@@ -9,7 +9,8 @@ import type {
 import type { ExecutionHostId } from '../../../../shared/execution-host'
 import type { StartupCommandDelivery } from '../../../../shared/codex-startup-delivery'
 import type { SessionOptionValue } from '../../../../shared/native-chat-session-options'
-import type { AgentStartedTelemetry } from '../../lib/worktree-startup-payload'
+import type { AgentLaunchInput } from '../../../../shared/agent-launch-spawn-request'
+import type { StartupLaunchTelemetry } from '../../lib/worktree-activation'
 import type {
   DirectSshLivePtyBinding,
   DirectSshPaneRetryAttempt,
@@ -51,11 +52,13 @@ export type TerminalState = {
     string,
     {
       command: string
+      agentLaunch?: AgentLaunchInput
       delivery?: 'terminal-paste'
       startupCommandDelivery?: StartupCommandDelivery
       env?: Record<string, string>
       envToDelete?: string[]
       launchConfig?: SleepingAgentLaunchConfig
+      legacyResumeRecordedConnectionId?: string | null
       resumeProviderSession?: AgentProviderSessionMetadata
       launchToken?: string
       launchAgent?: TuiAgent
@@ -67,7 +70,7 @@ export type TerminalState = {
         prompt: string
       }
       showSessionRestoredBanner?: boolean
-      telemetry?: AgentStartedTelemetry
+      telemetry?: StartupLaunchTelemetry
     }
   >
   pendingInitialCwdByTabId: Record<string, string>

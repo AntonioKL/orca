@@ -43,13 +43,18 @@ export function startDeferredSessionReattach(
     cols: session.cols,
     rows: session.rows,
     sessionId: deferredReattachSessionId,
-    ...(coldRestoreStartup?.command ? { command: coldRestoreStartup.command } : {}),
+    ...(coldRestoreStartup?.agentLaunch
+      ? { agentLaunch: coldRestoreStartup.agentLaunch }
+      : {}),
     ...(coldRestoreStartup?.env
       ? { env: session.mergeStartupEnvWithPaneIdentity(coldRestoreStartup.env) }
       : {}),
     ...(coldRestoreStartup?.launchConfig ? { launchConfig: coldRestoreStartup.launchConfig } : {}),
-    ...(coldRestoreStartup?.resumeProviderSession
-      ? { resumeProviderSession: coldRestoreStartup.resumeProviderSession }
+    ...(coldRestoreStartup?.legacyResumeRecordedConnectionId !== undefined
+      ? {
+          legacyResumeRecordedConnectionId:
+            coldRestoreStartup.legacyResumeRecordedConnectionId
+        }
       : {}),
     ...(coldRestoreStartup?.launchToken ? { launchToken: coldRestoreStartup.launchToken } : {}),
     ...(coldRestoreStartup?.agent ? { launchAgent: coldRestoreStartup.agent } : {}),

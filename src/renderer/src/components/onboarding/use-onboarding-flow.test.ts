@@ -3,11 +3,22 @@ import { toast } from 'sonner'
 import {
   prepareSkippedOnboardingPreferences,
   remapOpenOnboardingLastCompletedStep
+<<<<<<< HEAD
 } from './onboarding-flow-state'
+||||||| parent of ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
+} from './use-onboarding-flow'
+=======
+} from './use-onboarding-flow'
+import { setDefaultTuiAgent } from '@/lib/agent-catalog-authoring'
+>>>>>>> ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
 import { getDefaultOnboardingState } from '../../../../shared/constants'
 
 vi.mock('sonner', () => ({
   toast: { error: vi.fn(), info: vi.fn(), success: vi.fn() }
+}))
+
+vi.mock('@/lib/agent-catalog-authoring', () => ({
+  setDefaultTuiAgent: vi.fn().mockResolvedValue({ ok: true })
 }))
 
 describe('prepareSkippedOnboardingPreferences', () => {
@@ -64,7 +75,8 @@ describe('prepareSkippedOnboardingPreferences', () => {
 
     expect(setTheme).not.toHaveBeenCalled()
     expect(applyTheme).not.toHaveBeenCalled()
-    expect(updateSettings).toHaveBeenCalledWith({ defaultTuiAgent: 'codex' })
+    expect(setDefaultTuiAgent).toHaveBeenCalledWith('codex')
+    expect(updateSettings).not.toHaveBeenCalled()
     expect(setError).not.toHaveBeenCalled()
     expect(toast.error).not.toHaveBeenCalled()
   })

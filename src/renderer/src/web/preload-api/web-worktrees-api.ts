@@ -20,6 +20,11 @@ import {
   listAllRuntimeWorktrees
 } from './web-runtime-worktree-catalog'
 import { noopUnsubscribe } from './web-storage'
+import type {
+  ForgetUnknownAgentLaunchResult,
+  WorktreeRetryAgentLaunchResult
+} from '../../../../shared/agent-launch-worktree-recovery'
+import type { PendingAgentLaunchSummary } from '../../../../shared/agent-launch-pending-summary'
 
 export function createWorktreesApi(): NonNullable<Partial<PreloadApi>['worktrees']> {
   return {
@@ -91,7 +96,8 @@ export function createWorktreesApi(): NonNullable<Partial<PreloadApi>['worktrees
         ...(args.parentWorkspace ? { parentWorkspaceOrigin: 'manual' } : {}),
         workspaceStatus: args.workspaceStatus,
         manualOrder: args.manualOrder,
-        automationProvenanceRequest: args.automationProvenanceRequest
+        automationProvenanceRequest: args.automationProvenanceRequest,
+        ...(args.agentLaunch ? { agentLaunch: args.agentLaunch } : {})
       })
       return {
         ...owned.result,
@@ -180,6 +186,40 @@ export function createWorktreesApi(): NonNullable<Partial<PreloadApi>['worktrees
     persistSortOrder: async ({ orderedIds }) => {
       await callRuntimeResult('worktree.persistSortOrder', { orderedIds })
     },
+    retryAgentLaunch: ({ worktreeId, ...args }) =>
+      callRuntimeResult<WorktreeRetryAgentLaunchResult>('worktree.retryAgentLaunch', {
+        worktree: toRuntimeWorktreeSelector(worktreeId),
+        ...args
+      }),
+    forgetAgentLaunch: ({ worktreeId, ...args }) =>
+      callRuntimeResult<ForgetUnknownAgentLaunchResult>('worktree.forgetAgentLaunch', {
+        worktree: toRuntimeWorktreeSelector(worktreeId),
+        ...args
+      }),
+    forgetRevokedRemoteAgentLaunch: () =>
+      Promise.reject(
+        new Error('Forgetting a revoked device’s launch is unavailable in paired web clients.')
+      ),
+    retryBackgroundAgentLaunch: (args) =>
+      callRuntimeResult<WorktreeRetryAgentLaunchResult>(
+        'worktree.retryBackgroundAgentLaunch',
+        args
+      ),
+    forgetBackgroundAgentLaunch: (args) =>
+      callRuntimeResult<ForgetUnknownAgentLaunchResult>(
+        'worktree.forgetBackgroundAgentLaunch',
+        args
+      ),
+    pendingAgentLaunchSummary: () =>
+      callRuntimeResult<PendingAgentLaunchSummary>('worktree.pendingAgentLaunchSummary', {}),
+    unknownAgentLaunchSiblingCount: ({ worktreeId }) =>
+      callRuntimeResult<{ count: number }>('worktree.unknownAgentLaunchSiblingCount', {
+        worktree: toRuntimeWorktreeSelector(worktreeId)
+      }),
+    forgetUnknownAgentLaunchSiblings: ({ worktreeId }) =>
+      callRuntimeResult<{ forgottenCount: number }>('worktree.forgetUnknownAgentLaunchSiblings', {
+        worktree: toRuntimeWorktreeSelector(worktreeId)
+      }),
     // Why: the capture lives in desktop main memory, unexposed over pairing; the dialog falls back to the persisted excerpt.
     getBranchRenameFailureOutput: async () => null,
     onChanged: () => noopUnsubscribe,

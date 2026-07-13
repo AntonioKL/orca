@@ -1,7 +1,16 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import type { Automation, AutomationCreateInput } from '../../../../shared/automations-types'
 import {
+<<<<<<< HEAD
   listAutomationRunsForTarget,
+||||||| parent of ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
+  createAutomationForTarget,
+  getAutomationListTarget,
+=======
+  createAutomationForTarget,
+  forgetAutomationRunForTarget,
+  getAutomationListTarget,
+>>>>>>> ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
   listAutomationsForTarget,
   runAutomationNowForTarget,
   toRuntimeAutomationCreateInput,
@@ -20,7 +29,8 @@ const mockApi = {
     create: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
-    runNow: vi.fn()
+    runNow: vi.fn(),
+    forgetRun: vi.fn()
   }
 }
 
@@ -190,6 +200,36 @@ describe('automation host client', () => {
       sourceTarget,
       'automation.runNow',
       { id: automation.id },
+      { timeoutMs: 15_000 }
+    )
+  })
+
+  it('forgets a local-host stranded run through the desktop IPC', async () => {
+    const forgotten = { id: 'run-1', automationId: 'auto-1' }
+    mockApi.automations.forgetRun.mockResolvedValueOnce(forgotten)
+
+    const result = await forgetAutomationRunForTarget({ kind: 'local' }, 'run-1')
+
+    expect(result).toBe(forgotten)
+    expect(mockApi.automations.forgetRun).toHaveBeenCalledWith({ runId: 'run-1' })
+    expect(callRuntimeRpc).not.toHaveBeenCalled()
+  })
+
+  it('forgets a remote-owned stranded run through the server that owns the run', async () => {
+    const forgotten = { id: 'run-1', automationId: 'auto-1' }
+    vi.mocked(callRuntimeRpc).mockResolvedValueOnce({ run: forgotten })
+
+    const result = await forgetAutomationRunForTarget(
+      { kind: 'environment', environmentId: 'gpu' },
+      'run-1'
+    )
+
+    expect(result).toBe(forgotten)
+    expect(mockApi.automations.forgetRun).not.toHaveBeenCalled()
+    expect(callRuntimeRpc).toHaveBeenCalledWith(
+      { kind: 'environment', environmentId: 'gpu' },
+      'automation.forgetRun',
+      { runId: 'run-1' },
       { timeoutMs: 15_000 }
     )
   })

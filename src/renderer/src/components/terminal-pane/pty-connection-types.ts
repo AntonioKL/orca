@@ -3,7 +3,7 @@ import type { SessionRestoredBannerReason } from './session-restored-banner-pane
 import type { ReplayingPanesRef } from './replay-guard'
 import type { RestoredViewportBlankingPanesRef } from './terminal-restored-viewport'
 import type { AgentCompletionStatusSnapshot } from './agent-completion-coordinator-types'
-import type { EventProps } from '../../../../shared/telemetry-events'
+import type { StartupLaunchTelemetry } from '../../lib/worktree-activation'
 import type { TerminalColorSchemeMode } from '../../../../shared/terminal-color-scheme-protocol'
 import type { StartupCommandDelivery } from '../../../../shared/codex-startup-delivery'
 import type { TuiAgent } from '../../../../shared/tui-agent'
@@ -12,6 +12,7 @@ import type {
   AgentProviderSessionMetadata,
   SleepingAgentLaunchConfig
 } from '../../../../shared/agent-session-resume'
+import type { AgentLaunchSpawnRequest } from '../../../../shared/agent-launch-spawn-request'
 import type { TerminalKittyKeyboardModeTracker } from '../../../../shared/terminal-kitty-keyboard-mode-tracker'
 import type { PtyTransportRecoveryState } from './pty-transport-types'
 import type { SessionOptionValue } from '../../../../shared/native-chat-session-options'
@@ -19,30 +20,34 @@ import type { DirectSshPaneRetryAttemptId } from '@/store/slices/direct-ssh-term
 import type { PtyPreconnectInputEntry } from './pty-preconnect-input-buffer'
 
 export type PtyPaneStartup = {
-  command: string
-  /** Renderer-delivered startup input for callers that need xterm paste
-   *  semantics before the submit Enter. */
-  delivery?: 'terminal-paste'
-  startupCommandDelivery?: StartupCommandDelivery
-  env?: Record<string, string>
-  envToDelete?: string[]
-  launchConfig?: SleepingAgentLaunchConfig
-  resumeProviderSession?: AgentProviderSessionMetadata
-  launchToken?: string
-  launchAgent?: TuiAgent
-  /** Explicit CLI override for host-owned agent launches; omission uses host settings. */
-  agentArgsOverride?: string | null
-  draftPrompt?: string
-  sessionOptions?: Record<string, SessionOptionValue>
-  /** Telemetry payload for `agent_started`. Forwarded to `pty:spawn`
-   *  so main fires the event only after the spawn succeeds. */
-  telemetry?: EventProps<'agent_started'>
-  /** Initial prompt-start status for agents that lack native prompt hooks. */
-  initialAgentStatus?: { agent: TuiAgent; prompt: string }
-  /** Show the restored-session banner when this startup command mounts. */
-  showSessionRestoredBanner?: boolean
-  /** Initial startup may be paired with a setup split that changes its grid. */
-  waitForSetupSplitDirection?: SetupSplitDirection
+    command: string
+    /** Renderer-delivered startup input for callers that need xterm paste
+     *  semantics before the submit Enter. */
+    delivery?: 'terminal-paste'
+    startupCommandDelivery?: StartupCommandDelivery
+    env?: Record<string, string>
+    envToDelete?: string[]
+    launchConfig?: SleepingAgentLaunchConfig
+    resumeProviderSession?: AgentProviderSessionMetadata
+    launchToken?: string
+    launchAgent?: TuiAgent
+    /** Explicit CLI override for host-owned agent launches; omission uses host settings. */
+    agentArgsOverride?: string | null
+    agentLaunch?: AgentLaunchSpawnRequest
+    /** One-release legacy handoff: a pre-U5 record's recorded execution owner,
+     *  forwarded with its `launchConfig` so the host can prove provenance. */
+    legacyResumeRecordedConnectionId?: string | null
+    draftPrompt?: string
+    sessionOptions?: Record<string, SessionOptionValue>
+    /** Telemetry payload for `agent_started`. Forwarded to `pty:spawn`
+     *  so main fires the event only after the spawn succeeds. */
+    telemetry?: StartupLaunchTelemetry
+    /** Initial prompt-start status for agents that lack native prompt hooks. */
+    initialAgentStatus?: { agent: TuiAgent; prompt: string }
+    /** Show the restored-session banner when this startup command mounts. */
+    showSessionRestoredBanner?: boolean
+    /** Initial startup may be paired with a setup split that changes its grid. */
+    waitForSetupSplitDirection?: SetupSplitDirection
 } | null
 
 export type PaneProcessExit = {

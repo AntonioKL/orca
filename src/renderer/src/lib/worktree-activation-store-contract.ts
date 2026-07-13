@@ -8,6 +8,7 @@ import type {
 } from '../../../shared/agent-session-resume'
 import type { WorktreeRuntimeOwnerState } from '@/lib/worktree-runtime-owner'
 import type { AgentStartedTelemetry } from '@/lib/worktree-startup-payload'
+import type { AgentLaunchInput } from '../../../shared/agent-launch-spawn-request'
 
 export type WorktreeActivationStore = Partial<WorktreeRuntimeOwnerState> & {
   tabsByWorktree: Record<string, { id: string }[]>
@@ -37,15 +38,18 @@ export type WorktreeActivationStore = Partial<WorktreeRuntimeOwnerState> & {
     tabId: string,
     startup: {
       command: string
+      agentLaunch?: AgentLaunchInput
       env?: Record<string, string>
       launchConfig?: SleepingAgentLaunchConfig
+      legacyResumeRecordedConnectionId?: string | null
       resumeProviderSession?: AgentProviderSessionMetadata
       launchToken?: string
       launchAgent?: TuiAgent
       draftPrompt?: string
       initialAgentStatus?: { agent: TuiAgent; prompt: string }
       showSessionRestoredBanner?: boolean
-      telemetry?: AgentStartedTelemetry
+      telemetry?: Omit<AgentStartedTelemetry, 'agent_kind'> &
+        Partial<Pick<AgentStartedTelemetry, 'agent_kind'>>
     }
   ) => void
   queueTabSetupSplit: (

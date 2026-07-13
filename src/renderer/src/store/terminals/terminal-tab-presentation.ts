@@ -23,6 +23,7 @@ export function createTerminalTabPresentationActions(
   | 'setGeneratedTabTitleFromAgentPrompt'
   | 'setGeneratedTabTitlesFromAgentPrompts'
   | 'clearTabLaunchAgent'
+  | 'backfillTabLaunchAgent'
   | 'setRuntimePaneTitle'
   | 'clearRuntimePaneTitle'
 > {
@@ -142,7 +143,31 @@ export function createTerminalTabPresentationActions(
         return { tabsByWorktree: { ...s.tabsByWorktree, [ownerWorktreeId]: nextTabs } }
       })
     },
+<<<<<<< HEAD
     setRuntimePaneTitle: (tabId, paneId, title) => {
+||||||| parent of ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
+    setRuntimePaneTitle: (tabId, paneId, rawTitle) => {
+=======
+    backfillTabLaunchAgent: (tabId, agent) => {
+      set((s) => {
+        const ownerWorktreeId = getTerminalTabOwnerWorktreeId(s.tabsByWorktree, tabId)
+        if (!ownerWorktreeId) {
+          return s
+        }
+        const tabs = s.tabsByWorktree[ownerWorktreeId] ?? []
+        const tabIndex = tabs.findIndex((tab) => tab.id === tabId)
+        const currentTab = tabs[tabIndex]
+        if (!currentTab || currentTab.launchAgent) {
+          return s
+        }
+        const nextTabs = [...tabs]
+        nextTabs[tabIndex] = { ...currentTab, launchAgent: agent }
+        scheduleRuntimeGraphSync()
+        return { tabsByWorktree: { ...s.tabsByWorktree, [ownerWorktreeId]: nextTabs } }
+      })
+    },
+    setRuntimePaneTitle: (tabId, paneId, rawTitle) => {
+>>>>>>> ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
       set((s) => {
         const currentByPane = s.runtimePaneTitlesByTabId[tabId] ?? {}
         const prevTitle = currentByPane[paneId]

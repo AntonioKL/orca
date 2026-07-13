@@ -141,6 +141,9 @@ export function registerRuntimeClientIpcBridge(
         })
       return
     }
+    if (event.type === 'agentCatalogChanged' || event.type === 'agentReferencesChanged') {
+      return
+    }
     void ensureRuntimeEventRepoKnown(environmentId, event.repoId)
       .then(() => activateNotifiedWorktree(event, { allowRuntimeEnvironment: true }))
       .catch((error) => {

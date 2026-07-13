@@ -1,6 +1,9 @@
 import { useAppStore } from '@/store'
 import { hasPtySerializer } from '../pty-buffer-serializer'
 import { writeTerminalOutput } from '@/lib/pane-manager/pane-terminal-output-scheduler'
+import { agentLaunchOutcomeErrorMessage } from '@/lib/agent-launch-failure-copy'
+import { pasteDraftWhenAgentReady } from '@/lib/agent-paste-draft'
+import { showAutomationPromptNotSentToast } from '@/lib/agent-background-session-timeout-toast'
 
 import { STARTUP_CWD_FALLBACK_NOTICE } from './startup-cwd-fallback-notice'
 import { pendingSpawnByPaneKey, pendingSpawnGenerationByPaneKey } from './pty-connect-limits'
@@ -57,8 +60,11 @@ export function bindStartFreshSpawn(session: ConnectPanePtySession): void {
     // a restart-in-place would leak the old TUI's flags into a fresh shell.
     session.kittyKeyboardModes.reset()
     session.prepareFreshShellViewportForSpawn(options)
+    if (session.connectionId && startupOverride?.command) {
+      session.pendingStartupCommand = { command: startupOverride.command }
+    }
     const coldRestoreOverride =
-      startupOverride && 'launchConfig' in startupOverride
+      startupOverride && 'agentLaunch' in startupOverride
         ? (startupOverride as ColdRestoreAgentResumeStartup)
         : null
     // Why: pre-signal the main process so its cooperation gate suppresses
@@ -103,11 +109,19 @@ export function bindStartFreshSpawn(session: ConnectPanePtySession): void {
       ...(startupOverride?.env
         ? { env: session.mergeStartupEnvWithPaneIdentity(startupOverride.env) }
         : {}),
-      ...(coldRestoreOverride ? { launchConfig: coldRestoreOverride.launchConfig } : {}),
-      ...(coldRestoreOverride
-        ? { resumeProviderSession: coldRestoreOverride.resumeProviderSession }
+      ...(coldRestoreOverride ? { agentLaunch: coldRestoreOverride.agentLaunch } : {}),
+      ...(coldRestoreOverride?.launchConfig
+        ? { launchConfig: coldRestoreOverride.launchConfig }
         : {}),
-      ...(coldRestoreOverride ? { launchToken: coldRestoreOverride.launchToken } : {}),
+      ...(coldRestoreOverride?.legacyResumeRecordedConnectionId !== undefined
+        ? {
+            legacyResumeRecordedConnectionId:
+              coldRestoreOverride.legacyResumeRecordedConnectionId
+          }
+        : {}),
+      ...(coldRestoreOverride?.launchToken
+        ? { launchToken: coldRestoreOverride.launchToken }
+        : {}),
       ...(coldRestoreOverride ? { launchAgent: coldRestoreOverride.agent } : {}),
       ...(session.shouldDeclareHiddenAtSpawn() ? { initiallyHidden: true } : {}),
       shouldContinue: () => {
@@ -170,6 +184,24 @@ export function bindStartFreshSpawn(session: ConnectPanePtySession): void {
           clearPreSignaledSerializer()
           return null
         }
+        if (
+          spawnedPtyId &&
+          typeof spawnedPtyId === 'object' &&
+          !('id' in spawnedPtyId) &&
+          'agentLaunch' in spawnedPtyId
+        ) {
+          session.reportError(agentLaunchOutcomeErrorMessage(spawnedPtyId.agentLaunch))
+          if (session.paneStartup?.launchConfig || coldRestoreOverride) {
+            session.clearRegisteredStartupLaunchConfig()
+          }
+          const failureGen = await preSignalPromise
+          if (typeof failureGen === 'number') {
+            void window.api.pty
+              .clearPendingPaneSerializer(session.cacheKey, failureGen)
+              .catch(() => {})
+          }
+          return null
+        }
         const resolvedPtyId =
           spawnedPtyId && typeof spawnedPtyId === 'object' && 'id' in spawnedPtyId
             ? spawnedPtyId.id
@@ -210,10 +242,55 @@ export function bindStartFreshSpawn(session: ConnectPanePtySession): void {
           return accepted ? resolvedPtyId : null
         }
         if (spawnedPtyId && typeof spawnedPtyId === 'object' && 'id' in spawnedPtyId) {
+          const launchedReceipt =
+            spawnedPtyId.agentLaunch?.status === 'launched'
+              ? spawnedPtyId.agentLaunch.receipt
+              : null
+          if (launchedReceipt) {
+            session.launchToken = launchedReceipt.launchToken
+            useAppStore
+              .getState()
+              .backfillTabLaunchAgent(session.deps.tabId, launchedReceipt.requestedAgent)
+            if (launchedReceipt.notices.length > 0) {
+              useAppStore.getState().attachLaunchNotices({
+                worktreeId: session.deps.worktreeId,
+                tabId: session.deps.tabId,
+                launchToken: launchedReceipt.launchToken,
+                notices: launchedReceipt.notices
+              })
+            }
+          }
+          if (spawnedPtyId.launchNotices) {
+            useAppStore.getState().attachLaunchNotices({
+              worktreeId: session.deps.worktreeId,
+              tabId: session.deps.tabId,
+              launchToken: spawnedPtyId.launchNotices.launchToken,
+              notices: spawnedPtyId.launchNotices.notices
+            })
+          }
           session.registerEffectiveLaunchConfig(spawnedPtyId.launchConfig, {
-            ...(coldRestoreOverride ? { launchToken: coldRestoreOverride.launchToken } : {}),
-            ...(coldRestoreOverride ? { launchAgent: coldRestoreOverride.agent } : {})
+            ...(coldRestoreOverride?.launchToken
+              ? { launchToken: coldRestoreOverride.launchToken }
+              : {}),
+            ...(launchedReceipt ? { launchToken: launchedReceipt.launchToken } : {}),
+            ...(coldRestoreOverride ? { launchAgent: coldRestoreOverride.agent } : {}),
+            ...(launchedReceipt ? { launchAgent: launchedReceipt.baseAgent } : {})
           })
+          const hostFollowupPrompt = spawnedPtyId.followupPrompt ?? null
+          const hostDraftPrompt = spawnedPtyId.draftPrompt ?? null
+          const hostDeliveredAgent = launchedReceipt?.baseAgent ?? session.paneStartup?.launchAgent
+          if (!session.startupDraftPromptNeedsPaste && hostDeliveredAgent) {
+            const hostDeliveredPrompt = hostFollowupPrompt ?? hostDraftPrompt
+            if (hostDeliveredPrompt) {
+              void pasteDraftWhenAgentReady({
+                tabId: session.deps.tabId,
+                content: hostDeliveredPrompt,
+                agent: hostDeliveredAgent,
+                submit: hostFollowupPrompt !== null,
+                onTimeout: () => showAutomationPromptNotSentToast(hostDeliveredAgent)
+              }).catch(() => {})
+            }
+          }
         }
         if (resolvedPtyId) {
           if (
@@ -239,7 +316,7 @@ export function bindStartFreshSpawn(session: ConnectPanePtySession): void {
           session.clearSleepingRecordAfterColdRestoreSpawn(coldRestoreOverride)
         } else if (
           session.paneStartup?.launchConfig ||
-          (startupOverride && 'launchConfig' in startupOverride)
+          (startupOverride && 'agentLaunch' in startupOverride)
         ) {
           // Why: delayed draft/follow-up delivery keys off this launch
           // registry. If spawn produced no PTY, the launch is no longer a
@@ -298,7 +375,7 @@ export function bindStartFreshSpawn(session: ConnectPanePtySession): void {
         session.finishReattachLiveDataDeferral(false, outputCallbacks.generation)
         if (
           session.paneStartup?.launchConfig ||
-          (startupOverride && 'launchConfig' in startupOverride)
+          (startupOverride && 'agentLaunch' in startupOverride)
         ) {
           session.clearRegisteredStartupLaunchConfig()
         }

@@ -41,6 +41,13 @@ export type { WorktreePurgeTarget, WorktreePurgeTargets } from './worktree-purge
 import type { WorktreePurgeTargets } from './worktree-purge-target'
 export type { WorktreeDeleteState, WorktreeDeleteStateTarget } from './worktree-delete-state-types'
 import type { WorktreeDeleteState, WorktreeDeleteStateTarget } from './worktree-delete-state-types'
+import type {
+  RetryAgentLaunchAction,
+  WorktreeRetryAgentLaunchResult,
+  ForgetUnknownAgentLaunchResult
+} from '../../../../shared/agent-launch-worktree-recovery'
+import type { PendingAgentLaunchSummary } from '../../../../shared/agent-launch-pending-summary'
+import type { RuntimeClientTarget } from '@/runtime/runtime-rpc-client'
 export { getRepoIdFromWorktreeId } from '../../../../shared/worktree/id'
 
 export {
@@ -206,8 +213,73 @@ export type WorktreeSlice = {
     linkedAzureDevOpsPR?: number | null,
     linkedGiteaPR?: number | null,
     compareBaseRef?: string,
+<<<<<<< HEAD
     options?: CreateWorktreeCallOptions
+||||||| parent of ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
+    options?: {
+      automationProvenanceRequest?: CreateWorktreeArgs['automationProvenanceRequest']
+      linkedWorkItem?: WorkspaceLinkedItem | null
+      linkedTaskSourceContext?: TaskSourceContext | null
+      /** Lets the owning runtime launch and prefill a task agent without first creating an idle shell. */
+      startupDraft?: string
+      /** True only when `name` came from the creature-name generator; gates host-side retirement. */
+      nameWasGenerated?: boolean
+      provisionedRoot?: {
+        runtimeId: string
+        executionHostId: ExecutionHostId
+        expectedPath: string
+      }
+    }
+=======
+    options?: {
+      automationProvenanceRequest?: CreateWorktreeArgs['automationProvenanceRequest']
+      linkedWorkItem?: WorkspaceLinkedItem | null
+      linkedTaskSourceContext?: TaskSourceContext | null
+      /** Lets the owning runtime launch and prefill a task agent without first creating an idle shell. */
+      startupDraft?: string
+      /** True only when `name` came from the creature-name generator; gates host-side retirement. */
+      nameWasGenerated?: boolean
+      provisionedRoot?: {
+        runtimeId: string
+        executionHostId: ExecutionHostId
+        expectedPath: string
+      }
+      /** Host-resolved two-stage agent launch for worktree creation. */
+      agentLaunch?: CreateWorktreeArgs['agentLaunch']
+      /** Surface-owned telemetry for a host-emitted interactive launch. */
+      agentLaunchTelemetry?: CreateWorktreeArgs['agentLaunchTelemetry']
+    }
+>>>>>>> ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
   ) => Promise<CreateWorktreeResult>
+  retryWorktreeAgentLaunch: (args: {
+    worktreeId: string
+    expectedFailureId: string
+    action: RetryAgentLaunchAction
+  }) => Promise<WorktreeRetryAgentLaunchResult>
+  forgetWorktreeAgentLaunch: (args: {
+    worktreeId: string
+    expectedOperationId: string
+  }) => Promise<ForgetUnknownAgentLaunchResult>
+  retryBackgroundAgentLaunch: (args: {
+    attemptId: string
+    worktreeId: string
+    expectedFailureId: string
+    action: RetryAgentLaunchAction
+  }) => Promise<WorktreeRetryAgentLaunchResult>
+  forgetBackgroundAgentLaunch: (args: {
+    attemptId: string
+    worktreeId: string
+    expectedOperationId: string
+  }) => Promise<ForgetUnknownAgentLaunchResult>
+  unknownAgentLaunchSiblingPreflight: (args: {
+    worktreeId: string
+  }) => Promise<{ count: number; hostName: string }>
+  forgetUnknownAgentLaunchSiblings: (args: {
+    worktreeId: string
+  }) => Promise<{ forgottenCount: number }>
+  fetchPendingAgentLaunchSummary: (
+    target?: RuntimeClientTarget
+  ) => Promise<PendingAgentLaunchSummary>
   /** Register an in-flight background creation and make it the active surface. */
   beginPendingWorktreeCreation: (entry: PendingWorktreeCreation) => void
   /** Merge a status patch into an existing pending entry. */

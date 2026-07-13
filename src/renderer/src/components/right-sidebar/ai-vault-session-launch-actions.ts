@@ -1,8 +1,17 @@
 import { useCallback, useState } from 'react'
 import { toast } from 'sonner'
 import {
+<<<<<<< HEAD
   buildAiVaultResumeCopyCommandForWorktree,
   buildAiVaultResumeStartupForWorktree
+||||||| parent of ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
+  buildAiVaultResumeCopyCommandForWorktree,
+  buildAiVaultResumeStartupForWorktree,
+  type AiVaultResumeStartup
+=======
+  buildAiVaultResumeStartupForWorktree,
+  type AiVaultResumeStartup
+>>>>>>> ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
 } from '@/lib/ai-vault-resume-command'
 import { launchAiVaultSessionInNewTab } from '@/lib/launch-ai-vault-session'
 import {
@@ -28,7 +37,12 @@ import {
 import { prepareAiVaultSessionContinuation } from './ai-vault-session-continuation'
 import type { AgentSessionContinuationRequest } from '@/lib/agent-session-continuation'
 import { findWorktreeById } from '@/store/slices/worktree-helpers'
+<<<<<<< HEAD
 import { activateAiVaultStructuredSession } from '@/lib/activate-ai-vault-structured-session'
+||||||| parent of ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
+=======
+import { buildAiVaultResumeEntry } from './ai-vault-resume-entry'
+>>>>>>> ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
 
 export function useAiVaultSessionLaunchActions({
   activeWorktree,
@@ -40,21 +54,29 @@ export function useAiVaultSessionLaunchActions({
   activeWorktreeId: string | null
   targetState: AiVaultSessionResumeTargetState
   agentCmdOverrides?: Partial<Record<AiVaultAgent, string | null>>
+<<<<<<< HEAD
 }) {
+||||||| parent of ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
+}): {
+  buildResumeStartup: (session: AiVaultSession, worktreeId?: string | null) => AiVaultResumeStartup
+  copyResumeCommand: (session: AiVaultSession, worktreeId?: string | null) => Promise<void>
+  handleResume: (session: AiVaultSession, targetWorktreeId?: string) => void
+  handleContinueInNewSession: (session: AiVaultSession, targetWorktreeId: string) => void
+  continuationRequest: AgentSessionContinuationRequest | null
+  handleContinuationDialogOpenChange: (open: boolean) => void
+} {
+=======
+}): {
+  buildResumeStartup: (session: AiVaultSession, worktreeId?: string | null) => AiVaultResumeStartup
+  copyResumeCommand: (session: AiVaultSession) => Promise<void>
+  handleResume: (session: AiVaultSession, targetWorktreeId?: string) => void
+  handleContinueInNewSession: (session: AiVaultSession, targetWorktreeId: string) => void
+  continuationRequest: AgentSessionContinuationRequest | null
+  handleContinuationDialogOpenChange: (open: boolean) => void
+} {
+>>>>>>> ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
   const [continuationRequest, setContinuationRequest] =
     useState<AgentSessionContinuationRequest | null>(null)
-
-  const buildResumeCommand = useCallback(
-    (session: AiVaultSession, worktreeId?: string | null): string =>
-      buildAiVaultResumeCopyCommandForWorktree({
-        state: useAppStore.getState(),
-        worktreeId: worktreeId ?? activeWorktreeId ?? activeWorktree?.id ?? null,
-        session,
-        commandOverride: agentCmdOverrides?.[session.agent]
-      }),
-    [activeWorktree?.id, activeWorktreeId, agentCmdOverrides]
-  )
-
   const buildResumeStartup = useCallback(
     (session: AiVaultSession, worktreeId?: string | null) =>
       buildAiVaultResumeStartupForWorktree({
@@ -66,23 +88,29 @@ export function useAiVaultSessionLaunchActions({
     [activeWorktree?.id, activeWorktreeId, agentCmdOverrides]
   )
 
-  const copyResumeCommand = useCallback(
-    async (session: AiVaultSession, worktreeId?: string | null): Promise<void> => {
-      try {
-        const preparedSession = await prepareAiVaultSessionForResume(session)
-        await window.api.ui.writeClipboardText(buildResumeCommand(preparedSession, worktreeId))
-        toast.success(
-          translate(
-            'auto.components.right.sidebar.AiVaultPanel.resumeCommandCopied',
-            'Resume command copied'
-          )
+  const copyResumeCommand = useCallback(async (session: AiVaultSession): Promise<void> => {
+    // Host-owned copy: the host re-validates the discovered entry against its own
+    // fresh scanner and assembles the command from its settings; the client only
+    // echoes identity and writes the returned string. On web/paired the IPC strips
+    // filePath and the executing host re-derives it.
+    const result = await window.api.aiVault.resumeCommand(buildAiVaultResumeEntry(session))
+    if (result.status !== 'ok') {
+      toast.error(
+        translate(
+          'auto.components.right.sidebar.AiVaultPanel.resumeSessionUnavailable',
+          'This session can no longer be resumed.'
         )
-      } catch (error) {
-        notifyAiVaultSessionPreparationFailure(error)
-      }
-    },
-    [buildResumeCommand]
-  )
+      )
+      return
+    }
+    await window.api.ui.writeClipboardText(result.command)
+    toast.success(
+      translate(
+        'auto.components.right.sidebar.AiVaultPanel.resumeCommandCopied',
+        'Resume command copied'
+      )
+    )
+  }, [])
 
   const handleResume = useCallback(
     (session: AiVaultSession, targetWorktreeId?: string): void => {
@@ -115,7 +143,10 @@ export function useAiVaultSessionLaunchActions({
           const launchResult = launchAiVaultSessionInNewTab({
             agent: session.agent,
             worktreeId: targetId.worktreeId,
-            ...buildResumeStartup(preparedSession, targetId.worktreeId)
+            ...buildResumeStartup(preparedSession, targetId.worktreeId),
+            agentLaunch: {
+              vaultResume: { operation: 'resume', entry: buildAiVaultResumeEntry(session) }
+            }
           })
           if (launchResult.tabId === null) {
             void launchResult.runtimeLaunch.then((outcome) => {

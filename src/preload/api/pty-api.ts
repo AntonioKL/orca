@@ -12,12 +12,22 @@ import type {
   PtyRendererDeliveryStateReport
 } from '../../shared/pty-renderer-delivery-health'
 import type { AgentKind, LaunchSource, RequestKind } from '../../shared/telemetry-events'
+import type { AgentLaunchNoticeCode } from '../../shared/agent-launch-contract'
+import type { PersistedLaunchNoticeState } from '../../shared/agent-launch-contract'
+import type { AgentLaunchSpawnOutcome } from '../../shared/agent-launch-spawn-request'
+import type { AgentLaunchInput } from '../../shared/agent-launch-spawn-request'
 import type { TerminalSideEffectBatch } from '../../shared/terminal-side-effect-facts'
 import type { TerminalViewAttributes } from '../../shared/terminal-view-attributes'
 import type { TuiAgent } from '../../shared/tui-agent'
 import type { PtyManagementApi } from './pty-management-api'
 
 export type PtyApi = {
+  dismissLaunchNotice: (args: {
+    worktreeId: string
+    tabId: string
+    launchToken: string
+    code: AgentLaunchNoticeCode
+  }) => Promise<{ ok: boolean; changed: boolean }>
   spawn: (opts: {
     cols: number
     rows: number
@@ -31,6 +41,7 @@ export type PtyApi = {
     resumeProviderSession?: AgentProviderSessionMetadata
     launchToken?: string
     launchAgent?: TuiAgent
+    agentLaunch?: AgentLaunchInput
     startupCommandDelivery?: StartupCommandDelivery
     connectionId?: string | null
     worktreeId?: string
@@ -45,8 +56,9 @@ export type PtyApi = {
     tabId?: string
     leafId?: string
     // Why: main fires `agent_started` only on spawn success, so launch metadata rides this field (telemetry-plan.md §Agent launch semantics).
-    telemetry?: { agent_kind: AgentKind; launch_source: LaunchSource; request_kind: RequestKind }
-  }) => Promise<{
+    telemetry?: { agent_kind?: AgentKind; launch_source: LaunchSource; request_kind: RequestKind }
+  }) => Promise<
+    | {
     id: string
     /** Which lifetime of `id` this reply named; absent when the execution host predates the field. */
     incarnationId?: string
@@ -68,7 +80,12 @@ export type PtyApi = {
     coldRestore?: { scrollback: string; cwd: string; cols?: number; rows?: number }
     startupCwdFallback?: { kind: 'worktree'; cwd: string }
     agentResumeUnavailable?: true
-  }>
+    agentLaunch?: Extract<AgentLaunchSpawnOutcome, { status: 'launched' }>
+    followupPrompt?: string
+    launchNotices?: PersistedLaunchNoticeState
+  }
+    | { agentLaunch: AgentLaunchSpawnOutcome }
+  >
   write: (id: string, data: string) => void
   writeAccepted: (id: string, data: string) => Promise<boolean>
   onWriteUnavailable?: (callback: (payload: { id: string }) => void) => () => void
