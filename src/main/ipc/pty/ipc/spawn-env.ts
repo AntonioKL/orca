@@ -8,6 +8,7 @@ import { isOpaqueRemintedPaneKey } from '../../../../shared/pane-key-alias'
 import { isValidTerminalTabId } from '../../../../shared/terminal-tab-id'
 import { isClaudeAuthSwitchInProgress } from '../../../claude-accounts/live-pty-gate'
 import { hasClaudeAuthEnvConflict } from '../../../claude-accounts/environment'
+import { stripEphemeralAgentTeamsEnv } from '../../../runtime/claude-agent-teams-service'
 import { LocalPtyProvider } from '../../../providers/local-pty-provider'
 import { resolvePathEnvKey } from '../../../pty/windows-environment-path'
 import { routesFreshSpawnsToLocalProvider } from '../host-env/fresh-spawn-routing'
@@ -94,7 +95,10 @@ export async function assemblePtyIpcSpawnEnv(ctx: PtyIpcSpawnState): Promise<voi
     // Why: Agent Teams ids/tokens are process-local, so the team env must be regenerated for the new leader PTY.
     const prepared = await runtime.prepareClaudeAgentTeamsLeaderForHandle({
       handle: ctx.preAllocatedHandle,
-      baseEnv: ctx.baseEnv ?? {}
+      baseEnv: ctx.baseEnv ?? {},
+      ...(args.launchConfig
+        ? { childEnv: stripEphemeralAgentTeamsEnv(args.launchConfig.agentEnv) }
+        : {})
     })
     ctx.agentTeamsLeaderHandle = ctx.preAllocatedHandle
     ctx.baseEnv = {
@@ -104,10 +108,7 @@ export async function assemblePtyIpcSpawnEnv(ctx: PtyIpcSpawnState): Promise<voi
     if (args.launchConfig) {
       ctx.effectiveLaunchConfig = {
         ...args.launchConfig,
-        agentEnv: {
-          ...args.launchConfig.agentEnv,
-          ...prepared.env
-        }
+        agentEnv: stripEphemeralAgentTeamsEnv(args.launchConfig.agentEnv)
       }
     }
   }

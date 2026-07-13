@@ -53,6 +53,7 @@ export class StoreRuntimeState {
   readonly gitUsernameCache = new Map<string, string>()
   readonly protectedSecrets = new ProtectedSecretPersistence()
   loadNeedsSave = false
+  agentCatalogMigrationError: string | null = null
   flushOrThrow!: () => void
   settingsChangeListeners = new Set<
     (

@@ -22,6 +22,7 @@ import { bumpLocalWorktreeScanGeneration } from '../../local-worktree-scan-gener
 type ProfilePreferencesRuntime = Pick<
   StoreRuntimeState,
   | 'activeViewPreference'
+  | 'agentCatalogMigrationError'
   | 'githubCacheDirty'
   | 'githubCacheGeneration'
   | 'protectedSecrets'
@@ -45,6 +46,10 @@ export class ProfilePreferences {
 
   getSettings(): GlobalSettings {
     return this[profilePreferencesContext].runtime.state.settings
+  }
+
+  getAgentCatalogMigrationError(): string | null {
+    return this[profilePreferencesContext].runtime.agentCatalogMigrationError
   }
 
   onSettingsChanged(

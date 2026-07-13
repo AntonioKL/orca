@@ -41,6 +41,10 @@ import { hasStateBackup } from './backup-recovery-rotation'
 import { prepareLoadedTerminalSettings } from './prepare-loaded-terminal-settings'
 import { prepareLoadedProfileSettings } from './prepare-loaded-profile-settings'
 import { normalizeLoadedProfileState } from './normalize-loaded-profile-state'
+import {
+  createPinnedPreV1Backup,
+  migrateAgentCatalogSchema
+} from '../../agent-launch/agent-catalog-schema-migration'
 
 type PersistenceStartupDetails = Record<string, unknown> | (() => Record<string, unknown>)
 
@@ -64,6 +68,7 @@ type LoadedStateParsingOperationsRuntime = Pick<
   | 'dataFile'
   | 'githubCacheDirty'
   | 'loadNeedsSave'
+  | 'agentCatalogMigrationError'
   | 'protectedSecrets'
   | 'storageAuthority'
   | 'terminalScrollbackSnapshotStorage'
@@ -96,6 +101,21 @@ export class LoadedStateParsingOperations {
         logPersistenceStartupMilestone('persistence-json-parse-start')
         const parsed = JSON.parse(raw) as PersistedState
         logPersistenceStartupMilestone('persistence-json-parse-done')
+
+        const agentCatalogMigration = migrateAgentCatalogSchema({
+          settings: parsed.settings,
+          preV1RawContents: raw,
+          createBackup: () => createPinnedPreV1Backup(dataFile, raw)
+        })
+        if (agentCatalogMigration.didMigrate || agentCatalogMigration.backupError) {
+          this.runtime.loadNeedsSave =
+            this.runtime.loadNeedsSave || agentCatalogMigration.didMigrate
+          this.runtime.agentCatalogMigrationError = agentCatalogMigration.backupError ?? null
+          parsed.settings = {
+            ...parsed.settings,
+            ...agentCatalogMigration.settingsPatch
+          }
+        }
 
         // Why: secrets are stored encrypted via safeStorage; decrypt at the load boundary so the app sees plaintext.
         if (parsed.settings?.opencodeSessionCookie) {

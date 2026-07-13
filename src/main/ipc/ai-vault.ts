@@ -57,7 +57,11 @@ import {
   resolveAiVaultSessionTitlesByHost,
   type RuntimeAiVaultSessionTitleResolver
 } from './ai-vault-session-title-routing'
-import { projectStructuredAiVaultSessions } from '../ai-vault/structured-session-ownership'
+import {
+  registerAiVaultResumeCommandHandler,
+  type ResolveRuntimeAiVaultResumeDetails
+} from './ai-vault-resume-command'
+import type { VaultResumeAssemblySettings } from '../agent-launch/agent-launch-vault-resume'
 
 const AI_VAULT_ALL_HOST_RUNTIME_TIMEOUT_MS = 3_000
 // Why: a remote home with many agent roots routinely needs seconds to walk,
@@ -73,6 +77,10 @@ type AiVaultHandlerOptions = AiVaultSessionSources &
     getActiveRuntimeAiVaultHostInfos?: () => readonly RuntimeAiVaultHostInfo[]
     scanRuntimeAiVaultSessions?: RuntimeAiVaultScanner
     resolveRuntimeAiVaultSessionTitles?: RuntimeAiVaultSessionTitleResolver
+    resolveRuntimeAiVaultResumeDetails?: ResolveRuntimeAiVaultResumeDetails
+    // Host settings for AI Vault resume-command assembly (cmd overrides, default
+    // args/env, Windows shell). Absent in tests → assembly falls back to defaults.
+    getVaultResumeSettings?: () => VaultResumeAssemblySettings | undefined
   }
 
 let scanCoordinator = new AiVaultScanCoordinator()
@@ -269,6 +277,10 @@ async function scanLocalAiVaultSessions(
   )
 }
 
+// The desktop's OWN multi-host discovery (local + ssh + runtime), exported so the
+// resume surfaces re-validate against exactly what the picker showed.
+export { listAiVaultSessions as discoverAiVaultSessionsAcrossHosts }
+
 export function registerAiVaultHandlers(options: AiVaultHandlerOptions = {}): void {
   handlerOptions = options
   // Why: configure the SAME shared cache module the runtime RPC method uses so
@@ -283,9 +295,7 @@ export function registerAiVaultHandlers(options: AiVaultHandlerOptions = {}): vo
         : undefined
     const controller = listCancellations.begin(event, requestToken)
     try {
-      await handlerOptions.ensureStructuredSessionOwnership?.()
-      const result = await listAiVaultSessions(args, { signal: controller?.signal })
-      return projectStructuredAiVaultSessions(result, true)
+      return await listAiVaultSessions(args, { signal: controller?.signal })
     } catch (error) {
       // Why: superseding a scan is normal control flow, but Electron logs every
       // rejected handler — report it as a result so the log stays truthful.
@@ -320,7 +330,9 @@ export function registerAiVaultHandlers(options: AiVaultHandlerOptions = {}): vo
     handleAiVaultGetFirstUserPrompt(args)
   )
   registerAiVaultDeleteHandler(aiVaultDeleteDeps)
-  // macOS app activation skips DOM focus events, so emit the refresh signal here.
+  registerAiVaultResumeCommandHandler(listAiVaultSessions, options)
+  // DOM focus/visibility events don't fire in the renderer on macOS app
+  // activation, so refresh-on-refocus needs this main-process signal.
   app.on('browser-window-focus', (_event, window) => {
     if (!window.isDestroyed()) {
       window.webContents.send('aiVault:windowFocused')

@@ -4,14 +4,9 @@ import { OptionalBoolean } from '../schemas'
 import { restampAiVaultListResult } from '../../../ai-vault/session-list-results'
 import { AI_VAULT_AGENTS, AI_VAULT_SCOPE_PATHS_MAX_COUNT } from '../../../../shared/ai-vault-types'
 import { AI_VAULT_SESSION_TITLE_REQUEST_MAX_COUNT } from '../../../../shared/ai-vault-session-title'
-import type { AiVaultPrepareSessionResumeArgs } from '../../../../shared/ai-vault-resume-preparation'
 import { LOCAL_EXECUTION_HOST_ID, parseExecutionHostId } from '../../../../shared/execution-host'
 import { describeAiVaultScanError } from '../../../../shared/ai-vault-scan-error-message'
-import { STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
-import {
-  assertLegacyAiVaultResumeAllowed,
-  projectStructuredAiVaultSessions
-} from '../../../ai-vault/structured-session-ownership'
+import { AgentLaunchVaultResumeEntrySchema } from './agent-launch-spawn-schema'
 
 // Why: bound limit + scopePaths so a client cannot force an unbounded scan.
 // Each scopePath is a host-local match prefix (validated/capped, never used for
@@ -62,7 +57,6 @@ export const AiVaultListSessionsParams = z
 
 export const AiVaultPrepareSessionResumeParams = z.object({
   agent: z.enum(AI_VAULT_AGENTS),
-  sessionId: z.string().min(1).max(512).optional(),
   filePath: z.string().min(1).max(AI_VAULT_SCOPE_PATH_MAX_LENGTH),
   codexHome: z.string().min(1).max(AI_VAULT_SCOPE_PATH_MAX_LENGTH).nullable(),
   executionHostId: z.string().optional()
@@ -80,6 +74,14 @@ export const AiVaultSessionTitlesParams = z.object({
     .max(AI_VAULT_SESSION_TITLE_REQUEST_MAX_COUNT)
 })
 
+export const AiVaultResumeCommandParams = z.object({
+  entry: AgentLaunchVaultResumeEntrySchema
+})
+
+export const AiVaultResumeDetailsParams = z.object({
+  entry: AgentLaunchVaultResumeEntrySchema
+})
+
 export const AI_VAULT_METHODS: RpcMethod[] = [
   defineMethod({
     name: 'aiVault.resolveSessionTitles',
@@ -90,8 +92,7 @@ export const AI_VAULT_METHODS: RpcMethod[] = [
   defineMethod({
     name: 'aiVault.listSessions',
     params: AiVaultListSessionsParams,
-    handler: async (params, { runtime, clientKind, clientCapabilities }) => {
-      await runtime.ensureStructuredAgentSessionHost()
+    handler: async (params, { runtime }) => {
       let result
       try {
         result = await runtime.listAiVaultSessions({
@@ -109,32 +110,32 @@ export const AI_VAULT_METHODS: RpcMethod[] = [
       }
       // Why: web clients consume this response directly (no parent-side retag),
       // so sessions must come back stamped as the runtime host they addressed.
-      const stamped = params.executionHostId
+      return params.executionHostId
         ? restampAiVaultListResult(result, params.executionHostId)
         : result
-      return projectStructuredAiVaultSessions(
-        stamped,
-        clientKind === undefined ||
-          (clientCapabilities?.includes(STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY) ?? false)
-      )
     }
   }),
   defineMethod({
     name: 'aiVault.prepareSessionResume',
     params: AiVaultPrepareSessionResumeParams,
-    handler: async (params, { runtime }) => {
-      const args: AiVaultPrepareSessionResumeArgs = {
+    handler: (params, { runtime }) =>
+      runtime.prepareAiVaultSessionResume({
         agent: params.agent,
-        ...(params.sessionId ? { sessionId: params.sessionId } : {}),
         filePath: params.filePath,
         codexHome: params.codexHome,
         // Why: the RPC executes on the transcript-owning host; never let a
         // client-provided runtime/SSH stamp escape that host boundary.
         executionHostId: LOCAL_EXECUTION_HOST_ID
-      }
-      await runtime.ensureStructuredAgentSessionHost()
-      assertLegacyAiVaultResumeAllowed(args)
-      return runtime.prepareAiVaultSessionResume(args)
-    }
+      })
+  }),
+  defineMethod({
+    name: 'aiVault.resumeCommand',
+    params: AiVaultResumeCommandParams,
+    handler: (params, { runtime }) => runtime.resolveAiVaultResumeCommand(params.entry)
+  }),
+  defineMethod({
+    name: 'aiVault.resumeDetails',
+    params: AiVaultResumeDetailsParams,
+    handler: (params, { runtime }) => runtime.resolveAiVaultResumeDetails(params.entry)
   })
 ]

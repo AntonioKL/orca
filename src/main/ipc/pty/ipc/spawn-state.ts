@@ -10,6 +10,8 @@ import type { StablePaneOwner } from '../pane/stable-owner'
 import type { PaneSpawnReservation } from '../pane/spawn-reservation'
 import { localProvider } from '../provider/registry'
 import type { AdoptStablePaneResult, PtySpawnIpcArgs, PtySpawnIpcDeps } from './spawn-types'
+import type { AgentLaunchSpawnOutcome } from '../../../../shared/agent-launch-spawn-request'
+import type { PersistedLaunchNoticeState } from '../../../../shared/agent-launch-contract'
 
 export type PtyIpcSpawnState = {
   deps: PtySpawnIpcDeps
@@ -83,6 +85,12 @@ export type PtyIpcSpawnState = {
   sessionSizeBeforeAttach: { cols: number; rows: number } | undefined
   initiallyHidden: boolean
   preSpawnHiddenMarkId: string | null
+  agentLaunchOutcome: AgentLaunchSpawnOutcome | null
+  agentLaunchFollowupPrompt: string | null
+  agentLaunchDraftPrompt: string | null
+  agentLaunchToken: string | null
+  vaultLaunchNotices: PersistedLaunchNoticeState | null
+  settleAgentLaunch: (settlement: 'registered' | 'failed') => void
 }
 
 export function createPtyIpcSpawnState(
@@ -156,6 +164,12 @@ export function createPtyIpcSpawnState(
     hadSessionSizeBeforeAttach: false,
     sessionSizeBeforeAttach: undefined,
     initiallyHidden: false,
-    preSpawnHiddenMarkId: null
+    preSpawnHiddenMarkId: null,
+    agentLaunchOutcome: null,
+    agentLaunchFollowupPrompt: null,
+    agentLaunchDraftPrompt: null,
+    agentLaunchToken: null,
+    vaultLaunchNotices: null,
+    settleAgentLaunch: () => {}
   }
 }
