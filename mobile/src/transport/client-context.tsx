@@ -32,6 +32,7 @@ import {
   subscribeHostStateListener,
   type CloseEntryOptions
 } from './host-client-context-state'
+import { mountAgentSync } from './agent-sync-connection'
 import type { ConnectionState, HostProfile } from './types'
 import type { RpcClientContextValue } from './rpc-client-context-contract'
 
@@ -78,6 +79,7 @@ export function RpcClientProvider({ children }: { children: ReactNode }) {
     }
     entry?.unsubState()
     entry?.unsubConnectionPath()
+    entry?.agentSync?.dispose()
     storeRef.current.delete(hostId)
     entry?.client.close()
     notifyHostState(hostId, 'disconnected')
@@ -104,6 +106,7 @@ export function RpcClientProvider({ children }: { children: ReactNode }) {
         allowUnowned
       ).then((entry) => {
         if (entry) {
+          entry.agentSync ??= mountAgentSync(entry.client, hostId)
           manualDemandRef.current.delete(hostId)
         }
         return entry
@@ -252,6 +255,7 @@ export function RpcClientProvider({ children }: { children: ReactNode }) {
       if (entry) {
         entry.unsubState()
         entry.unsubConnectionPath()
+        entry.agentSync?.dispose()
         entry.client.close()
         storeRef.current.delete(hostId)
       }

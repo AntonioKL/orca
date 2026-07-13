@@ -12,7 +12,6 @@ import {
   type SetupHookTrust
 } from '../tasks/setup-hook-trust'
 import { createWorkspaceFromComposerSource } from '../tasks/source-workspace-create'
-import { normalizeWorkspaceAgent } from '../tasks/workspace-agent-selection'
 import type { WorkspaceCreateSetupDecision } from '../tasks/workspace-create-params'
 import type { WorkspaceSshGate } from '../tasks/workspace-ssh-gate'
 import type { useMobileComposerSource } from '../tasks/use-mobile-composer-source'
@@ -26,6 +25,8 @@ import type { MobileWorkspaceRepo, SetupRunPolicy } from './new-worktree-modal-t
 import type { SetupTrustPrompt } from './SetupHookTrustDrawer'
 import type { NewWorktreeDrawerView } from './use-new-worktree-drawer-navigation'
 import { getSuggestedCreatureName } from './worktree-name-suggestion'
+import { hostSupportsAgentLaunchIdentity } from '../session/agent-launch-identity-capability'
+import { buildInteractiveLaunchParams } from './interactive-worktree-launch-params'
 
 type CreateOptions = {
   setupOverride?: Exclude<WorkspaceCreateSetupDecision, 'inherit'>
@@ -40,6 +41,7 @@ export function useNewWorkspaceCreateSubmit(args: {
   selectedAgent: NewWorktreeAgentOption
   setSelectedAgent: (agent: NewWorktreeAgentOption) => void
   setAgentOverridden: (overridden: boolean) => void
+  agentOverridden: boolean
   runtimeSettings: NewWorktreeRuntimeSettings | null
   setRuntimeSettings: (settings: NewWorktreeRuntimeSettings) => void
   detectedAgentIds: Set<string> | null
@@ -99,6 +101,17 @@ export function useNewWorkspaceCreateSubmit(args: {
       } catch {
         // The runtime validates the same setting before spawning.
       }
+      let hasIdentityCapability = false
+      try {
+        const statusResponse = await client.sendRequest('status.get')
+        if (statusResponse.ok) {
+          hasIdentityCapability = hostSupportsAgentLaunchIdentity(
+            (statusResponse as RpcSuccess).result
+          )
+        }
+      } catch {
+        // Best-effort probe; older hosts keep the legacy launch path.
+      }
       if (
         args.selectedAgent.id !== '__blank__' &&
         !isMobileTuiAgentEnabled(args.selectedAgent.id, latestRuntimeSettings?.disabledTuiAgents)
@@ -152,6 +165,14 @@ export function useNewWorkspaceCreateSubmit(args: {
 
       const createdWithAgentId =
         args.selectedAgent.id !== '__blank__' ? args.selectedAgent.id : undefined
+      const launchParams = hasIdentityCapability
+        ? buildInteractiveLaunchParams({
+            selectedAgentId: args.selectedAgent.id,
+            hasIdentityCapability: true,
+            deferToHostDefault: !args.agentOverridden,
+            legacyCommand: undefined
+          })
+        : undefined
       const trimmedNote = args.note.trim() || undefined
       const selection = args.composer.createSelection
       const result = selection
@@ -160,7 +181,10 @@ export function useNewWorkspaceCreateSubmit(args: {
             selection,
             targetRepoId: selectedRepo.id,
             setupDecision,
-            agent: { choice: normalizeWorkspaceAgent(args.selectedAgent.id) ?? 'blank' },
+            agent: {
+              choice: args.selectedAgent.id === '__blank__' ? 'blank' : args.selectedAgent.id,
+              launchParams
+            },
             workspaceName: trimmedName || undefined,
             note: trimmedNote,
             nameIsAutoManaged: args.composer.isNameAutoManaged,
@@ -172,6 +196,7 @@ export function useNewWorkspaceCreateSubmit(args: {
             baseName,
             nameWasGenerated: !trimmedName,
             createdWithAgentId,
+            launchParams,
             comment: trimmedNote,
             setupDecision,
             worktreeCreateIdempotency: args.getWorktreeCreateCutoverSupport()

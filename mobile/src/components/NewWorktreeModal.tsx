@@ -25,6 +25,7 @@ import {
 import { NewWorktreeFormSheet } from './NewWorktreeFormSheet'
 import { NewWorktreeModalDrawers } from './NewWorktreeModalDrawers'
 import { useNewWorkspaceAgentSelection } from './use-new-workspace-agent-selection'
+import { useAgentCatalogSnapshot } from './use-agent-catalog-snapshot'
 import { useNewWorkspaceCreateSubmit } from './use-new-workspace-create-submit'
 import { useNewWorkspaceExecutionTarget } from './use-new-workspace-execution-target'
 import { useNewWorkspaceRepositories } from './use-new-workspace-repositories'
@@ -85,10 +86,12 @@ function NewWorktreeModalContent(props: NewWorktreeModalProps) {
     worktreeBranches: selectedRepoWorktreeBranches,
     onError: setError
   })
+  const agentCatalog = useAgentCatalogSnapshot(hostId)
   const agentSelection = useNewWorkspaceAgentSelection({
     visible,
     runtimeSettings: runtime.runtimeSettings,
-    detectedAgentIds: executionTarget.detectedAgentIds
+    detectedAgentIds: executionTarget.detectedAgentIds,
+    agentCatalog
   })
   const retiredNamesRefreshKey = useMemo(
     () => buildRetiredWorktreeNamesRefreshKey(existingWorktreePaths),
@@ -105,6 +108,7 @@ function NewWorktreeModalContent(props: NewWorktreeModalProps) {
     selectedAgent: agentSelection.selectedAgent,
     setSelectedAgent: agentSelection.setSelectedAgent,
     setAgentOverridden: agentSelection.setAgentOverridden,
+    agentOverridden: agentSelection.agentOverridden,
     runtimeSettings: runtime.runtimeSettings,
     setRuntimeSettings: runtime.setRuntimeSettings,
     detectedAgentIds: executionTarget.detectedAgentIds,

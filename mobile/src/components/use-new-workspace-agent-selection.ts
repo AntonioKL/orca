@@ -1,21 +1,24 @@
 import { useState } from 'react'
-import { isMobileTuiAgentEnabled } from '../tasks/mobile-tui-agents'
 import {
+  buildSelectableNewWorktreeAgentOptions,
   NEW_WORKTREE_AGENT_OPTIONS,
   NEW_WORKTREE_BLANK_AGENT,
   resolveNewWorktreeAgentSelection,
   type NewWorktreeAgentOption,
   type NewWorktreeRuntimeSettings
 } from './new-worktree-agent-selection'
+import type { AgentCatalogValue } from '../transport/agent-catalog-sync'
 
 export function useNewWorkspaceAgentSelection(args: {
   visible: boolean
   runtimeSettings: NewWorktreeRuntimeSettings | null
   detectedAgentIds: Set<string> | null
+  agentCatalog: AgentCatalogValue | null
 }): {
   selectedAgent: NewWorktreeAgentOption
   setSelectedAgent: (agent: NewWorktreeAgentOption) => void
   setAgentOverridden: (overridden: boolean) => void
+  agentOverridden: boolean
   pickerAgentOptions: NewWorktreeAgentOption[]
 } {
   const [selectedAgentState, setSelectedAgent] = useState<NewWorktreeAgentOption>(
@@ -36,16 +39,17 @@ export function useNewWorkspaceAgentSelection(args: {
     setSelectedAgent(resolution.selectedAgent)
     setAgentOverridden(resolution.agentOverridden)
   }
-  const visibleAgentOptions = NEW_WORKTREE_AGENT_OPTIONS.filter(
-    (agent) =>
-      agent.id !== '__blank__' &&
-      (args.detectedAgentIds === null || args.detectedAgentIds.has(agent.id)) &&
-      isMobileTuiAgentEnabled(agent.id, args.runtimeSettings?.disabledTuiAgents)
-  )
+  const visibleAgentOptions = buildSelectableNewWorktreeAgentOptions({
+    snapshot: args.agentCatalog,
+    includeCustomAgents: true,
+    detectedAgentIds: args.detectedAgentIds,
+    disabledTuiAgents: args.runtimeSettings?.disabledTuiAgents
+  })
   return {
     selectedAgent: resolution.selectedAgent,
     setSelectedAgent,
     setAgentOverridden,
+    agentOverridden: resolution.agentOverridden,
     pickerAgentOptions: [...visibleAgentOptions, NEW_WORKTREE_BLANK_AGENT]
   }
 }
