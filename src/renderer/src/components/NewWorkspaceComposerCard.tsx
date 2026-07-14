@@ -3,10 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { useAppStore } from '@/store'
 import { cn } from '@/lib/utils'
-import { getAgentCatalog } from '@/lib/agent-catalog'
-import { mergeCustomAgentCatalogEntries } from '@/components/agent/custom-agent-catalog-entries'
 import { setDefaultTuiAgent } from '@/lib/agent-catalog-authoring'
-import { useLocalAgentCatalog } from '@/hooks/useLocalAgentCatalog'
 import { getScreenSubmitModifierLabel } from '@/lib/screen-submit-shortcut'
 import { resolveProjectCloneUrlPrefill } from '@/lib/project-clone-url-prefill'
 import { useContextualTour } from '@/components/contextual-tours/use-contextual-tour'
@@ -19,11 +16,7 @@ import { unwrapRuntimeRpcResult } from '@/runtime/runtime-rpc-client'
 import { withUiConnectTimeout } from '@/ssh/ssh-connect-ui-timeout'
 import { isSshConnectInFlight, trackSshConnect } from '@/ssh/ssh-connect-in-flight'
 import { translate } from '@/i18n/i18n'
-import {
-  DEFAULT_DISABLED_TUI_AGENTS,
-  filterEnabledTuiAgents,
-  toLegacyAutoPreference
-} from '../../../shared/tui-agent-selection'
+import { toLegacyAutoPreference } from '../../../shared/tui-agent-selection'
 import type { RuntimeStatus } from '../../../shared/runtime-types'
 import type { TuiAgent } from '../../../shared/tui-agent'
 import { NewWorkspaceComposerAdvancedSection } from './new-workspace/NewWorkspaceComposerAdvancedSection'
@@ -76,10 +69,6 @@ export default function NewWorkspaceComposerCard(
   const defaultTuiAgent = toLegacyAutoPreference(
     useAppStore((state) => state.settings?.defaultTuiAgent)
   )
-  const disabledTuiAgents = useAppStore(
-    (state) => state.settings?.disabledTuiAgents ?? DEFAULT_DISABLED_TUI_AGENTS
-  )
-  const { snapshot: localAgentCatalog } = useLocalAgentCatalog()
   const projects = useAppStore((state) => state.projects)
   const repos = useAppStore((state) => state.repos)
   const nameInputFocusFrameRef = React.useRef<number | null>(null)
@@ -135,26 +124,6 @@ export default function NewWorkspaceComposerCard(
   const setupSkipButtonLabel = setupConfig?.kind === 'setup' ? 'Skip for now' : 'Skip commands'
   const showSetupAgentStartupPolicy =
     setupControlsEnabled && setupConfig !== null && setupConfig.kind !== 'default-tabs'
-  const agentCatalog = getAgentCatalog()
-  const enabledAgentIds = new Set(
-    filterEnabledTuiAgents(
-      agentCatalog.map((candidate) => candidate.id),
-      disabledTuiAgents
-    )
-  )
-  const visibleBuiltInQuickAgents = agentCatalog.filter((agent) => {
-    return (
-      enabledAgentIds.has(agent.id) &&
-      (props.detectedAgentIds === null || props.detectedAgentIds.has(agent.id))
-    )
-  })
-  const visibleQuickAgents = mergeCustomAgentCatalogEntries(
-    visibleBuiltInQuickAgents,
-    localAgentCatalog,
-    disabledTuiAgents,
-    props.detectedAgentIds
-  )
-
   const cancelNameInputFocusFrame = React.useCallback((): void => {
     if (nameInputFocusFrameRef.current !== null) {
       cancelAnimationFrame(nameInputFocusFrameRef.current)
@@ -306,7 +275,7 @@ export default function NewWorkspaceComposerCard(
         <NewWorkspaceComposerNameSection {...props} onNamePlainEnter={handleNamePlainEnter} />
         <NewWorkspaceComposerAgentSection
           {...props}
-          visibleQuickAgents={visibleQuickAgents}
+          visibleQuickAgents={props.quickAgentOptions}
           defaultTuiAgent={defaultTuiAgent}
           handleSetDefaultAgent={handleSetDefaultAgent}
         />
