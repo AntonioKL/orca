@@ -26,6 +26,7 @@ export function createTerminalLaunchNoticeActions(
       })
     },
     dismissLaunchNotice: ({ worktreeId, tabId, launchToken, code }) => {
+      // Clear optimistically while the host persists the dismissal.
       const runtimeEnvironmentId = getRuntimeEnvironmentIdForWorktree(get(), worktreeId)
       if (runtimeEnvironmentId) {
         void import('@/runtime/web-runtime-session').then(({ dismissWebRuntimeLaunchNotice }) =>

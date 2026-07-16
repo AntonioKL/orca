@@ -36,6 +36,7 @@ export async function runPtyIpcSpawn(deps: PtySpawnIpcDeps, args: PtySpawnIpcArg
   if (early) {
     return early
   }
+  // Any throw after admission must settle its token so failed pre-spawn work cannot consume capacity.
   try {
     const agentLaunchEarlyResult = await preparePtyIpcSpawnPreflight(ctx)
     if (agentLaunchEarlyResult) {

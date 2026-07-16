@@ -142,6 +142,7 @@ export type TerminalActions = {
     launchToken: string
     notices: readonly AgentLaunchNotice[]
   }) => void
+  /** Requests host removal and clears the matching notice locally without awaiting the acknowledgement. */
   dismissLaunchNotice: (args: {
     worktreeId: string
     tabId: string
