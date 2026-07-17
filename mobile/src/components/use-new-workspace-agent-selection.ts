@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import {
-  buildSelectableNewWorktreeAgentOptions,
+  buildNewWorktreePickerOptions,
   NEW_WORKTREE_AGENT_OPTIONS,
-  NEW_WORKTREE_BLANK_AGENT,
   resolveNewWorktreeAgentSelection,
   type NewWorktreeAgentOption,
   type NewWorktreeRuntimeSettings
@@ -30,7 +29,8 @@ export function useNewWorkspaceAgentSelection(args: {
     selectedAgent: selectedAgentState,
     agentOverridden: agentOverriddenState,
     runtimeSettings: args.runtimeSettings,
-    detectedAgentIds: args.detectedAgentIds
+    detectedAgentIds: args.detectedAgentIds,
+    catalogSnapshot: args.agentCatalog
   })
   if (
     selectedAgentState.id !== resolution.selectedAgent.id ||
@@ -39,9 +39,8 @@ export function useNewWorkspaceAgentSelection(args: {
     setSelectedAgent(resolution.selectedAgent)
     setAgentOverridden(resolution.agentOverridden)
   }
-  const visibleAgentOptions = buildSelectableNewWorktreeAgentOptions({
+  const pickerAgentOptions = buildNewWorktreePickerOptions({
     snapshot: args.agentCatalog,
-    includeCustomAgents: true,
     detectedAgentIds: args.detectedAgentIds,
     disabledTuiAgents: args.runtimeSettings?.disabledTuiAgents
   })
@@ -50,6 +49,6 @@ export function useNewWorkspaceAgentSelection(args: {
     setSelectedAgent,
     setAgentOverridden,
     agentOverridden: resolution.agentOverridden,
-    pickerAgentOptions: [...visibleAgentOptions, NEW_WORKTREE_BLANK_AGENT]
+    pickerAgentOptions
   }
 }

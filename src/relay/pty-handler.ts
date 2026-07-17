@@ -376,6 +376,9 @@ type PtyProcessSummary = {
   terminalHandle?: string
   foregroundProcessEvidence?: ForegroundProcessEvidence
   agentSessionOwners?: AgentSessionOwnerBinding[]
+  /** Host admission launch token echoed on re-list so crash reconciliation can
+   *  rejoin a main-surviving remote PTY to its pending launch by token. */
+  launchToken?: string
 }
 
 type SerializedPtyEntry = {
@@ -2432,7 +2435,8 @@ export class PtyHandler {
         ...(foregroundProcessEvidence ? { foregroundProcessEvidence } : {}),
         ...(this.agentSessionOwners.listForPty(id).length
           ? { agentSessionOwners: this.agentSessionOwners.listForPty(id) }
-          : {})
+          : {}),
+        ...(managed.launchToken ? { launchToken: managed.launchToken } : {})
       })
     }
     return results

@@ -3,6 +3,7 @@ import type { PersistedTrustedOrcaHooks } from '../../../src/shared/orca-yaml-ho
 import type { RetiredNameRegistry } from '../../../src/shared/worktree/retired-name-registry'
 import type { RpcClient } from '../transport/rpc-client'
 import type { RpcSuccess } from '../transport/types'
+import type { AgentCatalogValue } from '../transport/agent-catalog-sync'
 import { createBlankWorkspace } from '../tasks/blank-workspace-create'
 import { isMobileTuiAgentEnabled } from '../tasks/mobile-tui-agents'
 import {
@@ -45,6 +46,7 @@ export function useNewWorkspaceCreateSubmit(args: {
   runtimeSettings: NewWorktreeRuntimeSettings | null
   setRuntimeSettings: (settings: NewWorktreeRuntimeSettings) => void
   detectedAgentIds: Set<string> | null
+  agentCatalog: AgentCatalogValue | null
   sshGate: WorkspaceSshGate
   composer: Composer
   note: string
@@ -117,7 +119,11 @@ export function useNewWorkspaceCreateSubmit(args: {
         !isMobileTuiAgentEnabled(args.selectedAgent.id, latestRuntimeSettings?.disabledTuiAgents)
       ) {
         args.setSelectedAgent(
-          pickPreferredNewWorktreeAgent(latestRuntimeSettings, args.detectedAgentIds)
+          pickPreferredNewWorktreeAgent(
+            latestRuntimeSettings,
+            args.detectedAgentIds,
+            args.agentCatalog
+          )
         )
         args.setAgentOverridden(false)
         args.setError('Selected agent is disabled. Choose an enabled agent before creating.')

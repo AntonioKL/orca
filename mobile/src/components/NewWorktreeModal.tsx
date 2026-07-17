@@ -112,6 +112,7 @@ function NewWorktreeModalContent(props: NewWorktreeModalProps) {
     runtimeSettings: runtime.runtimeSettings,
     setRuntimeSettings: runtime.setRuntimeSettings,
     detectedAgentIds: executionTarget.detectedAgentIds,
+    agentCatalog,
     sshGate: executionTarget.sshGate,
     composer,
     note,
