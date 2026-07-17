@@ -61,7 +61,7 @@ export async function runPtyIpcSpawn(deps: PtySpawnIpcDeps, args: PtySpawnIpcArg
   } catch (err) {
     releaseAbandonedAgentTeamsLeader(ctx)
     ctx.settleAgentLaunch('failed')
-    if (ctx.agentLaunchToken) {
+    if (ctx.agentLaunchToken && ctx.agentLaunchSettlement !== 'registered') {
       getHostAgentSessionRecordStore().rollbackByToken(ctx.agentLaunchToken)
     }
     if (ctx.preSpawnHiddenMarkId !== null) {

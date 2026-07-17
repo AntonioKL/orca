@@ -89,6 +89,7 @@ export type PtyIpcSpawnState = {
   agentLaunchFollowupPrompt: string | null
   agentLaunchDraftPrompt: string | null
   agentLaunchToken: string | null
+  agentLaunchSettlement: 'registered' | 'failed' | null
   vaultLaunchNotices: PersistedLaunchNoticeState | null
   settleAgentLaunch: (settlement: 'registered' | 'failed') => void
 }
@@ -169,6 +170,7 @@ export function createPtyIpcSpawnState(
     agentLaunchFollowupPrompt: null,
     agentLaunchDraftPrompt: null,
     agentLaunchToken: null,
+    agentLaunchSettlement: null,
     vaultLaunchNotices: null,
     settleAgentLaunch: () => {}
   }

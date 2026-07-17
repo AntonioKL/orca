@@ -9,6 +9,7 @@ import { isValidTerminalTabId } from '../../../../shared/terminal-tab-id'
 import { isClaudeAuthSwitchInProgress } from '../../../claude-accounts/live-pty-gate'
 import { hasClaudeAuthEnvConflict } from '../../../claude-accounts/environment'
 import { stripEphemeralAgentTeamsEnv } from '../../../runtime/claude-agent-teams-service'
+import { ORCA_PROTECTED_ENV_KEYS } from '../../../agent-launch/compose-agent-launch-env'
 import { LocalPtyProvider } from '../../../providers/local-pty-provider'
 import { resolvePathEnvKey } from '../../../pty/windows-environment-path'
 import { routesFreshSpawnsToLocalProvider } from '../host-env/fresh-spawn-routing'
@@ -70,6 +71,16 @@ export async function assemblePtyIpcSpawnEnv(ctx: PtyIpcSpawnState): Promise<voi
       : null
   ctx.stablePaneKey = verifiedPaneKey ?? ctx.migrationUnsupportedPaneKey ?? ctx.metadataPaneKey
   ctx.baseEnv = baseEnvWithAuth ? { ...baseEnvWithAuth } : undefined
+  if (ctx.baseEnv && process.platform === 'win32') {
+    for (const protectedKey of ORCA_PROTECTED_ENV_KEYS) {
+      const lower = protectedKey.toLowerCase()
+      for (const existing of Object.keys(ctx.baseEnv)) {
+        if (existing !== protectedKey && existing.toLowerCase() === lower) {
+          delete ctx.baseEnv[existing]
+        }
+      }
+    }
+  }
   const shouldRefreshAgentTeamsEnv =
     !ctx.preAdoptedStablePane &&
     !args.connectionId &&

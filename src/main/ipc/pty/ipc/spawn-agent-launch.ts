@@ -13,7 +13,10 @@ import {
   detectionUnavailable,
   resolveLocalTargetHomePath
 } from '../../../agent-launch/agent-launch-host-state'
-import { resolveAgentLaunchSpawn } from '../../../agent-launch/agent-launch-spawn'
+import {
+  resolveAgentLaunchSpawn,
+  sanitizeClientAgentLaunchSourceRecord
+} from '../../../agent-launch/agent-launch-spawn'
 import { resolveResumeLaunchIngest } from '../../../agent-launch/agent-launch-resume-ingest'
 import { resolveRevalidatedVaultResume } from '../../../agent-launch/agent-launch-vault-resume'
 import { getHostAgentSessionRecordStore } from '../../../agent-launch/agent-session-record-store-host'
@@ -103,6 +106,9 @@ export async function resolvePtyIpcAgentLaunch(
       args.commandDelivery = 'provider'
       args.launchConfig = ingest.launchConfig
       args.launchAgent = ingest.baseAgent
+      if (ingest.launchConfig.agentEnv) {
+        args.env = { ...args.env, ...ingest.launchConfig.agentEnv }
+      }
       return null
     }
     resumeRequest = ingest.request
@@ -163,7 +169,7 @@ export async function resolvePtyIpcAgentLaunch(
       return null
     }
   } else {
-    resumeRequest = args.agentLaunch
+    resumeRequest = sanitizeClientAgentLaunchSourceRecord(args.agentLaunch)
     if (
       args.agentLaunch.unattended?.kind === 'background' &&
       args.agentLaunch.selection.kind === 'agent' &&
@@ -203,6 +209,10 @@ export async function resolvePtyIpcAgentLaunch(
         (typeof args.worktreeId === 'string' && args.worktreeId.length > 0
           ? args.worktreeId
           : 'local-pty-spawn'),
+      worktreeId:
+        typeof args.worktreeId === 'string' && args.worktreeId.length > 0
+          ? args.worktreeId
+          : null,
       principal: { kind: 'local' },
       ...(resumePersistedSnapshot ? { persistedSnapshot: resumePersistedSnapshot } : {}),
       ...(resumeProviderSession ? { resumeProviderSession } : {})
@@ -243,6 +253,7 @@ export async function resolvePtyIpcAgentLaunch(
       return
     }
     settled = true
+    ctx.agentLaunchSettlement = settlement
     getHostAgentLaunchBoundary().settleAgentLaunch(ctx.agentLaunchToken, settlement)
     if (backgroundDeclaration && backgroundDeclarationRequestedAgent) {
       settleBackgroundDeclarationSpawn(
