@@ -32,6 +32,10 @@ export type GitWorktreeInfo = {
    *  (Git ≥ 2.36) or a path-existence probe on older Git. */
   prunable?: boolean
   prunableReason?: string
+  /** True while a detached worktree is mid-rebase. */
+  rebasing?: boolean
+  /** Original branch recovered from Git's rebase head-name state. */
+  rebaseBranch?: string
   /** True for the repo's main working tree (the first entry from `git worktree list`).
    *  Linked worktrees created via `git worktree add` have this set to false. */
   isMainWorktree: boolean

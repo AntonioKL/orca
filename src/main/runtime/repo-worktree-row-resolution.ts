@@ -42,7 +42,10 @@ export type RepoWorktreeRow = Worktree & {
   parentWorktreeId: string | null
   childWorktreeIds: string[]
   lineage: WorktreeLineage | null
-  git: Pick<GitWorktreeInfo, 'path' | 'head' | 'branch' | 'isBare' | 'isMainWorktree'>
+  git: Pick<
+    GitWorktreeInfo,
+    'path' | 'head' | 'branch' | 'isBare' | 'isMainWorktree' | 'rebasing' | 'rebaseBranch'
+  >
 }
 
 export type RepoWorktreeRowDeps = {
@@ -115,6 +118,8 @@ export async function resolveRepoWorktreeRows(
         head: worktree.head,
         branch: worktree.branch,
         isBare: worktree.isBare,
+        ...(worktree.rebasing === true ? { rebasing: true } : {}),
+        ...(worktree.rebaseBranch !== undefined ? { rebaseBranch: worktree.rebaseBranch } : {}),
         isMainWorktree: worktree.isMainWorktree
       },
       displayName: worktree.displayName,
@@ -164,6 +169,8 @@ export async function resolveRepoWorktreeRows(
         head: gitWorktree.head,
         branch: gitWorktree.branch,
         isBare: gitWorktree.isBare,
+        ...(gitWorktree.rebasing === true ? { rebasing: true } : {}),
+        ...(gitWorktree.rebaseBranch !== undefined ? { rebaseBranch: gitWorktree.rebaseBranch } : {}),
         isMainWorktree: gitWorktree.isMainWorktree
       },
       displayName: merged.displayName,

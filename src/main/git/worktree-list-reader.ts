@@ -1,4 +1,6 @@
-import { stat } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import type { GitWorktreeInfo } from '../../shared/worktree/types'
 import { parseWslUncPath } from '../../shared/wsl-paths'
 import {
@@ -20,8 +22,48 @@ import {
   translateWorktreePath
 } from './worktree-path-comparison'
 import { gitExecFileAsync } from './runner'
+import { resolveGitDir } from './status'
+import { parseRebaseHeadName } from '../../shared/git-rebase-head-name'
 
 const PRUNABLE_EXISTENCE_PROBE_CONCURRENCY = 8
+
+export async function readWorktreeRebaseState(
+  worktreePath: string
+): Promise<{ rebasing: boolean; rebaseBranch: string | null }> {
+  const gitDir = await resolveGitDir(worktreePath)
+  let rebaseDir: string | null = null
+  if (existsSync(join(gitDir, 'rebase-merge'))) {
+    rebaseDir = join(gitDir, 'rebase-merge')
+  } else if (
+    existsSync(join(gitDir, 'rebase-apply')) &&
+    existsSync(join(gitDir, 'rebase-apply', 'rebasing'))
+  ) {
+    rebaseDir = join(gitDir, 'rebase-apply')
+  }
+  if (!rebaseDir) return { rebasing: false, rebaseBranch: null }
+  try {
+    const headName = await readFile(join(rebaseDir, 'head-name'), 'utf-8')
+    return { rebasing: true, rebaseBranch: parseRebaseHeadName(headName) }
+  } catch {
+    return { rebasing: true, rebaseBranch: null }
+  }
+}
+
+async function enrichLocalWorktreeWithRebaseState(
+  worktree: GitWorktreeInfo
+): Promise<GitWorktreeInfo> {
+  if (worktree.isBare || worktree.branch) return worktree
+  try {
+    const { rebasing, rebaseBranch } = await readWorktreeRebaseState(worktree.path)
+    return {
+      ...worktree,
+      ...(rebasing ? { rebasing: true } : {}),
+      ...(rebaseBranch ? { rebaseBranch } : {})
+    }
+  } catch {
+    return worktree
+  }
+}
 
 type RepoLocation = { topLevel: string; commonDir: string }
 
@@ -198,8 +240,10 @@ export async function readTranslatedWorktreeGraph(
   repoPath: string,
   options: GitWorktreeExecOptions = {}
 ): Promise<GitWorktreeInfo[]> {
-  return (await readWorktreeList(repoPath, options)).map((worktree) => {
+  const worktrees = await readWorktreeList(repoPath, options)
+  return Promise.all(worktrees.map(async (worktree) => {
     const translatedPath = translateWorktreePath(worktree.path, repoPath, options)
-    return translatedPath === worktree.path ? worktree : { ...worktree, path: translatedPath }
-  })
+    const translated = translatedPath === worktree.path ? worktree : { ...worktree, path: translatedPath }
+    return enrichLocalWorktreeWithRebaseState(translated)
+  }))
 }

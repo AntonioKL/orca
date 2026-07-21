@@ -10,6 +10,7 @@ import type { GitExec } from './git-handler-ops'
 import type { RelayGitStreamExec } from './git-stdout-stream'
 import type { GitUpstreamStatus } from '../shared/git-status-types'
 import { StatusPorcelainParser } from '../shared/git-status-porcelain-parser'
+import { parseRebaseHeadName } from '../shared/git-rebase-head-name'
 import { splitRemoteBranchName } from '../shared/git-effective-upstream'
 import { readOrProbeNoEffectiveUpstreamStatus } from './git-status-upstream-negative-cache'
 import {
@@ -66,11 +67,10 @@ export async function detectConflictOperation(worktreePath: string): Promise<str
 }
 
 /**
- * Recover the branch a worktree is rebasing, from git's on-disk rebase state.
- * Why: mid-rebase HEAD is detached and `worktree list` drops the branch name, so the
- * badge would show a bare SHA; reading `head-name` restores `<branch> (rebasing)`.
- * Reads plain state files only (no git subcommand), so it is version-agnostic on the
- * Git 2.25 baseline and host-correct wherever the relay runs (native/WSL/SSH/relay).
+ * Recover the branch a worktree is rebasing, from git's on-disk `head-name` state file.
+ * Why: mid-rebase HEAD is detached and `worktree list` drops the branch, so the badge would
+ * otherwise show a bare SHA. Reads plain state files only (version-agnostic; no git subcommand).
+ * Note: a host-side twin lives at `readWorktreeRebaseState` in src/main/git/worktree.ts.
  */
 export async function readWorktreeRebaseState(
   worktreePath: string
@@ -94,13 +94,8 @@ export async function readWorktreeRebaseState(
   }
 
   try {
-    const headName = (await readFile(path.join(rebaseDir, 'head-name'), 'utf-8')).trim()
-    // head-name holds the literal `detached HEAD` (or a non-branch ref) when the rebase
-    // started from a detached HEAD; only treat a real branch ref as recoverable.
-    const rebaseBranch = headName.startsWith('refs/heads/')
-      ? headName.slice('refs/heads/'.length)
-      : null
-    return { rebasing: true, rebaseBranch }
+    const headName = await readFile(path.join(rebaseDir, 'head-name'), 'utf-8')
+    return { rebasing: true, rebaseBranch: parseRebaseHeadName(headName) }
   } catch {
     // rebase in progress but head-name is unreadable/absent — known rebasing, no branch.
     return { rebasing: true, rebaseBranch: null }

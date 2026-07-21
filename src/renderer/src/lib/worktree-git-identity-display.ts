@@ -43,13 +43,7 @@ export function getRebasingTooltip(branchName: string | null, shortHead: string)
 export function getWorktreeIdentityBranchName(
   identity: WorktreeGitIdentityDisplay | null
 ): string | null {
-  if (identity?.kind === 'branch') {
-    return identity.branchName
-  }
-  if (identity?.kind === 'rebasing') {
-    return identity.branchName
-  }
-  return null
+  return identity?.kind === 'branch' || identity?.kind === 'rebasing' ? identity.branchName : null
 }
 
 export function getWorktreeGitIdentityDisplay(input: {

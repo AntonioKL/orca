@@ -1,6 +1,11 @@
 import { stat } from 'node:fs/promises'
 import type { GitWorktreeInfo } from '../../shared/worktree/types'
-import { readTranslatedWorktreeGraph, readWorktreeList } from './worktree-list-reader'
+import {
+  readTranslatedWorktreeGraph,
+  readWorktreeList,
+  readWorktreeRebaseState
+} from './worktree-list-reader'
+export { readWorktreeRebaseState }
 import type { GitWorktreeExecOptions } from './worktree-operation-options'
 import { getErrorCode, isNotGitRepositoryError } from './worktree-operation-options'
 import { translateWorktreePath } from './worktree-path-comparison'

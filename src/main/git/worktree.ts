@@ -1,7 +1,7 @@
 export { addWorktree } from './worktree-add'
 export { forceDeleteLocalBranch } from './worktree-branch-removal'
 export { parseWorktreeList } from './worktree-list-parser'
-export { listWorktreeGraph, listWorktreesStrict } from './worktree-listing'
+export { listWorktreeGraph, listWorktreesStrict, readWorktreeRebaseState } from './worktree-listing'
 export { moveWorktree } from './worktree-move'
 export {
   WORKTREE_ADD_TIMEOUT_MAX_MS,

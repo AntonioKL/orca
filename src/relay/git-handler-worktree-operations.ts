@@ -10,6 +10,7 @@ import {
   worktreeIsCleanOp
 } from './git-handler-worktree-ops'
 import { annotatePrunableWorktreesByExistence } from './git-handler-worktree-list'
+import { readWorktreeRebaseState } from './git-handler-status-ops'
 import { refreshLocalBaseRefForWorktreeCreateOp } from './git-handler-local-base-ref-refresh'
 import {
   hasUnsupportedRevParsePathFormatEcho,
@@ -50,6 +51,26 @@ function parseRelayRepoLocation(repoPath: string, output: string): RelayRepoLoca
 }
 
 export class GitHandlerWorktreeOperations extends GitHandlerOperationContext {
+  private async enrichWorktreesWithRebaseState(
+    worktrees: Record<string, unknown>[]
+  ): Promise<Record<string, unknown>[]> {
+    return Promise.all(
+      worktrees.map(async (worktree) => {
+        if (worktree.detached !== true || typeof worktree.path !== 'string') return worktree
+        try {
+          const { rebasing, rebaseBranch } = await readWorktreeRebaseState(worktree.path)
+          return {
+            ...worktree,
+            ...(rebasing ? { rebasing: true } : {}),
+            ...(rebaseBranch ? { rebaseBranch } : {})
+          }
+        } catch {
+          return worktree
+        }
+      })
+    )
+  }
+
   async isGitRepo(params: Record<string, unknown>) {
     const dirPath = params.dirPath as string
     try {
@@ -149,6 +170,7 @@ export class GitHandlerWorktreeOperations extends GitHandlerOperationContext {
         },
         isUnsupportedWorktreeListZError
       )
+      .then((worktrees) => this.enrichWorktreesWithRebaseState(worktrees))
       .catch(() => [])
   }
 
