@@ -288,6 +288,41 @@ describe('hasChecksPanelGitStatusBranchChanged', () => {
       })
     ).toBe(true)
   })
+
+  it('does not treat a mid-rebase detach of the same branch as a branch change', () => {
+    // Why: without the rebase context every Refresh click during a rebase aborted
+    // as a phantom 'branch-changed' before any PR/checks fetch ran.
+    expect(
+      hasChecksPanelGitStatusBranchChanged({
+        observedBranch: null,
+        observedRebasing: true,
+        observedRebaseBranch: 'feature/checks',
+        currentBranch: 'feature/checks'
+      })
+    ).toBe(false)
+  })
+
+  it('still reports a change when the rebase recovers a different branch', () => {
+    expect(
+      hasChecksPanelGitStatusBranchChanged({
+        observedBranch: null,
+        observedRebasing: true,
+        observedRebaseBranch: 'other',
+        currentBranch: 'feature/checks'
+      })
+    ).toBe(true)
+  })
+
+  it('ignores a stale rebaseBranch when the observation is not rebasing', () => {
+    expect(
+      hasChecksPanelGitStatusBranchChanged({
+        observedBranch: null,
+        observedRebasing: false,
+        observedRebaseBranch: 'feature/checks',
+        currentBranch: 'feature/checks'
+      })
+    ).toBe(true)
+  })
 })
 
 describe('shouldCommitChecksPanelGitStatusSnapshot', () => {

@@ -212,9 +212,15 @@ export function readChecksPanelRefreshGitIdentitySnapshot(input: {
 
 export function hasChecksPanelGitStatusBranchChanged(input: {
   observedBranch: string | null | undefined
+  observedRebasing?: boolean
+  observedRebaseBranch?: string | null
   currentBranch: string
 }): boolean {
-  return (
-    canonicalBranchIdentity(input.observedBranch) !== canonicalBranchIdentity(input.currentBranch)
-  )
+  // Why: mid-rebase the observed live branch is empty but `currentBranch` is the recovered
+  // review branch — compare identities like the snapshot path above, or every Refresh
+  // click during a rebase aborts as a phantom branch switch.
+  const observedIdentity =
+    canonicalBranchIdentity(input.observedBranch) ||
+    (input.observedRebasing ? canonicalBranchIdentity(input.observedRebaseBranch) : '')
+  return observedIdentity !== canonicalBranchIdentity(input.currentBranch)
 }
