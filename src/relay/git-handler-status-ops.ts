@@ -65,6 +65,48 @@ export async function detectConflictOperation(worktreePath: string): Promise<str
   return 'unknown'
 }
 
+/**
+ * Recover the branch a worktree is rebasing, from git's on-disk rebase state.
+ * Why: mid-rebase HEAD is detached and `worktree list` drops the branch name, so the
+ * badge would show a bare SHA; reading `head-name` restores `<branch> (rebasing)`.
+ * Reads plain state files only (no git subcommand), so it is version-agnostic on the
+ * Git 2.25 baseline and host-correct wherever the relay runs (native/WSL/SSH/relay).
+ */
+export async function readWorktreeRebaseState(
+  worktreePath: string
+): Promise<{ rebasing: boolean; rebaseBranch: string | null }> {
+  const gitDir = await resolveGitDir(worktreePath)
+  let rebaseDir: string | null = null
+  if (existsSync(path.join(gitDir, 'rebase-merge'))) {
+    // rebase-merge is written only by rebase (interactive/merge backend).
+    rebaseDir = path.join(gitDir, 'rebase-merge')
+  } else if (
+    existsSync(path.join(gitDir, 'rebase-apply')) &&
+    existsSync(path.join(gitDir, 'rebase-apply', 'rebasing'))
+  ) {
+    // rebase-apply is shared with `git am`; the `rebasing` sentinel marks a true rebase
+    // (git writes `applying` instead for `git am`), so gate on it to avoid a false badge.
+    rebaseDir = path.join(gitDir, 'rebase-apply')
+  }
+
+  if (!rebaseDir) {
+    return { rebasing: false, rebaseBranch: null }
+  }
+
+  try {
+    const headName = (await readFile(path.join(rebaseDir, 'head-name'), 'utf-8')).trim()
+    // head-name holds the literal `detached HEAD` (or a non-branch ref) when the rebase
+    // started from a detached HEAD; only treat a real branch ref as recoverable.
+    const rebaseBranch = headName.startsWith('refs/heads/')
+      ? headName.slice('refs/heads/'.length)
+      : null
+    return { rebasing: true, rebaseBranch }
+  } catch {
+    // rebase in progress but head-name is unreadable/absent — known rebasing, no branch.
+    return { rebasing: true, rebaseBranch: null }
+  }
+}
+
 export async function getStatusOp(
   git: GitExec,
   streamGit: RelayGitStreamExec,

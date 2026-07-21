@@ -5,7 +5,7 @@ import * as path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GitExec } from './git-handler-ops'
 import type { RelayGitStreamExec } from './git-stdout-stream'
-import { getStatusOp } from './git-handler-status-ops'
+import { getStatusOp, readWorktreeRebaseState } from './git-handler-status-ops'
 import { clearNoEffectiveUpstreamStatusCache } from './git-status-upstream-negative-cache'
 import { clearGitStatusLineStatsCache } from '../shared/git-status-line-stats-cache'
 import { DEFAULT_GIT_STATUS_LIMIT } from '../shared/git-status-limit'
@@ -401,5 +401,111 @@ describe('getStatusOp', () => {
     expect(
       git.mock.calls.filter(([args]) => args[0] === 'rev-parse' && args.includes('HEAD@{u}'))
     ).toHaveLength(2)
+  })
+})
+
+describe('readWorktreeRebaseState', () => {
+  const tmpDirs: string[] = []
+
+  function makeWorktree(): { worktreePath: string; gitDir: string } {
+    const worktreePath = mkdtempSync(path.join(tmpdir(), 'orca-rebase-'))
+    tmpDirs.push(worktreePath)
+    // Native worktree: `.git` is a real directory that also holds rebase state.
+    const gitDir = path.join(worktreePath, '.git')
+    return { worktreePath, gitDir }
+  }
+
+  afterEach(async () => {
+    while (tmpDirs.length > 0) {
+      const dir = tmpDirs.pop()
+      if (dir) {
+        await fs.rm(dir, { recursive: true, force: true })
+      }
+    }
+  })
+
+  it('recovers the branch from rebase-merge/head-name', async () => {
+    const { worktreePath, gitDir } = makeWorktree()
+    await fs.mkdir(path.join(gitDir, 'rebase-merge'), { recursive: true })
+    await fs.writeFile(path.join(gitDir, 'rebase-merge', 'head-name'), 'refs/heads/feature/x\n')
+
+    expect(await readWorktreeRebaseState(worktreePath)).toEqual({
+      rebasing: true,
+      rebaseBranch: 'feature/x'
+    })
+  })
+
+  it('recovers the branch from an am-guarded rebase-apply', async () => {
+    const { worktreePath, gitDir } = makeWorktree()
+    await fs.mkdir(path.join(gitDir, 'rebase-apply'), { recursive: true })
+    await fs.writeFile(path.join(gitDir, 'rebase-apply', 'rebasing'), '')
+    await fs.writeFile(path.join(gitDir, 'rebase-apply', 'head-name'), 'refs/heads/hotfix\n')
+
+    expect(await readWorktreeRebaseState(worktreePath)).toEqual({
+      rebasing: true,
+      rebaseBranch: 'hotfix'
+    })
+  })
+
+  it('rejects a git am (rebase-apply without the rebasing sentinel)', async () => {
+    const { worktreePath, gitDir } = makeWorktree()
+    await fs.mkdir(path.join(gitDir, 'rebase-apply'), { recursive: true })
+    await fs.writeFile(path.join(gitDir, 'rebase-apply', 'applying'), '')
+    await fs.writeFile(
+      path.join(gitDir, 'rebase-apply', 'head-name'),
+      'refs/heads/should-be-ignored\n'
+    )
+
+    expect(await readWorktreeRebaseState(worktreePath)).toEqual({
+      rebasing: false,
+      rebaseBranch: null
+    })
+  })
+
+  it('reports rebasing with no branch when head-name is absent', async () => {
+    const { worktreePath, gitDir } = makeWorktree()
+    await fs.mkdir(path.join(gitDir, 'rebase-merge'), { recursive: true })
+
+    expect(await readWorktreeRebaseState(worktreePath)).toEqual({
+      rebasing: true,
+      rebaseBranch: null
+    })
+  })
+
+  it('reports rebasing with no branch when head-name is a detached HEAD', async () => {
+    const { worktreePath, gitDir } = makeWorktree()
+    await fs.mkdir(path.join(gitDir, 'rebase-merge'), { recursive: true })
+    await fs.writeFile(path.join(gitDir, 'rebase-merge', 'head-name'), 'detached HEAD\n')
+
+    expect(await readWorktreeRebaseState(worktreePath)).toEqual({
+      rebasing: true,
+      rebaseBranch: null
+    })
+  })
+
+  it('reports not rebasing when there is no rebase directory', async () => {
+    const { worktreePath } = makeWorktree()
+    expect(await readWorktreeRebaseState(worktreePath)).toEqual({
+      rebasing: false,
+      rebaseBranch: null
+    })
+  })
+
+  it('resolves a linked worktree gitdir (.git file pointer) and recovers the branch', async () => {
+    const { worktreePath } = makeWorktree()
+    // Linked worktree: `.git` is a FILE pointing at the real per-worktree gitdir.
+    const realGitDir = mkdtempSync(path.join(tmpdir(), 'orca-rebase-gitdir-'))
+    tmpDirs.push(realGitDir)
+    await fs.writeFile(path.join(worktreePath, '.git'), `gitdir: ${realGitDir}\n`)
+    await fs.mkdir(path.join(realGitDir, 'rebase-merge'), { recursive: true })
+    await fs.writeFile(
+      path.join(realGitDir, 'rebase-merge', 'head-name'),
+      'refs/heads/linked/topic\n'
+    )
+
+    expect(await readWorktreeRebaseState(worktreePath)).toEqual({
+      rebasing: true,
+      rebaseBranch: 'linked/topic'
+    })
   })
 })
