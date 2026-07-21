@@ -26,4 +26,9 @@ describe('parseRebaseHeadName', () => {
   it('returns null for empty content', () => {
     expect(parseRebaseHeadName('')).toBeNull()
   })
+
+  it('returns null (not an empty branch) for a bare refs/heads/ prefix', () => {
+    expect(parseRebaseHeadName('refs/heads/\n')).toBeNull()
+    expect(parseRebaseHeadName('  refs/heads/  ')).toBeNull()
+  })
 })

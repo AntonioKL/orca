@@ -231,8 +231,28 @@ describe('readChecksPanelRefreshGitIdentitySnapshot', () => {
     ).toEqual({
       kind: 'changed',
       head: 'def456',
-      branch: 'refs/heads/feature/next'
+      branch: 'refs/heads/feature/next',
+      rebasing: false,
+      rebaseBranch: null
     })
+  })
+
+  it('reports same when a mid-rebase snapshot resolves to the current review branch', () => {
+    expect(
+      readChecksPanelRefreshGitIdentitySnapshot({
+        snapshot: {
+          ...SNAPSHOT,
+          gitIdentity: {
+            head: 'def456',
+            branch: null,
+            rebasing: true,
+            rebaseBranch: 'feature/checks'
+          }
+        },
+        contextKey: SNAPSHOT.contextKey,
+        currentBranch: 'feature/checks'
+      })
+    ).toEqual({ kind: 'same' })
   })
 
   it('reports missing when the snapshot lacks branch/head identity', () => {

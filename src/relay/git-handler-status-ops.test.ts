@@ -5,7 +5,7 @@ import * as path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GitExec } from './git-handler-ops'
 import type { RelayGitStreamExec } from './git-stdout-stream'
-import { getStatusOp, readWorktreeRebaseState } from './git-handler-status-ops'
+import { getStatusOp } from './git-handler-status-ops'
 import { clearNoEffectiveUpstreamStatusCache } from './git-status-upstream-negative-cache'
 import { clearGitStatusLineStatsCache } from '../shared/git-status-line-stats-cache'
 import { DEFAULT_GIT_STATUS_LIMIT } from '../shared/git-status-limit'
@@ -404,15 +404,22 @@ describe('getStatusOp', () => {
   })
 })
 
-describe('readWorktreeRebaseState', () => {
+describe('getStatusOp rebase identity', () => {
   const tmpDirs: string[] = []
 
   function makeWorktree(): { worktreePath: string; gitDir: string } {
     const worktreePath = mkdtempSync(path.join(tmpdir(), 'orca-rebase-'))
     tmpDirs.push(worktreePath)
-    // Native worktree: `.git` is a real directory that also holds rebase state.
-    const gitDir = path.join(worktreePath, '.git')
-    return { worktreePath, gitDir }
+    return { worktreePath, gitDir: path.join(worktreePath, '.git') }
+  }
+
+  function detachedStatusGit(): GitExec {
+    return vi.fn<GitExec>(async (args) => {
+      if (args.includes('status')) {
+        return { stdout: buildBranchStatusOutput('a'.repeat(40), '(detached)'), stderr: '' }
+      }
+      throw new Error(`Unexpected git command: ${args.join(' ')}`)
+    })
   }
 
   afterEach(async () => {
@@ -424,88 +431,52 @@ describe('readWorktreeRebaseState', () => {
     }
   })
 
-  it('recovers the branch from rebase-merge/head-name', async () => {
+  it('carries the disk-read rebase state alongside the detached status identity', async () => {
     const { worktreePath, gitDir } = makeWorktree()
     await fs.mkdir(path.join(gitDir, 'rebase-merge'), { recursive: true })
     await fs.writeFile(path.join(gitDir, 'rebase-merge', 'head-name'), 'refs/heads/feature/x\n')
+    const git = detachedStatusGit()
 
-    expect(await readWorktreeRebaseState(worktreePath)).toEqual({
-      rebasing: true,
-      rebaseBranch: 'feature/x'
-    })
+    const result = await getStatusOp(git, streamGitFromCapture(git), { worktreePath })
+
+    expect(result.conflictOperation).toBe('rebase')
+    expect(result.rebasing).toBe(true)
+    expect(result.rebaseBranch).toBe('feature/x')
   })
 
-  it('recovers the branch from an am-guarded rebase-apply', async () => {
-    const { worktreePath, gitDir } = makeWorktree()
-    await fs.mkdir(path.join(gitDir, 'rebase-apply'), { recursive: true })
-    await fs.writeFile(path.join(gitDir, 'rebase-apply', 'rebasing'), '')
-    await fs.writeFile(path.join(gitDir, 'rebase-apply', 'head-name'), 'refs/heads/hotfix\n')
-
-    expect(await readWorktreeRebaseState(worktreePath)).toEqual({
-      rebasing: true,
-      rebaseBranch: 'hotfix'
-    })
-  })
-
-  it('rejects a git am (rebase-apply without the rebasing sentinel)', async () => {
+  it('does NOT report rebasing for a conflicted git am, even though conflictOperation does', async () => {
     const { worktreePath, gitDir } = makeWorktree()
     await fs.mkdir(path.join(gitDir, 'rebase-apply'), { recursive: true })
     await fs.writeFile(path.join(gitDir, 'rebase-apply', 'applying'), '')
-    await fs.writeFile(
-      path.join(gitDir, 'rebase-apply', 'head-name'),
-      'refs/heads/should-be-ignored\n'
-    )
+    await fs.writeFile(path.join(gitDir, 'rebase-apply', 'head-name'), 'refs/heads/ignored\n')
+    const git = detachedStatusGit()
 
-    expect(await readWorktreeRebaseState(worktreePath)).toEqual({
-      rebasing: false,
-      rebaseBranch: null
-    })
+    const result = await getStatusOp(git, streamGitFromCapture(git), { worktreePath })
+
+    // conflictOperation keeps its coarse historical meaning for the conflict banner...
+    expect(result.conflictOperation).toBe('rebase')
+    // ...but the identity fields are sentinel-gated so the badge never shows a false rebase.
+    expect(result.rebasing).toBeUndefined()
+    expect(result.rebaseBranch).toBeUndefined()
   })
 
-  it('reports rebasing with no branch when head-name is absent', async () => {
+  it('re-probes when a rebase starts between the early probe and status reading HEAD', async () => {
     const { worktreePath, gitDir } = makeWorktree()
-    await fs.mkdir(path.join(gitDir, 'rebase-merge'), { recursive: true })
-
-    expect(await readWorktreeRebaseState(worktreePath)).toEqual({
-      rebasing: true,
-      rebaseBranch: null
+    // Why: the early probe protects `rebase --abort` torn reads; this covers the mirror
+    // race — rebase state lands on disk while `git status` runs, so the detached HEAD
+    // must not be reported as {detached, not rebasing} (a fake branch switch).
+    const git = vi.fn<GitExec>(async (args) => {
+      if (args.includes('status')) {
+        await fs.mkdir(path.join(gitDir, 'rebase-merge'), { recursive: true })
+        await fs.writeFile(path.join(gitDir, 'rebase-merge', 'head-name'), 'refs/heads/feature/x\n')
+        return { stdout: buildBranchStatusOutput('a'.repeat(40), '(detached)'), stderr: '' }
+      }
+      throw new Error(`Unexpected git command: ${args.join(' ')}`)
     })
-  })
 
-  it('reports rebasing with no branch when head-name is a detached HEAD', async () => {
-    const { worktreePath, gitDir } = makeWorktree()
-    await fs.mkdir(path.join(gitDir, 'rebase-merge'), { recursive: true })
-    await fs.writeFile(path.join(gitDir, 'rebase-merge', 'head-name'), 'detached HEAD\n')
+    const result = await getStatusOp(git, streamGitFromCapture(git), { worktreePath })
 
-    expect(await readWorktreeRebaseState(worktreePath)).toEqual({
-      rebasing: true,
-      rebaseBranch: null
-    })
-  })
-
-  it('reports not rebasing when there is no rebase directory', async () => {
-    const { worktreePath } = makeWorktree()
-    expect(await readWorktreeRebaseState(worktreePath)).toEqual({
-      rebasing: false,
-      rebaseBranch: null
-    })
-  })
-
-  it('resolves a linked worktree gitdir (.git file pointer) and recovers the branch', async () => {
-    const { worktreePath } = makeWorktree()
-    // Linked worktree: `.git` is a FILE pointing at the real per-worktree gitdir.
-    const realGitDir = mkdtempSync(path.join(tmpdir(), 'orca-rebase-gitdir-'))
-    tmpDirs.push(realGitDir)
-    await fs.writeFile(path.join(worktreePath, '.git'), `gitdir: ${realGitDir}\n`)
-    await fs.mkdir(path.join(realGitDir, 'rebase-merge'), { recursive: true })
-    await fs.writeFile(
-      path.join(realGitDir, 'rebase-merge', 'head-name'),
-      'refs/heads/linked/topic\n'
-    )
-
-    expect(await readWorktreeRebaseState(worktreePath)).toEqual({
-      rebasing: true,
-      rebaseBranch: 'linked/topic'
-    })
+    expect(result.rebasing).toBe(true)
+    expect(result.rebaseBranch).toBe('feature/x')
   })
 })

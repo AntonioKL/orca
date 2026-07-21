@@ -31,7 +31,7 @@ export function getDetachedHeadTooltip(shortHead: string): string {
 
 export function getRebasingTooltip(branchName: string | null, shortHead: string): string {
   return branchName
-    ? `Rebasing ${branchName}. HEAD is temporarily detached; your branch and its PR are intact.`
+    ? `Rebasing ${branchName}. HEAD is temporarily detached; your branch is intact.`
     : `Rebase in progress at ${shortHead}. HEAD is temporarily detached.`
 }
 

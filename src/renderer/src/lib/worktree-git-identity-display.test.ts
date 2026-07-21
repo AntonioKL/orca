@@ -59,8 +59,7 @@ describe('worktree git identity display', () => {
       shortHead: 'abcdef1',
       sidebarLabel: 'feature/x (rebasing)',
       sourceControlLabel: 'feature/x (rebasing)',
-      tooltip:
-        'Rebasing feature/x. HEAD is temporarily detached; your branch and its PR are intact.'
+      tooltip: 'Rebasing feature/x. HEAD is temporarily detached; your branch is intact.'
     })
   })
 
@@ -157,7 +156,7 @@ describe('detached HEAD copy', () => {
 describe('rebasing copy', () => {
   it('names the branch when recovered', () => {
     expect(getRebasingTooltip('feature/z', 'abc1234')).toBe(
-      'Rebasing feature/z. HEAD is temporarily detached; your branch and its PR are intact.'
+      'Rebasing feature/z. HEAD is temporarily detached; your branch is intact.'
     )
   })
 
