@@ -1,5 +1,6 @@
 import type { PreloadApi } from '../../../../preload/api-types'
 import type {
+  CreateWorktreeResult,
   ForceDeleteWorktreeBranchResult,
   RemoveWorktreeResult
 } from '../../../../shared/worktree/create-types'
@@ -25,6 +26,28 @@ import type {
   WorktreeRetryAgentLaunchResult
 } from '../../../../shared/agent-launch-worktree-recovery'
 import type { PendingAgentLaunchSummary } from '../../../../shared/agent-launch-pending-summary'
+import type { AgentLaunchSpawnRequest } from '../../../../shared/agent-launch-spawn-request'
+import { AGENT_LAUNCH_IDENTITY_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
+import {
+  resolveRemoteWorktreeCreateLaunchParams,
+  type RemoteWorktreeCreateLaunchParams
+} from '../worktree-create-launch-compat'
+import { getRemoteRuntimeStatus } from './web-runtime-calls'
+
+async function remoteHostSupportsAgentLaunchIdentity(): Promise<boolean> {
+  try {
+    const status = await getRemoteRuntimeStatus()
+    return status.capabilities?.includes(AGENT_LAUNCH_IDENTITY_RUNTIME_CAPABILITY) === true
+  } catch {
+    return false
+  }
+}
+
+function resolveWebWorktreeCreateLaunchParams(
+  agentLaunch: AgentLaunchSpawnRequest | undefined
+): Promise<RemoteWorktreeCreateLaunchParams> {
+  return resolveRemoteWorktreeCreateLaunchParams(agentLaunch, remoteHostSupportsAgentLaunchIdentity)
+}
 
 export function createWorktreesApi(): NonNullable<Partial<PreloadApi>['worktrees']> {
   return {
@@ -53,7 +76,9 @@ export function createWorktreesApi(): NonNullable<Partial<PreloadApi>['worktrees
     listAll: () => listAllRuntimeWorktrees(),
     create: async (args) => {
       invalidateRuntimeWorktreeCaches()
-      const owned = await callRuntimeResultWithOwner<{ worktree: Worktree }>('worktree.create', {
+      const launchParams = await resolveWebWorktreeCreateLaunchParams(args.agentLaunch)
+      const dropEmptyStartupCommand = 'startupAgent' in launchParams && args.startup?.command === ''
+      const owned = await callRuntimeResultWithOwner<CreateWorktreeResult>('worktree.create', {
         repo: args.repoId,
         name: args.name,
         // Absent means user-typed, which is what the host must assume — so send it only when true.
@@ -80,7 +105,7 @@ export function createWorktreesApi(): NonNullable<Partial<PreloadApi>['worktrees
         pendingFirstAgentMessageRename: args.pendingFirstAgentMessageRename,
         ...(args.startup
           ? {
-              startupCommand: args.startup.command,
+              ...(dropEmptyStartupCommand ? {} : { startupCommand: args.startup.command }),
               ...(args.startup.env ? { startupEnv: args.startup.env } : {}),
               ...(args.startup.launchConfig
                 ? { startupLaunchConfig: args.startup.launchConfig }
@@ -97,8 +122,11 @@ export function createWorktreesApi(): NonNullable<Partial<PreloadApi>['worktrees
         workspaceStatus: args.workspaceStatus,
         manualOrder: args.manualOrder,
         automationProvenanceRequest: args.automationProvenanceRequest,
-        ...(args.agentLaunch ? { agentLaunch: args.agentLaunch } : {})
+        ...launchParams
       })
+      if (!('worktree' in owned.result)) {
+        return owned.result
+      }
       return {
         ...owned.result,
         worktree: withRuntimeWorktreeOwner(owned.result.worktree, owned.hostId)

@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from 'node:fs'
 import type { GlobalSettings } from '../../../shared/global-settings-types'
 import type { OnboardingChecklistState } from '../../../shared/onboarding-state-types'
 import type { PersistedState } from '../../../shared/persisted-state-types'
@@ -17,12 +18,16 @@ import {
 import type { StoreRuntimeState } from './store-runtime-state'
 import type { WriteSchedulingOperations } from './write-scheduling'
 import { scheduleSave } from './write-scheduling'
-import { bumpLocalWorktreeScanGeneration } from '../../local-worktree-scan-generation'
+import {
+  createPinnedPreV1Backup,
+  migrateAgentCatalogSchema
+} from '../../agent-launch/agent-catalog-schema-migration'
 
 type ProfilePreferencesRuntime = Pick<
   StoreRuntimeState,
   | 'activeViewPreference'
   | 'agentCatalogMigrationError'
+  | 'dataFile'
   | 'githubCacheDirty'
   | 'githubCacheGeneration'
   | 'protectedSecrets'
@@ -50,6 +55,33 @@ export class ProfilePreferences {
 
   getAgentCatalogMigrationError(): string | null {
     return this[profilePreferencesContext].runtime.agentCatalogMigrationError
+  }
+
+  retryAgentCatalogMigration(): { ok: true } | { ok: false; error: string } {
+    const runtime = this[profilePreferencesContext].runtime
+    if (runtime.agentCatalogMigrationError === null) {
+      return { ok: true }
+    }
+    let raw: string | null
+    try {
+      raw = existsSync(runtime.dataFile) ? readFileSync(runtime.dataFile, 'utf-8') : null
+    } catch (error) {
+      const message = `Could not read the data file: ${error instanceof Error ? error.message : String(error)}`
+      runtime.agentCatalogMigrationError = message
+      return { ok: false, error: message }
+    }
+    const migration = migrateAgentCatalogSchema({
+      settings: runtime.state.settings,
+      preV1RawContents: raw,
+      createBackup: () => createPinnedPreV1Backup(runtime.dataFile, raw ?? '')
+    })
+    if (migration.backupError) {
+      runtime.agentCatalogMigrationError = migration.backupError
+      return { ok: false, error: migration.backupError }
+    }
+    runtime.agentCatalogMigrationError = null
+    this.updateSettings(migration.settingsPatch)
+    return { ok: true }
   }
 
   onSettingsChanged(
@@ -161,7 +193,6 @@ export function getSettingsMutationOperations(
 ): SettingsMutationOperations {
   return {
     state: owner[profilePreferencesContext].runtime.state,
-    bumpLocalWorktreeScanGeneration,
     removeRetainedBlob: (slot) =>
       owner[profilePreferencesContext].runtime.protectedSecrets.removeRetainedBlob(slot),
     scheduleSave: () => scheduleSave(owner[profilePreferencesContext].scheduling),

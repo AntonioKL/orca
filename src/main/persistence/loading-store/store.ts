@@ -87,12 +87,20 @@ export class Store {
     return dirname(this.runtime.dataFile)
   }
 
+  getDataFilePath(): string {
+    return this.runtime.dataFile
+  }
+
   freezeWrites(): void {
     this.runtime.writesFrozen = true
     if (this.runtime.writeTimer) {
       clearTimeout(this.runtime.writeTimer)
       this.runtime.writeTimer = null
     }
+  }
+
+  unfreezeWrites(): void {
+    this.runtime.writesFrozen = false
   }
 }
 
