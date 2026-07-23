@@ -41,10 +41,8 @@ import { hasStateBackup } from './backup-recovery-rotation'
 import { prepareLoadedTerminalSettings } from './prepare-loaded-terminal-settings'
 import { prepareLoadedProfileSettings } from './prepare-loaded-profile-settings'
 import { normalizeLoadedProfileState } from './normalize-loaded-profile-state'
-import {
-  createPinnedPreV1Backup,
-  migrateAgentCatalogSchema
-} from '../../agent-launch/agent-catalog-schema-migration'
+import { migrateAgentCatalogSchema } from '../../../shared/agent-catalog-schema-migration'
+import { createPinnedPreV1Backup } from '../../agent-launch/agent-catalog-pre-v1-backup'
 
 type PersistenceStartupDetails = Record<string, unknown> | (() => Record<string, unknown>)
 

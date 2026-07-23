@@ -18,10 +18,8 @@ import {
 import type { StoreRuntimeState } from './store-runtime-state'
 import type { WriteSchedulingOperations } from './write-scheduling'
 import { scheduleSave } from './write-scheduling'
-import {
-  createPinnedPreV1Backup,
-  migrateAgentCatalogSchema
-} from '../../agent-launch/agent-catalog-schema-migration'
+import { migrateAgentCatalogSchema } from '../../../shared/agent-catalog-schema-migration'
+import { createPinnedPreV1Backup } from '../../agent-launch/agent-catalog-pre-v1-backup'
 
 type ProfilePreferencesRuntime = Pick<
   StoreRuntimeState,
