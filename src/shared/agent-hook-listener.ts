@@ -533,6 +533,14 @@ function readHookHeader(headers: IncomingHttpHeaders, name: string): string | un
   return Array.isArray(value) ? value[0] : value
 }
 
+/**
+ * Wraps a JSON hook payload with Orca metadata carried in transport headers.
+ *
+ * POSIX hook scripts post the agent payload as JSON and send pane/session
+ * identity in headers, while older callers may still post the historical
+ * `{ paneKey, payload }` envelope. Returning a marked envelope lets downstream
+ * normalization share one code path without double-wrapping legacy requests.
+ */
 export function mergeAgentHookRequestHeaders(body: unknown, headers: IncomingHttpHeaders): unknown {
   const paneKey = readHookHeader(headers, 'x-orca-pane-key')
   if (!paneKey) {
