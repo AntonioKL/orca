@@ -140,6 +140,10 @@ describe('shared agent-hook-listener', () => {
       version: undefined,
       payload: rawBody
     })
+    expect(normalizeHookPayload(state, 'claude', merged, 'production')).toMatchObject({
+      paneKey: PANE_KEY,
+      payload: { state: 'working', prompt: 'hello' }
+    })
   })
 
   it('releases request parser listeners after rejecting an oversized body', async () => {

@@ -78,6 +78,7 @@ import { assertJsonTextStructureWithinLimits } from './json-text-structure-limit
 
 /** Maximum request body size accepted by the listener (1 MB). */
 export const HOOK_REQUEST_MAX_BYTES = 1_000_000
+const HEADER_MERGED_HOOK_ENVELOPE = Symbol('headerMergedHookEnvelope')
 const HOOK_REQUEST_INITIAL_BUFFER_BYTES = 4 * 1024
 const AGENT_HOOK_JSON_STRUCTURE_LIMITS = {
   structuralTokens: 128 * 1024,
@@ -537,7 +538,7 @@ export function mergeAgentHookRequestHeaders(body: unknown, headers: IncomingHtt
   if (!paneKey) {
     return body
   }
-  return {
+  const envelope = {
     paneKey,
     tabId: readHookHeader(headers, 'x-orca-tab-id'),
     launchToken: readHookHeader(headers, 'x-orca-launch-token'),
@@ -546,6 +547,10 @@ export function mergeAgentHookRequestHeaders(body: unknown, headers: IncomingHtt
     version: readHookHeader(headers, 'x-orca-agent-hook-version'),
     payload: body
   }
+  Object.defineProperty(envelope, HEADER_MERGED_HOOK_ENVELOPE, {
+    value: true
+  })
+  return envelope
 }
 
 function ignoreSettledRequestError(): void {}
@@ -1298,6 +1303,41 @@ function parseHookBodyPayloadRecord(body: unknown): Record<string, unknown> | nu
   return typeof payload === 'object' && payload !== null
     ? (payload as Record<string, unknown>)
     : null
+}
+
+function readHookBodyEnvelope(body: unknown): Record<string, unknown> | null {
+  if (typeof body !== 'object' || body === null) {
+    return null
+  }
+  const record = body as Record<string | symbol, unknown>
+  if (record[HEADER_MERGED_HOOK_ENVELOPE] === true) {
+    return body as Record<string, unknown>
+  }
+  // Why: direct callers and already-installed form hooks still send this legacy envelope shape.
+  const legacyEnvelope = body as Record<string, unknown>
+  if (
+    typeof legacyEnvelope.paneKey !== 'string' ||
+    !Object.prototype.hasOwnProperty.call(legacyEnvelope, 'payload')
+  ) {
+    return null
+  }
+  return legacyEnvelope
+}
+
+function parseHookEnvelopePayload(body: unknown): unknown {
+  const envelope = readHookBodyEnvelope(body)
+  if (!envelope) {
+    return null
+  }
+  const rawPayload = envelope.payload
+  if (typeof rawPayload !== 'string') {
+    return rawPayload
+  }
+  try {
+    return parseAgentHookJson(rawPayload)
+  } catch {
+    return null
+  }
 }
 
 function readBoundedString(
@@ -4128,20 +4168,13 @@ export function normalizeHookPayload(
     return null
   }
 
-  const record = body as Record<string, unknown>
+  const record = readHookBodyEnvelope(body)
+  if (!record) {
+    return null
+  }
   const paneKey = typeof record.paneKey === 'string' ? record.paneKey.trim() : ''
   const parsedPaneKey = parsePaneKey(paneKey)
-  const rawPayload = record.payload
-  const hookPayload =
-    typeof rawPayload === 'string'
-      ? (() => {
-          try {
-            return parseAgentHookJson(rawPayload)
-          } catch {
-            return null
-          }
-        })()
-      : rawPayload
+  const hookPayload = parseHookEnvelopePayload(body)
   if (
     !paneKey ||
     paneKey.length > MAX_PANE_KEY_LEN ||
