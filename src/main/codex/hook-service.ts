@@ -19,6 +19,7 @@ import {
   writeManagedScript,
   type HookDefinition
 } from '../agent-hooks/installer-utils'
+import { buildPosixAgentHookJsonPostCommand } from '../agent-hooks/hook-post-command'
 import { resolveHooksJsonWritePath } from '../agent-hooks/hook-config-write-path'
 import { writeFileAtomically } from '../codex-accounts/fs-utils'
 import {
@@ -813,20 +814,11 @@ function getManagedScript(target: 'local' | 'posix' = 'local'): string {
     '  curl_bin="$1"',
     '  connect_timeout="${2:-0.5}"',
     '  max_time="${3:-1.5}"',
-    // Why: worktreeId embeds a path, so hand-building JSON in shell is unsafe with quotes/newlines; post raw payload plus metadata as form fields instead.
-    // Why: pipe payload to curl's stdin (`payload@-`) not an inline arg, so tens-of-KB tool output stays off the command line (EDR false positives).
-    '  printf \'%s\' "$payload" | "$curl_bin" -sS -X POST "http://127.0.0.1:${ORCA_AGENT_HOOK_PORT}/hook/codex" \\',
-    '    --connect-timeout "$connect_timeout" --max-time "$max_time" \\',
-    '    --noproxy "127.0.0.1" \\',
-    '    -H "Content-Type: application/x-www-form-urlencoded" \\',
-    '    -H "X-Orca-Agent-Hook-Token: ${ORCA_AGENT_HOOK_TOKEN}" \\',
-    '    --data-urlencode "paneKey=${ORCA_PANE_KEY}" \\',
-    '    --data-urlencode "tabId=${ORCA_TAB_ID}" \\',
-    '    --data-urlencode "launchToken=${ORCA_AGENT_LAUNCH_TOKEN}" \\',
-    '    --data-urlencode "worktreeId=${ORCA_WORKTREE_ID}" \\',
-    '    --data-urlencode "env=${ORCA_AGENT_HOOK_ENV}" \\',
-    '    --data-urlencode "version=${ORCA_AGENT_HOOK_VERSION}" \\',
-    '    --data-urlencode "payload@-"',
+    // Why: keep full hook JSON off the command line and avoid URL-encoding paths/commands into IDS-friendly traversal signatures.
+    ...buildPosixAgentHookJsonPostCommand('codex', {
+      curlCommand: '"$curl_bin"',
+      indent: '    '
+    }).map((line) => `  ${line}`),
     '}',
     'is_wsl_runtime() {',
     '  [ -n "$WSL_DISTRO_NAME" ] && return 0',

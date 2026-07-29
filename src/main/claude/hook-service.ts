@@ -8,6 +8,7 @@ import {
   writeManagedScript,
   type HooksConfig
 } from '../agent-hooks/installer-utils'
+import { buildPosixAgentHookJsonPostCommand } from '../agent-hooks/hook-post-command'
 import {
   readHooksJsonRemote,
   writeHooksJsonRemote,
@@ -97,19 +98,10 @@ function getManagedScript(
     'if [ -z "$ORCA_AGENT_HOOK_PORT" ] || [ -z "$ORCA_AGENT_HOOK_TOKEN" ] || [ -z "$ORCA_PANE_KEY" ]; then',
     '  exit 0',
     'fi',
-    // Why: post form fields because path-bearing payloads are unsafe in hand-built JSON.
-    // Why: pipe payload to curl stdin to keep large output off the command line.
-    'printf \'%s\' "$payload" | curl -sS -X POST "http://127.0.0.1:${ORCA_AGENT_HOOK_PORT}/hook/claude" \\',
-    '  --connect-timeout 0.5 --max-time 1.5 \\',
-    '  -H "Content-Type: application/x-www-form-urlencoded" \\',
-    '  -H "X-Orca-Agent-Hook-Token: ${ORCA_AGENT_HOOK_TOKEN}" \\',
-    '  --data-urlencode "paneKey=${ORCA_PANE_KEY}" \\',
-    '  --data-urlencode "tabId=${ORCA_TAB_ID}" \\',
-    '  --data-urlencode "launchToken=${ORCA_AGENT_LAUNCH_TOKEN}" \\',
-    '  --data-urlencode "worktreeId=${ORCA_WORKTREE_ID}" \\',
-    '  --data-urlencode "env=${ORCA_AGENT_HOOK_ENV}" \\',
-    '  --data-urlencode "version=${ORCA_AGENT_HOOK_VERSION}" \\',
-    '  --data-urlencode "payload@-" >/dev/null 2>&1 || true',
+    // Why: keep full hook JSON off the command line and avoid URL-encoding paths/commands into IDS-friendly traversal signatures.
+    ...buildPosixAgentHookJsonPostCommand('claude').map((line, index, lines) =>
+      index === lines.length - 1 ? `${line} >/dev/null 2>&1 || true` : line
+    ),
     'exit 0',
     ''
   ].join('\n')

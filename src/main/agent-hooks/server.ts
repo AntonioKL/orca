@@ -21,6 +21,7 @@ import {
   markClaudeLeadTurnInterrupted,
   markCodexLeadTurnInterrupted,
   MAX_PANE_KEY_LEN,
+  mergeAgentHookRequestHeaders,
   movePaneCacheState,
   canAcceptClaudeCompactTransition,
   normalizeClaudePromptId,
@@ -2132,8 +2133,9 @@ export class AgentHookServer {
           return
         }
 
-        trackEmptyPaneKeyHook(body)
-        const aliasedBody = this.normalizeHookBodyPaneKeyAlias(body)
+        const hookBody = mergeAgentHookRequestHeaders(body, req.headers)
+        trackEmptyPaneKeyHook(hookBody)
+        const aliasedBody = this.normalizeHookBodyPaneKeyAlias(hookBody)
         const normalized = this.normalizeLocalHookPayload(source, aliasedBody)
         const statusDisposition = normalized.event
           ? this.getAgentStatusDisposition(normalized.event.paneKey, {

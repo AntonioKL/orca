@@ -1,7 +1,7 @@
 /* eslint-disable max-lines -- Why: canonical transport-agnostic listener; parser, normalizer, per-CLI extractors, and endpoint writer share invariants that must not drift between Orca's main process and the relay. */
 
 // Why: extracted from src/main/agent-hooks/server.ts so the relay can host the pipeline without Electron (Node builtins only). See docs/design/agent-status-over-ssh.md §3.
-import type { IncomingMessage } from 'node:http'
+import type { IncomingHttpHeaders, IncomingMessage } from 'node:http'
 import { createHash, randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import {
@@ -525,6 +525,27 @@ export function readRequestBody(req: IncomingMessage): Promise<unknown> {
     req.on('error', onError)
     req.on('close', onClose)
   })
+}
+
+function readHookHeader(headers: IncomingHttpHeaders, name: string): string | undefined {
+  const value = headers[name]
+  return Array.isArray(value) ? value[0] : value
+}
+
+export function mergeAgentHookRequestHeaders(body: unknown, headers: IncomingHttpHeaders): unknown {
+  const paneKey = readHookHeader(headers, 'x-orca-pane-key')
+  if (!paneKey) {
+    return body
+  }
+  return {
+    paneKey,
+    tabId: readHookHeader(headers, 'x-orca-tab-id'),
+    launchToken: readHookHeader(headers, 'x-orca-launch-token'),
+    worktreeId: readHookHeader(headers, 'x-orca-worktree-id'),
+    env: readHookHeader(headers, 'x-orca-agent-hook-env'),
+    version: readHookHeader(headers, 'x-orca-agent-hook-version'),
+    payload: body
+  }
 }
 
 function ignoreSettledRequestError(): void {}

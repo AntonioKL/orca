@@ -126,6 +126,27 @@ describe('RelayAgentHookServer', () => {
     }
   })
 
+  it('rejects unknown hook paths before parsing the request body', async () => {
+    const forward = vi.fn()
+    const server = new RelayAgentHookServer({ endpointDir: dir, forward })
+    await server.start()
+    try {
+      const { port, token } = server.getCoordinates()
+      const res = await fetch(`http://127.0.0.1:${port}/hook/unknown`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Orca-Agent-Hook-Token': token
+        },
+        body: JSON.stringify({ value: 'x'.repeat(agentHookListener.HOOK_REQUEST_MAX_BYTES + 1) })
+      })
+      expect(res.status).toBe(404)
+      expect(forward).not.toHaveBeenCalled()
+    } finally {
+      server.stop()
+    }
+  })
+
   it('replays cached payloads on demand', async () => {
     const forward = vi.fn<(envelope: AgentHookRelayEnvelope) => void>()
     const server = new RelayAgentHookServer({ endpointDir: dir, forward })

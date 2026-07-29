@@ -401,12 +401,13 @@ describe('ClaudeHookService.installRemote', () => {
     const script = fs.files.get('/home/dev/.orca/agent-hooks/claude-hook.sh')
     expect(script).toContain('#!/bin/sh')
     expect(script).toContain('DEVIN_PROJECT_DIR')
-    // Why: payload is piped to curl via stdin (`payload@-`) so it never lands
-    // on the curl command line (EDR oversized-command-line false positive),
-    // matching the Windows curl.exe hook post.
+    // Why: payload is piped to curl via stdin so it never lands on the curl
+    // command line, and JSON body delivery avoids URL-encoded IDS signatures.
     expect(script).toContain('printf \'%s\' "$payload" | curl')
-    expect(script).toContain('--data-urlencode "payload@-"')
-    expect(script).not.toContain('--data-urlencode "payload=${payload}"')
+    expect(script).toContain('-H "Content-Type: application/json"')
+    expect(script).toContain('-H "X-Orca-Pane-Key: ${ORCA_PANE_KEY}"')
+    expect(script).toContain('--data-binary @-')
+    expect(script).not.toContain('--data-urlencode "payload@-"')
     expect(fs.modes.get('/home/dev/.orca/agent-hooks/claude-hook.sh')).toBe(0o755)
     // Why: no remote statusLine — this path serves SSH remotes and WSL guests, whose relay
     // listener doesn't route /statusline/claude and whose accounts aren't attributable locally.

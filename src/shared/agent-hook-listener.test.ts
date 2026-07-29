@@ -15,6 +15,7 @@ import {
   seedClaudeSubagentRosterFromSnapshots,
   HOOK_REQUEST_MAX_BYTES,
   isShellSafeEndpointValue,
+  mergeAgentHookRequestHeaders,
   normalizeHookPayload,
   parseFormEncodedBody,
   preparePendingGrokResultDiscovery,
@@ -94,6 +95,51 @@ describe('shared agent-hook-listener', () => {
 
     await expect(body).resolves.toEqual({ ok: true })
     expectRequestParserListenersReleased(req)
+  })
+
+  it('merges hook metadata headers around a raw JSON payload body', async () => {
+    const req = createReadableRequest({
+      'content-type': 'application/json',
+      'x-orca-pane-key': PANE_KEY,
+      'x-orca-worktree-id': 'repo::/tmp/work',
+      'x-orca-agent-hook-env': 'production',
+      'x-orca-agent-hook-version': '1'
+    })
+    const body = readRequestBody(req as unknown as IncomingMessage)
+
+    req.emit('data', Buffer.from('{"hook_event_name":"UserPromptSubmit","prompt":"hello"}'))
+    req.emit('end')
+
+    const merged = mergeAgentHookRequestHeaders(await body, req.headers)
+    const event = normalizeHookPayload(state, 'claude', merged, 'production')
+    expect(event).toMatchObject({
+      paneKey: PANE_KEY,
+      worktreeId: 'repo::/tmp/work',
+      payload: { state: 'working', prompt: 'hello' }
+    })
+  })
+
+  it('uses hook metadata headers even when raw JSON contains envelope-like fields', async () => {
+    const rawBody = {
+      paneKey: 'payload-owned-pane',
+      payload: { hook_event_name: 'PayloadField' },
+      hook_event_name: 'UserPromptSubmit',
+      prompt: 'hello'
+    }
+    const merged = mergeAgentHookRequestHeaders(rawBody, {
+      'x-orca-pane-key': PANE_KEY,
+      'x-orca-tab-id': 'tab-1'
+    })
+
+    expect(merged).toEqual({
+      paneKey: PANE_KEY,
+      tabId: 'tab-1',
+      launchToken: undefined,
+      worktreeId: undefined,
+      env: undefined,
+      version: undefined,
+      payload: rawBody
+    })
   })
 
   it('releases request parser listeners after rejecting an oversized body', async () => {

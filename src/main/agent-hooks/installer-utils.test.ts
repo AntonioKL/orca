@@ -31,6 +31,7 @@ import {
   writeHooksJson,
   type HooksConfig
 } from './installer-utils'
+import { buildPosixAgentHookJsonPostCommand } from './hook-post-command'
 import { POSIX_HOOK_STDIN_DRAIN_COMMAND } from './hook-stdin-contract'
 
 let tmpDir: string
@@ -599,6 +600,18 @@ describe('buildWindowsAgentHookPostCommand', () => {
 
     expect(command).toMatch(/^"%SystemRoot%\\System32\\curl\.exe"/)
     expect(command).not.toMatch(/^curl\.exe\b/)
+  })
+})
+
+describe('buildPosixAgentHookJsonPostCommand', () => {
+  it('posts raw JSON payloads with hook metadata in headers', () => {
+    const command = buildPosixAgentHookJsonPostCommand('claude').join('\n')
+
+    expect(command).toContain('Content-Type: application/json')
+    expect(command).toContain('X-Orca-Pane-Key: ${ORCA_PANE_KEY}')
+    expect(command).toContain('X-Orca-Worktree-Id: ${ORCA_WORKTREE_ID}')
+    expect(command).toContain('--data-binary @-')
+    expect(command).not.toContain('--data-urlencode "payload@-"')
   })
 })
 

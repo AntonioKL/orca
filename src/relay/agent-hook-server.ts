@@ -17,6 +17,7 @@ import {
   hasCodexTranscriptSubagents,
   hasPendingAgentResultText,
   HOOK_REQUEST_SLOWLORIS_MS,
+  mergeAgentHookRequestHeaders,
   normalizeHookPayload,
   preparePendingGrokResultDiscovery,
   readRequestBody,
@@ -268,7 +269,6 @@ export class RelayAgentHookServer {
       req.destroy()
     })
     try {
-      const body = await readRequestBody(req)
       const pathname = new URL(req.url ?? '/', 'http://127.0.0.1').pathname
       const source = resolveHookSource(pathname)
       if (!source) {
@@ -276,6 +276,7 @@ export class RelayAgentHookServer {
         res.end()
         return
       }
+      const body = mergeAgentHookRequestHeaders(await readRequestBody(req), req.headers)
       const event = normalizeHookPayload(this.state, source, body, this.env, {
         allowUnanchoredPreCompact: true,
         allowUnanchoredPostCompact: true
