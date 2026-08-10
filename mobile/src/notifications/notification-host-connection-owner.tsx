@@ -10,6 +10,7 @@ import { connectionLogStore } from '../transport/connection-log-buffer'
 import type { ConnectionState, HostProfile } from '../transport/types'
 import { useAllHostClients } from '../transport/use-all-host-clients'
 import { subscribeToDesktopNotifications } from './mobile-notifications'
+import { selectNotificationHostAutoConnectIds } from './notification-host-auto-connect'
 import { retireHostNotificationState } from './notification-reconnect-catchup'
 
 const HOST_REFRESH_RETRY_DELAYS_MS = [250, 1_000, 5_000, 15_000] as const
@@ -46,12 +47,23 @@ function subscribeNotificationHostCatalog(
   let retryIndex = 0
   let retryTimer: ReturnType<typeof setTimeout> | null = null
   let profilesByHostId = new Map<string, HostProfile>()
+  let appIsActive = AppState.currentState === 'active'
+  const clearRetryTimer = () => {
+    if (retryTimer) {
+      clearTimeout(retryTimer)
+      retryTimer = null
+    }
+  }
   const scheduleRetry = () => {
-    if (retryTimer || disposed) {
+    if (
+      retryTimer ||
+      disposed ||
+      !appIsActive ||
+      retryIndex >= HOST_REFRESH_RETRY_DELAYS_MS.length
+    ) {
       return
     }
-    const delay =
-      HOST_REFRESH_RETRY_DELAYS_MS[Math.min(retryIndex, HOST_REFRESH_RETRY_DELAYS_MS.length - 1)]
+    const delay = HOST_REFRESH_RETRY_DELAYS_MS[retryIndex]
     retryIndex += 1
     retryTimer = setTimeout(() => {
       retryTimer = null
@@ -61,10 +73,7 @@ function subscribeNotificationHostCatalog(
   const refreshHosts = (resetRetry = false) => {
     if (resetRetry) {
       retryIndex = 0
-      if (retryTimer) {
-        clearTimeout(retryTimer)
-        retryTimer = null
-      }
+      clearRetryTimer()
     }
     const revision = ++loadRevision
     // Why: rejection handler as the second `then` arg so only catalog loads retry, not update errors.
@@ -102,16 +111,17 @@ function subscribeNotificationHostCatalog(
     refreshHosts(true)
   })
   const appStateSubscription = AppState.addEventListener('change', (state) => {
+    appIsActive = state === 'active'
     if (state === 'active') {
       refreshHosts(true)
+    } else {
+      clearRetryTimer()
     }
   })
   refreshHosts()
   return () => {
     disposed = true
-    if (retryTimer) {
-      clearTimeout(retryTimer)
-    }
+    clearRetryTimer()
     unsubscribeHosts()
     appStateSubscription.remove()
   }
@@ -144,7 +154,12 @@ export function NotificationHostConnectionOwner() {
   }, [activeHosts, primeHosts])
 
   const hostIds = useMemo(() => activeHosts.map(({ id }) => id), [activeHosts])
+  const autoConnectHostIds = useMemo(
+    () => selectNotificationHostAutoConnectIds(activeHosts),
+    [activeHosts]
+  )
   const clients = useAllHostClients(hostIds, {
+    autoConnectHostIds,
     closeUnusedOnRelease: true,
     observeConnectionState: false
   })

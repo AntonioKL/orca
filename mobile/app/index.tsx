@@ -234,7 +234,7 @@ export default function HomeScreen() {
   // Why: scoped to the paired hosts so an unpaired desktop's cached reply leaves the header total.
   const stats = useMemo(() => totalHomeStats(statsByHost, hostIds), [statsByHost, hostIds])
   const autoConnectHostIds = useMemo(() => selectHomeAutoConnectHostIds(hosts), [hosts])
-  const allClients = useAllHostClients(autoConnectHostIds, {
+  const allClients = useAllHostClients(hostIds, {
     autoConnectHostIds,
     closeUnusedOnRelease: true
   })

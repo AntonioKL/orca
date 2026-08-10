@@ -10,6 +10,7 @@ import {
 } from '../src/transport/pre-profile-pairing-coordinator'
 import type { ConnectionLogEntry } from '../src/transport/types'
 import { useCloseHost, useForceReconnect } from '../src/transport/client-context'
+import { restartPairedHostClient } from '../src/transport/restart-paired-host-client'
 import { colors, spacing, radii, typography } from '../src/theme/mobile-theme'
 import { ConnectionLog } from '../src/components/ConnectionLog'
 import {
@@ -116,8 +117,7 @@ export default function PairConfirmScreen() {
       // destination screen opens a fresh client with the newly-paired
       // profile. Reopen immediately so root notification ownership does not
       // stay clientless while onboarding is visible.
-      closeHost(hostId)
-      await forceReconnect(hostId)
+      restartPairedHostClient(hostId, closeHost, forceReconnect)
       const onboardingSteps = await loadMobileOnboardingSteps()
       if (!mountedRef.current) {
         return

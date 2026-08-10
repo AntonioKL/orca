@@ -192,11 +192,11 @@ describe('retired host live delivery', () => {
           }
         })
     )
-    asyncStorage.removeItem
-      .mockImplementationOnce(async () => {
+    asyncStorage.removeItem.mockImplementation(async (key: string) => {
+      if (key === 'orca:mobileNotificationsWatermark:host-late-watermark') {
         storedWatermark = undefined
-      })
-      .mockImplementationOnce(async () => undefined)
+      }
+    })
 
     vi.useFakeTimers()
     try {
@@ -208,9 +208,7 @@ describe('retired host live delivery', () => {
       await retirement
       finishWrite()
       await save
-      await Promise.resolve()
-
-      expect(storedWatermark).toBeUndefined()
+      await vi.waitFor(() => expect(storedWatermark).toBeUndefined())
     } finally {
       vi.useRealTimers()
     }
@@ -231,6 +229,31 @@ describe('retired host live delivery', () => {
       await retirement
 
       expect(settled).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('allows a same-id re-pair to persist after watermark removal never settles', async () => {
+    asyncStorage.removeItem.mockImplementationOnce(() => new Promise<void>(() => {}))
+
+    vi.useFakeTimers()
+    try {
+      const retirement = retireHostNotificationState('host-repaired-after-wedged-clear')
+      await vi.advanceTimersByTimeAsync(2_000)
+      await retirement
+
+      const save = saveWatermark('host-repaired-after-wedged-clear', {
+        seq: 1,
+        epoch: 'replacement-epoch'
+      })
+      await Promise.resolve()
+      await save
+
+      expect(asyncStorage.setItem).toHaveBeenCalledWith(
+        'orca:mobileNotificationsWatermark:host-repaired-after-wedged-clear',
+        JSON.stringify({ seq: 1, epoch: 'replacement-epoch' })
+      )
     } finally {
       vi.useRealTimers()
     }

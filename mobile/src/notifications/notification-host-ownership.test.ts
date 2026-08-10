@@ -11,6 +11,10 @@ const loadHostCatalogMock = vi.fn()
 const hostCollectionChange = vi.hoisted(() => ({
   listener: null as null | ((change: { retiredHostIds: readonly string[] }) => void)
 }))
+const appStateChange = vi.hoisted(() => ({
+  currentState: 'active',
+  listener: null as null | ((state: string) => void)
+}))
 
 vi.mock('expo-notifications', () => ({
   AndroidImportance: { HIGH: 'high' },
@@ -23,7 +27,19 @@ vi.mock('expo-notifications', () => ({
 
 vi.mock('react-native', () => ({
   AppState: {
-    addEventListener: vi.fn(() => ({ remove: vi.fn() }))
+    get currentState() {
+      return appStateChange.currentState
+    },
+    addEventListener: vi.fn((_event: string, listener: (state: string) => void) => {
+      appStateChange.listener = listener
+      return {
+        remove: vi.fn(() => {
+          if (appStateChange.listener === listener) {
+            appStateChange.listener = null
+          }
+        })
+      }
+    })
   },
   Platform: { OS: 'ios', Version: 18 }
 }))
@@ -240,6 +256,8 @@ describe('paired-host notification ownership', () => {
     vi.clearAllMocks()
     resetHostNotificationSessionsForTests()
     hostCollectionChange.listener = null
+    appStateChange.currentState = 'active'
+    appStateChange.listener = null
     closeOwnedHost = null
     reconnectOwnedHost = null
     loadHostCatalogMock.mockImplementation(async () =>
@@ -299,7 +317,7 @@ describe('paired-host notification ownership', () => {
     }
   })
 
-  it('subscribes every paired host without adding Home data streams at scale', async () => {
+  it('bounds root-owned notification sockets without adding Home data streams at scale', async () => {
     vi.useFakeTimers()
     const hosts = Array.from({ length: 1_000 }, (_, index) =>
       makeHost(`host-${index}`, 1_000 - index)
@@ -324,7 +342,7 @@ describe('paired-host notification ownership', () => {
         await vi.runAllTimersAsync()
       })
 
-      expect(clients).toHaveLength(1_000)
+      expect(clients).toHaveLength(32)
       expect(loadHostCatalogMock).toHaveBeenCalledOnce()
       expect(loadHostsMock).toHaveBeenCalledOnce()
       expect(clients.every((client) => client.notificationSubscribeCalls() === 1)).toBe(true)
@@ -588,6 +606,62 @@ describe('paired-host notification ownership', () => {
     }
   )
 
+  it('stops catalog retries after the bounded foreground ladder', async () => {
+    vi.useFakeTimers()
+    loadHostCatalogMock.mockRejectedValue(new Error('storage unavailable'))
+    let renderer: ReactTestRenderer | null = null
+    const restore = suppressRendererWarning()
+    try {
+      await act(async () => {
+        renderer = create(
+          createElement(RpcClientProvider, null, createElement(NotificationHostConnectionOwner))
+        )
+        await Promise.resolve()
+      })
+
+      await act(async () => {
+        await vi.runAllTimersAsync()
+      })
+
+      expect(loadHostCatalogMock).toHaveBeenCalledTimes(5)
+    } finally {
+      restore()
+      act(() => renderer?.unmount())
+      vi.useRealTimers()
+    }
+  })
+
+  it('cancels catalog retry while backgrounded and refreshes on resume', async () => {
+    vi.useFakeTimers()
+    loadHostCatalogMock.mockRejectedValue(new Error('storage unavailable'))
+    let renderer: ReactTestRenderer | null = null
+    const restore = suppressRendererWarning()
+    try {
+      await act(async () => {
+        renderer = create(
+          createElement(RpcClientProvider, null, createElement(NotificationHostConnectionOwner))
+        )
+        await Promise.resolve()
+      })
+
+      appStateChange.currentState = 'background'
+      act(() => appStateChange.listener?.('background'))
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000)
+      })
+      expect(loadHostCatalogMock).toHaveBeenCalledOnce()
+
+      appStateChange.currentState = 'active'
+      act(() => appStateChange.listener?.('active'))
+      await Promise.resolve()
+      expect(loadHostCatalogMock).toHaveBeenCalledTimes(2)
+    } finally {
+      restore()
+      act(() => renderer?.unmount())
+      vi.useRealTimers()
+    }
+  })
+
   it('does not rerender Home for notification-only host state changes', async () => {
     const clients = new Map<string, FakeClient>()
     connectMock.mockImplementation((profile: HostProfile) => {
@@ -655,7 +729,7 @@ describe('paired-host notification ownership', () => {
         await flushAsync()
       })
 
-      expect(connectMock).toHaveBeenCalledTimes(1_000)
+      expect(connectMock).toHaveBeenCalledTimes(32)
       expect(homeRenders).toBe(settledRenders)
     } finally {
       restore()
