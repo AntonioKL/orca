@@ -608,8 +608,10 @@ describe('buildPosixAgentHookJsonPostCommand', () => {
     const command = buildPosixAgentHookJsonPostCommand('claude').join('\n')
 
     expect(command).toContain('Content-Type: application/json')
-    expect(command).toContain('X-Orca-Pane-Key: ${ORCA_PANE_KEY}')
-    expect(command).toContain('X-Orca-Worktree-Id: ${ORCA_WORKTREE_ID}')
+    expect(command).toContain('X-Orca-Agent-Hook-Meta-Encoding: base64')
+    expect(command).toContain('X-Orca-Pane-Key: $(printf')
+    expect(command).toContain('$ORCA_PANE_KEY')
+    expect(command).toContain('$ORCA_WORKTREE_ID')
     expect(command).toContain('--data-binary @-')
     expect(command).not.toContain('--data-urlencode "payload@-"')
   })

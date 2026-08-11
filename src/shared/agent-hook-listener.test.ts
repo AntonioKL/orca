@@ -69,6 +69,8 @@ function expectRequestParserListenersReleased(req: FakeIncomingMessage): void {
 }
 
 describe('shared agent-hook-listener', () => {
+  const b64 = (value: string): string => Buffer.from(value, 'utf8').toString('base64')
+
   let state: HookListenerState
 
   beforeEach(() => {
@@ -115,6 +117,26 @@ describe('shared agent-hook-listener', () => {
     expect(event).toMatchObject({
       paneKey: PANE_KEY,
       worktreeId: 'repo::/tmp/work',
+      payload: { state: 'working', prompt: 'hello' }
+    })
+  })
+
+  it('decodes base64 metadata headers without corrupting path text', async () => {
+    const worktreeId = 'repo::/tmp/中文 worktree'
+    const rawBody = { hook_event_name: 'UserPromptSubmit', prompt: 'hello' }
+    const merged = mergeAgentHookRequestHeaders(rawBody, {
+      'x-orca-agent-hook-meta-encoding': 'base64',
+      'x-orca-pane-key': b64(PANE_KEY),
+      'x-orca-tab-id': b64('tab-1'),
+      'x-orca-worktree-id': b64(worktreeId),
+      'x-orca-agent-hook-env': b64('production'),
+      'x-orca-agent-hook-version': b64('1')
+    })
+
+    expect(normalizeHookPayload(state, 'claude', merged, 'production')).toMatchObject({
+      paneKey: PANE_KEY,
+      tabId: 'tab-1',
+      worktreeId,
       payload: { state: 'working', prompt: 'hello' }
     })
   })

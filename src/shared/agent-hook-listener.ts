@@ -2,6 +2,7 @@
 
 // Why: extracted from src/main/agent-hooks/server.ts so the relay can host the pipeline without Electron (Node builtins only). See docs/design/agent-status-over-ssh.md §3.
 import type { IncomingHttpHeaders, IncomingMessage } from 'node:http'
+import { Buffer } from 'node:buffer'
 import { createHash, randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import {
@@ -533,6 +534,28 @@ function readHookHeader(headers: IncomingHttpHeaders, name: string): string | un
   return Array.isArray(value) ? value[0] : value
 }
 
+function decodeBase64HookHeader(value: string): string | undefined {
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(value) || value.length % 4 === 1) {
+    return undefined
+  }
+  const decoded = Buffer.from(value, 'base64').toString('utf8')
+  const normalizedInput = value.replace(/=+$/, '')
+  const normalizedRoundTrip = Buffer.from(decoded, 'utf8').toString('base64').replace(/=+$/, '')
+  return normalizedRoundTrip === normalizedInput ? decoded : undefined
+}
+
+function readHookMetadataHeader(
+  headers: IncomingHttpHeaders,
+  name: string,
+  encoding: 'base64' | undefined
+): string | undefined {
+  const value = readHookHeader(headers, name)
+  if (value === undefined) {
+    return undefined
+  }
+  return encoding === 'base64' ? decodeBase64HookHeader(value) : value
+}
+
 /**
  * Wraps a JSON hook payload with Orca metadata carried in transport headers.
  *
@@ -542,17 +565,21 @@ function readHookHeader(headers: IncomingHttpHeaders, name: string): string | un
  * normalization share one code path without double-wrapping legacy requests.
  */
 export function mergeAgentHookRequestHeaders(body: unknown, headers: IncomingHttpHeaders): unknown {
-  const paneKey = readHookHeader(headers, 'x-orca-pane-key')
+  const metadataEncoding =
+    readHookHeader(headers, 'x-orca-agent-hook-meta-encoding')?.trim().toLowerCase() === 'base64'
+      ? 'base64'
+      : undefined
+  const paneKey = readHookMetadataHeader(headers, 'x-orca-pane-key', metadataEncoding)
   if (!paneKey) {
     return body
   }
   const envelope = {
     paneKey,
-    tabId: readHookHeader(headers, 'x-orca-tab-id'),
-    launchToken: readHookHeader(headers, 'x-orca-launch-token'),
-    worktreeId: readHookHeader(headers, 'x-orca-worktree-id'),
-    env: readHookHeader(headers, 'x-orca-agent-hook-env'),
-    version: readHookHeader(headers, 'x-orca-agent-hook-version'),
+    tabId: readHookMetadataHeader(headers, 'x-orca-tab-id', metadataEncoding),
+    launchToken: readHookMetadataHeader(headers, 'x-orca-launch-token', metadataEncoding),
+    worktreeId: readHookMetadataHeader(headers, 'x-orca-worktree-id', metadataEncoding),
+    env: readHookMetadataHeader(headers, 'x-orca-agent-hook-env', metadataEncoding),
+    version: readHookMetadataHeader(headers, 'x-orca-agent-hook-version', metadataEncoding),
     payload: body
   }
   Object.defineProperty(envelope, HEADER_MERGED_HOOK_ENVELOPE, {
