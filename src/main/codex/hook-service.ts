@@ -20,6 +20,7 @@ import {
   type HookDefinition
 } from '../agent-hooks/installer-utils'
 import { buildPosixAgentHookJsonPostCommand } from '../agent-hooks/hook-post-command'
+import { refreshManagedScriptIfPresent } from '../agent-hooks/managed-hook-script-refresh'
 import { resolveHooksJsonWritePath } from '../agent-hooks/hook-config-write-path'
 import { writeFileAtomically } from '../codex-accounts/fs-utils'
 import {
@@ -1013,6 +1014,10 @@ function getWslReconciliationKey(runtimeHomePath: string): string {
 }
 
 export class CodexHookService {
+  async refreshManagedScripts(): Promise<void> {
+    await refreshManagedScriptIfPresent(getManagedScriptPath(), getManagedScript())
+  }
+
   private readonly wslReconciliationGeneration = new Map<string, number>()
 
   private supersedeWslReconciliation(runtimeHomePath: string | null | undefined): number {

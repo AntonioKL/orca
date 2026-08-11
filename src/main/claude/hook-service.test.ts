@@ -405,7 +405,9 @@ describe('ClaudeHookService.installRemote', () => {
     // command line, and JSON body delivery avoids URL-encoded IDS signatures.
     expect(script).toContain('printf \'%s\' "$payload" | curl')
     expect(script).toContain('-H "Content-Type: application/json"')
-    expect(script).toContain('-H "X-Orca-Pane-Key: ${ORCA_PANE_KEY}"')
+    expect(script).toContain(
+      '-H "X-Orca-Pane-Key: $(printf \'%s\' "$ORCA_PANE_KEY" | base64 | tr -d \'\\n\')"'
+    )
     expect(script).toContain('--data-binary @-')
     expect(script).not.toContain('--data-urlencode "payload@-"')
     expect(fs.modes.get('/home/dev/.orca/agent-hooks/claude-hook.sh')).toBe(0o755)
