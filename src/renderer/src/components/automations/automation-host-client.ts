@@ -6,7 +6,6 @@ import type {
   AutomationUpdateInput
 } from '../../../../shared/automations-types'
 import { parseExecutionHostId } from '../../../../shared/execution-host'
-import type { GlobalSettings } from '../../../../shared/global-settings-types'
 
 type RuntimeAutomationCreateInput = Omit<
   AutomationCreateInput,
@@ -49,13 +48,6 @@ export function getAutomationTargetFromHostId(
     : { kind: 'local' }
 }
 
-export function getAutomationListTarget(
-  settings: Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> | null | undefined
-): AutomationHostTarget {
-  const environmentId = settings?.activeRuntimeEnvironmentId?.trim()
-  return environmentId ? { kind: 'environment', environmentId } : { kind: 'local' }
-}
-
 export function getAutomationOwnerTarget(
   automation: Pick<Automation, 'runContext'>,
   sourceTarget?: AutomationHostTarget | null
@@ -81,7 +73,6 @@ function toRuntimeAutomationCreateInput(
     workspace: input.workspaceMode === 'existing' && workspaceId ? `id:${workspaceId}` : undefined
   }
 }
-
 function toRuntimeAutomationUpdateInput(
   input: AutomationUpdateInput
 ): RuntimeAutomationUpdateInput {
@@ -110,17 +101,22 @@ export async function listAutomationsForTarget(
   return result.automations
 }
 
+/**
+ * One automation's history, never a host's. Usage totals for the list come from
+ * the authority's own list projection; fetching every run to compute them made
+ * the page's cost scale with retained history rather than with what is on screen.
+ */
 export async function listAutomationRunsForTarget(
   target: AutomationHostTarget,
-  automationId?: string
+  automationId: string
 ): Promise<AutomationRun[]> {
   if (target.kind === 'local') {
-    return await window.api.automations.listRuns(automationId ? { automationId } : undefined)
+    return await window.api.automations.listRuns({ automationId })
   }
   const result = await callRuntimeRpc<{ runs: AutomationRun[] }>(
     target,
     'automation.runs',
-    automationId ? { automationId } : {},
+    { automationId },
     { timeoutMs: 15_000 }
   )
   return result.runs

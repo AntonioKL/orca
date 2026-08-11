@@ -14,6 +14,7 @@ import {
   summarizeAutomationRunUsage
 } from './automation-usage-model'
 import type { AutomationTargetAvailability } from './automation-target-availability'
+import { automationEnablementNotice, automationPausedLabel } from './automation-enablement-notice'
 import { getAutomationSourceDisplay } from './automation-source-display'
 import { translate } from '@/i18n/i18n'
 import { AutomationPromptDisclosure } from './AutomationPromptDisclosure'
@@ -134,6 +135,7 @@ export function AutomationDetail({
       : workspaceName
   const sourceDisplay = getAutomationSourceDisplay(automation.sourceContext, hostLabelById)
   const runNowDisabled = runNowAvailability?.canRunNow === false
+  const enablementNotice = automationEnablementNotice(automation)
 
   return (
     <div className="flex w-full flex-col gap-4">
@@ -144,7 +146,7 @@ export function AutomationDetail({
             <Badge variant={automation.enabled ? 'secondary' : 'outline'}>
               {automation.enabled
                 ? translate('auto.components.automations.AutomationDetail.eaa02014f8', 'Enabled')
-                : translate('auto.components.automations.AutomationDetail.b09b2384fd', 'Paused')}
+                : automationPausedLabel(automation)}
             </Badge>
           </div>
           <p className="mt-1 truncate text-sm text-muted-foreground">
@@ -209,6 +211,16 @@ export function AutomationDetail({
           </ToolbarIconButton>
         </div>
       </div>
+
+      {enablementNotice ? (
+        <div
+          data-testid="automation-enablement-notice"
+          className="rounded-md border border-border/50 bg-muted/40 p-3 text-sm shadow-sm"
+        >
+          <p className="font-medium text-foreground">{enablementNotice.reason}</p>
+          <p className="mt-1 text-muted-foreground">{enablementNotice.recovery}</p>
+        </div>
+      ) : null}
 
       {automation.executionTargetType === 'ssh' ? (
         <div className="rounded-md border border-border/50 bg-muted/50 p-3 text-sm text-muted-foreground shadow-sm">

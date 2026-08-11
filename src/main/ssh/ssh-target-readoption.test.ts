@@ -23,7 +23,7 @@ function makeFakeStore(tombstones: RemovedSshTargetTombstone[]) {
   let current = [...tombstones]
   const store = {
     getRemovedSshTargetTombstones: () => [...current],
-    removeRemovedSshTargetTombstone: (oldTargetId: string) => {
+    releaseRemovedSshTargetTombstone: (oldTargetId: string) => {
       current = current.filter((t) => t.oldTargetId !== oldTargetId)
     },
     reassignSshTargetId: (oldTargetId: string, newTargetId: string) => {
@@ -178,6 +178,28 @@ describe('readoptOrphanedWorkspacesForTarget', () => {
       makeTarget({ configHost: undefined, host: 'dev.example.com', username: 'tim' })
     )
     expect(readoptions).toHaveLength(1)
+  })
+
+  it('never re-adopts through a synthetic automation-scan tombstone', () => {
+    // A ghost synthesized from a stored automation has no host identity, so its
+    // empty tuple must not wildcard-match a real, unrelated new target.
+    const fake = makeFakeStore([
+      tombstone({ host: '', port: 0, username: '', origin: 'automation-scan' })
+    ])
+    expect(readoptOrphanedWorkspacesForTarget(fake.store, makeTarget())).toHaveLength(0)
+    expect(fake.reassigned).toHaveLength(0)
+    expect(fake.remaining()).toHaveLength(1) // evidence preserved for the orphan entry
+  })
+
+  it('never re-adopts a synthetic tombstone even when a target has empty identity fields', () => {
+    const fake = makeFakeStore([
+      tombstone({ host: '', port: 0, username: '', origin: 'automation-scan' })
+    ])
+    const readoptions = readoptOrphanedWorkspacesForTarget(
+      fake.store,
+      makeTarget({ configHost: undefined, host: '', port: 0, username: '' })
+    )
+    expect(readoptions).toHaveLength(0)
   })
 })
 

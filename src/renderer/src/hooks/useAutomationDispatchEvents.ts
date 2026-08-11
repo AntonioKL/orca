@@ -31,10 +31,9 @@ import {
   toSshExecutionHostId
 } from '../../../shared/execution-host'
 import { parseWorkspaceKey } from '../../../shared/workspace-scope'
-import { getFolderWorkspaceConnectionId } from '@/lib/folder-workspace-connection'
 import type { AgentStateHistoryEntry } from '../../../shared/agent-status-types'
+import { resolveFolderWorkspaceHost } from '../../../shared/folder-workspace-execution-host'
 
-const AUTOMATIONS_CHANGED_EVENT = 'orca:automations-changed'
 const activeReuseDispatchTabIds = new Set<string>()
 
 function acquireReuseDispatchTab(tabId: string): (() => void) | null {
@@ -91,8 +90,10 @@ export function useAutomationDispatchEvents(): void {
     const unsubscribe = window.api.automations.onDispatchRequested(
       async ({ automation, run, dispatchToken }) => {
         const markDispatchResult = async (result: AutomationDispatchResult): Promise<void> => {
+          // Deliberately no local emit: the write publishes its own host-scoped event
+          // (automation-run-writer.ts) before this reply returns, and an unscoped one
+          // here would arrive second and invalidate every host in the catalog.
           await window.api.automations.markDispatchResult(result)
-          window.dispatchEvent(new Event(AUTOMATIONS_CHANGED_EVENT))
         }
         const state = useAppStore.getState()
         const focusBeforeDispatch = {
@@ -140,17 +141,22 @@ export function useAutomationDispatchEvents(): void {
         }
 
         try {
-          const folderWorkspaceConnectionId =
+          const folderWorkspaceHost =
             automationWorkspaceScope?.type === 'folder'
-              ? getFolderWorkspaceConnectionId(state, automationWorkspaceScope.folderWorkspaceId)
+              ? resolveFolderWorkspaceHost(state, automationWorkspaceScope.folderWorkspaceId)
               : null
+          const folderWorkspaceConnectionId =
+            folderWorkspaceHost?.kind === 'ssh' ? folderWorkspaceHost.targetId : null
+          // A workspace whose host does not resolve to one place is refused, not guessed at.
+          const folderWorkspaceHostUnresolved =
+            folderWorkspaceHost !== null && folderWorkspaceHost.kind === 'ambiguous'
           const folderWorkspaceHostId =
-            automationWorkspaceScope?.type === 'folder' && automationWorktree
-              ? folderWorkspaceConnectionId === undefined
-                ? null
-                : folderWorkspaceConnectionId
-                  ? toSshExecutionHostId(folderWorkspaceConnectionId)
-                  : getResolvedExecutionHostIdForWorktree(state, automationWorktree.id)
+            folderWorkspaceHost && automationWorktree
+              ? folderWorkspaceConnectionId
+                ? toSshExecutionHostId(folderWorkspaceConnectionId)
+                : folderWorkspaceHost.kind === 'local'
+                  ? getResolvedExecutionHostIdForWorktree(state, automationWorktree.id)
+                  : null
               : null
           const runHostId =
             parseExecutionHostId(automation.runContext?.hostId)?.id ?? getRepoExecutionHostId(repo)
@@ -169,10 +175,15 @@ export function useAutomationDispatchEvents(): void {
               status: 'skipped_unavailable',
               workspaceId: automation.workspaceId,
               workspaceDisplayName: dispatchWorkspaceDisplayName,
-              error: translate(
-                'auto.hooks.useAutomationDispatchEvents.3ad7d77f57',
-                'The target workspace is on a different host than this automation run target.'
-              )
+              error: folderWorkspaceHostUnresolved
+                ? translate(
+                    'auto.hooks.useAutomationDispatchEvents.workspaceHostUnresolved',
+                    'The target workspace spans more than one host, so this run has no single host to use.'
+                  )
+                : translate(
+                    'auto.hooks.useAutomationDispatchEvents.3ad7d77f57',
+                    'The target workspace is on a different host than this automation run target.'
+                  )
             })
             return
           }

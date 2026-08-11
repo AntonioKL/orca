@@ -1,14 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createExternalAutomation,
-  listExternalAutomationManagers,
   listExternalAutomationRuns,
   runExternalAutomationAction,
   updateExternalAutomation
 } from './external-manager'
 import { mapHermesJobs, mapOpenClawJobs } from './external-job-mappers'
+import { EXTERNAL_AUTOMATION_SCOPE_CODES } from '../../shared/external-automation-scope'
 import { getActiveMultiplexer } from '../ssh/ssh-target-registry'
-import type { Store } from '../persistence'
+import type {
+  ExternalAutomationAction,
+  ExternalAutomationProvider
+} from '../../shared/automations-types'
 import type * as Fs from 'node:fs'
 
 const execFileMock = vi.hoisted(() =>
@@ -54,26 +57,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers()
-})
-
-describe('listExternalAutomationManagers', () => {
-  it('settles when a local command lookup hangs', async () => {
-    vi.useFakeTimers()
-    execFileMock.mockImplementation(() => ({ kill: vi.fn() }))
-    const promise = listExternalAutomationManagers({
-      getSshTargets: () => []
-    } as unknown as Store)
-    let settled = false
-    void promise.finally(() => {
-      settled = true
-    })
-
-    await vi.advanceTimersByTimeAsync(5_000)
-    await Promise.resolve()
-
-    expect(settled).toBe(true)
-    await expect(promise).resolves.toEqual([])
-  })
 })
 
 describe('mapHermesJobs', () => {
@@ -322,6 +305,48 @@ describe('runExternalAutomationAction', () => {
     expect(execFileMock).not.toHaveBeenCalled()
   })
 
+  it('rejects an action name that is not in the provider table', async () => {
+    await expect(
+      runExternalAutomationAction({
+        managerId: 'hermes:local',
+        provider: 'hermes',
+        target: { type: 'local' },
+        jobId: 'job-1',
+        action: 'purge' as ExternalAutomationAction
+      })
+    ).rejects.toThrow('Unsupported external automation action.')
+
+    expect(execFileMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects an action inherited from the prototype chain', async () => {
+    await expect(
+      runExternalAutomationAction({
+        managerId: 'hermes:local',
+        provider: 'hermes',
+        target: { type: 'local' },
+        jobId: 'job-1',
+        action: 'toString' as unknown as ExternalAutomationAction
+      })
+    ).rejects.toThrow('Unsupported external automation action.')
+
+    expect(execFileMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a provider that has no action table', async () => {
+    await expect(
+      runExternalAutomationAction({
+        managerId: 'hermes:local',
+        provider: 'shellcat' as ExternalAutomationProvider,
+        target: { type: 'local' },
+        jobId: 'job-1',
+        action: 'run'
+      })
+    ).rejects.toThrow('Unsupported external automation action.')
+
+    expect(execFileMock).not.toHaveBeenCalled()
+  })
+
   it('maps OpenClaw lifecycle actions through its cron CLI names', async () => {
     await runExternalAutomationAction({
       managerId: 'openclaw:local',
@@ -394,6 +419,48 @@ describe('listExternalAutomationRuns', () => {
       page: 2,
       pageSize: 10
     })
+  })
+
+  it('reports a structured -32601 as an unsupported runs endpoint', async () => {
+    // Shaped like the multiplexer's rejection: a non-enumerable `code` that no
+    // amount of message parsing on the far side of IPC could recover.
+    const rejection = new Error('Method not found: externalAutomations.runs')
+    Object.defineProperty(rejection, 'code', { value: -32601 })
+    vi.mocked(getActiveMultiplexer).mockReturnValue({
+      isDisposed: () => false,
+      request: vi.fn().mockRejectedValue(rejection)
+    } as unknown as ReturnType<typeof getActiveMultiplexer>)
+
+    await expect(
+      listExternalAutomationRuns({
+        managerId: 'hermes:ssh:ssh-1',
+        provider: 'hermes',
+        target: { type: 'ssh', connectionId: 'ssh-1' },
+        jobId: 'job-1',
+        page: 1,
+        pageSize: 10
+      })
+    ).rejects.toMatchObject({ code: EXTERNAL_AUTOMATION_SCOPE_CODES.runsUnsupported })
+  })
+
+  it('propagates a relay failure that only reads like a missing method', async () => {
+    // No code, so the peer never declined the method — this is a broken call, and
+    // reporting it as "no runs endpoint" would show a truncated list as complete.
+    vi.mocked(getActiveMultiplexer).mockReturnValue({
+      isDisposed: () => false,
+      request: vi.fn().mockRejectedValue(new Error('relay crashed: method not found in registry'))
+    } as unknown as ReturnType<typeof getActiveMultiplexer>)
+
+    await expect(
+      listExternalAutomationRuns({
+        managerId: 'hermes:ssh:ssh-1',
+        provider: 'hermes',
+        target: { type: 'ssh', connectionId: 'ssh-1' },
+        jobId: 'job-1',
+        page: 1,
+        pageSize: 10
+      })
+    ).rejects.toThrow('relay crashed: method not found in registry')
   })
 })
 

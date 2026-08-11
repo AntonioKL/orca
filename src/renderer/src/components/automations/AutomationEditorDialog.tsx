@@ -14,6 +14,9 @@ import type { TuiAgent } from '../../../../shared/tui-agent'
 import type { SetupDecision } from '../../../../shared/worktree/create-types'
 import type { Worktree } from '../../../../shared/worktree/types'
 import { closeUnfocusedMonacoFindOrPreventDialogDismiss } from '@/components/editor/monaco-find-widget'
+import { AutomationOwnerConflictNotice } from './AutomationOwnerConflictNotice'
+import type { AutomationActionNotice } from './automation-row-action-dispatch'
+import type { AutomationCreateDestinationControl } from './use-automation-create-destination'
 import { AutomationEditorDialogFooter } from './AutomationEditorDialogFooter'
 import { AutomationEditorDialogHeader } from './AutomationEditorDialogHeader'
 import { getAutomationPromptEditorRoot } from './AutomationEditorPromptEditor'
@@ -67,6 +70,12 @@ type AutomationEditorDialogProps = {
   worktrees: Worktree[]
   settings: GlobalSettings | null
   draft: AutomationDraft
+  /** Present only while creating an Orca automation; editing keeps the record's captured owner. */
+  createDestination?: AutomationCreateDestinationControl
+  /** Why a save was refused. Belongs here rather than on the page: this dialog covers it. */
+  notice?: AutomationActionNotice | null
+  onNoticeRecover?: () => void
+  onNoticeDismiss?: () => void
   onProjectChange: (projectId: string) => void
   getRepoHostLabel?: (repo: Repo) => string | null | undefined
   allowAddProject?: boolean
@@ -93,6 +102,10 @@ export function AutomationEditorDialog({
   worktrees,
   settings,
   draft,
+  createDestination,
+  notice,
+  onNoticeRecover,
+  onNoticeDismiss,
   onProjectChange,
   getRepoHostLabel,
   allowAddProject,
@@ -172,6 +185,8 @@ export function AutomationEditorDialog({
             onDismiss={() => onOpenChange(false)}
           />
           <AutomationEditorSettingsSidebar
+            isCreateMode={isCreateMode}
+            createDestination={createDestination}
             isHermesTarget={isHermesTarget}
             isHermesCreate={isHermesCreate}
             repos={repos}
@@ -193,6 +208,13 @@ export function AutomationEditorDialog({
             onSetupDecisionTouched={onSetupDecisionTouched}
           />
         </div>
+
+        <AutomationOwnerConflictNotice
+          notice={notice ?? null}
+          className="mx-5 mb-1"
+          onRecover={onNoticeRecover}
+          onDismiss={onNoticeDismiss}
+        />
 
         <AutomationEditorDialogFooter
           isEditing={isEditing}

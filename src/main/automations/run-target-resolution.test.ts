@@ -76,7 +76,9 @@ function makeAutomation(runContext: WorkspaceRunContext): Automation {
 function makeStore(setups: ProjectHostSetup[], repos: Repo[]): Store {
   return {
     getProjectHostSetups: () => setups,
-    getRepo: (id: string) => repos.find((repo) => repo.id === id)
+    getRepo: (id: string) => repos.find((repo) => repo.id === id),
+    // Local records here; the generation fence has its own file against a real Store.
+    automationCapturedHostIssue: () => null
   } as unknown as Store
 }
 

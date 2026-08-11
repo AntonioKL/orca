@@ -71,7 +71,8 @@ describe('automation RPC methods', () => {
     await dispatcher.dispatch(makeRequest('automation.runs', { automationId: 'auto-1' }))
 
     expect(runtime.listAutomations).toHaveBeenCalled()
-    expect(runtime.showAutomation).toHaveBeenCalledWith('auto-1')
+    // A legacy client sends no precondition, so each call forwards an absent expected owner.
+    expect(runtime.showAutomation).toHaveBeenCalledWith('auto-1', undefined)
     expect(runtime.createAutomation).toHaveBeenCalledWith(
       expect.objectContaining({
         name: 'New review',
@@ -92,11 +93,12 @@ describe('automation RPC methods', () => {
         setupDecision: 'run',
         reuseSession: false,
         rrule: '0 9 * * 1-5'
-      })
+      }),
+      { expectedOwner: undefined, destination: undefined }
     )
-    expect(runtime.deleteAutomation).toHaveBeenCalledWith('auto-1')
-    expect(runtime.runAutomationNow).toHaveBeenCalledWith('auto-1')
-    expect(runtime.listAutomationRuns).toHaveBeenCalledWith('auto-1')
+    expect(runtime.deleteAutomation).toHaveBeenCalledWith('auto-1', undefined)
+    expect(runtime.runAutomationNow).toHaveBeenCalledWith('auto-1', undefined)
+    expect(runtime.listAutomationRuns).toHaveBeenCalledWith('auto-1', undefined)
   })
 
   it('rejects unknown providers and invalid schedules', async () => {
@@ -147,6 +149,10 @@ describe('automation RPC methods', () => {
       })
     )
 
-    expect(runtime.updateAutomation).toHaveBeenCalledWith('auto-1', { baseBranch: null })
+    expect(runtime.updateAutomation).toHaveBeenCalledWith(
+      'auto-1',
+      { baseBranch: null },
+      { expectedOwner: undefined, destination: undefined }
+    )
   })
 })

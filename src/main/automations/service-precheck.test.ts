@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { Repo } from '../../shared/repo-types'
 import { AutomationService } from './service'
+import { runHeadlessAutomationDispatch } from './headless-dispatch-runner'
+import { createAutomationRunWriter } from './automation-run-writer'
 
 const runAutomationPrecheckMock = vi.hoisted(() => vi.fn())
 const testState = { dir: '' }
@@ -204,20 +206,16 @@ describe('AutomationService prechecks', () => {
       headlessDispatcher
     })
     const run = store.createAutomationRun(automation, Date.now(), 'scheduled')
-    const requestHeadlessDispatch = (
-      service as unknown as {
-        requestHeadlessDispatch: (
-          automationArg: typeof automation,
-          runArg: typeof run,
-          targetArg: { ok: true; cwd: string; repo: Repo }
-        ) => Promise<unknown>
-      }
-    ).requestHeadlessDispatch.bind(service)
 
-    await requestHeadlessDispatch(automation, run, {
-      ok: true,
-      cwd: '/repo',
-      repo: store.getRepo('r1')!
+    await runHeadlessAutomationDispatch({
+      automation,
+      run,
+      target: { ok: true, cwd: '/repo', repo: store.getRepo('r1')! },
+      dispatcher: headlessDispatcher,
+      runs: createAutomationRunWriter(store, null),
+      runPrecheck: () => service.runPrecheck(automation.id, run.id),
+      markDispatchResult: (result) => service.markDispatchResult(result),
+      watchRun: () => {}
     })
 
     expect(headlessDispatcher).not.toHaveBeenCalled()

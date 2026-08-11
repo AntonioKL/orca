@@ -5,6 +5,7 @@ import type {
   SshConnectionStatus,
   SshTargetSummary
 } from '../../../../shared/ssh-types'
+import { sanitizeSshTargetGeneration } from '../../../../shared/ssh-target-generation'
 import { sshConnectionStatesEqual, sshTargetLabelsEqual } from './ssh-target-cleanup'
 
 /**
@@ -16,6 +17,11 @@ import { sshConnectionStatesEqual, sshTargetLabelsEqual } from './ssh-target-cle
 export type RuntimeEnvironmentSshBucket = {
   connectionStates: Map<string, SshConnectionState>
   targetLabels: Map<string, string>
+  /** Durable SSH *registration* generation per target, for automation owner
+   * fencing. Absent for targets an older server omitted it for — never
+   * defaulted, because a guessed generation would fence against the wrong
+   * registration. Cleared with the rest of the bucket when state goes stale. */
+  targetGenerations: Map<string, number>
   removedTargetLabels: Map<string, string>
   /** Mirrors the local `sshTargetsHydrated` positive-evidence rule: absence
    * from `targetLabels` only counts as target removal once a target list
@@ -60,8 +66,27 @@ export type RuntimeEnvironmentSshSlice = {
 const EMPTY_BUCKET: RuntimeEnvironmentSshBucket = {
   connectionStates: new Map(),
   targetLabels: new Map(),
+  targetGenerations: new Map(),
   removedTargetLabels: new Map(),
   targetsHydrated: false
+}
+
+function collectTargetGenerations(targets: SshTargetSummary[]): Map<string, number> {
+  const generations = new Map<string, number>()
+  for (const target of targets) {
+    const generation = sanitizeSshTargetGeneration(target.generation)
+    if (generation !== undefined) {
+      generations.set(target.id, generation)
+    }
+  }
+  return generations
+}
+
+function targetGenerationsEqual(current: Map<string, number>, next: Map<string, number>): boolean {
+  return (
+    current.size === next.size &&
+    [...next].every(([targetId, generation]) => current.get(targetId) === generation)
+  )
 }
 
 const stateGenerationByEnvironment = new Map<string, number>()
@@ -173,7 +198,11 @@ export const createRuntimeEnvironmentSshSlice: StateCreator<
       const connectionStates = new Map(
         Array.from(bucket.connectionStates).filter(([targetId]) => targetIds.has(targetId))
       )
-      if (sshTargetLabelsEqual(bucket.targetLabels, targets)) {
+      const targetGenerations = collectTargetGenerations(targets)
+      if (
+        sshTargetLabelsEqual(bucket.targetLabels, targets) &&
+        targetGenerationsEqual(bucket.targetGenerations, targetGenerations)
+      ) {
         // Why: an unchanged (even empty) list is still a successful load — the
         // hydration flag must flip on the first fetch of an empty target set.
         return bucket.targetsHydrated
@@ -184,6 +213,7 @@ export const createRuntimeEnvironmentSshSlice: StateCreator<
         ...bucket,
         connectionStates,
         targetLabels: new Map(targets.map((target) => [target.id, target.label])),
+        targetGenerations,
         targetsHydrated: true
       })
     }),
@@ -207,14 +237,21 @@ export const createRuntimeEnvironmentSshSlice: StateCreator<
     set((s) => {
       advanceEnvironmentSshStateGeneration(environmentId)
       const bucket = s.sshStateByEnvironment.get(environmentId)
-      if (!bucket || (!bucket.targetsHydrated && bucket.connectionStates.size === 0)) {
+      if (
+        !bucket ||
+        (!bucket.targetsHydrated &&
+          bucket.connectionStates.size === 0 &&
+          bucket.targetGenerations.size === 0)
+      ) {
         return s
       }
       // Labels are kept so a re-hydrating overlay can still show a friendly
       // host name; hydration=false alone forces reads back to "unknown".
+      // Generations are dropped: fencing must never run on unverified state.
       return withBucket(s, environmentId, {
         ...bucket,
         connectionStates: new Map(),
+        targetGenerations: new Map(),
         targetsHydrated: false
       })
     }),

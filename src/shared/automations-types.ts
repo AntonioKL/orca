@@ -6,6 +6,7 @@ export type AutomationWorkspaceMode = 'existing' | 'new_per_run'
 export type AutomationExecutionTargetType = 'local' | 'ssh'
 export type AutomationSchedulerOwner = 'local_host_service' | 'ssh_bridge' | 'remote_host_service'
 export type AutomationMissedRunPolicy = 'run_once_within_grace'
+export type AutomationEnablementDecider = 'owner_migration' | 'user'
 export type AutomationRunStatus =
   | 'pending'
   | 'dispatching'
@@ -108,6 +109,10 @@ export type Automation = {
   projectId: string
   executionTargetType: AutomationExecutionTargetType
   executionTargetId: string
+  /** Why: pins the SSH registration incarnation this record was attached to, so a
+   *  removed-and-re-added target reusing the id can't silently adopt it. Absent on
+   *  local records, on legacy records, and on orphans whose target is gone. */
+  executionTargetGeneration?: number
   schedulerOwner: AutomationSchedulerOwner
   workspaceMode: AutomationWorkspaceMode
   workspaceId: string | null
@@ -118,6 +123,10 @@ export type Automation = {
   rrule: string
   dtstart: number
   enabled: boolean
+  /** Why: who last decided `enabled`. The load migration disables an orphan once and
+   *  stamps itself; `user` is the user overruling that, which no later load may undo.
+   *  Absent on records the migration has never acted on. */
+  enabledDecidedBy?: AutomationEnablementDecider
   nextRunAt: number
   lastRunAt?: number
   missedRunPolicy: AutomationMissedRunPolicy
@@ -156,6 +165,12 @@ export type AutomationRun = {
   /** Why: run titles must stay unique once retention prunes old runs, so the
    *  number can no longer be derived from how many runs are currently kept. */
   runNumber?: number
+  /** Why: a target that cannot resolve refuses every occurrence, so consecutive
+   *  identical refusals fold into this record instead of one row each. Counts the
+   *  occurrences the record stands for; absent means one. */
+  occurrenceCount?: number
+  /** `scheduledFor` of the most recently folded occurrence; absent until one folds. */
+  lastOccurrenceAt?: number
 }
 
 export type AutomationCreateInput = {

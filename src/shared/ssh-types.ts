@@ -53,10 +53,14 @@ export type SshTarget = {
   /** Reuse a system OpenSSH connection across setup commands. Undefined means
    *  enabled; false is an explicit per-target compatibility opt-out. */
   systemSshConnectionReuse?: boolean
+  /** Durable registration incarnation. Advances on create / re-create / explicit
+   *  re-adopt only, so automations fenced on an old registration cannot run on a
+   *  later target that happens to reuse the id. Never advanced by connect state. */
+  generation?: number
 }
 
 /** Public target identity safe to mirror to a paired client. */
-export type SshTargetSummary = Pick<SshTarget, 'id' | 'label'>
+export type SshTargetSummary = Pick<SshTarget, 'id' | 'label' | 'generation'>
 
 /** Identity of a removed SSH target, recorded so that re-adding the same host
  *  can re-point orphaned repos/worktrees from the old (deleted) target id to
@@ -73,6 +77,11 @@ export type RemovedSshTargetTombstone = {
   label: string
   /** ms epoch when the target was removed, for pruning old tombstones. */
   removedAt: number
+  /** `automation-scan` tombstones are synthesized from a stored automation's dead
+   *  target reference, so they carry a label but no real host identity. They must
+   *  never match a re-added host on the host/port/username tuple. Undefined means
+   *  `removed` (a real removal that recorded the target's identity). */
+  origin?: 'removed' | 'automation-scan'
 }
 
 /** Exact repo ownership changes made while re-adopting a removed SSH host. */
