@@ -220,8 +220,9 @@ export const WORKTREE_HANDLERS: Record<string, CommandHandler> = {
       }
     }
     const linearIssueLink = getOptionalLinearIssueLinkFlag(flags, 'linear-issue')
-    const activate =
-      flags.get('activate') === true || flags.get('run-hooks') === true || Boolean(agentLaunch)
+    // An agent launch does NOT imply activation: a CLI-created agent workspace
+    // starts in the background so an agent shell cannot yank the user's focus.
+    const activate = flags.get('activate') === true || flags.get('run-hooks') === true
     // Negotiated wire shape: a pre-identity remote host would silently strip
     // the unknown agentLaunch key, so it gets the legacy startupAgent id.
     const launchParams = agentLaunch

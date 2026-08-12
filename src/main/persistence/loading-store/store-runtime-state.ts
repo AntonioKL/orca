@@ -54,6 +54,7 @@ export class StoreRuntimeState {
   readonly protectedSecrets = new ProtectedSecretPersistence()
   loadNeedsSave = false
   agentCatalogMigrationError: string | null = null
+  preV1RawContentsAwaitingBackup: string | null = null
   flushOrThrow!: () => void
   settingsChangeListeners = new Set<
     (

@@ -568,6 +568,7 @@ describe('useComposerState host-context boundaries', () => {
 
   it('uses submit-time smart metadata for the host-owned folder launch', () => {
     const section = COMPOSER_SOURCE.folderSubmit
+    expect(section).toContain('name: smartGitHubMetadata?.workspaceName ?? name')
     expect(section).toContain(
       'linkedWorkItem: smartGitHubMetadata?.linkedWorkItem ?? linkedWorkItem'
     )

@@ -26,6 +26,7 @@ type ProfilePreferencesRuntime = Pick<
   | 'activeViewPreference'
   | 'agentCatalogMigrationError'
   | 'dataFile'
+  | 'preV1RawContentsAwaitingBackup'
   | 'githubCacheDirty'
   | 'githubCacheGeneration'
   | 'protectedSecrets'
@@ -60,13 +61,15 @@ export class ProfilePreferences {
     if (runtime.agentCatalogMigrationError === null) {
       return { ok: true }
     }
-    let raw: string | null
-    try {
-      raw = existsSync(runtime.dataFile) ? readFileSync(runtime.dataFile, 'utf-8') : null
-    } catch (error) {
-      const message = `Could not read the data file: ${error instanceof Error ? error.message : String(error)}`
-      runtime.agentCatalogMigrationError = message
-      return { ok: false, error: message }
+    let raw: string | null = runtime.preV1RawContentsAwaitingBackup
+    if (raw === null) {
+      try {
+        raw = existsSync(runtime.dataFile) ? readFileSync(runtime.dataFile, 'utf-8') : null
+      } catch (error) {
+        const message = `Could not read the data file: ${error instanceof Error ? error.message : String(error)}`
+        runtime.agentCatalogMigrationError = message
+        return { ok: false, error: message }
+      }
     }
     const migration = migrateAgentCatalogSchema({
       settings: runtime.state.settings,
@@ -77,6 +80,7 @@ export class ProfilePreferences {
       runtime.agentCatalogMigrationError = migration.backupError
       return { ok: false, error: migration.backupError }
     }
+    runtime.preV1RawContentsAwaitingBackup = null
     runtime.agentCatalogMigrationError = null
     this.updateSettings(migration.settingsPatch)
     return { ok: true }

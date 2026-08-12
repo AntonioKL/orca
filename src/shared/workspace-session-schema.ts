@@ -22,6 +22,7 @@ import { terminalTabIdSchema } from './terminal-tab-id-schema'
 import { terminalSurfaceTombstoneSchema } from './terminal-surface-tombstone-schema'
 import { parseExecutionHostId, type ExecutionHostId } from './execution-host'
 import { persistedLaunchNoticeStateSchema } from './agent-launch-notice-schema'
+import { persistedOpenFileSchema } from './persisted-open-file-schema'
 import { isTuiAgent } from './tui-agent-config'
 import { isWorkspaceKey } from './workspace-scope'
 import {

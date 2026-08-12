@@ -67,6 +67,7 @@ type LoadedStateParsingOperationsRuntime = Pick<
   | 'githubCacheDirty'
   | 'loadNeedsSave'
   | 'agentCatalogMigrationError'
+  | 'preV1RawContentsAwaitingBackup'
   | 'protectedSecrets'
   | 'storageAuthority'
   | 'terminalScrollbackSnapshotStorage'
@@ -109,6 +110,9 @@ export class LoadedStateParsingOperations {
           this.runtime.loadNeedsSave =
             this.runtime.loadNeedsSave || agentCatalogMigration.didMigrate
           this.runtime.agentCatalogMigrationError = agentCatalogMigration.backupError ?? null
+          if (agentCatalogMigration.backupError) {
+            this.runtime.preV1RawContentsAwaitingBackup = raw
+          }
           parsed.settings = {
             ...parsed.settings,
             ...agentCatalogMigration.settingsPatch

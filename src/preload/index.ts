@@ -694,6 +694,7 @@ import { readRendererHeapStatistics } from './renderer-heap-statistics-reader'
 import { createUpdaterQuitAbortRelay } from '../shared/renderer-restart-preparation'
 import {
   prepareAndInvokeAppRestart,
+  prepareAndInvokeProfileRestore,
   prepareAndInvokeUpdaterInstall,
   registerRendererRestartIpcRelays
 } from './renderer-restart-wiring'
@@ -7074,7 +7075,12 @@ const api = {
     retryAgentCatalogMigration: (): Promise<unknown> =>
       ipcRenderer.invoke('dataRecovery:retryAgentCatalogMigration'),
     listPoints: (): Promise<unknown> => ipcRenderer.invoke('dataRecovery:listPoints'),
-    restore: (args: unknown): Promise<unknown> => ipcRenderer.invoke('dataRecovery:restore', args)
+    restore: (args: unknown): Promise<unknown> =>
+      prepareAndInvokeProfileRestore(
+        window,
+        () => ipcRenderer.invoke('dataRecovery:restore', args) as Promise<{ ok?: unknown }>,
+        awaitBeforeUnloadCheckpoint
+      )
   },
 
   keybindings: {

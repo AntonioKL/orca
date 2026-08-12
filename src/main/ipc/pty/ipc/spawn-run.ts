@@ -85,5 +85,10 @@ export async function runPtyIpcSpawn(deps: PtySpawnIpcDeps, args: PtySpawnIpcArg
   } finally {
     ctx.releaseWorktreeSpawn?.()
     ctx.finishTerminalInstall()
+    rejectPaneSpawnReservation(
+      ctx.paneSpawnReservationKey,
+      ctx.paneSpawnReservation,
+      new Error('pane_spawn_abandoned')
+    )
   }
 }

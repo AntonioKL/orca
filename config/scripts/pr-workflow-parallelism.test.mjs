@@ -462,7 +462,8 @@ describe('PR workflow parallelism', () => {
       'cross-version-wire',
       'managed_hook_node18',
       'package',
-      'package_windows'
+      'package_windows',
+      'custom_agent_platform'
     ])
     const verifyStep = workflow.jobs.verify.steps.find(
       (step) => step.name === 'Require successful checks'

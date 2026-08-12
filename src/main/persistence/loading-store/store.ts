@@ -91,6 +91,10 @@ export class Store {
     return this.runtime.dataFile
   }
 
+  getBackupRingFilePaths(): string[] {
+    return this.domains.backups.getBackupRingFilePaths()
+  }
+
   freezeWrites(): void {
     this.runtime.writesFrozen = true
     if (this.runtime.writeTimer) {

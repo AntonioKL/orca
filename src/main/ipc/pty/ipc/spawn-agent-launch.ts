@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import type { AgentProviderSessionMetadata } from '../../../../shared/agent-session-resume'
-import type { AgentLaunchSnapshot, LaunchIntent } from '../../../../shared/agent-launch-host-contract'
+import type {
+  AgentLaunchSnapshot,
+  LaunchIntent
+} from '../../../../shared/agent-launch-host-contract'
 import type {
   AgentLaunchSpawnOutcome,
   AgentLaunchSpawnRequest
@@ -90,7 +93,10 @@ export async function resolvePtyIpcAgentLaunch(
             ? {
                 handoff: {
                   launchConfig: args.launchConfig,
-                  recordedConnectionId: args.legacyResumeRecordedConnectionId ?? null
+                  recordedConnectionId: args.legacyResumeRecordedConnectionId ?? null,
+                  ...(args.resumeProviderSession?.transcriptPath
+                    ? { transcriptPath: args.resumeProviderSession.transcriptPath }
+                    : {})
                 }
               }
             : {})
@@ -210,9 +216,7 @@ export async function resolvePtyIpcAgentLaunch(
           ? args.worktreeId
           : 'local-pty-spawn'),
       worktreeId:
-        typeof args.worktreeId === 'string' && args.worktreeId.length > 0
-          ? args.worktreeId
-          : null,
+        typeof args.worktreeId === 'string' && args.worktreeId.length > 0 ? args.worktreeId : null,
       principal: { kind: 'local' },
       ...(resumePersistedSnapshot ? { persistedSnapshot: resumePersistedSnapshot } : {}),
       ...(resumeProviderSession ? { resumeProviderSession } : {})

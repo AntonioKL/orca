@@ -18,6 +18,7 @@ import type { WorkspaceSshGate } from '../tasks/workspace-ssh-gate'
 import type { useMobileComposerSource } from '../tasks/use-mobile-composer-source'
 import type { WorktreeCreateIdempotencySupport } from '../tasks/worktree-create-idempotency-policy'
 import {
+  hostDefaultMatchesNewWorktreePreview,
   pickPreferredNewWorktreeAgent,
   type NewWorktreeAgentOption,
   type NewWorktreeRuntimeSettings
@@ -175,7 +176,13 @@ export function useNewWorkspaceCreateSubmit(args: {
         ? buildInteractiveLaunchParams({
             selectedAgentId: args.selectedAgent.id,
             hasIdentityCapability: true,
-            deferToHostDefault: !args.agentOverridden,
+            deferToHostDefault:
+              !args.agentOverridden &&
+              hostDefaultMatchesNewWorktreePreview(
+                latestRuntimeSettings,
+                args.detectedAgentIds,
+                args.agentCatalog
+              ),
             legacyCommand: undefined
           })
         : undefined

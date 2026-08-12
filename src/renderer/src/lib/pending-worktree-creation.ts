@@ -8,7 +8,6 @@ import type {
   WorkspaceLinkedItem
 } from '../../../shared/types'
 import type { AgentLaunchSpawnRequest } from '../../../shared/agent-launch-spawn-request'
-import type { AgentStartupPlan } from '@/lib/tui-agent-startup'
 import type { AgentStartedTelemetry } from '@/lib/worktree-activation'
 import type { TaskSourceContext, WorkspaceRunContext } from '../../../shared/task-source-context'
 import type { AgentStartupPlan } from '../../../shared/tui-agent-startup'
@@ -72,9 +71,6 @@ export type WorktreeCreationRequest = {
   linkedPR?: number
   pushTarget?: GitPushTarget
   agent: TuiAgent | null
-  startupPlan?: AgentStartupPlan | null
-  quickPrompt?: string
-  launchDraftPrompt?: string | null
   linkedLinearIssue?: string
   linkedLinearIssueWorkspaceId?: string | null
   linkedLinearIssueOrganizationUrlKey?: string | null
@@ -101,7 +97,7 @@ export type WorktreeCreationRequest = {
   /** Legacy renderer-owned startup retained for queued pre-host-launch requests. */
   startupPlan?: AgentStartupPlan | null
   quickPrompt?: string
-  launchDraftPrompt?: string
+  launchDraftPrompt?: string | null
   /** Telemetry emitted renderer-side off the host's `launched` receipt (the host
    *  create-spawn threads no telemetry). Null for blank-shell creates. */
   quickTelemetry: AgentStartedTelemetry | null
