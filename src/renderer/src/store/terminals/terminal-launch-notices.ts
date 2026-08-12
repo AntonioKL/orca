@@ -29,11 +29,15 @@ export function createTerminalLaunchNoticeActions(
       // Clear optimistically while the host persists the dismissal.
       const runtimeEnvironmentId = getRuntimeEnvironmentIdForWorktree(get(), worktreeId)
       if (runtimeEnvironmentId) {
-        void import('@/runtime/web-runtime-session').then(({ dismissWebRuntimeLaunchNotice }) =>
-          dismissWebRuntimeLaunchNotice({ worktreeId, tabId, launchToken, code })
-        )
+        void import('@/runtime/web-runtime-session')
+          .then(({ dismissWebRuntimeLaunchNotice }) =>
+            dismissWebRuntimeLaunchNotice({ worktreeId, tabId, launchToken, code })
+          )
+          .catch(() => {})
       } else {
-        void window.api.pty.dismissLaunchNotice({ worktreeId, tabId, launchToken, code })
+        void window.api.pty
+          .dismissLaunchNotice({ worktreeId, tabId, launchToken, code })
+          .catch(() => {})
       }
       set((state) => {
         const tabs = state.tabsByWorktree[worktreeId]
