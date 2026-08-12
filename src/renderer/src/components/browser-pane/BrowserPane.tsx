@@ -135,6 +135,7 @@ import BrowserFind from './BrowserFind'
 import { BrowserMobileDriverOverlay } from './BrowserMobileDriverOverlay'
 import { getShortcutPlatform, useShortcutLabel } from '@/hooks/useShortcutLabel'
 import { getRemoteBrowserFrameStyle } from './remote-browser-frame-style'
+import { useRemoteBrowserStreamActivation } from './use-remote-browser-stream-activation'
 import {
   getRemoteBrowserKeyboardShortcut,
   getRemoteBrowserKeypressKey
@@ -1459,29 +1460,15 @@ function RemoteBrowserPagePane({
     setReopenNonce((nonce) => nonce + 1)
   }, [])
 
-  useEffect(() => {
-    if (!isActive) {
-      return
-    }
-    const closeStream = lifecycle.open()
-    return () => {
-      closeStream()
-      clearPendingRemoteWheel()
-    }
-    // Why: the lifecycle reads tab/environment/worktree live, so it only needs to reopen when the
-    // pane's identity actually changes — not when an unrelated callback identity does.
-    //
-    // browserTab.id is load-bearing because lifecycle.open() reads tab identity through refs.
-    // reopenNonce re-runs the full open path for an explicit reconnect.
-  }, [
+  useRemoteBrowserStreamActivation({
     activeRuntimeEnvironmentId,
-    browserTab.id,
+    browserPageId: browserTab.id,
     clearPendingRemoteWheel,
     isActive,
     lifecycle,
     reopenNonce,
     runtimeWorktree
-  ])
+  })
 
   useEffect(() => {
     if (!isActive) {
@@ -2896,7 +2883,7 @@ function BrowserPagePane({
         return
       }
       // Why: convert OS screen cursor coords to renderer CSS pixels — immune to guest/renderer coordinate-space mismatches from zoom/DPI.
-      const zoomFactor = Math.pow(1.2, window.api.ui.getZoomLevel())
+      const zoomFactor = 1.2 ** window.api.ui.getZoomLevel()
       const x = Math.round((event.screenX - window.screenX) / zoomFactor)
       const y = Math.round((event.screenY - window.screenY) / zoomFactor)
       console.debug(

@@ -1,6 +1,6 @@
 /* eslint-disable max-lines -- Why: canonical transport-agnostic listener; parser, normalizer, per-CLI extractors, and endpoint writer share invariants that must not drift between Orca's main process and the relay. */
 
-// Why: extracted from src/main/agent-hooks/server.ts so the relay can host the pipeline without Electron (Node builtins only). See docs/design/agent-status-over-ssh.md §3.
+// Why: extracted from src/main/agent-hooks/server.ts so the relay can host the same pipeline without Electron — this file must stay on Node builtins and other shared/ modules, or the relay bundle breaks.
 import type { IncomingHttpHeaders, IncomingMessage } from 'node:http'
 import { Buffer } from 'node:buffer'
 import { createHash, randomUUID } from 'node:crypto'
@@ -325,7 +325,8 @@ export type AgentHookEventPayload = {
   launchToken?: string
   tabId?: string
   worktreeId?: string
-  /** SSH connection the event arrived on, or null for local (only ingestRemote stamps it; the HTTP path can't know the mux). See docs/design/agent-status-over-ssh.md §5. */
+  /** SSH connection the event arrived on, or null for local. Only `ingestRemote` can stamp it — the loopback HTTP path has no mux identity — and receivers key off it to drop
+   *  in-flight events from a superseded connection after an SSH reconnect. */
   connectionId: string | null
   /** True when the event carried prompt text directly, not the listener's cached prompt from an earlier event in the pane. */
   hasExplicitPrompt?: boolean
@@ -903,7 +904,7 @@ function readString(record: Record<string, unknown>, key: string): string | unde
 }
 
 function hasOwnField(record: Record<string, unknown>, key: string): boolean {
-  return Object.prototype.hasOwnProperty.call(record, key)
+  return Object.hasOwn(record, key)
 }
 
 function hasAnyOwnField(record: Record<string, unknown>, keys: readonly string[]): boolean {
@@ -1356,10 +1357,7 @@ function readHookBodyEnvelope(body: unknown): Record<string, unknown> | null {
   }
   // Why: direct callers and already-installed form hooks still send this legacy envelope shape.
   const legacyEnvelope = body as Record<string, unknown>
-  if (
-    typeof legacyEnvelope.paneKey !== 'string' ||
-    !Object.prototype.hasOwnProperty.call(legacyEnvelope, 'payload')
-  ) {
+  if (typeof legacyEnvelope.paneKey !== 'string' || !Object.hasOwn(legacyEnvelope, 'payload')) {
     return null
   }
   return legacyEnvelope
@@ -4450,7 +4448,6 @@ export function normalizeHookPayload(
       break
   }
 
-  // Why: connectionId is null here; ingestRemote stamps it from mux identity on receive. See docs/design/agent-status-over-ssh.md §5.
   const providerSessionOnly =
     (source === 'pi' || source === 'prime-agent') &&
     eventName === 'session_start' &&
@@ -4468,6 +4465,7 @@ export function normalizeHookPayload(
         launchToken,
         tabId,
         worktreeId,
+        // Why: normalization is transport-agnostic — only ingestRemote knows the mux identity to stamp here.
         connectionId: null,
         hasExplicitPrompt:
           source === 'amp'

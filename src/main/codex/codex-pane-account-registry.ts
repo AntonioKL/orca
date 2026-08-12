@@ -111,6 +111,7 @@ function isShellStartupHomeOverride(value: unknown): value is CodexShellStartupH
     typeof context.home === 'string' &&
     context.home.length > 0 &&
     (context.shell === undefined || typeof context.shell === 'string') &&
+    (context.configHome === undefined || typeof context.configHome === 'string') &&
     typeof context.codexHome === 'string' &&
     context.codexHome.length > 0
   )
@@ -207,6 +208,7 @@ function shellStartupHomeOverridesEqual(
   return (
     left?.home === right?.home &&
     left?.shell === right?.shell &&
+    left?.configHome === right?.configHome &&
     left?.codexHome === right?.codexHome
   )
 }
@@ -223,6 +225,13 @@ export function forgetCodexPaneAccount(ptyId: string): void {
  */
 export function getCodexPaneAccount(ptyId: string): CodexPaneAccountRecord | null {
   return readRegistry().panes[ptyId] ?? null
+}
+
+/** `custom-home` stays conservative because it can mask a non-comparable shared-home route. */
+export function isCodexPaneHomeRouteProvenAwayFromSharedHome(
+  route: CodexPaneHomeRoute | undefined
+): boolean {
+  return route === 'real-home' || route === 'account-home' || route === 'wsl-home'
 }
 
 /**
