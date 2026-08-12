@@ -162,6 +162,20 @@ export function automationCreateProjectMismatch(
   return selector.kind === 'ssh' ? connectionId !== selector.targetId : connectionId !== null
 }
 
+/**
+ * The projects a destination can hold, filtered by the rule submit already
+ * enforces, so the form cannot offer a pairing its own check will refuse.
+ */
+export function automationCreateEligibleProjects<TProject extends { id: string }>(
+  tables: AutomationAuthorityRepoTables,
+  destination: AutomationCreateDestination,
+  projects: readonly TProject[]
+): TProject[] {
+  return projects.filter(
+    (project) => !automationCreateProjectMismatch(tables, destination, project.id)
+  )
+}
+
 function destinationOwner(value: AutomationCreateDestination): AutomationOwnerRef {
   return { authority: value.authority, selector: value.destination.selector }
 }

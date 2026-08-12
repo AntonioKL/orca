@@ -67,17 +67,27 @@ export function AutomationCreateDestinationField({
           ))}
         </SelectContent>
       </Select>
-      <p className="text-xs text-muted-foreground">
-        {selected
-          ? translate(
-              'auto.components.automations.createDestination.storedOn',
-              'Stored and scheduled by {authority}.'
-            ).replace('{authority}', selected.authorityLabel)
-          : translate(
-              'auto.components.automations.createDestination.unselected',
-              'Choose the host this automation will be created on.'
-            )}
-      </p>
+      {selected && control.projects.length === 0 ? (
+        // Otherwise Create is disabled for an empty project list with nothing said.
+        <p className="text-xs text-destructive" data-testid="automation-create-no-projects">
+          {translate(
+            'auto.components.automations.createDestination.noProjects',
+            'No projects are set up on {host}. Add one there, or choose another host.'
+          ).replace('{host}', selected.label)}
+        </p>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          {selected
+            ? translate(
+                'auto.components.automations.createDestination.storedOn',
+                'Stored and scheduled by {authority}.'
+              ).replace('{authority}', selected.authorityLabel)
+            : translate(
+                'auto.components.automations.createDestination.unselected',
+                'Choose the host this automation will be created on.'
+              )}
+        </p>
+      )}
     </Field>
   )
 }

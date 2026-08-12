@@ -81,6 +81,7 @@ import {
   type AutomationHostTarget,
   getAutomationHostTargetFromKey,
   getAutomationHostTargetKey,
+  getAutomationListTarget,
   getAutomationTargetFromHostId,
   listAutomationsForTarget,
   runAutomationNowForTarget,
@@ -584,8 +585,22 @@ export default function AutomationsPage(): React.JSX.Element {
     // Non-null only for a concrete host filter, which constrains the destination.
     filterStableKey: hostCatalog.resolution.entry?.stableKey ?? null,
     activeWorkspaceStableKey: activeWorkspaceHostStableKey,
-    repoTables
+    repoTables,
+    projects: repos
   })
+  const editorProjects = createDestination.control.projects
+  // A destination change can strand the chosen project on another host; leaving it
+  // selected only defers the same refusal to submit.
+  useEffect(() => {
+    if (!createOpen || editingAutomationId !== null || createTarget !== 'orca') {
+      return
+    }
+    setDraft((current) =>
+      !current.projectId || editorProjects.some((project) => project.id === current.projectId)
+        ? current
+        : { ...current, projectId: '', workspaceId: '', baseBranch: '' }
+    )
+  }, [createOpen, createTarget, editingAutomationId, editorProjects])
   // The row's own host, from its captured owner. A page-level target cannot
   // speak for a list spanning authorities, and the legacy arm below it is only
   // ever reached by rows the desktop's unscoped list produced.
@@ -852,31 +867,27 @@ export default function AutomationsPage(): React.JSX.Element {
   }, [activePaneTab, selected, selectedExternal])
 
   const getDefaultTarget = useCallback(() => {
-    const destinationTarget = getAutomationListTarget(settings)
-    const eligibleRepos = getAutomationCreateRepos(repos, destinationTarget)
     const activeWorktree = activeWorktreeId ? worktreeMap.get(activeWorktreeId) : null
     const activeRepo = activeWorktree ? (repoMap.get(activeWorktree.repoId) ?? null) : null
-    const fallbackRepo =
-      (activeRepo &&
-      eligibleRepos.some(
-        (repo) =>
-          repo.id === activeRepo.id &&
-          getRepoExecutionHostId(repo) === getRepoExecutionHostId(activeRepo)
-      )
+    // The stated destination decides which projects exist for this draft, so an
+    // active workspace on another host is not a candidate here.
+    const eligibleActiveRepo =
+      activeRepo && editorProjects.some((project) => project.id === activeRepo.id)
         ? activeRepo
-        : null) ??
-      eligibleRepos[0] ??
-      null
+        : null
+    const fallbackRepo = eligibleActiveRepo ?? editorProjects[0] ?? null
     const fallbackWorktrees = fallbackRepo ? (worktreesByRepo[fallbackRepo.id] ?? []) : []
     // Why: automation-created workspaces can be active; new automations should start from
     // the repo's stable main worktree unless the user explicitly chooses otherwise.
-    const targetWorktree = fallbackRepo ? getDefaultWorktree(fallbackWorktrees) : null
-    const targetProjectId = fallbackRepo?.id ?? ''
+    const targetWorktree =
+      getDefaultWorktree(fallbackWorktrees) ??
+      (activeWorktree && activeWorktree.repoId === fallbackRepo?.id ? activeWorktree : null)
+    const targetProjectId = fallbackRepo?.id ?? targetWorktree?.repoId ?? ''
     return {
       projectId: targetProjectId,
       workspaceId: targetWorktree?.id ?? ''
     }
-  }, [activeWorktreeId, repoMap, repos, settings, worktreeMap, worktreesByRepo])
+  }, [activeWorktreeId, editorProjects, repoMap, worktreeMap, worktreesByRepo])
 
   const canCreateAutomation = getAutomationCreateAvailability({
     automationHostTarget: getAutomationListTarget(settings),
@@ -1237,6 +1248,7 @@ export default function AutomationsPage(): React.JSX.Element {
       scheduleWarning: hasCustomSchedule
         ? null
         : 'This Hermes automation has an unsupported saved schedule. Pick a supported schedule before saving changes.'
+    }
     setEditingAutomationId(null)
     setEditingRowKey(null)
     setEditingExternalTarget({ manager, job, scope })
@@ -2050,7 +2062,7 @@ export default function AutomationsPage(): React.JSX.Element {
         canSave={canSaveDraft}
         isEditingExternal={editingExternalTarget !== null}
         createTarget={createTarget}
-        repos={dialogRepos}
+        repos={editorProjects}
         projectHostSetups={projectHostSetups}
         automationYamlHooksByRepoKey={automationYamlHooksByRepoKey}
         getAutomationHooksCacheKey={getAutomationHooksCacheKey}

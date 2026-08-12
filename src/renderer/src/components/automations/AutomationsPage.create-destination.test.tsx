@@ -36,6 +36,12 @@ installAutomationsPageHarness()
 
 const RUNTIME_REPO_ID = 'repo-2'
 const RUNTIME_WORKSPACE_ID = 'workspace-2'
+const SSH_TARGET_ID = 'ssh-target-1'
+const SSH_REPO_ID = 'repo-ssh'
+const SSH_HOST_KEY = hostStableKey({
+  authority: { kind: 'desktop' },
+  selector: { kind: 'ssh', targetId: SSH_TARGET_ID }
+})
 
 const DESKTOP_SELF_KEY = hostStableKey({
   authority: { kind: 'desktop' },
@@ -88,6 +94,28 @@ function addRuntimeProject(): void {
   mocks.state.worktreesByRepo = { ...worktreesByRepo, [RUNTIME_REPO_ID]: [worktree] }
   mocks.repoMap.set(RUNTIME_REPO_ID, repo)
   mocks.worktreeMap.set(RUNTIME_WORKSPACE_ID, worktree)
+}
+
+/** A desktop-registered SSH host, with the generation that makes it fenceable. */
+function addSshHost(): void {
+  mocks.state.sshTargetLabels = new Map([[SSH_TARGET_ID, 'openclaw']])
+  mocks.state.sshTargetGenerations = new Map([[SSH_TARGET_ID, 1]])
+  mocks.state.sshConnectionStates = new Map([[SSH_TARGET_ID, { status: 'connected' }]])
+}
+
+/** A project checked out on that SSH host rather than locally. */
+function addSshProject(): void {
+  const repo = {
+    id: SSH_REPO_ID,
+    displayName: 'orca',
+    path: '/repos/orca',
+    badgeColor: '#222222',
+    addedAt: 1,
+    worktreeBaseRef: 'main',
+    connectionId: SSH_TARGET_ID
+  } as Repo
+  mocks.state.repos = [...(mocks.state.repos as Repo[]), repo]
+  mocks.repoMap.set(SSH_REPO_ID, repo)
 }
 
 /** The runtime answers a create; without this the RPC double returns an empty result. */
@@ -193,6 +221,64 @@ describe('AutomationsPage create destination', () => {
 
     expect(runtimeCreateCalls()).toHaveLength(1)
     expect(api.automations.create).not.toHaveBeenCalled()
+  })
+
+  it('offers only the projects the chosen host actually has', async () => {
+    api.automations.list.mockResolvedValue([])
+    scopedList([])
+    addSshHost()
+    addSshProject()
+
+    await renderPage()
+    await settleHostQueries()
+    await act(async () => {
+      mocks.listPanel?.openCreateDialog()
+    })
+    await act(async () => {
+      mocks.editorDialog?.createDestination?.onSelect(SSH_HOST_KEY)
+    })
+
+    // The local project shares this one's name, so offering both leaves the user
+    // no way to tell which is the one on that host.
+    expect(mocks.editorDialog?.repos?.map((repo) => repo.id)).toEqual([SSH_REPO_ID])
+  })
+
+  it('moves a stranded project to one the newly chosen host has', async () => {
+    api.automations.list.mockResolvedValue([])
+    scopedList([])
+    addSshHost()
+    addSshProject()
+
+    await renderPage()
+    await settleHostQueries()
+    await openCreateDialogFor(REPO_ID, WORKSPACE_ID)
+    expect(mocks.editorDialog?.draft?.projectId).toBe(REPO_ID)
+
+    await act(async () => {
+      mocks.editorDialog?.createDestination?.onSelect(SSH_HOST_KEY)
+    })
+
+    // Keeping the local project selected only defers the same refusal to submit.
+    expect(mocks.editorDialog?.draft?.projectId).toBe(SSH_REPO_ID)
+  })
+
+  it('offers nothing rather than a stranded project when the host has no projects', async () => {
+    api.automations.list.mockResolvedValue([])
+    scopedList([])
+    addSshHost()
+
+    await renderPage()
+    await settleHostQueries()
+    await act(async () => {
+      mocks.listPanel?.openCreateDialog()
+    })
+    await act(async () => {
+      mocks.editorDialog?.createDestination?.onSelect(SSH_HOST_KEY)
+    })
+
+    expect(mocks.editorDialog?.repos).toEqual([])
+    // Nothing is left selected to submit against a host that cannot hold it.
+    expect(mocks.editorDialog?.draft?.projectId).toBe('')
   })
 
   it('states the chosen host on the form before submit', async () => {

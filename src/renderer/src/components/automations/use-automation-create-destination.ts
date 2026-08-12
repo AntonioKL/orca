@@ -10,12 +10,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { translate } from '@/i18n/i18n'
+import type { Repo } from '../../../../shared/types'
 import type {
   AutomationHostCatalog,
   AutomationHostCatalogEntry
 } from './automation-host-catalog-types'
 import type { AutomationAuthorityRepoTables } from './automation-authority-identity'
 import {
+  automationCreateEligibleProjects,
   automationCreateProjectMismatch,
   preselectAutomationCreateHost,
   resolveAutomationCreateDestination,
@@ -31,6 +33,8 @@ export type AutomationCreateDestinationControl = {
   entries: readonly AutomationHostCatalogEntry[]
   resolution: AutomationCreateDestinationResolution
   onSelect: (stableKey: string) => void
+  /** Projects the resolved destination can hold; the whole list until one resolves. */
+  projects: readonly Repo[]
 }
 
 export type AutomationCreateDestinationCheck =
@@ -46,6 +50,7 @@ export type AutomationCreateDestinationInput = {
   filterStableKey: string | null
   activeWorkspaceStableKey: string | null
   repoTables: AutomationAuthorityRepoTables
+  projects: readonly Repo[]
 }
 
 export type AutomationCreateDestinationState = {
@@ -79,7 +84,15 @@ function ownerNotice(message: string): AutomationActionNotice {
 export function useAutomationCreateDestination(
   input: AutomationCreateDestinationInput
 ): AutomationCreateDestinationState {
-  const { open, catalog, entries, filterStableKey, activeWorkspaceStableKey, repoTables } = input
+  const {
+    open,
+    catalog,
+    entries,
+    filterStableKey,
+    activeWorkspaceStableKey,
+    repoTables,
+    projects
+  } = input
   const [captured, setCaptured] = useState<AutomationCreateDestination | null>(null)
   const [reason, setReason] = useState<AutomationCreateDestinationChoiceReason>('unselected')
 
@@ -169,8 +182,19 @@ export function useAutomationCreateDestination(
     [captured, reason]
   )
 
+  const eligibleProjects = useMemo(
+    () =>
+      resolution.status === 'ready'
+        ? automationCreateEligibleProjects(repoTables, resolution, projects)
+        : projects,
+    [projects, repoTables, resolution]
+  )
+
   return {
-    control: useMemo(() => ({ entries, resolution, onSelect }), [entries, onSelect, resolution]),
+    control: useMemo(
+      () => ({ entries, resolution, onSelect, projects: eligibleProjects }),
+      [eligibleProjects, entries, onSelect, resolution]
+    ),
     check
   }
 }
