@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Orca E2E &amp; Integration Coverage</title>
+<style>
+:root{color-scheme:dark;--bg:#0d1117;--panel:#151b24;--line:#293241;--text:#e7edf5;--muted:#9aa8ba;--green:#55d187;--amber:#f1ba63;--red:#f07c82;--blue:#7db7ff}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}main{max-width:1150px;margin:auto;padding:45px 24px 70px}h1{font-size:34px;line-height:1.15;margin:5px 0 10px}h2{font-size:21px;margin:35px 0 12px}h3{margin:0 0 5px}p{color:var(--muted)}a{color:var(--blue)}.eyebrow{color:var(--blue);font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}.lede{font-size:17px;max-width:850px}.callout{background:#211b12;border:1px solid #684d2b;border-radius:12px;padding:16px;margin:22px 0}.callout strong{color:var(--amber)}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.card,table{background:var(--panel);border:1px solid var(--line);border-radius:12px}.card{padding:16px}.label{color:var(--muted);font-size:13px}.metric{font-size:30px;font-weight:750}.platforms{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}.platform{background:var(--panel);border-top:3px solid var(--line);border-radius:8px;padding:12px}.platform b{display:block;font-size:19px}.mac{border-color:var(--green)}.linux{border-color:var(--amber)}.windows{border-color:var(--red)}.mobile{border-color:var(--blue)}table{width:100%;border-collapse:collapse;overflow:hidden}th,td{padding:11px 13px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{color:var(--muted);font-size:12px;text-transform:uppercase}tr:last-child td{border:0}td:first-child{font-weight:650}code{color:#c9d7e8;font-size:12px;word-break:break-word}.columns{display:grid;grid-template-columns:1fr 1fr;gap:18px}li{margin:7px 0;color:var(--muted)}.status{border-radius:999px;padding:2px 8px;font-size:12px;font-weight:700}.partial{color:var(--amber);background:#382916}.gap{color:var(--red);background:#351b22}.covered{color:var(--green);background:#153325}.small,.footer{font-size:13px;color:var(--muted)}@media(max-width:800px){.grid,.platforms{grid-template-columns:repeat(2,1fr)}.columns{grid-template-columns:1fr}}@media(max-width:500px){main{padding:28px 15px 50px}h1{font-size:28px}th,td{padding:9px 8px}}
+</style>
+</head>
+<body>
+<main>
+<div class="eyebrow">Orca test inventory · snapshot 2026-08-12</div>
+<h1>E2E &amp; integration coverage</h1>
+<p class="lede">A repository-based view of executable test inventory, CI platform execution, and recorded reliability-gate evidence. It separates tests that exist from tests that actually run on a platform.</p>
+<div class="callout"><strong>Bottom line:</strong> the largest exposure is cross-platform live evidence. The standard Electron E2E suite is broad but Linux-only in CI. Windows has valuable targeted native, ConPTY, crash-survival, update, and computer-E2E lanes, but not broad desktop E2E parity.</div>
+<div class="grid">
+<div class="card"><div class="label">Playwright Electron specs</div><div class="metric">246</div><div class="label">Headless by default; headful for tagged specs</div></div>
+<div class="card"><div class="label">Vitest-included files</div><div class="metric">4,764</div><div class="label">4,643 src · 101 config · 1 tool · 19 E2E unit</div></div>
+<div class="card"><div class="label">Computer E2E files</div><div class="metric">5</div><div class="label">macOS 2 · Linux 1 · Windows 2</div></div>
+<div class="card"><div class="label">Reliability gates</div><div class="metric">77</div><div class="label">64 partial protection · 13 no protection</div></div>
+</div>
+<h2>Platform evidence</h2>
+<p>Counts overlap because a gate may target several platforms. “Evidence” means the gate metadata records coverage; it does not imply complete product coverage.</p>
+<div class="platforms">
+<div class="platform mac"><b>macOS</b>62 / 71 gates</div>
+<div class="platform linux"><b>Linux</b>4 / 69 gates</div>
+<div class="platform windows"><b>Windows</b>3 / 73 gates</div>
+<div class="platform mobile"><b>iOS</b>1 / 2 gates</div>
+<div class="platform mobile"><b>Android</b>0 / 2 gates</div>
+<div class="platform mobile"><b>Mobile</b>0 / 4 gates</div>
+</div>
+<h2>What runs where</h2>
+<table><thead><tr><th>Layer</th><th>Current execution</th><th>Limitation</th></tr></thead><tbody>
+<tr><td>Standard Electron E2E</td><td>246 <code>tests/e2e/*.spec.ts</code>; Playwright headless; 10 Ubuntu CI shards</td><td><span class="status partial">Linux-biased</span><br>macOS and Windows are not part of the default E2E workflow.</td></tr>
+<tr><td>Headful Electron E2E</td><td>Tagged <code>@headful</code> specs through a separate Playwright project</td><td><span class="status partial">Targeted</span><br>Used for pointer capture and focus-sensitive paths.</td></tr>
+<tr><td>Computer/accessibility E2E</td><td>Dedicated macOS, Linux, and Windows jobs</td><td><span class="status covered">All 3 desktop OSes</span><br>Specialized coverage, not full desktop-app parity.</td></tr>
+<tr><td>Vitest contracts/integration</td><td>4,764 included files; real Git, PTY, sockets, HTTP, SQLite, and relay fixtures appear in the suite</td><td><span class="status partial">Mostly deterministic</span><br>No formal integration-test taxonomy or source coverage percentage.</td></tr>
+<tr><td>Windows native/recovery</td><td>Windows PR smoke, ConPTY tests, crash survival, update, and terminal restart workflows</td><td><span class="status partial">Targeted</span><br>Strongest Windows confidence is concentrated in terminal and recovery behavior.</td></tr>
+<tr><td>SSH/WSL/paired runtime</td><td>Direct SSH, Docker relay, paired-runtime, and WSL fixtures</td><td><span class="status partial">Scenario coverage</span><br>Live evidence is frequently macOS-hosted; Linux/Windows clients and WSL remain gaps.</td></tr>
+</tbody></table>
+<h2>Highest-value missing coverage</h2>
+<div class="columns"><div class="card"><h3>Windows behavior</h3><ul>
+<li>WSL restore and shell-resolution parity for PowerShell 5/7, cmd, Git Bash, WSL, and missing shells.</li>
+<li>ConPTY keyboard reset after agents/TUIs and modified-Enter routing.</li>
+<li>Windows CJK/wide-glyph repaint and pixel-refresh correctness.</li>
+<li>Windows input throughput and terminal backpressure budgets.</li>
+<li>Startup color-query leakage, restore convergence, and persisted-session recovery.</li>
+</ul></div><div class="card"><h3>Cross-platform live journeys</h3><ul>
+<li>Paired-runtime and remote browser/terminal journeys with Linux and Windows clients.</li>
+<li>Real sleep/wake, network partitions, multi-client churn, and reconnect behavior.</li>
+<li>WSL-specific live process and PTY restore evidence.</li>
+<li>Mixed-version client/host journeys in both skew directions.</li>
+<li>CI soak history and per-OS flake tracking.</li>
+</ul></div></div>
+<h2>Registered gaps with no executable protection</h2>
+<p>These are the clearest candidates for adding tests, based on <a href="config/reliability-gates.jsonc">config/reliability-gates.jsonc</a>.</p>
+<table><thead><tr><th>Area</th><th>Missing invariant</th><th>Target</th></tr></thead><tbody>
+<tr><td>Startup upgrade</td><td>Recover old production persisted sessions</td><td>macOS · Linux · Windows</td></tr>
+<tr><td>Terminal provider</td><td>Preserve WSL launch identity, liveness, and restore boundaries</td><td>Windows</td></tr>
+<tr><td>Terminal input</td><td>Reset Windows ConPTY keyboard protocol after agents/TUIs exit</td><td>Windows</td></tr>
+<tr><td>Terminal rendering</td><td>Repaint Windows CJK/wide glyphs without stale cells</td><td>Windows</td></tr>
+<tr><td>Terminal shell</td><td>Resolve Windows local/daemon shells and startup commands consistently</td><td>Windows</td></tr>
+<tr><td>Terminal performance</td><td>Keep input latency and throughput within explicit budgets</td><td>macOS · Linux · Windows</td></tr>
+<tr><td>Terminal capability</td><td>Prevent startup color queries leaking into streams</td><td>macOS · Linux · Windows</td></tr>
+<tr><td>Observability</td><td>Detect renderer/mirror restore divergence</td><td>macOS · Linux · Windows</td></tr>
+<tr><td>Terminal rendering</td><td>Prove forced repaint does not alter revealed-pane pixels</td><td>macOS · Linux · Windows</td></tr>
+</tbody></table>
+<p class="small">The gate file contains 13 no-protection entries; nine are explicitly marked “Registered gap only.” The remaining four are tracked as pending-stack or contract gaps.</p>
+<h2>Recommended order</h2>
+<ol><li>Add a Windows Playwright smoke lane covering golden flows, terminal restore/input, file-browser drives, titlebar, settings, and onboarding.</li><li>Wire ConPTY keyboard reset, shell parity, and CJK repaint into executable reliability gates.</li><li>Promote Linux and Windows paired/SSH journeys from contracts to live CI evidence.</li><li>Add explicit unit/integration/E2E/performance classification so coverage reports do not rely on filename heuristics.</li><li>Track pass history and flake rate per OS.</li></ol>
+<h2>Sources</h2>
+<ul><li><a href="tests/playwright.config.ts">tests/playwright.config.ts</a> — Playwright projects and matching.</li><li><a href="config/vitest.config.ts">config/vitest.config.ts</a> — Vitest inclusion.</li><li><a href=".github/workflows/e2e.yml">.github/workflows/e2e.yml</a> — standard E2E CI.</li><li><a href=".github/workflows/computer-e2e.yml">.github/workflows/computer-e2e.yml</a> — platform-specific computer E2E.</li><li><a href="config/reliability-gates.jsonc">config/reliability-gates.jsonc</a> — gates, evidence, and known gaps.</li></ul>
+<p class="footer">Static repository inventory dated 2026-08-12. Counts are file counts, not test-case or source-line coverage.</p>
+</main></body></html>
