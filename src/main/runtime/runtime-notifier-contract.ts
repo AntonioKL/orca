@@ -2,6 +2,7 @@ import type { SleepingAgentLaunchConfig } from '../../shared/agent-session-resum
 import type { TerminalPaneSplitSource } from '../../shared/feature-education-telemetry'
 import type { TerminalRevealIdentity } from '../../shared/terminal-reveal-identity'
 import type { TuiAgent } from '../../shared/tui-agent'
+import type { ClientHostedBrowserRowsEvent } from '../../shared/client-hosted-browser-rows'
 import type {
   WorktreeBaseStatusEvent,
   WorktreeRemoteBranchConflictEvent
@@ -86,7 +87,7 @@ export type RuntimeNotifier = {
   renameTerminal(tabId: string, title: string | null): void
   focusTerminal(tabId: string, worktreeId: string, leafId?: string | null): void
   focusEditorTab?(tabId: string, worktreeId: string): void
-  closeSessionTab?(tabId: string, worktreeId: string): void
+  closeSessionTab?(tabId: string, worktreeId: string): void | Promise<void>
   moveSessionTab?(worktreeId: string, move: RuntimeMobileSessionTabMove): void
   openFile?(
     worktreeId: string,
@@ -109,7 +110,10 @@ export type RuntimeNotifier = {
     content: string
   ): Promise<RuntimeMarkdownSaveTabResult>
   closeTerminal(tabId: string, paneRuntimeId?: number): void
-  closeTerminalTab?(tabId: string): Promise<void>
+  closeTerminalTab?(
+    tabId: string,
+    options?: { localPtyTeardownOwnedExternally?: boolean }
+  ): Promise<void>
   sleepWorktree(worktreeId: string): void
   // Why: a phone opening a worktree wakes its slept agents by asking the host
   // renderer to run its own navigation-free wake (experimental agent sleep);
@@ -134,4 +138,6 @@ export type RuntimeNotifier = {
     resolution: { text: string; createdAt: number }
   ): void
   browserDriverChanged?(browserPageId: string, driver: RuntimeBrowserDriverState): void
+  browserRemoteViewersChanged?(browserPageId: string, hasRemoteViewers: boolean): void
+  clientHostedBrowserRowsChanged?(event: ClientHostedBrowserRowsEvent): void
 }

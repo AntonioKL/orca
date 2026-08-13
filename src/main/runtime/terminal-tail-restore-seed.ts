@@ -19,6 +19,45 @@ export type RestoredTerminalTailSeed = {
   preview: string
 }
 
+export type RestorableTerminalTailRecord = {
+  lastOutputAt: number | null
+  tailBuffer: string[]
+  tailTranscriptBuffer: string[]
+  tailTranscriptChars: number
+  tailPartialLine: string
+  tailPendingAnsi: string
+  tailRedrawCursor: RetainedTailRedrawCursor | null
+  tailTruncated: boolean
+  tailLinesTotal: number
+  preview: string
+}
+
+export function restoredTerminalTailSeedAllowed(record: RestorableTerminalTailRecord): boolean {
+  return (
+    record.lastOutputAt === null &&
+    record.preview.length === 0 &&
+    record.tailBuffer.length === 0 &&
+    record.tailPartialLine.length === 0
+  )
+}
+
+// Deliberately untouched: historical bytes must not read as fresh activity or a live wait signal.
+export function applyRestoredTerminalTailSeed(
+  record: RestorableTerminalTailRecord,
+  seed: RestoredTerminalTailSeed
+): void {
+  // Why: append operations replace arrays, while shared references keep equality checks O(1).
+  record.tailBuffer = seed.lines
+  record.tailTranscriptBuffer = seed.transcriptLines
+  record.tailTranscriptChars = seed.transcriptChars
+  record.tailPartialLine = seed.partialLine
+  record.tailPendingAnsi = seed.pendingAnsi
+  record.tailRedrawCursor = seed.redrawCursor
+  record.tailTruncated = seed.truncated
+  record.tailLinesTotal = seed.linesTotal
+  record.preview = seed.preview
+}
+
 export function buildRestoredTerminalTailSeed(text: string): RestoredTerminalTailSeed | null {
   let bounded = text
   let sliced = false
