@@ -2325,7 +2325,10 @@ void app.whenReady().then(async () => {
   // Why this early: the first window stamps the hosting id into its renderer's argv, so the durable
   // read has to have happened by then or the renderer and the browser-host lease disagree.
   initializeBrowserClientHostId(activeOrcaProfile.profileDirectory)
-  store = new Store({ dataFile: activeOrcaProfile.dataFile })
+  store = new Store({
+    dataFile: activeOrcaProfile.dataFile,
+    storageAuthority: isServeMode ? 'runtime' : 'desktop'
+  })
   // Why here and not at install time: the report remembers what it last said, and that
   // state lives beside the profile data file, which does not exist until now.
   reportSecretProtectionGap({

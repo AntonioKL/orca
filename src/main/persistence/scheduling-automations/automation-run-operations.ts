@@ -88,6 +88,46 @@ export function createAutomationRun(
   return run
 }
 
+export function recordRepeatedAutomationSkip(
+  operations: AutomationRunOperations,
+  automationId: string,
+  error: string,
+  scheduledFor: number
+): AutomationRun | null {
+  const runs = operations.state.automationRuns ?? []
+  const latest = runs
+    .filter((run) => run.automationId === automationId)
+    .reduce<AutomationRun | null>(
+      (newest, run) => (!newest || run.createdAt > newest.createdAt ? run : newest),
+      null
+    )
+  if (
+    !latest ||
+    latest.status !== 'skipped_unavailable' ||
+    latest.trigger !== 'scheduled' ||
+    latest.error !== error
+  ) {
+    return null
+  }
+  if ((latest.lastOccurrenceAt ?? latest.scheduledFor) === scheduledFor) {
+    return latest
+  }
+  const now = Date.now()
+  const updated: AutomationRun = {
+    ...latest,
+    occurrenceCount: (latest.occurrenceCount ?? 1) + 1,
+    lastOccurrenceAt: scheduledFor
+  }
+  runs[runs.findIndex((run) => run.id === latest.id)] = updated
+  const automation = operations.state.automations.find((entry) => entry.id === automationId)
+  if (automation) {
+    automation.lastRunAt = now
+    automation.updatedAt = now
+  }
+  operations.flush()
+  return updated
+}
+
 export function updateAutomationRun(
   operations: AutomationRunOperations,
   result: AutomationDispatchResult

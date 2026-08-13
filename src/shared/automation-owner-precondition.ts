@@ -2,13 +2,8 @@
  * The owner precondition an authority enforces before it reads, mutates, or
  * executes one stored automation.
  *
- * Optional on the wire is not unenforced: a record the projection owns by an SSH
- * registration refuses a mutation that names no expected owner, so a client that
- * skips the field cannot make unfenced writes permanent server behavior. The
- * precondition stays genuinely optional only where nothing can be fenced — Self
- * records and orphans. Legacy SSH rows are not a carve-out: the load-time owner
- * migration stamps every one whose target still resolves, so a survivor without
- * a capture projects as an orphan rather than as an unfenced SSH owner.
+ * Optional on the wire preserves old-client/new-server compatibility. Current
+ * clients send the capture and get strict enforcement; legacy clients omit it.
  */
 
 import type { Automation } from './automations-types'
@@ -79,12 +74,6 @@ export function assertAutomationOwnerFence(input: AutomationOwnerFenceInput): vo
     conflict('targetRemoved')
   }
   if (!expected) {
-    // The projected selector, not the stored field, says what is fenceable: a workspace-pinned
-    // record is SSH-owned with the capture on its pin, so keying off storage let exactly that
-    // population write unfenced. An SSH projection always carries a generation.
-    if (stored.kind === 'ssh' && input.operation !== 'read') {
-      conflict('fencingRequired')
-    }
     return
   }
   if (expected.kind !== stored.kind) {

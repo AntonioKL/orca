@@ -60,6 +60,8 @@ export type AutomationListLocalRowsProps = {
   relativeNow: number
   repoMap: ReadonlyMap<string, Repo>
   worktreeMap: ReadonlyMap<string, Worktree>
+  repoForRow?: (row: AutomationListRow) => Repo | undefined
+  worktreeForRow?: (row: AutomationListRow, repo: Repo | undefined) => Worktree | undefined
   projectHostSetups: readonly ProjectHostSetup[]
   sshConnectionStates: ReadonlyMap<string, Pick<SshConnectionState, 'status'>>
   runtimeStatusByEnvironmentId: ReadonlyMap<
@@ -76,6 +78,8 @@ export type AutomationListLocalRowsProps = {
   onToggle: (row: AutomationListRow) => void
   onDelete: (row: AutomationListRow) => void
 }
+
+const EMPTY_HOST_LABELS: ReadonlyMap<string, string> = new Map()
 
 function automationUsageText(summary: AutomationUsageSummary | undefined): string {
   if (!summary || summary.unavailableRuns > 0) {
@@ -110,12 +114,14 @@ export function AutomationListLocalRows({
   relativeNow,
   repoMap,
   worktreeMap,
+  repoForRow,
+  worktreeForRow,
   projectHostSetups,
   sshConnectionStates,
   runtimeStatusByEnvironmentId,
   hostTargetFor,
   automationSourceHostAvailabilityByRowKey,
-  hostLabelById = new Map(),
+  hostLabelById = EMPTY_HOST_LABELS,
   isActionEnabled,
   onSelect,
   onRunNow,
@@ -129,9 +135,9 @@ export function AutomationListLocalRows({
     <>
       {rows.map((row) => {
         const { automation } = row
-        const automationRepo = repoMap.get(getAutomationRunRepoId(automation))
+        const automationRepo = repoForRow?.(row) ?? repoMap.get(getAutomationRunRepoId(automation))
         const automationWorktree = automation.workspaceId
-          ? worktreeMap.get(automation.workspaceId)
+          ? (worktreeForRow?.(row, automationRepo) ?? worktreeMap.get(automation.workspaceId))
           : null
         const automationRunAvailability = getAutomationTargetAvailability({
           automation,

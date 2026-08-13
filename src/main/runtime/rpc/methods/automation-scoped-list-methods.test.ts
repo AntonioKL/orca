@@ -1,7 +1,7 @@
 /**
  * The runtime end of the list contract: an old client that sends no params must
- * keep receiving the authority's complete list in the legacy shape, and every
- * owner precondition must survive schema parsing rather than being stripped.
+ * keep receiving the authority's complete list through the legacy field while
+ * current callers also receive owner metadata.
  */
 import { describe, expect, it, vi } from 'vitest'
 import type { RpcContext, RpcRequest } from '../core'
@@ -20,11 +20,22 @@ function method(name: string) {
 function runtimeStub() {
   return {
     listAutomations: vi.fn(() => [{ id: 'a1' }, { id: 'a2' }]),
-    listAutomationsForScope: vi.fn(() => ({
-      automations: [{ id: 'a1' }],
-      items: [{ automationId: 'a1', selector: { kind: 'self' } }],
-      orphanCount: 2
-    })),
+    listAutomationsForScope: vi.fn((params?: { selector?: { kind: string } }) =>
+      params?.selector
+        ? {
+            automations: [{ id: 'a1' }],
+            items: [{ automationId: 'a1', selector: { kind: 'self' } }],
+            orphanCount: 2
+          }
+        : {
+            automations: [{ id: 'a1' }, { id: 'a2' }],
+            items: [
+              { automationId: 'a1', selector: { kind: 'self' } },
+              { automationId: 'a2', selector: { kind: 'orphan', issue: 'missing' } }
+            ],
+            orphanCount: 1
+          }
+    ),
     listAutomationRuns: vi.fn(() => []),
     showAutomation: vi.fn(() => ({ id: 'a1' })),
     automationOwnerPrecondition: vi.fn(() => SSH_OWNER),
@@ -49,18 +60,20 @@ async function invoke(name: string, params: unknown, runtime: ReturnType<typeof 
 const SSH_OWNER = { selector: { kind: 'ssh', targetId: 'ssh-1', targetGeneration: 7 } }
 
 describe('automation.list', () => {
-  it('answers a parameterless request with the complete legacy payload', async () => {
+  it('answers a parameterless request with owner metadata and the legacy field', async () => {
     const runtime = runtimeStub()
-    expect(await invoke('automation.list', undefined, runtime)).toEqual({
-      automations: [{ id: 'a1' }, { id: 'a2' }]
+    expect(await invoke('automation.list', undefined, runtime)).toMatchObject({
+      automations: [{ id: 'a1' }, { id: 'a2' }],
+      items: [{ automationId: 'a1' }, { automationId: 'a2' }]
     })
-    expect(runtime.listAutomationsForScope).not.toHaveBeenCalled()
+    expect(runtime.listAutomationsForScope).toHaveBeenCalledWith({})
   })
 
   it('treats an empty object the same as no params', async () => {
     const runtime = runtimeStub()
-    expect(await invoke('automation.list', {}, runtime)).toEqual({
-      automations: [{ id: 'a1' }, { id: 'a2' }]
+    expect(await invoke('automation.list', {}, runtime)).toMatchObject({
+      automations: [{ id: 'a1' }, { id: 'a2' }],
+      items: [{ automationId: 'a1' }, { automationId: 'a2' }]
     })
   })
 
@@ -102,7 +115,7 @@ describe('automation.list from a client that sends literal null params', () => {
     const response = await dispatcher.dispatch(request)
 
     expect(response).toMatchObject({ result: { automations: [{ id: 'a1' }, { id: 'a2' }] } })
-    expect(runtime.listAutomationsForScope).not.toHaveBeenCalled()
+    expect(runtime.listAutomationsForScope).toHaveBeenCalledWith({})
   })
 })
 

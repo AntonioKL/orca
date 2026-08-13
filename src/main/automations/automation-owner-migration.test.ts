@@ -70,6 +70,7 @@ function migrate(input: {
   folderWorkspaces?: FolderWorkspace[]
   projectGroups?: ProjectGroup[]
   sshTargetGenerationCounter?: number
+  storageAuthority?: 'desktop' | 'runtime'
 }) {
   return migrateAutomationOwners({
     automations: input.automations ?? [],
@@ -79,6 +80,7 @@ function migrate(input: {
     projectGroups: input.projectGroups,
     removedSshTargetTombstones: [],
     sshTargetGenerationCounter: input.sshTargetGenerationCounter,
+    storageAuthority: input.storageAuthority,
     now: NOW
   })
 }
@@ -282,6 +284,38 @@ describe('migrateAutomationOwners', () => {
       expect(result.automations).toHaveLength(1)
     }
   )
+
+  it.each([
+    { label: 'schedulerOwner', overrides: { schedulerOwner: 'remote_host_service' as const } },
+    {
+      label: 'runContext.hostId',
+      overrides: {
+        runContext: {
+          kind: 'workspace-run' as const,
+          projectId: 'p',
+          hostId: 'runtime:env-1' as const,
+          projectHostSetupId: 's',
+          repoId: 'repo-1',
+          path: '/tmp/repo'
+        }
+      }
+    }
+  ])('keeps a runtime-owned record flagged by $label enabled and owned', ({ overrides }) => {
+    const result = migrate({
+      automations: [makeAutomation(overrides)],
+      repos: [makeRepo()],
+      storageAuthority: 'runtime'
+    })
+    const migrated = result.automations[0]
+    expect(migrated.enabled).toBe(true)
+    expect(
+      projectAutomationSelector(migrated, {
+        storageAuthority: 'runtime',
+        sshTargetGeneration: () => undefined,
+        repoConnectionId: () => null
+      })
+    ).toEqual({ kind: 'self' })
+  })
 
   it('leaves a differing captured generation alone so the record stays a replaced orphan', () => {
     const result = migrate({

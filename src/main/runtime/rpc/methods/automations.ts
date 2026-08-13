@@ -11,11 +11,8 @@ export const AUTOMATION_METHODS: RpcMethod[] = [
   defineMethod({
     name: 'automation.list',
     params: AutomationList,
-    // Why: a scoped caller gets the qualified projection; a parameterless one keeps the legacy payload.
-    handler: (params, { runtime }) =>
-      params.selector
-        ? runtime.listAutomationsForScope({ selector: params.selector })
-        : { automations: runtime.listAutomations() }
+    // The projection retains `automations`, so old clients ignore the added owner metadata.
+    handler: (params, { runtime }) => runtime.listAutomationsForScope(params)
   }),
   defineMethod({
     name: 'automation.show',

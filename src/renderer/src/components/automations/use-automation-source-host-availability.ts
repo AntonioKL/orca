@@ -16,6 +16,7 @@ import {
   type RepoBackedAutomationSourceContext
 } from './automation-source-context'
 import type { AutomationListRow } from './automation-list-row-identity'
+import { createAutomationHostRequestPool } from './automation-host-scheduler-queue'
 
 /**
  * Availability of each automation's *source* host — the host its task provider
@@ -43,6 +44,7 @@ export function useAutomationSourceHostAvailability(
   )
   const mountedRef = useRef(true)
   const requestedHostIdsRef = useRef<Set<TaskSourceContext['hostId']>>(new Set())
+  const [requestPool] = useState(createAutomationHostRequestPool)
   const [statusByHostId, setStatusByHostId] = useState<
     ReadonlyMap<TaskSourceContext['hostId'], RuntimeProviderPreflightStatus>
   >(() => new Map())
@@ -73,8 +75,9 @@ export function useAutomationSourceHostAvailability(
   useEffect(
     () => () => {
       mountedRef.current = false
+      requestPool.cancelQueued()
     },
-    []
+    [requestPool]
   )
   useEffect(() => {
     if (!preflightStatusCurrent || !preflightStatusChecked) {
@@ -108,16 +111,23 @@ export function useAutomationSourceHostAvailability(
       if (parsed?.kind !== 'runtime') {
         continue
       }
-      void callRuntimeRpc<PreflightStatus>(
-        { kind: 'environment', environmentId: parsed.environmentId },
-        'preflight.check',
-        undefined,
-        { timeoutMs: 15_000 }
-      )
-        .then((status) => record(hostId, status))
-        .catch(() => record(hostId, null))
+      void requestPool.submit({
+        run: async () => {
+          try {
+            const status = await callRuntimeRpc<PreflightStatus>(
+              { kind: 'environment', environmentId: parsed.environmentId },
+              'preflight.check',
+              undefined,
+              { timeoutMs: 15_000 }
+            )
+            record(hostId, status)
+          } catch {
+            record(hostId, null)
+          }
+        }
+      })
     }
-  }, [runtimeSourceHostIds])
+  }, [requestPool, runtimeSourceHostIds])
 
   return useMemo(() => {
     const availabilityByRowKey = new Map<string, TaskSourceHostAvailability[]>()

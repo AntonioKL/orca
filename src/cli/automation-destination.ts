@@ -49,13 +49,8 @@ async function sshTargetGeneration(
   client: RuntimeClient,
   targetId: string
 ): Promise<number | undefined> {
-  let targets: SshTargetSummary[]
-  try {
-    targets = (await client.call<{ targets: SshTargetSummary[] }>('ssh.listTargetSummaries')).result
-      .targets
-  } catch {
-    return undefined
-  }
+  const targets = (await client.call<{ targets: SshTargetSummary[] }>('ssh.listTargetSummaries'))
+    .result.targets
   const match = targets.find((candidate) => candidate.id === targetId)
   if (!match) {
     throw new AutomationOwnerConflictError(AUTOMATION_OWNER_CONFLICT_CODES.invalidDestination)

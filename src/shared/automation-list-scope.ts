@@ -72,6 +72,8 @@ export type AutomationWorkspaceHost =
   | { kind: 'ambiguous' }
 
 export type AutomationProjectionContext = {
+  /** The process that owns this store; runtime scheduling markers are local only on a runtime. */
+  storageAuthority?: 'desktop' | 'runtime'
   /** Current registration generation of a saved SSH target; undefined once it is gone. */
   sshTargetGeneration: (targetId: string) => number | undefined
   /** `undefined` = the repo is gone; `null` = a local repo; a string = its SSH connection. */
@@ -138,17 +140,17 @@ function workspacePinSelector(
 }
 
 /**
- * Storage authority is never inferred here — `schedulerOwner` and
- * `runContext.hostId` only mark a record unrunnable, and a bare `local` is not
- * evidence of Self without a resolvable local project behind it.
+ * Runtime scheduling markers are owned only in runtime storage. A bare `local`
+ * still needs a resolvable local project before it is evidence of Self.
  */
 export function projectAutomationSelector(
   automation: Automation,
   context: AutomationProjectionContext
 ): AutomationListItemSelector {
   if (
-    automation.schedulerOwner === 'remote_host_service' ||
-    parseExecutionHostId(automation.runContext?.hostId)?.kind === 'runtime'
+    context.storageAuthority !== 'runtime' &&
+    (automation.schedulerOwner === 'remote_host_service' ||
+      parseExecutionHostId(automation.runContext?.hostId)?.kind === 'runtime')
   ) {
     return orphan(AUTOMATION_ORPHAN_ISSUES.scheduledElsewhere)
   }
@@ -191,7 +193,7 @@ const CAPTURED_HOST_ISSUES: Record<AutomationCapturedHostIssue, true> = {
 }
 
 function isCapturedHostIssue(issue: string): issue is AutomationCapturedHostIssue {
-  return Object.prototype.hasOwnProperty.call(CAPTURED_HOST_ISSUES, issue)
+  return Object.hasOwn(CAPTURED_HOST_ISSUES, issue)
 }
 
 /**

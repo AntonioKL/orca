@@ -194,14 +194,11 @@ describe('owner-fenced mutations', () => {
     expect(store.listAutomations().find((entry) => entry.id === 'ssh-1-a')?.enabled).toBe(true)
   })
 
-  it('refuses an unfenced mutation of a record pinned to a generation', async () => {
+  it('keeps legacy mutations compatible without an owner field', async () => {
     const store = await createStore()
-    const conflict = expect.objectContaining({
-      code: AUTOMATION_OWNER_CONFLICT_CODES.fencingRequired
-    })
-    expect(() => store.updateAutomation('ssh-1-a', { enabled: false })).toThrowError(conflict)
-    expect(() => store.deleteAutomation('ssh-1-a')).toThrowError(conflict)
-    expect(store.listAutomations()).toHaveLength(3)
+    expect(store.updateAutomation('ssh-1-a', { enabled: false }).enabled).toBe(false)
+    expect(() => store.deleteAutomation('ssh-1-a')).not.toThrow()
+    expect(store.listAutomations()).toHaveLength(2)
   })
 
   it('leaves a legacy client unaffected on a self record', async () => {
@@ -256,6 +253,15 @@ describe('owner-fenced mutations', () => {
  * The projection is what makes the fence satisfiable off-host rather than a wall.
  */
 describe('projected owner precondition', () => {
+  it('reuses the complete projection until automation state changes', async () => {
+    const store = await createStore()
+    const first = store.listAutomationsForScope()
+    expect(store.listAutomationsForScope()).toBe(first)
+
+    store.updateAutomation('local-1', { enabled: false })
+    expect(store.listAutomationsForScope()).not.toBe(first)
+  })
+
   it('projects the fenceable owner for each kind of record', async () => {
     const store = await createStore()
     expect(store.automationOwnerPrecondition('ssh-1-a')).toEqual(OWNED_SSH)
@@ -270,9 +276,7 @@ describe('projected owner precondition', () => {
   it('satisfies the fence it was projected from, on the record that used to refuse', async () => {
     const store = await createStore()
     const owner = store.automationOwnerPrecondition('ssh-1-a')!
-    expect(() => store.updateAutomation('ssh-1-a', { enabled: false })).toThrowError(
-      expect.objectContaining({ code: AUTOMATION_OWNER_CONFLICT_CODES.fencingRequired })
-    )
+    expect(() => store.updateAutomation('ssh-1-a', { enabled: false })).not.toThrow()
     expect(
       store.updateAutomation('ssh-1-a', { enabled: false }, { expectedOwner: owner }).enabled
     ).toBe(false)

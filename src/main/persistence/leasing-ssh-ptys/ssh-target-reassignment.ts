@@ -2,6 +2,7 @@ import type { ProjectHostSetup } from '../../../shared/project-types'
 import { toSshExecutionHostId } from '../../../shared/execution-host'
 import type { PersistedState } from '../../../shared/persisted-state-types'
 import {
+  migrateFolderWorkspaceHostSshTargetId,
   migrateUiHostScopeSshTargetId,
   migrateWorkspaceSessionSshTargetId
 } from '../../ssh/ssh-target-id-migration'
@@ -11,6 +12,11 @@ import {
   migrateRetirementNamespaceHostIdentity,
   sshHostIdentity
 } from '../../worktree-retirement-namespace'
+import {
+  migrateAutomationHostFilterSshTargetId,
+  migrateAutomationsForSshReadoption
+} from '../../automations/automation-ssh-readoption-migration'
+import { automationIdsPinnedToSshTarget } from '../scheduling-automations/automation-owner-projection'
 
 export type SshTargetReassignmentOperations = {
   state: PersistedState
@@ -105,6 +111,30 @@ export function reassignSshTargetId(
     carrierChanged = true
   }
   if (migrateRetirementNamespaces(operations.state, oldTargetId, newTargetId)) {
+    carrierChanged = true
+  }
+  const workspacePinnedAutomationIds = automationIdsPinnedToSshTarget(
+    operations.state,
+    oldTargetId
+  )
+  if (migrateFolderWorkspaceHostSshTargetId(operations.state, oldTargetId, newTargetId)) {
+    carrierChanged = true
+  }
+  if (
+    migrateAutomationsForSshReadoption({
+      automations: operations.state.automations ?? [],
+      automationRuns: operations.state.automationRuns ?? [],
+      oldTargetId,
+      newTargetId,
+      workspacePinnedAutomationIds,
+      newTargetGeneration: (operations.state.sshTargets ?? []).find(
+        (target) => target.id === newTargetId
+      )?.generation
+    })
+  ) {
+    carrierChanged = true
+  }
+  if (migrateAutomationHostFilterSshTargetId(operations.state.ui, oldTargetId, newTargetId)) {
     carrierChanged = true
   }
   for (const lease of operations.state.sshRemotePtyLeases ?? []) {

@@ -17,6 +17,7 @@ import type {
 } from './automation-host-catalog-types'
 import type { AutomationHostFilterResolution } from './automation-host-filter-resolution'
 import type { Repo } from '../../../../shared/repo-types'
+import type { Worktree } from '../../../../shared/worktree/types'
 import { resolveAutomationHostListRows } from './automation-host-list-rows'
 import {
   buildAutomationListSearchRows,
@@ -24,6 +25,7 @@ import {
   matchAutomationListSearchRowKeys
 } from './automation-list-search-rows'
 import { REPO_ID } from './automations-page-fixtures'
+import { automationRepoForRow, automationWorktreeForRow } from './automation-list-row-identity'
 
 const repoMap = new Map([
   [REPO_ID, { id: REPO_ID, displayName: 'orca', path: '/src/orca' } as Repo]
@@ -135,5 +137,44 @@ describe('automation list row identity across hosts', () => {
 
     expect(namesMatching('web-01')).toEqual(['Nightly web-01'])
     expect(namesMatching('this computer')).toEqual(['Nightly desktop'])
+  })
+
+  it('resolves colliding projects and worktrees inside each row authority', () => {
+    const rows = collidedListRows().rows
+    const repos = [
+      { ...repoMap.get(REPO_ID)!, displayName: 'Desktop repo', executionHostId: 'local' as const },
+      {
+        ...repoMap.get(REPO_ID)!,
+        displayName: 'Runtime repo',
+        executionHostId: 'runtime:gpu' as const
+      }
+    ]
+    const worktrees = [
+      { id: 'ws-1', repoId: REPO_ID, hostId: 'local', displayName: 'Desktop workspace' },
+      {
+        id: 'ws-1',
+        repoId: REPO_ID,
+        hostId: 'runtime:gpu',
+        displayName: 'Runtime workspace'
+      }
+    ] as Worktree[]
+    const fallbackRepos = new Map([[REPO_ID, repos[1]]])
+    const fallbackWorktrees = new Map([['ws-1', worktrees[1]]])
+
+    expect(rows.map((row) => automationRepoForRow(row, repos, fallbackRepos)?.displayName)).toEqual(
+      ['Desktop repo', 'Runtime repo']
+    )
+    expect(
+      rows.map((row) => {
+        const repo = automationRepoForRow(row, repos, fallbackRepos)
+        return automationWorktreeForRow(
+          row,
+          { [REPO_ID]: worktrees },
+          repo,
+          fallbackWorktrees,
+          'ws-1'
+        )?.displayName
+      })
+    ).toEqual(['Desktop workspace', 'Runtime workspace'])
   })
 })

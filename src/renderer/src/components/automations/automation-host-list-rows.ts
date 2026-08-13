@@ -139,6 +139,7 @@ export function resolveAutomationHostListRows(
       const listRow: AutomationListRow = {
         key: automationListRowKey(entry.stableKey, row.automation.id),
         automation: row.automation,
+        catalogRef: entry.stableRef,
         hostLabel: entry.label,
         usageSummary: row.usageSummary ?? null
       }

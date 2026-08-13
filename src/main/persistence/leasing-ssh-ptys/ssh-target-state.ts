@@ -3,9 +3,13 @@ import type { RemovedSshTargetTombstone, SshTarget } from '../../../shared/ssh-t
 import type { ProtectedSecretPersistence } from '../../protected-secret-persistence'
 import { sshPtyOwnerLeaseSecretSlot } from '../../protected-secret-persistence'
 import {
-  MAX_CLAUDE_LIVE_PTY_SESSION_IDS,
-  MAX_REMOVED_SSH_TARGET_TOMBSTONES
+  MAX_CLAUDE_LIVE_PTY_SESSION_IDS
 } from '../restoring-sessions/pane-alias-normalization'
+import {
+  MAX_REMOVED_SSH_TARGET_TOMBSTONES,
+  capRemovedSshTargetTombstones,
+  collectSshTargetRemovalEvidenceDependencies
+} from '../../ssh/removed-ssh-target-tombstone-retention'
 import { normalizeSshTarget } from './ssh-normalization'
 import { isRuntimeOwnedSshTargetId } from '../../../shared/execution-host'
 import {
@@ -170,11 +174,28 @@ export function addRemovedSshTargetTombstone(
   const existing = operations.state.removedSshTargetTombstones ?? []
   // Why: dedupe by oldTargetId so re-removing the same id can't stack duplicate tombstones; newest wins.
   const filtered = existing.filter((entry) => entry.oldTargetId !== tombstone.oldTargetId)
-  // Cap the history so pathological churn can't grow the state file unbounded.
-  operations.state.removedSshTargetTombstones = [...filtered, tombstone].slice(
-    -MAX_REMOVED_SSH_TARGET_TOMBSTONES
+  operations.state.removedSshTargetTombstones = capRemovedSshTargetTombstones(
+    [...filtered, tombstone],
+    sshTargetRemovalEvidenceDependencies(operations.state),
+    MAX_REMOVED_SSH_TARGET_TOMBSTONES
   )
   operations.scheduleSave()
+}
+
+function sshTargetRemovalEvidenceDependencies(state: PersistedState): Set<string> {
+  return collectSshTargetRemovalEvidenceDependencies({
+    automations: state.automations ?? [],
+    automationHostFilter: state.ui?.automationHostFilter
+  })
+}
+
+export function releaseRemovedSshTargetTombstone(
+  operations: SshTargetStateOperations,
+  oldTargetId: string
+): void {
+  if (!sshTargetRemovalEvidenceDependencies(operations.state).has(oldTargetId)) {
+    removeRemovedSshTargetTombstone(operations, oldTargetId)
+  }
 }
 
 export function removeRemovedSshTargetTombstone(

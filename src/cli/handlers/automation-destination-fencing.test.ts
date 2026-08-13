@@ -23,6 +23,7 @@ function authority(options: {
   /** Generation the same target carries by the time the write lands. */
   generationAtWrite?: number
   repoConnectionId?: string | null
+  targetSummaryError?: Error
 }): { call: ReturnType<typeof vi.fn>; writes: { method: string; params: unknown }[] } {
   const writes: { method: string; params: unknown }[] = []
   const connectionId = options.repoConnectionId ?? null
@@ -37,6 +38,9 @@ function authority(options: {
       return ok({ repo: { id: 'r1', connectionId } })
     }
     if (method === 'ssh.listTargetSummaries') {
+      if (options.targetSummaryError) {
+        throw options.targetSummaryError
+      }
       return ok({ targets: options.registered })
     }
     if (method === 'automation.create' || method === 'automation.update') {
@@ -105,6 +109,26 @@ describe('CLI automation writes fence the host they land on', () => {
         json: true
       })
     ).rejects.toThrow('automation_destination_invalid')
+
+    expect(writes).toEqual([])
+  })
+
+  it('does not drop the fence when reading SSH registrations fails', async () => {
+    const { call, writes } = authority({
+      registered: [],
+      repoConnectionId: 'box-1',
+      targetSummaryError: new Error('rpc timeout')
+    })
+    vi.spyOn(console, 'log').mockImplementation(() => undefined)
+
+    await expect(
+      AUTOMATION_HANDLERS['automations create']!({
+        client: { call } as never,
+        cwd: '/tmp',
+        flags: new Map([...CREATE_FLAGS, ['repo', 'repo-on-box-1']]),
+        json: true
+      })
+    ).rejects.toThrow('rpc timeout')
 
     expect(writes).toEqual([])
   })

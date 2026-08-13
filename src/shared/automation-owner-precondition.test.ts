@@ -104,11 +104,10 @@ describe('assertAutomationOwnerFence', () => {
     )
   })
 
-  it('requires a precondition before mutating a record pinned to a generation', () => {
-    expectConflict(
-      () => assertAutomationOwnerFence({ automation: sshRecord, operation: 'mutate', context }),
-      AUTOMATION_OWNER_CONFLICT_CODES.fencingRequired
-    )
+  it('keeps legacy mutations compatible when no precondition is present', () => {
+    expect(() =>
+      assertAutomationOwnerFence({ automation: sshRecord, operation: 'mutate', context })
+    ).not.toThrow()
   })
 
   it('still lets an old client read that record', () => {
@@ -125,25 +124,16 @@ describe('assertAutomationOwnerFence', () => {
 
   // The stored field is absent on a workspace-pinned record while the projection carries a
   // generation, so keying the demand off storage let precisely this population write unfenced.
-  it('requires a precondition on a record the projection presents as SSH-owned', () => {
-    expectConflict(
-      () =>
+  it('keeps legacy workspace-pinned mutations and execution compatible', () => {
+    for (const operation of ['mutate', 'execute'] as const) {
+      expect(() =>
         assertAutomationOwnerFence({
           automation: pinnedLocalRecord,
-          operation: 'mutate',
+          operation,
           context: pinnedContext
-        }),
-      AUTOMATION_OWNER_CONFLICT_CODES.fencingRequired
-    )
-    expectConflict(
-      () =>
-        assertAutomationOwnerFence({
-          automation: pinnedLocalRecord,
-          operation: 'execute',
-          context: pinnedContext
-        }),
-      AUTOMATION_OWNER_CONFLICT_CODES.fencingRequired
-    )
+        })
+      ).not.toThrow()
+    }
   })
 
   it('still lets an old client read a workspace-pinned record', () => {

@@ -31,7 +31,7 @@ import { scanAutomationsForGhostSshTargets } from './automation-ghost-ssh-tombst
 export type AutomationOwnerClassification = 'owned' | 'orphan' | 'ambiguous'
 
 /**
- * Storage authority is never inferred from these fields — they only mark a record unrunnable.
+ * Runtime markers belong to a runtime store; the same markers are ambiguous desktop mirrors.
  *
  * `knownSshTargetIds` is the authority's own persisted registry, so a miss is
  * settled evidence rather than a list that has not loaded. `workspacePin` is
@@ -41,11 +41,13 @@ export type AutomationOwnerClassification = 'owned' | 'orphan' | 'ambiguous'
 export function classifyAutomationOwner(
   automation: Automation,
   knownSshTargetIds: ReadonlySet<string>,
-  workspacePin?: AutomationWorkspaceSshPin
+  workspacePin?: AutomationWorkspaceSshPin,
+  storageAuthority: 'desktop' | 'runtime' = 'desktop'
 ): AutomationOwnerClassification {
   if (
-    automation.schedulerOwner === 'remote_host_service' ||
-    parseExecutionHostId(automation.runContext?.hostId)?.kind === 'runtime'
+    storageAuthority !== 'runtime' &&
+    (automation.schedulerOwner === 'remote_host_service' ||
+      parseExecutionHostId(automation.runContext?.hostId)?.kind === 'runtime')
   ) {
     return 'ambiguous'
   }
@@ -75,6 +77,7 @@ export type AutomationOwnerMigrationInput = {
   projectGroups?: readonly ProjectGroup[]
   removedSshTargetTombstones: readonly RemovedSshTargetTombstone[]
   sshTargetGenerationCounter?: number
+  storageAuthority?: 'desktop' | 'runtime'
   now: number
 }
 
@@ -176,7 +179,8 @@ function indexTargetsByGeneration(
 function migrateAutomations(
   automations: readonly Automation[],
   targetsById: ReadonlyMap<string, SshTarget>,
-  workspaceState: FolderWorkspaceHostState
+  workspaceState: FolderWorkspaceHostState,
+  storageAuthority: 'desktop' | 'runtime'
 ): MigratedAutomations {
   const knownIds = new Set(targetsById.keys())
   const sshTargetIdForGeneration = indexTargetsByGeneration(targetsById)
@@ -185,7 +189,7 @@ function migrateAutomations(
     const pin = resolveWorkspacePin(automation, workspaceState, targetsById)
     // Before classification: a followed re-pin is a healthy record, not an orphan.
     const record = followWorkspaceRepin(automation, pin, sshTargetIdForGeneration)
-    const classification = classifyAutomationOwner(record, knownIds, pin)
+    const classification = classifyAutomationOwner(record, knownIds, pin, storageAuthority)
     // Orphans and ambiguous records must not keep firing on a guessed host, but
     // they are never moved, rewritten to Self, or deleted.
     if (classification !== 'owned') {
@@ -226,11 +230,16 @@ export function migrateAutomationOwners(
   })
   const stamped = stampTargetGenerations(input.sshTargets, highWaterMark)
   const targetsById = new Map(stamped.targets.map((target) => [target.id, target]))
-  const migrated = migrateAutomations(input.automations, targetsById, {
-    folderWorkspaces: [...(input.folderWorkspaces ?? [])],
-    projectGroups: [...(input.projectGroups ?? [])],
-    repos: [...input.repos]
-  })
+  const migrated = migrateAutomations(
+    input.automations,
+    targetsById,
+    {
+      folderWorkspaces: [...(input.folderWorkspaces ?? [])],
+      projectGroups: [...(input.projectGroups ?? [])],
+      repos: [...input.repos]
+    },
+    input.storageAuthority ?? 'desktop'
+  )
   return {
     automations: migrated.automations,
     sshTargets: stamped.targets,

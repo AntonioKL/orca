@@ -13,6 +13,10 @@ describe('automation RPC methods', () => {
     const runtime = {
       getRuntimeId: () => 'test-runtime',
       listAutomations: vi.fn().mockReturnValue([{ id: 'auto-1', name: 'Daily review' }]),
+      listAutomationsForScope: vi.fn().mockReturnValue({
+        automations: [{ id: 'auto-1', name: 'Daily review' }],
+        items: [{ automationId: 'auto-1', selector: { kind: 'self' } }]
+      }),
       showAutomation: vi.fn().mockReturnValue({ id: 'auto-1', name: 'Daily review' }),
       createAutomation: vi.fn().mockResolvedValue({ id: 'auto-2', name: 'New review' }),
       updateAutomation: vi.fn().mockResolvedValue({ id: 'auto-1', name: 'Paused' }),
@@ -70,7 +74,7 @@ describe('automation RPC methods', () => {
     await dispatcher.dispatch(makeRequest('automation.runNow', { id: 'auto-1' }))
     await dispatcher.dispatch(makeRequest('automation.runs', { automationId: 'auto-1' }))
 
-    expect(runtime.listAutomations).toHaveBeenCalled()
+    expect(runtime.listAutomationsForScope).toHaveBeenCalledWith({})
     // A legacy client sends no precondition, so each call forwards an absent expected owner.
     expect(runtime.showAutomation).toHaveBeenCalledWith('auto-1', undefined)
     expect(runtime.createAutomation).toHaveBeenCalledWith(
