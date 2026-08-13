@@ -79,6 +79,11 @@ import {
   recentTerminalOutputIncludesPath
 } from './terminal-output-path-candidates'
 import { RecentPtyOutputBuffer } from './recent-pty-output-buffer'
+import { headlessBrowserTabsUnchanged } from './mobile-session-browser-equality'
+import {
+  appendBrowserTabOrder,
+  collectBrowserGroupAssignment
+} from './mobile-session-browser-group-projection'
 import { HeadlessEmulator } from '../daemon/headless-emulator'
 import {
   HEADLESS_RUNTIME_WINDOW_ID,
@@ -2609,7 +2614,6 @@ describe('OrcaRuntimeService', () => {
   })
 
   it('detects headless browser-tab changes by field, treating absent and null loadError alike', () => {
-    const runtime = createRuntime()
     const base = {
       type: 'browser' as const,
       id: 'page-1',
@@ -2638,7 +2642,7 @@ describe('OrcaRuntimeService', () => {
       observedAt: 123
     }
     const unchanged = (a: unknown[], b: unknown[]): boolean =>
-      runtime['headlessBrowserTabsUnchanged'](a as never, b as never)
+      headlessBrowserTabsUnchanged(a as never, b as never)
 
     // Absent vs explicit null loadError are equivalent (the JSON.stringify trap).
     expect(unchanged([{ ...base }], [{ ...base, loadError: null }])).toBe(true)
@@ -31270,14 +31274,13 @@ describe('OrcaRuntimeService', () => {
   })
 
   it('appendBrowserTabOrder keeps a browser in its group across rebuilds (durability)', () => {
-    const runtime = new OrcaRuntimeService(store)
     const groups = [
       { id: 'left', activeTabId: 'web-terminal-a', tabOrder: ['web-terminal-a'] },
       { id: 'right', activeTabId: 'web-terminal-b', tabOrder: ['web-terminal-b'] }
     ]
 
     // First create: a new browser targeted at the RIGHT group lands there.
-    const afterCreate = runtime['appendBrowserTabOrder'](groups, ['browser-1'], {
+    const afterCreate = appendBrowserTabOrder(groups, ['browser-1'], {
       tabId: 'browser-1',
       groupId: 'right'
     })
@@ -31289,8 +31292,8 @@ describe('OrcaRuntimeService', () => {
       { id: 'left', activeTabId: 'web-terminal-a', tabOrder: ['web-terminal-a'] },
       { id: 'right', activeTabId: 'web-terminal-b', tabOrder: ['web-terminal-b'] }
     ]
-    const priorAssignment = runtime['collectBrowserGroupAssignment'](afterCreate, ['browser-1'])
-    const afterRebuild = runtime['appendBrowserTabOrder'](
+    const priorAssignment = collectBrowserGroupAssignment(afterCreate, ['browser-1'])
+    const afterRebuild = appendBrowserTabOrder(
       rebuiltGroups,
       ['browser-1'],
       undefined,

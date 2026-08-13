@@ -61,10 +61,8 @@ import { terminalStatusPayloadMatchesHook } from '../../shared/agent-terminal-st
 import { indexAgentStatusRowsByPaneKey } from '../agent-hooks/agent-status-pane-index'
 import type { AgentHookAuthorityAttestation } from '../agent-hooks/server'
 import type {
-  AgentSessionClaimedSpawnResult,
   AgentSessionExecutionClaim,
   AgentSessionOwnerBinding,
-  AgentSessionSurfaceBinding,
   AgentLaunchPreferences,
   RuntimeAgentSessionRpcCaller,
   RuntimeCreateAgentSessionRequest,
@@ -285,7 +283,6 @@ import {
 } from '../skills/skill-ssh-relay-service'
 import { ORCHESTRATION_MESSAGE_WAIT_DEFAULT_TIMEOUT_MS } from '../../shared/orchestration-message-wait-timeout'
 import { shouldForwardHeadlessTerminalQueryReply } from './headless-terminal-query-reply-policy'
-import type { TerminalRevealIdentity } from '../../shared/terminal-reveal-identity'
 import { structuredAgentSessionTabId } from '../../shared/structured-agent-session-projection'
 import { collectSavedStructuredAgentSessionIds } from './saved-structured-agent-session-restoration'
 import type {
@@ -528,15 +525,12 @@ import {
   type RuntimeTerminalOrphanAdoptionResult,
   type RuntimeWorktreeTerminalSleepResult,
   type RuntimeTerminalResolvePane,
-  type RuntimeTerminalState,
   type RuntimeStatus,
   type RuntimeSyncWindowGraphResult,
   type RuntimeTerminalWait,
-  type RuntimeTerminalWaitBlockedReason,
   type RuntimeTerminalWaitCondition,
   type RuntimeWorktreePsSummary,
   type RuntimeWorktreeAgentRow,
-  type RuntimeWorktreeStatus,
   type RuntimeSpeechModelSummary,
   type RuntimeSpeechSetupState,
   type RuntimeTerminalInteractiveWait,
@@ -600,7 +594,6 @@ import {
   getProjectHostSetupForRepo,
   getProjectHostSetupWorktreeMeta
 } from '../../shared/project-host-setup-lookup'
-import { parsePtySessionId } from '../../shared/pty-session-id-format'
 import { clampLinearIssueListLimit } from '../../shared/linear/issue-read-limits'
 import { isFolderRepo } from '../../shared/repo-kind'
 import { DEFAULT_WORKSPACE_STATUS_ID } from '../../shared/workspace-statuses'
@@ -825,8 +818,6 @@ import type {
   PtyProviderBufferSnapshot,
   IFilesystemProvider,
   IPtyProvider,
-  PtyProcessInfo,
-  PtySpawnResult,
   PtyTransientFact
 } from '../providers/types'
 import { ClaudeAgentTeamsService } from './claude-agent-teams-service'
@@ -841,8 +832,7 @@ import {
 } from './claude-agent-teams-shim-env'
 import {
   addClaudeTeammateModeAuto,
-  addClaudeTeammateModeInProcess,
-  type ClaudeAgentTeamsMode
+  addClaudeTeammateModeInProcess
 } from '../../shared/claude-agent-teams-tmux-compat'
 import { joinWorktreeRelativePath } from './runtime-relative-paths'
 import { collectMemorySnapshot } from '../memory/collector'
@@ -1238,7 +1228,6 @@ import {
   areWorktreePathsEqual
 } from '../ipc/worktree-logic'
 import { findCreatedWorktree } from '../ipc/created-worktree-reconciliation'
-import { worktreePathComparisonKey } from '../ipc/worktree-path-comparison'
 import {
   assertWorktreeDoesNotContainRegisteredWorktree,
   canCleanupUnregisteredOrcaLeftoverDirectory,
@@ -1351,7 +1340,6 @@ import {
   resolveNestedRepoSelection
 } from '../project-groups/nested-repo-import'
 import { createNestedRepoImportTargetResolver } from '../project-groups/nested-repo-import-target'
-
 function sanitizeNestedRepoRuntimeImportError(context: string, error: unknown): string {
   console.warn(`[project-groups] ${context}`, error)
   return 'Repository could not be imported'
@@ -1727,14 +1715,6 @@ type TerminalCreateOptions = {
   deferMobileSessionPublish?: boolean
 }
 
-function mergeTerminalEnvDeletionKeys(
-  first: readonly string[] | undefined,
-  second: readonly string[] | undefined
-): string[] | undefined {
-  const merged = [...new Set([...(first ?? []), ...(second ?? [])])]
-  return merged.length > 0 ? merged : undefined
-}
-
 type AgentSessionCreateOperation = {
   fingerprint: string
   promise: Promise<RuntimeCreateAgentSessionResult>
@@ -1760,14 +1740,6 @@ type TrackedPtyLivenessVerdict = {
 const AGENT_SESSION_OPERATION_PER_CLIENT_LIMIT = 512
 const AGENT_SESSION_OPERATION_GLOBAL_LIMIT = 4_096
 
-function deterministicAgentSessionUuid(seed: string): string {
-  const hex = createHash('sha256').update(seed).digest('hex').slice(0, 32).split('')
-  hex[12] = '4'
-  hex[16] = ((Number.parseInt(hex[16]!, 16) & 0x3) | 0x8).toString(16)
-  const value = hex.join('')
-  return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`
-}
-
 type PtyForegroundAgentRefresh = {
   promise: Promise<boolean>
   startedAfterTitleObservation: number
@@ -1784,75 +1756,6 @@ type PtyForegroundProcessReadEntry = {
   controller: RuntimePtyController
   startedAfterTitleObservation: number
   promise: Promise<PtyForegroundProcessRead>
-}
-
-function copySleepingAgentLaunchConfig(
-  config: SleepingAgentLaunchConfig
-): SleepingAgentLaunchConfig {
-  return {
-    ...(config.agentCommand ? { agentCommand: config.agentCommand } : {}),
-    agentArgs: config.agentArgs,
-    agentEnv: { ...config.agentEnv },
-    ...(config.ompResumeFilePath ? { ompResumeFilePath: config.ompResumeFilePath } : {})
-  }
-}
-
-function normalizeAgentLaunchCommandForMatch(command: string): string {
-  return command.trim().replace(/\s+/g, ' ')
-}
-
-function resolveBareAgentLaunchCommand(args: {
-  command: string | undefined
-  settings: {
-    agentCmdOverrides?: Partial<Record<TuiAgent, string>> | null
-    disabledTuiAgents?: Iterable<unknown> | null
-  }
-  platform: NodeJS.Platform
-  isRemote: boolean
-}): TuiAgent | null {
-  const command = args.command ? normalizeAgentLaunchCommandForMatch(args.command) : ''
-  if (!command) {
-    return null
-  }
-
-  const cmdOverrides = args.settings.agentCmdOverrides ?? {}
-  for (const agent of Object.keys(TUI_AGENT_CONFIG) as TuiAgent[]) {
-    if (!isTuiAgentEnabled(agent, args.settings.disabledTuiAgents)) {
-      continue
-    }
-    const override = cmdOverrides[agent]?.trim()
-    const defaultLaunchCommand = getTuiAgentLaunchCommand(TUI_AGENT_CONFIG[agent], args.platform, {
-      isRemote: args.isRemote
-    })
-    const launchCommands = override ? [defaultLaunchCommand, override] : [defaultLaunchCommand]
-    if (
-      launchCommands.some((candidate) => command === normalizeAgentLaunchCommandForMatch(candidate))
-    ) {
-      return agent
-    }
-  }
-
-  return null
-}
-
-function inferCapturedClaudeAgentTeamsMode(
-  launchConfig: SleepingAgentLaunchConfig | undefined,
-  command: string | undefined,
-  currentMode: ClaudeAgentTeamsMode | undefined
-): ClaudeAgentTeamsMode | undefined {
-  const capturedCommand = launchConfig?.agentCommand?.trim() || command?.trim() || ''
-  const capturedArgs = launchConfig?.agentArgs?.trim() ?? ''
-  const capturedLaunch = `${capturedCommand} ${capturedArgs}`.trim()
-  if (/(^|\s)--teammate-mode(?:=|\s+)auto(?:\s|$)/.test(capturedLaunch)) {
-    return 'native-panes-shim'
-  }
-  if (/(^|\s)--teammate-mode(?:=|\s+)in-process(?:\s|$)/.test(capturedLaunch)) {
-    return 'in-process'
-  }
-  if (launchConfig && /(^|\s)--resume(?:\s|=|$)/.test(command?.trim() ?? '')) {
-    return 'off'
-  }
-  return currentMode
 }
 
 export type RuntimeTerminalAgentStatusEvent = {
@@ -2185,22 +2088,6 @@ type WorktreeStartupDraftPaste = {
 type WorktreeStartupFollowup = {
   expectedProcess: string
   prompt: string
-}
-
-function getAgentLaunchPlatformForRepo(
-  repo: Pick<Repo, 'connectionId' | 'path'>,
-  projectRuntime?: ProjectExecutionRuntimeResolution
-): NodeJS.Platform {
-  if (!repo.connectionId) {
-    if (projectRuntime?.status === 'repair-required') {
-      return projectRuntime.repair.preferredRuntime.kind === 'wsl' ? 'linux' : process.platform
-    }
-    if (projectRuntime?.status === 'resolved' && projectRuntime.runtime.kind === 'wsl') {
-      return 'linux'
-    }
-    return process.platform
-  }
-  return isWindowsAbsolutePathLike(repo.path) ? 'win32' : 'linux'
 }
 
 // Why: long enough for a phone to reconnect and retry a create whose response
@@ -2593,29 +2480,6 @@ async function isLocalRuntimeGitRepository(
   }
 }
 
-function gitStatusErrorMeansNotRepository(error: unknown): boolean {
-  const message =
-    error instanceof Error
-      ? error.message
-      : error && typeof error === 'object' && 'message' in error
-        ? String((error as { message: unknown }).message)
-        : typeof error === 'string'
-          ? error
-          : ''
-  const stderr =
-    error && typeof error === 'object' && 'stderr' in error
-      ? String((error as { stderr: unknown }).stderr)
-      : ''
-  return /not a git repository/i.test(`${message}\n${stderr}`)
-}
-
-type RuntimeWorktreeRemovalTarget = {
-  id: string
-  repoId: string
-  path: string
-  pushTarget?: GitPushTarget
-}
-
 type RuntimeWorktreeRemovalInFlight = {
   optionsKey: string
   promise: Promise<RemoveWorktreeResult & { warning?: string }>
@@ -2627,33 +2491,6 @@ type PreservedBranchCleanupTarget = {
   branchName: string
   head: string
   pushTarget?: GitPushTarget
-}
-
-function getRuntimeWorktreeRemovalOptionsKey(
-  force: boolean,
-  runHooks: boolean,
-  allowUnverifiedPtyStop: boolean
-): string {
-  // Why: a forced retry must not coalesce onto the in-flight attempt that just
-  // failed the PTY gate — it would inherit that failure instead of retrying.
-  const ptyKey = allowUnverifiedPtyStop ? 'allow-unverified-pty' : 'require-pty-stop'
-  return `${force ? 'force' : 'normal'}:${runHooks ? 'run-hooks' : 'skip-hooks'}:${ptyKey}`
-}
-
-// Null executionHostId means host-unaware: path-only callers match any repo, and the first runtime
-// host can adopt a legacy (unstamped) repo. But an unstamped repo with a connectionId is an SSH repo
-// (resolves to ssh:<id>), so it must not be adopted/matched by a runtime host at the same path.
-function runtimeRepoMatchesExecutionHost(
-  repo: Pick<Repo, 'connectionId' | 'executionHostId'>,
-  executionHostId?: ExecutionHostId | null
-): boolean {
-  if (executionHostId == null) {
-    return true
-  }
-  if (repo.executionHostId != null) {
-    return repo.executionHostId === executionHostId
-  }
-  return repo.connectionId == null
 }
 
 // Why: this runtime only has local git and local fs, so an ssh: host here would clone and
@@ -2718,19 +2555,6 @@ function listRuntimeFolderWorkspaces(
   })
 }
 
-function parseExactWorktreeIdSelector(selector: string): RuntimeWorktreeRemovalTarget | null {
-  const worktreeId = selector.startsWith('id:') ? selector.slice(3) : selector
-  const parsed = splitWorktreeId(worktreeId)
-  if (!parsed || !parsed.repoId || !parsed.worktreePath) {
-    return null
-  }
-  return {
-    id: worktreeId,
-    repoId: parsed.repoId,
-    path: parsed.worktreePath
-  }
-}
-
 async function resolveCreateBranchName(
   repoPath: string,
   branchNameOverride: string | undefined,
@@ -2756,18 +2580,6 @@ async function resolveCreateBranchName(
     ...gitOptions
   })
   return branchNameOverride
-}
-
-function normalizeLocalBranchName(branchName: string | undefined): string {
-  return branchName?.replace(/^refs\/heads\//, '') ?? ''
-}
-
-// Clamp terminal dimensions to the PTY's supported range (cols 20–240, rows 8–120).
-function clampTerminalViewport(cols: number, rows: number): { cols: number; rows: number } {
-  return {
-    cols: Math.max(20, Math.min(240, Math.round(cols))),
-    rows: Math.max(8, Math.min(120, Math.round(rows)))
-  }
 }
 
 // Subscribe a listener to a per-key Set, pruning the key's entry once its last
@@ -2825,10 +2637,6 @@ async function canCheckoutExistingLocalBranch(
   }
   const worktrees = await listWorktrees(repoPath, gitOptions)
   return !worktrees.some((worktree) => normalizeLocalBranchName(worktree.branch) === branchName)
-}
-
-function hasLocalGitOptions(gitOptions: { wslDistro?: string }): boolean {
-  return Object.keys(gitOptions).length > 0
 }
 
 function getLocalGitHubPrForBranch(
@@ -2899,13 +2707,6 @@ function resolveServerBrowsePath(pathValue: string): string {
   // Why: remote clients do not share the server process cwd; relative browse
   // inputs are anchored to the server user's home to match the `~` picker root.
   return resolve(homedir(), trimmed)
-}
-
-type ResolvedWorktree = Worktree & {
-  parentWorktreeId: string | null
-  childWorktreeIds: string[]
-  lineage: WorktreeLineage | null
-  git: GitWorktreeInfo
 }
 
 type LinearAgentWriteTarget = {
@@ -7819,7 +7620,7 @@ export class OrcaRuntimeService {
         reconciledWorktreeIds.add(entryWorktreeId)
         continue
       }
-      const terminalTabs = this.buildHeadlessMobileSessionTerminalTabs(
+      const terminalTabs = buildHeadlessMobileSessionTerminalTabs(
         entryWorktreeId,
         persistedTabs,
         session
@@ -7837,15 +7638,15 @@ export class OrcaRuntimeService {
       if (tabs.length === 0) {
         continue
       }
-      const activeTab = this.pickHeadlessActiveTerminalTab(terminalTabs)
+      const activeTab = pickHeadlessActiveTerminalTab(terminalTabs)
       const tabOrder = [
-        ...this.collectHeadlessParentTabOrder(terminalTabs),
+        ...collectHeadlessParentTabOrder(terminalTabs),
         ...browserTabs.map((tab) => tab.id)
       ]
-      const groupId = this.getHeadlessMobileSessionGroupId(entryWorktreeId)
+      const groupId = getHeadlessMobileSessionGroupId(entryWorktreeId)
       const mergedTabs =
         options.onlyRuntimeOwnedTerminals === true && existing
-          ? this.mergeMobileSessionSnapshotTabs(existing.tabs, tabs)
+          ? mergeMobileSessionSnapshotTabs(existing.tabs, tabs)
           : tabs
       const mergedActiveTab =
         existing?.tabs.find((tab) => tab.id === existing.activeTabId) ??
@@ -7873,26 +7674,26 @@ export class OrcaRuntimeService {
           : mergedActiveTab.id
         : null
       const nextTabGroups: RuntimeMobileSessionTabGroup[] = hasPersistedSplit
-        ? this.appendBrowserTabOrder(
-            this.distributeHeadlessTabsAcrossGroups(
+        ? appendBrowserTabOrder(
+            distributeHeadlessTabsAcrossGroups(
               persistedGroups.map((group) => ({
                 id: group.id,
                 activeTabId: group.activeTabId,
                 tabOrder: [...group.tabOrder],
                 ...(group.recentTabIds ? { recentTabIds: [...group.recentTabIds] } : {})
               })),
-              this.collectHeadlessParentTabOrder(mergedTerminalTabs),
+              collectHeadlessParentTabOrder(mergedTerminalTabs),
               activeTopLevelId
             ),
             mergedBrowserOrder,
             undefined,
             // Why: distribute drops browser ids (terminal-only), so carry each
             // browser's persisted group forward instead of coalescing left.
-            this.collectBrowserGroupAssignment(persistedGroups, mergedBrowserOrder)
+            collectBrowserGroupAssignment(persistedGroups, mergedBrowserOrder)
           )
         : options.onlyRuntimeOwnedTerminals === true && existing?.tabGroups
-          ? this.appendBrowserTabOrder(
-              this.mergeMobileSessionTabGroups(
+          ? appendBrowserTabOrder(
+              mergeMobileSessionTabGroups(
                 entryWorktreeId,
                 existing.tabGroups,
                 mergedTerminalTabs,
@@ -7941,75 +7742,12 @@ export class OrcaRuntimeService {
       // projection matches the existing snapshot, keep the existing object and
       // (epoch, version) untouched so identity-based change detection stays a
       // pure no-op and unchanged runtime/browser worktrees never fan out.
-      if (existing && this.headlessMobileSnapshotContentUnchanged(existing, nextSnapshot)) {
+      if (existing && headlessMobileSnapshotContentUnchanged(existing, nextSnapshot)) {
         continue
       }
       this.mobileSessionTabsByWorktree.set(entryWorktreeId, nextSnapshot)
     }
     return reconciledWorktreeIds
-  }
-
-  // Why: content equality for the hydrate's idempotence check — compares every
-  // client-visible field EXCEPT publicationEpoch/snapshotVersion (both are
-  // freshly minted on each rebuild and would defeat the comparison). Tab and
-  // group objects are rebuilt each hydrate, so compare by value, not identity.
-  private headlessMobileSnapshotContentUnchanged(
-    existing: RuntimeMobileSessionTabsSnapshot,
-    next: RuntimeMobileSessionTabsSnapshot
-  ): boolean {
-    if (
-      existing.worktree !== next.worktree ||
-      existing.activeGroupId !== next.activeGroupId ||
-      existing.activeTabId !== next.activeTabId ||
-      existing.activeTabType !== next.activeTabType
-    ) {
-      return false
-    }
-    // Why: this runs per persisted worktree on EVERY graph sync whenever a
-    // serve PTY exists, so compare structurally instead of stable-stringifying
-    // both sides (which allocated six full serialized trees per worktree).
-    return (
-      this.mobileSnapshotValueEqual(existing.tabs, next.tabs) &&
-      this.mobileSnapshotValueEqual(existing.tabGroups ?? null, next.tabGroups ?? null) &&
-      this.mobileSnapshotValueEqual(existing.tabGroupLayout ?? null, next.tabGroupLayout ?? null)
-    )
-  }
-
-  // Deep structural equality over plain snapshot JSON (objects/arrays/scalars).
-  // Key order is irrelevant; a mismatch only costs a coalesced no-op emit.
-  private mobileSnapshotValueEqual(a: unknown, b: unknown): boolean {
-    if (a === b) {
-      return true
-    }
-    if (Array.isArray(a) || Array.isArray(b)) {
-      if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
-        return false
-      }
-      for (let index = 0; index < a.length; index++) {
-        if (!this.mobileSnapshotValueEqual(a[index], b[index])) {
-          return false
-        }
-      }
-      return true
-    }
-    if (a !== null && b !== null && typeof a === 'object' && typeof b === 'object') {
-      const aRecord = a as Record<string, unknown>
-      const bRecord = b as Record<string, unknown>
-      const aKeys = Object.keys(aRecord)
-      if (aKeys.length !== Object.keys(bRecord).length) {
-        return false
-      }
-      for (const key of aKeys) {
-        if (
-          !Object.hasOwn(bRecord, key) ||
-          !this.mobileSnapshotValueEqual(aRecord[key], bRecord[key])
-        ) {
-          return false
-        }
-      }
-      return true
-    }
-    return false
   }
 
   // Why: keep an existing snapshot's browser tabs in sync with the live bridge
@@ -8025,13 +7763,13 @@ export class OrcaRuntimeService {
       (tab): tab is RuntimeMobileSessionBrowserTab => tab.type === 'browser'
     )
     const existingBrowserIds = existingBrowserTabs.map((tab) => tab.id)
-    if (this.headlessBrowserTabsUnchanged(liveBrowserTabs, existingBrowserTabs)) {
+    if (headlessBrowserTabsUnchanged(liveBrowserTabs, existingBrowserTabs)) {
       return
     }
     const nonBrowserTabs = existing.tabs.filter((tab) => tab.type !== 'browser')
     const nextTabs: RuntimeMobileSessionSnapshotTab[] = [...nonBrowserTabs, ...liveBrowserTabs]
     const liveIdSet = new Set(liveIds)
-    const tabGroups = this.appendBrowserTabOrder(
+    const tabGroups = appendBrowserTabOrder(
       (existing.tabGroups ?? []).map((group) => ({
         ...group,
         // Drop closed browser ids; appendBrowserTabOrder re-adds the live ones.
@@ -8055,71 +7793,6 @@ export class OrcaRuntimeService {
       tabGroups,
       tabs: nextTabs
     })
-  }
-
-  // Why: browser session tabs have no parentTabId so the terminal-only group
-  // builder drops them from tabOrder; this re-adds their ids to a group.
-  // Browser tabs are live-only (no persisted session entry), but their GROUP
-  // membership must still survive snapshot rebuilds like terminals'. The
-  // passed-in groups already encode each browser's group (carried from the prior
-  // snapshot / persisted tabGroups), so keep each existing browser id where it
-  // is; only a genuinely-new browser id goes to its create-target group (when
-  // that group exists) and otherwise to the first group. Previously every
-  // browser was force-pushed into group[0], so opening a browser in the right
-  // split group always snapped it back to the left on the next rebuild.
-  private appendBrowserTabOrder(
-    groups: readonly RuntimeMobileSessionTabGroup[],
-    browserTabIds: readonly string[],
-    newTabAssignment?: { tabId: string; groupId: string },
-    // browserPageId -> groupId from the prior/persisted groups. The terminal
-    // distributor rebuilds tabOrder from terminal ids only and drops browser
-    // ids, so this carries each browser's group across rebuilds.
-    priorGroupByBrowserId?: ReadonlyMap<string, string>
-  ): RuntimeMobileSessionTabGroup[] {
-    if (browserTabIds.length === 0) {
-      return [...groups]
-    }
-    const next = groups.map((group) => ({ ...group, tabOrder: [...group.tabOrder] }))
-    if (next.length === 0) {
-      return next
-    }
-    const groupById = new Map(next.map((group) => [group.id, group]))
-    const ownerGroupByTabId = new Map<string, RuntimeMobileSessionTabGroup>()
-    for (const group of next) {
-      for (const id of group.tabOrder) {
-        ownerGroupByTabId.set(id, group)
-      }
-    }
-    for (const id of browserTabIds) {
-      if (ownerGroupByTabId.has(id)) {
-        continue
-      }
-      const priorGroupId = priorGroupByBrowserId?.get(id)
-      const targetGroup =
-        (newTabAssignment?.tabId === id ? groupById.get(newTabAssignment.groupId) : undefined) ??
-        (priorGroupId ? groupById.get(priorGroupId) : undefined) ??
-        next[0]!
-      targetGroup.tabOrder.push(id)
-    }
-    return next
-  }
-
-  // browserPageId -> groupId from a set of groups (the persisted/prior layout),
-  // so a browser stays in its group across rebuilds that drop browser ids.
-  private collectBrowserGroupAssignment(
-    groups: readonly RuntimeMobileSessionTabGroup[] | undefined,
-    browserTabIds: readonly string[]
-  ): Map<string, string> {
-    const browserIdSet = new Set(browserTabIds)
-    const assignment = new Map<string, string>()
-    for (const group of groups ?? []) {
-      for (const id of group.tabOrder) {
-        if (browserIdSet.has(id)) {
-          assignment.set(id, group.id)
-        }
-      }
-    }
-    return assignment
   }
 
   private isServeOwnedPtyId(ptyId: string | null | undefined): boolean {
@@ -8416,110 +8089,6 @@ export class OrcaRuntimeService {
     return !this.tabs.has(tab.parentTabId)
   }
 
-  private mergeMobileSessionSnapshotTabs(
-    baseTabs: readonly RuntimeMobileSessionSnapshotTab[],
-    extraTabs: readonly RuntimeMobileSessionSnapshotTab[]
-  ): RuntimeMobileSessionSnapshotTab[] {
-    const seenIds = new Set<string>()
-    const merged: RuntimeMobileSessionSnapshotTab[] = []
-    const add = (tab: RuntimeMobileSessionSnapshotTab): void => {
-      const ids = this.getMobileSessionSnapshotTabIdentityKeys(tab)
-      if (ids.some((id) => seenIds.has(id))) {
-        return
-      }
-      for (const id of ids) {
-        seenIds.add(id)
-      }
-      merged.push(tab)
-    }
-    for (const tab of baseTabs) {
-      add(tab)
-    }
-    for (const tab of extraTabs) {
-      add(tab)
-    }
-    return merged
-  }
-
-  private getMobileSessionSnapshotTabIdentityKeys(tab: RuntimeMobileSessionSnapshotTab): string[] {
-    if (tab.type === 'terminal') {
-      // Why: split terminal leaves share one parent tab; merge dedup must stay
-      // leaf-scoped or preserved siblings collapse into a single surface.
-      const keys = [tab.id, `${tab.parentTabId}::${tab.leafId}`]
-      if (typeof tab.ptyId === 'string' && tab.ptyId.length > 0) {
-        // Why: renderer and headless sources can derive different leafIds for the same
-        // terminal; real PTYs collapse those duplicates without merging pending splits.
-        keys.push(`${tab.parentTabId}::pty:${tab.ptyId}`)
-      }
-      return keys
-    }
-    if (tab.type === 'browser') {
-      return [tab.id, tab.browserWorkspaceId]
-    }
-    return [tab.id]
-  }
-
-  private mergeMobileSessionTabGroups(
-    worktreeId: string,
-    groups: readonly RuntimeMobileSessionTabGroup[],
-    terminalTabs: readonly RuntimeMobileSessionTerminalTab[],
-    activeTab: RuntimeMobileSessionTerminalTab | null
-  ): RuntimeMobileSessionTabGroup[] {
-    const parentTabOrder = this.collectHeadlessParentTabOrder(terminalTabs)
-    if (parentTabOrder.length === 0) {
-      return [...groups]
-    }
-    const targetGroupId = groups[0]?.id ?? this.getHeadlessMobileSessionGroupId(worktreeId)
-    const nextGroups =
-      groups.length > 0
-        ? groups.map((group) => ({ ...group, tabOrder: [...group.tabOrder] }))
-        : [
-            {
-              id: targetGroupId,
-              activeTabId: null,
-              tabOrder: []
-            }
-          ]
-    // Why: keep each tab in the group that already owns it (a multi-group split
-    // must survive the merge), drop tabs no longer present, and route only
-    // genuinely-new tabs into the active group — never funnel everything into
-    // group[0], which duplicated/coalesced tabs that lived in other groups.
-    const ownerGroupId = new Map<string, string>()
-    for (const group of nextGroups) {
-      for (const tabId of group.tabOrder) {
-        ownerGroupId.set(tabId, group.id)
-      }
-    }
-    const liveTabIds = new Set(parentTabOrder)
-    const activeParentId = activeTab?.parentTabId ?? null
-    const activeGroupId =
-      (activeParentId ? ownerGroupId.get(activeParentId) : undefined) ?? nextGroups[0]!.id
-    const retainedOrder = new Map<string, string[]>(nextGroups.map((group) => [group.id, []]))
-    for (const tabId of parentTabOrder) {
-      const groupId = ownerGroupId.get(tabId) ?? activeGroupId
-      retainedOrder.get(groupId)?.push(tabId)
-    }
-    return nextGroups
-      .map((group) => {
-        const tabOrder = retainedOrder.get(group.id) ?? []
-        const keptActive =
-          group.activeTabId &&
-          tabOrder.includes(group.activeTabId) &&
-          liveTabIds.has(group.activeTabId)
-            ? group.activeTabId
-            : null
-        return {
-          ...group,
-          tabOrder,
-          activeTabId:
-            activeParentId && tabOrder.includes(activeParentId)
-              ? activeParentId
-              : (keptActive ?? tabOrder[0] ?? null)
-        }
-      })
-      .filter((group) => group.tabOrder.length > 0)
-  }
-
   /**
    * Publishes a PTY-backed terminal tab snapshot to the synced mobile session,
    * normalizing Pi-compatible titles based on launch or foreground ownership.
@@ -8566,7 +8135,7 @@ export class OrcaRuntimeService {
             candidate.leafId === args.split!.splitFromLeafId
         )?.parentLayout ?? existingTab?.parentLayout)
       : existingTab?.parentLayout
-    const parentLayout = this.buildMaterializedHeadlessParentLayout(
+    const parentLayout = buildMaterializedHeadlessParentLayout(
       args.leafId,
       pty.ptyId,
       baseLayout,
@@ -8605,7 +8174,7 @@ export class OrcaRuntimeService {
           candidate.leafId === args.leafId
         )
     )
-    const tabs = this.mergeMobileSessionSnapshotTabs(
+    const tabs = mergeMobileSessionSnapshotTabs(
       existingTabs.map((candidate) => ({
         ...candidate,
         // Why: the client picks one sibling's parentLayout to render the whole
@@ -8632,10 +8201,10 @@ export class OrcaRuntimeService {
       publicationEpoch:
         existing?.publicationEpoch ?? `headless:pty-backed:${Date.now().toString(36)}`,
       snapshotVersion: (existing?.snapshotVersion ?? 0) + 1,
-      activeGroupId: existing?.activeGroupId ?? this.getHeadlessMobileSessionGroupId(worktreeId),
+      activeGroupId: existing?.activeGroupId ?? getHeadlessMobileSessionGroupId(worktreeId),
       activeTabId: activeTab?.id ?? null,
       activeTabType: activeTab?.type ?? null,
-      tabGroups: this.mergeMobileSessionTabGroups(
+      tabGroups: mergeMobileSessionTabGroups(
         worktreeId,
         existing?.tabGroups ?? [],
         terminalTabs,
@@ -8934,55 +8503,6 @@ export class OrcaRuntimeService {
     }
   }
 
-  private buildHeadlessMobileSessionTerminalTabs(
-    worktreeId: string,
-    persistedTabs: readonly TerminalTab[],
-    session: WorkspaceSessionState
-  ): RuntimeMobileSessionTerminalTab[] {
-    return [...persistedTabs]
-      .sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt - b.createdAt)
-      .flatMap((tab, index) => {
-        const layout = session.terminalLayoutsByTabId?.[tab.id]
-        const leafIds = this.collectPersistedTerminalLeafIds(layout)
-        if (leafIds.length === 0) {
-          leafIds.push(this.deriveHeadlessLegacyTerminalLeafId(tab.id))
-        }
-        return leafIds.flatMap((leafId) => {
-          const ptyId =
-            layout?.ptyIdsByLeafId?.[leafId] ?? (leafIds.length === 1 ? tab.ptyId : null)
-          const title =
-            tab.customTitle?.trim() ||
-            tab.generatedTitle?.trim() ||
-            tab.title?.trim() ||
-            tab.defaultTitle?.trim() ||
-            `Terminal ${index + 1}`
-          return [
-            {
-              type: 'terminal' as const,
-              id: `${tab.id}::${leafId}`,
-              parentTabId: tab.id,
-              leafId,
-              title,
-              ...(ptyId ? { ptyId } : {}),
-              ...(tab.startupCwd ? { startupCwd: tab.startupCwd } : {}),
-              ...(tab.launchAgent ? { launchAgent: tab.launchAgent } : {}),
-              ...(layout ? { parentLayout: this.cloneTerminalLayoutSnapshot(layout) } : {}),
-              ...(tab.color != null ? { color: tab.color } : {}),
-              ...(tab.isPinned ? { isPinned: true } : {}),
-              ...(tab.viewMode ? { viewMode: tab.viewMode } : {}),
-              isActive: this.isPersistedTerminalLeafActive(
-                session,
-                worktreeId,
-                tab.id,
-                leafId,
-                layout
-              )
-            }
-          ]
-        })
-      })
-  }
-
   // Why: headless serve backs browser panes with offscreen WebContents that live
   // only in the BrowserManager, never in a renderer graph. Without surfacing them
   // as session tabs, a session.tabs snapshot (e.g. on terminal open) prunes the
@@ -9036,84 +8556,6 @@ export class OrcaRuntimeService {
     return [...publishedServerTabs, ...publishedClientTabs]
   }
 
-  // Why: change detection for headless browser tabs. Compares the fields that
-  // actually vary (a JSON.stringify equality was order-sensitive and silently
-  // dropped `undefined` keys, so it only worked while both sides shared one
-  // construction path).
-  private headlessBrowserTabsUnchanged(
-    live: RuntimeMobileSessionBrowserTab[],
-    existing: RuntimeMobileSessionBrowserTab[]
-  ): boolean {
-    if (live.length !== existing.length) {
-      return false
-    }
-    return live.every((tab, index) => {
-      const prev = existing[index]
-      return (
-        tab.id === prev.id &&
-        tab.title === prev.title &&
-        tab.url === prev.url &&
-        tab.loading === prev.loading &&
-        tab.canGoBack === prev.canGoBack &&
-        tab.canGoForward === prev.canGoForward &&
-        tab.browserProfileId === prev.browserProfileId &&
-        tab.executionHostKey === prev.executionHostKey &&
-        ((tab.placement === undefined && prev.placement === undefined) ||
-          (tab.placement !== undefined &&
-            prev.placement !== undefined &&
-            sameRuntimeBrowserPlacement(tab.placement, prev.placement))) &&
-        tab.isActive === prev.isActive &&
-        (tab.isPinned ?? false) === (prev.isPinned ?? false) &&
-        (tab.color ?? null) === (prev.color ?? null) &&
-        this.browserLoadErrorsEqual(tab.loadError, prev.loadError) &&
-        this.browserCertificateFailuresEqual(tab.certificateFailure, prev.certificateFailure)
-      )
-    })
-  }
-
-  private browserLoadErrorsEqual(
-    a: RuntimeMobileSessionBrowserTab['loadError'],
-    b: RuntimeMobileSessionBrowserTab['loadError']
-  ): boolean {
-    const left = a ?? null
-    const right = b ?? null
-    if (left === right) {
-      return true
-    }
-    if (!left || !right) {
-      return false
-    }
-    return (
-      left.code === right.code &&
-      left.description === right.description &&
-      left.validatedUrl === right.validatedUrl
-    )
-  }
-
-  private browserCertificateFailuresEqual(
-    a: RuntimeMobileSessionBrowserTab['certificateFailure'],
-    b: RuntimeMobileSessionBrowserTab['certificateFailure']
-  ): boolean {
-    const left = a ?? null
-    const right = b ?? null
-    if (left === right) {
-      return true
-    }
-    if (!left || !right) {
-      return false
-    }
-    return (
-      left.challengeId === right.challengeId &&
-      left.browserPageId === right.browserPageId &&
-      left.errorCode === right.errorCode &&
-      left.error === right.error &&
-      left.origin === right.origin &&
-      left.displayHost === right.displayHost &&
-      left.canProceed === right.canProceed &&
-      left.observedAt === right.observedAt
-    )
-  }
-
   private getPersistedUnifiedSessionTabProps(
     worktreeId: string,
     tabId: string
@@ -9123,256 +8565,6 @@ export class OrcaRuntimeService {
         (candidate) => candidate.id === tabId || candidate.entityId === tabId
       ) ?? null
     return tab ? { color: tab.color, isPinned: tab.isPinned } : null
-  }
-
-  private collectPersistedTerminalLeafIds(layout: TerminalLayoutSnapshot | undefined): string[] {
-    if (!layout) {
-      return []
-    }
-    const leafIds = new Set<string>()
-    const visit = (node: TerminalLayoutSnapshot['root']): void => {
-      if (!node) {
-        return
-      }
-      if (node.type === 'leaf') {
-        if (isTerminalLeafId(node.leafId)) {
-          leafIds.add(node.leafId)
-        }
-        return
-      }
-      visit(node.first)
-      visit(node.second)
-    }
-    visit(layout.root)
-    if (layout.activeLeafId && isTerminalLeafId(layout.activeLeafId)) {
-      leafIds.add(layout.activeLeafId)
-    }
-    for (const leafId of Object.keys(layout.ptyIdsByLeafId ?? {})) {
-      if (isTerminalLeafId(leafId)) {
-        leafIds.add(leafId)
-      }
-    }
-    return [...leafIds]
-  }
-
-  private deriveHeadlessLegacyTerminalLeafId(tabId: string): string {
-    const hash = createHash('sha256').update(`headless-terminal-leaf:${tabId}`).digest('hex')
-    const variant = ((Number.parseInt(hash.slice(16, 17), 16) & 0x3) | 0x8).toString(16)
-    const leafId = [
-      hash.slice(0, 8),
-      hash.slice(8, 12),
-      `4${hash.slice(13, 16)}`,
-      `${variant}${hash.slice(17, 20)}`,
-      hash.slice(20, 32)
-    ].join('-')
-    if (!isTerminalLeafId(leafId)) {
-      return randomUUID()
-    }
-    return leafId
-  }
-
-  private cloneTerminalLayoutSnapshot(layout: TerminalLayoutSnapshot): TerminalLayoutSnapshot {
-    const cloned: TerminalLayoutSnapshot = {
-      root: layout.root,
-      activeLeafId: layout.activeLeafId,
-      expandedLeafId: layout.expandedLeafId
-    }
-    if (layout.ptyIdsByLeafId) {
-      cloned.ptyIdsByLeafId = { ...layout.ptyIdsByLeafId }
-    }
-    if (layout.buffersByLeafId) {
-      cloned.buffersByLeafId = { ...layout.buffersByLeafId }
-    }
-    if (layout.scrollbackRefsByLeafId) {
-      cloned.scrollbackRefsByLeafId = { ...layout.scrollbackRefsByLeafId }
-    }
-    if (layout.titlesByLeafId) {
-      cloned.titlesByLeafId = { ...layout.titlesByLeafId }
-    }
-    return cloned
-  }
-
-  private isPersistedTerminalLeafActive(
-    session: WorkspaceSessionState,
-    worktreeId: string,
-    tabId: string,
-    leafId: string,
-    layout: TerminalLayoutSnapshot | undefined
-  ): boolean {
-    const activeTabId = session.activeTabIdByWorktree?.[worktreeId] ?? session.activeTabId
-    return activeTabId === tabId && (!layout?.activeLeafId || layout.activeLeafId === leafId)
-  }
-
-  private pickHeadlessActiveTerminalTab(
-    tabs: readonly RuntimeMobileSessionTerminalTab[]
-  ): RuntimeMobileSessionTerminalTab | null {
-    return tabs.find((tab) => tab.isActive) ?? tabs.find((tab) => tab.parentTabId) ?? null
-  }
-
-  private collectHeadlessParentTabOrder(
-    tabs: readonly RuntimeMobileSessionTerminalTab[]
-  ): string[] {
-    const order: string[] = []
-    const seen = new Set<string>()
-    for (const tab of tabs) {
-      if (!seen.has(tab.parentTabId)) {
-        seen.add(tab.parentTabId)
-        order.push(tab.parentTabId)
-      }
-    }
-    return order
-  }
-
-  // Why: the group tab order must follow actual creation/insertion order across
-  // both terminals and browsers, not list terminals first. A terminal's top-level
-  // id is its parentTabId (split leaves share one); a browser's is its own id.
-  private collectHeadlessTopLevelTabOrder(
-    tabs: readonly RuntimeMobileSessionSnapshotTab[]
-  ): string[] {
-    const order: string[] = []
-    const seen = new Set<string>()
-    for (const tab of tabs) {
-      const topLevelId = tab.type === 'terminal' ? tab.parentTabId : tab.id
-      if (!seen.has(topLevelId)) {
-        seen.add(topLevelId)
-        order.push(topLevelId)
-      }
-    }
-    return order
-  }
-
-  private getHeadlessMobileSessionGroupId(worktreeId: string): string {
-    return `headless-terminals:${worktreeId}`
-  }
-
-  private buildHeadlessMobileSessionTabGroups(
-    worktreeId: string,
-    tabs: readonly RuntimeMobileSessionSnapshotTab[],
-    activeTab: RuntimeMobileSessionSnapshotTab | null,
-    existingGroups?: readonly RuntimeMobileSessionTabGroup[],
-    // Why: a new tab created via a specific group's "+" must land in THAT group,
-    // not the active one — otherwise every "+" in a split funnels to one group.
-    newTabAssignment?: { tabId: string; groupId: string }
-  ): RuntimeMobileSessionTabGroup[] {
-    // Why: order across terminals and browsers in their actual array order so a
-    // tab opened after a browser tab lands to its right, not regrouped before it.
-    const tabOrder = this.collectHeadlessTopLevelTabOrder(tabs)
-    const topLevelOf = (tab: RuntimeMobileSessionSnapshotTab): string =>
-      tab.type === 'terminal' ? tab.parentTabId : tab.id
-    const activeTopLevelId =
-      (activeTab ? topLevelOf(activeTab) : null) ??
-      existingGroups?.[0]?.activeTabId ??
-      (() => {
-        const active = tabs.find((tab) => tab.isActive)
-        return active ? topLevelOf(active) : null
-      })() ??
-      tabOrder[0] ??
-      null
-
-    // Why: when the user has split tabs into multiple groups, preserve that
-    // assignment across rebuilds instead of coalescing back to one group.
-    if (existingGroups && existingGroups.length > 1) {
-      return this.distributeHeadlessTabsAcrossGroups(
-        existingGroups,
-        tabOrder,
-        activeTopLevelId,
-        newTabAssignment
-      )
-    }
-
-    const groupId = existingGroups?.[0]?.id ?? this.getHeadlessMobileSessionGroupId(worktreeId)
-    return [
-      {
-        id: groupId,
-        activeTabId:
-          activeTopLevelId && tabOrder.includes(activeTopLevelId)
-            ? activeTopLevelId
-            : (tabOrder[0] ?? null),
-        tabOrder
-      }
-    ]
-  }
-
-  // Distribute live top-level tabs into the existing multi-group structure,
-  // keeping each tab in its group; tabs new since the last snapshot join the
-  // active group. Emptied groups are dropped so a closed split collapses.
-  private distributeHeadlessTabsAcrossGroups(
-    existingGroups: readonly RuntimeMobileSessionTabGroup[],
-    tabOrder: readonly string[],
-    activeTopLevelId: string | null,
-    newTabAssignment?: { tabId: string; groupId: string }
-  ): RuntimeMobileSessionTabGroup[] {
-    const groupIdByTabId = new Map<string, string>()
-    for (const group of existingGroups) {
-      for (const tabId of group.tabOrder) {
-        groupIdByTabId.set(tabId, group.id)
-      }
-    }
-    // Why: route a freshly-created tab to the group its "+" was clicked in,
-    // when that group still exists; otherwise fall through to the active group.
-    const hasTargetGroup =
-      newTabAssignment !== undefined &&
-      existingGroups.some((group) => group.id === newTabAssignment.groupId)
-    if (hasTargetGroup) {
-      groupIdByTabId.set(newTabAssignment!.tabId, newTabAssignment!.groupId)
-    }
-    const activeGroupId =
-      (activeTopLevelId ? groupIdByTabId.get(activeTopLevelId) : undefined) ?? existingGroups[0]!.id
-    const orderByGroup = new Map<string, string[]>(existingGroups.map((group) => [group.id, []]))
-    for (const tabId of tabOrder) {
-      const groupId = groupIdByTabId.get(tabId) ?? activeGroupId
-      orderByGroup.get(groupId)?.push(tabId)
-    }
-    return existingGroups
-      .map((group) => {
-        const nextOrder = orderByGroup.get(group.id) ?? []
-        return {
-          ...group,
-          tabOrder: nextOrder,
-          activeTabId:
-            activeTopLevelId && nextOrder.includes(activeTopLevelId)
-              ? activeTopLevelId
-              : group.activeTabId && nextOrder.includes(group.activeTabId)
-                ? group.activeTabId
-                : (nextOrder[0] ?? null)
-        }
-      })
-      .filter((group) => group.tabOrder.length > 0)
-  }
-
-  private buildMaterializedHeadlessParentLayout(
-    leafId: string,
-    ptyId: string,
-    existingLayout: TerminalLayoutSnapshot | undefined,
-    split?: { splitFromLeafId: string; direction: 'horizontal' | 'vertical' }
-  ): TerminalLayoutSnapshot {
-    if (!existingLayout) {
-      return {
-        root: { type: 'leaf', leafId },
-        activeLeafId: leafId,
-        expandedLeafId: null,
-        ptyIdsByLeafId: { [leafId]: ptyId }
-      }
-    }
-    // Why: a split must insert the new leaf into the live layout tree with the
-    // requested direction, or the published snapshot keeps the old single-leaf
-    // root and the split renders with a fallback direction ("Split Right" lands
-    // as a top/bottom split). Reuse the persisted-split builder for parity.
-    if (split) {
-      return buildHeadlessTerminalSplitLayout(this.cloneTerminalLayoutSnapshot(existingLayout), {
-        leafId,
-        ptyId,
-        splitFromLeafId: split.splitFromLeafId,
-        direction: split.direction
-      })
-    }
-    return {
-      ...this.cloneTerminalLayoutSnapshot(existingLayout),
-      ptyIdsByLeafId: {
-        ...existingLayout.ptyIdsByLeafId,
-        [leafId]: ptyId
-      }
-    }
   }
 
   private removePersistedHeadlessTerminalTab(
@@ -9783,7 +8975,7 @@ export class OrcaRuntimeService {
       snapshotVersion: snapshot.snapshotVersion + 1,
       activeTabId: activeTab.id,
       activeTabType: 'terminal',
-      tabGroups: this.buildHeadlessMobileSessionTabGroups(
+      tabGroups: buildHeadlessMobileSessionTabGroups(
         worktreeId,
         tabs,
         activeTab,
@@ -9815,7 +9007,7 @@ export class OrcaRuntimeService {
     }
     const existing = session.terminalLayoutsByTabId?.[args.tabId]
     const nextLayout = buildHeadlessTerminalSplitLayout(
-      existing ? this.cloneTerminalLayoutSnapshot(existing) : undefined,
+      existing ? cloneTerminalLayoutSnapshot(existing) : undefined,
       args
     )
     this.setWorkspaceSessionForWorktree(args.worktreeId, {
@@ -9841,7 +9033,7 @@ export class OrcaRuntimeService {
       ? {
           ...session.terminalLayoutsByTabId,
           [tab.parentTabId]: {
-            ...this.cloneTerminalLayoutSnapshot(existingLayout),
+            ...cloneTerminalLayoutSnapshot(existingLayout),
             activeLeafId: tab.leafId
           }
         }
@@ -10369,7 +9561,7 @@ export class OrcaRuntimeService {
       snapshotVersion: snapshot.snapshotVersion + 1,
       activeTabId: active?.id ?? null,
       activeTabType: active?.type ?? null,
-      tabGroups: this.buildHeadlessMobileSessionTabGroups(
+      tabGroups: buildHeadlessMobileSessionTabGroups(
         worktreeId,
         nextTabs,
         active,
@@ -10614,7 +9806,7 @@ export class OrcaRuntimeService {
       terminalLayoutsByTabId: {
         ...session.terminalLayoutsByTabId,
         [args.tabId]: {
-          ...this.cloneTerminalLayoutSnapshot(existing),
+          ...cloneTerminalLayoutSnapshot(existing),
           root: args.root ?? existing.root,
           expandedLeafId: args.expandedLeafId,
           ...(args.titlesByLeafId ? { titlesByLeafId: args.titlesByLeafId } : {})
@@ -19781,7 +18973,7 @@ export class OrcaRuntimeService {
         : existingLayout
           ? {
               ...existingLayout,
-              root: this.collectPersistedTerminalLeafIds(existingLayout).includes(claim.leafId)
+              root: collectPersistedTerminalLeafIds(existingLayout).includes(claim.leafId)
                 ? existingLayout.root
                 : existingLayout.root === null
                   ? { type: 'leaf', leafId: claim.leafId }
@@ -31365,7 +30557,7 @@ export class OrcaRuntimeService {
           candidate.parentTabId === parentTabId &&
           candidate.leafId === leafId
       ) ?? null
-    const parentLayout = this.buildMaterializedHeadlessParentLayout(
+    const parentLayout = buildMaterializedHeadlessParentLayout(
       leafId,
       livePty.pty.ptyId,
       existingSurface?.parentLayout
@@ -31406,10 +30598,10 @@ export class OrcaRuntimeService {
       activeGroupId:
         activate && opts.targetGroupId
           ? opts.targetGroupId
-          : (existing?.activeGroupId ?? this.getHeadlessMobileSessionGroupId(worktreeId)),
+          : (existing?.activeGroupId ?? getHeadlessMobileSessionGroupId(worktreeId)),
       activeTabId: activate ? tab.id : (existing?.activeTabId ?? null),
       activeTabType: activate ? 'terminal' : (existing?.activeTabType ?? null),
-      tabGroups: this.buildHeadlessMobileSessionTabGroups(
+      tabGroups: buildHeadlessMobileSessionTabGroups(
         worktreeId,
         tabs,
         activate ? tab : null,
@@ -35621,7 +34813,7 @@ export class OrcaRuntimeService {
         rendererVersion: snapshot.snapshotVersion,
         rendererTabCount: fencedSnapshot.tabs.length,
         rendererTabIdentityKeys: new Set(
-          fencedSnapshot.tabs.flatMap((tab) => this.getMobileSessionSnapshotTabIdentityKeys(tab))
+          fencedSnapshot.tabs.flatMap((tab) => getMobileSessionSnapshotTabIdentityKeys(tab))
         )
       })
     }
@@ -35685,7 +34877,7 @@ export class OrcaRuntimeService {
     const normalizedIncomingTabs = preservedActiveTab
       ? snapshot.tabs.map((tab) => (tab.isActive ? { ...tab, isActive: false } : tab))
       : snapshot.tabs
-    const tabs = this.mergeMobileSessionSnapshotTabs(
+    const tabs = mergeMobileSessionSnapshotTabs(
       normalizedIncomingTabs,
       normalizedPreservedTabs
     )
@@ -35702,7 +34894,7 @@ export class OrcaRuntimeService {
     const terminalTabs = tabs.filter(
       (tab): tab is RuntimeMobileSessionTerminalTab => tab.type === 'terminal'
     )
-    const tabGroups = this.mergeMobileSessionTabGroups(
+    const tabGroups = mergeMobileSessionTabGroups(
       snapshot.worktree,
       snapshot.tabGroups ?? existing.tabGroups ?? [],
       terminalTabs,
@@ -35772,11 +34964,10 @@ export class OrcaRuntimeService {
       publicationEpoch: this.getMergedMobileSessionPublicationEpoch(existing, tabs),
       // Why: mint a fresh version or clients' same-epoch gate drops the prune frame.
       snapshotVersion: existing.snapshotVersion + 1,
-      activeGroupId:
-        existing.activeGroupId ?? this.getHeadlessMobileSessionGroupId(existing.worktree),
+      activeGroupId: existing.activeGroupId ?? getHeadlessMobileSessionGroupId(existing.worktree),
       activeTabId: activeTab?.id ?? null,
       activeTabType: activeTab?.type ?? null,
-      tabGroups: this.mergeMobileSessionTabGroups(
+      tabGroups: mergeMobileSessionTabGroups(
         existing.worktree,
         existing.tabGroups ?? [],
         terminalTabs,
@@ -35797,7 +34988,7 @@ export class OrcaRuntimeService {
   ): boolean {
     return existing.tabs.some(
       (tab) =>
-        !this.getMobileSessionSnapshotTabIdentityKeys(tab).some((id) =>
+        !getMobileSessionSnapshotTabIdentityKeys(tab).some((id) =>
           rendererTabIdentityKeys.has(id)
         ) && !this.shouldPreserveHeadlessMobileSessionTab(existing, tab)
     )
@@ -35808,10 +34999,10 @@ export class OrcaRuntimeService {
     incoming?: RuntimeMobileSessionTabsSnapshot
   ): RuntimeMobileSessionSnapshotTab[] {
     const incomingIds = new Set(
-      incoming?.tabs.flatMap((tab) => this.getMobileSessionSnapshotTabIdentityKeys(tab)) ?? []
+      incoming?.tabs.flatMap((tab) => getMobileSessionSnapshotTabIdentityKeys(tab)) ?? []
     )
     return existing.tabs.filter((tab) => {
-      if (this.getMobileSessionSnapshotTabIdentityKeys(tab).some((id) => incomingIds.has(id))) {
+      if (getMobileSessionSnapshotTabIdentityKeys(tab).some((id) => incomingIds.has(id))) {
         return false
       }
       return this.shouldPreserveHeadlessMobileSessionTab(existing, tab)
@@ -41297,26 +40488,10 @@ const WAIT_BLOCKED_CHECK_MIN_INTERVAL_MS = 50
 const WAIT_BLOCKED_KEYWORD_PATTERN =
   /press enter|press t to trust|do you trust|trust this|trusted workspace|permission required|requires permission|allow once|allow always|update available|choose working directory|codex just got an upgrade|hooks need review/
 const WAIT_BLOCKED_KEYWORD_CARRY_CHARS = 31
-const MAX_TAIL_LINES = 2000
-const MAX_TAIL_CHARS = 256 * 1024
-const MAX_TAIL_PARTIAL_CHARS = 4000
-const MAX_TAIL_PENDING_ANSI_CHARS = 4096
-const DEFAULT_TERMINAL_READ_LIMIT = 120
-const MAX_TERMINAL_READ_LIMIT = 2000
-const MAX_TERMINAL_PREVIEW_CHARS = 32 * 1024
 export const AUTHORITATIVE_TERMINAL_SNAPSHOT_TIMEOUT_MS = 8_000
 const VISIBLE_TERMINAL_SNAPSHOT_TIMEOUT_MS = 750
 const VISIBLE_TERMINAL_SNAPSHOT_RETRY_MS = 1_000
 const TUI_IDLE_VISIBLE_PROBE_SETTLE_MARGIN_MS = 10
-const MAX_PREVIEW_LINES = 6
-const MAX_PREVIEW_CHARS = 300
-const WORKTREE_STATUS_PRIORITY: Record<RuntimeWorktreeStatus, number> = {
-  inactive: 0,
-  active: 1,
-  done: 2,
-  working: 3,
-  permission: 4
-}
 const DEFAULT_REPO_SEARCH_REFS_LIMIT = 25
 const DEFAULT_TERMINAL_LIST_LIMIT = 200
 const DEFAULT_WORKTREE_LIST_LIMIT = 200
@@ -41425,14 +40600,6 @@ function setBoundedMapEntry<K, V>(map: Map<K, V>, key: K, value: V, maxEntries: 
   }
 }
 
-function getExplicitWorktreeIdSelector(selector: string | undefined): string | null {
-  if (!selector?.startsWith('id:')) {
-    return null
-  }
-  const id = selector.slice(3)
-  return id.length > 0 ? id : null
-}
-
 function withTimeoutResult<T>(
   promise: Promise<T>,
   timeoutMs: number
@@ -41444,49 +40611,6 @@ function withTimeoutResult<T>(
       ok: false
     }
   )
-}
-
-export function buildPreview(lines: string[], partialLine: string): string {
-  const previewLines: string[] = []
-  const collectVisibleLine = (line: string): void => {
-    const trimmed = line.trim()
-    if (trimmed.length > 0) {
-      previewLines.push(trimmed)
-    }
-  }
-
-  if (partialLine.length > 0) {
-    collectVisibleLine(partialLine)
-  }
-  for (
-    let index = lines.length - 1;
-    index >= 0 && previewLines.length < MAX_PREVIEW_LINES;
-    index--
-  ) {
-    collectVisibleLine(lines[index])
-  }
-  previewLines.reverse()
-
-  const preview = previewLines.join('\n')
-  return preview.length > MAX_PREVIEW_CHARS
-    ? preview.slice(preview.length - MAX_PREVIEW_CHARS)
-    : preview
-}
-
-// Why: restore payloads can be multi-MB; the records only retain a bounded tail,
-// so cap the one-time parse on the spawn path to the suffix that can matter.
-const MAX_RESTORE_TAIL_SEED_CHARS = 256 * 1024
-
-type RestoredTerminalTailSeed = {
-  lines: string[]
-  transcriptLines: string[]
-  transcriptChars: number
-  partialLine: string
-  pendingAnsi: string
-  redrawCursor: RetainedTailRedrawCursor | null
-  truncated: boolean
-  linesTotal: number
-  preview: string
 }
 
 type RestorableTerminalTailRecord = Pick<
@@ -41502,49 +40626,6 @@ type RestorableTerminalTailRecord = Pick<
   | 'tailLinesTotal'
   | 'preview'
 >
-
-export function buildRestoredTerminalTailSeed(text: string): RestoredTerminalTailSeed | null {
-  let bounded = text
-  let sliced = false
-  if (bounded.length > MAX_RESTORE_TAIL_SEED_CHARS) {
-    bounded = bounded.slice(-MAX_RESTORE_TAIL_SEED_CHARS)
-    // Why: an arbitrary suffix can start mid-escape; restarting after the first
-    // line break resumes at a boundary (escape params never span \n or \r —
-    // \r covers newline-free CR-redraw streams). Consume a full \r\n pair so
-    // the seed does not begin with a phantom blank line.
-    const anchor = bounded.search(/[\r\n]/)
-    if (anchor !== -1) {
-      bounded = bounded.slice(
-        bounded[anchor] === '\r' && bounded[anchor + 1] === '\n' ? anchor + 2 : anchor + 1
-      )
-    }
-    sliced = true
-  }
-  // Why: the live-path pipeline, so seeded records equal what streaming the
-  // same bytes through onPtyData would have produced.
-  const normalized = normalizeTerminalChunk(bounded)
-  const tail = appendNormalizedToTailBuffer([], '', normalized.text, null)
-  if (tail.lines.length === 0 && tail.partialLine.length === 0) {
-    return null
-  }
-  const transcript = appendCompletedTerminalTranscript(
-    [],
-    0,
-    tail.newlyCompletedLines,
-    tail.newCompleteLines
-  )
-  return {
-    lines: tail.lines,
-    transcriptLines: transcript.lines,
-    transcriptChars: transcript.characters,
-    partialLine: tail.partialLine,
-    pendingAnsi: normalized.pendingAnsi,
-    redrawCursor: tail.redrawCursor,
-    truncated: sliced || tail.truncated || transcript.truncated,
-    linesTotal: tail.newCompleteLines,
-    preview: buildPreview(tail.lines, tail.partialLine)
-  }
-}
 
 function restoredTerminalTailSeedAllowed(record: RestorableTerminalTailRecord): boolean {
   return (
@@ -42670,11 +41751,6 @@ async function assertTerminalInputWithinLimitWithYield(text: string | undefined)
 const TUI_IDLE_DEFAULT_TIMEOUT_MS = 5 * 60 * 1000
 const TUI_IDLE_POLL_INTERVAL_MS = 2000
 const TUI_IDLE_QUIESCENCE_MS = 3000
-const EXPLICIT_IDLE_TITLE_RE = /(^|\s)(ready|idle|done)(\s|$|[.!?])/i
-const CLAUDE_IDLE_PREFIX = '\u2733'
-const GEMINI_IDLE_PREFIX = '\u25c7'
-const PI_IDLE_PREFIX = '\u03c0 - '
-
 // Clamp for mobileAutoRestoreFitMs: floor above the legacy 300ms debounce, 1h ceiling (a held PTY beyond that is "I forgot", not intentional).
 const MOBILE_AUTO_RESTORE_FIT_MIN_MS = 5_000
 const MOBILE_AUTO_RESTORE_FIT_MAX_MS = 60 * 60 * 1000
