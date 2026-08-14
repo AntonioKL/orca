@@ -24,10 +24,10 @@ export class RuntimeTerminalViewSubscribers {
     this.spawnPublishedPtys.delete(ptyId)
   }
 
-  clear(ptyId: string): void {
+  // Why: exit drops subscribers only; attach/publish state survives until the respawn advances the generation.
+  clearSubscribers(ptyId: string): void {
     this.remoteCounts.delete(ptyId)
     this.rawCounts.delete(ptyId)
-    this.resetGeneration(ptyId)
   }
 
   registerRemote(ptyId: string): () => void {
@@ -59,6 +59,14 @@ export class RuntimeTerminalViewSubscribers {
 
   isKnownUnattachedLocal(ptyId: string): boolean {
     return !this.spawnPublishedPtys.has(ptyId) && this.deps.isUnattachedLocalCandidate(ptyId)
+  }
+
+  hasPendingProviderAttach(ptyId: string): boolean {
+    return this.providerAttaches.has(ptyId)
+  }
+
+  attachInventoryWaiterIds(): string[] {
+    return [...this.attachInventoryWaiters]
   }
 
   reconcileProviderAttach(ptyId: string): void {

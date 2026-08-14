@@ -1,13 +1,11 @@
 import {
   type getLinearIssueByUuidForAgent,
+  type LinearIssueTaskUpdateRequest,
+  type LinearIssueTaskUpdateResult,
+  type LinearIssueSummary,
   getLinearTeamLabelsOrThrow,
   linearError,
   sameStringSet
-} from './runtime-linear-command-dependencies'
-import type {
-  LinearIssueTaskUpdateRequest,
-  LinearIssueTaskUpdateResult,
-  LinearIssueSummary
 } from './runtime-linear-command-dependencies'
 import { RuntimeLinearProjectWriteCommands } from './runtime-linear-project-write-commands'
 

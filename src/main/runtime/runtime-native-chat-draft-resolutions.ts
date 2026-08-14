@@ -1,9 +1,9 @@
 import type { RuntimeClientEvent } from '../../shared/runtime-client-events'
 import type {
   RuntimeMobileSessionTabsSnapshot,
-  RuntimeMobileSessionTerminalTab
+  RuntimeMobileSessionTerminalTab,
+  RuntimeNativeChatLaunchDraftResolution
 } from '../../shared/runtime-types'
-import type { RuntimeNativeChatLaunchDraftResolution } from '../../shared/runtime-types'
 import { runtimeWorktreeIdsEqual } from './runtime-worktree-path-identity'
 
 type DraftResolutionTombstone = RuntimeNativeChatLaunchDraftResolution & { worktreeId: string }

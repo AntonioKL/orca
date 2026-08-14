@@ -1,8 +1,10 @@
 import type { Repo } from '../../shared/repo-types'
-import { reviewHeadRemoteRefComponent } from '../../shared/review-head-tracking-ref'
+import {
+  gitlabMergeRequestHeadLocalRef,
+  reviewHeadRemoteRefComponent
+} from '../../shared/review-head-tracking-ref'
 import { isTransientReviewHeadFetchError } from '../git/fetch-error-classification'
 import { fetchGitLabMergeRequestHeadRef } from '../gitlab/mr-head-tracking-ref'
-import { gitlabMergeRequestHeadLocalRef } from '../../shared/review-head-tracking-ref'
 import type { requireSshGitProvider } from '../providers/ssh-git-dispatch'
 
 type SshGitProvider = ReturnType<typeof requireSshGitProvider>

@@ -20,7 +20,7 @@ export class RuntimeRepositoryForkBackfill {
     void this.run()
   }
 
-  private async run(): Promise<void> {
+  async run(): Promise<void> {
     try {
       const store = this.getStore()
       if (!store) {

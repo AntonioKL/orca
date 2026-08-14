@@ -2,7 +2,6 @@ import {
   clampLinearSearchLimit,
   clampLinearIssueListLimit,
   listLinearIssues,
-  listLinearProjects,
   sanitizeLinearErrorMessage,
   listMcpIssues,
   getLinearTeamMembersOrThrow,
@@ -106,7 +105,7 @@ export class RuntimeLinearReadCommands extends RuntimeLinearContextCommands {
   }): Promise<LinearProjectListResult> {
     const limit = clampLinearSearchLimit(params.limit)
     try {
-      const result = await listLinearProjects(params.query, limit, params.workspaceId, true)
+      const result = await this.linearListProjects(params.query, limit, params.workspaceId, true)
       const projects = result.items.slice(0, limit).map((project) => ({
         id: project.id,
         name: project.name,

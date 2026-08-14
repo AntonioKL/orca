@@ -77,7 +77,8 @@ export class RuntimeAgentOrchestrationProjection {
             displayName: task.display_name
           })
         : { taskTitle: '', displayName: '' }
-    const owningRun = task?.run_id === dispatch.run_id ? db?.getRun?.(dispatch.run_id) : undefined
+    const owningRun =
+      task?.run_id && task.run_id === dispatch.run_id ? db?.getRun?.(dispatch.run_id) : undefined
     const runCoordinatorHandle = owningRun?.coordinator_handle ?? undefined
     const legacyActiveRun =
       owningRun?.legacy === 1 && (dispatch.status === 'pending' || dispatch.status === 'dispatched')

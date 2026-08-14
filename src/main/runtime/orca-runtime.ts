@@ -423,7 +423,6 @@ import {
 } from './terminal-send-payload'
 import { notifyRuntimeListeners, withTimeout, withTimeoutResult } from './runtime-async-boundaries'
 import { readRepoWorktreeAdminFingerprint } from './repo-worktree-admin-fingerprint'
-import { RuntimeLinearBrowseCommands } from './runtime-linear-browse-commands'
 import { RuntimeLinearCommands } from './runtime-linear-connection-commands'
 import {
   installRuntimeLinearCommandSurface,
@@ -9642,7 +9641,7 @@ class OrcaRuntimeService {
     advertisedUrlWatcher.unbindPty(ptyId)
     // Clean up new mobile state for this PTY
     this.mobileSubscribers.delete(ptyId)
-    this.terminalViewSubscribers.clear(ptyId)
+    this.terminalViewSubscribers.clearSubscribers(ptyId)
     this.mobileDisplayModes.delete(ptyId)
     this.resizeListeners.delete(ptyId)
     this.lastRendererSizes.delete(ptyId)
@@ -13327,10 +13326,10 @@ class OrcaRuntimeService {
             localOptions: localWorktreeGitOptions,
             store,
             acquireWatcherRemoval: this.acquireFileWatcherRemoval,
-            stopPtys: (worktreeId, connectionId, allow) =>
+            stopPtys: (worktreeId, connectionId, allowUnverifiedPtyStop) =>
               this.stopPtysForDestructiveWorktreeRemoval(worktreeId, {
                 ...(connectionId ? { connectionId } : {}),
-                allowUnverifiedStop: allow
+                allowUnverifiedStop: allowUnverifiedPtyStop
               }),
             finishRemoval: () => {
               this.clearOptimisticReconcileToken(removalTarget.id)
@@ -13451,13 +13450,13 @@ class OrcaRuntimeService {
           closeWatchers: (path) => this.closeFileWatchersForRemoval(path),
           preserveBranchHead: (result, fallbackHead) =>
             this.preservedBranchCleanup.preserveHead(result, fallbackHead),
-          finishRemoval: (result, rememberBranch) => {
+          finishRemoval: (result, rememberBranch, fallbackHead) => {
             if (rememberBranch) {
               this.preservedBranchCleanup.remember(
                 removalTarget.id,
                 cleanupHostId,
                 result,
-                registeredWorktree.head,
+                fallbackHead,
                 removedPushTarget
               )
             } else {
@@ -19934,7 +19933,6 @@ class OrcaRuntimeService {
     setWorktreeMeta: (worktreeId, meta) => this.store!.setWorktreeMeta(worktreeId, meta),
     emitClientEvent: (event) => this.emitClientEvent(event)
   })
-  readonly linearBrowseCommands = new RuntimeLinearBrowseCommands()
 
   private getAuthoritativeWindow(): BrowserWindow {
     const win = this.getAvailableAuthoritativeWindow()

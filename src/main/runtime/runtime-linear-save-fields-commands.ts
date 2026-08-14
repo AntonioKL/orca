@@ -1,11 +1,9 @@
 import {
   type getLinearIssueByUuidForAgent,
+  type LinearIssueUpdate,
+  type LinearCreateFieldIntent,
   linearError,
   sameStringSet
-} from './runtime-linear-command-dependencies'
-import type {
-  LinearIssueUpdate,
-  LinearCreateFieldIntent
 } from './runtime-linear-command-dependencies'
 import { RuntimeLinearTaskFieldCommands } from './runtime-linear-task-fields-commands'
 

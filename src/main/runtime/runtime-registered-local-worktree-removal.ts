@@ -49,7 +49,12 @@ export async function removeRuntimeRegisteredLocalWorktree(args: {
     result: RemoveWorktreeResult | undefined,
     fallbackHead: string | undefined
   ) => RemoveWorktreeResult
-  finishRemoval: (result: RemoveWorktreeResult | undefined, rememberBranch: boolean) => void
+  finishRemoval: (
+    result: RemoveWorktreeResult | undefined,
+    rememberBranch: boolean,
+    // Why: re-read after the archive hook, which can move the branch out from under the pre-hook row.
+    fallbackHead: string | undefined
+  ) => void
 }): Promise<RemoveWorktreeResult & { warning?: string }> {
   const { repo, registeredWorktree, localOptions } = args
   const canonicalPath = registeredWorktree.path
@@ -144,7 +149,7 @@ export async function removeRuntimeRegisteredLocalWorktree(args: {
           () => {}
         )
         await cleanupPushTarget(args)
-        args.finishRemoval(undefined, false)
+        args.finishRemoval(undefined, false, refreshed.head)
         completed = true
         return warning ? { warning } : {}
       } else {
@@ -156,7 +161,7 @@ export async function removeRuntimeRegisteredLocalWorktree(args: {
     await gate.finish(completed)
   }
   await cleanupPushTarget(args)
-  args.finishRemoval(removalResult, true)
+  args.finishRemoval(removalResult, true, refreshed.head)
   return { ...removalResult, ...(warning ? { warning } : {}) }
 }
 

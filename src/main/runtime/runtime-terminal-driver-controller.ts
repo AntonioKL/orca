@@ -59,7 +59,6 @@ export class RuntimeTerminalDriverController {
   }
 
   clear(ptyId: string): boolean {
-    this.inputFloorClaims.delete(ptyId)
     if (!this.current.delete(ptyId)) {
       return false
     }

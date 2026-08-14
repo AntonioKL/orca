@@ -1,6 +1,7 @@
 import type { RuntimeTerminalShow } from '../../shared/runtime-types'
 import type { ResolvedWorktree } from './runtime-worktree-path-identity'
 import type { LinearLinkedIssueUpdatedEvent } from './runtime-linear-command-dependencies'
+import { RuntimeLinearBrowseCommands } from './runtime-linear-browse-commands'
 
 export type RuntimeLinearCommandPorts = {
   runtimeAvailable: () => boolean
@@ -17,8 +18,11 @@ export type RuntimeLinearCommandPorts = {
   emitClientEvent: (event: LinearLinkedIssueUpdatedEvent) => void
 }
 
-export class RuntimeLinearCommandBase {
-  constructor(private readonly ports: RuntimeLinearCommandPorts) {}
+// Why: browse reads sit at the chain root so write commands can re-enter them through `this`, as they did on the facade.
+export class RuntimeLinearCommandBase extends RuntimeLinearBrowseCommands {
+  constructor(private readonly ports: RuntimeLinearCommandPorts) {
+    super()
+  }
 
   protected runtimeAvailable(): boolean {
     return this.ports.runtimeAvailable()

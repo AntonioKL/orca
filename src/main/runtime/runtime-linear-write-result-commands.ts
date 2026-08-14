@@ -1,9 +1,7 @@
 import type {
   getLinearAttachmentByUuidForAgent,
   getLinearCommentByUuidForAgent,
-  getLinearIssueByUuidForAgent
-} from './runtime-linear-command-dependencies'
-import type {
+  getLinearIssueByUuidForAgent,
   LinearAttachResult,
   LinearCommentAddResult,
   LinearCreateResult,
