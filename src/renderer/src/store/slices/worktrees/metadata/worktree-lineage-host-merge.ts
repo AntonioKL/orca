@@ -37,11 +37,16 @@ export function mergeLineageForHost(
     'repos' | 'settings' | 'worktreesByRepo' | 'detectedWorktreesByRepo' | 'worktreeLineageById'
   >,
   hostId: ExecutionHostId,
-  lineage: Readonly<Record<string, WorktreeLineage>>
+  lineage: Readonly<Record<string, WorktreeLineage>>,
+  idsAtRequestStart?: ReadonlySet<string>
 ): Readonly<Record<string, WorktreeLineage>> {
   const next: Record<string, WorktreeLineage> = {}
   for (const [worktreeId, existing] of Object.entries(state.worktreeLineageById)) {
-    if (getWorktreeHostId(state, worktreeId) !== hostId) {
+    // Why: preserve an optimistic create write that landed after this request started.
+    if (
+      getWorktreeHostId(state, worktreeId) !== hostId ||
+      (idsAtRequestStart !== undefined && !idsAtRequestStart.has(worktreeId))
+    ) {
       next[worktreeId] = existing
     }
   }
@@ -61,7 +66,8 @@ export function mergeWorkspaceLineageForHost(
     | 'workspaceLineageByChildKey'
   >,
   hostId: ExecutionHostId,
-  lineage: Readonly<Record<string, WorkspaceLineage>>
+  lineage: Readonly<Record<string, WorkspaceLineage>>,
+  childKeysAtRequestStart?: ReadonlySet<string>
 ): Readonly<Record<string, WorkspaceLineage>> {
   const next: Record<string, WorkspaceLineage> = {}
   for (const [childKey, existing] of Object.entries(state.workspaceLineageByChildKey)) {
@@ -69,7 +75,11 @@ export function mergeWorkspaceLineageForHost(
     const childHostId =
       childScope?.type === 'worktree' ? getWorktreeHostId(state, childScope.worktreeId) : null
     // A focused host refresh can no longer prove unknown-host child rows are current.
-    if (childScope?.type !== 'worktree' || (childHostId !== null && childHostId !== hostId)) {
+    if (
+      childScope?.type !== 'worktree' ||
+      (childHostId !== null && childHostId !== hostId) ||
+      (childKeysAtRequestStart !== undefined && !childKeysAtRequestStart.has(childKey))
+    ) {
       next[childKey] = existing
     }
   }

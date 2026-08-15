@@ -206,6 +206,8 @@ export type WorktreeSlice = {
       startupDraft?: string
       /** True only when `name` came from the creature-name generator; gates host-side retirement. */
       nameWasGenerated?: boolean
+      /** Parent picked in the composer. Sets sidebar nesting only; ignored if it no longer exists. */
+      parentWorktreeId?: string
       provisionedRoot?: {
         runtimeId: string
         executionHostId: ExecutionHostId

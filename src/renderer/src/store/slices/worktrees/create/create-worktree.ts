@@ -6,7 +6,14 @@ import {
   getGeneratedWorktreeCreateRetryCandidate,
   isRetryableWorktreeCreateConflict
 } from '../../../../../../shared/new-workspace/worktree-create-retry-policy'
-import { parseWorkspaceKey, folderWorkspaceKey } from '../../../../../../shared/workspace-scope'
+import {
+  parseWorkspaceKey,
+  folderWorkspaceKey,
+  worktreeWorkspaceKey
+} from '../../../../../../shared/workspace-scope'
+import { toast } from 'sonner'
+import { translate } from '@/i18n/i18n'
+import { resolveWorktreeDisplayName } from '@/lib/worktree-default-display-name'
 import {
   assertRuntimeEnvironmentCapability,
   callRuntimeRpc,
@@ -22,6 +29,29 @@ import {
   withRepoHostOwnership
 } from '../listing/worktree-host-ownership'
 import { settingsForRepoOwner } from '../listing/worktree-owner-settings'
+import { getIndexedWorktreeById } from '@/store/worktree-repo-index'
+import { isRuntimeLineageParentMissingError } from '../listing/runtime-worktree-rpc-errors'
+
+function notifyPickedParentDropped(parentDisplayName: string | null): void {
+  toast.warning(
+    parentDisplayName
+      ? translate(
+          'auto.store.slices.worktrees.createdWithoutParentNesting',
+          'Created without nesting under "{{value0}}"',
+          { value0: parentDisplayName }
+        )
+      : translate(
+          'auto.store.slices.worktrees.createdWithoutParentNestingUnnamed',
+          'Created without nesting under the selected parent'
+        ),
+    {
+      description: translate(
+        'auto.store.slices.worktrees.createdWithoutParentNestingDetail',
+        'The parent workspace was no longer available. You can set it from the workspace menu.'
+      )
+    }
+  )
+}
 
 export function createCreateWorktree(
   set: WorktreeSliceSet,
@@ -73,8 +103,21 @@ export function createCreateWorktree(
           // Why: manual sort is user-authored order; stamp new workspaces at the top rather than relying on sortOrder fallback.
           const manualOrder = get().sortBy === 'manual' ? Date.now() : undefined
           const activeScope = parseWorkspaceKey(get().activeWorkspaceKey ?? '')
-          const parentWorkspace =
-            activeScope?.type === 'folder'
+          const pickedParent = options?.parentWorktreeId
+            ? getIndexedWorktreeById(get().worktreesByRepo, options.parentWorktreeId)
+            : undefined
+          const pickedParentWorktreeId =
+            pickedParent && !pickedParent.isArchived && pickedParent.repoId === repoId
+              ? pickedParent.id
+              : undefined
+          if (options?.parentWorktreeId && !pickedParentWorktreeId) {
+            notifyPickedParentDropped(
+              pickedParent ? resolveWorktreeDisplayName(pickedParent).trim() : null
+            )
+          }
+          const parentWorkspace = pickedParentWorktreeId
+            ? worktreeWorkspaceKey(pickedParentWorktreeId)
+            : activeScope?.type === 'folder'
               ? folderWorkspaceKey(activeScope.folderWorkspaceId)
               : undefined
           const createArgs = {
@@ -130,6 +173,67 @@ export function createCreateWorktree(
           if (provisionedRoot && target.kind !== 'local') {
             throw new Error('Provisioned-root recipes currently require a direct SSH connection.')
           }
+          const createOnRuntimeTarget = async (
+            parentWorkspaceForCall: typeof parentWorkspace
+          ): Promise<Awaited<ReturnType<typeof window.api.worktrees.create>>> =>
+            await callRuntimeRpc<Awaited<ReturnType<typeof window.api.worktrees.create>>>(
+              target,
+              'worktree.create',
+              {
+                repo: repoId,
+                name: candidateName,
+                ...(options?.nameWasGenerated ? { nameWasGenerated: true } : {}),
+                baseBranch,
+                ...(compareBaseRef ? { compareBaseRef } : {}),
+                ...(candidateBranchNameOverride
+                  ? { branchNameOverride: candidateBranchNameOverride }
+                  : {}),
+                setupDecision,
+                sparseCheckout,
+                ...(displayName ? { displayName } : {}),
+                ...(telemetrySource ? { telemetrySource } : {}),
+                ...(linkedIssue !== undefined ? { linkedIssue } : {}),
+                ...(linkedPR !== undefined ? { linkedPR } : {}),
+                ...(pushTarget ? { pushTarget } : {}),
+                ...(createdWithAgent ? { createdWithAgent } : {}),
+                ...(pendingFirstAgentMessageRename === true && createdWithAgent
+                  ? { pendingFirstAgentMessageRename: true }
+                  : {}),
+                ...(linkedLinearIssue !== undefined ? { linkedLinearIssue } : {}),
+                ...(linkedLinearIssueWorkspaceId !== undefined
+                  ? { linkedLinearIssueWorkspaceId }
+                  : {}),
+                ...(linkedLinearIssueOrganizationUrlKey !== undefined
+                  ? { linkedLinearIssueOrganizationUrlKey }
+                  : {}),
+                ...(manualOrder !== undefined ? { manualOrder } : {}),
+                ...(parentWorkspaceForCall ? { parentWorkspace: parentWorkspaceForCall } : {}),
+                ...(workspaceStatus !== undefined ? { workspaceStatus } : {}),
+                ...(linkedGitLabMR !== undefined ? { linkedGitLabMR } : {}),
+                ...(linkedGitLabIssue !== undefined ? { linkedGitLabIssue } : {}),
+                ...(linkedBitbucketPR !== undefined ? { linkedBitbucketPR } : {}),
+                ...(linkedAzureDevOpsPR !== undefined ? { linkedAzureDevOpsPR } : {}),
+                ...(linkedGiteaPR !== undefined ? { linkedGiteaPR } : {}),
+                ...(linkedWorkItem !== undefined ? { linkedWorkItem } : {}),
+                ...(linkedTaskSourceContext !== undefined ? { linkedTaskSourceContext } : {}),
+                ...(startupDraft ? { startupDraft } : {}),
+                ...(automationProvenanceRequest ? { automationProvenanceRequest } : {}),
+                ...(startup
+                  ? {
+                      startupCommand: startup.command,
+                      ...(startup.env ? { startupEnv: startup.env } : {}),
+                      ...(startup.launchConfig
+                        ? { startupLaunchConfig: startup.launchConfig }
+                        : {}),
+                      ...(startup.startupCommandDelivery
+                        ? { startupCommandDelivery: startup.startupCommandDelivery }
+                        : {}),
+                      activate: true
+                    }
+                  : {})
+              },
+              { timeoutMs: 10 * 60_000 }
+            )
           const result = provisionedRoot
             ? await window.api.worktrees.adoptProvisionedRoot({
                 ...createArgs,
@@ -137,64 +241,17 @@ export function createCreateWorktree(
               })
             : target.kind === 'local'
               ? await window.api.worktrees.create(createArgs)
-              : await callRuntimeRpc<Awaited<ReturnType<typeof window.api.worktrees.create>>>(
-                  target,
-                  'worktree.create',
-                  {
-                    repo: repoId,
-                    name: candidateName,
-                    ...(options?.nameWasGenerated ? { nameWasGenerated: true } : {}),
-                    baseBranch,
-                    ...(compareBaseRef ? { compareBaseRef } : {}),
-                    ...(candidateBranchNameOverride
-                      ? { branchNameOverride: candidateBranchNameOverride }
-                      : {}),
-                    setupDecision,
-                    sparseCheckout,
-                    ...(displayName ? { displayName } : {}),
-                    ...(telemetrySource ? { telemetrySource } : {}),
-                    ...(linkedIssue !== undefined ? { linkedIssue } : {}),
-                    ...(linkedPR !== undefined ? { linkedPR } : {}),
-                    ...(pushTarget ? { pushTarget } : {}),
-                    ...(createdWithAgent ? { createdWithAgent } : {}),
-                    ...(pendingFirstAgentMessageRename === true && createdWithAgent
-                      ? { pendingFirstAgentMessageRename: true }
-                      : {}),
-                    ...(linkedLinearIssue !== undefined ? { linkedLinearIssue } : {}),
-                    ...(linkedLinearIssueWorkspaceId !== undefined
-                      ? { linkedLinearIssueWorkspaceId }
-                      : {}),
-                    ...(linkedLinearIssueOrganizationUrlKey !== undefined
-                      ? { linkedLinearIssueOrganizationUrlKey }
-                      : {}),
-                    ...(manualOrder !== undefined ? { manualOrder } : {}),
-                    ...(parentWorkspace ? { parentWorkspace } : {}),
-                    ...(workspaceStatus !== undefined ? { workspaceStatus } : {}),
-                    ...(linkedGitLabMR !== undefined ? { linkedGitLabMR } : {}),
-                    ...(linkedGitLabIssue !== undefined ? { linkedGitLabIssue } : {}),
-                    ...(linkedBitbucketPR !== undefined ? { linkedBitbucketPR } : {}),
-                    ...(linkedAzureDevOpsPR !== undefined ? { linkedAzureDevOpsPR } : {}),
-                    ...(linkedGiteaPR !== undefined ? { linkedGiteaPR } : {}),
-                    ...(linkedWorkItem !== undefined ? { linkedWorkItem } : {}),
-                    ...(linkedTaskSourceContext !== undefined ? { linkedTaskSourceContext } : {}),
-                    ...(startupDraft ? { startupDraft } : {}),
-                    ...(automationProvenanceRequest ? { automationProvenanceRequest } : {}),
-                    ...(startup
-                      ? {
-                          startupCommand: startup.command,
-                          ...(startup.env ? { startupEnv: startup.env } : {}),
-                          ...(startup.launchConfig
-                            ? { startupLaunchConfig: startup.launchConfig }
-                            : {}),
-                          ...(startup.startupCommandDelivery
-                            ? { startupCommandDelivery: startup.startupCommandDelivery }
-                            : {}),
-                          activate: true
-                        }
-                      : {})
-                  },
-                  { timeoutMs: 10 * 60_000 }
-                )
+              : await createOnRuntimeTarget(parentWorkspace).catch(async (error: unknown) => {
+                  if (!parentWorkspace || !isRuntimeLineageParentMissingError(error)) {
+                    throw error
+                  }
+                  return await createOnRuntimeTarget(undefined)
+                })
+          if (pickedParentWorktreeId && !result.lineage) {
+            notifyPickedParentDropped(
+              pickedParent ? resolveWorktreeDisplayName(pickedParent).trim() : null
+            )
+          }
           // Why: worktrees.onChanged can add this worktree before this callback runs; appending blindly would duplicate it (React key clash).
           set((s) => {
             const hostId = repoHostId(s, repoId)
@@ -222,6 +279,14 @@ export function createCreateWorktree(
                     workspaceLineageByChildKey: {
                       ...s.workspaceLineageByChildKey,
                       [result.workspaceLineage.childWorkspaceKey]: result.workspaceLineage
+                    }
+                  }
+                : {}),
+              ...(result.lineage
+                ? {
+                    worktreeLineageById: {
+                      ...s.worktreeLineageById,
+                      [result.lineage.worktreeId]: result.lineage
                     }
                   }
                 : {}),
