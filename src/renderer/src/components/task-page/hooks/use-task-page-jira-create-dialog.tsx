@@ -27,7 +27,7 @@ export function useTaskPageJiraCreateDialog({
   settings,
   jiraTaskSourceContext
 }: {
-  selectedJiraSiteId: JiraSiteSelection | string | null
+  selectedJiraSiteId: JiraSiteSelection | null
   availableJiraProjects: JiraProject[]
   jiraConnected: boolean
   settings: GlobalSettings | null
