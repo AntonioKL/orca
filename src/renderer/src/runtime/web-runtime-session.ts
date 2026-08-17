@@ -1867,7 +1867,9 @@ async function createWebRuntimeSessionTerminalResult(
                         ...(args.launchConfig?.ompResumeFilePath
                           ? { ompResumeFilePath: args.launchConfig.ompResumeFilePath }
                           : {}),
-                        ...(agentArgsOverride !== undefined ? { agentArgs: agentArgsOverride } : {}),
+                        ...(agentArgsOverride !== undefined
+                          ? { agentArgs: agentArgsOverride }
+                          : {}),
                         ...(args.launchPreferences
                           ? { launchPreferences: args.launchPreferences }
                           : {}),

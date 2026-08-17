@@ -2,6 +2,7 @@
 // v36 launches shells from content-addressed wrapper trees; older owners stay attachable.
 export const PROTOCOL_VERSION = 36
 export const CONTENT_ADDRESSED_SHELL_WRAPPER_DAEMON_PROTOCOL_VERSION = 36
+export const LAUNCH_TOKEN_ECHO_DAEMON_PROTOCOL_VERSION = 34
 export const ASYNC_CWD_VALIDATION_DAEMON_PROTOCOL_VERSION = 35
 export const CODEX_SHELL_LAUNCH_PREFLIGHT_DAEMON_PROTOCOL_VERSION = 34
 export const WSL_POSIX_CWD_DAEMON_PROTOCOL_VERSION = 33
@@ -39,4 +40,8 @@ export function supportsPtyStartupIngress(protocolVersion: number): boolean {
 
 export function supportsMode2031UnsubscribeFact(protocolVersion: number): boolean {
   return protocolVersion >= MODE_2031_UNSUBSCRIBE_FACT_PROTOCOL_VERSION
+}
+
+export function supportsLaunchTokenEcho(protocolVersion: number): boolean {
+  return protocolVersion >= LAUNCH_TOKEN_ECHO_DAEMON_PROTOCOL_VERSION
 }
