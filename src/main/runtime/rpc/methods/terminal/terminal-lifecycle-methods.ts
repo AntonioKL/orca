@@ -49,6 +49,7 @@ export const TERMINAL_LIFECYCLE_METHODS: RpcAnyMethod[] = [
           ? { terminalColorQueryReplies: params.terminalColorQueryReplies }
           : {}),
         clientKind,
+        ...(pairedDeviceId ? { deviceId: pairedDeviceId } : {}),
         title: params.title,
         focus: params.focus === true,
         rendererBacked: params.rendererBacked === true,

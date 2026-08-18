@@ -88,12 +88,14 @@ export const ORCHESTRATION_DISPATCH_INSPECTION_HANDLERS: Record<string, CommandH
     })
   },
 
-  'orchestration dispatch-forget': async ({ flags, client, json }) => {
+  'orchestration dispatch-forget': async ({ flags, client, cwd, json }) => {
     const result = await client.call<{
       dispatch: { id: string; task_id: string; status: string } | null
     }>('orchestration.dispatchForget', {
       task: getRequiredStringFlag(flags, 'task'),
-      expectedFailureId: getOptionalStringFlag(flags, 'expected-failure-id')
+      expectedFailureId: getOptionalStringFlag(flags, 'expected-failure-id'),
+      run: getOptionalStringFlag(flags, 'run'),
+      from: await resolveCoordinatorTerminalHandle(flags, cwd, client)
     })
     printResult(result, json, (value) => {
       if (!value.dispatch) {

@@ -93,7 +93,9 @@ export function useNewWorkspaceCreateSubmit(args: {
       }
       let latestRuntimeSettings = args.runtimeSettings
       try {
-        const settingsResponse = await client.sendRequest('settings.get')
+        const settingsResponse = await client.sendRequest('settings.get', {
+          includeAgentCatalog: false
+        })
         if (settingsResponse.ok) {
           const result = (settingsResponse as RpcSuccess).result as {
             settings: NewWorktreeRuntimeSettings

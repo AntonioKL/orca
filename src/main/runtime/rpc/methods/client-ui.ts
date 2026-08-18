@@ -1,8 +1,14 @@
 import { omitPairingLocalUiFields } from '../../../../shared/pairing-local-ui-fields'
+import { z } from 'zod'
 import type { PersistedUIState } from '../../../../shared/persisted-ui-state-types'
 import { defineMethod, type RpcMethod } from '../core'
-import { PRBotAuthorOverrideUpdate, SettingsUpdate } from './client-settings-schemas'
-import { FeatureInteractionIdParam, UiUpdate } from './client-ui-schemas'
+import { OptionalBoolean } from '../schemas'
+import {
+  FeatureInteractionIdParam,
+  PRBotAuthorOverrideUpdate,
+  SettingsUpdate,
+  UiUpdate
+} from './client-ui-schemas'
 // Type-only side effect: keeps the schema/PersistedUIState parity assertions in
 // the typecheck graph so drift fails the build instead of a paired client.
 
@@ -30,17 +36,32 @@ const AGENT_REJECTED_SETTINGS_UPDATE_KEYS = [
   'sourceControlAi'
 ] as const
 
+// Why: the catalog projection is budgeted at 512 KiB, so a client that only wants
+// settings opts out and fetches it from settings.agentCatalog.get instead. Omitted
+// keeps the legacy piggyback: an old client has no other way to read the catalog.
+const SettingsGet = z.object({ includeAgentCatalog: OptionalBoolean }).strict()
+
 export const CLIENT_UI_METHODS: RpcMethod[] = [
   defineMethod({
     name: 'settings.get',
-    params: null,
-    handler: (_params, { runtime }) => ({
+    params: SettingsGet,
+    handler: (params, { runtime }) => ({
       settings: runtime.getClientSettings(),
-      agentCatalog: runtime.getAgentCatalogSnapshot(),
+      ...(params.includeAgentCatalog === false
+        ? {}
+        : { agentCatalog: runtime.getAgentCatalogSnapshot() }),
       // Small capability descriptor; the full snapshot ships from
       // settings.agentReferences.get so the two never compete under one frame.
       agentReferences: { version: 1 as const, revision: runtime.getAgentReferenceRevision() }
     })
+  }),
+  defineMethod({
+    name: 'settings.agentCatalog.get',
+    params: null,
+    // Why: dedicated read so the catalog rides its own frame instead of every
+    // unrelated settings.get; a client that gets method_not_found here is talking
+    // to an old host and falls back to the settings.get piggyback.
+    handler: (_params, { runtime }) => ({ agentCatalog: runtime.getAgentCatalogSnapshot() })
   }),
   defineMethod({
     name: 'settings.agentReferences.get',
