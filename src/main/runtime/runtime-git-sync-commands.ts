@@ -4,6 +4,7 @@ import type { GitPushTarget } from '../../shared/worktree/types'
 import { gitSyncForkDefaultBranch } from '../git/fork-sync'
 import { gitFastForward, gitFetch, gitPull, gitPullRebaseFromBase, gitPush } from '../git/remote'
 import { abortMerge, abortRebase, commitChanges } from '../git/status'
+import { continueCherryPick, continueMerge, continueRebase } from '../git/sequencer-actions'
 import { getUpstreamStatus } from '../git/upstream'
 import {
   getSshGitProvider,
@@ -45,6 +46,48 @@ export class RuntimeGitSyncCommands {
       ...localGitOptionsForTarget(target),
       admissionTier: 'interactive'
     })
+    return { ok: true }
+  }
+
+  async continueRuntimeGitMerge(worktreeSelector: string): Promise<{ ok: true }> {
+    const target = await this.host.resolveRuntimeGitTarget(worktreeSelector)
+    const provider = target.connectionId ? getSshGitProvider(target.connectionId) : null
+    if (target.connectionId) {
+      if (!provider) {
+        throw new Error(SSH_GIT_PROVIDER_UNAVAILABLE_MESSAGE)
+      }
+      await provider.continueMerge(target.worktree.path)
+      return { ok: true }
+    }
+    await continueMerge(target.worktree.path, localGitOptionsForTarget(target))
+    return { ok: true }
+  }
+
+  async continueRuntimeGitRebase(worktreeSelector: string): Promise<{ ok: true }> {
+    const target = await this.host.resolveRuntimeGitTarget(worktreeSelector)
+    const provider = target.connectionId ? getSshGitProvider(target.connectionId) : null
+    if (target.connectionId) {
+      if (!provider) {
+        throw new Error(SSH_GIT_PROVIDER_UNAVAILABLE_MESSAGE)
+      }
+      await provider.continueRebase(target.worktree.path)
+      return { ok: true }
+    }
+    await continueRebase(target.worktree.path, localGitOptionsForTarget(target))
+    return { ok: true }
+  }
+
+  async continueRuntimeGitCherryPick(worktreeSelector: string): Promise<{ ok: true }> {
+    const target = await this.host.resolveRuntimeGitTarget(worktreeSelector)
+    const provider = target.connectionId ? getSshGitProvider(target.connectionId) : null
+    if (target.connectionId) {
+      if (!provider) {
+        throw new Error(SSH_GIT_PROVIDER_UNAVAILABLE_MESSAGE)
+      }
+      await provider.continueCherryPick(target.worktree.path)
+      return { ok: true }
+    }
+    await continueCherryPick(target.worktree.path, localGitOptionsForTarget(target))
     return { ok: true }
   }
 
