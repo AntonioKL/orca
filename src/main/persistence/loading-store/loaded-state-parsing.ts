@@ -67,6 +67,7 @@ type LoadedStateParsingOperationsRuntime = Pick<
   | 'githubCacheDirty'
   | 'loadNeedsSave'
   | 'agentCatalogMigrationError'
+  | 'agentCatalogSchemaTooNew'
   | 'preV1RawContentsAwaitingBackup'
   | 'protectedSecrets'
   | 'storageAuthority'
@@ -106,7 +107,9 @@ export class LoadedStateParsingOperations {
           preV1RawContents: raw,
           createBackup: () => createPinnedPreV1Backup(dataFile, raw)
         })
-        if (agentCatalogMigration.didMigrate || agentCatalogMigration.backupError) {
+        if (agentCatalogMigration.schemaNewerThanSupported) {
+          this.runtime.agentCatalogSchemaTooNew = agentCatalogMigration.schemaNewerThanSupported
+        } else if (agentCatalogMigration.didMigrate || agentCatalogMigration.backupError) {
           this.runtime.loadNeedsSave =
             this.runtime.loadNeedsSave || agentCatalogMigration.didMigrate
           this.runtime.agentCatalogMigrationError = agentCatalogMigration.backupError ?? null
