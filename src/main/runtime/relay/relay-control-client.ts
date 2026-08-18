@@ -78,7 +78,7 @@ export class RelayControlClient {
     }
     this.state = 'opening'
     if (!this.options.createSocket) {
-      await firstPartyRelay.prepareFirstPartyRelayWebSocketTrust(this.controlUrl)
+      firstPartyRelay.prepareFirstPartyRelayWebSocketTrust(this.controlUrl)
     }
     if (this.state !== 'opening') {
       throw new Error('relay_control_closed')
@@ -107,7 +107,7 @@ export class RelayControlClient {
       this.options.connectDeadlineMs ?? RELAY_CONTROL_CONNECT_DEADLINE_MS
     )
     this.connectTimer.unref()
-    return await new Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       this.connectResolve = resolve
       this.connectReject = reject
     })
