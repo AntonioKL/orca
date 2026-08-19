@@ -14,6 +14,8 @@ import { sanitizeFloatingWorkspaceDirectorySetting } from './floating-workspace-
 import { applyAgentStatusHooksEnabled } from '../agent-hooks/managed-agent-hook-controls'
 import { recordManagedHookInstallFailure } from '../agent-hooks/install-telemetry'
 import { applyElectronProxySettings } from '../network/proxy-settings'
+import { applyBrowserSessionProxies } from '../browser/browser-session-proxy'
+import { browserSessionRegistry } from '../browser/browser-session-registry'
 import { normalizeProxyBypassRules, normalizeProxyUrl } from '../../shared/network-proxy'
 import { normalizeAppIconId } from '../../shared/app-icon'
 import { normalizeUiLanguage } from '../../shared/ui-language'
@@ -244,6 +246,12 @@ export function registerSettingsHandlers(
         await applyElectronProxySettings(result)
       } catch {
         console.warn('[settings] failed to apply network proxy settings')
+      }
+      try {
+        // Why: browser guests run on their own partitions, which defaultSession's proxy never reaches (STA-4779).
+        await applyBrowserSessionProxies(browserSessionRegistry.listProfiles(), result)
+      } catch {
+        console.warn('[settings] failed to apply network proxy settings to browser sessions')
       }
     }
     if ('appIcon' in sanitizedArgs && before.appIcon !== result.appIcon) {

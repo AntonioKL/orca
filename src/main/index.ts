@@ -326,6 +326,11 @@ import { EmulatorBridge } from './emulator/emulator-bridge'
 import { browserCertificateTrustController, browserManager } from './browser/browser-manager'
 import { RpcDispatcher } from './runtime/rpc/dispatcher'
 import { OffscreenBrowserBackend } from './browser/offscreen-browser-backend'
+import { browserSessionRegistry } from './browser/browser-session-registry'
+import {
+  applyBrowserSessionProxies,
+  setBrowserNetworkProxySettingsResolver
+} from './browser/browser-session-proxy'
 import { initializeBrowserSessionsForApp } from './browser/browser-session-startup'
 import {
   installDocPreviewProtocolHandler,
@@ -2534,6 +2539,8 @@ void app.whenReady().then(async () => {
   } catch {
     console.warn('[proxy] Failed to apply network proxy settings')
   }
+  // Why: the partition installer reads the proxy through this resolver, so register it before sessions materialize.
+  setBrowserNetworkProxySettingsResolver(() => store!.getSettings())
   // Why: the preview session is protocol-scoped, so the handler must exist before any preview webview attaches.
   installDocPreviewProtocolHandler()
   registerDocPreviewGrantHandlers()
@@ -2551,6 +2558,12 @@ void app.whenReady().then(async () => {
       return store.getSshTargets().map((target) => target.id)
     }
   })
+  try {
+    // Why: awaited here so the first guest navigation cannot race the installer's fire-and-forget write.
+    await applyBrowserSessionProxies(browserSessionRegistry.listProfiles(), store.getSettings())
+  } catch {
+    console.warn('[proxy] Failed to apply network proxy settings to browser sessions')
+  }
   unsubscribeSystemResumeBroadcast = registerSystemResumeBroadcast()
   agentAwakeService = new AgentAwakeService()
   agentAwakeService.setMode(

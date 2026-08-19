@@ -72,6 +72,84 @@ export function resetProxyApplicationForTests(): void {
   lastAppliedProxyConfig = null
 }
 
+// Why: sessions outside defaultSession (browser partitions) need their own applied-config memo;
+// the module-global one above tracks defaultSession alone and would skip or clobber their writes.
+const appliedSessionProxyKeys = new WeakMap<ProxySession, string>()
+
+function proxyMemoKey(result: ProxyApplyResult): string {
+  return result.source === 'settings' || result.source === 'env'
+    ? `${result.source}\0${result.proxyRules}\0${result.proxyBypassRules ?? ''}`
+    : result.source
+}
+
+export function resetSessionProxyApplicationForTests(proxySession: ProxySession): void {
+  appliedSessionProxyKeys.delete(proxySession)
+}
+
+/**
+ * Apply the app-wide proxy to one non-default session, falling back to the environment
+ * proxy and then the system proxy exactly as the defaultSession path does.
+ */
+export async function applyProxySettingsToSession(
+  proxySession: ProxySession,
+  settings: NetworkProxySettings,
+  options: { env?: Record<string, string | undefined>; probeUrl?: string } = {}
+): Promise<ProxyApplyResult> {
+  const env = options.env ?? process.env
+  const configured = normalizeProxyUrl(settings.httpProxyUrl)
+  if (configured.ok && configured.value) {
+    const bypassRules = normalizeProxyBypassRules(settings.httpProxyBypassRules)
+    const result: ProxyApplyResult = {
+      source: 'settings',
+      proxyRules: configured.value,
+      ...(bypassRules ? { proxyBypassRules: bypassRules } : {})
+    }
+    return applySessionProxyResult(proxySession, result)
+  }
+
+  const envProxy = getProxyUrlFromEnvironment(env)
+  if (envProxy.ok && envProxy.value) {
+    // Why: mirror the defaultSession path — a system proxy already in effect outranks env vars.
+    const alreadyProxied =
+      !appliedSessionProxyKeys.has(proxySession) &&
+      (await proxySession.resolveProxy(options.probeUrl ?? PROXY_PROBE_URL)) !== 'DIRECT'
+    if (alreadyProxied) {
+      return { source: 'system' }
+    }
+    const bypassRules = getProxyBypassRulesFromEnvironment(env)
+    const result: ProxyApplyResult = {
+      source: 'env',
+      proxyRules: envProxy.value,
+      ...(bypassRules ? { proxyBypassRules: bypassRules } : {})
+    }
+    return applySessionProxyResult(proxySession, result)
+  }
+
+  // Why: only reset a session we previously pinned; an untouched session already follows the system proxy.
+  if (appliedSessionProxyKeys.has(proxySession)) {
+    await setSessionProxy(proxySession, { mode: 'system' })
+    appliedSessionProxyKeys.delete(proxySession)
+  }
+  return { source: configured.ok ? (envProxy.ok ? 'none' : 'invalid-env') : 'invalid-settings' }
+}
+
+async function applySessionProxyResult(
+  proxySession: ProxySession,
+  result: Extract<ProxyApplyResult, { source: 'settings' | 'env' }>
+): Promise<ProxyApplyResult> {
+  const key = proxyMemoKey(result)
+  if (appliedSessionProxyKeys.get(proxySession) === key) {
+    return result
+  }
+  await setSessionProxy(proxySession, {
+    mode: 'fixed_servers',
+    proxyRules: result.proxyRules,
+    ...(result.proxyBypassRules ? { proxyBypassRules: result.proxyBypassRules } : {})
+  })
+  appliedSessionProxyKeys.set(proxySession, key)
+  return result
+}
+
 export async function ensureElectronProxyFromEnvironment(
   options: {
     proxySession?: ProxySession
