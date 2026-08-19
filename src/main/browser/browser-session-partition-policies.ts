@@ -66,19 +66,15 @@ export function installBrowserSessionPartitionPolicies(
     downloads?: BrowserPartitionDownloadPolicy
     permissions?: BrowserPartitionPermissionPolicy
   }
-): void {
+): Promise<void> {
   const { partition } = profile
   const sess = session.fromPartition(partition)
   setBrowserSessionUserAgentMode(sess, profile.userAgentMode ?? 'clean')
+  // Why: every caller receives the current proxy-readiness barrier, including retries after policy installation.
+  const proxyReady = applyProxyToBrowserSession(sess)
   if (configuredPartitions.has(partition)) {
-    return
+    return proxyReady
   }
-
-  // Why: guests live on their own partition, so the app-wide proxy must be pinned per session
-  // rather than inherited from defaultSession (STA-4779). Startup and settings changes re-sweep.
-  void applyProxyToBrowserSession(sess).catch(() => {
-    /* proxy stays direct when the session rejects the write */
-  })
 
   browserManager.installCertificateRequestGuard(sess)
   if (profile.userAgentMode !== 'native' && typeof sess.getUserAgent === 'function') {
@@ -153,6 +149,7 @@ export function installBrowserSessionPartitionPolicies(
     options?.downloads === 'deny' ? handleDeniedWillDownload : handleWillDownload
   )
   configuredPartitions.add(partition)
+  return proxyReady
 }
 
 export function clearBrowserSessionPartitionPolicies(partition: string, sess: Session): void {

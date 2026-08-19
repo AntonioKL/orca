@@ -124,4 +124,42 @@ describe('installBrowserSessionPartitionPolicies proxy wiring', () => {
 
     expect(sessionsByPartition.get(profile.partition)?.setProxy).not.toHaveBeenCalled()
   })
+
+  it('does not report a new partition ready until Electron finishes applying its proxy', async () => {
+    let finishWrite: (() => void) | undefined
+    setBrowserNetworkProxySettingsResolver(() => ({
+      httpProxyUrl: 'socks5://127.0.0.1:1080',
+      httpProxyBypassRules: ''
+    }))
+    const profile = nextProfile()
+    const sess = fromPartitionMock(profile.partition)
+    sess.setProxy.mockImplementation(() => new Promise<void>((resolve) => (finishWrite = resolve)))
+
+    let ready = false
+    const installation = installBrowserSessionPartitionPolicies(profile).then(() => (ready = true))
+    await vi.waitFor(() => expect(sess.setProxy).toHaveBeenCalledTimes(1))
+    expect(ready).toBe(false)
+
+    finishWrite?.()
+    await installation
+    expect(ready).toBe(true)
+  })
+
+  it('re-applies the proxy when policies are already installed', async () => {
+    let proxyUrl = 'http://first.example:8080'
+    setBrowserNetworkProxySettingsResolver(() => ({
+      httpProxyUrl: proxyUrl,
+      httpProxyBypassRules: ''
+    }))
+    const profile = nextProfile()
+
+    await installBrowserSessionPartitionPolicies(profile)
+    proxyUrl = 'http://second.example:8080'
+    await installBrowserSessionPartitionPolicies(profile)
+
+    expect(sessionsByPartition.get(profile.partition)?.setProxy.mock.calls).toEqual([
+      [{ mode: 'fixed_servers', proxyRules: 'http://first.example:8080' }],
+      [{ mode: 'fixed_servers', proxyRules: 'http://second.example:8080' }]
+    ])
+  })
 })

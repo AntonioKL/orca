@@ -74,7 +74,12 @@ export function resetProxyApplicationForTests(): void {
 
 // Why: sessions outside defaultSession (browser partitions) need their own applied-config memo;
 // the module-global one above tracks defaultSession alone and would skip or clobber their writes.
-const appliedSessionProxyKeys = new WeakMap<ProxySession, string>()
+type SessionProxyApplicationState = {
+  appliedKey: string | null
+  tail: Promise<unknown>
+}
+
+const sessionProxyApplications = new WeakMap<ProxySession, SessionProxyApplicationState>()
 
 function proxyMemoKey(result: ProxyApplyResult): string {
   return result.source === 'settings' || result.source === 'env'
@@ -83,7 +88,7 @@ function proxyMemoKey(result: ProxyApplyResult): string {
 }
 
 export function resetSessionProxyApplicationForTests(proxySession: ProxySession): void {
-  appliedSessionProxyKeys.delete(proxySession)
+  sessionProxyApplications.delete(proxySession)
 }
 
 /**
@@ -95,6 +100,32 @@ export async function applyProxySettingsToSession(
   settings: NetworkProxySettings,
   options: { env?: Record<string, string | undefined>; probeUrl?: string } = {}
 ): Promise<ProxyApplyResult> {
+  let state = sessionProxyApplications.get(proxySession)
+  if (!state) {
+    state = { appliedKey: null, tail: Promise.resolve() }
+    sessionProxyApplications.set(proxySession, state)
+  }
+
+  const operation = state.tail
+    .catch(() => {})
+    .then(() => resolveAndApplySessionProxy(proxySession, state, settings, options))
+  state.tail = operation
+
+  try {
+    return await operation
+  } finally {
+    if (state.tail === operation && state.appliedKey === null) {
+      sessionProxyApplications.delete(proxySession)
+    }
+  }
+}
+
+async function resolveAndApplySessionProxy(
+  proxySession: ProxySession,
+  state: SessionProxyApplicationState,
+  settings: NetworkProxySettings,
+  options: { env?: Record<string, string | undefined>; probeUrl?: string }
+): Promise<ProxyApplyResult> {
   const env = options.env ?? process.env
   const configured = normalizeProxyUrl(settings.httpProxyUrl)
   if (configured.ok && configured.value) {
@@ -104,14 +135,14 @@ export async function applyProxySettingsToSession(
       proxyRules: configured.value,
       ...(bypassRules ? { proxyBypassRules: bypassRules } : {})
     }
-    return applySessionProxyResult(proxySession, result)
+    return applySessionProxyResult(proxySession, state, result)
   }
 
   const envProxy = getProxyUrlFromEnvironment(env)
   if (envProxy.ok && envProxy.value) {
     // Why: mirror the defaultSession path — a system proxy already in effect outranks env vars.
     const alreadyProxied =
-      !appliedSessionProxyKeys.has(proxySession) &&
+      state.appliedKey === null &&
       (await proxySession.resolveProxy(options.probeUrl ?? PROXY_PROBE_URL)) !== 'DIRECT'
     if (alreadyProxied) {
       return { source: 'system' }
@@ -122,23 +153,24 @@ export async function applyProxySettingsToSession(
       proxyRules: envProxy.value,
       ...(bypassRules ? { proxyBypassRules: bypassRules } : {})
     }
-    return applySessionProxyResult(proxySession, result)
+    return applySessionProxyResult(proxySession, state, result)
   }
 
   // Why: only reset a session we previously pinned; an untouched session already follows the system proxy.
-  if (appliedSessionProxyKeys.has(proxySession)) {
+  if (state.appliedKey !== null) {
     await setSessionProxy(proxySession, { mode: 'system' })
-    appliedSessionProxyKeys.delete(proxySession)
+    state.appliedKey = null
   }
   return { source: configured.ok ? (envProxy.ok ? 'none' : 'invalid-env') : 'invalid-settings' }
 }
 
 async function applySessionProxyResult(
   proxySession: ProxySession,
+  state: SessionProxyApplicationState,
   result: Extract<ProxyApplyResult, { source: 'settings' | 'env' }>
 ): Promise<ProxyApplyResult> {
   const key = proxyMemoKey(result)
-  if (appliedSessionProxyKeys.get(proxySession) === key) {
+  if (state.appliedKey === key) {
     return result
   }
   await setSessionProxy(proxySession, {
@@ -146,7 +178,7 @@ async function applySessionProxyResult(
     proxyRules: result.proxyRules,
     ...(result.proxyBypassRules ? { proxyBypassRules: result.proxyBypassRules } : {})
   })
-  appliedSessionProxyKeys.set(proxySession, key)
+  state.appliedKey = key
   return result
 }
 

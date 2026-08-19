@@ -18,7 +18,13 @@ import { applyProxySettingsToSession, resetSessionProxyApplicationForTests } fro
 function createProxySession() {
   return {
     resolveProxy: vi.fn(async () => 'DIRECT'),
-    setProxy: vi.fn(async () => {}),
+    setProxy: vi.fn(
+      async (_config: {
+        mode?: 'system' | 'fixed_servers'
+        proxyRules?: string
+        proxyBypassRules?: string
+      }) => {}
+    ),
     closeAllConnections: vi.fn(async () => {})
   }
 }
@@ -91,6 +97,94 @@ describe('applyProxySettingsToSession', () => {
     await applyProxySettingsToSession(proxySession, settings, { env: {} })
 
     expect(proxySession.setProxy).toHaveBeenCalledTimes(1)
+  })
+
+  it('coalesces concurrent writes of the same config', async () => {
+    let finishWrite: (() => void) | undefined
+    const proxySession = createProxySession()
+    proxySession.setProxy.mockImplementation(
+      () => new Promise<void>((resolve) => (finishWrite = resolve))
+    )
+    resetSessionProxyApplicationForTests(proxySession)
+    const settings = { httpProxyUrl: 'socks5://127.0.0.1:1080', httpProxyBypassRules: '' }
+
+    const first = applyProxySettingsToSession(proxySession, settings, { env: {} })
+    const second = applyProxySettingsToSession(proxySession, settings, { env: {} })
+
+    await vi.waitFor(() => expect(proxySession.setProxy).toHaveBeenCalledTimes(1))
+    finishWrite?.()
+    await Promise.all([first, second])
+    expect(proxySession.setProxy).toHaveBeenCalledTimes(1)
+  })
+
+  it('serializes config changes so an older write cannot finish last', async () => {
+    let finishFirstWrite: (() => void) | undefined
+    let effectiveProxy: string | undefined
+    const proxySession = createProxySession()
+    proxySession.setProxy
+      .mockImplementationOnce(
+        (config) =>
+          new Promise<void>((resolve) => {
+            finishFirstWrite = () => {
+              effectiveProxy = config.proxyRules
+              resolve()
+            }
+          })
+      )
+      .mockImplementationOnce(async (config) => {
+        effectiveProxy = config.proxyRules
+      })
+    resetSessionProxyApplicationForTests(proxySession)
+
+    const first = applyProxySettingsToSession(
+      proxySession,
+      { httpProxyUrl: 'http://old.example:8080', httpProxyBypassRules: '' },
+      { env: {} }
+    )
+    const second = applyProxySettingsToSession(
+      proxySession,
+      { httpProxyUrl: 'http://new.example:8080', httpProxyBypassRules: '' },
+      { env: {} }
+    )
+
+    await vi.waitFor(() => expect(proxySession.setProxy).toHaveBeenCalledTimes(1))
+    finishFirstWrite?.()
+    await Promise.all([first, second])
+    expect(proxySession.setProxy.mock.calls).toEqual([
+      [{ mode: 'fixed_servers', proxyRules: 'http://old.example:8080' }],
+      [{ mode: 'fixed_servers', proxyRules: 'http://new.example:8080' }]
+    ])
+    expect(effectiveProxy).toBe('http://new.example:8080')
+  })
+
+  it('orders a slow environment probe before a newer explicit setting', async () => {
+    let finishProbe: ((result: string) => void) | undefined
+    const proxySession = createProxySession()
+    proxySession.resolveProxy.mockImplementation(
+      () => new Promise<string>((resolve) => (finishProbe = resolve))
+    )
+    resetSessionProxyApplicationForTests(proxySession)
+
+    const environment = applyProxySettingsToSession(
+      proxySession,
+      { httpProxyUrl: '', httpProxyBypassRules: '' },
+      { env: { HTTP_PROXY: 'http://env.example:8080' } }
+    )
+    const explicit = applyProxySettingsToSession(
+      proxySession,
+      { httpProxyUrl: 'http://configured.example:8080', httpProxyBypassRules: '' },
+      { env: {} }
+    )
+
+    await vi.waitFor(() => expect(proxySession.resolveProxy).toHaveBeenCalledTimes(1))
+    expect(proxySession.setProxy).not.toHaveBeenCalled()
+    finishProbe?.('DIRECT')
+    await Promise.all([environment, explicit])
+
+    expect(proxySession.setProxy.mock.calls).toEqual([
+      [{ mode: 'fixed_servers', proxyRules: 'http://env.example:8080' }],
+      [{ mode: 'fixed_servers', proxyRules: 'http://configured.example:8080' }]
+    ])
   })
 
   it('falls back to the environment proxy when no proxy is configured', async () => {
