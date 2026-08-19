@@ -31,6 +31,7 @@ import {
   setBrowserNetworkProxySettingsResolver
 } from './browser-session-proxy'
 import { resetSessionProxyApplicationForTests } from '../network/proxy-settings'
+import { handleElectronProxyLogin } from '../network/electron-proxy-credentials'
 
 const PROFILES = [
   {
@@ -86,8 +87,39 @@ describe('browser session proxy', () => {
     expect(sessionsByPartition.get('persist:orca-browser')?.setProxy).toHaveBeenCalledWith({
       mode: 'fixed_servers',
       proxyRules: 'socks5://127.0.0.1:1080',
-      proxyBypassRules: 'localhost;*.internal'
+      proxyBypassRules: 'localhost;*.internal;<local>'
     })
+  })
+
+  it('authenticates a credentialed proxy without exposing credentials in partition rules', async () => {
+    await applyBrowserSessionProxies(PROFILES.slice(0, 1), {
+      httpProxyUrl: 'http://browser-user:browser-pass@proxy.example:8080',
+      httpProxyBypassRules: ''
+    })
+    const sess = sessionsByPartition.get('persist:orca-browser')
+    expect(sess?.setProxy).toHaveBeenCalledWith({
+      mode: 'fixed_servers',
+      proxyRules: 'http://proxy.example:8080'
+    })
+
+    const preventDefault = vi.fn()
+    const callback = vi.fn()
+    handleElectronProxyLogin(
+      { preventDefault } as never,
+      { session: sess } as never,
+      {} as never,
+      {
+        isProxy: true,
+        scheme: 'basic',
+        host: 'proxy.example',
+        port: 8080,
+        realm: 'proxy'
+      },
+      callback
+    )
+
+    expect(preventDefault).toHaveBeenCalledOnce()
+    expect(callback).toHaveBeenCalledWith('browser-user', 'browser-pass')
   })
 
   it('keeps sweeping the remaining profiles when one partition throws', async () => {

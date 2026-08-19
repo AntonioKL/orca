@@ -14,6 +14,7 @@ vi.mock('electron', () => ({
 }))
 
 import { applyProxySettingsToSession, resetSessionProxyApplicationForTests } from './proxy-settings'
+import { handleElectronProxyLogin } from './electron-proxy-credentials'
 
 function createProxySession() {
   return {
@@ -50,13 +51,13 @@ describe('applyProxySettingsToSession', () => {
     ).resolves.toEqual({
       source: 'settings',
       proxyRules: 'socks5://127.0.0.1:1080',
-      proxyBypassRules: 'localhost;*.internal'
+      proxyBypassRules: 'localhost;*.internal;<local>'
     })
 
     expect(proxySession.setProxy).toHaveBeenCalledWith({
       mode: 'fixed_servers',
       proxyRules: 'socks5://127.0.0.1:1080',
-      proxyBypassRules: 'localhost;*.internal'
+      proxyBypassRules: 'localhost;*.internal;<local>'
     })
     expect(proxySession.closeAllConnections).toHaveBeenCalledTimes(1)
   })
@@ -97,6 +98,42 @@ describe('applyProxySettingsToSession', () => {
     await applyProxySettingsToSession(proxySession, settings, { env: {} })
 
     expect(proxySession.setProxy).toHaveBeenCalledTimes(1)
+  })
+
+  it('refreshes in-memory authentication when only proxy credentials change', async () => {
+    const proxySession = createProxySession()
+    resetSessionProxyApplicationForTests(proxySession)
+
+    await applyProxySettingsToSession(
+      proxySession,
+      { httpProxyUrl: 'http://alice:old-secret@proxy.example:8080' },
+      { env: {} }
+    )
+    await applyProxySettingsToSession(
+      proxySession,
+      { httpProxyUrl: 'http://alice:new-secret@proxy.example:8080' },
+      { env: {} }
+    )
+
+    expect(proxySession.setProxy.mock.calls).toEqual([
+      [{ mode: 'fixed_servers', proxyRules: 'http://proxy.example:8080' }],
+      [{ mode: 'fixed_servers', proxyRules: 'http://proxy.example:8080' }]
+    ])
+    const callback = vi.fn()
+    handleElectronProxyLogin(
+      { preventDefault: vi.fn() } as never,
+      { session: proxySession } as never,
+      {} as never,
+      {
+        isProxy: true,
+        scheme: 'basic',
+        host: 'proxy.example',
+        port: 8080,
+        realm: 'proxy'
+      },
+      callback
+    )
+    expect(callback).toHaveBeenCalledWith('alice', 'new-secret')
   })
 
   it('coalesces concurrent writes of the same config', async () => {
@@ -200,12 +237,12 @@ describe('applyProxySettingsToSession', () => {
     ).resolves.toEqual({
       source: 'env',
       proxyRules: 'http://env.example:8080',
-      proxyBypassRules: 'localhost'
+      proxyBypassRules: 'localhost;<local>'
     })
     expect(proxySession.setProxy).toHaveBeenCalledWith({
       mode: 'fixed_servers',
       proxyRules: 'http://env.example:8080',
-      proxyBypassRules: 'localhost'
+      proxyBypassRules: 'localhost;<local>'
     })
   })
 
@@ -228,6 +265,33 @@ describe('applyProxySettingsToSession', () => {
       )
     ).resolves.toEqual({ source: 'none' })
     expect(proxySession.setProxy).toHaveBeenCalledWith({ mode: 'system' })
+  })
+
+  it('forgets authentication when a session returns to the system proxy', async () => {
+    const proxySession = createProxySession()
+    resetSessionProxyApplicationForTests(proxySession)
+    await applyProxySettingsToSession(
+      proxySession,
+      { httpProxyUrl: 'http://alice:secret@proxy.example:8080' },
+      { env: {} }
+    )
+    await applyProxySettingsToSession(proxySession, { httpProxyUrl: '' }, { env: {} })
+
+    const callback = vi.fn()
+    handleElectronProxyLogin(
+      { preventDefault: vi.fn() } as never,
+      { session: proxySession } as never,
+      {} as never,
+      {
+        isProxy: true,
+        scheme: 'basic',
+        host: 'proxy.example',
+        port: 8080,
+        realm: 'proxy'
+      },
+      callback
+    )
+    expect(callback).not.toHaveBeenCalled()
   })
 
   it('leaves an untouched session alone when nothing is configured', async () => {

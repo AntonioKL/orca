@@ -69,6 +69,15 @@ export function normalizeProxyBypassRules(value: unknown): string {
     .join(';')
 }
 
+export function normalizeElectronProxyBypassRules(value: unknown): string {
+  const rules = normalizeProxyBypassRules(value)
+  if (!rules) {
+    return ''
+  }
+  const entries = rules.split(';')
+  return entries.some((rule) => rule.toLowerCase() === '<local>') ? rules : `${rules};<local>`
+}
+
 export function getProxyUrlFromEnvironment(
   env: Record<string, string | undefined>
 ): ProxyUrlValidationResult {

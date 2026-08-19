@@ -18,6 +18,7 @@ import {
   ensureElectronProxyFromEnvironment,
   resetProxyApplicationForTests
 } from './proxy-settings'
+import { handleElectronProxyLogin } from './electron-proxy-credentials'
 
 function createProxySession(resolveProxy = 'DIRECT') {
   return {
@@ -48,17 +49,104 @@ describe('Electron proxy settings', () => {
       )
     ).resolves.toEqual({
       source: 'settings',
-      proxyRules: 'http://user:pass@proxy.example:8080',
-      proxyBypassRules: 'localhost;*.internal'
+      proxyRules: 'http://proxy.example:8080',
+      proxyBypassRules: 'localhost;*.internal;<local>'
     })
 
     expect(proxySession.setProxy).toHaveBeenCalledWith({
       mode: 'fixed_servers',
-      proxyRules: 'http://user:pass@proxy.example:8080',
-      proxyBypassRules: 'localhost;*.internal'
+      proxyRules: 'http://proxy.example:8080',
+      proxyBypassRules: 'localhost;*.internal;<local>'
     })
     expect(proxySession.resolveProxy).not.toHaveBeenCalled()
     expect(proxySession.closeAllConnections).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps credentials out of proxy metadata and answers matching proxy auth challenges', async () => {
+    const proxySession = createProxySession()
+    const result = await applyElectronProxySettings(
+      { httpProxyUrl: 'http://alice:s%40fe@proxy.example:8080' },
+      { proxySession, env: {} }
+    )
+
+    expect(proxySession.setProxy).toHaveBeenCalledWith({
+      mode: 'fixed_servers',
+      proxyRules: 'http://proxy.example:8080'
+    })
+    expect(JSON.stringify(result)).not.toContain('alice')
+    expect(JSON.stringify(result)).not.toContain('s%40fe')
+    expect(JSON.stringify(result)).not.toContain('s@fe')
+
+    const preventDefault = vi.fn()
+    const callback = vi.fn()
+    handleElectronProxyLogin(
+      { preventDefault } as never,
+      { session: proxySession } as never,
+      {} as never,
+      {
+        isProxy: true,
+        scheme: 'basic',
+        host: 'proxy.example',
+        port: 8080,
+        realm: 'proxy'
+      },
+      callback
+    )
+
+    expect(preventDefault).toHaveBeenCalledOnce()
+    expect(callback).toHaveBeenCalledWith('alice', 's@fe')
+  })
+
+  it('answers proxy auth for app requests without an associated webContents', async () => {
+    await applyElectronProxySettings({
+      httpProxyUrl: 'http://app-user:app-pass@proxy.example:8080'
+    })
+    const preventDefault = vi.fn()
+    const callback = vi.fn()
+
+    handleElectronProxyLogin(
+      { preventDefault } as never,
+      null,
+      {} as never,
+      {
+        isProxy: true,
+        scheme: 'basic',
+        host: 'proxy.example',
+        port: 8080,
+        realm: 'proxy'
+      },
+      callback
+    )
+
+    expect(preventDefault).toHaveBeenCalledOnce()
+    expect(callback).toHaveBeenCalledWith('app-user', 'app-pass')
+  })
+
+  it('does not disclose proxy credentials to origin or mismatched proxy challenges', async () => {
+    const proxySession = createProxySession()
+    await applyElectronProxySettings(
+      { httpProxyUrl: 'http://alice:secret@proxy.example:8080' },
+      { proxySession, env: {} }
+    )
+    const preventDefault = vi.fn()
+    const callback = vi.fn()
+
+    for (const authInfo of [
+      { isProxy: false, host: 'proxy.example', port: 8080 },
+      { isProxy: true, host: 'other.example', port: 8080 },
+      { isProxy: true, host: 'proxy.example', port: 3128 }
+    ]) {
+      handleElectronProxyLogin(
+        { preventDefault } as never,
+        { session: proxySession } as never,
+        {} as never,
+        { scheme: 'basic', realm: 'proxy', ...authInfo },
+        callback
+      )
+    }
+
+    expect(preventDefault).not.toHaveBeenCalled()
+    expect(callback).not.toHaveBeenCalled()
   })
 
   it('preserves system proxy settings when no explicit or env proxy is configured', async () => {
@@ -89,13 +177,13 @@ describe('Electron proxy settings', () => {
     ).resolves.toEqual({
       source: 'env',
       proxyRules: 'https://env.example:8443',
-      proxyBypassRules: 'localhost;*.internal'
+      proxyBypassRules: 'localhost;*.internal;<local>'
     })
 
     expect(proxySession.setProxy).toHaveBeenCalledWith({
       mode: 'fixed_servers',
       proxyRules: 'https://env.example:8443',
-      proxyBypassRules: 'localhost;*.internal'
+      proxyBypassRules: 'localhost;*.internal;<local>'
     })
   })
 

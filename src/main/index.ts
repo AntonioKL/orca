@@ -409,6 +409,7 @@ import {
   applyElectronProxySettings,
   setDefaultProxySessionResolver
 } from './network/proxy-settings'
+import { handleElectronProxyLogin } from './network/electron-proxy-credentials'
 import { preserveAgentAuthBeforeRestart } from './agent-auth-restart-preservation'
 import { CliInstaller } from './cli/cli-installer'
 import { installLinuxBareOrcaDispatcher } from './cli/linux-bare-orca-dispatcher'
@@ -2366,6 +2367,7 @@ void app.whenReady().then(async () => {
   logStartupMilestone('app-ready')
   // Why: a headless automated run must not claim a macOS Dock tile or the menu bar.
   applyBackgroundActivationPolicy({ warn: console.warn })
+  app.on('login', handleElectronProxyLogin)
   installMainThreadHangWatchdog({ userDataPath: getCanonicalUserDataPath() })
   const hangDetection = consumeHangDetectionMarker(
     hangDetectionMarkerPath(getCanonicalUserDataPath())

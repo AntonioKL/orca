@@ -226,7 +226,7 @@ describe('fetchOpenCodeGoRateLimits', () => {
     expect(setProxyMock).toHaveBeenCalledWith({
       mode: 'fixed_servers',
       proxyRules: 'http://proxy.example:8080',
-      proxyBypassRules: 'localhost;*.internal'
+      proxyBypassRules: 'localhost;*.internal;<local>'
     })
     expect(setProxyMock).toHaveBeenCalledTimes(1)
     expect(resolveProxyMock).not.toHaveBeenCalled()
