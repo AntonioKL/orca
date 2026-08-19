@@ -35,11 +35,13 @@ export async function applyBrowserSessionProxies(
   if (!resolved) {
     return
   }
-  for (const profile of profiles) {
-    try {
-      await applyProxySettingsToSession(session.fromPartition(profile.partition), resolved)
-    } catch {
-      // Why: one unavailable partition must not strand the proxy on the remaining profiles.
-    }
-  }
+  await Promise.all(
+    profiles.map(async (profile) => {
+      try {
+        await applyProxySettingsToSession(session.fromPartition(profile.partition), resolved)
+      } catch {
+        console.warn('[proxy] Failed to apply proxy to browser partition', profile.partition)
+      }
+    })
+  )
 }

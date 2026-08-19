@@ -120,6 +120,7 @@ export function registerSettingsHandlers(
     event.returnValue = store.getSettings()
   })
 
+  let latestProxyCommitGeneration = 0
   ipcMain.handle('settings:set', async (event, args: Partial<GlobalSettings>) => {
     const sanitizedArgs = sanitizeRendererSettingsUpdate(args)
     // Why: connection/navigation code receives the generic settings writer; the
@@ -196,6 +197,11 @@ export function registerSettingsHandlers(
       notifyListeners: true,
       originWebContentsId: event.sender.id
     })
+    // Why: only the newest committed proxy snapshot may reach browser partitions after awaits below.
+    const proxyCommitGeneration =
+      'httpProxyUrl' in sanitizedArgs || 'httpProxyBypassRules' in sanitizedArgs
+        ? ++latestProxyCommitGeneration
+        : 0
     if (
       'computerAwakeMode' in sanitizedArgs ||
       'keepComputerAwakeWhileAgentsRun' in sanitizedArgs
@@ -247,11 +253,13 @@ export function registerSettingsHandlers(
       } catch {
         console.warn('[settings] failed to apply network proxy settings')
       }
-      try {
-        // Why: browser guests run on their own partitions, which defaultSession's proxy never reaches (STA-4779).
-        await applyBrowserSessionProxies(browserSessionRegistry.listProfiles(), result)
-      } catch {
-        console.warn('[settings] failed to apply network proxy settings to browser sessions')
+      if (proxyCommitGeneration === latestProxyCommitGeneration) {
+        try {
+          // Why: browser guests run on their own partitions, which defaultSession's proxy never reaches (STA-4779).
+          await applyBrowserSessionProxies(browserSessionRegistry.listProfiles(), result)
+        } catch {
+          console.warn('[settings] failed to apply network proxy settings to browser sessions')
+        }
       }
     }
     if ('appIcon' in sanitizedArgs && before.appIcon !== result.appIcon) {

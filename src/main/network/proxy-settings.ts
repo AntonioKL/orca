@@ -104,10 +104,7 @@ export function resetSessionProxyApplicationForTests(proxySession: ProxySession)
   resetElectronProxyCredentialsForTests(proxySession)
 }
 
-/**
- * Apply the app-wide proxy to one non-default session, falling back to the environment
- * proxy and then the system proxy exactly as the defaultSession path does.
- */
+/** Apply the app-wide proxy to one non-default session, serializing writes in call order. */
 export async function applyProxySettingsToSession(
   proxySession: ProxySession,
   settings: NetworkProxySettings,
@@ -154,30 +151,45 @@ async function resolveAndApplySessionProxy(
 
   const envProxy = getProxyUrlFromEnvironment(env)
   if (envProxy.ok && envProxy.value) {
-    // Why: mirror the defaultSession path — a system proxy already in effect outranks env vars.
-    const alreadyProxied =
-      state.appliedKey === null &&
-      (await proxySession.resolveProxy(options.probeUrl ?? PROXY_PROBE_URL)) !== 'DIRECT'
-    if (alreadyProxied) {
-      return { source: 'system' }
-    }
     const { proxyRules, credentials } = separateElectronProxyCredentials(envProxy.value)
     const bypassRules = normalizeElectronProxyBypassRules(getProxyBypassRulesFromEnvironment(env))
-    const result: ProxyApplyResult = {
+    const result: Extract<ProxyApplyResult, { source: 'env' }> = {
       source: 'env',
       proxyRules,
       ...(bypassRules ? { proxyBypassRules: bypassRules } : {})
+    }
+    if (
+      state.appliedKey === proxyMemoKey(result) &&
+      haveSameElectronProxyCredentials(state.credentials, credentials)
+    ) {
+      return result
+    }
+    // Why: a pinned session resolves to its own pin, so release it before probing the system proxy.
+    await releaseSessionProxyPin(proxySession, state)
+    if ((await proxySession.resolveProxy(options.probeUrl ?? PROXY_PROBE_URL)) !== 'DIRECT') {
+      return { source: 'system' }
     }
     return applySessionProxyResult(proxySession, state, result, credentials)
   }
 
   // Why: only reset a session we previously pinned; an untouched session already follows the system proxy.
-  if (state.appliedKey !== null) {
-    await setSessionProxy(proxySession, { mode: 'system' })
-    state.appliedKey = null
-    state.credentials = null
-  }
+  await releaseSessionProxyPin(proxySession, state)
   return { source: configured.ok ? (envProxy.ok ? 'none' : 'invalid-env') : 'invalid-settings' }
+}
+
+async function releaseSessionProxyPin(
+  proxySession: ProxySession,
+  state: SessionProxyApplicationState
+): Promise<void> {
+  if (state.appliedKey === null) {
+    return
+  }
+  await proxySession.setProxy({ mode: 'system' })
+  // Why: the pin is gone before the best-effort connection close can reject.
+  state.appliedKey = null
+  state.credentials = null
+  setElectronProxyCredentialsForSession(proxySession, null)
+  await proxySession.closeAllConnections?.()
 }
 
 async function applySessionProxyResult(

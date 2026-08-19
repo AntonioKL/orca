@@ -112,7 +112,10 @@ class BrowserSessionRegistry {
     }
 
     // Why: nothing else installs policies on the default partition (hydrate skips it), so without this its guest permissions would be denied.
-    void installBrowserSessionPartitionPolicies(this.getDefaultProfile()).catch(() => {})
+    const defaultProfile = this.getDefaultProfile()
+    void installBrowserSessionPartitionPolicies(defaultProfile).catch(() => {
+      console.warn('[proxy] Failed to apply proxy to browser partition', defaultProfile.partition)
+    })
 
     applyBrowserSessionUserAgentModes(this.listProfiles())
   }
@@ -318,7 +321,9 @@ class BrowserSessionRegistry {
       }
       this.profiles.set(profile.id, profile)
       if (profile.partition !== this.defaultPartition) {
-        void installBrowserSessionPartitionPolicies(profile).catch(() => {})
+        void installBrowserSessionPartitionPolicies(profile).catch(() => {
+          console.warn('[proxy] Failed to apply proxy to browser partition', profile.partition)
+        })
       }
     }
   }

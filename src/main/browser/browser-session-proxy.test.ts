@@ -1,8 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { sessionsByPartition, fromPartitionMock } = vi.hoisted(() => {
+const { sessionsByPartition, fromPartition, fromPartitionMock } = vi.hoisted(() => {
   const sessionsByPartition = new Map<string, Record<string, ReturnType<typeof vi.fn>>>()
-  const fromPartitionMock = vi.fn((partition: string) => {
+  const fromPartition = (partition: string): Record<string, ReturnType<typeof vi.fn>> => {
     const existing = sessionsByPartition.get(partition)
     if (existing) {
       return existing
@@ -14,8 +14,8 @@ const { sessionsByPartition, fromPartitionMock } = vi.hoisted(() => {
     }
     sessionsByPartition.set(partition, created)
     return created
-  })
-  return { sessionsByPartition, fromPartitionMock }
+  }
+  return { sessionsByPartition, fromPartition, fromPartitionMock: vi.fn(fromPartition) }
 })
 
 vi.mock('electron', () => ({
@@ -30,7 +30,6 @@ import {
   applyProxyToBrowserSession,
   setBrowserNetworkProxySettingsResolver
 } from './browser-session-proxy'
-import { resetSessionProxyApplicationForTests } from '../network/proxy-settings'
 import { handleElectronProxyLogin } from '../network/electron-proxy-credentials'
 
 const PROFILES = [
@@ -52,12 +51,13 @@ const PROFILES = [
 
 describe('browser session proxy', () => {
   beforeEach(() => {
-    for (const sess of sessionsByPartition.values()) {
-      resetSessionProxyApplicationForTests(sess as never)
-    }
     sessionsByPartition.clear()
-    fromPartitionMock.mockClear()
+    fromPartitionMock.mockReset().mockImplementation(fromPartition)
     setBrowserNetworkProxySettingsResolver(null)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
   })
 
   // Why (STA-4779): browser guests run on their own partitions, so a proxy pinned only to
@@ -123,6 +123,7 @@ describe('browser session proxy', () => {
   })
 
   it('keeps sweeping the remaining profiles when one partition throws', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     fromPartitionMock.mockImplementationOnce(() => {
       throw new Error('partition unavailable')
     })
@@ -135,6 +136,32 @@ describe('browser session proxy', () => {
     expect(
       sessionsByPartition.get('persist:orca-browser-session-iso')?.setProxy
     ).toHaveBeenCalledWith({ mode: 'fixed_servers', proxyRules: 'socks5://127.0.0.1:1080' })
+    expect(warn).toHaveBeenCalledWith(
+      '[proxy] Failed to apply proxy to browser partition',
+      'persist:orca-browser'
+    )
+  })
+
+  it('starts every partition write without waiting for earlier partitions', async () => {
+    let finishFirstWrite: (() => void) | undefined
+    const firstSession = fromPartition('persist:orca-browser')
+    firstSession.setProxy.mockImplementation(
+      () => new Promise<void>((resolve) => (finishFirstWrite = resolve))
+    )
+    sessionsByPartition.set('persist:orca-browser', firstSession)
+
+    const sweep = applyBrowserSessionProxies(PROFILES, {
+      httpProxyUrl: 'socks5://127.0.0.1:1080',
+      httpProxyBypassRules: ''
+    })
+
+    await vi.waitFor(() =>
+      expect(
+        sessionsByPartition.get('persist:orca-browser-session-iso')?.setProxy
+      ).toHaveBeenCalledOnce()
+    )
+    finishFirstWrite?.()
+    await sweep
   })
 
   it('reads settings through the injected resolver when none are passed', async () => {

@@ -246,6 +246,55 @@ describe('applyProxySettingsToSession', () => {
     })
   })
 
+  it('releases a pin before probing for a system proxy', async () => {
+    const proxySession = createProxySession()
+    resetSessionProxyApplicationForTests(proxySession)
+    const env = { HTTPS_PROXY: 'http://env.example:8080' }
+
+    await applyProxySettingsToSession(
+      proxySession,
+      { httpProxyUrl: 'socks5://127.0.0.1:1080', httpProxyBypassRules: '' },
+      { env }
+    )
+    proxySession.setProxy.mockClear()
+    proxySession.resolveProxy.mockResolvedValue('PROXY system.example:8080')
+
+    await expect(
+      applyProxySettingsToSession(
+        proxySession,
+        { httpProxyUrl: '', httpProxyBypassRules: '' },
+        { env }
+      )
+    ).resolves.toEqual({ source: 'system' })
+
+    expect(proxySession.setProxy).toHaveBeenCalledOnce()
+    expect(proxySession.setProxy).toHaveBeenCalledWith({ mode: 'system' })
+  })
+
+  it('re-applies a pin after its release drops connections unsuccessfully', async () => {
+    const proxySession = createProxySession()
+    resetSessionProxyApplicationForTests(proxySession)
+    const settings = { httpProxyUrl: 'socks5://127.0.0.1:1080', httpProxyBypassRules: '' }
+
+    await applyProxySettingsToSession(proxySession, settings, { env: {} })
+    proxySession.closeAllConnections.mockRejectedValueOnce(new Error('close failed'))
+    await expect(
+      applyProxySettingsToSession(
+        proxySession,
+        { httpProxyUrl: '', httpProxyBypassRules: '' },
+        { env: {} }
+      )
+    ).rejects.toThrow('close failed')
+
+    proxySession.setProxy.mockClear()
+    await applyProxySettingsToSession(proxySession, settings, { env: {} })
+
+    expect(proxySession.setProxy).toHaveBeenCalledWith({
+      mode: 'fixed_servers',
+      proxyRules: 'socks5://127.0.0.1:1080'
+    })
+  })
+
   it('releases a previously pinned session back to the system proxy when settings are cleared', async () => {
     const proxySession = createProxySession()
     resetSessionProxyApplicationForTests(proxySession)
