@@ -1,11 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppState } from '../types'
 import type { LocalBaseRefRefreshResult } from '../../../../shared/worktree/base-ref-drift-types'
-import type { Worktree } from '../../../../shared/worktree/types'
 import { toast } from 'sonner'
 import type { RuntimeEnvironmentCallRequest } from '../../runtime/runtime-compatibility-test-fixture'
 import { folderWorkspaceKey, worktreeWorkspaceKey } from '../../../../shared/workspace-scope'
-import { makeLineage, makeWorkspaceLineage, makeWorktree } from './worktrees-slice-test-fixtures'
+import { makeWorkspaceLineage, makeWorktree } from './worktrees-slice-test-fixtures'
 import {
   createTestStore,
   mockApi,
@@ -725,133 +724,5 @@ describe('createWorktree base status merge', () => {
       status: 'drift',
       behind: 2
     })
-  })
-})
-
-describe('createWorktree composer parent pick', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    resetRemoteRuntimeMocks()
-  })
-
-  function createParentPickStore(parent?: Worktree) {
-    const store = createTestStore()
-    store.setState({ worktreesByRepo: { repo1: parent ? [parent] : [] } } as Partial<AppState>)
-    return store
-  }
-
-  function createWithParentPick(
-    store: ReturnType<typeof createTestStore>,
-    parentWorktreeId: string
-  ) {
-    const createWorktree = store.getState().createWorktree
-    const args: Parameters<typeof createWorktree> = ['repo1', 'feature', 'origin/main']
-    args[25] = { parentWorktreeId }
-    return createWorktree(...args)
-  }
-
-  it('nests the new workspace under the picked parent worktree', async () => {
-    const parent = makeWorktree({
-      id: 'repo1::/path/parent',
-      repoId: 'repo1',
-      path: '/path/parent',
-      instanceId: 'parent-instance'
-    })
-    const store = createParentPickStore(parent)
-    store.setState({ activeWorkspaceKey: folderWorkspaceKey('folder-1') } as Partial<AppState>)
-    mockApi.worktrees.create.mockResolvedValue({
-      worktree: makeWorktree({ id: 'repo1::/path/child', repoId: 'repo1', path: '/path/child' })
-    })
-
-    await createWithParentPick(store, parent.id)
-
-    expect(mockApi.worktrees.create).toHaveBeenCalledWith(
-      expect.objectContaining({ parentWorkspace: worktreeWorkspaceKey(parent.id) })
-    )
-  })
-
-  it('drops a stale parent pick and falls back to the active folder workspace', async () => {
-    const store = createParentPickStore()
-    store.setState({ activeWorkspaceKey: folderWorkspaceKey('folder-1') } as Partial<AppState>)
-    mockApi.worktrees.create.mockResolvedValue({
-      worktree: makeWorktree({ id: 'repo1::/path/child', repoId: 'repo1', path: '/path/child' })
-    })
-
-    await createWithParentPick(store, 'repo1::/path/removed')
-
-    expect(mockApi.worktrees.create).toHaveBeenCalledWith(
-      expect.objectContaining({ parentWorkspace: folderWorkspaceKey('folder-1') })
-    )
-  })
-
-  it('warns when an archived parent pick is dropped before create', async () => {
-    const parent = makeWorktree({
-      id: 'repo1::/path/parent',
-      repoId: 'repo1',
-      path: '/path/parent',
-      displayName: 'parent-wt',
-      isArchived: true
-    })
-    const store = createParentPickStore(parent)
-    mockApi.worktrees.create.mockResolvedValue({
-      worktree: makeWorktree({ id: 'repo1::/path/child', repoId: 'repo1', path: '/path/child' })
-    })
-
-    await createWithParentPick(store, parent.id)
-
-    expect(toast.warning).toHaveBeenCalledWith(
-      'Created without nesting under "parent-wt"',
-      expect.objectContaining({ description: expect.any(String) })
-    )
-  })
-
-  it('warns when the backend rejects an accepted parent pick', async () => {
-    const parent = makeWorktree({
-      id: 'repo1::/path/parent',
-      repoId: 'repo1',
-      path: '/path/parent',
-      displayName: 'parent-wt',
-      instanceId: 'parent-instance'
-    })
-    const store = createParentPickStore(parent)
-    mockApi.worktrees.create.mockResolvedValue({
-      worktree: makeWorktree({ id: 'repo1::/path/child', repoId: 'repo1', path: '/path/child' }),
-      lineage: null
-    })
-
-    await createWithParentPick(store, parent.id)
-
-    expect(toast.warning).toHaveBeenCalledWith(
-      'Created without nesting under "parent-wt"',
-      expect.objectContaining({ description: expect.any(String) })
-    )
-  })
-
-  it('keeps an accepted parent pick quiet and seeds its lineage', async () => {
-    const parent = makeWorktree({
-      id: 'repo1::/path/parent',
-      repoId: 'repo1',
-      path: '/path/parent',
-      instanceId: 'parent-instance'
-    })
-    const created = makeWorktree({
-      id: 'repo1::/path/child',
-      repoId: 'repo1',
-      path: '/path/child',
-      instanceId: 'child-instance'
-    })
-    const lineage = makeLineage({
-      worktreeId: created.id,
-      worktreeInstanceId: 'child-instance',
-      parentWorktreeId: parent.id,
-      parentWorktreeInstanceId: 'parent-instance'
-    })
-    const store = createParentPickStore(parent)
-    mockApi.worktrees.create.mockResolvedValue({ worktree: created, lineage })
-
-    await createWithParentPick(store, parent.id)
-
-    expect(toast.warning).not.toHaveBeenCalled()
-    expect(store.getState().worktreeLineageById[created.id]).toEqual(lineage)
   })
 })

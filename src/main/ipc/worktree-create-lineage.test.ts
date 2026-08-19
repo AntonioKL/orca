@@ -3,7 +3,10 @@ import type { CreateWorktreeArgs } from '../../shared/worktree/create-types'
 import type { WorktreeMeta } from '../../shared/worktree/meta-types'
 import type { Worktree } from '../../shared/worktree/types'
 import { folderWorkspaceKey, worktreeWorkspaceKey } from '../../shared/workspace-scope'
-import { recordWorkspaceLineageForCreatedWorktree } from './worktree-remote'
+import {
+  assertAttachableParentWorkspace,
+  recordWorkspaceLineageForCreatedWorktree
+} from './worktree-remote'
 
 const CHILD_ID = 'repo-1::/repos/child'
 const PARENT_ID = 'repo-1::/repos/parent'
@@ -207,5 +210,56 @@ describe('recordWorkspaceLineageForCreatedWorktree', () => {
 
     expect(store.setWorkspaceLineage).not.toHaveBeenCalled()
     expect(result).toEqual({ lineage: null, workspaceLineage: null })
+  })
+})
+
+describe('assertAttachableParentWorkspace', () => {
+  const childKey = worktreeWorkspaceKey(CHILD_ID)
+
+  beforeEach(() => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function assertParent(
+    store: ReturnType<typeof createStore>,
+    parentWorkspace: CreateWorktreeArgs['parentWorkspace']
+  ) {
+    assertAttachableParentWorkspace(store as never, parentWorkspace, childKey)
+  }
+
+  // Why: the pick can go stale between the composer and the create; nesting is decoration, not the job.
+  it.each([
+    ['worktree', () => worktreeWorkspaceKey(PARENT_ID)],
+    ['folder', () => folderWorkspaceKey('folder-gone')]
+  ])('degrades instead of failing when the %s parent disappeared', (_label, key) => {
+    const store = createStore({})
+
+    expect(() => assertParent(store, key())).not.toThrow()
+    expect(console.warn).toHaveBeenCalled()
+  })
+
+  it('accepts a parent that still exists', () => {
+    const store = createStore({ metaById: { [PARENT_ID]: parentMeta() } })
+
+    expect(() => assertParent(store, worktreeWorkspaceKey(PARENT_ID))).not.toThrow()
+    expect(console.warn).not.toHaveBeenCalled()
+  })
+
+  it('rejects a self-referential parent', () => {
+    const store = createStore({ metaById: { [CHILD_ID]: parentMeta() } })
+
+    expect(() => assertParent(store, childKey)).toThrow(/cannot be attached to itself/)
+  })
+
+  it('rejects a malformed parent key', () => {
+    const store = createStore({})
+
+    expect(() => assertParent(store, 'not-a-workspace-key' as never)).toThrow(
+      /Invalid parent workspace/
+    )
   })
 })

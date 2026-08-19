@@ -371,10 +371,8 @@ function ParentWorktreeCandidateList({
                 role="option"
                 aria-selected={(candidate?.id ?? null) === value}
                 data-selected={isHighlighted || undefined}
-                className={cn(
-                  'absolute left-0 top-0 flex w-full cursor-default select-none items-center gap-2 overflow-hidden rounded-sm px-2 py-2 text-sm outline-none',
-                  isHighlighted && 'bg-accent text-accent-foreground'
-                )}
+                // Why `jump-palette-item`: selection chrome lives in main.css — flat accent is invisible on light popovers.
+                className="jump-palette-item absolute left-0 top-0 flex w-full cursor-default select-none items-center gap-2 overflow-hidden rounded-sm px-2 py-2 text-sm outline-none"
                 style={{
                   height: virtualRow.size,
                   transform: `translateY(${virtualRow.start}px)`
