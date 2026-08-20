@@ -11,6 +11,7 @@ vi.mock('electron', () => ({
 import { CodexHookService, codexHookService } from '../codex/hook-service'
 import { DroidHookService, droidHookService } from '../droid/hook-service'
 import { CursorHookService, cursorHookService } from '../cursor/hook-service'
+import { CURSOR_EVENTS, getCursorHookResponse } from '../cursor/hook-events'
 import { CommandCodeHookService, commandCodeHookService } from '../command-code/hook-service'
 import { GeminiHookService, geminiHookService } from '../gemini/hook-service'
 import { AntigravityHookService, antigravityHookService } from '../antigravity/hook-service'
@@ -366,19 +367,14 @@ describe('remote hook service installers', () => {
       hooks: Record<string, { command?: string; hooks?: unknown[] }[]>
     }
     expect(cursorConfig.version).toBe(1)
-    for (const eventName of [
-      'beforeSubmitPrompt',
-      'stop',
-      'preToolUse',
-      'postToolUse',
-      'postToolUseFailure',
-      'beforeShellExecution',
-      'beforeMCPExecution',
-      'afterAgentResponse'
-    ]) {
+    for (const eventName of CURSOR_EVENTS) {
       const definition = cursorConfig.hooks[eventName]?.[0]
-      expect(definition?.command).toContain('/home/dev/.orca/agent-hooks/cursor-hook.sh')
+      const command = definition?.command
+      expect(command).toContain('/home/dev/.orca/agent-hooks/cursor-hook.sh')
       expect(definition?.hooks).toBeUndefined()
+      const response = getCursorHookResponse(eventName)
+      expect(command).toContain(`ORCA_CURSOR_HOOK_RESPONSE='${response}'`)
+      expect(command).toContain(`printf '%s\\n' '${response}'`)
     }
 
     const commandCodeConfig = JSON.parse(
