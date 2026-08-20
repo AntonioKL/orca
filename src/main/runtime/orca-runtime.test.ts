@@ -10420,6 +10420,51 @@ describe('OrcaRuntimeService', () => {
       expect(getForegroundProcess).toHaveBeenCalledOnce()
     })
 
+    it('does not confirm an agent exit when the SSH host is unverifiable', async () => {
+      const { runtime, batches } = createSideEffectRuntime()
+      runtime.registerPty('pty-1', TEST_WORKTREE_ID, 'conn-1')
+      syncSinglePty(runtime)
+      runtime.ingestSyntheticTitleFrame('pty-1', '\x1b]0;Codex ready\x07')
+      const getForegroundProcess = vi.fn(() => {
+        throw new TypeError('getForegroundProcess is unavailable')
+      })
+      runtime.setPtyController({
+        write: () => true,
+        kill: () => true,
+        getForegroundProcess
+      })
+
+      runtime.onPtyData('pty-1', '\x1b]0;bichir\x07', 100)
+      await vi.waitFor(() => expect(getForegroundProcess).toHaveBeenCalledOnce())
+      await Promise.resolve()
+
+      expect(batches.flatMap((batch) => batch.facts)).not.toContainEqual({ kind: 'agent-exited' })
+    })
+
+    it('still confirms a local agent exit if the PTY disconnects during the foreground read', async () => {
+      const { runtime, batches } = createSideEffectRuntime()
+      runtime.registerPty('pty-1', TEST_WORKTREE_ID)
+      syncSinglePty(runtime)
+      runtime.ingestSyntheticTitleFrame('pty-1', '\x1b]0;Codex ready\x07')
+      let resolveForeground!: (process: string) => void
+      const foregroundRead = new Promise<string>((resolve) => {
+        resolveForeground = resolve
+      })
+      runtime.setPtyController({
+        write: () => true,
+        kill: () => true,
+        getForegroundProcess: vi.fn(() => foregroundRead)
+      })
+
+      runtime.onPtyData('pty-1', '\x1b]0;bichir\x07', 100)
+      runtime.onPtyExit('pty-1', 0)
+      resolveForeground('zsh')
+
+      await vi.waitFor(() =>
+        expect(batches.flatMap((batch) => batch.facts)).toContainEqual({ kind: 'agent-exited' })
+      )
+    })
+
     it('aligns a restored session and pre-response bytes to the provider sequence', async () => {
       const { runtime } = createSideEffectRuntime()
 

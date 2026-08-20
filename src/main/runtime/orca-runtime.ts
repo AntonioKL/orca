@@ -19660,17 +19660,42 @@ export class OrcaRuntimeService {
     return entry.promise
   }
 
+  private canConfirmAgentExitFromHost(
+    pty: RuntimePtyWorktreeRecord | undefined,
+    ptyId: string
+  ): boolean {
+    if (this.getPtyLivenessVerdict(ptyId)?.status === 'unverifiable') {
+      return false
+    }
+    return !(pty?.connectionId && !pty.connected)
+  }
+
   private confirmPtyAgentExit(ptyId: string): void {
     const pty = this.ptysById.get(ptyId)
+    if (!this.canConfirmAgentExitFromHost(pty, ptyId)) {
+      return
+    }
     const titleObservedAt = pty?.lastOscTitleAt ?? null
     const foregroundRead = this.readPtyForegroundProcessFromController(ptyId, titleObservedAt ?? 0)
     if (!pty?.connected || !foregroundRead) {
+      // Why: a local PTY that is already gone after a shell-title exit is
+      // `exited`. A remote PTY that we cannot observe is `unverifiable`.
+      if (pty?.connectionId) {
+        return
+      }
       this.recordTerminalSideEffectFact(ptyId, { kind: 'agent-exited' })
       return
     }
     void foregroundRead.then((result) => {
       const current = this.ptysById.get(ptyId)
-      if (current !== pty || !current.connected) {
+      if (current !== pty) {
+        return
+      }
+      if (!this.canConfirmAgentExitFromHost(current, ptyId)) {
+        return
+      }
+      if (!current.connected) {
+        this.recordTerminalSideEffectFact(ptyId, { kind: 'agent-exited' })
         return
       }
       if (current.lastOscTitleAt !== titleObservedAt && current.lastAgentStatus !== null) {
@@ -19697,6 +19722,9 @@ export class OrcaRuntimeService {
             }
           }
         }
+        return
+      }
+      if (!result.available && current.connectionId) {
         return
       }
       this.recordTerminalSideEffectFact(ptyId, { kind: 'agent-exited' })

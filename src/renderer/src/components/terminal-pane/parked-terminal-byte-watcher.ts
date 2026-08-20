@@ -27,6 +27,11 @@ import {
 import { dispatchTerminalNotification } from './use-notification-dispatch'
 import { acquireHiddenRendererPtyDeliveryClaim } from './pty-renderer-delivery-claims'
 import { isRemoteRuntimePtyId } from '@/runtime/runtime-terminal-inspection'
+import {
+  bindConfirmedAgentExitResumePane,
+  retireConfirmedAgentExitResumeAuthority,
+  scheduleUnbindConfirmedAgentExitResumePane
+} from '@/lib/confirmed-agent-exit-resume-retirement'
 
 // Why: keep the live path's BEL-vs-completion race window so notification behavior is identical whether a tab is parked or mounted.
 const PARKED_NOTIFICATION_GRACE_MS = AGENT_TASK_COMPLETE_NOTIFICATION_GRACE_MS
@@ -69,6 +74,7 @@ export function startParkedTerminalByteWatcher(
 
   // Why: one watcher per PTY — a stale watcher from a previous park cycle would double-fire bell/completion for the same bytes.
   parkedWatcherDisposersByPtyId.get(ptyId)?.()
+  bindConfirmedAgentExitResumePane(ptyId, paneKey)
 
   let disposed = false
   let pendingBellNotification = false
@@ -183,7 +189,9 @@ export function startParkedTerminalByteWatcher(
     },
     onAgentExited: (): void => {
       // Why: title reverting to a plain shell means the agent session ended; clear the countdown so it doesn't survive in the sidebar while parked.
-      useAppStore.getState().setCacheTimerStartedAt(paneKey, null)
+      const state = useAppStore.getState()
+      state.setCacheTimerStartedAt(paneKey, null)
+      retireConfirmedAgentExitResumeAuthority(state, paneKey)
     }
   }
 
@@ -281,6 +289,7 @@ export function startParkedTerminalByteWatcher(
       return
     }
     disposed = true
+    scheduleUnbindConfirmedAgentExitResumePane(ptyId)
     // Why first: each park/reveal cycle owns a distinct processor gauge, and the store/IPC
     // teardown below must not be able to throw its way past the census drop.
     processor?.disposePendingSideEffectGauge()
