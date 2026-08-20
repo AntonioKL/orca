@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ParkedTerminalByteWatcherOptions } from './parked-terminal-byte-watcher'
 import type * as ParkedTerminalCommandStatus from './parked-terminal-command-status'
+import type { SleepingAgentSessionRecord } from '../../../../shared/agent-session-resume'
 
 const PTY_ID = 'pty-parked-exit'
 const TAB_ID = 'tab-1'
@@ -19,7 +20,7 @@ type MockStoreState = {
   setCacheTimerStartedAt: ReturnType<typeof vi.fn>
   observeTerminalGitHubPullRequestLink: ReturnType<typeof vi.fn>
   agentStatusByPaneKey: Record<string, never>
-  sleepingAgentSessionsByPaneKey: Record<string, { paneKey: string }>
+  sleepingAgentSessionsByPaneKey: Record<string, SleepingAgentSessionRecord>
   clearSleepingAgentSession: ReturnType<typeof vi.fn>
 }
 
