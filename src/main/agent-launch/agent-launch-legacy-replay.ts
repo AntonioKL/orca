@@ -86,11 +86,7 @@ export function buildLegacyResumeReplay(input: LegacyReplayInput): LegacyReplayR
   // Provider resume flags append to the one-shot command only. An unresumable
   // base or a session whose key type does not match the base cannot resume.
   const ompResumeFilePath = input.legacyLaunchConfig.ompResumeFilePath?.trim()
-  const resumeArgv = getAgentResumeArgv(
-    input.baseAgent,
-    input.providerSession,
-    ompResumeFilePath
-  )
+  const resumeArgv = getAgentResumeArgv(input.baseAgent, input.providerSession, ompResumeFilePath)
   if (!resumeArgv) {
     return INVALID
   }
@@ -99,7 +95,11 @@ export function buildLegacyResumeReplay(input: LegacyReplayInput): LegacyReplayR
     .map((element) => quoteStartupArg(element, input.shell))
     .join(' ')
 
-  const launchCommand = [command, trimmedArgs, resumeSuffix].filter(Boolean).join(' ')
+  // Why: a captured `agentCommand` is the COMPLETE base command — buildSleepingAgentLaunchConfig
+  // stores resolveAgentLaunchCommand's `commandWithoutSessionOptions`, which already
+  // embeds the quoted agentArgs, and pre-U5 resume launched that string alone.
+  // Re-appending the raw args string would double every flag and splice it unquoted.
+  const launchCommand = [command, resumeSuffix].filter(Boolean).join(' ')
   return {
     ok: true,
     launchCommand,

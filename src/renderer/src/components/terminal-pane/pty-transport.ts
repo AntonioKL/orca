@@ -96,6 +96,7 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
     env,
     envToDelete,
     command,
+    commandDelivery,
     launchConfig,
     resumeProviderSession,
     launchToken,
@@ -326,12 +327,29 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
                 ...((options.launchConfig ?? launchConfig)
                   ? { launchConfig: options.launchConfig ?? launchConfig }
                   : {}),
+                // Not redundant with the host's own record: on a pre-U5 FIRST
+                // resume there is no record yet, and pty.ts reads
+                // `args.resumeProviderSession?.transcriptPath` to build the
+                // legacy handoff. Pi/Prime-Agent resume by transcript path, not
+                // by id, so omitting this loses the session (BUG-7). Rides only
+                // alongside launchConfig, which is what marks the handoff.
+                ...((options.resumeProviderSession ?? resumeProviderSession)
+                  ? {
+                      resumeProviderSession: options.resumeProviderSession ?? resumeProviderSession
+                    }
+                  : {}),
                 ...(resolvedLegacyRecordedConnectionId !== undefined
                   ? { legacyResumeRecordedConnectionId: resolvedLegacyRecordedConnectionId }
                   : {})
               }
             : {
                 command: options.command ?? command,
+                // Rides with `command`, never with agentLaunch: it names who runs
+                // that command (relay/pty-handler.ts reads it), and on the
+                // host-resolved path the host assembles and delivers its own.
+                ...((options.commandDelivery ?? commandDelivery)
+                  ? { commandDelivery: options.commandDelivery ?? commandDelivery }
+                  : {}),
                 ...((options.envToDelete ?? envToDelete)
                   ? { envToDelete: options.envToDelete ?? envToDelete }
                   : {}),

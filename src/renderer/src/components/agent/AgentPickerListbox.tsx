@@ -64,6 +64,20 @@ export function AgentPickerListbox<T extends AgentPickerListboxItem>({
   const [activeValue, setActiveValue] = useState<string | null>(
     initialActiveValue ?? items[0]?.value ?? null
   )
+  // Why: a footer hover clears the highlight on purpose, and the repair effect
+  // below cannot tell that null apart from "the active row was filtered out" —
+  // without this flag it would immediately snap the highlight back to row 0.
+  const [highlightCleared, setHighlightCleared] = useState(false)
+
+  const setActiveRow = useCallback((value: string | null): void => {
+    setHighlightCleared(value === null)
+    setActiveValue(value)
+  }, [])
+
+  // Typing reasserts a top match, so a footer-hover clear must not outlive it.
+  useEffect(() => {
+    setHighlightCleared(false)
+  }, [query])
 
   const activeIndex = useMemo(
     () => items.findIndex((item) => item.value === activeValue),
@@ -79,10 +93,13 @@ export function AgentPickerListbox<T extends AgentPickerListboxItem>({
       }
       return
     }
+    if (highlightCleared) {
+      return
+    }
     if (!items.some((item) => item.value === activeValue)) {
       setActiveValue(items[0].value)
     }
-  }, [items, activeValue])
+  }, [items, activeValue, highlightCleared])
 
   const virtualizer = useVirtualizer({
     count: items.length,
@@ -106,10 +123,10 @@ export function AgentPickerListbox<T extends AgentPickerListboxItem>({
       const clamped = Math.max(0, Math.min(nextIndex, items.length - 1))
       const next = items[clamped]
       if (next) {
-        setActiveValue(next.value)
+        setActiveRow(next.value)
       }
     },
-    [items]
+    [items, setActiveRow]
   )
 
   const handleInputKeyDown = useCallback(
@@ -186,7 +203,7 @@ export function AgentPickerListbox<T extends AgentPickerListboxItem>({
                   data-active={active || undefined}
                   data-index={virtualRow.index}
                   ref={virtualizer.measureElement}
-                  onMouseEnter={() => setActiveValue(item.value)}
+                  onMouseEnter={() => setActiveRow(item.value)}
                   onClick={() => onSelect(item)}
                   className={cn(
                     'absolute left-0 top-0 w-full cursor-pointer rounded-sm',
@@ -203,7 +220,7 @@ export function AgentPickerListbox<T extends AgentPickerListboxItem>({
       )}
       {/* Hovering the footer (which lives outside the option list) clears the
           highlight so a stray last-hovered row is not left visually active. */}
-      {footer ? <div onMouseEnter={() => setActiveValue(null)}>{footer}</div> : null}
+      {footer ? <div onMouseEnter={() => setActiveRow(null)}>{footer}</div> : null}
     </div>
   )
 }

@@ -291,6 +291,92 @@ describe('buildVaultResumeStartup', () => {
     })
     expect(startup.command).toContain('my-codex')
   })
+
+  it('never quotes a remote Windows resume with the local terminalWindowsShell', () => {
+    // A remote host has its own shell; the local git-bash/cmd setting must not
+    // decide the grammar of a command that runs over there (PowerShell default).
+    for (const terminalWindowsShell of ['git-bash', 'cmd.exe']) {
+      const session = vaultSession({
+        agent: 'codex',
+        sessionId: 'remote-win-id',
+        cwd: 'C:\\repo\\app',
+        executionHostId: 'ssh:box',
+        executionHostPlatform: 'win32'
+      })
+      const startup = buildVaultResumeStartup({
+        session,
+        hostPlatform: 'darwin',
+        settings: { terminalWindowsShell }
+      })
+      expect(startup.command).toContain('Set-Location -LiteralPath')
+      expect(startup.command).not.toContain('cd /d')
+      expect(startup.command).not.toContain("cd 'C:")
+    }
+  })
+
+  it('still quotes a local Windows resume for the configured local shell', () => {
+    const session = vaultSession({
+      agent: 'codex',
+      sessionId: 'local-win-id',
+      cwd: 'C:\\repo\\app'
+    })
+    const startup = buildVaultResumeStartup({
+      session,
+      hostPlatform: 'win32',
+      settings: { terminalWindowsShell: 'cmd.exe' }
+    })
+    expect(startup.command).toContain('cd /d')
+    expect(startup.command).not.toContain('Set-Location')
+  })
+
+  it('keeps a WSL/linux target on POSIX quoting whatever the local Windows shell is', () => {
+    const session = vaultSession({ agent: 'codex', sessionId: 'wsl-id' })
+    const startup = buildVaultResumeStartup({
+      session,
+      hostPlatform: 'linux',
+      settings: { terminalWindowsShell: 'powershell.exe' }
+    })
+    expect(startup.command).toContain("cd '/repo/app'")
+    expect(startup.command).not.toContain('Set-Location')
+  })
+
+  it('rewrites a WSL UNC transcript path to POSIX when the target is linux', () => {
+    const session = vaultSession({
+      agent: 'omp',
+      sessionId: 'omp-wsl',
+      filePath: '\\\\wsl.localhost\\Ubuntu\\home\\me\\.omp\\sessions\\omp-wsl.jsonl'
+    })
+    const startup = buildVaultResumeStartup({ session, hostPlatform: 'linux' })
+    expect(startup.command).toContain('/home/me/.omp/sessions/omp-wsl.jsonl')
+    expect(startup.command).not.toContain('wsl.localhost')
+    expect(startup.launchConfig?.ompResumeFilePath).toBe('/home/me/.omp/sessions/omp-wsl.jsonl')
+  })
+
+  it('rewrites a WSL UNC transcript path on the structured resume-locator path', () => {
+    // Pi resumes by transcript path, so an untranslated UNC path reaches the
+    // Linux argv and cannot be opened.
+    const session = vaultSession({
+      agent: 'pi',
+      sessionId: 'pi-wsl',
+      filePath: '\\\\wsl$\\Ubuntu\\home\\me\\.pi\\sessions\\pi-wsl.json'
+    })
+    const startup = buildVaultResumeStartup({ session, hostPlatform: 'linux' })
+    expect(startup.command).toContain('/home/me/.pi/sessions/pi-wsl.json')
+    expect(startup.command).not.toContain('wsl$')
+  })
+
+  it('leaves a UNC transcript path untouched for a Windows target', () => {
+    const session = vaultSession({
+      agent: 'omp',
+      sessionId: 'omp-win',
+      cwd: 'C:\\repo\\app',
+      filePath: '\\\\wsl.localhost\\Ubuntu\\home\\me\\.omp\\sessions\\omp-win.jsonl'
+    })
+    const startup = buildVaultResumeStartup({ session, hostPlatform: 'win32' })
+    expect(startup.launchConfig?.ompResumeFilePath).toBe(
+      '\\\\wsl.localhost\\Ubuntu\\home\\me\\.omp\\sessions\\omp-win.jsonl'
+    )
+  })
 })
 
 describe('resolveVaultResumeCopyCommand', () => {
@@ -304,9 +390,45 @@ describe('resolveVaultResumeCopyCommand', () => {
     expect(result.status).toBe('ok')
     if (result.status === 'ok') {
       expect(result.command).toBe(
-        buildVaultResumeStartup({ session, hostPlatform: 'linux' }).command
+        buildVaultResumeStartup({ session, hostPlatform: 'linux', forCopy: true }).command
       )
     }
+  })
+
+  it('embeds the real-home Codex env clearing inline, unlike the spawned startup', () => {
+    // Copied text runs in a shell Orca never seeded, so the clearing has to ride
+    // in the command itself; a spawned pane gets envToDelete instead.
+    const session = vaultSession({ agent: 'codex', sessionId: 'copy-real-home', codexHome: null })
+    const result = resolveVaultResumeCopyCommand({
+      entry: entryFor(session),
+      sessions: [session],
+      hostPlatform: 'linux'
+    })
+    expect(result.status).toBe('ok')
+    if (result.status === 'ok') {
+      expect(result.command).toContain('env -u CODEX_HOME -u ORCA_CODEX_HOME')
+    }
+    const spawned = buildVaultResumeStartup({ session, hostPlatform: 'linux' })
+    expect(spawned.command).not.toContain('env -u')
+    expect(spawned.envToDelete).toEqual(['CODEX_HOME', 'ORCA_CODEX_HOME'])
+  })
+
+  it('clears nothing when the session carries its own Codex home', () => {
+    const session = vaultSession({
+      agent: 'codex',
+      sessionId: 'copy-pinned-home',
+      codexHome: '/home/me/.orca/codex-accounts/acct-1/home'
+    })
+    const result = resolveVaultResumeCopyCommand({
+      entry: entryFor(session),
+      sessions: [session],
+      hostPlatform: 'linux'
+    })
+    expect(result.status).toBe('ok')
+    if (result.status === 'ok') {
+      expect(result.command).not.toContain('env -u')
+    }
+    expect(buildVaultResumeStartup({ session, hostPlatform: 'linux' }).envToDelete).toBeUndefined()
   })
 
   it('fails closed with invalid_launch_snapshot when the host did not discover the entry', () => {

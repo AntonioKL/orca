@@ -13,7 +13,6 @@ import { TaskSourceContextSchema } from '../../../../shared/task-source-context-
 import { WorkspaceLinkedItemSchema } from '../../../../shared/workspace-linked-item-schema'
 import { isWorkspaceLinkedItemSourceContextMatch } from '../../../../shared/workspace-linked-item-source-context'
 import { normalizeExecutionHostId } from '../../../../shared/execution-host'
-import { isCanonicalLowercaseUuid } from '../../../agent-launch/agent-launch-operation-store'
 
 const OptionalExecutionHostId = z
   .string()
@@ -214,45 +213,3 @@ export const WorktreeResolveMrBase = z.object({
   targetBranch: OptionalString,
   isCrossRepository: OptionalBoolean
 })
-
-export const WorktreeRetryAgentLaunch = WorktreeSelector.extend({
-  expectedFailureId: z.string().min(1).max(256),
-  clientMutationId: z.string().refine(isCanonicalLowercaseUuid, {
-    message: 'clientMutationId must be a canonical lowercase UUID'
-  }),
-  action: z.union([
-    z.object({ kind: z.literal('retry-same') }),
-    z.object({ kind: z.literal('change-agent'), agent: z.custom<TuiAgent>(isTuiAgent) })
-  ])
-})
-
-export const WorktreeForgetAgentLaunch = WorktreeSelector.extend({
-  expectedOperationId: z.string().min(1).max(256),
-  clientMutationId: z.string().refine(isCanonicalLowercaseUuid, {
-    message: 'clientMutationId must be a canonical lowercase UUID'
-  })
-})
-
-export const WorktreeRetryBackgroundAgentLaunch = z.object({
-  attemptId: z.string().min(1).max(256),
-  expectedFailureId: z.string().min(1).max(256),
-  clientMutationId: z.string().refine(isCanonicalLowercaseUuid, {
-    message: 'clientMutationId must be a canonical lowercase UUID'
-  }),
-  action: z.union([
-    z.object({ kind: z.literal('retry-same') }),
-    z.object({ kind: z.literal('change-agent'), agent: z.custom<TuiAgent>(isTuiAgent) })
-  ])
-})
-
-export const WorktreeForgetBackgroundAgentLaunch = z.object({
-  attemptId: z.string().min(1).max(256),
-  expectedOperationId: z.string().min(1).max(256),
-  clientMutationId: z.string().refine(isCanonicalLowercaseUuid, {
-    message: 'clientMutationId must be a canonical lowercase UUID'
-  })
-})
-
-export const WorktreePendingAgentLaunchSummary = z.object({})
-export const WorktreeUnknownAgentLaunchSiblingCount = WorktreeSelector
-export const WorktreeForgetUnknownAgentLaunchSiblings = WorktreeSelector

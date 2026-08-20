@@ -72,6 +72,7 @@ type LoadedStateParsingOperationsRuntime = Pick<
   | 'protectedSecrets'
   | 'storageAuthority'
   | 'terminalScrollbackSnapshotStorage'
+  | 'writesFrozen'
 >
 
 export class LoadedStateParsingOperations {
@@ -109,6 +110,7 @@ export class LoadedStateParsingOperations {
         })
         if (agentCatalogMigration.schemaNewerThanSupported) {
           this.runtime.agentCatalogSchemaTooNew = agentCatalogMigration.schemaNewerThanSupported
+          this.runtime.writesFrozen = true
         } else if (agentCatalogMigration.didMigrate || agentCatalogMigration.backupError) {
           this.runtime.loadNeedsSave =
             this.runtime.loadNeedsSave || agentCatalogMigration.didMigrate

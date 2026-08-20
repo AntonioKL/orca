@@ -19,6 +19,10 @@ import type { AgentLaunchVaultResumeEntry } from '../../shared/agent-launch-spaw
 import type { AiVaultListArgs, AiVaultListResult } from '../../shared/ai-vault-types'
 import { parseExecutionHostId } from '../../shared/execution-host'
 import { getHostAgentSessionRecordStore } from '../agent-launch/agent-session-record-store-host'
+import {
+  applyAiVaultResumePreparation,
+  type AiVaultSessionResumePreparation
+} from '../../shared/ai-vault-resume-preparation'
 
 // Why: force a fresh scan scoped to the entry's host so a deleted session cannot
 // replay from stale cache; the high limit surfaces an older target past the
@@ -47,10 +51,14 @@ async function discoverForEntry(
 // Returns the host-discovered session (authoritative filePath et al.) or null.
 export async function revalidateAiVaultResumeEntry(
   entry: AgentLaunchVaultResumeEntry,
-  discover: DiscoverAiVaultSessions
+  discover: DiscoverAiVaultSessions,
+  // The entry echoes identity only, so the Codex account repin cannot ride it
+  // over from the client — the host that rebuilds the command applies it here.
+  prepare?: AiVaultSessionResumePreparation
 ): Promise<VaultResumeSession | null> {
   const discovered = await discoverForEntry(entry, discover)
-  return findVaultResumeSession(entry, discovered.sessions)
+  const session = findVaultResumeSession(entry, discovered.sessions)
+  return session ? applyAiVaultResumePreparation(session, prepare) : null
 }
 
 // Desktop 'copy' vault-resume: re-validate + assemble the copyable command. The
@@ -59,13 +67,20 @@ export async function revalidateAiVaultResumeEntry(
 async function resolveAiVaultResumeCopyCommand(
   entry: AgentLaunchVaultResumeEntry,
   discover: DiscoverAiVaultSessions,
-  settings: VaultResumeAssemblySettings | undefined
+  settings: VaultResumeAssemblySettings | undefined,
+  prepare?: AiVaultSessionResumePreparation,
+  targetPlatform?: NodeJS.Platform
 ): Promise<VaultResumeCopyResult> {
-  const discovered = await discoverForEntry(entry, discover)
+  const session = await revalidateAiVaultResumeEntry(entry, discover, prepare)
+  if (!session) {
+    return { status: 'failed', failure: { code: 'invalid_launch_snapshot' } }
+  }
   return resolveVaultResumeCopyCommand({
     entry,
-    sessions: discovered.sessions,
-    hostPlatform: process.platform,
+    sessions: [session],
+    // The client names the PASTE target's platform (its WSL/SSH workspace reads
+    // as linux); only quoting depends on it, and the host never runs this string.
+    hostPlatform: targetPlatform ?? process.platform,
     settings
   })
 }
@@ -98,12 +113,23 @@ export function registerAiVaultResumeCommandHandler(
   options?: {
     getVaultResumeSettings?: () => VaultResumeAssemblySettings | undefined
     resolveRuntimeAiVaultResumeDetails?: ResolveRuntimeAiVaultResumeDetails
+    prepareSessionResume?: AiVaultSessionResumePreparation
   }
 ): void {
   ipcMain.handle(
     'aiVault:resumeCommand',
-    (_event, entry: AgentLaunchVaultResumeEntry): Promise<VaultResumeCopyResult> =>
-      resolveAiVaultResumeCopyCommand(entry, discover, options?.getVaultResumeSettings?.())
+    (
+      _event,
+      entry: AgentLaunchVaultResumeEntry,
+      targetPlatform?: NodeJS.Platform
+    ): Promise<VaultResumeCopyResult> =>
+      resolveAiVaultResumeCopyCommand(
+        entry,
+        discover,
+        options?.getVaultResumeSettings?.(),
+        options?.prepareSessionResume,
+        targetPlatform
+      )
   )
   ipcMain.handle(
     'aiVault:resumeDetails',

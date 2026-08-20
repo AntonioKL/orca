@@ -3,6 +3,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { DataRecoveryMigrationNotice } from './DataRecoveryMigrationNotice'
 
+const mocks = vi.hoisted(() => ({
+  writeClipboardText: vi.fn(async () => {}),
+  toastSuccess: vi.fn(),
+  toastError: vi.fn()
+}))
+
+vi.mock('sonner', () => ({
+  toast: { success: mocks.toastSuccess, error: mocks.toastError }
+}))
+
 type ApiStub = {
   migrationStatus: ReturnType<typeof vi.fn>
   retryAgentCatalogMigration: ReturnType<typeof vi.fn>
@@ -25,13 +35,17 @@ function installApi(overrides: Partial<ApiStub> = {}): ApiStub {
     restore: vi.fn().mockResolvedValue({ ok: true }),
     ...overrides
   }
-  ;(window as unknown as { api: unknown }).api = { dataRecovery: api }
+  ;(window as unknown as { api: unknown }).api = {
+    dataRecovery: api,
+    ui: { writeClipboardText: mocks.writeClipboardText }
+  }
   return api
 }
 
 describe('DataRecoveryMigrationNotice', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.writeClipboardText.mockResolvedValue(undefined)
   })
 
   afterEach(() => {
@@ -121,6 +135,24 @@ describe('DataRecoveryMigrationNotice', () => {
     render(<DataRecoveryMigrationNotice />)
     expect(await screen.findByText('Retry migration')).toBeTruthy()
     expect(screen.queryByText('Custom agents are read-only in this version of Orca')).toBeNull()
+  })
+
+  it('copies the error through the app clipboard IPC and confirms with a toast', async () => {
+    installApi()
+    render(<DataRecoveryMigrationNotice />)
+    fireEvent.click(await screen.findByText('Copy details'))
+    await vi.waitFor(() => expect(mocks.toastSuccess).toHaveBeenCalledTimes(1))
+    expect(mocks.writeClipboardText).toHaveBeenCalledWith('disk full')
+    expect(mocks.toastError).not.toHaveBeenCalled()
+  })
+
+  it('surfaces a failure toast when the clipboard write rejects', async () => {
+    installApi()
+    mocks.writeClipboardText.mockRejectedValue(new Error('clipboard unavailable'))
+    render(<DataRecoveryMigrationNotice />)
+    fireEvent.click(await screen.findByText('Copy details'))
+    await vi.waitFor(() => expect(mocks.toastError).toHaveBeenCalledTimes(1))
+    expect(mocks.toastSuccess).not.toHaveBeenCalled()
   })
 
   it('opens Data recovery listing the pinned point with restore', async () => {

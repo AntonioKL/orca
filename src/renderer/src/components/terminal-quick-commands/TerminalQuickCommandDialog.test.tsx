@@ -216,7 +216,7 @@ describe('TerminalQuickCommandDialog local catalog subscription', () => {
 
   // This dialog is mounted once per tab bar and stays mounted while closed.
   it('opts out of the catalog while closed', async () => {
-    await renderDialog(agentCommand, false)
+    await renderDialog(agentCommand, { open: false })
 
     expect(useLocalAgentCatalogMock).toHaveBeenCalled()
     for (const call of useLocalAgentCatalogMock.mock.calls) {
@@ -225,7 +225,7 @@ describe('TerminalQuickCommandDialog local catalog subscription', () => {
   })
 
   it('opts in once open', async () => {
-    await renderDialog(agentCommand, true)
+    await renderDialog(agentCommand, { open: true })
 
     expect(useLocalAgentCatalogMock).toHaveBeenCalledWith({ enabled: true })
   })

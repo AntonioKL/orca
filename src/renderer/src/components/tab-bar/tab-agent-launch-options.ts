@@ -1,5 +1,6 @@
 import { getAgentCatalog } from '@/lib/agent-catalog'
 import { normalizeMatchQuery, tokenizeMatchValue } from './query-token-match'
+import { filterEnabledTuiAgents } from '../../../../shared/tui-agent-selection'
 import type { BuiltInTuiAgent, CustomTuiAgentId, TuiAgent } from '../../../../shared/types'
 import type { LocalAgentCatalogSnapshot } from '../../../../shared/agent-catalog-snapshot'
 
@@ -66,18 +67,24 @@ function getCatalogEntry(agent: TuiAgent): { id: TuiAgent; label: string; cmd: s
   return getAgentCatalog().find((entry) => entry.id === agent) ?? null
 }
 
+/** Owns the disabled filter for built-ins the way `deriveTabCustomAgentEntries`
+ *  owns it for customs — leaving it to callers already shipped one that forgot. */
 export function orderTabLaunchAgents(
   defaultAgent: TuiAgent | 'blank' | null | undefined,
   detected: readonly TuiAgent[],
-  customs: readonly TabCustomAgentLaunchEntry[] = []
+  customs: readonly TabCustomAgentLaunchEntry[] = [],
+  disabled?: Iterable<unknown> | null
 ): TuiAgent[] {
   const detectedSet = new Set<TuiAgent>(detected)
+  // Disabling a base hides its own row but says nothing about a custom built on
+  // it — that custom is filtered by deriveTabCustomAgentEntries, not here.
+  const enabledSet = new Set<TuiAgent>(filterEnabledTuiAgents(detected, disabled))
   const launchableCustoms = customs.filter(
     (custom) => !custom.requiresDetectedBase || detectedSet.has(custom.baseAgent)
   )
   const ordered: TuiAgent[] = []
   for (const entry of getAgentCatalog()) {
-    if (detectedSet.has(entry.id)) {
+    if (enabledSet.has(entry.id)) {
       ordered.push(entry.id)
     }
     // Customs group under their base harness (the settings-catalog ordering);

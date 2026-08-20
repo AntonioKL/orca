@@ -4962,24 +4962,33 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
     restoreAgentPaneAuthority: (paneKey) => {
       const ownerPaneKey = resolveAgentPaneAuthorityKey(paneKey)
       const tabId = getTabIdFromPaneKey(ownerPaneKey)
+      // Why: a closed tab is a stronger, separate claim — re-attach must not undo it.
       if (
         !ownerPaneKey ||
         (tabId && isRecentlyClosedAgentStatusTab(get().recentlyClosedAgentStatusTabIds, tabId))
       ) {
         return
       }
-      const retired = get().recentlyRetiredAgentStatusPaneKeys
-      if (!(ownerPaneKey in retired)) {
-        return
-      }
       set((s) => {
-        if (!(ownerPaneKey in s.recentlyRetiredAgentStatusPaneKeys)) {
+        const restorable = [paneKey, ownerPaneKey].filter(
+          (key) => key in s.recentlyRetiredAgentStatusPaneKeys
+        )
+        if (restorable.length === 0) {
           return s
         }
         const next = { ...s.recentlyRetiredAgentStatusPaneKeys }
-        delete next[ownerPaneKey]
+        for (const key of restorable) {
+          delete next[key]
+        }
         return { recentlyRetiredAgentStatusPaneKeys: next }
       })
+      // Why: deliberately OUTSIDE the guard above, and not gated on having cleared
+      // anything here. This map is not a mirror of main's — main fences panes the
+      // renderer never hears about (retirePtyAgentLaunchAuthority on command-finished
+      // and PTY exit calls the hook server directly, and nothing pushes that back), and
+      // this map is per-window and non-persisted, so a renderer reload empties it while
+      // main's survives. Gating the send on a local tombstone reintroduces STA-4114 for
+      // exactly those panes. The send is idempotent and main refuses closed tabs itself.
       if (typeof window !== 'undefined') {
         window.api?.agentStatus?.restorePaneAuthority?.(ownerPaneKey)
       }

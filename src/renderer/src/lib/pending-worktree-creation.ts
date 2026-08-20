@@ -60,6 +60,10 @@ export type WorktreeCreationRequest = {
    *  local-vs-runtime progress behavior even if the focused runtime changes. */
   worktreeCreateProgressMode?: WorktreeCreationProgressMode
   name: string
+  /** True only when `name` came from Orca's creature-name generator. Must survive
+   *  into the create call: the host retires generated names so one is never
+   *  reissued, and a name the user typed stays reusable. */
+  nameWasGenerated?: boolean
   displayName?: string
   displayNameKind?: 'generated' | 'user'
   baseBranch?: string

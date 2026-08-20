@@ -59,9 +59,13 @@ export function launchAiVaultSessionInNewTab(args: {
       ...(targetGroupId ? { targetGroupId } : {}),
       ...(hostOwnsResume ? {} : { command: args.command }),
       ...(args.agentLaunch ? { agentLaunch: args.agentLaunch } : {}),
-      ...(!args.agentLaunch
-        ? { agentSessionKind: 'resume' as const, launchAgent: args.agent }
-        : {}),
+      // Unconditional: a pre-identity host negotiates down to the legacy arm,
+      // which strips agentLaunch. Without the identity it receives a plain
+      // createTerminal with a command and no ensureAgentSession binding. The
+      // identity arm forwards launchAgent too but the host ignores every
+      // client-authored field when agentLaunch resolves (U3).
+      agentSessionKind: 'resume' as const,
+      launchAgent: args.agent,
       ...(args.cwd ? { cwd: args.cwd } : {}),
       ...(args.env ? { env: args.env } : {}),
       ...(args.envToDelete ? { envToDelete: args.envToDelete } : {}),

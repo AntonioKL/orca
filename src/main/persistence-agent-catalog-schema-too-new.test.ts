@@ -2,7 +2,7 @@
 // too-new state at load, refuses durable authoring writes, and never turns it
 // into a retryable pinned-backup failure.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -84,6 +84,51 @@ describe('agent-catalog schema newer than this build', () => {
       /newer than this build supports/
     )
     expect(store.getSettings().defaultTuiAgent).toBe('codex')
+  })
+
+  // The read-only latch only gates the two authoring services and
+  // updateSettingsDurable. Every other mutation path schedules a full-file
+  // rewrite from the v1 in-memory model, whose normalizers dropped the v2
+  // fields — so the profile must be frozen outright, not merely flagged.
+  it('freezes all writes, not just the authoring paths, while the profile is too new', async () => {
+    writeProfile(dataFile, {
+      defaultTuiAgent: 'codex',
+      agentCatalogSchemaVersion: 2,
+      agentCatalogRevision: 7,
+      unknownFutureSetting: 'must survive'
+    })
+    const store = await createStore(dataFile)
+
+    store.updateSettings({ defaultTuiAgent: 'auto' })
+    await store.waitForPendingWrite()
+
+    const onDisk = JSON.parse(readFileSync(dataFile, 'utf-8')) as {
+      settings: Record<string, unknown>
+    }
+    expect(onDisk.settings.unknownFutureSetting).toBe('must survive')
+    expect(onDisk.settings.agentCatalogSchemaVersion).toBe(2)
+    expect(onDisk.settings.defaultTuiAgent).toBe('codex')
+  })
+
+  // A failed recovery-point restore rolls the freeze back. That rollback is about
+  // a stale in-memory copy of a compatible file; it must not re-enable writes
+  // against a profile this build cannot represent.
+  it('does not let a failed restore rollback lift the too-new freeze', async () => {
+    writeProfile(dataFile, {
+      defaultTuiAgent: 'codex',
+      agentCatalogSchemaVersion: 2,
+      unknownFutureSetting: 'must survive'
+    })
+    const store = await createStore(dataFile)
+
+    store.unfreezeWrites()
+    store.updateSettings({ defaultTuiAgent: 'auto' })
+    await store.waitForPendingWrite()
+
+    const onDisk = JSON.parse(readFileSync(dataFile, 'utf-8')) as {
+      settings: Record<string, unknown>
+    }
+    expect(onDisk.settings.unknownFutureSetting).toBe('must survive')
   })
 
   it('allows durable authoring writes on a supported profile', async () => {

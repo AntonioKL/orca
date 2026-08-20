@@ -16180,6 +16180,8 @@
         "retryMigration": "Retry migration",
         "openDataRecovery": "Open Data recovery",
         "copyDetails": "Copy details",
+        "copyDetailsCopied": "Error details copied",
+        "copyDetailsFailed": "Could not copy error details",
         "settingsRowHint": "You can restore the settings from before this update, then install the previous Orca.",
         "settingsRowOpen": "Data recovery…",
         "pinExitTitle": "Custom agents are now available",

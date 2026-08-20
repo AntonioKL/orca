@@ -102,20 +102,27 @@ export const WORKTREE_METHODS: RpcMethod[] = [
         // Why: provenance tokens are reserved before creation so retries can recover,
         // but failed create attempts must release the reservation for a safe retry.
         try {
+          const createArgs = buildManagedWorktreeCreateArgs(
+            params,
+            {
+              automationProvenance,
+              agentLaunchClientKind: context.clientKind,
+              cliProvenance: buildCliWorkspaceProvenance(params.cliProvenanceRequest, {
+                startupAgent: params.startupAgent ?? params.createdWithAgent,
+                createdAt: Date.now()
+              }),
+              creatorProvenance: resolveRpcWorkspaceCreatorProvenance(context)
+            },
+            context.clientKind ? { clientKind: context.clientKind } : {}
+          )
           const result = await runtime.createManagedWorktree(
-            buildManagedWorktreeCreateArgs(
-              params,
-              {
-                automationProvenance,
-                agentLaunchClientKind: context.clientKind,
-                cliProvenance: buildCliWorkspaceProvenance(params.cliProvenanceRequest, {
-                  startupAgent: params.startupAgent ?? params.createdWithAgent,
-                  createdAt: Date.now()
-                }),
-                creatorProvenance: resolveRpcWorkspaceCreatorProvenance(context)
-              },
-              context.clientKind ? { clientKind: context.clientKind } : {}
-            )
+            // The paired device narrows the launch principal so one phone's
+            // capacity and recovery rows are its own. Taken from the
+            // authenticated envelope, never from client params, and never sent
+            // undefined-valued so pre-device rows keep their coarse principal.
+            params.agentLaunch && context.pairedDeviceId
+              ? { ...createArgs, agentLaunchDeviceId: context.pairedDeviceId }
+              : createArgs
           )
           finishAutomationWorkspaceProvenanceRequest(params.automationProvenanceRequest)
           // Why: agent callers need a stable dispatch target without traversing
@@ -127,7 +134,10 @@ export const WORKTREE_METHODS: RpcMethod[] = [
         } catch (error) {
           releaseAutomationWorkspaceProvenanceRequest(params.automationProvenanceRequest)
           if (error instanceof WorktreeAgentLaunchPreCreateError && error.failure) {
-            return { created: false, agentLaunchResult: { status: 'failed', failure: error.failure } }
+            return {
+              created: false,
+              agentLaunchResult: { status: 'failed', failure: error.failure }
+            }
           }
           if (error instanceof WorktreeAgentLaunchPreCreateError && error.requestError) {
             return {

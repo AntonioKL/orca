@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseAllowStaleBaseFromSpec } from './coordinator'
+import { parseAllowStaleBaseFromSpec } from './coordinator-stale-base-flag'
 
 describe('parseAllowStaleBaseFromSpec', () => {
   it('matches canonical form on its own line and strips it', () => {

@@ -21,7 +21,23 @@ import { toRuntimeExecutionHostId, toSshExecutionHostId } from '../../shared/exe
 import { isWindowsAbsolutePathLike } from '../../shared/cross-platform-path'
 import { parseWslUncPath } from '../../shared/wsl-paths'
 import { resolveLocalWindowsAgentStartupShell } from '../../shared/windows-terminal-shell'
+import type { ProjectExecutionRuntimeResolution } from '../../shared/project-execution-runtime'
 import type { AgentLaunchSpawnTarget } from './agent-launch-spawn'
+
+/** The distro a WSL-runtime project executes in, whatever its worktree path looks
+ *  like; a repair-required WSL project still owns the runtime, so it counts. */
+function projectRuntimeWslDistro(
+  projectRuntime: ProjectExecutionRuntimeResolution | null | undefined
+): string | undefined {
+  if (!projectRuntime) {
+    return undefined
+  }
+  return projectRuntime.status === 'resolved'
+    ? projectRuntime.runtime.kind === 'wsl'
+      ? projectRuntime.runtime.distro
+      : undefined
+    : (projectRuntime.repair.preferredRuntime.distro ?? undefined)
+}
 
 /** The execution surface a launch targets. isRemote/platform/executionHostId are
  *  derived from this shape; nothing is copied from a client payload. */
@@ -124,7 +140,13 @@ export function toStockBaseAgentSet(
 export function describeSpawnExecutionHost(args: {
   connectionId?: string | null
   cwd?: string | null
+  /** The pane's per-tab Windows shell, which beats the global setting at spawn
+   *  time — host-built argv must be quoted for the shell that actually runs it. */
+  shellOverride?: string | null
   terminalWindowsShell?: string | null
+  /** The project's Windows execution runtime. A WSL project runs bash even when
+   *  its worktree is a Windows drive path, which no cwd inspection can tell. */
+  projectRuntime?: ProjectExecutionRuntimeResolution | null
 }): AgentLaunchHostDescriptor {
   if (args.connectionId) {
     return {
@@ -133,13 +155,16 @@ export function describeSpawnExecutionHost(args: {
       platform: args.cwd && isWindowsAbsolutePathLike(args.cwd) ? 'win32' : 'linux'
     }
   }
-  const wslDistro = args.cwd ? parseWslUncPath(args.cwd)?.distro : undefined
+  const wslDistro =
+    (args.cwd ? parseWslUncPath(args.cwd)?.distro : undefined) ??
+    projectRuntimeWslDistro(args.projectRuntime)
   if (wslDistro) {
     return { kind: 'wsl', distro: wslDistro }
   }
   const shell = resolveLocalWindowsAgentStartupShell({
     platform: process.platform,
     isRemote: false,
+    shellOverride: args.shellOverride,
     terminalWindowsShell: args.terminalWindowsShell
   })
   return {

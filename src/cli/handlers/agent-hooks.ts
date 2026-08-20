@@ -127,7 +127,7 @@ async function readHookSettings(
   try {
     const response = await client.call<{
       settings?: Pick<GlobalSettings, 'agentStatusHooksEnabled' | 'disabledTuiAgents'>
-    }>('settings.get', undefined, { timeoutMs: 1_000 })
+    }>('settings.get', { includeAgentCatalog: false }, { timeoutMs: 1_000 })
     const settings = response.result.settings
     if (settings && typeof settings.agentStatusHooksEnabled === 'boolean') {
       return {

@@ -59,6 +59,7 @@ import {
   agentLaunchRequestErrorMessage
 } from '@/lib/agent-launch-failure-copy'
 import { createBrowserUuid } from '@/lib/browser-uuid'
+import { dispatchPreparedWorktreeCreate } from '@/lib/prepared-worktree-create-dispatch'
 import {
 >>>>>>> ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
   getInitialWorktreeCreationPhase,
@@ -349,59 +350,7 @@ async function executeWorktreeCreation(
 
   let result: CreateWorktreeResult
   try {
-    result = await useAppStore.getState().createWorktree(
-      preparedRequest.repoId,
-      preparedRequest.name,
-      preparedRequest.baseBranch,
-      preparedRequest.setupDecision,
-      preparedRequest.sparseCheckout,
-      preparedRequest.telemetrySource,
-      preparedRequest.displayName,
-      preparedRequest.linkedIssue,
-      preparedRequest.linkedPR,
-      preparedRequest.pushTarget,
-      preparedRequest.agent ?? undefined,
-      preparedRequest.linkedLinearIssue,
-      preparedRequest.branchNameOverride,
-      preparedRequest.workspaceStatus,
-      preparedRequest.linkedGitLabMR,
-      preparedRequest.linkedGitLabIssue,
-      // The host owns startup resolution via `agentLaunch`; the legacy
-      // self-contained startup arg is never used on the create path.
-      undefined,
-      preparedRequest.pendingFirstAgentMessageRename,
-      creationId,
-      preparedRequest.linkedLinearIssueWorkspaceId,
-      preparedRequest.linkedLinearIssueOrganizationUrlKey,
-      preparedRequest.linkedBitbucketPR,
-      preparedRequest.linkedAzureDevOpsPR,
-      preparedRequest.linkedGiteaPR,
-      preparedRequest.compareBaseRef,
-      {
-        ...(preparedRequest.linkedWorkItem !== undefined
-          ? { linkedWorkItem: preparedRequest.linkedWorkItem }
-          : {}),
-        ...(preparedRequest.linkedTaskSourceContext !== undefined
-          ? { linkedTaskSourceContext: preparedRequest.linkedTaskSourceContext }
-          : {}),
-        ...(preparedRequest.agentLaunch
-          ? {
-              agentLaunch: preparedRequest.agentLaunch,
-              // The host emits agent_started off its validated receipt; only the
-              // surface-owned launch_source/request_kind cross, so derive them from
-              // the quick telemetry the composer already captured.
-              ...(preparedRequest.quickTelemetry
-                ? {
-                    agentLaunchTelemetry: {
-                      launch_source: preparedRequest.quickTelemetry.launch_source,
-                      request_kind: preparedRequest.quickTelemetry.request_kind
-                    }
-                  }
-                : {})
-            }
-          : {})
-      }
-    )
+    result = await dispatchPreparedWorktreeCreate(creationId, preparedRequest)
   } catch (error) {
     // Why: a missing entry means the user cancelled mid-flight — abandon
     // silently rather than surfacing an error for work they already dismissed.
@@ -486,8 +435,7 @@ async function executeWorktreeCreation(
       ...(result.setup ? { setup: result.setup } : {}),
       ...(result.defaultTabs ? { defaultTabs: result.defaultTabs } : {}),
       ...(preparedRequest.issueCommand ? { issueCommand: preparedRequest.issueCommand } : {}),
-      ...(backendSpawned ? { backendStartupTerminalSpawned: true } : {}),
-      ...(hostOwnedLaunch ? { backendStartupTerminalSpawned: true } : {})
+      ...(backendSpawned || hostOwnedLaunch ? { backendStartupTerminalSpawned: true } : {})
     })
   } else {
     // The user moved on. Seed the worktree's setup in the background
@@ -502,8 +450,7 @@ async function executeWorktreeCreation(
       result.defaultTabs,
       {
         activateCreatedTabs: false,
-        ...(backendSpawned ? { backendStartupTerminalSpawned: true } : {}),
-        ...(hostOwnedLaunch ? { backendStartupTerminalSpawned: true } : {})
+        ...(backendSpawned || hostOwnedLaunch ? { backendStartupTerminalSpawned: true } : {})
       }
     )
   }

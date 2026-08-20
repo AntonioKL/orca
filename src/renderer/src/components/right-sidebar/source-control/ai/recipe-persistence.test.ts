@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppState } from '@/store'
-import type { GlobalSettings } from '../../../../shared/types'
+import type { GlobalSettings } from '../../../../../../shared/types'
 
 const saveSourceControlAiSettings = vi.fn()
 const toastError = vi.fn()
@@ -9,8 +9,7 @@ vi.mock('@/lib/agent-catalog-authoring', () => ({
 }))
 vi.mock('sonner', () => ({ toast: { error: (...args: unknown[]) => toastError(...args) } }))
 
-const { saveSourceControlAiActionRecipeForTarget } =
-  await import('./source-control-ai-recipe-persistence')
+const { saveSourceControlAiActionRecipeForTarget } = await import('./recipe-persistence')
 
 const settings = {
   sourceControlAi: { enabled: true },

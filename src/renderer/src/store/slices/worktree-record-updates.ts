@@ -1,5 +1,5 @@
 import type { Worktree, WorktreeMeta } from '../../../../shared/types'
-import { getRepoIdFromWorktreeId } from '../../../../shared/worktree-id'
+import { getRepoIdFromWorktreeId } from '../../../../shared/worktree/id'
 
 export function findWorktreeById(
   worktreesByRepo: Record<string, Worktree[]>,

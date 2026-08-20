@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { translate } from '@/i18n/i18n'
 import {
@@ -35,6 +36,21 @@ export function DataRecoveryMigrationNotice() {
   useEffect(() => {
     void refresh()
   }, [refresh])
+
+  const copyDetails = useCallback(async (details: string): Promise<void> => {
+    try {
+      // Why: Electron's clipboard IPC like every other copy button — navigator.clipboard
+      // fails silently in the renderer when focus/permission is lost.
+      await window.api.ui.writeClipboardText(details)
+      toast.success(
+        translate('auto.components.dataRecovery.copyDetailsCopied', 'Error details copied')
+      )
+    } catch {
+      toast.error(
+        translate('auto.components.dataRecovery.copyDetailsFailed', 'Could not copy error details')
+      )
+    }
+  }, [])
 
   // Read-only wins over the retryable block: no retry can clear a newer schema,
   // so offering one would only fail repeatedly.
@@ -113,7 +129,7 @@ export function DataRecoveryMigrationNotice() {
           type="button"
           size="xs"
           variant="ghost"
-          onClick={() => void navigator.clipboard.writeText(migrationError)}
+          onClick={() => void copyDetails(migrationError)}
         >
           {translate('auto.components.dataRecovery.copyDetails', 'Copy details')}
         </Button>

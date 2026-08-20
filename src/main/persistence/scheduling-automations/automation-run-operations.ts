@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import type {
   Automation,
-  AutomationDispatchResult,
   AutomationRun,
+  AutomationRunPersistInput,
   AutomationRunTrigger
 } from '../../../shared/automations-types'
 import type { PersistedState } from '../../../shared/persisted-state-types'
@@ -136,7 +136,7 @@ export function recordRepeatedAutomationSkip(
 
 export function updateAutomationRun(
   operations: AutomationRunOperations,
-  result: AutomationDispatchResult
+  result: AutomationRunPersistInput
 ): AutomationRun {
   const index = (operations.state.automationRuns ?? []).findIndex(
     (entry) => entry.id === result.runId
@@ -174,6 +174,13 @@ export function updateAutomationRun(
       ? normalizeAutomationPrecheckResult(result.precheckResult)
       : normalizeAutomationPrecheckResult(current.precheckResult),
     usage: Object.hasOwn(result, 'usage') ? (result.usage ?? null) : (current.usage ?? null),
+    // Additive U6 launch fields: omitted key preserves, present key writes/clears.
+    agentLaunchFailure: Object.hasOwn(result, 'agentLaunchFailure')
+      ? (result.agentLaunchFailure ?? null)
+      : (current.agentLaunchFailure ?? null),
+    agentLaunchForgottenAt: Object.hasOwn(result, 'agentLaunchForgottenAt')
+      ? (result.agentLaunchForgottenAt ?? null)
+      : (current.agentLaunchForgottenAt ?? null),
     error: result.error ?? null,
     startedAt: current.startedAt ?? now,
     dispatchedAt: result.status === 'dispatched' ? now : current.dispatchedAt

@@ -463,6 +463,7 @@ import type { MemorySnapshot } from '../shared/process-stats-types'
 import type { NestedRepoScanResult } from '../shared/project-group-types'
 import type { BaseRefDefaultResult, BaseRefSearchResult } from '../shared/repo-types'
 import type { TuiAgent } from '../shared/tui-agent'
+import type { PersistedLaunchNoticeState } from '../shared/agent-launch-contract'
 import type { FloatingTerminalCwdRequest } from '../shared/ui-chrome-types'
 import type { UpdateStatus } from '../shared/update-status-types'
 import type {
@@ -5758,6 +5759,9 @@ const api = {
       ipcRenderer.invoke('worktrees:retryAgentLaunch', args),
     forgetAgentLaunch: (args): Promise<ForgetUnknownAgentLaunchResult> =>
       ipcRenderer.invoke('worktrees:forgetAgentLaunch', args),
+    // Local-desktop-only override: no runtime RPC exists, so this never leaves the desktop path.
+    forgetRevokedRemoteAgentLaunch: (args): Promise<ForgetUnknownAgentLaunchResult> =>
+      ipcRenderer.invoke('worktrees:forgetRevokedRemoteAgentLaunch', args),
     retryBackgroundAgentLaunch: (args): Promise<WorktreeRetryAgentLaunchResult> =>
       ipcRenderer.invoke('worktrees:retryBackgroundAgentLaunch', args),
     forgetBackgroundAgentLaunch: (args): Promise<ForgetUnknownAgentLaunchResult> =>
@@ -8963,6 +8967,7 @@ const api = {
         resumeProviderSession?: AgentProviderSessionMetadata
         launchToken?: string
         launchAgent?: TuiAgent
+        launchNotices?: PersistedLaunchNoticeState
         viewMode?: 'terminal' | 'chat'
         title?: string
         ptyId?: string
@@ -8989,6 +8994,7 @@ const api = {
           resumeProviderSession?: AgentProviderSessionMetadata
           launchToken?: string
           launchAgent?: TuiAgent
+          launchNotices?: PersistedLaunchNoticeState
           viewMode?: 'terminal' | 'chat'
           title?: string
           ptyId?: string
@@ -9378,9 +9384,10 @@ const api = {
     deleteSession: (args: AiVaultDeleteSessionArgs): Promise<AiVaultDeleteSessionResult> =>
       ipcRenderer.invoke('aiVault:deleteSession', args),
     resumeCommand: (
-      entry: AgentLaunchVaultResumeEntry
+      entry: AgentLaunchVaultResumeEntry,
+      targetPlatform?: NodeJS.Platform
     ): Promise<AgentLaunchVaultResumeCopyResult> =>
-      ipcRenderer.invoke('aiVault:resumeCommand', entry),
+      ipcRenderer.invoke('aiVault:resumeCommand', entry, targetPlatform),
     resumeDetails: (
       entry: AgentLaunchVaultResumeEntry
     ): Promise<AgentLaunchVaultResumeDetailsResult> =>
@@ -9974,9 +9981,6 @@ const api = {
     },
     retirePaneAuthority: (paneKey: string): void => {
       ipcRenderer.send('agentStatus:retirePaneAuthority', paneKey)
-    },
-    restorePaneAuthority: (paneKey: string): void => {
-      ipcRenderer.send('agentStatus:restorePaneAuthority', paneKey)
     },
     restorePaneAuthority: (paneKey: string): void => {
       ipcRenderer.send('agentStatus:restorePaneAuthority', paneKey)

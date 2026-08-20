@@ -34,8 +34,12 @@ import {
   type BackgroundDeclarationLaunch
 } from '../../../agent-launch/background-agent-launch-spawn-declaration'
 import { revalidateAiVaultResumeEntry } from '../../ai-vault-resume-command'
-import { discoverAiVaultSessionsAcrossHosts } from '../../ai-vault'
+import {
+  discoverAiVaultSessionsAcrossHosts,
+  getAiVaultSessionResumePreparation
+} from '../../ai-vault'
 import { getRepoIdFromWorktreeId } from '../../../../shared/worktree/id'
+import { mergeTerminalEnvDeletionKeys } from '../../../../shared/terminal-env-deletion-keys'
 import type { PtyIpcSpawnState } from './spawn-state'
 
 export type AgentLaunchEarlyResult = { agentLaunch: AgentLaunchSpawnOutcome }
@@ -52,7 +56,9 @@ export async function resolvePtyIpcAgentLaunch(
   const descriptor = describeSpawnExecutionHost({
     connectionId: args.connectionId,
     cwd: ctx.cwd,
-    terminalWindowsShell: getLaunchSettings()?.terminalWindowsShell
+    shellOverride: args.shellOverride,
+    terminalWindowsShell: getLaunchSettings()?.terminalWindowsShell,
+    projectRuntime: args.projectRuntime
   })
   const hostState = await deriveAgentLaunchHostState(
     {
@@ -130,7 +136,8 @@ export async function resolvePtyIpcAgentLaunch(
     }
     const session = await revalidateAiVaultResumeEntry(
       vault.entry,
-      discoverAiVaultSessionsAcrossHosts
+      discoverAiVaultSessionsAcrossHosts,
+      getAiVaultSessionResumePreparation()
     )
     if (!session) {
       return {
@@ -166,6 +173,9 @@ export async function resolvePtyIpcAgentLaunch(
       args.commandDelivery = 'provider'
       if (startup.env) {
         args.env = { ...args.env, ...startup.env }
+      }
+      if (startup.envToDelete) {
+        args.envToDelete = mergeTerminalEnvDeletionKeys(args.envToDelete, startup.envToDelete)
       }
       if (startup.launchConfig) {
         args.launchConfig = startup.launchConfig

@@ -18,7 +18,6 @@ import type { TuiAgent } from '../../../../shared/tui-agent'
 import type { LaunchSource } from '../../../../shared/telemetry-events'
 import {
   DEFAULT_DISABLED_TUI_AGENTS,
-  filterEnabledTuiAgents,
   toLegacyAutoPreference
 } from '../../../../shared/tui-agent-selection'
 import { translate } from '@/i18n/i18n'
@@ -169,9 +168,8 @@ function QuickLaunchAgentMenuItemsInner({
   const customsById = new Map<TuiAgent, TabCustomAgentLaunchEntry>(
     customEntries.map((entry) => [entry.id, entry])
   )
-  const enabledDetectedIds = detectedIds ? filterEnabledTuiAgents(detectedIds, disabledAgents) : []
   const agents = detectedIds
-    ? orderTabLaunchAgents(defaultAgent, enabledDetectedIds, customEntries)
+    ? orderTabLaunchAgents(defaultAgent, detectedIds, customEntries, disabledAgents)
     : []
 
   return (

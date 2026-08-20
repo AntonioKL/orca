@@ -46,6 +46,9 @@ export function startDeferredSessionReattach(
     ...(coldRestoreStartup?.agentLaunch
       ? { agentLaunch: coldRestoreStartup.agentLaunch }
       : {}),
+    ...(coldRestoreStartup?.resumeProviderSession
+      ? { resumeProviderSession: coldRestoreStartup.resumeProviderSession }
+      : {}),
     ...(coldRestoreStartup?.env
       ? { env: session.mergeStartupEnvWithPaneIdentity(coldRestoreStartup.env) }
       : {}),

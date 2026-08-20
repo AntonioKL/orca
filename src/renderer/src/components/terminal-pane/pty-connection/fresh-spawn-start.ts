@@ -110,6 +110,9 @@ export function bindStartFreshSpawn(session: ConnectPanePtySession): void {
         ? { env: session.mergeStartupEnvWithPaneIdentity(startupOverride.env) }
         : {}),
       ...(coldRestoreOverride ? { agentLaunch: coldRestoreOverride.agentLaunch } : {}),
+      ...(coldRestoreOverride
+        ? { resumeProviderSession: coldRestoreOverride.resumeProviderSession }
+        : {}),
       ...(coldRestoreOverride?.launchConfig
         ? { launchConfig: coldRestoreOverride.launchConfig }
         : {}),

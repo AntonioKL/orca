@@ -3,7 +3,7 @@ import { DISPATCH_PANE_KEY_MATCH_SUFFIX_SQL } from '../pane-key-match'
 import { CURRENT_CONTRACT_VERSION, LEGACY_RUN_ID } from '../contract-constants'
 import type { OrchestrationDb } from '../orchestration-db'
 
-export function applySchemaMigrationsV13ToV29(this: OrchestrationDb, current: number): void {
+export function applySchemaMigrationsV13ToV30(this: OrchestrationDb, current: number): void {
   if (current < 13 && !this.hasColumn('worker_dispatches', 'runtime_epoch')) {
     this.db.exec('ALTER TABLE worker_dispatches ADD COLUMN runtime_epoch TEXT')
   }
@@ -158,7 +158,9 @@ export function applySchemaMigrationsV13ToV29(this: OrchestrationDb, current: nu
   if (current < 29 && !this.hasColumn('dispatch_contexts', 'termination_reason')) {
     this.db.exec('ALTER TABLE dispatch_contexts ADD COLUMN termination_reason TEXT')
   }
-  if (current < 29) {
+  // v30, not v29: every shipped install is already stamped 29, so gating the
+  // launch-identity columns on `current < 29` applied them to fresh installs only.
+  if (current < 30) {
     // Some pre-rebase v6 databases stamped the U6 identity columns without
     // running main's pane-identity step. Make the pane columns available
     // before the dispatch-table rebuild/copy below.
@@ -173,6 +175,11 @@ export function applySchemaMigrationsV13ToV29(this: OrchestrationDb, current: nu
       // dispatch table so v6/v28 databases preserve pane and ownership data
       // while gaining the forgotten disposition and launch identity columns.
       this.db.exec(`
+        -- SQLite re-parses every trigger during the RENAME below. This one
+        -- references dispatch_contexts in its WHEN clause, so leaving it in
+        -- place aborts the migration and leaves the DB unopenable. The DB
+        -- constructor recreates it right after migrate() returns.
+        DROP TRIGGER IF EXISTS trg_messages_route_coordinator_mail;
         CREATE TABLE dispatch_contexts_new (
           id                    TEXT PRIMARY KEY,
           run_id                TEXT NOT NULL DEFAULT '${LEGACY_RUN_ID}',
@@ -190,6 +197,7 @@ export function applySchemaMigrationsV13ToV29(this: OrchestrationDb, current: nu
           last_failure          TEXT,
           dispatched_at         TEXT,
           completed_at          TEXT,
+          termination_reason    TEXT,
           created_at            TEXT NOT NULL DEFAULT (datetime('now')),
           last_heartbeat_at     TEXT,
           requested_agent       TEXT,
@@ -200,15 +208,15 @@ export function applySchemaMigrationsV13ToV29(this: OrchestrationDb, current: nu
           id, run_id, task_id, contract_version, launch_token_hash,
           assignee_handle, assignee_pane_key, capability_hash,
           process_incarnation, capability_revoked_at, status, failure_count,
-          last_failure, dispatched_at, completed_at, created_at,
-          last_heartbeat_at
+          last_failure, termination_reason, dispatched_at, completed_at,
+          created_at, last_heartbeat_at
         )
         SELECT
           id, run_id, task_id, contract_version, launch_token_hash,
           assignee_handle, assignee_pane_key, capability_hash,
           process_incarnation, capability_revoked_at, status, failure_count,
-          last_failure, dispatched_at, completed_at, created_at,
-          last_heartbeat_at
+          last_failure, termination_reason, dispatched_at, completed_at,
+          created_at, last_heartbeat_at
         FROM dispatch_contexts;
         DROP TABLE dispatch_contexts;
         ALTER TABLE dispatch_contexts_new RENAME TO dispatch_contexts;

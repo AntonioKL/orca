@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import { AgentLaunchOperationStore } from './agent-launch-operation-store'
+import {
+  AgentLaunchOperationStore,
+  type PendingAgentLaunchSnapshot
+} from './agent-launch-operation-store'
 import {
   runWorktreeAgentLaunchTransaction,
   type WorktreeAgentLaunchTransactionDeps,
@@ -14,6 +17,7 @@ import type {
   AgentLaunchRequestError
 } from '../../shared/agent-launch-contract'
 import type { ExecuteAgentLaunchResult } from './agent-launch-boundary'
+import type { AdmissionPrincipal } from './agent-launch-admission-store'
 
 const SNAPSHOT: AgentLaunchSnapshot = {
   version: 1,
@@ -296,6 +300,80 @@ describe('runWorktreeAgentLaunchTransaction', () => {
     expect(persistFailure).not.toHaveBeenCalled()
     expect(persistPending).not.toHaveBeenCalled()
     expect(operationStore.settledForScope('wt-1')).toHaveLength(0)
+  })
+
+  it('records the caller principal in the private pending snapshot', async () => {
+    // The snapshot is the only durable carrier of who holds the capacity slot,
+    // so a restart must rebuild the counter into this device's bucket.
+    const principal: AdmissionPrincipal = { kind: 'remote', id: 'mobile', deviceId: 'dev-7' }
+    const { deps, operationStore } = makeDeps({})
+    const seen: (PendingAgentLaunchSnapshot | null)[] = []
+    deps.spawn = vi.fn(async () => {
+      seen.push(operationStore.getPending('tok-1'))
+      return { terminalId: 'term-1' }
+    })
+    await runWorktreeAgentLaunchTransaction(
+      deps,
+      params(async () => ({ ok: true, plan: PLAN, receipt: RECEIPT }), { principal })
+    )
+    expect(seen[0]).toMatchObject({ principal, launchToken: 'tok-1', intent: 'interactive' })
+  })
+
+  it('releases the launch when beginPending throws instead of stranding it pending', async () => {
+    const log: CallLog = []
+    const { deps, operationStore, persistFailure, persistPending } = makeDeps({ log })
+    operationStore.beginPending = (() => {
+      throw new Error('durable write failed')
+    }) as typeof operationStore.beginPending
+    const outcome = await runWorktreeAgentLaunchTransaction(
+      deps,
+      params(async () => ({ ok: true, plan: PLAN, receipt: RECEIPT }))
+    )
+    expect(log).not.toContain('spawn')
+    expect(log).toContain('settle:failed:tok-1')
+    expect(persistPending).not.toHaveBeenCalled()
+    expect(operationStore.getPending('tok-1')).toBeNull()
+    expect(operationStore.isSpawnInFlight('tok-1')).toBe(false)
+    expect(outcome.status).toBe('failed')
+    if (outcome.status === 'failed') {
+      expect(outcome.failure).toMatchObject({ code: 'spawn_failed', failureId: 'fail-1' })
+    }
+    expect(persistFailure).toHaveBeenCalledTimes(1)
+  })
+
+  it('rolls the private pending back when the public pending write throws', async () => {
+    const log: CallLog = []
+    const { deps, operationStore } = makeDeps({ log })
+    deps.persistPending = vi.fn(() => {
+      throw new Error('worktree meta write failed')
+    })
+    const outcome = await runWorktreeAgentLaunchTransaction(
+      deps,
+      params(async () => ({ ok: true, plan: PLAN, receipt: RECEIPT }))
+    )
+    expect(log).not.toContain('spawn')
+    expect(log).toContain('settle:failed:tok-1')
+    expect(operationStore.getPending('tok-1')).toBeNull()
+    expect(operationStore.isSpawnInFlight('tok-1')).toBe(false)
+    expect(outcome.status).toBe('failed')
+  })
+
+  it('drops the pending snapshot even when the rollback failure write throws', async () => {
+    const { deps, operationStore } = makeDeps({})
+    deps.persistPending = vi.fn(() => {
+      throw new Error('worktree meta write failed')
+    })
+    deps.persistFailure = vi.fn(() => {
+      throw new Error('failure write failed')
+    })
+    await expect(
+      runWorktreeAgentLaunchTransaction(
+        deps,
+        params(async () => ({ ok: true, plan: PLAN, receipt: RECEIPT }))
+      )
+    ).rejects.toThrow('failure write failed')
+    expect(operationStore.getPending('tok-1')).toBeNull()
+    expect(operationStore.isSpawnInFlight('tok-1')).toBe(false)
   })
 
   it('fails closed and spawns nothing when the admitted snapshot is missing', async () => {

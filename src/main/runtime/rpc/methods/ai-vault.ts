@@ -81,12 +81,32 @@ export const AiVaultSessionTitlesParams = z.object({
 // rather than just relying on the comment above to keep callers honest.
 const AiVaultResumeRpcEntrySchema = AgentLaunchVaultResumeEntrySchema.omit({ filePath: true })
 
+// Platform of the workspace the copied command will be PASTED into, which the
+// host cannot infer (a client's WSL/SSH workspace reads as linux). Only quoting
+// depends on it; omitted, the host quotes for itself as it always did.
+const OptionalTargetPlatform = z
+  .enum([
+    'aix',
+    'android',
+    'darwin',
+    'freebsd',
+    'haiku',
+    'linux',
+    'openbsd',
+    'sunos',
+    'win32',
+    'cygwin',
+    'netbsd'
+  ])
+  .optional()
+
 // Host-owned 'copy' vault-resume: the client echoes a discovered entry's identity
 // (filePath omitted on this untrusted surface — the host re-derives it) and the
 // runtime re-validates it against its own fresh scan before returning the
 // assembled command string. Unknown/mismatch → in-band invalid_launch_snapshot.
 export const AiVaultResumeCommandParams = z.object({
-  entry: AiVaultResumeRpcEntrySchema
+  entry: AiVaultResumeRpcEntrySchema,
+  targetPlatform: OptionalTargetPlatform
 })
 
 export const AiVaultResumeDetailsParams = z.object({
@@ -142,7 +162,8 @@ export const AI_VAULT_METHODS: RpcMethod[] = [
   defineMethod({
     name: 'aiVault.resumeCommand',
     params: AiVaultResumeCommandParams,
-    handler: (params, { runtime }) => runtime.resolveAiVaultResumeCommand(params.entry)
+    handler: (params, { runtime }) =>
+      runtime.resolveAiVaultResumeCommand(params.entry, params.targetPlatform)
   }),
   defineMethod({
     name: 'aiVault.resumeDetails',

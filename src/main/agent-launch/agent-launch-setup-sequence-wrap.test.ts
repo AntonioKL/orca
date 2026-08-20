@@ -53,4 +53,34 @@ describe('wrapAgentPlanWithSetupSequence', () => {
     expect(wrapped.env?.ORCA_AGENT_ENV).toBe('user-value')
     expect(wrapped.wrappedSetupCommand).toBe('run-setup && touch marker')
   })
+
+  // Regression (A-04): dropping `shell` made posixGateForWindowsRunner unreachable, so a
+  // .cmd runner launched from a Git Bash pane got the PowerShell gate the pane cannot run.
+  it('forwards the launching pane shell so the gate matches it', () => {
+    const createSequenced = vi.fn(() => ({
+      setupCommand: 'setup',
+      startupCommand: 'gate',
+      startupEnv: {}
+    }))
+    wrapAgentPlanWithSetupSequence(
+      PLAN,
+      { ...SETUP, runnerScriptPath: 'C:\\wt\\.orca\\setup.cmd', shell: { family: 'posix' } },
+      createSequenced
+    )
+    expect(createSequenced).toHaveBeenCalledWith(
+      expect.objectContaining({ platform: 'windows', shell: { family: 'posix' } })
+    )
+  })
+
+  it('omits shell when the setup launch does not record one', () => {
+    const createSequenced = vi.fn(() => ({
+      setupCommand: 'setup',
+      startupCommand: 'gate',
+      startupEnv: {}
+    }))
+    wrapAgentPlanWithSetupSequence(PLAN, SETUP, createSequenced)
+    expect(createSequenced).toHaveBeenCalledWith(
+      expect.not.objectContaining({ shell: expect.anything() })
+    )
+  })
 })

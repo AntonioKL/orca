@@ -85,6 +85,8 @@ export type TabBarRuntimeModel = {
   workspaceHasSimulatorTab: boolean
   toggleTabViewMode: (tabId: string) => void
   nativeChatTranscriptIsLocalReadable: boolean
+  customTuiAgents: GlobalSettings['customTuiAgents']
+  deletedCustomTuiAgents: GlobalSettings['deletedCustomTuiAgents']
   managedBrowserCreationEnabled: boolean
   mobileEmulatorCreationEnabled: boolean
 } & TabBarAgentProjections
@@ -157,7 +159,7 @@ export function useTabBarRuntimeModel({
   const agentLaunchOptions = useMemo(() => {
     const customs = deriveTabCustomAgentEntries(localAgentCatalog, disabledTuiAgents)
     return buildTabAgentLaunchOptions(
-      orderTabLaunchAgents(defaultAgent, detectedIds ?? [], customs),
+      orderTabLaunchAgents(defaultAgent, detectedIds ?? [], customs, disabledTuiAgents),
       agentCmdOverrides,
       customs
     )
@@ -280,6 +282,9 @@ export function useTabBarRuntimeModel({
     tabAgentTypesByTabId,
     nativeChatTabWideFallbackUnsafeTabsById,
     nativeChatTranscriptIsLocalReadable,
+    // Custom agents reach native chat through their base harness, so the toggle gate needs the catalog.
+    customTuiAgents: settings?.customTuiAgents,
+    deletedCustomTuiAgents: settings?.deletedCustomTuiAgents,
     managedBrowserCreationEnabled,
     mobileEmulatorCreationEnabled
   }

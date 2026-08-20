@@ -35,6 +35,14 @@ export const store = {
     agentDefaultArgs: Record<string, string>
     agentDefaultEnv: Record<string, Record<string, string>>
     activeRuntimeEnvironmentId: string | null
+    customTuiAgents?: {
+      id: string
+      baseAgent: string
+      label: string
+      args: string
+      env: Record<string, string>
+      syncEnv: boolean
+    }[]
     terminalWindowsShell?: string
     experimentalNativeChat?: boolean
     openAgentTabsInChatByDefault?: boolean

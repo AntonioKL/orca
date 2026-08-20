@@ -88,14 +88,24 @@ async function spawnFreshSession(
   context: SshPtySpawnContext,
   opts: PtySpawnOptions
 ): Promise<PtySpawnResult> {
-  const supportsCreateOperation = opts.agentSessionCreateOperationId
-    ? await context.supportsAgentSessionCreateOperations({ signal: opts.signal })
-    : false
   // Why probed before dispatch: an old relay accepts the token and never re-lists it, so
   // withhold it and let reconciliation keep its pre-token identification for this host.
-  const supportsLaunchTokenEcho = opts.launchToken
-    ? await context.supportsLaunchTokenEcho({ signal: opts.signal })
-    : false
+  // Concurrent because the two probes memoize separately and each evicts on a negative
+  // answer — serialized, a create-capable pre-echo relay paid two full `pty.getCapabilities`
+  // round-trips (5 s ceiling each) on every fresh spawn.
+  // Skipped entirely when nothing is probed: awaiting settled promises would push a plain
+  // spawn's `pty.spawn` dispatch out of the caller's turn.
+  const [supportsCreateOperation, supportsLaunchTokenEcho] =
+    opts.agentSessionCreateOperationId || opts.launchToken
+      ? await Promise.all([
+          opts.agentSessionCreateOperationId
+            ? context.supportsAgentSessionCreateOperations({ signal: opts.signal })
+            : Promise.resolve(false),
+          opts.launchToken
+            ? context.supportsLaunchTokenEcho({ signal: opts.signal })
+            : Promise.resolve(false)
+        ])
+      : [false, false]
   if (opts.signal?.aborted) {
     throw new Error('client_disconnected')
   }

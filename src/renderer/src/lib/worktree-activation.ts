@@ -41,8 +41,7 @@ import { ensureWorktreeHasInitialTerminal } from '@/lib/worktree-initial-termina
 import { ensureWebRuntimeWorktreeTerminalAfterWake } from '@/lib/web-runtime-worktree-terminal-after-wake'
 import { applyWorktreeNavViewEntry } from '@/lib/worktree-nav-view-history-replay'
 
-export type { AgentStartedTelemetry, WorktreeStartupPayload }
-export type { StartupLaunchTelemetry }
+export type { AgentStartedTelemetry, StartupLaunchTelemetry, WorktreeStartupPayload }
 export { ensureWorktreeHasInitialTerminal }
 
 /**

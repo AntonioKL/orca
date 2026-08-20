@@ -31,10 +31,12 @@ import {
   resolveTuiAgentLaunchEnv
 } from '../../shared/tui-agent-launch-defaults'
 import { parseWslUncPath } from '../../shared/wsl-paths'
-import { resolveWindowsShellStartupFamily } from '../../shared/windows-terminal-shell'
+import { normalizeAiVaultResumeFilePath } from '../../shared/ai-vault-resume-path'
+import { resolveLocalWindowsAgentStartupShell } from '../../shared/windows-terminal-shell'
 import { buildAgentResumeStartupPlan } from '../../shared/tui-agent-startup'
 import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import type { AgentStartupShell } from '../../shared/tui-agent-startup-shell'
+import { aiVaultResumeClearEnvNames } from '../../shared/ai-vault-resume-preparation'
 import type { TuiAgent } from '../../shared/types'
 import type {
   AgentLaunchResumeRequest,
@@ -71,6 +73,9 @@ export type VaultResumeAssemblySettings = {
 export type VaultResumeStartup = {
   command: string
   env?: Record<string, string>
+  /** Names the spawned pane must UNSET. A Codex session repinned to the real
+   *  home inherits CODEX_HOME from the Orca process otherwise. */
+  envToDelete?: string[]
   launchConfig?: SleepingAgentLaunchConfig
 }
 
@@ -111,7 +116,8 @@ export function resolveVaultResumeCopyCommand(args: {
     command: buildVaultResumeStartup({
       session,
       hostPlatform: args.hostPlatform,
-      settings: args.settings
+      settings: args.settings,
+      forCopy: true
     }).command
   }
 }
@@ -241,8 +247,15 @@ export function buildVaultResumeStartup(args: {
    *  session uses its own discovered host platform. */
   hostPlatform: NodeJS.Platform
   settings?: VaultResumeAssemblySettings
+  /** Copied text runs in a shell Orca never spawned and cannot seed, so the
+   *  clearing must be embedded in the command as an `env -u` prefix. A spawned
+   *  pane gets `envToDelete` instead. */
+  forCopy?: boolean
 }): VaultResumeStartup {
   const { session, hostPlatform, settings } = args
+  const clearNames = aiVaultResumeClearEnvNames(session)
+  const clearEnvNames = args.forCopy ? clearNames : undefined
+  const envToDelete = args.forCopy || !clearNames ? undefined : [...clearNames]
   const commandOverride = settings?.agentCmdOverrides?.[session.agent as TuiAgent] ?? null
   const isRemote = !!session.executionHostId && session.executionHostId !== LOCAL_EXECUTION_HOST_ID
   // Remote-verbatim: a remote host stamped a ready-to-run resume command at
@@ -256,11 +269,20 @@ export function buildVaultResumeStartup(args: {
   // Why: the queued command is typed verbatim into a freshly spawned tab whose
   // live shell is the configured Windows shell (default PowerShell). Hardcoding
   // cmd quoting made PowerShell mis-parse the `""`-doubled wrapper (#6152), so
-  // resolve the actual shell to quote per-shell instead.
+  // resolve the actual shell to quote per-shell instead. terminalWindowsShell
+  // describes THIS host only, so a non-local Windows target falls back to its
+  // own default PowerShell rather than borrowing the local setting.
   const queuedShell: AgentStartupShell | undefined =
     platform === 'win32'
-      ? resolveWindowsShellStartupFamily(settings?.terminalWindowsShell)
+      ? (resolveLocalWindowsAgentStartupShell({
+          platform,
+          isRemote,
+          terminalWindowsShell: settings?.terminalWindowsShell
+        }) ?? 'powershell')
       : undefined
+  // Twin of resolveVaultResumeCodexHome: a WSL-discovered transcript is a UNC
+  // path that no Linux resume argv can open.
+  const resumeFilePath = normalizeAiVaultResumeFilePath(session.filePath, platform)
   if (isResumableTuiAgent(session.agent)) {
     const startupPlan = buildAgentResumeStartupPlan({
       agent: session.agent,
@@ -272,11 +294,11 @@ export function buildVaultResumeStartup(args: {
         // Pi/Prime-Agent resume by transcript path, not id: without the
         // host-derived path their resume argv is null and the session drops to
         // the unstructured fallback (no launchConfig, no resume at all).
-        ...(session.filePath ? { transcriptPath: session.filePath } : {})
+        ...(resumeFilePath ? { transcriptPath: resumeFilePath } : {})
       },
       // OMP resumes by absolute transcript path; without it the argv falls back
       // to the session id, which misses a custom OMP_CODING_AGENT_DIR / WSL store.
-      ompResumeFilePath: session.filePath ?? null,
+      ompResumeFilePath: resumeFilePath ?? null,
       cmdOverrides: {
         ...settings?.agentCmdOverrides,
         ...(commandOverride?.trim() ? { [session.agent]: commandOverride } : {})
@@ -293,29 +315,33 @@ export function buildVaultResumeStartup(args: {
           cwd: session.cwd,
           platform,
           codexHome,
-          shell: queuedShell
+          shell: queuedShell,
+          clearEnvNames
         }),
         ...(startupPlan.env ? { env: startupPlan.env } : {}),
+        ...(envToDelete ? { envToDelete } : {}),
         launchConfig: startupPlan.launchConfig
       }
     }
   }
 
   return {
+    ...(envToDelete ? { envToDelete } : {}),
     command: buildAiVaultResumeCommand({
       agent: session.agent,
       sessionId: session.sessionId,
       // Why: OMP resumes by absolute transcript path, so local rebuilds must
       // forward the host-derived path — an id-prefix lookup scoped to the default
       // store would miss a custom OMP_CODING_AGENT_DIR / WSL-store session.
-      resumeFilePath: session.filePath,
+      resumeFilePath,
       cwd: session.cwd,
       platform,
       commandOverride,
       codexHome,
       // Why: non-resumable agents queue through this fallback too, so it must
       // quote for the live Windows shell like the startup-plan branch above.
-      shell: queuedShell
+      shell: queuedShell,
+      clearEnvNames
     })
   }
 }

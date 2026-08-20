@@ -100,12 +100,17 @@ describe('useAiVaultSessionLaunchActions copyResumeCommand', () => {
 
     // Host owns assembly; the client only echoes the discovered identity (filePath
     // rides the trusted desktop IPC) and copies the returned string.
-    expect(resumeCommandMock).toHaveBeenCalledWith({
-      executionHostId: 'local',
-      agent: 'claude',
-      sessionId: 'session-1',
-      filePath: '/Users/ada/.claude/projects/session-1.jsonl'
-    })
+    expect(resumeCommandMock).toHaveBeenCalledWith(
+      {
+        executionHostId: 'local',
+        agent: 'claude',
+        sessionId: 'session-1',
+        filePath: '/Users/ada/.claude/projects/session-1.jsonl'
+      },
+      // Quoting follows the workspace the command is pasted into, not the host;
+      // this local workspace resolves to the client platform.
+      'linux'
+    )
     expect(writeClipboardMock).toHaveBeenCalledWith("claude --resume 'session-1'")
     expect(toastSuccess).toHaveBeenCalledTimes(1)
     expect(toastError).not.toHaveBeenCalled()

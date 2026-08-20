@@ -58,6 +58,10 @@ import {
   type ResolveRuntimeAiVaultResumeDetails
 } from './ai-vault-resume-command'
 import type { VaultResumeAssemblySettings } from '../agent-launch/agent-launch-vault-resume'
+import type {
+  AiVaultPrepareSessionResumeArgs,
+  AiVaultPrepareSessionResumeResult
+} from '../../shared/ai-vault-resume-preparation'
 import { scanAllAiVaultHostLegs } from './ai-vault-all-host-scan'
 
 type AiVaultHandlerOptions = AiVaultSessionSources &
@@ -221,6 +225,14 @@ async function scanLocalAiVaultSessions(
 // The desktop's OWN multi-host discovery (local + ssh + runtime), exported so the
 // resume surfaces re-validate against exactly what the picker showed.
 export { listAiVaultSessions as discoverAiVaultSessionsAcrossHosts }
+
+/** The registered owning-host Codex repin, for host spawn paths that revalidate
+ *  a resume entry outside this module. Undefined until handlers register. */
+export function getAiVaultSessionResumePreparation():
+  | ((args: AiVaultPrepareSessionResumeArgs) => Promise<AiVaultPrepareSessionResumeResult>)
+  | undefined {
+  return handlerOptions.prepareSessionResume
+}
 
 export function registerAiVaultHandlers(options: AiVaultHandlerOptions = {}): void {
   handlerOptions = options

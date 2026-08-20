@@ -2,7 +2,10 @@ import {
   createSequencedSetupAgentCommands,
   type SequencedSetupAgentCommands
 } from '../../shared/setup-agent-sequencing'
-import { getSetupRunnerCommandPlatformForPath } from '../../shared/setup-runner-command'
+import {
+  getSetupRunnerCommandPlatformForPath,
+  type SetupRunnerShell
+} from '../../shared/setup-runner-command'
 import type { AgentStartupPlan } from '../../shared/tui-agent-startup'
 import type { WorktreeSetupLaunch } from '../../shared/types'
 
@@ -27,6 +30,7 @@ export function wrapAgentPlanWithSetupSequence(
     runnerScriptPath: string
     startupCommand: string
     platform: ReturnType<typeof getSetupRunnerCommandPlatformForPath>
+    shell?: SetupRunnerShell
   }) => SequencedSetupAgentCommands = createSequencedSetupAgentCommands
 ): WrappedAgentSpawnCommand {
   if (setup?.waitForAgentStartup !== true) {
@@ -36,10 +40,14 @@ export function wrapAgentPlanWithSetupSequence(
     setup.runnerScriptPath,
     process.platform === 'win32' ? 'windows' : 'posix'
   )
+  // Why: the launching pane's shell picks the gate. Dropping it gives a `.cmd`
+  // runner launched from a Git Bash pane the PowerShell gate, which that pane
+  // cannot run (MSYS rewrites `/c`) — setup then burns the 2h gate timeout.
   const sequenced = createSequenced({
     runnerScriptPath: setup.runnerScriptPath,
     startupCommand: plan.launchCommand,
-    platform
+    platform,
+    ...(setup.shell ? { shell: setup.shell } : {})
   })
   return {
     command: sequenced.startupCommand,

@@ -27,9 +27,9 @@ export function buildOnboardingFolderAgentStartup(
     command: '',
     launchAgent: agent,
     agentLaunch: { selection: { kind: 'default' }, allowEmptyPromptLaunch: true },
-    // Host overwrites agent_kind from the resolved receipt before the emit, so
-    // this host-resolved launch threads only the surface-owned fields.
     telemetry: {
+      // No agent_kind: a custom default has no client-known kind, and the host
+      // stamps it from the resolved receipt before the emit.
       launch_source: 'onboarding',
       request_kind: 'new'
     }

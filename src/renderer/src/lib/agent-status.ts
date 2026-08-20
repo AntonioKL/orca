@@ -3,8 +3,11 @@ import type { AgentStatusState, AgentType } from '../../../shared/agent-status-t
 import { tabHasLivePty } from './tab-has-live-pty'
 import type { WorktreeStatus } from './worktree-status'
 import { tuiAgentToAgentKind } from '../../../shared/agent-kind'
-import { resolveTuiAgentBaseAgent } from '../../../shared/custom-tui-agents'
+import { isCustomTuiAgentId, resolveTuiAgentBaseAgent } from '../../../shared/custom-tui-agents'
 import type { AgentKind } from '../../../shared/telemetry-events'
+import { getAgentCatalogSettings } from './agent-catalog-settings-source'
+// Built-in labels live in shared so mobile shows the same names.
+import { formatAgentTypeLabel as formatBuiltInAgentTypeLabel } from '../../../shared/agent-type-label'
 
 // Re-export from shared so existing renderer imports work; main process now shares the detection logic.
 export {
@@ -92,65 +95,49 @@ export function getWorkingAgentsPerWorktree({
   return result
 }
 
-// Re-export: shared so mobile shows the same agent labels; kept here for existing importers.
-export { formatAgentTypeLabel } from '../../../shared/agent-type-label'
-
-// Why: the icon registry is built-in-only; a custom id resolves through its base before rendering.
-const ICONABLE_AGENT_TYPES: Record<BuiltInTuiAgent, true> = {
-  claude: true,
-  'claude-agent-teams': true,
-  openclaude: true,
-  codex: true,
-  autohand: true,
-  opencode: true,
-  'mimo-code': true,
-  pi: true,
-  omp: true,
-  'prime-agent': true,
-  gemini: true,
-  antigravity: true,
-  aider: true,
-  goose: true,
-  amp: true,
-  kilo: true,
-  kiro: true,
-  crush: true,
-  aug: true,
-  cline: true,
-  codebuff: true,
-  'command-code': true,
-  continue: true,
-  cursor: true,
-  droid: true,
-  kimi: true,
-  'mistral-vibe': true,
-  'qwen-code': true,
-  rovo: true,
-  hermes: true,
-  openclaw: true,
-  copilot: true,
-  grok: true,
-  devin: true,
-  ante: true,
-  trae: true
+/** Label for a pane's `agentType`, which carries the REQUESTED id — a custom
+ *  agent shows its own catalog name (live or tombstoned), never the raw
+ *  `custom-agent:<base>:<uuid>` string and never its base harness's name. */
+export function formatAgentTypeLabel(agentType: AgentType | null | undefined): string {
+  if (!isCustomTuiAgentId(agentType)) {
+    return formatBuiltInAgentTypeLabel(agentType)
+  }
+  const settings = getAgentCatalogSettings()
+  const label =
+    settings?.customTuiAgents?.find((candidate) => candidate?.id === agentType)?.label ??
+    settings?.deletedCustomTuiAgents?.find((candidate) => candidate?.id === agentType)?.label
+  // An id the catalog cannot name is an unknown agent, not a printable id.
+  return label?.trim() || formatBuiltInAgentTypeLabel(null)
 }
 
 // Why: return null (not a 'claude' fallback) for unknown so Codex panes don't flash the Claude icon before the hook fires.
-export function agentTypeToIconAgent(agentType: AgentType | null | undefined): TuiAgent | null {
+// Icon, label, and telemetry registries are all built-in-only, so a custom agent
+// id resolves to its catalog-proven base harness first; an id the catalog cannot
+// prove (unknown string, tombstone-less custom id) stays null.
+function resolveAgentTypeBaseAgent(
+  agentType: AgentType | null | undefined
+): BuiltInTuiAgent | null {
   if (!agentType || agentType === 'unknown') {
     return null
   }
-  return Object.hasOwn(ICONABLE_AGENT_TYPES, agentType) ? (agentType as TuiAgent) : null
+  const settings = getAgentCatalogSettings()
+  // AgentType is an open string; resolveTuiAgentBaseAgent validates membership
+  // and returns null for anything outside the catalog.
+  return resolveTuiAgentBaseAgent(
+    agentType as TuiAgent,
+    settings?.customTuiAgents,
+    settings?.deletedCustomTuiAgents
+  )
+}
+
+export function agentTypeToIconAgent(agentType: AgentType | null | undefined): TuiAgent | null {
+  return resolveAgentTypeBaseAgent(agentType)
 }
 
 // Why: shared resolver so all send paths stamp identical agent_kind on agent_prompt_sent telemetry.
 export function agentKindForAgentType(agentType: AgentType | null | undefined): AgentKind {
-  const tuiAgent = agentTypeToIconAgent(agentType)
-  // agentTypeToIconAgent only yields built-ins, so the catalog-free base lookup
-  // is exact here.
-  return tuiAgent
-    ? tuiAgentToAgentKind(resolveTuiAgentBaseAgent(tuiAgent) ?? tuiAgent)
-    : 'other'
+  const baseAgent = resolveAgentTypeBaseAgent(agentType)
+  return baseAgent ? tuiAgentToAgentKind(baseAgent) : 'other'
 }
 
 // Re-export: freshness gate moved into pane-agent-evidence; keeps existing importers unchanged.

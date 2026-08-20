@@ -1,4 +1,5 @@
 import type {
+  AgentProviderSessionMetadata,
   ResumableTuiAgent,
   SleepingAgentLaunchConfig,
   SleepingAgentSessionRecord
@@ -17,6 +18,7 @@ export type FreshSpawnOptions = {
 export type ColdRestoreAgentResumeStartup = PendingStartupCommand & {
   agent: ResumableTuiAgent
   agentLaunch: AgentLaunchResumeRequest
+  resumeProviderSession: AgentProviderSessionMetadata
   launchConfig?: SleepingAgentLaunchConfig
   legacyResumeRecordedConnectionId?: string | null
   launchToken?: string

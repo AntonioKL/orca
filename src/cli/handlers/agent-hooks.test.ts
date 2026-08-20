@@ -232,9 +232,12 @@ describe('agent hooks CLI handler', () => {
       userDataPath,
       hooksEnabled: false
     })
-    expect(callMock).toHaveBeenCalledExactlyOnceWith('settings.get', undefined, {
-      timeoutMs: 1_000
-    })
+    // The CLI preflight opts out of the 512 KiB catalog projection.
+    expect(callMock).toHaveBeenCalledExactlyOnceWith(
+      'settings.get',
+      { includeAgentCatalog: false },
+      { timeoutMs: 1_000 }
+    )
   })
 
   const AGENT_CATALOG_KEYS = [

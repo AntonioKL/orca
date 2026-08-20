@@ -75,9 +75,10 @@ export function createWebAiVaultApi(): NonNullable<Partial<PreloadApi>['aiVault'
         agent: args.agent,
         reason: 'non-local-host' as const
       }),
-    resumeCommand: (entry: AgentLaunchVaultResumeEntry) =>
+    resumeCommand: (entry: AgentLaunchVaultResumeEntry, targetPlatform?: NodeJS.Platform) =>
       callRuntimeResult<AgentLaunchVaultResumeCopyResult>('aiVault.resumeCommand', {
-        entry: runtimeVaultResumeEntry(entry)
+        entry: runtimeVaultResumeEntry(entry),
+        ...(targetPlatform ? { targetPlatform } : {})
       }),
     resumeDetails: (entry: AgentLaunchVaultResumeEntry) =>
       callRuntimeResult<AgentLaunchVaultResumeDetailsResult>('aiVault.resumeDetails', {

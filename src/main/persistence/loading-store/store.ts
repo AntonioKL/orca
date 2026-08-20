@@ -104,6 +104,9 @@ export class Store {
   }
 
   unfreezeWrites(): void {
+    if (this.runtime.agentCatalogSchemaTooNew) {
+      return
+    }
     this.runtime.writesFrozen = false
   }
 }

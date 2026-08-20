@@ -285,7 +285,10 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
     command: '',
     agentLaunch,
     ...(sessionOptions ? { sessionOptions } : {}),
-    ...(agent === 'command-code' && hasPrompt && promptDelivery === 'auto-submit'
+    // Why: gate on the resolved BASE — a command-code-based custom agent has the
+    // same missing prompt-start hook. The status keeps the REQUESTED id so the
+    // pane stays attributed to the custom agent the user launched.
+    ...(baseAgent === 'command-code' && hasPrompt && promptDelivery === 'auto-submit'
       ? { initialAgentStatus: { agent, prompt: trimmedPrompt } }
       : {}),
     // Host overwrites agent_kind from the resolved receipt before the emit, so
@@ -318,10 +321,10 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
       onTimeout: timeoutNotice.onTimeout
     }).then((delivered) => {
       if (delivered) {
-        if (agent === 'command-code' && submitPastedPrompt) {
+        if (baseAgent === 'command-code' && submitPastedPrompt) {
           // Why: Command Code has no prompt-submit hook; when Orca submits a
           // generated prompt after readiness, seed working at delivery time.
-          seedCommandCodeSubmittedPromptStatus(worktreeId, tab.id, trimmedPrompt)
+          seedCommandCodeSubmittedPromptStatus(worktreeId, tab.id, agent, trimmedPrompt)
         }
         onPromptDelivered?.()
       }

@@ -5,7 +5,7 @@ import {
   type DashboardCard,
   type DashboardWorkspace
 } from '../../../../shared/dashboard-snapshot'
-import { isBuiltInTuiAgent, isTuiAgent } from '../../../../shared/tui-agent-config'
+import { isTuiAgent } from '../../../../shared/tui-agent-config'
 import {
   filterEnabledTuiAgents,
   TUI_AGENT_AUTO_PICK_ORDER

@@ -233,6 +233,34 @@ describe('describeSpawnExecutionHost', () => {
     expect(executionHostIdForDescriptor(descriptor)).toBe('wsl:Ubuntu')
   })
 
+  // #12320: the pane's tab shell decides how the host quotes the launch argv;
+  // PowerShell quotes typed into a cmd.exe tab reach the agent verbatim.
+  it('quotes for the tab shell override ahead of the global Windows shell', () => {
+    const original = Object.getOwnPropertyDescriptor(process, 'platform')
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true })
+    try {
+      expect(
+        describeSpawnExecutionHost({
+          connectionId: null,
+          cwd: 'C:\\repo',
+          shellOverride: 'cmd.exe',
+          terminalWindowsShell: 'powershell.exe'
+        })
+      ).toEqual({ kind: 'local', platform: 'win32', shell: 'cmd' })
+      expect(
+        describeSpawnExecutionHost({
+          connectionId: null,
+          cwd: 'C:\\repo',
+          terminalWindowsShell: 'powershell.exe'
+        })
+      ).toEqual({ kind: 'local', platform: 'win32', shell: 'powershell' })
+    } finally {
+      if (original) {
+        Object.defineProperty(process, 'platform', original)
+      }
+    }
+  })
+
   it('describes a legacy \\\\wsl$ UNC cwd as the same wsl host', () => {
     expect(
       describeSpawnExecutionHost({ connectionId: null, cwd: '\\\\wsl$\\Debian\\srv\\app' })

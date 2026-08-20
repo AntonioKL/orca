@@ -86,6 +86,7 @@ export class ProfilePreferences {
     })
     if (migration.schemaNewerThanSupported) {
       runtime.agentCatalogSchemaTooNew = migration.schemaNewerThanSupported
+      runtime.writesFrozen = true
       runtime.agentCatalogMigrationError = null
       runtime.preV1RawContentsAwaitingBackup = null
       return {
@@ -151,13 +152,13 @@ export class ProfilePreferences {
     options: { notifyListeners?: boolean; originWebContentsId?: number } = {}
   ): GlobalSettings {
     const runtime = this[profilePreferencesContext].runtime
-    if (runtime.writesFrozen) {
-      throw new Error('Cannot durably persist settings while writes are frozen')
-    }
     if (runtime.agentCatalogSchemaTooNew) {
       throw new Error(
         'Agent catalog schema is newer than this build supports; profile is read-only'
       )
+    }
+    if (runtime.writesFrozen) {
+      throw new Error('Cannot durably persist settings while writes are frozen')
     }
     const previousSettings = runtime.state.settings
     const settings = this.updateSettings(updates, { notifyListeners: false })

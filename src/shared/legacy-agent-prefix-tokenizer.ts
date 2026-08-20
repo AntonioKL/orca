@@ -12,7 +12,8 @@
 // - powershell: whitespace splits with double- AND single-quote grouping;
 //   backslashes are literal; the U+2018-U+201B smart-quote class groups like ';
 //   backtick escapes the next char outside quotes and `` `" `` / ``` `` ``` /
-//   `` `$ `` inside double quotes (never inside single quotes).
+//   `` `$ `` inside double quotes (never inside single quotes); doubling a
+//   delimiter inside its own group (`''`, `""`) is one literal delimiter.
 // - cmd: whitespace splits with double-quote grouping only; backslashes literal;
 //   single quotes are ordinary characters; caret escapes the next char OUTSIDE
 //   quotes only — inside double quotes a caret is a literal character.
@@ -51,13 +52,28 @@ type QuoteScan =
   | { ok: true; value: string; nextIndex: number }
   | { ok: false; reason: 'unterminated_quote' | 'control_char' }
 
-/** Literal-group scan until any closing delimiter in `closers`; no escapes. */
-function scanLiteralQuote(input: string, openIndex: number, closers: Set<string>): QuoteScan {
+/** Literal-group scan until any closing delimiter in `closers`. The only escape
+ *  is `doubledDelimiter`: a closer immediately followed by another closer is one
+ *  literal delimiter, not close-then-reopen (PowerShell's own `''` form). */
+function scanLiteralQuote(
+  input: string,
+  openIndex: number,
+  closers: Set<string>,
+  doubledDelimiter: boolean
+): QuoteScan {
   let value = ''
   let i = openIndex + 1
   while (i < input.length) {
     const inner = input[i]
     if (closers.has(inner)) {
+      if (doubledDelimiter && i + 1 < input.length && closers.has(input[i + 1])) {
+        // The scanned char is kept, matching what quoteStartupArg emits (each
+        // delimiter doubled with itself); PowerShell's quote class is
+        // interchangeable, so a mixed pair still escapes.
+        value += inner
+        i += 2
+        continue
+      }
       return { ok: true, value, nextIndex: i + 1 }
     }
     if (isDisallowedControl(inner)) {
@@ -70,18 +86,26 @@ function scanLiteralQuote(input: string, openIndex: number, closers: Set<string>
 }
 
 /** Double-quote scan where `escape` drops before one of `escapable`; any other
- *  occurrence stays literal alongside the following character. */
+ *  occurrence stays literal alongside the following character. `doubledDelimiter`
+ *  additionally reads `""` as one literal quote (PowerShell's second escape form,
+ *  which the backtick escape does not replace). */
 function scanEscapableDoubleQuote(
   input: string,
   openIndex: number,
   escape: string,
-  escapable: Set<string>
+  escapable: Set<string>,
+  doubledDelimiter: boolean
 ): QuoteScan {
   let value = ''
   let i = openIndex + 1
   while (i < input.length) {
     const inner = input[i]
     if (inner === '"') {
+      if (doubledDelimiter && input[i + 1] === '"') {
+        value += '"'
+        i += 2
+        continue
+      }
       return { ok: true, value, nextIndex: i + 1 }
     }
     if (isDisallowedControl(inner)) {
@@ -110,6 +134,10 @@ type ShellGrammar = {
   /** Outside quotes, this char escapes the next one: posix `\`, powershell
    *  backtick, cmd caret. */
   escapeOutsideQuotes: string | null
+  /** True when doubling a quote delimiter inside its own group yields one
+   *  literal delimiter (`''` / `""`). PowerShell only; posix and cmd read the
+   *  second delimiter as reopening a new group. */
+  doubledDelimiterEscape: boolean
 }
 
 const DOUBLE_QUOTE_CLOSERS = new Set(['"'])
@@ -119,7 +147,8 @@ function grammarFor(shell: AgentStartupShell): ShellGrammar {
     return {
       singleQuoteOpeners: new Map([["'", new Set(["'"])]]),
       doubleQuoteEscape: { char: '\\', escapable: new Set(['"', '\\', '$', '`']) },
-      escapeOutsideQuotes: '\\'
+      escapeOutsideQuotes: '\\',
+      doubledDelimiterEscape: false
     }
   }
   if (shell === 'powershell') {
@@ -130,7 +159,8 @@ function grammarFor(shell: AgentStartupShell): ShellGrammar {
     return {
       singleQuoteOpeners: openers,
       doubleQuoteEscape: { char: '`', escapable: new Set(['"', '`', '$']) },
-      escapeOutsideQuotes: '`'
+      escapeOutsideQuotes: '`',
+      doubledDelimiterEscape: true
     }
   }
   // cmd: double-quote grouping only; single quotes and backslashes are literal,
@@ -138,7 +168,8 @@ function grammarFor(shell: AgentStartupShell): ShellGrammar {
   return {
     singleQuoteOpeners: new Map(),
     doubleQuoteEscape: null,
-    escapeOutsideQuotes: '^'
+    escapeOutsideQuotes: '^',
+    doubledDelimiterEscape: false
   }
 }
 
@@ -176,8 +207,14 @@ export function tokenizeLegacyAgentPrefix(
     if (char === '"') {
       const escape = grammar.doubleQuoteEscape
       const scan = escape
-        ? scanEscapableDoubleQuote(prefix, i, escape.char, escape.escapable)
-        : scanLiteralQuote(prefix, i, DOUBLE_QUOTE_CLOSERS)
+        ? scanEscapableDoubleQuote(
+            prefix,
+            i,
+            escape.char,
+            escape.escapable,
+            grammar.doubledDelimiterEscape
+          )
+        : scanLiteralQuote(prefix, i, DOUBLE_QUOTE_CLOSERS, grammar.doubledDelimiterEscape)
       if (!scan.ok) {
         return scan
       }
@@ -189,7 +226,7 @@ export function tokenizeLegacyAgentPrefix(
 
     const singleCloser = grammar.singleQuoteOpeners.get(char)
     if (singleCloser) {
-      const scan = scanLiteralQuote(prefix, i, singleCloser)
+      const scan = scanLiteralQuote(prefix, i, singleCloser, grammar.doubledDelimiterEscape)
       if (!scan.ok) {
         return scan
       }

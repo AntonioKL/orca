@@ -37,8 +37,12 @@ export type AiVaultApi = {
   getFirstUserPrompt: (args: AiVaultFirstUserPromptArgs) => Promise<AiVaultFirstUserPromptResult>
   /** Moves a deletable session's transcript to the OS trash; local sessions only. */
   deleteSession: (args: AiVaultDeleteSessionArgs) => Promise<AiVaultDeleteSessionResult>
+  /** `targetPlatform` is the platform of the workspace the command will be
+   *  PASTED into (WSL/SSH read as linux) — client state the host cannot see.
+   *  Omitted, the host quotes for its own platform. */
   resumeCommand: (
-    entry: AgentLaunchVaultResumeEntry
+    entry: AgentLaunchVaultResumeEntry,
+    targetPlatform?: NodeJS.Platform
   ) => Promise<AgentLaunchVaultResumeCopyResult>
   resumeDetails: (
     entry: AgentLaunchVaultResumeEntry

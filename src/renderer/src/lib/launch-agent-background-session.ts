@@ -6,7 +6,9 @@ import type {
 import { scheduleAgentBackgroundDraft } from '@/lib/agent-background-draft-delivery'
 import { AgentLaunchSpawnOutcomeError } from '@/lib/agent-launch-spawn-outcome-error'
 import { requestBackgroundTerminalWorktreeMount } from '@/components/terminal/background-terminal-worktree-mount'
-import { resolveTuiAgentConfig } from '../../../shared/custom-tui-agents'
+import { resolveTuiAgentBaseAgent } from '../../../shared/custom-tui-agents'
+import { TUI_AGENT_CONFIG } from '../../../shared/tui-agent-config'
+import { resolveTelemetryAgentKind } from '@/lib/telemetry-agent-kind'
 import { makePaneKey } from '../../../shared/stable-pane-id'
 import {
   registerEagerPtyBuffer,
@@ -56,14 +58,16 @@ export async function launchAgentBackgroundSession(
     worktreePath: worktree.path,
     repo
   })
-  // Why: a custom id inherits its base harness's trust preset; resolve the base
-  // from the requested id before reading the built-in-only config so a
-  // custom-based agent still pre-marks trust and a tombstoned id degrades.
-  const preflight = resolveTuiAgentConfig(
+  // Why: a custom id inherits its base harness's trust preset and prompt-hook
+  // gaps; resolve the base from the requested id before reading any built-in-only
+  // registry so a custom-based agent behaves like its base and an unresolvable id
+  // degrades instead of silently reading `undefined`.
+  const baseAgent = resolveTuiAgentBaseAgent(
     agent,
     store.settings?.customTuiAgents,
     store.settings?.deletedCustomTuiAgents
-  )?.preflightTrust
+  )
+  const preflight = baseAgent ? TUI_AGENT_CONFIG[baseAgent].preflightTrust : undefined
   if (preflight && worktree.path && window.api.agentTrust?.markTrusted) {
     try {
       await window.api.agentTrust.markTrusted({
@@ -218,21 +222,24 @@ export async function launchAgentBackgroundSession(
         worktreeId,
         tabId: reservedTabId,
         leafId,
-        // Host overwrites agent_kind from the resolved receipt before the emit,
-        // so this host-resolved launch threads only the surface-owned fields.
+        // Host overwrites agent_kind from the resolved receipt before the emit;
+        // stamp the requested id's resolved base so a pre-receipt emit still
+        // names the harness instead of collapsing a custom agent to 'other'.
         telemetry: {
+          agent_kind: resolveTelemetryAgentKind(agent),
           launch_source: launchSource ?? 'unknown',
           request_kind: 'new'
         }
       })
       // Why: a pre-spawn host failure/rejection has no `id` — throw the typed
       // outcome (structured failure for the owner record + the localized
-      // message) and let the catch retire the hidden tab.
+      // message) and let the catch retire the hidden tab. The preload types that
+      // arm with the whole outcome union, so a 'launched' status without a pty id
+      // is a broken host contract, never a usable terminal.
       if (!('id' in result)) {
-        if (result.agentLaunch.status !== 'launched') {
-          throw new AgentLaunchSpawnOutcomeError(result.agentLaunch)
-        }
-        throw new Error('Agent launch succeeded without a terminal id.')
+        throw result.agentLaunch.status === 'launched'
+          ? new Error('The agent launch reported success without a terminal.')
+          : new AgentLaunchSpawnOutcomeError(result.agentLaunch)
       }
       ptyId = result.id
 <<<<<<< HEAD
@@ -325,7 +332,9 @@ export async function launchAgentBackgroundSession(
       })
     }
     terminalOwnership = bindAutomationTerminal(tab, paneKey, ptyId, runtimeTarget.kind, title)
-    if (agent === 'command-code' && hasPrompt) {
+    // Gate on the resolved BASE: a command-code-based custom agent has the same
+    // missing prompt-start hook. The status keeps the REQUESTED id below.
+    if (baseAgent === 'command-code' && hasPrompt) {
       // Why: Command Code does not expose a prompt-start hook; seed working for
       // hidden prompt launches so sidebar/activity surfaces do not stay idle.
       const routing = agentStatusConsumer.resolveRouting()

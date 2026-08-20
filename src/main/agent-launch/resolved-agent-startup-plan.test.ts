@@ -256,7 +256,10 @@ describe('buildAgentStartupPlanFromResolvedLaunch', () => {
         prompt: 'do it',
         promptDelivery: 'draft'
       })
-      expect(plan?.launchCommand).toBe(`'pi'; unset ORCA_PI_PREFILL`)
+      expect(plan?.launchCommand).toBe(
+        `'pi'; command test -n "$fish_pid" && set --erase -g ORCA_PI_PREFILL; ` +
+          `command test -z "$fish_pid" && unset ORCA_PI_PREFILL; true`
+      )
       expect(plan?.env).toEqual({ ORCA_PI_PREFILL: 'do it' })
       expect(plan?.launchConfig.agentEnv).not.toHaveProperty('ORCA_PI_PREFILL')
       expect(plan?.draftPrompt).toBeUndefined()

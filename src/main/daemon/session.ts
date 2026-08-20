@@ -7,6 +7,12 @@ import {
   IMMEDIATE_KILL_PHYSICAL_EXIT_TIMEOUT_MS
 } from './session-termination-controller'
 import { nudgePowerShellPromptRepaint } from './session-powershell-prompt-repaint'
+import {
+  releaseSessionSubprocess,
+  runSessionDispose,
+  runSessionPhysicalExit,
+  type SessionTeardownHost
+} from './session-teardown-sequence'
 export type { SubprocessHandle } from './session-subprocess-handle'
 import type { SubprocessHandle } from './session-subprocess-handle'
 import type { JobTerminationOutcome } from '../windows/windows-pty-job'
@@ -279,34 +285,7 @@ export class Session {
     if (this._disposed) {
       return
     }
-
-    // Why: `wasTerminating` below must be read BEFORE the `_state = 'exited'` flip — it guards the
-    // "dispose while kill() in flight" case and the invariant needs the pre-flip `_state`; do NOT move it down.
-    this.shellReady.releaseDeviceAttributes()
-    this.shellReady.releaseHeldBytes()
-    this.startupIngress.drainAndClose()
-    const wasTerminating = this.termination.isTerminating && this._state !== 'exited'
-    const clientsToNotify = wasTerminating ? this.output.snapshotClients() : []
-    if (wasTerminating) {
-      try {
-        this.subprocess.forceKill()
-      } catch {
-        /* child may already be gone */
-      }
-      this._exitCode = -1
-      this.termination.clearTerminating()
-    }
-
-    this.#teardownSubprocess()
-    this._state = 'exited'
-
-    this.output.clearClients()
-    this.shellReady.clearPendingWrites()
-    this.output.disposeEmulator()
-
-    for (const client of clientsToNotify) {
-      client.onExit(-1, this.incarnationId)
-    }
+    runSessionDispose(this.#teardownHost())
   }
 
   /** fd-release-only teardown for ALREADY-exited sessions still retained in the host map; skips
@@ -333,12 +312,29 @@ export class Session {
       return
     }
     this._disposed = true
-    this.output.markDisposed()
-    // Why: never leave a paused fd behind on teardown; the handle's dead-guard makes this a no-op once the child is reaped.
-    this.producerPause.release({ resume: true })
-    this.termination.cancelForceKillFallback()
-    this.shellReady.dispose()
-    this.termination.disposeSubprocessHandle()
+    releaseSessionSubprocess(this.#teardownHost())
+  }
+
+  #teardownHost(): SessionTeardownHost {
+    return {
+      parts: {
+        subprocess: this.subprocess,
+        output: this.output,
+        producerPause: this.producerPause,
+        shellReady: this.shellReady,
+        termination: this.termination,
+        startupIngress: this.startupIngress
+      },
+      incarnationId: this.incarnationId,
+      isExited: () => this._state === 'exited',
+      markExitCode: (code) => {
+        this._exitCode = code
+      },
+      markExited: () => {
+        this._state = 'exited'
+      },
+      releaseSubprocess: () => this.#teardownSubprocess()
+    }
   }
 
   private handleSubprocessData(data: string): void {
@@ -354,26 +350,7 @@ export class Session {
       return
     }
 
-    this.shellReady.releaseDeviceAttributes()
-    this.shellReady.disposePromptReadinessProbe()
-    this.shellReady.releaseHeldBytes()
-    this.startupIngress.drainAndClose()
-    this._exitCode = code
-    this._state = 'exited'
-    this.termination.clearTerminating()
-    // Why resume:false — the child is reaped (nothing to unblock); only the failsafe timer must not outlive the session.
-    this.producerPause.release({ resume: false })
-
-    this.termination.cancelForceKillFallback()
-    this.shellReady.clearReadyTimer()
-    this.shellReady.clearFlushGate()
-
-    // Why: release the ptmx fd here or node-pty's _socket leaks the master fd until GC (docs/fix-pty-fd-leak.md).
-    // Not via #teardownSubprocess: it flips `_disposed`, short-circuiting the later Session.dispose() reaper.
-    this.termination.disposeSubprocessHandle()
-
-    this.output.broadcastExit(code, this.incarnationId, cause)
-
+    runSessionPhysicalExit(this.#teardownHost(), code, cause)
     // Why: hand off to the owner's reaper (disposes emulator, drops session from host map); else dead sessions accumulate.
     this.onSessionExit?.(code)
   }

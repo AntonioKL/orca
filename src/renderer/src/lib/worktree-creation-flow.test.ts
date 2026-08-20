@@ -6,9 +6,12 @@ import type {
   WorktreeCreationRequest
 } from '@/lib/pending-worktree-creation'
 
-const { prepareEphemeralVmWorkspaceTargetMock } = vi.hoisted(() => ({
-  prepareEphemeralVmWorkspaceTargetMock: vi.fn()
-}))
+const { prepareEphemeralVmWorkspaceTargetMock, ensureWorktreeHasInitialTerminalMock } = vi.hoisted(
+  () => ({
+    prepareEphemeralVmWorkspaceTargetMock: vi.fn(),
+    ensureWorktreeHasInitialTerminalMock: vi.fn()
+  })
+)
 
 type TestActiveView = 'terminal' | 'tasks'
 
@@ -61,11 +64,14 @@ vi.mock('@/lib/browser-uuid', () => ({
 }))
 
 vi.mock('@/lib/worktree-activation', () => ({
-  activateAndRevealWorktree: vi.fn(() => false)
+  activateAndRevealWorktree: vi.fn(() => false),
+  // The flow reaches the seeding helper through this barrel, so both specifiers
+  // must resolve to the same spy.
+  ensureWorktreeHasInitialTerminal: ensureWorktreeHasInitialTerminalMock
 }))
 
 vi.mock('@/lib/worktree-initial-terminal-seeding', () => ({
-  ensureWorktreeHasInitialTerminal: vi.fn()
+  ensureWorktreeHasInitialTerminal: ensureWorktreeHasInitialTerminalMock
 }))
 
 vi.mock('@/lib/workspace-activation-terminal-focus', () => ({
@@ -554,8 +560,7 @@ describe('staged background worktree creation', () => {
       undefined,
       {
         activateCreatedTabs: false,
-        backendStartupTerminalSpawned: true,
-        hostSpawnedPrimary: false
+        backendStartupTerminalSpawned: true
       }
     )
     expect(queueWorkspaceActivationTerminalFocus).not.toHaveBeenCalled()
@@ -592,8 +597,7 @@ describe('staged background worktree creation', () => {
 
     expect(activateAndRevealWorktree).toHaveBeenCalledWith('wt-1', {
       sidebarRevealBehavior: 'auto',
-      backendStartupTerminalSpawned: true,
-      hostSpawnedPrimary: false
+      backendStartupTerminalSpawned: true
     })
     expect(ensureWorktreeHasInitialTerminal).not.toHaveBeenCalled()
     expect(store.removePendingWorktreeCreation).toHaveBeenCalledWith('creation-1', {
@@ -665,7 +669,7 @@ describe('staged background worktree creation', () => {
         undefined,
         { command: 'gh issue view 42' },
         undefined,
-        { activateCreatedTabs: false, hostSpawnedPrimary: false }
+        { activateCreatedTabs: false }
       )
     )
   })
@@ -738,7 +742,7 @@ describe('staged background worktree creation', () => {
     })
     expect(activateAndRevealWorktree).toHaveBeenCalledWith(
       'wt-1',
-      expect.objectContaining({ hostSpawnedPrimary: true })
+      expect.objectContaining({ backendStartupTerminalSpawned: true })
     )
     // The renderer no longer emits agent_started — the host owns that emit now.
     expect(vi.mocked(track)).not.toHaveBeenCalled()
@@ -753,12 +757,15 @@ describe('staged background worktree creation', () => {
     })
 
     expect(started).toBe(true)
-    await flushAsyncWorktreeCreation()
-    expect(store.updatePendingWorktreeCreation).toHaveBeenCalledWith(
-      'creation-1',
-      expect.objectContaining({
-        status: 'error'
-      })
+    // The failure path awaits ephemeral-VM cleanup before reporting, so a fixed
+    // microtask flush starves this assertion.
+    await vi.waitFor(() =>
+      expect(store.updatePendingWorktreeCreation).toHaveBeenCalledWith(
+        'creation-1',
+        expect.objectContaining({
+          status: 'error'
+        })
+      )
     )
     expect(toast.error).toHaveBeenCalledTimes(1)
   })

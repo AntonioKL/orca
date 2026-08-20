@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { CreateWorktreeResult } from '../../shared/worktree/create-types'
+import type { CreatedWorktreeResult } from '../../shared/worktree/create-types'
 import { getSshGitProviderMock, getActiveMultiplexerMock } from './worktrees-test-module-mocks'
 import { handlers, setupWorktreeHandlers, store } from './worktrees-test-harness'
 
@@ -160,7 +160,7 @@ describe('registerWorktreeHandlers', () => {
     const result = (await handlers['worktrees:create'](null, {
       repoId: 'repo-ssh',
       name: 'improve-dashboard'
-    })) as CreateWorktreeResult
+    })) as CreatedWorktreeResult
 
     expect(provider.exec).toHaveBeenCalledWith(
       ['merge-base', '--is-ancestor', 'refs/heads/main', 'refs/remotes/origin/main'],
@@ -260,7 +260,7 @@ describe('registerWorktreeHandlers', () => {
     const result = (await handlers['worktrees:create'](null, {
       repoId: 'repo-ssh',
       name: 'improve-dashboard'
-    })) as CreateWorktreeResult
+    })) as CreatedWorktreeResult
 
     expect(provider.exec).toHaveBeenCalledWith(
       ['merge-base', '--is-ancestor', 'refs/heads/main', 'refs/remotes/origin/main'],
@@ -478,7 +478,7 @@ describe('registerWorktreeHandlers', () => {
     const result = (await handlers['worktrees:create'](null, {
       repoId: 'repo-ssh',
       name: 'improve-dashboard'
-    })) as CreateWorktreeResult
+    })) as CreatedWorktreeResult
 
     expect(provider.refreshLocalBaseRefForWorktreeCreate).toHaveBeenCalledWith({
       repoPath: '/remote/repo',

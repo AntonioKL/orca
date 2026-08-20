@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
 import { translate } from '@/i18n/i18n'
+import { getUiRelativeTimeFormatter } from '@/i18n/relative-time-format'
 import { getAgentLabel } from '@/lib/agent-catalog'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 import type { RuntimeClientTarget } from '@/runtime/runtime-rpc-client'
@@ -24,7 +25,9 @@ import {
 
 /** Localized "admitted N ago" for a row's admittedAt against a render-time now. */
 function formatAdmittedAgo(admittedAt: number, now: number): string {
-  const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
+  // Why: the shared formatter follows the app's UI language (OS locale only when
+  // the language is System), unlike a bare Intl default that always uses the OS.
+  const formatter = getUiRelativeTimeFormatter()
   const seconds = Math.round((admittedAt - now) / 1000)
   const absSeconds = Math.abs(seconds)
   if (absSeconds < 60) {

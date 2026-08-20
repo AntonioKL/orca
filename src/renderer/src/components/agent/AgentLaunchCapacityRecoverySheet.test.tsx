@@ -7,6 +7,7 @@ import AgentLaunchCapacityRecoverySheet from './AgentLaunchCapacityRecoverySheet
 import type { PendingAgentLaunchSummaryRow } from '../../../../shared/agent-launch-pending-summary'
 
 const storeBox = vi.hoisted(() => ({ state: null as unknown }))
+const localeBox = vi.hoisted(() => ({ value: 'en' }))
 const summaryBox = vi.hoisted(() => ({
   rows: [] as readonly PendingAgentLaunchSummaryRow[],
   reject: false
@@ -42,7 +43,9 @@ vi.mock('@/lib/agent-catalog', () => ({
 }))
 
 vi.mock('@/i18n/i18n', () => ({
-  translate: (_key: string, fallback: string) => fallback
+  translate: (_key: string, fallback: string) => fallback,
+  // The real relative-time formatter reads the app's UI language through this.
+  getIntlLocale: () => localeBox.value
 }))
 
 vi.mock('@/components/ui/button', () => ({
@@ -108,6 +111,7 @@ beforeEach(() => {
   })
   summaryBox.rows = []
   summaryBox.reject = false
+  localeBox.value = 'en'
   ;(globalThis as unknown as { window: { api: unknown } }).window.api = {
     worktrees: { onChanged: mocks.onChanged }
   }
@@ -204,6 +208,28 @@ describe('AgentLaunchCapacityRecoverySheet', () => {
     ]
     await render()
     expect(buttonByLabel('Open')).toBeTruthy()
+  })
+
+  it('formats the admitted time in the app UI language, not the OS locale', async () => {
+    const admittedAt = Date.now() - 3 * 3_600_000
+    summaryBox.rows = [
+      {
+        sourceKind: 'cli',
+        baseHarness: 'codex',
+        targetHostDisplayName: 'This Mac',
+        admittedAt,
+        liveness: 'live',
+        deepLink: { kind: 'worktree', worktreeId: 'wt-1' }
+      }
+    ]
+    localeBox.value = 'ja'
+    await render()
+
+    const japanese = new Intl.RelativeTimeFormat('ja', { numeric: 'auto' }).format(-3, 'hour')
+    const english = new Intl.RelativeTimeFormat('en', { numeric: 'auto' }).format(-3, 'hour')
+    expect(japanese).not.toBe(english)
+    expect(textContent()).toContain(japanese)
+    expect(textContent()).not.toContain(english)
   })
 
   it('surfaces a retryable message when the fetch fails', async () => {

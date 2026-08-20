@@ -13,7 +13,7 @@
 // prefix surgically (proven by the captured shim-dir), so it is safe to apply
 // only on the legacy replay path.
 
-import type { AgentStartupShell } from '../../shared/tui-agent-startup-shell'
+import { isPosixStartupShell, type AgentStartupShell } from '../../shared/tui-agent-startup-shell'
 
 // Generated keys removed only when the config is a captured team launch. TMUX /
 // TMUX_PANE are ephemeral for every launch and stripped unconditionally below.
@@ -34,8 +34,11 @@ export function isCapturedAgentTeamsConfig(env: Record<string, string>): boolean
   )
 }
 
+/** `:` for the sh family, `;` for the Windows shells. fish has no member of its
+ *  own — AgentStartupShell folds every Unix shell into 'posix' — so it must be
+ *  routed through the shared predicate, not matched as a separate literal. */
 export function pathDelimiterForShell(shell: AgentStartupShell): string {
-  return shell === 'posix' || shell === 'fish' ? ':' : ';'
+  return isPosixStartupShell(shell) ? ':' : ';'
 }
 
 /** Remove Orca attribution + (for captured team configs) generated team/auth/

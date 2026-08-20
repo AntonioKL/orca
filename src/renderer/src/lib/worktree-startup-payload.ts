@@ -11,16 +11,24 @@ import type { AgentLaunchInput } from '../../../shared/agent-launch-spawn-reques
 /** Telemetry threaded from the launch site to `pty:spawn`; main fires `agent_started`
  *  only after the spawn succeeds. See telemetry-plan.md§Agent launch semantics. */
 export type AgentStartedTelemetry = EventProps<'agent_started'>
+
+/** What a client-threaded startup may carry: `agent_kind` is host-authoritative
+ *  (overwritten from the resolved launch receipt before the emit), so a surface
+ *  that only names an identity must be able to omit it. */
 export type StartupLaunchTelemetry = Omit<AgentStartedTelemetry, 'agent_kind'> &
   Partial<Pick<AgentStartedTelemetry, 'agent_kind'>>
 
 /** Startup command threaded onto a worktree's first terminal at activation. */
 export type WorktreeStartupPayload = {
   command: string
+  /** Host-owned launch request: the client names the identity (or session to
+   *  resume) and prompt policy only. When set it supersedes the
+   *  command/launchConfig/launchToken/launchAgent fields below, which the host
+   *  reassembles itself — mirrors the queueTabStartupCommand contract this
+   *  payload is forwarded to verbatim. */
   agentLaunch?: AgentLaunchInput
   env?: Record<string, string>
   launchConfig?: SleepingAgentLaunchConfig
-  legacyResumeRecordedConnectionId?: string | null
   resumeProviderSession?: AgentProviderSessionMetadata
   launchToken?: string
   launchAgent?: TuiAgent

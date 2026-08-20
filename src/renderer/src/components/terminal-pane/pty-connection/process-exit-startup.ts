@@ -11,6 +11,7 @@ export function toProcessExitStartup(
         env: startup.env,
         launchConfig: startup.launchConfig,
         agentLaunch: startup.agentLaunch,
+        resumeProviderSession: startup.resumeProviderSession,
         ...(startup.legacyResumeRecordedConnectionId !== undefined
           ? { legacyResumeRecordedConnectionId: startup.legacyResumeRecordedConnectionId }
           : {}),

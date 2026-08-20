@@ -262,7 +262,7 @@ describe('buildReconcileAgentLaunchDeps liveness', () => {
       }
     })
     const entry = pending({ launchToken: 'token-v34' }, 'ssh:host-a')
-    store.beginPending(entry)
+    store.rebuildPendingFrom([entry])
 
     const outcome = reconcileOnePendingAgentLaunch(deps, entry)
 
@@ -287,7 +287,7 @@ describe('buildReconcileAgentLaunchDeps liveness', () => {
       }
     })
     const entry = pending({ launchToken: 'token-legacy' }, 'ssh:host-a')
-    store.beginPending(entry)
+    store.rebuildPendingFrom([entry])
 
     const outcome = reconcileOnePendingAgentLaunch(deps, entry)
 
@@ -310,7 +310,7 @@ describe('buildReconcileAgentLaunchDeps liveness', () => {
       }
     })
     const entry = pending({ launchToken: 'token-nofallback' }, 'ssh:host-a')
-    store.beginPending(entry)
+    store.rebuildPendingFrom([entry])
 
     expect(reconcileOnePendingAgentLaunch(deps, entry)).toEqual({ kind: 'launch_state_unknown' })
     expect(store.getPending('token-nofallback')).not.toBeNull()
@@ -330,7 +330,7 @@ describe('buildReconcileAgentLaunchDeps liveness', () => {
       }
     })
     const entry = pending({ launchToken: 'token-proven' }, 'ssh:host-a')
-    store.beginPending(entry)
+    store.rebuildPendingFrom([entry])
 
     expect(reconcileOnePendingAgentLaunch(deps, entry)).toEqual({ kind: 'spawn_failed' })
     expect(arm.calls).toEqual(['failed'])
@@ -351,7 +351,7 @@ describe('buildReconcileAgentLaunchDeps liveness', () => {
       }
     })
     const entry = pending({ launchToken: 'token-live' }, 'ssh:host-a')
-    store.beginPending(entry)
+    store.rebuildPendingFrom([entry])
 
     expect(reconcileOnePendingAgentLaunch(deps, entry)).toEqual({ kind: 'launched' })
   })

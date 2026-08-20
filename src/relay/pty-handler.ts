@@ -198,6 +198,9 @@ type ManagedPty = {
   startupIngressIntent?: ReturnType<typeof parsePtyStartupIngressIntent>
   ownerBackend: PtyOwnerBackend
   agentSessionOwners?: AgentSessionOwnerBinding[]
+  /** Host admission launch token from pty.spawn, kept so listProcesses can echo it back
+   *  (pty.getCapabilities advertises that echo; without storing it the claim is false). */
+  launchToken?: string
 }
 
 type RelayAgentSessionCreateResult = {
@@ -354,6 +357,14 @@ function resolvePtyShellOverride(shellOverride: string): string {
  * Real distro names are registry keys, far below this.
  */
 const MAX_REVIVED_WSL_DISTRO_LENGTH = 256
+/** Mirrors main's own launch-token bound (OrcaRuntime.registerPty); the token is client input. */
+const MAX_LAUNCH_TOKEN_LENGTH = 128
+
+function parseLaunchToken(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 && value.length <= MAX_LAUNCH_TOKEN_LENGTH
+    ? value
+    : undefined
+}
 
 /**
  * Same bounds as a fresh spawn, but one unusable entry may not fail the whole
@@ -1852,6 +1863,7 @@ export class PtyHandler {
       params.startupIngressVersion === PTY_STARTUP_INGRESS_VERSION
         ? parsePtyStartupIngressIntent(params.startupIngress)
         : undefined
+    const launchToken = parseLaunchToken(params.launchToken)
     const managed: ManagedPty = {
       id,
       incarnationId: randomUUID(),
@@ -1883,6 +1895,7 @@ export class PtyHandler {
       }),
       ...(startupIngressIntent ? { startupIngressIntent } : {}),
       ...(terminalHandle ? { terminalHandle } : {}),
+      ...(launchToken ? { launchToken } : {}),
       ...(managedStartupCommand && (shouldProviderDeliverCommand || rendererShellReadySupported)
         ? {
             startupCommand: {
@@ -2471,6 +2484,8 @@ export class PtyHandler {
         // pane came back as the host default shell in another distro's history.
         ...(managed.shellOverride ? { shellOverride: managed.shellOverride } : {}),
         ...(managed.wslDistro ? { terminalWindowsWslDistro: managed.wslDistro } : {}),
+        // Deliberately not carrying launchToken: revive re-spawns a bare shell with no
+        // launch command, so echoing the old token would claim a dead launch is still live.
         ...(managed.terminalHandle ? { terminalHandle: managed.terminalHandle } : {})
       })
     }

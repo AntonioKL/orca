@@ -269,6 +269,31 @@ describe('launchAgentInNewTab', () => {
     expect(queued).not.toHaveProperty('launchToken')
   })
 
+  it('queues initial working status for a Command Code-based custom agent', async () => {
+    const customId = 'custom-agent:command-code:33333333-3333-4333-8333-333333333333'
+    store.settings.customTuiAgents = [
+      {
+        id: customId,
+        baseAgent: 'command-code',
+        label: 'Shipper',
+        args: '',
+        env: {},
+        syncEnv: false
+      }
+    ]
+    const { launchAgentInNewTab } = await import('./launch-agent-in-new-tab')
+
+    launchAgentInNewTab({
+      agent: customId,
+      worktreeId: 'wt-1',
+      prompt: 'fix the spinner'
+    })
+
+    const queued = mockQueueTabStartupCommand.mock.calls[0][1]
+    // Base gates the missing prompt-start hook; the status keeps the requested id.
+    expect(queued.initialAgentStatus).toEqual({ agent: customId, prompt: 'fix the spinner' })
+  })
+
   it('does not track prompt-sent for argv prompt launches', async () => {
     const { launchAgentInNewTab } = await import('./launch-agent-in-new-tab')
 
@@ -464,6 +489,53 @@ describe('launchAgentInNewTab', () => {
       { connectionId: 'ssh-a' }
     )
     expect(mockTrack).not.toHaveBeenCalledWith('agent_prompt_sent', expect.anything())
+  })
+
+  // The seed is gated on the resolved BASE so command-code-based customs get it
+  // too, but it must stamp the REQUESTED id: agentType is what every identity
+  // surface reads back, and Command Code has no later hook to correct it.
+  it('seeds the requested custom-agent id, not its command-code base', async () => {
+    const customId = 'custom-agent:command-code:44444444-4444-4444-8444-444444444444'
+    store.settings.customTuiAgents = [
+      {
+        id: customId,
+        baseAgent: 'command-code',
+        label: 'Shipper',
+        args: '',
+        env: {},
+        syncEnv: false
+      }
+    ]
+    store.repos = [{ id: 'repo-1', connectionId: 'ssh-a', path: '/repo' }]
+    const { launchAgentInNewTab } = await import('./launch-agent-in-new-tab')
+
+    const result = launchAgentInNewTab({
+      agent: customId,
+      worktreeId: 'wt-1',
+      prompt: 'large generated prompt',
+      promptDelivery: 'submit-after-ready'
+    })
+    store.terminalLayoutsByTabId = {
+      'tab-1': {
+        activeLeafId: LEAF_ID,
+        ptyIdsByLeafId: { [LEAF_ID]: toAppSshPtyId('ssh-a', 'pty-1') }
+      }
+    }
+    store.ptyIdsByTabId = { 'tab-1': [toAppSshPtyId('ssh-a', 'pty-1')] }
+    await expect(result?.promptDeliveryResult).resolves.toEqual({
+      delivered: true,
+      failureNotified: false
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(mockSetAgentStatus).toHaveBeenCalledWith(
+      `tab-1:${LEAF_ID}`,
+      expect.objectContaining({ state: 'working', agentType: customId }),
+      undefined,
+      undefined,
+      { connectionId: 'ssh-a' }
+    )
   })
 
   it('does not recreate SSH status when clear arrives before disconnect state', async () => {

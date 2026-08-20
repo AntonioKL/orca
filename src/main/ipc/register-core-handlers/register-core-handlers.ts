@@ -87,6 +87,7 @@ import type {
 import {
   getSavedRuntimeAiVaultHostInfos,
   prepareRuntimeAiVaultSessionResume,
+  resolveRuntimeAiVaultResumeDetails,
   resolveRuntimeAiVaultSessionTitles,
   scanRuntimeAiVaultSessions
 } from '../ai-vault/runtime-session-scanner'
@@ -226,7 +227,21 @@ export function registerCoreHandlers(
     resolveRuntimeAiVaultSessionTitles: async (environmentId, args) =>
       resolveRuntimeAiVaultSessionTitles(app.getPath('userData'), environmentId, args),
     prepareRuntimeSessionResume: async (environmentId, args) =>
-      prepareRuntimeAiVaultSessionResume(app.getPath('userData'), environmentId, args)
+      prepareRuntimeAiVaultSessionResume(app.getPath('userData'), environmentId, args),
+    // Without this every runtime-hosted row reports 'unavailable'; the runtime
+    // must re-scan to derive its own transcript path.
+    resolveRuntimeAiVaultResumeDetails: async (environmentId, entry) =>
+      resolveRuntimeAiVaultResumeDetails(app.getPath('userData'), environmentId, entry),
+    // Read per-call: settings change while the handlers stay registered.
+    getVaultResumeSettings: () => {
+      const settings = store.getSettings()
+      return {
+        agentCmdOverrides: settings.agentCmdOverrides,
+        agentDefaultArgs: settings.agentDefaultArgs,
+        agentDefaultEnv: settings.agentDefaultEnv,
+        terminalWindowsShell: settings.terminalWindowsShell
+      }
+    }
   })
   registerNativeChatHandlers()
   registerClipboardHandlers(store)

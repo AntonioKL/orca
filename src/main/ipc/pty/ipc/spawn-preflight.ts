@@ -17,10 +17,7 @@ import {
 } from '../host-env/fresh-spawn-routing'
 import { getAppPtyId, getProvider, getRelayPtyId } from '../provider/registry'
 import type { PtyIpcSpawnState } from './spawn-state'
-import {
-  resolvePtyIpcAgentLaunch,
-  type AgentLaunchEarlyResult
-} from './spawn-agent-launch'
+import { resolvePtyIpcAgentLaunch, type AgentLaunchEarlyResult } from './spawn-agent-launch'
 
 export async function preparePtyIpcSpawnPreflight(
   ctx: PtyIpcSpawnState
@@ -199,6 +196,9 @@ export async function preparePtyIpcSpawnPreflight(
   const agentLaunchEarlyResult = await resolvePtyIpcAgentLaunch(ctx)
   if (agentLaunchEarlyResult) {
     return agentLaunchEarlyResult
+  }
+  if (args.connectionId && args.command && args.startupCommandDelivery === undefined) {
+    args.startupCommandDelivery = 'shell-ready'
   }
   ctx.isClaudeLaunch =
     !ctx.preAdoptedStablePane && !args.connectionId && isClaudeLaunchCommand(args.command)

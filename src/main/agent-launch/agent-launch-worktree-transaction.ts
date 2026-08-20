@@ -147,22 +147,43 @@ export async function runWorktreeAgentLaunchTransaction(
   // ONE persistence transaction before the writer: private snapshot/token first,
   // then the client-safe pending metadata. Both synchronous so no mutation lands
   // between them and a mid-spawn crash still resolves via the persisted token.
-  deps.operationStore.beginPending({
-    operationId: params.operationId,
-    idempotencyKey: params.idempotencyKey,
-    scope: params.scope,
-    clientMutationId: params.clientMutationId,
-    payloadDigest: params.payloadDigest,
-    launchToken: receipt.launchToken,
-    intent: params.intent,
-    principal: params.principal,
-    snapshot
-  })
-  deps.persistPending({
-    operationId: params.operationId,
-    requestedAgent: receipt.requestedAgent,
-    ...(params.priorFailureId ? { priorFailureId: params.priorFailureId } : {})
-  })
+  try {
+    deps.operationStore.beginPending({
+      operationId: params.operationId,
+      idempotencyKey: params.idempotencyKey,
+      scope: params.scope,
+      clientMutationId: params.clientMutationId,
+      payloadDigest: params.payloadDigest,
+      launchToken: receipt.launchToken,
+      intent: params.intent,
+      principal: params.principal,
+      snapshot
+    })
+    deps.persistPending({
+      operationId: params.operationId,
+      requestedAgent: receipt.requestedAgent,
+      ...(params.priorFailureId ? { priorFailureId: params.priorFailureId } : {})
+    })
+  } catch {
+    // A throwing store write must RELEASE the admitted launch, never strand it
+    // pending forever; clearPending in `finally` drops a half-written snapshot
+    // even if the failure write itself throws too.
+    deps.boundary.settleAgentLaunch(receipt.launchToken, 'failed')
+    try {
+      return persistedFailure(
+        deps,
+        params,
+        {
+          code: 'spawn_failed',
+          requestedAgent: receipt.requestedAgent,
+          baseAgent: receipt.baseAgent
+        },
+        nowFn
+      )
+    } finally {
+      deps.operationStore.clearPending(receipt.launchToken)
+    }
+  }
 
   let terminalId: string
   try {

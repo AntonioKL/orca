@@ -57,6 +57,7 @@ export function bindBuildColdRestoreAgentResumeStartup(session: ConnectPanePtySe
           }
         }
       },
+      resumeProviderSession: providerSession,
       command: '',
       env: session.paneIdentityEnv,
       ...(legacyLaunchConfig

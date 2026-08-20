@@ -333,6 +333,64 @@ describe('AgentCombobox interaction', () => {
     expect(onOpenManageAgents).toHaveBeenCalledTimes(1)
   })
 
+  it('clears the highlight on footer hover instead of snapping it to the first row', () => {
+    render(
+      <AgentCombobox
+        agents={AGENTS}
+        value="claude"
+        onValueChange={vi.fn()}
+        onOpenManageAgents={vi.fn()}
+      />
+    )
+    fireEvent.click(screen.getByRole('combobox'))
+    const input = screen.getByPlaceholderText('Search agents...')
+    expect(input.getAttribute('aria-activedescendant')).toBeTruthy()
+
+    // React synthesizes onMouseEnter from mouseover, so mouseOver is the hover event here.
+    fireEvent.mouseOver(screen.getByText('Manage agents'))
+    expect(document.querySelector('[role="option"][aria-selected="true"]')).toBeNull()
+    expect(input.getAttribute('aria-activedescendant')).toBeNull()
+  })
+
+  it('keeps arrow navigation working after the footer clears the highlight', () => {
+    const onValueChange = vi.fn()
+    render(
+      <AgentCombobox
+        agents={AGENTS}
+        value="claude"
+        onValueChange={onValueChange}
+        onOpenManageAgents={vi.fn()}
+      />
+    )
+    fireEvent.click(screen.getByRole('combobox'))
+    fireEvent.mouseOver(screen.getByText('Manage agents'))
+
+    const input = screen.getByPlaceholderText('Search agents...')
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    // Blank Terminal is the first row when a blank selection is allowed.
+    expect(onValueChange).toHaveBeenCalledWith(null)
+  })
+
+  it('re-highlights the top match when typing after a footer hover', () => {
+    render(
+      <AgentCombobox
+        agents={AGENTS}
+        value="claude"
+        onValueChange={vi.fn()}
+        onOpenManageAgents={vi.fn()}
+      />
+    )
+    fireEvent.click(screen.getByRole('combobox'))
+    fireEvent.mouseOver(screen.getByText('Manage agents'))
+
+    const input = screen.getByPlaceholderText('Search agents...')
+    fireEvent.change(input, { target: { value: 'cod' } })
+    expect(document.querySelector('[role="option"][aria-selected="true"]')?.textContent).toContain(
+      'Codex'
+    )
+  })
+
   it('sets a default from the right-click menu', () => {
     const onSetDefault = vi.fn()
     render(

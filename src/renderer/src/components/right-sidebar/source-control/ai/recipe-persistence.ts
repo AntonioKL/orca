@@ -11,6 +11,8 @@ import {
   type SourceControlAiWriteTarget
 } from '../../../../../../shared/source-control-ai-recipe-save'
 import { saveSourceControlAiSettings } from '@/lib/agent-catalog-authoring'
+import { notifyAgentAuthoringWriteFailure } from '@/lib/agent-authoring-write-failure-toast'
+import { agentAuthoringWriteFailureMessage } from '@/components/settings/agent-authoring-write-failure'
 import { generationParamsToActionRecipe } from './text-generation-defaults'
 
 type SourceControlAiRecipePersistenceStoreSnapshot = Pick<AppState, 'settings' | 'repos'>
@@ -48,7 +50,12 @@ export async function saveSourceControlAiActionRecipeForTarget({
     customAgentCommand
   })
   if ('sourceControlAi' in result) {
-    await saveSourceControlAiSettings(result.sourceControlAi)
+    // Why: main acks only after a durable write, so a rejected save must reject here too —
+    // callers (pre-launch save, generation dialogs) treat resolution as "the recipe is on disk".
+    const writeResult = await saveSourceControlAiSettings(result.sourceControlAi)
+    if (notifyAgentAuthoringWriteFailure(writeResult)) {
+      throw new Error(agentAuthoringWriteFailureMessage())
+    }
     return
   }
   await updateRepo(result.target.repoId, result.update)

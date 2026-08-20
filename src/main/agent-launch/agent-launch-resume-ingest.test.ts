@@ -40,8 +40,11 @@ const KEY: AgentSessionOwnershipKey = {
   providerSessionId: 'sess-1'
 }
 
+// Real captured shape: `agentCommand` is the COMPLETE pre-quoted base command
+// (args already embedded by buildSleepingAgentLaunchConfig); `agentArgs` is the
+// raw echo of the same flags, which the replay must not re-append.
 const LEGACY_CONFIG: SleepingAgentLaunchConfig = {
-  agentCommand: 'claude',
+  agentCommand: "claude '--model' 'opus'",
   agentArgs: '--model opus',
   agentEnv: { FOO: 'bar' }
 }
@@ -143,7 +146,9 @@ describe('resolveResumeLaunchIngest — opaque legacy replay', () => {
     }
     expect(result.baseAgent).toBe('claude')
     expect(result.requestedAgent).toBe('claude')
-    // Base command + args, then the appended provider resume flags (one-shot only).
+    // The captured base command (args already inside it), then the appended
+    // provider resume flags (one-shot only) — each exactly once.
+    expect(result.launchCommand).toBe("claude '--model' 'opus' '--resume' 'sess-1'")
     expect(result.launchCommand).toContain('claude')
     expect(result.launchCommand).toContain('--model')
     expect(result.launchCommand).toContain('--resume')

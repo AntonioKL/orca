@@ -51,10 +51,13 @@ describe('daemon protocol version', () => {
     }
   })
 
-  it('withholds launch-token echo authority from pre-v34 daemons', () => {
-    expect(LAUNCH_TOKEN_ECHO_DAEMON_PROTOCOL_VERSION).toBe(34)
+  // Why 36: v34/v35 accepted `launchToken` but stored and echoed nothing, and either
+  // survives an app update — so echo authority starts at the first daemon that implements it.
+  it('withholds launch-token echo authority from pre-v36 daemons', () => {
+    expect(LAUNCH_TOKEN_ECHO_DAEMON_PROTOCOL_VERSION).toBe(36)
     expect(supportsLaunchTokenEcho(PROTOCOL_VERSION)).toBe(true)
-    expect(supportsLaunchTokenEcho(34)).toBe(true)
-    expect(supportsLaunchTokenEcho(33)).toBe(false)
+    expect(supportsLaunchTokenEcho(36)).toBe(true)
+    expect(supportsLaunchTokenEcho(35)).toBe(false)
+    expect(supportsLaunchTokenEcho(34)).toBe(false)
   })
 })

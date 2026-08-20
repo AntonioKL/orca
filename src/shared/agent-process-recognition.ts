@@ -3,7 +3,7 @@ import { EXACT_NODE_ENTRYPOINT_IDENTITIES } from './agent-node-entrypoint-identi
 import type { AgentType } from './agent-status-types'
 import type { BuiltInTuiAgent, TuiAgent } from './tui-agent'
 import { filterHeadlessOneShotAgentCommand } from './agent-headless-command'
-import { getFirstCommandToken } from './command-token-scanner'
+import { getFirstCommandToken, POWERSHELL_CALL_OPERATOR } from './command-token-scanner'
 
 export type RecognizedAgentProcess = { agent: TuiAgent; processName: string }
 
@@ -139,6 +139,11 @@ function tokenizeCommandLine(commandLine: string): string[] {
   }
   if (current) {
     tokens.push(current)
+  }
+  // Why: a PowerShell launch line leads with the call operator, which is syntax
+  // rather than the executable every token index here is measured from.
+  if (tokens[0] === POWERSHELL_CALL_OPERATOR) {
+    tokens.shift()
   }
   return tokens
 }
