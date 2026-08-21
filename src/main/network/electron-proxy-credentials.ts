@@ -75,9 +75,13 @@ export function setElectronProxyCredentialsForSession(
   }
 }
 
+export function clearElectronProxyCredentialsForSession(proxySession: object): void {
+  proxyCredentialsBySession.delete(proxySession)
+}
+
 export function resetElectronProxyCredentialsForTests(proxySession?: object): void {
   if (proxySession) {
-    proxyCredentialsBySession.delete(proxySession)
+    clearElectronProxyCredentialsForSession(proxySession)
   } else {
     proxyCredentialsBySession = new WeakMap()
   }

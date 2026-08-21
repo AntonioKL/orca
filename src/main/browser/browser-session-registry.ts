@@ -31,6 +31,7 @@ import {
 } from './browser-session-partition-policies'
 import { isValidPersistedBrowserSessionProfile } from './browser-session-persisted-profile-validation'
 import { clearBrowserSessionUserAgentMode } from './browser-session-user-agent-mode'
+import { clearProxySessionApplicationState } from '../network/proxy-settings'
 
 export type BrowserSessionRegistryProfileOptions = {
   orcaProfileId: string
@@ -235,6 +236,7 @@ class BrowserSessionRegistry {
       const sess = session.fromPartition(partition)
       clearBrowserSessionUserAgentMode(sess)
       clearBrowserSessionPartitionPolicies(partition, sess)
+      clearProxySessionApplicationState(sess)
       throw error
     }
     this.profiles.set(id, profile)
@@ -281,6 +283,7 @@ class BrowserSessionRegistry {
       const sess = session.fromPartition(profile.partition)
       clearBrowserSessionUserAgentMode(sess)
       clearBrowserSessionPartitionPolicies(profile.partition, sess)
+      clearProxySessionApplicationState(sess)
       await sess.clearStorageData()
       await sess.clearCache()
     } catch {

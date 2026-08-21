@@ -643,6 +643,27 @@ describe('registerSettingsHandlers', () => {
     })
   })
 
+  it('does not sweep sessions for a no-op proxy save', async () => {
+    const settings = {
+      httpProxyUrl: 'http://proxy.example:8080',
+      httpProxyBypassRules: 'localhost'
+    }
+    store.getSettings.mockReturnValue(settings)
+    store.updateSettings.mockReturnValue(settings)
+    registerSettingsHandlers(store as never)
+
+    const handler = handleMock.mock.calls.find((call) => call[0] === 'settings:set')?.[1] as (
+      event: typeof settingsInvokeEvent,
+      args: { httpProxyUrl: string }
+    ) => Promise<unknown>
+
+    await handler(settingsInvokeEvent, { httpProxyUrl: 'http://proxy.example:8080' })
+
+    expect(applyElectronProxySettingsMock).not.toHaveBeenCalled()
+    expect(listProfilesMock).not.toHaveBeenCalled()
+    expect(applyBrowserSessionProxiesMock).not.toHaveBeenCalled()
+  })
+
   it('never sweeps a superseded proxy save onto browser partitions', async () => {
     store.getSettings.mockReturnValue({ httpProxyUrl: '', httpProxyBypassRules: '' })
     store.updateSettings.mockImplementation((args) =>

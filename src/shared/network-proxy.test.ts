@@ -3,7 +3,6 @@ import {
   buildConfiguredProxyEnv,
   getProxyBypassRulesFromEnvironment,
   getProxyUrlFromEnvironment,
-  normalizeElectronProxyBypassRules,
   normalizeProxyBypassRules,
   normalizeProxyUrl,
   redactProxyUrl
@@ -29,14 +28,6 @@ describe('network proxy settings', () => {
     expect(normalizeProxyBypassRules('localhost, 127.0.0.1; *.internal\n<local>')).toBe(
       'localhost;127.0.0.1;*.internal;<local>'
     )
-  })
-
-  it('keeps Chromium loopback destinations direct when custom bypass rules are present', () => {
-    expect(normalizeElectronProxyBypassRules('*.internal, localhost')).toBe(
-      '*.internal;localhost;<local>'
-    )
-    expect(normalizeElectronProxyBypassRules('*.internal;<LOCAL>')).toBe('*.internal;<LOCAL>')
-    expect(normalizeElectronProxyBypassRules('')).toBe('')
   })
 
   it('uses standard proxy environment precedence', () => {

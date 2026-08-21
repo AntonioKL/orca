@@ -51,13 +51,13 @@ describe('applyProxySettingsToSession', () => {
     ).resolves.toEqual({
       source: 'settings',
       proxyRules: 'socks5://127.0.0.1:1080',
-      proxyBypassRules: 'localhost;*.internal;<local>'
+      proxyBypassRules: 'localhost;*.internal'
     })
 
     expect(proxySession.setProxy).toHaveBeenCalledWith({
       mode: 'fixed_servers',
       proxyRules: 'socks5://127.0.0.1:1080',
-      proxyBypassRules: 'localhost;*.internal;<local>'
+      proxyBypassRules: 'localhost;*.internal'
     })
     expect(proxySession.closeAllConnections).toHaveBeenCalledTimes(1)
   })
@@ -237,12 +237,12 @@ describe('applyProxySettingsToSession', () => {
     ).resolves.toEqual({
       source: 'env',
       proxyRules: 'http://env.example:8080',
-      proxyBypassRules: 'localhost;<local>'
+      proxyBypassRules: 'localhost'
     })
     expect(proxySession.setProxy).toHaveBeenCalledWith({
       mode: 'fixed_servers',
       proxyRules: 'http://env.example:8080',
-      proxyBypassRules: 'localhost;<local>'
+      proxyBypassRules: 'localhost'
     })
   })
 

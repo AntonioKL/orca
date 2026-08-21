@@ -197,11 +197,12 @@ export function registerSettingsHandlers(
       notifyListeners: true,
       originWebContentsId: event.sender.id
     })
-    // Why: only the newest committed proxy snapshot may reach browser partitions after awaits below.
-    const proxyCommitGeneration =
-      'httpProxyUrl' in sanitizedArgs || 'httpProxyBypassRules' in sanitizedArgs
-        ? ++latestProxyCommitGeneration
-        : 0
+    const proxySettingsChanged =
+      ('httpProxyUrl' in sanitizedArgs && before.httpProxyUrl !== result.httpProxyUrl) ||
+      ('httpProxyBypassRules' in sanitizedArgs &&
+        before.httpProxyBypassRules !== result.httpProxyBypassRules)
+    // Why: only the newest changed proxy snapshot may reach browser partitions after awaits below.
+    const proxyCommitGeneration = proxySettingsChanged ? ++latestProxyCommitGeneration : 0
     if (
       'computerAwakeMode' in sanitizedArgs ||
       'keepComputerAwakeWhileAgentsRun' in sanitizedArgs
@@ -247,7 +248,7 @@ export function registerSettingsHandlers(
     if (APPEARANCE_MENU_KEYS.some((key) => key in sanitizedArgs)) {
       rebuildAppMenu()
     }
-    if ('httpProxyUrl' in sanitizedArgs || 'httpProxyBypassRules' in sanitizedArgs) {
+    if (proxySettingsChanged) {
       try {
         await applyElectronProxySettings(result)
       } catch {

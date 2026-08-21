@@ -5,28 +5,30 @@ import type { NetworkProxySettings } from '../../shared/network-proxy'
 
 // Why: browser modules hold no store handle, so main injects a reader the way rate-limits does.
 let resolveNetworkProxySettings: (() => NetworkProxySettings) | null = null
+let proxyPolicyGeneration = 0
 
 export function setBrowserNetworkProxySettingsResolver(
   resolver: (() => NetworkProxySettings) | null
 ): void {
   resolveNetworkProxySettings = resolver
-}
-
-export async function applyProxyToBrowserSession(
-  sess: Session,
-  settings?: NetworkProxySettings
-): Promise<void> {
-  const resolved = settings ?? resolveNetworkProxySettings?.()
-  if (!resolved) {
-    return
+  if (!resolver) {
+    proxyPolicyGeneration = 0
   }
-  await applyProxySettingsToSession(sess, resolved)
 }
 
-/**
- * Re-apply the app-wide proxy across every browser partition. Used at startup and whenever the
- * proxy settings change, mirroring `applyBrowserSessionUserAgentModes`.
- */
+export async function applyProxyToBrowserSession(sess: Session): Promise<void> {
+  let observedGeneration: number
+  do {
+    observedGeneration = proxyPolicyGeneration
+    const resolved = resolveNetworkProxySettings?.()
+    if (!resolved) {
+      return
+    }
+    await applyProxySettingsToSession(sess, resolved)
+  } while (observedGeneration !== proxyPolicyGeneration)
+}
+
+/** Re-apply the app-wide proxy across every browser partition. */
 export async function applyBrowserSessionProxies(
   profiles: BrowserSessionProfile[],
   settings?: NetworkProxySettings
@@ -35,6 +37,7 @@ export async function applyBrowserSessionProxies(
   if (!resolved) {
     return
   }
+  proxyPolicyGeneration += 1
   await Promise.all(
     profiles.map(async (profile) => {
       try {

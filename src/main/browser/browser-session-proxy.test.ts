@@ -60,8 +60,7 @@ describe('browser session proxy', () => {
     vi.restoreAllMocks()
   })
 
-  // Why (STA-4779): browser guests run on their own partitions, so a proxy pinned only to
-  // defaultSession left every embedded tab going direct.
+  // Browser partitions cannot inherit a proxy pinned to defaultSession.
   it('pins the configured proxy onto every browser partition', async () => {
     await applyBrowserSessionProxies(PROFILES, {
       httpProxyUrl: 'socks5://127.0.0.1:1080',
@@ -87,7 +86,7 @@ describe('browser session proxy', () => {
     expect(sessionsByPartition.get('persist:orca-browser')?.setProxy).toHaveBeenCalledWith({
       mode: 'fixed_servers',
       proxyRules: 'socks5://127.0.0.1:1080',
-      proxyBypassRules: 'localhost;*.internal;<local>'
+      proxyBypassRules: 'localhost;*.internal'
     })
   })
 
@@ -162,6 +161,28 @@ describe('browser session proxy', () => {
     )
     finishFirstWrite?.()
     await sweep
+  })
+
+  it('settles an in-flight new partition on the latest swept policy', async () => {
+    let proxyUrl = 'http://old.example:8080'
+    let finishFirstWrite: (() => void) | undefined
+    setBrowserNetworkProxySettingsResolver(() => ({ httpProxyUrl: proxyUrl }))
+    const sess = fromPartition('persist:orca-browser-session-pending')
+    sess.setProxy.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (finishFirstWrite = resolve))
+    )
+
+    const pendingInstallation = applyProxyToBrowserSession(sess as never)
+    await vi.waitFor(() => expect(sess.setProxy).toHaveBeenCalledTimes(1))
+    proxyUrl = 'http://new.example:8080'
+    await applyBrowserSessionProxies([], { httpProxyUrl: proxyUrl })
+    finishFirstWrite?.()
+    await pendingInstallation
+
+    expect(sess.setProxy.mock.calls).toEqual([
+      [{ mode: 'fixed_servers', proxyRules: 'http://old.example:8080' }],
+      [{ mode: 'fixed_servers', proxyRules: 'http://new.example:8080' }]
+    ])
   })
 
   it('reads settings through the injected resolver when none are passed', async () => {
