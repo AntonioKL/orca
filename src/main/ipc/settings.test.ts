@@ -702,6 +702,52 @@ describe('registerSettingsHandlers', () => {
     ])
   })
 
+  it('orders proxy writes before unrelated settings reconciliation can suspend', async () => {
+    store.getSettings.mockReturnValue({
+      httpProxyUrl: '',
+      httpProxyBypassRules: '',
+      agentStatusHooksEnabled: false,
+      disabledTuiAgents: []
+    })
+    store.updateSettings.mockImplementation((args) => ({
+      httpProxyUrl: args.httpProxyUrl,
+      httpProxyBypassRules: '',
+      agentStatusHooksEnabled: args.agentStatusHooksEnabled ?? true,
+      disabledTuiAgents: []
+    }))
+    let releaseHookReconciliation = (): void => {}
+    let markHookReconciliationStarted = (): void => {}
+    const hookReconciliationStarted = new Promise<void>(
+      (resolve) => (markHookReconciliationStarted = resolve)
+    )
+    applyAgentStatusHooksEnabledMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseHookReconciliation = () => resolve([])
+          markHookReconciliationStarted()
+        })
+    )
+    registerSettingsHandlers(store as never)
+    const handler = handleMock.mock.calls.find((call) => call[0] === 'settings:set')?.[1] as (
+      event: typeof settingsInvokeEvent,
+      args: { httpProxyUrl: string; agentStatusHooksEnabled?: boolean }
+    ) => Promise<unknown>
+
+    const first = handler(settingsInvokeEvent, {
+      httpProxyUrl: 'http://old.example:8080',
+      agentStatusHooksEnabled: true
+    })
+    await hookReconciliationStarted
+    await handler(settingsInvokeEvent, { httpProxyUrl: 'http://new.example:8080' })
+    releaseHookReconciliation()
+    await first
+
+    expect(applyElectronProxySettingsMock.mock.calls.map((call) => call[0].httpProxyUrl)).toEqual([
+      'http://old.example:8080',
+      'http://new.example:8080'
+    ])
+  })
+
   it('drops invalid proxy URLs at the settings boundary', async () => {
     store.getSettings.mockReturnValue({ httpProxyUrl: 'http://proxy.example:8080' })
     store.updateSettings.mockReturnValue({ httpProxyUrl: '' })

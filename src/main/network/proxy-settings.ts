@@ -105,12 +105,18 @@ export function resetProxyApplicationForTests(): void {
   resetElectronProxyCredentialsForTests()
 }
 
-export function clearProxySessionApplicationState(proxySession: ProxySession): void {
+export function resetSessionProxyApplicationForTests(proxySession: ProxySession): void {
   sessionProxyApplications.delete(proxySession)
   clearElectronProxyCredentialsForSession(proxySession)
 }
 
-export const resetSessionProxyApplicationForTests = clearProxySessionApplicationState
+export async function releaseProxySessionApplication(proxySession: ProxySession): Promise<void> {
+  await enqueueSessionProxyApplication(proxySession, async (state) => {
+    await releaseSessionProxyPin(proxySession, state)
+    clearElectronProxyCredentialsForSession(proxySession)
+    return { source: 'none' }
+  })
+}
 
 function getSessionProxyApplicationState(proxySession: ProxySession): SessionProxyApplicationState {
   let state = sessionProxyApplications.get(proxySession)
@@ -276,7 +282,10 @@ export async function ensureElectronProxyFromEnvironment(
   }
   return enqueueSessionProxyApplication(proxySession, (state) => {
     if (!options.force && state.appliedResult !== null) {
-      return Promise.resolve(state.appliedResult)
+      if (state.settledKey === proxyMemoKey(state.appliedResult)) {
+        return Promise.resolve(state.appliedResult)
+      }
+      return applySessionProxyResult(proxySession, state, state.appliedResult, state.credentials)
     }
     return resolveAndApplySessionProxy(proxySession, state, {}, options)
   })

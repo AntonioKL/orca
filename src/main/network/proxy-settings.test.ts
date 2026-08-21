@@ -277,4 +277,31 @@ describe('Electron proxy settings', () => {
 
     expect(proxySession.setProxy).toHaveBeenCalledTimes(1)
   })
+
+  it('settles an explicit proxy before reporting it to environment callers', async () => {
+    const proxySession = createProxySession()
+    proxySession.closeAllConnections.mockRejectedValueOnce(new Error('close failed'))
+
+    await expect(
+      applyElectronProxySettings(
+        { httpProxyUrl: 'http://proxy.example:8080' },
+        { proxySession, env: {} }
+      )
+    ).rejects.toThrow('close failed')
+    await expect(
+      ensureElectronProxyFromEnvironment({
+        proxySession,
+        env: { HTTP_PROXY: 'http://env.example:8080' }
+      })
+    ).resolves.toEqual({
+      source: 'settings',
+      proxyRules: 'http://proxy.example:8080'
+    })
+
+    expect(proxySession.setProxy.mock.calls).toEqual([
+      [{ mode: 'fixed_servers', proxyRules: 'http://proxy.example:8080' }],
+      [{ mode: 'fixed_servers', proxyRules: 'http://proxy.example:8080' }]
+    ])
+    expect(proxySession.closeAllConnections).toHaveBeenCalledTimes(2)
+  })
 })

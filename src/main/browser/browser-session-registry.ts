@@ -31,7 +31,7 @@ import {
 } from './browser-session-partition-policies'
 import { isValidPersistedBrowserSessionProfile } from './browser-session-persisted-profile-validation'
 import { clearBrowserSessionUserAgentMode } from './browser-session-user-agent-mode'
-import { clearProxySessionApplicationState } from '../network/proxy-settings'
+import { releaseProxySessionApplication } from '../network/proxy-settings'
 
 export type BrowserSessionRegistryProfileOptions = {
   orcaProfileId: string
@@ -234,9 +234,13 @@ class BrowserSessionRegistry {
       await installBrowserSessionPartitionPolicies(profile)
     } catch (error) {
       const sess = session.fromPartition(partition)
+      try {
+        await releaseProxySessionApplication(sess)
+      } catch {
+        console.warn('[proxy] Failed to release proxy from browser partition', partition)
+      }
       clearBrowserSessionUserAgentMode(sess)
       clearBrowserSessionPartitionPolicies(partition, sess)
-      clearProxySessionApplicationState(sess)
       throw error
     }
     this.profiles.set(id, profile)
@@ -281,9 +285,13 @@ class BrowserSessionRegistry {
     // Why: clear the partition's storage so deleting a profile doesn't leave orphaned cookies/cache behind.
     try {
       const sess = session.fromPartition(profile.partition)
+      try {
+        await releaseProxySessionApplication(sess)
+      } catch {
+        console.warn('[proxy] Failed to release proxy from browser partition', profile.partition)
+      }
       clearBrowserSessionUserAgentMode(sess)
       clearBrowserSessionPartitionPolicies(profile.partition, sess)
-      clearProxySessionApplicationState(sess)
       await sess.clearStorageData()
       await sess.clearCache()
     } catch {

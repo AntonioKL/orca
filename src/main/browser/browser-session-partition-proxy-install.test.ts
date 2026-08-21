@@ -162,4 +162,21 @@ describe('installBrowserSessionPartitionPolicies proxy wiring', () => {
       [{ mode: 'fixed_servers', proxyRules: 'http://second.example:8080' }]
     ])
   })
+
+  it('retries proxy readiness after an installed partition rejects once', async () => {
+    setBrowserNetworkProxySettingsResolver(() => ({
+      httpProxyUrl: 'http://proxy.example:8080',
+      httpProxyBypassRules: ''
+    }))
+    const profile = nextProfile()
+    const sess = fromPartitionMock(profile.partition)
+    sess.setProxy.mockRejectedValueOnce(new Error('transient proxy failure'))
+
+    await expect(installBrowserSessionPartitionPolicies(profile)).rejects.toThrow(
+      'transient proxy failure'
+    )
+    await expect(installBrowserSessionPartitionPolicies(profile)).resolves.toBeUndefined()
+
+    expect(sess.setProxy).toHaveBeenCalledTimes(2)
+  })
 })

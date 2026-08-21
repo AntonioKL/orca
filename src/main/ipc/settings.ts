@@ -201,8 +201,23 @@ export function registerSettingsHandlers(
       ('httpProxyUrl' in sanitizedArgs && before.httpProxyUrl !== result.httpProxyUrl) ||
       ('httpProxyBypassRules' in sanitizedArgs &&
         before.httpProxyBypassRules !== result.httpProxyBypassRules)
-    // Why: only the newest changed proxy snapshot may reach browser partitions after awaits below.
+    // Why: only the newest changed proxy snapshot may reach browser partitions.
     const proxyCommitGeneration = proxySettingsChanged ? ++latestProxyCommitGeneration : 0
+    if (proxySettingsChanged) {
+      try {
+        await applyElectronProxySettings(result)
+      } catch {
+        console.warn('[settings] failed to apply network proxy settings')
+      }
+      if (proxyCommitGeneration === latestProxyCommitGeneration) {
+        try {
+          // Why: browser guests run on their own partitions, which defaultSession's proxy never reaches (STA-4779).
+          await applyBrowserSessionProxies(browserSessionRegistry.listProfiles(), result)
+        } catch {
+          console.warn('[settings] failed to apply network proxy settings to browser sessions')
+        }
+      }
+    }
     if (
       'computerAwakeMode' in sanitizedArgs ||
       'keepComputerAwakeWhileAgentsRun' in sanitizedArgs
@@ -247,21 +262,6 @@ export function registerSettingsHandlers(
     }
     if (APPEARANCE_MENU_KEYS.some((key) => key in sanitizedArgs)) {
       rebuildAppMenu()
-    }
-    if (proxySettingsChanged) {
-      try {
-        await applyElectronProxySettings(result)
-      } catch {
-        console.warn('[settings] failed to apply network proxy settings')
-      }
-      if (proxyCommitGeneration === latestProxyCommitGeneration) {
-        try {
-          // Why: browser guests run on their own partitions, which defaultSession's proxy never reaches (STA-4779).
-          await applyBrowserSessionProxies(browserSessionRegistry.listProfiles(), result)
-        } catch {
-          console.warn('[settings] failed to apply network proxy settings to browser sessions')
-        }
-      }
     }
     if ('appIcon' in sanitizedArgs && before.appIcon !== result.appIcon) {
       applyAppIcon(result.appIcon)

@@ -13,7 +13,11 @@ vi.mock('electron', () => ({
   }
 }))
 
-import { applyProxySettingsToSession, resetSessionProxyApplicationForTests } from './proxy-settings'
+import {
+  applyProxySettingsToSession,
+  releaseProxySessionApplication,
+  resetSessionProxyApplicationForTests
+} from './proxy-settings'
 import { handleElectronProxyLogin } from './electron-proxy-credentials'
 
 function createProxySession() {
@@ -326,6 +330,45 @@ describe('applyProxySettingsToSession', () => {
     )
     await applyProxySettingsToSession(proxySession, { httpProxyUrl: '' }, { env: {} })
 
+    const callback = vi.fn()
+    handleElectronProxyLogin(
+      { preventDefault: vi.fn() } as never,
+      { session: proxySession } as never,
+      {} as never,
+      {
+        isProxy: true,
+        scheme: 'basic',
+        host: 'proxy.example',
+        port: 8080,
+        realm: 'proxy'
+      },
+      callback
+    )
+    expect(callback).not.toHaveBeenCalled()
+  })
+
+  it('releases a removed session through the ordered proxy queue', async () => {
+    let finishWrite: (() => void) | undefined
+    const proxySession = createProxySession()
+    proxySession.setProxy.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (finishWrite = resolve))
+    )
+    resetSessionProxyApplicationForTests(proxySession)
+
+    const applying = applyProxySettingsToSession(
+      proxySession,
+      { httpProxyUrl: 'http://alice:secret@proxy.example:8080' },
+      { env: {} }
+    )
+    const releasing = releaseProxySessionApplication(proxySession)
+    await vi.waitFor(() => expect(proxySession.setProxy).toHaveBeenCalledTimes(1))
+    finishWrite?.()
+    await Promise.all([applying, releasing])
+
+    expect(proxySession.setProxy.mock.calls).toEqual([
+      [{ mode: 'fixed_servers', proxyRules: 'http://proxy.example:8080' }],
+      [{ mode: 'system' }]
+    ])
     const callback = vi.fn()
     handleElectronProxyLogin(
       { preventDefault: vi.fn() } as never,
