@@ -65,7 +65,8 @@ async function executeTerminalPastePlanNow(
         forceBracketedPaste: plan.mode === 'bracketed-terminal',
         ...(plan.windowsInputRecordNewline
           ? { windowsInputRecordNewline: plan.windowsInputRecordNewline }
-          : {})
+          : {}),
+        ...(plan.followedByNonImageInput ? { followedByNonImageInput: true } : {})
       })
     }, operationTimeoutMs)
     if (pasteResult.timedOut) {

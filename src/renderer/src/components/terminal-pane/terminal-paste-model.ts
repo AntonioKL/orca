@@ -40,6 +40,7 @@ export type TerminalPastePlan = {
   // every write path applies xterm's native \r?\n -> \r before ConPTY sees LF.
   newlinePolicy: 'preserve' | 'terminal-cr' | 'windows-input-record'
   windowsInputRecordNewline?: WindowsInputRecordNewline
+  followedByNonImageInput?: boolean
   runtimeKey: string
   maxChunkBytes?: number
   bracketed: boolean
@@ -52,6 +53,7 @@ export type TerminalPasteTextOptions = {
   forceBracketedPasteForMultiline?: boolean
   windowsInputRecordNewline?: WindowsInputRecordNewline
   recoverImagePasteWebglAtlas?: boolean
+  followedByNonImageInput?: boolean
 }
 
 export type WindowsInputRecordNewline = 'alt-enter' | 'csi-u'
