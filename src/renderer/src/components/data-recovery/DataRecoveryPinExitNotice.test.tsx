@@ -88,10 +88,18 @@ describe('DataRecoveryPinExitNotice', () => {
     render(<DataRecoveryPinExitNotice />)
     expect(await screen.findByRole('dialog')).toBeTruthy()
     expect(screen.getByText('Custom agents are now available')).toBeTruthy()
+    expect(
+      screen.getByText(
+        'Save a Codex, Claude, or other agent command under a name, then pick it from the agent list.'
+      )
+    ).toBeTruthy()
+    expect(screen.getByText('Agent picker')).toBeTruthy()
+    expect(screen.getByText('Codex')).toBeTruthy()
     expect(screen.getByText(PIN_EXIT_CUSTOM_AGENT_EXAMPLE_NAME)).toBeTruthy()
     expect(screen.getByText(PIN_EXIT_CUSTOM_AGENT_EXAMPLE_COMMAND)).toBeTruthy()
     expect(screen.getByText(PIN_EXIT_CUSTOM_AGENT_EXAMPLE_2_NAME)).toBeTruthy()
     expect(screen.getByText(PIN_EXIT_CUSTOM_AGENT_EXAMPLE_2_COMMAND)).toBeTruthy()
+    expect(screen.queryByText('Claude')).toBeNull()
     expect(screen.getAllByText('Settings → Agents').length).toBeGreaterThanOrEqual(1)
     expect(
       screen.getByText('If you need to downgrade to a previous Orca version later')

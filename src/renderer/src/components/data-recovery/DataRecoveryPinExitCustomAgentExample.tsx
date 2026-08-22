@@ -4,31 +4,36 @@ import { cn } from '@/lib/utils'
 import { translate } from '@/i18n/i18n'
 import type { BuiltInTuiAgent } from '../../../../shared/types'
 
-export const PIN_EXIT_CUSTOM_AGENT_EXAMPLE_NAME = 'gpt-5.6-luna-low'
+export const PIN_EXIT_CUSTOM_AGENT_EXAMPLE_NAME = 'Luna (low)'
 export const PIN_EXIT_CUSTOM_AGENT_EXAMPLE_COMMAND =
   'codex --model gpt-5.6-luna -c model_reasoning_effort="low"'
-export const PIN_EXIT_CUSTOM_AGENT_EXAMPLE_2_NAME = 'gpt-5.6-luna-high'
+export const PIN_EXIT_CUSTOM_AGENT_EXAMPLE_2_NAME = 'Luna (high)'
 export const PIN_EXIT_CUSTOM_AGENT_EXAMPLE_2_COMMAND =
   'codex --model gpt-5.6-luna -c model_reasoning_effort="high"'
 
-/** Static picker mock: shows custom agents as named rows among built-ins. */
+/** Static picker mock: customs sit under their base, with names a person would pick. */
 export function DataRecoveryPinExitCustomAgentExample() {
   return (
     <div aria-hidden className="overflow-hidden rounded-md border border-border bg-card text-left">
-      <ExamplePickerRow agent="claude" label="Claude" />
-      <ExamplePickerRow
-        agent="codex"
-        label={PIN_EXIT_CUSTOM_AGENT_EXAMPLE_NAME}
-        command={PIN_EXIT_CUSTOM_AGENT_EXAMPLE_COMMAND}
-        isCustom
-        selected
-      />
-      <ExamplePickerRow
-        agent="codex"
-        label={PIN_EXIT_CUSTOM_AGENT_EXAMPLE_2_NAME}
-        command={PIN_EXIT_CUSTOM_AGENT_EXAMPLE_2_COMMAND}
-        isCustom
-      />
+      <div className="border-b border-border/60 bg-muted/30 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.05em] text-muted-foreground">
+        {translate('auto.components.dataRecovery.pinExitExampleCaption', 'Agent picker')}
+      </div>
+      <div className="divide-y divide-border/60">
+        <ExamplePickerRow agent="codex" label="Codex" />
+        <ExamplePickerRow
+          agent="codex"
+          label={PIN_EXIT_CUSTOM_AGENT_EXAMPLE_NAME}
+          command={PIN_EXIT_CUSTOM_AGENT_EXAMPLE_COMMAND}
+          isCustom
+          selected
+        />
+        <ExamplePickerRow
+          agent="codex"
+          label={PIN_EXIT_CUSTOM_AGENT_EXAMPLE_2_NAME}
+          command={PIN_EXIT_CUSTOM_AGENT_EXAMPLE_2_COMMAND}
+          isCustom
+        />
+      </div>
     </div>
   )
 }
@@ -51,8 +56,7 @@ function ExamplePickerRow({
       className={cn(
         'flex items-start gap-2.5 px-3 py-2',
         selected &&
-          'bg-[color-mix(in_srgb,var(--foreground)_10%,var(--background))] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--foreground)_12%,transparent)]',
-        !selected && 'border-t border-border/60 first:border-t-0'
+          'bg-[color-mix(in_srgb,var(--foreground)_10%,var(--background))] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--foreground)_12%,transparent)]'
       )}
       data-current={selected ? 'true' : undefined}
     >

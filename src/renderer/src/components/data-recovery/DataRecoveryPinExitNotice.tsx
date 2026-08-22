@@ -99,7 +99,7 @@ export function DataRecoveryPinExitNotice() {
           <DialogDescription className="text-sm leading-relaxed text-foreground">
             {translate(
               'auto.components.dataRecovery.pinExitLead',
-              'A custom agent is saved arguments for a harness like Codex or Claude, picked by name.'
+              'Save a Codex, Claude, or other agent command under a name, then pick it from the agent list.'
             )}
           </DialogDescription>
         </DialogHeader>
