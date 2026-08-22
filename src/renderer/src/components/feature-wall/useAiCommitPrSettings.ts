@@ -7,7 +7,7 @@ import {
   isCustomAgentId,
   resolveCommitMessageAgentChoice
 } from '../../../../shared/commit-message-agent-spec'
-import { getAgentCatalog } from '@/lib/agent-catalog'
+import { getAgentLabel } from '@/lib/agent-catalog'
 import { saveCommitMessageAiSettings } from '@/lib/agent-catalog-authoring'
 import { notifyAgentAuthoringWriteFailure } from '@/lib/agent-authoring-write-failure-toast'
 import { useAppStore } from '@/store'
@@ -59,8 +59,7 @@ export function useAiCommitPrSettings(): AiCommitPrSettingsViewModel {
   const unsupportedConfiguredAgent =
     resolvedAgentId && !isCustom && !activeCapability ? resolvedAgentId : null
   const unsupportedConfiguredAgentLabel = unsupportedConfiguredAgent
-    ? (getAgentCatalog().find((a) => a.id === unsupportedConfiguredAgent)?.label ??
-      unsupportedConfiguredAgent)
+    ? getAgentLabel(unsupportedConfiguredAgent)
     : null
   const agentSelectValue = activeCapability
     ? activeCapability.id
@@ -77,12 +76,13 @@ export function useAiCommitPrSettings(): AiCommitPrSettingsViewModel {
     resolvedAgentId === null &&
     !config.agentId &&
     settings?.defaultTuiAgent &&
-    settings.defaultTuiAgent !== 'blank'
+    settings.defaultTuiAgent !== 'blank' &&
+    // 'auto' pins no agent, so it can never be the unsupported one.
+    settings.defaultTuiAgent !== 'auto'
       ? settings.defaultTuiAgent
       : null
   const unsupportedDefaultAgentLabel = unsupportedDefaultAgent
-    ? (getAgentCatalog().find((a) => a.id === unsupportedDefaultAgent)?.label ??
-      unsupportedDefaultAgent)
+    ? getAgentLabel(unsupportedDefaultAgent)
     : null
   const unsupportedAgentLabel = unsupportedConfiguredAgentLabel ?? unsupportedDefaultAgentLabel
 

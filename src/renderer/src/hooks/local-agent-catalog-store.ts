@@ -84,7 +84,10 @@ function handleSettingsChanged(updates: Partial<GlobalSettings>): void {
 export function subscribeToLocalAgentCatalog(listener: () => void): () => void {
   listeners.add(listener)
   if (listeners.size === 1) {
-    unsubscribeSettings = window.api.settings.onChanged(handleSettingsChanged)
+    // Same defensive read as `loadLocalAgentCatalog`: a host without the settings
+    // change feed must degrade to a one-shot read, not throw out of the effect.
+    const onChanged = window.api?.settings?.onChanged
+    unsubscribeSettings = typeof onChanged === 'function' ? onChanged(handleSettingsChanged) : null
     loadLocalAgentCatalog()
   }
   return () => {

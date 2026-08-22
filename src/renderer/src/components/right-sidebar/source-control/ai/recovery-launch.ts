@@ -7,7 +7,8 @@ import {
   pickSourceControlLaunchAgent,
   readSourceControlLaunchRecipeAgentId
 } from '@/lib/source-control-launch-agent-selection'
-import { isTuiAgentEnabled, toLegacyAutoPreference } from '../../../../../../shared/tui-agent-selection'
+import { isDetectedAgentAvailable } from '@/lib/detected-agent-availability'
+import { toLegacyAutoPreference } from '../../../../../../shared/tui-agent-selection'
 import type {
   SourceControlActionRecipe,
   SourceControlLaunchActionId
@@ -128,8 +129,7 @@ export async function launchSourceControlRecoveryAgentWithDefault({
   const savedAgent = readSourceControlLaunchRecipeAgentId(savedRecipe)
   if (
     savedAgent &&
-    (!detectedAgents.includes(savedAgent) ||
-      !isTuiAgentEnabled(savedAgent, store.settings?.disabledTuiAgents))
+    !isDetectedAgentAvailable(savedAgent, detectedAgents, store.settings?.disabledTuiAgents)
   ) {
     toast.error(copy.savedAgentUnavailable)
     return false

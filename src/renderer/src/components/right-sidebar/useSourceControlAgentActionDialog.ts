@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { getAgentCatalog } from '@/lib/agent-catalog'
+import { getAgentLabel } from '@/lib/agent-catalog'
 import { useLocalAgentCatalog } from '@/hooks/useLocalAgentCatalog'
 import { buildSourceControlAgentActionOptions } from './source-control-agent-action-agent-options'
 import {
@@ -283,9 +283,7 @@ export function useSourceControlAgentActionDialog({
     if (!launchAgentScope.overridesGlobalAgent) {
       return null
     }
-    const catalog = getAgentCatalog()
-    const labelFor = (agentId: TuiAgent | null): string =>
-      catalog.find((entry) => entry.id === agentId)?.label ?? agentId ?? ''
+    const labelFor = (agentId: TuiAgent | null): string => (agentId ? getAgentLabel(agentId) : '')
     return {
       effectiveAgentLabel: labelFor(launchAgentScope.effectiveAgentId),
       globalAgentLabel: labelFor(launchAgentScope.globalAgentId)

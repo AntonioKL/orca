@@ -1,4 +1,4 @@
-import { getAgentCatalog } from '@/lib/agent-catalog'
+import { getAgentLabel } from '@/lib/agent-catalog'
 import { isTuiAgentEnabled } from '../../../../shared/tui-agent-selection'
 import type { GlobalSettings, TuiAgent } from '../../../../shared/types'
 import type { SourceControlAiWriteTarget } from '../../../../shared/source-control-ai-recipe-save'
@@ -129,7 +129,7 @@ export function buildSourceControlAgentStatusCopy(args: {
     detecting
   } = args
   if (selectedAgentUnavailable) {
-    return `${getAgentCatalog().find((entry) => entry.id === selectedAgent)?.label ?? selectedAgent} is not enabled or was not detected on this workspace host.`
+    return `${selectedAgent ? getAgentLabel(selectedAgent) : selectedAgent} is not enabled or was not detected on this workspace host.`
   }
   if (connectionUnavailable) {
     return 'Unable to resolve the workspace connection.'

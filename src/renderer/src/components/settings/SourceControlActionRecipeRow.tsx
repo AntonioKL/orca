@@ -3,6 +3,7 @@ import type { GlobalSettings, TuiAgent } from '../../../../shared/types'
 import { toLegacyAutoPreference } from '../../../../shared/tui-agent-selection'
 import type { CustomAgentId } from '../../../../shared/commit-message-agent-spec'
 import { CUSTOM_AGENT_ID, isCustomAgentId } from '../../../../shared/commit-message-agent-spec'
+import { useLocalAgentCatalog } from '@/hooks/useLocalAgentCatalog'
 import {
   SOURCE_CONTROL_ACTION_LABELS,
   type SourceControlActionId
@@ -73,7 +74,8 @@ export function SourceControlActionRecipeRow({
   const agentArgsPlaceholder = getSourceControlAgentArgsPlaceholder(
     resolveAgentArgsPlaceholderAgent(selectedAgent, defaultTuiAgent)
   )
-  const agentOptions = getAgentCatalogForAction(actionId, selectedAgent)
+  const { snapshot: localAgentCatalog } = useLocalAgentCatalog()
+  const agentOptions = getAgentCatalogForAction(actionId, selectedAgent, localAgentCatalog)
   const agentWarningText = getSourceControlActionAgentWarningText(actionId, selectedAgent)
   const agentSupportText = getSourceControlActionAgentSupportText(actionId)
 

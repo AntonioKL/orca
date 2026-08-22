@@ -47,6 +47,7 @@ vi.mock('@/lib/tui-agent-startup', () => ({
 
 vi.mock('@/lib/agent-catalog', () => ({
   getAgentCatalog: () => [{ id: 'claude', label: 'Claude' }],
+  getAgentLabel: (agent: string) => (agent === 'claude' ? 'Claude' : agent),
   AgentIcon: function AgentIcon() {
     return null
   }

@@ -2,7 +2,7 @@ import { useCallback, useMemo } from 'react'
 import { Maximize2, Minimize2, Minus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { getAgentCatalog, AgentIcon } from '@/lib/agent-catalog'
+import { getAgentLabel, AgentIcon } from '@/lib/agent-catalog'
 import { focusTerminalTabSurface } from '@/lib/focus-terminal-tab-surface'
 import { useAppStore } from '@/store'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../../shared/constants'
@@ -54,10 +54,7 @@ export function FloatingTerminalWindowControls({
       ? defaultTuiAgent
       : null
   const defaultAgentLabel = useMemo(
-    () =>
-      defaultAgent
-        ? (getAgentCatalog().find((agent) => agent.id === defaultAgent)?.label ?? defaultAgent)
-        : null,
+    () => (defaultAgent ? getAgentLabel(defaultAgent) : null),
     [defaultAgent]
   )
 

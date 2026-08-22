@@ -2630,8 +2630,14 @@ function getLaunchConfigForEntry(
     return registryLaunchConfig
   }
   const sleepingRecord = state.sleepingAgentSessionsByPaneKey[entry.paneKey]
+  // Records key on the resumable BASE; a custom-id entry must match through it.
   return sleepingRecord?.launchConfig &&
-    sleepingRecord.agent === entry.agentType &&
+    sleepingRecord.agent ===
+      resolveTuiAgentBaseAgent(
+        entry.agentType as TuiAgent,
+        state.settings?.customTuiAgents,
+        state.settings?.deletedCustomTuiAgents
+      ) &&
     entry.providerSession &&
     agentProviderSessionsEqual(
       entry.agentType,

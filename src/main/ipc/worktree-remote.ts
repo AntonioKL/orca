@@ -61,7 +61,8 @@ import {
 import { requireSshGitProvider } from '../providers/ssh-git-dispatch'
 import { getSshFilesystemProvider } from '../providers/ssh-filesystem-dispatch'
 import type { SshGitProvider } from '../providers/ssh-git-provider'
-import { TUI_AGENT_CONFIG, isTuiAgent } from '../../shared/tui-agent-config'
+import { isTuiAgent } from '../../shared/tui-agent-config'
+import { resolveTuiAgentConfig } from '../../shared/custom-tui-agents'
 import { isWindowsAbsolutePathLike } from '../../shared/cross-platform-path'
 import { runWorktreeChangeInvalidators } from './worktree-change-invalidators'
 import {
@@ -306,7 +307,15 @@ async function spawnLocalStartupAndSetupTerminals(args: {
   try {
     // Why: only after `git worktree add` + metadata registration is the path safe for a runtime PTY to boot the agent while setup runs alongside.
     if (isTuiAgent(createdWithAgent)) {
-      const preset = TUI_AGENT_CONFIG[createdWithAgent].preflightTrust
+      // Why the resolver, not a direct index: TUI_AGENT_CONFIG is keyed by
+      // built-ins, so a custom agent id reads `undefined` here and the property
+      // access below threw — surfacing as "Failed to create the startup
+      // terminal" and no terminal at all. A custom agent takes its base's trust.
+      const preset = resolveTuiAgentConfig(
+        createdWithAgent,
+        settings.customTuiAgents,
+        settings.deletedCustomTuiAgents
+      )?.preflightTrust
       try {
         if (preset === 'cursor') {
           markCursorWorkspaceTrusted(worktree.path)

@@ -1,5 +1,6 @@
 import { getAgentCatalog } from '@/lib/agent-catalog'
 import { isCustomAgentId } from '../../../shared/commit-message-agent-spec'
+import { isDetectedAgentAvailable } from '@/lib/detected-agent-availability'
 import {
   normalizeRepoSourceControlAiOverrides,
   resolveSourceControlActionRecipe
@@ -25,13 +26,16 @@ export function pickSourceControlLaunchAgent(args: {
   disabledAgents?: TuiAgent[]
 }): TuiAgent | null {
   const enabledAgents = filterEnabledTuiAgents(args.detectedAgents, args.disabledAgents)
-  if (args.savedAgent && enabledAgents.includes(args.savedAgent)) {
+  if (
+    args.savedAgent &&
+    isDetectedAgentAvailable(args.savedAgent, args.detectedAgents, args.disabledAgents)
+  ) {
     return args.savedAgent
   }
   if (
     args.defaultAgent &&
     args.defaultAgent !== 'blank' &&
-    enabledAgents.includes(args.defaultAgent)
+    isDetectedAgentAvailable(args.defaultAgent, args.detectedAgents, args.disabledAgents)
   ) {
     return args.defaultAgent
   }

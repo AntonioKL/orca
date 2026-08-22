@@ -15,6 +15,8 @@ import {
 import { translate } from '@/i18n/i18n'
 import { createLocalizedCatalog } from '@/i18n/localized-catalog'
 import { AGENT_FAVICON_ASSETS } from './agent-favicon-assets'
+import { isCustomTuiAgentId, resolveTuiAgentBaseAgent } from '../../../shared/custom-tui-agents'
+import { getAgentCatalogSettings } from './agent-catalog-settings-source'
 
 export type AgentCatalogEntry = {
   id: TuiAgent
@@ -315,8 +317,23 @@ export const getAgentCatalog = createLocalizedCatalog((): AgentCatalogEntry[] =>
 // Why: tests and a few legacy call sites still import a catalog snapshot.
 export const AGENT_CATALOG: AgentCatalogEntry[] = getAgentCatalog()
 
+/** The custom agent's own name (live or tombstoned) for a custom id — never the
+ *  raw `custom-agent:<base>:<uuid>` string and never its base harness's name. */
+function customAgentLabel(agent: TuiAgent): string | null {
+  if (!isCustomTuiAgentId(agent)) {
+    return null
+  }
+  const settings = getAgentCatalogSettings()
+  const label =
+    settings?.customTuiAgents?.find((candidate) => candidate?.id === agent)?.label ??
+    settings?.deletedCustomTuiAgents?.find((candidate) => candidate?.id === agent)?.label
+  return label?.trim() || null
+}
+
 export function getAgentLabel(agent: TuiAgent): string {
-  return getAgentCatalog().find((entry) => entry.id === agent)?.label ?? agent
+  return (
+    customAgentLabel(agent) ?? getAgentCatalog().find((entry) => entry.id === agent)?.label ?? agent
+  )
 }
 
 export function AgentIcon({
@@ -332,6 +349,21 @@ export function AgentIcon({
   // arrived.
   if (!agent) {
     return <AgentLetterIcon letter="?" size={size} />
+  }
+  // Icon assets are built-in-only: a custom agent wears its base harness's icon,
+  // and an unresolvable custom id degrades to its own initial.
+  if (isCustomTuiAgentId(agent)) {
+    const settings = getAgentCatalogSettings()
+    const base = resolveTuiAgentBaseAgent(
+      agent,
+      settings?.customTuiAgents,
+      settings?.deletedCustomTuiAgents
+    )
+    return base ? (
+      <AgentIcon agent={base} size={size} />
+    ) : (
+      <AgentLetterIcon letter="?" size={size} />
+    )
   }
   if (agent === 'claude' || agent === 'claude-agent-teams') {
     return <ClaudeIcon size={size} />

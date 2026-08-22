@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue
 } from '@/components/ui/select'
-import { getAgentCatalog, AgentIcon } from '@/lib/agent-catalog'
+import { getAgentLabel, AgentIcon } from '@/lib/agent-catalog'
 import { planSourceControlTextGeneration } from '@/lib/source-control-generation-plan'
 import {
   CUSTOM_AGENT_ID,
@@ -75,7 +75,7 @@ export function getDefaultSourceControlTextGenerationSaveTargetKey(
 }
 
 function agentLabel(agentId: TuiAgent): string {
-  return getAgentCatalog().find((agent) => agent.id === agentId)?.label ?? agentId
+  return getAgentLabel(agentId)
 }
 
 export function SourceControlTextGenerationDialogForm({

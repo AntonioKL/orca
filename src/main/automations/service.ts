@@ -165,7 +165,10 @@ export class AutomationService {
       automation: this.store.listAutomations().find((entry) => entry.id === run.automationId),
       run,
       claudeUsage: this.claudeUsage,
-      codexUsage: this.codexUsage
+      codexUsage: this.codexUsage,
+      // Usage stores are per-built-in, so a custom agent's runs need its base
+      // harness resolved from the live catalog.
+      agentCatalog: this.store.getSettings()
     })
     // Why: the run is final during the await above, so a concurrent create-time
     // retention prune may have evicted it — the usage write must not throw then.

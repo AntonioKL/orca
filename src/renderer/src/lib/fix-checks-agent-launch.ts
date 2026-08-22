@@ -10,6 +10,7 @@ import {
   pickSourceControlLaunchAgent,
   readSourceControlLaunchRecipeAgentId
 } from '@/lib/source-control-launch-agent-selection'
+import { isDetectedAgentAvailable } from './detected-agent-availability'
 import { resolveSourceControlLaunchPlatform } from '@/lib/source-control-launch-platform'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 import { useAppStore } from '@/store'
@@ -18,7 +19,7 @@ import {
   DEFAULT_SOURCE_CONTROL_ACTION_COMMAND_TEMPLATES,
   renderSourceControlActionCommandTemplate
 } from '../../../shared/source-control-ai-actions'
-import { isTuiAgentEnabled, toLegacyAutoPreference } from '../../../shared/tui-agent-selection'
+import { toLegacyAutoPreference } from '../../../shared/tui-agent-selection'
 import type {
   GitHubWorkItem,
   TuiAgent,
@@ -53,9 +54,10 @@ async function detectAgentsForConnection(
 }
 
 function isAgentAvailable(agent: TuiAgent, detectedAgents: TuiAgent[]): boolean {
-  return (
-    detectedAgents.includes(agent) &&
-    isTuiAgentEnabled(agent, useAppStore.getState().settings?.disabledTuiAgents)
+  return isDetectedAgentAvailable(
+    agent,
+    detectedAgents,
+    useAppStore.getState().settings?.disabledTuiAgents
   )
 }
 

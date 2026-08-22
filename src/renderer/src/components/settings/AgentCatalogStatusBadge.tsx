@@ -67,7 +67,7 @@ export function AgentCatalogStatusBadge({
       variant={statusVariant(status)}
       className={cn(
         'font-normal',
-        isRepair && 'border-amber-500/40 text-amber-600 dark:text-amber-500',
+        isRepair && 'border-warning/40 text-warning-text',
         status === 'not-installed' && 'text-muted-foreground'
       )}
     >
