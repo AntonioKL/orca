@@ -2,10 +2,7 @@ import type { ElectronApplication, Locator, Page } from '@stablyai/playwright-te
 import { test, expect } from './helpers/orca-app'
 import { waitForActiveWorktree, waitForSessionReady } from './helpers/store'
 import { PALETTE_INTERACTION_BUDGET } from '../../src/renderer/src/lib/palette-match/palette-match-budget'
-import {
-  PALETTE_SECTION_RENDER_CAP,
-  TYPED_QUERY_LEADING_PREVIEW
-} from '../../src/renderer/src/components/cmd-j/palette-section-render-cap'
+import { PALETTE_SECTION_RENDER_CAP } from '../../src/renderer/src/components/cmd-j/palette-section-render-cap'
 
 const WORKSPACE_COUNT = 800
 const {
@@ -46,7 +43,10 @@ type PendingFeedbackProof = {
   sawZeroResults: boolean
 }
 
-type PendingFeedbackWindow = Window & { __cmdJPendingFeedbackProof?: PendingFeedbackProof }
+type PendingFeedbackWindow = Window & {
+  __cmdJPendingFeedbackObserver?: MutationObserver
+  __cmdJPendingFeedbackProof?: PendingFeedbackProof
+}
 
 async function seedAccumulatedWorkspaceCatalog(page: Page): Promise<void> {
   await page.evaluate(
@@ -190,6 +190,10 @@ async function seedAccumulatedWorkspaceCatalog(page: Page): Promise<void> {
 
 async function installPendingFeedbackObserver(page: Page): Promise<void> {
   await page.evaluate(() => {
+    const list = document.querySelector<HTMLElement>('[data-worktree-search-pending]')
+    if (!list) {
+      throw new Error('Cmd-J result list is not available')
+    }
     const proof: PendingFeedbackProof = {
       sawLoading: false,
       sawNoResults: false,
@@ -197,8 +201,7 @@ async function installPendingFeedbackObserver(page: Page): Promise<void> {
       sawZeroResults: false
     }
     const sample = (): void => {
-      const list = document.querySelector<HTMLElement>('[data-worktree-search-pending]')
-      if (list?.dataset.worktreeSearchPending !== 'true') {
+      if (list.dataset.worktreeSearchPending !== 'true') {
         return
       }
       proof.sawPending = true
@@ -207,12 +210,15 @@ async function installPendingFeedbackObserver(page: Page): Promise<void> {
       proof.sawZeroResults ||=
         list.closest('[role="dialog"]')?.textContent?.includes('0 results found') === true
     }
-    new MutationObserver(sample).observe(document.body, {
+    const observer = new MutationObserver(sample)
+    observer.observe(list, {
       attributes: true,
       childList: true,
       subtree: true
     })
-    ;(window as PendingFeedbackWindow).__cmdJPendingFeedbackProof = proof
+    const pendingWindow = window as PendingFeedbackWindow
+    pendingWindow.__cmdJPendingFeedbackObserver = observer
+    pendingWindow.__cmdJPendingFeedbackProof = proof
     sample()
   })
 }
@@ -412,7 +418,7 @@ async function expectAccumulatedCatalogCompleteness(dialog: Locator): Promise<vo
   await expect(rows).toHaveCount(PALETTE_SECTION_RENDER_CAP)
   await expect(
     dialog.getByText(
-      `${WORKSPACE_COUNT - TYPED_QUERY_LEADING_PREVIEW} more — scroll or keep typing to narrow`
+      `${WORKSPACE_COUNT - PALETTE_SECTION_RENDER_CAP} more — scroll or keep typing to narrow`
     )
   ).toBeVisible()
   const firstOrder = await rows.allTextContents()
@@ -562,11 +568,13 @@ test.describe('Cmd-J cold accumulated-workspace performance @headful', () => {
     const coldImmediateQuery = await readMetrics(orcaPage)
     expect(coldImmediateQuery).not.toBeNull()
     await expectHostQualifiedNeedleOrder(dialog)
-    expect(
-      await orcaPage.evaluate(
-        () => (window as PendingFeedbackWindow).__cmdJPendingFeedbackProof ?? null
-      )
-    ).toEqual({
+    const pendingFeedbackProof = await orcaPage.evaluate(() => {
+      const pendingWindow = window as PendingFeedbackWindow
+      pendingWindow.__cmdJPendingFeedbackObserver?.disconnect()
+      delete pendingWindow.__cmdJPendingFeedbackObserver
+      return pendingWindow.__cmdJPendingFeedbackProof ?? null
+    })
+    expect(pendingFeedbackProof).toEqual({
       sawLoading: true,
       sawNoResults: false,
       sawPending: true,
