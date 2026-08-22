@@ -364,20 +364,26 @@ async function togglePaletteFromMain(electronApp: ElectronApplication): Promise<
 async function waitForStableFrameCadence(page: Page): Promise<void> {
   await page.evaluate(
     () =>
-      new Promise<void>((resolve) => {
+      new Promise<void>((resolve, reject) => {
         let previousFrameAt = performance.now()
         let stableFrames = 0
+        let frameId = 0
+        const timeoutId = window.setTimeout(() => {
+          cancelAnimationFrame(frameId)
+          reject(new Error('Cmd-J frame cadence did not stabilize within 10 seconds'))
+        }, 10_000)
         const sample = (): void => {
           const now = performance.now()
           stableFrames = now - previousFrameAt <= 25 ? stableFrames + 1 : 0
           previousFrameAt = now
           if (stableFrames >= 12) {
+            window.clearTimeout(timeoutId)
             resolve()
             return
           }
-          requestAnimationFrame(sample)
+          frameId = requestAnimationFrame(sample)
         }
-        requestAnimationFrame(sample)
+        frameId = requestAnimationFrame(sample)
       })
   )
 }
