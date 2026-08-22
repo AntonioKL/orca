@@ -102,9 +102,7 @@ describe('installBrowserSessionPartitionPolicies proxy wiring', () => {
     }))
     const profile = nextProfile()
 
-    installBrowserSessionPartitionPolicies(profile)
-    // Why: the installer is sync and schedules the proxy write, so let the microtask queue drain.
-    await new Promise((resolve) => setImmediate(resolve))
+    await installBrowserSessionPartitionPolicies(profile)
 
     expect(sessionsByPartition.get(profile.partition)?.setProxy).toHaveBeenCalledWith({
       mode: 'fixed_servers',
@@ -119,8 +117,7 @@ describe('installBrowserSessionPartitionPolicies proxy wiring', () => {
     }))
     const profile = nextProfile()
 
-    installBrowserSessionPartitionPolicies(profile)
-    await new Promise((resolve) => setImmediate(resolve))
+    await installBrowserSessionPartitionPolicies(profile)
 
     expect(sessionsByPartition.get(profile.partition)?.setProxy).not.toHaveBeenCalled()
   })
