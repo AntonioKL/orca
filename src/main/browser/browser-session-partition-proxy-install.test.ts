@@ -57,8 +57,14 @@ vi.mock('./browser-webauthn-access', () => ({
   installBrowserWebAuthnAccessHandlers: vi.fn()
 }))
 
-import { installBrowserSessionPartitionPolicies } from './browser-session-partition-policies'
-import { setBrowserNetworkProxySettingsResolver } from './browser-session-proxy'
+import {
+  clearBrowserSessionPartitionPolicies,
+  installBrowserSessionPartitionPolicies
+} from './browser-session-partition-policies'
+import {
+  applyBrowserSessionProxies,
+  setBrowserNetworkProxySettingsResolver
+} from './browser-session-proxy'
 
 let partitionCounter = 0
 function nextProfile() {
@@ -175,5 +181,26 @@ describe('installBrowserSessionPartitionPolicies proxy wiring', () => {
     await expect(installBrowserSessionPartitionPolicies(profile)).resolves.toBeUndefined()
 
     expect(sess.setProxy).toHaveBeenCalledTimes(2)
+  })
+
+  it('cancels an in-flight policy retry when partition policies are cleared', async () => {
+    let proxyUrl = 'http://old.example:8080'
+    let finishWrite: (() => void) | undefined
+    setBrowserNetworkProxySettingsResolver(() => ({ httpProxyUrl: proxyUrl }))
+    const profile = nextProfile()
+    const sess = fromPartitionMock(profile.partition)
+    sess.setProxy.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (finishWrite = resolve))
+    )
+
+    const installation = installBrowserSessionPartitionPolicies(profile)
+    await vi.waitFor(() => expect(sess.setProxy).toHaveBeenCalledTimes(1))
+    clearBrowserSessionPartitionPolicies(profile.partition, sess as never)
+    proxyUrl = 'http://new.example:8080'
+    await applyBrowserSessionProxies([], { httpProxyUrl: proxyUrl })
+    finishWrite?.()
+    await installation
+
+    expect(sess.setProxy).toHaveBeenCalledTimes(1)
   })
 })

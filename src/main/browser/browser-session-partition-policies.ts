@@ -2,7 +2,10 @@ import { session } from 'electron'
 import type { Session } from 'electron'
 import type { BrowserSessionProfile } from '../../shared/browser-workspace-types'
 import { browserManager } from './browser-manager'
-import { applyProxyToBrowserSession } from './browser-session-proxy'
+import {
+  applyProxyToBrowserSession,
+  invalidateBrowserSessionProxyApplication
+} from './browser-session-proxy'
 import { hasSystemMediaAccess, requestSystemMediaAccess } from './browser-media-access'
 import { isAutoGrantedBrowserSessionPermission } from './browser-session-permission-policy'
 import { cleanElectronUserAgent, setupClientHintsOverride } from './browser-session-ua'
@@ -154,6 +157,7 @@ export function installBrowserSessionPartitionPolicies(
 
 export function clearBrowserSessionPartitionPolicies(partition: string, sess: Session): void {
   // Why: the Electron Session survives partition deletion; clear callbacks/listeners so removed profiles don't retain closures.
+  invalidateBrowserSessionProxyApplication(sess)
   configuredPartitions.delete(partition)
   browserManager.removeCertificateRequestGuard(sess)
   sess.removeListener('will-download', handleWillDownload)

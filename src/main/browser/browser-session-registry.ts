@@ -234,13 +234,13 @@ class BrowserSessionRegistry {
       await installBrowserSessionPartitionPolicies(profile)
     } catch (error) {
       const sess = session.fromPartition(partition)
+      clearBrowserSessionUserAgentMode(sess)
+      clearBrowserSessionPartitionPolicies(partition, sess)
       try {
         await releaseProxySessionApplication(sess)
       } catch {
         console.warn('[proxy] Failed to release proxy from browser partition', partition)
       }
-      clearBrowserSessionUserAgentMode(sess)
-      clearBrowserSessionPartitionPolicies(partition, sess)
       throw error
     }
     this.profiles.set(id, profile)
@@ -285,13 +285,13 @@ class BrowserSessionRegistry {
     // Why: clear the partition's storage so deleting a profile doesn't leave orphaned cookies/cache behind.
     try {
       const sess = session.fromPartition(profile.partition)
+      clearBrowserSessionUserAgentMode(sess)
+      clearBrowserSessionPartitionPolicies(profile.partition, sess)
       try {
         await releaseProxySessionApplication(sess)
       } catch {
         console.warn('[proxy] Failed to release proxy from browser partition', profile.partition)
       }
-      clearBrowserSessionUserAgentMode(sess)
-      clearBrowserSessionPartitionPolicies(profile.partition, sess)
       await sess.clearStorageData()
       await sess.clearCache()
     } catch {

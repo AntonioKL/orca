@@ -6,6 +6,8 @@ import type { NetworkProxySettings } from '../../shared/network-proxy'
 // Why: browser modules hold no store handle, so main injects a reader the way rate-limits does.
 let resolveNetworkProxySettings: (() => NetworkProxySettings) | null = null
 let proxyPolicyGeneration = 0
+// Why: removed partitions must stop stale readiness loops before their queued system release.
+const browserSessionProxyApplicationGenerations = new WeakMap<Session, number>()
 
 export function setBrowserNetworkProxySettingsResolver(
   resolver: (() => NetworkProxySettings) | null
@@ -17,6 +19,7 @@ export function setBrowserNetworkProxySettingsResolver(
 }
 
 export async function applyProxyToBrowserSession(sess: Session): Promise<void> {
+  const applicationGeneration = browserSessionProxyApplicationGenerations.get(sess) ?? 0
   let observedGeneration: number
   do {
     observedGeneration = proxyPolicyGeneration
@@ -25,7 +28,15 @@ export async function applyProxyToBrowserSession(sess: Session): Promise<void> {
       return
     }
     await applyProxySettingsToSession(sess, resolved)
-  } while (observedGeneration !== proxyPolicyGeneration)
+  } while (
+    applicationGeneration === (browserSessionProxyApplicationGenerations.get(sess) ?? 0) &&
+    observedGeneration !== proxyPolicyGeneration
+  )
+}
+
+export function invalidateBrowserSessionProxyApplication(sess: Session): void {
+  const generation = browserSessionProxyApplicationGenerations.get(sess) ?? 0
+  browserSessionProxyApplicationGenerations.set(sess, generation + 1)
 }
 
 /** Re-apply the app-wide proxy across every browser partition. */

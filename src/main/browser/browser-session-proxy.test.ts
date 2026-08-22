@@ -28,9 +28,11 @@ vi.mock('electron', () => ({
 import {
   applyBrowserSessionProxies,
   applyProxyToBrowserSession,
+  invalidateBrowserSessionProxyApplication,
   setBrowserNetworkProxySettingsResolver
 } from './browser-session-proxy'
 import { handleElectronProxyLogin } from '../network/electron-proxy-credentials'
+import { releaseProxySessionApplication } from '../network/proxy-settings'
 
 const PROFILES = [
   {
@@ -182,6 +184,30 @@ describe('browser session proxy', () => {
     expect(sess.setProxy.mock.calls).toEqual([
       [{ mode: 'fixed_servers', proxyRules: 'http://old.example:8080' }],
       [{ mode: 'fixed_servers', proxyRules: 'http://new.example:8080' }]
+    ])
+  })
+
+  it('does not reapply policy after an in-flight partition is invalidated', async () => {
+    let proxyUrl = 'http://old.example:8080'
+    let finishFirstWrite: (() => void) | undefined
+    setBrowserNetworkProxySettingsResolver(() => ({ httpProxyUrl: proxyUrl }))
+    const sess = fromPartition('persist:orca-browser-session-restored')
+    sess.setProxy.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (finishFirstWrite = resolve))
+    )
+
+    const restoredInstallation = applyProxyToBrowserSession(sess as never)
+    await vi.waitFor(() => expect(sess.setProxy).toHaveBeenCalledTimes(1))
+    invalidateBrowserSessionProxyApplication(sess as never)
+    const release = releaseProxySessionApplication(sess as never)
+    proxyUrl = 'http://new.example:8080'
+    await applyBrowserSessionProxies([], { httpProxyUrl: proxyUrl })
+    finishFirstWrite?.()
+    await Promise.all([restoredInstallation, release])
+
+    expect(sess.setProxy.mock.calls).toEqual([
+      [{ mode: 'fixed_servers', proxyRules: 'http://old.example:8080' }],
+      [{ mode: 'system' }]
     ])
   })
 
