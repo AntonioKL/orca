@@ -22,8 +22,7 @@ import type {
   GitHubOwnerRepo
 } from '../../../../../shared/github/pull-request-types'
 import type { GlobalSettings } from '../../../../../shared/global-settings-types'
-import type { Repo } from '../../../../../shared/repo-types'
-import type { IssueSourcePreference } from '../../../../../shared/repo-types'
+import type { IssueSourcePreference, Repo } from '../../../../../shared/repo-types'
 import type { ParsedTaskQuery } from '../../../../../shared/task-query'
 import type { TaskResumeState, TaskViewPresetId } from '../../../../../shared/ui-chrome-types'
 import {

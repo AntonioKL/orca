@@ -176,6 +176,12 @@ export function useTaskPageCreateGithubSubmit({
           }
         })
         .catch(() => {})
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : translate('auto.components.TaskPage.7437e340b4', 'Failed to create issue.')
+      )
     } finally {
       setNewIssueSubmitting(false)
     }

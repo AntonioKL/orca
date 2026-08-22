@@ -104,6 +104,10 @@ export function GithubWorkItemRow({
       tabIndex={0}
       onClick={() => openGitHubDetailPage(item)}
       onKeyDown={(event) => {
+        // Why: keydown bubbles from the row's nested action buttons; activating those must not also open the detail page.
+        if (event.target !== event.currentTarget) {
+          return
+        }
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault()
           openGitHubDetailPage(item)

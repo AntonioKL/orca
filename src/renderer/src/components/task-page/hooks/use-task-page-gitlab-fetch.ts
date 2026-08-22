@@ -5,6 +5,7 @@ import {
   isGitLabMRFilter
 } from '@/components/task-page/gitlab/gitlab-task-filters'
 import { getTaskPageRepoSourceContext } from '@/components/task-page/source/repo-source-context'
+import { withGitLabIpcTimeout } from '@/runtime/gitlab-ipc-timeout'
 import type { GitLabIssueFilter, GitLabTaskFilter } from '@/components/task-page-localized-options'
 import type { GitLabTodo, GitLabWorkItem } from '../../../../../shared/gitlab-types'
 import type { Repo } from '../../../../../shared/repo-types'
@@ -71,8 +72,8 @@ export function useTaskPageGitLabFetch({
       gitlabView === 'issues'
         ? (repo: (typeof eligibleRepos)[0]) => {
             const isAssignedToMe = activeIssueFilter === 'assigned-to-me'
-            return window.api.gl
-              .listIssues({
+            return withGitLabIpcTimeout(
+              window.api.gl.listIssues({
                 repoPath: repo.path,
                 repoId: repo.id,
                 sourceContext: getTaskPageRepoSourceContext(repo, 'gitlab'),
@@ -80,19 +81,19 @@ export function useTaskPageGitLabFetch({
                 assignee: isAssignedToMe ? '@me' : undefined,
                 limit: 50
               })
-              .then((result) => {
-                const typed = result as {
-                  items: GitLabWorkItem[]
-                  error?: { type?: string; message: string }
-                }
-                // Why: not_found just means the repo isn't a GitLab project (mixed selection); drop it so the list shows no false errors.
-                const error = typed.error?.type === 'not_found' ? undefined : typed.error
-                return { repoId: repo.id, items: typed.items, error }
-              })
+            ).then((result) => {
+              const typed = result as {
+                items: GitLabWorkItem[]
+                error?: { type?: string; message: string }
+              }
+              // Why: not_found just means the repo isn't a GitLab project (mixed selection); drop it so the list shows no false errors.
+              const error = typed.error?.type === 'not_found' ? undefined : typed.error
+              return { repoId: repo.id, items: typed.items, error }
+            })
           }
         : (repo: (typeof eligibleRepos)[0]) =>
-            window.api.gl
-              .listMRs({
+            withGitLabIpcTimeout(
+              window.api.gl.listMRs({
                 repoPath: repo.path,
                 repoId: repo.id,
                 sourceContext: getTaskPageRepoSourceContext(repo, 'gitlab'),
@@ -100,14 +101,14 @@ export function useTaskPageGitLabFetch({
                 page: 1,
                 perPage: 50
               })
-              .then((result) => {
-                const typed = result as {
-                  items: GitLabWorkItem[]
-                  error?: { type?: string; message: string }
-                }
-                const error = typed.error?.type === 'not_found' ? undefined : typed.error
-                return { repoId: repo.id, items: typed.items, error }
-              })
+            ).then((result) => {
+              const typed = result as {
+                items: GitLabWorkItem[]
+                error?: { type?: string; message: string }
+              }
+              const error = typed.error?.type === 'not_found' ? undefined : typed.error
+              return { repoId: repo.id, items: typed.items, error }
+            })
 
     void Promise.allSettled(eligibleRepos.map(fetchItems))
       .then((results) => {
@@ -158,12 +159,13 @@ export function useTaskPageGitLabFetch({
     }
     let stale = false
     setGitlabTodosLoading(true)
-    void window.api.gl
-      .todos({
+    void withGitLabIpcTimeout(
+      window.api.gl.todos({
         repoPath: primaryRepo.path,
         repoId: primaryRepo.id,
         sourceContext: getTaskPageRepoSourceContext(primaryRepo, 'gitlab')
       })
+    )
       .then((todos) => {
         if (!stale) {
           setGitlabTodos(todos as GitLabTodo[])

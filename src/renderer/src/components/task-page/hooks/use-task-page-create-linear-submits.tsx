@@ -309,6 +309,15 @@ export function useTaskPageCreateLinearSubmits({
           }
         })
         .catch(() => {})
+    } catch (error) {
+      // Why: a stale runtime context already handed the dialog to another provider; its toast would be noise.
+      if (submitProviderRuntimeContextKey === providerRuntimeContextKeyRef.current) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : translate('auto.components.TaskPage.7437e340b4', 'Failed to create issue.')
+        )
+      }
     } finally {
       if (submitProviderRuntimeContextKey === providerRuntimeContextKeyRef.current) {
         setNewLinearIssueSubmitting(false)

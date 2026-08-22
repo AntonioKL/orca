@@ -2,8 +2,8 @@ import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } 
 
 import { loadLinearIssueView } from '@/components/linear-issue-view-storage'
 import { normalizeGitHubTaskPreset } from '@/components/task-page-github-task-kind'
-import type { JiraPresetId } from '@/components/task-page-localized-options'
 import type {
+  JiraPresetId,
   LinearDisplayProperty,
   LinearGroupBy,
   LinearMode,
