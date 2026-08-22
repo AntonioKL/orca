@@ -9,10 +9,12 @@ import type { Worktree } from '../../../../shared/worktree/types'
 const EMPTY_DOCUMENTS: ReadonlyMap<string, PaletteDocument> = new Map()
 const DOCUMENT_BUILD_TIME_SLICE_MS = 16
 
-type CompletedBuild = {
-  request: WorktreePaletteDocumentBuildRequest
-  documents: ReadonlyMap<string, PaletteDocument>
-}
+type CompletedBuild =
+  | {
+      request: WorktreePaletteDocumentBuildRequest
+      documents: ReadonlyMap<string, PaletteDocument>
+    }
+  | { request: WorktreePaletteDocumentBuildRequest; error: unknown }
 
 type WorktreePaletteDocumentBuildRequest = {
   worktrees: readonly Worktree[]
@@ -31,17 +33,28 @@ export function useCooperativeWorktreePaletteDocuments(
     void buildWorktreePaletteDocumentsCooperatively(request.worktrees, request.sources, {
       shouldContinue: () => current,
       timeSliceMs: DOCUMENT_BUILD_TIME_SLICE_MS
-    }).then((documents) => {
-      if (current && documents) {
-        setCompleted({ request, documents })
+    }).then(
+      (documents) => {
+        if (current && documents) {
+          setCompleted({ request, documents })
+        }
+      },
+      (error: unknown) => {
+        if (current) {
+          setCompleted({ request, error })
+        }
       }
-    })
+    )
     return () => {
       current = false
     }
   }, [request])
 
-  return completed?.request === request
-    ? { documents: completed.documents, pending: false }
-    : { documents: EMPTY_DOCUMENTS, pending: true }
+  if (completed?.request !== request) {
+    return { documents: EMPTY_DOCUMENTS, pending: true }
+  }
+  if ('error' in completed) {
+    throw completed.error
+  }
+  return { documents: completed.documents, pending: false }
 }

@@ -9,10 +9,12 @@ import { parseCmdJTaskSourceUrl } from '@/lib/worktree-palette-task-url-match'
 
 const COOPERATIVE_SEARCH_MIN_WORKTREES = 200
 
-type CompletedSearch = {
-  request: WorktreePaletteSearchArgs
-  results: PaletteSearchResult[]
-}
+type CompletedSearch =
+  | {
+      request: WorktreePaletteSearchArgs
+      results: PaletteSearchResult[]
+    }
+  | { request: WorktreePaletteSearchArgs; error: unknown }
 
 type CooperativeWorktreePaletteSearch = {
   pending: boolean
@@ -63,11 +65,18 @@ export function useCooperativeWorktreePaletteSearch(
     let current = true
     void searchWorktreeDocumentsCooperatively(request, {
       shouldContinue: () => current
-    }).then((results) => {
-      if (current && results) {
-        setCompleted({ request, results })
+    }).then(
+      (results) => {
+        if (current && results) {
+          setCompleted({ request, results })
+        }
+      },
+      (error: unknown) => {
+        if (current) {
+          setCompleted({ request, error })
+        }
       }
-    })
+    )
     return () => {
       current = false
     }
@@ -76,7 +85,11 @@ export function useCooperativeWorktreePaletteSearch(
   if (immediateResults) {
     return { pending: false, results: immediateResults }
   }
-  return completed?.request === request
-    ? { pending: false, results: completed.results }
-    : { pending: true, results: [] }
+  if (completed?.request !== request) {
+    return { pending: true, results: [] }
+  }
+  if ('error' in completed) {
+    throw completed.error
+  }
+  return { pending: false, results: completed.results }
 }

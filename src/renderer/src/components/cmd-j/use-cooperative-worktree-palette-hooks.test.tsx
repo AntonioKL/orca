@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { act } from 'react'
+import { act, Component, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PaletteDocument } from '@/lib/palette-match/palette-document'
@@ -101,6 +101,22 @@ function SearchProbe({ query }: { query: string }): React.JSX.Element {
   )
 }
 
+class ProbeErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state: { error: Error | null } = { error: null }
+
+  static getDerivedStateFromError(error: Error): { error: Error } {
+    return { error }
+  }
+
+  render(): ReactNode {
+    return this.state.error ? (
+      <output data-error>{this.state.error.message}</output>
+    ) : (
+      this.props.children
+    )
+  }
+}
+
 describe('cooperative worktree palette hooks', () => {
   let container: HTMLDivElement
   let root: Root
@@ -168,5 +184,37 @@ describe('cooperative worktree palette hooks', () => {
     await act(async () => second.resolve([makeSearchResult('current')]))
     expect(container.querySelector('output')?.dataset.pending).toBe('false')
     expect(container.textContent).toBe('current')
+  })
+
+  it('surfaces a current document build failure to the palette error boundary', async () => {
+    cooperativeMocks.buildDocuments.mockRejectedValueOnce(new Error('document build failed'))
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    await act(async () =>
+      root.render(
+        <ProbeErrorBoundary>
+          <DocumentProbe worktrees={[makeWorktree(1)]} />
+        </ProbeErrorBoundary>
+      )
+    )
+
+    expect(container.querySelector('[data-error]')?.textContent).toBe('document build failed')
+    consoleError.mockRestore()
+  })
+
+  it('surfaces a current search failure to the palette error boundary', async () => {
+    cooperativeMocks.searchDocuments.mockRejectedValueOnce(new Error('search failed'))
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    await act(async () =>
+      root.render(
+        <ProbeErrorBoundary>
+          <SearchProbe query="needle" />
+        </ProbeErrorBoundary>
+      )
+    )
+
+    expect(container.querySelector('[data-error]')?.textContent).toBe('search failed')
+    consoleError.mockRestore()
   })
 })
