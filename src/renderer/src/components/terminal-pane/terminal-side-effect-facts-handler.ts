@@ -19,7 +19,8 @@ import type {
   TerminalSideEffectBatch,
   TerminalSideEffectFact
 } from '../../../../shared/terminal-side-effect-facts'
-import { retireConfirmedAgentExitResumeForPty } from '@/lib/confirmed-agent-exit-resume-retirement'
+import { useAppStore } from '@/store'
+import { retireConfirmedAgentExitResumeAuthority } from '@/lib/confirmed-agent-exit-resume-retirement'
 
 // Why: cached once per session — the blocking read should only ever run on
 // the pre-hydration startup path, never per pane bind.
@@ -259,18 +260,17 @@ function drainHandoffFactBuffer(ptyId: string, entry: ConsumerEntry): void {
 }
 
 export function dispatchTerminalSideEffectBatch(batch: TerminalSideEffectBatch): void {
-  // Why: the pane consumer unregisters on PTY teardown, but a confirmed
-  // agent-exited fact can still arrive after that. Resume retirement must
-  // not depend on the pane still being mounted.
-  if (!batch.replay) {
-    for (const fact of batch.facts) {
-      if (fact.kind === 'agent-exited') {
-        retireConfirmedAgentExitResumeForPty(batch.ptyId)
-      }
-    }
-  }
   const entry = consumersByPtyId.get(batch.ptyId)
   if (!entry) {
+    // Why: a confirmed exit can race pane teardown or arrive for byte-mode
+    // panes that never register here; main's fact attribution outlives both.
+    if (
+      !batch.replay &&
+      batch.paneKey &&
+      batch.facts.some((fact) => fact.kind === 'agent-exited')
+    ) {
+      retireConfirmedAgentExitResumeAuthority(useAppStore.getState(), batch.paneKey)
+    }
     bufferHandoffFactBatch(batch)
     return
   }

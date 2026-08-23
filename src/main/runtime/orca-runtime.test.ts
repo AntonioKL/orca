@@ -10441,6 +10441,31 @@ describe('OrcaRuntimeService', () => {
       expect(batches.flatMap((batch) => batch.facts)).not.toContainEqual({ kind: 'agent-exited' })
     })
 
+    it('does not confirm when the SSH host becomes unverifiable during the foreground read', async () => {
+      const { runtime, batches } = createSideEffectRuntime()
+      runtime.registerPty('pty-1', TEST_WORKTREE_ID, 'conn-1')
+      syncSinglePty(runtime)
+      runtime.ingestSyntheticTitleFrame('pty-1', '\x1b]0;Codex ready\x07')
+      let resolveForeground!: (process: string) => void
+      const foregroundRead = new Promise<string>((resolve) => {
+        resolveForeground = resolve
+      })
+      const getForegroundProcess = vi.fn(() => foregroundRead)
+      runtime.setPtyController({
+        write: () => true,
+        kill: () => true,
+        getForegroundProcess
+      })
+
+      runtime.onPtyData('pty-1', '\x1b]0;bichir\x07', 100)
+      await vi.waitFor(() => expect(getForegroundProcess).toHaveBeenCalledOnce())
+      runtime.markPtyLivenessUnverifiable('pty-1', 'the SSH provider disconnected')
+      resolveForeground('zsh')
+      await Promise.resolve()
+
+      expect(batches.flatMap((batch) => batch.facts)).not.toContainEqual({ kind: 'agent-exited' })
+    })
+
     it('still confirms a local agent exit if the PTY disconnects during the foreground read', async () => {
       const { runtime, batches } = createSideEffectRuntime()
       runtime.registerPty('pty-1', TEST_WORKTREE_ID)

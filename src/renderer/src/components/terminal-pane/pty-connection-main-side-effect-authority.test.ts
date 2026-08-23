@@ -443,16 +443,17 @@ describe('connectPanePty', () => {
       const onPtyExit = createdTransportOptions[0]?.onPtyExit as (ptyId: string) => void
       onPtyExit('pty-agent-exit')
 
-      expect(mockStoreState.clearSleepingAgentSession).toHaveBeenCalledWith(paneKey)
-      expect(mockStoreState.clearSleepingAgentSession).toHaveBeenCalledWith(duplicatePaneKey)
+      expect(mockStoreState.clearSleepingAgentSessionsByPaneKey).toHaveBeenCalledWith([
+        paneKey,
+        duplicatePaneKey
+      ])
       expect(mockStoreState.sleepingAgentSessionsByPaneKey[paneKey]).toBeUndefined()
       expect(mockStoreState.sleepingAgentSessionsByPaneKey[duplicatePaneKey]).toBeUndefined()
       expect(mockStoreState.sleepingAgentSessionsByPaneKey[siblingPaneKey]).toBe(siblingRecord)
       expect(deps.onAgentExitedRef.current).toHaveBeenCalledWith(LEAF_1)
-      const clearCallOrders = mockStoreState.clearSleepingAgentSession.mock.invocationCallOrder
-      expect(clearCallOrders.at(-1)).toBeLessThan(
-        deps.onAgentExitedRef.current.mock.invocationCallOrder[0]
-      )
+      const clearCallOrder =
+        mockStoreState.clearSleepingAgentSessionsByPaneKey.mock.invocationCallOrder[0]
+      expect(clearCallOrder).toBeLessThan(deps.onAgentExitedRef.current.mock.invocationCallOrder[0])
     })
 
     it('retires resume authority when the agent-exited fact arrives after PTY teardown', async () => {
@@ -485,6 +486,7 @@ describe('connectPanePty', () => {
       handler._dispatchTerminalSideEffectBatchForTest({
         ptyId: 'pty-late-exit',
         seq: 1,
+        paneKey,
         facts: [{ kind: 'agent-exited' }]
       })
 
@@ -776,6 +778,32 @@ describe('connectPanePty', () => {
       const onBell = createdTransportOptions[0]?.onBell as () => void
       onBell()
       expect(deps.markWorktreeUnread).toHaveBeenCalledTimes(1)
+
+      const paneKey = makePaneKey('tab-1', LEAF_1)
+      const record = {
+        paneKey,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        agent: 'claude' as const,
+        providerSession: { key: 'session_id' as const, id: 'session-byte-mode' },
+        prompt: 'finish the task',
+        state: 'working' as const,
+        capturedAt: 1,
+        updatedAt: 1,
+        origin: 'live' as const
+      }
+      mockStoreState.sleepingAgentSessionsByPaneKey = { [paneKey]: record }
+      const onPtyExit = createdTransportOptions[0]?.onPtyExit as (ptyId: string) => void
+      onPtyExit('pty-prehydration')
+
+      // Why: main still emits the confirmed fact after the byte-mode pane consumer is gone.
+      handler._dispatchTerminalSideEffectBatchForTest({
+        ptyId: 'pty-prehydration',
+        seq: 2,
+        paneKey,
+        facts: [{ kind: 'agent-exited' }]
+      })
+      expect(mockStoreState.sleepingAgentSessionsByPaneKey[paneKey]).toBeUndefined()
     })
   })
 })

@@ -22,6 +22,7 @@ type MockStoreState = {
   agentStatusByPaneKey: Record<string, never>
   sleepingAgentSessionsByPaneKey: Record<string, SleepingAgentSessionRecord>
   clearSleepingAgentSession: ReturnType<typeof vi.fn>
+  clearSleepingAgentSessionsByPaneKey: ReturnType<typeof vi.fn>
 }
 
 let mockStoreState: MockStoreState
@@ -65,6 +66,11 @@ describe('parked terminal confirmed agent-exit resume retirement', () => {
       sleepingAgentSessionsByPaneKey: {},
       clearSleepingAgentSession: vi.fn((paneKey: string) => {
         delete mockStoreState.sleepingAgentSessionsByPaneKey[paneKey]
+      }),
+      clearSleepingAgentSessionsByPaneKey: vi.fn((paneKeys: readonly string[]) => {
+        for (const paneKey of paneKeys) {
+          delete mockStoreState.sleepingAgentSessionsByPaneKey[paneKey]
+        }
       })
     }
     ;(globalThis as { window: typeof window }).window = {

@@ -19660,19 +19660,19 @@ export class OrcaRuntimeService {
     return entry.promise
   }
 
-  private canConfirmAgentExitFromHost(
+  private isPtyAgentExitUnverifiable(
     pty: RuntimePtyWorktreeRecord | undefined,
     ptyId: string
   ): boolean {
     if (this.getPtyLivenessVerdict(ptyId)?.status === 'unverifiable') {
-      return false
+      return true
     }
-    return !(pty?.connectionId && !pty.connected)
+    return Boolean(pty?.connectionId && !pty.connected)
   }
 
   private confirmPtyAgentExit(ptyId: string): void {
     const pty = this.ptysById.get(ptyId)
-    if (!this.canConfirmAgentExitFromHost(pty, ptyId)) {
+    if (this.isPtyAgentExitUnverifiable(pty, ptyId)) {
       return
     }
     const titleObservedAt = pty?.lastOscTitleAt ?? null
@@ -19691,7 +19691,7 @@ export class OrcaRuntimeService {
       if (current !== pty) {
         return
       }
-      if (!this.canConfirmAgentExitFromHost(current, ptyId)) {
+      if (this.isPtyAgentExitUnverifiable(current, ptyId)) {
         return
       }
       if (!current.connected) {
