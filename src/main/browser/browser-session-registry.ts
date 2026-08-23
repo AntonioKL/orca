@@ -31,7 +31,10 @@ import {
 } from './browser-session-partition-policies'
 import { isValidPersistedBrowserSessionProfile } from './browser-session-persisted-profile-validation'
 import { clearBrowserSessionUserAgentMode } from './browser-session-user-agent-mode'
-import { retireProxySessionApplication } from '../network/proxy-settings'
+import {
+  releaseProxySessionApplication,
+  retireProxySessionApplication
+} from '../network/proxy-settings'
 import { invalidateBrowserSessionProxyApplication } from './browser-session-proxy'
 import { browserManager } from './browser-manager'
 

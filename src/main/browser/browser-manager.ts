@@ -1496,7 +1496,7 @@ export class BrowserManager {
         continue
       }
       try {
-        guest.destroy()
+        guest.close({ waitForBeforeUnload: false })
       } catch {
         destroyed = false
       }
