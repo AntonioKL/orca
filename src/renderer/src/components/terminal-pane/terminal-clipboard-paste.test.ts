@@ -22,11 +22,7 @@ describe('terminal clipboard paste', () => {
 
     expect(pasteText).toHaveBeenCalledWith(
       '/var/folders/3l/b7w02vh17tg5r5s3nhhdf3kh0000gn/T/orca-paste-1760000000000-id.png',
-      {
-        forceBracketedPaste: true,
-        recoverImagePasteWebglAtlas: true,
-        followedByNonImageInput: true
-      }
+      { forceBracketedPaste: true, recoverImagePasteWebglAtlas: true }
     )
   })
 
@@ -52,10 +48,8 @@ describe('terminal clipboard paste', () => {
       pasteText: (text, options) => pasteTerminalText(terminal, text, options)
     })
 
-    const imageBytes = '\x1b[200~/tmp/orca-paste-1760000000000-id.png\x1b[201~ '
-    expect(terminal.input).toHaveBeenCalledWith(imageBytes)
-    expect(`${imageBytes}describe this`).toBe(
-      '\x1b[200~/tmp/orca-paste-1760000000000-id.png\x1b[201~ describe this'
+    expect(terminal.input).toHaveBeenCalledWith(
+      '\x1b[200~/tmp/orca-paste-1760000000000-id.png\x1b[201~'
     )
     expect(terminal.paste).not.toHaveBeenCalled()
     expect(observedIgnoreBracketedPasteMode).toEqual([false])
@@ -84,7 +78,7 @@ describe('terminal clipboard paste', () => {
     })
 
     expect(terminal.input).toHaveBeenCalledWith(
-      '\x1b[200~/tmp/orca-paste-1760000000000-id.png\x1b[201~ '
+      '\x1b[200~/tmp/orca-paste-1760000000000-id.png\x1b[201~'
     )
     expect(terminal.paste).not.toHaveBeenCalled()
     expect(observedIgnoreBracketedPasteMode).toEqual([false])
@@ -110,8 +104,7 @@ describe('terminal clipboard paste', () => {
     })
     expect(pasteText).toHaveBeenCalledWith('/var/tmp/orca-paste-1760000000000-id.png', {
       forceBracketedPaste: true,
-      recoverImagePasteWebglAtlas: true,
-      followedByNonImageInput: true
+      recoverImagePasteWebglAtlas: true
     })
   })
 
@@ -134,8 +127,7 @@ describe('terminal clipboard paste', () => {
     })
     expect(pasteText).toHaveBeenCalledWith('/tmp/orca-paste-1760000000000-runtime.png', {
       forceBracketedPaste: true,
-      recoverImagePasteWebglAtlas: true,
-      followedByNonImageInput: true
+      recoverImagePasteWebglAtlas: true
     })
   })
 
@@ -152,8 +144,7 @@ describe('terminal clipboard paste', () => {
 
     expect(pasteText).toHaveBeenCalledWith('/tmp/orca-paste-1760000000000-id.png', {
       forceBracketedPaste: true,
-      recoverImagePasteWebglAtlas: true,
-      followedByNonImageInput: true
+      recoverImagePasteWebglAtlas: true
     })
   })
 
@@ -175,8 +166,7 @@ describe('terminal clipboard paste', () => {
     })
     expect(pasteText).toHaveBeenCalledWith('/tmp/orca-paste-1760000000000-id.png', {
       forceBracketedPaste: true,
-      recoverImagePasteWebglAtlas: true,
-      followedByNonImageInput: true
+      recoverImagePasteWebglAtlas: true
     })
   })
 

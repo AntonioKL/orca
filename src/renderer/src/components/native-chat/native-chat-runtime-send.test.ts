@@ -343,10 +343,6 @@ describe('sendNativeChatMessageWithImageAttachments', () => {
 
     vi.advanceTimersByTime(NATIVE_CHAT_IMAGE_ATTACHMENT_SETTLE_MS)
     expect(sendRuntimePtyInput).toHaveBeenLastCalledWith(SETTINGS, PTY, 'what do you see?')
-    expect(`${framedImageWithSeparator}what do you see?`).toBe(
-      '\x1b[200~/tmp/orca-paste-image.png\x1b[201~ what do you see?'
-    )
-    expect(`${framedImageWithSeparator}what do you see?`).not.toContain('png\x1b[201~what')
 
     vi.advanceTimersByTime(NATIVE_CHAT_SUBMIT_DELAY_MS)
     expect(sendRuntimePtyInput).toHaveBeenLastCalledWith(SETTINGS, PTY, NATIVE_CHAT_SUBMIT)

@@ -44,7 +44,6 @@ type PlanTerminalPasteArgs = {
   forceBracketedPaste?: boolean
   forceBracketedPasteForMultiline?: boolean
   windowsInputRecordNewline?: WindowsInputRecordNewline
-  followedByNonImageInput?: boolean
   terminalBracketedPasteMode?: boolean
   hasRichText?: boolean
   maxDirectBytes?: number
@@ -87,7 +86,6 @@ export function planTerminalPaste({
   forceBracketedPaste = false,
   forceBracketedPasteForMultiline = false,
   windowsInputRecordNewline,
-  followedByNonImageInput = false,
   terminalBracketedPasteMode = false,
   hasRichText = false,
   maxDirectBytes = TERMINAL_PASTE_DIRECT_MAX_BYTES,
@@ -99,7 +97,6 @@ export function planTerminalPaste({
     forceBracketedPaste,
     forceBracketedPasteForMultiline,
     windowsInputRecordNewline,
-    followedByNonImageInput,
     maxBytes,
     maxChunkBytes,
     maxDirectBytes,
@@ -116,7 +113,6 @@ export async function planTerminalPasteWithYield({
   forceBracketedPaste = false,
   forceBracketedPasteForMultiline = false,
   windowsInputRecordNewline,
-  followedByNonImageInput = false,
   terminalBracketedPasteMode = false,
   hasRichText = false,
   maxDirectBytes = TERMINAL_PASTE_DIRECT_MAX_BYTES,
@@ -143,7 +139,6 @@ export async function planTerminalPasteWithYield({
     forceBracketedPaste,
     forceBracketedPasteForMultiline,
     windowsInputRecordNewline,
-    followedByNonImageInput,
     maxBytes,
     maxChunkBytes,
     maxDirectBytes,
@@ -159,7 +154,6 @@ function buildTerminalPastePlan({
   forceBracketedPaste,
   forceBracketedPasteForMultiline,
   windowsInputRecordNewline,
-  followedByNonImageInput,
   terminalBracketedPasteMode,
   maxDirectBytes,
   maxChunkBytes,
@@ -170,7 +164,6 @@ function buildTerminalPastePlan({
   forceBracketedPaste: boolean
   forceBracketedPasteForMultiline: boolean
   windowsInputRecordNewline?: WindowsInputRecordNewline
-  followedByNonImageInput: boolean
   terminalBracketedPasteMode: boolean
   maxDirectBytes: number
   maxChunkBytes: number
@@ -212,7 +205,6 @@ function buildTerminalPastePlan({
     ...(effectiveWindowsInputRecordNewline
       ? { windowsInputRecordNewline: effectiveWindowsInputRecordNewline }
       : {}),
-    ...(followedByNonImageInput ? { followedByNonImageInput: true } : {}),
     runtimeKey: target.runtime.runtimeKey,
     ...(shouldChunk ? { maxChunkBytes } : {}),
     bracketed: mode === 'bracketed-terminal' || (mode === 'chunked' && shouldBracketChunk),

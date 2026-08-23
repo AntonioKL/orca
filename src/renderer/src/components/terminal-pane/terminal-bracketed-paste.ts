@@ -1,5 +1,4 @@
 import type { Terminal } from '@xterm/xterm'
-import { separateImagePasteFromFollowingText } from '../../../../shared/image-paste-following-text'
 import type { WindowsInputRecordNewline } from './terminal-paste-model'
 
 type BracketedPasteTerminal = {
@@ -17,7 +16,6 @@ type PasteTerminal = BracketedPasteTerminal & {
 type PasteTerminalTextOptions = {
   forceBracketedPaste?: boolean
   windowsInputRecordNewline?: WindowsInputRecordNewline
-  followedByNonImageInput?: boolean
 }
 
 const interruptedBracketedPasteTerminals = new WeakSet<object>()
@@ -103,6 +101,12 @@ export function encodeWindowsInputRecordPasteText(
   return encoded
 }
 
+function forceBracketedPaste(terminal: PasteTerminal, text: string): void {
+  // Why: forced callers already built the exact paste protocol bytes. Send
+  // them as PTY input so xterm's DOM/native paste machinery cannot defer them.
+  terminal.input(wrapTerminalBracketedPasteText(text))
+}
+
 export function markTerminalBracketedPasteInterrupted(terminal: BracketedPasteTerminal): void {
   if (terminal.modes.bracketedPasteMode) {
     interruptedBracketedPasteTerminals.add(terminal)
@@ -139,14 +143,7 @@ export function pasteTerminalText(
   if (options?.forceBracketedPaste) {
     // Why: generated image paths are paste payloads, even when they are a
     // single line, so they must bypass stale Ctrl+C plain-text suppression.
-    // Trailing space is keyed off followedByNonImageInput only — never off
-    // forceBracketedPaste, which also wraps multiline text.
-    terminal.input(
-      separateImagePasteFromFollowingText(
-        wrapTerminalBracketedPasteText(text),
-        options.followedByNonImageInput === true
-      )
-    )
+    forceBracketedPaste(terminal, text)
     return
   }
   if (!interruptedBracketedPasteTerminals.has(terminal)) {
