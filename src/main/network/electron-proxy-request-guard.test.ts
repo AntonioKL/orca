@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { installElectronProxyRequestGuard } from './electron-proxy-request-guard'
-import { applyProxySettingsToSession, resetSessionProxyApplicationForTests } from './proxy-settings'
+import {
+  applyProxySettingsToSession,
+  resetSessionProxyApplicationForTests,
+  retireProxySessionApplication
+} from './proxy-settings'
 
 function createSession() {
   let listener:
@@ -68,6 +72,23 @@ describe('default-session proxy request guard', () => {
         { env: {} }
       )
     ).rejects.toThrow('proxy apply failed')
+    const callback = vi.fn()
+    request(callback)
+
+    expect(callback).toHaveBeenCalledWith({ cancel: true })
+  })
+
+  it('cancels session requests after permanent retirement without a WebContents', async () => {
+    const { proxySession, request } = createSession()
+    resetSessionProxyApplicationForTests(proxySession)
+    installElectronProxyRequestGuard(proxySession as never)
+    await applyProxySettingsToSession(
+      proxySession,
+      { httpProxyUrl: 'http://proxy.example:8080' },
+      { env: {} }
+    )
+
+    await retireProxySessionApplication(proxySession)
     const callback = vi.fn()
     request(callback)
 

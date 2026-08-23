@@ -155,17 +155,11 @@ export function installBrowserSessionPartitionPolicies(
   return proxyReady
 }
 
-export function clearBrowserSessionPartitionPolicies(
-  partition: string,
-  sess: Session,
-  options: { retainRequestGuard?: boolean } = {}
-): void {
+export function clearBrowserSessionPartitionPolicies(partition: string, sess: Session): void {
   // Why: the Electron Session survives partition deletion; clear callbacks/listeners so removed profiles don't retain closures.
   invalidateBrowserSessionProxyApplication(sess)
   configuredPartitions.delete(partition)
-  if (!options.retainRequestGuard) {
-    browserManager.removeCertificateRequestGuard(sess)
-  }
+  browserManager.removeCertificateRequestGuard(sess)
   sess.removeListener('will-download', handleWillDownload)
   sess.removeListener('will-download', handleDeniedWillDownload)
   clearBrowserWebAuthnAccessHandlers(sess)

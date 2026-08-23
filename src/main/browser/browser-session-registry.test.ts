@@ -4,13 +4,11 @@ const {
   sessionFromPartitionMock,
   askForMediaAccessMock,
   getMediaAccessStatusMock,
-  deferCertificateRequestGuardRemovalMock,
   removeCertificateRequestGuardMock
 } = vi.hoisted(() => ({
   sessionFromPartitionMock: vi.fn(),
   askForMediaAccessMock: vi.fn(),
   getMediaAccessStatusMock: vi.fn(),
-  deferCertificateRequestGuardRemovalMock: vi.fn(),
   removeCertificateRequestGuardMock: vi.fn()
 }))
 
@@ -29,8 +27,7 @@ vi.mock('./browser-manager', () => ({
     notifyPermissionDenied: vi.fn(),
     handleGuestWillDownload: vi.fn(),
     installCertificateRequestGuard: vi.fn(),
-    removeCertificateRequestGuard: removeCertificateRequestGuardMock,
-    deferCertificateRequestGuardRemoval: deferCertificateRequestGuardRemovalMock
+    removeCertificateRequestGuard: removeCertificateRequestGuardMock
   }
 }))
 
@@ -50,7 +47,6 @@ describe('BrowserSessionRegistry', () => {
     sessionFromPartitionMock.mockReset()
     askForMediaAccessMock.mockReset()
     getMediaAccessStatusMock.mockReset()
-    deferCertificateRequestGuardRemovalMock.mockClear()
     removeCertificateRequestGuardMock.mockClear()
     setBrowserNetworkProxySettingsResolver(null)
     askForMediaAccessMock.mockResolvedValue(true)
@@ -242,22 +238,18 @@ describe('BrowserSessionRegistry', () => {
     expect(browserSessionRegistry.getProfile(profile!.id)).toBeNull()
   })
 
-  it('clears session policy callbacks when deleting a profile', async () => {
+  it('retains session security policies when deleting a profile', async () => {
     const profile = await browserSessionRegistry.createProfile('isolated', 'Policy Delete Test')
     expect(profile).not.toBeNull()
     const mockSession = sessionFromPartitionMock.mock.results[0]?.value
-    const downloadHandler = mockSession.on.mock.calls.find(
-      ([eventName]) => eventName === 'will-download'
-    )?.[1]
+    const permissionWrites = mockSession.setPermissionRequestHandler.mock.calls.length
+    const downloadListenerWrites = mockSession.removeListener.mock.calls.length
 
     await expect(browserSessionRegistry.deleteProfile(profile!.id)).resolves.toBe(true)
 
-    expect(deferCertificateRequestGuardRemovalMock).toHaveBeenCalledWith(mockSession)
-    expect(mockSession.removeListener).toHaveBeenCalledWith('will-download', downloadHandler)
-    expect(mockSession.setPermissionRequestHandler).toHaveBeenLastCalledWith(null)
-    expect(mockSession.setPermissionCheckHandler).toHaveBeenLastCalledWith(null)
-    expect(mockSession.setDevicePermissionHandler).toHaveBeenLastCalledWith(null)
-    expect(mockSession.setDisplayMediaRequestHandler).toHaveBeenLastCalledWith(null)
+    expect(mockSession.setPermissionRequestHandler).toHaveBeenCalledTimes(permissionWrites)
+    expect(mockSession.removeListener).toHaveBeenCalledTimes(downloadListenerWrites)
+    expect(removeCertificateRequestGuardMock).not.toHaveBeenCalled()
   })
 
   it('keeps the request guard installed while deleted-profile guests remain', async () => {
@@ -276,7 +268,6 @@ describe('BrowserSessionRegistry', () => {
     const deletion = browserSessionRegistry.deleteProfile(profile!.id)
     await vi.waitFor(() => expect(mockSession.setProxy).toHaveBeenCalledWith({ mode: 'system' }))
 
-    expect(deferCertificateRequestGuardRemovalMock).toHaveBeenCalledWith(mockSession)
     expect(removeCertificateRequestGuardMock).not.toHaveBeenCalled()
     finishClose?.()
     await expect(deletion).resolves.toBe(true)
