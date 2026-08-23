@@ -293,7 +293,10 @@ class BrowserSessionRegistry {
       clearBrowserSessionUserAgentMode(sess)
       invalidateBrowserSessionProxyApplication(sess)
       const release = retireProxySessionApplication(sess)
-      const guestsDestroyed = browserManager.destroyBrowserSessionGuests(sess)
+      clearBrowserSessionPartitionPolicies(profile.partition, sess, {
+        retainRequestGuard: true
+      })
+      browserManager.deferCertificateRequestGuardRemoval(sess)
       try {
         await release
       } catch {
@@ -301,14 +304,6 @@ class BrowserSessionRegistry {
       }
       await sess.clearStorageData()
       await sess.clearCache()
-      if (guestsDestroyed) {
-        clearBrowserSessionPartitionPolicies(profile.partition, sess)
-      } else {
-        console.warn(
-          '[browser] Retaining fail-closed policy for browser partition',
-          profile.partition
-        )
-      }
     } catch {
       // Why: cleanup is best-effort — the profile is already out of the registry, so will-attach-webview blocks it regardless.
     }

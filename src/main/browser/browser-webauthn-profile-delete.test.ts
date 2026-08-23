@@ -30,7 +30,7 @@ vi.mock('./browser-manager', () => ({
     installCertificateRequestGuard: vi.fn(),
     notifyPermissionDenied: vi.fn(),
     removeCertificateRequestGuard: vi.fn(),
-    destroyBrowserSessionGuests: vi.fn(() => true)
+    deferCertificateRequestGuardRemoval: vi.fn()
   }
 }))
 

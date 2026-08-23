@@ -4,13 +4,13 @@ const {
   sessionFromPartitionMock,
   askForMediaAccessMock,
   getMediaAccessStatusMock,
-  destroyBrowserSessionGuestsMock,
+  deferCertificateRequestGuardRemovalMock,
   removeCertificateRequestGuardMock
 } = vi.hoisted(() => ({
   sessionFromPartitionMock: vi.fn(),
   askForMediaAccessMock: vi.fn(),
   getMediaAccessStatusMock: vi.fn(),
-  destroyBrowserSessionGuestsMock: vi.fn(() => true),
+  deferCertificateRequestGuardRemovalMock: vi.fn(),
   removeCertificateRequestGuardMock: vi.fn()
 }))
 
@@ -30,7 +30,7 @@ vi.mock('./browser-manager', () => ({
     handleGuestWillDownload: vi.fn(),
     installCertificateRequestGuard: vi.fn(),
     removeCertificateRequestGuard: removeCertificateRequestGuardMock,
-    destroyBrowserSessionGuests: destroyBrowserSessionGuestsMock
+    deferCertificateRequestGuardRemoval: deferCertificateRequestGuardRemovalMock
   }
 }))
 
@@ -50,7 +50,7 @@ describe('BrowserSessionRegistry', () => {
     sessionFromPartitionMock.mockReset()
     askForMediaAccessMock.mockReset()
     getMediaAccessStatusMock.mockReset()
-    destroyBrowserSessionGuestsMock.mockClear().mockReturnValue(true)
+    deferCertificateRequestGuardRemovalMock.mockClear()
     removeCertificateRequestGuardMock.mockClear()
     setBrowserNetworkProxySettingsResolver(null)
     askForMediaAccessMock.mockResolvedValue(true)
@@ -252,7 +252,7 @@ describe('BrowserSessionRegistry', () => {
 
     await expect(browserSessionRegistry.deleteProfile(profile!.id)).resolves.toBe(true)
 
-    expect(destroyBrowserSessionGuestsMock).toHaveBeenCalledWith(mockSession)
+    expect(deferCertificateRequestGuardRemovalMock).toHaveBeenCalledWith(mockSession)
     expect(mockSession.removeListener).toHaveBeenCalledWith('will-download', downloadHandler)
     expect(mockSession.setPermissionRequestHandler).toHaveBeenLastCalledWith(null)
     expect(mockSession.setPermissionCheckHandler).toHaveBeenLastCalledWith(null)
@@ -260,7 +260,7 @@ describe('BrowserSessionRegistry', () => {
     expect(mockSession.setDisplayMediaRequestHandler).toHaveBeenLastCalledWith(null)
   })
 
-  it('keeps the request guard installed until deleted-profile guests are destroyed and released', async () => {
+  it('keeps the request guard installed while deleted-profile guests remain', async () => {
     setBrowserNetworkProxySettingsResolver(() => ({
       httpProxyUrl: 'http://proxy.example:8080',
       httpProxyBypassRules: ''
@@ -276,11 +276,11 @@ describe('BrowserSessionRegistry', () => {
     const deletion = browserSessionRegistry.deleteProfile(profile!.id)
     await vi.waitFor(() => expect(mockSession.setProxy).toHaveBeenCalledWith({ mode: 'system' }))
 
-    expect(destroyBrowserSessionGuestsMock).toHaveBeenCalledWith(mockSession)
+    expect(deferCertificateRequestGuardRemovalMock).toHaveBeenCalledWith(mockSession)
     expect(removeCertificateRequestGuardMock).not.toHaveBeenCalled()
     finishClose?.()
     await expect(deletion).resolves.toBe(true)
-    expect(removeCertificateRequestGuardMock).toHaveBeenCalledWith(mockSession)
+    expect(removeCertificateRequestGuardMock).not.toHaveBeenCalled()
   })
 
   it('refuses to delete the default profile', async () => {

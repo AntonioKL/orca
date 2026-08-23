@@ -1485,23 +1485,25 @@ export class BrowserManager {
     this.annotationViewportBridgeOpsByTabId.delete(browserTabId)
   }
 
-  destroyBrowserSessionGuests(browserSession: Electron.Session): boolean {
-    let destroyed = true
-    for (const guest of webContents.getAllWebContents()) {
-      const managed =
-        this.policyAttachedGuestIds.has(guest.id) ||
-        this.offscreenGuestIds.has(guest.id) ||
-        this.popupOwnerContextByGuestId.has(guest.id)
-      if (!managed || guest.session !== browserSession || guest.isDestroyed()) {
-        continue
+  deferCertificateRequestGuardRemoval(browserSession: Electron.Session): void {
+    const observedGuestIds = new Set<number>()
+    const removeWhenUnused = (): void => {
+      let active = false
+      for (const guest of webContents.getAllWebContents()) {
+        if (guest.session !== browserSession || guest.isDestroyed()) {
+          continue
+        }
+        active = true
+        if (!observedGuestIds.has(guest.id)) {
+          observedGuestIds.add(guest.id)
+          guest.once('destroyed', removeWhenUnused)
+        }
       }
-      try {
-        guest.close({ waitForBeforeUnload: false })
-      } catch {
-        destroyed = false
+      if (!active) {
+        this.removeCertificateRequestGuard(browserSession)
       }
     }
-    return destroyed
+    removeWhenUnused()
   }
 
   // Why: headless orca serve has no <webview> window; back pages with offscreen WebContents and skip the webview-only setup.
