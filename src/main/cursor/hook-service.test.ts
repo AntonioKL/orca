@@ -19,7 +19,7 @@ vi.mock('os', async () => {
 
 import { CursorHookService } from './hook-service'
 import { POSIX_HOOK_STDIN_READER } from '../agent-hooks/hook-stdin-contract'
-import { CURSOR_EVENTS, getCursorHookResponse } from './hook-events'
+import { CURSOR_EVENTS, type CursorEvent } from './hook-events'
 
 const CURSOR_SCRIPT_FILE_NAME = process.platform === 'win32' ? 'cursor-hook.cmd' : 'cursor-hook.sh'
 const WINDOWS_POWERSHELL_LAUNCHER =
@@ -29,14 +29,21 @@ type InstalledCursorHooks = {
   hooks: Record<string, { command?: string }[]>
 }
 
+const EXPECTED_CURSOR_HOOK_STDOUT = {
+  beforeSubmitPrompt: { continue: true },
+  stop: {},
+  preToolUse: { permission: 'allow' },
+  postToolUse: {},
+  postToolUseFailure: {},
+  beforeShellExecution: { permission: 'allow' },
+  beforeMCPExecution: { permission: 'allow' },
+  afterAgentResponse: {}
+} satisfies Record<CursorEvent, Record<string, unknown>>
+
 function readInstalledCursorHooks(homeDir: string): InstalledCursorHooks {
   return JSON.parse(
     readFileSync(join(homeDir, '.cursor', 'hooks.json'), 'utf8')
   ) as InstalledCursorHooks
-}
-
-function expectedCursorHookStdout(eventName: (typeof CURSOR_EVENTS)[number]): unknown {
-  return JSON.parse(getCursorHookResponse(eventName))
 }
 
 function requireRegisteredCommand(config: InstalledCursorHooks, eventName: string): string {
@@ -213,7 +220,7 @@ describe('CursorHookService', () => {
         expect(result.status, `${eventName} exit`).toBe(0)
         expect(result.stderr, `${eventName} stderr`).toBe('')
         expect(JSON.parse(result.stdout), `${eventName} stdout`).toEqual(
-          expectedCursorHookStdout(eventName)
+          EXPECTED_CURSOR_HOOK_STDOUT[eventName]
         )
       }
     }
@@ -230,7 +237,7 @@ describe('CursorHookService', () => {
       expect(result.status, `${eventName} missing-script exit`).toBe(0)
       expect(result.stderr, `${eventName} missing-script stderr`).toBe('')
       expect(JSON.parse(result.stdout), `${eventName} missing-script stdout`).toEqual(
-        expectedCursorHookStdout(eventName)
+        EXPECTED_CURSOR_HOOK_STDOUT[eventName]
       )
     }
   })
@@ -239,7 +246,7 @@ describe('CursorHookService', () => {
     expect(new CursorHookService().install().state).toBe('installed')
     const config = readInstalledCursorHooks(homeDir)
 
-    for (const eventName of ['preToolUse', 'stop'] as const) {
+    for (const eventName of ['beforeSubmitPrompt', 'preToolUse', 'stop'] as const) {
       const command = requireRegisteredCommand(config, eventName)
       const result = runRegisteredCursorHook(
         command,
@@ -252,7 +259,7 @@ describe('CursorHookService', () => {
       )
       expect(result.status, `${eventName} dead-listener exit`).toBe(0)
       expect(JSON.parse(result.stdout), `${eventName} dead-listener stdout`).toEqual(
-        expectedCursorHookStdout(eventName)
+        EXPECTED_CURSOR_HOOK_STDOUT[eventName]
       )
     }
   })
@@ -262,30 +269,34 @@ describe('CursorHookService', () => {
     () => {
       expect(new CursorHookService().install().state).toBe('installed')
       const config = readInstalledCursorHooks(homeDir)
-      const command = requireRegisteredCommand(config, 'preToolUse')
       const gitBash = findGitBash()
       const shells = [
-        { name: 'cmd.exe', executable: 'cmd.exe', args: ['/d', '/c', command] },
-        { name: 'Git Bash', executable: gitBash, args: ['-c', command] }
+        { name: 'cmd.exe', executable: 'cmd.exe', args: ['/d', '/c'] },
+        { name: 'Git Bash', executable: gitBash, args: ['-c'] }
       ]
-      for (const shell of shells) {
-        const result = spawnSync(shell.executable, shell.args, {
-          encoding: 'utf8',
-          input: '{"hook_event_name":"preToolUse","tool_name":"Write"}',
-          timeout: 15_000,
-          env: {
-            ...process.env,
-            ORCA_AGENT_HOOK_ENDPOINT: '',
-            ORCA_AGENT_HOOK_PORT: '',
-            ORCA_AGENT_HOOK_TOKEN: '',
-            ORCA_PANE_KEY: '',
-            USERPROFILE: homeDir
-          }
-        })
-        expect(result.error, shell.name).toBeUndefined()
-        expect(result.status, `${shell.name} exit`).toBe(0)
-        expect(result.stderr, `${shell.name} stderr`).toBe('')
-        expect(JSON.parse(result.stdout), `${shell.name} stdout`).toEqual({ permission: 'allow' })
+      for (const eventName of ['beforeSubmitPrompt', 'preToolUse'] as const) {
+        const command = requireRegisteredCommand(config, eventName)
+        for (const shell of shells) {
+          const result = spawnSync(shell.executable, [...shell.args, command], {
+            encoding: 'utf8',
+            input: JSON.stringify({ hook_event_name: eventName, tool_name: 'Write' }),
+            timeout: 15_000,
+            env: {
+              ...process.env,
+              ORCA_AGENT_HOOK_ENDPOINT: '',
+              ORCA_AGENT_HOOK_PORT: '',
+              ORCA_AGENT_HOOK_TOKEN: '',
+              ORCA_PANE_KEY: '',
+              USERPROFILE: homeDir
+            }
+          })
+          expect(result.error, `${eventName} ${shell.name}`).toBeUndefined()
+          expect(result.status, `${eventName} ${shell.name} exit`).toBe(0)
+          expect(result.stderr, `${eventName} ${shell.name} stderr`).toBe('')
+          expect(JSON.parse(result.stdout), `${eventName} ${shell.name} stdout`).toEqual(
+            EXPECTED_CURSOR_HOOK_STDOUT[eventName]
+          )
+        }
       }
     }
   )

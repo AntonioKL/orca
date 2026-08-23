@@ -11,7 +11,7 @@ vi.mock('electron', () => ({
 import { CodexHookService, codexHookService } from '../codex/hook-service'
 import { DroidHookService, droidHookService } from '../droid/hook-service'
 import { CursorHookService, cursorHookService } from '../cursor/hook-service'
-import { CURSOR_EVENTS, getCursorHookResponse } from '../cursor/hook-events'
+import { CURSOR_EVENTS, type CursorEvent } from '../cursor/hook-events'
 import { CommandCodeHookService, commandCodeHookService } from '../command-code/hook-service'
 import { GeminiHookService, geminiHookService } from '../gemini/hook-service'
 import { AntigravityHookService, antigravityHookService } from '../antigravity/hook-service'
@@ -35,6 +35,17 @@ type FakeFs = {
   modes: Map<string, number>
   failRenameTo: Set<string>
 }
+
+const EXPECTED_CURSOR_HOOK_RESPONSES = {
+  beforeSubmitPrompt: '{"continue":true}',
+  stop: '{}',
+  preToolUse: '{"permission":"allow"}',
+  postToolUse: '{}',
+  postToolUseFailure: '{}',
+  beforeShellExecution: '{"permission":"allow"}',
+  beforeMCPExecution: '{"permission":"allow"}',
+  afterAgentResponse: '{}'
+} satisfies Record<CursorEvent, string>
 
 function createFakeSftp(initialFiles: Record<string, string> = {}): {
   sftp: SFTPWrapper
@@ -372,7 +383,7 @@ describe('remote hook service installers', () => {
       const command = definition?.command
       expect(command).toContain('/home/dev/.orca/agent-hooks/cursor-hook.sh')
       expect(definition?.hooks).toBeUndefined()
-      const response = getCursorHookResponse(eventName)
+      const response = EXPECTED_CURSOR_HOOK_RESPONSES[eventName]
       expect(command).toContain(`ORCA_CURSOR_HOOK_RESPONSE='${response}'`)
       expect(command).toContain(`printf '%s\\n' '${response}'`)
     }

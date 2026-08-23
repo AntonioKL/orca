@@ -13,17 +13,17 @@ export const CURSOR_EVENTS = [
 
 export type CursorEvent = (typeof CURSOR_EVENTS)[number]
 
-export const CURSOR_PERMISSION_EVENTS = new Set<CursorEvent>([
-  'preToolUse',
-  'beforeShellExecution',
-  'beforeMCPExecution'
-])
-
-export const CURSOR_PERMISSION_ALLOW_RESPONSE = '{"permission":"allow"}'
-export const CURSOR_NEUTRAL_RESPONSE = '{}'
+const CURSOR_HOOK_RESPONSES = {
+  beforeSubmitPrompt: '{"continue":true}',
+  stop: '{}',
+  preToolUse: '{"permission":"allow"}',
+  postToolUse: '{}',
+  postToolUseFailure: '{}',
+  beforeShellExecution: '{"permission":"allow"}',
+  beforeMCPExecution: '{"permission":"allow"}',
+  afterAgentResponse: '{}'
+} satisfies Record<CursorEvent, string>
 
 export function getCursorHookResponse(eventName: CursorEvent): string {
-  return CURSOR_PERMISSION_EVENTS.has(eventName)
-    ? CURSOR_PERMISSION_ALLOW_RESPONSE
-    : CURSOR_NEUTRAL_RESPONSE
+  return CURSOR_HOOK_RESPONSES[eventName]
 }
