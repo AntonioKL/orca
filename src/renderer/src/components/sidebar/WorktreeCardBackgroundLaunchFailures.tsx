@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { useAppStore } from '@/store'
-import { getWorktreeMapFromState } from '@/store/selectors'
+import { getWorktreeOnHostFromState } from '@/store/selectors'
 import { useOptionalConfirmationDialog } from '@/components/confirmation-dialog-context'
 import { WorktreeAgentLaunchFailure } from './WorktreeAgentLaunchFailure'
 import {
@@ -15,11 +15,15 @@ import {
   AGENTS_SETTINGS_ACTIONS,
   RETRY_SAME_ACTIONS
 } from '@/lib/agent-launch-recovery-action-dispatch'
-import { getSettingsForWorktreeRuntimeOwner } from '@/lib/worktree-runtime-owner'
+import {
+  resolveWorktreeOperationRouteForHost,
+  settingsForWorktreeOperationRoute
+} from '@/lib/worktree-operation-route'
 import { getActiveRuntimeTarget } from '@/runtime/runtime-client-target'
 import type { AgentLaunchRecoveryActionId } from '@/lib/agent-launch-recovery-card'
 import type { AppState } from '@/store/types'
 import type { BackgroundAgentLaunchAttempt } from '../../../../shared/background-agent-launch'
+import type { ExecutionHostId } from '../../../../shared/execution-host'
 
 // Stable empty reference so the selector never returns a fresh array identity and
 // re-renders in a loop when a worktree carries no background attempts.
@@ -31,12 +35,16 @@ const NO_ATTEMPTS: readonly BackgroundAgentLaunchAttempt[] = []
 // Object.values(undefined)) rather than hardening the shared selector.
 function selectBackgroundAttempts(
   state: AppState,
-  worktreeId: string
+  worktreeId: string,
+  executionHostId: ExecutionHostId
 ): readonly BackgroundAgentLaunchAttempt[] {
   if (!state.worktreesByRepo) {
     return NO_ATTEMPTS
   }
-  return getWorktreeMapFromState(state).get(worktreeId)?.backgroundAgentLaunches ?? NO_ATTEMPTS
+  return (
+    getWorktreeOnHostFromState(state, worktreeId, executionHostId)?.backgroundAgentLaunches ??
+    NO_ATTEMPTS
+  )
 }
 
 type SurfacedCard = {
@@ -53,11 +61,13 @@ type SurfacedCard = {
  *  reconciles launched/forgotten back out of the meta, so this holds no attempt
  *  state of its own. Renders nothing until an attempt has a surfacing failure. */
 export function WorktreeCardBackgroundLaunchFailures({
-  worktreeId
+  worktreeId,
+  executionHostId
 }: {
   worktreeId: string
+  executionHostId: ExecutionHostId
 }): React.JSX.Element | null {
-  const attempts = useAppStore((s) => selectBackgroundAttempts(s, worktreeId))
+  const attempts = useAppStore((s) => selectBackgroundAttempts(s, worktreeId, executionHostId))
   const retryBackgroundAgentLaunch = useAppStore((s) => s.retryBackgroundAgentLaunch)
   const forgetBackgroundAgentLaunch = useAppStore((s) => s.forgetBackgroundAgentLaunch)
   const unknownAgentLaunchSiblingPreflight = useAppStore(
@@ -96,6 +106,7 @@ export function WorktreeCardBackgroundLaunchFailures({
           await retryBackgroundAgentLaunch({
             attemptId: attempt.attemptId,
             worktreeId,
+            executionHostId,
             expectedFailureId,
             action: { kind: 'retry-same' }
           })
@@ -117,7 +128,10 @@ export function WorktreeCardBackgroundLaunchFailures({
         let siblingCount = 0
         let siblingHostName = ''
         try {
-          const preflight = await unknownAgentLaunchSiblingPreflight({ worktreeId })
+          const preflight = await unknownAgentLaunchSiblingPreflight({
+            worktreeId,
+            executionHostId
+          })
           siblingCount = preflight.count
           siblingHostName = preflight.hostName
         } catch {
@@ -153,13 +167,14 @@ export function WorktreeCardBackgroundLaunchFailures({
           await forgetBackgroundAgentLaunch({
             attemptId: attempt.attemptId,
             worktreeId,
+            executionHostId,
             expectedOperationId: attempt.operationId
           })
           // The bulk is worktree-scoped and clears only interactive siblings (the
           // structural guarantee keeps background-owned rows out of the count), so it
           // rides after the single attempt forget.
           if (forgetSiblings) {
-            await forgetUnknownAgentLaunchSiblings({ worktreeId })
+            await forgetUnknownAgentLaunchSiblings({ worktreeId, executionHostId })
           }
         } finally {
           setBusy(attempt.attemptId, false)
@@ -179,17 +194,20 @@ export function WorktreeCardBackgroundLaunchFailures({
       if (id === 'recover-capacity') {
         // Query the host that rejected the launch: this worktree's runtime owner,
         // not the local host (whose summary knows nothing of a remote's capacity).
-        openModal('agent-launch-capacity-recovery', {
-          target: getActiveRuntimeTarget(
-            getSettingsForWorktreeRuntimeOwner(useAppStore.getState(), worktreeId)
-          )
-        })
+        const state = useAppStore.getState()
+        const route = resolveWorktreeOperationRouteForHost(state, worktreeId, executionHostId)
+        if (route) {
+          openModal('agent-launch-capacity-recovery', {
+            target: getActiveRuntimeTarget(settingsForWorktreeOperationRoute(state.settings, route))
+          })
+        }
       }
       // open-terminal routes to an affordance not owned by this wave; the no-op
       // keeps the card honest rather than firing a wrong action.
     },
     [
       worktreeId,
+      executionHostId,
       confirm,
       setBusy,
       retryBackgroundAgentLaunch,

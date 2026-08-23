@@ -27,8 +27,8 @@ import type { MobileWorkspaceRepo, SetupRunPolicy } from './new-worktree-modal-t
 import type { SetupTrustPrompt } from './SetupHookTrustDrawer'
 import type { NewWorktreeDrawerView } from './use-new-worktree-drawer-navigation'
 import { getSuggestedCreatureName } from './worktree-name-suggestion'
-import { hostSupportsAgentLaunchIdentity } from '../session/agent-launch-identity-capability'
 import { buildInteractiveLaunchParams } from './interactive-worktree-launch-params'
+import { resolveNewWorktreeAgentIdentitySupport } from './new-worktree-agent-identity-support'
 
 type CreateOptions = {
   setupOverride?: Exclude<WorkspaceCreateSetupDecision, 'inherit'>
@@ -106,17 +106,11 @@ export function useNewWorkspaceCreateSubmit(args: {
       } catch {
         // The runtime validates the same setting before spawning.
       }
-      let hasIdentityCapability = false
-      try {
-        const statusResponse = await client.sendRequest('status.get')
-        if (statusResponse.ok) {
-          hasIdentityCapability = hostSupportsAgentLaunchIdentity(
-            (statusResponse as RpcSuccess).result
-          )
-        }
-      } catch {
-        // Best-effort probe; older hosts keep the legacy launch path.
-      }
+      const hasIdentityCapability = await resolveNewWorktreeAgentIdentitySupport({
+        client,
+        selectedAgent: args.selectedAgent,
+        catalogSnapshot: args.agentCatalog
+      })
       if (
         args.selectedAgent.id !== '__blank__' &&
         !isMobileTuiAgentEnabled(args.selectedAgent.id, latestRuntimeSettings?.disabledTuiAgents)

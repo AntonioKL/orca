@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   deriveAgentLaunchHostState,
+  detectionBaseAgentsForLaunch,
   defaultTransportConfidentiality,
   describeSpawnExecutionHost,
   detectionUnavailable,
@@ -31,10 +32,18 @@ describe('executionHostIdForDescriptor', () => {
       'wsl:Ubuntu%2022.04'
     )
     expect(
-      executionHostIdForDescriptor({ kind: 'ssh', connectionId: 'my host', platform: 'linux' })
+      executionHostIdForDescriptor({
+        kind: 'ssh',
+        connectionId: 'my host',
+        platform: 'linux'
+      })
     ).toBe('ssh:my%20host')
     expect(
-      executionHostIdForDescriptor({ kind: 'runtime', environmentId: 'env/1', platform: 'linux' })
+      executionHostIdForDescriptor({
+        kind: 'runtime',
+        environmentId: 'env/1',
+        platform: 'linux'
+      })
     ).toBe('runtime:env%2F1')
   })
 })
@@ -43,18 +52,32 @@ describe('platformForDescriptor / isRemoteForDescriptor', () => {
   it('forces linux for WSL and keeps the named platform otherwise', () => {
     expect(platformForDescriptor({ kind: 'wsl', distro: 'Ubuntu' })).toBe('linux')
     expect(platformForDescriptor({ kind: 'local', platform: 'win32' })).toBe('win32')
-    expect(platformForDescriptor({ kind: 'ssh', connectionId: 'h', platform: 'linux' })).toBe(
-      'linux'
-    )
+    expect(
+      platformForDescriptor({
+        kind: 'ssh',
+        connectionId: 'h',
+        platform: 'linux'
+      })
+    ).toBe('linux')
   })
 
   it('treats SSH and default runtime as remote, local and WSL as local', () => {
     expect(isRemoteForDescriptor({ kind: 'local', platform: 'darwin' })).toBe(false)
     expect(isRemoteForDescriptor({ kind: 'wsl', distro: 'Ubuntu' })).toBe(false)
-    expect(isRemoteForDescriptor({ kind: 'ssh', connectionId: 'h', platform: 'linux' })).toBe(true)
-    expect(isRemoteForDescriptor({ kind: 'runtime', environmentId: 'e', platform: 'linux' })).toBe(
-      true
-    )
+    expect(
+      isRemoteForDescriptor({
+        kind: 'ssh',
+        connectionId: 'h',
+        platform: 'linux'
+      })
+    ).toBe(true)
+    expect(
+      isRemoteForDescriptor({
+        kind: 'runtime',
+        environmentId: 'e',
+        platform: 'linux'
+      })
+    ).toBe(true)
     expect(
       isRemoteForDescriptor({
         kind: 'runtime',
@@ -71,10 +94,18 @@ describe('defaultTransportConfidentiality', () => {
     expect(defaultTransportConfidentiality({ kind: 'local', platform: 'darwin' })).toBeUndefined()
     expect(defaultTransportConfidentiality({ kind: 'wsl', distro: 'Ubuntu' })).toBeUndefined()
     expect(
-      defaultTransportConfidentiality({ kind: 'ssh', connectionId: 'h', platform: 'linux' })
+      defaultTransportConfidentiality({
+        kind: 'ssh',
+        connectionId: 'h',
+        platform: 'linux'
+      })
     ).toBe(true)
     expect(
-      defaultTransportConfidentiality({ kind: 'runtime', environmentId: 'e', platform: 'linux' })
+      defaultTransportConfidentiality({
+        kind: 'runtime',
+        environmentId: 'e',
+        platform: 'linux'
+      })
     ).toBe(false)
   })
 })
@@ -105,7 +136,10 @@ describe('deriveAgentLaunchHostState', () => {
     expect([...state.target.detectedStockBaseAgents!].sort()).toEqual(['claude', 'codex'])
     // Same-host: confidentiality is omitted (undefined), not false.
     expect('transportConfidentialityAvailable' in state.target).toBe(false)
-    expect(state.variables).toEqual({ repoPath: '/repo', worktreePath: '/repo/wt' })
+    expect(state.variables).toEqual({
+      repoPath: '/repo',
+      worktreePath: '/repo/wt'
+    })
     expect(state.getCatalogRevision()).toBe(3)
   })
 
@@ -120,6 +154,33 @@ describe('deriveAgentLaunchHostState', () => {
     expect(state.target.shell).toBe('posix')
     expect(state.target.targetHomePath).toBe('/home/remote')
     expect(state.target.transportConfidentialityAvailable).toBe(true)
+  })
+
+  it('uses the target-owned SSH shell when the descriptor has no shell', async () => {
+    const resolveStartupShell = vi.fn(async () => 'cmd' as const)
+    const descriptor: AgentLaunchHostDescriptor = {
+      kind: 'ssh',
+      connectionId: 'box-1',
+      platform: 'win32'
+    }
+    const state = await deriveAgentLaunchHostState(
+      makeDeps({ resolveStartupShell }),
+      descriptor,
+      {}
+    )
+    expect(resolveStartupShell).toHaveBeenCalledWith(descriptor)
+    expect(state.target.shell).toBe('cmd')
+  })
+
+  it('does not replace a shell already proven by the descriptor', async () => {
+    const resolveStartupShell = vi.fn(async () => 'powershell' as const)
+    const state = await deriveAgentLaunchHostState(
+      makeDeps({ resolveStartupShell }),
+      { kind: 'ssh', connectionId: 'box-1', platform: 'win32', shell: 'cmd' },
+      {}
+    )
+    expect(resolveStartupShell).not.toHaveBeenCalled()
+    expect(state.target.shell).toBe('cmd')
   })
 
   it('derives a WSL target as local linux with a wsl host id', async () => {
@@ -191,11 +252,55 @@ describe('deriveAgentLaunchHostState', () => {
   })
 })
 
+describe('detectionBaseAgentsForLaunch', () => {
+  const customId = 'custom-agent:codex:01234567-89ab-4cde-8f01-23456789abcd' as const
+  it('narrows only immutable built-in identities to one stock base', () => {
+    expect(detectionBaseAgentsForLaunch({ selection: { kind: 'agent', agent: 'claude' } })).toEqual(
+      ['claude']
+    )
+    expect(detectionBaseAgentsForLaunch({ selection: { kind: 'agent', agent: customId } })).toBe(
+      undefined
+    )
+  })
+
+  it('keeps full detection for mutable defaults and trusts snapshot base identity', () => {
+    expect(detectionBaseAgentsForLaunch({ selection: { kind: 'default' } })).toBeUndefined()
+    expect(
+      detectionBaseAgentsForLaunch(
+        { selection: { kind: 'default' } },
+        {
+          version: 1,
+          requestedAgent: 'claude',
+          baseAgent: 'claude',
+          displayLabel: 'Claude',
+          mode: 'built-in',
+          argv: ['claude'],
+          agentEnv: {},
+          capturedEnvPolicy: 'none',
+          target: {
+            platform: 'linux',
+            execution: 'native',
+            shell: 'posix',
+            isRemote: false,
+            executionHostId: 'local'
+          }
+        }
+      )
+    ).toEqual(['claude'])
+  })
+})
+
 describe('describeSpawnExecutionHost', () => {
   it('describes a local target with this machine platform', () => {
-    const descriptor = describeSpawnExecutionHost({ connectionId: null, cwd: '/repo' })
+    const descriptor = describeSpawnExecutionHost({
+      connectionId: null,
+      cwd: '/repo'
+    })
     expect(descriptor.kind).toBe('local')
-    expect(descriptor).toMatchObject({ kind: 'local', platform: process.platform })
+    expect(descriptor).toMatchObject({
+      kind: 'local',
+      platform: process.platform
+    })
   })
 
   it('describes an SSH target and infers linux from a POSIX cwd', () => {
@@ -203,7 +308,11 @@ describe('describeSpawnExecutionHost', () => {
       connectionId: 'host-1',
       cwd: '/home/user/repo'
     })
-    expect(descriptor).toEqual({ kind: 'ssh', connectionId: 'host-1', platform: 'linux' })
+    expect(descriptor).toEqual({
+      kind: 'ssh',
+      connectionId: 'host-1',
+      platform: 'linux'
+    })
   })
 
   it('infers win32 for an SSH target with a Windows-shaped cwd', () => {
@@ -211,12 +320,20 @@ describe('describeSpawnExecutionHost', () => {
       connectionId: 'host-1',
       cwd: 'C:\\Users\\me\\repo'
     })
-    expect(descriptor).toEqual({ kind: 'ssh', connectionId: 'host-1', platform: 'win32' })
+    expect(descriptor).toEqual({
+      kind: 'ssh',
+      connectionId: 'host-1',
+      platform: 'win32'
+    })
   })
 
   it('defaults an SSH target to linux when the cwd is unknown', () => {
     const descriptor = describeSpawnExecutionHost({ connectionId: 'host-1' })
-    expect(descriptor).toEqual({ kind: 'ssh', connectionId: 'host-1', platform: 'linux' })
+    expect(descriptor).toEqual({
+      kind: 'ssh',
+      connectionId: 'host-1',
+      platform: 'linux'
+    })
   })
 
   // A WSL UNC cwd runs a Linux userland; win32 here picks the Windows executable
@@ -237,7 +354,10 @@ describe('describeSpawnExecutionHost', () => {
   // PowerShell quotes typed into a cmd.exe tab reach the agent verbatim.
   it('quotes for the tab shell override ahead of the global Windows shell', () => {
     const original = Object.getOwnPropertyDescriptor(process, 'platform')
-    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true })
+    Object.defineProperty(process, 'platform', {
+      value: 'win32',
+      configurable: true
+    })
     try {
       expect(
         describeSpawnExecutionHost({
@@ -263,17 +383,27 @@ describe('describeSpawnExecutionHost', () => {
 
   it('describes a legacy \\\\wsl$ UNC cwd as the same wsl host', () => {
     expect(
-      describeSpawnExecutionHost({ connectionId: null, cwd: '\\\\wsl$\\Debian\\srv\\app' })
+      describeSpawnExecutionHost({
+        connectionId: null,
+        cwd: '\\\\wsl$\\Debian\\srv\\app'
+      })
     ).toEqual({ kind: 'wsl', distro: 'Debian' })
   })
 })
 
 describe('resolveLocalTargetHomePath', () => {
   it('returns a home dir for local and null for every other surface', async () => {
-    const local: AgentLaunchHostDescriptor = { kind: 'local', platform: process.platform }
+    const local: AgentLaunchHostDescriptor = {
+      kind: 'local',
+      platform: process.platform
+    }
     await expect(resolveLocalTargetHomePath(local)).resolves.toEqual(expect.any(String))
     await expect(
-      resolveLocalTargetHomePath({ kind: 'ssh', connectionId: 'h', platform: 'linux' })
+      resolveLocalTargetHomePath({
+        kind: 'ssh',
+        connectionId: 'h',
+        platform: 'linux'
+      })
     ).resolves.toBeNull()
     await expect(resolveLocalTargetHomePath({ kind: 'wsl', distro: 'Ubuntu' })).resolves.toBeNull()
   })

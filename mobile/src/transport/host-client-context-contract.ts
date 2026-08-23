@@ -30,6 +30,7 @@ export type HostClientContextValue = {
   getLastConnectedAt: (hostId: string) => number | null
   getActivePath: (hostId: string) => MobileConnectionPath
   getPendingPath: (hostId: string) => MobileConnectionPath | null
+  isPairingRejected: (hostId: string) => boolean
   subscribeHostState: (hostId: string, listener: (state: ConnectionState) => void) => () => void
   getAllClients: () => Array<{ hostId: string; client: RpcClient }>
   subscribeAllHosts: (listener: () => void) => () => void

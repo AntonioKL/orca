@@ -58,6 +58,9 @@ describe('workspace agent selection', () => {
   it('normalizes legacy blank sentinel and labels known choices', () => {
     expect(normalizeWorkspaceAgent('__blank__')).toBe('blank')
     expect(workspaceAgentLabel('codex')).toBe('Codex')
+    expect(workspaceAgentLabel(customClaudeId, new Map([[customClaudeId, 'My Claude']]))).toBe(
+      'My Claude'
+    )
   })
 
   it('accepts a custom default only when the catalog vouches for it', () => {

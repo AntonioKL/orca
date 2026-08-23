@@ -80,7 +80,10 @@ const WorktreeCard = React.memo(function WorktreeCard({
   return (
     <>
       <WorktreeCardSurface card={card} />
-      <WorktreeCardBackgroundLaunchFailures worktreeId={worktree.id} />
+      <WorktreeCardBackgroundLaunchFailures
+        worktreeId={worktree.id}
+        executionHostId={worktree.hostId ?? 'local'}
+      />
     </>
   )
 })

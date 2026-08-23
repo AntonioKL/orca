@@ -163,4 +163,47 @@ describe('registerPtyHandlers agent resume', () => {
       })
     )
   })
+
+  it('quotes a native-Windows SSH resume for the relay default shell', async () => {
+    const spawn = vi.fn(async () => ({ id: 'remote-win-pty' }))
+    const getDefaultShell = vi.fn(async () => 'C:\\Windows\\System32\\cmd.exe')
+    registerSshPtyProvider('ssh-win-resume', {
+      spawn,
+      write: vi.fn(),
+      resize: vi.fn(),
+      shutdown: vi.fn(),
+      sendSignal: vi.fn(),
+      getCwd: vi.fn(),
+      getInitialCwd: vi.fn(),
+      clearBuffer: vi.fn(),
+      onData: vi.fn(() => () => {}),
+      onReplay: vi.fn(() => () => {}),
+      onExit: vi.fn(() => () => {}),
+      listProcesses: vi.fn(),
+      hasChildProcesses: vi.fn(),
+      getForegroundProcess: vi.fn(),
+      serialize: vi.fn(),
+      revive: vi.fn(),
+      getDefaultShell,
+      getProfiles: vi.fn(),
+      acknowledgeDataEvent: vi.fn()
+    } as never)
+    handlers.clear()
+    registerPtyHandlers(mainWindow as never, undefined, undefined, (() => ({})) as never)
+
+    await handlers.get('pty:spawn')!(null, {
+      cols: 80,
+      rows: 24,
+      connectionId: 'ssh-win-resume',
+      cwd: 'C:\\Users\\me\\wt-1',
+      agentLaunch: resumeLaunch('codex-ssh-win-cmd'),
+      launchConfig: LEGACY_LAUNCH_CONFIG,
+      legacyResumeRecordedConnectionId: 'ssh-win-resume'
+    })
+
+    expect(spawn).toHaveBeenCalledWith(
+      expect.objectContaining({ command: `codex "resume" "codex-ssh-win-cmd"` })
+    )
+    expect(getDefaultShell).toHaveBeenCalledOnce()
+  })
 })

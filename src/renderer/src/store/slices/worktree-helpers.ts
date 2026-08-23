@@ -237,19 +237,23 @@ export type WorktreeSlice = {
   retryBackgroundAgentLaunch: (args: {
     attemptId: string
     worktreeId: string
+    executionHostId?: ExecutionHostId
     expectedFailureId: string
     action: RetryAgentLaunchAction
   }) => Promise<WorktreeRetryAgentLaunchResult>
   forgetBackgroundAgentLaunch: (args: {
     attemptId: string
     worktreeId: string
+    executionHostId?: ExecutionHostId
     expectedOperationId: string
   }) => Promise<ForgetUnknownAgentLaunchResult>
   unknownAgentLaunchSiblingPreflight: (args: {
     worktreeId: string
+    executionHostId?: ExecutionHostId
   }) => Promise<{ count: number; hostName: string }>
   forgetUnknownAgentLaunchSiblings: (args: {
     worktreeId: string
+    executionHostId?: ExecutionHostId
   }) => Promise<{ forgottenCount: number }>
   fetchPendingAgentLaunchSummary: (
     target?: RuntimeClientTarget

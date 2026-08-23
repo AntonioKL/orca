@@ -153,6 +153,7 @@ import { normalizeBrowserUrl } from '../../../../src/browser/browser-url'
 import { StatusDot } from '../../../../src/components/StatusDot'
 import { ActionSheetModal } from '../../../../src/components/ActionSheetModal'
 import { MobileAgentIcon } from '../../../../src/components/MobileAgentIcon'
+import { useAgentCatalogSnapshot } from '../../../../src/components/use-agent-catalog-snapshot'
 import { TextInputModal } from '../../../../src/components/TextInputModal'
 import { ConfirmModal } from '../../../../src/components/ConfirmModal'
 import { MobileMarkdownReader } from '../../../../src/session/MobileMarkdownReader'
@@ -189,6 +190,8 @@ import {
 } from '../../../../src/session/mobile-terminal-tab-agent'
 import type { MobileNewTabAgentOption } from '../../../../src/session/mobile-new-tab-agent-options'
 import { loadMobileNewTabAgentOptions } from '../../../../src/session/mobile-new-tab-agent-loader'
+import { buildMobileNewTabCreateFields } from '../../../../src/session/mobile-new-tab-create-fields'
+import { readMobileNewTabCreatedTerminal } from '../../../../src/session/mobile-new-tab-create-result'
 import { useMobileSessionImageAttachments } from '../../../../src/session/use-mobile-session-image-attachments'
 import { useMobileAttachmentInputLeaseGate } from '../../../../src/session/use-mobile-attachment-input-lease-gate'
 import { useMobileTerminalPaste } from '../../../../src/session/use-mobile-terminal-paste'
@@ -302,7 +305,6 @@ import type {
   RuntimeRepoSummary,
   SessionTabsResult,
   Terminal,
-  TerminalCreateResult,
   TerminalGestureInputBucket,
   TerminalGestureInputQueue
 } from '../../../../src/session/mobile-session-route-types'
@@ -599,6 +601,7 @@ export default function SessionScreen() {
   const insets = useSafeAreaInsets()
   // Why: shared client per host owned by RpcClientProvider (docs/mobile-shared-client-per-host.md).
   const { client, state: connState } = useHostClient(hostId)
+  const agentCatalog = useAgentCatalogSnapshot(hostId)
   const reconnectAttempts = useReconnectAttempt(hostId)
   const lastConnectedAt = useLastConnectedAt(hostId)
   const relayRecovery = useRelayRecoveryStatus(hostId)
@@ -3555,7 +3558,8 @@ export default function SessionScreen() {
     void (async () => {
       const options = await loadMobileNewTabAgentOptions({
         client,
-        worktreeId
+        worktreeId,
+        catalogSnapshot: agentCatalog
       })
       if (stale) {
         return
@@ -3572,7 +3576,7 @@ export default function SessionScreen() {
     return () => {
       stale = true
     }
-  }, [client, connState, pendingDiffNotesDelivery, showCreateTabDrawer, worktreeId])
+  }, [agentCatalog, client, connState, pendingDiffNotesDelivery, showCreateTabDrawer, worktreeId])
 
   async function handleCreateTerminal(
     agent?: MobileNewTabAgentOption['agent'],
@@ -3599,19 +3603,18 @@ export default function SessionScreen() {
         worktree: `id:${worktreeId}`,
         afterTabId: activeSessionTabId ?? undefined,
         clientMutationId,
-        ...(options?.startupCommand ? { command: options.startupCommand } : {}),
-        ...(options?.startupCommandDelivery
-          ? { startupCommandDelivery: options.startupCommandDelivery }
-          : {}),
-        ...(options?.agentPrompt ? { agentPrompt: options.agentPrompt } : {}),
-        ...(agent ? { agent } : {}),
+        ...buildMobileNewTabCreateFields({
+          agent,
+          agentPrompt: options?.agentPrompt,
+          startupCommand: options?.startupCommand,
+          startupCommandDelivery: options?.startupCommandDelivery
+        }),
         activate: false,
         select: true,
         navigation: 'caller'
       })
       if (response.ok) {
-        const result = (response as RpcSuccess).result as TerminalCreateResult
-        const created = result.tab
+        const created = readMobileNewTabCreatedTerminal((response as RpcSuccess).result)
         // Why: unsubscribe the old terminal so the server restores its desktop dims; otherwise its restore timer is never set.
         const prev = activeHandleRef.current
         if (prev) {
@@ -3705,16 +3708,18 @@ export default function SessionScreen() {
         setCreateError(message)
         if (options?.errorToast) {
           triggerError()
-          showToast(message, 1800)
         }
+        showToast(message, 1800)
       }
-    } catch {
-      const message = options?.errorToast ?? 'Failed to create terminal'
+    } catch (error) {
+      const message =
+        options?.errorToast ??
+        (error instanceof Error ? error.message : 'Failed to create terminal')
       setCreateError(message)
       if (options?.errorToast) {
         triggerError()
-        showToast(message, 1800)
       }
+      showToast(message, 1800)
     } finally {
       creatingTerminalRef.current = false
       setCreating(false)

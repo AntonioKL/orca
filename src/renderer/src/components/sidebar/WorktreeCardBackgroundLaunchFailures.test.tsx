@@ -11,11 +11,12 @@ import type {
 import type { BackgroundAgentLaunchAttempt } from '../../../../shared/background-agent-launch'
 
 const WORKTREE_ID = 'repo1::/tmp/wt'
+const HOST_ID = 'ssh:devbox' as const
 
 type WorktreeShape = { backgroundAgentLaunches?: BackgroundAgentLaunchAttempt[] }
 
 const storeBox = vi.hoisted(() => ({ state: null as unknown }))
-const worktreeBox = vi.hoisted(() => ({ worktree: null as WorktreeShape | null }))
+const worktreeBox = vi.hoisted(() => ({ byHost: new Map<string, WorktreeShape>() }))
 // Holds what the soft confirm hook returns; a null value reproduces a
 // provider-less render (the crash class that took out the WorktreeCard family).
 const confirmBox = vi.hoisted(() => ({ value: null as unknown }))
@@ -41,8 +42,13 @@ vi.mock('@/components/confirmation-dialog-context', () => ({
 }))
 
 vi.mock('@/store/selectors', () => ({
-  getWorktreeMapFromState: () =>
-    new Map(worktreeBox.worktree ? [[WORKTREE_ID, worktreeBox.worktree]] : [])
+  getWorktreeOnHostFromState: (_state: unknown, _worktreeId: string, hostId: string) =>
+    worktreeBox.byHost.get(hostId)
+}))
+
+vi.mock('@/lib/worktree-operation-route', () => ({
+  resolveWorktreeOperationRouteForHost: vi.fn(),
+  settingsForWorktreeOperationRoute: vi.fn()
 }))
 
 function failure(code: AgentLaunchFailureCode): PersistedAgentLaunchFailure {
@@ -75,7 +81,9 @@ async function render(): Promise<void> {
   const root = createRoot(container)
   mountedRoots.push(root)
   await act(async () => {
-    root.render(<WorktreeCardBackgroundLaunchFailures worktreeId={WORKTREE_ID} />)
+    root.render(
+      <WorktreeCardBackgroundLaunchFailures worktreeId={WORKTREE_ID} executionHostId={HOST_ID} />
+    )
   })
 }
 
@@ -99,7 +107,7 @@ beforeEach(() => {
   mocks.forgetUnknownAgentLaunchSiblings.mockResolvedValue({ forgottenCount: 0 })
   mocks.confirm.mockResolvedValue(true)
   confirmBox.value = mocks.confirm
-  worktreeBox.worktree = null
+  worktreeBox.byHost.clear()
   storeBox.state = {
     // The container guards a missing worktreesByRepo slice (partial sibling-suite
     // mocks) before projecting meta; production always carries it, so seed a
@@ -127,6 +135,26 @@ describe('WorktreeCardBackgroundLaunchFailures', () => {
     expect(document.body.querySelector('[role="alert"]')).toBeNull()
   })
 
+  it('selects the attempt row on the card host when worktree ids collide', async () => {
+    worktreeBox.byHost.set('local', {
+      backgroundAgentLaunches: [attempt({ failure: failure('unknown_agent') })]
+    })
+    worktreeBox.byHost.set(HOST_ID, {
+      backgroundAgentLaunches: [
+        attempt({ state: 'pending', failure: failure('launch_state_unknown') })
+      ]
+    })
+
+    await render()
+
+    expect(buttonByLabel('Reconnect')).toBeTruthy()
+    expect(
+      [...document.body.querySelectorAll('button')].some(
+        (button) => button.textContent === 'Choose agent'
+      )
+    ).toBe(false)
+  })
+
   it('renders nothing without throwing when the store omits the worktreesByRepo slice', async () => {
     // Reproduces the minimal sibling-suite store shape that made the indexed
     // worktree selector throw on Object.values(undefined) during G6's full run.
@@ -141,18 +169,18 @@ describe('WorktreeCardBackgroundLaunchFailures', () => {
   })
 
   it('renders nothing for launched/forgotten attempts (no surfacing failure)', async () => {
-    worktreeBox.worktree = {
+    worktreeBox.byHost.set(HOST_ID, {
       backgroundAgentLaunches: [
         attempt({ attemptId: 'a', state: 'launched', failure: null }),
         attempt({ attemptId: 'b', state: 'forgotten', failure: failure('spawn_failed') })
       ]
-    }
+    })
     await render()
     expect(document.body.querySelector('[role="alert"]')).toBeNull()
   })
 
   it('retries a failed attempt against its failure id, keyed by the attempt id', async () => {
-    worktreeBox.worktree = { backgroundAgentLaunches: [attempt()] }
+    worktreeBox.byHost.set(HOST_ID, { backgroundAgentLaunches: [attempt()] })
     await render()
     await act(async () => {
       buttonByLabel('Retry').click()
@@ -160,17 +188,18 @@ describe('WorktreeCardBackgroundLaunchFailures', () => {
     expect(mocks.retryBackgroundAgentLaunch).toHaveBeenCalledExactlyOnceWith({
       attemptId: 'attempt-1',
       worktreeId: WORKTREE_ID,
+      executionHostId: HOST_ID,
       expectedFailureId: 'failure-7',
       action: { kind: 'retry-same' }
     })
   })
 
   it('forgets an unknown attempt after the destructive confirmation, using its operation id as the guard', async () => {
-    worktreeBox.worktree = {
+    worktreeBox.byHost.set(HOST_ID, {
       backgroundAgentLaunches: [
         attempt({ state: 'pending', failure: failure('launch_state_unknown') })
       ]
-    }
+    })
     await render()
     await act(async () => {
       buttonByLabel('Forget launch…').click()
@@ -185,17 +214,18 @@ describe('WorktreeCardBackgroundLaunchFailures', () => {
     expect(mocks.forgetBackgroundAgentLaunch).toHaveBeenCalledExactlyOnceWith({
       attemptId: 'attempt-1',
       worktreeId: WORKTREE_ID,
+      executionHostId: HOST_ID,
       expectedOperationId: 'op-9'
     })
   })
 
   it('does not forget an unknown attempt when the destructive confirmation is declined', async () => {
     mocks.confirm.mockResolvedValue(false)
-    worktreeBox.worktree = {
+    worktreeBox.byHost.set(HOST_ID, {
       backgroundAgentLaunches: [
         attempt({ state: 'pending', failure: failure('launch_state_unknown') })
       ]
-    }
+    })
     await render()
     await act(async () => {
       buttonByLabel('Forget launch…').click()
@@ -212,17 +242,18 @@ describe('WorktreeCardBackgroundLaunchFailures', () => {
         return true
       }
     )
-    worktreeBox.worktree = {
+    worktreeBox.byHost.set(HOST_ID, {
       backgroundAgentLaunches: [
         attempt({ state: 'pending', failure: failure('launch_state_unknown') })
       ]
-    }
+    })
     await render()
     await act(async () => {
       buttonByLabel('Forget launch…').click()
     })
     expect(mocks.unknownAgentLaunchSiblingPreflight).toHaveBeenCalledExactlyOnceWith({
-      worktreeId: WORKTREE_ID
+      worktreeId: WORKTREE_ID,
+      executionHostId: HOST_ID
     })
     expect(mocks.confirm).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({
@@ -234,20 +265,22 @@ describe('WorktreeCardBackgroundLaunchFailures', () => {
     expect(mocks.forgetBackgroundAgentLaunch).toHaveBeenCalledExactlyOnceWith({
       attemptId: 'attempt-1',
       worktreeId: WORKTREE_ID,
+      executionHostId: HOST_ID,
       expectedOperationId: 'op-9'
     })
     expect(mocks.forgetUnknownAgentLaunchSiblings).toHaveBeenCalledExactlyOnceWith({
-      worktreeId: WORKTREE_ID
+      worktreeId: WORKTREE_ID,
+      executionHostId: HOST_ID
     })
   })
 
   it('omits the opt-in and still forgets the attempt when the sibling preflight fails', async () => {
     mocks.unknownAgentLaunchSiblingPreflight.mockRejectedValue(new Error('unreachable'))
-    worktreeBox.worktree = {
+    worktreeBox.byHost.set(HOST_ID, {
       backgroundAgentLaunches: [
         attempt({ state: 'pending', failure: failure('launch_state_unknown') })
       ]
-    }
+    })
     await render()
     await act(async () => {
       buttonByLabel('Forget launch…').click()
@@ -265,11 +298,11 @@ describe('WorktreeCardBackgroundLaunchFailures', () => {
     // The card must still render and the destructive forget must not fire
     // unconfirmed, rather than throwing and crashing the whole family.
     confirmBox.value = null
-    worktreeBox.worktree = {
+    worktreeBox.byHost.set(HOST_ID, {
       backgroundAgentLaunches: [
         attempt({ state: 'pending', failure: failure('launch_state_unknown') })
       ]
-    }
+    })
     await render()
     expect(document.body.querySelector('[role="alert"]')).not.toBeNull()
     await act(async () => {
@@ -280,11 +313,11 @@ describe('WorktreeCardBackgroundLaunchFailures', () => {
   })
 
   it('routes reconnect on an unknown attempt to the ssh settings pane', async () => {
-    worktreeBox.worktree = {
+    worktreeBox.byHost.set(HOST_ID, {
       backgroundAgentLaunches: [
         attempt({ state: 'pending', failure: failure('launch_state_unknown') })
       ]
-    }
+    })
     await render()
     await act(async () => {
       buttonByLabel('Reconnect').click()
@@ -294,9 +327,9 @@ describe('WorktreeCardBackgroundLaunchFailures', () => {
   })
 
   it('routes selection recovery to the desktop-host agents settings pane', async () => {
-    worktreeBox.worktree = {
+    worktreeBox.byHost.set(HOST_ID, {
       backgroundAgentLaunches: [attempt({ failure: failure('unknown_agent') })]
-    }
+    })
     await render()
     await act(async () => {
       buttonByLabel('Choose agent').click()
@@ -309,13 +342,13 @@ describe('WorktreeCardBackgroundLaunchFailures', () => {
   })
 
   it('renders one card per surfacing attempt', async () => {
-    worktreeBox.worktree = {
+    worktreeBox.byHost.set(HOST_ID, {
       backgroundAgentLaunches: [
         attempt({ attemptId: 'a' }),
         attempt({ attemptId: 'b', state: 'pending', failure: failure('launch_state_unknown') }),
         attempt({ attemptId: 'c', state: 'launched', failure: null })
       ]
-    }
+    })
     await render()
     expect(document.body.querySelectorAll('[role="alert"]').length).toBe(2)
   })

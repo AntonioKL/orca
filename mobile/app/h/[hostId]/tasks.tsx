@@ -47,6 +47,7 @@ import { BottomDrawer } from '../../../src/components/BottomDrawer'
 import { ConfirmModal } from '../../../src/components/ConfirmModal'
 import { MobileMarkdown } from '../../../src/components/MobileMarkdown'
 import { MobileAgentIcon } from '../../../src/components/MobileAgentIcon'
+import { useAgentCatalogSnapshot } from '../../../src/components/use-agent-catalog-snapshot'
 import { MobileWorkspaceNameInput } from '../../../src/components/MobileWorkspaceNameInput'
 import { MobileSearchField } from '../../../src/components/MobileSearchField'
 import { MobileSyntaxSegments } from '../../../src/components/MobileSyntaxSegments'
@@ -69,15 +70,17 @@ import {
   getHostedChecksLabel
 } from '../../../src/tasks/mobile-hosted-check-status'
 import { buildTaskWorkspaceCreateParams } from '../../../src/tasks/workspace-create-params'
+import { readTaskWorkspaceCreatedResult } from '../../../src/tasks/task-workspace-create-result'
 import { MOBILE_TASKS_CAPABILITY } from '../../../src/tasks/mobile-tasks-capability'
 import {
-  filterWorkspaceAgents,
   isWorkspaceAgentEnabled,
+  normalizeWorkspaceAgent,
   pickWorkspaceAgent,
   resolveWorkspaceAgentSelection,
   workspaceAgentLabel,
   type WorkspaceAgentChoice
 } from '../../../src/tasks/workspace-agent-selection'
+import { buildTaskWorkspaceAgentCatalog } from '../../../src/tasks/task-workspace-agent-catalog'
 import { shouldResolveHostedReviewStartPoint } from '../../../src/tasks/hosted-review-start-point'
 import { getLinkedWorkItemSuggestedName } from '../../../src/tasks/mobile-workspace-name'
 import {
@@ -143,7 +146,6 @@ import {
   extractLinearIssueReadItems,
   type LinearMobileIssue
 } from '../../../src/tasks/linear-mobile-issue-read'
-import { MOBILE_TUI_AGENT_AUTO_PICK_ORDER } from '../../../src/tasks/mobile-tui-agents'
 import { resolveComposerBranchSelection } from '../../../src/tasks/mobile-composer-branch-selection'
 import {
   clearMobileTaskCopyFeedbackTimer,
@@ -2072,6 +2074,7 @@ export default function MobileTasksScreen() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
   const { client, state: connState } = useHostClient(hostId)
+  const agentCatalog = useAgentCatalogSnapshot(hostId)
   const reconnectAttempts = useReconnectAttempt(hostId)
   const lastConnectedAt = useLastConnectedAt(hostId)
   const relayRecovery = useRelayRecoveryStatus(hostId)
@@ -4826,30 +4829,22 @@ export default function MobileTasksScreen() {
     !workspaceSparseDraftError &&
     workspaceSparseDraftParsed !== null
 
-  const workspaceAgentOptions = useMemo<PickerOption<WorkspaceAgentChoice>[]>(() => {
-    const enabledAgents = filterWorkspaceAgents(
-      MOBILE_TUI_AGENT_AUTO_PICK_ORDER,
-      runtimeTaskSettings.disabledTuiAgents
-    )
-    const availableAgents =
-      workspaceDetectedAgentIds === null
-        ? new Set<TuiAgent>(enabledAgents)
-        : new Set<TuiAgent>(enabledAgents.filter((agent) => workspaceDetectedAgentIds.has(agent)))
-    if (
-      workspaceAgent &&
-      workspaceAgent !== 'blank' &&
-      isWorkspaceAgentEnabled(workspaceAgent, runtimeTaskSettings.disabledTuiAgents) &&
-      (workspaceDetectedAgentIds === null || workspaceDetectedAgentIds.has(workspaceAgent))
-    ) {
-      availableAgents.add(workspaceAgent)
-    }
-    const agents = MOBILE_TUI_AGENT_AUTO_PICK_ORDER.filter((agent) => availableAgents.has(agent))
-    return [
-      ...agents.map((agent) => ({
-        value: agent,
-        label: workspaceAgentLabel(agent),
-        subtitle: agent,
-        renderIcon: () => <MobileAgentIcon agentId={workspaceAgentIconId(agent)} size={18} />
+  const workspaceAgentCatalog = useMemo(
+    () =>
+      buildTaskWorkspaceAgentCatalog(
+        agentCatalog,
+        workspaceDetectedAgentIds,
+        runtimeTaskSettings.disabledTuiAgents
+      ),
+    [agentCatalog, runtimeTaskSettings.disabledTuiAgents, workspaceDetectedAgentIds]
+  )
+  const workspaceAgentOptions = useMemo<PickerOption<WorkspaceAgentChoice>[]>(
+    () => [
+      ...workspaceAgentCatalog.rows.map((row) => ({
+        value: row.id,
+        label: row.label,
+        subtitle: row.isCustom ? `Custom ${workspaceAgentLabel(row.baseAgent!)}` : row.id,
+        renderIcon: () => <MobileAgentIcon agentId={row.baseAgent ?? row.id} size={18} />
       })),
       {
         value: 'blank' as const,
@@ -4857,8 +4852,9 @@ export default function MobileTasksScreen() {
         subtitle: 'Open a shell',
         renderIcon: () => <MobileAgentIcon agentId="__blank__" size={18} />
       }
-    ]
-  }, [runtimeTaskSettings.disabledTuiAgents, workspaceAgent, workspaceDetectedAgentIds])
+    ],
+    [workspaceAgentCatalog.rows]
+  )
   const openWorkspaceCreate = useCallback((item: ActionableTaskItem, repoIdOverride?: string) => {
     const suggestedName = taskWorkspaceSuggestedName(item)
     setWorkspaceCreateDraft({ item, ...(repoIdOverride ? { repoIdOverride } : {}) })
@@ -5323,6 +5319,7 @@ export default function MobileTasksScreen() {
     selectionActive: tasksSupported && workspaceCreateDraft !== null,
     settings: runtimeTaskSettings,
     detectedAgentIds: workspaceDetectedAgentIds,
+    customAgentBases: workspaceAgentCatalog.customAgentBases,
     agent: workspaceAgent,
     overridden: workspaceAgentOverridden
   })
@@ -5336,10 +5333,13 @@ export default function MobileTasksScreen() {
     setWorkspaceAgentOverridden(workspaceAgentSelection.overridden)
   }
 
-  const resolvedWorkspaceAgent = useMemo(
-    () => workspaceAgent ?? pickWorkspaceAgent(runtimeTaskSettings, workspaceDetectedAgentIds),
-    [runtimeTaskSettings, workspaceAgent, workspaceDetectedAgentIds]
-  )
+  const resolvedWorkspaceAgent =
+    workspaceAgent ??
+    pickWorkspaceAgent(
+      runtimeTaskSettings,
+      workspaceDetectedAgentIds,
+      workspaceAgentCatalog.customAgentBases
+    )
   const workspaceAgentDetectionPending =
     workspaceCreateDraft != null &&
     workspaceCreateTargetRepo != null &&
@@ -5430,17 +5430,20 @@ export default function MobileTasksScreen() {
         } catch {
           // Best-effort refresh; the runtime still validates agent availability before spawning.
         }
-        const selectedAgent =
-          agentOverride &&
-          (agentOverride === 'blank' ||
+        const agentOverrideAvailable =
+          agentOverride === 'blank' ||
+          (agentOverride !== undefined &&
+            normalizeWorkspaceAgent(agentOverride, workspaceAgentCatalog.customAgentBases) ===
+              agentOverride &&
             isWorkspaceAgentEnabled(agentOverride, latestRuntimeTaskSettings.disabledTuiAgents))
-            ? agentOverride
-            : pickWorkspaceAgent(latestRuntimeTaskSettings, workspaceDetectedAgentIds)
-        if (
-          agentOverride &&
-          agentOverride !== 'blank' &&
-          !isWorkspaceAgentEnabled(agentOverride, latestRuntimeTaskSettings.disabledTuiAgents)
-        ) {
+        const selectedAgent = agentOverrideAvailable
+          ? agentOverride!
+          : pickWorkspaceAgent(
+              latestRuntimeTaskSettings,
+              workspaceDetectedAgentIds,
+              workspaceAgentCatalog.customAgentBases
+            )
+        if (agentOverride && agentOverride !== 'blank' && !agentOverrideAvailable) {
           setWorkspaceAgent(selectedAgent)
           setWorkspaceAgentOverridden(false)
           throw new Error('Selected agent is disabled. Choose an enabled agent before creating.')
@@ -5606,10 +5609,7 @@ export default function MobileTasksScreen() {
         if (!isSuccess(response)) {
           throw new Error(response.error.message)
         }
-        const result = response.result as {
-          worktree: { id: string; displayName?: string }
-          warning?: string
-        }
+        const result = readTaskWorkspaceCreatedResult(response.result)
         setActionItem(null)
         setWorkspaceCreateDraft(null)
         setSetupPrompt(null)
@@ -5638,6 +5638,7 @@ export default function MobileTasksScreen() {
       taskStateHydrated,
       tasksSupported,
       trustedOrcaHooks,
+      workspaceAgentCatalog.customAgentBases,
       workspaceDetectedAgentIds
     ]
   )
@@ -11034,7 +11035,10 @@ export default function MobileTasksScreen() {
                       ? 'Connect repository first'
                       : workspaceAgentDetectionPending
                         ? 'Detecting agents...'
-                        : workspaceAgentLabel(resolvedWorkspaceAgent)}
+                        : workspaceAgentLabel(
+                            resolvedWorkspaceAgent,
+                            workspaceAgentCatalog.customAgentLabels
+                          )}
                   </Text>
                   <ChevronDown size={14} color={colors.textMuted} />
                 </Pressable>

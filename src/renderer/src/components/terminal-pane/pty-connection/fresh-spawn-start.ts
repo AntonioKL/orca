@@ -2,14 +2,13 @@ import { useAppStore } from '@/store'
 import { hasPtySerializer } from '../pty-buffer-serializer'
 import { writeTerminalOutput } from '@/lib/pane-manager/pane-terminal-output-scheduler'
 import { agentLaunchOutcomeErrorMessage } from '@/lib/agent-launch-failure-copy'
-import { pasteDraftWhenAgentReady } from '@/lib/agent-paste-draft'
-import { showAutomationPromptNotSentToast } from '@/lib/agent-background-session-timeout-toast'
 
 import { STARTUP_CWD_FALLBACK_NOTICE } from './startup-cwd-fallback-notice'
 import { pendingSpawnByPaneKey, pendingSpawnGenerationByPaneKey } from './pty-connect-limits'
 import { shouldWritePtyOutputForeground } from './foreground-output-scan'
 import { isRemoteRuntimePtyId } from './paired-parked-terminal-restore'
 import { toProcessExitStartup } from './process-exit-startup'
+import { applyFreshSpawnAgentLaunchResult } from './fresh-spawn-agent-launch-result'
 import type {
   PendingStartupCommand,
   FreshSpawnOptions,
@@ -118,13 +117,10 @@ export function bindStartFreshSpawn(session: ConnectPanePtySession): void {
         : {}),
       ...(coldRestoreOverride?.legacyResumeRecordedConnectionId !== undefined
         ? {
-            legacyResumeRecordedConnectionId:
-              coldRestoreOverride.legacyResumeRecordedConnectionId
+            legacyResumeRecordedConnectionId: coldRestoreOverride.legacyResumeRecordedConnectionId
           }
         : {}),
-      ...(coldRestoreOverride?.launchToken
-        ? { launchToken: coldRestoreOverride.launchToken }
-        : {}),
+      ...(coldRestoreOverride?.launchToken ? { launchToken: coldRestoreOverride.launchToken } : {}),
       ...(coldRestoreOverride ? { launchAgent: coldRestoreOverride.agent } : {}),
       ...(session.shouldDeclareHiddenAtSpawn() ? { initiallyHidden: true } : {}),
       shouldContinue: () => {
@@ -245,56 +241,7 @@ export function bindStartFreshSpawn(session: ConnectPanePtySession): void {
           return accepted ? resolvedPtyId : null
         }
         if (spawnedPtyId && typeof spawnedPtyId === 'object' && 'id' in spawnedPtyId) {
-          const launchedReceipt =
-            spawnedPtyId.agentLaunch?.status === 'launched'
-              ? spawnedPtyId.agentLaunch.receipt
-              : null
-          if (launchedReceipt) {
-            session.launchToken = launchedReceipt.launchToken
-            useAppStore
-              .getState()
-              .backfillTabLaunchAgent(session.deps.tabId, launchedReceipt.requestedAgent)
-            if (launchedReceipt.notices.length > 0) {
-              useAppStore.getState().attachLaunchNotices({
-                worktreeId: session.deps.worktreeId,
-                tabId: session.deps.tabId,
-                launchToken: launchedReceipt.launchToken,
-                notices: launchedReceipt.notices
-              })
-            }
-          }
-          if (spawnedPtyId.launchNotices) {
-            useAppStore.getState().attachLaunchNotices({
-              worktreeId: session.deps.worktreeId,
-              tabId: session.deps.tabId,
-              launchToken: spawnedPtyId.launchNotices.launchToken,
-              notices: spawnedPtyId.launchNotices.notices
-            })
-          }
-          session.registerEffectiveLaunchConfig(spawnedPtyId.launchConfig, {
-            ...(coldRestoreOverride?.launchToken
-              ? { launchToken: coldRestoreOverride.launchToken }
-              : {}),
-            ...(launchedReceipt ? { launchToken: launchedReceipt.launchToken } : {}),
-            ...(coldRestoreOverride ? { launchAgent: coldRestoreOverride.agent } : {}),
-            ...(launchedReceipt ? { launchAgent: launchedReceipt.baseAgent } : {})
-          })
-          const hostFollowupPrompt = spawnedPtyId.followupPrompt ?? null
-          const hostDraftPrompt = spawnedPtyId.draftPrompt ?? null
-          const hostDeliveredAgent = launchedReceipt?.baseAgent ?? session.paneStartup?.launchAgent
-          if (!session.startupDraftPromptNeedsPaste && hostDeliveredAgent) {
-            const hostDeliveredPrompt = hostFollowupPrompt ?? hostDraftPrompt
-            if (hostDeliveredPrompt) {
-              void pasteDraftWhenAgentReady({
-                tabId: session.deps.tabId,
-                content: hostDeliveredPrompt,
-                agent: hostDeliveredAgent,
-                submit: hostFollowupPrompt !== null,
-                forcePaste: true,
-                onTimeout: () => showAutomationPromptNotSentToast(hostDeliveredAgent)
-              }).catch(() => {})
-            }
-          }
+          applyFreshSpawnAgentLaunchResult(session, spawnedPtyId, coldRestoreOverride)
         }
         if (resolvedPtyId) {
           if (

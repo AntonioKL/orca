@@ -10,6 +10,7 @@
 // so it is unit-testable.
 
 import type { BuiltInTuiAgent, GlobalSettings, Repo } from '../../shared/types'
+import type { AgentStartupShell } from '../../shared/tui-agent-startup-shell'
 import type { AgentLaunchReceipt } from '../../shared/agent-launch-contract'
 import type {
   AgentLaunchInput,
@@ -27,6 +28,7 @@ import type {
 } from '../../shared/agent-session-resume'
 import type { StartupCommandDelivery } from '../../shared/codex-startup-delivery'
 import {
+  detectionBaseAgentsForLaunch,
   deriveAgentLaunchHostState,
   type AgentLaunchHostDescriptor
 } from '../agent-launch/agent-launch-host-state'
@@ -86,9 +88,13 @@ export type TerminalAgentLaunchDeps = {
   getSettings: () => GlobalSettings
   getCatalogRevision: () => number
   detectStockBaseAgents: (
-    descriptor: AgentLaunchHostDescriptor
+    descriptor: AgentLaunchHostDescriptor,
+    baseAgents?: readonly BuiltInTuiAgent[]
   ) => Promise<readonly string[] | null>
   resolveTargetHomePath: (descriptor: AgentLaunchHostDescriptor) => Promise<string | null>
+  resolveStartupShell?: (
+    descriptor: AgentLaunchHostDescriptor
+  ) => Promise<AgentStartupShell | undefined>
   /** Best-effort workspace trust for the resolved base agent, run as the
    *  boundary's pre-admission preflight. Must not throw for a routine no-trust
    *  agent; a throw maps to trust_preflight_failed with no admission record. */
@@ -174,20 +180,26 @@ export async function resolveTerminalAgentLaunch(
   deps: TerminalAgentLaunchDeps,
   args: TerminalAgentLaunchArgs
 ): Promise<TerminalAgentLaunchResolution> {
+  const spawnInput = resolveTerminalSpawnInput(args, deps.sessionRecordStore)
+  if (!spawnInput.ok) {
+    return { kind: 'failed', outcome: { status: 'failed', failure: spawnInput.failure } }
+  }
+  const detectionBaseAgents = detectionBaseAgentsForLaunch(
+    spawnInput.input.request,
+    spawnInput.input.persistedSnapshot
+  )
   const hostState = await deriveAgentLaunchHostState(
     {
       getSettings: deps.getSettings,
       getCatalogRevision: deps.getCatalogRevision,
       detectStockBaseAgents: deps.detectStockBaseAgents,
-      resolveTargetHomePath: deps.resolveTargetHomePath
+      resolveTargetHomePath: deps.resolveTargetHomePath,
+      ...(deps.resolveStartupShell ? { resolveStartupShell: deps.resolveStartupShell } : {})
     },
     args.descriptor,
-    { worktreePath: args.worktreePath, repoPath: args.repoPath }
+    { worktreePath: args.worktreePath, repoPath: args.repoPath },
+    detectionBaseAgents === undefined ? {} : { detectionBaseAgents }
   )
-  const spawnInput = resolveTerminalSpawnInput(args, deps.sessionRecordStore)
-  if (!spawnInput.ok) {
-    return { kind: 'failed', outcome: { status: 'failed', failure: spawnInput.failure } }
-  }
   const resolution = await resolveAgentLaunchSpawn(
     {
       getSettings: hostState.getSettings,

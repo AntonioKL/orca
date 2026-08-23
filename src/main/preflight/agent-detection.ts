@@ -242,13 +242,21 @@ export async function refreshShellPathAndDetectAgents(
  * unavailable and provides no evidence that the host lacks an agent. */
 export async function detectRemoteAgentsIfReachable(args: {
   connectionId: string
+  /** Omitted for full catalog discovery; present for launch eligibility. */
+  baseAgents?: readonly string[]
 }): Promise<string[] | null> {
   const mux = getActiveMultiplexer(args.connectionId)
   if (!mux || mux.isDisposed()) {
     return null
   }
+  const commands = args.baseAgents
+    ? KNOWN_TUI_AGENT_DETECTION_COMMANDS.filter((command) => args.baseAgents?.includes(command.id))
+    : KNOWN_TUI_AGENT_DETECTION_COMMANDS
+  if (commands.length === 0) {
+    return []
+  }
   const result = (await mux.request('preflight.detectAgents', {
-    commands: KNOWN_TUI_AGENT_DETECTION_COMMANDS
+    commands
   })) as { agents: string[] }
   return uniqueAgentIds(result.agents)
 }

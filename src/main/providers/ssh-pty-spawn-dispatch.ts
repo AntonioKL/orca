@@ -90,9 +90,8 @@ async function spawnFreshSession(
 ): Promise<PtySpawnResult> {
   // Why probed before dispatch: an old relay accepts the token and never re-lists it, so
   // withhold it and let reconciliation keep its pre-token identification for this host.
-  // Concurrent because the two probes memoize separately and each evicts on a negative
-  // answer — serialized, a create-capable pre-echo relay paid two full `pty.getCapabilities`
-  // round-trips (5 s ceiling each) on every fresh spawn.
+  // Concurrent because the two capabilities are independent; their results are
+  // cached for this provider generation, including definitive old-relay negatives.
   // Skipped entirely when nothing is probed: awaiting settled promises would push a plain
   // spawn's `pty.spawn` dispatch out of the caller's turn.
   const [supportsCreateOperation, supportsLaunchTokenEcho] =

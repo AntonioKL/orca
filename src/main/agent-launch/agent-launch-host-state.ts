@@ -14,8 +14,12 @@
 
 import { homedir } from 'node:os'
 import type { BuiltInTuiAgent, GlobalSettings } from '../../shared/types'
+import type { AgentLaunchSpawnRequest } from '../../shared/agent-launch-spawn-request'
 import type { AgentStartupShell } from '../../shared/tui-agent-startup-shell'
-import type { AgentLaunchExecutionHostId } from '../../shared/agent-launch-host-contract'
+import type {
+  AgentLaunchExecutionHostId,
+  AgentLaunchSnapshot
+} from '../../shared/agent-launch-host-contract'
 import { isBuiltInTuiAgent } from '../../shared/tui-agent-config'
 import { toRuntimeExecutionHostId, toSshExecutionHostId } from '../../shared/execution-host'
 import { isWindowsAbsolutePathLike } from '../../shared/cross-platform-path'
@@ -47,7 +51,12 @@ export type AgentLaunchHostDescriptor =
   // resolver translate Windows/UNC values to Linux form. Detection/home stay
   // honest unknowns until a caller can probe the distro's own PATH/$HOME.
   | { kind: 'wsl'; distro: string; shell?: AgentStartupShell }
-  | { kind: 'ssh'; connectionId: string; platform: NodeJS.Platform; shell?: AgentStartupShell }
+  | {
+      kind: 'ssh'
+      connectionId: string
+      platform: NodeJS.Platform
+      shell?: AgentStartupShell
+    }
   | {
       kind: 'runtime'
       environmentId: string
@@ -180,11 +189,17 @@ export type AgentLaunchHostStateDeps = {
   /** Detect stock base agents on the target's baseline PATH. Return null when
    *  detection is genuinely unavailable — never an empty list to mean unknown. */
   detectStockBaseAgents: (
-    descriptor: AgentLaunchHostDescriptor
+    descriptor: AgentLaunchHostDescriptor,
+    baseAgents?: readonly BuiltInTuiAgent[]
   ) => Promise<readonly string[] | null>
   /** Resolve the target host's home dir for `~` expansion, or null when the host
    *  has not resolved it (SSH before resolveHome, an unknown WSL distro $HOME). */
   resolveTargetHomePath: (descriptor: AgentLaunchHostDescriptor) => Promise<string | null>
+  /** Resolve a target-owned shell when the descriptor cannot carry one
+   * synchronously (notably a native-Windows SSH relay). */
+  resolveStartupShell?: (
+    descriptor: AgentLaunchHostDescriptor
+  ) => Promise<AgentStartupShell | undefined>
   /** Override the default confidentiality derivation when a cross-host channel's
    *  binding is identifiable (e.g. a runtime env reached over SSH). */
   resolveTransportConfidentiality?: (descriptor: AgentLaunchHostDescriptor) => boolean | undefined
@@ -201,20 +216,40 @@ export type AgentLaunchHostState = {
   variables: { repoPath: string | null; worktreePath: string | null }
 }
 
+/** Restrict an eligibility probe only when the base identity is immutable during
+ * the async probe. Defaults and custom definitions use full detection because a
+ * settings edit can change their base before synchronous launch resolution. */
+export function detectionBaseAgentsForLaunch(
+  request: AgentLaunchSpawnRequest,
+  snapshot?: AgentLaunchSnapshot
+): readonly BuiltInTuiAgent[] | undefined {
+  if (snapshot) {
+    return [snapshot.baseAgent]
+  }
+  if (request.selection.kind === 'default') {
+    return undefined
+  }
+  return isBuiltInTuiAgent(request.selection.agent) ? [request.selection.agent] : undefined
+}
+
 /** Derive the per-surface host state for a launch. Performs the async host reads
  *  (detection, target home) once, up front, so the boundary's synchronous
  *  re-resolution inside the admission coordinator only re-reads settings. */
 export async function deriveAgentLaunchHostState(
   deps: AgentLaunchHostStateDeps,
   descriptor: AgentLaunchHostDescriptor,
-  variables: { repoPath?: string | null; worktreePath?: string | null }
+  variables: { repoPath?: string | null; worktreePath?: string | null },
+  options: { detectionBaseAgents?: readonly BuiltInTuiAgent[] } = {}
 ): Promise<AgentLaunchHostState> {
   const platform = platformForDescriptor(descriptor)
   const isRemote = isRemoteForDescriptor(descriptor)
   const executionHostId = executionHostIdForDescriptor(descriptor)
-  const [detected, targetHomePath] = await Promise.all([
-    deps.detectStockBaseAgents(descriptor),
-    deps.resolveTargetHomePath(descriptor)
+  const [detected, targetHomePath, resolvedShell] = await Promise.all([
+    options.detectionBaseAgents === undefined
+      ? deps.detectStockBaseAgents(descriptor)
+      : deps.detectStockBaseAgents(descriptor, options.detectionBaseAgents),
+    deps.resolveTargetHomePath(descriptor),
+    descriptor.shell ? Promise.resolve(undefined) : deps.resolveStartupShell?.(descriptor)
   ])
   const confidentiality = (deps.resolveTransportConfidentiality ?? defaultTransportConfidentiality)(
     descriptor
@@ -222,7 +257,7 @@ export async function deriveAgentLaunchHostState(
 
   const target: AgentLaunchSpawnTarget = {
     platform,
-    ...(descriptor.shell ? { shell: descriptor.shell } : {}),
+    ...(descriptor.shell || resolvedShell ? { shell: descriptor.shell ?? resolvedShell } : {}),
     isRemote,
     executionHostId,
     targetHomePath: targetHomePath ?? null,

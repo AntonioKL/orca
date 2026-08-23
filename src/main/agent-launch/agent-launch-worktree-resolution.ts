@@ -13,6 +13,7 @@ import type { GlobalSettings } from '../../shared/types'
 import type { AgentLaunchSpawnRequest } from '../../shared/agent-launch-spawn-request'
 import type { LaunchIntent, ResolvedAgentLaunch } from '../../shared/agent-launch-host-contract'
 import {
+  detectionBaseAgentsForLaunch,
   deriveAgentLaunchHostState,
   type AgentLaunchHostDescriptor,
   type AgentLaunchHostStateDeps
@@ -61,6 +62,7 @@ export type WorktreeAgentLaunchDeps = {
   getCatalogRevision: () => number
   detectStockBaseAgents: AgentLaunchHostStateDeps['detectStockBaseAgents']
   resolveTargetHomePath: AgentLaunchHostStateDeps['resolveTargetHomePath']
+  resolveStartupShell?: AgentLaunchHostStateDeps['resolveStartupShell']
   resolveTransportConfidentiality?: AgentLaunchHostStateDeps['resolveTransportConfidentiality']
   /** Best-effort workspace trust for the resolved base agent, run as the
    *  boundary's pre-admission preflight OUTSIDE the coordinator. A throw maps to
@@ -110,18 +112,21 @@ export async function prepareWorktreeAgentLaunch(
   context: WorktreeAgentLaunchContext,
   provisionalPaths: { repoPath: string | null; worktreePath: string | null }
 ): Promise<PrepareReservedAgentLaunchResult> {
+  const detectionBaseAgents = detectionBaseAgentsForLaunch(context.request)
   const hostState = await deriveAgentLaunchHostState(
     {
       getSettings: deps.getSettings,
       getCatalogRevision: deps.getCatalogRevision,
       detectStockBaseAgents: deps.detectStockBaseAgents,
       resolveTargetHomePath: deps.resolveTargetHomePath,
+      ...(deps.resolveStartupShell ? { resolveStartupShell: deps.resolveStartupShell } : {}),
       ...(deps.resolveTransportConfidentiality
         ? { resolveTransportConfidentiality: deps.resolveTransportConfidentiality }
         : {})
     },
     context.descriptor,
-    provisionalPaths
+    provisionalPaths,
+    detectionBaseAgents === undefined ? {} : { detectionBaseAgents }
   )
   const resolve = buildHostStateResolve(toSpawnDeps(deps), {
     request: context.request,
@@ -145,18 +150,21 @@ export async function executeWorktreeAgentLaunch(
   reservation: { reservationId: string; expectedStableInputDigest: string }
 ): Promise<ExecuteAgentLaunchResult> {
   try {
+    const detectionBaseAgents = detectionBaseAgentsForLaunch(context.request)
     const hostState = await deriveAgentLaunchHostState(
       {
         getSettings: deps.getSettings,
         getCatalogRevision: deps.getCatalogRevision,
         detectStockBaseAgents: deps.detectStockBaseAgents,
         resolveTargetHomePath: deps.resolveTargetHomePath,
+        ...(deps.resolveStartupShell ? { resolveStartupShell: deps.resolveStartupShell } : {}),
         ...(deps.resolveTransportConfidentiality
           ? { resolveTransportConfidentiality: deps.resolveTransportConfidentiality }
           : {})
       },
       context.descriptor,
-      authoritativePaths
+      authoritativePaths,
+      detectionBaseAgents === undefined ? {} : { detectionBaseAgents }
     )
     const resolve = buildHostStateResolve(toSpawnDeps(deps), {
       request: context.request,

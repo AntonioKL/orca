@@ -10,6 +10,7 @@ import type {
 } from '../../../../shared/agent-launch-spawn-request'
 import { resolveStartupShell } from '../../../../shared/tui-agent-startup-shell'
 import type { TuiAgent } from '../../../../shared/types'
+import { resolveWindowsShellStartupFamily } from '../../../../shared/windows-terminal-shell'
 import {
   describeSpawnExecutionHost,
   deriveAgentLaunchHostState,
@@ -55,7 +56,7 @@ export async function resolvePtyIpcAgentLaunch(
   const getLaunchSettings = ctx.deps.getSettings
   const descriptor = describeSpawnExecutionHost({
     connectionId: args.connectionId,
-    cwd: ctx.cwd,
+    cwd: ctx.cwd ?? args.cwd,
     shellOverride: args.shellOverride,
     terminalWindowsShell: getLaunchSettings()?.terminalWindowsShell,
     projectRuntime: args.projectRuntime
@@ -65,7 +66,14 @@ export async function resolvePtyIpcAgentLaunch(
       getSettings: getLaunchSettings,
       getCatalogRevision: () => getLaunchSettings()?.agentCatalogRevision ?? 1,
       detectStockBaseAgents: detectionUnavailable,
-      resolveTargetHomePath: resolveLocalTargetHomePath
+      resolveTargetHomePath: resolveLocalTargetHomePath,
+      resolveStartupShell: async (target) => {
+        if (target.kind !== 'ssh' || target.platform !== 'win32') {
+          return undefined
+        }
+        const shell = args.shellOverride ?? (await ctx.provider.getDefaultShell())
+        return resolveWindowsShellStartupFamily(shell)
+      }
     },
     descriptor,
     { worktreePath: ctx.cwd ?? null, repoPath: null }

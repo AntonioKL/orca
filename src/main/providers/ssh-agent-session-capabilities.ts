@@ -20,9 +20,13 @@ export class SshAgentSessionCapabilities {
       await waitForSshCapabilityProbe(probe, options.signal)
       this.claimSupported = true
       return true
-    } catch {
-      if (!options.signal?.aborted && this.claimProbe === probe) {
-        // Why: negative physical probes must follow a relay upgraded on this connection.
+    } catch (error) {
+      if (
+        !options.signal?.aborted &&
+        this.claimProbe === probe &&
+        (error as { capabilityProbeTransportFailure?: unknown }).capabilityProbeTransportFailure ===
+          true
+      ) {
         this.claimProbe = null
         this.claimSupported = false
       }
@@ -41,12 +45,11 @@ export class SshAgentSessionCapabilities {
     try {
       supported = await waitForSshCapabilityProbe(probe, options.signal)
     } catch {
-      // Why: one canceled waiter must not cancel or evict the shared physical probe used by peers.
+      // Why: a transport failure is unknown and may recover on this connection.
+      if (!options.signal?.aborted && this.createOperationProbe === probe) {
+        this.createOperationProbe = null
+      }
       return false
-    }
-    if (!supported && this.createOperationProbe === probe) {
-      // Why: negative capability results must follow a relay upgraded on the same connection.
-      this.createOperationProbe = null
     }
     return supported
   }
@@ -58,12 +61,11 @@ export class SshAgentSessionCapabilities {
     try {
       supported = await waitForSshCapabilityProbe(probe, options.signal)
     } catch {
-      // Why: one canceled waiter must not cancel or evict the shared physical probe used by peers.
+      // Why: a transport failure is unknown and may recover on this connection.
+      if (!options.signal?.aborted && this.launchTokenEchoProbe === probe) {
+        this.launchTokenEchoProbe = null
+      }
       return false
-    }
-    if (!supported && this.launchTokenEchoProbe === probe) {
-      // Why: negative capability results must follow a relay upgraded on the same connection.
-      this.launchTokenEchoProbe = null
     }
     this.launchTokenEchoSupported = supported
     return supported

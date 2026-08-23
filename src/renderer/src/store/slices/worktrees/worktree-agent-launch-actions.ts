@@ -14,6 +14,26 @@ import { toRuntimeWorktreeSelector } from '../../../runtime/runtime-worktree-sel
 import { getRepoIdFromWorktreeId } from '../worktree-helpers'
 import { settingsForRepoOwner } from './listing/worktree-owner-settings'
 import { createBrowserUuid } from '@/lib/browser-uuid'
+import type { ExecutionHostId } from '../../../../../shared/execution-host'
+import {
+  resolveWorktreeOperationRouteForHost,
+  settingsForWorktreeOperationRoute
+} from '@/lib/worktree-operation-route'
+
+function targetForBackgroundRecovery(
+  state: ReturnType<WorktreeSliceGet>,
+  worktreeId: string,
+  executionHostId?: ExecutionHostId
+): RuntimeClientTarget {
+  if (executionHostId) {
+    const route = resolveWorktreeOperationRouteForHost(state, worktreeId, executionHostId)
+    if (!route) {
+      throw new Error('The workspace host is no longer available.')
+    }
+    return getActiveRuntimeTarget(settingsForWorktreeOperationRoute(state.settings, route))
+  }
+  return getActiveRuntimeTarget(settingsForRepoOwner(state, getRepoIdFromWorktreeId(worktreeId)))
+}
 
 export function createWorktreeAgentLaunchActions(
   _set: WorktreeSliceSet,
@@ -77,10 +97,15 @@ export function createWorktreeAgentLaunchActions(
       )
     },
 
-    retryBackgroundAgentLaunch: async ({ attemptId, worktreeId, expectedFailureId, action }) => {
-      const repoId = getRepoIdFromWorktreeId(worktreeId)
+    retryBackgroundAgentLaunch: async ({
+      attemptId,
+      worktreeId,
+      executionHostId,
+      expectedFailureId,
+      action
+    }) => {
       const clientMutationId = createBrowserUuid()
-      const target = getActiveRuntimeTarget(settingsForRepoOwner(get(), repoId))
+      const target = targetForBackgroundRecovery(get(), worktreeId, executionHostId)
       if (target.kind === 'local') {
         return window.api.worktrees.retryBackgroundAgentLaunch({
           attemptId,
@@ -97,10 +122,14 @@ export function createWorktreeAgentLaunchActions(
       )
     },
 
-    forgetBackgroundAgentLaunch: async ({ attemptId, worktreeId, expectedOperationId }) => {
-      const repoId = getRepoIdFromWorktreeId(worktreeId)
+    forgetBackgroundAgentLaunch: async ({
+      attemptId,
+      worktreeId,
+      executionHostId,
+      expectedOperationId
+    }) => {
       const clientMutationId = createBrowserUuid()
-      const target = getActiveRuntimeTarget(settingsForRepoOwner(get(), repoId))
+      const target = targetForBackgroundRecovery(get(), worktreeId, executionHostId)
       if (target.kind === 'local') {
         return window.api.worktrees.forgetBackgroundAgentLaunch({
           attemptId,
@@ -116,9 +145,8 @@ export function createWorktreeAgentLaunchActions(
       )
     },
 
-    unknownAgentLaunchSiblingPreflight: async ({ worktreeId }) => {
-      const repoId = getRepoIdFromWorktreeId(worktreeId)
-      const target = getActiveRuntimeTarget(settingsForRepoOwner(get(), repoId))
+    unknownAgentLaunchSiblingPreflight: async ({ worktreeId, executionHostId }) => {
+      const target = targetForBackgroundRecovery(get(), worktreeId, executionHostId)
       if (target.kind === 'local') {
         const { count } = await window.api.worktrees.unknownAgentLaunchSiblingCount({ worktreeId })
         return { count, hostName: '' }
@@ -129,13 +157,14 @@ export function createWorktreeAgentLaunchActions(
         { worktree: toRuntimeWorktreeSelector(worktreeId) },
         { timeoutMs: 30_000 }
       )
-      const environment = get().runtimeEnvironments.find((entry) => entry.id === target.environmentId)
+      const environment = get().runtimeEnvironments.find(
+        (entry) => entry.id === target.environmentId
+      )
       return { count, hostName: environment?.name || target.environmentId }
     },
 
-    forgetUnknownAgentLaunchSiblings: async ({ worktreeId }) => {
-      const repoId = getRepoIdFromWorktreeId(worktreeId)
-      const target = getActiveRuntimeTarget(settingsForRepoOwner(get(), repoId))
+    forgetUnknownAgentLaunchSiblings: async ({ worktreeId, executionHostId }) => {
+      const target = targetForBackgroundRecovery(get(), worktreeId, executionHostId)
       if (target.kind === 'local') {
         return window.api.worktrees.forgetUnknownAgentLaunchSiblings({ worktreeId })
       }

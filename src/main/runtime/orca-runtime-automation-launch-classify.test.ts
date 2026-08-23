@@ -6,8 +6,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
-import type { Repo } from '../../shared/types'
+import { homedir, tmpdir } from 'node:os'
+import type { CustomTuiAgentId, Repo } from '../../shared/types'
+import { installFakeAppEnvironment } from '../../../config/scripts/vitest-host-ports-setup'
 import { OrcaRuntimeService } from './orca-runtime'
 
 const testState = { dir: '' }
@@ -26,6 +27,7 @@ vi.mock('electron', () => ({
 
 async function createStore() {
   vi.resetModules()
+  installFakeAppEnvironment({ getPath: () => testState.dir })
   const { Store, initDataPath } = await import('../persistence')
   initDataPath()
   return new Store()
@@ -38,6 +40,7 @@ const REPO: Repo = {
   badgeColor: '#fff',
   addedAt: 1
 }
+const CUSTOM_AGENT_ID: CustomTuiAgentId = 'custom-agent:claude:01234567-89ab-4cde-8f01-23456789abcd'
 
 describe('OrcaRuntimeService.classifyAgentLaunchForAutomation (U6)', () => {
   beforeEach(() => {
@@ -54,7 +57,7 @@ describe('OrcaRuntimeService.classifyAgentLaunchForAutomation (U6)', () => {
     store.updateSettings({ disabledTuiAgents: ['claude'] })
     const runtime = new OrcaRuntimeService(store)
 
-    const failure = runtime.classifyAgentLaunchForAutomation('claude', REPO, 'run-1')
+    const failure = runtime.classifyAgentLaunchForAutomation('claude', REPO, 'run-1', '/repo')
 
     expect(failure).not.toBeNull()
     expect(failure?.code).toBe('base_agent_disabled')
@@ -70,6 +73,71 @@ describe('OrcaRuntimeService.classifyAgentLaunchForAutomation (U6)', () => {
     store.addRepo(REPO)
     const runtime = new OrcaRuntimeService(store)
 
-    expect(runtime.classifyAgentLaunchForAutomation('claude', REPO, 'run-1')).toBeNull()
+    expect(runtime.classifyAgentLaunchForAutomation('claude', REPO, 'run-1', '/repo')).toBeNull()
+  })
+
+  it('classifies custom agents with automation repo and worktree variables', async () => {
+    const store = await createStore()
+    store.addRepo(REPO)
+    store.updateSettings({
+      customTuiAgents: [
+        {
+          id: CUSTOM_AGENT_ID,
+          baseAgent: 'claude',
+          label: 'Context Agent',
+          args: '--repo {repoPath} --worktree {worktreePath}',
+          env: { AUTOMATION_ROOT: '{worktreePath}' },
+          syncEnv: false
+        }
+      ]
+    })
+    const runtime = new OrcaRuntimeService(store)
+
+    expect(
+      runtime.classifyAgentLaunchForAutomation(
+        CUSTOM_AGENT_ID,
+        REPO,
+        'run-context',
+        '/repo/worktrees/context'
+      )
+    ).toBeNull()
+  })
+
+  it('classifies local custom command overrides against the target home', async () => {
+    const store = await createStore()
+    store.addRepo(REPO)
+    store.updateSettings({
+      customTuiAgents: [
+        {
+          id: CUSTOM_AGENT_ID,
+          baseAgent: 'claude',
+          label: 'Home Agent',
+          commandOverride: '~/my agent/bin/claude',
+          args: '',
+          env: {},
+          syncEnv: false
+        }
+      ]
+    })
+    const runtime = new OrcaRuntimeService(store)
+
+    expect(
+      runtime.classifyAgentLaunchForAutomation(CUSTOM_AGENT_ID, REPO, 'run-home', '/repo')
+    ).toBeNull()
+  })
+
+  it('keeps the legacy resolve-only target home unknown', async () => {
+    const store = await createStore()
+    store.addRepo(REPO)
+    const runtime = new OrcaRuntimeService(store)
+    const internals = runtime as unknown as {
+      buildResolveOnlySpawnTarget: (
+        repo: Repo,
+        includeLocalTargetHome?: boolean
+      ) => { targetHomePath: string | null }
+    }
+
+    expect(internals.buildResolveOnlySpawnTarget(REPO).targetHomePath).toBeNull()
+    expect(internals.buildResolveOnlySpawnTarget(REPO, true).targetHomePath).toBe(homedir())
   })
 })

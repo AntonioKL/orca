@@ -135,7 +135,7 @@ describe('resolveTerminalAgentLaunch', () => {
       followupPrompt: 'go'
     })
     // Detection ran against the target descriptor.
-    expect(detectStockBaseAgents).toHaveBeenCalledWith(DESCRIPTOR)
+    expect(detectStockBaseAgents).toHaveBeenCalledWith(DESCRIPTOR, ['claude'])
     // Trust preflight marked the workspace for the resolved launch before admission.
     expect(trusted).toHaveLength(1)
     expect(trusted[0]!.baseAgent).toBe('claude')
@@ -280,7 +280,7 @@ describe('resolveTerminalAgentLaunch target-host planning (U7 oracle-14)', () =>
       expect(captured!.shell).toBe(shell)
       expect(captured!.isRemote).toBe(descriptor.kind === 'ssh')
       // Stock detection ran against the TARGET descriptor, not a client host.
-      expect(detectStockBaseAgents).toHaveBeenCalledWith(descriptor)
+      expect(detectStockBaseAgents).toHaveBeenCalledWith(descriptor, ['claude'])
     }
   )
 })
