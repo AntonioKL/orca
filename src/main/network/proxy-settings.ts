@@ -1,25 +1,3 @@
-/**
- * The default proxy session, or null on a host with no Chromium.
- *
- * Why settable: `session.defaultSession` is the only Electron value this module needs,
- * and callers already accept an explicit `options.proxySession`. Making the *default*
- * injectable lets the module load under plain Node, where there is no Chromium proxy
- * config to consult and the environment variables are the whole answer.
- */
-let resolveDefaultProxySession: (() => ProxySession | null) | null = null
-
-/**
- * Why a resolver and not a Session: `session.defaultSession` throws until the Electron
- * app is ready, and this is installed during pre-ready bootstrap. Passing a getter
- * defers the access to first use, which is always after ready.
- */
-export function setDefaultProxySessionResolver(resolve: (() => ProxySession | null) | null): void {
-  resolveDefaultProxySession = resolve
-}
-
-function defaultProxySession(): ProxySession | null {
-  return resolveDefaultProxySession?.() ?? null
-}
 import {
   getProxyBypassRulesFromEnvironment,
   getProxyUrlFromEnvironment,
@@ -44,6 +22,29 @@ type ProxySession = {
     proxyBypassRules?: string
   }): Promise<void>
   closeAllConnections?: () => Promise<void>
+}
+
+/**
+ * The default proxy session, or null on a host with no Chromium.
+ *
+ * Why settable: `session.defaultSession` is the only Electron value this module needs,
+ * and callers already accept an explicit `options.proxySession`. Making the *default*
+ * injectable lets the module load under plain Node, where there is no Chromium proxy
+ * config to consult and the environment variables are the whole answer.
+ */
+let resolveDefaultProxySession: (() => ProxySession | null) | null = null
+
+/**
+ * Why a resolver and not a Session: `session.defaultSession` throws until the Electron
+ * app is ready, and this is installed during pre-ready bootstrap. Passing a getter
+ * defers the access to first use, which is always after ready.
+ */
+export function setDefaultProxySessionResolver(resolve: (() => ProxySession | null) | null): void {
+  resolveDefaultProxySession = resolve
+}
+
+function defaultProxySession(): ProxySession | null {
+  return resolveDefaultProxySession?.() ?? null
 }
 
 export type ProxyApplyResult =

@@ -16,7 +16,8 @@ vi.mock('electron', () => ({
 import {
   applyElectronProxySettings,
   ensureElectronProxyFromEnvironment,
-  resetProxyApplicationForTests
+  resetProxyApplicationForTests,
+  setDefaultProxySessionResolver
 } from './proxy-settings'
 import { handleElectronProxyLogin } from './electron-proxy-credentials'
 
@@ -37,6 +38,29 @@ function createProxySession(resolveProxy = 'DIRECT') {
 describe('Electron proxy settings', () => {
   beforeEach(() => {
     resetProxyApplicationForTests()
+    setDefaultProxySessionResolver(() => defaultSessionMock)
+  })
+
+  it('resolves proxy policy without a Chromium session on Node hosts', async () => {
+    setDefaultProxySessionResolver(null)
+
+    await expect(
+      applyElectronProxySettings(
+        {
+          httpProxyUrl: 'http://user:pass@proxy.example:8080',
+          httpProxyBypassRules: 'localhost,*.internal'
+        },
+        { env: { HTTP_PROXY: 'http://env.example:8080' } }
+      )
+    ).resolves.toEqual({
+      source: 'settings',
+      proxyRules: 'http://proxy.example:8080',
+      proxyBypassRules: 'localhost;*.internal'
+    })
+    await expect(
+      applyElectronProxySettings({}, { env: { HTTP_PROXY: 'http://env.example:8080' } })
+    ).resolves.toEqual({ source: 'env', proxyRules: 'http://env.example:8080' })
+    expect(defaultSessionMock.setProxy).not.toHaveBeenCalled()
   })
 
   it('applies explicit settings before env fallback', async () => {
