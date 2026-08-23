@@ -149,6 +149,15 @@ describe('in-flight pending snapshots', () => {
     expect(store.getPending('token-1')).toBe(a)
     expect(store.getPending('token-2')).toBe(b)
   })
+
+  it('releaseSpawnInFlight drops only the in-flight guard, never the pending', () => {
+    const store = new AgentLaunchOperationStore()
+    store.beginPending(pending({ launchToken: 'token-x' }))
+    expect(store.isSpawnInFlight('token-x')).toBe(true)
+    store.releaseSpawnInFlight('token-x')
+    expect(store.isSpawnInFlight('token-x')).toBe(false)
+    expect(store.getPending('token-x')).not.toBeNull()
+  })
 })
 
 describe('settled ledger', () => {

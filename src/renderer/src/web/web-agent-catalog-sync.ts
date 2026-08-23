@@ -46,11 +46,12 @@ function readyRow(agent: Extract<SyncedCustomTuiAgent, { status: 'ready' }>): Lo
     },
     // Env never crosses the wire, so its size is unknowable here; no UI reads it.
     envSummary: { entryCount: 0, bytes: 0 },
-    // `host-preflight` means the host, not stock base detection, vouches for the
-    // row — keep it out of `baseline-stock` so clients don't gate it on detection.
+    // `launch-reported` means stock base detection cannot vouch for the row and
+    // only the launch on the execution host establishes availability — keep it
+    // out of `baseline-stock` so clients don't gate it on detection.
     availabilityReason: agent.commandOverride
       ? 'configured-executable'
-      : agent.availabilityCheck === 'host-preflight'
+      : agent.availabilityCheck === 'launch-reported'
         ? 'custom-path'
         : 'baseline-stock'
   }

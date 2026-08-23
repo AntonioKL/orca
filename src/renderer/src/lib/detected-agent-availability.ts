@@ -7,7 +7,7 @@ import type { TuiAgent } from '../../../shared/types'
  *
  *  Host detection probes built-in harness binaries only, so a custom id is never
  *  a member of that list: a baseline-stock custom stands on its base harness's
- *  detection, and one carrying its own executable is host-preflighted at launch
+ *  detection, and one carrying its own executable is launch-reported (only the launch itself checks it)
  *  and never client-gated (oracle 35). Without this, every custom assignment
  *  reads as "not available on this host" and its surface refuses to launch. */
 export function isDetectedAgentAvailable(

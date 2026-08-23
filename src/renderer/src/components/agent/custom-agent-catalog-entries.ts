@@ -8,7 +8,7 @@ import type { TuiAgent } from '../../../../shared/types'
  *  base harness like the settings catalog and the tab quick-launch surfaces.
  *
  *  Oracle 35 gating: a baseline-stock custom is offered only when its base is
- *  detected; a configured-executable/custom-PATH custom is host-preflighted at
+ *  detected; a configured-executable/custom-PATH custom is launch-reported at
  *  launch and never client-gated. A null `detectedAgentIds` means detection is
  *  unknown, so nothing is detection-gated (mirrors the built-in list). Adapted
  *  rows carry the base harness id so AgentCombobox renders the base icon, and
@@ -56,7 +56,7 @@ export function mergeCustomAgentCatalogEntries(
       placed.add(entry.id)
     }
   }
-  // A host-preflighted custom whose base row was filtered out (base disabled or
+  // A launch-reported custom whose base row was filtered out (base disabled or
   // undetected) is still launch-eligible, so append it rather than drop it.
   for (const [base, group] of customsByBase) {
     if (!placed.has(base)) {

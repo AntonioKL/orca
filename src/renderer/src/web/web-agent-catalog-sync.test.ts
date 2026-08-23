@@ -20,7 +20,7 @@ function hostSnapshot(overrides: Partial<AgentCatalogSnapshot> = {}): AgentCatal
         syncEnv: true,
         status: 'ready',
         envState: 'available',
-        availabilityCheck: 'host-preflight'
+        availabilityCheck: 'launch-reported'
       }
     ],
     deletedCustomAgents: [],

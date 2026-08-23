@@ -318,7 +318,9 @@ export function resolveAgentLaunch(
 
   // Stock-name detection gates only stock catalog argv with no accepted user PATH
   // override; configured/custom prefixes and custom PATH env cannot be evaluated
-  // by name detection and proceed to preflight/spawn.
+  // by name detection and proceed straight to spawn — no executable-existence
+  // preflight exists, so for those rows the launch itself is the availability
+  // check ('launch-reported' in the catalog projection).
   if (
     command.prefixSource === 'catalog' &&
     request.detectedStockBaseAgents !== null &&

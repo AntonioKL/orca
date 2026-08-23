@@ -71,18 +71,18 @@ describe('remote snapshot projection', () => {
     expect(second).toMatchObject({
       status: 'ready',
       envState: 'available',
-      availabilityCheck: 'host-preflight'
+      availabilityCheck: 'launch-reported'
     })
   })
 
-  it('uses host-preflight for a configured executable regardless of env', () => {
+  it('uses launch-reported for a configured executable regardless of env', () => {
     const snapshot = buildAgentCatalogSnapshot(
       settingsWith({ customTuiAgents: [liveAgent({ commandOverride: '/opt/codex' })] })
     )
     if ('code' in snapshot) {
       throw new Error('unexpected projection error')
     }
-    expect(snapshot.customAgents[0]).toMatchObject({ availabilityCheck: 'host-preflight' })
+    expect(snapshot.customAgents[0]).toMatchObject({ availabilityCheck: 'launch-reported' })
   })
 
   it('projects valid-id repair rows without raw fields and omits malformed/duplicate rows', () => {

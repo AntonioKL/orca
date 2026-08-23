@@ -6,9 +6,10 @@ import { translate } from '@/i18n/i18n'
 
 // Preview classes mirror the host `availabilityCheck` projection (plan §830/§972):
 // a stock-prefix launch is gated on baseline detection, while a configured
-// executable or agent env is host-preflight and must never be blocked here —
-// baseline stock detection cannot evaluate it, and the real launch reports the outcome.
-export type SourceControlAgentAvailabilityClass = 'baseline-detection' | 'host-preflight'
+// executable or agent env is launch-reported and must never be blocked here —
+// baseline stock detection cannot evaluate it, no preflight runs anywhere, and
+// only the real launch on the execution host reports the outcome.
+export type SourceControlAgentAvailabilityClass = 'baseline-detection' | 'launch-reported'
 
 export type SourceControlAgentAvailability = {
   /** Proven built-in base of the selected id; null for an unknown/unresolvable id. */
@@ -25,7 +26,7 @@ type SourceControlAgentAvailabilitySettings = Partial<
 
 /** Resolve the selected agent's proven base and availability class from the local
  *  catalog view. Custom ids resolve their base through the catalog (never id syntax),
- *  and a configured executable or agent env marks the row host-preflight so a
+ *  and a configured executable or agent env marks the row launch-reported so a
  *  base-not-detected host cannot falsely block it. Zero host projection field added. */
 export function resolveSourceControlAgentAvailability(
   agent: TuiAgent | null | undefined,
@@ -46,7 +47,7 @@ export function resolveSourceControlAgentAvailability(
     )
     return {
       baseAgent,
-      availabilityClass: usesHostPreflight ? 'host-preflight' : 'baseline-detection'
+      availabilityClass: usesHostPreflight ? 'launch-reported' : 'baseline-detection'
     }
   }
   const override = settings?.agentCmdOverrides?.[baseAgent]
@@ -54,7 +55,7 @@ export function resolveSourceControlAgentAvailability(
   const usesHostPreflight = Boolean(override || (env && Object.keys(env).length > 0))
   return {
     baseAgent,
-    availabilityClass: usesHostPreflight ? 'host-preflight' : 'baseline-detection'
+    availabilityClass: usesHostPreflight ? 'launch-reported' : 'baseline-detection'
   }
 }
 

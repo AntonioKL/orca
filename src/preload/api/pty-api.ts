@@ -12,8 +12,10 @@ import type {
   PtyRendererDeliveryStateReport
 } from '../../shared/pty-renderer-delivery-health'
 import type { AgentKind, LaunchSource, RequestKind } from '../../shared/telemetry-events'
-import type { AgentLaunchNoticeCode } from '../../shared/agent-launch-contract'
-import type { PersistedLaunchNoticeState } from '../../shared/agent-launch-contract'
+import type {
+  AgentLaunchNoticeCode,
+  PersistedLaunchNoticeState
+} from '../../shared/agent-launch-contract'
 import type {
   AgentLaunchInput,
   AgentLaunchSpawnOutcome

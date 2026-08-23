@@ -25,7 +25,9 @@ const mocks = vi.hoisted(() => ({
   moveUnifiedTabToGroup: vi.fn(),
   setRemoteBrowserPageHandle: vi.fn(),
   focusBrowserTabInWorktree: vi.fn(),
-  applyFreshWebSessionTabsSnapshot: vi.fn(),
+  applyWebSessionTabsSnapshot: vi.fn(),
+  decideWebSessionTabsSnapshot: vi.fn(),
+  settleWebSessionTabsMirror: vi.fn(),
   acceptReplayedWebSessionTabsSnapshot: vi.fn(),
   resolveHostSessionTabIdForWebSessionTab: vi.fn(),
   trackTerminalPaneSplit: vi.fn(),
@@ -44,9 +46,13 @@ vi.mock('../store', () => ({
 
 vi.mock('./web-session-tabs-sync', () => ({
   acceptReplayedWebSessionTabsSnapshot: mocks.acceptReplayedWebSessionTabsSnapshot,
-  applyFreshWebSessionTabsSnapshot: mocks.applyFreshWebSessionTabsSnapshot,
-  applyWebSessionTabsStorePatch: (buildPatch: (state: unknown) => unknown) =>
-    mocks.setState(buildPatch),
+  applyWebSessionTabsSnapshot: mocks.applyWebSessionTabsSnapshot,
+  decideWebSessionTabsSnapshot: mocks.decideWebSessionTabsSnapshot,
+  applyWebSessionTabsStorePatch: (buildPatch: (state: unknown) => unknown) => {
+    mocks.setState(buildPatch)
+    // The production caller invokes the returned settle receipt.
+    return mocks.settleWebSessionTabsMirror
+  },
   resolveHostSessionTabIdForWebSessionTab: mocks.resolveHostSessionTabIdForWebSessionTab
 }))
 
@@ -73,7 +79,8 @@ describe('moveWebRuntimeSessionTab', () => {
       },
       setActiveWorktree: mocks.setActiveWorktree
     })
-    mocks.applyFreshWebSessionTabsSnapshot.mockReturnValue({ state: 'after' })
+    mocks.decideWebSessionTabsSnapshot.mockReturnValue({ apply: true, settlesHostMirror: true })
+    mocks.applyWebSessionTabsSnapshot.mockReturnValue({ state: 'after' })
   })
 
   afterEach(() => {
@@ -120,7 +127,8 @@ describe('moveWebRuntimeSessionTab', () => {
       timeoutMs: 15_000
     })
     expect(runtimeCall).toHaveBeenCalledTimes(1)
-    expect(mocks.applyFreshWebSessionTabsSnapshot).not.toHaveBeenCalled()
+    expect(mocks.decideWebSessionTabsSnapshot).not.toHaveBeenCalled()
+    expect(mocks.applyWebSessionTabsSnapshot).not.toHaveBeenCalled()
   })
 
   it('maps mirrored local browser unified ids back to host session tab ids', async () => {
@@ -279,7 +287,8 @@ describe('web runtime session tab actions', () => {
     mocks.setState.mockImplementation((updater: (state: unknown) => unknown) =>
       updater({ state: 'before', activeWorktreeId: WORKTREE_ID })
     )
-    mocks.applyFreshWebSessionTabsSnapshot.mockReturnValue({ state: 'after' })
+    mocks.decideWebSessionTabsSnapshot.mockReturnValue({ apply: true, settlesHostMirror: true })
+    mocks.applyWebSessionTabsSnapshot.mockReturnValue({ state: 'after' })
     mocks.resolveHostSessionTabIdForWebSessionTab.mockImplementation(
       (_state, args: { tabId: string }) =>
         args.tabId === 'local-browser-unified' ? 'host-browser-unified' : null
@@ -363,7 +372,15 @@ describe('web runtime session tab actions', () => {
       },
       timeoutMs: 15_000
     })
-    expect(mocks.applyFreshWebSessionTabsSnapshot).toHaveBeenCalled()
+    // Why: the close's eager list must flow through decide → apply so host
+    // activation state mirrors locally only once this frame's decision allows it.
+    expect(mocks.decideWebSessionTabsSnapshot).toHaveBeenCalledWith(makeSnapshot(), ENVIRONMENT_ID)
+    expect(mocks.applyWebSessionTabsSnapshot).toHaveBeenCalledWith(
+      { state: 'before', activeWorktreeId: WORKTREE_ID },
+      makeSnapshot(),
+      ENVIRONMENT_ID
+    )
+    expect(mocks.settleWebSessionTabsMirror).toHaveBeenCalled()
   })
 
   it('supersedes browser focus intent when a terminal is activated next', async () => {
@@ -558,9 +575,41 @@ describe('web runtime session tab actions', () => {
       ENVIRONMENT_ID,
       WORKTREE_ID
     )
+    // Why: freshness tracking must be released before the authoritative re-list
+    // is applied, or the republished snapshot would be rejected as stale.
     expect(mocks.acceptReplayedWebSessionTabsSnapshot.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.applyFreshWebSessionTabsSnapshot.mock.invocationCallOrder[0]!
+      mocks.applyWebSessionTabsSnapshot.mock.invocationCallOrder[0]!
     )
+    expect(mocks.applyWebSessionTabsSnapshot).toHaveBeenCalledWith(
+      { state: 'before', activeWorktreeId: WORKTREE_ID },
+      authoritative,
+      ENVIRONMENT_ID
+    )
+  })
+
+  it('discards a snapshot the frame decision rejects without patching local tabs', async () => {
+    mocks.decideWebSessionTabsSnapshot.mockReturnValue({ apply: false, settlesHostMirror: true })
+    const runtimeCall = vi
+      .fn()
+      .mockResolvedValueOnce({ id: 'close', ok: true, result: {} })
+      .mockResolvedValueOnce({ id: 'list', ok: true, result: makeSnapshot() })
+    vi.stubGlobal('window', {
+      api: { runtimeEnvironments: { call: runtimeCall } }
+    })
+
+    await expect(
+      closeWebRuntimeSessionTab({
+        worktreeId: WORKTREE_ID,
+        tabId: 'local-browser-unified',
+        reason: 'user'
+      })
+    ).resolves.toBe(true)
+
+    expect(mocks.decideWebSessionTabsSnapshot).toHaveBeenCalledWith(makeSnapshot(), ENVIRONMENT_ID)
+    // Why: an outranked answer never rewrites local tabs, but the mirror still
+    // settles because an equal-or-newer accepted view backs the rejection.
+    expect(mocks.applyWebSessionTabsSnapshot).not.toHaveBeenCalled()
+    expect(mocks.settleWebSessionTabsMirror).toHaveBeenCalled()
   })
 
   it('keeps the close intent when a refused lifecycle close was not republished', async () => {

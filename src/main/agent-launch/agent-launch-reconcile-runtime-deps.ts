@@ -22,6 +22,12 @@
 //     user's Retry then spawns a duplicate beside it. Such hosts fall back to the
 //     pre-launchToken identification, and hold the launch pending when that is
 //     inconclusive.
+//
+// KNOWN GAP (pre-existing, out of custom-agent scope): token authority is read
+// per-host here, but the SSH path withholds the token per-launch on a mutable
+// probe that also collapses timeouts into `false` — so a recovered probe can read
+// a live launch's missing echo as absence. Needs the delivery fact pinned at
+// dispatch; always sending the token does not fix it (old relays drop it).
 
 import type { AgentLaunchExecutionHostId } from '../../shared/agent-launch-host-contract'
 import {

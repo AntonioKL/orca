@@ -119,7 +119,7 @@ describe('custom agents in the tab quick-launch list', () => {
 
   it('gates a baseline-stock custom on base detection but never gates a configured executable', () => {
     // Base not detected: the stock-PATH custom drops, the overridden one stays
-    // (its availability is host-preflighted at launch, oracle 35).
+    // (its availability is launch-reported, oracle 35).
     const stock = orderTabLaunchAgents(null, ['claude'], [customEntry])
     expect(stock).not.toContain(CUSTOM_ID)
     const overridden = orderTabLaunchAgents(

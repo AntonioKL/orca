@@ -438,7 +438,10 @@ import type {
   AgentLaunchVaultResumeDetailsResult,
   AgentLaunchVaultResumeEntry
 } from '../shared/agent-launch-spawn-request'
-import type { AgentLaunchNoticeCode } from '../shared/agent-launch-contract'
+import type {
+  AgentLaunchNoticeCode,
+  PersistedLaunchNoticeState
+} from '../shared/agent-launch-contract'
 import type {
   ForgetUnknownAgentLaunchResult,
   WorktreeRetryAgentLaunchResult
@@ -463,7 +466,6 @@ import type { MemorySnapshot } from '../shared/process-stats-types'
 import type { NestedRepoScanResult } from '../shared/project-group-types'
 import type { BaseRefDefaultResult, BaseRefSearchResult } from '../shared/repo-types'
 import type { TuiAgent } from '../shared/tui-agent'
-import type { PersistedLaunchNoticeState } from '../shared/agent-launch-contract'
 import type { FloatingTerminalCwdRequest } from '../shared/ui-chrome-types'
 import type { UpdateStatus } from '../shared/update-status-types'
 import type {

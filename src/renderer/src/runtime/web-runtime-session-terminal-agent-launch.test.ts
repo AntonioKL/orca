@@ -26,7 +26,8 @@ const mocks = vi.hoisted(() => ({
   moveUnifiedTabToGroup: vi.fn(),
   setRemoteBrowserPageHandle: vi.fn(),
   focusBrowserTabInWorktree: vi.fn(),
-  applyFreshWebSessionTabsSnapshot: vi.fn(),
+  applyWebSessionTabsSnapshot: vi.fn(),
+  decideWebSessionTabsSnapshot: vi.fn(),
   acceptReplayedWebSessionTabsSnapshot: vi.fn(),
   resolveHostSessionTabIdForWebSessionTab: vi.fn(),
   trackTerminalPaneSplit: vi.fn(),
@@ -45,9 +46,13 @@ vi.mock('../store', () => ({
 
 vi.mock('./web-session-tabs-sync', () => ({
   acceptReplayedWebSessionTabsSnapshot: mocks.acceptReplayedWebSessionTabsSnapshot,
-  applyFreshWebSessionTabsSnapshot: mocks.applyFreshWebSessionTabsSnapshot,
-  applyWebSessionTabsStorePatch: (buildPatch: (state: unknown) => unknown) =>
-    mocks.setState(buildPatch),
+  applyWebSessionTabsSnapshot: mocks.applyWebSessionTabsSnapshot,
+  decideWebSessionTabsSnapshot: mocks.decideWebSessionTabsSnapshot,
+  applyWebSessionTabsStorePatch: (buildPatch: (state: unknown) => unknown) => {
+    mocks.setState(buildPatch)
+    // The production caller invokes the returned settle receipt.
+    return () => {}
+  },
   resolveHostSessionTabIdForWebSessionTab: mocks.resolveHostSessionTabIdForWebSessionTab
 }))
 

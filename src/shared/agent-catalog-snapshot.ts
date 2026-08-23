@@ -42,7 +42,13 @@ export type SyncedCustomTuiAgent =
       // Describes host launch capability; keys and values are never projected.
       envState: 'none' | 'available' | 'withheld'
       // Conservative remote UX hint; never identifies PATH or another env key.
-      availabilityCheck: 'baseline-detection' | 'host-preflight'
+      // 'launch-reported' means baseline stock detection CANNOT vouch for this
+      // row (configured executable or host-applicable env) and NO preflight runs
+      // anywhere: availability is only ever established by an actual launch on
+      // the execution host, which reports its own failure. Clients must not gate
+      // such rows on baseline detection — and must not treat the value as proof
+      // the executable exists.
+      availabilityCheck: 'baseline-detection' | 'launch-reported'
     })
   | {
       id: CustomTuiAgentId

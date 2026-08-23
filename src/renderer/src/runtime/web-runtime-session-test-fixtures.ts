@@ -13,7 +13,8 @@ export type WebRuntimeSessionTestMocks = {
   moveUnifiedTabToGroup: Mock
   setRemoteBrowserPageHandle: Mock
   focusBrowserTabInWorktree: Mock
-  applyFreshWebSessionTabsSnapshot: Mock
+  applyWebSessionTabsSnapshot: Mock
+  decideWebSessionTabsSnapshot: Mock
   acceptReplayedWebSessionTabsSnapshot: Mock
   resolveHostSessionTabIdForWebSessionTab: Mock
   trackTerminalPaneSplit: Mock
@@ -83,7 +84,8 @@ export function primeTerminalSessionState(mocks: WebRuntimeSessionTestMocks): vo
       activeWorktreeId: WORKTREE_ID
     })
   })
-  mocks.applyFreshWebSessionTabsSnapshot.mockReturnValue({ state: 'after' })
+  mocks.decideWebSessionTabsSnapshot.mockReturnValue({ apply: true, settlesHostMirror: true })
+  mocks.applyWebSessionTabsSnapshot.mockReturnValue({ state: 'after' })
   mocks.resolveHostSessionTabIdForWebSessionTab.mockReturnValue(null)
   mocks.deliverLaunchPromptToAgentTab.mockResolvedValue(true)
 }

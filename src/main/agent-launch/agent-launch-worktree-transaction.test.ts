@@ -18,6 +18,9 @@ import type {
 } from '../../shared/agent-launch-contract'
 import type { ExecuteAgentLaunchResult } from './agent-launch-boundary'
 import type { AdmissionPrincipal } from './agent-launch-admission-store'
+import { retryRecoveryGateForFailureCode } from './agent-launch-reconciliation'
+import { buildReconcileAgentLaunchDeps } from './agent-launch-reconcile-runtime-deps'
+import { reconcileOnePendingAgentLaunch } from './agent-launch-worktree-reconcile-writer'
 
 const SNAPSHOT: AgentLaunchSnapshot = {
   version: 1,
@@ -220,6 +223,108 @@ describe('runWorktreeAgentLaunchTransaction', () => {
       expect(outcome.failure.code).toBe('spawn_failed')
     }
     expect(persistFailure).toHaveBeenCalledTimes(1)
+  })
+
+  it('maps a mid-spawn contact loss to launch_state_unknown WITHOUT settling', async () => {
+    // Branch-review HIGH 1: a transport drop mid-spawn is not evidence the host
+    // never spawned the agent (ssh-execution-boundary). Settling spawn_failed
+    // would clear the pending and let Retry cold-start a duplicate.
+    const log: CallLog = []
+    const spawn = vi.fn(async () => {
+      log.push('spawn')
+      throw Object.assign(new Error('SSH connection lost, reconnecting...'), {
+        code: 'CONNECTION_LOST'
+      })
+    })
+    const { deps, operationStore, settle, persistFailure } = makeDeps({ log, spawn })
+    const outcome = await runWorktreeAgentLaunchTransaction(
+      deps,
+      params(async () => ({ ok: true, plan: PLAN, receipt: RECEIPT }))
+    )
+    expect(outcome.status).toBe('failed')
+    if (outcome.status === 'failed') {
+      expect(outcome.failure).toMatchObject({ code: 'launch_state_unknown', intent: 'interactive' })
+    }
+    // The admission reservation is NOT settled failed and the operation is NOT
+    // in the settled ledger — nothing has actually settled.
+    expect(settle).not.toHaveBeenCalled()
+    expect(operationStore.findSettledByIdempotencyKey('wt-1', 'idem-1')).toBeNull()
+    // The private pending survives for host-evidence reconciliation, but the
+    // in-flight guard is released so a reconcile pass may process the token.
+    expect(operationStore.getPending('tok-1')).not.toBeNull()
+    expect(operationStore.isSpawnInFlight('tok-1')).toBe(false)
+    // The durable card is written once; its code blocks the server-side retry
+    // gate, so no plain Retry can double-launch.
+    expect(persistFailure).toHaveBeenCalledTimes(1)
+    expect(retryRecoveryGateForFailureCode('launch_state_unknown')).toEqual({
+      kind: 'launch_state_unknown'
+    })
+  })
+
+  it('treats the post-dispatch ambiguity marker as contact loss', async () => {
+    const spawn = vi.fn(async () => {
+      throw Object.assign(new Error('execution_owner_unavailable'), {
+        agentSessionOperationOutcome: 'unknown' as const
+      })
+    })
+    const { deps, operationStore, settle } = makeDeps({ spawn })
+    const outcome = await runWorktreeAgentLaunchTransaction(
+      deps,
+      params(async () => ({ ok: true, plan: PLAN, receipt: RECEIPT }))
+    )
+    expect(outcome.status).toBe('failed')
+    if (outcome.status === 'failed') {
+      expect(outcome.failure.code).toBe('launch_state_unknown')
+    }
+    expect(settle).not.toHaveBeenCalled()
+    expect(operationStore.getPending('tok-1')).not.toBeNull()
+  })
+
+  it('reconciles the retained pending as launched when the token later proves live', async () => {
+    // End-to-end no-double-launch proof: contact loss keeps the pending; a
+    // provider-reconnect re-list that finds the token live ADOPTS the surviving
+    // terminal (settles launched) instead of ever spawning a second agent.
+    const spawn = vi.fn(async () => {
+      throw Object.assign(new Error('lost'), { code: 'CONNECTION_LOST' })
+    })
+    const { deps, operationStore } = makeDeps({ spawn })
+    await runWorktreeAgentLaunchTransaction(
+      deps,
+      params(async () => ({ ok: true, plan: PLAN, receipt: RECEIPT }))
+    )
+    const retained = operationStore.getPending('tok-1')
+    expect(retained).not.toBeNull()
+
+    const arm = {
+      settleLaunched: vi.fn(),
+      settleFailed: vi.fn(),
+      markUnknown: vi.fn()
+    }
+    const settleBoundary = vi.fn((_token: string, _settlement: 'registered' | 'failed') => {})
+    const reconcileDeps = buildReconcileAgentLaunchDeps({
+      operationStore,
+      liveTerminalByToken: () => ({ ptyId: 'ssh-term-1', worktreeId: 'wt-1' }),
+      isHostAuthoritative: () => true,
+      isHostTokenAuthoritative: () => true,
+      expectedWorktreeId: (pending) => pending.scope,
+      arms: {
+        worktree: () => arm,
+        automation: () => arm,
+        orchestration: () => arm,
+        background: () => arm
+      },
+      settleBoundary,
+      mintFailureId: () => 'fail-r1',
+      now: () => 2000
+    })
+    const outcome = reconcileOnePendingAgentLaunch(reconcileDeps, retained!)
+    expect(outcome).toEqual({ kind: 'launched' })
+    expect(settleBoundary).toHaveBeenCalledWith('tok-1', 'registered')
+    expect(arm.settleLaunched).toHaveBeenCalledTimes(1)
+    expect(operationStore.getPending('tok-1')).toBeNull()
+    expect(operationStore.findSettledByIdempotencyKey('wt-1', 'idem-1')).toMatchObject({
+      status: 'launched'
+    })
   })
 
   it('marks the token spawn-in-flight for the whole beginPending→settle window', async () => {

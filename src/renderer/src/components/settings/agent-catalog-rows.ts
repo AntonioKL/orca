@@ -24,7 +24,7 @@ import {
 } from '../../../../shared/agent-search-query'
 
 /** Effective status shown as a single quiet badge (plan §971). Desktop-local
- *  never surfaces `host-preflight`; that reason is withheld to paired clients. */
+ *  never surfaces `launch-reported`; that reason is withheld to paired clients. */
 export type AgentCatalogRowStatus =
   | 'enabled'
   | 'disabled'

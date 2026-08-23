@@ -1,8 +1,7 @@
 // @vitest-environment happy-dom
 
-import { render, screen } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup } from '@testing-library/react'
 import type { CustomTuiAgentId } from '../../../shared/types'
 import { AgentIcon, getAgentLabel } from './agent-catalog'
 import { registerAgentCatalogSettingsSource } from './agent-catalog-settings-source'

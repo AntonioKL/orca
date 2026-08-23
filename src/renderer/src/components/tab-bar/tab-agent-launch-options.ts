@@ -19,7 +19,7 @@ export type TabCustomAgentLaunchEntry = {
   commandOverride?: string
   /** Baseline-stock customs launch via the base's PATH binary, so they are
    *  only offered when that base is detected; configured-executable and
-   *  custom-PATH agents are host-preflighted at launch and never gated on
+   *  custom-PATH agents are launch-reported (only the launch itself checks them) and never gated on
    *  client detection (oracle 35). */
   requiresDetectedBase: boolean
 }
@@ -88,7 +88,7 @@ export function orderTabLaunchAgents(
       ordered.push(entry.id)
     }
     // Customs group under their base harness (the settings-catalog ordering);
-    // a host-preflighted custom is offered even when its base binary is not
+    // a launch-reported custom is offered even when its base binary is not
     // detected, since the base row's absence says nothing about its override.
     for (const custom of launchableCustoms) {
       if (custom.baseAgent === entry.id) {

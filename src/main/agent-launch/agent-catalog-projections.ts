@@ -60,10 +60,12 @@ function syncedRow(definition: CustomTuiAgent): SyncedCustomTuiAgent {
     envState,
     // Conservative: a configured executable or host-applicable env means stock
     // baseline detection cannot vouch for this row, and naming the actual
-    // reason (e.g. PATH) would leak which env key exists.
+    // reason (e.g. PATH) would leak which env key exists. No executable
+    // existence check runs anywhere on the launch boundary — 'launch-reported'
+    // deliberately claims only that the launch itself is the availability check.
     availabilityCheck:
       definition.commandOverride || envState === 'available'
-        ? 'host-preflight'
+        ? 'launch-reported'
         : 'baseline-detection'
   }
 }

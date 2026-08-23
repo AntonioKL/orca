@@ -37,22 +37,22 @@ describe('resolveSourceControlAgentAvailability', () => {
     })
   })
 
-  it('marks a built-in with a configured executable override host-preflight', () => {
+  it('marks a built-in with a configured executable override launch-reported', () => {
     expect(
       resolveSourceControlAgentAvailability(
         'claude',
         settings({ agentCmdOverrides: { claude: '/opt/claude' } })
       )
-    ).toEqual({ baseAgent: 'claude', availabilityClass: 'host-preflight' })
+    ).toEqual({ baseAgent: 'claude', availabilityClass: 'launch-reported' })
   })
 
-  it('marks a built-in with agent env host-preflight', () => {
+  it('marks a built-in with agent env launch-reported', () => {
     expect(
       resolveSourceControlAgentAvailability(
         'claude',
         settings({ agentDefaultEnv: { claude: { API_KEY: 'x' } } })
       )
-    ).toEqual({ baseAgent: 'claude', availabilityClass: 'host-preflight' })
+    ).toEqual({ baseAgent: 'claude', availabilityClass: 'launch-reported' })
   })
 
   it('resolves a plain custom agent to its base, baseline-detection', () => {
@@ -64,22 +64,22 @@ describe('resolveSourceControlAgentAvailability', () => {
     ).toEqual({ baseAgent: 'codex', availabilityClass: 'baseline-detection' })
   })
 
-  it('marks a custom agent with a command override host-preflight', () => {
+  it('marks a custom agent with a command override launch-reported', () => {
     expect(
       resolveSourceControlAgentAvailability(
         CUSTOM_ID,
         settings({ customTuiAgents: [customAgent({ commandOverride: 'my-codex' })] })
       )
-    ).toEqual({ baseAgent: 'codex', availabilityClass: 'host-preflight' })
+    ).toEqual({ baseAgent: 'codex', availabilityClass: 'launch-reported' })
   })
 
-  it('marks a custom agent with env host-preflight', () => {
+  it('marks a custom agent with env launch-reported', () => {
     expect(
       resolveSourceControlAgentAvailability(
         CUSTOM_ID,
         settings({ customTuiAgents: [customAgent({ env: { TOKEN: 'y' } })] })
       )
-    ).toEqual({ baseAgent: 'codex', availabilityClass: 'host-preflight' })
+    ).toEqual({ baseAgent: 'codex', availabilityClass: 'launch-reported' })
   })
 
   it('returns a null base for an unknown custom id', () => {
@@ -131,11 +131,11 @@ describe('planSourceControlAgentActionLaunch', () => {
     ).toEqual({ ok: false, error: 'The selected agent was not detected on this workspace host.' })
   })
 
-  it('never blocks a host-preflight agent whose base is not detected', () => {
+  it('never blocks a launch-reported agent whose base is not detected', () => {
     const result = planSourceControlAgentActionLaunch({
       agent: CUSTOM_ID,
       baseAgent: 'codex',
-      availabilityClass: 'host-preflight',
+      availabilityClass: 'launch-reported',
       commandInput: 'Fix checks',
       promptDelivery: 'submit-after-ready',
       detectedAgents: []

@@ -196,6 +196,14 @@ export class AgentLaunchOperationStore {
     return this.inFlightSpawnTokens.has(launchToken)
   }
 
+  /** Release only the in-flight spawn guard, KEEPING the pending snapshot: the
+   *  contact-lost arm of the spawn transaction ends this process's spawn attempt
+   *  without settling the operation, so reconciliation must become able to
+   *  resolve the retained pending on real host evidence. */
+  releaseSpawnInFlight(launchToken: string): void {
+    this.inFlightSpawnTokens.delete(launchToken)
+  }
+
   getPending(launchToken: string): PendingAgentLaunchSnapshot | null {
     return this.pendingByToken.get(launchToken) ?? null
   }

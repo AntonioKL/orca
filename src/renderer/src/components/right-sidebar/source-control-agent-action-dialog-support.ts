@@ -39,7 +39,7 @@ export function isSourceControlAgentUnavailable(
 }
 
 /** Gate on the resolved BASE (custom ids never index detection by their own id) and
- *  skip detection for host-preflight rows, which baseline stock detection can't evaluate. */
+ *  skip detection for launch-reported rows, which baseline stock detection can't evaluate. */
 export function isSourceControlAgentDetectedAndEnabled(
   agent: TuiAgent | null,
   detectedAgents: TuiAgent[],
@@ -50,7 +50,7 @@ export function isSourceControlAgentDetectedAndEnabled(
     return false
   }
   return (
-    availability.availabilityClass === 'host-preflight' ||
+    availability.availabilityClass === 'launch-reported' ||
     detectedAgents.includes(availability.baseAgent)
   )
 }

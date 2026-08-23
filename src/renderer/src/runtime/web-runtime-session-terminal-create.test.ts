@@ -24,7 +24,9 @@ const mocks = vi.hoisted(() => ({
   moveUnifiedTabToGroup: vi.fn(),
   setRemoteBrowserPageHandle: vi.fn(),
   focusBrowserTabInWorktree: vi.fn(),
-  applyFreshWebSessionTabsSnapshot: vi.fn(),
+  applyWebSessionTabsSnapshot: vi.fn(),
+  decideWebSessionTabsSnapshot: vi.fn(),
+  settleWebSessionTabsMirror: vi.fn(),
   acceptReplayedWebSessionTabsSnapshot: vi.fn(),
   resolveHostSessionTabIdForWebSessionTab: vi.fn(),
   trackTerminalPaneSplit: vi.fn(),
@@ -43,9 +45,13 @@ vi.mock('../store', () => ({
 
 vi.mock('./web-session-tabs-sync', () => ({
   acceptReplayedWebSessionTabsSnapshot: mocks.acceptReplayedWebSessionTabsSnapshot,
-  applyFreshWebSessionTabsSnapshot: mocks.applyFreshWebSessionTabsSnapshot,
-  applyWebSessionTabsStorePatch: (buildPatch: (state: unknown) => unknown) =>
-    mocks.setState(buildPatch),
+  applyWebSessionTabsSnapshot: mocks.applyWebSessionTabsSnapshot,
+  decideWebSessionTabsSnapshot: mocks.decideWebSessionTabsSnapshot,
+  applyWebSessionTabsStorePatch: (buildPatch: (state: unknown) => unknown) => {
+    mocks.setState(buildPatch)
+    // The production caller invokes the returned settle receipt.
+    return mocks.settleWebSessionTabsMirror
+  },
   resolveHostSessionTabIdForWebSessionTab: mocks.resolveHostSessionTabIdForWebSessionTab
 }))
 
@@ -307,11 +313,15 @@ describe('createWebRuntimeSessionTerminal', () => {
       },
       timeoutMs: 15_000
     })
-    expect(mocks.applyFreshWebSessionTabsSnapshot).toHaveBeenCalledWith(
+    // Why: activation mirroring is host-authoritative — the post-create list must
+    // pass through the frame's own decision before it may patch the local store.
+    expect(mocks.decideWebSessionTabsSnapshot).toHaveBeenCalledWith(snapshot, ENVIRONMENT_ID)
+    expect(mocks.applyWebSessionTabsSnapshot).toHaveBeenCalledWith(
       { state: 'before', activeWorktreeId: WORKTREE_ID },
       snapshot,
       ENVIRONMENT_ID
     )
+    expect(mocks.settleWebSessionTabsMirror).toHaveBeenCalled()
   })
 
   it('keeps exact legacy ordering when structured creation cannot express afterTabId', async () => {

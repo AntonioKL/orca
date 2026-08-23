@@ -6,9 +6,12 @@
 //      synchronous write BEFORE the writer, so a crash mid-spawn still self-
 //      identifies the terminal by token;
 //   3. spawn exactly ONE PTY from the resolved plan (token travels inside it);
-//   4. settle — registered clears pending + records `launched`; any post-create
-//      failure keeps the workspace, writes a durable `agentLaunchFailure`, and
-//      records `failed`. No path spawns a substitute blank terminal (I9).
+//   4. settle — registered clears pending + records `launched`; a host-attested
+//      post-create failure keeps the workspace, writes a durable
+//      `agentLaunchFailure`, and records `failed`. Loss of contact mid-spawn is
+//      NOT attested (the host may have spawned the agent): it keeps the pending
+//      and reservation, and writes launch_state_unknown instead of settling.
+//      No path spawns a substitute blank terminal (I9).
 // A request error performs no owner-state write. Electron-free and injectable.
 
 import type { AgentStartupPlan } from '../../shared/tui-agent-startup'
@@ -19,6 +22,7 @@ import type {
   AgentLaunchRequestError,
   PersistedAgentLaunchFailure
 } from '../../shared/agent-launch-contract'
+import { isSpawnContactLossError } from './agent-launch-spawn-contact-loss'
 import type { TuiAgent } from '../../shared/types'
 import type { AgentLaunchBoundary, ExecuteAgentLaunchResult } from './agent-launch-boundary'
 import type { AdmissionPrincipal } from './agent-launch-admission-store'
@@ -189,7 +193,35 @@ export async function runWorktreeAgentLaunchTransaction(
   try {
     const spawned = await deps.spawn(plan, receipt)
     terminalId = spawned.terminalId
-  } catch {
+  } catch (error) {
+    if (isSpawnContactLossError(error)) {
+      // Contact with the execution host broke while the spawn was (possibly) in
+      // flight — the host may well have spawned the agent (ssh-execution-boundary:
+      // a transport failure can only ever produce `unverifiable`). Settling
+      // `failed` here would clear the pending and hand the user a plain Retry
+      // that cold-starts a duplicate beside a live remote agent. Instead: keep
+      // the private pending + admission reservation (coexistence rule, exactly
+      // like a reconciled launch_state_unknown), release only the in-flight
+      // guard so provider-reconnect reconciliation may settle this token on real
+      // host evidence, and persist the non-retryable launch_state_unknown card
+      // (the server-side retry gate blocks on this code; the client card offers
+      // reconnect/forget, never plain Retry). No settled ledger entry: the
+      // operation has NOT settled.
+      deps.operationStore.releaseSpawnInFlight(receipt.launchToken)
+      const failure: PersistedAgentLaunchFailure = {
+        code: 'launch_state_unknown',
+        requestedAgent: receipt.requestedAgent,
+        baseAgent: receipt.baseAgent,
+        version: 1,
+        failureId: deps.mintFailureId(),
+        intent: params.intent,
+        occurredAt: nowFn()
+      }
+      // persistFailure also clears the public pending metadata; the durable card
+      // replaces it client-side while the private snapshot retains attribution.
+      deps.persistFailure(failure)
+      return { status: 'failed', failure }
+    }
     deps.boundary.settleAgentLaunch(receipt.launchToken, 'failed')
     // Settled ledger entry (inside persistedFailure) BEFORE clearPending: a
     // crash between the two durable writes must never lose both the pending

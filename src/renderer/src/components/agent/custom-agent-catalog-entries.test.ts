@@ -94,7 +94,7 @@ describe('mergeCustomAgentCatalogEntries', () => {
     expect(custom).toMatchObject({ cmd: '/opt/bin/agent', baseAgent: 'codex' })
   })
 
-  it('appends a host-preflighted custom whose base row is absent from the built-in list', () => {
+  it('appends a launch-reported custom whose base row is absent from the built-in list', () => {
     const merged = mergeCustomAgentCatalogEntries(
       [builtIn('claude', 'Claude', 'claude')],
       snapshot([
