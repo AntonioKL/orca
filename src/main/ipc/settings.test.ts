@@ -664,7 +664,7 @@ describe('registerSettingsHandlers', () => {
     expect(applyBrowserSessionProxiesMock).not.toHaveBeenCalled()
   })
 
-  it('never sweeps a superseded proxy save onto browser partitions', async () => {
+  it('queues every proxy snapshot on both authorities before either apply settles', async () => {
     store.getSettings.mockReturnValue({ httpProxyUrl: '', httpProxyBypassRules: '' })
     store.updateSettings.mockImplementation((args) =>
       args.httpProxyUrl !== undefined
@@ -689,12 +689,20 @@ describe('registerSettingsHandlers', () => {
 
     const first = handler(settingsInvokeEvent, { httpProxyUrl: 'socks5://127.0.0.1:1080' })
     await firstApplyStarted
+    expect(applyBrowserSessionProxiesMock).toHaveBeenCalledWith([], {
+      httpProxyUrl: 'socks5://127.0.0.1:1080',
+      httpProxyBypassRules: ''
+    })
     const second = handler(settingsInvokeEvent, { httpProxyBypassRules: 'late.example' })
     await second
     releaseFirstApply()
     await first
 
     expect(applyBrowserSessionProxiesMock.mock.calls.map((call) => call[1])).toEqual([
+      {
+        httpProxyUrl: 'socks5://127.0.0.1:1080',
+        httpProxyBypassRules: ''
+      },
       {
         httpProxyUrl: 'socks5://127.0.0.1:1080',
         httpProxyBypassRules: 'late.example'

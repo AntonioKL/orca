@@ -120,7 +120,6 @@ export function registerSettingsHandlers(
     event.returnValue = store.getSettings()
   })
 
-  let latestProxyCommitGeneration = 0
   ipcMain.handle('settings:set', async (event, args: Partial<GlobalSettings>) => {
     const sanitizedArgs = sanitizeRendererSettingsUpdate(args)
     // Why: connection/navigation code receives the generic settings writer; the
@@ -201,21 +200,22 @@ export function registerSettingsHandlers(
       ('httpProxyUrl' in sanitizedArgs && before.httpProxyUrl !== result.httpProxyUrl) ||
       ('httpProxyBypassRules' in sanitizedArgs &&
         before.httpProxyBypassRules !== result.httpProxyBypassRules)
-    // Why: only the newest changed proxy snapshot may reach browser partitions.
-    const proxyCommitGeneration = proxySettingsChanged ? ++latestProxyCommitGeneration : 0
     if (proxySettingsChanged) {
-      try {
-        await applyElectronProxySettings(result)
-      } catch {
+      // Start both authorities before yielding so requests cannot enter between their barriers.
+      const defaultSessionApply = applyElectronProxySettings(result)
+      const browserSessionsApply = applyBrowserSessionProxies(
+        browserSessionRegistry.listProfiles(),
+        result
+      )
+      const [defaultSessionResult, browserSessionsResult] = await Promise.allSettled([
+        defaultSessionApply,
+        browserSessionsApply
+      ])
+      if (defaultSessionResult.status === 'rejected') {
         console.warn('[settings] failed to apply network proxy settings')
       }
-      if (proxyCommitGeneration === latestProxyCommitGeneration) {
-        try {
-          // Why: browser guests run on their own partitions, which defaultSession's proxy never reaches (STA-4779).
-          await applyBrowserSessionProxies(browserSessionRegistry.listProfiles(), result)
-        } catch {
-          console.warn('[settings] failed to apply network proxy settings to browser sessions')
-        }
+      if (browserSessionsResult.status === 'rejected') {
+        console.warn('[settings] failed to apply network proxy settings to browser sessions')
       }
     }
     if (

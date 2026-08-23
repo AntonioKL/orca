@@ -49,13 +49,20 @@ export async function applyBrowserSessionProxies(
     return
   }
   proxyPolicyGeneration += 1
-  await Promise.all(
-    profiles.map(async (profile) => {
-      try {
-        await applyProxySettingsToSession(session.fromPartition(profile.partition), resolved)
-      } catch {
-        console.warn('[proxy] Failed to apply proxy to browser partition', profile.partition)
-      }
-    })
-  )
+  const failedPartitions = (
+    await Promise.all(
+      profiles.map(async (profile) => {
+        try {
+          await applyProxySettingsToSession(session.fromPartition(profile.partition), resolved)
+          return null
+        } catch {
+          console.warn('[proxy] Failed to apply proxy to browser partition', profile.partition)
+          return profile.partition
+        }
+      })
+    )
+  ).filter((partition): partition is string => partition !== null)
+  if (failedPartitions.length > 0) {
+    throw new Error(`Failed to apply proxy to browser partitions: ${failedPartitions.join(', ')}`)
+  }
 }

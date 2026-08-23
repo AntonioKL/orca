@@ -123,16 +123,18 @@ describe('browser session proxy', () => {
     expect(callback).toHaveBeenCalledWith('browser-user', 'browser-pass')
   })
 
-  it('keeps sweeping the remaining profiles when one partition throws', async () => {
+  it('keeps sweeping but reports failure so the failed partition stays gated', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     fromPartitionMock.mockImplementationOnce(() => {
       throw new Error('partition unavailable')
     })
 
-    await applyBrowserSessionProxies(PROFILES, {
-      httpProxyUrl: 'socks5://127.0.0.1:1080',
-      httpProxyBypassRules: ''
-    })
+    await expect(
+      applyBrowserSessionProxies(PROFILES, {
+        httpProxyUrl: 'socks5://127.0.0.1:1080',
+        httpProxyBypassRules: ''
+      })
+    ).rejects.toThrow('persist:orca-browser')
 
     expect(
       sessionsByPartition.get('persist:orca-browser-session-iso')?.setProxy

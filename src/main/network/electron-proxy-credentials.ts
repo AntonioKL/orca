@@ -1,4 +1,3 @@
-import { session } from 'electron'
 import { normalizeProxyUrl } from '../../shared/network-proxy'
 
 export type ElectronProxyCredentials = {
@@ -88,16 +87,20 @@ export function resetElectronProxyCredentialsForTests(proxySession?: object): vo
 }
 
 export function handleElectronProxyLogin(
-  event: Electron.Event,
-  webContents: Electron.WebContents | null,
-  _authenticationResponseDetails: Electron.AuthenticationResponseDetails,
-  authInfo: Electron.AuthInfo,
-  callback: (username?: string, password?: string) => void
+  event: { preventDefault(): void },
+  webContents: { session: object } | null,
+  _authenticationResponseDetails: unknown,
+  authInfo: { isProxy: boolean; host: string; port: number; scheme?: string; realm?: string },
+  callback: (username?: string, password?: string) => void,
+  defaultProxySession?: object
 ): void {
   if (!authInfo.isProxy) {
     return
   }
-  const proxySession = webContents?.session ?? session.defaultSession
+  const proxySession = webContents?.session ?? defaultProxySession
+  if (!proxySession) {
+    return
+  }
   const credentials = proxyCredentialsBySession.get(proxySession)
   if (
     !credentials ||

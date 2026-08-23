@@ -13,6 +13,7 @@ import {
   setElectronProxyCredentialsForSession,
   type ElectronProxyCredentials
 } from './electron-proxy-credentials'
+import { resolveProxyPolicyWithoutSession, type ProxyApplyResult } from './proxy-policy-resolution'
 
 type ProxySession = {
   resolveProxy(url: string): Promise<string>
@@ -47,43 +48,9 @@ function defaultProxySession(): ProxySession | null {
   return resolveDefaultProxySession?.() ?? null
 }
 
-export type ProxyApplyResult =
-  | { source: 'settings'; proxyRules: string; proxyBypassRules?: string }
-  | { source: 'env'; proxyRules: string; proxyBypassRules?: string }
-  | { source: 'system' | 'none' | 'invalid-settings' | 'invalid-env' }
+export type { ProxyApplyResult } from './proxy-policy-resolution'
 
 const PROXY_PROBE_URL = 'https://api.anthropic.com/'
-
-function resolveProxySettingsWithoutSession(
-  settings: NetworkProxySettings,
-  env: Record<string, string | undefined>
-): ProxyApplyResult {
-  const configured = normalizeProxyUrl(settings.httpProxyUrl)
-  if (configured.ok && configured.value) {
-    const { proxyRules } = separateElectronProxyCredentials(configured.value)
-    const bypassRules = normalizeProxyBypassRules(settings.httpProxyBypassRules)
-    return {
-      source: 'settings',
-      proxyRules,
-      ...(bypassRules ? { proxyBypassRules: bypassRules } : {})
-    }
-  }
-
-  const envProxy = getProxyUrlFromEnvironment(env)
-  if (envProxy.ok && envProxy.value) {
-    const { proxyRules } = separateElectronProxyCredentials(envProxy.value)
-    const bypassRules = normalizeProxyBypassRules(getProxyBypassRulesFromEnvironment(env))
-    return {
-      source: 'env',
-      proxyRules,
-      ...(bypassRules ? { proxyBypassRules: bypassRules } : {})
-    }
-  }
-  if (!configured.ok) {
-    return { source: 'invalid-settings' }
-  }
-  return { source: envProxy.ok ? 'none' : 'invalid-env' }
-}
 
 type SessionProxyApplicationState = {
   appliedKey: string | null
@@ -91,6 +58,7 @@ type SessionProxyApplicationState = {
   appliedResult: Extract<ProxyApplyResult, { source: 'settings' | 'env' }> | null
   credentials: ElectronProxyCredentials | null
   tail: Promise<unknown>
+  readiness: 'ready' | 'pending' | 'failed'
 }
 
 let sessionProxyApplications = new WeakMap<ProxySession, SessionProxyApplicationState>()
@@ -111,6 +79,41 @@ export function resetSessionProxyApplicationForTests(proxySession: ProxySession)
   clearElectronProxyCredentialsForSession(proxySession)
 }
 
+/** Wait for the newest queued policy; false keeps requests fail-closed after an apply error. */
+export async function awaitProxySessionApplication(proxySession: ProxySession): Promise<boolean> {
+  while (true) {
+    const state = sessionProxyApplications.get(proxySession)
+    if (!state) {
+      return true
+    }
+    const observed = state.tail
+    try {
+      await observed
+    } catch {
+      if (state.tail === observed) {
+        return false
+      }
+      continue
+    }
+    if (state.tail === observed) {
+      return true
+    }
+  }
+}
+
+export function getProxySessionApplicationReadiness(
+  proxySession: ProxySession
+): boolean | Promise<boolean> {
+  const state = sessionProxyApplications.get(proxySession)
+  if (!state || state.readiness === 'ready') {
+    return true
+  }
+  if (state.readiness === 'failed') {
+    return false
+  }
+  return awaitProxySessionApplication(proxySession)
+}
+
 export async function releaseProxySessionApplication(proxySession: ProxySession): Promise<void> {
   await enqueueSessionProxyApplication(proxySession, async (state) => {
     await releaseSessionProxyPin(proxySession, state)
@@ -127,7 +130,8 @@ function getSessionProxyApplicationState(proxySession: ProxySession): SessionPro
       settledKey: null,
       appliedResult: null,
       credentials: null,
-      tail: Promise.resolve()
+      tail: Promise.resolve(),
+      readiness: 'ready'
     }
     sessionProxyApplications.set(proxySession, state)
   }
@@ -141,14 +145,20 @@ async function enqueueSessionProxyApplication(
   const state = getSessionProxyApplicationState(proxySession)
   const operation = state.tail.catch(() => {}).then(() => apply(state))
   state.tail = operation
-
-  try {
-    return await operation
-  } finally {
-    if (state.tail === operation && state.appliedKey === null) {
-      sessionProxyApplications.delete(proxySession)
+  state.readiness = 'pending'
+  void operation.then(
+    () => {
+      if (state.tail === operation) {
+        state.readiness = 'ready'
+      }
+    },
+    () => {
+      if (state.tail === operation) {
+        state.readiness = 'failed'
+      }
     }
-  }
+  )
+  return operation
 }
 
 /** Apply the app-wide proxy to one session, serializing writes in call order. */
@@ -279,7 +289,7 @@ export async function ensureElectronProxyFromEnvironment(
 ): Promise<ProxyApplyResult> {
   const proxySession = options.proxySession ?? defaultProxySession()
   if (!proxySession) {
-    return resolveProxySettingsWithoutSession({}, options.env ?? process.env)
+    return resolveProxyPolicyWithoutSession({}, options.env ?? process.env)
   }
   return enqueueSessionProxyApplication(proxySession, (state) => {
     if (!options.force && state.appliedResult !== null) {
@@ -302,7 +312,7 @@ export function applyElectronProxySettings(
 ): Promise<ProxyApplyResult> {
   const proxySession = options.proxySession ?? defaultProxySession()
   if (!proxySession) {
-    return Promise.resolve(resolveProxySettingsWithoutSession(settings, options.env ?? process.env))
+    return Promise.resolve(resolveProxyPolicyWithoutSession(settings, options.env ?? process.env))
   }
   return applyProxySettingsToSession(proxySession, settings, {
     env: options.env,

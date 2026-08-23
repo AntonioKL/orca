@@ -15,6 +15,7 @@ vi.mock('electron', () => ({
 
 import {
   applyProxySettingsToSession,
+  awaitProxySessionApplication,
   releaseProxySessionApplication,
   resetSessionProxyApplicationForTests
 } from './proxy-settings'
@@ -196,6 +197,58 @@ describe('applyProxySettingsToSession', () => {
       [{ mode: 'fixed_servers', proxyRules: 'http://new.example:8080' }]
     ])
     expect(effectiveProxy).toBe('http://new.example:8080')
+  })
+
+  it('holds request readiness until the newest queued policy settles', async () => {
+    let finishFirstWrite: (() => void) | undefined
+    let finishSecondWrite: (() => void) | undefined
+    const proxySession = createProxySession()
+    proxySession.setProxy
+      .mockImplementationOnce(() => new Promise<void>((resolve) => (finishFirstWrite = resolve)))
+      .mockImplementationOnce(() => new Promise<void>((resolve) => (finishSecondWrite = resolve)))
+    resetSessionProxyApplicationForTests(proxySession)
+
+    const first = applyProxySettingsToSession(
+      proxySession,
+      { httpProxyUrl: 'http://old.example:8080' },
+      { env: {} }
+    )
+    const second = applyProxySettingsToSession(
+      proxySession,
+      { httpProxyUrl: 'http://new.example:8080' },
+      { env: {} }
+    )
+    let requestReleased = false
+    const readiness = awaitProxySessionApplication(proxySession).then((ready) => {
+      requestReleased = true
+      return ready
+    })
+
+    await vi.waitFor(() => expect(proxySession.setProxy).toHaveBeenCalledTimes(1))
+    expect(requestReleased).toBe(false)
+    finishFirstWrite?.()
+    await vi.waitFor(() => expect(proxySession.setProxy).toHaveBeenCalledTimes(2))
+    expect(requestReleased).toBe(false)
+    finishSecondWrite?.()
+
+    await expect(readiness).resolves.toBe(true)
+    await Promise.all([first, second])
+  })
+
+  it('keeps request readiness closed after proxy application fails', async () => {
+    const proxySession = createProxySession()
+    proxySession.setProxy.mockRejectedValueOnce(new Error('proxy apply failed'))
+    resetSessionProxyApplicationForTests(proxySession)
+
+    await expect(
+      applyProxySettingsToSession(
+        proxySession,
+        { httpProxyUrl: 'http://proxy.example:8080' },
+        { env: {} }
+      )
+    ).rejects.toThrow('proxy apply failed')
+
+    await expect(awaitProxySessionApplication(proxySession)).resolves.toBe(false)
   })
 
   it('orders a slow environment probe before a newer explicit setting', async () => {

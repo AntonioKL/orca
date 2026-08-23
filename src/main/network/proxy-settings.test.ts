@@ -183,7 +183,8 @@ describe('Electron proxy settings', () => {
         port: 8080,
         realm: 'proxy'
       },
-      callback
+      callback,
+      defaultSessionMock
     )
 
     expect(preventDefault).toHaveBeenCalledOnce()
