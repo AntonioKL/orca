@@ -59,6 +59,7 @@ type SessionProxyApplicationState = {
   credentials: ElectronProxyCredentials | null
   tail: Promise<unknown>
   readiness: 'ready' | 'pending' | 'failed'
+  retired: boolean
 }
 
 let sessionProxyApplications = new WeakMap<ProxySession, SessionProxyApplicationState>()
@@ -83,8 +84,8 @@ export function resetSessionProxyApplicationForTests(proxySession: ProxySession)
 export async function awaitProxySessionApplication(proxySession: ProxySession): Promise<boolean> {
   while (true) {
     const state = sessionProxyApplications.get(proxySession)
-    if (!state) {
-      return true
+    if (!state || state.retired) {
+      return !state
     }
     const observed = state.tail
     try {
@@ -96,7 +97,7 @@ export async function awaitProxySessionApplication(proxySession: ProxySession): 
       continue
     }
     if (state.tail === observed) {
-      return true
+      return !state.retired
     }
   }
 }
@@ -105,21 +106,38 @@ export function getProxySessionApplicationReadiness(
   proxySession: ProxySession
 ): boolean | Promise<boolean> {
   const state = sessionProxyApplications.get(proxySession)
-  if (!state || state.readiness === 'ready') {
+  if (!state) {
     return true
   }
-  if (state.readiness === 'failed') {
+  if (state.retired || state.readiness === 'failed') {
     return false
+  }
+  if (state.readiness === 'ready') {
+    return true
   }
   return awaitProxySessionApplication(proxySession)
 }
 
-export async function releaseProxySessionApplication(proxySession: ProxySession): Promise<void> {
-  await enqueueSessionProxyApplication(proxySession, async (state) => {
-    await releaseSessionProxyPin(proxySession, state)
-    clearElectronProxyCredentialsForSession(proxySession)
-    return { source: 'none' }
-  })
+export async function releaseProxySessionApplication(
+  proxySession: ProxySession,
+  allowRetired = false
+): Promise<void> {
+  await enqueueSessionProxyApplication(
+    proxySession,
+    async (state) => {
+      await releaseSessionProxyPin(proxySession, state)
+      clearElectronProxyCredentialsForSession(proxySession)
+      return { source: 'none' }
+    },
+    allowRetired
+  )
+}
+
+/** Permanently close request readiness before releasing a deleted partition. */
+export async function retireProxySessionApplication(proxySession: ProxySession): Promise<void> {
+  const state = getSessionProxyApplicationState(proxySession)
+  state.retired = true
+  await releaseProxySessionApplication(proxySession, true)
 }
 
 function getSessionProxyApplicationState(proxySession: ProxySession): SessionProxyApplicationState {
@@ -131,7 +149,8 @@ function getSessionProxyApplicationState(proxySession: ProxySession): SessionPro
       appliedResult: null,
       credentials: null,
       tail: Promise.resolve(),
-      readiness: 'ready'
+      readiness: 'ready',
+      retired: false
     }
     sessionProxyApplications.set(proxySession, state)
   }
@@ -140,9 +159,13 @@ function getSessionProxyApplicationState(proxySession: ProxySession): SessionPro
 
 async function enqueueSessionProxyApplication(
   proxySession: ProxySession,
-  apply: (state: SessionProxyApplicationState) => Promise<ProxyApplyResult>
+  apply: (state: SessionProxyApplicationState) => Promise<ProxyApplyResult>,
+  allowRetired = false
 ): Promise<ProxyApplyResult> {
   const state = getSessionProxyApplicationState(proxySession)
+  if (state.retired && !allowRetired) {
+    throw new Error('Proxy session is retired')
+  }
   const operation = state.tail.catch(() => {}).then(() => apply(state))
   state.tail = operation
   state.readiness = 'pending'

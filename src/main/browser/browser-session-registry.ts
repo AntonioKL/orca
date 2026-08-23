@@ -31,7 +31,9 @@ import {
 } from './browser-session-partition-policies'
 import { isValidPersistedBrowserSessionProfile } from './browser-session-persisted-profile-validation'
 import { clearBrowserSessionUserAgentMode } from './browser-session-user-agent-mode'
-import { releaseProxySessionApplication } from '../network/proxy-settings'
+import { retireProxySessionApplication } from '../network/proxy-settings'
+import { invalidateBrowserSessionProxyApplication } from './browser-session-proxy'
+import { browserManager } from './browser-manager'
 
 export type BrowserSessionRegistryProfileOptions = {
   orcaProfileId: string
@@ -286,14 +288,24 @@ class BrowserSessionRegistry {
     try {
       const sess = session.fromPartition(profile.partition)
       clearBrowserSessionUserAgentMode(sess)
-      clearBrowserSessionPartitionPolicies(profile.partition, sess)
+      invalidateBrowserSessionProxyApplication(sess)
+      const release = retireProxySessionApplication(sess)
+      const guestsDestroyed = browserManager.destroyBrowserSessionGuests(sess)
       try {
-        await releaseProxySessionApplication(sess)
+        await release
       } catch {
         console.warn('[proxy] Failed to release proxy from browser partition', profile.partition)
       }
       await sess.clearStorageData()
       await sess.clearCache()
+      if (guestsDestroyed) {
+        clearBrowserSessionPartitionPolicies(profile.partition, sess)
+      } else {
+        console.warn(
+          '[browser] Retaining fail-closed policy for browser partition',
+          profile.partition
+        )
+      }
     } catch {
       // Why: cleanup is best-effort — the profile is already out of the registry, so will-attach-webview blocks it regardless.
     }

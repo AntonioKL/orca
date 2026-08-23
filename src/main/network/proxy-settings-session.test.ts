@@ -17,6 +17,7 @@ import {
   applyProxySettingsToSession,
   awaitProxySessionApplication,
   releaseProxySessionApplication,
+  retireProxySessionApplication,
   resetSessionProxyApplicationForTests
 } from './proxy-settings'
 import { handleElectronProxyLogin } from './electron-proxy-credentials'
@@ -248,6 +249,35 @@ describe('applyProxySettingsToSession', () => {
       )
     ).rejects.toThrow('proxy apply failed')
 
+    await expect(awaitProxySessionApplication(proxySession)).resolves.toBe(false)
+  })
+
+  it('keeps a deleted partition retired while its proxy release settles', async () => {
+    let finishClose: (() => void) | undefined
+    const proxySession = createProxySession()
+    resetSessionProxyApplicationForTests(proxySession)
+    await applyProxySettingsToSession(
+      proxySession,
+      { httpProxyUrl: 'http://proxy.example:8080' },
+      { env: {} }
+    )
+    proxySession.closeAllConnections.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (finishClose = resolve))
+    )
+
+    const retirement = retireProxySessionApplication(proxySession)
+    await vi.waitFor(() => expect(proxySession.setProxy).toHaveBeenCalledWith({ mode: 'system' }))
+    await expect(awaitProxySessionApplication(proxySession)).resolves.toBe(false)
+    await expect(
+      applyProxySettingsToSession(
+        proxySession,
+        { httpProxyUrl: 'http://later.example:8080' },
+        { env: {} }
+      )
+    ).rejects.toThrow('retired')
+
+    finishClose?.()
+    await retirement
     await expect(awaitProxySessionApplication(proxySession)).resolves.toBe(false)
   })
 
