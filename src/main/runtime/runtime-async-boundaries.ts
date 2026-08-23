@@ -32,7 +32,9 @@ export function setBoundedMapEntry<K, V>(
   }
 }
 
-export { withTimeout } from '../../shared/promise-timeout-fallback'
+import { withTimeout } from '../../shared/promise-timeout-fallback'
+
+export { withTimeout }
 
 export function withTimeoutResult<T>(
   promise: Promise<T>,

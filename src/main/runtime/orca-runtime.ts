@@ -111,20 +111,37 @@ import { formatMessagePointer } from './orchestration/formatter'
 import { MailPointerRepointScheduler } from './orchestration/mail-pointer-repoint-scheduler'
 import { selectExactWorkerProviderSession } from './orchestration/worker-provider-session'
 import type { Automation, AutomationRun } from '../../shared/automations-types'
-import type { CreateWorktreeResult, ForceDeleteWorktreeBranchResult, RemoveWorktreeResult } from '../../shared/worktree/create-types'
-import type { DetectedWorktreeListResult, GitHubPrStartPoint, GitPushTarget, GitWorktreeInfo, Worktree } from '../../shared/worktree/types'
+import type {
+  CreateWorktreeResult,
+  ForceDeleteWorktreeBranchResult,
+  RemoveWorktreeResult
+} from '../../shared/worktree/create-types'
+import type {
+  DetectedWorktreeListResult,
+  GitHubPrStartPoint,
+  GitPushTarget,
+  GitWorktreeInfo,
+  Worktree
+} from '../../shared/worktree/types'
 import type { GlobalSettings } from '../../shared/global-settings-types'
 import type { PersistedUIState } from '../../shared/persisted-ui-state-types'
 import type { Repo } from '../../shared/repo-types'
 import type { StatsSummary, MemorySnapshot } from '../../shared/process-stats-types'
-import type { WorktreeLineage, WorkspaceLineage, WorktreeLineageWarning } from '../../shared/worktree/lineage-types'
+import type {
+  WorktreeLineage,
+  WorkspaceLineage,
+  WorktreeLineageWarning
+} from '../../shared/worktree/lineage-types'
 import type { WorkspaceKey, FolderWorkspace } from '../../shared/folder-workspace-types'
 import type { WorktreeMeta } from '../../shared/worktree/meta-types'
 import type { WorktreeBaseStatusEvent } from '../../shared/worktree/base-ref-drift-types'
 import type { WorktreeStartupLaunch } from '../../shared/worktree/launch-types'
 import type { Tab, TabGroupLayoutNode } from '../../shared/tab-types'
 import type { TerminalQuickCommand } from '../../shared/terminal-quick-command-types'
-import type { TerminalLayoutSnapshot, TerminalPaneLayoutNode } from '../../shared/terminal-tab-types'
+import type {
+  TerminalLayoutSnapshot,
+  TerminalPaneLayoutNode
+} from '../../shared/terminal-tab-types'
 import type { TuiAgent } from '../../shared/tui-agent'
 import type { WorkspaceSessionState } from '../../shared/workspace-session-state-types'
 import { assertWorktreeUnlockedForRemoval } from '../../shared/worktree/removal'
@@ -554,7 +571,6 @@ import { removeStaleLocalWorktreeRegistrationAfterFilesystemRemoval } from '../l
 import { listWorktreesStrict } from '../git/worktree'
 import { invalidateAuthorizedRootsCache } from '../ipc/filesystem-auth'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../shared/constants'
-import { pruneLineageForMissingRepoWorktrees } from '../worktree-lineage-pruning'
 import { deleteWorktreeHistoryDir } from '../terminal-history-deletion'
 import { cleanupUnusedWorktreePushTargetRemote } from '../ipc/worktree-remote'
 import type { Store } from '../persistence'
@@ -1251,8 +1267,9 @@ class OrcaRuntimeService {
     isRunning: (handle) => this.isTerminalRunningAgent(handle)
   })
   private _orchestrationDb: OrchestrationDb | null = null
-  private readonly messageWaiters = new RuntimeMessageWaiters((handle, reservedTypes) =>
-    this.deliverPendingMessagesForHandle(handle, reservedTypes)
+  private readonly messageWaiters = new RuntimeMessageWaiters(
+    (handle, reservedTypes) => this.deliverPendingMessagesForHandle(handle, reservedTypes),
+    (handle) => this.mailPointerRepointScheduler.schedule(handle)
   )
   // Why: mobile clients subscribe to terminal output via terminal.subscribe.
   // These listeners fire on every onPtyData call, enabling real-time streaming
@@ -17461,7 +17478,8 @@ class OrcaRuntimeService {
 
   /** A warm fleet snapshot already answers any selector for free, so scoped scanning must yield to it. */
   private hasFreshResolvedWorktreeCache(): boolean {
-    return Boolean(this.resolvedWorktreeCache && this.resolvedWorktreeCache.expiresAt > Date.now())
+    const cached = this.resolvedWorktrees.peek()
+    return Boolean(cached && cached.expiresAt > Date.now())
   }
 
   private async listResolvedWorktrees(): Promise<ResolvedWorktree[]> {
@@ -17706,7 +17724,7 @@ class OrcaRuntimeService {
       repos.filter((repo) => repo.connectionId === targetId).map((repo) => repo.id)
     )
     for (const repoId of affectedRepoIds) {
-      this.resolvedWorktrees.invalidateScan(repoId)
+      this.invalidateWorktreeScanCacheForRepo(repoId)
     }
     if (affectedRepoIds.size > 0) {
       this.resolvedWorktrees.invalidateResolved()

@@ -611,6 +611,21 @@ describe('scoped explicit worktree-id resolution', () => {
     expect(resolved.id).toBe(MAIN_WORKTREE_ID)
   })
 
+  it('does not rescan an id: selector when the fleet snapshot is still warm', async () => {
+    const { runtime, list } = makeRuntime({ repoCount: 10 })
+    const resolve = (selector: string): Promise<{ id: string }> =>
+      (
+        runtime as unknown as { resolveWorktreeSelector: (s: string) => Promise<{ id: string }> }
+      ).resolveWorktreeSelector(selector)
+
+    await list()
+    const scansAfterFleet = scannedRepoPaths().length
+    const resolved = await resolve(`id:${MAIN_WORKTREE_ID}`)
+
+    expect(resolved.id).toBe(MAIN_WORKTREE_ID)
+    expect(scannedRepoPaths()).toHaveLength(scansAfterFleet)
+  })
+
   it('still finds worktrees in other repos through the fleet path', async () => {
     const runtime = new OrcaRuntimeService(makeStore({ repoCount: 10 }) as never)
     const resolve = (selector: string): Promise<{ id: string }> =>

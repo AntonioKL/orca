@@ -14,10 +14,14 @@ export class RuntimeMessageWaiters {
   private readonly waitersByHandle = new Map<string, Set<MessageWaiter>>()
 
   constructor(
-    private readonly deliverPending: (handle: string, reservedTypes: ReadonlySet<string>) => void
+    private readonly deliverPending: (handle: string, reservedTypes: ReadonlySet<string>) => void,
+    private readonly scheduleRepoint?: (handle: string) => void
   ) {}
 
   notify(handle: string, messageType?: string): void {
+    if (this.scheduleRepoint && !handle.startsWith('dispatch:')) {
+      this.scheduleRepoint(handle)
+    }
     const waiters = this.waitersByHandle.get(handle)
     const consumers = waiters
       ? [...waiters].filter(

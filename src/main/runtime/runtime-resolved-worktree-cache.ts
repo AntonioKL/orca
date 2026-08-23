@@ -39,8 +39,7 @@ export class RuntimeResolvedWorktreeCache {
     compute: () => Promise<ResolvedWorktreeSnapshot>,
     ttlMs: number
   ): Promise<ResolvedWorktreeSnapshot> {
-    const now = Date.now()
-    if (this.resolved && this.resolved.expiresAt > now) {
+    if (this.resolved && this.resolved.expiresAt > Date.now()) {
       return this.resolved
     }
     const generation = this.resolvedGeneration
@@ -52,7 +51,9 @@ export class RuntimeResolvedWorktreeCache {
     try {
       const result = await promise
       if (generation === this.resolvedGeneration) {
-        this.resolved = { ...result, expiresAt: now + ttlMs }
+        // Why stamped on completion, not entry: a compute that spent longer than the TTL would
+        // otherwise publish an already-expired entry, so the next poll recomputes the same slow path.
+        this.resolved = { ...result, expiresAt: Date.now() + ttlMs }
       }
       return result
     } finally {

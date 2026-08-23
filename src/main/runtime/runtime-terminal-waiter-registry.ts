@@ -40,14 +40,14 @@ export class RuntimeTerminalWaiterRegistry {
     if (!waiters) {
       return
     }
-    for (const waiter of waiters) {
+    for (const waiter of Array.from(waiters)) {
       this.remove(waiter)
       waiter.reject(new Error(code))
     }
   }
 
   rejectAll(code: string): void {
-    for (const handle of this.byHandle.keys()) {
+    for (const handle of Array.from(this.byHandle.keys())) {
       this.rejectHandle(handle, code)
     }
   }
