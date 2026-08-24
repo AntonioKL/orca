@@ -117,6 +117,7 @@ export function dispatchTerminalNotification(
       : undefined
   if (
     event.source === 'agent-task-complete' &&
+    !event.authoritativeRemote &&
     isSupersededAgentCompletionSnapshot(storedAgentStatus, eventAgentStatusSnapshot)
   ) {
     return
