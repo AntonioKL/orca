@@ -1,7 +1,11 @@
+// @vitest-environment happy-dom
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, render, screen, within } from '@testing-library/react'
 import { getDefaultSettings } from '../../../../shared/constants'
+import type { LocalAgentCatalogSnapshot } from '../../../../shared/agent-catalog-snapshot'
+import { buildLocalCatalogSnapshot } from './agent-catalog-snapshot.fixture'
 import type { GlobalSettings } from '../../../../shared/global-settings-types'
 import type { TuiAgent } from '../../../../shared/tui-agent'
 import { AGENT_CATALOG } from '@/lib/agent-catalog'
@@ -459,48 +463,111 @@ describe('AgentsPane', () => {
 })
 
 describe('empty agent detection must not cost the saved default (#15256)', () => {
-  const withEmptyDetection = <T,>(run: () => T): T => {
-    const previous = detectedAgentsMock.detectedIds
+  // The default picker moved into the async AgentCatalogSection and the saved
+  // default now lives in the local catalog snapshot, so these tests hydrate the
+  // snapshot the way AgentCatalogSection.test.tsx does, holding detection empty
+  // for the whole render.
+  const isRowElement = (el: HTMLElement): boolean =>
+    typeof el.hasAttribute === 'function' && el.hasAttribute('data-agent-catalog-row')
+
+  let restoreDom: (() => void) | undefined
+  let savedDetectedIds: typeof detectedAgentsMock.detectedIds = null
+
+  beforeEach(() => {
+    savedDetectedIds = detectedAgentsMock.detectedIds
     detectedAgentsMock.detectedIds = []
-    try {
-      return run()
-    } finally {
-      detectedAgentsMock.detectedIds = previous
+    // @tanstack/react-virtual measures via offsetHeight/getBoundingClientRect,
+    // which happy-dom reports as zero; feed the container a viewport and rows
+    // their estimate so catalog rows actually mount.
+    const rect = HTMLElement.prototype.getBoundingClientRect
+    HTMLElement.prototype.getBoundingClientRect = function (): DOMRect {
+      const height = isRowElement(this) ? 52 : 500
+      return {
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: 400,
+        bottom: height,
+        width: 400,
+        height,
+        toJSON() {}
+      }
     }
-  }
-
-  /** The rendered `<button>` whose label contains `label`. */
-  const pillMarkup = (markup: string, label: string): string => {
-    const chunk = markup.split('<button').find((part) => part.includes(label))
-    expect(chunk, `no pill labelled ${label}`).toBeDefined()
-    return String(chunk)
-  }
-
-  it('does not present Auto as the active choice while an agent is stored', () => {
-    // The Auto pill's handler writes null. Rendering it pressed while
-    // `defaultTuiAgent: "claude"` is stored made the already-selected pill
-    // destructive: one click erased the setting, and later successful
-    // detection did not bring it back.
-    const markup = withEmptyDetection(() =>
-      renderPane({ ...getDefaultSettings('/tmp'), defaultTuiAgent: 'claude' })
-    )
-    expect(pillMarkup(markup, 'Auto')).toContain('aria-pressed="false"')
+    const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')
+    const offsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth')
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return isRowElement(this) ? 52 : 500
+      }
+    })
+    Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
+      configurable: true,
+      get: () => 400
+    })
+    restoreDom = () => {
+      HTMLElement.prototype.getBoundingClientRect = rect
+      if (offsetHeight) {
+        Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offsetHeight)
+      }
+      if (offsetWidth) {
+        Object.defineProperty(HTMLElement.prototype, 'offsetWidth', offsetWidth)
+      }
+    }
   })
 
-  it('still offers the stored agent so the choice can be kept', () => {
-    // With zero detected there were no agent pills at all, so the stored value
-    // was invisible and unrecoverable through the UI.
-    const markup = withEmptyDetection(() =>
-      renderPane({ ...getDefaultSettings('/tmp'), defaultTuiAgent: 'claude' })
-    )
-    expect(markup).toContain('Saved as your default, but not detected right now')
+  afterEach(() => {
+    cleanup()
+    restoreDom?.()
+    detectedAgentsMock.detectedIds = savedDetectedIds
+    delete (window as { api?: unknown }).api
   })
 
-  it('keeps a Refresh control reachable when nothing is detected', () => {
-    // Refresh lived inside the Installed section, which only renders when at
-    // least one agent was found -- gone in exactly the state needing a retry.
-    const markup = withEmptyDetection(() => renderPane(getDefaultSettings('/tmp')))
-    expect(markup).toContain('No agents detected')
-    expect(markup).toContain('Refresh')
+  const renderHydratedPane = (snapshot: LocalAgentCatalogSnapshot): void => {
+    ;(window as unknown as { api: unknown }).api = {
+      settings: {
+        agentCatalog: { getLocal: vi.fn().mockResolvedValue(snapshot) },
+        onChanged: () => () => {}
+      }
+    }
+    render(
+      React.createElement(
+        TooltipProvider,
+        null,
+        React.createElement(AgentsPane, {
+          settings: getDefaultSettings('/tmp'),
+          updateSettings: vi.fn()
+        })
+      )
+    )
+  }
+
+  it('does not present Auto as the active choice while an agent is stored', async () => {
+    // The saved default must stay the visible selection: presenting Auto as the
+    // active choice while `defaultAgent: 'claude'` is stored made the
+    // already-selected control destructive — one click erased the setting, and
+    // later successful detection did not bring it back.
+    renderHydratedPane(buildLocalCatalogSnapshot({ defaultAgent: 'claude' }))
+    const trigger = await screen.findByRole('combobox')
+    expect(trigger.textContent).toContain('Claude')
+    expect(trigger.textContent).not.toContain('Auto')
+  })
+
+  it('still offers the stored agent so the choice can be kept', async () => {
+    // With zero detected the stored agent must stay visible (as Not installed),
+    // not vanish and leave the saved value unrecoverable through the UI.
+    renderHydratedPane(buildLocalCatalogSnapshot({ defaultAgent: 'claude' }))
+    const labels = await screen.findAllByText('Claude')
+    const row = labels
+      .map((el) => el.closest('[data-agent-catalog-row]'))
+      .find((el): el is HTMLElement => el instanceof HTMLElement)
+    expect(row, 'no catalog row labelled Claude').toBeTruthy()
+    expect(within(row as HTMLElement).getByText('Not installed')).toBeTruthy()
+  })
+
+  it('keeps a Refresh control reachable when nothing is detected', async () => {
+    renderHydratedPane(buildLocalCatalogSnapshot({}))
+    expect(await screen.findByText('Refresh')).toBeTruthy()
   })
 })

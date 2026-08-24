@@ -112,20 +112,8 @@ export async function launchAgentBackgroundSession(
   const runtimeTarget = getActiveRuntimeTarget(
     getSettingsForWorktreeRuntimeOwner(store, worktreeId)
   )
-<<<<<<< HEAD
-  let ptyId = '',
-    runtimeTerminalHandle: string | null = null
-  // What the local spawn answered and later steps still need: which lifetime of `ptyId` this launch
-  // owns, and the config the host actually launched. Both absent for a runtime terminal.
-  let spawned: { incarnationId?: string; launchConfig?: typeof startupPlan.launchConfig } = {}
-||||||| parent of ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
-  let ptyId = '',
-    runtimeTerminalHandle: string | null = null
-  let returnedLaunchConfig: typeof startupPlan.launchConfig | undefined
-=======
   let ptyId = ''
   let runtimeTerminalHandle: string | null = null
->>>>>>> ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
   let tab: ReturnType<typeof store.createTab> | null = null
   let exitHandled = false
   let eagerPtyBuffer: EagerPtyHandle | null = null
@@ -211,12 +199,15 @@ export async function launchAgentBackgroundSession(
       runtimeTerminalHandle = terminal.handle
       ptyId = toRemoteRuntimePtyId(runtimeTerminalHandle, runtimeTarget.environmentId)
     } else {
+      // A WSL UNC worktree needs the pane opened inside the distro shell.
+      const wslUncShellOverride =
+        !sshConnectionId && isWslUncPath(worktree.path) ? { shellOverride: 'wsl.exe' } : {}
       const result = await window.api.pty.spawn({
         cols: 120,
         rows: 40,
         cwd: worktree.path,
         agentLaunch,
-        ...(!sshConnectionId && isWslUncPath(worktree.path) ? { shellOverride: 'wsl.exe' } : {}),
+        ...wslUncShellOverride,
         env: paneEnv,
         connectionId: sshConnectionId,
         worktreeId,
@@ -242,56 +233,11 @@ export async function launchAgentBackgroundSession(
           : new AgentLaunchSpawnOutcomeError(result.agentLaunch)
       }
       ptyId = result.id
-<<<<<<< HEAD
-      spawned = result
-||||||| parent of ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
-      returnedLaunchConfig = result.launchConfig
-=======
       launchToken =
         result.agentLaunch?.status === 'launched' ? result.agentLaunch.receipt.launchToken : null
       resolvedLaunchConfig = result.launchConfig
       localFollowupPrompt = result.followupPrompt ?? null
->>>>>>> ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
     }
-<<<<<<< HEAD
-    const adopted = await adoptAgentBackgroundSessionTab({
-      store,
-      worktreeId,
-      reservedTabId,
-      ptyId,
-      paneKey,
-      launchConfig: spawned.launchConfig ?? startupPlan.launchConfig,
-      launchRegistration,
-      runtimeTarget,
-      runtimeTerminalHandle,
-      onRetire: () => {
-        exitHandled = true
-        sshStartupDelivery.clear()
-        store.clearAgentLaunchConfig(paneKey)
-      },
-      ...(title ? { title } : {})
-    })
-    if (!adopted) {
-||||||| parent of ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
-    const adopted = await adoptAgentBackgroundSessionTab({
-      store,
-      worktreeId,
-      reservedTabId,
-      ptyId,
-      paneKey,
-      launchConfig: returnedLaunchConfig ?? startupPlan.launchConfig,
-      launchRegistration,
-      runtimeTarget,
-      runtimeTerminalHandle,
-      onRetire: () => {
-        exitHandled = true
-        sshStartupDelivery.clear()
-        store.clearAgentLaunchConfig(paneKey)
-      },
-      ...(title ? { title } : {})
-    })
-    if (!adopted) {
-=======
     if (
       await retireUnownedTerminal({
         owner: { worktreeId },
@@ -304,7 +250,6 @@ export async function launchAgentBackgroundSession(
         }
       })
     ) {
->>>>>>> ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
       return null
     }
     // Why: the spawned process already owns reservedTabId in its pane env; a

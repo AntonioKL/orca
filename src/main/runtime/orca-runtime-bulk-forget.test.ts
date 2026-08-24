@@ -24,7 +24,13 @@ vi.mock('../agent-launch/agent-launch-boundary-host', () => ({
 vi.mock('../agent-launch/agent-launch-operation-store-host', () => ({
   getHostAgentLaunchOperationStore: () => ({
     // Every enumerated sibling has a pending snapshot naming its operation id.
-    findPendingByScope: (scope: string) => ({ operationId: `op-${scope}`, launchToken: `tok-${scope}` })
+    findPendingByScope: (scope: string) => ({
+      operationId: `op-${scope}`,
+      launchToken: `tok-${scope}`
+    }),
+    recordSettled: () => {},
+    clearPending: () => true,
+    settleAndClearPending: () => {}
   })
 }))
 
@@ -162,7 +168,9 @@ describe('forgetUnknownWorktreeAgentLaunchSiblings', () => {
     const internals = runtime as unknown as {
       forgetUnknownWorktreeAgentLaunch: () => Promise<ForgetUnknownAgentLaunchResult>
     }
-    const spy = vi.fn(async (): Promise<ForgetUnknownAgentLaunchResult> => ({ status: 'forgotten' }))
+    const spy = vi.fn(
+      async (): Promise<ForgetUnknownAgentLaunchResult> => ({ status: 'forgotten' })
+    )
     internals.forgetUnknownWorktreeAgentLaunch = spy
 
     const result = await runtime.forgetUnknownWorktreeAgentLaunchSiblings('id:wt-anchor', undefined)

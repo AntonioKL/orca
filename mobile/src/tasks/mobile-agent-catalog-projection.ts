@@ -45,14 +45,15 @@ function builtInPickerRows(): MobileAgentPickerRow[] {
 }
 
 function groupEnabledReadyCustoms(
-  snapshot: AgentCatalogSnapshot
+  snapshot: AgentCatalogSnapshot,
+  disabled: ReadonlySet<TuiAgent>
 ): Map<TuiAgent, MobileAgentPickerRow[]> {
-  const disabled = new Set<TuiAgent>(snapshot.disabledAgents)
   const grouped = new Map<TuiAgent, MobileAgentPickerRow[]>()
   for (const custom of snapshot.customAgents) {
-    // Repair-required customs are not launchable and disabled ones are hidden;
-    // neither belongs in the mobile launch picker.
-    if (custom.status !== 'ready' || disabled.has(custom.id)) {
+    // Repair-required customs are not launchable and disabled ones are hidden; a
+    // custom whose base harness is disabled is host-rejected at admission
+    // (base-disabled), so none of them belongs in the mobile launch picker.
+    if (custom.status !== 'ready' || disabled.has(custom.id) || disabled.has(custom.baseAgent)) {
       continue
     }
     const row: MobileAgentPickerRow = {
@@ -94,11 +95,19 @@ export function buildMobileAgentPickerRows(
   snapshot: AgentCatalogValue | null,
   options: MobileAgentPickerOptions = {}
 ): MobileAgentPickerRow[] {
-  const builtInRows = builtInPickerRows()
-  if (!options.includeCustomAgents || !isCatalogSnapshot(snapshot)) {
+  if (!isCatalogSnapshot(snapshot)) {
+    return builtInPickerRows()
+  }
+  // Why: the snapshot's disabledAgents is the same host state the launch
+  // admission checks, so a disabled base harness must not be offered — selecting
+  // it is rejected on the host. Without a snapshot the callers' settings-based
+  // filter is the only guard.
+  const disabled = new Set<TuiAgent>(snapshot.disabledAgents)
+  const builtInRows = builtInPickerRows().filter((row) => !disabled.has(row.id))
+  if (!options.includeCustomAgents) {
     return builtInRows
   }
-  const customsByBase = groupEnabledReadyCustoms(snapshot)
+  const customsByBase = groupEnabledReadyCustoms(snapshot, disabled)
   if (customsByBase.size === 0) {
     return builtInRows
   }

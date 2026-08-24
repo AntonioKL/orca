@@ -145,12 +145,7 @@ export function AutomationRunHistory({
               worktree: runWorktree
             })
             const usageLabel = getAutomationUsageStatusLabel(run.usage)
-<<<<<<< HEAD
-            const occurrenceLabel = automationRunOccurrenceLabel(run)
-||||||| parent of ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
-=======
             const rowBadge = getAutomationRunRowBadge(run)
->>>>>>> ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
             return (
               <button
                 key={run.id}

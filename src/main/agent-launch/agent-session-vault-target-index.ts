@@ -77,7 +77,7 @@ function targetKey(target: IndexedSnapshotTarget): string {
   } satisfies IndexedSnapshotTarget)
 }
 
-function targetMatchesDiscoveredHost(
+export function targetMatchesDiscoveredHost(
   targetExecutionHostId: AgentLaunchExecutionHostId,
   scannedExecutionHostId: string
 ): boolean {

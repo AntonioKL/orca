@@ -1,16 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import type { Automation, AutomationCreateInput } from '../../../../shared/automations-types'
 import {
-<<<<<<< HEAD
-  listAutomationRunsForTarget,
-||||||| parent of ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
-  createAutomationForTarget,
-  getAutomationListTarget,
-=======
   createAutomationForTarget,
   forgetAutomationRunForTarget,
   getAutomationListTarget,
->>>>>>> ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
   listAutomationsForTarget,
   runAutomationNowForTarget,
   toRuntimeAutomationCreateInput,

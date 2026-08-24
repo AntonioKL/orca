@@ -114,19 +114,22 @@ export function runForgetUnknownAgentLaunch(
     return rejected('stale_agent_launch_failure')
   }
 
-  // Settle `forgotten`, drop the private attribution, and free the reservation.
-  // No kill/spawn: a later provider terminal is treated as unattributed.
-  deps.operationStore.recordSettled({
-    operationId: pending.operationId,
-    idempotencyKey,
-    scope: params.scope,
-    payloadDigest,
-    status: 'forgotten',
-    terminalId: null,
-    failureId: null,
-    settledAt: nowFn()
-  })
-  deps.operationStore.clearPending(pending.launchToken)
+  // Settle `forgotten` and drop the private attribution in one atomic durable
+  // write, then free the reservation. No kill/spawn: a later provider terminal
+  // is treated as unattributed.
+  deps.operationStore.settleAndClearPending(
+    {
+      operationId: pending.operationId,
+      idempotencyKey,
+      scope: params.scope,
+      payloadDigest,
+      status: 'forgotten',
+      terminalId: null,
+      failureId: null,
+      settledAt: nowFn()
+    },
+    pending.launchToken
+  )
   deps.releaseReservation(pending.launchToken)
   deps.clearPublicState()
   return { status: 'forgotten' }

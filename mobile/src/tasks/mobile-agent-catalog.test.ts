@@ -19,7 +19,7 @@ function parseDesktopAutoPickOrder(): string[] {
 }
 
 function parseDesktopConfiguredAgents(): string[] {
-  const source = readDesktopSharedFile('tui-agent-config.ts')
+  const source = readDesktopSharedFile('built-in-tui-agent-configs.ts')
   const match = source.match(
     /TUI_AGENT_CONFIG: Record<BuiltInTuiAgent, TuiAgentConfig> = {([\s\S]*?)^}/m
   )

@@ -179,7 +179,13 @@ export function resolveResumeLaunchIngest(
   }
 
   // No record, a record without a replayable field, or a legacy record reached
-  // over an untrusted surface: never silently resolve current config.
+  // over an untrusted surface: never silently resolve current config. Log which
+  // (identity only) — the client renders one generic code for all of them.
+  console.warn(
+    `[agent-launch] resume ingest rejected base=${input.resume.sessionKey.baseAgent} ` +
+      `record=${record ? 'unreplayable' : 'none'} client=${input.client} ` +
+      `legacyContext=${input.legacy ? (input.legacy.handoff ? 'handoff' : 'no-handoff') : 'absent'}`
+  )
   return INVALID
 }
 

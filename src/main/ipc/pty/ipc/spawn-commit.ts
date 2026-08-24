@@ -79,6 +79,10 @@ export async function commitPtyIpcSpawn(ctx: PtyIpcSpawnState): Promise<PtySpawn
       launchToken: args.launchToken,
       spawnEnv: ctx.spawnEnv,
       launchAgent: args.launchAgent,
+      // args.launchAgent is the receipt's built-in base; preserve the requested identity for display.
+      ...(ctx.agentLaunchOutcome?.status === 'launched'
+        ? { requestedAgent: ctx.agentLaunchOutcome.receipt.requestedAgent }
+        : {}),
       launchConfig: ctx.effectiveLaunchConfig,
       isReattach: ctx.result.isReattach === true,
       hasStablePaneOwner: ctx.stablePaneOwner !== null,

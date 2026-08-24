@@ -155,22 +155,8 @@ export function useFullCreationExecution(input: FullCreationExecutionInput) {
           linkedWorkItem: toFolderWorkspaceLinkedTask(submitLinkedWorkItem),
           linkedTaskSourceContext: taskSourceContext,
           nameWasGenerated,
-<<<<<<< HEAD
-          ...(createDisplayName
-            ? { displayNameKind: nameIsAutoManaged ? ('generated' as const) : ('user' as const) }
-            : {}),
-          ...(!backendStartup && startupPlan?.draftPrompt
-            ? { startupDraft: startupPlan.draftPrompt }
-            : {}),
-          ...(parentWorktreeId ? { parentWorktreeId } : {})
-||||||| parent of ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
-          ...(!backendStartup && startupPlan?.draftPrompt
-            ? { startupDraft: startupPlan.draftPrompt }
-            : {})
-=======
           agentLaunch,
           agentLaunchTelemetry
->>>>>>> ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
         }
       )
 

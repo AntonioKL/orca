@@ -1,10 +1,10 @@
 import { Pressable, Text, TextInput, View } from 'react-native'
 import { MessageSquare, Plus, X } from 'lucide-react-native'
-import { MobileSyntaxSegments } from '../../../../src/components/MobileSyntaxSegments'
-import { colors } from '../../../../src/theme/mobile-theme'
-import { styles } from '../../../../src/session/mobile-session-styles'
-import type { DiffComment } from '../../../../../src/shared/types'
-import type { RenderableDiffLine } from '../../../../src/session/mobile-session-route-types'
+import { MobileSyntaxSegments } from '../components/MobileSyntaxSegments'
+import { colors } from '../theme/mobile-theme'
+import { styles } from './mobile-session-styles'
+import type { DiffComment } from '../../../src/shared/types'
+import type { RenderableDiffLine } from './mobile-session-route-types'
 
 export function DiffLineRow({
   line,

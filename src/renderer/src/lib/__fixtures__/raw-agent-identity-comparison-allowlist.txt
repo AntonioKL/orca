@@ -14,11 +14,12 @@ src/main/runtime/headless-terminal-query-reply-policy.ts:1
 src/main/runtime/orca-runtime.ts:6
 src/relay/relay.ts:3
 #
-# KNOWN GAP — same defect class, not yet fixed
-# Both gate the OMP resume-path capability on a REQUESTED id, so a custom agent
-# derived from the `omp` base does not request the capability and its provider
-# resume can fall back to the legacy create. Fixing it changes remote capability
-# negotiation, so it must go through docs/reference/remote-wire-compatibility.md
-# rather than a drive-by edit. Delete these two lines when that lands.
-src/renderer/src/components/terminal-pane/remote-runtime-pty-transport.ts:1
-src/renderer/src/runtime/web-runtime-session.ts:1
+# KNOWN GAP — same defect class, not yet fixed, no longer scanner-visible
+# remote-runtime-pty-transport.ts and web-runtime-session.ts gate the OMP/Kimi
+# resume-path capability on a REQUESTED id, so a custom agent derived from those
+# bases does not request the capability and its provider resume can fall back to
+# the legacy create. The comparison now lives in
+# src/renderer/src/runtime/agent-resume-host-authority-capability.ts as a record
+# lookup, which this ratchet cannot see, so the two call sites carry no entry
+# here. Fixing it changes remote capability negotiation, so it must go through
+# docs/reference/remote-wire-compatibility.md rather than a drive-by edit.

@@ -261,6 +261,9 @@ export type RuntimeMobileSessionTerminalTab = {
   /** Event-only lead-turn end time for paired clients; never persisted in AgentStatusEntry. */
   turnCompletedAt?: number
   launchAgent?: TuiAgent
+  /** Requested (possibly custom) launch identity for display. Optional (wire
+   *  rule 1): absent means launchAgent — the built-in base — is the identity. */
+  requestedAgent?: TuiAgent
   launchNotices?: PersistedLaunchNoticeState
   startupCwd?: string
   parentLayout?: TerminalLayoutSnapshot

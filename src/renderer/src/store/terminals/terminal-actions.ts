@@ -224,6 +224,7 @@ export type TerminalActions = {
       launchConfig?: SleepingAgentLaunchConfig
       legacyResumeRecordedConnectionId?: string | null
       resumeProviderSession?: AgentProviderSessionMetadata
+      sleepingRecordPaneKey?: string
       launchToken?: string
       launchAgent?: TuiAgent
       agentArgsOverride?: string | null
@@ -252,6 +253,7 @@ export type TerminalActions = {
     launchConfig?: SleepingAgentLaunchConfig
     legacyResumeRecordedConnectionId?: string | null
     resumeProviderSession?: AgentProviderSessionMetadata
+    sleepingRecordPaneKey?: string
     launchToken?: string
     launchAgent?: TuiAgent
     agentArgsOverride?: string | null

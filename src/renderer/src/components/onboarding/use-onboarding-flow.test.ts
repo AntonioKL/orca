@@ -3,14 +3,8 @@ import { toast } from 'sonner'
 import {
   prepareSkippedOnboardingPreferences,
   remapOpenOnboardingLastCompletedStep
-<<<<<<< HEAD
-} from './onboarding-flow-state'
-||||||| parent of ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
-} from './use-onboarding-flow'
-=======
 } from './use-onboarding-flow'
 import { setDefaultTuiAgent } from '@/lib/agent-catalog-authoring'
->>>>>>> ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
 import { getDefaultOnboardingState } from '../../../../shared/constants'
 
 vi.mock('sonner', () => ({

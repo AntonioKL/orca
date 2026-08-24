@@ -150,17 +150,20 @@ function settleForgottenDispatchOpStore(dispatchId: string): void {
   if (!pending) {
     return
   }
-  operationStore.recordSettled({
-    operationId: pending.operationId,
-    idempotencyKey: pending.idempotencyKey,
-    scope: pending.scope,
-    payloadDigest: pending.payloadDigest,
-    status: 'forgotten',
-    terminalId: null,
-    failureId: null,
-    settledAt: Date.now()
-  })
-  operationStore.clearPending(pending.launchToken)
+  // One atomic durable write for the settled entry + pending drop.
+  operationStore.settleAndClearPending(
+    {
+      operationId: pending.operationId,
+      idempotencyKey: pending.idempotencyKey,
+      scope: pending.scope,
+      payloadDigest: pending.payloadDigest,
+      status: 'forgotten',
+      terminalId: null,
+      failureId: null,
+      settledAt: Date.now()
+    },
+    pending.launchToken
+  )
   // A 'failed' settle releases the reservation the unknown launch held.
   getHostAgentLaunchBoundary().settleAgentLaunch(pending.launchToken, 'failed')
 }

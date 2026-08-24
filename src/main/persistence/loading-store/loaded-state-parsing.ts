@@ -24,7 +24,8 @@ import {
 import { readGithubCacheSnapshot } from './user-data-path'
 import {
   gcStaleWorktreeMeta,
-  normalizeWorktreeLinkedItemMetadata
+  normalizeWorktreeLinkedItemMetadata,
+  normalizeWorktreeMetaAgentLaunchState
 } from '../tracking-repos/worktree-metadata-normalization'
 import { backfillLegacyAutomationContexts } from '../scheduling-automations/automation-context-migration'
 import { migrateAutomationOwners } from '../../automations/automation-owner-migration'
@@ -285,6 +286,10 @@ export class LoadedStateParsingOperations {
     result = folderScopeConnectionMigration.state
 
     if (normalizeWorktreeLinkedItemMetadata(result)) {
+      this.runtime.loadNeedsSave = true
+    }
+
+    if (normalizeWorktreeMetaAgentLaunchState(result)) {
       this.runtime.loadNeedsSave = true
     }
 

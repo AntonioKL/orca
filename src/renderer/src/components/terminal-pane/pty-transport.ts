@@ -2,30 +2,6 @@ import { attachIpcPty } from './ipc-pty-attach'
 import { connectIpcPty } from './ipc-pty-connect'
 import { createIpcPtySessionHandlers } from './ipc-pty-session-handlers'
 import { createPtyInputWriteQueue } from './pty-input-write-queue'
-<<<<<<< HEAD
-import { createPtyOutputProcessor } from './pty-output-processor'
-import { createPtyPreconnectInputBuffer } from './pty-preconnect-input-buffer'
-import type { IpcPtyTransportOptions, PtyTransport } from './pty-transport-types'
-||||||| parent of ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
-import { waitAtTerminalPtyPreSpawnE2EBarrier } from './terminal-pty-pre-spawn-e2e-barrier'
-import type { PtyDataMeta } from './pty-dispatcher'
-import type { IpcPtyTransportOptions, PtyConnectResult, PtyTransport } from './pty-transport-types'
-import { createBellDetector } from '../../../../shared/terminal-bell-detector'
-import {
-  hasTerminalDisplayContent,
-  trimIncompleteTerminalControlTail
-} from './terminal-output-visibility'
-import {
-  createAgentStatusOscProcessor,
-  type ProcessedAgentStatusChunk
-} from '../../../../shared/agent-status-osc'
-import { extractIpcErrorMessage } from '@/lib/ipc-error'
-import {
-  registerPtySideEffectPendingGauge,
-  type PtySideEffectGauge
-} from './pty-side-effect-pending-census'
-import { isTuiAgent } from '../../../../shared/tui-agent-config'
-=======
 import { waitAtTerminalPtyPreSpawnE2EBarrier } from './terminal-pty-pre-spawn-e2e-barrier'
 import type { PtyDataMeta } from './pty-dispatcher'
 import type {
@@ -49,7 +25,6 @@ import {
   type PtySideEffectGauge
 } from './pty-side-effect-pending-census'
 import { isTuiAgent } from '../../../../shared/tui-agent-config'
->>>>>>> ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
 
 export {
   ensurePtyDispatcher,
@@ -77,20 +52,6 @@ export type {
 
 export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTransport {
   const {
-<<<<<<< HEAD
-||||||| parent of ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
-    cwd,
-    cwdFallback,
-    env,
-    envToDelete,
-    command,
-    commandDelivery,
-    launchConfig,
-    resumeProviderSession,
-    launchToken,
-    launchAgent,
-    startupCommandDelivery,
-=======
     cwd,
     cwdFallback,
     env,
@@ -104,7 +65,6 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
     agentLaunch,
     legacyResumeRecordedConnectionId,
     startupCommandDelivery,
->>>>>>> ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
     connectionId,
     shellOverride,
     onPtyExit,
@@ -201,89 +161,6 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
     connect: async (options) => {
       const connectGeneration = advancePtyLifecycle()
       try {
-<<<<<<< HEAD
-        return await connectIpcPty(options, {
-          transportOptions: opts,
-          handlers,
-          isDestroyed: () => destroyed || lifecycleGeneration !== connectGeneration,
-          isExpectedExitCurrent: () =>
-            !destroyed &&
-            lastExitGeneration === lifecycleGeneration &&
-            lifecycleGeneration === connectGeneration + 1,
-          ownsPtyId: (id) => !destroyed && connected && ptyId === id,
-          bind,
-          isCurrent: (id) => lifecycleGeneration === connectGeneration && connected && ptyId === id,
-          setCallbacks,
-          getCallbacks: () => storedCallbacks
-        })
-      } finally {
-        if (lifecycleGeneration === connectGeneration) {
-          await flushPreconnectInput()
-||||||| parent of ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
-        const preSpawnBarrier = waitAtTerminalPtyPreSpawnE2EBarrier()
-        if (preSpawnBarrier) {
-          await preSpawnBarrier
-          if (destroyed) {
-            return
-          }
-        }
-        if (options.shouldContinue && !options.shouldContinue()) {
-          return
-        }
-        // Why: cwd fallback is only for fresh local spawns — reattach keeps the session's cwd and SSH transports resolve cwd on the remote host.
-        const shouldSendLocalCwdFallback =
-          cwdFallback === 'worktree' && !connectionId && !admittedSessionId
-        const result = await window.api.pty.spawn({
-          cols: options.cols ?? 80,
-          rows: options.rows ?? 24,
-          cwd,
-          ...(shouldSendLocalCwdFallback ? { cwdFallback } : {}),
-          env: options.env ?? env,
-          ...((options.envToDelete ?? envToDelete)
-            ? { envToDelete: options.envToDelete ?? envToDelete }
-            : {}),
-          command: options.command ?? command,
-          ...((options.commandDelivery ?? commandDelivery)
-            ? { commandDelivery: options.commandDelivery ?? commandDelivery }
-            : {}),
-          ...((options.launchConfig ?? launchConfig)
-            ? { launchConfig: options.launchConfig ?? launchConfig }
-            : {}),
-          ...((options.resumeProviderSession ?? resumeProviderSession)
-            ? {
-                resumeProviderSession: options.resumeProviderSession ?? resumeProviderSession
-              }
-            : {}),
-          ...((options.launchToken ?? launchToken)
-            ? { launchToken: options.launchToken ?? launchToken }
-            : {}),
-          ...((options.launchAgent ?? launchAgent)
-            ? { launchAgent: options.launchAgent ?? launchAgent }
-            : {}),
-          ...((options.startupCommandDelivery ?? startupCommandDelivery)
-            ? { startupCommandDelivery: options.startupCommandDelivery ?? startupCommandDelivery }
-            : {}),
-          ...(connectionId ? { connectionId } : {}),
-          ...(admittedSessionId ? { sessionId: admittedSessionId } : {}),
-          // Why: hidden-at-spawn mark must reach main before the PTY's first byte — ride the spawn IPC, not the visibility sync (terminal-query-authority.md).
-          ...(options.initiallyHidden ? { initiallyHidden: true } : {}),
-          worktreeId,
-          ...(tabId ? { tabId } : {}),
-          ...(leafId ? { leafId } : {}),
-          ...(shellOverride ? { shellOverride } : {}),
-          ...(projectRuntime ? { projectRuntime } : {}),
-          ...(terminalColorQueryReplies ? { terminalColorQueryReplies } : {}),
-          ...(telemetry ? { telemetry } : {})
-        })
-        const spawnResult = result as PtyConnectResult & { isReattach?: boolean }
-        const resultLaunchAgent = isTuiAgent(spawnResult.launchAgent)
-          ? spawnResult.launchAgent
-          : undefined
-        const retireFreshSpawn = async (): Promise<void> => {
-          if (!spawnResult.isReattach && !spawnResult.coldRestore) {
-            await window.api.pty.kill(spawnResult.id)
-          }
-=======
         const preSpawnBarrier = waitAtTerminalPtyPreSpawnE2EBarrier()
         if (preSpawnBarrier) {
           await preSpawnBarrier
@@ -402,122 +279,7 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
           if (!spawnResult.isReattach && !spawnResult.coldRestore) {
             await window.api.pty.kill(spawnResult.id)
           }
->>>>>>> ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
         }
-<<<<<<< HEAD
-||||||| parent of ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
-
-        // Why: on destroy mid-connect, kill only a fresh spawn — killing a reattached session (owned by the tab lifecycle) loses a live shell.
-        if (destroyed) {
-          await retireFreshSpawn()
-          return
-        }
-
-        if (options.admitPtyId && !options.admitPtyId(spawnResult.id)) {
-          // Why: a rejected session-expired fallback has no owner to retire its newly created process.
-          await retireFreshSpawn()
-          return spawnResult
-        }
-
-        if (spawnResult.isReattach && !admittedSessionId) {
-          storedCallbacks.onReattachDetermined?.()
-        }
-        ptyId = spawnResult.id
-        connected = true
-
-        // Why: skip onPtySpawn for reattach/coldRestore — it would reset lastActivityAt and destroy the recency sort order.
-        if (!spawnResult.isReattach && !spawnResult.coldRestore) {
-          onPtySpawn?.(spawnResult.id)
-        }
-
-        registerPtyDataHandler(spawnResult.id)
-        const exitedBeforeAttach = registerPtyExitHandler(spawnResult.id)
-        if (exitedBeforeAttach) {
-          return { id: spawnResult.id, exitedBeforeAttach: true } satisfies PtyConnectResult
-        }
-        if (!connected || ptyId !== spawnResult.id) {
-          return undefined
-        }
-
-        storedCallbacks.onConnect?.()
-        storedCallbacks.onStatus?.('shell')
-
-        if (spawnResult.isReattach || spawnResult.coldRestore || spawnResult.sessionExpired) {
-          return {
-            id: spawnResult.id,
-            // Why: recovery needs to distinguish an attach that ignored startup intent from a fresh spawn that ran it.
-            ...(spawnResult.isReattach ? { isReattach: true } : {}),
-            ...(resultLaunchAgent ? { launchAgent: resultLaunchAgent } : {}),
-            ...(spawnResult.launchConfig ? { launchConfig: spawnResult.launchConfig } : {}),
-            snapshot: spawnResult.snapshot,
-            snapshotCols: spawnResult.snapshotCols,
-            snapshotRows: spawnResult.snapshotRows,
-            ...(spawnResult.snapshotPrefixAnsi !== undefined
-              ? { snapshotPrefixAnsi: spawnResult.snapshotPrefixAnsi }
-              : {}),
-            ...(spawnResult.snapshotFrameAnsi !== undefined
-              ? { snapshotFrameAnsi: spawnResult.snapshotFrameAnsi }
-              : {}),
-            ...(spawnResult.snapshotFrameRestoreAnsi !== undefined
-              ? { snapshotFrameRestoreAnsi: spawnResult.snapshotFrameRestoreAnsi }
-              : {}),
-            isAlternateScreen: spawnResult.isAlternateScreen,
-            sessionExpired: spawnResult.sessionExpired,
-            coldRestore: spawnResult.coldRestore,
-            replay: spawnResult.replay,
-            pendingEscapeTailAnsi: spawnResult.pendingEscapeTailAnsi,
-            // Why: the cold-restore path re-runs the launch command, so it needs the
-            // same "main declined the resume" signal the fresh-spawn path gets.
-            ...(spawnResult.agentResumeUnavailable ? { agentResumeUnavailable: true as const } : {})
-          } satisfies PtyConnectResult
-        }
-        if (
-          resultLaunchAgent ||
-          spawnResult.launchConfig ||
-          spawnResult.startupCwdFallback ||
-          spawnResult.agentResumeUnavailable
-        ) {
-          return {
-            id: spawnResult.id,
-            ...(resultLaunchAgent ? { launchAgent: resultLaunchAgent } : {}),
-            ...(spawnResult.launchConfig ? { launchConfig: spawnResult.launchConfig } : {}),
-            ...(spawnResult.startupCwdFallback
-              ? { startupCwdFallback: spawnResult.startupCwdFallback }
-              : {}),
-            ...(spawnResult.agentResumeUnavailable ? { agentResumeUnavailable: true as const } : {})
-          } satisfies PtyConnectResult
-        }
-        return spawnResult.id
-      } catch (err) {
-        const msg = extractIpcErrorMessage(err, err instanceof Error ? err.message : String(err))
-        if (
-          connectionId &&
-          options.sessionId &&
-          (msg.includes(SSH_SESSION_EXPIRED_ERROR) ||
-            msg.includes(SSH_PTY_CONNECTION_MISMATCH_MARKER))
-        ) {
-          return {
-            id: options.sessionId,
-            sessionExpired: true
-          } satisfies PtyConnectResult
-        }
-        // Why: re-spawning a Kill-All'd session throws TerminalKilledError; swallow it (pane still shows "Process exited"), don't toast (src/main/daemon/daemon-pty-adapter.ts).
-        if (msg.includes('was explicitly killed')) {
-          return undefined
-        }
-        // Why: on cold start the SSH provider isn't registered yet, so pty:spawn throws a raw IPC error; replace with a friendly message.
-        if (connectionId && msg.includes('No PTY provider for connection')) {
-          // Why: a disappearing runtime-owned SSH target is expected teardown (e.g. workspace deleted); don't surface a reconnect toast.
-          if (!isRuntimeOwnedSshTargetId(connectionId)) {
-            storedCallbacks.onError?.(
-              'SSH connection is not active. Use the reconnect dialog or Settings to connect.'
-            )
-          }
-        } else {
-          storedCallbacks.onError?.(msg)
-        }
-        return undefined
-=======
         const launchedOutcome =
           spawnResult.agentLaunch?.status === 'launched' ? spawnResult.agentLaunch : undefined
 
@@ -642,7 +404,6 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
           storedCallbacks.onError?.(msg)
         }
         return undefined
->>>>>>> ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
       }
     },
 

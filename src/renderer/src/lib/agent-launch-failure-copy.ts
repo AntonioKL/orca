@@ -101,7 +101,7 @@ function failureCodeMessage(
     case 'invalid_launch_snapshot':
       return translate(
         'agentLaunch.failure.invalidSnapshot',
-        "This agent's saved launch details are no longer valid."
+        "This agent's saved launch details are no longer valid. Launch the agent again to start fresh with its current settings."
       )
     case 'trust_preflight_failed':
       return translate(
@@ -174,4 +174,59 @@ export function agentLaunchOutcomeErrorMessage(
   return outcome.status === 'failed'
     ? agentLaunchFailureMessage(outcome.failure)
     : agentLaunchRequestErrorMessage(outcome.requestError)
+}
+
+// Runtime code lists kept exhaustive by their Record types: adding a union
+// member fails compilation here alongside the copy switches above. Local
+// instead of shared AGENT_LAUNCH_FAILURE_CODES because that module pulls zod
+// into the renderer bundle.
+const FAILURE_CODE_SET: Record<AgentLaunchFailureCode, true> = {
+  unknown_agent: true,
+  no_agent_selected: true,
+  agent_definition_needs_repair: true,
+  custom_agent_disabled: true,
+  agent_configuration_changed: true,
+  base_agent_disabled: true,
+  base_agent_unavailable: true,
+  missing_variable: true,
+  missing_target_home: true,
+  invalid_command_override: true,
+  invalid_agent_args: true,
+  invalid_agent_env: true,
+  secure_env_transport_unavailable: true,
+  launch_command_too_long: true,
+  invalid_launch_snapshot: true,
+  trust_preflight_failed: true,
+  spawn_failed: true,
+  launch_state_unknown: true,
+  launch_capacity_exceeded: true
+}
+const REQUEST_ERROR_CODE_SET: Record<AgentLaunchRequestError['code'], true> = {
+  idempotency_conflict: true,
+  stale_agent_launch_failure: true,
+  untrusted_reference: true
+}
+
+/** True when an error line is exactly one of this module's typed launch
+ *  messages. Error surfaces use it to reserve file-an-issue framing for
+ *  unexplained internal errors; translated at call time so it tracks the
+ *  active locale. */
+export function isAgentLaunchFailureCopy(line: string): boolean {
+  for (const code of Object.keys(FAILURE_CODE_SET) as AgentLaunchFailureCode[]) {
+    if (
+      failureCodeMessage(code, 'pre-spawn') === line ||
+      failureCodeMessage(code, 'post-create') === line
+    ) {
+      return true
+    }
+  }
+  for (const code of Object.keys(REQUEST_ERROR_CODE_SET) as AgentLaunchRequestError['code'][]) {
+    if (agentLaunchRequestErrorMessage({ code }) === line) {
+      return true
+    }
+  }
+  return (
+    line === translate('agentLaunch.failure.unknown', "The agent couldn't be launched.") ||
+    line === translate('agentLaunch.requestError.unknown', "This launch couldn't be completed.")
+  )
 }

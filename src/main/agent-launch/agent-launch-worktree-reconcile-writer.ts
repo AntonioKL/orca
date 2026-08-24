@@ -113,17 +113,21 @@ export function reconcileOnePendingAgentLaunch(
 
   if (outcome.kind === 'launched') {
     deps.settleBoundary(pending.launchToken, 'registered')
-    deps.operationStore.recordSettled({
-      operationId: pending.operationId,
-      idempotencyKey: pending.idempotencyKey,
-      scope: pending.scope,
-      payloadDigest: pending.payloadDigest,
-      status: 'launched',
-      terminalId: liveTerminalId,
-      failureId: null,
-      settledAt: nowFn()
-    })
-    deps.operationStore.clearPending(pending.launchToken)
+    // Settled entry + pending drop in one atomic durable write; a crash leaves
+    // one of the two, and either alone reconciles/replays.
+    deps.operationStore.settleAndClearPending(
+      {
+        operationId: pending.operationId,
+        idempotencyKey: pending.idempotencyKey,
+        scope: pending.scope,
+        payloadDigest: pending.payloadDigest,
+        status: 'launched',
+        terminalId: liveTerminalId,
+        failureId: null,
+        settledAt: nowFn()
+      },
+      pending.launchToken
+    )
     persistence.settleLaunched()
     return outcome
   }
@@ -131,17 +135,19 @@ export function reconcileOnePendingAgentLaunch(
   if (outcome.kind === 'spawn_failed') {
     const failure = persistedFailure(outcome.kind, pending, deps, pending.intent, nowFn())
     deps.settleBoundary(pending.launchToken, 'failed')
-    deps.operationStore.recordSettled({
-      operationId: pending.operationId,
-      idempotencyKey: pending.idempotencyKey,
-      scope: pending.scope,
-      payloadDigest: pending.payloadDigest,
-      status: 'failed',
-      terminalId: liveTerminalId,
-      failureId: failure.failureId,
-      settledAt: nowFn()
-    })
-    deps.operationStore.clearPending(pending.launchToken)
+    deps.operationStore.settleAndClearPending(
+      {
+        operationId: pending.operationId,
+        idempotencyKey: pending.idempotencyKey,
+        scope: pending.scope,
+        payloadDigest: pending.payloadDigest,
+        status: 'failed',
+        terminalId: liveTerminalId,
+        failureId: failure.failureId,
+        settledAt: nowFn()
+      },
+      pending.launchToken
+    )
     persistence.settleFailed(failure)
     return outcome
   }

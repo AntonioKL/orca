@@ -1,3 +1,4 @@
+import { useAppStore } from '@/store'
 import type { SleepingAgentSessionRecord } from '../../../shared/agent-session-resume'
 
 export const LEAF_ID = '11111111-1111-4111-8111-111111111111'
@@ -58,6 +59,15 @@ export function makeSplitLayout(
     activeLeafId: leafId,
     expandedLeafId: null,
     ptyIdsByLeafId
+  }
+}
+
+/** Spends every queued startup — the spawn-success signal that clears each
+ *  resume startup's sleeping record. */
+export function consumeQueuedResumeStartups(): void {
+  const state = useAppStore.getState()
+  for (const tabId of Object.keys(state.pendingStartupByTabId)) {
+    state.consumeTabStartupCommand(tabId)
   }
 }
 

@@ -205,6 +205,29 @@ describe('settled ledger', () => {
     expect(store.findSettledByIdempotencyKey('wt-9', 'k-1')).toBeNull()
   })
 
+  it('settleAndClearPending lands the settled entry and the pending drop in ONE durable write', () => {
+    const store = new AgentLaunchOperationStore()
+    const entry = pending()
+    store.beginPending(entry)
+    const sink = vi.fn()
+    store.setDurablePersistence(sink)
+
+    const outcome = settled({
+      operationId: entry.operationId,
+      idempotencyKey: entry.idempotencyKey,
+      scope: entry.scope
+    })
+    store.settleAndClearPending(outcome, entry.launchToken)
+
+    expect(sink).toHaveBeenCalledTimes(1)
+    const written = sink.mock.calls[0][0]
+    expect(written.pending).toEqual([])
+    expect(written.settled).toEqual([outcome])
+    expect(store.getPending(entry.launchToken)).toBeNull()
+    expect(store.isSpawnInFlight(entry.launchToken)).toBe(false)
+    expect(store.findSettledByIdempotencyKey(entry.scope, entry.idempotencyKey)).toEqual(outcome)
+  })
+
   it('rebuild never invokes the durable sink (locked-keychain recovery re-entry)', () => {
     // The recovery path rebuilds while its sink is still installed as
     // onDurableMutation; a persisting rebuild would re-enter that sink per

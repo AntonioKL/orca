@@ -254,6 +254,18 @@ export class AgentLaunchOperationStore {
     this.persistDurable()
   }
 
+  /** Settle and drop the pending in ONE durable write. The single file image
+   *  carries both effects, so a crash leaves either the old pending
+   *  (reconcilable) or the settled entry (replayable) — never neither — while
+   *  paying one fsync'd full-store rewrite instead of the two a
+   *  recordSettled+clearPending pair costs on every launch settle. */
+  settleAndClearPending(entry: SettledAgentLaunchOperation, launchToken: string): void {
+    this.appendSettled(entry)
+    this.inFlightSpawnTokens.delete(launchToken)
+    this.pendingByToken.delete(launchToken)
+    this.persistDurable()
+  }
+
   private appendSettled(entry: SettledAgentLaunchOperation): void {
     const bucket = this.settledByScope.get(entry.scope) ?? []
     const next = bucket.filter((existing) => existing.operationId !== entry.operationId)

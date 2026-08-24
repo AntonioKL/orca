@@ -60,6 +60,8 @@ export type TerminalState = {
       launchConfig?: SleepingAgentLaunchConfig
       legacyResumeRecordedConnectionId?: string | null
       resumeProviderSession?: AgentProviderSessionMetadata
+      /** Sleeping record retained as retry state until this startup is consumed. */
+      sleepingRecordPaneKey?: string
       launchToken?: string
       launchAgent?: TuiAgent
       agentArgsOverride?: string | null

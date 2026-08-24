@@ -23,16 +23,6 @@ import type {
 } from '../../../shared/agent-launch-spawn-request'
 import type { LaunchSource } from '../../../shared/telemetry-events'
 import { getConnectionIdFromState } from '@/lib/connection-context'
-<<<<<<< HEAD
-import { resolveInitialNativeChatSessionOptions } from '@/components/native-chat/native-chat-launch-session-options'
-import { seedNativeChatAppliedSessionOptions } from '@/components/native-chat/native-chat-session-option-cache'
-import { canUseStructuredNativeChat } from '@/lib/structured-native-chat-availability'
-import { startStructuredCodexLaunch } from '@/lib/structured-agent-session-launch'
-||||||| parent of ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
-import { resolveInitialNativeChatSessionOptions } from '@/components/native-chat/native-chat-launch-session-options'
-import { seedNativeChatAppliedSessionOptions } from '@/components/native-chat/native-chat-session-option-cache'
-=======
->>>>>>> ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
 
 export type LaunchAgentInNewTabArgs = {
   agent: TuiAgent

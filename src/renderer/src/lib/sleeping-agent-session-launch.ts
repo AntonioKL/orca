@@ -62,62 +62,9 @@ export function launchSleepingAgentSession(
   const requestedAgent = record.requestedAgent ?? record.agent
 
   const tab = state.createTab(record.worktreeId, undefined, undefined, {
-<<<<<<< HEAD
-    launchAgent: record.agent,
-    pendingStartup: {
-      command: startupPlan.launchCommand,
-      ...(startupPlan.env ? { env: startupPlan.env } : {}),
-      launchConfig: startupPlan.launchConfig,
-      resumeProviderSession: record.providerSession,
-      launchAgent: record.agent,
-      ...(launchConfig ? { agentArgsOverride: launchConfig.agentArgs } : {}),
-      ...(startupPlan.startupCommandDelivery
-        ? { startupCommandDelivery: startupPlan.startupCommandDelivery }
-        : {}),
-      showSessionRestoredBanner: true,
-      telemetry: {
-        agent_kind: tuiAgentToAgentKind(record.agent),
-        launch_source: 'sidebar',
-        request_kind: 'resume'
-      }
-    },
-    automaticResumeClaim: {
-      worktreeId: record.worktreeId,
-      launchAgent: record.agent,
-      providerSession: record.providerSession
-    },
-||||||| parent of ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
-    launchAgent: record.agent,
-=======
     launchAgent: requestedAgent,
->>>>>>> ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
     ...(options?.suppressNavigation ? { activate: false, recordInteraction: false } : {})
   })
-<<<<<<< HEAD
-||||||| parent of ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
-  state.queueTabStartupCommand(tab.id, {
-    command: startupPlan.launchCommand,
-    ...(startupPlan.env ? { env: startupPlan.env } : {}),
-    launchConfig: startupPlan.launchConfig,
-    resumeProviderSession: record.providerSession,
-    launchAgent: record.agent,
-    ...(launchConfig ? { agentArgsOverride: launchConfig.agentArgs } : {}),
-    ...(startupPlan.startupCommandDelivery
-      ? { startupCommandDelivery: startupPlan.startupCommandDelivery }
-      : {}),
-    showSessionRestoredBanner: true,
-    telemetry: {
-      agent_kind: tuiAgentToAgentKind(record.agent),
-      launch_source: 'sidebar',
-      request_kind: 'resume'
-    }
-  })
-  state.claimAutomaticAgentResume(tab.id, {
-    worktreeId: record.worktreeId,
-    launchAgent: record.agent,
-    providerSession: record.providerSession
-  })
-=======
   state.queueTabStartupCommand(tab.id, {
     command: '',
     agentLaunch,
@@ -140,6 +87,7 @@ export function launchSleepingAgentSession(
     // double-launching a provider session that is already queued.
     resumeProviderSession: record.providerSession,
     launchAgent: requestedAgent,
+    sleepingRecordPaneKey: record.paneKey,
     showSessionRestoredBanner: true,
     telemetry: {
       agent_kind: tuiAgentToAgentKind(baseAgent),
@@ -152,8 +100,11 @@ export function launchSleepingAgentSession(
     launchAgent: requestedAgent,
     providerSession: record.providerSession
   })
->>>>>>> ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
-  state.clearSleepingAgentSession(record.paneKey)
+  // Why: the record is NOT cleared here. The host resolves the launch after the
+  // pane mounts, so it can still fail (or land unverifiable on contact loss);
+  // clearing now would strand the session with no retry record. Consumption of
+  // the queued startup — spent only once the pane owns a concrete PTY — clears
+  // it via sleepingRecordPaneKey; until then the sweep's replay dedup skips it.
   if (!options?.suppressNavigation) {
     state.setActiveTabType('terminal')
   }

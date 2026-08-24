@@ -12,7 +12,7 @@ import { TUI_AGENT_CONFIG } from '../../../../shared/tui-agent-config'
 import { isCustomTuiAgentId } from '../../../../shared/custom-tui-agent-identity'
 import { slugifyForWorkspaceName } from '../../../../shared/workspace-name'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../../shared/constants'
-import type { TuiAgent } from '../../../../shared/types'
+import type { CustomTuiAgent, TuiAgent } from '../../../../shared/types'
 import { getLocalProjectExecutionRuntimeContext } from '@/lib/local-preflight-context'
 import { getForkAgentLaunchPlatform, preflightForkAgentTrust } from './fork-agent-host-preflight'
 import { translate } from '@/i18n/i18n'
@@ -29,8 +29,9 @@ export type PreparedAgentSessionFork = {
   agent: TuiAgent | null
   worktreeId: string
   pane: ManagedPane
-  /** True when the source pane ran a custom agent, so `agent` was filtered to null:
-   *  host-owned custom-agent fork is not wired yet, and this flags the honest notice. */
+  /** True when the source pane ran a custom agent whose definition is no longer
+   *  live (deleted or unknown), so `agent` was filtered to null: the fork cannot
+   *  relaunch it, and this flags the honest notice. */
   sourceWasCustomAgent: boolean
 }
 
@@ -38,8 +39,19 @@ function buildForkWorkspaceName(sourceName: string): string {
   return slugifyForWorkspaceName(`${sourceName}-fork`) || 'session-fork'
 }
 
-function resolveTuiAgent(value: string | null | undefined): TuiAgent | null {
-  return value && Object.hasOwn(TUI_AGENT_CONFIG, value) ? (value as TuiAgent) : null
+function resolveTuiAgent(
+  value: string | null | undefined,
+  customTuiAgents: readonly CustomTuiAgent[] | null | undefined
+): TuiAgent | null {
+  if (value && Object.hasOwn(TUI_AGENT_CONFIG, value)) {
+    return value as TuiAgent
+  }
+  // A custom id relaunches through the host agentLaunch boundary, which resolves
+  // only live definitions — tombstoned/unknown ids degrade to the copy path.
+  if (isCustomTuiAgentId(value) && customTuiAgents?.some((candidate) => candidate?.id === value)) {
+    return value
+  }
+  return null
 }
 
 function getUsableForkBase(
@@ -98,19 +110,25 @@ export function prepareAgentSessionForkFromPane({
   const state = useAppStore.getState()
   const rawSourceAgent = state.agentStatusByPaneKey[paneKey]?.agentType
   const rawTabAgent = state.tabsByWorktree[worktreeId]?.find((tab) => tab.id === tabId)?.launchAgent
-  const sourceAgent = resolveTuiAgent(rawSourceAgent)
-  const tabAgent = resolveTuiAgent(rawTabAgent)
+  const customTuiAgents = state.settings?.customTuiAgents
+  const sourceAgent = resolveTuiAgent(rawSourceAgent, customTuiAgents)
+  const tabAgent = resolveTuiAgent(rawTabAgent, customTuiAgents)
   const agent = sourceAgent ?? tabAgent
-  // resolveTuiAgent nulls custom ids; a null agent whose raw source was a custom id
-  // means the source pane ran a custom agent that fork cannot relaunch yet.
+  // resolveTuiAgent nulls non-live custom ids; a null agent whose raw source was
+  // a custom id means the source agent was deleted and fork cannot relaunch it.
   const sourceWasCustomAgent =
     !agent && (isCustomTuiAgentId(rawSourceAgent) || isCustomTuiAgentId(rawTabAgent))
   // Why: v1 is a context fork, not a process clone. Capturing scrollback keeps
   // SSH and local panes on the same path because both expose xterm state here.
+  // The custom agent's display name, never the raw `custom-agent:<base>:<uuid>` id.
+  const agentLabel =
+    agent && isCustomTuiAgentId(agent)
+      ? (customTuiAgents?.find((candidate) => candidate?.id === agent)?.label ?? null)
+      : agent
   const prompt = buildAgentSessionForkPrompt({
     capturedText: pane.serializeAddon.serialize({ scrollback: 800 }),
     sourceLabel: paneKey,
-    agentLabel: agent
+    agentLabel
   })
 
   if (!prompt) {
@@ -242,12 +260,12 @@ export async function startAgentSessionFork(fork: PreparedAgentSessionFork): Pro
   if (!fork.agent) {
     activateAndRevealWorktree(forkWorktreeId, { sidebarRevealBehavior: 'auto' })
     if (fork.sourceWasCustomAgent) {
-      // Host-owned fork for custom agents lands post-release; name the limit instead
-      // of silently degrading to the copy-context path with no explanation.
+      // A live custom agent forks like a built-in; only a deleted/unknown one
+      // lands here. Name the limit instead of degrading with no explanation.
       toast.message(
         translate(
-          'auto.components.terminal.pane.terminal.agent.session.fork.customForkUnavailable',
-          "Forking isn't available for custom agents yet"
+          'auto.components.terminal.pane.terminal.agent.session.fork.customForkAgentDeleted',
+          'The custom agent from this session no longer exists, so the fork starts without an agent'
         )
       )
     }

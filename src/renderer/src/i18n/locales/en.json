@@ -3019,7 +3019,8 @@
                   "f62b40e2c7": "No terminal context to copy",
                   "373a3103e7": "Context copied",
                   "3fc568a49d": "Failed to copy context.",
-                  "customForkUnavailable": "Forking isn't available for custom agents yet"
+                  "customForkUnavailable": "Forking isn't available for custom agents yet",
+                  "customForkAgentDeleted": "The custom agent from this session no longer exists, so the fork starts without an agent"
                 }
               }
             },
@@ -3095,6 +3096,14 @@
           "TerminalQuickCommandsSubmenu": {
             "3ccc7981bb": "Host unavailable",
             "54f29b7c0d": "Loading host…"
+          },
+          "TerminalProcessExitOverlay": {
+            "capacityTitle": "Git Bash console limit reached",
+            "failedTitle": "Terminal exited",
+            "capacityDetail": "Git Bash reached its 128-console limit. Close unused Git Bash terminals, then restart this terminal.",
+            "failedDetail": "The shell process ended with exit code {{code}}. Its output is preserved.",
+            "close": "Close",
+            "restart": "Restart"
           }
         }
       },
@@ -16880,7 +16889,7 @@
       "invalidEnv": "This agent's launch environment is invalid. Fix it in Settings.",
       "secureEnvUnavailable": "Can't securely send this agent's environment to the remote host.",
       "commandTooLong": "The launch command is too long to run. Shorten the agent arguments or prompt.",
-      "invalidSnapshot": "This agent's saved launch details are no longer valid.",
+      "invalidSnapshot": "This agent's saved launch details are no longer valid. Launch the agent again to start fresh with its current settings.",
       "trustPreflightFailed": "Couldn't confirm workspace trust for this agent. Try again.",
       "spawnFailed": "The agent couldn't be started. Try again.",
       "stateUnknown": "The launch status is unknown. Check the terminal before retrying.",

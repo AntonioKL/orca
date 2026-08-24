@@ -143,11 +143,6 @@ export function createTerminalTabPresentationActions(
         return { tabsByWorktree: { ...s.tabsByWorktree, [ownerWorktreeId]: nextTabs } }
       })
     },
-<<<<<<< HEAD
-    setRuntimePaneTitle: (tabId, paneId, title) => {
-||||||| parent of ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
-    setRuntimePaneTitle: (tabId, paneId, rawTitle) => {
-=======
     backfillTabLaunchAgent: (tabId, agent) => {
       set((s) => {
         const ownerWorktreeId = getTerminalTabOwnerWorktreeId(s.tabsByWorktree, tabId)
@@ -167,7 +162,6 @@ export function createTerminalTabPresentationActions(
       })
     },
     setRuntimePaneTitle: (tabId, paneId, rawTitle) => {
->>>>>>> ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
       set((s) => {
         const currentByPane = s.runtimePaneTitlesByTabId[tabId] ?? {}
         const prevTitle = currentByPane[paneId]

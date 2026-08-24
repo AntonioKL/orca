@@ -15,8 +15,9 @@ import {
 import { translate } from '@/i18n/i18n'
 import { createLocalizedCatalog } from '@/i18n/localized-catalog'
 import { AGENT_FAVICON_ASSETS } from './agent-favicon-assets'
-import { isCustomTuiAgentId, resolveTuiAgentBaseAgent } from '../../../shared/custom-tui-agents'
+import { isCustomTuiAgentId } from '../../../shared/custom-tui-agents'
 import { getAgentCatalogSettings } from './agent-catalog-settings-source'
+import { customAgentSettingsBase, customAgentSettingsLabel } from './custom-agent-settings-index'
 
 export type AgentCatalogEntry = {
   id: TuiAgent
@@ -323,10 +324,8 @@ function customAgentLabel(agent: TuiAgent): string | null {
   if (!isCustomTuiAgentId(agent)) {
     return null
   }
-  const settings = getAgentCatalogSettings()
-  const label =
-    settings?.customTuiAgents?.find((candidate) => candidate?.id === agent)?.label ??
-    settings?.deletedCustomTuiAgents?.find((candidate) => candidate?.id === agent)?.label
+  // Per-row render path: O(1) memoized index, not a catalog scan per row.
+  const label = customAgentSettingsLabel(getAgentCatalogSettings(), agent)
   return label?.trim() || null
 }
 
@@ -353,12 +352,7 @@ export function AgentIcon({
   // Icon assets are built-in-only: a custom agent wears its base harness's icon,
   // and an unresolvable custom id degrades to its own initial.
   if (isCustomTuiAgentId(agent)) {
-    const settings = getAgentCatalogSettings()
-    const base = resolveTuiAgentBaseAgent(
-      agent,
-      settings?.customTuiAgents,
-      settings?.deletedCustomTuiAgents
-    )
+    const base = customAgentSettingsBase(getAgentCatalogSettings(), agent)
     return base ? (
       <AgentIcon agent={base} size={size} />
     ) : (

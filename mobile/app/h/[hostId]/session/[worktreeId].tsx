@@ -287,7 +287,7 @@ import { QuickCommandsTabButton } from '../../../../src/session/QuickCommandsTab
 import { styles } from '../../../../src/session/mobile-session-styles'
 import type { DiffComment } from '../../../../../src/shared/diff-comment-types'
 import type { TerminalQuickCommand } from '../../../../../src/shared/terminal-quick-command-types'
-import { DiffLineRow } from './mobile-session-diff-line-row'
+import { DiffLineRow } from '../../../../src/session/mobile-session-diff-line-row'
 import type { AgentLaunchNoticeCode } from '../../../../../src/shared/agent-launch-contract'
 import type {
   DiffCommentActions,

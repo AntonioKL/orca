@@ -3,7 +3,9 @@ import type { AgentStatusState, AgentType } from '../../../shared/agent-status-t
 import { tabHasLivePty } from './tab-has-live-pty'
 import type { WorktreeStatus } from './worktree-status'
 import { tuiAgentToAgentKind } from '../../../shared/agent-kind'
-import { isCustomTuiAgentId, resolveTuiAgentBaseAgent } from '../../../shared/custom-tui-agents'
+import { isCustomTuiAgentId } from '../../../shared/custom-tui-agents'
+import { isBuiltInTuiAgent } from '../../../shared/tui-agent-config'
+import { customAgentSettingsBase, customAgentSettingsLabel } from './custom-agent-settings-index'
 import type { AgentKind } from '../../../shared/telemetry-events'
 import { getAgentCatalogSettings } from './agent-catalog-settings-source'
 // Built-in labels live in shared so mobile shows the same names.
@@ -102,10 +104,8 @@ export function formatAgentTypeLabel(agentType: AgentType | null | undefined): s
   if (!isCustomTuiAgentId(agentType)) {
     return formatBuiltInAgentTypeLabel(agentType)
   }
-  const settings = getAgentCatalogSettings()
-  const label =
-    settings?.customTuiAgents?.find((candidate) => candidate?.id === agentType)?.label ??
-    settings?.deletedCustomTuiAgents?.find((candidate) => candidate?.id === agentType)?.label
+  // Per-row render path: O(1) memoized index, not a catalog scan per row.
+  const label = customAgentSettingsLabel(getAgentCatalogSettings(), agentType)
   // An id the catalog cannot name is an unknown agent, not a printable id.
   return label?.trim() || formatBuiltInAgentTypeLabel(null)
 }
@@ -120,14 +120,16 @@ function resolveAgentTypeBaseAgent(
   if (!agentType || agentType === 'unknown') {
     return null
   }
-  const settings = getAgentCatalogSettings()
-  // AgentType is an open string; resolveTuiAgentBaseAgent validates membership
-  // and returns null for anything outside the catalog.
-  return resolveTuiAgentBaseAgent(
-    agentType as TuiAgent,
-    settings?.customTuiAgents,
-    settings?.deletedCustomTuiAgents
-  )
+  // AgentType is an open string; membership is validated here and anything
+  // outside the catalog returns null. Custom ids resolve through the memoized
+  // O(1) index (per-row render path), matching resolveTuiAgentBaseAgent.
+  if (isBuiltInTuiAgent(agentType)) {
+    return agentType
+  }
+  if (!isCustomTuiAgentId(agentType)) {
+    return null
+  }
+  return customAgentSettingsBase(getAgentCatalogSettings(), agentType)
 }
 
 export function agentTypeToIconAgent(agentType: AgentType | null | undefined): TuiAgent | null {

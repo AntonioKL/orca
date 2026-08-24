@@ -73,22 +73,11 @@ export function bindHandleReattachResult(sessionBag: ConnectPanePtySession): voi
     if (attemptGeneration !== session.transportStreamGeneration) {
       return false
     }
-<<<<<<< HEAD
-    const isCurrentReattachTransport = (): boolean =>
-      !session.disposed &&
-      // A remount can register its successor before the old async result settles.
-      // Do not let the stale session mutate or retire the successor's ownership.
-      session.deps.paneTransportsRef.current.get(session.pane.id) === session.transport &&
-      attemptGeneration === session.transportStreamGeneration
-    if (!isCurrentReattachTransport()) {
-||||||| parent of ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
-=======
     if (result && typeof result === 'object' && !('id' in result) && 'agentLaunch' in result) {
       session.reportError(agentLaunchOutcomeErrorMessage(result.agentLaunch))
       if (coldRestoreStartup) {
         session.clearRegisteredStartupLaunchConfig()
       }
->>>>>>> ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
       return false
     }
     // Why: bump only once this attempt owns the stream, or a superseded result
@@ -181,23 +170,11 @@ export function bindHandleReattachResult(sessionBag: ConnectPanePtySession): voi
     }
     const isCurrentReattachPayload = (): boolean => {
       const currentPtyId = session.transport.getPtyId()
-<<<<<<< HEAD
-      // Remote transports may publish the result object before their async
-      // bind callback updates getPtyId(); the explicit result is authoritative.
-      return isCurrentReattachTransport() && (currentPtyId === ptyId || hasExplicitPtyId)
-||||||| parent of ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
-      return (
-        !session.disposed &&
-        attemptGeneration === session.transportStreamGeneration &&
-        currentPtyId === ptyId
-      )
-=======
       return (
         !session.disposed &&
         attemptGeneration === session.transportStreamGeneration &&
         (!reattachPayloadCommitted || currentPtyId === ptyId)
       )
->>>>>>> ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
     }
     if (!isCurrentReattachPayload()) {
       return false
@@ -268,15 +245,7 @@ export function bindHandleReattachResult(sessionBag: ConnectPanePtySession): voi
     } else {
       session.deps.updateTabPtyId(session.deps.tabId, ptyId)
     }
-<<<<<<< HEAD
-    // Keep layout sync after the identity commit; replacement paths are atomic.
-    session.syncPanePtyLayoutBinding(ptyId)
-    useAppStore.getState().restoreAgentPaneAuthority?.(session.cacheKey)
-    notifyCodexPaneBoundForStaleSweep(ptyId)
-||||||| parent of ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
-=======
     reattachPayloadCommitted = true
->>>>>>> ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
     session.agentCompletionCoordinator.startProcessTracking()
     session.sampleVisiblePaneForegroundAgent()
 

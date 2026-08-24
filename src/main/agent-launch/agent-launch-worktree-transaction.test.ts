@@ -357,29 +357,31 @@ describe('runWorktreeAgentLaunchTransaction', () => {
     expect(operationStore.isSpawnInFlight('tok-1')).toBe(false)
   })
 
-  it('writes the settled ledger entry BEFORE clearing the pending snapshot (both arms)', async () => {
-    // Regression (L3b-#9): a crash between the two durable writes must never
-    // lose both the pending attribution and the settled entry.
-    const order: string[] = []
+  it('settles the ledger and clears the pending in ONE durable write (both arms)', async () => {
+    // Regression (L3b-#9, tightened): the settled entry and the pending drop
+    // must land in the same durable file image, so a crash leaves either the
+    // pending attribution or the settled entry — never neither — and the settle
+    // path pays one fsync'd write, not two.
     const { deps, operationStore } = makeDeps({})
-    const recordSettled = operationStore.recordSettled.bind(operationStore)
-    operationStore.recordSettled = ((entry) => {
-      order.push(`recordSettled:${entry.status}`)
-      return recordSettled(entry)
-    }) as typeof operationStore.recordSettled
-    const clearPending = operationStore.clearPending.bind(operationStore)
-    operationStore.clearPending = ((token) => {
-      order.push('clearPending')
-      return clearPending(token)
-    }) as typeof operationStore.clearPending
+    const writes: { pendingTokens: string[]; settledStatuses: string[] }[] = []
+    operationStore.setDurablePersistence((state) => {
+      writes.push({
+        pendingTokens: state.pending.map((entry) => entry.launchToken),
+        settledStatuses: state.settled.map((entry) => entry.status)
+      })
+    })
 
     await runWorktreeAgentLaunchTransaction(
       deps,
       params(async () => ({ ok: true, plan: PLAN, receipt: RECEIPT }))
     )
-    expect(order).toEqual(['recordSettled:launched', 'clearPending'])
+    // Write 1: beginPending (durable before the spawn). Write 2: settle+clear.
+    expect(writes).toEqual([
+      { pendingTokens: ['tok-1'], settledStatuses: [] },
+      { pendingTokens: [], settledStatuses: ['launched'] }
+    ])
 
-    order.length = 0
+    writes.length = 0
     deps.spawn = vi.fn(async () => {
       throw new Error('pty boom')
     })
@@ -391,7 +393,11 @@ describe('runWorktreeAgentLaunchTransaction', () => {
         receipt: { ...RECEIPT, launchToken: 'tok-2' }
       }))
     )
-    expect(order).toEqual(['recordSettled:failed', 'clearPending'])
+    // Same operationId as arm 1, so the ledger entry is replaced, not appended.
+    expect(writes).toEqual([
+      { pendingTokens: ['tok-2'], settledStatuses: ['launched'] },
+      { pendingTokens: [], settledStatuses: ['failed'] }
+    ])
   })
 
   it('performs no owner-state write on a request error', async () => {

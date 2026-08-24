@@ -90,7 +90,9 @@ function persistedFailure(
   deps: WorktreeAgentLaunchTransactionDeps,
   params: WorktreeAgentLaunchTransactionParams,
   failure: AgentLaunchFailure,
-  nowFn: () => number
+  nowFn: () => number,
+  // When set, the settled entry and the pending drop land in ONE durable write.
+  clearPendingLaunchToken?: string
 ): { status: 'failed'; failure: PersistedAgentLaunchFailure } {
   const persisted: PersistedAgentLaunchFailure = {
     ...failure,
@@ -101,16 +103,21 @@ function persistedFailure(
   }
   // Keep the workspace; the durable failure card offers Retry/Choose agent.
   deps.persistFailure(persisted)
-  deps.operationStore.recordSettled({
+  const settled = {
     operationId: params.operationId,
     idempotencyKey: params.idempotencyKey,
     scope: params.scope,
     payloadDigest: params.payloadDigest,
-    status: 'failed',
+    status: 'failed' as const,
     terminalId: null,
     failureId: persisted.failureId,
     settledAt: nowFn()
-  })
+  }
+  if (clearPendingLaunchToken) {
+    deps.operationStore.settleAndClearPending(settled, clearPendingLaunchToken)
+  } else {
+    deps.operationStore.recordSettled(settled)
+  }
   return { status: 'failed', failure: persisted }
 }
 
@@ -223,10 +230,10 @@ export async function runWorktreeAgentLaunchTransaction(
       return { status: 'failed', failure }
     }
     deps.boundary.settleAgentLaunch(receipt.launchToken, 'failed')
-    // Settled ledger entry (inside persistedFailure) BEFORE clearPending: a
-    // crash between the two durable writes must never lose both the pending
-    // attribution and the settled entry — either alone reconciles/replays.
-    const failed = persistedFailure(
+    // Settled entry + pending drop in one atomic durable write: a crash before
+    // it leaves the pending attribution, after it the settled entry — either
+    // alone reconciles/replays.
+    return persistedFailure(
       deps,
       params,
       {
@@ -234,28 +241,30 @@ export async function runWorktreeAgentLaunchTransaction(
         requestedAgent: receipt.requestedAgent,
         baseAgent: receipt.baseAgent
       },
-      nowFn
+      nowFn,
+      receipt.launchToken
     )
-    deps.operationStore.clearPending(receipt.launchToken)
-    return failed
   }
 
-  // Registered: move attribution into the boundary's retained handoff, append
-  // the settled `launched` ledger entry, then clear the pending (private +
-  // public). Settled-before-clear so a crash between the durable writes leaves
-  // at least one record of the launch (recordSettled replay is idempotent).
+  // Registered: move attribution into the boundary's retained handoff, then
+  // append the settled `launched` entry and clear the private pending in ONE
+  // atomic durable write — a crash leaves either the pending or the settled
+  // entry, and each alone reconciles/replays (recordSettled replay is
+  // idempotent).
   deps.boundary.settleAgentLaunch(receipt.launchToken, 'registered')
-  deps.operationStore.recordSettled({
-    operationId: params.operationId,
-    idempotencyKey: params.idempotencyKey,
-    scope: params.scope,
-    payloadDigest: params.payloadDigest,
-    status: 'launched',
-    terminalId,
-    failureId: null,
-    settledAt: nowFn()
-  })
-  deps.operationStore.clearPending(receipt.launchToken)
+  deps.operationStore.settleAndClearPending(
+    {
+      operationId: params.operationId,
+      idempotencyKey: params.idempotencyKey,
+      scope: params.scope,
+      payloadDigest: params.payloadDigest,
+      status: 'launched',
+      terminalId,
+      failureId: null,
+      settledAt: nowFn()
+    },
+    receipt.launchToken
+  )
   deps.clearPublicPending()
   return { status: 'launched', receipt, terminalId }
 }

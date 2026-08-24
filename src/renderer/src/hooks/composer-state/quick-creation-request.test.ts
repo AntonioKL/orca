@@ -108,18 +108,11 @@ describe('quick composer creation request', () => {
       linkedGitLabMR: 9,
       linkedGitLabIssue: 8,
       branchNameOverride: 'feature',
-<<<<<<< HEAD
-      parentWorktreeId: 'repo-1::/worktrees/parent',
-      launchDraftPrompt: 'draft',
-||||||| parent of ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
-      launchDraftPrompt: 'draft',
-=======
       agentLaunch: {
         selection: { kind: 'agent', agent: 'claude' },
         prompt: 'draft',
         promptDelivery: 'draft'
       },
->>>>>>> ebaa81ab2f (Rebase custom-agents onto main (2/4): renderer)
       suppressTerminalFocusOnCompletion: true
     })
   })

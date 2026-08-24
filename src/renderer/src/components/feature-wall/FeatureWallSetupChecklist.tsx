@@ -24,6 +24,9 @@ import { AgentStep } from '../onboarding/AgentStep'
 import { NotificationStep } from '../onboarding/NotificationStep'
 import { useAppStore } from '@/store'
 import { setDefaultTuiAgent } from '@/lib/agent-catalog-authoring'
+import { getAgentCatalog } from '@/lib/agent-catalog'
+import { mergeCustomAgentCatalogEntries } from '@/components/agent/custom-agent-catalog-entries'
+import { useLocalAgentCatalog } from '@/hooks/useLocalAgentCatalog'
 import type { TuiAgent } from '../../../../shared/types'
 import { toLegacyAutoPreference } from '../../../../shared/tui-agent-selection'
 import { getProviderRuntimeContextKey } from '@/lib/provider-runtime-context'
@@ -190,11 +193,38 @@ function DefaultAgentAction(): React.JSX.Element {
   const refreshDetectedAgents = useAppStore((s) => s.refreshDetectedAgents)
   const detectedAgentIds = useAppStore((s) => s.detectedAgentIds)
   const isDetectingAgents = useAppStore((s) => s.isDetectingAgents || s.isRefreshingAgents)
+  // Why: custom agents live in the local catalog snapshot, not GlobalSettings, and
+  // the default-agent offering includes them (like the Settings combobox) so an
+  // existing custom default renders selected instead of looking unset.
+  const { snapshot: localAgentCatalog } = useLocalAgentCatalog()
   // 'auto' (migrated legacy null) selects no fixed agent for the checklist.
   const normalizedDefaultAgent = toLegacyAutoPreference(settings?.defaultTuiAgent)
   const selectedAgent =
     normalizedDefaultAgent && normalizedDefaultAgent !== 'blank' ? normalizedDefaultAgent : null
   const detectedSet = useMemo(() => new Set(detectedAgentIds ?? []), [detectedAgentIds])
+  const disabledTuiAgents = settings?.disabledTuiAgents
+  const agentCatalog = useMemo(
+    () =>
+      mergeCustomAgentCatalogEntries(
+        getAgentCatalog(),
+        localAgentCatalog,
+        disabledTuiAgents ?? [],
+        detectedAgentIds === null ? null : detectedSet
+      ),
+    [localAgentCatalog, disabledTuiAgents, detectedAgentIds, detectedSet]
+  )
+  // Merged customs are launch-eligible by construction (base detected, or a
+  // configured executable that is launch-reported), so group them as available
+  // rather than showing the "isn't on your PATH" install banner.
+  const effectiveDetectedSet = useMemo(() => {
+    const detected = new Set(detectedSet)
+    for (const entry of agentCatalog) {
+      if (entry.baseAgent) {
+        detected.add(entry.id)
+      }
+    }
+    return detected
+  }, [agentCatalog, detectedSet])
   const handleSelectAgent = useCallback((agent: TuiAgent) => {
     void setDefaultTuiAgent(agent)
   }, [])
@@ -208,8 +238,9 @@ function DefaultAgentAction(): React.JSX.Element {
       <AgentStep
         selectedAgent={selectedAgent}
         onSelect={handleSelectAgent}
-        detectedSet={detectedSet}
+        detectedSet={effectiveDetectedSet}
         isDetecting={isDetectingAgents}
+        agentCatalog={agentCatalog}
       />
     </div>
   )

@@ -2828,7 +2828,8 @@
                   "f62b40e2c7": "没有可复制的终端上下文",
                   "373a3103e7": "已复制上下文",
                   "3fc568a49d": "无法复制上下文。",
-                  "customForkUnavailable": "自定义智能体尚不支持派生"
+                  "customForkUnavailable": "自定义智能体尚不支持派生",
+                  "customForkAgentDeleted": "此会话使用的自定义智能体已不存在，派生将不带智能体启动"
                 }
               }
             },
@@ -15109,7 +15110,7 @@
       "invalidEnv": "该智能体的启动环境无效。请在设置中修正。",
       "secureEnvUnavailable": "无法安全地将该智能体的环境发送到远程主机。",
       "commandTooLong": "启动命令过长，无法运行。请缩短智能体参数或提示词。",
-      "invalidSnapshot": "该智能体保存的启动信息已失效。",
+      "invalidSnapshot": "该智能体保存的启动信息已失效。重新启动该智能体即可使用当前设置重新开始。",
       "trustPreflightFailed": "无法确认该智能体的工作区信任。请重试。",
       "spawnFailed": "无法启动该智能体。请重试。",
       "stateUnknown": "启动状态未知。请在重试前检查终端。",

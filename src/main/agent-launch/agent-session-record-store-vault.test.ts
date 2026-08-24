@@ -5,6 +5,7 @@ import {
   type HostSessionLaunchRecord,
   type StagedLaunchRegistration
 } from './agent-session-record-store'
+import { forgetDeletedVaultSessionRecords } from './agent-session-vault-delete-forget'
 
 const CUSTOM_CODEX_ID = 'custom-agent:codex:11111111-1111-4111-8111-111111111111' as const
 
@@ -228,5 +229,79 @@ describe('AgentSessionRecordStore Vault correlation', () => {
       })
     ).toBe(true)
     expect(resolve(rebuilt, { scannedTranscriptPath: '/new.jsonl' })).toEqual({ kind: 'missing' })
+  })
+})
+
+describe('forgetDeletedVaultSessionRecords', () => {
+  const deletedIdentity = {
+    baseAgent: 'codex' as const,
+    scannedProviderSessionId: 'provider-session',
+    scannedTranscriptPath: '/home/me/.codex/sessions/transcript.jsonl',
+    scannedExecutionHostId: 'local'
+  }
+
+  it('forgets EVERY owner of the deleted transcript, ambiguous ones included', () => {
+    const store = new AgentSessionRecordStore()
+    store.rebuildRecordsFrom([
+      record(),
+      record({
+        worktreeId: 'wt-other',
+        providerSession: { key: 'session_id', id: 'provider-session' }
+      })
+    ])
+    expect(forgetDeletedVaultSessionRecords(store, deletedIdentity)).toBe(2)
+    expect(store.durableState().records).toEqual([])
+    expect(
+      store.resolveByOwnershipKey({
+        worktreeId: 'wt-source',
+        baseAgent: 'codex',
+        providerSessionId: 'provider-session'
+      })
+    ).toBeNull()
+  })
+
+  it('keeps other-host records and repeated provider ids with a different transcript', () => {
+    const store = new AgentSessionRecordStore()
+    store.rebuildRecordsFrom([
+      record({
+        worktreeId: 'wt-remote',
+        launchSnapshot: snapshot({
+          target: { ...snapshot().target, executionHostId: 'ssh:box', isRemote: true }
+        })
+      }),
+      record({
+        worktreeId: 'wt-other-transcript',
+        providerSession: {
+          key: 'session_id',
+          id: 'provider-session',
+          transcriptPath: '/home/me/.codex/sessions/other.jsonl'
+        }
+      })
+    ])
+    expect(forgetDeletedVaultSessionRecords(store, deletedIdentity)).toBe(0)
+    expect(store.durableState().records).toHaveLength(2)
+  })
+
+  it('forgets a local snapshotless record by provider identity, keeping remote-owned ones', () => {
+    const store = new AgentSessionRecordStore()
+    store.rebuildRecordsFrom([
+      record({ launchSnapshot: undefined }),
+      record({
+        worktreeId: 'wt-remote-legacy',
+        launchSnapshot: undefined,
+        legacyConnectionId: 'conn-1'
+      })
+    ])
+    expect(forgetDeletedVaultSessionRecords(store, deletedIdentity)).toBe(1)
+    expect(store.durableState().records).toMatchObject([{ worktreeId: 'wt-remote-legacy' }])
+  })
+
+  it('cannot be resurrected by a late rehydrated-records merge', () => {
+    const store = new AgentSessionRecordStore()
+    const persisted = record()
+    store.rebuildRecordsFrom([persisted])
+    expect(forgetDeletedVaultSessionRecords(store, deletedIdentity)).toBe(1)
+    store.mergeRehydratedRecords([persisted])
+    expect(store.durableState().records).toEqual([])
   })
 })

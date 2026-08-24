@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest'
 import {
   agentLaunchFailureMessage,
   agentLaunchRequestErrorMessage,
-  agentLaunchOutcomeErrorMessage
+  agentLaunchOutcomeErrorMessage,
+  isAgentLaunchFailureCopy
 } from './agent-launch-failure-copy'
 import type {
   AgentLaunchFailureCode,
@@ -101,6 +102,34 @@ describe('agentLaunchRequestErrorMessage', () => {
       expect(message.length).toBeGreaterThan(0)
       expect(message).not.toBe(code)
     }
+  })
+})
+
+describe('isAgentLaunchFailureCopy', () => {
+  it('recognizes every failure copy on both surfaces', () => {
+    for (const code of ALL_FAILURE_CODES) {
+      expect(isAgentLaunchFailureCopy(agentLaunchFailureMessage({ code }, 'pre-spawn'))).toBe(true)
+      expect(isAgentLaunchFailureCopy(agentLaunchFailureMessage({ code }, 'post-create'))).toBe(
+        true
+      )
+    }
+  })
+
+  it('recognizes every request-error copy', () => {
+    for (const code of ALL_REQUEST_ERROR_CODES) {
+      expect(isAgentLaunchFailureCopy(agentLaunchRequestErrorMessage({ code }))).toBe(true)
+    }
+  })
+
+  it('rejects an arbitrary terminal error line', () => {
+    expect(isAgentLaunchFailureCopy('Paste failed.')).toBe(false)
+    expect(isAgentLaunchFailureCopy('')).toBe(false)
+  })
+
+  it('names the next step for a lost launch snapshot', () => {
+    expect(agentLaunchFailureMessage({ code: 'invalid_launch_snapshot' })).toContain(
+      'Launch the agent again'
+    )
   })
 })
 

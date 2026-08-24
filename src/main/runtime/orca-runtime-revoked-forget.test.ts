@@ -30,8 +30,7 @@ vi.mock('../agent-launch/agent-launch-boundary-host', () => ({
 // Spy the shared reconciler: capture its injected deps + params without running the
 // real settle so these tests isolate the override's revocation gate.
 const forgetSpy = vi.fn(
-  (_deps: ForgetUnknownAgentLaunchDeps, _params: unknown) =>
-    ({ status: 'forgotten' }) as const
+  (_deps: ForgetUnknownAgentLaunchDeps, _params: unknown) => ({ status: 'forgotten' }) as const
 )
 vi.mock('../agent-launch/agent-launch-worktree-forget', () => ({
   runForgetUnknownAgentLaunch: (deps: ForgetUnknownAgentLaunchDeps, params: unknown) =>
@@ -39,7 +38,12 @@ vi.mock('../agent-launch/agent-launch-worktree-forget', () => ({
 }))
 
 vi.mock('../agent-launch/agent-launch-operation-store-host', () => ({
-  getHostAgentLaunchOperationStore: () => ({ findPendingByScope: () => null })
+  getHostAgentLaunchOperationStore: () => ({
+    findPendingByScope: () => null,
+    recordSettled: () => {},
+    clearPending: () => true,
+    settleAndClearPending: () => {}
+  })
 }))
 
 function row(over: Partial<AdmissionCapacityRow>): AdmissionCapacityRow {
@@ -143,7 +147,10 @@ describe('forgetRevokedRemoteWorktreeAgentLaunch', () => {
     // mobile still paired; runtime revoked and owns the row.
     const runtime = stubRuntime([row({ scope: 'wt-runtime' })], ['mobile'])
 
-    const result = await runtime.forgetRevokedRemoteWorktreeAgentLaunch('id:wt-runtime', FORGET_ARGS)
+    const result = await runtime.forgetRevokedRemoteWorktreeAgentLaunch(
+      'id:wt-runtime',
+      FORGET_ARGS
+    )
 
     expect(result).toEqual({ status: 'forgotten' })
     const [deps] = forgetSpy.mock.calls[0]

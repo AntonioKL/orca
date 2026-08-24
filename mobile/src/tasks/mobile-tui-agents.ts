@@ -125,6 +125,23 @@ export function isMobileTuiAgent(value: unknown): value is BuiltInTuiAgent {
   )
 }
 
+export const MOBILE_CUSTOM_AGENT_ID_PREFIX = 'custom-agent:'
+
+export function isMobileCustomAgentId(value: string): boolean {
+  return value.startsWith(MOBILE_CUSTOM_AGENT_ID_PREFIX)
+}
+
+/** Syntax-only decomposition for display (icon/base lookup), mirroring the
+ *  desktop's classify-by-syntax fallback. It never grants launch authority —
+ *  launches resolve customs against the synced catalog. */
+export function parseMobileCustomAgentBase(value: string): BuiltInTuiAgent | null {
+  if (!isMobileCustomAgentId(value)) {
+    return null
+  }
+  const base = value.slice(MOBILE_CUSTOM_AGENT_ID_PREFIX.length).split(':')[0]
+  return isMobileTuiAgent(base) ? base : null
+}
+
 function normalizeDisabledMobileTuiAgents(value: unknown): TuiAgent[] {
   if (!Array.isArray(value)) {
     return []

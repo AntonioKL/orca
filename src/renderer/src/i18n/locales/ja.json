@@ -2813,7 +2813,8 @@
                   "f62b40e2c7": "コピーするターミナルコンテキストがありません",
                   "373a3103e7": "コンテキストをコピーしました",
                   "3fc568a49d": "コンテキストのコピーに失敗しました。",
-                  "customForkUnavailable": "カスタム Agent ではフォークをまだ利用できません"
+                  "customForkUnavailable": "カスタム Agent ではフォークをまだ利用できません",
+                  "customForkAgentDeleted": "このセッションのカスタム Agent は既に存在しないため、フォークは Agent なしで開始されます"
                 }
               }
             },
@@ -15023,7 +15024,7 @@
       "invalidEnv": "この Agent の起動環境が無効です。設定で修正してください。",
       "secureEnvUnavailable": "この Agent の環境をリモートホストに安全に送信できません。",
       "commandTooLong": "起動コマンドが長すぎて実行できません。Agent の引数またはプロンプトを短くしてください。",
-      "invalidSnapshot": "この Agent の保存された起動情報は無効になりました。",
+      "invalidSnapshot": "この Agent の保存された起動情報は無効になりました。もう一度起動すると、現在の設定で新しく開始します。",
       "trustPreflightFailed": "この Agent のワークスペースの信頼を確認できませんでした。もう一度お試しください。",
       "spawnFailed": "Agent を起動できませんでした。もう一度お試しください。",
       "stateUnknown": "起動の状態が不明です。再試行する前にターミナルを確認してください。",

@@ -2813,7 +2813,8 @@
                   "f62b40e2c7": "No hay contexto de terminal para copiar",
                   "373a3103e7": "Contexto copiado",
                   "3fc568a49d": "Error al copiar el contexto.",
-                  "customForkUnavailable": "Aún no se puede hacer fork con agentes personalizados"
+                  "customForkUnavailable": "Aún no se puede hacer fork con agentes personalizados",
+                  "customForkAgentDeleted": "El agente personalizado de esta sesión ya no existe, por lo que el fork se inicia sin agente"
                 }
               }
             },
@@ -15023,7 +15024,7 @@
       "invalidEnv": "El entorno de inicio de este agente no es válido. Corrígelo en Ajustes.",
       "secureEnvUnavailable": "No se puede enviar de forma segura el entorno de este agente al host remoto.",
       "commandTooLong": "El comando de inicio es demasiado largo. Acorta los argumentos del agente o el mensaje.",
-      "invalidSnapshot": "Los detalles de inicio guardados de este agente ya no son válidos.",
+      "invalidSnapshot": "Los detalles de inicio guardados de este agente ya no son válidos. Vuelve a iniciar el agente para empezar de nuevo con su configuración actual.",
       "trustPreflightFailed": "No se pudo confirmar la confianza del espacio de trabajo para este agente. Inténtalo de nuevo.",
       "spawnFailed": "No se pudo iniciar el agente. Inténtalo de nuevo.",
       "stateUnknown": "El estado del inicio es desconocido. Revisa la terminal antes de reintentar.",

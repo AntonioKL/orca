@@ -126,6 +126,109 @@ describe('OrcaRuntimeService.classifyAgentLaunchForAutomation (U6)', () => {
     ).toBeNull()
   })
 
+  it('builds a base-harness startup for a custom agent (headless dispatch path)', async () => {
+    const store = await createStore()
+    store.addRepo(REPO)
+    store.updateSettings({
+      customTuiAgents: [
+        {
+          id: CUSTOM_AGENT_ID,
+          baseAgent: 'claude',
+          label: 'Context Agent',
+          args: '--add-dir {worktreePath}',
+          env: { AUTOMATION_ROOT: '{worktreePath}' },
+          syncEnv: false
+        }
+      ]
+    })
+    const runtime = new OrcaRuntimeService(store)
+    const internals = runtime as unknown as {
+      buildStartupForAgent: (
+        repo: Repo,
+        agent: string,
+        prompt: string | undefined,
+        launchPreferences?: undefined,
+        worktreePath?: string
+      ) => {
+        agent: string
+        launchAgent?: string
+        startup: { command: string; env?: Record<string, string> }
+      }
+    }
+
+    const startup = internals.buildStartupForAgent(
+      REPO,
+      CUSTOM_AGENT_ID,
+      'Review changes',
+      undefined,
+      '/repo/worktrees/context'
+    )
+
+    expect(startup.agent).toBe(CUSTOM_AGENT_ID)
+    // Terminal surfacing uses the resolved base harness, mirroring the
+    // host-atomic paths' receipt.baseAgent.
+    expect(startup.launchAgent).toBe('claude')
+    expect(startup.startup.command).toContain('claude')
+    expect(startup.startup.command).toContain('/repo/worktrees/context')
+    expect(startup.startup.env).toMatchObject({ AUTOMATION_ROOT: '/repo/worktrees/context' })
+  })
+
+  it('throws a coded error for an unresolvable custom agent instead of spawning', async () => {
+    const store = await createStore()
+    store.addRepo(REPO)
+    const runtime = new OrcaRuntimeService(store)
+    const internals = runtime as unknown as {
+      buildStartupForAgent: (repo: Repo, agent: string, prompt: string | undefined) => unknown
+    }
+
+    expect(() => internals.buildStartupForAgent(REPO, CUSTOM_AGENT_ID, 'Review changes')).toThrow(
+      /Could not build launch command/
+    )
+  })
+
+  it('threads the catalog into the draft-ready budget so a custom id inherits its base harness', async () => {
+    const codexCustomId = 'custom-agent:codex:11111111-1111-4111-8111-111111111111'
+    const store = await createStore()
+    store.addRepo(REPO)
+    store.updateSettings({
+      customTuiAgents: [
+        {
+          id: codexCustomId,
+          baseAgent: 'codex',
+          label: 'Codex Prod',
+          args: '',
+          env: {},
+          syncEnv: false
+        }
+      ]
+    })
+    const runtime = new OrcaRuntimeService(store)
+    const internals = runtime as unknown as {
+      getLivePtyForHandle: (handle: string) => unknown
+      subscribeToTerminalData: (ptyId: string, listener: (data: string) => void) => () => void
+      waitForStartupDraftReady: (handle: string, agent: string) => Promise<string | null>
+    }
+    internals.getLivePtyForHandle = () => ({ pty: { ptyId: 'pty-1' } })
+    internals.subscribeToTerminalData = () => () => {}
+
+    vi.useFakeTimers()
+    try {
+      let settled = false
+      const wait = internals.waitForStartupDraftReady('h1', codexCustomId).then((value) => {
+        settled = true
+        return value
+      })
+      // Without the catalog the default 8s budget would have fired here.
+      await vi.advanceTimersByTimeAsync(8_100)
+      expect(settled).toBe(false)
+      // Codex's 20s base budget applies to the custom id.
+      await vi.advanceTimersByTimeAsync(12_000)
+      expect(await wait).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('keeps the legacy resolve-only target home unknown', async () => {
     const store = await createStore()
     store.addRepo(REPO)

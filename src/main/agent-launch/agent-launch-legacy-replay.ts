@@ -49,6 +49,20 @@ export type LegacyReplayResult =
 
 const INVALID: LegacyReplayResult = { ok: false, failure: { code: 'invalid_launch_snapshot' } }
 
+// The user-facing failure is one generic code, so the rejecting gate must be
+// diagnosable from logs. Reasons + identity only — never command/env contents.
+function invalid(
+  input: LegacyReplayInput,
+  reason: string,
+  detail?: Record<string, string | null>
+): LegacyReplayResult {
+  console.warn(
+    `[agent-launch] legacy resume replay rejected (${reason}) base=${input.baseAgent}`,
+    detail ?? ''
+  )
+  return INVALID
+}
+
 // Control chars that would corrupt an opaque shell command. Mirrors the command
 // override guard; the pre-quoted command text is otherwise passed through.
 // eslint-disable-next-line no-control-regex -- rejecting control chars is the point
@@ -61,17 +75,20 @@ export function buildLegacyResumeReplay(input: LegacyReplayInput): LegacyReplayR
   // Provenance: the recorded execution owner must match the current spawn's owner.
   // Missing/conflicting owner evidence fails closed rather than inferring a target.
   if ((input.recordedConnectionId ?? null) !== (input.currentConnectionId ?? null)) {
-    return INVALID
+    return invalid(input, 'execution owner mismatch', {
+      recorded: input.recordedConnectionId ?? null,
+      current: input.currentConnectionId ?? null
+    })
   }
 
   const { agentCommand, agentArgs } = input.legacyLaunchConfig
   const command = agentCommand?.trim() ?? ''
   if (!command || COMMAND_CONTROL_RE.test(command)) {
-    return INVALID
+    return invalid(input, command ? 'control chars in command' : 'empty command')
   }
   const trimmedArgs = agentArgs.trim()
   if (trimmedArgs && COMMAND_CONTROL_RE.test(trimmedArgs)) {
-    return INVALID
+    return invalid(input, 'control chars in args')
   }
 
   // Strip Orca attribution + generated Agent Teams keys (and the proven shim PATH
@@ -80,7 +97,7 @@ export function buildLegacyResumeReplay(input: LegacyReplayInput): LegacyReplayR
   // launch path regenerates a fresh team plan for a captured team config.
   const cleanedEnv = stripLegacyReplayEnv(input.legacyLaunchConfig.agentEnv, input.shell)
   if (validateCustomAgentEnv(cleanedEnv).length > 0) {
-    return INVALID
+    return invalid(input, 'invalid surviving env')
   }
 
   // Provider resume flags append to the one-shot command only. An unresumable
@@ -88,7 +105,7 @@ export function buildLegacyResumeReplay(input: LegacyReplayInput): LegacyReplayR
   const ompResumeFilePath = input.legacyLaunchConfig.ompResumeFilePath?.trim()
   const resumeArgv = getAgentResumeArgv(input.baseAgent, input.providerSession, ompResumeFilePath)
   if (!resumeArgv) {
-    return INVALID
+    return invalid(input, 'no resume argv for base')
   }
   const resumeSuffix = resumeArgv
     .slice(1)

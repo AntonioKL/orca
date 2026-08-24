@@ -130,6 +130,30 @@ describe('mobile agent catalog projection', () => {
     expect(rows.some((row) => row.isCustom)).toBe(false)
   })
 
+  it('hides built-in harnesses listed in disabledAgents', () => {
+    const rows = buildMobileAgentPickerRows(snapshot({ disabledAgents: ['codex'] }), {
+      includeCustomAgents: true
+    })
+    expect(rows.some((row) => row.id === 'codex')).toBe(false)
+    expect(rows.some((row) => row.id === 'claude')).toBe(true)
+  })
+
+  it('hides disabled built-ins even with customs gated off', () => {
+    const rows = buildMobileAgentPickerRows(snapshot({ disabledAgents: ['codex'] }))
+    expect(rows.some((row) => row.id === 'codex')).toBe(false)
+  })
+
+  it('hides customs whose base harness is disabled', () => {
+    const rows = buildMobileAgentPickerRows(
+      snapshot({
+        customAgents: [readyCustom('custom-agent:codex:a', 'codex', 'Codex A')],
+        disabledAgents: ['codex']
+      }),
+      { includeCustomAgents: true }
+    )
+    expect(rows.some((row) => row.isCustom)).toBe(false)
+  })
+
   it('falls back to built-in rows when the projection is oversize', () => {
     const rows = buildMobileAgentPickerRows(projectionError, { includeCustomAgents: true })
     expect(rows).toEqual(buildMobileAgentPickerRows(null))

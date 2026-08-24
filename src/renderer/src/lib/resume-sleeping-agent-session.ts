@@ -151,6 +151,19 @@ function activeOrQueuedResumeClaimsProviderSession(
   return false
 }
 
+// Why: a queued resume launch keeps its source record until the spawn is proven
+// (consumption clears it via sleepingRecordPaneKey). While that launch is in
+// flight — or after it failed before spawning — the record is the retry state,
+// not a stale replay, so the dedup must skip it rather than clear it.
+function queuedResumeLaunchOwnsRecord(
+  record: SleepingAgentSessionRecord,
+  state: ReturnType<typeof useAppStore.getState>
+): boolean {
+  return Object.values(state.pendingStartupByTabId).some(
+    (startup) => startup.sleepingRecordPaneKey === record.paneKey
+  )
+}
+
 // Why: an interrupted turn is still resumable — `claude --resume` reopens the transcript at the
 // prompt — so discarding those records only stranded the session across wake and restart.
 function isInvalidWorktreeActivationRecord(record: SleepingAgentSessionRecord): boolean {
@@ -257,8 +270,12 @@ export function resumeSleepingAgentSessionsForWorktree(
     }
     if (activeOrQueuedResumeClaimsProviderSession(record, currentState, isPaneOwned)) {
       // Why: main can replay the old wake record after the same provider
-      // session was already queued in a fresh tab; clear the stale replay.
-      state.clearSleepingAgentSession(record.paneKey)
+      // session was already queued in a fresh tab; clear the stale replay —
+      // unless the queued launch was born from THIS record and has not yet
+      // spawned, in which case the record is its retry state.
+      if (!queuedResumeLaunchOwnsRecord(record, currentState)) {
+        state.clearSleepingAgentSession(record.paneKey)
+      }
       continue
     }
     const paneOwnedClaimKeys = getCurrentPaneOwnedClaimKeys(activeWorktreeRecords)

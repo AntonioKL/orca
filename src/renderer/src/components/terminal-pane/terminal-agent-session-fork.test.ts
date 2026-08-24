@@ -25,6 +25,14 @@ const store = {
   repos: [] as { id: string; kind?: 'git' | 'folder'; connectionId?: string | null }[],
   settings: {} as {
     localWindowsRuntimeDefault?: { kind: 'windows-host' } | { kind: 'wsl'; distro: string }
+    customTuiAgents?: {
+      id: string
+      baseAgent: string
+      label: string
+      args: string
+      env: Record<string, string>
+      syncEnv: boolean
+    }[]
   },
   worktreesByRepo: {} as Record<
     string,
@@ -356,12 +364,70 @@ describe('forkAgentSessionFromPane', () => {
     )
     // A plain-shell source is not a custom agent, so it never claims that limitation.
     expect(mockToast.message).not.toHaveBeenCalledWith(
-      "Forking isn't available for custom agents yet"
+      'The custom agent from this session no longer exists, so the fork starts without an agent'
     )
     expect(pane.terminal.focus).toHaveBeenCalled()
   })
 
-  it('names the custom-agent fork limitation instead of silently degrading to copy-context', async () => {
+  it('forks a live custom agent through the host launch path with its display label', async () => {
+    const customId = 'custom-agent:codex:22222222-2222-4222-8222-222222222222'
+    store.settings = {
+      localWindowsRuntimeDefault: { kind: 'windows-host' },
+      customTuiAgents: [
+        { id: customId, baseAgent: 'codex', label: 'Codex Prod', args: '', env: {}, syncEnv: false }
+      ]
+    }
+    store.agentStatusByPaneKey = {
+      [`tab-1:${LEAF_ID}`]: { agentType: customId }
+    }
+    mockCreateWorktree.mockResolvedValueOnce({
+      worktree: { id: 'wt-fork', path: '/repo/worktrees/auth-feature-fork' }
+    })
+    const { forkAgentSessionFromPane } = await import('./terminal-agent-session-fork')
+
+    await forkAgentSessionFromPane({
+      pane: makePane('User: continue with the custom agent'),
+      tabId: 'tab-1',
+      worktreeId: 'wt-1',
+      groupId: null
+    })
+
+    // Identity stays the custom id; trust preflight resolves to the base preset.
+    expect(mockCreateWorktree).toHaveBeenCalledWith(
+      'repo-1',
+      'auth-feature-fork',
+      'feature/auth',
+      'inherit',
+      undefined,
+      'terminal_context_menu',
+      'Fork of auth-feature',
+      undefined,
+      undefined,
+      undefined,
+      customId
+    )
+    expect(mockMarkTrusted).toHaveBeenCalledWith({
+      preset: 'codex',
+      workspacePath: '/repo/worktrees/auth-feature-fork'
+    })
+    expect(mockLaunchAgentInNewTab).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agent: customId,
+        worktreeId: 'wt-fork',
+        promptDelivery: 'draft',
+        launchSource: 'terminal_context_menu'
+      })
+    )
+    // The prompt names the custom agent by label, never the raw id.
+    const launched = mockLaunchAgentInNewTab.mock.calls[0][0] as { prompt: string }
+    expect(launched.prompt).toContain('Codex Prod')
+    expect(launched.prompt).not.toContain('custom-agent:codex:')
+    expect(mockToast.message).not.toHaveBeenCalledWith(
+      'The custom agent from this session no longer exists, so the fork starts without an agent'
+    )
+  })
+
+  it('names the deleted-custom-agent limitation instead of silently degrading to copy-context', async () => {
     store.agentStatusByPaneKey = {
       [`tab-1:${LEAF_ID}`]: {
         agentType: 'custom-agent:codex:11111111-1111-4111-8111-111111111111'
@@ -377,8 +443,10 @@ describe('forkAgentSessionFromPane', () => {
       groupId: null
     })
 
-    // Host-owned custom-agent fork is not wired yet; the failure must be honest.
-    expect(mockToast.message).toHaveBeenCalledWith("Forking isn't available for custom agents yet")
+    // The source custom agent has no live definition; the failure must be honest.
+    expect(mockToast.message).toHaveBeenCalledWith(
+      'The custom agent from this session no longer exists, so the fork starts without an agent'
+    )
     expect(mockLaunchAgentInNewTab).not.toHaveBeenCalled()
     // The context is still copied so the user can paste it into a manual launch.
     expect(mockWriteClipboardText).toHaveBeenCalledWith(

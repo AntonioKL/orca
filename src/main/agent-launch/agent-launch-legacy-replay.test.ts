@@ -55,13 +55,25 @@ describe('buildLegacyResumeReplay', () => {
       }
       const resumeArgv = getAgentResumeArgv(base, providerSession)
       expect(resumeArgv).not.toBeNull()
-      // The final flag/value pair appears exactly once in the one-shot command.
-      const lastFlag = resumeArgv?.at(-2)
-      if (lastFlag) {
-        const occurrences = result.launchCommand.split(lastFlag).length - 1
-        expect(occurrences, `base ${base} flag ${lastFlag}`).toBe(1)
-      }
+      // The resume marker appears exactly once in the one-shot command. argv[1]
+      // is always the flag or subcommand; splitting on '=' also covers copilot's
+      // combined `--resume=<id>` form, whose argv has no separate value element.
+      const marker = resumeArgv![1]!.split('=')[0]!
+      const occurrences = result.launchCommand.split(marker).length - 1
+      expect(occurrences, `base ${base} marker ${marker}`).toBe(1)
     }
+  })
+
+  it("carries copilot's combined --resume=<id> form into the one-shot command", () => {
+    const result = replay({
+      baseAgent: 'copilot',
+      requestedAgent: 'copilot',
+      legacyLaunchConfig: { agentCommand: 'copilot', agentArgs: '', agentEnv: {} },
+      providerSession: { key: 'session_id', id: 'sess-42' }
+    })
+    expect(result.ok && result.launchCommand).toContain('--resume=sess-42')
+    // Durable config stays base-only so a fresh relaunch never re-resumes.
+    expect(result.ok && result.launchConfig.agentArgs).toBe('')
   })
 
   it('uses and preserves the captured OMP resume file path', () => {

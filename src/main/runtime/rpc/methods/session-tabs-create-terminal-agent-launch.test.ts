@@ -62,6 +62,54 @@ describe('session.tabs.createTerminal host-resolved agentLaunch', () => {
     expect(response.result).toMatchObject({ tab: { id: 'tab-1::leaf-1' } })
   })
 
+  it('admits a custom agent id on the sanctioned agentLaunch selection', async () => {
+    const customId = 'custom-agent:codex:11111111-1111-4111-8111-111111111111'
+    const customLaunch = {
+      selection: { kind: 'agent', agent: customId },
+      allowEmptyPromptLaunch: true
+    }
+    const createMobileSessionTerminal = vi.fn().mockResolvedValue(MOBILE_TAB_RESULT)
+    const runtime = {
+      getRuntimeId: () => 'test-runtime',
+      createMobileSessionTerminal
+    } as unknown as OrcaRuntimeService
+    const dispatcher = new RpcDispatcher({ runtime, methods: SESSION_TAB_METHODS })
+
+    const response = await dispatchTabCreateWithClientKind(
+      dispatcher,
+      { worktree: 'id:wt-1', agentLaunch: customLaunch },
+      'mobile'
+    )
+
+    expect(response.ok).toBe(true)
+    expect(createMobileSessionTerminal).toHaveBeenCalledWith(
+      'id:wt-1',
+      expect.objectContaining({ agentLaunch: customLaunch })
+    )
+  })
+
+  it('rejects a custom agent id on the legacy built-in-only preset fields', async () => {
+    const customId = 'custom-agent:codex:11111111-1111-4111-8111-111111111111'
+    const createMobileSessionTerminal = vi.fn().mockResolvedValue(MOBILE_TAB_RESULT)
+    const runtime = {
+      getRuntimeId: () => 'test-runtime',
+      createMobileSessionTerminal
+    } as unknown as OrcaRuntimeService
+    const dispatcher = new RpcDispatcher({ runtime, methods: SESSION_TAB_METHODS })
+
+    // Contract: a custom id is only admitted on agentLaunch.selection; the legacy
+    // `agent`/`launchAgent` fields fail fast instead of failing deep in the
+    // built-in-only startup plan.
+    for (const params of [
+      { worktree: 'id:wt-1', agent: customId },
+      { worktree: 'id:wt-1', launchAgent: customId }
+    ]) {
+      const response = await dispatchTabCreateWithClientKind(dispatcher, params, 'mobile')
+      expect(response.ok).toBe(false)
+    }
+    expect(createMobileSessionTerminal).not.toHaveBeenCalled()
+  })
+
   it('returns the failure arm as an RPC success with no tab created', async () => {
     const createMobileSessionTerminal = vi.fn().mockResolvedValue({
       agentLaunch: {
