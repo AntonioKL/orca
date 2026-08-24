@@ -203,7 +203,7 @@ export function useTaskPageSessionResume({
             setLinearProjectParentView(null)
             setLinearProjectsError(
               translate(
-                'auto.components.task.page.hooks.use.task.page.session.resume.2f69b193f1',
+                'auto.components.task.page.hooks.use.task.page.session.resume.savedLinearProjectMissing',
                 'Saved Linear project was not found.'
               )
             )
@@ -221,7 +221,7 @@ export function useTaskPageSessionResume({
             setLinearProjectParentView(null)
             setLinearProjectsError(
               translate(
-                'auto.components.task.page.hooks.use.task.page.session.resume.fa88a9c276',
+                'auto.components.task.page.hooks.use.task.page.session.resume.savedLinearProjectRestoreFailed',
                 'Failed to restore saved Linear project.'
               )
             )
@@ -250,7 +250,7 @@ export function useTaskPageSessionResume({
             setSelectedLinearCustomView(null)
             setLinearCustomViewsError(
               translate(
-                'auto.components.task.page.hooks.use.task.page.session.resume.44c0ff3999',
+                'auto.components.task.page.hooks.use.task.page.session.resume.savedLinearViewMissing',
                 'Saved Linear view was not found.'
               )
             )
@@ -265,7 +265,7 @@ export function useTaskPageSessionResume({
             setLinearCustomViewsLoading(false)
             setLinearCustomViewsError(
               translate(
-                'auto.components.task.page.hooks.use.task.page.session.resume.c50ef0c9f9',
+                'auto.components.task.page.hooks.use.task.page.session.resume.savedLinearViewRestoreFailed',
                 'Failed to restore saved Linear view.'
               )
             )

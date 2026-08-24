@@ -15793,6 +15793,14 @@
                     "e02508846c": "this repository"
                   }
                 }
+              },
+              "linear": {
+                "issue": {
+                  "dialog": {
+                    "dialogTitle": "New Linear issue",
+                    "dialogDescription": "Create a Linear issue for the selected team."
+                  }
+                }
               }
             },
             "task": {
@@ -15829,7 +15837,7 @@
                   "jira": {
                     "create": {
                       "dialog": {
-                        "00900c2958": "Failed to load required Jira fields."
+                        "jiraRequiredFieldsLoadFailed": "Failed to load required Jira fields."
                       }
                     }
                   },
@@ -15843,10 +15851,10 @@
                   },
                   "session": {
                     "resume": {
-                      "2f69b193f1": "Saved Linear project was not found.",
-                      "fa88a9c276": "Failed to restore saved Linear project.",
-                      "44c0ff3999": "Saved Linear view was not found.",
-                      "c50ef0c9f9": "Failed to restore saved Linear view."
+                      "savedLinearProjectMissing": "Saved Linear project was not found.",
+                      "savedLinearProjectRestoreFailed": "Failed to restore saved Linear project.",
+                      "savedLinearViewMissing": "Saved Linear view was not found.",
+                      "savedLinearViewRestoreFailed": "Failed to restore saved Linear view."
                     }
                   }
                 }

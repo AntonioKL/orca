@@ -3,12 +3,7 @@ import { translate } from '@/i18n/i18n'
 /** Matches the bound `callRuntimeRpc` applies to the equivalent remote GitLab call. */
 export const GITLAB_IPC_TIMEOUT_MS = 30_000
 
-/**
- * Bound a local `window.api.gl.*` IPC call the way `callRuntimeRpc` bounds the remote one.
- *
- * `glab` runs without a subprocess timeout in main, so an unreachable GitLab host would
- * otherwise leave the caller's loading state spinning forever.
- */
+/** Bounds local GitLab IPC because main runs `glab` without a subprocess timeout. */
 export function withGitLabIpcTimeout<T>(
   pending: Promise<T>,
   options?: { timeoutMs?: number; message?: string }

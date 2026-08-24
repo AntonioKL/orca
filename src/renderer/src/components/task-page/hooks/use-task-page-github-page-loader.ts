@@ -161,6 +161,7 @@ export function useTaskPageGitHubPageLoader({
         }
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the remaining referenced setters and refs are stable useState/useRef identities passed in as props.
     [
       paginationLoading,
       selectedRepos,

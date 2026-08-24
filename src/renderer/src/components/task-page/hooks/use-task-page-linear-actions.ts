@@ -162,6 +162,7 @@ export function useTaskPageLinearActions({
           )
         })
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the remaining referenced setters and refs are stable useState/useRef identities passed in as props.
     [clearSelectedLinearIssue, linearMode, selectLinearWorkspace, setTaskResumeState]
   )
 
@@ -174,6 +175,7 @@ export function useTaskPageLinearActions({
         )
       })
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the remaining referenced setters and refs are stable useState/useRef identities passed in as props.
     [updateSettings]
   )
 
@@ -186,11 +188,13 @@ export function useTaskPageLinearActions({
       .catch(() => {
         console.warn('[TaskPage] Failed to refresh Linear teams')
       })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the remaining referenced setters and refs are stable useState/useRef identities passed in as props.
   }, [checkLinearConnection, listLinearTeams, selectedLinearWorkspaceId])
 
   const handleLinearAccessConnected = useCallback((): void => {
     setLinearTeamRefreshNonce((n) => n + 1)
     setLinearRefreshNonce((n) => n + 1)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the remaining referenced setters and refs are stable useState/useRef identities passed in as props.
   }, [])
 
   return {

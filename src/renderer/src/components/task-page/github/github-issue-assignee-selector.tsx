@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react'
+import React, { useCallback, useId, useMemo } from 'react'
 import { Check, LoaderCircle } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -39,12 +39,14 @@ export function GitHubIssueAssigneeSelector({
     [onChange, selectedAssignees, selectedLogins]
   )
 
+  // Why: name the trigger with both nodes so the field label and current selection are announced.
+  const selectorId = useId()
+  const labelId = `assignees-label-${selectorId}`
+  const triggerId = `assignees-trigger-${selectorId}`
+
   return (
     <div className="flex min-w-0 flex-col gap-1">
-      <span
-        id="github-issue-assignee-selector-label"
-        className="text-[11px] font-medium text-muted-foreground"
-      >
+      <span id={labelId} className="text-[11px] font-medium text-muted-foreground">
         {translate('auto.components.TaskPage.8aba10579d', 'Assignees')}
       </span>
       <Popover>
@@ -53,7 +55,8 @@ export function GitHubIssueAssigneeSelector({
             type="button"
             variant="outline"
             disabled={disabled}
-            aria-labelledby="github-issue-assignee-selector-label"
+            id={triggerId}
+            aria-labelledby={`${labelId} ${triggerId}`}
             className="h-auto min-h-9 justify-start gap-2 px-3 py-2 text-left"
           >
             {selectedAssignees.length === 0 ? (

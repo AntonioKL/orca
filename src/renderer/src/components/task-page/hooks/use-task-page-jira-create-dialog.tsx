@@ -241,7 +241,7 @@ export function useTaskPageJiraCreateDialog({
         if (!cancelled) {
           setJiraCreateFieldsError(
             translate(
-              'auto.components.task.page.hooks.use.task.page.jira.create.dialog.00900c2958',
+              'auto.components.task.page.hooks.use.task.page.jira.create.dialog.jiraRequiredFieldsLoadFailed',
               'Failed to load required Jira fields.'
             )
           )

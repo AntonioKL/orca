@@ -199,8 +199,9 @@ export function PRReviewCell({
       })
       // Why: only clear the typed reviewer on success — a failed request rolls
       // back, so keep the user's input instead of forcing a retype.
-      // Why: removal is unrelated to the add-reviewer draft; keep whatever the user typed.
-      void outcome
+      if (outcome === 'confirmed') {
+        setReviewerInput('')
+      }
     } finally {
       setSubmitting(false)
     }

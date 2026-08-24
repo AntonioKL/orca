@@ -184,5 +184,6 @@ export function useTaskPageGitLabFetch({
     return () => {
       stale = true
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the remaining referenced setters and refs are stable useState/useRef identities passed in as props.
   }, [taskSource, gitlabView, gitlabRefreshNonce, primaryRepo])
 }
