@@ -49,4 +49,17 @@ describe('AgentStatusFactJournal', () => {
 
     expect(received).toEqual([1])
   })
+
+  it('isolates a throwing listener from later live subscribers', () => {
+    const journal = new AgentStatusFactJournal()
+    const received: string[] = []
+    journal.subscribe(() => {
+      throw new Error('stale stream')
+    })
+    journal.subscribe((entry) => received.push(entry.paneKey))
+
+    journal.record(fact('pane-1'))
+
+    expect(received).toEqual(['pane-1'])
+  })
 })

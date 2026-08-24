@@ -41,7 +41,12 @@ export class AgentStatusFactJournal {
       this.facts.splice(0, this.facts.length - this.capacity)
     }
     for (const listener of this.listeners) {
-      listener(fact)
+      try {
+        listener(fact)
+      } catch (error) {
+        // A stale stream must not abort hook ingestion or starve other clients.
+        console.warn('[agent-status-facts] listener failed:', error)
+      }
     }
     return fact
   }
