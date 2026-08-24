@@ -18,14 +18,12 @@ import {
 
 type CoordinatorEntry = {
   worktreeId: string
+  authoritativeRemote: boolean
   coordinator: AgentCompletionCoordinator
 }
 
 type StoreSnapshot = ReturnType<typeof useAppStore.getState>
 type WorktreeTab = NonNullable<StoreSnapshot['tabsByWorktree']>[string][number]
-// Why: a paneKey resolves to a tab by id. Prebuilding this index once per prune
-// pass avoids re-flattening tabsByWorktree per coordinator (O(coordinators x
-// tabs)) when a liveness or notification-setting update requires a prune.
 type TabIndex = ReadonlyMap<string, WorktreeTab>
 type PaneCoordinatorLivenessSnapshot = Pick<
   StoreSnapshot,
@@ -44,6 +42,9 @@ function disposeCoordinatorForPaneKey(paneKey: string): void {
   paneKeysRequiringFreshWorking.delete(paneKey)
 }
 
+export function forgetAgentHookCompletionNotificationCoordinator(paneKey: string): void {
+  disposeCoordinatorForPaneKey(paneKey)
+}
 function buildTabIndex(tabsByWorktree: StoreSnapshot['tabsByWorktree']): TabIndex {
   const index = new Map<string, WorktreeTab>()
   for (const tabs of Object.values(tabsByWorktree ?? {})) {
@@ -57,10 +58,7 @@ function buildTabIndex(tabsByWorktree: StoreSnapshot['tabsByWorktree']): TabInde
   }
   return index
 }
-
 function pruneClosedPaneCoordinators(): void {
-  // Why: hook-completion coordinators are module-scoped and may outlive a pane
-  // unless liveness changes from close/sleep paths evict them here.
   if (coordinatorsByPaneKey.size === 0 && paneKeysRequiringFreshWorking.size === 0) {
     lastPrunedLivenessSnapshot = null
     return
@@ -81,8 +79,6 @@ function pruneClosedPaneCoordinators(): void {
     return
   }
   lastPrunedLivenessSnapshot = livenessSnapshot
-  // Why: build the paneKey->tab index once for the whole pass instead of
-  // re-flattening tabsByWorktree inside paneCanReceiveHookCompletion per entry.
   const tabIndex = buildTabIndex(livenessSnapshot.tabsByWorktree)
   for (const paneKey of coordinatorsByPaneKey.keys()) {
     if (!paneCanReceiveHookCompletion(paneKey, tabIndex)) {
@@ -98,20 +94,16 @@ function pruneClosedPaneCoordinators(): void {
     lastPrunedLivenessSnapshot = null
   }
 }
-
 function isAgentTaskCompleteNotificationEnabled(): boolean {
-  const notifications = useAppStore.getState().settings?.notifications
-  return notifications?.enabled !== false && notifications?.agentTaskComplete !== false
+  const n = useAppStore.getState().settings?.notifications
+  return n?.enabled !== false && n?.agentTaskComplete !== false
 }
-
 function isTerminalAttentionEnabled(): boolean {
   return useAppStore.getState().settings?.experimentalTerminalAttention === true
 }
-
 function isAgentTaskCompleteTrackingEnabled(): boolean {
   return isAgentTaskCompleteNotificationEnabled() || isTerminalAttentionEnabled()
 }
-
 function syncAgentTaskCompleteTrackingEnabled(enabled: boolean): void {
   if (wasAgentTaskCompleteTrackingEnabled === undefined) {
     wasAgentTaskCompleteTrackingEnabled = enabled
@@ -126,20 +118,16 @@ function syncAgentTaskCompleteTrackingEnabled(enabled: boolean): void {
   }
   wasAgentTaskCompleteTrackingEnabled = enabled
 }
-
 export function syncAgentHookCompletionNotificationSettings(): boolean {
   pruneClosedPaneCoordinators()
   const enabled = isAgentTaskCompleteTrackingEnabled()
   syncAgentTaskCompleteTrackingEnabled(enabled)
   return enabled
 }
-
 export function syncAgentHookCompletionNotificationsForStoreUpdate(
   current: AgentHookCompletionStoreSnapshot,
   previous: AgentHookCompletionStoreSnapshot
 ): boolean {
-  // Why: Zustand also publishes high-rate title/status writes that cannot make
-  // module-scoped completion coordinators stale.
   if (!shouldSyncAgentHookCompletionForStoreUpdate(current, previous)) {
     return false
   }
@@ -149,7 +137,6 @@ export function syncAgentHookCompletionNotificationsForStoreUpdate(
   syncAgentHookCompletionNotificationSettings()
   return true
 }
-
 function getPtyIdForPaneKey(paneKey: string): string | null {
   const parsed = parsePaneKey(paneKey)
   if (!parsed) {
@@ -187,11 +174,9 @@ function getPtyIdForPaneKey(paneKey: string): string | null {
   }
   return tabPtyIds[0] ?? null
 }
-
 function paneHasLivePty(paneKey: string): boolean {
   return getPtyIdForPaneKey(paneKey) !== null
 }
-
 function resolveTabById(
   state: StoreSnapshot,
   tabId: string,
@@ -208,7 +193,6 @@ function resolveTabById(
   }
   return undefined
 }
-
 function paneKeyHasUnsuppressedPtyHint(
   state: StoreSnapshot,
   paneKey: string,
@@ -233,15 +217,17 @@ function paneKeyHasUnsuppressedPtyHint(
   const ptyHints = [tab.ptyId, leafPtyId].filter((ptyId): ptyId is string => Boolean(ptyId))
   return ptyHints.length === 0 || ptyHints.some((ptyId) => !state.suppressedPtyExitIds?.[ptyId])
 }
-
 function paneCanReceiveHookCompletion(paneKey: string, tabIndex?: TabIndex): boolean {
   const state = useAppStore.getState()
   // Why: native hook IPC is itself a live status signal. Inactive worktrees can
   // have accepted hook updates before their renderer PTY map catches up.
   return paneKeyHasUnsuppressedPtyHint(state, paneKey, tabIndex) || paneHasLivePty(paneKey)
 }
-
-function createCoordinator(paneKey: string, worktreeId: string): AgentCompletionCoordinator {
+function createCoordinator(
+  paneKey: string,
+  worktreeId: string,
+  authoritativeRemote = false
+): AgentCompletionCoordinator {
   return createAgentCompletionCoordinator({
     paneKey,
     statusLane: 'hook',
@@ -261,6 +247,7 @@ function createCoordinator(paneKey: string, worktreeId: string): AgentCompletion
         terminalTitle: title,
         paneKey,
         suppressOsNotification: !isAgentTaskCompleteNotificationEnabled(),
+        ...(authoritativeRemote && { authoritativeRemote: true }),
         ...(meta?.agentStatus ? { agentStatusSnapshot: meta.agentStatus } : {})
       })
     },
@@ -275,29 +262,30 @@ function createCoordinator(paneKey: string, worktreeId: string): AgentCompletion
         terminalTitle: title,
         paneKey,
         suppressOsNotification: !isAgentTaskCompleteNotificationEnabled(),
+        ...(authoritativeRemote && { authoritativeRemote: true }),
         agentStatusSnapshot: meta.agentStatus
       })
     },
-    isLive: () => paneCanReceiveHookCompletion(paneKey),
+    isLive: () => authoritativeRemote || paneCanReceiveHookCompletion(paneKey),
     shouldSuppressHookCompletion: createCodexAutoApprovalHookCompletionSuppressor(paneKey)
   })
 }
-
 export function observeAgentHookCompletionForNotification({
   paneKey,
   worktreeId,
   payload,
-  seedOnly
+  seedOnly,
+  authoritativeRemote
 }: {
   paneKey: string
   worktreeId: string
   payload: AgentCompletionStatusSnapshot
   seedOnly?: boolean
+  authoritativeRemote?: boolean
 }): void {
-  // Why: replay seeds already passed indexed snapshot ownership; re-resolving every row makes startup batches quadratic.
   if (seedOnly !== true) {
     pruneClosedPaneCoordinators()
-    if (!paneCanReceiveHookCompletion(paneKey)) {
+    if (!authoritativeRemote && !paneCanReceiveHookCompletion(paneKey)) {
       return
     }
   }
@@ -310,19 +298,22 @@ export function observeAgentHookCompletionForNotification({
   }
 
   let entry = coordinatorsByPaneKey.get(paneKey)
-  if (!entry || entry.worktreeId !== worktreeId) {
+  if (
+    !entry ||
+    entry.worktreeId !== worktreeId ||
+    (authoritativeRemote === true && !entry.authoritativeRemote)
+  ) {
     entry?.coordinator.dispose()
     entry = {
       worktreeId,
-      coordinator: createCoordinator(paneKey, worktreeId)
+      authoritativeRemote: authoritativeRemote === true,
+      coordinator: createCoordinator(paneKey, worktreeId, authoritativeRemote)
     }
     coordinatorsByPaneKey.set(paneKey, entry)
     if (requireFreshWorkingForNewTrackingCoordinators) {
       paneKeysRequiringFreshWorking.add(paneKey)
     }
   }
-  // Why: notification preferences may suppress alerts, but accepted hooks must
-  // still release pane-owned cursor/cache effects after the quiet window.
   if (payload.state === 'working' && payload.turnCompletedAt === undefined && trackingEnabled) {
     paneKeysRequiringFreshWorking.delete(paneKey)
   }
@@ -332,7 +323,6 @@ export function observeAgentHookCompletionForNotification({
     entry.coordinator.observeHookStatus(payload)
   }
 }
-
 export function resetAgentHookCompletionNotificationCoordinators(): void {
   for (const entry of coordinatorsByPaneKey.values()) {
     entry.coordinator.dispose()
@@ -343,7 +333,6 @@ export function resetAgentHookCompletionNotificationCoordinators(): void {
   wasAgentTaskCompleteTrackingEnabled = isAgentTaskCompleteTrackingEnabled()
   requireFreshWorkingForNewTrackingCoordinators = !wasAgentTaskCompleteTrackingEnabled
 }
-
 export function _getAgentHookCompletionNotificationCoordinatorCountForTest(): number {
   return coordinatorsByPaneKey.size
 }

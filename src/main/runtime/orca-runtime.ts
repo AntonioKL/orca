@@ -57,6 +57,7 @@ import {
   type AgentStatusEntry
 } from '../../shared/agent-status-types'
 import { terminalStatusPayloadMatchesHook } from '../../shared/agent-terminal-status-equivalence'
+import type { AgentStatusFact, AgentStatusFactInput } from '../../shared/agent-status-fact-types'
 import { indexAgentStatusRowsByPaneKey } from '../agent-hooks/agent-status-pane-index'
 import type { AgentHookAuthorityAttestation } from '../agent-hooks/server'
 import type {
@@ -132,6 +133,7 @@ import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises'
 import { resolveWorktreeCreateBase } from '../worktree-create-base'
 import { resolveWorktreeAddBaseRef } from '../../shared/worktree/base-ref'
 import { OrchestrationDb } from './orchestration/db'
+import { AgentStatusFactJournal } from './agent-status-fact-journal'
 import type { DispatchStatus } from './orchestration/types'
 import { reconcileRequestedWorkerTerminalReleases } from './orchestration/worker-terminal-release-reconciliation'
 import {
@@ -3231,6 +3233,8 @@ export class OrcaRuntimeService {
     listener: (snapshot: RuntimeMobileSessionTabsResult) => void
     clientNavigationId?: string
   }>()
+  private readonly agentStatusFactJournal = new AgentStatusFactJournal()
+  private readonly agentStatusWorktreeByPaneKey = new Map<string, string>()
   // Why: one watermark per repo replaces per-closed-pane fences while preserving stale-write safety.
   private terminalTopologyRevisionByRepoId = new Map<string, number>()
   // Why: provider exit can beat surface registration; that exact dead incarnation must never publish.
@@ -11240,6 +11244,53 @@ export class OrcaRuntimeService {
         this.mobileSessionTabsAgentStatusHeartbeat.cancelPending()
       }
     }
+  }
+
+  publishAgentStatusFact(fact: AgentStatusFactInput): AgentStatusFact {
+    if (fact.status === null) {
+      this.agentStatusWorktreeByPaneKey.delete(fact.paneKey)
+    } else {
+      this.agentStatusWorktreeByPaneKey.set(fact.paneKey, fact.worktreeId)
+    }
+    return this.agentStatusFactJournal.record(fact)
+  }
+
+  getAgentStatusWorktreeIdForPaneKey(paneKey: string): string | null {
+    return this.agentStatusWorktreeByPaneKey.get(paneKey) ?? null
+  }
+
+  readAgentStatusFactsSince(
+    lastSeenSeq?: number,
+    epoch?: string
+  ): ReturnType<AgentStatusFactJournal['readSince']> {
+    return this.agentStatusFactJournal.readSince(lastSeenSeq, epoch)
+  }
+
+  onAgentStatusFact(
+    listener: (fact: AgentStatusFact) => void,
+    lastSeenSeq?: number,
+    epoch?: string
+  ): {
+    replay: ReturnType<AgentStatusFactJournal['readSince']>
+    unsubscribe: () => void
+  } {
+    const subscription = this.agentStatusFactJournal.subscribeWithReplay(
+      listener,
+      lastSeenSeq,
+      epoch
+    )
+    // The journal owns the live fan-out. Keep the service set as an explicit
+    // liveness index so tests and teardown can inspect active fact consumers.
+    return {
+      replay: subscription,
+      unsubscribe: () => {
+        subscription.unsubscribe()
+      }
+    }
+  }
+
+  getAgentStatusFactJournalEpoch(): string {
+    return this.agentStatusFactJournal.epoch
   }
 
   forgetClientNavigationState(clientNavigationId: string): void {

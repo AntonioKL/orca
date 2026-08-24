@@ -58,6 +58,7 @@ export type TerminalNotificationEvent = {
   paneKey?: string
   agentStatusSnapshot?: AgentCompletionStatusSnapshot
   agentCompletionSource?: AgentCompletionDispatchMeta['source']
+  authoritativeRemote?: boolean
   suppressOsNotification?: boolean
 }
 
@@ -150,7 +151,7 @@ export function dispatchTerminalNotification(
       const isCurrentPane = hasLivePty
         ? isCurrentLivePaneKey(state, worktreeId, event.paneKey)
         : isCurrentKnownPaneKey(state, worktreeId, event.paneKey)
-      if (!tabId || !isCurrentPane) {
+      if (!tabId || (!event.authoritativeRemote && !isCurrentPane)) {
         return
       }
     }
