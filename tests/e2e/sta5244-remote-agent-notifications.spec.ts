@@ -240,6 +240,25 @@ test('STA-5244 new/new paired headed client receives one hidden completion and p
     await expect.poll(() => isUnread(client!.page, worktreeId), { timeout: 30_000 }).toBe(true)
     await expect.poll(() => dispatches(client!.app), { timeout: 10_000 }).toHaveLength(1)
 
+    await client.page.evaluate(
+      (id) => window.__store?.getState().clearWorktreeUnread(id),
+      worktreeId
+    )
+    await installDispatchSpy(client.app)
+    await emitCodexHookStatus(endpoint, {
+      paneKey,
+      worktreeId,
+      state: 'working',
+      prompt: 'sta5244 post-reconnect turn'
+    })
+    await emitCodexHookStatus(endpoint, {
+      paneKey,
+      worktreeId,
+      state: 'waiting'
+    })
+    await expect.poll(() => isUnread(client!.page, worktreeId), { timeout: 30_000 }).toBe(true)
+    await expect.poll(() => dispatches(client!.app), { timeout: 30_000 }).toHaveLength(1)
+
     await emitCodexHookStatus(endpoint, {
       paneKey,
       worktreeId,
