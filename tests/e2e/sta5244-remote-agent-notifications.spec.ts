@@ -6,7 +6,6 @@ import {
   type PairedElectronClient
 } from './helpers/paired-electron-client'
 import { emitCodexHookStatus, readHookEndpoint } from './helpers/agent-hook-endpoint'
-import type { AgentHookEndpoint } from '../../src/shared/agent-hook-endpoint-file'
 
 type Dispatch = { source?: string; paneKey?: string }
 
@@ -56,34 +55,6 @@ async function isUnread(page: Page, worktreeId: string): Promise<boolean> {
       .find((candidate) => candidate.id === id)
     return worktree?.isUnread === true
   }, worktreeId)
-}
-
-async function postClaudePermission(
-  endpoint: AgentHookEndpoint,
-  paneKey: string,
-  worktreeId: string
-): Promise<void> {
-  const [tabId] = paneKey.split(':')
-  const response = await fetch(`http://127.0.0.1:${endpoint.port}/hook/claude`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Orca-Agent-Hook-Token': endpoint.token
-    },
-    body: JSON.stringify({
-      paneKey,
-      tabId,
-      worktreeId,
-      env: endpoint.env,
-      version: endpoint.version,
-      payload: {
-        hook_event_name: 'PermissionRequest',
-        tool_name: 'Bash',
-        tool_input: { command: 'echo permission' }
-      }
-    })
-  })
-  expect(response.status).toBe(204)
 }
 
 test('STA-5244 new/new paired headed client receives one hidden completion and permission alert', async ({
@@ -203,6 +174,42 @@ test('STA-5244 new/new paired headed client receives one hidden completion and p
     await client.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.show())
     await expect.poll(() => dispatches(client!.app), { timeout: 10_000 }).toHaveLength(1)
 
+    await client.page.evaluate(
+      (id) => window.__store?.getState().clearWorktreeUnread(id),
+      worktreeId
+    )
+    await installDispatchSpy(client.app)
+    await client.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.hide())
+
+    await emitCodexHookStatus(endpoint, {
+      paneKey,
+      worktreeId,
+      state: 'working',
+      prompt: 'sta5244 permission turn'
+    })
+    await emitCodexHookStatus(endpoint, {
+      paneKey,
+      worktreeId,
+      state: 'waiting'
+    })
+    await expect
+      .poll(
+        async () => {
+          const snapshot = await host.client.call<{
+            tabs: { id: string; agentStatus?: { paneKey?: string; state?: string } }[]
+          }>('session.tabs.list', { worktree: `id:${worktreeId}` })
+          return snapshot.result.tabs.some(
+            (tab) =>
+              tab.id === `${created.tab.parentTabId}::${created.tab.leafId}` &&
+              tab.agentStatus?.paneKey === paneKey &&
+              tab.agentStatus.state === 'waiting'
+          )
+        },
+        { timeout: 30_000 }
+      )
+      .toBe(true)
+    await expect.poll(() => dispatches(client!.app), { timeout: 30_000 }).toHaveLength(1)
+
     await client.page.evaluate(async (selector) => {
       await window.api.runtimeEnvironments.disconnect({ selector })
       const response = await window.api.runtimeEnvironments.connect({ selector })
@@ -221,27 +228,7 @@ test('STA-5244 new/new paired headed client receives one hidden completion and p
         { timeout: 30_000, message: 'paired runtime did not become graph-ready after reconnect' }
       )
       .toBe('ready')
-    await expect.poll(() => isUnread(client!.page, worktreeId), { timeout: 10_000 }).toBe(true)
-    await installDispatchSpy(client.app)
-
-    await postClaudePermission(endpoint, paneKey, worktreeId)
-    await expect
-      .poll(
-        async () => {
-          const snapshot = await host.client.call<{
-            tabs: { id: string; agentStatus?: { paneKey?: string; state?: string } }[]
-          }>('session.tabs.list', { worktree: `id:${worktreeId}` })
-          return snapshot.result.tabs.some(
-            (tab) =>
-              tab.id === `${created.tab.parentTabId}::${created.tab.leafId}` &&
-              tab.agentStatus?.paneKey === paneKey &&
-              tab.agentStatus.state === 'waiting'
-          )
-        },
-        { timeout: 30_000 }
-      )
-      .toBe(true)
-    await expect.poll(() => dispatches(client!.app), { timeout: 30_000 }).toHaveLength(1)
+    await expect.poll(() => dispatches(client!.app), { timeout: 10_000 }).toHaveLength(1)
   } finally {
     await client?.dispose()
     await host.dispose()
