@@ -70,6 +70,8 @@ import {
   claudeRosterHasWorkingSubagent,
   claudeRosterToSnapshots
 } from '../../shared/claude-subagent-roster'
+import { codexRosterToSnapshots } from '../../shared/codex-subagent-roster'
+import { reconcileCodexSubagentTranscript } from '../../shared/codex-subagent-transcript'
 import {
   isAgentHookSource,
   restoreShedStatusFields,
@@ -90,6 +92,7 @@ import {
   normalizeAgentStatusPayload
 } from '../../shared/agent-status-types'
 import { terminalStatusPayloadMatchesHook } from '../../shared/agent-terminal-status-equivalence'
+import { normalizeAgentReconcileDiagnostic } from '../../shared/agent-reconcile-diagnostic'
 import {
   AgentStatusObservationSequencer,
   createAgentStatusAuthorityId,
@@ -215,6 +218,8 @@ const LAST_STATUS_FILE_NAME = 'last-status.json'
 const ASSISTANT_MESSAGE_RETRY_ATTEMPTS = 5
 const ASSISTANT_MESSAGE_RETRY_MS = 50
 const CODEX_SUBAGENT_POLL_MS = 1_000
+const CODEX_RESTART_RECONCILE_ATTEMPTS = 5
+const CODEX_RESTART_RECONCILE_MS = 1_000
 const INTERRUPTED_DONE_LATE_WORKING_SUPPRESSION_MS = 15_000
 
 // Why: starts at 2 — pre-merge v1 lacked receivedAt/stateStartedAt (never shipped); a mismatched version hydrates empty (treated as corrupt).
@@ -373,6 +378,7 @@ function sanitizeHydratedEntry(
     source === 'claude' && (record.compactTrigger === 'manual' || record.compactTrigger === 'auto')
       ? record.compactTrigger
       : undefined
+  const reconcileDiagnostic = normalizeAgentReconcileDiagnostic(record.reconcileDiagnostic)
   return {
     paneKey,
     source,
@@ -390,6 +396,7 @@ function sanitizeHydratedEntry(
     claudeLeadBoundaryChildOnly: record.claudeLeadBoundaryChildOnly === true ? true : undefined,
     providerSession,
     providerSessionOnly: providerSessionOnly ? true : undefined,
+    ...(reconcileDiagnostic !== undefined ? { reconcileDiagnostic } : {}),
     retainedForLiveness: retainedForLiveness ? true : undefined,
     payload,
     receivedAt,
@@ -467,6 +474,9 @@ function toAgentStatusIpcPayload(entry: EnrichedAgentHookEventPayload): AgentSta
     ...(entry.providerSessionOnly ? { providerSessionOnly: true } : {}),
     ...(entry.promptInteractionKey ? { promptInteractionKey: entry.promptInteractionKey } : {}),
     ...(entry.restoredUnconfirmed ? { restoredUnconfirmed: true } : {}),
+    ...(entry.reconcileDiagnostic !== undefined
+      ? { reconcileDiagnostic: entry.reconcileDiagnostic }
+      : {}),
     ...(entry.observation ? { observation: entry.observation } : {}),
     ...entry.payload
   }
@@ -736,6 +746,8 @@ export class AgentHookServer {
   private statusPersistTimer: ReturnType<typeof setTimeout> | null = null
   private assistantMessageRetryTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private codexSubagentPollTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private codexRestartReconcileTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private codexPaneGenerations = new Map<string, number>()
   private promptSentDedupeByPaneKey = new Map<string, AgentPromptSentDedupeEntry>()
   private activeHookTurnCompletedAtByPaneKey = new Map<string, number>()
   private promptSentHashSalt = randomBytes(16).toString('hex')
@@ -1424,6 +1436,10 @@ export class AgentHookServer {
     onAccepted?: () => void,
     origin: AgentStatusObservationOrigin = 'hook'
   ): EnrichedAgentHookEventPayload {
+    if (payload.payload.agentType === 'codex' && payload.hookEventName === 'SessionStart') {
+      this.clearCodexRestartReconcile(payload.paneKey)
+      this.bumpCodexPaneGeneration(payload.paneKey)
+    }
     if (payload.hookEventName === 'UserPromptSubmit') {
       // Why: the prompt boundary is authoritative even when text is unchanged; its next OSC working row must not inherit the prior cron/background turn stamp.
       this.activeHookTurnCompletedAtByPaneKey.delete(payload.paneKey)
@@ -1635,6 +1651,119 @@ export class AgentHookServer {
     }
     clearTimeout(timer)
     this.codexSubagentPollTimers.delete(paneKey)
+  }
+
+  private clearCodexRestartReconcile(paneKey: string): void {
+    const timer = this.codexRestartReconcileTimers.get(paneKey)
+    if (timer) {
+      clearTimeout(timer)
+      this.codexRestartReconcileTimers.delete(paneKey)
+    }
+  }
+
+  private bumpCodexPaneGeneration(paneKey: string): number {
+    const generation = (this.codexPaneGenerations.get(paneKey) ?? 0) + 1
+    this.codexPaneGenerations.set(paneKey, generation)
+    return generation
+  }
+
+  private scheduleCodexRestartReconciliation(paneKey: string): void {
+    const entry = this.state.lastStatusByPaneKey.get(paneKey) as
+      | EnrichedAgentHookEventPayload
+      | undefined
+    const transcriptPath = entry?.providerSession?.transcriptPath
+    if (entry?.payload.agentType !== 'codex') {
+      return
+    }
+    if (!transcriptPath?.trim()) {
+      if (entry.restoredUnconfirmed && !entry.reconcileDiagnostic) {
+        const diagnostic: EnrichedAgentHookEventPayload = {
+          ...entry,
+          reconcileDiagnostic: {
+            kind: 'unverifiable',
+            reason: 'transcript-unreadable',
+            observedAt: Date.now()
+          }
+        }
+        this.state.lastStatusByPaneKey.set(paneKey, diagnostic)
+        this.scheduleStatusPersist()
+        this.notifyStatusChangeListeners()
+        this.emitEnrichedStatus(diagnostic)
+      }
+      return
+    }
+    if (entry.connectionId) {
+      // Remote paths belong to the execution host; the client must never open them locally.
+      if (!entry.reconcileDiagnostic) {
+        const diagnostic: EnrichedAgentHookEventPayload = {
+          ...entry,
+          reconcileDiagnostic: {
+            kind: 'unverifiable',
+            reason: 'owner-unavailable',
+            observedAt: Date.now()
+          }
+        }
+        this.state.lastStatusByPaneKey.set(paneKey, diagnostic)
+        this.scheduleStatusPersist()
+        this.notifyStatusChangeListeners()
+        this.emitEnrichedStatus(diagnostic)
+      }
+      return
+    }
+    this.clearCodexRestartReconcile(paneKey)
+    const generation = this.codexPaneGenerations.get(paneKey) ?? 0
+    let original = entry
+    let attempt = 0
+    const reconcile = (): void => {
+      this.codexRestartReconcileTimers.delete(paneKey)
+      const current = this.state.lastStatusByPaneKey.get(paneKey) as
+        | EnrichedAgentHookEventPayload
+        | undefined
+      if (current !== original || (this.codexPaneGenerations.get(paneKey) ?? 0) !== generation) {
+        return
+      }
+      const transcript = this.state.codexSubagentTranscriptByPaneKey.get(paneKey)
+      const roster = this.state.codexSubagentRosterByPaneKey.get(paneKey)
+      if (!transcript || !roster) {
+        return
+      }
+      reconcileCodexSubagentTranscript(transcript, roster, transcriptPath)
+      const subagents = codexRosterToSnapshots(roster)
+      const terminal = transcript.parentTerminalObserved === true
+      const nextPayload = {
+        ...current.payload,
+        ...(terminal ? { state: 'done' as const } : {}),
+        ...(subagents ? { subagents } : { subagents: undefined })
+      }
+      if (
+        JSON.stringify(nextPayload) !== JSON.stringify(current.payload) ||
+        (terminal && current.restoredUnconfirmed)
+      ) {
+        const next: EnrichedAgentHookEventPayload = {
+          ...current,
+          payload: nextPayload,
+          ...(terminal ? { restoredUnconfirmed: undefined } : {})
+        }
+        this.state.lastStatusByPaneKey.set(paneKey, next)
+        original = next
+        this.scheduleStatusPersist()
+        this.notifyStatusChangeListeners()
+        this.emitEnrichedStatus(next)
+      }
+      attempt += 1
+      if (!terminal && attempt < CODEX_RESTART_RECONCILE_ATTEMPTS) {
+        const timer = setTimeout(reconcile, CODEX_RESTART_RECONCILE_MS)
+        this.codexRestartReconcileTimers.set(paneKey, timer)
+        if (typeof timer.unref === 'function') {
+          timer.unref()
+        }
+      }
+    }
+    const timer = setTimeout(reconcile, 0)
+    this.codexRestartReconcileTimers.set(paneKey, timer)
+    if (typeof timer.unref === 'function') {
+      timer.unref()
+    }
   }
 
   private scheduleCodexSubagentPoll(
@@ -1939,6 +2068,8 @@ export class AgentHookServer {
     }
     this.clearAssistantMessageRetry(previousOwnerPaneKey)
     this.clearCodexSubagentPoll(previousOwnerPaneKey)
+    this.clearCodexRestartReconcile(previousOwnerPaneKey)
+    this.bumpCodexPaneGeneration(previousOwnerPaneKey)
     // Why: the live process keeps posting the physical source key after detach; persist a chain-safe mapping to the current owner.
     this.legacyPaneKeyAliases.set(physicalPaneKey, {
       stablePaneKey: toPaneKey,
@@ -1977,6 +2108,8 @@ export class AgentHookServer {
       this.restartedStatusLaunchTokenHashByPaneKey.delete(key)
       this.clearAssistantMessageRetry(key)
       this.clearCodexSubagentPoll(key)
+      this.clearCodexRestartReconcile(key)
+      this.bumpCodexPaneGeneration(key)
       clearPaneCacheState(this.state, key)
       this.activeHookTurnCompletedAtByPaneKey.delete(key)
       this.runtimeObservedStatusPaneKeys.delete(key)
@@ -2297,6 +2430,7 @@ export class AgentHookServer {
       toolAgentType?: string
       providerSession?: unknown
       providerSessionOnly?: unknown
+      reconcileDiagnostic?: unknown
       isReplay?: boolean
       /** Payload fields the relay dropped to fit an oversized frame; validated below. */
       shedFields?: unknown
@@ -2412,6 +2546,7 @@ export class AgentHookServer {
         ? envelope.toolAgentType.trim()
         : undefined
     const providerSession = normalizeAgentProviderSession(envelope.providerSession) ?? undefined
+    const reconcileDiagnostic = normalizeAgentReconcileDiagnostic(envelope.reconcileDiagnostic)
     // Why: relay crosses a trust boundary — re-run the canonical normalizer to enforce caps/invariants (returns null on malformed).
     const validatedPayload = normalizeAgentStatusPayload(envelope.payload)
     if (!validatedPayload) {
@@ -2517,6 +2652,7 @@ export class AgentHookServer {
       toolAgentType,
       providerSession,
       providerSessionOnly: envelope.providerSessionOnly === true ? true : undefined,
+      ...(reconcileDiagnostic !== undefined ? { reconcileDiagnostic } : {}),
       isReplay: envelope.isReplay === true ? true : undefined,
       claudeRunningNonAgentTask:
         typeof envelope.claudeRunningNonAgentTask === 'boolean'
@@ -2704,6 +2840,11 @@ export class AgentHookServer {
       clearTimeout(timer)
     }
     this.codexSubagentPollTimers.clear()
+    for (const timer of this.codexRestartReconcileTimers.values()) {
+      clearTimeout(timer)
+    }
+    this.codexRestartReconcileTimers.clear()
+    this.codexPaneGenerations.clear()
     // Why: don't unlink the endpoint file — a stale file matches fail-open and avoids a TOCTOU race with a concurrent Orca.
     this.endpointDir = null
     this.endpointFilePathCache = null
@@ -2831,7 +2972,11 @@ export class AgentHookServer {
         statusChanged = true
         if (deleted.payload.agentType === 'codex') {
           // Why: a replacement remote process may reuse the pane; don't merge it with the lost connection's children.
+          this.clearCodexSubagentPoll(paneKey)
+          this.clearCodexRestartReconcile(paneKey)
+          this.bumpCodexPaneGeneration(paneKey)
           this.state.codexSubagentRosterByPaneKey.delete(paneKey)
+          this.state.codexSubagentTranscriptByPaneKey.delete(paneKey)
           this.state.codexLeadStateByPaneKey.delete(paneKey)
         } else if (deleted.payload.agentType === 'claude') {
           this.state.claudeSubagentRosterByPaneKey.delete(paneKey)
@@ -2879,6 +3024,8 @@ export class AgentHookServer {
     }
     this.clearAssistantMessageRetry(resolvedPaneKey)
     this.clearCodexSubagentPoll(resolvedPaneKey)
+    this.clearCodexRestartReconcile(resolvedPaneKey)
+    this.bumpCodexPaneGeneration(resolvedPaneKey)
     this.runtimeObservedStatusPaneKeys.delete(resolvedPaneKey)
     this.currentAuthorityObservations.delete(resolvedPaneKey)
     if (existing.payload.state === 'done') {
@@ -2952,6 +3099,8 @@ export class AgentHookServer {
       }
       this.clearAssistantMessageRetry(paneKey)
       this.clearCodexSubagentPoll(paneKey)
+      this.clearCodexRestartReconcile(paneKey)
+      this.bumpCodexPaneGeneration(paneKey)
       clearPaneCacheState(this.state, paneKey)
       this.activeHookTurnCompletedAtByPaneKey.delete(paneKey)
       this.runtimeObservedStatusPaneKeys.delete(paneKey)
@@ -2975,6 +3124,8 @@ export class AgentHookServer {
     const hadStatus = this.state.lastStatusByPaneKey.has(resolvedPaneKey)
     this.clearAssistantMessageRetry(resolvedPaneKey)
     this.clearCodexSubagentPoll(resolvedPaneKey)
+    this.clearCodexRestartReconcile(resolvedPaneKey)
+    this.bumpCodexPaneGeneration(resolvedPaneKey)
     clearPaneCacheState(this.state, resolvedPaneKey)
     this.activeHookTurnCompletedAtByPaneKey.delete(resolvedPaneKey)
     this.currentAuthorityObservations.delete(resolvedPaneKey)
@@ -3254,7 +3405,13 @@ export class AgentHookServer {
         }
         // Why: restore live child hierarchy immediately; provider-specific reconciliation reaps stale seeds.
         if (entry.payload.agentType === 'codex') {
-          seedCodexStateFromSnapshot(this.state, resolvedPaneKey, entry.payload)
+          seedCodexStateFromSnapshot(
+            this.state,
+            resolvedPaneKey,
+            entry.payload,
+            entry.providerSession?.transcriptPath
+          )
+          this.scheduleCodexRestartReconciliation(resolvedPaneKey)
         } else if (entry.payload.agentType === 'claude') {
           seedClaudeLeadTurnFromPersistedStatus(this.state, resolvedPaneKey, entry, {
             childOnlyBoundary: entry.claudeLeadBoundaryChildOnly === true

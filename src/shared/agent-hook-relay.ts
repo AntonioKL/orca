@@ -25,6 +25,7 @@
 import { createHash } from 'node:crypto'
 
 import type { AgentSubagentSnapshot, ParsedAgentStatusPayload } from './agent-status-types'
+import type { AgentReconcileDiagnostic } from './agent-reconcile-diagnostic'
 import type { AgentProviderSessionMetadata } from './agent-session-resume'
 import type { AgentHookTarget } from './agent-hook-types'
 
@@ -103,6 +104,8 @@ export type AgentHookRelayEnvelope = {
   providerSessionOnly?: boolean
   /** True when the relay is replaying its cache after Orca reconnects. */
   isReplay?: boolean
+  /** Optional restart reconciliation diagnostic; older peers ignore it. */
+  reconcileDiagnostic?: AgentReconcileDiagnostic | null
   /** Claude background-work evidence for input-interrupt inference on the receiving host. */
   claudeRunningNonAgentTask?: boolean
   /** Forwarded from the agent CLI POST body. The relay default is `remote`,

@@ -204,4 +204,61 @@ describe('AgentHookServer Codex subagent transcript polling', () => {
       server.stop()
     }
   })
+
+  it('reconciles a dropped child completion after restart without inferring a parent terminal', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-hook-codex-restart-'))
+    dirs.push(dir)
+    const parentPath = join(dir, 'rollout-parent.jsonl')
+    const childPath = join(dir, `rollout-child-${CHILD_ID}.jsonl`)
+    writeFileSync(parentPath, spawnLine(CHILD_ID, '/root/restart_repro'))
+    writeFileSync(childPath, line({ type: 'event_msg', payload: { type: 'task_started' } }))
+    const post = async (server: AgentHookServer): Promise<void> => {
+      const env = server.buildPtyEnv()
+      await fetch(`http://127.0.0.1:${env.ORCA_AGENT_HOOK_PORT}/hook/codex`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Orca-Agent-Hook-Token': env.ORCA_AGENT_HOOK_TOKEN
+        },
+        body: JSON.stringify({
+          paneKey: PANE_KEY,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          payload: {
+            hook_event_name: 'PostToolUse',
+            session_id: 'root-session',
+            transcript_path: parentPath,
+            tool_name: 'collaborationspawn_agent'
+          }
+        })
+      })
+    }
+    const first = new AgentHookServer()
+    await first.start({ env: 'production', userDataPath: dir })
+    await post(first)
+    expect(first.getStatusSnapshot()[0]?.subagents).toHaveLength(1)
+    first.stop()
+    appendFileSync(childPath, line({ type: 'event_msg', payload: { type: 'task_complete' } }))
+
+    const second = new AgentHookServer()
+    await second.start({ env: 'production', userDataPath: dir })
+    try {
+      await vi.waitFor(
+        () => {
+          const status = second.getStatusSnapshot()[0]
+          expect(status?.state).toBe('working')
+          expect(status?.subagents).toBeUndefined()
+          expect(status?.restoredUnconfirmed).toBe(true)
+        },
+        { timeout: 2_500, interval: 50 }
+      )
+      appendFileSync(parentPath, line({ type: 'event_msg', payload: { type: 'task_complete' } }))
+      await vi.waitFor(() => expect(second.getStatusSnapshot()[0]?.state).toBe('done'), {
+        timeout: 5_500,
+        interval: 50
+      })
+    } finally {
+      second.stop()
+    }
+  })
 })
