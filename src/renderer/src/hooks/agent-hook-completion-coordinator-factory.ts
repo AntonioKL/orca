@@ -61,7 +61,11 @@ export function createAgentHookCompletionCoordinator(args: {
       })
     },
     isLive,
-    shouldSuppressHookCompletion: createCodexAutoApprovalHookCompletionSuppressor(paneKey)
+    // Remote status is authoritative on the host; client launch arguments may
+    // describe a different or stale pane and must not suppress its attention.
+    shouldSuppressHookCompletion: authoritativeRemote
+      ? undefined
+      : createCodexAutoApprovalHookCompletionSuppressor(paneKey)
   })
 }
 

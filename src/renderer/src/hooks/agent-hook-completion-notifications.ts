@@ -33,7 +33,7 @@ let requireFreshWorkingForNewTrackingCoordinators = false
 let lastPrunedLivenessSnapshot: PaneCoordinatorLivenessSnapshot | null = null
 
 function disposeCoordinatorForPaneKey(paneKey: string): void {
-  coordinatorsByPaneKey.get(paneKey)?.coordinator.dispose()
+  coordinatorsByPaneKey.get(paneKey)?.coordinator.dispose({ clearReplayState: true })
   coordinatorsByPaneKey.delete(paneKey)
   paneKeysRequiringFreshWorking.delete(paneKey)
 }

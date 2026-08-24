@@ -187,11 +187,6 @@ test('STA-5244 new/new paired headed client receives one hidden completion and p
       state: 'working',
       prompt: 'sta5244 permission turn'
     })
-    await emitCodexHookStatus(endpoint, {
-      paneKey,
-      worktreeId,
-      state: 'waiting'
-    })
     await expect
       .poll(
         async () => {
@@ -202,20 +197,34 @@ test('STA-5244 new/new paired headed client receives one hidden completion and p
             (tab) =>
               tab.id === `${created.tab.parentTabId}::${created.tab.leafId}` &&
               tab.agentStatus?.paneKey === paneKey &&
-              tab.agentStatus.state === 'waiting'
+              tab.agentStatus.state === 'working'
           )
         },
         { timeout: 30_000 }
       )
       .toBe(true)
-    await expect.poll(() => dispatches(client!.app), { timeout: 30_000 }).toHaveLength(1)
 
     await client.page.evaluate(async (selector) => {
       await window.api.runtimeEnvironments.disconnect({ selector })
+      window.__store?.getState().setRuntimeEnvironmentStatus(selector, {
+        status: null,
+        checkedAt: Date.now()
+      })
+    }, client.environmentId)
+    await emitCodexHookStatus(endpoint, {
+      paneKey,
+      worktreeId,
+      state: 'waiting'
+    })
+    await client.page.evaluate(async (selector) => {
       const response = await window.api.runtimeEnvironments.connect({ selector })
       if (!response.ok) {
         throw new Error(`runtime reconnect failed: ${response.error.message}`)
       }
+      window.__store?.getState().setRuntimeEnvironmentStatus(selector, {
+        status: response.result,
+        checkedAt: Date.now()
+      })
     }, client.environmentId)
     await expect
       .poll(
@@ -228,6 +237,14 @@ test('STA-5244 new/new paired headed client receives one hidden completion and p
         { timeout: 30_000, message: 'paired runtime did not become graph-ready after reconnect' }
       )
       .toBe('ready')
+    await expect.poll(() => isUnread(client!.page, worktreeId), { timeout: 30_000 }).toBe(true)
+    await expect.poll(() => dispatches(client!.app), { timeout: 10_000 }).toHaveLength(1)
+
+    await emitCodexHookStatus(endpoint, {
+      paneKey,
+      worktreeId,
+      state: 'waiting'
+    })
     await expect.poll(() => dispatches(client!.app), { timeout: 10_000 }).toHaveLength(1)
   } finally {
     await client?.dispose()
