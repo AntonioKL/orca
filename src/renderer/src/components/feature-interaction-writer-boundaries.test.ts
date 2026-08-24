@@ -174,6 +174,7 @@ describe('feature interaction writer boundaries', () => {
     ]
     for (const section of mutationSections) {
       expect(section).toContain(gitlabWriter)
+      expect(section).toContain('showGitLabMutationError')
     }
   })
 
