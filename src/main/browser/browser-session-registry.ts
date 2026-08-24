@@ -27,6 +27,7 @@ import type { BrowserSessionMeta } from './browser-session-meta-store'
 import {
   applyBrowserSessionUserAgentModes,
   clearBrowserSessionPartitionPolicies,
+  forgetBrowserSessionPartitionConfiguration,
   installBrowserSessionPartitionPolicies
 } from './browser-session-partition-policies'
 import { isValidPersistedBrowserSessionProfile } from './browser-session-persisted-profile-validation'
@@ -291,6 +292,7 @@ class BrowserSessionRegistry {
     try {
       const sess = session.fromPartition(profile.partition)
       clearBrowserSessionUserAgentMode(sess)
+      forgetBrowserSessionPartitionConfiguration(profile.partition)
       invalidateBrowserSessionProxyApplication(sess)
       const release = retireProxySessionApplication(sess)
       // Why: persistent partitions can retain service workers after every WebContents dies, so a retired session's deny policies must remain permanent.

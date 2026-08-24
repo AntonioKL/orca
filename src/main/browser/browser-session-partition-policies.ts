@@ -19,6 +19,11 @@ import { noticeDocPreviewDownloadBlocked } from './doc-preview-download-block-no
 
 // Why: one shared installer keeps every partition's deny-by-default permission/download policies from drifting apart.
 const configuredPartitions = new Set<string>()
+
+/** Drop only the installer memo; retired-session guards remain fail-closed. */
+export function forgetBrowserSessionPartitionConfiguration(partition: string): void {
+  configuredPartitions.delete(partition)
+}
 const handleWillDownload = (
   _event: Electron.Event,
   item: Electron.DownloadItem,

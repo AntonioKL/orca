@@ -59,6 +59,7 @@ vi.mock('./browser-webauthn-access', () => ({
 
 import {
   clearBrowserSessionPartitionPolicies,
+  forgetBrowserSessionPartitionConfiguration,
   installBrowserSessionPartitionPolicies
 } from './browser-session-partition-policies'
 import {
@@ -164,6 +165,19 @@ describe('installBrowserSessionPartitionPolicies proxy wiring', () => {
       [{ mode: 'fixed_servers', proxyRules: 'http://first.example:8080' }],
       [{ mode: 'fixed_servers', proxyRules: 'http://second.example:8080' }]
     ])
+  })
+
+  it('forgets deleted partition configuration without weakening its proxy guard', async () => {
+    setBrowserNetworkProxySettingsResolver(() => ({ httpProxyUrl: 'http://proxy.example:8080' }))
+    const profile = nextProfile()
+    const sess = fromPartitionMock(profile.partition)
+
+    await installBrowserSessionPartitionPolicies(profile)
+    forgetBrowserSessionPartitionConfiguration(profile.partition)
+    await installBrowserSessionPartitionPolicies(profile)
+
+    expect(sess.setPermissionRequestHandler).toHaveBeenCalledTimes(2)
+    expect(sess.setProxy).toHaveBeenCalledTimes(1)
   })
 
   it('recovers partition readiness after one transient proxy rejection', async () => {
