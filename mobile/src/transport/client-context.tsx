@@ -368,6 +368,7 @@ export function useRpcClientContext(): RpcClientContextValue {
 // Primary hook for screens: acquires the shared client on mount, releases on unmount, re-renders on state change.
 export function useHostClient(hostId: string | undefined): {
   client: RpcClient | null
+  clientId: string | null
   state: ConnectionState
 } {
   const ctx = useRpcClientContext()
@@ -425,12 +426,18 @@ export function useHostClient(hostId: string | undefined): {
 
   // Why: Expo can reuse the screen before effects bind the next host; never expose the prior host's client or state in that render.
   const bound = clientHostIdRef.current === hostId
+  const boundClient = bound ? clientRef.current : null
   const boundState = bound
     ? state
     : hostId
       ? (ctx.getKnownState(hostId) ?? 'connecting')
       : 'disconnected'
-  return { client: bound ? clientRef.current : null, state: boundState }
+  // Why: publish identity from the same entry as the client so consumers cannot race a second Keychain read.
+  return {
+    client: boundClient,
+    clientId: boundClient && hostId ? ctx.getClientId(hostId) : null,
+    state: boundState
+  }
 }
 
 // Why: host-store's removeHost() must close the live client but has no React-side handle; this hook bridges to it.
