@@ -129,6 +129,14 @@ export function useTaskPageCreateJiraSubmit({
           }
         })
         .catch(() => {})
+    } catch (error) {
+      if (submitProviderRuntimeContextKey === providerRuntimeContextKeyRef.current) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : translate('auto.components.TaskPage.aec5feeb69', 'Failed to create Jira issue.')
+        )
+      }
     } finally {
       if (submitProviderRuntimeContextKey === providerRuntimeContextKeyRef.current) {
         setNewJiraIssueSubmitting(false)

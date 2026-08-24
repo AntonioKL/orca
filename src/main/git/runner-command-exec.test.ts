@@ -17,6 +17,7 @@ import {
   commandExecFileAsync,
   ghExecFileAsync,
   gitExecFileAsync,
+  glabExecFileAsync,
   gitStreamStdout,
   translateWslOutputPaths,
   wslAwareSpawn
@@ -270,6 +271,20 @@ describe('runner execFile timeout handling', () => {
       cwd: '/repo'
     })
     const rejection = expect(promise).rejects.toThrow('gh timed out.')
+    await vi.advanceTimersByTimeAsync(30_000)
+
+    await rejection
+    expect(child.kill).toHaveBeenCalled()
+  })
+
+  it('rejects glab executions that never call back using the default timeout', async () => {
+    const child = createMockChildProcess(1234)
+    execFileMock.mockReturnValue(child)
+
+    const promise = glabExecFileAsync(['api', 'projects/stablyai%2Forca/issues'], {
+      cwd: '/repo'
+    })
+    const rejection = expect(promise).rejects.toThrow('glab timed out.')
     await vi.advanceTimersByTimeAsync(30_000)
 
     await rejection

@@ -10,10 +10,7 @@ const RUNTIME_PREFLIGHT_SOURCE = readFileSync(
   join(__dirname, 'task-page/hooks/use-task-page-runtime-preflight.ts'),
   'utf8'
 )
-const GITHUB_DETAIL_OPENERS_SOURCE = readFileSync(
-  join(__dirname, 'task-page/hooks/use-task-page-github-detail-openers.ts'),
-  'utf8'
-)
+const TASK_PAGE_SOURCE = readFileSync(join(__dirname, 'TaskPage.tsx'), 'utf8')
 const USE_ITEM_ACTIONS_SOURCE = readFileSync(
   join(__dirname, 'task-page/hooks/use-task-page-use-item-actions.ts'),
   'utf8'
@@ -110,7 +107,7 @@ describe('TaskPage source switching host boundary', () => {
     expect(sourceContextBuilder).toContain('buildGitLabProviderIdentity(gitlabProjectRef)')
 
     const openGitLabDetail = sourceBetween(
-      GITHUB_DETAIL_OPENERS_SOURCE,
+      TASK_PAGE_SOURCE,
       'const openGitLabDetailPage = useCallback(',
       'const patchTaskPageWorkItemRows = useCallback('
     )

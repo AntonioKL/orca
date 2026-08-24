@@ -37,15 +37,18 @@ describe('feature interaction writer boundaries', () => {
 
   it('keeps task-provider writers off filters, tab switches, query edits, refresh, and pagination', () => {
     const providerWriter = /recordFeatureInteraction\('(github|gitlab|linear)-tasks'\)/
-    const banners = componentSource('task-page/hooks/use-task-page-github-source-banners.ts')
+    const taskPage = componentSource('TaskPage.tsx')
     const pageLoader = componentSource('task-page/hooks/use-task-page-github-page-loader.ts')
-    const search = componentSource('task-page/hooks/use-task-page-github-search.ts')
 
     const passiveSections = [
-      sourceBetween(banners, 'const handleRefreshGithubTasks', 'return {'),
+      sourceBetween(taskPage, 'const handleRefreshGithubTasks', 'const {\n    newIssueOpen'),
       sourceBetween(pageLoader, 'const handleLoadNextPage', 'return { handleLoadNextPage }'),
-      sourceBetween(search, 'const handleApplyTaskSearch', 'const handleSetDefaultTaskPreset'),
-      sourceBetween(search, 'const handleSelectGithubTaskKind', 'const handleResetGithubTaskSearch')
+      sourceBetween(taskPage, 'const handleApplyTaskSearch', 'const handleSetDefaultTaskPreset'),
+      sourceBetween(
+        taskPage,
+        'const handleSelectGithubTaskKind',
+        'const handleResetGithubTaskSearch'
+      )
     ]
     for (const section of passiveSections) {
       expect(section).not.toMatch(providerWriter)
@@ -95,7 +98,7 @@ describe('feature interaction writer boundaries', () => {
   it('suppresses Tasks surface telemetry for in-page provider switches and detail opens', () => {
     const suppression = 'recordTasksInteraction: false'
     const githubDetailSection = sourceBetween(
-      componentSource('task-page/hooks/use-task-page-github-detail-openers.ts'),
+      componentSource('TaskPage.tsx'),
       'const openGitHubDetailPage',
       'const patchTaskPageWorkItemRows'
     )
@@ -172,6 +175,24 @@ describe('feature interaction writer boundaries', () => {
     for (const section of mutationSections) {
       expect(section).toContain(gitlabWriter)
     }
+  })
+
+  it('keeps nested GitLab row actions from also opening task details by keyboard', () => {
+    const rowSection = sourceBetween(
+      componentSource('task-page/gitlab/gitlab-work-item-list.tsx'),
+      'onKeyDown={(event) => {',
+      'className="grid w-full cursor-pointer'
+    )
+    expect(rowSection).toContain('event.target !== event.currentTarget')
+    expect(rowSection.indexOf('event.target !== event.currentTarget')).toBeLessThan(
+      rowSection.indexOf("event.key === 'Enter'")
+    )
+  })
+
+  it('keys GitLab rows by repository and item identity across hosts', () => {
+    expect(componentSource('task-page/gitlab/gitlab-work-item-list.tsx')).toContain(
+      'key={`${item.repoId}:${item.id}`}'
+    )
   })
 
   it('records Linear provider-depth for inline edits, board drops, creation, and workspace use', () => {

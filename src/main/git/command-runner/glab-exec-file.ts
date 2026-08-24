@@ -13,6 +13,7 @@ import {
 } from './gh-retry-policy'
 
 // Why: cloned from the gh runner rather than abstracted behind a generic runner, to avoid touching the working gh path.
+const DEFAULT_GLAB_EXEC_TIMEOUT_MS = 30_000
 
 export type GlabExecOptions = Omit<GitExecOptions, 'cwd'> & {
   cwd?: string
@@ -66,7 +67,7 @@ export async function glabExecFileAsync(
         cwd: resolved.cwd,
         encoding: (options.encoding ?? 'utf-8') as BufferEncoding,
         maxBuffer: options.maxBuffer,
-        timeout: options.timeout,
+        timeout: options.timeout ?? DEFAULT_GLAB_EXEC_TIMEOUT_MS,
         env: options.env,
         signal: options.signal
       })

@@ -87,4 +87,17 @@ describe('TaskPage Linear/Jira creation drafts', () => {
     )
     expect(jiraIssueSection).toContain('discardNewJiraIssueDraft()')
   })
+
+  it('surfaces Jira create transport failures without leaking stale-context toasts', () => {
+    const jiraIssueSection = sectionBetween(
+      jiraCreateSubmitSource,
+      'const handleCreateNewJiraIssue',
+      'return { handleCreateNewJiraIssue }'
+    )
+    expect(jiraIssueSection).toContain('} catch (error) {')
+    expect(jiraIssueSection).toContain(
+      'submitProviderRuntimeContextKey === providerRuntimeContextKeyRef.current'
+    )
+    expect(jiraIssueSection).toContain('toast.error(')
+  })
 })

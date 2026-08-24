@@ -76,14 +76,17 @@ export function GitlabWorkItemList({
             <div
               role="button"
               tabIndex={0}
-              key={item.id}
+              key={`${item.repoId}:${item.id}`}
               onClick={() => {
                 useAppStore.getState().recordFeatureInteraction('gitlab-tasks')
                 openGitLabDetailPage(item)
               }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault()
+              onKeyDown={(event) => {
+                if (event.target !== event.currentTarget) {
+                  return
+                }
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
                   useAppStore.getState().recordFeatureInteraction('gitlab-tasks')
                   openGitLabDetailPage(item)
                 }

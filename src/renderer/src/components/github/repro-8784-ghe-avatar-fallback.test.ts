@@ -77,15 +77,20 @@ describe('issue #8784 GHE avatar fallback (regression)', () => {
       displayName: 'option.name'
     },
     {
-      file: 'TaskPage.tsx',
+      file: 'task-page/github/github-assignee-avatars.tsx',
       fn: 'GitHubAssigneeAvatar',
       login: 'assignee.login',
       displayName: 'assignee.name'
     },
-    { file: 'TaskPage.tsx', fn: 'GHAssigneesCell', login: 'user.login', displayName: 'user.name' },
     {
-      file: 'TaskPage.tsx',
-      fn: 'PRReviewCell',
+      file: 'task-page/github/github-assignees-cell.tsx',
+      fn: 'GHAssigneesCell',
+      login: 'user.login',
+      displayName: 'user.name'
+    },
+    {
+      file: 'task-page/github/pr-review-picker-panel.tsx',
+      fn: 'PRReviewPickerPanel',
       login: 'reviewer.login',
       displayName: 'reviewer.name'
     }
