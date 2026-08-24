@@ -1447,6 +1447,12 @@ export class AgentHookServer {
     let previous = this.state.lastStatusByPaneKey.get(payload.paneKey) as
       | EnrichedAgentHookEventPayload
       | undefined
+    const diagnosticAwarePayload =
+      payload.hookEventName === 'SessionStart'
+        ? { ...payload, reconcileDiagnostic: null }
+        : payload.reconcileDiagnostic === undefined && previous?.reconcileDiagnostic !== undefined
+          ? { ...payload, reconcileDiagnostic: previous.reconcileDiagnostic }
+          : payload
     const connectionClearWatermark = payload.connectionId
       ? this.connectionTimestampWatermarkById.get(payload.connectionId)
       : undefined
@@ -1464,8 +1470,8 @@ export class AgentHookServer {
       // Why: identity-only rows survive replay but must not emit prompt telemetry or a fabricated status.
       onAccepted?.()
       const enriched = {
-        ...this.attachStatusTiming(payload, now),
-        observation: this.stampObservation(payload, origin, now)
+        ...this.attachStatusTiming(diagnosticAwarePayload, now),
+        observation: this.stampObservation(diagnosticAwarePayload, origin, now)
       }
       this.clearAssistantMessageRetry(enriched.paneKey)
       this.runtimeObservedStatusPaneKeys.delete(enriched.paneKey)
@@ -1476,19 +1482,21 @@ export class AgentHookServer {
       return enriched
     }
     const stateReconciledPayload =
-      payload.connectionId && payload.payload.agentType === 'codex' && payload.hookEventName
+      diagnosticAwarePayload.connectionId &&
+      diagnosticAwarePayload.payload.agentType === 'codex' &&
+      diagnosticAwarePayload.hookEventName
         ? {
-            ...payload,
+            ...diagnosticAwarePayload,
             payload: reconcileRemoteCodexState(
               this.state,
-              payload.paneKey,
-              payload.hookEventName,
-              payload.toolAgentId,
-              payload.payload,
+              diagnosticAwarePayload.paneKey,
+              diagnosticAwarePayload.hookEventName,
+              diagnosticAwarePayload.toolAgentId,
+              diagnosticAwarePayload.payload,
               previous?.payload
             )
           }
-        : payload
+        : diagnosticAwarePayload
     const previousCodexRoot =
       stateReconciledPayload.payload.agentType === 'codex' &&
       stateReconciledPayload.toolAgentId &&
@@ -1675,6 +1683,11 @@ export class AgentHookServer {
     if (entry?.payload.agentType !== 'codex') {
       return
     }
+    // Transcript paths for relay/SSH/WSL panes belong to the execution host; reconciliation is
+    // performed there and only its result crosses the wire.
+    if (entry.connectionId) {
+      return
+    }
     if (!transcriptPath?.trim()) {
       if (entry.restoredUnconfirmed && !entry.reconcileDiagnostic) {
         const diagnostic: EnrichedAgentHookEventPayload = {
@@ -1682,24 +1695,6 @@ export class AgentHookServer {
           reconcileDiagnostic: {
             kind: 'unverifiable',
             reason: 'transcript-unreadable',
-            observedAt: Date.now()
-          }
-        }
-        this.state.lastStatusByPaneKey.set(paneKey, diagnostic)
-        this.scheduleStatusPersist()
-        this.notifyStatusChangeListeners()
-        this.emitEnrichedStatus(diagnostic)
-      }
-      return
-    }
-    if (entry.connectionId) {
-      // Remote paths belong to the execution host; the client must never open them locally.
-      if (!entry.reconcileDiagnostic) {
-        const diagnostic: EnrichedAgentHookEventPayload = {
-          ...entry,
-          reconcileDiagnostic: {
-            kind: 'unverifiable',
-            reason: 'owner-unavailable',
             observedAt: Date.now()
           }
         }
@@ -1742,6 +1737,7 @@ export class AgentHookServer {
         const next: EnrichedAgentHookEventPayload = {
           ...current,
           payload: nextPayload,
+          reconcileDiagnostic: null,
           ...(terminal ? { restoredUnconfirmed: undefined } : {})
         }
         this.state.lastStatusByPaneKey.set(paneKey, next)
@@ -1751,7 +1747,26 @@ export class AgentHookServer {
         this.emitEnrichedStatus(next)
       }
       attempt += 1
-      if (!terminal && attempt < CODEX_RESTART_RECONCILE_ATTEMPTS) {
+      if (!terminal && attempt >= CODEX_RESTART_RECONCILE_ATTEMPTS) {
+        const unreadable = [...transcript.subagents.values()].some((child) => child.unresolvedSince)
+        if (
+          unreadable &&
+          (current.reconcileDiagnostic === undefined || current.reconcileDiagnostic === null)
+        ) {
+          const diagnostic: EnrichedAgentHookEventPayload = {
+            ...current,
+            reconcileDiagnostic: {
+              kind: 'unverifiable',
+              reason: 'transcript-unreadable',
+              observedAt: Date.now()
+            }
+          }
+          this.state.lastStatusByPaneKey.set(paneKey, diagnostic)
+          this.scheduleStatusPersist()
+          this.notifyStatusChangeListeners()
+          this.emitEnrichedStatus(diagnostic)
+        }
+      } else if (!terminal && attempt < CODEX_RESTART_RECONCILE_ATTEMPTS) {
         const timer = setTimeout(reconcile, CODEX_RESTART_RECONCILE_MS)
         this.codexRestartReconcileTimers.set(paneKey, timer)
         if (typeof timer.unref === 'function') {

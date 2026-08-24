@@ -261,4 +261,57 @@ describe('AgentHookServer Codex subagent transcript polling', () => {
       second.stop()
     }
   })
+
+  it('preserves an unreadable transcript diagnostic across ordinary hooks', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-hook-codex-unreadable-'))
+    dirs.push(dir)
+    const parentPath = join(dir, 'rollout-parent.jsonl')
+    writeFileSync(parentPath, spawnLine(CHILD_ID, '/root/missing'))
+    const first = new AgentHookServer()
+    await first.start({ env: 'production', userDataPath: dir })
+    try {
+      const post = async (server: AgentHookServer): Promise<void> => {
+        const env = server.buildPtyEnv()
+        await fetch(`http://127.0.0.1:${env.ORCA_AGENT_HOOK_PORT}/hook/codex`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Orca-Agent-Hook-Token': env.ORCA_AGENT_HOOK_TOKEN
+          },
+          body: JSON.stringify({
+            paneKey: PANE_KEY,
+            tabId: 'tab-1',
+            worktreeId: 'wt-1',
+            payload: {
+              hook_event_name: 'PostToolUse',
+              session_id: 'root-session',
+              transcript_path: parentPath,
+              tool_name: 'collaborationspawn_agent'
+            }
+          })
+        })
+      }
+      await post(first)
+      first.stop()
+      const server = new AgentHookServer()
+      await server.start({ env: 'production', userDataPath: dir })
+      await vi.waitFor(
+        () =>
+          expect(server.getStatusSnapshot()[0]?.reconcileDiagnostic).toEqual({
+            kind: 'unverifiable',
+            reason: 'transcript-unreadable',
+            observedAt: expect.any(Number)
+          }),
+        { timeout: 7_000, interval: 100 }
+      )
+      await post(server)
+      expect(server.getStatusSnapshot()[0]?.reconcileDiagnostic).toEqual({
+        kind: 'unverifiable',
+        reason: 'transcript-unreadable',
+        observedAt: expect.any(Number)
+      })
+    } finally {
+      first.stop()
+    }
+  })
 })
