@@ -1507,6 +1507,7 @@ export class SshRelaySession {
         isReplay?: unknown
         providerSession?: unknown
         providerSessionOnly?: unknown
+        reconcileDiagnostic?: unknown
         shedFields?: unknown
         claudeRunningNonAgentTask?: unknown
         payload?: unknown
@@ -1542,6 +1543,7 @@ export class SshRelaySession {
           isReplay: envelope.isReplay === true ? true : undefined,
           providerSession: envelope.providerSession,
           providerSessionOnly: envelope.providerSessionOnly === true ? true : undefined,
+          reconcileDiagnostic: envelope.reconcileDiagnostic,
           // Why: names the fields the relay dropped to fit the frame; ingestRemote restores them.
           shedFields: envelope.shedFields,
           claudeRunningNonAgentTask:

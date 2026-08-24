@@ -1730,6 +1730,7 @@ export class AgentHookServer {
         ...(terminal ? { state: 'done' as const } : {}),
         ...(subagents ? { subagents } : { subagents: undefined })
       }
+      let latest = current
       if (
         JSON.stringify(nextPayload) !== JSON.stringify(current.payload) ||
         (terminal && current.restoredUnconfirmed)
@@ -1742,6 +1743,7 @@ export class AgentHookServer {
         }
         this.state.lastStatusByPaneKey.set(paneKey, next)
         original = next
+        latest = next
         this.scheduleStatusPersist()
         this.notifyStatusChangeListeners()
         this.emitEnrichedStatus(next)
@@ -1751,10 +1753,10 @@ export class AgentHookServer {
         const unreadable = [...transcript.subagents.values()].some((child) => child.unresolvedSince)
         if (
           unreadable &&
-          (current.reconcileDiagnostic === undefined || current.reconcileDiagnostic === null)
+          (latest.reconcileDiagnostic === undefined || latest.reconcileDiagnostic === null)
         ) {
           const diagnostic: EnrichedAgentHookEventPayload = {
-            ...current,
+            ...latest,
             reconcileDiagnostic: {
               kind: 'unverifiable',
               reason: 'transcript-unreadable',

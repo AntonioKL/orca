@@ -314,4 +314,67 @@ describe('AgentHookServer Codex subagent transcript polling', () => {
       first.stop()
     }
   })
+
+  it('keeps the final reconciled roster when marking an unresolved child unverifiable', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-hook-codex-final-reconcile-'))
+    dirs.push(dir)
+    const parentPath = join(dir, 'rollout-parent.jsonl')
+    const completedLaterPath = join(dir, `rollout-child-${CHILD_ID}.jsonl`)
+    writeFileSync(
+      parentPath,
+      `${spawnLine(CHILD_ID, '/root/completes-late')}${spawnLine(SECOND_CHILD_ID, '/root/missing')}`
+    )
+    writeFileSync(
+      completedLaterPath,
+      line({ type: 'event_msg', payload: { type: 'task_started' } })
+    )
+    const first = new AgentHookServer()
+    let server: AgentHookServer | undefined
+    await first.start({ env: 'production', userDataPath: dir })
+    try {
+      const env = first.buildPtyEnv()
+      await fetch(`http://127.0.0.1:${env.ORCA_AGENT_HOOK_PORT}/hook/codex`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Orca-Agent-Hook-Token': env.ORCA_AGENT_HOOK_TOKEN
+        },
+        body: JSON.stringify({
+          paneKey: PANE_KEY,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          payload: {
+            hook_event_name: 'PostToolUse',
+            session_id: 'root-session',
+            transcript_path: parentPath,
+            tool_name: 'collaborationspawn_agent'
+          }
+        })
+      })
+      first.stop()
+      server = new AgentHookServer()
+      await server.start({ env: 'production', userDataPath: dir })
+      setTimeout(() => {
+        appendFileSync(
+          completedLaterPath,
+          line({ type: 'event_msg', payload: { type: 'task_complete' } })
+        )
+      }, 3_500).unref()
+      await vi.waitFor(
+        () => {
+          const status = server?.getStatusSnapshot()[0]
+          expect(status?.reconcileDiagnostic).toEqual({
+            kind: 'unverifiable',
+            reason: 'transcript-unreadable',
+            observedAt: expect.any(Number)
+          })
+          expect(status?.subagents).toEqual([expect.objectContaining({ id: SECOND_CHILD_ID })])
+        },
+        { timeout: 7_000, interval: 100 }
+      )
+    } finally {
+      server?.stop()
+      first.stop()
+    }
+  })
 })

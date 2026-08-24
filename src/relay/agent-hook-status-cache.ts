@@ -34,10 +34,14 @@ export function applyRelayHookEvent(options: {
   clearPaneState: (paneKey: string) => void
   forward: (envelope: AgentHookRelayEnvelope) => void
 }): void {
-  const cachedEvent = resolveCachedClaudeCompactOwnership(options.previous, options.event)
-  options.state.lastStatusByPaneKey.delete(options.event.paneKey)
-  options.state.lastStatusByPaneKey.set(options.event.paneKey, cachedEvent)
-  options.metadata.set(options.event.paneKey, {
+  const diagnosticAwareEvent =
+    options.event.payload.agentType === 'codex' && options.event.hookEventName === 'SessionStart'
+      ? { ...options.event, reconcileDiagnostic: null }
+      : options.event
+  const cachedEvent = resolveCachedClaudeCompactOwnership(options.previous, diagnosticAwareEvent)
+  options.state.lastStatusByPaneKey.delete(diagnosticAwareEvent.paneKey)
+  options.state.lastStatusByPaneKey.set(diagnosticAwareEvent.paneKey, cachedEvent)
+  options.metadata.set(diagnosticAwareEvent.paneKey, {
     source: options.source,
     env: options.env,
     version: options.version
