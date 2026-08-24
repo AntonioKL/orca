@@ -20,6 +20,7 @@ import { AUTOMATION_ORPHAN_ISSUES } from '../../shared/automation-list-scope'
 import type { Store } from '../persistence'
 import { resolveAutomationRunTarget } from './run-target-resolution'
 import { AutomationService } from './service'
+import { installFakeAppEnvironment } from '../../../config/scripts/vitest-host-ports-setup'
 
 const testState = { dir: '' }
 
@@ -36,6 +37,7 @@ vi.mock('electron', () => ({
 
 async function createStore(): Promise<Store> {
   vi.resetModules()
+  installFakeAppEnvironment({ getPath: () => testState.dir })
   const { Store: StoreClass, initDataPath } = await import('../persistence')
   initDataPath()
   return new StoreClass()

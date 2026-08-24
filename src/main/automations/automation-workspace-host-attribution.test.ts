@@ -16,6 +16,7 @@ import type { SshTarget } from '../../shared/ssh-types'
 import { getDefaultPersistedState } from '../../shared/constants'
 import { AUTOMATION_ORPHAN_ISSUES } from '../../shared/automation-list-scope'
 import { AutomationService } from './service'
+import { installFakeAppEnvironment } from '../../../config/scripts/vitest-host-ports-setup'
 
 const testState = { dir: '' }
 
@@ -115,6 +116,7 @@ async function createStore(
     'utf-8'
   )
   vi.resetModules()
+  installFakeAppEnvironment({ getPath: () => testState.dir })
   const { Store, initDataPath } = await import('../persistence')
   initDataPath()
   return new Store()

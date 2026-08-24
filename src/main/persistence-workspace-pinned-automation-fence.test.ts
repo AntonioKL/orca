@@ -20,6 +20,7 @@ import { AUTOMATION_ORPHAN_ISSUES } from '../shared/automation-list-scope'
 import { AUTOMATION_OWNER_CONFLICT_CODES } from '../shared/automation-owner-conflict'
 import { getDefaultPersistedState } from '../shared/constants'
 import { folderWorkspaceKey } from '../shared/workspace-scope'
+import { installFakeAppEnvironment } from '../../config/scripts/vitest-host-ports-setup'
 
 const testState = { dir: '' }
 
@@ -112,6 +113,7 @@ async function createStoreFromState(state: Record<string, unknown>) {
     'utf-8'
   )
   vi.resetModules()
+  installFakeAppEnvironment({ getPath: () => testState.dir })
   const { Store, initDataPath } = await import('./persistence')
   initDataPath()
   return new Store()
@@ -119,6 +121,7 @@ async function createStoreFromState(state: Record<string, unknown>) {
 
 async function reloadStore() {
   vi.resetModules()
+  installFakeAppEnvironment({ getPath: () => testState.dir })
   const { Store, initDataPath } = await import('./persistence')
   initDataPath()
   return new Store()

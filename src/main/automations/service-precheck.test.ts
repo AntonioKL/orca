@@ -6,6 +6,7 @@ import type { Repo } from '../../shared/repo-types'
 import { AutomationService } from './service'
 import { runHeadlessAutomationDispatch } from './headless-dispatch-runner'
 import { createAutomationRunWriter } from './automation-run-writer'
+import { installFakeAppEnvironment } from '../../../config/scripts/vitest-host-ports-setup'
 
 const runAutomationPrecheckMock = vi.hoisted(() => vi.fn())
 const testState = { dir: '' }
@@ -27,6 +28,7 @@ vi.mock('./precheck-runner', () => ({
 
 async function createStore() {
   vi.resetModules()
+  installFakeAppEnvironment({ getPath: () => testState.dir })
   const { Store, initDataPath } = await import('../persistence')
   initDataPath()
   return new Store()

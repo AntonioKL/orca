@@ -1,10 +1,10 @@
 /* eslint-disable max-lines -- Why: external automation discovery, pagination,
  * and lifecycle routing share provider/target validation and remote relay fallbacks. */
-import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { runProcess } from '../../shared/child-process/run-process'
 import type {
   ExternalAutomationAction,
   ExternalAutomationActionInput,
@@ -65,41 +65,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function runLocalProviderCommand(
   command: string,
   args: string[],
-  options: { timeoutMs: number; timeoutMessage: string; execTimeout?: boolean }
+  options: { timeoutMs: number; timeoutMessage: string }
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    let child: ReturnType<typeof execFile> | null = null
-    let settled = false
-
-    const finish = (error: Error | null): void => {
-      if (settled) {
-        return
-      }
-      settled = true
-      clearTimeout(timeout)
-      if (error) {
-        reject(error)
-        return
-      }
-      resolve()
+  return runProcess({ program: command, args, timeoutMs: options.timeoutMs }).then((result) => {
+    if (result.timedOut) {
+      throw new Error(options.timeoutMessage)
     }
-
-    const timeout = setTimeout(() => {
-      child?.kill()
-      finish(new Error(options.timeoutMessage))
-    }, options.timeoutMs)
-
-    try {
-      child = execFile(
-        command,
-        args,
-        { encoding: 'utf-8', ...(options.execTimeout ? { timeout: options.timeoutMs } : {}) },
-        (error) => {
-          finish(error ?? null)
-        }
+    if (result.code !== 0) {
+      throw new Error(
+        result.stderr.trim() || `Command exited with code ${result.code ?? 'unknown'}.`
       )
-    } catch (error) {
-      finish(error instanceof Error ? error : new Error(String(error)))
     }
   })
 }
@@ -124,8 +99,7 @@ async function isCommandOnPath(command: string): Promise<boolean> {
 function runLocalAutomationCommand(command: string, args: string[]): Promise<void> {
   return runLocalProviderCommand(command, args, {
     timeoutMs: LOCAL_AUTOMATION_COMMAND_TIMEOUT_MS,
-    timeoutMessage: `Local automation command timed out after ${LOCAL_AUTOMATION_COMMAND_TIMEOUT_MS}ms.`,
-    execTimeout: true
+    timeoutMessage: `Local automation command timed out after ${LOCAL_AUTOMATION_COMMAND_TIMEOUT_MS}ms.`
   })
 }
 

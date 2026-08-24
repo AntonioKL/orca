@@ -12,6 +12,7 @@ import type { Repo } from '../../shared/repo-types'
 import type { SshTarget } from '../../shared/ssh-types'
 import { getDefaultPersistedState } from '../../shared/constants'
 import { isAutomationDisabledByOwnerMigration } from '../../shared/automation-enablement-decision'
+import { installFakeAppEnvironment } from '../../../config/scripts/vitest-host-ports-setup'
 
 const testState = { dir: '' }
 
@@ -93,6 +94,7 @@ function seed(): void {
 
 async function loadStore() {
   vi.resetModules()
+  installFakeAppEnvironment({ getPath: () => testState.dir })
   const { Store, initDataPath } = await import('../persistence')
   initDataPath()
   return new Store()

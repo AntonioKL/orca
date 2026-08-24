@@ -14,28 +14,10 @@ import type {
 } from '../../shared/automations-types'
 import type * as Fs from 'node:fs'
 
-const execFileMock = vi.hoisted(() =>
-  vi.fn((...args: unknown[]) => {
-    const callback = args.at(-1)
-    if (typeof callback === 'function') {
-      const execCallback = callback as (error: Error | null, stdout: string, stderr: string) => void
-      execCallback(null, '', '')
-    }
-    return { kill: vi.fn() }
-  })
-)
+const runProcessMock = vi.hoisted(() => vi.fn())
 const existsSyncMock = vi.hoisted(() => vi.fn(() => false))
 
-function resolveExecFileMock(...args: unknown[]) {
-  const callback = args.at(-1)
-  if (typeof callback === 'function') {
-    const execCallback = callback as (error: Error | null, stdout: string, stderr: string) => void
-    execCallback(null, '', '')
-  }
-  return { kill: vi.fn() }
-}
-
-vi.mock('child_process', () => ({ execFile: execFileMock }))
+vi.mock('../../shared/child-process/run-process', () => ({ runProcess: runProcessMock }))
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof Fs>('fs')
   return {
@@ -49,8 +31,14 @@ vi.mock('../ssh/ssh-target-registry', () => ({
 }))
 
 beforeEach(() => {
-  execFileMock.mockReset()
-  execFileMock.mockImplementation(resolveExecFileMock)
+  runProcessMock.mockReset()
+  runProcessMock.mockResolvedValue({
+    code: 0,
+    signal: null,
+    stdout: '',
+    stderr: '',
+    timedOut: false
+  })
   existsSyncMock.mockReturnValue(false)
   vi.mocked(getActiveMultiplexer).mockReset()
 })
@@ -192,9 +180,9 @@ describe('createExternalAutomation', () => {
       workdir: '/repo'
     })
 
-    expect(execFileMock).toHaveBeenCalledWith(
-      'hermes',
-      [
+    expect(runProcessMock).toHaveBeenCalledWith({
+      program: 'hermes',
+      args: [
         'cron',
         'create',
         '0 9 * * 1-5',
@@ -206,15 +194,18 @@ describe('createExternalAutomation', () => {
         '--workdir',
         '/repo'
       ],
-      { encoding: 'utf-8', timeout: 30_000 },
-      expect.any(Function)
-    )
+      timeoutMs: 30_000
+    })
   })
 
   it('settles when local Hermes cron creation hangs', async () => {
-    vi.useFakeTimers()
-    const killMock = vi.fn()
-    execFileMock.mockImplementation(() => ({ kill: killMock }))
+    runProcessMock.mockResolvedValue({
+      code: null,
+      signal: null,
+      stdout: '',
+      stderr: '',
+      timedOut: true
+    })
 
     const promise = createExternalAutomation({
       managerId: 'hermes:local',
@@ -232,12 +223,8 @@ describe('createExternalAutomation', () => {
         settled = true
       })
 
-    await vi.advanceTimersByTimeAsync(30_000)
-    await Promise.resolve()
-
-    expect(settled).toBe(true)
     await expect(promise).rejects.toThrow('Local automation command timed out')
-    expect(killMock).toHaveBeenCalled()
+    expect(settled).toBe(true)
   })
 
   it('updates local Hermes cron jobs through the CLI', async () => {
@@ -252,9 +239,9 @@ describe('createExternalAutomation', () => {
       workdir: '/repo'
     })
 
-    expect(execFileMock).toHaveBeenCalledWith(
-      'hermes',
-      [
+    expect(runProcessMock).toHaveBeenCalledWith({
+      program: 'hermes',
+      args: [
         'cron',
         'edit',
         'job-1',
@@ -267,9 +254,8 @@ describe('createExternalAutomation', () => {
         '--workdir',
         '/repo'
       ],
-      { encoding: 'utf-8', timeout: 30_000 },
-      expect.any(Function)
-    )
+      timeoutMs: 30_000
+    })
   })
 })
 
@@ -283,12 +269,11 @@ describe('runExternalAutomationAction', () => {
       action: 'run'
     })
 
-    expect(execFileMock).toHaveBeenCalledWith(
-      'hermes',
-      ['cron', 'run', 'job-1'],
-      { encoding: 'utf-8', timeout: 30_000 },
-      expect.any(Function)
-    )
+    expect(runProcessMock).toHaveBeenCalledWith({
+      program: 'hermes',
+      args: ['cron', 'run', 'job-1'],
+      timeoutMs: 30_000
+    })
   })
 
   it('rejects job IDs that could be parsed as CLI options', async () => {
@@ -302,7 +287,7 @@ describe('runExternalAutomationAction', () => {
       })
     ).rejects.toThrow('Invalid external automation job ID.')
 
-    expect(execFileMock).not.toHaveBeenCalled()
+    expect(runProcessMock).not.toHaveBeenCalled()
   })
 
   it('rejects an action name that is not in the provider table', async () => {
@@ -316,7 +301,7 @@ describe('runExternalAutomationAction', () => {
       })
     ).rejects.toThrow('Unsupported external automation action.')
 
-    expect(execFileMock).not.toHaveBeenCalled()
+    expect(runProcessMock).not.toHaveBeenCalled()
   })
 
   it('rejects an action inherited from the prototype chain', async () => {
@@ -330,7 +315,7 @@ describe('runExternalAutomationAction', () => {
       })
     ).rejects.toThrow('Unsupported external automation action.')
 
-    expect(execFileMock).not.toHaveBeenCalled()
+    expect(runProcessMock).not.toHaveBeenCalled()
   })
 
   it('rejects a provider that has no action table', async () => {
@@ -344,7 +329,7 @@ describe('runExternalAutomationAction', () => {
       })
     ).rejects.toThrow('Unsupported external automation action.')
 
-    expect(execFileMock).not.toHaveBeenCalled()
+    expect(runProcessMock).not.toHaveBeenCalled()
   })
 
   it('maps OpenClaw lifecycle actions through its cron CLI names', async () => {
@@ -356,12 +341,11 @@ describe('runExternalAutomationAction', () => {
       action: 'pause'
     })
 
-    expect(execFileMock).toHaveBeenCalledWith(
-      'openclaw',
-      ['cron', 'disable', 'job-1'],
-      { encoding: 'utf-8', timeout: 30_000 },
-      expect.any(Function)
-    )
+    expect(runProcessMock).toHaveBeenCalledWith({
+      program: 'openclaw',
+      args: ['cron', 'disable', 'job-1'],
+      timeoutMs: 30_000
+    })
   })
 })
 

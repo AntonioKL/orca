@@ -13,18 +13,10 @@ import type { ExternalAutomationProvider } from '../../shared/automations-types'
 import type { SshTarget } from '../../shared/ssh-types'
 import type * as Fs from 'node:fs'
 
-const execFileMock = vi.hoisted(() =>
-  vi.fn((...args: unknown[]) => {
-    const callback = args.at(-1)
-    if (typeof callback === 'function') {
-      ;(callback as (error: Error | null, stdout: string, stderr: string) => void)(null, '', '')
-    }
-    return { kill: vi.fn() }
-  })
-)
+const runProcessMock = vi.hoisted(() => vi.fn())
 const existsSyncMock = vi.hoisted(() => vi.fn(() => false))
 
-vi.mock('child_process', () => ({ execFile: execFileMock }))
+vi.mock('../../shared/child-process/run-process', () => ({ runProcess: runProcessMock }))
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof Fs>('fs')
   return { ...actual, existsSync: existsSyncMock }
@@ -73,13 +65,13 @@ function relay(response: unknown): {
 }
 
 beforeEach(() => {
-  execFileMock.mockReset()
-  execFileMock.mockImplementation((...args: unknown[]) => {
-    const callback = args.at(-1)
-    if (typeof callback === 'function') {
-      ;(callback as (error: Error | null, stdout: string, stderr: string) => void)(null, '', '')
-    }
-    return { kill: vi.fn() }
+  runProcessMock.mockReset()
+  runProcessMock.mockResolvedValue({
+    code: 0,
+    signal: null,
+    stdout: '',
+    stderr: '',
+    timedOut: false
   })
   existsSyncMock.mockReturnValue(false)
   vi.mocked(getActiveMultiplexer).mockReset()
@@ -94,18 +86,21 @@ describe('scoped external automations', () => {
   // returns must still resolve the entry, or the page waits forever on one host.
   it('settles when a local command lookup hangs', async () => {
     vi.useFakeTimers()
-    execFileMock.mockImplementation(() => ({ kill: vi.fn() }))
+    runProcessMock.mockResolvedValue({
+      code: null,
+      signal: null,
+      stdout: '',
+      stderr: '',
+      timedOut: true
+    })
     const promise = buildEngine([]).listManager({ owner: desktopSelf, provider: 'hermes' })
     let settled = false
     void promise.finally(() => {
       settled = true
     })
 
-    await vi.advanceTimersByTimeAsync(5_000)
-    await Promise.resolve()
-
-    expect(settled).toBe(true)
     await expect(promise).resolves.toMatchObject({ manager: null })
+    expect(settled).toBe(true)
   })
 
   it('probes only local managers when Local is selected', async () => {
@@ -115,8 +110,12 @@ describe('scoped external automations', () => {
 
     expect(entry.manager?.id).toBe('hermes:local')
     expect(getActiveMultiplexer).not.toHaveBeenCalled()
-    expect(execFileMock).toHaveBeenCalledTimes(1)
-    expect(execFileMock.mock.calls[0]?.[1]).toEqual(['hermes'])
+    expect(runProcessMock).toHaveBeenCalledTimes(1)
+    expect(runProcessMock.mock.calls[0]?.[0]).toEqual({
+      program: 'which',
+      args: ['hermes'],
+      timeoutMs: 5_000
+    })
   })
 
   it('does not reach out to any SSH target from a Local view', async () => {
@@ -153,7 +152,7 @@ describe('scoped external automations', () => {
       engine.listManager({ owner: desktopSsh('target-a', 3), provider: 'hermes' })
     ).rejects.toBeInstanceOf(AutomationOwnerConflictError)
     expect(getActiveMultiplexer).not.toHaveBeenCalled()
-    expect(execFileMock).not.toHaveBeenCalled()
+    expect(runProcessMock).not.toHaveBeenCalled()
   })
 
   it('excludes a runtime-owned target without probing it', async () => {
@@ -165,7 +164,7 @@ describe('scoped external automations', () => {
       engine.listManager({ owner: desktopSsh('target-a', 3), provider: 'hermes' })
     ).rejects.toBeInstanceOf(ExternalAutomationScopeError)
     expect(getActiveMultiplexer).not.toHaveBeenCalled()
-    expect(execFileMock).not.toHaveBeenCalled()
+    expect(runProcessMock).not.toHaveBeenCalled()
   })
 
   it('rejects a runtime authority before any probe', async () => {
@@ -180,7 +179,7 @@ describe('scoped external automations', () => {
         provider: 'hermes'
       })
     ).rejects.toThrow(EXTERNAL_AUTOMATION_SCOPE_CODES.authorityNotSupported)
-    expect(execFileMock).not.toHaveBeenCalled()
+    expect(runProcessMock).not.toHaveBeenCalled()
     expect(getActiveMultiplexer).not.toHaveBeenCalled()
   })
 
@@ -196,7 +195,7 @@ describe('scoped external automations', () => {
         action: 'delete'
       })
     ).rejects.toThrow(EXTERNAL_AUTOMATION_SCOPE_CODES.providerNotAllowed)
-    expect(execFileMock).not.toHaveBeenCalled()
+    expect(runProcessMock).not.toHaveBeenCalled()
     expect(getActiveMultiplexer).not.toHaveBeenCalled()
   })
 
@@ -214,7 +213,7 @@ describe('scoped external automations', () => {
         workdir: null
       })
     ).rejects.toBeInstanceOf(AutomationOwnerConflictError)
-    expect(execFileMock).not.toHaveBeenCalled()
+    expect(runProcessMock).not.toHaveBeenCalled()
     expect(getActiveMultiplexer).not.toHaveBeenCalled()
   })
 

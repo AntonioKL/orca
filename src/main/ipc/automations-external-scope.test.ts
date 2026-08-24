@@ -24,7 +24,7 @@ const relay = {
   request: vi.fn<(method: string, params: unknown) => Promise<unknown>>(),
   isDisposed: () => false
 }
-vi.mock('../ipc/ssh', () => ({
+vi.mock('../ssh/ssh-target-registry', () => ({
   getActiveMultiplexer: () => relay
 }))
 

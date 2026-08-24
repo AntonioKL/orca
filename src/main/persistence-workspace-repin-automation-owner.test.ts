@@ -20,6 +20,7 @@ import type { SshTarget } from '../shared/ssh-types'
 import { AUTOMATION_ORPHAN_ISSUES } from '../shared/automation-list-scope'
 import { getDefaultPersistedState } from '../shared/constants'
 import { folderWorkspaceKey } from '../shared/workspace-scope'
+import { installFakeAppEnvironment } from '../../config/scripts/vitest-host-ports-setup'
 
 const testState = { dir: '' }
 
@@ -136,6 +137,7 @@ async function loadStore(state: Record<string, unknown>) {
     'utf-8'
   )
   vi.resetModules()
+  installFakeAppEnvironment({ getPath: () => testState.dir })
   const { Store, initDataPath } = await import('./persistence')
   initDataPath()
   return new Store()
@@ -178,6 +180,7 @@ describe('a workspace re-pinned outside the automation editor', () => {
     repinWorkspace('staging')
 
     vi.resetModules()
+    installFakeAppEnvironment({ getPath: () => testState.dir })
     const { Store, initDataPath } = await import('./persistence')
     initDataPath()
     const reloaded = new Store()
@@ -199,6 +202,7 @@ describe('a workspace re-pinned outside the automation editor', () => {
     repinWorkspace('staging', [target('staging', STAGING_GENERATION)])
 
     vi.resetModules()
+    installFakeAppEnvironment({ getPath: () => testState.dir })
     const { Store, initDataPath } = await import('./persistence')
     initDataPath()
     const reloaded = new Store()

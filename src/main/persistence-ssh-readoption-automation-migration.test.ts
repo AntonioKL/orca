@@ -20,6 +20,7 @@ import { getDefaultPersistedState } from '../shared/constants'
 import { toSshExecutionHostId } from '../shared/execution-host'
 import { hostStableKey } from '../shared/automation-owner-key'
 import { folderWorkspaceKey } from '../shared/workspace-scope'
+import { installFakeAppEnvironment } from '../../config/scripts/vitest-host-ports-setup'
 
 const testState = { dir: '' }
 
@@ -141,6 +142,7 @@ async function createStoreFromState(state: Record<string, unknown>) {
     'utf-8'
   )
   vi.resetModules()
+  installFakeAppEnvironment({ getPath: () => testState.dir })
   const { Store, initDataPath } = await import('./persistence')
   initDataPath()
   return new Store()
@@ -149,6 +151,7 @@ async function createStoreFromState(state: Record<string, unknown>) {
 /** Re-read whatever is on disk now — no fixture rewrite. */
 async function reloadStore() {
   vi.resetModules()
+  installFakeAppEnvironment({ getPath: () => testState.dir })
   const { Store, initDataPath } = await import('./persistence')
   initDataPath()
   return new Store()
