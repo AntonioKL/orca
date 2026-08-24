@@ -1,15 +1,11 @@
 import { useAppStore } from '@/store'
 import { parsePaneKey } from '../../../shared/stable-pane-id'
-import { createAgentCompletionCoordinator } from '@/components/terminal-pane/agent-completion-coordinator'
 import type {
   AgentCompletionCoordinator,
   AgentCompletionStatusSnapshot
 } from '@/components/terminal-pane/agent-completion-coordinator-types'
-import type { RuntimeTerminalProcessInspection } from '@/runtime/runtime-terminal-inspection'
-import { dispatchTerminalNotification } from '@/components/terminal-pane/use-notification-dispatch'
 import { collectLeafIdsInOrder } from '@/components/terminal-pane/layout-serialization'
-import { createCodexAutoApprovalHookCompletionSuppressor } from '@/components/terminal-pane/codex-auto-approval-notification-suppression'
-import { dispatchAgentHookTerminalLifecycle } from '@/components/terminal-pane/agent-hook-terminal-lifecycle'
+import { createAgentHookCompletionCoordinator } from './agent-hook-completion-coordinator-factory'
 import {
   isAgentHookCompletionTrackingEnabled,
   shouldSyncAgentHookCompletionForStoreUpdate,
@@ -223,53 +219,6 @@ function paneCanReceiveHookCompletion(paneKey: string, tabIndex?: TabIndex): boo
   // have accepted hook updates before their renderer PTY map catches up.
   return paneKeyHasUnsuppressedPtyHint(state, paneKey, tabIndex) || paneHasLivePty(paneKey)
 }
-function createCoordinator(
-  paneKey: string,
-  worktreeId: string,
-  authoritativeRemote = false
-): AgentCompletionCoordinator {
-  return createAgentCompletionCoordinator({
-    paneKey,
-    statusLane: 'hook',
-    getPtyId: () => getPtyIdForPaneKey(paneKey),
-    getSettings: () => useAppStore.getState().settings,
-    inspectProcess: async (): Promise<RuntimeTerminalProcessInspection> => ({
-      foregroundProcess: null,
-      hasChildProcesses: false
-    }),
-    dispatchHookLifecycle: (payload) => dispatchAgentHookTerminalLifecycle(paneKey, payload),
-    dispatchCompletion: (title, meta) => {
-      if (!isAgentTaskCompleteTrackingEnabled() || paneKeysRequiringFreshWorking.has(paneKey)) {
-        return
-      }
-      dispatchTerminalNotification(worktreeId, {
-        source: 'agent-task-complete',
-        terminalTitle: title,
-        paneKey,
-        suppressOsNotification: !isAgentTaskCompleteNotificationEnabled(),
-        ...(authoritativeRemote && { authoritativeRemote: true }),
-        ...(meta?.agentStatus ? { agentStatusSnapshot: meta.agentStatus } : {})
-      })
-    },
-    dispatchAttention: (title, meta) => {
-      if (!isAgentTaskCompleteTrackingEnabled() || paneKeysRequiringFreshWorking.has(paneKey)) {
-        return
-      }
-      // Why: native notification settings still label this channel as "agent
-      // task complete"; the snapshot state makes the banner read "needs input".
-      dispatchTerminalNotification(worktreeId, {
-        source: 'agent-task-complete',
-        terminalTitle: title,
-        paneKey,
-        suppressOsNotification: !isAgentTaskCompleteNotificationEnabled(),
-        ...(authoritativeRemote && { authoritativeRemote: true }),
-        agentStatusSnapshot: meta.agentStatus
-      })
-    },
-    isLive: () => authoritativeRemote || paneCanReceiveHookCompletion(paneKey),
-    shouldSuppressHookCompletion: createCodexAutoApprovalHookCompletionSuppressor(paneKey)
-  })
-}
 export function observeAgentHookCompletionForNotification({
   paneKey,
   worktreeId,
@@ -307,7 +256,15 @@ export function observeAgentHookCompletionForNotification({
     entry = {
       worktreeId,
       authoritativeRemote: authoritativeRemote === true,
-      coordinator: createCoordinator(paneKey, worktreeId, authoritativeRemote)
+      coordinator: createAgentHookCompletionCoordinator({
+        paneKey,
+        worktreeId,
+        authoritativeRemote: authoritativeRemote === true,
+        getPtyId: () => getPtyIdForPaneKey(paneKey),
+        isLive: () => authoritativeRemote === true || paneCanReceiveHookCompletion(paneKey),
+        isTrackingEnabled: isAgentTaskCompleteTrackingEnabled,
+        requiresFreshWorking: () => paneKeysRequiringFreshWorking.has(paneKey)
+      })
     }
     coordinatorsByPaneKey.set(paneKey, entry)
     if (requireFreshWorkingForNewTrackingCoordinators) {
