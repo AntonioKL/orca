@@ -11,10 +11,8 @@ import { TaskPageGitHubWorkItemStateBadge } from '@/components/task-page-github-
 import { formatPRDelta } from '@/components/task-page-pr-delta-summary'
 import type { ItemDialogTab } from '@/components/GitHubItemDialog'
 import { translate } from '@/i18n/i18n'
-import {
-  findGithubWorkItemWorkspaceAttachment,
-  getGithubWorkItemWorkspaceAttachmentLabel
-} from '@/lib/github-work-item-workspace-attachment'
+import { findGithubWorkItemWorkspaceAttachment } from '@/lib/github-work-item-workspace-attachment'
+import { getWorktreeAttachmentLabel } from '@/lib/worktree-attachment-label'
 import { cn } from '@/lib/utils'
 import type { GitHubWorkItem } from '../../../../../shared/github/work-item-types'
 import type { Repo } from '../../../../../shared/repo-types'
@@ -67,7 +65,7 @@ export function GithubWorkItemRow({
     item.number
   )
   const attachedWorkspaceLabel = attachedWorkspace
-    ? getGithubWorkItemWorkspaceAttachmentLabel(attachedWorkspace)
+    ? getWorktreeAttachmentLabel(attachedWorkspace)
     : null
   const prDelta = item.type === 'pr' ? formatPRDelta(item) : null
   const githubTaskIdPill = (

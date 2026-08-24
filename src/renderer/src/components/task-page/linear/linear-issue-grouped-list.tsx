@@ -6,9 +6,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { LinearPriorityIcon } from '@/components/linear-priority-icon'
 import {
   findLinearIssueWorkspaceAttachmentInIndex,
-  getLinearIssueWorkspaceAttachmentLabel,
   type LinearIssueWorkspaceAttachmentIndex
 } from '@/lib/linear-issue-workspace-attachment'
+import { getWorktreeAttachmentLabel } from '@/lib/worktree-attachment-label'
 import { translate } from '@/i18n/i18n'
 import { cn } from '@/lib/utils'
 import type { LinearIssue } from '../../../../../shared/linear/issue-types'
@@ -69,7 +69,7 @@ export function LinearIssueGroupedList({
           issue
         )
         const attachedWorkspaceLabel = attachedWorkspace
-          ? getLinearIssueWorkspaceAttachmentLabel(attachedWorkspace)
+          ? getWorktreeAttachmentLabel(attachedWorkspace)
           : null
         return (
           <div
