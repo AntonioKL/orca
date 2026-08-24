@@ -1,14 +1,8 @@
 import type { CreateWorktreeResult } from '../../shared/worktree/create-types'
 import type { Repo } from '../../shared/repo-types'
-import {
-  createSetupRunnerScript,
-  getDefaultTabsLaunch,
-  getEffectiveHooks,
-  loadHooks,
-  resolveSetupRunnerShell,
-  runHook,
-  shouldRunSetupForCreate
-} from '../hooks'
+import { getEffectiveHooks, loadHooks, runHook } from '../hooks'
+import { createSetupRunnerScript, resolveSetupRunnerShell } from '../worktree-runner-script'
+import { getDefaultTabsLaunch, shouldRunSetupForCreate } from '../effective-hook-config'
 import type { RuntimeManagedWorktreeCreateArgs } from './runtime-managed-worktree-create-types'
 import type { RuntimeStore } from './runtime-store-contract'
 

@@ -1,6 +1,7 @@
 import {
   detectAgentStatusFromTitle,
   isOpenCodeNativeTitle,
+  isCursorAgentTitle,
   isQuarterCircleSpinnerOnlyAgentTitle,
   isShellProcess,
   type AgentStatus
@@ -38,9 +39,27 @@ type Dependencies = {
 }
 
 export class RuntimeTerminalAgentStatusQuery {
+  private readonly inFlight = new Map<string, Promise<RuntimeTerminalAgentStatus>>()
+
   constructor(private readonly deps: Dependencies) {}
 
   async getStatus(handle: string): Promise<RuntimeTerminalAgentStatus> {
+    const existing = this.inFlight.get(handle)
+    if (existing) {
+      return existing
+    }
+    const request = this.readStatus(handle)
+    this.inFlight.set(handle, request)
+    try {
+      return await request
+    } finally {
+      if (this.inFlight.get(handle) === request) {
+        this.inFlight.delete(handle)
+      }
+    }
+  }
+
+  private async readStatus(handle: string): Promise<RuntimeTerminalAgentStatus> {
     const ptyId = this.getPtyId(handle)
     const terminal = this.getSnapshot(handle, ptyId)
     const explicitStatus = this.deps.getExplicitStatus(handle)
@@ -49,14 +68,16 @@ export class RuntimeTerminalAgentStatusQuery {
       terminal.titleStatusIsLive &&
       terminal.titleStatus !== null &&
       terminal.titleStatus !== 'permission' &&
-      !isOpenCodeNativeTitle(terminal.title)
+      !isOpenCodeNativeTitle(terminal.title) &&
+      !isCursorAgentTitle(terminal.title)
     if (terminal.titleStatus === 'permission' && terminal.titleStatusIsLive) {
       return { handle, isRunningAgent: true, status: 'permission' }
     }
     if (
       blockedByWaitText &&
       !liveTitleClearsBlockedText &&
-      (!explicitStatus ||
+      (blockedByWaitText === 'agent-approval-prompt' ||
+        !explicitStatus ||
         explicitStatus.status === 'permission' ||
         (terminal.waitBlockedAt !== null && terminal.waitBlockedAt >= explicitStatus.updatedAt))
     ) {

@@ -3,6 +3,7 @@ import type { RuntimeFileCommands } from './orca-runtime-files'
 type RuntimeFileCommandName =
   | 'listMobileFiles'
   | 'searchMobileFilePaths'
+  | 'searchQuickOpenFilePaths'
   | 'openMobileFile'
   | 'openMobileDiff'
   | 'readMobileFile'
@@ -39,6 +40,7 @@ export function installRuntimeFileCommandSurface(
   Object.assign(target, {
     listMobileFiles: commands.listMobileFiles.bind(commands),
     searchMobileFilePaths: commands.searchMobileFilePaths.bind(commands),
+    searchQuickOpenFilePaths: commands.searchQuickOpenFilePaths.bind(commands),
     openMobileFile: commands.openMobileFile.bind(commands),
     openMobileDiff: commands.openMobileDiff.bind(commands),
     readMobileFile: commands.readMobileFile.bind(commands),

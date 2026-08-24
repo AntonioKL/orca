@@ -16,11 +16,13 @@ export type RuntimeServiceCommandSurface = {
   onClientEvent: RuntimeClientEventBus['on']
   notifyNativeChatLaunchDraftResolved: RuntimeNativeChatDraftResolutions['notify']
   registerSubscriptionCleanup: RuntimeSubscriptionRegistry['register']
+  registerOwnedSubscriptionCleanup: RuntimeSubscriptionRegistry['registerOwned']
   cleanupSubscription: RuntimeSubscriptionRegistry['cleanup']
   retrySubscriptionCleanupAfter: RuntimeSubscriptionRegistry['retryAfter']
   cleanupSubscriptionAndWait: RuntimeSubscriptionRegistry['cleanupAndWait']
   cleanupSubscriptionsByPrefix: RuntimeSubscriptionRegistry['cleanupByPrefix']
   cleanupSubscriptionsForConnection: RuntimeSubscriptionRegistry['cleanupForConnection']
+  cleanupSubscriptionIfOwnedByConnection: RuntimeSubscriptionRegistry['cleanupIfOwnedByConnection']
   onNotificationDispatched: RuntimeMobileNotificationController['onDispatched']
   getMobileNotificationListenerCount: RuntimeMobileNotificationController['getListenerCount']
   dispatchMobileNotification: RuntimeMobileNotificationController['dispatch']
@@ -93,11 +95,14 @@ export function installRuntimeServiceCommandSurface(
     onClientEvent: events.on.bind(events),
     notifyNativeChatLaunchDraftResolved: drafts.notify.bind(drafts),
     registerSubscriptionCleanup: subscriptions.register.bind(subscriptions),
+    registerOwnedSubscriptionCleanup: subscriptions.registerOwned.bind(subscriptions),
     cleanupSubscription: subscriptions.cleanup.bind(subscriptions),
     retrySubscriptionCleanupAfter: subscriptions.retryAfter.bind(subscriptions),
     cleanupSubscriptionAndWait: subscriptions.cleanupAndWait.bind(subscriptions),
     cleanupSubscriptionsByPrefix: subscriptions.cleanupByPrefix.bind(subscriptions),
     cleanupSubscriptionsForConnection: subscriptions.cleanupForConnection.bind(subscriptions),
+    cleanupSubscriptionIfOwnedByConnection:
+      subscriptions.cleanupIfOwnedByConnection.bind(subscriptions),
     onNotificationDispatched: notifications.onDispatched.bind(notifications),
     getMobileNotificationListenerCount: notifications.getListenerCount.bind(notifications),
     dispatchMobileNotification: notifications.dispatch.bind(notifications),

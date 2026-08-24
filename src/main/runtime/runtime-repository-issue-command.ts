@@ -1,5 +1,6 @@
 import type { Repo } from '../../shared/repo-types'
-import { parseOrcaYaml, readIssueCommand, writeIssueCommand } from '../hooks'
+import { parseOrcaYaml } from '../hooks'
+import { readIssueCommand, writeIssueCommand } from '../issue-command-file'
 import { isENOENT } from '../ipc/filesystem-auth'
 import { getSshFilesystemProvider } from '../providers/ssh-filesystem-dispatch'
 import type { IFilesystemProvider } from '../providers/types'

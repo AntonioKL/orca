@@ -28,14 +28,21 @@ type RuntimeTerminalAgentPresenceDependencies = {
   getForegroundProcess(ptyId: string): Promise<string | null> | null
 }
 
+export type RuntimeTerminalAgentPresenceOptions = {
+  retryForegroundWrappers?: boolean
+}
+
 export class RuntimeTerminalAgentPresence {
   constructor(private readonly deps: RuntimeTerminalAgentPresenceDependencies) {}
 
-  async isRunning(handle: string): Promise<boolean> {
+  async isRunning(
+    handle: string,
+    options: RuntimeTerminalAgentPresenceOptions = {}
+  ): Promise<boolean> {
     try {
       const pty = this.deps.getLivePty(handle)
       if (pty) {
-        return await this.isPtyRunning(pty, this.deps.getPrimaryLeaf(pty.ptyId))
+        return await this.isPtyRunning(pty, this.deps.getPrimaryLeaf(pty.ptyId), options)
       }
       const leaf = this.deps.getLiveLeaf(handle)
       const trackedPty = leaf.ptyId ? this.deps.getTrackedPty(leaf.ptyId) : null
@@ -77,7 +84,12 @@ export class RuntimeTerminalAgentPresence {
       if (suppressClaude && isExpectedAgentProcess(foreground, 'claude')) {
         return false
       }
-      return await this.isRecognizedForegroundAgentProcess(leaf.ptyId, foreground, suppressClaude)
+      return await this.isRecognizedForegroundAgentProcess(
+        leaf.ptyId,
+        foreground,
+        suppressClaude,
+        options.retryForegroundWrappers !== false
+      )
     } catch {
       return false
     }
@@ -85,7 +97,8 @@ export class RuntimeTerminalAgentPresence {
 
   private async isPtyRunning(
     pty: RuntimePtyWorktreeRecord,
-    leaf: RuntimeLeafRecord | null
+    leaf: RuntimeLeafRecord | null,
+    options: RuntimeTerminalAgentPresenceOptions
   ): Promise<boolean> {
     const leafTitle = leaf
       ? getLatestAgentCandidateTitle(
@@ -136,19 +149,28 @@ export class RuntimeTerminalAgentPresence {
     if (suppressClaude && isExpectedAgentProcess(foreground, 'claude')) {
       return false
     }
-    return await this.isRecognizedForegroundAgentProcess(pty.ptyId, foreground, suppressClaude)
+    return await this.isRecognizedForegroundAgentProcess(
+      pty.ptyId,
+      foreground,
+      suppressClaude,
+      options.retryForegroundWrappers !== false
+    )
   }
 
   private async isRecognizedForegroundAgentProcess(
     ptyId: string,
     foregroundProcess: string,
-    suppressClaude: boolean
+    suppressClaude: boolean,
+    retryForegroundWrappers: boolean
   ): Promise<boolean> {
     const recognized = recognizeAgentProcess(foregroundProcess)
     if (recognized) {
       return !(suppressClaude && isExpectedAgentProcess(recognized.processName, 'claude'))
     }
     if (!isAgentForegroundWrapperProcess(foregroundProcess)) {
+      return false
+    }
+    if (!retryForegroundWrappers) {
       return false
     }
     const startedAt = Date.now()

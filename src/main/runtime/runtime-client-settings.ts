@@ -34,6 +34,8 @@ export type RuntimeClientSettings = Pick<
   | 'minimaxUsageModels'
   | 'prBotAuthorOverrides'
   | 'artifactSharingEnabled'
+  | 'worktreeVisibilityDefaults'
+  | 'agentSkillSharingEnabled'
 >
 
 export type RuntimeClientSettingsUpdate = Pick<
@@ -54,6 +56,7 @@ export type RuntimeClientSettingsUpdate = Pick<
   | 'minimaxGroupId'
   | 'minimaxUsageModels'
   | 'prBotAuthorOverrides'
+  | 'worktreeVisibilityDefaults'
 >
 
 export class RuntimeClientSettingsController {
@@ -85,7 +88,9 @@ export class RuntimeClientSettingsController {
       minimaxGroupId: settings.minimaxGroupId ?? '',
       minimaxUsageModels: settings.minimaxUsageModels ?? 'general',
       prBotAuthorOverrides: settings.prBotAuthorOverrides ?? [],
-      artifactSharingEnabled: isArtifactSharingEnabled(settings)
+      artifactSharingEnabled: isArtifactSharingEnabled(settings),
+      worktreeVisibilityDefaults: settings.worktreeVisibilityDefaults,
+      agentSkillSharingEnabled: settings.agentSkillSharingEnabled === true
     }
   }
 

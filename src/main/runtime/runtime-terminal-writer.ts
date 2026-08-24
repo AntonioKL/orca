@@ -6,6 +6,7 @@ import {
 import { iterateTerminalInputChunks } from '../../shared/terminal-input'
 
 export type RuntimeTerminalWriteOptions = {
+  signal?: AbortSignal
   beforeWrite?: (ptyId: string) => void | Promise<void>
   reserveWrite?: (ptyId: string) => void
   afterWrite?: (ptyId: string) => void | Promise<void>
@@ -21,6 +22,9 @@ export class RuntimeTerminalWriter {
     payload: string,
     options: RuntimeTerminalWriteOptions = {}
   ): Promise<void> {
+    if (options.signal?.aborted) {
+      throw options.signal.reason ?? new Error('terminal_write_aborted')
+    }
     const hasText = typeof action.text === 'string' && action.text.length > 0
     const hasSuffix = action.enter || action.interrupt
     if (hasText) {
@@ -65,6 +69,9 @@ export class RuntimeTerminalWriter {
     const chunks = iterateTerminalInputChunks(text)
     let chunk = chunks.next()
     while (!chunk.done) {
+      if (options.signal?.aborted) {
+        throw options.signal.reason ?? new Error('terminal_write_aborted')
+      }
       await options.beforeWrite?.(ptyId)
       options.reserveWrite?.(ptyId)
       if (!this.write(ptyId, chunk.value)) {

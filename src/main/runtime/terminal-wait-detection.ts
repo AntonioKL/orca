@@ -159,7 +159,7 @@ function isTerminalWaitWhitespace(value: string, index: number): boolean {
 }
 
 export const TERMINAL_WAIT_BLOCKED_SENTINEL_RE =
-  /update available|choose working directory to|codex just got an upgrade|hooks need review|do you trust|trust this|trusted workspace|press enter to (?:confirm|continue|view|insert)|press t to trust|permission required|requires permission|allow once|allow always/i
+  /update available|choose working directory to|codex just got an upgrade|hooks need review|do you trust|trust this|trusted workspace|press enter to (?:confirm|continue|view|insert)|press t to trust|permission required|requires permission|allow once|allow always|waiting for approval|not in allowlist|run \(once\)/i
 
 function findTerminalWaitBlockedSignal(
   normalized: string
@@ -243,9 +243,43 @@ function findTerminalWaitBlockedSignal(
       candidates.push({ reason: 'codex-interactive-prompt', index: permissionPromptIndex })
     }
   }
+  const approvalIndex = Math.max(
+    normalized.lastIndexOf('waiting for approval'),
+    normalized.lastIndexOf('not in allowlist'),
+    normalized.lastIndexOf('run this command?')
+  )
+  if (
+    approvalIndex !== -1 &&
+    !hasTrailingApprovalOutput(normalized, approvalIndex) &&
+    (normalized.includes('run (once)', approvalIndex) ||
+      normalized.includes('run once', approvalIndex) ||
+      normalized.includes('add shell', approvalIndex))
+  ) {
+    candidates.push({ reason: 'agent-approval-prompt', index: approvalIndex })
+  }
   return candidates.length > 0
     ? candidates.reduce((latest, candidate) =>
         candidate.index > latest.index ? candidate : latest
       )
     : null
+}
+
+function hasTrailingApprovalOutput(normalized: string, approvalIndex: number): boolean {
+  const lines = normalized.split('\n')
+  let seenApproval = false
+  let menuEndLine = -1
+  let offset = 0
+  for (const [index, line] of lines.entries()) {
+    if (offset >= approvalIndex) {
+      seenApproval = true
+      if (/^\s*(?:run everything|skip & tell the agent)/.test(line)) {
+        menuEndLine = index
+      }
+    }
+    offset += line.length + 1
+  }
+  if (!seenApproval || menuEndLine === -1) {
+    return false
+  }
+  return lines.slice(menuEndLine + 1).some((line) => line.trim().length > 0)
 }

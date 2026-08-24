@@ -85,12 +85,13 @@ export type RuntimePtyController = {
     agentSessionEnsure?: AgentSessionClaimedSpawnResult
   }>
   write(ptyId: string, data: string): boolean
+  writeWithSettlement?(ptyId: string, data: string): Promise<boolean>
   /** Attach-only adoption of a live local daemon session so its output streams
    *  to main without a renderer pane; never creates, resizes, or focuses.
    *  False on doubt (absent session, SSH-scoped id, non-daemon provider). */
   attach?(ptyId: string): Promise<boolean>
   kill(ptyId: string): boolean
-  retireRejectedPty?(ptyId: string): void
+  retireRejectedPty?(ptyId: string, stopConfirmed?: boolean): void
   stopAndWait?(
     ptyId: string,
     opts?: { keepHistory?: boolean; deadlineMs?: number }
@@ -107,7 +108,14 @@ export type RuntimePtyController = {
   resize?(ptyId: string, cols: number, rows: number): boolean
   // Why: exact-id mobile polls should not enumerate every local and SSH PTY.
   hasPty?(ptyId: string): boolean | null
-  listProcesses?(connectionId?: string | null): Promise<PtyProcessInfo[]>
+  listProcesses?(
+    connectionId?: string | null,
+    opts?: { deadlineMs?: number }
+  ): Promise<PtyProcessInfo[]>
+  listProcessesWithHostScope?(opts?: { deadlineMs?: number }): Promise<{
+    processes: PtyProcessInfo[]
+    hostIds: string[]
+  }>
   serializeBuffer?(
     ptyId: string,
     opts?: { scrollbackRows?: number; altScreenForcesZeroRows?: boolean }

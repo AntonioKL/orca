@@ -2,14 +2,16 @@ import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import type { Repo } from '../../shared/repo-types'
 import {
-  getDefaultTabCommandTrustContent,
   getEffectiveHooks,
-  getEffectiveSetupRunPolicy,
   hasHooksFile,
   hasUnrecognizedOrcaYamlKeys,
   loadHooks,
   parseOrcaYaml
 } from '../hooks'
+import {
+  getDefaultTabCommandTrustContent,
+  getEffectiveSetupRunPolicy
+} from '../effective-hook-config'
 import { isENOENT } from '../ipc/filesystem-auth'
 import { getSshFilesystemProvider } from '../providers/ssh-filesystem-dispatch'
 import { isFolderRepo } from '../../shared/repo-kind'

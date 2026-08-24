@@ -7,6 +7,10 @@ export type RuntimeStore = {
   getRepo: Store['getRepo']
   addRepo: Store['addRepo']
   updateRepo: Store['updateRepo']
+  addRetiredWorktreeName?: Store['addRetiredWorktreeName']
+  mergeRetiredWorktreeNames?: Store['mergeRetiredWorktreeNames']
+  getRetiredWorktreeNameRegistry?: Store['getRetiredWorktreeNameRegistry']
+  getRetiredWorktreeNameRegistryForNamespace?: Store['getRetiredWorktreeNameRegistryForNamespace']
   getProjects?: Store['getProjects']
   updateProject?: Store['updateProject']
   getProjectHostSetups?: Store['getProjectHostSetups']
@@ -95,6 +99,8 @@ export type RuntimeStore = {
     terminalMainSideEffectAuthority?: GlobalSettings['terminalMainSideEffectAuthority']
     terminalHiddenDeliveryGate?: GlobalSettings['terminalHiddenDeliveryGate']
     terminalModelQueryAuthority?: GlobalSettings['terminalModelQueryAuthority']
+    worktreeVisibilityDefaults?: GlobalSettings['worktreeVisibilityDefaults']
+    agentSkillSharingEnabled?: GlobalSettings['agentSkillSharingEnabled']
   }
   // Why: narrow to `unknown` return so test mocks can return void without
   // a cast. The runtime never reads the return value — the persisted value

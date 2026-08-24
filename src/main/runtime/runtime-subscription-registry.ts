@@ -1,5 +1,9 @@
 type SubscriptionCleanup = () => void | Promise<void>
 
+export type SubscriptionRegistration = {
+  releaseIfCurrent(): void
+}
+
 export class RuntimeSubscriptionRegistry {
   private readonly cleanups = new Map<string, SubscriptionCleanup>()
   private readonly cleanupPromises = new Map<
@@ -26,6 +30,30 @@ export class RuntimeSubscriptionRegistry {
     }
     set.add(subscriptionId)
     this.connectionBySubscription.set(subscriptionId, connectionId)
+  }
+
+  registerOwned(
+    subscriptionId: string,
+    cleanup: SubscriptionCleanup,
+    connectionId?: string
+  ): SubscriptionRegistration {
+    this.register(subscriptionId, cleanup, connectionId)
+    return { releaseIfCurrent: () => this.cleanupOwned(subscriptionId, cleanup) }
+  }
+
+  cleanupIfOwnedByConnection(subscriptionId: string, connectionId?: string): boolean {
+    if (!connectionId) {
+      this.cleanup(subscriptionId)
+      return true
+    }
+    if (!this.cleanups.has(subscriptionId)) {
+      return true
+    }
+    if (this.connectionBySubscription.get(subscriptionId) !== connectionId) {
+      return false
+    }
+    this.cleanup(subscriptionId)
+    return true
   }
 
   cleanup(subscriptionId: string): void {
@@ -109,6 +137,13 @@ export class RuntimeSubscriptionRegistry {
     if (set.size === 0) {
       this.subscriptionsByConnection.delete(connectionId)
     }
+  }
+
+  private cleanupOwned(subscriptionId: string, expectedCleanup: SubscriptionCleanup): void {
+    if (this.cleanups.get(subscriptionId) !== expectedCleanup) {
+      return
+    }
+    this.cleanup(subscriptionId)
   }
 
   private removeConnectionIndex(subscriptionId: string): void {

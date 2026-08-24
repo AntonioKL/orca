@@ -10,6 +10,9 @@ import {
   isRegisteredWorktreePath
 } from './registered-worktree-roots-cache'
 
+export { invalidateAuthorizedRootsCache } from './registered-worktree-roots-cache'
+export { isENOENT } from './filesystem-path-containment'
+
 export const PATH_ACCESS_DENIED_MESSAGE =
   'Access denied: path resolves outside allowed directories. If this blocks a legitimate workflow, please file a GitHub issue.'
 // Why: authorized external paths accumulate all session; LRU-bound the set. Safe to evict because every caller re-authorizes before operating.
