@@ -167,7 +167,7 @@ describe('BrowserCertificateTrustController', () => {
   })
 
   it('cancels requests after proxy readiness fails', async () => {
-    vi.mocked(browserSession.setProxy).mockRejectedValueOnce(new Error('proxy apply failed'))
+    vi.mocked(browserSession.setProxy).mockRejectedValue(new Error('proxy apply failed'))
     await expect(
       applyProxySettingsToSession(
         browserSession,

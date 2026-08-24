@@ -238,7 +238,7 @@ describe('applyProxySettingsToSession', () => {
 
   it('keeps request readiness closed after proxy application fails', async () => {
     const proxySession = createProxySession()
-    proxySession.setProxy.mockRejectedValueOnce(new Error('proxy apply failed'))
+    proxySession.setProxy.mockRejectedValue(new Error('proxy apply failed'))
     resetSessionProxyApplicationForTests(proxySession)
 
     await expect(
@@ -364,7 +364,9 @@ describe('applyProxySettingsToSession', () => {
     const settings = { httpProxyUrl: 'socks5://127.0.0.1:1080', httpProxyBypassRules: '' }
 
     await applyProxySettingsToSession(proxySession, settings, { env: {} })
-    proxySession.closeAllConnections.mockRejectedValueOnce(new Error('close failed'))
+    proxySession.closeAllConnections
+      .mockRejectedValueOnce(new Error('close failed'))
+      .mockRejectedValueOnce(new Error('close failed'))
     await expect(
       applyProxySettingsToSession(
         proxySession,
@@ -380,6 +382,49 @@ describe('applyProxySettingsToSession', () => {
       mode: 'fixed_servers',
       proxyRules: 'socks5://127.0.0.1:1080'
     })
+  })
+
+  it('retries stale connection cleanup before a cleared proxy becomes ready', async () => {
+    const proxySession = createProxySession()
+    resetSessionProxyApplicationForTests(proxySession)
+    await applyProxySettingsToSession(
+      proxySession,
+      { httpProxyUrl: 'socks5://127.0.0.1:1080', httpProxyBypassRules: '' },
+      { env: {} }
+    )
+    proxySession.closeAllConnections.mockRejectedValueOnce(new Error('close failed'))
+
+    await expect(
+      applyProxySettingsToSession(
+        proxySession,
+        { httpProxyUrl: '', httpProxyBypassRules: '' },
+        { env: {} }
+      )
+    ).resolves.toEqual({ source: 'none' })
+
+    expect(proxySession.setProxy.mock.calls.slice(-2)).toEqual([
+      [{ mode: 'system' }],
+      [{ mode: 'system' }]
+    ])
+    expect(proxySession.closeAllConnections).toHaveBeenCalledTimes(3)
+    await expect(awaitProxySessionApplication(proxySession)).resolves.toBe(true)
+  })
+
+  it('fails closed after both bounded proxy application attempts reject', async () => {
+    const proxySession = createProxySession()
+    proxySession.setProxy.mockRejectedValue(new Error('proxy apply failed'))
+    resetSessionProxyApplicationForTests(proxySession)
+
+    await expect(
+      applyProxySettingsToSession(
+        proxySession,
+        { httpProxyUrl: 'http://proxy.example:8080' },
+        { env: {} }
+      )
+    ).rejects.toThrow('proxy apply failed')
+
+    expect(proxySession.setProxy).toHaveBeenCalledTimes(2)
+    await expect(awaitProxySessionApplication(proxySession)).resolves.toBe(false)
   })
 
   it('releases a previously pinned session back to the system proxy when settings are cleared', async () => {

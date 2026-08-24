@@ -303,7 +303,7 @@ describe('Electron proxy settings', () => {
     expect(proxySession.setProxy).toHaveBeenCalledTimes(1)
   })
 
-  it('settles an explicit proxy before reporting it to environment callers', async () => {
+  it('retries a transient connection-close failure before reporting an explicit proxy', async () => {
     const proxySession = createProxySession()
     proxySession.closeAllConnections.mockRejectedValueOnce(new Error('close failed'))
 
@@ -312,7 +312,7 @@ describe('Electron proxy settings', () => {
         { httpProxyUrl: 'http://proxy.example:8080' },
         { proxySession, env: {} }
       )
-    ).rejects.toThrow('close failed')
+    ).resolves.toEqual({ source: 'settings', proxyRules: 'http://proxy.example:8080' })
     await expect(
       ensureElectronProxyFromEnvironment({
         proxySession,

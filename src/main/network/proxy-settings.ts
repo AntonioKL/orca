@@ -13,45 +13,13 @@ import {
   setElectronProxyCredentialsForSession,
   type ElectronProxyCredentials
 } from './electron-proxy-credentials'
+import { runBoundedProxyApplication } from './bounded-proxy-application'
+import { defaultProxySession, type ProxySession } from './electron-default-proxy-session'
 import { resolveProxyPolicyWithoutSession, type ProxyApplyResult } from './proxy-policy-resolution'
 
-type ProxySession = {
-  resolveProxy(url: string): Promise<string>
-  setProxy(config: {
-    mode?: 'system' | 'fixed_servers'
-    proxyRules?: string
-    proxyBypassRules?: string
-  }): Promise<void>
-  closeAllConnections?: () => Promise<void>
-}
-
-/**
- * The default proxy session, or null on a host with no Chromium.
- *
- * Why settable: `session.defaultSession` is the only Electron value this module needs,
- * and callers already accept an explicit `options.proxySession`. Making the *default*
- * injectable lets the module load under plain Node, where there is no Chromium proxy
- * config to consult and the environment variables are the whole answer.
- */
-let resolveDefaultProxySession: (() => ProxySession | null) | null = null
-
-/**
- * Why a resolver and not a Session: `session.defaultSession` throws until the Electron
- * app is ready, and this is installed during pre-ready bootstrap. Passing a getter
- * defers the access to first use, which is always after ready.
- */
-export function setDefaultProxySessionResolver(resolve: (() => ProxySession | null) | null): void {
-  resolveDefaultProxySession = resolve
-}
-
-function defaultProxySession(): ProxySession | null {
-  return resolveDefaultProxySession?.() ?? null
-}
-
+export { setDefaultProxySessionResolver } from './electron-default-proxy-session'
 export type { ProxyApplyResult } from './proxy-policy-resolution'
-
 const PROXY_PROBE_URL = 'https://api.anthropic.com/'
-
 type SessionProxyApplicationState = {
   appliedKey: string | null
   settledKey: string | null
@@ -61,7 +29,6 @@ type SessionProxyApplicationState = {
   readiness: 'ready' | 'pending' | 'failed'
   retired: boolean
 }
-
 let sessionProxyApplications = new WeakMap<ProxySession, SessionProxyApplicationState>()
 
 function proxyMemoKey(result: ProxyApplyResult): string {
@@ -166,7 +133,9 @@ async function enqueueSessionProxyApplication(
   if (state.retired && !allowRetired) {
     throw new Error('Proxy session is retired')
   }
-  const operation = state.tail.catch(() => {}).then(() => apply(state))
+  const operation = state.tail
+    .catch(() => {})
+    .then(() => runBoundedProxyApplication(() => apply(state)))
   state.tail = operation
   state.readiness = 'pending'
   void operation.then(
@@ -265,13 +234,13 @@ async function releaseSessionProxyPin(
     return
   }
   await proxySession.setProxy({ mode: 'system' })
-  // Why: the pin is gone before the best-effort connection close can reject.
-  state.appliedKey = null
+  // Why: keep the pin marker until stale pooled connections are closed so a retry cannot skip them.
   state.settledKey = null
-  state.appliedResult = null
   state.credentials = null
   setElectronProxyCredentialsForSession(proxySession, null)
   await proxySession.closeAllConnections?.()
+  state.appliedKey = null
+  state.appliedResult = null
 }
 
 async function applySessionProxyResult(
