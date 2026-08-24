@@ -6,10 +6,16 @@ import {
   type AgentHookEventPayload,
   type HookListenerState
 } from '../shared/agent-hook-listener'
-import type { AgentHookRelayEnvelope, AgentHookSource } from '../shared/agent-hook-relay'
+import { normalizeAgentStatusPayload } from '../shared/agent-status-types'
+import {
+  isAgentHookSource,
+  type AgentHookRelayEnvelope,
+  type AgentHookSource
+} from '../shared/agent-hook-relay'
 import { codexRosterToSnapshots } from '../shared/codex-subagent-roster'
 import { reconcileCodexSubagentTranscript } from '../shared/codex-subagent-transcript'
 import { buildRelayHookEnvelope } from './agent-hook-envelope-build'
+import { parsePaneKey } from '../shared/stable-pane-id'
 
 export type RelayHookStatusMeta = { source: AgentHookSource; env?: string; version?: string }
 type PersistedCache = {
@@ -21,6 +27,50 @@ const CACHE_VERSION = 1
 const MAX_CACHED_PANES = 256
 const MAX_RECONCILE_ATTEMPTS = 5
 const RECONCILE_INTERVAL_MS = 1_000
+
+function sanitizeHydratedEntry(
+  rawEntry: unknown
+): { event: AgentHookEventPayload; meta: RelayHookStatusMeta } | null {
+  if (typeof rawEntry !== 'object' || rawEntry === null) {
+    return null
+  }
+  const entry = rawEntry as Record<string, unknown>
+  if (typeof entry.event !== 'object' || entry.event === null) {
+    return null
+  }
+  if (typeof entry.meta !== 'object' || entry.meta === null) {
+    return null
+  }
+  const rawEvent = entry.event as Record<string, unknown>
+  const paneKey = rawEvent.paneKey
+  if (typeof paneKey !== 'string' || !parsePaneKey(paneKey)) {
+    return null
+  }
+  const payload = normalizeAgentStatusPayload(rawEvent.payload)
+  // Every normalized hook event carries its source agent type. Without it,
+  // restart reconciliation and replay would operate on an untrusted shape.
+  if (!payload || typeof payload.agentType !== 'string' || payload.agentType.length === 0) {
+    return null
+  }
+  const rawMeta = entry.meta as Record<string, unknown>
+  if (!isAgentHookSource(rawMeta.source)) {
+    return null
+  }
+  if (
+    (rawMeta.env !== undefined && typeof rawMeta.env !== 'string') ||
+    (rawMeta.version !== undefined && typeof rawMeta.version !== 'string')
+  ) {
+    return null
+  }
+  return {
+    event: { ...rawEvent, paneKey, payload } as AgentHookEventPayload,
+    meta: {
+      source: rawMeta.source,
+      env: typeof rawMeta.env === 'string' ? rawMeta.env : undefined,
+      version: typeof rawMeta.version === 'string' ? rawMeta.version : undefined
+    }
+  }
+}
 
 export function applyRelayHookEvent(options: {
   state: HookListenerState
@@ -107,8 +157,9 @@ export function hydrateRelayHookStatusCache(
   if (cache.version !== CACHE_VERSION || !Array.isArray(cache.entries)) {
     return metadata
   }
-  for (const entry of cache.entries.slice(-MAX_CACHED_PANES)) {
-    if (!entry?.event || !entry.meta || typeof entry.event.paneKey !== 'string') {
+  for (const rawEntry of cache.entries.slice(-MAX_CACHED_PANES)) {
+    const entry = sanitizeHydratedEntry(rawEntry)
+    if (!entry) {
       continue
     }
     const event =

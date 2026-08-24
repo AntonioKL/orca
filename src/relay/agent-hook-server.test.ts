@@ -366,6 +366,75 @@ describe('RelayAgentHookServer', () => {
     }
   })
 
+  it('skips malformed durable entries while hydrating valid status and diagnostics', async () => {
+    writeFileSync(
+      join(dir, 'hook-status-cache.json'),
+      JSON.stringify({
+        version: 1,
+        entries: [
+          { event: { paneKey: PANE_KEY }, meta: { source: 'claude' } },
+          {
+            event: {
+              paneKey: PANE_KEY,
+              payload: { state: 'working', prompt: 'missing agent type' }
+            },
+            meta: { source: 'claude' }
+          },
+          {
+            event: {
+              paneKey: PANE_KEY,
+              payload: null
+            },
+            meta: { source: 'claude' }
+          },
+          {
+            event: {
+              paneKey: PANE_KEY,
+              payload: {
+                state: 'working',
+                prompt: 'keep me after restart',
+                agentType: 'codex'
+              },
+              reconcileDiagnostic: {
+                kind: 'unverifiable',
+                reason: 'transcript-unreadable',
+                observedAt: 123
+              }
+            },
+            meta: { source: 'codex', env: 'remote', version: '1' }
+          }
+        ]
+      }),
+      'utf8'
+    )
+
+    const forward = vi.fn<(envelope: AgentHookRelayEnvelope) => void>()
+    const server = new RelayAgentHookServer({ endpointDir: dir, forward })
+    await expect(server.start()).resolves.toBeUndefined()
+    try {
+      expect(server.replayCachedPayloadsForPanes()).toBe(1)
+      expect(forward).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: 'codex',
+          env: 'remote',
+          version: '1',
+          payload: expect.objectContaining({
+            prompt: 'keep me after restart',
+            agentType: 'codex'
+          }),
+          reconcileDiagnostic: {
+            kind: 'unverifiable',
+            reason: 'transcript-unreadable',
+            observedAt: 123
+          },
+          isReplay: true
+        })
+      )
+    } finally {
+      server.stop()
+    }
+  })
+
   it('forwards and replays Pi session identity as metadata-only', async () => {
     const forward = vi.fn<(envelope: AgentHookRelayEnvelope) => void>()
     const server = new RelayAgentHookServer({ endpointDir: dir, forward })
