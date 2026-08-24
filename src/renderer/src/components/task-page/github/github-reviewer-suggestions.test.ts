@@ -16,6 +16,15 @@ describe('sameOptionalGitHubOwnerRepo', () => {
       sameOptionalGitHubOwnerRepo(null, { owner: 'acme', repo: 'orca', host: 'github.com' })
     ).toBe(false)
   })
+
+  it('separates the same owner/repo on different hosts', () => {
+    expect(
+      sameOptionalGitHubOwnerRepo(
+        { owner: 'acme', repo: 'orca', host: 'github.com' },
+        { owner: 'acme', repo: 'orca', host: 'github.example.com' }
+      )
+    ).toBe(false)
+  })
 })
 
 describe('resolveTaskPullRequestRepo', () => {
@@ -45,7 +54,7 @@ describe('mergeReviewerSuggestions', () => {
         [{ login: 'Ada', name: 'Ada', avatarUrl: 'https://example/ada.png' }],
         [{ login: 'ada', name: null, avatarUrl: '' }]
       )
-    ).toEqual([{ login: 'ada', name: null, avatarUrl: 'https://example/ada.png' }])
+    ).toEqual([{ login: 'ada', name: 'Ada', avatarUrl: 'https://example/ada.png' }])
   })
 })
 

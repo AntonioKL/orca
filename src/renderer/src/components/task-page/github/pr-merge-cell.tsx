@@ -244,7 +244,7 @@ export function PRMergeCell({
             {label}
           </DropdownMenuItem>
         ))}
-        <DropdownMenuItem onSelect={() => window.api.shell.openUrl(item.url)}>
+        <DropdownMenuItem onSelect={() => void window.api.shell.openUrl(item.url)}>
           <ExternalLink className="size-4" />
           {translate('auto.components.TaskPage.37d60046e3', 'Open GitHub merge box')}
         </DropdownMenuItem>

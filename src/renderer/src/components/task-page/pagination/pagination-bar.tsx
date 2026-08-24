@@ -56,7 +56,7 @@ export function PaginationBar({
           <button
             key={entry}
             type="button"
-            disabled={loadingTarget !== null && loadingTarget !== entry}
+            disabled={loadingTarget !== null}
             onClick={() => onPageChange(entry)}
             aria-label={translate('auto.components.TaskPage.ae859c816b', 'Page {{value0}}', {
               value0: entry + 1

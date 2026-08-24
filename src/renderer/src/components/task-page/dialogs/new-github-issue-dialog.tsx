@@ -113,10 +113,15 @@ export function NewGithubIssueDialog({
             const issuesSlug = entry?.sources?.issues
               ? `${entry.sources.issues.owner}/${entry.sources.issues.repo}`
               : null
-            const fallback = newIssueTargetRepo?.displayName ?? 'this repository'
+            const fallback =
+              newIssueTargetRepo?.displayName ??
+              translate(
+                'auto.components.task.page.dialogs.new.github.issue.dialog.e02508846c',
+                'this repository'
+              )
             return (
               <DialogDescription>
-                {translate('auto.components.TaskPage.9f2b4c03a6', 'Filing in')}
+                {translate('auto.components.TaskPage.9f2b4c03a6', 'Filing in')}{' '}
                 {issuesSlug ?? fallback}
               </DialogDescription>
             )

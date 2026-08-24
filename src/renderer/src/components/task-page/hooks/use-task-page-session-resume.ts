@@ -1,6 +1,7 @@
 import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
 
 import { loadLinearIssueView } from '@/components/linear-issue-view-storage'
+import { translate } from '@/i18n/i18n'
 import { normalizeGitHubTaskPreset } from '@/components/task-page-github-task-kind'
 import type {
   JiraPresetId,
@@ -200,7 +201,12 @@ export function useTaskPageSessionResume({
             setSelectedLinearProject(null)
             setSelectedLinearProjectDetail(null)
             setLinearProjectParentView(null)
-            setLinearProjectsError('Saved Linear project was not found.')
+            setLinearProjectsError(
+              translate(
+                'auto.components.task.page.hooks.use.task.page.session.resume.2f69b193f1',
+                'Saved Linear project was not found.'
+              )
+            )
             setTaskResumeState({ linearContext: undefined })
             return
           }
@@ -213,7 +219,12 @@ export function useTaskPageSessionResume({
             setSelectedLinearProject(null)
             setSelectedLinearProjectDetail(null)
             setLinearProjectParentView(null)
-            setLinearProjectsError('Failed to restore saved Linear project.')
+            setLinearProjectsError(
+              translate(
+                'auto.components.task.page.hooks.use.task.page.session.resume.fa88a9c276',
+                'Failed to restore saved Linear project.'
+              )
+            )
             setTaskResumeState({ linearContext: undefined })
           }
         })
@@ -237,7 +248,12 @@ export function useTaskPageSessionResume({
           setLinearCustomViewsLoading(false)
           if (!restoredView) {
             setSelectedLinearCustomView(null)
-            setLinearCustomViewsError('Saved Linear view was not found.')
+            setLinearCustomViewsError(
+              translate(
+                'auto.components.task.page.hooks.use.task.page.session.resume.44c0ff3999',
+                'Saved Linear view was not found.'
+              )
+            )
             setTaskResumeState({ linearContext: undefined })
             return
           }
@@ -247,7 +263,12 @@ export function useTaskPageSessionResume({
           if (!cancelled) {
             setSelectedLinearCustomView(null)
             setLinearCustomViewsLoading(false)
-            setLinearCustomViewsError('Failed to restore saved Linear view.')
+            setLinearCustomViewsError(
+              translate(
+                'auto.components.task.page.hooks.use.task.page.session.resume.c50ef0c9f9',
+                'Failed to restore saved Linear view.'
+              )
+            )
             setTaskResumeState({ linearContext: undefined })
           }
         })

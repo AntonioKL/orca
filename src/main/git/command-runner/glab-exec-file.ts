@@ -102,7 +102,7 @@ export async function glabExecFileAsync(
           retryAfterMs !== null
             ? Math.min(retryAfterMs, GH_RETRY_AFTER_MAX_MS)
             : GH_RETRY_DELAYS_MS[attempt]
-        await sleep(delayMs)
+        await sleep(delayMs, options.signal)
         continue
       }
       throw err

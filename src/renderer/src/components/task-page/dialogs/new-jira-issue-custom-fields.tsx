@@ -44,7 +44,7 @@ export function NewJiraIssueCustomFields({
                 }
                 disabled={newJiraIssueSubmitting}
               >
-                <SelectTrigger>
+                <SelectTrigger aria-label={field.name}>
                   <SelectValue
                     placeholder={translate(
                       'auto.components.TaskPage.1f0fce91e3',
@@ -82,6 +82,7 @@ export function NewJiraIssueCustomFields({
                       })
                 }
                 disabled={newJiraIssueSubmitting}
+                aria-label={field.name}
               />
             )}
           </div>

@@ -105,7 +105,7 @@ export function LinearIssueBoard({
                   draggable={linearStatusBoardEnabled && !updating}
                   aria-current={selected ? 'true' : undefined}
                   data-current={selected ? 'true' : undefined}
-                  aria-disabled={updating ? 'true' : undefined}
+                  aria-busy={updating ? 'true' : undefined}
                   onDragStart={(event) => handleLinearBoardCardDragStart(issue, event)}
                   onDragEnd={() => {
                     setLinearBoardDraggingIssueId(null)
@@ -185,7 +185,9 @@ export function LinearIssueBoard({
                         size="icon-xs"
                         onClick={(event) => {
                           event.stopPropagation()
-                          window.api.shell.openUrl(issue.url)
+                          void window.api.shell.openUrl(issue.url).catch((err) => {
+                            console.error('Failed to open Linear issue:', err)
+                          })
                         }}
                         aria-label={translate(
                           'auto.components.TaskPage.246bd64aed',

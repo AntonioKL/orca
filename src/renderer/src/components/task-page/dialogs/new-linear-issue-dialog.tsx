@@ -121,9 +121,11 @@ export function NewLinearIssueDialog({
             )}
           </div>
           <button
+            type="button"
             onClick={() => setNewLinearIssueOpen(false)}
             className="text-muted-foreground hover:text-foreground p-1 rounded-md transition-colors"
             disabled={newLinearIssueSubmitting}
+            aria-label={translate('auto.components.TaskPage.b6795e65fd', 'Close')}
           >
             <X className="size-4" />
           </button>

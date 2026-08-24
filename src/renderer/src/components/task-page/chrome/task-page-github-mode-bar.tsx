@@ -130,6 +130,7 @@ export function TaskPageGithubModeBar({
               }
               void window.api.shell.openUrl(selectedGitHubRepoExternalLink.url)
             }}
+            disabled={!selectedGitHubRepoExternalLink}
             aria-label={
               selectedGitHubRepoExternalLink
                 ? translate('auto.components.TaskPage.8d1e17a3ef', 'Open {{value0}} in GitHub', {

@@ -145,14 +145,17 @@ export function useTaskPageJiraFetch({
           jiraTaskSourceContext ?? settings,
           jiraTaskSourceScopeKey,
           projectScope
-        ).then((order) => {
-          if (!cancelled) {
-            setJiraProjectStatusOrder({
-              order,
-              scopeKey: statusOrderScopeKey
-            })
-          }
-        })
+        )
+          .then((order) => {
+            if (!cancelled) {
+              setJiraProjectStatusOrder({
+                order,
+                scopeKey: statusOrderScopeKey
+              })
+            }
+          })
+          // Why: status order is decorative; a failure must not surface as an unhandled rejection.
+          .catch(() => undefined)
       })
       .catch((err) => {
         if (cancelled) {

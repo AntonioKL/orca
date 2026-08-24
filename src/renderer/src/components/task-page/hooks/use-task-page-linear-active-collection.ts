@@ -1,6 +1,7 @@
 import { useState } from 'react'
 
 import type { LinearProjectTab } from '@/components/task-page/linear/linear-issue-grouping'
+import { translate } from '@/i18n/i18n'
 import type { GlobalSettings } from '../../../../../shared/global-settings-types'
 import type { LinearIssue } from '../../../../../shared/linear/issue-types'
 import type {
@@ -100,11 +101,20 @@ export function useTaskPageLinearActiveCollection({
         ? linearCustomViewIssuesResult.errors
         : undefined
   const activeLinearIssueHasCollectionError = (activeLinearIssueCollectionErrors?.length ?? 0) > 0
-  const activeLinearIssueContextLabel = selectedLinearProject
-    ? `Project: ${selectedLinearProject.name}`
-    : selectedLinearCustomView?.model === 'issue'
-      ? `View: ${selectedLinearCustomView.name}`
-      : null
+  const activeLinearIssueContextLabel =
+    selectedLinearProject && linearProjectTab === 'issues'
+      ? translate(
+          'auto.components.task.page.hooks.use.task.page.linear.active.collection.d8b3cd9488',
+          'Project: {{value0}}',
+          { value0: selectedLinearProject.name }
+        )
+      : selectedLinearCustomView?.model === 'issue'
+        ? translate(
+            'auto.components.task.page.hooks.use.task.page.linear.active.collection.68462f8b29',
+            'View: {{value0}}',
+            { value0: selectedLinearCustomView.name }
+          )
+        : null
   const canLoadMorePlainLinearIssues =
     !activeLinearIssueContextLabel &&
     appliedLinearSearch.trim().length === 0 &&

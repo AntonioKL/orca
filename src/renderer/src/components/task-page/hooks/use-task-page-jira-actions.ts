@@ -20,7 +20,7 @@ export function useTaskPageJiraActions({
   openModal: AppState['openModal']
 }) {
   const openComposerForJiraItem = useCallback(
-    (issue: JiraIssue): void => {
+    (issue: JiraIssue): boolean => {
       const taskSourceContext = bindTaskPageJiraItemSourceContext({
         issue,
         sites: jiraSites,
@@ -34,7 +34,7 @@ export function useTaskPageJiraActions({
             'Couldn’t link this Jira issue. Reconnect Jira or pick the matching site, then try again.'
           )
         )
-        return
+        return false
       }
       const linkedWorkItem: LinkedWorkItemSummary = {
         type: 'issue',
@@ -50,14 +50,17 @@ export function useTaskPageJiraActions({
         prefilledName: getJiraIssueWorkspaceSeed(issue),
         telemetrySource: 'sidebar'
       })
+      return true
     },
     [jiraSites, jiraTaskSourceContext, openModal]
   )
 
   const handleUseJiraItem = useCallback(
     (issue: JiraIssue): void => {
-      useAppStore.getState().recordFeatureInteraction('jira-tasks')
-      openComposerForJiraItem(issue)
+      // Why: record provider depth only when the issue actually reaches the composer.
+      if (openComposerForJiraItem(issue)) {
+        useAppStore.getState().recordFeatureInteraction('jira-tasks')
+      }
     },
     [openComposerForJiraItem]
   )

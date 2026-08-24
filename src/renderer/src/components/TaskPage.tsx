@@ -1361,8 +1361,6 @@ export default function TaskPage(): React.JSX.Element {
   })
   useTaskPageCreateDialogResets({
     providerRuntimeContextKey,
-    newLinearIssueOpen,
-    newJiraIssueOpen,
     setNewLinearIssueOpen,
     setNewLinearIssueTitle,
     setNewLinearIssueBody,

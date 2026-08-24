@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 
 import { useAppStore } from '@/store'
 import { PER_REPO_FETCH_LIMIT, CROSS_REPO_DISPLAY_LIMIT } from '@/lib/new-workspace'
@@ -89,8 +89,11 @@ export function useTaskPageGitHubListState({
   const [currentPage, setCurrentPage] = useState(0)
   const pagesRef = useRef(pages)
   const currentPageRef = useRef(currentPage)
-  pagesRef.current = pages
-  currentPageRef.current = currentPage
+  useLayoutEffect(() => {
+    // Why: effects and event handlers read these refs; a render-phase write can publish a discarded render.
+    pagesRef.current = pages
+    currentPageRef.current = currentPage
+  }, [pages, currentPage])
   const githubResumeConsumedRef = useRef(false)
   const githubResumeContextRef = useRef('')
   const githubListScrollRef = useRef<HTMLDivElement>(null)

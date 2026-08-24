@@ -181,6 +181,7 @@ export function LinearIssueGroupedList({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <div
+                      role="img"
                       className="flex size-5 shrink-0 items-center justify-center rounded-full border border-border/50 bg-muted/40 text-[10px] text-muted-foreground"
                       aria-label={
                         issue.assignee?.displayName ??
@@ -268,7 +269,9 @@ export function LinearIssueGroupedList({
                     size="icon-xs"
                     onClick={(event) => {
                       event.stopPropagation()
-                      window.api.shell.openUrl(issue.url)
+                      void window.api.shell.openUrl(issue.url).catch((err) => {
+                        console.error('Failed to open Linear issue:', err)
+                      })
                     }}
                     aria-label={translate(
                       'auto.components.TaskPage.246bd64aed',

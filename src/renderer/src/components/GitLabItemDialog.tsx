@@ -110,7 +110,11 @@ function jobStatusTone(status: string): string {
 
 function showGitLabMutationError(error: unknown): void {
   const message = error instanceof Error && error.message ? error.message : String(error)
-  toast.error(message === 'undefined' || message === 'null' ? 'GitLab action failed.' : message)
+  toast.error(
+    message === 'undefined' || message === 'null'
+      ? translate('auto.components.GitLabItemDialog.gitlabActionFailed', 'GitLab action failed.')
+      : message
+  )
 }
 
 function StateBadge({ state }: { state: GitLabWorkItem['state'] }): React.JSX.Element {

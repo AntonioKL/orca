@@ -144,6 +144,16 @@ export function useTaskPageGitHubPageLoader({
         setCurrentPage(target)
       } catch (err) {
         console.error('Failed to load next page:', err)
+        if (paginationGenerationRef.current === requestGeneration) {
+          toast.error(
+            translate(
+              'auto.components.TaskPage.loadPageFailed',
+              'Page {{value0}} could not be loaded from GitHub.',
+              { value0: String(target + 1) }
+            ),
+            { id: 'work-items-page-load-failed' }
+          )
+        }
       } finally {
         if (paginationGenerationRef.current === requestGeneration) {
           setPaginationLoading(false)

@@ -8,7 +8,9 @@ const taskPageSource = readFileSync(
 
 function issueCreationSection(): string {
   const start = taskPageSource.indexOf('const handleCreateNewIssue')
-  const end = taskPageSource.indexOf('const handleCreateNewLinearProject', start)
+  expect(start).toBeGreaterThanOrEqual(0)
+  const end = taskPageSource.indexOf('return { handleCreateNewIssue }', start)
+  expect(end).toBeGreaterThan(start)
   return taskPageSource.slice(start, end)
 }
 

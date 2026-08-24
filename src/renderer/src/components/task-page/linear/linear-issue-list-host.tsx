@@ -72,6 +72,25 @@ export function LinearIssueListHost({
     </div>
   ) : null
 
+  const collectionNotice =
+    selectedLinearProject && linearProjectTab === 'issues'
+      ? {
+          errors: linearProjectIssuesResult.errors,
+          count: linearProjectIssuesResult.items.length,
+          label: translate('auto.components.TaskPage.67662ade50', 'project issues')
+        }
+      : selectedLinearCustomView?.model === 'issue'
+        ? {
+            errors: linearCustomViewIssuesResult.errors,
+            count: linearCustomViewIssuesResult.items.length,
+            label: translate('auto.components.TaskPage.be8cf68d9f', 'view issues')
+          }
+        : {
+            errors: undefined,
+            count: linearIssues.length,
+            label: translate('auto.components.TaskPage.d1e243795c', 'issues')
+          }
+
   return (
     <div className="flex min-h-0 max-h-full flex-col overflow-hidden rounded-md rounded-t-none border border-t-0 border-border/50 bg-background shadow-sm">
       <LinearIssueToolbar {...toolbar} pagedLinearIssuesCount={pagedLinearIssuesCount} />
@@ -86,45 +105,16 @@ export function LinearIssueListHost({
           <LinearIssueGroupedList {...list} />
         )}
       </div>
-      {selectedLinearProject && linearProjectTab === 'issues' ? (
-        <>
-          <LinearCollectionNotice
-            errors={linearProjectIssuesResult.errors}
-            hasMore={showLinearEmptyFilteredLoadMore}
-            count={linearProjectIssuesResult.items.length}
-            label={translate('auto.components.TaskPage.67662ade50', 'project issues')}
-            onLoadMore={handleLinearEmptyFilteredLoadMore}
-            loading={activeLinearIssueLoading}
-            loadMoreLabel="Fetch more"
-          />
-          {pagination}
-        </>
-      ) : selectedLinearCustomView?.model === 'issue' ? (
-        <>
-          <LinearCollectionNotice
-            errors={linearCustomViewIssuesResult.errors}
-            hasMore={showLinearEmptyFilteredLoadMore}
-            count={linearCustomViewIssuesResult.items.length}
-            label={translate('auto.components.TaskPage.be8cf68d9f', 'view issues')}
-            onLoadMore={handleLinearEmptyFilteredLoadMore}
-            loading={activeLinearIssueLoading}
-            loadMoreLabel="Fetch more"
-          />
-          {pagination}
-        </>
-      ) : (
-        <>
-          <LinearCollectionNotice
-            hasMore={showLinearEmptyFilteredLoadMore}
-            count={linearIssues.length}
-            label={translate('auto.components.TaskPage.d1e243795c', 'issues')}
-            onLoadMore={handleLinearEmptyFilteredLoadMore}
-            loading={activeLinearIssueLoading}
-            loadMoreLabel="Fetch more"
-          />
-          {pagination}
-        </>
-      )}
+      <LinearCollectionNotice
+        errors={collectionNotice.errors}
+        hasMore={showLinearEmptyFilteredLoadMore}
+        count={collectionNotice.count}
+        label={collectionNotice.label}
+        onLoadMore={handleLinearEmptyFilteredLoadMore}
+        loading={activeLinearIssueLoading}
+        loadMoreLabel={translate('auto.components.TaskPage.linearFetchMore', 'Fetch more')}
+      />
+      {pagination}
     </div>
   )
 }

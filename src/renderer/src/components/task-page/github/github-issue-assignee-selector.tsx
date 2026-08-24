@@ -41,15 +41,19 @@ export function GitHubIssueAssigneeSelector({
 
   return (
     <div className="flex min-w-0 flex-col gap-1">
-      <label className="text-[11px] font-medium text-muted-foreground">
+      <span
+        id="github-issue-assignee-selector-label"
+        className="text-[11px] font-medium text-muted-foreground"
+      >
         {translate('auto.components.TaskPage.8aba10579d', 'Assignees')}
-      </label>
+      </span>
       <Popover>
         <PopoverTrigger asChild>
           <Button
             type="button"
             variant="outline"
             disabled={disabled}
+            aria-labelledby="github-issue-assignee-selector-label"
             className="h-auto min-h-9 justify-start gap-2 px-3 py-2 text-left"
           >
             {selectedAssignees.length === 0 ? (

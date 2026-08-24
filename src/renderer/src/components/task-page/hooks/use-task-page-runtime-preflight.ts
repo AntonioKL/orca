@@ -40,12 +40,13 @@ export function useTaskPageRuntimePreflight({
   const [runtimePreflightStatusByHostId, setRuntimePreflightStatusByHostId] = useState<
     ReadonlyMap<TaskSourceContext['hostId'], RuntimeProviderPreflightStatus>
   >(() => new Map())
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    // Why: StrictMode remounts reuse the ref instance; re-arm it or every later result is discarded.
+    runtimePreflightMountedRef.current = true
+    return () => {
       runtimePreflightMountedRef.current = false
-    },
-    []
-  )
+    }
+  }, [])
   const taskSourceRepoContexts = useMemo(
     () =>
       taskSource === 'github' || taskSource === 'gitlab'

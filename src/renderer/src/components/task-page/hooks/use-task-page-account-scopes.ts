@@ -10,7 +10,7 @@ export function useTaskPageAccountScopes({
   linearStatus: LinearConnectionStatus
   jiraStatus: JiraConnectionStatus
 }) {
-  const linearWorkspaces = linearStatus.workspaces ?? []
+  const linearWorkspaces = useMemo(() => linearStatus.workspaces ?? [], [linearStatus.workspaces])
   const selectedLinearWorkspaceId =
     linearStatus.selectedWorkspaceId ??
     linearStatus.activeWorkspaceId ??

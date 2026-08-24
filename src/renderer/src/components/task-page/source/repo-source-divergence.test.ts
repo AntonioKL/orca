@@ -32,6 +32,17 @@ describe('hasDivergentSources', () => {
     ).toBe(true)
   })
 
+  it('is false when the PR source is missing', () => {
+    expect(
+      hasDivergentSources(
+        state({
+          issues: { owner: 'acme', repo: 'fork', host: 'github.com' },
+          prs: null
+        })
+      )
+    ).toBe(false)
+  })
+
   it('is false when issues and PRs share an owner/repo', () => {
     expect(
       hasDivergentSources(
@@ -54,6 +65,17 @@ describe('hasUpstreamCandidateDivergence', () => {
         })
       )
     ).toBe(true)
+  })
+
+  it('is false when the upstream candidate is missing', () => {
+    expect(
+      hasUpstreamCandidateDivergence(
+        state({
+          originCandidate: { owner: 'me', repo: 'fork', host: 'github.com' },
+          upstreamCandidate: null
+        })
+      )
+    ).toBe(false)
   })
 
   it('is false when origin and upstream candidates match', () => {

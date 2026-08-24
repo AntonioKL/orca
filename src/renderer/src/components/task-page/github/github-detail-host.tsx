@@ -2,6 +2,7 @@ import React from 'react'
 
 import GitHubItemDialog, { type ItemDialogTab } from '@/components/GitHubItemDialog'
 import PullRequestPage from '@/components/PullRequestPage'
+import { translate } from '@/i18n/i18n'
 import type { GitHubAssignableUser } from '../../../../../shared/github/pull-request-types'
 import type { GitHubWorkItem } from '../../../../../shared/github/work-item-types'
 import type { TaskSourceContext } from '../../../../../shared/task-source-context'
@@ -37,7 +38,10 @@ export function GithubDetailHost({
       repoPath={dialogRepoPath}
       repoId={dialogWorkItem.repoId}
       sourceContext={dialogSourceContext}
-      backLabel="Pull requests"
+      backLabel={translate(
+        'auto.components.task.page.github.github.detail.host.8d5cde4770',
+        'Pull requests'
+      )}
       onUse={(item) => {
         setDialogWorkItem(null)
         handleUseWorkItem(item)
@@ -52,7 +56,10 @@ export function GithubDetailHost({
       repoPath={dialogRepoPath}
       repoId={dialogWorkItem.repoId}
       sourceContext={dialogSourceContext}
-      backLabel="GitHub list"
+      backLabel={translate(
+        'auto.components.task.page.github.github.detail.host.312ca15778',
+        'GitHub list'
+      )}
       onUse={(item) => {
         setDialogWorkItem(null)
         handleUseWorkItem(item)

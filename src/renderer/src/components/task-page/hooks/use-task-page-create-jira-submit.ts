@@ -101,7 +101,7 @@ export function useTaskPageCreateJiraSubmit({
           action: result.url
             ? {
                 label: translate('auto.components.TaskPage.9c57663908', 'View'),
-                onClick: () => window.open(result.url, '_blank')
+                onClick: () => window.open(result.url, '_blank', 'noopener,noreferrer')
               }
             : undefined
         }

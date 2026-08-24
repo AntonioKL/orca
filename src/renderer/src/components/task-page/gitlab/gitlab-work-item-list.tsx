@@ -5,7 +5,7 @@ import { useAppStore } from '@/store'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { RepoBackedTaskEmptyState } from '@/components/task-page-empty-state'
-import { translate } from '@/i18n/i18n'
+import { getIntlLocale, translate } from '@/i18n/i18n'
 import type { GitLabWorkItem } from '../../../../../shared/gitlab-types'
 
 export type GitlabWorkItemListProps = {
@@ -106,7 +106,7 @@ export function GitlabWorkItemList({
                 · {item.state}
               </span>
               <span className="text-xs text-muted-foreground">
-                {item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : ''}
+                {item.updatedAt ? new Date(item.updatedAt).toLocaleDateString(getIntlLocale()) : ''}
               </span>
               <div className="flex items-center justify-end gap-1">
                 <Tooltip>

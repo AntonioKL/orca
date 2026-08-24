@@ -100,10 +100,13 @@ export function GitHubStatusDuplicatePicker({
           placeholder={translate('auto.components.TaskPage.searchIssues', 'Search issues')}
           className="h-9 pl-8 text-[12px]"
           aria-invalid={duplicateError ? true : undefined}
+          aria-describedby={duplicateError ? 'github-duplicate-picker-error' : undefined}
         />
       </div>
       {duplicateError ? (
-        <p className="px-2 pb-2 text-[11px] text-destructive">{duplicateError}</p>
+        <p id="github-duplicate-picker-error" className="px-2 pb-2 text-[11px] text-destructive">
+          {duplicateError}
+        </p>
       ) : null}
       <div className="scrollbar-sleek max-h-72 overflow-y-auto pr-1">
         {directDuplicateTarget ? (

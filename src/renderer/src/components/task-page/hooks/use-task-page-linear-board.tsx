@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, type Dispatch, type SetStateAction } from 'react'
+import React, { useCallback, useMemo, useRef, type Dispatch, type SetStateAction } from 'react'
 import { toast } from 'sonner'
 
 import { useAppStore } from '@/store'
@@ -172,6 +172,9 @@ export function useTaskPageLinearBoard({
     [linearStatusBoardEnabled]
   )
 
+  // Why: two drops resolving in the same render pass both read the stale state set; the ref settles first.
+  const linearBoardInFlightIssueIdsRef = useRef<Set<string>>(new Set())
+
   const handleLinearBoardDrop = useCallback(
     async (section: LinearGroupSection, event: React.DragEvent<HTMLElement>) => {
       event.preventDefault()
@@ -193,11 +196,12 @@ export function useTaskPageLinearBoard({
       const issue = filteredLinearIssues.find((item) => item.id === issueId)
       if (
         !issue ||
-        linearBoardUpdatingIssueIds.has(issue.id) ||
+        linearBoardInFlightIssueIdsRef.current.has(issue.id) ||
         (issue.state.name === targetState.name && issue.state.type === targetState.type)
       ) {
         return
       }
+      linearBoardInFlightIssueIdsRef.current.add(issue.id)
 
       setLinearBoardUpdatingIssueIds((prev) => {
         const next = new Set(prev)
@@ -274,6 +278,7 @@ export function useTaskPageLinearBoard({
           translate('auto.components.TaskPage.6775c05483', 'Failed to update Linear state')
         )
       } finally {
+        linearBoardInFlightIssueIdsRef.current.delete(issue.id)
         setLinearBoardUpdatingIssueIds((prev) => {
           const next = new Set(prev)
           next.delete(issue.id)
@@ -285,7 +290,6 @@ export function useTaskPageLinearBoard({
       filteredLinearIssues,
       invalidateLinearIssueLists,
       linearBoardDraggingIssueId,
-      linearBoardUpdatingIssueIds,
       linearStatusBoardEnabled,
       patchScopedLinearIssue,
       patchLinearIssue,

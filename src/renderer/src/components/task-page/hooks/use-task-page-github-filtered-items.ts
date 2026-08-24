@@ -143,16 +143,20 @@ export function useTaskPageGitHubFilteredItems({
         item.headSha,
         item.prRepo ?? null,
         { repoId: repo.id, sourceContext: getTaskPageRepoSourceContext(repo, 'github') }
-      ).then((checks) => {
-        patchTaskPageWorkItemRows(
-          { id: item.id, repoId: item.repoId },
-          { checksSummary: deriveTaskPagePRCheckSummary(checks) },
-          (currentItem) =>
-            currentItem.type === 'pr' &&
-            currentItem.headSha === requestedHeadSha &&
-            sameOptionalGitHubOwnerRepo(currentItem.prRepo, requestedPRRepo)
-        )
-      })
+      )
+        .then((checks) => {
+          patchTaskPageWorkItemRows(
+            { id: item.id, repoId: item.repoId },
+            { checksSummary: deriveTaskPagePRCheckSummary(checks) },
+            (currentItem) =>
+              currentItem.type === 'pr' &&
+              currentItem.headSha === requestedHeadSha &&
+              sameOptionalGitHubOwnerRepo(currentItem.prRepo, requestedPRRepo)
+          )
+        })
+        .catch((err) => {
+          console.error('Failed to prefetch PR checks:', err)
+        })
     },
     [fetchPRChecks, patchTaskPageWorkItemRows, repoMap]
   )

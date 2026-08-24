@@ -93,7 +93,9 @@ export function getLinearIssueGroup(
   if (groupBy === 'assignee') {
     return {
       key: `assignee:${issue.assignee?.id ?? 'unassigned'}`,
-      label: issue.assignee?.displayName ?? 'Unassigned'
+      label:
+        issue.assignee?.displayName ??
+        translate('auto.components.TaskPage.42a9160321', 'Unassigned')
     }
   }
   if (groupBy === 'priority') {

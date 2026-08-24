@@ -10,7 +10,7 @@ import {
 import { TaskPageGitHubWorkItemStateBadge } from '@/components/task-page-github-work-item-status-badge'
 import { formatPRDelta } from '@/components/task-page-pr-delta-summary'
 import type { ItemDialogTab } from '@/components/GitHubItemDialog'
-import { translate } from '@/i18n/i18n'
+import { getIntlLocale, translate } from '@/i18n/i18n'
 import { findGithubWorkItemWorkspaceAttachment } from '@/lib/github-work-item-workspace-attachment'
 import { getWorktreeAttachmentLabel } from '@/lib/worktree-attachment-label'
 import { cn } from '@/lib/utils'
@@ -240,7 +240,7 @@ export function GithubWorkItemRow({
           </div>
         </TooltipTrigger>
         <TooltipContent side="bottom" sideOffset={6}>
-          {new Date(item.updatedAt).toLocaleString()}
+          {new Date(item.updatedAt).toLocaleString(getIntlLocale())}
         </TooltipContent>
       </Tooltip>
 

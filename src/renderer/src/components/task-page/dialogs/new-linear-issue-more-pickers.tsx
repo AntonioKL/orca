@@ -101,7 +101,9 @@ export function NewLinearIssueMorePickers({
                 const selectedProj = newLinearIssueProjects.find(
                   (p) => p.id === newLinearIssueProjectId
                 )
-                return selectedProj?.name || 'Project'
+                return (
+                  selectedProj?.name || translate('auto.components.TaskPage.00022ec0ba', 'Project')
+                )
               })()}
             </span>
             <ChevronDown className="size-3 text-muted-foreground/70" />

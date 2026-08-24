@@ -116,7 +116,9 @@ export function useTaskPageLinearCreateDialogs({
           setNewLinearIssueProjects(p.items)
         }
       })
-      .catch(() => {})
+      .catch((err) => {
+        console.warn('[TaskPage] Failed to load Linear projects for the issue composer', err)
+      })
       .finally(() => {
         if (!cancelled) {
           setNewLinearIssueProjectsLoading(false)
@@ -149,7 +151,12 @@ export function useTaskPageLinearCreateDialogs({
       setNewLinearIssueProjectId(null)
     }
     setNewLinearIssueLabelIds([])
-  }, [newLinearIssueTargetTeam?.id, newLinearIssueTargetTeam?.workspaceId, selectedLinearProject])
+  }, [
+    newLinearIssueTargetTeam?.id,
+    newLinearIssueTargetTeam?.workspaceId,
+    selectedLinearProject?.id,
+    selectedLinearProject?.workspaceId
+  ])
 
   const newLinearStates = useTeamStates(
     linearConnected ? newLinearIssueTargetTeam?.id || null : null,

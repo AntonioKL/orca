@@ -18,6 +18,23 @@ import type { ClassifiedError } from '../../../../../shared/classified-error'
 import type { GitHubWorkItem } from '../../../../../shared/github/work-item-types'
 import type { TaskSourceContext } from '../../../../../shared/task-source-context'
 
+function clearDispatchedRetrySourceKeys(
+  dispatchedRetrySourceKeys: ReadonlySet<string>,
+  setRetryingSourceKeys: Dispatch<SetStateAction<ReadonlySet<string>>>
+): void {
+  // Why: clear only the dispatch-time snapshot keys so an overlapping retry's newer source isn't wiped.
+  if (dispatchedRetrySourceKeys.size === 0) {
+    return
+  }
+  setRetryingSourceKeys((prev) => {
+    const next = new Set(prev)
+    for (const key of dispatchedRetrySourceKeys) {
+      next.delete(key)
+    }
+    return next
+  })
+}
+
 type GitHubPages = (GitHubWorkItem[] | null)[]
 
 export type GitHubListFetchRepoArg = {
@@ -139,17 +156,7 @@ export function settleGitHubListItemsSuccess({
   setTasksRefreshing: Dispatch<SetStateAction<boolean>>
   setTasksFiltering: Dispatch<SetStateAction<boolean>>
 }): void {
-  // Why: clear only the dispatch-time snapshot keys so an overlapping retry's newer source isn't wiped.
-  setRetryingSourceKeys((prev) => {
-    if (dispatchedRetrySourceKeys.size === 0) {
-      return prev
-    }
-    const next = new Set(prev)
-    for (const key of dispatchedRetrySourceKeys) {
-      next.delete(key)
-    }
-    return next
-  })
+  clearDispatchedRetrySourceKeys(dispatchedRetrySourceKeys, setRetryingSourceKeys)
   if (cancelled) {
     return
   }
@@ -243,17 +250,7 @@ export function settleGitHubListItemsFailure({
   setTasksFiltering: Dispatch<SetStateAction<boolean>>
 }): void {
   // Why: fetchWorkItemsAcrossRepos swallows per-repo failures, so a reject here is IPC/programmer error — surface it.
-  // Why: clear only the dispatch-time snapshot keys so an overlapping retry's newer source isn't wiped.
-  setRetryingSourceKeys((prev) => {
-    if (dispatchedRetrySourceKeys.size === 0) {
-      return prev
-    }
-    const next = new Set(prev)
-    for (const key of dispatchedRetrySourceKeys) {
-      next.delete(key)
-    }
-    return next
-  })
+  clearDispatchedRetrySourceKeys(dispatchedRetrySourceKeys, setRetryingSourceKeys)
   if (cancelled) {
     return
   }

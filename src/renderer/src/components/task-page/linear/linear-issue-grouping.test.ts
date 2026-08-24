@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { LinearIssue } from '../../../../../shared/linear/issue-types'
 import {
   compareLinearIssues,
+  findLinearWorkflowStateForStatus,
   getLinearIssueGridTemplate,
   getLinearPriorityRank,
   getLinearStatusSectionState,
@@ -87,6 +88,39 @@ describe('getLinearStatusSectionState', () => {
         issues: [issue({ id: '1', identifier: 'COR-1' })]
       })
     ).toBeNull()
+  })
+})
+
+describe('findLinearWorkflowStateForStatus', () => {
+  const states = [
+    { id: 'ws-1', name: 'In Progress', type: 'started', color: '#000', position: 1 },
+    { id: 'ws-2', name: 'In Progress', type: 'unstarted', color: '#111', position: 2 }
+  ]
+
+  it('prefers the state matching both name and type', () => {
+    expect(
+      findLinearWorkflowStateForStatus(states, {
+        name: 'In Progress',
+        type: 'unstarted',
+        color: '#111'
+      })
+    ).toEqual(states[1])
+  })
+
+  it('falls back to a name-only match when no type matches', () => {
+    expect(
+      findLinearWorkflowStateForStatus(states, {
+        name: 'In Progress',
+        type: 'completed',
+        color: '#222'
+      })
+    ).toEqual(states[0])
+  })
+
+  it('returns undefined when the name is absent', () => {
+    expect(
+      findLinearWorkflowStateForStatus(states, { name: 'Done', type: 'completed', color: '#333' })
+    ).toBeUndefined()
   })
 })
 

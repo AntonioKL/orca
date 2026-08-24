@@ -42,9 +42,9 @@ export function useTaskPageJiraProjects({
           setAvailableJiraProjects(projects)
         }
       })
-      .catch(() => {
+      .catch((error) => {
         if (!cancelled) {
-          console.warn('[TaskPage] Failed to fetch Jira projects')
+          console.warn('[TaskPage] Failed to fetch Jira projects', error)
         }
       })
       .finally(() => {

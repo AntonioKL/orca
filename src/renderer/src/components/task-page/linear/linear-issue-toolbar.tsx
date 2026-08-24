@@ -111,6 +111,7 @@ export function LinearIssueToolbar({
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <div
+            role="group"
             className="hidden items-center rounded-md border border-border/50 bg-background/70 p-0.5 md:flex"
             aria-label={translate('auto.components.TaskPage.d47248df4d', 'Linear view mode')}
           >

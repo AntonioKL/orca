@@ -1,7 +1,7 @@
 import React from 'react'
 import { ExternalLink } from 'lucide-react'
 
-import { translate } from '@/i18n/i18n'
+import { getIntlLocale, translate } from '@/i18n/i18n'
 import type { GitLabTodo } from '../../../../../shared/gitlab-types'
 
 export type GitlabTodosListProps = {
@@ -94,7 +94,7 @@ export function GitlabTodosList({
                 {todo.projectPath}
               </span>
               <span className="text-xs text-muted-foreground">
-                {todo.updatedAt ? new Date(todo.updatedAt).toLocaleDateString() : ''}
+                {todo.updatedAt ? new Date(todo.updatedAt).toLocaleDateString(getIntlLocale()) : ''}
               </span>
               <span className="flex justify-end">
                 <ExternalLink className="size-3.5 text-muted-foreground" />

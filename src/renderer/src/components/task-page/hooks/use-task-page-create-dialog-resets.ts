@@ -5,8 +5,6 @@ import type { LinearProjectSummary } from '../../../../../shared/linear/project-
 
 export function useTaskPageCreateDialogResets({
   providerRuntimeContextKey,
-  newLinearIssueOpen,
-  newJiraIssueOpen,
   setNewLinearIssueOpen,
   setNewLinearIssueTitle,
   setNewLinearIssueBody,
@@ -36,8 +34,6 @@ export function useTaskPageCreateDialogResets({
   setNewJiraIssueSubmitting
 }: {
   providerRuntimeContextKey: string
-  newLinearIssueOpen: boolean
-  newJiraIssueOpen: boolean
   setNewLinearIssueOpen: Dispatch<SetStateAction<boolean>>
   setNewLinearIssueTitle: Dispatch<SetStateAction<string>>
   setNewLinearIssueBody: Dispatch<SetStateAction<string>>
@@ -73,36 +69,33 @@ export function useTaskPageCreateDialogResets({
       return
     }
     previousProviderRuntimeContextKeyRef.current = providerRuntimeContextKey
-    if (newLinearIssueOpen) {
-      setNewLinearIssueOpen(false)
-      setNewLinearIssueTitle('')
-      setNewLinearIssueBody('')
-      setNewLinearIssueTeamId(null)
-      setNewLinearIssueStateId(null)
-      setNewLinearIssueAssigneeId(null)
-      setNewLinearIssuePriority(0)
-      setNewLinearIssueProjectId(null)
-      setNewLinearIssueLabelIds([])
-      setNewLinearIssueProjects([])
-      setNewLinearIssueProjectsLoading(false)
-      setNewLinearIssueSubmitting(false)
-    }
-    if (newJiraIssueOpen) {
-      setNewJiraIssueOpen(false)
-      setNewJiraIssueTitle('')
-      setNewJiraIssueBody('')
-      setNewJiraIssueProjectId(null)
-      setNewJiraIssueProjectComboboxOpen(false)
-      setNewJiraIssueProjectQuery('')
-      setNewJiraIssueProjectCommandValue('')
-      setNewJiraIssueTypeId(null)
-      setAvailableJiraIssueTypes([])
-      setJiraIssueTypesLoading(false)
-      setJiraCreateFields([])
-      setJiraCreateFieldsLoading(false)
-      setJiraCreateFieldsError(null)
-      setNewJiraIssueCustomFieldValues({})
-      setNewJiraIssueSubmitting(false)
-    }
-  }, [newJiraIssueOpen, newLinearIssueOpen, providerRuntimeContextKey])
+    // Why: reset regardless of open state — a closed dialog would otherwise reopen with the previous provider's draft.
+    setNewLinearIssueOpen(false)
+    setNewLinearIssueTitle('')
+    setNewLinearIssueBody('')
+    setNewLinearIssueTeamId(null)
+    setNewLinearIssueStateId(null)
+    setNewLinearIssueAssigneeId(null)
+    setNewLinearIssuePriority(0)
+    setNewLinearIssueProjectId(null)
+    setNewLinearIssueLabelIds([])
+    setNewLinearIssueProjects([])
+    setNewLinearIssueProjectsLoading(false)
+    setNewLinearIssueSubmitting(false)
+    setNewJiraIssueOpen(false)
+    setNewJiraIssueTitle('')
+    setNewJiraIssueBody('')
+    setNewJiraIssueProjectId(null)
+    setNewJiraIssueProjectComboboxOpen(false)
+    setNewJiraIssueProjectQuery('')
+    setNewJiraIssueProjectCommandValue('')
+    setNewJiraIssueTypeId(null)
+    setAvailableJiraIssueTypes([])
+    setJiraIssueTypesLoading(false)
+    setJiraCreateFields([])
+    setJiraCreateFieldsLoading(false)
+    setJiraCreateFieldsError(null)
+    setNewJiraIssueCustomFieldValues({})
+    setNewJiraIssueSubmitting(false)
+  }, [providerRuntimeContextKey])
 }

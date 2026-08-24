@@ -348,14 +348,18 @@ export function useTaskPageGitHubFetch({
       })),
       q,
       githubPerRepoPageLimit
-    ).then(({ totalPages: countedPages }) => {
-      settleGitHubListCount({
-        cancelled,
-        countedPages,
-        countedTotalPagesRef,
-        setCountedTotalPages
+    )
+      .then(({ totalPages: countedPages }) => {
+        settleGitHubListCount({
+          cancelled,
+          countedPages,
+          countedTotalPagesRef,
+          setCountedTotalPages
+        })
       })
-    })
+      .catch((err) => {
+        console.error('Failed to count work items:', err)
+      })
 
     return () => {
       cancelled = true

@@ -7,8 +7,14 @@ import { translate } from '@/i18n/i18n'
 
 export function LinearStatusLoading(): React.JSX.Element {
   return (
-    <div className="mt-4 flex items-center justify-center py-14">
-      <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
+    <div className="mt-4 flex items-center justify-center py-14" role="status">
+      <LoaderCircle
+        className="size-5 animate-spin text-muted-foreground"
+        aria-label={translate(
+          'auto.components.task.page.linear.linear.connect.empty.3e00e8ebd4',
+          'Loading Linear'
+        )}
+      />
     </div>
   )
 }
