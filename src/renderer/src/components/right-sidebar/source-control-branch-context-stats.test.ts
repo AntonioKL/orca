@@ -81,10 +81,39 @@ describe('source-control branch context stats', () => {
 
   it('singularizes a single commit', () => {
     const stats = buildSourceControlCompareBaseStats(
-      { ...readySummary, commitsAhead: 1 },
+      { ...readySummary, commitsAhead: 1, commitsBehind: 1 },
       'origin/main'
     )
-    expect(stats[0]?.title).toBe('1 commit ahead of origin/main')
+    expect(stats.map((stat) => stat.title)).toEqual([
+      '1 commit ahead of origin/main',
+      '1 commit behind origin/main'
+    ])
+  })
+
+  // The case the row exists for: a rebased branch is ahead of its base and behind it.
+  it('counts both directions against the compare base', () => {
+    const stats = buildSourceControlCompareBaseStats(
+      { ...readySummary, commitsAhead: 33, commitsBehind: 12 },
+      'refs/remotes/origin/main'
+    )
+    expect(stats.map((stat) => stat.label)).toEqual(['\u219133', '\u219312'])
+    expect(stats[1]?.title).toBe('12 commits behind origin/main')
+  })
+
+  it('drops each direction independently when it is zero or unreported', () => {
+    expect(
+      buildSourceControlCompareBaseStats(
+        { ...readySummary, commitsAhead: 0, commitsBehind: 4 },
+        'origin/main'
+      ).map((stat) => stat.label)
+    ).toEqual(['\u21934'])
+    // An older remote host omits commitsBehind entirely; ahead must still render.
+    expect(
+      buildSourceControlCompareBaseStats(
+        { ...readySummary, commitsBehind: undefined },
+        'origin/main'
+      ).map((stat) => stat.label)
+    ).toEqual(['\u21913'])
   })
 
   it('shows nothing without a ready summary or a positive count', () => {
@@ -94,11 +123,14 @@ describe('source-control branch context stats', () => {
       buildSourceControlCompareBaseStats({ ...readySummary, status: 'loading' }, 'origin/main')
     ).toEqual([])
     expect(
-      buildSourceControlCompareBaseStats({ ...readySummary, commitsAhead: 0 }, 'origin/main')
+      buildSourceControlCompareBaseStats(
+        { ...readySummary, commitsAhead: 0, commitsBehind: 0 },
+        'origin/main'
+      )
     ).toEqual([])
     expect(
       buildSourceControlCompareBaseStats(
-        { ...readySummary, commitsAhead: undefined },
+        { ...readySummary, commitsAhead: undefined, commitsBehind: undefined },
         'origin/main'
       )
     ).toEqual([])

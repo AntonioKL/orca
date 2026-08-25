@@ -16,8 +16,22 @@ function formatAheadOfTitle(count: number, ref: string): string {
       )
 }
 
-// Why: the count carries no color of its own. Green and red are reserved for the
-// line-total chip beside it — an `↑1` in added-green next to `+1,114` reads as one
+function formatBehindOfTitle(count: number, ref: string): string {
+  return count === 1
+    ? translate(
+        'auto.components.right.sidebar.SourceControl.c1a8f3e204',
+        '1 commit behind {{value0}}',
+        { value0: ref }
+      )
+    : translate(
+        'auto.components.right.sidebar.SourceControl.d2b9g4f315',
+        '{{value0}} commits behind {{value1}}',
+        { value0: count, value1: ref }
+      )
+}
+
+// Why: the counts carry no color of their own. Green and red are reserved for the
+// line-total chip beside them — an `↑1` in added-green next to `+1,114` reads as one
 // quantity when they count different things (commits vs lines).
 export type SourceControlBranchContextStat = {
   key: string
@@ -66,8 +80,8 @@ export function shouldShowSourceControlBranchContextChrome(
   return shouldShowSourceControlBranchContextRow(summary, compareBaseRef) || headDisplay != null
 }
 
-// Why: one count, on the line that names the ref it measures. Upstream ↑↓ used to
-// ride alongside and were read against the base ref instead of the tracked branch.
+// Why: both directions, on the line that names the ref they measure. Ahead alone hid
+// the case this row exists for — a rebased branch that has also fallen behind its base.
 export function buildSourceControlCompareBaseStats(
   summary: GitBranchCompareSummary | null | undefined,
   baseRef: string
@@ -75,16 +89,23 @@ export function buildSourceControlCompareBaseStats(
   if (summary?.status !== 'ready') {
     return []
   }
-  const commitsAhead = summary.commitsAhead
-  if (typeof commitsAhead !== 'number' || commitsAhead <= 0) {
-    return []
-  }
   const baseLabel = formatSourceControlRefLabel(baseRef)
-  return [
-    {
+  const stats: SourceControlBranchContextStat[] = []
+  const commitsAhead = summary.commitsAhead
+  if (typeof commitsAhead === 'number' && commitsAhead > 0) {
+    stats.push({
       key: 'compare-ahead',
       label: `↑${commitsAhead}`,
       title: formatAheadOfTitle(commitsAhead, baseLabel)
-    }
-  ]
+    })
+  }
+  const commitsBehind = summary.commitsBehind
+  if (typeof commitsBehind === 'number' && commitsBehind > 0) {
+    stats.push({
+      key: 'compare-behind',
+      label: `↓${commitsBehind}`,
+      title: formatBehindOfTitle(commitsBehind, baseLabel)
+    })
+  }
+  return stats
 }
