@@ -78,7 +78,7 @@ export class RelayControlClient {
     }
     this.state = 'opening'
     if (!this.options.createSocket) {
-      firstPartyRelay.prepareFirstPartyRelayWebSocketTrust(this.controlUrl)
+      await firstPartyRelay.prepareFirstPartyRelayWebSocketTrust(this.controlUrl)
     }
     if (this.state !== 'opening') {
       throw new Error('relay_control_closed')
