@@ -5,6 +5,7 @@ import type { RpcSuccess } from '../transport/types'
 import { readMobileRuntimeHostPlatform } from '../transport/mobile-runtime-host-platform'
 import { MOBILE_TASKS_CAPABILITY } from './mobile-tasks-capability'
 import {
+  WORKTREE_CREATE_DEDUPE_TTL_LEGACY_HOST_MS,
   resolveWorktreeCreateIdempotencySupport,
   type WorktreeCreateIdempotencySupport
 } from './worktree-create-idempotency-policy'
@@ -52,7 +53,7 @@ export async function readNewWorktreeRuntimeCapabilities(
         tasksSupported: capabilities.includes(MOBILE_TASKS_CAPABILITY),
         worktreeCreateIdempotency: supportsIdempotency
           ? advertisedIdempotency === undefined
-            ? resolveWorktreeCreateIdempotencySupport(undefined)
+            ? { dedupeTtlMs: WORKTREE_CREATE_DEDUPE_TTL_LEGACY_HOST_MS }
             : advertisedIdempotency !== null &&
                 typeof advertisedIdempotency === 'object' &&
                 !Array.isArray(advertisedIdempotency)

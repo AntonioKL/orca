@@ -69,6 +69,23 @@ describe('readNewWorktreeRuntimeCapabilities', () => {
     })
   })
 
+  it('fails closed when a valid idempotency container omits dedupeTtlMs', async () => {
+    await expect(
+      readNewWorktreeRuntimeCapabilities(
+        statusClient([
+          {
+            capabilities: ['worktree.create-idempotency.v1'],
+            worktreeCreateIdempotency: {}
+          }
+        ])
+      )
+    ).resolves.toEqual({
+      tasksSupported: false,
+      worktreeCreateIdempotency: { dedupeTtlMs: 0 },
+      hostPlatform: 'darwin'
+    })
+  })
+
   it.each([
     { label: 'null', value: null },
     { label: 'string', value: 'nonsense' },

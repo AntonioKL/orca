@@ -20,7 +20,7 @@ export function resolveWorktreeCreateIdempotencySupport(
   advertisedDedupeTtlMs: unknown
 ): WorktreeCreateIdempotencySupport {
   if (advertisedDedupeTtlMs === undefined) {
-    return { dedupeTtlMs: WORKTREE_CREATE_DEDUPE_TTL_LEGACY_HOST_MS }
+    return { dedupeTtlMs: 0 }
   }
   if (
     typeof advertisedDedupeTtlMs !== 'number' ||
