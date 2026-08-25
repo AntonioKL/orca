@@ -12,12 +12,9 @@ import {
   type ManagedHookDetectionSettings
 } from './managed-hook-detection-commands'
 import type { SshChannelMultiplexer } from '../ssh/ssh-channel-multiplexer'
-import { wslCodexRuntimeHomeForGuestHome } from '../pty/codex-home-wsl-env'
 import { WSL_HOOK_FS_METHODS, type WslFsResult } from '../../shared/wsl-hook-relay-contract'
 
-/** Run the shared remote hook installers against a WSL guest over the relay's
- *  fs bridge. Codex is the one agent whose home Orca redirects for WSL
- *  sessions, so its hooks go to the managed runtime home. */
+/** Run the shared remote hook installers against a WSL guest over the relay's fs bridge. */
 export async function installWslGuestHooks(options: {
   mux: SshChannelMultiplexer
   guestHome: string
@@ -44,10 +41,7 @@ export async function installWslGuestHooks(options: {
   if (agents.length === 0) {
     return
   }
-  const results = await installHooks(createWslHookSftpAdapter(mux), guestHome, {
-    codexHomeDir: wslCodexRuntimeHomeForGuestHome(guestHome),
-    agents
-  })
+  const results = await installHooks(createWslHookSftpAdapter(mux), guestHome, { agents })
   const failed = results.filter((r) => r.state === 'error').length
   if (failed > 0) {
     warn(
