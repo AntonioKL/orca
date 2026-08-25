@@ -203,6 +203,7 @@ describe('PR workflow parallelism', () => {
 
     expect(installIndex).toBeLessThan(buildIndex)
     expect(buildIndex).toBeLessThan(node18Index)
+    expect(trustBuildIndex).toBeGreaterThanOrEqual(0)
     expect(trustBuildIndex).toBeLessThan(node18Index)
     expect(node18Index).toBeLessThan(smokeIndex)
     expect(node18Index).toBeLessThan(trustSmokeIndex)
