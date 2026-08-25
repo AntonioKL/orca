@@ -101,7 +101,11 @@ export async function startGitCommonPrimaryWatch(
     if (!next) {
       return
     }
-    if (disposed || !watcher || statusRefPolling) {
+    // Why: rebinding can flip back while the poller was being built. A concurrent
+    // unbind sees `statusRefPolling` still null and correctly does nothing, so
+    // selection has to be re-read here or this adopts a poller for a repo that
+    // no longer holds a ref — reinstating the idle wake-ups this removes.
+    if (disposed || !watcher || statusRefPolling || getStatusRefPaths().length === 0) {
       await next.unsubscribe().catch(() => {})
       return
     }
