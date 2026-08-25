@@ -139,6 +139,7 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
         writeFakeLoadableNodePty(projectDir, { nativeDir: '../build/Release/' })
         writeFakeWindowsRegistry(projectDir)
         writeFakeWindowsProcessTree(projectDir)
+        writeFakeWindowsCaCerts(projectDir)
         writeFakeNodePtyConptyPayload(projectDir, process.arch)
 
         const result = runRebuildScript(projectDir, {
@@ -194,6 +195,7 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
         writeFakeElectronRebuild(projectDir, { logPathEnv: 'ORCA_REBUILD_TEST_LOG' })
         writeFakeLoadableNodePty(projectDir)
         writeFakeWindowsProcessTree(projectDir)
+        writeFakeWindowsCaCerts(projectDir)
         writeFakeNodePtyConptyPayload(projectDir, process.arch)
 
         const result = runRebuildScript(projectDir, {
@@ -224,6 +226,7 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
         writeFakeLoadableNodePty(projectDir, { ownsPtyJob: false })
         writeFakeWindowsRegistry(projectDir)
         writeFakeWindowsProcessTree(projectDir)
+        writeFakeWindowsCaCerts(projectDir)
 
         const result = runRebuildScript(projectDir, {
           ORCA_REBUILD_TEST_LOG: rebuildLogPath,
@@ -576,6 +579,12 @@ function writeFakeWindowsProcessTree(projectDir) {
   const processTreeDir = join(projectDir, 'node_modules', '@vscode', 'windows-process-tree')
   mkdirSync(processTreeDir, { recursive: true })
   writeFileSync(join(processTreeDir, 'index.js'), 'module.exports = {}\n')
+}
+
+function writeFakeWindowsCaCerts(projectDir) {
+  const certificatesDir = join(projectDir, 'node_modules', '@vscode', 'windows-ca-certs')
+  mkdirSync(certificatesDir, { recursive: true })
+  writeFileSync(join(certificatesDir, 'index.js'), 'module.exports = {}\n')
 }
 
 function writeNodePtyPatchFile(projectDir) {
