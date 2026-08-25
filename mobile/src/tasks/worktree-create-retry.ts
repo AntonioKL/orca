@@ -40,14 +40,6 @@ const WORKTREE_CREATE_CUTOVER_MAX_RETRIES = 5
 // finished the worktree. Replay on the same clientMutationId instead.
 const WORKTREE_CREATE_AMBIGUOUS_MAX_RETRIES = 2
 
-// Why: the host keeps a settled create's advertised dedupe record after it resolves;
-// a replay that lands later misses it and the host's suffix loop
-// builds a SECOND worktree — and for folder workspaces a second one with the SAME name
-// and no collision check at all. So a replay is bounded by how stale our knowledge of the
-// host is, and that has to be measured in WALL CLOCK: iOS/Android suspend JS timers while
-// the app is backgrounded, so any ceiling derived from timer intervals — a watchdog probe
-// budget, a request timeout — can be arbitrarily wrong across a background cycle, which is
-// exactly when a create sits ambiguous for minutes.
 // Bounded so the Create spinner doesn't sit for the whole window; the deadline still caps it.
 export const WORKTREE_CREATE_AMBIGUOUS_RECONNECT_WAIT_MS = 20_000
 

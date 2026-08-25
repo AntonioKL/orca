@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 import type { RpcClient } from '../transport/rpc-client'
 import { LogicalClientCutoverError } from '../transport/stable-logical-rpc-client'
 import { readNewWorktreeRuntimeCapabilities } from './worktree-create-capability'
-import { WORKTREE_CREATE_DEDUPE_TTL_LEGACY_HOST_MS } from './worktree-create-idempotency-policy'
+import {
+  WORKTREE_CREATE_DEDUPE_TTL_CLIENT_CEILING_MS,
+  WORKTREE_CREATE_DEDUPE_TTL_LEGACY_HOST_MS
+} from './worktree-create-idempotency-policy'
 
 type StatusOutcome =
   | 'cutover'
@@ -10,7 +13,7 @@ type StatusOutcome =
   | string[]
   | {
       capabilities?: string[]
-      worktreeCreateIdempotency?: { dedupeTtlMs: unknown }
+      worktreeCreateIdempotency?: unknown
     }
 
 function statusClient(outcomes: StatusOutcome[]): RpcClient {
@@ -61,10 +64,35 @@ describe('readNewWorktreeRuntimeCapabilities', () => {
       readNewWorktreeRuntimeCapabilities(statusClient([['worktree.create-idempotency.v1']]))
     ).resolves.toEqual({
       tasksSupported: false,
-      worktreeCreateIdempotency: { dedupeTtlMs: WORKTREE_CREATE_DEDUPE_TTL_LEGACY_HOST_MS },
+      worktreeCreateIdempotency: { dedupeTtlMs: WORKTREE_CREATE_DEDUPE_TTL_CLIENT_CEILING_MS },
       hostPlatform: 'darwin'
     })
   })
+
+  it.each([
+    { label: 'null', value: null },
+    { label: 'string', value: 'nonsense' },
+    { label: 'number', value: 20_000 },
+    { label: 'empty array', value: [] }
+  ])(
+    'fails closed for a malformed idempotency container ($label)',
+    async ({ value: worktreeCreateIdempotency }) => {
+      await expect(
+        readNewWorktreeRuntimeCapabilities(
+          statusClient([
+            {
+              capabilities: ['worktree.create-idempotency.v1'],
+              worktreeCreateIdempotency
+            }
+          ])
+        )
+      ).resolves.toEqual({
+        tasksSupported: false,
+        worktreeCreateIdempotency: { dedupeTtlMs: 0 },
+        hostPlatform: 'darwin'
+      })
+    }
+  )
 
   it('clamps an over-large host advertisement to the client fallback ceiling', async () => {
     await expect(

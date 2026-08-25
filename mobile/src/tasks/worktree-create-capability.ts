@@ -41,16 +41,25 @@ export async function readNewWorktreeRuntimeCapabilities(
       }
       const result = (response as RpcSuccess).result as {
         capabilities?: string[]
-        worktreeCreateIdempotency?: { dedupeTtlMs?: unknown }
+        worktreeCreateIdempotency?: unknown
       }
       const capabilities = result.capabilities ?? []
       const supportsIdempotency = capabilities.includes(
         MOBILE_WORKTREE_CREATE_IDEMPOTENCY_CAPABILITY
       )
+      const advertisedIdempotency = result.worktreeCreateIdempotency
       return {
         tasksSupported: capabilities.includes(MOBILE_TASKS_CAPABILITY),
         worktreeCreateIdempotency: supportsIdempotency
-          ? resolveWorktreeCreateIdempotencySupport(result.worktreeCreateIdempotency?.dedupeTtlMs)
+          ? advertisedIdempotency === undefined
+            ? resolveWorktreeCreateIdempotencySupport(undefined)
+            : advertisedIdempotency !== null &&
+                typeof advertisedIdempotency === 'object' &&
+                !Array.isArray(advertisedIdempotency)
+              ? resolveWorktreeCreateIdempotencySupport(
+                  (advertisedIdempotency as { dedupeTtlMs?: unknown }).dedupeTtlMs
+                )
+              : { dedupeTtlMs: 0 }
           : false,
         hostPlatform: readMobileRuntimeHostPlatform(result)
       }
