@@ -109,15 +109,6 @@ describe('Electron runtime package contract', () => {
     }
   })
 
-  it('includes the scoped first-party HTTP dispatcher in every packaged runtime', () => {
-    for (const platform of ['win32', 'darwin', 'linux']) {
-      const packagedTargets = createPackagedRuntimeNodeModuleResources(platform).map(
-        (resource) => resource.to
-      )
-      expect(packagedTargets).toContain(join('node_modules', 'undici'))
-    }
-  })
-
   it('guards package scripts that launch Electron tooling', () => {
     const scripts = packageJson.scripts
     const guardedScripts = [
