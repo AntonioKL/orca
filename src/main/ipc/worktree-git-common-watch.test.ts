@@ -406,12 +406,13 @@ describe('worktree git-common narrow watch (local native platforms)', () => {
       ),
       []
     )
-    // Narrow fallback + selected-ref polling + primary backstop, with the narrow
-    // existence poll retired. Waiting on the exact count is what guarantees the
-    // fallback has baselined before the entry below is created.
+    // Narrow fallback + primary backstop, with the narrow existence poll retired.
+    // No upstream ref is selected here, so no selected-ref poll is scheduled at
+    // all. Waiting on the exact count is what guarantees the fallback has
+    // baselined before the entry below is created.
     await vi.waitFor(() => {
       expect(narrowSubscription().unsubscribe).toHaveBeenCalledOnce()
-      expect(visibility.listenerCount()).toBe(4)
+      expect(visibility.listenerCount()).toBe(3)
     })
 
     const entryPath = join(worktreesDir, 'fallback-entry')
@@ -580,9 +581,9 @@ describe('worktree git-common narrow watch (local native platforms)', () => {
       visibility.source
     )
 
-    // Narrow existence, selected-ref polling, and the primary backstop each park
-    // on window visibility.
-    expect(visibility.listenerCount()).toBe(3)
+    // Narrow existence and the primary backstop park on window visibility. No
+    // upstream ref is selected, so no selected-ref poll exists to park.
+    expect(visibility.listenerCount()).toBe(2)
     await watch.unsubscribe()
     expect(visibility.listenerCount()).toBe(0)
   })
@@ -637,10 +638,15 @@ describe('worktree git-common narrow watch (local native platforms)', () => {
 
       await replaceWorktreesRoot(commonDir, worktreesDir, retainedEntry)
       await vi.advanceTimersByTimeAsync(POLL_MS * RECONCILIATION_TICKS * 4)
-      await vi.waitFor(() => {
-        expect(subscribeMock).toHaveBeenCalledTimes(3)
-      })
-      expect(staleSubscription.unsubscribe).toHaveBeenCalledOnce()
+      // Reconciliation's snapshot is real filesystem work, so advancing the fake
+      // clock schedules it but does not guarantee it has settled.
+      await vi.waitFor(
+        () => {
+          expect(subscribeMock).toHaveBeenCalledTimes(3)
+          expect(staleSubscription.unsubscribe).toHaveBeenCalledOnce()
+        },
+        { timeout: 2_000 }
+      )
 
       const beforeStaleEvent = received.length
       staleSubscription.callback(null, [{ type: 'update', path: retainedEntry }])

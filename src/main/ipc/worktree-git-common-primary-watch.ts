@@ -7,6 +7,7 @@ import type {
   WorktreePollerWindowVisibility
 } from './worktree-base-directory-poller'
 import { createSingleFlight } from './single-flight-promise'
+import { onActiveGitStatusRefBindingChanged } from './worktree-git-status-ref-watch'
 import { PRIMARY_CHECKOUT_METADATA_FILES } from './worktree-git-common-metadata-files'
 import { startGitCommonPrimaryPolling } from './worktree-git-common-primary-polling'
 
@@ -67,6 +68,50 @@ export async function startGitCommonPrimaryWatch(
       })
     )
 
+  const startStatusRefPollingIfSelected = async (): Promise<WorktreeBaseSubscription | null> =>
+    getStatusRefPaths().length === 0
+      ? null
+      : startGitCommonPrimaryPolling(
+          commonDirPath,
+          getStatusRefPaths,
+          onEvents,
+          pollIntervalMs,
+          visibility,
+          undefined,
+          false
+        )
+
+  // Why: rebinding is synchronous and in-process, so reacting to it costs the
+  // same detection latency as polling would have, without the idle wake-ups.
+  const syncStatusRefPolling = async (): Promise<void> => {
+    if (disposed || !watcher) {
+      return
+    }
+    const selected = getStatusRefPaths().length > 0
+    if (selected === (statusRefPolling !== null)) {
+      return
+    }
+    if (!selected) {
+      const current = statusRefPolling
+      statusRefPolling = null
+      await current?.unsubscribe().catch(() => {})
+      return
+    }
+    const next = await startStatusRefPollingIfSelected()
+    if (!next) {
+      return
+    }
+    if (disposed || !watcher || statusRefPolling) {
+      await next.unsubscribe().catch(() => {})
+      return
+    }
+    statusRefPolling = next
+  }
+
+  const unsubscribeBindingChanges = onActiveGitStatusRefBindingChanged(() => {
+    void syncStatusRefPolling().catch(() => {})
+  })
+
   const stopWatcherSidePolling = async (): Promise<void> => {
     const current = statusRefPolling
     const currentBackstop = backstopPolling
@@ -124,15 +169,7 @@ export async function startGitCommonPrimaryWatch(
     )
     if (watcher && !disposed && !fallbackFlight.pending()) {
       const [nextStatusRefPolling, nextBackstop] = await Promise.all([
-        startGitCommonPrimaryPolling(
-          commonDirPath,
-          getStatusRefPaths,
-          onEvents,
-          pollIntervalMs,
-          visibility,
-          undefined,
-          false
-        ),
+        startStatusRefPollingIfSelected(),
         startGitCommonPrimaryPolling(
           commonDirPath,
           () => [],
@@ -148,7 +185,7 @@ export async function startGitCommonPrimaryWatch(
       // adopting these now would strand the repo with status-ref coverage only.
       if (disposed || !watcher) {
         await Promise.all([
-          nextStatusRefPolling.unsubscribe().catch(() => {}),
+          nextStatusRefPolling?.unsubscribe().catch(() => {}),
           nextBackstop.unsubscribe().catch(() => {})
         ])
         if (!disposed) {
@@ -166,6 +203,7 @@ export async function startGitCommonPrimaryWatch(
   return {
     unsubscribe: async () => {
       disposed = true
+      unsubscribeBindingChanges()
       const current = watcher
       watcher = null
       if (current) {
