@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { RpcClient } from '../transport/rpc-client'
 import { LogicalClientCutoverError } from '../transport/stable-logical-rpc-client'
 import { readNewWorktreeRuntimeCapabilities } from './worktree-create-capability'
-import { WORKTREE_CREATE_DEDUPE_TTL_FALLBACK_MS } from './worktree-create-idempotency-policy'
+import { WORKTREE_CREATE_DEDUPE_TTL_LEGACY_HOST_MS } from './worktree-create-idempotency-policy'
 
 type StatusOutcome =
   | 'cutover'
@@ -61,7 +61,7 @@ describe('readNewWorktreeRuntimeCapabilities', () => {
       readNewWorktreeRuntimeCapabilities(statusClient([['worktree.create-idempotency.v1']]))
     ).resolves.toEqual({
       tasksSupported: false,
-      worktreeCreateIdempotency: { dedupeTtlMs: WORKTREE_CREATE_DEDUPE_TTL_FALLBACK_MS },
+      worktreeCreateIdempotency: { dedupeTtlMs: WORKTREE_CREATE_DEDUPE_TTL_LEGACY_HOST_MS },
       hostPlatform: 'darwin'
     })
   })
@@ -78,10 +78,30 @@ describe('readNewWorktreeRuntimeCapabilities', () => {
       )
     ).resolves.toEqual({
       tasksSupported: false,
-      worktreeCreateIdempotency: { dedupeTtlMs: WORKTREE_CREATE_DEDUPE_TTL_FALLBACK_MS },
+      worktreeCreateIdempotency: { dedupeTtlMs: WORKTREE_CREATE_DEDUPE_TTL_LEGACY_HOST_MS },
       hostPlatform: 'darwin'
     })
   })
+
+  it.each(['60000', -1, Number.NaN, 60_000.5, {}])(
+    'fails closed for malformed host advertisement %j',
+    async (advertisedDedupeTtlMs) => {
+      await expect(
+        readNewWorktreeRuntimeCapabilities(
+          statusClient([
+            {
+              capabilities: ['worktree.create-idempotency.v1'],
+              worktreeCreateIdempotency: { dedupeTtlMs: advertisedDedupeTtlMs }
+            }
+          ])
+        )
+      ).resolves.toEqual({
+        tasksSupported: false,
+        worktreeCreateIdempotency: { dedupeTtlMs: 0 },
+        hostPlatform: 'darwin'
+      })
+    }
+  )
 
   it('retries the safe status probe after a connection cutover', async () => {
     await expect(

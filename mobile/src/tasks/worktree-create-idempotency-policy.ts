@@ -1,6 +1,8 @@
-// Why: old idempotent hosts omit policy; this fallback also caps advertisements
-// so a new host cannot widen a deployed client's replay behavior.
-export const WORKTREE_CREATE_DEDUPE_TTL_FALLBACK_MS = 60_000
+// Why: old idempotent hosts omit policy, so preserve today's effective replay window.
+export const WORKTREE_CREATE_DEDUPE_TTL_LEGACY_HOST_MS = 60_000
+
+// Why: a client must not trust a host advertisement beyond its tested ceiling.
+export const WORKTREE_CREATE_DEDUPE_TTL_CLIENT_CEILING_MS = 60_000
 
 // Why: the replay still has to reach the host before its dedupe record expires.
 const WORKTREE_CREATE_REPLAY_FLIGHT_MARGIN_MS = 10_000
@@ -18,27 +20,21 @@ export function resolveWorktreeCreateIdempotencySupport(
   advertisedDedupeTtlMs: unknown
 ): WorktreeCreateIdempotencySupport {
   if (advertisedDedupeTtlMs === undefined) {
-    return { dedupeTtlMs: WORKTREE_CREATE_DEDUPE_TTL_FALLBACK_MS }
+    return { dedupeTtlMs: WORKTREE_CREATE_DEDUPE_TTL_LEGACY_HOST_MS }
   }
   if (
     typeof advertisedDedupeTtlMs !== 'number' ||
     !Number.isSafeInteger(advertisedDedupeTtlMs) ||
     advertisedDedupeTtlMs < 0
   ) {
+    // Truthy support preserves immediate cutover retries while disabling ambiguous replay.
     return { dedupeTtlMs: 0 }
   }
   return {
-    dedupeTtlMs: Math.min(advertisedDedupeTtlMs, WORKTREE_CREATE_DEDUPE_TTL_FALLBACK_MS)
+    dedupeTtlMs: Math.min(advertisedDedupeTtlMs, WORKTREE_CREATE_DEDUPE_TTL_CLIENT_CEILING_MS)
   }
 }
 
 export function getWorktreeCreateReplayWindowMs(support: WorktreeCreateIdempotencySupport): number {
-  if (!Number.isSafeInteger(support.dedupeTtlMs) || support.dedupeTtlMs <= 0) {
-    return 0
-  }
-  return Math.max(
-    0,
-    Math.min(support.dedupeTtlMs, WORKTREE_CREATE_DEDUPE_TTL_FALLBACK_MS) -
-      WORKTREE_CREATE_REPLAY_FLIGHT_MARGIN_MS
-  )
+  return Math.max(0, support.dedupeTtlMs - WORKTREE_CREATE_REPLAY_FLIGHT_MARGIN_MS)
 }

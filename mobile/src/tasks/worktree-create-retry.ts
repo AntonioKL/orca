@@ -12,8 +12,6 @@ import {
 import { WORKTREE_CREATE_TIMEOUT_MS } from './workspace-create-timeout'
 import {
   getWorktreeCreateReplayWindowMs,
-  resolveWorktreeCreateIdempotencySupport,
-  WORKTREE_CREATE_DEDUPE_TTL_FALLBACK_MS,
   type WorktreeCreateIdempotencyProbe,
   type WorktreeCreateIdempotencySupport
 } from './worktree-create-idempotency-policy'
@@ -50,9 +48,6 @@ const WORKTREE_CREATE_AMBIGUOUS_MAX_RETRIES = 2
 // the app is backgrounded, so any ceiling derived from timer intervals — a watchdog probe
 // budget, a request timeout — can be arbitrarily wrong across a background cycle, which is
 // exactly when a create sits ambiguous for minutes.
-export const WORKTREE_CREATE_AMBIGUOUS_REPLAY_WINDOW_MS = getWorktreeCreateReplayWindowMs(
-  resolveWorktreeCreateIdempotencySupport(WORKTREE_CREATE_DEDUPE_TTL_FALLBACK_MS)
-)
 // Bounded so the Create spinner doesn't sit for the whole window; the deadline still caps it.
 export const WORKTREE_CREATE_AMBIGUOUS_RECONNECT_WAIT_MS = 20_000
 
@@ -61,7 +56,7 @@ export type CreateWorktreeWithNameRetryArgs = {
   baseName: string
   nameWasGenerated?: boolean
   buildParams: (name: string) => Record<string, unknown>
-  supportsIdempotentCutoverRetry: WorktreeCreateIdempotencyProbe
+  worktreeCreateIdempotency: WorktreeCreateIdempotencyProbe
   maxAttempts?: number
   // Injected in tests; production mints a fresh idempotency key per candidate.
   mintMutationId?: () => string
@@ -78,7 +73,7 @@ export async function createWorktreeWithNameRetry(
   const { client, baseName, buildParams } = args
   // Why: creating before status.get settles would silently disable safe replay
   // during the exact slow-network window this path is meant to recover from.
-  const idempotentCutoverRetrySupport = await args.supportsIdempotentCutoverRetry
+  const worktreeCreateIdempotency = await args.worktreeCreateIdempotency
   const maxAttempts = args.maxAttempts ?? CLIENT_WORKTREE_CREATE_MAX_ATTEMPTS
   const mintMutationId = args.mintMutationId ?? defaultWorktreeCreateMutationId
   let lastError: string | null = null
@@ -90,14 +85,10 @@ export async function createWorktreeWithNameRetry(
     // Why: older hosts strip unknown fields, so only stamp and replay when the
     // host advertises idempotency. One key per candidate makes cutover retries
     // safe while a name-collision bump remains a genuinely new create.
-    const params = idempotentCutoverRetrySupport
+    const params = worktreeCreateIdempotency
       ? { ...candidateParams, clientMutationId: mintMutationId() }
       : candidateParams
-    const response = await sendWorktreeCreateResilient(
-      client,
-      params,
-      idempotentCutoverRetrySupport
-    )
+    const response = await sendWorktreeCreateResilient(client, params, worktreeCreateIdempotency)
     if (response.ok) {
       const result = (response as RpcSuccess).result as { worktree: { id: string } }
       return { worktreeId: result.worktree.id, name: candidateName }
@@ -118,7 +109,7 @@ export async function createWorktreeWithNameRetry(
 async function sendWorktreeCreateResilient(
   client: RpcClient,
   params: Record<string, unknown>,
-  idempotentCutoverRetrySupport: WorktreeCreateIdempotencySupport | false
+  worktreeCreateIdempotency: WorktreeCreateIdempotencySupport | false
 ): Promise<RpcResponse> {
   let migrationRetry = 0
   let ambiguousRetry = 0
@@ -130,7 +121,7 @@ async function sendWorktreeCreateResilient(
         timeoutMs: WORKTREE_CREATE_TIMEOUT_MS
       })
     } catch (error) {
-      if (!idempotentCutoverRetrySupport) {
+      if (!worktreeCreateIdempotency) {
         throw error
       }
       if (isLogicalClientCutoverError(error)) {
@@ -158,7 +149,7 @@ async function sendWorktreeCreateResilient(
       }
       // Computed once: a later ambiguity reads a fresher lastInboundAt from the
       // replacement session, which would push the deadline past the record it respects.
-      replayDeadlineAt ??= resolveReplayDeadline(client, firstSentAt, idempotentCutoverRetrySupport)
+      replayDeadlineAt ??= resolveReplayDeadline(client, firstSentAt, worktreeCreateIdempotency)
       const remainingWindowMs = replayDeadlineAt - Date.now()
       if (remainingWindowMs <= 0) {
         throw error

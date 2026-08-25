@@ -20,13 +20,13 @@ export async function createBlankWorkspace(args: {
   /** True when `baseName` is a generated creature name rather than one the user typed; only then
    *  may the host retire it. */
   nameWasGenerated: boolean
-  supportsIdempotentCutoverRetry: WorktreeCreateIdempotencyProbe
+  worktreeCreateIdempotency: WorktreeCreateIdempotencyProbe
 }): Promise<WorktreeCreateResult> {
   return createWorktreeWithNameRetry({
     client: args.client,
     baseName: args.baseName,
     nameWasGenerated: args.nameWasGenerated,
-    supportsIdempotentCutoverRetry: args.supportsIdempotentCutoverRetry,
+    worktreeCreateIdempotency: args.worktreeCreateIdempotency,
     buildParams: (name) => {
       const params: Record<string, unknown> = {
         repo: `id:${args.repoId}`,
