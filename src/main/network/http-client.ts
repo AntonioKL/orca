@@ -35,17 +35,27 @@ export type MainHttpClient = {
   proxySession(): Session | null
 }
 
-let nodeSystemTrustDispatcher: Promise<Dispatcher> | undefined
+type NodeSystemTrustTransport = {
+  dispatcher: Dispatcher
+  fetch: typeof globalThis.fetch
+}
 
-async function getNodeSystemTrustDispatcher(): Promise<Dispatcher> {
-  nodeSystemTrustDispatcher ??= Promise.all([
+// Why: dispatchers are private Undici ABI; pair them with the fetch from the same package.
+let nodeSystemTrustTransport: Promise<NodeSystemTrustTransport> | undefined
+
+async function getNodeSystemTrustTransport(): Promise<NodeSystemTrustTransport> {
+  nodeSystemTrustTransport ??= Promise.all([
     import('undici'),
     import('./first-party-tls-trust')
-  ]).then(async ([{ Agent, EnvHttpProxyAgent }, { getFirstPartyCaCertificates }]) => {
+  ]).then(async ([{ Agent, EnvHttpProxyAgent, fetch }, { getFirstPartyCaCertificates }]) => {
     const ca = await getFirstPartyCaCertificates()
     const proxy = getProxyUrlFromEnvironment(process.env)
+    const packageFetch = fetch as unknown as typeof globalThis.fetch
     if (!proxy.ok || !/^https?:/.test(proxy.value)) {
-      return new Agent({ connect: { ca, rejectUnauthorized: true } })
+      return {
+        dispatcher: new Agent({ connect: { ca, rejectUnauthorized: true } }),
+        fetch: packageFetch
+      }
     }
     const proxyOptions = {
       connect: { ca, rejectUnauthorized: true },
@@ -55,16 +65,19 @@ async function getNodeSystemTrustDispatcher(): Promise<Dispatcher> {
       httpsProxy: proxy.value,
       noProxy: getProxyBypassRulesFromEnvironment(process.env).replaceAll(';', ',')
     }
-    return new EnvHttpProxyAgent(proxyOptions)
+    return {
+      dispatcher: new EnvHttpProxyAgent(proxyOptions),
+      fetch: packageFetch
+    }
   })
-  return nodeSystemTrustDispatcher
+  return nodeSystemTrustTransport
 }
 
 const nodeHttpClient: MainHttpClient = {
   fetch: (url, init) => globalThis.fetch(url, init),
   fetchWithSystemTrust: async (url, init) => {
-    const dispatcher = await getNodeSystemTrustDispatcher()
-    return globalThis.fetch(url, { ...init, dispatcher } as RequestInit)
+    const transport = await getNodeSystemTrustTransport()
+    return transport.fetch(url, { ...init, dispatcher: transport.dispatcher } as RequestInit)
   },
   proxySession: () => null
 }
