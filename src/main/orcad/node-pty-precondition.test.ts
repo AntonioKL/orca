@@ -25,8 +25,16 @@ const REAL_PTY_NODE = join(REAL_NODE_PTY, 'build', 'Release', 'pty.node')
  * on a host that could never satisfy them. Probed in a child so a bad binding cannot
  * take the test runner down with it.
  */
+const REAL_SPAWN_HELPER = join(REAL_NODE_PTY, 'build', 'Release', 'spawn-helper')
+
 const realNodePtyLoads = ((): boolean => {
   if (!existsSync(REAL_PTY_NODE)) {
+    return false
+  }
+  // Why spawn-helper too: a slot without it is legitimately 'degraded', so a test that
+  // expects 'ok' has an unsatisfiable premise on a host that lacks it. CI has the
+  // binding but not the helper, which is what made the previous gate insufficient.
+  if (process.platform !== 'win32' && !existsSync(REAL_SPAWN_HELPER)) {
     return false
   }
   const probe = spawnSync(process.execPath, ['-e', `require(${JSON.stringify(REAL_PTY_NODE)})`], {
@@ -290,7 +298,7 @@ describe('checkNodePtyPrecondition', () => {
       temporaryDirs.push(prebuildsDir)
       mkdirSync(join(prebuildsDir, slot), { recursive: true })
       cpSync(REAL_PTY_NODE, join(prebuildsDir, slot, 'pty.node'))
-      const helper = join(REAL_NODE_PTY, 'build', 'Release', 'spawn-helper')
+      const helper = REAL_SPAWN_HELPER
       if (process.platform !== 'win32' && existsSync(helper)) {
         cpSync(helper, join(prebuildsDir, slot, 'spawn-helper'))
       }
