@@ -1,10 +1,7 @@
 import React from 'react'
 import { ExternalLink, Loader2, RefreshCw } from 'lucide-react'
 import type { GitBranchCompareSummary } from '../../../../../../shared/git-diff-compare-types'
-import type {
-  GitBranchLineTotal,
-  GitUpstreamStatus
-} from '../../../../../../shared/git-status-types'
+import type { GitBranchLineTotal } from '../../../../../../shared/git-status-types'
 import { cn } from '@/lib/utils'
 import { translate } from '@/i18n/i18n'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -13,7 +10,7 @@ import type { WorktreeGitIdentityDisplay } from '@/lib/worktree-git-identity-dis
 import { SourceControlHeaderIconButton } from './header-icon-button'
 import { SourceControlBranchLineTotalChip } from './branch-line-total-chip'
 import {
-  buildSourceControlUpstreamDivergenceStats,
+  buildSourceControlCompareBaseStats,
   formatSourceControlRefLabel,
   resolveSourceControlDisplayedBaseRef,
   type SourceControlBranchContextStat
@@ -49,9 +46,9 @@ function BaseRefButton({
 }
 
 function ContextStat({ stat }: { stat: SourceControlBranchContextStat }): React.JSX.Element {
-  // Why: aria-label on an unfocusable span is never announced, so the upstream
-  // ref these counts measure against would exist only for sighted hover users.
-  // tabIndex also lets keyboard users open the tooltip, like HeadIdentity.
+  // Why: aria-label on an unfocusable span is never announced, so the ref this
+  // count measures against would exist only for sighted hover users. tabIndex also
+  // lets keyboard users open the tooltip, like HeadIdentity.
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -283,7 +280,6 @@ export function SourceControlBranchContextRow({
   summary,
   compareBaseRef,
   headDisplay = null,
-  upstreamStatus,
   manualReviewUrl,
   branchLineTotal,
   onChangeBaseRef,
@@ -292,18 +288,12 @@ export function SourceControlBranchContextRow({
   summary: GitBranchCompareSummary | null
   compareBaseRef: string | null
   headDisplay?: WorktreeGitIdentityDisplay | null
-  upstreamStatus?: GitUpstreamStatus
   manualReviewUrl?: string | null
   branchLineTotal?: GitBranchLineTotal | null
   onChangeBaseRef: () => void
   onRetry: () => void
 }): React.JSX.Element | null {
   const displayedBaseRef = resolveSourceControlDisplayedBaseRef(summary, compareBaseRef)
-
-  // Why: ↑↓ measure HEAD against its upstream, not against the compare base, so
-  // they stay valid (and rendered) while compare is missing, loading, or failed.
-  const upstreamStats = buildSourceControlUpstreamDivergenceStats(upstreamStatus)
-  const upstreamStatNodes = upstreamStats.map((stat) => <ContextStat key={stat.key} stat={stat} />)
 
   // Why: no base → still show HEAD identity so branch/detached never vanish when
   // compare isn't configured (replaces the separate identity row from #10215).
@@ -312,11 +302,8 @@ export function SourceControlBranchContextRow({
       return null
     }
     return (
-      <div className="flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
-        <span className="flex min-w-0 flex-1 items-center">
-          <HeadIdentity display={headDisplay} />
-        </span>
-        {upstreamStatNodes}
+      <div className="min-w-0 text-[11px] text-muted-foreground">
+        <HeadIdentity display={headDisplay} />
       </div>
     )
   }
@@ -351,7 +338,6 @@ export function SourceControlBranchContextRow({
           changeBaseTitle={changeBaseTitle}
           leading={<Loader2 className="size-3 shrink-0 animate-spin" aria-hidden="true" />}
           trailing={<ManualReviewLinkButton url={manualReviewUrl} />}
-          headTrailing={upstreamStatNodes}
         />
         <span className="sr-only">
           {translate('auto.components.right.sidebar.SourceControl.11b5dd8e41', 'Comparing against')}
@@ -382,7 +368,6 @@ export function SourceControlBranchContextRow({
               />
             </>
           }
-          headTrailing={upstreamStatNodes}
         />
         {/* Why: pl-4 under the base line so the error reads as compare state, not HEAD. */}
         <span
@@ -399,6 +384,10 @@ export function SourceControlBranchContextRow({
     )
   }
 
+  const compareStatNodes = buildSourceControlCompareBaseStats(summary, displayedBaseRef).map(
+    (stat) => <ContextStat key={stat.key} stat={stat} />
+  )
+
   return (
     <CompareFlowGroup flowLabel={flowLabel} className="min-w-0 text-[11px] text-muted-foreground">
       <StackedCompareFlow
@@ -407,16 +396,13 @@ export function SourceControlBranchContextRow({
         baseLabel={baseLabel}
         onChangeBaseRef={onChangeBaseRef}
         changeBaseTitle={changeBaseTitle}
-        trailing={<ManualReviewLinkButton url={manualReviewUrl} />}
-        // Why: ↑↓ measure this branch against the branch it tracks, so they sit on
-        // the line that names it. Beside `→ origin/main` they read as counts
-        // against origin/main, which is false whenever the two refs differ.
-        headTrailing={
+        trailing={
           <>
-            {upstreamStatNodes}
-            <SourceControlBranchLineTotalChip branchLineTotal={branchLineTotal} />
+            {compareStatNodes}
+            <ManualReviewLinkButton url={manualReviewUrl} />
           </>
         }
+        headTrailing={<SourceControlBranchLineTotalChip branchLineTotal={branchLineTotal} />}
       />
     </CompareFlowGroup>
   )

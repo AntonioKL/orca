@@ -208,74 +208,42 @@ describe('SourceControlBranchContextRow', () => {
     expect(markup).toContain('Retry')
   })
 
-  // A branch rebased onto origin/main still tracks its pre-rebase remote branch.
-  // Beside `→ origin/main`, ↑25 ↓5 read as counts against origin/main — false,
-  // and the whole reason the row was confusing.
-  it('puts the upstream arrows on the head line, never beside the base ref', () => {
+  // A branch rebased onto origin/main still tracks its pre-rebase remote branch,
+  // so upstream ↑↓ answered a question nobody asked here. One count, against the
+  // base ref, on the line that names it.
+  it('counts commits against the compare base, on the base line', () => {
     const markup = renderToStaticMarkup(
       <SourceControlBranchContextRow
         summary={{ ...readySummary, baseRef: 'refs/remotes/origin/main', commitsAhead: 5 }}
         compareBaseRef={null}
         headDisplay={{ kind: 'branch', branchName: 'feature/rebased' }}
-        upstreamStatus={{
-          hasUpstream: true,
-          upstreamName: 'origin/feature',
-          ahead: 25,
-          behind: 5
-        }}
         onChangeBaseRef={vi.fn()}
         onRetry={vi.fn()}
       />
     )
 
-    // Arrows land between the branch name and the base line, i.e. on the head line.
     // Anchor on the base-ref button, not on 'origin/main' — the group's
     // head→base aria-label repeats the base ref at the top of the markup.
-    const headIndex = markup.indexOf('data-testid="source-control-head-identity"')
     const baseIndex = markup.indexOf('aria-label="Change base ref:')
-    expect(markup.indexOf('↑25')).toBeGreaterThan(headIndex)
-    expect(markup.indexOf('↑25')).toBeLessThan(baseIndex)
-    expect(markup.indexOf('↓5')).toBeLessThan(baseIndex)
-    // The base line carries no counts at all, so nothing can be misread against it.
-    expect(markup.slice(baseIndex)).not.toContain('↑')
-    expect(markup.slice(baseIndex)).not.toContain('↓')
+    expect(markup.indexOf('↑5')).toBeGreaterThan(baseIndex)
+    expect(markup).toContain('aria-label="5 commits ahead of origin/main"')
+    // Nothing claims the branch is behind — that count is not available.
+    expect(markup).not.toContain('↓')
   })
 
-  it('names the upstream ref on every count for screen readers', () => {
+  it('shows the count on the base line when there is no head identity', () => {
     const markup = renderToStaticMarkup(
       <SourceControlBranchContextRow
-        summary={readySummary}
-        compareBaseRef={null}
-        headDisplay={{ kind: 'branch', branchName: 'feature/rebased' }}
-        upstreamStatus={{
-          hasUpstream: true,
-          upstreamName: 'origin/feature',
-          ahead: 25,
-          behind: 5
-        }}
-        onChangeBaseRef={vi.fn()}
-        onRetry={vi.fn()}
-      />
-    )
-
-    expect(markup).toContain('aria-label="25 commits ahead of origin/feature"')
-    expect(markup).toContain('aria-label="5 commits behind origin/feature"')
-  })
-
-  it('folds the upstream arrows onto the base line when there is no head identity', () => {
-    const markup = renderToStaticMarkup(
-      <SourceControlBranchContextRow
-        summary={readySummary}
+        summary={{ ...readySummary, commitsAhead: 3 }}
         compareBaseRef={null}
         headDisplay={null}
-        upstreamStatus={{ hasUpstream: true, upstreamName: 'origin/feature', ahead: 3, behind: 0 }}
         onChangeBaseRef={vi.fn()}
         onRetry={vi.fn()}
       />
     )
 
     expect(markup).toContain('↑3')
-    expect(markup).toContain('aria-label="3 commits ahead of origin/feature"')
+    expect(markup).toContain('aria-label="3 commits ahead of origin/FRONT-192-ZisVoucherStrip"')
   })
 
   it('renders a compact external review link when a manual URL is available', () => {
@@ -389,26 +357,28 @@ describe('SourceControlBranchContextRow branch line total', () => {
     }
   })
 
-  // The compare base is quantified in files (section heading) and lines (this
-  // chip), never in a second arrow pair that would sit next to the upstream one.
-  it('shows no commit count against the compare base', () => {
+  // Regression: with no upstream divergence this is the only count left, so
+  // dropping it left a pushed, rebased branch showing no divergence at all.
+  it('counts commits against the compare base on the base line', () => {
     const markup = renderWithLineTotal(
       { added: 8259, removed: 670, mergeBase: 'base' },
       { ...readySummary, commitsAhead: 2 }
     )
 
-    expect(markup).not.toContain('↑2')
-    expect(markup).not.toContain('↑')
+    expect(markup).toContain('↑2')
+    expect(markup).toContain('2 commits ahead of origin/FRONT-192-ZisVoucherStrip')
+    // It belongs to the base line, after the base-ref button.
+    expect(markup.indexOf('↑2')).toBeGreaterThan(markup.indexOf('aria-label="Change base ref:'))
+    // Nothing claims the branch is behind its base — that count does not exist.
     expect(markup).not.toContain('↓')
   })
 
-  it('keeps the upstream counts out of the line-total colors', () => {
+  it('keeps the commit count out of the line-total colors', () => {
     const markup = renderToStaticMarkup(
       <SourceControlBranchContextRow
-        summary={readySummary}
+        summary={{ ...readySummary, commitsAhead: 2 }}
         compareBaseRef={null}
         headDisplay={{ kind: 'branch', branchName: 'feature/line-total' }}
-        upstreamStatus={{ hasUpstream: true, upstreamName: 'origin/feature', ahead: 2, behind: 0 }}
         branchLineTotal={{ added: 8259, removed: 670, mergeBase: 'base' }}
         onChangeBaseRef={vi.fn()}
         onRetry={vi.fn()}

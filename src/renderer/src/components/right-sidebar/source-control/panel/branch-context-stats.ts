@@ -1,5 +1,4 @@
 import type { GitBranchCompareSummary } from '../../../../../../shared/git-diff-compare-types'
-import type { GitUpstreamStatus } from '../../../../../../shared/git-status-types'
 import type { WorktreeGitIdentityDisplay } from '@/lib/worktree-git-identity-display'
 import { translate } from '@/i18n/i18n'
 
@@ -17,24 +16,9 @@ function formatAheadOfTitle(count: number, ref: string): string {
       )
 }
 
-function formatBehindOfTitle(count: number, ref: string): string {
-  return count === 1
-    ? translate(
-        'auto.components.right.sidebar.SourceControl.c1a8f3e204',
-        '1 commit behind {{value0}}',
-        { value0: ref }
-      )
-    : translate(
-        'auto.components.right.sidebar.SourceControl.d2b9g4f315',
-        '{{value0}} commits behind {{value1}}',
-        { value0: count, value1: ref }
-      )
-}
-
-// Why: ahead/behind carry no color of their own. Green and red are reserved for
-// the line-total chip that sits beside them — an `↑1` in added-green next to
-// `+1,114` reads as one quantity when they count different things (commits vs
-// lines). The ↑/↓ glyph already carries direction.
+// Why: the count carries no color of its own. Green and red are reserved for the
+// line-total chip beside it — an `↑1` in added-green next to `+1,114` reads as one
+// quantity when they count different things (commits vs lines).
 export type SourceControlBranchContextStat = {
   key: string
   label: string
@@ -82,40 +66,25 @@ export function shouldShowSourceControlBranchContextChrome(
   return shouldShowSourceControlBranchContextRow(summary, compareBaseRef) || headDisplay != null
 }
 
-function resolveUpstreamDisplayLabel(upstreamStatus: GitUpstreamStatus): string {
-  const named = upstreamStatus.upstreamName?.trim()
-  if (named) {
-    return formatSourceControlRefLabel(named)
-  }
-  return translate('auto.components.right.sidebar.SourceControl.f3a1b8c204', 'upstream')
-}
-
-// ↑/↓ mean one thing only: this branch against the branch it tracks — the same
-// reading every other git UI gives them.
-export function buildSourceControlUpstreamDivergenceStats(
-  upstreamStatus: GitUpstreamStatus | undefined
+// Why: one count, on the line that names the ref it measures. Upstream ↑↓ used to
+// ride alongside and were read against the base ref instead of the tracked branch.
+export function buildSourceControlCompareBaseStats(
+  summary: GitBranchCompareSummary | null | undefined,
+  baseRef: string
 ): SourceControlBranchContextStat[] {
-  if (!upstreamStatus?.hasUpstream) {
+  if (summary?.status !== 'ready') {
     return []
   }
-
-  const ref = resolveUpstreamDisplayLabel(upstreamStatus)
-  const stats: SourceControlBranchContextStat[] = []
-
-  if (upstreamStatus.ahead > 0) {
-    stats.push({
-      key: 'upstream-ahead',
-      label: `↑${upstreamStatus.ahead}`,
-      title: formatAheadOfTitle(upstreamStatus.ahead, ref)
-    })
+  const commitsAhead = summary.commitsAhead
+  if (typeof commitsAhead !== 'number' || commitsAhead <= 0) {
+    return []
   }
-  if (upstreamStatus.behind > 0) {
-    stats.push({
-      key: 'upstream-behind',
-      label: `↓${upstreamStatus.behind}`,
-      title: formatBehindOfTitle(upstreamStatus.behind, ref)
-    })
-  }
-
-  return stats
+  const baseLabel = formatSourceControlRefLabel(baseRef)
+  return [
+    {
+      key: 'compare-ahead',
+      label: `↑${commitsAhead}`,
+      title: formatAheadOfTitle(commitsAhead, baseLabel)
+    }
+  ]
 }

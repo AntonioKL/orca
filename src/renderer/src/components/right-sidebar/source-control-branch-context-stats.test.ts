@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  buildSourceControlUpstreamDivergenceStats,
+  buildSourceControlCompareBaseStats,
   formatSourceControlRefLabel,
   resolveSourceControlDisplayedBaseRef,
   shouldShowSourceControlBranchContextChrome,
@@ -62,52 +62,45 @@ describe('source-control branch context stats', () => {
     expect(shouldShowSourceControlBranchContextChrome(readySummary, null, null)).toBe(true)
   })
 
-  it('renders ahead and behind counts against the tracking branch', () => {
-    const stats = buildSourceControlUpstreamDivergenceStats({
-      hasUpstream: true,
-      upstreamName: 'origin/feature',
-      ahead: 2,
-      behind: 1
-    })
-    expect(stats.map((stat) => stat.label)).toEqual(['↑2', '↓1'])
-    expect(stats[0]?.title).toBe('2 commits ahead of origin/feature')
-    expect(stats[1]?.title).toBe('1 commit behind origin/feature')
+  it('counts commits ahead of the compare base', () => {
+    const stats = buildSourceControlCompareBaseStats(readySummary, 'refs/remotes/origin/main')
+    expect(stats.map((stat) => stat.label)).toEqual(['\u21913'])
+    expect(stats[0]?.title).toBe('3 commits ahead of origin/main')
   })
 
-  // The rebase case: upstream still points at the pre-rebase branch while the
-  // compare base is origin/main. Only the upstream counts belong here, so there
-  // is nothing for the base ref to be confused with.
-  it('never reports the branch against its compare base', () => {
-    const stats = buildSourceControlUpstreamDivergenceStats({
-      hasUpstream: true,
-      upstreamName: 'origin/feature',
-      ahead: 25,
-      behind: 5
-    })
-    expect(stats.map((stat) => stat.label)).toEqual(['↑25', '↓5'])
-    expect(stats.every((stat) => stat.title.includes('origin/feature'))).toBe(true)
-    expect(stats.some((stat) => stat.title.includes('origin/main'))).toBe(false)
+  it('names the base ref, never the tracked branch', () => {
+    // The rebase case: upstream still points at the pre-rebase branch. This count
+    // is against the compare base and says so, so the two cannot be conflated.
+    const stats = buildSourceControlCompareBaseStats(
+      { ...readySummary, commitsAhead: 36 },
+      'origin/main'
+    )
+    expect(stats[0]?.label).toBe('\u219136')
+    expect(stats[0]?.title).toBe('36 commits ahead of origin/main')
   })
 
-  it('reports nothing without a tracking branch', () => {
-    expect(buildSourceControlUpstreamDivergenceStats(undefined)).toEqual([])
+  it('singularizes a single commit', () => {
+    const stats = buildSourceControlCompareBaseStats(
+      { ...readySummary, commitsAhead: 1 },
+      'origin/main'
+    )
+    expect(stats[0]?.title).toBe('1 commit ahead of origin/main')
+  })
+
+  it('shows nothing without a ready summary or a positive count', () => {
+    expect(buildSourceControlCompareBaseStats(null, 'origin/main')).toEqual([])
+    expect(buildSourceControlCompareBaseStats(undefined, 'origin/main')).toEqual([])
     expect(
-      buildSourceControlUpstreamDivergenceStats({ hasUpstream: false, ahead: 0, behind: 0 })
+      buildSourceControlCompareBaseStats({ ...readySummary, status: 'loading' }, 'origin/main')
     ).toEqual([])
-  })
-
-  it('falls back to a generic upstream label when upstreamName is missing', () => {
-    const stats = buildSourceControlUpstreamDivergenceStats({
-      hasUpstream: true,
-      ahead: 2,
-      behind: 0
-    })
-    expect(stats[0]?.title).toBe('2 commits ahead of upstream')
-  })
-
-  it('returns no stats when the branch is even with its upstream', () => {
     expect(
-      buildSourceControlUpstreamDivergenceStats({ hasUpstream: true, ahead: 0, behind: 0 })
+      buildSourceControlCompareBaseStats({ ...readySummary, commitsAhead: 0 }, 'origin/main')
+    ).toEqual([])
+    expect(
+      buildSourceControlCompareBaseStats(
+        { ...readySummary, commitsAhead: undefined },
+        'origin/main'
+      )
     ).toEqual([])
   })
 })
