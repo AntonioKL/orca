@@ -83,6 +83,29 @@ describe('default-session proxy request guard', () => {
     await vi.waitFor(() => expect(callback).toHaveBeenCalledWith({}))
   })
 
+  it('recovers after two transient failures without another settings transition', async () => {
+    const { proxySession, request } = createSession()
+    proxySession.setProxy
+      .mockRejectedValueOnce(new Error('first transient proxy failure'))
+      .mockRejectedValueOnce(new Error('second transient proxy failure'))
+    resetSessionProxyApplicationForTests(proxySession)
+    installElectronProxyRequestGuard(proxySession as never)
+
+    const applying = applyProxySettingsToSession(
+      proxySession,
+      { httpProxyUrl: 'http://proxy.example:8080' },
+      { env: {} }
+    )
+    const callback = vi.fn()
+    request(callback)
+
+    await vi.waitFor(() => expect(proxySession.setProxy).toHaveBeenCalledTimes(2))
+    expect(callback).not.toHaveBeenCalled()
+    await applying
+    expect(proxySession.setProxy).toHaveBeenCalledTimes(3)
+    await vi.waitFor(() => expect(callback).toHaveBeenCalledWith({}))
+  })
+
   it('cancels renderer requests after proxy application fails', async () => {
     const { proxySession, request } = createSession()
     proxySession.setProxy.mockRejectedValue(new Error('proxy apply failed'))

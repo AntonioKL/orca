@@ -367,6 +367,7 @@ describe('applyProxySettingsToSession', () => {
     proxySession.closeAllConnections
       .mockRejectedValueOnce(new Error('close failed'))
       .mockRejectedValueOnce(new Error('close failed'))
+      .mockRejectedValueOnce(new Error('close failed'))
     await expect(
       applyProxySettingsToSession(
         proxySession,
@@ -410,7 +411,7 @@ describe('applyProxySettingsToSession', () => {
     await expect(awaitProxySessionApplication(proxySession)).resolves.toBe(true)
   })
 
-  it('fails closed after both bounded proxy application attempts reject', async () => {
+  it('fails closed after all bounded proxy application attempts reject', async () => {
     const proxySession = createProxySession()
     proxySession.setProxy.mockRejectedValue(new Error('proxy apply failed'))
     resetSessionProxyApplicationForTests(proxySession)
@@ -423,7 +424,7 @@ describe('applyProxySettingsToSession', () => {
       )
     ).rejects.toThrow('proxy apply failed')
 
-    expect(proxySession.setProxy).toHaveBeenCalledTimes(2)
+    expect(proxySession.setProxy).toHaveBeenCalledTimes(3)
     await expect(awaitProxySessionApplication(proxySession)).resolves.toBe(false)
   })
 
