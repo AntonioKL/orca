@@ -1,6 +1,7 @@
 import { createServer } from 'node:https'
 import type * as NodeTls from 'node:tls'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import nacl from 'tweetnacl'
 import WebSocket, { WebSocketServer } from 'ws'
 
 const tlsFixture = vi.hoisted(() => ({
@@ -87,24 +88,128 @@ import {
   prepareFirstPartyRelayWebSocketTrust
 } from './first-party-relay-websocket'
 import { firstPartyFetch } from './first-party-fetch'
-import { getFirstPartyCaCertificates } from './first-party-tls-trust'
+import { getFirstPartyCaCertificates } from '../network/first-party-tls-trust'
+import { exchangeOrcaCloudAuthCode } from '../orca-profiles/profile-cloud-client'
+import { exchangeRelayAuthorization, requestRelayAssignment } from './relay/relay-http-client'
 
 function opened(socket: WebSocket): Promise<void> {
   return new Promise((resolve, reject) => {
-    socket.once('open', resolve)
-    socket.once('error', reject)
+    const timer = setTimeout(() => reject(new Error('WSS open timed out')), 5_000)
+    const settle = (result: () => void): void => {
+      clearTimeout(timer)
+      socket.off('open', onOpen)
+      socket.off('error', onError)
+      result()
+    }
+    const onOpen = (): void => settle(resolve)
+    const onError = (error: Error): void => settle(() => reject(error))
+    socket.once('open', onOpen)
+    socket.once('error', onError)
   })
 }
 
 function nextMessage(socket: WebSocket): Promise<string> {
-  return new Promise((resolve) => socket.once('message', (data) => resolve(data.toString())))
+  return new Promise((resolve, reject) => {
+    const onMessage = (data: WebSocket.RawData): void => {
+      clearTimeout(timer)
+      socket.off('error', onError)
+      resolve(data.toString())
+    }
+    const onError = (error: Error): void => {
+      clearTimeout(timer)
+      socket.off('message', onMessage)
+      reject(error)
+    }
+    const timer = setTimeout(() => {
+      socket.off('message', onMessage)
+      socket.off('error', onError)
+      reject(new Error('WSS message timed out'))
+    }, 5_000)
+    socket.once('message', onMessage)
+    socket.once('error', onError)
+  })
+}
+
+function socketError(socket: WebSocket): Promise<Error> {
+  return new Promise((resolve, reject) => {
+    const onError = (error: Error): void => {
+      clearTimeout(timer)
+      socket.off('open', onOpen)
+      resolve(error)
+    }
+    const onOpen = (): void => {
+      clearTimeout(timer)
+      socket.off('error', onError)
+      socket.terminate()
+      reject(new Error('unexpected WSS open'))
+    }
+    const timer = setTimeout(() => {
+      socket.off('error', onError)
+      socket.off('open', onOpen)
+      reject(new Error('WSS error timed out'))
+    }, 5_000)
+    socket.once('error', onError)
+    socket.once('open', onOpen)
+  })
 }
 
 describe('first-party TLS trust', () => {
+  const cloudRequests: { authorization: string | undefined; body: string }[] = []
+  const relayRequests: { url: string; authorization: string | undefined; body: string }[] = []
   const server = createServer(
     { key: tlsFixture.key, cert: tlsFixture.certificate },
-    (_req, res) => {
-      res.end('fixture-http-ok')
+    (request, response) => {
+      if (
+        request.url === '/session' ||
+        request.url === '/relay-token' ||
+        request.url === '/v1/assign'
+      ) {
+        const chunks: Buffer[] = []
+        request.on('data', (chunk: Buffer) => chunks.push(chunk))
+        request.on('end', () => {
+          const body = Buffer.concat(chunks).toString('utf8')
+          response.setHeader('content-type', 'application/json')
+          if (request.url === '/session') {
+            cloudRequests.push({ authorization: request.headers.authorization, body })
+            response.end(
+              JSON.stringify({
+                accessToken: 'fixture-access-token',
+                refreshToken: 'fixture-refresh-token',
+                expiresAt: Date.now() + 60_000,
+                cloud: {
+                  cloudProfileId: 'cloud-profile-1',
+                  userId: 'user-1',
+                  email: 'fixture@example.com',
+                  linkedAt: Date.now()
+                },
+                organizations: [],
+                capabilities: { flags: { relay: true }, refreshedAt: Date.now() }
+              })
+            )
+            return
+          }
+          relayRequests.push({
+            url: request.url!,
+            authorization: request.headers.authorization,
+            body
+          })
+          response.end(
+            request.url === '/relay-token'
+              ? JSON.stringify({
+                  relayToken: 'fixture-relay-token',
+                  expiresAt: Date.now() + 60_000
+                })
+              : JSON.stringify({
+                  v: 1,
+                  cellUrl: httpsUrl,
+                  assignmentEpoch: 3,
+                  lease: 'fixture-lease'
+                })
+          )
+        })
+        return
+      }
+      response.end('fixture-http-ok')
     }
   )
   const wss = new WebSocketServer({ server, perMessageDeflate: false })
@@ -113,7 +218,7 @@ describe('first-party TLS trust', () => {
 
   beforeAll(async () => {
     wss.on('connection', (socket) => socket.on('message', (data) => socket.send(data)))
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    await new Promise<void>((resolve) => server.listen(0, '::', resolve))
     const address = server.address()
     if (!address || typeof address === 'string') {
       throw new Error('expected TLS fixture address')
@@ -127,11 +232,12 @@ describe('first-party TLS trust', () => {
       client.terminate()
     }
     await new Promise<void>((resolve) => wss.close(() => resolve()))
+    await new Promise<void>((resolve) => server.close(() => resolve()))
   })
 
   it('rejects the inspection certificate without additive trust', async () => {
     const socket = new WebSocket(url)
-    const error = await new Promise<Error>((resolve) => socket.once('error', resolve))
+    const error = await socketError(socket)
     expect(error.message).toMatch(/certificate|self-signed|unable to verify/i)
   })
 
@@ -143,9 +249,64 @@ describe('first-party TLS trust', () => {
     await expect(response.text()).resolves.toBe('fixture-http-ok')
   })
 
+  it('keeps HTTP hostname verification enabled with additive trust', async () => {
+    const mismatchedUrl = httpsUrl.replace('localhost', '[::1]')
+    await expect(firstPartyFetch(mismatchedUrl)).rejects.toThrow(/fetch failed/i)
+  })
+
+  it('keeps WSS hostname verification enabled with additive trust', async () => {
+    await prepareFirstPartyRelayWebSocketTrust(url)
+    const socket = createFirstPartyRelayDataWebSocket(url.replace('localhost', '[::1]'))
+    const error = await socketError(socket)
+    expect(error.message).toMatch(/hostname|altname|IP/i)
+  })
+
+  it('carries the Cloud sign-in handoff through the real trusted HTTP boundary', async () => {
+    cloudRequests.length = 0
+    await expect(
+      exchangeOrcaCloudAuthCode(
+        {
+          apiBaseUrl: httpsUrl,
+          authorizeEndpoint: `${httpsUrl}/authorize`,
+          sessionEndpoint: `${httpsUrl}/session`,
+          refreshEndpoint: `${httpsUrl}/refresh`,
+          capabilitiesEndpoint: `${httpsUrl}/capabilities`,
+          profileEndpoint: `${httpsUrl}/profile`,
+          orgEndpoint: `${httpsUrl}/org`,
+          logoutEndpoint: `${httpsUrl}/logout`,
+          relayTokenEndpoint: `${httpsUrl}/relay-token`,
+          relayDirectorUrl: httpsUrl,
+          clientId: 'fixture-client',
+          scope: 'openid profile email offline_access'
+        },
+        {
+          code: 'fixture-code',
+          codeVerifier: 'fixture-verifier',
+          nonce: 'fixture-nonce',
+          redirectUri: 'orca://auth/callback',
+          state: 'fixture-state',
+          localProfileId: 'local-profile-1'
+        }
+      )
+    ).resolves.toMatchObject({ accessToken: 'fixture-access-token' })
+    expect(cloudRequests).toEqual([
+      {
+        authorization: undefined,
+        body: JSON.stringify({
+          code: 'fixture-code',
+          codeVerifier: 'fixture-verifier',
+          nonce: 'fixture-nonce',
+          redirectUri: 'orca://auth/callback',
+          state: 'fixture-state',
+          localProfileId: 'local-profile-1'
+        })
+      }
+    ])
+  })
+
   it('opens authenticated control and data sockets with additive trust', async () => {
-    prepareFirstPartyRelayWebSocketTrust(url)
-    expect(getFirstPartyCaCertificates()).toContain(tlsFixture.root)
+    await prepareFirstPartyRelayWebSocketTrust(url)
+    await expect(getFirstPartyCaCertificates()).resolves.toContain(tlsFixture.root)
 
     const controlRequest = new Promise<string | undefined>((resolve) =>
       wss.once('headers', (_headers, request) => resolve(request.headers.authorization))
@@ -161,5 +322,36 @@ describe('first-party TLS trust', () => {
     data.send('fixture-wss-ok')
     await expect(echoed).resolves.toBe('fixture-wss-ok')
     data.close()
+  })
+
+  it('carries Relay mint and assignment through the real trusted HTTP boundary', async () => {
+    relayRequests.length = 0
+    const keypair = nacl.box.keyPair()
+    await expect(
+      exchangeRelayAuthorization({
+        endpoint: `${httpsUrl}/relay-token`,
+        accessToken: 'fixture-access-token',
+        keypair: {
+          ...keypair,
+          publicKeyB64: Buffer.from(keypair.publicKey).toString('base64')
+        }
+      })
+    ).resolves.toMatchObject({ relayToken: 'fixture-relay-token' })
+    await expect(
+      requestRelayAssignment({
+        directorUrl: httpsUrl,
+        relayToken: 'fixture-relay-token',
+        relayHostId: 'AbCdEf0123_-xyZ9'
+      })
+    ).resolves.toMatchObject({ assignmentEpoch: 3, cellUrl: httpsUrl })
+
+    expect(relayRequests.map(({ url, authorization }) => ({ url, authorization }))).toEqual([
+      { url: '/relay-token', authorization: 'Bearer fixture-access-token' },
+      { url: '/v1/assign', authorization: 'Bearer fixture-relay-token' }
+    ])
+    expect(JSON.parse(relayRequests[1]!.body)).toEqual({
+      v: 1,
+      relayHostId: 'AbCdEf0123_-xyZ9'
+    })
   })
 })

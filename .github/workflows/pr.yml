@@ -564,6 +564,9 @@ jobs:
       - name: Build relay companions
         run: pnpm run build:relay
 
+      - name: Build first-party Node 18 trust smoke
+        run: node config/scripts/build-first-party-node18-trust-smoke.mjs
+
       - name: Setup Node 18 runtime
         uses: actions/setup-node@v6
         with:
@@ -571,6 +574,9 @@ jobs:
 
       - name: Smoke managed-hook companions
         run: node config/scripts/smoke-managed-hook-runtime-node18.mjs
+
+      - name: Smoke first-party HTTPS and WSS trust
+        run: node config/scripts/smoke-first-party-node18-trust.mjs
 
   package:
     name: package

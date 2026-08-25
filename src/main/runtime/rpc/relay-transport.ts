@@ -118,10 +118,13 @@ export class CloudRelayTransport implements RpcTransport, MobileSocketTransport 
   }
 
   async start(): Promise<void> {
-    if (this.usesFirstPartySocket) {
-      prepareFirstPartyRelayWebSocketTrust(this.cellWebSocketOrigin)
-    }
     this.stopped = false
+    if (this.usesFirstPartySocket) {
+      await prepareFirstPartyRelayWebSocketTrust(this.cellWebSocketOrigin)
+      if (this.stopped) {
+        throw new Error('relay_transport_stopped')
+      }
+    }
   }
 
   async stop(): Promise<void> {

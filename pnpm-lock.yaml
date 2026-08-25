@@ -95,8 +95,8 @@ importers:
         specifier: ^1.0.3
         version: 1.0.3
       undici:
-        specifier: ^7.29.0
-        version: 7.29.0
+        specifier: ^6.28.0
+        version: 6.28.0
       ws:
         specifier: ^8.21.0
         version: 8.21.0
@@ -408,6 +408,9 @@ importers:
         specifier: ^5.0.14
         version: 5.0.14(@types/react@19.2.17)(react@19.2.7)(use-sync-external-store@1.6.0(react@19.2.7))
     optionalDependencies:
+      '@vscode/windows-ca-certs':
+        specifier: 0.3.4
+        version: 0.3.4
       '@vscode/windows-process-tree':
         specifier: 0.8.0
         version: 0.8.0(patch_hash=73a90530e6b95c05dac50f2c48787fb51cb292587773016ebe57eb05e41075a0)
@@ -3387,6 +3390,10 @@ packages:
   '@vitest/utils@4.1.5':
     resolution: {integrity: sha512-76wdkrmfXfqGjueGgnb45ITPyUi1ycZ4IHgC2bhPDUfWHklY/q3MdLOAB+TF1e6xfl8NxNY0ZYaPCFNWSsw3Ug==}
 
+  '@vscode/windows-ca-certs@0.3.4':
+    resolution: {integrity: sha512-DcDLjBpu8srh6wUiZqEMyhXHzNDO81ecZOttL3+1u3Iht4CS6Qtxy5WkTPX/aDgbheASO/MK8yg6uLq58RzEWg==}
+    os: [win32]
+
   '@vscode/windows-process-tree@0.8.0':
     resolution: {integrity: sha512-TI+h2GRwX+igD/YYJMQQVAFcsCNSg7Te2yYxQpKMzwto5RsJ8d2KKgOeur/p/6sAOQwZvopiTDOClyTHEn9MhQ==}
 
@@ -5444,6 +5451,10 @@ packages:
 
   node-addon-api@7.1.1:
     resolution: {integrity: sha512-5m3bsyrjFWE1xf7nz7YXdN4udnVtXK6/Yfgn5qnahL6bCkf2yKt4k3nuTKAtT4r3IG8JNR2ncsIMdZuAzJjHQQ==}
+
+  node-addon-api@8.9.2:
+    resolution: {integrity: sha512-VijLXbi3UACN69I0JVXJsX4tjACjNoQDgv2gTF6sx2wWEi8tkSg2eX8p5gSIFi8z2+DL3oHmY6OyKce38SDolg==}
+    engines: {node: ^18 || ^20 || >= 21}
 
   node-api-version@0.2.1:
     resolution: {integrity: sha512-2xP/IGGMmmSQpI1+O/k72jF/ykvZ89JeuKX3TLJAYPDVLUalrshrLHkeVcCCZqG/eEa635cr8IBYzgnDvM2O8Q==}
@@ -9608,6 +9619,11 @@ snapshots:
       convert-source-map: 2.0.0
       tinyrainbow: 3.1.0
 
+  '@vscode/windows-ca-certs@0.3.4':
+    dependencies:
+      node-addon-api: 8.9.2
+    optional: true
+
   '@vscode/windows-process-tree@0.8.0(patch_hash=73a90530e6b95c05dac50f2c48787fb51cb292587773016ebe57eb05e41075a0)':
     dependencies:
       node-addon-api: 7.1.0
@@ -12029,6 +12045,9 @@ snapshots:
     optional: true
 
   node-addon-api@7.1.1: {}
+
+  node-addon-api@8.9.2:
+    optional: true
 
   node-api-version@0.2.1:
     dependencies:

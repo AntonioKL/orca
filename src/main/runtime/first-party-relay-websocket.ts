@@ -1,18 +1,25 @@
 import type { SecureContext } from 'node:tls'
 import WebSocket from 'ws'
-import { getFirstPartySecureContext } from './first-party-tls-trust'
+import { getFirstPartySecureContext } from '../network/first-party-tls-trust'
 
-export function prepareFirstPartyRelayWebSocketTrust(url: string): void {
+let secureContext: SecureContext | undefined
+
+export async function prepareFirstPartyRelayWebSocketTrust(url: string): Promise<void> {
   if (url.startsWith('wss:')) {
-    getFirstPartySecureContext()
+    secureContext ??= await getFirstPartySecureContext()
   }
 }
 
-function firstPartyWebSocketTlsOptions(url: string): { secureContext: SecureContext } | undefined {
+function firstPartyWebSocketTlsOptions(
+  url: string
+): { secureContext: SecureContext; rejectUnauthorized: true } | undefined {
   if (!url.startsWith('wss:')) {
     return undefined
   }
-  return { secureContext: getFirstPartySecureContext() }
+  if (!secureContext) {
+    throw new Error('first_party_websocket_trust_not_prepared')
+  }
+  return { secureContext, rejectUnauthorized: true }
 }
 
 export function createFirstPartyRelayControlWebSocket(url: string, relayJwt: string): WebSocket {

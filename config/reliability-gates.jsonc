@@ -15786,6 +15786,99 @@
       "demotionRule": "Keep experimental or demote if either signal traps, returns nonzero, retains its listener/Xvfb/run-owned process identity, touches the unrelated canary, or the focused gate flakes without an identified product or harness defect."
     },
     {
+      "id": "cloud-relay.node18-system-tls-trust",
+      "title": "Node 18 Cloud and Relay transports retain host trust and TLS verification",
+      "maturity": "experimental",
+      "protection": "partial",
+      "owner": "cloud-relay-network",
+      "layer": "host-first-party-network-boundary",
+      "surfaces": [
+        "Cloud session exchange",
+        "Relay token mint and HTTP assignment",
+        "Relay control and data WSS"
+      ],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local", "ssh", "paired-runtime"],
+      "coveredPlatforms": ["macos", "linux"],
+      "coveredProviders": ["local"],
+      "coverageNotes": "A real Node 18 process drives the production Cloud exchange, Relay mint/assignment, and default control/data clients through one CA-signed HTTPS/WSS fixture. Injected host-store contracts cover Linux bundles, macOS trust verification, and Windows disallowed-root subtraction. Physical Windows and managed corporate policy remain uncollected.",
+      "motivatingLinks": [
+        "https://github.com/stablyai/orca/issues/13735",
+        "https://linear.app/stably/issue/STA-3864"
+      ],
+      "invariant": "Node-hosted Orca Cloud and Relay HTTPS/WSS accept host-trusted inspection chains without changing global CA state or disabling certificate and hostname verification.",
+      "oracle": "Build the production Cloud/Relay callers for Node 18, start one local CA-signed HTTPS/WSS fixture, prove raw HTTP and WSS reject it, then prove exact Cloud PKCE exchange, Relay mint/assignment, control authorization/hello, and data authorization/echo through the default clients. Independently prove the trusted CA still rejects HTTPS and WSS hostname mismatches.",
+      "commands": [
+        "node config/scripts/build-first-party-node18-trust-smoke.mjs && npx -y node@18 config/scripts/smoke-first-party-node18-trust.mjs",
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/network/first-party-ca-certificates.test.ts src/main/network/first-party-tls-trust-node18.test.ts src/main/runtime/first-party-relay-websocket.test.ts"
+      ],
+      "testFiles": [
+        "config/scripts/smoke-first-party-node18-trust.mjs",
+        "src/main/network/first-party-ca-certificates.test.ts",
+        "src/main/network/first-party-tls-trust-node18.test.ts",
+        "src/main/runtime/first-party-relay-websocket.test.ts"
+      ],
+      "assertionRefs": [
+        {
+          "file": "config/scripts/smoke-first-party-node18-trust.mjs",
+          "assertions": [
+            "raw Node 18 HTTP and WSS reject the fixture CA",
+            "the real Cloud session exchange sends the exact PKCE handoff and receives a normalized session",
+            "the real Relay token and assignment callers send exact bearer credentials and request bodies",
+            "the default Relay control client sends authorization and host hello over trusted WSS",
+            "the default Relay data transport sends its ticket/generation and carries a reply",
+            "the trusted CA still rejects HTTPS and WSS hostname mismatches"
+          ]
+        },
+        {
+          "file": "src/main/network/first-party-ca-certificates.test.ts",
+          "assertions": [
+            "Linux reads its policy-owned CA bundle",
+            "macOS accepts only current self-issued roots that host verification accepts",
+            "Windows subtracts explicitly disallowed certificates from its root store"
+          ]
+        }
+      ],
+      "evidenceRuns": [
+        {
+          "date": "2026-08-25",
+          "runner": "local",
+          "platform": "macos",
+          "result": "passed",
+          "command": "node config/scripts/build-first-party-node18-trust-smoke.mjs && npx -y node@18 config/scripts/smoke-first-party-node18-trust.mjs",
+          "durationSeconds": 4,
+          "summary": "Node 18.20.8 kept raw HTTP/WSS red, then passed real Cloud exchange, Relay mint/assignment, default control/data WSS, exact request/auth assertions, data echo, and both hostname mismatches."
+        }
+      ],
+      "runtimeBudget": {
+        "p95Seconds": 20,
+        "scope": "one local CA generation, three HTTPS requests, two successful WSS handshakes, two raw rejections, two hostname rejections, and cleanup"
+      },
+      "flakeHistory": {
+        "status": "not-started",
+        "evidence": "The fixture uses bound ports and event-driven socket barriers; CI soak history is not yet available."
+      },
+      "redGreenEvidence": {
+        "status": "complete",
+        "evidence": "The byte-identical production-caller overlay fails on origin/main bc98655a3965 at Cloud certificate verification after raw HTTP/WSS reject the fixture. Candidate and fix-reverted SHAs are recorded in the PR evidence after the final code commit so this file does not self-reference its own commit."
+      },
+      "performanceBudget": {
+        "required": true,
+        "evidence": "Certificate enumeration is lazy, cached once per host process, and adds no polling or per-request subprocess. A local macOS cold load completed in 31ms. Modern Linux/Windows use Node policy APIs; legacy Linux reads one bundle, legacy Windows enumerates two native stores, and macOS performs one bounded keychain listing plus bounded verification only for current self-issued CA candidates."
+      },
+      "promotionCriteria": [
+        "Collect 100 consecutive focused CI passes or 14 days without an unexplained flake.",
+        "Collect one managed macOS corporate-inspection run across sign-in, Relay mint, assignment, and control/data WSS.",
+        "Collect one packaged Windows run that loads the native root-store module and rejects a disallowed test root."
+      ],
+      "knownGaps": [
+        "No reporter has run the reworked build on a managed corporate network.",
+        "Explicit HTTP-proxy tunneling for Relay WSS remains unsupported and is distinct from transparent inspection.",
+        "The local real-Node-18 smoke uses an explicit CA file; platform store policy is covered with deterministic injected sources."
+      ],
+      "demotionRule": "Demote if raw Node unexpectedly trusts the fixture, scoped traffic accepts a hostname mismatch, host-store loading mutates global trust, or the Node 18 lane stops exercising both HTTPS and WSS."
+    },
+    {
       "id": "ssh-managed-hooks.node18-runtime-compatibility",
       "title": "SSH managed-hook companions load and install hooks on Node 18",
       "maturity": "experimental",

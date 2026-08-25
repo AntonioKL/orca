@@ -15,7 +15,7 @@ const runtime = readRuntimeArg()
 const NATIVE_MODULES = [
   'node-pty',
   ...(process.platform === 'win32'
-    ? ['windows-native-registry', '@vscode/windows-process-tree']
+    ? ['windows-native-registry', '@vscode/windows-process-tree', '@vscode/windows-ca-certs']
     : [])
 ]
 const NODE_PTY_CONPTY_RUNTIME_FILES = ['conpty.dll', 'OpenConsole.exe']

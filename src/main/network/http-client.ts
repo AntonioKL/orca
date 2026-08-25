@@ -1,4 +1,9 @@
 import type { Session } from 'electron'
+import type { Dispatcher } from 'undici'
+import {
+  getProxyBypassRulesFromEnvironment,
+  getProxyUrlFromEnvironment
+} from '../../shared/network-proxy'
 
 /**
  * Outbound HTTP for main-process integrations.
@@ -20,13 +25,47 @@ import type { Session } from 'electron'
  */
 
 export type MainHttpClient = {
-  fetch(url: string, init?: RequestInit): Promise<Response>
+  fetch(input: Parameters<typeof globalThis.fetch>[0], init?: RequestInit): Promise<Response>
+  /** Additive OS trust without weakening certificate or hostname verification. */
+  fetchWithSystemTrust(
+    input: Parameters<typeof globalThis.fetch>[0],
+    init?: RequestInit
+  ): Promise<Response>
   /** The Chromium session whose proxy state applies, or null on a host without one. */
   proxySession(): Session | null
 }
 
+let nodeSystemTrustDispatcher: Promise<Dispatcher> | undefined
+
+async function getNodeSystemTrustDispatcher(): Promise<Dispatcher> {
+  nodeSystemTrustDispatcher ??= Promise.all([
+    import('undici'),
+    import('./first-party-tls-trust')
+  ]).then(async ([{ Agent, EnvHttpProxyAgent }, { getFirstPartyCaCertificates }]) => {
+    const ca = await getFirstPartyCaCertificates()
+    const proxy = getProxyUrlFromEnvironment(process.env)
+    if (!proxy.ok || !/^https?:/.test(proxy.value)) {
+      return new Agent({ connect: { ca, rejectUnauthorized: true } })
+    }
+    const proxyOptions = {
+      connect: { ca, rejectUnauthorized: true },
+      proxyTls: { ca, rejectUnauthorized: true },
+      requestTls: { ca, rejectUnauthorized: true },
+      httpProxy: proxy.value,
+      httpsProxy: proxy.value,
+      noProxy: getProxyBypassRulesFromEnvironment(process.env).replaceAll(';', ',')
+    }
+    return new EnvHttpProxyAgent(proxyOptions)
+  })
+  return nodeSystemTrustDispatcher
+}
+
 const nodeHttpClient: MainHttpClient = {
   fetch: (url, init) => globalThis.fetch(url, init),
+  fetchWithSystemTrust: async (url, init) => {
+    const dispatcher = await getNodeSystemTrustDispatcher()
+    return globalThis.fetch(url, { ...init, dispatcher } as RequestInit)
+  },
   proxySession: () => null
 }
 
