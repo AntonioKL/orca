@@ -3,7 +3,10 @@ import type { RpcClient } from '../transport/rpc-client'
 import { markRpcDeliveryUnknown } from '../transport/rpc-delivery-ambiguity'
 import { LogicalClientCutoverError } from '../transport/stable-logical-rpc-client'
 import type { ConnectionState } from '../transport/types'
-import { WORKTREE_CREATE_DEDUPE_TTL_MS } from '../../../src/shared/new-workspace/worktree-create-retry-policy'
+import {
+  WORKTREE_CREATE_DEDUPE_TTL_FALLBACK_MS,
+  type WorktreeCreateIdempotencySupport
+} from './worktree-create-idempotency-policy'
 import {
   createWorktreeWithNameRetry,
   WORKTREE_CREATE_AMBIGUOUS_RECONNECT_WAIT_MS,
@@ -12,6 +15,10 @@ import {
 import { WORKTREE_CREATE_TIMEOUT_MS } from './workspace-create-timeout'
 
 type Attempt = { method: string; params: Record<string, unknown> }
+
+const IDEMPOTENT_CREATE_SUPPORT = {
+  dedupeTtlMs: WORKTREE_CREATE_DEDUPE_TTL_FALLBACK_MS
+}
 
 // Drives the transport state a replay has to wait on. Production couples the two:
 // a socket close rejects the pending frame AND drops the client off 'connected'.
@@ -106,8 +113,8 @@ describe('createWorktreeWithNameRetry', () => {
   it('waits for capability detection before sending a create', async () => {
     const attempts: Attempt[] = []
     const client = scriptedClient([{ id: 'wt-ready' }], attempts)
-    let resolveSupport!: (supported: boolean) => void
-    const support = new Promise<boolean>((resolve) => {
+    let resolveSupport!: (supported: WorktreeCreateIdempotencySupport) => void
+    const support = new Promise<WorktreeCreateIdempotencySupport>((resolve) => {
       resolveSupport = resolve
     })
     const pending = createWorktreeWithNameRetry({
@@ -120,7 +127,7 @@ describe('createWorktreeWithNameRetry', () => {
 
     await Promise.resolve()
     expect(attempts).toHaveLength(0)
-    resolveSupport(true)
+    resolveSupport(IDEMPOTENT_CREATE_SUPPORT)
 
     await expect(pending).resolves.toEqual({ worktreeId: 'wt-ready', name: 'puffin' })
     expect(attempts).toHaveLength(1)
@@ -134,7 +141,7 @@ describe('createWorktreeWithNameRetry', () => {
       client,
       baseName: 'otter',
       buildParams: (name) => ({ repo: 'id:r', name }),
-      supportsIdempotentCutoverRetry: true,
+      supportsIdempotentCutoverRetry: IDEMPOTENT_CREATE_SUPPORT,
       mintMutationId: () => 'key-1'
     })
     expect(result).toEqual({ worktreeId: 'wt-1', name: 'otter' })
@@ -152,7 +159,7 @@ describe('createWorktreeWithNameRetry', () => {
       client,
       baseName: 'seal',
       buildParams: (name) => ({ repo: 'id:r', name }),
-      supportsIdempotentCutoverRetry: true,
+      supportsIdempotentCutoverRetry: IDEMPOTENT_CREATE_SUPPORT,
       mintMutationId: () => 'key-mig'
     })
     expect(result).toEqual({ worktreeId: 'wt-2', name: 'seal' })
@@ -172,7 +179,7 @@ describe('createWorktreeWithNameRetry', () => {
         client,
         baseName: 'crab',
         buildParams: (name) => ({ repo: 'id:r', name }),
-        supportsIdempotentCutoverRetry: true,
+        supportsIdempotentCutoverRetry: IDEMPOTENT_CREATE_SUPPORT,
         mintMutationId: () => 'key-x'
       })
     ).rejects.toBeInstanceOf(LogicalClientCutoverError)
@@ -190,7 +197,7 @@ describe('createWorktreeWithNameRetry', () => {
         client,
         baseName: 'eel',
         buildParams: (name) => ({ repo: 'id:r', name }),
-        supportsIdempotentCutoverRetry: true,
+        supportsIdempotentCutoverRetry: IDEMPOTENT_CREATE_SUPPORT,
         mintMutationId: () => 'key-t'
       })
     ).rejects.toThrow('Request timed out')
@@ -208,7 +215,7 @@ describe('createWorktreeWithNameRetry', () => {
       client,
       baseName: 'topic',
       buildParams: (name) => ({ repo: 'id:r', name }),
-      supportsIdempotentCutoverRetry: true,
+      supportsIdempotentCutoverRetry: IDEMPOTENT_CREATE_SUPPORT,
       mintMutationId: () => `key-${(n += 1)}`
     })
     expect(result).toEqual({ worktreeId: 'wt-3', name: 'topic-2' })
@@ -273,7 +280,7 @@ describe('createWorktreeWithNameRetry', () => {
       client,
       baseName: 'urchin',
       buildParams: (name) => ({ repo: 'id:r', name }),
-      supportsIdempotentCutoverRetry: true,
+      supportsIdempotentCutoverRetry: IDEMPOTENT_CREATE_SUPPORT,
       mintMutationId: () => 'key-drop'
     })
 
@@ -331,14 +338,14 @@ describe('createWorktreeWithNameRetry', () => {
         client,
         baseName: 'barnacle',
         buildParams: (name) => ({ repo: 'id:r', name }),
-        supportsIdempotentCutoverRetry: true,
+        supportsIdempotentCutoverRetry: IDEMPOTENT_CREATE_SUPPORT,
         mintMutationId: () => 'key-budget'
       }).catch((error: unknown) => {
         settledAt = Date.now()
         throw error
       })
       const settled = expect(pending).rejects.toThrow('Connection interrupted')
-      await vi.advanceTimersByTimeAsync(WORKTREE_CREATE_DEDUPE_TTL_MS)
+      await vi.advanceTimersByTimeAsync(WORKTREE_CREATE_DEDUPE_TTL_FALLBACK_MS)
       await settled
       // Initial attempt + 2 replays.
       expect(attempts).toHaveLength(3)
@@ -373,7 +380,7 @@ describe('createWorktreeWithNameRetry', () => {
         client,
         baseName: 'anemone',
         buildParams: (name) => ({ repo: 'id:r', name }),
-        supportsIdempotentCutoverRetry: true,
+        supportsIdempotentCutoverRetry: IDEMPOTENT_CREATE_SUPPORT,
         mintMutationId: () => 'key-stuck'
       })
       const settled = expect(pending).rejects.toThrow('Connection interrupted')
@@ -387,6 +394,41 @@ describe('createWorktreeWithNameRetry', () => {
     // Generous: advanceTimersByTimeAsync yields through REAL macrotasks between ticks,
     // so vitest's default 5s real-time budget is reachable on a loaded runner.
   }, 30_000)
+
+  it('stops replaying when the host-advertised dedupe record has expired', async () => {
+    vi.useFakeTimers()
+    try {
+      const attempts: Attempt[] = []
+      const connection = connectionController()
+      const client = scriptedClient(
+        [
+          {
+            throws: markRpcDeliveryUnknown(new Error('Connection interrupted')),
+            dropsConnection: true,
+            takesMs: 12_000,
+            reconnectsAfterMs: 1_000
+          },
+          { id: 'wt-duplicate' }
+        ],
+        attempts,
+        connection
+      )
+
+      const pending = createWorktreeWithNameRetry({
+        client,
+        baseName: 'mussel',
+        buildParams: (name) => ({ repo: 'id:r', name }),
+        supportsIdempotentCutoverRetry: { dedupeTtlMs: 20_000 },
+        mintMutationId: () => 'key-short-ttl'
+      })
+      const settled = expect(pending).rejects.toThrow('Connection interrupted')
+      await vi.advanceTimersByTimeAsync(30_000)
+      await settled
+      expect(attempts).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 
   it('does not replay an ambiguity that surfaced while the transport stayed connected', async () => {
     vi.useFakeTimers()
@@ -415,7 +457,7 @@ describe('createWorktreeWithNameRetry', () => {
         client,
         baseName: 'cuttlefish',
         buildParams: (name) => ({ repo: 'id:r', name }),
-        supportsIdempotentCutoverRetry: true,
+        supportsIdempotentCutoverRetry: IDEMPOTENT_CREATE_SUPPORT,
         mintMutationId: () => 'key-expired'
       })
       const settled = expect(pending).rejects.toThrow('Request timed out')
@@ -464,7 +506,7 @@ describe('createWorktreeWithNameRetry', () => {
         client,
         baseName: 'nautilus',
         buildParams: (name) => ({ repo: 'id:r', name }),
-        supportsIdempotentCutoverRetry: true,
+        supportsIdempotentCutoverRetry: IDEMPOTENT_CREATE_SUPPORT,
         mintMutationId: () => 'key-clamped'
       }).catch((error: unknown) => {
         settledAt = Date.now()
@@ -509,7 +551,7 @@ describe('createWorktreeWithNameRetry', () => {
         client,
         baseName: 'limpet',
         buildParams: (name) => ({ repo: 'id:r', name }),
-        supportsIdempotentCutoverRetry: true,
+        supportsIdempotentCutoverRetry: IDEMPOTENT_CREATE_SUPPORT,
         mintMutationId: () => 'key-stale'
       })
       const settled = expect(pending).rejects.toThrow('Connection interrupted')
@@ -551,7 +593,7 @@ describe('createWorktreeWithNameRetry', () => {
         client,
         baseName: 'kelp',
         buildParams: (name) => ({ repo: 'id:r', name }),
-        supportsIdempotentCutoverRetry: true,
+        supportsIdempotentCutoverRetry: IDEMPOTENT_CREATE_SUPPORT,
         mintMutationId: () => 'key-long'
       })
       await vi.advanceTimersByTimeAsync(250_000)
@@ -606,7 +648,7 @@ describe('createWorktreeWithNameRetry', () => {
         client,
         baseName: 'urchin',
         buildParams: (name) => ({ repo: 'id:r', name }),
-        supportsIdempotentCutoverRetry: true,
+        supportsIdempotentCutoverRetry: IDEMPOTENT_CREATE_SUPPORT,
         mintMutationId: () => 'key-anchored'
       })
       const settled = expect(pending).rejects.toThrow('Connection lost')
@@ -638,7 +680,7 @@ describe('createWorktreeWithNameRetry', () => {
         client,
         baseName: 'urchin',
         buildParams: (name) => ({ repo: 'id:r', name }),
-        supportsIdempotentCutoverRetry: true,
+        supportsIdempotentCutoverRetry: IDEMPOTENT_CREATE_SUPPORT,
         mintMutationId: () => 'key-unmarked'
       })
     ).rejects.toThrow('Socket closed before send')
@@ -650,7 +692,9 @@ describe('createWorktreeWithNameRetry', () => {
     // it has to leave the record room for the replay to still be in flight. Widening it
     // to the whole TTL would let the last replay land on a record that just expired.
     expect(WORKTREE_CREATE_AMBIGUOUS_REPLAY_WINDOW_MS).toBeGreaterThan(0)
-    expect(WORKTREE_CREATE_AMBIGUOUS_REPLAY_WINDOW_MS).toBeLessThan(WORKTREE_CREATE_DEDUPE_TTL_MS)
+    expect(WORKTREE_CREATE_AMBIGUOUS_REPLAY_WINDOW_MS).toBeLessThan(
+      WORKTREE_CREATE_DEDUPE_TTL_FALLBACK_MS
+    )
     // A single wait must not be able to consume the window on its own.
     expect(WORKTREE_CREATE_AMBIGUOUS_RECONNECT_WAIT_MS).toBeLessThan(
       WORKTREE_CREATE_AMBIGUOUS_REPLAY_WINDOW_MS

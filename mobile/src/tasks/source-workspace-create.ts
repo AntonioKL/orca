@@ -13,6 +13,7 @@ import {
   type WorkspaceCreateTaskItem
 } from './workspace-create-params'
 import { createWorktreeWithNameRetry, type WorktreeCreateResult } from './worktree-create-retry'
+import type { WorktreeCreateIdempotencyProbe } from './worktree-create-idempotency-policy'
 
 // The agent bundle the modal resolved: `choice` drives launch resolution — the
 // host applies the agent's launch args (permission flags) and shell quoting.
@@ -29,7 +30,7 @@ export type CreateWorkspaceFromComposerArgs = {
   workspaceName: string | undefined
   note: string | undefined
   nameIsAutoManaged?: boolean
-  supportsIdempotentCutoverRetry: boolean | Promise<boolean>
+  supportsIdempotentCutoverRetry: WorktreeCreateIdempotencyProbe
 }
 
 export async function createWorkspaceFromComposerSource(
@@ -92,7 +93,7 @@ async function createWorkItemWorkspace(args: {
   workspaceName: string | undefined
   note: string | undefined
   nameIsAutoManaged?: boolean
-  supportsIdempotentCutoverRetry: boolean | Promise<boolean>
+  supportsIdempotentCutoverRetry: WorktreeCreateIdempotencyProbe
 }): Promise<WorktreeCreateResult> {
   const { client, selection, targetRepoId, setupDecision, agent, workspaceName, note } = args
   const item = selection.item
@@ -150,7 +151,7 @@ async function createBranchWorkspace(args: {
   agent: WorkspaceCreateAgentBundle
   workspaceName: string | undefined
   note: string | undefined
-  supportsIdempotentCutoverRetry: boolean | Promise<boolean>
+  supportsIdempotentCutoverRetry: WorktreeCreateIdempotencyProbe
 }): Promise<WorktreeCreateResult> {
   const { client, selection, targetRepoId, setupDecision, agent, workspaceName, note } = args
   const createdWithAgentId = agent.choice === 'blank' ? undefined : agent.choice
@@ -220,7 +221,7 @@ async function createNewBranchWorkspace(args: {
   agent: WorkspaceCreateAgentBundle
   workspaceName: string | undefined
   note: string | undefined
-  supportsIdempotentCutoverRetry: boolean | Promise<boolean>
+  supportsIdempotentCutoverRetry: WorktreeCreateIdempotencyProbe
 }): Promise<WorktreeCreateResult> {
   const { client, selection, targetRepoId, setupDecision, agent, note } = args
   const createdWithAgentId = agent.choice === 'blank' ? undefined : agent.choice

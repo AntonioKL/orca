@@ -4,6 +4,10 @@ import { isLogicalClientCutoverError } from '../transport/stable-logical-rpc-cli
 import type { RpcSuccess } from '../transport/types'
 import { readMobileRuntimeHostPlatform } from '../transport/mobile-runtime-host-platform'
 import { MOBILE_TASKS_CAPABILITY } from './mobile-tasks-capability'
+import {
+  resolveWorktreeCreateIdempotencySupport,
+  type WorktreeCreateIdempotencySupport
+} from './worktree-create-idempotency-policy'
 
 // Why: older hosts strip worktree.create's clientMutationId, so mobile must not
 // replay an ambiguous create unless the host advertises idempotency support.
@@ -14,13 +18,13 @@ const STATUS_CUTOVER_MAX_RETRIES = 5
 
 export type NewWorktreeRuntimeCapabilities = {
   tasksSupported: boolean
-  idempotentWorktreeCreateSupported: boolean
+  worktreeCreateIdempotency: WorktreeCreateIdempotencySupport | false
   hostPlatform: NodeJS.Platform | null
 }
 
 const UNSUPPORTED_CAPABILITIES: NewWorktreeRuntimeCapabilities = {
   tasksSupported: false,
-  idempotentWorktreeCreateSupported: false,
+  worktreeCreateIdempotency: false,
   hostPlatform: null
 }
 
@@ -35,13 +39,19 @@ export async function readNewWorktreeRuntimeCapabilities(
       if (!response.ok) {
         return UNSUPPORTED_CAPABILITIES
       }
-      const result = (response as RpcSuccess).result as { capabilities?: string[] }
+      const result = (response as RpcSuccess).result as {
+        capabilities?: string[]
+        worktreeCreateIdempotency?: { dedupeTtlMs?: unknown }
+      }
       const capabilities = result.capabilities ?? []
+      const supportsIdempotency = capabilities.includes(
+        MOBILE_WORKTREE_CREATE_IDEMPOTENCY_CAPABILITY
+      )
       return {
         tasksSupported: capabilities.includes(MOBILE_TASKS_CAPABILITY),
-        idempotentWorktreeCreateSupported: capabilities.includes(
-          MOBILE_WORKTREE_CREATE_IDEMPOTENCY_CAPABILITY
-        ),
+        worktreeCreateIdempotency: supportsIdempotency
+          ? resolveWorktreeCreateIdempotencySupport(result.worktreeCreateIdempotency?.dedupeTtlMs)
+          : false,
         hostPlatform: readMobileRuntimeHostPlatform(result)
       }
     } catch (error) {
@@ -58,7 +68,7 @@ export function useNewWorktreeRuntimeCapabilities(
 ): {
   tasksSupported: boolean
   hostPlatform: NodeJS.Platform | null
-  getWorktreeCreateCutoverSupport: () => Promise<boolean>
+  getWorktreeCreateCutoverSupport: () => Promise<WorktreeCreateIdempotencySupport | false>
 } {
   const [tasksSupported, setTasksSupported] = useState(false)
   const [hostPlatform, setHostPlatform] = useState<NodeJS.Platform | null>(null)
@@ -97,7 +107,7 @@ export function useNewWorktreeRuntimeCapabilities(
   }, [client, enabled, getCapabilities, setTasksSupported])
 
   const getWorktreeCreateCutoverSupport = useCallback(
-    () => getCapabilities().then((capabilities) => capabilities.idempotentWorktreeCreateSupported),
+    () => getCapabilities().then((capabilities) => capabilities.worktreeCreateIdempotency),
     [getCapabilities]
   )
   return { tasksSupported, hostPlatform, getWorktreeCreateCutoverSupport }

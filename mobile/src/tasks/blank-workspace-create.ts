@@ -1,6 +1,7 @@
 import type { TuiAgent } from '../../../src/shared/tui-agent'
 import type { RpcClient } from '../transport/rpc-client'
 import { createWorktreeWithNameRetry, type WorktreeCreateResult } from './worktree-create-retry'
+import type { WorktreeCreateIdempotencyProbe } from './worktree-create-idempotency-policy'
 import {
   agentLaunchCreateFields,
   type WorkspaceCreateSetupDecision
@@ -19,7 +20,7 @@ export async function createBlankWorkspace(args: {
   /** True when `baseName` is a generated creature name rather than one the user typed; only then
    *  may the host retire it. */
   nameWasGenerated: boolean
-  supportsIdempotentCutoverRetry: boolean | Promise<boolean>
+  supportsIdempotentCutoverRetry: WorktreeCreateIdempotencyProbe
 }): Promise<WorktreeCreateResult> {
   return createWorktreeWithNameRetry({
     client: args.client,
