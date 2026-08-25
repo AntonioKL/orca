@@ -213,7 +213,8 @@ export function buildNodePtyLoadProbeScript(nodePtyDir: string): string {
 
 function resolveNodePtyDir(): string | null {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports -- resolution only; the load itself happens in the child.
+    // Why require.resolve and not import: resolution only — the load itself happens in
+    // the child process, which is the whole point of the precondition.
     return dirname(require.resolve('node-pty/package.json'))
   } catch {
     return null
@@ -339,7 +340,9 @@ export function formatNodePtyPreconditionReport(
   const { abi } = verdict
   const host = [
     `platform ${abi.platform}/${abi.arch}`,
-    abi.libc === 'none' ? null : `libc ${abi.libc}${abi.glibcVersion ? ` ${abi.glibcVersion}` : ''}`,
+    abi.libc === 'none'
+      ? null
+      : `libc ${abi.libc}${abi.glibcVersion ? ` ${abi.glibcVersion}` : ''}`,
     `Node ABI ${abi.nodeAbi}`,
     `prebuild slot ${verdict.slot}`
   ]
