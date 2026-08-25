@@ -877,7 +877,11 @@ export class RuntimeBrowserCommands {
         worktreeId: clientPage.workspaceId,
         focus: params.focus
       })
-      return { switched: switchedIndex, browserPageId: clientPage.browserPageId }
+      return {
+        switched: switchedIndex,
+        browserPageId: clientPage.browserPageId,
+        placement: clientPage.placement
+      }
     }
     const bridge = this.requireAgentBrowserBridge()
     const worktreeId =
@@ -903,7 +907,7 @@ export class RuntimeBrowserCommands {
     if (params.focus) {
       this.notifyRendererBrowserPaneFocus(focusWorktreeId, result.browserPageId)
     }
-    return { ...result, switched: switchedIndex }
+    return { ...result, switched: switchedIndex, placement: { kind: 'server' } }
   }
 
   async browserHover(
@@ -2124,7 +2128,8 @@ export class RuntimeBrowserCommands {
       ...tab,
       worktreeId: browserManager.getWorktreeIdForTab(tab.browserPageId) ?? null,
       profileId: profile.id,
-      profileLabel: profile.label
+      profileLabel: profile.label,
+      placement: { kind: 'server' }
     }
   }
 
@@ -2155,7 +2160,8 @@ export class RuntimeBrowserCommands {
         certificateFailure: null,
         worktreeId: page.workspaceId,
         profileId: profile.id,
-        profileLabel: profile.label
+        profileLabel: profile.label,
+        placement: page.placement
       }
     })
     const tabs = [...serverTabs, ...clientTabs]
