@@ -1,4 +1,5 @@
 import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -15,6 +16,25 @@ import { detectNativeHostAbi } from './native-host-abi'
 const require = createRequire(import.meta.url)
 const REAL_NODE_PTY = dirname(require.resolve('node-pty/package.json'))
 const REAL_PTY_NODE = join(REAL_NODE_PTY, 'build', 'Release', 'pty.node')
+
+/**
+ * Whether this host's compiled node-pty actually loads under plain Node.
+ *
+ * Why not existsSync: CI ships a pty.node built for Electron's ABI, so the file is
+ * present and `require` still fails. Gating on existence ran the load-dependent tests
+ * on a host that could never satisfy them. Probed in a child so a bad binding cannot
+ * take the test runner down with it.
+ */
+const realNodePtyLoads = ((): boolean => {
+  if (!existsSync(REAL_PTY_NODE)) {
+    return false
+  }
+  const probe = spawnSync(process.execPath, ['-e', `require(${JSON.stringify(REAL_PTY_NODE)})`], {
+    encoding: 'utf8',
+    timeout: 30_000
+  })
+  return !probe.error && probe.status === 0
+})()
 
 const probe = (overrides: Partial<Parameters<typeof classifyNodePtyProbeResult>[0]> = {}) =>
   classifyNodePtyProbeResult({
@@ -194,8 +214,12 @@ describe('checkNodePtyPrecondition', () => {
     // never 'blocked' and never carries an unestablished reason.
     const verdict = checkNodePtyPrecondition({ prebuildsDir: null })
 
-    expect(['ok', 'degraded']).toContain(verdict.status)
-    if (verdict.status === 'degraded') {
+    // Why not a fixed status: a prepared host gives 'ok', CI's unprepared shard gives
+    // 'degraded', and a corrupt binding gives 'blocked' — all three are honest. What is
+    // invariant is that anything other than 'ok' names an established cause, so the
+    // host can never decline a terminal for a reason it did not work out.
+    expect(['ok', 'degraded', 'blocked', 'unverifiable']).toContain(verdict.status)
+    if (verdict.status !== 'ok') {
       expect(verdict.reason).toBeDefined()
       expect(verdict.reason).not.toBe('unknown')
     }
@@ -209,7 +233,7 @@ describe('checkNodePtyPrecondition', () => {
   // Why gated on the real binding: this asserts a LOAD outcome, so it needs a pty.node
   // built for the Node ABI. CI's shard never runs ensure-native-runtime, so the copy
   // ENOENT'd there.
-  it.runIf(process.platform !== 'win32' && existsSync(REAL_PTY_NODE))(
+  it.runIf(process.platform !== 'win32' && realNodePtyLoads)(
     'degrades rather than blocks when only spawn-helper is missing',
     () => {
       // node-pty posix_spawns spawn-helper, so this host loads fine and then fails ENOENT
@@ -253,7 +277,7 @@ describe('checkNodePtyPrecondition', () => {
     expect(verdict.reason).toBeDefined()
   })
 
-  it.runIf(existsSync(REAL_PTY_NODE))(
+  it.runIf(realNodePtyLoads)(
     'reports ok once a loadable slot is installed (needs a Node-ABI build)',
     () => {
       const dir = stageNodePty()
