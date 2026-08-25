@@ -16,7 +16,7 @@ type RunGitAction = (
   actionId: string,
   method: string,
   params: Record<string, unknown>
-) => Promise<void>
+) => Promise<boolean>
 
 /** Abort / Continue controls on the conflict banner. */
 export function useMobileConflictSequencerRunners(runGitAction: RunGitAction) {
