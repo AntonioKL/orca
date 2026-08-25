@@ -15847,7 +15847,7 @@
           "result": "passed",
           "command": "node config/scripts/build-first-party-node18-trust-smoke.mjs && npx -y node@18 config/scripts/smoke-first-party-node18-trust.mjs",
           "durationSeconds": 4,
-          "summary": "Node 18.20.8 kept raw HTTP/WSS red, then passed real Cloud exchange, Relay mint/assignment, default control/data WSS, exact request/auth assertions, data echo, and both hostname mismatches."
+          "summary": "Candidate 7effe7f9b69d passed on Node 18.20.8: raw HTTP/WSS stayed red, then real Cloud exchange, Relay mint/assignment, default control/data WSS, exact request/auth assertions, data echo, and both hostname mismatches passed."
         }
       ],
       "runtimeBudget": {
@@ -15860,7 +15860,7 @@
       },
       "redGreenEvidence": {
         "status": "complete",
-        "evidence": "The byte-identical production-caller overlay fails on origin/main bc98655a3965 at Cloud certificate verification after raw HTTP/WSS reject the fixture. Candidate and fix-reverted SHAs are recorded in the PR evidence after the final code commit so this file does not self-reference its own commit."
+        "evidence": "The byte-identical build/entry/smoke files (SHA-256 bfbc12e7ca44, 32e630510ae8, 565b47dbcd21) failed on origin/main 98bdd653abcb with UNABLE_TO_VERIFY_LEAF_SIGNATURE, passed on candidate 7effe7f9b69d, and failed at the same boundary when only profile-cloud-client.ts, relay-http-client.ts, relay-control-client.ts, and relay-transport.ts in that candidate were restored byte-for-byte from main."
       },
       "performanceBudget": {
         "required": true,
