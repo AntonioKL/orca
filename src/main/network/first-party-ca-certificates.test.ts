@@ -8,12 +8,16 @@ const bundledRoot = rootCertificates.find((pem) => {
   const certificate = new X509Certificate(pem)
   return certificate.ca && certificate.checkIssued(certificate)
 })
+const bundledRoots = rootCertificates
+  .filter((pem) => {
+    const certificate = new X509Certificate(pem)
+    return certificate.ca && certificate.checkIssued(certificate)
+  })
+  .slice(0, 9)
 
-if (!bundledRoot) {
-  throw new Error('expected a current bundled root certificate')
+if (!bundledRoot || bundledRoots.length < 9) {
+  throw new Error('expected current bundled root certificates')
 }
-
-const bundledRootDer = new X509Certificate(bundledRoot).raw
 
 function processResult(overrides: Partial<ProcessResult> = {}): ProcessResult {
   return {
@@ -24,18 +28,6 @@ function processResult(overrides: Partial<ProcessResult> = {}): ProcessResult {
     timedOut: false,
     ...overrides
   }
-}
-
-class FakeWindowsStore {
-  private index = 0
-
-  constructor(private readonly certificates: Uint8Array[]) {}
-
-  next(): Uint8Array | undefined {
-    return this.certificates[this.index++]
-  }
-
-  done(): void {}
 }
 
 describe('legacy system CA loading', () => {
@@ -53,12 +45,15 @@ describe('legacy system CA loading', () => {
   })
 
   it('accepts only macOS roots that the host trust policy verifies', async () => {
+    const signals: (AbortSignal | undefined)[] = []
     const accepted = await loadLegacySystemCaCertificates({
       platform: 'darwin',
-      runProcess: async (spec) =>
-        spec.args?.[0] === 'find-certificate'
+      runProcess: async (spec) => {
+        signals.push(spec.signal)
+        return spec.args?.[0] === 'find-certificate'
           ? processResult({ stdout: bundledRoot })
           : processResult()
+      }
     })
     const rejected = await loadLegacySystemCaCertificates({
       platform: 'darwin',
@@ -70,34 +65,73 @@ describe('legacy system CA loading', () => {
 
     expect(accepted).toEqual([bundledRoot])
     expect(rejected).toEqual([])
+    expect(signals).toHaveLength(2)
+    expect(signals[0]).toBeDefined()
+    expect(signals[1]).toBe(signals[0])
   })
 
-  it('subtracts the Windows disallowed store from trusted roots', async () => {
-    const load = (disallowed: Uint8Array[]) =>
+  it('bounds concurrent macOS trust verification', async () => {
+    let active = 0
+    let maxActive = 0
+    let verificationCount = 0
+    const certificates = await loadLegacySystemCaCertificates({
+      platform: 'darwin',
+      runProcess: async (spec) => {
+        if (spec.args?.[0] === 'find-certificate') {
+          return processResult({ stdout: bundledRoots.join('\n') })
+        }
+        verificationCount += 1
+        active += 1
+        maxActive = Math.max(maxActive, active)
+        await new Promise<void>((resolve) => setImmediate(resolve))
+        active -= 1
+        return processResult()
+      }
+    })
+
+    expect(certificates).toHaveLength(9)
+    expect(verificationCount).toBe(9)
+    expect(maxActive).toBe(8)
+  })
+
+  it('reads both Windows root locations and subtracts their disallowed stores', async () => {
+    const calls: { store: string; storeTypeList: string[] }[] = []
+    const load = (disallowed: string[]) =>
       loadLegacySystemCaCertificates({
         platform: 'win32',
         loadWindowsCaModule: async () => ({
-          Crypt32: class {
-            private readonly store: FakeWindowsStore
-
-            constructor(name?: string) {
-              this.store = new FakeWindowsStore(
-                name === 'Disallowed' ? disallowed : [bundledRootDer]
-              )
-            }
-
-            next(): Uint8Array | undefined {
-              return this.store.next()
-            }
-
-            done(): void {
-              this.store.done()
-            }
+          exportSystemCertificatesAsync: async (options) => {
+            calls.push(options)
+            return options.store === 'Disallowed' ? disallowed : [bundledRoot]
           }
         })
       })
 
     expect(await load([])).toHaveLength(1)
-    expect(await load([bundledRootDer])).toEqual([])
+    expect(await load([bundledRoot])).toEqual([])
+    expect(calls).toEqual(
+      expect.arrayContaining([
+        {
+          store: 'ROOT',
+          storeTypeList: ['CERT_SYSTEM_STORE_LOCAL_MACHINE', 'CERT_SYSTEM_STORE_CURRENT_USER']
+        },
+        {
+          store: 'Disallowed',
+          storeTypeList: ['CERT_SYSTEM_STORE_LOCAL_MACHINE', 'CERT_SYSTEM_STORE_CURRENT_USER']
+        }
+      ])
+    )
+  })
+
+  it('bounds a stalled Windows certificate store', async () => {
+    const certificates = await loadLegacySystemCaCertificates({
+      platform: 'win32',
+      trustLoadTimeoutMs: 5,
+      loadWindowsCaModule: async () => ({
+        exportSystemCertificatesAsync: () => new Promise<string[]>(() => {})
+      })
+    })
+
+    expect(certificates).toEqual([])
   })
 })

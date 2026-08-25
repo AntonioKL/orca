@@ -2,9 +2,12 @@ import { createHash, X509Certificate } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { runProcess, type ProcessResult } from '../../shared/child-process/run-process'
+import { mapWithConcurrency } from '../../shared/map-with-concurrency'
 
 const PEM_CERTIFICATE_PATTERN = /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g
 const MACOS_SECURITY = '/usr/bin/security'
+const MACOS_TRUST_LOAD_TIMEOUT_MS = 10_000
+const MACOS_TRUST_VERIFY_CONCURRENCY = 8
 const LINUX_CA_BUNDLES = [
   '/etc/ssl/certs/ca-certificates.crt',
   '/etc/ssl/certs/ca-bundle.crt',
@@ -13,14 +16,14 @@ const LINUX_CA_BUNDLES = [
   '/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem'
 ]
 
-type WindowsCertificateStore = {
-  next(): Uint8Array | undefined
-  done(): void
+type WindowsCaModule = {
+  exportSystemCertificatesAsync(options: {
+    store: string
+    storeTypeList: string[]
+  }): Promise<string[]>
 }
 
-type WindowsCaModule = {
-  Crypt32: new (store?: string) => WindowsCertificateStore
-}
+const WINDOWS_STORE_TYPES = ['CERT_SYSTEM_STORE_LOCAL_MACHINE', 'CERT_SYSTEM_STORE_CURRENT_USER']
 
 type ReadTextFile = (path: string, encoding: 'utf8') => Promise<string>
 
@@ -31,6 +34,7 @@ type CertificateSources = {
   readFile?: ReadTextFile
   runProcess?: (spec: Parameters<typeof runProcess>[0]) => Promise<ProcessResult>
   loadWindowsCaModule?: () => Promise<WindowsCaModule>
+  trustLoadTimeoutMs?: number
 }
 
 const requireFromMain = createRequire(__filename)
@@ -54,27 +58,12 @@ function filterCurrentCaCertificates(certificates: string[], now: number): strin
   return [...new Set(certificates)].filter((pem) => isCurrentCaCertificate(pem, now))
 }
 
-function derToPem(der: Uint8Array): string {
-  const body =
-    Buffer.from(der)
-      .toString('base64')
-      .match(/.{1,64}/g)
-      ?.join('\n') ?? ''
-  return `-----BEGIN CERTIFICATE-----\n${body}\n-----END CERTIFICATE-----`
-}
-
-function readWindowsStore(module: WindowsCaModule, storeName: string): Uint8Array[] {
-  const store = new module.Crypt32(storeName)
-  const certificates: Uint8Array[] = []
+function certificateDigest(pem: string): string | undefined {
   try {
-    let certificate: Uint8Array | undefined
-    while ((certificate = store.next())) {
-      certificates.push(certificate)
-    }
-  } finally {
-    store.done()
+    return createHash('sha256').update(new X509Certificate(pem).raw).digest('hex')
+  } catch {
+    return undefined
   }
-  return certificates
 }
 
 async function loadWindowsCertificates(
@@ -82,28 +71,36 @@ async function loadWindowsCertificates(
   now: number
 ): Promise<string[]> {
   const module = await loadModule()
+  const [trusted, blocked] = await Promise.all([
+    module.exportSystemCertificatesAsync({ store: 'ROOT', storeTypeList: WINDOWS_STORE_TYPES }),
+    module.exportSystemCertificatesAsync({
+      store: 'Disallowed',
+      storeTypeList: WINDOWS_STORE_TYPES
+    })
+  ])
   const disallowed = new Set(
-    readWindowsStore(module, 'Disallowed').map((der) =>
-      createHash('sha256').update(der).digest('hex')
-    )
+    blocked.map(certificateDigest).filter((digest): digest is string => digest !== undefined)
   )
-  const trusted = readWindowsStore(module, 'ROOT')
-    .filter((der) => !disallowed.has(createHash('sha256').update(der).digest('hex')))
-    .map(derToPem)
-  return filterCurrentCaCertificates(trusted, now)
+  return filterCurrentCaCertificates(trusted, now).filter((pem) => {
+    const digest = certificateDigest(pem)
+    return digest !== undefined && !disallowed.has(digest)
+  })
 }
 
 async function loadMacCertificates(
   execute: NonNullable<CertificateSources['runProcess']>,
-  now: number
+  now: number,
+  timeoutMs: number
 ): Promise<string[]> {
+  const signal = AbortSignal.timeout(timeoutMs)
   const listed = await execute({
     program: MACOS_SECURITY,
     args: ['find-certificate', '-a', '-p'],
-    timeoutMs: 10_000,
+    timeoutMs,
+    signal,
     maxOutputBytes: 64 * 1024 * 1024
   })
-  if (listed.code !== 0 || listed.timedOut) {
+  if (listed.code !== 0 || listed.timedOut || signal.aborted) {
     return []
   }
   const candidates = filterCurrentCaCertificates(parsePemCertificates(listed.stdout), now).filter(
@@ -112,19 +109,30 @@ async function loadMacCertificates(
       return certificate.checkIssued(certificate)
     }
   )
-  const trusted: string[] = []
-  for (const certificate of candidates) {
-    const verified = await execute({
-      program: MACOS_SECURITY,
-      args: ['verify-cert', '-c', '/dev/stdin', '-p', 'basic', '-l', '-L', '-q'],
-      input: certificate,
-      timeoutMs: 5_000
-    })
-    if (verified.code === 0 && !verified.timedOut) {
-      trusted.push(certificate)
+  const trusted = await mapWithConcurrency(
+    candidates,
+    MACOS_TRUST_VERIFY_CONCURRENCY,
+    async (certificate): Promise<string | undefined> => {
+      const verified = await execute({
+        program: MACOS_SECURITY,
+        args: ['verify-cert', '-c', '/dev/stdin', '-p', 'basic', '-l', '-L', '-q'],
+        input: certificate,
+        timeoutMs: 5_000,
+        signal
+      })
+      return verified.code === 0 && !verified.timedOut && !signal.aborted ? certificate : undefined
     }
-  }
-  return trusted
+  )
+  return trusted.filter((certificate): certificate is string => certificate !== undefined)
+}
+
+function withinDeadline<T>(operation: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const expired = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), timeoutMs)
+    timer.unref()
+  })
+  return Promise.race([operation, expired]).finally(() => clearTimeout(timer))
 }
 
 async function loadLinuxCertificates(
@@ -171,9 +179,10 @@ export async function loadLegacySystemCaCertificates(
   const now = sources.now ?? Date.now()
   const loadFile = sources.readFile ?? readFile
   const execute = sources.runProcess ?? runProcess
+  const trustLoadTimeoutMs = sources.trustLoadTimeoutMs ?? MACOS_TRUST_LOAD_TIMEOUT_MS
   try {
     if (platform === 'darwin') {
-      return await loadMacCertificates(execute, now)
+      return await loadMacCertificates(execute, now, trustLoadTimeoutMs)
     }
     if (platform === 'linux') {
       return await loadLinuxCertificates(env, loadFile, now)
@@ -181,8 +190,8 @@ export async function loadLegacySystemCaCertificates(
     if (platform === 'win32') {
       const loadModule =
         sources.loadWindowsCaModule ??
-        (async () => requireFromMain('@vscode/windows-ca-certs') as WindowsCaModule)
-      return await loadWindowsCertificates(loadModule, now)
+        (async () => requireFromMain('win-export-certificate-and-key') as WindowsCaModule)
+      return await withinDeadline(loadWindowsCertificates(loadModule, now), trustLoadTimeoutMs, [])
     }
   } catch {
     // Bundled roots remain available if host trust enumeration fails.

@@ -272,13 +272,13 @@
     "zustand": "^5.0.14"
   },
   "optionalDependencies": {
-    "@vscode/windows-ca-certs": "0.3.4",
     "@vscode/windows-process-tree": "0.8.0",
     "sherpa-onnx-darwin-arm64": "1.12.37",
     "sherpa-onnx-darwin-x64": "1.12.37",
     "sherpa-onnx-linux-arm64": "1.12.37",
     "sherpa-onnx-linux-x64": "1.12.37",
     "sherpa-onnx-win-x64": "1.12.37",
+    "win-export-certificate-and-key": "3.0.2",
     "windows-native-registry": "3.2.2"
   },
   "lint-staged": {
