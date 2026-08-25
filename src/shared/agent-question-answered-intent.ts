@@ -43,8 +43,17 @@ function readSingleSelectOptionCount(interactivePrompt: string | undefined): num
     if (!Array.isArray(parsed.questions) || parsed.questions.length !== 1) {
       return -1
     }
-    const [question] = parsed.questions as { multiSelect?: unknown; options?: unknown }[]
-    if (!question || question.multiSelect === true || !Array.isArray(question.options)) {
+    const [question] = parsed.questions as {
+      multiSelect?: unknown
+      multi_select?: unknown
+      options?: unknown
+    }[]
+    if (
+      !question ||
+      question.multiSelect === true ||
+      question.multi_select === true ||
+      !Array.isArray(question.options)
+    ) {
       return -1
     }
     return question.options.length

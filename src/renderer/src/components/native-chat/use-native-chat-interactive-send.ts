@@ -10,6 +10,7 @@ import {
 import {
   buildAskAnswerKeys,
   buildCodexAskAnswerKeys,
+  buildGrokAskAnswerKeys,
   formatAskAnswer,
   hasAskAnswer,
   type AskAnswerSelection,
@@ -96,7 +97,7 @@ export function useNativeChatInteractiveSend(
       // Claude, Codex, and Grok ignore pasted labels but have different selector
       // state machines. OpenClaude follows Claude's path.
       const stepsAnswer = shouldStepNativeChatAskAnswer(agent)
-      const buildsCodexAnswer = resolveNativeChatTranscriptAgent(agent) === 'codex'
+      const transcriptAgent = resolveNativeChatTranscriptAgent(agent)
       // Why: pin the answered question's baseline BEFORE delivery. A late settle
       // callback (paced writes + remote acceptance can span seconds on SSH) must
       // not read the live status and mint a fresh baseline for a replacement
@@ -132,9 +133,11 @@ export function useNativeChatInteractiveSend(
         ? sendNativeChatAskAnswer(
             settings,
             targetPtyId,
-            buildsCodexAnswer
+            transcriptAgent === 'codex'
               ? buildCodexAskAnswerKeys(prompt, selections)
-              : buildAskAnswerKeys(prompt, selections),
+              : transcriptAgent === 'grok'
+                ? buildGrokAskAnswerKeys(prompt, selections)
+                : buildAskAnswerKeys(prompt, selections),
             onSettled
           )
         : sendNativeChatMessage(settings, targetPtyId, formatAskAnswer(prompt, selections))

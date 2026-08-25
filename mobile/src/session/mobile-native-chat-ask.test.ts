@@ -5,6 +5,7 @@ import {
   formatAskAnswer,
   parseAskFromStatus
 } from '../../../src/shared/native-chat-ask'
+import { buildGrokAskAnswerKeys } from '../../../src/shared/native-chat-grok-ask-answer'
 import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
 
 function msg(blocks: NativeChatMessage['blocks'], id = 'm'): NativeChatMessage {
@@ -232,6 +233,63 @@ describe('buildAskAnswerKeys', () => {
       { raw: '1' },
       { raw: '3' },
       { raw: '\x1b[C' },
+      { raw: '\r' }
+    ])
+  })
+})
+
+describe('buildGrokAskAnswerKeys', () => {
+  it('selects and submits a single-question single-select answer', () => {
+    const prompt = {
+      questions: [
+        { question: 'q', multiSelect: false, options: [{ label: 'Tabs' }, { label: 'Spaces' }] }
+      ]
+    }
+    expect(buildGrokAskAnswerKeys(prompt, [{ indices: [1] }])).toEqual([
+      { raw: '2' },
+      { raw: '\r' }
+    ])
+  })
+
+  it('moves between questions with Grok navigation before submitting', () => {
+    const prompt = {
+      questions: [
+        { question: 'q1', multiSelect: false, options: [{ label: 'A' }, { label: 'B' }] },
+        { question: 'q2', multiSelect: false, options: [{ label: 'C' }, { label: 'D' }] }
+      ]
+    }
+    expect(buildGrokAskAnswerKeys(prompt, [{ indices: [1] }, { indices: [0] }])).toEqual([
+      { raw: '2' },
+      { raw: 'l' },
+      { raw: '1' },
+      { raw: '\r' }
+    ])
+  })
+
+  it('picks every Grok multi-select option before submitting', () => {
+    const prompt = {
+      questions: [
+        {
+          question: 'q',
+          multiSelect: true,
+          options: [{ label: 'A' }, { label: 'B' }, { label: 'C' }]
+        }
+      ]
+    }
+    expect(buildGrokAskAnswerKeys(prompt, [{ indices: [0, 2] }])).toEqual([
+      { raw: '1' },
+      { raw: '3' },
+      { raw: '\r' }
+    ])
+  })
+
+  it('opens Grok free text with z before typing and submitting', () => {
+    const prompt = {
+      questions: [{ question: 'q', multiSelect: false, options: [{ label: 'A' }] }]
+    }
+    expect(buildGrokAskAnswerKeys(prompt, [{ indices: [], other: 'custom' }])).toEqual([
+      { raw: 'z' },
+      { text: 'custom' },
       { raw: '\r' }
     ])
   })

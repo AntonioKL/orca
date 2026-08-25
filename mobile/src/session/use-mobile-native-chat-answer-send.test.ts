@@ -256,13 +256,21 @@ describe('useMobileNativeChatAnswerSend', () => {
     ])
   })
 
-  it('answers Grok selector prompts with the option number', async () => {
+  it('answers Grok selector prompts with its pick and submit keys', async () => {
     const sendRequest = vi.fn().mockResolvedValue(acceptedResponse())
     await mount({ sendRequest } as unknown as RpcClient, vi.fn(), 'grok')
 
-    await expect(answerSend?.answerAsk(TABS_OR_SPACES, [{ indices: [1] }])).resolves.toBe(true)
-    expect(sendRequest).toHaveBeenCalledTimes(1)
-    expect(sendRequest.mock.calls[0]?.[1]).toMatchObject({ text: '2', enter: false })
+    let result: Promise<boolean> | undefined
+    await act(async () => {
+      result = answerSend?.answerAsk(TABS_OR_SPACES, [{ indices: [1] }])
+    })
+    await act(async () => vi.runAllTimersAsync())
+
+    await expect(result).resolves.toBe(true)
+    expect(sendRequest.mock.calls.map((call) => call[1])).toEqual([
+      expect.objectContaining({ text: '2', enter: false }),
+      expect.objectContaining({ text: '\r', enter: false })
+    ])
   })
 
   it('keeps the marker for a Grok selector answer', async () => {
@@ -270,9 +278,17 @@ describe('useMobileNativeChatAnswerSend', () => {
     await mount({ sendRequest } as unknown as RpcClient, vi.fn(), 'grok')
     markMobileNativeChatInputStale('terminal')
 
-    await expect(answerSend?.answerAsk(TABS_OR_SPACES, [{ indices: [1] }])).resolves.toBe(true)
-    expect(sendRequest).toHaveBeenCalledTimes(1)
-    expect(sendRequest.mock.calls[0]?.[1]).toMatchObject({ text: '2', enter: false })
+    let result: Promise<boolean> | undefined
+    await act(async () => {
+      result = answerSend?.answerAsk(TABS_OR_SPACES, [{ indices: [1] }])
+    })
+    await act(async () => vi.runAllTimersAsync())
+
+    await expect(result).resolves.toBe(true)
+    expect(sendRequest.mock.calls.map((call) => call[1])).toEqual([
+      expect.objectContaining({ text: '2', enter: false }),
+      expect.objectContaining({ text: '\r', enter: false })
+    ])
     expect(isMobileNativeChatInputStale('terminal')).toBe(true)
   })
 
@@ -731,7 +747,7 @@ describe('useMobileNativeChatAnswerSend', () => {
           settle.push(resolve)
         })
     )
-    await mount({ sendRequest } as unknown as RpcClient, onSendError, 'grok')
+    await mount({ sendRequest } as unknown as RpcClient, onSendError, 'omp')
 
     let first: Promise<boolean> | undefined
     let second: Promise<boolean> | undefined
@@ -739,6 +755,7 @@ describe('useMobileNativeChatAnswerSend', () => {
       first = acceptedAnswerAsk?.(TABS_OR_SPACES, [{ indices: [0] }])
       await Promise.resolve()
     })
+    expect(sendRequest.mock.calls[0]?.[1]).toMatchObject({ text: 'Tabs', enter: true })
     await act(async () => {
       second = acceptedAnswerAsk?.(TABS_OR_SPACES, [{ indices: [1] }])
       await Promise.resolve()
@@ -797,13 +814,14 @@ describe('useMobileNativeChatAnswerSend', () => {
           settle.push(resolve)
         })
     )
-    await mount({ sendRequest } as unknown as RpcClient, onSendError, 'grok')
+    await mount({ sendRequest } as unknown as RpcClient, onSendError, 'omp')
 
     let first: Promise<boolean> | undefined
     await act(async () => {
       first = acceptedAnswerAsk?.(TABS_OR_SPACES, [{ indices: [1] }])
       await Promise.resolve()
     })
+    expect(sendRequest.mock.calls[0]?.[1]).toMatchObject({ text: 'Spaces', enter: true })
     await act(async () => {
       answerSend?.cancelPending()
       settle[0]!(acceptedResponse())

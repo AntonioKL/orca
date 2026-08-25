@@ -7,6 +7,7 @@ import {
   type AskAnswerSelection,
   type AskPrompt
 } from '../../../src/shared/native-chat-ask'
+import { buildGrokAskAnswerKeys } from '../../../src/shared/native-chat-grok-ask-answer'
 import type { RpcClient } from '../transport/rpc-client'
 import { MOBILE_NATIVE_CHAT_QUESTION_STEP_MS } from './mobile-native-chat-answer-stepping'
 import {
@@ -258,10 +259,13 @@ export function useMobileNativeChatAnswerSend(args: {
           const sent = (await sendTerminal(formatAskAnswer(prompt, selections), true)) || fail()
           return sent && writeTurnsRef.current.get(handle) === turn
         }
+        const transcriptAgent = resolveNativeChatTranscriptAgent(agentRef.current)
         const groups =
-          resolveNativeChatTranscriptAgent(agentRef.current) === 'codex'
+          transcriptAgent === 'codex'
             ? buildCodexAskAnswerKeys(prompt, selections)
-            : buildAskAnswerKeys(prompt, selections)
+            : transcriptAgent === 'grok'
+              ? buildGrokAskAnswerKeys(prompt, selections)
+              : buildAskAnswerKeys(prompt, selections)
         for (let index = 0; index < groups.length; index += 1) {
           if (generationRef.current !== generation) {
             return false
