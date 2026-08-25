@@ -15,8 +15,7 @@ describe('preserveAgentAuthBeforeRestart', () => {
       codexRuntimeHome: {
         syncForCurrentSelection: vi.fn(() => {
           calls.push('codex')
-        }),
-        syncActiveWslSelectionsBeforeRestart: vi.fn()
+        })
       },
       claudeRuntimeAuth: {
         syncForCurrentSelection: vi.fn(async () => {
@@ -33,35 +32,13 @@ describe('preserveAgentAuthBeforeRestart', () => {
     expect(calls).toEqual(['codex', 'claude', 'flush'])
   })
 
-  it('runs WSL Codex preservation through the runtime service', async () => {
-    const syncForCurrentSelection = vi.fn()
-    const syncActiveWslSelectionsBeforeRestart = vi.fn()
-
-    await preserveAgentAuthBeforeRestart({
-      codexRuntimeHome: {
-        syncForCurrentSelection,
-        syncActiveWslSelectionsBeforeRestart
-      },
-      store: {
-        flushPendingOrThrowAsync: vi.fn()
-      }
-    })
-
-    expect(syncForCurrentSelection).toHaveBeenCalledTimes(1)
-    expect(syncForCurrentSelection).toHaveBeenNthCalledWith(1)
-    expect(syncActiveWslSelectionsBeforeRestart).toHaveBeenCalledTimes(1)
-  })
-
-  it('runs Claude preservation before WSL Codex preservation', async () => {
+  it('runs Claude preservation after Codex and before the store flush', async () => {
     const calls: string[] = []
 
     await preserveAgentAuthBeforeRestart({
       codexRuntimeHome: {
         syncForCurrentSelection: vi.fn(() => {
           calls.push('codex-host')
-        }),
-        syncActiveWslSelectionsBeforeRestart: vi.fn(() => {
-          calls.push('codex-wsl')
         })
       },
       claudeRuntimeAuth: {
@@ -76,27 +53,7 @@ describe('preserveAgentAuthBeforeRestart', () => {
       }
     })
 
-    expect(calls).toEqual(['codex-host', 'claude', 'codex-wsl', 'flush'])
-  })
-
-  it('continues after WSL Codex preservation fails', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const flushPendingOrThrowAsync = vi.fn()
-
-    await preserveAgentAuthBeforeRestart({
-      codexRuntimeHome: {
-        syncForCurrentSelection: vi.fn(),
-        syncActiveWslSelectionsBeforeRestart: vi.fn(() => {
-          throw new Error('wsl-token-secret')
-        })
-      },
-      store: {
-        flushPendingOrThrowAsync
-      }
-    })
-
-    expect(flushPendingOrThrowAsync).toHaveBeenCalledTimes(1)
-    expect(JSON.stringify(warn.mock.calls)).not.toContain('token-secret')
+    expect(calls).toEqual(['codex-host', 'claude', 'flush'])
   })
 
   it('flushes the store when auth services are missing', async () => {
@@ -116,8 +73,7 @@ describe('preserveAgentAuthBeforeRestart', () => {
         codexRuntimeHome: {
           syncForCurrentSelection: vi.fn(() => {
             throw new Error('codex-token-secret')
-          }),
-          syncActiveWslSelectionsBeforeRestart: vi.fn()
+          })
         },
         claudeRuntimeAuth: {
           syncForCurrentSelection: vi.fn(async () => {

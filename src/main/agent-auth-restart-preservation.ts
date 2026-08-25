@@ -4,10 +4,7 @@ import type { Store } from './persistence'
 
 const AUTH_PRESERVATION_TIMEOUT_MS = 2_000
 
-type CodexRuntimeAuthSync = Pick<
-  CodexRuntimeHomeService,
-  'syncForCurrentSelection' | 'syncActiveWslSelectionsBeforeRestart'
->
+type CodexRuntimeAuthSync = Pick<CodexRuntimeHomeService, 'syncForCurrentSelection'>
 type ClaudeRuntimeAuthSync = Pick<ClaudeRuntimeAuthService, 'syncForCurrentSelection'>
 type ShutdownStore = Pick<Store, 'flushPendingOrThrowAsync'>
 
@@ -42,12 +39,6 @@ export async function preserveAgentAuthBeforeRestart({
     logStepTimeout('Claude auth preservation', 0)
   }
 
-  if (codexRuntimeHome && Date.now() - startedAt < AUTH_PRESERVATION_TIMEOUT_MS) {
-    runWslCodexPreservationStep(codexRuntimeHome)
-  } else if (codexRuntimeHome) {
-    logStepTimeout('Codex auth preservation', 0)
-  }
-
   if (store) {
     const storeRemainingMs = Math.max(0, AUTH_PRESERVATION_TIMEOUT_MS - (Date.now() - startedAt))
     await runWithinLifecycleTimeout(
@@ -61,16 +52,6 @@ export async function preserveAgentAuthBeforeRestart({
 function runCodexPreservationStep(codexRuntimeHome: CodexRuntimeAuthSync | null | undefined): void {
   try {
     codexRuntimeHome?.syncForCurrentSelection()
-  } catch (error) {
-    logStepFailure('Codex auth preservation', error)
-  }
-}
-
-function runWslCodexPreservationStep(
-  codexRuntimeHome: CodexRuntimeAuthSync | null | undefined
-): void {
-  try {
-    codexRuntimeHome?.syncActiveWslSelectionsBeforeRestart()
   } catch (error) {
     logStepFailure('Codex auth preservation', error)
   }
