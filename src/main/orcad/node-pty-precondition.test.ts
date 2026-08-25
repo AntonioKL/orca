@@ -112,7 +112,7 @@ describe('classifyNodePtyProbeResult', () => {
   it('reads past node\u2019s echoed source line when it can only use stderr', () => {
     const failure = probe({
       stderr:
-        "[eval]:1\nprocess.dlopen({exports:{}},f);\n        ^\n\nError: something specific went wrong\n"
+        '[eval]:1\nprocess.dlopen({exports:{}},f);\n        ^\n\nError: something specific went wrong\n'
     })
     expect(failure?.detail).toBe('Error: something specific went wrong')
   })
@@ -179,9 +179,21 @@ describe('checkNodePtyPrecondition', () => {
     expect(verdict).toMatchObject({ status: 'blocked', reason: 'dependency_missing' })
   })
 
-  it('passes against the node-pty this repo actually builds', () => {
+  it('agrees with whether node-pty actually loads on this host', () => {
+    // Why compared against ground truth rather than asserted as 'ok': CI's test shard
+    // runs `vitest` directly, so `ensure-native-runtime --runtime=node` never prepares
+    // node-pty for the Node ABI and `degraded` is the CORRECT verdict there. Asserting
+    // 'ok' encoded a prepared environment the shard does not have. Asserting "whatever
+    // it said" would be vacuous, so this pins the verdict to an independent check.
+    let loads = true
+    try {
+      createRequire(import.meta.url)('node-pty')
+    } catch {
+      loads = false
+    }
+
     const verdict = checkNodePtyPrecondition({ prebuildsDir: null })
-    expect(verdict.status).toBe('ok')
+    expect(verdict.status).toBe(loads ? 'ok' : 'degraded')
     expect(verdict.slot).toBe(
       process.platform === 'linux'
         ? `linux-${process.arch}-${verdict.abi.libc}`
@@ -210,7 +222,9 @@ describe('checkNodePtyPrecondition', () => {
     const dir = stageNodePty()
     const abi = detectNativeHostAbi()
     const slot =
-      abi.libc === 'none' ? `${abi.platform}-${abi.arch}` : `${abi.platform}-${abi.arch}-${abi.libc}`
+      abi.libc === 'none'
+        ? `${abi.platform}-${abi.arch}`
+        : `${abi.platform}-${abi.arch}-${abi.libc}`
     const prebuildsDir = mkdtempSync(join(tmpdir(), 'orcad-prebuilds-'))
     temporaryDirs.push(prebuildsDir)
     mkdirSync(join(prebuildsDir, slot), { recursive: true })
