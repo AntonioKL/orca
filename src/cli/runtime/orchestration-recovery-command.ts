@@ -27,7 +27,7 @@ export function buildOrchestrationRecoveryCommand(
 export function buildOrchestrationRecoveryCommand(
   methodOrExecutable: string,
   paramsOrMethod: unknown,
-  executableOrParams?: string | unknown,
+  executableOrParams?: unknown,
   originalArgs?: readonly string[]
 ): string[] | undefined {
   const legacyOrder = typeof paramsOrMethod === 'string' && executableOrParams !== undefined
@@ -38,6 +38,10 @@ export function buildOrchestrationRecoveryCommand(
     : typeof executableOrParams === 'string'
       ? executableOrParams
       : resolveOrchestrationCliExecutable()
+  if (originalArgs && originalArgs.length > 0) {
+    const recoverableArgs = recoverableOrchestrationArgs(originalArgs)
+    return recoverableArgs ? [executable, ...recoverableArgs] : undefined
+  }
   const command =
     method === 'orchestration.workerStart'
       ? 'worker-start'
@@ -47,7 +51,9 @@ export function buildOrchestrationRecoveryCommand(
           ? 'worker-abandon'
           : method === 'orchestration.workerRelease'
             ? 'worker-release'
-            : undefined
+            : method === 'orchestration.workerRetain'
+              ? 'worker-retain'
+              : undefined
   if (!command || params === null || typeof params !== 'object') {
     return undefined
   }
@@ -55,9 +61,6 @@ export function buildOrchestrationRecoveryCommand(
   const requiredKey = command === 'worker-start' ? 'task' : 'dispatch'
   if (typeof record[requiredKey] !== 'string' || record[requiredKey].length === 0) {
     return undefined
-  }
-  if (originalArgs && originalArgs.length > 0) {
-    return [executable, ...withoutRetryRequest(originalArgs)]
   }
   const args = [executable, 'orchestration', command]
   for (const [key, value] of Object.entries(record)) {
@@ -74,7 +77,10 @@ export function buildOrchestrationRecoveryCommand(
   return args
 }
 
-function withoutRetryRequest(args: readonly string[]): string[] {
+export function recoverableOrchestrationArgs(args: readonly string[]): string[] | undefined {
+  if (args.some((arg) => arg === '--pairing-code' || arg.startsWith('--pairing-code='))) {
+    return undefined
+  }
   const result: string[] = []
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]

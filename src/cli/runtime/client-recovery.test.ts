@@ -69,7 +69,7 @@ describe('RuntimeClient orchestration recovery identity', () => {
       })
     )
 
-    const client = new RuntimeClient(userDataPath, 500)
+    const client = new RuntimeClient(userDataPath, 500, null, null, 'orca')
     try {
       await client.call('orchestration.workerStart', { task: 'task_1' })
       throw new Error('expected worker-start failure')

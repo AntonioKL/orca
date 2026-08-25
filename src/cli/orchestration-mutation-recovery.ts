@@ -1,5 +1,8 @@
 import { RuntimeClientError } from './runtime-client'
-import { resolveOrchestrationCliExecutable } from './runtime/orchestration-recovery-command'
+import {
+  recoverableOrchestrationArgs,
+  resolveOrchestrationCliExecutable
+} from './runtime/orchestration-recovery-command'
 import { quoteWindowsCmdArgument } from '../shared/child-process/windows-command-line'
 import { quotePowerShellNativeArgument } from '../shared/powershell-native-argument'
 import { resolveWindowsShellStartupFamily } from '../shared/windows-terminal-shell'
@@ -15,7 +18,12 @@ export function orchestrationMutationRecoveryError(error: unknown): unknown {
     return error
   }
   const dispatchId = typeof data?.dispatchId === 'string' ? data.dispatchId : undefined
-  const originalCommand = commandParts(data?.originalCommand)
+  const parsedOriginalCommand = commandParts(data?.originalCommand)
+  const originalCommand = parsedOriginalCommand
+    ? recoverableOrchestrationArgs(parsedOriginalCommand)
+    : undefined
+  const safeData = { ...data }
+  delete safeData.originalCommand
   const retryCommand = originalCommand
     ? [...originalCommand, '--retry-request', requestId]
     : undefined
@@ -48,8 +56,9 @@ export function orchestrationMutationRecoveryError(error: unknown): unknown {
       : undefined
   ].filter((line): line is string => line !== undefined)
   return new RuntimeClientError(error.code, message.join('\n'), {
-    ...data,
+    ...safeData,
     orchestrationRequestId: requestId,
+    ...(originalCommand ? { originalCommand } : {}),
     recovery,
     nextSteps
   })
@@ -171,7 +180,7 @@ function shellQuote(value: string): string {
   if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) {
     return value
   }
-  return `'${value.replaceAll("'", "'\\\"'\\\"'")}'`
+  return `'${value.replaceAll("'", `'"'"'`)}'`
 }
 
 function stripUnsafeRetryAdvice(message: string, requestId: string): string {
