@@ -103,6 +103,25 @@ describe('parseAskFromStatus', () => {
     expect(parseAskFromStatus('{not json')).toBeNull()
     expect(parseAskFromStatus('{"foo":1}')).toBeNull()
   })
+
+  it('parses Grok question notifications whose payload is the questions array', () => {
+    const grokQuestions = [
+      {
+        question: 'Ship to which region?',
+        options: [
+          { label: 'us-east', description: 'US East' },
+          { label: 'eu-west', description: 'EU West' }
+        ],
+        multi_select: false
+      }
+    ]
+    const ask = parseAskFromStatus(JSON.stringify(grokQuestions), 'ask_user_question')
+    expect(ask?.questions[0]).toMatchObject({
+      question: 'Ship to which region?',
+      options: [{ label: 'us-east' }, { label: 'eu-west' }],
+      multiSelect: false
+    })
+  })
 })
 
 describe('formatAskAnswer', () => {

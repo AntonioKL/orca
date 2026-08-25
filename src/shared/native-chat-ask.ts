@@ -20,10 +20,11 @@ export function registerQuestionTool(toolName: string, parser: InteractiveQuesti
 }
 
 function parseQuestionsShape(input: unknown): AskPrompt | null {
-  if (!input || typeof input !== 'object') {
-    return null
-  }
-  const rawQuestions = (input as { questions?: unknown }).questions
+  const rawQuestions = Array.isArray(input)
+    ? input
+    : input && typeof input === 'object'
+      ? (input as { questions?: unknown }).questions
+      : undefined
   if (!Array.isArray(rawQuestions) || rawQuestions.length === 0) {
     return null
   }
@@ -39,7 +40,7 @@ function parseQuestionsShape(input: unknown): AskPrompt | null {
       questions.push({
         question: text,
         header: typeof question.header === 'string' ? question.header : undefined,
-        multiSelect: question.multiSelect === true,
+        multiSelect: question.multiSelect === true || question.multi_select === true,
         options
       })
     }
