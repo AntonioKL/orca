@@ -61,6 +61,7 @@ import {
 } from '../codex/codex-config-mirror'
 import { parseWslUncPath, toLinuxPath } from '../../shared/wsl-paths'
 import {
+  getCodexSelectionLaneKey,
   getWslSelectionKey,
   getSelectedCodexAccountIdForTarget,
   normalizeCodexRuntimeSelection,
@@ -91,10 +92,17 @@ import { CodexCredentialAbsenceGrace } from './codex-credential-absence-grace'
 import { syncLegacySharedCodexConfigForRetainedPanes } from './legacy-shared-config-compatibility'
 import {
   getCodexPaneAccount,
+  hasRecordedLegacyWslCodexPane,
   hasRecordedLegacySharedCodexPane,
   type CodexPaneHomeRoute
 } from '../codex/codex-pane-account-registry'
 import { isShellStartupEnvProbeSupported } from '../pty/shell-startup-env'
+import {
+  readWslCodexAuth,
+  startLegacyWslRuntimeAuthDrain,
+  type LegacyWslRuntimeAuthDestination,
+  type WslCodexAuthRead
+} from './legacy-wsl-runtime-auth-drain'
 
 type CodexSystemDefaultSnapshot = {
   authJson: string | null
@@ -244,11 +252,11 @@ export class CodexRuntimeHomeService {
   ): string | null {
     if (target?.runtime === 'wsl') {
       const wslTarget = this.resolveWslDefaultTarget(target)
-      const syncedRuntimeHomePath = this.syncWslRuntimeForCurrentSelection(wslTarget)
-      this.syncWslConfigAndGlobalInstructionsForLaunch(wslTarget, syncedRuntimeHomePath)
-      const runtimeHomePath = syncedRuntimeHomePath ?? this.getWslSystemCodexHomePath(wslTarget)
-      this.startWslSessionBridgeForLaunch(wslTarget, runtimeHomePath)
-      return runtimeHomePath
+      const homePath = this.getWslCodexHomePathForSelection(wslTarget)
+      this.startLegacyWslAuthDrain(wslTarget)
+      this.syncWslConfigAndGlobalInstructionsForLaunch(wslTarget, homePath)
+      this.startWslSessionBridgeForLaunch(wslTarget, homePath)
+      return homePath
     }
     const selfContainedAccount = this.getSelfContainedManagedHostAccount()
     if (selfContainedAccount) {
@@ -790,10 +798,9 @@ export class CodexRuntimeHomeService {
   prepareForRateLimitFetch(target?: CodexAccountSelectionTarget): CodexRateLimitHomeResolution {
     if (target?.runtime === 'wsl') {
       const wslTarget = this.resolveWslDefaultTarget(target)
-      const syncedRuntimeHomePath = this.getPreparedWslRateLimitHomePath(wslTarget)
       return {
         kind: 'ready',
-        codexHomePath: syncedRuntimeHomePath ?? this.getWslSystemCodexHomePath(wslTarget)
+        codexHomePath: this.getPreparedWslRateLimitHomePath(wslTarget)
       }
     }
     const selfContainedAccount = this.getSelfContainedManagedHostAccount()
@@ -833,7 +840,7 @@ export class CodexRuntimeHomeService {
     launchEnv?: NodeJS.ProcessEnv
   ): void {
     if (target?.runtime === 'wsl') {
-      this.syncWslRuntimeForCurrentSelection(target)
+      this.startLegacyWslAuthDrain(this.resolveWslDefaultTarget(target))
       return
     }
 
@@ -1051,28 +1058,105 @@ export class CodexRuntimeHomeService {
   }
 
   private getPreparedWslRateLimitHomePath(target: CodexAccountSelectionTarget): string | null {
-    const distro = target.wslDistro?.trim()
-    if (distro) {
-      const settings = this.store.getSettings()
-      const selectedAccountId = getSelectedCodexAccountIdForTarget(settings, target)
-      if (selectedAccountId === null) {
-        // Why: the system-default account changes outside Orca, so read its real home directly to avoid a stale cached runtime copy.
-        return this.getWslSystemCodexHomePath(target)
-      }
-      const cachedRuntimeHomePath = this.wslRuntimeHomePathByDistro.get(distro)
-      if (
-        cachedRuntimeHomePath &&
-        this.lastSyncedWslAccountIdByDistro.has(distro) &&
-        this.lastSyncedWslAccountIdByDistro.get(distro) === selectedAccountId
-      ) {
-        // Why: RateLimitService resolves provenance twice per poll; stay path-only so it doesn't block main on UNC reads and a wsl.exe probe.
-        return cachedRuntimeHomePath
-      }
-    }
-    return this.syncWslRuntimeForCurrentSelection(target)
+    this.startLegacyWslAuthDrain(target)
+    return this.getWslCodexHomePathForSelection(target)
   }
 
-  private syncWslRuntimeForCurrentSelection(target: CodexAccountSelectionTarget): string | null {
+  private getWslCodexHomePathForSelection(target: CodexAccountSelectionTarget): string | null {
+    const settings = this.store.getSettings()
+    const account = this.getActiveAccount(
+      settings.codexManagedAccounts,
+      getSelectedCodexAccountIdForTarget(settings, target)
+    )
+    return account?.managedHomePath ?? this.getWslSystemCodexHomePath(target)
+  }
+
+  private startLegacyWslAuthDrain(target: CodexAccountSelectionTarget): void {
+    if (process.platform !== 'win32') {
+      return
+    }
+    const distro = target.wslDistro?.trim() || getDefaultWslDistro()
+    if (!distro) {
+      return
+    }
+    const guestHome = getWslHome(distro)
+    const parsedGuestHome = guestHome ? parseWslUncPath(guestHome) : null
+    if (!parsedGuestHome) {
+      return
+    }
+    let legacyPanePresent: boolean
+    try {
+      legacyPanePresent = hasRecordedLegacyWslCodexPane(getCodexSelectionLaneKey(target))
+    } catch (error) {
+      console.warn('[codex-wsl-auth-drain] Pane registry unavailable; deferring drain:', error)
+      return
+    }
+    startLegacyWslRuntimeAuthDrain({
+      distro,
+      guestHomeLinuxPath: parsedGuestHome.linuxPath,
+      legacyPanePresent,
+      resolveDestination: (runtimeAuthContents) =>
+        this.resolveLegacyWslAuthDestination(distro, runtimeAuthContents)
+    })
+  }
+
+  private async resolveLegacyWslAuthDestination(
+    distro: string,
+    runtimeAuthContents: string
+  ): Promise<LegacyWslRuntimeAuthDestination | null> {
+    const accounts = this.store.getSettings().codexManagedAccounts.filter((account) => {
+      const parsedHome = parseWslUncPath(account.managedHomePath)
+      return parsedHome?.distro.toLowerCase() === distro.toLowerCase()
+    })
+    const authReads = new Map<string, WslCodexAuthRead>()
+    for (const account of accounts) {
+      const parsedHome = parseWslUncPath(account.managedHomePath)
+      if (parsedHome) {
+        try {
+          authReads.set(account.id, await readWslCodexAuth(distro, parsedHome.linuxPath))
+        } catch {
+          authReads.set(account.id, { kind: 'unreadable' })
+        }
+      }
+    }
+    const match = this.findManagedAccountForRuntimeAuth(runtimeAuthContents, undefined, {
+      accounts,
+      authReads
+    })
+    if (match.kind === 'ambiguous') {
+      return null
+    }
+    if (match.kind === 'matched') {
+      const parsedHome = parseWslUncPath(match.account.managedHomePath)
+      if (!parsedHome || parsedHome.distro.toLowerCase() !== distro.toLowerCase()) {
+        return null
+      }
+      return {
+        authContents: match.managedAuthContents,
+        linuxHomePath: parsedHome.linuxPath
+      }
+    }
+
+    const systemHome = this.getWslSystemCodexHomePath({ runtime: 'wsl', wslDistro: distro })
+    const parsedSystemHome = systemHome ? parseWslUncPath(systemHome) : null
+    if (!systemHome || !parsedSystemHome) {
+      return null
+    }
+    let systemAuth: WslCodexAuthRead
+    try {
+      systemAuth = await readWslCodexAuth(distro, parsedSystemHome.linuxPath)
+    } catch {
+      return null
+    }
+    if (systemAuth.kind !== 'present') {
+      return null
+    }
+    return this.runtimeAuthMatchesSystemDefaultIdentity(runtimeAuthContents, systemAuth.contents)
+      ? { authContents: systemAuth.contents, linuxHomePath: parsedSystemHome.linuxPath }
+      : null
+  }
+
+  syncWslRuntimeForCurrentSelection(target: CodexAccountSelectionTarget): string | null {
     if (process.platform !== 'win32') {
       return null
     }
@@ -1319,7 +1403,11 @@ export class CodexRuntimeHomeService {
 
   private findManagedAccountForRuntimeAuth(
     runtimeAuthContents: string,
-    expectedAccountId?: string
+    expectedAccountId?: string,
+    options?: {
+      accounts: readonly CodexManagedAccount[]
+      authReads: ReadonlyMap<string, WslCodexAuthRead>
+    }
   ): CodexReadBackMatch {
     const matches: {
       account: CodexManagedAccount
@@ -1327,18 +1415,17 @@ export class CodexRuntimeHomeService {
       managedAuthContents: string
     }[] = []
     let unreadableHomeCouldOwnRuntimeAuth = false
-    for (const account of this.store.getSettings().codexManagedAccounts) {
+    for (const account of options?.accounts ?? this.store.getSettings().codexManagedAccounts) {
       if (expectedAccountId && account.id !== expectedAccountId) {
         continue
       }
       const managedAuthPath = join(account.managedHomePath, 'auth.json')
-      if (!existsSync(managedAuthPath)) {
+      let managedAuthContents: string
+      const suppliedRead = options?.authReads.get(account.id)
+      if (suppliedRead?.kind === 'missing') {
         continue
       }
-      let managedAuthContents: string
-      try {
-        managedAuthContents = readFileSync(managedAuthPath, 'utf-8')
-      } catch {
+      if (suppliedRead?.kind === 'unreadable') {
         // Why: an unreadable home can never be compared, but letting the read
         // throw abandons the scan for every other account — dropping a refresh
         // the runtime home holds for one of them. Only its record can rule it
@@ -1350,6 +1437,24 @@ export class CodexRuntimeHomeService {
           unreadableHomeCouldOwnRuntimeAuth = true
         }
         continue
+      }
+      if (suppliedRead?.kind === 'present') {
+        managedAuthContents = suppliedRead.contents
+      } else {
+        if (!existsSync(managedAuthPath)) {
+          continue
+        }
+        try {
+          managedAuthContents = readFileSync(managedAuthPath, 'utf-8')
+        } catch {
+          if (
+            !expectedAccountId &&
+            codexAuthCouldBelongToManagedAccount(runtimeAuthContents, account)
+          ) {
+            unreadableHomeCouldOwnRuntimeAuth = true
+          }
+          continue
+        }
       }
       if (codexAuthMatchesManagedAccount(runtimeAuthContents, account, managedAuthContents)) {
         matches.push({ account, managedAuthPath, managedAuthContents })
