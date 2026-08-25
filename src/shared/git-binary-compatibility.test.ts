@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -15,6 +15,7 @@ import {
   isUnsupportedWorktreeListZError
 } from './git-worktree-command-capabilities'
 import { gitCredentialPromptGuardEnv } from './git-credential-prompt-env'
+import { isGitSilentNegativeAnswer } from './git-object-store-failure'
 import {
   githubPullRequestHeadLocalRef,
   gitlabMergeRequestHeadLocalRef,
@@ -254,6 +255,71 @@ describeBinaryCompatibility('real Git binary compatibility', () => {
       // the scalar prompt guards still provide the baseline fail-fast behavior.
       expect(supports(2, 31)).toBe(false)
     }
+  })
+
+  // Why pin this: worktree-object-store-diagnosis.ts reports "the object is missing" only
+  // when `rev-parse --verify --quiet` exits 1 *without* explaining itself, and reports
+  // `unverifiable` when it does. If a future Git started narrating an absent object (or
+  // stopped narrating an unreadable one) that probe would start asserting a corruption it
+  // never observed, which is the whole failure mode this file exists to catch early.
+  it('answers an absent object silently and an unreadable one with a diagnostic', async () => {
+    const nested = 'compat-object-store'
+    await runGit(['init', '-q', nested])
+    await runGit(['-C', nested, 'config', 'user.email', 'compatibility@example.invalid'])
+    await runGit(['-C', nested, 'config', 'user.name', 'Compatibility Test'])
+    await writeFile(join(repoPath, nested, 'tracked.txt'), 'objects\n')
+    await runGit(['-C', nested, 'add', 'tracked.txt'])
+    await runGit(['-C', nested, 'commit', '-qm', 'initial'])
+    await runGit(['-C', nested, 'branch', 'compat-objects'])
+
+    const peel = (kind: 'commit' | 'tree'): string[] => [
+      '-C',
+      nested,
+      'rev-parse',
+      '--verify',
+      '--quiet',
+      `refs/heads/compat-objects^{${kind}}`
+    ]
+    const treeOid = (await runGit(peel('tree'))).stdout.trim()
+    expect(treeOid).toMatch(/^[0-9a-f]{40}$/)
+    const treeFile = join(
+      repoPath,
+      nested,
+      '.git',
+      'objects',
+      treeOid.slice(0, 2),
+      treeOid.slice(2)
+    )
+
+    const peelFailure = async (): Promise<{ code?: unknown; stderr?: string } | null> =>
+      runGit(peel('tree')).then(
+        () => null,
+        (error: unknown) => error as { code?: unknown; stderr?: string }
+      )
+
+    // Present-but-unopenable: never a silent "no". Which way it differs is version-dependent
+    // (2.44 narrates and still exits 1; 2.38 exits 128), so pin the predicate, not the shape.
+    // Truncation rather than chmod so the contract holds for a root CI user and on Windows.
+    await chmod(treeFile, 0o644)
+    await writeFile(treeFile, '')
+    const unreadable = await peelFailure()
+    expect(isGitSilentNegativeAnswer(unreadable?.code, unreadable?.stderr ?? '')).toBe(false)
+
+    // Absent: silent status 1. The commit peels either way, which is exactly why a
+    // tree-only probe cannot tell a missing tree from a missing commit.
+    await rm(treeFile, { force: true })
+    await expect(runGit(peel('commit'))).resolves.toMatchObject({
+      stdout: expect.stringMatching(/^[0-9a-f]{40}/)
+    })
+    const absent = await peelFailure()
+    expect(isGitSilentNegativeAnswer(absent?.code, absent?.stderr ?? '')).toBe(true)
+
+    // And `worktree add` really does die on that tree, which is why the diagnosis runs at all.
+    await expect(runGit(['-C', nested, 'worktree', 'add', 'wt', 'compat-objects'])).rejects.toEqual(
+      expect.objectContaining({ stderr: expect.stringContaining('unable to read tree') })
+    )
+
+    await rm(join(repoPath, nested), { recursive: true, force: true })
   })
 
   // Why pin this: --verify swallows --end-of-options but --symbolic-full-name echoes

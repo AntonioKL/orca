@@ -2654,6 +2654,11 @@ function addListenerToMap<T>(map: Map<string, Set<T>>, key: string, listener: T)
   }
 }
 
+// Preflight contract: `^{commit}` peels the ref and reads ONLY the commit object, so a
+// pass proves the branch tip is resolvable — NOT that its tree and blobs are readable.
+// `git worktree add` reads the root tree next and can still die there; that failure is
+// diagnosed and redacted in git/worktree-add-object-store-error.ts. Do not widen this
+// probe into a tree walk: it runs on every create and would slow every success.
 async function canCheckoutExistingLocalBranch(
   repoPath: string,
   branchName: string,

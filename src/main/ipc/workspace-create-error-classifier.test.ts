@@ -5,6 +5,7 @@
 // a renamed throw site needs regression coverage.
 
 import { describe, expect, it } from 'vitest'
+import { formatGitObjectStoreFailureMessage } from '../../shared/git-object-store-failure'
 import { classifyWorkspaceCreateError } from './workspace-create-error-classifier'
 
 describe('classifyWorkspaceCreateError', () => {
@@ -54,6 +55,63 @@ describe('classifyWorkspaceCreateError', () => {
   it('buckets generic git errors as git_failed', () => {
     const err = new Error('fatal: not a git repository')
     expect(classifyWorkspaceCreateError(err)).toBe('git_failed')
+  })
+
+  it('keeps a redacted object-store failure in git_failed', () => {
+    // The redacted message drops 'fatal:' and the argv, so it needs its own anchor.
+    const err = new Error(
+      formatGitObjectStoreFailureMessage({
+        failure: { kind: 'unreadable-tree', oid: '041335168f0214913840aaaaaaaaaaaaaaaaaaaa' },
+        branch: 'akulafb/test',
+        commit: 'present',
+        rootTree: 'missing',
+        partialClone: 'no'
+      })
+    )
+    expect(err.message).not.toContain('fatal:')
+    expect(classifyWorkspaceCreateError(err)).toBe('git_failed')
+  })
+
+  it('keeps a redacted permission failure in permission_denied, not git_failed', () => {
+    // Real git 2.44 for a tree object at mode 000: the keyword only exists in the raw text.
+    const raw = new Error(
+      "Command failed: git worktree add /Users/akulafb/dev/worktrees/test 'akulafb/test'\n" +
+        'error: unable to open loose object ba856f78f34fcefae5d72ef4aec60e70a52ea4a0: Permission denied\n' +
+        'fatal: unable to read tree c34d8d3a1ebd165bbdc29303e8c0e7330442abaa'
+    )
+    expect(classifyWorkspaceCreateError(raw)).toBe('permission_denied')
+
+    const described = new Error(
+      formatGitObjectStoreFailureMessage({
+        failure: { kind: 'unreadable-tree', oid: 'c34d8d3a1ebd165bbdc29303e8c0e7330442abaa' },
+        branch: 'akulafb/test',
+        commit: 'present',
+        rootTree: 'unverifiable',
+        partialClone: 'no'
+      })
+    )
+    described.cause = raw
+
+    expect(described.message.toLowerCase()).not.toContain('permission denied')
+    expect(classifyWorkspaceCreateError(described)).toBe('permission_denied')
+  })
+
+  it("reads the cause's stderr when a buffer cap truncated its message", () => {
+    const raw = Object.assign(new Error('git timed out.'), {
+      stderr: 'error: unable to open loose object ba856f78: Permission denied\n'
+    })
+    const described = new Error(
+      formatGitObjectStoreFailureMessage({
+        failure: { kind: 'unreadable-tree', oid: null },
+        branch: 'akulafb/test',
+        commit: 'unverifiable',
+        rootTree: 'unverifiable',
+        partialClone: 'unverifiable'
+      })
+    )
+    described.cause = raw
+
+    expect(classifyWorkspaceCreateError(described)).toBe('permission_denied')
   })
 
   it('falls through to unknown for unrecognised errors', () => {

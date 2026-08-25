@@ -26,7 +26,13 @@ import type {
   WorktreeHeadIdentity
 } from '../../shared/worktree/types'
 import { getPRForBranch } from '../github/client'
-import { listWorktrees, addWorktree, addSparseWorktree } from '../git/worktree'
+import {
+  listWorktrees,
+  addWorktree,
+  addSparseWorktree,
+  WORKTREE_OBJECT_STORE_DIAGNOSIS_TIMEOUT_MS
+} from '../git/worktree'
+import { describeWorktreeAddObjectStoreFailure } from '../git/worktree-add-object-store-error'
 import type { AddWorktreeOptions, AddWorktreeResult } from '../git/worktree'
 import {
   getBranchConflictKind,
@@ -594,6 +600,11 @@ function normalizeLocalBranchName(branchName: string | undefined): string {
   return branchName?.replace(/^refs\/heads\//, '') ?? ''
 }
 
+// Preflight contract: `^{commit}` peels the ref and reads ONLY the commit object, so a
+// pass proves the branch tip is resolvable — NOT that its tree and blobs are readable.
+// `git worktree add` reads the root tree next and can still die there; that failure is
+// diagnosed and redacted in git/worktree-add-object-store-error.ts. Do not widen this
+// probe into a tree walk: it runs on every create and would slow every success.
 async function canCheckoutExistingLocalBranch(
   repoPath: string,
   branchName: string,
@@ -728,6 +739,11 @@ async function hasCommitRefSsh(
   }
 }
 
+// Preflight contract: `^{commit}` peels the ref and reads ONLY the commit object, so a
+// pass proves the branch tip is resolvable — NOT that its tree and blobs are readable.
+// `git worktree add` reads the root tree next and can still die there; that failure is
+// diagnosed and redacted in git/worktree-add-object-store-error.ts. Do not widen this
+// probe into a tree walk: it runs on every create and would slow every success.
 async function canCheckoutExistingLocalBranchSsh(
   provider: SshGitProvider,
   repoPath: string,
@@ -1788,7 +1804,18 @@ export async function createRemoteWorktree(
         `Older relay reported an authorization error; please reconnect to deploy the latest relay. (${err.message})`
       )
     }
-    throw err
+    // Client-side so the diagnosis works against any relay version, without a wire change.
+    const described = await describeWorktreeAddObjectStoreFailure(err, {
+      runGit: (gitArgs) =>
+        // Why bound: unbounded here is the mux's 30s ambient default, 3x the local path's
+        // bound, so a promisor fetch at an unreachable remote holds the failing create for it.
+        provider.exec(gitArgs, repo.path, {
+          timeoutMs: WORKTREE_OBJECT_STORE_DIAGNOSIS_TIMEOUT_MS
+        }),
+      branch: branchName,
+      checkoutRef: checkoutExistingBranch ? `refs/heads/${branchName}` : baseBranch
+    })
+    throw described ?? err
   }
   if (sparseDirectories.length > 0) {
     try {
@@ -1821,7 +1848,20 @@ export async function createRemoteWorktree(
       if (!rollbackSucceeded && shouldRetireGeneratedName) {
         await retireGeneratedWorktreeName(store, repo, settings, effectiveSanitizedName)
       }
-      throw err
+      // Parity with local addSparseWorktree: --no-checkout means `worktree add` never read
+      // the tree, so the object-store failure lands here instead. Probes target repo.path,
+      // which outlives the rollback above.
+      const described = await describeWorktreeAddObjectStoreFailure(err, {
+        runGit: (gitArgs) =>
+          // Why bound: unbounded here is the mux's 30s ambient default, 3x the local path's
+          // bound, so a promisor fetch at an unreachable remote holds the failing create for it.
+          provider.exec(gitArgs, repo.path, {
+            timeoutMs: WORKTREE_OBJECT_STORE_DIAGNOSIS_TIMEOUT_MS
+          }),
+        branch: branchName,
+        checkoutRef: `refs/heads/${branchName}`
+      })
+      throw described ?? err
     }
   }
 

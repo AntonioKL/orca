@@ -106,7 +106,8 @@ export default function WorktreeCreationPanel({
             log={entry.provisioningLog ?? ''}
             error={
               isError
-                ? (entry.error ??
+                ? (entry.errorDetail ??
+                  entry.error ??
                   translate(
                     'auto.components.worktree.creation.WorktreeCreationPanel.767951265d',
                     'Something went wrong while creating the worktree.'
@@ -126,7 +127,8 @@ export default function WorktreeCreationPanel({
               )}
             </span>
             <span className="text-muted-foreground">
-              {entry.error ??
+              {entry.errorDetail ??
+                entry.error ??
                 translate(
                   'auto.components.worktree.creation.WorktreeCreationPanel.767951265d',
                   'Something went wrong while creating the worktree.'

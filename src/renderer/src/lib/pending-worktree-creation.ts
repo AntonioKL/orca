@@ -127,7 +127,10 @@ export type PendingWorktreeCreation = {
    *  background creates set this immediately so the faux tab strip stays stable
    *  from create start through terminal handoff. */
   loaderVisible: boolean
+  /** Short label for the truncating sidebar row. */
   error?: string
+  /** Full diagnosis for the creation panel; the sidebar row would truncate it away. */
+  errorDetail?: string
   provisioningLog?: string
   request: WorktreeCreationRequest
 }

@@ -12,12 +12,32 @@
 // widening this match set later requires explicit review, not silent regex
 // expansion. Anything we cannot confidently bucket falls through to `unknown`.
 
+import { GIT_OBJECT_STORE_FAILURE_ANCHOR } from '../../shared/git-object-store-failure'
 import type { WorkspaceCreateErrorClass } from '../../shared/telemetry-events'
+
+// Why the cause chain and not just `message`: object-store failures reach here redacted
+// (worktree-add-object-store-error.ts rebuilds the message and keeps the raw git text on
+// `cause`), and that raw text is the only place `Permission denied`/`EACCES` survives. Reading
+// it back is a widening of the INPUT, not of the match set below, and the matched strings still
+// never leave this process — only the enum does.
+const MAX_CAUSE_DEPTH = 4
+
+function readErrorChainText(error: unknown): string {
+  const parts: string[] = []
+  let current: unknown = error
+  for (let depth = 0; depth < MAX_CAUSE_DEPTH && current instanceof Error; depth += 1) {
+    // Why `stderr` too: a buffer-capped runner can leave the fatal line off `message` entirely.
+    const stderr = (current as { stderr?: unknown }).stderr
+    parts.push(current.message, typeof stderr === 'string' ? stderr : '')
+    current = current.cause
+  }
+  return parts.join('\n')
+}
 
 export function classifyWorkspaceCreateError(error: unknown): WorkspaceCreateErrorClass {
   // Why: throw sites mix capitalization ('Worktree created...' vs lowercased
   // git messages); normalize once so all anchors below can be lowercase literals.
-  const text = (error instanceof Error ? error.message : '').toLowerCase()
+  const text = readErrorChainText(error).toLowerCase()
 
   if (text.includes('could not resolve a default base ref')) {
     return 'base_ref_missing'
@@ -45,7 +65,9 @@ export function classifyWorkspaceCreateError(error: unknown): WorkspaceCreateErr
   if (
     text.includes('fatal:') ||
     text.includes('git worktree') ||
-    text.includes('created but not found in listing')
+    text.includes('created but not found in listing') ||
+    // Redaction strips 'fatal:' and the argv from object-store failures; keep them bucketed.
+    text.includes(GIT_OBJECT_STORE_FAILURE_ANCHOR)
   ) {
     return 'git_failed'
   }

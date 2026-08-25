@@ -223,6 +223,7 @@ export type WorktreeSlice = {
       status?: 'creating' | 'error'
       startedAt?: number
       error?: string
+      errorDetail?: string
       loaderVisible?: boolean
       request?: PendingWorktreeCreation['request']
       provisioningLog?: string

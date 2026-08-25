@@ -166,6 +166,21 @@ describe('WorktreeCreationPanel', () => {
     expect(container.textContent).toContain('Retry')
   })
 
+  it('renders the full object-store diagnosis, not just its short label', async () => {
+    mocks.state.pendingWorktreeCreations['create-1'] = {
+      ...mocks.state.pendingWorktreeCreations['create-1'],
+      status: 'error',
+      error: 'Repository objects are missing',
+      errorDetail:
+        'Orca could not create this workspace because the repository object database is missing objects. ' +
+        'Run git fsck in the repository to confirm what is missing.'
+    }
+
+    const container = await renderPanel(false)
+
+    expect(container.textContent).toContain('git fsck')
+  })
+
   it('omits the recipe output panel for a non-VM creation failure', async () => {
     mocks.state.pendingWorktreeCreations['create-1'] = {
       ...mocks.state.pendingWorktreeCreations['create-1'],

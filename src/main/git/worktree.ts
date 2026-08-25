@@ -35,6 +35,7 @@ import { withLocalGitCapabilityCacheForExecution } from './git-capability-state'
 import { gitExecFileAsync, translateWslOutputPaths } from './runner'
 import { resolveGitDir, runWithGitReadCacheInvalidation } from './status'
 import { hasWorktreeBaseCommitRef, probeWorktreeBaseRefPresence } from './worktree-base-ref-probe'
+import { describeWorktreeAddObjectStoreFailure } from './worktree-add-object-store-error'
 
 export type AddWorktreeResult = {
   localBaseRefRefresh?: LocalBaseRefRefreshResult
@@ -101,6 +102,9 @@ export const WORKTREE_REMOVAL_PREFLIGHT_TIMEOUT_MS = 30_000
 export const WORKTREE_REMOVAL_REGISTRATION_TIMEOUT_MS = 30_000
 // Why: one wedged shared scan otherwise hangs every later list, including create's post-add re-list.
 export const WORKTREE_LIST_TIMEOUT_MS = 30_000
+// Why: on a partial clone the failure-path `^{tree}` peel can trigger a promisor fetch, so an
+// unreachable remote would turn a bounded `worktree add` failure into a create that never settles.
+export const WORKTREE_OBJECT_STORE_DIAGNOSIS_TIMEOUT_MS = 10_000
 
 /**
  * `ORCA_WORKTREE_ADD_TIMEOUT_MS` clamped into [{@link WORKTREE_ADD_TIMEOUT_MS},
@@ -1023,11 +1027,27 @@ async function performAddWorktree(
       args.push(effectiveBase)
     }
   }
-  await gitExecFileAsync(args, {
-    ...gitExecOptions(repoPath, options),
-    // Why: resolve per call — hoisting this to a module const would freeze the override at import.
-    timeout: resolveWorktreeAddTimeoutMs()
-  })
+  try {
+    await gitExecFileAsync(args, {
+      ...gitExecOptions(repoPath, options),
+      // Why: resolve per call — hoisting this to a module const would freeze the override at import.
+      timeout: resolveWorktreeAddTimeoutMs()
+    })
+  } catch (error) {
+    // Why here: `worktree add` reads the root tree, which the commit-only preflight never touched.
+    const described = await describeWorktreeAddObjectStoreFailure(error, {
+      runGit: (gitArgs) =>
+        gitExecFileAsync(gitArgs, {
+          ...gitExecOptions(repoPath, options),
+          timeout: WORKTREE_OBJECT_STORE_DIAGNOSIS_TIMEOUT_MS
+        }),
+      branch,
+      checkoutRef: options.checkoutExistingBranch
+        ? `refs/heads/${branch}`
+        : (effectiveBase ?? 'HEAD')
+    })
+    throw described ?? error
+  }
 
   if (options.checkoutExistingBranch) {
     return localBaseRefRefresh ? { localBaseRefRefresh } : {}
@@ -1110,8 +1130,22 @@ export async function addSparseWorktree(
     )
     return addResult
   } catch (error) {
+    // Why here too: sparse passes --no-checkout, so `worktree add` never reads the tree and
+    // exits 0; the object-store failure surfaces in the sparse-checkout/checkout calls above.
+    // Probes run against repoPath, whose object store outlives the rollback below.
+    const described = await describeWorktreeAddObjectStoreFailure(error, {
+      runGit: (gitArgs) =>
+        gitExecFileAsync(gitArgs, {
+          ...gitExecOptions(repoPath, options),
+          timeout: WORKTREE_OBJECT_STORE_DIAGNOSIS_TIMEOUT_MS
+        }),
+      branch,
+      // `worktree add -b` already created the branch, so its ref resolves either way.
+      checkoutRef: `refs/heads/${branch}`
+    })
+    const failure = described ?? error
     const wrapped: SparseWorktreeCreateError =
-      error instanceof Error ? (error as SparseWorktreeCreateError) : new Error(String(error))
+      failure instanceof Error ? (failure as SparseWorktreeCreateError) : new Error(String(failure))
     if (created) {
       if (!options.checkoutExistingBranch) {
         try {

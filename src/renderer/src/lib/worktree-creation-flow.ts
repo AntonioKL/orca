@@ -13,6 +13,7 @@ import {
 import { getProvisionedRootCreateOptions } from '@/lib/provisioned-root-create-options'
 import {
   formatWorkspaceCreateError,
+  getWorkspaceCreateErrorDetail,
   getWorkspaceCreateErrorToastMessage
 } from '@/lib/workspace-create-error-format'
 import type { CreateWorktreeResult } from '../../../shared/worktree/create-types'
@@ -157,18 +158,21 @@ async function executeWorktreeCreation(
     if (preparedRequest.ephemeralVmRuntimeId) {
       await cleanupEphemeralVmRuntimeForFailedCreate(preparedRequest)
     }
-    const message = getWorkspaceCreateErrorToastMessage(formatWorkspaceCreateError(error))
+    const formatted = formatWorkspaceCreateError(error)
     // Why: an error must stay on the same creation surface that owns the faux
     // tab strip, rather than falling back to stale previous-workspace tabs.
     useAppStore.getState().updatePendingWorktreeCreation(creationId, {
       status: 'error',
-      error: message,
+      error: getWorkspaceCreateErrorToastMessage(formatted),
+      // Why: the panel renders one string and this path never rethrows, so the short
+      // title alone would drop the only repair instructions the user ever sees.
+      errorDetail: getWorkspaceCreateErrorDetail(formatted),
       ...(preparedRequest.ephemeralVmRecipe ? { request } : {})
     })
     // Why: only toast when the panel isn't already showing this error (the user
     // navigated away), so a visible failure isn't announced twice.
     if (!isPendingCreationSurfaceVisible(creationId)) {
-      toast.error(message)
+      toast.error(getWorkspaceCreateErrorToastMessage(formatted))
     }
     return
   }
@@ -323,6 +327,7 @@ export function continueBackgroundWorktreeCreation(
     status: 'creating',
     startedAt: Date.now(),
     error: undefined,
+    errorDetail: undefined,
     provisioningLog: undefined,
     request
   })
@@ -352,6 +357,7 @@ export function retryBackgroundWorktreeCreation(creationId: string): void {
         ? 'provisioning-vm'
         : 'fetching',
     error: undefined,
+    errorDetail: undefined,
     provisioningLog: undefined
   })
   store.setActivePendingWorktreeCreation(creationId)
