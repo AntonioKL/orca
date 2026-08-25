@@ -1,4 +1,4 @@
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -14,6 +14,7 @@ import { detectNativeHostAbi } from './native-host-abi'
 
 const require = createRequire(import.meta.url)
 const REAL_NODE_PTY = dirname(require.resolve('node-pty/package.json'))
+const REAL_PTY_NODE = join(REAL_NODE_PTY, 'build', 'Release', 'pty.node')
 
 const probe = (overrides: Partial<Parameters<typeof classifyNodePtyProbeResult>[0]> = {}) =>
   classifyNodePtyProbeResult({
@@ -205,7 +206,10 @@ describe('checkNodePtyPrecondition', () => {
     )
   })
 
-  it.runIf(process.platform !== 'win32')(
+  // Why gated on the real binding: this asserts a LOAD outcome, so it needs a pty.node
+  // built for the Node ABI. CI's shard never runs ensure-native-runtime, so the copy
+  // ENOENT'd there.
+  it.runIf(process.platform !== 'win32' && existsSync(REAL_PTY_NODE))(
     'degrades rather than blocks when only spawn-helper is missing',
     () => {
       // node-pty posix_spawns spawn-helper, so this host loads fine and then fails ENOENT
@@ -222,7 +226,11 @@ describe('checkNodePtyPrecondition', () => {
     }
   )
 
-  it('installs the matching shipped prebuilt slot when nothing is compiled', () => {
+  // Why split: the "ok" half needs a REAL loadable pty.node, which only exists after
+  // `ensure-native-runtime --runtime=node`. CI's shard runs vitest directly, so copying
+  // from node_modules ENOENT'd there. Slot *placement* is the logic worth checking on
+  // every host; the load verdict needs a prepared one.
+  it('places the matching slot even when the payload is not loadable', () => {
     const dir = stageNodePty()
     const abi = detectNativeHostAbi()
     const slot =
@@ -232,22 +240,43 @@ describe('checkNodePtyPrecondition', () => {
     const prebuildsDir = mkdtempSync(join(tmpdir(), 'orcad-prebuilds-'))
     temporaryDirs.push(prebuildsDir)
     mkdirSync(join(prebuildsDir, slot), { recursive: true })
-    cpSync(
-      join(REAL_NODE_PTY, 'build', 'Release', 'pty.node'),
-      join(prebuildsDir, slot, 'pty.node')
-    )
+    writeFileSync(join(prebuildsDir, slot, 'pty.node'), 'not a real binding')
     if (process.platform !== 'win32') {
-      cpSync(
-        join(REAL_NODE_PTY, 'build', 'Release', 'spawn-helper'),
-        join(prebuildsDir, slot, 'spawn-helper')
-      )
+      writeFileSync(join(prebuildsDir, slot, 'spawn-helper'), '#!/bin/sh\nexit 0\n')
     }
 
     const verdict = checkNodePtyPrecondition({ nodePtyDir: dir, prebuildsDir })
 
+    // Installed from the right slot, and honest that the payload does not load.
     expect(verdict.prebuilt).toMatchObject({ installed: true, slot })
-    expect(verdict.status).toBe('ok')
+    expect(verdict.status).not.toBe('ok')
+    expect(verdict.reason).toBeDefined()
   })
+
+  it.runIf(existsSync(REAL_PTY_NODE))(
+    'reports ok once a loadable slot is installed (needs a Node-ABI build)',
+    () => {
+      const dir = stageNodePty()
+      const abi = detectNativeHostAbi()
+      const slot =
+        abi.libc === 'none'
+          ? `${abi.platform}-${abi.arch}`
+          : `${abi.platform}-${abi.arch}-${abi.libc}`
+      const prebuildsDir = mkdtempSync(join(tmpdir(), 'orcad-prebuilds-'))
+      temporaryDirs.push(prebuildsDir)
+      mkdirSync(join(prebuildsDir, slot), { recursive: true })
+      cpSync(REAL_PTY_NODE, join(prebuildsDir, slot, 'pty.node'))
+      const helper = join(REAL_NODE_PTY, 'build', 'Release', 'spawn-helper')
+      if (process.platform !== 'win32' && existsSync(helper)) {
+        cpSync(helper, join(prebuildsDir, slot, 'spawn-helper'))
+      }
+
+      const verdict = checkNodePtyPrecondition({ nodePtyDir: dir, prebuildsDir })
+
+      expect(verdict.prebuilt).toMatchObject({ installed: true, slot })
+      expect(verdict.status).toBe('ok')
+    }
+  )
 })
 
 describe('formatNodePtyPreconditionReport', () => {
