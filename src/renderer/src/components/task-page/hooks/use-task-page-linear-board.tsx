@@ -157,7 +157,7 @@ export function useTaskPageLinearBoard({
       }
       setLinearBoardDraggingIssueId(issue.id)
     },
-    [linearBoardUpdatingIssueIds, linearStatusBoardEnabled]
+    [linearBoardUpdatingIssueIds, linearStatusBoardEnabled, setLinearBoardDraggingIssueId]
   )
 
   const handleLinearBoardDragOver = useCallback(
@@ -169,7 +169,7 @@ export function useTaskPageLinearBoard({
       event.dataTransfer.dropEffect = 'move'
       setLinearBoardDragOverKey(section.key)
     },
-    [linearStatusBoardEnabled]
+    [linearStatusBoardEnabled, setLinearBoardDragOverKey]
   )
 
   // Why: two drops resolving in the same render pass both read the stale state set; the ref settles first.
@@ -294,24 +294,31 @@ export function useTaskPageLinearBoard({
       patchScopedLinearIssue,
       patchLinearIssue,
       linearTaskSourceContext,
-      settings
+      settings,
+
+      setLinearBoardDragOverKey,
+      setLinearBoardUpdatingIssueIds,
+      setSelectedLinearIssueFallback
     ]
   )
 
-  const toggleLinearDisplayProperty = useCallback((property: LinearDisplayProperty): void => {
-    if (property === 'team') {
-      setLinearTeamPropertyTouched(true)
-    }
-    setLinearDisplayProperties((prev) => {
-      const next = new Set(prev)
-      if (next.has(property)) {
-        next.delete(property)
-      } else {
-        next.add(property)
+  const toggleLinearDisplayProperty = useCallback(
+    (property: LinearDisplayProperty): void => {
+      if (property === 'team') {
+        setLinearTeamPropertyTouched(true)
       }
-      return next
-    })
-  }, [])
+      setLinearDisplayProperties((prev) => {
+        const next = new Set(prev)
+        if (next.has(property)) {
+          next.delete(property)
+        } else {
+          next.add(property)
+        }
+        return next
+      })
+    },
+    [setLinearTeamPropertyTouched, setLinearDisplayProperties]
+  )
 
   return {
     selectedLinearTeamForExternalLink,

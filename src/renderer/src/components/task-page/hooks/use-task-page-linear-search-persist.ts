@@ -75,7 +75,7 @@ export function useTaskPageLinearSearchPersist({
       setAppliedLinearSearch(linearSearchInput)
     }, TASK_SEARCH_DEBOUNCE_MS)
     return () => window.clearTimeout(timeout)
-  }, [linearSearchInput, taskResumeApplied])
+  }, [linearSearchInput, taskResumeApplied, setAppliedLinearSearch])
 
   useEffect(() => {
     if (!taskResumeApplied) {
@@ -86,7 +86,7 @@ export function useTaskPageLinearSearchPersist({
       return
     }
     setTaskResumeState({ linearQuery: appliedLinearSearch.trim() })
-  }, [appliedLinearSearch, setTaskResumeState, taskResumeApplied])
+  }, [appliedLinearSearch, setTaskResumeState, taskResumeApplied, linearSearchPersistReadyRef])
 
   useEffect(() => {
     if (!taskResumeApplied) {
@@ -113,7 +113,9 @@ export function useTaskPageLinearSearchPersist({
     linearOrderBy,
     linearTeamPropertyTouched,
     linearViewMode,
-    taskResumeApplied
+    taskResumeApplied,
+
+    linearViewPersistReadyRef
   ])
 
   useEffect(() => {
@@ -126,6 +128,10 @@ export function useTaskPageLinearSearchPersist({
     selectedLinearCustomView?.id,
     selectedLinearProject?.id,
     selectedLinearWorkspaceId,
-    taskSource
+    taskSource,
+
+    setLinearIssueLimit,
+    setLinearIssueLoadingTargetPage,
+    setLinearIssuePage
   ])
 }

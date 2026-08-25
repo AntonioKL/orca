@@ -86,7 +86,7 @@ export function useTaskPageGitHubSourceBanners({
         page ? (overlayPendingOnTaskPagePages([page])[0] ?? []) : null
       )
     )
-  }, [githubMode, selectedWorkItemsCacheEntries, taskSource])
+  }, [githubMode, selectedWorkItemsCacheEntries, taskSource, setPages])
 
   // Why: one-time toast per repo when the 'upstream' preference fell back to origin (ref-gated); deliberately don't auto-reset the preference so re-adding upstream later still applies.
   const fellBackToastedRef = useRef<Set<string>>(new Set())
@@ -133,12 +133,12 @@ export function useTaskPageGitHubSourceBanners({
       })
       setTaskRefreshNonce((n) => n + 1)
     },
-    [perRepoSourceState]
+    [perRepoSourceState, setTaskRefreshNonce]
   )
   const handleRefreshGithubTasks = useCallback((): void => {
     setTasksRefreshing(true)
     setTaskRefreshNonce((current) => current + 1)
-  }, [])
+  }, [setTaskRefreshNonce, setTasksRefreshing])
 
   return {
     selectedWorkItemsCacheEntries,

@@ -156,7 +156,16 @@ export function useTaskPageCreateJiraSubmit({
     settings,
     setSelectedJiraIssue,
     visibleJiraCreateFields,
-    discardNewJiraIssueDraft
+    discardNewJiraIssueDraft,
+
+    providerRuntimeContextKeyRef,
+    setNewJiraIssueCustomFieldValues,
+    setNewJiraIssueBody,
+    setJiraIssues,
+    setNewJiraIssueOpen,
+    setNewJiraIssueTitle,
+    setJiraRefreshNonce,
+    setNewJiraIssueSubmitting
   ])
 
   return { handleCreateNewJiraIssue }

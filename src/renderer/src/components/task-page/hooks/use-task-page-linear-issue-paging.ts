@@ -131,7 +131,14 @@ export function useTaskPageLinearIssuePaging({
         setLinearIssuePage(page)
       }
     },
-    [linearProjectTab, selectedLinearCustomView?.model, selectedLinearProject]
+    [
+      linearProjectTab,
+      selectedLinearCustomView?.model,
+      selectedLinearProject,
+      setLinearProjectIssuePage,
+      setLinearIssuePage,
+      setLinearCustomViewIssuePage
+    ]
   )
 
   const setActiveLinearIssueLoadingTargetPage = useCallback(
@@ -144,7 +151,14 @@ export function useTaskPageLinearIssuePaging({
         setLinearIssueLoadingTargetPage(page)
       }
     },
-    [linearProjectTab, selectedLinearCustomView?.model, selectedLinearProject]
+    [
+      linearProjectTab,
+      selectedLinearCustomView?.model,
+      selectedLinearProject,
+      setLinearProjectIssueLoadingTargetPage,
+      setLinearIssueLoadingTargetPage,
+      setLinearCustomViewIssueLoadingTargetPage
+    ]
   )
 
   const ensureActiveLinearIssueLimit = useCallback(
@@ -158,7 +172,14 @@ export function useTaskPageLinearIssuePaging({
         setLinearIssueLimit((limit) => Math.max(limit, nextLimit))
       }
     },
-    [linearProjectTab, selectedLinearCustomView?.model, selectedLinearProject]
+    [
+      linearProjectTab,
+      selectedLinearCustomView?.model,
+      selectedLinearProject,
+      setLinearProjectIssueLimit,
+      setLinearIssueLimit,
+      setLinearCustomViewIssueLimit
+    ]
   )
 
   const handleLinearIssuePageChange = useCallback(

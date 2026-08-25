@@ -51,7 +51,7 @@ export function GitHubStatusDuplicatePicker({
       setOpen(false)
       setDuplicatePickerOpen(false)
     },
-    [handleStateChange, item.number]
+    [handleStateChange, item.number, setDuplicateError, setOpen, setDuplicatePickerOpen]
   )
 
   const handleDuplicateSearchSubmit = useCallback(() => {
@@ -61,7 +61,7 @@ export function GitHubStatusDuplicatePicker({
       return
     }
     closeAsDuplicate(validation.duplicateOf)
-  }, [closeAsDuplicate, duplicateSearch, item.number])
+  }, [closeAsDuplicate, duplicateSearch, item.number, setDuplicateError])
 
   return (
     <div>

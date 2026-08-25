@@ -449,7 +449,15 @@ export default function TaskPage(): React.JSX.Element {
       page: currentPage,
       scrollTop: githubListScrollTopRef.current
     }
-  }, [currentPage, githubMode, githubResumeContextKey, pageData.openGitHubWorkItem, taskSource])
+  }, [
+    currentPage,
+    githubMode,
+    githubResumeContextKey,
+    pageData.openGitHubWorkItem,
+    taskSource,
+    githubListScrollTopRef,
+    pendingGithubScrollRestoreRef
+  ])
 
   useEffect(
     () => () => {
@@ -482,7 +490,11 @@ export default function TaskPage(): React.JSX.Element {
     taskRefreshNonce,
     taskSource,
     githubMode,
-    taskResumeApplied
+    taskResumeApplied,
+
+    setPaginationLoading,
+    paginationGenerationRef,
+    setLoadingTargetPage
   ])
 
   // Why: the dialog's "Use" button routes through the same direct-launch flow as the row-level "Use" CTA so behavior is consistent regardless of entry point.
@@ -575,7 +587,16 @@ export default function TaskPage(): React.JSX.Element {
       }, 5_000)
     }
     return clearScheduledRestore
-  }, [currentPage, dialogWorkItem, githubResumeContextKey, pages])
+  }, [
+    currentPage,
+    dialogWorkItem,
+    githubResumeContextKey,
+    pages,
+    githubListScrollTopRef,
+    pendingGithubScrollRestoreRef,
+    githubListScrollRef.current?.scrollTop,
+    githubListScrollRef
+  ])
 
   const dialogRepoPath = dialogWorkItem ? (repoMap.get(dialogWorkItem.repoId)?.path ?? null) : null
   const dialogSourceContext = useMemo(() => {
@@ -636,7 +657,7 @@ export default function TaskPage(): React.JSX.Element {
 
   useEffect(() => {
     setGitlabDialogItem(pageData.openGitLabWorkItem ?? null)
-  }, [pageData.openGitLabWorkItem])
+  }, [pageData.openGitLabWorkItem, setGitlabDialogItem])
 
   const openGitHubDetailPage = useCallback(
     (item: GitHubWorkItem, initialTab: ItemDialogTab = 'conversation') => {
@@ -660,7 +681,15 @@ export default function TaskPage(): React.JSX.Element {
         { recordTasksInteraction: false }
       )
     },
-    [githubResumeContextKey, openTaskPage, repoMap]
+    [
+      githubResumeContextKey,
+      openTaskPage,
+      repoMap,
+      githubListScrollTopRef,
+      pendingGithubScrollRestoreRef,
+      currentPageRef,
+      githubListScrollRef.current?.scrollTop
+    ]
   )
 
   const openGitLabDetailPage = useCallback(
@@ -692,7 +721,7 @@ export default function TaskPage(): React.JSX.Element {
         return patchTaskPageGitHubWorkItemPages(current, itemKey, patch, shouldPatch)
       })
     },
-    []
+    [setPages]
   )
   const handleDialogReviewRequestsChange = useCallback(
     (itemKey: { id: string; repoId: string }, reviewRequests: GitHubAssignableUser[]): void => {
@@ -727,7 +756,7 @@ export default function TaskPage(): React.JSX.Element {
         page ? (overlayPendingOnTaskPagePages([page])[0] ?? []) : null
       )
     )
-  }, [githubMode, selectedWorkItemsCacheEntries, taskSource])
+  }, [githubMode, selectedWorkItemsCacheEntries, taskSource, setPages])
 
   // Why: one-time toast per repo when the 'upstream' preference fell back to origin (ref-gated); deliberately don't auto-reset the preference so re-adding upstream later still applies.
   const fellBackToastedRef = useRef<Set<string>>(new Set())
@@ -774,12 +803,12 @@ export default function TaskPage(): React.JSX.Element {
       })
       setTaskRefreshNonce((n) => n + 1)
     },
-    [perRepoSourceState]
+    [perRepoSourceState, setTaskRefreshNonce]
   )
   const handleRefreshGithubTasks = useCallback((): void => {
     setTasksRefreshing(true)
     setTaskRefreshNonce((current) => current + 1)
-  }, [])
+  }, [setTasksRefreshing, setTaskRefreshNonce])
   const {
     newIssueOpen,
     setNewIssueOpen,
@@ -1446,7 +1475,7 @@ export default function TaskPage(): React.JSX.Element {
       }
       setAppliedTaskSearch(scoped)
     },
-    [activeGithubTaskKind, appliedTaskSearch]
+    [activeGithubTaskKind, appliedTaskSearch, setAppliedTaskSearch, setTasksFiltering]
   )
   useGitHubTaskSearchCommit({
     enabled: taskResumeApplied,
@@ -1467,7 +1496,13 @@ export default function TaskPage(): React.JSX.Element {
       githubItemsPreset: activeTaskPreset,
       githubItemsQuery: appliedTaskSearch.trim()
     })
-  }, [activeTaskPreset, appliedTaskSearch, setTaskResumeState, taskResumeApplied])
+  }, [
+    activeTaskPreset,
+    appliedTaskSearch,
+    setTaskResumeState,
+    taskResumeApplied,
+    githubSearchPersistReadyRef
+  ])
 
   useTaskPageGitHubFetch({
     taskResumeApplied,
@@ -1577,7 +1612,16 @@ export default function TaskPage(): React.JSX.Element {
       setTasksFiltering(true)
       setTaskRefreshNonce((current) => current + 1)
     },
-    [activeGithubTaskKind, setTaskResumeState, taskSearchInput]
+    [
+      activeGithubTaskKind,
+      setTaskResumeState,
+      taskSearchInput,
+      setTaskSearchInput,
+      setActiveTaskPreset,
+      setTasksFiltering,
+      setAppliedTaskSearch,
+      setTaskRefreshNonce
+    ]
   )
 
   const handleApplyTaskSearch = useCallback((): void => {
@@ -1588,13 +1632,25 @@ export default function TaskPage(): React.JSX.Element {
     setTaskResumeState({ githubItemsPreset: null, githubItemsQuery: scoped })
     setTasksFiltering(true)
     setTaskRefreshNonce((current) => current + 1)
-  }, [activeGithubTaskKind, setTaskResumeState, taskSearchInput])
+  }, [
+    activeGithubTaskKind,
+    setTaskResumeState,
+    taskSearchInput,
+    setAppliedTaskSearch,
+    setTaskRefreshNonce,
+    setTaskSearchInput,
+    setActiveTaskPreset,
+    setTasksFiltering
+  ])
 
-  const handleTaskSearchChange = useCallback((event: React.ChangeEvent<HTMLInputElement>): void => {
-    const next = event.target.value
-    setTaskSearchInput(next)
-    setActiveTaskPreset(null)
-  }, [])
+  const handleTaskSearchChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>): void => {
+      const next = event.target.value
+      setTaskSearchInput(next)
+      setActiveTaskPreset(null)
+    },
+    [setTaskSearchInput, setActiveTaskPreset]
+  )
 
   const handleSetDefaultTaskPreset = useCallback(
     (presetId: TaskViewPresetId): void => {
@@ -1622,7 +1678,14 @@ export default function TaskPage(): React.JSX.Element {
       setTasksFiltering(true)
       setTaskRefreshNonce((current) => current + 1)
     },
-    [setTaskResumeState]
+    [
+      setTaskResumeState,
+      setAppliedTaskSearch,
+      setTaskRefreshNonce,
+      setTaskSearchInput,
+      setActiveTaskPreset,
+      setTasksFiltering
+    ]
   )
 
   const handleResetGithubTaskSearch = useCallback((): void => {
@@ -1700,7 +1763,9 @@ export default function TaskPage(): React.JSX.Element {
     newLinearProjectOpen,
     newLinearIssueOpen,
     newJiraIssueOpen,
-    taskSource
+    taskSource,
+
+    taskSearchInputRef
   ])
 
   const { handleUseWorkItem, handleOpenOrUseGitHubWorkItem, handleUseGitLabItem } =
@@ -1912,7 +1977,7 @@ export default function TaskPage(): React.JSX.Element {
       setAppliedLinearSearch(linearSearchInput)
     }, TASK_SEARCH_DEBOUNCE_MS)
     return () => window.clearTimeout(timeout)
-  }, [linearSearchInput, taskResumeApplied])
+  }, [linearSearchInput, taskResumeApplied, setAppliedLinearSearch])
 
   useEffect(() => {
     if (!taskResumeApplied) {
@@ -1923,7 +1988,7 @@ export default function TaskPage(): React.JSX.Element {
       return
     }
     setTaskResumeState({ linearQuery: appliedLinearSearch.trim() })
-  }, [appliedLinearSearch, setTaskResumeState, taskResumeApplied])
+  }, [appliedLinearSearch, setTaskResumeState, taskResumeApplied, linearSearchPersistReadyRef])
 
   useEffect(() => {
     if (!taskResumeApplied) {
@@ -1950,7 +2015,9 @@ export default function TaskPage(): React.JSX.Element {
     linearOrderBy,
     linearTeamPropertyTouched,
     linearViewMode,
-    taskResumeApplied
+    taskResumeApplied,
+
+    linearViewPersistReadyRef
   ])
 
   useEffect(() => {
@@ -1963,7 +2030,10 @@ export default function TaskPage(): React.JSX.Element {
     selectedLinearCustomView?.id,
     selectedLinearProject?.id,
     selectedLinearWorkspaceId,
-    taskSource
+    taskSource,
+    setLinearIssueLoadingTargetPage,
+    setLinearIssueLimit,
+    setLinearIssuePage
   ])
 
   useTaskPageLinearFetch({
@@ -2087,7 +2157,15 @@ export default function TaskPage(): React.JSX.Element {
     linearMode,
     linearRefreshNonce,
     linearTaskSourceContext,
+    inOrcaLinkedLinearRefsRef,
+    lastLinearRequestRef,
+    lastLinearRequestRef.current?.nonce,
+    lastLinearRequestRef.current?.signature,
     refreshLinearIssue,
+    setLinearError,
+    setLinearIssues,
+    setLinearIssuesHasMore,
+    setLinearLoading,
     selectedLinearWorkspaceId,
     taskResumeApplied,
     taskSource

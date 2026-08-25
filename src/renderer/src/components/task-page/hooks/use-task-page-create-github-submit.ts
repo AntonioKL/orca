@@ -197,7 +197,15 @@ export function useTaskPageCreateGithubSubmit({
     openGitHubDetailPage,
     setDialogWorkItem,
     clearNewIssueDraft,
-    setNewIssueDraft
+    setNewIssueDraft,
+
+    setNewIssueSubmitting,
+    setNewIssueBody,
+    setTaskRefreshNonce,
+    setNewIssueOpen,
+    setNewIssueAssignees,
+    setNewIssueTitle,
+    setNewIssueLabels
   ])
 
   return { handleCreateNewIssue }

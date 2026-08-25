@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { useAppStore } from '@/store'
@@ -74,7 +74,9 @@ export function useTaskPageStoreBindings() {
   const checkJiraConnection = useAppStore((s) => s.checkJiraConnection)
   const providerRuntimeContextKey = getProviderRuntimeContextKey(settings)
   const providerRuntimeContextKeyRef = useRef(providerRuntimeContextKey)
-  providerRuntimeContextKeyRef.current = providerRuntimeContextKey
+  useEffect(() => {
+    providerRuntimeContextKeyRef.current = providerRuntimeContextKey
+  }, [providerRuntimeContextKey])
   const linearStatusCurrent = linearStatusContextKey === providerRuntimeContextKey
   const jiraStatusCurrent = jiraStatusContextKey === providerRuntimeContextKey
   const preflightStatusCurrent = preflightStatusContextKey === expectedPreflightContextKey

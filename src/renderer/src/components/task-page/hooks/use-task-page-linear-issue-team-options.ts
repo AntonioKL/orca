@@ -98,7 +98,7 @@ export function useTaskPageLinearIssueTeamOptions({
     setLinearTeamSelection(
       reconcileLinearTeamSelection(linearTeamOptions, defaultLinearTeamSelection)
     )
-  }, [linearTeamOptions, defaultLinearTeamSelection])
+  }, [linearTeamOptions, defaultLinearTeamSelection, setLinearTeamSelection])
 
   const linearAttributePrimaryTeam = useMemo(
     () =>
@@ -120,7 +120,13 @@ export function useTaskPageLinearIssueTeamOptions({
       setLinearIssuePage(0)
       setLinearIssueLoadingTargetPage(null)
     },
-    [linearAttributeFilterWorkspaceId]
+    [
+      linearAttributeFilterWorkspaceId,
+      setLinearIssueLimit,
+      setLinearIssueFiltersByWorkspaceId,
+      setLinearIssuePage,
+      setLinearIssueLoadingTargetPage
+    ]
   )
 
   useEffect(() => {
@@ -151,7 +157,9 @@ export function useTaskPageLinearIssueTeamOptions({
     availableTeams.length,
     linearAttributeFilter,
     linearAttributeFilterWorkspaceId,
-    linearAttributePrimaryTeam?.id
+    linearAttributePrimaryTeam?.id,
+
+    linearPrimaryTeamRef
   ])
 
   return {

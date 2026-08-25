@@ -101,14 +101,17 @@ export function useTaskPageLinearListState({
   const landingLinearRefreshKeysRef = useRef<ReadonlySet<string>>(new Set())
   const linearContextResumeAttemptedRef = useRef(false)
 
-  const patchScopedLinearIssue = useCallback((issueId: string, patch: Partial<LinearIssue>) => {
-    const patchResult = (result: LinearCollectionResult<LinearIssue>) => ({
-      ...result,
-      items: result.items.map((item) => (item.id === issueId ? { ...item, ...patch } : item))
-    })
-    setLinearProjectIssuesResult(patchResult)
-    setLinearCustomViewIssuesResult(patchResult)
-  }, [])
+  const patchScopedLinearIssue = useCallback(
+    (issueId: string, patch: Partial<LinearIssue>) => {
+      const patchResult = (result: LinearCollectionResult<LinearIssue>) => ({
+        ...result,
+        items: result.items.map((item) => (item.id === issueId ? { ...item, ...patch } : item))
+      })
+      setLinearProjectIssuesResult(patchResult)
+      setLinearCustomViewIssuesResult(patchResult)
+    },
+    [setLinearProjectIssuesResult, setLinearCustomViewIssuesResult]
+  )
 
   const selectLinearMode = useCallback(
     (mode: LinearMode) => {
@@ -129,7 +132,23 @@ export function useTaskPageLinearListState({
       setLinearMode(mode)
       setTaskResumeState({ linearMode: mode, linearContext: undefined })
     },
-    [clearSelectedLinearIssue, setTaskResumeState]
+    [
+      clearSelectedLinearIssue,
+      setTaskResumeState,
+      setLinearProjectIssuesResult,
+      setSelectedLinearCustomView,
+      setLinearProjectParentView,
+      setLinearProjectIssueLimit,
+      setSelectedLinearProject,
+      setLinearCustomViewIssueLimit,
+      setLinearCustomViewProjectsResult,
+      setSelectedLinearProjectDetail,
+      setLinearCustomViewIssuesResult,
+      setLinearCustomViewIssuePage,
+      setLinearCustomViewIssueLoadingTargetPage,
+      setLinearProjectIssueLoadingTargetPage,
+      setLinearProjectIssuePage
+    ]
   )
 
   return {

@@ -80,7 +80,15 @@ export function useTaskPageGitHubListResume({
       page: currentPage,
       scrollTop: githubListScrollTopRef.current
     }
-  }, [currentPage, githubMode, githubResumeContextKey, openGitHubWorkItem, taskSource])
+  }, [
+    currentPage,
+    githubMode,
+    githubResumeContextKey,
+    openGitHubWorkItem,
+    taskSource,
+    githubListScrollTopRef,
+    pendingGithubScrollRestoreRef
+  ])
 
   useEffect(
     () => () => {
@@ -113,7 +121,11 @@ export function useTaskPageGitHubListResume({
     taskRefreshNonce,
     taskSource,
     githubMode,
-    taskResumeApplied
+    taskResumeApplied,
+
+    setPaginationLoading,
+    paginationGenerationRef,
+    setLoadingTargetPage
   ])
 
   useLayoutEffect(() => {
@@ -175,7 +187,16 @@ export function useTaskPageGitHubListResume({
       }, 5_000)
     }
     return clearScheduledRestore
-  }, [currentPage, dialogWorkItem, githubResumeContextKey, pages])
+  }, [
+    currentPage,
+    dialogWorkItem,
+    githubResumeContextKey,
+    pages,
+    githubListScrollRef.current?.scrollTop,
+    githubListScrollRef,
+    githubListScrollTopRef,
+    pendingGithubScrollRestoreRef
+  ])
 
   return {
     taskListPositionRef

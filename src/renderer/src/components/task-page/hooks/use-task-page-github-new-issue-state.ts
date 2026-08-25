@@ -4,10 +4,7 @@ import { useAppStore } from '@/store'
 import { getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
 import { getSettingsForRepoRuntimeOwner } from '@/lib/repo-runtime-owner'
 import { useRepoAssignees, useRepoLabels } from '@/hooks/useIssueMetadata'
-import {
-  isNewIssueDraftContentful,
-  resolveVanishedNewIssueRepoReset
-} from '@/components/task-page-new-issue-draft'
+import { isNewIssueDraftContentful } from '@/components/task-page-new-issue-draft'
 import { getTaskPageRepoSourceContext } from '@/components/task-page/source/repo-source-context'
 import { getTaskSourceRuntimeSettings } from '../../../../../shared/task-source-context'
 import type { GitHubAssignableUser } from '../../../../../shared/github/pull-request-types'
@@ -29,15 +26,27 @@ export function useTaskPageGitHubNewIssueState({
   const [newIssueLabels, setNewIssueLabels] = useState<string[]>([])
   const [newIssueAssignees, setNewIssueAssignees] = useState<GitHubAssignableUser[]>([])
   const [newIssueSubmitting, setNewIssueSubmitting] = useState(false)
-  const [newIssueRepoId, setNewIssueRepoId] = useState<string | null>(null)
+  const [newIssueRepoId, setNewIssueRepoIdState] = useState<string | null>(null)
   // Why: session-only draft recovers an in-progress issue across dismissal/remount; read imperatively (not subscribed) so per-keystroke writes don't re-render all of TaskPage.
   const setNewIssueDraft = useAppStore((s) => s.setNewIssueDraft)
   const clearNewIssueDraft = useAppStore((s) => s.clearNewIssueDraft)
+  const newIssueRepoSelected = selectedRepos.some((repo) => repo.id === newIssueRepoId)
+  const effectiveNewIssueRepoId = newIssueRepoSelected
+    ? newIssueRepoId
+    : (selectedRepos[0]?.id ?? null)
+  const effectiveNewIssueLabels = useMemo(
+    () => (newIssueRepoSelected ? newIssueLabels : []),
+    [newIssueRepoSelected, newIssueLabels]
+  )
+  const effectiveNewIssueAssignees = useMemo(
+    () => (newIssueRepoSelected ? newIssueAssignees : []),
+    [newIssueRepoSelected, newIssueAssignees]
+  )
 
   // Why: fall back to the first selected repo if the chosen id drops from the selection mid-dialog, so submit always has a valid target.
   const newIssueTargetRepo = useMemo(
-    () => selectedRepos.find((r) => r.id === newIssueRepoId) ?? selectedRepos[0] ?? null,
-    [selectedRepos, newIssueRepoId]
+    () => selectedRepos.find((r) => r.id === effectiveNewIssueRepoId) ?? null,
+    [selectedRepos, effectiveNewIssueRepoId]
   )
   const newIssueSourceContext = useMemo(
     () => getTaskPageRepoSourceContext(newIssueTargetRepo, 'github'),
@@ -75,19 +84,14 @@ export function useTaskPageGitHubNewIssueState({
     { runtimeEnvironmentId: newIssueOpen ? (newIssueRuntimeTarget?.environmentId ?? null) : null }
   )
 
-  // Why: only handles the "chosen repo vanished" case; a reactive clear keyed on target id can't tell a restore from a user switch and would wipe the recovery draft.
-  useEffect(() => {
-    const reset = resolveVanishedNewIssueRepoReset(
-      newIssueRepoId,
-      selectedRepos.map((r) => r.id)
-    )
-    if (!reset) {
+  const setNewIssueRepoId = (repoId: string | null): void => {
+    setNewIssueRepoIdState(repoId)
+    if (repoId === newIssueRepoId || selectedRepos.some((repo) => repo.id === repoId)) {
       return
     }
     setNewIssueLabels([])
     setNewIssueAssignees([])
-    setNewIssueRepoId(reset.repoId)
-  }, [newIssueRepoId, selectedRepos])
+  }
 
   // Why: content-gated mirror of live fields into the session draft while the modal is open, so dismissal doesn't lose input.
   useEffect(() => {
@@ -98,16 +102,16 @@ export function useTaskPageGitHubNewIssueState({
       isNewIssueDraftContentful({
         title: newIssueTitle,
         body: newIssueBody,
-        labels: newIssueLabels,
-        assignees: newIssueAssignees
+        labels: effectiveNewIssueLabels,
+        assignees: effectiveNewIssueAssignees
       })
     ) {
       setNewIssueDraft({
         title: newIssueTitle,
         body: newIssueBody,
-        labels: newIssueLabels,
-        assignees: newIssueAssignees,
-        repoId: newIssueRepoId
+        labels: effectiveNewIssueLabels,
+        assignees: effectiveNewIssueAssignees,
+        repoId: effectiveNewIssueRepoId
       })
     } else {
       clearNewIssueDraft()
@@ -116,9 +120,9 @@ export function useTaskPageGitHubNewIssueState({
     newIssueOpen,
     newIssueTitle,
     newIssueBody,
-    newIssueLabels,
-    newIssueAssignees,
-    newIssueRepoId,
+    effectiveNewIssueLabels,
+    effectiveNewIssueAssignees,
+    effectiveNewIssueRepoId,
     setNewIssueDraft,
     clearNewIssueDraft
   ])
@@ -130,13 +134,13 @@ export function useTaskPageGitHubNewIssueState({
     setNewIssueTitle,
     newIssueBody,
     setNewIssueBody,
-    newIssueLabels,
+    newIssueLabels: effectiveNewIssueLabels,
     setNewIssueLabels,
-    newIssueAssignees,
+    newIssueAssignees: effectiveNewIssueAssignees,
     setNewIssueAssignees,
     newIssueSubmitting,
     setNewIssueSubmitting,
-    newIssueRepoId,
+    newIssueRepoId: effectiveNewIssueRepoId,
     setNewIssueRepoId,
     setNewIssueDraft,
     clearNewIssueDraft,

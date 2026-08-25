@@ -127,11 +127,7 @@ export function useTaskPageGitHubDetailOpeners({
     }
     setGithubMode('items')
     setDialogWorkItem(pageData.openGitHubWorkItem, pageData.openGitHubInitialTab)
-  }, [pageData.openGitHubInitialTab, pageData.openGitHubWorkItem, setDialogWorkItem])
-
-  useEffect(() => {
-    setGitlabDialogItem(pageData.openGitLabWorkItem ?? null)
-  }, [pageData.openGitLabWorkItem])
+  }, [pageData.openGitHubInitialTab, pageData.openGitHubWorkItem, setDialogWorkItem, setGithubMode])
 
   const openGitHubDetailPage = useCallback(
     (item: GitHubWorkItem, initialTab: ItemDialogTab = 'conversation') => {
@@ -155,7 +151,16 @@ export function useTaskPageGitHubDetailOpeners({
         { recordTasksInteraction: false }
       )
     },
-    [githubResumeContextKey, openTaskPage, repoMap]
+    [
+      githubResumeContextKey,
+      openTaskPage,
+      repoMap,
+      taskListPositionRef,
+      currentPageRef,
+      githubListScrollRef.current?.scrollTop,
+      githubListScrollTopRef,
+      pendingGithubScrollRestoreRef
+    ]
   )
 
   const openGitLabDetailPage = useCallback(
@@ -187,7 +192,7 @@ export function useTaskPageGitHubDetailOpeners({
         return patchTaskPageGitHubWorkItemPages(current, itemKey, patch, shouldPatch)
       })
     },
-    []
+    [setPages]
   )
   const handleDialogReviewRequestsChange = useCallback(
     (itemKey: { id: string; repoId: string }, reviewRequests: GitHubAssignableUser[]): void => {

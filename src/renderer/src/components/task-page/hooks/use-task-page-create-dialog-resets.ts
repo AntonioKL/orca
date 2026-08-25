@@ -97,5 +97,34 @@ export function useTaskPageCreateDialogResets({
     setJiraCreateFieldsError(null)
     setNewJiraIssueCustomFieldValues({})
     setNewJiraIssueSubmitting(false)
-  }, [providerRuntimeContextKey])
+  }, [
+    providerRuntimeContextKey,
+    setNewLinearIssueTitle,
+    setNewLinearIssuePriority,
+    setNewJiraIssueProjectQuery,
+    setNewLinearIssueProjectsLoading,
+    setJiraIssueTypesLoading,
+    setJiraCreateFieldsLoading,
+    setJiraCreateFieldsError,
+    setJiraCreateFields,
+    setNewLinearIssueSubmitting,
+    setNewLinearIssueOpen,
+    setNewJiraIssueProjectComboboxOpen,
+    setNewLinearIssueStateId,
+    setNewLinearIssueBody,
+    setNewJiraIssueCustomFieldValues,
+    setNewJiraIssueProjectCommandValue,
+    setNewLinearIssueTeamId,
+    setNewJiraIssueBody,
+    setNewLinearIssueAssigneeId,
+    setNewJiraIssueOpen,
+    setNewJiraIssueTitle,
+    setNewJiraIssueTypeId,
+    setNewJiraIssueSubmitting,
+    setNewLinearIssueProjects,
+    setAvailableJiraIssueTypes,
+    setNewLinearIssueLabelIds,
+    setNewJiraIssueProjectId,
+    setNewLinearIssueProjectId
+  ])
 }

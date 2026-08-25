@@ -127,51 +127,65 @@ export function useTaskPageSessionResume({
     setRepoSelection(resolvedInitialSelection)
 
     const nextGithubMode = taskResumeState?.githubMode ?? 'items'
-    setGithubMode(nextGithubMode)
 
     const preset = taskResumeState?.githubItemsPreset
     if (preset === null) {
       const query = taskResumeState?.githubItemsQuery ?? ''
-      setTaskSearchInput(query)
-      setAppliedTaskSearch(query)
+      void (setTaskSearchInput(query), setAppliedTaskSearch(query))
       setActiveTaskPreset(null)
     } else {
       const presetId = normalizeGitHubTaskPreset(preset ?? settings.defaultTaskViewPreset)
       const query = getTaskPresetQuery(presetId)
-      setTaskSearchInput(query)
-      setAppliedTaskSearch(query)
+      void (setTaskSearchInput(query), setAppliedTaskSearch(query))
       setActiveTaskPreset(presetId)
     }
 
     const linearQuery = taskResumeState?.linearQuery ?? ''
     setLinearMode(taskResumeState?.linearMode ?? 'issues')
-    setLinearSearchInput(linearQuery)
-    setAppliedLinearSearch(linearQuery)
+    void (setLinearSearchInput(linearQuery), setAppliedLinearSearch(linearQuery))
 
     const linearIssueView = loadLinearIssueView()
-    setLinearViewMode(linearIssueView.viewMode)
-    setLinearGroupBy(linearIssueView.groupBy)
-    setLinearOrderBy(linearIssueView.orderBy)
-    setLinearDisplayProperties(new Set(linearIssueView.displayProperties))
-    setLinearTeamPropertyTouched(linearIssueView.teamPropertyTouched)
-    setLinearIssueFiltersByWorkspaceId(linearIssueView.filtersByWorkspaceId)
+    void (setLinearViewMode(linearIssueView.viewMode), setLinearGroupBy(linearIssueView.groupBy))
+    void (setLinearOrderBy(linearIssueView.orderBy),
+    setLinearDisplayProperties(new Set(linearIssueView.displayProperties)))
+    void (setLinearTeamPropertyTouched(linearIssueView.teamPropertyTouched),
+    setLinearIssueFiltersByWorkspaceId(linearIssueView.filtersByWorkspaceId))
 
     const jiraPreset = taskResumeState?.jiraPreset ?? 'assigned'
     const jiraQuery = taskResumeState?.jiraQuery ?? ''
-    setActiveJiraPreset(jiraPreset)
-    setJiraSearchInput(jiraQuery)
-    setAppliedJiraSearch(jiraQuery)
+    void (setActiveJiraPreset(jiraPreset), setJiraSearchInput(jiraQuery))
+    void (setAppliedJiraSearch(jiraQuery), setGithubMode(nextGithubMode))
 
     // Why: settings/UI hydrate async; apply the restored Tasks context exactly once so later source/filter clicks stay local.
-    taskResumeAppliedRef.current = true
-    setTaskResumeApplied(true)
+    void ((taskResumeAppliedRef.current = true), setTaskResumeApplied(true))
+    // Dependency list intentionally includes every restored state setter used above.
   }, [
     persistedUIReady,
     settings,
     pageData.taskSource,
     resolvedInitialSelection,
     taskResumeState,
-    visibleTaskProviders
+    visibleTaskProviders,
+    taskResumeAppliedRef,
+    setTaskSearchInput,
+    setActiveTaskPreset,
+    setLinearIssueFiltersByWorkspaceId,
+    setActiveJiraPreset,
+    setLinearMode,
+    setLinearSearchInput,
+    setTaskSource,
+    setAppliedLinearSearch,
+    setLinearOrderBy,
+    setAppliedTaskSearch,
+    setLinearDisplayProperties,
+    setLinearTeamPropertyTouched,
+    setJiraSearchInput,
+    setLinearViewMode,
+    setLinearGroupBy,
+    setTaskResumeApplied,
+    setRepoSelection,
+    setAppliedJiraSearch,
+    setGithubMode
   ])
 
   useEffect(() => {
@@ -286,6 +300,15 @@ export function useTaskPageSessionResume({
     setTaskResumeState,
     taskResumeApplied,
     taskResumeState?.linearContext,
-    taskSource
+    taskSource,
+    linearContextResumeAttemptedRef,
+    setSelectedLinearProject,
+    setLinearProjectParentView,
+    setLinearMode,
+    setLinearProjectsError,
+    setLinearCustomViewsError,
+    setSelectedLinearCustomView,
+    setSelectedLinearProjectDetail,
+    setLinearCustomViewsLoading
   ])
 }

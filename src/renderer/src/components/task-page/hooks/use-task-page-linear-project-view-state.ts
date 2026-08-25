@@ -108,7 +108,7 @@ export function useTaskPageLinearProjectViewState({
         linearContext: { kind: 'project', id: project.id, workspaceId: project.workspaceId }
       })
     },
-    [clearSelectedLinearIssue, setTaskResumeState]
+    [clearSelectedLinearIssue, setTaskResumeState, setLinearMode]
   )
 
   const openLinearCustomViewContext = useCallback(
@@ -147,7 +147,7 @@ export function useTaskPageLinearProjectViewState({
         }
       })
     },
-    [clearSelectedLinearIssue, setTaskResumeState]
+    [clearSelectedLinearIssue, setTaskResumeState, setLinearMode]
   )
 
   return {

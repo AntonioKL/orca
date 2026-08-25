@@ -89,7 +89,7 @@ export function useTaskPageJiraFetch({
       setAppliedJiraSearch(jiraSearchInput)
     }, TASK_SEARCH_DEBOUNCE_MS)
     return () => window.clearTimeout(timeout)
-  }, [jiraSearchInput, taskResumeApplied])
+  }, [jiraSearchInput, taskResumeApplied, setAppliedJiraSearch])
 
   useEffect(() => {
     if (!taskResumeApplied) {
@@ -100,7 +100,7 @@ export function useTaskPageJiraFetch({
       return
     }
     setTaskResumeState({ jiraQuery: appliedJiraSearch.trim() })
-  }, [appliedJiraSearch, setTaskResumeState, taskResumeApplied])
+  }, [appliedJiraSearch, setTaskResumeState, taskResumeApplied, jiraSearchPersistReadyRef])
 
   useEffect(() => {
     if (!taskResumeApplied) {
@@ -209,6 +209,9 @@ export function useTaskPageJiraFetch({
     selectedJiraIssueFallback,
     selectedJiraIssueKey,
     taskResumeApplied,
-    taskSource
+    taskSource,
+
+    setSelectedJiraIssueFallback,
+    setSelectedJiraIssueKey
   ])
 }

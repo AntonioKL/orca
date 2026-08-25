@@ -221,7 +221,24 @@ export function useTaskPageCreateLinearSubmits({
     openLinearProjectContext,
     linearTaskSourceContext,
     settings,
-    discardNewLinearProjectDraft
+    discardNewLinearProjectDraft,
+
+    setNewLinearProjectLabelIds,
+    setNewLinearProjectStartDate,
+    setLinearProjectsResult,
+    setSelectedLinearProjectDetail,
+    setNewLinearProjectPriority,
+    setNewLinearProjectOpen,
+    setAppliedLinearProjectSearch,
+    setLinearProjectSearchInput,
+    setNewLinearProjectContent,
+    setNewLinearProjectTargetDate,
+    setNewLinearProjectLeadId,
+    setNewLinearProjectSubmitting,
+    setNewLinearProjectName,
+    setNewLinearProjectDescription,
+    setNewLinearProjectMemberIds,
+    setLinearRefreshNonce
   ])
 
   const handleCreateNewLinearIssue = useCallback(async (): Promise<void> => {
@@ -338,7 +355,19 @@ export function useTaskPageCreateLinearSubmits({
     setSelectedLinearIssue,
     linearTaskSourceContext,
     settings,
-    discardNewLinearIssueDraft
+    discardNewLinearIssueDraft,
+
+    setNewLinearIssueTitle,
+    setNewLinearIssueStateId,
+    providerRuntimeContextKeyRef,
+    setNewLinearIssueOpen,
+    setNewLinearIssueAssigneeId,
+    setNewLinearIssueBody,
+    setNewLinearIssueSubmitting,
+    setNewLinearIssueLabelIds,
+    setNewLinearIssuePriority,
+    setNewLinearIssueProjectId,
+    setLinearRefreshNonce
   ])
 
   return { handleCreateNewLinearProject, handleCreateNewLinearIssue }

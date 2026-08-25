@@ -83,11 +83,11 @@ export function useTaskPageGitHubMutationSession({
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [setGitHubViewerLogin])
 
   const scheduleQuietRevalidate = useCallback(() => {
     setQuietRefreshNonce((current) => current + 1)
-  }, [])
+  }, [setQuietRefreshNonce])
 
   const patchCoordinatedGitHubWorkItem = useCallback(
     (...args: Parameters<TaskPageGitHubPatchWorkItem>): void => {

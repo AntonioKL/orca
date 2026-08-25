@@ -81,10 +81,12 @@ export function useTaskPageGitHubQuietRevalidate({
     queryKey: githubWorkItemMutationQueryKey,
     generation: 0
   })
-  quietRevalidateScopeRef.current = advanceTaskPageQuietRevalidateScope(
-    quietRevalidateScopeRef.current,
-    githubWorkItemMutationQueryKey
-  )
+  useEffect(() => {
+    quietRevalidateScopeRef.current = advanceTaskPageQuietRevalidateScope(
+      quietRevalidateScopeRef.current,
+      githubWorkItemMutationQueryKey
+    )
+  }, [githubWorkItemMutationQueryKey])
 
   // Why: dedicated quiet revalidate path (K23) — never tasksFiltering / skeleton,
   // never blanks pages, never bumps taskRefreshNonce. Single-flight with backoff

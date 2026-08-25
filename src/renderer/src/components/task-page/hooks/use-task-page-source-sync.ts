@@ -39,7 +39,7 @@ export function useTaskPageSourceSync({
       }
       setTaskSource(resolveVisibleTaskProvider(pageData.taskSource, visibleTaskProviders))
     }
-  }, [pageData.taskSource, visibleTaskProviders])
+  }, [pageData.taskSource, visibleTaskProviders, setTaskSource])
 
   useEffect(() => {
     if (taskSourceManuallyChangedRef.current) {
@@ -49,13 +49,13 @@ export function useTaskPageSourceSync({
     if (visibleTaskProviders.includes(preferredTaskSource) && taskSource !== preferredTaskSource) {
       setTaskSource(preferredTaskSource)
     }
-  }, [preferredTaskSource, taskSource, visibleTaskProviders])
+  }, [preferredTaskSource, taskSource, visibleTaskProviders, setTaskSource])
 
   useEffect(() => {
     if (!visibleTaskProviders.includes(taskSource)) {
       setTaskSource(resolveVisibleTaskProvider(settings?.defaultTaskSource, visibleTaskProviders))
     }
-  }, [settings?.defaultTaskSource, taskSource, visibleTaskProviders])
+  }, [settings?.defaultTaskSource, taskSource, visibleTaskProviders, setTaskSource])
 
   return {
     taskSourceManuallyChangedRef,

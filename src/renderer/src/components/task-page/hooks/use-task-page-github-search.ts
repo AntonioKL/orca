@@ -81,7 +81,7 @@ export function useTaskPageGitHubSearch({
       }
       setAppliedTaskSearch(scoped)
     },
-    [activeGithubTaskKind, appliedTaskSearch]
+    [activeGithubTaskKind, appliedTaskSearch, setTasksFiltering, setAppliedTaskSearch]
   )
   useGitHubTaskSearchCommit({
     enabled: taskResumeApplied,
@@ -102,7 +102,13 @@ export function useTaskPageGitHubSearch({
       githubItemsPreset: activeTaskPreset,
       githubItemsQuery: appliedTaskSearch.trim()
     })
-  }, [activeTaskPreset, appliedTaskSearch, setTaskResumeState, taskResumeApplied])
+  }, [
+    activeTaskPreset,
+    appliedTaskSearch,
+    setTaskResumeState,
+    taskResumeApplied,
+    githubSearchPersistReadyRef
+  ])
 
   const applyPRFilterChange = useCallback(
     (change: PRFilterChange): void => {
@@ -148,7 +154,16 @@ export function useTaskPageGitHubSearch({
       setTasksFiltering(true)
       setTaskRefreshNonce((current) => current + 1)
     },
-    [activeGithubTaskKind, setTaskResumeState, taskSearchInput]
+    [
+      activeGithubTaskKind,
+      setTaskResumeState,
+      taskSearchInput,
+      setTasksFiltering,
+      setAppliedTaskSearch,
+      setTaskSearchInput,
+      setTaskRefreshNonce,
+      setActiveTaskPreset
+    ]
   )
 
   const handleApplyTaskSearch = useCallback((): void => {
@@ -159,13 +174,25 @@ export function useTaskPageGitHubSearch({
     setTaskResumeState({ githubItemsPreset: null, githubItemsQuery: scoped })
     setTasksFiltering(true)
     setTaskRefreshNonce((current) => current + 1)
-  }, [activeGithubTaskKind, setTaskResumeState, taskSearchInput])
+  }, [
+    activeGithubTaskKind,
+    setTaskResumeState,
+    taskSearchInput,
+    setAppliedTaskSearch,
+    setTasksFiltering,
+    setTaskSearchInput,
+    setActiveTaskPreset,
+    setTaskRefreshNonce
+  ])
 
-  const handleTaskSearchChange = useCallback((event: ChangeEvent<HTMLInputElement>): void => {
-    const next = event.target.value
-    setTaskSearchInput(next)
-    setActiveTaskPreset(null)
-  }, [])
+  const handleTaskSearchChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>): void => {
+      const next = event.target.value
+      setTaskSearchInput(next)
+      setActiveTaskPreset(null)
+    },
+    [setActiveTaskPreset, setTaskSearchInput]
+  )
 
   const handleSetDefaultTaskPreset = useCallback(
     (presetId: TaskViewPresetId): void => {
@@ -193,7 +220,14 @@ export function useTaskPageGitHubSearch({
       setTasksFiltering(true)
       setTaskRefreshNonce((current) => current + 1)
     },
-    [setTaskResumeState]
+    [
+      setTaskResumeState,
+      setTasksFiltering,
+      setAppliedTaskSearch,
+      setTaskRefreshNonce,
+      setTaskSearchInput,
+      setActiveTaskPreset
+    ]
   )
 
   const handleResetGithubTaskSearch = useCallback((): void => {
@@ -271,7 +305,9 @@ export function useTaskPageGitHubSearch({
     newLinearProjectOpen,
     newLinearIssueOpen,
     newJiraIssueOpen,
-    taskSource
+    taskSource,
+
+    taskSearchInputRef
   ])
 
   return {

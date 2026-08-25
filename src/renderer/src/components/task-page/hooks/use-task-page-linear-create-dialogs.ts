@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type SetStateAction } from 'react'
 
 import { useTaskCreationDraftRetention } from '@/components/use-task-creation-draft-retention'
 import { useTeamLabels, useTeamMembers, useTeamStates } from '@/hooks/useIssueMetadata'
@@ -32,7 +32,7 @@ export function useTaskPageLinearCreateDialogs({
   const [newLinearProjectName, setNewLinearProjectName] = useState('')
   const [newLinearProjectDescription, setNewLinearProjectDescription] = useState('')
   const [newLinearProjectContent, setNewLinearProjectContent] = useState('')
-  const [newLinearProjectTeamId, setNewLinearProjectTeamId] = useState<string | null>(null)
+  const [newLinearProjectTeamId, setNewLinearProjectTeamIdState] = useState<string | null>(null)
   const [newLinearProjectLeadId, setNewLinearProjectLeadId] = useState<string | null>(null)
   const [newLinearProjectMemberIds, setNewLinearProjectMemberIds] = useState<string[]>([])
   const [newLinearProjectLabelIds, setNewLinearProjectLabelIds] = useState<string[]>([])
@@ -56,11 +56,12 @@ export function useTaskPageLinearCreateDialogs({
     newLinearProjectTargetTeam?.workspaceId
   )
 
-  useEffect(() => {
+  const setNewLinearProjectTeamId = (id: string | null): void => {
+    setNewLinearProjectTeamIdState(id)
     setNewLinearProjectLeadId(null)
     setNewLinearProjectMemberIds([])
     setNewLinearProjectLabelIds([])
-  }, [newLinearProjectTargetTeam?.id, newLinearProjectTargetTeam?.workspaceId])
+  }
 
   const discardNewLinearProjectDraft = useTaskCreationDraftRetention({
     open: newLinearProjectOpen,
@@ -76,7 +77,7 @@ export function useTaskPageLinearCreateDialogs({
   const [newLinearIssueOpen, setNewLinearIssueOpen] = useState(false)
   const [newLinearIssueTitle, setNewLinearIssueTitle] = useState('')
   const [newLinearIssueBody, setNewLinearIssueBody] = useState('')
-  const [newLinearIssueTeamId, setNewLinearIssueTeamId] = useState<string | null>(null)
+  const [newLinearIssueTeamId, setNewLinearIssueTeamIdState] = useState<string | null>(null)
   const [newLinearIssueSubmitting, setNewLinearIssueSubmitting] = useState(false)
 
   const [newLinearIssueStateId, setNewLinearIssueStateId] = useState<string | null>(null)
@@ -137,26 +138,20 @@ export function useTaskPageLinearCreateDialogs({
     selectedLinearWorkspaceId
   ])
 
-  useEffect(() => {
-    // Why: the selected team can change indirectly when the Linear teams/workspace list refreshes, even if the picker value didn't.
+  const setNewLinearIssueTeamId = (value: SetStateAction<string | null>): void => {
+    const id = typeof value === 'function' ? value(newLinearIssueTeamId) : value
+    setNewLinearIssueTeamIdState(id)
     setNewLinearIssueStateId(null)
     setNewLinearIssueAssigneeId(null)
     setNewLinearIssuePriority(0)
-    if (
-      selectedLinearProject &&
-      selectedLinearProject.workspaceId === newLinearIssueTargetTeam?.workspaceId
-    ) {
-      setNewLinearIssueProjectId(selectedLinearProject.id)
-    } else {
-      setNewLinearIssueProjectId(null)
-    }
+    const targetTeam = availableTeams.find((team) => team.id === id) ?? availableTeams[0]
+    setNewLinearIssueProjectId(
+      selectedLinearProject?.workspaceId === targetTeam?.workspaceId
+        ? (selectedLinearProject?.id ?? null)
+        : null
+    )
     setNewLinearIssueLabelIds([])
-  }, [
-    newLinearIssueTargetTeam?.id,
-    newLinearIssueTargetTeam?.workspaceId,
-    selectedLinearProject?.id,
-    selectedLinearProject?.workspaceId
-  ])
+  }
 
   const newLinearStates = useTeamStates(
     linearConnected ? newLinearIssueTargetTeam?.id || null : null,

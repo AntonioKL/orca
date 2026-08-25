@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 
 import { useAppStore } from '@/store'
@@ -23,10 +23,10 @@ export function useTaskPageSelectedIssueState({
   openTaskPage: AppState['openTaskPage']
   setDialogWorkItem: (item: GitHubWorkItem | null) => void
 }) {
-  const [selectedLinearIssueId, setSelectedLinearIssueId] = useState<string | null>(null)
-  const [selectedLinearIssueFallback, setSelectedLinearIssueFallback] =
+  const [selectedLinearIssueIdState, setSelectedLinearIssueId] = useState<string | null>(null)
+  const [selectedLinearIssueFallbackState, setSelectedLinearIssueFallback] =
     useState<LinearIssue | null>(null)
-  const [selectedLinearIssueCanFloat, setSelectedLinearIssueCanFloat] = useState(false)
+  const [selectedLinearIssueCanFloatState, setSelectedLinearIssueCanFloat] = useState(false)
 
   // Why: subscribe to just the Linear caches so list and inline detail reflect optimistic cell edits without a second cache.
   const linearCacheSnapshot = useAppStore(
@@ -40,8 +40,13 @@ export function useTaskPageSelectedIssueState({
     linearCacheSnapshot.issueCache,
     linearCacheSnapshot.searchCache,
     linearCacheSnapshot.listCache,
-    selectedLinearIssueId
+    pageData.openLinearIssue?.id ?? selectedLinearIssueIdState
   )
+  const selectedLinearIssueId = pageData.openLinearIssue?.id ?? selectedLinearIssueIdState
+  const selectedLinearIssueFallback = pageData.openLinearIssue ?? selectedLinearIssueFallbackState
+  const selectedLinearIssueCanFloat = pageData.openLinearIssue
+    ? true
+    : selectedLinearIssueCanFloatState
   const selectedLinearIssue = selectedLinearIssueId
     ? (cachedSelectedLinearIssue ?? selectedLinearIssueFallback)
     : null
@@ -75,14 +80,6 @@ export function useTaskPageSelectedIssueState({
     setSelectedLinearIssueId(null)
     setSelectedLinearIssueFallback(null)
   }, [])
-
-  useEffect(() => {
-    if (!pageData.openLinearIssue) {
-      clearSelectedLinearIssue()
-      return
-    }
-    setSelectedLinearIssue(pageData.openLinearIssue, { allowOutsideList: true })
-  }, [clearSelectedLinearIssue, pageData.openLinearIssue, setSelectedLinearIssue])
 
   const openLinearDetailPage = useCallback(
     (issue: LinearIssue) => {
@@ -134,8 +131,12 @@ export function useTaskPageSelectedIssueState({
     }))
   }, [clearSelectedLinearIssue, setDialogWorkItem])
 
-  const [selectedJiraIssueKey, setSelectedJiraIssueKey] = useState<string | null>(null)
-  const [selectedJiraIssueFallback, setSelectedJiraIssueFallback] = useState<JiraIssue | null>(null)
+  const [selectedJiraIssueKeyState, setSelectedJiraIssueKey] = useState<string | null>(null)
+  const [selectedJiraIssueFallbackState, setSelectedJiraIssueFallback] = useState<JiraIssue | null>(
+    null
+  )
+  const selectedJiraIssueKey = pageData.openJiraIssue?.key ?? selectedJiraIssueKeyState
+  const selectedJiraIssueFallback = pageData.openJiraIssue ?? selectedJiraIssueFallbackState
   const jiraCacheSnapshot = useAppStore(
     useShallow((s) => ({
       issueCache: s.jiraIssueCache,
@@ -175,10 +176,6 @@ export function useTaskPageSelectedIssueState({
     setSelectedJiraIssueKey(issue?.key ?? null)
     setSelectedJiraIssueFallback(issue)
   }, [])
-
-  useEffect(() => {
-    setSelectedJiraIssue(pageData.openJiraIssue ?? null)
-  }, [pageData.openJiraIssue, setSelectedJiraIssue])
 
   const openJiraDetailPage = useCallback(
     (issue: JiraIssue) => {
