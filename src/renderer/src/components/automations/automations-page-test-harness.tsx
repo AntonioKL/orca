@@ -302,6 +302,55 @@ export const RUNTIME_SELF_FILTER = {
   }
 }
 
+/** The scoped-list shape every self-owned host answers with. */
+function selfScopedList(automations: Automation[]): Record<string, unknown> {
+  return {
+    automations,
+    items: automations.map((automation) => ({
+      automationId: automation.id,
+      selector: { kind: 'self' }
+    })),
+    orphanCount: 0
+  }
+}
+
+/** The local authority's automation RPC surface, served from the same programmable
+ *  `api.automations` mocks; an environment target answers from `runtimeHost()` state. */
+async function answerAutomationRpc(
+  target: unknown,
+  method: string,
+  params?: unknown
+): Promise<unknown> {
+  if ((target as { kind?: string } | null)?.kind === 'environment') {
+    const answers = mocks.state.runtimeAnswers as
+      | { automations: Automation[]; runs: AutomationRun[] }
+      | undefined
+    if (method === 'automation.list') {
+      return selfScopedList(answers?.automations ?? [])
+    }
+    return method === 'automation.runs' ? { runs: answers?.runs ?? [] } : {}
+  }
+  const args = params as Record<string, unknown> | undefined
+  switch (method) {
+    case 'automation.list':
+      return args?.selector
+        ? await api.automations.listScoped({ selector: args.selector })
+        : { automations: await api.automations.list() }
+    case 'automation.runs':
+      return { runs: await api.automations.listRuns(args) }
+    case 'automation.create':
+      return { automation: await api.automations.create(args) }
+    case 'automation.update':
+      return { automation: await api.automations.update(args) }
+    case 'automation.delete':
+      return await api.automations.delete(args).then(() => ({}))
+    case 'automation.runNow':
+      return { run: await api.automations.runNow(args) }
+    default:
+      return {}
+  }
+}
+
 /** Puts a reachable, capable second authority in the catalog and answers for it. */
 export function runtimeHost(automations: Automation[], runs: AutomationRun[]): void {
   mocks.state.runtimeEnvironments = [
@@ -311,31 +360,12 @@ export function runtimeHost(automations: Automation[], runs: AutomationRun[]): v
     [RUNTIME_ID, { status: { capabilities: RUNTIME_CAPABILITIES } }]
   ])
   mocks.getRuntimeEnvironmentStatus.mockResolvedValue({ capabilities: RUNTIME_CAPABILITIES })
-  mocks.callRuntimeRpc.mockImplementation(async (_target: unknown, method: string) => {
-    if (method === 'automation.list') {
-      return {
-        automations,
-        items: automations.map((automation) => ({
-          automationId: automation.id,
-          selector: { kind: 'self' }
-        })),
-        orphanCount: 0
-      }
-    }
-    return method === 'automation.runs' ? { runs } : {}
-  })
+  mocks.state.runtimeAnswers = { automations, runs }
 }
 
 /** Answers the host-scoped read, which is where the list's rows and owners come from. */
 export function scopedList(automations: Automation[]): void {
-  api.automations.listScoped.mockResolvedValue({
-    automations,
-    items: automations.map((automation) => ({
-      automationId: automation.id,
-      selector: { kind: 'self' }
-    })),
-    orphanCount: 0
-  })
+  api.automations.listScoped.mockResolvedValue(selfScopedList(automations))
 }
 
 const roots: Root[] = []
@@ -395,6 +425,9 @@ export function installAutomationsPageHarness(): void {
   beforeEach(() => {
     globalThis.IS_REACT_ACT_ENVIRONMENT = true
     vi.clearAllMocks()
+    // A prior test's wholesale mockImplementation must not leak forward.
+    mocks.callRuntimeRpc.mockReset()
+    mocks.callRuntimeRpc.mockImplementation(answerAutomationRpc)
     mocks.listPanel = null
     mocks.detailPane = null
     mocks.editorDialog = null
@@ -412,11 +445,7 @@ export function installAutomationsPageHarness(): void {
       updatedAt: 0
     })
     api.automations.retainExternalScopes.mockResolvedValue(undefined)
-    api.automations.listScoped.mockResolvedValue({
-      automations: [makeAutomation()],
-      items: [{ automationId: 'a-1', selector: { kind: 'self' } }],
-      orphanCount: 0
-    })
+    api.automations.listScoped.mockResolvedValue(selfScopedList([makeAutomation()]))
     api.automations.create.mockResolvedValue(makeAutomation())
     api.automations.update.mockResolvedValue(makeAutomation())
     api.automations.delete.mockResolvedValue(undefined)

@@ -135,18 +135,24 @@ function runtimeSelfAutomationIds(): string[] {
   return (host?.rows ?? []).map((row) => row.automation.id)
 }
 
+/** The desktop authority's scoped-list answer, served on the local runtime target. */
+let desktopListScoped = vi.fn()
+
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
   view = null
   mocks.callRuntimeRpc.mockReset()
   mocks.getRuntimeEnvironmentStatus.mockReset()
-  mocks.callRuntimeRpc.mockResolvedValue({ automations: [legacyAutomation()] })
+  desktopListScoped = vi.fn().mockResolvedValue({ automations: [], items: [], orphanCount: 0 })
+  mocks.callRuntimeRpc.mockImplementation(async (target: unknown, _method: string, params) => {
+    if ((target as { kind?: string } | null)?.kind === 'local') {
+      return await desktopListScoped(params)
+    }
+    return { automations: [legacyAutomation()] }
+  })
   mocks.getRuntimeEnvironmentStatus.mockResolvedValue({ capabilities: [] })
   Object.assign(window, {
     api: {
-      automations: {
-        listScoped: vi.fn().mockResolvedValue({ automations: [], items: [], orphanCount: 0 })
-      },
       ssh: { connect: vi.fn() },
       runtimeEnvironments: { connect: vi.fn() }
     }
@@ -162,9 +168,7 @@ afterEach(async () => {
 
 describe('useAutomationHostCatalog orphan bootstrap', () => {
   it('projects the orphan entry a host answer reported', async () => {
-    window.api.automations.listScoped = vi
-      .fn()
-      .mockResolvedValue({ automations: [], items: [], orphanCount: 2 })
+    desktopListScoped.mockResolvedValue({ automations: [], items: [], orphanCount: 2 })
 
     await renderCatalog([])
 

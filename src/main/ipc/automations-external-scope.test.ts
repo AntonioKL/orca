@@ -46,9 +46,13 @@ function desktopSsh(targetId = 't1', targetGeneration = 3): AutomationOwnerRef {
   }
 }
 
-const state: { targets: SshTarget[]; runNow: () => Promise<unknown> } = {
+const state: {
+  targets: SshTarget[]
+  /** The lease registration installs on the service, for the runtime methods to take. */
+  service: { externalProbePriority: (<T>(run: () => T) => T) | null }
+} = {
   targets: [sshTarget()],
-  runNow: () => Promise.resolve({})
+  service: { externalProbePriority: null }
 }
 
 /** Async like the real bridge: Electron turns a handler's sync throw into a rejection. */
@@ -65,14 +69,14 @@ beforeEach(async () => {
   relay.request.mockReset()
   relay.request.mockResolvedValue({ jobs: [], hermesAvailable: true, error: null })
   state.targets = [sshTarget()]
-  state.runNow = () => Promise.resolve({})
+  state.service = { externalProbePriority: null }
   const { registerAutomationHandlers } = await import('./automations')
   registerAutomationHandlers(
     {
       getSshTargets: () => state.targets,
       assertAutomationOwnerFence: () => undefined
     } as unknown as Store,
-    { runNow: () => state.runNow() } as unknown as AutomationService
+    state.service as unknown as AutomationService
   )
 })
 
@@ -196,14 +200,18 @@ describe('probe scope retention', () => {
 })
 
 describe('Orca automation traffic priority', () => {
-  it('parks queued probes while an Orca run dispatch holds the lease', async () => {
-    const dispatchControl: { finish: () => void } = { finish: () => undefined }
-    state.runNow = () =>
-      new Promise((resolve) => {
-        dispatchControl.finish = () => resolve({ id: 'run-1' })
-      })
-    const dispatch = invoke('automations:runNow', { id: 'a-1' }) as Promise<unknown>
-    await Promise.resolve()
+  it('parks queued probes while Orca automation work holds the installed lease', async () => {
+    // Orca CRUD and dispatch arrive through the runtime methods, which take the
+    // lease through the hook this registration installed on the service.
+    const lease = state.service.externalProbePriority
+    expect(lease).not.toBeNull()
+    let finish: () => void = () => undefined
+    const dispatch = lease!(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
+    )
 
     const probe = invoke('automations:listExternalManagerForOwner', {
       owner: desktopSsh(),
@@ -214,7 +222,7 @@ describe('Orca automation traffic priority', () => {
     // external discovery from competing with the work the user is waiting on.
     expect(relay.request).not.toHaveBeenCalled()
 
-    dispatchControl.finish()
+    finish()
     await dispatch
     await probe
     expect(relay.request).toHaveBeenCalledTimes(1)

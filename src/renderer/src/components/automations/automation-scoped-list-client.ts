@@ -43,6 +43,7 @@ import {
   type RuntimeCapability
 } from '../../../../shared/protocol-version'
 import { automationAuthorityCatalogKey } from './automation-host-catalog-types'
+import { toRuntimeAutomationUpdateInput } from './automation-host-client'
 import { automationHostDiagnostics } from './automation-host-diagnostics'
 
 const REQUEST_TIMEOUT_MS = 15_000
@@ -167,9 +168,8 @@ export async function listScopedAutomations(
   authority: AutomationAuthorityRef,
   selector: AutomationListScopeSelector
 ): Promise<ScopedAutomationList> {
-  if (authority.kind === 'desktop') {
-    return validated(await window.api.automations.listScoped({ selector }), selector)
-  }
+  // Why: the desktop authority is the in-process runtime, so the probe no-ops
+  // there — its scoped contract ships with the client and can never lag it.
   await assertAuthorityCapability(
     authority,
     AUTOMATION_LIST_HOST_SCOPE_RUNTIME_CAPABILITY,
@@ -206,8 +206,6 @@ export async function listAutomationsForOwner(
 }
 
 /**
- * The only place that chooses IPC or RPC for a fenced run history read.
- *
  * Deliberately unprobed, matching the mutation arms' *absence* of a probe here:
  * history is read-only, and an older host that ignores the precondition answers
  * with the rows it has rather than acting on a fence it never honoured.
@@ -217,9 +215,6 @@ async function listRunsFenced(
   automationId: string,
   expectedOwner: AutomationOwnerPrecondition
 ): Promise<AutomationRun[]> {
-  if (authority.kind === 'desktop') {
-    return await window.api.automations.listRuns({ automationId, expectedOwner })
-  }
   const result = await callAuthority<{ runs: AutomationRun[] }>(authority, 'automation.runs', {
     automationId,
     expectedOwner
@@ -235,8 +230,8 @@ export async function listAutomationRunsForOwner(
 }
 
 /**
- * The only place that chooses IPC or RPC for a fenced mutation. Owned and orphan
- * rows differ in the precondition they fence with and in nothing else, so they
+ * The one fenced-mutation path every authority shares. Owned and orphan rows
+ * differ in the precondition they fence with and in nothing else, so they
  * share the transport, the capability probe, and any check either later gains.
  */
 async function updateFenced(
@@ -247,12 +242,9 @@ async function updateFenced(
   destination?: AutomationDestination
 ): Promise<Automation> {
   await assertOwnerFencingSupported(authority)
-  if (authority.kind === 'desktop') {
-    return await window.api.automations.update({ id, updates, expectedOwner, destination })
-  }
   const result = await callAuthority<{ automation: Automation }>(authority, 'automation.update', {
     id,
-    updates,
+    updates: toRuntimeAutomationUpdateInput(updates),
     expectedOwner,
     destination
   })
@@ -265,10 +257,6 @@ async function deleteFenced(
   expectedOwner: AutomationOwnerPrecondition
 ): Promise<void> {
   await assertOwnerFencingSupported(authority)
-  if (authority.kind === 'desktop') {
-    await window.api.automations.delete({ id, expectedOwner })
-    return
-  }
   await callAuthority(authority, 'automation.delete', { id, expectedOwner })
 }
 
@@ -327,9 +315,6 @@ export async function runAutomationNowForOwner(
 ): Promise<AutomationRun> {
   await assertOwnerFencingSupported(owner.authority)
   const expectedOwner = ownerPrecondition(owner)
-  if (owner.authority.kind === 'desktop') {
-    return await window.api.automations.runNow({ id, expectedOwner })
-  }
   const result = await callAuthority<{ run: AutomationRun }>(owner.authority, 'automation.runNow', {
     id,
     expectedOwner
@@ -343,9 +328,6 @@ export async function createAutomationForDestination(
   destination: AutomationDestination
 ): Promise<Automation> {
   await assertOwnerFencingSupported(authority)
-  if (authority.kind === 'desktop') {
-    return await window.api.automations.create(input, { destination })
-  }
   const { projectId, workspaceId, ...rest } = input
   const result = await callAuthority<{ automation: Automation }>(authority, 'automation.create', {
     ...rest,

@@ -278,23 +278,12 @@ import { createUsageProviderApi } from './usage-provider-api'
 import type { AppStarSource } from '../shared/gh-star-source'
 import type { ExecutionHostId } from '../shared/execution-host'
 import type {
-  Automation,
-  AutomationCreateInput,
   AutomationDispatchRequest,
   AutomationDispatchResult,
   ExternalAutomationRunsPage,
   AutomationRun,
-  AutomationPrecheckResult,
-  AutomationUpdateInput
+  AutomationPrecheckResult
 } from '../shared/automations-types'
-import type {
-  AutomationListResult,
-  AutomationListScopeSelector
-} from '../shared/automation-list-scope'
-import type {
-  AutomationDestination,
-  AutomationOwnerPrecondition
-} from '../shared/automation-owner-precondition'
 import type { AutomationOwnerRef } from '../shared/automation-owner-ref'
 import type {
   ScopedExternalManagerActionRequest,
@@ -4934,15 +4923,9 @@ const api = {
       ipcRenderer.invoke('ssh:submitCredential', args)
   },
 
+  // Orca automation CRUD rides the local runtime RPC surface (`runtime:call`),
+  // so only external-manager and dispatch-loop plumbing stays on IPC.
   automations: {
-    list: (): Promise<Automation[]> => ipcRenderer.invoke('automations:list'),
-    listScoped: (params: {
-      selector: AutomationListScopeSelector
-    }): Promise<AutomationListResult> => ipcRenderer.invoke('automations:list', params),
-    listRuns: (args?: {
-      automationId?: string
-      expectedOwner?: AutomationOwnerPrecondition
-    }): Promise<AutomationRun[]> => ipcRenderer.invoke('automations:listRuns', args),
     listExternalManagerForOwner: (
       request: ScopedExternalManagerListRequest
     ): Promise<ExternalAutomationManagerResult> =>
@@ -4959,22 +4942,6 @@ const api = {
       ipcRenderer.invoke('automations:runExternalActionForOwner', request),
     retainExternalScopes: (request: { owners: readonly AutomationOwnerRef[] }): Promise<void> =>
       ipcRenderer.invoke('automations:retainExternalScopes', request),
-    create: (
-      input: AutomationCreateInput,
-      options?: { destination?: AutomationDestination }
-    ): Promise<Automation> => ipcRenderer.invoke('automations:create', input, options),
-    update: (args: {
-      id: string
-      updates: AutomationUpdateInput
-      expectedOwner?: AutomationOwnerPrecondition
-      destination?: AutomationDestination
-    }): Promise<Automation> => ipcRenderer.invoke('automations:update', args),
-    delete: (args: { id: string; expectedOwner?: AutomationOwnerPrecondition }): Promise<void> =>
-      ipcRenderer.invoke('automations:delete', args),
-    runNow: (args: {
-      id: string
-      expectedOwner?: AutomationOwnerPrecondition
-    }): Promise<AutomationRun> => ipcRenderer.invoke('automations:runNow', args),
     runPrecheck: (args: {
       automationId: string
       runId: string

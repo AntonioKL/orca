@@ -4246,11 +4246,20 @@ export class OrcaRuntimeService {
     return this.store.listAutomations()
   }
 
+  // Why: Orca's own automation work holds the desktop probe scheduler's
+  // priority lease so queued external probes stay parked behind it; runtime
+  // servers install no lease and run directly.
+  private underExternalProbePriority<T>(run: () => T): T {
+    const wrap = this.automationService?.externalProbePriority
+    return wrap ? wrap(run) : run()
+  }
+
   listAutomationsForScope(params: AutomationListParams): AutomationListResult {
-    if (!this.store?.listAutomationsForScope) {
+    const store = this.store
+    if (!store?.listAutomationsForScope) {
       throw new Error('runtime_unavailable')
     }
-    return this.store.listAutomationsForScope(params)
+    return this.underExternalProbePriority(() => store.listAutomationsForScope!(params))
   }
 
   // Why: a supplied precondition must never degrade to unfenced work, so a store that cannot check it fails the call.
@@ -4272,16 +4281,19 @@ export class OrcaRuntimeService {
     automationId?: string,
     expectedOwner?: AutomationOwnerPrecondition
   ): AutomationRun[] {
-    if (!this.store?.listAutomationRuns) {
+    const store = this.store
+    if (!store?.listAutomationRuns) {
       throw new Error('runtime_unavailable')
     }
     if (expectedOwner && !automationId) {
       throw new Error('An expected owner requires an automation id.')
     }
-    if (automationId) {
-      this.fenceAutomationOwner(automationId, expectedOwner, 'read')
-    }
-    return this.store.listAutomationRuns(automationId)
+    return this.underExternalProbePriority(() => {
+      if (automationId) {
+        this.fenceAutomationOwner(automationId, expectedOwner, 'read')
+      }
+      return store.listAutomationRuns!(automationId)
+    })
   }
 
   /** Null when the store predates the projection: the caller then sends no precondition. */
@@ -4307,31 +4319,34 @@ export class OrcaRuntimeService {
     if (input.reuseSession && target.workspaceMode !== 'existing') {
       throw new Error('Session reuse requires an existing workspace target.')
     }
-    const created = this.store.createAutomation(
-      {
-        name: input.name,
-        prompt: input.prompt,
-        precheck: input.precheck,
-        agentId: input.agentId,
-        runContext: input.runContext,
-        sourceContext: input.sourceContext,
-        projectId: target.projectId,
-        workspaceMode: target.workspaceMode,
-        workspaceId: target.workspaceId,
-        baseBranch: input.baseBranch,
-        setupDecision: input.setupDecision,
-        reuseSession: input.reuseSession,
-        timezone: input.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
-        rrule: input.rrule,
-        dtstart: input.dtstart,
-        enabled: input.enabled,
-        missedRunGraceMinutes: input.missedRunGraceMinutes
-      },
-      input.destination ? { destination: input.destination } : undefined
-    )
-    const selector = this.automationChangeSelector(created.id)
-    this.publishAutomationDefinitionChange(selector, selector)
-    return created
+    const createInput: AutomationCreateInput = {
+      name: input.name,
+      prompt: input.prompt,
+      precheck: input.precheck,
+      agentId: input.agentId,
+      runContext: input.runContext,
+      sourceContext: input.sourceContext,
+      projectId: target.projectId,
+      workspaceMode: target.workspaceMode,
+      workspaceId: target.workspaceId,
+      baseBranch: input.baseBranch,
+      setupDecision: input.setupDecision,
+      reuseSession: input.reuseSession,
+      timezone: input.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+      rrule: input.rrule,
+      dtstart: input.dtstart,
+      enabled: input.enabled,
+      missedRunGraceMinutes: input.missedRunGraceMinutes
+    }
+    return this.underExternalProbePriority(() => {
+      const created = this.store!.createAutomation!(
+        createInput,
+        input.destination ? { destination: input.destination } : undefined
+      )
+      const selector = this.automationChangeSelector(created.id)
+      this.publishAutomationDefinitionChange(selector, selector)
+      return created
+    })
   }
 
   private automationChangeSelector(id: string): AutomationChangeSelector | null {
@@ -4423,11 +4438,13 @@ export class OrcaRuntimeService {
     if (!targetChanged && patch.reuseSession && current.workspaceMode !== 'existing') {
       throw new Error('Session reuse requires an existing workspace target.')
     }
-    // Captured first: an update may move the record to another host.
-    const before = this.automationChangeSelector(id)
-    const updated = this.store.updateAutomation(id, patch, options)
-    this.publishAutomationDefinitionChange(before, this.automationChangeSelector(id))
-    return updated
+    return this.underExternalProbePriority(() => {
+      // Captured first: an update may move the record to another host.
+      const before = this.automationChangeSelector(id)
+      const updated = this.store!.updateAutomation!(id, patch, options)
+      this.publishAutomationDefinitionChange(before, this.automationChangeSelector(id))
+      return updated
+    })
   }
 
   deleteAutomation(
@@ -4437,11 +4454,13 @@ export class OrcaRuntimeService {
     if (!this.store?.deleteAutomation) {
       throw new Error('runtime_unavailable')
     }
-    this.showAutomation(id)
-    const before = this.automationChangeSelector(id)
-    this.store.deleteAutomation(id, expectedOwner ? { expectedOwner } : undefined)
-    this.publishAutomationDefinitionChange(before, before)
-    return { removed: true, id }
+    return this.underExternalProbePriority(() => {
+      this.showAutomation(id)
+      const before = this.automationChangeSelector(id)
+      this.store!.deleteAutomation!(id, expectedOwner ? { expectedOwner } : undefined)
+      this.publishAutomationDefinitionChange(before, before)
+      return { removed: true, id }
+    })
   }
 
   async runAutomationNow(
@@ -4452,12 +4471,16 @@ export class OrcaRuntimeService {
     if (!service) {
       throw new Error('runtime_unavailable')
     }
-    // Why: an orphan or re-registered host must be refused before dispatch, not after a session starts.
-    return await runAutomationNowFenced({
-      fence: () => this.fenceAutomationOwner(id, expectedOwner, 'execute'),
-      service,
-      automationId: id
-    })
+    // Why: an orphan or re-registered host must be refused before dispatch, not
+    // after a session starts. The lease spans the whole dispatch promise, so
+    // queued external probes stay parked until the run the user is waiting on settles.
+    return await this.underExternalProbePriority(() =>
+      runAutomationNowFenced({
+        fence: () => this.fenceAutomationOwner(id, expectedOwner, 'execute'),
+        service,
+        automationId: id
+      })
+    )
   }
 
   private async resolveAutomationTarget(
@@ -28735,9 +28758,6 @@ export class OrcaRuntimeService {
         if (launchOpts.signal?.aborted) {
           throw new Error('client_disconnected')
         }
-        // Why: every host-created terminal must survive a renderer omission or
-        // promotion; the binding is durable regardless of attached windows.
-        const persistHostSessionBinding = true
         let result: Awaited<ReturnType<NonNullable<RuntimePtyController['spawn']>>>
         try {
           result = await this.ptyController.spawn({

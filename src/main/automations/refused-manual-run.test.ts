@@ -13,6 +13,7 @@ import type { Repo } from '../../shared/repo-types'
 import type { SshTarget } from '../../shared/ssh-types'
 import { getDefaultPersistedState } from '../../shared/constants'
 import { AUTOMATION_OWNER_CONFLICT_CODES } from '../../shared/automation-owner-conflict'
+import type { AutomationOwnerPrecondition } from '../../shared/automation-owner-precondition'
 import { AutomationService } from './service'
 import { installFakeAppEnvironment } from '../../../config/scripts/vitest-host-ports-setup'
 
@@ -95,19 +96,29 @@ async function createStore() {
   )
   vi.resetModules()
   installFakeAppEnvironment({ getPath: () => testState.dir })
-  ipcHandlers.clear()
   const { Store, initDataPath } = await import('../persistence')
   initDataPath()
   const store = new Store()
   const service = new AutomationService(store, { tickMs: 60_000 })
-  const { registerAutomationHandlers } = await import('../ipc/automations')
-  registerAutomationHandlers(store, service)
-  return { store, service }
+  // Manual runs arrive over the shared runtime RPC surface for every transport.
+  const { OrcaRuntimeService } = await import('../runtime/orca-runtime')
+  const runtime = new OrcaRuntimeService(store as never)
+  runtime.setAutomationService(service)
+  return { store, service, runtime }
 }
 
-/** Async like the real channel: `ipcMain.handle` turns a sync throw into a rejection too. */
-const runNow = async (id: string, expectedOwner?: unknown): Promise<AutomationRun> =>
-  (await ipcHandlers.get('automations:runNow')!(null, { id, expectedOwner })) as AutomationRun
+type RuntimeWithRunNow = {
+  runAutomationNow: (
+    id: string,
+    expectedOwner?: AutomationOwnerPrecondition
+  ) => Promise<AutomationRun>
+}
+
+const runNow = async (
+  runtime: RuntimeWithRunNow,
+  id: string,
+  expectedOwner?: AutomationOwnerPrecondition
+): Promise<AutomationRun> => await runtime.runAutomationNow(id, expectedOwner)
 
 describe('manual run refused before dispatch', () => {
   beforeEach(() => {
@@ -119,9 +130,9 @@ describe('manual run refused before dispatch', () => {
   })
 
   it('answers the caller with the conflict and still leaves the user a run record', async () => {
-    const { store, service } = await createStore()
+    const { store, runtime } = await createStore()
 
-    await expect(runNow('orphan-1')).rejects.toMatchObject({
+    await expect(runNow(runtime, 'orphan-1')).rejects.toMatchObject({
       code: AUTOMATION_OWNER_CONFLICT_CODES.targetRemoved
     })
 
@@ -134,7 +145,6 @@ describe('manual run refused before dispatch', () => {
         error: 'The automation host is no longer registered, so this automation has nowhere to run.'
       }
     ])
-    service.stop()
   })
 
   /**
@@ -143,14 +153,15 @@ describe('manual run refused before dispatch', () => {
    * with rows for runs the user never saw refused.
    */
   it('writes nothing when the refusal is about a stale caller, not a lost host', async () => {
-    const { store, service } = await createStore()
-    const stale = { selector: { kind: 'ssh', targetId: 'ssh-1', targetGeneration: 6 } }
+    const { store, runtime } = await createStore()
+    const stale = {
+      selector: { kind: 'ssh', targetId: 'ssh-1', targetGeneration: 6 }
+    } as const satisfies AutomationOwnerPrecondition
 
-    await expect(runNow('live-1', stale)).rejects.toMatchObject({
+    await expect(runNow(runtime, 'live-1', stale)).rejects.toMatchObject({
       code: AUTOMATION_OWNER_CONFLICT_CODES.ownerChanged
     })
 
     expect(store.listAutomationRuns('live-1')).toEqual([])
-    service.stop()
   })
 })

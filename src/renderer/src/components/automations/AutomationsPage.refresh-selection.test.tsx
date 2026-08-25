@@ -77,7 +77,6 @@ describe('AutomationsPage refresh', () => {
       ...(mocks.state.settings as Record<string, unknown>),
       activeRuntimeEnvironmentId: 'gpu'
     }
-    mocks.callRuntimeRpc.mockResolvedValue({ automations: [], runs: [] })
 
     await renderPage()
 

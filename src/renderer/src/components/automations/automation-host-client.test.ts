@@ -89,8 +89,9 @@ describe('automation host client', () => {
   // The broad form is gone in both directions: usage totals come from the
   // authority's list projection, so nothing may ask a host for all of its runs.
   it('fetches one automation history at a time, on both the desktop and a runtime', async () => {
-    vi.mocked(callRuntimeRpc).mockResolvedValueOnce({ runs: [] })
-    mockApi.automations.listRuns.mockResolvedValueOnce([])
+    vi.mocked(callRuntimeRpc)
+      .mockResolvedValueOnce({ runs: [] })
+      .mockResolvedValueOnce({ runs: [] })
 
     await listAutomationRunsForTarget({ kind: 'environment', environmentId: 'gpu' }, 'auto-1')
     await listAutomationRunsForTarget({ kind: 'local' }, 'auto-1')
@@ -101,7 +102,12 @@ describe('automation host client', () => {
       { automationId: 'auto-1' },
       { timeoutMs: 15_000 }
     )
-    expect(mockApi.automations.listRuns).toHaveBeenCalledWith({ automationId: 'auto-1' })
+    expect(callRuntimeRpc).toHaveBeenCalledWith(
+      { kind: 'local' },
+      'automation.runs',
+      { automationId: 'auto-1' },
+      { timeoutMs: 15_000 }
+    )
   })
 
   it('manually runs runtime-host automations through that server', async () => {

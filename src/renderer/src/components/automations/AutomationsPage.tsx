@@ -1224,7 +1224,9 @@ export default function AutomationsPage(): React.JSX.Element {
       automationDispatchContext,
       { rowKey: row.key, automationId },
       async () =>
-        (await window.api.automations.list()).find((entry) => entry.id === automationId) ?? null
+        (await listAutomationsForTarget({ kind: 'local' })).find(
+          (entry) => entry.id === automationId
+        ) ?? null
     )
     if (!reread.ok && reread.notice.severity === 'owner') {
       setOwnerActionNotice(reread.notice)

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AUTOMATION_OWNER_CONFLICT_CODES } from '../../../../shared/automation-owner-conflict'
 import {
   AUTOMATION_LIST_HOST_SCOPE_RUNTIME_CAPABILITY,
@@ -17,11 +17,6 @@ vi.mock('@/runtime/runtime-rpc-client', () => ({
     (error as { message: string }).message.trimEnd().endsWith(`: ${code}`)
 }))
 
-const listScoped = vi.fn()
-const update = vi.fn()
-const remove = vi.fn()
-const listRuns = vi.fn()
-
 const DESKTOP = { kind: 'desktop' } as const
 const RUNTIME = { kind: 'runtime', environmentId: 'env-1', pairingRevision: 4 } as const
 const SSH_OWNER = {
@@ -39,17 +34,6 @@ const ALL_CAPABILITIES = {
 beforeEach(() => {
   callRuntimeRpc.mockReset()
   getRuntimeEnvironmentStatus.mockReset()
-  listScoped.mockReset()
-  update.mockReset()
-  remove.mockReset()
-  listRuns.mockReset()
-  vi.stubGlobal('window', {
-    api: { automations: { listScoped, update, delete: remove, listRuns } }
-  })
-})
-
-afterEach(() => {
-  vi.unstubAllGlobals()
 })
 
 async function client() {
@@ -59,7 +43,7 @@ async function client() {
 describe('listScopedAutomations', () => {
   it('rejects a legacy-shaped payload instead of committing it as one host', async () => {
     const { listScopedAutomations, AutomationHostScopeUnsupportedError } = await client()
-    listScoped.mockResolvedValue({ automations: [{ id: 'a1' }] })
+    callRuntimeRpc.mockResolvedValue({ automations: [{ id: 'a1' }] })
     await expect(listScopedAutomations(DESKTOP, { kind: 'self' })).rejects.toBeInstanceOf(
       AutomationHostScopeUnsupportedError
     )
@@ -67,7 +51,7 @@ describe('listScopedAutomations', () => {
 
   it('rejects a structurally broken payload', async () => {
     const { listScopedAutomations, AutomationListResponseError } = await client()
-    listScoped.mockResolvedValue({ automations: 'nope' })
+    callRuntimeRpc.mockResolvedValue({ automations: 'nope' })
     await expect(listScopedAutomations(DESKTOP, { kind: 'self' })).rejects.toBeInstanceOf(
       AutomationListResponseError
     )
@@ -75,7 +59,7 @@ describe('listScopedAutomations', () => {
 
   it('drops rows the host scoped elsewhere and keeps the rest', async () => {
     const { listScopedAutomations } = await client()
-    listScoped.mockResolvedValue({
+    callRuntimeRpc.mockResolvedValue({
       automations: [{ id: 'a1' }, { id: 'a2' }],
       items: [
         { automationId: 'a1', selector: { kind: 'ssh', targetId: 'other', targetGeneration: 1 } },
@@ -87,6 +71,20 @@ describe('listScopedAutomations', () => {
     expect(result.automations.map((entry) => entry.id)).toEqual(['a2'])
     expect(result.invalidRows).toBe(1)
     expect(result.orphanCount).toBe(2)
+  })
+
+  it('addresses the desktop authority as the local runtime target, unprobed', async () => {
+    const { listScopedAutomations } = await client()
+    callRuntimeRpc.mockResolvedValue({ automations: [], items: [], orphanCount: 0 })
+    await listScopedAutomations(DESKTOP, { kind: 'self' })
+    expect(getRuntimeEnvironmentStatus).not.toHaveBeenCalled()
+    expect(callRuntimeRpc).toHaveBeenCalledWith(
+      { kind: 'local' },
+      'automation.list',
+      { selector: { kind: 'self' } },
+      // Why: the in-process runtime has no pairing revision to pin.
+      expect.not.objectContaining({ expectedEnvironmentPairingRevision: expect.anything() })
+    )
   })
 
   it('negotiates host scope and pins the request to the captured pairing revision', async () => {
@@ -160,14 +158,17 @@ describe('owner-fenced mutations', () => {
     expect(callRuntimeRpc).not.toHaveBeenCalled()
   })
 
-  it('fences a desktop mutation through IPC with the same precondition', async () => {
+  it('fences a desktop mutation over the local runtime target with the same precondition', async () => {
     const { deleteAutomationForOwner, updateAutomationForOwner } = await client()
-    update.mockResolvedValue({ id: 'a1' })
+    callRuntimeRpc.mockResolvedValue({ automation: { id: 'a1' } })
     await updateAutomationForOwner({ authority: DESKTOP, selector: { kind: 'self' } }, 'a1', {
       enabled: true
     })
-    expect(update).toHaveBeenCalledWith(
-      expect.objectContaining({ expectedOwner: { selector: { kind: 'self' } } })
+    expect(callRuntimeRpc).toHaveBeenCalledWith(
+      { kind: 'local' },
+      'automation.update',
+      expect.objectContaining({ expectedOwner: { selector: { kind: 'self' } } }),
+      expect.anything()
     )
     expect(getRuntimeEnvironmentStatus).not.toHaveBeenCalled()
     expect(typeof deleteAutomationForOwner).toBe('function')
@@ -211,23 +212,29 @@ describe('orphan-fenced mutations', () => {
     )
   })
 
-  it('routes a desktop orphan through IPC rather than a local RPC call', async () => {
+  it('routes a desktop orphan over the local runtime target, unprobed', async () => {
     const { deleteOrphanAutomation, updateOrphanAutomation } = await client()
-    update.mockResolvedValue({ id: 'a1' })
+    callRuntimeRpc.mockResolvedValue({ automation: { id: 'a1' } })
     await updateOrphanAutomation(DESKTOP, 'a1', { enabled: false })
     await deleteOrphanAutomation(DESKTOP, 'a1')
-    expect(update).toHaveBeenCalledWith({
-      id: 'a1',
-      updates: { enabled: false },
-      expectedOwner: { selector: { kind: 'orphan' } },
-      // An orphan has no host to be moved to, so no destination is ever sent.
-      destination: undefined
-    })
-    expect(remove).toHaveBeenCalledWith({
-      id: 'a1',
-      expectedOwner: { selector: { kind: 'orphan' } }
-    })
-    expect(callRuntimeRpc).not.toHaveBeenCalled()
+    expect(callRuntimeRpc).toHaveBeenCalledWith(
+      { kind: 'local' },
+      'automation.update',
+      {
+        id: 'a1',
+        updates: { enabled: false },
+        expectedOwner: { selector: { kind: 'orphan' } },
+        // An orphan has no host to be moved to, so no destination is ever sent.
+        destination: undefined
+      },
+      expect.anything()
+    )
+    expect(callRuntimeRpc).toHaveBeenCalledWith(
+      { kind: 'local' },
+      'automation.delete',
+      { id: 'a1', expectedOwner: { selector: { kind: 'orphan' } } },
+      expect.anything()
+    )
     expect(getRuntimeEnvironmentStatus).not.toHaveBeenCalled()
   })
 
@@ -246,15 +253,16 @@ describe('orphan-fenced mutations', () => {
     )
   })
 
-  it('reads a desktop orphan history through IPC', async () => {
+  it('reads a desktop orphan history over the local runtime target', async () => {
     const { listOrphanAutomationRuns } = await client()
-    listRuns.mockResolvedValue([])
+    callRuntimeRpc.mockResolvedValue({ runs: [] })
     await listOrphanAutomationRuns(DESKTOP, 'a1')
-    expect(listRuns).toHaveBeenCalledWith({
-      automationId: 'a1',
-      expectedOwner: { selector: { kind: 'orphan' } }
-    })
-    expect(callRuntimeRpc).not.toHaveBeenCalled()
+    expect(callRuntimeRpc).toHaveBeenCalledWith(
+      { kind: 'local' },
+      'automation.runs',
+      { automationId: 'a1', expectedOwner: { selector: { kind: 'orphan' } } },
+      expect.anything()
+    )
   })
 
   // Read-only, so it deliberately takes the owned read's probe behaviour — which
@@ -271,9 +279,9 @@ describe('orphan-fenced mutations', () => {
 
   it('cannot be handed an owner precondition — the fence is not a parameter', async () => {
     const { updateOrphanAutomation, ORPHAN_OWNER_PRECONDITION } = await client()
-    update.mockResolvedValue({ id: 'a1' })
+    callRuntimeRpc.mockResolvedValue({ automation: { id: 'a1' } })
     await updateOrphanAutomation(DESKTOP, 'a1', { enabled: false })
-    expect(update.mock.calls[0]?.[0]?.expectedOwner).toEqual(ORPHAN_OWNER_PRECONDITION)
+    expect(callRuntimeRpc.mock.calls[0]?.[2]?.expectedOwner).toEqual(ORPHAN_OWNER_PRECONDITION)
     expect(updateOrphanAutomation.length).toBe(3)
   })
 })

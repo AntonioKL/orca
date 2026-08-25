@@ -30,6 +30,15 @@ vi.mock('@/store', () => {
   return { useAppStore }
 })
 
+// Desktop-only file: every request is a local-target scoped list, so the
+// transport routes straight into the generation-aware fake below.
+vi.mock('@/runtime/runtime-rpc-client', () => ({
+  callRuntimeRpc: (_target: unknown, _method: string, params: unknown) =>
+    listScoped(params as { selector: AutomationListScopeSelector }),
+  getRuntimeEnvironmentStatus: vi.fn(),
+  hasRuntimeRpcErrorCode: () => false
+}))
+
 import { useAutomationHostCatalog } from './use-automation-host-catalog'
 
 const TARGET_ID = 'ssh-1'
@@ -148,7 +157,6 @@ beforeEach(() => {
   releaseHeld = null
   Object.assign(window, {
     api: {
-      automations: { listScoped: vi.fn(listScoped) },
       ssh: { connect: vi.fn() },
       runtimeEnvironments: { connect: vi.fn() }
     }

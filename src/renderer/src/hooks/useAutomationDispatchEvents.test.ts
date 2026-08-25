@@ -137,6 +137,11 @@ vi.mock('@/lib/agent-paste-draft', () => ({
   submitPromptToAgentPty: mockSubmitPromptToAgentPty
 }))
 
+// The reuse path reads run history over the local runtime target, not IPC.
+vi.mock('@/components/automations/automation-host-client', () => ({
+  listAutomationRunsForTarget: vi.fn().mockResolvedValue([])
+}))
+
 vi.mock('@/lib/automation-session-reuse', () => ({
   findReusableAutomationSession: mockFindReusableAutomationSession
 }))
@@ -219,8 +224,7 @@ describe('useAutomationDispatchEvents setup launch', () => {
           onDispatchRequested: mockOnDispatchRequested,
           rendererReady: mockRendererReady,
           markDispatchResult: mockMarkDispatchResult,
-          runPrecheck: vi.fn(),
-          listRuns: vi.fn().mockResolvedValue([])
+          runPrecheck: vi.fn()
         },
         ssh: {
           needsPassphrasePrompt: mockSshNeedsPassphrasePrompt,

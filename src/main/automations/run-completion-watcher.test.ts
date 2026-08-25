@@ -358,42 +358,8 @@ describe('automationsChanged publication', () => {
     service.stop()
   })
 
-  it('publishes definition changes from the desktop IPC handlers', async () => {
-    const store = await createStore()
-    store.addRepo(makeRepo())
-    const publish = vi.fn()
-    const service = new AutomationService(store, { onAutomationsChanged: publish })
-    const { registerAutomationHandlers } = await import('../ipc/automations')
-    registerAutomationHandlers(store, service)
-
-    const created = (await ipcHandlers.get('automations:create')!(null, {
-      name: 'Nightly check',
-      prompt: 'Check the repo',
-      agentId: 'claude',
-      projectId: 'r1',
-      workspaceMode: 'existing',
-      workspaceId: 'wt1',
-      timezone: 'UTC',
-      rrule: 'FREQ=DAILY;BYHOUR=9;BYMINUTE=0',
-      dtstart: new Date('2026-05-12T00:00:00Z').getTime()
-    })) as Automation
-    // Definition changes name the host they affected; a move would publish source and destination.
-    expect(publish).toHaveBeenLastCalledWith({
-      reason: 'definition',
-      selector: { kind: 'self' }
-    })
-
-    await ipcHandlers.get('automations:update')!(null, {
-      id: created.id,
-      updates: { enabled: false }
-    })
-    expect(publish).toHaveBeenCalledTimes(2)
-
-    await ipcHandlers.get('automations:delete')!(null, { id: created.id })
-    expect(publish).toHaveBeenCalledTimes(3)
-    expect(store.listAutomations()).toHaveLength(0)
-    service.stop()
-  })
+  // Definition-change publication from the shared runtime methods is covered by
+  // src/main/runtime/automation-change-publication.test.ts against the real store.
 
   it('changes nothing for a consumer that ignores the unknown event type', async () => {
     const store = await createStore()

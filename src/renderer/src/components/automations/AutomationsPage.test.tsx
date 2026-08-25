@@ -437,10 +437,10 @@ describe('AutomationsPage mutations', () => {
     })
 
     expect(api.automations.create).toHaveBeenCalledWith(
-      expect.objectContaining({ name: 'Sweep' }),
-      {
+      expect.objectContaining({
+        name: 'Sweep',
         destination: { selector: { kind: 'self' } }
-      }
+      })
     )
   })
 

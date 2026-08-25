@@ -2,26 +2,12 @@ import { ipcMain } from 'electron'
 import type { Store } from '../persistence'
 import type { AutomationService } from '../automations/service'
 import type {
-  Automation,
-  AutomationCreateInput,
   AutomationDispatchResult,
   AutomationPrecheckResult,
   ExternalAutomationRunsPage,
-  AutomationRun,
-  AutomationUpdateInput
+  AutomationRun
 } from '../../shared/automations-types'
-import {
-  automationChangePublications,
-  type AutomationChangeSelector,
-  type AutomationListParams,
-  type AutomationListResult
-} from '../../shared/automation-list-scope'
-import type {
-  AutomationDestination,
-  AutomationOwnerPrecondition
-} from '../../shared/automation-owner-precondition'
 import { createScopedExternalAutomations } from '../automations/external-manager'
-import { runAutomationNowFenced } from '../automations/refused-manual-run'
 import {
   ExternalAutomationManagerCache,
   type ExternalAutomationManagerCacheEntry
@@ -36,24 +22,6 @@ import type {
   ScopedExternalManagerRunsRequest,
   ScopedExternalManagerUpdateRequest
 } from '../../shared/external-automation-scope'
-
-/**
- * Publishes the scoped `automationsChanged` events one definition change owes.
- *
- * A move touches two hosts, so both are named; an unknown side degrades the
- * whole publication to one unscoped authority event rather than a partial one,
- * because a subscriber that never hears about the host it is showing would keep
- * a deleted row on screen.
- */
-function publishDefinitionChange(
-  service: AutomationService,
-  before: AutomationChangeSelector | null,
-  after: AutomationChangeSelector | null
-): void {
-  for (const selector of automationChangePublications(before, after)) {
-    service.publishAutomationsChanged({ reason: 'definition', ...(selector ? { selector } : {}) })
-  }
-}
 
 /**
  * Fail closed: an external request with no captured owner is refused rather than
@@ -104,32 +72,9 @@ export function registerAutomationHandlers(store: Store, service: AutomationServ
     scheduler: probeScheduler,
     cache: managerCache
   })
-  const withPriority = <T>(run: () => T): T => underOrcaPriority(probeScheduler, run)
-  // Why: an omitted selector keeps the legacy array so existing callers are untouched.
-  ipcMain.handle(
-    'automations:list',
-    (_event, params?: AutomationListParams | null): Automation[] | AutomationListResult =>
-      withPriority(() =>
-        params?.selector ? store.listAutomationsForScope(params) : store.listAutomations()
-      )
-  )
-  ipcMain.handle(
-    'automations:listRuns',
-    (
-      _event,
-      args?: { automationId?: string; expectedOwner?: AutomationOwnerPrecondition }
-    ): AutomationRun[] =>
-      withPriority(() => {
-        if (args?.automationId && args.expectedOwner) {
-          store.assertAutomationOwnerFence({
-            id: args.automationId,
-            expectedOwner: args.expectedOwner,
-            operation: 'read'
-          })
-        }
-        return store.listAutomationRuns(args?.automationId)
-      })
-  )
+  // Why: Orca automation CRUD now arrives over the local runtime RPC surface,
+  // so the runtime methods take the lease through this hook instead of an arm here.
+  service.externalProbePriority = (run) => underOrcaPriority(probeScheduler, run)
   // Scoped external-manager surface: one captured desktop owner in, one host's
   // managers out. The target and manager ID are derived inside the guard.
   ipcMain.handle(
@@ -168,71 +113,6 @@ export function registerAutomationHandlers(store: Store, service: AutomationServ
     (_event, request?: { owners?: readonly AutomationOwnerRef[] } | null): void => {
       probeScheduler.retainScopes((request?.owners ?? []).map(ownerKey))
     }
-  )
-  ipcMain.handle(
-    'automations:create',
-    (
-      _event,
-      input: AutomationCreateInput,
-      options?: { destination?: AutomationDestination }
-    ): Automation =>
-      withPriority(() => {
-        const created = store.createAutomation(input, options)
-        const selector = store.automationChangeSelector(created.id)
-        publishDefinitionChange(service, selector, selector)
-        return created
-      })
-  )
-  ipcMain.handle(
-    'automations:update',
-    (
-      _event,
-      args: {
-        id: string
-        updates: AutomationUpdateInput
-        expectedOwner?: AutomationOwnerPrecondition
-        destination?: AutomationDestination
-      }
-    ): Automation =>
-      withPriority(() => {
-        // Captured first: an update may move the record to another host.
-        const before = store.automationChangeSelector(args.id)
-        const updated = store.updateAutomation(args.id, args.updates, {
-          expectedOwner: args.expectedOwner,
-          destination: args.destination
-        })
-        publishDefinitionChange(service, before, store.automationChangeSelector(args.id))
-        return updated
-      })
-  )
-  ipcMain.handle(
-    'automations:delete',
-    (_event, args: { id: string; expectedOwner?: AutomationOwnerPrecondition }): void =>
-      withPriority(() => {
-        const before = store.automationChangeSelector(args.id)
-        store.deleteAutomation(args.id, { expectedOwner: args.expectedOwner })
-        publishDefinitionChange(service, before, before)
-      })
-  )
-  ipcMain.handle(
-    'automations:runNow',
-    (
-      _event,
-      args: { id: string; expectedOwner?: AutomationOwnerPrecondition }
-    ): Promise<AutomationRun> =>
-      withPriority(() =>
-        // Why: the dispatch is refused before a session exists, exactly like the runtime path.
-        runAutomationNowFenced({
-          fence: () =>
-            store.assertAutomationOwnerFence({
-              id: args.id,
-              expectedOwner: args.expectedOwner,
-              operation: 'execute'
-            }),
-          service,
-          automationId: args.id
-        })
-      )
   )
   ipcMain.handle(
     'automations:runPrecheck',

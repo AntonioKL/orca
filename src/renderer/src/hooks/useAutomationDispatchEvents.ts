@@ -25,6 +25,7 @@ import { translate } from '@/i18n/i18n'
 import { createBrowserUuid } from '@/lib/browser-uuid'
 import type { AutomationTerminalOwnership } from '@/lib/automation-terminal-ownership'
 import { getResolvedExecutionHostIdForWorktree } from '@/lib/resolved-worktree-execution-host'
+import { listAutomationRunsForTarget } from '@/components/automations/automation-host-client'
 import {
   getRepoExecutionHostId,
   parseExecutionHostId,
@@ -513,7 +514,9 @@ export function useAutomationDispatchEvents(): void {
               agentId: automation.agentId,
               worktreeId: worktree.id,
               currentRunId: run.id,
-              runs: await window.api.automations.listRuns({ automationId: automation.id }),
+              // Why: the dispatch loop only ever executes for the desktop authority,
+              // so its history read addresses the local runtime explicitly.
+              runs: await listAutomationRunsForTarget({ kind: 'local' }, automation.id),
               state: useAppStore.getState()
             })
             if (reusableSession) {

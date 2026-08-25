@@ -43,9 +43,11 @@ function selectDesktopRow(): string {
   return row?.key ?? ''
 }
 
-/** Every runtime-bound automation call, so a misrouted action cannot hide in the noise. */
+/** Every runtime-environment automation call, so a misrouted action cannot hide
+ *  in the noise. Local-target calls are the desktop authority's own and excluded. */
 function runtimeAutomationCalls(): string[] {
   return mocks.callRuntimeRpc.mock.calls
+    .filter((call) => (call[0] as { kind?: string } | null)?.kind === 'environment')
     .map((call) => String(call[1]))
     .filter((method) => method.startsWith('automation.'))
 }
