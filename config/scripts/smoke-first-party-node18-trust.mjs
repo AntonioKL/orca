@@ -11,7 +11,13 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import WebSocket, { WebSocketServer } from 'ws'
 
-assert.match(process.versions.node, /^18\./, 'This smoke test must run under Node 18')
+const expectedNodeMajor = process.env.ORCA_FIRST_PARTY_TRUST_SMOKE_NODE_MAJOR ?? '18'
+assert.match(expectedNodeMajor, /^\d+$/, 'Expected a numeric Node major')
+assert.equal(
+  process.versions.node.split('.')[0],
+  expectedNodeMajor,
+  `This smoke test must run under Node ${expectedNodeMajor}`
+)
 
 const require = createRequire(import.meta.url)
 const projectDir = fileURLToPath(new URL('../..', import.meta.url))
@@ -384,4 +390,4 @@ try {
   await rm(fixtureDirectory, { recursive: true, force: true })
 }
 
-console.log('Node 18 first-party HTTPS and WSS trust smoke passed.')
+console.log(`Node ${expectedNodeMajor} first-party HTTPS and WSS trust smoke passed.`)

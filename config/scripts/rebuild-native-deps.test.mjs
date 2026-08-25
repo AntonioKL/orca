@@ -126,6 +126,58 @@ describe('rebuild-native-deps Electron install fallback', () => {
   })
 })
 
+describe('rebuild-native-deps optional Windows certificate addon', () => {
+  it('continues postinstall when the optional addon rebuild fails', () => {
+    const projectDir = mkTempProject()
+
+    try {
+      writeFakeUsableElectronPackage(projectDir, { platform: 'win32' })
+      writeFakeElectronRebuild(projectDir, {
+        failModule: 'win-export-certificate-and-key'
+      })
+
+      const result = runRebuildScript(
+        projectDir,
+        { npm_config_platform: 'win32', npm_lifecycle_event: 'postinstall' },
+        ['--platform=win32', '--arch=x64', '--force']
+      )
+
+      expect(result.status, result.stderr).toBe(0)
+      expect(result.stderr).toContain('Optional native module rebuild failed: rebuild failed')
+      expect(result.stderr).toContain(
+        'Continuing postinstall; Orca will use bundled certificate roots'
+      )
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true })
+    }
+  })
+
+  it('fails explicit rebuilds when the optional addon rebuild fails', () => {
+    const projectDir = mkTempProject()
+
+    try {
+      writeFakeUsableElectronPackage(projectDir, { platform: 'win32' })
+      writeFakeElectronRebuild(projectDir, {
+        failModule: 'win-export-certificate-and-key'
+      })
+
+      const result = runRebuildScript(projectDir, { npm_config_platform: 'win32' }, [
+        '--platform=win32',
+        '--arch=x64',
+        '--force'
+      ])
+
+      expect(result.status).toBe(1)
+      expect(result.stderr).toContain('Optional native module rebuild failed: rebuild failed')
+      expect(result.stderr).not.toContain(
+        'Continuing postinstall; Orca will use bundled certificate roots'
+      )
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true })
+    }
+  })
+})
+
 describe('rebuild-native-deps patched node-pty rebuild', () => {
   it.skipIf(process.platform !== 'win32')(
     'repairs a missing ConPTY runtime before probing without recompiling node-pty',
@@ -139,7 +191,7 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
         writeFakeLoadableNodePty(projectDir, { nativeDir: '../build/Release/' })
         writeFakeWindowsRegistry(projectDir)
         writeFakeWindowsProcessTree(projectDir)
-        writeFakeWindowsCaCerts(projectDir)
+        writeFakeWindowsCertificateStore(projectDir)
         writeFakeNodePtyConptyPayload(projectDir, process.arch)
 
         const result = runRebuildScript(projectDir, {
@@ -195,7 +247,7 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
         writeFakeElectronRebuild(projectDir, { logPathEnv: 'ORCA_REBUILD_TEST_LOG' })
         writeFakeLoadableNodePty(projectDir)
         writeFakeWindowsProcessTree(projectDir)
-        writeFakeWindowsCaCerts(projectDir)
+        writeFakeWindowsCertificateStore(projectDir)
         writeFakeNodePtyConptyPayload(projectDir, process.arch)
 
         const result = runRebuildScript(projectDir, {
@@ -226,7 +278,7 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
         writeFakeLoadableNodePty(projectDir, { ownsPtyJob: false })
         writeFakeWindowsRegistry(projectDir)
         writeFakeWindowsProcessTree(projectDir)
-        writeFakeWindowsCaCerts(projectDir)
+        writeFakeWindowsCertificateStore(projectDir)
 
         const result = runRebuildScript(projectDir, {
           ORCA_REBUILD_TEST_LOG: rebuildLogPath,
@@ -453,7 +505,7 @@ module.exports = async function extract(_zipPath, options) {
   chmodSync(join(extractDir, 'index.js'), 0o755)
 }
 
-function writeFakeElectronRebuild(projectDir, { logPathEnv = null } = {}) {
+function writeFakeElectronRebuild(projectDir, { failModule = null, logPathEnv = null } = {}) {
   const rebuildDir = join(projectDir, 'node_modules', '@electron', 'rebuild')
   mkdirSync(rebuildDir, { recursive: true })
   writeFileSync(join(rebuildDir, 'package.json'), JSON.stringify({ type: 'module' }))
@@ -464,6 +516,9 @@ function writeFakeElectronRebuild(projectDir, { logPathEnv = null } = {}) {
 import { appendFileSync } from 'node:fs'
 
 export async function rebuild(options) {
+  if (options.onlyModules.includes(${JSON.stringify(failModule)})) {
+    throw new Error('rebuild failed')
+  }
   const logPath = process.env[${JSON.stringify(logPathEnv)}]
   if (!logPath) {
     return
@@ -481,7 +536,11 @@ export async function rebuild(options) {
   )
 }
 `
-      : 'export async function rebuild() {}\n'
+      : `export async function rebuild(options) {
+  if (options.onlyModules.includes(${JSON.stringify(failModule)})) {
+    throw new Error('rebuild failed')
+  }
+}\n`
   )
 }
 
@@ -581,8 +640,8 @@ function writeFakeWindowsProcessTree(projectDir) {
   writeFileSync(join(processTreeDir, 'index.js'), 'module.exports = {}\n')
 }
 
-function writeFakeWindowsCaCerts(projectDir) {
-  const certificatesDir = join(projectDir, 'node_modules', '@vscode', 'windows-ca-certs')
+function writeFakeWindowsCertificateStore(projectDir) {
+  const certificatesDir = join(projectDir, 'node_modules', 'win-export-certificate-and-key')
   mkdirSync(certificatesDir, { recursive: true })
   writeFileSync(join(certificatesDir, 'index.js'), 'module.exports = {}\n')
 }

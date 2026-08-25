@@ -33,8 +33,8 @@ const PACKAGED_RUNTIME_PACKAGE_ROOTS = [
   'zod'
 ]
 const WINDOWS_PACKAGED_RUNTIME_PACKAGE_ROOTS = [
-  '@vscode/windows-ca-certs',
   '@vscode/windows-process-tree',
+  'win-export-certificate-and-key',
   'windows-native-registry'
 ]
 

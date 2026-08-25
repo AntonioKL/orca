@@ -27,10 +27,11 @@ describe('packaged first-party dispatcher contract', () => {
       join(projectDir, 'config/scripts/ensure-native-runtime.mjs'),
       'utf8'
     )
-    expect(packageJson.optionalDependencies['@vscode/windows-ca-certs']).toBe('0.3.4')
-    expect(packageJson.pnpm.onlyBuiltDependencies).not.toContain('@vscode/windows-ca-certs')
-    expect(rebuildScript).toContain("'@vscode/windows-ca-certs'")
-    expect(ensureScript).toContain("'@vscode/windows-ca-certs'")
+    expect(packageJson.optionalDependencies['win-export-certificate-and-key']).toBe('3.0.2')
+    expect(packageJson.pnpm.onlyBuiltDependencies).not.toContain('win-export-certificate-and-key')
+    expect(rebuildScript).toContain("'win-export-certificate-and-key'")
+    expect(rebuildScript).toContain('Continuing postinstall')
+    expect(ensureScript).not.toContain('win-export-certificate-and-key')
     const packageTargets = {
       win32: createPackagedRuntimeNodeModuleResources('win32'),
       darwin: createPackagedRuntimeNodeModuleResources('darwin'),
@@ -38,13 +39,13 @@ describe('packaged first-party dispatcher contract', () => {
     }
     expect(packageTargets.win32).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ to: join('node_modules', '@vscode', 'windows-ca-certs') })
+        expect.objectContaining({ to: join('node_modules', 'win-export-certificate-and-key') })
       ])
     )
     for (const platform of ['darwin', 'linux']) {
       expect(packageTargets[platform]).not.toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ to: join('node_modules', '@vscode', 'windows-ca-certs') })
+          expect.objectContaining({ to: join('node_modules', 'win-export-certificate-and-key') })
         ])
       )
     }
