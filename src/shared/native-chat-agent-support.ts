@@ -31,12 +31,13 @@ export function nativeChatRequiresLocalTranscript(agent: string | null | undefin
 
 /** True when the agent renders a digit-commit question selector that ignores
  *  typed label text (pasting "Blue" + Enter commits the highlighted FIRST
- *  option — STA-1860): Claude's AskUserQuestion and Codex 0.145's
- *  request_user_input card both behave this way, so answers must be delivered
- *  as per-option keystrokes. Other agents commit a pasted answer. */
+ *  option — STA-1860): Claude's AskUserQuestion, Codex 0.145's
+ *  request_user_input, and Grok's ask_user_question cards behave this way,
+ *  so answers must be delivered as per-option keystrokes. Other agents commit
+ *  a pasted answer. */
 export function shouldStepNativeChatAskAnswer(agent: string | null | undefined): boolean {
   const transcriptAgent = resolveNativeChatTranscriptAgent(agent)
-  return transcriptAgent === 'claude' || transcriptAgent === 'codex'
+  return transcriptAgent === 'claude' || transcriptAgent === 'codex' || transcriptAgent === 'grok'
 }
 
 export function resolveNativeChatTranscriptAgent(

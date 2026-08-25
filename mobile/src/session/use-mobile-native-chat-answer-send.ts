@@ -223,8 +223,8 @@ export function useMobileNativeChatAnswerSend(args: {
           }
           return false
         }
-        // Grok commits pasted labels; Claude and Codex need their selector-specific
-        // keystrokes paced so each step renders before the next lands.
+        // Claude, Codex, and Grok need selector-specific keystrokes paced so each
+        // step renders before the next lands; other agents commit pasted labels.
         if (!shouldStepNativeChatAskAnswer(agentRef.current)) {
           // This shape pastes the label into the composer and commits it, so an
           // orphaned image paste would be submitted along with the answer (#10228).

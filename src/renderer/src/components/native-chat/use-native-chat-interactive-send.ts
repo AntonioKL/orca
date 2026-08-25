@@ -93,8 +93,8 @@ export function useNativeChatInteractiveSend(
       // Cancel any prior in-flight answer before starting a new one.
       cancelInFlight()
       const settings = getSettingsForAgentTabRuntimeOwner(terminalTabId)
-      // Claude and Codex ignore pasted labels but have different selector state
-      // machines; Grok commits pasted text. OpenClaude follows Claude's path.
+      // Claude, Codex, and Grok ignore pasted labels but have different selector
+      // state machines. OpenClaude follows Claude's path.
       const stepsAnswer = shouldStepNativeChatAskAnswer(agent)
       const buildsCodexAnswer = resolveNativeChatTranscriptAgent(agent) === 'codex'
       // Why: pin the answered question's baseline BEFORE delivery. A late settle

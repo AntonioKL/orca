@@ -256,29 +256,24 @@ describe('useMobileNativeChatAnswerSend', () => {
     ])
   })
 
-  it('submits a non-selector answer as pasted label text with a single Enter', async () => {
+  it('answers Grok selector prompts with the option number', async () => {
     const sendRequest = vi.fn().mockResolvedValue(acceptedResponse())
     await mount({ sendRequest } as unknown as RpcClient, vi.fn(), 'grok')
 
     await expect(answerSend?.answerAsk(TABS_OR_SPACES, [{ indices: [1] }])).resolves.toBe(true)
-    // Grok's question tool commits the pasted answer: label text + one Enter.
     expect(sendRequest).toHaveBeenCalledTimes(1)
-    expect(sendRequest.mock.calls[0]?.[1]).toMatchObject({ text: 'Spaces', enter: true })
+    expect(sendRequest.mock.calls[0]?.[1]).toMatchObject({ text: '2', enter: false })
   })
 
-  it('clears an orphaned image paste before an answer that commits with Enter (#10228)', async () => {
+  it('keeps the marker for a Grok selector answer', async () => {
     const sendRequest = vi.fn().mockResolvedValue(acceptedResponse())
     await mount({ sendRequest } as unknown as RpcClient, vi.fn(), 'grok')
-    // An earlier image send left its path on this terminal's composer line.
     markMobileNativeChatInputStale('terminal')
 
     await expect(answerSend?.answerAsk(TABS_OR_SPACES, [{ indices: [1] }])).resolves.toBe(true)
-    // Without the leading clear, the pasted label + Enter would submit
-    // "<image path>Spaces" as one prompt.
-    expect(sendRequest).toHaveBeenCalledTimes(2)
-    expect(sendRequest.mock.calls[0]?.[1]).toMatchObject({ text: '\x15', enter: false })
-    expect(sendRequest.mock.calls[1]?.[1]).toMatchObject({ text: 'Spaces', enter: true })
-    expect(isMobileNativeChatInputStale('terminal')).toBe(false)
+    expect(sendRequest).toHaveBeenCalledTimes(1)
+    expect(sendRequest.mock.calls[0]?.[1]).toMatchObject({ text: '2', enter: false })
+    expect(isMobileNativeChatInputStale('terminal')).toBe(true)
   })
 
   it('keeps the marker for a selector answer, which cannot submit the composer', async () => {
@@ -303,7 +298,7 @@ describe('useMobileNativeChatAnswerSend', () => {
       result: { send: { accepted: false } },
       _meta: { runtimeId: 'runtime' }
     })
-    await mount({ sendRequest } as unknown as RpcClient, onSendError, 'grok')
+    await mount({ sendRequest } as unknown as RpcClient, onSendError, 'omp')
     markMobileNativeChatInputStale('terminal')
 
     await expect(answerSend?.answerAsk(TABS_OR_SPACES, [{ indices: [1] }])).resolves.toBe(false)

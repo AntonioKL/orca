@@ -20,11 +20,8 @@ export function registerQuestionTool(toolName: string, parser: InteractiveQuesti
 }
 
 function parseQuestionsShape(input: unknown): AskPrompt | null {
-  const rawQuestions = Array.isArray(input)
-    ? input
-    : input && typeof input === 'object'
-      ? (input as { questions?: unknown }).questions
-      : undefined
+  const rawQuestions =
+    input && typeof input === 'object' ? (input as { questions?: unknown }).questions : undefined
   if (!Array.isArray(rawQuestions) || rawQuestions.length === 0) {
     return null
   }

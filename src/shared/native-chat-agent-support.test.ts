@@ -49,16 +49,17 @@ describe('nativeChatRequiresLocalTranscript', () => {
 })
 
 describe('shouldStepNativeChatAskAnswer', () => {
-  it('steps the digit-commit selector agents (Claude, OpenClaude, Codex)', () => {
+  it('steps the digit-commit selector agents (Claude, OpenClaude, Codex, Grok)', () => {
     expect(shouldStepNativeChatAskAnswer('claude')).toBe(true)
     expect(shouldStepNativeChatAskAnswer('openclaude')).toBe(true)
     // Codex 0.145's request_user_input card ignores typed labels and commits on
     // the highlighted row, so pasted answers misdeliver like STA-1860.
     expect(shouldStepNativeChatAskAnswer('codex')).toBe(true)
+    // Grok's ask_user_question card also commits option digits directly.
+    expect(shouldStepNativeChatAskAnswer('grok')).toBe(true)
   })
 
   it('does not step other or unknown agents', () => {
-    expect(shouldStepNativeChatAskAnswer('grok')).toBe(false)
     expect(shouldStepNativeChatAskAnswer('omp')).toBe(false)
     expect(shouldStepNativeChatAskAnswer('cursor')).toBe(false)
     expect(shouldStepNativeChatAskAnswer(null)).toBe(false)

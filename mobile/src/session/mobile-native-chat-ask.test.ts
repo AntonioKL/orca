@@ -104,23 +104,82 @@ describe('parseAskFromStatus', () => {
     expect(parseAskFromStatus('{"foo":1}')).toBeNull()
   })
 
-  it('parses Grok question notifications whose payload is the questions array', () => {
-    const grokQuestions = [
-      {
-        question: 'Ship to which region?',
-        options: [
-          { label: 'us-east', description: 'US East' },
-          { label: 'eu-west', description: 'EU West' }
-        ],
-        multi_select: false
-      }
-    ]
-    const ask = parseAskFromStatus(JSON.stringify(grokQuestions), 'ask_user_question')
-    expect(ask?.questions[0]).toMatchObject({
-      question: 'Ship to which region?',
-      options: [{ label: 'us-east' }, { label: 'eu-west' }],
-      multiSelect: false
-    })
+  it('parses the captured Grok ask_user_question envelope and options', () => {
+    // Captured from ~/.grok/sessions/.../chat_history.jsonl. Keep the
+    // {questions:[...]} envelope: Grok does not send a bare array here.
+    const grokInput = {
+      questions: [
+        {
+          question: 'How should we proceed with the 0.0.41 mobile release?',
+          options: [
+            {
+              label: 'Both platforms (Recommended)',
+              description:
+                'iOS: App Store Connect with existing TestFlight 0.0.41; Android: trigger release workflow'
+            },
+            {
+              label: 'iOS only',
+              description: 'Prepare App Store Connect copy; no Android CI.'
+            },
+            {
+              label: 'Android only',
+              description: 'Tag/dispatch Mobile Android Release with release_version 0.0.41'
+            },
+            {
+              label: 'Status only for now',
+              description: 'Stop here; I’ll handle ASC/Android myself with the drafts above'
+            }
+          ],
+          multi_select: false
+        },
+        {
+          question: 'How should we trigger the Android release (if shipping Android)?',
+          options: [
+            {
+              label: 'Tag push mobile-android-v0.0.41 (Recommended)',
+              description: 'git tag on origin/main and push'
+            },
+            {
+              label: 'workflow_dispatch',
+              description: 'Dispatch Mobile Android Release with release_version 0.0.41'
+            },
+            { label: 'N/A — not shipping Android', description: 'Skip Android trigger' }
+          ],
+          multi_select: false
+        }
+      ]
+    }
+    const ask = parseAskFromStatus(JSON.stringify(grokInput), 'ask_user_question')
+    expect(ask?.questions).toHaveLength(2)
+    expect(
+      ask?.questions.flatMap((question) => question.options.map((option) => option.label))
+    ).toEqual([
+      'Both platforms (Recommended)',
+      'iOS only',
+      'Android only',
+      'Status only for now',
+      'Tag push mobile-android-v0.0.41 (Recommended)',
+      'workflow_dispatch',
+      'N/A — not shipping Android'
+    ])
+    expect(ask?.questions.every((question) => question.multiSelect)).toBe(false)
+  })
+
+  it('maps Grok multi_select to the selector flag', () => {
+    const capturedShapeWithMultiSelect = {
+      questions: [
+        {
+          question: 'Pick release targets',
+          options: [{ label: 'iOS' }, { label: 'Android' }],
+          multi_select: true
+        }
+      ]
+    }
+    const ask = parseAskFromStatus(
+      JSON.stringify(capturedShapeWithMultiSelect),
+      'ask_user_question'
+    )
+    expect(ask?.questions[0]?.multiSelect).toBe(true)
   })
 })
 
