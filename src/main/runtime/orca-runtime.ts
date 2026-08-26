@@ -32321,7 +32321,10 @@ export class OrcaRuntimeService {
       throw new Error('selector_not_found')
     }
 
-    if (selector.startsWith('id:')) {
+    if (selector.startsWith('identity:')) {
+      const identityKey = selector.slice('identity:'.length)
+      candidates = worktrees.filter((worktree) => worktree.identity?.key === identityKey)
+    } else if (selector.startsWith('id:')) {
       const worktreeId = explicitWorktreeId ?? selector.slice(3)
       candidates = worktrees.filter((worktree) => worktree.id === worktreeId)
       if (candidates.length === 0) {

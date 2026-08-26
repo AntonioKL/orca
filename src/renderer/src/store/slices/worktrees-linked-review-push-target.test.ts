@@ -607,6 +607,51 @@ describe('worktree remote runtime mutations', () => {
     expect(mockApi.worktrees.resolvePrBase).not.toHaveBeenCalled()
     expect(mockApi.worktrees.updateMeta).not.toHaveBeenCalled()
   })
+  it('updates only the explicitly selected owner when locators collide', async () => {
+    const store = createTestStore()
+    const worktreeId = 'repo-shared::/same/path'
+    const sshA = makeWorktree({
+      id: worktreeId,
+      repoId: 'repo-shared',
+      hostId: 'ssh:ssh-a',
+      runtimeOwnerEnvironmentId: 'hub-a',
+      comment: 'A'
+    })
+    const sshB = makeWorktree({
+      id: worktreeId,
+      repoId: 'repo-shared',
+      hostId: 'ssh:ssh-b',
+      runtimeOwnerEnvironmentId: 'hub-b',
+      comment: 'B'
+    })
+    runtimeEnvironmentCall.mockResolvedValue({
+      id: 'rpc-set-selected-owner',
+      ok: true,
+      result: { worktree: sshB },
+      _meta: { runtimeId: 'hub-b' }
+    })
+    store.setState({
+      settings: { activeRuntimeEnvironmentId: 'hub-a' } as never,
+      worktreesByRepo: { 'repo-shared': [sshA, sshB] }
+    } as Partial<AppState>)
+
+    const result = await store
+      .getState()
+      .updateWorktreeMeta(worktreeId, { comment: 'selected B' }, { executionHostId: 'ssh:ssh-b' })
+
+    expect(result).toEqual({ ok: true })
+    expect(store.getState().worktreesByRepo['repo-shared']).toEqual([
+      expect.objectContaining({ hostId: 'ssh:ssh-a', comment: 'A' }),
+      expect.objectContaining({ hostId: 'ssh:ssh-b', comment: 'selected B' })
+    ])
+    expect(runtimeEnvironmentCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selector: 'hub-b',
+        method: 'worktree.set',
+        params: expect.objectContaining({ comment: 'selected B' })
+      })
+    )
+  })
 
   it('cleans up the in-flight lookup when restore is skipped for a genuinely ambiguous owner', async () => {
     const store = createTestStore()

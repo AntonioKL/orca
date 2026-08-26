@@ -480,6 +480,7 @@ describe('orca root help', () => {
     const rootHelp = String(logSpy.mock.calls[0][0])
     expect(rootHelp).not.toContain('--parent-workspace')
     expect(rootHelp).toContain('[--parent-worktree <selector>] [--no-parent]')
+    expect(rootHelp).toContain('identity:<identity>')
 
     logSpy.mockClear()
     await main(['worktree', 'create', '--help'], '/tmp/repo')

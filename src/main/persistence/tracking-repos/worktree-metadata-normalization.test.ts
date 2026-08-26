@@ -38,6 +38,32 @@ describe('normalizeWorktreeLinkedItemMetadata', () => {
     expect(normalizeWorktreeLinkedItemMetadata(state)).toBe(true)
     expect(state.workspaceLineageByChildKey).toEqual({})
   })
+  it('repairs malformed canonical metadata and alias maps', () => {
+    const state = makeState({
+      worktreeMetaByIdentity: null as unknown as PersistedState['worktreeMetaByIdentity'],
+      worktreeIdentityAliases: {
+        'local|r1::/tmp/wt': ['wt2:local:one', 'wt2:local:one', '', 42]
+      } as unknown as PersistedState['worktreeIdentityAliases']
+    })
+
+    expect(normalizeWorktreeLinkedItemMetadata(state)).toBe(true)
+    expect(state.worktreeMetaByIdentity).toEqual({})
+    expect(state.worktreeIdentityAliases).toEqual({
+      'local|r1::/tmp/wt': ['wt2:local:one']
+    })
+  })
+
+  it('drops malformed canonical metadata entries', () => {
+    const state = makeState({
+      worktreeMetaByIdentity: {
+        valid: makeMeta(),
+        malformed: null
+      } as unknown as PersistedState['worktreeMetaByIdentity']
+    })
+
+    expect(normalizeWorktreeLinkedItemMetadata(state)).toBe(true)
+    expect(state.worktreeMetaByIdentity).toEqual({ valid: makeMeta() })
+  })
 
   it('leaves already-normalized state clean', () => {
     const state = makeState({

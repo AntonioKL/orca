@@ -15,6 +15,7 @@ import {
 } from '../../../shared/workspace-linked-item'
 import { isWorkspaceLinkedItemSourceContextMatch } from '../../../shared/workspace-linked-item-source-context'
 import type { PersistedState } from '../../../shared/persisted-state-types'
+import type { WorktreeMeta } from '../../../shared/worktree/meta-types'
 
 // Why: worktrees deleted outside Orca orphan their worktreeMeta, so the map grew monotonically (63% dead on a heavy install).
 // GC stays narrow: local-host entries only (a local existsSync would falsely condemn SSH/WSL remote paths) and only after a 30-day idle grace.
@@ -80,6 +81,27 @@ export function gcStaleWorktreeMeta(state: PersistedState): number {
   return removed
 }
 
+function normalizeLinkedMetadata(meta: WorktreeMeta): boolean {
+  const linkedWorkItem = normalizeWorkspaceLinkedItem(meta.linkedWorkItem)
+  const sourceContext = normalizeStoredTaskSourceContext(meta.linkedTaskSourceContext)
+  const linkedTaskSourceContext = isWorkspaceLinkedItemSourceContextMatch(
+    linkedWorkItem,
+    sourceContext
+  )
+    ? sourceContext
+    : null
+  let changed = false
+  if (!areWorkspaceLinkedItemsEqual(meta.linkedWorkItem, linkedWorkItem)) {
+    meta.linkedWorkItem = linkedWorkItem
+    changed = true
+  }
+  if (!areTaskSourceContextsEqual(meta.linkedTaskSourceContext, linkedTaskSourceContext)) {
+    meta.linkedTaskSourceContext = linkedTaskSourceContext
+    changed = true
+  }
+  return changed
+}
+
 export function normalizeWorktreeLinkedItemMetadata(state: PersistedState): boolean {
   // Why: a hand-corrupted null lineage map would throw on the companion deletes below. The repair
   // itself is dirty state — without it the map stays null on disk and is repaired again every load.
@@ -116,20 +138,55 @@ export function normalizeWorktreeLinkedItemMetadata(state: PersistedState): bool
       changed = true
       continue
     }
-    const linkedWorkItem = normalizeWorkspaceLinkedItem(meta.linkedWorkItem)
-    const sourceContext = normalizeStoredTaskSourceContext(meta.linkedTaskSourceContext)
-    const linkedTaskSourceContext = isWorkspaceLinkedItemSourceContextMatch(
-      linkedWorkItem,
-      sourceContext
-    )
-      ? sourceContext
-      : null
-    if (!areWorkspaceLinkedItemsEqual(meta.linkedWorkItem, linkedWorkItem)) {
-      meta.linkedWorkItem = linkedWorkItem
+    changed = normalizeLinkedMetadata(meta) || changed
+  }
+  const rawIdentityMetadata = state.worktreeMetaByIdentity as unknown
+  if (
+    rawIdentityMetadata !== undefined &&
+    (typeof rawIdentityMetadata !== 'object' ||
+      rawIdentityMetadata === null ||
+      Array.isArray(rawIdentityMetadata))
+  ) {
+    state.worktreeMetaByIdentity = {}
+    changed = true
+  }
+  for (const [identityKey, meta] of Object.entries(state.worktreeMetaByIdentity ?? {})) {
+    if (typeof meta !== 'object' || meta === null || Array.isArray(meta)) {
+      delete state.worktreeMetaByIdentity?.[identityKey]
       changed = true
+      continue
     }
-    if (!areTaskSourceContextsEqual(meta.linkedTaskSourceContext, linkedTaskSourceContext)) {
-      meta.linkedTaskSourceContext = linkedTaskSourceContext
+    changed = normalizeLinkedMetadata(meta) || changed
+  }
+
+  const rawAliases = state.worktreeIdentityAliases as unknown
+  if (
+    rawAliases !== undefined &&
+    (typeof rawAliases !== 'object' || rawAliases === null || Array.isArray(rawAliases))
+  ) {
+    state.worktreeIdentityAliases = {}
+    changed = true
+  }
+  for (const [alias, rawIdentityKeys] of Object.entries(state.worktreeIdentityAliases ?? {})) {
+    if (!Array.isArray(rawIdentityKeys)) {
+      delete state.worktreeIdentityAliases?.[alias]
+      changed = true
+      continue
+    }
+    const identityKeys = [
+      ...new Set(
+        rawIdentityKeys.filter((key): key is string => typeof key === 'string' && key.length > 0)
+      )
+    ]
+    if (identityKeys.length === 0) {
+      delete state.worktreeIdentityAliases?.[alias]
+      changed = true
+    } else if (
+      identityKeys.length !== rawIdentityKeys.length ||
+      identityKeys.some((key, index) => key !== rawIdentityKeys[index])
+    ) {
+      state.worktreeIdentityAliases ??= {}
+      state.worktreeIdentityAliases[alias] = identityKeys
       changed = true
     }
   }

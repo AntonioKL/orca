@@ -67,6 +67,21 @@ export function pruneWorktreeStateForRepo(
       delete state.worktreeMeta[key]
     }
   }
+  const identityKeysToPrune = new Set<string>()
+  for (const [alias, identityKeys] of Object.entries(state.worktreeIdentityAliases ?? {})) {
+    const rawId = getWorktreeIdFromHostIdentity(alias)
+    const aliasHost = alias.slice(0, alias.indexOf('|'))
+    if (rawId.startsWith(prefix) && (hostId === null || aliasHost === hostId)) {
+      identityKeys.forEach((identityKey) => identityKeysToPrune.add(identityKey))
+      delete state.worktreeIdentityAliases?.[alias]
+    }
+  }
+  const retainedIdentityKeys = new Set(Object.values(state.worktreeIdentityAliases ?? {}).flat())
+  for (const identityKey of identityKeysToPrune) {
+    if (!retainedIdentityKeys.has(identityKey)) {
+      delete state.worktreeMetaByIdentity?.[identityKey]
+    }
+  }
   // Why: a host-scoped prune must touch only that host's session (legacy blob = local, one partition
   // per remote host); pruning every partition would wipe a surviving host's tabs and sleeping agents
   // for a shared repo id/path. A full removal (hostId === null) still clears every host.

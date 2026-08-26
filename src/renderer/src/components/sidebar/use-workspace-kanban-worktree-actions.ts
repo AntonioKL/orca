@@ -54,7 +54,11 @@ export function useWorkspaceKanbanWorktreeActions(args: {
         return
       }
       recordInteraction()
-      void args.updateWorktreeMeta(worktreeId, { workspaceStatus: status })
+      void args.updateWorktreeMeta(
+        worktreeId,
+        { workspaceStatus: status },
+        { executionHostId: current.hostId }
+      )
       args.maybeSyncTaskStatuses([worktreeId], status)
     },
     [args]
@@ -157,7 +161,11 @@ export function useWorkspaceKanbanWorktreeActions(args: {
       if (!current || current.isPinned) {
         return
       }
-      void args.updateWorktreeMeta(worktreeId, { isPinned: true })
+      void args.updateWorktreeMeta(
+        worktreeId,
+        { isPinned: true },
+        { executionHostId: current.hostId }
+      )
     },
     [args]
   )

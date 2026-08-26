@@ -1,0 +1,171 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { rmSync, mkdtempSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import type { PersistedState } from '../shared/persisted-state-types'
+import {
+  canonicalWorktreeIdentity,
+  composeWorktreeIdentityAlias
+} from '../shared/worktree/identity'
+import { createStore, readDataFile, testState, writeDataFile } from './persistence-test-harness'
+
+describe('host-qualified worktree metadata', () => {
+  const worktreeId = 'repo-1::/workspace/feature'
+
+  beforeEach(() => {
+    testState.dir = mkdtempSync(join(tmpdir(), 'orca-worktree-identity-'))
+  })
+
+  afterEach(() => {
+    rmSync(testState.dir, { recursive: true, force: true })
+  })
+
+  it('stores independent metadata for colliding locators on two hosts', () => {
+    const store = createStore()
+
+    store.setWorktreeMetaForHost(worktreeId, 'local', { displayName: 'Local feature' })
+    store.setWorktreeMetaForHost(worktreeId, 'ssh:build-box', { displayName: 'Remote feature' })
+
+    expect(store.getWorktreeMetaForHost(worktreeId, 'local')?.displayName).toBe('Local feature')
+    expect(store.getWorktreeMetaForHost(worktreeId, 'ssh:build-box')?.displayName).toBe(
+      'Remote feature'
+    )
+    store.flush()
+    const persisted = readDataFile() as PersistedState
+    expect(Object.keys(persisted.worktreeMetaByIdentity ?? {})).toHaveLength(2)
+    expect(store.getWorktreeMeta(worktreeId)?.displayName).toBe('Local feature')
+  })
+  it('reloads host-specific metadata without collapsing it to the legacy locator', () => {
+    const store = createStore()
+    store.setWorktreeMetaForHost(worktreeId, 'local', { displayName: 'Local feature' })
+    store.setWorktreeMetaForHost(worktreeId, 'ssh:build-box', { displayName: 'Remote feature' })
+    store.flush()
+
+    const reloaded = createStore()
+    expect(reloaded.getWorktreeMetaForHost(worktreeId, 'local')?.displayName).toBe('Local feature')
+    expect(reloaded.getWorktreeMetaForHost(worktreeId, 'ssh:build-box')?.displayName).toBe(
+      'Remote feature'
+    )
+  })
+  it('keeps canonical metadata current for legacy writers on a known owner', () => {
+    const store = createStore()
+    store.setWorktreeMetaForHost(worktreeId, 'local', { comment: 'before' })
+
+    store.setWorktreeMeta(worktreeId, { comment: 'after' })
+
+    expect(store.getWorktreeMetaForHost(worktreeId, 'local')?.comment).toBe('after')
+  })
+  it('backfills one stable instance for legacy metadata that omitted it', () => {
+    const seed = createStore()
+    seed.setWorktreeMeta(worktreeId, { displayName: 'Legacy feature' })
+    seed.flush()
+    const legacy = readDataFile() as PersistedState
+    delete legacy.worktreeMeta[worktreeId]?.instanceId
+    delete legacy.worktreeMetaByIdentity
+    delete legacy.worktreeIdentityAliases
+    writeDataFile(legacy)
+
+    const store = createStore()
+    const first = store.getWorktreeMetaForHost(worktreeId, 'local')
+    const second = store.getWorktreeMetaForHost(worktreeId, 'local')
+    store.setWorktreeMeta(worktreeId, { comment: 'after migration' })
+    store.flush()
+
+    expect(first?.instanceId).toBeTruthy()
+    expect(second?.instanceId).toBe(first?.instanceId)
+    expect(store.getWorktreeMetaForHost(worktreeId, 'local')?.comment).toBe('after migration')
+    const migrated = readDataFile() as PersistedState
+    expect(migrated.worktreeMeta[worktreeId]?.hostId).toBe('local')
+    expect(Object.keys(migrated.worktreeMetaByIdentity ?? {})).toHaveLength(1)
+  })
+  it('fails closed when one host-qualified locator names multiple instances', () => {
+    const seed = createStore()
+    const first = seed.setWorktreeMetaForHost(worktreeId, 'local', { displayName: 'First' })
+    seed.flush()
+    const persisted = readDataFile() as PersistedState
+    const alias = composeWorktreeIdentityAlias('local', worktreeId)
+    const secondKey = canonicalWorktreeIdentity({
+      worktreeId,
+      executionHostId: 'local',
+      instanceId: '33333333-3333-4333-8333-333333333333'
+    })
+    persisted.worktreeMetaByIdentity ??= {}
+    persisted.worktreeIdentityAliases ??= {}
+    persisted.worktreeMetaByIdentity[secondKey] = {
+      ...first,
+      instanceId: '33333333-3333-4333-8333-333333333333',
+      displayName: 'Second'
+    }
+    persisted.worktreeIdentityAliases[alias] = [
+      ...(persisted.worktreeIdentityAliases[alias] ?? []),
+      secondKey
+    ]
+    writeDataFile(persisted)
+
+    const store = createStore()
+    expect(store.getWorktreeMetaForHost(worktreeId, 'local')).toBeUndefined()
+    expect(() =>
+      store.setWorktreeMetaForHost(worktreeId, 'local', { comment: 'ambiguous write' })
+    ).toThrow('Worktree identity is ambiguous for this host and locator.')
+  })
+
+  it('removes only the selected host metadata when locators collide', () => {
+    const store = createStore()
+    store.setWorktreeMetaForHost(worktreeId, 'local', { displayName: 'Local feature' })
+    store.setWorktreeMetaForHost(worktreeId, 'ssh:build-box', { displayName: 'Remote feature' })
+
+    store.removeWorktreeMeta(worktreeId, 'ssh:build-box')
+
+    expect(store.getWorktreeMetaForHost(worktreeId, 'local')?.displayName).toBe('Local feature')
+    expect(store.getWorktreeMetaForHost(worktreeId, 'ssh:build-box')).toBeUndefined()
+    store.flush()
+    expect(
+      Object.keys((readDataFile() as PersistedState).worktreeMetaByIdentity ?? {})
+    ).toHaveLength(1)
+  })
+
+  it('moves the locator alias without changing canonical identity', () => {
+    const store = createStore()
+    const meta = store.setWorktreeMetaForHost(worktreeId, 'local', { displayName: 'Feature' })
+    const identityKey = canonicalWorktreeIdentity({
+      worktreeId,
+      executionHostId: 'local',
+      instanceId: meta.instanceId!
+    })
+    const renamedId = 'repo-1::/workspace/renamed-feature'
+
+    store.migrateWorktreeIdentity(worktreeId, renamedId)
+
+    expect(store.getWorktreeMetaForHost(worktreeId, 'local')).toBeUndefined()
+    expect(store.getWorktreeMetaForHost(renamedId, 'local')?.instanceId).toBe(meta.instanceId)
+    store.flush()
+    const persisted = readDataFile() as PersistedState
+    expect(persisted.worktreeMetaByIdentity?.[identityKey]?.displayName).toBe('Feature')
+    expect(
+      persisted.worktreeIdentityAliases?.[composeWorktreeIdentityAlias('local', renamedId)]
+    ).toEqual([identityKey])
+  })
+
+  it('keeps the canonical identity stable when the locator changes', () => {
+    const store = createStore()
+    const meta = store.setWorktreeMetaForHost(worktreeId, 'local', {
+      displayName: 'Feature'
+    })
+
+    const before = canonicalWorktreeIdentity({
+      worktreeId,
+      executionHostId: 'local',
+      instanceId: meta.instanceId!
+    })
+    const after = canonicalWorktreeIdentity({
+      worktreeId: 'repo-1::/workspace/renamed-feature',
+      executionHostId: 'local',
+      instanceId: meta.instanceId!
+    })
+
+    expect(after).toBe(before)
+    expect(composeWorktreeIdentityAlias('local', worktreeId)).toBe(
+      'local|repo-1::/workspace/feature'
+    )
+  })
+})

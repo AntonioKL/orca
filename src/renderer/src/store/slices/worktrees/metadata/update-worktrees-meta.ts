@@ -95,7 +95,8 @@ export function createUpdateWorktreesMeta(
                   persistWorktreeMeta(
                     settingsForWorktreeOwner(state, worktreeId, hostId),
                     worktreeId,
-                    updates
+                    updates,
+                    hostId
                   )
                 )
               ))

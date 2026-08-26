@@ -24,6 +24,7 @@ export type TestStore = {
   getWorktreeMeta: KeyedStoreMock
   getAllWorktreeMeta: StoreMock
   setWorktreeMeta: KeyedStoreWriteMock
+  setWorktreeMetaForHost: StoreMock
   getProjectHostSetups: StoreMock
   removeWorktreeMeta: KeyedStoreMock
   removeWorkspaceSessionStateForWorktree: KeyedStoreMock
@@ -56,6 +57,7 @@ export const store: TestStore = {
   getWorktreeMeta: vi.fn(),
   getAllWorktreeMeta: vi.fn(),
   setWorktreeMeta: vi.fn(),
+  setWorktreeMetaForHost: vi.fn(),
   getProjectHostSetups: vi.fn(),
   removeWorktreeMeta: vi.fn(),
   removeWorkspaceSessionStateForWorktree: vi.fn(),

@@ -419,6 +419,7 @@ describe('worktree remote runtime mutations', () => {
     ])
     expect(mockApi.worktrees.updateMeta).toHaveBeenCalledWith({
       worktreeId,
+      executionHostId: 'local',
       updates: { manualOrder: 9000 }
     })
     expect(runtimeEnvironmentCall).toHaveBeenCalledWith({

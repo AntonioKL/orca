@@ -64,6 +64,8 @@ export type DirectSshWorktreeFetchOptions = WorktreeFetchOptions & {
 export type WorktreeMetaUpdateGuard = (worktree: Worktree | DetectedWorktree | undefined) => boolean
 
 export type WorktreeMetaUpdateOptions = {
+  /** Required to mutate one row when the legacy locator exists on multiple hosts. */
+  executionHostId?: ExecutionHostId
   shouldApply?: WorktreeMetaUpdateGuard
   /** Skip the automatic review refetch when the caller owns an equivalent refresh. */
   suppressHostedReviewRefresh?: boolean
@@ -410,7 +412,8 @@ export function withoutErasedRequiredWorktreeFields(
 export function applyWorktreeUpdates(
   worktreesByRepo: Record<string, Worktree[]>,
   worktreeId: string,
-  rawUpdates: Partial<WorktreeMeta>
+  rawUpdates: Partial<WorktreeMeta>,
+  executionHostId?: ExecutionHostId
 ): Record<string, Worktree[]> {
   const updates = withoutErasedRequiredWorktreeFields(rawUpdates)
   const repoId = getRepoIdFromWorktreeId(worktreeId)
@@ -421,7 +424,10 @@ export function applyWorktreeUpdates(
 
   let changed = false
   const nextWorktrees = worktrees.map((worktree) => {
-    if (worktree.id !== worktreeId) {
+    if (
+      worktree.id !== worktreeId ||
+      (executionHostId !== undefined && worktree.hostId !== executionHostId)
+    ) {
       return worktree
     }
 

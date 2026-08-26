@@ -34,7 +34,8 @@ export function createUpdateWorktreeMeta(
 ): WorktreeSlice['updateWorktreeMeta'] {
   return async (worktreeId, updates, options) => {
     const shouldApplyUpdate = options?.shouldApply
-    const existingWorktree = get().getKnownWorktreeById(worktreeId)
+    const executionHostId = options?.executionHostId
+    const existingWorktree = findKnownWorktreeById(get(), worktreeId, executionHostId)
     if (shouldApplyUpdate && !shouldApplyUpdate(existingWorktree)) {
       return { ok: true }
     }
@@ -139,15 +140,24 @@ export function createUpdateWorktreeMeta(
 
     let didApply = false
     set((s) => {
-      if (shouldApplyUpdate && !shouldApplyUpdate(findKnownWorktreeById(s, worktreeId))) {
+      if (
+        shouldApplyUpdate &&
+        !shouldApplyUpdate(findKnownWorktreeById(s, worktreeId, executionHostId))
+      ) {
         return {}
       }
       didApply = true
-      const nextWorktrees = applyWorktreeUpdates(s.worktreesByRepo, worktreeId, enriched)
+      const nextWorktrees = applyWorktreeUpdates(
+        s.worktreesByRepo,
+        worktreeId,
+        enriched,
+        executionHostId
+      )
       const nextDetectedWorktrees = applyDetectedWorktreeUpdates(
         s.detectedWorktreesByRepo,
         worktreeId,
-        enriched
+        enriched,
+        executionHostId
       )
       const cacheKey =
         reviewRepo && reviewBranch
@@ -231,7 +241,12 @@ export function createUpdateWorktreeMeta(
     }
 
     try {
-      await persistWorktreeMeta(settingsForWorktreeOwner(get(), worktreeId), worktreeId, enriched)
+      await persistWorktreeMeta(
+        settingsForWorktreeOwner(get(), worktreeId, executionHostId),
+        worktreeId,
+        enriched,
+        executionHostId ?? existingWorktree?.hostId
+      )
       if (
         !options?.suppressHostedReviewRefresh &&
         reviewRepo &&

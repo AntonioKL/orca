@@ -127,6 +127,7 @@ export function setupWorktreeHandlers(): WorktreeRuntimeStub {
     store.getWorktreeMeta,
     store.getAllWorktreeMeta,
     store.setWorktreeMeta,
+    store.setWorktreeMetaForHost,
     store.getProjectHostSetups,
     store.removeWorktreeMeta,
     store.removeWorkspaceSessionStateForWorktree,
@@ -194,6 +195,7 @@ export function setupWorktreeHandlers(): WorktreeRuntimeStub {
   store.getRetiredWorktreeNameRegistry.mockReturnValue({ exhaustedTiers: 0, names: [] })
   resetRetirementCollisionKeyCacheForTests()
   store.setWorktreeMeta.mockReturnValue({})
+  store.setWorktreeMetaForHost.mockReturnValue({})
   store.getProjectHostSetups.mockReturnValue([
     {
       id: 'repo-1',
