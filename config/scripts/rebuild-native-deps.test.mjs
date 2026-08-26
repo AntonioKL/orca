@@ -218,6 +218,7 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
     try {
       writeFakeUsableElectronPackage(projectDir, { platform: 'win32' })
       writeFakeElectronRebuild(projectDir)
+      writeFakeWindowsCertificateStore(projectDir)
       writeFakeNodePtyConptyPayload(projectDir, 'x64')
 
       const result = runRebuildScript(
