@@ -133,6 +133,74 @@ describe('createRemoteRuntimePtyTransport', () => {
     }
   })
 
+  it('drops queued fallback input after the terminal handle is rebound', async () => {
+    vi.useFakeTimers()
+    runtimeSubscribe.mockImplementation(
+      async (_args: unknown, callbacks: typeof subscriptionCallbacks) => {
+        subscriptionCallbacks = callbacks
+        return { unsubscribe: vi.fn(), sendBinary: subscriptionSendBinary }
+      }
+    )
+    try {
+      let releaseFirst!: () => void
+      const firstSettled = new Promise<void>((resolve) => {
+        releaseFirst = resolve
+      })
+      const sends: string[] = []
+      const defaultRuntimeCall = runtimeCall.getMockImplementation()
+      runtimeCall.mockImplementation((args: { method: string; params?: { text?: string } }) => {
+        if (args.method === 'terminal.send') {
+          const text = args.params?.text ?? ''
+          sends.push(text)
+          if (text === 'first') {
+            return firstSettled.then(() => ({
+              ok: true,
+              result: { send: { handle: 'terminal-1', accepted: true, bytesWritten: 5 } }
+            }))
+          }
+          return Promise.resolve({
+            ok: true,
+            result: { send: { handle: 'terminal-2', accepted: true, bytesWritten: 6 } }
+          })
+        }
+        return defaultRuntimeCall?.(args)
+      })
+
+      const { createRemoteRuntimePtyTransport } = await import('./remote-runtime-pty-transport')
+      const transport = createRemoteRuntimePtyTransport('env-1', {
+        worktreeId: 'wt-1',
+        tabId: 'tab-1',
+        leafId: 'pane:1'
+      })
+      transport.attach({
+        existingPtyId: 'remote:env-1@@terminal-1',
+        callbacks: {}
+      })
+      await vi.waitFor(() => expect(transport.getPtyId()).toBe('remote:env-1@@terminal-1'))
+
+      expect(transport.sendInput('first')).toBe(true)
+      await vi.advanceTimersByTimeAsync(8)
+      expect(transport.sendInput('second')).toBe(true)
+      await vi.advanceTimersByTimeAsync(8)
+      expect(sends).toEqual(['first'])
+
+      resolvedPaneHandle = 'terminal-2'
+      transport.attach({
+        existingPtyId: 'remote:env-1@@terminal-2',
+        callbacks: {}
+      })
+      await vi.waitFor(() => expect(transport.getPtyId()).toBe('remote:env-1@@terminal-2'))
+
+      releaseFirst()
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(sends).toEqual(['first'])
+      transport.destroy?.()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('reports terminal_not_writable from the one-shot runtime fallback', async () => {
     vi.useFakeTimers()
     runtimeSubscribe.mockImplementation(

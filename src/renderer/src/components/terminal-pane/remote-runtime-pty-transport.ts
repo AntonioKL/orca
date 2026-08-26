@@ -1393,6 +1393,14 @@ export function createRemoteRuntimePtyTransport(
         ? unacknowledgedInputTail.promise
         : Promise.resolve()
     const current = previous.then(async () => {
+      if (
+        !connected ||
+        lifecycleEpoch !== targetLifecycleEpoch ||
+        handle !== targetHandle ||
+        recoveryBlocksIo()
+      ) {
+        return
+      }
       try {
         const result = await callRuntime<{ send: RuntimeTerminalSend }>('terminal.send', {
           terminal: targetHandle,
