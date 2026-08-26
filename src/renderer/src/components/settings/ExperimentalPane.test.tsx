@@ -241,7 +241,7 @@ describe('ExperimentalPane', () => {
 
     expect(container.textContent).toContain('Use updated structured native chat')
     expect(container.textContent).toContain(
-      'Local sessions only. Remote and SSH sessions continue to use terminal chat.'
+      'Local macOS and Linux sessions only for now. Windows, WSL, remote, and SSH sessions continue to use terminal chat.'
     )
     expect(container.textContent).toContain('Chat UI')
     expect(container.textContent).not.toContain('Default view')

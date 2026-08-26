@@ -72,7 +72,7 @@ export function NativeChatExperimentalSetting({
               <p className="text-xs text-muted-foreground">
                 {translate(
                   'auto.components.settings.ExperimentalPane.nativeChat.structuredScope',
-                  'Local sessions only. Remote and SSH sessions continue to use terminal chat.'
+                  'Local macOS and Linux sessions only for now. Windows, WSL, remote, and SSH sessions continue to use terminal chat.'
                 )}
               </p>
             </div>
