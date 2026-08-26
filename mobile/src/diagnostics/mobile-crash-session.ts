@@ -4,6 +4,7 @@ import {
   type CrashReportBreadcrumb,
   type CrashReportBreadcrumbData
 } from '../../../src/shared/crash-reporting'
+import { describeCrashError } from '../../../src/shared/crash-error-description'
 import {
   MAX_MOBILE_CRASH_BREADCRUMBS,
   MOBILE_CRASH_SESSION_STORAGE_KEY,
@@ -27,8 +28,6 @@ type JournalOptions = {
   now?: () => number
   createSessionId?: () => string
 }
-
-const MAX_STACK_CHARS = 2_000
 
 const SAFE_ROUTE_SEGMENTS = new Set([
   'about',
@@ -137,9 +136,14 @@ export class MobileCrashSessionJournal {
   async recordRenderError(error: unknown, componentStack?: string | null): Promise<void> {
     await this.start()
     await this.enqueue(async () => {
-      this.appendBreadcrumb('render_error_contained', describeError(error, componentStack))
+      this.appendBreadcrumb('render_error_contained', describeCrashError(error, componentStack))
       await this.persistJournal()
     })
+  }
+
+  async getLatestAbnormalSession(): Promise<MobileCrashSessionSnapshot | null> {
+    await this.start()
+    return this.enqueue(async () => this.journal?.latestAbnormalSession ?? null)
   }
 
   async buildReport(app: { version: string; platform: string }): Promise<string> {
@@ -236,39 +240,6 @@ function normalizeAppState(state: string): string {
   return ['active', 'background', 'inactive', 'unknown', 'extension'].includes(state)
     ? state
     : 'unknown'
-}
-
-function describeError(error: unknown, componentStack?: string | null): CrashReportBreadcrumbData {
-  const candidate = error instanceof Error ? error : null
-  const message = candidate?.message ?? String(error)
-  const stack = extractStackFrames(candidate?.stack, message)
-  return {
-    errorName: sanitizeCrashReportString(candidate?.name || 'NonErrorThrown', 80),
-    errorFingerprint: fingerprint(message),
-    ...(stack ? { errorStack: sanitizeCrashReportString(stack, MAX_STACK_CHARS) } : {}),
-    ...(componentStack?.trim()
-      ? { componentStack: sanitizeCrashReportString(componentStack.trim(), MAX_STACK_CHARS) }
-      : {})
-  }
-}
-
-function extractStackFrames(stack: string | undefined, message: string): string | undefined {
-  const messageLineCount = message.split(/\r?\n/).length
-  const lines = (stack?.split(/\r?\n/) ?? []).slice(messageLineCount)
-  const firstFrameIndex = lines.findIndex((line) => /^\s+at\b/.test(line))
-  if (firstFrameIndex === -1) {
-    return undefined
-  }
-  return lines.slice(firstFrameIndex).join('\n').trim() || undefined
-}
-
-function fingerprint(value: string): string {
-  let hash = 0x811c9dc5
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index)
-    hash = Math.imul(hash, 0x01000193)
-  }
-  return (hash >>> 0).toString(16).padStart(8, '0')
 }
 
 function appendSessionLines(lines: string[], session: MobileCrashSessionSnapshot): void {

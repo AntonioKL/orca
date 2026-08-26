@@ -127,7 +127,7 @@ export type CrashReportCopyDiagnosticsArgs = {
 const MAX_STRING_DETAIL_LENGTH = 240
 const MAX_STACK_DETAIL_LENGTH = 4_000
 const MAX_BREADCRUMB_NAME_LENGTH = 80
-const MAX_BREADCRUMBS = 30
+const MAX_CRASH_REPORT_BREADCRUMBS = 30
 const MAX_FORMATTED_REPORT_LENGTH = 64_000
 const FORMATTED_REPORT_TRUNCATION_SUFFIX =
   '\n\n[Crash report truncated to fit feedback endpoint limits.]'
@@ -214,7 +214,7 @@ export function sanitizeCrashReportBreadcrumbs(
     return undefined
   }
   const sanitized = breadcrumbs
-    .slice(-MAX_BREADCRUMBS)
+    .slice(-MAX_CRASH_REPORT_BREADCRUMBS)
     .map((breadcrumb): CrashReportBreadcrumb | null => {
       if (!breadcrumb.name.trim() || !breadcrumb.createdAt.trim()) {
         return null

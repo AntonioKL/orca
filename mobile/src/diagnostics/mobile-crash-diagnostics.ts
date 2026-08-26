@@ -24,6 +24,10 @@ export function recordMobileRenderError(
   return journal.recordRenderError(error, componentStack)
 }
 
+export function getPreviousMobileCrashSession(): Promise<MobileCrashSessionSnapshot | null> {
+  return journal.getLatestAbnormalSession()
+}
+
 export function buildMobileCrashDiagnosticsReport(): Promise<string> {
   return journal.buildReport({
     version: Constants.expoConfig?.version ?? 'unknown',

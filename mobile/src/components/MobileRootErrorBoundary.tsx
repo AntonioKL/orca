@@ -38,10 +38,8 @@ export class MobileRootErrorBoundary extends Component<Props, State> {
   }
 
   handleReturnHome = (): void => {
-    this.setState(
-      ({ resetKey }) => ({ error: null, resetKey: resetKey + 1 }),
-      this.props.onReturnHome
-    )
+    this.props.onReturnHome()
+    this.setState(({ resetKey }) => ({ error: null, resetKey: resetKey + 1 }))
   }
 
   handleReport = (): void => {
@@ -101,7 +99,7 @@ function MobileRootErrorFallback({
           style={styles.secondaryButton}
           onPress={onReturnHome}
         >
-          <House size={16} color={colors.textSecondary} />
+          <House size={16} color={colors.textPrimary} />
           <Text style={styles.secondaryButtonText}>Return home</Text>
         </Pressable>
         <Pressable
@@ -110,7 +108,7 @@ function MobileRootErrorFallback({
           style={styles.secondaryButton}
           onPress={onReport}
         >
-          <Bug size={16} color={colors.textSecondary} />
+          <Bug size={16} color={colors.textPrimary} />
           <Text style={styles.secondaryButtonText}>Report error</Text>
         </Pressable>
       </View>
@@ -181,10 +179,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: spacing.sm,
     paddingHorizontal: spacing.xl,
-    borderRadius: radii.button
+    borderRadius: radii.button,
+    backgroundColor: colors.bgRaised
   },
   secondaryButtonText: {
-    color: colors.textSecondary,
+    color: colors.textPrimary,
     fontSize: typography.bodySize,
     fontWeight: '500'
   }

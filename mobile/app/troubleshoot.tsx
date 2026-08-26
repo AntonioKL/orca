@@ -22,6 +22,7 @@ import {
   AlertTriangle
 } from 'lucide-react-native'
 import { colors, spacing, typography } from '../src/theme/mobile-theme'
+import { PreviousCrashSessionBanner } from '../src/components/PreviousCrashSessionBanner'
 import { loadHosts } from '../src/transport/host-store'
 import {
   startDiagnosticFetchTimeout,
@@ -33,7 +34,10 @@ import {
   unreachableHostDetail
 } from '../src/diagnostics/host-reachability'
 import { troubleshootCommonIssues } from '../src/diagnostics/troubleshoot-common-issues'
-import { buildMobileCrashDiagnosticsReport } from '../src/diagnostics/mobile-crash-diagnostics'
+import {
+  buildMobileCrashDiagnosticsReport,
+  getPreviousMobileCrashSession
+} from '../src/diagnostics/mobile-crash-diagnostics'
 
 type DiagnosticStatus = 'idle' | 'running' | 'done'
 
@@ -64,9 +68,19 @@ export default function TroubleshootScreen() {
   const diagnosticRunRef = useRef(0)
   const activeInternetCheckRef = useRef<DiagnosticFetchTimeout | null>(null)
   const [crashDiagnosticsCopied, setCrashDiagnosticsCopied] = useState(false)
+  const [hasPreviousCrashSession, setHasPreviousCrashSession] = useState(false)
+  const crashSessionLoadedRef = useRef(false)
 
   const setTroubleshootRootRef = useCallback((node: View | null): void => {
     if (node !== null) {
+      if (!crashSessionLoadedRef.current) {
+        crashSessionLoadedRef.current = true
+        void getPreviousMobileCrashSession().then((session) => {
+          if (!abortRef.current) {
+            setHasPreviousCrashSession(session !== null)
+          }
+        })
+      }
       return
     }
     // Why: diagnostics can outlive the screen; cancel the active run when the
@@ -199,6 +213,8 @@ export default function TroubleshootScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
+        {hasPreviousCrashSession && <PreviousCrashSessionBanner />}
+
         <Pressable
           style={({ pressed }) => [
             styles.diagnosticButton,

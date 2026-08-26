@@ -84,6 +84,7 @@ vi.mock('../diagnostics/mobile-crash-diagnostics', () => ({
 }))
 
 import RootLayout from '../../app/_layout'
+import { colors } from '../theme/mobile-theme'
 
 describe('mobile root error boundary', () => {
   let renderer!: ReactTestRenderer
@@ -121,6 +122,10 @@ describe('mobile root error boundary', () => {
       expect.objectContaining({ message: 'route render exploded' }),
       expect.any(String)
     )
+    expect(buttons[1]?.props.style).toEqual(
+      expect.objectContaining({ backgroundColor: colors.bgRaised })
+    )
+    expect(buttons[1]?.findByType('House').props.color).toBe(colors.textPrimary)
 
     act(() => buttons[2]?.props.onPress())
     expect(mocks.shareDiagnostics).toHaveBeenCalledOnce()
@@ -148,19 +153,19 @@ describe('mobile root error boundary', () => {
     expect(mocks.recordRoute).toHaveBeenCalledWith(['h', '[hostId]', 'session', '[worktreeId]'])
   })
 
-  it('returns home after remounting the failed route', () => {
+  it('navigates home before remounting the failed route', () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
     act(() => {
       renderer = create(createElement(RootLayout))
     })
 
-    mocks.routeShouldThrow = false
     mocks.routerReplace.mockImplementationOnce(() => {
-      expect(renderer.root.findAllByProps({ testID: 'mobile-root-error-boundary' })).toHaveLength(0)
+      mocks.routeShouldThrow = false
     })
     const returnHome = renderer.root.findByProps({ accessibilityLabel: 'Return home' })
     act(() => returnHome.props.onPress())
 
     expect(mocks.routerReplace).toHaveBeenCalledWith('/')
+    expect(renderer.root.findAllByProps({ testID: 'mobile-root-error-boundary' })).toHaveLength(0)
   })
 })

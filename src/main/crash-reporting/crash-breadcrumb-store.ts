@@ -5,7 +5,7 @@ import {
   type CrashReportBreadcrumb
 } from '../../shared/crash-reporting'
 
-const MAX_BREADCRUMBS = 30
+const MAX_DESKTOP_CRASH_BREADCRUMBS = 30
 // Why: retain two thresholds for each renderer surface without growing the ring.
 const MAX_RETAINED_BREADCRUMBS = 4
 // Why: coalesceKey embeds an open-string agentType (length-trimmed only, never
@@ -78,7 +78,7 @@ export function recordCrashBreadcrumb(
     return breadcrumb
   }
   breadcrumbs.push(breadcrumb)
-  if (breadcrumbs.length > MAX_BREADCRUMBS) {
+  if (breadcrumbs.length > MAX_DESKTOP_CRASH_BREADCRUMBS) {
     breadcrumbs.shift()
   }
   return breadcrumb
@@ -178,7 +178,7 @@ function isCoalescedCrumbStillInEvidence(
     isVisibleToReporter(breadcrumb, reporterOrigin)
   )
   return visibleRecent
-    .slice(-(MAX_BREADCRUMBS - retained.length))
+    .slice(-(MAX_DESKTOP_CRASH_BREADCRUMBS - retained.length))
     .some((recentBreadcrumb) => recentBreadcrumb === crumb)
 }
 
@@ -254,7 +254,7 @@ export function getCrashBreadcrumbSnapshot(reporterOrigin?: string): CrashReport
   const visibleRecent = breadcrumbs.filter((breadcrumb) =>
     isVisibleToReporter(breadcrumb, reporterOrigin)
   )
-  const recent = visibleRecent.slice(-(MAX_BREADCRUMBS - retained.length))
+  const recent = visibleRecent.slice(-(MAX_DESKTOP_CRASH_BREADCRUMBS - retained.length))
   return [...retained, ...recent]
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
     .map((breadcrumb) => ({
