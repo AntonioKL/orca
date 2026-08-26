@@ -63,10 +63,7 @@ import type { AutomationTemplate } from './automation-templates'
 import { getAutomationTargetAvailability } from './automation-target-availability'
 import { getAutomationCreateAvailability } from './automation-create-admission'
 import { buildAutomationRunContextForRepo } from './automation-run-context'
-import {
-  repoMatchesExternalAutomationTarget,
-  getExternalAutomationTargetForRepo
-} from './automation-external-target-match'
+import { repoMatchesExternalAutomationTarget } from './automation-external-target-match'
 import { ensureHooksConfirmed } from '@/lib/ensure-hooks-confirmed'
 import { getSettingsForRepoRuntimeOwner } from '@/lib/repo-runtime-owner'
 import { checkRuntimeHooks } from '@/runtime/runtime-hooks-client'
@@ -82,6 +79,7 @@ import {
   getAutomationHostTargetFromKey,
   getAutomationHostTargetKey,
   getAutomationListTarget,
+  getAutomationOwnerTarget,
   getAutomationTargetFromHostId,
   listAutomationsForTarget,
   runAutomationNowForTarget,
@@ -994,9 +992,6 @@ export default function AutomationsPage(): React.JSX.Element {
     ? getAutomationOwnerTarget(editingAutomation, automationHostTarget)
     : getAutomationListTarget(settings)
   const isOrcaForm = createTarget === 'orca' && editingExternalTarget === null
-  const dialogRepos = isOrcaForm
-    ? getAutomationCreateRepos(repos, automationDialogTarget)
-    : getAutomationCreateRepos(repos, { kind: 'local' })
 
   const destinationForProject = useCallback(
     (projectId: string): AutomationCreateDestination | null => {
@@ -1349,27 +1344,7 @@ export default function AutomationsPage(): React.JSX.Element {
       : null
     const projectId = targetWorktree?.repoId ?? fallbackRepo?.id ?? ''
     const workspaceId = targetWorktree?.id ?? fallbackWorktree?.id ?? ''
-    const nextDraft: AutomationDraft = {
-      name: job.name,
-      prompt: job.prompt ?? job.promptPreview,
-      agentId: 'hermes',
-      projectId,
-      workspaceMode: 'existing',
-      workspaceId,
-      baseBranch: '',
-      setupDecision: undefined,
-      reuseSession: false,
-      precheckCommand: '',
-      precheckTimeoutSeconds: '60',
-      preset: hasCustomSchedule ? 'custom' : 'weekdays',
-      time: AUTOMATION_DEFAULT_TIME,
-      dayOfWeek: '1',
-      customSchedule: hasCustomSchedule ? rawSchedule : '',
-      missedRunGraceMinutes: '720',
-      scheduleWarning: hasCustomSchedule
-        ? null
-        : 'This Hermes automation has an unsupported saved schedule. Pick a supported schedule before saving changes.'
-    }
+    const nextDraft = buildExternalAutomationEditDraft(job, { projectId, workspaceId })
     setEditingAutomationId(null)
     setEditingRowKey(null)
     setEditingDestination(null)
@@ -1576,7 +1551,7 @@ export default function AutomationsPage(): React.JSX.Element {
         )
         return
       }
-      if (isOrcaForm && !dialogRepos.some((repo) => repo.id === draft.projectId)) {
+      if (isOrcaForm && !editorProjects.some((repo) => repo.id === draft.projectId)) {
         toast.error(
           translate(
             'auto.components.automations.AutomationsPage.destinationProjectUnavailable',
