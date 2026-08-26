@@ -78,7 +78,6 @@ import {
   getAutomationHostTargetFromKey,
   getAutomationHostTargetKey,
   getAutomationListTarget,
-  getAutomationOwnerTarget,
   getAutomationTargetFromHostId,
   listAutomationsForTarget,
   runAutomationNowForTarget,
@@ -139,6 +138,7 @@ import {
   groupReposByAutomationAuthority
 } from './automation-authority-identity'
 import {
+  automationCreateHostOffered,
   automationCreateHostStableKey,
   resolveAutomationCreateDestination,
   revalidateAutomationCreateDestination,
@@ -679,15 +679,19 @@ export default function AutomationsPage(): React.JSX.Element {
   // The row's own host, from its captured owner. A page-level target cannot
   // speak for a list spanning authorities, and the legacy arm below it is only
   // ever reached by rows the desktop's unscoped list produced.
-  const automationHostTargetFor = useCallback(
-    (row: AutomationListRow): AutomationHostTarget | null => {
-      const owner = capturedAutomationOwner(capturedAutomationOwners, row.key).owner
+  const automationHostTargetForRowKey = useCallback(
+    (rowKey: string | null): AutomationHostTarget | null => {
+      const owner = capturedAutomationOwner(capturedAutomationOwners, rowKey).owner
       if (owner?.authority.kind === 'runtime') {
         return { kind: 'environment', environmentId: owner.authority.environmentId }
       }
       return owner ? { kind: 'local' } : automationHostTarget
     },
     [automationHostTarget, capturedAutomationOwners]
+  )
+  const automationHostTargetFor = useCallback(
+    (row: AutomationListRow): AutomationHostTarget | null => automationHostTargetForRowKey(row.key),
+    [automationHostTargetForRowKey]
   )
   const automationDispatchContext = useMemo(
     () => ({ capturedOwners: capturedAutomationOwners, authority: automationAuthority }),
@@ -980,18 +984,25 @@ export default function AutomationsPage(): React.JSX.Element {
     }
   }, [activeWorktreeId, editorProjects, repoMap, worktreeMap, worktreesByRepo])
 
-  const canCreateAutomation = hostCatalog.entries.some(
-    (entry) => resolveAutomationCreateDestination(entry).status === 'ready'
-  )
-  const editingAutomation = editingAutomationId
-    ? (automations.find((automation) => automation.id === editingAutomationId) ?? null)
+  // Gated on what the picker offers, not on eligibility: with every offered
+  // host ineligible (e.g. all pre-host-scoping servers), the dialog is where
+  // the repair is stated, so the button must still open it.
+  const canCreateAutomation = hostCatalog.entries.some(automationCreateHostOffered)
+  // The edited row's own captured owner names the host, not the ambient list
+  // target: a remote row need not appear in `automations` at all, and looking it
+  // up by id there would answer with whichever authority the page last listed.
+  // Uncaptured rows fall back to the record's own run context, never the filter.
+  const editingRow = editingRowKey
+    ? (visibleRows.find((row) => row.key === editingRowKey) ?? null)
     : null
-  const automationDialogTarget = editingAutomation
-    ? getAutomationOwnerTarget(editingAutomation, automationHostTarget)
-    : getAutomationListTarget(settings)
+  const automationDialogTarget =
+    editingAutomationId !== null
+      ? (automationHostTargetForRowKey(editingRowKey) ??
+        getAutomationTargetFromHostId(editingRow?.automation.runContext?.hostId))
+      : getAutomationListTarget(settings)
   const isOrcaForm = createTarget === 'orca' && editingExternalTarget === null
   const dialogRepos = isOrcaForm
-    ? editingAutomation
+    ? editingAutomationId !== null
       ? getAutomationCreateRepos(repos, automationDialogTarget)
       : editorProjects
     : getAutomationCreateRepos(repos, { kind: 'local' })
@@ -1032,13 +1043,12 @@ export default function AutomationsPage(): React.JSX.Element {
         ? { kind: 'runtime', environmentId: automationHostTarget.environmentId }
         : { kind: 'desktop' }
     )
+    // Managers are per host and failures are per provider: the probe settles
+    // into its own state on its own time, and must neither fail the automation
+    // list nor keep the list loading while a slow provider answers.
+    void reloadExternalManagers().catch(() => undefined)
     try {
-      const [nextAutomations] = await Promise.all([
-        listAutomationsForTarget(automationHostTarget),
-        // Managers are per host and failures are per provider, so this settles
-        // on its own and must not be able to fail the automation list with it.
-        reloadExternalManagers().catch(() => undefined)
-      ])
+      const nextAutomations = await listAutomationsForTarget(automationHostTarget)
       // Selection and run history are deliberately not written here: this call
       // addressed one authority, and the selected row may belong to another.
       setAutomations(nextAutomations)
@@ -1552,6 +1562,17 @@ export default function AutomationsPage(): React.JSX.Element {
           )
         )
         return
+      }
+      // Refused here, before the side-effectful steps below (hooks load, trust
+      // prompt): the user must not answer a trust dialog for a create that the
+      // destination was always going to reject. `createDraftAutomation` checks
+      // again after those awaits, which is the fence that actually gates the send.
+      if (editingAutomationId === null) {
+        const earlyDestination = createDestination.check(draft.projectId)
+        if (!earlyDestination.ok) {
+          setEditorNotice(earlyDestination.notice)
+          return
+        }
       }
       const now = Date.now()
       const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -2231,7 +2252,7 @@ export default function AutomationsPage(): React.JSX.Element {
         canSave={canSaveDraft}
         isEditingExternal={editingExternalTarget !== null}
         createTarget={createTarget}
-        repos={editorProjects}
+        repos={dialogRepos}
         projectHostSetups={projectHostSetups}
         automationYamlHooksByRepoKey={automationYamlHooksByRepoKey}
         getAutomationHooksCacheKey={getAutomationHooksCacheKey}

@@ -15402,7 +15402,6 @@
           "rowActions": "Automation actions",
           "tableLastRun": "Last run",
           "noListMatches": "No automations match.",
-          "destinationUnavailable": "The selected automation destination is not ready. Reconnect it and try again.",
           "destinationProjectUnavailable": "Choose a project owned by the selected automation destination."
         },
         "AutomationsPageSkeleton": {

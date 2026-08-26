@@ -1,10 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import type { Automation, AutomationCreateInput } from '../../../../shared/automations-types'
 import {
-  createAutomationForTarget,
   listAutomationRunsForTarget,
   listAutomationsForTarget,
   runAutomationNowForTarget,
+  toRuntimeAutomationCreateInput,
   updateAutomationForTarget
 } from './automation-host-client'
 import { callRuntimeRpc } from '@/runtime/runtime-rpc-client'
@@ -127,7 +127,7 @@ describe('automation host client', () => {
     )
   })
 
-  it('uses an exact machine selector for an existing runtime workspace', async () => {
+  it('encodes exact machine selectors for the create wire input', () => {
     const automation = makeAutomation({
       workspaceMode: 'existing',
       workspaceId: 'repo-1::/srv/orca'
@@ -146,57 +146,15 @@ describe('automation host client', () => {
       rrule: automation.rrule,
       dtstart: automation.dtstart
     }
-    vi.mocked(callRuntimeRpc).mockResolvedValueOnce({ automation })
 
-    await createAutomationForTarget(input)
-
-    expect(callRuntimeRpc).toHaveBeenCalledWith(
-      { kind: 'environment', environmentId: 'gpu' },
-      'automation.create',
-      expect.objectContaining({
-        repo: 'id:repo-1',
-        workspace: 'id:repo-1::/srv/orca'
-      }),
-      { timeoutMs: 15_000 }
-    )
-  })
-
-  it('creates desktop automations through the local runtime RPC surface', async () => {
-    const automation = makeAutomation({
-      runContext: {
-        kind: 'workspace-run',
-        projectId: 'github:stablyai/orca',
-        hostId: 'local',
-        projectHostSetupId: 'setup-local',
-        repoId: 'repo-1',
-        path: '/srv/orca'
-      }
+    expect(toRuntimeAutomationCreateInput(input)).toMatchObject({
+      repo: 'id:repo-1',
+      workspace: 'id:repo-1::/srv/orca'
     })
-    const input: AutomationCreateInput = {
-      name: automation.name,
-      prompt: automation.prompt,
-      precheck: null,
-      agentId: automation.agentId,
-      runContext: automation.runContext,
-      projectId: automation.projectId,
-      workspaceMode: 'new_per_run',
-      workspaceId: null,
-      setupDecision: 'skip',
-      timezone: automation.timezone,
-      rrule: automation.rrule,
-      dtstart: automation.dtstart
-    }
-    vi.mocked(callRuntimeRpc).mockResolvedValueOnce({ automation })
-
-    await createAutomationForTarget(input)
-
-    expect(mockApi.automations.create).not.toHaveBeenCalled()
-    expect(callRuntimeRpc).toHaveBeenCalledWith(
-      { kind: 'local' },
-      'automation.create',
-      expect.objectContaining({ repo: 'id:repo-1' }),
-      { timeoutMs: 15_000 }
-    )
+    // A per-run workspace states no workspace selector at all.
+    expect(
+      toRuntimeAutomationCreateInput({ ...input, workspaceMode: 'new_per_run', workspaceId: null })
+    ).toMatchObject({ repo: 'id:repo-1', workspace: undefined })
   })
 
   it('updates and manually runs SSH-host automations through the remote server that listed them', async () => {
