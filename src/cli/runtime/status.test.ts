@@ -2,17 +2,25 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { createServer, type Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { getRuntimeMetadataPath } from '../../shared/runtime-bootstrap'
 import type { RuntimeStatus } from '../../shared/runtime-types'
 import { RuntimeClient } from './client'
-import { projectRemoteAppStatus, projectRuntimeConnectFailure } from './status'
+import { projectRemoteAppStatus } from './status'
+import type * as RuntimeTransport from './transport'
+import { sendRequest } from './transport'
 import { RuntimeClientError } from './types'
+
+vi.mock('./transport', async (importOriginal) => {
+  const actual = await importOriginal<typeof RuntimeTransport>()
+  return { ...actual, sendRequest: vi.fn(actual.sendRequest) }
+})
 
 const servers = new Set<ReturnType<typeof createServer>>()
 const sockets = new Set<Socket>()
 
 afterEach(async () => {
+  vi.clearAllMocks()
   for (const socket of sockets) {
     socket.destroy()
   }
@@ -144,23 +152,52 @@ describe('projectRemoteAppStatus', () => {
   })
 })
 
-describe('projectRuntimeConnectFailure', () => {
-  it('does not report a live permission-denied runtime as starting', () => {
-    expect(
-      projectRuntimeConnectFailure(
-        new RuntimeClientError('runtime_permission_denied', 'denied'),
-        true
-      )
-    ).toEqual({
-      runtimeState: 'stale_bootstrap',
-      graphState: 'not_running'
+describe('CLI runtime connection failures', () => {
+  it('does not report a live permission-denied runtime as starting', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-status-'))
+    writeFileSync(
+      getRuntimeMetadataPath(userDataPath),
+      JSON.stringify({
+        runtimeId: 'runtime-denied',
+        pid: process.pid,
+        transports: [{ kind: 'named-pipe', endpoint: String.raw`\\.\pipe\orca-denied` }],
+        authToken: 'token',
+        startedAt: Date.now()
+      })
+    )
+    vi.mocked(sendRequest).mockRejectedValueOnce(
+      new RuntimeClientError('runtime_permission_denied', 'denied')
+    )
+
+    const status = await new RuntimeClient(userDataPath).getCliStatus()
+
+    expect(status.result).toMatchObject({
+      app: { running: true, pid: process.pid },
+      runtime: { state: 'stale_bootstrap', reachable: false },
+      graph: { state: 'not_running' }
     })
   })
 
-  it('retains starting for a live transient connection failure', () => {
-    expect(projectRuntimeConnectFailure(new Error('not ready'), true)).toEqual({
-      runtimeState: 'starting',
-      graphState: 'starting'
+  it('retains starting for a live transient connection failure', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-status-'))
+    writeFileSync(
+      getRuntimeMetadataPath(userDataPath),
+      JSON.stringify({
+        runtimeId: 'runtime-starting',
+        pid: process.pid,
+        transports: [{ kind: 'named-pipe', endpoint: String.raw`\\.\pipe\orca-starting` }],
+        authToken: 'token',
+        startedAt: Date.now()
+      })
+    )
+    vi.mocked(sendRequest).mockRejectedValueOnce(new Error('not ready'))
+
+    const status = await new RuntimeClient(userDataPath).getCliStatus()
+
+    expect(status.result).toMatchObject({
+      app: { running: true, pid: process.pid },
+      runtime: { state: 'starting', reachable: false },
+      graph: { state: 'starting' }
     })
   })
 })

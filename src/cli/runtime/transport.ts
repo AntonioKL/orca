@@ -69,10 +69,7 @@ export async function sendRequest<TResult>(
     socket.once('error', (error: NodeJS.ErrnoException) => {
       finish({
         ok: false,
-        error: mapRuntimeConnectError(
-          error,
-          transport.kind === 'unix' ? 'unix' : 'named-pipe'
-        )
+        error: mapRuntimeConnectError(error, transport.kind === 'unix' ? 'unix' : 'named-pipe')
       })
     })
     // Why: a clean peer close (FIN, no 'error') before a terminal frame never

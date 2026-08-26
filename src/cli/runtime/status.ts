@@ -6,11 +6,7 @@ import {
   projectRemoteAppStatus,
   resolveDesktopWindowStatus
 } from '../../shared/cli-app-status-projection'
-import {
-  RuntimeClientError,
-  RuntimeRpcFailureError,
-  type RuntimeRpcSuccess
-} from './types'
+import { RuntimeClientError, RuntimeRpcFailureError, type RuntimeRpcSuccess } from './types'
 
 export { projectRemoteAppStatus, resolveDesktopWindowStatus }
 
@@ -87,7 +83,7 @@ export async function getCliStatus(
   }
 }
 
-export function projectRuntimeConnectFailure(
+function projectRuntimeConnectFailure(
   error: unknown,
   running: boolean
 ): {
