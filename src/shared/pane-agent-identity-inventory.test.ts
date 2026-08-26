@@ -43,6 +43,7 @@ const INVENTORY: readonly InventoryGroup[] = [
       'src/renderer/src/components/agent-session-continuation/AgentSessionContinuationDialog.tsx',
       'src/renderer/src/components/automations/AutomationListLocalRows.tsx',
       'src/renderer/src/components/automations/automation-draft-model.ts',
+      'src/renderer/src/components/automations/automation-list-search-rows.ts',
       'src/renderer/src/components/dashboard-popout/AgentMapSnapshotWorkspaceMenu.tsx',
       'src/renderer/src/components/dashboard-popout/AgentMapWorktreeRingNode.tsx',
       'src/renderer/src/components/settings/QuickCommandsList.tsx',
@@ -226,11 +227,6 @@ const DIRECT_SINGLE_SOURCE_SURFACES: readonly {
   classification: Classification
   marker: string
 }[] = [
-  {
-    path: 'src/renderer/src/components/automations/automation-run-completion-evidence.ts',
-    classification: 'action-consumer',
-    marker: 'hasAutomationRunCompletionEvidence'
-  },
   {
     path: 'src/renderer/src/components/terminal-pane/terminal-renderer-policy.ts',
     classification: 'identity-consumer',
