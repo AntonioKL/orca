@@ -11,7 +11,7 @@ import {
 } from '../../shared/foreground-wrapper-agent'
 import { isShellProcess } from '../../shared/shell-process-detection'
 import {
-  queryWindowsProcessDescendants,
+  queryWindowsPaneProcessInventory,
   type WindowsProcessCandidate,
   type WindowsProcessRow
 } from './windows-foreground-process-rows'
@@ -75,13 +75,14 @@ export async function resolveWindowsAgentForegroundProcessWithAvailability(
   fallbackProcess: string,
   options: AgentForegroundResolutionOptions
 ): Promise<WindowsAgentForegroundResolution> {
-  const candidates = await queryWindowsProcessDescendants(
-    shellPid,
-    options.fresh === true ? { fresh: true } : {}
-  )
-  if (!candidates) {
+  const inventory = await queryWindowsPaneProcessInventory(shellPid, {
+    ...(options.fresh === true ? { fresh: true } : {}),
+    ...(options.anchorProcessId !== undefined ? { anchorPid: options.anchorProcessId } : {})
+  })
+  if (!inventory) {
     return { available: false, processName: null }
   }
+  const candidates = inventory.candidates
   // Resolve membership before applying the global ambiguity rule. A detached
   // agent can otherwise make an attached Droid look ambiguous and suppress
   // the only identity that is actually able to receive this PTY's input.
@@ -103,17 +104,15 @@ export async function resolveWindowsAgentForegroundProcessWithAvailability(
     }
     filteredCandidates = candidates.filter((candidate) => consoleProcessIds.has(candidate.pid))
   }
-  // From the UNfiltered rows: a console-detached squatter still contradicts.
+  // From the FULL table, not the ppid projection: an orphaned job member (its
+  // creator exited) leaves the descendant walk yet can hold a recycled pid.
+  const anchorRow = inventory.anchorRow
   const anchorPidForeign =
-    options.anchorProcessId !== undefined &&
-    candidates.some(
-      (candidate) =>
-        candidate.pid === options.anchorProcessId &&
-        // A query-denied row falls back to command === name; that is
-        // inconclusive (the agent may just be unreadable), never foreign.
-        candidate.command !== candidate.name &&
-        recognizeWindowsProcessCandidate(candidate) === null
-    )
+    anchorRow !== null &&
+    // A query-denied row falls back to command === name; that is
+    // inconclusive (the agent may just be unreadable), never foreign.
+    anchorRow.command !== anchorRow.name &&
+    recognizeWindowsProcessCandidate(anchorRow) === null
   return {
     available: true,
     ...resolveWindowsForegroundIdentity(filteredCandidates, fallbackProcess, options.contextPaths),

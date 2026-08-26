@@ -427,6 +427,26 @@ describe('resolveAgentForegroundProcess', () => {
     })
   })
 
+  it('detects a foreign anchor even when the squatter is orphaned out of the descendant walk', async () => {
+    // The recycled pid's creator exited, so the row is not a ppid-descendant of
+    // the shell — but it can still be the job member holding the anchor pid.
+    Object.defineProperty(process, 'platform', { value: 'win32' })
+    mockWindowsRows([
+      { pid: 100, ppid: 99, name: 'powershell.exe', commandLine: 'powershell.exe' },
+      { pid: 999, ppid: 500, name: 'node.exe', commandLine: 'node server.js' }
+    ])
+
+    await expect(
+      resolveAgentForegroundProcessWithAvailability(100, 'powershell.exe', {
+        anchorProcessId: 999
+      })
+    ).resolves.toEqual({
+      available: true,
+      processName: 'powershell.exe',
+      anchorPidForeign: true
+    })
+  })
+
   it('treats a query-denied anchor row as inconclusive, never foreign', async () => {
     // A denied query yields command === name; the agent may just be unreadable.
     Object.defineProperty(process, 'platform', { value: 'win32' })
