@@ -1073,11 +1073,15 @@ export class CodexRuntimeHomeService {
       const targetDistro = this.resolveWslDefaultTarget(target).wslDistro?.trim()
       // Persisted selections can outlive an account's runtime metadata. Never
       // hand a host home (or another distro's UNC home) to a WSL launch.
-      if (
-        managedHome &&
-        targetDistro &&
-        managedHome.distro.toLowerCase() === targetDistro.toLowerCase()
-      ) {
+      const accountDistro = account.wslDistro?.trim()
+      const distroMatches =
+        (!accountDistro ||
+          !targetDistro ||
+          accountDistro.toLowerCase() === targetDistro.toLowerCase()) &&
+        (!managedHome ||
+          !targetDistro ||
+          managedHome.distro.toLowerCase() === targetDistro.toLowerCase())
+      if (distroMatches && (account.managedHomeRuntime === 'wsl' || managedHome)) {
         return account.managedHomePath
       }
     }
