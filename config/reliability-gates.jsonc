@@ -15556,12 +15556,12 @@
         {
           "file": "config/scripts/smoke-first-party-node18-trust.mjs",
           "assertions": [
-            "raw Node HTTP and WSS reject the fixture CA",
-            "the real Cloud session exchange sends the exact PKCE handoff and receives a normalized session",
-            "the real Relay token and assignment callers send exact bearer credentials and request bodies",
+            "raw Node HTTP and WSS reject the fixture CA with UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+            "the real Cloud session exchange sends the exact POST, JSON content type, PKCE handoff, and receives a normalized session",
+            "the real Relay token and assignment callers send exact POST, JSON content type, bearer credentials, and request bodies",
             "the default Relay control client sends authorization and host hello over trusted WSS",
             "the default Relay data transport sends its ticket/generation and carries a reply",
-            "the trusted CA still rejects HTTPS and WSS hostname mismatches"
+            "the trusted CA still rejects HTTPS and WSS hostname mismatches with ERR_TLS_CERT_ALTNAME_INVALID"
           ]
         },
         {
@@ -15569,8 +15569,8 @@
           "assertions": [
             "Linux reads its policy-owned CA bundle",
             "macOS accepts only current self-issued roots that host verification accepts",
-            "Windows reads machine- and user-owned ROOT stores and subtracts both Disallowed stores",
-            "macOS and Windows host trust loading share one bounded 10-second deadline"
+            "Windows retains readable machine/user stores when a sibling store fails and subtracts both Disallowed stores from the final merged trust set",
+            "stalled macOS listing, macOS verification, and Windows enumeration share one bounded 10-second deadline"
           ]
         }
       ],
@@ -15582,7 +15582,7 @@
           "result": "passed",
           "command": "node config/scripts/build-first-party-node18-trust-smoke.mjs && ORCA_FIRST_PARTY_TRUST_SMOKE_NODE_MAJOR=18 npx -y node@18 config/scripts/smoke-first-party-node18-trust.mjs",
           "durationSeconds": 5,
-          "summary": "Candidate 0b5b9ce921 passed under Node 18: raw HTTP/WSS stayed red, then real Cloud exchange, Relay mint/assignment, default control/data WSS, exact request/auth assertions, data echo, and both hostname mismatches passed."
+          "summary": "Candidate 50991cfa05 passed under Node 18: raw HTTP/WSS stayed red with exact TLS cause codes, then real Cloud exchange, Relay mint/assignment, default control/data WSS, exact method/content/auth/body assertions, data echo, and both hostname mismatches passed."
         },
         {
           "date": "2026-08-25",
@@ -15613,11 +15613,11 @@
       },
       "redGreenEvidence": {
         "status": "complete",
-        "evidence": "The byte-identical build/entry/smoke files (SHA-256 bfbc12e7ca44, 32e630510ae8, 182ceac03d00) failed on reported v1.4.178 commit 92a8100f698e and latest origin/main 0e0a8c943bb9 with UNABLE_TO_VERIFY_LEAF_SIGNATURE, passed on candidate 0b5b9ce92190, and failed at the same boundary after the candidate's complete src/main product tree was restored byte-for-byte to latest main."
+        "evidence": "The byte-identical build/entry/smoke files (SHA-256 bfbc12e7ca44, 32e630510ae8, a3433d39b9ff) failed on reported v1.4.178 commit 92a8100f698e and latest origin/main 5a8b4aff7b44 with UNABLE_TO_VERIFY_LEAF_SIGNATURE, passed on candidate 50991cfa0558, and failed at the same boundary after the candidate's complete src/main product tree was restored byte-for-byte to latest main."
       },
       "performanceBudget": {
         "required": true,
-        "evidence": "Certificate enumeration is lazy, cached once per host process, and adds no polling or per-request subprocess. A local macOS legacy load completed in 12ms. Modern Node trust is additive; legacy Linux reads one bundle, legacy Windows asynchronously enumerates machine/user ROOT and Disallowed stores, and macOS performs one keychain listing plus eight-way verification of current self-issued CA candidates. macOS and Windows loading share a 10-second aggregate bound, and Relay's existing connection deadline includes trust preparation."
+        "evidence": "Certificate enumeration is lazy, cached once per host process, and adds no polling or per-request subprocess. A local macOS legacy load completed in 12ms. Linux reads one policy bundle only when Node lacks its system API; Windows asynchronously enumerates machine/user ROOT and Disallowed stores independently so one inaccessible store does not erase the other; macOS performs one keychain listing plus eight-way verification of current self-issued CA candidates. macOS and Windows loading share a 10-second aggregate bound, and Relay's existing connection deadline includes trust preparation."
       },
       "promotionCriteria": [
         "Collect 100 consecutive focused CI passes or 14 days without an unexplained flake.",
