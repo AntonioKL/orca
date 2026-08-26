@@ -2,7 +2,12 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { glob } from 'tinyglobby'
-import { blankStringContents, isTestFile, stripComments } from './source-scan/source-tree-scan'
+import {
+  blankStringContents,
+  blankStringContentsDesynced,
+  isTestFile,
+  stripComments
+} from './source-scan/source-tree-scan'
 
 const HELPERS = [
   'getAgentLabel',
@@ -322,7 +327,11 @@ describe('pane agent identity inventory ratchet', () => {
       if (!HELPERS.some((helper) => rawSource.includes(helper))) {
         continue
       }
-      const source = blankStringContents(stripComments(rawSource))
+      const decommentedSource = stripComments(rawSource)
+      if (blankStringContentsDesynced(decommentedSource)) {
+        throw new Error(`String scanner desynchronized while inventorying ${path}`)
+      }
+      const source = blankStringContents(decommentedSource)
       for (const helper of HELPERS) {
         const occurrences = source.match(new RegExp(`\\b${helper}\\b`, 'g'))?.length ?? 0
         if (occurrences > 0) {
