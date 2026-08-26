@@ -42,6 +42,10 @@ export type MobileNativeChatPendingItem = {
   id: string
   text: string
   images?: string[]
+  /** Transcript tail when the send was issued. The echo renders directly after
+   *  that row, so a send whose row never arrives stays where it was sent instead
+   *  of trailing every turn that lands afterwards. */
+  baselineTailMessageId?: string | null
 }
 
 export function foldMobileNativeChatMessages(messages: NativeChatMessage[]): NativeChatMessage[] {
@@ -85,31 +89,60 @@ export function buildMobileNativeChatTransientData({
     }
     return { ...message, blocks }
   })
-  const data: NativeChatMessage[] = [
-    ...renderedFolded,
-    ...(streaming
-      ? [
-          {
-            id: 'streaming',
-            role: 'assistant' as const,
-            blocks: [{ type: 'text' as const, text: streaming }],
-            timestamp: null,
-            source: 'hook' as const
-          }
-        ]
-      : []),
-    ...pending.map((p) => ({
-      id: p.id,
-      role: 'user' as const,
+  // Why anchored rather than appended: an echo whose transcript row never
+  // arrives — Claude consumes a mid-turn send without writing a user record —
+  // used to sit at the tail forever, re-reading below every turn that landed
+  // afterwards. That is what makes the conversation look re-ordered. Rendering it
+  // after the row it was sent against keeps it in place, so an unmatched echo is
+  // at worst a duplicate in the right position instead of a scrambled one.
+  const anchoredPending = new Map<string, NativeChatMessage[]>()
+  const trailingPending: NativeChatMessage[] = []
+  const foldedIds = new Set(renderedFolded.map((message) => message.id))
+  for (const item of pending) {
+    const bubble: NativeChatMessage = {
+      id: item.id,
+      role: 'user',
       // Text first (when present), then a thumbnail per ridden-along image so the
       // sent photo shows immediately, before the transcript echo lands.
       blocks: [
-        ...(p.text ? [{ type: 'text' as const, text: p.text }] : []),
-        ...(p.images ?? []).map((uri) => ({ type: 'image-ref' as const, url: uri }))
+        ...(item.text ? [{ type: 'text' as const, text: item.text }] : []),
+        ...(item.images ?? []).map((uri) => ({ type: 'image-ref' as const, url: uri }))
       ],
       timestamp: null,
-      source: 'transcript' as const
-    }))
-  ]
+      source: 'transcript'
+    }
+    // No baseline, or a tail that folding dropped/merged: the tail is the only
+    // position left, which is also the pre-existing behaviour.
+    const anchor = item.baselineTailMessageId
+    if (!anchor || !foldedIds.has(anchor)) {
+      trailingPending.push(bubble)
+      continue
+    }
+    const siblings = anchoredPending.get(anchor)
+    if (siblings) {
+      siblings.push(bubble)
+    } else {
+      anchoredPending.set(anchor, [bubble])
+    }
+  }
+
+  const data: NativeChatMessage[] = []
+  for (const message of renderedFolded) {
+    data.push(message)
+    const attached = anchoredPending.get(message.id)
+    if (attached) {
+      data.push(...attached)
+    }
+  }
+  if (streaming) {
+    data.push({
+      id: 'streaming',
+      role: 'assistant',
+      blocks: [{ type: 'text', text: streaming }],
+      timestamp: null,
+      source: 'hook'
+    })
+  }
+  data.push(...trailingPending)
   return { folded: renderedFolded, streaming, data }
 }

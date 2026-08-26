@@ -269,3 +269,92 @@ describe('foldMobileNativeChatMessages', () => {
     ])
   })
 })
+
+// Claude consumes a mid-turn send through a `queued_command` attachment and writes
+// no `type:"user"` record for it, so that echo has no row to match - ever. What
+// made the conversation read as scrambled was not the unmatched echo itself but
+// where it rendered: appended after every turn, so it re-read below each new one.
+describe('buildMobileNativeChatTransientData anchoring', () => {
+  function row(id: string, role: 'user' | 'assistant', text: string): NativeChatMessage {
+    return { id, role, blocks: [{ type: 'text', text }], timestamp: 1, source: 'transcript' }
+  }
+
+  it('keeps an unmatched echo where it was sent instead of below later turns', () => {
+    const folded = [row('m1', 'user', 'earlier'), row('m2', 'assistant', 'on it')]
+    const { data } = buildMobileNativeChatTransientData({
+      folded,
+      streaming: null,
+      pending: [{ id: 'p1', text: 'a mid-turn send', baselineTailMessageId: 'm2' }]
+    })
+    expect(data.map((m) => m.id)).toEqual(['m1', 'm2', 'p1'])
+
+    // The agent keeps working. The echo must NOT drift below the new turns.
+    const later = [
+      ...folded,
+      row('m3', 'assistant', 'still working'),
+      row('m4', 'assistant', 'done')
+    ]
+    const { data: after } = buildMobileNativeChatTransientData({
+      folded: later,
+      streaming: null,
+      pending: [{ id: 'p1', text: 'a mid-turn send', baselineTailMessageId: 'm2' }]
+    })
+    expect(after.map((m) => m.id)).toEqual(['m1', 'm2', 'p1', 'm3', 'm4'])
+  })
+
+  it('reproduces the reported replay: stale echoes stay in place, not stacked at the tail', () => {
+    const folded = [
+      row('m1', 'user', 'first question'),
+      row('m2', 'assistant', 'answering'),
+      row('m3', 'assistant', 'newest turn')
+    ]
+    const { data } = buildMobileNativeChatTransientData({
+      folded,
+      streaming: null,
+      pending: [
+        { id: 'p1', text: 'sent against m1', baselineTailMessageId: 'm1' },
+        { id: 'p2', text: 'sent against m2', baselineTailMessageId: 'm2' }
+      ]
+    })
+    expect(data.map((m) => m.id)).toEqual(['m1', 'p1', 'm2', 'p2', 'm3'])
+  })
+
+  it('keeps send order among echoes sharing one anchor', () => {
+    const { data } = buildMobileNativeChatTransientData({
+      folded: [row('m1', 'assistant', 'ready')],
+      streaming: null,
+      pending: [
+        { id: 'p1', text: 'first', baselineTailMessageId: 'm1' },
+        { id: 'p2', text: 'second', baselineTailMessageId: 'm1' }
+      ]
+    })
+    expect(data.map((m) => m.id)).toEqual(['m1', 'p1', 'p2'])
+  })
+
+  it('falls back to the tail when the send captured no baseline', () => {
+    const { data } = buildMobileNativeChatTransientData({
+      folded: [row('m1', 'assistant', 'ready')],
+      streaming: null,
+      pending: [{ id: 'p1', text: 'no baseline yet', baselineTailMessageId: null }]
+    })
+    expect(data.map((m) => m.id)).toEqual(['m1', 'p1'])
+  })
+
+  it('falls back to the tail when folding dropped the anchor row', () => {
+    const { data } = buildMobileNativeChatTransientData({
+      folded: [row('m1', 'assistant', 'ready')],
+      streaming: null,
+      pending: [{ id: 'p1', text: 'anchored to a folded-away row', baselineTailMessageId: 'gone' }]
+    })
+    expect(data.map((m) => m.id)).toEqual(['m1', 'p1'])
+  })
+
+  it('still puts the streaming bubble after the transcript', () => {
+    const { data } = buildMobileNativeChatTransientData({
+      folded: [row('m1', 'user', 'hi')],
+      streaming: 'thinking',
+      pending: [{ id: 'p1', text: 'echo', baselineTailMessageId: 'm1' }]
+    })
+    expect(data.map((m) => m.id)).toEqual(['m1', 'p1', 'streaming'])
+  })
+})
