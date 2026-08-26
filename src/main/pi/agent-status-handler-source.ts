@@ -66,7 +66,7 @@ export function getPiAgentStatusHandlerSourceLines(kind: PiAgentKind): string[] 
     '// import (the extension loads inside pi/omp with no Orca deps).',
     'function isStatusOwnerAlive(pid: string): boolean {',
     '  const parsed = Number(pid)',
-    '  if (!Number.isInteger(parsed) || parsed < 1) return false',
+    '  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 0x7fffffff) return false',
     "  if (typeof process.kill !== 'function') return true",
     '  try {',
     '    process.kill(parsed, 0)',

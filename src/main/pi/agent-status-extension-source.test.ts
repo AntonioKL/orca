@@ -6,7 +6,13 @@ describe('getPiAgentStatusExtensionSource', () => {
   it('registers Prime hooks only in the event-emitting daemon worker', () => {
     const frontend = createHarness({
       kind: 'prime-agent',
-      env: { PRIME_AGENT_INTERNAL_DAEMON_WORKER: undefined }
+      env: {
+        PRIME_AGENT_INTERNAL_DAEMON_WORKER: undefined,
+        ORCA_PRIME_AGENT_STATUS_OWNED: String(SELF_PID - 1)
+      },
+      killImpl: () => {
+        throw Object.assign(new Error('ESRCH'), { code: 'ESRCH' })
+      }
     })
     const worker = createHarness({
       kind: 'prime-agent',
@@ -14,7 +20,8 @@ describe('getPiAgentStatusExtensionSource', () => {
     })
 
     expect(frontend.handlers).toEqual({})
-    expect(frontend.processEnv.ORCA_PI_STATUS_OWNED).toBeUndefined()
+    expect(frontend.killMock).not.toHaveBeenCalled()
+    expect(frontend.processEnv.ORCA_PRIME_AGENT_STATUS_OWNED).toBe(String(SELF_PID - 1))
     expect(worker.handlers.agent_start).toBeTypeOf('function')
     expect(worker.processEnv.ORCA_PRIME_AGENT_STATUS_OWNED).toBe(String(SELF_PID))
   })
@@ -315,6 +322,30 @@ describe('getPiAgentStatusExtensionSource', () => {
       kind: 'pi',
       pid: SELF_PID,
       env: { ORCA_PI_STATUS_OWNED: 'not-a-pid' }
+    })
+
+    expect(harness.killMock).not.toHaveBeenCalled()
+    expect(harness.handlers.agent_end).toBeTypeOf('function')
+    expect(harness.processEnv.ORCA_PI_STATUS_OWNED).toBe(String(SELF_PID))
+  })
+
+  it('claims the pane when the inherited owner PID exceeds safe integer precision', () => {
+    const harness = createHarness({
+      kind: 'pi',
+      pid: SELF_PID,
+      env: { ORCA_PI_STATUS_OWNED: '99999999999999999999999' }
+    })
+
+    expect(harness.killMock).not.toHaveBeenCalled()
+    expect(harness.handlers.agent_end).toBeTypeOf('function')
+    expect(harness.processEnv.ORCA_PI_STATUS_OWNED).toBe(String(SELF_PID))
+  })
+
+  it('claims the pane when the inherited owner PID exceeds the process API range', () => {
+    const harness = createHarness({
+      kind: 'pi',
+      pid: SELF_PID,
+      env: { ORCA_PI_STATUS_OWNED: String(2 ** 31) }
     })
 
     expect(harness.killMock).not.toHaveBeenCalled()
