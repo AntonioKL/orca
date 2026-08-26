@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { readRasterImageDimensions } from './raster-image-dimensions'
+import {
+  readRasterImageDimensions,
+  readRenderedRasterImageDimensions
+} from './raster-image-dimensions'
 
 function pngHeader(width: number, height: number): Buffer {
   const png = Buffer.alloc(24)
@@ -77,6 +80,15 @@ describe('readRasterImageDimensions', () => {
       width: 40_000,
       height: 2
     })
+  })
+
+  // Why: verified against Chromium 151 — img.naturalWidth/naturalHeight for these bytes is 1x1.
+  // The budget must stay forgery-resistant, but layout has to follow the entry the decoder picks.
+  it('renders an ICO at its directory size while the stored read keeps the payload budget', () => {
+    const forged = icoWithPayload(pngHeader(40_000, 2))
+
+    expect(readRasterImageDimensions(forged)).toEqual({ width: 40_000, height: 2 })
+    expect(readRenderedRasterImageDimensions(forged)).toEqual({ width: 1, height: 1 })
   })
 
   it('reads a Uint8Array view without depending on its backing-buffer offset', () => {

@@ -1,5 +1,5 @@
 import type { RasterImageDimensions } from './raster-image-dimensions'
-import { readRasterImageBase64Dimensions } from './raster-image-base64-preview'
+import { readRasterImageBase64Header } from './raster-image-base64-preview'
 import {
   isKnownRasterImageMimeType,
   isRasterImagePreviewDimensions
@@ -7,7 +7,7 @@ import {
 
 export type RasterImagePreview = {
   dataUri: string | null
-  /** Natural size read from the encoded header; null means unreadable, never a guess. */
+  /** Size a browser reports as naturalWidth/naturalHeight; null means unreadable, never a guess. */
   dimensions: RasterImageDimensions | null
 }
 
@@ -33,11 +33,13 @@ export function buildRasterImagePreview(
   }
   // Only suppress when the header says the image is too large to render safely. An unreadable
   // header is not evidence of an oversized image, and the decoder handles formats we cannot parse.
-  const dimensions = readRasterImageBase64Dimensions(cleaned, mimeType)
-  if (dimensions !== null && !isRasterImagePreviewDimensions(dimensions)) {
+  const header = readRasterImageBase64Header(cleaned, mimeType)
+  // Limits gate on the stored size (a pixel budget neither axis order changes); layout needs the
+  // oriented one, which can stay unknown on an image whose stored size we read fine.
+  if (header.encoded !== null && !isRasterImagePreviewDimensions(header.encoded)) {
     return { dataUri: null, dimensions: null }
   }
-  return { dataUri: `data:${mimeType};base64,${cleaned}`, dimensions }
+  return { dataUri: `data:${mimeType};base64,${cleaned}`, dimensions: header.natural }
 }
 
 export function buildImageDataUri(

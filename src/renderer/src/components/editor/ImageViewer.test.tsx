@@ -164,13 +164,38 @@ async function renderExpandedImageViewer(
 const SVG_BASE64 = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" />').toString('base64')
 
 function pngBase64(width: number): string {
-  const bytes = Buffer.alloc(24)
+  const bytes = Buffer.alloc(41)
   Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(bytes)
   bytes.writeUInt32BE(13, 8)
   bytes.write('IHDR', 12, 'ascii')
   bytes.writeUInt32BE(width, 16)
   bytes.writeUInt32BE(1, 20)
+  bytes.write('IDAT', 37, 'ascii')
   return bytes.toString('base64')
+}
+
+/** A landscape JPEG frame whose EXIF orientation makes a browser render it portrait. */
+function rotatedJpegBase64(width: number, height: number): string {
+  const tiff = Buffer.alloc(26)
+  tiff.write('MM', 0, 'ascii')
+  tiff.writeUInt16BE(42, 2)
+  tiff.writeUInt32BE(8, 4)
+  tiff.writeUInt16BE(1, 8)
+  tiff.writeUInt16BE(0x0112, 10)
+  tiff.writeUInt16BE(3, 12)
+  tiff.writeUInt32BE(1, 14)
+  tiff.writeUInt16BE(6, 18)
+  const payload = Buffer.concat([Buffer.from('Exif\0\0', 'latin1'), tiff])
+  const app1 = Buffer.alloc(4)
+  app1.writeUInt16BE(0xffe1)
+  app1.writeUInt16BE(payload.byteLength + 2, 2)
+  const sof = Buffer.alloc(11)
+  sof.writeUInt16BE(0xffc0)
+  sof.writeUInt16BE(8, 2)
+  sof[4] = 8
+  sof.writeUInt16BE(height, 5)
+  sof.writeUInt16BE(width, 7)
+  return Buffer.concat([Buffer.from([0xff, 0xd8]), app1, payload, sof]).toString('base64')
 }
 
 async function renderPdfViewerProps(
@@ -281,6 +306,23 @@ describe('ImageViewer pre-load layout box', () => {
       findElementsByType(rendered, 'div').some((element) => {
         const style = element.props.style as { width?: string; height?: string } | undefined
         return style?.width === '4px' && style?.height === '1px'
+      })
+    ).toBe(true)
+  })
+
+  // Why: Chromium applies EXIF orientation to naturalWidth/naturalHeight, so a portrait phone
+  // photo stored landscape must get its portrait box now — otherwise onLoad transposes it.
+  it('fits the pre-load box to the EXIF-rotated axes, not the stored ones', async () => {
+    const content = rotatedJpegBase64(4032, 3024)
+    const first = await renderExpandedImageViewer(content, 'image/jpeg')
+    attachSurface(findSurfaceRefs(first)[0], 700, 800)
+
+    const rendered = await renderExpandedImageViewer(content, 'image/jpeg')
+
+    expect(
+      findElementsByType(rendered, 'div').some((element) => {
+        const style = element.props.style as { width?: string; height?: string } | undefined
+        return style?.width === '576px' && style?.height === '768px'
       })
     ).toBe(true)
   })

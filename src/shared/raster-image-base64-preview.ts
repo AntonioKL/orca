@@ -1,4 +1,9 @@
-import { readRasterImageDimensions, type RasterImageDimensions } from './raster-image-dimensions'
+import {
+  readRasterImageDimensions,
+  readRenderedRasterImageDimensions,
+  type RasterImageDimensions
+} from './raster-image-dimensions'
+import { applyRasterImageAxisSwap, readRasterImageAxisSwap } from './raster-image-orientation'
 import {
   isKnownRasterImageMimeType,
   RASTER_IMAGE_PREVIEW_HEADER_MAX_BYTES
@@ -120,17 +125,38 @@ function decodeBase64Prefix(content: string, maxBytes: number): Uint8Array | nul
   return output.subarray(0, outputLength)
 }
 
+export type RasterImageBase64Header = {
+  /** Size as stored in the header, before EXIF orientation — the axis-independent pixel budget. */
+  encoded: RasterImageDimensions | null
+  /** Size a browser reports as naturalWidth/naturalHeight, EXIF orientation applied. */
+  natural: RasterImageDimensions | null
+}
+
+const UNREADABLE_HEADER: RasterImageBase64Header = {
+  encoded: null,
+  natural: null
+}
+
 /**
- * Natural size encoded in a base64 raster payload, or null when it cannot be read — an SVG, an
- * unrecognized header, or a truncated one. Null means unknown, never "small".
+ * Sizes carried by a base64 raster payload. A null field means we could not read it — an SVG, an
+ * unrecognized header, a truncated one, or (for `natural`) an orientation or ICO entry choice the
+ * bytes never settled. Null means unknown, never "small" and never "unrotated".
  */
-export function readRasterImageBase64Dimensions(
+export function readRasterImageBase64Header(
   content: string,
   mimeType: string | undefined
-): RasterImageDimensions | null {
+): RasterImageBase64Header {
   if (!isKnownRasterImageMimeType(mimeType)) {
-    return null
+    return UNREADABLE_HEADER
   }
   const prefix = decodeBase64Prefix(content, RASTER_IMAGE_PREVIEW_HEADER_MAX_BYTES)
-  return prefix ? readRasterImageDimensions(prefix) : null
+  if (!prefix) {
+    return UNREADABLE_HEADER
+  }
+  // The stored read over-estimates an ICO on purpose, so layout takes the rendered read instead.
+  const rendered = readRenderedRasterImageDimensions(prefix)
+  return {
+    encoded: readRasterImageDimensions(prefix),
+    natural: rendered ? applyRasterImageAxisSwap(rendered, readRasterImageAxisSwap(prefix)) : null
+  }
 }

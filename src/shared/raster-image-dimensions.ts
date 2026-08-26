@@ -95,9 +95,21 @@ function readGifDimensions(bytes: Uint8Array): RasterImageDimensions | null {
   return positiveDimensions(readUint16Le(bytes, 6), readUint16Le(bytes, 8))
 }
 
-function readJpegDimensions(bytes: Uint8Array): RasterImageDimensions | null {
+export function isJpegStartOfFrameMarker(marker: number): boolean {
+  return JPEG_START_OF_FRAME_MARKERS.has(marker)
+}
+
+/**
+ * Walks JPEG marker segments from SOI, passing each one's length-field offset and length to
+ * `visit`. Returns the first result `visit` gives, or undefined when the scan runs out of
+ * segments — which includes a truncated buffer, so undefined never means "the segment is absent".
+ */
+export function scanJpegSegments<T>(
+  bytes: Uint8Array,
+  visit: (marker: number, lengthOffset: number, segmentLength: number) => T | undefined
+): T | undefined {
   if (!hasBytes(bytes, 0, 4) || bytes[0] !== 0xff || bytes[1] !== 0xd8) {
-    return null
+    return undefined
   }
   let offset = 2
   const scanEnd = bytes.byteLength
@@ -108,26 +120,40 @@ function readJpegDimensions(bytes: Uint8Array): RasterImageDimensions | null {
     const marker = bytes[offset]
     offset += 1
     if (marker === undefined || marker === 0x00 || marker === 0xd9 || marker === 0xda) {
-      return null
+      return undefined
     }
     if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd8)) {
       continue
     }
     if (!hasBytes(bytes, offset, 2)) {
-      return null
+      return undefined
     }
     const segmentLength = readUint16Be(bytes, offset)
     if (segmentLength < 2 || offset + segmentLength > scanEnd) {
-      return null
+      return undefined
     }
-    if (JPEG_START_OF_FRAME_MARKERS.has(marker)) {
-      return segmentLength >= 7
-        ? positiveDimensions(readUint16Be(bytes, offset + 5), readUint16Be(bytes, offset + 3))
-        : null
+    const visited = visit(marker, offset, segmentLength)
+    if (visited !== undefined) {
+      return visited
     }
     offset += segmentLength
   }
-  return null
+  return undefined
+}
+
+function readJpegDimensions(bytes: Uint8Array): RasterImageDimensions | null {
+  return (
+    scanJpegSegments<RasterImageDimensions | null>(bytes, (marker, lengthOffset, segmentLength) =>
+      isJpegStartOfFrameMarker(marker)
+        ? segmentLength >= 7
+          ? positiveDimensions(
+              readUint16Be(bytes, lengthOffset + 5),
+              readUint16Be(bytes, lengthOffset + 3)
+            )
+          : null
+        : undefined
+    ) ?? null
+  )
 }
 
 function readWebpDimensions(bytes: Uint8Array): RasterImageDimensions | null {
@@ -208,12 +234,24 @@ function readBmpDimensions(bytes: Uint8Array): RasterImageDimensions | null {
   return matchesAscii(bytes, 0, 'BM') ? readDibDimensions(bytes, 14) : null
 }
 
-function readIcoDimensions(bytes: Uint8Array): RasterImageDimensions | null {
-  if (!hasBytes(bytes, 0, 6) || readUint16Le(bytes, 0) !== 0 || readUint16Le(bytes, 2) !== 1) {
-    return null
+function isIcoHeader(bytes: Uint8Array): boolean {
+  return hasBytes(bytes, 0, 6) && readUint16Le(bytes, 0) === 0 && readUint16Le(bytes, 2) === 1
+}
+
+/** Entry count, or 0 when this is not an ICO whose directory table is fully present. */
+function readIcoImageCount(bytes: Uint8Array): number {
+  if (!isIcoHeader(bytes)) {
+    return 0
   }
   const imageCount = readUint16Le(bytes, 4)
-  if (imageCount <= 0 || imageCount > ICO_MAX_IMAGES || !hasBytes(bytes, 6, imageCount * 16)) {
+  return imageCount > 0 && imageCount <= ICO_MAX_IMAGES && hasBytes(bytes, 6, imageCount * 16)
+    ? imageCount
+    : 0
+}
+
+function readIcoDimensions(bytes: Uint8Array): RasterImageDimensions | null {
+  const imageCount = readIcoImageCount(bytes)
+  if (imageCount === 0) {
     return null
   }
 
@@ -237,7 +275,44 @@ function readIcoDimensions(bytes: Uint8Array): RasterImageDimensions | null {
   return positiveDimensions(maxWidth, maxHeight)
 }
 
-/** Reads encoded raster dimensions without invoking a native or browser image decoder. */
+/**
+ * Size a browser renders an ICO at: Chromium 151 decodes the largest-area directory entry at the
+ * size that entry states, ignoring both the payload's own header and the doubled AND-mask height a
+ * BMP entry stores. Null when differently shaped entries tie on area, because Blink then orders
+ * them by bit depth and leaves the choice unproven.
+ */
+function readIcoRenderedDimensions(bytes: Uint8Array): RasterImageDimensions | null {
+  const imageCount = readIcoImageCount(bytes)
+  let rendered: RasterImageDimensions | null = null
+  let tied = false
+  for (let index = 0; index < imageCount; index += 1) {
+    const entryOffset = 6 + index * 16
+    // A 0 axis byte encodes 256, the largest size a directory entry can express.
+    const size = {
+      width: bytes[entryOffset] || 256,
+      height: bytes[entryOffset + 1] || 256
+    }
+    const renderedArea = rendered ? rendered.width * rendered.height : 0
+    const area = size.width * size.height
+    if (!rendered || area > renderedArea) {
+      rendered = size
+      tied = false
+    } else if (area === renderedArea && size.width !== rendered.width) {
+      tied = true
+    }
+  }
+  return tied ? null : rendered
+}
+
+/**
+ * Size the decoder renders, before EXIF orientation. Differs from the stored read only for ICO,
+ * whose stored read is a forgery-resistant over-estimate rather than any size a browser reports.
+ */
+export function readRenderedRasterImageDimensions(bytes: Uint8Array): RasterImageDimensions | null {
+  return isIcoHeader(bytes) ? readIcoRenderedDimensions(bytes) : readRasterImageDimensions(bytes)
+}
+
+/** Reads raster dimensions as stored, before EXIF orientation, without invoking a decoder. */
 export function readRasterImageDimensions(bytes: Uint8Array): RasterImageDimensions | null {
   return (
     readPngDimensions(bytes) ??
