@@ -40,6 +40,7 @@ export function buildPosixHookSpoolLines(source: string): string[] {
     "  spool_id=$(printf %s \"${ORCA_PANE_KEY:-unknown}\" | tail -c 36 | tr '/:' '__')",
     '  spool_file="$spool_dir/pane-$spool_id.jsonl"',
     '  if [ -f "$spool_file" ] && find "$spool_file" -mtime +7 -print -quit 2>/dev/null | grep -q .; then : > "$spool_file"; fi',
+    '  [ -f "$spool_file" ] || : > "$spool_file"',
     '  spool_size=$(wc -c < "$spool_file" 2>/dev/null || printf 0)',
     '  [ "$spool_size" -lt 5242880 ] || return 0',
     '  spool_now=$(date +%s 2>/dev/null || printf 0)',

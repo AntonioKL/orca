@@ -854,9 +854,13 @@ function getManagedScript(target: 'local' | 'posix' = 'local'): string {
     'if is_wsl_runtime; then',
     '  windows_curl=$(command -v curl.exe 2>/dev/null || true)',
     '  if [ -n "$windows_curl" ] && [ -x "$windows_curl" ]; then',
-    '    post_codex_hook "$windows_curl" 3 5 >/dev/null 2>&1 || true',
+    '    if post_codex_hook "$windows_curl" 3 5 >/dev/null 2>&1; then',
+    '      exit 0',
+    '    fi',
+    '    # post_codex_hook "$windows_curl" 3 5 >/dev/null 2>&1 || true',
     '  fi',
     'fi',
+    'spool_hook_event',
     'exit 0',
     ''
   ].join('\n')
