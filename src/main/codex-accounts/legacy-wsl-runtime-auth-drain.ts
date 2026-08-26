@@ -34,11 +34,15 @@ export function startLegacyWslRuntimeAuthDrain(options: LegacyWslRuntimeAuthDrai
   if (completedDistroKeys.has(key)) {
     return
   }
-  const previous = drainQueueByDistro.get(key) ?? Promise.resolve()
-  const next = previous
-    .catch(() => {})
-    .then(async () => {
-      if ((await drainLegacyWslRuntimeAuth(options)) === 'complete') {
+  // Coalesce launch/rate-limit callers while a drain is in flight. Queuing a
+  // new pass for every poll can otherwise build an unbounded promise chain
+  // while a legacy pane keeps the migration pending.
+  if (drainQueueByDistro.has(key)) {
+    return
+  }
+  const next = drainLegacyWslRuntimeAuth(options)
+    .then((status) => {
+      if (status === 'complete') {
         completedDistroKeys.add(key)
       }
     })

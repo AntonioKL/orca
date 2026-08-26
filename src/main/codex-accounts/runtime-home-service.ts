@@ -1068,7 +1068,20 @@ export class CodexRuntimeHomeService {
       settings.codexManagedAccounts,
       getSelectedCodexAccountIdForTarget(settings, target)
     )
-    return account?.managedHomePath ?? this.getWslSystemCodexHomePath(target)
+    if (account) {
+      const managedHome = parseWslUncPath(account.managedHomePath)
+      const targetDistro = this.resolveWslDefaultTarget(target).wslDistro?.trim()
+      // Persisted selections can outlive an account's runtime metadata. Never
+      // hand a host home (or another distro's UNC home) to a WSL launch.
+      if (
+        managedHome &&
+        targetDistro &&
+        managedHome.distro.toLowerCase() === targetDistro.toLowerCase()
+      ) {
+        return account.managedHomePath
+      }
+    }
+    return this.getWslSystemCodexHomePath(target)
   }
 
   private startLegacyWslAuthDrain(target: CodexAccountSelectionTarget): void {

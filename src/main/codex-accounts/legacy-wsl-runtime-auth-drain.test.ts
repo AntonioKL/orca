@@ -8,7 +8,11 @@ vi.mock('../wsl/wsl-runner', () => ({
   runWslProcess: runWslProcessMock
 }))
 
-import { drainLegacyWslRuntimeAuth } from './legacy-wsl-runtime-auth-drain'
+import {
+  _internals,
+  drainLegacyWslRuntimeAuth,
+  startLegacyWslRuntimeAuthDrain
+} from './legacy-wsl-runtime-auth-drain'
 
 const SOURCE_AUTH = '{"tokens":{"expires_at":2000}}\n'
 const STALE_AUTH = '{"tokens":{"expires_at":1000}}\n'
@@ -27,6 +31,7 @@ function result(code: number, stdout = '') {
 describe('legacy WSL runtime auth drain', () => {
   beforeEach(() => {
     runWslProcessMock.mockReset()
+    _internals.resetDrainQueue()
   })
 
   it('promotes fresher auth guest-side while a legacy pane remains', async () => {
@@ -146,5 +151,21 @@ describe('legacy WSL runtime auth drain', () => {
       '/home/alice/.local/share/orca/codex-runtime-home/active/wsl/home',
       '/home/alice/.local/share/orca/codex-runtime-home/direct-home-auth-drain-v1.json'
     ])
+  })
+
+  it('coalesces concurrent drain triggers instead of queueing every poll', async () => {
+    runWslProcessMock.mockImplementation(() => new Promise(() => {}))
+    const options = {
+      distro: 'Ubuntu',
+      guestHomeLinuxPath: '/home/alice',
+      legacyPanePresent: true,
+      resolveDestination: () => null
+    }
+
+    startLegacyWslRuntimeAuthDrain(options)
+    startLegacyWslRuntimeAuthDrain(options)
+    await Promise.resolve()
+
+    expect(runWslProcessMock).toHaveBeenCalledTimes(1)
   })
 })
