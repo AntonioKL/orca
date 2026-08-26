@@ -64,11 +64,6 @@ describe('resolvePublishedPaneAgentIdentity', () => {
   })
 
   it('publishes nothing when the title names no agent unambiguously', () => {
-    // Ambiguity still publishes nothing — that part was always right.
-    expect(resolve({ title: '◐ Rebase PR #14624 onto main' })).toBeUndefined()
-  })
-
-  it('publishes nothing when the title names no agent unambiguously', () => {
     // Absence is meaningful: it tells a caller to fail closed rather than guess.
     expect(resolve({ title: '◐ Rebase PR #14624 onto main' })).toBeUndefined()
     expect(resolve({ title: 'Fix the codex bug' })).toBeUndefined()

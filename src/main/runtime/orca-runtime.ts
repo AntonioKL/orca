@@ -33215,7 +33215,9 @@ export class OrcaRuntimeService {
         pty?.launchAgent,
         pty?.foregroundAgent,
         title,
-        makePaneKey(leaf.tabId, leaf.leafId)
+        // Why guarded: makePaneKey THROWS on a non-UUID leaf id, and an unguarded call here took
+        // down terminal.list for every pane in the list, not just the odd one.
+        isTerminalLeafId(leaf.leafId) ? makePaneKey(leaf.tabId, leaf.leafId) : null
       )
     }
   }
