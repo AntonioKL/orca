@@ -140,7 +140,7 @@ const INVENTORY: readonly InventoryGroup[] = [
   {
     helper: 'resolveExplicitTerminalTitleAgentType',
     classification: 'parser-implementation',
-    paths: ['src/shared/pane-agent-identity-census.ts', 'src/shared/terminal-title-agent-type.ts']
+    paths: ['src/shared/terminal-title-agent-type.ts']
   },
   {
     helper: 'resolveCommittedTitleAgentType',
@@ -190,7 +190,7 @@ const INVENTORY: readonly InventoryGroup[] = [
   {
     helper: 'resolveCompatibleAgentTypeForOwner',
     classification: 'parser-implementation',
-    paths: ['src/shared/agent-title-owner.ts', 'src/shared/pane-agent-identity-evidence.ts']
+    paths: ['src/shared/agent-title-owner.ts']
   },
   {
     helper: 'resolveCompatibleAgentTypeForOwner',
