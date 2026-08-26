@@ -223,6 +223,74 @@ describe('crash-reporting shared helpers', () => {
     expect(text.indexOf('Check failure:')).toBeLessThan(text.indexOf('Details:'))
   })
 
+  describe('faulting module line', () => {
+    const withDetails = (details: CrashReportRecord['details']): string =>
+      formatCrashReportText({
+        id: 'crash-faulting-module',
+        createdAt: '2026-08-20T01:00:00.000Z',
+        status: 'pending',
+        source: 'renderer',
+        processType: 'renderer',
+        reason: 'crashed',
+        exitCode: -2147483645,
+        appVersion: '1.4.188',
+        platform: 'win32',
+        osRelease: '10.0.26200',
+        arch: 'x64',
+        electronVersion: '43.1.0',
+        chromeVersion: '150.0.7871.47',
+        details,
+        breadcrumbs: []
+      })
+
+    it('says the product image does not localize the fault', () => {
+      const text = withDetails({
+        minidumpFaultingModuleState: 'resolved',
+        minidumpFaultingModule: 'Orca.exe',
+        minidumpFaultingModuleOffset: '0x6ac606a',
+        minidumpFaultingModuleIdentity: 'product-image',
+        minidumpFaultingModuleAddressSource: 'exception-address'
+      })
+
+      expect(text).toContain('Faulting module: Orca.exe+0x6ac606a (')
+      expect(text).toContain('statically linked into')
+    })
+
+    it('leaves a separately loaded module unqualified', () => {
+      const text = withDetails({
+        minidumpFaultingModuleState: 'resolved',
+        minidumpFaultingModule: 'KERNELBASE.dll',
+        minidumpFaultingModuleOffset: '0xc1b6a',
+        minidumpFaultingModuleIdentity: 'separate-module',
+        minidumpFaultingModuleAddressSource: 'exception-address'
+      })
+
+      expect(text).toContain('Faulting module: KERNELBASE.dll+0xc1b6a\n')
+    })
+
+    it('states the unresolved states rather than omitting the line', () => {
+      expect(
+        withDetails({
+          minidumpFaultingModuleState: 'not-applicable',
+          minidumpFaultingModuleReason: 'no thread context, and si_addr is a data address'
+        })
+      ).toContain(
+        'Faulting module: not applicable (no thread context, and si_addr is a data address)'
+      )
+
+      expect(
+        withDetails({
+          minidumpFaultingModuleState: 'unknown',
+          minidumpFaultingModuleReason: 'this dump carries no module list'
+        })
+      ).toContain('Faulting module: unknown (this dump carries no module list)')
+    })
+
+    it('stays silent for an older host that sends no faulting-module fields', () => {
+      expect(withDetails({ minidumpExceptionCode: '0x80000003' })).not.toContain('Faulting module:')
+    })
+  })
+
   it('decodes POSIX wait statuses in the exit code line and leaves Windows codes raw', () => {
     const report = (overrides: Partial<CrashReportRecord>): CrashReportRecord => ({
       id: 'crash-wait-status',

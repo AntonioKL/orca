@@ -11,16 +11,16 @@
 // rather than throwing: a truncated dump must degrade, not break crash
 // reporting.
 
-import { findStream, isMinidump, MAX_MODULES, MinidumpView } from './minidump-stream-reader'
+import { findStream, isMinidump, MinidumpView } from './minidump-stream-reader'
 import { readCrashpadAnnotations } from './minidump-crashpad-annotations'
+import {
+  chromiumLinkedImageNames,
+  dumpPathBasename,
+  type FaultingModuleResolution,
+  resolveFaultingModule
+} from './minidump-faulting-module'
 
-const STREAM_TYPE_MODULE_LIST = 4
 const STREAM_TYPE_EXCEPTION = 6
-
-const MODULE_RECORD_SIZE = 108
-const MODULE_BASE_OFFSET = 0
-const MODULE_SIZE_OFFSET = 8
-const MODULE_NAME_RVA_OFFSET = 20
 
 // MINIDUMP_EXCEPTION_STREAM: ThreadId u32, __alignment u32, then MINIDUMP_EXCEPTION.
 const EXCEPTION_RECORD_OFFSET = 8
@@ -50,47 +50,12 @@ export type MinidumpCrashSignature = {
   readonly processType?: string
   /** Win32 exception code / POSIX signal, e.g. 0x80000003 STATUS_BREAKPOINT. */
   readonly exceptionCode?: number
+  /** Win32 exception address, or POSIX `siginfo.si_addr` — the faulting data address. */
   readonly exceptionAddress?: string
-  /** Module whose image range contains `exceptionAddress`. */
-  readonly faultingModule?: string
-  readonly faultingModuleOffset?: string
+  /** Module holding the crashing instruction, or why it could not be named. */
+  readonly faultingModule?: FaultingModuleResolution
   /** Allowlisted Crashpad annotations, verbatim. */
   readonly annotations: Readonly<Record<string, string>>
-}
-
-type ModuleRecord = {
-  readonly base: bigint
-  readonly size: number
-  readonly name: string
-}
-
-function readModules(view: MinidumpView): ModuleRecord[] {
-  const stream = findStream(view, STREAM_TYPE_MODULE_LIST)
-  if (!stream) {
-    return []
-  }
-  const count = view.u32(stream.rva)
-  if (count === null || count > MAX_MODULES) {
-    return []
-  }
-  const modules: ModuleRecord[] = []
-  for (let index = 0; index < count; index += 1) {
-    const record = stream.rva + 4 + index * MODULE_RECORD_SIZE
-    const base = view.u64(record + MODULE_BASE_OFFSET)
-    const size = view.u32(record + MODULE_SIZE_OFFSET)
-    const nameRva = view.u32(record + MODULE_NAME_RVA_OFFSET)
-    if (base === null || size === null || nameRva === null) {
-      break
-    }
-    const name = view.utf16String(nameRva, 2_048)
-    modules.push({ base, size, name: name ?? 'unknown' })
-  }
-  return modules
-}
-
-function moduleBasename(modulePath: string): string {
-  const separator = Math.max(modulePath.lastIndexOf('/'), modulePath.lastIndexOf('\\'))
-  return separator >= 0 ? modulePath.slice(separator + 1) : modulePath
 }
 
 function toHex(value: bigint): string {
@@ -150,7 +115,7 @@ function findEmbeddedCheckMessage(dump: Buffer): LocatedCheckMessage | undefined
       const line = Number.parseInt(match[3] ?? match[4], 10)
       return {
         message: candidate,
-        file: moduleBasename(match[2]),
+        file: dumpPathBasename(match[2]),
         line: Number.isFinite(line) ? line : undefined
       }
     }
@@ -171,21 +136,6 @@ function parseCheckLocation(checkMessage: string): {
   return { file: match[1], line: Number.isFinite(line) ? line : undefined }
 }
 
-function findFaultingModule(
-  modules: ModuleRecord[],
-  address: bigint
-): { name: string; offset: string } | undefined {
-  for (const module of modules) {
-    if (address >= module.base && address < module.base + BigInt(module.size)) {
-      return {
-        name: moduleBasename(module.name),
-        offset: toHex(address - module.base)
-      }
-    }
-  }
-  return undefined
-}
-
 export type MinidumpParseOptions = {
   /**
    * Process type the caller will accept. A dump from any other process is
@@ -194,6 +144,11 @@ export type MinidumpParseOptions = {
    * it does not match.
    */
   readonly expectedProcessType?: string
+  /**
+   * Basenames of the images Chromium is statically linked into, so a hit on one
+   * is not read as localizing the fault. Defaults to the running executable.
+   */
+  readonly productImageNames?: readonly string[]
 }
 
 /**
@@ -238,21 +193,22 @@ export function parseMinidumpCrashSignature(
     }
   }
   const exception = findStream(view, STREAM_TYPE_EXCEPTION)
+  const address = exception ? view.u64(exception.rva + EXCEPTION_ADDRESS_OFFSET) : null
   if (exception) {
     const code = view.u32(exception.rva + EXCEPTION_CODE_OFFSET)
-    const address = view.u64(exception.rva + EXCEPTION_ADDRESS_OFFSET)
     if (code !== null) {
       signature.exceptionCode = code
     }
     if (address !== null) {
       signature.exceptionAddress = toHex(address)
-      const faulting = findFaultingModule(readModules(view), address)
-      if (faulting) {
-        signature.faultingModule = faulting.name
-        signature.faultingModuleOffset = faulting.offset
-      }
     }
   }
+  signature.faultingModule = resolveFaultingModule(
+    view,
+    exception,
+    address,
+    options.productImageNames ?? chromiumLinkedImageNames()
+  )
 
   return signature
 }
@@ -280,11 +236,17 @@ export function minidumpSignatureDetails(
   if (signature.exceptionAddress) {
     details.minidumpExceptionAddress = signature.exceptionAddress
   }
-  if (signature.faultingModule) {
-    details.minidumpFaultingModule = signature.faultingModule
-  }
-  if (signature.faultingModuleOffset) {
-    details.minidumpFaultingModuleOffset = signature.faultingModuleOffset
+  const faulting = signature.faultingModule
+  if (faulting) {
+    details.minidumpFaultingModuleState = faulting.state
+    if (faulting.state === 'resolved') {
+      details.minidumpFaultingModule = faulting.module
+      details.minidumpFaultingModuleOffset = faulting.offset
+      details.minidumpFaultingModuleIdentity = faulting.identity
+      details.minidumpFaultingModuleAddressSource = faulting.addressSource
+    } else {
+      details.minidumpFaultingModuleReason = faulting.reason
+    }
   }
   for (const [key, value] of Object.entries(signature.annotations)) {
     if (key === 'LOG_FATAL' || key === 'abort-message' || key === 'ptype') {
