@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { parseRelayRetryAfterMs } from '../../../src/shared/relay-retry-after-header'
-import { RELAY_RETRY_AFTER_MAX_MS } from './mobile-relay-retry-delays'
+import { MOBILE_RELAY_RETRY_AFTER_MAX_MS } from './mobile-relay-retry-delays'
 import type { MobileRelayEndpoint } from '../../../src/shared/mobile-relay-credential-contract'
 
 const MAX_RESPONSE_BYTES = 16 * 1024
@@ -55,7 +55,7 @@ export async function resolveMobileRelayEndpoint(args: {
     if (!response.ok) {
       throw new RelayDirectorHttpError(
         response.status,
-        parseRelayRetryAfterMs(response.headers.get('retry-after'), RELAY_RETRY_AFTER_MAX_MS)
+        parseRelayRetryAfterMs(response.headers.get('retry-after'), MOBILE_RELAY_RETRY_AFTER_MAX_MS)
       )
     }
     const declaredLength = Number(response.headers.get('content-length') ?? 0)

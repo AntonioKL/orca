@@ -86,6 +86,10 @@ describe('mobile relay resume director', () => {
       retryAfterMs: 120_000
     })
     // A past date or unparseable header leaves the local backoff in charge.
+    const pastDate = new Date(Date.now() - 10 * 60_000).toUTCString()
+    await expect(resolveWith({ 'retry-after': pastDate })).rejects.toMatchObject({
+      retryAfterMs: null
+    })
     await expect(resolveWith({ 'retry-after': 'soon-ish' })).rejects.toMatchObject({
       retryAfterMs: null
     })

@@ -230,18 +230,23 @@ describe('recovering pairing relay candidate', () => {
   it('keeps a cell load refusal out of director recovery', async () => {
     const limited = client(Promise.reject(new RelayOuterError(4429)))
     const resolveDirector = vi.fn()
+    let connects = 0
     const candidate = createRecoveringPairingRelayCandidate({
       journal,
-      connect: () => limited,
+      connect: () => {
+        connects++
+        return limited
+      },
       resolveDirector,
       persistMove: vi.fn(),
       now: () => 1
     })
 
-    // Why: every cell dial burns an invite attempt server-side; a director hop
-    // cannot relieve cell load, so 4429 must fail fast instead of retrying.
+    // Why: 4429 is rejected after the cell reserves the invite credential, so a
+    // retry burns an attempt — and a director hop cannot relieve cell load.
     await expect(candidate.sendRequest('status.get')).rejects.toEqual(new RelayOuterError(4429))
     expect(resolveDirector).not.toHaveBeenCalled()
+    expect(connects).toBe(1)
   })
 
   it('does not ask the director to reinterpret endpoint-scoped host-offline', async () => {

@@ -161,7 +161,10 @@ function isDirectorRecoverable(error: unknown): boolean {
   if (!(error instanceof RelayOuterError)) {
     return true
   }
-  // 4429 stays out: a director hop cannot relieve cell load, and every cell
-  // dial burns an invite attempt toward cooldown/invalidation server-side.
+  // 4429 stays out: the cell rejects it after reserving the invite credential,
+  // so each retry burns an attempt toward cooldown/invalidation — and a
+  // director hop cannot relieve cell load anyway. The retained codes are
+  // rejected before reservation (4409/4503) or never reach the cell (1006),
+  // so their re-dials burn nothing.
   return error.code === 4409 || error.code === 4503 || error.code === 1006
 }

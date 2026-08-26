@@ -4,6 +4,8 @@ import type { E2EEKeypair } from '../e2ee-keypair'
 import { cancelUnreadResponseBody } from '../../lib/unread-response-body'
 import { parseRelayRetryAfterMs } from '../../../shared/relay-retry-after-header'
 import {
+  RelayAssignAbortedError,
+  RelayAssignRateLimitedError,
   relayAssignRateKey,
   sharedRelayAssignRateGate,
   type RelayAssignRateGate
@@ -53,6 +55,11 @@ function relayRetryAfterMs(value: string | null): number | null {
 }
 
 export function shouldRetryRelayConnectionError(error: unknown): boolean {
+  // A staleness abort means the caller was superseded — retrying it would
+  // spend rate-gate slots on work whose owner is gone.
+  if (error instanceof RelayAssignAbortedError) {
+    return false
+  }
   if (!(error instanceof RelayHttpError)) {
     return true
   }
@@ -132,7 +139,16 @@ export async function requestRelayAssignment(
   }
   const gate = input.assignRateGate ?? sharedRelayAssignRateGate
   const rateKey = relayAssignRateKey(input.directorUrl, input.relayHostId)
-  await gate.reserve(rateKey, input.isCurrent)
+  try {
+    await gate.reserve(rateKey, input.isCurrent)
+  } catch (error) {
+    if (error instanceof RelayAssignRateLimitedError) {
+      // Surface a long local wait as the 429 it stands in for, so the existing
+      // schedulers pace with retryAfterMs instead of parking the caller inline.
+      throw new RelayHttpError('assignment', 429, error.retryAfterMs)
+    }
+    throw error
+  }
   return await sendRelayAssignment(input, gate, rateKey)
 }
 

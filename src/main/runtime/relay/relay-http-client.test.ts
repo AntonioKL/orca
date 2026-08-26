@@ -1,8 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import nacl from 'tweetnacl'
 import { cancelTrackingResponse } from '../../lib/unread-response-body.test-fixtures'
-import { RelayAssignAbortedError, RelayAssignRateGate } from './relay-assign-rate-gate'
-import { exchangeRelayAuthorization, requestRelayAssignment } from './relay-http-client'
+import {
+  RelayAssignAbortedError,
+  RelayAssignRateGate,
+  sharedRelayAssignRateGate
+} from './relay-assign-rate-gate'
+import {
+  exchangeRelayAuthorization,
+  requestRelayAssignment,
+  shouldRetryRelayConnectionError
+} from './relay-http-client'
 
 type AssignInput = Parameters<typeof requestRelayAssignment>[0]
 
@@ -333,7 +341,7 @@ describe('relay assignment rate gate', () => {
     clock.advance(2_000)
     await request({ fetch, assignRateGate })
 
-    expect(clock.sleeps).toEqual([3_000])
+    expect(clock.sleeps).toEqual([1_000, 1_000, 1_000])
     expect(fetch).toHaveBeenCalledTimes(2)
   })
 
@@ -360,7 +368,7 @@ describe('relay assignment rate gate', () => {
       request({ fetch, assignRateGate })
     ])
 
-    expect(clock.sleeps).toEqual([5_000, 5_000])
+    expect(clock.sleeps).toEqual(Array.from({ length: 10 }, () => 1_000))
   })
 
   it('keeps a Retry-After hint past the retry timer the coordinator cancels', async () => {
@@ -373,11 +381,58 @@ describe('relay assignment rate gate', () => {
 
     await expect(request({ fetch, assignRateGate })).rejects.toThrow('relay_assignment_failed_429')
     // A reconcile() cancels the armed retry timer and resets attempts; only the
-    // gate still remembers what the director asked for.
+    // gate still remembers what the director asked for. A wait beyond the
+    // inline cap fails fast with the remainder instead of parking the caller
+    // (pairing IPC awaits reconcile inline).
     clock.advance(6_000)
-    await request({ fetch, assignRateGate })
+    await expect(request({ fetch, assignRateGate })).rejects.toMatchObject({
+      statusCode: 429,
+      retryAfterMs: 24_000
+    })
+    expect(clock.sleeps).toEqual([])
+    expect(fetch).toHaveBeenCalledTimes(1)
 
-    expect(clock.sleeps).toEqual([24_000])
+    clock.advance(25_000)
+    await request({ fetch, assignRateGate })
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('honors a deadline raise that lands mid-wait', async () => {
+    const key = 'https://relay.example AbCdEf0123_-xyZ9'
+    let raised = false
+    const clock = fakeAssignClock(() => {
+      if (!raised) {
+        raised = true
+        assignRateGate.noteRetryAfter(key, 10_000)
+      }
+    })
+    const assignRateGate = new RelayAssignRateGate(clock.options)
+
+    await assignRateGate.reserve(key)
+    await assignRateGate.reserve(key)
+
+    // First slice consumes 1s of the 5s interval; the raise then owes 10s more.
+    expect(clock.sleeps.reduce((sum, ms) => sum + ms, 0)).toBe(11_000)
+  })
+
+  it('routes ungated callers through the shared process-wide gate', async () => {
+    const reserve = vi.spyOn(sharedRelayAssignRateGate, 'reserve').mockResolvedValueOnce()
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => assignSuccessResponse())
+
+    await requestRelayAssignment({
+      directorUrl: 'https://relay.example',
+      relayToken: 'scoped-token',
+      relayHostId: 'AbCdEf0123_-xyZ9',
+      fetch
+    })
+
+    expect(reserve).toHaveBeenCalledWith('https://relay.example AbCdEf0123_-xyZ9', undefined)
+    reserve.mockRestore()
+  })
+
+  it('classifies a staleness abort as non-retryable', () => {
+    expect(shouldRetryRelayConnectionError(new RelayAssignAbortedError())).toBe(false)
+    expect(shouldRetryRelayConnectionError(new Error('socket hang up'))).toBe(true)
   })
 
   it('does not re-wait for the field-fallback retries of one attempt', async () => {
@@ -408,7 +463,7 @@ describe('relay assignment rate gate', () => {
       request({ fetch, assignRateGate, isCurrent: () => current })
     ).rejects.toBeInstanceOf(RelayAssignAbortedError)
 
-    expect(clock.sleeps).toEqual([5_000])
+    expect(clock.sleeps).toEqual([1_000])
     expect(fetch).toHaveBeenCalledTimes(1)
   })
 

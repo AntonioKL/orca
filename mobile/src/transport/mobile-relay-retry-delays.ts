@@ -14,7 +14,7 @@ const RELAY_GATE_REPROBE_BASE_MS = 60_000
 const RELAY_GATE_REPROBE_CEILING_MS = 15 * 60_000
 // A director Retry-After only ever floors a delay, so cap what one header can
 // park the phone for; anything longer is the gated reprobe cadence's job.
-export const RELAY_RETRY_AFTER_MAX_MS = 120_000
+export const MOBILE_RELAY_RETRY_AFTER_MAX_MS = 120_000
 
 // Every relay retry delay in one place: transport backoff, known-offline
 // polling, and the escalating gated reprobe cadence, all jittered.

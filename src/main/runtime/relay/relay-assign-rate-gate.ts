@@ -4,10 +4,23 @@
 // The gate lives below all of them, at the single call site that issues assigns.
 const ASSIGN_MIN_INTERVAL_MS = 5_000
 const ASSIGN_INTERVAL_JITTER_MS = 500
+// Sleep in slices so a raise landing mid-wait is honored and a superseded
+// caller aborts promptly instead of holding its IPC path for the full wait.
+const ASSIGN_WAIT_SLICE_MS = 1_000
+// Beyond this, fail fast with the remaining wait instead of parking the caller
+// (pairing IPC awaits reconcile inline): a Retry-After can legitimately reach
+// minutes, and the gate keeps the deadline for the scheduled retry.
+const ASSIGN_MAX_INLINE_WAIT_MS = 15_000
 
 export class RelayAssignAbortedError extends Error {
   constructor() {
     super('relay_assignment_aborted_stale')
+  }
+}
+
+export class RelayAssignRateLimitedError extends Error {
+  constructor(readonly retryAfterMs: number) {
+    super('relay_assignment_rate_limited_locally')
   }
 }
 
@@ -53,13 +66,23 @@ export class RelayAssignRateGate {
     let stale = false
     try {
       await prior
-      const waitMs = (this.nextPermittedAt.get(key) ?? 0) - this.now()
-      if (waitMs > 0) {
-        await this.sleep(waitMs)
+      // Re-read the deadline every slice: a sibling's Retry-After can raise it
+      // mid-wait, and a caller superseded mid-wait must not spend the slot.
+      for (;;) {
+        stale = isCurrent ? !isCurrent() : false
+        if (stale) {
+          break
+        }
+        const waitMs = (this.nextPermittedAt.get(key) ?? 0) - this.now()
+        if (waitMs <= 0) {
+          break
+        }
+        if (waitMs > ASSIGN_MAX_INLINE_WAIT_MS) {
+          this.pruneExpired()
+          throw new RelayAssignRateLimitedError(waitMs)
+        }
+        await this.sleep(Math.min(waitMs, ASSIGN_WAIT_SLICE_MS))
       }
-      // The wait widened the window between the caller's intent and the request;
-      // a superseded caller must not spend the host's slot.
-      stale = isCurrent ? !isCurrent() : false
       if (!stale) {
         this.book(key)
       }
