@@ -44,6 +44,8 @@ type HeapMetrics = BrowserPerformanceMemory & {
 const emittedHighwaterRatios = new Set<number>()
 const emittedPrivateHighwaterMarks = new Set<number>()
 let lastProcessFootprint: RendererProcessMemory | null = null
+let processFootprintReadGeneration = 0
+let processFootprintReadInFlight = false
 let rendererSurface: RendererSurface = 'main'
 
 export function setRendererMemorySamplingSurface(surface: RendererSurface): void {
@@ -54,6 +56,8 @@ export function resetRendererMemorySampling(): void {
   emittedHighwaterRatios.clear()
   emittedPrivateHighwaterMarks.clear()
   lastProcessFootprint = null
+  processFootprintReadGeneration += 1
+  processFootprintReadInFlight = false
   rendererSurface = 'main'
 }
 
@@ -92,18 +96,25 @@ export function recordRendererMemorySample(reason: string): void {
 /** Stays null on shells without the bridge, or when the runtime withholds it. */
 function refreshProcessFootprint(): void {
   const read = window.api?.crashReports?.readProcessMemory
-  if (!read) {
+  if (!read || processFootprintReadInFlight) {
     return
+  }
+  const generation = processFootprintReadGeneration
+  processFootprintReadInFlight = true
+  const settle = (footprint: RendererProcessMemory | null): void => {
+    if (generation !== processFootprintReadGeneration) {
+      return
+    }
+    lastProcessFootprint = footprint
+    processFootprintReadInFlight = false
   }
   try {
     void read().then(
-      (footprint) => {
-        lastProcessFootprint = footprint ?? null
-      },
-      () => undefined
+      (footprint) => settle(footprint ?? null),
+      () => settle(null)
     )
   } catch {
-    // Why: diagnostics must never break the renderer if the bridge throws.
+    settle(null)
   }
 }
 

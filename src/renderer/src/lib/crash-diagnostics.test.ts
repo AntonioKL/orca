@@ -470,5 +470,26 @@ describe('renderer crash diagnostics', () => {
       expect(() => tick()).not.toThrow()
       expect(memoryCalls().at(-1)!.data).toMatchObject({ usedHeapMB: 150 })
     })
+
+    it('does not overlap footprint reads while the previous read is pending', async () => {
+      let resolveRead: (value: { privateKB: number } | null) => void = () => undefined
+      readProcessMemory.mockImplementation(
+        () =>
+          new Promise<{ privateKB: number } | null>((resolve) => {
+            resolveRead = resolve
+          })
+      )
+
+      diagnostics.installRendererCrashDiagnostics()
+      const tick = setIntervalMock.mock.calls[0][0] as () => void
+      tick()
+      tick()
+      expect(readProcessMemory).toHaveBeenCalledTimes(1)
+
+      resolveRead({ privateKB: 618 * KB })
+      await flush()
+      tick()
+      expect(readProcessMemory).toHaveBeenCalledTimes(2)
+    })
   })
 })

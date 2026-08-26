@@ -6,8 +6,8 @@ import {
 } from '../../shared/crash-reporting'
 
 const MAX_BREADCRUMBS = 30
-// Why: retain two thresholds for each renderer surface without growing the ring.
-const MAX_RETAINED_BREADCRUMBS = 4
+// Two threshold ladders, two marks each, across both renderer surfaces.
+const MAX_RETAINED_BREADCRUMBS = 8
 // Why: coalesceKey embeds an open-string agentType (length-trimmed only, never
 // enum-checked), so the key space is unbounded over a long multi-agent/SSH session.
 // Bound the coalesce map the same way ProcessGoneDedupe bounds its key map.
