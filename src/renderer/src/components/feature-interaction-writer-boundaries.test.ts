@@ -92,7 +92,10 @@ describe('feature interaction writer boundaries', () => {
       expect(section).toContain('sourceContext')
     }
     const rowSource = componentSource('task-page/github/github-work-item-row.tsx')
-    expect(rowSource).toContain('sourceContext={getTaskPageRepoSourceContext(itemRepo,')
+    expect(rowSource).toContain(
+      "const rowSourceContext = getTaskPageRepoSourceContext(itemRepo, 'github')"
+    )
+    expect(rowSource).toContain('sourceContext={rowSourceContext}')
   })
 
   it('suppresses Tasks surface telemetry for in-page provider switches and detail opens', () => {
