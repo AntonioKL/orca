@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { OrcaRuntimeService } from '../../orca-runtime'
 import { OrchestrationDb } from '../../orchestration/db'
 import { ORCHESTRATION_METHODS } from './orchestration'
+import { createRootDispatch } from '../../orchestration/db/root-dispatch-test-fixture'
 
 describe('manual Dispatch observation', () => {
   let db: OrchestrationDb | undefined
@@ -111,7 +112,8 @@ describe('manual Dispatch observation', () => {
       coordinatorPaneKey: 'tab_coord:leaf_coord'
     })
     const task = db.createTask({ spec: 'injected lane', runId: run.id })
-    const dispatch = db.createDispatchContext(
+    const dispatch = createRootDispatch(
+      db,
       task.id,
       'term_worker',
       'tab_worker:leaf_worker',
@@ -216,7 +218,8 @@ describe('manual Dispatch observation', () => {
     runtime.setOrchestrationDb(db)
     const closeTerminal = vi.spyOn(runtime, 'closeTerminal')
     const task = db.createTask({ spec: 'operator-owned lane' })
-    const dispatch = db.createDispatchContext(
+    const dispatch = createRootDispatch(
+      db,
       task.id,
       'term_worker',
       'tab_worker:leaf_worker',

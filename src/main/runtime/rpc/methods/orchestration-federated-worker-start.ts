@@ -21,6 +21,7 @@ import {
   type OrchestrationWorkerLaunchReceipt
 } from './orchestration-worker-launch-preferences'
 import { validateFederatedWorkerStartPlacement } from './orchestration-worker-start-validation'
+import { resolveDispatchCreator } from './orchestration-dispatch-creator'
 
 export async function startFederatedWorker(args: {
   params: WorkerStartInput
@@ -97,6 +98,8 @@ export async function startFederatedWorker(args: {
 
   const setupDecision = createsWorktree ? (params.setup ?? 'run') : 'not_applicable'
   const started = db.createStartingWorkerDispatch({
+    creator: resolveDispatchCreator(runtime, params.from),
+    maxDepth: runtime.getNestedWorkerMaxDepth(),
     taskId: task.id,
     retryOf: params.retryOf,
     startOptions: {
