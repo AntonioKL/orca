@@ -233,6 +233,40 @@ async function renderPalette(overrides: Partial<AppState>): Promise<void> {
   await flushEffects()
 }
 
+/** Palette state with `count` "Perf chat" tabs on one worktree plus 5 "improve-perf" worktrees. */
+function perfTabsPaletteProps(count: number): Partial<AppState> {
+  const tabIds = Array.from({ length: count }, (_, index) => `${index}`)
+  return {
+    worktreesByRepo: {
+      'repo-1': [
+        makeWorktree('wt-tabs', 'tab-host'),
+        ...Array.from({ length: 5 }, (_, index) =>
+          makeWorktree(`wt-${index}`, `improve-perf-${index}`)
+        )
+      ]
+    },
+    showSleepingWorkspaces: true,
+    ptyIdsByTabId: Object.fromEntries(tabIds.map((id) => [`term-${id}`, [`pty-${id}`]])),
+    tabsByWorktree: {
+      'wt-tabs': tabIds.map((id) => makeTerminalTab(`term-${id}`, 'wt-tabs', `Perf chat ${id}`))
+    },
+    unifiedTabsByWorktree: {
+      'wt-tabs': tabIds.map((id) =>
+        makeUnifiedTab(`tab-${id}`, 'wt-tabs', `term-${id}`, `Perf chat ${id}`)
+      )
+    },
+    groupsByWorktree: {
+      'wt-tabs': [
+        makeGroup(
+          'wt-tabs',
+          tabIds.map((id) => `tab-${id}`)
+        )
+      ]
+    },
+    activeGroupIdByWorktree: { 'wt-tabs': 'group-wt-tabs' }
+  } as Partial<AppState>
+}
+
 /** Each primary row paired with the section header rendered above it, in DOM order. */
 function getPrimaryRowsBySectionHeader(): { header: string; rowId: string }[] {
   const headerLabels = new Set(['Open Tabs', 'Worktrees'])
@@ -397,44 +431,15 @@ describe('WorktreeJumpPalette interleaved primary sections', () => {
   })
 
   it('reveals 20 more entries when clicking the See more button in soft preview', async () => {
-    const tabIds = Array.from({ length: 30 }, (_, index) => `${index}`)
-    await renderPalette({
-      worktreesByRepo: {
-        'repo-1': [
-          makeWorktree('wt-tabs', 'tab-host'),
-          ...Array.from({ length: 5 }, (_, index) =>
-            makeWorktree(`wt-${index}`, `improve-perf-${index}`)
-          )
-        ]
-      },
-      showSleepingWorkspaces: true,
-      ptyIdsByTabId: Object.fromEntries(tabIds.map((id) => [`term-${id}`, [`pty-${id}`]])),
-      tabsByWorktree: {
-        'wt-tabs': tabIds.map((id) => makeTerminalTab(`term-${id}`, 'wt-tabs', `Perf chat ${id}`))
-      },
-      unifiedTabsByWorktree: {
-        'wt-tabs': tabIds.map((id) =>
-          makeUnifiedTab(`tab-${id}`, 'wt-tabs', `term-${id}`, `Perf chat ${id}`)
-        )
-      },
-      groupsByWorktree: {
-        'wt-tabs': [
-          makeGroup(
-            'wt-tabs',
-            tabIds.map((id) => `tab-${id}`)
-          )
-        ]
-      },
-      activeGroupIdByWorktree: { 'wt-tabs': 'group-wt-tabs' }
-    })
+    await renderPalette(perfTabsPaletteProps(80))
 
     await act(async () => {
       setCommandQuery?.('perf')
     })
     await flushEffects()
 
-    // Initially preview is 6, remainder has 24
-    expect(testContainer.textContent).toContain('24 more')
+    // Preview is 6; 74 follow, 30 of them past the hard cap of 50.
+    expect(testContainer.textContent).toContain('74 more')
     const seeMoreBtn = Array.from(testContainer.querySelectorAll('button')).find((btn) =>
       btn.textContent?.includes('See more')
     )
@@ -446,41 +451,29 @@ describe('WorktreeJumpPalette interleaved primary sections', () => {
     })
     await flushEffects()
 
-    // 6 + 20 = 26 preview tabs, 4 remainder
-    expect(testContainer.textContent).toContain('4 more')
+    // 6 + 20 = 26 preview tabs, 54 follow, 10 still past the raised cap of 70.
+    expect(testContainer.textContent).toContain('54 more')
+    expect(testContainer.textContent).toContain('10 more')
+  })
+
+  it('leaves the soft preview hint non-actionable when no rows are hidden', async () => {
+    await renderPalette(perfTabsPaletteProps(30))
+
+    await act(async () => {
+      setCommandQuery?.('perf')
+    })
+    await flushEffects()
+
+    // All 30 tabs render (6 preview + 24 remainder), so expanding would only reorder rows.
+    expect(testContainer.textContent).toContain('24 more')
+    const seeMoreBtn = Array.from(testContainer.querySelectorAll('button')).find((btn) =>
+      btn.textContent?.includes('See more')
+    )
+    expect(seeMoreBtn).toBeUndefined()
   })
 
   it('resets expanded section caps when query changes', async () => {
-    const tabIds = Array.from({ length: 30 }, (_, index) => `${index}`)
-    await renderPalette({
-      worktreesByRepo: {
-        'repo-1': [
-          makeWorktree('wt-tabs', 'tab-host'),
-          ...Array.from({ length: 5 }, (_, index) =>
-            makeWorktree(`wt-${index}`, `improve-perf-${index}`)
-          )
-        ]
-      },
-      showSleepingWorkspaces: true,
-      ptyIdsByTabId: Object.fromEntries(tabIds.map((id) => [`term-${id}`, [`pty-${id}`]])),
-      tabsByWorktree: {
-        'wt-tabs': tabIds.map((id) => makeTerminalTab(`term-${id}`, 'wt-tabs', `Perf chat ${id}`))
-      },
-      unifiedTabsByWorktree: {
-        'wt-tabs': tabIds.map((id) =>
-          makeUnifiedTab(`tab-${id}`, 'wt-tabs', `term-${id}`, `Perf chat ${id}`)
-        )
-      },
-      groupsByWorktree: {
-        'wt-tabs': [
-          makeGroup(
-            'wt-tabs',
-            tabIds.map((id) => `tab-${id}`)
-          )
-        ]
-      },
-      activeGroupIdByWorktree: { 'wt-tabs': 'group-wt-tabs' }
-    })
+    await renderPalette(perfTabsPaletteProps(80))
 
     await act(async () => {
       setCommandQuery?.('perf')
@@ -494,14 +487,14 @@ describe('WorktreeJumpPalette interleaved primary sections', () => {
       seeMoreBtn?.click()
     })
     await flushEffects()
-    expect(testContainer.textContent).toContain('4 more')
+    expect(testContainer.textContent).toContain('54 more')
 
-    // Change query: should reset back to 6 preview (so 24 more)
+    // Change query: should reset back to 6 preview (so 74 more)
     await act(async () => {
       setCommandQuery?.('per')
     })
     await flushEffects()
-    expect(testContainer.textContent).toContain('24 more')
+    expect(testContainer.textContent).toContain('74 more')
   })
 
   it('allows clicking See more on empty query to expand worktree cap by 20', async () => {
