@@ -44,6 +44,9 @@ export function buildPosixHookSpoolLines(source: string, eventNameVar?: string):
       ? `  case "\${${eventNameVar}:-}" in PreToolUse|PostToolUse|PostToolUseFailure) return 0 ;; esac`
       : '  case "$payload" in *\'"PreToolUse"\'*|*\'"PostToolUse"\'*|*\'"PostToolUseFailure"\'*) return 0 ;; esac',
     '  [ -n "${ORCA_AGENT_HOOK_ENDPOINT:-}" ] || return 0',
+    // Why: an endpoint can linger in a parent shell after leaving Orca; without a pane key
+    // the record is un-attributable and would accumulate as pane-unknown.jsonl.
+    '  [ -n "${ORCA_PANE_KEY:-}" ] || return 0',
     // Why: a stale env var must not create a spool tree for an Orca that is not installed here.
     '  [ -r "$ORCA_AGENT_HOOK_ENDPOINT" ] || return 0',
     '  spool_base=${ORCA_AGENT_HOOK_ENDPOINT%/*}',

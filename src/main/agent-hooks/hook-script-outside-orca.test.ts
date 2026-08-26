@@ -57,6 +57,17 @@ describe('managed hook outside an Orca terminal', () => {
     // a stale env var must not create a spool tree for an Orca that is not installed here
     expect(readdirSync(dir)).toEqual(['codex-hook.sh'])
   })
+
+  it('readable endpoint without a pane key: silent, writes nothing', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'orca-outside-readable-'))
+    const endpoint = join(dir, 'endpoint.env')
+    writeFileSync(endpoint, 'ORCA_AGENT_HOOK_PORT=9\nORCA_AGENT_HOOK_TOKEN=stale\n')
+    const res = runHook(dir, { ORCA_AGENT_HOOK_ENDPOINT: endpoint })
+    expect(res.status).toBe(0)
+    expect(res.stdout).toBe('')
+    expect(res.stderr).toBe('')
+    expect(readdirSync(dir).sort()).toEqual(['codex-hook.sh', 'endpoint.env'])
+  })
 })
 
 describe('antigravity out-of-band event name', () => {
