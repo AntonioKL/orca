@@ -802,6 +802,13 @@ export class AgentHookServer {
     }
   }
 
+  /** Replay is durable evidence from a prior runtime, not a live observation. */
+  private withdrawReplayObservation(paneKey: string): void {
+    if (this.runtimeObservedStatusPaneKeys.delete(paneKey)) {
+      this.notifyStatusChangeListeners()
+    }
+  }
+
   setPaneStatusClearListener(listener: PaneStatusClearListener | null): void {
     this.onPaneStatusCleared = listener
   }
@@ -2260,14 +2267,14 @@ export class AgentHookServer {
       claudeRunningNonAgentTask?: unknown
       payload: unknown
     },
-    connectionId: string
+    connectionId: string | null
   ): void {
     // Why: wire crosses a trust boundary — re-check/trim so an empty connectionId can't poison caches.
-    if (typeof connectionId !== 'string') {
+    if (connectionId !== null && typeof connectionId !== 'string') {
       return
     }
-    const trimmedConnectionId = connectionId.trim()
-    if (trimmedConnectionId.length === 0) {
+    const trimmedConnectionId = connectionId?.trim() ?? null
+    if (trimmedConnectionId !== null && trimmedConnectionId.length === 0) {
       return
     }
     if (!envelope || typeof envelope.paneKey !== 'string') {
@@ -2523,10 +2530,14 @@ export class AgentHookServer {
         getPersistedLaunchTokenHash: (paneKey) =>
           this.hydratedLaunchTokenHashByPaneKey.get(this.resolvePaneKeyAlias(paneKey)),
         ingest: (record: SpoolRecord) => {
-          this.ingestRemote(
-            record as Parameters<AgentHookServer['ingestRemote']>[0],
-            'spool-replay'
-          )
+          this.ingestRemote(record as Parameters<AgentHookServer['ingestRemote']>[0], null)
+          if (
+            record.payload &&
+            typeof record.payload === 'object' &&
+            (record.payload as { state?: unknown }).state !== 'done'
+          ) {
+            this.withdrawReplayObservation(this.resolvePaneKeyAlias(record.paneKey))
+          }
         }
       })
     }
@@ -3324,6 +3335,8 @@ export class AgentHookServer {
         restoredUnconfirmed: _restoredUnconfirmed,
         // Why: same — the sequencer that issued it dies with the process (see PersistedAgentHookEventPayload).
         observation: _observation,
+        // Replay provenance is runtime-only and must not survive another restart.
+        isReplay: _isReplay,
         launchToken,
         ...persistedPayload
       } = enrichedPayload

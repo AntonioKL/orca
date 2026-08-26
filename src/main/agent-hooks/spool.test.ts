@@ -15,6 +15,7 @@ import { drainAgentHookSpool, launchTokenHash, readSpoolRecords } from './spool'
 import { AgentHookServer, _internals } from './server'
 import { buildBody } from './server.test-fixtures'
 import { _internals as codexInternals } from '../codex/hook-service'
+import { makePaneKey } from '../../shared/stable-pane-id'
 
 describe('agent hook spool', () => {
   it('drops torn lines while retaining complete records', () => {
@@ -69,7 +70,7 @@ describe('agent hook spool', () => {
 
   it('replays a spooled Codex SubagentStop through the server after restart', async () => {
     const userDataPath = mkdtempSync(join(tmpdir(), 'orca-spool-e2e-'))
-    const paneKey = 'tab-spool:0'
+    const paneKey = makePaneKey('tab-spool', '00000000-0000-4000-8000-000000000001')
     const launchToken = 'generation-token'
     const first = new AgentHookServer()
     await first.start({ env: 'production', userDataPath })
@@ -88,6 +89,7 @@ describe('agent hook spool', () => {
       },
       'spool-test'
     )
+    expect(first.getStatusSnapshot()).toHaveLength(1)
     first.flushStatusPersistSync()
     first.stop()
     const stopped = _internals.normalizeHookPayload(
@@ -104,7 +106,11 @@ describe('agent hook spool', () => {
     const restarted = new AgentHookServer()
     await restarted.start({ env: 'production', userDataPath })
     try {
-      expect(restarted.getStatusSnapshot()[0]?.payload.subagents).toBeUndefined()
+      const snapshot = restarted.getStatusSnapshot()
+      expect(snapshot).toHaveLength(1)
+      expect(snapshot[0]!.subagents).toBeUndefined()
+      restarted.flushStatusPersistSync()
+      expect(readFileSync(restarted.lastStatusPath!, 'utf8')).not.toContain('isReplay')
     } finally {
       restarted.stop()
     }
@@ -138,5 +144,43 @@ describe('agent hook spool', () => {
     expect(readFileSync(join(endpointDir, 'spool', spoolFiles[0]!), 'utf8')).toContain(
       'SubagentStop'
     )
+  })
+
+  it('does not mark a non-terminal downtime replay as runtime-observed', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-spool-observed-'))
+    const paneKey = makePaneKey('tab-observed', '00000000-0000-4000-8000-000000000002')
+    const launchToken = 'observed-generation'
+    const first = new AgentHookServer()
+    await first.start({ env: 'production', userDataPath })
+    const started = _internals.normalizeHookPayload(
+      'codex',
+      buildBody({ hook_event_name: 'SubagentStart', agent_id: 'child-observed' }),
+      'production'
+    )!
+    first.ingestRemote(
+      {
+        paneKey,
+        source: 'codex',
+        hookEventName: 'SubagentStart',
+        launchToken,
+        payload: started.payload
+      },
+      null
+    )
+    first.flushStatusPersistSync()
+    first.stop()
+    const spoolDir = join(userDataPath, 'agent-hooks', 'spool')
+    mkdirSync(spoolDir, { recursive: true })
+    writeFileSync(
+      join(spoolDir, 'pane-observed.jsonl'),
+      `\n${JSON.stringify({ paneKey, source: 'codex', hookEventName: 'SubagentStart', launchToken, receivedAt: Date.now(), payload: started.payload })}\n`
+    )
+    const restarted = new AgentHookServer()
+    await restarted.start({ env: 'production', userDataPath })
+    try {
+      expect(restarted.getStatusChangeSnapshot()[0]?.observedInCurrentRuntime).toBe(false)
+    } finally {
+      restarted.stop()
+    }
   })
 })
