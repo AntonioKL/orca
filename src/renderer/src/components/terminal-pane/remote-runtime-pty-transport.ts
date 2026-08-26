@@ -177,6 +177,46 @@ export function createRemoteRuntimePtyTransport(
   const attachmentReadyWaiters = new Set<(ready: boolean) => void>()
   // Why: transport methods overlap during remounts; only the latest pane lifecycle may install a returned PTY.
   let lifecycleEpoch = 0
+  const lifecycleEpochWaiters = new Set<() => void>()
+
+  function advanceLifecycleEpoch(): number {
+    lifecycleEpoch += 1
+    for (const notify of lifecycleEpochWaiters) {
+      notify()
+    }
+    return lifecycleEpoch
+  }
+
+  function awaitInputTailOrLifecycleChange(
+    promise: Promise<unknown>,
+    expectedLifecycleEpoch: number
+  ): Promise<'settled' | 'changed'> {
+    if (lifecycleEpoch !== expectedLifecycleEpoch) {
+      return Promise.resolve('changed')
+    }
+    return new Promise((resolve) => {
+      let finished = false
+      const finish = (result: 'settled' | 'changed'): void => {
+        if (finished) {
+          return
+        }
+        finished = true
+        lifecycleEpochWaiters.delete(onLifecycleChange)
+        resolve(result)
+      }
+      const onLifecycleChange = (): void => {
+        if (lifecycleEpoch !== expectedLifecycleEpoch) {
+          finish('changed')
+        }
+      }
+      lifecycleEpochWaiters.add(onLifecycleChange)
+      void promise.then(
+        () => finish('settled'),
+        () => finish('settled')
+      )
+      onLifecycleChange()
+    })
+  }
   let handle: string | null = null
   let remotePtyId: string | null = null
   let authoritativeExecutionHostId: ExecutionHostId | null = executionHostId ?? null
@@ -1256,9 +1296,17 @@ export function createRemoteRuntimePtyTransport(
       pendingFallback.handle === targetHandle &&
       pendingFallback.lifecycleEpoch === targetLifecycleEpoch
     ) {
-      await pendingFallback.promise
+      await awaitInputTailOrLifecycleChange(pendingFallback.promise, targetLifecycleEpoch)
     }
     await inputBatcher.drain()
+    const fallbackAfterValidation = unacknowledgedInputTail
+    if (
+      fallbackAfterValidation &&
+      fallbackAfterValidation.handle === targetHandle &&
+      fallbackAfterValidation.lifecycleEpoch === targetLifecycleEpoch
+    ) {
+      await awaitInputTailOrLifecycleChange(fallbackAfterValidation.promise, targetLifecycleEpoch)
+    }
     if (!connected || handle !== targetHandle || recoveryBlocksIo()) {
       return false
     }
@@ -1552,6 +1600,8 @@ export function createRemoteRuntimePtyTransport(
     unregisterShutdownHandlers(replacedPtyId)
     handle = nextHandle
     remotePtyId = toRemoteRuntimePtyId(nextHandle, currentRuntimeEnvironmentId)
+    // Bytes queued for the retired handle are no longer safe to replay on its replacement.
+    inputBatcher.clear()
     resetRecoveryReplacementPolicy()
     resetSameHandleEndReuse()
     registerShutdownHandlers(remotePtyId)
@@ -2100,7 +2150,7 @@ export function createRemoteRuntimePtyTransport(
   const transport: PtyTransport = {
     async connect(options) {
       cancelTerminalCreateRetryWait()
-      const connectLifecycleEpoch = ++lifecycleEpoch
+      const connectLifecycleEpoch = advanceLifecycleEpoch()
       const createEnvironmentId = currentRuntimeEnvironmentId
       lastConnectOptions = options
       lastAttachOptions = null
@@ -2334,7 +2384,7 @@ export function createRemoteRuntimePtyTransport(
     },
 
     attach(options) {
-      const attachLifecycleEpoch = ++lifecycleEpoch
+      const attachLifecycleEpoch = advanceLifecycleEpoch()
       const generation = ++attachGeneration
       cancelTerminalCreateRetryWait()
       recovery.cancel()
@@ -2434,7 +2484,7 @@ export function createRemoteRuntimePtyTransport(
     },
 
     disconnect() {
-      lifecycleEpoch += 1
+      advanceLifecycleEpoch()
       attachGeneration += 1
       cancelTerminalCreateRetryWait()
       recovery.cancel()
@@ -2469,7 +2519,7 @@ export function createRemoteRuntimePtyTransport(
       // Why first: the successor transport owns the PTY after detach, and the batcher flushes
       // below can throw past the census drop — a stranded gauge outlives the transport.
       outputProcessor.disposePendingSideEffectGauge()
-      lifecycleEpoch += 1
+      advanceLifecycleEpoch()
       attachGeneration += 1
       cancelTerminalCreateRetryWait()
       recovery.cancel()
@@ -2541,8 +2591,16 @@ export function createRemoteRuntimePtyTransport(
         return true
       }
       const pending = inputBatcher.takePending()
-      if (pending && !sendUnacknowledgedInput(pending)) {
-        return false
+      if (pending) {
+        // Streams and viewport claims preserve query replies as distinct input
+        // frames; only the legacy RPC fallback needs one combined write.
+        if (getCurrentMultiplexedStream(targetHandle) || pendingViewportClaim) {
+          if (!sendUnacknowledgedInput(pending)) {
+            return false
+          }
+          return sendUnacknowledgedInput(data, true)
+        }
+        return sendUnacknowledgedInput(`${pending}${data}`)
       }
       return sendUnacknowledgedInput(data, true)
     },
