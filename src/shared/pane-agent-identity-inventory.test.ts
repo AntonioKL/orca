@@ -56,13 +56,14 @@ const INVENTORY: readonly InventoryGroup[] = [
   },
   {
     helper: 'getAgentLabel',
-    classification: 'identity-consumer',
-    paths: ['src/renderer/src/lib/agent-status.ts', 'src/renderer/src/lib/pane-agent-evidence.ts']
+    classification: 'activity-only',
+    paths: ['src/renderer/src/lib/pane-agent-evidence.ts']
   },
   {
     helper: 'getAgentLabel',
     classification: 'parser-implementation',
     paths: [
+      'src/renderer/src/lib/agent-status.ts',
       'src/shared/agent-detection.ts',
       'src/shared/agent-title-identity.ts',
       'src/shared/agent-title-owner.ts',
@@ -139,14 +140,16 @@ const INVENTORY: readonly InventoryGroup[] = [
     paths: [
       'mobile/src/session/mobile-terminal-tab-agent.ts',
       'src/renderer/src/lib/open-tab-occupant-agent.ts',
-      'src/renderer/src/lib/pane-agent-evidence.ts',
       'src/renderer/src/lib/use-tab-agent.ts'
     ]
   },
   {
     helper: 'resolveExplicitTerminalTitleAgentType',
     classification: 'parser-implementation',
-    paths: ['src/shared/terminal-title-agent-type.ts']
+    paths: [
+      'src/renderer/src/lib/pane-agent-evidence.ts',
+      'src/shared/terminal-title-agent-type.ts'
+    ]
   },
   {
     helper: 'resolveCommittedTitleAgentType',
@@ -165,9 +168,13 @@ const INVENTORY: readonly InventoryGroup[] = [
     paths: [
       'src/renderer/src/components/tab-bar/tab-bar-item-surface.tsx',
       'src/renderer/src/components/terminal-pane/native-chat-leaf-title-agent.ts',
-      'src/renderer/src/components/terminal-pane/pty-connection/pane-agent-identity.ts',
-      'src/renderer/src/lib/pane-agent-evidence.ts'
+      'src/renderer/src/components/terminal-pane/pty-connection/pane-agent-identity.ts'
     ]
+  },
+  {
+    helper: 'resolveCommittedTitleAgentType',
+    classification: 'parser-implementation',
+    paths: ['src/renderer/src/lib/pane-agent-evidence.ts']
   },
   {
     helper: 'resolveCommittedTitleAgentType',
@@ -205,9 +212,13 @@ const INVENTORY: readonly InventoryGroup[] = [
       'src/main/runtime/orca-runtime.ts',
       'src/renderer/src/components/sidebar/worktree-agent-rows.ts',
       'src/renderer/src/components/sidebar/worktree-title-derived-agent-rows.ts',
-      'src/renderer/src/components/terminal-pane/use-notification-dispatch.ts',
       'src/renderer/src/lib/use-tab-agent.ts'
     ]
+  },
+  {
+    helper: 'resolveCompatibleAgentTypeForOwner',
+    classification: 'action-consumer',
+    paths: ['src/renderer/src/components/terminal-pane/use-notification-dispatch.ts']
   },
   {
     helper: 'resolveCompatibleAgentTypeForOwner',
