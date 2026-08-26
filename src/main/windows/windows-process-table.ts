@@ -146,20 +146,25 @@ function loadWindowsProcessTree(): WindowsProcessTreeModule | null {
 const WINDOWS_PROCESS_QUERY_TIMEOUT_MS = 3_000
 
 /**
- * How long to stop calling the reader after it misses its deadline.
+ * Reads that missed their deadline and have not called back yet.
  *
- * Why a cooldown and not just the deadline: a timed-out call leaves its
- * callback in the vendored module's queue, and that queue only drains when the
- * latched request finally completes -- which, in the wedge this guards against,
- * never happens. Retrying at the caller's poll rate would then add a closure
- * per tick forever. One probe per cooldown bounds it.
+ * Why the wedge is sticky rather than a cooldown: a timed-out call leaves its
+ * callback in the vendored module's queue, and that queue drains only when the
+ * latched request completes -- which, in the wedge this guards against, never
+ * happens. Probing again on a timer bounded the *rate* of new callbacks, not
+ * the total: a permanently wedged reader retained one more closure every
+ * cooldown for the life of the app. Refusing while the earlier read is still
+ * out bounds it at one, and that read's callback finally firing is the only
+ * honest evidence the queue drained -- strictly better than a wall-clock guess,
+ * because a probe enqueued behind the latch could never have observed recovery
+ * anyway. It also keeps the relay's bare addon, which has no queue of its own,
+ * from re-entering CreateToolhelp32Snapshot while a call is still running.
+ *
+ * A set rather than a counter so a test reset, or a callback that arrives after
+ * one, can never drive the tally negative and re-open the gate.
  */
-const WINDOWS_PROCESS_QUERY_COOLDOWN_MS = 30_000
-
-let wedgedUntilMs = 0
-// Why a generation: a request that already lost its deadline must not later
-// clear or re-arm the wedge on behalf of the request that replaced it.
-let readGeneration = 0
+const unreturnedReads = new Set<number>()
+let readSequence = 0
 
 function readNativeRows(): Promise<WindowsProcessRow[]> {
   const native = moduleLoader()
@@ -177,19 +182,12 @@ function readNativeRows(): Promise<WindowsProcessRow[]> {
     // tree dead. "Unavailable" has to stay distinguishable from "empty".
     return Promise.reject(new Error('windows process table unavailable'))
   }
-  const startedAt = Date.now()
-  if (startedAt < wedgedUntilMs) {
-    return Promise.reject(new Error('windows process table is cooling down after a timeout'))
+  if (unreturnedReads.size > 0) {
+    return Promise.reject(
+      new Error('windows process table is wedged: an earlier read has not returned')
+    )
   }
-  if (wedgedUntilMs > 0) {
-    // Coming out of a wedge: re-arm the cooldown BEFORE probing, so exactly one
-    // caller gets through. Without this every concurrent caller passes the
-    // check above at expiry, each enqueues a callback into the still-latched
-    // native queue, and each cooldown cycle leaks another batch rather than
-    // bounding it to one probe.
-    wedgedUntilMs = startedAt + WINDOWS_PROCESS_QUERY_COOLDOWN_MS
-  }
-  const generation = ++readGeneration
+  const readId = ++readSequence
   // Why always both flags: each adds an OpenProcess per process (Memory a
   // GetProcessMemoryInfo, CommandLine a PEB read), so asking for less would be
   // cheaper -- 15.9ms p50 versus 30.6ms at 1050 processes. But every read shares
@@ -204,18 +202,16 @@ function readNativeRows(): Promise<WindowsProcessRow[]> {
     let deadline: ReturnType<typeof setTimeout> | undefined
     try {
       deadline = setTimeout(() => {
-        if (generation === readGeneration) {
-          wedgedUntilMs = Date.now() + WINDOWS_PROCESS_QUERY_COOLDOWN_MS
-        }
+        unreturnedReads.add(readId)
         reject(new Error('windows process table timed out'))
       }, WINDOWS_PROCESS_QUERY_TIMEOUT_MS)
       deadline.unref?.()
       native.getAllProcesses((processes) => {
         clearTimeout(deadline)
-        // A callback proves the reader is answering, so stop refusing.
-        if (generation === readGeneration) {
-          wedgedUntilMs = 0
-        }
+        // A callback proves this read drained, so stop refusing. Unconditional:
+        // dropping an id that was never added is a no-op, and only the read
+        // that actually wedged can be holding the gate shut.
+        unreturnedReads.delete(readId)
         if (!processes) {
           reject(new Error('windows process table returned no snapshot'))
           return
@@ -303,7 +299,7 @@ export function __setWindowsProcessTreeLoaderForTests(
 ): void {
   moduleLoader = loader ?? loadWindowsProcessTree
   cachedModule = undefined
-  wedgedUntilMs = 0
+  unreturnedReads.clear()
   snapshotReader.reset()
 }
 
@@ -314,7 +310,7 @@ export function __setWindowsProcessTreeRequireForTests(
   requireNative = resolve ?? requireFromMain
   moduleLoader = loadWindowsProcessTree
   cachedModule = undefined
-  wedgedUntilMs = 0
+  unreturnedReads.clear()
   snapshotReader.reset()
 }
 
@@ -330,5 +326,5 @@ export function __setWindowsProcessTableCimScanForTests(
 export function resetWindowsProcessTableForTests(): void {
   snapshotReader.reset()
   cachedModule = undefined
-  wedgedUntilMs = 0
+  unreturnedReads.clear()
 }
