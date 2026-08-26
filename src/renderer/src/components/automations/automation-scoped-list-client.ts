@@ -9,11 +9,7 @@
  * that would attribute other hosts' automations to the selected one.
  */
 
-import {
-  callRuntimeRpc,
-  getRuntimeEnvironmentStatus,
-  type RuntimeClientTarget
-} from '@/runtime/runtime-rpc-client'
+import { callRuntimeRpc, type RuntimeClientTarget } from '@/runtime/runtime-rpc-client'
 import type {
   Automation,
   AutomationCreateInput,
@@ -36,29 +32,24 @@ import type {
   AutomationOwnerPrecondition
 } from '../../../../shared/automation-owner-precondition'
 import {
-  AUTOMATION_LIST_HOST_SCOPE_RUNTIME_CAPABILITY,
-  AUTOMATION_LIST_HOST_SCOPE_UPDATE_REQUIRED_MESSAGE,
-  AUTOMATION_OWNER_FENCING_RUNTIME_CAPABILITY,
-  AUTOMATION_OWNER_FENCING_UPDATE_REQUIRED_MESSAGE,
-  type RuntimeCapability
-} from '../../../../shared/protocol-version'
-import { automationAuthorityCatalogKey } from './automation-host-catalog-types'
-import {
   toRuntimeAutomationCreateInput,
   toRuntimeAutomationUpdateInput
 } from './automation-host-client'
-import { automationHostDiagnostics } from './automation-host-diagnostics'
+import {
+  assertAuthorityCapability,
+  assertOwnerFencingSupported,
+  AUTOMATION_LIST_HOST_SCOPE_RUNTIME_CAPABILITY,
+  AUTOMATION_LIST_HOST_SCOPE_UPDATE_REQUIRED_MESSAGE,
+  AutomationHostScopeUnsupportedError,
+  REQUEST_TIMEOUT_MS
+} from './automation-capability-probe'
 
-const REQUEST_TIMEOUT_MS = 15_000
-
-export class AutomationHostScopeUnsupportedError extends Error {
-  readonly code = 'unsupported_host_scope'
-
-  constructor(message: string) {
-    super(message)
-    this.name = 'AutomationHostScopeUnsupportedError'
-  }
-}
+export {
+  AutomationHostScopeUnsupportedError,
+  AUTHORITY_CAPABILITY_CONFIRMATION_TTL_MS,
+  AUTHORITY_CAPABILITY_CONFIRMATION_MAX,
+  resetAutomationCapabilityProbes
+} from './automation-capability-probe'
 
 export class AutomationListResponseError extends Error {
   readonly code = 'invalid_response'
@@ -120,84 +111,6 @@ async function callAuthority<TResult>(
       ? { expectedEnvironmentPairingRevision: authority.pairingRevision }
       : {})
   })
-}
-
-/**
- * One probe serves an incarnation, not a call: concurrent callers share the
- * in-flight `status.get`, and a capability a response confirmed is never asked
- * about again under the same pairing revision. Only confirmations are kept — an
- * absence or a failed probe is asked again on the next call, so a server
- * upgraded in place recovers without a re-pair.
- */
-const confirmedAuthorityCapabilities = new Map<string, Set<string>>()
-const inFlightCapabilityProbes = new Map<string, Promise<{ capabilities?: string[] }>>()
-
-function capabilityProbeKey(authority: AutomationAuthorityRef & { kind: 'runtime' }): string {
-  return `${authority.environmentId}:${authority.pairingRevision}`
-}
-
-/** Test seam: probe state is module-level and must not leak between test cases. */
-export function resetAutomationCapabilityProbes(): void {
-  confirmedAuthorityCapabilities.clear()
-  inFlightCapabilityProbes.clear()
-}
-
-/**
- * Fails closed on a missing capability, but only on a *known* absence: an
- * unreachable authority must classify as unavailable and retry, not as an old
- * server the user is told to upgrade.
- *
- * The probe is counted where it is sent because it is counted nowhere else: it
- * rides outside the scheduler's four-slot pool, so an instrument that saw only
- * pooled work would under-report the relay traffic a 50-host refresh costs.
- */
-async function assertAuthorityCapability(
-  authority: AutomationAuthorityRef,
-  capability: RuntimeCapability,
-  message: string
-): Promise<void> {
-  if (authority.kind !== 'runtime') {
-    return
-  }
-  const key = capabilityProbeKey(authority)
-  if (confirmedAuthorityCapabilities.get(key)?.has(capability)) {
-    return
-  }
-  let probe = inFlightCapabilityProbes.get(key)
-  if (!probe) {
-    automationHostDiagnostics.recordCapabilityProbe({
-      authorityKey: automationAuthorityCatalogKey(authority)
-    })
-    const started = getRuntimeEnvironmentStatus(authority.environmentId, REQUEST_TIMEOUT_MS)
-    probe = started
-    inFlightCapabilityProbes.set(key, started)
-    void started
-      .catch(() => undefined)
-      .finally(() => {
-        if (inFlightCapabilityProbes.get(key) === started) {
-          inFlightCapabilityProbes.delete(key)
-        }
-      })
-  }
-  const status = await probe
-  if (status.capabilities?.length) {
-    const confirmed = confirmedAuthorityCapabilities.get(key) ?? new Set<string>()
-    for (const name of status.capabilities) {
-      confirmed.add(name)
-    }
-    confirmedAuthorityCapabilities.set(key, confirmed)
-  }
-  if (!status.capabilities?.includes(capability)) {
-    throw new AutomationHostScopeUnsupportedError(message)
-  }
-}
-
-async function assertOwnerFencingSupported(authority: AutomationAuthorityRef): Promise<void> {
-  await assertAuthorityCapability(
-    authority,
-    AUTOMATION_OWNER_FENCING_RUNTIME_CAPABILITY,
-    AUTOMATION_OWNER_FENCING_UPDATE_REQUIRED_MESSAGE
-  )
 }
 
 function validated(raw: unknown, selector: AutomationListScopeSelector): ScopedAutomationList {

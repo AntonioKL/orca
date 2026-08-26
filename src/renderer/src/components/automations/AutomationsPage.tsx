@@ -78,6 +78,7 @@ import {
   getAutomationHostTargetFromKey,
   getAutomationHostTargetKey,
   getAutomationListTarget,
+  getAutomationOwnerTarget,
   getAutomationTargetFromHostId,
   listAutomationsForTarget,
   runAutomationNowForTarget,
@@ -991,15 +992,28 @@ export default function AutomationsPage(): React.JSX.Element {
   // The edited row's own captured owner names the host, not the ambient list
   // target: a remote row need not appear in `automations` at all, and looking it
   // up by id there would answer with whichever authority the page last listed.
-  // Uncaptured rows fall back to the record's own run context, never the filter.
+  // An uncaptured row resolves to the same host its save addresses.
   const editingRow = editingRowKey
     ? (visibleRows.find((row) => row.key === editingRowKey) ?? null)
     : null
-  const automationDialogTarget =
-    editingAutomationId !== null
-      ? (automationHostTargetForRowKey(editingRowKey) ??
-        getAutomationTargetFromHostId(editingRow?.automation.runContext?.hostId))
-      : getAutomationListTarget(settings)
+  const editingRowCapturedOwner = capturedAutomationOwner(
+    capturedAutomationOwners,
+    editingRowKey
+  ).owner
+  const automationDialogTarget = ((): AutomationHostTarget => {
+    if (editingAutomationId === null) {
+      return getAutomationListTarget(settings)
+    }
+    // Uncaptured: the host the legacy save addresses, so a runtime row the
+    // desktop list produced stops offering desktop projects.
+    if (editingRow && !editingRowCapturedOwner) {
+      return getAutomationOwnerTarget(editingRow.automation, automationHostTarget)
+    }
+    return (
+      automationHostTargetForRowKey(editingRowKey) ??
+      getAutomationTargetFromHostId(editingRow?.automation.runContext?.hostId)
+    )
+  })()
   const isOrcaForm = createTarget === 'orca' && editingExternalTarget === null
   const dialogRepos = isOrcaForm
     ? editingAutomationId !== null
@@ -1029,39 +1043,47 @@ export default function AutomationsPage(): React.JSX.Element {
 
   const reloadExternalManagers = scopedExternal.reload
 
-  const refresh = useCallback(async () => {
-    setIsLoading(true)
-    const pendingNavigation = useAppStore.getState().pendingAutomationRunNavigation
-    // The desktop unless navigation named a host: this arm exists for rows the
-    // per-host reads have not answered for, and the client's own authority is
-    // the only one it can address without guessing which server is meant.
-    const automationHostTarget: AutomationHostTarget = pendingNavigation
-      ? getAutomationTargetFromHostId(pendingNavigation.hostId)
-      : { kind: 'local' }
-    const authorityKey = automationAuthorityCatalogKey(
-      automationHostTarget.kind === 'environment'
-        ? { kind: 'runtime', environmentId: automationHostTarget.environmentId }
-        : { kind: 'desktop' }
-    )
-    // Managers are per host and failures are per provider: the probe settles
-    // into its own state on its own time, and must neither fail the automation
-    // list nor keep the list loading while a slow provider answers.
-    void reloadExternalManagers().catch(() => undefined)
-    try {
-      const nextAutomations = await listAutomationsForTarget(automationHostTarget)
-      // Selection and run history are deliberately not written here: this call
-      // addressed one authority, and the selected row may belong to another.
-      setAutomations(nextAutomations)
-      setAutomationHostTargetKey(getAutomationHostTargetKey(automationHostTarget))
-      setFailedAuthorityKeys((current) => withoutKey(current, authorityKey))
-    } catch {
-      // Why not a toast and not a rethrow: the list keeps whatever it had, and
-      // the host's own status row is where the failure and its Retry belong.
-      setFailedAuthorityKeys((current) => new Set(current).add(authorityKey))
-    } finally {
-      setIsLoading(false)
-    }
-  }, [reloadExternalManagers])
+  const refresh = useCallback(
+    async (options?: { awaitExternalManagers?: boolean }) => {
+      setIsLoading(true)
+      const pendingNavigation = useAppStore.getState().pendingAutomationRunNavigation
+      // The desktop unless navigation named a host: this arm exists for rows the
+      // per-host reads have not answered for, and the client's own authority is
+      // the only one it can address without guessing which server is meant.
+      const automationHostTarget: AutomationHostTarget = pendingNavigation
+        ? getAutomationTargetFromHostId(pendingNavigation.hostId)
+        : { kind: 'local' }
+      const authorityKey = automationAuthorityCatalogKey(
+        automationHostTarget.kind === 'environment'
+          ? { kind: 'runtime', environmentId: automationHostTarget.environmentId }
+          : { kind: 'desktop' }
+      )
+      // Managers are per host and failures are per provider: the probe settles
+      // into its own state on its own time, and must neither fail the automation
+      // list nor keep the list loading while a slow provider answers. An explicit
+      // external mutation opts in below, so the row set it re-reads reflects the
+      // write before its success toast lands.
+      const managersSettled = reloadExternalManagers().catch(() => undefined)
+      try {
+        const nextAutomations = await listAutomationsForTarget(automationHostTarget)
+        // Selection and run history are deliberately not written here: this call
+        // addressed one authority, and the selected row may belong to another.
+        setAutomations(nextAutomations)
+        setAutomationHostTargetKey(getAutomationHostTargetKey(automationHostTarget))
+        setFailedAuthorityKeys((current) => withoutKey(current, authorityKey))
+      } catch {
+        // Why not a toast and not a rethrow: the list keeps whatever it had, and
+        // the host's own status row is where the failure and its Retry belong.
+        setFailedAuthorityKeys((current) => new Set(current).add(authorityKey))
+      } finally {
+        setIsLoading(false)
+      }
+      if (options?.awaitExternalManagers) {
+        await managersSettled
+      }
+    },
+    [reloadExternalManagers]
+  )
 
   useEffect(() => {
     if (!pendingAutomationRunNavigation || isLoading) {
@@ -1527,7 +1549,7 @@ export default function AutomationsPage(): React.JSX.Element {
         if (!editingExternalTarget) {
           useAppStore.getState().recordFeatureInteraction('automation-created')
         }
-        await refresh()
+        await refresh({ awaitExternalManagers: true })
         setCreateOpen(false)
         setEditingExternalTarget(null)
         // Same helper and same captured scope the row's key was built from, so the
@@ -1990,7 +2012,7 @@ export default function AutomationsPage(): React.JSX.Element {
       if (action === 'run') {
         useAppStore.getState().recordFeatureInteraction('automation-run')
       }
-      await refresh()
+      await refresh({ awaitExternalManagers: true })
       // Why: full-page detail keeps selection when the deleted external was open;
       // without this, detail can fall through to an unrelated local automation.
       if (action === 'delete') {
