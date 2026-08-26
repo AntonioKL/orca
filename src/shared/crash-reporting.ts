@@ -135,7 +135,7 @@ const SECRET_PATTERNS = [
   /\b(gh[pousr]_[A-Za-z0-9_]{20,})\b/g,
   /\b(sk-[A-Za-z0-9_-]{20,})\b/g,
   /\b([A-Za-z0-9._%+-]+:[A-Za-z0-9._%+-]+@)(?=[^/\s]+)/g,
-  /\b(token|api[_-]?key|secret|password)=([^&\s]+)/gi
+  /\b((?:[A-Za-z0-9]+[_-])*(?:token|api[_-]?key|secret|password))=([^&\s]+)/gi
 ]
 
 const PATH_PATTERNS = [
@@ -175,7 +175,7 @@ export function sanitizeCrashReportString(
   }
   for (const pattern of SECRET_PATTERNS) {
     sanitized = sanitized.replace(pattern, (match, key?: string) => {
-      if (key && /^(token|api[_-]?key|secret|password)$/i.test(key)) {
+      if (key && /^(?:[A-Za-z0-9]+[_-])*(?:token|api[_-]?key|secret|password)$/i.test(key)) {
         return `${key}=[redacted]`
       }
       return match.includes('@') ? '[redacted-credential]@' : '[redacted-secret]'

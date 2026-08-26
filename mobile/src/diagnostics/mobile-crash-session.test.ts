@@ -53,27 +53,31 @@ describe('mobile crash session journal', () => {
     expect(report).toContain('Previous session ended abnormally')
     expect(report).toContain('h > [dynamic] > session > [dynamic]')
     expect(report).toContain('errorFingerprint')
+    expect(report).toContain('prompt contents from [redacted-path] secret=[redacted]')
     expect(report).not.toContain('private-host-id')
     expect(report).not.toContain('private-worktree-id')
-    expect(report).not.toContain('prompt contents')
     expect(report).not.toContain('do-not-store')
     expect(report).not.toContain('/Users/example/private-repo')
     expect(persisted).not.toContain('private-host-id')
     expect(persisted).not.toContain('private-worktree-id')
-    expect(persisted).not.toContain('prompt contents')
+    expect(persisted).toContain('prompt contents from [redacted-path] secret=[redacted]')
     expect(persisted).not.toContain('do-not-store')
     expect(persisted).not.toContain('/Users/example/private-repo')
     expect(persisted.length).toBeLessThanOrEqual(MAX_MOBILE_CRASH_DIAGNOSTICS_CHARS)
   })
 
-  it('never persists or reports lines from a multi-line error message', async () => {
+  it('sanitizes every line of a multi-line error message before persistence and reporting', async () => {
     const storage = new MemoryStorage()
     const journal = new MobileCrashSessionJournal(storage, {
       now: () => FIRST_SESSION_AT,
       createSessionId: () => 'session-one'
     })
     const error = new Error(
-      'Failed to render prompt:\nSYSTEM PROMPT LINE ONE the user typed\n    at private message-shaped frame'
+      [
+        'Failed to render prompt: SECRET_TOKEN=first-secret',
+        'Details in /Users/example/private-repo/first.ts token=second-secret',
+        'Credentials alice:super-secret@example.com and /tmp/second-secret secret=third-secret'
+      ].join('\n')
     )
 
     await journal.start()
@@ -81,13 +85,27 @@ describe('mobile crash session journal', () => {
 
     const report = await journal.buildReport({ version: '0.0.29', platform: 'ios 26.5' })
     const persisted = storage.values.get(MOBILE_CRASH_SESSION_STORAGE_KEY) ?? ''
-    for (const privateLine of [
-      'SYSTEM PROMPT LINE ONE the user typed',
-      'private message-shaped frame'
+    for (const privateValue of [
+      'first-secret',
+      '/Users/example/private-repo/first.ts',
+      'second-secret',
+      'alice:super-secret@',
+      '/tmp/second-secret',
+      'third-secret'
     ]) {
-      expect(report).not.toContain(privateLine)
-      expect(persisted).not.toContain(privateLine)
+      expect(report).not.toContain(privateValue)
+      expect(persisted).not.toContain(privateValue)
     }
+    expect(report).toContain('SECRET_TOKEN=[redacted]')
+    expect(report).toContain('Details in [redacted-path] token=[redacted]')
+    expect(report).toContain(
+      'Credentials [redacted-credential]@example.com and [redacted-path] secret=[redacted]'
+    )
+    expect(persisted).toContain('SECRET_TOKEN=[redacted]')
+    expect(persisted).toContain('Details in [redacted-path] token=[redacted]')
+    expect(persisted).toContain(
+      'Credentials [redacted-credential]@example.com and [redacted-path] secret=[redacted]'
+    )
   })
 
   it('retains a contained render failure after a normal background handoff', async () => {
