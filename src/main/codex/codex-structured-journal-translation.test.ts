@@ -4,7 +4,10 @@ import type {
   AgentJournalItemIdentity
 } from '../../shared/agent-session-journal-types'
 import { agentJournalItemKey } from '../../shared/agent-session-journal-item-key'
-import { projectStructuredItemsToNativeChat } from '../../shared/structured-agent-session-projection'
+import {
+  projectStructuredAgentSessionStatus,
+  projectStructuredItemsToNativeChat
+} from '../../shared/structured-agent-session-projection'
 import type { StructuredAgentSessionEventSink } from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
 import { CodexTurnOrdinals } from './codex-structured-item-translation'
 import {
@@ -136,6 +139,74 @@ describe('codex journal translation', () => {
       }
     ])
     expect(tap.tombstones).toEqual(['legacy:codex:session-1:turn-lifecycle%3Aturn-1'])
+  })
+
+  it('closes every active turn when the provider session ends after a later turn starts', () => {
+    const tap = recorder()
+    const translator = createCodexJournalTranslator({
+      sink: tap.sink,
+      primaryThreadId: () => THREAD_ID
+    })
+
+    translator.handle(notification('turn/started', { turn: { id: 'turn-stale' } }))
+    translator.handle(notification('turn/started', { turn: { id: 'turn-later' } }))
+    translator.handle({ type: 'ended', sessionId: SESSION_ID, reason: 'app-server exited' })
+
+    expect(tap.rows.filter((row) => row.body.kind === 'status')).toHaveLength(2)
+    expect(tap.rows.map((row) => row.body)).toEqual([
+      expect.objectContaining({ turnLifecycle: { turnId: 'turn-stale', state: 'running' } }),
+      expect.objectContaining({ turnLifecycle: { turnId: 'turn-later', state: 'running' } })
+    ])
+    expect(tap.tombstones).toEqual([
+      'legacy:codex:session-1:turn-lifecycle%3Aturn-stale',
+      'legacy:codex:session-1:turn-lifecycle%3Aturn-later'
+    ])
+    // The tombstones remove both running rows from the reduced journal; no
+    // lifecycle identity remains live after a session end.
+    expect(
+      projectStructuredAgentSessionStatus(
+        tap.rows
+          .filter((row) => !tap.tombstones.includes(row.key))
+          .map((row, sequence) => ({
+            itemId: row.key,
+            revision: 1,
+            sequence: sequence + 1,
+            observedAt: sequence + 1,
+            body: row.body
+          }))
+      )
+    ).toBe('idle')
+  })
+
+  it('matches out-of-order completions to each turn identity', () => {
+    const tap = recorder()
+    const translator = createCodexJournalTranslator({
+      sink: tap.sink,
+      primaryThreadId: () => THREAD_ID
+    })
+
+    translator.handle(notification('turn/started', { turn: { id: 'turn-stale' } }))
+    translator.handle(notification('turn/started', { turn: { id: 'turn-later' } }))
+    translator.handle(notification('turn/completed', { turn: { id: 'turn-stale' } }))
+    translator.handle(notification('turn/completed', { turn: { id: 'turn-later' } }))
+
+    expect(tap.tombstones).toEqual([
+      'legacy:codex:session-1:turn-lifecycle%3Aturn-stale',
+      'legacy:codex:session-1:turn-lifecycle%3Aturn-later'
+    ])
+    expect(
+      projectStructuredAgentSessionStatus(
+        tap.rows
+          .filter((row) => !tap.tombstones.includes(row.key))
+          .map((row, sequence) => ({
+            itemId: row.key,
+            revision: 1,
+            sequence: sequence + 1,
+            observedAt: sequence + 1,
+            body: row.body
+          }))
+      )
+    ).toBe('idle')
   })
 
   it('journals a user turn and the assistant answer under durable codex keys', () => {

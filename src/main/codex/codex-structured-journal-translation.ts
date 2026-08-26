@@ -65,17 +65,33 @@ export function createCodexJournalTranslator(
   const identities = new Map<string, AgentJournalItemIdentity>()
   /** What each announced item is, so an approval can name what it approves. */
   const details = new Map<string, string>()
-  const currentTurnIds = new Map<string, string>()
+  /** Turns announced by the provider and not yet closed. */
+  const currentTurnIds = new Map<string, Set<string>>()
   const genericRowsByTurn = new Map<string, number>()
   const suppressedRowsByTurn = new Map<string, number>()
   let fallbackSequence = 0
+
+  const currentTurnIdFor = (threadId: string): string | null =>
+    [...(currentTurnIds.get(threadId) ?? [])].at(-1) ?? null
+
+  const rememberTurn = (threadId: string, turnId: string): void => {
+    currentTurnIds.set(threadId, new Set([...(currentTurnIds.get(threadId) ?? []), turnId]))
+  }
+
+  const forgetTurn = (threadId: string, turnId: string): void => {
+    const active = currentTurnIds.get(threadId)
+    active?.delete(turnId)
+    if (!active?.size) {
+      currentTurnIds.delete(threadId)
+    }
+  }
 
   const appendUnhandled = (kind: string, payload: unknown, threadId = 'session'): void => {
     const translated = unhandledProviderFrameJournalItem('codex', kind, payload)
     if (!translated) {
       return
     }
-    const turnId = readCodexTurnId(payload) ?? currentTurnIds.get(threadId) ?? 'outside-turn'
+    const turnId = readCodexTurnId(payload) ?? currentTurnIdFor(threadId) ?? 'outside-turn'
     const bucket = `${encodeURIComponent(threadId)}:${encodeURIComponent(turnId)}`
     const rowCount = genericRowsByTurn.get(bucket) ?? 0
     // The cap bounds noise, never evidence: an error frame is always journaled,
@@ -152,7 +168,7 @@ export function createCodexJournalTranslator(
     coalesceMs: deps.coalesceMs,
     schedule: deps.schedule,
     identityFor: (threadId, params, item) => {
-      const turnId = readCodexTurnId(params) ?? currentTurnIds.get(threadId) ?? null
+      const turnId = readCodexTurnId(params) ?? currentTurnIdFor(threadId)
       return identityFor(threadId, turnId, item)
     }
   })
@@ -167,7 +183,7 @@ export function createCodexJournalTranslator(
     if (!item) {
       return false
     }
-    const turnId = readCodexTurnId(event.params) ?? currentTurnIds.get(event.threadId) ?? null
+    const turnId = readCodexTurnId(event.params) ?? currentTurnIdFor(event.threadId)
     const identity = identityFor(event.threadId, turnId, item)
     const translated = codexJournalItem(item)
     const command = readString(item, 'command')
@@ -238,7 +254,7 @@ export function createCodexJournalTranslator(
         if (!turnId) {
           continue
         }
-        currentTurnIds.set(threadId, turnId)
+        currentTurnIds.set(threadId, new Set([turnId]))
         for (const item of Array.isArray(turn.items) ? turn.items : []) {
           handleItemEvent({ threadId, method: 'item/completed', params: { turnId, item } })
         }
@@ -250,8 +266,11 @@ export function createCodexJournalTranslator(
     handle: (event) => {
       if (event.type === 'ended') {
         streams.flush()
-        for (const [threadId, turnId] of currentTurnIds) {
-          publishTurnLifecycle(event.sessionId, threadId, turnId, 'completed')
+        for (const [threadId, turnIds] of currentTurnIds) {
+          for (const turnId of turnIds) {
+            publishTurnLifecycle(event.sessionId, threadId, turnId, 'completed')
+            ordinals.forgetTurn(threadId, turnId)
+          }
         }
         currentTurnIds.clear()
         return
@@ -279,20 +298,20 @@ export function createCodexJournalTranslator(
       if (event.method === 'turn/started') {
         const turnId = readCodexTurnId(event.params)
         if (turnId) {
-          currentTurnIds.set(event.threadId, turnId)
+          rememberTurn(event.threadId, turnId)
           publishTurnLifecycle(event.sessionId, event.threadId, turnId, 'running')
         }
         return
       }
       if (event.method === 'turn/completed') {
-        const turnId = readCodexTurnId(event.params) ?? currentTurnIds.get(event.threadId)
+        const turnId = readCodexTurnId(event.params) ?? currentTurnIdFor(event.threadId)
         if (turnId) {
           publishTurnLifecycle(event.sessionId, event.threadId, turnId, 'completed')
           ordinals.forgetTurn(event.threadId, turnId)
+          forgetTurn(event.threadId, turnId)
         }
-        // A later item with no turn of its own belongs to no turn, not to the
-        // one that just ended.
-        currentTurnIds.delete(event.threadId)
+        // A later item without its own turn id falls back to another active
+        // turn, if one exists; completed turns are never adopted again.
         return
       }
       if (event.method === 'item/started' || event.method === 'item/completed') {

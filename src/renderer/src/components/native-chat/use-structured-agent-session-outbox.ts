@@ -247,13 +247,38 @@ export function useStructuredAgentSessionOutbox(args: {
   const retry = (clientMessageId: string): void => {
     blockedIdRef.current = null
     setError(null)
-    const unknown = submissions.find(
-      (submission) =>
-        submission.clientMessageId === clientMessageId && submission.dispatchState === 'unknown'
+    const submission = submissions.find(
+      (candidate) => candidate.clientMessageId === clientMessageId
     )
     const current = outboxRef.current.find((entry) => entry.clientMessageId === clientMessageId)
+    // A provider-history reconciliation can settle an earlier unknown as
+    // rejected before the user presses Retry. Reusing that operation id only
+    // replays the settled rejection forever, so rotate the id for a safe resend.
+    if (current && submission?.dispatchState === 'rejected') {
+      const rotated = outboxRef.current.map((entry) =>
+        entry.clientMessageId === clientMessageId
+          ? {
+              ...entry,
+              clientMessageId: structuredSessionOperationId(),
+              state: 'queued' as const,
+              retryAfterUnknownSubmittedAt: null
+            }
+          : entry
+      )
+      if (!writeOutbox(sessionId, rotated)) {
+        setError('Message could not be saved to the outbox')
+        return
+      }
+      outboxRef.current = rotated
+      setOutbox(rotated)
+      return
+    }
     const retryAfterUnknownSubmittedAt =
-      unknown?.submittedAt ?? (current?.state === 'unconfirmed' ? -1 : null)
+      submission?.dispatchState === 'unknown'
+        ? submission.submittedAt
+        : current?.state === 'unconfirmed'
+          ? -1
+          : null
     const next = outboxRef.current.map((entry) =>
       entry.clientMessageId === clientMessageId
         ? {

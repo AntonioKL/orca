@@ -2,6 +2,7 @@
 
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { AgentJournalSubmission } from '../../../../shared/agent-session-journal-types'
 import type { AgentSessionWireRefusalCode } from '../../../../shared/agent-session-wire'
 
 const mocks = vi.hoisted(() => ({
@@ -41,6 +42,50 @@ function acceptedResult(fence: number) {
         reason: null,
         submittedAt: fence,
         resolvedAt: fence
+      }
+    }
+  }
+}
+
+function acceptedResultFor(clientMessageId: string, fence: number) {
+  return {
+    ok: true,
+    replayed: false,
+    fence,
+    cursor: { epoch: 'epoch-1', sequence: fence },
+    value: {
+      clientMessageId,
+      submission: {
+        clientMessageId,
+        fence,
+        payloadFingerprint: 'fingerprint',
+        dispatchState: 'accepted',
+        providerItemId: `provider-${clientMessageId}`,
+        reason: null,
+        submittedAt: fence,
+        resolvedAt: fence
+      }
+    }
+  }
+}
+
+function unknownResultFor(clientMessageId: string, submittedAt: number) {
+  return {
+    ok: true,
+    replayed: false,
+    fence: 1,
+    cursor: { epoch: 'epoch-1', sequence: submittedAt },
+    value: {
+      clientMessageId,
+      submission: {
+        clientMessageId,
+        fence: 1,
+        payloadFingerprint: 'fingerprint',
+        dispatchState: 'unknown' as const,
+        providerItemId: null,
+        reason: 'socket closed',
+        submittedAt,
+        resolvedAt: submittedAt
       }
     }
   }
@@ -174,5 +219,127 @@ describe('useStructuredAgentSessionOutbox', () => {
         blocks: [{ type: 'image-ref', path: '/tmp/image.png' }]
       }
     })
+  })
+
+  it('retries an unknown head and advances a queued tail', async () => {
+    vi.mocked(globalThis.crypto.randomUUID)
+      .mockReturnValueOnce('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
+      .mockReturnValueOnce('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb')
+    mocks.call
+      .mockImplementationOnce(async (_target, _method, params) => {
+        const clientMessageId = (params as { envelope: { clientOperationId: string } }).envelope
+          .clientOperationId
+        return unknownResultFor(clientMessageId, 10)
+      })
+      .mockImplementationOnce(async (_target, _method, params) => {
+        const clientMessageId = (params as { envelope: { clientOperationId: string } }).envelope
+          .clientOperationId
+        return acceptedResultFor(clientMessageId, 11)
+      })
+      .mockImplementationOnce(async (_target, _method, params) => {
+        const clientMessageId = (params as { envelope: { clientOperationId: string } }).envelope
+          .clientOperationId
+        return acceptedResultFor(clientMessageId, 12)
+      })
+    const { result, rerender } = renderHook(
+      ({ submissions }: { submissions: readonly AgentJournalSubmission[] }) =>
+        useStructuredAgentSessionOutbox({
+          sessionId: 'session-1',
+          target: LOCAL_TARGET,
+          fence: 1,
+          submissions
+        }),
+      { initialProps: { submissions: [] as readonly AgentJournalSubmission[] } }
+    )
+
+    act(() => {
+      expect(result.current.send('first')).toBe(true)
+    })
+    await waitFor(() => expect(result.current.outbox[0]?.state).toBe('unconfirmed'))
+    const firstId = result.current.outbox[0]!.clientMessageId
+    rerender({
+      submissions: [
+        {
+          clientMessageId: firstId,
+          fence: 1,
+          payloadFingerprint: 'fingerprint',
+          dispatchState: 'unknown',
+          providerItemId: null,
+          reason: 'socket closed',
+          submittedAt: 10,
+          resolvedAt: 10
+        }
+      ]
+    })
+    act(() => {
+      expect(result.current.send('second')).toBe(true)
+    })
+    expect(result.current.outbox).toHaveLength(2)
+
+    act(() => result.current.retry(firstId))
+    await waitFor(() => expect(mocks.call).toHaveBeenCalledTimes(3))
+    await waitFor(() => expect(result.current.outbox).toHaveLength(0))
+    const retryParams = mocks.call.mock.calls[1]?.[2] as { retryUnknown?: true } | undefined
+    expect(retryParams?.retryUnknown).toBe(true)
+  })
+
+  it('rotates a history-rejected unknown head so the queued tail can advance', async () => {
+    vi.mocked(globalThis.crypto.randomUUID)
+      .mockReturnValueOnce('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
+      .mockReturnValueOnce('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb')
+      .mockReturnValueOnce('cccccccc-cccc-4ccc-8ccc-cccccccccccc')
+    mocks.call
+      .mockImplementationOnce(async (_target, _method, params) => {
+        const clientMessageId = (params as { envelope: { clientOperationId: string } }).envelope
+          .clientOperationId
+        return unknownResultFor(clientMessageId, 10)
+      })
+      .mockImplementationOnce(async (_target, _method, params) => {
+        const clientMessageId = (params as { envelope: { clientOperationId: string } }).envelope
+          .clientOperationId
+        return acceptedResultFor(clientMessageId, 11)
+      })
+      .mockImplementationOnce(async (_target, _method, params) => {
+        const clientMessageId = (params as { envelope: { clientOperationId: string } }).envelope
+          .clientOperationId
+        return acceptedResultFor(clientMessageId, 12)
+      })
+    const { result, rerender } = renderHook(
+      ({ submissions }: { submissions: readonly AgentJournalSubmission[] }) =>
+        useStructuredAgentSessionOutbox({
+          sessionId: 'session-1',
+          target: LOCAL_TARGET,
+          fence: 1,
+          submissions
+        }),
+      { initialProps: { submissions: [] as readonly AgentJournalSubmission[] } }
+    )
+
+    act(() => expect(result.current.send('first')).toBe(true))
+    await waitFor(() => expect(result.current.outbox[0]?.state).toBe('unconfirmed'))
+    const firstId = result.current.outbox[0]!.clientMessageId
+    act(() => expect(result.current.send('second')).toBe(true))
+    rerender({
+      submissions: [
+        {
+          clientMessageId: firstId,
+          fence: 1,
+          payloadFingerprint: 'fingerprint',
+          dispatchState: 'rejected',
+          providerItemId: null,
+          reason: 'not_delivered',
+          submittedAt: 10,
+          resolvedAt: 10
+        }
+      ]
+    })
+
+    act(() => result.current.retry(firstId))
+    await waitFor(() => expect(mocks.call).toHaveBeenCalledTimes(3))
+    await waitFor(() => expect(result.current.outbox).toHaveLength(0))
+    const retryParams = mocks.call.mock.calls[1]?.[2] as
+      | { envelope: { clientOperationId: string } }
+      | undefined
+    expect(retryParams?.envelope.clientOperationId).not.toBe(firstId)
   })
 })
