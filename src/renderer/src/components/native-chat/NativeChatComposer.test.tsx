@@ -39,7 +39,7 @@ const mocks = vi.hoisted(() => ({
   // predate the shared catalog); a test that needs real commands assigns them.
   verifiedCommands: [] as readonly SlashCommandSuggestion[],
   getMainBufferSnapshot: vi.fn(),
-  sendHandle: { cancel: vi.fn(), settleAfterMs: 500 },
+  sendHandle: { cancel: vi.fn(), settleAfterMs: 500, settled: Promise.resolve() },
   sendNativeChatMessage: vi.fn(),
   sendNativeChatTypedCommand: vi.fn(),
   sendNativeChatMessageVerified: vi.fn(),
@@ -322,7 +322,9 @@ describe('NativeChatComposer', () => {
       act(() => mocks.fieldProps?.onSend?.())
 
       expect(mocks.sendNativeChatMessage).toHaveBeenCalledWith({}, 'pty-1', '/resume', undefined)
-      expect(onSlashCommand).toHaveBeenCalledWith('/resume')
+      // The send handle rides along: a view switch cancels every tracked handle,
+      // so the reveal has to wait for these writes to finish.
+      expect(onSlashCommand).toHaveBeenCalledWith('/resume', mocks.sendHandle.settled)
     }
   )
 

@@ -17,7 +17,7 @@ import type { NativeChatSessionOptionDispatchCommand } from './native-chat-sessi
 export function useNativeChatSessionOptionCommand(args: {
   agent: AgentType
   disabled: boolean
-  onSlashCommand?: (command: string) => void
+  onSlashCommand?: (command: string, settled?: Promise<void>) => void
   resolveTarget: () => NativeChatResolvedTarget | null
   setHistory: Dispatch<SetStateAction<HistoryState>>
 }): { dispatch: NativeChatSessionOptionDispatchCommand; isDispatching: boolean } {

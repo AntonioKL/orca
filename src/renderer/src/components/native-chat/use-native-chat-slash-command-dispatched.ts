@@ -20,20 +20,33 @@ import {
  * options already reveal `/model` this way; this is the half that has no
  * session-option catalog behind it, so it also covers agents that have slash
  * commands but no options catalog.
+ *
+ * It waits for `settled` — revealing synchronously would DESTROY the send it is
+ * revealing. Switching views unmounts this whole subtree in the same commit,
+ * and the send lifecycle's unmount cleanup cancels every tracked handle: the
+ * delayed Enter never fires and `onCancelUnsubmitted` wipes the command off the
+ * TUI line (Codex, typed key-by-key, loses it mid-word). The same commit would
+ * also discard the composer's own `setDraft('')`.
  */
 export function useNativeChatSlashCommandDispatched(args: {
   agent: AgentType
   commandMarkerScope: NativeChatCommandMarkerScope
   setCommandMarkers: Dispatch<SetStateAction<NativeChatCommandMarker[]>>
   onSwitchToTerminal?: () => void
-}): (command: string) => void {
+}): (command: string, settled?: Promise<void>) => void {
   const { agent, commandMarkerScope, setCommandMarkers, onSwitchToTerminal } = args
   return useCallback(
-    (command: string) => {
+    (command: string, settled?: Promise<void>) => {
       setCommandMarkers(appendCommandMarkerCache(commandMarkerScope, command))
-      if (nativeChatSlashCommandOpensAgentPicker(command, getVerifiedNativeChatCommands(agent))) {
-        onSwitchToTerminal?.()
+      if (!nativeChatSlashCommandOpensAgentPicker(command, getVerifiedNativeChatCommands(agent))) {
+        return
       }
+      const reveal = (): void => onSwitchToTerminal?.()
+      if (settled) {
+        void settled.then(reveal, reveal)
+        return
+      }
+      reveal()
     },
     [agent, commandMarkerScope, onSwitchToTerminal, setCommandMarkers]
   )

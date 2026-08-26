@@ -289,7 +289,7 @@ export const NativeChatComposer = forwardRef<NativeChatComposerHandle, NativeCha
         // Why: only verified catalog commands can truthfully claim they ran or
         // mutate session-option state; unknown slash-like text has no such proof.
         if (classification === 'command') {
-          onSlashCommand?.(text.trim())
+          onSlashCommand?.(text.trim(), pendingHandle?.settled)
           sessionOptionsSurface?.recordOutgoingCommand(text.trim())
         }
       } else {

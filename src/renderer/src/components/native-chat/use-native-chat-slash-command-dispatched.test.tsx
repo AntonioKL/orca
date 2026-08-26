@@ -38,6 +38,57 @@ describe('useNativeChatSlashCommandDispatched', () => {
     }
   )
 
+  it('holds the reveal until the send settles', async () => {
+    // Revealing switches views, which unmounts the chat subtree in the same
+    // commit — and the send lifecycle's unmount cleanup cancels every tracked
+    // handle, killing the delayed Enter and Ctrl+U-ing the command off the line.
+    // A synchronous reveal therefore destroys the send it is revealing.
+    let settle = (): void => {}
+    const settled = new Promise<void>((resolve) => {
+      settle = resolve
+    })
+    const hook = render('claude')
+    act(() => hook.result.current('/resume', settled))
+
+    expect(onSwitchToTerminal).not.toHaveBeenCalled()
+
+    await act(async () => {
+      settle()
+      await settled
+    })
+    expect(onSwitchToTerminal).toHaveBeenCalledTimes(1)
+  })
+
+  it('still reveals when the send sequence rejects', async () => {
+    // A failed write leaves the user stuck in chat otherwise; the terminal is
+    // where they can see what actually happened.
+    const settled = Promise.reject(new Error('write failed'))
+    const hook = render('claude')
+    act(() => hook.result.current('/resume', settled))
+
+    await act(async () => {
+      await settled.catch(() => undefined)
+    })
+    expect(onSwitchToTerminal).toHaveBeenCalledTimes(1)
+  })
+
+  it('records the marker immediately, not on settle', async () => {
+    // The `Ran /x` line is local feedback for a command with no transcript turn;
+    // holding it until the writes finish would lag the user's own action.
+    let settle = (): void => {}
+    const settled = new Promise<void>((resolve) => {
+      settle = resolve
+    })
+    const hook = render('claude')
+    act(() => hook.result.current('/resume', settled))
+
+    expect(setCommandMarkers).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      settle()
+      await settled
+    })
+  })
+
   it('leaves the chat view in place for commands the agent answers inline', () => {
     const hook = render('claude')
     act(() => {
