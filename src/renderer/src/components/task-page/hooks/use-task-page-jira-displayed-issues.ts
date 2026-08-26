@@ -11,7 +11,7 @@ import {
   type JiraIssueSortDirection,
   type JiraPrioritiesBySite
 } from '@/components/jira-issue-sorter'
-import type { CacheEntry } from '@/store/slices/github'
+import type { CacheEntry } from '@/store/github/cache-model'
 import type { JiraIssue, JiraProjectStatusOrder } from '../../../../../shared/jira-types'
 import type { TaskSourceContext } from '../../../../../shared/task-source-context'
 

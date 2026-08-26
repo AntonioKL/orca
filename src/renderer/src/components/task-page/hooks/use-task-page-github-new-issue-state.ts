@@ -32,9 +32,12 @@ export function useTaskPageGitHubNewIssueState({
   const clearNewIssueDraft = useAppStore((s) => s.clearNewIssueDraft)
   const newIssueRepoSelected =
     newIssueRepoId === null || selectedRepos.some((repo) => repo.id === newIssueRepoId)
-  const effectiveNewIssueRepoId = newIssueRepoSelected
-    ? newIssueRepoId
-    : (selectedRepos[0]?.id ?? null)
+  // A fresh mount has no repo id yet; keep the toolbar actionable by targeting
+  // the first selected repo until the user chooses another one.
+  const effectiveNewIssueRepoId =
+    newIssueRepoSelected && newIssueRepoId !== null
+      ? newIssueRepoId
+      : (selectedRepos[0]?.id ?? null)
   const effectiveNewIssueLabels = useMemo(
     () => (newIssueRepoSelected ? newIssueLabels : []),
     [newIssueRepoSelected, newIssueLabels]

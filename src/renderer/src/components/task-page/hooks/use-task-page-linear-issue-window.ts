@@ -20,7 +20,7 @@ import type {
   LinearTeam
 } from '../../../../../shared/linear/workspace-types'
 import type { Worktree } from '../../../../../shared/worktree/types'
-import type { CacheEntry } from '@/store/slices/github'
+import type { CacheEntry } from '@/store/github/cache-model'
 
 export function useTaskPageLinearIssueWindow({
   activeLinearIssues,
