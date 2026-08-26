@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useLayoutEffect, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { useAppStore } from '@/store'
@@ -74,7 +74,7 @@ export function useTaskPageStoreBindings() {
   const checkJiraConnection = useAppStore((s) => s.checkJiraConnection)
   const providerRuntimeContextKey = getProviderRuntimeContextKey(settings)
   const providerRuntimeContextKeyRef = useRef(providerRuntimeContextKey)
-  useEffect(() => {
+  useLayoutEffect(() => {
     providerRuntimeContextKeyRef.current = providerRuntimeContextKey
   }, [providerRuntimeContextKey])
   const linearStatusCurrent = linearStatusContextKey === providerRuntimeContextKey

@@ -30,7 +30,8 @@ export function useTaskPageGitHubNewIssueState({
   // Why: session-only draft recovers an in-progress issue across dismissal/remount; read imperatively (not subscribed) so per-keystroke writes don't re-render all of TaskPage.
   const setNewIssueDraft = useAppStore((s) => s.setNewIssueDraft)
   const clearNewIssueDraft = useAppStore((s) => s.clearNewIssueDraft)
-  const newIssueRepoSelected = selectedRepos.some((repo) => repo.id === newIssueRepoId)
+  const newIssueRepoSelected =
+    newIssueRepoId === null || selectedRepos.some((repo) => repo.id === newIssueRepoId)
   const effectiveNewIssueRepoId = newIssueRepoSelected
     ? newIssueRepoId
     : (selectedRepos[0]?.id ?? null)
