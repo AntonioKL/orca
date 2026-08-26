@@ -5,28 +5,28 @@ import { translate } from '@/i18n/i18n'
 function formatAheadOfTitle(count: number, ref: string): string {
   return count === 1
     ? translate(
-        'auto.components.right.sidebar.SourceControl.f9b2441bb6',
-        '1 commit ahead of {{value0}}',
-        { value0: ref }
+        'auto.components.right.sidebar.SourceControl.compareBaseCommitsAheadOne',
+        '1 commit ahead of {{ref}}',
+        { ref }
       )
     : translate(
-        'auto.components.right.sidebar.SourceControl.b715ef615b',
-        '{{value0}} commits ahead of {{value1}}',
-        { value0: count, value1: ref }
+        'auto.components.right.sidebar.SourceControl.compareBaseCommitsAheadOther',
+        '{{count}} commits ahead of {{ref}}',
+        { count, ref }
       )
 }
 
 function formatBehindOfTitle(count: number, ref: string): string {
   return count === 1
     ? translate(
-        'auto.components.right.sidebar.SourceControl.c1a8f3e204',
-        '1 commit behind {{value0}}',
-        { value0: ref }
+        'auto.components.right.sidebar.SourceControl.compareBaseCommitsBehindOne',
+        '1 commit behind {{ref}}',
+        { ref }
       )
     : translate(
-        'auto.components.right.sidebar.SourceControl.d2b9g4f315',
-        '{{value0}} commits behind {{value1}}',
-        { value0: count, value1: ref }
+        'auto.components.right.sidebar.SourceControl.compareBaseCommitsBehindOther',
+        '{{count}} commits behind {{ref}}',
+        { count, ref }
       )
 }
 

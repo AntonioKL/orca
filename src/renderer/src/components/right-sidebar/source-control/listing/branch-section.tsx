@@ -65,14 +65,14 @@ export function SourceControlBranchSection({
     baseRef && fileCount === totalBranchEntryCount
       ? fileCount === 1
         ? translate(
-            'auto.components.right.sidebar.SourceControl.c3f9a1d806',
-            '1 file changed vs {{value0}}',
-            { value0: formatSourceControlRefLabel(baseRef) }
+            'auto.components.right.sidebar.SourceControl.branchFilesChangedVsBaseOne',
+            '1 file changed vs {{ref}}',
+            { ref: formatSourceControlRefLabel(baseRef) }
           )
         : translate(
-            'auto.components.right.sidebar.SourceControl.d6e2b8c704',
-            '{{value0}} files changed vs {{value1}}',
-            { value0: fileCount, value1: formatSourceControlRefLabel(baseRef) }
+            'auto.components.right.sidebar.SourceControl.branchFilesChangedVsBaseOther',
+            '{{count}} files changed vs {{ref}}',
+            { count: fileCount, ref: formatSourceControlRefLabel(baseRef) }
           )
       : undefined
 
