@@ -11,13 +11,21 @@
 // rather than throwing: a truncated dump must degrade, not break crash
 // reporting.
 
-import { findStream, isMinidump, MAX_MODULES, MinidumpView } from './minidump-stream-reader'
+import {
+  findStream,
+  isMinidump,
+  MAX_MODULES,
+  MinidumpView,
+  overlapsOtherStream
+} from './minidump-stream-reader'
 import { readCrashpadAnnotations } from './minidump-crashpad-annotations'
 
 const STREAM_TYPE_MODULE_LIST = 4
 const STREAM_TYPE_EXCEPTION = 6
 
 const MODULE_RECORD_SIZE = 108
+const MODULE_LIST_HEADER_SIZE = 4
+const MODULE_LIST_PADDED_HEADER_SIZE = 8
 const MODULE_BASE_OFFSET = 0
 const MODULE_SIZE_OFFSET = 8
 const MODULE_NAME_RVA_OFFSET = 20
@@ -40,6 +48,15 @@ const CHECK_LOG_PATTERN =
   /^\[(?:\d+:){1,2}\d{4}\/\d{6}\.\d{3,6}:(FATAL|CHECK|DFATAL|ERROR)(?::[^:\]\r\n]{1,80})*:([^:\]\r\n]{1,512}?)(?:\((\d+)\)|:(\d+))\]\s*(.+)$/
 const ERROR_CHECK_PATTERN = /\b(?:Check failed:|D?CHECK failed:|Intentionally causing D?CHECK\b)/i
 
+/**
+ * How much of the MINIDUMP_MODULE_LIST backed `faultingModule`. `complete` says
+ * every record the list declared was read at an offset the dump corroborates —
+ * not that the producer was honest. A list we could not read in full is still
+ * not a list without the faulting module, so the two states stay distinct and
+ * never collapse into "no faulting module".
+ */
+export type ModuleListStatus = 'complete' | 'truncated' | 'unreadable'
+
 export type MinidumpCrashSignature = {
   /** Chromium's fatal log line, e.g. `[...:FATAL:node.cc(123)] Check failed: !x.` */
   readonly checkMessage?: string
@@ -54,6 +71,13 @@ export type MinidumpCrashSignature = {
   /** Module whose image range contains `exceptionAddress`. */
   readonly faultingModule?: string
   readonly faultingModuleOffset?: string
+  /** Set only when the module list was not read in full; absent means complete. */
+  readonly moduleListStatus?: Exclude<ModuleListStatus, 'complete'>
+  /**
+   * Set only when part of Crashpad's annotation walk went unread. `processType`
+   * missing under it means undetermined, not another process.
+   */
+  readonly annotationListStatus?: 'unreadable'
   /** Allowlisted Crashpad annotations, verbatim. */
   readonly annotations: Readonly<Record<string, string>>
 }
@@ -61,31 +85,59 @@ export type MinidumpCrashSignature = {
 type ModuleRecord = {
   readonly base: bigint
   readonly size: number
-  readonly name: string
+  /** Absent when the MINIDUMP_STRING could not be read; never a stand-in name. */
+  readonly name?: string
 }
 
-function readModules(view: MinidumpView): ModuleRecord[] {
+function readModules(view: MinidumpView): {
+  modules: ModuleRecord[]
+  status: ModuleListStatus
+} {
   const stream = findStream(view, STREAM_TYPE_MODULE_LIST)
   if (!stream) {
-    return []
+    return { modules: [], status: 'unreadable' }
   }
   const count = view.u32(stream.rva)
-  if (count === null || count > MAX_MODULES) {
-    return []
+  if (count === null) {
+    return { modules: [], status: 'unreadable' }
+  }
+  // Breakpad's ReadModuleList tolerates a 4-byte pad between NumberOfModules and
+  // Modules[0] on 64-bit ABIs; reading that layout at +4 shifts every field.
+  const headerSize =
+    stream.size === MODULE_LIST_PADDED_HEADER_SIZE + count * MODULE_RECORD_SIZE
+      ? MODULE_LIST_PADDED_HEADER_SIZE
+      : MODULE_LIST_HEADER_SIZE
+  // Records past the declared stream size are unrelated dump bytes; reading them
+  // would invent modules, so an over-declared count is truncation, not absence.
+  const declared = Math.floor((stream.size - headerSize) / MODULE_RECORD_SIZE)
+  const readable = Math.max(0, Math.min(count, MAX_MODULES, declared))
+  // `size` and `count` are one producer's word, so their agreement corroborates
+  // nothing. Reaching into another stream's bytes does: it proves the declared
+  // range is not the list's, and every offset derived from it with it.
+  const walkedEnd = stream.rva + headerSize + readable * MODULE_RECORD_SIZE
+  if (overlapsOtherStream(view, stream.rva, walkedEnd)) {
+    return { modules: [], status: 'unreadable' }
   }
   const modules: ModuleRecord[] = []
-  for (let index = 0; index < count; index += 1) {
-    const record = stream.rva + 4 + index * MODULE_RECORD_SIZE
+  for (let index = 0; index < readable; index += 1) {
+    const record = stream.rva + headerSize + index * MODULE_RECORD_SIZE
     const base = view.u64(record + MODULE_BASE_OFFSET)
     const size = view.u32(record + MODULE_SIZE_OFFSET)
     const nameRva = view.u32(record + MODULE_NAME_RVA_OFFSET)
     if (base === null || size === null || nameRva === null) {
-      break
+      return { modules, status: 'unreadable' }
     }
+    // The range still locates the module, so keep the record and drop only the name.
     const name = view.utf16String(nameRva, 2_048)
-    modules.push({ base, size, name: name ?? 'unknown' })
+    modules.push({ base, size, name: name ?? undefined })
   }
-  return modules
+  if (readable < count) {
+    return { modules, status: 'truncated' }
+  }
+  // A size matching neither packed nor padded layout makes every record offset a
+  // guess, so nothing walked at them may be published as a module either.
+  const layoutMatches = stream.size === headerSize + count * MODULE_RECORD_SIZE
+  return layoutMatches ? { modules, status: 'complete' } : { modules: [], status: 'unreadable' }
 }
 
 function moduleBasename(modulePath: string): string {
@@ -174,11 +226,11 @@ function parseCheckLocation(checkMessage: string): {
 function findFaultingModule(
   modules: ModuleRecord[],
   address: bigint
-): { name: string; offset: string } | undefined {
+): { name?: string; offset: string } | undefined {
   for (const module of modules) {
     if (address >= module.base && address < module.base + BigInt(module.size)) {
       return {
-        name: moduleBasename(module.name),
+        name: module.name === undefined ? undefined : moduleBasename(module.name),
         offset: toHex(address - module.base)
       }
     }
@@ -208,7 +260,7 @@ export function parseMinidumpCrashSignature(
     return null
   }
   const view = new MinidumpView(dump)
-  const annotations = readCrashpadAnnotations(view)
+  const { annotations, annotationsComplete } = readCrashpadAnnotations(view)
 
   const signature: {
     -readonly [K in keyof MinidumpCrashSignature]: MinidumpCrashSignature[K]
@@ -218,9 +270,19 @@ export function parseMinidumpCrashSignature(
   if (processType) {
     signature.processType = processType
   }
+  if (!annotationsComplete) {
+    signature.annotationListStatus = 'unreadable'
+  }
+  // A list we could not finish did not say the dump is another process's; it said
+  // nothing, and stopping here reports a dump we did read as never written.
+  const processTypeUndetermined = processType === undefined && !annotationsComplete
   // Annotations are bounded; the scans below are not. A renderer crash would
   // otherwise scan every fresh GPU/utility dump end to end before rejecting it.
-  if (options.expectedProcessType !== undefined && processType !== options.expectedProcessType) {
+  if (
+    options.expectedProcessType !== undefined &&
+    processType !== options.expectedProcessType &&
+    !processTypeUndetermined
+  ) {
     return signature
   }
 
@@ -246,10 +308,17 @@ export function parseMinidumpCrashSignature(
     }
     if (address !== null) {
       signature.exceptionAddress = toHex(address)
-      const faulting = findFaultingModule(readModules(view), address)
-      if (faulting) {
+      const { modules, status } = readModules(view)
+      const faulting = findFaultingModule(modules, address)
+      if (faulting?.name !== undefined) {
         signature.faultingModule = faulting.name
         signature.faultingModuleOffset = faulting.offset
+      }
+      // A module we located but could not name leaves `faultingModule` absent for
+      // a reason the status must carry, or silence reads as "no module covers it".
+      const listStatus = faulting && faulting.name === undefined ? 'unreadable' : status
+      if (listStatus !== 'complete') {
+        signature.moduleListStatus = listStatus
       }
     }
   }
@@ -285,6 +354,12 @@ export function minidumpSignatureDetails(
   }
   if (signature.faultingModuleOffset) {
     details.minidumpFaultingModuleOffset = signature.faultingModuleOffset
+  }
+  if (signature.moduleListStatus) {
+    details.minidumpModuleListStatus = signature.moduleListStatus
+  }
+  if (signature.annotationListStatus) {
+    details.minidumpAnnotationListStatus = signature.annotationListStatus
   }
   for (const [key, value] of Object.entries(signature.annotations)) {
     if (key === 'LOG_FATAL' || key === 'abort-message' || key === 'ptype') {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { minidumpSignatureDetails, parseMinidumpCrashSignature } from './minidump-crash-signature'
+import { MAX_MODULES } from './minidump-stream-reader'
 
 const STREAM_TYPE_MODULE_LIST = 4
 const STREAM_TYPE_EXCEPTION = 6
@@ -77,6 +78,10 @@ function location(size: number, rva: number): Buffer {
 
 const EMPTY_LOCATION = location(0, 0)
 
+// A name region Crashpad has not written yet: the record's RVA lands past EOF,
+// which is what reading a dump mid-write looks like.
+const UNWRITTEN_NAME_RVA = 0xffff_0000
+
 type BuiltDump = { dump: Buffer }
 
 /**
@@ -88,7 +93,16 @@ function buildDump(options: {
   annotations?: Record<string, string>
   simpleAnnotations?: Record<string, string>
   exception?: { code: number; address: bigint }
-  modules?: { base: bigint; size: number; name: string }[]
+  /** `name: null` writes a record whose name region is missing from the dump. */
+  modules?: { base: bigint; size: number; name: string | null }[]
+  /** Declares more modules than the list carries, as a corrupt dump does. */
+  declaredModuleCount?: number
+  /** Stream-directory size for the module list, when it must disagree with the count. */
+  moduleListDeclaredSize?: number
+  /** Writes the 4-byte pad between NumberOfModules and Modules[0] that 64-bit ABIs emit. */
+  moduleListPadded?: boolean
+  /** Declared size of Crashpad's module-link list, when it must under-declare. */
+  crashpadModuleLinkListSize?: number
 }): BuiltDump {
   const streamCount =
     1 + (options.exception ? 1 : 0) + (options.modules && options.modules.length > 0 ? 1 : 0)
@@ -153,7 +167,7 @@ function buildDump(options: {
       return v
     })(),
     location(simpleBuf.length, simpleRva),
-    location(moduleLinkBuf.length, moduleLinkRva)
+    location(options.crashpadModuleLinkListSize ?? moduleLinkBuf.length, moduleLinkRva)
   ])
   const crashpadInfoRva = builder.append(crashpadInfoBuf)
   streams.push({
@@ -163,18 +177,21 @@ function buildDump(options: {
   })
 
   if (options.modules && options.modules.length > 0) {
-    const nameRvas = options.modules.map((module) => builder.utf16String(module.name))
-    const listBuf = Buffer.alloc(4 + options.modules.length * 108)
-    listBuf.writeUInt32LE(options.modules.length, 0)
+    const nameRvas = options.modules.map((module) =>
+      module.name === null ? UNWRITTEN_NAME_RVA : builder.utf16String(module.name)
+    )
+    const recordsAt = options.moduleListPadded ? 8 : 4
+    const listBuf = Buffer.alloc(recordsAt + options.modules.length * 108)
+    listBuf.writeUInt32LE(options.declaredModuleCount ?? options.modules.length, 0)
     options.modules.forEach((module, index) => {
-      const at = 4 + index * 108
+      const at = recordsAt + index * 108
       listBuf.writeBigUInt64LE(module.base, at)
       listBuf.writeUInt32LE(module.size, at + 8)
       listBuf.writeUInt32LE(nameRvas[index], at + 20)
     })
     streams.push({
       type: STREAM_TYPE_MODULE_LIST,
-      size: listBuf.length,
+      size: options.moduleListDeclaredSize ?? listBuf.length,
       rva: builder.append(listBuf)
     })
   }
@@ -212,6 +229,20 @@ describe('parseMinidumpCrashSignature', () => {
     expect(signature?.checkFile).toBe('render_frame_impl.cc')
     expect(signature?.checkLine).toBe(4821)
     expect(signature?.processType).toBe('renderer')
+  })
+
+  it('keeps parsing when an unread annotation list left the process type unknown', () => {
+    const { dump } = buildDump({
+      annotations: { LOG_FATAL: FATAL_LINE, ptype: 'renderer' },
+      // Room for zero links, so the carrier the count declares is never reached.
+      crashpadModuleLinkListSize: 4
+    })
+
+    const signature = parseMinidumpCrashSignature(dump, { expectedProcessType: 'renderer' })
+
+    expect(signature?.processType).toBeUndefined()
+    expect(signature?.annotationListStatus).toBe('unreadable')
+    expect(signature?.checkMessage).toContain('Check failed: !is_detached_.')
   })
 
   it('recovers a CHECK line from Electron 43 dump memory without LOG_FATAL', () => {
@@ -407,5 +438,195 @@ describe('minidumpSignatureDetails', () => {
     const details = minidumpSignatureDetails(parseMinidumpCrashSignature(dump)!)
 
     expect(details.minidumpAnnotation_LOG_FATAL).toBeUndefined()
+  })
+})
+
+describe('module list capacity', () => {
+  /** Measured image count of a real macOS renderer; the cap must clear it. */
+  const MACOS_RENDERER_IMAGE_COUNT = 1_042
+
+  function manyModules(count: number): { base: bigint; size: number; name: string }[] {
+    return Array.from({ length: count }, (_, index) => ({
+      base: BigInt(0x1_0000_0000 + index * 0x1_0000),
+      size: 0x1000,
+      name: `/opt/orca/lib/module-${index}.dylib`
+    }))
+  }
+
+  it('resolves the faulting module in a macOS renderer sized image list', () => {
+    const modules = manyModules(MACOS_RENDERER_IMAGE_COUNT)
+    const target = modules[MACOS_RENDERER_IMAGE_COUNT - 1]
+    const { dump } = buildDump({
+      exception: { code: 11, address: target.base + 0x24n },
+      modules
+    })
+
+    const signature = parseMinidumpCrashSignature(dump)
+
+    expect(signature?.faultingModule).toBe(`module-${MACOS_RENDERER_IMAGE_COUNT - 1}.dylib`)
+    expect(signature?.faultingModuleOffset).toBe('0x24')
+    expect(signature?.moduleListStatus).toBeUndefined()
+  })
+
+  it('reports truncation as a distinct state instead of an absent faulting module', () => {
+    const modules = manyModules(MAX_MODULES + 1)
+    const target = modules[MAX_MODULES]
+    const { dump } = buildDump({
+      exception: { code: 11, address: target.base + 0x8n },
+      modules
+    })
+
+    const signature = parseMinidumpCrashSignature(dump)
+
+    expect(signature?.moduleListStatus).toBe('truncated')
+    expect(signature?.faultingModule).toBeUndefined()
+    expect(minidumpSignatureDetails(signature!).minidumpModuleListStatus).toBe('truncated')
+  })
+
+  it('reports an unreadable module list when records run past the end of the dump', () => {
+    const { dump } = buildDump({
+      exception: { code: 11, address: 0xdead_0000n },
+      modules: manyModules(8),
+      declaredModuleCount: 4_000,
+      // The stream claims room the file cannot back, so only EOF can stop the walk.
+      moduleListDeclaredSize: 4 + 4_000 * 108
+    })
+
+    const signature = parseMinidumpCrashSignature(dump)
+
+    expect(signature?.moduleListStatus).toBe('unreadable')
+    expect(signature?.faultingModule).toBeUndefined()
+  })
+
+  it('stops at the declared stream size instead of reading trailing bytes as modules', () => {
+    const modules = [
+      { base: 0x1000_0000n, size: 0x1000, name: '/opt/orca/lib/real.dylib' },
+      { base: 0x2000_0000n, size: 0x1000, name: '/opt/orca/lib/fake.dylib' }
+    ]
+    const { dump } = buildDump({
+      exception: { code: 11, address: 0x2000_0024n },
+      modules,
+      // Honest for one record; the count says two, as a corrupt header does.
+      moduleListDeclaredSize: 4 + 108
+    })
+
+    const signature = parseMinidumpCrashSignature(dump)
+
+    expect(signature?.faultingModule).toBeUndefined()
+    expect(signature?.moduleListStatus).toBe('truncated')
+  })
+
+  it('refuses to name a module whose name region is missing from the dump', () => {
+    const { dump } = buildDump({
+      exception: { code: 11, address: 0x1000_0024n },
+      modules: [{ base: 0x1000_0000n, size: 0x1000, name: null }]
+    })
+
+    const signature = parseMinidumpCrashSignature(dump)
+
+    expect(signature?.faultingModule).toBeUndefined()
+    expect(signature?.faultingModuleOffset).toBeUndefined()
+    expect(signature?.moduleListStatus).toBe('unreadable')
+    expect(minidumpSignatureDetails(signature!).minidumpModuleListStatus).toBe('unreadable')
+  })
+
+  it('still names the faulting module when an unrelated module name is unreadable', () => {
+    const { dump } = buildDump({
+      exception: { code: 11, address: 0x1000_0024n },
+      modules: [
+        { base: 0x2000_0000n, size: 0x1000, name: null },
+        { base: 0x1000_0000n, size: 0x1000, name: '/opt/orca/lib/real.dylib' }
+      ]
+    })
+
+    const signature = parseMinidumpCrashSignature(dump)
+
+    expect(signature?.faultingModule).toBe('real.dylib')
+    expect(signature?.faultingModuleOffset).toBe('0x24')
+    expect(signature?.moduleListStatus).toBeUndefined()
+  })
+
+  it('keeps an unreadable name outside every image range from clouding absence', () => {
+    const { dump } = buildDump({
+      exception: { code: 11, address: 0x10n },
+      modules: [{ base: 0x2000_0000n, size: 0x1000, name: null }]
+    })
+
+    const signature = parseMinidumpCrashSignature(dump)
+
+    expect(signature?.faultingModule).toBeUndefined()
+    expect(signature?.moduleListStatus).toBeUndefined()
+  })
+
+  it('reads a module list padded to the 64-bit record alignment', () => {
+    const { dump } = buildDump({
+      exception: { code: 11, address: 0x1000_0024n },
+      modules: [{ base: 0x1000_0000n, size: 0x1000, name: '/opt/orca/lib/real.dylib' }],
+      moduleListPadded: true
+    })
+
+    const signature = parseMinidumpCrashSignature(dump)
+
+    expect(signature?.faultingModule).toBe('real.dylib')
+    expect(signature?.faultingModuleOffset).toBe('0x24')
+    expect(signature?.moduleListStatus).toBeUndefined()
+  })
+
+  it('refuses to call a list complete when its size matches no known layout', () => {
+    const { dump } = buildDump({
+      exception: { code: 11, address: 0x10n },
+      modules: [{ base: 0x1000_0000n, size: 0x1000, name: '/opt/orca/lib/real.dylib' }],
+      // Neither 4 + 108 nor 8 + 108: the record offsets are unknowable.
+      moduleListDeclaredSize: 6 + 108
+    })
+
+    const signature = parseMinidumpCrashSignature(dump)
+
+    expect(signature?.moduleListStatus).toBe('unreadable')
+  })
+
+  it('refuses to call a list complete when its declared range runs into another stream', () => {
+    const { dump } = buildDump({
+      // Nothing in the dump covers this address; the reader must not be told so
+      // on the strength of a walk that read another stream as a module record.
+      exception: { code: 0x1000, address: 0x10n },
+      modules: [{ base: 0x1000_0000n, size: 0x1000, name: '/opt/orca/lib/real.dylib' }],
+      // Count and declared size over-declare in lockstep, so record #1 is the
+      // exception stream's bytes — the one corruption their agreement hides.
+      declaredModuleCount: 2,
+      moduleListDeclaredSize: 4 + 2 * 108
+    })
+
+    const signature = parseMinidumpCrashSignature(dump)
+
+    expect(signature?.moduleListStatus).toBe('unreadable')
+    expect(minidumpSignatureDetails(signature!).minidumpModuleListStatus).toBe('unreadable')
+  })
+
+  it('does not name a module read at offsets it could not establish', () => {
+    const { dump } = buildDump({
+      exception: { code: 11, address: 0x1000_0024n },
+      modules: [{ base: 0x1000_0000n, size: 0x1000, name: '/opt/orca/lib/real.dylib' }],
+      // Neither 4 + 108 nor 8 + 108, so the record offset below is a guess.
+      moduleListDeclaredSize: 6 + 108
+    })
+
+    const signature = parseMinidumpCrashSignature(dump)
+
+    expect(signature?.faultingModule).toBeUndefined()
+    expect(signature?.faultingModuleOffset).toBeUndefined()
+    expect(signature?.moduleListStatus).toBe('unreadable')
+  })
+
+  it('keeps a fully read list silent so a missing module still means absent', () => {
+    const { dump } = buildDump({
+      exception: { code: 11, address: 0x10n },
+      modules: [{ base: 0x7ff7_0000_0000n, size: 0x1000, name: '/opt/orca/orca' }]
+    })
+
+    const signature = parseMinidumpCrashSignature(dump)
+
+    expect(signature?.moduleListStatus).toBeUndefined()
+    expect(minidumpSignatureDetails(signature!).minidumpModuleListStatus).toBeUndefined()
   })
 })

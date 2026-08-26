@@ -215,6 +215,67 @@ describe('captureMinidumpSignature', () => {
     expect(captured?.signature.processType).toBe('renderer')
   })
 
+  it('keeps a dump whose process type an unread annotation list left unknown', async () => {
+    const dumpPath = await writeDump(path.join('reports', 'unreadable.dmp'), CRASHED_AT + 100)
+    parseMinidumpCrashSignatureMock.mockReturnValue({
+      annotations: {},
+      annotationListStatus: 'unreadable'
+    })
+
+    const captured = await captureMinidumpSignature(CRASHED_AT, {
+      expectedProcessType: 'renderer',
+      timeoutMs: 0,
+      now: () => CRASHED_AT
+    })
+
+    expect(captured?.filePath).toBe(dumpPath)
+  })
+
+  it('prefers a dump that names this process over one an unread list left unknown', async () => {
+    const rendererDump = await writeDump(
+      path.join('reports', 'renderer.dmp'),
+      CRASHED_AT + 50,
+      Buffer.from('renderer')
+    )
+    // Newer, so it is examined first, and its annotation list never named a ptype.
+    await writeDump(path.join('reports', 'gpu.dmp'), CRASHED_AT + 80, Buffer.from('unreadable'))
+    parseMinidumpCrashSignatureMock.mockImplementation((dump: Buffer) =>
+      dump.toString('utf8') === 'unreadable'
+        ? { annotations: {}, annotationListStatus: 'unreadable' }
+        : { processType: dump.toString('utf8'), annotations: {} }
+    )
+
+    const captured = await captureMinidumpSignature(CRASHED_AT, {
+      expectedProcessType: 'renderer',
+      timeoutMs: 0,
+      now: () => CRASHED_AT
+    })
+
+    expect(captured?.filePath).toBe(rendererDump)
+  })
+
+  it('leaves an undetermined dump available for the process that owns it', async () => {
+    const dumpPath = await writeDump(path.join('reports', 'unreadable.dmp'), CRASHED_AT + 100)
+    parseMinidumpCrashSignatureMock.mockReturnValue({
+      annotations: {},
+      annotationListStatus: 'unreadable'
+    })
+
+    const renderer = await captureMinidumpSignature(CRASHED_AT, {
+      expectedProcessType: 'renderer',
+      timeoutMs: 0,
+      now: () => CRASHED_AT
+    })
+    const gpu = await captureMinidumpSignature(CRASHED_AT, {
+      expectedProcessType: 'gpu-process',
+      timeoutMs: 0,
+      now: () => CRASHED_AT
+    })
+
+    expect(renderer?.filePath).toBe(dumpPath)
+    expect(gpu?.filePath).toBe(dumpPath)
+  })
+
   it('leaves a mismatched dump available for its own process report', async () => {
     const gpuDump = await writeDump(
       path.join('reports', 'gpu.dmp'),

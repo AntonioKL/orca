@@ -223,6 +223,148 @@ describe('crash-reporting shared helpers', () => {
     expect(text.indexOf('Check failure:')).toBeLessThan(text.indexOf('Details:'))
   })
 
+  it('says the module list was unread rather than implying no faulting module', () => {
+    const report: CrashReportRecord = {
+      id: 'crash-truncated-modules',
+      createdAt: '2026-08-15T01:00:00.000Z',
+      status: 'pending',
+      source: 'renderer',
+      processType: 'renderer',
+      reason: 'crashed',
+      exitCode: 11,
+      appVersion: '1.4.188',
+      platform: 'darwin',
+      osRelease: '24.6.0',
+      arch: 'arm64',
+      electronVersion: '43.1.0',
+      chromeVersion: '150.0.7871.47',
+      details: {
+        minidumpExceptionAddress: '0x7ff800001234',
+        minidumpModuleListStatus: 'truncated'
+      },
+      breadcrumbs: []
+    }
+
+    const text = formatCrashReportText(report)
+
+    expect(text).toContain('Faulting module: unresolved (module list truncated)')
+  })
+
+  it('qualifies the faulting module headline with the module list status', () => {
+    const report: CrashReportRecord = {
+      id: 'crash-partial-modules',
+      createdAt: '2026-08-15T01:00:00.000Z',
+      status: 'pending',
+      source: 'renderer',
+      processType: 'renderer',
+      reason: 'crashed',
+      exitCode: 11,
+      appVersion: '1.4.188',
+      platform: 'darwin',
+      osRelease: '24.6.0',
+      arch: 'arm64',
+      electronVersion: '43.1.0',
+      chromeVersion: '150.0.7871.47',
+      details: {
+        minidumpExceptionAddress: '0x7ff800001234',
+        minidumpFaultingModule: 'libGLESv2.dylib',
+        minidumpFaultingModuleOffset: '0x1234',
+        minidumpModuleListStatus: 'truncated'
+      },
+      breadcrumbs: []
+    }
+
+    const text = formatCrashReportText(report)
+
+    expect(text).toContain('Faulting module: libGLESv2.dylib+0x1234 (module list truncated)')
+  })
+
+  it('marks a fatal line lifted from a dump whose process type went unread', () => {
+    const report: CrashReportRecord = {
+      id: 'crash-unattributed',
+      createdAt: '2026-08-15T01:00:00.000Z',
+      status: 'pending',
+      source: 'renderer',
+      processType: 'renderer',
+      reason: 'crashed',
+      exitCode: 11,
+      appVersion: '1.4.188',
+      platform: 'darwin',
+      osRelease: '24.6.0',
+      arch: 'arm64',
+      electronVersion: '43.1.0',
+      chromeVersion: '150.0.7871.47',
+      details: {
+        minidumpCheckMessage: '[0101/000000.000000:FATAL:gpu_main.cc(9)] Check failed: false.',
+        minidumpAnnotationListStatus: 'unreadable'
+      },
+      breadcrumbs: []
+    }
+
+    const text = formatCrashReportText(report)
+
+    expect(text).toContain(
+      'Check failure: [0101/000000.000000:FATAL:gpu_main.cc(9)] Check failed: false. (process unconfirmed: annotation list unreadable)'
+    )
+  })
+
+  it('leaves the fatal line unqualified when the dump did name its process', () => {
+    const report: CrashReportRecord = {
+      id: 'crash-attributed',
+      createdAt: '2026-08-15T01:00:00.000Z',
+      status: 'pending',
+      source: 'renderer',
+      processType: 'renderer',
+      reason: 'crashed',
+      exitCode: 11,
+      appVersion: '1.4.188',
+      platform: 'darwin',
+      osRelease: '24.6.0',
+      arch: 'arm64',
+      electronVersion: '43.1.0',
+      chromeVersion: '150.0.7871.47',
+      details: {
+        minidumpCheckMessage: '[0101/000000.000000:FATAL:render_frame.cc(9)] Check failed: false.',
+        minidumpProcessType: 'renderer',
+        minidumpAnnotationListStatus: 'unreadable'
+      },
+      breadcrumbs: []
+    }
+
+    const text = formatCrashReportText(report)
+
+    expect(text).toContain(
+      'Check failure: [0101/000000.000000:FATAL:render_frame.cc(9)] Check failed: false.\n'
+    )
+  })
+
+  it('says the process is unconfirmed even with no fatal line to hang it on', () => {
+    const report: CrashReportRecord = {
+      id: 'crash-unattributed-no-check',
+      createdAt: '2026-08-15T01:00:00.000Z',
+      status: 'pending',
+      source: 'renderer',
+      processType: 'renderer',
+      reason: 'crashed',
+      exitCode: 11,
+      appVersion: '1.4.188',
+      platform: 'darwin',
+      osRelease: '24.6.0',
+      arch: 'arm64',
+      electronVersion: '43.1.0',
+      chromeVersion: '150.0.7871.47',
+      details: {
+        minidumpExceptionCode: '0x80000003',
+        minidumpAnnotationListStatus: 'unreadable'
+      },
+      breadcrumbs: []
+    }
+
+    const text = formatCrashReportText(report)
+
+    expect(text).toContain('Minidump process: unconfirmed (annotation list unreadable)')
+  })
+
   it('decodes POSIX wait statuses in the exit code line and leaves Windows codes raw', () => {
     const report = (overrides: Partial<CrashReportRecord>): CrashReportRecord => ({
       id: 'crash-wait-status',

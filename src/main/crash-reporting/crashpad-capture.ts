@@ -44,7 +44,13 @@ type DumpCandidate = {
 let crashpadDumpDirectory: string | null = null
 let captureStarted = false
 let captureStartedAtMs: number | null = null
-const claimedDumpPaths = new Map<string, number>()
+type DumpClaim = {
+  readonly mtimeMs: number
+  /** False for a dump whose own process type went unread: it may still be another
+   * report's, so the claim only protects it from pruning, it does not reserve it. */
+  readonly exclusive: boolean
+}
+const claimedDumpPaths = new Map<string, DumpClaim>()
 const reservedDumpPaths = new Set<string>()
 let dumpPruneTimer: NodeJS.Timeout | null = null
 
@@ -217,8 +223,8 @@ function freshDumpCandidates(candidates: DumpCandidate[], crashedAtMs: number): 
     crashedAtMs - DUMP_RECENCY_WINDOW_MS,
     captureStartedAtMs ?? Number.NEGATIVE_INFINITY
   )
-  for (const [filePath, mtimeMs] of claimedDumpPaths) {
-    if (mtimeMs < floorMs) {
+  for (const [filePath, claim] of claimedDumpPaths) {
+    if (claim.mtimeMs < floorMs) {
       claimedDumpPaths.delete(filePath)
     }
   }
@@ -275,40 +281,78 @@ export type CapturedMinidump = {
   readonly signature: MinidumpCrashSignature
 }
 
+type DumpTriage = {
+  /** Not a minidump, or one that named a different process: never look again. */
+  readonly rejected: Set<string>
+  /** Process type left unread: worth one more read once the wait for a named one is over. */
+  readonly deferred: Set<string>
+}
+
+async function selectDump(
+  dump: DumpCandidate,
+  options: CrashMinidumpCaptureOptions,
+  triage: DumpTriage,
+  acceptUndeterminedProcess: boolean
+): Promise<CapturedMinidump | null> {
+  if (
+    triage.rejected.has(dump.filePath) ||
+    triage.deferred.has(dump.filePath) ||
+    claimedDumpPaths.get(dump.filePath)?.exclusive === true ||
+    reservedDumpPaths.has(dump.filePath)
+  ) {
+    return null
+  }
+  reservedDumpPaths.add(dump.filePath)
+  try {
+    const signature = parseMinidumpCrashSignature(await readFile(dump.filePath), {
+      expectedProcessType: options.expectedProcessType
+    })
+    if (!signature) {
+      triage.rejected.add(dump.filePath)
+      return null
+    }
+    const matches =
+      options.expectedProcessType === undefined ||
+      signature.processType === options.expectedProcessType
+    // A `processType` the annotation list left unread is undetermined, not a
+    // mismatch; rejecting it outright reports a dump we read as never written.
+    const undetermined =
+      signature.processType === undefined && signature.annotationListStatus === 'unreadable'
+    if (!matches && !(undetermined && acceptUndeterminedProcess)) {
+      const triaged = undetermined ? triage.deferred : triage.rejected
+      triaged.add(dump.filePath)
+      return null
+    }
+    // A dump that never named its process may still be another report's, so the
+    // claim only protects it from pruning; an exclusive one reserves it.
+    claimedDumpPaths.set(dump.filePath, { mtimeMs: dump.mtimeMs, exclusive: matches })
+    return { filePath: dump.filePath, sizeBytes: dump.size, signature }
+  } finally {
+    reservedDumpPaths.delete(dump.filePath)
+  }
+}
+
 /** Finds the dump for a crash and parses its signature. Never throws. */
 export async function captureMinidumpSignature(
   crashedAtMs: number,
   options: CrashMinidumpCaptureOptions = {}
 ): Promise<CapturedMinidump | null> {
-  const rejectedDumpPaths = new Set<string>()
+  const triage: DumpTriage = { rejected: new Set(), deferred: new Set() }
   try {
-    return await pollDumpCandidates(crashedAtMs, options, async (dump) => {
-      if (
-        rejectedDumpPaths.has(dump.filePath) ||
-        claimedDumpPaths.has(dump.filePath) ||
-        reservedDumpPaths.has(dump.filePath)
-      ) {
-        return null
-      }
-      reservedDumpPaths.add(dump.filePath)
-      try {
-        const signature = parseMinidumpCrashSignature(await readFile(dump.filePath), {
-          expectedProcessType: options.expectedProcessType
-        })
-        if (
-          !signature ||
-          (options.expectedProcessType !== undefined &&
-            signature.processType !== options.expectedProcessType)
-        ) {
-          rejectedDumpPaths.add(dump.filePath)
-          return null
-        }
-        claimedDumpPaths.set(dump.filePath, dump.mtimeMs)
-        return { filePath: dump.filePath, sizeBytes: dump.size, signature }
-      } finally {
-        reservedDumpPaths.delete(dump.filePath)
-      }
-    })
+    const named = await pollDumpCandidates(crashedAtMs, options, (dump) =>
+      selectDump(dump, options, triage, false)
+    )
+    if (named) {
+      return named
+    }
+    // Why a second sweep instead of taking it inline: a dump whose own process
+    // type went unread may be this crash's or another's, so it is the fallback,
+    // never the pick over a dump that names itself — and re-reading it now sees a
+    // dump that was merely mid-write before. `timeoutMs: 0` makes it one sweep.
+    triage.deferred.clear()
+    return await pollDumpCandidates(crashedAtMs, { ...options, timeoutMs: 0 }, (dump) =>
+      selectDump(dump, options, triage, true)
+    )
   } catch (error) {
     console.error('[crash-reporting] minidump signature capture failed:', error)
     return null

@@ -14,12 +14,21 @@ const DIRECTORY_ENTRY_SIZE = 12
 const MAX_STREAMS = 4_096
 export const MAX_ANNOTATION_VALUE_BYTES = 8_192
 // Shared cap: both the MINIDUMP_MODULE_LIST and Crashpad's per-module info list.
-export const MAX_MODULES = 1_024
+// Why this high: a real macOS renderer loads 1042 images, so a 1_024 cap made
+// every POSIX module list over-large and unresolvable.
+export const MAX_MODULES = 8_192
 
 export type LocationDescriptor = {
   readonly size: number
   readonly rva: number
 }
+
+export type LocationRead =
+  | { readonly status: 'present'; readonly location: LocationDescriptor }
+  /** The producer wrote a zero RVA: there is no such sub-structure. */
+  | { readonly status: 'absent' }
+  /** The descriptor itself, or what it points at, lies past the end of the dump. */
+  | { readonly status: 'unreadable' }
 
 export class MinidumpView {
   constructor(private readonly buf: Buffer) {}
@@ -49,17 +58,30 @@ export class MinidumpView {
     return this.buf.readBigUInt64LE(offset)
   }
 
-  location(offset: number): LocationDescriptor | null {
+  /**
+   * A LOCATION_DESCRIPTOR read that keeps the producer's "absent" apart from our
+   * "could not read". Collapsing the two turns a truncated dump into a dump that
+   * declared the sub-structure missing.
+   */
+  locationRead(offset: number): LocationRead {
     const size = this.u32(offset)
     const rva = this.u32(offset + 4)
     if (size === null || rva === null) {
-      return null
+      return { status: 'unreadable' }
     }
     // A zero rva means "absent", which is normal for optional sub-structures.
-    if (rva === 0 || rva >= this.buf.length) {
-      return null
+    if (rva === 0) {
+      return { status: 'absent' }
     }
-    return { size, rva }
+    if (rva >= this.buf.length) {
+      return { status: 'unreadable' }
+    }
+    return { status: 'present', location: { size, rva } }
+  }
+
+  location(offset: number): LocationDescriptor | null {
+    const read = this.locationRead(offset)
+    return read.status === 'present' ? read.location : null
   }
 
   /** MinidumpUTF8String: u32 byte length, then NUL-terminated UTF-8. */
@@ -99,6 +121,34 @@ export class MinidumpView {
 
 export function isMinidump(dump: Buffer): boolean {
   return dump.length >= MINIDUMP_HEADER_SIZE && dump.readUInt32LE(0) === MINIDUMP_SIGNATURE
+}
+
+/**
+ * Whether `[rva, end)` reaches into bytes the directory hands to another stream.
+ *
+ * Why: a stream's own `size` and the counts inside it are one producer's word, so
+ * their agreement corroborates nothing. Streams are written disjointly, which
+ * makes an overlap the one in-file proof that a declared range is not the
+ * stream's own bytes.
+ */
+export function overlapsOtherStream(view: MinidumpView, rva: number, end: number): boolean {
+  const streamCount = view.u32(8)
+  const directoryRva = view.u32(12)
+  if (streamCount === null || directoryRva === null || streamCount > MAX_STREAMS) {
+    return false
+  }
+  for (let index = 0; index < streamCount; index += 1) {
+    const entry = directoryRva + index * DIRECTORY_ENTRY_SIZE
+    const size = view.u32(entry + 4)
+    const other = view.u32(entry + 8)
+    if (size === null || other === null || other === 0 || other === rva) {
+      continue
+    }
+    if (other < end && other + size > rva) {
+      return true
+    }
+  }
+  return false
 }
 
 /** Locates a stream by type in the header's directory, or null if absent. */
