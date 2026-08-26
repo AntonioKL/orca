@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  appendFileSync,
   chmodSync,
   mkdirSync,
   mkdtempSync,
@@ -42,6 +43,34 @@ describe('agent hook spool', () => {
       '\n{"paneKey":"tab:1","source":"codex","receivedAt":1,"payload":{}}\n{"paneKey":'
     )
     expect(readSpoolRecords(file, 1)).toHaveLength(1)
+  })
+
+  it('waits for a newline before replaying a complete-looking final record', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'orca-spool-unterminated-'))
+    const spool = join(dir, 'spool')
+    mkdirSync(spool)
+    const file = join(spool, 'pane-live.jsonl')
+    const record = JSON.stringify({
+      paneKey: 'tab:live',
+      source: 'codex',
+      receivedAt: Date.now(),
+      payload: { state: 'done' }
+    })
+    writeFileSync(file, record)
+    const ingested: SpoolRecord[] = []
+    const options = {
+      endpointDir: dir,
+      getPersistedLaunchTokenHash: () => undefined,
+      ingest: (value: SpoolRecord) => ingested.push(value)
+    }
+    expect(readSpoolRecords(file)).toHaveLength(0)
+    expect(drainAgentHookSpool(options)).toBe(0)
+    expect(readFileSync(file, 'utf8')).toBe(record)
+
+    appendFileSync(file, '\n')
+    expect(drainAgentHookSpool(options)).toBe(1)
+    expect(ingested).toHaveLength(1)
+    expect(readFileSync(file)).toHaveLength(0)
   })
 
   it('does not let historical empty pane files starve newer records', () => {

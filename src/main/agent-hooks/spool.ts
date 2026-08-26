@@ -57,6 +57,11 @@ export function readSpoolFile(
     if (end !== bytes.length && bytes[end] !== 0x0a) {
       continue
     }
+    // A final line without its newline may still be in flight from a hook writer.
+    // Leave it untouched until the writer terminates the record explicitly.
+    if (end === bytes.length && (end === 0 || bytes[end - 1] !== 0x0a)) {
+      break
+    }
     const lineBytes = bytes.subarray(start, end)
     if (end !== bytes.length) {
       consumed = end + 1
