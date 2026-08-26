@@ -57,24 +57,18 @@ import {
 const NESTED_WORKER_DEPTH_CHOICES = [
   {
     value: 1,
-    label: translate(
-      'auto.components.settings.AgentsPane.nestedWorkerDepthOne',
-      '1 — workers cannot dispatch'
-    )
+    labelKey: 'auto.components.settings.AgentsPane.nestedWorkerDepthOne',
+    fallbackLabel: '1 — workers cannot dispatch'
   },
   {
     value: 2,
-    label: translate(
-      'auto.components.settings.AgentsPane.nestedWorkerDepthTwo',
-      '2 — workers may dispatch once'
-    )
+    labelKey: 'auto.components.settings.AgentsPane.nestedWorkerDepthTwo',
+    fallbackLabel: '2 — workers may dispatch once'
   },
   {
     value: 3,
-    label: translate(
-      'auto.components.settings.AgentsPane.nestedWorkerDepthThree',
-      '3 — two further generations'
-    )
+    labelKey: 'auto.components.settings.AgentsPane.nestedWorkerDepthThree',
+    fallbackLabel: '3 — two further generations'
   }
 ] as const
 
@@ -353,7 +347,7 @@ export function NestedWorkerDepthSetting({ settings, updateSettings }: AgentsPan
             <SelectContent>
               {NESTED_WORKER_DEPTH_CHOICES.map((choice) => (
                 <SelectItem key={choice.value} value={String(choice.value)}>
-                  {choice.label}
+                  {translate(choice.labelKey, choice.fallbackLabel)}
                 </SelectItem>
               ))}
             </SelectContent>
