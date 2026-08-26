@@ -110,6 +110,11 @@ describe('repos:create', () => {
   const defaultProjectParent = join('/Users/alice', 'orca', 'projects')
   // The value a fresh install seeds Settings -> Workspace Directory with.
   const defaultWorkspaceDir = getDefaultWorkspaceDir('/Users/alice')
+  // Spelled for the host platform on purpose: the handler must only hand back
+  // parents that repos:create's isAbsolute() gate accepts, and isAbsolute is
+  // platform-native, so 'J:\PROJECTS' is not an absolute path on a POSIX runner.
+  const configuredParent = process.platform === 'win32' ? 'J:\\PROJECTS' : '/Volumes/projects'
+  const overrideParent = process.platform === 'win32' ? 'D:\\code' : '/Volumes/code'
 
   const callCreate = (args: CreateArgs): Promise<CreateResult> => {
     const handler = handlers.get('repos:create')
@@ -163,16 +168,16 @@ describe('repos:create', () => {
   // ── create-project default parent (orca#14767) ────────────────────
 
   it('defaults new projects to a configured Workspace Directory', async () => {
-    mockStore.getSettings.mockReturnValue({ workspaceDir: 'J:\\PROJECTS' })
-    await expect(callDefaultCreateProjectParent()).resolves.toBe('J:\\PROJECTS')
+    mockStore.getSettings.mockReturnValue({ workspaceDir: configuredParent })
+    await expect(callDefaultCreateProjectParent()).resolves.toBe(configuredParent)
   })
 
   it('prefers the local host override over the client-default workspace directory', async () => {
     mockStore.getSettings.mockReturnValue({
-      workspaceDir: 'J:\\PROJECTS',
-      hostSettingOverrides: { local: { defaultWorktreeLocation: 'D:\\code' } }
+      workspaceDir: configuredParent,
+      hostSettingOverrides: { local: { defaultWorktreeLocation: overrideParent } }
     })
-    await expect(callDefaultCreateProjectParent()).resolves.toBe('D:\\code')
+    await expect(callDefaultCreateProjectParent()).resolves.toBe(overrideParent)
   })
 
   it.each([undefined, '', '   '])(
@@ -204,6 +209,38 @@ describe('repos:create', () => {
     await expect(callDefaultCreateProjectParent()).resolves.toBe(
       join('C:\\Users\\alice', 'orca', 'projects')
     )
+  })
+
+  // Why: a repo-relative workspaceDir ('../worktrees') is a supported setting --
+  // worktree-logic resolves it against each repo path. A project being created has
+  // no repo path yet, and repos:create rejects any non-absolute parent, so handing
+  // one back as the Location default dead-ends the dialog (#14767).
+  it.each(['../worktrees', '.orca/worktrees', 'worktrees', '..\\worktrees'])(
+    'falls back to ~/orca/projects for a repo-relative workspace directory: %p',
+    async (workspaceDir) => {
+      mockStore.getSettings.mockReturnValue({ workspaceDir })
+      await expect(callDefaultCreateProjectParent()).resolves.toBe(defaultProjectParent)
+    }
+  )
+
+  it('falls back to ~/orca/projects when the local host override is repo-relative', async () => {
+    mockStore.getSettings.mockReturnValue({
+      workspaceDir: configuredParent,
+      hostSettingOverrides: { local: { defaultWorktreeLocation: '../worktrees' } }
+    })
+    await expect(callDefaultCreateProjectParent()).resolves.toBe(defaultProjectParent)
+  })
+
+  // The invariant behind the two tests above: whatever the Location field is
+  // pre-filled with must survive Create, not bounce off the same handler's guard.
+  it('hands back a create-project default that repos:create accepts', async () => {
+    mockStore.getSettings.mockReturnValue({ workspaceDir: '../worktrees' })
+
+    const parentPath = await callDefaultCreateProjectParent()
+    const result = await callCreate({ parentPath, name: 'demo', kind: 'folder' })
+
+    expect(result).toHaveProperty('repo.path', join(defaultProjectParent, 'demo'))
+    expect(mkdirMock).toHaveBeenCalledWith(defaultProjectParent, { recursive: true })
   })
 
   it('unregisters any previously-registered repos:create handler', () => {

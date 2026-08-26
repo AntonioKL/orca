@@ -56,7 +56,11 @@ function getDefaultCreateProjectParent(store: Store): string {
   const isUntouchedDefault =
     normalizeRuntimePathForComparison(configured) ===
     normalizeRuntimePathForComparison(getDefaultWorkspaceDir(home))
-  if (configured && !isUntouchedDefault) {
+  // Why isAbsolute: repo-relative workspace dirs ('../worktrees') are a supported
+  // setting, but they only mean anything once resolved against a repo path and a
+  // new project has none. Returning one pre-fills Location with a value that
+  // repos:create below hard-rejects, dead-ending the dialog.
+  if (configured && !isUntouchedDefault && isAbsolute(configured)) {
     return configured
   }
   return join(home, 'orca', 'projects')
