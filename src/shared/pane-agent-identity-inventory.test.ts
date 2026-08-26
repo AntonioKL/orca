@@ -82,7 +82,7 @@ const INVENTORY: readonly InventoryGroup[] = [
   },
   {
     helper: 'isClaudeAgent',
-    classification: 'evidence-producer',
+    classification: 'action-consumer',
     paths: [
       'src/renderer/src/components/terminal-pane/pty-connection/command-inferred-pane-agent.ts'
     ]
@@ -178,7 +178,7 @@ const INVENTORY: readonly InventoryGroup[] = [
   },
   {
     helper: 'resolveCommittedTitleAgentType',
-    classification: 'evidence-producer',
+    classification: 'action-consumer',
     paths: [
       'src/renderer/src/components/terminal-pane/pty-connection/command-inferred-pane-agent.ts'
     ]
@@ -190,11 +190,15 @@ const INVENTORY: readonly InventoryGroup[] = [
   },
   {
     helper: 'resolvePaneAgentOwner',
+    classification: 'evidence-producer',
+    paths: ['src/renderer/src/components/terminal-pane/parked-terminal-command-status.ts']
+  },
+  {
+    helper: 'resolvePaneAgentOwner',
     classification: 'identity-consumer',
     paths: [
       'src/main/runtime/orca-runtime.ts',
       'src/renderer/src/components/sidebar/worktree-title-derived-agent-rows.ts',
-      'src/renderer/src/components/terminal-pane/parked-terminal-command-status.ts',
       'src/renderer/src/components/terminal-pane/pty-connection/shell-command-inference.ts',
       'src/renderer/src/lib/use-tab-agent.ts',
       'src/renderer/src/runtime/web-session-tabs-sync.ts'
@@ -218,16 +222,18 @@ const INVENTORY: readonly InventoryGroup[] = [
   {
     helper: 'resolveCompatibleAgentTypeForOwner',
     classification: 'action-consumer',
-    paths: ['src/renderer/src/components/terminal-pane/use-notification-dispatch.ts']
+    paths: [
+      'src/renderer/src/components/terminal-pane/pty-connection/agent-task-complete-notify.ts',
+      'src/renderer/src/components/terminal-pane/pty-connection/command-inferred-pane-agent.ts',
+      'src/renderer/src/components/terminal-pane/pty-connection/terminal-keydown-fit.ts',
+      'src/renderer/src/components/terminal-pane/use-notification-dispatch.ts'
+    ]
   },
   {
     helper: 'resolveCompatibleAgentTypeForOwner',
     classification: 'evidence-producer',
     paths: [
-      'src/renderer/src/components/terminal-pane/pty-connection/agent-task-complete-notify.ts',
-      'src/renderer/src/components/terminal-pane/pty-connection/command-inferred-pane-agent.ts',
       'src/renderer/src/components/terminal-pane/pty-connection/direct-ssh-retry-status.ts',
-      'src/renderer/src/components/terminal-pane/pty-connection/terminal-keydown-fit.ts',
       'src/renderer/src/components/terminal-pane/pty-connection/title-spawn-bell.ts'
     ]
   }
