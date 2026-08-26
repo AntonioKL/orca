@@ -7,9 +7,6 @@ import type { AutomationHostCatalogEntry } from './automation-host-catalog-types
 import {
   externalAutomationProbeOwners,
   externalAutomationScopeGateFromError,
-  externalAutomationScopeNotice,
-  externalManagersListedForEntries,
-  externalManagersListedForEntry,
   parseExternalAutomationScopeCode,
   resolveExternalAutomationScopeGate
 } from './external-automation-scope-gating'
@@ -49,7 +46,6 @@ describe('external automation scope gating', () => {
       authority: { kind: 'desktop' },
       selector: { kind: 'self' }
     })
-    expect(externalAutomationScopeNotice(gate)).toBeNull()
   })
 
   it('never presents a runtime-owned host as clean', () => {
@@ -57,17 +53,12 @@ describe('external automation scope gating', () => {
     expect(gate.status).toBe('not-listed')
     expect(gate.code).toBe(EXTERNAL_AUTOMATION_SCOPE_CODES.authorityNotSupported)
     expect(gate.probeOwner).toBeNull()
-    expect(externalManagersListedForEntry(runtimeEntry)).toBe(false)
-    expect(externalAutomationScopeNotice(gate)).toBe(
-      'External automation managers are not listed for this host in this release.'
-    )
   })
 
   it('fails closed when no owner was captured, so nothing is probed', () => {
     const gate = resolveExternalAutomationScopeGate(entry({ owner: null }))
     expect(gate.status).toBe('not-listed')
     expect(gate.probeOwner).toBeNull()
-    expect(externalAutomationScopeNotice(gate)).not.toBeNull()
   })
 
   it('treats the orphan bucket as scope limited rather than empty', () => {
@@ -78,7 +69,6 @@ describe('external automation scope gating', () => {
       stableKey: 'host:desktop:orphan'
     })
     expect(resolveExternalAutomationScopeGate(orphan).status).toBe('not-listed')
-    expect(externalManagersListedForEntry(orphan)).toBe(false)
   })
 
   it('makes no claim for an unresolved host', () => {
@@ -86,15 +76,6 @@ describe('external automation scope gating', () => {
     expect(gate.status).toBe('unknown')
     expect(gate.probeOwner).toBeNull()
     // Why: 'unknown' is not a limitation, so it must not print the scope note.
-    expect(externalAutomationScopeNotice(gate)).toBeNull()
-    expect(externalManagersListedForEntry(null)).toBe(false)
-  })
-
-  it('keeps the note on screen when any host in the view is scope limited', () => {
-    expect(externalManagersListedForEntries([entry()])).toBe(true)
-    expect(externalManagersListedForEntries([entry(), runtimeEntry])).toBe(false)
-    // No hosts is not evidence that everything was listed.
-    expect(externalManagersListedForEntries([])).toBe(false)
   })
 
   it('retains probe owners only for hosts that are actually listed', () => {
@@ -123,9 +104,6 @@ describe('engine scope errors', () => {
       new ExternalAutomationScopeError(EXTERNAL_AUTOMATION_SCOPE_CODES.targetHidden)
     )
     expect(gate?.status).toBe('not-listed')
-    expect(externalAutomationScopeNotice(gate!)).toBe(
-      'This host is managed by Orca, so its external automation managers are not listed in this release.'
-    )
   })
 
   it('leaves unrelated failures alone so they are not relabelled as scope limits', () => {

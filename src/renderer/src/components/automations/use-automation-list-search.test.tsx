@@ -192,8 +192,6 @@ describe('useAutomationListSearch counts', () => {
       throw new Error('hook produced no counts')
     }
 
-    expect(
-      resolveAutomationListEmptyState({ resolution, externalManagersListed: false, ...counts }).kind
-    ).toBe('search-no-match')
+    expect(resolveAutomationListEmptyState({ resolution, ...counts }).kind).toBe('search-no-match')
   })
 })

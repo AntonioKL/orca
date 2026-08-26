@@ -57,7 +57,6 @@ function render(overrides: Partial<AutomationListEmptyViewProps> = {}): void {
         hostRowCount={0}
         visibleRowCount={0}
         searchActive={false}
-        externalManagersListed
         {...overrides}
       />
     )
@@ -81,18 +80,6 @@ describe('AutomationListEmptyView', () => {
     expect(container.querySelector('[data-empty-state="host-empty"]')).toBeNull()
     expect(container.textContent).not.toContain('No automations')
     expect(container.querySelector('[data-empty-state="host-not-connected"]')).not.toBeNull()
-  })
-
-  it('states the external-manager scope limit for a scope-limited host', () => {
-    render({ externalManagersListed: false })
-    expect(container.querySelector('[data-scope-note="external-managers"]')?.textContent).toBe(
-      'External automation managers are not listed for this host in this release.'
-    )
-  })
-
-  it('omits the scope note when managers are listed', () => {
-    render()
-    expect(container.querySelector('[data-scope-note="external-managers"]')).toBeNull()
   })
 
   it('invokes the recovery action the failure calls for', () => {

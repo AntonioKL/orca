@@ -11,6 +11,7 @@ import {
 import { translate } from '@/i18n/i18n'
 import { AutomationHostLabel, AutomationHostStatusBadges } from './AutomationHostBadges'
 import { Field } from './automation-page-parts'
+import { automationCreateHostEligible } from './automation-create-destination'
 import { groupAutomationHostEntriesByAuthority } from './automation-host-picker-groups'
 import type { AutomationCreateDestinationControl } from './use-automation-create-destination'
 
@@ -31,8 +32,10 @@ export function AutomationCreateDestinationField({
   labelClassName?: string
 }): React.JSX.Element {
   const selected = control.resolution.status === 'ready' ? control.resolution.entry : null
+  // Offered and resolved by the same predicate, so the list never contains a
+  // host that selecting would refuse (e.g. a view-only entry).
   const groups = groupAutomationHostEntriesByAuthority(
-    control.entries.filter((entry) => entry.kind !== 'orphan' && entry.owner)
+    control.entries.filter(automationCreateHostEligible)
   )
   const label = translate('auto.components.automations.createDestination.label', 'Create on')
 

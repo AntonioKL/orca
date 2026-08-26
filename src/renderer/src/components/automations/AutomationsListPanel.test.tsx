@@ -71,8 +71,6 @@ function renderPanel(
             searchActive: query !== ''
           }}
           hostCatalog={HOST_CATALOG}
-          externalManagersListed
-          externalScopeNotice={null}
           externalManagersUncheckedNotice={uncheckedNotice}
           onSelectHost={() => undefined}
           onRecoverHost={() => undefined}

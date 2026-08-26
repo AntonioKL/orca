@@ -38,11 +38,6 @@ export function AutomationListEmptyView({
     >
       <p className="text-sm text-foreground">{state.title}</p>
       {state.detail ? <p className="text-xs">{state.detail}</p> : null}
-      {state.scopeNote ? (
-        <p className="text-[11px]" data-scope-note="external-managers">
-          {state.scopeNote}
-        </p>
-      ) : null}
       {recovery && onRecover ? (
         <Button
           type="button"

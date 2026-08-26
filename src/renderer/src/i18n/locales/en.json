@@ -15570,7 +15570,6 @@
         },
         "emptyState": {
           "unknownHost": "this host",
-          "externalManagersOutOfScope": "External automation managers are not listed for this host in this release.",
           "hostLoading": "Loading host…",
           "hostLoadingDetail": "Waiting for {{hostLabel}} to report its automations.",
           "hostError": "Automations could not be loaded from {{hostLabel}}",
@@ -15647,7 +15646,6 @@
           "failed": "That automation action did not complete."
         },
         "externalScope": {
-          "targetHidden": "This host is managed by Orca, so its external automation managers are not listed in this release.",
           "unknownManager": "This external automation is no longer listed for any host in view.",
           "uncheckedHost": "External automation managers on {{hostLabel}} could not be checked.",
           "uncheckedHosts": "External automation managers on {{count}} hosts could not be checked."

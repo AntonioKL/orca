@@ -10,7 +10,6 @@ import {
   resolveAutomationHostGroupEmptyState,
   type AutomationListEmptyState
 } from './automation-list-empty-state'
-import { externalManagersListedForEntry } from './external-automation-scope-gating'
 import {
   automationHostRecoveryActions,
   recoveryActionLabel,
@@ -54,11 +53,6 @@ function AutomationHostGroupState({
     <div className="px-3 pb-1 text-xs text-muted-foreground" data-empty-state={state.kind}>
       <div>{state.title}</div>
       {state.detail ? <div>{state.detail}</div> : null}
-      {state.scopeNote ? (
-        <div className="text-[11px]" data-scope-note="external-managers">
-          {state.scopeNote}
-        </div>
-      ) : null}
       {recovery ? (
         <Button
           type="button"
@@ -93,8 +87,7 @@ export function AutomationListHostGroups({
               entry,
               hostRowCount,
               visibleRowCount: rows.length,
-              searchActive,
-              externalManagersListed: externalManagersListedForEntry(entry)
+              searchActive
             })
             return (
               <div key={entry.stableKey} className="mb-1" data-host-group={entry.stableKey}>

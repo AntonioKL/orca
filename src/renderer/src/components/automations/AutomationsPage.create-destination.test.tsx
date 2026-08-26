@@ -16,6 +16,7 @@ import type { Automation } from '../../../../shared/automations-types'
 import { hostStableKey } from '../../../../shared/automation-owner-key'
 import { unscopedAutomationListRows, type AutomationListRow } from './automation-list-row-identity'
 import {
+  addRuntimeProject,
   api,
   installAutomationsPageHarness,
   listedRow,
@@ -23,19 +24,17 @@ import {
   renderPage,
   runtimeHost,
   RUNTIME_ID,
+  RUNTIME_REPO_ID,
   RUNTIME_SELF_FILTER,
+  RUNTIME_WORKSPACE_ID,
   scopedList,
   settleHostQueries
 } from './automations-page-test-harness'
 import { makeAutomation, REPO_ID, WORKSPACE_ID } from './automations-page-fixtures'
-import type { ProjectHostSetup } from '../../../../shared/project-types'
 import type { Repo } from '../../../../shared/repo-types'
-import type { Worktree } from '../../../../shared/worktree/types'
 
 installAutomationsPageHarness()
 
-const RUNTIME_REPO_ID = 'repo-2'
-const RUNTIME_WORKSPACE_ID = 'workspace-2'
 const SSH_TARGET_ID = 'ssh-target-1'
 const SSH_REPO_ID = 'repo-ssh'
 const SSH_HOST_KEY = hostStableKey({
@@ -51,50 +50,6 @@ const RUNTIME_SELF_KEY = hostStableKey({
   authority: { kind: 'runtime', environmentId: RUNTIME_ID },
   selector: { kind: 'self' }
 })
-
-/**
- * A project the runtime owns. It carries no `connectionId`, so a flat repo
- * lookup reads it as local — the ambiguity the authority-scoped tables exist to
- * remove.
- */
-function addRuntimeProject(): void {
-  const repo = {
-    id: RUNTIME_REPO_ID,
-    displayName: 'gpu-orca',
-    path: '/repos/gpu-orca',
-    badgeColor: '#111111',
-    addedAt: 1,
-    worktreeBaseRef: 'main',
-    executionHostId: `runtime:${RUNTIME_ID}`
-  } as Repo
-  const worktree = {
-    id: RUNTIME_WORKSPACE_ID,
-    repoId: RUNTIME_REPO_ID,
-    displayName: 'main',
-    path: '/repos/gpu-orca',
-    branch: 'main'
-  } as Worktree
-  const setup: ProjectHostSetup = {
-    id: 'setup-2',
-    projectId: 'project-2',
-    hostId: `runtime:${RUNTIME_ID}`,
-    repoId: RUNTIME_REPO_ID,
-    path: '/repos/gpu-orca',
-    displayName: 'gpu-orca',
-    setupState: 'ready',
-    setupMethod: 'legacy-repo',
-    createdAt: 1,
-    updatedAt: 1
-  }
-  const repos = mocks.state.repos as Repo[]
-  const setups = mocks.state.projectHostSetups as ProjectHostSetup[]
-  const worktreesByRepo = mocks.state.worktreesByRepo as Record<string, Worktree[]>
-  mocks.state.repos = [...repos, repo]
-  mocks.state.projectHostSetups = [...setups, setup]
-  mocks.state.worktreesByRepo = { ...worktreesByRepo, [RUNTIME_REPO_ID]: [worktree] }
-  mocks.repoMap.set(RUNTIME_REPO_ID, repo)
-  mocks.worktreeMap.set(RUNTIME_WORKSPACE_ID, worktree)
-}
 
 /** A desktop-registered SSH host, with the generation that makes it fenceable. */
 function addSshHost(): void {
@@ -163,6 +118,31 @@ describe('AutomationsPage create destination', () => {
     scopedList([])
     runtimeHost([], [])
     runtimeCreateReturns(makeAutomation({ id: 'a-new', name: 'Sweep' }))
+    addRuntimeProject()
+    mocks.state.automationHostFilter = RUNTIME_SELF_FILTER
+
+    await renderPage()
+    await settleHostQueries()
+    await openCreateDialogFor(RUNTIME_REPO_ID, RUNTIME_WORKSPACE_ID)
+    await save()
+
+    // The desktop is the client's own authority, never the selected host — and
+    // the id sent is the runtime's own, never a desktop repo id it cannot resolve.
+    expect(api.automations.create).not.toHaveBeenCalled()
+    expect(runtimeCreateCalls()).toHaveLength(1)
+    expect(runtimeCreateCalls()[0]?.[2]).toMatchObject({
+      repo: RUNTIME_REPO_ID,
+      destination: { selector: { kind: 'self' } }
+    })
+  })
+
+  it('refuses a desktop project for a runtime destination instead of sending its id', async () => {
+    // The repo_not_found bug: the desktop repo id can never resolve on the
+    // runtime, so the submit is refused here rather than by the remote host.
+    api.automations.list.mockResolvedValue([])
+    scopedList([])
+    runtimeHost([], [])
+    runtimeCreateReturns(makeAutomation({ id: 'a-new', name: 'Sweep' }))
     mocks.state.automationHostFilter = RUNTIME_SELF_FILTER
 
     await renderPage()
@@ -170,12 +150,10 @@ describe('AutomationsPage create destination', () => {
     await openCreateDialogFor(REPO_ID, WORKSPACE_ID)
     await save()
 
-    // The desktop is the client's own authority, never the selected host.
     expect(api.automations.create).not.toHaveBeenCalled()
-    expect(runtimeCreateCalls()).toHaveLength(1)
-    expect(runtimeCreateCalls()[0]?.[2]).toMatchObject({
-      destination: { selector: { kind: 'self' } }
-    })
+    expect(runtimeCreateCalls()).toHaveLength(0)
+    expect(mocks.editorDialog?.notice?.message).toBeTruthy()
+    expect(mocks.editorDialog?.open).toBe(true)
   })
 
   it('refuses a runtime-owned project under the desktop destination', async () => {
@@ -200,6 +178,7 @@ describe('AutomationsPage create destination', () => {
     scopedList([])
     runtimeHost([], [])
     runtimeCreateReturns(makeAutomation({ id: 'a-new', name: 'Sweep' }))
+    addRuntimeProject()
 
     await renderPage()
     await settleHostQueries()
@@ -217,6 +196,14 @@ describe('AutomationsPage create destination', () => {
       mocks.editorDialog?.createDestination?.onSelect(RUNTIME_SELF_KEY)
     })
     expect(mocks.editorDialog?.createDestination?.resolution.status).toBe('ready')
+    // The stated host stranded the desktop project; the draft moves to its own.
+    await act(async () => {
+      mocks.editorDialog?.onDraftChange((current) => ({
+        ...(current as Record<string, unknown>),
+        projectId: RUNTIME_REPO_ID,
+        workspaceId: RUNTIME_WORKSPACE_ID
+      }))
+    })
     await save()
 
     expect(runtimeCreateCalls()).toHaveLength(1)

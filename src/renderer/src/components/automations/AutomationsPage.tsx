@@ -135,13 +135,7 @@ import {
 } from './automation-captured-owner'
 import { useAutomationHostCatalog } from './use-automation-host-catalog'
 import { useScopedExternalAutomations } from './use-scoped-external-automations'
-import {
-  externalAutomationScopeEntries,
-  externalAutomationScopeNotice,
-  externalManagersListedForEntries,
-  externalManagersListedForEntry,
-  resolveExternalAutomationScopeGate
-} from './external-automation-scope-gating'
+import { externalAutomationScopeEntries } from './external-automation-scope-gating'
 import { externalAutomationUncheckedNotice } from './external-automation-unchecked-hosts'
 import {
   automationRuntimePairingRevision,
@@ -658,6 +652,21 @@ export default function AutomationsPage(): React.JSX.Element {
     projects: repos
   })
   const editorProjects = createDestination.control.projects
+  // The destination's own repo table decides project eligibility, so a runtime
+  // destination refreshes its mirror the moment the dialog captures it —
+  // otherwise a never-fetched host offers no projects at all.
+  const createDestinationRuntimeEnvironmentId =
+    createDestination.control.resolution.status === 'ready' &&
+    createDestination.control.resolution.authority.kind === 'runtime'
+      ? createDestination.control.resolution.authority.environmentId
+      : null
+  useEffect(() => {
+    if (createDestinationRuntimeEnvironmentId) {
+      void useAppStore
+        .getState()
+        .fetchRuntimeEnvironmentRepos(createDestinationRuntimeEnvironmentId)
+    }
+  }, [createDestinationRuntimeEnvironmentId])
   // A destination change can strand the chosen project on another host; leaving it
   // selected only defers the same refusal to submit.
   useEffect(() => {
@@ -734,22 +743,6 @@ export default function AutomationsPage(): React.JSX.Element {
       isAutomationActionEnabled(capturedAutomationOwner(capturedAutomationOwners, row.key), action),
     [capturedAutomationOwners]
   )
-  const externalScopeGate = useMemo(() => {
-    if (hostCatalog.resolution.effective.kind !== 'all') {
-      return resolveExternalAutomationScopeGate(hostCatalog.resolution.entry)
-    }
-    // One scope-limited host makes the combined list incomplete, and its own
-    // gate carries the more specific reason; a null entry means no claim.
-    return (
-      hostCatalog.entries
-        .map((entry) => resolveExternalAutomationScopeGate(entry))
-        .find((gate) => gate.status === 'not-listed') ?? resolveExternalAutomationScopeGate(null)
-    )
-  }, [hostCatalog.entries, hostCatalog.resolution])
-  const externalManagersListed =
-    hostCatalog.resolution.effective.kind === 'all'
-      ? externalManagersListedForEntries(hostCatalog.entries)
-      : externalManagersListedForEntry(hostCatalog.resolution.entry)
   const externalManagersUncheckedNotice = useMemo(
     () => externalAutomationUncheckedNotice(scopedExternal.failures, hostCatalog.entries),
     [scopedExternal.failures, hostCatalog.entries]
@@ -2428,8 +2421,6 @@ export default function AutomationsPage(): React.JSX.Element {
             hostRowCount: visibleRows.length + externalAutomationEntries.length
           }}
           hostCatalog={hostCatalog}
-          externalManagersListed={externalManagersListed}
-          externalScopeNotice={externalAutomationScopeNotice(externalScopeGate)}
           externalManagersUncheckedNotice={externalManagersUncheckedNotice}
           onSelectHost={hostCatalog.selectHost}
           onRecoverHost={(action, entry) => {

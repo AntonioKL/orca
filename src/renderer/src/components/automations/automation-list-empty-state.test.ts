@@ -48,7 +48,6 @@ function input(
     hostRowCount: 0,
     visibleRowCount: 0,
     searchActive: false,
-    externalManagersListed: true,
     ...overrides
   }
 }
@@ -62,7 +61,6 @@ function groupInput(
     hostRowCount: 0,
     visibleRowCount: 0,
     searchActive: false,
-    externalManagersListed: true,
     ...overrides
   }
 }
@@ -167,18 +165,6 @@ describe('automation list empty state', () => {
     expect(state.title).not.toContain('No automations')
   })
 
-  it('states the external-manager scope limit for a runtime-owned host', () => {
-    const state = resolveAutomationListEmptyState(input({ externalManagersListed: false }))
-    expect(state.kind).toBe('host-empty')
-    expect(state.scopeNote).toBe(
-      'External automation managers are not listed for this host in this release.'
-    )
-  })
-
-  it('omits the scope note when external managers are listed', () => {
-    expect(resolveAutomationListEmptyState(input()).scopeNote).toBeNull()
-  })
-
   it('never claims a host the group could not reach is empty', () => {
     const state = resolveAutomationHostGroupEmptyState(
       groupInput({ entry: entry({ authorityHealth: 'unavailable' }) })
@@ -222,15 +208,6 @@ describe('automation list empty state', () => {
     const state = resolveAutomationHostGroupEmptyState(groupInput())
     expect(state.kind).toBe('host-empty')
     expect(state.title).toBe('No automations on web-01')
-  })
-
-  it('states the external-manager scope limit per group host', () => {
-    const state = resolveAutomationHostGroupEmptyState(
-      groupInput({ externalManagersListed: false })
-    )
-    expect(state.scopeNote).toBe(
-      'External automation managers are not listed for this host in this release.'
-    )
   })
 
   it('keeps each empty string exclusive to its own condition', () => {

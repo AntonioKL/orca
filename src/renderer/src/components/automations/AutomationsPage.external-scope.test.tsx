@@ -117,7 +117,6 @@ describe('AutomationsPage external manager probes', () => {
     await renderPage()
     await settleHostQueries()
 
-    expect(mocks.listPanel?.externalManagersListed).toBe(false)
     expect(mocks.listPanel?.filteredExternalAutomationEntries).toEqual([])
   })
 

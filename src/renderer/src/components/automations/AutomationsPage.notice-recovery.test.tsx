@@ -12,17 +12,20 @@
 import { act } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import {
+  addRuntimeProject,
   api,
   installAutomationsPageHarness,
   listedRow,
   mocks,
   renderPage,
   runtimeHost,
+  RUNTIME_REPO_ID,
   RUNTIME_SELF_FILTER,
+  RUNTIME_WORKSPACE_ID,
   scopedList,
   settleHostQueries
 } from './automations-page-test-harness'
-import { makeAutomation, REPO_ID, WORKSPACE_ID } from './automations-page-fixtures'
+import { makeAutomation } from './automations-page-fixtures'
 
 installAutomationsPageHarness()
 
@@ -55,6 +58,8 @@ describe('AutomationsPage notice recovery', () => {
     scopedList([])
     runtimeHost([], [])
     runtimeRpcRefuses('automation.create')
+    // The runtime's own project: a desktop repo id is refused before any RPC.
+    addRuntimeProject()
     mocks.state.automationHostFilter = RUNTIME_SELF_FILTER
     const settings = watchSettings()
 
@@ -68,9 +73,9 @@ describe('AutomationsPage notice recovery', () => {
         ...(current as Record<string, unknown>),
         name: 'Sweep',
         prompt: 'Do the sweep',
-        projectId: REPO_ID,
+        projectId: RUNTIME_REPO_ID,
         workspaceMode: 'existing',
-        workspaceId: WORKSPACE_ID
+        workspaceId: RUNTIME_WORKSPACE_ID
       }))
     })
     await act(async () => {

@@ -66,6 +66,17 @@ describe('create destination resolution', () => {
     })
   })
 
+  it('refuses a view-only host even when it still carries an owner', () => {
+    // A degraded query contract means the record could not be listed or edited
+    // back after landing; the badge and the create gate must agree.
+    for (const querySupport of ['legacy-unscoped', 'incompatible'] as const) {
+      expect(resolveAutomationCreateDestination(entry({ querySupport }))).toEqual({
+        status: 'choice-required',
+        reason: 'unavailable'
+      })
+    }
+  })
+
   it('prefers the explicit selection and only then the active workspace', () => {
     const entries = [entry(), sshEntry(3)]
     expect(
@@ -118,10 +129,16 @@ describe('sole create host', () => {
   it('states the only eligible host and never one of several', () => {
     expect(soleAutomationCreateHost([entry()], hydrated)?.stableKey).toBe('desktop:self')
     expect(soleAutomationCreateHost([entry(), sshEntry(3)], hydrated)).toBeNull()
-    // An orphan bucket and an unowned host are not candidates at all.
+    // An orphan bucket, an unowned host, and a view-only host are not candidates at all.
     expect(
       soleAutomationCreateHost([entry(), entry({ stableKey: 'orphan', kind: 'orphan' })], hydrated)
         ?.stableKey
+    ).toBe('desktop:self')
+    expect(
+      soleAutomationCreateHost(
+        [entry(), entry({ stableKey: 'legacy', querySupport: 'legacy-unscoped' })],
+        hydrated
+      )?.stableKey
     ).toBe('desktop:self')
   })
 
@@ -184,15 +201,22 @@ describe('create project mismatch', () => {
     ).toBe(false)
   })
 
-  it('leaves a runtime mirror miss unverified rather than calling it a mismatch', () => {
-    const tables = groupReposByAutomationAuthority([repo({ id: 'repo-1' })])
+  it('refuses a repo id another authority owns for a runtime destination', () => {
+    // The exact repo_not_found bug: a desktop-local repo id sent to a remote
+    // host can never resolve there, so the miss is a verdict, not lag.
+    const tables = groupReposByAutomationAuthority([
+      repo({ id: 'repo-1' }),
+      repo({ id: 'runtime-repo', executionHostId: 'runtime:gpu' })
+    ])
     const runtimeSelf = {
       authority: { kind: 'runtime' as const, environmentId: 'gpu', pairingRevision: 4 },
       destination: { selector: { kind: 'self' as const } },
       entry: entry()
     }
-    expect(automationCreateProjectMismatch(tables, runtimeSelf, 'repo-1')).toBe(false)
-    // The desktop's own table is a verdict, so its miss does refuse.
+    expect(automationCreateProjectMismatch(tables, runtimeSelf, 'repo-1')).toBe(true)
+    expect(automationCreateProjectMismatch(tables, runtimeSelf, 'runtime-repo')).toBe(false)
+    // An id in no table at all fails closed for every destination.
+    expect(automationCreateProjectMismatch(tables, runtimeSelf, 'missing')).toBe(true)
     expect(automationCreateProjectMismatch(tables, desktopSelf, 'missing')).toBe(true)
   })
 })

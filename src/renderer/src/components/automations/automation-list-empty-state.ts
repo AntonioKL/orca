@@ -32,8 +32,6 @@ export type AutomationListEmptyState = {
   kind: AutomationListEmptyStateKind
   title: string
   detail: string | null
-  /** Runtime-owned hosts list no external managers yet; a scope-limited host is never shown as clean. */
-  scopeNote: string | null
   recovery: AutomationHostRecoveryAction | null
 }
 
@@ -44,13 +42,8 @@ export type AutomationListEmptyStateInput = {
   /** Rows still visible after the search query and attribute filter. */
   visibleRowCount: number
   searchActive: boolean
-  /** True while the status/last-run/agent filter menu narrows the list. */
+  /** True while the status/last-run/agent/host filter menu narrows the list. */
   filterActive?: boolean
-  /**
-   * False when this host's external automation managers are out of scope for
-   * the release. Passed in rather than derived so the list never guesses.
-   */
-  externalManagersListed: boolean
 }
 
 function hostLabel(input: AutomationListEmptyStateInput): string {
@@ -60,23 +53,14 @@ function hostLabel(input: AutomationListEmptyStateInput): string {
   )
 }
 
-function scopeNoteFor(input: AutomationListEmptyStateInput): string | null {
-  return input.externalManagersListed
-    ? null
-    : translate(
-        'auto.components.automations.emptyState.externalManagersOutOfScope',
-        'External automation managers are not listed for this host in this release.'
-      )
-}
-
 function state(
   kind: AutomationListEmptyStateKind,
   title: string,
   detail: string | null,
-  input: AutomationListEmptyStateInput,
+  _input: AutomationListEmptyStateInput,
   recovery: AutomationHostRecoveryAction | null = null
 ): AutomationListEmptyState {
-  return { kind, title, detail, scopeNote: scopeNoteFor(input), recovery }
+  return { kind, title, detail, recovery }
 }
 
 function resolveSelectedHostState(input: AutomationListEmptyStateInput): AutomationListEmptyState {
@@ -198,7 +182,7 @@ export function resolveAutomationListEmptyState(
   input: AutomationListEmptyStateInput
 ): AutomationListEmptyState {
   if (input.visibleRowCount > 0) {
-    return { kind: 'rows', title: '', detail: null, scopeNote: null, recovery: null }
+    return { kind: 'rows', title: '', detail: null, recovery: null }
   }
   if ((input.searchActive || input.filterActive) && input.hostRowCount > 0) {
     // The host has rows; only the query or the attribute filter emptied the view.
@@ -214,7 +198,7 @@ export function resolveAutomationListEmptyState(
             'No automations match your filters'
           ),
       null,
-      { ...input, externalManagersListed: true }
+      input
     )
   }
   if (input.resolution.effective.kind === 'all') {

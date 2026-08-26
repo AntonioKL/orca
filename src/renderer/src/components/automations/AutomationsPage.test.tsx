@@ -250,14 +250,6 @@ describe('AutomationsPage list rendering', () => {
       expect.objectContaining({ owner: runtimeScope.owner, jobId: entry.job.id })
     )
   })
-
-  it('reports that a runtime host lists no external managers this release', async () => {
-    await renderPage()
-
-    // Desktop + Self is the only host in the fixture, and it is in scope.
-    expect(mocks.listPanel?.externalManagersListed).toBe(true)
-    expect(mocks.listPanel?.externalScopeNotice).toBeNull()
-  })
 })
 
 describe('AutomationsPage host filter', () => {

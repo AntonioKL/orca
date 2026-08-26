@@ -49,6 +49,18 @@ export type AutomationCreateDestinationResolution =
   | ({ status: 'ready' } & AutomationCreateDestination)
   | { status: 'choice-required'; reason: AutomationCreateDestinationChoiceReason }
 
+/**
+ * The one create-eligibility predicate: an executable owner AND the scoped
+ * query contract. A view-only entry (degraded `querySupport`) must not accept
+ * a create it could not list or edit back afterwards, so every surface that
+ * offers, resolves, or defaults a create destination shares this check.
+ */
+export function automationCreateHostEligible(
+  entry: AutomationHostCatalogEntry
+): entry is AutomationHostCatalogEntry & { owner: AutomationOwnerRef } {
+  return entry.kind !== 'orphan' && entry.owner !== null && entry.querySupport === 'scoped'
+}
+
 export function resolveAutomationCreateDestination(
   entry: AutomationHostCatalogEntry | null | undefined
 ): AutomationCreateDestinationResolution {
@@ -58,7 +70,7 @@ export function resolveAutomationCreateDestination(
   if (entry.kind === 'orphan') {
     return { status: 'choice-required', reason: 'orphan' }
   }
-  if (!entry.owner) {
+  if (!automationCreateHostEligible(entry)) {
     return { status: 'choice-required', reason: 'unavailable' }
   }
   return {
@@ -116,7 +128,7 @@ export function soleAutomationCreateHost(
   if (!hydration.runtimeCatalogSettled || !hydration.desktopSshHydrated) {
     return null
   }
-  const eligible = entries.filter((entry) => entry.kind !== 'orphan' && entry.owner)
+  const eligible = entries.filter(automationCreateHostEligible)
   return eligible.length === 1 ? (eligible[0] ?? null) : null
 }
 
@@ -140,23 +152,25 @@ export function automationCreateHostStableKey(hostId: string | null | undefined)
 }
 
 /**
- * Whether the project can live on the destination at all, checked against the
+ * Whether the project can live on the destination at all, answered by the
  * destination authority's own repo table.
  *
- * Only the desktop table is a verdict: a runtime's repos reach this client as a
- * mirror that can lag, so a miss there leaves the project unverified for the
- * authority to reject, while a miss in the desktop's own table is proof.
+ * Fail closed on a miss: repo ids are host-local, and every candidate this
+ * dialog offers is a live row of this client's catalog, so a row the
+ * destination's table does not hold is provably another authority's — sending
+ * its id would only defer the refusal to the destination (`repo_not_found`).
+ * Contrast `automationAuthorityPartitionContext`, which stays fail-open for
+ * *stored* automation rows whose project may simply not be mirrored yet.
  */
 export function automationCreateProjectMismatch(
   tables: AutomationAuthorityRepoTables,
   destination: AutomationCreateDestination,
   projectId: string
 ): boolean {
-  const authority = destination.authority
-  const table = tables.get(automationAuthorityCatalogKey(authority))
+  const table = tables.get(automationAuthorityCatalogKey(destination.authority))
   const connectionId = table ? repoConnectionIdIn(table)(projectId) : undefined
   if (connectionId === undefined) {
-    return authority.kind === 'desktop'
+    return true
   }
   const selector = destination.destination.selector
   return selector.kind === 'ssh' ? connectionId !== selector.targetId : connectionId !== null

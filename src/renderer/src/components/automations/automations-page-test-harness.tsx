@@ -25,6 +25,14 @@ import type { AutomationHostCatalogView } from './use-automation-host-catalog'
 import type { AutomationCreateDestinationControl } from './use-automation-create-destination'
 import type { ExternalAutomationListEntry } from './external-automation-list-entries'
 import type { AutomationListRow } from './automation-list-row-identity'
+import {
+  addRuntimeProject as addRuntimeProjectFixture,
+  RUNTIME_REPO_ID as RUNTIME_REPO_ID_FIXTURE,
+  RUNTIME_WORKSPACE_ID as RUNTIME_WORKSPACE_ID_FIXTURE
+} from './automations-page-runtime-fixtures'
+
+export const RUNTIME_REPO_ID = RUNTIME_REPO_ID_FIXTURE
+export const RUNTIME_WORKSPACE_ID = RUNTIME_WORKSPACE_ID_FIXTURE
 
 export type ListPanelProps = {
   filteredAutomations: Automation[]
@@ -49,8 +57,6 @@ export type ListPanelProps = {
   selectedExternalKey: string | null
   hostCatalog: AutomationHostCatalogView
   searchCounts: { hostRowCount: number; visibleRowCount: number; searchActive: boolean }
-  externalManagersListed: boolean
-  externalScopeNotice: string | null
   externalManagersUncheckedNotice: string | null
   isActionEnabled: (row: AutomationListRow, action: string) => boolean
   onSelectHost: (filter: unknown) => void
@@ -363,6 +369,8 @@ export function runtimeHost(automations: Automation[], runs: AutomationRun[]): v
   mocks.getRuntimeEnvironmentStatus.mockResolvedValue({ capabilities: RUNTIME_CAPABILITIES })
   mocks.state.runtimeAnswers = { automations, runs }
 }
+
+export const addRuntimeProject = (): void => addRuntimeProjectFixture(mocks, RUNTIME_ID)
 
 /** Answers the host-scoped read, which is where the list's rows and owners come from. */
 export function scopedList(automations: Automation[]): void {

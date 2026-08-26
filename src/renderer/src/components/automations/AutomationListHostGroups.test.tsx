@@ -156,22 +156,6 @@ describe('AutomationListHostGroups empty groups', () => {
     expect(emptyState(container).text).toContain('No automations on web-01')
   })
 
-  it('states the external-manager scope limit for a runtime-owned host', async () => {
-    const container = await render({
-      entry: entry({
-        stableRef: {
-          authority: { kind: 'runtime', environmentId: 'gpu' },
-          selector: { kind: 'self' }
-        },
-        owner: null
-      })
-    })
-
-    expect(container.querySelector('[data-scope-note="external-managers"]')?.textContent).toContain(
-      'External automation managers are not listed'
-    )
-  })
-
   it('renders the rows a host did report', async () => {
     const container = await render({
       entry: entry(),

@@ -12,7 +12,6 @@ import {
   type ExternalAutomationScopeCode
 } from '../../../../shared/external-automation-scope'
 import type { AutomationOwnerRef } from '../../../../shared/automation-owner-ref'
-import { translate } from '@/i18n/i18n'
 import type { AutomationHostCatalogEntry } from './automation-host-catalog-types'
 import type { AutomationHostFilterResolution } from './automation-host-filter-resolution'
 
@@ -56,21 +55,6 @@ export function resolveExternalAutomationScopeGate(
   return entry.owner ? { status: 'listed', probeOwner: entry.owner, code: null } : notListed(null)
 }
 
-/** The value `AutomationListEmptyView` requires; never derived from row counts. */
-export function externalManagersListedForEntry(entry: AutomationHostCatalogEntry | null): boolean {
-  return resolveExternalAutomationScopeGate(entry).status === 'listed'
-}
-
-/**
- * All-hosts variant: one scope-limited host in the view is enough to keep the
- * note on screen, because the combined list is then incomplete.
- */
-export function externalManagersListedForEntries(
-  entries: readonly AutomationHostCatalogEntry[]
-): boolean {
-  return entries.length > 0 && entries.every((entry) => externalManagersListedForEntry(entry))
-}
-
 /**
  * The hosts whose external managers are in view. Probing and retention both key
  * off this: a host the user filtered away is not a host we may go ask about.
@@ -97,27 +81,6 @@ export function externalAutomationProbeOwners(
     }
   }
   return owners
-}
-
-/**
- * The scope-limitation line. Shown in the populated state too — the empty state
- * is not the only place a host can be silently incomplete.
- */
-export function externalAutomationScopeNotice(gate: ExternalAutomationScopeGate): string | null {
-  if (gate.status !== 'not-listed') {
-    return null
-  }
-  if (gate.code === EXTERNAL_AUTOMATION_SCOPE_CODES.targetHidden) {
-    return translate(
-      'auto.components.automations.externalScope.targetHidden',
-      'This host is managed by Orca, so its external automation managers are not listed in this release.'
-    )
-  }
-  // Same string as the empty state's scope note, so the two never drift apart.
-  return translate(
-    'auto.components.automations.emptyState.externalManagersOutOfScope',
-    'External automation managers are not listed for this host in this release.'
-  )
 }
 
 /**

@@ -60,8 +60,6 @@ type AutomationsListPanelProps = {
   onListFilterChange: (filter: AutomationListFilter) => void
   searchCounts: AutomationListSearchCounts
   hostCatalog: AutomationHostCatalogView
-  externalManagersListed: boolean
-  externalScopeNotice: string | null
   externalManagersUncheckedNotice: string | null
   onSelectHost: (filter: AutomationHostFilter) => void
   onRecoverHost: (
@@ -125,8 +123,6 @@ export function AutomationsListPanel(props: AutomationsListPanelProps): React.JS
     onListFilterChange,
     searchCounts,
     hostCatalog,
-    externalManagersListed,
-    externalScopeNotice,
     externalManagersUncheckedNotice,
     onSelectHost,
     onRecoverHost,
@@ -244,8 +240,7 @@ export function AutomationsListPanel(props: AutomationsListPanelProps): React.JS
   const emptyStateInput = {
     resolution: hostCatalog.resolution,
     ...searchCounts,
-    filterActive: listFilterActive,
-    externalManagersListed
+    filterActive: listFilterActive
   }
   const emptyState = resolveAutomationListEmptyState(emptyStateInput)
   const rowProps = {
@@ -357,11 +352,6 @@ export function AutomationsListPanel(props: AutomationsListPanelProps): React.JS
       {externalManagersUncheckedNotice ? (
         <p className="pb-2 text-[11px] text-muted-foreground" data-external-managers="unchecked">
           {externalManagersUncheckedNotice}
-        </p>
-      ) : null}
-      {externalScopeNotice && hasFilteredListItems ? (
-        <p className="pb-2 text-[11px] text-muted-foreground" data-scope-note="populated">
-          {externalScopeNotice}
         </p>
       ) : null}
 

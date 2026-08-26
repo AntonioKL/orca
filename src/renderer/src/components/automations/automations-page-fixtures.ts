@@ -211,6 +211,7 @@ export function makeStoreState(): AutomationsPageStoreFixtures {
       activeWorktreeId: null,
       fetchWorktrees: noop,
       fetchAllWorktrees: noop,
+      fetchRuntimeEnvironmentRepos: async () => [],
       startupWorktreeRefreshCompleted: true,
       updateSettings: noop,
       openSettingsPage: noop,
