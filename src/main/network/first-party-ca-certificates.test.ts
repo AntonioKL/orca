@@ -2,7 +2,11 @@ import { X509Certificate } from 'node:crypto'
 import { rootCertificates } from 'node:tls'
 import { describe, expect, it } from 'vitest'
 import type { ProcessResult } from '../../shared/child-process/run-process'
-import { loadLegacySystemCaCertificates } from './first-party-ca-certificates'
+import {
+  applyLegacySystemCaPolicy,
+  loadLegacySystemCaCertificates,
+  loadLegacySystemCaPolicy
+} from './first-party-ca-certificates'
 
 const bundledRoot = rootCertificates.find((pem) => {
   const certificate = new X509Certificate(pem)
@@ -94,6 +98,25 @@ describe('legacy system CA loading', () => {
     expect(maxActive).toBe(8)
   })
 
+  it('bounds stalled macOS listing and verification with one aggregate deadline', async () => {
+    const stalledListing = loadLegacySystemCaCertificates({
+      platform: 'darwin',
+      trustLoadTimeoutMs: 5,
+      runProcess: () => new Promise<ProcessResult>(() => {})
+    })
+    const stalledVerification = loadLegacySystemCaCertificates({
+      platform: 'darwin',
+      trustLoadTimeoutMs: 5,
+      runProcess: async (spec) =>
+        spec.args?.[0] === 'find-certificate'
+          ? processResult({ stdout: bundledRoot })
+          : await new Promise<ProcessResult>(() => {})
+    })
+
+    await expect(stalledListing).resolves.toEqual([])
+    await expect(stalledVerification).resolves.toEqual([])
+  })
+
   it('reads both Windows root locations and subtracts their disallowed stores', async () => {
     const calls: { store: string; storeTypeList: string[] }[] = []
     const load = (disallowed: string[]) =>
@@ -110,17 +133,31 @@ describe('legacy system CA loading', () => {
     expect(await load([])).toHaveLength(1)
     expect(await load([bundledRoot])).toEqual([])
     expect(calls).toEqual(
-      expect.arrayContaining([
-        {
-          store: 'ROOT',
-          storeTypeList: ['CERT_SYSTEM_STORE_LOCAL_MACHINE', 'CERT_SYSTEM_STORE_CURRENT_USER']
-        },
-        {
-          store: 'Disallowed',
-          storeTypeList: ['CERT_SYSTEM_STORE_LOCAL_MACHINE', 'CERT_SYSTEM_STORE_CURRENT_USER']
-        }
-      ])
+      expect.arrayContaining(
+        ['ROOT', 'Disallowed'].flatMap((store) =>
+          ['CERT_SYSTEM_STORE_LOCAL_MACHINE', 'CERT_SYSTEM_STORE_CURRENT_USER'].map(
+            (storeType) => ({ store, storeTypeList: [storeType] })
+          )
+        )
+      )
     )
+  })
+
+  it('retains a readable Windows store and applies Disallowed to the merged trust set', async () => {
+    const policy = await loadLegacySystemCaPolicy({
+      platform: 'win32',
+      loadWindowsCaModule: async () => ({
+        exportSystemCertificatesAsync: async ({ store, storeTypeList }) => {
+          if (storeTypeList[0] === 'CERT_SYSTEM_STORE_CURRENT_USER') {
+            throw new Error('store unavailable')
+          }
+          return store === 'Disallowed' ? [bundledRoots[1]] : [bundledRoot]
+        }
+      })
+    })
+
+    expect(policy.certificates).toEqual([bundledRoot])
+    expect(applyLegacySystemCaPolicy([bundledRoots[1]], policy)).toEqual([])
   })
 
   it('bounds a stalled Windows certificate store', async () => {

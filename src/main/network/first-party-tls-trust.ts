@@ -1,8 +1,9 @@
 import * as tls from 'node:tls'
 import type { SecureContext } from 'node:tls'
 import {
+  applyLegacySystemCaPolicy,
   loadCaCertificateFile,
-  loadLegacySystemCaCertificates
+  loadLegacySystemCaPolicy
 } from './first-party-ca-certificates'
 
 let cachedCaCertificates: Promise<string[]> | undefined
@@ -22,19 +23,24 @@ async function loadCaCertificates(): Promise<string[]> {
   } catch {
     // Node 18 has no policy-aware system certificate API.
   }
-  const legacyCertificates =
-    process.platform === 'darwin' || typeof tls.getCACertificates !== 'function'
-      ? await loadLegacySystemCaCertificates()
-      : []
+  const legacyPolicy =
+    process.platform === 'darwin' ||
+    process.platform === 'win32' ||
+    typeof tls.getCACertificates !== 'function'
+      ? await loadLegacySystemCaPolicy()
+      : { certificates: [], disallowedDigests: new Set<string>() }
   const explicitCertificates = await loadCaCertificateFile(process.env.NODE_EXTRA_CA_CERTS)
-  return [
-    ...new Set([
-      ...defaultCertificates,
-      ...systemCertificates,
-      ...legacyCertificates,
-      ...explicitCertificates
-    ])
-  ]
+  return applyLegacySystemCaPolicy(
+    [
+      ...new Set([
+        ...defaultCertificates,
+        ...systemCertificates,
+        ...legacyPolicy.certificates,
+        ...explicitCertificates
+      ])
+    ],
+    legacyPolicy
+  )
 }
 
 export function getFirstPartyCaCertificates(): Promise<string[]> {
