@@ -48,6 +48,11 @@ function conflictsHeading(conflictOperation: GitConflictOperation): string {
   )
 }
 
+// Full 40-char oids only get truncated by CSS, which reads as a broken value.
+function shortenOnto(onto: string | undefined): string | undefined {
+  return onto && /^[0-9a-f]{40}$/i.test(onto) ? onto.slice(0, 8) : onto
+}
+
 function inProgressHeading(conflictOperation: GitConflictOperation): string {
   if (conflictOperation === 'merge') {
     return translate(
@@ -155,7 +160,7 @@ export function OperationBannerBody({
   onResolveWithAI?: () => void
 }): React.JSX.Element {
   const Icon = conflictOperation === 'rebase' ? GitPullRequestArrow : GitMerge
-  const onto = operationProgress?.onto?.trim()
+  const onto = shortenOnto(operationProgress?.onto?.trim())
   const heading =
     conflictOperation === 'rebase' && onto
       ? translate(

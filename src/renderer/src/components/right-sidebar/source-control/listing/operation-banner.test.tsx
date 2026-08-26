@@ -42,6 +42,16 @@ describe('OperationBanner heading', () => {
     expect(render()).toContain('Rebasing onto origin/main')
   })
 
+  // The banner is narrow; a full oid only gets CSS-truncated, which reads as broken.
+  it('shortens a bare oid it is replaying onto', () => {
+    const markup = render({
+      operationProgress: { ...progress, onto: 'bc98655a3965fe350f77acb14bf4a53f1e2d3c4b' }
+    })
+
+    expect(markup).toContain('Rebasing onto bc98655a')
+    expect(markup).not.toContain('bc98655a3965fe350f77acb14bf4a53f1e2d3c4b')
+  })
+
   // Wire compatibility: a host that predates operationProgress omits it entirely.
   it('degrades to the plain in-progress banner when the host reported no progress', () => {
     const markup = render({ operationProgress: null })
