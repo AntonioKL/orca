@@ -64,19 +64,29 @@ export function getNextWheelImageViewerZoom(
   return clampImageViewerZoom(currentZoom * getPinchZoomFactor(deltaY, deltaMode))
 }
 
-/** Content box the image may occupy, or null when the surface is unmeasured or too small. */
+/** Content length one axis offers, or null when that axis is unmeasured or eaten by padding. */
+export function getAvailableImageSurfaceLength(
+  surfaceLength: number | undefined,
+  padding: number = IMAGE_VIEWER_SURFACE_PADDING
+): number | null {
+  if (surfaceLength === undefined || !Number.isFinite(surfaceLength)) {
+    return null
+  }
+
+  const available = surfaceLength - padding * 2
+
+  return available > 0 ? available : null
+}
+
+/** Content box the image may occupy; null unless both axes are usable, since fitting needs both. */
 export function getAvailableImageSurfaceBox(
   surfaceSize: ImageViewerSurfaceSize | null,
   padding: number = IMAGE_VIEWER_SURFACE_PADDING
 ): ImageViewerSurfaceSize | null {
-  if (!surfaceSize) {
-    return null
-  }
+  const width = getAvailableImageSurfaceLength(surfaceSize?.width, padding)
+  const height = getAvailableImageSurfaceLength(surfaceSize?.height, padding)
 
-  const width = surfaceSize.width - padding * 2
-  const height = surfaceSize.height - padding * 2
-
-  return width > 0 && height > 0 ? { width, height } : null
+  return width !== null && height !== null ? { width, height } : null
 }
 
 export function getZoomedImageLayoutSize({

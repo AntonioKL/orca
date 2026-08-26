@@ -30,8 +30,24 @@ describe('getImageElementSizing', () => {
     })
   })
 
-  it('falls back to viewport lengths when the surface is smaller than its own padding', () => {
+  // Why: an axis we could not use is not evidence the other axis is unbounded — a surface too
+  // narrow to cap the width still measured a height, so keep it and fall back only on that axis.
+  it('keeps the measured height when the surface is narrower than its own padding', () => {
     expect(getImageElementSizing(null, { width: 24, height: 800 })).toEqual({
+      className: 'block max-w-[100vw]',
+      style: { maxHeight: '768px' }
+    })
+  })
+
+  it('keeps the measured width when the surface is shorter than its own padding', () => {
+    expect(getImageElementSizing(null, { width: 900, height: 24 })).toEqual({
+      className: 'block max-h-[100vh]',
+      style: { maxWidth: '868px' }
+    })
+  })
+
+  it('falls back to viewport lengths when neither surface axis clears its padding', () => {
+    expect(getImageElementSizing(null, { width: 24, height: 24 })).toEqual({
       className: 'block max-h-[100vh] max-w-[100vw]',
       style: undefined
     })

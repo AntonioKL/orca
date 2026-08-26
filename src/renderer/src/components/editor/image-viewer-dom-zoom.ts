@@ -6,7 +6,7 @@ import {
   type ImageViewerZoomAnchor,
   clampImageViewerZoom,
   getAnchoredImageViewerScrollOffset,
-  getAvailableImageSurfaceBox,
+  getAvailableImageSurfaceLength,
   getNextWheelImageViewerZoom,
   shouldHandleImageZoomWheel
 } from './image-viewer-zoom'
@@ -50,6 +50,9 @@ export type ImageElementSizing = {
  * The surface itself is already measured by then, and in a split pane or side-by-side image diff
  * it is a fraction of the viewport, so cap against it; viewport lengths are only the fallback for
  * a surface we have not measured, which is not the same as an unbounded one.
+ *
+ * Each axis falls back on its own: a surface too narrow to yield a width cap still measured a
+ * height, and discarding it would hand the smallest surfaces the loosest box.
  */
 export function getImageElementSizing(
   layoutSize: ImageViewerImageDimensions | null,
@@ -59,14 +62,25 @@ export function getImageElementSizing(
     return { className: 'block h-full w-full', style: undefined }
   }
 
-  const available = getAvailableImageSurfaceBox(surfaceSize)
-  if (!available) {
-    return { className: 'block max-h-[100vh] max-w-[100vw]', style: undefined }
+  const maxWidth = getAvailableImageSurfaceLength(surfaceSize?.width)
+  const maxHeight = getAvailableImageSurfaceLength(surfaceSize?.height)
+  const style: CSSProperties = {}
+  if (maxWidth !== null) {
+    style.maxWidth = `${maxWidth}px`
+  }
+  if (maxHeight !== null) {
+    style.maxHeight = `${maxHeight}px`
   }
 
   return {
-    className: 'block',
-    style: { maxWidth: `${available.width}px`, maxHeight: `${available.height}px` }
+    className: [
+      'block',
+      maxHeight === null ? 'max-h-[100vh]' : null,
+      maxWidth === null ? 'max-w-[100vw]' : null
+    ]
+      .filter(Boolean)
+      .join(' '),
+    style: maxWidth === null && maxHeight === null ? undefined : style
   }
 }
 

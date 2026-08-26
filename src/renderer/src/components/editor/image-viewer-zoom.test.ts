@@ -105,6 +105,17 @@ describe('image viewer zoom helpers', () => {
     ).toBeNull()
   })
 
+  // Why: fitting needs both axes, so an axis fully eaten by padding leaves no fit to compute.
+  it('returns no layout size when a surface axis is smaller than its padding', () => {
+    expect(
+      getZoomedImageLayoutSize({
+        imageDimensions: { width: 200, height: 100 },
+        surfaceSize: { width: 900, height: 24 },
+        zoom: 1
+      })
+    ).toBeNull()
+  })
+
   it('keeps the zoom anchor stable by moving the scroll offset', () => {
     expect(
       getAnchoredImageViewerScrollOffset({
