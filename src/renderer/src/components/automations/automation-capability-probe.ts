@@ -64,8 +64,9 @@ export async function assertAuthorityCapability(
   if (authority.kind !== 'runtime') {
     return
   }
+  const useCache = options.cacheConfirmation !== false
   const key = capabilityProbeKey(authority)
-  if (options.cacheConfirmation !== false) {
+  if (useCache) {
     const confirmation = confirmedAuthorityCapabilities.get(key)
     if (
       confirmation &&
@@ -76,29 +77,45 @@ export async function assertAuthorityCapability(
       return
     }
   }
-  let probe = inFlightCapabilityProbes.get(key)
-  if (!probe) {
-    automationHostDiagnostics.recordCapabilityProbe({
-      authorityKey: automationAuthorityCatalogKey(authority)
-    })
-    const started = getRuntimeEnvironmentStatus(authority.environmentId, REQUEST_TIMEOUT_MS)
-    probe = started
-    inFlightCapabilityProbes.set(key, started)
-    void started
-      .catch(() => undefined)
-      .finally(() => {
-        if (inFlightCapabilityProbes.get(key) === started) {
-          inFlightCapabilityProbes.delete(key)
-        }
-      })
-  }
-  const status = await probe
-  if (options.cacheConfirmation !== false && status.capabilities?.length) {
+  // Fencing checks never join an in-flight probe: it may predate an in-place runtime replacement.
+  const status = useCache
+    ? await sharedCapabilityProbe(authority, key)
+    : await startCapabilityProbe(authority)
+  if (useCache && status.capabilities?.length) {
     rememberAuthorityCapabilities(key, new Set(status.capabilities), Date.now())
   }
   if (!status.capabilities?.includes(capability)) {
     throw new AutomationHostScopeUnsupportedError(message)
   }
+}
+
+function startCapabilityProbe(
+  authority: AutomationAuthorityRef & { kind: 'runtime' }
+): Promise<{ capabilities?: string[] }> {
+  automationHostDiagnostics.recordCapabilityProbe({
+    authorityKey: automationAuthorityCatalogKey(authority)
+  })
+  return getRuntimeEnvironmentStatus(authority.environmentId, REQUEST_TIMEOUT_MS)
+}
+
+function sharedCapabilityProbe(
+  authority: AutomationAuthorityRef & { kind: 'runtime' },
+  key: string
+): Promise<{ capabilities?: string[] }> {
+  const existing = inFlightCapabilityProbes.get(key)
+  if (existing) {
+    return existing
+  }
+  const started = startCapabilityProbe(authority)
+  inFlightCapabilityProbes.set(key, started)
+  void started
+    .catch(() => undefined)
+    .finally(() => {
+      if (inFlightCapabilityProbes.get(key) === started) {
+        inFlightCapabilityProbes.delete(key)
+      }
+    })
+  return started
 }
 
 export async function assertOwnerFencingSupported(
