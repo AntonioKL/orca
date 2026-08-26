@@ -18,6 +18,7 @@ import {
   assertAgentSkillSharingAllowed,
   isAgentSkillSharingEnabled
 } from '../../shared/agent-skill-sharing-gate'
+import { resolveNestedWorkerMaxDepth } from '../../shared/nested-worker-depth'
 import { sortDirEntries } from '../../shared/file-name-sort'
 import { isServerDriveListRequest, listWindowsDrives } from './windows-drive-listing'
 import { extractLastOsc7Uri, extractOscScanTail } from '../daemon/osc7-uri-extraction'
@@ -264,6 +265,17 @@ import type {
   AutomationUpdateInput,
   AutomationWorkspaceMode
 } from '../../shared/automations-types'
+import {
+  automationChangePublications,
+  type AutomationChangeSelector,
+  type AutomationListParams,
+  type AutomationListResult
+} from '../../shared/automation-list-scope'
+import type {
+  AutomationDestination,
+  AutomationOwnerFenceOperation,
+  AutomationOwnerPrecondition
+} from '../../shared/automation-owner-precondition'
 import type { DirEntry, FilesystemPathFlavor } from '../../shared/filesystem-entry-types'
 import type { FolderWorkspace, WorkspaceKey } from '../../shared/folder-workspace-types'
 import type {
@@ -385,7 +397,10 @@ import {
   screencastSubscriberDrivesAsMobile,
   type BrowserScreencastSubscriber
 } from './browser-screencast-driver-scope'
-import type { RuntimeClientEvent } from '../../shared/runtime-client-events'
+import type {
+  AutomationsChangedPayload,
+  RuntimeClientEvent
+} from '../../shared/runtime-client-events'
 import { toRuntimeActivateWorktreeEvent } from '../../shared/runtime-client-events'
 import {
   navigationTargetsClients,
@@ -668,6 +683,7 @@ import {
 } from '../ports/workspace-port-ownership'
 import { advertisedUrlWatcher } from '../ports/advertised-url-watcher'
 import type { AutomationService } from '../automations/service'
+import { runAutomationNowFenced } from '../automations/refused-manual-run'
 import type { RuntimeBrowserCommands } from './orca-runtime-browser'
 import {
   createRuntimeBrowserCommands,
@@ -1351,6 +1367,10 @@ type RuntimeStore = {
   updateUI?: Store['updateUI']
   recordFeatureInteraction?: Store['recordFeatureInteraction']
   listAutomations?: Store['listAutomations']
+  listAutomationsForScope?: Store['listAutomationsForScope']
+  assertAutomationOwnerFence?: Store['assertAutomationOwnerFence']
+  automationOwnerPrecondition?: Store['automationOwnerPrecondition']
+  automationChangeSelector?: Store['automationChangeSelector']
   listAutomationRuns?: Store['listAutomationRuns']
   createAutomation?: Store['createAutomation']
   updateAutomation?: Store['updateAutomation']
@@ -1388,6 +1408,7 @@ type RuntimeStore = {
     prBotAuthorOverrides?: GlobalSettings['prBotAuthorOverrides']
     artifactSharingEnabled?: GlobalSettings['artifactSharingEnabled']
     agentSkillSharingEnabled?: GlobalSettings['agentSkillSharingEnabled']
+    nestedWorkerMaxDepth?: GlobalSettings['nestedWorkerMaxDepth']
     terminalQuickCommands?: GlobalSettings['terminalQuickCommands']
     gitlabProjects?: GlobalSettings['gitlabProjects']
     mobileAutoRestoreFitMs?: number | null
@@ -1418,6 +1439,7 @@ export type RuntimeAutomationCreateInput = Omit<
   workspace?: string
   workspaceMode?: AutomationWorkspaceMode
   timezone?: string
+  destination?: AutomationDestination
 }
 
 export type RuntimeAutomationUpdateInput = Omit<
@@ -1426,6 +1448,18 @@ export type RuntimeAutomationUpdateInput = Omit<
 > & {
   repo?: string
   workspace?: string
+}
+
+function assertAutomationRunContextMatchesRepo(
+  runContext: AutomationCreateInput['runContext'],
+  repo: Repo | null
+): void {
+  if (!runContext || !repo) {
+    return
+  }
+  if (runContext.repoId !== repo.id || runContext.path !== repo.path) {
+    throw new Error('Automation project does not match its run context.')
+  }
 }
 
 function normalizeSparsePresetName(name: string): string {
@@ -2203,6 +2237,7 @@ type RuntimeNotifier = {
   worktreeBaseStatus?(event: WorktreeBaseStatusEvent): void
   worktreeRemoteBranchConflict?(event: WorktreeRemoteBranchConflictEvent): void
   reposChanged(): void
+  automationsChanged?(payload: AutomationsChangedPayload): void
   activateWorktree(
     repoId: string,
     worktreeId: string,
@@ -4213,18 +4248,67 @@ export class OrcaRuntimeService {
     return this.store.listAutomations()
   }
 
-  listAutomationRuns(automationId?: string): AutomationRun[] {
-    if (!this.store?.listAutomationRuns) {
-      throw new Error('runtime_unavailable')
-    }
-    return this.store.listAutomationRuns(automationId)
+  // Why: Orca's own automation work holds the desktop probe scheduler's
+  // priority lease so queued external probes stay parked behind it; runtime
+  // servers install no lease and run directly.
+  private underExternalProbePriority<T>(run: () => T): T {
+    const wrap = this.automationService?.externalProbePriority
+    return wrap ? wrap(run) : run()
   }
 
-  showAutomation(id: string): Automation {
+  listAutomationsForScope(params: AutomationListParams): AutomationListResult {
+    const store = this.store
+    if (!store?.listAutomationsForScope) {
+      throw new Error('runtime_unavailable')
+    }
+    return this.underExternalProbePriority(() => store.listAutomationsForScope!(params))
+  }
+
+  // Why: a supplied precondition must never degrade to unfenced work, so a store that cannot check it fails the call.
+  private fenceAutomationOwner(
+    id: string,
+    expectedOwner: AutomationOwnerPrecondition | undefined,
+    operation: AutomationOwnerFenceOperation
+  ): void {
+    if (!this.store?.assertAutomationOwnerFence) {
+      if (expectedOwner) {
+        throw new Error('runtime_unavailable')
+      }
+      return
+    }
+    this.store.assertAutomationOwnerFence({ id, expectedOwner, operation })
+  }
+
+  listAutomationRuns(
+    automationId?: string,
+    expectedOwner?: AutomationOwnerPrecondition
+  ): AutomationRun[] {
+    const store = this.store
+    if (!store?.listAutomationRuns) {
+      throw new Error('runtime_unavailable')
+    }
+    if (expectedOwner && !automationId) {
+      throw new Error('An expected owner requires an automation id.')
+    }
+    return this.underExternalProbePriority(() => {
+      if (automationId) {
+        this.fenceAutomationOwner(automationId, expectedOwner, 'read')
+      }
+      return store.listAutomationRuns!(automationId)
+    })
+  }
+
+  /** Null when the store predates the projection: the caller then sends no precondition. */
+  automationOwnerPrecondition(id: string): AutomationOwnerPrecondition | null {
+    return this.store?.automationOwnerPrecondition?.(id) ?? null
+  }
+
+  showAutomation(id: string, expectedOwner?: AutomationOwnerPrecondition): Automation {
     const automation = this.listAutomations().find((entry) => entry.id === id)
     if (!automation) {
       throw new Error('Automation not found.')
     }
+    this.fenceAutomationOwner(id, expectedOwner, 'read')
     return automation
   }
 
@@ -4233,10 +4317,11 @@ export class OrcaRuntimeService {
       throw new Error('runtime_unavailable')
     }
     const target = await this.resolveAutomationTarget(input)
+    assertAutomationRunContextMatchesRepo(input.runContext, target.repo)
     if (input.reuseSession && target.workspaceMode !== 'existing') {
       throw new Error('Session reuse requires an existing workspace target.')
     }
-    return this.store.createAutomation({
+    const createInput: AutomationCreateInput = {
       name: input.name,
       prompt: input.prompt,
       precheck: input.precheck,
@@ -4254,10 +4339,37 @@ export class OrcaRuntimeService {
       dtstart: input.dtstart,
       enabled: input.enabled,
       missedRunGraceMinutes: input.missedRunGraceMinutes
+    }
+    return this.underExternalProbePriority(() => {
+      const created = this.store!.createAutomation!(
+        createInput,
+        input.destination ? { destination: input.destination } : undefined
+      )
+      const selector = this.automationChangeSelector(created.id)
+      this.publishAutomationDefinitionChange(selector, selector)
+      return created
     })
   }
 
-  async updateAutomation(id: string, updates: RuntimeAutomationUpdateInput): Promise<Automation> {
+  private automationChangeSelector(id: string): AutomationChangeSelector | null {
+    return this.store?.automationChangeSelector?.(id) ?? null
+  }
+
+  /** A store that cannot name the affected host degrades to one unscoped authority event. */
+  private publishAutomationDefinitionChange(
+    before: AutomationChangeSelector | null,
+    after: AutomationChangeSelector | null
+  ): void {
+    for (const selector of automationChangePublications(before, after)) {
+      this.notifyAutomationsChanged({ reason: 'definition', ...(selector ? { selector } : {}) })
+    }
+  }
+
+  async updateAutomation(
+    id: string,
+    updates: RuntimeAutomationUpdateInput,
+    options?: { expectedOwner?: AutomationOwnerPrecondition; destination?: AutomationDestination }
+  ): Promise<Automation> {
     if (!this.store?.updateAutomation) {
       throw new Error('runtime_unavailable')
     }
@@ -4311,6 +4423,7 @@ export class OrcaRuntimeService {
       hasRuntimeAutomationUpdateValue(updates, 'workspaceMode')
     if (targetChanged) {
       const target = await this.resolveAutomationTarget(updates, current)
+      assertAutomationRunContextMatchesRepo(updates.runContext, target.repo)
       if (patch.reuseSession === true && target.workspaceMode !== 'existing') {
         throw new Error('Session reuse requires an existing workspace target.')
       }
@@ -4320,27 +4433,56 @@ export class OrcaRuntimeService {
       if (target.workspaceMode !== 'existing') {
         patch.reuseSession = false
       }
+    } else if (hasRuntimeAutomationUpdateValue(updates, 'runContext') && current.projectId) {
+      const currentRepo = await this.showRepo(`id:${current.projectId}`)
+      assertAutomationRunContextMatchesRepo(updates.runContext, currentRepo)
     }
     if (!targetChanged && patch.reuseSession && current.workspaceMode !== 'existing') {
       throw new Error('Session reuse requires an existing workspace target.')
     }
-    return this.store.updateAutomation(id, patch)
+    return this.underExternalProbePriority(() => {
+      // Captured first: an update may move the record to another host.
+      const before = this.automationChangeSelector(id)
+      const updated = this.store!.updateAutomation!(id, patch, options)
+      this.publishAutomationDefinitionChange(before, this.automationChangeSelector(id))
+      return updated
+    })
   }
 
-  deleteAutomation(id: string): { removed: boolean; id: string } {
+  deleteAutomation(
+    id: string,
+    expectedOwner?: AutomationOwnerPrecondition
+  ): { removed: boolean; id: string } {
     if (!this.store?.deleteAutomation) {
       throw new Error('runtime_unavailable')
     }
-    this.showAutomation(id)
-    this.store.deleteAutomation(id)
-    return { removed: true, id }
+    return this.underExternalProbePriority(() => {
+      this.showAutomation(id)
+      const before = this.automationChangeSelector(id)
+      this.store!.deleteAutomation!(id, expectedOwner ? { expectedOwner } : undefined)
+      this.publishAutomationDefinitionChange(before, before)
+      return { removed: true, id }
+    })
   }
 
-  async runAutomationNow(id: string): Promise<AutomationRun> {
-    if (!this.automationService) {
+  async runAutomationNow(
+    id: string,
+    expectedOwner?: AutomationOwnerPrecondition
+  ): Promise<AutomationRun> {
+    const service = this.automationService
+    if (!service) {
       throw new Error('runtime_unavailable')
     }
-    return await this.automationService.runNow(id)
+    // Why: an orphan or re-registered host must be refused before dispatch, not
+    // after a session starts. The lease spans the whole dispatch promise, so
+    // queued external probes stay parked until the run the user is waiting on settles.
+    return await this.underExternalProbePriority(() =>
+      runAutomationNowFenced({
+        fence: () => this.fenceAutomationOwner(id, expectedOwner, 'execute'),
+        service,
+        automationId: id
+      })
+    )
   }
 
   private async resolveAutomationTarget(
@@ -4355,6 +4497,7 @@ export class OrcaRuntimeService {
     projectId: string
     workspaceMode: AutomationWorkspaceMode
     workspaceId?: string | null
+    repo: Repo | null
   }> {
     const hasRepo = input.repo !== undefined
     const hasWorkspace = input.workspace !== undefined
@@ -4369,7 +4512,14 @@ export class OrcaRuntimeService {
       )
     }
     const workspace = input.workspace ? await this.showManagedWorktree(input.workspace) : null
-    const repo = input.repo ? await this.showRepo(input.repo) : null
+    const repoSelector =
+      input.repo ??
+      (workspace?.repoId
+        ? `id:${workspace.repoId}`
+        : current?.projectId
+          ? `id:${current.projectId}`
+          : null)
+    const repo = repoSelector ? await this.showRepo(repoSelector) : null
     const workspaceMode =
       input.workspaceMode ??
       (workspace
@@ -4386,13 +4536,13 @@ export class OrcaRuntimeService {
       if (!workspaceId || !projectId) {
         throw new Error('Existing-workspace automation requires --workspace.')
       }
-      return { projectId, workspaceMode, workspaceId }
+      return { projectId, workspaceMode, workspaceId, repo }
     }
     const projectId = repo?.id ?? workspace?.repoId ?? current?.projectId
     if (!projectId) {
       throw new Error('Automation requires --repo or --workspace.')
     }
-    return { projectId, workspaceMode: 'new_per_run', workspaceId: null }
+    return { projectId, workspaceMode: 'new_per_run', workspaceId: null, repo }
   }
 
   // Why: lazy initialization — the DB path depends on userData, which on the desktop
@@ -5133,6 +5283,11 @@ export class OrcaRuntimeService {
 
   assertAgentSkillSharingAllowed(): void {
     assertAgentSkillSharingAllowed(() => isAgentSkillSharingEnabled(this.store?.getSettings()))
+  }
+
+  /** Renderer-owned; read here because dispatch enforcement lives in main. */
+  getNestedWorkerMaxDepth(): number {
+    return resolveNestedWorkerMaxDepth(this.store?.getSettings())
   }
 
   async publishDiscoveredSkillsFromAgent(
@@ -6631,6 +6786,14 @@ export class OrcaRuntimeService {
     wakeFolderRepoGitUpgradeWatch()
     this.notifier?.reposChanged()
     this.emitClientEvent({ type: 'reposChanged' })
+  }
+
+  // Why: automation writes land in the automation service and IPC handlers, so
+  // like SSH state they need a public entry point onto the client-event stream.
+  // Old clients drop the unknown event type; nothing is negotiated for it.
+  notifyAutomationsChanged(payload: AutomationsChangedPayload = {}): void {
+    this.notifier?.automationsChanged?.(payload)
+    this.emitClientEvent({ type: 'automationsChanged', ...payload })
   }
 
   // Why: SSH state changes originate in main's ssh handlers, not in runtime
@@ -35036,7 +35199,9 @@ export class OrcaRuntimeService {
     return Date.now() - completedAtMs <= AGENT_STATUS_STALE_AFTER_MS ? dispatch : undefined
   }
 
-  private getTerminalHandleForPaneKey(paneKey: string): string | null {
+  // Why: public because automation completion watching runs in main but the
+  // pane→handle mapping is runtime-owned state.
+  getTerminalHandleForPaneKey(paneKey: string): string | null {
     const parsed = parsePaneKey(paneKey)
     const leaf = parsed ? this.leaves.get(this.getLeafKey(parsed.tabId, parsed.leafId)) : undefined
     if (leaf?.ptyId && leaf.connected) {

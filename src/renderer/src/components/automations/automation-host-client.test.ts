@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import type { Automation, AutomationCreateInput } from '../../../../shared/automations-types'
 import {
   createAutomationForTarget,
-  getAutomationListTarget,
+  listAutomationRunsForTarget,
   listAutomationsForTarget,
   runAutomationNowForTarget,
   updateAutomationForTarget
@@ -68,11 +68,13 @@ describe('automation host client', () => {
     vi.clearAllMocks()
   })
 
-  it('lists automations from the active remote server when one is selected', async () => {
+  it('lists automations from the host it was handed, which the caller must state', async () => {
     vi.mocked(callRuntimeRpc).mockResolvedValueOnce({ automations: [makeAutomation()] })
 
-    const target = getAutomationListTarget({ activeRuntimeEnvironmentId: 'gpu' })
-    const automations = await listAutomationsForTarget(target)
+    const automations = await listAutomationsForTarget({
+      kind: 'environment',
+      environmentId: 'gpu'
+    })
 
     expect(automations).toHaveLength(1)
     expect(mockApi.automations.list).not.toHaveBeenCalled()
@@ -84,8 +86,52 @@ describe('automation host client', () => {
     )
   })
 
-  it('creates and manually runs runtime-host automations through that server', async () => {
+  // The broad form is gone in both directions: usage totals come from the
+  // authority's list projection, so nothing may ask a host for all of its runs.
+  it('fetches one automation history at a time, on both the desktop and a runtime', async () => {
+    vi.mocked(callRuntimeRpc)
+      .mockResolvedValueOnce({ runs: [] })
+      .mockResolvedValueOnce({ runs: [] })
+
+    await listAutomationRunsForTarget({ kind: 'environment', environmentId: 'gpu' }, 'auto-1')
+    await listAutomationRunsForTarget({ kind: 'local' }, 'auto-1')
+
+    expect(callRuntimeRpc).toHaveBeenCalledWith(
+      { kind: 'environment', environmentId: 'gpu' },
+      'automation.runs',
+      { automationId: 'auto-1' },
+      { timeoutMs: 15_000 }
+    )
+    expect(callRuntimeRpc).toHaveBeenCalledWith(
+      { kind: 'local' },
+      'automation.runs',
+      { automationId: 'auto-1' },
+      { timeoutMs: 15_000 }
+    )
+  })
+
+  it('manually runs runtime-host automations through that server', async () => {
     const automation = makeAutomation()
+    vi.mocked(callRuntimeRpc).mockResolvedValueOnce({
+      run: { id: 'run-1', automationId: automation.id }
+    })
+
+    await runAutomationNowForTarget(automation)
+
+    expect(mockApi.automations.runNow).not.toHaveBeenCalled()
+    expect(callRuntimeRpc).toHaveBeenCalledWith(
+      { kind: 'environment', environmentId: 'gpu' },
+      'automation.runNow',
+      { id: automation.id },
+      { timeoutMs: 15_000 }
+    )
+  })
+
+  it('uses an exact machine selector for an existing runtime workspace', async () => {
+    const automation = makeAutomation({
+      workspaceMode: 'existing',
+      workspaceId: 'repo-1::/srv/orca'
+    })
     const input: AutomationCreateInput = {
       name: automation.name,
       prompt: automation.prompt,
@@ -93,39 +139,24 @@ describe('automation host client', () => {
       agentId: automation.agentId,
       runContext: automation.runContext,
       projectId: automation.projectId,
-      workspaceMode: automation.workspaceMode,
-      workspaceId: null,
-      setupDecision: 'run',
+      workspaceMode: 'existing',
+      workspaceId: automation.workspaceId,
+      setupDecision: 'skip',
       timezone: automation.timezone,
       rrule: automation.rrule,
       dtstart: automation.dtstart
     }
-    vi.mocked(callRuntimeRpc)
-      .mockResolvedValueOnce({ automation })
-      .mockResolvedValueOnce({ run: { id: 'run-1', automationId: automation.id } })
+    vi.mocked(callRuntimeRpc).mockResolvedValueOnce({ automation })
 
     await createAutomationForTarget(input)
-    await runAutomationNowForTarget(automation)
 
-    expect(mockApi.automations.create).not.toHaveBeenCalled()
-    expect(mockApi.automations.runNow).not.toHaveBeenCalled()
-    expect(callRuntimeRpc).toHaveBeenNthCalledWith(
-      1,
+    expect(callRuntimeRpc).toHaveBeenCalledWith(
       { kind: 'environment', environmentId: 'gpu' },
       'automation.create',
       expect.objectContaining({
-        repo: 'repo-1',
-        workspace: undefined,
-        setupDecision: 'run',
-        runContext: automation.runContext
+        repo: 'id:repo-1',
+        workspace: 'id:repo-1::/srv/orca'
       }),
-      { timeoutMs: 15_000 }
-    )
-    expect(callRuntimeRpc).toHaveBeenNthCalledWith(
-      2,
-      { kind: 'environment', environmentId: 'gpu' },
-      'automation.runNow',
-      { id: automation.id },
       { timeoutMs: 15_000 }
     )
   })
