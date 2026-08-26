@@ -15,6 +15,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { useMountedRef } from '@/hooks/useMountedRef'
+import { escalateReactUpdateDepthError } from '@/lib/react-update-depth-escalation'
 import type { GlobalSettings } from '../../../../shared/global-settings-types'
 import {
   isUserManagedRuntimeEnvironment,
@@ -63,6 +64,9 @@ import {
 } from './RemoteServerUpdateStatus'
 import { RuntimeHostAccessForm, type RuntimeHostAccessFailure } from './RuntimeHostAccessForm'
 
+const RUNTIME_LOAD_CATCH = 'settings.RuntimeEnvironmentsPane.loadEnvironments'
+const RUNTIME_PROBE_CATCH = 'settings.RuntimeEnvironmentsPane.probeEnvironmentStatus'
+
 const LOCAL_RUNTIME_VALUE = '__local__'
 const NO_RUNTIME_VALUE = '__none__'
 
@@ -89,6 +93,15 @@ export function evaluateHostDetails(status: RuntimeStatus): RuntimeCompatVerdict
     serverMinCompatibleClientProtocolVersion:
       status.minCompatibleRuntimeClientVersion ?? status.minCompatibleMobileVersion
   })
+}
+
+function buildReadyHostDetails(runtimeStatus: RuntimeStatus): RuntimeHostDetails {
+  return {
+    status: 'ready',
+    runtimeStatus,
+    compatibility: evaluateHostDetails(runtimeStatus),
+    error: null
+  }
 }
 
 export function getHostDetailsSummary(details: RuntimeHostDetails | undefined): string {
@@ -336,12 +349,7 @@ export function RuntimeEnvironmentsPane({
             for (const environment of visibleEnvironments) {
               next[environment.id] =
                 verified?.environmentId === environment.id
-                  ? {
-                      status: 'ready',
-                      runtimeStatus: verified.runtimeStatus,
-                      compatibility: evaluateHostDetails(verified.runtimeStatus),
-                      error: null
-                    }
+                  ? buildReadyHostDetails(verified.runtimeStatus)
                   : (current[environment.id] ?? {
                       status: 'loading',
                       runtimeStatus: null,
@@ -356,12 +364,14 @@ export function RuntimeEnvironmentsPane({
           visibleEnvironments
             .filter((environment) => environment.id !== verified?.environmentId)
             .map(async (environment) => {
+              let answeredRuntimeStatus: RuntimeStatus | null = null
               try {
                 const response = await window.api.runtimeEnvironments.getStatus({
                   selector: environment.id,
                   timeoutMs: 10_000
                 })
                 const runtimeStatus = unwrapRuntimeRpcResult<RuntimeStatus>(response)
+                answeredRuntimeStatus = runtimeStatus
                 // Why: feed the live status into the store so sidebar host pickers
                 // reflect manual refreshes, not just the settings pane.
                 useAppStore.getState().setRuntimeEnvironmentStatus(environment.id, {
@@ -373,14 +383,24 @@ export function RuntimeEnvironmentsPane({
                 }
                 setDetailsByEnvironmentId((current) => ({
                   ...current,
-                  [environment.id]: {
-                    status: 'ready',
-                    runtimeStatus,
-                    compatibility: evaluateHostDetails(runtimeStatus),
-                    error: null
-                  }
+                  [environment.id]: buildReadyHostDetails(runtimeStatus)
                 }))
               } catch (error) {
+                // Why first: a #185 is a local render loop, never loss of contact, so status:null
+                // here would publish an unverifiable verdict — into the store the sidebar host
+                // picker reads — for a server that answered.
+                if (escalateReactUpdateDepthError(error, RUNTIME_PROBE_CATCH)) {
+                  // Only re-assert what this probe actually observed; if it never answered, the row
+                  // keeps whatever the last real check left rather than gaining a verdict.
+                  if (answeredRuntimeStatus && mountedRef.current) {
+                    const readyDetails = buildReadyHostDetails(answeredRuntimeStatus)
+                    setDetailsByEnvironmentId((current) => ({
+                      ...current,
+                      [environment.id]: readyDetails
+                    }))
+                  }
+                  return
+                }
                 // Why: record the failed probe (null status) so the sidebar can
                 // distinguish unreachable from never-checked.
                 useAppStore.getState().setRuntimeEnvironmentStatus(environment.id, {
@@ -403,6 +423,10 @@ export function RuntimeEnvironmentsPane({
             })
         )
       } catch (error) {
+        // A toast carrying the React digest reads as a load failure the list call never had.
+        if (escalateReactUpdateDepthError(error, RUNTIME_LOAD_CATCH)) {
+          return
+        }
         if (mountedRef.current) {
           toast.error(
             error instanceof Error

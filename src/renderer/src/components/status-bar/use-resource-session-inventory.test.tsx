@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DaemonSession } from './resource-usage-merge-types'
 import { notifyDaemonSessionInventoryInvalidated } from './daemon-session-inventory-invalidation'
 import { useResourceSessionInventory } from './use-resource-session-inventory'
+import { clearReactErrorBoundaryReportingForTest } from '@/lib/react-error-boundary-reporting'
+import { resetReactUpdateDepthEscalationForTest } from '@/lib/react-update-depth-escalation'
 
 function session(id: string): DaemonSession {
   return { id, cwd: '/workspace', title: id, agentOwnership: 'absent' as const }
@@ -82,6 +84,32 @@ describe('useResourceSessionInventory', () => {
 
     expect(result.current.sessionInventory.sessions).toEqual([session('recovered')])
     expect(result.current.sessionsError).toBe(false)
+  })
+
+  // SSH boundary: a renderer render loop is not evidence that the PTY host stopped answering.
+  it('does not flag the PTY host unreachable when a React #185 lands in the refresh catch', async () => {
+    const recordBreadcrumb = vi.fn()
+    resetReactUpdateDepthEscalationForTest()
+    clearReactErrorBoundaryReportingForTest()
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    ;(window as unknown as { api: { crashReports: unknown } }).api.crashReports = {
+      recordBreadcrumb,
+      recordRendererError: vi.fn().mockResolvedValue({ ok: true, report: null, deduped: false })
+    }
+    listSessions.mockRejectedValue(
+      new Error('Minified React error #185; visit https://react.dev/errors/185')
+    )
+
+    const { result } = renderHook(() => useResourceSessionInventory(true))
+    await act(async () => {
+      await result.current.refreshSessions()
+    })
+
+    expect(result.current.sessionsError).toBe(false)
+    expect(recordBreadcrumb.mock.calls[0]?.[0]).toMatchObject({
+      name: 'react_update_depth_swallowed',
+      data: { site: 'status-bar.use-resource-session-inventory.refreshSessions' }
+    })
   })
 
   it('refreshes for background spawns without depending on mounted pane state', async () => {

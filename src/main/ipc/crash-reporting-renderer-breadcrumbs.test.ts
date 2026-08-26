@@ -393,6 +393,45 @@ describe('renderer breadcrumb IPC routing', () => {
     ])
   })
 
+  // #185's message is one constant, so message keying would collapse every catch onto one slot.
+  it('coalesces swallowed React #185 notices per catching site', () => {
+    const message = 'Minified React error #185; visit https://react.dev/errors/185'
+    emitRendererBreadcrumb({
+      name: 'react_update_depth_swallowed',
+      data: { site: 'settings.RuntimeEnvironmentsPane.probeEnvironmentStatus', message }
+    })
+    emitRendererBreadcrumb({
+      name: 'react_update_depth_swallowed',
+      data: { site: 'settings.RuntimeEnvironmentsPane.probeEnvironmentStatus', message }
+    })
+    emitRendererBreadcrumb({
+      name: 'react_update_depth_swallowed',
+      data: { site: 'status-bar.use-resource-session-inventory.refreshSessions', message }
+    })
+
+    expect(recordCrashBreadcrumbMock).not.toHaveBeenCalled()
+    expect(
+      recordCoalescedCrashBreadcrumbMock.mock.calls.map(
+        (call) => (call[0] as { coalesceKey: string }).coalesceKey
+      )
+    ).toEqual([
+      'react_update_depth_swallowed:settings.RuntimeEnvironmentsPane.probeEnvironmentStatus',
+      'react_update_depth_swallowed:settings.RuntimeEnvironmentsPane.probeEnvironmentStatus',
+      'react_update_depth_swallowed:status-bar.use-resource-session-inventory.refreshSessions'
+    ])
+  })
+
+  it('scopes swallowed React #185 notices to the renderer that emitted them', () => {
+    const data = { site: 'settings.ReleaseChannelSection.loadBuilds', message: '#185' }
+    emitRendererBreadcrumb({ name: 'react_update_depth_swallowed', data }, 7)
+    emitRendererBreadcrumb({ name: 'react_update_depth_swallowed', data }, 9)
+
+    const keys = recordCoalescedCrashBreadcrumbMock.mock.calls.map(
+      (call) => (call[0] as { coalesceKey: string }).coalesceKey
+    )
+    expect(keys[0]).not.toEqual(keys[1])
+  })
+
   it('records non-error renderer breadcrumbs without coalescing', () => {
     emitRendererBreadcrumb({ name: 'renderer_bootstrap_started', data: { dev: true } })
 

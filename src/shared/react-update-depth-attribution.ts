@@ -31,10 +31,16 @@ function messageOf(error: unknown): string {
   return ''
 }
 
+export function isReactUpdateDepthError(error: unknown): boolean {
+  return REACT_UPDATE_DEPTH_ERROR.test(messageOf(error))
+}
+
 export function getReactErrorBoundaryAttribution(
   error: unknown
 ): CrashReportAttribution | undefined {
-  return REACT_UPDATE_DEPTH_ERROR.test(messageOf(error))
-    ? UNRELIABLE_BOUNDARY_ATTRIBUTION
-    : undefined
+  return isReactUpdateDepthError(error) ? UNRELIABLE_BOUNDARY_ATTRIBUTION : undefined
 }
+
+// A #185 that lands in an async catch is never caught by a boundary, so the only record it can leave
+// is a breadcrumb naming the catch. Coalesced per site in the main process; see the recorder.
+export const REACT_UPDATE_DEPTH_SWALLOWED_BREADCRUMB = 'react_update_depth_swallowed'

@@ -9,6 +9,7 @@ import { SettingsSegmentedControl, SettingsSubsectionHeader } from './SettingsFo
 import { Badge } from '../ui/badge'
 import { translate } from '@/i18n/i18n'
 import { getShortcutPlatform } from '@/lib/shortcut-platform'
+import { escalateReactUpdateDepthError } from '@/lib/react-update-depth-escalation'
 import {
   DEV_CHANNEL_PLATFORM_LABEL,
   RELEASE_CHANNELS,
@@ -22,6 +23,8 @@ import {
   type ReleaseBuild,
   type ReleaseChannel
 } from '../../../../shared/release-channel'
+
+const LOAD_BUILDS_CATCH = 'settings.ReleaseChannelSection.loadBuilds'
 
 const CHANNEL_DESCRIPTIONS: Record<ReleaseChannel, string> = {
   stable: 'Shipped releases. What everyone else is running.',
@@ -135,6 +138,11 @@ export function ReleaseChannelSection(): React.JSX.Element {
         setLoadError(result.message)
       }
     } catch (error) {
+      // Why first: listBuilds can succeed and the setState above it still throw React #185, which
+      // then rendered the digest as red inline copy under "No builds found" and dropped the builds.
+      if (escalateReactUpdateDepthError(error, LOAD_BUILDS_CATCH)) {
+        return
+      }
       if (isStale()) {
         return
       }

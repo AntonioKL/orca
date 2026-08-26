@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Gauge, RefreshCw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { installWindowVisibilityInterval } from '@/lib/window-visibility-interval'
+import { escalateReactUpdateDepthError } from '@/lib/react-update-depth-escalation'
 import { useAppStore } from '@/store'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
 import type {
@@ -13,6 +14,7 @@ import { ProviderHostScopeControl } from '@/components/settings/ProviderHostScop
 import { translate } from '@/i18n/i18n'
 
 const REFRESH_INTERVAL_MS = 60_000
+const GITHUB_RATE_LIMIT_CATCH = 'github-rate-limit-display.refreshSnapshot'
 
 type BucketKey = 'core' | 'search' | 'graphql'
 
@@ -110,7 +112,12 @@ export function useGitHubRateLimitSnapshot(options?: { autoRefresh?: boolean }):
         } else {
           setHasError(true)
         }
-      } catch {
+      } catch (error) {
+        // Why first: the call can succeed and setSnapshot still throw #185; hasError would then
+        // read as a provider outage. Guarded on both providers by the provider-parity rule.
+        if (escalateReactUpdateDepthError(error, GITHUB_RATE_LIMIT_CATCH)) {
+          return
+        }
         if (token === latestToken.current) {
           setHasError(true)
         }

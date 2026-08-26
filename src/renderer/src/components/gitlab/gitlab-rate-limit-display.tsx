@@ -3,6 +3,7 @@ import { Gauge, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { installWindowVisibilityInterval } from '@/lib/window-visibility-interval'
+import { escalateReactUpdateDepthError } from '@/lib/react-update-depth-escalation'
 import { useAppStore } from '@/store'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
 import type {
@@ -14,6 +15,7 @@ import { ProviderHostScopeControl } from '@/components/settings/ProviderHostScop
 import { translate } from '@/i18n/i18n'
 
 const REFRESH_INTERVAL_MS = 60_000
+const GITLAB_RATE_LIMIT_CATCH = 'gitlab-rate-limit-display.refreshSnapshot'
 
 export function formatGitLabRateLimitReset(resetAt: number | null): string {
   if (resetAt === null) {
@@ -79,7 +81,12 @@ export function useGitLabRateLimitSnapshot(options?: { autoRefresh?: boolean }):
         } else {
           setHasError(true)
         }
-      } catch {
+      } catch (error) {
+        // Why first: the call can succeed and setSnapshot still throw #185; hasError would then
+        // read as a provider outage. Guarded on both providers by the provider-parity rule.
+        if (escalateReactUpdateDepthError(error, GITLAB_RATE_LIMIT_CATCH)) {
+          return
+        }
         if (token === latestToken.current) {
           setHasError(true)
         }

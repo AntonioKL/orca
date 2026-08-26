@@ -9,6 +9,7 @@ import {
 } from '../crash-reporting/crash-breadcrumb-store'
 import { startSpan } from '../observability/tracer'
 import { TERMINAL_WEBGL_DIAGNOSTIC_BREADCRUMB } from '../../shared/terminal-webgl-diagnostics'
+import { REACT_UPDATE_DEPTH_SWALLOWED_BREADCRUMB } from '../../shared/react-update-depth-attribution'
 
 function sanitizeRendererBreadcrumbData(value: unknown): CrashReportBreadcrumbData | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -54,6 +55,7 @@ const COALESCED_RENDERER_BREADCRUMB_NAMES = new Set([
   'terminal_safe_fit_retry_exhausted',
   DUPLICATE_TAB_OWNER_BREADCRUMB,
   PARK_VERDICT_CHURN_BREADCRUMB,
+  REACT_UPDATE_DEPTH_SWALLOWED_BREADCRUMB,
   TERMINAL_WEBGL_DIAGNOSTIC_BREADCRUMB
 ])
 const RENDERER_BREADCRUMB_COALESCE_MS = 30_000
@@ -74,6 +76,11 @@ function rendererBreadcrumbCoalesceKey(
 ): string | undefined {
   if (NAME_ONLY_COALESCED_BREADCRUMB_NAMES.has(name)) {
     return name
+  }
+  // Why site and not message: React #185's text is one constant, so keying on it would collapse every
+  // catch the runaway passed through into one slot. The set of catches is the only attribution it has.
+  if (name === REACT_UPDATE_DEPTH_SWALLOWED_BREADCRUMB) {
+    return `${name}:${String(data?.site ?? '')}`
   }
   // Why trigger and not name alone: `burst` means damping engaged a commit
   // short of React #185, `window` means slow benign churn. Collapsing them

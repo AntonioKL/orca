@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useMountedRef } from '@/hooks/useMountedRef'
+import { escalateReactUpdateDepthError } from '@/lib/react-update-depth-escalation'
 import { subscribeDaemonSessionInventoryInvalidated } from './daemon-session-inventory-invalidation'
 import {
   EMPTY_DAEMON_SESSION_INVENTORY,
@@ -8,6 +9,8 @@ import {
   removeSessionsFromInventory,
   type DaemonSessionInventory
 } from './resource-session-inventory'
+
+const REFRESH_SESSIONS_CATCH = 'status-bar.use-resource-session-inventory.refreshSessions'
 
 type ResourceSessionInventory = {
   sessionInventory: DaemonSessionInventory
@@ -79,7 +82,12 @@ export function useResourceSessionInventory(ready: boolean): ResourceSessionInve
         sessionInventory: inventoryFromSessions(liveSessions),
         sessionsError: false
       })
-    } catch {
+    } catch (error) {
+      // Why first: listSessions can succeed and the fresh-object setStoredState above still throw
+      // #185; sessionsError would then report a PTY-host failure that the host never had.
+      if (escalateReactUpdateDepthError(error, REFRESH_SESSIONS_CATCH)) {
+        return
+      }
       if (mountedRef.current && generation === refreshGenerationRef.current) {
         setStoredState((current) => ({ ...current, sessionsError: true }))
       }
