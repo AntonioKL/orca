@@ -15827,6 +15827,15 @@
                     "2a1862c470": "Loading labels…"
                   }
                 }
+              },
+              "work": {
+                "item": {
+                  "row": {
+                    "draftPullRequest": "Draft pull request",
+                    "pullRequest": "Pull request",
+                    "issue": "Issue"
+                  }
+                }
               }
             }
           },

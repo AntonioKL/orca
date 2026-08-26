@@ -130,6 +130,12 @@ export function useTaskPageCreateGithubSubmit({
       // Why: bump the nonce so the list refetches and shows the new issue.
       setTaskRefreshNonce((current) => current + 1)
 
+      if (!result.url) {
+        // Why: create only validates the number, so the URL can come back empty. A stub that
+        // can't link out shouldn't open a detail page — the refetched list surfaces the issue.
+        return
+      }
+
       // Why: auto-open the new issue with an optimistic stub for immediate content, then refine with the full workItem fetch.
       const stub: GitHubWorkItem = {
         id: `issue:${String(result.number)}`,

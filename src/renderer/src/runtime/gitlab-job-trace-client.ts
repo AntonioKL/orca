@@ -7,9 +7,11 @@ import type { GitLabJobTraceResult, GitLabProjectRef } from '../../../shared/git
 import type { PRCheckDetail, PRCheckRunDetails } from '../../../shared/github/check-types'
 import { getActiveRuntimeTarget } from './runtime-client-target'
 import { callRuntimeRpc } from './runtime-rpc-client'
-import { GITLAB_IPC_TIMEOUT_MS, withGitLabIpcTimeout } from './gitlab-ipc-timeout'
+import { withGitLabIpcTimeout } from './gitlab-ipc-timeout'
 
-const JOB_TRACE_TIMEOUT_MS = GITLAB_IPC_TIMEOUT_MS
+// Why: job logs run longer than a generic GitLab call, so this sits above main's 60s
+// `glab` timeout — otherwise the caller aborts first and hides main's classified error.
+const JOB_TRACE_TIMEOUT_MS = 65_000
 
 /**
  * Load a GitLab pipeline job log as provider-neutral check details.

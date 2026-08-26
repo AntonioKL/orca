@@ -157,7 +157,7 @@ export function useTaskPageGitHubDetailOpeners({
       repoMap,
       taskListPositionRef,
       currentPageRef,
-      githubListScrollRef.current?.scrollTop,
+      githubListScrollRef,
       githubListScrollTopRef,
       pendingGithubScrollRestoreRef
     ]

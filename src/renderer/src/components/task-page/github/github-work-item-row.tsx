@@ -68,12 +68,25 @@ export function GithubWorkItemRow({
     ? getWorktreeAttachmentLabel(attachedWorkspace)
     : null
   const prDelta = item.type === 'pr' ? formatPRDelta(item) : null
+  const rowSourceContext = getTaskPageRepoSourceContext(itemRepo, 'github')
   const githubTaskIdPill = (
     <span
       // Why: no fill — a muted wash on the pill stacks on the
       // row's hover:bg-accent and reads as a second hover tint.
       className="inline-flex items-center gap-1 rounded-md border border-border/40 px-1.5 py-0.5 text-muted-foreground"
-      aria-label={`${item.type === 'pr' ? (isTaskPageGitHubDraftPR(item) ? 'Draft pull request' : 'Pull request') : 'Issue'} #${item.number}`}
+      aria-label={`${
+        item.type === 'pr'
+          ? isTaskPageGitHubDraftPR(item)
+            ? translate(
+                'auto.components.task.page.github.github.work.item.row.draftPullRequest',
+                'Draft pull request'
+              )
+            : translate(
+                'auto.components.task.page.github.github.work.item.row.pullRequest',
+                'Pull request'
+              )
+          : translate('auto.components.task.page.github.github.work.item.row.issue', 'Issue')
+      } #${item.number}`}
     >
       {item.type === 'pr' ? (
         isTaskPageGitHubDraftPR(item) ? (
@@ -188,7 +201,7 @@ export function GithubWorkItemRow({
           <GHAssigneesCell
             item={item}
             repo={itemRepo ?? null}
-            sourceContext={getTaskPageRepoSourceContext(itemRepo, 'github')}
+            sourceContext={rowSourceContext}
             workItemMutation={githubWorkItemMutation}
           />
         </div>
@@ -200,7 +213,7 @@ export function GithubWorkItemRow({
             <PRReviewCell
               item={item}
               repo={itemRepo ?? null}
-              sourceContext={getTaskPageRepoSourceContext(itemRepo, 'github')}
+              sourceContext={rowSourceContext}
               workItemMutation={githubWorkItemMutation}
             />
           </div>
@@ -217,7 +230,7 @@ export function GithubWorkItemRow({
             <PRMergeCell
               item={item}
               repo={itemRepo ?? null}
-              sourceContext={getTaskPageRepoSourceContext(itemRepo, 'github')}
+              sourceContext={rowSourceContext}
               workItemMutation={githubWorkItemMutation}
             />
           </div>
@@ -227,7 +240,7 @@ export function GithubWorkItemRow({
           <GHStatusCell
             item={item}
             repo={itemRepo ?? null}
-            sourceContext={getTaskPageRepoSourceContext(itemRepo, 'github')}
+            sourceContext={rowSourceContext}
             workItemMutation={githubWorkItemMutation}
           />
         </div>
