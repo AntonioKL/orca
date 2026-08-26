@@ -391,4 +391,23 @@ describe('buildMobileNativeChatTransientData anchoring', () => {
     })
     expect(data.map((message) => message.id)).toEqual(['a1', 'p1', 'a2'])
   })
+
+  it('anchors after the prompt that absorbed an earlier image-source row', () => {
+    const messages = [
+      row('a1', 'assistant', 'ready'),
+      user('source', '[Image: source: /tmp/earlier.png]'),
+      user('prompt', '[Image #1] earlier image'),
+      row('a2', 'assistant', 'done')
+    ]
+    const folded = foldMobileNativeChatMessages(messages)
+    expect(folded.map((message) => message.id)).toEqual(['a1', 'prompt', 'a2'])
+
+    const { data } = buildMobileNativeChatTransientData({
+      messages,
+      folded,
+      streaming: null,
+      pending: [{ id: 'p1', text: 'sent after the image source', baselineTailMessageId: 'source' }]
+    })
+    expect(data.map((message) => message.id)).toEqual(['a1', 'prompt', 'p1', 'a2'])
+  })
 })

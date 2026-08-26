@@ -6,7 +6,10 @@ import {
 import { stripNoiseMessages } from '../../../src/shared/native-chat-noise'
 import { foldToolMessages } from '../../../src/shared/native-chat-tool-fold'
 import { isImageRefBlock, type NativeChatMessage } from '../../../src/shared/native-chat-types'
-import { normalizeImageTranscriptMessages } from './mobile-native-chat-image-transcript-markers'
+import {
+  isImageSourceUserTurn,
+  normalizeImageTranscriptMessages
+} from './mobile-native-chat-image-transcript-markers'
 import type { MobileNativeChatStatus } from './use-mobile-native-chat-session'
 
 /** The centered empty-state copy for a chat with no messages, mirroring the
@@ -109,11 +112,21 @@ export function buildMobileNativeChatTransientData({
   const foldedAnchorByRawId = new Map<string, string>()
   if (missingBaselineIds.size > 0) {
     let lastVisibleId: string | null = null
+    const forwardImageBaselineIds: string[] = []
     for (const message of messages) {
       if (foldedIds.has(message.id)) {
+        for (const baselineId of forwardImageBaselineIds) {
+          foldedAnchorByRawId.set(baselineId, message.id)
+        }
+        forwardImageBaselineIds.length = 0
         lastVisibleId = message.id
       }
-      if (lastVisibleId && missingBaselineIds.has(message.id)) {
+      if (!missingBaselineIds.has(message.id)) {
+        continue
+      }
+      if (isImageSourceUserTurn(message)) {
+        forwardImageBaselineIds.push(message.id)
+      } else if (lastVisibleId) {
         foldedAnchorByRawId.set(message.id, lastVisibleId)
       }
     }
@@ -131,7 +144,7 @@ export function buildMobileNativeChatTransientData({
       timestamp: null,
       source: 'transcript'
     }
-    // Tool/noise folding can remove the raw tail; anchor to its preceding visible row.
+    // Tool/noise rows fold backward; image-source rows fold into their following prompt.
     const baselineId = item.baselineTailMessageId
     const anchor = baselineId
       ? foldedIds.has(baselineId)
