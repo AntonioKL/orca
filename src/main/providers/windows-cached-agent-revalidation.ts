@@ -31,3 +31,49 @@ export function canRevalidateCachedAgentWithoutScan(
     isShellProcess(fallbackProcess)
   )
 }
+
+export type WindowsCachedAgentJobVerdict =
+  /** Anchor pid alive in the job, recently confirmed: identity stands, no scan. */
+  | 'confirmed'
+  /** Anchor pid alive but past the age bound: scan for drift; a silent scan keeps it. */
+  | 'recheck'
+  /** Complete job read without the anchor pid, or the shell alone: identity retired. */
+  | 'exited'
+  /** No anchor; a non-shell member exists and the bound has not elapsed: identity stands. */
+  | 'unproven'
+  /** No anchor and the bound elapsed: the superset answer stops standing in for a scan. */
+  | 'expired'
+  /** No job answer: unverifiable per ssh-execution-boundary.md, never exit proof. */
+  | 'unavailable'
+
+/**
+ * Weigh a cached agent identity against the pane's job membership.
+ *
+ * The job list is complete when non-null (the native read grows its buffer
+ * until every pid fits), so an anchor pid it lacks has provably exited — a job
+ * is inescapable once joined. Without an anchor the job is only a superset of
+ * the console (it keeps console-detached descendants), so `size > 1` cannot
+ * tell a working agent from a leftover and the age bound decides instead.
+ */
+export function judgeCachedAgentJobEvidence(args: {
+  jobProcessIds: ReadonlySet<number> | null
+  shellPid: number
+  anchorProcessId: number | null
+  identityAgeMs: number
+}): WindowsCachedAgentJobVerdict {
+  if (args.jobProcessIds === null) {
+    return 'unavailable'
+  }
+  const withinAgeBound = args.identityAgeMs <= WINDOWS_DETACHED_DESCENDANT_IDENTITY_MAX_AGE_MS
+  // A shell-pid "anchor" proves nothing about a child; treat it as unanchored.
+  if (args.anchorProcessId !== null && args.anchorProcessId !== args.shellPid) {
+    if (!args.jobProcessIds.has(args.anchorProcessId)) {
+      return 'exited'
+    }
+    return withinAgeBound ? 'confirmed' : 'recheck'
+  }
+  if (args.jobProcessIds.size <= 1) {
+    return 'exited'
+  }
+  return withinAgeBound ? 'unproven' : 'expired'
+}

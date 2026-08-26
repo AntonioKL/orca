@@ -211,6 +211,46 @@ describe('daemon pty foreground degraded-scan handling', () => {
     expect(await readForegroundAt(handle, 120_000)).toBe('claude')
   })
 
+  it('retires an anchored agent immediately when its pid leaves the job, despite a leftover', async () => {
+    // With an anchor pid the detached-leftover shape no longer pins a dead
+    // agent for the age bound: the anchor missing from a complete job read is
+    // proof of exit, leftovers notwithstanding.
+    resolveAgentForegroundProcessMock
+      .mockResolvedValueOnce({
+        available: true,
+        processName: 'claude',
+        processId: 999
+      })
+      .mockResolvedValue({ available: true, processName: null })
+    readConptyMock.mockReturnValue(new Set([12345, 999]))
+    const { handle } = await spawnWindowsShell()
+
+    await readForegroundAt(handle, 0)
+    // Agent 999 exits; detached plumbing 777 keeps the job larger than the shell.
+    readConptyMock.mockReturnValue(new Set([12345, 777]))
+    await readForegroundAt(handle, 1_000) // refresh sees the anchor gone and clears
+    expect(await readForegroundAt(handle, 1_100)).toBe('powershell.exe')
+  })
+
+  it('never retires an anchored agent the job still holds, even when scans miss it', async () => {
+    // The anchor pid alive in the job is proof of life: agentless-but-available
+    // scans past the age bound restamp instead of retiring a working agent.
+    resolveAgentForegroundProcessMock
+      .mockResolvedValueOnce({
+        available: true,
+        processName: 'claude',
+        processId: 999
+      })
+      .mockResolvedValue({ available: true, processName: null })
+    readConptyMock.mockReturnValue(new Set([12345, 999]))
+    const { handle } = await spawnWindowsShell()
+
+    await readForegroundAt(handle, 0)
+    await readForegroundAt(handle, 40_000) // pre-fix: this refresh cleared the cache
+    expect(await readForegroundAt(handle, 40_100)).toBe('claude')
+    expect(await readForegroundAt(handle, 120_000)).toBe('claude')
+  })
+
   it('retires a cached agent when a scan finds no agent and the console is shell-only', async () => {
     resolveAgentForegroundProcessMock
       .mockResolvedValueOnce({ available: true, processName: 'claude' })

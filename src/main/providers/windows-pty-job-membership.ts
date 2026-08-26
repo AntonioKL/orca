@@ -11,7 +11,10 @@ import { listPtyJobProcessIds } from '../windows/windows-pty-job'
  *
  * The job is a SUPERSET of the console -- it keeps console-detached descendants
  * -- so `size > 1` is not proof of life, only absence of proof of absence.
- * `size === 1` (the shell alone) is decisive; callers must bound the rest.
+ * `size === 1` (the shell alone) is decisive, and so is membership of a KNOWN
+ * pid: the list is complete when non-null and a job is inescapable once joined,
+ * so an anchored identity can be confirmed or retired exactly
+ * (judgeCachedAgentJobEvidence). Callers must bound only the unanchored rest.
  *
  * Null means unverifiable per docs/reference/ssh-execution-boundary.md, never
  * that processes died.

@@ -69,7 +69,7 @@ import { readWindowsConsoleAttachedProcessIds } from './windows-console-attached
 import { terminatePtyJob } from '../windows/windows-pty-job'
 import {
   canRevalidateCachedAgentWithoutScan,
-  WINDOWS_DETACHED_DESCENDANT_IDENTITY_MAX_AGE_MS
+  judgeCachedAgentJobEvidence
 } from './windows-cached-agent-revalidation'
 import { forceKillPosixPtyProcessGroups } from '../pty/posix-pty-process-groups'
 import { shouldUseShellReadyStartupDelivery } from '../../shared/codex-startup-delivery'
@@ -124,8 +124,12 @@ const pendingLocalPtySpawns = new Map<string, Set<PendingLocalPtySpawn>>()
 const ptyShellName = new Map<string, string>()
 const ptyAgentForegroundContextPaths = new Map<string, string[]>()
 // Why: remember the last recognized agent foreground so a degraded scan doesn't report the shell and look like an exit.
-// `at` is when a scan last confirmed it, so job evidence -- only a superset -- cannot hold it forever.
-const ptyLastRecognizedForeground = new Map<string, { name: string; at: number }>()
+// `pid` anchors the identity to the row that proved it (null when ambiguous);
+// `at` is the last confirmation, so unanchored job evidence -- only a superset -- cannot hold it forever.
+const ptyLastRecognizedForeground = new Map<
+  string,
+  { name: string; pid: number | null; at: number }
+>()
 const ptyTerminalHandle = new Map<string, string>()
 const ptyWorktreeId = new Map<string, string>()
 const ptyInitialCwd = new Map<string, string>()
@@ -1411,8 +1415,10 @@ export class LocalPtyProvider implements IPtyProvider {
       proc.process || null,
       ptyShellName.get(id)
     )
-    const cachedAgent = ptyLastRecognizedForeground.get(id)?.name ?? null
+    const cachedEntry = ptyLastRecognizedForeground.get(id)
+    const cachedAgent = cachedEntry?.name ?? null
     let paneMembershipUnavailable = false
+    let cachedAgentAliveInJob = false
     // Why: job membership preserves a live cached agent without the whole-table
     // scan (incomplete under Windows load). Job, not console: this asks "is
     // anything besides the shell alive?", which needs no console attachment and
@@ -1426,19 +1432,23 @@ export class LocalPtyProvider implements IPtyProvider {
         if (ptyProcesses.get(id) !== proc) {
           return null
         }
-        // Why the age bound: `size > 1` is a superset, not proof of life, so this
-        // short-circuit was permanent wherever a detached descendant lives -- and it
-        // skips the scan below, the only path that can clear the cache.
-        const confirmedAt = ptyLastRecognizedForeground.get(id)?.at ?? 0
-        if (
-          paneProcessIds !== null &&
-          paneProcessIds.size > 1 &&
-          cachedAgent !== null &&
-          Date.now() - confirmedAt <= WINDOWS_DETACHED_DESCENDANT_IDENTITY_MAX_AGE_MS
-        ) {
+        const verdict = judgeCachedAgentJobEvidence({
+          jobProcessIds: paneProcessIds,
+          shellPid: proc.pid,
+          anchorProcessId: cachedEntry?.pid ?? null,
+          identityAgeMs: Date.now() - (cachedEntry?.at ?? 0)
+        })
+        if (verdict === 'confirmed' || verdict === 'unproven') {
           return cachedAgent
         }
-        paneMembershipUnavailable = paneProcessIds === null
+        if (verdict === 'exited') {
+          // The job is authoritative for its members: the anchor pid is gone (or
+          // the shell stands alone), so retire the identity before the scan --
+          // a detached leftover in the job must not stand in for a dead agent.
+          ptyLastRecognizedForeground.delete(id)
+        }
+        cachedAgentAliveInJob = verdict === 'recheck'
+        paneMembershipUnavailable = verdict === 'unavailable'
       } catch {
         paneMembershipUnavailable = true
       }
@@ -1460,15 +1470,30 @@ export class LocalPtyProvider implements IPtyProvider {
       const resolvedAgent = resolution.processName
         ? recognizeAgentProcessFromCommandLine(resolution.processName)
         : null
-      // Why: incomplete snapshot + unavailable job read isn't exit proof; only shell-only membership may clear the cache.
+      // Why: incomplete snapshot + unavailable job read isn't exit proof; and an
+      // anchor pid still alive in the job outranks a snapshot that lost its row.
       const stableResolution =
-        paneMembershipUnavailable && resolvedAgent === null
+        (paneMembershipUnavailable || cachedAgentAliveInJob) && resolvedAgent === null
           ? { ...resolution, available: false }
           : resolution
       const stable = resolveStableForegroundProcess(stableResolution, lastRecognizedAgent)
       if (stable.lastRecognizedAgent && stableResolution.available) {
         // Only a positive recognition restarts the age bound.
-        ptyLastRecognizedForeground.set(id, { name: stable.lastRecognizedAgent, at: Date.now() })
+        ptyLastRecognizedForeground.set(id, {
+          name: stable.lastRecognizedAgent,
+          pid:
+            stable.lastRecognizedAgent === resolution.processName
+              ? (resolution.processId ?? null)
+              : null,
+          at: Date.now()
+        })
+      } else if (stable.lastRecognizedAgent && cachedAgentAliveInJob) {
+        // The anchor pid in the job is proof of life; restamp so the
+        // short-circuit resumes instead of scanning on every call.
+        const entry = ptyLastRecognizedForeground.get(id)
+        if (entry) {
+          ptyLastRecognizedForeground.set(id, { ...entry, at: Date.now() })
+        }
       } else if (!stable.lastRecognizedAgent) {
         ptyLastRecognizedForeground.delete(id)
       }

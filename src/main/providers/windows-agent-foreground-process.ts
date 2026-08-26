@@ -29,6 +29,17 @@ export type AgentForegroundResolutionOptions = {
 export type WindowsAgentForegroundResolution = {
   available: boolean
   processName: string | null
+  /**
+   * Pid of the candidate row that proved the name — the liveness anchor a
+   * caller may check against the pane's job. Absent when the name came from a
+   * fallback or when sibling leaves left no single anchor.
+   */
+  processId?: number
+}
+
+type WindowsForegroundIdentity = {
+  processName: string | null
+  processId?: number
 }
 
 export function shouldInspectWindowsAgentForeground(fallbackProcess: string): boolean {
@@ -85,11 +96,7 @@ export async function resolveWindowsAgentForegroundProcessWithAvailability(
   }
   return {
     available: true,
-    processName: resolveWindowsProcessName(
-      filteredCandidates,
-      fallbackProcess,
-      options.contextPaths
-    )
+    ...resolveWindowsForegroundIdentity(filteredCandidates, fallbackProcess, options.contextPaths)
   }
 }
 
@@ -110,11 +117,11 @@ function windowsCandidatesContainRecognizedAgent(
     )
 }
 
-function resolveWindowsProcessName(
+function resolveWindowsForegroundIdentity(
   candidates: readonly WindowsProcessCandidate[],
   fallbackProcess: string,
   contextPaths: readonly string[] | undefined
-): string | null {
+): WindowsForegroundIdentity {
   if (isShellProcess(fallbackProcess)) {
     return resolveShellForegroundProcessFromWindowsCandidates(candidates, contextPaths)
   }
@@ -133,15 +140,18 @@ function resolveWindowsProcessName(
     recognizeAgentProcessFromCommandLine(candidate.command) ??
     recognizeAgentProcessFromCommandLine(candidate.name)
   if (recognized) {
-    return resolveOuterWrapperForegroundProcess(recognized, candidate, candidates)
+    return {
+      processName: resolveOuterWrapperForegroundProcess(recognized, candidate, candidates),
+      processId: candidate.pid
+    }
   }
-  return null
+  return { processName: null }
 }
 
 function resolveShellForegroundProcessFromWindowsCandidates(
   candidates: readonly WindowsProcessCandidate[],
   contextPaths: readonly string[] | undefined
-): string | null {
+): WindowsForegroundIdentity {
   const recognizedCandidates = createRecognizedWindowsProcessCandidates(candidates, contextPaths)
   const contextCandidates = recognizedCandidates.filter((candidate) => candidate.contextMatch)
   if (contextCandidates.length > 0) {
@@ -154,14 +164,14 @@ function resolveWrapperForegroundProcessFromWindowsCandidates(
   candidates: readonly WindowsProcessCandidate[],
   allCandidates: readonly WindowsProcessCandidate[],
   contextPaths: readonly string[] | undefined
-): string | null {
+): WindowsForegroundIdentity {
   const contextCandidates = createRecognizedWindowsProcessCandidates(
     candidates,
     contextPaths
   ).filter((candidate) => candidate.contextMatch)
   return contextCandidates.length > 0
     ? resolveRecognizedWindowsProcessCandidates(contextCandidates, allCandidates)
-    : null
+    : { processName: null }
 }
 
 type RecognizedWindowsProcessCandidate = WindowsProcessRow & {
@@ -195,9 +205,9 @@ function createRecognizedWindowsProcessCandidates(
 function resolveRecognizedWindowsProcessCandidates(
   recognizedCandidates: readonly RecognizedWindowsProcessCandidate[],
   allCandidates: readonly WindowsProcessCandidate[]
-): string | null {
+): WindowsForegroundIdentity {
   if (recognizedCandidates.length === 0) {
-    return null
+    return { processName: null }
   }
   const candidatesByPid = new Map(allCandidates.map((candidate) => [candidate.pid, candidate]))
   const leafCandidates = recognizedCandidates.filter(
@@ -215,7 +225,15 @@ function resolveRecognizedWindowsProcessCandidates(
   )
   // Why: Windows lacks a cheap PTY foreground marker like POSIX '+'. A single
   // recognized lineage leaf is strong enough; sibling agent leaves are not.
-  return leafProcessNames.size === 1 ? [...leafProcessNames][0] : null
+  if (leafProcessNames.size !== 1) {
+    return { processName: null }
+  }
+  return {
+    processName: [...leafProcessNames][0],
+    // The anchor is the leaf that proved the name, even when the reported name
+    // is its outer wrapper. Two leaves agreeing on a name leave no single anchor.
+    ...(leafCandidates.length === 1 ? { processId: leafCandidates[0].pid } : {})
+  }
 }
 
 function windowsCandidateIsAncestor(

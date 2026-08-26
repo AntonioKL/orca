@@ -510,7 +510,11 @@ describe('resolveAgentForegroundProcess', () => {
         fresh: true,
         readWindowsConsoleAttachedProcessIds: async () => new Set([100, 101])
       })
-    ).resolves.toEqual({ available: true, processName: 'droid' })
+    ).resolves.toEqual({
+      available: true,
+      processName: 'droid',
+      processId: 101
+    })
   })
 
   it('fails closed when console attachment cannot be read', async () => {
@@ -688,7 +692,11 @@ describe('resolveAgentForegroundProcess', () => {
         fresh: true,
         readWindowsConsoleAttachedProcessIds
       })
-    ).resolves.toEqual({ available: true, processName: 'droid' })
+    ).resolves.toEqual({
+      available: true,
+      processName: 'droid',
+      processId: 101
+    })
     expect(readWindowsConsoleAttachedProcessIds).toHaveBeenCalledTimes(1)
   })
 

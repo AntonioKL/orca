@@ -59,7 +59,7 @@ describe('Pi Windows foreground recognition', () => {
         fresh: true,
         readWindowsConsoleAttachedProcessIds
       })
-    ).resolves.toEqual({ available: true, processName: 'pi' })
+    ).resolves.toEqual({ available: true, processName: 'pi', processId: 101 })
     expect(readWindowsConsoleAttachedProcessIds).toHaveBeenCalledTimes(1)
   })
 })
