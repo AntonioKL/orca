@@ -2087,7 +2087,8 @@ const BRACKETED_PASTE_BEGIN = '\x1b[200~'
 const BRACKETED_PASTE_END = '\x1b[201~'
 const BRACKETED_PASTE_QUIET_MS = 1500
 const AGENT_PROMPT_RENDER_TIMEOUT_MS = 8000
-const AGENT_PROMPT_RENDER_QUIET_MS = 1500
+// Why: allow one bounded redraw burst after the cursor marker without adding human-visible lag.
+const AGENT_PROMPT_RENDER_QUIET_MS = 250
 // Why: Claude and Codex emit show-cursor after accepting bracketed paste.
 const AGENT_PROMPT_RENDER_MARKER = '\x1b[?25h'
 

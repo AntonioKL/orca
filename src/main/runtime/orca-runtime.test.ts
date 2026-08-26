@@ -17471,7 +17471,11 @@ describe('OrcaRuntimeService', () => {
         expect(writes).not.toContain('\r')
         await vi.advanceTimersByTimeAsync(101)
         expect(writes).not.toContain('\r')
-        await vi.advanceTimersByTimeAsync(1_748)
+        await vi.advanceTimersByTimeAsync(248)
+        expect(writes).not.toContain('\r')
+        await vi.advanceTimersByTimeAsync(1)
+        expect(writes).not.toContain('\r')
+        await vi.advanceTimersByTimeAsync(249)
         expect(writes).not.toContain('\r')
         await vi.advanceTimersByTimeAsync(1)
         await sendPromise
@@ -17548,7 +17552,9 @@ describe('OrcaRuntimeService', () => {
       const sendPromise = runtime.sendTerminalAgentPrompt(handle, 'review this change')
       await vi.advanceTimersByTimeAsync(1_199)
       expect(writes).not.toContain('\r')
-      await vi.advanceTimersByTimeAsync(1_500)
+      await vi.advanceTimersByTimeAsync(249)
+      expect(writes).not.toContain('\r')
+      await vi.advanceTimersByTimeAsync(1)
       expect(writes).not.toContain('\r')
       await vi.advanceTimersByTimeAsync(1)
       await sendPromise
@@ -17621,7 +17627,11 @@ describe('OrcaRuntimeService', () => {
       const sendPromise = runtime.sendTerminalAgentPrompt(handle, 'review this change')
       await vi.advanceTimersByTimeAsync(8_000)
       expect(writes).not.toContain('\r')
-      await vi.advanceTimersByTimeAsync(1_599)
+      await vi.advanceTimersByTimeAsync(249)
+      expect(writes).not.toContain('\r')
+      await vi.advanceTimersByTimeAsync(99)
+      expect(writes).not.toContain('\r')
+      await vi.advanceTimersByTimeAsync(1)
       expect(writes).not.toContain('\r')
       await vi.advanceTimersByTimeAsync(1)
       await sendPromise
@@ -17643,7 +17653,7 @@ describe('OrcaRuntimeService', () => {
           writes.push(data)
           if (data.includes(AGENT_PROMPT_BRACKETED_PASTE_END)) {
             setTimeout(() => runtime.onPtyData('pty-bg', '\x1b[?25h', Date.now()), 100)
-            for (const delay of [1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 7_000]) {
+            for (const delay of Array.from({ length: 40 }, (_, index) => 200 + index * 200)) {
               setTimeout(
                 () => runtime.onPtyData('pty-bg', `render frame ${delay}`, Date.now()),
                 delay
