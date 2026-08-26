@@ -57,7 +57,10 @@ export function useMobileNativeChatController(args: {
     onSendError,
     onSendResolved
   } = args
-  const { isTabChatView, toggleTabChatView } = useMobileSessionViewMode({ hostId, worktreeId })
+  const { isTabChatView, toggleTabChatView, showTabTerminalView } = useMobileSessionViewMode({
+    hostId,
+    worktreeId
+  })
 
   const activeChatResolution =
     activeSessionTab && activeSessionTabId && isTabChatView(activeSessionTabId)
@@ -212,11 +215,14 @@ export function useMobileNativeChatController(args: {
   const recordSessionOptionCommandRef = useRef<(command: string) => void>(() => {})
 
   // Bring the terminal view forward when an agent-owned picker command is used.
+  // Why the absolute setter and not a toggle: this runs after an async send, and
+  // a user who switched to the terminal meanwhile would otherwise be flipped back
+  // into chat by this stale caller — hiding the very picker it just revealed.
   const handleAgentPicker = useCallback(() => {
-    if (activeSessionTabId && isTabChatView(activeSessionTabId)) {
-      toggleTabChatView(activeSessionTabId)
+    if (activeSessionTabId) {
+      showTabTerminalView(activeSessionTabId)
     }
-  }, [activeSessionTabId, isTabChatView, toggleTabChatView])
+  }, [activeSessionTabId, showTabTerminalView])
 
   const {
     send: handleNativeChatSend,

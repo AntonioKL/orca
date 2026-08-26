@@ -502,6 +502,15 @@ describe('useMobileNativeChatMessageSend agent-picker commands', () => {
     api = null
   })
 
+  it('surfaces the picker when the ack was lost, since the send usually landed', async () => {
+    sendWithOutcome.mockResolvedValue('unknown')
+    mount('claude')
+    await act(async () => {
+      await api!.send('/resume')
+    })
+    expect(onAgentPicker).toHaveBeenCalledTimes(1)
+  })
+
   it('surfaces the picker after an accepted Claude /resume', async () => {
     mount('claude')
     await act(async () => {

@@ -7,6 +7,10 @@ import type {
   SessionOptionsSurface
 } from '../../../../shared/native-chat-session-options'
 import type * as nativeChatAgentProfiles from '../../../../shared/native-chat-agent-profiles'
+import {
+  getAgentSlashCommands,
+  type SlashCommandSuggestion
+} from '../../../../shared/native-chat-slash-commands'
 import { clearNativeChatSessionOptionCacheForTests } from './native-chat-session-option-cache'
 import { clearNativeChatModelEnrichmentForTests } from './native-chat-session-option-enrichment'
 
@@ -31,6 +35,9 @@ const mocks = vi.hoisted(() => ({
   createClaudeModelSwitchConfirmationObserver: vi.fn(),
   discoverCommitMessageModels: vi.fn(),
   draft: 'hello',
+  // The catalog the composer classifies against. Empty by default (these tests
+  // predate the shared catalog); a test that needs real commands assigns them.
+  verifiedCommands: [] as readonly SlashCommandSuggestion[],
   getMainBufferSnapshot: vi.fn(),
   sendHandle: { cancel: vi.fn(), settleAfterMs: 500 },
   sendNativeChatMessage: vi.fn(),
@@ -79,7 +86,7 @@ vi.mock('./claude-model-switch-confirmation', () => ({
 }))
 vi.mock('../../../../shared/native-chat-agent-profiles', async (importOriginal) => ({
   ...(await importOriginal<typeof nativeChatAgentProfiles>()),
-  getVerifiedNativeChatCommands: () => []
+  getVerifiedNativeChatCommands: () => mocks.verifiedCommands
 }))
 vi.mock('@/lib/native-chat-telemetry', () => ({
   emitNativeChatMessageSent: vi.fn(),
@@ -148,6 +155,7 @@ describe('NativeChatComposer', () => {
     mocks.fieldProps = null
     mocks.modelSwitchOutcome = 'applied'
     mocks.draft = 'hello'
+    mocks.verifiedCommands = []
     mocks.draftScopeKeys.length = 0
     mocks.confirmationObserver = null
     mocks.createClaudeModelSwitchConfirmationObserver.mockImplementation(() => {
@@ -292,6 +300,31 @@ describe('NativeChatComposer', () => {
     expect(mocks.sendNativeChatMessage).toHaveBeenCalledWith({}, 'pty-1', '/clear', undefined)
     expect(mocks.sendNativeChatTypedCommand).not.toHaveBeenCalled()
   })
+
+  it.each(['claude', 'openclaude'] as const)(
+    'reports a %s /resume send as a verified command, so the view can reveal the TUI',
+    (agent) => {
+      // STA-4617: the reveal hangs off this callback (the composer cannot know the
+      // chat surface is covering the terminal), so an unreported send strands it.
+      const onSlashCommand = vi.fn()
+      mocks.verifiedCommands = getAgentSlashCommands(agent)
+      mocks.draft = '/resume'
+      render(
+        <NativeChatComposer
+          terminalTabId="tab-1"
+          paneKey="tab-1:leaf-1"
+          targetPtyId="pty-1"
+          agent={agent}
+          onSlashCommand={onSlashCommand}
+        />
+      )
+
+      act(() => mocks.fieldProps?.onSend?.())
+
+      expect(mocks.sendNativeChatMessage).toHaveBeenCalledWith({}, 'pty-1', '/resume', undefined)
+      expect(onSlashCommand).toHaveBeenCalledWith('/resume')
+    }
+  )
 
   it('retires the launch-draft seed once a send clears the TUI input line', () => {
     render(

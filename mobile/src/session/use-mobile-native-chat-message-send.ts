@@ -144,6 +144,12 @@ export function useMobileNativeChatMessageSend(args: {
       }
       const seededLaunchDraft = readSeededLaunchDraftSeed()
       const classification = classifyMobileNativeChatSend(agent, text)
+      // Why the agent captured at send start, not the live ref: a tab switch
+      // during the write must not judge this command against the new tab's
+      // catalog, exactly as `recordCommand` is captured above. Session-option
+      // dispatches (`recordControlSend` false) keep their own picker decision.
+      const revealsAgentPicker =
+        recordControlSend && mobileNativeChatSendOpensAgentPicker(agent, text)
       const typesCodexCommand =
         agent === 'codex' &&
         classification !== 'chat' &&
@@ -200,6 +206,13 @@ export function useMobileNativeChatMessageSend(args: {
       // turn, so an optimistic bubble would never reconcile and the
       // unconfirmed hold could never observe a landing.
       if (outcome === 'unknown') {
+        // Why reveal on an ack-lost send: it usually WAS delivered (the comment
+        // above), so the picker is probably already open on the host. Revealing is
+        // self-correcting — the user sees the picker or their untouched prompt —
+        // while staying put reproduces this bug on the flakiest links.
+        if (revealsAgentPicker) {
+          onAgentPicker?.()
+        }
         if (classification === 'chat') {
           // Why: an ack-lost send usually WAS delivered (issue seen on cellular
           // relay) — verify via the transcript echo instead of a false "not sent".
@@ -224,10 +237,7 @@ export function useMobileNativeChatMessageSend(args: {
         // The session-option catalog can recognize controls omitted from the
         // autocomplete catalog (for example Claude `/model` and `/fast`).
         recordCommand(text.trim())
-        // Why the agent captured at send start, not the live ref: a tab switch
-        // during the write must not judge this command against the new tab's
-        // catalog, exactly as `recordCommand` is captured above.
-        if (mobileNativeChatSendOpensAgentPicker(agent, text)) {
+        if (revealsAgentPicker) {
           onAgentPicker?.()
         }
       }

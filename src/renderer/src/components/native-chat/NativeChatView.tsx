@@ -30,7 +30,6 @@ import {
   type NativeChatPendingSend
 } from './native-chat-pending'
 import {
-  appendCommandMarkerCache,
   applyCommandMarkerBoundaries,
   commandMarkersAsMessages,
   readCommandMarkerCache,
@@ -49,6 +48,7 @@ import {
   emptyNativeChatContextMenuActions,
   useNativeChatContextMenu
 } from './use-native-chat-context-menu'
+import { useNativeChatSlashCommandDispatched } from './use-native-chat-slash-command-dispatched'
 import { resolveNativeChatFileLinkContext } from './native-chat-file-link'
 import { selectNativeChatRuntimeEnvironmentId } from './native-chat-runtime-owner'
 import { useNativeChatPasteBridge } from './use-native-chat-paste-bridge'
@@ -257,12 +257,12 @@ function NativeChatResolvedView({
     },
     [pendingScope]
   )
-  const onSlashCommand = useCallback(
-    (command: string) => {
-      setCommandMarkers(appendCommandMarkerCache(commandMarkerScope, command))
-    },
-    [commandMarkerScope]
-  )
+  const onSlashCommand = useNativeChatSlashCommandDispatched({
+    agent,
+    commandMarkerScope,
+    setCommandMarkers,
+    onSwitchToTerminal
+  })
 
   const launchPromptMessage = useMemo(
     () => launchPromptAsMessage(paneLaunchPrompt, session.messages),

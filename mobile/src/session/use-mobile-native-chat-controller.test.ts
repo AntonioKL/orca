@@ -13,6 +13,7 @@ const holdUnconfirmedSend = vi.fn()
 // Mutable stand-ins so the launch-draft wiring below can drive chat resolution
 // and transcript state; defaults keep the send-seam tests unchanged.
 const toggleTabChatView = vi.fn()
+const showTabTerminalView = vi.fn()
 const viewMode = { isTabChatView: (_tabId: string) => true }
 const sessionState = { messages: [] as unknown[], status: 'ready', transcriptLoading: false }
 const draftsArgs: Record<string, unknown>[] = []
@@ -28,7 +29,8 @@ const promptsState = {
 vi.mock('./use-mobile-session-view-mode', () => ({
   useMobileSessionViewMode: () => ({
     isTabChatView: (tabId: string) => viewMode.isTabChatView(tabId),
-    toggleTabChatView
+    toggleTabChatView,
+    showTabTerminalView
   })
 }))
 vi.mock('./use-mobile-native-chat-session', () => ({
@@ -824,6 +826,14 @@ describe('useMobileNativeChatController /resume surfaces the agent picker', () =
 
   beforeEach(() => {
     vi.clearAllMocks()
+    // The pre-body input clear is a real transport write (only the message send
+    // itself is mocked), so it has to be accepted or nothing reaches the agent.
+    clientStub.sendRequest.mockResolvedValue({
+      id: 'send',
+      ok: true,
+      result: { send: { accepted: true } },
+      _meta: { runtimeId: 'r' }
+    })
     resetMobileNativeChatStaleInputForTests()
     captureSendOrigin.mockReturnValue(ORIGIN)
     sendWithOutcome.mockResolvedValue('accepted')
@@ -838,28 +848,45 @@ describe('useMobileNativeChatController /resume surfaces the agent picker', () =
     controller = null
   })
 
-  it('flips the tab to the terminal view after an accepted /resume', async () => {
+  it('reveals the terminal after an accepted /resume', async () => {
     await act(async () => {
       await controller!.handleNativeChatSend('/resume')
     })
-    expect(toggleTabChatView).toHaveBeenCalledWith('tab-1')
+    expect(showTabTerminalView).toHaveBeenCalledWith('tab-1')
+  })
+
+  it('reveals the terminal when the ack was lost, since the send usually landed', async () => {
+    // An ack-lost /resume on a flaky relay is exactly when the picker is open and
+    // invisible — the symptom this fixes. Revealing is self-correcting.
+    sendWithOutcome.mockResolvedValue('unknown')
+    await act(async () => {
+      await controller!.handleNativeChatSend('/resume')
+    })
+    expect(showTabTerminalView).toHaveBeenCalledWith('tab-1')
+  })
+
+  it('does not reveal the terminal when the write was rejected', async () => {
+    sendWithOutcome.mockResolvedValue('rejected')
+    await act(async () => {
+      await controller!.handleNativeChatSend('/resume')
+    })
+    expect(showTabTerminalView).not.toHaveBeenCalled()
   })
 
   it('stays in chat view for an ordinary prompt', async () => {
     await act(async () => {
       await controller!.handleNativeChatSend('resume where we left off')
     })
-    expect(toggleTabChatView).not.toHaveBeenCalled()
+    expect(showTabTerminalView).not.toHaveBeenCalled()
   })
 
-  it('does not flip a tab already showing the terminal', async () => {
-    // The toggle is symmetric — firing it here would yank the user INTO chat,
-    // hiding the very picker the command just opened.
-    viewMode.isTabChatView = () => false
-    act(() => renderer?.update(createElement(Harness)))
+  it('reveals rather than toggles, so a late resolve cannot hide the picker', async () => {
+    // The toggle is symmetric and this call lands after an async send: a user who
+    // switched to the terminal meanwhile would be flipped back into chat by it.
     await act(async () => {
       await controller!.handleNativeChatSend('/resume')
     })
     expect(toggleTabChatView).not.toHaveBeenCalled()
+    expect(showTabTerminalView).toHaveBeenCalledWith('tab-1')
   })
 })
