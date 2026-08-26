@@ -97,6 +97,7 @@ import { MAX_QUICK_COMMANDS } from '../../shared/terminal-quick-commands'
 import {
   AGENT_PROMPT_BRACKETED_PASTE_END,
   AGENT_PROMPT_BRACKETED_PASTE_START,
+  AGENT_PROMPT_CSI_U_SUBMIT,
   AGENT_PROMPT_SUBMIT_DELAY_MS,
   buildAgentPromptPasteBytes
 } from '../../shared/agent-prompt-injection'
@@ -184,7 +185,7 @@ function acknowledgeAgentPromptSubmit(
   ptyId: string,
   data: string
 ): void {
-  if (data === '\r') {
+  if (data === '\r' || data.includes(AGENT_PROMPT_CSI_U_SUBMIT)) {
     runtime.onPtyData(ptyId, '\x1b]0;Codex working\x07', Date.now())
   }
 }
@@ -17406,6 +17407,342 @@ describe('OrcaRuntimeService', () => {
         bytesWritten: Buffer.byteLength(`${pasted}\r`, 'utf8')
       })
       expect(writes).toEqual([pasted, '\r'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([
+    { agent: 'claude' as const, flags: 1, prompt: 'review this change' },
+    { agent: 'codex' as const, flags: 7, prompt: 'line one\nline two' },
+    { agent: 'codex' as const, flags: 8, prompt: 'report all keys' }
+  ])(
+    'submits a negotiated $agent prompt in one zero-wait PTY write',
+    async ({ agent, flags, prompt }) => {
+      const writes: string[] = []
+      const runtime = new OrcaRuntimeService(store)
+      runtime.setPtyController({
+        spawn: vi.fn().mockResolvedValue({ id: 'pty-negotiated' }),
+        write: (_ptyId, data) => {
+          writes.push(data)
+          acknowledgeAgentPromptSubmit(runtime, 'pty-negotiated', data)
+          return true
+        },
+        kill: () => true,
+        getForegroundProcess: async () => agent,
+        confirmForegroundProcess: async () => agent
+      })
+      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+        launchAgent: agent
+      })
+      runtime.onPtyData('pty-negotiated', `\x1b[>${flags}u`, Date.now())
+      await new Promise<void>((resolve) => setImmediate(resolve))
+
+      await expect(runtime.isTerminalRunningSettledPromptAgent(handle)).resolves.toBe(true)
+      await expect(
+        runtime.sendTerminalAgentPrompt(handle, prompt, { preferProtocolSubmit: true })
+      ).resolves.toMatchObject({
+        accepted: true,
+        bytesWritten: Buffer.byteLength(
+          `${buildAgentPromptPasteBytes(prompt)}${AGENT_PROMPT_CSI_U_SUBMIT}`,
+          'utf8'
+        )
+      })
+
+      expect(writes).toEqual([`${buildAgentPromptPasteBytes(prompt)}${AGENT_PROMPT_CSI_U_SUBMIT}`])
+    }
+  )
+
+  it('reconfirms foreground ownership after queued output settles', async () => {
+    vi.useFakeTimers()
+    try {
+      const writes: string[] = []
+      const outputGate = deferred<void>()
+      let confirmedProcess = 'codex'
+      const confirmForegroundProcess = vi.fn(async () => confirmedProcess)
+      const runtime = new OrcaRuntimeService(store)
+      runtime.setPtyController({
+        spawn: vi.fn().mockResolvedValue({ id: 'pty-reconfirmed' }),
+        write: (_ptyId, data) => {
+          writes.push(data)
+          acknowledgeAgentPromptSubmit(runtime, 'pty-reconfirmed', data)
+          return true
+        },
+        kill: () => true,
+        getForegroundProcess: async () => 'codex',
+        confirmForegroundProcess
+      })
+      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+        launchAgent: 'codex'
+      })
+      runtime.onPtyData('pty-reconfirmed', '\x1b[>1u', Date.now())
+      await vi.advanceTimersByTimeAsync(0)
+      const internals = runtime as unknown as {
+        headlessTerminals: Map<string, { writeChain: Promise<void> }>
+      }
+      internals.headlessTerminals.get('pty-reconfirmed')!.writeChain = outputGate.promise
+
+      await expect(runtime.isTerminalRunningSettledPromptAgent(handle)).resolves.toBe(true)
+      const send = runtime.sendTerminalAgentPrompt(handle, 'ownership changed', {
+        preferProtocolSubmit: true
+      })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(confirmForegroundProcess).not.toHaveBeenCalled()
+
+      confirmedProcess = 'zsh'
+      outputGate.resolve()
+      await vi.runAllTimersAsync()
+      await send
+
+      expect(confirmForegroundProcess).toHaveBeenCalledTimes(2)
+      expect(writes).toEqual([buildAgentPromptPasteBytes('ownership changed')])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps mixed-version confirmation failures on the settled fallback', async () => {
+    vi.useFakeTimers()
+    try {
+      const writes: string[] = []
+      const confirmForegroundProcess = vi.fn(async () => {
+        throw new Error('unknown_method')
+      })
+      const runtime = new OrcaRuntimeService(store)
+      runtime.setPtyController({
+        spawn: vi.fn().mockResolvedValue({ id: 'pty-old-host' }),
+        write: (_ptyId, data) => {
+          writes.push(data)
+          acknowledgeAgentPromptSubmit(runtime, 'pty-old-host', data)
+          return true
+        },
+        kill: () => true,
+        getForegroundProcess: async () => 'codex',
+        confirmForegroundProcess
+      })
+      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+        launchAgent: 'codex'
+      })
+      runtime.onPtyData('pty-old-host', '\x1b[>1u', Date.now())
+      await vi.advanceTimersByTimeAsync(0)
+
+      await expect(runtime.isTerminalRunningSettledPromptAgent(handle)).resolves.toBe(true)
+      const send = runtime.sendTerminalAgentPrompt(handle, 'old host', {
+        preferProtocolSubmit: true
+      })
+      await vi.runAllTimersAsync()
+      await send
+
+      expect(confirmForegroundProcess).toHaveBeenCalledTimes(2)
+      expect(writes).toEqual([buildAgentPromptPasteBytes('old host'), '\r'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps concurrent negotiated submissions independently confirmed', async () => {
+    const writes: string[] = []
+    const confirmForegroundProcess = vi.fn(async () => 'codex')
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: 'pty-concurrent-negotiated' }),
+      write: (_ptyId, data) => {
+        writes.push(data)
+        acknowledgeAgentPromptSubmit(runtime, 'pty-concurrent-negotiated', data)
+        runtime.onPtyData('pty-concurrent-negotiated', '\x1b]0;Codex idle\x07', Date.now())
+        return true
+      },
+      kill: () => true,
+      getForegroundProcess: async () => 'codex',
+      confirmForegroundProcess
+    })
+    const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+      launchAgent: 'codex'
+    })
+    runtime.onPtyData('pty-concurrent-negotiated', '\x1b[>1u', Date.now())
+    await new Promise<void>((resolve) => setImmediate(resolve))
+
+    await Promise.all([
+      runtime.isTerminalRunningSettledPromptAgent(handle),
+      runtime.isTerminalRunningSettledPromptAgent(handle)
+    ])
+    await Promise.all([
+      runtime.sendTerminalAgentPrompt(handle, 'first', { preferProtocolSubmit: true }),
+      runtime.sendTerminalAgentPrompt(handle, 'second', { preferProtocolSubmit: true })
+    ])
+
+    expect(confirmForegroundProcess).toHaveBeenCalledTimes(4)
+    expect(writes).toEqual([
+      `${buildAgentPromptPasteBytes('first')}${AGENT_PROMPT_CSI_U_SUBMIT}`,
+      `${buildAgentPromptPasteBytes('second')}${AGENT_PROMPT_CSI_U_SUBMIT}`
+    ])
+  })
+
+  it.each([0, 2, 4])(
+    'keeps the settled fallback when kitty flags %i do not accept synthetic CSI-u Enter',
+    async (flags) => {
+      vi.useFakeTimers()
+      try {
+        const writes: string[] = []
+        const runtime = new OrcaRuntimeService(store)
+        runtime.setPtyController({
+          spawn: vi.fn().mockResolvedValue({ id: 'pty-unnegotiated' }),
+          write: (_ptyId, data) => {
+            writes.push(data)
+            acknowledgeAgentPromptSubmit(runtime, 'pty-unnegotiated', data)
+            return true
+          },
+          kill: () => true,
+          getForegroundProcess: async () => 'codex',
+          confirmForegroundProcess: async () => 'codex'
+        })
+        const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+          launchAgent: 'codex'
+        })
+        if (flags !== 0) {
+          runtime.onPtyData('pty-unnegotiated', `\x1b[>${flags}u`, Date.now())
+          await vi.advanceTimersByTimeAsync(0)
+        }
+
+        await expect(runtime.isTerminalRunningSettledPromptAgent(handle)).resolves.toBe(true)
+        const send = runtime.sendTerminalAgentPrompt(handle, 'fallback prompt', {
+          preferProtocolSubmit: true
+        })
+        await vi.runAllTimersAsync()
+        await send
+
+        expect(writes).toEqual([buildAgentPromptPasteBytes('fallback prompt'), '\r'])
+      } finally {
+        vi.useRealTimers()
+      }
+    }
+  )
+
+  it('keeps the settled fallback when negotiated flags lack a fresh foreground confirmation', async () => {
+    vi.useFakeTimers()
+    try {
+      const writes: string[] = []
+      const confirmForegroundProcess = vi.fn(async () => null)
+      const runtime = new OrcaRuntimeService(store)
+      runtime.setPtyController({
+        spawn: vi.fn().mockResolvedValue({ id: 'pty-unconfirmed' }),
+        write: (_ptyId, data) => {
+          writes.push(data)
+          acknowledgeAgentPromptSubmit(runtime, 'pty-unconfirmed', data)
+          return true
+        },
+        kill: () => true,
+        getForegroundProcess: async () => 'codex',
+        confirmForegroundProcess
+      })
+      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+        launchAgent: 'codex'
+      })
+      runtime.onPtyData('pty-unconfirmed', '\x1b[>1u', Date.now())
+      await vi.advanceTimersByTimeAsync(0)
+
+      await expect(runtime.isTerminalRunningSettledPromptAgent(handle)).resolves.toBe(true)
+      const send = runtime.sendTerminalAgentPrompt(handle, 'unconfirmed prompt', {
+        preferProtocolSubmit: true
+      })
+      await vi.runAllTimersAsync()
+      await send
+
+      expect(confirmForegroundProcess).toHaveBeenCalledTimes(2)
+      expect(writes).toEqual([buildAgentPromptPasteBytes('unconfirmed prompt'), '\r'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('rejects the settled fallback when the PTY exits during final foreground confirmation', async () => {
+    vi.useFakeTimers()
+    try {
+      const writes: string[] = []
+      const confirmation = deferred<string | null>()
+      const confirmForegroundProcess = vi.fn(() => confirmation.promise)
+      const runtime = new OrcaRuntimeService(store)
+      runtime.setPtyController({
+        spawn: vi.fn().mockResolvedValue({ id: 'pty-fallback-race' }),
+        write: (_ptyId, data) => {
+          writes.push(data)
+          if (data.includes(AGENT_PROMPT_BRACKETED_PASTE_END)) {
+            setTimeout(() => runtime.onPtyData('pty-fallback-race', '\x1b[?25h', Date.now()), 0)
+          }
+          return true
+        },
+        kill: () => true,
+        getForegroundProcess: async () => 'codex',
+        confirmForegroundProcess
+      })
+      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+        launchAgent: 'codex'
+      })
+      await expect(runtime.isTerminalRunningSettledPromptAgent(handle)).resolves.toBe(true)
+
+      const send = runtime.sendTerminalAgentPrompt(handle, 'fallback race')
+      await vi.advanceTimersByTimeAsync(1_600)
+      await vi.waitFor(() => expect(confirmForegroundProcess).toHaveBeenCalledOnce())
+      runtime.onPtyExit('pty-fallback-race', 0)
+      confirmation.resolve('codex')
+
+      await expect(send).rejects.toThrow('terminal_handle_stale')
+      expect(writes).toEqual([buildAgentPromptPasteBytes('fallback race')])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not force foreground confirmation for a shell Quick Command target', async () => {
+    const confirmForegroundProcess = vi.fn(async () => 'codex')
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: 'pty-shell' }),
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => 'zsh',
+      confirmForegroundProcess
+    })
+    const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
+
+    await expect(runtime.isTerminalRunningSettledPromptAgent(handle)).resolves.toBe(false)
+    expect(confirmForegroundProcess).not.toHaveBeenCalled()
+  })
+
+  it('keeps oversized negotiated prompts on the settled fallback', async () => {
+    vi.useFakeTimers()
+    try {
+      const writes: string[] = []
+      const runtime = new OrcaRuntimeService(store)
+      runtime.setPtyController({
+        spawn: vi.fn().mockResolvedValue({ id: 'pty-large-negotiated' }),
+        write: (_ptyId, data) => {
+          writes.push(data)
+          acknowledgeAgentPromptSubmit(runtime, 'pty-large-negotiated', data)
+          return true
+        },
+        kill: () => true,
+        getForegroundProcess: async () => 'codex',
+        confirmForegroundProcess: async () => 'codex'
+      })
+      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+        launchAgent: 'codex'
+      })
+      runtime.onPtyData('pty-large-negotiated', '\x1b[>1u', Date.now())
+      await vi.advanceTimersByTimeAsync(0)
+      const prompt = 'x'.repeat(TERMINAL_INPUT_CHUNK_MAX_BYTES * 2)
+
+      await expect(runtime.isTerminalRunningSettledPromptAgent(handle)).resolves.toBe(true)
+      const send = runtime.sendTerminalAgentPrompt(handle, prompt, { preferProtocolSubmit: true })
+      await vi.runAllTimersAsync()
+      await send
+
+      expect(writes.length).toBeGreaterThan(1)
+      expect(writes.at(-1)).toBe('\r')
+      expect(writes.some((write) => write.includes(AGENT_PROMPT_CSI_U_SUBMIT))).toBe(false)
+      expect(
+        writes.every((write) => Buffer.byteLength(write, 'utf8') <= TERMINAL_INPUT_CHUNK_MAX_BYTES)
+      ).toBe(true)
     } finally {
       vi.useRealTimers()
     }

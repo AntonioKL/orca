@@ -45,7 +45,10 @@ import type {
 } from '../../shared/terminal-side-effect-facts'
 import type { TerminalGitHubPRLink } from '../../shared/terminal-github-pr-link-detector'
 import { TerminalKittyKeyboardModeTracker } from '../../shared/terminal-kitty-keyboard-mode-tracker'
-import { parseTerminalKittyKeyboardFlags } from '../../shared/terminal-kitty-keyboard-flags'
+import {
+  kittyModeAcceptsSyntheticCsiUEnter,
+  parseTerminalKittyKeyboardFlags
+} from '../../shared/terminal-kitty-keyboard-flags'
 import {
   AGENT_STATUS_STALE_AFTER_MS,
   isFreshNonDoneAgentStatus,
@@ -93,11 +96,13 @@ import {
 import { buildOrchestrationTaskDisplayMetadata } from '../../shared/orchestration-task-display'
 import {
   isTerminalInputTooLargeWithYield,
+  TERMINAL_INPUT_CHUNK_MAX_BYTES,
   TERMINAL_INPUT_TOO_LARGE_ERROR,
   iterateTerminalInputChunks
 } from '../../shared/terminal-input'
 import {
   AGENT_PROMPT_BRACKETED_PASTE_END,
+  AGENT_PROMPT_CSI_U_SUBMIT,
   AGENT_PROMPT_SUBMIT,
   AGENT_PROMPT_SUBMIT_DELAY_MS,
   buildAgentPromptPasteBytes
@@ -19001,6 +19006,7 @@ export class OrcaRuntimeService {
       beforeWrite?: (ptyId: string) => void | Promise<void>
       suffixFailureError?: string
       signal?: AbortSignal
+      preferProtocolSubmit?: boolean
     } = {}
   ): Promise<RuntimeTerminalSend> {
     const payload = buildAgentPromptPasteBytes(prompt)
@@ -19722,43 +19728,84 @@ export class OrcaRuntimeService {
       beforeWrite?: (ptyId: string) => void | Promise<void>
       suffixFailureError?: string
       signal?: AbortSignal
+      preferProtocolSubmit?: boolean
     } = {}
   ): Promise<number> {
     assertAgentPromptRequestActive(options.signal)
     this.assertAgentPromptGeneration(ptyId, generation)
     const permissionBaseline = this.getAgentPromptActivity(handle, ptyId)
     this.assertAgentPromptPermissionSafe(permissionBaseline, permissionBaseline)
-    const renderGate = this.createAgentPromptRenderGate(ptyId)
+    const protocolSubmitBytes =
+      options.preferProtocolSubmit === true &&
+      Buffer.byteLength(pastePayload, 'utf8') +
+        Buffer.byteLength(AGENT_PROMPT_CSI_U_SUBMIT, 'utf8') <=
+        TERMINAL_INPUT_CHUNK_MAX_BYTES
+        ? await this.getAgentPromptProtocolSubmitBytes(
+            ptyId,
+            generation,
+            async () => {
+              await options.beforeWrite?.(ptyId)
+              assertAgentPromptRequestActive(options.signal)
+              this.assertAgentPromptGeneration(ptyId, generation)
+              this.assertAgentPromptPermissionSafe(
+                permissionBaseline,
+                this.getAgentPromptActivity(handle, ptyId)
+              )
+            },
+            options.signal
+          )
+        : null
+    const renderGate = protocolSubmitBytes ? null : this.createAgentPromptRenderGate(ptyId)
+    const pasteChunkBytes = protocolSubmitBytes
+      ? TERMINAL_INPUT_CHUNK_MAX_BYTES - Buffer.byteLength(protocolSubmitBytes, 'utf8')
+      : TERMINAL_INPUT_CHUNK_MAX_BYTES
+    let remainingPasteCodeUnits = pastePayload.length
     let wrotePasteBytes = false
     let completedPaste = false
+    let protocolSubmitAborted = false
     try {
-      const chunks = iterateTerminalInputChunks(pastePayload)
+      const chunks = iterateTerminalInputChunks(pastePayload, pasteChunkBytes)
       let chunk = chunks.next()
       while (!chunk.done) {
         const nextChunk = chunks.next()
         assertAgentPromptRequestActive(options.signal)
         this.assertAgentPromptGeneration(ptyId, generation)
-        await options.beforeWrite?.(ptyId)
+        if (!protocolSubmitBytes) {
+          await options.beforeWrite?.(ptyId)
+        }
         assertAgentPromptRequestActive(options.signal)
         this.assertAgentPromptGeneration(ptyId, generation)
         this.assertAgentPromptPermissionSafe(
           permissionBaseline,
           this.getAgentPromptActivity(handle, ptyId)
         )
+        if (protocolSubmitBytes && nextChunk.done) {
+          const foregroundConfirmed = await this.confirmAgentPromptForeground(ptyId)
+          if (foregroundConfirmed !== true) {
+            // The payload is already visible; never turn a changed foreground
+            // shell/TUI into an accidental submit.
+            protocolSubmitAborted = true
+          }
+        }
         if (nextChunk.done) {
           renderGate?.arm()
         }
-        const wrote = this.ptyController?.write(ptyId, chunk.value) ?? false
+        const writeBytes =
+          protocolSubmitBytes && nextChunk.done && !protocolSubmitAborted
+            ? `${chunk.value}${protocolSubmitBytes}`
+            : chunk.value
+        const wrote = this.ptyController?.write(ptyId, writeBytes) ?? false
         if (!wrote) {
           throw new Error('terminal_not_writable')
         }
         wrotePasteBytes = true
+        remainingPasteCodeUnits = Math.max(0, remainingPasteCodeUnits - chunk.value.length)
+        completedPaste = remainingPasteCodeUnits === 0
         chunk = nextChunk
         if (!chunk.done) {
           await new Promise((resolve) => setTimeout(resolve, 0))
         }
       }
-      completedPaste = true
     } catch (error) {
       if (
         wrotePasteBytes &&
@@ -19769,6 +19816,20 @@ export class OrcaRuntimeService {
       }
       renderGate?.dispose()
       throw error
+    }
+
+    if (protocolSubmitBytes && protocolSubmitAborted) {
+      return Buffer.byteLength(pastePayload, 'utf8')
+    }
+    if (protocolSubmitBytes) {
+      assertAgentPromptRequestActive(options.signal)
+      this.assertAgentPromptGeneration(ptyId, generation)
+      await verifyAgentPromptSubmission({
+        baseline: permissionBaseline,
+        readActivity: () => this.getAgentPromptActivity(handle, ptyId),
+        signal: options.signal
+      })
+      return Buffer.byteLength(protocolSubmitBytes, 'utf8')
     }
 
     if (renderGate) {
@@ -19794,6 +19855,11 @@ export class OrcaRuntimeService {
     this.assertAgentPromptGeneration(ptyId, generation)
     const baseline = this.getAgentPromptActivity(handle, ptyId)
     this.assertAgentPromptPermissionSafe(permissionBaseline, baseline)
+    const foregroundConfirmed = await this.confirmAgentPromptForeground(ptyId)
+    this.assertAgentPromptGeneration(ptyId, generation)
+    if (foregroundConfirmed === false) {
+      return Buffer.byteLength(pastePayload, 'utf8')
+    }
     const suffixWrote = this.ptyController?.write(ptyId, AGENT_PROMPT_SUBMIT) ?? false
     if (!suffixWrote) {
       throw new Error(options.suffixFailureError ?? 'terminal_not_writable')
@@ -19804,6 +19870,78 @@ export class OrcaRuntimeService {
       signal: options.signal
     })
     return 1
+  }
+
+  /** Recheck agent ownership immediately before a submit byte reaches the PTY. */
+  private async confirmAgentPromptForeground(ptyId: string): Promise<boolean | null> {
+    const controller = this.ptyController
+    const expectedAgent = this.ptysById.get(ptyId)?.foregroundAgent
+    if (!controller?.confirmForegroundProcess || !isTerminalSendSettlementAgent(expectedAgent)) {
+      return null
+    }
+    try {
+      const confirmedProcess = await controller.confirmForegroundProcess(ptyId)
+      if (confirmedProcess === null) {
+        return null
+      }
+      const confirmedAgent = recognizeAgentProcess(confirmedProcess)?.agent
+      return confirmedAgent === expectedAgent
+    } catch {
+      // Unknown on old hosts: preserve their existing fallback behavior.
+      return null
+    }
+  }
+
+  private async getAgentPromptProtocolSubmitBytes(
+    ptyId: string,
+    generation: number,
+    beforeConfirmation: () => void | Promise<void>,
+    signal?: AbortSignal
+  ): Promise<string | null> {
+    if (process.env.ORCA_E2E_DISABLE_QUICK_COMMAND_AGENT_PROTOCOL === '1') {
+      return null
+    }
+    const controller = this.ptyController
+    const expectedAgent = this.ptysById.get(ptyId)?.foregroundAgent
+    if (!controller?.confirmForegroundProcess || !isTerminalSendSettlementAgent(expectedAgent)) {
+      return null
+    }
+    const state = this.headlessTerminals.get(ptyId)
+    if (!state) {
+      return null
+    }
+    try {
+      await waitForAgentPromptPromise(state.writeChain, signal)
+    } catch {
+      assertAgentPromptRequestActive(signal)
+      return null
+    }
+    if (
+      this.headlessTerminals.get(ptyId) !== state ||
+      !kittyModeAcceptsSyntheticCsiUEnter(state.emulator.getKittyKeyboardFlags())
+    ) {
+      return null
+    }
+    await beforeConfirmation()
+    let confirmedAgent: TuiAgent | null = null
+    try {
+      confirmedAgent =
+        recognizeAgentProcess(await controller.confirmForegroundProcess(ptyId))?.agent ?? null
+    } catch {
+      assertAgentPromptRequestActive(signal)
+      return null
+    }
+    if (
+      confirmedAgent !== expectedAgent ||
+      this.ptyController !== controller ||
+      this.getPtyLifecycleGeneration(ptyId) !== generation ||
+      this.headlessTerminals.get(ptyId) !== state ||
+      this.ptysById.get(ptyId)?.foregroundAgent !== expectedAgent ||
+      !kittyModeAcceptsSyntheticCsiUEnter(state.emulator.getKittyKeyboardFlags())
+    ) {
+      return null
+    }
+    return AGENT_PROMPT_CSI_U_SUBMIT
   }
 
   private async serializeAgentPromptSubmission<T>(
@@ -35193,6 +35331,9 @@ export class OrcaRuntimeService {
   }
 
   async isTerminalRunningSettledPromptAgent(handle: string): Promise<boolean> {
+    if (process.env.ORCA_E2E_DISABLE_QUICK_COMMAND_AGENT_PROTOCOL === '1') {
+      return false
+    }
     try {
       const livePty = this.getLivePtyForHandle(handle)
       const leaf = livePty ? null : this.getLiveLeafForHandle(handle).leaf
@@ -35201,12 +35342,26 @@ export class OrcaRuntimeService {
       if (!ptyId || !trackedPty || !this.ptyController) {
         return false
       }
-      const recognized = recognizeAgentProcess(await this.ptyController.getForegroundProcess(ptyId))
+      const controller = this.ptyController
+      const generation = this.getPtyLifecycleGeneration(ptyId)
+      const recognized = recognizeAgentProcess(await controller.getForegroundProcess(ptyId))
       const recognizedAgent = recognized?.agent
       if (!isTerminalSendSettlementAgent(recognizedAgent)) {
         return false
       }
-      if (!(await this.isTerminalRunningAgent(handle, { retryForegroundWrappers: false }))) {
+      const keyboardFlags = this.headlessTerminals.get(ptyId)?.emulator.getKittyKeyboardFlags()
+      if (keyboardFlags === undefined || !kittyModeAcceptsSyntheticCsiUEnter(keyboardFlags)) {
+        if (!(await this.isTerminalRunningAgent(handle, { retryForegroundWrappers: false }))) {
+          return false
+        }
+        trackedPty.foregroundAgent = recognizedAgent
+        return true
+      }
+      if (
+        this.ptyController !== controller ||
+        this.getPtyLifecycleGeneration(ptyId) !== generation ||
+        this.ptysById.get(ptyId) !== trackedPty
+      ) {
         return false
       }
       trackedPty.foregroundAgent = recognizedAgent
