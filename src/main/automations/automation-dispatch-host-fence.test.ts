@@ -95,11 +95,20 @@ function seedMissingSetupAutomation(store: Store): Automation {
     badgeColor: '#fff',
     addedAt: 1
   } as Repo)
-  return store.createAutomation({
+  const automation = store.createAutomation({
     name: 'Other check',
     prompt: 'Check the other repo',
     agentId: 'claude',
     projectId: 'r2',
+    workspaceMode: 'new_per_run',
+    timezone: 'UTC',
+    rrule: 'FREQ=DAILY;BYHOUR=9;BYMINUTE=0',
+    dtstart: new Date('2026-05-12T00:00:00').getTime()
+  })
+  // Drift after storage: the setup the record captured no longer exists. The
+  // create path derives contexts itself, so the drifted record is built here.
+  return {
+    ...automation,
     runContext: {
       kind: 'workspace-run',
       projectId: 'project-2',
@@ -107,12 +116,8 @@ function seedMissingSetupAutomation(store: Store): Automation {
       projectHostSetupId: 'missing-setup',
       repoId: 'r2',
       path: '/other'
-    },
-    workspaceMode: 'new_per_run',
-    timezone: 'UTC',
-    rrule: 'FREQ=DAILY;BYHOUR=9;BYMINUTE=0',
-    dtstart: new Date('2026-05-12T00:00:00').getTime()
-  })
+    }
+  }
 }
 
 /**

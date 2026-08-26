@@ -76,8 +76,11 @@ export function createAutomation(
     prompt: input.prompt,
     precheck: normalizeAutomationPrecheck(input.precheck),
     agentId: input.agentId,
-    runContext: input.runContext ?? contexts.runContext,
-    sourceContext: input.sourceContext ?? contexts.sourceContext,
+    // Why own contexts win: a wire context speaks the client's perspective —
+    // 'runtime:<id>' is a client-assigned name this store cannot interpret, and
+    // persisting it makes the projection orphan a record this authority owns.
+    runContext: contexts.runContext ?? input.runContext ?? null,
+    sourceContext: contexts.sourceContext ?? input.sourceContext ?? null,
     projectId: input.projectId,
     ...executionTarget,
     schedulerOwner,
@@ -154,16 +157,21 @@ export function updateAutomation(
       ? normalizeAutomationPrecheck(definedUpdates.precheck)
       : normalizeAutomationPrecheck(current.precheck),
     projectId: repoId,
-    runContext: Object.hasOwn(definedUpdates, 'runContext')
-      ? (definedUpdates.runContext ?? null)
-      : updates.projectId !== undefined
-        ? contexts.runContext
-        : (current.runContext ?? contexts.runContext),
-    sourceContext: Object.hasOwn(definedUpdates, 'sourceContext')
-      ? (definedUpdates.sourceContext ?? null)
-      : updates.projectId !== undefined
-        ? contexts.sourceContext
-        : (current.sourceContext ?? contexts.sourceContext),
+    // Why the wire object is ignored: contexts are the storing authority's own
+    // registry speaking. A move restates them from that registry, anything else
+    // keeps the stored value; an explicit null still clears.
+    runContext:
+      definedUpdates.runContext === null
+        ? null
+        : selectorMoveRequested
+          ? (contexts.runContext ?? definedUpdates.runContext ?? null)
+          : (current.runContext ?? contexts.runContext),
+    sourceContext:
+      definedUpdates.sourceContext === null
+        ? null
+        : selectorMoveRequested
+          ? (contexts.sourceContext ?? definedUpdates.sourceContext ?? null)
+          : (current.sourceContext ?? contexts.sourceContext),
     schedulerOwner,
     workspaceMode,
     workspaceId:

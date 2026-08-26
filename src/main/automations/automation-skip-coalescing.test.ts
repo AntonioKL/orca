@@ -6,7 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { Repo } from '../../shared/repo-types'
@@ -48,27 +48,36 @@ const SETUP_GONE = 'Project is not set up on the selected automation host anymor
 
 const NO_WINDOW = 'No Orca window was available to launch the automation.'
 
-/** Daily at 09:00, pointed at a project host setup that does not exist. */
-function seedUnresolvableAutomation(store: Store): Automation {
-  store.addRepo(makeRepo())
-  return store.createAutomation({
+/**
+ * Daily at 09:00, pointed at a project host setup that does not exist. The
+ * unresolvable context is written into the stored record and reloaded, as drift
+ * after creation would leave it — the create path derives contexts itself.
+ */
+async function seedUnresolvableAutomation(): Promise<{ store: Store; automation: Automation }> {
+  const seed = await createStore()
+  seed.addRepo(makeRepo())
+  const automation = seed.createAutomation({
     name: 'Nightly check',
     prompt: 'Check the repo',
     agentId: 'claude',
     projectId: 'r1',
-    runContext: {
-      kind: 'workspace-run',
-      projectId: 'project-1',
-      hostId: 'local',
-      projectHostSetupId: 'missing-setup',
-      repoId: 'r1',
-      path: '/repo'
-    },
     workspaceMode: 'new_per_run',
     timezone: 'UTC',
     rrule: 'FREQ=DAILY;BYHOUR=9;BYMINUTE=0',
     dtstart: new Date('2026-05-12T00:00:00').getTime()
   })
+  const file = join(testState.dir, 'orca-data.json')
+  const state = JSON.parse(readFileSync(file, 'utf-8'))
+  state.automations[0].runContext = {
+    kind: 'workspace-run',
+    projectId: 'project-1',
+    hostId: 'local',
+    projectHostSetupId: 'missing-setup',
+    repoId: 'r1',
+    path: '/repo'
+  }
+  writeFileSync(file, JSON.stringify(state, null, 2), 'utf-8')
+  return { store: await createStore(), automation }
 }
 
 /** Daily at 09:00 against a repo that resolves, so only the window can refuse it. */
@@ -130,8 +139,7 @@ describe('repeated skipped_unavailable coalescing', () => {
 
   it('folds every later refusal into the first record instead of writing a row each', async () => {
     vi.setSystemTime(new Date('2026-05-13T08:00:00'))
-    const store = await createStore()
-    const automation = seedUnresolvableAutomation(store)
+    const { store, automation } = await seedUnresolvableAutomation()
     const service = attachedService(store)
 
     await evaluateAt(store, service, automation.id, '2026-05-13T09:01:00')
@@ -178,8 +186,7 @@ describe('repeated skipped_unavailable coalescing', () => {
 
   it('starts a new record when a real run intervened, so history is not rewritten', async () => {
     vi.setSystemTime(new Date('2026-05-13T08:00:00'))
-    const store = await createStore()
-    const automation = seedUnresolvableAutomation(store)
+    const { store, automation } = await seedUnresolvableAutomation()
     const completed = store.createAutomationRun(
       automation,
       new Date('2026-05-12T09:00:00').getTime()
@@ -197,8 +204,7 @@ describe('repeated skipped_unavailable coalescing', () => {
 
   it('gives a manual attempt its own answer rather than folding it into a scheduled skip', async () => {
     vi.setSystemTime(new Date('2026-05-13T08:00:00'))
-    const store = await createStore()
-    const automation = seedUnresolvableAutomation(store)
+    const { store, automation } = await seedUnresolvableAutomation()
     const service = attachedService(store)
 
     await evaluateAt(store, service, automation.id, '2026-05-13T09:01:00')
@@ -211,8 +217,7 @@ describe('repeated skipped_unavailable coalescing', () => {
 
   it('never folds a scheduled refusal into a manual one', async () => {
     vi.setSystemTime(new Date('2026-05-13T08:00:00'))
-    const store = await createStore()
-    const automation = seedUnresolvableAutomation(store)
+    const { store, automation } = await seedUnresolvableAutomation()
     const manual = store.createAutomationRun(automation, Date.now(), 'manual')
     store.updateAutomationRun({
       runId: manual.id,
@@ -229,8 +234,7 @@ describe('repeated skipped_unavailable coalescing', () => {
   // Merging these would destroy the signal the record exists to carry.
   it('keeps distinct diagnoses in distinct records', async () => {
     vi.setSystemTime(new Date('2026-05-13T08:00:00'))
-    const store = await createStore()
-    const automation = seedUnresolvableAutomation(store)
+    const { store, automation } = await seedUnresolvableAutomation()
     seedSkip(store, automation, Date.now(), 'The SSH host is unreachable.')
 
     expect(
@@ -240,8 +244,7 @@ describe('repeated skipped_unavailable coalescing', () => {
 
   it('counts one occurrence once, however many times the scheduler revisits it', async () => {
     vi.setSystemTime(new Date('2026-05-13T08:00:00'))
-    const store = await createStore()
-    const automation = seedUnresolvableAutomation(store)
+    const { store, automation } = await seedUnresolvableAutomation()
     const scheduledFor = Date.now()
     seedSkip(store, automation, scheduledFor, SETUP_GONE)
 
@@ -262,8 +265,7 @@ describe('repeated skipped_unavailable coalescing', () => {
 
   it('announces the fold, so a client that is not polling still sees the repeat', async () => {
     vi.setSystemTime(new Date('2026-05-13T08:00:00'))
-    const store = await createStore()
-    const automation = seedUnresolvableAutomation(store)
+    const { store, automation } = await seedUnresolvableAutomation()
     const published: unknown[] = []
     const service = new AutomationService(store, {
       tickMs: 60_000,
@@ -282,8 +284,7 @@ describe('repeated skipped_unavailable coalescing', () => {
   // preserves stamped ones, so an upgrade resumes counting instead of restarting.
   it('resumes counting a folded record across a reload', async () => {
     vi.setSystemTime(new Date('2026-05-13T08:00:00'))
-    const store = await createStore()
-    const automation = seedUnresolvableAutomation(store)
+    const { store, automation } = await seedUnresolvableAutomation()
     const scheduledFor = Date.now()
     seedSkip(store, automation, scheduledFor, SETUP_GONE)
     store.recordRepeatedAutomationSkip(automation.id, SETUP_GONE, scheduledFor + 1000)
