@@ -8,6 +8,7 @@ import type { RpcContext, RpcRequest } from '../core'
 import { RpcDispatcher } from '../dispatcher'
 import type { OrcaRuntimeService } from '../../orca-runtime'
 import { AUTOMATION_METHODS } from './automations'
+import { AUTOMATION_OWNER_FENCING_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
 
 function method(name: string) {
   const found = AUTOMATION_METHODS.find((entry) => entry.name === name)
@@ -45,7 +46,12 @@ function runtimeStub() {
   }
 }
 
-async function invoke(name: string, params: unknown, runtime: ReturnType<typeof runtimeStub>) {
+async function invoke(
+  name: string,
+  params: unknown,
+  runtime: ReturnType<typeof runtimeStub>,
+  context: Pick<RpcContext, 'clientCapabilities'> = {}
+) {
   const target = method(name)
   // Why: mirrors the dispatcher, which turns omitted params into an empty object before parsing.
   const parsed = target.params?.safeParse(params ?? {})
@@ -53,7 +59,8 @@ async function invoke(name: string, params: unknown, runtime: ReturnType<typeof 
     throw parsed?.error
   }
   return await target.handler(parsed.data, {
-    runtime: runtime as unknown as OrcaRuntimeService
+    runtime: runtime as unknown as OrcaRuntimeService,
+    ...context
   } as RpcContext)
 }
 
@@ -201,9 +208,27 @@ describe('owner preconditions', () => {
 
   it('leaves the parameterless old-client shapes valid', async () => {
     const runtime = runtimeStub()
-    await invoke('automation.delete', { id: 'a1' }, runtime)
+    await invoke('automation.update', { id: 'a1', updates: { enabled: false } }, runtime, {
+      clientCapabilities: []
+    })
+    await invoke('automation.delete', { id: 'a1' }, runtime, { clientCapabilities: [] })
+    await invoke('automation.runNow', { id: 'a1' }, runtime, { clientCapabilities: [] })
     await invoke('automation.runs', {}, runtime)
-    expect(runtime.deleteAutomation).toHaveBeenCalledWith('a1', undefined)
+    expect(runtime.updateAutomation).toHaveBeenCalledWith(
+      'a1',
+      expect.objectContaining({ enabled: false }),
+      { expectedOwner: SSH_OWNER, destination: undefined }
+    )
+    expect(runtime.deleteAutomation).toHaveBeenCalledWith('a1', SSH_OWNER)
+    expect(runtime.runAutomationNow).toHaveBeenCalledWith('a1', SSH_OWNER)
     expect(runtime.listAutomationRuns).toHaveBeenCalledWith(undefined, undefined)
+  })
+
+  it('keeps missing owner metadata fenced for a current remote client', async () => {
+    const runtime = runtimeStub()
+    await invoke('automation.delete', { id: 'a1' }, runtime, {
+      clientCapabilities: [AUTOMATION_OWNER_FENCING_RUNTIME_CAPABILITY]
+    })
+    expect(runtime.deleteAutomation).toHaveBeenCalledWith('a1', undefined)
   })
 })

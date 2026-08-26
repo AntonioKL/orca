@@ -1,6 +1,8 @@
 import type { RemovedSshTargetTombstone } from '../../shared/ssh-types'
 import type { PersistedAutomationHostFilter } from '../../shared/automation-host-filter'
 import { parseHostStableKey } from '../../shared/automation-owner-key'
+import { resolveAutomationWorkspaceSshTargetId } from '../../shared/automation-workspace-pin'
+import type { FolderWorkspaceHostState } from '../../shared/folder-workspace-execution-host'
 
 // Why: bound removed-SSH-target history so remove/re-add churn can't grow the file unbounded.
 export const MAX_REMOVED_SSH_TARGET_TOMBSTONES = 50
@@ -58,8 +60,14 @@ export function persistedAutomationHostFilterSshTargetId(
 }
 
 export type SshTargetRemovalEvidenceDependents = {
-  automations: readonly { executionTargetType: string; executionTargetId: string }[]
+  automations: readonly {
+    executionTargetType: string
+    executionTargetId: string
+    workspaceId?: string | null
+  }[]
   automationHostFilter?: PersistedAutomationHostFilter
+  /** Folder-workspace pins are indirect automation host references. */
+  workspaceState?: FolderWorkspaceHostState
 }
 
 /** Everything that still depends on removal evidence: a tombstone for one of these is never discarded. */
@@ -67,6 +75,17 @@ export function collectSshTargetRemovalEvidenceDependencies(
   input: SshTargetRemovalEvidenceDependents
 ): Set<string> {
   const ids = collectAutomationReferencedSshTargetIds(input.automations)
+  if (input.workspaceState) {
+    for (const automation of input.automations) {
+      const targetId = resolveAutomationWorkspaceSshTargetId(
+        input.workspaceState,
+        automation.workspaceId ?? null
+      )
+      if (targetId) {
+        ids.add(targetId)
+      }
+    }
+  }
   const filterTargetId = persistedAutomationHostFilterSshTargetId(input.automationHostFilter)
   if (filterTargetId) {
     ids.add(filterTargetId)

@@ -186,7 +186,12 @@ export function addRemovedSshTargetTombstone(
 function sshTargetRemovalEvidenceDependencies(state: PersistedState): Set<string> {
   return collectSshTargetRemovalEvidenceDependencies({
     automations: state.automations ?? [],
-    automationHostFilter: state.ui?.automationHostFilter
+    automationHostFilter: state.ui?.automationHostFilter,
+    workspaceState: {
+      folderWorkspaces: state.folderWorkspaces ?? [],
+      projectGroups: state.projectGroups ?? [],
+      repos: state.repos ?? []
+    }
   })
 }
 

@@ -147,6 +147,24 @@ describe('owner-fenced mutations', () => {
     })
   })
 
+  it('sends the captured destination with a selector-moving mutation', async () => {
+    const { updateAutomationForOwner } = await client()
+    getRuntimeEnvironmentStatus.mockResolvedValue(ALL_CAPABILITIES)
+    callRuntimeRpc.mockResolvedValue({ automation: { id: 'a1' } })
+    await updateAutomationForOwner(
+      { authority: DESKTOP, selector: { kind: 'self' } },
+      'a1',
+      { projectId: 'repo-ssh' },
+      { selector: { kind: 'ssh', targetId: 'ssh-1', targetGeneration: 7 } }
+    )
+    expect(callRuntimeRpc.mock.calls[0]?.[2]).toEqual({
+      id: 'a1',
+      updates: { repo: 'repo-ssh' },
+      expectedOwner: { selector: { kind: 'self' } },
+      destination: { selector: { kind: 'ssh', targetId: 'ssh-1', targetGeneration: 7 } }
+    })
+  })
+
   it('stays view-only against a host without owner fencing', async () => {
     const { updateAutomationForOwner, AutomationHostScopeUnsupportedError } = await client()
     getRuntimeEnvironmentStatus.mockResolvedValue({

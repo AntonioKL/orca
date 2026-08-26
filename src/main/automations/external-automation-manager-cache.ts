@@ -60,6 +60,7 @@ export class ExternalAutomationManagerCache {
 
   /** Fresh entry for this scope, or null when absent or past its TTL. */
   read(key: ExternalAutomationManagerCacheKey): ExternalAutomationManagerCacheEntry | null {
+    this.pruneExpired()
     const entry = this.entries.get(externalAutomationManagerCacheKey(key))
     if (!entry) {
       return null
@@ -131,7 +132,17 @@ export class ExternalAutomationManagerCache {
     key: ExternalAutomationManagerCacheKey,
     entry: ExternalAutomationManagerCacheEntry
   ): ExternalAutomationManagerCacheEntry {
+    this.pruneExpired()
     this.entries.set(externalAutomationManagerCacheKey(key), entry)
     return entry
+  }
+
+  private pruneExpired(): void {
+    const now = this.now()
+    for (const [key, entry] of this.entries) {
+      if (now - entry.updatedAt > this.ttlMs) {
+        this.entries.delete(key)
+      }
+    }
   }
 }

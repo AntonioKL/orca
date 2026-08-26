@@ -29,6 +29,8 @@ const CAPTURED_HOST_REFUSALS: Record<AutomationCapturedHostIssue, string> = {
     'The automation workspace spans more than one host, so Orca cannot tell which one to run it on.'
 }
 
+const NO_RUNNABLE_HOST = 'This automation has no host to run on.'
+
 type AutomationRunTargetOptions = {
   allowRemoteHostScheduling?: boolean
 }
@@ -43,6 +45,14 @@ function getLegacyPrecheckCwd(store: Store, automation: Automation): string | nu
   return store.getRepo(getAutomationLegacyRepoId(automation))?.path ?? null
 }
 
+function resolveAutomationOwnerRefusal(store: Store, automation: Automation): string | null {
+  if (store.automationOwnerPrecondition(automation.id)?.selector.kind !== 'orphan') {
+    return null
+  }
+  const issue = store.automationCapturedHostIssue(automation)
+  return issue ? CAPTURED_HOST_REFUSALS[issue] : NO_RUNNABLE_HOST
+}
+
 export function resolveAutomationRunTarget(
   store: Store,
   automation: Automation,
@@ -50,11 +60,9 @@ export function resolveAutomationRunTarget(
 ): AutomationRunTargetResult {
   const context = automation.runContext ?? null
   if (!context) {
-    // The legacy path resolves from bare repo state, which survives a host being
-    // removed or replaced — so it must consult the same verdict the context path does.
-    const legacyHostIssue = store.automationCapturedHostIssue(automation)
-    if (legacyHostIssue) {
-      return { ok: false, error: CAPTURED_HOST_REFUSALS[legacyHostIssue] }
+    const ownerRefusal = resolveAutomationOwnerRefusal(store, automation)
+    if (ownerRefusal) {
+      return { ok: false, error: ownerRefusal }
     }
     const repo = store.getRepo(getAutomationLegacyRepoId(automation))
     const cwd = getLegacyPrecheckCwd(store, automation)

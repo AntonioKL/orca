@@ -39,7 +39,7 @@ const DEFAULT_PROBE_CONCURRENCY = 4
 export class ExternalAutomationProbeScheduler {
   private readonly concurrency: number
   private readonly queue: QueuedProbe[] = []
-  private readonly active = new Map<string, { scopeKey: string; controller: AbortController }>()
+  private readonly active = new Set<QueuedProbe>()
   private readonly shared = new Map<string, Promise<unknown>>()
   private priorityHolds = 0
 
@@ -61,6 +61,7 @@ export class ExternalAutomationProbeScheduler {
       return existing as Promise<T>
     }
     const controller = new AbortController()
+    let settled!: Promise<T>
     const promise = new Promise<T>((resolve, reject) => {
       const entry: QueuedProbe = {
         key: job.key,
@@ -68,26 +69,33 @@ export class ExternalAutomationProbeScheduler {
         controller,
         reject,
         start: () => {
-          this.active.set(job.key, { scopeKey: job.scopeKey, controller })
+          this.active.add(entry)
           // Why: settle on abort even when a provider call cannot honour the signal.
           controller.signal.addEventListener(
             'abort',
             () => reject(new ExternalAutomationProbeCancelledError()),
             { once: true }
           )
-          job.run(controller.signal).then(resolve, reject)
+          void job
+            .run(controller.signal)
+            .then(resolve, reject)
+            .finally(() => {
+              this.active.delete(entry)
+              if (this.shared.get(entry.key) === settled) {
+                this.shared.delete(entry.key)
+              }
+              this.pump()
+            })
         }
       }
       this.queue.push(entry)
     })
-    const settled = promise.finally(() => {
-      this.active.delete(job.key)
-      this.shared.delete(job.key)
+    settled = promise.finally(() => {
       this.pump()
     })
     this.shared.set(job.key, settled)
     this.pump()
-    return settled as Promise<T>
+    return settled
   }
 
   /** Held for the duration of Orca list/mutation work; queued probes wait behind it. */
@@ -120,9 +128,10 @@ export class ExternalAutomationProbeScheduler {
       if (entry && shouldCancel(entry.scopeKey)) {
         this.queue.splice(index, 1)
         entry.reject(new ExternalAutomationProbeCancelledError())
+        this.shared.delete(entry.key)
       }
     }
-    for (const entry of this.active.values()) {
+    for (const entry of this.active) {
       if (shouldCancel(entry.scopeKey)) {
         entry.controller.abort()
       }

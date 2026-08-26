@@ -45,7 +45,9 @@ import type {
   SshConfigHostResolution,
   SshConfigImportResult,
   SshTargetAddResult,
+  SshTargetCreateInput,
   SshTarget,
+  SshTargetUpdateInput,
   PortForwardEntry,
   EnrichedDetectedPort
 } from '../shared/ssh-types'
@@ -4765,13 +4767,11 @@ const api = {
     listRemovedTargetLabels: (): Promise<Record<string, string>> =>
       ipcRenderer.invoke('ssh:listRemovedTargetLabels'),
 
-    addTarget: (args: { target: Omit<SshTarget, 'id'> }): Promise<SshTargetAddResult> =>
+    addTarget: (args: { target: SshTargetCreateInput }): Promise<SshTargetAddResult> =>
       ipcRenderer.invoke('ssh:addTarget', args),
 
-    updateTarget: (args: {
-      id: string
-      updates: Partial<Omit<SshTarget, 'id'>>
-    }): Promise<SshTarget> => ipcRenderer.invoke('ssh:updateTarget', args),
+    updateTarget: (args: { id: string; updates: SshTargetUpdateInput }): Promise<SshTarget> =>
+      ipcRenderer.invoke('ssh:updateTarget', args),
 
     removeTarget: (args: { id: string }): Promise<void> =>
       ipcRenderer.invoke('ssh:removeTarget', args),

@@ -15,6 +15,7 @@ import type {
   AutomationUpdateInput
 } from '../../../../shared/automations-types'
 import type { AutomationAuthorityRef } from '../../../../shared/automation-owner-ref'
+import type { AutomationDestination } from '../../../../shared/automation-owner-precondition'
 import {
   automationActionAvailability,
   capturedAutomationOwner,
@@ -122,14 +123,21 @@ export async function dispatchAutomationUpdate(
   row: AutomationDispatchRow,
   updates: AutomationUpdateInput,
   legacy: () => Promise<Automation>,
-  action: AutomationRowAction = 'toggle'
+  action: AutomationRowAction = 'toggle',
+  destination?: AutomationDestination
 ): Promise<AutomationDispatchResult<Automation>> {
   return await dispatch(
     context,
     row,
     action,
     (availability) =>
-      updateOwnedAutomation(availability, context.authority, row.automationId, updates),
+      updateOwnedAutomation(
+        availability,
+        context.authority,
+        row.automationId,
+        updates,
+        destination
+      ),
     legacy
   )
 }

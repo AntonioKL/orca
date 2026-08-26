@@ -1,4 +1,6 @@
-import { defineMethod, type RpcMethod } from '../core'
+import { AUTOMATION_OWNER_FENCING_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
+import type { AutomationOwnerPrecondition } from '../../../../shared/automation-owner-precondition'
+import { defineMethod, type RpcContext, type RpcMethod } from '../core'
 import {
   AutomationCreate,
   AutomationId,
@@ -6,6 +8,22 @@ import {
   AutomationRuns,
   AutomationUpdate
 } from './automation-schemas'
+
+function mutationOwner(
+  id: string,
+  expectedOwner: AutomationOwnerPrecondition | undefined,
+  context: RpcContext
+): AutomationOwnerPrecondition | undefined {
+  if (
+    expectedOwner ||
+    context.clientCapabilities === undefined ||
+    context.clientCapabilities.includes(AUTOMATION_OWNER_FENCING_RUNTIME_CAPABILITY)
+  ) {
+    return expectedOwner
+  }
+  // Legacy clients cannot echo owner metadata, so snapshot it at the RPC boundary.
+  return context.runtime.automationOwnerPrecondition(id) ?? undefined
+}
 
 export const AUTOMATION_METHODS: RpcMethod[] = [
   defineMethod({
@@ -36,9 +54,9 @@ export const AUTOMATION_METHODS: RpcMethod[] = [
   defineMethod({
     name: 'automation.update',
     params: AutomationUpdate,
-    handler: async (params, { runtime }) => ({
-      automation: await runtime.updateAutomation(params.id, params.updates, {
-        expectedOwner: params.expectedOwner,
+    handler: async (params, context) => ({
+      automation: await context.runtime.updateAutomation(params.id, params.updates, {
+        expectedOwner: mutationOwner(params.id, params.expectedOwner, context),
         destination: params.destination
       })
     })
@@ -46,13 +64,20 @@ export const AUTOMATION_METHODS: RpcMethod[] = [
   defineMethod({
     name: 'automation.delete',
     params: AutomationId,
-    handler: (params, { runtime }) => runtime.deleteAutomation(params.id, params.expectedOwner)
+    handler: (params, context) =>
+      context.runtime.deleteAutomation(
+        params.id,
+        mutationOwner(params.id, params.expectedOwner, context)
+      )
   }),
   defineMethod({
     name: 'automation.runNow',
     params: AutomationId,
-    handler: async (params, { runtime }) => ({
-      run: await runtime.runAutomationNow(params.id, params.expectedOwner)
+    handler: async (params, context) => ({
+      run: await context.runtime.runAutomationNow(
+        params.id,
+        mutationOwner(params.id, params.expectedOwner, context)
+      )
     })
   }),
   defineMethod({

@@ -65,6 +65,18 @@ describe('ExternalAutomationManagerCache', () => {
     expect(cache.read({ ownerKey: selfOwner, provider: 'hermes' })).toBeNull()
   })
 
+  it('prunes expired entries when the cache is accessed', () => {
+    let now = 1_000
+    const cache = new ExternalAutomationManagerCache({ ttlMs: 100, now: () => now })
+    for (let index = 0; index < 10; index += 1) {
+      cache.write({ ownerKey: `owner-${index}`, provider: 'hermes' }, manager(String(index)))
+    }
+    now += 101
+
+    expect(cache.read({ ownerKey: 'unrelated', provider: 'hermes' })).toBeNull()
+    expect(cache.size).toBe(0)
+  })
+
   it('serves a fresh entry without reloading, and reloads on refresh', async () => {
     const cache = new ExternalAutomationManagerCache()
     const load = vi.fn(() => Promise.resolve(manager('hermes:local')))

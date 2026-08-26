@@ -59,6 +59,10 @@ export type SshTarget = {
   generation?: number
 }
 
+/** Renderer-authored target fields; registration generations are allocated and owned by main. */
+export type SshTargetCreateInput = Omit<SshTarget, 'id' | 'generation'>
+export type SshTargetUpdateInput = Partial<SshTargetCreateInput>
+
 /** Public target identity safe to mirror to a paired client. */
 export type SshTargetSummary = Pick<SshTarget, 'id' | 'label' | 'generation'>
 
