@@ -350,7 +350,8 @@ describe('resolving the native reader', () => {
         ppid: 4,
         name: 'orca.exe',
         command: '"C:/a b/orca.exe" --x',
-        memoryBytes: 4096
+        memoryBytes: 4096,
+        creationTimeMs: 1_700_000_000_000
       }
     ])
     expect(isWindowsProcessTableAvailable()).toBe(true)
