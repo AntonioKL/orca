@@ -9,6 +9,7 @@ import {
 } from './core'
 
 import { errorResponse, successResponse } from './errors'
+import { ALL_RPC_METHODS } from './methods'
 import { emulatorProbe, emulatorProbeError } from '../../emulator/emulator-probe'
 import type { OrcaRuntimeService } from '../orca-runtime'
 import {
@@ -26,7 +27,7 @@ import { routeDispatcherClientHostedBrowserRpc } from './dispatcher-client-brows
 import { needsLocalCallerFingerprint } from './dispatcher-caller-fingerprint'
 import { createDispatcherStreamingFeatureEmitter } from './dispatcher-streaming-feature-emitter'
 
-export type DispatcherOptions = { runtime: OrcaRuntimeService; methods: readonly RpcAnyMethod[] }
+export type DispatcherOptions = { runtime: OrcaRuntimeService; methods?: readonly RpcAnyMethod[] }
 
 // oxfmt-ignore
 type DispatchCallOptions = Pick<RpcDispatchStreamingOptions, 'signal' | 'clientId' | 'clientKind' | 'clientCapabilities' | 'authenticatedCallerFingerprint'>
@@ -37,7 +38,7 @@ export class RpcDispatcher {
   private readonly orchestrationMutations: OrchestrationMutationExecutor
   private readonly legacyOrchestration: OrchestrationLegacyCompatibility
 
-  constructor({ runtime, methods }: DispatcherOptions) {
+  constructor({ runtime, methods = ALL_RPC_METHODS }: DispatcherOptions) {
     this.runtime = runtime
     this.registry = buildRegistry(methods)
     this.orchestrationMutations = getOrchestrationMutationExecutor(runtime)

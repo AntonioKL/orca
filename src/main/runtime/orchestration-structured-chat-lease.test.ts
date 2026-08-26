@@ -317,13 +317,14 @@ describe('orchestration while Structured Chat owns an agent session', () => {
   it('settles worker_done while its pane remains in Structured Chat', async () => {
     const run = createRun()
     const task = db.createTask({ spec: 'Finish from Structured Chat', runId: run.id })
-    const dispatch = db.createDispatchContext(
-      task.id,
-      WORKER.handle,
-      paneKey(WORKER),
-      undefined,
-      runtime.getTerminalProcessIncarnation(WORKER.handle) ?? undefined
-    )
+    const dispatch = db.createDispatchContext({
+      taskId: task.id,
+      assigneeHandle: WORKER.handle,
+      assigneePaneKey: paneKey(WORKER),
+      processIncarnation: runtime.getTerminalProcessIncarnation(WORKER.handle) ?? undefined,
+      creator: { kind: 'system' },
+      maxDepth: Number.MAX_SAFE_INTEGER
+    })
     const capability = db.mintDispatchCapability({
       dispatchId: dispatch.id,
       paneKey: paneKey(WORKER),
