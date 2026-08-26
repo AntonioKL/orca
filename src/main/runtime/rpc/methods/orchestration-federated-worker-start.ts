@@ -142,6 +142,7 @@ export async function startFederatedWorker(args: {
         // remote worker cannot be mistaken for a root when it dispatches again.
         depth: started.dispatch.depth,
         protocolVersion: federationProtocolVersion,
+        depth: started.dispatch.depth,
         worktree,
         name: params.name,
         repo: params.repo,

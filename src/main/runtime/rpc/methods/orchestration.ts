@@ -1685,6 +1685,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
       const preamble = buildDispatchPreamble({
         taskId: task.id,
         dispatchId: ctx.id,
+        canDispatchSubWorkers: ctx.depth < runtime.getNestedWorkerMaxDepth(),
         taskSpec: task.spec,
         coordinatorHandle: params.from ?? 'coordinator',
         workerHandle: to,
@@ -1733,6 +1734,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
           taskId: task.id,
           // Why: use the real ctx.id when present so the preview matches what was injected; placeholder when no dispatch has occurred yet.
           dispatchId: ctx?.id ?? 'ctx_preview',
+          canDispatchSubWorkers: (ctx?.depth ?? 1) < runtime.getNestedWorkerMaxDepth(),
           taskSpec: task.spec,
           coordinatorHandle: params.from ?? 'coordinator',
           workerHandle,

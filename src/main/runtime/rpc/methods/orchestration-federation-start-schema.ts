@@ -22,7 +22,10 @@ export const FederationAttachStartParams = z.object({
   model: OptionalWorkerLaunchPreference,
   effort: OptionalWorkerLaunchPreference,
   timeoutMs: OptionalFiniteNumber,
-  devMode: z.boolean().optional()
+  devMode: z.boolean().optional(),
+  // Why optional: an older Run home omits it, and the attachment row's
+  // NOT NULL DEFAULT 1 then fails closed rather than reading as a root.
+  depth: OptionalFiniteNumber
 })
 
 export type FederationAttachStartInput = z.infer<typeof FederationAttachStartParams>

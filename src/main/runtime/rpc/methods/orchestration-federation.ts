@@ -52,6 +52,7 @@ export const ORCHESTRATION_FEDERATION_ATTACH_METHODS: RpcMethod[] = [
 
       const db = runtime.getOrchestrationDb()
       db.createRemoteDispatchAttachment({
+        depth: params.depth,
         dispatchId: params.dispatchId,
         taskId: params.taskId,
         homePeerFingerprint: orchestrationMutation.callerFingerprint,
@@ -236,6 +237,9 @@ export const ORCHESTRATION_FEDERATION_ATTACH_METHODS: RpcMethod[] = [
             workerHandle: terminalHandle,
             dispatchCapability: capability,
             devMode: params.devMode,
+            // Why the worker host's own setting: enforcement runs here, with this
+            // host's code, against this host's cap.
+            canDispatchSubWorkers: (params.depth ?? 1) < runtime.getNestedWorkerMaxDepth(),
             cliCommand: runtime.getTerminalOrchestrationCliCommand(terminalHandle)
           })
         )
