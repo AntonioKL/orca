@@ -358,6 +358,25 @@ describe('buildMobileNativeChatTransientData anchoring', () => {
     expect(data.map((m) => m.id)).toEqual(['m1', 'p1'])
   })
 
+  it('keeps an echo before later turns when its folded baseline leads the raw window', () => {
+    const messages = [
+      row('noise', 'user', '<system-reminder>hidden boundary'),
+      row('a1', 'assistant', 'arrived later')
+    ]
+    const folded = foldMobileNativeChatMessages(messages)
+    expect(folded.map((message) => message.id)).toEqual(['a1'])
+
+    const { data } = buildMobileNativeChatTransientData({
+      messages,
+      folded,
+      streaming: null,
+      pending: [
+        { id: 'p1', text: 'sent after the hidden boundary', baselineTailMessageId: 'noise' }
+      ]
+    })
+    expect(data.map((message) => message.id)).toEqual(['p1', 'a1'])
+  })
+
   it('still puts the streaming bubble after the transcript', () => {
     const { data } = buildMobileNativeChatTransientData({
       messages: [row('m1', 'user', 'hi')],

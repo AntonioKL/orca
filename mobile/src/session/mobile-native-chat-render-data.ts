@@ -100,6 +100,7 @@ export function buildMobileNativeChatTransientData({
   // after the row it was sent against keeps it in place, so an unmatched echo is
   // at worst a duplicate in the right position instead of a scrambled one.
   const anchoredPending = new Map<string, NativeChatMessage[]>()
+  const leadingPending: NativeChatMessage[] = []
   const trailingPending: NativeChatMessage[] = []
   const foldedIds = new Set(renderedFolded.map((message) => message.id))
   const missingBaselineIds = new Set<string>()
@@ -110,6 +111,7 @@ export function buildMobileNativeChatTransientData({
     }
   }
   const foldedAnchorByRawId = new Map<string, string>()
+  const leadingBaselineIds = new Set<string>()
   if (missingBaselineIds.size > 0) {
     let lastVisibleId: string | null = null
     const forwardImageBaselineIds: string[] = []
@@ -128,6 +130,8 @@ export function buildMobileNativeChatTransientData({
         forwardImageBaselineIds.push(message.id)
       } else if (lastVisibleId) {
         foldedAnchorByRawId.set(message.id, lastVisibleId)
+      } else {
+        leadingBaselineIds.add(message.id)
       }
     }
   }
@@ -146,6 +150,10 @@ export function buildMobileNativeChatTransientData({
     }
     // Tool/noise rows fold backward; image-source rows fold into their following prompt.
     const baselineId = item.baselineTailMessageId
+    if (baselineId && leadingBaselineIds.has(baselineId)) {
+      leadingPending.push(bubble)
+      continue
+    }
     const anchor = baselineId
       ? foldedIds.has(baselineId)
         ? baselineId
@@ -163,7 +171,7 @@ export function buildMobileNativeChatTransientData({
     }
   }
 
-  const data: NativeChatMessage[] = []
+  const data: NativeChatMessage[] = [...leadingPending]
   for (const message of renderedFolded) {
     data.push(message)
     const attached = anchoredPending.get(message.id)
