@@ -19,21 +19,15 @@ export type SourceControlOperationActionProps = {
 
 function continueLabel(operation: GitConflictOperation): string {
   if (operation === 'merge') {
-    return translate(
-      'auto.components.right.sidebar.source.control.listing.operation.banner.actions.7a41c9e6b2',
-      'Continue merge'
-    )
+    return translate('components.sourceControl.operationBanner.continueMerge', 'Continue merge')
   }
   if (operation === 'cherry-pick') {
     return translate(
-      'auto.components.right.sidebar.source.control.listing.operation.banner.actions.8b52dae713',
+      'components.sourceControl.operationBanner.continueCherryPick',
       'Continue cherry-pick'
     )
   }
-  return translate(
-    'auto.components.right.sidebar.source.control.listing.operation.banner.actions.9c63ebf824',
-    'Continue rebase'
-  )
+  return translate('components.sourceControl.operationBanner.continueRebase', 'Continue rebase')
 }
 
 function abortLabel(operation: GitConflictOperation): string {

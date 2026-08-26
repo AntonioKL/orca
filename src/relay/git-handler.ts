@@ -226,7 +226,7 @@ export class GitHandler {
     this.clearGitMutationReadCaches()
     const worktreePath = params.worktreePath as string
     try {
-      await this.git(args, worktreePath, { suppressEditor: true })
+      await this.git(args, worktreePath, { suppressEditor: true, terminationBarrier: true })
     } finally {
       this.clearGitMutationReadCaches()
     }

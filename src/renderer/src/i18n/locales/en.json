@@ -12637,17 +12637,6 @@
                   "1ea9ba37aa": "Pick an agent in Settings -> Git -> Source Control AI."
                 }
               },
-              "listing": {
-                "operation": {
-                  "banner": {
-                    "actions": {
-                      "7a41c9e6b2": "Continue merge",
-                      "8b52dae713": "Continue cherry-pick",
-                      "9c63ebf824": "Continue rebase"
-                    }
-                  }
-                }
-              },
               "panel": {
                 "head": {
                   "identity": {
@@ -17033,6 +17022,13 @@
         "hours": "{{value0}}h",
         "days": "{{value0}}d",
         "underOneMinute": "<1m"
+      }
+    },
+    "sourceControl": {
+      "operationBanner": {
+        "continueMerge": "Continue merge",
+        "continueCherryPick": "Continue cherry-pick",
+        "continueRebase": "Continue rebase"
       }
     }
   },
