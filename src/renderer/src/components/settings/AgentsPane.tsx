@@ -330,6 +330,7 @@ export function NestedWorkerDepthSetting({ settings, updateSettings }: AgentsPan
     <section className="space-y-3">
       <SettingsRow
         label={getNestedWorkerDepthTitle()}
+        labelId="nested-worker-depth-label"
         description={getNestedWorkerDepthDescription()}
         control={
           <Select
@@ -341,7 +342,11 @@ export function NestedWorkerDepthSetting({ settings, updateSettings }: AgentsPan
               }
             }}
           >
-            <SelectTrigger size="sm" className="w-full min-w-52">
+            <SelectTrigger
+              size="sm"
+              className="w-full min-w-52"
+              aria-labelledby="nested-worker-depth-label"
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

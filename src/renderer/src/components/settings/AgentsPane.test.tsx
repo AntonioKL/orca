@@ -251,6 +251,13 @@ describe('AgentsPane', () => {
     expect(markup).toContain('>Agent<')
   })
 
+  it('associates the nested worker depth select with its label', () => {
+    const markup = renderPane(getDefaultSettings('/tmp'))
+
+    expect(markup).toContain('id="nested-worker-depth-label"')
+    expect(markup).toContain('aria-labelledby="nested-worker-depth-label"')
+  })
+
   it('hides desktop-only awake modes in paired web clients', () => {
     ;(globalThis as { __ORCA_WEB_CLIENT__?: boolean }).__ORCA_WEB_CLIENT__ = true
     try {
