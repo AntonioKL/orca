@@ -1081,6 +1081,9 @@ export class CodexRuntimeHomeService {
         (!managedHome ||
           !targetDistro ||
           managedHome.distro.toLowerCase() === targetDistro.toLowerCase())
+      // Older persisted fixtures may not carry a UNC spelling, but the
+      // explicit WSL runtime marker still proves the lane; reject unmarked
+      // host paths while retaining those legacy WSL records.
       if (distroMatches && (account.managedHomeRuntime === 'wsl' || managedHome)) {
         return account.managedHomePath
       }
