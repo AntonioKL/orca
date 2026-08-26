@@ -60,10 +60,10 @@ describe('judgeCachedAgentJobEvidence', () => {
     expect(judge(new Set([SHELL, AGENT]), AGENT, AGED)).toBe('recheck')
   })
 
-  it('retires an anchored identity the moment its pid leaves the job, even with leftovers', () => {
-    // The detached-leftover shape: something survives in the job, but it is not
-    // the recognized agent. Unanchored evidence held this for the age bound.
-    expect(judge(new Set([SHELL, 777]), AGENT, FRESH)).toBe('exited')
+  it('downgrades an anchored identity when its pid leaves a job that still has members', () => {
+    // The survivor is a detached leftover OR the agent's restarted successor;
+    // only a scan can tell, so the verdict must not be a hard exit.
+    expect(judge(new Set([SHELL, 777]), AGENT, FRESH)).toBe('anchor-exited')
   })
 
   it('retires any identity when the shell stands alone', () => {

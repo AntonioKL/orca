@@ -26,10 +26,12 @@ export type AgentForegroundResolutionOptions = {
   readWindowsConsoleAttachedProcessIds?: () => Promise<ReadonlySet<number> | null>
   /**
    * A caller's cached liveness anchor. When a scan row holds this pid but no
-   * longer recognizes as an agent, the pid was recycled by a different process
-   * (command lines are immutable), and the resolution reports the anchor foreign.
+   * longer recognizes as the cached agent, the pid was recycled by a different
+   * process (command lines are immutable): the resolution reports it foreign.
    */
   anchorProcessId?: number
+  /** The cached agent name the anchor pid is supposed to prove. */
+  anchorProcessName?: string
 }
 
 export type WindowsAgentForegroundResolution = {
@@ -107,12 +109,16 @@ export async function resolveWindowsAgentForegroundProcessWithAvailability(
   // From the FULL table, not the ppid projection: an orphaned job member (its
   // creator exited) leaves the descendant walk yet can hold a recycled pid.
   const anchorRow = inventory.anchorRow
+  const anchorRecognized = anchorRow === null ? null : recognizeWindowsProcessCandidate(anchorRow)
   const anchorPidForeign =
     anchorRow !== null &&
-    // A query-denied row falls back to command === name; that is
-    // inconclusive (the agent may just be unreadable), never foreign.
-    anchorRow.command !== anchorRow.name &&
-    recognizeWindowsProcessCandidate(anchorRow) === null
+    (anchorRecognized !== null
+      ? // A recognized row is foreign when it names a DIFFERENT agent.
+        options.anchorProcessName !== undefined &&
+        anchorRecognized.processName !== options.anchorProcessName
+      : // A query-denied row falls back to command === name; that is
+        // inconclusive (the agent may just be unreadable), never foreign.
+        anchorRow.command !== anchorRow.name)
   return {
     available: true,
     ...resolveWindowsForegroundIdentity(filteredCandidates, fallbackProcess, options.contextPaths),

@@ -37,8 +37,15 @@ export type WindowsCachedAgentJobVerdict =
   | 'confirmed'
   /** Anchor pid alive but past the age bound: scan for drift; a silent scan keeps it. */
   | 'recheck'
-  /** Complete job read without the anchor pid, or the shell alone: identity retired. */
+  /** The shell alone in a complete job read: no successor is possible, retire. */
   | 'exited'
+  /**
+   * The anchor pid left the job but another member remains — a leftover, or
+   * the agent's restarted successor. The name may only survive as unanchored,
+   * age-bounded evidence; an available scan settles it (a degraded one must
+   * not read as an exit).
+   */
+  | 'anchor-exited'
   /** No anchor; a non-shell member exists and the bound has not elapsed: identity stands. */
   | 'unproven'
   /** No anchor and the bound elapsed: the superset answer stops standing in for a scan. */
@@ -68,7 +75,7 @@ export function judgeCachedAgentJobEvidence(args: {
   // A shell-pid "anchor" proves nothing about a child; treat it as unanchored.
   if (args.anchorProcessId !== null && args.anchorProcessId !== args.shellPid) {
     if (!args.jobProcessIds.has(args.anchorProcessId)) {
-      return 'exited'
+      return args.jobProcessIds.size <= 1 ? 'exited' : 'anchor-exited'
     }
     return withinAgeBound ? 'confirmed' : 'recheck'
   }

@@ -1442,10 +1442,15 @@ export class LocalPtyProvider implements IPtyProvider {
           return cachedAgent
         }
         if (verdict === 'exited') {
-          // The job is authoritative for its members: the anchor pid is gone (or
-          // the shell stands alone), so retire the identity before the scan --
-          // a detached leftover in the job must not stand in for a dead agent.
+          // The shell stands alone in a complete, inescapable job list: no
+          // successor is possible, so the identity retires before the scan.
           ptyLastRecognizedForeground.delete(id)
+        } else if (verdict === 'anchor-exited' && cachedEntry) {
+          // The recognized process died but another member remains -- a
+          // leftover, or a restarted successor. Keep the name as unanchored,
+          // age-bounded evidence and let this cycle's scan decide: deleting
+          // here made a degraded scan read a mid-restart agent as an exit.
+          ptyLastRecognizedForeground.set(id, { ...cachedEntry, pid: null })
         }
         cachedAgentAliveInJob = verdict === 'recheck'
         paneMembershipUnavailable = verdict === 'unavailable'
@@ -1459,7 +1464,9 @@ export class LocalPtyProvider implements IPtyProvider {
         fallbackProcess,
         {
           contextPaths: ptyAgentForegroundContextPaths.get(id),
-          ...(cachedEntry?.pid != null ? { anchorProcessId: cachedEntry.pid } : {})
+          ...(cachedEntry?.pid != null
+            ? { anchorProcessId: cachedEntry.pid, anchorProcessName: cachedEntry.name }
+            : {})
         }
       )
       // Why: the scan can outlive PTY teardown/id reuse; stale results must not resurrect cache for a foreign id.

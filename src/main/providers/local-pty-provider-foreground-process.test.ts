@@ -443,6 +443,40 @@ describe('LocalPtyProvider', () => {
       }
     })
 
+    it('holds a restarting agent across a degraded scan instead of reporting an exit', async () => {
+      // The anchor pid died but another job member remains -- possibly the
+      // agent's restarted successor under a new pid. A degraded scan at that
+      // instant must not fire a false "agent done"; the next available scan
+      // re-recognizes and re-anchors.
+      Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+      mockProc.process = 'powershell.exe'
+      resolveAgentForegroundProcessMock
+        .mockResolvedValueOnce({ available: true, processName: 'claude', processId: 999 })
+        .mockResolvedValueOnce({ available: false, processName: null })
+        .mockResolvedValue({ available: true, processName: 'claude', processId: 1000 })
+      readWindowsPtyJobProcessIdsMock.mockReturnValue(new Set([12345, 999]))
+      vi.useFakeTimers({ toFake: ['Date'] })
+      try {
+        vi.setSystemTime(1_000_000)
+        const { id } = await provider.spawn({ cols: 80, rows: 24 })
+
+        await expect(provider.getForegroundProcess(id)).resolves.toBe('claude')
+        // Restart: 999 exits, successor 1000 joins the job; scan degrades.
+        readWindowsPtyJobProcessIdsMock.mockReturnValue(new Set([12345, 1000]))
+        await expect(provider.getForegroundProcess(id)).resolves.toBe('claude')
+        // Downgraded evidence ages out; the recheck scan re-anchors the successor.
+        vi.setSystemTime(1_000_000 + 40_000)
+        await expect(provider.getForegroundProcess(id)).resolves.toBe('claude')
+        expect(resolveAgentForegroundProcessMock).toHaveBeenCalledTimes(3)
+        // Re-anchored on pid 1000: the short-circuit resumes.
+        vi.setSystemTime(1_000_000 + 45_000)
+        await expect(provider.getForegroundProcess(id)).resolves.toBe('claude')
+        expect(resolveAgentForegroundProcessMock).toHaveBeenCalledTimes(3)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
     it('drops an anchored agent when the drift recheck proves the pid was recycled', async () => {
       // The anchor pid stays in the job (a squatter reused it) but the scan
       // proves the pid now runs a non-agent: proof of life must not apply.

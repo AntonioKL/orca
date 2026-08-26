@@ -447,6 +447,41 @@ describe('resolveAgentForegroundProcess', () => {
     })
   })
 
+  it('flags an anchor recycled by a DIFFERENT agent as foreign', async () => {
+    // The squatter recognizes as an agent — just not the cached one.
+    Object.defineProperty(process, 'platform', { value: 'win32' })
+    mockWindowsRows([
+      { pid: 100, ppid: 99, name: 'powershell.exe', commandLine: 'powershell.exe' },
+      { pid: 999, ppid: 500, name: 'node.exe', commandLine: 'node /usr/bin/codex' }
+    ])
+
+    await expect(
+      resolveAgentForegroundProcessWithAvailability(100, 'powershell.exe', {
+        anchorProcessId: 999,
+        anchorProcessName: 'claude'
+      })
+    ).resolves.toEqual({
+      available: true,
+      processName: 'powershell.exe',
+      anchorPidForeign: true
+    })
+  })
+
+  it('does not flag an anchor whose row still recognizes as the cached agent', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32' })
+    mockWindowsRows([
+      { pid: 100, ppid: 99, name: 'powershell.exe', commandLine: 'powershell.exe' },
+      { pid: 999, ppid: 500, name: 'node.exe', commandLine: 'node C:\\npm\\claude' }
+    ])
+
+    await expect(
+      resolveAgentForegroundProcessWithAvailability(100, 'powershell.exe', {
+        anchorProcessId: 999,
+        anchorProcessName: 'claude'
+      })
+    ).resolves.toEqual({ available: true, processName: 'powershell.exe' })
+  })
+
   it('treats a query-denied anchor row as inconclusive, never foreign', async () => {
     // A denied query yields command === name; the agent may just be unreadable.
     Object.defineProperty(process, 'platform', { value: 'win32' })

@@ -1,4 +1,5 @@
 import {
+  recognizeAgentProcess,
   recognizeAgentProcessFromCommandLine,
   type RecognizedAgentProcess
 } from './agent-process-recognition'
@@ -16,6 +17,12 @@ export function shouldInspectOuterWrapperForegroundProcess(
 ): boolean {
   // Why: only Pi is currently embedded by a same-group wrapper; scanning OMP would add a subprocess to every relay poll.
   return process.agent === 'pi'
+}
+
+/** Same gate for a bare process name, recognizing it first. */
+export function shouldInspectOuterWrapperForegroundName(processName: string | null): boolean {
+  const recognized = recognizeAgentProcess(processName)
+  return recognized !== null && shouldInspectOuterWrapperForegroundProcess(recognized)
 }
 
 /**
