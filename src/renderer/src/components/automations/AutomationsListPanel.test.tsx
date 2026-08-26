@@ -99,7 +99,6 @@ function renderPanel(
           requestExternalAction={() => undefined}
           openEditExternalDialog={() => undefined}
           openCreateDialog={() => undefined}
-          canCreateAutomation
           onOpenDetail={() => undefined}
           onRefresh={() => undefined}
           isRefreshing={false}
