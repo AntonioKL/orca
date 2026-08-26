@@ -86,7 +86,8 @@ export type EditorDialogProps = {
   open: boolean
   isEditing: boolean
   createDestination?: AutomationCreateDestinationControl
-  notice?: { message: string } | null
+  notice?: { message: string; recovery: string | null } | null
+  onNoticeRecover?: (action: string) => void
   repos?: { id: string }[]
   draft?: { projectId: string; workspaceId: string }
   onSave: () => void

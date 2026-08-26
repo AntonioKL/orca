@@ -1,12 +1,14 @@
 import type { StateCreator } from 'zustand'
 import type { AppState } from '../types'
-import type {
-  SshConnectionState,
-  SshConnectionStatus,
-  SshTargetSummary
-} from '../../../../shared/ssh-types'
+import type { SshConnectionState, SshTargetSummary } from '../../../../shared/ssh-types'
 import { sanitizeSshTargetGeneration } from '../../../../shared/ssh-target-generation'
 import { sshConnectionStatesEqual, sshTargetLabelsEqual } from './ssh-target-cleanup'
+export {
+  selectRuntimeAwareSshError,
+  selectRuntimeAwareSshStatus,
+  selectRuntimeAwareSshTargetLabel,
+  selectRuntimeAwareSshTargetRemoved
+} from './runtime-environment-ssh-selectors'
 
 /**
  * SSH state of one remote Orca server's own SSH targets, mirrored on this
@@ -282,117 +284,3 @@ export const createRuntimeEnvironmentSshSlice: StateCreator<
       return changed ? { sshStateByEnvironment: next } : s
     })
 })
-
-type RuntimeAwareSshReadState = Pick<
-  AppState,
-  | 'sshConnectionStates'
-  | 'sshTargetLabels'
-  | 'removedSshTargetLabels'
-  | 'sshTargetsHydrated'
-  | 'sshStateByEnvironment'
-> &
-  Partial<Pick<AppState, 'runtimeStatusByEnvironmentId'>>
-
-function isEnvironmentReachable(state: RuntimeAwareSshReadState, environmentId: string): boolean {
-  return Boolean(state.runtimeStatusByEnvironmentId?.get(environmentId)?.status)
-}
-
-/**
- * Reconnect-overlay status for an SSH target owned by `environmentId` (a
- * remote Orca server) or by this machine (`environmentId === null`).
- *
- * Returns null when the state is unknown — environment unreachable or its
- * bucket not hydrated — so callers show nothing rather than another machine's
- * stale state. The runtime environment's own disconnected UI outranks any SSH
- * overlay in that case.
- */
-export function selectRuntimeAwareSshStatus(
-  state: RuntimeAwareSshReadState,
-  environmentId: string | null,
-  targetId: string
-): SshConnectionStatus | null {
-  if (environmentId === null) {
-    return state.sshConnectionStates.get(targetId)?.status ?? 'disconnected'
-  }
-  if (!isEnvironmentReachable(state, environmentId)) {
-    return null
-  }
-  const bucket = state.sshStateByEnvironment.get(environmentId)
-  if (!bucket?.targetsHydrated) {
-    return null
-  }
-  return bucket.connectionStates.get(targetId)?.status ?? null
-}
-
-/**
- * The failure detail behind the status, when there is one.
- *
- * Mirrors selectRuntimeAwareSshStatus exactly so the pair cannot disagree about which source they
- * read. Null whenever the status selector would return null, so a caller never pairs a detail with
- * a status it did not come from.
- */
-export function selectRuntimeAwareSshError(
-  state: RuntimeAwareSshReadState,
-  environmentId: string | null,
-  targetId: string
-): string | null {
-  if (environmentId === null) {
-    return state.sshConnectionStates.get(targetId)?.error ?? null
-  }
-  if (!isEnvironmentReachable(state, environmentId)) {
-    return null
-  }
-  const bucket = state.sshStateByEnvironment.get(environmentId)
-  if (!bucket?.targetsHydrated) {
-    return null
-  }
-  return bucket.connectionStates.get(targetId)?.error ?? null
-}
-
-export function selectRuntimeAwareSshTargetLabel(
-  state: RuntimeAwareSshReadState,
-  environmentId: string | null,
-  targetId: string
-): string {
-  if (environmentId === null) {
-    return (
-      state.sshTargetLabels.get(targetId) ??
-      // Fall back to the removed target's last known label (ghost host) before
-      // the raw id, so a removed host shows its name instead of ssh-<ts>-<rand>.
-      state.removedSshTargetLabels.get(targetId) ??
-      targetId
-    )
-  }
-  const bucket = state.sshStateByEnvironment.get(environmentId)
-  return bucket?.targetLabels.get(targetId) ?? bucket?.removedTargetLabels.get(targetId) ?? targetId
-}
-
-/**
- * True only on positive evidence that the target was removed on its owning
- * host: a removal tombstone, or a hydrated target list that lacks the id.
- * An unreachable environment or un-hydrated bucket never reports removal, so
- * destructive "remove workspace" UI cannot be offered out of ignorance.
- */
-export function selectRuntimeAwareSshTargetRemoved(
-  state: RuntimeAwareSshReadState,
-  environmentId: string | null,
-  targetId: string
-): boolean {
-  if (environmentId === null) {
-    return (
-      state.removedSshTargetLabels.has(targetId) ||
-      (state.sshTargetsHydrated && !state.sshTargetLabels.has(targetId))
-    )
-  }
-  if (!isEnvironmentReachable(state, environmentId)) {
-    return false
-  }
-  const bucket = state.sshStateByEnvironment.get(environmentId)
-  if (!bucket) {
-    return false
-  }
-  return (
-    bucket.removedTargetLabels.has(targetId) ||
-    (bucket.targetsHydrated && !bucket.targetLabels.has(targetId))
-  )
-}

@@ -16,6 +16,7 @@ import type { Worktree } from '../../../../shared/worktree/types'
 import { closeUnfocusedMonacoFindOrPreventDialogDismiss } from '@/components/editor/monaco-find-widget'
 import { AutomationOwnerConflictNotice } from './AutomationOwnerConflictNotice'
 import type { AutomationActionNotice } from './automation-row-action-dispatch'
+import type { AutomationHostRecoveryAction } from './automation-host-status-descriptors'
 import type { AutomationCreateDestinationControl } from './use-automation-create-destination'
 import { AutomationEditorDialogFooter } from './AutomationEditorDialogFooter'
 import { AutomationEditorDialogHeader } from './AutomationEditorDialogHeader'
@@ -74,7 +75,7 @@ type AutomationEditorDialogProps = {
   createDestination?: AutomationCreateDestinationControl
   /** Why a save was refused. Belongs here rather than on the page: this dialog covers it. */
   notice?: AutomationActionNotice | null
-  onNoticeRecover?: () => void
+  onNoticeRecover?: (action: AutomationHostRecoveryAction) => void
   onNoticeDismiss?: () => void
   onProjectChange: (projectId: string) => void
   getRepoHostLabel?: (repo: Repo) => string | null | undefined

@@ -170,6 +170,8 @@ import {
   automationRowCatalogRef,
   automationWriteChangeEvent
 } from './automation-write-invalidation'
+import { automationRowRecoveryHost } from './automation-notice-recovery-host'
+import type { AutomationHostCatalogEntry } from './automation-host-catalog-types'
 import type { AutomationAuthorityChangeReason } from './automation-host-invalidation'
 import { AutomationOwnerConflictNotice } from './AutomationOwnerConflictNotice'
 import { useContextualTour } from '@/components/contextual-tours/use-contextual-tour'
@@ -254,7 +256,12 @@ export default function AutomationsPage(): React.JSX.Element {
   const [failedAuthorityKeys, setFailedAuthorityKeys] = useState<ReadonlySet<string>>(
     () => new Set()
   )
-  const [ownerActionNotice, setOwnerActionNotice] = useState<AutomationActionNotice | null>(null)
+  // Held with the host it was raised against: Reconnect and Update server act on
+  // the row's own host, not on whatever the list happens to be scoped to.
+  const [ownerAction, setOwnerAction] = useState<{
+    notice: AutomationActionNotice
+    host: AutomationHostCatalogEntry | null
+  } | null>(null)
   // Separate from the page notice: while the editor is open it covers the page,
   // so a refusal posted there is a save that visibly did nothing at all.
   const [editorNotice, setEditorNotice] = useState<AutomationActionNotice | null>(null)
@@ -680,6 +687,30 @@ export default function AutomationsPage(): React.JSX.Element {
     () => ({ capturedOwners: capturedAutomationOwners, authority: automationAuthority }),
     [automationAuthority, capturedAutomationOwners]
   )
+  const rowRecoveryHost = useCallback(
+    (rowKey: string | null): AutomationHostCatalogEntry | null =>
+      automationRowRecoveryHost(
+        hostCatalog.catalog,
+        capturedAutomationOwner(capturedAutomationOwners, rowKey),
+        automationAuthority
+      ),
+    [automationAuthority, capturedAutomationOwners, hostCatalog.catalog]
+  )
+  const reportOwnerAction = useCallback(
+    (rowKey: string | null, notice: AutomationActionNotice | null): void => {
+      setOwnerAction(notice ? { notice, host: rowRecoveryHost(rowKey) } : null)
+    },
+    [rowRecoveryHost]
+  )
+  // A create is refused by the destination the dialog captured, a save by the row
+  // it addresses; neither is the host the list is filtered to.
+  const editorRecoveryHost = useMemo((): AutomationHostCatalogEntry | null => {
+    if (editingAutomationId !== null) {
+      return rowRecoveryHost(editingRowKey)
+    }
+    const resolution = createDestination.control.resolution
+    return resolution.status === 'ready' ? resolution.entry : null
+  }, [createDestination.control.resolution, editingAutomationId, editingRowKey, rowRecoveryHost])
   const notifyAuthorityChange = hostCatalog.notifyAuthorityChange
   // The list renders the per-host cache, so a write is only visible once that
   // host is refetched. The authority publishes the same event, but a round trip
@@ -1280,7 +1311,7 @@ export default function AutomationsPage(): React.JSX.Element {
         ) ?? null
     )
     if (!reread.ok && reread.notice.severity === 'owner') {
-      setOwnerActionNotice(reread.notice)
+      reportOwnerAction(row.key, reread.notice)
       return
     }
     // A failed re-read still opens the form on the copy already on screen.
@@ -1823,7 +1854,7 @@ export default function AutomationsPage(): React.JSX.Element {
           automationHostTargetFor(row)
         )
     )
-    setOwnerActionNotice(result.ok ? null : result.notice)
+    reportOwnerAction(row.key, result.ok ? null : result.notice)
     if (result.ok) {
       invalidateRowHost(row.key, 'definition')
     }
@@ -1837,7 +1868,7 @@ export default function AutomationsPage(): React.JSX.Element {
       { rowKey: row.key, automationId: automation.id },
       () => deleteAutomationForTarget(automation, automationHostTargetFor(row))
     )
-    setOwnerActionNotice(result.ok ? null : result.notice)
+    reportOwnerAction(row.key, result.ok ? null : result.notice)
     if (result.ok) {
       if (selectedRowKey === row.key) {
         selectAutomationId(null)
@@ -1901,7 +1932,7 @@ export default function AutomationsPage(): React.JSX.Element {
       { rowKey: row.key, automationId: automation.id },
       () => runAutomationNowForTarget(automation, rowHostTarget)
     )
-    setOwnerActionNotice(result.ok ? null : result.notice)
+    reportOwnerAction(row.key, result.ok ? null : result.notice)
     if (!result.ok) {
       return
     }
@@ -1931,7 +1962,7 @@ export default function AutomationsPage(): React.JSX.Element {
         { rowKey: row.key, automationId: row.automation.id },
         () => runAutomationNowForTarget(row.automation, automationHostTargetFor(row))
       )
-      setOwnerActionNotice(result.ok ? null : result.notice)
+      reportOwnerAction(row.key, result.ok ? null : result.notice)
       if (!result.ok) {
         await refresh()
         return
@@ -2219,15 +2250,17 @@ export default function AutomationsPage(): React.JSX.Element {
       </header>
 
       <AutomationOwnerConflictNotice
-        notice={ownerActionNotice}
+        notice={ownerAction?.notice ?? null}
         className="mx-4 mb-2"
         onRecover={(action) => {
-          setOwnerActionNotice(null)
+          const host = ownerAction?.host ?? null
+          setOwnerAction(null)
+          hostCatalog.recover(action, host)
           if (action === 'retry') {
             void refresh()
           }
         }}
-        onDismiss={() => setOwnerActionNotice(null)}
+        onDismiss={() => setOwnerAction(null)}
       />
 
       <AutomationEditorDialog
@@ -2247,9 +2280,12 @@ export default function AutomationsPage(): React.JSX.Element {
         draft={draft}
         createDestination={createDestination.control}
         notice={editorNotice}
-        onNoticeRecover={() => {
+        onNoticeRecover={(action) => {
           setEditorNotice(null)
-          void refresh()
+          hostCatalog.recover(action, editorRecoveryHost)
+          if (action === 'retry') {
+            void refresh()
+          }
         }}
         onNoticeDismiss={() => setEditorNotice(null)}
         onProjectChange={handleProjectChange}
@@ -2311,9 +2347,9 @@ export default function AutomationsPage(): React.JSX.Element {
           selectedRuns={selectedRuns}
           selectedRunsNotice={selectedRunsNotice}
           recoverSelectedRuns={(action) => {
-            // Reconnect/Update server act on the selected host; the re-ask is what
-            // brings this automation's history back either way.
-            hostCatalog.recover(action)
+            // Reconnect/Update server act on the selected row's own host; the
+            // re-ask is what brings this automation's history back either way.
+            hostCatalog.recover(action, rowRecoveryHost(selectedRowKey))
             setSelectedAutomationRuns((current) => ({ ...current, notice: null }))
             setRunHistoryReloadToken((token) => token + 1)
           }}
