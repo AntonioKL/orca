@@ -35,6 +35,18 @@ export function getImageLayoutStyle(
   }
 }
 
+/**
+ * Sizing classes for the preview `<img>`.
+ *
+ * A null size means the natural size has not been measured yet, not that the image is small.
+ * The scroll surface's inner box is `w-max`/`h-max`, so percentage maxes there resolve to `none`
+ * and an unmeasured image would lay out — and raster — at full natural resolution before onLoad.
+ * Viewport lengths are definite without measuring anything, so they cap that first layout.
+ */
+export function getImageElementSizeClassName(size: ImageViewerImageDimensions | null): string {
+  return size ? 'block h-full w-full' : 'block max-h-[100vh] max-w-[100vw]'
+}
+
 export function applyAnchoredImageViewerZoomChange(
   surface: HTMLDivElement | null,
   setZoom: Dispatch<SetStateAction<number>>,

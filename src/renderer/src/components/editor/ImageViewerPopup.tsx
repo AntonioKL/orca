@@ -2,6 +2,7 @@ import { X } from 'lucide-react'
 import type { CSSProperties, JSX } from 'react'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
+import { getImageElementSizeClassName } from './image-viewer-dom-zoom'
 import type { ImageViewerImageDimensions } from './image-viewer-zoom'
 import { translate } from '@/i18n/i18n'
 
@@ -59,10 +60,7 @@ export default function ImageViewerPopup({
               <img
                 src={previewUrl}
                 alt={filename}
-                className={cn(
-                  'object-contain',
-                  imageLayoutSize ? 'block h-full w-full' : 'block max-h-full max-w-full'
-                )}
+                className={cn('object-contain', getImageElementSizeClassName(imageLayoutSize))}
               />
             </div>
           </div>

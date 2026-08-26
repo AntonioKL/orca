@@ -239,3 +239,29 @@ describe('ImageViewer preview source retry', () => {
     expect(findElementsByType(rendered, 'img')).toHaveLength(0)
   })
 })
+
+describe('ImageViewer pre-load layout box', () => {
+  beforeEach(() => {
+    reactHookRuntime.states = []
+    reactHookRuntime.index = 0
+    vi.clearAllMocks()
+  })
+
+  // Why: before onLoad there is no measured size, and the surface's `w-max`/`h-max` inner
+  // box makes percentage maxes resolve to `none` — so an uncapped image lays out and
+  // rasters at full natural resolution before any constraint applies.
+  it('caps the inline preview with viewport lengths before the image loads', async () => {
+    const rendered = await renderExpandedImageViewer(pngBase64(4))
+
+    expect(findPreviewImage(rendered).props.className).toBe(
+      'object-contain block max-h-[100vh] max-w-[100vw]'
+    )
+  })
+
+  it('caps the full-size popup preview the same way', async () => {
+    const rendered = await renderExpandedImageViewer(pngBase64(4))
+    const popupImage = findElementsByType(rendered, 'img').find((element) => !element.props.onError)
+
+    expect(popupImage?.props.className).toBe('object-contain block max-h-[100vh] max-w-[100vw]')
+  })
+})

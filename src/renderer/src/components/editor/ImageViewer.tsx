@@ -9,6 +9,7 @@ import {
   applyAnchoredImageViewerZoomChange,
   applyImageSurfaceWheel,
   getElementSurfaceSize,
+  getImageElementSizeClassName,
   getImageLayoutStyle
 } from './image-viewer-dom-zoom'
 import {
@@ -289,9 +290,7 @@ export default function ImageViewer({
                   'object-contain',
                   isIntrinsicLayout
                     ? 'block h-auto max-h-none max-w-full'
-                    : inlineImageLayoutSize
-                      ? 'block h-full w-full'
-                      : 'block max-h-full max-w-full'
+                    : getImageElementSizeClassName(inlineImageLayoutSize)
                 )}
                 onLoad={(event) => {
                   const img = event.currentTarget
