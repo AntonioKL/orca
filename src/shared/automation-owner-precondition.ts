@@ -18,6 +18,7 @@ import {
   AUTOMATION_OWNER_CONFLICT_CODES,
   AutomationOwnerConflictError
 } from './automation-owner-conflict'
+import { sanitizeSshTargetGeneration } from './ssh-target-generation'
 
 export type AutomationOwnerPreconditionSelector =
   | { kind: 'self' }
@@ -74,6 +75,16 @@ export function assertAutomationOwnerFence(input: AutomationOwnerFenceInput): vo
     conflict('targetRemoved')
   }
   if (!expected) {
+    // Optional on the wire is not unenforced: a record fenced to an SSH registration
+    // may not be mutated or executed by a caller that names no host at all. Only
+    // reads, Self records, and generation-less legacy SSH rows stay callable bare.
+    if (
+      input.operation !== 'read' &&
+      stored.kind === 'ssh' &&
+      sanitizeSshTargetGeneration(input.automation.executionTargetGeneration) !== undefined
+    ) {
+      conflict('fencingRequired')
+    }
     return
   }
   if (expected.kind !== stored.kind) {

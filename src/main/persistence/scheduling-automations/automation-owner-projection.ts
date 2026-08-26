@@ -55,8 +55,11 @@ function automationUsageSummaries(state: PersistedState) {
   const runsByAutomation = new Map<string, AutomationRun[]>()
   for (const run of state.automationRuns ?? []) {
     const runs = runsByAutomation.get(run.automationId)
-    if (runs) runs.push(run)
-    else runsByAutomation.set(run.automationId, [run])
+    if (runs) {
+      runs.push(run)
+    } else {
+      runsByAutomation.set(run.automationId, [run])
+    }
   }
   return new Map([...runsByAutomation].map(([id, runs]) => [id, summarizeAutomationRunUsage(runs)]))
 }
@@ -144,10 +147,12 @@ export function listAutomationsForScope(input: {
   const scope = input.params?.selector
   if (scope?.kind === 'ssh') {
     const current = sshTargetGenerationForConnection(input.state, scope.targetId)
-    if (current === undefined)
+    if (current === undefined) {
       throw new AutomationOwnerConflictError(AUTOMATION_OWNER_CONFLICT_CODES.targetRemoved)
-    if (current !== scope.expectedTargetGeneration)
+    }
+    if (current !== scope.expectedTargetGeneration) {
       throw new AutomationOwnerConflictError(AUTOMATION_OWNER_CONFLICT_CODES.ownerChanged)
+    }
   }
   const inputs = projectionInputs(input.state)
   const complete =
@@ -160,7 +165,9 @@ export function listAutomationsForScope(input: {
             automationProjectionContext(input.state, input.storageAuthority, true)
           )
         }
-  if (!scope) return { result: complete.result, cache: complete }
+  if (!scope) {
+    return { result: complete.result, cache: complete }
+  }
   const items = complete.result.items.filter((item) =>
     automationSelectorMatchesScope(item.selector, scope)
   )
@@ -226,7 +233,9 @@ export function assertAutomationOwnerFence(input: {
   operation: AutomationOwnerFenceOperation
 }): Automation {
   const automation = (input.state.automations ?? []).find((entry) => entry.id === input.id)
-  if (!automation) throw new Error('Automation not found.')
+  if (!automation) {
+    throw new Error('Automation not found.')
+  }
   enforceAutomationOwnerFence({
     automation,
     expectedOwner: input.expectedOwner,

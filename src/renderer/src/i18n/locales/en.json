@@ -15654,10 +15654,7 @@
           "uncheckedHosts": "External automation managers on {{count}} hosts could not be checked."
         },
         "enablement": {
-          "pausedByOrca": "Paused by Orca",
-          "paused": "Paused",
-          "hostChangedReason": "Orca paused this automation because it could not tell which host it belongs to. You did not pause it.",
-          "hostChangedRecovery": "Re-add that host to restore it, resume the automation to run it anyway, or delete it if you no longer need it."
+          "paused": "Paused"
         },
         "runHistory": {
           "occurrencesWithLatest": "{{times}} times, most recently {{date}}",

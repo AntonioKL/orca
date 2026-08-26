@@ -50,6 +50,12 @@ export function resolveAutomationRunTarget(
 ): AutomationRunTargetResult {
   const context = automation.runContext ?? null
   if (!context) {
+    // The legacy path resolves from bare repo state, which survives a host being
+    // removed or replaced — so it must consult the same verdict the context path does.
+    const legacyHostIssue = store.automationCapturedHostIssue(automation)
+    if (legacyHostIssue) {
+      return { ok: false, error: CAPTURED_HOST_REFUSALS[legacyHostIssue] }
+    }
     const repo = store.getRepo(getAutomationLegacyRepoId(automation))
     const cwd = getLegacyPrecheckCwd(store, automation)
     if (!repo || !cwd) {

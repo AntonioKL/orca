@@ -107,6 +107,5 @@ export function useSelectedAutomationRunHistory(input: SelectedAutomationRunHist
     return () => {
       cancelled = true
     }
-    // oxlint-disable-next-line react-hooks/exhaustive-deps -- fetchKey is the refetch policy; see the module docblock for why the context object is deliberately not a dependency.
   }, [automationId, rowKey, fetchKey, reloadToken])
 }

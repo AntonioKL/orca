@@ -1,5 +1,5 @@
 import type { Automation } from '../../shared/automations-types'
-import type { RemovedSshTargetTombstone, SshTarget } from '../../shared/ssh-types'
+import type { SshTarget } from '../../shared/ssh-types'
 import type { FolderWorkspace } from '../../shared/folder-workspace-types'
 import type { ProjectGroup } from '../../shared/project-group-types'
 import type { Repo } from '../../shared/repo-types'
@@ -18,14 +18,13 @@ import {
   resolveSshTargetGenerationHighWaterMark,
   sanitizeSshTargetGeneration
 } from '../../shared/ssh-target-generation'
-import { scanAutomationsForGhostSshTargets } from './automation-ghost-ssh-tombstones'
 
 /**
  * One idempotent load-time migration that gives every stored automation a
- * fenceable owner. Order is load-bearing: ghost tombstones are recorded from the
- * pre-migration automations first (so a dead target still has a label), then
- * generations are stamped on live targets, then automations adopt or are
- * classified. Running it twice changes nothing.
+ * fenceable owner: generations are stamped on live targets, then automations
+ * adopt or are classified. Running it twice changes nothing. Classification only
+ * gates adoption here — refusing to run an orphan is dispatch's live verdict
+ * (`resolveAutomationRunTarget`), not a persisted write this migration makes.
  */
 
 export type AutomationOwnerClassification = 'owned' | 'orphan' | 'ambiguous'
@@ -75,16 +74,13 @@ export type AutomationOwnerMigrationInput = {
   /** Needed to resolve which SSH target a record's folder workspace pins it to. */
   folderWorkspaces?: readonly FolderWorkspace[]
   projectGroups?: readonly ProjectGroup[]
-  removedSshTargetTombstones: readonly RemovedSshTargetTombstone[]
   sshTargetGenerationCounter?: number
   storageAuthority?: 'desktop' | 'runtime'
-  now: number
 }
 
 export type AutomationOwnerMigrationResult = {
   automations: Automation[]
   sshTargets: SshTarget[]
-  removedSshTargetTombstones: RemovedSshTargetTombstone[]
   sshTargetGenerationCounter: number
   changed: boolean
 }
@@ -190,17 +186,11 @@ function migrateAutomations(
     // Before classification: a followed re-pin is a healthy record, not an orphan.
     const record = followWorkspaceRepin(automation, pin, sshTargetIdForGeneration)
     const classification = classifyAutomationOwner(record, knownIds, pin, storageAuthority)
-    // Orphans and ambiguous records must not keep firing on a guessed host, but
-    // they are never moved, rewritten to Self, or deleted.
+    // Orphans and ambiguous records are never moved, rewritten to Self, stamped,
+    // or deleted; dispatch refuses them live rather than this migration writing state.
     if (classification !== 'owned') {
-      // Once per record, not once per load: a stamp means the decision is already
-      // made — by this migration, or by a user whose re-enable outranks it.
-      if (!record.enabled || record.enabledDecidedBy) {
-        changed ||= record !== automation
-        return record
-      }
-      changed = true
-      return { ...record, enabled: false, enabledDecidedBy: 'owner_migration' as const }
+      changed ||= record !== automation
+      return record
     }
     const ownerTargetId =
       record.executionTargetType === 'ssh' ? record.executionTargetId : pin?.targetId
@@ -216,13 +206,6 @@ function migrateAutomations(
 export function migrateAutomationOwners(
   input: AutomationOwnerMigrationInput
 ): AutomationOwnerMigrationResult {
-  const tombstoneScan = scanAutomationsForGhostSshTargets({
-    automations: input.automations,
-    sshTargets: input.sshTargets,
-    repos: input.repos,
-    removedSshTargetTombstones: input.removedSshTargetTombstones,
-    now: input.now
-  })
   const highWaterMark = resolveSshTargetGenerationHighWaterMark({
     persistedCounter: input.sshTargetGenerationCounter,
     targetGenerations: input.sshTargets.map((target) => target.generation),
@@ -243,10 +226,8 @@ export function migrateAutomationOwners(
   return {
     automations: migrated.automations,
     sshTargets: stamped.targets,
-    removedSshTargetTombstones: tombstoneScan.removedSshTargetTombstones,
     sshTargetGenerationCounter: stamped.counter,
     changed:
-      tombstoneScan.changed ||
       stamped.changed ||
       migrated.changed ||
       // A rolled-back counter must be rewritten even when nothing else changed.

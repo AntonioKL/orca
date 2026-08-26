@@ -78,10 +78,8 @@ function migrate(input: {
     repos: input.repos ?? [],
     folderWorkspaces: input.folderWorkspaces,
     projectGroups: input.projectGroups,
-    removedSshTargetTombstones: [],
     sshTargetGenerationCounter: input.sshTargetGenerationCounter,
-    storageAuthority: input.storageAuthority,
-    now: NOW
+    storageAuthority: input.storageAuthority
   })
 }
 
@@ -182,80 +180,28 @@ describe('migrateAutomationOwners', () => {
       automations: first.automations,
       sshTargets: first.sshTargets,
       repos: [makeRepo()],
-      removedSshTargetTombstones: first.removedSshTargetTombstones,
-      sshTargetGenerationCounter: first.sshTargetGenerationCounter,
-      now: NOW + 1
+      sshTargetGenerationCounter: first.sshTargetGenerationCounter
     })
     expect(second.changed).toBe(false)
     expect(second.automations).toEqual(first.automations)
     expect(second.sshTargets).toEqual(first.sshTargets)
-    expect(second.removedSshTargetTombstones).toEqual(first.removedSshTargetTombstones)
   })
 
-  it('turns an automation whose target is gone into a disabled orphan without rewriting it to local', () => {
+  // Refusing to run an orphan is dispatch's live verdict, not a persisted write:
+  // the record keeps its selector and its enablement untouched.
+  it('leaves an automation whose target is gone in place without rewriting or disabling it', () => {
+    const automation = makeAutomation({
+      executionTargetType: 'ssh',
+      executionTargetId: 'ssh-gone',
+      schedulerOwner: 'ssh_bridge'
+    })
     const result = migrate({
-      automations: [
-        makeAutomation({
-          executionTargetType: 'ssh',
-          executionTargetId: 'ssh-gone',
-          schedulerOwner: 'ssh_bridge'
-        })
-      ],
+      automations: [automation],
       repos: [makeRepo({ connectionId: 'ssh-gone' })]
     })
     const migrated = result.automations[0]
-    expect(migrated.enabled).toBe(false)
-    expect(migrated.executionTargetType).toBe('ssh')
-    expect(migrated.executionTargetId).toBe('ssh-gone')
+    expect(migrated).toEqual(automation)
     expect(migrated.executionTargetGeneration).toBeUndefined()
-    expect(migrated.schedulerOwner).toBe('ssh_bridge')
-  })
-
-  it('records a synthetic tombstone carrying the last known label for a ghost target', () => {
-    const result = migrate({
-      automations: [makeAutomation({ executionTargetType: 'ssh', executionTargetId: 'ssh-gone' })],
-      repos: [makeRepo({ connectionId: 'ssh-gone' })]
-    })
-    expect(result.removedSshTargetTombstones).toEqual([
-      {
-        oldTargetId: 'ssh-gone',
-        host: '',
-        port: 0,
-        username: '',
-        label: 'Repo One',
-        removedAt: NOW,
-        origin: 'automation-scan'
-      }
-    ])
-  })
-
-  it('falls back to the target id when no repo supplies a label', () => {
-    const result = migrate({
-      automations: [makeAutomation({ executionTargetType: 'ssh', executionTargetId: 'ssh-gone' })]
-    })
-    expect(result.removedSshTargetTombstones[0].label).toBe('ssh-gone')
-  })
-
-  it('does not overwrite an existing real tombstone with a synthetic one', () => {
-    const result = migrateAutomationOwners({
-      automations: [makeAutomation({ executionTargetType: 'ssh', executionTargetId: 'ssh-gone' })],
-      sshTargets: [],
-      repos: [],
-      removedSshTargetTombstones: [
-        {
-          oldTargetId: 'ssh-gone',
-          host: 'old.example.com',
-          port: 22,
-          username: 'tim',
-          label: 'Old box',
-          removedAt: 1
-        }
-      ],
-      sshTargetGenerationCounter: 0,
-      now: NOW
-    })
-    expect(result.removedSshTargetTombstones).toHaveLength(1)
-    expect(result.removedSshTargetTombstones[0].origin).toBeUndefined()
   })
 
   it.each([
@@ -274,11 +220,12 @@ describe('migrateAutomationOwners', () => {
       }
     }
   ])(
-    'disables an ambiguous desktop record flagged by $label and leaves it in place',
+    'leaves an ambiguous desktop record flagged by $label unstamped and in place',
     ({ overrides }) => {
       const result = migrate({ automations: [makeAutomation(overrides)] })
       const migrated = result.automations[0]
-      expect(migrated.enabled).toBe(false)
+      expect(migrated.enabled).toBe(true)
+      expect(migrated.executionTargetGeneration).toBeUndefined()
       expect(migrated.executionTargetType).toBe('local')
       expect(migrated.executionTargetId).toBe('local')
       expect(result.automations).toHaveLength(1)
@@ -332,41 +279,13 @@ describe('migrateAutomationOwners', () => {
     })
     const migrated = result.automations[0]
     expect(migrated.executionTargetGeneration).toBe(4)
+    expect(migrated.enabled).toBe(true)
     expect(
       projectAutomationSelector(migrated, {
         sshTargetGeneration: () => 9,
         repoConnectionId: () => 'ssh-1'
       })
     ).toEqual({ kind: 'orphan', issue: AUTOMATION_ORPHAN_ISSUES.targetReplaced })
-  })
-
-  it('never re-disables a record whose enablement the user decided', () => {
-    const result = migrate({
-      automations: [
-        makeAutomation({
-          executionTargetType: 'ssh',
-          executionTargetId: 'ssh-gone',
-          schedulerOwner: 'ssh_bridge',
-          enabledDecidedBy: 'user'
-        })
-      ],
-      repos: [makeRepo({ connectionId: 'ssh-gone' })]
-    })
-    expect(result.automations[0].enabled).toBe(true)
-  })
-
-  // Reachable through a downgrade: an older build re-enables without knowing the stamp.
-  it('does not revisit a record it has already decided once', () => {
-    const result = migrate({
-      automations: [
-        makeAutomation({
-          executionTargetType: 'ssh',
-          executionTargetId: 'ssh-gone',
-          enabledDecidedBy: 'owner_migration'
-        })
-      ]
-    })
-    expect(result.automations[0].enabled).toBe(true)
   })
 
   it('leaves a healthy local automation untouched', () => {
@@ -411,6 +330,7 @@ describe('migrateAutomationOwners', () => {
     })
     const migrated = result.automations[0]
     expect(migrated.executionTargetGeneration).toBe(4)
+    expect(migrated.enabled).toBe(true)
     expect(
       projectAutomationSelector(migrated, {
         sshTargetGeneration: () => 9,
@@ -433,9 +353,7 @@ describe('migrateAutomationOwners', () => {
       sshTargets: first.sshTargets,
       repos: [],
       ...workspace,
-      removedSshTargetTombstones: first.removedSshTargetTombstones,
-      sshTargetGenerationCounter: first.sshTargetGenerationCounter,
-      now: NOW + 1
+      sshTargetGenerationCounter: first.sshTargetGenerationCounter
     })
     expect(second.changed).toBe(false)
     expect(second.automations).toEqual(first.automations)
@@ -451,37 +369,26 @@ describe('migrateAutomationOwners', () => {
     expect(result.automations[0].executionTargetGeneration).toBeUndefined()
   })
 
-  // The pin, not the project, is what dispatch resolves, so a pin this authority cannot
-  // vouch for has to classify the same way an unresolvable SSH selector does.
-  it('disables a pinned local record whose pin names an unregistered target', () => {
+  // The pin, not the project, is what dispatch resolves; a pin this authority cannot
+  // vouch for stays unstamped so it classifies like an unresolvable SSH selector.
+  it('never stamps a pinned local record whose pin names an unregistered target', () => {
     const result = migrate({
       automations: [pinnedLocalAutomation()],
       sshTargets: [],
       ...pinnedWorkspaceState()
     })
     const migrated = result.automations[0]
-    expect(migrated.enabled).toBe(false)
-    expect(migrated.enabledDecidedBy).toBe('owner_migration')
+    expect(migrated.enabled).toBe(true)
+    expect(migrated.executionTargetGeneration).toBeUndefined()
     expect(migrated.executionTargetType).toBe('local')
     expect(migrated.executionTargetId).toBe('local')
-  })
-
-  it('disables a pinned local record whose pin came back as a different registration', () => {
-    const result = migrate({
-      automations: [pinnedLocalAutomation({ executionTargetGeneration: 4 })],
-      sshTargets: [makeTarget({ generation: 9 })],
-      sshTargetGenerationCounter: 9,
-      ...pinnedWorkspaceState()
-    })
-    const migrated = result.automations[0]
-    expect(migrated.enabled).toBe(false)
-    expect(migrated.executionTargetGeneration).toBe(4)
   })
 
   // Absence of evidence: with no workspace list supplied, nothing proves the record is pinned.
   it('leaves a record alone when no workspace list was supplied to prove a pin', () => {
     const result = migrate({ automations: [pinnedLocalAutomation()], sshTargets: [] })
     expect(result.automations[0].enabled).toBe(true)
+    expect(result.automations[0].executionTargetGeneration).toBeUndefined()
   })
 
   it('follows an external re-pin onto the registration the workspace names now', () => {

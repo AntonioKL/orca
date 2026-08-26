@@ -81,5 +81,9 @@ export function useAutomationHostCatalogSourceState({
     [runtimeEnvironments, runtimeStatusByEnvironmentId, sshStateByEnvironment]
   )
 
-  return { desktopSsh, runtimes, runtimeCatalogSettled }
+  // Memoized: consumers key whole-catalog rebuilds on this object's identity.
+  return useMemo(
+    () => ({ desktopSsh, runtimes, runtimeCatalogSettled }),
+    [desktopSsh, runtimes, runtimeCatalogSettled]
+  )
 }

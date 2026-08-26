@@ -47,9 +47,7 @@ function automation(overrides: Partial<Automation>): Automation {
     timezone: 'UTC',
     rrule: 'FREQ=DAILY',
     dtstart: 0,
-    // The user re-enabled it after the owner migration disabled it, so the pause below is real work.
     enabled: true,
-    enabledDecidedBy: 'user',
     nextRunAt: 0,
     missedRunPolicy: 'run_once_within_grace',
     missedRunGraceMinutes: 720,

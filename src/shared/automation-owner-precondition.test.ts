@@ -104,9 +104,29 @@ describe('assertAutomationOwnerFence', () => {
     )
   })
 
-  it('keeps legacy mutations compatible when no precondition is present', () => {
+  // Optional on the wire is not unenforced: a generation-bearing record refuses
+  // an ownerless mutation, while a generation-less legacy row stays callable bare.
+  it('refuses an ownerless mutation of a record that captured a generation', () => {
+    expectConflict(
+      () => assertAutomationOwnerFence({ automation: sshRecord, operation: 'mutate', context }),
+      AUTOMATION_OWNER_CONFLICT_CODES.fencingRequired
+    )
+  })
+
+  it('keeps legacy mutations compatible on a generation-less SSH record', () => {
+    const legacySshRecord = automation({
+      executionTargetType: 'ssh',
+      executionTargetId: 'ssh-1',
+      projectId: 'repo-ssh'
+    })
     expect(() =>
-      assertAutomationOwnerFence({ automation: sshRecord, operation: 'mutate', context })
+      assertAutomationOwnerFence({ automation: legacySshRecord, operation: 'mutate', context })
+    ).not.toThrow()
+  })
+
+  it('keeps legacy mutations compatible on a self record', () => {
+    expect(() =>
+      assertAutomationOwnerFence({ automation: automation(), operation: 'mutate', context })
     ).not.toThrow()
   })
 

@@ -2,9 +2,7 @@ import type { PersistedState } from '../../../shared/persisted-state-types'
 import type { RemovedSshTargetTombstone, SshTarget } from '../../../shared/ssh-types'
 import type { ProtectedSecretPersistence } from '../../protected-secret-persistence'
 import { sshPtyOwnerLeaseSecretSlot } from '../../protected-secret-persistence'
-import {
-  MAX_CLAUDE_LIVE_PTY_SESSION_IDS
-} from '../restoring-sessions/pane-alias-normalization'
+import { MAX_CLAUDE_LIVE_PTY_SESSION_IDS } from '../restoring-sessions/pane-alias-normalization'
 import {
   MAX_REMOVED_SSH_TARGET_TOMBSTONES,
   capRemovedSshTargetTombstones,
@@ -34,8 +32,8 @@ export function getSshTarget(state: PersistedState, id: string): SshTarget | und
 }
 
 export function addSshTarget(operations: SshTargetStateOperations, target: SshTarget): void {
-  operations.state.sshTargets ??= []
-  operations.state.sshTargets.push(normalizeSshTarget(target))
+  // Replaced, not pushed in place: the automation list projection caches on array identity.
+  operations.state.sshTargets = [...(operations.state.sshTargets ?? []), normalizeSshTarget(target)]
   operations.scheduleSave()
 }
 
@@ -73,6 +71,9 @@ export function updateSshTarget(
       to: sshHostIdentity(target)
     })
   }
+  // The Object.assign above patches the row in place (other callers hold the
+  // reference); the automation list projection caches on array identity.
+  operations.state.sshTargets = [...(operations.state.sshTargets ?? [])]
   operations.scheduleSave()
   return { ...target }
 }

@@ -45,7 +45,6 @@ import {
   formatAutomationTokens,
   type AutomationUsageSummary
 } from './automation-usage-model'
-import { automationPausedLabel } from './automation-enablement-notice'
 import { AUTOMATIONS_TABLE_GRID_CLASS } from './automations-table-layout'
 import { LIST_TABLE_ROW_CLASS, LIST_TABLE_ROW_SELECTED_CLASS } from '@/lib/list-table-layout'
 import { isPortaledRowMenuClick, isRowActivationKey } from '@/lib/list-row-interaction'
@@ -155,7 +154,7 @@ export function AutomationListLocalRows({
         const scheduleLabel = formatUiAutomationSchedule(automation.rrule)
         const nextRunLabel = automation.enabled
           ? formatAutomationDateTimeWithRelative(automation.nextRunAt, relativeNow)
-          : automationPausedLabel(automation)
+          : translate('auto.components.automations.enablement.paused', 'Paused')
         const isSelected = isSelectedLocal && selectedRowKey === row.key
         const agentLabel = getAgentLabel(automation.agentId)
         const hostId =

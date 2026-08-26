@@ -79,6 +79,7 @@ async function render(options: {
         isSelectedLocal
         relativeNow={0}
         repoMap={new Map()}
+        lastRunByAutomationId={new Map()}
         worktreeMap={new Map()}
         projectHostSetups={[]}
         sshConnectionStates={new Map()}

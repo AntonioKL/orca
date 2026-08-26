@@ -113,10 +113,7 @@ export function reassignSshTargetId(
   if (migrateRetirementNamespaces(operations.state, oldTargetId, newTargetId)) {
     carrierChanged = true
   }
-  const workspacePinnedAutomationIds = automationIdsPinnedToSshTarget(
-    operations.state,
-    oldTargetId
-  )
+  const workspacePinnedAutomationIds = automationIdsPinnedToSshTarget(operations.state, oldTargetId)
   if (migrateFolderWorkspaceHostSshTargetId(operations.state, oldTargetId, newTargetId)) {
     carrierChanged = true
   }
@@ -179,6 +176,11 @@ export function reassignSshTargetId(
     operations.syncProjectHostSetupCompatibilityState()
   }
   if (repoIds.size > 0 || metaChanged || carrierChanged || setupsChanged) {
+    // The rewrites above patch rows in place; the list projection caches on array
+    // identity, so a same-identity array would keep serving pre-readoption owners.
+    operations.state.repos = [...operations.state.repos]
+    operations.state.automations = [...(operations.state.automations ?? [])]
+    operations.state.automationRuns = [...(operations.state.automationRuns ?? [])]
     operations.scheduleSave()
   }
   return [...repoIds]

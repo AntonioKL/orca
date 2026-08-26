@@ -8,9 +8,9 @@
  * it on that machine" survives the machine changing identity underneath it.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { translate } from '@/i18n/i18n'
-import type { Repo } from '../../../../shared/types'
+import type { Repo } from '../../../../shared/repo-types'
 import type {
   AutomationHostCatalog,
   AutomationHostCatalogEntry
@@ -96,16 +96,15 @@ export function useAutomationCreateDestination(
   const [captured, setCaptured] = useState<AutomationCreateDestination | null>(null)
   const [reason, setReason] = useState<AutomationCreateDestinationChoiceReason>('unselected')
 
-  useEffect(() => {
-    if (!open) {
-      setCaptured(null)
-      setReason('unselected')
-      return
-    }
-    if (captured) {
-      return
-    }
-    // Re-runs until it first resolves: a catalog still hydrating must not lock
+  // Adjusted during render rather than in an effect, so no frame paints the
+  // previous dialog's capture. Each branch is guarded on an actual change, so
+  // the re-render this schedules converges immediately.
+  if (!open && (captured !== null || reason !== 'unselected')) {
+    setCaptured(null)
+    setReason('unselected')
+  }
+  if (open && !captured) {
+    // Re-resolves until it first captures: a catalog still hydrating must not lock
     // the form into "choose a host" once the host it would have picked arrives.
     const entry =
       preselectAutomationCreateHost(entries, filterStableKey, activeWorkspaceStableKey) ??
@@ -113,10 +112,10 @@ export function useAutomationCreateDestination(
     const resolved = resolveAutomationCreateDestination(entry)
     if (resolved.status === 'ready') {
       setCaptured(resolved)
-      return
+    } else if (resolved.reason !== reason) {
+      setReason(resolved.reason)
     }
-    setReason(resolved.reason)
-  }, [activeWorkspaceStableKey, captured, catalog, entries, filterStableKey, open])
+  }
 
   const onSelect = useCallback(
     (stableKey: string) => {

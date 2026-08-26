@@ -7,6 +7,7 @@ import {
   normalizeTuiAgentEnvRecord
 } from '../../../../shared/tui-agent-launch-defaults'
 import { normalizeDisabledTuiAgents } from '../../../../shared/tui-agent-selection'
+import { WorktreeVisibilityDefaultsUpdate } from './worktree-visibility-defaults-schema'
 import type { TaskProvider } from '../../../../shared/task-providers'
 
 const TaskProviderParam = z.custom<TaskProvider>(isTaskProvider, {
@@ -40,6 +41,7 @@ const GitHubProjectSettings = z
 
 export const SettingsUpdate = z
   .object({
+    worktreeVisibilityDefaults: WorktreeVisibilityDefaultsUpdate.optional(),
     defaultTuiAgent: z
       .unknown()
       .transform((value) =>

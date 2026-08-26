@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createScopedExternalAutomations } from './external-manager'
 import { ExternalAutomationManagerCache } from './external-automation-manager-cache'
 import { ExternalAutomationProbeScheduler } from './external-automation-probe-scheduler'
-import { getActiveMultiplexer } from '../ipc/ssh'
+import { getActiveMultiplexer } from '../ssh/ssh-target-registry'
 import { AutomationOwnerConflictError } from '../../shared/automation-owner-conflict'
 import type { AutomationOwnerRef } from '../../shared/automation-owner-ref'
 import {
@@ -21,7 +21,7 @@ vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof Fs>('fs')
   return { ...actual, existsSync: existsSyncMock }
 })
-vi.mock('../ipc/ssh', () => ({ getActiveMultiplexer: vi.fn() }))
+vi.mock('../ssh/ssh-target-registry', () => ({ getActiveMultiplexer: vi.fn() }))
 
 function sshTarget(overrides: Partial<SshTarget> = {}): SshTarget {
   return {

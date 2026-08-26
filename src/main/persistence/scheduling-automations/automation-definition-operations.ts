@@ -196,7 +196,6 @@ export function updateAutomation(
     nextRunAt: scheduleChanged
       ? nextAutomationOccurrenceAfter(rrule, dtstart, Date.now())
       : current.nextRunAt,
-    enabledDecidedBy: updates.enabled !== undefined ? 'user' : current.enabledDecidedBy,
     updatedAt: Date.now()
   }
   const previousPin = automationWorkspaceSshPin(operations.state, current.workspaceId)
@@ -218,7 +217,10 @@ export function updateAutomation(
     executionTarget,
     workspaceSshPinMoved ? undefined : workspaceSshPin
   )
-  operations.state.automations[index] = updated
+  // Replaced, not patched in place: the list projection caches on array identity.
+  operations.state.automations = operations.state.automations.map((entry) =>
+    entry.id === id ? updated : entry
+  )
   operations.flush()
   return updated
 }

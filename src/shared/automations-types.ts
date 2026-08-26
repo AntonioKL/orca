@@ -6,7 +6,6 @@ export type AutomationWorkspaceMode = 'existing' | 'new_per_run'
 export type AutomationExecutionTargetType = 'local' | 'ssh'
 export type AutomationSchedulerOwner = 'local_host_service' | 'ssh_bridge' | 'remote_host_service'
 export type AutomationMissedRunPolicy = 'run_once_within_grace'
-export type AutomationEnablementDecider = 'owner_migration' | 'user'
 export type AutomationRunStatus =
   | 'pending'
   | 'dispatching'
@@ -123,10 +122,6 @@ export type Automation = {
   rrule: string
   dtstart: number
   enabled: boolean
-  /** Why: who last decided `enabled`. The load migration disables an orphan once and
-   *  stamps itself; `user` is the user overruling that, which no later load may undo.
-   *  Absent on records the migration has never acted on. */
-  enabledDecidedBy?: AutomationEnablementDecider
   nextRunAt: number
   lastRunAt?: number
   missedRunPolicy: AutomationMissedRunPolicy

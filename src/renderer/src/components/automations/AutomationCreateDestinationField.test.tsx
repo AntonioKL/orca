@@ -8,7 +8,7 @@ import { AutomationCreateDestinationField } from './AutomationCreateDestinationF
 import type { AutomationHostCatalogEntry } from './automation-host-catalog-types'
 import type { AutomationOwnerRef } from '../../../../shared/automation-owner-ref'
 import type { AutomationCreateDestinationControl } from './use-automation-create-destination'
-import type { Repo } from '../../../../shared/types'
+import type { Repo } from '../../../../shared/repo-types'
 
 let container: HTMLDivElement
 let root: Root

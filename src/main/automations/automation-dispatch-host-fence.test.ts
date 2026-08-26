@@ -284,7 +284,9 @@ describe('scheduled dispatch fenced on the host the record captured', () => {
     expect(send).toHaveBeenCalledWith('automations:dispatchRequested', expect.anything())
   })
 
-  it('leaves a legacy record with no run context alone', async () => {
+  // A missing run context resolves from bare repo state, which survives the host
+  // being replaced — so the legacy path must consult the same verdict.
+  it('refuses a legacy record with no run context once its host was replaced', async () => {
     vi.setSystemTime(new Date('2026-05-13T08:00:00'))
     const store = await createStore()
     const automation = seedSshAutomation(store)
@@ -298,7 +300,11 @@ describe('scheduled dispatch fenced on the host the record captured', () => {
 
     await evaluateAt(store, service, automation.id, '2026-05-13T09:01:00')
 
-    expect(send).toHaveBeenCalledWith('automations:dispatchRequested', expect.anything())
+    expect(send).not.toHaveBeenCalled()
+    expect(store.listAutomationRuns(automation.id)[0]).toMatchObject({
+      status: 'skipped_unavailable',
+      error: REPLACED
+    })
   })
 
   // The fold in #26 keys on byte-identical error text. A generation number, a host

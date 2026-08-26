@@ -199,8 +199,8 @@ describe('SSH re-adoption migrates automations', () => {
       targetGeneration: added.generation
     })
     expect(store.getRepo('repo-1')?.connectionId).toBe(added.id)
-    // The migration's orphan disable is not undone here: re-adoption repairs identity, not intent.
-    expect(store.listAutomations()[0].enabled).toBe(false)
+    // Enablement is the user's intent and is never rewritten by migration or re-adoption.
+    expect(store.listAutomations()[0].enabled).toBe(true)
   })
 
   it('persists the automation, repo and filter migrations together', async () => {

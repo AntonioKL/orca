@@ -100,7 +100,15 @@ function makeExternalEntry(
     runs: [],
     ...overrides
   }
-  return { key: `${manager.id}:${job.id}`, manager, job }
+  return {
+    key: `${manager.id}:${job.id}`,
+    scope: {
+      owner: { authority: { kind: 'desktop' }, selector: { kind: 'self' } },
+      provider: manager.provider
+    },
+    manager,
+    job
+  }
 }
 
 describe('automation-list-view', () => {

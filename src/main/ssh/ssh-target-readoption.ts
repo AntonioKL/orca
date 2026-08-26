@@ -37,11 +37,6 @@ function tombstoneMatches(
     // or a second alias for the same endpoint would steal the first's workspaces.
     return targetAlias === tombstoneAlias
   }
-  // A synthetic tombstone (built from an automation's dead target reference) has
-  // no real host identity, so the tuple would be a wildcard — never match on it.
-  if (tombstone.origin === 'automation-scan') {
-    return false
-  }
   // Fallback: identical host+user+port. Used when either side has no real alias
   // (manual adds default configHost to host), so a different account or port on
   // the same host is correctly treated as a different target.

@@ -196,11 +196,20 @@ describe('owner-fenced mutations', () => {
     expect(store.listAutomations().find((entry) => entry.id === 'ssh-1-a')?.enabled).toBe(true)
   })
 
-  it('keeps legacy mutations compatible without an owner field', async () => {
+  // Optional on the wire is not unenforced: a caller that names no host may not
+  // mutate a record fenced to an SSH registration.
+  it('refuses an ownerless mutation of a generation-bearing SSH record', async () => {
     const store = await createStore()
-    expect(store.updateAutomation('ssh-1-a', { enabled: false }).enabled).toBe(false)
-    expect(() => store.deleteAutomation('ssh-1-a')).not.toThrow()
-    expect(store.listAutomations()).toHaveLength(2)
+    const required = expect.objectContaining({
+      code: AUTOMATION_OWNER_CONFLICT_CODES.fencingRequired
+    })
+    expect(() => store.updateAutomation('ssh-1-a', { enabled: false })).toThrowError(required)
+    expect(() => store.deleteAutomation('ssh-1-a')).toThrowError(required)
+    expect(() =>
+      store.assertAutomationOwnerFence({ id: 'ssh-1-a', operation: 'execute' })
+    ).toThrowError(required)
+    expect(store.listAutomations().find((entry) => entry.id === 'ssh-1-a')?.enabled).toBe(true)
+    expect(store.listAutomations()).toHaveLength(3)
   })
 
   it('leaves a legacy client unaffected on a self record', async () => {
@@ -278,7 +287,9 @@ describe('projected owner precondition', () => {
   it('satisfies the fence it was projected from, on the record that used to refuse', async () => {
     const store = await createStore()
     const owner = store.automationOwnerPrecondition('ssh-1-a')!
-    expect(() => store.updateAutomation('ssh-1-a', { enabled: false })).not.toThrow()
+    expect(() => store.updateAutomation('ssh-1-a', { enabled: false })).toThrowError(
+      expect.objectContaining({ code: AUTOMATION_OWNER_CONFLICT_CODES.fencingRequired })
+    )
     expect(
       store.updateAutomation('ssh-1-a', { enabled: false }, { expectedOwner: owner }).enabled
     ).toBe(false)

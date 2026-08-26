@@ -229,10 +229,8 @@ export class LoadedStateParsingOperations {
       repos,
       folderWorkspaces: result.folderWorkspaces,
       projectGroups: result.projectGroups,
-      removedSshTargetTombstones: result.removedSshTargetTombstones ?? [],
       sshTargetGenerationCounter: result.sshTargetGenerationCounter,
-      storageAuthority: this.runtime.storageAuthority,
-      now: Date.now()
+      storageAuthority: this.runtime.storageAuthority
     })
     if (automationOwnerMigration.changed) {
       this.runtime.loadNeedsSave = true
@@ -241,7 +239,6 @@ export class LoadedStateParsingOperations {
       ...result,
       automations: automationOwnerMigration.automations,
       sshTargets: automationOwnerMigration.sshTargets,
-      removedSshTargetTombstones: automationOwnerMigration.removedSshTargetTombstones,
       sshTargetGenerationCounter: automationOwnerMigration.sshTargetGenerationCounter
     }
 

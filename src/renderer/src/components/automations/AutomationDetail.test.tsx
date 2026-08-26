@@ -60,37 +60,15 @@ afterEach(async () => {
 })
 
 describe('AutomationDetail enablement', () => {
-  it('says Orca paused it, why, and what to do about it', async () => {
-    const container = await render({ enabled: false, enabledDecidedBy: 'owner_migration' })
-
-    expect(container.textContent).toContain('Paused by Orca')
-    expect(notice(container)?.textContent).toContain('You did not pause it.')
-    // The affordance is the point: without it the user is told it stopped and
-    // left with no move. Re-adding the host and resuming are different fixes.
-    expect(notice(container)?.textContent).toContain('Re-add that host')
-    expect(notice(container)?.textContent).toContain('resume the automation')
-  })
-
-  it('leaves a user-paused record reading as a plain pause', async () => {
-    const container = await render({ enabled: false, enabledDecidedBy: 'user' })
-
-    expect(container.textContent).toContain('Paused')
-    expect(container.textContent).not.toContain('Paused by Orca')
-    expect(notice(container)).toBeNull()
-  })
-
-  it('adds no new state to a pre-stamp record, which is every record until one is disabled', async () => {
+  it('shows a paused record as a plain pause', async () => {
     const container = await render({ enabled: false })
 
     expect(container.textContent).toContain('Paused')
-    expect(container.textContent).not.toContain('Paused by Orca')
     expect(notice(container)).toBeNull()
   })
 
-  it('never explains a running automation', async () => {
-    // The authority restamps to `user` on resume, but the renderer holds the
-    // old record until the list comes back — so `enabled` has to win the race.
-    const container = await render({ enabled: true, enabledDecidedBy: 'owner_migration' })
+  it('shows a running automation as enabled', async () => {
+    const container = await render({ enabled: true })
 
     expect(container.textContent).toContain('Enabled')
     expect(notice(container)).toBeNull()

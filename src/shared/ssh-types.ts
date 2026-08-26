@@ -77,11 +77,6 @@ export type RemovedSshTargetTombstone = {
   label: string
   /** ms epoch when the target was removed, for pruning old tombstones. */
   removedAt: number
-  /** `automation-scan` tombstones are synthesized from a stored automation's dead
-   *  target reference, so they carry a label but no real host identity. They must
-   *  never match a re-added host on the host/port/username tuple. Undefined means
-   *  `removed` (a real removal that recorded the target's identity). */
-  origin?: 'removed' | 'automation-scan'
 }
 
 /** Exact repo ownership changes made while re-adopting a removed SSH host. */

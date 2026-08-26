@@ -144,7 +144,8 @@ export function useAutomationHostCatalog(
           referencedStableKeys
         })
       ),
-    [desktopLabel, orphanCount, referencedStableKeys, sourceState]
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- cacheVersion is the cache's change signal: orphan counts only exist in committed answers, so the catalog re-reads them when the cache moves.
+    [cacheVersion, desktopLabel, orphanCount, referencedStableKeys, sourceState]
   )
 
   // Why a signature rather than the catalog object: health and label changes
