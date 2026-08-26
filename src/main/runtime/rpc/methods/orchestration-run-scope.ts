@@ -42,16 +42,28 @@ export type OrchestrationCallerParams = {
   callerAuthority?: OrchestrationCompatibilityCallerAuthority
   /** Preserve legacy callers that treated a missing pane as an ordinary fence. */
   requireStablePane?: boolean
-  /** run-use performs its takeover check between pane resolution and attestation. */
-  assertEvidence?: boolean
+  /**
+   * Skip attestation here because the caller performs it itself — run-use must run
+   * its legacy-takeover check between pane resolution and attestation. Setting this
+   * without asserting elsewhere reopens the hole this helper exists to close.
+   */
+  evidenceAssertedByCaller?: boolean
 }
 
 /** Resolve the caller's runtime pane and, by default, attest its declared handle. */
 export function resolveOrchestrationCaller(
   runtime: OrcaRuntimeService,
+  params: OrchestrationCallerParams & { requireStablePane: true }
+): string
+export function resolveOrchestrationCaller(
+  runtime: OrcaRuntimeService,
+  params: OrchestrationCallerParams
+): string | null
+export function resolveOrchestrationCaller(
+  runtime: OrcaRuntimeService,
   params: OrchestrationCallerParams
 ): string | null {
-  if (params.assertEvidence !== false) {
+  if (!params.evidenceAssertedByCaller) {
     assertCallerHandleMatchesEvidence(runtime, params.callerTerminalHandle, params.callerEvidence)
   }
   const paneKey =

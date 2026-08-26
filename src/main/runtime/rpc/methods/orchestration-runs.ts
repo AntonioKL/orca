@@ -35,7 +35,7 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
         callerTerminalHandle: params.from,
         callerEvidence: orchestrationCompatibilityEvidence,
         requireStablePane: true
-      }) as string
+      })
       const db = runtime.getOrchestrationDb()
       const priorRun = db.getCurrentRunForPane(paneKey)
       const run = db.createRun({
@@ -67,8 +67,8 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
         callerEvidence: orchestrationCompatibilityEvidence,
         callerAuthority,
         requireStablePane: true,
-        assertEvidence: false
-      }) as string
+        evidenceAssertedByCaller: true
+      })
       if (
         params.takeoverLegacy &&
         (callerAuthority?.terminalHandle !== params.from || callerAuthority.paneKey !== paneKey)
@@ -111,7 +111,7 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
         callerTerminalHandle: params.from,
         callerEvidence: orchestrationCompatibilityEvidence,
         requireStablePane: true
-      }) as string
+      })
       return { run: runtime.getOrchestrationDb().getCurrentRunForPane(paneKey) ?? null }
     }
   }),
