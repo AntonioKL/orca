@@ -21,6 +21,7 @@ import type {
   DirectSshPaneRetryResult
 } from '../slices/direct-ssh-terminal-recovery'
 import type { NativeChatLaunchDraft, NativeChatLaunchPrompt } from '@/lib/native-chat-launch-prompt'
+import type { TerminalCreateRoutingOutcome } from '@/lib/terminal-create-routing-outcome'
 import type { AgentStatusWorktreeShutdownReason } from '../slices/agent-status'
 import type {
   TerminalTabCloseReason,
@@ -76,7 +77,8 @@ export type TerminalActions = {
       forceHostRuntime?: boolean
     }
   ) => TerminalTab
-  openNewTerminalTabInActiveWorkspace: (groupId: string) => Promise<void>
+  /** Callers must surface a non-created outcome; a routed creation that fails is otherwise invisible. */
+  openNewTerminalTabInActiveWorkspace: (groupId: string) => Promise<TerminalCreateRoutingOutcome>
   /** Synchronous retirement: provider teardown starts before state removal but is never awaited. */
   closeTab: (
     tabId: string,

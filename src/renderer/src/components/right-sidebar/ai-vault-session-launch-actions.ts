@@ -6,6 +6,7 @@ import {
   type AiVaultResumeStartup
 } from '@/lib/ai-vault-resume-command'
 import { launchAiVaultSessionInNewTab } from '@/lib/launch-ai-vault-session'
+import { agentLaunchFailureMessage } from '@/lib/terminal-create-routing-outcome'
 import {
   activateAndRevealFolderWorkspace,
   activateAndRevealWorktree
@@ -122,15 +123,17 @@ export function useAiVaultSessionLaunchActions({
           })
           if (launchResult.tabId === null) {
             void launchResult.runtimeLaunch.then((outcome) => {
-              if (outcome.status === 'failed') {
-                toast.error(
-                  outcome.message ||
-                    translate(
-                      'auto.lib.launch.agent.in.new.tab.11cce5cc77',
-                      'Could not launch {{value0}} in a new terminal.',
-                      { value0: agentLabel(session.agent) }
-                    )
-                )
+              const failureMessage = agentLaunchFailureMessage(outcome, agentLabel(session.agent))
+              if (failureMessage) {
+                toast.error(failureMessage)
+                // Why: an unconfirmed launch may already be live on the host, so put the user
+                // where "check the workspace" is actionable instead of inviting a duplicate retry.
+                if (
+                  outcome.status === 'unverifiable' &&
+                  useAppStore.getState().activeWorktreeId !== targetId.worktreeId
+                ) {
+                  activateAiVaultResumeWorkspace(targetId.worktreeId)
+                }
                 return
               }
               if (useAppStore.getState().activeWorktreeId !== targetId.worktreeId) {

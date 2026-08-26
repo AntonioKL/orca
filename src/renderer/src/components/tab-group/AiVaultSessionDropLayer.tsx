@@ -17,6 +17,7 @@ import {
   getAiVaultAgentProviderSession
 } from '@/lib/ai-vault-resume-command'
 import { launchAiVaultSessionInNewTab } from '@/lib/launch-ai-vault-session'
+import { agentLaunchFailureMessage } from '@/lib/terminal-create-routing-outcome'
 import { aiVaultSessionNeedsResumePreparation } from '@/lib/ai-vault-session-resume-preparation'
 import { useAppStore } from '@/store'
 import { resolveDropZone } from './tab-drop-zone'
@@ -270,15 +271,9 @@ export default function AiVaultSessionDropLayer({
           })
           if (launchResult.tabId === null) {
             void launchResult.runtimeLaunch.then((outcome) => {
-              if (outcome.status === 'failed') {
-                toast.error(
-                  outcome.message ||
-                    translate(
-                      'auto.lib.launch.agent.in.new.tab.11cce5cc77',
-                      'Could not launch {{value0}} in a new terminal.',
-                      { value0: payload.agent }
-                    )
-                )
+              const failureMessage = agentLaunchFailureMessage(outcome, payload.agent)
+              if (failureMessage) {
+                toast.error(failureMessage)
                 return
               }
               showQueuedToast()

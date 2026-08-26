@@ -6,6 +6,7 @@ import type { RuntimeStatus } from '../../../../shared/runtime-types'
 import type { Worktree } from '../../../../shared/worktree/types'
 import {
   getClientForEnvironment,
+  manuallyDisconnectedAfterReplyResponse,
   manuallyDisconnectedEnvironmentIds,
   manuallyDisconnectedResponse,
   requireActiveEnvironment,
@@ -35,14 +36,19 @@ export async function callRuntimeEnvelope<TResult = unknown>(
   if (manuallyDisconnectedEnvironmentIds.has(environment.id)) {
     return manuallyDisconnectedResponse(environment)
   }
+  let dispatched = false
   const response = await runtimeCallQueuePool.enqueue(environment.id, method, () => {
     if (manuallyDisconnectedEnvironmentIds.has(environment.id)) {
       return Promise.resolve(manuallyDisconnectedResponse(environment))
     }
+    dispatched = true
     return getClientForEnvironment(environment).call(method, params, { timeoutMs })
   })
   if (manuallyDisconnectedEnvironmentIds.has(environment.id)) {
-    return manuallyDisconnectedResponse(environment)
+    // Why: only a dispatched call can already have been answered; a queued one definitely was not.
+    return dispatched
+      ? manuallyDisconnectedAfterReplyResponse(environment)
+      : manuallyDisconnectedResponse(environment)
   }
   updateEnvironmentFromResponse(environment, response)
   return response as RuntimeRpcResponse<TResult>
@@ -58,14 +64,19 @@ export async function callEnvironmentEnvelope<TResult = unknown>(
   if (manuallyDisconnectedEnvironmentIds.has(environment.id)) {
     return manuallyDisconnectedResponse(environment)
   }
+  let dispatched = false
   const response = await runtimeCallQueuePool.enqueue(environment.id, method, () => {
     if (manuallyDisconnectedEnvironmentIds.has(environment.id)) {
       return Promise.resolve(manuallyDisconnectedResponse(environment))
     }
+    dispatched = true
     return getClientForEnvironment(environment).call(method, params, { timeoutMs })
   })
   if (manuallyDisconnectedEnvironmentIds.has(environment.id)) {
-    return manuallyDisconnectedResponse(environment)
+    // Why: only a dispatched call can already have been answered; a queued one definitely was not.
+    return dispatched
+      ? manuallyDisconnectedAfterReplyResponse(environment)
+      : manuallyDisconnectedResponse(environment)
   }
   updateEnvironmentFromResponse(environment, response)
   return response as RuntimeRpcResponse<TResult>

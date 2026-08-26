@@ -15,6 +15,10 @@ import { buildDuplicatedBrowserTabOptions } from '@/lib/duplicate-browser-tab-op
 import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
 import { browserWorkspaceHasRemoteOwner } from '@/runtime/remote-browser-tab-ownership'
 import { getClientCreationActionPolicy } from '@/lib/client-creation-action-policy'
+import {
+  reportTerminalCreateOutcome,
+  reportTerminalCreateRejection
+} from '@/lib/terminal-create-routing-outcome'
 import type { TabGroupWorktreeSnapshot } from './useTabGroupItemProjections'
 
 export function recordTerminalTabGroupSplit(createdTerminal: TerminalTab | null | undefined): void {
@@ -145,6 +149,8 @@ export function useTabGroupCreationCommands({
     },
     newTerminalTab: () => {
       void openNewTerminalTabInActiveWorkspace(groupId)
+        .then(reportTerminalCreateOutcome)
+        .catch(reportTerminalCreateRejection)
     },
     newTerminalWithShell: (shellOverride: string) => {
       void (async () => {
@@ -156,7 +162,12 @@ export function useTabGroupCreationCommands({
           command: shellOverride,
           activate: true
         })
-        if (outcome.status === 'created' || isWebRuntimeSessionActive(environmentId)) {
+        if (outcome.status === 'created') {
+          return
+        }
+        // Why: an owning runtime keeps ownership on failure (no local fallback), so say why nothing opened.
+        if (isWebRuntimeSessionActive(environmentId)) {
+          reportTerminalCreateOutcome(outcome)
           return
         }
         const terminal = createTab(worktreeId, groupId, shellOverride)

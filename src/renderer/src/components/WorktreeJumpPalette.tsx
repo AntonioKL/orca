@@ -109,6 +109,7 @@ import {
 } from '@/lib/palette-repo-resolution'
 import { activateBrowserPagePaletteResult } from '@/lib/browser-page-palette-activation'
 import { activateSimulatorTabPaletteResult } from '@/lib/simulator-tab-palette-activation'
+import { reportTerminalCreateOutcome } from '@/lib/terminal-create-routing-outcome'
 import {
   buildSearchableSimulatorTabs,
   searchSimulatorTabs,
@@ -822,6 +823,13 @@ function WorktreeJumpPaletteContent({
   const openNewMarkdownInActiveWorkspace = useAppStore((s) => s.openNewMarkdownInActiveWorkspace)
   const openNewTerminalTabInActiveWorkspace = useAppStore(
     (s) => s.openNewTerminalTabInActiveWorkspace
+  )
+  // Why: quick actions report through thrown errors; the terminal action reports a routing outcome instead.
+  const openNewTerminalTabWithFailureNotice = useCallback(
+    async (groupId: string) => {
+      reportTerminalCreateOutcome(await openNewTerminalTabInActiveWorkspace(groupId))
+    },
+    [openNewTerminalTabInActiveWorkspace]
   )
   const settingsSections = useSettingsNavigationMetadata()
 
@@ -1785,7 +1793,7 @@ function WorktreeJumpPaletteContent({
         activeGroupSnapshot: activeGroupSnapshotRef.current,
         openNewBrowserTab: openNewBrowserTabInActiveWorkspace,
         openNewMarkdownFile: openNewMarkdownInActiveWorkspace,
-        openNewTerminalTab: openNewTerminalTabInActiveWorkspace,
+        openNewTerminalTab: openNewTerminalTabWithFailureNotice,
         openCreateWorkspace: openCreateWorkspaceAction,
         deleteActiveWorkspace: deleteActiveWorkspaceAction,
         openAddQuickCommand: openAddQuickCommandAction
@@ -1796,7 +1804,7 @@ function WorktreeJumpPaletteContent({
       openCreateWorkspaceAction,
       openNewBrowserTabInActiveWorkspace,
       openNewMarkdownInActiveWorkspace,
-      openNewTerminalTabInActiveWorkspace
+      openNewTerminalTabWithFailureNotice
     ]
   )
 
@@ -2731,15 +2739,18 @@ function WorktreeJumpPaletteContent({
           recordFeatureInteraction('cmd-j-quick-action')
         })
         .catch((error: unknown) => {
-          if (!action.id.startsWith('plugin:')) {
-            throw error
-          }
-          toast.error(
-            translate(
-              'auto.components.WorktreeJumpPalette.pluginCommandFailed',
-              'Could not run the plugin command.'
+          if (action.id.startsWith('plugin:')) {
+            toast.error(
+              translate(
+                'auto.components.WorktreeJumpPalette.pluginCommandFailed',
+                'Could not run the plugin command.'
+              )
             )
-          )
+            return
+          }
+          // Why: the rethrow feeds crash breadcrumbs, but the user still needs to learn why nothing opened.
+          toast.error(error instanceof Error ? error.message : String(error))
+          throw error
         })
     },
     [buildQuickActionContext, closeModal, recordFeatureInteraction]

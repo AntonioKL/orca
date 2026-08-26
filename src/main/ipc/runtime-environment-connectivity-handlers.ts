@@ -3,7 +3,8 @@ import {
   addEnvironmentFromPairingCode,
   listEnvironments,
   removeEnvironment,
-  resolveEnvironment
+  resolveEnvironment,
+  RuntimeEnvironmentStoreError
 } from '../../shared/runtime-environment-store'
 import {
   redactRuntimeEnvironment,
@@ -26,18 +27,33 @@ import {
 
 const manuallyDisconnectedEnvironmentIds = new Set<string>()
 
-function manuallyDisconnectedResponse(
-  environment: ReturnType<typeof resolveEnvironment>
+function manualDisconnectResponse(
+  environment: ReturnType<typeof resolveEnvironment>,
+  code: 'runtime_manually_disconnected' | 'runtime_manually_disconnected_after_reply'
 ): RuntimeRpcResponse<never> {
   return {
     id: 'runtime.manualDisconnect',
     ok: false,
-    error: {
-      code: 'runtime_manually_disconnected',
-      message: 'Runtime environment is manually disconnected.'
-    },
+    error: { code, message: 'Runtime environment is manually disconnected.' },
     _meta: { runtimeId: environment.runtimeId }
   }
+}
+
+/** The call never left this process, so whatever it asked for definitely did not happen. */
+function manuallyDisconnectedResponse(
+  environment: ReturnType<typeof resolveEnvironment>
+): RuntimeRpcResponse<never> {
+  return manualDisconnectResponse(environment, 'runtime_manually_disconnected')
+}
+
+/**
+ * Discarding a reply the runtime already sent is not the same as refusing to dispatch: the discarded
+ * reply may have been `ok:true`, so callers must read this as "outcome unknown", not "did not happen".
+ */
+function manuallyDisconnectedAfterReplyResponse(
+  environment: ReturnType<typeof resolveEnvironment>
+): RuntimeRpcResponse<never> {
+  return manualDisconnectResponse(environment, 'runtime_manually_disconnected_after_reply')
 }
 
 export function isRuntimeEnvironmentManuallyDisconnected(environmentId: string): boolean {
@@ -161,7 +177,7 @@ function registerPassiveStatusHandler(getUserDataPath: () => string): void {
         args.timeoutMs
       )
       return isRuntimeEnvironmentManuallyDisconnected(environment.id)
-        ? manuallyDisconnectedResponse(environment)
+        ? manuallyDisconnectedAfterReplyResponse(environment)
         : response
     }
   )
@@ -186,6 +202,19 @@ function runtimeEnvironmentCallFailure(
   }
 }
 
+/**
+ * Electron IPC drops the error code on a rejection, so a selector the main process already refused
+ * would reach the renderer as an unclassifiable string it could only treat as "outcome unknown".
+ */
+function runtimeEnvironmentSelectorFailure(
+  method: string,
+  error: unknown
+): RuntimeRpcFailure | null {
+  return error instanceof RuntimeEnvironmentStoreError
+    ? { id: method, ok: false, error: { code: error.code, message: error.message } }
+    : null
+}
+
 function registerPassiveCallHandler(getUserDataPath: () => string): void {
   ipcMain.handle(
     'runtimeEnvironments:call',
@@ -199,7 +228,16 @@ function registerPassiveCallHandler(getUserDataPath: () => string): void {
         expectedEnvironmentPairingRevision?: number
       }
     ): Promise<RuntimeRpcResponse<unknown>> => {
-      const environment = resolveEnvironment(getUserDataPath(), args.selector)
+      let environment: ReturnType<typeof resolveEnvironment>
+      try {
+        environment = resolveEnvironment(getUserDataPath(), args.selector)
+      } catch (error) {
+        const failure = runtimeEnvironmentSelectorFailure(args.method, error)
+        if (failure) {
+          return failure
+        }
+        throw error
+      }
       if (isRuntimeEnvironmentManuallyDisconnected(environment.id)) {
         return manuallyDisconnectedResponse(environment)
       }
@@ -221,7 +259,7 @@ function registerPassiveCallHandler(getUserDataPath: () => string): void {
         throw error
       }
       return isRuntimeEnvironmentManuallyDisconnected(environment.id)
-        ? manuallyDisconnectedResponse(environment)
+        ? manuallyDisconnectedAfterReplyResponse(environment)
         : response
     }
   )

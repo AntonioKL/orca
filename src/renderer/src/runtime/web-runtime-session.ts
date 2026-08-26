@@ -37,7 +37,11 @@ import type { TuiAgent } from '../../../shared/tui-agent'
 import { createBrowserUuid } from '../lib/browser-uuid'
 import { getRuntimeEnvironmentIdForWorktree } from '../lib/worktree-runtime-owner'
 import { useAppStore } from '../store'
-import { hasRuntimeRpcErrorCode, unwrapRuntimeRpcResult } from './runtime-rpc-client'
+import {
+  hasRuntimeRpcErrorCode,
+  RuntimeRpcCallError,
+  unwrapRuntimeRpcResult
+} from './runtime-rpc-client'
 import {
   createAgentSessionCreateOperation,
   withAgentSessionCreateOperationId
@@ -125,6 +129,69 @@ export function isWebRuntimeSessionActive(
 export type WebRuntimeTerminalCreateOutcome =
   | { status: 'created' }
   | { status: 'failed'; message: string }
+  /** The host never confirmed either way, so the PTY may exist. Never report this as a failure. */
+  | { status: 'unverifiable'; message: string }
+
+/**
+ * Reply codes that report the host's own loss of contact with the executor rather than a refusal,
+ * so the create is as unknown as a call that never got a reply at all.
+ */
+const UNVERIFIABLE_TERMINAL_CREATE_CODES: ReadonlySet<string> = new Set([
+  'invalid_runtime_response',
+  // Why: the call paths substitute this envelope for an already-received reply, so it is
+  // indistinguishable from a create the host answered `ok:true` before the disconnect landed. The
+  // plain `runtime_manually_disconnected` code is the pre-dispatch refusal and stays a definite failure.
+  'runtime_manually_disconnected_after_reply',
+  'relay_request_superseded',
+  'remote_runtime_unavailable',
+  'runtime_timeout',
+  'runtime_unavailable',
+  'timeout'
+])
+
+function findRuntimeRpcCallError(error: unknown): RuntimeRpcCallError | null {
+  const seen = new Set<unknown>()
+  let current: unknown = error
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    if (current instanceof RuntimeRpcCallError) {
+      return current
+    }
+    seen.add(current)
+    current = (current as { cause?: unknown }).cause
+  }
+  return null
+}
+
+/**
+ * Refusal codes a cause-dropping transport can only carry as a bare token in the message. Absent
+ * one, the create stays unverifiable — an unreadable error is not evidence the host refused.
+ */
+const DEFINITIVE_TERMINAL_CREATE_FAILURE_CODES = [
+  'capability_unsupported',
+  'forbidden',
+  'invalid_argument',
+  'invalid_params',
+  'method_not_found',
+  'runtime_rpc_queue_overloaded',
+  'selector_ambiguous',
+  'selector_not_found',
+  'unauthorized'
+] as const
+
+/** Only a delivered `ok:false` reply proves the host refused; a lost or timed-out call proves nothing. */
+function classifyTerminalCreateFailure(error: unknown): 'failed' | 'unverifiable' {
+  const reply = findRuntimeRpcCallError(error)
+  if (reply) {
+    return UNVERIFIABLE_TERMINAL_CREATE_CODES.has(reply.code) ? 'unverifiable' : 'failed'
+  }
+  // Why: Electron IPC and relay re-throws re-wrap the reply and drop the cause (runtime-rpc-result.ts),
+  // so a refusal token in the message is the only surviving proof the call was answered.
+  return DEFINITIVE_TERMINAL_CREATE_FAILURE_CODES.some((code) =>
+    hasRuntimeRpcErrorCode(error, code)
+  )
+    ? 'failed'
+    : 'unverifiable'
+}
 
 const DEFINITIVE_BROWSER_CREATE_FAILURE_CODES = [
   'browser_error',
@@ -233,7 +300,7 @@ export async function createWebRuntimeAgentSessionTerminal(
   promptDelivered: boolean
 }> {
   const created = await createWebRuntimeSessionTerminalResult(args)
-  if (created.outcome.status === 'failed' || !created.hostTabId) {
+  if (created.outcome.status !== 'created' || !created.hostTabId) {
     return { outcome: created.outcome, promptDelivered: false }
   }
 
@@ -259,7 +326,7 @@ export async function createWebRuntimeAgentSessionTerminalWithLaunchDraft(
   }
 ): Promise<WebRuntimeTerminalCreateOutcome> {
   const created = await createWebRuntimeSessionTerminalResult(args)
-  if (created.outcome.status !== 'failed' && created.hostTabId) {
+  if (created.outcome.status === 'created' && created.hostTabId) {
     seedNativeChatLaunchDraftForAgentTab({
       tabId: toWebTerminalSurfaceTabId(created.hostTabId),
       agent: args.agent,
@@ -503,7 +570,9 @@ async function createWebRuntimeSessionTerminalResult(
     // Why: once the host accepted creation, reporting failure invites the user
     // to retry with a new operation ID and can duplicate a fresh agent.
     return {
-      outcome: hostCreated ? { status: 'created' } : { status: 'failed', message },
+      outcome: hostCreated
+        ? { status: 'created' }
+        : { status: classifyTerminalCreateFailure(error), message },
       ...(createdTabId ? { hostTabId: createdTabId } : {})
     }
   }

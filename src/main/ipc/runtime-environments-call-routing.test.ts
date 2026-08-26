@@ -448,6 +448,80 @@ describe('registerRuntimeEnvironmentHandlers', () => {
     }
   )
 
+  it('returns a coded refusal when the selector names no saved environment', async () => {
+    registerRuntimeEnvironmentHandlers(store as never)
+    const call = handler<{ selector: string; method: string }, RuntimeRpcResponse<unknown>>(
+      'runtimeEnvironments:call'
+    )
+
+    // Why: Electron IPC drops the error code on a rejection, so a renderer could not tell this
+    // refusal — the call never left the client — from a reply that was lost in transit.
+    const response = structuredClone(
+      await call(null, { selector: 'env-1', method: 'session.tabs.createTerminal' })
+    )
+    expect(response.ok).toBe(false)
+    if (response.ok === false) {
+      expect(response.error).toEqual({
+        code: 'invalid_argument',
+        message: 'Unknown environment: env-1'
+      })
+    }
+    expect(sendRemoteRuntimeRequestMock).not.toHaveBeenCalled()
+  })
+
+  it('separates a pre-dispatch manual disconnect from one that discards a delivered reply', async () => {
+    registerRuntimeEnvironmentHandlers(store as never)
+    const add = handler<
+      { name: string; pairingCode: string },
+      { environment: { id: string; name: string } }
+    >('runtimeEnvironments:addFromPairingCode')
+    await add(null, { name: 'desk', pairingCode: pairingCode() })
+    const disconnect = handler<{ selector: string }, unknown>('runtimeEnvironments:disconnect')
+    const call = handler<{ selector: string; method: string }, RuntimeRpcResponse<unknown>>(
+      'runtimeEnvironments:call'
+    )
+
+    // Why: the request never left the client, so the terminal definitely was not created.
+    await disconnect(null, { selector: 'desk' })
+    const beforeDispatch = structuredClone(
+      await call(null, { selector: 'desk', method: 'session.tabs.createTerminal' })
+    )
+    expect(beforeDispatch.ok).toBe(false)
+    if (beforeDispatch.ok === false) {
+      expect(beforeDispatch.error.code).toBe('runtime_manually_disconnected')
+    }
+    expect(sendRemoteRuntimeRequestMock).not.toHaveBeenCalled()
+
+    // Why: the discarded reply may have said ok:true, so this outcome is unknown, not a refusal.
+    sendRemoteRuntimeRequestMock.mockImplementation(async (_pairing, method) => {
+      if (method === 'status.get') {
+        return {
+          id: 'status',
+          ok: true,
+          result: { runtimeId: 'runtime-remote', capabilities: [] },
+          _meta: { runtimeId: 'runtime-remote' }
+        }
+      }
+      await disconnect(null, { selector: 'desk' })
+      return {
+        id: 'rpc-1',
+        ok: true,
+        result: { tab: { id: 'host-tab-1' } },
+        _meta: { runtimeId: 'runtime-remote' }
+      }
+    })
+    await handler<{ selector: string }, unknown>('runtimeEnvironments:connect')(null, {
+      selector: 'desk'
+    })
+    const afterReply = structuredClone(
+      await call(null, { selector: 'desk', method: 'session.tabs.createTerminal' })
+    )
+    expect(afterReply.ok).toBe(false)
+    if (afterReply.ok === false) {
+      expect(afterReply.error.code).toBe('runtime_manually_disconnected_after_reply')
+    }
+  })
+
   it('keeps uncoded call failures on the rejected IPC fallback path', async () => {
     registerRuntimeEnvironmentHandlers(store as never)
     sendRemoteRuntimeRequestMock.mockRejectedValue(new Error('shared down'))

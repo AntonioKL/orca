@@ -10,7 +10,7 @@ import type { AgentStartupPlan } from '@/lib/tui-agent-startup'
 import type { Tab } from '../../../shared/tab-types'
 import type { TuiAgent } from '../../../shared/tui-agent'
 import type { AgentPromptDelivery } from '../../../shared/agent-session-host-authority'
-import { translate } from '@/i18n/i18n'
+import { agentLaunchFailureMessage } from '@/lib/terminal-create-routing-outcome'
 import { toAgentLaunchPreferences } from '@/runtime/agent-session-create-operation'
 
 function removeStaleLocalAgentTabsForWebHostLaunch(worktreeId: string): void {
@@ -104,15 +104,9 @@ export function launchAgentInWebHostTab(args: {
     // Why: created means the host accepted the launch, not that a local tab
     // exists; keep pruning stale local rows until the snapshot mirrors.
     removeStaleLocalAgentTabsForWebHostLaunch(worktreeId)
-    if (outcome.status === 'failed') {
-      toast.error(
-        outcome.message ||
-          translate(
-            'auto.lib.launch.agent.in.new.tab.11cce5cc77',
-            'Could not launch {{value0}} in a new terminal.',
-            { value0: agent }
-          )
-      )
+    const failureMessage = agentLaunchFailureMessage(outcome, agent)
+    if (failureMessage) {
+      toast.error(failureMessage)
       return { delivered: false, failureNotified: true }
     }
     useAppStore.getState().setActiveTabType('terminal')

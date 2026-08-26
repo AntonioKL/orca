@@ -190,6 +190,10 @@ import {
 } from './terminal-pane/use-manual-terminal-worktree-parking'
 import { EDITOR_TAB_CONTENT_TYPES, getEditorCmdSaveFileId } from './editor/editor-cmd-save-target'
 import { getClientCreationActionPolicy } from '@/lib/client-creation-action-policy'
+import {
+  reportTerminalCreateOutcome,
+  reportTerminalCreateRejection
+} from '@/lib/terminal-create-routing-outcome'
 import type { WorktreeTabBucketProjection } from '@/lib/worktree-tab-bucket-projection'
 
 const EditorPanel = lazy(() => import('./editor/EditorPanel'))
@@ -1571,10 +1575,14 @@ function Terminal(): React.JSX.Element | null {
           command: shellOverride,
           activate: true
         })
+          .then(reportTerminalCreateOutcome)
+          .catch(reportTerminalCreateRejection)
         return
       }
       if (!shellOverride && targetGroupId) {
         void openNewTerminalTabInActiveWorkspace(targetGroupId)
+          .then(reportTerminalCreateOutcome)
+          .catch(reportTerminalCreateRejection)
         return
       }
       const newTab = createTab(activeWorktreeId, undefined, shellOverride)

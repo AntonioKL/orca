@@ -273,9 +273,11 @@ describe('web runtime environment identity', () => {
       _meta: { runtimeId: 'runtime-1' }
     })
 
+    // Why: the call was dispatched and answered, so the substitution reports an unknown outcome
+    // rather than the pre-dispatch refusal.
     await expect(status).resolves.toMatchObject({
       ok: false,
-      error: { code: 'runtime_manually_disconnected' }
+      error: { code: 'runtime_manually_disconnected_after_reply' }
     })
   })
 
@@ -338,7 +340,7 @@ describe('web runtime environment identity', () => {
         Array.from({ length: 8 }, () =>
           expect.objectContaining({
             ok: false,
-            error: expect.objectContaining({ code: 'runtime_manually_disconnected' })
+            error: expect.objectContaining({ code: 'runtime_manually_disconnected_after_reply' })
           })
         )
       )

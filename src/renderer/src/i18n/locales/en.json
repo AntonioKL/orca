@@ -16835,5 +16835,13 @@
   },
   "quickOpen": {
     "moreMatchesAvailable": "More matches may be available. Refine your search to narrow the results."
+  },
+  "terminalCreation": {
+    "failed": "Could not open a new terminal. {{message}}",
+    "unverified": "Orca could not confirm whether the new terminal opened. {{message}} Check the workspace before trying again.",
+    "unverifiedAgentLaunch": "Orca could not confirm whether {{agent}} launched in a new terminal. {{message}} Check the workspace before trying again.",
+    "ambiguousOwner": "More than one execution host claims this workspace, so Orca cannot tell where the terminal belongs. Select the workspace host explicitly, then try again.",
+    "unknownOwner": "Orca cannot tell which execution host owns this workspace, so it has nowhere to open the terminal. The host may still be connecting or out of contact; reopen the workspace and try again.",
+    "webClientNeedsPairedRuntime": "This workspace is not routed to a paired runtime, and the web client cannot open a terminal on the local machine. Pair its runtime or open the workspace in the Orca desktop app."
   }
 }

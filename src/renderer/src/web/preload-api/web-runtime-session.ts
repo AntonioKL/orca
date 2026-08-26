@@ -73,14 +73,15 @@ export function removeActiveRuntimeEnvironment(): void {
   webRuntimeState.activeEnvironment = null
 }
 
-export function manuallyDisconnectedResponse(
-  environment: StoredWebRuntimeEnvironment
+function manualDisconnectResponse(
+  environment: StoredWebRuntimeEnvironment,
+  code: 'runtime_manually_disconnected' | 'runtime_manually_disconnected_after_reply'
 ): RuntimeRpcResponse<never> {
   return {
     id: 'runtime.manualDisconnect',
     ok: false,
     error: {
-      code: 'runtime_manually_disconnected',
+      code,
       message: translate(
         'auto.web.webPreloadApi.runtimeEnvironmentManuallyDisconnected',
         'Runtime environment is manually disconnected.'
@@ -88,6 +89,23 @@ export function manuallyDisconnectedResponse(
     },
     _meta: { runtimeId: environment.runtimeId }
   }
+}
+
+/** The call never left this client, so whatever it asked for definitely did not happen. */
+export function manuallyDisconnectedResponse(
+  environment: StoredWebRuntimeEnvironment
+): RuntimeRpcResponse<never> {
+  return manualDisconnectResponse(environment, 'runtime_manually_disconnected')
+}
+
+/**
+ * Discarding a reply the runtime already sent is not the same as refusing to dispatch: the discarded
+ * reply may have been `ok:true`, so callers must read this as "outcome unknown", not "did not happen".
+ */
+export function manuallyDisconnectedAfterReplyResponse(
+  environment: StoredWebRuntimeEnvironment
+): RuntimeRpcResponse<never> {
+  return manualDisconnectResponse(environment, 'runtime_manually_disconnected_after_reply')
 }
 
 export function resolveEnvironment(selector: string): StoredWebRuntimeEnvironment {

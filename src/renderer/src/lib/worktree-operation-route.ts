@@ -12,6 +12,7 @@ import { resolveExplicitWorktreeOperationRouteResult } from './worktree-operatio
 import {
   findFolderWorkspaceOwner,
   getExecutionHostIdForFolderWorkspace,
+  hasNamedFolderWorkspaceExecutionHost,
   type FolderWorkspaceRuntimeOwnerState
 } from './folder-workspace-runtime-owner'
 
@@ -110,6 +111,49 @@ export function resolveWorktreeOperationRouteForHost(
   return resolution.kind === 'resolved' ? resolution.route : null
 }
 
+function selectedHostRuntimeOwnerEnvironmentIds(
+  state: WorktreeOperationRouteState,
+  worktreeId: string,
+  sshHostId: `ssh:${string}`
+): Set<string> {
+  const environmentIds = new Set<string>()
+  for (const owner of ownerRecordsOnHost(state, worktreeId, sshHostId)) {
+    const resolution = resolveExactWorktreeRoute(state, owner)
+    if (resolution.kind === 'resolved' && resolution.route.runtimeEnvironmentId) {
+      environmentIds.add(resolution.route.runtimeEnvironmentId)
+    }
+  }
+  return environmentIds
+}
+
+/**
+ * Why a resolved route carries no runtime owner. `resolveSelectedHostRoute` flattens "rival HUBs
+ * claim this host" and "no owner row has landed yet" into the same null, so a caller that cannot
+ * execute locally must not read that null as proof no runtime is paired.
+ */
+export function resolveRouteRuntimeOwner(
+  state: WorktreeOperationRouteState,
+  worktreeId: string,
+  route: WorktreeOperationRoute
+): WorktreeOperationRouteResolution {
+  const host = parseExecutionHostId(route.executionHostId)
+  if (route.runtimeEnvironmentId) {
+    return { kind: 'resolved', route }
+  }
+  if (host?.kind !== 'ssh') {
+    // Why: a folder route reads `local` both when a row named it and when nothing named anything
+    // (rows predating executionHostId/connectionId); only the first is evidence of an owner.
+    const workspaceScope = parseWorkspaceKey(worktreeId)
+    const namedFolderHost =
+      workspaceScope?.type !== 'folder' ||
+      hasNamedFolderWorkspaceExecutionHost(state, workspaceScope.folderWorkspaceId)
+    return namedFolderHost ? { kind: 'resolved', route } : { kind: 'missing' }
+  }
+  return selectedHostRuntimeOwnerEnvironmentIds(state, worktreeId, host.id).size > 1
+    ? { kind: 'ambiguous' }
+    : { kind: 'missing' }
+}
+
 function resolveSelectedHostRoute(
   state: WorktreeOperationRouteState,
   worktreeId: string,
@@ -122,13 +166,7 @@ function resolveSelectedHostRoute(
   if (selectedHost.kind !== 'ssh') {
     return { executionHostId: selectedHost.id, runtimeEnvironmentId: null }
   }
-  const environmentIds = new Set<string>()
-  for (const owner of ownerRecordsOnHost(state, worktreeId, selectedHost.id)) {
-    const resolution = resolveExactWorktreeRoute(state, owner)
-    if (resolution.kind === 'resolved' && resolution.route.runtimeEnvironmentId) {
-      environmentIds.add(resolution.route.runtimeEnvironmentId)
-    }
-  }
+  const environmentIds = selectedHostRuntimeOwnerEnvironmentIds(state, worktreeId, selectedHost.id)
   const environmentId = environmentIds.values().next().value
   return {
     executionHostId: selectedHost.id,

@@ -1,5 +1,6 @@
 import { focusTerminalTabSurface } from '@/lib/focus-terminal-tab-surface'
 import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
+import { reportTerminalCreateOutcome } from '@/lib/terminal-create-routing-outcome'
 import {
   createWebRuntimeSessionTerminal,
   isWebRuntimeSessionActive
@@ -54,7 +55,12 @@ export function registerTabLifecycleIpcBridge(unsubs: (() => void)[]): void {
           environmentId,
           activate: true
         })
-        if (outcome.status === 'created' || isWebRuntimeSessionActive(environmentId)) {
+        if (outcome.status === 'created') {
+          return
+        }
+        // Why: an owning runtime keeps ownership on failure (no local fallback), so say why nothing opened.
+        if (isWebRuntimeSessionActive(environmentId)) {
+          reportTerminalCreateOutcome(outcome)
           return
         }
         const newTab = store.createTab(worktreeId)

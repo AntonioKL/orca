@@ -134,11 +134,17 @@ export function getExplicitRuntimeEnvironmentIdForFolderWorkspace(
   return getRestoredRuntimeHostForFolderWorkspace(state, folderWorkspaceId)?.environmentId ?? null
 }
 
-export function getExecutionHostIdForFolderWorkspace(
+type FolderWorkspaceExecutionHost = {
+  hostId: ExecutionHostId
+  /** False when `local` is only the last-resort default and nothing actually named an owner. */
+  named: boolean
+}
+
+function resolveFolderWorkspaceExecutionHost(
   state: FolderWorkspaceRuntimeOwnerState,
   folderWorkspaceId: string,
   executionHostId?: ExecutionHostId
-): ExecutionHostId {
+): FolderWorkspaceExecutionHost {
   const preferredHostId = getPreferredFolderExecutionHostId(
     state,
     folderWorkspaceId,
@@ -150,19 +156,44 @@ export function getExecutionHostIdForFolderWorkspace(
     folderWorkspace?.executionHostId ?? projectGroup?.executionHostId
   )
   if (parsed) {
-    return parsed.id
+    return { hostId: parsed.id, named: true }
   }
   const connectionId = folderWorkspace?.connectionId?.trim() || projectGroup?.connectionId?.trim()
   if (connectionId) {
-    return toSshExecutionHostId(connectionId)
-  }
-  if (preferredHostId && folderWorkspace) {
-    return preferredHostId
+    return { hostId: toSshExecutionHostId(connectionId), named: true }
   }
   const restoredRuntimeHost = getRestoredRuntimeHostForFolderWorkspace(state, folderWorkspaceId)
-  if (restoredRuntimeHost) {
-    return restoredRuntimeHost.id
+  const focusedEnvironmentId = getSingleFocusedRuntimeEnvironmentId(state)
+  if (preferredHostId && folderWorkspace) {
+    // Why: `local` is exactly what folderWorkspaceToWorktree defaults to when a row names nothing,
+    // and a sidebar click records that default as the active host — so it is not owner evidence.
+    const preferenceNamesOwner = parseExecutionHostId(preferredHostId)?.kind !== 'local'
+    return {
+      hostId: preferredHostId,
+      named: preferenceNamesOwner || Boolean(restoredRuntimeHost) || Boolean(focusedEnvironmentId)
+    }
   }
-  const environmentId = getSingleFocusedRuntimeEnvironmentId(state)
-  return environmentId ? `runtime:${encodeURIComponent(environmentId)}` : 'local'
+  if (restoredRuntimeHost) {
+    return { hostId: restoredRuntimeHost.id, named: true }
+  }
+  return focusedEnvironmentId
+    ? { hostId: `runtime:${encodeURIComponent(focusedEnvironmentId)}`, named: true }
+    : { hostId: 'local', named: false }
+}
+
+export function getExecutionHostIdForFolderWorkspace(
+  state: FolderWorkspaceRuntimeOwnerState,
+  folderWorkspaceId: string,
+  executionHostId?: ExecutionHostId
+): ExecutionHostId {
+  return resolveFolderWorkspaceExecutionHost(state, folderWorkspaceId, executionHostId).hostId
+}
+
+/** Whether any row, session partition or focused runtime actually named this folder's host. */
+export function hasNamedFolderWorkspaceExecutionHost(
+  state: FolderWorkspaceRuntimeOwnerState,
+  folderWorkspaceId: string,
+  executionHostId?: ExecutionHostId
+): boolean {
+  return resolveFolderWorkspaceExecutionHost(state, folderWorkspaceId, executionHostId).named
 }
