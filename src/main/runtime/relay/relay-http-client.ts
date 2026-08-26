@@ -170,6 +170,11 @@ async function sendRelayAssignment(
   gate: RelayAssignRateGate,
   rateKey: string
 ): Promise<RelayAssignment> {
+  // A caller superseded after reserving — or between field-fallback retries —
+  // must not spend more requests on an assignment nobody will consume.
+  if (input.isCurrent && !input.isCurrent()) {
+    throw new RelayAssignAbortedError()
+  }
   const response = await (input.fetch ?? globalThis.fetch)(`${input.directorUrl}/v1/assign`, {
     method: 'POST',
     headers: {

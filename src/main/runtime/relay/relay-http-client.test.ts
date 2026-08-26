@@ -450,6 +450,42 @@ describe('relay assignment rate gate', () => {
     expect(clock.sleeps).toEqual([])
   })
 
+  it('aborts before sending when the caller is superseded after reservation', async () => {
+    const clock = fakeAssignClock()
+    const assignRateGate = new RelayAssignRateGate(clock.options)
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => assignSuccessResponse())
+    // First reads happen inside reserve(); the last read guards the send.
+    const currency = [true, false]
+
+    await expect(
+      request({ fetch, assignRateGate, isCurrent: () => currency.shift() ?? false })
+    ).rejects.toBeInstanceOf(RelayAssignAbortedError)
+
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('stops field-fallback retries when the caller is superseded mid-attempt', async () => {
+    const clock = fakeAssignClock()
+    const assignRateGate = new RelayAssignRateGate(clock.options)
+    let current = true
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+      current = false
+      return Response.json({ error: 'invalid_request' }, { status: 400 })
+    })
+
+    await expect(
+      request({
+        fetch,
+        assignRateGate,
+        reconnect: true,
+        preferredRegion: 'asia-east2',
+        isCurrent: () => current
+      })
+    ).rejects.toBeInstanceOf(RelayAssignAbortedError)
+
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
   it('aborts without assigning when the caller is superseded during the wait', async () => {
     let current = true
     const clock = fakeAssignClock(() => {
