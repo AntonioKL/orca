@@ -2776,8 +2776,13 @@ export function connectPanePty(
       return
     }
     manager.setPaneGpuRendering(pane.id, true)
-    const failedLocalProcess = !connectionId && runtimeEnvironmentId === null && exitCode !== 0
-    if (failedLocalProcess && deps.onPaneProcessDied) {
+    const failedLocalStartup =
+      !connectionId &&
+      runtimeEnvironmentId === null &&
+      exitCode !== 0 &&
+      spawnedFreshPtyId === ptyId &&
+      !hasTerminalInputForCurrentPty()
+    if (failedLocalStartup && deps.onPaneProcessDied) {
       const gitBashConsoleCapacityFailure = processExitState.detector.detected()
       deps.onPaneProcessDied({
         paneId: pane.id,
@@ -2800,7 +2805,7 @@ export function connectPanePty(
       // for this ptyId — reattach/coldRestore skip it) that the user never typed
       // into, so a reattached-dead session or an explicit `exit` still tears
       // down as before.
-      if (spawnedFreshPtyId === ptyId && !Number.isFinite(lastTerminalInputAt)) {
+      if (spawnedFreshPtyId === ptyId && !hasTerminalInputForCurrentPty()) {
         return
       }
       deps.onPtyExitRef.current(ptyId)
@@ -2810,7 +2815,7 @@ export function connectPanePty(
       deps.isVisibleRef.current &&
       hadExistingPaneTransportAtConnect &&
       !restoredPtyIdForTransport &&
-      !Number.isFinite(lastTerminalInputAt) &&
+      !hasTerminalInputForCurrentPty() &&
       !hasReceivedPtyOutput
     ) {
       // Why: a freshly split pane can lose its newborn PTY during setup; keep
@@ -3168,6 +3173,11 @@ export function connectPanePty(
     // just-created worktree) can be kept visible rather than tearing down the
     // worktree. Reattach/coldRestore skip onPtySpawn (pty-transport.ts).
     spawnedFreshPtyId = ptyId
+    // Each fresh PTY gets its own startup-retention decision; input sent to a
+    // previous session must not make a replacement shell look user-interacted.
+    terminalInputGeneration += 1
+    lastTerminalInputAt = Number.NEGATIVE_INFINITY
+    lastTerminalInputGeneration = null
     // Why: Command Code has no prompt-start hook. Seed the visible working row
     // once the PTY exists, then let real hook events refine or complete it.
     bindActivePanePty(ptyId, { seedInitialAgentStatus: true })
@@ -3897,6 +3907,8 @@ export function connectPanePty(
     Boolean(connectionId) && !shouldDeliverStartupViaTerminalPaste
   const hadExistingPaneTransportAtConnect = deps.paneTransportsRef.current.size > 0
   let lastTerminalInputAt = Number.NEGATIVE_INFINITY
+  let terminalInputGeneration = 0
+  let lastTerminalInputGeneration: number | null = null
   // Why: separate from lastTerminalInputAt because onExit reads that one as
   // "the user never typed into this pane" to keep a dead newborn pane mounted.
   // Captured shortcuts must open the redraw window without arming that teardown.
@@ -3911,8 +3923,15 @@ export function connectPanePty(
     // Why: input must probe a wedged xterm even when the PTY produces no renderer output.
     requestTerminalWritePipelineProbe(pane.terminal)
   }
-  const markTerminalInputSent = (): void => {
+  // Why: acknowledged writes settle asynchronously, so a fast PTY exit can beat the ack callback.
+  const hasTerminalInputForCurrentPty = (): boolean =>
+    lastTerminalInputGeneration === terminalInputGeneration && Number.isFinite(lastTerminalInputAt)
+  const markTerminalInputAttempted = (generation = terminalInputGeneration): void => {
     lastTerminalInputAt = performance.now()
+    lastTerminalInputGeneration = generation
+  }
+  const markTerminalInputSent = (generation = terminalInputGeneration): void => {
+    markTerminalInputAttempted(generation)
     markInteractiveRedrawInput()
   }
   const recordTerminalInputForHibernation = (): void => {
@@ -3938,8 +3957,8 @@ export function connectPanePty(
       recordTerminalInputForHibernation()
     }
   }
-  const markAcceptedTerminalInputSent = (): void => {
-    markTerminalInputSent()
+  const markAcceptedTerminalInputSent = (generation = terminalInputGeneration): void => {
+    markTerminalInputSent(generation)
     recordTerminalInputForHibernationFallback()
   }
   const terminalTheme = pane.terminal.options.theme
@@ -4297,6 +4316,7 @@ export function connectPanePty(
     // excluded because those transports do not expose sendInputAccepted.
     const acknowledgedIntent = intent ?? inferIntentFromExactTerminalInput(data)
     if (acknowledgedIntent && transport.sendInputAccepted) {
+      const inputGeneration = terminalInputGeneration
       const interruptStatusBaseline = useAppStore.getState().agentStatusByPaneKey[cacheKey] ?? null
       // Why: equal snapshots retain double-Escape semantics while older snapshots lose ack races.
       if (sequencedInterruptStatusBaseline !== interruptStatusBaseline) {
@@ -4311,12 +4331,13 @@ export function connectPanePty(
         cancelSuspendedShellCommandInference()
       }
       clearPendingTerminalInputIntent()
+      markTerminalInputAttempted(inputGeneration)
       const writePromise = transport
         .sendInputAccepted(data)
         .then((accepted): boolean | Promise<boolean> | null => {
           if (accepted) {
             // Why: rejected writes use transport recovery and must not arm a parser probe.
-            markAcceptedTerminalInputSent()
+            markAcceptedTerminalInputSent(inputGeneration)
             observeAcceptedShellCommandInput(data)
             observeAcceptedTerminalInput(data, acknowledgedIntent)
             const immediateResult = interruptInference.observeInputIntent(
@@ -4340,9 +4361,11 @@ export function connectPanePty(
       return
     }
     if (intent) {
+      const inputGeneration = terminalInputGeneration
       claimViewportForUserActivity()
+      markTerminalInputAttempted(inputGeneration)
       if (transport.sendInput(data)) {
-        markAcceptedTerminalInputSent()
+        markAcceptedTerminalInputSent(inputGeneration)
         observeAcceptedShellCommandInput(data)
         observeAcceptedTerminalInput(data, intent)
       } else {
@@ -4351,9 +4374,11 @@ export function connectPanePty(
       clearPendingTerminalInputIntent()
       return
     }
+    const inputGeneration = terminalInputGeneration
     claimViewportForUserActivity()
+    markTerminalInputAttempted(inputGeneration)
     if (transport.sendInput(data)) {
-      markAcceptedTerminalInputSent()
+      markAcceptedTerminalInputSent(inputGeneration)
       observeAcceptedShellCommandInput(data)
       observeAcceptedTerminalInput(data)
       observeSentTerminalInputIntent(data)
