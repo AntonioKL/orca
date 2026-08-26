@@ -90,7 +90,9 @@ import {
 import {
   applyAgentStatusHooksEnabled,
   isAgentStatusHooksEnabled,
-  removeManagedAgentHooks
+  removeManagedAgentHooks,
+  removeManagedAgentHooksAsync,
+  shouldContinueManagedHookStartup
 } from './agent-hooks/managed-agent-hook-controls'
 import { initCohortClassifier } from './telemetry/cohort-classifier'
 import { initOnboardingCohortClassifier } from './telemetry/onboarding-cohort-classifier'
@@ -323,7 +325,7 @@ import { createRuntimeAutomationRunTerminalObserver } from './automations/runtim
 import { AgentAwakeService } from './agent-awake-service'
 import { normalizeComputerAwakeMode } from '../shared/computer-awake-mode'
 import { registerSystemResumeBroadcast } from './system-resume-broadcast'
-import { settleTeardownWithinDeadline } from './quit-teardown-deadline'
+import { settleTeardownWithinDeadline, settleWithinMs } from './quit-teardown-deadline'
 import { quitTeardownStartGate } from './quit-teardown-start-gate'
 import { beginSshShutdown } from './ipc/ssh-shutdown-drain'
 import { PluginService } from './plugins/plugin-service'
@@ -2395,7 +2397,7 @@ void app.whenReady().then(async () => {
       if (isAgentStatusHooksEnabled(settings)) {
         wslHookRelayManager.resumeStoppedRelays()
       } else {
-        wslHookRelayManager.disposeAll({ permanent: false })
+        void wslHookRelayManager.disposeAll({ permanent: false })
       }
     }
   })
@@ -3079,7 +3081,7 @@ void app.whenReady().then(async () => {
         onInstallError: recordManagedHookInstallFailure,
         shouldContinue: (agent) => {
           const settings = managedHookStore.getSettings()
-          return isAgentStatusHooksEnabled(settings) && !settings.disabledTuiAgents.includes(agent)
+          return shouldContinueManagedHookStartup(isQuitting, settings, agent)
         }
       }).catch((error) => {
         console.warn('[agent-hooks] failed to reconcile managed hooks on startup:', error)
@@ -3437,6 +3439,9 @@ app.on('before-quit', () => {
 
 // Why: will-quit fires twice — first pass preventDefaults and runs teardown; second pass exits.
 let daemonDisconnectDone = false
+// Why 2s: matches the WSL leg's per-distro bound; a config delete is best-effort, not durable state.
+const GROK_HOOK_CLEANUP_DEADLINE_MS = 2_000
+
 app.on('will-quit', (e) => {
   // Why return instead of re-running teardown: the second pass is Electron re-firing after
   // our own app.quit(), so every step below already ran and every durable write already
@@ -3482,8 +3487,33 @@ app.on('will-quit', (e) => {
   pluginService = null
   setUnreadDockBadgeCount(0)
   agentHookServer.stop()
+  // Why: Grok reads global hooks after Orca closes; remove them without blocking the main thread.
+  // Why bounded here: every other teardown member carries its own ceiling, and this one reaches
+  // $GROK_HOME -- which can be a stalled network mount, where the fs calls never settle and the
+  // shared 20s deadline becomes the only thing ending the quit.
+  const grokHookCleanup = settleWithinMs(
+    removeManagedAgentHooksAsync({ agents: ['grok'] }),
+    GROK_HOOK_CLEANUP_DEADLINE_MS
+  ).then((settled) => {
+    if (settled.outcome === 'timed-out') {
+      console.warn('[agent-hooks] Grok hook cleanup on quit timed out')
+      return
+    }
+    if (settled.outcome === 'failed') {
+      console.warn('[agent-hooks] Grok hook cleanup on quit failed:', settled.error)
+      return
+    }
+    const statuses = settled.value
+    // Why: these report failure as a status rather than a throw, so without this a quit that failed
+    // to remove the hooks looks identical to one that succeeded.
+    for (const status of statuses.filter((entry) => entry.detail)) {
+      console.warn(`[agent-hooks] ${status.agent} hook cleanup on quit: ${status.detail}`)
+    }
+  })
   // Why: cancels relay restart/reinstall timers and kills wsl.exe children deterministically, not via stdio-pipe teardown.
-  wslHookRelayManager.disposeAll()
+  // Why awaited now: guest Grok hooks are removed over the relay's own mux first, so the kill is bounded (2s per distro)
+  // rather than immediate; the teardown deadline below is what keeps that from holding the quit open.
+  const wslHookCleanup = wslHookRelayManager.disposeAll()
   const statsFlush = stats?.flushAsync() ?? Promise.resolve()
   // Why: agent-browser daemon processes would otherwise linger after quit, holding ports and stale session state on disk.
   runtime?.getAgentBrowserBridge()?.destroyAllSessions()
@@ -3548,6 +3578,8 @@ app.on('will-quit', (e) => {
     { name: 'ssh', promise: sshShutdown },
     { name: 'plugin-hosts', promise: pluginHostShutdown },
     { name: 'skill-uploads', promise: skillUploadShutdown },
+    { name: 'grok-hooks', promise: grokHookCleanup },
+    { name: 'wsl-grok-hooks', promise: wslHookCleanup },
     { name: 'codex-backfill-recovery', promise: codexBackfillRecoveryShutdown },
     { name: 'usage-cache', promise: usageCacheFlush },
     { name: 'stats', promise: statsFlush },
