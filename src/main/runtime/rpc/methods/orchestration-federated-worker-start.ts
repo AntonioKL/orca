@@ -138,6 +138,9 @@ export async function startFederatedWorker(args: {
         dispatchId: started.dispatch.id,
         taskId: task.id,
         taskSpec: task.spec,
+        // Carry the home dispatch depth across the federation boundary so a
+        // remote worker cannot be mistaken for a root when it dispatches again.
+        depth: started.dispatch.depth,
         protocolVersion: federationProtocolVersion,
         worktree,
         name: params.name,
