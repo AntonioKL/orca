@@ -2,7 +2,10 @@ import type { OrchestrationCompatibilityEvidence } from '../../../../shared/orch
 import { orchestrationSkillRecoveryData } from '../../../../shared/orchestration-rpc-contract'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
 import type { RunRow } from '../../orchestration/types'
-import type { OrcaRuntimeService } from '../../orca-runtime'
+import type {
+  OrcaRuntimeService,
+  OrchestrationCompatibilityCallerAuthority
+} from '../../orca-runtime'
 
 export type RunScopeParams = {
   runId?: string
@@ -31,6 +34,37 @@ export function assertCallerHandleMatchesEvidence(
       { effectsApplied: false }
     )
   }
+}
+
+export type OrchestrationCallerParams = {
+  callerTerminalHandle: string
+  callerEvidence?: OrchestrationCompatibilityEvidence
+  callerAuthority?: OrchestrationCompatibilityCallerAuthority
+  /** Preserve legacy callers that treated a missing pane as an ordinary fence. */
+  requireStablePane?: boolean
+  /** run-use performs its takeover check between pane resolution and attestation. */
+  assertEvidence?: boolean
+}
+
+/** Resolve the caller's runtime pane and, by default, attest its declared handle. */
+export function resolveOrchestrationCaller(
+  runtime: OrcaRuntimeService,
+  params: OrchestrationCallerParams
+): string | null {
+  if (params.assertEvidence !== false) {
+    assertCallerHandleMatchesEvidence(runtime, params.callerTerminalHandle, params.callerEvidence)
+  }
+  const paneKey =
+    params.callerAuthority?.terminalHandle === params.callerTerminalHandle
+      ? params.callerAuthority.paneKey
+      : runtime.getTerminalPaneKey(params.callerTerminalHandle)
+  if (!paneKey && params.requireStablePane) {
+    throw new OrchestrationError(
+      'stable_pane_required',
+      'The coordinator terminal has no stable pane identity. Run this command inside a live Orca terminal.'
+    )
+  }
+  return paneKey ?? null
 }
 
 // Why: task and gate mutations must share one Run-binding rule.

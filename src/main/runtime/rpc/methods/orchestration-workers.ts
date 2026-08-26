@@ -21,7 +21,7 @@ import {
 import { failWorkerStartWithReceipt } from './orchestration-worker-start-receipt'
 import { prepareLocalWorkerStart } from './orchestration-worker-start-validation'
 import { resolveDispatchCreator } from './orchestration-dispatch-creator'
-import { assertCallerHandleMatchesEvidence } from './orchestration-run-scope'
+import { resolveOrchestrationCaller } from './orchestration-run-scope'
 
 export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
   defineMethod({
@@ -34,8 +34,10 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
       const db = runtime.getOrchestrationDb()
       // Why: worker-start was the only Run-scoped verb that skipped this, so a
       // declared --from could name someone else's pane and inherit their depth.
-      assertCallerHandleMatchesEvidence(runtime, params.from, orchestrationCompatibilityEvidence)
-      const coordinatorPane = runtime.getTerminalPaneKey(params.from)
+      const coordinatorPane = resolveOrchestrationCaller(runtime, {
+        callerTerminalHandle: params.from,
+        callerEvidence: orchestrationCompatibilityEvidence
+      })
       const run = coordinatorPane ? db.getCurrentRunForPane(coordinatorPane) : undefined
       if (!run || (params.run && params.run !== run.id)) {
         throw new OrchestrationError(
