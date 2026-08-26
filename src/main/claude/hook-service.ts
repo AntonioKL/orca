@@ -97,7 +97,7 @@ function getManagedScript(
     // Why: Claude-compatible permission hooks fail closed on empty stdout (#14818).
     'printf "{}\\n"',
     ...buildPosixHookPayloadCapture(),
-    ...buildPosixHookSpoolLines(options.agent),
+    ...buildPosixHookSpoolLines('claude'),
     ...(options.skipWhenDevinImportsClaude
       ? [
           // Why: Devin imports .claude hooks by default; skip Orca's managed hook there so status posts stay attributed to Devin.

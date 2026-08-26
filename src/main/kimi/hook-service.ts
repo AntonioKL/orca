@@ -74,7 +74,9 @@ function getManagedScript(target: 'local' | 'posix' = 'local'): string {
     '  . "$ORCA_AGENT_HOOK_ENDPOINT" 2>/dev/null || :',
     'fi',
     'if [ -z "$ORCA_AGENT_HOOK_PORT" ] || [ -z "$ORCA_AGENT_HOOK_TOKEN" ] || [ -z "$ORCA_PANE_KEY" ]; then',
-    '  spool_hook_event',
+    // Why: the windows-local ordering runs this guard before stdin is read and before
+    // spool_hook_event is defined, so only the payload-first ordering may spool here.
+    ...(windowsLocal ? [] : ['  spool_hook_event']),
     '  exit 0',
     'fi'
   ]

@@ -5,8 +5,10 @@ import {
   ftruncateSync,
   openSync,
   readFileSync,
+  readSync,
   readdirSync,
-  statSync
+  statSync,
+  writeSync
 } from 'node:fs'
 import { join } from 'node:path'
 
@@ -33,19 +35,32 @@ export function launchTokenHash(token: string | undefined): string | null {
 }
 
 export function readSpoolRecords(path: string, now = Date.now()): SpoolRecord[] {
+  return readSpoolFile(path, now).records
+}
+
+/** Records plus the byte offset through the last COMPLETE line. A torn trailing line is
+ *  left unconsumed so a writer still finishing it is not truncated away. */
+export function readSpoolFile(
+  path: string,
+  now = Date.now()
+): { records: SpoolRecord[]; consumed: number } {
   let bytes: Buffer
   try {
     bytes = readFileSync(path)
   } catch {
-    return []
+    return { records: [], consumed: 0 }
   }
   const records: SpoolRecord[] = []
+  let consumed = 0
   let start = 0
   for (let end = 0; end <= bytes.length; end += 1) {
     if (end !== bytes.length && bytes[end] !== 0x0a) {
       continue
     }
     const lineBytes = bytes.subarray(start, end)
+    if (end !== bytes.length) {
+      consumed = end + 1
+    }
     start = end + 1
     if (lineBytes.length === 0) {
       continue
@@ -65,7 +80,7 @@ export function readSpoolRecords(path: string, now = Date.now()): SpoolRecord[] 
       // Torn lines are discarded while later complete lines remain replayable.
     }
   }
-  return records
+  return { records, consumed }
 }
 
 export type SpoolDrainOptions = {
@@ -100,7 +115,8 @@ export function drainAgentHookSpool(options: SpoolDrainOptions): number {
     .slice(0, AGENT_HOOK_SPOOL_MAX_FILES)
   let drained = 0
   for (const candidate of candidates) {
-    for (const record of readSpoolRecords(candidate.path, now)) {
+    const { records, consumed } = readSpoolFile(candidate.path, now)
+    for (const record of records) {
       const expected = options.getPersistedLaunchTokenHash(record.paneKey)
       const actual = launchTokenHash(record.launchToken)
       if (expected && actual !== expected) {
@@ -113,10 +129,18 @@ export function drainAgentHookSpool(options: SpoolDrainOptions): number {
       const fd = openSync(candidate.path, 'r+')
       try {
         // Keep the inode so a concurrent append handle cannot silently orphan writes.
-        ftruncateSync(fd, 0)
+        const size = fstatSync(fd).size
+        if (size > consumed) {
+          // Why: a hook may have appended between the read and here; shift the unread tail
+          // to the front instead of truncating to zero, which would erase it.
+          const tail = Buffer.alloc(size - consumed)
+          readSync(fd, tail, 0, tail.length, consumed)
+          writeSync(fd, tail, 0, tail.length, 0)
+          ftruncateSync(fd, tail.length)
+        } else {
+          ftruncateSync(fd, 0)
+        }
       } finally {
-        // fstat keeps the descriptor operation observable in tests and documents the inode contract.
-        fstatSync(fd)
         closeSync(fd)
       }
     } catch {

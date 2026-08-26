@@ -56,7 +56,7 @@ export function getManagedScript(target: 'local' | 'posix' = 'local'): string {
     // Why: some Antigravity events arrive without stdin but still need a
     // status post, so the shared capture maps empty input to an object.
     ...buildPosixHookPayloadCapture('empty-object'),
-    ...buildPosixHookSpoolLines('antigravity'),
+    ...buildPosixHookSpoolLines('antigravity', 'ORCA_ANTIGRAVITY_EVENT'),
     'if [ -n "$ORCA_AGENT_HOOK_ENDPOINT" ] && [ -r "$ORCA_AGENT_HOOK_ENDPOINT" ]; then',
     '  . "$ORCA_AGENT_HOOK_ENDPOINT" 2>/dev/null || :',
     'fi',
