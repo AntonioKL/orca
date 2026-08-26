@@ -240,6 +240,9 @@ fi
 if [ "$7" = 1 ]; then
   cp -- "$source_auth" "$temporary_auth"
   chmod 600 "$temporary_auth"
+  # Codex rewrites auth.json in place, so this copy is a second read: verify the
+  # bytes being promoted, not the ones freshness was judged on.
+  [ "$(hash_file "$temporary_auth")" = "$5" ] || exit 42
   [ "$(hash_file "$target_auth")" = "$6" ] || exit 39
   mv -f -- "$temporary_auth" "$target_auth"
 fi
@@ -266,6 +269,7 @@ mv -f -- "$temporary_marker" "$3"
 `
 
 export const _internals = {
+  applyLegacyAuthScript: APPLY_LEGACY_AUTH_SCRIPT,
   resetDrainQueue: (): void => {
     drainQueueByDistro.clear()
     completedDistroKeys.clear()
