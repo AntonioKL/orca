@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { SleepingAgentSessionRecord } from '../../../shared/agent-session-resume'
 import { useAppStore } from '@/store'
 import { resumeSleepingAgentSessionsForWorktree } from './resume-sleeping-agent-session'
+import { consumeQueuedStartupAndClearSleepingRecord } from '@/components/terminal-pane/use-terminal-pane-lifecycle'
 import { launchAiVaultSessionInNewTab } from './launch-ai-vault-session'
 import { buildWorkspaceSessionPayload } from './workspace-session'
 
@@ -108,6 +109,54 @@ describe('resumeSleepingAgentSessionsForWorktree replay protection', () => {
     expect(useAppStore.getState().sleepingAgentSessionsByPaneKey[replacement.paneKey]).toBe(
       replacement
     )
+  })
+
+  // Why the real store actions: the identity marker only works if it survives the
+  // queue/consume round trip; doubles cannot catch a field dropped in that path.
+  it('clears the record only once the real store round trip yields a spawned startup', () => {
+    const record = makeRecord()
+    useAppStore.setState({
+      tabsByWorktree: { 'wt-1': [] },
+      sleepingAgentSessionsByPaneKey: { [record.paneKey]: record }
+    } as never)
+
+    expect(resumeSleepingAgentSessionsForWorktree('wt-1')).toBe(1)
+    const resumedTab = useAppStore.getState().tabsByWorktree['wt-1']![0]!
+    expect(useAppStore.getState().sleepingAgentSessionsByPaneKey[record.paneKey]).toBe(record)
+
+    const state = useAppStore.getState()
+    consumeQueuedStartupAndClearSleepingRecord(
+      resumedTab.id,
+      state.consumeTabStartupCommand,
+      (paneKey) => state.sleepingAgentSessionsByPaneKey[paneKey],
+      state.clearSleepingAgentSession
+    )
+
+    expect(useAppStore.getState().sleepingAgentSessionsByPaneKey[record.paneKey]).toBeUndefined()
+    expect(useAppStore.getState().pendingStartupByTabId[resumedTab.id]).toBeUndefined()
+  })
+
+  it('leaves a folder-workspace record retryable when its resume spawn never arrives', () => {
+    const record = makeRecord({
+      paneKey: 'folder-tab:leaf-1',
+      tabId: 'folder-tab',
+      worktreeId: 'folder-workspace-1'
+    })
+    useAppStore.setState({
+      tabsByWorktree: { 'folder-workspace-1': [] },
+      sleepingAgentSessionsByPaneKey: { [record.paneKey]: record }
+    } as never)
+
+    expect(resumeSleepingAgentSessionsForWorktree('folder-workspace-1')).toBe(1)
+    const resumedTab = useAppStore.getState().tabsByWorktree['folder-workspace-1']![0]!
+    expect(
+      useAppStore.getState().pendingStartupByTabId[resumedTab.id]?.sleepingAgentResumeIdentity
+    ).toEqual({ paneKey: record.paneKey, capturedAt: record.capturedAt })
+
+    // No fresh PTY ever binds: the record stays available for a later retry.
+    expect(resumeSleepingAgentSessionsForWorktree('folder-workspace-1')).toBe(0)
+    expect(useAppStore.getState().tabsByWorktree['folder-workspace-1']).toHaveLength(1)
+    expect(useAppStore.getState().sleepingAgentSessionsByPaneKey[record.paneKey]).toBe(record)
   })
 
   it('does not fork a provider session that is already queued', () => {
