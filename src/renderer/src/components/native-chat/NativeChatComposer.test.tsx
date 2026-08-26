@@ -567,7 +567,7 @@ describe('NativeChatComposer', () => {
       '/model opus',
       expect.any(AbortSignal)
     )
-    expect(onSlashCommand).toHaveBeenCalledWith('/model opus')
+    expect(onSlashCommand).toHaveBeenCalledWith('/model opus', expect.any(Promise))
     expect(onOptimisticSend).not.toHaveBeenCalled()
     expect(mocks.createClaudeModelSwitchConfirmationObserver).toHaveBeenCalledWith({
       ptyId: 'pty-1',

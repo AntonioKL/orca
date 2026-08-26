@@ -700,11 +700,18 @@ function TerminalPane(
   }, [toggleNativeChatForLeaf])
   // Stable identity: this reaches the session-option surface's useMemo deps, so an
   // inline arrow would rebuild the surface on every TerminalPane render.
+  //
+  // Absolute, not the toggle: callers fire it after an async send settles, from a
+  // callback captured before the wait. A user (or the leaf's own exit route) who
+  // reached the terminal meanwhile would be flipped back into chat by a stale
+  // toggle — hiding the picker the caller meant to reveal (STA-4617).
   const switchNativeChatToTerminal = useCallback(() => {
-    if (chatLeafId) {
-      toggleNativeChatForLeaf(chatLeafId)
+    if (!unifiedTabId) {
+      return
     }
-  }, [chatLeafId, toggleNativeChatForLeaf])
+    setChatLeafId(null)
+    setTabViewMode(unifiedTabId, 'terminal')
+  }, [setTabViewMode, unifiedTabId])
   const readNativeChatTerminalScreen = useCallback((): string | null => {
     if (!chatLeafId) {
       return null
