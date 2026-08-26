@@ -2,6 +2,43 @@ import { describe, expect, it } from 'vitest'
 import { describeCrashError } from './crash-error-description'
 
 describe('describeCrashError', () => {
+  it('does not throw when a non-Error value cannot be converted to a string', () => {
+    const hostile = {
+      [Symbol.toPrimitive](): never {
+        throw new Error('conversion failed')
+      }
+    }
+
+    expect(() => describeCrashError(hostile)).not.toThrow()
+    expect(describeCrashError(hostile)).toMatchObject({
+      errorName: 'NonErrorThrown',
+      errorMessage: '[unprintable thrown value]'
+    })
+  })
+
+  it('normalizes malformed Error fields before sanitizing them', () => {
+    const error = new Error('fallback')
+    Object.defineProperties(error, {
+      message: { value: Symbol('message') },
+      name: { value: 42 },
+      stack: {
+        get() {
+          return {
+            toString(): never {
+              throw new Error('conversion failed')
+            }
+          }
+        }
+      }
+    })
+
+    expect(describeCrashError(error)).toMatchObject({
+      errorName: '42',
+      errorMessage: 'Symbol(message)'
+    })
+    expect(describeCrashError(error)).not.toHaveProperty('errorStack')
+  })
+
   it('retains sanitized messages and the full sanitized stack alongside a fingerprint', () => {
     const error = new Error(
       [

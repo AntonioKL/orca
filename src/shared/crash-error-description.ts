@@ -8,18 +8,49 @@ export function describeCrashError(
   error: unknown,
   componentStack?: string | null
 ): CrashErrorDescription {
-  const candidate = error instanceof Error ? error : null
-  const message = candidate?.message ?? String(error)
+  let candidate: Error | null = null
+  try {
+    candidate = error instanceof Error ? error : null
+  } catch {
+    // A revoked proxy can throw while checking its prototype.
+  }
+
+  const message = safeString(
+    readErrorProperty(candidate, 'message') ?? error,
+    '[unprintable thrown value]'
+  )
+  const rawName = readErrorProperty(candidate, 'name')
+  const name = rawName == null ? 'NonErrorThrown' : safeString(rawName, 'NonErrorThrown')
+  const rawStack = readErrorProperty(candidate, 'stack')
+  const stack = rawStack == null ? '' : safeString(rawStack, '')
+
   return {
-    errorName: sanitizeCrashReportString(candidate?.name || 'NonErrorThrown', 80),
+    errorName: sanitizeCrashReportString(name || 'NonErrorThrown', 80),
     errorMessage: sanitizeCrashReportString(message),
     errorFingerprint: fingerprint(message),
-    ...(candidate?.stack
-      ? { errorStack: sanitizeCrashReportString(candidate.stack, MAX_STACK_CHARS) }
-      : {}),
-    ...(componentStack?.trim()
+    ...(stack ? { errorStack: sanitizeCrashReportString(stack, MAX_STACK_CHARS) } : {}),
+    ...(typeof componentStack === 'string' && componentStack.trim()
       ? { componentStack: sanitizeCrashReportString(componentStack.trim(), MAX_STACK_CHARS) }
       : {})
+  }
+}
+
+function readErrorProperty(error: Error | null, key: 'message' | 'name' | 'stack'): unknown {
+  try {
+    return error?.[key]
+  } catch {
+    return undefined
+  }
+}
+
+function safeString(value: unknown, fallback: string): string {
+  if (typeof value === 'string') {
+    return value
+  }
+  try {
+    return String(value)
+  } catch {
+    return fallback
   }
 }
 
