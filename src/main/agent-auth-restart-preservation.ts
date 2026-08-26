@@ -4,7 +4,8 @@ import type { Store } from './persistence'
 
 const AUTH_PRESERVATION_TIMEOUT_MS = 2_000
 
-type CodexRuntimeAuthSync = Pick<CodexRuntimeHomeService, 'syncForCurrentSelection'>
+type CodexRuntimeAuthSync = Pick<CodexRuntimeHomeService, 'syncForCurrentSelection'> &
+  Partial<Pick<CodexRuntimeHomeService, 'syncActiveWslSelectionsBeforeRestart'>>
 type ClaudeRuntimeAuthSync = Pick<ClaudeRuntimeAuthService, 'syncForCurrentSelection'>
 type ShutdownStore = Pick<Store, 'flushPendingOrThrowAsync'>
 
@@ -37,6 +38,21 @@ export async function preserveAgentAuthBeforeRestart({
     )
   } else if (claudeRuntimeAuth) {
     logStepTimeout('Claude auth preservation', 0)
+  }
+
+  const syncActiveWslSelectionsBeforeRestart =
+    codexRuntimeHome?.syncActiveWslSelectionsBeforeRestart
+  if (
+    syncActiveWslSelectionsBeforeRestart &&
+    Date.now() - startedAt < AUTH_PRESERVATION_TIMEOUT_MS
+  ) {
+    await runWithinLifecycleTimeout(
+      'Codex auth preservation',
+      () => syncActiveWslSelectionsBeforeRestart.call(codexRuntimeHome),
+      Math.max(0, AUTH_PRESERVATION_TIMEOUT_MS - (Date.now() - startedAt))
+    )
+  } else if (syncActiveWslSelectionsBeforeRestart) {
+    logStepTimeout('Codex auth preservation', 0)
   }
 
   if (store) {

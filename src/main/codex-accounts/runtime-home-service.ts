@@ -56,6 +56,7 @@ import { syncSystemConfigIntoManagedCodexHome } from '../codex/codex-config-mirr
 import { parseWslUncPath, toLinuxPath } from '../../shared/wsl-paths'
 import {
   getCodexSelectionLaneKey,
+  getWslSelectionKey,
   getSelectedCodexAccountIdForTarget,
   normalizeCodexRuntimeSelection,
   type CodexAccountSelectionTarget
@@ -996,33 +997,61 @@ export class CodexRuntimeHomeService {
     return this.getWslSystemCodexHomePath(target)
   }
 
-  private startLegacyWslAuthDrain(target: CodexAccountSelectionTarget): void {
+  private startLegacyWslAuthDrain(target: CodexAccountSelectionTarget): Promise<void> {
     if (process.platform !== 'win32') {
-      return
+      return Promise.resolve()
     }
     const distro = target.wslDistro?.trim() || getDefaultWslDistro()
     if (!distro) {
-      return
+      return Promise.resolve()
     }
     const guestHome = getWslHome(distro)
     const parsedGuestHome = guestHome ? parseWslUncPath(guestHome) : null
     if (!parsedGuestHome) {
-      return
+      return Promise.resolve()
     }
     let legacyPanePresent: boolean
     try {
       legacyPanePresent = hasRecordedLegacyWslCodexPane(getCodexSelectionLaneKey(target))
     } catch (error) {
       console.warn('[codex-wsl-auth-drain] Pane registry unavailable; deferring drain:', error)
-      return
+      return Promise.resolve()
     }
-    startLegacyWslRuntimeAuthDrain({
+    return startLegacyWslRuntimeAuthDrain({
       distro,
       guestHomeLinuxPath: parsedGuestHome.linuxPath,
       legacyPanePresent,
       resolveDestination: (runtimeAuthContents) =>
         this.resolveLegacyWslAuthDestination(distro, runtimeAuthContents)
     })
+  }
+
+  /** Preserve refreshed auth from retained legacy WSL panes before restart. */
+  async syncActiveWslSelectionsBeforeRestart(): Promise<void> {
+    if (process.platform !== 'win32') {
+      return
+    }
+    const settings = this.store.getSettings()
+    const drains: Promise<void>[] = []
+    for (const [selectedDistroKey, accountId] of Object.entries(
+      normalizeCodexRuntimeSelection(settings).wsl
+    )) {
+      if (!accountId) {
+        continue
+      }
+      const account = this.getActiveAccount(settings.codexManagedAccounts, accountId)
+      if (!account || account.managedHomeRuntime !== 'wsl') {
+        continue
+      }
+      const distro =
+        selectedDistroKey === getWslSelectionKey(null)
+          ? account.wslDistro?.trim() || null
+          : selectedDistroKey.trim() || null
+      if (distro) {
+        drains.push(this.startLegacyWslAuthDrain({ runtime: 'wsl', wslDistro: distro }))
+      }
+    }
+    await Promise.all(drains)
   }
 
   private async resolveLegacyWslAuthDestination(

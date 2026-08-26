@@ -56,6 +56,28 @@ describe('preserveAgentAuthBeforeRestart', () => {
     expect(calls).toEqual(['codex-host', 'claude', 'flush'])
   })
 
+  it('drains retained WSL Codex auth before flushing the store', async () => {
+    const calls: string[] = []
+
+    await preserveAgentAuthBeforeRestart({
+      codexRuntimeHome: {
+        syncForCurrentSelection: vi.fn(() => {
+          calls.push('codex-host')
+        }),
+        syncActiveWslSelectionsBeforeRestart: vi.fn(async () => {
+          calls.push('codex-wsl')
+        })
+      },
+      store: {
+        flushPendingOrThrowAsync: vi.fn(async () => {
+          calls.push('flush')
+        })
+      }
+    })
+
+    expect(calls).toEqual(['codex-host', 'codex-wsl', 'flush'])
+  })
+
   it('flushes the store when auth services are missing', async () => {
     const flushPendingOrThrowAsync = vi.fn()
 
