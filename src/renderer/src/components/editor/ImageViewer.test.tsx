@@ -146,17 +146,22 @@ function attachSurface(
   setSurfaceRef({ clientWidth, clientHeight, addEventListener() {}, removeEventListener() {} })
 }
 
-async function renderExpandedImageViewer(content: string): Promise<unknown> {
+async function renderExpandedImageViewer(
+  content: string,
+  mimeType = 'image/png'
+): Promise<unknown> {
   reactHookRuntime.index = 0
   const module = await import('./ImageViewer')
   return expandNode(
     module.default({
       content,
       filePath: '/repo/preview.png',
-      mimeType: 'image/png'
+      mimeType
     })
   )
 }
+
+const SVG_BASE64 = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" />').toString('base64')
 
 function pngBase64(width: number): string {
   const bytes = Buffer.alloc(24)
@@ -261,15 +266,34 @@ describe('ImageViewer pre-load layout box', () => {
     vi.clearAllMocks()
   })
 
-  // Why: before onLoad there is no measured natural size, and the surface's `w-max`/`h-max`
-  // inner box makes percentage maxes resolve to `none` — so an uncapped image lays out and
-  // rasters at full natural resolution. The surface itself is already measured, and in a
-  // split pane it is a fraction of the viewport, so the cap has to come from it.
-  it('caps the inline preview with the measured surface box before the image loads', async () => {
+  // Why: the natural size is already in the base64 header, so a raster preview gets its exact
+  // fit box on the first render instead of a heuristic cap that onLoad then relays out.
+  it('sizes a raster preview from its header dimensions before onLoad', async () => {
     const first = await renderExpandedImageViewer(pngBase64(4))
     attachSurface(findSurfaceRefs(first)[0], 700, 800)
 
     const rendered = await renderExpandedImageViewer(pngBase64(4))
+    const image = findPreviewImage(rendered)
+
+    expect(image.props.className).toBe('object-contain block h-full w-full')
+    expect(image.props.style).toBeUndefined()
+    expect(
+      findElementsByType(rendered, 'div').some((element) => {
+        const style = element.props.style as { width?: string; height?: string } | undefined
+        return style?.width === '4px' && style?.height === '1px'
+      })
+    ).toBe(true)
+  })
+
+  // Why: before onLoad an unparsed mime has no natural size, and the surface's `w-max`/`h-max`
+  // inner box makes percentage maxes resolve to `none` — so an uncapped image lays out and
+  // rasters at full natural resolution. The surface itself is already measured, and in a
+  // split pane it is a fraction of the viewport, so the cap has to come from it.
+  it('caps an unmeasurable preview with the measured surface box before the image loads', async () => {
+    const first = await renderExpandedImageViewer(SVG_BASE64, 'image/svg+xml')
+    attachSurface(findSurfaceRefs(first)[0], 700, 800)
+
+    const rendered = await renderExpandedImageViewer(SVG_BASE64, 'image/svg+xml')
     const image = findPreviewImage(rendered)
 
     expect(image.props.className).toBe('object-contain block')
@@ -277,19 +301,31 @@ describe('ImageViewer pre-load layout box', () => {
   })
 
   it('caps the full-size popup preview from its own surface, not the viewport', async () => {
-    const first = await renderExpandedImageViewer(pngBase64(4))
+    const first = await renderExpandedImageViewer(SVG_BASE64, 'image/svg+xml')
     attachSurface(findSurfaceRefs(first)[1], 1200, 900)
 
-    const rendered = await renderExpandedImageViewer(pngBase64(4))
+    const rendered = await renderExpandedImageViewer(SVG_BASE64, 'image/svg+xml')
     const popupImage = findElementsByType(rendered, 'img').find((element) => !element.props.onError)
 
     expect(popupImage?.props.className).toBe('object-contain block')
     expect(popupImage?.props.style).toEqual({ maxWidth: '1168px', maxHeight: '868px' })
   })
 
+  // Why: a surface the user dragged to 30px was measured — the viewport is not a bound it implies.
+  it('caps an unmeasurable preview at a surface too short for its own padding', async () => {
+    const first = await renderExpandedImageViewer(SVG_BASE64, 'image/svg+xml')
+    attachSurface(findSurfaceRefs(first)[0], 700, 30)
+
+    const rendered = await renderExpandedImageViewer(SVG_BASE64, 'image/svg+xml')
+    const image = findPreviewImage(rendered)
+
+    expect(image.props.className).toBe('object-contain block')
+    expect(image.props.style).toEqual({ maxWidth: '668px', maxHeight: '30px' })
+  })
+
   // Why: an unmeasured surface is not an unbounded one.
   it('falls back to viewport lengths while no surface has been measured', async () => {
-    const rendered = await renderExpandedImageViewer(pngBase64(4))
+    const rendered = await renderExpandedImageViewer(SVG_BASE64, 'image/svg+xml')
 
     expect(findPreviewImage(rendered).props.className).toBe(
       'object-contain block max-h-[100vh] max-w-[100vw]'

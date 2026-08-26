@@ -1,30 +1,50 @@
-import { exceedsRasterImagePreviewLimits } from './raster-image-base64-preview'
-import { isKnownRasterImageMimeType } from './raster-image-preview-limits'
+import type { RasterImageDimensions } from './raster-image-dimensions'
+import { readRasterImageBase64Dimensions } from './raster-image-base64-preview'
+import {
+  isKnownRasterImageMimeType,
+  isRasterImagePreviewDimensions
+} from './raster-image-preview-limits'
+
+export type RasterImagePreview = {
+  dataUri: string | null
+  /** Natural size read from the encoded header; null means unreadable, never a guess. */
+  dimensions: RasterImageDimensions | null
+}
 
 // Builds an inline `data:` URI for base64 image bytes, shared by the desktop
 // editor ImageViewer and the mobile file preview so both decode images the same
 // way. Strips whitespace from the payload (base64 from git diffs and SSH streams
 // can arrive line-wrapped) and returns null when there is nothing an <img>/RN
 // <Image> can show — empty content or a non-image mime (PDF, octet-stream, …).
+// Returns the header dimensions from the same decode pass so callers that size
+// layout before the image loads do not pay for a second one.
+export function buildRasterImagePreview(
+  mimeType: string | undefined,
+  base64Content: string
+): RasterImagePreview {
+  // Only image/* renders in an <img>/RN <Image>; reject every other mime
+  // (application/pdf, application/octet-stream, …), not just PDF.
+  if (!mimeType?.startsWith('image/')) {
+    return { dataUri: null, dimensions: null }
+  }
+  const cleaned = base64Content.replace(/\s/g, '')
+  if (!cleaned) {
+    return { dataUri: null, dimensions: null }
+  }
+  // Only suppress when the header says the image is too large to render safely. An unreadable
+  // header is not evidence of an oversized image, and the decoder handles formats we cannot parse.
+  const dimensions = readRasterImageBase64Dimensions(cleaned, mimeType)
+  if (dimensions !== null && !isRasterImagePreviewDimensions(dimensions)) {
+    return { dataUri: null, dimensions: null }
+  }
+  return { dataUri: `data:${mimeType};base64,${cleaned}`, dimensions }
+}
+
 export function buildImageDataUri(
   mimeType: string | undefined,
   base64Content: string
 ): string | null {
-  // Only image/* renders in an <img>/RN <Image>; reject every other mime
-  // (application/pdf, application/octet-stream, …), not just PDF.
-  if (!mimeType?.startsWith('image/')) {
-    return null
-  }
-  const cleaned = base64Content.replace(/\s/g, '')
-  if (!cleaned) {
-    return null
-  }
-  // Only suppress when the header says the image is too large to render safely. An unreadable
-  // header is not evidence of an oversized image, and the decoder handles formats we cannot parse.
-  if (exceedsRasterImagePreviewLimits(cleaned, mimeType)) {
-    return null
-  }
-  return `data:${mimeType};base64,${cleaned}`
+  return buildRasterImagePreview(mimeType, base64Content).dataUri
 }
 
 /** Preserves non-raster data URIs and rejects unsafe known-raster data URIs. */

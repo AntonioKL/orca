@@ -42,17 +42,28 @@ export type ImageElementSizing = {
 }
 
 /**
+ * Max length for one axis: its padded content box, or the raw measured surface when padding leaves
+ * no content box. Only an axis we never measured falls through to the viewport — a 30px pane is a
+ * tighter bound than the window, and widening it to the viewport would give the smallest surfaces
+ * the loosest box.
+ */
+function getImageAxisMaxLength(surfaceLength: number | undefined): number | null {
+  if (surfaceLength === undefined || !Number.isFinite(surfaceLength) || surfaceLength < 0) {
+    return null
+  }
+
+  return getAvailableImageSurfaceLength(surfaceLength) ?? surfaceLength
+}
+
+/**
  * Sizing for the preview `<img>`.
  *
- * A null `layoutSize` means the natural size is not measured yet, not that the image is small.
+ * A null `layoutSize` means the natural size is not known yet, not that the image is small.
  * The scroll surface's inner box is `w-max`/`h-max`, so percentage maxes there resolve to `none`
  * and an unmeasured image would lay out — and raster — at full natural resolution before onLoad.
  * The surface itself is already measured by then, and in a split pane or side-by-side image diff
  * it is a fraction of the viewport, so cap against it; viewport lengths are only the fallback for
  * a surface we have not measured, which is not the same as an unbounded one.
- *
- * Each axis falls back on its own: a surface too narrow to yield a width cap still measured a
- * height, and discarding it would hand the smallest surfaces the loosest box.
  */
 export function getImageElementSizing(
   layoutSize: ImageViewerImageDimensions | null,
@@ -62,8 +73,8 @@ export function getImageElementSizing(
     return { className: 'block h-full w-full', style: undefined }
   }
 
-  const maxWidth = getAvailableImageSurfaceLength(surfaceSize?.width)
-  const maxHeight = getAvailableImageSurfaceLength(surfaceSize?.height)
+  const maxWidth = getImageAxisMaxLength(surfaceSize?.width)
+  const maxHeight = getImageAxisMaxLength(surfaceSize?.height)
   const style: CSSProperties = {}
   if (maxWidth !== null) {
     style.maxWidth = `${maxWidth}px`

@@ -1,7 +1,6 @@
-import { readRasterImageDimensions } from './raster-image-dimensions'
+import { readRasterImageDimensions, type RasterImageDimensions } from './raster-image-dimensions'
 import {
   isKnownRasterImageMimeType,
-  isRasterImagePreviewDimensions,
   RASTER_IMAGE_PREVIEW_HEADER_MAX_BYTES
 } from './raster-image-preview-limits'
 
@@ -122,23 +121,16 @@ function decodeBase64Prefix(content: string, maxBytes: number): Uint8Array | nul
 }
 
 /**
- * Whether the encoded dimensions are known to exceed the preview limits.
- *
- * Distinct from a failed read: an unrecognized or truncated header means we could not measure the
- * image, not that it is too large. Treating those the same blanks out valid images that no decoder
- * has trouble with, so only a confident over-limit answer should suppress a preview.
+ * Natural size encoded in a base64 raster payload, or null when it cannot be read — an SVG, an
+ * unrecognized header, or a truncated one. Null means unknown, never "small".
  */
-export function exceedsRasterImagePreviewLimits(
+export function readRasterImageBase64Dimensions(
   content: string,
   mimeType: string | undefined
-): boolean {
+): RasterImageDimensions | null {
   if (!isKnownRasterImageMimeType(mimeType)) {
-    return false
+    return null
   }
   const prefix = decodeBase64Prefix(content, RASTER_IMAGE_PREVIEW_HEADER_MAX_BYTES)
-  if (!prefix) {
-    return false
-  }
-  const dimensions = readRasterImageDimensions(prefix)
-  return dimensions !== null && !isRasterImagePreviewDimensions(dimensions)
+  return prefix ? readRasterImageDimensions(prefix) : null
 }

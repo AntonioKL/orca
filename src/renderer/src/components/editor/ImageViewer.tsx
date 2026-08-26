@@ -21,7 +21,7 @@ import {
   getZoomedImageLayoutSize
 } from './image-viewer-zoom'
 import { translate } from '@/i18n/i18n'
-import { buildImageDataUri } from '../../../../shared/image-data-uri'
+import { buildRasterImagePreview } from '../../../../shared/image-data-uri'
 
 const FALLBACK_IMAGE_MIME_TYPE = 'image/png'
 
@@ -64,10 +64,13 @@ export default function ImageViewer({
   }
   const isPdf = mimeType === 'application/pdf'
   const isIntrinsicLayout = layout === 'intrinsic'
-  const previewSrc = useMemo(
-    () => buildImageDataUri(mimeType, cleanedContent),
+  // Why: one decode pass yields both the data URI and the header's natural size, so the first
+  // render can lay out the real fit box instead of a cap onLoad would immediately replace.
+  const rasterPreview = useMemo(
+    () => buildRasterImagePreview(mimeType, cleanedContent),
     [cleanedContent, mimeType]
   )
+  const previewSrc = rasterPreview.dataUri
   const imageError =
     (previewSrc === null && cleanedContent.length > 0) ||
     (previewSrc !== null && failedPreviewSrc === previewSrc)
@@ -82,25 +85,26 @@ export default function ImageViewer({
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   }, [cleanedContent])
   const inlineZoomPercent = Math.round(inlineZoom * 100)
+  const naturalImageDimensions = imageDimensions ?? rasterPreview.dimensions
   const inlineImageLayoutSize = useMemo(
     () =>
       isIntrinsicLayout
         ? null
         : getZoomedImageLayoutSize({
-            imageDimensions,
+            imageDimensions: naturalImageDimensions,
             surfaceSize: inlineSurfaceSize,
             zoom: inlineZoom
           }),
-    [imageDimensions, inlineSurfaceSize, inlineZoom, isIntrinsicLayout]
+    [naturalImageDimensions, inlineSurfaceSize, inlineZoom, isIntrinsicLayout]
   )
   const popupImageLayoutSize = useMemo(
     () =>
       getZoomedImageLayoutSize({
-        imageDimensions,
+        imageDimensions: naturalImageDimensions,
         surfaceSize: popupSurfaceSize,
         zoom: popupZoom
       }),
-    [imageDimensions, popupSurfaceSize, popupZoom]
+    [naturalImageDimensions, popupSurfaceSize, popupZoom]
   )
   const inlineImageLayoutStyle = useMemo(
     () => getImageLayoutStyle(inlineImageLayoutSize),

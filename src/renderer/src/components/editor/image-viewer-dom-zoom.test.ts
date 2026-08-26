@@ -30,26 +30,34 @@ describe('getImageElementSizing', () => {
     })
   })
 
-  // Why: an axis we could not use is not evidence the other axis is unbounded — a surface too
-  // narrow to cap the width still measured a height, so keep it and fall back only on that axis.
-  it('keeps the measured height when the surface is narrower than its own padding', () => {
+  // Why: padding eating an axis is not evidence that axis is unbounded — the surface was still
+  // measured, and it, not the viewport, is what the image cannot exceed.
+  it('keeps the measured surface length on an axis whose padding leaves no content box', () => {
+    expect(getImageElementSizing(null, { width: 700, height: 30 })).toEqual({
+      className: 'block',
+      style: { maxWidth: '668px', maxHeight: '30px' }
+    })
+  })
+
+  it('keeps the measured surface length when the surface is narrower than its own padding', () => {
     expect(getImageElementSizing(null, { width: 24, height: 800 })).toEqual({
-      className: 'block max-w-[100vw]',
-      style: { maxHeight: '768px' }
+      className: 'block',
+      style: { maxWidth: '24px', maxHeight: '768px' }
     })
   })
 
-  it('keeps the measured width when the surface is shorter than its own padding', () => {
-    expect(getImageElementSizing(null, { width: 900, height: 24 })).toEqual({
-      className: 'block max-h-[100vh]',
-      style: { maxWidth: '868px' }
-    })
-  })
-
-  it('falls back to viewport lengths when neither surface axis clears its padding', () => {
+  it('keeps both measured lengths when neither axis clears its padding', () => {
     expect(getImageElementSizing(null, { width: 24, height: 24 })).toEqual({
-      className: 'block max-h-[100vh] max-w-[100vw]',
-      style: undefined
+      className: 'block',
+      style: { maxWidth: '24px', maxHeight: '24px' }
+    })
+  })
+
+  // Why: a collapsed ancestor reports 0, and a 0-length surface still bounds the image.
+  it('keeps a zero-length measured axis rather than widening it to the viewport', () => {
+    expect(getImageElementSizing(null, { width: 0, height: 0 })).toEqual({
+      className: 'block',
+      style: { maxWidth: '0px', maxHeight: '0px' }
     })
   })
 })
