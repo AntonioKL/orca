@@ -64,6 +64,13 @@ function socketError(socket, label) {
   )
 }
 
+function assertTlsErrorCode(expectedCode) {
+  return (error) => {
+    assert.equal(error?.cause?.code ?? error?.code, expectedCode)
+    return true
+  }
+}
+
 function readRequestBody(request) {
   return bounded(
     new Promise((resolve, reject) => {
@@ -153,7 +160,12 @@ try {
       try {
         const body = await readRequestBody(request)
         if (request.url === '/session') {
-          cloudRequests.push({ authorization: request.headers.authorization, body })
+          cloudRequests.push({
+            method: request.method,
+            contentType: request.headers['content-type'],
+            authorization: request.headers.authorization,
+            body
+          })
           response.setHeader('content-type', 'application/json')
           response.end(
             JSON.stringify({
@@ -175,6 +187,8 @@ try {
         if (request.url === '/relay-token' || request.url === '/v1/assign') {
           relayRequests.push({
             url: request.url,
+            method: request.method,
+            contentType: request.headers['content-type'],
             authorization: request.headers.authorization,
             body
           })
@@ -216,12 +230,15 @@ try {
   assert(address && typeof address !== 'string')
   const httpsUrl = `https://127.0.0.1:${address.port}`
 
-  await assert.rejects(globalThis.fetch(httpsUrl), /fetch failed/i)
+  await assert.rejects(
+    globalThis.fetch(httpsUrl),
+    assertTlsErrorCode('UNABLE_TO_VERIFY_LEAF_SIGNATURE')
+  )
   const rawWssError = await socketError(
     new WebSocket(`wss://127.0.0.1:${address.port}`),
     'raw Node WSS rejection'
   )
-  assert.match(rawWssError.message, /certificate|self-signed|unable to verify/i)
+  assert.equal(rawWssError.code, 'UNABLE_TO_VERIFY_LEAF_SIGNATURE')
   const session = await transport.exchangeOrcaCloudAuthCode(
     { sessionEndpoint: `${httpsUrl}/session` },
     {
@@ -236,6 +253,8 @@ try {
   assert.equal(session.accessToken, 'fixture-access-token')
   assert.deepEqual(cloudRequests, [
     {
+      method: 'POST',
+      contentType: 'application/json',
       authorization: undefined,
       body: JSON.stringify({
         code: 'fixture-code',
@@ -270,10 +289,25 @@ try {
   })
   assert.equal(assignment.cellUrl, httpsUrl)
   assert.deepEqual(
-    relayRequests.map(({ url, authorization: header }) => ({ url, authorization: header })),
+    relayRequests.map(({ url, method, contentType, authorization }) => ({
+      url,
+      method,
+      contentType,
+      authorization
+    })),
     [
-      { url: '/relay-token', authorization: 'Bearer fixture-access-token' },
-      { url: '/v1/assign', authorization: 'Bearer fixture-relay-token' }
+      {
+        url: '/relay-token',
+        method: 'POST',
+        contentType: 'application/json',
+        authorization: 'Bearer fixture-access-token'
+      },
+      {
+        url: '/v1/assign',
+        method: 'POST',
+        contentType: 'application/json',
+        authorization: 'Bearer fixture-relay-token'
+      }
     ]
   )
   assert.deepEqual(JSON.parse(relayRequests[0].body), {
@@ -346,9 +380,10 @@ try {
   )
   assert.equal(receivedData, 'node18-data-message')
 
+  const mismatchedUrl = httpsUrl.replace('127.0.0.1', 'localhost')
   await assert.rejects(
     transport.exchangeOrcaCloudAuthCode(
-      { sessionEndpoint: `${httpsUrl.replace('127.0.0.1', 'localhost')}/session` },
+      { sessionEndpoint: `${mismatchedUrl}/session` },
       {
         code: 'fixture-code',
         codeVerifier: 'fixture-verifier',
@@ -358,10 +393,10 @@ try {
         localProfileId: 'local-profile-1'
       }
     ),
-    /fetch failed/i
+    assertTlsErrorCode('ERR_TLS_CERT_ALTNAME_INVALID')
   )
   mismatchedControlClient = new transport.RelayControlClient({
-    cellUrl: httpsUrl.replace('127.0.0.1', 'localhost'),
+    cellUrl: mismatchedUrl,
     relayJwt: authorization.relayToken,
     relayHostId,
     assignmentEpoch: assignment.assignmentEpoch,
@@ -372,7 +407,10 @@ try {
     onDrain: () => {},
     onClose: () => {}
   })
-  await assert.rejects(mismatchedControlClient.connect(), /hostname|altname|IP/i)
+  await assert.rejects(
+    mismatchedControlClient.connect(),
+    assertTlsErrorCode('ERR_TLS_CERT_ALTNAME_INVALID')
+  )
 } finally {
   controlClient?.closeNow()
   mismatchedControlClient?.closeNow()

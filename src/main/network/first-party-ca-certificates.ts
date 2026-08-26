@@ -37,6 +37,11 @@ type CertificateSources = {
   trustLoadTimeoutMs?: number
 }
 
+export type LegacySystemCaPolicy = {
+  certificates: string[]
+  disallowedDigests: ReadonlySet<string>
+}
+
 const requireFromMain = createRequire(__filename)
 
 function parsePemCertificates(value: string): string[] {
@@ -69,22 +74,25 @@ function certificateDigest(pem: string): string | undefined {
 async function loadWindowsCertificates(
   loadModule: NonNullable<CertificateSources['loadWindowsCaModule']>,
   now: number
-): Promise<string[]> {
+): Promise<LegacySystemCaPolicy> {
   const module = await loadModule()
-  const [trusted, blocked] = await Promise.all([
-    module.exportSystemCertificatesAsync({ store: 'ROOT', storeTypeList: WINDOWS_STORE_TYPES }),
-    module.exportSystemCertificatesAsync({
-      store: 'Disallowed',
-      storeTypeList: WINDOWS_STORE_TYPES
-    })
-  ])
-  const disallowed = new Set(
+  const readStore = async (store: string): Promise<string[]> => {
+    const results = await Promise.allSettled(
+      WINDOWS_STORE_TYPES.map((storeType) =>
+        module.exportSystemCertificatesAsync({ store, storeTypeList: [storeType] })
+      )
+    )
+    return results.flatMap((result) => (result.status === 'fulfilled' ? result.value : []))
+  }
+  const [trusted, blocked] = await Promise.all([readStore('ROOT'), readStore('Disallowed')])
+  const disallowedDigests = new Set(
     blocked.map(certificateDigest).filter((digest): digest is string => digest !== undefined)
   )
-  return filterCurrentCaCertificates(trusted, now).filter((pem) => {
+  const certificates = filterCurrentCaCertificates(trusted, now).filter((pem) => {
     const digest = certificateDigest(pem)
-    return digest !== undefined && !disallowed.has(digest)
+    return digest !== undefined && !disallowedDigests.has(digest)
   })
+  return { certificates, disallowedDigests }
 }
 
 async function loadMacCertificates(
@@ -171,9 +179,19 @@ export async function loadCaCertificateFile(path: string | undefined): Promise<s
   }
 }
 
-export async function loadLegacySystemCaCertificates(
+export function applyLegacySystemCaPolicy(
+  certificates: string[],
+  policy: LegacySystemCaPolicy
+): string[] {
+  return certificates.filter((pem) => {
+    const digest = certificateDigest(pem)
+    return digest !== undefined && !policy.disallowedDigests.has(digest)
+  })
+}
+
+export async function loadLegacySystemCaPolicy(
   sources: CertificateSources = {}
-): Promise<string[]> {
+): Promise<LegacySystemCaPolicy> {
   const platform = sources.platform ?? process.platform
   const env = sources.env ?? process.env
   const now = sources.now ?? Date.now()
@@ -182,19 +200,34 @@ export async function loadLegacySystemCaCertificates(
   const trustLoadTimeoutMs = sources.trustLoadTimeoutMs ?? MACOS_TRUST_LOAD_TIMEOUT_MS
   try {
     if (platform === 'darwin') {
-      return await loadMacCertificates(execute, now, trustLoadTimeoutMs)
+      const certificates = await withinDeadline(
+        loadMacCertificates(execute, now, trustLoadTimeoutMs),
+        trustLoadTimeoutMs,
+        []
+      )
+      return { certificates, disallowedDigests: new Set() }
     }
     if (platform === 'linux') {
-      return await loadLinuxCertificates(env, loadFile, now)
+      const certificates = await loadLinuxCertificates(env, loadFile, now)
+      return { certificates, disallowedDigests: new Set() }
     }
     if (platform === 'win32') {
       const loadModule =
         sources.loadWindowsCaModule ??
         (async () => requireFromMain('win-export-certificate-and-key') as WindowsCaModule)
-      return await withinDeadline(loadWindowsCertificates(loadModule, now), trustLoadTimeoutMs, [])
+      return await withinDeadline(loadWindowsCertificates(loadModule, now), trustLoadTimeoutMs, {
+        certificates: [],
+        disallowedDigests: new Set()
+      })
     }
   } catch {
     // Bundled roots remain available if host trust enumeration fails.
   }
-  return []
+  return { certificates: [], disallowedDigests: new Set() }
+}
+
+export async function loadLegacySystemCaCertificates(
+  sources: CertificateSources = {}
+): Promise<string[]> {
+  return (await loadLegacySystemCaPolicy(sources)).certificates
 }
