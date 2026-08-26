@@ -2,6 +2,7 @@
 import { z } from 'zod'
 import { setImmediate as yieldToEventLoop } from 'node:timers/promises'
 import { defineMethod, type RpcMethod } from '../core'
+import { resolveDispatchCreator } from './orchestration-dispatch-creator'
 import { OptionalFiniteNumber, OptionalString, OptionalBoolean, requiredString } from '../schemas'
 import {
   LEGACY_CONTRACT_VERSION,
@@ -27,6 +28,7 @@ import {
   resolveBareOrchestrationRecipient,
   type SendRecipientWarning
 } from './orchestration-recipient-routing'
+import { buildInjectRejectionMessage } from './orchestration-inject-rejection-message'
 import { resolveRunScope } from './orchestration-run-scope'
 import { ORCHESTRATION_RUN_METHODS } from './orchestration-runs'
 import { ORCHESTRATION_WORKER_METHODS } from './orchestration-worker-methods'
@@ -1643,11 +1645,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
       if (params.inject) {
         const hasAgent = await runtime.isTerminalRunningAgent(to)
         if (!hasAgent) {
-          throw new Error(
-            `Cannot dispatch --inject to terminal ${to}: no recognized agent detected. ` +
-              'Start an agent CLI (e.g. claude, codex, gemini, droid, cursor) in the terminal first, ' +
-              'or dispatch without --inject and send the prompt manually.'
-          )
+          throw new Error(buildInjectRejectionMessage(to))
         }
       }
 
@@ -1666,13 +1664,15 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
       }
 
       revalidateLegacyCoordinator?.()
-      const ctx = db.createDispatchContext(
-        params.task,
-        to,
+      const ctx = db.createDispatchContext({
+        taskId: params.task,
+        assigneeHandle: to,
         assigneePaneKey,
-        dispatchAuthority?.launchTokenHash ?? undefined,
-        processIncarnation
-      )
+        launchTokenHash: dispatchAuthority?.launchTokenHash ?? undefined,
+        processIncarnation,
+        creator: resolveDispatchCreator(runtime, params.from),
+        maxDepth: runtime.getNestedWorkerMaxDepth()
+      })
       const dispatchCapability = params.inject
         ? db.mintDispatchCapability({
             dispatchId: ctx.id,

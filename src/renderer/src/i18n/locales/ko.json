@@ -232,7 +232,10 @@
         "workspace": {
           "cleanup": {
             "9d6e531da6": "워크스페이스가 더 이상 존재하지 않습니다.",
-            "changedSinceConfirmation": "확인 후 워크스페이스가 변경되었습니다. 제거하기 전에 새로 고쳐 검토하세요."
+            "changedSinceConfirmation": "확인 후 워크스페이스가 변경되었습니다. 제거하기 전에 새로 고쳐 검토하세요.",
+            "gitStatusUnavailable": "Orca가 이 워크스페이스의 Git 상태를 확인할 수 없습니다. 다시 시도하거나 호스트별 사이드바 또는 프로젝트 목록에서 삭제하세요.",
+            "gitStatusUnavailableOlderPeer": "Orca가 이 Git 상태 확인 실패를 호스트와 연결할 수 없습니다. 이전 연결 피어를 업데이트하거나 호스트별 사이드바 또는 프로젝트 목록에서 워크스페이스를 삭제하세요.",
+            "forceNeedsApproval": "강제로 삭제하기 전에 이 워크스페이스를 검토하고 확인하세요."
           }
         },
         "worktrees": {
@@ -3227,6 +3230,14 @@
             "workspaceConflict": "워크스페이스 충돌",
             "workspaceSyncError": "워크스페이스 동기화 오류"
           },
+          "CaffeinateStatusSegment": {
+            "active": "활성",
+            "inactive": "비활성",
+            "ariaLabel": "{{title}}, {{status}}",
+            "onDescription": "이 컴퓨터가 절전 모드로 전환되지 않도록 항상 유지",
+            "autoDescription": "에이전트가 작업하는 동안 절전 모드로 전환되지 않도록 유지",
+            "offDescription": "시스템의 기본 절전 동작 허용"
+          },
           "StatusBar": {
             "9659e38343": "포트",
             "d1e1a7a6bf": "리소스 관리자",
@@ -3962,6 +3973,10 @@
         "SkillUpdateRow": {
           "oneLocation": "1 location",
           "manyLocations": "{{value0}} locations"
+        },
+        "host": {
+          "local": "이 컴퓨터",
+          "remote": "연결된 런타임"
         }
       },
       "sidebar": {
@@ -4273,7 +4288,7 @@
           "489d1c8c9f": "프로젝트 검색...",
           "ee240a39eb": "필터 편집",
           "automationCreated": "자동화로 생성된 워크스페이스 숨기기",
-          "cliCreated": "Hide CLI-created",
+          "cliCreated": "CLI로 생성된 워크스페이스 숨기기",
           "detachedHead": "분리된 HEAD 숨기기",
           "keepDefaultBranch": "기본 브랜치는 제외",
           "keepDefaultBranchAria": "슬립 중인 워크스페이스를 숨겨도 기본 브랜치는 계속 표시"
@@ -4342,7 +4357,7 @@
           "ed1611b65b": "슬립 중인 항목 숨기기",
           "82594419ba": "필터",
           "automationCreated": "자동화로 생성된 워크스페이스 숨기기",
-          "cliCreated": "Hide CLI-created",
+          "cliCreated": "CLI로 생성된 워크스페이스 숨기기",
           "detachedHead": "분리된 HEAD 숨기기",
           "keepDefaultBranch": "기본 브랜치는 제외",
           "keepDefaultBranchAria": "슬립 중인 워크스페이스를 숨겨도 기본 브랜치는 계속 표시"
@@ -4515,10 +4530,10 @@
           "issueLinkLabel": "이슈 링크",
           "reviewLinkLabel": "{{value0}} 링크",
           "cliHeader": "Orca CLI",
-          "cliCreatedFromAgent": "Created by an agent via `orca worktree create`",
-          "cliCreatedFromShell": "Created via `orca worktree create`",
-          "cliStartupAgent": "Started with {{value0}}",
-          "cliCreated": "Created by Orca CLI",
+          "cliCreatedFromAgent": "Agent가 `orca worktree create`로 생성",
+          "cliCreatedFromShell": "`orca worktree create`로 생성",
+          "cliStartupAgent": "{{value0}}(으)로 시작됨",
+          "cliCreated": "Orca CLI로 생성됨",
           "jiraIssue": "Jira {{value0}}",
           "viewOnJira": "Jira에서 보기",
           "linkedJira": "연결된 Jira {{value0}}"
@@ -9168,7 +9183,13 @@
         "agent-awake-copy": {
           "e5995ce268": "agents 작업 중 컴퓨터를 깨어 있게 유지",
           "95d3031db2": "agents가 작업하는 동안 이 컴퓨터와 디스플레이를 깨어 있게 유지합니다. 뚜껑을 닫을 때의 동작은 이 기기의 전원 설정을 따릅니다.",
-          "a42f6fbdd8": "agents가 작업하는 동안 이 컴퓨터와 디스플레이를 깨어 있게 유지합니다. Orca는 전원 정책에 따라 뚜껑이 닫혀 있을 때도 이 기기를 깨어 있게 유지하도록 요청합니다."
+          "a42f6fbdd8": "agents가 작업하는 동안 이 컴퓨터와 디스플레이를 깨어 있게 유지합니다. Orca는 전원 정책에 따라 뚜껑이 닫혀 있을 때도 이 기기를 깨어 있게 유지하도록 요청합니다.",
+          "modeTitle": "컴퓨터 절전 방지"
+        },
+        "AgentAwakeSetting": {
+          "on": "켜짐",
+          "auto": "에이전트",
+          "off": "꺼짐"
         },
         "agent-status-hooks-copy": {
           "7707c15abb": "Agent 상태 훅",
@@ -10589,6 +10610,8 @@
             "7a09d7f9d2": "베이스",
             "383cf92c73": "트리",
             "d7ae61269b": "브랜치에 Commit 됨",
+            "branchFilesChangedVsBaseOne": "{{ref}} 대비 파일 1개 변경됨",
+            "branchFilesChangedVsBaseOther": "{{ref}} 대비 파일 {{count}}개 변경됨",
             "48a003c1b1": "스테이징된 변경 사항",
             "d4ef4bafc5": "변경 사항",
             "522f44dce5": "추적되지 않은 파일",
@@ -10663,10 +10686,10 @@
             "b3c8f1a902": "파일 이름으로 필터링",
             "d4f8c2a901": "필터 지우고 닫기",
             "e8a1c4b203": "vs",
-            "f9b2441bb6": "{{value0}}보다 1 commit 앞서 있음",
-            "b715ef615b": "{{value1}}보다 {{value0}} commits 앞서 있음",
-            "c1a8f3e204": "{{value0}}보다 1 commit 뒤처짐",
-            "d2b9g4f315": "{{value1}}보다 {{value0}} commits 뒤처짐",
+            "compareBaseCommitsAheadOne": "{{ref}}보다 1 commit 앞서 있음",
+            "compareBaseCommitsAheadOther": "{{ref}}보다 {{count}} commits 앞서 있음",
+            "compareBaseCommitsBehindOne": "{{ref}}보다 1 commit 뒤처짐",
+            "compareBaseCommitsBehindOther": "{{ref}}보다 {{count}} commits 뒤처짐",
             "4b4a7de138": "브라우저에서 검토 페이지 열기",
             "createPrIntentCommitBlockedSummary": "커밋이 차단됨: {{value0}} 이슈를 수정한 후 PR 만들기를 다시 시도하세요.",
             "pushRecovery": {
@@ -13852,6 +13875,7 @@
           "backToList": "모든 자동화",
           "tableName": "이름",
           "tableProject": "프로젝트",
+          "tableHost": "호스트",
           "tableStatus": "상태",
           "tableActions": "작업",
           "newAutomation": "새 자동화",
@@ -14566,6 +14590,59 @@
         "presentation": {
           "gitlabMergeRequestNumber": "MR #{{value0}}",
           "githubPullRequestNumber": "PR #{{value0}}"
+        },
+        "browse": {
+          "gitStatusCheckFailed": "Git 상태 확인 실패",
+          "gitStatusUnverified": "Git 상태를 확인할 수 없음",
+          "deleteAnyway": "그래도 삭제",
+          "forceDeleteProjectionOne": "현재 워크스페이스 {{count}}개에 위험 요소가 표시되며 강제 삭제가 필요할 수 있습니다",
+          "forceDeleteProjectionMany": "현재 워크스페이스 {{count}}개에 위험 요소가 표시되며 강제 삭제가 필요할 수 있습니다",
+          "appliedFilters": "적용된 필터",
+          "removeFilter": "{{value0}} 필터 제거",
+          "chip": {
+            "idleDays": "{{value0}}일 이상 유휴",
+            "neverVisited": "방문한 적 없음",
+            "minSize": "{{value0}} MB 이상",
+            "maxSize": "{{value0}} MB 이하",
+            "excludesUnsized": "측정된 항목만",
+            "excludesStatusless": "상태 있음",
+            "list": "{{value0}}: {{value1}}",
+            "triState": "{{value0}}: {{value1}}",
+            "only": "만",
+            "exclude": "제외",
+            "minAhead": "{{value0}}개 이상 앞섬",
+            "minBehind": "{{value0}}개 이상 뒤처짐",
+            "branchQuery": "브랜치: {{value0}}",
+            "pathPrefix": "경로: {{value0}}",
+            "presence": "{{value0}}: {{value1}}",
+            "has": "있음",
+            "none": "없음",
+            "completelyEmpty": "잃을 것 없음",
+            "selectableOnly": "삭제 가능한 항목만",
+            "kind": {
+              "status": "상태",
+              "agent": "에이전트",
+              "git": "Git",
+              "review": "리뷰",
+              "reviewState": "리뷰 상태",
+              "reviewProvider": "제공자",
+              "ticket": "티켓",
+              "ticketSource": "티켓 소스",
+              "context": "컨텍스트",
+              "host": "호스트",
+              "repo": "저장소",
+              "blocker": "차단 요인",
+              "tier": "안전",
+              "dismissed": "무시됨",
+              "archived": "보관됨",
+              "pinned": "고정됨",
+              "unread": "읽지 않음",
+              "comment": "댓글",
+              "prunable": "정리 가능",
+              "locked": "잠김",
+              "retainedAgents": "완료된 에이전트"
+            }
+          }
         }
       }
     },
