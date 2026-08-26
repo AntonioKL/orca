@@ -614,7 +614,7 @@ export function buildSettingsNavigationMetadata({
               'Low-level compatibility settings for troubleshooting.'
             ),
             icon: Wrench,
-            searchEntries: getAdvancedPaneSearchEntries(),
+            searchEntries: getAdvancedPaneSearchEntries({ isWindows, isWebClient }),
             group: 'advanced'
           }
         ]

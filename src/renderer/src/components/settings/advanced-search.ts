@@ -4,7 +4,7 @@ import { createLocalizedCatalog } from '@/i18n/localized-catalog'
 import { translate } from '@/i18n/i18n'
 import { translateSearchKeyword } from './settings-search-keywords'
 
-export const getAdvancedPaneSearchEntries = createLocalizedCatalog((): SettingsSearchEntry[] => [
+const getAdvancedPaneCoreSearchEntries = createLocalizedCatalog((): SettingsSearchEntry[] => [
   ...getAdvancedNetworkSearchEntries(),
   {
     title: translate(
@@ -44,8 +44,59 @@ export const getAdvancedPaneSearchEntries = createLocalizedCatalog((): SettingsS
   }
 ])
 
+const getSafeGraphicsModeSearchEntry = createLocalizedCatalog(
+  (): SettingsSearchEntry => ({
+    title: translate('auto.components.settings.advanced.search.safeGraphics', 'Safe Graphics Mode'),
+    description: translate(
+      'auto.components.settings.advanced.search.safeGraphicsDescription',
+      'Turn software rendering on, or undo the fallback Orca applies after repeated GPU crashes.'
+    ),
+    keywords: [
+      ...translateSearchKeyword('auto.components.settings.advanced.search.e04e9db503', 'advanced'),
+      ...translateSearchKeyword('auto.components.settings.advanced.search.gpu', 'gpu'),
+      ...translateSearchKeyword('auto.components.settings.advanced.search.graphics', 'graphics'),
+      ...translateSearchKeyword(
+        'auto.components.settings.advanced.search.hardwareAcceleration',
+        'hardware acceleration'
+      ),
+      ...translateSearchKeyword(
+        'auto.components.settings.advanced.search.softwareRendering',
+        'software rendering'
+      ),
+      ...translateSearchKeyword('auto.components.settings.advanced.search.driver', 'driver'),
+      ...translateSearchKeyword('auto.components.settings.advanced.search.crash', 'crash'),
+      ...translateSearchKeyword('auto.components.settings.advanced.search.safeMode', 'safe mode')
+    ]
+  })
+)
+
+/**
+ * Whether the Advanced pane renders the Safe Graphics Mode row.
+ *
+ * Shared with the pane on purpose: the fallback only ever engages on the Windows desktop app,
+ * and a search index that answers where nothing renders sends the user to a dead result. One
+ * predicate is what keeps the two from drifting apart.
+ */
+export function isSafeGraphicsModeSettingAvailable(platform: {
+  isWindows: boolean
+  isWebClient: boolean
+}): boolean {
+  return platform.isWindows && !platform.isWebClient
+}
+
+export function getAdvancedPaneSearchEntries(platform: {
+  isWindows: boolean
+  isWebClient: boolean
+}): SettingsSearchEntry[] {
+  return isSafeGraphicsModeSettingAvailable(platform)
+    ? [...getAdvancedPaneCoreSearchEntries(), getSafeGraphicsModeSearchEntry()]
+    : getAdvancedPaneCoreSearchEntries()
+}
+
 function findEntry(title: string): SettingsSearchEntry {
-  const entry = getAdvancedPaneSearchEntries().find((e) => e.title === title)
+  const entry = [...getAdvancedPaneCoreSearchEntries(), getSafeGraphicsModeSearchEntry()].find(
+    (e) => e.title === title
+  )
   if (!entry) {
     throw new Error(`Missing advanced-pane search entry: "${title}"`)
   }
@@ -56,6 +107,9 @@ export function getAdvancedSearchEntry() {
   return {
     http1Compatibility: findEntry(
       translate('auto.components.settings.advanced.search.11eea3da72', 'HTTP/1.1 Compatibility')
+    ),
+    safeGraphicsMode: findEntry(
+      translate('auto.components.settings.advanced.search.safeGraphics', 'Safe Graphics Mode')
     )
   } as const
 }

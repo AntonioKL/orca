@@ -1,14 +1,21 @@
 import { useRef, useState } from 'react'
-import { Info, Loader2, RotateCw } from 'lucide-react'
+import { Info } from 'lucide-react'
 import type { GlobalSettings } from '../../../../shared/global-settings-types'
 import { useMountedRef } from '@/hooks/useMountedRef'
-import { Button } from '../ui/button'
+import { getRendererAppPlatform } from '@/lib/renderer-app-platform'
+import { isWebClientLocation } from '@/lib/web-client-location'
 import { Label } from '../ui/label'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip'
 import { AdvancedNetworkSettingsSection } from './AdvancedNetworkSettingsSection'
+import { SafeGraphicsModeSetting } from './SafeGraphicsModeSetting'
 import { SearchableSetting } from './SearchableSetting'
+import { SettingsRestartPrompt } from './SettingsRestartPrompt'
 import { SettingsSubsectionHeader, SettingsSwitch } from './SettingsFormControls'
-import { getAdvancedPaneSearchEntries, getAdvancedSearchEntry } from './advanced-search'
+import {
+  getAdvancedPaneSearchEntries,
+  getAdvancedSearchEntry,
+  isSafeGraphicsModeSettingAvailable
+} from './advanced-search'
 import { translate } from '@/i18n/i18n'
 
 export { getAdvancedPaneSearchEntries }
@@ -103,38 +110,27 @@ export function AdvancedPane({ settings, updateSettings }: AdvancedPaneProps): R
           </div>
 
           {http1CompatibilityRestartRequired ? (
-            <div className="flex items-center justify-between gap-3 rounded-md border border-border/50 bg-muted/30 px-3 py-2">
-              <div className="min-w-0">
-                <p className="text-xs font-medium">
-                  {translate(
-                    'auto.components.settings.AdvancedPane.89958d7edf',
-                    'Restart required'
-                  )}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {translate(
-                    'auto.components.settings.AdvancedPane.87a2cb2ac8',
-                    'Orca applies this networking mode at startup.'
-                  )}
-                </p>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleHttp1CompatibilityRelaunch}
-                disabled={http1CompatibilityRelaunching}
-                className="shrink-0 gap-1.5"
-              >
-                {http1CompatibilityRelaunching ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <RotateCw className="size-3.5" />
-                )}
-                {translate('auto.components.settings.AdvancedPane.40b29e0bf3', 'Restart')}
-              </Button>
-            </div>
+            <SettingsRestartPrompt
+              title={translate(
+                'auto.components.settings.AdvancedPane.89958d7edf',
+                'Restart required'
+              )}
+              description={translate(
+                'auto.components.settings.AdvancedPane.87a2cb2ac8',
+                'Orca applies this networking mode at startup.'
+              )}
+              onRestart={handleHttp1CompatibilityRelaunch}
+              restarting={http1CompatibilityRelaunching}
+            />
           ) : null}
         </SearchableSetting>
+
+        {isSafeGraphicsModeSettingAvailable({
+          isWindows: getRendererAppPlatform() === 'win32',
+          isWebClient: isWebClientLocation()
+        }) ? (
+          <SafeGraphicsModeSetting />
+        ) : null}
       </section>
 
       <section className="space-y-3">

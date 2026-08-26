@@ -2,6 +2,25 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
+/**
+ * Anchored source lookup. Why a helper: a bare `indexOf` returns -1 when the anchor is renamed,
+ * and -1 compares "before" everything — so an ordering assertion built on one silently passes
+ * against code that no longer exists.
+ */
+function anchorIndex(source: string, anchor: string): number {
+  const index = source.indexOf(anchor)
+  expect(index, `missing source anchor: ${anchor}`).toBeGreaterThanOrEqual(0)
+  return index
+}
+
+/** The slice between two anchors, with both bounded so a rename cannot slice to EOF. */
+function between(source: string, from: string, to: string, label: string): string {
+  const start = anchorIndex(source, from)
+  const end = source.indexOf(to, start)
+  expect(end, `missing closing anchor for ${label}: ${to}`).toBeGreaterThan(start)
+  return source.slice(start, end)
+}
+
 describe('startup ordering', () => {
   it('passes the startup barrier into PTY handlers without blocking window creation', () => {
     const source = readFileSync(join(process.cwd(), 'src/main/index.ts'), 'utf8')
@@ -63,6 +82,54 @@ describe('startup ordering', () => {
     expect(source.slice(readyIndex, initIndex)).not.toMatch(/\bawait\b/)
     // Why the count: a second call site would leave the ordering claim above ambiguous.
     expect(source.split('initializeBrowserClientHostId(')).toHaveLength(2)
+  })
+
+  /**
+   * Ordering claims that no behavioural test can hold: `app.disableHardwareAcceleration()` is a
+   * no-op once whenReady resolves, the canonical userData path only exists after initDataPath()
+   * pins it, and a crash-at-startup launch is dead ~600ms in — so evidence written after the
+   * in-session threshold check never survives the launch that produced it. Everything else about
+   * the fallback is behaviour, and lives in gpu-fallback-launch-session.test.ts.
+   */
+  it('decides GPU fallback after initDataPath and before whenReady, off the canonical path', () => {
+    const source = readFileSync(join(process.cwd(), 'src/main/index.ts'), 'utf8')
+    const applyIndex = anchorIndex(source, '  maybeApplyGpuFallbackForThisLaunch()')
+    const apply = between(
+      source,
+      'function maybeApplyGpuFallbackForThisLaunch()',
+      '\n}\n',
+      'maybeApplyGpuFallbackForThisLaunch body'
+    )
+
+    expect(anchorIndex(source, 'void app.whenReady().then(')).toBeGreaterThan(applyIndex)
+    // Why initDataPath first: it is what pins userData before app.setName() can change how
+    // getPath('userData') resolves. Reading it earlier would resolve a different directory.
+    expect(anchorIndex(source, '  initDataPath()')).toBeLessThan(applyIndex)
+    // Why one path, captured once: the session keeps it for every later read and write, so
+    // nothing can move the artifacts out from under a decision this launch already made.
+    expect(apply).toContain('userDataPath: getCanonicalUserDataPath()')
+    expect(apply).not.toContain("app.getPath('userData')")
+    // Why: a modal here would block a process that has no window yet.
+    expect(apply).not.toContain('promptForGpuFallbackRestart')
+  })
+
+  it('persists GPU crash evidence before the in-session threshold check', () => {
+    const source = readFileSync(join(process.cwd(), 'src/main/index.ts'), 'utf8')
+    const handler = between(
+      source,
+      'async function handleGpuChildCrash(',
+      'function recordProcessGoneCrash(',
+      'handleGpuChildCrash body'
+    )
+    const evidenceIndex = anchorIndex(handler, 'gpuFallbackSession?.recordGpuCrash(msSinceLaunch)')
+
+    expect(anchorIndex(handler, 'gpuCrashFallbackTracker.recordGpuCrash(')).toBeGreaterThan(
+      evidenceIndex
+    )
+    expect(anchorIndex(handler, 'promptForGpuFallbackRestart(')).toBeGreaterThan(evidenceIndex)
+    // Why on ready-to-show: the survival clock may only start once a window actually painted.
+    expect(source).toContain("window.once('ready-to-show'")
+    expect(source).toContain('gpuFallbackSession?.armHistoryReset()')
   })
 
   it('requires daemon authority before restored-subagent liveness runs', () => {

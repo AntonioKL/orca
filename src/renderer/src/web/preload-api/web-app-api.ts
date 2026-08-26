@@ -1,3 +1,4 @@
+import { GPU_FALLBACK_INACTIVE_STATUS } from '../../../../shared/gpu-fallback-status'
 import type { PreloadApi } from '../../../../preload/api-types'
 import { sanitizeWebRuntimeWorkspaceSession } from '../web-workspace-session'
 import { sessionStorageKeyForHost } from './web-workspace-session-api'
@@ -34,6 +35,9 @@ export function createWebAppApi(): Partial<PreloadApi> {
       awaitBeforeUnloadCheckpoint: () => Promise.resolve(),
       awaitFirstWindowStartupServices: () => Promise.resolve(),
       recoverLegacyWorkerTerminalsForRendererStartup: () => Promise.resolve(),
+      // Safe Graphics Mode is a win32 desktop-only fallback; the browser has no equivalent.
+      getGpuFallbackStatus: () => Promise.resolve(GPU_FALLBACK_INACTIVE_STATUS),
+      setGpuFallbackEnabled: () => Promise.resolve(),
       startupDiagnostic: () => Promise.resolve(),
       getKeyboardInputSourceId: () => Promise.resolve(null),
       // The web client cannot inspect local Mission Control shortcuts.

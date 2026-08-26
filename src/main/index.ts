@@ -139,6 +139,7 @@ import {
   resolveUpdateInstallMode
 } from './updater'
 import { configureRemoteServerUpdater } from './runtime/remote-server-updater'
+import { GPU_FALLBACK_INACTIVE_STATUS } from '../shared/gpu-fallback-status'
 import type { UpdateCheckOptions } from '../shared/update-status-types'
 import { recordUpdaterLifecycle } from './updater-lifecycle-diagnostics'
 import {
@@ -165,13 +166,8 @@ import {
 import { enableRendererHeapHeadroom } from './startup/renderer-heap-headroom'
 import { argvRequestsServeMode, normalizeServeModeArgv } from './startup/serve-mode-argv'
 import { ensureVirtualDisplayForHeadlessServe } from './startup/ensure-virtual-display'
-import {
-  readActiveGpuFallbackMarker,
-  writeGpuFallbackMarker,
-  type GpuFallbackEnvironment,
-  type WindowsGpuFallbackEnvironment
-} from './startup/gpu-fallback-marker'
-import { applyGpuFallbackCommandLineSwitches } from './startup/gpu-fallback-switches'
+import type { GpuFallbackEnvironment } from './startup/gpu-fallback-marker'
+import { GpuFallbackLaunchSession } from './startup/gpu-fallback-launch-session'
 import {
   DEFAULT_GPU_CRASH_FALLBACK_THRESHOLD,
   DEFAULT_GPU_CRASH_FALLBACK_WINDOW_MS,
@@ -449,8 +445,15 @@ const gpuCrashFallbackTracker = new GpuCrashFallbackTracker({
   windowMs: DEFAULT_GPU_CRASH_FALLBACK_WINDOW_MS,
   threshold: DEFAULT_GPU_CRASH_FALLBACK_THRESHOLD
 })
-let gpuFallbackActiveThisLaunch = false
+// Why null off the Windows desktop and in serve mode: there is nothing to rescue there, and a
+// session would keep reading and writing userData artifacts that can never be acted on.
+let gpuFallbackSession: GpuFallbackLaunchSession | null = null
 let gpuFeatureStatus: Electron.GPUFeatureStatus | null = null
+
+/** True when this launch booted without hardware acceleration. */
+function isGpuFallbackActiveThisLaunch(): boolean {
+  return gpuFallbackSession !== null && gpuFallbackSession.softwareRenderingActive
+}
 let localPtyStartupReady: Promise<void> = Promise.resolve()
 let localPtyProviderStartupReady: Promise<void> = Promise.resolve()
 const AGENT_STATE_CRASH_BREADCRUMB_MIN_INTERVAL_MS = 30_000
@@ -529,7 +532,7 @@ function updateGpuAccelerationAboutPanel(): void {
       appName: app.name,
       appVersion: app.getVersion(),
       platform: process.platform,
-      gpuFallbackActive: gpuFallbackActiveThisLaunch,
+      gpuFallbackActive: isGpuFallbackActiveThisLaunch(),
       gpuFeatureStatus
     })
   )
@@ -964,7 +967,7 @@ if (hasSingleInstanceLock) {
   configureElectronNetworkCompatibility()
   enableRendererHeapHeadroom()
   maybeApplyGpuFallbackForThisLaunch()
-  if (!gpuFallbackActiveThisLaunch) {
+  if (!isGpuFallbackActiveThisLaunch()) {
     enableMainProcessGpuFeatures()
   }
   // Why: headless serve's offscreen BrowserWindows need an X display (Xvfb) on Linux; the result gates whether the offscreen backend is installed.
@@ -997,6 +1000,17 @@ ipcMain.handle('ui:consumePendingOpenSettings', (event) =>
 
 ipcMain.handle('ui:consumePendingSkillShare', () => {
   return skillShareDeepLinks.consume()
+})
+
+ipcMain.handle(
+  'app:getGpuFallbackStatus',
+  () => gpuFallbackSession?.status() ?? GPU_FALLBACK_INACTIVE_STATUS
+)
+
+// Why: without an exit a user whose driver was fixed stays in software rendering until the
+// next release, and without an entry a user with a known-bad driver cannot pin the workaround.
+ipcMain.handle('app:setGpuFallbackEnabled', (_event, enabled: boolean) => {
+  gpuFallbackSession?.setEnabled(enabled === true)
 })
 
 ipcMain.handle(
@@ -1536,6 +1550,7 @@ function openMainWindow(options: { revealOnDidFinishLoad?: boolean } = {}): Brow
   window.once('ready-to-show', () => {
     logStartupMilestone('ready-to-show')
     setImmediate(createSystemTrayDeferred)
+    gpuFallbackSession?.armHistoryReset()
   })
   window.once('show', () => {
     logStartupMilestone('window-shown')
@@ -1817,41 +1832,39 @@ function getGpuFallbackEnvironment(): GpuFallbackEnvironment {
   }
 }
 
-function getWindowsGpuFallbackEnvironment(): WindowsGpuFallbackEnvironment | null {
-  const environment = getGpuFallbackEnvironment()
-  if (environment.platform !== 'win32') {
-    return null
-  }
-  return { ...environment, platform: 'win32' }
-}
-
-// Why: read the GPU-fallback marker before app.whenReady() so app.disableHardwareAcceleration() takes effect. Windows desktop only.
+/**
+ * Decides and applies software rendering for this launch. Must run before app.whenReady(), or
+ * app.disableHardwareAcceleration() is a no-op — and before app.setName(), because the session
+ * captures one userData path and setName moves where a later getPath('userData') resolves.
+ */
 function maybeApplyGpuFallbackForThisLaunch(): void {
   if (isServeMode || process.platform !== 'win32') {
     return
   }
-  const marker = readActiveGpuFallbackMarker(app.getPath('userData'), getGpuFallbackEnvironment())
-  if (!marker) {
-    return
-  }
-  app.disableHardwareAcceleration()
-  const appliedSwitches = applyGpuFallbackCommandLineSwitches(app.commandLine, process.platform)
-  gpuFallbackActiveThisLaunch = true
-  // Why: with no GPU child left, child-process-gone can't report a GPU fault, so
-  // name the applied switches in the trail any later crash report carries.
-  recordCrashBreadcrumb('gpu_fallback_applied', {
-    crashesInWindow: marker.crashesInWindow,
-    switches: appliedSwitches.join(',')
+  gpuFallbackSession = new GpuFallbackLaunchSession({
+    userDataPath: getCanonicalUserDataPath(),
+    environment: getGpuFallbackEnvironment(),
+    launchId: getMainProcessLifecycleIdentity().mainProcessLaunchId,
+    hooks: {
+      disableHardwareAcceleration: () => app.disableHardwareAcceleration(),
+      commandLine: app.commandLine,
+      recordBreadcrumb: recordCrashBreadcrumb
+    }
   })
+  gpuFallbackSession.engage()
 }
 
 // Why: a burst of GPU child crashes means HW acceleration is unusable — persist a build-scoped marker and offer software rendering.
 async function handleGpuChildCrash(reason: string, exitCode: number | null): Promise<void> {
   // Software rendering already active or shutting down: nothing more to do.
-  if (gpuFallbackActiveThisLaunch || isQuitting || isServeMode) {
+  if (isGpuFallbackActiveThisLaunch() || isQuitting || isServeMode) {
     return
   }
-  const result = gpuCrashFallbackTracker.recordGpuCrash(performance.now())
+  const msSinceLaunch = performance.now()
+  // Why first: this process can be FATALed milliseconds from now, and the in-session
+  // threshold check below never survives a crash-at-startup launch.
+  gpuFallbackSession?.recordGpuCrash(msSinceLaunch)
+  const result = gpuCrashFallbackTracker.recordGpuCrash(msSinceLaunch)
   if (!result.shouldEngageFallback) {
     return
   }
@@ -1878,24 +1891,11 @@ async function handleGpuChildCrash(reason: string, exitCode: number | null): Pro
     return
   }
   if (restartDecision !== 'restart') {
+    gpuFallbackSession?.declineRestart()
     recordDurableCrashBreadcrumb('gpu_fallback_restart_deferred', fallbackData)
     return
   }
-  const environment = getWindowsGpuFallbackEnvironment()
-  if (!environment) {
-    return
-  }
-  try {
-    writeGpuFallbackMarker(
-      app.getPath('userData'),
-      {
-        engagedAt,
-        crashesInWindow: result.crashesInWindow
-      },
-      environment
-    )
-  } catch (error) {
-    console.warn('[gpu-fallback] failed to persist marker:', error)
+  if (gpuFallbackSession?.promoteToMarker(result.crashesInWindow, engagedAt) !== true) {
     return
   }
   isQuitting = true

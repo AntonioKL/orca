@@ -1,6 +1,7 @@
 import type { AppIdentity } from '../../shared/app-identity'
 import type { E2EConfig } from '../../shared/e2e-config'
 import type { ExecutionHostId } from '../../shared/execution-host'
+import type { GpuFallbackStatus } from '../../shared/gpu-fallback-status'
 import type {
   WriteTerminalRenderDesyncEvidenceArgs,
   WriteTerminalRenderDesyncEvidenceResult
@@ -40,6 +41,11 @@ export type AppApi = {
   awaitFirstWindowStartupServices: () => Promise<void>
   /** Reconciles legacy worker authority around persisted terminal reconnect. */
   recoverLegacyWorkerTerminalsForRendererStartup: () => Promise<void>
+  /** Reports whether this launch disabled hardware acceleration after repeated GPU crashes. */
+  getGpuFallbackStatus: () => Promise<GpuFallbackStatus>
+  /** Turns Safe Graphics Mode on (pinned across updates) or off (drops the decision and its
+   *  crash evidence, so the next launch retries hardware acceleration). Caller relaunches. */
+  setGpuFallbackEnabled: (enabled: boolean) => Promise<void>
   /** Emits a startup benchmark marker when ORCA_STARTUP_DIAGNOSTICS is enabled. */
   startupDiagnostic: (event: string, details?: Record<string, unknown>) => Promise<void>
   /** macOS active input mode, or layout ID when no IME is selected (e.g. `com.apple.keylayout.PolishPro`).

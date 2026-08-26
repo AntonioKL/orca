@@ -1071,6 +1071,12 @@
       "useInstalledAgentSkills": {
         "unreadableSkillSource": "A skill folder did not respond, so this status may be incomplete."
       },
+      "useGpuFallbackNotice": {
+        "title": "Orca started in Safe Graphics Mode",
+        "description": "Hardware acceleration is off because Orca's graphics process crashed on repeated launches. Rendering may be slower. Open Settings > Advanced to learn more and try hardware acceleration again.",
+        "openSettings": "Open Settings",
+        "dismiss": "Don't show again"
+      },
       "useMacosTccPromptNotice": {
         "title": "Seeing “Orca would like to access…” prompts?",
         "description": "Permission messages from macOS may appear when an agent or terminal tool running in Orca attempts to access protected files. Grant Full Disk Access in Settings to reduce these prompts.",
@@ -6325,6 +6331,19 @@
           "network": "Network",
           "networkDescription": "App-level network routing for proxies and corporate environments."
         },
+        "SafeGraphicsMode": {
+          "title": "Safe Graphics Mode",
+          "activeDescription": "Hardware acceleration is off because Orca's graphics process crashed on repeated launches. Rendering may be slower.",
+          "pinnedDescription": "On because you turned it on. Hardware acceleration stays off, including after Orca updates, until you turn this back off.",
+          "keepAfterUpdates": "Keep on after updates",
+          "inactiveDescription": "Off. Orca is using hardware acceleration, and turns this on by itself only after repeated graphics crashes at startup.",
+          "confirmTitle": "Restart with hardware acceleration?",
+          "confirmDescription": "If the graphics driver still crashes, Orca turns Safe Graphics Mode back on by itself once three launches within ten minutes have crashed graphics during startup.",
+          "confirmEnableTitle": "Restart in Safe Graphics Mode?",
+          "confirmEnableDescription": "Hardware acceleration stays off, including after Orca updates, until you turn this back off.",
+          "cancel": "Cancel",
+          "restart": "Restart"
+        },
         "AgentLocationSetting": {
           "92f4238f1a": "WSL default",
           "fc806485ae": "Loading WSL",
@@ -8686,7 +8705,16 @@
             "2b4d26d11e": "networking",
             "e04e9db503": "advanced",
             "585f56fae0": "Use HTTP/1.1 for Electron networking when HTTP/2 fails behind a proxy.",
-            "11eea3da72": "HTTP/1.1 Compatibility"
+            "11eea3da72": "HTTP/1.1 Compatibility",
+            "safeGraphics": "Safe Graphics Mode",
+            "safeGraphicsDescription": "Turn software rendering on, or undo the fallback Orca applies after repeated GPU crashes.",
+            "gpu": "gpu",
+            "graphics": "graphics",
+            "hardwareAcceleration": "hardware acceleration",
+            "softwareRendering": "software rendering",
+            "driver": "driver",
+            "crash": "crash",
+            "safeMode": "safe mode"
           }
         },
         "agents": {
@@ -11448,6 +11476,9 @@
         },
         "shortcutDefinitionCatalog": {
           "missionControlConflict": "Blocked by Mission Control. Remap here or change it in System Settings."
+        },
+        "SettingsRestartPrompt": {
+          "restart": "Restart"
         }
       },
       "right": {

@@ -276,6 +276,7 @@ import { readBrowserClientHostIdArgument } from '../shared/browser-client-host-i
 import { createUsageProviderApi } from './usage-provider-api'
 import type { AppStarSource } from '../shared/gh-star-source'
 import type { ExecutionHostId } from '../shared/execution-host'
+import type { GpuFallbackStatus } from '../shared/gpu-fallback-status'
 import type {
   Automation,
   AutomationCreateInput,
@@ -579,6 +580,10 @@ const api = {
       ipcRenderer.invoke('app:awaitFirstWindowStartupServices'),
     recoverLegacyWorkerTerminalsForRendererStartup: (): Promise<void> =>
       ipcRenderer.invoke('app:recoverLegacyWorkerTerminalsForRendererStartup'),
+    getGpuFallbackStatus: (): Promise<GpuFallbackStatus> =>
+      ipcRenderer.invoke('app:getGpuFallbackStatus'),
+    setGpuFallbackEnabled: (enabled: boolean): Promise<void> =>
+      ipcRenderer.invoke('app:setGpuFallbackEnabled', enabled),
     startupDiagnostic: (event: string, details?: Record<string, unknown>): Promise<void> =>
       startupDiagnosticsEnabled
         ? ipcRenderer.invoke('app:startupDiagnostic', event, details)

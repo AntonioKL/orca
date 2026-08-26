@@ -5,6 +5,15 @@ export type GpuCrashFallbackOptions = {
   threshold: number
 }
 
+// Why 'launch-failed' is retained but unreachable on the launch-failure path: when the
+// GPU child fails to *launch* (measured on Electron 43 / Windows 11 with --gpu-launcher
+// forcing failure), Chromium retries internally 6x and then FATALs the browser process —
+// 42 internal GPU failures produced zero 'child-process-gone' events. Electron 43 exposes
+// no other signal for that mode, and the cross-launch crash history does NOT cover it
+// either: its only writer sits behind the same 'child-process-gone' event, so nothing is
+// ever recorded and that shape stays unrescued. Rescuing it needs a separate signal, e.g.
+// detecting that the previous launch exited 3 before ready-to-show. This reason is kept
+// only because a GPU child that dies *after* a successful launch can still report it.
 const GPU_FALLBACK_CRASH_REASONS = new Set(['abnormal-exit', 'crashed', 'launch-failed'])
 
 // Why: on old/flaky GPU drivers the GPU child process crashes (STATUS_BREAKPOINT
