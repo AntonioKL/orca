@@ -3,6 +3,7 @@ import path from 'node:path'
 import type { Page } from '@stablyai/playwright-test'
 import { gitExecFileAsync } from '../../src/main/git/runner'
 import { listWorktreesStrict } from '../../src/main/git/worktree'
+import { areWorktreePathsEqual } from '../../src/main/ipc/worktree-path-comparison'
 import { expect, test } from './helpers/orca-app'
 import {
   createRuntimeDesktopPairingOffer,
@@ -13,6 +14,9 @@ import { worktreeRow } from './worktree-row-locators'
 
 function equivalentTestPaths(value: string): string[] {
   const normalized = path.normalize(value)
+  if (process.platform === 'win32') {
+    return [normalized.replaceAll('\\', '/').toLowerCase()]
+  }
   if (process.platform !== 'darwin') {
     return [normalized]
   }
@@ -22,19 +26,22 @@ function equivalentTestPaths(value: string): string[] {
 }
 
 function pathsMatch(left: string, right: string): boolean {
-  return equivalentTestPaths(left).includes(path.normalize(right))
+  return equivalentTestPaths(left).some((candidate) => areWorktreePathsEqual(candidate, right))
 }
 
 function waitForCatalogWorktree(page: Page, repoId: string, worktreePath: string): Promise<string> {
   return page.evaluate(
-    ({ expectedPaths, expectedRepoId }) => {
+    ({ expectedPaths, expectedRepoId, windows }) => {
+      const comparablePath = (value: string): string =>
+        windows ? value.replaceAll('\\', '/').toLowerCase() : value
       const findId = (): string | undefined =>
         window.__store
           ?.getState()
           .allWorktrees()
           .find(
             (worktree) =>
-              worktree.repoId === expectedRepoId && expectedPaths.includes(worktree.path)
+              worktree.repoId === expectedRepoId &&
+              expectedPaths.includes(comparablePath(worktree.path))
           )?.id
       const existing = findId()
       if (existing) {
@@ -50,8 +57,32 @@ function waitForCatalogWorktree(page: Page, repoId: string, worktreePath: string
         })
       })
     },
-    { expectedPaths: equivalentTestPaths(worktreePath), expectedRepoId: repoId }
+    {
+      expectedPaths: equivalentTestPaths(worktreePath),
+      expectedRepoId: repoId,
+      windows: process.platform === 'win32'
+    }
   )
+}
+
+async function readRuntimeTransportContinuity(page: Page, environmentId: string) {
+  const remoteControl = await page.evaluate(async (selector) => {
+    const response = await window.api.runtimeEnvironments.getStatus({ selector })
+    if (!response.ok) {
+      throw new Error(response.error.message)
+    }
+    return response.result.remoteControl ?? null
+  }, environmentId)
+  if (!remoteControl || remoteControl.state !== 'ready' || remoteControl.lastConnectedAt === null) {
+    throw new Error('Paired client shared-control transport is not ready')
+  }
+  return {
+    state: remoteControl.state,
+    lastConnectedAt: remoteControl.lastConnectedAt,
+    lastClose: remoteControl.lastClose,
+    lastError: remoteControl.lastError,
+    reconnectAttempt: remoteControl.reconnectAttempt
+  }
 }
 
 test('shows an externally created worktree on a paired client without reconnect', async ({
@@ -89,17 +120,28 @@ test('shows an externally created worktree on a paired client without reconnect'
       'External worktree discovery'
     )
     await client.page.waitForFunction(
-      ({ expectedPaths, expectedRepoId }) =>
+      ({ expectedPaths, expectedRepoId, windows }) =>
         window.__store
           ?.getState()
           .allWorktrees()
           .some(
             (worktree) =>
-              worktree.repoId === expectedRepoId && expectedPaths.includes(worktree.path)
+              worktree.repoId === expectedRepoId &&
+              expectedPaths.includes(
+                windows ? worktree.path.replaceAll('\\', '/').toLowerCase() : worktree.path
+              )
           ) ?? false,
-      { expectedPaths: equivalentTestPaths(testRepoPath), expectedRepoId: repoId }
+      {
+        expectedPaths: equivalentTestPaths(testRepoPath),
+        expectedRepoId: repoId,
+        windows: process.platform === 'win32'
+      }
     )
 
+    const clientTransportBefore = await readRuntimeTransportContinuity(
+      client.page,
+      client.environmentId
+    )
     const hostCatalogUpdate = waitForCatalogWorktree(sharedPage, repoId, externalPath)
     const clientCatalogUpdate = waitForCatalogWorktree(client.page, repoId, externalPath)
     await gitExecFileAsync(['worktree', 'add', '--quiet', '-b', branch, externalPath], {
@@ -119,6 +161,9 @@ test('shows an externally created worktree on a paired client without reconnect'
     expect(clientWorktreeId).toBe(hostWorktreeId)
     await expect(worktreeRow(sharedPage, hostWorktreeId)).toBeVisible()
     await expect(worktreeRow(client.page, clientWorktreeId)).toBeVisible()
+    expect(await readRuntimeTransportContinuity(client.page, client.environmentId)).toEqual(
+      clientTransportBefore
+    )
   } finally {
     await client?.dispose()
   }

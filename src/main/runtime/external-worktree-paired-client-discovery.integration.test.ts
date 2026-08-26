@@ -90,7 +90,6 @@ describe('external worktree discovery for paired clients', () => {
   it('publishes one host-scoped catalog invalidation to two paired clients', async () => {
     vi.mocked(listWorktrees).mockResolvedValue([initialWorktree])
     vi.mocked(listWorktreesStrict).mockResolvedValue([initialWorktree])
-    vi.mocked(listWorktreesStrict).mockResolvedValue([initialWorktree])
     const runtime = new OrcaRuntimeService(makeStore() as never)
     setWorktreeCatalogRemoteClientNotifier(runtime)
     const userDataPath = mkdtempSync(join(tmpdir(), 'o-ewd-'))
@@ -152,9 +151,6 @@ describe('external worktree discovery for paired clients', () => {
 
     vi.mocked(listWorktrees).mockResolvedValue([initialWorktree, externalWorktree])
     vi.mocked(listWorktreesStrict).mockResolvedValue([initialWorktree, externalWorktree])
-    expect(
-      (await listWorktreesStrict({ path: initialWorktreePath } as never)).map((w) => w.path)
-    ).toEqual([initialWorktreePath, externalWorktreePath])
 
     const sendToHostRenderer = vi.fn()
     const watch = {

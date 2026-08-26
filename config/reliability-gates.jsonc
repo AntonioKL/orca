@@ -1758,10 +1758,17 @@
           ]
         },
         {
+          "file": "src/main/window/attach-main-window-services.test.ts",
+          "assertions": [
+            "main-window wiring installs the runtime as the watched-worktree remote-client notifier alongside the existing repo notifier"
+          ]
+        },
+        {
           "file": "tests/e2e/paired-external-worktree-discovery.spec.ts",
           "assertions": [
             "a real git worktree add advances the authoritative host inventory",
-            "the headed host and separate paired Electron client render the same new worktree without reconnect"
+            "the headed host and separate paired Electron client render the same new worktree identity",
+            "the paired client's main-process shared-control transport keeps one connection epoch while converging and compares Windows paths case-insensitively"
           ]
         },
         {
@@ -1859,6 +1866,24 @@
           "result": "passed",
           "durationSeconds": 66,
           "summary": "Four Electron Docker SSH tests passed: two typing/performance paths, one concurrent file/Git load path, and exact-authority disconnect/reconnect with a container-visible remote proof file."
+        },
+        {
+          "date": "2026-08-26",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/ipc/watched-worktree-catalog-notification.test.ts src/main/runtime/external-worktree-paired-client-discovery.integration.test.ts src/main/window/attach-main-window-services.test.ts",
+          "result": "passed",
+          "durationSeconds": 6.19,
+          "summary": "Three watcher/runtime/wiring files passed with 38 tests, including two-client publication, reconnect, stale scan fencing, headless parity, owner-collision suppression, failure isolation, and main-window notifier wiring."
+        },
+        {
+          "date": "2026-08-26",
+          "runner": "local",
+          "platform": "macos",
+          "command": "ORCA_E2E_FORCE_HEADFUL=1 SKIP_BUILD=1 pnpm exec playwright test tests/e2e/paired-external-worktree-discovery.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
+          "result": "passed",
+          "durationSeconds": 17.96,
+          "summary": "One forced-visible paired Electron test passed: real Git inventory, matching visible host/client rows, and one unchanged main-process shared-control transport epoch during convergence."
         }
       ],
       "runtimeBudget": {
@@ -1867,7 +1892,7 @@
       },
       "flakeHistory": {
         "status": "unknown",
-        "evidence": "Three deterministic local macOS runs cover the original watcher lane, main catalog/authority lane, and direct SSH scheduler/telemetry lane; CI soak is still unavailable."
+        "evidence": "Four focused deterministic local macOS runs cover the original watcher lane, paired-runtime publication lane, main catalog/authority lane, and direct SSH scheduler/telemetry lane; two live Electron runs cover paired external discovery and Docker SSH, while CI soak is still unavailable."
       },
       "redGreenEvidence": {
         "status": "partial",
