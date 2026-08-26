@@ -19819,7 +19819,7 @@ export class OrcaRuntimeService {
     }
 
     if (protocolSubmitBytes && protocolSubmitAborted) {
-      return Buffer.byteLength(pastePayload, 'utf8')
+      return 0
     }
     if (protocolSubmitBytes) {
       assertAgentPromptRequestActive(options.signal)
@@ -19858,7 +19858,7 @@ export class OrcaRuntimeService {
     const foregroundConfirmed = await this.confirmAgentPromptForeground(ptyId)
     this.assertAgentPromptGeneration(ptyId, generation)
     if (foregroundConfirmed === false) {
-      return Buffer.byteLength(pastePayload, 'utf8')
+      return 0
     }
     const suffixWrote = this.ptyController?.write(ptyId, AGENT_PROMPT_SUBMIT) ?? false
     if (!suffixWrote) {

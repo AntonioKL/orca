@@ -1248,7 +1248,11 @@ export function createRemoteRuntimePtyTransport(
     if (!connected || handle !== targetHandle || recoveryBlocksIo()) {
       return false
     }
-    if (pendingViewportClaim && !getCurrentMultiplexedStream(targetHandle)) {
+    if (
+      pendingViewportClaim &&
+      !getCurrentMultiplexedStream(targetHandle) &&
+      (data.length > 0 || inputBatcher.hasPending())
+    ) {
       const ready = await new Promise<boolean>((resolve) => {
         viewportClaimReadyWaiters.add(resolve)
       })

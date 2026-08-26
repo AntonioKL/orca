@@ -344,6 +344,32 @@ describe('getForegroundProcessName', () => {
     })
   })
 
+  it('does not trust a direct agent fallback during fresh confirmation', async () => {
+    await withProcessPlatform('linux', async () => {
+      mockExecFile((_command, args) => {
+        if (args[0] !== '-axo') {
+          return new Error('unexpected command')
+        }
+        return {
+          stdout: ['100 99 Ss   bash -l', '101 100 S+   vim notes.txt'].join('\n')
+        }
+      })
+
+      await expect(getForegroundProcessName(100, 'codex', { fresh: true })).resolves.toBeNull()
+    })
+  })
+
+  it('does not trust a direct Windows agent fallback during fresh confirmation', async () => {
+    await withProcessPlatform('win32', async () => {
+      mockWindowsProcessTable([
+        { pid: 100, ppid: 99, name: 'powershell.exe', commandLine: 'powershell.exe' },
+        { pid: 101, ppid: 100, name: 'vim.exe', commandLine: 'vim.exe notes.txt' }
+      ])
+
+      await expect(getForegroundProcessName(100, 'codex', { fresh: true })).resolves.toBeNull()
+    })
+  })
+
   it('recognizes Windows SSH relay shell-rooted agent descendants', async () => {
     await withProcessPlatform('win32', async () => {
       mockWindowsProcessTable([

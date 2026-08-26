@@ -176,6 +176,7 @@ async function parentMain() {
       shellQuote(marker),
       '--timeout-ms',
       String(timeoutMs),
+      '--negotiate-csi-u',
       ...(expectBlocked ? ['--permission-before-send'] : []),
       ...(process.platform === 'win32' ? ['--allow-unframed-paste'] : [])
     ]))

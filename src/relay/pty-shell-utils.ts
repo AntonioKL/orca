@@ -294,6 +294,16 @@ export async function getForegroundProcessName(
   if (fallbackProcess) {
     const fallbackRecognition = recognizeAgentProcess(fallbackProcess)
     if (fallbackRecognition) {
+      if (options.fresh) {
+        // Fresh confirmation must prove the cached agent still owns the PTY.
+        if (process.platform === 'win32') {
+          return (
+            (await resolveWindowsAgentForegroundProcess(pid, fallbackProcess, { fresh: true })) ??
+            null
+          )
+        }
+        return await getRecognizedForegroundDescendant(pid, fallbackProcess, true)
+      }
       // Why: node-pty can report OMP's wrapped Pi; enrich only that ambiguous
       // fallback so authoritative OMP reads keep the zero-subprocess fast path.
       if (shouldInspectOuterWrapperForegroundProcess(fallbackRecognition)) {
@@ -305,7 +315,7 @@ export async function getForegroundProcessName(
           )
         }
         return (
-          (await getRecognizedForegroundDescendant(pid, fallbackProcess, options.fresh === true)) ??
+          (await getRecognizedForegroundDescendant(pid, fallbackProcess)) ??
           fallbackRecognition.processName
         )
       }

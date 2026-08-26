@@ -17492,10 +17492,13 @@ describe('OrcaRuntimeService', () => {
       confirmedProcess = 'zsh'
       outputGate.resolve()
       await vi.runAllTimersAsync()
-      await send
+      const result = await send
 
       expect(confirmForegroundProcess).toHaveBeenCalledTimes(2)
       expect(writes).toEqual([buildAgentPromptPasteBytes('ownership changed')])
+      expect(result.bytesWritten).toBe(
+        Buffer.byteLength(buildAgentPromptPasteBytes('ownership changed'), 'utf8')
+      )
     } finally {
       vi.useRealTimers()
     }

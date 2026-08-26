@@ -74,6 +74,41 @@ describe('terminal agent prompt send RPC', () => {
     expect(sendTerminal).not.toHaveBeenCalled()
   })
 
+  it('defaults an omitted client type to desktop for Quick Commands', async () => {
+    const parsed = TerminalSend.parse({
+      terminal: 'terminal-1',
+      text: 'echo x\r',
+      quickCommand: true,
+      client: { id: 'desktop-1' }
+    })
+    expect(parsed.client?.type).toBe('desktop')
+
+    const sendTerminal = vi.fn().mockResolvedValue({
+      handle: 'terminal-1',
+      accepted: true,
+      bytesWritten: 7
+    })
+    const runtime = makeRuntime({
+      resolveLiveLeafForHandle: vi.fn().mockReturnValue({ ptyId: 'pty-1' }),
+      getDriver: vi.fn().mockReturnValue({ kind: 'idle' }),
+      isTerminalRunningSettledPromptAgent: vi.fn().mockResolvedValue(false),
+      sendTerminal
+    })
+    const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
+
+    const response = await dispatcher.dispatch(
+      makeRequest({
+        terminal: 'terminal-1',
+        text: 'echo x\r',
+        quickCommand: true,
+        client: { id: 'desktop-1' }
+      })
+    )
+
+    expect(response.ok).toBe(true)
+    expect(sendTerminal).toHaveBeenCalled()
+  })
+
   it('preserves the exact raw Quick Command bytes for shells and other terminal apps', async () => {
     const sendTerminal = vi.fn().mockResolvedValue({
       handle: 'terminal-1',
