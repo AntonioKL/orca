@@ -17485,6 +17485,51 @@ describe('OrcaRuntimeService', () => {
     }
   )
 
+  it('does not submit between a render marker and a sparse final composer frame', async () => {
+    vi.useFakeTimers()
+    try {
+      const writes: string[] = []
+      let composerReady = false
+      const runtime = new OrcaRuntimeService(store)
+      runtime.setPtyController({
+        spawn: vi.fn().mockResolvedValue({ id: 'pty-sparse' }),
+        write: (_ptyId, data) => {
+          writes.push(data)
+          if (data.includes(AGENT_PROMPT_BRACKETED_PASTE_END)) {
+            setTimeout(() => runtime.onPtyData('pty-sparse', '\x1b[?25h', Date.now()), 100)
+            setTimeout(() => {
+              composerReady = true
+              runtime.onPtyData('pty-sparse', 'final composer frame', Date.now())
+            }, 1_600)
+          }
+          if (data === '\r') {
+            expect(composerReady).toBe(true)
+            acknowledgeAgentPromptSubmit(runtime, 'pty-sparse', data)
+          }
+          return true
+        },
+        kill: () => true,
+        getForegroundProcess: async () => null
+      })
+      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+        launchAgent: 'codex'
+      })
+
+      const sendPromise = runtime.sendTerminalAgentPrompt(handle, 'review this change')
+      await vi.advanceTimersByTimeAsync(1_599)
+      expect(writes).not.toContain('\r')
+      await vi.advanceTimersByTimeAsync(1)
+      expect(writes).not.toContain('\r')
+      await vi.advanceTimersByTimeAsync(1_499)
+      expect(writes).not.toContain('\r')
+      await vi.advanceTimersByTimeAsync(1)
+      await sendPromise
+      expect(writes.filter((data) => data === '\r')).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it.each(
     (Object.keys(TUI_AGENT_CONFIG) as TuiAgent[]).filter(
       (agent) => agent !== 'claude' && agent !== 'codex'

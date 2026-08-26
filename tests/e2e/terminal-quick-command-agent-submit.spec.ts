@@ -50,7 +50,7 @@ if (process.platform === 'win32') {
 const fakeCodexCommand =
   process.platform === 'win32'
     ? buildFakeAgentCommandOverride(fakeCodex)
-    : [
+    : `exec ${[
         fakeCodex,
         fixtureScript,
         '--fake-agent',
@@ -60,7 +60,7 @@ const fakeCodexCommand =
         fixtureMarker
       ]
         .map((value) => buildFakeAgentCommandOverride(value))
-        .join(' ')
+        .join(' ')}`
 
 test.use({
   orcaAppExtraEnv: {
@@ -129,6 +129,11 @@ test('Quick Command submits a settled prompt to an active Codex TUI', async ({
   await expect
     .poll(() => getTerminalContent(orcaPage), { message: 'Fake Codex TUI did not render' })
     .toContain('OpenAI Codex')
+  await expect
+    .poll(() => orcaPage.evaluate((id) => window.api.pty.getForegroundProcess(id), ptyId), {
+      message: 'Fake Codex process did not become the foreground PTY process'
+    })
+    .toMatch(/codex/i)
   await installTerminalPtyWriteSpy(electronApp)
   await clearTerminalPtyWriteLog(electronApp)
 

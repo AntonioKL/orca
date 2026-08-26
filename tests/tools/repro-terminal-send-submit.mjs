@@ -348,6 +348,9 @@ async function fakeAgentMain() {
     if (!renderScheduled && input.includes(marker)) {
       renderScheduled = true
       setTimeout(() => {
+        process.stdout.write('\x1b[?25h')
+      }, COMPOSER_RENDER_MS)
+      setTimeout(() => {
         composerReady = true
         const pasteStart = input.indexOf(BEGIN)
         const pasteEnd = input.indexOf(END, pasteStart + BEGIN.length)
@@ -355,8 +358,8 @@ async function fakeAgentMain() {
           pasteStart !== -1 && pasteEnd !== -1
             ? input.slice(pasteStart + BEGIN.length, pasteEnd)
             : input
-        process.stdout.write(`\x1b[?25h\x1b[2J\x1b[H› ${composer}`)
-      }, COMPOSER_RENDER_MS)
+        process.stdout.write(`\x1b[2J\x1b[H› ${composer}`)
+      }, COMPOSER_RENDER_MS + 900)
     }
     let nextCarriage = input.indexOf('\r', countedCarriages)
     while (nextCarriage !== -1) {
