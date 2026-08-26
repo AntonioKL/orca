@@ -213,6 +213,66 @@ describe('shouldRecordProcessGoneCrash', () => {
     ).toBe(false)
   })
 
+  // 1.4.188 batch: both were filed as user-facing crashes. The PAC evaluator
+  // report even collected a user note about opening a 14MB JSON file.
+  it('suppresses on-demand Chromium utility teardown outside the old allowlist', () => {
+    expect(
+      shouldRecordProcessGoneCrash({
+        source: 'child',
+        processType: 'Utility',
+        serviceName: 'proxy_resolver.mojom.ProxyResolverFactory',
+        reason: 'killed',
+        exitCode: 1,
+        expectedTeardown: 'none'
+      })
+    ).toBe(false)
+    expect(
+      shouldRecordProcessGoneCrash({
+        source: 'child',
+        processType: 'Utility',
+        serviceName: 'printing.mojom.PrintCompositor',
+        reason: 'crashed',
+        exitCode: -1,
+        expectedTeardown: 'none'
+      })
+    ).toBe(false)
+  })
+
+  it('still records the utilities Chromium churn does not own', () => {
+    expect(
+      shouldRecordProcessGoneCrash({
+        source: 'child',
+        processType: 'Utility',
+        serviceName: 'node.mojom.NodeService',
+        reason: 'crashed',
+        exitCode: -1,
+        expectedTeardown: 'none'
+      })
+    ).toBe(true)
+    expect(
+      shouldRecordProcessGoneCrash({
+        source: 'child',
+        processType: 'Utility',
+        serviceName: 'storage.mojom.StorageService',
+        reason: 'killed',
+        exitCode: 1,
+        expectedTeardown: 'none'
+      })
+    ).toBe(true)
+  })
+
+  it('still records a utility exit that named no service', () => {
+    expect(
+      shouldRecordProcessGoneCrash({
+        source: 'child',
+        processType: 'Utility',
+        reason: 'crashed',
+        exitCode: -1,
+        expectedTeardown: 'none'
+      })
+    ).toBe(true)
+  })
+
   it('still records unknown child process crashes', () => {
     expect(
       shouldRecordProcessGoneCrash({

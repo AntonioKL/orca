@@ -595,7 +595,7 @@ describe('minidump signature attachment', () => {
       event({
         source: 'child',
         processType: 'Utility',
-        // A utility outside the recoverable-service allowlist still reports.
+        // A utility Chromium churn does not own still reports.
         details: { type: 'Utility', serviceName: 'storage.mojom.StorageService' }
       }),
       new ProcessGoneDedupe(),

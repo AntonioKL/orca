@@ -31,6 +31,14 @@ const MAX_STORED_DUMP_BYTES = 128 * 1024 * 1024
 // directory walk, so cap the file count too.
 const MAX_STORED_DUMPS = 64
 const DUMP_PRUNE_DELAY_MS = 2_000
+// Bounds the list across a crash loop; an entry older than the recency window can
+// no longer fence anything.
+const MAX_UNREPORTED_DEATHS = 32
+
+type UnreportedProcessDeath = {
+  readonly processType: string
+  readonly atMs: number
+}
 
 type DumpCandidate = {
   readonly filePath: string
@@ -46,6 +54,9 @@ let captureStarted = false
 let captureStartedAtMs: number | null = null
 const claimedDumpPaths = new Map<string, number>()
 const reservedDumpPaths = new Set<string>()
+// Deaths we deliberately did not report, so nothing ever claims the dump Crashpad
+// wrote for them; recorded here to keep that dump off an unrelated report.
+let unreportedProcessDeaths: UnreportedProcessDeath[] = []
 let dumpPruneTimer: NodeJS.Timeout | null = null
 
 export type CrashpadCaptureOptions = {
@@ -110,6 +121,7 @@ export function _setCrashpadCaptureStateForTest(
   captureStartedAtMs = state?.started ? (state.startedAtMs ?? Number.NEGATIVE_INFINITY) : null
   claimedDumpPaths.clear()
   reservedDumpPaths.clear()
+  unreportedProcessDeaths = []
   if (dumpPruneTimer) {
     clearTimeout(dumpPruneTimer)
     dumpPruneTimer = null
@@ -269,6 +281,59 @@ export async function waitForCrashMinidump(
   return pollDumpCandidates(crashedAtMs, options, async (candidate) => candidate)
 }
 
+/**
+ * Records a process death that produced no crash report.
+ *
+ * Why: a reported crash claims its dump, which is what stops the *next* report of
+ * the same process type from adopting it. A suppressed death claims nothing, so
+ * its dump stays selectable — and because Crashpad usually has not finished
+ * writing the newer dump when process-gone fires, the next reportable crash of
+ * that type picks the suppressed one on its very first poll and files someone
+ * else's CHECK file, line and stack.
+ */
+export function noteUnreportedProcessDeath(processType: string | null, atMs: number): void {
+  if (!processType) {
+    return
+  }
+  unreportedProcessDeaths.push({ processType, atMs })
+  if (unreportedProcessDeaths.length > MAX_UNREPORTED_DEATHS) {
+    unreportedProcessDeaths.shift()
+  }
+}
+
+/**
+ * Whether an unreported death of this type better explains the dump than the
+ * crash being paired, consuming that death so one death fences one dump.
+ *
+ * The `mtimeMs < crashedAtMs` bound is what keeps this from eating the pairing
+ * crash's own dump: we only fence a dump that already existed when process-gone
+ * was delivered, which the module comment above notes is the uncommon case. A
+ * dump we wrongly fence degrades the report to `minidumpStatus: absent`; a dump
+ * we wrongly adopt sends a triager after a different crash entirely.
+ */
+function fencedByUnreportedDeath(
+  dump: DumpCandidate,
+  processType: string | undefined,
+  crashedAtMs: number
+): boolean {
+  if (processType === undefined) {
+    return false
+  }
+  const index = unreportedProcessDeaths.findIndex(
+    (death) =>
+      death.processType === processType &&
+      death.atMs < crashedAtMs &&
+      death.atMs >= crashedAtMs - DUMP_RECENCY_WINDOW_MS &&
+      dump.mtimeMs >= death.atMs &&
+      dump.mtimeMs < crashedAtMs
+  )
+  if (index === -1) {
+    return false
+  }
+  unreportedProcessDeaths.splice(index, 1)
+  return true
+}
+
 export type CapturedMinidump = {
   readonly filePath: string
   readonly sizeBytes: number
@@ -300,6 +365,11 @@ export async function captureMinidumpSignature(
           (options.expectedProcessType !== undefined &&
             signature.processType !== options.expectedProcessType)
         ) {
+          rejectedDumpPaths.add(dump.filePath)
+          return null
+        }
+        if (fencedByUnreportedDeath(dump, options.expectedProcessType, crashedAtMs)) {
+          // Left unclaimed on purpose: no report references it, so pruning may reclaim it.
           rejectedDumpPaths.add(dump.filePath)
           return null
         }

@@ -17,6 +17,7 @@ import {
   _pruneCrashpadDumpsForTest,
   _setCrashpadCaptureStateForTest,
   captureMinidumpSignature,
+  noteUnreportedProcessDeath,
   waitForCrashMinidump
 } from './crashpad-capture'
 
@@ -248,6 +249,107 @@ describe('captureMinidumpSignature', () => {
     })
 
     expect(captured).toBeNull()
+  })
+})
+
+describe('dumps left behind by suppressed process deaths', () => {
+  beforeEach(() => {
+    parseMinidumpCrashSignatureMock.mockReturnValue({ processType: 'utility', annotations: {} })
+  })
+
+  // The suppressed exit never claims its dump, and Crashpad has usually not
+  // finished writing the reportable crash's own dump when process-gone fires --
+  // so without the fence the first poll hands over someone else's CHECK.
+  it('keeps a suppressed utility dump off the next reportable utility crash', async () => {
+    const suppressedAt = CRASHED_AT - 5_000
+    await writeDump(path.join('reports', 'suppressed.dmp'), suppressedAt + 100)
+    noteUnreportedProcessDeath('utility', suppressedAt)
+
+    const captured = await captureMinidumpSignature(CRASHED_AT, {
+      expectedProcessType: 'utility',
+      timeoutMs: 0,
+      now: () => CRASHED_AT
+    })
+
+    expect(captured).toBeNull()
+  })
+
+  it('still pairs the reportable crash with the dump written for it', async () => {
+    const suppressedAt = CRASHED_AT - 5_000
+    await writeDump(path.join('reports', 'suppressed.dmp'), suppressedAt + 100)
+    const own = await writeDump(path.join('reports', 'own.dmp'), CRASHED_AT + 100)
+    noteUnreportedProcessDeath('utility', suppressedAt)
+
+    const captured = await captureMinidumpSignature(CRASHED_AT, {
+      expectedProcessType: 'utility',
+      timeoutMs: 0,
+      now: () => CRASHED_AT
+    })
+
+    expect(captured?.filePath).toBe(own)
+  })
+
+  // The fence must never eat a dump the pairing crash itself produced, even when
+  // Crashpad won the race and wrote it before process-gone was delivered.
+  it('does not fence a dump written after the crash it is pairing', async () => {
+    const own = await writeDump(path.join('reports', 'own.dmp'), CRASHED_AT + 50)
+    noteUnreportedProcessDeath('utility', CRASHED_AT - 5_000)
+
+    const captured = await captureMinidumpSignature(CRASHED_AT, {
+      expectedProcessType: 'utility',
+      timeoutMs: 0,
+      now: () => CRASHED_AT
+    })
+
+    expect(captured?.filePath).toBe(own)
+  })
+
+  it('fences one dump per suppressed death, not every later dump', async () => {
+    const suppressedAt = CRASHED_AT - 5_000
+    await writeDump(path.join('reports', 'suppressed.dmp'), suppressedAt + 100)
+    noteUnreportedProcessDeath('utility', suppressedAt)
+
+    const fenced = await captureMinidumpSignature(CRASHED_AT, {
+      expectedProcessType: 'utility',
+      timeoutMs: 0,
+      now: () => CRASHED_AT
+    })
+    const later = await captureMinidumpSignature(CRASHED_AT + 1_000, {
+      expectedProcessType: 'utility',
+      timeoutMs: 0,
+      now: () => CRASHED_AT + 1_000
+    })
+
+    expect(fenced).toBeNull()
+    expect(later?.filePath).toBe(path.join(dumpDir, 'reports', 'suppressed.dmp'))
+  })
+
+  it('leaves a suppressed GPU dump available to a utility report', async () => {
+    const suppressedAt = CRASHED_AT - 5_000
+    const dump = await writeDump(path.join('reports', 'utility.dmp'), suppressedAt + 100)
+    noteUnreportedProcessDeath('gpu-process', suppressedAt)
+
+    const captured = await captureMinidumpSignature(CRASHED_AT, {
+      expectedProcessType: 'utility',
+      timeoutMs: 0,
+      now: () => CRASHED_AT
+    })
+
+    expect(captured?.filePath).toBe(dump)
+  })
+
+  it('ignores a suppressed death older than the dump recency window', async () => {
+    const suppressedAt = CRASHED_AT - 120_000
+    const dump = await writeDump(path.join('reports', 'stale.dmp'), CRASHED_AT - 5_000)
+    noteUnreportedProcessDeath('utility', suppressedAt)
+
+    const captured = await captureMinidumpSignature(CRASHED_AT, {
+      expectedProcessType: 'utility',
+      timeoutMs: 0,
+      now: () => CRASHED_AT
+    })
+
+    expect(captured?.filePath).toBe(dump)
   })
 })
 

@@ -1,15 +1,10 @@
+import { isRecoverableChromiumUtilityService } from './chromium-utility-service-recoverability'
+
 export type ProcessGoneSource = 'renderer' | 'child'
 export type ExpectedTeardownScope = 'none' | 'renderer-reload' | 'app-shutdown'
 
 const WINDOWS_CONTROL_TERMINATION_EXIT_CODES = new Set([0xc000013a, 0x40010004])
 const RECOVERABLE_CHILD_PROCESS_TYPES = new Set(['gpu'])
-const RECOVERABLE_UTILITY_SERVICE_NAMES = new Set([
-  'audio.mojom.AudioService',
-  'network.mojom.NetworkService',
-  // Why: Windows media/screen capture can churn this Chromium utility without
-  // taking down Orca; prompting users for those child exits is noise.
-  'video_capture.mojom.VideoCaptureService'
-])
 const RECOVERABLE_CHILD_PROCESS_REASONS = new Set(['abnormal-exit', 'crashed', 'killed'])
 const NON_RECOVERABLE_RENDERER_REASONS = new Set(['integrity-failure'])
 
@@ -41,11 +36,7 @@ function isRecoverableChromiumChildProcess({
   if (normalizedProcessType && RECOVERABLE_CHILD_PROCESS_TYPES.has(normalizedProcessType)) {
     return true
   }
-  return (
-    normalizedProcessType === 'utility' &&
-    serviceName !== undefined &&
-    RECOVERABLE_UTILITY_SERVICE_NAMES.has(serviceName)
-  )
+  return normalizedProcessType === 'utility' && isRecoverableChromiumUtilityService(serviceName)
 }
 
 export function shouldRecordProcessGoneCrash({
@@ -63,7 +54,7 @@ export function shouldRecordProcessGoneCrash({
   exitCode: number | null
   expectedTeardown: ExpectedTeardownScope
 }): boolean {
-  // Why: GPU, Network Service, and Audio Service exits are recoverable Chromium
+  // Why: GPU exits and on-demand Chromium utility-service exits are recoverable
   // child-process churn; treating them as app crashes creates noisy user prompts.
   if (isRecoverableChromiumChildProcess({ source, processType, serviceName, reason })) {
     return false
