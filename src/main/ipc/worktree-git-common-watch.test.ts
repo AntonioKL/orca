@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { appendFile, mkdtemp, mkdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import type * as NodeFsPromises from 'node:fs/promises'
 import { performance as nodePerformance } from 'node:perf_hooks'
+import { updateActiveGitStatusRefBinding } from './worktree-git-status-ref-watch'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { subscribeViaWatcherProcess } from './parcel-watcher-process'
@@ -280,6 +281,61 @@ describe('worktree git-common narrow watch (local native platforms)', () => {
     )
     const backstopSamples = statCalls.filter((path) => path === headPath).length
     expect(duringOrdinaryTicks).toBeLessThan(backstopSamples * RECONCILIATION_TICKS)
+  })
+
+  it('drops the ref poller when the binding moves away, leaving no orphan', async () => {
+    installSubscribeMock()
+    const commonDir = await makeCommonDir(true)
+    await mkdir(join(commonDir, 'refs', 'remotes', 'origin'), { recursive: true })
+    await writeFile(join(commonDir, 'refs', 'remotes', 'origin', 'main'), 'aaa\n')
+    const visibility = createVisibilityHarness()
+    const target = makeTarget(commonDir)
+    const watchTarget = {
+      kind: target.kind,
+      path: target.path,
+      repos: target.repos,
+      gitStatusRefPaths: new Set<string>()
+    }
+    const watch = await startGitCommonWatch(
+      target,
+      () => {},
+      POLL_MS,
+      'darwin',
+      visibility.source,
+      undefined,
+      () => [...watchTarget.gitStatusRefPaths]
+    )
+    cleanups.push(() => watch.unsubscribe())
+    const baseline = visibility.listenerCount()
+
+    const bind = (branch?: string): Promise<void> =>
+      updateActiveGitStatusRefBinding(
+        {
+          worktreeId: `${[...target.repos.keys()][0]}::${commonDir}`,
+          worktreePath: commonDir,
+          executionHostId: 'local',
+          branch,
+          upstreamName: branch ? 'origin/main' : undefined
+        },
+        () => [watchTarget],
+        async () => 'refs/remotes/origin/main'
+      )
+
+    // Bind then unbind repeatedly: each cycle must hand back whatever it took.
+    for (let round = 0; round < 4; round++) {
+      await bind('main')
+      await vi.waitFor(() => {
+        expect(visibility.listenerCount()).toBeGreaterThan(baseline)
+      })
+      await bind(undefined)
+      await vi.waitFor(() => {
+        expect(visibility.listenerCount()).toBe(baseline)
+      })
+    }
+
+    await watch.unsubscribe()
+    cleanups.pop()
+    expect(visibility.listenerCount()).toBe(0)
   })
 
   it('polls only the accepted upstream ref and rebinds without synthetic events', async () => {

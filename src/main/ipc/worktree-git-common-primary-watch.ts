@@ -43,6 +43,11 @@ export async function startGitCommonPrimaryWatch(
   let disposed = false
   let watcher: WatcherProcessSubscription | null = null
   let statusRefPolling: WorktreeBaseSubscription | null = null
+  // Why: startup and every rebind can each be mid-build at the same time. The
+  // generation names which attempt still owns the slot, so a loser unsubscribes
+  // its own poller instead of being silently overwritten — an overwrite would
+  // strand that poller's timer and visibility listener for the process lifetime.
+  let statusRefGeneration = 0
   let backstopPolling: WorktreeBaseSubscription | null = null
   let fallback: WorktreeBaseSubscription | null = null
   const fallbackFlight = createSingleFlight()
@@ -83,10 +88,33 @@ export async function startGitCommonPrimaryWatch(
 
   // Why: rebinding is synchronous and in-process, so reacting to it costs the
   // same detection latency as polling would have, without the idle wake-ups.
+  // Adopts a freshly built poller only if this attempt still owns the slot and a
+  // ref is still selected; anything else unsubscribes what it built.
+  const adoptStatusRefPolling = async (
+    generation: number,
+    next: WorktreeBaseSubscription | null
+  ): Promise<void> => {
+    if (!next) {
+      return
+    }
+    if (
+      generation !== statusRefGeneration ||
+      disposed ||
+      !watcher ||
+      statusRefPolling ||
+      getStatusRefPaths().length === 0
+    ) {
+      await next.unsubscribe().catch(() => {})
+      return
+    }
+    statusRefPolling = next
+  }
+
   const syncStatusRefPolling = async (): Promise<void> => {
     if (disposed || !watcher) {
       return
     }
+    const generation = ++statusRefGeneration
     const selected = getStatusRefPaths().length > 0
     if (selected === (statusRefPolling !== null)) {
       return
@@ -97,19 +125,7 @@ export async function startGitCommonPrimaryWatch(
       await current?.unsubscribe().catch(() => {})
       return
     }
-    const next = await startStatusRefPollingIfSelected()
-    if (!next) {
-      return
-    }
-    // Why: rebinding can flip back while the poller was being built. A concurrent
-    // unbind sees `statusRefPolling` still null and correctly does nothing, so
-    // selection has to be re-read here or this adopts a poller for a repo that
-    // no longer holds a ref — reinstating the idle wake-ups this removes.
-    if (disposed || !watcher || statusRefPolling || getStatusRefPaths().length === 0) {
-      await next.unsubscribe().catch(() => {})
-      return
-    }
-    statusRefPolling = next
+    await adoptStatusRefPolling(generation, await startStatusRefPollingIfSelected())
   }
 
   const unsubscribeBindingChanges = onActiveGitStatusRefBindingChanged(() => {
@@ -117,6 +133,7 @@ export async function startGitCommonPrimaryWatch(
   })
 
   const stopWatcherSidePolling = async (): Promise<void> => {
+    statusRefGeneration++
     const current = statusRefPolling
     const currentBackstop = backstopPolling
     statusRefPolling = null
@@ -172,6 +189,7 @@ export async function startGitCommonPrimaryWatch(
       }
     )
     if (watcher && !disposed && !fallbackFlight.pending()) {
+      const generation = ++statusRefGeneration
       const [nextStatusRefPolling, nextBackstop] = await Promise.all([
         startStatusRefPollingIfSelected(),
         startGitCommonPrimaryPolling(
@@ -196,7 +214,7 @@ export async function startGitCommonPrimaryWatch(
           await startFallback()
         }
       } else {
-        statusRefPolling = nextStatusRefPolling
+        await adoptStatusRefPolling(generation, nextStatusRefPolling)
         backstopPolling = nextBackstop
       }
     }
