@@ -70,6 +70,69 @@ describe('createRemoteRuntimePtyTransport', () => {
     }
   })
 
+  it('does not overtake an in-flight fallback input RPC before a Quick Command', async () => {
+    vi.useFakeTimers()
+    try {
+      runtimeSubscribe.mockImplementation(
+        async (_args: unknown, callbacks: typeof subscriptionCallbacks) => {
+          subscriptionCallbacks = callbacks
+          return { unsubscribe: vi.fn(), sendBinary: subscriptionSendBinary }
+        }
+      )
+      let releaseInput!: () => void
+      const inputSettled = new Promise<void>((resolve) => {
+        releaseInput = resolve
+      })
+      const sends: string[] = []
+      const defaultRuntimeCall = runtimeCall.getMockImplementation()
+      runtimeCall.mockImplementation((args: { method: string; params?: { text?: string } }) => {
+        if (args.method === 'terminal.send') {
+          sends.push(args.params?.text ?? '')
+          if (args.params?.text === 'draft') {
+            return inputSettled.then(() => ({
+              ok: true,
+              result: { send: { handle: 'terminal-1', accepted: true, bytesWritten: 5 } }
+            }))
+          }
+          return Promise.resolve({
+            ok: true,
+            result: { send: { handle: 'terminal-1', accepted: true, bytesWritten: 5 } }
+          })
+        }
+        return defaultRuntimeCall?.(args)
+      })
+
+      const { createRemoteRuntimePtyTransport } = await import('./remote-runtime-pty-transport')
+      const transport = createRemoteRuntimePtyTransport('env-1', {
+        worktreeId: 'wt-1',
+        tabId: 'tab-1',
+        leafId: 'pane:1'
+      })
+      transport.attach({
+        existingPtyId: 'remote:env-1@@terminal-1',
+        callbacks: {}
+      })
+      await vi.waitFor(() => expect(transport.getPtyId()).toBe('remote:env-1@@terminal-1'))
+
+      expect(transport.sendInput('draft')).toBe(true)
+      await vi.advanceTimersByTimeAsync(8)
+      expect(sends).toEqual(['draft'])
+
+      const quickCommand = transport.sendQuickCommand?.('quick\r')
+      for (let i = 0; i < 10; i += 1) {
+        await Promise.resolve()
+      }
+      expect(sends).toEqual(['draft'])
+
+      releaseInput()
+      await expect(quickCommand).resolves.toBe(true)
+      expect(sends).toEqual(['draft', 'quick'])
+      transport.destroy?.()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('reports terminal_not_writable from the one-shot runtime fallback', async () => {
     vi.useFakeTimers()
     runtimeSubscribe.mockImplementation(

@@ -270,6 +270,11 @@ export function createRemoteRuntimePtyTransport(
   })
   let lastRecoveryStateKey = ''
   let pendingViewportClaim = false
+  let unacknowledgedInputTail: {
+    handle: string
+    lifecycleEpoch: number
+    promise: Promise<void>
+  } | null = null
   let pendingClaimInput: { text: string; queryReply: boolean }[] = []
   let pendingClaimQueryReplyCount = 0
   let terminalCreateRetryWait: {
@@ -1241,8 +1246,17 @@ export function createRemoteRuntimePtyTransport(
 
   async function sendInputAcceptedToRuntime(data: string): Promise<boolean> {
     const targetHandle = handle
+    const targetLifecycleEpoch = lifecycleEpoch
     if (!connected || !targetHandle || recoveryBlocksIo()) {
       return false
+    }
+    const pendingFallback = unacknowledgedInputTail
+    if (
+      pendingFallback &&
+      pendingFallback.handle === targetHandle &&
+      pendingFallback.lifecycleEpoch === targetLifecycleEpoch
+    ) {
+      await pendingFallback.promise
     }
     await inputBatcher.drain()
     if (!connected || handle !== targetHandle || recoveryBlocksIo()) {
@@ -1373,13 +1387,19 @@ export function createRemoteRuntimePtyTransport(
       queuePendingClaimInput(text, queryReply)
       return true
     }
-    void callRuntime<{ send: RuntimeTerminalSend }>('terminal.send', {
-      terminal: targetHandle,
-      text,
-      client: { id: clientId, type: 'desktop' },
-      ...(desiredViewport ? { viewport: desiredViewport, claimViewport: true as const } : {})
-    })
-      .then((result) => {
+    const previous =
+      unacknowledgedInputTail?.handle === targetHandle &&
+      unacknowledgedInputTail.lifecycleEpoch === targetLifecycleEpoch
+        ? unacknowledgedInputTail.promise
+        : Promise.resolve()
+    const current = previous.then(async () => {
+      try {
+        const result = await callRuntime<{ send: RuntimeTerminalSend }>('terminal.send', {
+          terminal: targetHandle,
+          text,
+          client: { id: clientId, type: 'desktop' },
+          ...(desiredViewport ? { viewport: desiredViewport, claimViewport: true as const } : {})
+        })
         if (
           connected &&
           lifecycleEpoch === targetLifecycleEpoch &&
@@ -1388,8 +1408,7 @@ export function createRemoteRuntimePtyTransport(
         ) {
           notifyWriteUnavailable()
         }
-      })
-      .catch((error) => {
+      } catch (error) {
         if (lifecycleEpoch !== targetLifecycleEpoch || handle !== targetHandle) {
           return
         }
@@ -1398,7 +1417,19 @@ export function createRemoteRuntimePtyTransport(
         } else {
           handleRemoteTerminalError(error)
         }
-      })
+      }
+    })
+    unacknowledgedInputTail = {
+      handle: targetHandle,
+      lifecycleEpoch: targetLifecycleEpoch,
+      promise: current
+    }
+    const clearTail = (): void => {
+      if (unacknowledgedInputTail?.promise === current) {
+        unacknowledgedInputTail = null
+      }
+    }
+    void current.then(clearTail, clearTail)
     return true
   }
 
