@@ -25,6 +25,8 @@ type FakeAgentReport = {
   markerReceived: boolean
   prematureEnters: number
   receivedEnters: number
+  firstInputAtMs: number | null
+  submitObservedAtMs: number | null
   submitted: boolean
 }
 
@@ -42,7 +44,7 @@ mkdirSync(fixtureBin)
 if (process.platform === 'win32') {
   writeFileSync(
     fakeCodex,
-    `@echo off\r\n"${process.execPath}" "${fixtureScript}" --fake-agent --report "${fixtureReport}" --marker "${fixtureMarker}" --allow-unframed-paste %*\r\n`,
+    `@echo off\r\n"${process.execPath}" "${fixtureScript}" --fake-agent --report "${fixtureReport}" --marker "${fixtureMarker}" --negotiate-csi-u %*\r\n`,
     'utf8'
   )
 } else {
@@ -58,14 +60,16 @@ const fakeCodexCommand =
         '--report',
         fixtureReport,
         '--marker',
-        fixtureMarker
+        fixtureMarker,
+        '--negotiate-csi-u'
       ]
         .map((value) => buildFakeAgentCommandOverride(value))
         .join(' ')}`
 
 test.use({
   orcaAppExtraEnv: {
-    PATH: `${fixtureBin}${path.delimiter}${process.env.PATH ?? ''}`
+    PATH: `${fixtureBin}${path.delimiter}${process.env.PATH ?? ''}`,
+    ORCA_E2E_DISABLE_QUICK_COMMAND_AGENT_PROTOCOL: expectStalled ? '1' : '0'
   }
 })
 
@@ -135,12 +139,48 @@ test('Quick Command submits a settled prompt to an active Codex TUI', async ({
       message: 'Fake Codex process did not become the foreground PTY process'
     })
     .toMatch(/codex/i)
+  await expect
+    .poll(() => orcaPage.evaluate((id) => window.api.pty.confirmForegroundProcess(id), ptyId), {
+      message: 'Fake Codex process did not receive fresh foreground confirmation'
+    })
+    .toMatch(/codex/i)
+  const foregroundProbeTiming = await orcaPage.evaluate(async (id) => {
+    const startedAt = performance.now()
+    await window.api.pty.getForegroundProcess(id)
+    const readAt = performance.now()
+    await window.api.pty.confirmForegroundProcess(id)
+    const confirmedAt = performance.now()
+    return {
+      confirmMs: confirmedAt - readAt,
+      readMs: readAt - startedAt
+    }
+  }, ptyId)
   await installTerminalPtyWriteSpy(electronApp)
   await clearTerminalPtyWriteLog(electronApp)
+  await orcaPage.evaluate(() => {
+    const timingWindow = window as unknown as { __quickCommandClickAtMs?: number }
+    timingWindow.__quickCommandClickAtMs = undefined
+    const onClick = (event: Event): void => {
+      const target = event.target as Element | null
+      if (
+        target?.closest('[role="menuitem"]')?.textContent?.includes('Submit deterministic prompt')
+      ) {
+        // Keep the marker in the same wall-clock domain as the PTY helper.
+        timingWindow.__quickCommandClickAtMs = Date.now()
+        document.removeEventListener('click', onClick, true)
+      }
+    }
+    document.addEventListener('click', onClick, true)
+  })
 
   await openTerminalContextMenu(orcaPage)
   await orcaPage.getByRole('menuitem', { name: 'Quick Commands' }).hover()
   await orcaPage.getByRole('menuitem', { name: 'Submit deterministic prompt' }).click()
+  const clickDispatchedAtMs = await orcaPage.evaluate(
+    () =>
+      (window as unknown as { __quickCommandClickAtMs?: number }).__quickCommandClickAtMs ?? null
+  )
+  expect(clickDispatchedAtMs).not.toBeNull()
 
   await expect.poll(readReport, { message: 'Fake TUI did not emit a state report' }).not.toBeNull()
   const report = readReport()
@@ -148,11 +188,35 @@ test('Quick Command submits a settled prompt to an active Codex TUI', async ({
     .filter((entry) => entry.id === ptyId)
     .map((entry) => entry.data)
   const receivedChunks = report?.inputChunksHex.map((hex) => Buffer.from(hex, 'hex').toString())
-  console.log(JSON.stringify({ tabId, ptyId, writes, receivedChunks, report }))
+  console.log(
+    JSON.stringify({
+      tabId,
+      ptyId,
+      writes,
+      receivedChunks,
+      report,
+      foregroundProbeTiming,
+      timing: {
+        clickToFirstInputMs:
+          clickDispatchedAtMs === null ||
+          report?.firstInputAtMs === null ||
+          report?.firstInputAtMs === undefined
+            ? null
+            : report.firstInputAtMs - clickDispatchedAtMs,
+        firstInputToSubmitMs:
+          report?.firstInputAtMs === null ||
+          report?.firstInputAtMs === undefined ||
+          report?.submitObservedAtMs === null ||
+          report?.submitObservedAtMs === undefined
+            ? null
+            : report.submitObservedAtMs - report.firstInputAtMs
+      }
+    })
+  )
 
   if (expectStalled) {
     expect(report?.inputHex).toBe(Buffer.from(`${normalizedPrompt}\r`, 'utf8').toString('hex'))
-    expect(receivedChunks).toEqual([`${normalizedPrompt}\r`])
+    expect(receivedChunks?.join('')).toBe(`${normalizedPrompt}\r`)
     expect(report).toMatchObject({
       composerReady: false,
       contractOk: false,
@@ -172,9 +236,10 @@ test('Quick Command submits a settled prompt to an active Codex TUI', async ({
   // IPC spy is intentionally only diagnostic here because settled runtime sends can
   // write directly through the provider rather than the renderer IPC channel.
   expect(report?.inputHex).toBe(
-    Buffer.from(`\x1b[200~${normalizedPrompt}\x1b[201~\r`, 'utf8').toString('hex')
+    Buffer.from(`\x1b[200~${normalizedPrompt}\x1b[201~\x1b[13u`, 'utf8').toString('hex')
   )
-  expect(receivedChunks).toEqual([`\x1b[200~${normalizedPrompt}\x1b[201~`, '\r'])
+  // PTY data events may split one provider write; exact bytes and ordering are the E2E contract.
+  expect(receivedChunks?.join('')).toBe(`\x1b[200~${normalizedPrompt}\x1b[201~\x1b[13u`)
   expect(report).toMatchObject({
     composerReady: true,
     contractOk: true,

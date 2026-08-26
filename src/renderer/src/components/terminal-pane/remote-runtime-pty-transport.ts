@@ -19,7 +19,10 @@ import type {
   RuntimeTerminalResolvePane,
   RuntimeTerminalSend
 } from '../../../../shared/runtime-types'
-import { TERMINAL_CREATE_IDEMPOTENCY_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
+import {
+  TERMINAL_CREATE_IDEMPOTENCY_RUNTIME_CAPABILITY,
+  TERMINAL_QUICK_COMMANDS_RUNTIME_CAPABILITY
+} from '../../../../shared/protocol-version'
 import { agentResumeHostAuthorityCapability } from '../../runtime/agent-resume-host-authority-capability'
 import {
   isTerminalInputTooLargeWithDeferredMeasurement,
@@ -1295,6 +1298,7 @@ export function createRemoteRuntimePtyTransport(
   async function sendQuickCommandToRuntime(data: string): Promise<boolean> {
     const targetHandle = handle
     const targetLifecycleEpoch = lifecycleEpoch
+    const targetEnvironmentId = currentRuntimeEnvironmentId
     return inputOrderingLane.enqueueQuickCommand(async () => {
       if (!connected || !targetHandle || recoveryBlocksIo()) {
         return false
@@ -1306,8 +1310,18 @@ export function createRemoteRuntimePtyTransport(
         !connected ||
         handle !== targetHandle ||
         lifecycleEpoch !== targetLifecycleEpoch ||
+        currentRuntimeEnvironmentId !== targetEnvironmentId ||
         recoveryBlocksIo()
       ) {
+        return false
+      }
+      const supportsQuickCommand =
+        useAppStore
+          .getState()
+          .runtimeStatusByEnvironmentId.get(targetEnvironmentId)
+          ?.status?.capabilities?.includes(TERMINAL_QUICK_COMMANDS_RUNTIME_CAPABILITY) === true
+      const legacyPrompt = data.endsWith('\r') ? data.slice(0, -1) : null
+      if (!supportsQuickCommand && !legacyPrompt) {
         return false
       }
       try {
@@ -1315,8 +1329,10 @@ export function createRemoteRuntimePtyTransport(
           'terminal.send',
           {
             terminal: targetHandle,
-            text: data,
-            quickCommand: true,
+            text: supportsQuickCommand ? data : legacyPrompt!,
+            ...(supportsQuickCommand
+              ? { quickCommand: true as const }
+              : { agentPrompt: true as const, enter: true }),
             client: { id: clientId, type: 'desktop' },
             ...(desiredViewport ? { viewport: desiredViewport, claimViewport: true as const } : {})
           },

@@ -322,6 +322,28 @@ describe('getForegroundProcessName', () => {
     })
   })
 
+  it('uses a fresh process-table scan for confirmation instead of a cached agent identity', async () => {
+    await withProcessPlatform('linux', async () => {
+      let scans = 0
+      mockExecFile((_command, args) => {
+        if (args[0] !== '-axo') {
+          return new Error('unexpected command')
+        }
+        scans += 1
+        return {
+          stdout:
+            scans === 1
+              ? ['100 99 Ss   bash -l', '101 100 S+   node /home/dev/.local/bin/codex'].join('\n')
+              : ['100 99 Ss   bash -l', '101 100 S+   vim notes.txt'].join('\n')
+        }
+      })
+
+      await expect(getForegroundProcessName(100, 'node')).resolves.toBe('codex')
+      await expect(getForegroundProcessName(100, 'node', { fresh: true })).resolves.toBe('node')
+      expect(scans).toBe(2)
+    })
+  })
+
   it('recognizes Windows SSH relay shell-rooted agent descendants', async () => {
     await withProcessPlatform('win32', async () => {
       mockWindowsProcessTable([

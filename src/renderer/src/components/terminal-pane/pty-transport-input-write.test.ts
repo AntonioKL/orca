@@ -135,6 +135,64 @@ describe('createIpcPtyTransport', () => {
     ])
   })
 
+  it('drops deferred input after a same-id PTY rebind', async () => {
+    let releaseFirst!: (accepted: boolean) => void
+    mocks.sendRuntimeTerminalQuickCommand.mockImplementationOnce(
+      () => new Promise<boolean>((resolve) => (releaseFirst = resolve))
+    )
+    const { createIpcPtyTransport } = await import('./pty-transport')
+    const transport = createIpcPtyTransport({
+      worktreeId: 'worktree-1',
+      tabId: 'tab-1',
+      leafId: 'd45db739-fb66-40d3-9533-d537772ad03f'
+    })
+    await transport.connect({ url: '', callbacks: {} })
+
+    const quickCommand = transport.sendQuickCommand?.('one\r')
+    expect(transport.sendInput('stale trailing input')).toBe(true)
+    await Promise.resolve()
+    transport.detach?.()
+    transport.attach?.({ existingPtyId: 'pty-1', callbacks: {} })
+
+    releaseFirst(true)
+    await expect(quickCommand).resolves.toBe(true)
+    await Promise.resolve()
+
+    expect(window.api.pty.write).not.toHaveBeenCalled()
+  })
+
+  it('drops deferred input when the PTY exits before same-id reattach', async () => {
+    let releaseFirst!: (accepted: boolean) => void
+    let emitExit: ((payload: { id: string; code: number }) => void) | undefined
+    mocks.sendRuntimeTerminalQuickCommand.mockImplementationOnce(
+      () => new Promise<boolean>((resolve) => (releaseFirst = resolve))
+    )
+    installIpcPtyWindow(originalWindow, {
+      exit: (callback) => {
+        emitExit = callback
+      }
+    })
+    const { createIpcPtyTransport } = await import('./pty-transport')
+    const transport = createIpcPtyTransport({
+      worktreeId: 'worktree-1',
+      tabId: 'tab-1',
+      leafId: 'd45db739-fb66-40d3-9533-d537772ad03f'
+    })
+    await transport.connect({ url: '', callbacks: {} })
+
+    const quickCommand = transport.sendQuickCommand?.('one\r')
+    expect(transport.sendInput('stale trailing input')).toBe(true)
+    await Promise.resolve()
+    emitExit?.({ id: 'pty-1', code: 0 })
+    transport.attach?.({ existingPtyId: 'pty-1', callbacks: {} })
+
+    releaseFirst(true)
+    await expect(quickCommand).resolves.toBe(true)
+    await Promise.resolve()
+
+    expect(window.api.pty.write).not.toHaveBeenCalled()
+  })
+
   it('chunks large local IPC terminal input before renderer-to-main writes', async () => {
     vi.useFakeTimers()
     try {

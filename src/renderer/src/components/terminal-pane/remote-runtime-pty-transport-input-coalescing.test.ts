@@ -10,6 +10,7 @@ import {
   TERMINAL_INPUT_MAX_BYTES
 } from '../../../../shared/terminal-input'
 import { CLIPBOARD_TEXT_MEASURE_YIELD_CODE_UNITS } from '../../../../shared/clipboard-text'
+import { TERMINAL_QUICK_COMMANDS_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
 import {
   createRemoteRuntimeTransportMocks,
   type MultiplexSubscriptionCallbacks
@@ -38,8 +39,20 @@ const {
 })
 
 describe('createRemoteRuntimePtyTransport', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     resetRemoteRuntimeTransport()
+    const { useAppStore } = await import('@/store')
+    useAppStore.setState({
+      runtimeStatusByEnvironmentId: new Map([
+        [
+          'env-1',
+          {
+            checkedAt: Date.now(),
+            status: { capabilities: [TERMINAL_QUICK_COMMANDS_RUNTIME_CAPABILITY] }
+          } as never
+        ]
+      ])
+    })
   })
 
   it('resubscribes with the latest pane viewport after the remote stream closes', async () => {
@@ -413,6 +426,45 @@ describe('createRemoteRuntimePtyTransport', () => {
       }
     ])
     expect(subscriptionSendBinary).not.toHaveBeenCalled()
+  })
+
+  it('uses legacy agent-prompt intent when the remote host lacks Quick Command support', async () => {
+    const { useAppStore } = await import('@/store')
+    useAppStore.setState({
+      runtimeStatusByEnvironmentId: new Map([
+        ['env-1', { checkedAt: Date.now(), status: { capabilities: [] } } as never]
+      ])
+    })
+    runtimeCall.mockImplementation((args) => {
+      if (args.method === 'terminal.create') {
+        return Promise.resolve({ ok: true, result: { terminal: { handle: 'terminal-1' } } })
+      }
+      return Promise.resolve({
+        ok: true,
+        result: {
+          send: { handle: 'terminal-1', accepted: true, bytesWritten: args.params.text.length }
+        }
+      })
+    })
+    const { createRemoteRuntimePtyTransport } = await import('./remote-runtime-pty-transport')
+    const transport = createRemoteRuntimePtyTransport('env-1', {
+      worktreeId: 'wt-1',
+      tabId: 'tab-1',
+      leafId: 'pane:1'
+    })
+    await transport.connect({ url: '', callbacks: {} })
+    runtimeCall.mockClear()
+
+    await expect(transport.sendQuickCommand?.('echo x\r')).resolves.toBe(true)
+
+    expect(
+      runtimeCall.mock.calls.find(([call]) => call.method === 'terminal.send')?.[0].params
+    ).toMatchObject({
+      terminal: 'terminal-1',
+      text: 'echo x',
+      agentPrompt: true,
+      enter: true
+    })
   })
 
   it('fences trailing input and repeated Quick Commands behind the first remote submit', async () => {

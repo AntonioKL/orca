@@ -63,6 +63,7 @@ describe('terminal agent prompt send RPC', () => {
     expect(runtime.isTerminalRunningSettledPromptAgent).toHaveBeenCalledWith('terminal-1')
     expect(sendTerminalAgentPrompt).toHaveBeenCalledWith('terminal-1', 'review this change', {
       beforeWrite: expect.any(Function),
+      preferProtocolSubmit: true,
       signal: undefined
     })
     const beforeWrite = sendTerminalAgentPrompt.mock.calls[0][2].beforeWrite as (
@@ -162,6 +163,7 @@ describe('terminal agent prompt send RPC', () => {
     expect(runtime.isTerminalRunningSettledPromptAgent).toHaveBeenCalledWith('terminal-1')
     expect(sendTerminalAgentPrompt).toHaveBeenCalledWith('terminal-1', 'review this change', {
       beforeWrite: expect.any(Function),
+      preferProtocolSubmit: true,
       signal: undefined
     })
     expect(sendTerminal).not.toHaveBeenCalled()

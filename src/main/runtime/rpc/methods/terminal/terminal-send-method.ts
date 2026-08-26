@@ -198,7 +198,8 @@ export const TERMINAL_SEND_METHODS: RpcAnyMethod[] = [
         result = useSettledAgentPrompt
           ? await runtime.sendTerminalAgentPrompt(params.terminal, settledAgentPrompt!, {
               beforeWrite,
-              signal
+              signal,
+              preferProtocolSubmit: true
             })
           : await runtime.sendTerminal(
               params.terminal,
