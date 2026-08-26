@@ -211,6 +211,13 @@ export function useMobileNativeChatController(args: {
   // the cycle without re-creating the send callbacks per snapshot.
   const recordSessionOptionCommandRef = useRef<(command: string) => void>(() => {})
 
+  // Bring the terminal view forward when an agent-owned picker command is used.
+  const handleAgentPicker = useCallback(() => {
+    if (activeSessionTabId && isTabChatView(activeSessionTabId)) {
+      toggleTabChatView(activeSessionTabId)
+    }
+  }, [activeSessionTabId, isTabChatView, toggleTabChatView])
+
   const {
     send: handleNativeChatSend,
     sendWithOutcome: handleNativeChatSendWithOutcome,
@@ -229,15 +236,9 @@ export function useMobileNativeChatController(args: {
     restoreRejectedDraft,
     acceptSend,
     holdUnconfirmedSend,
-    onSendError
+    onSendError,
+    onAgentPicker: handleAgentPicker
   })
-
-  // Bring the terminal view forward when an agent-owned picker command is used.
-  const handleAgentPicker = useCallback(() => {
-    if (activeSessionTabId && isTabChatView(activeSessionTabId)) {
-      toggleTabChatView(activeSessionTabId)
-    }
-  }, [activeSessionTabId, isTabChatView, toggleTabChatView])
 
   const sessionOptions = useMobileNativeChatSessionOptions({
     agent: activeChatResolution?.agent ?? null,

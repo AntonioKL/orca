@@ -10,7 +10,10 @@ import {
 import type { CatalogCommandDelivery } from '../../../src/shared/agent-session-option-catalog'
 import { isSlashCommandDraft } from '../../../src/shared/native-chat-slash-commands'
 import { healMobileNativeChatStaleInput } from './mobile-native-chat-stale-input'
-import { classifyMobileNativeChatSend } from './mobile-native-chat-send-classification'
+import {
+  classifyMobileNativeChatSend,
+  mobileNativeChatSendOpensAgentPicker
+} from './mobile-native-chat-send-classification'
 import {
   acquireMobileNativeChatTerminalWrite,
   releaseMobileNativeChatTerminalWrite
@@ -69,6 +72,10 @@ export function useMobileNativeChatMessageSend(args: {
     onUnconfirmed: () => void
   ) => void
   onSendError: (message: string) => void
+  /** Called after a dispatched command whose answer is the agent's own TUI picker
+   *  (`/resume`), so the terminal view can come forward — the chat view cannot
+   *  render one, and mobile has no other way to reach it (STA-4617). */
+  onAgentPicker?: () => void
 }): MobileNativeChatMessageSend {
   const {
     client,
@@ -83,7 +90,8 @@ export function useMobileNativeChatMessageSend(args: {
     restoreRejectedDraft,
     acceptSend,
     holdUnconfirmedSend,
-    onSendError
+    onSendError,
+    onAgentPicker
   } = args
 
   const sendMessage = useCallback(
@@ -216,6 +224,12 @@ export function useMobileNativeChatMessageSend(args: {
         // The session-option catalog can recognize controls omitted from the
         // autocomplete catalog (for example Claude `/model` and `/fast`).
         recordCommand(text.trim())
+        // Why the agent captured at send start, not the live ref: a tab switch
+        // during the write must not judge this command against the new tab's
+        // catalog, exactly as `recordCommand` is captured above.
+        if (mobileNativeChatSendOpensAgentPicker(agent, text)) {
+          onAgentPicker?.()
+        }
       }
       return 'accepted'
     },
@@ -230,6 +244,7 @@ export function useMobileNativeChatMessageSend(args: {
       enabled,
       handleRef,
       holdUnconfirmedSend,
+      onAgentPicker,
       onSendError,
       readSeededLaunchDraftSeed,
       restoreRejectedDraft
