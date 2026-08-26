@@ -3,6 +3,11 @@ import { z } from 'zod'
 import type { E2EEKeypair } from '../e2ee-keypair'
 import { cancelUnreadResponseBody } from '../../lib/unread-response-body'
 import { parseRelayRetryAfterMs } from '../../../shared/relay-retry-after-header'
+import {
+  relayAssignRateKey,
+  sharedRelayAssignRateGate,
+  type RelayAssignRateGate
+} from './relay-assign-rate-gate'
 import type { RelayRegion } from './relay-region-preference'
 
 const RELAY_HTTP_REQUEST_DEADLINE_MS = 15_000
@@ -106,7 +111,7 @@ export async function exchangeRelayAuthorization(input: {
   return parsed.data
 }
 
-export async function requestRelayAssignment(input: {
+type RelayAssignmentRequest = {
   directorUrl: string
   relayToken: string
   relayHostId: string
@@ -114,10 +119,30 @@ export async function requestRelayAssignment(input: {
   preferredRegion?: RelayRegion
   fetch?: typeof globalThis.fetch
   requestDeadlineMs?: number
-}): Promise<RelayAssignment> {
+  // Fencing for the throttle wait: a superseded caller aborts instead of assigning.
+  isCurrent?: () => boolean
+  assignRateGate?: RelayAssignRateGate
+}
+
+export async function requestRelayAssignment(
+  input: RelayAssignmentRequest
+): Promise<RelayAssignment> {
   if (!isAllowedRelayOrigin(input.directorUrl)) {
     throw new RelayHttpError('assignment', 400)
   }
+  const gate = input.assignRateGate ?? sharedRelayAssignRateGate
+  const rateKey = relayAssignRateKey(input.directorUrl, input.relayHostId)
+  await gate.reserve(rateKey, input.isCurrent)
+  return await sendRelayAssignment(input, gate, rateKey)
+}
+
+// The field-fallback retries below are one logical attempt against one booked
+// slot; re-entering the gate would stall rolled-back-director compatibility 5s.
+async function sendRelayAssignment(
+  input: RelayAssignmentRequest,
+  gate: RelayAssignRateGate,
+  rateKey: string
+): Promise<RelayAssignment> {
   const response = await (input.fetch ?? globalThis.fetch)(`${input.directorUrl}/v1/assign`, {
     method: 'POST',
     headers: {
@@ -136,15 +161,18 @@ export async function requestRelayAssignment(input: {
   })
   if (!response.ok) {
     const retryAfterMs = relayRetryAfterMs(response.headers.get('retry-after'))
+    if (retryAfterMs !== null) {
+      gate.noteRetryAfter(rateKey, retryAfterMs)
+    }
     await cancelUnreadResponseBody(response)
     if (input.preferredRegion && response.status === 400) {
       // A rolled-back director rejects the regional hint; preserve the
       // reconnect lane while retrying without only that field.
-      return await requestRelayAssignment({ ...input, preferredRegion: undefined })
+      return await sendRelayAssignment({ ...input, preferredRegion: undefined }, gate, rateKey)
     }
     if (input.reconnect && response.status === 400) {
       // A rolled-back director rejects unknown fields; retry once unhinted.
-      return await requestRelayAssignment({ ...input, reconnect: false })
+      return await sendRelayAssignment({ ...input, reconnect: false }, gate, rateKey)
     }
     throw new RelayHttpError('assignment', response.status, retryAfterMs)
   }
