@@ -26,6 +26,8 @@ export class RelayAssignRateLimitedError extends Error {
 
 export type RelayAssignRateGateOptions = {
   now?: () => number
+  // Test fakes MUST advance `now` when sleeping — the wait loop re-reads the
+  // clock each slice, so a no-op sleep against a frozen clock never terminates.
   sleep?: (ms: number) => Promise<void>
   random?: () => number
 }

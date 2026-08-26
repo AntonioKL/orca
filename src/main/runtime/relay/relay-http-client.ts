@@ -50,6 +50,15 @@ export class RelayHttpError extends Error {
   }
 }
 
+// Distinct message so log censuses can tell a locally-enforced wait from a real
+// director 429 — one server 429 would otherwise print several identical lines.
+export class RelayAssignLocallyPacedError extends RelayHttpError {
+  constructor(retryAfterMs: number) {
+    super('assignment', 429, retryAfterMs)
+    this.message = 'relay_assignment_locally_paced_429'
+  }
+}
+
 function relayRetryAfterMs(value: string | null): number | null {
   return parseRelayRetryAfterMs(value, RELAY_RETRY_AFTER_MAX_MS)
 }
@@ -145,7 +154,9 @@ export async function requestRelayAssignment(
     if (error instanceof RelayAssignRateLimitedError) {
       // Surface a long local wait as the 429 it stands in for, so the existing
       // schedulers pace with retryAfterMs instead of parking the caller inline.
-      throw new RelayHttpError('assignment', 429, error.retryAfterMs)
+      // Reachable only while a director Retry-After beyond the inline cap is
+      // still in force — local booking alone never exceeds ~5.5s.
+      throw new RelayAssignLocallyPacedError(error.retryAfterMs)
     }
     throw error
   }
