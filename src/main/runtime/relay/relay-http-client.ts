@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import type { E2EEKeypair } from '../e2ee-keypair'
 import { cancelUnreadResponseBody } from '../../lib/unread-response-body'
+import { parseRelayRetryAfterMs } from '../../../shared/relay-retry-after-header'
 import type { RelayRegion } from './relay-region-preference'
 
 const RELAY_HTTP_REQUEST_DEADLINE_MS = 15_000
@@ -42,16 +43,8 @@ export class RelayHttpError extends Error {
   }
 }
 
-function relayRetryAfterMs(value: string | null, nowMs = Date.now()): number | null {
-  if (!value) {
-    return null
-  }
-  const seconds = Number(value)
-  const delayMs = Number.isFinite(seconds) ? seconds * 1_000 : Date.parse(value) - nowMs
-  if (!Number.isFinite(delayMs) || delayMs <= 0) {
-    return null
-  }
-  return Math.min(RELAY_RETRY_AFTER_MAX_MS, Math.ceil(delayMs))
+function relayRetryAfterMs(value: string | null): number | null {
+  return parseRelayRetryAfterMs(value, RELAY_RETRY_AFTER_MAX_MS)
 }
 
 export function shouldRetryRelayConnectionError(error: unknown): boolean {
