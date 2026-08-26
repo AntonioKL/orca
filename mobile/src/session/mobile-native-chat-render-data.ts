@@ -54,15 +54,16 @@ export function foldMobileNativeChatMessages(messages: NativeChatMessage[]): Nat
   return stripNoiseMessages(foldToolMessages(normalizeImageTranscriptMessages(messages)))
 }
 
-/** Assemble the list data the chat renders: the folded transcript, then a
- *  synthetic bubble for the streaming text the gate let through, then the
- *  route-owned accepted optimistic messages at the tail. */
+/** Assemble the folded transcript, streaming text, and optimistic user echoes. */
 export function buildMobileNativeChatTransientData({
+  messages,
   folded,
   streaming,
   pending,
   imagePreviewsByMessageId
 }: {
+  /** Raw transcript rows, used to project folded-away send boundaries. */
+  messages: NativeChatMessage[]
   folded: NativeChatMessage[]
   /** Streaming bubble text, already gated by `deriveMobileNativeChatStreaming`. */
   streaming: string | null
@@ -98,6 +99,25 @@ export function buildMobileNativeChatTransientData({
   const anchoredPending = new Map<string, NativeChatMessage[]>()
   const trailingPending: NativeChatMessage[] = []
   const foldedIds = new Set(renderedFolded.map((message) => message.id))
+  const missingBaselineIds = new Set<string>()
+  for (const item of pending) {
+    const baselineId = item.baselineTailMessageId
+    if (baselineId && !foldedIds.has(baselineId)) {
+      missingBaselineIds.add(baselineId)
+    }
+  }
+  const foldedAnchorByRawId = new Map<string, string>()
+  if (missingBaselineIds.size > 0) {
+    let lastVisibleId: string | null = null
+    for (const message of messages) {
+      if (foldedIds.has(message.id)) {
+        lastVisibleId = message.id
+      }
+      if (lastVisibleId && missingBaselineIds.has(message.id)) {
+        foldedAnchorByRawId.set(message.id, lastVisibleId)
+      }
+    }
+  }
   for (const item of pending) {
     const bubble: NativeChatMessage = {
       id: item.id,
@@ -111,9 +131,13 @@ export function buildMobileNativeChatTransientData({
       timestamp: null,
       source: 'transcript'
     }
-    // No baseline, or a tail that folding dropped/merged: the tail is the only
-    // position left, which is also the pre-existing behaviour.
-    const anchor = item.baselineTailMessageId
+    // Tool/noise folding can remove the raw tail; anchor to its preceding visible row.
+    const baselineId = item.baselineTailMessageId
+    const anchor = baselineId
+      ? foldedIds.has(baselineId)
+        ? baselineId
+        : foldedAnchorByRawId.get(baselineId)
+      : undefined
     if (!anchor || !foldedIds.has(anchor)) {
       trailingPending.push(bubble)
       continue
