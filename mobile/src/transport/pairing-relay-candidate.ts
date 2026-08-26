@@ -96,7 +96,7 @@ export function createRecoveringPairingRelayCandidate(args: {
           // to re-dial it with a real pause, not to abandon the relay path.
           log(
             'info',
-            isCurrentAssignmentMove(error, relay)
+            directorEchoedCurrentAssignment(error, relay)
               ? 'Relay: director kept current assignment'
               : 'Relay: director has no newer assignment',
             redactSocketEndpoint(relay.cellUrl)
@@ -140,7 +140,7 @@ export function createRecoveringPairingRelayCandidate(args: {
 // the near-zero full jitter that would hammer the cell that refused the dial.
 const NOT_NEWER_RETRY_FLOOR_MS = 250
 
-function isCurrentAssignmentMove(error: unknown, relay: PairingRelay): boolean {
+function directorEchoedCurrentAssignment(error: unknown, relay: PairingRelay): boolean {
   return (
     error instanceof RelayDirectorMoveNotNewerError &&
     error.assignmentEpoch === relay.assignmentEpoch &&
