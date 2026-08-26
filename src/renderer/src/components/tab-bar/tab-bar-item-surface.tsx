@@ -215,10 +215,14 @@ export function renderTabBarItems({
           tabCount={items.length}
           hasTabsToRight={index < items.length - 1}
           hasTabsToLeft={index > 0}
-          isActive={activeTabType === 'agent-session' && item.id === activeTabId}
+          isActive={
+            !clientHostedRowOwnsActiveState &&
+            activeTabType === 'agent-session' &&
+            item.id === activeTabId
+          }
           isPinned={item.isPinned}
           isExpanded={false}
-          onActivate={() => onActivateAgentSession?.(item.id)}
+          onActivate={() => activateRealTab(onActivateAgentSession)(item.id)}
           onClose={() => onClose(item.id)}
           onCloseOthers={() => onCloseOthers(item.id)}
           onCloseToRight={() => onCloseToRight(item.id)}
