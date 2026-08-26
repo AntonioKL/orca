@@ -1,6 +1,5 @@
 import { X509Certificate } from 'node:crypto'
 import { rootCertificates } from 'node:tls'
-import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { ProcessResult } from '../../shared/child-process/run-process'
 import {
@@ -39,9 +38,9 @@ describe('legacy system CA loading', () => {
   it('reads the policy-owned Linux bundle when Node cannot enumerate system roots', async () => {
     const certificates = await loadLegacySystemCaCertificates({
       platform: 'linux',
-      env: { SSL_CERT_FILE: join('/', 'fixture', 'ca-bundle.crt') },
+      env: { SSL_CERT_FILE: '/fixture/ca-bundle.crt' },
       readFile: async (path) => {
-        expect(path).toBe(join('/', 'fixture', 'ca-bundle.crt'))
+        expect(path).toBe('/fixture/ca-bundle.crt')
         return bundledRoot
       }
     })
