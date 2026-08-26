@@ -24,7 +24,6 @@ import { WslRelayRecovery } from './wsl-hook-relay-recovery'
 import { wslHookRelayStateKey } from './wsl-hook-relay-state-key'
 import { SshChannelMultiplexer, type MultiplexerTransport } from '../ssh/ssh-channel-multiplexer'
 import { AGENT_HOOK_REQUEST_REPLAY_METHOD } from '../../shared/agent-hook-relay'
-import { disposeWslHookRelayState } from './wsl-hook-relay-disposal'
 import {
   sanitizeWslHookInstanceKey,
   WSL_HOOK_FS_METHODS,
@@ -112,19 +111,17 @@ export class WslHookRelayManager {
 
   /** Kills every live relay. Non-permanent (hooks switched off mid-session) leaves the
    *  manager reusable, so re-enabling hooks can start relays again without an app restart. */
-  async disposeAll({ permanent = true }: { permanent?: boolean } = {}): Promise<void> {
+  disposeAll({ permanent = true }: { permanent?: boolean } = {}): void {
     this.disposed ||= permanent
-    const states = [...this.states.values()]
-    this.states.clear()
-    await Promise.allSettled(states.map((state) => this.disposeState(state, permanent)))
-  }
-
-  private async disposeState(state: DistroState, permanent: boolean): Promise<void> {
-    this.recovery.clearTimers(state)
-    if (!permanent) {
-      this.stoppedByHooksOff.add(state.distro)
+    for (const state of this.states.values()) {
+      this.recovery.clearTimers(state)
+      state.mux?.dispose()
+      state.child?.kill()
+      if (!permanent) {
+        this.stoppedByHooksOff.add(state.distro)
+      }
     }
-    await disposeWslHookRelayState(this.deps, state)
+    this.states.clear()
   }
 
   /** Restarts what a hooks-off teardown stopped. Skips distros the user has since shut

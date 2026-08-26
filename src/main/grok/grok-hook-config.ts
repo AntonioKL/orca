@@ -8,15 +8,18 @@ import {
 
 export const GROK_TOOL_EVENT_MATCHER = '.*'
 
-// Why PreToolUse is deliberately absent: it is a blocking hook, so registering it puts Orca on the
-// critical path of every tool call -- twice the per-tool spawns -- for a transition we already learn
-// from PostToolUse. Its cost was a large part of what #15518 reported.
 export const GROK_EVENTS = [
   { eventName: 'SessionStart', definition: { hooks: [{ type: 'command', command: '' }] } },
   { eventName: 'UserPromptSubmit', definition: { hooks: [{ type: 'command', command: '' }] } },
   { eventName: 'Stop', definition: { hooks: [{ type: 'command', command: '' }] } },
   { eventName: 'StopFailure', definition: { hooks: [{ type: 'command', command: '' }] } },
   { eventName: 'SessionEnd', definition: { hooks: [{ type: 'command', command: '' }] } },
+  {
+    // Why: Orca needs the pre-event to show in-flight tools and detect ask_user_question waits;
+    // PostToolUse arrives only after both states have ended.
+    eventName: 'PreToolUse',
+    definition: { matcher: GROK_TOOL_EVENT_MATCHER, hooks: [{ type: 'command', command: '' }] }
+  },
   {
     eventName: 'PostToolUse',
     definition: { matcher: GROK_TOOL_EVENT_MATCHER, hooks: [{ type: 'command', command: '' }] }

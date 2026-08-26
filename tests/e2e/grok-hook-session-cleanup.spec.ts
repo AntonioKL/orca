@@ -30,6 +30,7 @@ async function waitForManagedConfig(configPath: string): Promise<void> {
 
 test('removes the managed Grok hook config on quit', async (// oxlint-disable-next-line no-empty-pattern -- this test owns its Electron launch.
 {}, testInfo) => {
+  test.skip(process.platform !== 'win32', 'POSIX hooks are pane-guarded and stay installed')
   const session = createRestartSession(testInfo, LAUNCH_ENV)
   const configPath = grokConfigPath(session.userDataDir)
   let app: ElectronApplication | null = null

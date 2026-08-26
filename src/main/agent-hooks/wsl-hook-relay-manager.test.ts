@@ -229,7 +229,6 @@ describe('WslHookRelayManager', () => {
       waitForSentinel: vi.fn(async () => guestTransport()),
       ingest: vi.fn(),
       installHooks: vi.fn(async () => []),
-      removeHooks: vi.fn(async () => []),
       managedHookSettings: () => null,
       pluginSources: () => ({ opencodePluginSource: '// opencode plugin source' }),
       warn: vi.fn(),
@@ -402,16 +401,13 @@ describe('WslHookRelayManager', () => {
     await vi.waitFor(() => expect(deps.installHooks).toHaveBeenCalledTimes(1))
 
     settings.agentStatusHooksEnabled = false
-    await manager.disposeAll({ permanent: false })
+    manager.disposeAll({ permanent: false })
     // Reattach and crash recovery both re-enter ensureForDistro; neither may reinstall guest hooks now.
     manager.ensureForDistro('Ubuntu')
     await new Promise((resolve) => setTimeout(resolve, 20))
 
     expect(deps.spawnRelay).toHaveBeenCalledTimes(1)
     expect(deps.installHooks).toHaveBeenCalledTimes(1)
-    expect(deps.removeHooks).toHaveBeenCalledWith(expect.anything(), home, {
-      agents: ['grok']
-    })
     expect(manager.getGuestEndpointFilePath('Ubuntu')).toBeNull()
 
     // Re-enabling puts the relay back without waiting for the next WSL spawn.

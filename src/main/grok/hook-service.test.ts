@@ -245,6 +245,7 @@ describe('GrokHookService', () => {
     expect(Object.keys(config.hooks).sort()).toEqual(
       [
         'Notification',
+        'PreToolUse',
         'PostToolUse',
         'PostToolUseFailure',
         'SessionEnd',
@@ -254,10 +255,10 @@ describe('GrokHookService', () => {
         'UserPromptSubmit'
       ].sort()
     )
-    // Why asserted absent: PreToolUse is a blocking hook, so registering it puts Orca on the
-    // critical path of every tool call -- doubling per-tool spawns -- for a transition PostToolUse
-    // already reports. Re-adding it would restore a large part of what #15518 measured.
-    expect(config.hooks.PreToolUse).toBeUndefined()
+    // Why: PreToolUse drives in-flight tool state and ask_user_question waits. The pane guard below
+    // keeps it inert outside Orca; PostToolUse cannot replace a state that has already ended.
+    expect(config.hooks.PreToolUse[0].matcher).toBe('.*')
+    expect(registersManagedGrokScript(config.hooks.PreToolUse[0].hooks[0].command)).toBe(true)
     // Why: Grok matchers are real regexes; bare `*` does not match-all.
     expect(config.hooks.PostToolUseFailure[0].matcher).toBe('.*')
     expect(config.hooks.PostToolUse[0].matcher).toBe('.*')
@@ -456,6 +457,21 @@ describe('GrokHookService', () => {
     expect(lstatSync(configPath).isSymbolicLink()).toBe(true)
     expect(existsSync(realConfig)).toBe(true)
     expect(service.getStatus().managedHooksPresent).toBe(false)
+  })
+
+  it('respects an empty user-managed symlink as an opt-out', () => {
+    const service = new GrokHookService()
+    const configPath = join(homeDir, '.grok', 'hooks', 'orca-status.json')
+    const realConfig = join(homeDir, 'dotfiles', 'orca-status.json')
+    const userCleared = '{"hooks":{}}\n'
+    mkdirSync(dirname(configPath), { recursive: true })
+    mkdirSync(dirname(realConfig), { recursive: true })
+    writeFileSync(realConfig, userCleared)
+    symlinkSync(realConfig, configPath)
+
+    expect(service.install().state).toBe('not_installed')
+    expect(readFileSync(realConfig, 'utf8')).toBe(userCleared)
+    expect(lstatSync(configPath).isSymbolicLink()).toBe(true)
   })
 
   it('writes through a symlinked config on the sync remove path too', () => {

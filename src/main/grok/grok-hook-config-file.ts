@@ -1,9 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import { lstat, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import { copyFile, lstat, open, readFile, realpath, rename, rm, stat } from 'node:fs/promises'
 import { parseHooksJsonText } from '../agent-hooks/hooks-json-read'
 import type { HooksConfig } from '../agent-hooks/installer-utils'
-
-const WINDOWS_RENAME_ATTEMPTS = 6
 
 export type AsyncGrokHookConfigSnapshot = {
   raw: string | null
@@ -17,31 +16,13 @@ export async function readGrokHookConfigSnapshot(
   return raw === null ? { raw: null, config: {} } : { raw, config: parseHooksJsonText(raw) }
 }
 
-// Why temp+rename and not the guarded hard-link swap in codex-accounts/fs-utils: Grok stats every
-// global hook JSON and refuses to build a sandbox profile for one with st_nlink != 1, so a file
-// briefly carrying a second link fails any Grok session that starts in that window. rename() never
-// creates a second link. The compare-and-swap below is therefore read-compare-rename; the residual
-// window is one atomic rename rather than the whole publish.
 export async function writeGrokHookConfigIfUnchanged(
   targetPath: string,
   expectedContents: string,
-  contents: string
+  contents: string,
+  options?: GrokHookConfigMutationOptions
 ): Promise<boolean> {
-  if ((await readFileOrNull(targetPath)) !== expectedContents) {
-    return false
-  }
-  // Why resolve first: renaming onto the link path would REPLACE a config the user has symlinked
-  // into a dotfiles repo with a plain file, silently detaching it. Write through the link instead.
-  const writePath = await resolveWriteTarget(targetPath)
-  const tempPath = `${writePath}.${process.pid}.${randomUUID()}.tmp`
-  try {
-    await writeFile(tempPath, contents, 'utf8')
-    await renameWithWindowsRetry(tempPath, writePath)
-    return true
-  } catch (error) {
-    await rm(tempPath, { force: true })
-    throw error
-  }
+  return await mutateGrokHookConfigIfUnchanged(targetPath, expectedContents, contents, options)
 }
 
 /**
@@ -50,13 +31,10 @@ export async function writeGrokHookConfigIfUnchanged(
  */
 export async function removeGrokHookConfigIfUnchanged(
   targetPath: string,
-  expectedContents: string
+  expectedContents: string,
+  options?: GrokHookConfigMutationOptions
 ): Promise<boolean> {
-  if ((await readFileOrNull(targetPath)) !== expectedContents) {
-    return false
-  }
-  await rm(targetPath, { force: true })
-  return true
+  return await mutateGrokHookConfigIfUnchanged(targetPath, expectedContents, null, options)
 }
 
 /** True when the config is a symlink, so it must be written through and never unlinked. */
@@ -72,6 +50,100 @@ async function resolveWriteTarget(targetPath: string): Promise<string> {
   return (await isGrokHookConfigSymlink(targetPath)) ? await realpath(targetPath) : targetPath
 }
 
+async function mutateGrokHookConfigIfUnchanged(
+  targetPath: string,
+  expectedContents: string,
+  contents: string | null,
+  options?: GrokHookConfigMutationOptions
+): Promise<boolean> {
+  if (options?.beforeHold && !(await options.beforeHold())) {
+    return false
+  }
+  // Why resolve first: moving the link path would detach a config kept in the user's dotfiles.
+  const writePath = await resolveWriteTarget(targetPath)
+  const heldPath = `${writePath}.${process.pid}.${randomUUID()}.held`
+  try {
+    await rename(writePath, heldPath)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return false
+    }
+    throw error
+  }
+
+  let restoreOnFailure = true
+  try {
+    if ((await readFileOrNull(heldPath)) !== expectedContents) {
+      restoreOnFailure = false
+      await restoreHeldFile(heldPath, writePath)
+      return false
+    }
+    if (options?.shouldCommit && !(await options.shouldCommit())) {
+      restoreOnFailure = false
+      await restoreHeldFile(heldPath, writePath)
+      return false
+    }
+    if ((await readFileOrNull(writePath)) !== null) {
+      // A concurrent writer published a newer generation while the old one was held.
+      restoreOnFailure = false
+      await rm(heldPath, { force: true })
+      return false
+    }
+    if (contents === null) {
+      restoreOnFailure = false
+      await rm(heldPath, { force: true })
+      return true
+    }
+
+    const mode = (await stat(heldPath)).mode
+    let handle
+    try {
+      handle = await open(writePath, 'wx', mode)
+      await handle.writeFile(contents, 'utf8')
+      await handle.chmod(mode)
+      await handle.sync()
+    } catch (error) {
+      await handle?.close().catch(() => {})
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+        await rm(heldPath, { force: true })
+        return false
+      }
+      await rm(writePath, { force: true })
+      throw error
+    }
+    await handle.close()
+    restoreOnFailure = false
+    await rm(heldPath, { force: true })
+    return true
+  } catch (error) {
+    if (restoreOnFailure) {
+      await restoreHeldFile(heldPath, writePath)
+    }
+    throw error
+  }
+}
+
+async function restoreHeldFile(heldPath: string, targetPath: string): Promise<void> {
+  try {
+    // Why exclusive copy: it never overwrites a concurrent writer and works on Windows/network
+    // filesystems that do not support hard links. Keep heldPath until the complete copy succeeds.
+    await copyFile(heldPath, targetPath, constants.COPYFILE_EXCL)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+      // Preserve the held file as the only complete generation when restoration itself fails.
+      throw error
+    }
+  }
+  await rm(heldPath, { force: true })
+}
+
+type GrokHookConfigMutationOptions = {
+  /** Slow ownership work runs before the live config is moved out of place. */
+  beforeHold?: () => Promise<boolean>
+  /** Fast generation check that closes the gap after ownership was released. */
+  shouldCommit?: () => Promise<boolean>
+}
+
 async function readFileOrNull(targetPath: string): Promise<string | null> {
   try {
     return await readFile(targetPath, 'utf8')
@@ -80,23 +152,5 @@ async function readFileOrNull(targetPath: string): Promise<string | null> {
       return null
     }
     throw error
-  }
-}
-
-// Why: on Windows an antivirus scan or another agent CLI can hold the target open briefly.
-async function renameWithWindowsRetry(sourcePath: string, targetPath: string): Promise<void> {
-  const attempts = process.platform === 'win32' ? WINDOWS_RENAME_ATTEMPTS : 1
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    try {
-      await rename(sourcePath, targetPath)
-      return
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code
-      if (attempt < attempts && (code === 'EPERM' || code === 'EACCES' || code === 'EBUSY')) {
-        await new Promise((resolve) => setTimeout(resolve, attempt * 50))
-        continue
-      }
-      throw error
-    }
   }
 }

@@ -25,11 +25,102 @@ import { openClaudeHookService } from '../openclaude/hook-service'
 import { MANAGED_AGENT_HOOK_INSTALLERS } from './managed-agent-hook-controls'
 import {
   installRemoteManagedAgentHooks,
-  removeRemoteManagedAgentHooks,
   REMOTE_MANAGED_HOOK_INSTALLER_AGENTS
 } from './remote-managed-hook-installers'
-import { writeHooksJsonRemoteIfUnchanged } from './remote-hook-config-generation'
-import { createRemoteHookTestFilesystem as createFakeSftp } from './remote-hook-test-filesystem'
+
+type FakeFs = {
+  files: Map<string, string>
+  dirs: Set<string>
+  modes: Map<string, number>
+  failRenameTo: Set<string>
+}
+
+function createFakeSftp(initialFiles: Record<string, string> = {}): {
+  sftp: SFTPWrapper
+  fs: FakeFs
+} {
+  const fs: FakeFs = {
+    files: new Map(Object.entries(initialFiles)),
+    dirs: new Set(['/']),
+    modes: new Map(),
+    failRenameTo: new Set()
+  }
+  const noEntryError = (path: string): { code: number; message: string } => ({
+    code: 2,
+    message: `ENOENT ${path}`
+  })
+  const fakeStats = (mode: number): { mode: number } => ({ mode })
+
+  const sftp = {
+    readFile: (path: string, _enc: string, cb: (err: unknown, data?: string) => void): void => {
+      const v = fs.files.get(path)
+      if (v === undefined) {
+        cb(noEntryError(path))
+        return
+      }
+      cb(null, v)
+    },
+    writeFile: (
+      path: string,
+      content: string,
+      options: string | { mode?: number },
+      cb: (err: unknown) => void
+    ): void => {
+      fs.files.set(path, content)
+      if (typeof options !== 'string' && options.mode !== undefined) {
+        fs.modes.set(path, options.mode)
+      }
+      cb(null)
+    },
+    rename: (src: string, dst: string, cb: (err: unknown) => void): void => {
+      if (fs.failRenameTo.has(dst)) {
+        cb({ code: 4, message: `rename failed ${dst}` })
+        return
+      }
+      const v = fs.files.get(src)
+      if (v === undefined) {
+        cb(noEntryError(src))
+        return
+      }
+      fs.files.set(dst, v)
+      fs.files.delete(src)
+      const mode = fs.modes.get(src)
+      if (mode !== undefined) {
+        fs.modes.set(dst, mode)
+        fs.modes.delete(src)
+      }
+      cb(null)
+    },
+    unlink: (path: string, cb: (err: unknown) => void): void => {
+      fs.files.delete(path)
+      fs.modes.delete(path)
+      cb(null)
+    },
+    chmod: (path: string, mode: number, cb: (err: unknown) => void): void => {
+      fs.modes.set(path, mode)
+      cb(null)
+    },
+    stat: (path: string, cb: (err: unknown, stats?: { mode: number }) => void): void => {
+      if (!fs.files.has(path)) {
+        cb(noEntryError(path))
+        return
+      }
+      cb(null, fakeStats(fs.modes.get(path) ?? 0o100644))
+    },
+    readdir: (path: string, cb: (err: unknown, list?: { filename: string }[]) => void): void => {
+      if (fs.dirs.has(path)) {
+        cb(null, [])
+        return
+      }
+      cb(noEntryError(path))
+    },
+    mkdir: (path: string, cb: (err: unknown) => void): void => {
+      fs.dirs.add(path)
+      cb(null)
+    }
+  } as unknown as SFTPWrapper
+  return { sftp, fs }
+}
 
 describe('remote hook service installers', () => {
   it('always writes POSIX scripts for SSH remotes even from a Windows host', async () => {
@@ -316,6 +407,7 @@ describe('remote hook service installers', () => {
       'Stop',
       'StopFailure',
       'SessionEnd',
+      'PreToolUse',
       'PostToolUse',
       'PostToolUseFailure',
       'Notification'
@@ -323,12 +415,10 @@ describe('remote hook service installers', () => {
       const definition = grokConfig.hooks[eventName]?.[0]
       const command = definition?.hooks?.[0]?.command
       expect(command).toContain('/home/dev/.orca/agent-hooks/grok-hook.sh')
-      expect(command).toMatch(/^if \[ -n "\$ORCA_PANE_KEY" \] && \[ -f /)
+      expect(command).toMatch(/^if \[ -n "\$ORCA_PANE_KEY" \] && /)
     }
-    // Why asserted absent: PreToolUse is a blocking hook, so registering it puts Orca on the
-    // critical path of every remote tool call for a transition PostToolUse already reports.
-    expect(grokConfig.hooks.PreToolUse).toBeUndefined()
     // Why: Grok tool matchers are real regexes; bare `*` is invalid match-all.
+    expect(grokConfig.hooks.PreToolUse?.[0]?.matcher).toBe('.*')
     expect(grokConfig.hooks.PostToolUse?.[0]?.matcher).toBe('.*')
     expect(grokConfig.hooks.StopFailure?.[0]?.matcher).toBeUndefined()
 
@@ -378,69 +468,6 @@ describe('remote hook service installers', () => {
     const script = fs.files.get('/home/dev/.orca/agent-hooks/grok-hook.sh')!
     expect(script).toContain('${#GROK_HOME}" -le 4096')
     expect(script).toContain('--data-urlencode "grokHome=${grok_home}"')
-  })
-
-  it('removes only Orca entries from a remote Grok config', async () => {
-    const userCommand = 'echo user-authored'
-    const { sftp, fs } = createFakeSftp()
-    const configPath = '/home/dev/.grok/hooks/orca-status.json'
-
-    await expect(
-      installRemoteManagedAgentHooks(sftp, '/home/dev', { agents: ['grok'] })
-    ).resolves.toMatchObject([{ agent: 'grok', state: 'installed' }])
-
-    const installedConfig = JSON.parse(fs.files.get(configPath)!) as {
-      hooks: Record<string, { hooks: { type: string; command: string }[] }[]>
-    }
-    installedConfig.hooks.SessionStart[0].hooks.push({ type: 'command', command: userCommand })
-    fs.files.set(configPath, `${JSON.stringify(installedConfig)}\n`)
-
-    const results = await removeRemoteManagedAgentHooks(sftp, '/home/dev', {
-      agents: ['grok']
-    })
-
-    expect(results).toMatchObject([{ agent: 'grok', state: 'not_installed' }])
-    const config = JSON.parse(fs.files.get('/home/dev/.grok/hooks/orca-status.json')!) as {
-      hooks: Record<string, { hooks: { command: string }[] }[]>
-    }
-    expect(config.hooks.SessionStart[0].hooks).toEqual([{ type: 'command', command: userCommand }])
-  })
-
-  it('preserves a remote edit made after cleanup claims the config', async () => {
-    const { sftp, fs } = createFakeSftp()
-    const configPath = '/home/dev/.grok/hooks/orca-status.json'
-    const userConfig = '{"hooks":{"Notification":[]}}\n'
-
-    await installRemoteManagedAgentHooks(sftp, '/home/dev', { agents: ['grok'] })
-    fs.beforeUnlink = (path) => {
-      if (path.endsWith('.orca-guarded')) {
-        fs.files.set(configPath, userConfig)
-      }
-    }
-
-    await expect(
-      removeRemoteManagedAgentHooks(sftp, '/home/dev', { agents: ['grok'] })
-    ).resolves.toMatchObject([{ agent: 'grok', state: 'not_installed' }])
-    expect(fs.files.get(configPath)).toBe(userConfig)
-  })
-
-  it('treats an OpenSSH exclusive-create failure as a remote edit', async () => {
-    const { sftp, fs } = createFakeSftp()
-    const configPath = '/home/dev/.grok/hooks/orca-status.json'
-    const userConfig = '{"hooks":{"Notification":[]}}\n'
-
-    await installRemoteManagedAgentHooks(sftp, '/home/dev', { agents: ['grok'] })
-    const expectedRaw = fs.files.get(configPath)!
-    fs.beforeExclusiveWrite = (path) => {
-      if (path === configPath) {
-        fs.files.set(configPath, userConfig)
-      }
-    }
-
-    await expect(
-      writeHooksJsonRemoteIfUnchanged(sftp, configPath, expectedRaw, JSON.parse(expectedRaw))
-    ).resolves.toBe(false)
-    expect(fs.files.get(configPath)).toBe(userConfig)
   })
 
   it.each(['relative/grok', '/bad\\grok', `/${'x'.repeat(4096)}`])(

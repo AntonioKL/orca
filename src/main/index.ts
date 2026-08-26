@@ -2397,7 +2397,7 @@ void app.whenReady().then(async () => {
       if (isAgentStatusHooksEnabled(settings)) {
         wslHookRelayManager.resumeStoppedRelays()
       } else {
-        void wslHookRelayManager.disposeAll({ permanent: false })
+        wslHookRelayManager.disposeAll({ permanent: false })
       }
     }
   })
@@ -3439,7 +3439,7 @@ app.on('before-quit', () => {
 
 // Why: will-quit fires twice — first pass preventDefaults and runs teardown; second pass exits.
 let daemonDisconnectDone = false
-// Why 2s: matches the WSL leg's per-distro bound; a config delete is best-effort, not durable state.
+// Why 2s: a config delete is best-effort, not durable state.
 const GROK_HOOK_CLEANUP_DEADLINE_MS = 2_000
 
 app.on('will-quit', (e) => {
@@ -3487,33 +3487,33 @@ app.on('will-quit', (e) => {
   pluginService = null
   setUnreadDockBadgeCount(0)
   agentHookServer.stop()
-  // Why: Grok reads global hooks after Orca closes; remove them without blocking the main thread.
+  // Why Windows only: POSIX hooks short-circuit on ORCA_PANE_KEY, while Windows must register a
+  // bare script path that cannot express the guard and would otherwise keep spawning after quit.
   // Why bounded here: every other teardown member carries its own ceiling, and this one reaches
   // $GROK_HOME -- which can be a stalled network mount, where the fs calls never settle and the
   // shared 20s deadline becomes the only thing ending the quit.
-  const grokHookCleanup = settleWithinMs(
-    removeManagedAgentHooksAsync({ agents: ['grok'] }),
-    GROK_HOOK_CLEANUP_DEADLINE_MS
-  ).then((settled) => {
-    if (settled.outcome === 'timed-out') {
-      console.warn('[agent-hooks] Grok hook cleanup on quit timed out')
-      return
-    }
-    if (settled.outcome === 'failed') {
-      console.warn('[agent-hooks] Grok hook cleanup on quit failed:', settled.error)
-      return
-    }
-    const statuses = settled.value
-    // Why: these report failure as a status rather than a throw, so without this a quit that failed
-    // to remove the hooks looks identical to one that succeeded.
-    for (const status of statuses.filter((entry) => entry.detail)) {
-      console.warn(`[agent-hooks] ${status.agent} hook cleanup on quit: ${status.detail}`)
-    }
-  })
+  const grokHookCleanup =
+    process.platform === 'win32'
+      ? settleWithinMs(
+          removeManagedAgentHooksAsync({ agents: ['grok'] }),
+          GROK_HOOK_CLEANUP_DEADLINE_MS
+        ).then((settled) => {
+          if (settled.outcome === 'timed-out') {
+            console.warn('[agent-hooks] Grok hook cleanup on quit timed out')
+            return
+          }
+          if (settled.outcome === 'failed') {
+            console.warn('[agent-hooks] Grok hook cleanup on quit failed:', settled.error)
+            return
+          }
+          // Why: removers report failures as statuses, so inspect details even after fulfillment.
+          for (const status of settled.value.filter((entry) => entry.detail)) {
+            console.warn(`[agent-hooks] ${status.agent} hook cleanup on quit: ${status.detail}`)
+          }
+        })
+      : Promise.resolve()
   // Why: cancels relay restart/reinstall timers and kills wsl.exe children deterministically, not via stdio-pipe teardown.
-  // Why awaited now: guest Grok hooks are removed over the relay's own mux first, so the kill is bounded (2s per distro)
-  // rather than immediate; the teardown deadline below is what keeps that from holding the quit open.
-  const wslHookCleanup = wslHookRelayManager.disposeAll()
+  wslHookRelayManager.disposeAll()
   const statsFlush = stats?.flushAsync() ?? Promise.resolve()
   // Why: agent-browser daemon processes would otherwise linger after quit, holding ports and stale session state on disk.
   runtime?.getAgentBrowserBridge()?.destroyAllSessions()
@@ -3579,7 +3579,6 @@ app.on('will-quit', (e) => {
     { name: 'plugin-hosts', promise: pluginHostShutdown },
     { name: 'skill-uploads', promise: skillUploadShutdown },
     { name: 'grok-hooks', promise: grokHookCleanup },
-    { name: 'wsl-grok-hooks', promise: wslHookCleanup },
     { name: 'codex-backfill-recovery', promise: codexBackfillRecoveryShutdown },
     { name: 'usage-cache', promise: usageCacheFlush },
     { name: 'stats', promise: statsFlush },

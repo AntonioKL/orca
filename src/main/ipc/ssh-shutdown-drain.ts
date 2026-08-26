@@ -12,11 +12,7 @@ import { teardownActiveSshSession } from './ssh-session-teardown'
 // observes its cancellation at the next checkpoint, and one blocked in the transport handshake can
 // sit there for the whole SSH timeout. A per-phase timeout lets any single phase consume the global
 // quit deadline; a shared absolute deadline cannot.
-// Why 8s and not 6s: the managed-hook cleanup now gates disconnectAll and is charged against this
-// same absolute deadline, so leaving it at 6s silently cut the pre-existing drain/join/final-drain
-// phases to ~4s -- a reduction that only bites when the remote is already unhealthy, which is
-// exactly when those phases need the time.
-export const SSH_SHUTDOWN_BUDGET_MS = 8_000
+export const SSH_SHUTDOWN_BUDGET_MS = 6_000
 
 export type SshShutdownPhase = 'drain' | 'in-flight-join' | 'final-drain'
 export type SshShutdownUnfinished = { targetId: string; phase: SshShutdownPhase }
@@ -66,36 +62,14 @@ async function settleTasksWithinMs(
 }
 
 function sshShutdownTasks(targetIds: readonly string[]): SshShutdownTask[] {
-  const sessions = targetIds.flatMap((targetId) => {
-    const session = activeSessions.get(targetId)
-    return session ? [{ targetId, session }] : []
-  })
-  // Why before disconnectAll: the remote hook cleanup rides the same transport, so tearing the
-  // transport down first would strand Orca's hooks in the remote agent config.
-  const managedHookCleanup = Promise.allSettled(
-    sessions.map(({ session }) => session.beginShutdownManagedHookCleanup())
-  ).then(() => {})
-  const sessionTasks = sessions.map(({ targetId, session }) => {
-    try {
-      session.beginShutdownDetach()
-      return {
-        targetId,
-        promise: teardownActiveSshSession(targetId, (activeSession) =>
-          activeSession.detachAndPersist()
-        )
-      }
-    } catch (error) {
-      return { targetId, promise: Promise.reject(error) }
-    }
-  })
   return [
-    ...sessionTasks,
-    {
-      targetId: '*transports',
-      promise: managedHookCleanup.then(
-        () => connectionManager?.disconnectAll() ?? Promise.resolve()
-      )
-    }
+    ...targetIds
+      .filter((targetId) => activeSessions.has(targetId))
+      .map((targetId) => ({
+        targetId,
+        promise: teardownActiveSshSession(targetId, (session) => session.detachAndPersist())
+      })),
+    { targetId: '*transports', promise: connectionManager?.disconnectAll() ?? Promise.resolve() }
   ]
 }
 
@@ -174,7 +148,6 @@ export function beginSshShutdown(): Promise<SshShutdownResult> {
     // it and skip every later session, the drain assignment, and the store flush that persists all
     // of this. Collect and keep going; the drain reports them.
     try {
-      session.beginShutdownManagedHookCleanup()
       session.beginShutdownDetach()
     } catch (error) {
       detachErrors.push(error)

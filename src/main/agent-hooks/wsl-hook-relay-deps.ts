@@ -7,10 +7,7 @@ import { readFileSync } from 'node:fs'
 import { isAgentStatusHooksEnabled } from './managed-agent-hook-controls'
 import { agentHookServer } from './server'
 import type { ManagedHookDetectionSettings } from './managed-hook-detection-commands'
-import {
-  installRemoteManagedAgentHooks,
-  removeRemoteManagedAgentHooks
-} from './remote-managed-hook-installers'
+import { installRemoteManagedAgentHooks } from './remote-managed-hook-installers'
 import { getOpenCodePluginSource } from '../opencode/hook-service'
 import type { PluginSources } from '../../relay/plugin-overlay'
 import {
@@ -64,7 +61,6 @@ export type WslHookRelayManagerDeps = {
   waitForSentinel: typeof waitForWslRelaySentinel
   ingest: (envelope: Record<string, unknown>, connectionId: string) => void
   installHooks: typeof installRemoteManagedAgentHooks
-  removeHooks: typeof removeRemoteManagedAgentHooks
   managedHookSettings: () => ManagedHookDetectionSettings
   /** Plugin source strings shipped to the guest relay so an Orca update needn't redeploy the relay bundle. */
   pluginSources: () => PluginSources
@@ -106,7 +102,6 @@ export const defaultWslHookRelayDeps: WslHookRelayManagerDeps = {
       connectionId
     ),
   installHooks: installRemoteManagedAgentHooks,
-  removeHooks: removeRemoteManagedAgentHooks,
   managedHookSettings: () => null,
   // Why: only OpenCode is in scope for WSL now; the payload shape stays identical to SSH so Pi/OMP are additive later.
   pluginSources: () => ({ opencodePluginSource: getOpenCodePluginSource() }),

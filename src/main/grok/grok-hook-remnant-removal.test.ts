@@ -1,7 +1,6 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { SFTPWrapper } from 'ssh2'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { homedirMock } = vi.hoisted(() => ({ homedirMock: vi.fn<() => string>() }))
@@ -11,10 +10,7 @@ vi.mock('os', async () => {
 })
 
 import { GrokHookService } from './hook-service'
-import { createRemoteHookTestFilesystem } from '../agent-hooks/remote-hook-test-filesystem'
-
-// Why one file covering all three removal paths: the local path was fixed for this and the remote
-// path shipped with the identical bug, because nothing exercised the rule more than once. Removal
+// Why one file covers both local removal paths: nothing exercised this rule more than once. Removal
 // used to unlink only when the WHOLE config object was empty, but it strips just the `hooks` key --
 // so any other top-level key left a remnant, and the user-cleared install guard then read that
 // remnant as a deliberate opt-out and never reinstalled. Silently. Forever.
@@ -60,22 +56,5 @@ describe('Grok hook removal leaves no remnant that blocks reinstall', () => {
 
     expect(existsSync(configPath)).toBe(false)
     expect(service.install().state).toBe('installed')
-  })
-
-  it('removes it on the remote path', async () => {
-    const remoteConfig = '/home/dev/.grok/hooks/orca-status.json'
-    const service = new GrokHookService()
-    const { sftp, fs } = createRemoteHookTestFilesystem()
-    const first = await service.installRemote(sftp, '/home/dev')
-    expect(first.state).toBe('installed')
-    const config = JSON.parse(fs.files.get(remoteConfig)!) as Record<string, unknown>
-    config.$schema = SCHEMA
-    fs.files.set(remoteConfig, `${JSON.stringify(config, null, 2)}\n`)
-
-    await service.removeRemote(sftp as SFTPWrapper, '/home/dev')
-
-    expect(fs.files.get(remoteConfig)).toBeUndefined()
-    const reinstalled = await service.installRemote(sftp, '/home/dev')
-    expect(reinstalled.state).toBe('installed')
   })
 })

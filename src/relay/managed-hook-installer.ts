@@ -17,7 +17,6 @@ export type ManagedHookRuntime = {
     signal?: AbortSignal
     hostKeyFingerprint?: string
     agents?: readonly AgentHookTarget[]
-    removeAgents?: readonly AgentHookTarget[]
   }) => Promise<ManagedHookInstallSummary>
 }
 
@@ -31,8 +30,8 @@ function readHostKeyFingerprint(params: unknown): string | undefined {
     : undefined
 }
 
-function readAgents(params: unknown, field: 'agents' | 'removeAgents'): AgentHookTarget[] {
-  const raw = (params as Partial<AgentHookInstallManagedHooksParams> | null)?.[field]
+function readAgents(params: unknown): AgentHookTarget[] {
+  const raw = (params as Partial<AgentHookInstallManagedHooksParams> | null)?.agents
   if (raw === undefined) {
     return []
   }
@@ -62,13 +61,11 @@ export function registerManagedHookInstaller(
     async (params, context: RequestContext): Promise<ManagedHookInstallSummary> => {
       context.signal?.throwIfAborted()
       const hostKeyFingerprint = readHostKeyFingerprint(params)
-      const agents = readAgents(params, 'agents')
-      const removeAgents = readAgents(params, 'removeAgents')
+      const agents = readAgents(params)
       return await loadRuntime().installManagedHooks({
         signal: context.signal,
         ...(hostKeyFingerprint ? { hostKeyFingerprint } : {}),
-        agents,
-        ...(removeAgents.length > 0 ? { removeAgents } : {})
+        agents
       })
     }
   )
