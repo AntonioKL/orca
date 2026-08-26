@@ -176,12 +176,7 @@ describe('resolvePinnedTabLabel', () => {
 
     expect(resolvePinnedTabLabel(state, 'wt-1', 'a')).toBe('Custom')
     expect(resolvePinnedTabLabel(state, 'wt-1', 'b')).toBe('Run tests')
-    // STA-2848 demoted the generated first-prompt title below a meaningful live
-    // title in the tab strip, and this helper exists to mirror that priority — so
-    // 'ec' (generated + live) now resolves to the live label.
     expect(resolvePinnedTabLabel(state, 'wt-1', 'ec')).toBe('Plain')
-    // Generated is still the fallback when there is no live label ('ee'), and the
-    // live label is used when there is no generated one ('ed').
     expect(resolvePinnedTabLabel(state, 'wt-1', 'ed')).toBe('Plain')
     expect(resolvePinnedTabLabel(state, 'wt-1', 'ee')).toBe('Gen only')
   })
