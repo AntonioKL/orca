@@ -49,6 +49,10 @@ import {
 import { AgentAvailabilityControl, type AgentCatalogRowProps } from './AgentCatalogRow'
 import { AgentDefaultSetting } from './AgentDefaultSetting'
 import { AgentDetectionCatalog } from './AgentDetectionCatalog'
+import {
+  getNestedWorkerDepthDescription,
+  getNestedWorkerDepthTitle
+} from './nested-worker-depth-copy'
 
 const NESTED_WORKER_DEPTH_CHOICES = [
   {
@@ -282,7 +286,9 @@ export function AgentsPane({
         wslCapabilitiesLoading={wslCapabilitiesLoading}
       />
       <AgentStatusHooksSetting settings={settings} updateSettings={updateSettings} />
-      <NestedWorkerDepthSetting settings={settings} updateSettings={updateSettings} />
+      {!isPairedWebClientWindow() ? (
+        <NestedWorkerDepthSetting settings={settings} updateSettings={updateSettings} />
+      ) : null}
       <AgentGeneratedTabTitlesSetting settings={settings} updateSettings={updateSettings} />
       {!isPairedWebClientWindow() ? (
         <AgentAwakeSetting settings={settings} updateSettings={updateSettings} />
@@ -329,14 +335,8 @@ export function NestedWorkerDepthSetting({ settings, updateSettings }: AgentsPan
   return (
     <section className="space-y-3">
       <SettingsRow
-        label={translate(
-          'auto.components.settings.AgentsPane.nestedWorkerDepthTitle',
-          'Nested worker depth'
-        )}
-        description={translate(
-          'auto.components.settings.AgentsPane.nestedWorkerDepthDescription',
-          'How many generations of dispatched workers may spawn their own workers. 1 keeps the agent tree flat: a coordinator dispatches workers, and those workers do not dispatch.'
-        )}
+        label={getNestedWorkerDepthTitle()}
+        description={getNestedWorkerDepthDescription()}
         control={
           <Select
             value={String(depth)}

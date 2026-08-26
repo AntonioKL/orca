@@ -157,6 +157,8 @@ describe('settings navigation metadata', () => {
     expect(shortcuts?.searchEntries.map((entry) => entry.title)).not.toContain(
       'New mobile emulator tab'
     )
+    const agents = webSections.find((section) => section.id === 'agents')
+    expect(agents?.searchEntries.map((entry) => entry.title)).not.toContain('Nested worker depth')
   })
 
   it('keeps the Browser shortcut searchable for a capable web runtime', () => {

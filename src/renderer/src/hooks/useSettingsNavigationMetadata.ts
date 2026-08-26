@@ -175,7 +175,8 @@ export function buildSettingsNavigationMetadata({
       icon: Bot,
       searchEntries: getAgentsPaneSearchEntries({
         includeAgentAwake: !isWebClient,
-        includeAgentRuntime: isLocalWindowsHost
+        includeAgentRuntime: isLocalWindowsHost,
+        includeNestedWorkerDepth: !isWebClient
       }),
       group: 'capabilities'
     },

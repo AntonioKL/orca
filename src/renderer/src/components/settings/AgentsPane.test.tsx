@@ -263,6 +263,21 @@ describe('AgentsPane', () => {
     }
   })
 
+  it('hides the host-only nested worker depth control in paired web clients', () => {
+    ;(globalThis as { __ORCA_WEB_CLIENT__?: boolean }).__ORCA_WEB_CLIENT__ = true
+    try {
+      expect(renderPane(getDefaultSettings('/tmp'))).not.toContain('Nested worker depth')
+      expect(
+        matchesSettingsSearch(
+          'nested worker',
+          getAgentsPaneSearchEntries({ includeNestedWorkerDepth: false })
+        )
+      ).toBe(false)
+    } finally {
+      delete (globalThis as { __ORCA_WEB_CLIENT__?: boolean }).__ORCA_WEB_CLIENT__
+    }
+  })
+
   it('renders the agent runtime control on Windows-class hosts', () => {
     const markup = renderPane(
       {
@@ -396,6 +411,13 @@ describe('AgentsPane', () => {
     expect(matchesSettingsSearch('hooks', getAgentsPaneSearchEntries())).toBe(true)
     expect(matchesSettingsSearch('waiting', getAgentsPaneSearchEntries())).toBe(true)
     expect(matchesSettingsSearch('codex', getAgentsPaneSearchEntries())).toBe(true)
+  })
+
+  it('includes nested worker depth search metadata', () => {
+    expect(matchesSettingsSearch('nested worker', getAgentsPaneSearchEntries())).toBe(true)
+    expect(matchesSettingsSearch('depth', getAgentsPaneSearchEntries())).toBe(true)
+    expect(matchesSettingsSearch('dispatch', getAgentsPaneSearchEntries())).toBe(true)
+    expect(matchesSettingsSearch('child agents', getAgentsPaneSearchEntries())).toBe(true)
   })
 
   it('includes generated title search metadata', () => {

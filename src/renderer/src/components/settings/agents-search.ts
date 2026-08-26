@@ -15,6 +15,11 @@ import {
   getAgentStatusHooksTitle
 } from './agent-status-hooks-copy'
 import { getAgentCacheTimerSearchEntries } from './agent-cache-timer-search'
+import {
+  getNestedWorkerDepthDescription,
+  getNestedWorkerDepthSearchKeywords,
+  getNestedWorkerDepthTitle
+} from './nested-worker-depth-copy'
 import { translate } from '@/i18n/i18n'
 import { searchKeywords, translateSearchKeyword, uniqueKeywords } from './settings-search-keywords'
 import { createLocalizedCatalog } from '@/i18n/localized-catalog'
@@ -62,10 +67,12 @@ function expandAgentSearchText(value: string): string[] {
 type AgentsPaneSearchOptions = {
   includeAgentAwake?: boolean
   includeAgentRuntime?: boolean
+  includeNestedWorkerDepth?: boolean
 }
 
 const AGENT_AWAKE_SEARCH_ENTRY_ID = 'agent-awake'
 const AGENT_RUNTIME_SEARCH_ENTRY_ID = 'agent-runtime'
+const NESTED_WORKER_DEPTH_SEARCH_ENTRY_ID = 'nested-worker-depth'
 
 const getAllAgentsPaneSearchEntries = createLocalizedCatalog(() => [
   {
@@ -109,6 +116,12 @@ const getAllAgentsPaneSearchEntries = createLocalizedCatalog(() => [
     keywords: getAgentStatusHooksSearchKeywords()
   },
   {
+    title: getNestedWorkerDepthTitle(),
+    id: NESTED_WORKER_DEPTH_SEARCH_ENTRY_ID,
+    description: getNestedWorkerDepthDescription(),
+    keywords: getNestedWorkerDepthSearchKeywords()
+  },
+  {
     title: getAgentGeneratedTabTitlesTitle(),
     description: getAgentGeneratedTabTitlesDescription(),
     keywords: getAgentGeneratedTabTitlesSearchKeywords()
@@ -145,12 +158,16 @@ const getAllAgentsPaneSearchEntries = createLocalizedCatalog(() => [
 
 export function getAgentsPaneSearchEntries({
   includeAgentAwake = true,
-  includeAgentRuntime = true
+  includeAgentRuntime = true,
+  includeNestedWorkerDepth = true
 }: AgentsPaneSearchOptions = {}) {
   const entries = getAllAgentsPaneSearchEntries()
   return entries.filter(
     (entry) =>
       (!('id' in entry) || entry.id !== AGENT_RUNTIME_SEARCH_ENTRY_ID || includeAgentRuntime) &&
-      (!('id' in entry) || entry.id !== AGENT_AWAKE_SEARCH_ENTRY_ID || includeAgentAwake)
+      (!('id' in entry) || entry.id !== AGENT_AWAKE_SEARCH_ENTRY_ID || includeAgentAwake) &&
+      (!('id' in entry) ||
+        entry.id !== NESTED_WORKER_DEPTH_SEARCH_ENTRY_ID ||
+        includeNestedWorkerDepth)
   )
 }
