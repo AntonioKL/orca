@@ -16,12 +16,11 @@ diff --git a/src/process.cc b/src/process.cc
 index 3eea92077c4d1d433119361d5c432881859131e9..1998f4addd4d7e9aba946ea6f7f7a4a5d13291bc 100644
 --- a/src/process.cc
 +++ b/src/process.cc
-@@ -37,7 +37,7 @@ uint32_t GetRawProcessList(std::vector<ProcessInfo>& process_info,
+@@ -37,6 +37,6 @@ uint32_t GetRawProcessList(std::vector<ProcessInfo>& process_info,
          process_info.push_back(std::move(pinfo));
          process_count++;
        }
 -    } while (process_count < 1024 && Process32Next(snapshot_handle, &process_entry));
 +    } while (Process32Next(snapshot_handle, &process_entry));
    }
- 
    CloseHandle(snapshot_handle);

@@ -1,12 +1,9 @@
 import type { GlobalSettings } from '../../../../shared/global-settings-types'
 import { translate } from '@/i18n/i18n'
 import { Label } from '../ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { SearchableSetting } from './SearchableSetting'
 import { SettingsSwitch } from './SettingsFormControls'
 import { getExperimentalSearchEntry } from './experimental-search'
-
-type NativeChatDefaultView = 'terminal-chat' | 'native-chat'
 
 type NativeChatExperimentalSettingProps = {
   settings: GlobalSettings
@@ -18,8 +15,7 @@ export function NativeChatExperimentalSetting({
   updateSettings
 }: NativeChatExperimentalSettingProps): React.JSX.Element {
   const nativeChatEnabled = settings.experimentalNativeChat === true
-  const openByDefault = settings.openAgentTabsInChatByDefault === true
-  const defaultView: NativeChatDefaultView = openByDefault ? 'native-chat' : 'terminal-chat'
+  const structuredNativeChatEnabled = settings.experimentalStructuredNativeChat === true
 
   return (
     <SearchableSetting
@@ -40,7 +36,7 @@ export function NativeChatExperimentalSetting({
           <p className="text-xs text-muted-foreground">
             {translate(
               'auto.components.settings.ExperimentalPane.nativeChat.copy',
-              'Adds a Chat UI view you can switch to from supported agent terminal panes. Experimental while we tune transcript fidelity, streaming, and terminal parity.'
+              'Enables the experimental Chat UI for newly created supported local sessions. Existing terminal sessions keep the terminal chat path while we tune transcript fidelity, streaming, and parity.'
             )}
           </p>
         </div>
@@ -59,54 +55,39 @@ export function NativeChatExperimentalSetting({
       </div>
       {nativeChatEnabled ? (
         <div className="ml-4 border-l border-border pl-4">
-          <div className="flex items-start justify-between gap-4">
+          <div className="mb-4 flex items-start justify-between gap-4">
             <div className="min-w-0 shrink space-y-0.5">
               <Label>
                 {translate(
-                  'auto.components.settings.ExperimentalPane.nativeChat.defaultTitle',
-                  'Default view'
+                  'auto.components.settings.ExperimentalPane.nativeChat.structuredTitle',
+                  'Use updated structured native chat'
                 )}
               </Label>
               <p className="text-xs text-muted-foreground">
                 {translate(
-                  'auto.components.settings.ExperimentalPane.nativeChat.defaultCopy',
-                  'Choose how new supported agent terminal tabs open.'
+                  'auto.components.settings.ExperimentalPane.nativeChat.structuredCopy',
+                  'Opt in to the host-owned structured Codex runtime. Off keeps the existing terminal-backed chat path.'
+                )}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {translate(
+                  'auto.components.settings.ExperimentalPane.nativeChat.structuredScope',
+                  'Local sessions only. Remote and SSH sessions continue to use terminal chat.'
                 )}
               </p>
             </div>
-            <Select
-              value={defaultView}
-              onValueChange={(value: NativeChatDefaultView) => {
+            <SettingsSwitch
+              checked={structuredNativeChatEnabled}
+              ariaLabel={translate(
+                'auto.components.settings.ExperimentalPane.nativeChat.structuredToggleLabel',
+                'Toggle updated structured native chat'
+              )}
+              onChange={() =>
                 updateSettings({
-                  openAgentTabsInChatByDefault: value === 'native-chat'
+                  experimentalStructuredNativeChat: !structuredNativeChatEnabled
                 })
-              }}
-            >
-              <SelectTrigger
-                aria-label={translate(
-                  'auto.components.settings.ExperimentalPane.nativeChat.defaultViewLabel',
-                  'Default Chat UI view'
-                )}
-                className="w-36"
-                size="sm"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent position="popper" side="bottom" sideOffset={4} avoidCollisions={false}>
-                <SelectItem value="terminal-chat">
-                  {translate(
-                    'auto.components.settings.ExperimentalPane.nativeChat.defaultViewTerminal',
-                    'Terminal chat'
-                  )}
-                </SelectItem>
-                <SelectItem value="native-chat">
-                  {translate(
-                    'auto.components.settings.ExperimentalPane.nativeChat.defaultViewNative',
-                    'Chat UI'
-                  )}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+              }
+            />
           </div>
         </div>
       ) : null}

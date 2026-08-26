@@ -23,6 +23,13 @@ import type { TabGroup } from '../../../../shared/tab-types'
 import type { ClientHostedBrowserRow } from '../../../../shared/client-hosted-browser-rows'
 import { useClientHostedBrowserRows } from '@/lib/pane-manager/client-hosted-browser-row-state'
 import { resolveClientHostedBrowserRowStripGroupId } from '../tab-bar/client-hosted-browser-row-strip-placement'
+import NativeChatView from '../native-chat/NativeChatView'
+import {
+  getExecutionHostIdForWorktree,
+  getRuntimeEnvironmentIdForWorktree
+} from '@/lib/worktree-runtime-owner'
+import { getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
+import { isAgentSessionHandleProvider } from '../../../../shared/agent-session-provider-handle'
 
 const EditorPanel = lazy(() => import('../editor/EditorPanel'))
 const EMPTY_GROUPS: readonly TabGroup[] = []
@@ -63,9 +70,26 @@ export default function TabGroupPanel({
 }): React.JSX.Element {
   const rightSidebarOpen = useAppStore((state) => state.rightSidebarOpen)
   const sidebarOpen = useAppStore((state) => state.sidebarOpen)
-
+  const structuredRuntimeEnvironmentId = useAppStore((state) =>
+    getRuntimeEnvironmentIdForWorktree(state, worktreeId)
+  )
+  const structuredFileLinksEnabled = useAppStore(
+    (state) => getExecutionHostIdForWorktree(state, worktreeId) === 'local'
+  )
+  const structuredRuntimeTarget = useMemo(
+    () => getActiveRuntimeTarget({ activeRuntimeEnvironmentId: structuredRuntimeEnvironmentId }),
+    [structuredRuntimeEnvironmentId]
+  )
   const model = useTabGroupWorkspaceModel({ groupId, worktreeId })
-  const { activeTab, browserItems, commands, editorItems, tabBarOrder, terminalTabs } = model
+  const {
+    activeTab,
+    agentSessionItems,
+    browserItems,
+    commands,
+    editorItems,
+    tabBarOrder,
+    terminalTabs
+  } = model
   // Why: one strip owns the worktree's client-hosted rows, or every split repeats them.
   const ownsClientHostedRows = useAppStore(
     (state) =>
@@ -97,14 +121,20 @@ export default function TabGroupPanel({
   const tabBar = (
     <TabBar
       tabs={terminalTabs}
-      activeTabId={activeTab?.contentType === 'terminal' ? activeTab.entityId : null}
+      activeTabId={
+        activeTab?.contentType === 'terminal'
+          ? activeTab.entityId
+          : activeTab?.contentType === 'agent-session'
+            ? activeTab.id
+            : null
+      }
       groupId={groupId}
       worktreeId={worktreeId}
       expandedPaneByTabId={model.expandedPaneByTabId}
       onActivate={commands.activateTerminal}
       onClose={(terminalId) => {
         const item = resolveGroupTabFromVisibleId(model.groupTabs, terminalId)
-        if (item?.contentType === 'terminal') {
+        if (item?.contentType === 'terminal' || item?.contentType === 'agent-session') {
           commands.closeItem(item.id)
           return
         }
@@ -143,8 +173,10 @@ export default function TabGroupPanel({
       browserTabs={browserItems}
       clientHostedBrowserRows={clientHostedRows}
       groupActiveTabId={activeTab?.id ?? null}
+      agentSessionTabs={agentSessionItems}
       activeFileId={
         activeTab?.contentType === 'terminal' ||
+        activeTab?.contentType === 'agent-session' ||
         activeTab?.contentType === 'browser' ||
         activeTab?.contentType === 'simulator'
           ? null
@@ -155,15 +187,18 @@ export default function TabGroupPanel({
       activeTabType={
         activeTab?.contentType === 'terminal'
           ? 'terminal'
-          : activeTab?.contentType === 'browser'
-            ? 'browser'
-            : activeTab?.contentType === 'simulator'
-              ? 'simulator'
-              : 'editor'
+          : activeTab?.contentType === 'agent-session'
+            ? 'agent-session'
+            : activeTab?.contentType === 'browser'
+              ? 'browser'
+              : activeTab?.contentType === 'simulator'
+                ? 'simulator'
+                : 'editor'
       }
       onActivateFile={commands.activateEditor}
       onCloseFile={commands.closeItem}
       onActivateBrowserTab={commands.activateBrowser}
+      onActivateAgentSession={commands.activateAgentSession}
       onCloseBrowserTab={(browserTabId) => {
         const item = model.groupTabs.find(
           (candidate) => candidate.entityId === browserTabId && candidate.contentType === 'browser'
@@ -331,6 +366,7 @@ export default function TabGroupPanel({
         ) : null}
         {activeTab &&
           activeTab.contentType !== 'terminal' &&
+          activeTab.contentType !== 'agent-session' &&
           activeTab.contentType !== 'browser' &&
           activeTab.contentType !== 'simulator' && (
             <div className="absolute inset-0 flex min-h-0 min-w-0">
@@ -354,6 +390,22 @@ export default function TabGroupPanel({
               </Suspense>
             </div>
           )}
+
+        {activeTab?.contentType === 'agent-session' &&
+        isAgentSessionHandleProvider(activeTab.agentSessionAgent) ? (
+          <div className="native-chat-pane-shell absolute inset-0 z-10 flex min-h-0 min-w-0">
+            <NativeChatView
+              key={activeTab.entityId}
+              mode="structured"
+              tabId={activeTab.id}
+              sessionId={activeTab.entityId}
+              agent={activeTab.agentSessionAgent}
+              isVisible={isVisible}
+              target={structuredRuntimeTarget}
+              allowFileUriLinks={structuredFileLinksEnabled}
+            />
+          </div>
+        ) : null}
 
         {/* Why: terminal/browser/simulator panes render at the worktree level (overlay layers); per-group rendering remounted xterm/webview/simulator on split moves. */}
       </div>

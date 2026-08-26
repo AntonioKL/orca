@@ -106,6 +106,7 @@ export type {
   RuntimeDegradation,
   RuntimeDesktopWindowStatus,
   RuntimeGraphStatus,
+  RuntimeMobileSessionAgentTab,
   RuntimeMobileSessionBrowserTab,
   RuntimeMobileSessionClientTab,
   RuntimeMobileSessionCreateTerminalResult,

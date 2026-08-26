@@ -312,6 +312,7 @@ import { BrowserClientPageCommandError } from './browser/browser-client-page-com
 import { EmulatorBridge } from './emulator/emulator-bridge'
 import { browserCertificateTrustController, browserManager } from './browser/browser-manager'
 import { RpcDispatcher } from './runtime/rpc/dispatcher'
+import { ALL_RPC_METHODS } from './runtime/rpc/methods'
 import { OffscreenBrowserBackend } from './browser/offscreen-browser-backend'
 import { initializeBrowserSessionsForApp } from './browser/browser-session-startup'
 import { initializeBrowserClientHostId } from './browser/browser-client-host-id'
@@ -324,6 +325,7 @@ import { AgentAwakeService } from './agent-awake-service'
 import { normalizeComputerAwakeMode } from '../shared/computer-awake-mode'
 import { registerSystemResumeBroadcast } from './system-resume-broadcast'
 import { settleTeardownWithinDeadline } from './quit-teardown-deadline'
+import { stopStructuredAgentSessionRuntime } from './runtime/structured-agent-session-runtime'
 import { quitTeardownStartGate } from './quit-teardown-start-gate'
 import { beginSshShutdown } from './ipc/ssh-shutdown-drain'
 import { PluginService } from './plugins/plugin-service'
@@ -974,6 +976,11 @@ if (hasSingleInstanceLock) {
 
 ipcMain.handle('app:awaitFirstWindowStartupServices', async () => {
   await Promise.all([firstWindowStartupServicesReady, managedWslCliStartupBarrierReady])
+})
+
+ipcMain.handle('app:prepareTerminalStartupRestoration', async () => {
+  await Promise.all([firstWindowStartupServicesReady, managedWslCliStartupBarrierReady])
+  await runtime?.prepareStructuredAgentSessionStartupRestoration()
 })
 
 ipcMain.handle('app:recoverLegacyWorkerTerminalsForRendererStartup', () =>
@@ -2766,6 +2773,11 @@ void app.whenReady().then(async () => {
         runtimeHome: codexRuntimeHome,
         systemCodexHomePath: resolveHostCodexSessionSourceHome(store!.getSettings())
       }),
+    prepareCodexStructuredLaunch: ({ workspacePath, launchEnv }) =>
+      prepareCodexRuntimeHomeForLaunch(undefined, launchEnv, {
+        launchAgent: 'codex',
+        workspacePath
+      }),
     buildAgentHookPtyEnv: () =>
       isAgentStatusHooksEnabled(store?.getSettings()) ? agentHookServer.buildPtyEnv() : {},
     orchestrationEnvironmentTransport,
@@ -3029,7 +3041,10 @@ void app.whenReady().then(async () => {
     onTabsChanged: (worktreeId) => runtimeService.notifyMobileSessionTabsChanged(worktreeId)
   })
   runtimeService.setAgentBrowserBridge(agentBrowserBridge)
-  const browserClientAutomationDispatcher = new RpcDispatcher({ runtime: runtimeService })
+  const browserClientAutomationDispatcher = new RpcDispatcher({
+    runtime: runtimeService,
+    methods: ALL_RPC_METHODS
+  })
   configureBrowserClientPageAutomationRuntime({
     browserManager,
     getAgentBrowserBridge: () => agentBrowserBridge,
@@ -3479,6 +3494,7 @@ app.on('will-quit', (e) => {
   pluginMarketplaceInstaller = null
   const pluginHostShutdown = pluginService?.dispose() ?? Promise.resolve()
   const codexBackfillRecoveryShutdown = stopCodexStateDbBackfillRecoveries()
+  const structuredAgentSessionShutdown = stopStructuredAgentSessionRuntime()
   pluginService = null
   setUnreadDockBadgeCount(0)
   agentHookServer.stop()
@@ -3549,6 +3565,7 @@ app.on('will-quit', (e) => {
     { name: 'plugin-hosts', promise: pluginHostShutdown },
     { name: 'skill-uploads', promise: skillUploadShutdown },
     { name: 'codex-backfill-recovery', promise: codexBackfillRecoveryShutdown },
+    { name: 'structured-agent-session', promise: structuredAgentSessionShutdown },
     { name: 'usage-cache', promise: usageCacheFlush },
     { name: 'stats', promise: statsFlush },
     { name: 'state', promise: storeFlush }
