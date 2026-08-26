@@ -53,6 +53,7 @@ import {
   createRemoteRuntimePtyTextBatcher,
   createRemoteRuntimeViewportBatcher
 } from './remote-runtime-pty-batching'
+import { createTerminalInputOrderingLane } from './terminal-input-ordering-lane'
 import {
   REMOTE_RUNTIME_AUTO_RECOVERY_TIMEOUT_MS,
   RemoteRuntimePtyRecoveryState
@@ -83,6 +84,7 @@ import {
 import { getRuntimeEnvironmentRevision } from '@/runtime/runtime-environment-revision'
 
 const REMOTE_TERMINAL_INPUT_FLUSH_MS = 8
+const REMOTE_QUICK_COMMAND_SEND_TIMEOUT_MS = 30_000
 const REMOTE_TERMINAL_VIEWPORT_FLUSH_MS = 33
 const REMOTE_RUNTIME_MAX_PENDING_QUERY_REPLIES = 64
 const HOST_SESSION_ATTACH_POLL_MS = 150
@@ -1239,9 +1241,6 @@ export function createRemoteRuntimePtyTransport(
     if (!connected || !targetHandle || recoveryBlocksIo()) {
       return false
     }
-    if (!data) {
-      return true
-    }
     await inputBatcher.drain()
     if (!connected || handle !== targetHandle || recoveryBlocksIo()) {
       return false
@@ -1256,6 +1255,9 @@ export function createRemoteRuntimePtyTransport(
     }
     // Why: normal sendInput may be awaiting size validation; drain it before acknowledged writes so terminal bytes stay ordered.
     const text = `${inputBatcher.takePending()}${data}`
+    if (!text) {
+      return true
+    }
     try {
       const tooLarge = isTerminalInputTooLargeWithDeferredMeasurement(text)
       if (typeof tooLarge === 'boolean' ? tooLarge : await tooLarge) {
@@ -1288,6 +1290,46 @@ export function createRemoteRuntimePtyTransport(
       }
       return false
     }
+  }
+
+  async function sendQuickCommandToRuntime(data: string): Promise<boolean> {
+    const targetHandle = handle
+    const targetLifecycleEpoch = lifecycleEpoch
+    return inputOrderingLane.enqueueQuickCommand(async () => {
+      if (!connected || !targetHandle || recoveryBlocksIo()) {
+        return false
+      }
+      if (!(await sendInputAcceptedToRuntime(''))) {
+        return false
+      }
+      if (
+        !connected ||
+        handle !== targetHandle ||
+        lifecycleEpoch !== targetLifecycleEpoch ||
+        recoveryBlocksIo()
+      ) {
+        return false
+      }
+      try {
+        const result = await callRuntime<{ send: RuntimeTerminalSend }>(
+          'terminal.send',
+          {
+            terminal: targetHandle,
+            text: data,
+            quickCommand: true,
+            client: { id: clientId, type: 'desktop' },
+            ...(desiredViewport ? { viewport: desiredViewport, claimViewport: true as const } : {})
+          },
+          REMOTE_QUICK_COMMAND_SEND_TIMEOUT_MS
+        )
+        return result.send.accepted === true
+      } catch (error) {
+        if (lifecycleEpoch === targetLifecycleEpoch && handle === targetHandle) {
+          handleRemoteTerminalError(error)
+        }
+        return false
+      }
+    })
   }
 
   function notifyWriteUnavailable(): void {
@@ -1344,6 +1386,24 @@ export function createRemoteRuntimePtyTransport(
     REMOTE_TERMINAL_INPUT_FLUSH_MS,
     sendUnacknowledgedInput
   )
+  const inputOrderingLane = createTerminalInputOrderingLane()
+
+  function sendInputAcceptedInOrder(data: string): Promise<boolean> {
+    const targetHandle = handle
+    const targetLifecycleEpoch = lifecycleEpoch
+    return inputOrderingLane.enqueueQuickCommand(async () => {
+      if (
+        !connected ||
+        !targetHandle ||
+        handle !== targetHandle ||
+        lifecycleEpoch !== targetLifecycleEpoch ||
+        recoveryBlocksIo()
+      ) {
+        return false
+      }
+      return sendInputAcceptedToRuntime(data)
+    })
+  }
 
   function sendViewportUpdate(cols: number, rows: number, claim = false): void {
     const targetHandle = handle
@@ -2372,14 +2432,24 @@ export function createRemoteRuntimePtyTransport(
     },
 
     sendInput(data: string): boolean {
-      if (!connected || !handle || recoveryBlocksIo()) {
-        return false
-      }
-      if (!data) {
-        return true
-      }
-      // Why: literal LF bytes from paste/programmatic input must survive; callers use \r or the enter flag for semantic Enter.
-      return inputBatcher.push(data)
+      const targetHandle = handle
+      const targetLifecycleEpoch = lifecycleEpoch
+      return inputOrderingLane.enqueueInput(() => {
+        if (
+          !connected ||
+          !targetHandle ||
+          handle !== targetHandle ||
+          lifecycleEpoch !== targetLifecycleEpoch ||
+          recoveryBlocksIo()
+        ) {
+          return false
+        }
+        if (!data) {
+          return true
+        }
+        // Why: literal LF bytes from paste/programmatic input must survive; callers use \r or the enter flag for semantic Enter.
+        return inputBatcher.push(data)
+      }, data.length)
     },
 
     // Why: query replies (CPR/DSR/DA/OSC) are read in raw mode with a short timeout; the 8ms debounce would miss it and echo the reply onto the prompt (#7329).
@@ -2418,7 +2488,9 @@ export function createRemoteRuntimePtyTransport(
       return sendUnacknowledgedInput(data, true)
     },
 
-    sendInputAccepted: sendInputAcceptedToRuntime,
+    sendInputAccepted: sendInputAcceptedInOrder,
+
+    sendQuickCommand: sendQuickCommandToRuntime,
 
     claimViewport(cols: number, rows: number): boolean {
       if (!connected || !handle) {

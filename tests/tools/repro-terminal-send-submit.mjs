@@ -297,6 +297,7 @@ async function fakeAgentMain() {
   }
 
   let input = ''
+  const inputChunksHex = []
   let countedCarriages = 0
   let prematureEnters = 0
   let receivedEnters = 0
@@ -318,7 +319,10 @@ async function fakeAgentMain() {
       pasteFramingRequired,
       hasBracketedPasteFrame,
       markerReceived: input.includes(marker),
-      receivedBytes: Buffer.byteLength(input, 'utf8')
+      receivedBytes: Buffer.byteLength(input, 'utf8'),
+      inputHex: Buffer.from(input, 'utf8').toString('hex'),
+      inputChunksHex,
+      composerReady
     }
     await writeFile(reportPath, JSON.stringify(report, null, 2))
     return report
@@ -339,6 +343,7 @@ async function fakeAgentMain() {
     setTimeout(() => void writeReport(false), 250)
   }
   process.stdin.on('data', (chunk) => {
+    inputChunksHex.push(Buffer.from(chunk).toString('hex'))
     input += chunk.toString('utf8')
     if (!renderScheduled && input.includes(marker)) {
       renderScheduled = true
@@ -371,6 +376,9 @@ async function fakeAgentMain() {
       }
       prematureEnters += 1
       nextCarriage = input.indexOf('\r', countedCarriages)
+    }
+    if (prematureEnters > 0) {
+      void writeReport(false)
     }
   })
 }

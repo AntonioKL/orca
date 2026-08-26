@@ -5,6 +5,8 @@ import { createIpcPtySessionHandlers } from './ipc-pty-session-handlers'
 import { createPtyInputWriteQueue } from './pty-input-write-queue'
 import { createPtyOutputProcessor } from './pty-output-processor'
 import type { IpcPtyTransportOptions, PtyTransport } from './pty-transport-types'
+import { sendRuntimeTerminalQuickCommand } from '../../runtime/runtime-terminal-quick-command'
+import { createTerminalInputOrderingLane } from './terminal-input-ordering-lane'
 
 export {
   ensurePtyDispatcher,
@@ -34,6 +36,9 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
   const {
     connectionId,
     cwd,
+    worktreeId,
+    tabId,
+    leafId,
     shellOverride,
     onPtyExit,
     onTitleChange,
@@ -58,6 +63,7 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
       }
     }
   })
+  const inputOrderingLane = createTerminalInputOrderingLane()
   const outputProcessor = createPtyOutputProcessor({
     onTitleChange,
     onBell,
@@ -144,26 +150,53 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
     },
 
     sendInput(data) {
-      return connected && ptyId ? inputWriteQueue.enqueue(ptyId, data) : false
+      const id = ptyId
+      return inputOrderingLane.enqueueInput(
+        () =>
+          connected && id !== null && ptyId === id ? inputWriteQueue.enqueue(id, data) : false,
+        data.length
+      )
     },
 
     sendInputImmediate(data) {
       return connected && ptyId ? inputWriteQueue.enqueueQueryReply(ptyId, data) : false
     },
 
+    async sendQuickCommand(data) {
+      const targetId = ptyId
+      return inputOrderingLane.enqueueQuickCommand(async () => {
+        if (!connected || !targetId || !worktreeId || !tabId || !leafId) {
+          return false
+        }
+        await inputWriteQueue.waitForDrain()
+        if (!connected || ptyId !== targetId) {
+          return false
+        }
+        return await sendRuntimeTerminalQuickCommand({
+          worktreeId,
+          tabId,
+          leafId,
+          expectedPtyId: targetId,
+          text: data
+        })
+      })
+    },
+
     ...(connectionId
       ? {}
       : {
           async sendInputAccepted(data: string): Promise<boolean> {
-            if (!connected || !ptyId) {
-              return false
-            }
             const id = ptyId
-            await inputWriteQueue.waitForDrain()
-            if (!connected || ptyId !== id) {
-              return false
-            }
-            return writeAcceptedIpcPtyInput(id, data, () => connected && ptyId === id)
+            return inputOrderingLane.enqueueQuickCommand(async () => {
+              if (!connected || !id || ptyId !== id) {
+                return false
+              }
+              await inputWriteQueue.waitForDrain()
+              if (!connected || ptyId !== id) {
+                return false
+              }
+              return writeAcceptedIpcPtyInput(id, data, () => connected && ptyId === id)
+            })
           }
         }),
 
