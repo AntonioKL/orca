@@ -15,7 +15,8 @@ import {
   AGENT_HOOK_SPOOL_MAX_FILES,
   drainAgentHookSpool,
   launchTokenHash,
-  readSpoolRecords
+  readSpoolRecords,
+  type SpoolRecord
 } from './spool'
 import { AgentHookServer, _internals } from './server'
 import { buildBody } from './server.test-fixtures'
