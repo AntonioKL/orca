@@ -71,6 +71,7 @@ function renderPanel(
             searchActive: query !== ''
           }}
           hostCatalog={HOST_CATALOG}
+          canCreateAutomation={true}
           externalManagersUncheckedNotice={uncheckedNotice}
           onSelectHost={() => undefined}
           onRecoverHost={() => undefined}

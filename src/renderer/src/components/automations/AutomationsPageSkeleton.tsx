@@ -125,21 +125,23 @@ export function AutomationsPageSkeleton(): React.JSX.Element {
         className={cn('min-h-0 flex-1 overflow-hidden', LIST_TABLE_CONTAINER_CLASS)}
         data-contextual-fix-target="automations-list"
       >
-        <div className={cn(AUTOMATIONS_TABLE_GRID_CLASS, LIST_TABLE_HEADER_CLASS)}>
-          <SkeletonBar className="h-2.5 w-12" />
-          <SkeletonBar className="h-2.5 w-14" />
-          <SkeletonBar className="h-2.5 w-14" />
-          <SkeletonBar className="h-2.5 w-12" />
-          <SkeletonBar className="h-2.5 w-16" />
-          <SkeletonBar className="h-2.5 w-16" />
-          <SkeletonBar className="h-2.5 w-12" />
-          <SkeletonBar className="mx-auto h-2.5 w-10" />
-          <span />
-        </div>
-        <div className="divide-y divide-border/50">
-          {TABLE_ROW_SKELETONS.map(({ id, ...row }) => (
-            <TableRowSkeleton key={id} {...row} />
-          ))}
+        <div className="min-w-full w-fit">
+          <div className={cn(AUTOMATIONS_TABLE_GRID_CLASS, LIST_TABLE_HEADER_CLASS)}>
+            <SkeletonBar className="h-2.5 w-12" />
+            <SkeletonBar className="h-2.5 w-14" />
+            <SkeletonBar className="h-2.5 w-14" />
+            <SkeletonBar className="h-2.5 w-12" />
+            <SkeletonBar className="h-2.5 w-16" />
+            <SkeletonBar className="h-2.5 w-16" />
+            <SkeletonBar className="h-2.5 w-12" />
+            <SkeletonBar className="mx-auto h-2.5 w-10" />
+            <span />
+          </div>
+          <div className="divide-y divide-border/50">
+            {TABLE_ROW_SKELETONS.map(({ id, ...row }) => (
+              <TableRowSkeleton key={id} {...row} />
+            ))}
+          </div>
         </div>
       </div>
     </div>
