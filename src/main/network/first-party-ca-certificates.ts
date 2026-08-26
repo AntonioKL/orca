@@ -1,19 +1,20 @@
 import { createHash, X509Certificate } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
+import { join } from 'node:path'
 import { runProcess, type ProcessResult } from '../../shared/child-process/run-process'
 import { mapWithConcurrency } from '../../shared/map-with-concurrency'
 
 const PEM_CERTIFICATE_PATTERN = /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g
-const MACOS_SECURITY = '/usr/bin/security'
+const MACOS_SECURITY = join('/', 'usr', 'bin', 'security')
 const MACOS_TRUST_LOAD_TIMEOUT_MS = 10_000
 const MACOS_TRUST_VERIFY_CONCURRENCY = 8
 const LINUX_CA_BUNDLES = [
-  '/etc/ssl/certs/ca-certificates.crt',
-  '/etc/ssl/certs/ca-bundle.crt',
-  '/etc/ssl/ca-bundle.pem',
-  '/etc/pki/tls/certs/ca-bundle.crt',
-  '/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem'
+  join('/', 'etc', 'ssl', 'certs', 'ca-certificates.crt'),
+  join('/', 'etc', 'ssl', 'certs', 'ca-bundle.crt'),
+  join('/', 'etc', 'ssl', 'ca-bundle.pem'),
+  join('/', 'etc', 'pki', 'tls', 'certs', 'ca-bundle.crt'),
+  join('/', 'etc', 'pki', 'ca-trust', 'extracted', 'pem', 'tls-ca-bundle.pem')
 ]
 
 type WindowsCaModule = {
@@ -123,7 +124,7 @@ async function loadMacCertificates(
     async (certificate): Promise<string | undefined> => {
       const verified = await execute({
         program: MACOS_SECURITY,
-        args: ['verify-cert', '-c', '/dev/stdin', '-p', 'basic', '-l', '-L', '-q'],
+        args: ['verify-cert', '-c', join('/', 'dev', 'stdin'), '-p', 'basic', '-l', '-L', '-q'],
         input: certificate,
         timeoutMs: 5_000,
         signal
