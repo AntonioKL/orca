@@ -11,13 +11,28 @@ import {
 import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { drainAgentHookSpool, launchTokenHash, readSpoolRecords } from './spool'
+import {
+  AGENT_HOOK_SPOOL_MAX_FILES,
+  drainAgentHookSpool,
+  launchTokenHash,
+  readSpoolRecords
+} from './spool'
 import { AgentHookServer, _internals } from './server'
 import { buildBody } from './server.test-fixtures'
 import { _internals as codexInternals } from '../codex/hook-service'
 import { makePaneKey } from '../../shared/stable-pane-id'
+import { buildPosixHookSpoolLines } from './hook-stdin-contract'
 
 describe('agent hook spool', () => {
+  it('appends each record with one printf write to prevent concurrent field interleaving', () => {
+    const spoolLine = buildPosixHookSpoolLines('codex').find((line) =>
+      line.includes('>> "$spool_file"')
+    )
+    expect(spoolLine).toBeDefined()
+    expect(spoolLine!.match(/printf/g)).toHaveLength(1)
+    expect(spoolLine).toContain('"$spool_now" "$payload"')
+  })
+
   it('drops torn lines while retaining complete records', () => {
     const dir = mkdtempSync(join(tmpdir(), 'orca-spool-'))
     const file = join(dir, 'pane.jsonl')
@@ -26,6 +41,28 @@ describe('agent hook spool', () => {
       '\n{"paneKey":"tab:1","source":"codex","receivedAt":1,"payload":{}}\n{"paneKey":'
     )
     expect(readSpoolRecords(file, 1)).toHaveLength(1)
+  })
+
+  it('does not let historical empty pane files starve newer records', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'orca-spool-empty-files-'))
+    const spool = join(dir, 'spool')
+    mkdirSync(spool)
+    for (let index = 0; index < AGENT_HOOK_SPOOL_MAX_FILES; index += 1) {
+      writeFileSync(join(spool, `pane-empty-${index}.jsonl`), '')
+    }
+    const live = join(spool, 'pane-live.jsonl')
+    writeFileSync(
+      live,
+      `\n${JSON.stringify({ paneKey: 'tab:live', source: 'codex', receivedAt: Date.now(), payload: { state: 'done' } })}\n`
+    )
+    const ingested: SpoolRecord[] = []
+    drainAgentHookSpool({
+      endpointDir: dir,
+      getPersistedLaunchTokenHash: () => undefined,
+      ingest: (record) => ingested.push(record)
+    })
+    expect(ingested).toHaveLength(1)
+    expect(ingested[0]?.paneKey).toBe('tab:live')
   })
 
   it('rejects stale launch tokens before ingest and truncates in place', () => {

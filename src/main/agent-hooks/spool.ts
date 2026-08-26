@@ -105,7 +105,9 @@ export function drainAgentHookSpool(options: SpoolDrainOptions): number {
       const path = join(spoolDir, name)
       try {
         const stat = statSync(path)
-        return stat.isFile() ? { path, mtimeMs: stat.mtimeMs } : null
+        // Empty files are retained to keep append handles race-safe, but they must not
+        // consume the bounded replay candidate set ahead of files with durable events.
+        return stat.isFile() && stat.size > 0 ? { path, mtimeMs: stat.mtimeMs } : null
       } catch {
         return null
       }
