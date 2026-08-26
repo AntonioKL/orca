@@ -291,7 +291,11 @@ describe('pane agent identity inventory ratchet', () => {
     })
     const actual: string[] = []
     for (const path of files) {
-      const source = stripComments(readFileSync(join(process.cwd(), path), 'utf8'))
+      const rawSource = readFileSync(join(process.cwd(), path), 'utf8')
+      if (!HELPERS.some((helper) => rawSource.includes(helper))) {
+        continue
+      }
+      const source = stripComments(rawSource)
       for (const helper of HELPERS) {
         if (new RegExp(`\\b${helper}\\b`).test(source)) {
           actual.push(`${helper}\0${path}`)
