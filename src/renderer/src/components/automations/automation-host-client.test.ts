@@ -161,6 +161,44 @@ describe('automation host client', () => {
     )
   })
 
+  it('creates desktop automations through the local runtime RPC surface', async () => {
+    const automation = makeAutomation({
+      runContext: {
+        kind: 'workspace-run',
+        projectId: 'github:stablyai/orca',
+        hostId: 'local',
+        projectHostSetupId: 'setup-local',
+        repoId: 'repo-1',
+        path: '/srv/orca'
+      }
+    })
+    const input: AutomationCreateInput = {
+      name: automation.name,
+      prompt: automation.prompt,
+      precheck: null,
+      agentId: automation.agentId,
+      runContext: automation.runContext,
+      projectId: automation.projectId,
+      workspaceMode: 'new_per_run',
+      workspaceId: null,
+      setupDecision: 'skip',
+      timezone: automation.timezone,
+      rrule: automation.rrule,
+      dtstart: automation.dtstart
+    }
+    vi.mocked(callRuntimeRpc).mockResolvedValueOnce({ automation })
+
+    await createAutomationForTarget(input)
+
+    expect(mockApi.automations.create).not.toHaveBeenCalled()
+    expect(callRuntimeRpc).toHaveBeenCalledWith(
+      { kind: 'local' },
+      'automation.create',
+      expect.objectContaining({ repo: 'id:repo-1' }),
+      { timeoutMs: 15_000 }
+    )
+  })
+
   it('updates and manually runs SSH-host automations through the remote server that listed them', async () => {
     const automation = makeAutomation({
       runContext: {

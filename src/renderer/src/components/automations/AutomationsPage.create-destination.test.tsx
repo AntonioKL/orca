@@ -131,7 +131,8 @@ describe('AutomationsPage create destination', () => {
     expect(api.automations.create).not.toHaveBeenCalled()
     expect(runtimeCreateCalls()).toHaveLength(1)
     expect(runtimeCreateCalls()[0]?.[2]).toMatchObject({
-      repo: RUNTIME_REPO_ID,
+      repo: `id:${RUNTIME_REPO_ID}`,
+      workspace: `id:${RUNTIME_WORKSPACE_ID}`,
       destination: { selector: { kind: 'self' } }
     })
   })

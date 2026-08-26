@@ -61,7 +61,6 @@ import {
 } from './automation-setup-decision'
 import type { AutomationTemplate } from './automation-templates'
 import { getAutomationTargetAvailability } from './automation-target-availability'
-import { getAutomationCreateAvailability } from './automation-create-admission'
 import { buildAutomationRunContextForRepo } from './automation-run-context'
 import { repoMatchesExternalAutomationTarget } from './automation-external-target-match'
 import { ensureHooksConfirmed } from '@/lib/ensure-hooks-confirmed'
@@ -981,10 +980,9 @@ export default function AutomationsPage(): React.JSX.Element {
     }
   }, [activeWorktreeId, editorProjects, repoMap, worktreeMap, worktreesByRepo])
 
-  const canCreateAutomation = getAutomationCreateAvailability({
-    automationHostTarget: getAutomationListTarget(settings),
-    runtimeStatusByEnvironmentId
-  }).canRunNow
+  const canCreateAutomation = hostCatalog.entries.some(
+    (entry) => resolveAutomationCreateDestination(entry).status === 'ready'
+  )
   const editingAutomation = editingAutomationId
     ? (automations.find((automation) => automation.id === editingAutomationId) ?? null)
     : null
@@ -992,6 +990,11 @@ export default function AutomationsPage(): React.JSX.Element {
     ? getAutomationOwnerTarget(editingAutomation, automationHostTarget)
     : getAutomationListTarget(settings)
   const isOrcaForm = createTarget === 'orca' && editingExternalTarget === null
+  const dialogRepos = isOrcaForm
+    ? editingAutomation
+      ? getAutomationCreateRepos(repos, automationDialogTarget)
+      : editorProjects
+    : getAutomationCreateRepos(repos, { kind: 'local' })
 
   const destinationForProject = useCallback(
     (projectId: string): AutomationCreateDestination | null => {
@@ -1537,7 +1540,11 @@ export default function AutomationsPage(): React.JSX.Element {
         )
         return
       }
-      if (isOrcaForm && !editorProjects.some((repo) => repo.id === draft.projectId)) {
+      if (
+        editingAutomationId !== null &&
+        isOrcaForm &&
+        !dialogRepos.some((repo) => repo.id === draft.projectId)
+      ) {
         toast.error(
           translate(
             'auto.components.automations.AutomationsPage.destinationProjectUnavailable',

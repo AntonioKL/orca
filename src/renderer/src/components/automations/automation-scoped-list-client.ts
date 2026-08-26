@@ -331,8 +331,8 @@ export async function createAutomationForDestination(
   const { projectId, workspaceId, ...rest } = input
   const result = await callAuthority<{ automation: Automation }>(authority, 'automation.create', {
     ...rest,
-    repo: projectId,
-    workspace: input.workspaceMode === 'existing' ? (workspaceId ?? undefined) : undefined,
+    repo: `id:${projectId}`,
+    workspace: input.workspaceMode === 'existing' && workspaceId ? `id:${workspaceId}` : undefined,
     destination
   })
   return result.automation
