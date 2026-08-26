@@ -16,6 +16,10 @@ import { kimiHookService } from '../kimi/hook-service'
 import { openClaudeHookService } from '../openclaude/hook-service'
 
 export type RemoteManagedHookInstallOptions = {
+  /** Explicit CODEX_HOME dir for redirected runtimes (for example WSL's managed runtime home). */
+  codexHomeDir?: string
+  /** Skip the trust write when a redirected runtime config is seeded by the launch path. */
+  deferTrustUntilConfigToml?: boolean
   /** Explicit GROK_HOME for remote runtimes that redirect Grok's config. */
   grokHomeDir?: string
   /** Stops before starting the next installer when the owning relay request
@@ -38,7 +42,14 @@ type RemoteManagedHookInstaller = readonly [
 const REMOTE_MANAGED_HOOK_INSTALLERS: readonly RemoteManagedHookInstaller[] = [
   ['claude', (sftp, remoteHome) => claudeHookService.installRemote(sftp, remoteHome)],
   ['openclaude', (sftp, remoteHome) => openClaudeHookService.installRemote(sftp, remoteHome)],
-  ['codex', (sftp, remoteHome) => codexHookService.installRemote(sftp, remoteHome)],
+  [
+    'codex',
+    (sftp, remoteHome, options) =>
+      codexHookService.installRemote(sftp, remoteHome, {
+        codexHomeDir: options?.codexHomeDir,
+        deferTrustUntilConfigToml: options?.deferTrustUntilConfigToml
+      })
+  ],
   ['gemini', (sftp, remoteHome) => geminiHookService.installRemote(sftp, remoteHome)],
   ['antigravity', (sftp, remoteHome) => antigravityHookService.installRemote(sftp, remoteHome)],
   ['amp', (sftp, remoteHome) => ampHookService.installRemote(sftp, remoteHome)],

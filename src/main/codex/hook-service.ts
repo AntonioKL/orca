@@ -1419,8 +1419,13 @@ export class CodexHookService {
     return this.getStatusAfterInstall(recentGrantEntries, runtimeHomePath)
   }
 
-  async installRemote(sftp: SFTPWrapper, remoteHome: string): Promise<AgentHookInstallStatus> {
-    const codexHomeBase = `${remoteHome.replace(/\/$/, '')}/.codex`
+  async installRemote(
+    sftp: SFTPWrapper,
+    remoteHome: string,
+    options?: { codexHomeDir?: string; deferTrustUntilConfigToml?: boolean }
+  ): Promise<AgentHookInstallStatus> {
+    const codexHomeBase =
+      options?.codexHomeDir?.replace(/\/$/, '') ?? `${remoteHome.replace(/\/$/, '')}/.codex`
     const remoteConfigPath = `${codexHomeBase}/hooks.json`
     const remoteTomlPath = `${codexHomeBase}/config.toml`
     const remoteScriptPath = `${remoteHome.replace(/\/$/, '')}/.orca/agent-hooks/codex-hook.sh`
@@ -1479,6 +1484,15 @@ export class CodexHookService {
       await writeHooksJsonRemote(sftp, remoteConfigPath, { ...config, hooks: nextHooks })
       try {
         const existingTomlRaw = await readTextFileRemote(sftp, remoteTomlPath)
+        if (existingTomlRaw === null && options?.deferTrustUntilConfigToml === true) {
+          return {
+            agent: 'codex',
+            state: 'installed',
+            configPath: remoteConfigPath,
+            managedHooksPresent: true,
+            detail: 'Trust entries deferred until config.toml is seeded by the launch path'
+          }
+        }
         const existingToml = existingTomlRaw ?? ''
         const updatedToml = upsertHookTrustEntriesInContent(existingToml, trustEntries)
         if (updatedToml !== existingToml) {

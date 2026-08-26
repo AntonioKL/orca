@@ -245,7 +245,9 @@ describe('WslHookRelayManager', () => {
     await vi.waitFor(() => expect(deps.installHooks).toHaveBeenCalledTimes(1))
     expect(deps.spawnRelay).toHaveBeenCalledTimes(1)
     expect(deps.installHooks).toHaveBeenCalledWith(expect.anything(), home, {
-      agents: ['codex']
+      agents: ['codex'],
+      codexHomeDir: `${home}/.local/share/orca/codex-runtime-home/home`,
+      deferTrustUntilConfigToml: true
     })
 
     expect(manager.getGuestEndpointFilePath('Ubuntu')).toBe(
