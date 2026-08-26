@@ -262,12 +262,12 @@ test('reuses a terminal file link already open in a sibling workspace @golden', 
   await expect
     .poll(
       () =>
-        orcaPage.evaluate(
-          (expectedPath) => window.__monacoEditorE2E?.filePath === expectedPath,
-          filePath
-        ),
-      { timeout: 20_000, message: 'sibling editor never rendered the linked file' }
+        orcaPage.evaluate(() => ({
+          filePath: window.__monacoEditorE2E?.filePath ?? null,
+          activeWorktreeId: window.__store?.getState()?.activeWorktreeId ?? null
+        })),
+      { timeout: 20_000, message: 'sibling workspace never rendered the linked file' }
     )
-    .toBe(true)
+    .toEqual({ filePath, activeWorktreeId: sibling.id })
   await expect(orcaPage.getByText('Loading...', { exact: true })).toHaveCount(0)
 })
