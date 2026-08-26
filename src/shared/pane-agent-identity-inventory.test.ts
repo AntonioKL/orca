@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { glob } from 'tinyglobby'
+import { stripComments } from './source-scan/source-tree-scan'
 
 const HELPERS = [
   'getAgentLabel',
@@ -282,10 +283,6 @@ const DIRECT_SINGLE_SOURCE_SURFACES: readonly {
     marker: 'createTerminalAndSendPrompt'
   }
 ]
-
-function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
-}
 
 describe('pane agent identity inventory ratchet', () => {
   it('classifies every legacy helper definition, import, and callsite in src and mobile/src', async () => {
