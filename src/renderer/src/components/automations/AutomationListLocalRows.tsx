@@ -34,7 +34,10 @@ import type { RuntimeStatus } from '../../../../shared/runtime-types'
 import type { TaskSourceHostAvailability } from '../task-source-context-summary'
 import type { AutomationRowAction } from './automation-captured-owner'
 import type { AutomationHostTarget } from './automation-host-client'
-import { getLocalAutomationLastRunSnapshot } from './automation-list-last-run'
+import {
+  getAutomationRowLastRunSnapshot,
+  getLocalAutomationLastRunSnapshot
+} from './automation-list-last-run'
 import { AutomationListLastRunCell } from './AutomationListLastRunCell'
 import { formatAutomationDateTimeWithRelative } from './automation-page-parts'
 import { getAutomationTargetAvailability } from './automation-target-availability'
@@ -168,7 +171,11 @@ export function AutomationListLocalRows({
         const agentTooltipLabel = `${agentLabel} · ${hostLabel} · ${automationUsageText(row.usageSummary ?? undefined)}`
         const canRunNow = automationRunAvailability.canRunNow && allows(row, 'run')
         const lastRun = lastRunByAutomationId.get(automation.id)
-        const lastRunSnapshot = getLocalAutomationLastRunSnapshot(automation, lastRun)
+        // Without a fetched run, the row's projected summary carries the newest
+        // retained run's status — the list never downloads run history for this.
+        const lastRunSnapshot = lastRun
+          ? getLocalAutomationLastRunSnapshot(automation, lastRun)
+          : getAutomationRowLastRunSnapshot(row)
 
         const actionItems = (
           <>
@@ -245,6 +252,9 @@ export function AutomationListLocalRows({
                 </span>
                 <span className="min-w-0 truncate text-muted-foreground" title={projectLabel}>
                   {projectLabel}
+                </span>
+                <span className="min-w-0 truncate text-muted-foreground" title={hostLabel}>
+                  {hostLabel}
                 </span>
                 <span className="min-w-0 truncate text-muted-foreground" title={nextRunLabel}>
                   {nextRunLabel}

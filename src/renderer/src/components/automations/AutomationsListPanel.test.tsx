@@ -11,8 +11,9 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { AutomationsListPanel } from './AutomationsListPanel'
+import { EMPTY_AUTOMATION_LIST_FILTER } from './automation-list-view'
 import type { AutomationHostCatalogView } from './use-automation-host-catalog'
-import { makeAutomationListRow } from './automations-page-fixtures'
+import { makeAutomation, makeAutomationListRow } from './automations-page-fixtures'
 import type { AutomationListRow } from './automation-list-row-identity'
 
 let container: HTMLDivElement
@@ -59,6 +60,8 @@ function renderPanel(
         <AutomationsListPanel
           hasListItems={rows.length > 0}
           hasFilteredListItems={rows.length > 0}
+          listFilter={EMPTY_AUTOMATION_LIST_FILTER}
+          onListFilterChange={() => undefined}
           listSearchQuery={query}
           isListSearchQueryTooLarge={false}
           onListSearchQueryChange={onQueryChange}
@@ -150,5 +153,30 @@ describe('AutomationsListPanel unchecked hosts', () => {
     renderPanel([], '')
 
     expect(container.textContent).not.toContain('could not be checked')
+  })
+})
+
+describe('AutomationsListPanel flat table layout', () => {
+  it('renders table headers including Host column and displays row with host cell', () => {
+    const row = makeAutomationListRow({
+      hostLabel: 'Remote Linux',
+      automation: makeAutomation({
+        id: 'auto-1',
+        name: 'Nightly Sync',
+        agentId: 'codex',
+        rrule: 'FREQ=DAILY;BYHOUR=2;BYMINUTE=0',
+        nextRunAt: 10000,
+        lastRunAt: 5000,
+        enabled: true
+      })
+    })
+    renderPanel([row], '')
+
+    expect(container.textContent).toContain('Name')
+    expect(container.textContent).toContain('Schedule')
+    expect(container.textContent).toContain('Project')
+    expect(container.textContent).toContain('Host')
+    expect(container.textContent).toContain('Nightly Sync')
+    expect(container.textContent).toContain('Remote Linux')
   })
 })

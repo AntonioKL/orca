@@ -1,4 +1,4 @@
-import type { AutomationRun } from './automations-types'
+import type { AutomationRun, AutomationRunStatus } from './automations-types'
 
 export type AutomationUsageSummary = {
   knownRuns: number
@@ -9,6 +9,9 @@ export type AutomationUsageSummary = {
   reasoningOutputTokens: number
   totalTokens: number
   estimatedCostUsd: number | null
+  /** Newest retained run's status, so list filters never fetch run history. Optional: older projections omit it. */
+  lastRunStatus?: AutomationRunStatus | null
+  lastRunAt?: number | null
 }
 
 /** Bounded aggregate over an authority's retained runs; never fetches history. */
@@ -24,8 +27,12 @@ export function summarizeAutomationRunUsage(
   let totalTokens = 0
   let estimatedCostUsd = 0
   let hasKnownCost = false
+  let latest: AutomationRun | null = null
 
   for (const run of runs) {
+    if (!latest || run.createdAt > latest.createdAt) {
+      latest = run
+    }
     const usage = run.usage
     if (!usage || usage.status !== 'known') {
       unavailableRuns++
@@ -51,6 +58,8 @@ export function summarizeAutomationRunUsage(
     cacheTokens,
     reasoningOutputTokens,
     totalTokens,
-    estimatedCostUsd: hasKnownCost ? estimatedCostUsd : null
+    estimatedCostUsd: hasKnownCost ? estimatedCostUsd : null,
+    lastRunStatus: latest?.status ?? null,
+    lastRunAt: latest ? (latest.dispatchedAt ?? latest.startedAt ?? latest.createdAt ?? null) : null
   }
 }

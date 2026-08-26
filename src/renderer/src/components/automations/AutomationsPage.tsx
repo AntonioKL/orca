@@ -106,6 +106,12 @@ import { buildExternalAutomationListEntries } from './external-automation-list-e
 import type { ExternalAutomationScope } from './external-automation-scope-client'
 import { useAutomationListSearch } from './use-automation-list-search'
 import {
+  EMPTY_AUTOMATION_LIST_FILTER,
+  filterAutomationListRows,
+  filterExternalAutomationListEntries,
+  type AutomationListFilter
+} from './automation-list-view'
+import {
   automationRepoForRow,
   automationWorktreeForRow,
   unscopedAutomationListRows,
@@ -253,6 +259,7 @@ export default function AutomationsPage(): React.JSX.Element {
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [listSearchQuery, setListSearchQuery] = useState('')
+  const [listFilter, setListFilter] = useState<AutomationListFilter>(EMPTY_AUTOMATION_LIST_FILTER)
   const [createOpen, setCreateOpen] = useState(false)
   const [createTarget, setCreateTarget] = useState<AutomationCreateTarget>('orca')
   const [editingAutomationId, setEditingAutomationId] = useState<string | null>(null)
@@ -382,6 +389,15 @@ export default function AutomationsPage(): React.JSX.Element {
     () => buildExternalAutomationListEntries(scopedExternal.managers),
     [scopedExternal.managers]
   )
+  // The status/last-run/agent menu narrows rows before search, so both compose.
+  const attributeFilteredRows = useMemo(
+    () => filterAutomationListRows(visibleRows, listFilter),
+    [listFilter, visibleRows]
+  )
+  const attributeFilteredExternalEntries = useMemo(
+    () => filterExternalAutomationListEntries(externalAutomationEntries, listFilter),
+    [externalAutomationEntries, listFilter]
+  )
 
   const selectedExternal =
     externalAutomationEntries.find((entry) => entry.key === selectedExternalKey) ??
@@ -444,8 +460,8 @@ export default function AutomationsPage(): React.JSX.Element {
     searchCounts
   } = useAutomationListSearch({
     listSearchQuery,
-    rows: visibleRows,
-    externalAutomationEntries,
+    rows: attributeFilteredRows,
+    externalAutomationEntries: attributeFilteredExternalEntries,
     repoMap,
     worktreeMap,
     selectedRowKey: selectedRow?.key ?? null,
@@ -2250,7 +2266,23 @@ export default function AutomationsPage(): React.JSX.Element {
           listSearchQuery={listSearchQuery}
           isListSearchQueryTooLarge={isListSearchQueryTooLarge}
           onListSearchQueryChange={setListSearchQuery}
-          searchCounts={searchCounts}
+          listFilter={listFilter}
+          onListFilterChange={(next) => {
+            setListFilter(next)
+            // Host narrowing is row-side now; a leftover single-host query scope
+            // would hide the very rows the menu is asking for.
+            if (
+              (next.hostStableKeys?.length ?? 0) > 0 &&
+              hostCatalog.resolution.effective.kind !== 'all'
+            ) {
+              hostCatalog.selectHost({ kind: 'all' })
+            }
+          }}
+          // Pre-filter count, so "no match" is distinguishable from an empty host.
+          searchCounts={{
+            ...searchCounts,
+            hostRowCount: visibleRows.length + externalAutomationEntries.length
+          }}
           hostCatalog={hostCatalog}
           externalManagersListed={externalManagersListed}
           externalScopeNotice={externalAutomationScopeNotice(externalScopeGate)}

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { Loader2, TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { translate } from '@/i18n/i18n'
 import { cn } from '@/lib/utils'
@@ -103,6 +104,7 @@ export function AutomationHostFilterNotice({
   const message = noticeCopy(resolution)
   const recovery = resolution.entry ? automationHostRecoveryActions(resolution.entry) : null
   const action = recovery?.authority ?? recovery?.execution ?? null
+  const isLoading = resolution.status === 'loading'
 
   useEffect(() => {
     setAnnouncedFallback(
@@ -125,14 +127,28 @@ export function AutomationHostFilterNotice({
         <div
           data-filter-status={resolution.status}
           className={cn(
-            'flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs text-muted-foreground',
+            'flex flex-wrap items-center gap-2 rounded-lg px-3.5 py-2.5 text-xs',
+            isLoading
+              ? 'border border-border bg-muted/40 text-muted-foreground'
+              : 'border border-amber-500/40 bg-amber-500/10 text-foreground dark:border-amber-500/35 dark:bg-amber-500/15',
             className
           )}
         >
-          <span className="min-w-0 flex-1">{message}</span>
+          {isLoading ? (
+            <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+          ) : (
+            <TriangleAlert className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+          )}
+          <span className="min-w-0 flex-1 leading-normal font-medium">{message}</span>
           {resolution.entry ? <AutomationHostStatusBadges entry={resolution.entry} /> : null}
           {action && onRecover ? (
-            <Button type="button" variant="outline" size="xs" onClick={() => onRecover(action)}>
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              className="border-amber-500/40 bg-background font-medium text-foreground shadow-xs hover:bg-muted"
+              onClick={() => onRecover(action)}
+            >
               {recoveryActionLabel(action)}
             </Button>
           ) : null}

@@ -1,4 +1,5 @@
 import React from 'react'
+import { TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { translate } from '@/i18n/i18n'
@@ -52,21 +53,36 @@ export function AutomationOwnerConflictNotice({
       role="alert"
       data-testid="automation-owner-conflict"
       className={cn(
-        'flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs text-muted-foreground',
+        'flex items-center gap-2.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3.5 py-2.5 text-xs text-foreground dark:border-amber-500/35 dark:bg-amber-500/15',
         className
       )}
     >
-      <span className="min-w-0 flex-1">{notice.message}</span>
-      {recovery && onRecover ? (
-        <Button type="button" variant="outline" size="xs" onClick={() => onRecover(recovery)}>
-          {recoveryActionLabel(recovery)}
-        </Button>
-      ) : null}
-      {onDismiss ? (
-        <Button type="button" variant="ghost" size="xs" onClick={onDismiss}>
-          {translate('auto.components.automations.ownerConflict.dismiss', 'Dismiss')}
-        </Button>
-      ) : null}
+      <TriangleAlert className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+      <span className="min-w-0 flex-1 leading-normal font-medium">{notice.message}</span>
+      <div className="flex shrink-0 items-center gap-1.5">
+        {recovery && onRecover ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            className="border-amber-500/40 bg-background font-medium text-foreground shadow-xs hover:bg-muted"
+            onClick={() => onRecover(recovery)}
+          >
+            {recoveryActionLabel(recovery)}
+          </Button>
+        ) : null}
+        {onDismiss ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            className="text-muted-foreground hover:bg-amber-500/20 hover:text-foreground"
+            onClick={onDismiss}
+          >
+            {translate('auto.components.automations.ownerConflict.dismiss', 'Dismiss')}
+          </Button>
+        ) : null}
+      </div>
     </div>
   )
 }

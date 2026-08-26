@@ -39,11 +39,13 @@ export type AutomationListEmptyState = {
 
 export type AutomationListEmptyStateInput = {
   resolution: AutomationHostFilterResolution
-  /** Rows for the selected host before the search query is applied. */
+  /** Rows for the selected host before the search query or attribute filter is applied. */
   hostRowCount: number
-  /** Rows still visible after the search query. */
+  /** Rows still visible after the search query and attribute filter. */
   visibleRowCount: number
   searchActive: boolean
+  /** True while the status/last-run/agent filter menu narrows the list. */
+  filterActive?: boolean
   /**
    * False when this host's external automation managers are out of scope for
    * the release. Passed in rather than derived so the list never guesses.
@@ -198,14 +200,19 @@ export function resolveAutomationListEmptyState(
   if (input.visibleRowCount > 0) {
     return { kind: 'rows', title: '', detail: null, scopeNote: null, recovery: null }
   }
-  if (input.searchActive && input.hostRowCount > 0) {
-    // The host has rows; only the query emptied the view.
+  if ((input.searchActive || input.filterActive) && input.hostRowCount > 0) {
+    // The host has rows; only the query or the attribute filter emptied the view.
     return state(
       'search-no-match',
-      translate(
-        'auto.components.automations.emptyState.searchNoMatch',
-        'No automations match your search'
-      ),
+      input.searchActive
+        ? translate(
+            'auto.components.automations.emptyState.searchNoMatch',
+            'No automations match your search'
+          )
+        : translate(
+            'auto.components.automations.emptyState.filtersNoMatch',
+            'No automations match your filters'
+          ),
       null,
       { ...input, externalManagersListed: true }
     )

@@ -42,7 +42,9 @@ describe('summarizeAutomationRunUsage', () => {
       cacheTokens: 10,
       reasoningOutputTokens: 2,
       totalTokens: 42,
-      estimatedCostUsd: 0.25
+      estimatedCostUsd: 0.25,
+      lastRunStatus: null,
+      lastRunAt: null
     })
   })
 
@@ -61,7 +63,19 @@ describe('summarizeAutomationRunUsage', () => {
       cacheTokens: 0,
       reasoningOutputTokens: 0,
       totalTokens: 0,
-      estimatedCostUsd: null
+      estimatedCostUsd: null,
+      lastRunStatus: null,
+      lastRunAt: null
     })
+  })
+
+  it('projects the newest retained run so list filters never fetch history', () => {
+    const summary = summarizeAutomationRunUsage([
+      { ...makeRun(makeUsage()), createdAt: 1, status: 'completed', dispatchedAt: 11 },
+      { ...makeRun(makeUsage()), createdAt: 3, status: 'dispatch_failed', dispatchedAt: 33 },
+      { ...makeRun(makeUsage()), createdAt: 2, status: 'completed', dispatchedAt: 22 }
+    ])
+    expect(summary.lastRunStatus).toBe('dispatch_failed')
+    expect(summary.lastRunAt).toBe(33)
   })
 })

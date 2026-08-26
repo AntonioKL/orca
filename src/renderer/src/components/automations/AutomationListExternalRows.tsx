@@ -86,7 +86,8 @@ export function AutomationListExternalRows({
         })
         const actionDisabled = disabledMessage !== null
         const scheduleLabel = getExternalAutomationScheduleDisplay(entry.manager, entry.job).label
-        const projectLabel = `${providerLabel} / ${entry.manager.targetLabel}`
+        const hostLabel = entry.manager.targetLabel || entry.manager.label || 'Local'
+        const projectLabel = entry.job.workdir ?? providerLabel
         const nextRunLabel = entry.job.enabled
           ? formatExternalDate(entry.job.nextRunAt, relativeNow)
           : translate('auto.components.automations.AutomationsPage.paused', 'Paused')
@@ -126,6 +127,9 @@ export function AutomationListExternalRows({
                 </span>
                 <span className="min-w-0 truncate text-muted-foreground" title={projectLabel}>
                   {projectLabel}
+                </span>
+                <span className="min-w-0 truncate text-muted-foreground" title={hostLabel}>
+                  {hostLabel}
                 </span>
                 <span className="min-w-0 truncate text-muted-foreground" title={nextRunLabel}>
                   {nextRunLabel}

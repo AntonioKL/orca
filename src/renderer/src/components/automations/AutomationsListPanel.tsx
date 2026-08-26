@@ -26,14 +26,14 @@ import {
 import type { AutomationListRow } from './automation-list-row-identity'
 import type { AutomationPaneTab } from './automation-page-state'
 import { AutomationListSearchField } from './AutomationListSearchField'
-import { getAutomationTemplates, type AutomationTemplate } from './automation-templates'
+import { AutomationListFilterMenu, AutomationListFilterPills } from './AutomationListFilterMenu'
+import { isAutomationListFilterActive, type AutomationListFilter } from './automation-list-view'
+import { automationHostFilterStableKey } from '../../../../shared/automation-host-filter'
+import type { AutomationTemplate } from './automation-templates'
 import type { ExternalAutomationListEntry } from './external-automation-list-entries'
 import type { ExternalAutomationScope } from './external-automation-scope-client'
 import { AutomationListLocalRows } from './AutomationListLocalRows'
 import { AutomationListExternalRows } from './AutomationListExternalRows'
-import { AutomationListHostGroups } from './AutomationListHostGroups'
-import { filterAutomationHostGroups } from './automation-host-list-rows'
-import { AutomationHostPicker } from './AutomationHostPicker'
 import { AutomationHostFilterNotice, AutomationHostLoadSummary } from './AutomationHostFilterNotice'
 import { AutomationListEmptyView } from './AutomationListEmptyView'
 import { resolveAutomationListEmptyState } from './automation-list-empty-state'
@@ -42,9 +42,10 @@ import type { AutomationHostCatalogView } from './use-automation-host-catalog'
 import type { AutomationHostRecoveryAction } from './automation-host-status-descriptors'
 import type { AutomationHostCatalogEntry } from './automation-host-catalog-types'
 import { useAutomationListFocusRecovery } from './use-automation-list-focus-recovery'
-import { AUTOMATIONS_TABLE_GRID_CLASS } from './automations-table-layout'
-import { LIST_TABLE_CONTAINER_CLASS, LIST_TABLE_HEADER_CLASS } from '@/lib/list-table-layout'
+import { LIST_TABLE_CONTAINER_CLASS } from '@/lib/list-table-layout'
 import { translate } from '@/i18n/i18n'
+import { AutomationTemplateEmptyState } from './AutomationTemplateEmptyState'
+import { AutomationListTableHeader } from './AutomationListTableHeader'
 
 const TEMPLATE_EMPTY_STATES: ReadonlySet<string> = new Set(['host-empty', 'all-hosts-empty'])
 const EMPTY_AUTOMATION_RUNS: ReadonlyMap<string, AutomationRun> = new Map()
@@ -55,6 +56,8 @@ type AutomationsListPanelProps = {
   listSearchQuery: string
   isListSearchQueryTooLarge: boolean
   onListSearchQueryChange: (query: string) => void
+  listFilter: AutomationListFilter
+  onListFilterChange: (filter: AutomationListFilter) => void
   searchCounts: AutomationListSearchCounts
   hostCatalog: AutomationHostCatalogView
   externalManagersListed: boolean
@@ -118,6 +121,8 @@ export function AutomationsListPanel(props: AutomationsListPanelProps): React.JS
     listSearchQuery,
     isListSearchQueryTooLarge,
     onListSearchQueryChange,
+    listFilter,
+    onListFilterChange,
     searchCounts,
     hostCatalog,
     externalManagersListed,
@@ -158,18 +163,21 @@ export function AutomationsListPanel(props: AutomationsListPanelProps): React.JS
     isRefreshing
   } = props
   const listRef = useRef<HTMLDivElement>(null)
-  const pickerRef = useRef<HTMLDivElement>(null)
+  // Hosts moved into the Filters menu, so its toolbar row is the focus fallback now.
+  const toolbarRef = useRef<HTMLDivElement>(null)
   const pendingKeyboardScrollRef = useRef(false)
   const rowKeys = React.useMemo(() => filteredRows.map((row) => row.key), [filteredRows])
-  const visibleRowKeys = React.useMemo(() => new Set(rowKeys), [rowKeys])
   const visibleItems = React.useMemo(
     () => [
       ...filteredRows.map((row) => ({ kind: 'local' as const, id: row.key })),
-      ...filteredExternalAutomationEntries.map((entry) => ({ kind: 'external' as const, id: entry.key }))
+      ...filteredExternalAutomationEntries.map((entry) => ({
+        kind: 'external' as const,
+        id: entry.key
+      }))
     ],
     [filteredExternalAutomationEntries, filteredRows]
   )
-  useAutomationListFocusRecovery({ rowKeys, containerRef: listRef, fallbackRef: pickerRef })
+  useAutomationListFocusRecovery({ rowKeys, containerRef: listRef, fallbackRef: toolbarRef })
   const handleSearchArrowNavigate = React.useCallback(
     (key: AutomationListArrowKey) => {
       const next = getAutomationListArrowNavigationTarget({
@@ -186,7 +194,9 @@ export function AutomationsListPanel(props: AutomationsListPanelProps): React.JS
           ? selectedExternalKey === null && selectedRowKey === next.id
           : selectedExternalKey === next.id
       if (alreadySelected) {
-        listRef.current?.querySelector('[data-current="true"]')?.scrollIntoView({ block: 'nearest' })
+        listRef.current
+          ?.querySelector('[data-current="true"]')
+          ?.scrollIntoView({ block: 'nearest' })
         return
       }
       pendingKeyboardScrollRef.current = true
@@ -215,9 +225,26 @@ export function AutomationsListPanel(props: AutomationsListPanelProps): React.JS
     pendingKeyboardScrollRef.current = false
     listRef.current?.querySelector('[data-current="true"]')?.scrollIntoView({ block: 'nearest' })
   }, [selectedExternalKey, selectedRowKey])
+  const listFilterActive = isAutomationListFilterActive(listFilter)
+  // A leftover single-host query scope from before hosts moved into the Filters menu.
+  const legacyScopeStableKey = automationHostFilterStableKey(hostCatalog.resolution.effective)
+  const menuHostKeys = listFilter.hostStableKeys ?? []
+  const selectedHostLabel =
+    menuHostKeys.length > 0
+      ? menuHostKeys
+          .map(
+            (stableKey) =>
+              hostCatalog.entries.find((entry) => entry.stableKey === stableKey)?.label ?? stableKey
+          )
+          .join(', ')
+      : legacyScopeStableKey === null
+        ? null
+        : (hostCatalog.resolution.entry?.label ??
+          translate('auto.components.automations.hostPicker.loadingHost', 'Loading host…'))
   const emptyStateInput = {
     resolution: hostCatalog.resolution,
     ...searchCounts,
+    filterActive: listFilterActive,
     externalManagersListed
   }
   const emptyState = resolveAutomationListEmptyState(emptyStateInput)
@@ -254,14 +281,7 @@ export function AutomationsListPanel(props: AutomationsListPanelProps): React.JS
       data-contextual-tour-target="automations-list"
     >
       <div className="flex shrink-0 items-end justify-between gap-3 pb-4">
-        <div className="flex min-w-0 flex-1 items-end gap-2">
-          <div ref={pickerRef} className="w-48 shrink-0">
-            <AutomationHostPicker
-              entries={hostCatalog.entries}
-              resolution={hostCatalog.resolution}
-              onSelect={onSelectHost}
-            />
-          </div>
+        <div ref={toolbarRef} className="flex min-w-0 flex-1 items-end gap-2">
           <AutomationListSearchField
             className="w-full max-w-xs"
             query={listSearchQuery}
@@ -271,6 +291,11 @@ export function AutomationsListPanel(props: AutomationsListPanelProps): React.JS
             }
             onClear={() => onListSearchQueryChange('')}
             onArrowNavigate={handleSearchArrowNavigate}
+          />
+          <AutomationListFilterMenu
+            filter={listFilter}
+            onChange={onListFilterChange}
+            hostEntries={hostCatalog.entries}
           />
           <Tooltip>
             <TooltipTrigger asChild>
@@ -310,6 +335,19 @@ export function AutomationsListPanel(props: AutomationsListPanelProps): React.JS
         </Button>
       </div>
 
+      {listFilterActive || legacyScopeStableKey !== null ? (
+        <div className="flex flex-wrap items-center gap-1.5 pb-3">
+          <AutomationListFilterPills
+            filter={listFilter}
+            onChange={onListFilterChange}
+            hostLabel={selectedHostLabel}
+            onClearHost={() => {
+              onListFilterChange({ ...listFilter, hostStableKeys: [] })
+              onSelectHost({ kind: 'all' })
+            }}
+          />
+        </div>
+      ) : null}
       <AutomationHostFilterNotice
         resolution={hostCatalog.resolution}
         onRecover={(action) => onRecoverHost(action)}
@@ -329,50 +367,13 @@ export function AutomationsListPanel(props: AutomationsListPanelProps): React.JS
 
       <div
         ref={listRef}
-        className={cn(
-          'scrollbar-sleek min-h-0 flex-1 overflow-auto',
-          LIST_TABLE_CONTAINER_CLASS
-        )}
+        className={cn('scrollbar-sleek min-h-0 flex-1 overflow-auto', LIST_TABLE_CONTAINER_CLASS)}
       >
         {hasFilteredListItems ? (
           <>
-            <div className={cn(AUTOMATIONS_TABLE_GRID_CLASS, LIST_TABLE_HEADER_CLASS)}>
-              <span>
-                {translate('auto.components.automations.AutomationsPage.tableName', 'Name')}
-              </span>
-              <span>
-                {translate('auto.components.automations.AutomationDetail.18763ded26', 'Schedule')}
-              </span>
-              <span>
-                {translate('auto.components.automations.AutomationsPage.tableProject', 'Project')}
-              </span>
-              <span>
-                {translate('auto.components.automations.AutomationDetail.578ff46987', 'Next run')}
-              </span>
-              <span>
-                {translate('auto.components.automations.AutomationsPage.tableLastRun', 'Last run')}
-              </span>
-              <span>
-                {translate('auto.components.automations.AutomationsPage.tableStatus', 'Status')}
-              </span>
-              <span className="text-center">
-                {translate('auto.components.automations.AutomationDetail.2df8970cd5', 'Agent')}
-              </span>
-              <span className="sr-only">
-                {translate('auto.components.automations.AutomationsPage.tableActions', 'Actions')}
-              </span>
-            </div>
+            <AutomationListTableHeader />
             <div className="divide-y divide-border/50">
-              {hostCatalog.rows.groups.length > 0 ? (
-                <AutomationListHostGroups
-                  {...rowProps}
-                  groups={filterAutomationHostGroups(hostCatalog.rows.groups, visibleRowKeys)}
-                  searchActive={searchCounts.searchActive}
-                  onRecover={onRecoverHost}
-                />
-              ) : (
-                <AutomationListLocalRows {...rowProps} rows={filteredRows} />
-              )}
+              <AutomationListLocalRows {...rowProps} rows={filteredRows} />
               <AutomationListExternalRows
                 entries={filteredExternalAutomationEntries}
                 selectedExternalKey={selectedExternalKey}
@@ -398,39 +399,7 @@ export function AutomationsListPanel(props: AutomationsListPanelProps): React.JS
         )}
 
         {!hasListItems && TEMPLATE_EMPTY_STATES.has(emptyState.kind) ? (
-          <div className="mx-auto grid max-w-2xl gap-2 p-4">
-            <div className="px-1 pb-1 text-sm font-medium">
-              {translate(
-                'auto.components.automations.AutomationsPage.d207ab4c25',
-                'Start from a template'
-              )}
-            </div>
-            {getAutomationTemplates().map((template) => (
-              <button
-                key={template.id}
-                type="button"
-                onClick={() => openCreateDialog(template)}
-                className="rounded-md border border-border/70 bg-background px-3 py-2 text-left shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-              >
-                <div className="text-[11px] font-medium uppercase text-muted-foreground">
-                  {template.category}
-                </div>
-                <div className="mt-1 text-sm font-medium">{template.label}</div>
-                <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                  {template.description}
-                </div>
-              </button>
-            ))}
-            <Button
-              type="button"
-              variant="outline"
-              className="mt-1 w-full justify-start"
-              onClick={() => openCreateDialog()}
-            >
-              <Plus className="size-4" />
-              {translate('auto.components.automations.AutomationsPage.25060635c6', 'Add new')}
-            </Button>
-          </div>
+          <AutomationTemplateEmptyState onOpenCreate={openCreateDialog} />
         ) : null}
       </div>
     </section>
