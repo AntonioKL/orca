@@ -49,13 +49,17 @@ import type {
 } from '../../shared/runtime-types'
 import { assertClipboardTextWriteWithinLimitWithYield } from '../../shared/clipboard-text'
 import { normalizeBrowserNavigationUrl } from '../../shared/browser-url'
+import { mapSettledWithConcurrency } from '../../shared/map-with-concurrency'
 import { iterateBrowserTextInsertionChunks } from './browser-text-insertion'
+import { createAgentBrowserProcessEnvironment } from './agent-browser-process-environment'
 
 // Why: must exceed agent-browser's internal timeouts (goto 30s, wait 60s) so the bridge never kills a command before its own timeout fires.
 const EXEC_TIMEOUT_MS = 90_000
 const CONSECUTIVE_TIMEOUT_LIMIT = 3
 const WAIT_PROCESS_TIMEOUT_GRACE_MS = 1_000
 const STALE_SESSION_CLOSE_TIMEOUT_MS = 3_000
+const AGENT_BROWSER_CLEANUP_TIMEOUT_MS = 5_000
+const AGENT_BROWSER_CLEANUP_CONCURRENCY = 4
 const EMBEDDED_NAVIGATION_TIMEOUT_MS = 30_000
 export const AGENT_BROWSER_TEXT_ARGUMENT_MAX_BYTES = 8 * 1024
 export const AGENT_BROWSER_CLIPBOARD_WRITE_MAX_BYTES = AGENT_BROWSER_TEXT_ARGUMENT_MAX_BYTES
@@ -82,6 +86,10 @@ type QueuedCommand = {
 type ResolvedBrowserCommandTarget = {
   browserPageId: string
   webContentsId: number
+}
+
+type AgentBrowserCleanupOptions = {
+  closeTimeoutMs?: number
 }
 
 export type BrowserMouseModifier = 'cmd' | 'ctrl' | 'alt' | 'shift'
@@ -578,6 +586,7 @@ export class AgentBrowserBridge {
   // Why: screenshot prep mutates shared paintability across tabs; serialize globally so concurrent captures don't blank each other.
   private screenshotTurn: Promise<void> = Promise.resolve()
   private readonly agentBrowserBin: string
+  private readonly agentBrowserEnv: NodeJS.ProcessEnv
   // Why: stash intercept patterns from a swap-destroyed session, keyed by name, so the next session restores them.
   private readonly pendingInterceptRestore = new Map<string, string[]>()
   // Why: promise-lock so two concurrent ensureSession calls don't both create the session entry.
@@ -585,12 +594,18 @@ export class AgentBrowserBridge {
   // Why: `agent-browser close` is async, keyed by session name — recreating before it finishes lets the old teardown close the new session.
   private readonly pendingSessionDestruction = new Map<string, Promise<void>>()
   private readonly cancelledProcesses = new WeakSet<ChildProcess>()
+  private shutdownStarted = false
 
   constructor(
     private readonly browserManager: BrowserManager,
     private readonly options: AgentBrowserBridgeOptions = {}
   ) {
     this.agentBrowserBin = resolveAgentBrowserBinary()
+    this.agentBrowserEnv = createAgentBrowserProcessEnvironment({
+      inheritedEnv: process.env,
+      platform: process.platform,
+      userDataPath: app.getPath('userData')
+    })
   }
 
   // ── Tab tracking ──
@@ -671,11 +686,16 @@ export class AgentBrowserBridge {
       this.activeWebContentsId = nextWorktreeActiveWebContentsId
     }
     if (browserPageId) {
-      const sessionName = `orca-tab-${browserPageId}`
-      await this.destroySession(sessionName)
-      this.pendingInterceptRestore.delete(sessionName)
+      await this.onPageClosed(browserPageId)
     }
     this.options.onTabsChanged?.(owningWorktreeId)
+  }
+
+  /** Retire a helper by its stable page identity when WebContents mapping is gone. */
+  async onPageClosed(browserPageId: string): Promise<void> {
+    const sessionName = `orca-tab-${browserPageId}`
+    await this.destroySession(sessionName)
+    this.pendingInterceptRestore.delete(sessionName)
   }
 
   async onProcessSwap(
@@ -2037,12 +2057,18 @@ export class AgentBrowserBridge {
 
   // ── Session lifecycle ──
 
-  async destroyAllSessions(): Promise<void> {
-    const promises: Promise<void>[] = []
-    for (const sessionName of this.sessions.keys()) {
-      promises.push(this.destroySession(sessionName))
-    }
-    await Promise.allSettled(promises)
+  async destroyAllSessions(options?: AgentBrowserCleanupOptions): Promise<void> {
+    this.shutdownStarted = true
+    const sessionNames = new Set([
+      ...this.sessions.keys(),
+      ...this.pendingSessionCreation.keys(),
+      ...this.pendingSessionDestruction.keys()
+    ])
+    await mapSettledWithConcurrency(
+      [...sessionNames],
+      AGENT_BROWSER_CLEANUP_CONCURRENCY,
+      (sessionName) => this.destroySession(sessionName, options)
+    )
     this.pendingInterceptRestore.clear()
   }
 
@@ -2066,12 +2092,14 @@ export class AgentBrowserBridge {
     execute: (sessionName: string, target: ResolvedBrowserCommandTarget) => Promise<T>,
     options: EnqueueTargetedCommandOptions = {}
   ): Promise<T> {
+    this.assertCommandAdmission()
     const target = this.resolveCommandTarget(worktreeId, browserPageId, options.requireScopedTarget)
     const sessionName = `orca-tab-${target.browserPageId}`
 
     if (options.ensureSession !== false) {
       await this.ensureSession(sessionName, target.browserPageId, target.webContentsId)
     }
+    this.assertCommandAdmission()
 
     return new Promise<T>((resolve, reject) => {
       let queue = this.commandQueues.get(sessionName)
@@ -2295,6 +2323,7 @@ export class AgentBrowserBridge {
     if (pendingDestruction) {
       await pendingDestruction
     }
+    this.assertCommandAdmission()
 
     if (this.sessions.has(sessionName)) {
       return
@@ -2304,6 +2333,7 @@ export class AgentBrowserBridge {
     const pending = this.pendingSessionCreation.get(sessionName)
     if (pending) {
       await pending
+      this.assertCommandAdmission()
       return
     }
 
@@ -2374,7 +2404,9 @@ export class AgentBrowserBridge {
 
       const destroy = (async (): Promise<void> => {
         try {
-          await this.runAgentBrowserRaw(sessionName, ['--session', sessionName, 'close'])
+          await this.runAgentBrowserRaw(sessionName, ['--session', sessionName, 'close'], {
+            timeoutMs: AGENT_BROWSER_CLEANUP_TIMEOUT_MS
+          })
         } catch {
           // Session may already be dead.
         }
@@ -2393,7 +2425,10 @@ export class AgentBrowserBridge {
     }
   }
 
-  private async destroySession(sessionName: string): Promise<void> {
+  private async destroySession(
+    sessionName: string,
+    options: AgentBrowserCleanupOptions = { closeTimeoutMs: AGENT_BROWSER_CLEANUP_TIMEOUT_MS }
+  ): Promise<void> {
     const pendingDestruction = this.pendingSessionDestruction.get(sessionName)
     if (pendingDestruction) {
       await pendingDestruction
@@ -2436,7 +2471,11 @@ export class AgentBrowserBridge {
     const destroy = (async (): Promise<void> => {
       try {
         // Why: each tab has its own named session — close without --session leaves this tab's daemon running.
-        await this.runAgentBrowserRaw(sessionName, ['--session', sessionName, 'close'])
+        await this.runAgentBrowserRaw(
+          sessionName,
+          ['--session', sessionName, 'close'],
+          options.closeTimeoutMs === undefined ? undefined : { timeoutMs: options.closeTimeoutMs }
+        )
       } catch {
         // Session may already be dead
       }
@@ -2464,6 +2503,12 @@ export class AgentBrowserBridge {
         cmd.reject(err)
       }
       queue.length = 0
+    }
+  }
+
+  private assertCommandAdmission(): void {
+    if (this.shutdownStarted) {
+      throw new BrowserError('browser_owner_unavailable', 'Browser runtime is shutting down')
     }
   }
 
@@ -2608,7 +2653,11 @@ export class AgentBrowserBridge {
           // process owns no console, so each spawn gets a fresh visible conhost
           // that takes foreground -- keystrokes typed into a terminal at that
           // moment land in the black box (#14543).
-          { timeout: STALE_SESSION_CLOSE_TIMEOUT_MS, windowsHide: true },
+          {
+            env: this.agentBrowserEnv,
+            timeout: STALE_SESSION_CLOSE_TIMEOUT_MS,
+            windowsHide: true
+          },
           (error) =>
             finish(
               error
@@ -2675,8 +2724,8 @@ export class AgentBrowserBridge {
           // agent-browser invocation would otherwise flash a console (#14543).
           windowsHide: true,
           env: execOptions?.envOverrides
-            ? { ...process.env, ...execOptions.envOverrides }
-            : process.env
+            ? { ...this.agentBrowserEnv, ...execOptions.envOverrides }
+            : this.agentBrowserEnv
         },
         (error, stdout, stderr) => {
           if (session && session.activeProcess === child) {
