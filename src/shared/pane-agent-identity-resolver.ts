@@ -23,30 +23,15 @@ import type { TuiAgent } from './tui-agent'
  * launch, a recognized command at a shell prompt, a host-confirmed foreground change, a new
  * provider session. Never by a title changing, and never by transport loss.
  */
-/**
- * Ranked by TENSE, not by how authoritative the source sounds.
- *
- * The first two are OBSERVATIONS of what is running now. Everything after them is a RECORD of
- * something that happened, and a record does not stop being true when the thing it describes ends —
- * which is why a pane reused after its agent was closed kept reading as the old agent.
- */
 export const PANE_AGENT_EVIDENCE_SOURCES = [
-  /** Present tense. A live provider hook for a turn in progress: the agent is running and said so. */
+  /** A live provider hook for a turn in progress. The agent is running and said so. */
   'live-hook',
-  /** Present tense. The pane's foreground process, as read on the execution host. */
+  /** The pane's foreground process, as read on the execution host. */
   'process',
-  /**
-   * Past tense. A provider hook from a turn that finished — the agent's own word that it actually
-   * ran in this pane. Ranks above `launch` because it is evidence the agent EXISTED here, where a
-   * launch record is only evidence Orca tried to start one.
-   */
-  'completed-hook',
-  /**
-   * Past tense, and the weakest of the trusted sources. Orca launched or accepted a command for
-   * this agent — an event, not a state. It survives the agent exiting and the pane being reused,
-   * so it must not outrank anything that observes the present.
-   */
+  /** Orca launched, resumed, or accepted a command for this agent. A fact Orca owns. */
   'launch',
+  /** A provider hook from a turn that finished. Still authoritative about identity. */
+  'completed-hook',
   /** A sleeping session record restored for this pane. */
   'sleeping-session',
   /** Another pane in the same tab. Tab-level surfaces only; never pane-scoped routing. */

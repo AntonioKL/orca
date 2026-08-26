@@ -99,12 +99,21 @@ describe('resolvePublishedPaneAgentIdentity', () => {
     })
   })
 
-  describe('a launch record is a past event, not a live observation', () => {
+  describe('a launch record is outranked by live observation, not by other records', () => {
+    // NOTE: `launch` deliberately still ranks ABOVE `completed-hook`, matching
+    // pane-agent-owner.ts. Demoting it looked right — a launch record is past tense — but a
+    // completed hook is past tense too, and without run keys it never expires. Ranking it higher
+    // lets a stale hook from a previous agent hijack a pane from the fresh launch record of the
+    // agent running now. The reorder belongs with run generation, not before it.
+
     // Field report: launch an agent, close it, reuse the terminal — the pane kept reading as the
     // old agent. A launch record does not stop being true when the thing it describes ends.
-    it('lets a completed hook outrank a stale launch record', () => {
+    it('keeps the launch record when only a completed hook competes', () => {
+      // Both are records, and neither expires without run keys. The launch record is the one Orca
+      // stamped for the CURRENT process, so promoting the hook above it lets a stale hook from a
+      // previous agent hijack the pane. Matches pane-agent-owner.ts.
       expect(resolve({ launchAgent: 'claude', hookAgent: 'codex', hookIsLive: false })).toBe(
-        'codex'
+        'claude'
       )
     })
 
