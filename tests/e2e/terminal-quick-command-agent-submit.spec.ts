@@ -36,6 +36,7 @@ const fixtureScript = path.join(process.cwd(), 'tests', 'tools', 'repro-terminal
 const fakeCodex = path.join(fixtureBin, process.platform === 'win32' ? 'codex.cmd' : 'codex')
 const prompt = `${fixtureMarker} ${'deterministic quick command payload '.repeat(16)}`
 const normalizedPrompt = prompt.trim()
+const expectStalled = process.env.ORCA_E2E_EXPECT_QUICK_COMMAND_STALLED === '1'
 
 mkdirSync(fixtureBin)
 if (process.platform === 'win32') {
@@ -141,15 +142,31 @@ test('Quick Command submits a settled prompt to an active Codex TUI', async ({
   await orcaPage.getByRole('menuitem', { name: 'Quick Commands' }).hover()
   await orcaPage.getByRole('menuitem', { name: 'Submit deterministic prompt' }).click()
 
-  await expect
-    .poll(readReport, { message: 'Fake TUI did not emit a complete state report' })
-    .toMatchObject({ submitted: true })
+  await expect.poll(readReport, { message: 'Fake TUI did not emit a state report' }).not.toBeNull()
   const report = readReport()
   const writes = (await readTerminalPtyWriteEntries(electronApp))
     .filter((entry) => entry.id === ptyId)
     .map((entry) => entry.data)
   const receivedChunks = report?.inputChunksHex.map((hex) => Buffer.from(hex, 'hex').toString())
   console.log(JSON.stringify({ tabId, ptyId, writes, receivedChunks, report }))
+
+  if (expectStalled) {
+    expect(report?.inputHex).toBe(Buffer.from(`${normalizedPrompt}\r`, 'utf8').toString('hex'))
+    expect(receivedChunks).toEqual([`${normalizedPrompt}\r`])
+    expect(report).toMatchObject({
+      composerReady: false,
+      contractOk: false,
+      hasBracketedPasteFrame: false,
+      markerReceived: true,
+      prematureEnters: 1,
+      receivedEnters: 0,
+      submitted: false
+    })
+    await expect(getTerminalContent(orcaPage)).resolves.not.toContain(
+      'ORCA_TERMINAL_SEND_REPORT ok'
+    )
+    return
+  }
 
   // The fake TUI records the exact bytes observed on its PTY stdin. The main-process
   // IPC spy is intentionally only diagnostic here because settled runtime sends can
