@@ -395,4 +395,152 @@ describe('WorktreeJumpPalette interleaved primary sections', () => {
     const worktree = row?.querySelector('[data-slot="palette-open-tab-worktree"]')
     expect(worktree?.textContent).toBe('main')
   })
+
+  it('reveals 20 more entries when clicking the See more button in soft preview', async () => {
+    const tabIds = Array.from({ length: 30 }, (_, index) => `${index}`)
+    await renderPalette({
+      worktreesByRepo: {
+        'repo-1': [
+          makeWorktree('wt-tabs', 'tab-host'),
+          ...Array.from({ length: 5 }, (_, index) =>
+            makeWorktree(`wt-${index}`, `improve-perf-${index}`)
+          )
+        ]
+      },
+      showSleepingWorkspaces: true,
+      ptyIdsByTabId: Object.fromEntries(tabIds.map((id) => [`term-${id}`, [`pty-${id}`]])),
+      tabsByWorktree: {
+        'wt-tabs': tabIds.map((id) => makeTerminalTab(`term-${id}`, 'wt-tabs', `Perf chat ${id}`))
+      },
+      unifiedTabsByWorktree: {
+        'wt-tabs': tabIds.map((id) =>
+          makeUnifiedTab(`tab-${id}`, 'wt-tabs', `term-${id}`, `Perf chat ${id}`)
+        )
+      },
+      groupsByWorktree: {
+        'wt-tabs': [
+          makeGroup(
+            'wt-tabs',
+            tabIds.map((id) => `tab-${id}`)
+          )
+        ]
+      },
+      activeGroupIdByWorktree: { 'wt-tabs': 'group-wt-tabs' }
+    })
+
+    await act(async () => {
+      setCommandQuery?.('perf')
+    })
+    await flushEffects()
+
+    // Initially preview is 6, remainder has 24
+    expect(testContainer.textContent).toContain('24 more')
+    const seeMoreBtn = Array.from(testContainer.querySelectorAll('button')).find((btn) =>
+      btn.textContent?.includes('See more')
+    )
+    expect(seeMoreBtn).toBeDefined()
+
+    // Click See more button
+    await act(async () => {
+      seeMoreBtn?.click()
+    })
+    await flushEffects()
+
+    // 6 + 20 = 26 preview tabs, 4 remainder
+    expect(testContainer.textContent).toContain('4 more')
+  })
+
+  it('resets expanded section caps when query changes', async () => {
+    const tabIds = Array.from({ length: 30 }, (_, index) => `${index}`)
+    await renderPalette({
+      worktreesByRepo: {
+        'repo-1': [
+          makeWorktree('wt-tabs', 'tab-host'),
+          ...Array.from({ length: 5 }, (_, index) =>
+            makeWorktree(`wt-${index}`, `improve-perf-${index}`)
+          )
+        ]
+      },
+      showSleepingWorkspaces: true,
+      ptyIdsByTabId: Object.fromEntries(tabIds.map((id) => [`term-${id}`, [`pty-${id}`]])),
+      tabsByWorktree: {
+        'wt-tabs': tabIds.map((id) => makeTerminalTab(`term-${id}`, 'wt-tabs', `Perf chat ${id}`))
+      },
+      unifiedTabsByWorktree: {
+        'wt-tabs': tabIds.map((id) =>
+          makeUnifiedTab(`tab-${id}`, 'wt-tabs', `term-${id}`, `Perf chat ${id}`)
+        )
+      },
+      groupsByWorktree: {
+        'wt-tabs': [
+          makeGroup(
+            'wt-tabs',
+            tabIds.map((id) => `tab-${id}`)
+          )
+        ]
+      },
+      activeGroupIdByWorktree: { 'wt-tabs': 'group-wt-tabs' }
+    })
+
+    await act(async () => {
+      setCommandQuery?.('perf')
+    })
+    await flushEffects()
+
+    const seeMoreBtn = Array.from(testContainer.querySelectorAll('button')).find((btn) =>
+      btn.textContent?.includes('See more')
+    )
+    await act(async () => {
+      seeMoreBtn?.click()
+    })
+    await flushEffects()
+    expect(testContainer.textContent).toContain('4 more')
+
+    // Change query: should reset back to 6 preview (so 24 more)
+    await act(async () => {
+      setCommandQuery?.('per')
+    })
+    await flushEffects()
+    expect(testContainer.textContent).toContain('24 more')
+  })
+
+  it('allows clicking See more on empty query to expand worktree cap by 20', async () => {
+    const worktrees = Array.from({ length: 35 }, (_, index) =>
+      makeWorktree(`wt-${index}`, `project-wt-${index}`)
+    )
+    await renderPalette({
+      worktreesByRepo: { 'repo-1': worktrees },
+      showSleepingWorkspaces: true
+    })
+
+    // Empty query with 35 worktrees: initial cap is 10, 25 more
+    expect(testContainer.textContent).toContain('25 more')
+    const seeMoreBtn = Array.from(testContainer.querySelectorAll('button')).find((btn) =>
+      btn.textContent?.includes('See more')
+    )
+    expect(seeMoreBtn).toBeDefined()
+
+    await act(async () => {
+      seeMoreBtn?.click()
+    })
+    await flushEffects()
+
+    // After expanding by 20: 30 worktrees are rendered, 5 more
+    const renderedItems = testContainer.querySelectorAll('[data-command-item]')
+    expect(renderedItems).toHaveLength(30)
+    expect(testContainer.textContent).toContain('5 more')
+
+    // Click again: 30 + 20 = 50 (all 35 fit), hint disappears
+    const seeMoreBtn2 = Array.from(testContainer.querySelectorAll('button')).find((btn) =>
+      btn.textContent?.includes('See more')
+    )
+    await act(async () => {
+      seeMoreBtn2?.click()
+    })
+    await flushEffects()
+
+    const renderedItemsAll = testContainer.querySelectorAll('[data-command-item]')
+    expect(renderedItemsAll).toHaveLength(35)
+    expect(testContainer.textContent).not.toContain('more')
+  })
 })
