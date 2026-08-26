@@ -33,9 +33,12 @@ export function installPtyExitHibernate(session: ConnectPanePtySession): void {
   session.currentProcessExitState = session.createProcessExitState(session.paneStartup)
   session.processExitStateByPtyId = new Map<string, ProcessExitState>()
   session.bindProcessExitState = (ptyId: string, replacedPtyId?: string): void => {
-    const state =
-      (replacedPtyId ? session.processExitStateByPtyId.get(replacedPtyId) : undefined) ??
-      session.currentProcessExitState
+    // A replacement gets a clean state; never carry detector or restart context
+    // from the PTY it replaced.
+    const state = replacedPtyId
+      ? session.createProcessExitState(null)
+      : session.currentProcessExitState
+    session.currentProcessExitState = state
     session.processExitStateByPtyId.set(ptyId, state)
     if (replacedPtyId && replacedPtyId !== ptyId) {
       session.processExitStateByPtyId.delete(replacedPtyId)
@@ -201,8 +204,7 @@ export function installPtyExitHibernate(session: ConnectPanePtySession): void {
       return
     }
     session.handledExitPtyId = ptyId
-    const processExitState =
-      session.processExitStateByPtyId.get(ptyId) ?? session.currentProcessExitState
+    const processExitState = session.processExitStateByPtyId.get(ptyId)
     session.processExitStateByPtyId.delete(ptyId)
     session.agentCompletionCoordinator.dispose()
     session.dropSideEffectFactConsumer()
@@ -280,15 +282,22 @@ export function installPtyExitHibernate(session: ConnectPanePtySession): void {
       return
     }
     session.manager.setPaneGpuRendering(session.pane.id, true)
-    const failedLocalProcess =
-      !session.connectionId && session.runtimeEnvironmentId === null && exitCode !== 0
-    if (failedLocalProcess && session.deps.onPaneProcessDied) {
-      const gitBashConsoleCapacityFailure = processExitState.detector.detected()
+    const hasTerminalInput =
+      Number.isFinite(session.lastTerminalInputAt) || Boolean(session.pendingTerminalInputWrite)
+    const gitBashConsoleCapacityFailure =
+      session.isNativeWindowsConpty &&
+      !session.connectionId &&
+      session.runtimeEnvironmentId === null &&
+      exitCode !== 0 &&
+      session.spawnedFreshPtyId === ptyId &&
+      !hasTerminalInput &&
+      processExitState?.detector.detected() === true
+    if (gitBashConsoleCapacityFailure && session.deps.onPaneProcessDied) {
       session.deps.onPaneProcessDied({
         paneId: session.pane.id,
         exitCode,
-        startup: gitBashConsoleCapacityFailure ? processExitState.startup : null,
-        reason: gitBashConsoleCapacityFailure ? 'git-bash-console-capacity' : 'process-failed'
+        startup: processExitState.startup,
+        reason: 'git-bash-console-capacity'
       })
       return
     }
@@ -305,7 +314,7 @@ export function installPtyExitHibernate(session: ConnectPanePtySession): void {
       // for this ptyId — reattach/coldRestore skip it) that the user never typed
       // into, so a reattached-dead session or an explicit `exit` still tears
       // down as before.
-      if (session.spawnedFreshPtyId === ptyId && !Number.isFinite(session.lastTerminalInputAt)) {
+      if (session.spawnedFreshPtyId === ptyId && !hasTerminalInput) {
         return
       }
       session.deps.onPtyExitRef.current(ptyId)
@@ -315,7 +324,7 @@ export function installPtyExitHibernate(session: ConnectPanePtySession): void {
       session.deps.isVisibleRef.current &&
       session.hadExistingPaneTransportAtConnect &&
       !session.restoredPtyIdForTransport &&
-      !Number.isFinite(session.lastTerminalInputAt) &&
+      !hasTerminalInput &&
       !session.hasReceivedPtyOutput
     ) {
       // Why: a freshly split pane can lose its newborn PTY during setup; keep
