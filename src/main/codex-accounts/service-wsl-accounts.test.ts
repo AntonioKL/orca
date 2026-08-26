@@ -117,6 +117,76 @@ describe('CodexAccountService config sync', () => {
     )
   })
 
+  it('keeps Linux-relative config paths when a WSL home is under a mounted drive', async () => {
+    vi.resetModules()
+    const originalPlatform = process.platform
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+
+    const wslManagedHomePath = join(testState.userDataDir, 'wsl-account', 'home')
+    const wslCanonicalHomePath = join(testState.userDataDir, 'wsl-home', '.codex')
+    const wslCanonicalConfigPath = join(wslCanonicalHomePath, 'config.toml')
+    const wslLinuxHomePath = '/mnt/c/Users/alice/.local/share/orca/codex-accounts/account-1/home'
+    const wslLinuxCanonicalHomePath = '/mnt/c/Users/alice/.codex'
+    mkdirSync(wslManagedHomePath, { recursive: true })
+    mkdirSync(wslCanonicalHomePath, { recursive: true })
+    writeFileSync(join(wslManagedHomePath, '.orca-managed-home'), 'account-1\n', 'utf-8')
+    writeFileSync(wslCanonicalConfigPath, 'model_instructions_file = "instructions.md"\n', 'utf-8')
+
+    vi.doMock('node:child_process', () => ({
+      execFileSync: vi.fn(() => `${wslLinuxHomePath}\n`),
+      spawn: vi.fn()
+    }))
+    vi.doMock('../../shared/wsl-paths', () => ({
+      parseWslUncPath: (path: string) =>
+        path === wslManagedHomePath ? { distro: 'Ubuntu', linuxPath: wslLinuxHomePath } : null
+    }))
+    vi.doMock('../wsl', () => ({
+      toWindowsWslPath: (linuxPath: string) =>
+        linuxPath.endsWith('/config.toml')
+          ? wslCanonicalConfigPath
+          : linuxPath === wslLinuxCanonicalHomePath
+            ? wslCanonicalHomePath
+            : wslManagedHomePath
+    }))
+
+    const settings = createSettings({
+      codexManagedAccounts: [
+        {
+          id: 'account-1',
+          email: 'wsl@example.com',
+          managedHomePath: wslManagedHomePath,
+          managedHomeRuntime: 'wsl',
+          wslDistro: 'Ubuntu',
+          wslLinuxHomePath,
+          providerAccountId: null,
+          workspaceLabel: null,
+          workspaceAccountId: null,
+          createdAt: 1,
+          updatedAt: 1,
+          lastAuthenticatedAt: 1
+        }
+      ]
+    })
+
+    try {
+      const { CodexAccountService } = await import('./service')
+      new CodexAccountService(
+        createStore(settings) as never,
+        createRateLimits() as never,
+        createRuntimeHome() as never
+      )
+
+      expect(readFileSync(join(wslManagedHomePath, 'config.toml'), 'utf-8')).toContain(
+        "model_instructions_file = '/mnt/c/Users/alice/.codex/instructions.md'"
+      )
+    } finally {
+      Object.defineProperty(process, 'platform', {
+        configurable: true,
+        value: originalPlatform
+      })
+    }
+  })
+
   it('adds a managed Codex account inside WSL when the account context is WSL', async () => {
     vi.resetModules()
     const originalPlatform = process.platform

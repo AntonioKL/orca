@@ -91,6 +91,8 @@ type CanonicalCodexConfig = {
   contents: string
   /** Host-readable source home; the mirror resolves WSL UNC paths to their Linux spelling. */
   sourceHomePath: string
+  /** Preserve Linux path semantics when WSL $HOME is under /mnt/<drive>. */
+  sourceConfigDir?: string
 }
 
 export type CodexAccountAddTarget = {
@@ -1312,7 +1314,8 @@ export class CodexAccountService {
     // granted there while refreshing ordinary settings from the lane's source.
     syncSystemConfigIntoManagedCodexHome({
       runtimeHomePath: trustedManagedHomePath,
-      systemHomePath: canonicalConfig.sourceHomePath
+      systemHomePath: canonicalConfig.sourceHomePath,
+      systemConfigDir: canonicalConfig.sourceConfigDir
     })
   }
 
@@ -1356,7 +1359,8 @@ export class CodexAccountService {
       // path rewrites must anchor to the Linux-side ~/.codex, not the UNC path.
       return {
         contents: readFileSync(configPath, 'utf-8'),
-        sourceHomePath: toWindowsWslPath(`${wslHome}/.codex`, wslInfo.distro)
+        sourceHomePath: toWindowsWslPath(`${wslHome}/.codex`, wslInfo.distro),
+        sourceConfigDir: `${wslHome}/.codex`
       }
     } catch (error) {
       console.warn('[codex-accounts] Failed to read WSL canonical config:', error)
