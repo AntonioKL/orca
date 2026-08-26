@@ -6,7 +6,7 @@ import {
   type RecognizedAgentProcess
 } from '../../shared/agent-process-recognition'
 import {
-  resolveOuterWrapperForegroundProcess,
+  resolveOuterWrapperForegroundIdentity,
   shouldInspectOuterWrapperForegroundProcess
 } from '../../shared/foreground-wrapper-agent'
 import { isShellProcess } from '../../shared/shell-process-detection'
@@ -24,17 +24,26 @@ export type AgentForegroundResolutionOptions = {
   forceProcessScan?: boolean
   /** Lazily proves which global descendants still belong to this ConPTY. */
   readWindowsConsoleAttachedProcessIds?: () => Promise<ReadonlySet<number> | null>
+  /**
+   * A caller's cached liveness anchor. When a scan row holds this pid but no
+   * longer recognizes as an agent, the pid was recycled by a different process
+   * (command lines are immutable), and the resolution reports the anchor foreign.
+   */
+  anchorProcessId?: number
 }
 
 export type WindowsAgentForegroundResolution = {
   available: boolean
   processName: string | null
   /**
-   * Pid of the candidate row that proved the name — the liveness anchor a
-   * caller may check against the pane's job. Absent when the name came from a
-   * fallback or when sibling leaves left no single anchor.
+   * Pid of the process the name belongs to — the liveness anchor a caller may
+   * check against the pane's job. The OUTER wrapper's pid when the name
+   * collapsed onto one (its embedded leaf may exit first). Absent when the
+   * name came from a fallback or when sibling leaves left no single anchor.
    */
   processId?: number
+  /** True when the scan proves `anchorProcessId` now belongs to a non-agent. */
+  anchorPidForeign?: boolean
 }
 
 type WindowsForegroundIdentity = {
@@ -94,9 +103,21 @@ export async function resolveWindowsAgentForegroundProcessWithAvailability(
     }
     filteredCandidates = candidates.filter((candidate) => consoleProcessIds.has(candidate.pid))
   }
+  // From the UNfiltered rows: a console-detached squatter still contradicts.
+  const anchorPidForeign =
+    options.anchorProcessId !== undefined &&
+    candidates.some(
+      (candidate) =>
+        candidate.pid === options.anchorProcessId &&
+        // A query-denied row falls back to command === name; that is
+        // inconclusive (the agent may just be unreadable), never foreign.
+        candidate.command !== candidate.name &&
+        recognizeWindowsProcessCandidate(candidate) === null
+    )
   return {
     available: true,
-    ...resolveWindowsForegroundIdentity(filteredCandidates, fallbackProcess, options.contextPaths)
+    ...resolveWindowsForegroundIdentity(filteredCandidates, fallbackProcess, options.contextPaths),
+    ...(anchorPidForeign ? { anchorPidForeign: true } : {})
   }
 }
 
@@ -140,10 +161,7 @@ function resolveWindowsForegroundIdentity(
     recognizeAgentProcessFromCommandLine(candidate.command) ??
     recognizeAgentProcessFromCommandLine(candidate.name)
   if (recognized) {
-    return {
-      processName: resolveOuterWrapperForegroundProcess(recognized, candidate, candidates),
-      processId: candidate.pid
-    }
+    return resolveOuterWrapperForegroundIdentity(recognized, candidate, candidates)
   }
   return { processName: null }
 }
@@ -218,21 +236,23 @@ function resolveRecognizedWindowsProcessCandidates(
           windowsCandidateIsAncestor(candidate, other, candidatesByPid)
       )
   )
-  const leafProcessNames = new Set(
-    leafCandidates.map((candidate) =>
-      resolveOuterWrapperForegroundProcess(candidate.recognized, candidate, allCandidates)
-    )
+  const leafIdentities = leafCandidates.map((candidate) =>
+    resolveOuterWrapperForegroundIdentity(candidate.recognized, candidate, allCandidates)
   )
+  const leafProcessNames = new Set(leafIdentities.map((identity) => identity.processName))
   // Why: Windows lacks a cheap PTY foreground marker like POSIX '+'. A single
   // recognized lineage leaf is strong enough; sibling agent leaves are not.
   if (leafProcessNames.size !== 1) {
     return { processName: null }
   }
+  // The anchor is the process the NAME belongs to — the outer wrapper when the
+  // leaf collapsed onto one, else the leaf itself. An embedded leaf can exit
+  // and restart under a live wrapper; its pid must not stand for the wrapper's.
+  const anchorProcessIds = new Set(leafIdentities.map((identity) => identity.processId))
   return {
     processName: [...leafProcessNames][0],
-    // The anchor is the leaf that proved the name, even when the reported name
-    // is its outer wrapper. Two leaves agreeing on a name leave no single anchor.
-    ...(leafCandidates.length === 1 ? { processId: leafCandidates[0].pid } : {})
+    // Distinct anchors agreeing on one name still leave no single liveness anchor.
+    ...(anchorProcessIds.size === 1 ? { processId: [...anchorProcessIds][0] } : {})
   }
 }
 

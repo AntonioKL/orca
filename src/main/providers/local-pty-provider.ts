@@ -1458,7 +1458,8 @@ export class LocalPtyProvider implements IPtyProvider {
         proc.pid,
         fallbackProcess,
         {
-          contextPaths: ptyAgentForegroundContextPaths.get(id)
+          contextPaths: ptyAgentForegroundContextPaths.get(id),
+          ...(cachedEntry?.pid != null ? { anchorProcessId: cachedEntry.pid } : {})
         }
       )
       // Why: the scan can outlive PTY teardown/id reuse; stale results must not resurrect cache for a foreign id.
@@ -1470,10 +1471,15 @@ export class LocalPtyProvider implements IPtyProvider {
       const resolvedAgent = resolution.processName
         ? recognizeAgentProcessFromCommandLine(resolution.processName)
         : null
+      // A recycled anchor pid keeps job membership truthful but the identity
+      // dead; the scan proving the pid now runs a non-agent settles it.
+      const anchorContradicted = resolution.anchorPidForeign === true
       // Why: incomplete snapshot + unavailable job read isn't exit proof; and an
       // anchor pid still alive in the job outranks a snapshot that lost its row.
       const stableResolution =
-        (paneMembershipUnavailable || cachedAgentAliveInJob) && resolvedAgent === null
+        (paneMembershipUnavailable || cachedAgentAliveInJob) &&
+        !anchorContradicted &&
+        resolvedAgent === null
           ? { ...resolution, available: false }
           : resolution
       const stable = resolveStableForegroundProcess(stableResolution, lastRecognizedAgent)
@@ -1487,7 +1493,7 @@ export class LocalPtyProvider implements IPtyProvider {
               : null,
           at: Date.now()
         })
-      } else if (stable.lastRecognizedAgent && cachedAgentAliveInJob) {
+      } else if (stable.lastRecognizedAgent && cachedAgentAliveInJob && !anchorContradicted) {
         // The anchor pid in the job is proof of life; restamp so the
         // short-circuit resumes instead of scanning on every call.
         const entry = ptyLastRecognizedForeground.get(id)

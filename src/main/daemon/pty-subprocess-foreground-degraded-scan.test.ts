@@ -251,6 +251,20 @@ describe('daemon pty foreground degraded-scan handling', () => {
     expect(await readForegroundAt(handle, 120_000)).toBe('claude')
   })
 
+  it('retires an anchored agent when the scan proves its pid was recycled', async () => {
+    // Squatter reuse: the pid survives in the job, but the scan shows it now
+    // runs a non-agent. Proof of life must yield to proof of a different process.
+    resolveAgentForegroundProcessMock
+      .mockResolvedValueOnce({ available: true, processName: 'claude', processId: 999 })
+      .mockResolvedValue({ available: true, processName: null, anchorPidForeign: true })
+    readConptyMock.mockReturnValue(new Set([12345, 999]))
+    const { handle } = await spawnWindowsShell()
+
+    await readForegroundAt(handle, 0)
+    await readForegroundAt(handle, 1_000) // refresh sees the foreign anchor and clears
+    expect(await readForegroundAt(handle, 1_100)).toBe('powershell.exe')
+  })
+
   it('retires a cached agent when a scan finds no agent and the console is shell-only', async () => {
     resolveAgentForegroundProcessMock
       .mockResolvedValueOnce({ available: true, processName: 'claude' })

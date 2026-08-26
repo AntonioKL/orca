@@ -134,9 +134,10 @@ export function createPtyForegroundProcessTracker(args: {
       }
     }
     void resolveAgentForegroundProcessWithAvailability(proc.pid, fallbackProcess, {
-      contextPaths
+      contextPaths,
+      ...(cachedAgentForeground?.pid != null ? { anchorProcessId: cachedAgentForeground.pid } : {})
     })
-      .then<string | void>(({ processName, processId, available }) => {
+      .then<string | void>(({ processName, processId, available, anchorPidForeign }) => {
         if (args.isDead() || !available) {
           return
         }
@@ -154,6 +155,11 @@ export function createPtyForegroundProcessTracker(args: {
               return
             }
             if (verdict === 'confirmed' || verdict === 'recheck') {
+              if (anchorPidForeign === true) {
+                // The scan proved the pid recycled to a non-agent: retire now.
+                retireStaleForegroundIdentity()
+                return
+              }
               // The anchor pid is still in the job: the scan lost the row, not
               // the agent. Restamp so a live agent never ages out (#9258).
               cachedAgentForeground = { ...cachedAgentForeground, refreshedAt: Date.now() }

@@ -443,6 +443,35 @@ describe('LocalPtyProvider', () => {
       }
     })
 
+    it('drops an anchored agent when the drift recheck proves the pid was recycled', async () => {
+      // The anchor pid stays in the job (a squatter reused it) but the scan
+      // proves the pid now runs a non-agent: proof of life must not apply.
+      Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+      mockProc.process = 'powershell.exe'
+      resolveAgentForegroundProcessMock
+        .mockResolvedValueOnce({ available: true, processName: 'claude', processId: 999 })
+        .mockResolvedValue({ available: true, processName: null, anchorPidForeign: true })
+      readWindowsPtyJobProcessIdsMock.mockReturnValue(new Set([12345, 999]))
+      vi.useFakeTimers({ toFake: ['Date'] })
+      try {
+        vi.setSystemTime(1_000_000)
+        const { id } = await provider.spawn({ cols: 80, rows: 24 })
+
+        await expect(provider.getForegroundProcess(id)).resolves.toBe('claude')
+
+        vi.setSystemTime(1_000_000 + 40_000)
+        await expect(provider.getForegroundProcess(id)).resolves.toBeNull()
+        // The recheck scan received the anchor to test against.
+        expect(resolveAgentForegroundProcessMock).toHaveBeenLastCalledWith(
+          mockProc.pid,
+          'powershell.exe',
+          expect.objectContaining({ anchorProcessId: 999 })
+        )
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
     it('retires the cached agent after verified shell-only membership and a no-agent scan', async () => {
       Object.defineProperty(process, 'platform', {
         configurable: true,

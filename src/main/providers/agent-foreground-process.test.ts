@@ -407,6 +407,41 @@ describe('resolveAgentForegroundProcess', () => {
     ).resolves.toEqual({ available: true, processName: null })
   })
 
+  it('reports a foreign anchor when its pid now runs an unrecognized command', async () => {
+    // Pid reuse inside the pane's job: the row proves a different process
+    // (command lines are immutable), so job membership must stop confirming it.
+    Object.defineProperty(process, 'platform', { value: 'win32' })
+    mockWindowsRows([
+      { pid: 100, ppid: 99, name: 'powershell.exe', commandLine: 'powershell.exe' },
+      { pid: 999, ppid: 100, name: 'node.exe', commandLine: 'node server.js' }
+    ])
+
+    await expect(
+      resolveAgentForegroundProcessWithAvailability(100, 'powershell.exe', {
+        anchorProcessId: 999
+      })
+    ).resolves.toEqual({
+      available: true,
+      processName: 'powershell.exe',
+      anchorPidForeign: true
+    })
+  })
+
+  it('treats a query-denied anchor row as inconclusive, never foreign', async () => {
+    // A denied query yields command === name; the agent may just be unreadable.
+    Object.defineProperty(process, 'platform', { value: 'win32' })
+    mockWindowsRows([
+      { pid: 100, ppid: 99, name: 'powershell.exe', commandLine: 'powershell.exe' },
+      { pid: 999, ppid: 100, name: 'node.exe', commandLine: '' }
+    ])
+
+    await expect(
+      resolveAgentForegroundProcessWithAvailability(100, 'powershell.exe', {
+        anchorProcessId: 999
+      })
+    ).resolves.toEqual({ available: true, processName: 'powershell.exe' })
+  })
+
   it('treats a Windows snapshot missing the requested shell as unavailable', async () => {
     Object.defineProperty(process, 'platform', { value: 'win32' })
     mockWindowsRows([
