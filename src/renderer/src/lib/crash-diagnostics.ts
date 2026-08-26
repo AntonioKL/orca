@@ -1,3 +1,4 @@
+import { RENDERER_MEMORY_HEARTBEAT_INTERVAL_MS } from '../../../shared/renderer-memory-heartbeat'
 import { compactBreadcrumbData, describeUnknownValue } from './crash-breadcrumb-data'
 import { recordRendererCrashBreadcrumb } from './crash-breadcrumb-recorder'
 import {
@@ -7,8 +8,6 @@ import {
   setRendererMemorySamplingSurface,
   type RendererSurface
 } from './renderer-memory-sampling'
-
-const RENDERER_MEMORY_SAMPLE_INTERVAL_MS = 60_000
 
 let rendererCrashDiagnosticsInstalled = false
 let rendererMemoryInterval: number | null = null
@@ -32,7 +31,7 @@ export function installRendererCrashDiagnostics(surface: RendererSurface = 'main
     recordRendererMemorySample('startup')
     rendererMemoryInterval = window.setInterval(
       () => recordRendererMemorySample('interval'),
-      RENDERER_MEMORY_SAMPLE_INTERVAL_MS
+      RENDERER_MEMORY_HEARTBEAT_INTERVAL_MS
     )
   }
 }

@@ -5,6 +5,7 @@
  */
 import type { CrashReportDetailValue } from '../../../shared/crash-reporting'
 import type { RendererProcessMemory } from '../../../shared/renderer-process-memory'
+import { RENDERER_MEMORY_HEARTBEAT_BREADCRUMB } from '../../../shared/renderer-memory-heartbeat'
 import {
   getBrowserWebviewMemoryProfile,
   type BrowserWebviewMemoryProfile
@@ -76,7 +77,7 @@ export function recordRendererMemorySample(reason: string): void {
   refreshProcessFootprint()
 
   recordRendererCrashBreadcrumb(
-    'renderer_memory',
+    RENDERER_MEMORY_HEARTBEAT_BREADCRUMB,
     compactBreadcrumbData({
       reason,
       usedHeapMB: toMegabytes(memory.usedJSHeapSize),

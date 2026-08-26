@@ -1,5 +1,6 @@
 import { BrowserWindow, powerMonitor } from 'electron'
 import { recordCrashBreadcrumb } from './crash-reporting/crash-breadcrumb-store'
+import { SYSTEM_SLEPT_BREADCRUMB } from './system-sleep-breadcrumb'
 import { publishSystemResume, publishSystemSuspend } from './system-power-lifecycle'
 
 export const SYSTEM_RESUMED_CHANNEL = 'system:resumed'
@@ -53,7 +54,7 @@ export function registerSystemResumeBroadcast(
     const suspendedForMs = suspendedAt === null ? null : Math.max(0, now() - suspendedAt)
     suspendedAt = null
     if (suspendedForMs !== null && suspendedForMs >= MIN_REPORTABLE_SUSPEND_MS) {
-      recordCrashBreadcrumb('system_slept', { suspendedForMs })
+      recordCrashBreadcrumb(SYSTEM_SLEPT_BREADCRUMB, { suspendedForMs })
     }
     publishSystemResume()
     for (const window of getWindows()) {
