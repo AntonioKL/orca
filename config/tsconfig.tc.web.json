@@ -17,6 +17,7 @@
     "../src/main/wsl-distro-list-output.ts",
     "../src/main/wsl-distro-retry.ts",
     "../src/main/wsl.ts",
+    "../src/main/wsl-interop-spawn-directory.ts",
     "../src/main/startup/serve-desktop-activation.ts",
     "../src/main/startup/serve-mode-argv.ts",
     "../src/main/startup/single-instance-lock.ts",

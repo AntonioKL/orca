@@ -1,4 +1,5 @@
 import { isTerminalLeafId } from '../../../../shared/stable-pane-id'
+import { isProvenProcessExit } from '../../../../shared/terminal-exit-cause'
 import { isRemoteRuntimePtyId } from '@/runtime/runtime-terminal-inspection'
 import { useAppStore } from '@/store'
 import { closeTerminalTab } from '../terminal/terminal-tab-actions'
@@ -53,8 +54,18 @@ export function startParkedPtyWatcher(args: {
   ) {
     return
   }
-  const handlePtyExit = (_code: number, { hadPrimary }: { hadPrimary: boolean }): void => {
+  const handlePtyExit = (code: number, { hadPrimary }: { hadPrimary: boolean }): void => {
     useAppStore.getState().clearRuntimePaneTitle(tab.id, pane.paneId)
+    // Why (#16391): a synthesized code is not a death certificate — it is what
+    // every session on a host reports at once when the host itself goes away
+    // (`wsl --shutdown`, a relay drop). Record that so no later sweep reads this
+    // tab as finished, and below, refuse to spend the exit as a tab close: a
+    // parked tab has no pane to notice, and closing it destroys the persisted
+    // record. 23 tabs were deleted that way with no close ever requested.
+    const provenExit = isProvenProcessExit(code)
+    if (!provenExit) {
+      useAppStore.getState().markUnverifiedPtyLoss(tab.id)
+    }
     if (entry.disposersByPtyId.size > 1) {
       discardPreHandlerPtyState(ptyId)
       collapseParkedExitedLeaf(tab.id, ptyId)
@@ -71,6 +82,13 @@ export function startParkedPtyWatcher(args: {
     // Why: the empty entry prevents a pending pinned-close confirmation from restarting the dead PTY.
     entry.disposersByPtyId.get(ptyId)?.()
     entry.disposersByPtyId.delete(ptyId)
+    if (!provenExit) {
+      discardPreHandlerPtyState(ptyId)
+      if (parkedWatchersByTabId.get(tab.id) === entry) {
+        parkedWatchersByTabId.delete(tab.id)
+      }
+      return
+    }
     closeTerminalTab(tab.id, {
       captureRecentlyClosed: false,
       hostCloseReason: 'pty-exit',

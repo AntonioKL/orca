@@ -101,3 +101,17 @@ export function describeTerminalExitCause(cause: TerminalExitCause): string {
 export function isDeliberateTerminalExit(cause: TerminalExitCause): boolean {
   return cause.kind === 'operator_close'
 }
+
+/**
+ * Whether a delivered exit code is positive evidence that the process is gone.
+ *
+ * The stop paths synthesize a negative code to mean "we asked it to stop and
+ * never saw it die" — and that is exactly what a host emits for every one of
+ * its sessions at once when the execution host itself disappears (a WSL distro
+ * shutdown, a relay drop, a daemon teardown). Per
+ * `docs/reference/ssh-execution-boundary.md` that is `unverifiable`, never
+ * `exited`, so it may not authorize destroying the user's record of the tab.
+ */
+export function isProvenProcessExit(exitCode: number): boolean {
+  return resolveProcessExitCause({ exitCode }).kind !== 'unknown'
+}

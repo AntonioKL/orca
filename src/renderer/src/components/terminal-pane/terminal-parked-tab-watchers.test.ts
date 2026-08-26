@@ -93,6 +93,7 @@ type MockStoreState = {
   setRuntimePaneTitle: ReturnType<typeof vi.fn>
   setTabLayout: ReturnType<typeof vi.fn>
   updateTabTitle: ReturnType<typeof vi.fn>
+  markUnverifiedPtyLoss: ReturnType<typeof vi.fn>
 }
 
 let mockStoreState: MockStoreState
@@ -159,7 +160,8 @@ describe('terminal-parked-tab-watchers', () => {
       clearRuntimePaneTitle: vi.fn(),
       setRuntimePaneTitle: vi.fn(),
       setTabLayout: vi.fn(),
-      updateTabTitle: vi.fn()
+      updateTabTitle: vi.fn(),
+      markUnverifiedPtyLoss: vi.fn()
     }
     ;(globalThis as { window?: unknown }).window = { api: { pty: { write: ptyWrite } } }
     clearTerminalProviderSnapshotCapabilities()
@@ -398,6 +400,36 @@ describe('terminal-parked-tab-watchers', () => {
     expect(consumePreHandlerPtyState).toHaveBeenCalledWith(PTY_ID)
     expect(startedWatchers[0].dispose).toHaveBeenCalledTimes(1)
     expect(getParkedTerminalWatcherTabIds()).toEqual([])
+  })
+
+  // Regression coverage for #16391 ("A WSL distro shutdown deletes the tab
+  // records of every worktree that had a live PTY"). A parked tab has no pane to
+  // notice its own exit, so this watcher is what closes it — and a close deletes
+  // the persisted record. `wsl --shutdown` delivered code -1 for 23 sessions at
+  // once; docs/reference/ssh-execution-boundary.md calls that `unverifiable`,
+  // and an unverifiable loss must never be spent as a close.
+  it('keeps a parked tab whose PTY exit carried no proof of death', () => {
+    capturePanes([{ ptyId: PTY_ID, paneId: 1, leafId: LEAF_ID, drivesTabTitle: true }])
+    syncParked()
+
+    exitSubscriptions.find((entry) => entry.ptyId === PTY_ID)?.callback(-1, { hadPrimary: false })
+
+    expect(closeTerminalTab).not.toHaveBeenCalled()
+    expect(mockStoreState.markUnverifiedPtyLoss).toHaveBeenCalledWith(TAB_ID)
+    // The watcher still retires — the PTY really is gone from this client — but
+    // the tab record survives for an explicit close to remove.
+    expect(startedWatchers[0].dispose).toHaveBeenCalledTimes(1)
+    expect(getParkedTerminalWatcherTabIds()).toEqual([])
+  })
+
+  it('still closes a parked tab whose PTY exit was host-vouched', () => {
+    capturePanes([{ ptyId: PTY_ID, paneId: 1, leafId: LEAF_ID, drivesTabTitle: true }])
+    syncParked()
+
+    exitSubscriptions.find((entry) => entry.ptyId === PTY_ID)?.callback(0, { hadPrimary: false })
+
+    expect(closeTerminalTab).toHaveBeenCalledTimes(1)
+    expect(mockStoreState.markUnverifiedPtyLoss).not.toHaveBeenCalled()
   })
 
   it('retains the buffered exit and empty registry entry when pinned close is cancelled', () => {

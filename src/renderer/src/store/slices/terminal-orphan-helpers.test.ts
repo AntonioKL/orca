@@ -14,7 +14,8 @@ import { buildTerminalTabRetirementPlan } from './terminal-tab-retirement'
 // Why: superset state that satisfies both getOrphanTerminalIds (orphan sweep)
 // and buildTerminalTabRetirementPlan (retirement authority) so one fixture can
 // prove the two agree on liveness.
-type TestState = Parameters<typeof buildTerminalTabRetirementPlan>[0]
+type TestState = Parameters<typeof buildTerminalTabRetirementPlan>[0] &
+  Parameters<typeof getOrphanTerminalIds>[0]
 
 function makeTab(overrides: Partial<TerminalTab> & { id: string }): TerminalTab {
   return {
@@ -39,6 +40,7 @@ function makeState(overrides: Partial<TestState> = {}): TestState {
     lastKnownRelayPtyIdByTabId: {},
     deferredSshSessionIdsByTabId: {},
     pendingReconnectPtyIdByTabId: {},
+    unverifiedPtyLossTabIds: {},
     ...overrides
   } as TestState
 }
@@ -89,6 +91,33 @@ describe('getOrphanTerminalIds reconnect-map liveness', () => {
     })
 
     expect(getOrphanTerminalIds(state, 'wt-1')).toContain('dead')
+  })
+
+  // Regression coverage for #16391 ("A WSL distro shutdown deletes the tab
+  // records of every worktree that had a live PTY"). A synthesized exit code is
+  // what every session on a host reports at once when the host itself goes
+  // away, so it is `unverifiable` per docs/reference/ssh-execution-boundary.md.
+  // The sweep DELETES the persisted record, so it may not act on that.
+  it('does not orphan a tab whose PTY vanished without proof of death', () => {
+    const state = makeState({
+      tabsByWorktree: { 'wt-1': [makeTab({ id: 'host-lost', ptyId: null })] },
+      ptyIdsByTabId: { 'host-lost': [] },
+      unifiedTabsByWorktree: { 'wt-1': [] },
+      unverifiedPtyLossTabIds: { 'host-lost': true }
+    })
+
+    expect(getOrphanTerminalIds(state, 'wt-1')).not.toContain('host-lost')
+  })
+
+  it('orphans a tab whose PTY loss was proven once the marker is settled', () => {
+    const state = makeState({
+      tabsByWorktree: { 'wt-1': [makeTab({ id: 'host-lost', ptyId: null })] },
+      ptyIdsByTabId: { 'host-lost': [] },
+      unifiedTabsByWorktree: { 'wt-1': [] },
+      unverifiedPtyLossTabIds: {}
+    })
+
+    expect(getOrphanTerminalIds(state, 'wt-1')).toContain('host-lost')
   })
 
   // A persisted layout leaf binding is NOT a liveness signal: SSH-target removal

@@ -588,7 +588,10 @@ describe('runner execFile timeout handling', () => {
       expect(execFileMock).toHaveBeenCalledWith(
         'wsl.exe',
         ['-d', 'Ubuntu', '--exec', 'sh', '-lc', expect.any(String)],
-        expect.objectContaining({ cwd: undefined }),
+        // Why a concrete directory (#16463): `undefined` makes CreateProcessW inherit
+        // Orca's own cwd, a deletable WSL UNC path when it was launched from a
+        // worktree. The Linux directory still rides inside the command.
+        expect.objectContaining({ cwd: expect.any(String) }),
         expect.any(Function)
       )
       // A read also warms the direct-git environment probe in the background, so
@@ -621,7 +624,10 @@ describe('runner execFile timeout handling', () => {
       expect(execFileMock).toHaveBeenCalledWith(
         'wsl.exe',
         ['-d', 'Ubuntu', '--exec', 'bash', '-c', expect.any(String)],
-        expect.objectContaining({ cwd: undefined }),
+        // Why a concrete directory (#16463): `undefined` makes CreateProcessW inherit
+        // Orca's own cwd, a deletable WSL UNC path when it was launched from a
+        // worktree. The Linux directory still rides inside the command.
+        expect.objectContaining({ cwd: expect.any(String) }),
         expect.any(Function)
       )
       const shellCommand = execFileMock.mock.calls[0]?.[1]?.[5] as string

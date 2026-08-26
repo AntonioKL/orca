@@ -8,6 +8,7 @@ import {
   isCurrentDirectSshAuthority,
   isRemoteRuntimePtyId
 } from './terminal-pty-identities'
+import { omitUnverifiedPtyLossTabIds } from './terminal-unverified-pty-loss'
 
 export function createTerminalPtyBindingActions(
   set: TerminalStoreSet,
@@ -222,6 +223,16 @@ export function createTerminalPtyBindingActions(
             ...s.lastKnownRelayPtyIdByTabId,
             [tabId]: ptyId
           },
+          // Why (#16391): the tab is bound to a live session again, so the
+          // unverified-loss reprieve that kept its record from being swept has
+          // been settled by evidence and must not outlive it.
+          ...(s.unverifiedPtyLossTabIds[tabId]
+            ? {
+                unverifiedPtyLossTabIds: omitUnverifiedPtyLossTabIds(s.unverifiedPtyLossTabIds, [
+                  tabId
+                ])
+              }
+            : {}),
           suppressedPtyExitIds: nextSuppressedPtyExitIds,
           pendingCodexPaneRestartIds: nextPendingCodexPaneRestartIds,
           codexRestartNoticeByPtyId: nextCodexRestartNoticeByPtyId,

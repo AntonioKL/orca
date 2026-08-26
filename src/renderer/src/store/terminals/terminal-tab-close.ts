@@ -13,6 +13,7 @@ import {
 } from '../slices/terminal-tab-retirement'
 import type { TerminalSlice, TerminalStoreGet, TerminalStoreSet } from './terminal-state'
 import { startTerminalTabProviderRetirement } from './terminal-tab-close-providers'
+import { omitUnverifiedPtyLossTabIds } from './terminal-unverified-pty-loss'
 
 export function createTerminalTabCloseActions(
   set: TerminalStoreSet,
@@ -92,6 +93,11 @@ export function createTerminalTabCloseActions(
         delete nextPendingReconnectPtyIdByTabId[tabId]
         const nextRuntimePaneTitlesByTabId = { ...s.runtimePaneTitlesByTabId }
         delete nextRuntimePaneTitlesByTabId[tabId]
+        // Why (#16391): an explicit close is the one thing entitled to delete a
+        // record the unverified-loss reprieve was protecting.
+        const nextUnverifiedPtyLossTabIds = omitUnverifiedPtyLossTabIds(s.unverifiedPtyLossTabIds, [
+          tabId
+        ])
         const nextDirectSshPaneRetryByTabId = { ...s.directSshPaneRetryByTabId }
         delete nextDirectSshPaneRetryByTabId[tabId]
         const nextDirectSshLivePtyBindingByTabId = {
@@ -201,6 +207,9 @@ export function createTerminalTabCloseActions(
           deferredSshSessionIdsByTabId: nextDeferredSshSessionIdsByTabId,
           pendingReconnectPtyIdByTabId: nextPendingReconnectPtyIdByTabId,
           runtimePaneTitlesByTabId: nextRuntimePaneTitlesByTabId,
+          ...(nextUnverifiedPtyLossTabIds !== s.unverifiedPtyLossTabIds
+            ? { unverifiedPtyLossTabIds: nextUnverifiedPtyLossTabIds }
+            : {}),
           directSshPaneRetryByTabId: nextDirectSshPaneRetryByTabId,
           directSshLivePtyBindingByTabId: nextDirectSshLivePtyBindingByTabId,
           directSshPaneRetryHistoryByTabId: nextDirectSshPaneRetryHistoryByTabId,

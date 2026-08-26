@@ -97,6 +97,14 @@ export type TerminalState = {
   pendingReconnectPtyIdByTabId: Record<string, string>
   /** Retained across relay disconnect after tab.ptyId is cleared so persistence can reattach. */
   lastKnownRelayPtyIdByTabId: Record<string, string>
+  /**
+   * Tabs whose PTY vanished with no positive evidence it died (#16391).
+   *
+   * Session-scoped and never persisted: it exists so the orphan sweep cannot
+   * read a host-loss (`wsl --shutdown`, a relay drop) as "the user is done with
+   * this tab" and delete the record. Cleared as soon as the tab rebinds a PTY.
+   */
+  unverifiedPtyLossTabIds: Record<string, true>
   /** Reattach snapshots are consumed once by the pane that receives the replacement PTY. */
   pendingSnapshotByPtyId: Record<
     string,

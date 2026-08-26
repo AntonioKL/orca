@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   describeTerminalExitCause,
   isDeliberateTerminalExit,
+  isProvenProcessExit,
   resolveProcessExitCause,
   resolveUnreportedExitCause
 } from './terminal-exit-cause'
@@ -95,5 +96,18 @@ describe('isDeliberateTerminalExit', () => {
     expect(isDeliberateTerminalExit({ kind: 'exited', exitCode: 0 })).toBe(false)
     expect(isDeliberateTerminalExit({ kind: 'signaled', signal: 9 })).toBe(false)
     expect(isDeliberateTerminalExit({ kind: 'unknown', reason: 'stop_unverified' })).toBe(false)
+  })
+})
+
+describe('isProvenProcessExit', () => {
+  it('accepts a status the host actually vouched for', () => {
+    expect(isProvenProcessExit(0)).toBe(true)
+    expect(isProvenProcessExit(1)).toBe(true)
+    expect(isProvenProcessExit(137)).toBe(true)
+  })
+
+  it('refuses a synthesized code — the shape a whole host losing contact produces', () => {
+    // #16391: `wsl --shutdown` delivered code -1 for every session at once.
+    expect(isProvenProcessExit(-1)).toBe(false)
   })
 })

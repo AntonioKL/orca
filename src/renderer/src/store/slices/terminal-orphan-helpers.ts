@@ -8,7 +8,10 @@ type TerminalTabReconnectState = Pick<
   | 'pendingReconnectPtyIdByTabId'
 >
 
-type OrphanTerminalDetectionState = Pick<AppState, 'tabsByWorktree' | 'unifiedTabsByWorktree'> &
+type OrphanTerminalDetectionState = Pick<
+  AppState,
+  'tabsByWorktree' | 'unifiedTabsByWorktree' | 'unverifiedPtyLossTabIds'
+> &
   TerminalTabReconnectState
 
 /**
@@ -70,6 +73,14 @@ export function getOrphanTerminalIds(
     runtimeTabs
       .filter((tab) => {
         if (unifiedTerminalEntityIds.has(tab.id)) {
+          return false
+        }
+        // Why (#16391): the sweep DELETES the persisted record, so it needs
+        // evidence the session is gone — not merely that this client stopped
+        // tracking it. A PTY that vanished with no host-vouched exit is
+        // `unverifiable` per docs/reference/ssh-execution-boundary.md; only an
+        // explicit close may remove the tab.
+        if (state.unverifiedPtyLossTabIds[tab.id]) {
           return false
         }
         // Why: a tab is orphaned only when it owns NO live/reconnecting PTY; a
