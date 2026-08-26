@@ -342,4 +342,38 @@ describe('useStructuredAgentSessionOutbox', () => {
       | undefined
     expect(retryParams?.envelope.clientOperationId).not.toBe(firstId)
   })
+
+  it('loads the new session outbox when a pane switches sessions', async () => {
+    mocks.call.mockImplementationOnce(async (_target, _method, params) => {
+      const clientMessageId = (params as { envelope: { clientOperationId: string } }).envelope
+        .clientOperationId
+      return unknownResultFor(clientMessageId, 10)
+    })
+
+    const { result, rerender } = renderHook(
+      ({ sessionId }: { sessionId: string }) =>
+        useStructuredAgentSessionOutbox({
+          sessionId,
+          target: LOCAL_TARGET,
+          fence: 1,
+          submissions: []
+        }),
+      { initialProps: { sessionId: 'session-1' } }
+    )
+
+    act(() => expect(result.current.send('first session')).toBe(true))
+    await waitFor(() => expect(result.current.outbox[0]?.state).toBe('unconfirmed'))
+
+    rerender({ sessionId: 'session-2' })
+    expect(result.current.outbox).toHaveLength(0)
+
+    act(() => expect(result.current.send('second session')).toBe(true))
+    await waitFor(() => expect(mocks.call).toHaveBeenCalledTimes(2))
+    expect(mocks.call.mock.calls[1]?.[2]).toMatchObject({
+      envelope: { sessionId: 'session-2' },
+      body: {
+        blocks: [{ type: 'text', text: 'second session' }]
+      }
+    })
+  })
 })

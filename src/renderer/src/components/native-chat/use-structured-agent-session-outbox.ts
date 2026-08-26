@@ -76,6 +76,7 @@ export function useStructuredAgentSessionOutbox(args: {
     readOutbox(sessionId)
   )
   const outboxRef = useRef(outbox)
+  const outboxSessionRef = useRef(sessionId)
   const dispatchingRef = useRef(false)
   const dispatchGenerationRef = useRef(0)
   const blockedIdRef = useRef<string | null>(null)
@@ -89,14 +90,23 @@ export function useStructuredAgentSessionOutbox(args: {
     dispatchGenerationRef.current += 1
     dispatchingRef.current = false
     blockedIdRef.current = null
-    const current = outboxRef.current
+    const sessionChanged = outboxSessionRef.current !== sessionId
+    outboxSessionRef.current = sessionId
+    const current = sessionChanged ? readOutbox(sessionId) : outboxRef.current
     const next = current.map((entry) =>
       entry.state === 'dispatching' ? { ...entry, state: 'queued' as const } : entry
     )
-    if (next.some((entry, index) => entry !== current[index])) {
+    if (
+      sessionChanged ||
+      next.some((entry, index) => entry !== current[index]) ||
+      next.length !== current.length
+    ) {
       outboxRef.current = next
       setOutbox(next)
       writeOutbox(sessionId, next)
+    }
+    if (sessionChanged) {
+      setError(null)
     }
   }, [fence, sessionId, target])
 
@@ -116,6 +126,7 @@ export function useStructuredAgentSessionOutbox(args: {
     const next = outbox[0]
     if (
       !next ||
+      next.sessionId !== sessionId ||
       next.state !== 'queued' ||
       fence === null ||
       dispatchingRef.current ||
