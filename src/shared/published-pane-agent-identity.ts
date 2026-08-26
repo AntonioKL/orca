@@ -11,10 +11,15 @@ import type { TuiAgent } from './tui-agent'
  * Hook evidence ranks first because the agent reports its own identity regardless of how it was
  * started — Orca's launcher, a shell prompt, or a resumed session — and regardless of host.
  *
- * Title is NOT consulted. What this publishes authorizes actions, and a terminal title is a
- * decoration channel a user can type any agent's name into — "Switch Claude and Codex off the
- * load balancer… - grok" is a Grok pane that used to receive both `@claude` and `@codex`.
- * Identity therefore comes only from launch and foreground-process evidence the host owns.
+ * Title ranks LAST and is a genuine last resort, not forbidden. An earlier revision refused it
+ * outright for action consumers, reasoning that a title must never authorize a write. That
+ * conflated the parser with the raw substring match it replaced: `collectAgentTitleEvidence`
+ * returns null on exactly the shapes that caused misdelivery — "Review the Claude session-history
+ * fix" on a Codex pane yields nothing, and "Switch Claude and Codex off the load balancer… - grok"
+ * yields grok from its owner suffix. Refusing it instead cost real panes their identity: an agent
+ * a user started by hand inside an Orca WSL terminal has no launch record, no readable foreground
+ * process (the Windows host sees `wsl.exe`), and — until managed Codex hooks install there — no
+ * hook either, leaving a title that names it unambiguously as the only thing left.
  *
  * Returns undefined when nothing is known, and absence is published as absence. A caller that
  * authorizes an action must fail closed on it rather than falling back to parsing the title.
@@ -36,11 +41,6 @@ export function resolvePublishedPaneAgentIdentity(args: {
   const titleAgent = args.title ? collectAgentTitleEvidence(args.title).agent : null
   return (
     resolvePaneAgentIdentity({
-      // Why the floor: what this publishes authorizes actions — orchestration routing decides
-      // which real agent pane receives a message. Ranking title last makes a bad delivery
-      // unlikely; refusing to see it makes one impossible. A pane whose only evidence is a
-      // parsed string publishes no identity, and every action consumer fails closed on absence.
-      minimumSource: 'launch',
       evidence: [
         ...(args.hookAgent
           ? [

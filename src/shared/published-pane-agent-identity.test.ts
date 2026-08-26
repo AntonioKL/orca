@@ -30,17 +30,42 @@ describe('resolvePublishedPaneAgentIdentity', () => {
     expect(resolve({ launchAgent: 'claude', foregroundAgent: 'codex' })).toBe('codex')
   })
 
-  it('publishes nothing from a title alone, even an unambiguous one', () => {
-    // Deliberate, and the sharpest trade in this change. What this publishes AUTHORIZES ACTIONS:
-    // orchestration routing uses it to pick which real agent pane receives a message. A title is
-    // a decoration channel, and a stale one outlives the agent that wrote it, so a pane whose only
-    // evidence is a parsed string publishes no identity and every action consumer fails closed.
-    //
-    // The cost: a hook-less agent over SSH that Orca did not launch, and whose foreground process
-    // the host cannot read, is not addressable by @agent. That is a real capability loss, accepted
-    // because a message delivered into the wrong agent's prompt is not recoverable and an
-    // undelivered one is — the sender sees zero recipients.
-    expect(resolve({ title: '✳ Claude Code' })).toBeUndefined()
+  describe('title is the last resort, and the parser is what makes that safe', () => {
+    // The misdelivery this PR exists to stop, re-checked with title ALLOWED at the bottom. The old
+    // code matched `buildAgentNameRe('claude').test(title)`; the parser is categorically stricter
+    // and yields nothing for a name that only appears in task text.
+    it('does not name a Codex pane Claude from its task text', () => {
+      expect(resolve({ title: 'Review the Claude session-history fix' })).toBeUndefined()
+    })
+
+    it('reads the owner suffix, not the agents named in the task text', () => {
+      expect(resolve({ title: 'Switch Claude and Codex off the load balancer… - grok' })).toBe(
+        'grok'
+      )
+    })
+
+    it('identifies a pane whose title unambiguously names its agent', () => {
+      // The WSL case: no launch record, no readable foreground process, no hooks installed. An
+      // unambiguous title is the only thing left, and refusing it made the pane unaddressable.
+      expect(resolve({ title: '✳ Claude Code' })).toBe('claude')
+    })
+
+    it('still declines a bare worktree name that merely contains an agent word', () => {
+      expect(resolve({ title: 'review-14600-codex' })).toBeUndefined()
+    })
+
+    it('lets every stronger source outrank an unambiguous title', () => {
+      expect(resolve({ title: '✳ Claude Code', hookAgent: 'codex', hookIsLive: true })).toBe(
+        'codex'
+      )
+      expect(resolve({ title: '✳ Claude Code', foregroundAgent: 'codex' })).toBe('codex')
+      expect(resolve({ title: '✳ Claude Code', launchAgent: 'codex' })).toBe('codex')
+    })
+  })
+
+  it('publishes nothing when the title names no agent unambiguously', () => {
+    // Ambiguity still publishes nothing — that part was always right.
+    expect(resolve({ title: '◐ Rebase PR #14624 onto main' })).toBeUndefined()
   })
 
   it('publishes nothing when the title names no agent unambiguously', () => {
