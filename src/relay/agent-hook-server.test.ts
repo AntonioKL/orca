@@ -125,6 +125,36 @@ describe('RelayAgentHookServer', () => {
     }
   })
 
+  it('keeps the relay listening when spool replay forwarding fails', async () => {
+    const spoolDir = join(dir, 'spool')
+    const spoolFile = join(spoolDir, 'pane-codex.jsonl')
+    mkdirSync(spoolDir)
+    writeFileSync(
+      spoolFile,
+      `${JSON.stringify({
+        paneKey: PANE_KEY,
+        source: 'codex',
+        hookEventName: 'SubagentStop',
+        payload: { hook_event_name: 'SubagentStop', agent_id: 'child-spooled' },
+        receivedAt: Date.now()
+      })}\n`
+    )
+    const server = new RelayAgentHookServer({
+      endpointDir: dir,
+      forward: () => {
+        throw new Error('receiver unavailable')
+      }
+    })
+
+    try {
+      await expect(server.start()).resolves.toBeUndefined()
+      expect(server.getCoordinates().port).toBeGreaterThan(0)
+      expect(readFileSync(spoolFile, 'utf8')).not.toBe('')
+    } finally {
+      server.stop()
+    }
+  })
+
   it('caches before forwarding, schedules retries after forwarding, and responds last', async () => {
     const order: string[] = []
     let server!: RelayAgentHookServer

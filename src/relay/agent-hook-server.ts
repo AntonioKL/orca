@@ -106,11 +106,25 @@ export class RelayAgentHookServer {
     this.token = this.fixedToken ?? randomUUID()
     this.endpointFileWritten = false
     this.portFallbackApplied = false
-    drainAgentHookSpool({
-      endpointDir: this.endpointDir,
-      getPersistedLaunchTokenHash: () => undefined,
-      ingest: (record) => this.ingestSpoolRecord(record)
-    })
+    try {
+      try {
+        drainAgentHookSpool({
+          endpointDir: this.endpointDir,
+          getPersistedLaunchTokenHash: () => undefined,
+          ingest: (record) => this.ingestSpoolRecord(record)
+        })
+      } catch (err) {
+        // Why: a downstream relay failure must not prevent the loopback listener from starting;
+        // the untruncated spool file remains available for retry on the next restart.
+        process.stderr.write(
+          `[relay-hook-server] spool replay failed: ${err instanceof Error ? err.message : String(err)}\n`
+        )
+      }
+    } catch (err) {
+      // Keep the relay available; an unsuccessful replay remains on disk for the next start.
+      const message = err instanceof Error ? err.message : String(err)
+      process.stderr.write(`[relay-hook-server] spool replay deferred: ${message}\n`)
+    }
     try {
       await this.listenOn(this.preferredPort)
     } catch (err) {
