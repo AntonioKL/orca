@@ -30,6 +30,20 @@ export type SpoolRecord = {
   [key: string]: unknown
 }
 
+/** Restore the HTTP listener body shape from a shell-written spool record. */
+export function buildSpoolHookBody(record: SpoolRecord): Record<string, unknown> {
+  return {
+    paneKey: record.paneKey,
+    tabId: record.tabId,
+    worktreeId: record.worktreeId,
+    env: record.env,
+    version: record.version,
+    launchToken: record.launchToken,
+    hookEventName: record.hookEventName,
+    payload: record.payload
+  }
+}
+
 export function launchTokenHash(token: string | undefined): string | null {
   return token?.trim() ? createHash('sha256').update(token.trim()).digest('hex') : null
 }

@@ -18,7 +18,7 @@ import {
   launchTokenHash,
   readSpoolRecords,
   type SpoolRecord
-} from './spool'
+} from '../../shared/agent-hook-spool'
 import { AgentHookServer, _internals } from './server'
 import { buildBody } from './server.test-fixtures'
 import { _internals as codexInternals } from '../codex/hook-service'
@@ -159,16 +159,11 @@ describe('agent hook spool', () => {
     expect(first.getStatusSnapshot()).toHaveLength(1)
     first.flushStatusPersistSync()
     first.stop()
-    const stopped = _internals.normalizeHookPayload(
-      'codex',
-      buildBody({ hook_event_name: 'SubagentStop', agent_id: 'child-spooled' }),
-      'production'
-    )!
     const spoolDir = join(userDataPath, 'agent-hooks', 'spool')
     mkdirSync(spoolDir, { recursive: true })
     writeFileSync(
       join(spoolDir, 'pane-tab-spooled_0.jsonl'),
-      `\n${JSON.stringify({ paneKey, source: 'codex', hookEventName: 'SubagentStop', launchToken, receivedAt: Date.now(), payload: stopped.payload })}\n`
+      `\n${JSON.stringify({ paneKey, source: 'codex', hookEventName: 'SubagentStop', launchToken, receivedAt: Date.now(), payload: { hook_event_name: 'SubagentStop', agent_id: 'child-spooled' } })}\n`
     )
     const restarted = new AgentHookServer()
     await restarted.start({ env: 'production', userDataPath })
@@ -180,6 +175,47 @@ describe('agent hook spool', () => {
       expect(readFileSync(restarted.lastStatusPath!, 'utf8')).not.toContain('isReplay')
     } finally {
       restarted.stop()
+    }
+  })
+
+  it('rejects a stale remote replay against the hydrated launch-token fence', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-spool-remote-fence-'))
+    const paneKey = makePaneKey('tab-remote-fence', '00000000-0000-4000-8000-000000000003')
+    const first = new AgentHookServer()
+    const second = new AgentHookServer()
+    try {
+      await first.start({ env: 'production', userDataPath })
+      first.ingestRemote(
+        {
+          paneKey,
+          source: 'codex',
+          launchToken: 'old-generation',
+          payload: { state: 'working', agentType: 'codex', prompt: 'old' }
+        },
+        'ssh-1'
+      )
+      first.flushStatusPersistSync()
+      first.stop()
+
+      await second.start({ env: 'production', userDataPath })
+      second.ingestRemote(
+        {
+          paneKey,
+          source: 'codex',
+          launchToken: 'new-generation',
+          isReplay: true,
+          payload: { state: 'done', agentType: 'codex', prompt: 'stale completion' }
+        },
+        'ssh-2'
+      )
+      expect(second.getStatusSnapshot()[0]).toMatchObject({
+        paneKey,
+        state: 'working',
+        prompt: 'old'
+      })
+    } finally {
+      first.stop()
+      second.stop()
     }
   })
 

@@ -116,7 +116,12 @@ import {
   type AgentProviderSessionMetadata
 } from '../../shared/agent-session-resume'
 import { isCommandCodeNewTurnWhileWorking } from '../../shared/command-code-turn-boundary'
-import { drainAgentHookSpool, type SpoolRecord } from './spool'
+import {
+  buildSpoolHookBody,
+  drainAgentHookSpool,
+  launchTokenHash,
+  type SpoolRecord
+} from '../../shared/agent-hook-spool'
 
 export type { AgentHookSource }
 
@@ -806,6 +811,37 @@ export class AgentHookServer {
   private withdrawReplayObservation(paneKey: string): void {
     if (this.runtimeObservedStatusPaneKeys.delete(paneKey)) {
       this.notifyStatusChangeListeners()
+    }
+  }
+
+  private ingestSpoolRecord(record: SpoolRecord): void {
+    if (!isAgentHookSource(record.source)) {
+      return
+    }
+    const body = this.normalizeHookBodyPaneKeyAlias(buildSpoolHookBody(record))
+    const normalized = this.normalizeLocalHookPayload(record.source, body)
+    if (!normalized.event) {
+      return
+    }
+    const replay = { ...normalized.event, isReplay: true as const }
+    const statusDisposition = this.getAgentStatusDisposition(replay.paneKey, {
+      source: record.source,
+      hookEventName: replay.hookEventName,
+      isReplay: true,
+      hasExplicitPrompt: replay.hasExplicitPrompt,
+      launchToken: replay.launchToken
+    })
+    if (statusDisposition === 'suppress') {
+      return
+    }
+    const event = statusDisposition === 'restart' ? { ...replay, launchToken: undefined } : replay
+    if (statusDisposition === 'restart') {
+      this.observations.rebind(event.paneKey)
+    }
+    this.recordCurrentAuthorityObservation(event)
+    this.applyNormalizedStatus(event, normalized.onAccepted)
+    if (event.payload.state !== 'done') {
+      this.withdrawReplayObservation(this.resolvePaneKeyAlias(event.paneKey))
     }
   }
 
@@ -2294,6 +2330,14 @@ export class AgentHookServer {
     if (!parsedPaneKey) {
       return
     }
+    // Why: fence relay spool replay at main so stale generations cannot overwrite hydrated state.
+    if (envelope.isReplay === true) {
+      const expectedLaunchTokenHash = this.hydratedLaunchTokenHashByPaneKey.get(paneKey)
+      const actualLaunchTokenHash = launchTokenHash(envelope.launchToken)
+      if (expectedLaunchTokenHash && actualLaunchTokenHash !== expectedLaunchTokenHash) {
+        return
+      }
+    }
     if (envelope.tabId !== undefined && typeof envelope.tabId !== 'string') {
       return
     }
@@ -2529,16 +2573,7 @@ export class AgentHookServer {
         endpointDir: this.endpointDir,
         getPersistedLaunchTokenHash: (paneKey) =>
           this.hydratedLaunchTokenHashByPaneKey.get(this.resolvePaneKeyAlias(paneKey)),
-        ingest: (record: SpoolRecord) => {
-          this.ingestRemote(record as Parameters<AgentHookServer['ingestRemote']>[0], null)
-          if (
-            record.payload &&
-            typeof record.payload === 'object' &&
-            (record.payload as { state?: unknown }).state !== 'done'
-          ) {
-            this.withdrawReplayObservation(this.resolvePaneKeyAlias(record.paneKey))
-          }
-        }
+        ingest: (record: SpoolRecord) => this.ingestSpoolRecord(record)
       })
     }
     const handleRequest = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
