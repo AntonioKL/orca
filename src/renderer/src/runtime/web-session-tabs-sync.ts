@@ -3229,7 +3229,11 @@ function applyWebSessionTabsSnapshotWithContext(
   // append never-seen tabs, drop vanished ones, and honor explicit focus intent. Host order,
   // host actives, and host layout apply only on first adoption (no client groups yet).
   const clientOwnedPlacement = (() => {
-    if (currentGroups.length === 0 || !nextUnifiedTabs) {
+    // Why: a preserveLocalLayout owner keeps the local layout authoritative, so placement
+    // is client-owned even before any local group record exists — first adoption on an
+    // empty worktree must repair a rendered-leaf-without-record or materialize a rendered
+    // group instead of publishing the tab into a group no local leaf will ever show.
+    if (!nextUnifiedTabs || (currentGroups.length === 0 && !options?.preserveLocalLayout)) {
       return null
     }
     // Why: an entity-identical replacement (provisional terminal → mirrored surface, local
@@ -3671,9 +3675,12 @@ function applyWebSessionTabsSnapshotWithContext(
         )
       : state.activeGroupIdByWorktree
   const nextLayoutByWorktree = (() => {
-    if (!nextGroups || options?.preserveLocalLayout) {
+    if (!nextGroups) {
       return state.layoutByWorktree
     }
+    // Why: client-owned placement derives its layout from the local one (pruned, plus
+    // repair leaves for surviving groups the layout lost), so a preserveLocalLayout owner
+    // still applies it — the option only rejects host-authored layout below.
     if (clientOwnedPlacement) {
       const clientLayout =
         clientOwnedPlacement.layout ??
@@ -3689,6 +3696,9 @@ function applyWebSessionTabsSnapshotWithContext(
         (current, next) => current === next,
         batchContext
       )
+    }
+    if (options?.preserveLocalLayout) {
+      return state.layoutByWorktree
     }
     const validGroupIds = new Set(nextGroups.map((group) => group.id))
     const hostLayout = pruneTabGroupLayout(snapshot.tabGroupLayout, validGroupIds)
