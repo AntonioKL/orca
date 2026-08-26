@@ -200,6 +200,10 @@ describe('OrchestrationPane', () => {
     expect(markup).toContain('aria-label="Nested worker depth"')
     expect(markup).toContain('min="1"')
     expect(markup).not.toContain('max=')
+    expect(markup).not.toContain('Default:')
+    expect(markup.indexOf('Nested worker depth')).toBeGreaterThan(
+      markup.indexOf('Orchestration skill')
+    )
     expect(matchesSettingsSearch('nested worker', getOrchestrationPaneSearchEntries())).toBe(true)
   })
 

@@ -111,20 +111,6 @@ export function OrchestrationPane({
       forceVisible
       className="space-y-5 py-2"
     >
-      {showNestedWorkerDepth ? (
-        <NumberField
-          label={getNestedWorkerDepthTitle()}
-          description={getNestedWorkerDepthDescription()}
-          value={resolveNestedWorkerMaxDepth(settings)}
-          defaultValue={1}
-          min={1}
-          integer
-          onChange={(nestedWorkerMaxDepth) => {
-            void updateSettings({ nestedWorkerMaxDepth })
-          }}
-        />
-      ) : null}
-
       <AgentSkillSetupPanel
         title={translate(
           'auto.components.settings.OrchestrationPane.07641b9768',
@@ -196,6 +182,19 @@ export function OrchestrationPane({
           activeSkillRuntime.canUseLocalSkillFreshness ? ORCHESTRATION_SKILL_NAME : undefined
         }
       />
+
+      {showNestedWorkerDepth ? (
+        <NumberField
+          label={getNestedWorkerDepthTitle()}
+          description={getNestedWorkerDepthDescription()}
+          value={resolveNestedWorkerMaxDepth(settings)}
+          min={1}
+          integer
+          onChange={(nestedWorkerMaxDepth) => {
+            void updateSettings({ nestedWorkerMaxDepth })
+          }}
+        />
+      ) : null}
 
       <OrchestrationSkillPromptDialog
         command={orchestrationInstallCommand}
