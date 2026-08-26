@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { glob } from 'tinyglobby'
-import { stripComments } from './source-scan/source-tree-scan'
+import { isTestFile, stripComments } from './source-scan/source-tree-scan'
 
 const HELPERS = [
   'getAgentLabel',
@@ -15,6 +15,10 @@ const HELPERS = [
   'resolvePaneAgentOwner',
   'resolveCompatibleAgentTypeForOwner'
 ] as const
+
+const TEST_SUPPORT_PATHS = new Set([
+  'src/renderer/src/components/terminal-pane/pty-connection-test-environment.ts'
+])
 
 type Helper = (typeof HELPERS)[number]
 type Classification =
@@ -287,10 +291,13 @@ const DIRECT_SINGLE_SOURCE_SURFACES: readonly {
 describe('pane agent identity inventory ratchet', () => {
   it('classifies every legacy helper definition, import, and callsite in src and mobile/src', async () => {
     const files = await glob(['src/**/*.{ts,tsx}', 'mobile/src/**/*.{ts,tsx}'], {
-      ignore: ['**/*.test.*', '**/*.spec.*', '**/*test-*', '**/*-test-*']
+      ignore: ['**/*.test.*', '**/*.spec.*']
     })
     const actual: string[] = []
     for (const path of files) {
+      if (isTestFile(path) || TEST_SUPPORT_PATHS.has(path)) {
+        continue
+      }
       const rawSource = readFileSync(join(process.cwd(), path), 'utf8')
       if (!HELPERS.some((helper) => rawSource.includes(helper))) {
         continue
