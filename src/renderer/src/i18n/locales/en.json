@@ -6406,12 +6406,7 @@
           "codexSessionSourceInfo": "About importing Codex history",
           "codexSessionSourceTooltip": "Orca runs Codex in an isolated home. Point this at your existing Codex home to import that session history. Empty uses ~/.codex.",
           "storedDefaultUndetected": "Saved as your default, but not detected right now",
-          "noAgentsDetected": "No agents detected. If one is installed, the probe may have timed out.",
-          "nestedWorkerDepthOne": "1 — workers cannot dispatch",
-          "nestedWorkerDepthTwo": "2 — workers may dispatch once",
-          "nestedWorkerDepthThree": "3 — two further generations",
-          "nestedWorkerDepthTitle": "Nested worker depth",
-          "nestedWorkerDepthDescription": "How many generations of dispatched workers may spawn their own workers. 1 keeps the agent tree flat: a coordinator dispatches workers, and those workers do not dispatch."
+          "noAgentsDetected": "No agents detected. If one is installed, the probe may have timed out."
         },
         "AppIconSelector": {
           "d5a112dc9b": "Next icon",
@@ -7445,7 +7440,9 @@
           "9bedd2a6e5": "Enables agents to hand off context and coordinate work through Orca.",
           "07641b9768": "Orchestration skill",
           "2aacdb0517": "Coordinate coding agents across handoffs, worktree handovers, and child-agent work.",
-          "191ac34567": "Agent Orchestration"
+          "191ac34567": "Agent Orchestration",
+          "nestedWorkerDepthTitle": "Nested worker depth",
+          "nestedWorkerDepthDescription": "How many generations of dispatched workers may spawn their own workers. 1 keeps the agent tree flat: a coordinator dispatches workers, and those workers do not dispatch."
         },
         "OrchestrationSetupCard": {
           "e7d2a5146c": "Enables agents to hand off context and coordinate work through Orca.",

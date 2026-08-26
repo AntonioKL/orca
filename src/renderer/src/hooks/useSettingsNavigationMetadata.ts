@@ -175,8 +175,7 @@ export function buildSettingsNavigationMetadata({
       icon: Bot,
       searchEntries: getAgentsPaneSearchEntries({
         includeAgentAwake: !isWebClient,
-        includeAgentRuntime: isLocalWindowsHost,
-        includeNestedWorkerDepth: !isWebClient
+        includeAgentRuntime: isLocalWindowsHost
       }),
       group: 'capabilities'
     },
@@ -203,7 +202,9 @@ export function buildSettingsNavigationMetadata({
         'Coordinate multiple coding agents through Orca.'
       ),
       icon: Network,
-      searchEntries: getOrchestrationPaneSearchEntries(),
+      searchEntries: getOrchestrationPaneSearchEntries({
+        includeNestedWorkerDepth: !isWebClient
+      }),
       group: 'capabilities'
     },
     // Why: only surfaced once Linear is connected — a capability that needs a

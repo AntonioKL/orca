@@ -8,8 +8,6 @@ import { useAppStore } from '@/store'
 import { AgentAwakeSetting } from './AgentAwakeSetting'
 import { AgentCacheTimerSection } from './AgentCacheTimerSection'
 import { AgentRuntimeSetting } from './AgentRuntimeSetting'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
-import { resolveNestedWorkerMaxDepth } from '../../../../shared/nested-worker-depth'
 import { buildCodexSessionSourceHomeControl } from './codex-session-source-home-control'
 import {
   getAgentGeneratedTabTitlesDescription,
@@ -19,7 +17,6 @@ import { getAgentStatusHooksDescription, getAgentStatusHooksTitle } from './agen
 import {
   SettingsSegmentedControl,
   SettingsSubsectionHeader,
-  SettingsRow,
   SettingsSwitchRow
 } from './SettingsFormControls'
 import {
@@ -49,28 +46,6 @@ import {
 import { AgentAvailabilityControl, type AgentCatalogRowProps } from './AgentCatalogRow'
 import { AgentDefaultSetting } from './AgentDefaultSetting'
 import { AgentDetectionCatalog } from './AgentDetectionCatalog'
-import {
-  getNestedWorkerDepthDescription,
-  getNestedWorkerDepthTitle
-} from './nested-worker-depth-copy'
-
-const NESTED_WORKER_DEPTH_CHOICES = [
-  {
-    value: 1,
-    labelKey: 'auto.components.settings.AgentsPane.nestedWorkerDepthOne',
-    fallbackLabel: '1 — workers cannot dispatch'
-  },
-  {
-    value: 2,
-    labelKey: 'auto.components.settings.AgentsPane.nestedWorkerDepthTwo',
-    fallbackLabel: '2 — workers may dispatch once'
-  },
-  {
-    value: 3,
-    labelKey: 'auto.components.settings.AgentsPane.nestedWorkerDepthThree',
-    fallbackLabel: '3 — two further generations'
-  }
-] as const
 
 export {
   buildAgentAvailabilitySettingsUpdate,
@@ -280,9 +255,6 @@ export function AgentsPane({
         wslCapabilitiesLoading={wslCapabilitiesLoading}
       />
       <AgentStatusHooksSetting settings={settings} updateSettings={updateSettings} />
-      {!isPairedWebClientWindow() ? (
-        <NestedWorkerDepthSetting settings={settings} updateSettings={updateSettings} />
-      ) : null}
       <AgentGeneratedTabTitlesSetting settings={settings} updateSettings={updateSettings} />
       {!isPairedWebClientWindow() ? (
         <AgentAwakeSetting settings={settings} updateSettings={updateSettings} />
@@ -319,45 +291,6 @@ export function AgentStatusHooksSetting({ settings, updateSettings }: AgentsPane
         checked={enabled}
         onChange={() => updateSettings({ agentStatusHooksEnabled: !enabled })}
         ariaLabel={getAgentStatusHooksTitle()}
-      />
-    </section>
-  )
-}
-
-export function NestedWorkerDepthSetting({ settings, updateSettings }: AgentsPaneProps) {
-  const depth = resolveNestedWorkerMaxDepth(settings)
-  return (
-    <section className="space-y-3">
-      <SettingsRow
-        label={getNestedWorkerDepthTitle()}
-        labelId="nested-worker-depth-label"
-        description={getNestedWorkerDepthDescription()}
-        control={
-          <Select
-            value={String(depth)}
-            onValueChange={(value) => {
-              const parsed = Number.parseInt(value, 10)
-              if (Number.isInteger(parsed) && parsed >= 1) {
-                void updateSettings({ nestedWorkerMaxDepth: parsed })
-              }
-            }}
-          >
-            <SelectTrigger
-              size="sm"
-              className="w-full min-w-52"
-              aria-labelledby="nested-worker-depth-label"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {NESTED_WORKER_DEPTH_CHOICES.map((choice) => (
-                <SelectItem key={choice.value} value={String(choice.value)}>
-                  {translate(choice.labelKey, choice.fallbackLabel)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        }
       />
     </section>
   )

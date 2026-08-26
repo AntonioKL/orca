@@ -251,34 +251,12 @@ describe('AgentsPane', () => {
     expect(markup).toContain('>Agent<')
   })
 
-  it('associates the nested worker depth select with its label', () => {
-    const markup = renderPane(getDefaultSettings('/tmp'))
-
-    expect(markup).toContain('id="nested-worker-depth-label"')
-    expect(markup).toContain('aria-labelledby="nested-worker-depth-label"')
-  })
-
   it('hides desktop-only awake modes in paired web clients', () => {
     ;(globalThis as { __ORCA_WEB_CLIENT__?: boolean }).__ORCA_WEB_CLIENT__ = true
     try {
       expect(renderPane(getDefaultSettings('/tmp'))).not.toContain('Keep computer awake')
       expect(
         matchesSettingsSearch('awake', getAgentsPaneSearchEntries({ includeAgentAwake: false }))
-      ).toBe(false)
-    } finally {
-      delete (globalThis as { __ORCA_WEB_CLIENT__?: boolean }).__ORCA_WEB_CLIENT__
-    }
-  })
-
-  it('hides the host-only nested worker depth control in paired web clients', () => {
-    ;(globalThis as { __ORCA_WEB_CLIENT__?: boolean }).__ORCA_WEB_CLIENT__ = true
-    try {
-      expect(renderPane(getDefaultSettings('/tmp'))).not.toContain('Nested worker depth')
-      expect(
-        matchesSettingsSearch(
-          'nested worker',
-          getAgentsPaneSearchEntries({ includeNestedWorkerDepth: false })
-        )
       ).toBe(false)
     } finally {
       delete (globalThis as { __ORCA_WEB_CLIENT__?: boolean }).__ORCA_WEB_CLIENT__
@@ -418,13 +396,6 @@ describe('AgentsPane', () => {
     expect(matchesSettingsSearch('hooks', getAgentsPaneSearchEntries())).toBe(true)
     expect(matchesSettingsSearch('waiting', getAgentsPaneSearchEntries())).toBe(true)
     expect(matchesSettingsSearch('codex', getAgentsPaneSearchEntries())).toBe(true)
-  })
-
-  it('includes nested worker depth search metadata', () => {
-    expect(matchesSettingsSearch('nested worker', getAgentsPaneSearchEntries())).toBe(true)
-    expect(matchesSettingsSearch('depth', getAgentsPaneSearchEntries())).toBe(true)
-    expect(matchesSettingsSearch('dispatch', getAgentsPaneSearchEntries())).toBe(true)
-    expect(matchesSettingsSearch('child agents', getAgentsPaneSearchEntries())).toBe(true)
   })
 
   it('includes generated title search metadata', () => {

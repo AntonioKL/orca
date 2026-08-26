@@ -3,14 +3,14 @@ import { searchKeywords } from './settings-search-keywords'
 
 export function getNestedWorkerDepthTitle(): string {
   return translate(
-    'auto.components.settings.AgentsPane.nestedWorkerDepthTitle',
+    'auto.components.settings.OrchestrationPane.nestedWorkerDepthTitle',
     'Nested worker depth'
   )
 }
 
 export function getNestedWorkerDepthDescription(): string {
   return translate(
-    'auto.components.settings.AgentsPane.nestedWorkerDepthDescription',
+    'auto.components.settings.OrchestrationPane.nestedWorkerDepthDescription',
     'How many generations of dispatched workers may spawn their own workers. 1 keeps the agent tree flat: a coordinator dispatches workers, and those workers do not dispatch.'
   )
 }
