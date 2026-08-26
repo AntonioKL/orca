@@ -9,7 +9,7 @@ import {
   applyAnchoredImageViewerZoomChange,
   applyImageSurfaceWheel,
   getElementSurfaceSize,
-  getImageElementSizeClassName,
+  getImageElementSizing,
   getImageLayoutStyle
 } from './image-viewer-dom-zoom'
 import {
@@ -105,6 +105,10 @@ export default function ImageViewer({
   const inlineImageLayoutStyle = useMemo(
     () => getImageLayoutStyle(inlineImageLayoutSize),
     [inlineImageLayoutSize]
+  )
+  const inlineImageSizing = useMemo(
+    () => getImageElementSizing(inlineImageLayoutSize, inlineSurfaceSize),
+    [inlineImageLayoutSize, inlineSurfaceSize]
   )
   const popupImageLayoutStyle = useMemo(
     () => getImageLayoutStyle(popupImageLayoutSize),
@@ -290,8 +294,9 @@ export default function ImageViewer({
                   'object-contain',
                   isIntrinsicLayout
                     ? 'block h-auto max-h-none max-w-full'
-                    : getImageElementSizeClassName(inlineImageLayoutSize)
+                    : inlineImageSizing.className
                 )}
+                style={isIntrinsicLayout ? undefined : inlineImageSizing.style}
                 onLoad={(event) => {
                   const img = event.currentTarget
                   setImageDimensions({ width: img.naturalWidth, height: img.naturalHeight })
@@ -358,6 +363,7 @@ export default function ImageViewer({
         onOpenChange={handlePopupOpenChange}
         previewUrl={previewSrc}
         setSurfaceRef={setPopupSurfaceRef}
+        surfaceSize={popupSurfaceSize}
         zoomPercent={Math.round(popupZoom * 100)}
       />
     </>

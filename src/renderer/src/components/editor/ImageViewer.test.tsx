@@ -132,6 +132,20 @@ function findPreviewImage(node: unknown): ReactElementLike {
   return image
 }
 
+function findSurfaceRefs(node: unknown): ((surface: unknown) => void)[] {
+  return findElementsByType(node, 'div')
+    .map((element) => element.props.ref)
+    .filter((ref): ref is (surface: unknown) => void => typeof ref === 'function')
+}
+
+function attachSurface(
+  setSurfaceRef: (surface: unknown) => void,
+  clientWidth: number,
+  clientHeight: number
+): void {
+  setSurfaceRef({ clientWidth, clientHeight, addEventListener() {}, removeEventListener() {} })
+}
+
 async function renderExpandedImageViewer(content: string): Promise<unknown> {
   reactHookRuntime.index = 0
   const module = await import('./ImageViewer')
@@ -247,21 +261,38 @@ describe('ImageViewer pre-load layout box', () => {
     vi.clearAllMocks()
   })
 
-  // Why: before onLoad there is no measured size, and the surface's `w-max`/`h-max` inner
-  // box makes percentage maxes resolve to `none` — so an uncapped image lays out and
-  // rasters at full natural resolution before any constraint applies.
-  it('caps the inline preview with viewport lengths before the image loads', async () => {
+  // Why: before onLoad there is no measured natural size, and the surface's `w-max`/`h-max`
+  // inner box makes percentage maxes resolve to `none` — so an uncapped image lays out and
+  // rasters at full natural resolution. The surface itself is already measured, and in a
+  // split pane it is a fraction of the viewport, so the cap has to come from it.
+  it('caps the inline preview with the measured surface box before the image loads', async () => {
+    const first = await renderExpandedImageViewer(pngBase64(4))
+    attachSurface(findSurfaceRefs(first)[0], 700, 800)
+
+    const rendered = await renderExpandedImageViewer(pngBase64(4))
+    const image = findPreviewImage(rendered)
+
+    expect(image.props.className).toBe('object-contain block')
+    expect(image.props.style).toEqual({ maxWidth: '668px', maxHeight: '768px' })
+  })
+
+  it('caps the full-size popup preview from its own surface, not the viewport', async () => {
+    const first = await renderExpandedImageViewer(pngBase64(4))
+    attachSurface(findSurfaceRefs(first)[1], 1200, 900)
+
+    const rendered = await renderExpandedImageViewer(pngBase64(4))
+    const popupImage = findElementsByType(rendered, 'img').find((element) => !element.props.onError)
+
+    expect(popupImage?.props.className).toBe('object-contain block')
+    expect(popupImage?.props.style).toEqual({ maxWidth: '1168px', maxHeight: '868px' })
+  })
+
+  // Why: an unmeasured surface is not an unbounded one.
+  it('falls back to viewport lengths while no surface has been measured', async () => {
     const rendered = await renderExpandedImageViewer(pngBase64(4))
 
     expect(findPreviewImage(rendered).props.className).toBe(
       'object-contain block max-h-[100vh] max-w-[100vw]'
     )
-  })
-
-  it('caps the full-size popup preview the same way', async () => {
-    const rendered = await renderExpandedImageViewer(pngBase64(4))
-    const popupImage = findElementsByType(rendered, 'img').find((element) => !element.props.onError)
-
-    expect(popupImage?.props.className).toBe('object-contain block max-h-[100vh] max-w-[100vw]')
   })
 })

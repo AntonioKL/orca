@@ -6,6 +6,7 @@ import {
   type ImageViewerZoomAnchor,
   clampImageViewerZoom,
   getAnchoredImageViewerScrollOffset,
+  getAvailableImageSurfaceBox,
   getNextWheelImageViewerZoom,
   shouldHandleImageZoomWheel
 } from './image-viewer-zoom'
@@ -35,16 +36,38 @@ export function getImageLayoutStyle(
   }
 }
 
+export type ImageElementSizing = {
+  className: string
+  style: CSSProperties | undefined
+}
+
 /**
- * Sizing classes for the preview `<img>`.
+ * Sizing for the preview `<img>`.
  *
- * A null size means the natural size has not been measured yet, not that the image is small.
+ * A null `layoutSize` means the natural size is not measured yet, not that the image is small.
  * The scroll surface's inner box is `w-max`/`h-max`, so percentage maxes there resolve to `none`
  * and an unmeasured image would lay out — and raster — at full natural resolution before onLoad.
- * Viewport lengths are definite without measuring anything, so they cap that first layout.
+ * The surface itself is already measured by then, and in a split pane or side-by-side image diff
+ * it is a fraction of the viewport, so cap against it; viewport lengths are only the fallback for
+ * a surface we have not measured, which is not the same as an unbounded one.
  */
-export function getImageElementSizeClassName(size: ImageViewerImageDimensions | null): string {
-  return size ? 'block h-full w-full' : 'block max-h-[100vh] max-w-[100vw]'
+export function getImageElementSizing(
+  layoutSize: ImageViewerImageDimensions | null,
+  surfaceSize: ImageViewerSurfaceSize | null
+): ImageElementSizing {
+  if (layoutSize) {
+    return { className: 'block h-full w-full', style: undefined }
+  }
+
+  const available = getAvailableImageSurfaceBox(surfaceSize)
+  if (!available) {
+    return { className: 'block max-h-[100vh] max-w-[100vw]', style: undefined }
+  }
+
+  return {
+    className: 'block',
+    style: { maxWidth: `${available.width}px`, maxHeight: `${available.height}px` }
+  }
 }
 
 export function applyAnchoredImageViewerZoomChange(

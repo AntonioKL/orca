@@ -2,8 +2,8 @@ import { X } from 'lucide-react'
 import type { CSSProperties, JSX } from 'react'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
-import { getImageElementSizeClassName } from './image-viewer-dom-zoom'
-import type { ImageViewerImageDimensions } from './image-viewer-zoom'
+import { getImageElementSizing } from './image-viewer-dom-zoom'
+import type { ImageViewerImageDimensions, ImageViewerSurfaceSize } from './image-viewer-zoom'
 import { translate } from '@/i18n/i18n'
 
 type ImageViewerPopupProps = {
@@ -15,6 +15,7 @@ type ImageViewerPopupProps = {
   imageLayoutStyle: CSSProperties | undefined
   onOpenChange: (open: boolean) => void
   setSurfaceRef: (surface: HTMLDivElement | null) => void
+  surfaceSize: ImageViewerSurfaceSize | null
 }
 
 export default function ImageViewerPopup({
@@ -25,8 +26,11 @@ export default function ImageViewerPopup({
   imageLayoutSize,
   imageLayoutStyle,
   onOpenChange,
-  setSurfaceRef
+  setSurfaceRef,
+  surfaceSize
 }: ImageViewerPopupProps): JSX.Element {
+  const imageSizing = getImageElementSizing(imageLayoutSize, surfaceSize)
+
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent
@@ -60,7 +64,8 @@ export default function ImageViewerPopup({
               <img
                 src={previewUrl}
                 alt={filename}
-                className={cn('object-contain', getImageElementSizeClassName(imageLayoutSize))}
+                className={cn('object-contain', imageSizing.className)}
+                style={imageSizing.style}
               />
             </div>
           </div>

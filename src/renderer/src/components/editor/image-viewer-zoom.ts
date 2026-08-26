@@ -64,6 +64,21 @@ export function getNextWheelImageViewerZoom(
   return clampImageViewerZoom(currentZoom * getPinchZoomFactor(deltaY, deltaMode))
 }
 
+/** Content box the image may occupy, or null when the surface is unmeasured or too small. */
+export function getAvailableImageSurfaceBox(
+  surfaceSize: ImageViewerSurfaceSize | null,
+  padding: number = IMAGE_VIEWER_SURFACE_PADDING
+): ImageViewerSurfaceSize | null {
+  if (!surfaceSize) {
+    return null
+  }
+
+  const width = surfaceSize.width - padding * 2
+  const height = surfaceSize.height - padding * 2
+
+  return width > 0 && height > 0 ? { width, height } : null
+}
+
 export function getZoomedImageLayoutSize({
   imageDimensions,
   surfaceSize,
@@ -75,27 +90,15 @@ export function getZoomedImageLayoutSize({
   zoom: number
   padding?: number
 }): ImageViewerImageDimensions | null {
-  if (
-    !imageDimensions ||
-    !surfaceSize ||
-    imageDimensions.width <= 0 ||
-    imageDimensions.height <= 0 ||
-    surfaceSize.width <= 0 ||
-    surfaceSize.height <= 0
-  ) {
-    return null
-  }
-
-  const availableWidth = Math.max(0, surfaceSize.width - padding * 2)
-  const availableHeight = Math.max(0, surfaceSize.height - padding * 2)
-  if (availableWidth <= 0 || availableHeight <= 0) {
+  const available = getAvailableImageSurfaceBox(surfaceSize, padding)
+  if (!imageDimensions || !available || imageDimensions.width <= 0 || imageDimensions.height <= 0) {
     return null
   }
 
   const fitScale = Math.min(
     1,
-    availableWidth / imageDimensions.width,
-    availableHeight / imageDimensions.height
+    available.width / imageDimensions.width,
+    available.height / imageDimensions.height
   )
   const boundedZoom = clampImageViewerZoom(zoom)
 

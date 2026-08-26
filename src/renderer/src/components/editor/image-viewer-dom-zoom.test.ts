@@ -1,19 +1,39 @@
 import { describe, expect, it } from 'vitest'
-import { getImageElementSizeClassName } from './image-viewer-dom-zoom'
+import { getImageElementSizing } from './image-viewer-dom-zoom'
 
-describe('getImageElementSizeClassName', () => {
+describe('getImageElementSizing', () => {
   it('fills the measured wrapper box once the natural size is known', () => {
-    expect(getImageElementSizeClassName({ width: 800, height: 600 })).toBe('block h-full w-full')
+    expect(getImageElementSizing({ width: 800, height: 600 }, { width: 700, height: 800 })).toEqual(
+      {
+        className: 'block h-full w-full',
+        style: undefined
+      }
+    )
   })
 
-  // Why: the scroll surface's inner box is `w-max`/`h-max`, so percentage maxes on the
-  // image resolve to `none` and an unmeasured image lays out at natural resolution.
-  it('caps an unmeasured image with viewport lengths, not percentages', () => {
-    const className = getImageElementSizeClassName(null)
+  // Why: the scroll surface's inner box is `w-max`/`h-max`, so percentage maxes on the image
+  // resolve to `none` and an unmeasured image lays out at natural resolution; the surface is
+  // already measured by then, and it is far tighter than the viewport in a split pane.
+  it('caps an unmeasured image with the measured surface box minus its padding', () => {
+    expect(getImageElementSizing(null, { width: 700, height: 800 })).toEqual({
+      className: 'block',
+      style: { maxWidth: '668px', maxHeight: '768px' }
+    })
+  })
 
-    expect(className).toContain('max-h-[100vh]')
-    expect(className).toContain('max-w-[100vw]')
-    expect(className).not.toContain('max-h-full')
-    expect(className).not.toContain('max-w-full')
+  // Why: a null surface means "not measured yet", not "unbounded" — fall back to a definite
+  // viewport cap rather than letting the natural size through.
+  it('falls back to viewport lengths while the surface is unmeasured', () => {
+    expect(getImageElementSizing(null, null)).toEqual({
+      className: 'block max-h-[100vh] max-w-[100vw]',
+      style: undefined
+    })
+  })
+
+  it('falls back to viewport lengths when the surface is smaller than its own padding', () => {
+    expect(getImageElementSizing(null, { width: 24, height: 800 })).toEqual({
+      className: 'block max-h-[100vh] max-w-[100vw]',
+      style: undefined
+    })
   })
 })
