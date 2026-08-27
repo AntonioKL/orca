@@ -172,7 +172,7 @@ describe('floating workspace tab reorder', () => {
 })
 
 describe('floating panel titlebar drag target', () => {
-  it.each(['sortable-tab', 'browser-tab', 'editor-tab'])(
+  it.each(['sortable-tab', 'browser-tab', 'editor-tab', 'client-hosted-browser-row-id'])(
     'does not move the panel when the press lands on a %s',
     (kind) => {
       const tab = document.createElement('div')
@@ -185,6 +185,16 @@ describe('floating panel titlebar drag target', () => {
       expect(isFloatingTerminalDragTarget(label)).toBe(false)
     }
   )
+
+  it('does not move the panel when a tab SVG icon receives the press', () => {
+    const tab = document.createElement('div')
+    tab.dataset.tabId = 'terminal-tab'
+    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+    tab.appendChild(icon)
+    document.body.appendChild(tab)
+
+    expect(isFloatingTerminalDragTarget(icon)).toBe(false)
+  })
 
   it('still moves the panel from bare titlebar chrome', () => {
     const titlebar = document.createElement('div')
