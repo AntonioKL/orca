@@ -72,7 +72,6 @@ export function observeDaemonChildExit(
         return
       }
       ready = true
-      stderrTail = Buffer.alloc(0)
       child.stderr?.on('error', onStderrError)
       child.stderr?.unref?.()
       child.on('close', onClose)

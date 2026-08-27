@@ -44,6 +44,20 @@ describe('observeDaemonChildExit', () => {
     observer.stop()
   })
 
+  it('retains fatal stderr that arrives before the independent ready IPC callback', () => {
+    const child = createChild()
+    const onExit = vi.fn()
+    const observer = observeDaemonChildExit(child, onExit)
+
+    child.stderr.write('FATAL ERROR before ready dispatch')
+    observer.markReady()
+    child.emit('close', 134, null)
+
+    expect(onExit).toHaveBeenCalledWith(
+      expect.objectContaining({ stderrTail: 'FATAL ERROR before ready dispatch' })
+    )
+  })
+
   it('stops observing and destroys the startup pipe on launch failure', () => {
     const child = createChild()
     const destroy = vi.spyOn(child.stderr, 'destroy')
