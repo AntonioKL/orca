@@ -47,6 +47,14 @@ export function resetSessionProxyApplicationForTests(proxySession: ProxySession)
   clearElectronProxyCredentialsForSession(proxySession)
 }
 
+export function clearProxySessionCredentials(proxySession: ProxySession): void {
+  const state = sessionProxyApplications.get(proxySession)
+  if (state) {
+    state.credentials = null
+  }
+  clearElectronProxyCredentialsForSession(proxySession)
+}
+
 /** Wait for the newest queued policy; false keeps requests fail-closed after an apply error. */
 export async function awaitProxySessionApplication(proxySession: ProxySession): Promise<boolean> {
   while (true) {
@@ -107,8 +115,7 @@ export async function retireProxySessionApplication(proxySession: ProxySession):
   try {
     await releaseProxySessionApplication(proxySession, true)
   } finally {
-    state.credentials = null
-    clearElectronProxyCredentialsForSession(proxySession)
+    clearProxySessionCredentials(proxySession)
   }
 }
 

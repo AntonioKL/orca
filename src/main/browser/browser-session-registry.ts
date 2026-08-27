@@ -25,7 +25,6 @@ import {
 import type { BrowserSessionMeta } from './browser-session-meta-store'
 import {
   applyBrowserSessionUserAgentModes,
-  clearBrowserSessionPartitionPolicies,
   forgetBrowserSessionPartitionConfiguration,
   installBrowserSessionPartitionPolicies
 } from './browser-session-partition-policies'
@@ -37,6 +36,7 @@ import {
 } from './browser-session-route-policies'
 import { retireProxySessionApplication } from '../network/proxy-settings'
 import { invalidateBrowserSessionProxyApplication } from './browser-session-proxy'
+import { retireFailedBrowserSessionProfile } from './browser-session-profile-retirement'
 import { cancelBrowserWebAuthnAccountRequestsForSession } from './browser-webauthn-account-picker'
 
 export type BrowserSessionRegistryProfileOptions = {
@@ -234,14 +234,7 @@ class BrowserSessionRegistry {
     try {
       await installBrowserSessionPartitionPolicies(profile)
     } catch (error) {
-      const sess = session.fromPartition(partition)
-      clearBrowserSessionUserAgentMode(sess)
-      clearBrowserSessionPartitionPolicies(partition, sess)
-      try {
-        await retireProxySessionApplication(sess)
-      } catch {
-        console.warn('[proxy] Failed to release proxy from browser partition', partition)
-      }
+      await retireFailedBrowserSessionProfile(partition, session.fromPartition(partition))
       throw error
     }
     this.profiles.set(id, profile)

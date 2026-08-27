@@ -66,6 +66,7 @@ import {
   applyBrowserSessionProxies,
   setBrowserNetworkProxySettingsResolver
 } from './browser-session-proxy'
+import { handleElectronProxyLogin } from '../network/electron-proxy-credentials'
 
 let partitionCounter = 0
 function nextProfile() {
@@ -192,6 +193,41 @@ describe('installBrowserSessionPartitionPolicies proxy wiring', () => {
     await expect(installBrowserSessionPartitionPolicies(profile)).resolves.toBeUndefined()
 
     expect(sess.setProxy).toHaveBeenCalledTimes(2)
+  })
+
+  it('forgets failed startup credentials and restores them after recovery', async () => {
+    setBrowserNetworkProxySettingsResolver(() => ({
+      httpProxyUrl: 'http://alice:secret@proxy.example:8080',
+      httpProxyBypassRules: ''
+    }))
+    const profile = nextProfile()
+    const sess = fromPartitionMock(profile.partition)
+    sess.closeAllConnections.mockRejectedValue(new Error('proxy settlement failed'))
+
+    await expect(installBrowserSessionPartitionPolicies(profile)).rejects.toThrow(
+      'proxy settlement failed'
+    )
+    const failedCallback = vi.fn()
+    handleElectronProxyLogin(
+      { preventDefault: vi.fn() } as never,
+      { session: sess } as never,
+      {} as never,
+      { isProxy: true, host: 'proxy.example', port: 8080 },
+      failedCallback
+    )
+    expect(failedCallback).not.toHaveBeenCalled()
+
+    sess.closeAllConnections.mockResolvedValue(undefined)
+    await expect(installBrowserSessionPartitionPolicies(profile)).resolves.toBeUndefined()
+    const recoveredCallback = vi.fn()
+    handleElectronProxyLogin(
+      { preventDefault: vi.fn() } as never,
+      { session: sess } as never,
+      {} as never,
+      { isProxy: true, host: 'proxy.example', port: 8080 },
+      recoveredCallback
+    )
+    expect(recoveredCallback).toHaveBeenCalledWith('alice', 'secret')
   })
 
   it('cancels an in-flight policy retry when partition policies are cleared', async () => {

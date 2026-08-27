@@ -2,6 +2,7 @@ import { session } from 'electron'
 import type { Session } from 'electron'
 import type { BrowserSessionProfile } from '../../shared/browser-workspace-types'
 import { browserManager } from './browser-manager'
+import { clearProxySessionCredentials } from '../network/proxy-settings'
 import {
   applyProxyToBrowserSession,
   invalidateBrowserSessionProxyApplication
@@ -80,8 +81,12 @@ export function installBrowserSessionPartitionPolicies(
   const sess = session.fromPartition(partition)
   setBrowserSessionUserAgentMode(sess, profile.userAgentMode ?? 'clean')
   // Why: route partitions own a SOCKS transport policy that the app proxy must not overwrite.
-  const proxyReady =
+  const proxyReady = (
     options.applyAppWideProxy === false ? Promise.resolve() : applyProxyToBrowserSession(sess)
+  ).catch((error: unknown) => {
+    clearProxySessionCredentials(sess)
+    throw error
+  })
   if (configuredPartitions.has(partition)) {
     return proxyReady
   }

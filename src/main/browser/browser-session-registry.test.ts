@@ -36,6 +36,7 @@ import { googleAuthUserAgent } from './browser-google-auth-ua'
 import { setupClientHintsOverride } from './browser-session-ua'
 import { setBrowserNetworkProxySettingsResolver } from './browser-session-proxy'
 import { handleElectronProxyLogin } from '../network/electron-proxy-credentials'
+import { applyProxySettingsToSession } from '../network/proxy-settings'
 import { ORCA_BROWSER_PARTITION } from '../../shared/constants'
 import {
   DEFAULT_LOCAL_ORCA_PROFILE_ID,
@@ -155,6 +156,11 @@ describe('BrowserSessionRegistry', () => {
       .mockResolvedValueOnce(undefined)
       .mockRejectedValue(new Error('proxy rollback failed'))
     proxySession.closeAllConnections.mockRejectedValueOnce(new Error('proxy settlement failed'))
+    proxySession.setPermissionRequestHandler.mockImplementation((handler: unknown) => {
+      if (handler === null) {
+        throw new Error('policy cleanup failed')
+      }
+    })
     sessionFromPartitionMock.mockReturnValue(proxySession)
     setBrowserNetworkProxySettingsResolver(() => ({
       httpProxyUrl: 'http://alice:secret@proxy.example:8080',
@@ -174,6 +180,13 @@ describe('BrowserSessionRegistry', () => {
     )
 
     expect(callback).not.toHaveBeenCalled()
+    await expect(
+      applyProxySettingsToSession(
+        proxySession,
+        { httpProxyUrl: 'http://later.example:8080' },
+        { env: {} }
+      )
+    ).rejects.toThrow('retired')
   })
 
   it('rejects creating a profile with scope default', async () => {
