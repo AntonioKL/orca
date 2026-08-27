@@ -276,6 +276,7 @@ export function useSourceControlBranchCompare({
     branchComparePollEnabledRef.current = true
     const stopInterval = installWindowVisibilityInterval({
       run: () => void startBranchCompareRef.current('interval'),
+      jitterOnVisible: true,
       intervalMs: BRANCH_REFRESH_INTERVAL_MS
     })
     return () => {

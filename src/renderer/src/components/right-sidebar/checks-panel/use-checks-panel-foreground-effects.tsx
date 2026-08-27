@@ -143,6 +143,7 @@ export function useChecksPanelForegroundEffects(model: ChecksPanelForegroundEffe
         }
         setGitStatusRefreshNonce((value) => value + 1)
       },
+      jitterOnVisible: true,
       intervalMs: RUNTIME_SSH_STATUS_REFRESH_MS
     })
   }, [isPanelVisible, repoConnectionId, runtimeEnvironmentId, setGitStatusRefreshNonce])

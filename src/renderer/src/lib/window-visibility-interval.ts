@@ -20,6 +20,7 @@ export function installWindowVisibilityInterval(args: {
   intervalMs: number
   setIntervalFn?: (callback: () => void, intervalMs: number) => WindowVisibilityIntervalTimer
   clearIntervalFn?: (handle: WindowVisibilityIntervalTimer) => void
+  jitterOnVisible?: boolean
   jitterFn?: () => number
 }): () => void {
   const setIntervalFn =
@@ -30,13 +31,15 @@ export function installWindowVisibilityInterval(args: {
     args.clearIntervalFn ?? ((handle: WindowVisibilityIntervalTimer): void => clearInterval(handle))
   let intervalId: WindowVisibilityIntervalTimer | null = null
   let visibilityJitterId: WindowVisibilityJitterTimer | null = null
-  const visibilityJitterMs = Math.max(
-    0,
-    Math.min(
-      MAX_VISIBILITY_JITTER_MS,
-      Math.floor(args.jitterFn?.() ?? Math.random() * (MAX_VISIBILITY_JITTER_MS + 1))
-    )
-  )
+  const visibilityJitterMs = args.jitterOnVisible
+    ? Math.max(
+        0,
+        Math.min(
+          MAX_VISIBILITY_JITTER_MS,
+          Math.floor(args.jitterFn?.() ?? Math.random() * (MAX_VISIBILITY_JITTER_MS + 1))
+        )
+      )
+    : 0
 
   const stop = (): void => {
     if (visibilityJitterId !== null) {
@@ -70,7 +73,7 @@ export function installWindowVisibilityInterval(args: {
   }
   const reconcile = (): void => {
     if (isWindowVisible()) {
-      start(true)
+      start(args.jitterOnVisible === true)
     } else {
       stop()
     }

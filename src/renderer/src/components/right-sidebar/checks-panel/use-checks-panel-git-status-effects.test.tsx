@@ -21,11 +21,22 @@ const setGitStatusProbeErrorContextKey = vi.fn()
 const setGitStatusRefreshNonce = vi.fn()
 const updateWorktreeGitIdentity = vi.fn()
 
-function Probe({ nonce }: { nonce: number }): null {
+function Probe({
+  nonce,
+  contextKey = 'context-A',
+  worktreeId = 'worktree-A',
+  worktreePath = '/repo'
+}: {
+  nonce: number
+  contextKey?: string
+  worktreeId?: string
+  worktreePath?: string
+}): null {
+  panelContextKeyRef.current = contextKey
   useChecksPanelGitStatusEffects({
     activeConnectionId: null,
-    activeWorktreeId: 'worktree-A',
-    activeWorktreePath: '/repo',
+    activeWorktreeId: worktreeId,
+    activeWorktreePath: worktreePath,
     activeWorktreePushTarget: null,
     branch: 'feature',
     eligibilityHeadOidRef: { current: null },
@@ -47,7 +58,7 @@ function Probe({ nonce }: { nonce: number }): null {
     fallbackGitHubPRNumber: null,
     localExecutionScope: 'host',
     ownerSettings: null,
-    panelContextKey: 'context-A',
+    panelContextKey: contextKey,
     panelContextKeyRef,
     remoteStatus: undefined,
     remoteStatusInvalidation: 0,
@@ -122,5 +133,41 @@ describe('useChecksPanelGitStatusEffects poll runner', () => {
       await vi.advanceTimersByTimeAsync(1)
     })
     expect(mocks.getRuntimeGitStatus).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not carry a slow worktree backoff into the next panel context', async () => {
+    const first = deferred<{
+      entries: never[]
+      head: string
+      branch: string
+      upstreamStatus: { hasUpstream: boolean; ahead: number; behind: number }
+    }>()
+    const status = {
+      entries: [],
+      head: 'head-A',
+      branch: 'feature',
+      upstreamStatus: { hasUpstream: true, ahead: 0, behind: 0 }
+    }
+    mocks.getRuntimeGitStatus.mockReturnValueOnce(first.promise).mockResolvedValue(status)
+    const root: Root = await mountProbe(<Probe nonce={0} />)
+    expect(mocks.getRuntimeGitStatus).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+      first.resolve(status)
+    })
+    await flush()
+
+    await act(async () => {
+      root.render(
+        <Probe nonce={0} contextKey="context-B" worktreeId="worktree-B" worktreePath="/repo-b" />
+      )
+    })
+    await flush()
+
+    expect(mocks.getRuntimeGitStatus).toHaveBeenCalledTimes(2)
+    expect(mocks.getRuntimeGitStatus).toHaveBeenLastCalledWith(
+      expect.objectContaining({ worktreeId: 'worktree-B', worktreePath: '/repo-b' })
+    )
   })
 })

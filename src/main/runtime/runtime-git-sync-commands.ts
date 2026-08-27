@@ -24,7 +24,10 @@ export class RuntimeGitSyncCommands {
       await provider.abortMerge(target.worktree.path)
       return { ok: true }
     }
-    await abortMerge(target.worktree.path, localGitOptionsForTarget(target))
+    await abortMerge(target.worktree.path, {
+      ...localGitOptionsForTarget(target),
+      admissionTier: 'interactive'
+    })
     return { ok: true }
   }
 
@@ -38,7 +41,10 @@ export class RuntimeGitSyncCommands {
       await provider.abortRebase(target.worktree.path)
       return { ok: true }
     }
-    await abortRebase(target.worktree.path, localGitOptionsForTarget(target))
+    await abortRebase(target.worktree.path, {
+      ...localGitOptionsForTarget(target),
+      admissionTier: 'interactive'
+    })
     return { ok: true }
   }
 
@@ -70,7 +76,10 @@ export class RuntimeGitSyncCommands {
       await provider.fetchRemote(target.worktree.path, pushTarget)
       return { ok: true }
     }
-    await gitFetch(target.worktree.path, pushTarget, localGitOptionsForTarget(target))
+    await gitFetch(target.worktree.path, pushTarget, {
+      ...localGitOptionsForTarget(target),
+      admissionTier: 'interactive'
+    })
     return { ok: true }
   }
 
@@ -106,7 +115,10 @@ export class RuntimeGitSyncCommands {
       await provider.pullBranch(target.worktree.path, pushTarget)
       return { ok: true }
     }
-    await gitPull(target.worktree.path, pushTarget, localGitOptionsForTarget(target))
+    await gitPull(target.worktree.path, pushTarget, {
+      ...localGitOptionsForTarget(target),
+      admissionTier: 'interactive'
+    })
     return { ok: true }
   }
 
@@ -123,7 +135,10 @@ export class RuntimeGitSyncCommands {
       await provider.fastForwardBranch(target.worktree.path, pushTarget)
       return { ok: true }
     }
-    await gitFastForward(target.worktree.path, pushTarget, localGitOptionsForTarget(target))
+    await gitFastForward(target.worktree.path, pushTarget, {
+      ...localGitOptionsForTarget(target),
+      admissionTier: 'interactive'
+    })
     return { ok: true }
   }
 
@@ -184,6 +199,9 @@ export class RuntimeGitSyncCommands {
       }
       return provider.commit(target.worktree.path, message)
     }
-    return commitChanges(target.worktree.path, message, localGitOptionsForTarget(target))
+    return commitChanges(target.worktree.path, message, {
+      ...localGitOptionsForTarget(target),
+      admissionTier: 'interactive'
+    })
   }
 }

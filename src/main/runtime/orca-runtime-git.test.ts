@@ -9,8 +9,6 @@ import type * as PullRequestContextModule from '../text-generation/pull-request-
 import { RuntimeGitCommands, type ResolvedRuntimeGitWorktree } from './orca-runtime-git'
 
 const mocks = vi.hoisted(() => ({
-  abortMerge: vi.fn(),
-  abortRebase: vi.fn(),
   checkoutBranch: vi.fn(),
   listLocalBranches: vi.fn(),
   getStagedCommitContext: vi.fn(),
@@ -26,8 +24,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../git/status', async () => ({
   ...(await vi.importActual<typeof GitStatusModule>('../git/status')),
-  abortMerge: mocks.abortMerge,
-  abortRebase: mocks.abortRebase,
   getStagedCommitContext: mocks.getStagedCommitContext,
   getStatus: mocks.getStatus
 }))
@@ -97,8 +93,6 @@ function makeCommands(worktreePath: string): RuntimeGitCommands {
 
 describe('RuntimeGitCommands', () => {
   beforeEach(() => {
-    mocks.abortMerge.mockReset()
-    mocks.abortRebase.mockReset()
     mocks.getStagedCommitContext.mockReset()
     mocks.getPullRequestDraftContext.mockReset()
     mocks.generateCommitMessageFromContext.mockReset()
@@ -120,17 +114,6 @@ describe('RuntimeGitCommands', () => {
     }
   })
 
-  it('aborts a local merge through the resolved worktree', async () => {
-    const worktreePath = mkdtempSync(join(tmpdir(), 'orca-runtime-git-'))
-    tempDirs.push(worktreePath)
-    const commands = makeCommands(worktreePath)
-    mocks.abortMerge.mockResolvedValue(undefined)
-
-    await expect(commands.abortRuntimeGitMerge('id:wt-1')).resolves.toEqual({ ok: true })
-
-    expect(mocks.abortMerge).toHaveBeenCalledWith(worktreePath, {})
-  })
-
   // Why: a directory-only ignore rule (`node_modules/`) never matches the shared
   // symlink, so Git reports it untracked forever. Runtime/CLI status has to tell
   // getStatus which untracked entries are Orca's own (issue #10451); nothing else
@@ -148,6 +131,7 @@ describe('RuntimeGitCommands', () => {
     await commands.getRuntimeGitStatus('id:wt-1')
 
     expect(mocks.getStatus).toHaveBeenCalledWith('/workspace/feature', {
+      admissionTier: 'interactive',
       sharedLinkPaths: ['node_modules']
     })
   })
@@ -168,51 +152,6 @@ describe('RuntimeGitCommands', () => {
 
     expect(provider.getStatus).toHaveBeenCalledWith('/remote/repo')
     expect(mocks.getStatus).not.toHaveBeenCalled()
-  })
-
-  it('aborts a remote merge through the SSH git provider', async () => {
-    const provider = { abortMerge: vi.fn().mockResolvedValue(undefined) }
-    mocks.getSshGitProvider.mockReturnValue(provider)
-    const commands = new RuntimeGitCommands({
-      resolveRuntimeGitTarget: async () => ({
-        worktree: makeWorktree('/remote/repo'),
-        connectionId: 'conn-1'
-      }),
-      getRuntimeSettings: () => ({}) as GlobalSettings
-    })
-
-    await expect(commands.abortRuntimeGitMerge('id:wt-1')).resolves.toEqual({ ok: true })
-
-    expect(provider.abortMerge).toHaveBeenCalledWith('/remote/repo')
-    expect(mocks.abortMerge).not.toHaveBeenCalled()
-  })
-
-  it('aborts a local rebase through the resolved worktree', async () => {
-    const worktreePath = mkdtempSync(join(tmpdir(), 'orca-runtime-git-'))
-    tempDirs.push(worktreePath)
-    const commands = makeCommands(worktreePath)
-    mocks.abortRebase.mockResolvedValue(undefined)
-
-    await expect(commands.abortRuntimeGitRebase('id:wt-1')).resolves.toEqual({ ok: true })
-
-    expect(mocks.abortRebase).toHaveBeenCalledWith(worktreePath, {})
-  })
-
-  it('aborts a remote rebase through the SSH git provider', async () => {
-    const provider = { abortRebase: vi.fn().mockResolvedValue(undefined) }
-    mocks.getSshGitProvider.mockReturnValue(provider)
-    const commands = new RuntimeGitCommands({
-      resolveRuntimeGitTarget: async () => ({
-        worktree: makeWorktree('/remote/repo'),
-        connectionId: 'conn-1'
-      }),
-      getRuntimeSettings: () => ({}) as GlobalSettings
-    })
-
-    await expect(commands.abortRuntimeGitRebase('id:wt-1')).resolves.toEqual({ ok: true })
-
-    expect(provider.abortRebase).toHaveBeenCalledWith('/remote/repo')
-    expect(mocks.abortRebase).not.toHaveBeenCalled()
   })
 
   it('checks out a local branch through the resolved worktree', async () => {

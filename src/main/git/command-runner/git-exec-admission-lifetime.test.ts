@@ -130,7 +130,7 @@ describe('git exec admission lifetime', () => {
     expect(_gitAdmissionSnapshotForTests().budgets.general?.baseUsed).toBe(0)
   })
 
-  it('releases barrier admission at bounded unverifiable-exit settlement', async () => {
+  it('retains barrier admission past bounded settlement until termination is observed', async () => {
     const child = mockChild()
     spawnMock.mockReturnValue(child)
     const pending = gitExecFileAsync(['status'], {
@@ -145,6 +145,61 @@ describe('git exec admission lifetime', () => {
     expect(_gitAdmissionSnapshotForTests().budgets.general?.baseUsed).toBe(1)
     await vi.advanceTimersByTimeAsync(10_000)
     await rejection
+    expect(_gitAdmissionSnapshotForTests().budgets.general?.baseUsed).toBe(1)
+
+    child.emit('close', null, 'SIGKILL')
+    await Promise.resolve()
     expect(_gitAdmissionSnapshotForTests().budgets.general?.baseUsed).toBe(0)
+  })
+
+  it('admits interactive fetch before a background fetch can queue on FETCH_HEAD', async () => {
+    _resetGitAdmissionForTests(new GitAdmissionScheduler({ networkCap: 1, networkHeadroom: 1 }))
+    const children = new Map<string, ChildProcess>()
+    const callbacks = new Map<string, ExecCallback>()
+    execFileMock.mockImplementation(
+      (_command: string, args: string[], _options: unknown, callback: ExecCallback) => {
+        const label = args[1] ?? ''
+        const child = mockChild()
+        children.set(label, child)
+        callbacks.set(label, callback)
+        return child
+      }
+    )
+
+    const first = gitExecFileAsync(['fetch', 'first'], {
+      cwd: '/repo',
+      admissionTier: 'background'
+    })
+    await vi.waitFor(() => expect(callbacks.has('first')).toBe(true))
+    const background = gitExecFileAsync(['fetch', 'background'], {
+      cwd: '/repo',
+      admissionTier: 'background'
+    })
+    const interactive = gitExecFileAsync(['fetch', 'interactive'], {
+      cwd: '/repo',
+      admissionTier: 'interactive'
+    })
+
+    await vi.waitFor(() => expect(_gitAdmissionSnapshotForTests().queued).toBe(1))
+    expect([...callbacks.keys()]).toEqual(['first'])
+
+    callbacks.get('first')?.(null, '', '')
+    await expect(first).resolves.toEqual({ stdout: '', stderr: '' })
+    await vi.waitFor(() => expect(callbacks.has('interactive')).toBe(true))
+    expect([...callbacks.keys()]).toEqual(['first', 'interactive'])
+
+    children.get('first')?.emit('close', 0, null)
+    await Promise.resolve()
+    expect(callbacks.has('background')).toBe(false)
+
+    callbacks.get('interactive')?.(null, '', '')
+    await expect(interactive).resolves.toEqual({ stdout: '', stderr: '' })
+    await vi.waitFor(() => expect(callbacks.has('background')).toBe(true))
+    expect([...callbacks.keys()]).toEqual(['first', 'interactive', 'background'])
+
+    children.get('interactive')?.emit('close', 0, null)
+    callbacks.get('background')?.(null, '', '')
+    await expect(background).resolves.toEqual({ stdout: '', stderr: '' })
+    children.get('background')?.emit('close', 0, null)
   })
 })

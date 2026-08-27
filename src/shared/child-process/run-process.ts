@@ -55,7 +55,7 @@ export type ProcessSpec = {
   stdio?: NodeSpawnOptions['stdio']
   /** Kill the whole process tree and do not settle until termination is verified. */
   terminationBarrier?: boolean | ProcessTerminationBarrier
-  /** Called once when the child exits, or when a termination barrier gives up safely. */
+  /** Called once when the child exits or tree termination is verified. */
   onChildTerminated?: () => void
 }
 
@@ -202,8 +202,6 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
       clearTimeout(graceTimer)
       clearTimeout(barrierDeadlineTimer)
       spec.signal?.removeEventListener('abort', onAbort)
-      // A barrier's bounded grace must release rather than pin capacity forever.
-      terminationReporter.reportIf(Boolean(spec.terminationBarrier))
       act()
     }
 

@@ -104,7 +104,7 @@ async function gitExecFileAsyncUnlocked(
             )
           : execFileCapture(command.binary, command.args, captureOptions)
       }
-      try {
+      const runCapturedCommand = async (): Promise<{ stdout: string; stderr: string }> => {
         let result: { stdout: string | Buffer; stderr: string | Buffer }
         try {
           result = await capture(resolved)
@@ -136,6 +136,17 @@ async function gitExecFileAsyncUnlocked(
           stdout: readCapturedGitString(stdout as string, resolved),
           stderr: stderr as string
         }
+      }
+      try {
+        const command = resolveGitFetchHeadCommand(args, options.cwd)
+        return command.needsLock
+          ? await runWithGitFetchHeadLock(
+              command.cwd,
+              options.signal,
+              runCapturedCommand,
+              command.gitDir
+            )
+          : await runCapturedCommand()
       } finally {
         const termination = terminationState.current
         if (termination) {
@@ -152,11 +163,7 @@ export function gitExecFileAsync(
   args: string[],
   options: GitExecOptions
 ): Promise<{ stdout: string; stderr: string }> {
-  const run = () => gitExecFileAsyncUnlocked(args, options)
-  const command = resolveGitFetchHeadCommand(args, options.cwd)
-  return command.needsLock
-    ? runWithGitFetchHeadLock(command.cwd, options.signal, run, command.gitDir)
-    : run()
+  return gitExecFileAsyncUnlocked(args, options)
 }
 
 /**

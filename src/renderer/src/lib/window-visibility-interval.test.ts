@@ -7,8 +7,7 @@ describe('installWindowVisibilityInterval', () => {
     vi.unstubAllGlobals()
   })
 
-  it('runs intervals only while the document is visible', async () => {
-    vi.useFakeTimers()
+  it('runs intervals only while the document is visible', () => {
     let visibilityState: DocumentVisibilityState = 'hidden'
     const documentListeners = new Map<string, () => void>()
     const clearIntervalMock = vi.fn()
@@ -33,8 +32,7 @@ describe('installWindowVisibilityInterval', () => {
       run,
       intervalMs: 3000,
       setIntervalFn: setIntervalMock,
-      clearIntervalFn: clearIntervalMock,
-      jitterFn: () => 0
+      clearIntervalFn: clearIntervalMock
     })
 
     expect(run).not.toHaveBeenCalled()
@@ -42,7 +40,6 @@ describe('installWindowVisibilityInterval', () => {
 
     visibilityState = 'visible'
     documentListeners.get('visibilitychange')?.()
-    await vi.advanceTimersByTimeAsync(0)
     expect(run).toHaveBeenCalledTimes(1)
     expect(setIntervalMock).toHaveBeenCalledTimes(1)
 
@@ -52,7 +49,6 @@ describe('installWindowVisibilityInterval', () => {
 
     visibilityState = 'visible'
     documentListeners.get('visibilitychange')?.()
-    await vi.advanceTimersByTimeAsync(0)
     expect(run).toHaveBeenCalledTimes(2)
     expect(setIntervalMock).toHaveBeenCalledTimes(2)
 
@@ -61,11 +57,9 @@ describe('installWindowVisibilityInterval', () => {
       'visibilitychange',
       documentListeners.get('visibilitychange')
     )
-    vi.useRealTimers()
   })
 
-  it('uses runOnVisible for the becoming-visible run and run for interval ticks', async () => {
-    vi.useFakeTimers()
+  it('uses runOnVisible for the becoming-visible run and run for interval ticks', () => {
     let visibilityState: DocumentVisibilityState = 'hidden'
     const documentListeners = new Map<string, () => void>()
     const intervalCallbacks: (() => void)[] = []
@@ -95,13 +89,11 @@ describe('installWindowVisibilityInterval', () => {
       runOnVisible,
       intervalMs: 3000,
       setIntervalFn: setIntervalMock,
-      clearIntervalFn: vi.fn(),
-      jitterFn: () => 0
+      clearIntervalFn: vi.fn()
     })
 
     visibilityState = 'visible'
     documentListeners.get('visibilitychange')?.()
-    await vi.advanceTimersByTimeAsync(0)
     expect(runOnVisible).toHaveBeenCalledTimes(1)
     expect(run).not.toHaveBeenCalled()
 
@@ -110,7 +102,6 @@ describe('installWindowVisibilityInterval', () => {
     expect(runOnVisible).toHaveBeenCalledTimes(1)
 
     cleanup()
-    vi.useRealTimers()
   })
 
   it('starts while visible even when the window is not focused', () => {
@@ -153,6 +144,7 @@ describe('installWindowVisibilityInterval', () => {
       installWindowVisibilityInterval({
         run,
         intervalMs: 10_000,
+        jitterOnVisible: true,
         jitterFn: () => [0, 100, 400][index] ?? 0
       })
     )
@@ -186,6 +178,7 @@ describe('installWindowVisibilityInterval', () => {
     const cleanup = installWindowVisibilityInterval({
       run,
       intervalMs: 3000,
+      jitterOnVisible: true,
       jitterFn: () => 400
     })
 
@@ -212,6 +205,7 @@ describe('installWindowVisibilityInterval', () => {
     const cleanup = installWindowVisibilityInterval({
       run,
       intervalMs: 3000,
+      jitterOnVisible: true,
       jitterFn: () => 400
     })
     visibilityState = 'visible'

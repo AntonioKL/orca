@@ -124,7 +124,7 @@ export function useChecksPanelGitStatusEffects(model: ChecksPanelGitStatusEffect
         gitStatusPollRunnerRef.current = null
       }
     }
-  }, [])
+  }, [panelContextKey])
 
   useEffect(() => {
     if (
