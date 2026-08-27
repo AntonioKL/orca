@@ -27,6 +27,7 @@ import type { AgentStatus } from '../../shared/agent-detection'
 import type { TerminalOscLinkRange } from '../../shared/terminal-osc-link-ranges'
 import type { TerminalOscColorQueryReplyColors } from '../../shared/terminal-osc-color-reply'
 import type { TerminalOutputSourceRange } from '../../shared/terminal-output-source-range'
+import { detectTerminalComposerDraft } from '../../shared/terminal-composer-draft'
 import type {
   RemoteTerminalSourceRangeConsumerHooks,
   RemoteTerminalSourceRangeReplacementPublication,
@@ -106,6 +107,8 @@ import {
 } from '../../shared/agent-prompt-injection'
 import {
   type AgentPromptActivity,
+  type AgentPromptWaitTextCache,
+  readAgentPromptWaitText,
   resolveAgentPromptEffectTimeoutMs,
   verifyAgentPromptSubmission
 } from './agent-prompt-submission-verification'
@@ -344,6 +347,7 @@ import type {
   TerminalPaneLayoutNode,
   TerminalTab
 } from '../../shared/terminal-tab-types'
+import { resolvePublishedPaneAgentIdentity } from '../../shared/published-pane-agent-identity'
 import type { TuiAgent } from '../../shared/tui-agent'
 import type { BranchPrefixStrategy } from '../../shared/ui-chrome-types'
 import type { WorkspaceSessionState } from '../../shared/workspace-session-state-types'
@@ -538,11 +542,11 @@ import {
   splitWorktreeIdForFilesystem,
   worktreeIdComparisonKey
 } from '../../shared/worktree/id'
+import { getProjectIdForProviderIdentity } from '../../shared/project-host-setup-projection'
 import {
-  getProjectIdForProviderIdentity,
   getProjectHostSetupForRepo,
   getProjectHostSetupWorktreeMeta
-} from '../../shared/project-host-setup-projection'
+} from '../../shared/project-host-setup-lookup'
 import { parsePtySessionId } from '../../shared/pty-session-id-format'
 import { clampLinearIssueListLimit } from '../../shared/linear/issue-read-limits'
 import { isFolderRepo } from '../../shared/repo-kind'
@@ -918,6 +922,7 @@ import {
   type RepoWorktreeRowDeps
 } from './repo-worktree-row-resolution'
 import { getRepoOwnedWorktreeMeta } from '../worktree-metadata-ownership'
+import { readWorktreeMetaForHost } from '../persistence/host-qualified-worktree-meta'
 import { withTimeout } from '../../shared/promise-timeout-fallback'
 import {
   getLocalWorktreePathAccess,
@@ -1354,6 +1359,7 @@ type RuntimeStore = {
   getAllWorktreeMeta: Store['getAllWorktreeMeta']
   getWorktreeMeta: Store['getWorktreeMeta']
   setWorktreeMeta: Store['setWorktreeMeta']
+  setWorktreeMetaForHost?: Store['setWorktreeMetaForHost']
   removeWorktreeMeta: Store['removeWorktreeMeta']
   getWorktreeLineage?: Store['getWorktreeLineage']
   getAllWorktreeLineage?: Store['getAllWorktreeLineage']
@@ -1892,9 +1898,15 @@ export type RuntimeTerminalDataMeta = Readonly<{
 
 type RuntimeVisibleTerminalState = {
   lines: string[]
+  draft?: string
   isAlternateScreen: boolean
   sequence: number
   generation: number
+}
+
+type RuntimeTerminalProjection = {
+  lines: string[]
+  draft?: string
 }
 
 type ProviderBufferAcquisition = {
@@ -2845,6 +2857,7 @@ const AGENT_HOOK_RUNTIME_ENV_KEYS = [
   'ORCA_AGENT_HOOK_TOKEN',
   'ORCA_AGENT_HOOK_ENV',
   'ORCA_AGENT_HOOK_VERSION',
+  'ORCA_AGENT_HOOK_TRANSPORT',
   'ORCA_AGENT_HOOK_ENDPOINT'
 ] as const
 
@@ -6094,7 +6107,8 @@ export class OrcaRuntimeService {
     method: string,
     params: unknown,
     timeoutMs?: number,
-    envelope?: RuntimeOrchestrationEnvelope
+    envelope?: RuntimeOrchestrationEnvelope,
+    internal?: { contractVerified?: boolean }
   ): Promise<unknown> {
     if (!this.orchestrationEnvironmentTransport) {
       throw new OrchestrationError(
@@ -6102,7 +6116,7 @@ export class OrcaRuntimeService {
         'Connected-server orchestration is unavailable in this runtime.'
       )
     }
-    if (isOrchestrationMutation(method, params)) {
+    if (isOrchestrationMutation(method, params) && !internal?.contractVerified) {
       const statusResponse = await this.orchestrationEnvironmentTransport.call(
         selector,
         'status.get',
@@ -11443,6 +11457,10 @@ export class OrcaRuntimeService {
       leafId: string
       incarnationId?: PtyIncarnationId
       agentLaunchAuthority?: { launchToken: string; launchAgent: TuiAgent }
+      providerReattachLaunchIdentity?: {
+        incarnationId: PtyIncarnationId
+        launchAgent: TuiAgent
+      }
     },
     isWsl?: boolean
   ): void {
@@ -11480,6 +11498,18 @@ export class OrcaRuntimeService {
       pty.launchToken = agentLaunchAuthority.launchToken
       pty.launchIncarnationId = binding.incarnationId
       pty.launchAgent = agentLaunchAuthority.launchAgent
+    }
+    const providerReattachLaunchIdentity = binding?.providerReattachLaunchIdentity
+    if (
+      providerReattachLaunchIdentity &&
+      paneKey &&
+      binding.incarnationId === providerReattachLaunchIdentity.incarnationId &&
+      pty.incarnationId === providerReattachLaunchIdentity.incarnationId &&
+      pty.paneKey === paneKey &&
+      isTuiAgent(providerReattachLaunchIdentity.launchAgent)
+    ) {
+      // Why: daemon metadata owns the surviving process; its incarnation fence restores identity without minting renderer launch authority.
+      pty.launchAgent = providerReattachLaunchIdentity.launchAgent
     }
     const pendingIncarnation = this.pendingPtyRegistrationIncarnations.get(ptyId)
     if (
@@ -14047,13 +14077,18 @@ export class OrcaRuntimeService {
       !recoveredWorkerFallback &&
       this.isKnownUnattachedLocalDaemonPty(ptyId)
     if (recoveredWorkerFallback || neverAttachedProviderFallback) {
-      const providerLines = await this.readProviderTerminalTailLines(
+      const providerProjection = await this.readProviderTerminalTailLines(
         ptyId,
         opts.limit,
         providerSnapshot
       )
-      if (providerLines.length > 0) {
-        return buildVisibleSnapshotReadFallback(read, providerLines, opts.limit)
+      if (providerProjection.lines.length > 0) {
+        return buildVisibleSnapshotReadFallback(
+          read,
+          providerProjection.lines,
+          opts.limit,
+          providerProjection.draft
+        )
       }
     }
     const knownAlternateScreen = this.isTerminalAlternateScreen(ptyId)
@@ -14077,21 +14112,21 @@ export class OrcaRuntimeService {
     ) {
       return read
     }
-    let lines = visibleState?.lines ?? []
-    if (lines.length === 0) {
-      lines = await this.readRendererVisibleSnapshotLines(ptyId)
+    let projection: RuntimeTerminalProjection = visibleState ?? { lines: [] }
+    if (projection.lines.length === 0) {
+      projection = await this.readRendererVisibleSnapshotLines(ptyId)
     }
-    if (lines.length === 0) {
+    if (projection.lines.length === 0) {
       return read
     }
-    return buildVisibleSnapshotReadFallback(read, lines, opts.limit)
+    return buildVisibleSnapshotReadFallback(read, projection.lines, opts.limit, projection.draft)
   }
 
   private async readProviderTerminalTailLines(
     ptyId: string,
     limit: number | undefined,
     snapshotOptions: ProviderSnapshotReadOptions = {}
-  ): Promise<string[]> {
+  ): Promise<RuntimeTerminalProjection> {
     const generation = this.getPtyLifecycleGeneration(ptyId)
     const lineLimit = terminalReadLimit(limit, DEFAULT_TERMINAL_READ_LIMIT)
     const snapshot = await this.serializeProviderTerminalBuffer(
@@ -14100,21 +14135,21 @@ export class OrcaRuntimeService {
       snapshotOptions
     )
     if (!snapshot) {
-      return []
+      return { lines: [] }
     }
     // Why: a cached acquisition can carry scrollback this caller did not ask for,
     // so visible-only reads parse the grid itself rather than trusting the request.
     if (snapshotOptions.visibleScreenOnly) {
-      const lines = await this.parseVisibleSnapshotLines(snapshot)
+      const projection = await this.parseVisibleSnapshot(snapshot)
       // Live bytes ordered after the provider frame make that frame stale.
       return this.getPtyLifecycleGeneration(ptyId) === generation &&
         this.getPtyOutputSequence(ptyId) <= snapshot.seq
-        ? lines
-        : []
+        ? projection
+        : { lines: [] }
     }
     const data = `${snapshot.scrollbackAnsi ?? ''}${snapshot.data}`
     if (data.length === 0) {
-      return []
+      return { lines: [] }
     }
     const emulator = new HeadlessEmulator({
       cols: snapshot.cols,
@@ -14123,11 +14158,11 @@ export class OrcaRuntimeService {
     })
     try {
       await emulator.write(data)
-      const lines = visibleNonBlankTerminalLines(emulator.getBufferTailLines(lineLimit))
+      const projection = projectTerminalTailLines(emulator, lineLimit)
       return this.getPtyLifecycleGeneration(ptyId) === generation &&
         this.getPtyOutputSequence(ptyId) <= snapshot.seq
-        ? lines
-        : []
+        ? projection
+        : { lines: [] }
     } finally {
       emulator.dispose()
     }
@@ -14144,11 +14179,11 @@ export class OrcaRuntimeService {
     if (!knownAlternateScreen && !visibleState?.isAlternateScreen) {
       return preview
     }
-    let lines = visibleState?.lines ?? []
-    if (lines.length === 0) {
-      lines = await this.readRendererVisibleSnapshotLines(ptyId)
+    let projection: RuntimeTerminalProjection = visibleState ?? { lines: [] }
+    if (projection.lines.length === 0) {
+      projection = await this.readRendererVisibleSnapshotLines(ptyId)
     }
-    return lines.length > 0 ? buildPreview(lines, '') : preview
+    return projection.lines.length > 0 ? buildPreview(projection.lines, '') : preview
   }
 
   private async readVisibleTerminalState(
@@ -14202,7 +14237,7 @@ export class OrcaRuntimeService {
         return liveState
       }
     }
-    const lines = await this.parseVisibleSnapshotLines(snapshot)
+    const projection = await this.parseVisibleSnapshot(snapshot)
     if (
       this.getPtyLifecycleGeneration(ptyId) !== generation ||
       this.getPtyOutputSequence(ptyId) > snapshot.seq
@@ -14210,7 +14245,8 @@ export class OrcaRuntimeService {
       return null
     }
     const visibleState: RuntimeVisibleTerminalState = {
-      lines,
+      lines: projection.lines,
+      ...(projection.draft ? { draft: projection.draft } : {}),
       isAlternateScreen: snapshot.alternateScreen ?? false,
       sequence: snapshot.seq,
       generation
@@ -14234,21 +14270,23 @@ export class OrcaRuntimeService {
     ) {
       return null
     }
+    const projection = projectVisibleTerminalLines(state.emulator)
     return {
-      lines: visibleNonBlankTerminalLines(state.emulator.getVisibleLines()),
+      lines: projection.lines,
+      ...(projection.draft ? { draft: projection.draft } : {}),
       isAlternateScreen: state.emulator.isAlternateScreen,
       sequence: state.outputSequence,
       generation
     }
   }
 
-  private async parseVisibleSnapshotLines(snapshot: {
+  private async parseVisibleSnapshot(snapshot: {
     data: string
     cols: number
     rows: number
-  }): Promise<string[]> {
+  }): Promise<{ lines: string[]; draft?: string }> {
     if (snapshot.data.length === 0) {
-      return []
+      return { lines: [] }
     }
     const emulator = new HeadlessEmulator({
       cols: snapshot.cols,
@@ -14257,19 +14295,21 @@ export class OrcaRuntimeService {
     })
     try {
       await emulator.write(`\x1b[2J\x1b[3J\x1b[H${snapshot.data}`)
-      return visibleNonBlankTerminalLines(emulator.getVisibleLines())
+      return projectVisibleTerminalLines(emulator)
     } finally {
       emulator.dispose()
     }
   }
 
-  private async readRendererVisibleSnapshotLines(ptyId: string): Promise<string[]> {
+  private async readRendererVisibleSnapshotLines(
+    ptyId: string
+  ): Promise<RuntimeTerminalProjection> {
     const controller = this.ptyController
     if (!controller?.serializeBuffer) {
-      return []
+      return { lines: [] }
     }
     if (controller.hasRendererSerializer && !controller.hasRendererSerializer(ptyId)) {
-      return []
+      return { lines: [] }
     }
     try {
       // Why: raw PTY tails can be whitespace-only while a full-screen TUI is
@@ -14284,11 +14324,11 @@ export class OrcaRuntimeService {
         null
       )
       if (!snapshot || snapshot.data.length === 0) {
-        return []
+        return { lines: [] }
       }
-      return this.parseVisibleSnapshotLines(snapshot)
+      return this.parseVisibleSnapshot(snapshot)
     } catch {
-      return []
+      return { lines: [] }
     }
   }
 
@@ -14666,13 +14706,14 @@ export class OrcaRuntimeService {
       return
     }
     const receipt = this.restoredOrchestrationAuthorityByPtyId.get(ptyId)
-    if (!pty.launchToken && !receipt) {
+    if (!pty.launchToken && !receipt && !pty.launchAgent) {
       return
     }
     const paneKeys = this.collectPaneKeysForPty(ptyId)
     this.restoredOrchestrationAuthorityByPtyId.delete(ptyId)
     pty.launchToken = null
     pty.launchIncarnationId = null
+    pty.launchAgent = null
     for (const paneKey of paneKeys) {
       this.retireAgentHookCompatibilityAuthorityFn?.(paneKey)
     }
@@ -19272,12 +19313,11 @@ export class OrcaRuntimeService {
     opts: { limit?: number } = {}
   ): Promise<RuntimeTerminalRead> {
     const visibleState = await this.readVisibleTerminalState(ptyId)
-    const lines =
-      visibleState?.lines ?? (await this.readProviderTerminalTailLines(ptyId, opts.limit))
-    if (lines.length === 0) {
+    const projection = visibleState ?? (await this.readProviderTerminalTailLines(ptyId, opts.limit))
+    if (projection.lines.length === 0) {
       return { ...read, source: 'screen-unavailable' }
     }
-    return buildVisibleSnapshotReadFallback(read, lines, opts.limit)
+    return buildVisibleSnapshotReadFallback(read, projection.lines, opts.limit, projection.draft)
   }
 
   // Why a cache: leaf-branch sends may arrive per keystroke; one proven-absent
@@ -19530,7 +19570,8 @@ export class OrcaRuntimeService {
 
   private getTerminalAgentStatusSnapshot(
     handle: string,
-    expectedPtyId: string
+    expectedPtyId: string,
+    waitTextOverride?: string
   ): TerminalAgentStatusSnapshot {
     const pty = this.getLivePtyForHandle(handle)
     if (pty) {
@@ -19550,11 +19591,9 @@ export class OrcaRuntimeService {
           { title: pty.pty.title, updatedAt: pty.pty.titleUpdatedAt },
           { title: pty.pty.lastOscTitle, updatedAt: pty.pty.lastOscTitleAt }
         )
-      const waitText = buildTerminalWaitText(
-        pty.pty.tailBuffer,
-        pty.pty.tailPartialLine,
-        pty.pty.preview
-      )
+      const waitText =
+        waitTextOverride ??
+        buildTerminalWaitText(pty.pty.tailBuffer, pty.pty.tailPartialLine, pty.pty.preview)
       return {
         waitText,
         waitBlockedAt: pty.pty.waitBlockedAt,
@@ -19582,7 +19621,9 @@ export class OrcaRuntimeService {
       { title: this.tabs.get(leaf.tabId)?.title, updatedAt: 0 }
     )
     return {
-      waitText: buildTerminalWaitText(leaf.tailBuffer, leaf.tailPartialLine, leaf.preview),
+      waitText:
+        waitTextOverride ??
+        buildTerminalWaitText(leaf.tailBuffer, leaf.tailPartialLine, leaf.preview),
       waitBlockedAt: leaf.waitBlockedAt,
       title: title?.title ?? null,
       titleStatus: title ? detectAgentStatusFromTitle(title.title) : leaf.lastAgentStatus,
@@ -20241,7 +20282,8 @@ export class OrcaRuntimeService {
     }
     assertAgentPromptRequestActive(options.signal)
     this.assertAgentPromptGeneration(ptyId, generation)
-    const baseline = this.getAgentPromptActivity(handle, ptyId)
+    const waitTextCache: AgentPromptWaitTextCache = {}
+    const baseline = this.getAgentPromptActivity(handle, ptyId, waitTextCache)
     this.assertAgentPromptPermissionSafe(permissionBaseline, baseline)
     const suffixWrote = this.ptyController?.write(ptyId, AGENT_PROMPT_SUBMIT) ?? false
     if (!suffixWrote) {
@@ -20249,7 +20291,7 @@ export class OrcaRuntimeService {
     }
     await verifyAgentPromptSubmission({
       baseline,
-      readActivity: () => this.getAgentPromptActivity(handle, ptyId),
+      readActivity: () => this.getAgentPromptActivity(handle, ptyId, waitTextCache),
       timeoutMs: resolveAgentPromptEffectTimeoutMs(this.getPtyAgent(ptyId)),
       signal: options.signal
     })
@@ -20278,8 +20320,13 @@ export class OrcaRuntimeService {
     }
   }
 
-  private getAgentPromptActivity(handle: string, ptyId: string): AgentPromptActivity {
+  private getAgentPromptActivity(
+    handle: string,
+    ptyId: string,
+    waitTextCache?: AgentPromptWaitTextCache
+  ): AgentPromptActivity {
     this.assertLiveTerminalHandleTargetsPty(handle, ptyId)
+    const outputSequence = this.getPtyOutputSequence(ptyId)
     const explicitCandidate = this.getFreshExplicitAgentStatusForHandle(handle)
     const explicitFloor = this.agentPromptExplicitStatusFloorByPtyId.get(ptyId)
     const explicit =
@@ -20297,7 +20344,14 @@ export class OrcaRuntimeService {
       (!explicit ||
         lifecycle.updatedAt > explicit.updatedAt ||
         (lifecycle.updatedAt === explicit.updatedAt && lifecycle.status === 'permission'))
-    const terminal = this.getTerminalAgentStatusSnapshot(handle, ptyId)
+    const waitText = waitTextCache
+      ? readAgentPromptWaitText(
+          waitTextCache,
+          outputSequence,
+          () => this.getTerminalAgentStatusSnapshot(handle, ptyId).waitText
+        )
+      : undefined
+    const terminal = this.getTerminalAgentStatusSnapshot(handle, ptyId, waitText)
     const status = this.hasAuthoritativeTerminalWaitPermission(terminal, explicit, lifecycle)
       ? 'permission'
       : lifecycleIsNewer
@@ -20312,7 +20366,7 @@ export class OrcaRuntimeService {
       // stateStartedAt, not updatedAt — same-state tool/prompt pings refresh updatedAt and would
       // otherwise pass off an in-progress turn as a new one.
       explicitWorkingStartedAt: explicit?.status === 'working' ? explicit.stateStartedAt : null,
-      outputSequence: this.getPtyOutputSequence(ptyId),
+      outputSequence,
       status
     }
   }
@@ -20837,7 +20891,7 @@ export class OrcaRuntimeService {
         workspaceKind: 'git',
         worktreeId: worktree.id,
         repoId: worktree.repoId,
-        ...((worktree.hostId ?? meta?.hostId) ? { hostId: worktree.hostId ?? meta?.hostId } : {}),
+        ...((meta?.hostId ?? worktree.hostId) ? { hostId: meta?.hostId ?? worktree.hostId } : {}),
         terminalPlatform,
         repo: repo?.displayName ?? worktree.repoId,
         path: worktree.path,
@@ -24263,7 +24317,10 @@ export class OrcaRuntimeService {
     const metaById = store.getAllWorktreeMeta()
     const detected = scan.worktrees.map((gitWorktree) => {
       const worktreeId = `${repo.id}::${gitWorktree.path}`
-      const meta = getRepoOwnedWorktreeMeta(repo, worktreeId, metaById, repoOwnerCount)
+      // A host-qualified row is exact; the locator-keyed one is only trustworthy when this repo owns it.
+      const meta =
+        readWorktreeMetaForHost(store, worktreeId, expectedHostId) ??
+        getRepoOwnedWorktreeMeta(repo, worktreeId, metaById, repoOwnerCount)
       const worktree = {
         ...mergeWorktree(repo.id, gitWorktree, meta, repo.displayName),
         hostId: repoOwnerCount === 1 ? (meta?.hostId ?? expectedHostId) : expectedHostId
@@ -27131,12 +27188,20 @@ export class OrcaRuntimeService {
         createdAt
       })
     }
-    this.store.setWorktreeMeta(worktree.id, stripOrcaProvenanceMetaUpdates(persistedMetaUpdates))
+    const metadataUpdates = stripOrcaProvenanceMetaUpdates(persistedMetaUpdates)
+    const executionHostId = worktree.identity?.executionHostId ?? worktree.hostId
+    if (executionHostId && this.store.setWorktreeMetaForHost) {
+      this.store.setWorktreeMetaForHost(worktree.id, executionHostId, metadataUpdates)
+    } else {
+      this.store.setWorktreeMeta(worktree.id, metadataUpdates)
+    }
     // Why: unlike renderer-initiated optimistic updates, CLI callers need an
     // explicit push so the editor refreshes metadata changed outside the UI.
     this.invalidateResolvedWorktreeCache()
     this.notifyWorktreesChanged(worktree.repoId)
-    return await this.showManagedWorktree(`id:${worktree.id}`)
+    return await this.showManagedWorktree(
+      worktree.identity?.key ? `identity:${worktree.identity.key}` : `id:${worktree.id}`
+    )
   }
 
   persistManagedWorktreeSortOrder(orderedIds: string[]): { updated: number } {
@@ -32324,7 +32389,10 @@ export class OrcaRuntimeService {
       throw new Error('selector_not_found')
     }
 
-    if (selector.startsWith('id:')) {
+    if (selector.startsWith('identity:')) {
+      const identityKey = selector.slice('identity:'.length)
+      candidates = worktrees.filter((worktree) => worktree.identity?.key === identityKey)
+    } else if (selector.startsWith('id:')) {
       const worktreeId = explicitWorktreeId ?? selector.slice(3)
       candidates = worktrees.filter((worktree) => worktree.id === worktreeId)
       if (candidates.length === 0) {
@@ -33937,6 +34005,30 @@ export class OrcaRuntimeService {
     return null
   }
 
+  /** Thin adapter so the summary builders stay declarative; the decision lives in `src/shared`. */
+  private resolvePaneAgentIdentityField(
+    launchAgent: TuiAgent | null | undefined,
+    foregroundAgent: TuiAgent | null | undefined,
+    title: string | null,
+    paneKey: string | null
+  ): { agentIdentity?: TuiAgent } {
+    // Why hooks here: an agent the USER started from a shell has no launch record, and on WSL the
+    // Windows host reads its foreground process as `wsl.exe` rather than the agent inside the
+    // distro. The hook is the only signal that survives both, because the agent reports itself.
+    const hookRow = paneKey
+      ? this.getHookAgentRowForPane(this.getAgentProviderSessionRowsForPaneFn?.(paneKey) ?? [])
+      : null
+    const hookAgent = isTuiAgent(hookRow?.agentType) ? hookRow.agentType : null
+    const agentIdentity = resolvePublishedPaneAgentIdentity({
+      hookAgent,
+      hookIsLive: hookRow?.agentIsLive,
+      launchAgent,
+      foregroundAgent,
+      title
+    })
+    return agentIdentity ? { agentIdentity } : {}
+  }
+
   private buildTerminalSummary(
     leaf: RuntimeLeafRecord,
     worktreesById: Map<string, ResolvedWorktree>,
@@ -33946,6 +34038,7 @@ export class OrcaRuntimeService {
     const tab = this.tabs.get(leaf.tabId) ?? null
 
     const pty = leaf.ptyId ? this.ptysById.get(leaf.ptyId) : undefined
+    const title = getLatestLeafTitle(leaf, tab?.title ?? null)
     // Why: leaf.connected mirrors the renderer graph (`ptyId !== null`), so a
     // restored surface whose PTY died with a prior run still reads connected.
     // Demote only on a controller-proven absence, and only for locally-scoped
@@ -33971,13 +34064,21 @@ export class OrcaRuntimeService {
       branch: worktree?.branch ?? '',
       tabId: leaf.tabId,
       leafId: leaf.leafId,
-      title: getLatestLeafTitle(leaf, tab?.title ?? null),
+      title,
       connected: provenAbsent ? false : leaf.connected,
       writable: provenAbsent ? false : leaf.writable,
       lastOutputAt: leaf.lastOutputAt,
       preview: leaf.preview,
       ...(leaf.lastExitCause ? { exitCause: leaf.lastExitCause } : {}),
-      ...this.terminalExecutionHostField(leaf.ptyId, leaf.worktreeId)
+      ...this.terminalExecutionHostField(leaf.ptyId, leaf.worktreeId),
+      ...this.resolvePaneAgentIdentityField(
+        pty?.launchAgent,
+        pty?.foregroundAgent,
+        title,
+        // Why guarded: makePaneKey THROWS on a non-UUID leaf id, and an unguarded call here took
+        // down terminal.list for every pane in the list, not just the odd one.
+        isTerminalLeafId(leaf.leafId) ? makePaneKey(leaf.tabId, leaf.leafId) : null
+      )
     }
   }
 
@@ -35178,6 +35279,7 @@ export class OrcaRuntimeService {
     providerSessionAgentType: string | null
     providerSessionReceivedAt: number | null
     agentType: string | null
+    agentIsLive: boolean
     live: HookLiveAgentRow | null
   } {
     let session: AgentStatusIpcPayload | null = null
@@ -35218,6 +35320,9 @@ export class OrcaRuntimeService {
       providerSessionAgentType: session?.agentType ?? null,
       providerSessionReceivedAt: session?.receivedAt ?? null,
       agentType: agent?.agentType ?? null,
+      // A fresh completed row still projects its terminal `done` status, but it is
+      // past-tense identity evidence and must not outrank process or launch facts.
+      agentIsLive: agent != null && agent.state !== 'done',
       live: live
         ? {
             payload: pickParsedAgentStatusPayload(live),
@@ -36001,6 +36106,7 @@ export class OrcaRuntimeService {
     worktreesById: Map<string, ResolvedWorktree>
   ): RuntimeTerminalSummary {
     const worktree = worktreesById.get(pty.worktreeId)
+    const title = getLatestPtyTitle(pty)
 
     const pane = parsePaneKey(pty.paneKey ?? '')
     const orphaned = !pty.tabId || !pane || pane.tabId !== pty.tabId
@@ -36014,13 +36120,19 @@ export class OrcaRuntimeService {
       branch: worktree?.branch ?? '',
       tabId: orphaned ? `pty:${pty.ptyId}` : pty.tabId!,
       leafId: orphaned ? `pty:${pty.ptyId}` : pane.leafId,
-      title: getLatestPtyTitle(pty),
+      title,
       connected: pty.connected,
       writable: pty.connected,
       lastOutputAt: pty.lastOutputAt,
       preview: pty.preview,
       ...(pty.lastExitCause ? { exitCause: pty.lastExitCause } : {}),
-      ...this.terminalExecutionHostField(pty.ptyId, pty.worktreeId)
+      ...this.terminalExecutionHostField(pty.ptyId, pty.worktreeId),
+      ...this.resolvePaneAgentIdentityField(
+        pty.launchAgent,
+        pty.foregroundAgent,
+        title,
+        pty.paneKey ?? null
+      )
     }
   }
 
@@ -40942,6 +41054,46 @@ function visibleNonBlankTerminalLines(lines: string[]): string[] {
   return lines.map((line) => line.trimEnd()).filter((line) => line.trim().length > 0)
 }
 
+function projectVisibleTerminalLines(emulator: HeadlessEmulator): {
+  lines: string[]
+  draft?: string
+} {
+  const lines = emulator.getVisibleLines()
+  const draft = detectTerminalComposerDraft(emulator.getCursorLineContext())
+  if (draft) {
+    lines[draft.promptRow] = draft.promptGlyph
+    for (let row = draft.promptRow + 1; row <= draft.endRow; row += 1) {
+      lines[row] = ''
+    }
+  }
+  return {
+    lines: visibleNonBlankTerminalLines(lines),
+    ...(draft ? { draft: draft.text } : {})
+  }
+}
+
+export function projectTerminalTailLines(
+  emulator: HeadlessEmulator,
+  limit: number
+): RuntimeTerminalProjection {
+  const tail = emulator.getBufferTailLines(limit)
+  const visible = emulator.getVisibleLines()
+  const visibleRange = emulator.getVisibleBufferRange()
+  const draft = detectTerminalComposerDraft(emulator.getCursorLineContext())
+  if (draft && visibleRange.endExclusive === visibleRange.totalLength) {
+    visible[draft.promptRow] = draft.promptGlyph
+    for (let row = draft.promptRow + 1; row <= draft.endRow; row += 1) {
+      visible[row] = ''
+    }
+    const scrollbackTail = tail.slice(0, Math.max(0, tail.length - visible.length))
+    tail.splice(0, tail.length, ...scrollbackTail, ...visibleNonBlankTerminalLines(visible))
+  }
+  return {
+    lines: visibleNonBlankTerminalLines(tail).slice(-limit),
+    ...(draft ? { draft: draft.text } : {})
+  }
+}
+
 // Why: every read carries its source, so a caller that asked for a screen and got a response
 // with no source at all knows it reached a host that predates screen reads — rather than
 // mistaking the stream for the screen. Rendered lines only ever enter a read through
@@ -40954,7 +41106,8 @@ function labelTerminalReadSource(resolved: RuntimeTerminalRead): RuntimeTerminal
 function buildVisibleSnapshotReadFallback(
   read: RuntimeTerminalRead,
   visibleLines: string[],
-  limit: number | undefined
+  limit: number | undefined,
+  draft?: string
 ): RuntimeTerminalRead {
   const lineLimit = terminalReadLimit(limit, DEFAULT_TERMINAL_READ_LIMIT)
   const lineBoundedTail = visibleLines.slice(-lineLimit)
@@ -40968,7 +41121,8 @@ function buildVisibleSnapshotReadFallback(
     limited:
       read.limited || lineBoundedTail.length < visibleLines.length || charBoundedTail.limited,
     returnedLineCount: charBoundedTail.tail.length,
-    source: 'screen'
+    source: 'screen',
+    ...(draft ? { draft } : {})
   }
 }
 
