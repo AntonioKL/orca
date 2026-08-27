@@ -124,7 +124,7 @@ export async function startFederatedWorker(args: {
       terminal: params.terminal ?? null,
       agent: params.agent ?? null,
       launch: requestedLaunch,
-      timeoutMs: params.timeoutMs ?? 60_000,
+      timeoutMs: budgets.readinessTimeoutMs,
       setup: setupDecision,
       setupSource: createsWorktree
         ? params.setup
@@ -171,7 +171,7 @@ export async function startFederatedWorker(args: {
           agent: params.agent,
           model: params.model,
           effort: params.effort,
-          timeoutMs: params.timeoutMs,
+          timeoutMs: budgets.readinessTimeoutMs,
           devMode: params.devMode
         },
         budgets.attachDeadlineMs,
@@ -217,7 +217,7 @@ export async function startFederatedWorker(args: {
         server: { environmentId: server.environmentId, name: server.name },
         setup: remote.setup,
         launch,
-        timeoutMs: params.timeoutMs ?? 60_000,
+        timeoutMs: budgets.readinessTimeoutMs,
         effects: remote.effects ?? [],
         residualResources: remote.residualResources ?? []
       }

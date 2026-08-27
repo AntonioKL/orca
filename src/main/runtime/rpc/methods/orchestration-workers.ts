@@ -22,7 +22,10 @@ import { failWorkerStartWithReceipt } from './orchestration-worker-start-receipt
 import { prepareLocalWorkerStart } from './orchestration-worker-start-validation'
 import { resolveDispatchCreator } from './orchestration-dispatch-creator'
 import { resolveOrchestrationCaller } from './orchestration-run-scope'
-import { isWorkerStartTimeoutWithinTimerLimit } from '../../../../shared/orchestration-timing-budgets'
+import {
+  isWorkerStartTimeoutWithinTimerLimit,
+  resolveWorkerStartReadinessTimeoutMs
+} from '../../../../shared/orchestration-timing-budgets'
 
 export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
   defineMethod({
@@ -38,6 +41,7 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
           `--timeout-ms is too large for worker-start transport grace; the derived timeout must fit within the timer limit.`
         )
       }
+      const readinessTimeoutMs = resolveWorkerStartReadinessTimeoutMs(params.timeoutMs)
       const db = runtime.getOrchestrationDb()
       // Why: worker-start was the only Run-scoped verb that skipped this, so a
       // declared --from could name someone else's pane and inherit their depth.
@@ -118,7 +122,7 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
         terminal: params.terminal ?? null,
         agent: agent ?? null,
         launch: launch.receipt,
-        timeoutMs: params.timeoutMs ?? 60_000,
+        timeoutMs: readinessTimeoutMs,
         setup: createsWorktree ? (params.setup ?? 'run') : 'not_applicable',
         setupSource: createsWorktree
           ? params.setup
@@ -215,7 +219,7 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
         failedStage = 'agent_readiness'
         const wait = await runtime.waitForTerminal(terminalHandle, {
           condition: 'tui-idle',
-          timeoutMs: params.timeoutMs ?? 60_000
+          timeoutMs: readinessTimeoutMs
         })
         persistWorkerSetupWaitOutcome({ ...setupStage, wait })
         if (!wait.satisfied) {
@@ -275,7 +279,7 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
           stage: worker.stage,
           setup: setupReceipt,
           launch: launch.receipt,
-          timeoutMs: params.timeoutMs ?? 60_000,
+          timeoutMs: readinessTimeoutMs,
           effects,
           residualResources: [],
           ...(terminalRevealWarning ? { warning: terminalRevealWarning } : {})
