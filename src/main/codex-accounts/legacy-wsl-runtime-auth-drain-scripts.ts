@@ -177,8 +177,8 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 if [ "$8" != 1 ]; then
   session_scan_start=''; session_scan_day=$(date +%Y/%m/%d) || exit 46
-  if [ "\${10}" = recent ] && [ -f "$session_scan_watermark" ] && [ ! -L "$session_scan_watermark" ]; then
-    IFS= read -r session_scan_start < "$session_scan_watermark" || session_scan_start=''
+  if [ -f "$session_scan_watermark" ] && [ ! -L "$session_scan_watermark" ]; then
+    [ "\${10}" != recent ] || IFS= read -r session_scan_start < "$session_scan_watermark" || session_scan_start=''
   elif [ -e "$session_scan_watermark" ] && [ ! -L "$session_scan_watermark" ]; then exit 46
   fi
 fi

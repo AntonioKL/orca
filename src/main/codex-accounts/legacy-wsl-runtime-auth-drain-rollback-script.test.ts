@@ -69,6 +69,8 @@ describe.skipIf(process.platform === 'win32')('legacy WSL auth drain rollback re
     const oldTargetSessionPath = join(targetHome, 'sessions', '1999', '01', '01', 'old.jsonl')
     const rollbackSourceSessionPath = join(sourceSessionPath, '..', 'clock-rollback.jsonl')
     const rollbackTargetSessionPath = join(targetSessionPath, '..', 'clock-rollback.jsonl')
+    const restartSourceSessionPath = join(sourceSessionPath, '..', 'restart-full.jsonl')
+    const restartTargetSessionPath = join(targetSessionPath, '..', 'restart-full.jsonl')
     const blockedSourceSessionPath = join(sourceSessionPath, '..', 'blocked-watermark.jsonl')
     const blockedTargetSessionPath = join(targetSessionPath, '..', 'blocked-watermark.jsonl')
     mkdirSync(join(sourceSessionPath, '..'), { recursive: true })
@@ -126,6 +128,10 @@ describe.skipIf(process.platform === 'win32')('legacy WSL auth drain rollback re
     writeFileSync(rollbackSourceSessionPath, LATER_SESSION)
     apply(sha256(SOURCE_AUTH), '0', '0', 'recent')
     expect(readFileSync(rollbackTargetSessionPath, 'utf8')).toBe(LATER_SESSION)
+
+    writeFileSync(restartSourceSessionPath, LATER_SESSION)
+    apply(sha256(SOURCE_AUTH), '0', '0', 'full')
+    expect(readFileSync(restartTargetSessionPath, 'utf8')).toBe(LATER_SESSION)
 
     rmSync(watermarkPath)
     mkdirSync(watermarkPath)
