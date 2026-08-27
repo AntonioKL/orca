@@ -172,6 +172,21 @@ describe('repairLaunchCwd', () => {
     expect(calls).toEqual([])
   })
 
+  it('leaves an extended-length UNC share before it can be deleted', () => {
+    const { calls, chdir } = recordingChdir()
+
+    const repair = repairLaunchCwd({
+      platform: 'win32',
+      env: windowsEnv(),
+      readCwd: () => '\\\\?\\UNC\\fileserver\\team\\orca\\wt\\feature',
+      isDirectory: () => true,
+      chdir
+    })
+
+    expect(repair).toMatchObject({ outcome: 'relocated', reason: 'network-share' })
+    expect(calls).toEqual([WINDOWS_USER_DATA])
+  })
+
   it('never relocates onto another share', () => {
     const { calls, chdir } = recordingChdir()
 

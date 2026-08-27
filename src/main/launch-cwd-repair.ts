@@ -30,6 +30,11 @@ import { homedir } from 'node:os'
  */
 function isUncSharePath(path: string): boolean {
   const normalized = path.replace(/\\/g, '/')
+  // Extended-length UNC paths still refer to a network share; only extended
+  // local (`\\?\C:`) and device paths are safe to keep as a process cwd.
+  if (normalized.toLowerCase().startsWith('//?/unc/')) {
+    return true
+  }
   return normalized.startsWith('//') && !/^\/\/[?.]\//.test(normalized)
 }
 
