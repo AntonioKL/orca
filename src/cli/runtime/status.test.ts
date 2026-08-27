@@ -178,6 +178,41 @@ describe('CLI runtime connection failures', () => {
     })
   })
 
+  it.each(['EPERM', 'EACCES'] as const)(
+    'preserves live process evidence when its PID probe returns %s',
+    async (code) => {
+      const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-status-'))
+      writeFileSync(
+        getRuntimeMetadataPath(userDataPath),
+        JSON.stringify({
+          runtimeId: 'runtime-denied',
+          pid: process.pid,
+          transports: [{ kind: 'named-pipe', endpoint: String.raw`\\.\pipe\orca-denied` }],
+          authToken: 'token',
+          startedAt: Date.now()
+        })
+      )
+      vi.mocked(sendRequest).mockRejectedValueOnce(
+        new RuntimeClientError('runtime_permission_denied', 'denied')
+      )
+      const killSpy = vi.spyOn(process, 'kill').mockImplementationOnce(() => {
+        throw Object.assign(new Error('denied'), { code })
+      })
+
+      try {
+        const status = await new RuntimeClient(userDataPath).getCliStatus()
+
+        expect(status.result).toMatchObject({
+          app: { running: true, pid: process.pid },
+          runtime: { state: 'stale_bootstrap', reachable: false },
+          graph: { state: 'not_running' }
+        })
+      } finally {
+        killSpy.mockRestore()
+      }
+    }
+  )
+
   it('retains starting for a live transient connection failure', async () => {
     const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-status-'))
     writeFileSync(
