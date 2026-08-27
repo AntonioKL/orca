@@ -1,8 +1,3 @@
-// Relay-side adapter for the shared agent-hook listener: hosts a loopback HTTP server and
-// forwards each parsed payload via a callback so `relay.ts` re-emits it as an `agent.hook`
-// JSON-RPC notification over the SSH channel. Replay cache is bounded one-entry-per-paneKey: a
-// reattaching Orca only needs each pane's current status, never its history, and the bound keeps a
-// long-lived relay from growing with every event.
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
@@ -12,33 +7,39 @@ import {
   clearAllListenerCaches,
   clearPaneCacheState,
   createHookListenerState,
-  getEndpointFileName,
-  HOOK_REQUEST_SLOWLORIS_MS,
-  normalizeHookPayload,
-  readRequestBody,
-  resolveCachedClaudeCompactOwnership,
-  resolveHookSource,
-  writeEndpointFile,
-  type AgentHookEventPayload,
   type HookListenerState
-} from '../shared/agent-hook-listener'
+} from '../shared/agent-hook-listener/listener-state'
+import {
+  getEndpointFileName,
+  writeEndpointFile
+} from '../shared/agent-hook-listener/endpoint-publication'
+import { HOOK_REQUEST_SLOWLORIS_MS } from '../shared/agent-hook-listener/listener-limits'
+import { normalizeHookPayload } from '../shared/agent-hook-listener'
+import { readRequestBody } from '../shared/agent-hook-listener/request-body'
+import { resolveHookSource } from '../shared/agent-hook-listener/source-routing'
+import type { AgentHookEventPayload } from '../shared/agent-hook-listener/listener-event'
 import {
   createHookTransportInterferenceTracker,
   describeHookTransportInterference,
   isHookRequestTruncatedError
 } from '../shared/agent-hook-transport-interference'
 import {
+  isAgentHookSource,
   REMOTE_AGENT_HOOK_ENV,
   type AgentHookRelayEnvelope,
   type AgentHookSource
 } from '../shared/agent-hook-relay'
+import {
+  buildSpoolHookBody,
+  drainAgentHookSpool,
+  type SpoolRecord
+} from '../shared/agent-hook-spool'
 import { buildRelayHookPtyEnv, defaultEndpointDir } from './agent-hook-endpoint-coordinates'
 import { buildRelayHookEnvelope, hookBodyEnv, hookBodyVersion } from './agent-hook-envelope-build'
 import { AgentHookResultRetryScheduler } from './agent-hook-result-retry-scheduler'
 
 export type RelayHookForward = (envelope: AgentHookRelayEnvelope) => void
 
-// Why: WSL lacks per-pane teardown, so cap replay-cache recency.
 const MAX_CACHED_PANES = 256
 
 export type RelayHookServerOptions = {
@@ -50,7 +51,6 @@ export type RelayHookServerOptions = {
   token?: string
   /** Preferred bind port. WSL relay passes the Windows listener's port so env-sourced client coords stay truthful; falls back to :0 if occupied. Defaults to :0. */
   preferredPort?: number
-  /** Called once per parsed payload; the relay wires this to `dispatcher.notify('agent.hook', envelope)`. */
   forward: RelayHookForward
 }
 
@@ -107,6 +107,19 @@ export class RelayAgentHookServer {
     this.endpointFileWritten = false
     this.portFallbackApplied = false
     try {
+      drainAgentHookSpool({
+        endpointDir: this.endpointDir,
+        getPersistedLaunchTokenHash: () => undefined,
+        ingest: (record) => this.ingestSpoolRecord(record)
+      })
+    } catch (err) {
+      // Why: a downstream relay failure must not prevent the loopback listener from starting;
+      // the untruncated spool file remains available for retry on the next restart.
+      process.stderr.write(
+        `[relay-hook-server] spool replay failed: ${err instanceof Error ? err.message : String(err)}\n`
+      )
+    }
+    try {
       await this.listenOn(this.preferredPort)
     } catch (err) {
       // Why: fall back to an ephemeral port on EADDRINUSE; clients use the endpoint file.
@@ -122,7 +135,6 @@ export class RelayAgentHookServer {
     }
   }
 
-  /** True when the preferred port was occupied and the server fell back to an ephemeral bind. */
   get usedPortFallback(): boolean {
     return this.portFallbackApplied
   }
@@ -249,8 +261,7 @@ export class RelayAgentHookServer {
         return
       }
       const event = normalizeHookPayload(this.state, source, body, this.env, {
-        allowUnanchoredPreCompact: true,
-        allowUnanchoredPostCompact: true
+        deferCompactOwnershipToClient: true
       })
       if (event) {
         // TODO: once normalizeHookPayload returns validated env/version, drop bodyEnv/bodyVersion and source them from the listener result.
@@ -281,13 +292,16 @@ export class RelayAgentHookServer {
     event: AgentHookEventPayload,
     source: AgentHookSource,
     env?: string,
-    version?: string
+    version?: string,
+    options: { isReplay?: boolean } = {}
   ): void {
     if (event.payload.state !== 'done' || event.payload.lastAssistantMessage) {
       this.retryScheduler.clearAssistantMessageRetry(event.paneKey)
     }
-    const previous = this.state.lastStatusByPaneKey.get(event.paneKey)
-    const cachedEvent = resolveCachedClaudeCompactOwnership(previous, event)
+    // Why: keep PostCompact identity in the replay cache so the client can re-run ownership when
+    // it reconnects. Stripping it would let a cold relay replay a completion as an ordinary `done`
+    // row and resurrect a pane that the client had already retired.
+    const cachedEvent = event
     // Why: delete-then-set makes Map insertion order = recency, so the cap below evicts the longest-idle pane.
     this.state.lastStatusByPaneKey.delete(event.paneKey)
     this.state.lastStatusByPaneKey.set(event.paneKey, cachedEvent)
@@ -300,6 +314,22 @@ export class RelayAgentHookServer {
       }
       this.clearPaneState(oldest)
     }
-    this.forward(buildRelayHookEnvelope(event, source, env, version))
+    this.forward(buildRelayHookEnvelope(event, source, env, version, options))
+  }
+
+  private ingestSpoolRecord(record: SpoolRecord): void {
+    if (!isAgentHookSource(record.source)) {
+      return
+    }
+    const body = buildSpoolHookBody(record)
+    const event = normalizeHookPayload(this.state, record.source, body, this.env, {
+      deferCompactOwnershipToClient: true
+    })
+    if (!event) {
+      return
+    }
+    this.applyEvent(event, record.source, hookBodyEnv(body), hookBodyVersion(body), {
+      isReplay: true
+    })
   }
 }
