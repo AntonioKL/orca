@@ -11282,9 +11282,8 @@ export class OrcaRuntimeService {
     const pty = this.getOrCreatePtyWorktreeRecord(ptyId)
     if (pty) {
       pty.hostExitConfirmed = false
-      if (incarnationId) {
-        pty.incarnationId = incarnationId
-      }
+      // Absence is unknown, not a reason to carry a prior process identity.
+      pty.incarnationId = incarnationId ?? null
       pty.connected = true
       pty.disconnectedAt = null
     }
@@ -11310,6 +11309,7 @@ export class OrcaRuntimeService {
     this.assertPtyDidNotExitBeforeRegistration(ptyId, binding?.incarnationId)
     this.forgetPtyLivenessVerdict(ptyId)
     this.spawnPublishedPtys.add(ptyId)
+    const wasDisconnected = this.ptysById.get(ptyId)?.connected === false
     // Why: record the renderer pane identity at spawn time so a stalled graph
     // sync can't hide that a live PTY already backs a pending mobile create.
     const paneKey =
@@ -11327,6 +11327,10 @@ export class OrcaRuntimeService {
       ...(binding?.incarnationId ? { incarnationId: binding.incarnationId } : {})
     })
     pty.hostExitConfirmed = false
+    if (wasDisconnected && binding?.incarnationId === undefined) {
+      // Mixed-version hosts may omit identity on a replacement; never retain the dead process's proof.
+      pty.incarnationId = null
+    }
     const agentLaunchAuthority = binding?.agentLaunchAuthority
     if (
       agentLaunchAuthority &&

@@ -10327,6 +10327,34 @@ describe('OrcaRuntimeService', () => {
       )
     })
 
+    it('clears a stale PTY incarnation when a replacement spawn omits identity', () => {
+      const { runtime } = createSideEffectRuntime()
+      runtime.registerPty('pty-1', TEST_WORKTREE_ID, null, {
+        tabId: 'tab-1',
+        leafId: '11111111-1111-4111-8111-111111111111',
+        incarnationId: 'inc-old'
+      })
+      runtime.onPtyExit('pty-1', 0, 'inc-old')
+
+      runtime.onPtySpawned('pty-1', undefined, { awaitsRegistration: false })
+
+      const pty = (
+        runtime as unknown as {
+          ptysById: Map<string, { incarnationId: string | null }>
+        }
+      ).ptysById.get('pty-1')
+      expect(pty?.incarnationId).toBeNull()
+
+      runtime.registerPty('pty-1', TEST_WORKTREE_ID, null, {
+        tabId: 'tab-1',
+        leafId: '11111111-1111-4111-8111-111111111111',
+        incarnationId: 'inc-next'
+      })
+      runtime.onPtyExit('pty-1', 0, 'inc-next')
+      runtime.registerPty('pty-1', TEST_WORKTREE_ID)
+      expect(pty?.incarnationId).toBeNull()
+    })
+
     it('confirms title-based agent exits against the foreground process', async () => {
       const { runtime, batches } = createSideEffectRuntime()
       syncSinglePty(runtime)
