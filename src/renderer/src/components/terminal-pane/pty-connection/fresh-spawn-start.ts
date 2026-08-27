@@ -207,12 +207,14 @@ export function bindStartFreshSpawn(session: ConnectPanePtySession): void {
             })
           }
           if (
-            spawnedPtyId &&
-            typeof spawnedPtyId === 'object' &&
-            spawnedPtyId.agentResumeUnavailable
+            options.notifyResumeUnavailable ||
+            (spawnedPtyId &&
+              typeof spawnedPtyId === 'object' &&
+              spawnedPtyId.agentResumeUnavailable)
           ) {
-            // Why: main dropped the resume argv, so this pane is a NEW session —
-            // the plain restored banner would claim the old one came back.
+            // Why: the resume argv was dropped — by main, or by the caller when the relay
+            // that answered post-dated the binding — so this pane is a NEW session, and the
+            // plain restored banner would claim the old one came back.
             session.showSessionRestoredBanner('resume-unavailable')
           } else if (coldRestoreOverride?.hasSleepingRecord) {
             session.showSessionRestoredBanner()

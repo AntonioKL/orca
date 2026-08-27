@@ -1,6 +1,10 @@
 import { warnTerminalLifecycleAnomaly } from '../terminal-lifecycle-diagnostics'
 import { recordPtyConnectDiagnostic } from './pty-connect-limits'
 import { isSshSessionExpiredError } from './ssh-session-connect'
+import {
+  isRelayReplacedSinceBindingError,
+  withRelayReplacedResumeSuppressed
+} from './relay-replaced-resume-suppression'
 import { isRemoteRuntimePtyId } from './paired-parked-terminal-restore'
 import { toProcessExitStartup } from './process-exit-startup'
 import { recoverUnverifiableDirectSshReattach } from './direct-ssh-reattach-recovery'
@@ -22,11 +26,13 @@ export function startDeferredSessionReattach(
       : window.api.pty.declarePendingPaneSerializer(session.cacheKey).catch(() => null)
 
   let expiredReattachError = false
+  let relayReplacedSinceBinding = false
   const coldRestoreStartup = session.buildColdRestoreAgentResumeStartup()
   const outputCallbacks = session.captureTransportOutputCallbacks(
     (message) => {
       if (isSshSessionExpiredError(message)) {
         expiredReattachError = true
+        relayReplacedSinceBinding ||= isRelayReplacedSinceBindingError(message)
         return
       }
       if (!session.isCapturedDirectSshReattachCurrent(deferredReattachSessionId)) {
@@ -89,9 +95,11 @@ export function startDeferredSessionReattach(
         }
         session.deps.clearExitedPanePtyLayoutBinding(session.pane.id, deferredReattachSessionId)
         session.deps.clearTabPtyId(session.deps.tabId, deferredReattachSessionId)
-        session.startFreshColdRestoreAgentResume(coldRestoreStartup, {
-          forceBlankRestoredViewport: true
-        })
+        session.startFreshColdRestoreAgentResume(
+          ...withRelayReplacedResumeSuppressed(coldRestoreStartup, relayReplacedSinceBinding, {
+            forceBlankRestoredViewport: true
+          })
+        )
         return
       }
       const accepted = await session.handleReattachResult(
@@ -144,9 +152,13 @@ export function startDeferredSessionReattach(
       if (session.connectionId && isSshSessionExpiredError(err)) {
         session.deps.clearExitedPanePtyLayoutBinding(session.pane.id, deferredReattachSessionId)
         session.deps.clearTabPtyId(session.deps.tabId, deferredReattachSessionId)
-        session.startFreshColdRestoreAgentResume(coldRestoreStartup, {
-          forceBlankRestoredViewport: true
-        })
+        session.startFreshColdRestoreAgentResume(
+          ...withRelayReplacedResumeSuppressed(
+            coldRestoreStartup,
+            isRelayReplacedSinceBindingError(err),
+            { forceBlankRestoredViewport: true }
+          )
+        )
         return
       }
       session.reportError(message)

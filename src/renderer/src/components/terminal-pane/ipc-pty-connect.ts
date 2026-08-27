@@ -13,6 +13,7 @@ import { spawnIpcPty } from './ipc-pty-spawn-request'
 import type { IpcPtyTransportOptions, PtyConnectResult, PtyTransport } from './pty-transport-types'
 
 const SSH_SESSION_EXPIRED_ERROR = 'SSH_SESSION_EXPIRED'
+const SSH_RELAY_REPLACED_ERROR = 'SSH_RELAY_REPLACED'
 const SSH_PTY_CONNECTION_MISMATCH_MARKER = 'belongs to SSH connection'
 
 type PtyConnectOptions = Parameters<PtyTransport['connect']>[0]
@@ -124,7 +125,11 @@ function handleConnectError(
     (message.includes(SSH_SESSION_EXPIRED_ERROR) ||
       message.includes(SSH_PTY_CONNECTION_MISMATCH_MARKER))
   ) {
-    return { id: options.sessionId, sessionExpired: true }
+    return {
+      id: options.sessionId,
+      sessionExpired: true,
+      ...(message.includes(SSH_RELAY_REPLACED_ERROR) ? { relayReplaced: true as const } : {})
+    }
   }
   if (message.includes('was explicitly killed')) {
     return undefined

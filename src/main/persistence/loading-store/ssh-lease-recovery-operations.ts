@@ -1,5 +1,6 @@
 import type { SshPtyConsumerRecovery, SshRemotePtyLease } from '../../../shared/ssh-types'
 import {
+  getSshRemotePtyLease as getSshRemotePtyLeaseOperation,
   getSshRemotePtyLeases as getSshRemotePtyLeasesOperation,
   markSshRemotePtyLease as markSshRemotePtyLeaseOperation,
   markSshRemotePtyLeases as markSshRemotePtyLeasesOperation,
@@ -74,6 +75,10 @@ export class SshLeaseRecoveryOperations {
       this[sshLeaseRecoveryOperationsContext].runtime.state,
       targetId
     )
+  }
+
+  getSshRemotePtyLease(targetId: string, ptyId: string): SshRemotePtyLease | null {
+    return getSshRemotePtyLeaseOperation(getSshPtyLeaseOperations(this), targetId, ptyId)
   }
 
   upsertSshRemotePtyLease(

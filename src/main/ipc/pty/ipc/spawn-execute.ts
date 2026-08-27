@@ -3,6 +3,7 @@ import {
   SSH_SESSION_EXPIRED_ERROR,
   isSshPtyIdentityMismatchError
 } from '../../../providers/ssh-pty-errors'
+import { markSshExpiryFromReplacedRelay } from '../../../providers/ssh-relay-replacement-verdict'
 import { classifyError } from '../../../telemetry/classify-error'
 import { track } from '../../../telemetry/client'
 import { getCohortAtEmit } from '../../../telemetry/cohort-classifier'
@@ -158,6 +159,18 @@ export async function executePtyIpcSpawn(ctx: PtyIpcSpawnState): Promise<void> {
       }
     }
     if (args.connectionId && ctx.effectiveSessionRelayId !== undefined && isExpiredSshSession) {
+      if (!isIdentityMismatch) {
+        // Why before the lease is expired: the fallback spawn that follows re-runs this request's
+        // launchAgent/command/resumeProviderSession, and only the lease still records when we last
+        // proved the PTY existed (STA-5698).
+        await markSshExpiryFromReplacedRelay({
+          error: spawnError,
+          provider: ctx.provider,
+          store: ctx.deps.store,
+          connectionId: args.connectionId,
+          relayPtyId: ctx.effectiveSessionRelayId
+        })
+      }
       // Why: expired remote reattach = relay already dropped the PTY; clear the lease so writes can't restore the stale binding.
       if (ctx.effectiveSessionAppId !== undefined && !isIdentityMismatch) {
         clearProviderPtyState(ctx.effectiveSessionAppId)

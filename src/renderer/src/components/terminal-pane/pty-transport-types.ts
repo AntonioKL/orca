@@ -93,6 +93,9 @@ export type PtyConnectResult = {
   snapshotSeq?: number
   isAlternateScreen?: boolean
   sessionExpired?: boolean
+  /** The relay that reported the PTY absent started after we last attached it, so the pane's
+   *  binding named a shell from a dead daemon and its agent must not be resumed (STA-5698). */
+  relayReplaced?: true
   coldRestore?: { scrollback: string; cwd: string; cols?: number; rows?: number }
   replay?: string
   startupCwdFallback?: { kind: 'worktree'; cwd: string }

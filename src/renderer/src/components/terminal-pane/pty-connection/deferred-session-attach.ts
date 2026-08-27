@@ -8,6 +8,10 @@ import {
   waitForUserInitiatedSshConnect,
   waitForSshConnection
 } from './ssh-session-connect'
+import {
+  isRelayReplacedSinceBindingError,
+  withRelayReplacedResumeSuppressed
+} from './relay-replaced-resume-suppression'
 import { isRemoteRuntimePtyId } from './paired-parked-terminal-restore'
 import { toProcessExitStartup } from './process-exit-startup'
 
@@ -141,13 +145,25 @@ export function runDeferredSessionAttach(session: ConnectPanePtySession): void {
             }
           }
           let expiredReattachError = false
+          let relayReplacedSinceBinding = false
           const coldRestoreStartup = session.buildColdRestoreAgentResumeStartup()
           session.clearPaneMode2031State()
           session.clearHiddenOutputRestoreState()
+          const restartPaneAfterRelayAbsence = (relayReplaced: boolean): void => {
+            useAppStore.getState().removeDeferredSshSessionId(session.deps.tabId)
+            session.deps.clearExitedPanePtyLayoutBinding(session.pane.id, pendingSessionId)
+            session.deps.clearTabPtyId(session.deps.tabId, pendingSessionId)
+            session.startFreshColdRestoreAgentResume(
+              ...withRelayReplacedResumeSuppressed(coldRestoreStartup, relayReplaced, {
+                forceBlankRestoredViewport: true
+              })
+            )
+          }
           const outputCallbacks = session.captureTransportOutputCallbacks(
             (message) => {
               if (isSshSessionExpiredError(message)) {
                 expiredReattachError = true
+                relayReplacedSinceBinding ||= isRelayReplacedSinceBindingError(message)
                 return
               }
               if (!session.isCapturedDirectSshReattachCurrent(pendingSessionId)) {
@@ -214,12 +230,7 @@ export function runDeferredSessionAttach(session: ConnectPanePtySession): void {
                 if (session.rejectObsoleteDirectSshReattach(pendingSessionId)) {
                   return
                 }
-                useAppStore.getState().removeDeferredSshSessionId(session.deps.tabId)
-                session.deps.clearExitedPanePtyLayoutBinding(session.pane.id, pendingSessionId)
-                session.deps.clearTabPtyId(session.deps.tabId, pendingSessionId)
-                session.startFreshColdRestoreAgentResume(coldRestoreStartup, {
-                  forceBlankRestoredViewport: true
-                })
+                restartPaneAfterRelayAbsence(relayReplacedSinceBinding)
                 return
               }
               const accepted = await session.handleReattachResult(
@@ -277,12 +288,7 @@ export function runDeferredSessionAttach(session: ConnectPanePtySession): void {
                 return
               }
               if (isSshSessionExpiredError(err)) {
-                useAppStore.getState().removeDeferredSshSessionId(session.deps.tabId)
-                session.deps.clearExitedPanePtyLayoutBinding(session.pane.id, pendingSessionId)
-                session.deps.clearTabPtyId(session.deps.tabId, pendingSessionId)
-                session.startFreshColdRestoreAgentResume(coldRestoreStartup, {
-                  forceBlankRestoredViewport: true
-                })
+                restartPaneAfterRelayAbsence(isRelayReplacedSinceBindingError(err))
                 return
               }
               session.reportError(err instanceof Error ? err.message : String(err))

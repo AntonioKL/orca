@@ -18,6 +18,7 @@ import type { ReattachPayloadContext } from './reattach-payload-context'
 import { createReattachPayloadHandlers } from './apply-reattach-payload'
 import type { ReattachPayloadSession } from './reattach-payload-session'
 import { recoverUnverifiableDirectSshReattach } from './direct-ssh-reattach-recovery'
+import { withRelayReplacedResumeSuppressed } from './relay-replaced-resume-suppression'
 
 type ReattachResultSession = ReattachPayloadSession &
   Pick<
@@ -127,9 +128,13 @@ export function bindHandleReattachResult(sessionBag: ConnectPanePtySession): voi
         session.deps.clearTabPtyId(session.deps.tabId, staleSessionId)
       }
       // Why: SSH sleep/reconnect can invalidate the relay PTY while the tab stays mounted; replace the dead lease in-place, not a stale overlay.
-      session.startFreshColdRestoreAgentResume(coldRestoreStartup, {
-        forceBlankRestoredViewport: true
-      })
+      session.startFreshColdRestoreAgentResume(
+        ...withRelayReplacedResumeSuppressed(
+          coldRestoreStartup,
+          connectResult.relayReplaced === true,
+          { forceBlankRestoredViewport: true }
+        )
+      )
       return false
     }
     const isCurrentReattachPayload = (): boolean => {

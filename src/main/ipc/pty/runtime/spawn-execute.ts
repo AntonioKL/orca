@@ -15,6 +15,7 @@ import {
   SSH_SESSION_EXPIRED_ERROR,
   isSshPtyIdentityMismatchError
 } from '../../../providers/ssh-pty-errors'
+import { markSshExpiryFromReplacedRelay } from '../../../providers/ssh-relay-replacement-verdict'
 import type { RuntimePtySpawnState } from './spawn-state'
 
 export async function executeRuntimePtySpawn(ctx: RuntimePtySpawnState): Promise<void> {
@@ -238,6 +239,18 @@ export async function executeRuntimePtySpawn(ctx: RuntimePtySpawnState): Promise
       }
     }
     if (args.connectionId && ctx.effectiveSessionRelayId !== undefined && isExpiredSshSession) {
+      if (!isIdentityMismatch) {
+        // Why before the lease is expired: the fallback spawn that follows re-runs this request's
+        // launchAgent/command/resumeProviderSession, and only the lease still records when we last
+        // proved the PTY existed (STA-5698).
+        await markSshExpiryFromReplacedRelay({
+          error: spawnError,
+          provider: ctx.provider,
+          store: ctx.deps.store,
+          connectionId: args.connectionId,
+          relayPtyId: ctx.effectiveSessionRelayId
+        })
+      }
       if (ctx.effectiveSessionAppId !== undefined && !isIdentityMismatch) {
         clearProviderPtyState(ctx.effectiveSessionAppId)
         deletePtyOwnership(ctx.effectiveSessionAppId)

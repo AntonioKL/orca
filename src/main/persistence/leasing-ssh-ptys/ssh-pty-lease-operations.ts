@@ -139,6 +139,19 @@ export async function markSshRemotePtyLeasesAttachedAsync(
   }
 }
 
+export function getSshRemotePtyLease(
+  operations: Pick<SshPtyLeaseOperations, 'state' | 'toStoredPtyId'>,
+  targetId: string,
+  ptyId: string
+): SshRemotePtyLease | null {
+  const relayPtyId = operations.toStoredPtyId(targetId, ptyId)
+  return (
+    operations.state.sshRemotePtyLeases?.find(
+      (entry) => entry.targetId === targetId && entry.ptyId === relayPtyId
+    ) ?? null
+  )
+}
+
 export function markSshRemotePtyLease(
   operations: SshPtyLeaseOperations,
   targetId: string,

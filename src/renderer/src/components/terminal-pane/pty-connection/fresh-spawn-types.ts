@@ -12,6 +12,8 @@ export type PendingStartupCommand = {
 
 export type FreshSpawnOptions = {
   forceBlankRestoredViewport?: boolean
+  /** The caller already declined this pane's agent resume, so the fresh shell must say so. */
+  notifyResumeUnavailable?: true
 }
 
 export type ColdRestoreAgentResumeStartup = PendingStartupCommand & {
