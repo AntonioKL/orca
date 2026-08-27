@@ -44,6 +44,19 @@ describe('readTerminalCursorLineContext', () => {
     terminal.dispose()
   })
 
+  it('recognizes a colored context-only Codex status footer', () => {
+    const terminal = new Terminal({ cols: 80, rows: 8, allowProposedApi: true })
+    writeSync(
+      terminal,
+      '\x1b[1m›\x1b[22m \x1b7review the change\r\n \r\n\x1b[38;2;242;181;144mContext 0% used\x1b[0m\x1b8'
+    )
+
+    const context = readTerminalCursorLineContext(terminal, 16)
+
+    expect(detectTerminalComposerDraft(context)?.text).toBe('review the change')
+    terminal.dispose()
+  })
+
   it('finds a composer prompt more than 16 wrapped rows above the cursor', async () => {
     const draft = `proceed ${'with '.repeat(65)}release`
     const emulator = new HeadlessEmulator({ cols: 19, rows: 30 })

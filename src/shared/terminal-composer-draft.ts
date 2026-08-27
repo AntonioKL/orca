@@ -6,6 +6,7 @@ export type TerminalCursorContext = {
   rowsBelow: string[]
   typedRowsBelow: string[]
   rowsBelowWrapped?: boolean[]
+  rowsBelowCustomForeground?: boolean[]
   beforeCursor: string
   afterCursor: string
   rawAfterCursor: string
@@ -22,11 +23,12 @@ export type TerminalComposerDraft = {
 }
 
 const COMPOSER_FRAME_LINE = /^[─━-]{8,}\s*$/
-const CODEX_FOOTER_LINE = /^\s*(?:gpt-\S+|o\d\S*)\s+[·•]\s+(?:~[/\\]|[/\\]|[A-Za-z]:[/\\]).*$/i
+const CODEX_FOOTER_LINE = /^\s*(?:gpt-\S+|o\d\S*)\s+[·•]\s+\S.*$/i
 
 function composerContinuationRows(
   context: TerminalCursorContext,
-  afterCursor: string
+  afterCursor: string,
+  codexFooterIndex: number
 ): { text: string; wrapped: boolean }[] {
   if (!afterCursor.trim() && !context.typedRowsBelow.some((row) => row.trim())) {
     return []
@@ -36,7 +38,7 @@ function composerContinuationRows(
   let hasFollowingTyped = false
   for (let index = context.rowsBelow.length - 1; index >= 0; index -= 1) {
     const raw = context.rowsBelow[index] ?? ''
-    if (COMPOSER_FRAME_LINE.test(raw) || CODEX_FOOTER_LINE.test(raw)) {
+    if (COMPOSER_FRAME_LINE.test(raw) || index === codexFooterIndex) {
       hasFollowingTyped = false
       continue
     }
@@ -47,7 +49,7 @@ function composerContinuationRows(
   }
   for (let index = 0; index < context.rowsBelow.length; index += 1) {
     const raw = context.rowsBelow[index] ?? ''
-    if (COMPOSER_FRAME_LINE.test(raw) || CODEX_FOOTER_LINE.test(raw)) {
+    if (COMPOSER_FRAME_LINE.test(raw) || index === codexFooterIndex) {
       break
     }
     if (!raw.trim() && !hasTypedContinuationAfter[index]) {
@@ -60,6 +62,25 @@ function composerContinuationRows(
     })
   }
   return continuation
+}
+
+function findCodexFooterIndex(context: TerminalCursorContext): number {
+  for (let index = context.rowsBelow.length - 1; index >= 0; index -= 1) {
+    const row = context.rowsBelow[index] ?? ''
+    if (!row.trim()) {
+      continue
+    }
+    const undimmed = context.typedRowsBelow[index] ?? ''
+    const hasFooterGap = index > 0 && !(context.rowsBelow[index - 1] ?? '').trim()
+    const isDimmedFooter =
+      hasFooterGap && !undimmed.trim() && context.rowsBelowWrapped?.[index] === false
+    const isColoredFooter =
+      hasFooterGap &&
+      context.rowsBelowCustomForeground?.[index] === true &&
+      context.rowsBelowWrapped?.[index] === false
+    return isDimmedFooter || isColoredFooter || CODEX_FOOTER_LINE.test(row) ? index : -1
+  }
+  return -1
 }
 
 function isStockPlaceholder(
@@ -84,8 +105,9 @@ export function detectTerminalComposerDraft(
     return null
   }
   const cursorIndex = context.rows.length - 1
+  const codexFooterIndex = findCodexFooterIndex(context)
   let afterCursor = context.afterCursor || context.rawAfterCursor
-  let continuationRows = composerContinuationRows(context, afterCursor)
+  let continuationRows = composerContinuationRows(context, afterCursor, codexFooterIndex)
   if (isStockPlaceholder(afterCursor, continuationRows)) {
     afterCursor = ''
     continuationRows = []
@@ -100,8 +122,7 @@ export function detectTerminalComposerDraft(
       }
       if (
         (glyph === '›' || glyph === '»') &&
-        (context.promptGlyphBoldRows[index] !== true ||
-          !context.rowsBelow.some((line) => CODEX_FOOTER_LINE.test(line)))
+        (context.promptGlyphBoldRows[index] !== true || codexFooterIndex === -1)
       ) {
         return null
       }

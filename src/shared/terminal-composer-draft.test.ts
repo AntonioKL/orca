@@ -150,6 +150,42 @@ describe('detectTerminalComposerDraft', () => {
     ).toMatchObject({ text: 'review the change', promptGlyph: '›' })
   })
 
+  it('recognizes a Codex composer with a context-only status footer', () => {
+    expect(
+      detectTerminalComposerDraft({
+        rows: ['› review the change'],
+        typedRows: ['› review the change'],
+        promptGlyphBoldRows: [true],
+        rowsBelow: ['', '  Context 12% used'],
+        typedRowsBelow: ['', ''],
+        rowsBelowWrapped: [false, false],
+        beforeCursor: '› review the change',
+        afterCursor: '',
+        rawAfterCursor: '',
+        cursorHidden: false,
+        cursorViewportRow: 4
+      })
+    ).toMatchObject({ text: 'review the change', promptGlyph: '›' })
+  })
+
+  it('recognizes a Codex composer with an arbitrary dimmed thread-title footer', () => {
+    expect(
+      detectTerminalComposerDraft({
+        rows: ['› review the change'],
+        typedRows: ['› review the change'],
+        promptGlyphBoldRows: [true],
+        rowsBelow: ['', '  Release train'],
+        typedRowsBelow: ['', ''],
+        rowsBelowWrapped: [false, false],
+        beforeCursor: '› review the change',
+        afterCursor: '',
+        rawAfterCursor: '',
+        cursorHidden: false,
+        cursorViewportRow: 4
+      })
+    ).toMatchObject({ text: 'review the change', promptGlyph: '›' })
+  })
+
   it('preserves an ordinary shell prompt that uses the Codex glyph', () => {
     expect(
       detectTerminalComposerDraft({
@@ -237,6 +273,24 @@ describe('detectTerminalComposerDraft', () => {
         cursorViewportRow: 8
       })?.text
     ).toBe('proceed deploy · verify')
+  })
+
+  it('keeps a model-like continuation before the Codex status footer', () => {
+    expect(
+      detectTerminalComposerDraft({
+        rows: ['› compare '],
+        typedRows: ['› compare '],
+        promptGlyphBoldRows: [true],
+        rowsBelow: ['gpt-5 · verify', 'gpt-5.6 · Context 12% used'],
+        typedRowsBelow: ['gpt-5 · verify', 'gpt-5.6 · Context 12% used'],
+        rowsBelowWrapped: [false, false],
+        beforeCursor: '› compare ',
+        afterCursor: '',
+        rawAfterCursor: '',
+        cursorHidden: false,
+        cursorViewportRow: 4
+      })?.text
+    ).toBe('compare\ngpt-5 · verify')
   })
 
   it('keeps typed soft-wrapped rows below a restored cursor in the draft', () => {

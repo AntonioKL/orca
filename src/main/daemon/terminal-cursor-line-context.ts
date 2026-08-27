@@ -24,6 +24,17 @@ function firstVisibleCellIsBold(line: IBufferLine): boolean {
   return false
 }
 
+function firstVisibleCellHasCustomForeground(line: IBufferLine): boolean {
+  for (let x = 0; x < line.length; x += 1) {
+    const cell = line.getCell(x)
+    if (!cell || cell.getWidth() === 0 || !cell.getChars().trim()) {
+      continue
+    }
+    return !cell.isFgDefault()
+  }
+  return false
+}
+
 export function readTerminalCursorLineContext(
   terminal: Terminal,
   rowsAbove: number
@@ -50,6 +61,7 @@ export function readTerminalCursorLineContext(
   const rowsBelow: string[] = []
   const typedRowsBelow: string[] = []
   const rowsBelowWrapped: boolean[] = []
+  const rowsBelowCustomForeground: boolean[] = []
   const end = Math.min(
     buffer.viewportY + terminal.rows - 1,
     cursorRow + Math.max(0, Math.floor(rowsAbove))
@@ -60,6 +72,7 @@ export function readTerminalCursorLineContext(
     rowsBelow.push(line?.translateToString(!nextLineIsWrapped) ?? '')
     typedRowsBelow.push(line ? undimmedText(line, 0, !nextLineIsWrapped) : '')
     rowsBelowWrapped.push(line?.isWrapped ?? false)
+    rowsBelowCustomForeground.push(line ? firstVisibleCellHasCustomForeground(line) : false)
   }
   return {
     rows,
@@ -69,6 +82,7 @@ export function readTerminalCursorLineContext(
     rowsBelow,
     typedRowsBelow,
     rowsBelowWrapped,
+    rowsBelowCustomForeground,
     beforeCursor: cursorLine.translateToString(true, 0, buffer.cursorX),
     afterCursor: undimmedText(
       cursorLine,
