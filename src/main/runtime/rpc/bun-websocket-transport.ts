@@ -195,10 +195,10 @@ export class BunWebSocketTransport {
     for (const socket of this.clients) {
       socket.terminate()
     }
-    this.clients.clear()
-    this.adapterClients.clear()
-    this.clientIds.clear()
     await server.stop({ closeActiveConnections: true })
+    for (const socket of this.clients) {
+      this.handleClose(socket)
+    }
   }
 
   private handleOpen(socket: BunServerWebSocket): void {
