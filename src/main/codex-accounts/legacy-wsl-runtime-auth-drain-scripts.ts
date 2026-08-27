@@ -11,10 +11,8 @@ import {
   RETIRED_RECENT_SESSION_BRIDGE_COMMAND,
   ROLLBACK_SESSION_LINKS_FUNCTION
 } from './legacy-wsl-runtime-auth-drain-shell-commands'
-
 export * from './legacy-wsl-runtime-auth-drain-exit-codes'
 export { FINALIZE_ABSENT_AUTH_SCRIPT } from './legacy-wsl-runtime-auth-finalize-script'
-
 export const INSPECT_LEGACY_AUTH_SCRIPT = `
 set -eu
 source_recovery_auth="$3.orca-drain-source"
@@ -177,6 +175,13 @@ cleanup() {
   rm -f -- "$temporary_auth" "$temporary_credentials" "$temporary_previous_auth" "$temporary_destination_auth" "$temporary_source_auth" "$temporary_destination_snapshot" "$temporary_destination_path" "$temporary_source_snapshot" "$temporary_marker" "$temporary_session_scan_watermark"
 }
 trap cleanup EXIT HUP INT TERM
+if [ "$8" != 1 ] && [ "\${10}" = recent ]; then
+  session_scan_start=''; session_scan_day=$(date +%Y/%m/%d) || exit 46
+  if [ -f "$session_scan_watermark" ] && [ ! -L "$session_scan_watermark" ]; then
+    IFS= read -r session_scan_start < "$session_scan_watermark" || session_scan_start=''
+  elif [ -e "$session_scan_watermark" ] && [ ! -L "$session_scan_watermark" ]; then exit 46
+  fi
+fi
 source_credentials="$legacy_home/.credentials.json"
 target_credentials="$target_home/.credentials.json"
 if [ -f "$source_credentials" ] && [ ! -e "$target_credentials" ] && [ ! -L "$target_credentials" ]; then
@@ -209,7 +214,7 @@ if [ "$7" = 1 ]; then
   rm -- "$temporary_previous_auth"
 fi
 if [ "$8" != 1 ]; then
-  session_scan_day=$(date +%Y/%m/%d) || exit 46
+  session_scan_day=\${session_scan_day:-$(date +%Y/%m/%d)} || exit 46
   expected_target_hash="$6"
   [ "$7" != 1 ] || expected_target_hash="$5"
   # Keep both live auth inodes observable while links are staged, then prove
@@ -223,10 +228,6 @@ if [ "$8" != 1 ]; then
   if [ "\${10}" = full ]; then
     ${RETIRED_SESSION_BRIDGE_COMMAND}
   elif [ "\${10}" = recent ]; then
-    session_scan_start=''
-    if [ -f "$session_scan_watermark" ] && [ ! -L "$session_scan_watermark" ]; then
-      IFS= read -r session_scan_start < "$session_scan_watermark" || session_scan_start=''
-    fi
     case "$session_scan_start" in
       ????/??/??) ${RETIRED_RECENT_SESSION_BRIDGE_COMMAND} ;;
       *) ${RETIRED_SESSION_BRIDGE_COMMAND} ;;
