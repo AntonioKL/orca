@@ -192,9 +192,10 @@ export function resolveWorktreeOperationRouteResult(
     return explicitResolution
   }
 
+  const hasDetectedWorktree = hasIndexedDetectedWorktree(state.detectedWorktreesByRepo, worktreeId)
   const hasKnownWorktree =
     resolveIndexedWorktreeOwner(state.worktreesByRepo, worktreeId).kind !== 'missing' ||
-    hasIndexedDetectedWorktree(state.detectedWorktreesByRepo, worktreeId)
+    hasDetectedWorktree
   const repoId = getRepoIdFromWorktreeId(worktreeId)
   const hasKnownRepo = state.repos?.some((repo) => repo.id === repoId) === true
   if (!hasKnownWorktree && !hasKnownRepo) {
@@ -219,9 +220,10 @@ export function resolveWorktreeOperationRouteResult(
       }
     }
   }
-  // Why: global saved-runtime entries and tombstones cannot own a known identity without row provenance.
+  // Why: with a runtime catalog, only a current local scan affirms local identity for an ownerless row.
   const mayBeLegacyLocal =
-    savedRuntimeIds === undefined || state.runtimeEnvironmentCatalogHydrated === true
+    savedRuntimeIds === undefined ||
+    (state.runtimeEnvironmentCatalogHydrated === true && hasDetectedWorktree)
   return mayBeLegacyLocal
     ? { kind: 'resolved', route: { executionHostId: 'local', runtimeEnvironmentId: null } }
     : { kind: 'missing' }

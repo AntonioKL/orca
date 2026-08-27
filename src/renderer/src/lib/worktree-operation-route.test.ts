@@ -184,7 +184,10 @@ describe('resolveWorktreeOperationRouteResult', () => {
           runtimeEnvironments: [{ id: 'runtime-a' }, { id: 'runtime-b' }, { id: 'runtime-c' }],
           runtimeEnvironmentCatalogHydrated: true,
           settings: { activeRuntimeEnvironmentId: null } as never,
-          worktreesByRepo: { 'repo-1': [worktree(undefined)] }
+          worktreesByRepo: { 'repo-1': [worktree(undefined)] },
+          detectedWorktreesByRepo: {
+            'repo-1': { worktrees: [worktree(undefined)] }
+          }
         },
         WORKTREE_ID
       )
@@ -194,7 +197,7 @@ describe('resolveWorktreeOperationRouteResult', () => {
     })
   })
 
-  it('treats a known repo without a worktree row as positive local identity', () => {
+  it('does not treat a repo row alone as positive local identity', () => {
     expect(
       resolveWorktreeOperationRouteResult(
         {
@@ -204,13 +207,10 @@ describe('resolveWorktreeOperationRouteResult', () => {
         },
         WORKTREE_ID
       )
-    ).toEqual({
-      kind: 'resolved',
-      route: { executionHostId: 'local', runtimeEnvironmentId: null }
-    })
+    ).toEqual({ kind: 'missing' })
   })
 
-  it('treats a known worktree without a repo row as positive local identity', () => {
+  it('fails a paired-client ownerless stale publication closed instead of routing it locally', () => {
     expect(
       resolveWorktreeOperationRouteResult(
         {
@@ -220,10 +220,7 @@ describe('resolveWorktreeOperationRouteResult', () => {
         },
         WORKTREE_ID
       )
-    ).toEqual({
-      kind: 'resolved',
-      route: { executionHostId: 'local', runtimeEnvironmentId: null }
-    })
+    ).toEqual({ kind: 'missing' })
   })
 
   it('keeps an unstamped row ambiguous when another owner names a different host', () => {
@@ -267,7 +264,10 @@ describe('resolveWorktreeOperationRouteResult', () => {
           runtimeEnvironments: [{ id: 'saved-runtime' }],
           runtimeEnvironmentCatalogHydrated: true,
           removedRuntimeEnvironmentIds: new Set(['removed-runtime']),
-          worktreesByRepo: { 'repo-1': [worktree(undefined)] }
+          worktreesByRepo: { 'repo-1': [worktree(undefined)] },
+          detectedWorktreesByRepo: {
+            'repo-1': { worktrees: [worktree(undefined)] }
+          }
         },
         WORKTREE_ID
       )
@@ -313,7 +313,10 @@ describe('resolveWorktreeOperationRouteResult', () => {
           repos: [{ id: 'repo-1' } as never],
           runtimeEnvironments: [],
           runtimeEnvironmentCatalogHydrated: true,
-          worktreesByRepo: { 'repo-1': [worktree(undefined)] }
+          worktreesByRepo: { 'repo-1': [worktree(undefined)] },
+          detectedWorktreesByRepo: {
+            'repo-1': { worktrees: [worktree(undefined)] }
+          }
         },
         WORKTREE_ID
       )
