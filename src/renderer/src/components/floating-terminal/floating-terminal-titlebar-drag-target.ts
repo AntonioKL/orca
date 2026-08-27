@@ -5,5 +5,9 @@ const FLOATING_TERMINAL_NO_DRAG_SELECTOR =
   'button,input,textarea,select,[role="menuitem"],[data-tab-id],[data-client-hosted-browser-row-id],[data-floating-terminal-no-drag]'
 
 export function isFloatingTerminalDragTarget(target: EventTarget): boolean {
-  return !(target instanceof Element && target.closest(FLOATING_TERMINAL_NO_DRAG_SELECTOR))
+  if (typeof Element === 'undefined' || !(target instanceof Element)) {
+    return true
+  }
+
+  return target.closest(FLOATING_TERMINAL_NO_DRAG_SELECTOR) === null
 }
