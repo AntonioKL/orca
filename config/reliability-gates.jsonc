@@ -2420,19 +2420,10 @@
           "date": "2026-08-27",
           "runner": "local",
           "platform": "macos",
-          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/runtime-graph-reload-lifecycle.test.ts src/main/runtime/runtime-graph-publication-recovery.test.ts src/main/window/runtime-renderer-notification-sender.test.ts src/main/window/renderer-document-navigation.test.ts src/main/ipc/runtime.test.ts src/main/window/attach-main-window-services.test.ts src/main/runtime/orca-runtime.test.ts src/renderer/src/runtime/sync-runtime-graph-scheduling.test.ts src/renderer/src/runtime/sync-runtime-graph-payload-partition.test.ts --reporter=dot",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/runtime-graph-reload-lifecycle.test.ts src/main/runtime/runtime-graph-publication-recovery.test.ts src/main/window/runtime-renderer-notification-sender.test.ts src/main/window/renderer-document-navigation.test.ts src/main/ipc/runtime.test.ts src/main/window/attach-main-window-services.test.ts src/main/runtime/orca-runtime.test.ts src/renderer/src/runtime/sync-runtime-graph-scheduling.test.ts src/renderer/src/runtime/sync-runtime-graph-payload-partition.test.ts",
           "result": "passed",
           "durationSeconds": 13,
-          "summary": "Nine focused files passed 1,284 tests with one pre-existing skip, including same-generation frame-failure recovery, timeout/process/retired-window fencing, notification resumption, bounded renderer retry, reload ownership, IPC authority, and payload acknowledgement."
-        },
-        {
-          "date": "2026-08-14",
-          "runner": "local",
-          "platform": "macos",
-          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/runtime-graph-reload-lifecycle.test.ts src/main/window/runtime-renderer-notification-sender.test.ts src/main/window/renderer-document-navigation.test.ts src/main/ipc/runtime.test.ts src/main/window/attach-main-window-services.test.ts src/main/runtime/orca-runtime.test.ts src/renderer/src/runtime/sync-runtime-graph-scheduling.test.ts src/renderer/src/runtime/sync-runtime-graph-payload-partition.test.ts",
-          "result": "passed",
-          "durationSeconds": 12,
-          "summary": "Eight focused files passed with 1,175 tests and one pre-existing skip after the merge from latest main. The suite covers exact reload settlement, timeout replacement, cancelled-navigation recovery, concurrent provisional starts, document and window authority, notification containment, preload IPC, and renderer publication scheduling."
+          "summary": "Nine focused files passed 1,283 tests with one pre-existing skip, including same-generation frame-failure recovery, timeout/process/retired-window fencing, notification resumption, bounded renderer retry, reload ownership, IPC authority, and payload acknowledgement."
         },
         {
           "date": "2026-08-14",
