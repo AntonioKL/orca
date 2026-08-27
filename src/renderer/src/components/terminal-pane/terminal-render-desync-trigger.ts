@@ -68,7 +68,42 @@ export function maybeStartTerminalRenderDesyncSentinel(): void {
   console.warn('[terminal] render-desync sentinel armed (10s post-link bursts + ⇧-capture)')
 }
 
+export function isTerminalRenderDesyncSentinelArmed(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(RENDER_DESYNC_SENTINEL_FLAG) === '1'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Staff arming surface (hidden-experimental toggle): persists the flag and
+ * arms/disarms the capture gestures live, so no reload is needed. The passive
+ * probes (weight-change crumbs, reveal parity audit) are deliberately not
+ * governed by this — they are content-free and always on.
+ */
+export function setTerminalRenderDesyncSentinelArmed(armed: boolean): void {
+  try {
+    if (armed) {
+      globalThis.localStorage?.setItem(RENDER_DESYNC_SENTINEL_FLAG, '1')
+    } else {
+      globalThis.localStorage?.removeItem(RENDER_DESYNC_SENTINEL_FLAG)
+    }
+  } catch {
+    // Why: storage failure still allows a session-scoped arm/disarm below.
+  }
+  if (armed) {
+    maybeStartTerminalRenderDesyncSentinel()
+  } else {
+    removeClickListener()
+  }
+}
+
 export function stopTerminalRenderDesyncTriggerForTesting(): void {
+  removeClickListener()
+}
+
+function removeClickListener(): void {
   if (clickListener != null) {
     document.removeEventListener('mouseup', clickListener, true)
     clickListener = null

@@ -3879,18 +3879,96 @@
       },
       "skills": {
         "SkillsPage": {
-          "cb142070b4": "새로 고침", "a68dee6a32": "스킬 검색", "f43ad6edf3": "스킬", "ea72d6185b": "스킬을 검색하지 못했습니다", "dc4c3328ee": "파일 표시", "9963dff6d3": "설명을 찾을 수 없습니다.", "995fde8337": "스킬 파일을 표시하지 못했습니다", "4acd6d68ec": "스킬을 찾을 수 없습니다", "6a62a0168c": "일치하는 항목 없음", "08a321a984": "현재 검색 및 필터와 일치하는 스킬이 없습니다.", "cd7893fbc1": "스킬 검색 중", "35b9a724a0": "사용 가능", "c13b82793c": "설치 관리", "aee7b99cc6": "링크에서 설치", "filterProvider": "에이전트별 필터", "filterSource": "소스별 필터", "allSources": "전체", "clearFilters": "필터 지우기", "closeSkills": "스킬 닫기", "closeTooltip": "닫기 · Esc", "moreActions": "추가 작업", "sharedLinks": "공유 링크", "emptyCopy": "검색한 스킬 폴더가 비어 있습니다. 공유 번들을 설치하거나 스킬을 추가한 후 새로 고치세요.", "retry": "다시 시도", "remoteShareNotice": "이 스킬은 {{host}}에 있습니다. 공유하려면 해당 머신에서 스킬을 여세요.", "viewSwitch": "표시", "searchLinks": "링크 검색", "deleteSkills": "스킬 삭제…"
+          "cb142070b4": "새로 고침",
+          "a68dee6a32": "스킬 검색",
+          "f43ad6edf3": "스킬",
+          "ea72d6185b": "스킬을 검색하지 못했습니다",
+          "dc4c3328ee": "파일 표시",
+          "9963dff6d3": "설명을 찾을 수 없습니다.",
+          "995fde8337": "스킬 파일을 표시하지 못했습니다",
+          "4acd6d68ec": "스킬을 찾을 수 없습니다",
+          "6a62a0168c": "일치하는 항목 없음",
+          "08a321a984": "현재 검색 및 필터와 일치하는 스킬이 없습니다.",
+          "cd7893fbc1": "스킬 검색 중",
+          "35b9a724a0": "사용 가능",
+          "c13b82793c": "설치 관리",
+          "aee7b99cc6": "링크에서 설치",
+          "filterProvider": "에이전트별 필터",
+          "filterSource": "소스별 필터",
+          "allSources": "전체",
+          "clearFilters": "필터 지우기",
+          "closeSkills": "스킬 닫기",
+          "closeTooltip": "닫기 · Esc",
+          "moreActions": "추가 작업",
+          "sharedLinks": "공유 링크",
+          "emptyCopy": "검색한 스킬 폴더가 비어 있습니다. 공유 번들을 설치하거나 스킬을 추가한 후 새로 고치세요.",
+          "retry": "다시 시도",
+          "remoteShareNotice": "이 스킬은 {{host}}에 있습니다. 공유하려면 해당 머신에서 스킬을 여세요.",
+          "viewSwitch": "표시",
+          "searchLinks": "링크 검색",
+          "deleteSkills": "스킬 삭제…"
         },
-        "SkillShareSelectionControls": { "01c5a15e02": "스킬 공유" },
-        "SkillRow": { "updatedUnknown": "날짜 없음", "pathCopied": "경로 복사됨", "copyPath": "경로 복사", "detailPath": "경로", "skillActions": "{{value0}} 작업", "viewDetails": "세부 정보 보기", "deleteSkill": "삭제…" },
-        "SkillsList": { "listLabel": "스킬" },
-        "sourceStatus": { "missing": "폴더를 찾을 수 없음", "remoteRepo": "원격 리포지토리 — 검색 안 됨", "unavailable": "검색 안 됨" },
-        "sources": { "heading": "스킬 폴더" },
-        "sourceKind": { "home": "홈", "workspace": "워크스페이스", "bundled": "번들", "plugin": "플러그인" },
-        "count": { "skillOne": "스킬 {{count}}개", "skillOther": "스킬 {{count}}개", "sourceOne": "소스 {{count}}개", "sourceOther": "소스 {{count}}개", "fileOne": "파일 {{count}}개", "fileOther": "파일 {{count}}개", "resultOne": "결과 {{count}}개", "resultOther": "결과 {{count}}개", "selected": "{{count}}개 선택됨", "shareOne": "스킬 {{count}}개 공유", "shareOther": "스킬 {{count}}개 공유", "linkOne": "링크 {{count}}개", "linkOther": "링크 {{count}}개" },
-        "filter": { "allAgents": "모든 에이전트", "sharedAgent": "공유됨 (.agents)" },
-        "SkillsSelectionHeader": { "exit": "선택 나가기", "exitTooltip": "선택 나가기 · Esc", "title": "공유할 스킬 선택", "selectAll": "가능한 {{count}}개 모두 선택", "clear": "지우기", "deleteTitle": "삭제할 스킬 선택" },
-        "SkillDetailDialog": { "agents": "에이전트", "updated": "업데이트됨", "copy": "복사" },
+        "SkillShareSelectionControls": {
+          "01c5a15e02": "스킬 공유"
+        },
+        "SkillRow": {
+          "updatedUnknown": "날짜 없음",
+          "pathCopied": "경로 복사됨",
+          "copyPath": "경로 복사",
+          "detailPath": "경로",
+          "skillActions": "{{value0}} 작업",
+          "viewDetails": "세부 정보 보기",
+          "deleteSkill": "삭제…"
+        },
+        "SkillsList": {
+          "listLabel": "스킬"
+        },
+        "sourceStatus": {
+          "missing": "폴더를 찾을 수 없음",
+          "remoteRepo": "원격 리포지토리 — 검색 안 됨",
+          "unavailable": "검색 안 됨"
+        },
+        "sources": {
+          "heading": "스킬 폴더"
+        },
+        "sourceKind": {
+          "home": "홈",
+          "workspace": "워크스페이스",
+          "bundled": "번들",
+          "plugin": "플러그인"
+        },
+        "count": {
+          "skillOne": "스킬 {{count}}개",
+          "skillOther": "스킬 {{count}}개",
+          "sourceOne": "소스 {{count}}개",
+          "sourceOther": "소스 {{count}}개",
+          "fileOne": "파일 {{count}}개",
+          "fileOther": "파일 {{count}}개",
+          "resultOne": "결과 {{count}}개",
+          "resultOther": "결과 {{count}}개",
+          "selected": "{{count}}개 선택됨",
+          "shareOne": "스킬 {{count}}개 공유",
+          "shareOther": "스킬 {{count}}개 공유",
+          "linkOne": "링크 {{count}}개",
+          "linkOther": "링크 {{count}}개"
+        },
+        "filter": {
+          "allAgents": "모든 에이전트",
+          "sharedAgent": "공유됨 (.agents)"
+        },
+        "SkillsSelectionHeader": {
+          "exit": "선택 나가기",
+          "exitTooltip": "선택 나가기 · Esc",
+          "title": "공유할 스킬 선택",
+          "selectAll": "가능한 {{count}}개 모두 선택",
+          "clear": "지우기",
+          "deleteTitle": "삭제할 스킬 선택"
+        },
+        "SkillDetailDialog": {
+          "agents": "에이전트",
+          "updated": "업데이트됨",
+          "copy": "복사"
+        },
         "SkillFreshnessNudge": {
           "titleOne": "설치된 Orca 스킬이 오래되었습니다",
           "titleMany": "설치된 Orca 스킬 {{value0}}개가 오래되었습니다",
@@ -6083,10 +6161,10 @@
           "compareBaseBranchUpstream": "브랜치 업스트림"
         },
         "HiddenExperimentalGroup": {
-          "d0f914a528": "자리 표시자 토글",
-          "1014ddbfaf": "오늘은 아무것도 하지 않습니다. 숨겨진 실험 옵션을 위한 첫 번째 슬롯으로 예약되어 있습니다.",
           "232cf83de8": "내부 테스트를 위한 비공개 토글입니다. 여기에는 아무것도 지원되지 않습니다.",
-          "3e9e827ca5": "숨겨진 실험"
+          "3e9e827ca5": "숨겨진 실험",
+          "7c4e18d2f6": "이 컴퓨터에서 굵게 표시 결함 캡처 제스처를 활성화합니다. 터미널을 Cmd/Ctrl 클릭하면 샘플링 버스트가 시작되고, Shift를 추가하면 창 증거를 디스크에 캡처합니다.",
+          "b09f24a51d": "터미널 렌더링 진단"
         },
         "InputPane": {
           "db15068196": "Linux 및 macOS에서는 기본적으로 활성화되어 있습니다. Linux는 시스템 선택 클립보드를 사용합니다. 다른 플랫폼은 개인 버퍼를 사용합니다.",
@@ -14589,23 +14667,6 @@
     "workspace": {
       "cleanup": {
         "browse": {
-          "selectionWithheldOne": "선택한 워크스페이스 1개가 현재 필터에 의해 숨겨져 선택이 해제되었습니다.",
-          "selectionWithheld": "선택한 워크스페이스 {{value0}}개가 현재 필터에 의해 숨겨져 선택이 해제되었습니다.",
-          "selectAllCountOne": "안전 검사를 통과한 워크스페이스 1개 선택",
-          "selectAllCount": "안전 검사를 통과한 워크스페이스 {{value0}}개 모두 선택"
-        },
-        "scan": {
-          "readyOne": "워크스페이스 1개를 찾았습니다.",
-          "readyMany": "워크스페이스 {{value0}}개를 찾았습니다."
-        },
-        "presentationFixtures": {
-          "reviewAlphaCleanup": "알파 정리 검토"
-        },
-        "presentation": {
-          "gitlabMergeRequestNumber": "MR #{{value0}}",
-          "githubPullRequestNumber": "PR #{{value0}}"
-        },
-        "browse": {
           "gitStatusCheckFailed": "Git 상태 확인 실패",
           "gitStatusUnverified": "Git 상태를 확인할 수 없음",
           "deleteAnyway": "그래도 삭제",
@@ -14657,6 +14718,17 @@
               "retainedAgents": "완료된 에이전트"
             }
           }
+        },
+        "scan": {
+          "readyOne": "워크스페이스 1개를 찾았습니다.",
+          "readyMany": "워크스페이스 {{value0}}개를 찾았습니다."
+        },
+        "presentationFixtures": {
+          "reviewAlphaCleanup": "알파 정리 검토"
+        },
+        "presentation": {
+          "gitlabMergeRequestNumber": "MR #{{value0}}",
+          "githubPullRequestNumber": "PR #{{value0}}"
         }
       }
     },

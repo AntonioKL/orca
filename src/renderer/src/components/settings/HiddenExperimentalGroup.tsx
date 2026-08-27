@@ -1,5 +1,10 @@
+import { useState } from 'react'
 import { Label } from '../ui/label'
 import { Switch } from '../ui/switch'
+import {
+  isTerminalRenderDesyncSentinelArmed,
+  setTerminalRenderDesyncSentinelArmed
+} from '../terminal-pane/terminal-render-desync-trigger'
 import { translate } from '@/i18n/i18n'
 
 // Why: anything in this group is deliberately unfinished or staff-only. The
@@ -7,6 +12,13 @@ import { translate } from '@/i18n/i18n'
 // for hidden-experimental items so future entries inherit the same
 // affordance without another round of styling decisions.
 export function HiddenExperimentalGroup(): React.JSX.Element {
+  const [renderDiagnosticsArmed, setRenderDiagnosticsArmed] = useState(
+    isTerminalRenderDesyncSentinelArmed
+  )
+  const onRenderDiagnosticsChange = (armed: boolean): void => {
+    setTerminalRenderDesyncSentinelArmed(armed)
+    setRenderDiagnosticsArmed(armed)
+  }
   return (
     <section className="space-y-3 rounded-lg border border-orange-500/40 bg-orange-500/5 p-3">
       <div className="space-y-0.5">
@@ -28,25 +40,25 @@ export function HiddenExperimentalGroup(): React.JSX.Element {
         <div className="min-w-0 shrink space-y-0.5">
           <Label className="text-orange-600 dark:text-orange-300">
             {translate(
-              'auto.components.settings.HiddenExperimentalGroup.d0f914a528',
-              'Placeholder toggle'
+              'auto.components.settings.HiddenExperimentalGroup.b09f24a51d',
+              'Terminal render diagnostics'
             )}
           </Label>
           <p className="text-xs text-orange-600/80 dark:text-orange-300/80">
             {translate(
-              'auto.components.settings.HiddenExperimentalGroup.1014ddbfaf',
-              'Does nothing today. Reserved as the first slot for hidden experimental options.'
+              'auto.components.settings.HiddenExperimentalGroup.7c4e18d2f6',
+              'Arms the bold-glitch capture gestures on this machine: Cmd/Ctrl-click a terminal starts a sampling burst; add Shift to capture pane evidence to disk.'
             )}
           </p>
         </div>
         <Switch
           aria-label={translate(
-            'auto.components.settings.HiddenExperimentalGroup.d0f914a528',
-            'Placeholder toggle'
+            'auto.components.settings.HiddenExperimentalGroup.b09f24a51d',
+            'Terminal render diagnostics'
           )}
-          checked={false}
-          className="border-orange-500/40 data-[state=unchecked]:bg-orange-500/20 disabled:opacity-70"
-          disabled
+          checked={renderDiagnosticsArmed}
+          className="border-orange-500/40 data-[state=unchecked]:bg-orange-500/20"
+          onCheckedChange={onRenderDiagnosticsChange}
           thumbClassName="data-[state=unchecked]:bg-orange-200 dark:data-[state=unchecked]:bg-orange-100"
         />
       </div>

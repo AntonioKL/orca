@@ -275,3 +275,32 @@ describe('terminal-render-desync-sentinel', () => {
     expect(resetAndRefreshAllTerminalWebglAtlases).not.toHaveBeenCalled()
   })
 })
+
+describe('sentinel arming surface', () => {
+  it('arms live on enable and removes the listener on disable', async () => {
+    const storage = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => storage.get(k) ?? null,
+      setItem: (k: string, v: string) => storage.set(k, v),
+      removeItem: (k: string) => storage.delete(k)
+    })
+    vi.stubGlobal('document', {
+      addEventListener: documentAddEventListener,
+      removeEventListener: documentRemoveEventListener
+    })
+    vi.stubGlobal('navigator', { userAgent: 'Mac' })
+    const { isTerminalRenderDesyncSentinelArmed, setTerminalRenderDesyncSentinelArmed } =
+      await import('./terminal-render-desync-trigger')
+
+    expect(isTerminalRenderDesyncSentinelArmed()).toBe(false)
+    setTerminalRenderDesyncSentinelArmed(true)
+    expect(isTerminalRenderDesyncSentinelArmed()).toBe(true)
+    // Live arm: the mouseup listener is registered without a reload.
+    expect(documentAddEventListener).toHaveBeenCalledWith('mouseup', expect.any(Function), true)
+
+    setTerminalRenderDesyncSentinelArmed(false)
+    expect(isTerminalRenderDesyncSentinelArmed()).toBe(false)
+    expect(documentRemoveEventListener).toHaveBeenCalledWith('mouseup', expect.any(Function), true)
+    vi.unstubAllGlobals()
+  })
+})
