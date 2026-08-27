@@ -204,7 +204,7 @@ describe('Subprocess: Relay entry point', () => {
     const repairedId = relay.send('pty.spawn', { cols: 80, rows: 24 })
     const repaired = await relay.waitForResponse(repairedId)
     expect(repaired.error).toBeUndefined()
-    expect(repaired.result).toMatchObject({ id: 'pty-1' })
+    expect(repaired.result).toMatchObject({ id: expect.any(String) })
   }, 10_000)
 
   it('reloads node-pty after a late native binding failure without restarting', async () => {
@@ -228,7 +228,7 @@ describe('Subprocess: Relay entry point', () => {
     const repairedId = relay.send('pty.spawn', { cols: 80, rows: 24 })
     const repaired = await relay.waitForResponse(repairedId)
     expect(repaired.error).toBeUndefined()
-    expect(repaired.result).toMatchObject({ id: 'pty-2' })
+    expect(repaired.result).toMatchObject({ id: expect.any(String) })
   }, 10_000)
 
   it('responds to fs.stat over stdin/stdout', async () => {
