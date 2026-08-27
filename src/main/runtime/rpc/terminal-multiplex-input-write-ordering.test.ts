@@ -82,4 +82,42 @@ describe('terminal multiplex input ordering', () => {
     await expect(quickCommand).resolves.toMatchObject({ ok: true })
     expect(writes).toEqual(['prior', 'quick\r'])
   })
+
+  it('reports queue overflow as write unavailable', async () => {
+    const notifyStreamWriteUnavailable = vi.fn()
+    const runtime = {
+      getRuntimeId: () => 'test-runtime',
+      enqueueTerminalInputWrite: vi.fn().mockRejectedValue(new Error('terminal_input_queue_full')),
+      getDriver: vi.fn().mockReturnValue({ kind: 'idle' }),
+      resolveLiveLeafForHandle: vi.fn().mockReturnValue({ ptyId: 'pty-1' }),
+      isTerminalRunningSettledPromptAgent: vi.fn().mockResolvedValue(false),
+      sendTerminal: vi.fn()
+    } as unknown as OrcaRuntimeService
+    const stream = {
+      streamId: 7,
+      terminal: 'terminal-1',
+      ptyId: 'pty-1',
+      client: { id: 'desktop-1', type: 'desktop' as const },
+      isMobile: false,
+      desktopClaimTail: Promise.resolve(true)
+    } as unknown as TerminalMultiplexStream
+    const state = {
+      runtime,
+      closed: false,
+      streams: new Map([[stream.streamId, stream]]),
+      notifyStreamWriteUnavailable
+    } as unknown as TerminalMultiplexCleanupStage
+    installMultiplexSlotFrames(state)
+
+    state.handleSlotFrame(stream, {
+      opcode: TerminalStreamOpcode.Input,
+      streamId: stream.streamId,
+      seq: 1,
+      payload: encodeTerminalStreamText('queued')
+    })
+
+    await vi.waitFor(() =>
+      expect(notifyStreamWriteUnavailable).toHaveBeenCalledWith(stream, 'rejected')
+    )
+  })
 })

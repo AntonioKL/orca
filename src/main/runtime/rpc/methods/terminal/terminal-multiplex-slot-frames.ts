@@ -92,7 +92,7 @@ export function installMultiplexSlotFrames(
         runtime.enqueueTerminalInputWrite
           ? runtime.enqueueTerminalInputWrite(stream.ptyId, write, Buffer.byteLength(text, 'utf8'))
           : write()
-      ).catch(() => state.notifyStreamWriteUnavailable(stream, 'failed'))
+      ).catch(() => state.notifyStreamWriteUnavailable(stream, 'rejected'))
       return
     }
     if (frame.opcode === TerminalStreamOpcode.SetOutputPaused && stream.supportsOutputPause) {

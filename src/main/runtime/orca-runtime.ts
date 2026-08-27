@@ -19153,6 +19153,7 @@ export class OrcaRuntimeService {
   ): Promise<RuntimeTerminalSend> {
     const pty = this.getLivePtyForHandle(handle)
     if (pty) {
+      const expectedGeneration = this.getPtyLifecycleGeneration(pty.pty.ptyId)
       if (!pty.pty.connected) {
         throw new Error('terminal_not_writable')
       }
@@ -19161,7 +19162,10 @@ export class OrcaRuntimeService {
         throw new Error('invalid_terminal_send')
       }
       await assertTerminalInputWithinLimitWithYield(action.text)
-      await this.writeTerminalAction(pty.pty.ptyId, action, payload, options)
+      await this.writeTerminalAction(pty.pty.ptyId, action, payload, {
+        ...options,
+        expectedGeneration
+      })
       return {
         handle,
         accepted: true,
@@ -19173,6 +19177,7 @@ export class OrcaRuntimeService {
     if (!leaf.writable || !leaf.ptyId) {
       throw new Error('terminal_not_writable')
     }
+    const expectedGeneration = this.getPtyLifecycleGeneration(leaf.ptyId)
     const payload = buildSendPayload(action)
     if (payload === null) {
       throw new Error('invalid_terminal_send')
@@ -19186,7 +19191,10 @@ export class OrcaRuntimeService {
       throw new Error('terminal_not_writable')
     }
 
-    await this.writeTerminalAction(leaf.ptyId, action, payload, options)
+    await this.writeTerminalAction(leaf.ptyId, action, payload, {
+      ...options,
+      expectedGeneration
+    })
 
     return {
       handle,
@@ -19854,9 +19862,16 @@ export class OrcaRuntimeService {
       afterWrite?: (ptyId: string) => void | Promise<void>
       suffixFailureError?: string
       signal?: AbortSignal
+      expectedGeneration?: number
     } = {}
   ): Promise<void> {
     assertAgentPromptRequestActive(options.signal)
+    if (
+      options.expectedGeneration !== undefined &&
+      this.getPtyLifecycleGeneration(ptyId) !== options.expectedGeneration
+    ) {
+      throw new Error('terminal_handle_stale')
+    }
     // Why: direct terminal.send can carry paste-sized text from RPC/mobile
     // clients; chunk text before PTY/ConPTY while preserving suffix separation.
     const text = typeof action.text === 'string' ? action.text : ''
@@ -19879,6 +19894,13 @@ export class OrcaRuntimeService {
       }
       try {
         await options.beforeWrite?.(ptyId)
+        assertAgentPromptRequestActive(options.signal)
+        if (
+          options.expectedGeneration !== undefined &&
+          this.getPtyLifecycleGeneration(ptyId) !== options.expectedGeneration
+        ) {
+          throw new Error('terminal_handle_stale')
+        }
         options.reserveWrite?.(ptyId)
       } catch (error) {
         if (options.suffixFailureError) {
@@ -19898,6 +19920,13 @@ export class OrcaRuntimeService {
     }
 
     await options.beforeWrite?.(ptyId)
+    assertAgentPromptRequestActive(options.signal)
+    if (
+      options.expectedGeneration !== undefined &&
+      this.getPtyLifecycleGeneration(ptyId) !== options.expectedGeneration
+    ) {
+      throw new Error('terminal_handle_stale')
+    }
     options.reserveWrite?.(ptyId)
     const wrote = this.ptyController?.write(ptyId, payload) ?? false
     if (!wrote) {
@@ -19914,14 +19943,27 @@ export class OrcaRuntimeService {
       reserveWrite?: (ptyId: string) => void
       afterWrite?: (ptyId: string) => void | Promise<void>
       signal?: AbortSignal
+      expectedGeneration?: number
     } = {}
   ): Promise<void> {
     const chunks = iterateTerminalInputChunks(text)
     let chunk = chunks.next()
     while (!chunk.done) {
       assertAgentPromptRequestActive(options.signal)
+      if (
+        options.expectedGeneration !== undefined &&
+        this.getPtyLifecycleGeneration(ptyId) !== options.expectedGeneration
+      ) {
+        throw new Error('terminal_handle_stale')
+      }
       await options.beforeWrite?.(ptyId)
       assertAgentPromptRequestActive(options.signal)
+      if (
+        options.expectedGeneration !== undefined &&
+        this.getPtyLifecycleGeneration(ptyId) !== options.expectedGeneration
+      ) {
+        throw new Error('terminal_handle_stale')
+      }
       options.reserveWrite?.(ptyId)
       const wrote = this.ptyController?.write(ptyId, chunk.value) ?? false
       if (!wrote) {
@@ -20221,7 +20263,15 @@ export class OrcaRuntimeService {
     this.terminalInputWriteQueueDepthByPtyId.set(ptyId, depth + 1)
     this.terminalInputWriteQueueBytesByPtyId.set(ptyId, bytes + Math.max(0, estimatedBytes))
     const previous = this.terminalInputWriteTailByPtyId.get(ptyId) ?? Promise.resolve()
-    const current = previous.catch(() => undefined).then(write)
+    const generation = this.getPtyLifecycleGeneration(ptyId)
+    const current = previous
+      .catch(() => undefined)
+      .then(() => {
+        if (this.getPtyLifecycleGeneration(ptyId) !== generation) {
+          throw new Error('terminal_handle_stale')
+        }
+        return write()
+      })
     const tail = current.then(
       () => undefined,
       () => undefined
