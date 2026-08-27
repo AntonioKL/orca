@@ -8,7 +8,7 @@ export type StablePaneOwner = {
   ptyId: string
   incarnationId?: string
   hasPersistedBinding?: true
-  bindingCreatedAt?: number
+  bindingRelayProcessId?: string
   persistedIncarnationId?: string
   runtimeIncarnationId?: string
 }

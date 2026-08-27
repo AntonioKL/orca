@@ -31,7 +31,7 @@ export function resolvePersistedStablePaneOwner(
   connectionId: string | null | undefined
 ): Pick<
   StablePaneOwner,
-  'tabId' | 'leafId' | 'ptyId' | 'incarnationId' | 'bindingCreatedAt'
+  'tabId' | 'leafId' | 'ptyId' | 'incarnationId' | 'bindingRelayProcessId'
 > | null {
   if (!store || typeof store.getWorkspaceSession !== 'function') {
     return null
@@ -52,17 +52,17 @@ export function resolvePersistedStablePaneOwner(
   }
   const incarnationId = session.terminalPtyIncarnationsByPaneKey?.[paneKey]
   const relayPtyId = parseAppSshPtyId(ptyId)?.relayPtyId
-  const bindingCreatedAt =
+  const bindingRelayProcessId =
     connectionId && relayPtyId
       ? store.getSshRemotePtyLeases(connectionId).find((lease) => lease.ptyId === relayPtyId)
-          ?.createdAt
+          ?.relayProcessId
       : undefined
   return {
     tabId: parsed.tabId,
     leafId: parsed.leafId,
     ptyId,
     ...(incarnationId ? { incarnationId } : {}),
-    ...(Number.isFinite(bindingCreatedAt) ? { bindingCreatedAt } : {})
+    ...(bindingRelayProcessId ? { bindingRelayProcessId } : {})
   }
 }
 
@@ -117,8 +117,8 @@ export function resolveStablePaneOwner(
       ? { incarnationId: runtimeIncarnationId ?? persisted?.incarnationId }
       : {}),
     ...(persisted ? { hasPersistedBinding: true as const } : {}),
-    ...(Number.isFinite(persisted?.bindingCreatedAt)
-      ? { bindingCreatedAt: persisted?.bindingCreatedAt }
+    ...(persisted?.bindingRelayProcessId
+      ? { bindingRelayProcessId: persisted.bindingRelayProcessId }
       : {}),
     ...(persisted?.incarnationId ? { persistedIncarnationId: persisted.incarnationId } : {}),
     ...(runtimeIncarnationId ? { runtimeIncarnationId } : {})
@@ -239,22 +239,32 @@ export async function attachStablePaneOwner(
     if (!isPtyAlreadyGoneError(error)) {
       throw error
     }
-    const absenceVerdict = await resolveSshRelayAbsenceVerdict({
-      provider,
-      bindingCreatedAt: owner.bindingCreatedAt
-    })
+    const absenceVerdict = args.connectionId
+      ? await resolveSshRelayAbsenceVerdict({
+          provider,
+          bindingRelayProcessId: owner.bindingRelayProcessId
+        })
+      : ({ status: 'exited' } as const)
     const ownerBeforeRetire = args.resolveOwner?.()
     if (
       ownerBeforeRetire &&
       (ownerBeforeRetire.ptyId !== owner.ptyId ||
         ownerBeforeRetire.runtimeIncarnationId !== owner.runtimeIncarnationId ||
         ownerBeforeRetire.hasPersistedBinding !== owner.hasPersistedBinding ||
+        ownerBeforeRetire.bindingRelayProcessId !== owner.bindingRelayProcessId ||
         ownerBeforeRetire.persistedIncarnationId !== owner.persistedIncarnationId)
     ) {
       throw new Error('terminal_pane_owner_changed')
     }
-    runtime?.onPtyExit(owner.ptyId, 0, owner.incarnationId)
-    clearProviderPtyState(owner.ptyId)
+    if (absenceVerdict.status === 'unverifiable') {
+      runtime?.markPtyLivenessUnverifiable(owner.ptyId, absenceVerdict.reason)
+      runtime?.onPtyExit(owner.ptyId, -1, owner.incarnationId)
+    } else {
+      runtime?.onPtyExit(owner.ptyId, 0, owner.incarnationId)
+    }
+    clearProviderPtyState(owner.ptyId, {
+      preserveAgentSessionOwners: absenceVerdict.status === 'unverifiable'
+    })
     ptyOwnership.delete(owner.ptyId)
     if (
       args.worktreeId &&

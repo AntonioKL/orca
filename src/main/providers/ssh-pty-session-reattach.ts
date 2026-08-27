@@ -19,10 +19,12 @@ import {
   type PtySourceReceivingActivation
 } from '../../shared/pty-source-receiving-activation'
 import type { SshPtyReceivingActivationLease } from './ssh-pty-notification-routing'
+import { parseSshRelayProcessId } from './ssh-relay-process-id'
 
 export type SshPtyAttachResult = {
   replay?: string
   incarnationId?: PtyIncarnationId
+  relayProcessId?: string
   sourceRecovery?: PtySourceRecoveryResult
   sourceActivation?: PtySourceReceivingActivation
   sourceActivationLease?: SshPtyReceivingActivationLease
@@ -45,6 +47,7 @@ export function parseSshPtyAttachResult(value: unknown): SshPtyAttachResult {
     incarnationId?: unknown
     sourceRecovery?: unknown
     sourceActivation?: unknown
+    relayProcessId?: unknown
   }
   if (result.replay !== undefined && typeof result.replay !== 'string') {
     throw new Error('Invalid SSH PTY attach replay')
@@ -53,6 +56,7 @@ export function parseSshPtyAttachResult(value: unknown): SshPtyAttachResult {
     // Why: a present-but-invalid identity cannot safely fence delayed exits from a reused relay id.
     throw new Error('Invalid SSH PTY attach incarnation')
   }
+  const relayProcessId = parseSshRelayProcessId(result.relayProcessId)
   const sourceRecovery = parseSourceRecoveryResult(result.sourceRecovery)
   const sourceActivation = parsePtySourceReceivingActivation(result.sourceActivation)
   const activation =
@@ -68,6 +72,7 @@ export function parseSshPtyAttachResult(value: unknown): SshPtyAttachResult {
   return {
     ...(typeof result.replay === 'string' ? { replay: result.replay } : {}),
     ...(isPtyIncarnationId(result.incarnationId) ? { incarnationId: result.incarnationId } : {}),
+    ...(relayProcessId ? { relayProcessId } : {}),
     ...(sourceRecovery ? { sourceRecovery } : {}),
     ...(activation ? { sourceActivation: activation } : {})
   }
@@ -202,6 +207,7 @@ export async function reattachSshPtySession(args: {
         // buffer. Without this the relay sees a delivery still open under our unchanged client id,
         // answers "you already have this", and the pane stays blank until new output arrives.
         requireReplay: true,
+        requestRelayProcessId: true,
         ...(expectedPaneKey ? { expectedPaneKey } : {}),
         ...(expectedTabId ? { expectedTabId } : {})
       },
@@ -216,6 +222,7 @@ export async function reattachSshPtySession(args: {
       isReattach: true,
       ...(attachResult.replay ? { replay: attachResult.replay } : {}),
       ...(attachResult.incarnationId ? { incarnationId: attachResult.incarnationId } : {}),
+      ...(attachResult.relayProcessId ? { relayProcessId: attachResult.relayProcessId } : {}),
       ...(attachResult.sourceRecovery ? { sourceRecovery: attachResult.sourceRecovery } : {}),
       ...(attachResult.sourceActivation ? { sourceActivation: attachResult.sourceActivation } : {}),
       ...(attachResult.sourceActivationLease
