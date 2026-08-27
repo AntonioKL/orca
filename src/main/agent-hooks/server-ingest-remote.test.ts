@@ -311,6 +311,41 @@ describe('AgentHookServer ingestRemote', () => {
     )
 
     expect(server.getStatusSnapshot()[0]?.state).toBe('done')
+    expect(server.getStatusSnapshot()[0]?.restoredUnconfirmed).toBeUndefined()
+  })
+
+  it('marks a nonterminal relay cache replay as unconfirmed until live evidence arrives', () => {
+    const server = new AgentHookServer()
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        hookEventName: 'PostToolUse',
+        isReplay: true,
+        codexSubagentsAuthoritative: true,
+        codexAuthoritativeParentState: 'working',
+        payload: { state: 'working', prompt: '', agentType: 'codex' }
+      },
+      'conn-1'
+    )
+
+    expect(server.getStatusSnapshot()[0]).toMatchObject({
+      state: 'working',
+      restoredUnconfirmed: true
+    })
+
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        hookEventName: 'PostToolUse',
+        payload: { state: 'working', prompt: '', agentType: 'codex' }
+      },
+      'conn-1'
+    )
+    expect(server.getStatusSnapshot()[0]?.restoredUnconfirmed).toBeUndefined()
   })
 
   it('keeps transcript-proved children discovered from a cached SessionStart', () => {

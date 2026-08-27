@@ -5,7 +5,7 @@ import {
   getOrCreateCodexSubagentTranscriptState,
   seedCodexStateFromSnapshot
 } from '../shared/agent-hook-listener/providers/codex-state'
-import { codexRosterToSnapshots } from '../shared/codex-subagent-roster'
+import { codexRosterEffectiveState, codexRosterToSnapshots } from '../shared/codex-subagent-roster'
 import { reconcileCodexSubagentTranscript } from '../shared/codex-subagent-transcript'
 import { seedCodexSubagentTranscriptFromSnapshot } from '../shared/codex-subagent-transcript-seeding'
 import { createRelayCodexReconciler, type RelayHookStatusMeta } from './agent-hook-status-cache'
@@ -56,17 +56,19 @@ export function reconcileRelayCodexEvent(
   const roster = getOrCreateCodexSubagentRoster(state, event.paneKey)
   reconcileCodexSubagentTranscript(transcript, roster, transcriptPath)
   const subagents = codexRosterToSnapshots(roster)
+  const reconciledParentState =
+    transcript.parentTerminalObserved === true
+      ? ('done' as const)
+      : transcript.parentTerminalObserved === false
+        ? event.payload.state === 'waiting'
+          ? ('waiting' as const)
+          : ('working' as const)
+        : undefined
   const payload = {
     ...event.payload,
     ...(subagents ? { subagents } : { subagents: undefined }),
-    ...(options.reconcileParentState
-      ? transcript.parentTerminalObserved === true
-        ? { state: 'done' as const }
-        : transcript.parentTerminalObserved === false
-          ? {
-              state: event.payload.state === 'waiting' ? ('waiting' as const) : ('working' as const)
-            }
-          : {}
+    ...(options.reconcileParentState && reconciledParentState
+      ? { state: codexRosterEffectiveState(roster, reconciledParentState) }
       : {})
   }
   const codexAuthoritativeParentState =

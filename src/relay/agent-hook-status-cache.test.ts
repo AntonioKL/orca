@@ -134,6 +134,60 @@ describe('relay agent-hook status cache', () => {
     }
   })
 
+  it.each(['working', 'waiting'] as const)(
+    'keeps the aggregate %s when the parent completed before a child',
+    (childState) => {
+      const dir = mkdtempSync(join(tmpdir(), 'relay-hook-status-cache-active-child-'))
+      try {
+        const transcriptPath = join(dir, 'rollout-parent.jsonl')
+        const childId = '019fa65f-3144-7151-9c02-cff7a28f316f'
+        writeFileSync(
+          transcriptPath,
+          `${JSON.stringify({ type: 'event_msg', payload: { type: 'task_started' } })}\n${JSON.stringify(
+            {
+              type: 'event_msg',
+              payload: {
+                type: 'sub_agent_activity',
+                occurred_at_ms: 1234,
+                agent_thread_id: childId,
+                agent_path: '/root/active_child',
+                kind: 'started'
+              }
+            }
+          )}\n${JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete' } })}\n`
+        )
+        writeFileSync(
+          join(dir, `rollout-child-${childId}.jsonl`),
+          `${JSON.stringify({ type: 'event_msg', payload: { type: 'task_started' } })}\n`
+        )
+        const state = createHookListenerState()
+
+        const reconciled = reconcileRelayCodexEvent(
+          state,
+          {
+            ...event('PostToolUse'),
+            providerSession: { key: 'session_id', id: 'session-1', transcriptPath },
+            payload: {
+              state: childState,
+              prompt: 'prompt',
+              agentType: 'codex',
+              subagents: [{ id: childId, state: childState, startedAt: 1234 }]
+            }
+          },
+          { reconcileParentState: true }
+        )
+
+        expect(reconciled.codexAuthoritativeParentState).toBe('done')
+        expect(reconciled.payload.state).toBe(childState)
+        expect(reconciled.payload.subagents).toEqual([
+          expect.objectContaining({ id: childId, state: childState })
+        ])
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    }
+  )
+
   it('does not claim an authoritative roster when an initial read skips old parent history', () => {
     const dir = mkdtempSync(join(tmpdir(), 'relay-hook-status-cache-long-parent-'))
     try {

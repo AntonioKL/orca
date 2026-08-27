@@ -76,7 +76,10 @@ import {
   claudeRosterHasWorkingSubagent,
   claudeRosterToSnapshots
 } from '../../shared/claude-subagent-roster'
-import { codexRosterToSnapshots } from '../../shared/codex-subagent-roster'
+import {
+  codexRosterEffectiveState,
+  codexRosterToSnapshots
+} from '../../shared/codex-subagent-roster'
 import { reconcileCodexSubagentTranscript } from '../../shared/codex-subagent-transcript'
 import { seedCodexSubagentTranscriptFromSnapshot } from '../../shared/codex-subagent-transcript-seeding'
 import {
@@ -1495,7 +1498,7 @@ export class AgentHookServer {
       this.emitEnrichedStatus(enriched)
       return enriched
     }
-    const stateReconciledPayload =
+    let stateReconciledPayload: AgentHookEventPayload =
       diagnosticAwarePayload.connectionId &&
       diagnosticAwarePayload.payload.agentType === 'codex' &&
       diagnosticAwarePayload.hookEventName
@@ -1516,6 +1519,13 @@ export class AgentHookServer {
             )
           }
         : diagnosticAwarePayload
+    if (
+      stateReconciledPayload.connectionId &&
+      stateReconciledPayload.isReplay === true &&
+      stateReconciledPayload.payload.state !== 'done'
+    ) {
+      stateReconciledPayload = { ...stateReconciledPayload, restoredUnconfirmed: true }
+    }
     const previousCodexRoot =
       stateReconciledPayload.payload.agentType === 'codex' &&
       stateReconciledPayload.toolAgentId &&
@@ -1756,20 +1766,24 @@ export class AgentHookServer {
       reconcileCodexSubagentTranscript(transcript, roster, transcriptPath)
       this.codexRestartReconcileNextRunAt = Date.now() + CODEX_RESTART_RECONCILE_YIELD_MS
       const subagents = codexRosterToSnapshots(roster)
-      const terminal = transcript.parentTerminalObserved === true
+      const reconciledParentState =
+        transcript.parentTerminalObserved === true
+          ? ('done' as const)
+          : transcript.parentTerminalObserved === false
+            ? current.payload.state === 'waiting'
+              ? ('waiting' as const)
+              : ('working' as const)
+            : undefined
+      const reconciledState = reconciledParentState
+        ? codexRosterEffectiveState(roster, reconciledParentState)
+        : current.payload.state
+      const terminal = reconciledState === 'done'
       const transcriptUnreadable =
         transcript.parentReadable === false ||
         [...transcript.subagents.values()].some((child) => child.unresolvedSince)
       const nextPayload = {
         ...current.payload,
-        ...(terminal
-          ? { state: 'done' as const }
-          : transcript.parentTerminalObserved === false
-            ? {
-                state:
-                  current.payload.state === 'waiting' ? ('waiting' as const) : ('working' as const)
-              }
-            : {}),
+        ...(reconciledParentState ? { state: reconciledState } : {}),
         ...(subagents ? { subagents } : { subagents: undefined })
       }
       let latest = current
