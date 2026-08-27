@@ -1182,7 +1182,7 @@ async function prepareCodexRuntimeHomeForLaunch(
   // Why: a ManagedCodexHomeTemporarilyUnavailableError must escape uncaught —
   // the fallbacks below all key off `null`, which means "system default", so
   // swallowing the refusal would launch the wrong account (#STA-4422).
-  let runtimeHomePath = codexRuntimeHome!.prepareForCodexLaunch(target, launchEnv, {
+  let runtimeHomePath = await codexRuntimeHome!.prepareForCodexLaunchAsync(target, launchEnv, {
     unavailableManagedHomePath: launchContext?.unavailableManagedHomePath
   })
   if (runtimeHomePath === null && !realHomeHooksPrepared) {
@@ -1191,7 +1191,7 @@ async function prepareCodexRuntimeHomeForLaunch(
     // re-resolve if the capability gate rejects it.
     realHomeHooksPrepared = await ensureRealHomeHooksIfSelected()
     if (realHomeHooksPrepared) {
-      runtimeHomePath = codexRuntimeHome!.prepareForCodexLaunch(target, launchEnv, {
+      runtimeHomePath = await codexRuntimeHome!.prepareForCodexLaunchAsync(target, launchEnv, {
         unavailableManagedHomePath: launchContext?.unavailableManagedHomePath
       })
     }

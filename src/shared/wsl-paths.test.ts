@@ -4,7 +4,8 @@ import {
   isWslUncPath,
   parseWslUncPath,
   resolveWslRepoWorktreeBasePath,
-  toWindowsWslPath
+  toWindowsWslPath,
+  toWindowsWslUncPath
 } from './wsl-paths'
 
 describe('wsl path helpers', () => {
@@ -32,6 +33,12 @@ describe('wsl path helpers', () => {
     ['/mnt/C/Repo', '\\\\wsl.localhost\\Ubuntu\\mnt\\C\\Repo']
   ])('converts %s without folding case-sensitive Linux paths', (linuxPath, expected) => {
     expect(toWindowsWslPath(linuxPath, 'Ubuntu')).toBe(expected)
+  })
+
+  it('keeps mounted-drive paths on the distro UNC view when requested', () => {
+    expect(toWindowsWslUncPath('/mnt/c/Users/jin', 'Ubuntu')).toBe(
+      '\\\\wsl.localhost\\Ubuntu\\mnt\\c\\Users\\jin'
+    )
   })
 })
 
