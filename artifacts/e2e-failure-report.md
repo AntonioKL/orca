@@ -174,7 +174,7 @@ Scheduled CI run 33021799961 failed across 5 matrix jobs with 8 distinct test fa
 
 ## Changes and validation
 
-- **PR:** `not opened` (pending explicit user authorization)
+- **PR:** [#16816](https://github.com/stablyai/orca/pull/16816)
 - **Files changed:**
   - `tests/e2e/automation-prompt-disclosure.spec.ts`
   - `tests/e2e/completed-worker-retirement-resume.spec.ts`
@@ -199,6 +199,6 @@ Scheduled CI run 33021799961 failed across 5 matrix jobs with 8 distinct test fa
 
 ## Blockers and next actions
 
-- **PR creation / merge:** Blocked pending explicit user authorization.
+- **PR Status:** Opened [#16816](https://github.com/stablyai/orca/pull/16816).
 - **Slack notification:** Blocked pending explicit user authorization.
-- **Next steps upon approval:** Push branch `auto-e2e-tests-autofix-scheduled-ci-1h-run-19-20260827T0700`, open draft/fix PR, and link Linear issue STA-5661.
+- **Next steps:** Monitor CI checks on PR #16816 and merge upon green checks.
