@@ -295,6 +295,47 @@ describe('mobile session terminal persistence retirement', () => {
     expect(untrustedReplacement.terminalPtyIncarnationsByPaneKey).toBeUndefined()
   })
 
+  it('rebases a host partition that no longer carries the closed web-terminal layout', () => {
+    const tabId = 'web-terminal-24aa462c-589c-45fa-b332-6aa233cd84cf'
+    const prior = {
+      ...getDefaultWorkspaceSession(),
+      tabsByWorktree: {
+        [WORKTREE_ID]: [
+          {
+            id: tabId,
+            ptyId: 'pty-worker',
+            worktreeId: WORKTREE_ID,
+            title: 'Worker',
+            customTitle: null,
+            color: null,
+            sortOrder: 0,
+            createdAt: 1
+          }
+        ]
+      },
+      terminalLayoutsByTabId: {
+        [tabId]: {
+          root: { type: 'leaf' as const, leafId: 'worker' },
+          activeLeafId: 'worker',
+          expandedLeafId: null,
+          ptyIdsByLeafId: { worker: 'pty-worker' }
+        }
+      },
+      terminalTopologyRevisionByRepoId: { [REPO_ID]: 1 }
+    }
+    const incoming = {
+      ...getDefaultWorkspaceSession(),
+      tabsByWorktree: { [WORKTREE_ID]: [] }
+    }
+    const partialIncoming: Partial<typeof incoming> = incoming
+    delete partialIncoming.terminalLayoutsByTabId
+
+    const result = sanitizeWorkspaceSessionTerminalRetirements(incoming, prior)
+
+    expect(result.tabsByWorktree[WORKTREE_ID]).toEqual(prior.tabsByWorktree[WORKTREE_ID])
+    expect(result.terminalLayoutsByTabId[tabId]).toEqual(prior.terminalLayoutsByTabId[tabId])
+  })
+
   it('migrates legacy tombstones into one repo watermark', () => {
     const stale = {
       ...getDefaultWorkspaceSession(),
