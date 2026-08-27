@@ -2087,6 +2087,7 @@ export class AgentHookServer {
     this.clearCodexSubagentPoll(previousOwnerPaneKey)
     this.clearCodexRestartReconcile(previousOwnerPaneKey)
     this.bumpCodexPaneGeneration(previousOwnerPaneKey)
+    this.scheduleCodexRestartReconciliation(toPaneKey)
     // Why: the live process keeps posting the physical source key after detach; persist a chain-safe mapping to the current owner.
     this.legacyPaneKeyAliases.set(physicalPaneKey, {
       stablePaneKey: toPaneKey,

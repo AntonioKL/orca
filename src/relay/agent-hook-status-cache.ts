@@ -16,6 +16,8 @@ import { codexRosterToSnapshots } from '../shared/codex-subagent-roster'
 import { reconcileCodexSubagentTranscript } from '../shared/codex-subagent-transcript'
 import { buildRelayHookEnvelope } from './agent-hook-envelope-build'
 import { parsePaneKey } from '../shared/stable-pane-id'
+import { normalizeAgentProviderSession } from '../shared/agent-session-resume'
+import { normalizeAgentReconcileDiagnostic } from '../shared/agent-reconcile-diagnostic'
 
 export type RelayHookStatusMeta = { source: AgentHookSource; env?: string; version?: string }
 type PersistedCache = {
@@ -62,8 +64,25 @@ function sanitizeHydratedEntry(
   ) {
     return null
   }
+  const providerSession =
+    rawEvent.providerSession === undefined
+      ? undefined
+      : normalizeAgentProviderSession(rawEvent.providerSession)
+  if (rawEvent.providerSession !== undefined && !providerSession) {
+    return null
+  }
+  const reconcileDiagnostic = normalizeAgentReconcileDiagnostic(rawEvent.reconcileDiagnostic)
+  if (rawEvent.reconcileDiagnostic !== undefined && reconcileDiagnostic === undefined) {
+    return null
+  }
   return {
-    event: { ...rawEvent, paneKey, payload } as AgentHookEventPayload,
+    event: {
+      ...rawEvent,
+      paneKey,
+      payload,
+      ...(providerSession ? { providerSession } : {}),
+      ...(reconcileDiagnostic !== undefined ? { reconcileDiagnostic } : {})
+    } as AgentHookEventPayload,
     meta: {
       source: rawMeta.source,
       env: typeof rawMeta.env === 'string' ? rawMeta.env : undefined,

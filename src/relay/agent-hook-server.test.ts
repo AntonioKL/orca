@@ -6,11 +6,17 @@ import { RelayAgentHookServer } from './agent-hook-server'
 import type { AgentHookResultRetryScheduler } from './agent-hook-result-retry-scheduler'
 import { endpointDirForRelaySocket } from './agent-hook-endpoint-coordinates'
 import type { AgentHookRelayEnvelope } from '../shared/agent-hook-relay'
+import type { AgentHookEventPayload } from '../shared/agent-hook-listener'
 import { makePaneKey } from '../shared/stable-pane-id'
 import * as agentHookListener from '../shared/agent-hook-listener/grok-result-discovery'
 
 const LEAF_ID = '11111111-1111-4111-8111-111111111111'
 const PANE_KEY = makePaneKey('tab-1', LEAF_ID)
+const MALFORMED_PANE_KEYS = [
+  makePaneKey('tab-1', '22222222-2222-4222-8222-222222222222'),
+  makePaneKey('tab-1', '33333333-3333-4333-8333-333333333333'),
+  makePaneKey('tab-1', '44444444-4444-4444-8444-444444444444')
+]
 
 type RelayServerInternals = {
   state: { lastStatusByPaneKey: Map<string, unknown> }
@@ -372,17 +378,17 @@ describe('RelayAgentHookServer', () => {
       JSON.stringify({
         version: 1,
         entries: [
-          { event: { paneKey: PANE_KEY }, meta: { source: 'claude' } },
+          { event: { paneKey: MALFORMED_PANE_KEYS[0] }, meta: { source: 'claude' } },
           {
             event: {
-              paneKey: PANE_KEY,
+              paneKey: MALFORMED_PANE_KEYS[1],
               payload: { state: 'working', prompt: 'missing agent type' }
             },
             meta: { source: 'claude' }
           },
           {
             event: {
-              paneKey: PANE_KEY,
+              paneKey: MALFORMED_PANE_KEYS[2],
               payload: null
             },
             meta: { source: 'claude' }
@@ -433,6 +439,68 @@ describe('RelayAgentHookServer', () => {
     } finally {
       server.stop()
     }
+  })
+
+  it('sanitizes malformed provider session metadata during hydration', async () => {
+    writeFileSync(
+      join(dir, 'hook-status-cache.json'),
+      JSON.stringify({
+        version: 1,
+        entries: [
+          {
+            event: {
+              paneKey: PANE_KEY,
+              payload: { state: 'working', prompt: 'bad transcript path', agentType: 'codex' },
+              providerSession: { key: 'session_id', id: 'session-1', transcriptPath: 5 }
+            },
+            meta: { source: 'codex' }
+          }
+        ]
+      }),
+      'utf8'
+    )
+
+    const forward = vi.fn<(envelope: AgentHookRelayEnvelope) => void>()
+    const server = new RelayAgentHookServer({ endpointDir: dir, forward })
+    await expect(server.start()).resolves.toBeUndefined()
+    try {
+      expect(server.replayCachedPayloadsForPanes()).toBe(1)
+      expect(forward).toHaveBeenCalledWith(
+        expect.objectContaining({
+          providerSession: { key: 'session_id', id: 'session-1' }
+        })
+      )
+    } finally {
+      server.stop()
+    }
+  })
+
+  it('ignores request continuations that arrive after the relay stops', async () => {
+    const forward = vi.fn<(envelope: AgentHookRelayEnvelope) => void>()
+    const server = new RelayAgentHookServer({ endpointDir: dir, forward })
+    await server.start()
+    server.stop()
+
+    ;(
+      server as unknown as {
+        applyEvent: (
+          event: AgentHookEventPayload,
+          source: 'codex',
+          env?: string,
+          version?: string
+        ) => void
+      }
+    ).applyEvent(
+      {
+        paneKey: PANE_KEY,
+        connectionId: null,
+        payload: { state: 'working', prompt: 'late', agentType: 'codex' }
+      },
+      'codex'
+    )
+
+    expect(server.replayCachedPayloadsForPanes()).toBe(0)
+    expect(forward).not.toHaveBeenCalled()
   })
 
   it('forwards and replays Pi session identity as metadata-only', async () => {

@@ -268,6 +268,7 @@ describe('AgentHookServer Codex subagent transcript polling', () => {
     const parentPath = join(dir, 'rollout-parent.jsonl')
     writeFileSync(parentPath, spawnLine(CHILD_ID, '/root/missing'))
     const first = new AgentHookServer()
+    const server = new AgentHookServer()
     await first.start({ env: 'production', userDataPath: dir })
     try {
       const post = async (server: AgentHookServer): Promise<void> => {
@@ -293,7 +294,6 @@ describe('AgentHookServer Codex subagent transcript polling', () => {
       }
       await post(first)
       first.stop()
-      const server = new AgentHookServer()
       await server.start({ env: 'production', userDataPath: dir })
       await vi.waitFor(
         () =>
@@ -311,6 +311,7 @@ describe('AgentHookServer Codex subagent transcript polling', () => {
         observedAt: expect.any(Number)
       })
     } finally {
+      server.stop()
       first.stop()
     }
   })

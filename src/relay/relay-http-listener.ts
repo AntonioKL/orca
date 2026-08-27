@@ -8,6 +8,7 @@ export function listenRelayHttpServer(
   return new Promise((resolve, reject) => {
     const onError = (error: Error): void => {
       server.off('listening', onListening)
+      server.close()
       reject(error)
     }
     const onListening = (): void => {
