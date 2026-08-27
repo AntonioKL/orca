@@ -10,6 +10,7 @@ import {
   pointerCount,
   temporaryDirectories
 } from './orchestration-mailbox-notification-test-harness'
+import { MAILBOX_POINTER_WRITE_ATTEMPTED } from './orchestration/db/messages/mailbox-pointer-enter-state'
 
 vi.mock('electron', () => ({
   app: { getPath: vi.fn(() => tmpdir()), isPackaged: false },
@@ -26,7 +27,7 @@ describe('orchestration mailbox transport settlement', () => {
     }
   })
 
-  it('does not durably stage a pointer until transport settlement succeeds', async () => {
+  it('durably reserves before transport and redrives a rejected write', async () => {
     vi.useFakeTimers()
     const db = createDatabase('orca-mailbox-transport-settlement-')
     const first = createRuntime(db)
@@ -48,7 +49,10 @@ describe('orchestration mailbox transport settlement', () => {
 
     await driveToLiveIdle(first.runtime)
     expect(pointerCount(observedWrite)).toBe(0)
-    expect(db.getMessageById(message.id)?.delivered_at).toBeNull()
+    expect(db.getMessageById(message.id)).toMatchObject({
+      delivered_at: null,
+      pointer_enter_pending: MAILBOX_POINTER_WRITE_ATTEMPTED
+    })
 
     settleWrite?.(false)
     await Promise.resolve()
@@ -60,7 +64,7 @@ describe('orchestration mailbox transport settlement', () => {
     await driveToLiveIdle(restarted.runtime)
     await Promise.resolve()
     expect(pointerCount(restarted.write)).toBe(1)
-    expect(db.getMessageById(message.id)?.delivered_at).toEqual(expect.any(String))
+    expect(db.getMessageById(message.id)?.delivered_at).toBeNull()
     db.close()
   })
 })

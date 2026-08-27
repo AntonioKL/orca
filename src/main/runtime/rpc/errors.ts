@@ -107,6 +107,7 @@ const STRUCTURED_RUNTIME_PASSTHROUGH_CODES: ReadonlySet<string> = new Set([
   'relay_quota_exceeded',
   'dispatch_capability_invalid',
   'agent_unconfigured',
+  'worker_prompt_too_large',
   'terminal_worktree_mismatch',
   'request_mismatch',
   'mutation_ledger_full',

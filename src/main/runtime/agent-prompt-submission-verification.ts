@@ -27,11 +27,21 @@ export type AgentPromptWaitTextCache = {
   waitText?: string
 }
 
+export type AgentPromptTurnStartEvidence =
+  | { kind: 'lifecycle'; workingSequence: number }
+  | { kind: 'hook'; workingStartedAt: number }
+
 type AgentPromptVerificationOptions = {
   baseline: AgentPromptActivity
   readActivity: () => AgentPromptActivity
-  timeoutMs?: number
+  /** Accept only a turn start reserved for this request. */
+  acceptTurnStart?: (evidence: AgentPromptTurnStartEvidence) => boolean
+  /** Hook evidence is valid only when the baseline was captured before this request's Enter. */
+  allowHookEvidence?: boolean
+  /** Existing-turn output proves legacy delivery, but not a durable new-turn receipt. */
+  allowOutputEvidence?: boolean
   signal?: AbortSignal
+  timeoutMs?: number
 }
 
 export function resolveAgentPromptEffectTimeoutMs(agent: TuiAgent | null | undefined): number {
@@ -77,7 +87,15 @@ export async function verifyAgentPromptSubmission(
     const current = options.readActivity()
     assertSamePromptGeneration(options.baseline, current)
     assertPromptNotBlocked(options.baseline, current)
-    if (agentPromptEffectObserved(options.baseline, current)) {
+    if (
+      agentPromptEffectAccepted(
+        options.baseline,
+        current,
+        options.acceptTurnStart,
+        options.allowHookEvidence,
+        options.allowOutputEvidence
+      )
+    ) {
       return
     }
     await waitForAgentPromptPoll(options.signal)
@@ -86,21 +104,44 @@ export async function verifyAgentPromptSubmission(
   const current = options.readActivity()
   assertSamePromptGeneration(options.baseline, current)
   assertPromptNotBlocked(options.baseline, current)
-  if (agentPromptEffectObserved(options.baseline, current)) {
+  if (
+    agentPromptEffectAccepted(
+      options.baseline,
+      current,
+      options.acceptTurnStart,
+      options.allowHookEvidence,
+      options.allowOutputEvidence
+    )
+  ) {
     return
   }
   throw new Error(AGENT_PROMPT_STALLED_ERROR)
 }
 
-function agentPromptEffectObserved(
+function agentPromptEffectAccepted(
   baseline: AgentPromptActivity,
-  current: AgentPromptActivity
+  current: AgentPromptActivity,
+  acceptTurnStart?: (evidence: AgentPromptTurnStartEvidence) => boolean,
+  allowHookEvidence = true,
+  allowOutputEvidence = true
 ): boolean {
-  return (
-    current.workingSequence > baseline.workingSequence ||
-    observedHookWorkingAfterBaseline(baseline, current) ||
-    observedDeliveryEvidence(baseline, current)
-  )
+  if (current.workingSequence > baseline.workingSequence) {
+    return (
+      acceptTurnStart?.({
+        kind: 'lifecycle',
+        workingSequence: current.workingSequence
+      }) ?? true
+    )
+  }
+  if (allowHookEvidence && observedHookWorkingAfterBaseline(baseline, current)) {
+    return (
+      acceptTurnStart?.({
+        kind: 'hook',
+        workingStartedAt: current.explicitWorkingStartedAt!
+      }) ?? true
+    )
+  }
+  return allowOutputEvidence && observedDeliveryEvidence(baseline, current)
 }
 
 // Why: hook status reaches the runtime directly, so it survives a hidden window and headless serve —

@@ -1,5 +1,9 @@
 import type { OrchestrationDb } from './db'
 import {
+  MAILBOX_POINTER_ENTER_ATTEMPTED,
+  MAILBOX_POINTER_WRITE_ATTEMPTED
+} from './db/messages/mailbox-pointer-enter-state'
+import {
   shouldReleaseOrchestrationPointer,
   type OrchestrationMessageWaiter
 } from './mailbox-pointer-eligibility'
@@ -13,13 +17,21 @@ type PointerSubmitDependencies<TWaiter extends OrchestrationMessageWaiter> = {
   mailboxOwner: OrchestrationMailboxOwner
   state: OrchestrationMailboxPointerState
   getDb: () => OrchestrationDb | null
-  getLeaf: (leafKey: string) => OrchestrationMailboxLeaf | undefined
-  getLeafKey: (tabId: string, leafId: string) => string
+  resolveSubmitTarget: (
+    leaf: OrchestrationMailboxLeaf,
+    ptyId: string
+  ) => OrchestrationMailboxPointerSubmitTarget | null
   getMessageWaiters: (mailboxHandle: string) => ReadonlySet<TWaiter> | undefined
   isLeafPtyProvenAbsent: (ptyId: string) => Promise<boolean>
   writePty: (ptyId: string, data: string) => boolean | Promise<boolean>
   settle: (ptyId: string, flight: OrchestrationMailboxDeliveryFlight) => void
   redrive: (mailboxHandle: string, force?: boolean) => void
+}
+
+export type OrchestrationMailboxPointerSubmitTarget = {
+  leaf: OrchestrationMailboxLeaf
+  terminalHandle: string
+  processIncarnation: string
 }
 
 export function submitOrchestrationMailboxPointer<TWaiter extends OrchestrationMessageWaiter>(
@@ -31,12 +43,21 @@ export function submitOrchestrationMailboxPointer<TWaiter extends OrchestrationM
     newestSequence: number
     ptyId: string
     flight: OrchestrationMailboxDeliveryFlight
+    expectedTarget: OrchestrationMailboxPointerSubmitTarget
   }
 ): void {
   let clearAndRedrive = false
+  let redriveClearedPointer = true
   let submitted = false
   let releaseWithoutRedrive = false
   let finalizeReservation = true
+  let preserveAmbiguousDelivery = false
+  let expectedPhase = MAILBOX_POINTER_WRITE_ATTEMPTED
+  const messageIds = input.messages.map((message) => message.id)
+  const reservationTarget = {
+    ptyId: input.ptyId,
+    processIncarnation: input.expectedTarget.processIncarnation
+  }
   void deps
     .isLeafPtyProvenAbsent(input.ptyId)
     .then(async (absent) => {
@@ -48,16 +69,26 @@ export function submitOrchestrationMailboxPointer<TWaiter extends OrchestrationM
         finalizeReservation = false
         return
       }
-      const currentLeaf = deps.getLeaf(deps.getLeafKey(input.leaf.tabId, input.leaf.leafId))
-      if (!currentLeaf || currentLeaf.ptyId !== input.ptyId || !currentLeaf.writable) {
+      const target = deps.resolveSubmitTarget(input.leaf, input.ptyId)
+      const exactTarget =
+        target?.terminalHandle === input.expectedTarget.terminalHandle &&
+        target.processIncarnation === input.expectedTarget.processIncarnation
+          ? target
+          : null
+      const sameMailbox =
+        exactTarget &&
+        deps.mailboxOwner.resolve(exactTarget.leaf, undefined, {
+          terminalHandle: exactTarget.terminalHandle
+        }) === input.mailboxHandle
+      const queueSafe =
+        exactTarget?.leaf.lastAgentStatusObservedLive === true &&
+        (exactTarget.leaf.lastAgentStatus === 'idle' ||
+          exactTarget.leaf.lastAgentStatus === 'working')
+      if (!exactTarget?.leaf.writable || !sameMailbox) {
         clearAndRedrive = true
-      } else if (deps.mailboxOwner.resolve(currentLeaf) !== input.mailboxHandle) {
-        clearAndRedrive = true
-      } else if (
-        currentLeaf.lastAgentStatusObservedLive &&
-        // Once staged, working is queue-safe; idle-only strands Orca-owned text in the composer.
-        (currentLeaf.lastAgentStatus === 'idle' || currentLeaf.lastAgentStatus === 'working')
-      ) {
+      } else if (!queueSafe) {
+        releaseWithoutRedrive = true
+      } else {
         if (
           shouldReleaseOrchestrationPointer(
             deps.getDb(),
@@ -68,16 +99,46 @@ export function submitOrchestrationMailboxPointer<TWaiter extends OrchestrationM
         ) {
           releaseWithoutRedrive = true
         } else {
+          preserveAmbiguousDelivery = true
+          const db = deps.getDb()
+          if (!db?.markMailboxPointerEnterAttempted(messageIds, reservationTarget)) {
+            return
+          }
+          expectedPhase = MAILBOX_POINTER_ENTER_ATTEMPTED
           submitted = await deps.writePty(input.ptyId, '\r')
+          if (!deps.state.isCurrentFlight(input.ptyId, input.flight)) {
+            finalizeReservation = false
+            return
+          }
+          if (!submitted) {
+            releaseWithoutRedrive = true
+          }
         }
       }
     })
-    .catch(() => undefined)
+    .catch(() => {
+      if (!preserveAmbiguousDelivery) {
+        clearAndRedrive = true
+        redriveClearedPointer = false
+      }
+    })
     .finally(() => {
       let released = false
+      let rollbackPersisted = true
       if (finalizeReservation) {
         if (clearAndRedrive) {
-          deps.getDb()?.markAsUndelivered(input.messages.map((message) => message.id))
+          try {
+            deps.getDb()?.releaseMailboxPointerEnter(messageIds, reservationTarget, [expectedPhase])
+          } catch {
+            // Runtime teardown can close the DB while this delayed submit is settling.
+            rollbackPersisted = false
+          }
+        } else if (submitted || releaseWithoutRedrive) {
+          try {
+            deps.getDb()?.settleMailboxPointerEnter(messageIds, reservationTarget, [expectedPhase])
+          } catch {
+            // A surviving pending row is revalidated against live agent state after restart.
+          }
         }
         released =
           submitted || clearAndRedrive || releaseWithoutRedrive
@@ -85,7 +146,12 @@ export function submitOrchestrationMailboxPointer<TWaiter extends OrchestrationM
             : deps.state.deactivateWatermark(input.mailboxHandle, input.newestSequence, input.ptyId)
       }
       deps.settle(input.ptyId, input.flight)
-      if (released && !releaseWithoutRedrive) {
+      if (
+        released &&
+        rollbackPersisted &&
+        !releaseWithoutRedrive &&
+        (!clearAndRedrive || redriveClearedPointer)
+      ) {
         deps.redrive(input.mailboxHandle, clearAndRedrive)
       }
     })

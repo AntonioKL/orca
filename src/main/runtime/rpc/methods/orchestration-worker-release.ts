@@ -1,47 +1,38 @@
 import { z } from 'zod'
-import type { WorkerTerminalListState } from '../../orchestration/worker-terminal-ownership'
+import { OrchestrationError } from '../../orchestration/orchestration-error'
 import { defineMethod, type RpcMethod } from '../core'
 import { requiredString } from '../schemas'
+import { releaseFederatedWorker } from './orchestration-federated-worker-release'
+import { ORCHESTRATION_WORKER_LIST_METHOD } from './orchestration-worker-list-method'
+import { resolvePinnedFederatedServer } from './orchestration-worker-observation'
 import {
   archiveSummary,
   completeWorkerTerminalRelease,
-  exposeWorkerTerminalResource,
   type WorkerReleaseReceipt
 } from './orchestration-worker-release-completion'
-
-const WorkerDispatchParams = z.object({ dispatch: requiredString('Missing --dispatch') })
-
-const WORKER_TERMINAL_LIST_STATES = [
-  'active',
-  'reclaimable',
-  'retained',
-  'release_pending',
-  'release_unknown',
-  'released'
-] as const
-
-const WorkerListParams = z.object({
-  run: z.string().min(1).optional(),
-  terminalState: z.enum(WORKER_TERMINAL_LIST_STATES).optional()
-})
+import { WorkerDispatchParams, WorkerRetainParams } from './orchestration-worker-release-schemas'
 
 export const ORCHESTRATION_WORKER_RELEASE_METHODS: RpcMethod[] = [
   defineMethod({
     name: 'orchestration.workerRelease',
     params: WorkerDispatchParams,
-    handler: async (params, { runtime }): Promise<WorkerReleaseReceipt> => {
+    handler: async (params, { runtime, orchestrationMutation }): Promise<WorkerReleaseReceipt> => {
       const db = runtime.getOrchestrationDb()
-      if (db.getFederatedDispatch(params.dispatch)) {
-        // Fail closed: the worker server owns that terminal; a home-side close would be a guess.
-        return {
-          dispatchId: params.dispatch,
-          state: 'retained',
-          reason: 'federation_unsupported',
-          processAction: 'none',
-          archive: null,
-          recovery:
-            'Connected-server workers do not support release yet; inspect the worker server directly.'
+      const federated = db.getFederatedDispatch(params.dispatch)
+      if (federated) {
+        if (!orchestrationMutation) {
+          throw new OrchestrationError(
+            'invalid_argument',
+            'Remote worker-release requires a durable retry request.'
+          )
         }
+        return releaseFederatedWorker({
+          runtime,
+          server: resolvePinnedFederatedServer(runtime, federated),
+          federated,
+          dispatchId: params.dispatch,
+          requestId: orchestrationMutation.requestId
+        })
       }
       const requested = db.requestWorkerTerminalRelease(params.dispatch)
       if (requested.disposition === 'already_released') {
@@ -95,7 +86,7 @@ export const ORCHESTRATION_WORKER_RELEASE_METHODS: RpcMethod[] = [
   }),
   defineMethod({
     name: 'orchestration.workerRetain',
-    params: WorkerDispatchParams,
+    params: WorkerRetainParams,
     handler: (params, { runtime }) => {
       const db = runtime.getOrchestrationDb()
       const retained = db.retainWorkerTerminalResource(params.dispatch)
@@ -139,33 +130,7 @@ export const ORCHESTRATION_WORKER_RELEASE_METHODS: RpcMethod[] = [
       }
     }
   }),
-  defineMethod({
-    name: 'orchestration.workerList',
-    params: WorkerListParams,
-    handler: (params, { runtime }) => {
-      const db = runtime.getOrchestrationDb()
-      const rows = db.listWorkerTerminalResources({ runId: params.run })
-      const workers = rows
-        .filter((row) => !params.terminalState || row.terminalState === params.terminalState)
-        .map((row) => ({
-          dispatchId: row.dispatchId,
-          taskId: row.taskId,
-          runId: row.runId,
-          workerState: row.workerState,
-          dispatchStatus: row.dispatchStatus,
-          agentTerminalHandle: row.agentTerminalHandle,
-          terminalState: row.terminalState,
-          resource: row.resource ? exposeWorkerTerminalResource(row.resource) : null
-        }))
-      const counts: Partial<Record<WorkerTerminalListState, number>> = {}
-      for (const row of rows) {
-        if (row.terminalState) {
-          counts[row.terminalState] = (counts[row.terminalState] ?? 0) + 1
-        }
-      }
-      return { workers, counts }
-    }
-  }),
+  ORCHESTRATION_WORKER_LIST_METHOD,
   defineMethod({
     name: 'orchestration.workerTerminalUserInput',
     params: z.object({ paneKey: requiredString('Missing paneKey') }),

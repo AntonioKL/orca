@@ -40,7 +40,8 @@ describe('orchestration federation', () => {
       resolve: () => ({
         environmentId: 'environment_windows',
         name: 'windows',
-        peerFingerprint: workerPeerFingerprint
+        peerFingerprint: workerPeerFingerprint,
+        pairingRevision: 73
       }),
       call: async (_selector, method, params, _timeoutMs, envelope) => {
         if (method === 'status.get') {
@@ -143,6 +144,11 @@ describe('orchestration federation', () => {
       worktreeId: 'repo::windows-worktree',
       status: 'running'
     } as never)
+    // Absent execution-host verdicts remain unverifiable for mixed-version peers.
+    vi.spyOn(runtime, 'getTerminalLivenessVerdict').mockReturnValue({
+      status: 'live',
+      ptyIds: ['term_windows_worker']
+    })
     vi.spyOn(runtime, 'readTerminal').mockResolvedValue({
       handle: 'term_windows_worker',
       status: 'running',
@@ -207,7 +213,12 @@ describe('orchestration federation', () => {
     expect([create.activate, create.runHooks]).toEqual([false, false])
     expect(workerRuntime.sendTerminalAgentPrompt).toHaveBeenCalledWith(
       'term_windows_worker',
-      expect.stringContaining(`Your task ID is: ${task.id}`)
+      expect.stringContaining(`Your task ID is: ${task.id}`),
+      expect.objectContaining({
+        acceptQueued: true,
+        observationTimeoutMs: 0,
+        requestId: expect.any(String)
+      })
     )
   })
 
@@ -701,6 +712,7 @@ describe('orchestration federation', () => {
       connected: false,
       writable: false
     } as never)
+    vi.mocked(workerRuntime.getTerminalLivenessVerdict).mockReturnValue({ status: 'exited' })
     const shown = await homeDispatcher.dispatch({
       id: 'rpc_remote_show_after_stop',
       authToken: 'coordinator-token',

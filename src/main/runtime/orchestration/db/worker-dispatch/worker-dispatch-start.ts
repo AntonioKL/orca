@@ -1,4 +1,4 @@
-import type { DispatchContextRow, WorkerDispatchRow } from '../../types'
+import type { DispatchContextRow, TaskRow, WorkerDispatchRow } from '../../types'
 import { OrchestrationError } from '../../orchestration-error'
 import { ensureMutationReceiptCapacity } from '../../mutation-receipt-capacity'
 import { CURRENT_CONTRACT_VERSION } from '../contract-constants'
@@ -6,11 +6,21 @@ import { generateId } from '../generated-id'
 import type { OrchestrationDb } from '../orchestration-db'
 import { insertStartingDispatchContextRow } from '../dispatch-row-writer'
 import type { DispatchCreator } from '../dispatch-depth'
+import { transitionLifecycleWithDb } from '../lifecycle-transition'
 
 export function createStartingWorkerDispatch(
   this: OrchestrationDb,
   params: {
-    taskId: string
+    taskId?: string
+    taskSpec?: string
+    taskRunId?: string
+    taskCreatedByTerminalHandle?: string
+    taskCreatedByPaneKey?: string
+    taskCreatedByProcessIncarnation?: string
+    taskCreatedByRunGeneration?: number
+    taskTitle?: string
+    taskDeps?: string[]
+    taskParentId?: string
     startOptions: unknown
     launchTokenHash?: string
     retryOf?: string
@@ -31,7 +41,7 @@ export function createStartingWorkerDispatch(
     creator: DispatchCreator
     maxDepth: number
   }
-): { dispatch: DispatchContextRow; worker: WorkerDispatchRow } {
+): { dispatch: DispatchContextRow; worker: WorkerDispatchRow; task: TaskRow } {
   this.db.exec('BEGIN IMMEDIATE')
   try {
     if (params.mutationReceipt) {
@@ -58,7 +68,21 @@ export function createStartingWorkerDispatch(
         )
         .run(receipt.callerFingerprint, receipt.requestId, receipt.method, receipt.payloadHash)
     }
-    const task = this.getTask(params.taskId)
+    const task = params.taskId
+      ? this.getTask(params.taskId)
+      : params.taskSpec
+        ? this.createTask({
+            spec: params.taskSpec,
+            taskTitle: params.taskTitle,
+            deps: params.taskDeps,
+            parentId: params.taskParentId,
+            createdByTerminalHandle: params.taskCreatedByTerminalHandle,
+            createdByPaneKey: params.taskCreatedByPaneKey,
+            createdByProcessIncarnation: params.taskCreatedByProcessIncarnation,
+            createdByRunGeneration: params.taskCreatedByRunGeneration,
+            runId: params.taskRunId
+          })
+        : undefined
     if (!task) {
       throw new OrchestrationError('task_not_found', `Task ${params.taskId} was not found.`)
     }
@@ -87,6 +111,7 @@ export function createStartingWorkerDispatch(
     }
 
     const id = generateId('ctx')
+    const creatorDispatchId = this.resolveCreatorDispatchId(params.creator)
     if (params.mutationReceipt) {
       this.db
         .prepare(
@@ -95,7 +120,7 @@ export function createStartingWorkerDispatch(
            WHERE caller_fingerprint = ? AND request_id = ? AND state = 'pending'`
         )
         .run(
-          JSON.stringify({ accepted: { dispatchId: id } }),
+          JSON.stringify({ accepted: { taskId: task.id, dispatchId: id } }),
           params.mutationReceipt.callerFingerprint,
           params.mutationReceipt.requestId
         )
@@ -106,7 +131,11 @@ export function createStartingWorkerDispatch(
       taskId: task.id,
       contractVersion: CURRENT_CONTRACT_VERSION,
       launchTokenHash: params.launchTokenHash ?? null,
-      depth: this.resolveChildDispatchDepth(params.creator, params.maxDepth)
+      depth: this.resolveChildDispatchDepth(params.creator, params.maxDepth),
+      retryOfDispatchId: params.retryOf ?? null,
+      creatorDispatchId,
+      creatorRole: params.creator.kind,
+      attachmentKind: params.federation ? 'remote' : null
     })
     this.db
       .prepare(
@@ -130,16 +159,20 @@ export function createStartingWorkerDispatch(
           params.federation.protocolVersion
         )
     }
-    this.db
-      .prepare(
-        "UPDATE tasks SET status = 'dispatched', result = NULL, completed_at = NULL WHERE id = ?"
-      )
-      .run(task.id)
+    transitionLifecycleWithDb(this.db, {
+      entity: 'task',
+      id: task.id,
+      from: params.retryOf ? ['failed', 'blocked'] : 'ready',
+      to: 'dispatched',
+      projection: { result: null, completed_at: null },
+      receipt: { kind: 'task_dispatched', details: { dispatchId: id } }
+    })
     this.db.exec('COMMIT')
     this.hasAnyDispatchContextsCache = true
     return {
       dispatch: this.getDispatchContextById(id) as DispatchContextRow,
-      worker: this.getWorkerDispatch(id) as WorkerDispatchRow
+      worker: this.getWorkerDispatch(id) as WorkerDispatchRow,
+      task: this.getTask(task.id) as TaskRow
     }
   } catch (error) {
     this.db.exec('ROLLBACK')

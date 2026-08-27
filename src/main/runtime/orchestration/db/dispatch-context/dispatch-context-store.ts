@@ -7,6 +7,7 @@ import { paneKeyMatchSuffix } from '../pane-key-match'
 import { claimDispatchContextRow } from '../dispatch-row-writer'
 import type { DispatchCreator } from '../dispatch-depth'
 import type { OrchestrationDb } from '../orchestration-db'
+import { transitionLifecycleWithDb } from '../lifecycle-transition'
 
 export function createDispatchContext(
   this: OrchestrationDb,
@@ -50,6 +51,7 @@ export function createDispatchContext(
   const paneSuffix =
     assigneePaneKey && parsePaneKey(assigneePaneKey) ? paneKeyMatchSuffix(assigneePaneKey) : null
   const id = generateId('ctx')
+  const creatorDispatchId = this.resolveCreatorDispatchId(params.creator)
   this.db.exec('SAVEPOINT create_dispatch_context')
   try {
     const inserted = claimDispatchContextRow(this.db, {
@@ -59,6 +61,8 @@ export function createDispatchContext(
       assigneeHandle,
       assigneePaneKey: assigneePaneKey ?? null,
       processIncarnation: processIncarnation ?? null,
+      creatorDispatchId,
+      creatorRole: params.creator.kind,
       priorFailures,
       depth,
       taskId,
@@ -76,7 +80,13 @@ export function createDispatchContext(
         `Task ${taskId} is ${current?.status ?? 'missing'}; only ready tasks can be dispatched`
       )
     }
-    this.db.prepare("UPDATE tasks SET status = 'dispatched' WHERE id = ?").run(taskId)
+    transitionLifecycleWithDb(this.db, {
+      entity: 'task',
+      id: taskId,
+      from: 'ready',
+      to: 'dispatched',
+      receipt: { kind: 'task_dispatched', details: { dispatchId: id } }
+    })
     const dispatch = this.db
       .prepare('SELECT * FROM dispatch_contexts WHERE id = ?')
       .get(id) as DispatchContextRow

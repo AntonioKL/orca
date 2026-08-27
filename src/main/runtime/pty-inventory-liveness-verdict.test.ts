@@ -9,6 +9,18 @@ import { SSH_EXIT_UNCONFIRMED_REASON } from '../../shared/pty-liveness-verdict'
 
 const WORKTREE_ID = 'repo-1::/tmp/inventory-verdict'
 const REMOTE_PTY_ID = 'ssh:conn-1@@relay-9'
+const LIVE_PTY_COUNT = 320
+const CHURNED_PTY_COUNT = 400
+
+type LivenessCacheInternals = {
+  ptysById: Map<string, unknown>
+  activePtyLivenessVerdictByPtyId: Map<string, unknown>
+  historicalPtyLivenessVerdictByPtyId: Map<string, unknown>
+}
+
+function getLivenessCacheInternals(runtime: OrcaRuntimeService): LivenessCacheInternals {
+  return runtime as unknown as LivenessCacheInternals
+}
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -89,7 +101,7 @@ describe('inventory sweep liveness verdicts', () => {
 
     runtime.onPtyExit(REMOTE_PTY_ID, -1, undefined, { hostExitConfirmed: true })
 
-    expect(runtime.getPtyLivenessVerdict(REMOTE_PTY_ID)).toBeNull()
+    expect(runtime.getPtyLivenessVerdict(REMOTE_PTY_ID)).toEqual({ status: 'exited' })
   })
 
   it('records lost contact when no provider can answer for the PTY', async () => {
@@ -108,11 +120,10 @@ describe('inventory sweep liveness verdicts', () => {
 
     await runtime.listTerminals(`id:${WORKTREE_ID}`)
 
-    // An observed absence is the death certificate callers already act on.
-    expect(runtime.getPtyLivenessVerdict(REMOTE_PTY_ID)).toBeNull()
+    expect(runtime.getPtyLivenessVerdict(REMOTE_PTY_ID)).toEqual({ status: 'exited' })
   })
 
-  it('clears lost-contact doubt when reconnect inventory observes the PTY live', async () => {
+  it('records positive host evidence when reconnect inventory observes the PTY live', async () => {
     let reconnected = false
     const runtime = makeRuntimeMissingFromInventory(
       () => null,
@@ -125,7 +136,10 @@ describe('inventory sweep liveness verdicts', () => {
     reconnected = true
     await runtime.listTerminals(`id:${WORKTREE_ID}`)
 
-    expect(runtime.getPtyLivenessVerdict(REMOTE_PTY_ID)).toBeNull()
+    expect(runtime.getPtyLivenessVerdict(REMOTE_PTY_ID)).toEqual({
+      status: 'live',
+      ptyIds: [REMOTE_PTY_ID]
+    })
   })
 
   it('does not let a pre-drop inventory clear a newer lost-contact verdict', async () => {
@@ -180,7 +194,7 @@ describe('inventory sweep liveness verdicts', () => {
 
   it('retains unresolved verdicts for every still-addressable PTY', () => {
     const runtime = new OrcaRuntimeService(makeStore() as never)
-    for (let index = 0; index < 257; index += 1) {
+    for (let index = 0; index < LIVE_PTY_COUNT; index += 1) {
       const ptyId = `ssh:conn-1@@relay-${index}`
       runtime.registerPty(ptyId, WORKTREE_ID, 'conn-1')
       runtime.markPtyLivenessUnverifiable(ptyId, 'provider disconnected')
@@ -190,5 +204,66 @@ describe('inventory sweep liveness verdicts', () => {
       status: 'unverifiable',
       reason: 'provider disconnected'
     })
+    const internals = getLivenessCacheInternals(runtime)
+    expect(internals.activePtyLivenessVerdictByPtyId).toHaveLength(LIVE_PTY_COUNT)
+    expect(internals.historicalPtyLivenessVerdictByPtyId).toHaveLength(0)
+  })
+
+  it('observes more than 256 live PTYs with linear cache work and no retained history', async () => {
+    const sessions = Array.from({ length: LIVE_PTY_COUNT }, (_, index) => ({
+      id: `ssh:conn-1@@inventory-${index}`,
+      worktreeId: WORKTREE_ID
+    }))
+    const runtime = new OrcaRuntimeService(makeStore() as never)
+    runtime.setPtyController({
+      write: () => true,
+      kill: () => true,
+      hasPty: () => true,
+      listProcesses: vi.fn(async () => sessions),
+      getForegroundProcess: async () => null
+    } as never)
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, { tabs: [], leaves: [] })
+    for (const session of sessions) {
+      runtime.registerPty(session.id, WORKTREE_ID, 'conn-1')
+    }
+    const internals = getLivenessCacheInternals(runtime)
+    const activeIdentityChecks = vi.spyOn(internals.ptysById, 'has')
+
+    await runtime.listTerminals(`id:${WORKTREE_ID}`)
+
+    expect(runtime.getPtyLivenessVerdict(sessions[0]!.id)).toEqual({
+      status: 'live',
+      ptyIds: [sessions[0]!.id]
+    })
+    expect(internals.activePtyLivenessVerdictByPtyId).toHaveLength(LIVE_PTY_COUNT)
+    expect(internals.historicalPtyLivenessVerdictByPtyId).toHaveLength(0)
+    expect(activeIdentityChecks.mock.calls.length).toBeLessThanOrEqual(LIVE_PTY_COUNT * 4)
+  })
+
+  it('bounds historical verdicts while preserving active doubt and lifecycle cleanup', () => {
+    const runtime = new OrcaRuntimeService(makeStore() as never)
+    for (let index = 0; index < CHURNED_PTY_COUNT; index += 1) {
+      const ptyId = `ssh:conn-1@@churn-${index}`
+      runtime.registerPty(ptyId, WORKTREE_ID, 'conn-1')
+      runtime.markPtyLivenessUnverifiable(ptyId, 'provider disconnected')
+      runtime.onPtyExit(ptyId, index % 2 === 0 ? -1 : 0)
+    }
+
+    const internals = getLivenessCacheInternals(runtime)
+    expect(internals.activePtyLivenessVerdictByPtyId).toHaveLength(128)
+    expect(internals.historicalPtyLivenessVerdictByPtyId).toHaveLength(256)
+    expect(runtime.getPtyLivenessVerdict('ssh:conn-1@@churn-0')).toBeNull()
+    expect(runtime.getPtyLivenessVerdict('ssh:conn-1@@churn-16')).toEqual({
+      status: 'unverifiable',
+      reason: 'provider disconnected'
+    })
+    expect(runtime.getPtyLivenessVerdict('ssh:conn-1@@churn-17')).toEqual({ status: 'exited' })
+    expect(runtime.getPtyLivenessVerdict('ssh:conn-1@@churn-399')).toEqual({ status: 'exited' })
+
+    runtime.onPtySpawned('ssh:conn-1@@churn-16', 'replacement')
+
+    expect(runtime.getPtyLivenessVerdict('ssh:conn-1@@churn-16')).toBeNull()
+    expect(internals.historicalPtyLivenessVerdictByPtyId).toHaveLength(255)
   })
 })

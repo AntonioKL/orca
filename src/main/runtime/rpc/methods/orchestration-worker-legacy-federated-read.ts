@@ -36,7 +36,9 @@ export async function readLegacyFederatedTerminal(args: {
       cursor: cursor?.source === 'terminal' ? cursor.position : undefined,
       limit: args.limit
     },
-    15_000
+    15_000,
+    undefined,
+    { expectedEnvironmentPairingRevision: args.server.pairingRevision }
   )) as { runtimeEpoch: string; terminal: RuntimeTerminalRead }
   const sourceIdentity = createWorkerOutputSourceIdentity([
     'legacy-remote-terminal',
@@ -69,6 +71,9 @@ export async function readLegacyFederatedTerminal(args: {
         : encodeWorkerOutputCursor(args.dispatchId, 'terminal', sourceIdentity, nextPosition),
     status: { worker: args.workerState, terminal: remote.terminal.status },
     fallbackReason: 'remote_capability_unavailable' as const,
+    sourceExact: false,
+    contentComplete: false,
+    clipping: ['terminal_fallback'],
     warnings: [],
     server: { environmentId: args.server.environmentId, name: args.server.name },
     remoteRuntimeEpoch: remote.runtimeEpoch

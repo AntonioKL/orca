@@ -131,6 +131,7 @@ describe('orchestration federation control mail', () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     homeRuntime.stopOrchestrationFederationRelay()
     homeDb.close()
     workerDb.close()
@@ -268,22 +269,30 @@ describe('orchestration federation control mail', () => {
     })
   })
 
-  it('wakes only waiters whose filter matches an imported control message', async () => {
+  it('uses imported types for waiter eligibility and returns the oldest full batch', async () => {
+    vi.useFakeTimers()
+    await dispatchImport(importRequest('import-heartbeat', 1, 'relay-heartbeat', 'heartbeat'))
+
     const escalationWaiter = workerDispatcher.dispatch(
       checkRequest('wait-escalation', true, 1_000, 'escalation')
     )
     const statusWaiter = workerDispatcher.dispatch(checkRequest('wait-status', true, 30, 'status'))
-    await Promise.resolve()
+    await waitForDispatchWaiterCount(2)
 
-    await dispatchImport(importRequest('import-escalation', 1, 'relay-escalation', 'escalation'))
+    await dispatchImport(importRequest('import-escalation', 2, 'relay-escalation', 'escalation'))
 
     await expect(escalationWaiter).resolves.toMatchObject({
       ok: true,
       result: {
-        count: 1,
-        messages: [{ id: 'relay-escalation', type: 'escalation' }]
+        count: 2,
+        messages: [
+          { id: 'relay-heartbeat', type: 'heartbeat' },
+          { id: 'relay-escalation', type: 'escalation' }
+        ]
       }
     })
+    await waitForDispatchWaiterCount(1)
+    await vi.advanceTimersByTimeAsync(30)
     await expect(statusWaiter).resolves.toMatchObject({
       ok: true,
       result: { count: 0, timedOut: true }
@@ -344,5 +353,19 @@ describe('orchestration federation control mail', () => {
     return workerDispatcher.dispatch(request, {
       authenticatedCallerFingerprint: homeFingerprint
     })
+  }
+
+  async function waitForDispatchWaiterCount(expected: number): Promise<void> {
+    const internals = workerRuntime as unknown as {
+      messageWaitersByHandle: Map<string, Set<unknown>>
+    }
+    const address = `dispatch:${dispatchId}`
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      if (internals.messageWaitersByHandle.get(address)?.size === expected) {
+        return
+      }
+      await Promise.resolve()
+    }
+    expect(internals.messageWaitersByHandle.get(address)?.size).toBe(expected)
   }
 })

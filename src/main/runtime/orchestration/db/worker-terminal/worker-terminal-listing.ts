@@ -1,74 +1,35 @@
 import type { DispatchStatus } from '../../types'
+import type { TerminalExitCause } from '../../../../../shared/terminal-exit-cause'
 import { deriveWorkerTerminalListState } from '../../worker-terminal-ownership'
 import type {
   WorkerDispatchListState,
   WorkerTerminalResourceRow,
   WorkerTerminalListState
 } from '../../worker-terminal-ownership'
-import { isEquivalentPaneKey } from '../pane-key-match'
 import type { OrchestrationDb } from '../orchestration-db'
+import {
+  getWorkerAttentionFacts,
+  getWorkerAttentionFactsForDispatches
+} from './worker-terminal-attention-query'
+import {
+  countWorkerTerminalInventory,
+  countWorkerTerminalResources,
+  WORKER_TERMINAL_STATE_EXPRESSION
+} from './worker-terminal-inventory-counts'
+import { markWorkerTerminalUserOwned } from './worker-terminal-user-takeover'
 
-// Real user input relinquishes orchestration ownership durably; programmatic prompt delivery,
-// query auto-replies, resize, and output never reach this path.
-export function markWorkerTerminalUserOwned(this: OrchestrationDb, paneKey: string): number {
-  this.db.exec('BEGIN IMMEDIATE')
-  try {
-    const exact = this.db
-      .prepare(
-        `SELECT id, owner_dispatch_id, pane_key FROM worker_terminal_resources
-          WHERE pane_key = ? AND ownership_state = 'owned'
-            AND release_state IN ('not_requested', 'retained', 'requested')
-            AND NOT EXISTS (
-              SELECT 1 FROM worker_dispatches w
-               WHERE w.dispatch_id = owner_dispatch_id AND w.state = 'stopping'
-            )`
-      )
-      .all(paneKey) as { id: string; owner_dispatch_id: string; pane_key: string }[]
-    const candidates =
-      exact.length > 0
-        ? exact
-        : (
-            this.db
-              .prepare(
-                `SELECT id, owner_dispatch_id, pane_key FROM worker_terminal_resources
-                WHERE ownership_state = 'owned'
-                  AND release_state IN ('not_requested', 'retained', 'requested')
-                  AND NOT EXISTS (
-                    SELECT 1 FROM worker_dispatches w
-                     WHERE w.dispatch_id = owner_dispatch_id AND w.state = 'stopping'
-                  )
-                  AND pane_key IS NOT NULL`
-              )
-              .all() as { id: string; owner_dispatch_id: string; pane_key: string }[]
-          ).filter((candidate) => isEquivalentPaneKey(candidate.pane_key, paneKey))
-    const update = this.db.prepare(
-      `UPDATE worker_terminal_resources
-       SET ownership_state = 'user_owned', release_state = 'retained',
-           retained_reason = 'user_takeover', updated_at = datetime('now')
-       WHERE id = ? AND ownership_state = 'owned'
-         AND release_state IN ('not_requested', 'retained', 'requested')
-         AND NOT EXISTS (
-           SELECT 1 FROM worker_dispatches w
-            WHERE w.dispatch_id = owner_dispatch_id AND w.state = 'stopping'
-         )`
-    )
-    let changed = 0
-    for (const candidate of candidates) {
-      const result = Number(update.run(candidate.id).changes)
-      if (result > 0) {
-        this.db
-          .prepare('DELETE FROM worker_terminal_archives WHERE dispatch_id = ?')
-          .run(candidate.owner_dispatch_id)
-        changed += result
-      }
-    }
-    this.db.exec('COMMIT')
-    return changed
-  } catch (error) {
-    this.db.exec('ROLLBACK')
-    throw error
-  }
+export {
+  countWorkerTerminalInventory,
+  countWorkerTerminalResources,
+  getWorkerAttentionFacts,
+  getWorkerAttentionFactsForDispatches,
+  markWorkerTerminalUserOwned
 }
+
+export type WorkerTerminalOrderingKey = { createdAt: string; dispatchId: string }
+export type WorkerTerminalListingSnapshot =
+  | { databaseId: number }
+  | { createdAt: string; dispatchId: string }
 
 export function listWorkerTerminalReleaseBacklog(
   this: OrchestrationDb
@@ -84,43 +45,123 @@ export function listWorkerTerminalReleaseBacklog(
 
 export function listWorkerTerminalResources(
   this: OrchestrationDb,
-  params: { runId?: string } = {}
+  params: {
+    runId?: string
+    limit?: number
+    after?: WorkerTerminalOrderingKey
+    snapshot?: WorkerTerminalListingSnapshot
+    terminalState?: WorkerTerminalListState
+    dispatchIds?: string[]
+  } = {}
 ): {
   dispatchId: string
   taskId: string
   runId: string
+  parentTaskId: string | null
   workerState: WorkerDispatchListState
   dispatchStatus: DispatchStatus
+  workerStage: string | null
   agentTerminalHandle: string | null
+  paneKey: string | null
+  worktreeId: string | null
   terminalState: WorkerTerminalListState | null
+  pendingInput: boolean
+  pendingApproval: boolean
+  terminationReason: TerminalExitCause['kind'] | null
   resource: WorkerTerminalResourceRow | null
+  createdAt: string
+  databaseId: number
 }[] {
+  const orderExpression = 'COALESCE(w.created_at, d.created_at)'
+  const where: string[] = []
+  const values: (string | number)[] = []
+  if (params.runId) {
+    where.push('d.run_id = ?')
+    values.push(params.runId)
+  }
+  if (params.dispatchIds) {
+    if (params.dispatchIds.length === 0) {
+      return []
+    }
+    where.push(`d.id IN (${params.dispatchIds.map(() => '?').join(',')})`)
+    values.push(...params.dispatchIds)
+  }
+  if (params.snapshot) {
+    if ('databaseId' in params.snapshot) {
+      where.push('d.rowid <= ?')
+      values.push(params.snapshot.databaseId)
+    } else {
+      where.push(`(${orderExpression} < ? OR (${orderExpression} = ? AND d.id <= ?))`)
+      values.push(params.snapshot.createdAt, params.snapshot.createdAt, params.snapshot.dispatchId)
+    }
+  }
+  if (params.after) {
+    where.push(`(${orderExpression} > ? OR (${orderExpression} = ? AND d.id > ?))`)
+    values.push(params.after.createdAt, params.after.createdAt, params.after.dispatchId)
+  }
+  if (params.terminalState) {
+    // Keep filtering in lockstep with deriveWorkerTerminalListState before LIMIT.
+    where.push(`${WORKER_TERMINAL_STATE_EXPRESSION} = ?`)
+    values.push(params.terminalState)
+  }
+  const limitClause = params.limit === undefined ? '' : ' LIMIT ?'
+  if (params.limit !== undefined) {
+    values.push(params.limit)
+  }
   const rows = this.db
     .prepare(
       `SELECT d.id AS dispatch_id,
+              d.rowid AS database_id,
+              ${orderExpression} AS created_at,
               COALESCE(w.state, 'unsupervised') AS worker_state,
               COALESCE(w.agent_terminal_handle, d.assignee_handle) AS agent_terminal_handle,
-              d.task_id, d.run_id, d.status AS dispatch_status
+              COALESCE(r.pane_key, d.assignee_pane_key) AS pane_key,
+              COALESCE(w.worktree_id, r.worktree_id) AS worktree_id,
+              w.stage AS worker_stage,
+              t.parent_id AS parent_task_id,
+              d.task_id, d.run_id, d.status AS dispatch_status,
+              d.termination_reason,
+              EXISTS (
+                SELECT 1 FROM question_threads q
+                 WHERE q.dispatch_id = d.id AND q.status = 'pending'
+              ) AS pending_input,
+              EXISTS (
+                SELECT 1 FROM decision_gates g
+                 WHERE g.task_id = d.task_id AND g.status = 'pending'
+              ) AS pending_approval
          FROM dispatch_contexts d
          LEFT JOIN worker_dispatches w ON w.dispatch_id = d.id
-        ${params.runId ? 'WHERE d.run_id = ?' : ''}
-        ORDER BY COALESCE(w.created_at, d.created_at) ASC`
+         LEFT JOIN tasks t ON t.id = d.task_id AND t.run_id = d.run_id
+         LEFT JOIN worker_terminal_resources r ON r.owner_dispatch_id = d.id
+        ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
+        ORDER BY ${orderExpression} ASC, d.id ASC${limitClause}`
     )
-    .all(...(params.runId ? [params.runId] : [])) as {
+    .all(...values) as {
     dispatch_id: string
     worker_state: WorkerDispatchListState
     agent_terminal_handle: string | null
+    pane_key: string | null
+    worktree_id: string | null
+    worker_stage: string | null
+    parent_task_id: string | null
     task_id: string
     run_id: string
     dispatch_status: DispatchStatus
+    termination_reason: TerminalExitCause['kind'] | null
+    pending_input: number
+    pending_approval: number
+    created_at: string
+    database_id: number
   }[]
-  const resources = this.db
-    .prepare(
-      `SELECT r.* FROM worker_terminal_resources r
-         JOIN dispatch_contexts d ON d.id = r.owner_dispatch_id
-        ${params.runId ? 'WHERE d.run_id = ?' : ''}`
-    )
-    .all(...(params.runId ? [params.runId] : [])) as WorkerTerminalResourceRow[]
+  const resources =
+    rows.length === 0
+      ? []
+      : (this.db
+          .prepare(
+            `SELECT r.* FROM worker_terminal_resources r
+               WHERE r.owner_dispatch_id IN (${rows.map(() => '?').join(',')})`
+          )
+          .all(...rows.map((row) => row.dispatch_id)) as WorkerTerminalResourceRow[])
   const resourceByOwner = new Map(
     resources.map((resource) => [resource.owner_dispatch_id, resource])
   )
@@ -130,29 +171,77 @@ export function listWorkerTerminalResources(
       dispatchId: row.dispatch_id,
       taskId: row.task_id,
       runId: row.run_id,
+      parentTaskId: row.parent_task_id,
       workerState: row.worker_state,
       dispatchStatus: row.dispatch_status,
+      workerStage: row.worker_stage,
       agentTerminalHandle: row.agent_terminal_handle,
+      paneKey: row.pane_key,
+      worktreeId: row.worktree_id,
       terminalState: deriveWorkerTerminalListState({
         workerState: row.worker_state,
         agentTerminalHandle: row.agent_terminal_handle,
         resource
       }),
-      resource
+      pendingInput: row.pending_input === 1,
+      pendingApproval: row.pending_approval === 1,
+      terminationReason: row.termination_reason,
+      resource,
+      createdAt: row.created_at,
+      databaseId: row.database_id
     }
   })
+}
+export function getWorkerTerminalListingSnapshot(
+  this: OrchestrationDb,
+  runId?: string
+): { databaseId: number } | null {
+  const row = this.db
+    .prepare(
+      `SELECT MAX(d.rowid) AS database_id
+         FROM dispatch_contexts d
+        ${runId ? 'WHERE d.run_id = ?' : ''}`
+    )
+    .get(...(runId ? [runId] : [])) as { database_id: number | null }
+  return row.database_id === null ? null : { databaseId: row.database_id }
+}
+export function getWorkerTerminalOrderingKey(
+  this: OrchestrationDb,
+  dispatchId: string
+): WorkerTerminalOrderingKey | null {
+  const row = this.db
+    .prepare(
+      `SELECT d.id AS dispatch_id, COALESCE(w.created_at, d.created_at) AS created_at
+         FROM dispatch_contexts d
+         LEFT JOIN worker_dispatches w ON w.dispatch_id = d.id
+        WHERE d.id = ?`
+    )
+    .get(dispatchId) as { dispatch_id: string; created_at: string } | undefined
+  return row ? { createdAt: row.created_at, dispatchId: row.dispatch_id } : null
 }
 
 export type WorkerTerminalListingMethods = {
   markWorkerTerminalUserOwned: typeof markWorkerTerminalUserOwned
   listWorkerTerminalReleaseBacklog: typeof listWorkerTerminalReleaseBacklog
   listWorkerTerminalResources: typeof listWorkerTerminalResources
+  getWorkerTerminalListingSnapshot: typeof getWorkerTerminalListingSnapshot
+  getWorkerTerminalOrderingKey: typeof getWorkerTerminalOrderingKey
+  countWorkerTerminalResources: typeof countWorkerTerminalResources
+  countWorkerTerminalInventory: typeof countWorkerTerminalInventory
+  getWorkerAttentionFacts: typeof getWorkerAttentionFacts
+  getWorkerAttentionFactsForDispatches: typeof getWorkerAttentionFactsForDispatches
 }
 
 export function attachWorkerTerminalListing(ctor: { prototype: object }): void {
   Object.assign(ctor.prototype, {
     markWorkerTerminalUserOwned,
     listWorkerTerminalReleaseBacklog,
-    listWorkerTerminalResources
+    listWorkerTerminalResources,
+    getWorkerTerminalListingSnapshot,
+    getWorkerTerminalOrderingKey,
+    countWorkerTerminalResources,
+    countWorkerTerminalInventory,
+    getWorkerAttentionFacts,
+    getWorkerAttentionFactsForDispatches
   })
 }

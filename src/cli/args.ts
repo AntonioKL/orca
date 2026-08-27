@@ -28,6 +28,7 @@ export const BOOLEAN_FLAGS = new Set([
   'help',
   'inject',
   'include-archived',
+  'include-remote',
   'include-visual-layouts',
   'interrupt',
   'json',

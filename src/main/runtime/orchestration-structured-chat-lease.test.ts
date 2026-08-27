@@ -257,7 +257,7 @@ describe('orchestration while Structured Chat owns an agent session', () => {
 
     expect(db.getMessageById(message.id)?.delivered_at).not.toBeNull()
     expect(writes).toHaveBeenCalledTimes(2)
-    expect(writes.mock.calls[0]?.[1]).toContain('orca orchestration check')
+    expect(writes.mock.calls[0]?.[1]).toContain('orchestration check')
     expect(writes.mock.calls[1]).toEqual([WORKER.ptyId, '\r'])
   })
 
@@ -300,7 +300,7 @@ describe('orchestration while Structured Chat owns an agent session', () => {
     if (!response.ok) {
       throw new Error(response.error.message)
     }
-    expect(response.result).toEqual({
+    expect(response.result).toMatchObject({
       send: {
         handle: WORKER.handle,
         accepted: false,
@@ -311,7 +311,49 @@ describe('orchestration while Structured Chat owns an agent session', () => {
         })
       }
     })
+    expect(response.result).toMatchObject({
+      mutation: { requestId: expect.stringMatching(/^mutation-terminal\.send-/), replayed: false }
+    })
     expect(writes).not.toHaveBeenCalled()
+  })
+
+  it('stops a prompt when Structured Chat takes the lease between paste chunks', async () => {
+    await establishOwner('tui', 'spawn-tui', 1)
+    let writesStarted = 0
+
+    await expect(
+      runtime.sendTerminalAgentPrompt(WORKER.handle, 'x'.repeat(20_000), {
+        beforeWrite: async () => {
+          writesStarted += 1
+          if (writesStarted === 2) {
+            await establishOwner('native', 'spawn-native-transfer', 2)
+          }
+        }
+      })
+    ).rejects.toMatchObject({
+      refusal: expect.objectContaining({
+        code: 'agent_session_conflict',
+        ownerRuntimeKind: 'native'
+      })
+    })
+
+    expect(writes).toHaveBeenCalledTimes(1)
+    expect(writes.mock.calls[0]?.[1]).not.toBe('\r')
+  })
+
+  it('withholds delayed pointer Enter when Structured Chat takes the lease', async () => {
+    vi.useFakeTimers()
+    await establishOwner('tui', 'spawn-tui', 1)
+    const run = createRun(WORKER)
+    const message = queueRunMessage(run.id)
+
+    runtime.deliverPendingMessagesForHandle(`run:${run.id}`)
+    expect(writes).toHaveBeenCalledTimes(1)
+    await establishOwner('native', 'spawn-native-before-enter', 2)
+    await vi.advanceTimersByTimeAsync(500)
+
+    expect(writes).toHaveBeenCalledTimes(1)
+    expect(db.getMessageById(message.id)).toMatchObject({ read: 0 })
   })
 
   it('settles worker_done while its pane remains in Structured Chat', async () => {

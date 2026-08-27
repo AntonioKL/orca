@@ -45,6 +45,15 @@ import {
   ORCHESTRATION_FEDERATION_CONTROL_MAIL_PROTOCOL_VERSION,
   ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_PROTOCOL_VERSION
 } from '../../../../shared/protocol-version'
+import {
+  readMutationReplayNudge,
+  readWorkerDoneReplayNudge,
+  stripMutationReplayNudge
+} from '../orchestration-mutation-executor'
+import {
+  attachMutationReplayNudge,
+  type MutationReplayNudge
+} from '../orchestration-mutation-receipt'
 
 const TASK_STATUSES: TaskStatus[] = [
   'pending',
@@ -436,6 +445,61 @@ function rejectFederatedExplicitTarget(params: { to?: string; run?: string }): v
   }
 }
 
+function recordReceiptBeforeNudge<T>(
+  recordMutationReceipt: ((receipt: unknown) => void) | undefined,
+  receipt: T,
+  nudge: () => void,
+  replayNudge: MutationReplayNudge | undefined = messageReplayNudge(receipt)
+): T {
+  recordMutationReceipt?.(replayNudge ? attachMutationReplayNudge(receipt, replayNudge) : receipt)
+  nudge()
+  return receipt
+}
+
+function recordReceiptForPostCommitNudge<T>(
+  recordMutationReceipt: ((receipt: unknown) => void) | undefined,
+  receipt: T,
+  nudge: () => void,
+  replayNudge: MutationReplayNudge | undefined = messageReplayNudge(receipt)
+): { receipt: T; nudge: () => void } {
+  recordMutationReceipt?.(replayNudge ? attachMutationReplayNudge(receipt, replayNudge) : receipt)
+  return { receipt, nudge }
+}
+
+function messageReplayNudge(receipt: unknown): MutationReplayNudge | undefined {
+  if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) {
+    return undefined
+  }
+  const source = receipt as { message?: unknown; messages?: unknown }
+  const rows = source.message
+    ? [source.message]
+    : Array.isArray(source.messages)
+      ? source.messages
+      : []
+  const targets = rows.flatMap((row) => {
+    if (!row || typeof row !== 'object') {
+      return []
+    }
+    const candidate = row as { to_handle?: unknown; type?: unknown }
+    return typeof candidate.to_handle === 'string' && typeof candidate.type === 'string'
+      ? [{ to: candidate.to_handle, type: candidate.type }]
+      : []
+  })
+  return targets.length === rows.length && targets.length > 0
+    ? { kind: 'messages', targets }
+    : undefined
+}
+
+function replayMutationNudge(runtime: OrcaRuntimeService, replayNudge: MutationReplayNudge): void {
+  if (replayNudge.kind === 'federation') {
+    runtime.ensureOrchestrationFederationRelay(replayNudge.runId)
+    return
+  }
+  for (const target of replayNudge.targets) {
+    runtime.notifyMessageArrived(target.to, target.type)
+  }
+}
+
 export const ORCHESTRATION_METHODS: RpcMethod[] = [
   ...ORCHESTRATION_RUN_METHODS,
   ...ORCHESTRATION_WORKER_METHODS,
@@ -453,10 +517,26 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
         revalidateLegacyCoordinator,
         orchestrationCompatibilityCallerAuthority,
         recordMutationReceipt,
+        markWorkerDoneMutationEffectFree,
+        replayedMutationReceipt,
         signal
       }
     ) => {
       const db = runtime.getOrchestrationDb()
+      const legacyReplayNudge = readWorkerDoneReplayNudge(
+        'orchestration.send',
+        params,
+        replayedMutationReceipt
+      )
+      const replayNudge =
+        readMutationReplayNudge(replayedMutationReceipt) ??
+        (legacyReplayNudge
+          ? { kind: 'messages' as const, targets: [legacyReplayNudge] }
+          : undefined)
+      if (replayNudge) {
+        replayMutationNudge(runtime, replayNudge)
+        return stripMutationReplayNudge(replayedMutationReceipt)
+      }
       const from = params.from ?? 'unknown'
       const attestedCaller =
         orchestrationCompatibilityCallerAuthority?.terminalHandle === from
@@ -674,8 +754,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
               payload: params.payload ?? null
             })
           })
-          runtime.ensureOrchestrationFederationRelay(messageRunId)
-          return withSendWarnings({
+          const receipt = withSendWarnings({
             relay: {
               messageId: relay.message_id,
               sequence: relay.sequence,
@@ -684,127 +763,159 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
               accepted: true
             }
           })
+          return recordReceiptBeforeNudge(
+            recordMutationReceipt,
+            receipt,
+            () => runtime.ensureOrchestrationFederationRelay(messageRunId),
+            { kind: 'federation', ...(messageRunId ? { runId: messageRunId } : {}) }
+          )
         }
         // Point-to-point — existing single-recipient behavior
         revalidateLegacyCoordinator?.()
-        const dispatch = routing.dispatchId
-          ? db.getDispatchContextById(routing.dispatchId)
-          : undefined
         const messageType = (params.type ?? 'status') as MessageType
-        const msg = db.insertMessage({
-          from,
-          to,
-          subject: params.subject,
-          body: params.body,
-          type: messageType,
-          priority: params.priority as MessagePriority,
-          threadId: params.threadId,
-          payload: dispatch
-            ? bindCoordinatorMutationPayload(messageType, params.payload, dispatch.id)
-            : params.payload,
-          senderPaneKey,
-          runId: messageRunId,
-          deliveryContract: legacyWorkerDeliveryContract(
-            runtime,
-            messageRunId ?? legacyCoordinatorRunId,
-            to
-          )
-        })
-        const dispatchMutationMessage = isDispatchMutationMessageType(msg.type)
-        if (dispatchMutationMessage) {
-          const processIncarnation =
-            attestedCaller?.processIncarnation ??
+        const processIncarnation = isDispatchMutationMessageType(messageType)
+          ? (attestedCaller?.processIncarnation ??
             runtime.getTerminalProcessIncarnation(from) ??
-            undefined
-          const taskId = parseMessageTaskId(params.payload)
-          const capabilityBacked = Boolean(dispatch?.capability_hash)
-          const coordinatorMutation = msg.type === 'escalation' || msg.type === 'decision_gate'
-          let authority: {
-            valid: boolean
-            code: 'sender_not_assignee' | 'task_dispatch_mismatch' | 'dispatch_capability_invalid'
-            reason: string
-          }
-          if (!dispatch) {
-            authority = {
-              valid: !coordinatorMutation,
-              code: 'sender_not_assignee',
-              reason: 'No active Dispatch belongs to this message sender.'
+            undefined)
+          : undefined
+        const commitMessage = () => {
+          const dispatch = routing.dispatchId
+            ? db.getDispatchContextById(routing.dispatchId)
+            : undefined
+          const msg = db.insertMessage({
+            from,
+            to,
+            subject: params.subject,
+            body: params.body,
+            type: messageType,
+            priority: params.priority as MessagePriority,
+            threadId: params.threadId,
+            payload: dispatch
+              ? bindCoordinatorMutationPayload(messageType, params.payload, dispatch.id)
+              : params.payload,
+            senderPaneKey,
+            runId: messageRunId,
+            deliveryContract: legacyWorkerDeliveryContract(
+              runtime,
+              messageRunId ?? legacyCoordinatorRunId,
+              to
+            )
+          })
+          const dispatchMutationMessage = isDispatchMutationMessageType(msg.type)
+          if (dispatchMutationMessage) {
+            const taskId = parseMessageTaskId(params.payload)
+            const capabilityBacked = Boolean(dispatch?.capability_hash)
+            const coordinatorMutation = msg.type === 'escalation' || msg.type === 'decision_gate'
+            let authority: {
+              valid: boolean
+              code: 'sender_not_assignee' | 'task_dispatch_mismatch' | 'dispatch_capability_invalid'
+              reason: string
             }
-          } else if (coordinatorMutation && taskId && taskId !== dispatch.task_id) {
-            authority = {
-              valid: false,
-              code: 'task_dispatch_mismatch',
-              reason: `Task ${taskId} does not belong to Dispatch ${dispatch.id}.`
-            }
-          } else if (capabilityBacked) {
-            const capabilityAuthority = db.verifyDispatchCapability({
-              dispatchId: dispatch.id,
-              capability: orchestrationCapability,
-              paneKey: senderPaneKey,
-              processIncarnation
-            })
-            authority = {
-              valid: capabilityAuthority.valid,
-              code: 'dispatch_capability_invalid',
-              reason: capabilityAuthority.valid ? '' : capabilityAuthority.reason
-            }
-          } else if (dispatch.process_incarnation) {
-            authority = {
-              valid: db.isDispatchProcessCurrent({
-                dispatchId: dispatch.id,
-                paneKey: senderPaneKey ?? null,
-                processIncarnation: processIncarnation ?? null
-              }),
-              code: 'sender_not_assignee',
-              reason: `Dispatch ${dispatch.id} process incarnation is no longer current for its pane.`
-            }
-          } else {
-            authority = {
-              valid:
-                !coordinatorMutation ||
-                db.isDispatchMessageSender({
-                  dispatchId: dispatch.id,
-                  handle: from,
-                  paneKey: senderPaneKey
-                }),
-              code: 'sender_not_assignee',
-              reason: `Terminal ${from} does not own Dispatch ${dispatch.id}.`
-            }
-          }
-          if (!authority.valid) {
-            const code = authority.code
-            const rejection =
-              db.convertLifecycleMessageToRejection(msg.id, code, authority.reason) ?? msg
-            runtime.notifyMessageArrived(rejection.to_handle, rejection.type)
-            return withSendWarnings({
-              message: rejection,
-              lifecycle: {
-                action: 'rejected',
-                code,
-                reason: authority.reason
+            if (!dispatch) {
+              authority = {
+                valid: !coordinatorMutation,
+                code: 'sender_not_assignee',
+                reason: 'No active Dispatch belongs to this message sender.'
               }
-            })
+            } else if (coordinatorMutation && taskId && taskId !== dispatch.task_id) {
+              authority = {
+                valid: false,
+                code: 'task_dispatch_mismatch',
+                reason: `Task ${taskId} does not belong to Dispatch ${dispatch.id}.`
+              }
+            } else if (capabilityBacked) {
+              const capabilityAuthority = db.verifyDispatchCapability({
+                dispatchId: dispatch.id,
+                capability: orchestrationCapability,
+                paneKey: senderPaneKey,
+                processIncarnation
+              })
+              authority = {
+                valid: capabilityAuthority.valid,
+                code: 'dispatch_capability_invalid',
+                reason: capabilityAuthority.valid ? '' : capabilityAuthority.reason
+              }
+            } else if (dispatch.process_incarnation) {
+              authority = {
+                valid: db.isDispatchProcessCurrent({
+                  dispatchId: dispatch.id,
+                  paneKey: senderPaneKey ?? null,
+                  processIncarnation: processIncarnation ?? null
+                }),
+                code: 'sender_not_assignee',
+                reason: `Dispatch ${dispatch.id} process incarnation is no longer current for its pane.`
+              }
+            } else {
+              authority = {
+                valid:
+                  !coordinatorMutation ||
+                  db.isDispatchMessageSender({
+                    dispatchId: dispatch.id,
+                    handle: from,
+                    paneKey: senderPaneKey
+                  }),
+                code: 'sender_not_assignee',
+                reason: `Terminal ${from} does not own Dispatch ${dispatch.id}.`
+              }
+            }
+            if (!authority.valid) {
+              const code = authority.code
+              const rejection =
+                db.convertLifecycleMessageToRejection(msg.id, code, authority.reason) ?? msg
+              const receipt = withSendWarnings({
+                message: rejection,
+                lifecycle: {
+                  action: 'rejected',
+                  code,
+                  reason: authority.reason
+                }
+              })
+              return recordReceiptForPostCommitNudge(recordMutationReceipt, receipt, () =>
+                runtime.notifyMessageArrived(rejection.to_handle, rejection.type)
+              )
+            }
           }
-        }
-        // Why: reconcile releases the dispatch lock before waking recipients, else a woken coordinator re-dispatches while the lock is still held.
-        if (msg.type === 'worker_done' || msg.type === 'heartbeat') {
-          const reconciled = reconcileLifecycleMessage(db, msg)
-          // Why: a suppressed message is already read, so skip the notify that would wake a check --wait waiter to an empty result.
-          if (reconciled.action === 'suppressed') {
-            return withSendWarnings({ message: msg })
+          if (msg.type === 'worker_done' || msg.type === 'heartbeat') {
+            const reconciled = reconcileLifecycleMessage(db, msg)
+            // Why: a suppressed message is already read, so skip waking a check waiter to an empty result.
+            if (reconciled.action === 'suppressed') {
+              return recordReceiptForPostCommitNudge(
+                recordMutationReceipt,
+                withSendWarnings({ message: msg }),
+                () => undefined
+              )
+            }
+            if (reconciled.action === 'rejected') {
+              const rejection = db.getMessageById(msg.id) ?? msg
+              const receipt = withSendWarnings({ message: rejection, lifecycle: reconciled })
+              return recordReceiptForPostCommitNudge(recordMutationReceipt, receipt, () =>
+                runtime.notifyMessageArrived(rejection.to_handle, rejection.type)
+              )
+            }
+            const receipt = withSendWarnings(
+              msg.type === 'worker_done'
+                ? { message: msg, lifecycle: reconciled }
+                : { message: msg }
+            )
+            return recordReceiptForPostCommitNudge(recordMutationReceipt, receipt, () =>
+              runtime.notifyMessageArrived(msg.to_handle, msg.type)
+            )
           }
-          if (reconciled.action === 'rejected') {
-            const rejection = db.getMessageById(msg.id) ?? msg
-            runtime.notifyMessageArrived(rejection.to_handle, rejection.type)
-            return withSendWarnings({ message: rejection, lifecycle: reconciled })
-          }
-          runtime.notifyMessageArrived(msg.to_handle, msg.type)
-          return withSendWarnings(
-            msg.type === 'worker_done' ? { message: msg, lifecycle: reconciled } : { message: msg }
+          const receipt = withSendWarnings({ message: msg })
+          return recordReceiptForPostCommitNudge(recordMutationReceipt, receipt, () =>
+            runtime.notifyMessageArrived(msg.to_handle, msg.type)
           )
         }
-        runtime.notifyMessageArrived(msg.to_handle, msg.type)
-        return withSendWarnings({ message: msg })
+        // Why: worker_done wakes the Run only after its mailbox row, settlement, and replay receipt commit together.
+        if (messageType === 'worker_done') {
+          markWorkerDoneMutationEffectFree?.()
+        }
+        const committed =
+          messageType === 'worker_done'
+            ? db.commitWorkerDoneMessageMutation(commitMessage)
+            : commitMessage()
+        committed.nudge()
+        return committed.receipt
       }
 
       // Why: fan out one message per recipient (independent read-tracking) but share a thread_id for correlation (Section 4.5).
@@ -893,11 +1004,11 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
         recipients: messages.length,
         ...(groupWarnings.length > 0 ? { warnings: groupWarnings } : {})
       }
-      recordMutationReceipt?.(receipt)
-      for (const message of messages) {
-        runtime.notifyMessageArrived(message.to_handle, message.type)
-      }
-      return receipt
+      return recordReceiptBeforeNudge(recordMutationReceipt, receipt, () => {
+        for (const message of messages) {
+          runtime.notifyMessageArrived(message.to_handle, message.type)
+        }
+      })
     }
   }),
 
@@ -1260,22 +1371,69 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
           }
         }
         await revalidateWorkerMailbox()
+        const deliveryRunId = workerMailbox.runId ?? ORCHESTRATION_LEGACY_RUN_ID
+        const acknowledged = params.ack
+          ? db.acknowledgeMailboxDelivery({
+              runId: deliveryRunId,
+              mailboxHandle: address,
+              consumerGeneration: 0,
+              deliveryId: params.ack
+            })
+          : undefined
         const showAll = params.all === true || (params.unread === false && params.peek !== true)
-        const messages = showAll
-          ? db.getAllMessagesForHandle(address, 100, typeFilter)
-          : db.getUnreadMessages(address, typeFilter)
-        if (!showAll && params.peek !== true && messages.length > 0) {
-          db.markAsRead(messages.map((message) => message.id))
-        }
-        if (messages.length > 0 || !params.wait) {
+        const readPeek = () => db.getUnreadMessages(address, typeFilter)
+        const readDelivery = (wakeTypes?: MessageType[]) =>
+          db.getOrCreateMailboxDelivery({
+            runId: deliveryRunId,
+            mailboxHandle: address,
+            consumerGeneration: 0,
+            wakeTypes
+          })
+        if (showAll) {
+          const messages = db.getAllMessagesForHandle(address, 100, typeFilter)
           return {
             ...(workerMailbox.runId ? { runId: workerMailbox.runId } : {}),
             dispatchId: workerMailbox.dispatchId,
             messages,
             count: messages.length,
+            acknowledged: acknowledged?.delivery.id ?? null,
             ...(params.format || params.inject
               ? { formatted: messages.map(formatMessageBanner).join('\n\n') }
               : {})
+          }
+        }
+        if (params.peek) {
+          const messages = readPeek()
+          if (messages.length > 0 || !params.wait) {
+            return {
+              ...(workerMailbox.runId ? { runId: workerMailbox.runId } : {}),
+              dispatchId: workerMailbox.dispatchId,
+              messages,
+              count: messages.length,
+              acknowledged: acknowledged?.delivery.id ?? null,
+              ...(params.format || params.inject
+                ? { formatted: messages.map(formatMessageBanner).join('\n\n') }
+                : {})
+            }
+          }
+        } else {
+          const current = readDelivery(params.wait ? typeFilter : undefined)
+          if (current || !params.wait) {
+            return {
+              ...(workerMailbox.runId ? { runId: workerMailbox.runId } : {}),
+              dispatchId: workerMailbox.dispatchId,
+              deliveryId: current?.delivery.id ?? null,
+              messages: current?.messages ?? [],
+              count: current?.messages.length ?? 0,
+              replayed: current?.replayed ?? false,
+              acknowledged: acknowledged?.delivery.id ?? null,
+              timedOut: false,
+              cancelled: false,
+              connectionLost: false,
+              ...(params.format || params.inject
+                ? { formatted: current?.messages.map(formatMessageBanner).join('\n\n') ?? '' }
+                : {})
+            }
           }
         }
         const waitResult = await runtime.waitForMessage(address, {
@@ -1290,20 +1448,36 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
             dispatchId: workerMailbox.dispatchId,
             messages: [],
             count: 0,
+            acknowledged: acknowledged?.delivery.id ?? null,
             timedOut: waitResult === 'timed_out',
             cancelled: waitResult === 'cancelled',
             connectionLost: waitResult === 'cancelled' && signal?.aborted === true
           }
         }
-        const arrived = db.getUnreadMessages(address, typeFilter)
-        db.markAsRead(arrived.map((message) => message.id))
+        if (params.peek) {
+          const arrived = readPeek()
+          return {
+            ...(workerMailbox.runId ? { runId: workerMailbox.runId } : {}),
+            dispatchId: workerMailbox.dispatchId,
+            messages: arrived,
+            count: arrived.length,
+            acknowledged: acknowledged?.delivery.id ?? null,
+            ...(params.format || params.inject
+              ? { formatted: arrived.map(formatMessageBanner).join('\n\n') }
+              : {})
+          }
+        }
+        const arrived = readDelivery(typeFilter)
         return {
           ...(workerMailbox.runId ? { runId: workerMailbox.runId } : {}),
           dispatchId: workerMailbox.dispatchId,
-          messages: arrived,
-          count: arrived.length,
+          deliveryId: arrived?.delivery.id ?? null,
+          messages: arrived?.messages ?? [],
+          count: arrived?.messages.length ?? 0,
+          replayed: arrived?.replayed ?? false,
+          acknowledged: acknowledged?.delivery.id ?? null,
           ...(params.format || params.inject
-            ? { formatted: arrived.map(formatMessageBanner).join('\n\n') }
+            ? { formatted: arrived?.messages.map(formatMessageBanner).join('\n\n') ?? '' }
             : {})
         }
       }
@@ -1380,8 +1554,19 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
     params: ReplyParams,
     handler: async (
       params,
-      { orchestrationCompatibilityEvidence, runtime, legacyCoordinatorRunId }
+      {
+        orchestrationCompatibilityEvidence,
+        runtime,
+        legacyCoordinatorRunId,
+        recordMutationReceipt,
+        replayedMutationReceipt
+      }
     ) => {
+      const replayNudge = readMutationReplayNudge(replayedMutationReceipt)
+      if (replayNudge) {
+        replayMutationNudge(runtime, replayNudge)
+        return stripMutationReplayNudge(replayedMutationReceipt)
+      }
       const db = runtime.getOrchestrationDb()
       const original = db.getMessageById(params.id)
       if (!original) {
@@ -1426,6 +1611,11 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
           body: params.body
         })
         const federated = db.getFederatedDispatch(question.dispatch_id)
+        const receipt = {
+          message: answered.message,
+          question: answered.question,
+          duplicate: answered.duplicate
+        }
         if (federated) {
           db.enqueueFederationRelay({
             dispatchId: question.dispatch_id,
@@ -1437,15 +1627,16 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
               body: params.body
             })
           })
-          runtime.ensureOrchestrationFederationRelay(run.id)
-        } else {
+          return recordReceiptBeforeNudge(
+            recordMutationReceipt,
+            receipt,
+            () => runtime.ensureOrchestrationFederationRelay(run.id),
+            { kind: 'federation', runId: run.id }
+          )
+        }
+        return recordReceiptBeforeNudge(recordMutationReceipt, receipt, () =>
           runtime.notifyMessageArrived(`dispatch:${question.dispatch_id}`, 'status')
-        }
-        return {
-          message: answered.message,
-          question: answered.question,
-          duplicate: answered.duplicate
-        }
+        )
       }
 
       db.markAsRead([original.id])
@@ -1459,8 +1650,10 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
         runId: original.run_id
       })
 
-      runtime.notifyMessageArrived(reply.to_handle, reply.type)
-      return { message: reply }
+      const receipt = { message: reply }
+      return recordReceiptBeforeNudge(recordMutationReceipt, receipt, () =>
+        runtime.notifyMessageArrived(reply.to_handle, reply.type)
+      )
     }
   }),
 
@@ -1587,7 +1780,8 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
         orchestrationCompatibilityEvidence,
         runtime,
         legacyCoordinatorRunId,
-        revalidateLegacyCoordinator
+        revalidateLegacyCoordinator,
+        orchestrationMutation
       }
     ) => {
       const db = runtime.getOrchestrationDb()
@@ -1694,9 +1888,15 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
       })
 
       let injected = false
+      let prompt
       if (params.inject) {
         try {
-          await runtime.sendTerminalAgentPrompt(to, preamble)
+          prompt = await runtime.sendTerminalAgentPrompt(to, preamble, {
+            // A delayed provider hook must not revoke an accepted Dispatch.
+            acceptQueued: true,
+            observationTimeoutMs: 0,
+            requestId: orchestrationMutation?.requestId ?? ctx.id
+          })
           injected = true
         } catch (err) {
           db.failDispatch(ctx.id, err instanceof Error ? err.message : String(err))
@@ -1706,9 +1906,14 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
 
       // Why: returnPreamble is opt-in because the preamble is several hundred bytes most callers don't need in the response.
       if (params.returnPreamble) {
-        return { dispatch: ctx, injected, preamble }
+        return {
+          dispatch: ctx,
+          injected,
+          preamble,
+          ...(prompt?.prompt ? { prompt: prompt.prompt } : {})
+        }
       }
-      return { dispatch: ctx, injected }
+      return { dispatch: ctx, injected, ...(prompt?.prompt ? { prompt: prompt.prompt } : {}) }
     }
   }),
 

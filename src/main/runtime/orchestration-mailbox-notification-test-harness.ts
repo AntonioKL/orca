@@ -81,7 +81,10 @@ export type MailboxCheckOptions = {
   signal?: AbortSignal
 }
 
-export function createRuntime(db: OrchestrationDb): MailboxNotificationHarness {
+export function createRuntime(
+  db: OrchestrationDb,
+  options: { connectionId?: string; isWsl?: boolean } = {}
+): MailboxNotificationHarness {
   const runtime = new OrcaRuntimeService(null, undefined, {
     attestAgentHookCompatibilityAuthority: ({ paneKey }) =>
       paneKey === PANE_KEY || paneKey.startsWith(`${SECOND_TAB_ID}:`)
@@ -95,12 +98,18 @@ export function createRuntime(db: OrchestrationDb): MailboxNotificationHarness {
     kill: vi.fn(),
     getForegroundProcess: async () => null
   })
-  runtime.registerPty(PTY_ID, WORKTREE_ID, null, {
-    tabId: TAB_ID,
-    leafId: LEAF_ID,
-    incarnationId: 'mailbox-incarnation',
-    agentLaunchAuthority: { launchToken: LAUNCH_TOKEN, launchAgent: 'codex' }
-  })
+  runtime.registerPty(
+    PTY_ID,
+    WORKTREE_ID,
+    options.connectionId ?? null,
+    {
+      tabId: TAB_ID,
+      leafId: LEAF_ID,
+      incarnationId: 'mailbox-incarnation',
+      agentLaunchAuthority: { launchToken: LAUNCH_TOKEN, launchAgent: 'codex' }
+    },
+    options.isWsl
+  )
   runtime.registerPreAllocatedHandleForPty(PTY_ID, TERMINAL_HANDLE)
   runtime.attachWindow(1)
   runtime.syncWindowGraph(1, {
@@ -190,9 +199,11 @@ export async function driveToLiveIdle(runtime: OrcaRuntimeService): Promise<void
 }
 
 export function pointerCount(write: ReturnType<typeof vi.fn>): number {
-  return write.mock.calls.filter(([, payload]) =>
-    String(payload).includes('orca orchestration check')
-  ).length
+  return write.mock.calls.filter(([, payload]) => isMailboxPointer(payload)).length
+}
+
+export function isMailboxPointer(payload: unknown): boolean {
+  return String(payload).includes(' orchestration check')
 }
 
 export async function checkBoundMailbox(

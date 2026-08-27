@@ -4,6 +4,7 @@ import {
   REMOTE_ATTACHMENT_PANE_KEY_MATCH_SUFFIX_SQL
 } from '../pane-key-match'
 import type { OrchestrationDb } from '../orchestration-db'
+import { potentiallyLiveRemoteAttachmentSql } from '../federation/remote-attachment-liveness'
 
 export function applySchemaMigrationsV13ToV30(this: OrchestrationDb, current: number): void {
   if (current < 13 && !this.hasColumn('worker_dispatches', 'runtime_epoch')) {
@@ -176,12 +177,71 @@ export function applySchemaMigrationsV13ToV30(this: OrchestrationDb, current: nu
         DROP INDEX IF EXISTS idx_remote_dispatch_attachments_active_pane_suffix;
         CREATE INDEX IF NOT EXISTS idx_remote_dispatch_attachments_active_pane
           ON remote_dispatch_attachments(pane_key)
-          WHERE state IN ('starting', 'ready', 'start_unknown', 'stopping', 'stop_unknown');
+          WHERE ${potentiallyLiveRemoteAttachmentSql()};
         CREATE INDEX IF NOT EXISTS idx_remote_dispatch_attachments_active_pane_suffix
           ON remote_dispatch_attachments(${REMOTE_ATTACHMENT_PANE_KEY_MATCH_SUFFIX_SQL})
-          WHERE state IN ('starting', 'ready', 'start_unknown', 'stopping', 'stop_unknown')
+          WHERE ${potentiallyLiveRemoteAttachmentSql()}
             AND pane_key IS NOT NULL;
       `)
+  }
+  if (current < 31) {
+    const dispatchColumns = [
+      ['retry_of_dispatch_id', 'TEXT'],
+      ['creator_dispatch_id', 'TEXT'],
+      ['creator_role', 'TEXT'],
+      ['endpoint_id', 'TEXT'],
+      ['endpoint_incarnation', 'TEXT'],
+      ['host_scope', 'TEXT'],
+      ['attachment_kind', 'TEXT'],
+      ['resource_id', 'TEXT']
+    ] as const
+    for (const [column, definition] of dispatchColumns) {
+      if (!this.hasColumn('dispatch_contexts', column)) {
+        this.db.exec(`ALTER TABLE dispatch_contexts ADD COLUMN ${column} ${definition}`)
+      }
+    }
+    for (const column of ['endpoint_id', 'endpoint_incarnation'] as const) {
+      if (!this.hasColumn('worker_terminal_resources', column)) {
+        this.db.exec(`ALTER TABLE worker_terminal_resources ADD COLUMN ${column} TEXT`)
+      }
+    }
+    // Resource IDs are already canonical; only backfill links where ownership
+    // proves the relationship. Legacy provenance remains null.
+    this.db.exec(`
+      UPDATE dispatch_contexts
+         SET resource_id = (
+           SELECT r.id FROM worker_terminal_resources r
+            WHERE r.owner_dispatch_id = dispatch_contexts.id
+         )
+       WHERE resource_id IS NULL
+         AND EXISTS (
+           SELECT 1 FROM worker_terminal_resources r
+            WHERE r.owner_dispatch_id = dispatch_contexts.id
+         );
+      UPDATE dispatch_contexts
+         SET endpoint_id = (
+           SELECT w.runtime_epoch FROM worker_dispatches w
+            WHERE w.dispatch_id = dispatch_contexts.id
+         )
+       WHERE endpoint_id IS NULL
+         AND EXISTS (
+           SELECT 1 FROM worker_dispatches w
+            WHERE w.dispatch_id = dispatch_contexts.id AND w.runtime_epoch IS NOT NULL
+         );
+      CREATE INDEX IF NOT EXISTS idx_dispatch_retry_of ON dispatch_contexts(retry_of_dispatch_id);
+      CREATE INDEX IF NOT EXISTS idx_dispatch_resource ON dispatch_contexts(resource_id);
+    `)
+  }
+  if (current < 32) {
+    const resourceColumns = [
+      ['recovery_attempt_count', 'INTEGER NOT NULL DEFAULT 0'],
+      ['last_recovery_at', 'TEXT']
+    ] as const
+    for (const [column, definition] of resourceColumns) {
+      if (!this.hasColumn('worker_terminal_resources', column)) {
+        this.db.exec(`ALTER TABLE worker_terminal_resources ADD COLUMN ${column} ${definition}`)
+      }
+    }
   }
   this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_dispatch_assignee_pane_leaf

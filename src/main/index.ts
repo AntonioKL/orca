@@ -2857,17 +2857,18 @@ void app.whenReady().then(async () => {
       return {
         environmentId: environment.id,
         name: environment.name,
-        peerFingerprint: fingerprintOrchestrationPeer(pairing.publicKeyB64)
+        peerFingerprint: fingerprintOrchestrationPeer(pairing.publicKeyB64),
+        pairingRevision: environment.pairingRevision ?? environment.createdAt
       }
     },
-    call: (selector, method, params, timeoutMs, envelope) =>
+    call: (selector, method, params, timeoutMs, envelope, expectedPairingRevision) =>
       callRuntimeEnvironment(
         app.getPath('userData'),
         selector,
         method,
         params,
         timeoutMs,
-        undefined,
+        expectedPairingRevision,
         envelope
       )
   }

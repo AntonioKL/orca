@@ -8,6 +8,7 @@ export type OrchestrationWorkerServer = {
   environmentId: string
   name: string
   peerFingerprint: string
+  pairingRevision?: number
 }
 
 export type OrchestrationEnvironmentTransport = {
@@ -17,7 +18,8 @@ export type OrchestrationEnvironmentTransport = {
     method: string,
     params: unknown,
     timeoutMs?: number,
-    envelope?: RuntimeOrchestrationEnvelope
+    envelope?: RuntimeOrchestrationEnvelope,
+    expectedEnvironmentPairingRevision?: number
   ): Promise<RuntimeRpcResponse<unknown>>
 }
 

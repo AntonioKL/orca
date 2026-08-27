@@ -30,10 +30,12 @@ describe('federated worker start receipt validation', () => {
     vi.spyOn(runtime, 'resolveOrchestrationWorkerServer').mockReturnValue({
       environmentId: 'environment_remote',
       name: 'remote',
-      peerFingerprint: 'remote_peer'
+      peerFingerprint: 'remote_peer',
+      pairingRevision: 73
     })
-    vi.spyOn(runtime, 'callOrchestrationWorkerServer').mockImplementation(
-      async (_environmentId, method, params) => {
+    const remoteCall = vi
+      .spyOn(runtime, 'callOrchestrationWorkerServer')
+      .mockImplementation(async (_environmentId, method, params) => {
         if (method === 'status.get') {
           return {
             capabilities: [
@@ -48,8 +50,7 @@ describe('federated worker start receipt validation', () => {
           worktreeId: 'worktree_remote',
           terminalHandle: 'term_remote'
         }
-      }
-    )
+      })
 
     const result = (await startFederatedWorker({
       params: {
@@ -80,5 +81,11 @@ describe('federated worker start receipt validation', () => {
       remote_worktree_id: null,
       remote_terminal_handle: null
     })
+    for (const call of remoteCall.mock.calls) {
+      expect(call[5]).toEqual({
+        ...(call[1] === 'orchestration.federationAttachStart' ? { contractVerified: true } : {}),
+        expectedEnvironmentPairingRevision: 73
+      })
+    }
   })
 })

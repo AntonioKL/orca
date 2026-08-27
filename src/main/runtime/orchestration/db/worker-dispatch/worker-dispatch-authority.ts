@@ -49,10 +49,13 @@ export function prepareStartingWorkerAuthority(
       )
     }
     const capability = `dcap_${randomBytes(32).toString('base64url')}`
+    const endpointId = this.getWorkerDispatch(params.dispatchId)?.runtime_epoch ?? null
     const contextUpdate = this.db
       .prepare(
         `UPDATE dispatch_contexts
          SET assignee_handle = ?, assignee_pane_key = ?, process_incarnation = ?,
+             endpoint_id = COALESCE(endpoint_id, ?), endpoint_incarnation = ?, host_scope = ?,
+             attachment_kind = 'local',
              capability_hash = ?, launch_token_hash = COALESCE(launch_token_hash, ?),
              capability_revoked_at = NULL
          WHERE id = ? AND status = 'pending'`
@@ -61,6 +64,9 @@ export function prepareStartingWorkerAuthority(
         params.handle,
         params.paneKey,
         params.processIncarnation,
+        endpointId,
+        params.processIncarnation,
+        params.hostScope ?? null,
         hashDispatchCapability(capability),
         params.launchTokenHash ?? null,
         params.dispatchId
@@ -109,6 +115,8 @@ export function prepareStartingWorkerAuthority(
           terminalHandle: params.handle,
           paneKey: params.paneKey,
           processIncarnation: params.processIncarnation,
+          endpointId,
+          endpointIncarnation: params.processIncarnation,
           hostScope: params.hostScope,
           ownership: 'owned'
         })
@@ -126,6 +134,8 @@ export function prepareStartingWorkerAuthority(
             terminalHandle: params.handle,
             paneKey: params.paneKey,
             processIncarnation: params.processIncarnation,
+            endpointId,
+            endpointIncarnation: params.processIncarnation,
             hostScope: params.hostScope ?? null
           })
         } else {
@@ -135,11 +145,23 @@ export function prepareStartingWorkerAuthority(
             terminalHandle: params.handle,
             paneKey: params.paneKey,
             processIncarnation: params.processIncarnation,
+            endpointId,
+            endpointIncarnation: params.processIncarnation,
             hostScope: params.hostScope,
             ownership: 'external'
           })
         }
       }
+    }
+    const resource = this.getWorkerTerminalResourceByOwner(params.dispatchId)
+    if (resource) {
+      this.db
+        .prepare(
+          `UPDATE dispatch_contexts
+              SET resource_id = ?, attachment_kind = 'local'
+            WHERE id = ?`
+        )
+        .run(resource.id, params.dispatchId)
     }
     this.db.exec('COMMIT')
     return capability

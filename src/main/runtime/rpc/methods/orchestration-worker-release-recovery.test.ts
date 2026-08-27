@@ -185,12 +185,33 @@ describe('orchestration worker release recovery', () => {
     ).resolves.toMatchObject({ state: 'release_unknown' })
     const read = (await call('orchestration.workerRead', { dispatch: dispatchId })) as {
       archived?: boolean
+      status: { terminal: string }
       terminal: { tail: string[] }
     }
     expect(read).toMatchObject({
       archived: true,
+      status: { terminal: 'unknown', liveness: 'unverifiable' },
       terminal: { tail: ['worker output line 1', 'worker output line 2'] }
     })
+  })
+
+  it('observes a still-releasing terminal before projecting archived output', async () => {
+    setup()
+    const { dispatchId } = await startSettledWorker()
+    vi.mocked(runtime.closeTerminal).mockRejectedValueOnce(new Error('Multiplexer disposed'))
+
+    await expect(
+      call('orchestration.workerRelease', { dispatch: dispatchId })
+    ).resolves.toMatchObject({ state: 'release_pending' })
+    expect(db.getWorkerTerminalResourceByOwner(dispatchId)?.release_state).toBe('releasing')
+
+    await expect(call('orchestration.workerRead', { dispatch: dispatchId })).resolves.toMatchObject(
+      {
+        archived: true,
+        status: { terminal: 'running', liveness: 'live' }
+      }
+    )
+    expect(runtime.showTerminal).toHaveBeenCalled()
   })
 
   it('never touches resources without requested releases', async () => {
@@ -201,24 +222,40 @@ describe('orchestration worker release recovery', () => {
     expect(runtime.closeTerminal).not.toHaveBeenCalled()
   })
 
-  it('coalesces overlapping reconciliation passes and closes each resource once', async () => {
+  it('records one recovery attempt when reconciliation joins an interactive release', async () => {
     setup()
     const { dispatchId } = await startSettledWorker()
-    expect(db.requestWorkerTerminalRelease(dispatchId).disposition).toBe('requested')
+    const resourceId = db.getWorkerTerminalResourceByOwner(dispatchId)?.id
+    expect(resourceId).toBeDefined()
     const pendingClose = deferred<Awaited<ReturnType<OrcaRuntimeService['closeTerminal']>>>()
     vi.mocked(runtime.closeTerminal).mockReturnValue(pendingClose.promise)
 
-    const first = reconcileRequestedWorkerTerminalReleases(runtime)
+    const interactive = call('orchestration.workerRelease', { dispatch: dispatchId })
     await vi.waitFor(() => expect(runtime.closeTerminal).toHaveBeenCalledTimes(1))
+    const first = reconcileRequestedWorkerTerminalReleases(runtime)
     const second = reconcileRequestedWorkerTerminalReleases(runtime)
     expect(second).toBe(first)
     pendingClose.resolve({ handle: 'term_worker', tabId: 'tab-worker', ptyKilled: true })
 
+    await expect(interactive).resolves.toMatchObject({ state: 'released' })
     await expect(Promise.all([first, second])).resolves.toEqual([
       expect.objectContaining({ attempted: 1, released: 1 }),
       expect.objectContaining({ attempted: 1, released: 1 })
     ])
     expect(runtime.closeTerminal).toHaveBeenCalledTimes(1)
+    expect(db.getWorkerTerminalResource(resourceId!)).toMatchObject({
+      recovery_attempt_count: 1,
+      last_recovery_at: expect.any(String)
+    })
+    expect(db.getLifecycleTransitionReceipts('worker', resourceId!)).toEqual([
+      expect.objectContaining({ kind: 'worker_terminal_recovery' })
+    ])
+
+    await expect(reconcileRequestedWorkerTerminalReleases(runtime)).resolves.toMatchObject({
+      attempted: 0
+    })
+    expect(db.getWorkerTerminalResource(resourceId!)?.recovery_attempt_count).toBe(1)
+    expect(db.getLifecycleTransitionReceipts('worker', resourceId!)).toHaveLength(1)
   })
 
   it('keeps live terminals bounded across 50 settled workers while controls survive', async () => {

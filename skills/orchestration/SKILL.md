@@ -1,17 +1,11 @@
 ---
 name: orchestration
 description: >-
-  Use Orca orchestration for structured multi-agent coordination: threaded
-  messages, blocking ask/reply flows, task dispatch, worker_done/escalation
-  waits, task DAGs, decision gates, coordinator loops, or decomposing work
-  across agents. Use `orca-cli` instead for full ownership handoffs, including
-  requests phrased as "hand off", "handoff", "handover", "give this to another
-  agent", or "another worktree" when the user did not explicitly ask to
-  supervise, monitor, wait for results, or coordinate a DAG. Use `orca-cli` for
-  ordinary terminal control, lightweight terminal prompts, shell commands, Orca
-  worktree management, reading or waiting on terminals, and automation of the
-  browser embedded inside Orca. Use Computer Use for browser windows, webviews,
-  Orca app UI, or desktop UI outside Orca's embedded browser.
+  Coordinate supervised Orca workers with durable Runs, Tasks, Dispatches,
+  messages, questions, gates, and completion tracking. Use when the user asks
+  to supervise, monitor, wait for results, coordinate a DAG, or manage blocking
+  agent-to-agent questions. For full ownership handoffs or ordinary terminal,
+  worktree, and built-in-browser control, use `orca-cli`.
 ---
 
 # Orca Orchestration
@@ -48,16 +42,16 @@ same way in POSIX shells, PowerShell, and cmd.exe.
 If the selected executable cannot run, report its exact error and stop. Do not fall through
 to another executable, which could silently target a different Orca build.
 
-## Load the full guide before running Orca commands
+## Load the version-matched guide before running Orca commands
 
 ```text
 ORCA skills get orchestration
 ```
 
-That prints the complete, version-matched guide for the exact binary that will handle your
-next commands — task creation and dispatch, injected lifecycle preambles, worker_done
-authority, decision gates, and coordinator loops. Read it first, then run the specific
-command you need.
+That prints the compact, version-matched guide for the exact binary that will handle your
+next commands. It covers the normal local coordinator loop. For a conditional action gate
+such as remote placement, uncertain release recovery, or expanded DAG work, run
+`ORCA skills get orchestration --full` and read the named bundled reference before acting.
 
 Don't guess subcommands or flags from memory or from a cached copy of this stub. They
 change between Orca releases, and this file deliberately no longer lists them. Confirm the

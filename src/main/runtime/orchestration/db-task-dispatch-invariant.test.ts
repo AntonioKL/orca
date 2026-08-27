@@ -26,6 +26,42 @@ afterEach(() => {
 })
 
 describe('Task/Dispatch invariant transactions', () => {
+  it.each(['failed', 'completed', 'blocked'] as const)(
+    'allows a dependency-blocked pending Task to become %s',
+    (status) => {
+      const { db } = createDatabase()
+      const dependency = db.createTask({ spec: 'unresolved dependency' })
+      const task = db.createTask({ spec: 'manual resolution', deps: [dependency.id] })
+      const dependent = db.createTask({ spec: 'downstream work', deps: [task.id] })
+
+      expect(task.status).toBe('pending')
+      const updated = db.updateTaskStatus(task.id, status, 'manual resolution')
+
+      expect(updated?.status).toBe(status)
+      expect(db.getTask(task.id)?.status).toBe(status)
+      expect(db.getTask(dependent.id)?.status).toBe(status === 'completed' ? 'ready' : 'pending')
+      expect(db.getLifecycleTransitionReceipts('task', task.id)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ from_state: 'pending', to_state: status })
+        ])
+      )
+    }
+  )
+
+  it('surfaces invalid Task lifecycle edges instead of returning the unchanged row', () => {
+    const { db } = createDatabase()
+    const task = db.createTask({ spec: 'invalid lifecycle edge' })
+    db.updateTaskStatus(task.id, 'blocked')
+
+    expect(() => db.updateTaskStatus(task.id, 'completed', 'must reject')).toThrowError(
+      expect.objectContaining({
+        code: 'lifecycle_conflict',
+        data: expect.objectContaining({ state: 'blocked', to: 'completed' })
+      })
+    )
+    expect(db.getTask(task.id)).toMatchObject({ status: 'blocked', result: null })
+  })
+
   it.each(['completed', 'failed'] as const)(
     'rolls back a %s Task when Dispatch settlement fails',
     (status) => {

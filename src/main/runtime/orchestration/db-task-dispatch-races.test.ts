@@ -26,6 +26,63 @@ afterEach(() => {
 })
 
 describe('Task/Dispatch concurrency', () => {
+  it('preserves the concurrent Task status winner before writer reservation', () => {
+    const first = createDatabase()
+    const concurrent = createDatabase(first.path)
+    const task = first.db.createTask({ spec: 'concurrent status winner' })
+    const sqlite = sqliteFor(first.db)
+    const exec = sqlite.exec.bind(sqlite)
+    let concurrentWon = false
+    vi.spyOn(sqlite, 'exec').mockImplementation((sql) => {
+      if (!concurrentWon && sql === 'BEGIN IMMEDIATE') {
+        concurrentWon = true
+        expect(
+          concurrent.db.updateTaskStatus(task.id, 'failed', 'concurrent winner')
+        ).toMatchObject({ status: 'failed' })
+      }
+      return exec(sql)
+    })
+
+    expect(() => first.db.updateTaskStatus(task.id, 'completed', 'stale loser')).toThrow(
+      `task ${task.id} cannot transition from failed to completed`
+    )
+    expect(concurrentWon).toBe(true)
+    expect(first.db.getTask(task.id)).toMatchObject({
+      status: 'failed',
+      result: 'concurrent winner'
+    })
+  })
+
+  it('holds the Task status writer reservation through its lifecycle reads', () => {
+    const first = createDatabase()
+    const concurrent = createDatabase(first.path)
+    const task = first.db.createTask({ spec: 'reserved status winner' })
+    const sqlite = sqliteFor(first.db)
+    const exec = sqlite.exec.bind(sqlite)
+    sqliteFor(concurrent.db).pragma('busy_timeout = 0')
+    let concurrentBlocked = false
+    vi.spyOn(sqlite, 'exec').mockImplementation((sql) => {
+      const result = exec(sql)
+      if (!concurrentBlocked && sql === 'BEGIN IMMEDIATE') {
+        concurrentBlocked = true
+        expect(() => concurrent.db.updateTaskStatus(task.id, 'failed', 'concurrent loser')).toThrow(
+          /database is locked/
+        )
+      }
+      return result
+    })
+
+    expect(first.db.updateTaskStatus(task.id, 'completed', 'reserved winner')).toMatchObject({
+      status: 'completed',
+      result: 'reserved winner'
+    })
+    expect(concurrentBlocked).toBe(true)
+    expect(concurrent.db.getTask(task.id)).toMatchObject({
+      status: 'completed',
+      result: 'reserved winner'
+    })
+  })
+
   it('rolls back Dispatch failure when Task requeue fails', () => {
     const { db } = createDatabase()
     const task = db.createTask({ spec: 'atomic retry failure' })
@@ -74,14 +131,10 @@ describe('Task/Dispatch concurrency', () => {
     })
     first.db.markWorkerDispatchReady(started.dispatch.id)
     const sqlite = sqliteFor(first.db)
-    const prepare = sqlite.prepare.bind(sqlite)
+    const exec = sqlite.exec.bind(sqlite)
     let completionWon = false
-    vi.spyOn(sqlite, 'prepare').mockImplementation((sql) => {
-      if (
-        !completionWon &&
-        sql.includes('UPDATE dispatch_contexts') &&
-        sql.includes('failure_count')
-      ) {
+    vi.spyOn(sqlite, 'exec').mockImplementation((sql) => {
+      if (!completionWon && sql === 'BEGIN IMMEDIATE') {
         completionWon = true
         expect(
           concurrent.db.settleWorkerReport({
@@ -92,7 +145,7 @@ describe('Task/Dispatch concurrency', () => {
           })
         ).toMatchObject({ action: 'settled', duplicate: false })
       }
-      return prepare(sql)
+      return exec(sql)
     })
 
     expect(
@@ -108,6 +161,11 @@ describe('Task/Dispatch concurrency', () => {
     })
     expect(first.db.getWorkerDispatch(started.dispatch.id)?.state).toBe('succeeded')
     expect(
+      first.db
+        .getLifecycleTransitionReceipts('dispatch', started.dispatch.id)
+        .map((receipt) => receipt.kind)
+    ).not.toContain('dispatch_failed')
+    expect(
       first.db.verifyDispatchCapability({
         dispatchId: started.dispatch.id,
         capability,
@@ -115,6 +173,29 @@ describe('Task/Dispatch concurrency', () => {
         processIncarnation: 'worker:1'
       })
     ).toMatchObject({ valid: false })
+  })
+
+  it('keeps nested dispatch failure atomic with its caller transaction', () => {
+    const { db } = createDatabase()
+    const task = db.createTask({ spec: 'nested atomic failure' })
+    const dispatch = createRootDispatch(db, task.id, 'term_worker')
+    const sqlite = sqliteFor(db)
+
+    sqlite.exec('BEGIN IMMEDIATE')
+    expect(db.failDispatch(dispatch.id, 'nested failure')).toMatchObject({ status: 'failed' })
+    expect(sqlite.isTransaction).toBe(true)
+    expect(db.getLifecycleTransitionReceipts('dispatch', dispatch.id)).toEqual([
+      expect.objectContaining({ kind: 'dispatch_failed' })
+    ])
+    sqlite.exec('ROLLBACK')
+
+    expect(db.getTask(task.id)?.status).toBe('dispatched')
+    expect(db.getDispatchContextById(dispatch.id)).toMatchObject({
+      status: 'dispatched',
+      failure_count: 0,
+      last_failure: null
+    })
+    expect(db.getLifecycleTransitionReceipts('dispatch', dispatch.id)).toEqual([])
   })
 
   it('serializes reminted-pane worker authority claims', () => {

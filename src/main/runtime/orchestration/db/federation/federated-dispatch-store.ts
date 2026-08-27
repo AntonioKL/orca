@@ -95,12 +95,27 @@ export function updateFederatedDispatchResources(
   return row
 }
 
+export function updateFederatedDispatchRuntimeEpoch(
+  this: OrchestrationDb,
+  dispatchId: string,
+  remoteRuntimeEpoch: string
+): void {
+  this.db
+    .prepare(
+      `UPDATE federated_dispatches
+       SET remote_runtime_epoch = ?, updated_at = datetime('now')
+       WHERE dispatch_id = ?`
+    )
+    .run(remoteRuntimeEpoch, dispatchId)
+}
+
 export type FederatedDispatchStoreMethods = {
   getFederatedDispatch: typeof getFederatedDispatch
   listActiveFederatedDispatches: typeof listActiveFederatedDispatches
   findNextTerminalFederatedDispatchPendingAcknowledgment: typeof findNextTerminalFederatedDispatchPendingAcknowledgment
   isFederatedDispatchRelayEligible: typeof isFederatedDispatchRelayEligible
   updateFederatedDispatchResources: typeof updateFederatedDispatchResources
+  updateFederatedDispatchRuntimeEpoch: typeof updateFederatedDispatchRuntimeEpoch
 }
 
 export function attachFederatedDispatchStore(ctor: { prototype: object }): void {
@@ -109,6 +124,7 @@ export function attachFederatedDispatchStore(ctor: { prototype: object }): void 
     listActiveFederatedDispatches,
     findNextTerminalFederatedDispatchPendingAcknowledgment,
     isFederatedDispatchRelayEligible,
-    updateFederatedDispatchResources
+    updateFederatedDispatchResources,
+    updateFederatedDispatchRuntimeEpoch
   })
 }

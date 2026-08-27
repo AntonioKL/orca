@@ -22,13 +22,26 @@ const POST_V6_COLUMNS = [
   ['legacy_adoptions', 'source_run_id'],
   ['legacy_compatibility_principals', 'id'],
   ['legacy_operation_receipts', 'principal_id'],
-  ['legacy_mail_receipts', 'principal_id']
+  ['legacy_mail_receipts', 'principal_id'],
+  ['worker_terminal_resources', 'recovery_attempt_count'],
+  ['worker_terminal_resources', 'last_recovery_at']
 ] as const
 
 const VERSIONED_POST_V6_COLUMNS = [
   { version: 27, table: 'federated_dispatches', column: 'to_home_acknowledged_sequence' },
   { version: 30, table: 'dispatch_contexts', column: 'depth' },
-  { version: 30, table: 'remote_dispatch_attachments', column: 'depth' }
+  { version: 30, table: 'remote_dispatch_attachments', column: 'depth' },
+  { version: 31, table: 'dispatch_contexts', column: 'retry_of_dispatch_id' },
+  { version: 31, table: 'dispatch_contexts', column: 'creator_dispatch_id' },
+  { version: 31, table: 'dispatch_contexts', column: 'creator_role' },
+  { version: 31, table: 'dispatch_contexts', column: 'endpoint_id' },
+  { version: 31, table: 'dispatch_contexts', column: 'endpoint_incarnation' },
+  { version: 31, table: 'dispatch_contexts', column: 'host_scope' },
+  { version: 31, table: 'dispatch_contexts', column: 'attachment_kind' },
+  { version: 31, table: 'dispatch_contexts', column: 'resource_id' },
+  { version: 31, table: 'worker_terminal_resources', column: 'endpoint_id' },
+  { version: 31, table: 'worker_terminal_resources', column: 'endpoint_incarnation' },
+  { version: 34, table: 'deliveries', column: 'mailbox_handle' }
 ] as const
 
 const POST_V6_INDEXES = [
@@ -48,6 +61,15 @@ const POST_V6_INDEXES = [
 function hasOrchestrationColumn(db: Database.Database, table: string, column: string): boolean {
   const rows = db.pragma(`table_info(${table})`) as { name: string }[]
   return rows.some((row) => row.name === column)
+}
+
+function hasNotNullOrchestrationColumn(
+  db: Database.Database,
+  table: string,
+  column: string
+): boolean {
+  const rows = db.pragma(`table_info(${table})`) as { name: string; notnull: number }[]
+  return rows.some((row) => row.name === column && row.notnull === 1)
 }
 
 function hasOrchestrationIndex(db: Database.Database, index: string): boolean {
@@ -95,6 +117,7 @@ function hasCompletePostV6Schema(db: Database.Database, storedVersion: number): 
       ({ version, table, column }) =>
         storedVersion < version || hasOrchestrationColumn(db, table, column)
     ) &&
+    (storedVersion < 34 || hasNotNullOrchestrationColumn(db, 'deliveries', 'mailbox_handle')) &&
     POST_V6_INDEXES.every((index) => hasOrchestrationIndex(db, index)) &&
     messagesAllowQuestions(db) &&
     hasConsistentLegacyAdoption(db)

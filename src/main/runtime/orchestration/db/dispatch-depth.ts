@@ -8,6 +8,7 @@ import { OrchestrationError } from '../orchestration-error'
 import { isEquivalentPaneKey } from './pane-key-match'
 import type { OrchestrationDb } from './orchestration-db'
 import type { DispatchContextRow, RemoteDispatchAttachmentRow } from '../types'
+import { potentiallyLiveRemoteAttachmentSql } from './federation/remote-attachment-liveness'
 
 /**
  * Who is creating a dispatch row, for nesting-depth purposes.
@@ -35,14 +36,6 @@ export type DispatchCreator =
  * never evidence of process death — see docs/reference/ssh-execution-boundary.md.
  * An `unverifiable` worker must still count as a nesting parent.
  */
-const POTENTIALLY_LIVE_ATTACHMENT_STATES = [
-  'starting',
-  'ready',
-  'start_unknown',
-  'stopping',
-  'stop_unknown'
-] as const
-
 export class AmbiguousDispatchParentError extends Error {
   constructor(message: string) {
     super(message)
@@ -82,6 +75,22 @@ export function resolveCreatorDepth(this: OrchestrationDb, creator: DispatchCrea
   return depths.length > 0 ? Math.max(...depths) : ROOT_DISPATCH_DEPTH
 }
 
+/** Proven creator Attempt identity; null when system-owned, absent, or ambiguous. */
+export function resolveCreatorDispatchId(
+  this: OrchestrationDb,
+  creator: DispatchCreator
+): string | null {
+  if (creator.kind === 'system') {
+    return null
+  }
+  const local = this.findActiveDispatchForAssignee(creator.handle, creator.paneKey)
+  const remote = findPotentiallyLiveAttachmentsForCreator.call(this, creator)
+  if ((local ? 1 : 0) + remote.length !== 1) {
+    return null
+  }
+  return local?.id ?? remote[0]?.dispatch_id ?? null
+}
+
 /**
  * Remote attachments matching this caller's pane AND exact process incarnation.
  *
@@ -97,18 +106,14 @@ function findPotentiallyLiveAttachmentsForCreator(
   if (!creator.paneKey || !creator.processIncarnation) {
     return []
   }
-  const placeholders = POTENTIALLY_LIVE_ATTACHMENT_STATES.map(() => '?').join(', ')
   const rows = this.db
     .prepare(
       `SELECT * FROM remote_dispatch_attachments
        WHERE process_incarnation = ?
          AND pane_key IS NOT NULL
-         AND state IN (${placeholders})`
+         AND ${potentiallyLiveRemoteAttachmentSql()}`
     )
-    .all(
-      creator.processIncarnation,
-      ...POTENTIALLY_LIVE_ATTACHMENT_STATES
-    ) as RemoteDispatchAttachmentRow[]
+    .all(creator.processIncarnation) as RemoteDispatchAttachmentRow[]
 
   const matches = rows.filter(
     (row) => row.pane_key !== null && isEquivalentPaneKey(row.pane_key, creator.paneKey as string)
@@ -148,9 +153,14 @@ export function resolveChildDispatchDepth(
 
 export type DispatchDepthMethods = {
   resolveCreatorDepth: typeof resolveCreatorDepth
+  resolveCreatorDispatchId: typeof resolveCreatorDispatchId
   resolveChildDispatchDepth: typeof resolveChildDispatchDepth
 }
 
 export function attachDispatchDepth(ctor: { prototype: object }): void {
-  Object.assign(ctor.prototype, { resolveCreatorDepth, resolveChildDispatchDepth })
+  Object.assign(ctor.prototype, {
+    resolveCreatorDepth,
+    resolveCreatorDispatchId,
+    resolveChildDispatchDepth
+  })
 }

@@ -1204,17 +1204,127 @@ class InMemoryOrchestrationMessages {
   }
 
   getUndeliveredUnreadMessages(toHandle: string, types?: MessageType[]): MessageRow[] {
-    return this.getUnreadMessages(toHandle, types).filter((message) => !message.delivered_at)
+    return this.getUnreadMessages(toHandle, types).filter(
+      (message) => !message.delivered_at && (message.pointer_enter_pending ?? 0) === 0
+    )
   }
 
   getUndeliveredUnreadMailboxHandles(): string[] {
     return [
       ...new Set(
         this.messages
-          .filter((message) => message.read === 0 && !message.delivered_at)
+          .filter(
+            (message) =>
+              message.read === 0 &&
+              !message.delivered_at &&
+              (message.pointer_enter_pending ?? 0) === 0
+          )
           .map((message) => message.to_handle)
       )
     ]
+  }
+
+  getPendingMailboxPointerMessages(toHandle: string): MessageRow[] {
+    return this.messages.filter(
+      (message) =>
+        message.to_handle === toHandle &&
+        message.read === 0 &&
+        (message.pointer_enter_pending ?? 0) > 0
+    )
+  }
+
+  getPendingMailboxPointerHandles(): string[] {
+    return [
+      ...new Set(
+        this.messages
+          .filter((message) => message.read === 0 && (message.pointer_enter_pending ?? 0) > 0)
+          .map((message) => message.to_handle)
+      )
+    ]
+  }
+
+  stageMailboxPointerEnter(
+    ids: string[],
+    target: { ptyId: string; processIncarnation: string }
+  ): boolean {
+    const stagedIds = new Set(ids)
+    let changed = 0
+    for (const message of this.messages) {
+      if (stagedIds.has(message.id) && message.read === 0) {
+        message.pointer_enter_pending = 1
+        message.pointer_pty_id = target.ptyId
+        message.pointer_process_incarnation = target.processIncarnation
+        changed += 1
+      }
+    }
+    return changed === ids.length
+  }
+
+  markMailboxPointerWriteAttempted(
+    ids: string[],
+    target: { ptyId: string; processIncarnation: string }
+  ): boolean {
+    return this.advanceMailboxPointerPhase(ids, target, 1, 2)
+  }
+
+  markMailboxPointerEnterAttempted(
+    ids: string[],
+    target: { ptyId: string; processIncarnation: string }
+  ): boolean {
+    return this.advanceMailboxPointerPhase(ids, target, 2, 3)
+  }
+
+  settleMailboxPointerEnter(
+    ids: string[],
+    target: { ptyId: string; processIncarnation: string },
+    expectedPhases: readonly number[]
+  ): void {
+    const settled = this.matchMailboxPointerEnter(ids, target, expectedPhases)
+    for (const message of this.messages) {
+      if (settled.has(message.id)) {
+        message.delivered_at ??= '1970-01-01 00:00:00'
+      }
+    }
+    this.clearMailboxPointerEnter(settled)
+  }
+
+  releaseMailboxPointerEnter(
+    ids: string[],
+    target: { ptyId: string; processIncarnation: string },
+    expectedPhases: readonly number[]
+  ): void {
+    const released = this.matchMailboxPointerEnter(ids, target, expectedPhases)
+    for (const message of this.messages) {
+      if (released.has(message.id) && message.read === 0) {
+        message.delivered_at = null
+      }
+    }
+    this.clearMailboxPointerEnter(released)
+  }
+
+  releasePendingMailboxPointerForPty(ptyId: string): void {
+    const reservedIds = new Set(
+      this.messages
+        .filter(
+          (message) => message.pointer_enter_pending === 1 && message.pointer_pty_id === ptyId
+        )
+        .map((message) => message.id)
+    )
+    const pendingIds = new Set(
+      this.messages
+        .filter(
+          (message) => (message.pointer_enter_pending ?? 0) > 0 && message.pointer_pty_id === ptyId
+        )
+        .map((message) => message.id)
+    )
+    for (const message of this.messages) {
+      if (reservedIds.has(message.id) && message.read === 0) {
+        message.delivered_at = null
+      } else if (pendingIds.has(message.id) && message.read === 0) {
+        message.delivered_at ??= '1970-01-01 00:00:00'
+      }
+    }
+    this.clearMailboxPointerEnter(pendingIds)
   }
 
   setActiveCoordinatorRun(run: { coordinator_handle: string } | null): void {
@@ -1296,6 +1406,7 @@ class InMemoryOrchestrationMessages {
         message.delivered_at = '1970-01-01 00:00:00'
       }
     }
+    this.clearMailboxPointerEnter(deliveredIds)
   }
 
   markAsUndelivered(ids: string[]): void {
@@ -1305,6 +1416,58 @@ class InMemoryOrchestrationMessages {
         message.delivered_at = null
       }
     }
+    this.clearMailboxPointerEnter(releasedIds)
+  }
+
+  private clearMailboxPointerEnter(ids: ReadonlySet<string>): void {
+    for (const message of this.messages) {
+      if (ids.has(message.id)) {
+        message.pointer_enter_pending = 0
+        message.pointer_pty_id = null
+        message.pointer_process_incarnation = null
+      }
+    }
+  }
+
+  private advanceMailboxPointerPhase(
+    ids: string[],
+    target: { ptyId: string; processIncarnation: string },
+    from: number,
+    to: number
+  ): boolean {
+    const selected = new Set(ids)
+    let changed = 0
+    for (const message of this.messages) {
+      if (
+        selected.has(message.id) &&
+        message.read === 0 &&
+        message.pointer_enter_pending === from &&
+        message.pointer_pty_id === target.ptyId &&
+        message.pointer_process_incarnation === target.processIncarnation
+      ) {
+        message.pointer_enter_pending = to
+        changed += 1
+      }
+    }
+    return changed === ids.length
+  }
+
+  private matchMailboxPointerEnter(
+    ids: string[],
+    target: { ptyId: string; processIncarnation: string },
+    expectedPhases: readonly number[]
+  ): Set<string> {
+    return new Set(
+      this.messages
+        .filter(
+          (message) =>
+            ids.includes(message.id) &&
+            expectedPhases.includes(message.pointer_enter_pending ?? 0) &&
+            message.pointer_pty_id === target.ptyId &&
+            message.pointer_process_incarnation === target.processIncarnation
+        )
+        .map((message) => message.id)
+    )
   }
 
   close(): void {}
@@ -21203,7 +21366,7 @@ describe('OrcaRuntimeService', () => {
       await vi.advanceTimersByTimeAsync(500)
 
       const firstInjections = write.mock.calls.filter(
-        (c) => typeof c[1] === 'string' && c[1].includes('orca orchestration check')
+        (c) => typeof c[1] === 'string' && c[1].includes('orchestration check')
       ).length
       expect(firstInjections).toBe(1)
 
@@ -21212,7 +21375,7 @@ describe('OrcaRuntimeService', () => {
       await vi.advanceTimersByTimeAsync(500)
 
       const totalInjections = write.mock.calls.filter(
-        (c) => typeof c[1] === 'string' && c[1].includes('orca orchestration check')
+        (c) => typeof c[1] === 'string' && c[1].includes('orchestration check')
       ).length
       expect(totalInjections).toBe(1)
       db.close()
@@ -36794,7 +36957,7 @@ describe('OrcaRuntimeService', () => {
       runtime.onPtyData('pty-1', '\x1b]0;Codex done\x07', 101)
       expect(write).toHaveBeenCalledWith(
         'pty-1',
-        '\nYou have 1 orchestration message. Run `orca orchestration check --run run_mailbox`.\n'
+        '\nYou have 1 orchestration message. Run `orca-dev orchestration check --run run_mailbox`.\n'
       )
       expect(write).not.toHaveBeenCalledWith(
         'pty-1',
@@ -36809,8 +36972,7 @@ describe('OrcaRuntimeService', () => {
       await vi.advanceTimersByTimeAsync(500)
       expect(
         write.mock.calls.filter(
-          ([, payload]) =>
-            typeof payload === 'string' && payload.includes('orca orchestration check')
+          ([, payload]) => typeof payload === 'string' && payload.includes('orchestration check')
         )
       ).toHaveLength(1)
       db.close()
@@ -36869,8 +37031,7 @@ describe('OrcaRuntimeService', () => {
 
       const pointers = () =>
         write.mock.calls.filter(
-          ([, payload]) =>
-            typeof payload === 'string' && payload.includes('orca orchestration check')
+          ([, payload]) => typeof payload === 'string' && payload.includes('orchestration check')
         )
       expect(pointers()).toHaveLength(1)
       expect(pointers()[0]?.[1]).toContain('You have 1 orchestration message')
@@ -37046,8 +37207,7 @@ describe('OrcaRuntimeService', () => {
 
       expect(
         write.mock.calls.filter(
-          ([, payload]) =>
-            typeof payload === 'string' && payload.includes('orca orchestration check')
+          ([, payload]) => typeof payload === 'string' && payload.includes('orchestration check')
         )
       ).toHaveLength(1)
       expect(pendingMailPointerRepoints(runtime)).toBe(0)
@@ -37159,7 +37319,7 @@ describe('OrcaRuntimeService', () => {
     await vi.waitFor(() => {
       expect(write).toHaveBeenCalledWith(
         'pty-1',
-        '\nYou have 1 orchestration message. Run `orca orchestration check --run run_codex_native_title`.\n'
+        '\nYou have 1 orchestration message. Run `orca-dev orchestration check --run run_codex_native_title`.\n'
       )
     })
     db.close()
@@ -37386,7 +37546,7 @@ describe('OrcaRuntimeService', () => {
         .map(([, data]) => data)
         .filter((data): data is string => typeof data === 'string')
       expect(payloads).toContain(
-        '\nYou have 1 orchestration message. Run `orca orchestration check --run run_test`.\n'
+        '\nYou have 1 orchestration message. Run `orca-dev orchestration check --run run_test`.\n'
       )
       expect(payloads.some((data) => data.includes('reserved completion'))).toBe(false)
       expect(status.delivered_at).toEqual(expect.any(String))
@@ -37757,7 +37917,7 @@ describe('OrcaRuntimeService', () => {
       await Promise.resolve()
 
       const pointerWrites = write.mock.calls.filter(
-        ([, payload]) => typeof payload === 'string' && payload.includes('orca orchestration check')
+        ([, payload]) => typeof payload === 'string' && payload.includes('orchestration check')
       )
       expect(pointerWrites).toHaveLength(1)
 
@@ -37768,8 +37928,7 @@ describe('OrcaRuntimeService', () => {
       await vi.advanceTimersByTimeAsync(2_000)
       expect(
         write.mock.calls.filter(
-          ([, payload]) =>
-            typeof payload === 'string' && payload.includes('orca orchestration check')
+          ([, payload]) => typeof payload === 'string' && payload.includes('orchestration check')
         )
       ).toHaveLength(1)
       db.close()
@@ -37810,8 +37969,7 @@ describe('OrcaRuntimeService', () => {
       await Promise.resolve()
       expect(
         write.mock.calls.filter(
-          ([, payload]) =>
-            typeof payload === 'string' && payload.includes('orca orchestration check')
+          ([, payload]) => typeof payload === 'string' && payload.includes('orchestration check')
         )
       ).toHaveLength(1)
       expect(second.delivered_at).toBeNull()
@@ -37824,8 +37982,7 @@ describe('OrcaRuntimeService', () => {
       expect(first.delivered_at).toEqual(expect.any(String))
       expect(
         write.mock.calls.filter(
-          ([, payload]) =>
-            typeof payload === 'string' && payload.includes('orca orchestration check')
+          ([, payload]) => typeof payload === 'string' && payload.includes('orchestration check')
         )
       ).toHaveLength(2)
       expect(write).toHaveBeenCalledWith(
@@ -44659,7 +44816,11 @@ describe('OrcaRuntimeService', () => {
         dispatchStatus: 'dispatched',
         taskTitle: 'coordinator-created work',
         displayName: 'coordinator-created work',
-        orchestrationRunId: runA.id
+        orchestrationRunId: runA.id,
+        attention: {
+          categories: ['unverifiable'],
+          requiresAction: true
+        }
       })
     } finally {
       db.close()
@@ -44694,6 +44855,7 @@ describe('OrcaRuntimeService', () => {
       const getTask = vi.spyOn(db, 'getTask')
       const getRun = vi.spyOn(db, 'getRun')
       const getActiveCoordinatorRun = vi.spyOn(db, 'getActiveCoordinatorRun')
+      const getWorkerAttentionFacts = vi.spyOn(db, 'getWorkerAttentionFacts')
       runtime.setOrchestrationDb(db)
       runtime.attachWindow(1)
 
@@ -44721,7 +44883,8 @@ describe('OrcaRuntimeService', () => {
         latestDispatch: getLatestDispatchForTerminal.mock.calls.length,
         task: getTask.mock.calls.length,
         run: getRun.mock.calls.length,
-        legacyCoordinator: getActiveCoordinatorRun.mock.calls.length
+        legacyCoordinator: getActiveCoordinatorRun.mock.calls.length,
+        attention: getWorkerAttentionFacts.mock.calls.length
       }
 
       db.completeDispatch(dispatch.id)
@@ -44732,7 +44895,8 @@ describe('OrcaRuntimeService', () => {
         getLatestDispatchForTerminal,
         getTask,
         getRun,
-        getActiveCoordinatorRun
+        getActiveCoordinatorRun,
+        getWorkerAttentionFacts
       ]) {
         query.mockClear()
       }
@@ -44743,7 +44907,8 @@ describe('OrcaRuntimeService', () => {
         latestDispatch: getLatestDispatchForTerminal.mock.calls.length,
         task: getTask.mock.calls.length,
         run: getRun.mock.calls.length,
-        legacyCoordinator: getActiveCoordinatorRun.mock.calls.length
+        legacyCoordinator: getActiveCoordinatorRun.mock.calls.length,
+        attention: getWorkerAttentionFacts.mock.calls.length
       }
       expect({
         active: {
@@ -44761,6 +44926,7 @@ describe('OrcaRuntimeService', () => {
           task: 1,
           run: 1,
           legacyCoordinator: 0,
+          attention: 0,
           total: 201
         },
         historical: {
@@ -44769,11 +44935,82 @@ describe('OrcaRuntimeService', () => {
           task: 0,
           run: 0,
           legacyCoordinator: 0,
+          attention: 0,
           total: 200
         }
       })
     } finally {
       vi.useRealTimers()
+      db.close()
+    }
+  })
+
+  it('batches attention queries across unchanged graph publishes', () => {
+    const runtime = new OrcaRuntimeService(store)
+    const terminals = Array.from({ length: 12 }, (_, index) => ({
+      tabId: `tab-attention-batch-${index}`,
+      leafId: `10000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+      ptyId: `pty-attention-batch-${index}`,
+      paneRuntimeId: index + 1
+    }))
+    const handles = terminals.map((terminal) => runtime.preAllocateHandleForPty(terminal.ptyId))
+    const db = new OrchestrationDb(':memory:')
+    try {
+      const run = db.createRun({
+        objective: 'bounded attention query oracle',
+        coordinatorHandle: 'term_attention_coordinator',
+        coordinatorPaneKey: makePaneKey(
+          'tab-attention-coordinator',
+          '20000000-0000-4000-8000-000000000000'
+        )
+      })
+      for (const [index, terminal] of terminals.entries()) {
+        const task = db.createTask({ spec: `worker ${index}`, runId: run.id })
+        createRootDispatch(
+          db,
+          task.id,
+          handles[index],
+          makePaneKey(terminal.tabId, terminal.leafId)
+        )
+      }
+      const getWorkerAttentionFacts = vi.spyOn(db, 'getWorkerAttentionFacts')
+      const prepare = vi.spyOn(db.db, 'prepare')
+      runtime.setOrchestrationDb(db)
+      runtime.attachWindow(1)
+      const graph = {
+        tabs: terminals.map((terminal) => ({
+          tabId: terminal.tabId,
+          worktreeId: TEST_WORKTREE_ID,
+          title: terminal.tabId,
+          activeLeafId: terminal.leafId,
+          layout: null
+        })),
+        leaves: terminals.map((terminal) => ({
+          tabId: terminal.tabId,
+          worktreeId: TEST_WORKTREE_ID,
+          leafId: terminal.leafId,
+          paneRuntimeId: terminal.paneRuntimeId,
+          ptyId: terminal.ptyId,
+          paneTitle: null
+        }))
+      }
+
+      runtime.syncWindowGraph(1, graph)
+      prepare.mockClear()
+      getWorkerAttentionFacts.mockClear()
+      const unchanged = runtime.syncWindowGraph(1, graph)
+
+      const attentionSql = prepare.mock.calls
+        .map(([sql]) => sql)
+        .filter(
+          (sql) =>
+            (sql.includes('AS pending_input') && sql.includes('json_each(?)')) ||
+            (sql.includes('attempt_observation_facts') && sql.includes('json_each(?)'))
+        )
+      expect(Object.keys(unchanged.agentOrchestrationByPaneKey ?? {})).toHaveLength(12)
+      expect(getWorkerAttentionFacts).not.toHaveBeenCalled()
+      expect(attentionSql).toHaveLength(2)
+    } finally {
       db.close()
     }
   })

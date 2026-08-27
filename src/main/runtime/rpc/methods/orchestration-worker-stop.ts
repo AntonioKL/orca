@@ -36,7 +36,9 @@ export const ORCHESTRATION_WORKER_STOP_METHODS: RpcMethod[] = [
             server.environmentId,
             'status.get',
             undefined,
-            30_000
+            30_000,
+            undefined,
+            { expectedEnvironmentPairingRevision: server.pairingRevision }
           )) as RuntimeStatus
           if (
             !status.capabilities?.includes(ORCHESTRATION_WORKER_STOP_VERDICT_RUNTIME_CAPABILITY)
@@ -55,7 +57,8 @@ export const ORCHESTRATION_WORKER_STOP_METHODS: RpcMethod[] = [
             'orchestration.federationStop',
             { dispatchId: params.dispatch },
             30_000,
-            { orchestrationRequestId: orchestrationMutation.requestId }
+            { orchestrationRequestId: orchestrationMutation.requestId },
+            { expectedEnvironmentPairingRevision: server.pairingRevision }
           )) as RemoteStopReceipt
           if (remote.state === 'stopped') {
             const worker = db.reconcileFederatedWorkerStop(params.dispatch)

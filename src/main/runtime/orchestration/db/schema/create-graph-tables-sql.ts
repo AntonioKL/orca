@@ -3,6 +3,7 @@ import {
   REMOTE_ATTACHMENT_PANE_KEY_MATCH_SUFFIX_SQL,
   RUN_PANE_KEY_MATCH_SUFFIX_SQL
 } from '../pane-key-match'
+import { potentiallyLiveRemoteAttachmentSql } from '../federation/remote-attachment-liveness'
 
 export function createGraphTablesSql(): string {
   return `
@@ -55,10 +56,10 @@ CREATE TABLE IF NOT EXISTS remote_dispatch_attachments (
 -- nesting parent. See docs/reference/ssh-execution-boundary.md.
 CREATE INDEX IF NOT EXISTS idx_remote_dispatch_attachments_active_pane
   ON remote_dispatch_attachments(pane_key)
-  WHERE state IN ('starting', 'ready', 'start_unknown', 'stopping', 'stop_unknown');
+  WHERE ${potentiallyLiveRemoteAttachmentSql()};
 CREATE INDEX IF NOT EXISTS idx_remote_dispatch_attachments_active_pane_suffix
   ON remote_dispatch_attachments(${REMOTE_ATTACHMENT_PANE_KEY_MATCH_SUFFIX_SQL})
-  WHERE state IN ('starting', 'ready', 'start_unknown', 'stopping', 'stop_unknown')
+  WHERE ${potentiallyLiveRemoteAttachmentSql()}
     AND pane_key IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS federation_relay_items (
@@ -128,6 +129,15 @@ CREATE TABLE IF NOT EXISTS dispatch_contexts (
   capability_hash     TEXT,
   process_incarnation TEXT,
   capability_revoked_at TEXT,
+  -- R1 identity facts; nullable when legacy provenance was never proven.
+  retry_of_dispatch_id TEXT,
+  creator_dispatch_id TEXT,
+  creator_role        TEXT,
+  endpoint_id         TEXT,
+  endpoint_incarnation TEXT,
+  host_scope          TEXT,
+  attachment_kind     TEXT,
+  resource_id         TEXT,
   status              TEXT NOT NULL DEFAULT 'pending'
     CHECK(status IN ('pending', 'dispatched', 'completed', 'failed', 'circuit_broken')),
   failure_count       INTEGER NOT NULL DEFAULT 0,
@@ -146,6 +156,30 @@ CREATE TABLE IF NOT EXISTS dispatch_contexts (
 CREATE INDEX IF NOT EXISTS idx_dispatch_task ON dispatch_contexts(task_id);
 CREATE INDEX IF NOT EXISTS idx_dispatch_status ON dispatch_contexts(status);
 CREATE INDEX IF NOT EXISTS idx_dispatch_assignee_handle ON dispatch_contexts(assignee_handle);
+
+-- Additive tables outlive v30 writers, so legacy parent deletes must clean their rows too.
+CREATE TRIGGER IF NOT EXISTS trg_tasks_delete_additive_lifecycle
+AFTER DELETE ON tasks
+BEGIN
+  DELETE FROM lifecycle_transition_receipts
+    WHERE entity = 'task' AND entity_id = OLD.id;
+  DELETE FROM attempt_observation_facts WHERE task_id = OLD.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_dispatches_delete_additive_lifecycle
+AFTER DELETE ON dispatch_contexts
+BEGIN
+  DELETE FROM lifecycle_transition_receipts
+    WHERE entity IN ('dispatch', 'worker') AND entity_id = OLD.id;
+  DELETE FROM attempt_observation_facts WHERE dispatch_id = OLD.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_workers_delete_additive_lifecycle
+AFTER DELETE ON worker_dispatches
+BEGIN
+  DELETE FROM lifecycle_transition_receipts
+    WHERE entity = 'worker' AND entity_id = OLD.dispatch_id;
+END;
 
 CREATE TABLE IF NOT EXISTS decision_gates (
   id            TEXT PRIMARY KEY,

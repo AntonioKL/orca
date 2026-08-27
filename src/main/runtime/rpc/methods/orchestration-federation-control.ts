@@ -1,13 +1,20 @@
 import { z } from 'zod'
 import { ORCHESTRATION_WORKER_READ_SOURCES } from '../../../../shared/orchestration-worker-output'
-import type { RuntimeTerminalInteractiveWait } from '../../../../shared/runtime-types'
-import type { OrcaRuntimeService } from '../../orca-runtime'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
 import type { RemoteDispatchAttachmentRow } from '../../orchestration/types'
 import { defineMethod, type RpcMethod } from '../core'
 import { OptionalFiniteNumber, requiredString } from '../schemas'
+import { mapWithConcurrency } from '../../../../shared/map-with-concurrency'
 import { readExactWorkerOutput } from './orchestration-worker-output'
 import { describeUnconfirmedAgentStop } from '../../../../shared/pty-liveness-verdict'
+import {
+  inspectRemoteAttachment,
+  requireHomeAttachment
+} from './orchestration-federation-attachment-observation'
+import {
+  readRemoteAttachmentArchive,
+  releaseRemoteAttachment
+} from './orchestration-federated-worker-release-host'
 
 const FederationDispatchParams = z.object({
   dispatchId: requiredString('Missing Dispatch ID')
@@ -21,8 +28,46 @@ const FederationOutputReadParams = FederationDispatchParams.extend({
   limit: OptionalFiniteNumber,
   source: z.enum(ORCHESTRATION_WORKER_READ_SOURCES).optional()
 })
+const FederationFleetSnapshotParams = z.object({
+  dispatchIds: z.array(requiredString('Missing Dispatch ID')).min(1).max(100)
+})
 
 export const ORCHESTRATION_FEDERATION_CONTROL_METHODS: RpcMethod[] = [
+  defineMethod({
+    name: 'orchestration.federationFleetSnapshot',
+    params: FederationFleetSnapshotParams,
+    handler: async (params, { runtime, authenticatedCallerFingerprint }) => {
+      const items = await mapWithConcurrency(params.dispatchIds, 16, async (dispatchId) => {
+        requireHomeAttachment(runtime, dispatchId, authenticatedCallerFingerprint)
+        const observation = await inspectRemoteAttachment(runtime, dispatchId)
+        return {
+          dispatchId,
+          observation: {
+            status:
+              observation.status === 'live' || observation.status === 'exited'
+                ? observation.status
+                : 'unverifiable',
+            exactWorker: observation.exact,
+            ...(observation.reason ? { reason: observation.reason } : {})
+          }
+        }
+      })
+      return { runtimeEpoch: runtime.getRuntimeId(), items }
+    }
+  }),
+  defineMethod({
+    name: 'orchestration.federationRelease',
+    params: FederationDispatchParams,
+    handler: async (params, { runtime, authenticatedCallerFingerprint }) => {
+      const attachment = requireHomeAttachment(
+        runtime,
+        params.dispatchId,
+        authenticatedCallerFingerprint
+      )
+      const observation = await inspectRemoteAttachment(runtime, params.dispatchId)
+      return releaseRemoteAttachment({ runtime, attachment, observation })
+    }
+  }),
   defineMethod({
     name: 'orchestration.federationShow',
     params: FederationDispatchParams,
@@ -81,6 +126,37 @@ export const ORCHESTRATION_FEDERATION_CONTROL_METHODS: RpcMethod[] = [
         params.dispatchId,
         authenticatedCallerFingerprint
       )
+      const storedArchive = runtime
+        .getOrchestrationDb()
+        .getWorkerTerminalArchive(attachment.dispatch_id)
+      if (storedArchive) {
+        const archivedObservation =
+          attachment.stage === 'released'
+            ? null
+            : await inspectRemoteAttachment(runtime, params.dispatchId)
+        const output = await readRemoteAttachmentArchive({
+          runtime,
+          attachment,
+          source: params.source,
+          cursor: params.cursor,
+          limit: params.limit,
+          liveness:
+            attachment.stage === 'released' || archivedObservation?.status === 'exited'
+              ? 'exited'
+              : archivedObservation?.exact && archivedObservation.terminal
+                ? archivedObservation.status === 'live'
+                  ? 'live'
+                  : 'unverifiable'
+                : 'unverifiable'
+        })
+        if (output) {
+          return {
+            dispatchId: params.dispatchId,
+            runtimeEpoch: runtime.getRuntimeId(),
+            output
+          }
+        }
+      }
       const observation = await inspectRemoteAttachment(runtime, params.dispatchId)
       if (!observation.exact || !observation.terminal) {
         throw new OrchestrationError(
@@ -193,67 +269,6 @@ export const ORCHESTRATION_FEDERATION_CONTROL_METHODS: RpcMethod[] = [
     }
   })
 ]
-
-function requireHomeAttachment(
-  runtime: OrcaRuntimeService,
-  dispatchId: string,
-  callerFingerprint: string | undefined
-): RemoteDispatchAttachmentRow {
-  const attachment = runtime.getOrchestrationDb().getRemoteDispatchAttachment(dispatchId)
-  if (!attachment || attachment.home_peer_fingerprint !== callerFingerprint) {
-    throw new OrchestrationError(
-      'dispatch_not_found',
-      `Remote Dispatch ${dispatchId} was not found for this Run home.`
-    )
-  }
-  return attachment
-}
-
-async function inspectRemoteAttachment(
-  runtime: OrcaRuntimeService,
-  dispatchId: string
-): Promise<{
-  terminal: Awaited<ReturnType<OrcaRuntimeService['showTerminal']>> | null
-  exact: boolean
-  status: 'unattached' | 'missing' | 'identity_changed' | 'live' | 'exited' | 'unverifiable'
-  /** Set with `unverifiable`; names what we lost contact with. */
-  reason?: string
-  /** Set only on a proven-exact attachment parked on a prompt that needs a human. */
-  agentWait?: RuntimeTerminalInteractiveWait | null
-}> {
-  const db = runtime.getOrchestrationDb()
-  const attachment = db.getRemoteDispatchAttachment(dispatchId)
-  if (!attachment?.terminal_handle) {
-    return { terminal: null, exact: false, status: 'unattached' }
-  }
-  const terminal = await runtime.showTerminal(attachment.terminal_handle).catch(() => null)
-  if (!terminal) {
-    return { terminal: null, exact: false, status: 'missing' }
-  }
-  const exact = db.isRemoteAttachmentProcessCurrent({
-    dispatchId,
-    paneKey: runtime.getTerminalPaneKey(attachment.terminal_handle),
-    processIncarnation: runtime.getTerminalProcessIncarnation(attachment.terminal_handle)
-  })
-  if (!exact) {
-    return { terminal, exact, status: 'identity_changed' }
-  }
-  // Why: the same rule as the local worker observation — the inventory only
-  // iterates registered providers, so a dropped relay clears `connected` for
-  // every remote PTY at once. Lost contact is not a death certificate.
-  // Why reused: showTerminal above already scanned this pane's tail for the same verdict.
-  const agentWait = terminal.agentWait
-  const verdict = runtime.getTerminalLivenessVerdict?.(attachment.terminal_handle) ?? null
-  if (verdict?.status === 'unverifiable') {
-    return { terminal, exact, status: 'unverifiable', reason: verdict.reason, agentWait }
-  }
-  return {
-    terminal,
-    exact,
-    status: verdict?.status !== 'live' && terminal.connected === false ? 'exited' : 'live',
-    agentWait
-  }
-}
 
 function exposeRemoteAttachment(attachment: RemoteDispatchAttachmentRow) {
   return {

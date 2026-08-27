@@ -26,10 +26,11 @@ describe('orchestration RPC methods', () => {
 
   it('registers all expected methods', () => {
     const registry = buildRegistry(ORCHESTRATION_METHODS)
-    expect(registry.size).toBe(39)
+    expect(registry.size).toBe(40)
     expect(registry.has('orchestration.workerRelease')).toBe(true)
     expect(registry.has('orchestration.workerRetain')).toBe(true)
     expect(registry.has('orchestration.workerList')).toBe(true)
+    expect(registry.has('orchestration.workerCleanup')).toBe(false)
     expect(registry.has('orchestration.workerTerminalUserInput')).toBe(true)
     expect(registry.has('orchestration.runCreate')).toBe(true)
     expect(registry.has('orchestration.runUse')).toBe(true)
@@ -57,6 +58,8 @@ describe('orchestration RPC methods', () => {
     expect(registry.has('orchestration.federationShow')).toBe(true)
     expect(registry.has('orchestration.federationRead')).toBe(true)
     expect(registry.has('orchestration.federationReadOutput')).toBe(true)
+    expect(registry.has('orchestration.federationFleetSnapshot')).toBe(true)
+    expect(registry.has('orchestration.federationRelease')).toBe(true)
     expect(registry.has('orchestration.federationStop')).toBe(true)
     expect(registry.has('orchestration.ask')).toBe(true)
     expect(registry.has('orchestration.run')).toBe(true)

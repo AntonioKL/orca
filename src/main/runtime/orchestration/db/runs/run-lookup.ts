@@ -153,8 +153,10 @@ export function requireRun(this: OrchestrationDb, runId: string): void {
 
 export function fenceOutstandingDelivery(this: OrchestrationDb, runId: string): void {
   this.db
-    .prepare("UPDATE deliveries SET status = 'fenced' WHERE run_id = ? AND status = 'outstanding'")
-    .run(runId)
+    .prepare(
+      "UPDATE deliveries SET status = 'fenced' WHERE mailbox_handle = ? AND status = 'outstanding'"
+    )
+    .run(`run:${runId}`)
 }
 
 export type RunLookupMethods = {

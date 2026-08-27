@@ -191,7 +191,9 @@ describe('legacy compatibility through RpcDispatcher', () => {
       launchTokenHash: createHash('sha256').update('worker-token').digest('hex'),
       processIncarnation: 'process-1'
     })
-    harness.db.updateTaskStatus(harness.taskId, 'ready')
+    // Recreate the pre-boundary state where A settled before a current attempt was persisted.
+    const sqlite = (harness.db as unknown as { db: Database.Database }).db
+    sqlite.prepare("UPDATE tasks SET status = 'ready' WHERE id = ?").run(harness.taskId)
     const currentDispatch = createRootDispatch(
       harness.db,
       harness.taskId,

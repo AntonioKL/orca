@@ -58,6 +58,7 @@ describe('OrchestrationDb reset scopes', () => {
 
   it('resetAll clears Runs, worker/federation state, and messages', () => {
     const state = createState()
+    expect(db!.getLifecycleTransitionReceipts('task', state.task.id)).not.toEqual([])
 
     db!.resetAll()
 
@@ -68,6 +69,7 @@ describe('OrchestrationDb reset scopes', () => {
     const sqlite = (db as unknown as { db: { prepare: (sql: string) => { all: () => unknown[] } } })
       .db
     expect(sqlite.prepare('SELECT * FROM run_coordinator_handles').all()).toEqual([])
+    expect(sqlite.prepare('SELECT * FROM lifecycle_transition_receipts').all()).toEqual([])
     // The ledger survives so a lost reset response cannot replay as a new mutation.
     expect(db!.getMutationReceipt('caller_1', 'request_1')).toBeDefined()
     expect(db!.getInbox()).toEqual([])
@@ -82,6 +84,7 @@ describe('OrchestrationDb reset scopes', () => {
 
   it('resetTasks preserves Runs and messages while clearing every worker attachment', () => {
     const state = createState()
+    expect(db!.getLifecycleTransitionReceipts('task', state.task.id)).not.toEqual([])
 
     db!.resetTasks()
 
@@ -91,6 +94,9 @@ describe('OrchestrationDb reset scopes', () => {
     expect(db!.getWorkerDispatch(state.started.dispatch.id)).toBeUndefined()
     expect(db!.getFederatedDispatch(state.started.dispatch.id)).toBeUndefined()
     expect(db!.getRemoteQuestion('question_1')).toBeUndefined()
+    const sqlite = (db as unknown as { db: { prepare: (sql: string) => { all: () => unknown[] } } })
+      .db
+    expect(sqlite.prepare('SELECT * FROM lifecycle_transition_receipts').all()).toEqual([])
     expect(db!.getMessageById(state.localQuestion.message.id)).toBeDefined()
     expect(db!.getQuestion(state.localQuestion.message.id)).toMatchObject({
       status: 'closed',

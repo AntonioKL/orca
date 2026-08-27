@@ -27,6 +27,11 @@ export type AgentStatusIpcPayload = ParsedAgentStatusPayload & {
   paneKey: string
   launchToken?: string
   terminalHandle?: string
+  /** Runtime process identity, when the ingress can attest the PTY incarnation. */
+  processIncarnation?: string
+  /** Execution endpoint identity for federated/remote status rows. */
+  endpointId?: string
+  endpointIncarnation?: string
   tabId?: string
   worktreeId?: string
   /** Identifies the SSH connection the event arrived on, or null for local.

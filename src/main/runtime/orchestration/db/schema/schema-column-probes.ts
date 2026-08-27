@@ -6,11 +6,24 @@ export function hasColumn(this: OrchestrationDb, table: string, column: string):
 }
 
 export function createMailboxDeliveryIndexesIfPossible(this: OrchestrationDb): void {
+  if (this.hasColumn('deliveries', 'mailbox_handle')) {
+    this.db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_deliveries_one_outstanding
+        ON deliveries(mailbox_handle) WHERE status = 'outstanding';
+    `)
+  }
   const hasDeliveredAt = this.hasColumn('messages', 'delivered_at')
   if (hasDeliveredAt) {
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_messages_undelivered_inbox
         ON messages(to_handle, read, delivered_at, sequence)
+    `)
+  }
+  if (this.hasColumn('messages', 'pointer_enter_pending')) {
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_messages_pending_pointer_enter
+        ON messages(to_handle, sequence)
+        WHERE read = 0 AND pointer_enter_pending = 1;
     `)
   }
 

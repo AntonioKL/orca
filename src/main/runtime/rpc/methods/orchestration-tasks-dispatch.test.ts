@@ -347,7 +347,12 @@ describe('orchestration RPC methods', () => {
 
       expect(send).toHaveBeenCalledWith(
         'term_a',
-        expect.stringContaining('orca-dev orchestration send')
+        expect.stringContaining('orca-dev orchestration send'),
+        expect.objectContaining({
+          acceptQueued: true,
+          observationTimeoutMs: 0,
+          requestId: expect.any(String)
+        })
       )
     })
 
@@ -388,7 +393,12 @@ describe('orchestration RPC methods', () => {
 
       expect(agentPrompt).toHaveBeenCalledWith(
         'term_a',
-        expect.stringContaining('line one\nline two')
+        expect.stringContaining('line one\nline two'),
+        expect.objectContaining({
+          acceptQueued: true,
+          observationTimeoutMs: 0,
+          requestId: expect.any(String)
+        })
       )
       expect(rawSend).not.toHaveBeenCalled()
     })

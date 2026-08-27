@@ -6,6 +6,7 @@ import Database from '../../sqlite/sync-database'
 import { LEGACY_CONTRACT_VERSION, LEGACY_RUN_ID, OrchestrationDb } from './db'
 import { resolveOrchestrationMigrationStartVersion } from './orchestration-schema-version-skew'
 import { createRootDispatch } from './db/root-dispatch-test-fixture'
+import { SCHEMA_VERSION } from './db/contract-constants'
 
 describe('OrchestrationDb version-skew migration', () => {
   let db: OrchestrationDb | undefined
@@ -189,5 +190,219 @@ describe('OrchestrationDb version-skew migration', () => {
     expect(raw.pragma('user_version', { simple: true })).toBe(20)
 
     raw.close()
+  })
+
+  it('repairs recovery columns missing from a partially-upgraded v32 schema', () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'orca-db-version-skew-v32-'))
+    const dbPath = join(tempDir, 'orchestration.db')
+    db = new OrchestrationDb(dbPath)
+    db.close()
+    db = undefined
+
+    const raw = new Database(dbPath)
+    raw.exec(
+      'ALTER TABLE worker_terminal_resources DROP COLUMN recovery_attempt_count; ALTER TABLE worker_terminal_resources DROP COLUMN last_recovery_at;'
+    )
+    raw.pragma('user_version = 32')
+    expect(resolveOrchestrationMigrationStartVersion(raw, 32, 32)).toBe(6)
+    raw.close()
+
+    db = new OrchestrationDb(dbPath)
+    expect(db.db.pragma('user_version', { simple: true })).toBe(SCHEMA_VERSION)
+    expect(db.db.pragma('table_info(worker_terminal_resources)')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'recovery_attempt_count' }),
+        expect.objectContaining({ name: 'last_recovery_at' })
+      ])
+    )
+    expect(db.db.pragma('table_info(messages)')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'pointer_enter_pending' }),
+        expect.objectContaining({ name: 'pointer_pty_id' }),
+        expect.objectContaining({ name: 'pointer_process_incarnation' })
+      ])
+    )
+    expect(
+      db.db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_messages_pending_pointer_enter'"
+        )
+        .get()
+    ).toBeDefined()
+  })
+
+  it('creates fresh delivery mailboxes with a non-null schema invariant', () => {
+    db = new OrchestrationDb(':memory:')
+
+    expect(db.db.pragma('table_info(deliveries)')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'mailbox_handle', type: 'TEXT', notnull: 1 })
+      ])
+    )
+  })
+
+  it('repairs a nullable mailbox column written by an incomplete v34 schema', () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'orca-db-version-skew-v34-delivery-'))
+    const dbPath = join(tempDir, 'orchestration.db')
+    db = new OrchestrationDb(dbPath)
+    db.close()
+    db = undefined
+
+    const raw = new Database(dbPath)
+    raw.exec(`
+      DROP INDEX idx_deliveries_one_outstanding;
+      ALTER TABLE deliveries DROP COLUMN mailbox_handle;
+      ALTER TABLE deliveries ADD COLUMN mailbox_handle TEXT;
+      CREATE UNIQUE INDEX idx_deliveries_one_outstanding
+        ON deliveries(mailbox_handle) WHERE status = 'outstanding';
+    `)
+    raw.pragma('user_version = 34')
+    expect(resolveOrchestrationMigrationStartVersion(raw, 34, SCHEMA_VERSION)).toBe(6)
+    raw.close()
+
+    db = new OrchestrationDb(dbPath)
+    expect(db.db.pragma('table_info(deliveries)')).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'mailbox_handle', notnull: 1 })])
+    )
+  })
+
+  it('backfills stable mailbox addresses for v33 Run deliveries', () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'orca-db-version-skew-v33-delivery-'))
+    const dbPath = join(tempDir, 'orchestration.db')
+    db = new OrchestrationDb(dbPath)
+    const run = db.createRun({
+      objective: 'v33 Delivery',
+      coordinatorHandle: 'term_v33',
+      coordinatorPaneKey: 'tab_v33:leaf_v33'
+    })
+    db.insertMessage({ from: 'term_worker', to: `run:${run.id}`, subject: 'queued', runId: run.id })
+    const deliveryId = db.getOrCreateRunDelivery({
+      runId: run.id,
+      consumerGeneration: run.consumer_generation
+    })!.delivery.id
+    const originalMessageIds = db.getDeliveryRaw(deliveryId)!.message_ids
+    db.close()
+    db = undefined
+
+    const raw = new Database(dbPath)
+    raw.exec(`
+      DROP INDEX idx_deliveries_one_outstanding;
+      ALTER TABLE deliveries DROP COLUMN mailbox_handle;
+      UPDATE deliveries
+      SET status = 'acknowledged',
+          created_at = '2026-01-02 03:04:05',
+          acknowledged_at = '2026-01-02 04:05:06'
+      WHERE id = '${deliveryId}';
+      INSERT INTO deliveries (
+        id, run_id, consumer_generation, message_ids, status, created_at, acknowledged_at
+      ) VALUES
+        ('delivery_v33_outstanding', '${run.id}', ${run.consumer_generation}, '["msg_outstanding"]', 'outstanding', '2026-02-03 04:05:06', NULL),
+        ('delivery_v33_fenced', '${run.id}', ${run.consumer_generation}, '["msg_fenced"]', 'fenced', '2026-03-04 05:06:07', NULL);
+    `)
+    raw.pragma('user_version = 33')
+    raw.close()
+
+    db = new OrchestrationDb(dbPath)
+    expect(db.db.pragma('table_info(deliveries)')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'mailbox_handle', type: 'TEXT', notnull: 1 })
+      ])
+    )
+    const migratedDeliveries = db.db
+      .prepare(
+        `SELECT id, run_id, mailbox_handle, consumer_generation, message_ids,
+                status, created_at, acknowledged_at
+         FROM deliveries`
+      )
+      .all()
+    expect(migratedDeliveries).toHaveLength(3)
+    expect(migratedDeliveries).toEqual(
+      expect.arrayContaining([
+        {
+          id: deliveryId,
+          run_id: run.id,
+          mailbox_handle: `run:${run.id}`,
+          consumer_generation: run.consumer_generation,
+          message_ids: originalMessageIds,
+          status: 'acknowledged',
+          created_at: '2026-01-02 03:04:05',
+          acknowledged_at: '2026-01-02 04:05:06'
+        },
+        {
+          id: 'delivery_v33_fenced',
+          run_id: run.id,
+          mailbox_handle: `run:${run.id}`,
+          consumer_generation: run.consumer_generation,
+          message_ids: '["msg_fenced"]',
+          status: 'fenced',
+          created_at: '2026-03-04 05:06:07',
+          acknowledged_at: null
+        },
+        {
+          id: 'delivery_v33_outstanding',
+          run_id: run.id,
+          mailbox_handle: `run:${run.id}`,
+          consumer_generation: run.consumer_generation,
+          message_ids: '["msg_outstanding"]',
+          status: 'outstanding',
+          created_at: '2026-02-03 04:05:06',
+          acknowledged_at: null
+        }
+      ])
+    )
+    const deliveryIndexes = db.db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'deliveries'")
+      .all() as { name: string }[]
+    expect(deliveryIndexes.map(({ name }) => name)).toEqual(
+      expect.arrayContaining(['idx_deliveries_one_outstanding', 'idx_deliveries_run_created'])
+    )
+    expect(() =>
+      db!.db
+        .prepare(
+          `INSERT INTO deliveries (
+             id, run_id, mailbox_handle, consumer_generation, message_ids
+           ) VALUES (?, ?, ?, ?, '[]')`
+        )
+        .run('delivery_v34_duplicate', run.id, `run:${run.id}`, run.consumer_generation)
+    ).toThrow(/UNIQUE constraint failed/)
+  })
+
+  it('cleans additive lifecycle rows when a v30 writer resets tasks before re-upgrade', () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'orca-db-version-skew-v30-reset-'))
+    const dbPath = join(tempDir, 'orchestration.db')
+    db = new OrchestrationDb(dbPath)
+    const task = db.createTask({ spec: 'reset by an older writer' })
+    const started = db.createStartingWorkerDispatch({
+      creator: { kind: 'system' },
+      maxDepth: Number.MAX_SAFE_INTEGER,
+      taskId: task.id,
+      startOptions: {}
+    })
+    db.recordAttemptObservation({
+      id: 'observation_before_v30_reset',
+      dispatchId: started.dispatch.id,
+      sequence: 0,
+      authorityId: 'home',
+      authorityClock: 'home',
+      facet: 'process_turn',
+      payload: { process: 'running', turn: 'working' },
+      homeReceivedAt: 1
+    })
+    db.close()
+    db = undefined
+
+    const raw = new Database(dbPath)
+    // v30 resetTasks predates both additive tables, so it only deletes their legacy parents.
+    raw.exec(`
+      DELETE FROM worker_dispatches;
+      DELETE FROM dispatch_contexts;
+      DELETE FROM tasks;
+    `)
+    raw.pragma('user_version = 30')
+    raw.close()
+
+    db = new OrchestrationDb(dbPath)
+    expect(db.db.prepare('SELECT * FROM lifecycle_transition_receipts').all()).toEqual([])
+    expect(db.db.prepare('SELECT * FROM attempt_observation_facts').all()).toEqual([])
   })
 })

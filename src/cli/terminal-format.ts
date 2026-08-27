@@ -188,7 +188,38 @@ export function formatTerminalSend(result: { send: RuntimeTerminalSend }): strin
       return copy
     }
   }
-  return `Sent ${result.send.bytesWritten} bytes to ${result.send.handle}.`
+  if (!result.send.accepted) {
+    const reason = result.send.refusedReason ? `: ${result.send.refusedReason}` : ''
+    return `Input refused by ${result.send.handle}${reason}.`
+  }
+  const prompt = result.send.prompt
+  if (!prompt) {
+    return `Sent ${result.send.bytesWritten} bytes to ${result.send.handle}.`
+  }
+  const warning = formatTerminalPromptObservationWarning(prompt)
+  return [
+    `Prompt ${prompt.requestId} on ${result.send.handle}: ${prompt.stages.join(' -> ')}.`,
+    `provider: ${prompt.provider}`,
+    `delivery observation: ${prompt.observation}`,
+    ...(warning ? [`warning: ${warning}`] : [])
+  ].join('\n')
+}
+
+function formatTerminalPromptObservationWarning(
+  prompt: NonNullable<RuntimeTerminalSend['prompt']>
+): string | null {
+  if (prompt.observation === 'permission') {
+    return `delivery was not observed because the provider requires permission. Resolve the permission prompt in the terminal, then reissue the exact command with --retry-request ${prompt.requestId} and --wait-submit <seconds>.`
+  }
+  if (prompt.observation === 'incarnation_replaced') {
+    return 'delivery was not observed because the terminal process was replaced. Inspect the current terminal before sending a new prompt; do not retry with this request ID.'
+  }
+  if (prompt.observation === 'unsupported') {
+    return prompt.provider === 'old-host'
+      ? 'this host predates durable prompt receipts. Update Orca on the execution host, and inspect the terminal before retrying an ambiguous send.'
+      : 'input was accepted, but this provider cannot report delivery. Inspect the terminal before retrying.'
+  }
+  return null
 }
 
 export function formatTerminalRename(result: { rename: RuntimeTerminalRename }): string {

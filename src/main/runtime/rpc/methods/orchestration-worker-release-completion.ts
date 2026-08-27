@@ -1,18 +1,24 @@
 import type { OrchestrationDb } from '../../orchestration/db'
 import type {
-  WorkerTerminalArchiveRow,
   WorkerTerminalArchiveStatus,
   WorkerTerminalResourceRow,
   WorkerTerminalRetainedReason
 } from '../../orchestration/worker-terminal-ownership'
 import {
   captureWorkerOutputArchive,
-  type WorkerTerminalTailArchive
+  summarizeWorkerOutputArchive
 } from '../../orchestration/worker-output-archive'
 import type { OrcaRuntimeService } from '../../orca-runtime'
 import { describeUnconfirmedAgentStop } from '../../../../shared/pty-liveness-verdict'
 import { inspectWorkerTerminal } from './orchestration-worker-observation'
 import { orchestrationTimestampToMs } from './orchestration-worker-output'
+import { archiveSummary } from './orchestration-worker-terminal-resource-presentation'
+import { classifyWorkerTerminalCloseError } from './orchestration-worker-release-close-error'
+
+export {
+  archiveSummary,
+  exposeWorkerTerminalResource
+} from './orchestration-worker-terminal-resource-presentation'
 
 export type WorkerReleaseReceipt = {
   dispatchId: string
@@ -32,52 +38,15 @@ type WorkerTerminalReleaseArgs = {
   mode?: 'interactive' | 'recovery'
 }
 
+type ActiveWorkerTerminalRelease = {
+  promise: Promise<WorkerReleaseReceipt>
+  recoveryRequested: boolean
+}
+
 const activeReleaseByRuntime = new WeakMap<
   OrcaRuntimeService,
-  Map<string, Promise<WorkerReleaseReceipt>>
+  Map<string, ActiveWorkerTerminalRelease>
 >()
-
-export function exposeWorkerTerminalResource(resource: WorkerTerminalResourceRow): {
-  id: string
-  ownershipState: string
-  releaseState: string
-  retainedReason: string | null
-  terminalHandle: string
-  worktreeId: string | null
-  originDispatchId: string
-  ownerDispatchId: string
-  releaseRequestedAt: string | null
-  releaseCompletedAt: string | null
-  releaseError: string | null
-  archive: { source: string | null; status: string | null }
-} {
-  return {
-    id: resource.id,
-    ownershipState: resource.ownership_state,
-    releaseState: resource.release_state,
-    retainedReason: resource.retained_reason,
-    terminalHandle: resource.terminal_handle,
-    worktreeId: resource.worktree_id,
-    originDispatchId: resource.origin_dispatch_id,
-    ownerDispatchId: resource.owner_dispatch_id,
-    releaseRequestedAt: resource.release_requested_at,
-    releaseCompletedAt: resource.release_completed_at,
-    releaseError: resource.release_error,
-    archive: { source: resource.archive_source, status: resource.archive_status }
-  }
-}
-
-export function archiveSummary(
-  resource: WorkerTerminalResourceRow | null
-): { source: string | null; status: string | null } | null {
-  if (!resource) {
-    return null
-  }
-  if (!resource.archive_source && !resource.archive_status) {
-    return null
-  }
-  return { source: resource.archive_source, status: resource.archive_status }
-}
 
 // Completes a durably requested release: re-prove exact identity, freeze output, close only the
 // exact agent terminal, settle. Shared between the RPC method and the startup reconciler.
@@ -91,14 +60,35 @@ export function completeWorkerTerminalRelease(
   }
   const active = activeByResource.get(args.resource.id)
   if (active) {
-    return active
+    active.recoveryRequested ||= args.mode === 'recovery'
+    return active.promise
   }
-  const release = completeWorkerTerminalReleaseOnce(args).finally(() => {
-    if (activeByResource?.get(args.resource.id) === release) {
-      activeByResource.delete(args.resource.id)
-    }
-  })
-  activeByResource.set(args.resource.id, release)
+  const activeRelease = {
+    recoveryRequested: args.mode === 'recovery'
+  } as ActiveWorkerTerminalRelease
+  const release = completeWorkerTerminalReleaseOnce(args)
+    .then((receipt) => {
+      if (activeRelease.recoveryRequested) {
+        args.db.recordWorkerTerminalRecoveryAttempt(
+          args.resource.id,
+          receipt.state === 'released' || receipt.state === 'already_released'
+            ? 'released'
+            : receipt.state === 'release_pending'
+              ? 'pending'
+              : receipt.state === 'release_unknown'
+                ? 'unknown'
+                : 'retained'
+        )
+      }
+      return receipt
+    })
+    .finally(() => {
+      if (activeByResource?.get(args.resource.id) === activeRelease) {
+        activeByResource.delete(args.resource.id)
+      }
+    })
+  activeRelease.promise = release
+  activeByResource.set(args.resource.id, activeRelease)
   return release
 }
 
@@ -162,7 +152,7 @@ async function completeWorkerTerminalReleaseOnce(
       processAction: 'none',
       archive: archiveSummary(unknown),
       lastError: unknown.release_error ?? undefined,
-      recovery: `Inspect with: orca orchestration worker-show --dispatch ${dispatchId} --json — then repeat worker-release with the same --retry-request. Never substitute a broad terminal close.`
+      recovery: releaseUnknownRecovery(dispatchId)
     }
   }
 
@@ -181,7 +171,7 @@ async function completeWorkerTerminalReleaseOnce(
     archiveSource = captured.kind === 'transcript_pin' ? 'transcript' : 'terminal'
     archiveStatus = captured.status
   } else {
-    const stored = summarizeStoredArchive(archive)
+    const stored = summarizeWorkerOutputArchive(archive)
     archiveSource ??= stored.source
     archiveStatus ??= stored.status
   }
@@ -223,12 +213,13 @@ async function completeWorkerTerminalReleaseOnce(
         processAction: 'closed_agent_terminal',
         archive: { source: archiveSource, status: archiveStatus },
         lastError: unknown.release_error ?? reason,
-        recovery: `Inspect with: orca orchestration worker-show --dispatch ${dispatchId} --json — then repeat worker-release with the same --retry-request. Never substitute a broad terminal close.`
+        recovery: releaseUnknownRecovery(dispatchId)
       }
     }
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error)
-    if (/disposed|not connected|unavailable/i.test(reason)) {
+    const closeError = classifyWorkerTerminalCloseError(error)
+    const reason = closeError.reason
+    if (closeError.transient) {
       // Durable intent exists; the owning endpoint is temporarily unreachable. Recovery retries.
       return {
         dispatchId,
@@ -247,7 +238,7 @@ async function completeWorkerTerminalReleaseOnce(
       processAction: 'none',
       archive: { source: archiveSource, status: archiveStatus },
       lastError: unknown.release_error ?? reason,
-      recovery: `Inspect with: orca orchestration worker-show --dispatch ${dispatchId} --json — then repeat worker-release with the same --retry-request. Never substitute a broad terminal close.`
+      recovery: releaseUnknownRecovery(dispatchId)
     }
   }
   const released = db.settleWorkerTerminalRelease(resource.id)
@@ -259,6 +250,10 @@ async function completeWorkerTerminalReleaseOnce(
       observation.status === 'exited' ? 'closed_exited_terminal' : 'closed_agent_terminal',
     archive: archiveSummary(released)
   }
+}
+
+export function releaseUnknownRecovery(dispatchId: string): string {
+  return `Inspect with: orca orchestration worker-show --dispatch ${dispatchId} --json — then retry worker-release with a fresh request ID (omit --retry-request to let the CLI generate one). Reusing the prior request ID only replays this release_unknown receipt. Never substitute a broad terminal close.`
 }
 
 function workerTerminalLeaseIsCurrent(
@@ -280,18 +275,6 @@ function workerTerminalLeaseIsCurrent(
     }) &&
     !db.workerTerminalResourceHasIdentityConflict(resource.id)
   )
-}
-
-function summarizeStoredArchive(archive: WorkerTerminalArchiveRow): {
-  source: 'transcript' | 'terminal'
-  status: Extract<WorkerTerminalArchiveStatus, 'captured' | 'empty'>
-} {
-  if (archive.kind === 'transcript_pin') {
-    return { source: 'transcript', status: 'captured' }
-  }
-  const content = JSON.parse(archive.content) as WorkerTerminalTailArchive
-  const empty = content.lines.every((line) => line.trim() === '')
-  return { source: 'terminal', status: empty ? 'empty' : 'captured' }
 }
 
 function retainedReason(resource: WorkerTerminalResourceRow): WorkerTerminalRetainedReason {

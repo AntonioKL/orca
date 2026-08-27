@@ -61,7 +61,8 @@ describe('orchestration worker release liveness verdict', () => {
         ...resource,
         release_state: 'releasing'
       })),
-      markWorkerTerminalReleaseUnknown
+      markWorkerTerminalReleaseUnknown,
+      recordWorkerTerminalRecoveryAttempt: vi.fn()
     } as unknown as OrchestrationDb
 
     await expect(

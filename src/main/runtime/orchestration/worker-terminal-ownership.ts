@@ -36,6 +36,8 @@ export type WorkerTerminalResourceRow = {
   terminal_handle: string
   pane_key: string | null
   process_incarnation: string | null
+  endpoint_id: string | null
+  endpoint_incarnation: string | null
   host_scope: string | null
   ownership_state: WorkerTerminalOwnershipState
   release_state: WorkerTerminalReleaseState
@@ -43,6 +45,8 @@ export type WorkerTerminalResourceRow = {
   release_requested_at: string | null
   release_completed_at: string | null
   release_error: string | null
+  recovery_attempt_count: number
+  last_recovery_at: string | null
   archive_source: string | null
   archive_status: WorkerTerminalArchiveStatus | null
   created_at: string

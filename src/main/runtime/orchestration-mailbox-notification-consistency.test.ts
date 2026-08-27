@@ -11,6 +11,7 @@ import {
   createRuntime,
   driveToLiveIdle,
   insertDirectRunMessage,
+  isMailboxPointer,
   LAUNCH_TOKEN,
   LEAF_ID,
   PANE_KEY,
@@ -29,6 +30,7 @@ import {
 import { RpcDispatcher } from './rpc/dispatcher'
 import { ORCHESTRATION_METHODS } from './rpc/methods/orchestration'
 import { createRootDispatch } from './orchestration/db/root-dispatch-test-fixture'
+import { MAILBOX_POINTER_WRITE_ATTEMPTED } from './orchestration/db/messages/mailbox-pointer-enter-state'
 
 vi.mock('electron', () => ({
   app: { getPath: vi.fn(() => tmpdir()), isPackaged: false },
@@ -314,7 +316,7 @@ describe('orchestration notification mailbox consistency', () => {
     restartedDb.close()
   })
 
-  it('does not replay a staged same-Run pointer when the runtime restarts before Enter', async () => {
+  it('does not replay Enter for an ambiguous staged pointer after restart', async () => {
     vi.useFakeTimers()
     const directory = mkdtempSync(join(tmpdir(), 'orca-mailbox-staged-restart-'))
     temporaryDirectories.push(directory)
@@ -327,17 +329,57 @@ describe('orchestration notification mailbox consistency', () => {
     await driveToLiveIdle(first.runtime)
     expect(pointerCount(first.write)).toBe(1)
     expect(first.write.mock.calls.filter(([, payload]) => payload === '\r')).toHaveLength(0)
-    expect(firstDb.getMessageById(message.id)?.delivered_at).toEqual(expect.any(String))
+    expect(firstDb.getMessageById(message.id)?.delivered_at).toBeNull()
+    expect(firstDb.getPendingMailboxPointerMessages(`run:${run.id}`)).toEqual([
+      expect.objectContaining({
+        id: message.id,
+        pointer_enter_pending: MAILBOX_POINTER_WRITE_ATTEMPTED,
+        pointer_pty_id: PTY_ID,
+        pointer_process_incarnation: `${PTY_ID}:mailbox-incarnation`
+      })
+    ])
     firstDb.close()
 
     const restartedDb = new OrchestrationDb(dbPath)
     const restarted = createRuntime(restartedDb)
-    await driveToLiveIdle(restarted.runtime)
+    await restarted.runtime.listTerminals()
+    restarted.runtime.onPtyData(PTY_ID, '\x1b]0;Codex done\x07', 3)
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(500)
     const checked = await checkBoundMailbox(restarted.runtime)
 
     expect(pointerCount(restarted.write)).toBe(0)
+    expect(restarted.write.mock.calls.filter(([, payload]) => payload === '\r')).toHaveLength(0)
     expect(checked).toMatchObject({ runId: run.id, count: 1 })
     expect(checked.messages).toEqual([expect.objectContaining({ id: message.id })])
+    restartedDb.close()
+  })
+
+  it('never resumes a staged Enter after the restored agent starts working', async () => {
+    vi.useFakeTimers()
+    const directory = mkdtempSync(join(tmpdir(), 'orca-mailbox-working-restart-'))
+    temporaryDirectories.push(directory)
+    const dbPath = join(directory, 'orchestration.db')
+    const firstDb = new OrchestrationDb(dbPath)
+    const first = createRuntime(firstDb)
+    const run = createBoundRun(firstDb, 'Working restart Run')
+    const message = insertDirectRunMessage(firstDb, run.id, 'Do not submit stale Enter')
+
+    await driveToLiveIdle(first.runtime)
+    expect(pointerCount(first.write)).toBe(1)
+    firstDb.close()
+
+    const restartedDb = new OrchestrationDb(dbPath)
+    const restarted = createRuntime(restartedDb)
+    await restarted.runtime.listTerminals()
+    restarted.runtime.onPtyData(PTY_ID, '\x1b]0;Codex working\x07', 3)
+    await vi.advanceTimersByTimeAsync(500)
+
+    expect(restarted.write.mock.calls.filter(([, payload]) => payload === '\r')).toHaveLength(0)
+    expect(restartedDb.getMessageById(message.id)?.delivered_at).toEqual(expect.any(String))
+    restarted.runtime.onPtyData(PTY_ID, '\x1b]0;Codex done\x07', 4)
+    await Promise.resolve()
+    expect(pointerCount(restarted.write)).toBe(0)
     restartedDb.close()
   })
 
@@ -409,8 +451,7 @@ describe('orchestration notification mailbox consistency', () => {
 
     expect(
       harness.write.mock.calls.filter(
-        ([ptyId, payload]) =>
-          ptyId === SECOND_PTY_ID && String(payload).includes('orca orchestration check')
+        ([ptyId, payload]) => ptyId === SECOND_PTY_ID && isMailboxPointer(payload)
       )
     ).toHaveLength(1)
     expect(
@@ -449,16 +490,14 @@ describe('orchestration notification mailbox consistency', () => {
     await Promise.resolve()
     expect(
       harness.write.mock.calls.filter(
-        ([ptyId, payload]) =>
-          ptyId === SECOND_PTY_ID && String(payload).includes('orca orchestration check')
+        ([ptyId, payload]) => ptyId === SECOND_PTY_ID && isMailboxPointer(payload)
       )
     ).toHaveLength(0)
 
     await vi.advanceTimersByTimeAsync(500)
     expect(
       harness.write.mock.calls.filter(
-        ([ptyId, payload]) =>
-          ptyId === PTY_ID && String(payload).includes('orca orchestration check')
+        ([ptyId, payload]) => ptyId === PTY_ID && isMailboxPointer(payload)
       )
     ).toHaveLength(2)
     await vi.advanceTimersByTimeAsync(500)
@@ -519,6 +558,48 @@ describe('orchestration notification mailbox consistency', () => {
       db.close()
     }
   )
+  it('submits a staged pointer once when a live PTY is cold-parked before Enter', async () => {
+    vi.useFakeTimers()
+    const db = createDatabase('orca-mailbox-cold-park-submit-')
+    const harness = createRuntime(db)
+    const run = createBoundRun(db, 'Cold-park Run')
+    const message = insertDirectRunMessage(db, run.id, 'Submit while parked')
+
+    await driveToLiveIdle(harness.runtime)
+    expect(pointerCount(harness.write)).toBe(1)
+    // Parking unmounts the renderer leaf but intentionally leaves the PTY alive.
+    harness.runtime.syncWindowGraph(1, { tabs: [], leaves: [] })
+
+    await vi.advanceTimersByTimeAsync(500)
+
+    expect(harness.write.mock.calls.filter(([, payload]) => payload === '\r')).toHaveLength(1)
+    expect(db.getMessageById(message.id)?.delivered_at).toEqual(expect.any(String))
+    db.close()
+  })
+
+  it.each([
+    ['working', '\x1b]0;Codex working\x07'],
+    ['permission', '\x1b]0;Codex waiting for permission\x07']
+  ])('handles a cold-parked pointer after the agent becomes %s', async (state, title) => {
+    vi.useFakeTimers()
+    const db = createDatabase('orca-mailbox-cold-park-transition-')
+    const harness = createRuntime(db)
+    const run = createBoundRun(db, 'Cold-park transition Run')
+    const message = insertDirectRunMessage(db, run.id, 'Do not submit while unavailable')
+
+    await driveToLiveIdle(harness.runtime)
+    expect(pointerCount(harness.write)).toBe(1)
+    harness.runtime.syncWindowGraph(1, { tabs: [], leaves: [] })
+    harness.runtime.onPtyData(PTY_ID, title, 3)
+
+    await vi.advanceTimersByTimeAsync(500)
+
+    expect(harness.write.mock.calls.filter(([, payload]) => payload === '\r')).toHaveLength(
+      state === 'working' ? 1 : 0
+    )
+    expect(db.getMessageById(message.id)?.delivered_at).toEqual(expect.any(String))
+    db.close()
+  })
 
   it('releases staged pointer state when an explicit check owns the batch', async () => {
     vi.useFakeTimers()
@@ -657,6 +738,8 @@ describe('orchestration notification mailbox consistency', () => {
     const restarted = createRuntime(db)
     await driveToLiveIdle(restarted.runtime)
     expect(pointerCount(restarted.write)).toBe(0)
+    const checked = await checkBoundMailbox(restarted.runtime)
+    expect(checked.messages).toEqual([expect.objectContaining({ id: message.id })])
     db.close()
   })
 
@@ -797,9 +880,14 @@ describe('orchestration notification mailbox consistency', () => {
       types: 'question'
     })
 
-    expect(checked).toMatchObject({ runId: run.id, dispatchId: dispatch.id, count: 1 })
-    expect(checked.messages).toEqual([expect.objectContaining({ id: question.id })])
+    expect(checked).toMatchObject({ runId: run.id, dispatchId: dispatch.id, count: 50 })
+    expect(checked.messages).not.toContainEqual(expect.objectContaining({ id: question.id }))
     expect(db.getMessageById(question.id)?.to_handle).toBe(`dispatch:${dispatch.id}`)
+    const next = await checkBoundMailbox(harness.runtime, {
+      ack: checked.deliveryId!,
+      types: 'question'
+    })
+    expect(next.messages).toEqual([expect.objectContaining({ id: question.id })])
     db.close()
   })
 })

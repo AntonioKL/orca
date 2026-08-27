@@ -227,7 +227,7 @@ describe('orchestration worker-start prompt contract', () => {
     })
   })
 
-  it('reports a swallowed Enter as stalled without sending a rescue Enter', async () => {
+  it('keeps a swallowed Enter queued without revoking the worker or retrying input', async () => {
     vi.useFakeTimers()
     const harness = await createPromptContractHarness('swallowed')
     const pending = harness.dispatcher.dispatch(harness.request)
@@ -237,9 +237,12 @@ describe('orchestration worker-start prompt contract', () => {
     expect(response).toMatchObject({
       ok: true,
       result: {
-        state: 'failed',
-        failedStage: 'dispatch_input',
-        lastError: 'agent_prompt_stalled',
+        state: 'ready',
+        stage: 'input_accepted',
+        prompt: {
+          requestId: harness.requestId,
+          stages: ['input_accepted']
+        },
         mutation: { requestId: harness.requestId, replayed: false }
       }
     })
@@ -253,27 +256,78 @@ describe('orchestration worker-start prompt contract', () => {
     expect(harness.prematureSubmits()).toBe(0)
     expect(harness.writes.filter((data) => data === '\r')).toHaveLength(1)
     const persisted = reopenPromptContractDb(harness)
-    expect(persisted.getTask(harness.taskId)?.status).toBe('failed')
-    // Why (#16095): the receipt still reports the failure, but Enter was written before it was
-    // verified — so the capability survives and the worker's own report can correct the record.
+    expect(persisted.getTask(harness.taskId)?.status).toBe('dispatched')
     expect(persisted.getDispatchContextById(dispatchId)).toMatchObject({
-      status: 'failed',
-      last_failure: 'agent_prompt_stalled',
+      status: 'dispatched',
+      last_failure: null,
       capability_revoked_at: null
     })
     expect(persisted.getWorkerDispatch(dispatchId)).toMatchObject({
-      state: 'failed',
-      stage: 'dispatch_input',
-      last_error: 'agent_prompt_stalled'
+      state: 'ready',
+      stage: 'input_accepted',
+      last_error: null
     })
     const callerFingerprint = persisted.getOrCreateLocalMutationCallerFingerprint()
     const receipt = persisted.getMutationReceipt(callerFingerprint, harness.requestId)
     expect(receipt).toMatchObject({ state: 'completed' })
     expect(JSON.parse(receipt?.receipt ?? 'null')).toMatchObject({
       dispatchId,
-      state: 'failed',
-      failedStage: 'dispatch_input',
-      lastError: 'agent_prompt_stalled'
+      state: 'ready',
+      stage: 'input_accepted',
+      prompt: {
+        requestId: harness.requestId,
+        stages: ['input_accepted']
+      }
     })
+  })
+
+  it('does not attribute output from the old busy turn to a queued prompt', async () => {
+    vi.useFakeTimers()
+    const { runtime, handle } = await createAgentPromptSubmissionRuntime(() => undefined, 'codex')
+    runtime.onPtyData('pty-prompt', '\x1b]0;Codex working\x07', Date.now())
+    const pending = runtime.sendTerminalAgentPrompt(handle, 'queued prompt', {
+      acceptQueued: true,
+      requestId: 'busy-swallowed',
+      observationTimeoutMs: 0
+    })
+
+    await vi.runAllTimersAsync()
+    const send = await pending
+    expect(send).toMatchObject({
+      prompt: {
+        requestId: 'busy-swallowed',
+        stages: ['input_accepted', 'queued_pending_turn']
+      }
+    })
+    const observed = runtime.observeTerminalAgentPrompt(handle, send.prompt!, 1_000)
+    setTimeout(() => {
+      runtime.onPtyData('pty-prompt', 'old turn output', Date.now())
+    }, 50)
+    await vi.runAllTimersAsync()
+
+    await expect(observed).resolves.toMatchObject({
+      stages: ['input_accepted', 'queued_pending_turn']
+    })
+  })
+
+  it('refuses an 8 MiB inline spec before Task, Dispatch, or terminal effects', async () => {
+    const harness = await createPromptContractHarness('accepted')
+    const tasksBefore = harness.db.listTasks().map((task) => task.id)
+    const params = harness.request.params as Record<string, unknown>
+    delete params.task
+    params.spec = 'x'.repeat(8 * 1024 * 1024)
+
+    const response = await harness.dispatcher.dispatch(harness.request)
+
+    expect(response).toMatchObject({
+      ok: false,
+      error: {
+        code: 'worker_prompt_too_large',
+        data: { effectsApplied: false, maxTaskSpecBytes: expect.any(Number) }
+      }
+    })
+    expect(harness.db.listTasks().map((task) => task.id)).toEqual(tasksBefore)
+    expect(harness.db.getDispatchContext(harness.taskId)).toBeUndefined()
+    expect(harness.writes).toEqual([])
   })
 })

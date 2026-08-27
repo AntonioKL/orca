@@ -136,7 +136,7 @@ async function check(
 function pointerPayloads(write: ReturnType<typeof vi.fn>): string[] {
   return write.mock.calls
     .map(([, payload]) => String(payload))
-    .filter((payload) => payload.includes('orca orchestration check'))
+    .filter((payload) => payload.includes('orchestration check'))
 }
 
 async function runBuiltCli(

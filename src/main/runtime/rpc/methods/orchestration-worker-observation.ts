@@ -2,6 +2,7 @@ import type { RuntimeTerminalInteractiveWait } from '../../../../shared/runtime-
 import type { OrcaRuntimeService } from '../../orca-runtime'
 import type { OrchestrationDb } from '../../orchestration/db'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
+import { parseWorkerTerminalHostScope } from '../../orchestration/worker-terminal-process-liveness'
 import type {
   DispatchContextRow,
   FederatedDispatchRow,
@@ -54,10 +55,30 @@ export async function inspectWorkerTerminal(
   if (verdict?.status === 'live') {
     return { terminal, exact, status: 'live', agentWait }
   }
+  if (!verdict) {
+    const dispatch = db.getDispatchContextById?.(dispatchId)
+    const persistedHostScope = parseWorkerTerminalHostScope(dispatch?.host_scope ?? null)
+    const currentHostScope = runtime.getOrchestrationDispatchAuthority?.(terminalHandle)?.hostScope
+    if (persistedHostScope?.kind === 'ssh' || currentHostScope?.kind === 'ssh') {
+      return {
+        terminal,
+        exact,
+        status: 'unverifiable',
+        reason: 'missing_liveness_verdict',
+        agentWait
+      }
+    }
+    return {
+      terminal,
+      exact,
+      status: terminal.connected === false ? 'exited' : 'live',
+      agentWait
+    }
+  }
   return {
     terminal,
     exact,
-    status: terminal.connected === false ? 'exited' : 'live',
+    status: 'exited',
     agentWait
   }
 }
@@ -109,6 +130,20 @@ export function exposeWorker(worker: WorkerDispatchRow) {
   }
 }
 
+export function exposeFederatedWorkerObservation(
+  observation: { status?: string; exactWorker: boolean; reason?: string },
+  projected: boolean
+) {
+  if (!projected) {
+    return { status: 'unverifiable' as const, exactWorker: false, reason: 'observation_superseded' }
+  }
+  // Legacy `running` maps to live; an absent peer verdict remains unverifiable.
+  return {
+    ...observation,
+    status: observation.status === 'running' ? 'live' : (observation.status ?? 'unverifiable')
+  }
+}
+
 export function resolvePinnedFederatedServer(
   runtime: OrcaRuntimeService,
   federated: FederatedDispatchRow
@@ -147,10 +182,13 @@ export async function callFederatedWorkerShow(
     agentWait?: RuntimeTerminalInteractiveWait | null
   }
 }> {
+  const server = resolvePinnedFederatedServer(runtime, federated)
   return (await runtime.callOrchestrationWorkerServer(
-    federated.environment_id,
+    server.environmentId,
     'orchestration.federationShow',
     { dispatchId: federated.dispatch_id },
-    15_000
+    15_000,
+    undefined,
+    { expectedEnvironmentPairingRevision: server.pairingRevision }
   )) as Awaited<ReturnType<typeof callFederatedWorkerShow>>
 }

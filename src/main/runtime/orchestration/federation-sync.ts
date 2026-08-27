@@ -15,6 +15,7 @@ import {
 } from './federation-ack-checkpoints'
 import { parseFederatedWorkerReportPayload } from './federation-worker-report-payload'
 import { bindCoordinatorMutationPayload } from './dispatch-message-binding'
+import { getOrchestrationPeerCapabilityCache } from './orchestration-peer-capability-cache'
 
 const MESSAGE_TYPE_SET = new Set<MessageType>(MESSAGE_TYPES)
 const FEDERATION_PULL_PAGE_SIZE = 50
@@ -84,7 +85,9 @@ async function syncFederatedDispatchPages(
       ...(supportsLifecycleSettlement ? { replayUnacknowledged: true } : {}),
       limit: FEDERATION_PULL_PAGE_SIZE
     },
-    15_000
+    15_000,
+    undefined,
+    { expectedEnvironmentPairingRevision: currentServer.pairingRevision }
   )) as { runtimeEpoch: string; items: PulledRelayItem[] }
   let cursor =
     supportsLifecycleSettlement && pulled.items.length > 0
@@ -157,7 +160,8 @@ async function syncFederatedDispatchPages(
         ...(settlements.length > 0 ? { settlements } : {})
       },
       15_000,
-      { orchestrationRequestId: `relay_ack_${dispatchId}_${cursor}` }
+      { orchestrationRequestId: `relay_ack_${dispatchId}_${cursor}` },
+      { expectedEnvironmentPairingRevision: currentServer.pairingRevision }
     )) as { acknowledgedThrough: number }
     const keepRelayEligible =
       pulled.items.length === FEDERATION_PULL_PAGE_SIZE && remainingPages === 1
@@ -174,6 +178,11 @@ async function syncFederatedDispatchPages(
       throughSequence: locallyAcknowledgedThrough
     })
   }
+  getOrchestrationPeerCapabilityCache(runtime).observeEpoch(
+    federated.peer_fingerprint,
+    pulled.runtimeEpoch
+  )
+  db.updateFederatedDispatchRuntimeEpoch(dispatchId, pulled.runtimeEpoch)
   const toWorker =
     db.getWorkerDispatch(dispatchId)?.state === 'ready'
       ? db.listPendingFederationRelay(dispatchId, 'to_worker')
@@ -186,7 +195,8 @@ async function syncFederatedDispatchPages(
       15_000,
       {
         orchestrationRequestId: `relay_import_${dispatchId}_${toWorker.at(-1)?.sequence ?? 0}`
-      }
+      },
+      { expectedEnvironmentPairingRevision: currentServer.pairingRevision }
     )) as { acknowledgedThrough: number }
     db.acknowledgeFederationRelay({
       dispatchId,

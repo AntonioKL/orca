@@ -194,4 +194,14 @@ describe('orchestration worker launch preferences', () => {
       }).success
     ).toBe(false)
   })
+
+  it('requires exactly one task identity', () => {
+    expect(WorkerStartParams.safeParse({ agent: 'codex' }).success).toBe(false)
+    expect(
+      WorkerStartParams.safeParse({ task: 'task_1', spec: 'new work', agent: 'codex' }).success
+    ).toBe(false)
+    expect(
+      WorkerStartParams.safeParse({ spec: 'new work', agent: 'codex', from: 'term_coord' }).success
+    ).toBe(true)
+  })
 })

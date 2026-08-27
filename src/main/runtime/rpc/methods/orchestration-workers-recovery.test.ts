@@ -183,6 +183,9 @@ describe('orchestration worker recovery', () => {
       connected: false,
       writable: false
     } as never)
+    // `connected: false` is transport state; an exited result requires the
+    // runtime's authoritative host-side verdict.
+    vi.spyOn(runtime, 'getTerminalLivenessVerdict').mockReturnValue({ status: 'exited' })
 
     await expect(
       call('orchestration.workerShow', { dispatch: dispatch.id })
@@ -291,5 +294,94 @@ describe('orchestration worker recovery', () => {
       observation: { status: 'exited', exactWorker: true }
     })
     expect(db.getTask(task.id)?.status).toBe('blocked')
+  })
+
+  it('does not let a delayed remote show revive a released worker projection', async () => {
+    const run = db.createRun({
+      objective: 'Fence delayed remote show',
+      coordinatorHandle: 'term_coord',
+      coordinatorPaneKey: 'tab_coord:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    })
+    const task = db.createTask({ spec: 'release remote worker', runId: run.id })
+    const started = db.createStartingWorkerDispatch({
+      creator: { kind: 'system' },
+      maxDepth: Number.MAX_SAFE_INTEGER,
+      taskId: task.id,
+      startOptions: {},
+      federation: {
+        environmentId: 'environment_windows',
+        environmentName: 'windows',
+        peerFingerprint: 'windows_peer',
+        protocolVersion: 1
+      }
+    })
+    db.reconcileFederatedWorkerStart({
+      dispatchId: started.dispatch.id,
+      state: 'ready',
+      stage: 'remote_input_accepted',
+      worktreeId: 'repo::windows-worktree',
+      terminalHandle: 'term_windows_worker'
+    })
+    db.updateFederatedDispatchResources({
+      dispatchId: started.dispatch.id,
+      remoteRuntimeEpoch: 'windows_epoch_old',
+      worktreeId: 'repo::windows-worktree',
+      terminalHandle: 'term_windows_worker'
+    })
+    const pendingShow = deferred<unknown>()
+    vi.spyOn(runtime, 'resolveOrchestrationWorkerServer').mockReturnValue({
+      environmentId: 'environment_windows',
+      name: 'windows',
+      peerFingerprint: 'windows_peer'
+    })
+    vi.spyOn(runtime, 'callOrchestrationWorkerServer').mockReturnValue(pendingShow.promise)
+
+    const show = call('orchestration.workerShow', { dispatch: started.dispatch.id })
+    await vi.waitFor(() => expect(runtime.callOrchestrationWorkerServer).toHaveBeenCalledOnce())
+    db.transitionLifecycle({
+      entity: 'worker',
+      id: started.dispatch.id,
+      from: 'ready',
+      to: 'ready',
+      projection: { stage: 'released', agent_terminal_handle: null },
+      receipt: { kind: 'test_release' }
+    })
+    db.db
+      .prepare(
+        `UPDATE federated_dispatches
+         SET remote_runtime_epoch = 'windows_epoch_new', remote_terminal_handle = NULL
+         WHERE dispatch_id = ?`
+      )
+      .run(started.dispatch.id)
+    pendingShow.resolve({
+      runtimeEpoch: 'windows_epoch_old',
+      attachment: {
+        state: 'ready',
+        stage: 'remote_input_accepted',
+        last_error: null,
+        worktree_id: 'repo::windows-worktree',
+        terminal_handle: 'term_windows_worker',
+        setup_state: 'not_applicable',
+        effects: [],
+        residualResources: []
+      },
+      terminal: { handle: 'term_windows_worker', connected: true },
+      observation: { status: 'live', exactWorker: true }
+    })
+
+    await expect(show).resolves.toMatchObject({
+      worker: { stage: 'released', agent_terminal_handle: null },
+      remoteRuntimeEpoch: 'windows_epoch_new',
+      terminal: null,
+      observation: {
+        status: 'unverifiable',
+        exactWorker: false,
+        reason: 'observation_superseded'
+      }
+    })
+    expect(db.getFederatedDispatch(started.dispatch.id)).toMatchObject({
+      remote_runtime_epoch: 'windows_epoch_new',
+      remote_terminal_handle: null
+    })
   })
 })

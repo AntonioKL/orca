@@ -56,6 +56,30 @@ describe('OrchestrationDb worker Dispatch state', () => {
     ])
   })
 
+  it('creates a Task and starting Dispatch together for a spec', () => {
+    const d = createDb()
+    const started = d.createStartingWorkerDispatch({
+      creator: { kind: 'system' },
+      maxDepth: Number.MAX_SAFE_INTEGER,
+      taskSpec: 'atomic spec task',
+      taskRunId: 'run_legacy_local',
+      startOptions: { topology: 'current' },
+      mutationReceipt: {
+        callerFingerprint: 'caller',
+        requestId: 'atomic_spec_request',
+        method: 'orchestration.workerStart',
+        payloadHash: 'hash'
+      }
+    })
+    expect(started.task.spec).toBe('atomic spec task')
+    expect(started.task.status).toBe('dispatched')
+    expect(d.getDispatchContextById(started.dispatch.id)?.task_id).toBe(started.task.id)
+    expect(d.getMutationReceipt('caller', 'atomic_spec_request')).toMatchObject({
+      state: 'pending',
+      receipt: expect.stringContaining(started.task.id)
+    })
+  })
+
   it('retains an active supervised worker terminal', () => {
     const d = createDb()
     const task = d.createTask({ spec: 'retain active worker' })
@@ -74,6 +98,13 @@ describe('OrchestrationDb worker Dispatch state', () => {
       setupState: 'not_applicable',
       effects: [],
       terminalOwnership: 'created'
+    })
+    expect(d.getDispatchContextById(started.dispatch.id)).toMatchObject({
+      attachment_kind: 'local',
+      resource_id: expect.any(String)
+    })
+    expect(d.getWorkerTerminalResourceByOwner(started.dispatch.id)).toMatchObject({
+      endpoint_incarnation: 'runtime:pty:1'
     })
     d.markWorkerDispatchReady(started.dispatch.id)
 
@@ -214,6 +245,8 @@ describe('OrchestrationDb worker Dispatch state', () => {
       retryOf: first.dispatch.id,
       startOptions: {}
     })
+    expect(second.dispatch.retry_of_dispatch_id).toBe(first.dispatch.id)
+    expect(second.dispatch.creator_role).toBe('system')
     d.failWorkerStart(second.dispatch.id, 'agent_readiness', 'second failed')
 
     expect(() =>
@@ -314,6 +347,39 @@ describe('OrchestrationDb worker Dispatch state', () => {
     expect(d.getTask(task.id)?.status).toBe('blocked')
   })
 
+  it('rolls back stop-unknown projection when its receipt cannot be inserted', () => {
+    const d = createDb()
+    const task = d.createTask({ spec: 'atomic uncertain stop' })
+    const started = d.createStartingWorkerDispatch({
+      creator: { kind: 'system' },
+      maxDepth: Number.MAX_SAFE_INTEGER,
+      taskId: task.id,
+      startOptions: {}
+    })
+    d.markWorkerDispatchReady(started.dispatch.id)
+    expect(d.beginWorkerStop(started.dispatch.id, 'runtime_test').disposition).toBe('stopping')
+    d.db.exec(`
+      CREATE TRIGGER reject_worker_stop_unknown_receipt
+      BEFORE INSERT ON lifecycle_transition_receipts
+      WHEN NEW.kind = 'worker_stop_unknown'
+      BEGIN SELECT RAISE(ABORT, 'forced stop-unknown receipt failure'); END;
+    `)
+
+    expect(() => d.markWorkerStopUnknown(started.dispatch.id, 'stop response lost')).toThrow(
+      'forced stop-unknown receipt failure'
+    )
+    expect(d.getWorkerDispatch(started.dispatch.id)).toMatchObject({
+      state: 'stopping',
+      stage: 'stop_requested',
+      last_error: null
+    })
+    expect(
+      d
+        .getLifecycleTransitionReceipts('worker', started.dispatch.id)
+        .some((receipt) => receipt.kind === 'worker_stop_unknown')
+    ).toBe(false)
+  })
+
   it('allows explicit stop recovery from uncertain local and remote starts', () => {
     const d = createDb()
     const task = d.createTask({ spec: 'uncertain local start' })
@@ -357,6 +423,62 @@ describe('OrchestrationDb worker Dispatch state', () => {
     })
   })
 
+  it.each(['starting', 'ready', 'start_unknown', 'stopping', 'stop_unknown'] as const)(
+    'keeps a %s remote attachment authoritative for pane occupancy',
+    (state) => {
+      const d = createDb()
+      const paneKey = 'tab_remote:11111111-1111-4111-8111-111111111111'
+      const attach = (dispatchId: string): void => {
+        d.createRemoteDispatchAttachment({
+          dispatchId,
+          taskId: `task_${dispatchId}`,
+          homePeerFingerprint: 'home_peer',
+          protocolVersion: 1,
+          runtimeEpoch: 'worker_epoch',
+          mutationReceipt: {
+            callerFingerprint: 'home_peer',
+            requestId: `request_${dispatchId}`,
+            method: 'orchestration.federationAttachStart',
+            payloadHash: `payload_${dispatchId}`
+          }
+        })
+      }
+
+      attach('ctx_remote_owner')
+      d.prepareRemoteAttachmentAuthority({
+        dispatchId: 'ctx_remote_owner',
+        paneKey,
+        processIncarnation: 'process_owner',
+        worktreeId: 'repo::worktree',
+        terminalHandle: 'term_owner',
+        setupState: 'not_applicable',
+        effects: []
+      })
+      d.db
+        .prepare('UPDATE remote_dispatch_attachments SET state = ? WHERE dispatch_id = ?')
+        .run(state, 'ctx_remote_owner')
+      attach('ctx_remote_contender')
+
+      expect(() =>
+        d.prepareRemoteAttachmentAuthority({
+          dispatchId: 'ctx_remote_contender',
+          paneKey,
+          processIncarnation: 'process_contender',
+          worktreeId: 'repo::worktree',
+          terminalHandle: 'term_contender',
+          setupState: 'not_applicable',
+          effects: []
+        })
+      ).toThrow('already has active remote Dispatch ctx_remote_owner')
+      expect(d.getRemoteDispatchAttachment('ctx_remote_contender')).toMatchObject({
+        state: 'starting',
+        pane_key: null,
+        terminal_handle: null
+      })
+      expect(d.getWorkerTerminalResourceByOwner('ctx_remote_contender')).toBeUndefined()
+    }
+  )
+
   it('bounds remote attachment lookup across pane remints and malformed suffix collisions', () => {
     const d = createDb()
     const leafId = '11111111-1111-4111-8111-111111111111'
@@ -387,12 +509,17 @@ describe('OrchestrationDb worker Dispatch state', () => {
 
     attach('ctx_valid_old', `tab_old:${leafId}`)
     for (let index = 0; index < 64; index += 1) {
-      attach(`ctx_malformed_${index}`, `:${leafId}`)
+      const dispatchId = `ctx_malformed_${index}`
+      attach(dispatchId, `:${leafId}`)
+      if (index < 63) {
+        d.failRemoteAttachment(dispatchId, 'fixture_retired', 'Superseded fixture row.', false)
+      }
     }
 
     expect(d.findActiveRemoteAttachmentForPane(`tab_reminted:${leafId}`)?.dispatch_id).toBe(
       'ctx_valid_old'
     )
+    d.failRemoteAttachment('ctx_valid_old', 'fixture_retired', 'Pane reminted.', false)
     attach('ctx_valid_new', `tab_new:${leafId}`)
     expect(d.findActiveRemoteAttachmentForPane(`tab_reminted:${leafId}`)?.dispatch_id).toBe(
       'ctx_valid_new'

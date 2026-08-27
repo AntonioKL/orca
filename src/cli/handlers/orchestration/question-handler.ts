@@ -1,6 +1,8 @@
 import type { CommandHandler } from '../../dispatch'
 import { getOptionalStringFlag } from '../../flags'
+import { renderCommand } from '../../orchestration-mutation-recovery'
 import { RuntimeClientError } from '../../runtime-client'
+import { resolveOrchestrationCliExecutable } from '../../runtime/orchestration-recovery-command'
 import {
   clampOrchestrationAskTimeoutMs,
   resolveOrchestrationAskClientTimeoutMs
@@ -91,7 +93,28 @@ export const ORCHESTRATION_QUESTION_HANDLER: Record<string, CommandHandler> = {
       if (!json) {
         // Why: report the server's clamped effective budget rather than overstating the wait.
         const waitedMs = result.result.timeoutMs ?? timeoutMs
-        console.error(`ask timeout after ${waitedMs}ms (thread ${result.result.threadId})`)
+        const messageId = result.result.messageId
+        const dispatchCapability = getOptionalStringFlag(flags, 'dispatch-capability')
+        const resumeCommand =
+          messageId === null
+            ? undefined
+            : renderCommand([
+                resolveOrchestrationCliExecutable(),
+                'orchestration',
+                'ask',
+                '--from',
+                from,
+                ...(dispatchCapability ? ['--dispatch-capability', dispatchCapability] : []),
+                '--resume',
+                messageId,
+                '--timeout-ms',
+                String(waitedMs)
+              ])
+        console.error(
+          resumeCommand
+            ? `ask timeout after ${waitedMs}ms; question is still pending (messageId: ${messageId}). Resume waiting; do not ask again:\n${resumeCommand}`
+            : `ask timeout after ${waitedMs}ms; question identity was not returned, so it cannot be resumed safely.`
+        )
       }
       process.exitCode = 1
     }

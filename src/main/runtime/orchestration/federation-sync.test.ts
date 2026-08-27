@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { ORCHESTRATION_FEDERATION_RELEASE_RUNTIME_CAPABILITY } from '../../../shared/protocol-version'
 import { OrcaRuntimeService } from '../orca-runtime'
 import { OrchestrationDb } from './db'
 import {
@@ -9,8 +10,9 @@ import {
   type FederationAckIdentity
 } from './federation-ack-checkpoints'
 import { parseRelayedMessage, syncFederatedDispatch } from './federation-sync'
+import { getOrchestrationPeerCapabilityCache } from './orchestration-peer-capability-cache'
 
-function createIdleSyncHarness() {
+function createIdleSyncHarness(initialSequence = 2) {
   let remoteRuntimeEpoch = 'remote_epoch_1'
   let blockedAck: { reached: () => void; released: Promise<void> } | null = null
   let blockedPull: { reached: () => void; released: Promise<void> } | null = null
@@ -20,7 +22,7 @@ function createIdleSyncHarness() {
     environment_name: 'windows',
     peer_fingerprint: 'windows_peer_fingerprint',
     remote_runtime_epoch: remoteRuntimeEpoch,
-    to_home_imported_sequence: 2,
+    to_home_imported_sequence: initialSequence,
     to_home_acknowledged_sequence: 0
   }
   const createDb = () =>
@@ -36,6 +38,9 @@ function createIdleSyncHarness() {
       }) => {
         federated.remote_runtime_epoch = params.remoteRuntimeEpoch
         federated.to_home_acknowledged_sequence = params.sequence
+      },
+      updateFederatedDispatchRuntimeEpoch: (_dispatchId: string, runtimeEpoch: string) => {
+        federated.remote_runtime_epoch = runtimeEpoch
       }
     }) as never
   const runtime = new OrcaRuntimeService()
@@ -79,6 +84,7 @@ function createIdleSyncHarness() {
     restartRemote: () => {
       remoteRuntimeEpoch = 'remote_epoch_2'
     },
+    getPersistedRemoteRuntimeEpoch: () => federated.remote_runtime_epoch,
     settleDispatch: () => {
       relayEligible = false
     },
@@ -189,6 +195,39 @@ describe('federation relay parsing', () => {
 })
 
 describe('federation relay acknowledgments', () => {
+  it('invalidates stale capabilities when an empty pull observes a restarted runtime', async () => {
+    const { runtime, restartRemote, getPersistedRemoteRuntimeEpoch } = createIdleSyncHarness(0)
+    const cache = getOrchestrationPeerCapabilityCache(runtime)
+    await cache.resolve({
+      peerFingerprint: 'windows_peer_fingerprint',
+      expectedRuntimeEpoch: 'remote_epoch_1',
+      capability: ORCHESTRATION_FEDERATION_RELEASE_RUNTIME_CAPABILITY,
+      probe: vi.fn().mockResolvedValue({ runtimeId: 'remote_epoch_1', capabilities: [] })
+    })
+
+    restartRemote()
+    await runtime.syncOrchestrationFederatedDispatch('dispatch_remote')
+
+    expect(getPersistedRemoteRuntimeEpoch()).toBe('remote_epoch_2')
+    const restartedProbe = vi.fn().mockResolvedValue({
+      runtimeId: 'remote_epoch_2',
+      capabilities: [ORCHESTRATION_FEDERATION_RELEASE_RUNTIME_CAPABILITY]
+    })
+    await expect(
+      cache.resolve({
+        peerFingerprint: 'windows_peer_fingerprint',
+        expectedRuntimeEpoch: 'remote_epoch_1',
+        capability: ORCHESTRATION_FEDERATION_RELEASE_RUNTIME_CAPABILITY,
+        probe: restartedProbe
+      })
+    ).resolves.toMatchObject({
+      runtimeEpoch: 'remote_epoch_2',
+      supported: true,
+      cached: false
+    })
+    expect(restartedProbe).toHaveBeenCalledTimes(1)
+  })
+
   it('does not wake a waiter for an acknowledged duplicate replay', async () => {
     const db = new OrchestrationDb(':memory:')
     const run = db.createRun({
@@ -343,6 +382,9 @@ describe('federation relay acknowledgments', () => {
       },
       recordFederatedHomeAcknowledgment: ({ sequence }: { sequence: number }) => {
         federated.to_home_acknowledged_sequence = sequence
+      },
+      updateFederatedDispatchRuntimeEpoch: (_dispatchId: string, runtimeEpoch: string) => {
+        federated.remote_runtime_epoch = runtimeEpoch
       },
       getWorkerDispatch: () => ({ state: 'ready' }),
       listPendingFederationRelay: () => pendingToWorker,
