@@ -1,9 +1,9 @@
 import { NATIVE_CHAT_SUPPORTED_AGENT_LIST } from '../../../../shared/native-chat-agent-support'
 import { AgentIcon, getAgentLabel } from '@/lib/agent-catalog'
 import { translate } from '@/i18n/i18n'
+import { Badge } from '../ui/badge'
 
-/** Names the agents behind the "supported agent" wording in the Chat UI setting —
- *  without it, users on an unsupported agent read the terminal fallback as a bug. */
+/** Names the agents so unsupported-agent terminal fallback does not look broken. */
 export function NativeChatSupportedAgents(): React.JSX.Element {
   return (
     <div className="flex flex-wrap items-center gap-1.5 pt-1">
@@ -11,15 +11,15 @@ export function NativeChatSupportedAgents(): React.JSX.Element {
         {translate('auto.components.settings.NativeChatSupportedAgents.label', 'Supported agents:')}
       </span>
       {NATIVE_CHAT_SUPPORTED_AGENT_LIST.map((agent) => (
-        <span
+        <Badge
           key={agent}
-          data-slot="native-chat-supported-agent"
           data-agent={agent}
-          className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/20 px-2 py-0.5 text-xs font-medium text-foreground"
+          variant="outline"
+          className="border-border/60 bg-muted/20"
         >
           <AgentIcon agent={agent} size={12} />
           {getAgentLabel(agent)}
-        </span>
+        </Badge>
       ))}
     </div>
   )
