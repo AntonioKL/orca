@@ -23,9 +23,7 @@ type JsonlCursor = {
 
 type TrackedTranscriptSubagent = JsonlCursor & {
   description?: string
-  /** Latest model seen in the child's own rollout. Retained across polls
-   *  because the cursor is incremental: `turn_context` is emitted once per
-   *  turn, so a later read usually carries no model at all. */
+  /** Retained because incremental reads usually omit the earlier `turn_context`. */
   model?: string
   startedAt: number
   unresolvedSince?: number
@@ -203,9 +201,7 @@ function readActivity(recordValue: JsonRecord):
   }
 }
 
-/** Latest model from the child's own `turn_context` records. A child can be
- *  launched on a different model than its parent, so this is read from the
- *  child rollout rather than inherited. */
+/** Read from the child's rollout because its model can differ from the parent's. */
 function readChildModel(records: JsonRecord[]): string | undefined {
   let model: string | undefined
   for (const recordValue of records) {
@@ -222,19 +218,15 @@ function readChildModel(records: JsonRecord[]): string | undefined {
 }
 
 function childIsComplete(records: JsonRecord[]): boolean {
-  let complete = false
+  let lifecycle: unknown
   for (const recordValue of records) {
-    if (recordValue.type !== 'event_msg') {
-      continue
-    }
-    const payload = record(recordValue.payload)
-    if (payload?.type === 'task_started') {
-      complete = false
-    } else if (payload?.type === 'task_complete') {
-      complete = true
+    const eventType =
+      recordValue.type === 'event_msg' ? record(recordValue.payload)?.type : undefined
+    if (eventType === 'task_started' || eventType === 'task_complete') {
+      lifecycle = eventType
     }
   }
-  return complete
+  return lifecycle === 'task_complete'
 }
 
 export function createCodexSubagentTranscriptState(): CodexSubagentTranscriptState {
@@ -265,11 +257,14 @@ export function reconcileCodexSubagentTranscript(
     }
     state.parent = { filePath: normalizedPath, offset: 0, carry: '' }
     state.subagents.clear()
-    state.parentTerminalObserved = false
+    state.parentTerminalObserved = undefined
   }
   for (const recordValue of readJsonlCursor(state.parent) ?? []) {
-    if (recordValue.type === 'event_msg' && record(recordValue.payload)?.type === 'task_complete') {
-      state.parentTerminalObserved = true
+    if (recordValue.type === 'event_msg') {
+      const eventType = record(recordValue.payload)?.type
+      if (eventType === 'task_started' || eventType === 'task_complete') {
+        state.parentTerminalObserved = eventType === 'task_complete'
+      }
     }
     const activity = readActivity(recordValue)
     if (!activity) {

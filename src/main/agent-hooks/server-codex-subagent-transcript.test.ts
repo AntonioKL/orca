@@ -210,7 +210,10 @@ describe('AgentHookServer Codex subagent transcript polling', () => {
     dirs.push(dir)
     const parentPath = join(dir, 'rollout-parent.jsonl')
     const childPath = join(dir, `rollout-child-${CHILD_ID}.jsonl`)
-    writeFileSync(parentPath, spawnLine(CHILD_ID, '/root/restart_repro'))
+    writeFileSync(
+      parentPath,
+      `${line({ type: 'event_msg', payload: { type: 'task_started' } })}${line({ type: 'event_msg', payload: { type: 'task_complete' } })}${line({ type: 'event_msg', payload: { type: 'task_started' } })}${spawnLine(CHILD_ID, '/root/restart_repro')}`
+    )
     writeFileSync(childPath, line({ type: 'event_msg', payload: { type: 'task_started' } }))
     const post = async (server: AgentHookServer): Promise<void> => {
       const env = server.buildPtyEnv()

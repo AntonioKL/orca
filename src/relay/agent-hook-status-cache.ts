@@ -149,7 +149,11 @@ export function reconcileRelayCodexEvent(
   const payload = {
     ...event.payload,
     ...(subagents ? { subagents } : { subagents: undefined }),
-    ...(transcript.parentTerminalObserved ? { state: 'done' as const } : {})
+    ...(transcript.parentTerminalObserved === true
+      ? { state: 'done' as const }
+      : transcript.parentTerminalObserved === false
+        ? { state: 'working' as const }
+        : {})
   }
   return [...transcript.subagents.values()].some((child) => child.unresolvedSince)
     ? { ...event, payload }

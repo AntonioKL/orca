@@ -1726,7 +1726,11 @@ export class AgentHookServer {
       const terminal = transcript.parentTerminalObserved === true
       const nextPayload = {
         ...current.payload,
-        ...(terminal ? { state: 'done' as const } : {}),
+        ...(terminal
+          ? { state: 'done' as const }
+          : transcript.parentTerminalObserved === false
+            ? { state: 'working' as const }
+            : {}),
         ...(subagents ? { subagents } : { subagents: undefined })
       }
       let latest = current

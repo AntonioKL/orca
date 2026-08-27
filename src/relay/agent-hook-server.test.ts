@@ -11,6 +11,11 @@ import * as agentHookListener from '../shared/agent-hook-listener/grok-result-di
 
 const LEAF_ID = '11111111-1111-4111-8111-111111111111'
 const PANE_KEY = makePaneKey('tab-1', LEAF_ID)
+const MALFORMED_LEAF_IDS = [
+  '22222222-2222-4222-8222-222222222222',
+  '33333333-3333-4333-8333-333333333333',
+  '44444444-4444-4444-8444-444444444444'
+] as const
 
 type RelayServerInternals = {
   state: { lastStatusByPaneKey: Map<string, unknown> }
@@ -372,17 +377,20 @@ describe('RelayAgentHookServer', () => {
       JSON.stringify({
         version: 1,
         entries: [
-          { event: { paneKey: PANE_KEY }, meta: { source: 'claude' } },
+          {
+            event: { paneKey: makePaneKey('tab-1', MALFORMED_LEAF_IDS[0]) },
+            meta: { source: 'claude' }
+          },
           {
             event: {
-              paneKey: PANE_KEY,
+              paneKey: makePaneKey('tab-1', MALFORMED_LEAF_IDS[1]),
               payload: { state: 'working', prompt: 'missing agent type' }
             },
             meta: { source: 'claude' }
           },
           {
             event: {
-              paneKey: PANE_KEY,
+              paneKey: makePaneKey('tab-1', MALFORMED_LEAF_IDS[2]),
               payload: null
             },
             meta: { source: 'claude' }
