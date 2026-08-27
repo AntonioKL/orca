@@ -8,6 +8,7 @@ import { buildWindowsCmdShimCommandLine, isCmdInterpretedProgram } from './windo
 import { forceTerminateProcessTree, signalProcessTree } from './process-tree-termination'
 
 import { createOutputSink } from './bounded-output-sink'
+import { createChildTerminationReporter } from './child-termination-reporter'
 
 export type ChildProcessHandle = ChildProcess
 
@@ -54,6 +55,8 @@ export type ProcessSpec = {
   stdio?: NodeSpawnOptions['stdio']
   /** Kill the whole process tree and do not settle until termination is verified. */
   terminationBarrier?: boolean | ProcessTerminationBarrier
+  /** Called once when the child exits, or when a termination barrier gives up safely. */
+  onChildTerminated?: () => void
 }
 
 export type ProcessTerminationBarrier = {
@@ -161,15 +164,18 @@ export function spawnProcess(spec: ProcessSpec): ChildProcess {
  */
 export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
   if (spec.signal?.aborted) {
+    spec.onChildTerminated?.()
     return Promise.resolve({ code: null, signal: null, stdout: '', stderr: '', timedOut: false })
   }
   const maxOutputBytes = spec.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES
 
   return new Promise<ProcessResult>((resolve, reject) => {
+    const terminationReporter = createChildTerminationReporter(spec.onChildTerminated)
     let child: ChildProcess
     try {
       child = spawnProcess(spec)
     } catch (error) {
+      terminationReporter.report()
       reject(error)
       return
     }
@@ -196,6 +202,8 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
       clearTimeout(graceTimer)
       clearTimeout(barrierDeadlineTimer)
       spec.signal?.removeEventListener('abort', onAbort)
+      // A barrier's bounded grace must release rather than pin capacity forever.
+      terminationReporter.reportIf(Boolean(spec.terminationBarrier))
       act()
     }
 
@@ -277,6 +285,7 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
             }
             barrierAttemptComplete = true
             barrierTerminationVerified = true
+            terminationReporter.report()
             resolveBarrierIfSafe()
           })
         }
@@ -292,6 +301,7 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
                 ([initialTerminated, forceTerminated]) => {
                   barrierAttemptComplete = true
                   barrierTerminationVerified = initialTerminated || forceTerminated
+                  terminationReporter.reportIf(barrierTerminationVerified)
                   if (!barrierTerminationVerified) {
                     // The barrier never confirmed the tree died, so the root
                     // would otherwise outlive the abort or timeout.
@@ -308,6 +318,7 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
               }
               barrierAttemptComplete = true
               barrierTerminationVerified = terminated
+              terminationReporter.reportIf(barrierTerminationVerified)
               resolveBarrierIfSafe()
             })
             return
@@ -316,6 +327,7 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
             ([_initialTerminated, forceTerminated]) => {
               barrierAttemptComplete = true
               barrierTerminationVerified = forceTerminated
+              terminationReporter.reportIf(barrierTerminationVerified)
               if (!barrierTerminationVerified) {
                 terminate(child, 'SIGKILL')
               }
@@ -351,6 +363,7 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
     }
 
     child.once('error', (error) => {
+      terminationReporter.reportIf(!child.pid)
       if (barrierStopping) {
         deferredError = error
         resolveBarrierIfSafe()
@@ -368,6 +381,7 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
       }
     })
     child.once('close', (code, signal) => {
+      terminationReporter.report()
       if (!barrierStopping) {
         rootExitedBeforeBarrier = true
       }

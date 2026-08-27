@@ -20,6 +20,7 @@ import {
 } from './hosted-review-cache-identity'
 import { getGitHubPRCacheKey, getLegacyGitHubPRCacheKey } from './github-cache-key'
 import { getRepoExecutionHostId, parseExecutionHostId } from '../../../../shared/execution-host'
+import { slowTaskRequiredIdleMs } from '@/components/right-sidebar/coalesced-poll-runner'
 
 export { getHostedReviewCacheKey, linkedReviewHintKey } from './hosted-review-cache-identity'
 
@@ -47,6 +48,8 @@ type CreateStackedHostedReviewStoreInput = CreateStackedHostedReviewInput & {
 
 const CACHE_TTL_MS = 60_000
 const HOSTED_REVIEW_CACHE_MAX = 500
+const HOSTED_REVIEW_REVALIDATION_IDLE_MULTIPLIER = 5
+const HOSTED_REVIEW_REVALIDATION_MAX_INTERVAL_MS = 5 * 60_000
 // Why: the runtime path is bounded by callRuntimeRpc's own timeout; the local
 // Electron path had none, so a hung git/gh subprocess (e.g. a stalled Windows
 // credential probe) could leave the Create PR header stuck in its "Checking…"
@@ -88,10 +91,126 @@ const inflightHostedReviewRequests = new Map<
     promise: Promise<HostedReviewInfo | null>
     force: boolean
     generation: number
-    linkedReviewHintKey: string
+    startedAt: number
   }
 >()
 const requestGenerations = new Map<string, number>()
+type HostedReviewRevalidationLane = {
+  inFlight: Promise<HostedReviewInfo | null> | null
+  lastRunDurationMs: number
+  lastRunEndedAt: number
+  pendingStartRequest: (() => Promise<HostedReviewInfo | null>) | null
+  timer: ReturnType<typeof setTimeout> | null
+}
+const hostedReviewRevalidationLanes = new Map<string, HostedReviewRevalidationLane>()
+
+function hostedReviewRequestKey(cacheKey: string, hintKey: string): string {
+  return `${cacheKey}\0${hintKey}`
+}
+
+function requiredHostedReviewRevalidationIdleMs(lane: HostedReviewRevalidationLane): number {
+  return slowTaskRequiredIdleMs(
+    lane.lastRunDurationMs,
+    HOSTED_REVIEW_REVALIDATION_IDLE_MULTIPLIER,
+    0,
+    HOSTED_REVIEW_REVALIDATION_MAX_INTERVAL_MS
+  )
+}
+
+function clearHostedReviewRevalidationTimer(lane: HostedReviewRevalidationLane): void {
+  if (lane.timer !== null) {
+    clearTimeout(lane.timer)
+    lane.timer = null
+  }
+}
+
+function scheduleHostedReviewRevalidationLane(
+  requestKey: string,
+  lane: HostedReviewRevalidationLane
+): void {
+  if (lane.inFlight || lane.timer !== null) {
+    return
+  }
+  const allowedAt = lane.lastRunEndedAt + requiredHostedReviewRevalidationIdleMs(lane)
+  const delayMs = allowedAt - Date.now()
+  if (delayMs <= 0 && lane.pendingStartRequest) {
+    startHostedReviewRevalidationLane(requestKey, lane)
+    return
+  }
+  lane.timer = setTimeout(
+    () => {
+      lane.timer = null
+      if (lane.pendingStartRequest) {
+        startHostedReviewRevalidationLane(requestKey, lane)
+      } else if (!lane.inFlight) {
+        hostedReviewRevalidationLanes.delete(requestKey)
+      }
+    },
+    Math.max(0, delayMs)
+  )
+}
+
+function observeHostedReviewRevalidationPromise(
+  requestKey: string,
+  lane: HostedReviewRevalidationLane,
+  promise: Promise<HostedReviewInfo | null>,
+  startedAt: number
+): void {
+  lane.inFlight = promise
+  const finish = (): void => {
+    if (lane.inFlight !== promise) {
+      return
+    }
+    lane.inFlight = null
+    lane.lastRunEndedAt = Date.now()
+    lane.lastRunDurationMs = lane.lastRunEndedAt - startedAt
+    scheduleHostedReviewRevalidationLane(requestKey, lane)
+  }
+  void promise.then(finish, finish)
+}
+
+function startHostedReviewRevalidationLane(
+  requestKey: string,
+  lane: HostedReviewRevalidationLane
+): void {
+  const startRequest = lane.pendingStartRequest
+  if (!startRequest) {
+    return
+  }
+  clearHostedReviewRevalidationTimer(lane)
+  lane.pendingStartRequest = null
+  const startedAt = Date.now()
+  observeHostedReviewRevalidationPromise(requestKey, lane, startRequest(), startedAt)
+}
+
+function queueHostedReviewRevalidation(
+  requestKey: string,
+  startRequest: () => Promise<HostedReviewInfo | null>,
+  inflightRequest?: { promise: Promise<HostedReviewInfo | null>; startedAt: number }
+): void {
+  let lane = hostedReviewRevalidationLanes.get(requestKey)
+  if (!lane) {
+    lane = {
+      inFlight: null,
+      lastRunDurationMs: 0,
+      lastRunEndedAt: -Infinity,
+      pendingStartRequest: null,
+      timer: null
+    }
+    hostedReviewRevalidationLanes.set(requestKey, lane)
+  }
+  lane.pendingStartRequest = startRequest
+  if (!lane.inFlight && inflightRequest) {
+    observeHostedReviewRevalidationPromise(
+      requestKey,
+      lane,
+      inflightRequest.promise,
+      inflightRequest.startedAt
+    )
+    return
+  }
+  scheduleHostedReviewRevalidationLane(requestKey, lane)
+}
 
 /** @internal - exposed for leak-regression tests only */
 export function _getHostedReviewRequestGenerationCountForTest(): number {
@@ -101,6 +220,11 @@ export function _getHostedReviewRequestGenerationCountForTest(): number {
 /** @internal - exposed for leak-regression tests only */
 export function _clearHostedReviewRequestGenerationsForTest(): void {
   requestGenerations.clear()
+  inflightHostedReviewRequests.clear()
+  for (const lane of hostedReviewRevalidationLanes.values()) {
+    clearHostedReviewRevalidationTimer(lane)
+  }
+  hostedReviewRevalidationLanes.clear()
 }
 
 function isFresh<T>(entry: CacheEntry<T> | undefined): entry is CacheEntry<T> {
@@ -139,10 +263,6 @@ function shouldRefetchGitHubScopedResultForNoHint(
     hintKey === '' &&
     isGitHubLinkedReviewHintKey(cached.linkedReviewHintKey)
   )
-}
-
-function canReuseInflightHint(inflightHintKey: string, nextHintKey: string): boolean {
-  return inflightHintKey === nextHintKey
 }
 
 function isStaleMergedGitHubReviewForHead(
@@ -398,6 +518,7 @@ export const createHostedReviewSlice: StateCreator<AppState, [], [], HostedRevie
     )
     const cached = get().hostedReviewCache[cacheKey]
     const hintKey = linkedReviewHintKey(options)
+    const requestKey = hostedReviewRequestKey(cacheKey, hintKey)
     const linkedRefetch = shouldRefetchForLinkedHint(cached, hintKey)
     const scopedResultRefetch = shouldRefetchGitHubScopedResultForNoHint(cached, hintKey)
     const staleMergedHeadRefetch = isStaleMergedGitHubReviewForHead(cached, options?.currentHeadOid)
@@ -411,10 +532,7 @@ export const createHostedReviewSlice: StateCreator<AppState, [], [], HostedRevie
       return cached.data
     }
 
-    const inflightRequest = inflightHostedReviewRequests.get(cacheKey)
-    const inflightHasRequestedHint =
-      inflightRequest !== undefined &&
-      canReuseInflightHint(inflightRequest.linkedReviewHintKey, hintKey)
+    const inflightRequest = inflightHostedReviewRequests.get(requestKey)
     const startRequest = (): Promise<HostedReviewInfo | null> => {
       const generation = (requestGenerations.get(cacheKey) ?? 0) + 1
       const requestStartedAt = Date.now()
@@ -525,9 +643,9 @@ export const createHostedReviewSlice: StateCreator<AppState, [], [], HostedRevie
           }
           return preserved?.data ?? null
         } finally {
-          const activeRequest = inflightHostedReviewRequests.get(cacheKey)
+          const activeRequest = inflightHostedReviewRequests.get(requestKey)
           if (activeRequest?.generation === generation) {
-            inflightHostedReviewRequests.delete(cacheKey)
+            inflightHostedReviewRequests.delete(requestKey)
             if (requestGenerations.get(cacheKey) === generation) {
               requestGenerations.delete(cacheKey)
             }
@@ -535,11 +653,11 @@ export const createHostedReviewSlice: StateCreator<AppState, [], [], HostedRevie
         }
       })()
 
-      inflightHostedReviewRequests.set(cacheKey, {
+      inflightHostedReviewRequests.set(requestKey, {
         promise: request,
         force: Boolean(options?.force),
         generation,
-        linkedReviewHintKey: hintKey
+        startedAt: requestStartedAt
       })
       return request
     }
@@ -554,13 +672,11 @@ export const createHostedReviewSlice: StateCreator<AppState, [], [], HostedRevie
     ) {
       // Why: sidebar PR metadata can stay visible while a quiet refresh updates
       // it; don't block card rendering on a quota-bound GitHub round trip.
-      if (!inflightRequest || !inflightHasRequestedHint) {
-        void startRequest()
-      }
+      queueHostedReviewRevalidation(requestKey, startRequest, inflightRequest)
       return cached.data
     }
 
-    if (inflightRequest && (!options?.force || inflightRequest.force) && inflightHasRequestedHint) {
+    if (inflightRequest && (!options?.force || inflightRequest.force)) {
       return inflightRequest.promise
     }
 

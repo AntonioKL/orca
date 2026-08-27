@@ -25,11 +25,17 @@ function shouldAcceptMergedFallbackPR(candidate: PRBranchLookupCandidate): boole
 }
 
 export function hostedReviewOptionArgs(
-  candidate: PRBranchLookupCandidate
+  candidate: PRBranchLookupCandidate,
+  reason: GitHubPRRefreshReason = 'visible'
 ): [] | [GitHubPRBranchLookupOptions] {
   const options: GitHubPRBranchLookupOptions = {}
-  if (candidate.localGitOptions?.wslDistro) {
-    options.localGitExecOptions = { wslDistro: candidate.localGitOptions.wslDistro }
+  if (candidate.localGitOptions?.wslDistro || candidate.localGitOptions?.admissionTier || reason) {
+    options.localGitExecOptions = {
+      ...(candidate.localGitOptions?.wslDistro
+        ? { wslDistro: candidate.localGitOptions.wslDistro }
+        : {}),
+      admissionTier: reason === 'manual' ? 'interactive' : 'background'
+    }
   }
   if (shouldAcceptMergedFallbackPR(candidate)) {
     options.acceptMergedFallbackPR = true

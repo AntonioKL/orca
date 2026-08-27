@@ -48,13 +48,10 @@ export class RuntimeGitDiffCommands {
       )
     }
     return assertGitDiffWithinTransportBudget(
-      await getDiff(
-        target.worktree.path,
-        relativePath,
-        staged,
-        compareAgainstHead,
-        localGitOptionsForTarget(target)
-      ),
+      await getDiff(target.worktree.path, relativePath, staged, compareAgainstHead, {
+        ...localGitOptionsForTarget(target),
+        admissionTier: 'interactive'
+      }),
       maxContentBytes
     )
   }
@@ -71,7 +68,10 @@ export class RuntimeGitDiffCommands {
       }
       return provider.getBranchCompare(target.worktree.path, baseRef)
     }
-    return getBranchCompare(target.worktree.path, baseRef, localGitOptionsForTarget(target))
+    return getBranchCompare(target.worktree.path, baseRef, {
+      ...localGitOptionsForTarget(target),
+      admissionTier: 'interactive'
+    })
   }
 
   async getRuntimeGitCommitCompare(
@@ -86,7 +86,10 @@ export class RuntimeGitDiffCommands {
       }
       return provider.getCommitCompare(target.worktree.path, commitId)
     }
-    return getCommitCompare(target.worktree.path, commitId, localGitOptionsForTarget(target))
+    return getCommitCompare(target.worktree.path, commitId, {
+      ...localGitOptionsForTarget(target),
+      admissionTier: 'interactive'
+    })
   }
 
   async getRuntimeGitBranchDiff(

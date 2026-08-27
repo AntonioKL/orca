@@ -231,7 +231,7 @@ describe('useSourceControlBranchCompare scheduler', () => {
     expect(mocks.getRuntimeGitBranchCompare).toHaveBeenCalledTimes(2)
   })
 
-  it('collapses a poll tick that fires while a refresh is in flight', async () => {
+  it('coalesces M interval ticks into one trailing run after the slowTaskBackoff gap', async () => {
     vi.useFakeTimers()
     const first = deferred<typeof OK>()
     mocks.getRuntimeGitBranchCompare.mockReturnValueOnce(first.promise)
@@ -250,7 +250,16 @@ describe('useSourceControlBranchCompare scheduler', () => {
       await Promise.resolve()
       await Promise.resolve()
     })
-    // Three skipped ticks collapse into exactly one trailing run.
+    // Three skipped ticks collapse into one pending run, but a 90s task must
+    // not start it back-to-back (5x is capped at the 5-minute horizon).
+    expect(mocks.getRuntimeGitBranchCompare).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(299_999)
+    })
+    expect(mocks.getRuntimeGitBranchCompare).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1)
+    })
     expect(mocks.getRuntimeGitBranchCompare).toHaveBeenCalledTimes(2)
   })
 

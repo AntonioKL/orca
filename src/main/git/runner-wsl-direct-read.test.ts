@@ -20,6 +20,11 @@ vi.mock('../diagnostics/main-thread-churn-probe', () => ({ recordSubprocessSpawn
 import { pendingWslDirectGitReadEnvironment } from './command-runner/git-command-resolution'
 import { gitExecFileAsync, gitSpawn, gitStreamStdout } from './runner'
 import {
+  GitAdmissionScheduler,
+  _resetGitAdmissionForTests,
+  type GitAdmissionEvent
+} from './command-runner/git-subprocess-admission'
+import {
   disableWslGitReadEnvironment,
   getWslGitReadEnvironment,
   resetWslGitReadEnvironmentForTests,
@@ -32,6 +37,8 @@ import {
   WSL_LINKED_WORKTREE_ROUTE_TTL_MS,
   type WslLinkedWorktreeRoutingFileSystem
 } from './wsl-linked-worktree-git-routing'
+
+afterEach(() => _resetGitAdmissionForTests())
 
 const DISTRO = 'Ubuntu'
 const LOGIN_ENVIRONMENT = {
@@ -495,21 +502,29 @@ describe('WSL direct Git reads', () => {
 
   it('invalidates a missing direct executable and retries through the login shell', async () => {
     await withPlatform('win32', async () => {
+      const admissionEvents: GitAdmissionEvent[] = []
+      _resetGitAdmissionForTests(
+        new GitAdmissionScheduler({ onAdmissionEvent: (event) => admissionEvents.push(event) })
+      )
       seedWslGitReadEnvironmentForTests(DISTRO, LOGIN_ENVIRONMENT)
       execFileMock.mockImplementationOnce((_command, _args, _options, callback) => {
         const child = createMockChild()
-        queueMicrotask(() =>
+        queueMicrotask(() => {
+          child.emit('close', 127, null)
           callback?.(
             Object.assign(new Error('exit 127'), { code: 127 }),
             '',
             '/usr/bin/env: No such file or directory'
           )
-        )
+        })
         return child
       })
       execFileMock.mockImplementationOnce((_command, _args, _options, callback) => {
         const child = createMockChild()
-        queueMicrotask(() => callback?.(null, 'ok', ''))
+        queueMicrotask(() => {
+          child.emit('close', 0, null)
+          callback?.(null, 'ok', '')
+        })
         return child
       })
 
@@ -523,6 +538,10 @@ describe('WSL direct Git reads', () => {
 
       expect(execFileMock.mock.calls[0]?.[1]).toContain('--exec')
       expect(execFileMock.mock.calls[1]?.[1]?.slice(3, 5)).toEqual(['sh', '-lc'])
+      expect(admissionEvents.map(({ phase, waiterId }) => [phase, waiterId])).toEqual([
+        ['grant', 0],
+        ['release', 0]
+      ])
     })
   })
 

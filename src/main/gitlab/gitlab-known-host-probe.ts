@@ -3,9 +3,11 @@ import { NEGATIVE_ENTRY_TTL_MS } from '../git/remote-ref-probe-cache'
 import { glabExecFileAsync } from '../git/runner'
 import { getSshGitProviderGeneration } from '../providers/ssh-git-dispatch'
 import { DEFAULT_GITLAB_HOSTS, normalizeGitLabHost } from './project-ref-parser'
+import type { GitAdmissionTier } from '../git/command-runner/git-exec-options'
 
 export type LocalGitExecOptions = {
   wslDistro?: string
+  admissionTier?: GitAdmissionTier
 }
 
 const GLAB_KNOWN_HOSTS_TIMEOUT_MS = 10_000

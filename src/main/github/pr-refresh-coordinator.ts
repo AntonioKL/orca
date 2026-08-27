@@ -175,7 +175,7 @@ export async function refreshPRNow(candidate: GitHubPRRefreshCandidate): Promise
     candidate.linkedPRNumber ?? null,
     candidate.connectionId ?? null,
     candidate.linkedPRNumber == null ? (candidate.fallbackPRNumber ?? null) : null,
-    ...hostedReviewOptionArgs(candidate)
+    ...hostedReviewOptionArgs(candidate, 'manual')
   )
   let plannedRetryAt: number | undefined
   let broadcastOutcome = outcome

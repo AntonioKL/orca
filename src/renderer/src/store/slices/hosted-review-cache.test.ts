@@ -157,6 +157,43 @@ describe('hosted review cache revalidation', () => {
     expect(store.getState().hostedReviewCache[cacheKey]?.data).toEqual(updatedReview)
   })
 
+  it('coalesces M card poll ticks into one trailing run after the slowTaskBackoff gap', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+    let resolveRefresh: (value: HostedReviewInfo) => void = () => {}
+    const slowRefresh = new Promise<HostedReviewInfo>((resolve) => {
+      resolveRefresh = resolve
+    })
+    mockApi.hostedReview.forBranch
+      .mockResolvedValueOnce(review)
+      .mockReturnValueOnce(slowRefresh)
+      .mockResolvedValue(review)
+    const store = makeStore()
+    const options = { linkedGitHubPR: 42, staleWhileRevalidate: true }
+
+    await store
+      .getState()
+      .fetchHostedReviewForBranch('/repo', 'feature/slow-poll', { linkedGitHubPR: 42 })
+    vi.setSystemTime(60_001)
+    await store.getState().fetchHostedReviewForBranch('/repo', 'feature/slow-poll', options)
+    for (let tick = 0; tick < 5; tick += 1) {
+      await store.getState().fetchHostedReviewForBranch('/repo', 'feature/slow-poll', options)
+    }
+    expect(mockApi.hostedReview.forBranch).toHaveBeenCalledTimes(2)
+
+    await vi.advanceTimersByTimeAsync(10_000)
+    resolveRefresh(review)
+    await slowRefresh
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(mockApi.hostedReview.forBranch).toHaveBeenCalledTimes(2)
+
+    await vi.advanceTimersByTimeAsync(49_999)
+    expect(mockApi.hostedReview.forBranch).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(mockApi.hostedReview.forBranch).toHaveBeenCalledTimes(3)
+  })
+
   it('does not serve stale metadata when a stronger linked PR hint changes the lookup', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(0)

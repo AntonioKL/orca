@@ -207,7 +207,10 @@ describe('pr-refresh-coordinator', () => {
       null,
       null,
       12,
-      { acceptMergedFallbackPR: true }
+      {
+        acceptMergedFallbackPR: true,
+        localGitExecOptions: { admissionTier: 'interactive' }
+      }
     )
   })
 })

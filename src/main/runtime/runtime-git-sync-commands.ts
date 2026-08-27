@@ -137,7 +137,10 @@ export class RuntimeGitSyncCommands {
       await provider.rebaseFromBase(target.worktree.path, baseRef)
       return { ok: true }
     }
-    await gitPullRebaseFromBase(target.worktree.path, baseRef, localGitOptionsForTarget(target))
+    await gitPullRebaseFromBase(target.worktree.path, baseRef, {
+      ...localGitOptionsForTarget(target),
+      admissionTier: 'interactive'
+    })
     return { ok: true }
   }
 
@@ -160,7 +163,8 @@ export class RuntimeGitSyncCommands {
     }
     await gitPush(target.worktree.path, publish === true, pushTarget, {
       forceWithLease: forceWithLease === true,
-      ...localGitOptionsForTarget(target)
+      ...localGitOptionsForTarget(target),
+      admissionTier: 'interactive'
     })
     return { ok: true }
   }
