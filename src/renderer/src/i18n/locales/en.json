@@ -11470,6 +11470,9 @@
         },
         "shortcutDefinitionCatalog": {
           "missionControlConflict": "Blocked by Mission Control. Remap here or change it in System Settings."
+        },
+        "NativeChatSupportedAgents": {
+          "label": "Supported agents:"
         }
       },
       "right": {
