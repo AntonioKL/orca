@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { prepareOrchestrationCheckOutput } from './orchestration-check-output'
+import {
+  formatOrchestrationCheckText,
+  prepareOrchestrationCheckOutput
+} from './orchestration-check-output'
 
 describe('prepareOrchestrationCheckOutput', () => {
   it('keeps mixed read-only mail safe and current Run replies executable', () => {
@@ -38,5 +41,63 @@ describe('prepareOrchestrationCheckOutput', () => {
       '[Inspection only: reply and acknowledgment are unavailable.]'
     )
     expect(prepared.formatted).not.toContain('unsafe stale formatter output')
+  })
+})
+
+describe('formatOrchestrationCheckText', () => {
+  it('labels an exact replay and reports matching mail queued behind it', () => {
+    const output = formatOrchestrationCheckText(
+      {
+        count: 1,
+        deliveryId: 'delivery_1',
+        runId: 'run_1',
+        replayed: true,
+        queuedMatchingMessages: true,
+        messages: [
+          {
+            id: 'msg_1',
+            from_handle: 'term_worker',
+            subject: 'Older status',
+            type: 'status'
+          }
+        ]
+      },
+      'term_coord'
+    )
+
+    expect(output).toContain('Delivery delivery_1 [replay: unacknowledged]')
+    expect(output).toContain('Newer messages matching this check are queued behind this Delivery.')
+    expect(output).toContain('orchestration check --run run_1 --ack delivery_1')
+  })
+
+  it('keeps delivery status explicit for formatted and mixed-version output', () => {
+    expect(
+      formatOrchestrationCheckText(
+        {
+          count: 1,
+          deliveryId: 'delivery_new',
+          replayed: false,
+          queuedMatchingMessages: false,
+          messages: [],
+          formatted: 'formatted message'
+        },
+        'term_coord'
+      )
+    ).toContain('Delivery delivery_new [new]')
+    const olderRuntimeOutput = formatOrchestrationCheckText(
+      {
+        count: 1,
+        deliveryId: 'delivery_old_runtime',
+        messages: [],
+        formatted: 'formatted message'
+      },
+      'term_coord'
+    )
+    expect(olderRuntimeOutput).toContain(
+      'Delivery delivery_old_runtime [status unavailable from older runtime]'
+    )
+    expect(olderRuntimeOutput).toContain(
+      'Queued matching-message status is unavailable from this runtime.'
+    )
   })
 })

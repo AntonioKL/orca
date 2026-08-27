@@ -50,8 +50,10 @@ describe('OrchestrationDb Run state', () => {
       expect(first?.messages).toHaveLength(50)
       expect(first?.messages[0].subject).toBe('message 0')
       expect(first?.messages[49].subject).toBe('message 49')
+      expect(first?.queuedMatchingMessages).toBe(true)
       expect(replay?.delivery.id).toBe(first?.delivery.id)
       expect(replay?.replayed).toBe(true)
+      expect(replay?.queuedMatchingMessages).toBe(true)
 
       d.acknowledgeRunDelivery({
         runId: run.id,
@@ -129,6 +131,51 @@ describe('OrchestrationDb Run state', () => {
         wakeTypes: ['worker_done']
       })
       expect(delivery?.messages.map((message) => message.subject)).toEqual(['status', 'done'])
+    })
+
+    it('reports newer matching mail behind an exact replay without exposing it', () => {
+      const d = createDb()
+      const run = createBoundRun(d)
+      const status = d.insertMessage({
+        from: 'a',
+        to: `run:${run.id}`,
+        subject: 'status',
+        runId: run.id
+      })
+      const first = d.getOrCreateRunDelivery({
+        runId: run.id,
+        consumerGeneration: run.consumer_generation
+      })!
+      const question = d.insertMessage({
+        from: 'b',
+        to: `run:${run.id}`,
+        subject: 'question',
+        type: 'question',
+        runId: run.id
+      })
+
+      const replay = d.getOrCreateRunDelivery({
+        runId: run.id,
+        consumerGeneration: run.consumer_generation,
+        wakeTypes: ['worker_done', 'question', 'escalation']
+      })!
+
+      expect(replay).toMatchObject({
+        replayed: true,
+        queuedMatchingMessages: true,
+        delivery: { id: first.delivery.id },
+        messages: [{ id: status.id }]
+      })
+      expect(replay.messages).not.toContainEqual(expect.objectContaining({ id: question.id }))
+      expect(d.getMessageById(question.id)?.read).toBe(0)
+
+      expect(
+        d.getOrCreateRunDelivery({
+          runId: run.id,
+          consumerGeneration: run.consumer_generation,
+          queuedTypes: ['worker_done']
+        })?.queuedMatchingMessages
+      ).toBe(false)
     })
 
     it('fences an outstanding batch when the Run consumer changes', () => {
