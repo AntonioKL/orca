@@ -29,6 +29,7 @@ describe('ensure-native-runtime', () => {
       const binDir = join(projectDir, 'bin')
       copyFileSync(sourceScriptPath, scriptPath)
       writeFakeNativeModules(projectDir)
+      writeNodePtyPatchFile(projectDir)
       writeFakePnpm(binDir)
 
       const result = spawnSync(process.execPath, [scriptPath, '--runtime=node'], {
@@ -43,6 +44,7 @@ describe('ensure-native-runtime', () => {
       expect(result.status, result.stderr).toBe(0)
       const log = readFileSync(logPath, 'utf8')
       expect(log).toContain('pnpm rebuild node-pty\n')
+      expect(log).toContain('build-from-source true\n')
       expect(log.split('\n').filter((line) => line.startsWith('node-pty child '))).toEqual([
         expect.stringMatching(/^node-pty child (?:conpty|pty) marker=false$/),
         expect.stringMatching(/^node-pty child (?:conpty|pty) marker=true$/)
@@ -81,6 +83,7 @@ describe('ensure-native-runtime', () => {
           'Patched node-pty build artifacts are missing; rebuilding native deps.'
         )
         expect(readFileSync(logPath, 'utf8')).toContain('pnpm rebuild node-pty\n')
+        expect(readFileSync(logPath, 'utf8')).toContain('build-from-source true\n')
       } finally {
         rmSync(projectDir, { recursive: true, force: true })
       }
@@ -115,6 +118,7 @@ describe('ensure-native-runtime', () => {
         expect(result.status, result.stderr).toBe(0)
         expect(result.stderr).toContain("expected build/Release so Orca's node-pty patch is active")
         expect(readFileSync(logPath, 'utf8')).toContain('pnpm rebuild node-pty\n')
+        expect(readFileSync(logPath, 'utf8')).toContain('build-from-source true\n')
       } finally {
         rmSync(projectDir, { recursive: true, force: true })
       }
@@ -197,6 +201,14 @@ exports.loadNativeModule = function loadNativeModule(nativeName) {
   if (!markerExists) {
     throw new Error('ABI mismatch sentinel')
   }
+  return {
+    dir: '../build/Release/',
+    module: {
+      listJobProcessIds() {},
+      terminateJob() {},
+      assignCurrentProcessToJob() {}
+    }
+  }
 }
 `
   )
@@ -260,6 +272,10 @@ function writeFakePnpm(binDir) {
 const { appendFileSync, writeFileSync } = require('node:fs')
 
 appendFileSync(process.env.ORCA_NATIVE_TEST_LOG, \`pnpm \${process.argv.slice(2).join(' ')}\\n\`)
+appendFileSync(
+  process.env.ORCA_NATIVE_TEST_LOG,
+  \`build-from-source \${process.env.npm_config_build_from_source ?? 'unset'}\\n\`
+)
 writeFileSync(process.env.ORCA_NATIVE_TEST_MARKER, 'rebuilt')
 `
   )

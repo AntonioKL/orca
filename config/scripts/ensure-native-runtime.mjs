@@ -19,6 +19,7 @@ const NATIVE_MODULES = [
     : [])
 ]
 const NODE_PTY_CONPTY_RUNTIME_FILES = ['conpty.dll', 'OpenConsole.exe']
+const NODE_PTY_PATCH_PATH = resolve(projectDir, 'config', 'patches', 'node-pty@1.1.0.patch')
 const CHILD_CHECK_FLAG = '--check-only'
 
 if (process.argv.includes(CHILD_CHECK_FLAG)) {
@@ -330,16 +331,15 @@ function getPatchedNodePtyRebuildReason() {
 }
 
 function requiresPatchedNodePtySourceBuild() {
-  if (process.platform === 'win32') {
-    return false
-  }
-
-  const nodePtyPatchPath = resolve(projectDir, 'config', 'patches', 'node-pty@1.1.0.patch')
-  if (!existsSync(nodePtyPatchPath)) {
+  if (process.platform === 'win32' || !hasNodePtyPatch()) {
     return false
   }
 
   return existsSync(resolve(projectDir, 'node_modules', 'node-pty'))
+}
+
+function hasNodePtyPatch() {
+  return existsSync(NODE_PTY_PATCH_PATH)
 }
 
 function isNodePtyReleaseBuildDir(nativeDir) {
@@ -353,8 +353,13 @@ function getWindowsBuildNumber() {
 
 function runPnpm(args) {
   const command = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
+  const env =
+    args.includes('node-pty') && hasNodePtyPatch()
+      ? { ...process.env, npm_config_build_from_source: 'true' }
+      : process.env
   const result = spawnSync(command, args, {
     cwd: projectDir,
+    env,
     stdio: 'inherit',
     shell: process.platform === 'win32'
   })
