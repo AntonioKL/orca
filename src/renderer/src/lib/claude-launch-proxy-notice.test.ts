@@ -24,4 +24,9 @@ describe('warnIfConfiguredClaudeProxy', () => {
     warnIfConfiguredClaudeProxy('claude', {})
     expect(warning).not.toHaveBeenCalled()
   })
+
+  it('does not warn for an invalid proxy URL that cannot be injected into the PTY', () => {
+    warnIfConfiguredClaudeProxy('claude', { httpProxyUrl: 'not-a-proxy-url' })
+    expect(warning).not.toHaveBeenCalled()
+  })
 })

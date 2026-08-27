@@ -1,5 +1,6 @@
 import { toast } from 'sonner'
 import type { TuiAgent } from '../../../shared/tui-agent'
+import { normalizeProxyUrl } from '../../../shared/network-proxy'
 
 type ProxySettings = { httpProxyUrl?: string }
 
@@ -8,7 +9,8 @@ export function warnIfConfiguredClaudeProxy(
   agent: TuiAgent,
   settings: ProxySettings | null | undefined
 ): void {
-  if (agent !== 'claude' || !settings?.httpProxyUrl?.trim()) {
+  const proxy = normalizeProxyUrl(settings?.httpProxyUrl)
+  if (agent !== 'claude' || !proxy.ok || !proxy.value) {
     return
   }
   toast.warning(
