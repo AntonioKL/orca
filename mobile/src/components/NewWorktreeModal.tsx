@@ -35,7 +35,7 @@ import { useNewWorktreeDrawerNavigation } from './use-new-worktree-drawer-naviga
 export function NewWorktreeModal(props: NewWorktreeModalProps) {
   const openEpochRef = useRef(0)
   const wasVisibleRef = useRef(false)
-  const clientEpochRef = useRef({ client: props.client, epoch: 0 })
+  const hostEpochRef = useRef({ hostId: props.hostId, epoch: 0 })
 
   // Why: each drawer opening is a fresh form session; remounting resets local
   // form state before paint instead of clearing it in a visible-prop Effect.
@@ -43,13 +43,18 @@ export function NewWorktreeModal(props: NewWorktreeModalProps) {
     openEpochRef.current += 1
   }
   wasVisibleRef.current = props.visible
-  if (clientEpochRef.current.client !== props.client) {
-    clientEpochRef.current = { client: props.client, epoch: clientEpochRef.current.epoch + 1 }
+  // Why: key the session on the HOST, never on the RpcClient object. A reconnect,
+  // forceReconnect, or foreground revival swaps that object for the same host
+  // (see useHostClient), and keying on it silently remounted this form mid-edit
+  // and threw away the picked source. Every client-scoped hook below already
+  // drops responses from a superseded client, so no remount is needed for that.
+  if (hostEpochRef.current.hostId !== props.hostId) {
+    hostEpochRef.current = { hostId: props.hostId, epoch: hostEpochRef.current.epoch + 1 }
   }
 
   return (
     <NewWorktreeModalContent
-      key={`${openEpochRef.current}:${clientEpochRef.current.epoch}`}
+      key={`${openEpochRef.current}:${hostEpochRef.current.epoch}`}
       {...props}
     />
   )

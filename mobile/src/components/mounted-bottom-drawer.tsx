@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import {
   View,
   Pressable,
@@ -88,6 +88,23 @@ export function MountedBottomDrawer({
         topGap: spacing.lg
       })
     : undefined
+
+  // Why: a sheet pinned under a fill picker keeps progress at 1 while the picker
+  // owns the window, so nothing re-applies its transform when the picker leaves.
+  // If the native view was rebuilt underneath (shared modal host swaps the window
+  // contents), it is left with no transform and never paints — a dimmed, dead
+  // screen the user can only escape by dismissing the whole modal. Re-assert the
+  // enter transform whenever a visible sheet takes the window back.
+  const wasInteractiveRef = useRef(interactive)
+  useEffect(() => {
+    const tookWindowBack = visible && interactive && !wasInteractiveRef.current
+    wasInteractiveRef.current = interactive
+    if (!tookWindowBack) {
+      return
+    }
+    translateY.value = 0
+    progress.value = withTiming(1, { duration: SHOW_DURATION })
+  }, [interactive, visible])
 
   useEffect(() => {
     if (visible) {
