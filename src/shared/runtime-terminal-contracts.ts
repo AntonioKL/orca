@@ -26,15 +26,12 @@ export type RuntimeTerminalSummary = {
   writable: boolean
   lastOutputAt: number | null
   preview: string
+  /** Host-resolved agent identity for action consumers; absent when unknown or unsupported. */
+  agentIdentity?: TuiAgent
   /** Absent while running or when the host predates the field; never infer a clean finish. */
   exitCause?: TerminalExitCause
   /** Absent when the host predates the field or could not name the execution host. */
   executionHostId?: ExecutionHostId
-  /**
-   * Host-resolved agent identity for delivery decisions. Titles are presentation text and may
-   * mention other agents; absent means unknown, so identity-based actions must fail closed.
-   */
-  agentIdentity?: TuiAgent
 }
 
 export type RuntimeTerminalVisualTerminalNode = {
