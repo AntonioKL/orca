@@ -39,6 +39,24 @@ export function isLinearSearchResult(result: unknown): result is LinearSearchRes
   )
 }
 
+function isLinearMcpIssue(issue: unknown): boolean {
+  return (
+    isRecord(issue) &&
+    typeof issue.id === 'string' &&
+    typeof issue.identifier === 'string' &&
+    typeof issue.title === 'string' &&
+    typeof issue.url === 'string' &&
+    Array.isArray(issue.labels) &&
+    isLinearWorkspaceCandidate(issue.workspace)
+  )
+}
+
+function isLinearWorkspaceCandidate(workspace: unknown): boolean {
+  return (
+    isRecord(workspace) && typeof workspace.id === 'string' && typeof workspace.name === 'string'
+  )
+}
+
 export function isLinearIssueListResult(result: unknown): result is LinearIssueListResult {
   return (
     isRecord(result) &&
@@ -53,6 +71,7 @@ export function isLinearMcpIssueListResult(result: unknown): result is LinearMcp
   return (
     isRecord(result) &&
     Array.isArray(result.issues) &&
+    result.issues.every(isLinearMcpIssue) &&
     isRecord(result.meta) &&
     (typeof result.meta.limit === 'number' || result.meta.limit === null) &&
     typeof result.meta.hasMore === 'boolean' &&
