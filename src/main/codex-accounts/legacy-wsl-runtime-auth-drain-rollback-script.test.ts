@@ -130,6 +130,8 @@ describe.skipIf(process.platform === 'win32')('legacy WSL auth drain rollback re
     rmSync(watermarkPath)
     mkdirSync(watermarkPath)
     writeFileSync(blockedSourceSessionPath, LATER_SESSION)
+    expect(() => apply(sha256(SOURCE_AUTH), '0', '0', 'full')).toThrow()
+    expect(existsSync(blockedTargetSessionPath)).toBe(false)
     expect(() => apply(sha256(SOURCE_AUTH), '0', '0', 'recent')).toThrow()
     expect(existsSync(blockedTargetSessionPath)).toBe(false)
     rmSync(watermarkPath, { recursive: true })
