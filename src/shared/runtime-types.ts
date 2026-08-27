@@ -95,18 +95,23 @@ export {
   BROWSER_UNAVAILABLE_ERROR_CODE,
   browserUnavailableMessage,
   HEADLESS_RUNTIME_WINDOW_ID,
-  TERMINAL_PTY_DEGRADATION_CAPABILITY,
-  TERMINAL_UNAVAILABLE_ERROR_CODE,
-  terminalUnavailableMessage,
   UNPUBLISHED_WORKTREE_PUBLICATION_EPOCH
 } from './runtime-session-contracts'
+export {
+  TERMINAL_PTY_DEGRADATION_CAPABILITY,
+  TERMINAL_UNAVAILABLE_ERROR_CODE,
+  terminalUnavailableMessage
+} from './runtime-capability-degradation'
+export type {
+  RuntimeBrowserUnavailableReason,
+  RuntimeDegradation,
+  RuntimeTerminalUnavailableReason
+} from './runtime-capability-degradation'
 export type {
   CliRuntimeState,
   CliStatusResult,
   DeviceScope,
   RuntimeBrowserDriverState,
-  RuntimeBrowserUnavailableReason,
-  RuntimeDegradation,
   RuntimeDesktopWindowStatus,
   RuntimeGraphStatus,
   RuntimeMobileSessionBrowserTab,
@@ -133,7 +138,6 @@ export type {
   RuntimeSyncedTab,
   RuntimeSyncWindowGraph,
   RuntimeSyncWindowGraphResult,
-  RuntimeTerminalUnavailableReason,
   RuntimeTerminalDriverState
 } from './runtime-session-contracts'
 export type {
@@ -196,4 +200,3 @@ export type {
   RuntimeMarkdownReadTabResult,
   RuntimeMarkdownSaveTabResult
 } from './mobile-markdown-document'
-

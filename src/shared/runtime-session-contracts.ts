@@ -4,6 +4,10 @@ import type { RemoteServerUpdateSupport } from './remote-server-update'
 import type { RemoteRuntimeSharedConnectionDiagnostics } from './remote-runtime-shared-control-types'
 import type { RuntimeBrowserPlacement } from './runtime-browser-placement'
 import type { RuntimeCapability } from './protocol-version'
+import type {
+  RuntimeBrowserUnavailableReason,
+  RuntimeDegradation
+} from './runtime-capability-degradation'
 import type { TabGroupLayoutNode } from './tab-types'
 import type { TerminalColorOverrides } from './terminal-color-overrides'
 import type { TerminalLayoutSnapshot, TerminalPaneLayoutNode } from './terminal-tab-types'
@@ -25,22 +29,6 @@ export type RuntimeTerminalDriverState =
 export type RuntimeBrowserDriverState = RuntimeTerminalDriverState
 
 export const BROWSER_UNAVAILABLE_ERROR_CODE = 'browser_unavailable' as const
-
-/**
- * Why a host declined browser automation. Members are opaque to clients: new ones
- * ship without a protocol bump, so render `message` and never switch exhaustively
- * (same contract as RuntimeTerminalWaitBlockedReason).
- */
-export type RuntimeBrowserUnavailableReason =
-  | 'unconfigured'
-  | 'driver_missing'
-  | 'executable_not_found'
-  | 'executable_not_executable'
-  | 'electron_start_failed'
-  | 'chromium_start_failed'
-  | 'provider_unhealthy'
-  | 'desktop_window_unavailable'
-  | 'unknown'
 
 // Why: one sentence per cause, each naming the thing the operator can change. The host
 // renders these so an older client still shows an accurate reason it cannot decode.
@@ -67,69 +55,6 @@ export function browserUnavailableMessage(
 ): string {
   const base = BROWSER_UNAVAILABLE_MESSAGES[reason]
   return detail ? `${base} (${detail})` : base
-}
-
-export const TERMINAL_UNAVAILABLE_ERROR_CODE = 'terminal_unavailable' as const
-
-export const TERMINAL_PTY_DEGRADATION_CAPABILITY = 'terminal.pty.v1' as const
-
-/**
- * Why this host cannot spawn PTYs. Same opacity contract as
- * `RuntimeBrowserUnavailableReason`: render `message`, never switch exhaustively.
- *
- * The libc/ABI members exist because they are the failure the dynamic loader owns —
- * `node-pty` is present and resolvable, and loading it kills the process before any
- * `try` can see it (docs/reference/linux-glibc-compatibility.md, #9902). A host that
- * proved this out of process reports it here instead of dying.
- */
-export type RuntimeTerminalUnavailableReason =
-  | 'dependency_missing'
-  | 'libc_floor'
-  | 'abi_mismatch'
-  | 'load_failed'
-  | 'load_crashed'
-  | 'spawn_helper_missing'
-  | 'unknown'
-
-const TERMINAL_UNAVAILABLE_MESSAGES: Record<RuntimeTerminalUnavailableReason, string> = {
-  dependency_missing:
-    'Terminals are unavailable on this host: node-pty has no native binary for this platform. Install or rebuild it, or deploy a build that ships a prebuilt binary for this platform.',
-  libc_floor:
-    "This host's node-pty binary was built against a newer C library than the host provides, so the dynamic loader refuses it. Rebuild node-pty on this host, or deploy a build whose prebuilt binary matches this platform's libc.",
-  abi_mismatch:
-    "This host's node-pty binary was built for a different Node ABI than the running Node, so it cannot be loaded. Rebuild node-pty against this Node version.",
-  load_failed: 'Terminals are unavailable on this host: node-pty failed to load.',
-  load_crashed:
-    'Terminals are unavailable on this host: loading node-pty terminated the probe process, which means the binary is incompatible with this host rather than merely missing.',
-  spawn_helper_missing:
-    "node-pty loaded, but its spawn-helper executable is missing or not executable, so every terminal spawn would fail. Reinstall node-pty on this host.",
-  unknown: 'Terminals are unavailable on this host, and the cause could not be determined.'
-}
-
-export function terminalUnavailableMessage(
-  reason: RuntimeTerminalUnavailableReason,
-  detail?: string
-): string {
-  const base = TERMINAL_UNAVAILABLE_MESSAGES[reason]
-  return detail ? `${base} (${detail})` : base
-}
-
-export type RuntimeDegradation = {
-  /**
-   * Open vocabulary. New codes ship without a protocol bump, so a client must render
-   * `message` and must not switch exhaustively on this — the same contract the `reason`
-   * fields carry.
-   */
-  code: typeof BROWSER_UNAVAILABLE_ERROR_CODE | typeof TERMINAL_UNAVAILABLE_ERROR_CODE
-  capability: 'browser.headless.v1' | typeof TERMINAL_PTY_DEGRADATION_CAPABILITY
-  message: string
-  /**
-   * Machine-readable cause. Optional for mixed-version peers: absence means the host
-   * predates structured causes, NOT that the cause is 'unconfigured'.
-   */
-  reason?: RuntimeBrowserUnavailableReason | RuntimeTerminalUnavailableReason
-  /** Underlying error text when the host has one. Diagnostic only; never load-bearing. */
-  detail?: string
 }
 
 export type RuntimeStatus = {
