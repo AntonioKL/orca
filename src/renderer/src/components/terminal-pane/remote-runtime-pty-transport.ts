@@ -1441,7 +1441,7 @@ export function createRemoteRuntimePtyTransport(
   const sendUnacknowledgedInput = (text: string, queryReply = false): boolean => {
     const targetHandle = handle
     const targetLifecycleEpoch = lifecycleEpoch
-    if (!connected || !targetHandle || recoveryBlocksIo()) {
+    if (!connected || !targetHandle || (recoveryBlocksIo() && !queryReply)) {
       return false
     }
     const stream = getCurrentMultiplexedStream(targetHandle)
@@ -1462,7 +1462,7 @@ export function createRemoteRuntimePtyTransport(
         !connected ||
         lifecycleEpoch !== targetLifecycleEpoch ||
         handle !== targetHandle ||
-        recoveryBlocksIo()
+        (recoveryBlocksIo() && !queryReply)
       ) {
         return
       }
@@ -2588,7 +2588,9 @@ export function createRemoteRuntimePtyTransport(
     sendInputImmediate(data: string): boolean {
       const targetHandle = handle
       const targetLifecycleEpoch = lifecycleEpoch
-      if (!connected || !targetHandle || recoveryBlocksIo()) {
+      // Query replies remain best-effort writable while recovery is backoff-latched;
+      // lifecycle and handle fencing below still prevents delivery to a replacement PTY.
+      if (!connected || !targetHandle) {
         return false
       }
       if (!data) {
@@ -2597,12 +2599,7 @@ export function createRemoteRuntimePtyTransport(
       // Why: wait behind async validation, but keep the reply as its own host-classifiable write.
       if (inputBatcher.hasPendingValidation()) {
         inputBatcher.enqueueAfterValidation(() => {
-          if (
-            !connected ||
-            lifecycleEpoch !== targetLifecycleEpoch ||
-            handle !== targetHandle ||
-            recoveryBlocksIo()
-          ) {
+          if (!connected || lifecycleEpoch !== targetLifecycleEpoch || handle !== targetHandle) {
             return
           }
           const pending = inputBatcher.takePending()
