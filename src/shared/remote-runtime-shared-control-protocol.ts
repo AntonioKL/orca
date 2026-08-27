@@ -71,10 +71,10 @@ export function getCleanupRequest(
     return cleanupBySubscriptionId('notifications.unsubscribe', subscription.remoteSubscriptionId)
   }
   if (subscription.method === 'agent.status.subscribe') {
-    return cleanupBySubscriptionId(
-      'agent.status.unsubscribe',
-      subscription.remoteSubscriptionId ?? subscription.requestId
-    )
+    if (!subscription.remoteSubscriptionId) {
+      return null
+    }
+    return cleanupBySubscriptionId('agent.status.unsubscribe', subscription.remoteSubscriptionId)
   }
   if (
     subscription.method === 'runtime.clientEvents.subscribe' &&
