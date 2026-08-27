@@ -2,7 +2,12 @@ import type { AgentStatusEntry, AgentStatusOrchestrationContext } from './agent-
 import type { BrowserCertificateFailure, BrowserLoadError } from './browser-workspace-types'
 import type { RemoteServerUpdateSupport } from './remote-server-update'
 import type { RemoteRuntimeSharedConnectionDiagnostics } from './remote-runtime-shared-control-types'
+import type { RuntimeBrowserPlacement } from './runtime-browser-placement'
 import type { RuntimeCapability } from './protocol-version'
+import type {
+  RuntimeBrowserUnavailableReason,
+  RuntimeDegradation
+} from './runtime-capability-degradation'
 import type { TabGroupLayoutNode } from './tab-types'
 import type { TerminalColorOverrides } from './terminal-color-overrides'
 import type { TerminalLayoutSnapshot, TerminalPaneLayoutNode } from './terminal-tab-types'
@@ -24,22 +29,6 @@ export type RuntimeTerminalDriverState =
 export type RuntimeBrowserDriverState = RuntimeTerminalDriverState
 
 export const BROWSER_UNAVAILABLE_ERROR_CODE = 'browser_unavailable' as const
-
-/**
- * Why a host declined browser automation. Members are opaque to clients: new ones
- * ship without a protocol bump, so render `message` and never switch exhaustively
- * (same contract as RuntimeTerminalWaitBlockedReason).
- */
-export type RuntimeBrowserUnavailableReason =
-  | 'unconfigured'
-  | 'driver_missing'
-  | 'executable_not_found'
-  | 'executable_not_executable'
-  | 'electron_start_failed'
-  | 'chromium_start_failed'
-  | 'provider_unhealthy'
-  | 'desktop_window_unavailable'
-  | 'unknown'
 
 // Why: one sentence per cause, each naming the thing the operator can change. The host
 // renders these so an older client still shows an accurate reason it cannot decode.
@@ -66,19 +55,6 @@ export function browserUnavailableMessage(
 ): string {
   const base = BROWSER_UNAVAILABLE_MESSAGES[reason]
   return detail ? `${base} (${detail})` : base
-}
-
-export type RuntimeDegradation = {
-  code: typeof BROWSER_UNAVAILABLE_ERROR_CODE
-  capability: 'browser.headless.v1'
-  message: string
-  /**
-   * Machine-readable cause. Optional for mixed-version peers: absence means the host
-   * predates structured causes, NOT that the cause is 'unconfigured'.
-   */
-  reason?: RuntimeBrowserUnavailableReason
-  /** Underlying error text when the host has one. Diagnostic only; never load-bearing. */
-  detail?: string
 }
 
 export type RuntimeStatus = {
@@ -247,6 +223,9 @@ export type RuntimeMobileSessionBrowserTab = {
   title: string
   browserWorkspaceId: string
   browserPageId: string | null
+  browserProfileId?: string
+  executionHostKey?: string
+  placement?: RuntimeBrowserPlacement
   url: string
   loading: boolean
   canGoBack: boolean
@@ -311,6 +290,16 @@ export type RuntimeMobileSessionTabCloseResult = {
 
 export type RuntimeSessionTabCloseReason = 'user' | 'pty-exit' | 'cleanup'
 
+/**
+ * The publication epoch a runtime answers with for a worktree it has published nothing for yet —
+ * the state every worktree is in for a moment after the host process restarts.
+ *
+ * Paired with `snapshotVersion: 0` it marks a synthesized placeholder, not a host answer: the
+ * runtime is saying "ask me later", not "those tabs are gone". Clients must not read absence from
+ * such a frame as evidence a tab was closed.
+ */
+export const UNPUBLISHED_WORKTREE_PUBLICATION_EPOCH = 'none'
+
 export type RuntimeMobileSessionTabsSnapshot = {
   worktree: string
   publicationEpoch: string
@@ -334,6 +323,16 @@ export type RuntimeMobileSessionTabsResult = {
   tabGroups?: RuntimeMobileSessionTabGroup[]
   tabGroupLayout?: TabGroupLayoutNode | null
   tabs: RuntimeMobileSessionClientTab[]
+  /**
+   * Set while a freshly started runtime has not yet taken back the client-hosted pages its paired
+   * hosts are still holding. Such a snapshot is authoritative about terminals, which it rehydrated
+   * from disk, but silently empty of browser rows it has simply not heard about yet — so a client
+   * must not read the absence of its own client-hosted rows here as "the host closed them".
+   *
+   * Always bounded: the runtime clears it once a host attaches, and drops it on a deadline so a
+   * host that never returns cannot hold rows open forever.
+   */
+  clientHostedPagesUnreconciled?: true
 }
 
 export type RuntimeMobileSessionCreateTerminalResult = {
