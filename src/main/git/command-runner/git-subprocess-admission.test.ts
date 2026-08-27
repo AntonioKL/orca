@@ -349,6 +349,26 @@ describe('GitAdmissionScheduler', () => {
     expect(order).toEqual(Array.from({ length: 20 }, (_, index) => index))
   })
 
+  it('drains a large saturated FIFO burst without retaining settled waiters', async () => {
+    const scheduler = new GitAdmissionScheduler({ generalCap: 1, generalHeadroom: 0 })
+    const running = await scheduler.acquire(local('status'))
+    const count = 4_000
+    const order: number[] = []
+    const queued = Array.from({ length: count }, (_, index) =>
+      scheduler.acquire(local('background')).then((grant) => {
+        order.push(index)
+        grant.release()
+      })
+    )
+
+    expect(scheduler.snapshot().queued).toBe(count)
+    running.release()
+    await Promise.all(queued)
+
+    expect(order).toEqual(Array.from({ length: count }, (_, index) => index))
+    expect(scheduler.snapshot()).toMatchObject({ queued: 0, queuedWaiters: [] })
+  })
+
   it('captures killswitch state in each release closure', async () => {
     const scheduler = schedulerWithOneSlot()
     _resetGitAdmissionForTests(scheduler)

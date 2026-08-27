@@ -1,6 +1,7 @@
 import { uncRouteKey } from '../../providers/working-directory-validation'
 import { classifyGitCommand } from '../wsl-direct-git-read-commands'
 import { createAbortError } from './abort-error'
+import { GitAdmissionWaiterQueue } from './git-admission-waiter-queue'
 import {
   ADMISSION_TIER_VALUE,
   AdmissionEventPublisher,
@@ -42,7 +43,7 @@ function routeKey(request: GitAdmissionRequest): string | null {
 export class GitAdmissionScheduler {
   private readonly config: AdmissionSchedulerConfig
   private readonly budgets = new Map<string, AdmissionBudget>()
-  private readonly waiters: AdmissionWaiter[] = []
+  private readonly waiters = new GitAdmissionWaiterQueue()
   private nextWaiterId = 0
   private readonly eventPublisher: AdmissionEventPublisher
 
@@ -72,13 +73,17 @@ export class GitAdmissionScheduler {
         reject,
         onAbort: () => this.abort(waiter)
       }
+      this.waiters.enqueue(waiter)
       request.signal?.addEventListener('abort', waiter.onAbort, { once: true })
       if (request.signal?.aborted) {
         this.abort(waiter)
         return
       }
-      this.waiters.push(waiter)
-      this.drain()
+      // Adding a blocked waiter cannot make an older waiter runnable. Avoid a
+      // queue scan for every arrival while the fixed-size budget is saturated.
+      if (this.slotKindFor(waiter)) {
+        this.drain(admissionClass)
+      }
     })
   }
 
@@ -87,9 +92,9 @@ export class GitAdmissionScheduler {
     queuedWaiters: { id: number; args: readonly string[]; tier: AdmissionWaiter['tier'] }[]
     budgets: Record<string, { baseUsed: number; headroomUsed: number }>
   } {
-    const queuedWaiters = this.waiters.filter((waiter) => waiter.state === 'queued')
+    const queuedWaiters = this.waiters.snapshot()
     return {
-      queued: queuedWaiters.length,
+      queued: this.waiters.count,
       queuedWaiters: queuedWaiters.map(({ id, args, tier }) => ({ id, args, tier })),
       budgets: Object.fromEntries(
         [...this.budgets].map(([key, budget]) => [
@@ -156,35 +161,28 @@ export class GitAdmissionScheduler {
     })
   }
 
-  private drain(): void {
-    let granted = true
-    while (granted) {
-      granted = false
+  private slotKindFor(waiter: AdmissionWaiter): AdmissionSlotKind | null {
+    return this.fits(waiter, 'base')
+      ? 'base'
+      : waiter.tier === 'interactive' && this.fits(waiter, 'headroom')
+        ? 'headroom'
+        : null
+  }
+
+  private drain(admissionClass: AdmissionClass): void {
+    while (true) {
       const now = this.config.now()
-      const ordered = this.waiters
-        .filter((waiter) => waiter.state === 'queued')
-        .sort(
-          (left, right) =>
-            this.effectiveTier(left, now) - this.effectiveTier(right, now) || left.id - right.id
-        )
-      for (const waiter of ordered) {
-        if (waiter.signal?.aborted) {
-          this.abort(waiter)
-          continue
-        }
-        const slotKind = this.fits(waiter, 'base')
-          ? 'base'
-          : waiter.tier === 'interactive' && this.fits(waiter, 'headroom')
-            ? 'headroom'
-            : null
-        if (!slotKind) {
-          continue
-        }
-        this.grant(waiter, slotKind, now)
-        granted = true
+      const selected = this.waiters.nextFitting(
+        admissionClass,
+        (waiter) => this.effectiveTier(waiter, now),
+        (waiter) => this.slotKindFor(waiter),
+        (waiter) => this.abort(waiter)
+      )
+      if (!selected) {
+        return
       }
+      this.grant(selected.waiter, selected.slotKind, now)
     }
-    this.pruneBudgets()
   }
 
   private grant(waiter: AdmissionWaiter, slotKind: AdmissionSlotKind, now: number): void {
@@ -198,6 +196,7 @@ export class GitAdmissionScheduler {
         budget.headroomUsed += 1
       }
     }
+    this.waiters.dequeue(waiter)
     const queueWaitMs = Math.max(0, now - waiter.enqueuedAt)
     this.publishEvent(waiter, slotKind, 'grant', queueWaitMs)
     queueMicrotask(() => {
@@ -210,7 +209,6 @@ export class GitAdmissionScheduler {
         queueWaitMs,
         release: this.releaseOnce(waiter, slotKind, queueWaitMs)
       })
-      this.removeWaiter(waiter)
     })
   }
 
@@ -234,7 +232,8 @@ export class GitAdmissionScheduler {
         }
       }
       this.publishEvent(waiter, slotKind, 'release', queueWaitMs)
-      this.drain()
+      this.pruneRouteBudgets(waiter.budgetKeys)
+      this.drain(waiter.admissionClass)
     }
   }
 
@@ -249,18 +248,14 @@ export class GitAdmissionScheduler {
         Math.max(0, this.config.now() - waiter.enqueuedAt)
       )()
     }
+    const wasQueued = waiter.state === 'queued'
     waiter.state = 'settled'
     waiter.signal?.removeEventListener('abort', waiter.onAbort)
-    this.removeWaiter(waiter)
-    waiter.reject(createAbortError())
-    this.drain()
-  }
-
-  private removeWaiter(waiter: AdmissionWaiter): void {
-    const index = this.waiters.indexOf(waiter)
-    if (index !== -1) {
-      this.waiters.splice(index, 1)
+    if (wasQueued) {
+      this.waiters.dequeue(waiter)
+      this.pruneRouteBudgets(waiter.budgetKeys)
     }
+    waiter.reject(createAbortError())
   }
 
   private publishEvent(
@@ -274,21 +269,20 @@ export class GitAdmissionScheduler {
       waiter,
       slotKind,
       queueWaitMs,
-      queued: this.waiters.filter((candidate) => candidate.state === 'queued').length,
+      queued: this.waiters.count,
       budgets: this.budgets
     })
   }
 
-  private pruneBudgets(): void {
-    const queuedKeys = new Set(
-      this.waiters.flatMap((waiter) => (waiter.state === 'queued' ? waiter.budgetKeys : []))
-    )
-    for (const [key, budget] of this.budgets) {
+  private pruneRouteBudgets(keys: readonly string[]): void {
+    for (const key of keys) {
+      const budget = this.budgets.get(key)
       if (
+        budget &&
         key.startsWith('route:') &&
         budget.baseUsed === 0 &&
         budget.headroomUsed === 0 &&
-        !queuedKeys.has(key)
+        !this.waiters.hasBudget(key)
       ) {
         this.budgets.delete(key)
       }
