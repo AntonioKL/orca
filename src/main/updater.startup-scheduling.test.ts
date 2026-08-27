@@ -216,11 +216,17 @@ describe('updater', () => {
 
     const { setupAutoUpdater } = await import('./updater')
 
+    // Why: a startup check also arms its own 24h timer, which would fire at the same boundary as the
+    // reschedule under test; entering 23h in makes the startup timer fire the check itself, so only
+    // the result handler's re-arm can produce a check 24h later.
     setupAutoUpdater(mainWindow as never, {
-      getLastUpdateCheckAt: () => null,
+      getLastUpdateCheckAt: () => Date.now() - 23 * 60 * 60 * 1000,
       setLastUpdateCheckAt
     })
 
+    expect(autoUpdaterMock.checkForUpdates).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000)
     await vi.waitFor(() => {
       expect(autoUpdaterMock.checkForUpdates).toHaveBeenCalledTimes(1)
     })
