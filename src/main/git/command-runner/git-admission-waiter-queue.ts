@@ -10,16 +10,78 @@ type WaiterLane = {
   items: AdmissionWaiter[]
   head: number
   count: number
+  baseEligible: boolean
+  headroomEligible: boolean
+  version: number
 }
 
 const TIERS = ['interactive', 'status', 'background'] as const
-const createLane = (): WaiterLane => ({ items: [], head: 0, count: 0 })
+const createLane = (): WaiterLane => ({
+  items: [],
+  head: 0,
+  count: 0,
+  baseEligible: false,
+  headroomEligible: false,
+  version: 0
+})
 type TierLanes = Record<GitAdmissionTier, Map<string | null, WaiterLane>>
 const createTierLanes = (): TierLanes => ({
   interactive: new Map(),
   status: new Map(),
   background: new Map()
 })
+type Candidate = { lane: WaiterLane; waiter: AdmissionWaiter; version: number }
+
+class CandidateHeap {
+  private readonly items: Candidate[] = []
+
+  push(candidate: Candidate): void {
+    this.items.push(candidate)
+    let index = this.items.length - 1
+    while (index > 0) {
+      const parent = Math.floor((index - 1) / 2)
+      if (this.items[parent].waiter.id <= candidate.waiter.id) {
+        break
+      }
+      this.items[index] = this.items[parent]
+      index = parent
+    }
+    this.items[index] = candidate
+  }
+
+  peek(valid: (candidate: Candidate) => boolean): Candidate | null {
+    // Eligibility changes invalidate by version so route updates stay O(log N).
+    while (this.items.length > 0 && !valid(this.items[0])) {
+      this.pop()
+    }
+    return this.items[0] ?? null
+  }
+
+  private pop(): void {
+    const last = this.items.pop()
+    if (!last || this.items.length === 0) {
+      return
+    }
+    let index = 0
+    while (true) {
+      const left = index * 2 + 1
+      if (left >= this.items.length) {
+        break
+      }
+      const right = left + 1
+      const child =
+        right < this.items.length && this.items[right].waiter.id < this.items[left].waiter.id
+          ? right
+          : left
+      if (this.items[child].waiter.id >= last.waiter.id) {
+        break
+      }
+      this.items[index] = this.items[child]
+      index = child
+    }
+    this.items[index] = last
+  }
+}
 
 export class GitAdmissionWaiterQueue {
   private readonly lanes: Record<AdmissionClass, TierLanes> = {
@@ -27,6 +89,23 @@ export class GitAdmissionWaiterQueue {
     network: createTierLanes()
   }
   private readonly countsByBudget = new Map<string, number>()
+  private readonly baseCandidates: Record<AdmissionClass, Record<GitAdmissionTier, CandidateHeap>> =
+    {
+      general: {
+        interactive: new CandidateHeap(),
+        status: new CandidateHeap(),
+        background: new CandidateHeap()
+      },
+      network: {
+        interactive: new CandidateHeap(),
+        status: new CandidateHeap(),
+        background: new CandidateHeap()
+      }
+    }
+  private readonly headroomCandidates: Record<AdmissionClass, CandidateHeap> = {
+    general: new CandidateHeap(),
+    network: new CandidateHeap()
+  }
   private totalCount = 0
 
   get count(): number {
@@ -46,6 +125,9 @@ export class GitAdmissionWaiterQueue {
     for (const key of waiter.budgetKeys) {
       this.countsByBudget.set(key, (this.countsByBudget.get(key) ?? 0) + 1)
     }
+    if (lane.count === 1) {
+      this.publishLaneHead(waiter.admissionClass, waiter.tier, lane)
+    }
   }
 
   dequeue(waiter: AdmissionWaiter): void {
@@ -64,9 +146,35 @@ export class GitAdmissionWaiterQueue {
         this.countsByBudget.set(key, current - 1)
       }
     }
+    const previousHead = lane.items[lane.head]
     this.compact(lane)
     if (lane.count === 0) {
+      lane.version += 1
       lanes.delete(waiter.route)
+    } else if (lane.items[lane.head] !== previousHead) {
+      lane.version += 1
+      this.publishLaneHead(waiter.admissionClass, waiter.tier, lane)
+    }
+  }
+
+  updateRouteEligibility(
+    admissionClass: AdmissionClass,
+    route: string | null,
+    baseEligible: boolean,
+    headroomEligible: boolean
+  ): void {
+    for (const tier of TIERS) {
+      const lane = this.lanes[admissionClass][tier].get(route)
+      if (
+        !lane ||
+        (lane.baseEligible === baseEligible && lane.headroomEligible === headroomEligible)
+      ) {
+        continue
+      }
+      lane.baseEligible = baseEligible
+      lane.headroomEligible = headroomEligible
+      lane.version += 1
+      this.publishLaneHead(admissionClass, tier, lane)
     }
   }
 
@@ -89,39 +197,66 @@ export class GitAdmissionWaiterQueue {
   nextFitting(
     admissionClass: AdmissionClass,
     effectiveTier: (waiter: AdmissionWaiter) => number,
-    slotKindFor: (waiter: AdmissionWaiter) => AdmissionSlotKind | null,
+    allowBase: boolean,
+    allowHeadroom: boolean,
     abort: (waiter: AdmissionWaiter) => void
   ): SelectedWaiter | null {
-    let selected: (SelectedWaiter & { tier: number }) | null = null
-    for (const rawTier of TIERS) {
-      for (const lane of this.lanes[admissionClass][rawTier].values()) {
-        for (let index = lane.head; index < lane.items.length; index += 1) {
-          const waiter = lane.items[index]
-          if (waiter.state !== 'queued') {
-            continue
+    while (true) {
+      const candidates: SelectedWaiter[] = []
+      if (allowBase) {
+        // Aging preserves order within a raw tier, so only its oldest eligible head can win.
+        for (const tier of TIERS) {
+          const candidate = this.peekValid(this.baseCandidates[admissionClass][tier], 'base')
+          if (candidate) {
+            candidates.push({ waiter: candidate.waiter, slotKind: 'base' })
           }
-          if (waiter.signal?.aborted) {
-            abort(waiter)
-            continue
-          }
-          const slotKind = slotKindFor(waiter)
-          if (slotKind) {
-            const tier = effectiveTier(waiter)
-            if (
-              !selected ||
-              tier < selected.tier ||
-              (tier === selected.tier && waiter.id < selected.waiter.id)
-            ) {
-              selected = { waiter, slotKind, tier }
-            }
-          }
-          // Every waiter in this route lane has the same budget shape, so a
-          // blocked head proves the rest cannot fit either.
-          break
         }
       }
+      if (allowHeadroom) {
+        const candidate = this.peekValid(this.headroomCandidates[admissionClass], 'headroom')
+        if (candidate) {
+          candidates.push({ waiter: candidate.waiter, slotKind: 'headroom' })
+        }
+      }
+      const selected = candidates.sort(
+        (left, right) =>
+          effectiveTier(left.waiter) - effectiveTier(right.waiter) ||
+          left.waiter.id - right.waiter.id ||
+          (left.slotKind === 'base' ? -1 : 1)
+      )[0]
+      if (!selected || !selected.waiter.signal?.aborted) {
+        return selected ?? null
+      }
+      abort(selected.waiter)
     }
-    return selected
+  }
+
+  private publishLaneHead(
+    admissionClass: AdmissionClass,
+    tier: GitAdmissionTier,
+    lane: WaiterLane
+  ): void {
+    const waiter = lane.items[lane.head]
+    if (!waiter || waiter.state !== 'queued') {
+      return
+    }
+    const candidate = { lane, waiter, version: lane.version }
+    if (lane.baseEligible) {
+      this.baseCandidates[admissionClass][tier].push(candidate)
+    }
+    if (tier === 'interactive' && lane.headroomEligible) {
+      this.headroomCandidates[admissionClass].push(candidate)
+    }
+  }
+
+  private peekValid(heap: CandidateHeap, slotKind: AdmissionSlotKind): Candidate | null {
+    return heap.peek(
+      ({ lane, waiter, version }) =>
+        version === lane.version &&
+        waiter === lane.items[lane.head] &&
+        waiter.state === 'queued' &&
+        (slotKind === 'base' ? lane.baseEligible : lane.headroomEligible)
+    )
   }
 
   private compact(lane: WaiterLane): void {

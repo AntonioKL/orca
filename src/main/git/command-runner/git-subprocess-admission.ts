@@ -74,6 +74,7 @@ export class GitAdmissionScheduler {
         onAbort: () => this.abort(waiter)
       }
       this.waiters.enqueue(waiter)
+      this.refreshRouteEligibility(admissionClass, route)
       request.signal?.addEventListener('abort', waiter.onAbort, { once: true })
       if (request.signal?.aborted) {
         this.abort(waiter)
@@ -172,10 +173,12 @@ export class GitAdmissionScheduler {
   private drain(admissionClass: AdmissionClass): void {
     while (true) {
       const now = this.config.now()
+      const globalBudget = this.ensureBudget(admissionClass)
       const selected = this.waiters.nextFitting(
         admissionClass,
         (waiter) => this.effectiveTier(waiter, now),
-        (waiter) => this.slotKindFor(waiter),
+        globalBudget.baseUsed < globalBudget.baseCapacity,
+        globalBudget.headroomUsed < globalBudget.headroomCapacity,
         (waiter) => this.abort(waiter)
       )
       if (!selected) {
@@ -196,6 +199,7 @@ export class GitAdmissionScheduler {
         budget.headroomUsed += 1
       }
     }
+    this.refreshRouteEligibility(waiter.admissionClass, waiter.route)
     this.waiters.dequeue(waiter)
     const queueWaitMs = Math.max(0, now - waiter.enqueuedAt)
     this.publishEvent(waiter, slotKind, 'grant', queueWaitMs)
@@ -231,6 +235,7 @@ export class GitAdmissionScheduler {
           budget.headroomUsed -= 1
         }
       }
+      this.refreshRouteEligibility(waiter.admissionClass, waiter.route)
       this.publishEvent(waiter, slotKind, 'release', queueWaitMs)
       this.pruneRouteBudgets(waiter.budgetKeys)
       this.drain(waiter.admissionClass)
@@ -287,6 +292,16 @@ export class GitAdmissionScheduler {
         this.budgets.delete(key)
       }
     }
+  }
+
+  private refreshRouteEligibility(admissionClass: AdmissionClass, route: string | null): void {
+    const budget = route ? this.ensureBudget(`route:${admissionClass}:${route}`) : null
+    this.waiters.updateRouteEligibility(
+      admissionClass,
+      route,
+      !budget || budget.baseUsed < budget.baseCapacity,
+      !budget || budget.headroomUsed < budget.headroomCapacity
+    )
   }
 }
 

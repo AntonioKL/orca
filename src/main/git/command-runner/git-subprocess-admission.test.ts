@@ -411,6 +411,52 @@ describe('GitAdmissionScheduler', () => {
     expect(scheduler.snapshot()).toMatchObject({ queued: 0, queuedWaiters: [] })
   })
 
+  it('selects one eligible route without scanning thousands of saturated routes', async () => {
+    const routeCount = 2_000
+    const scheduler = new GitAdmissionScheduler({
+      generalCap: routeCount,
+      generalHeadroom: 0,
+      routeCap: 1,
+      routeHeadroom: 0
+    })
+    const running = await Promise.all(
+      Array.from({ length: routeCount }, (_, index) =>
+        scheduler.acquire({ ...local('background'), wslDistro: `distro-${index}` })
+      )
+    )
+    let aborted = false
+    let abortedReads = 0
+    const abortListeners = new Set<() => void>()
+    const signal = {
+      get aborted() {
+        abortedReads += 1
+        return aborted
+      },
+      addEventListener: (_event: string, listener: () => void) => abortListeners.add(listener),
+      removeEventListener: (_event: string, listener: () => void) => abortListeners.delete(listener)
+    } as unknown as AbortSignal
+    const queued = Array.from({ length: routeCount }, (_, index) =>
+      scheduler
+        .acquire({ ...local('background'), wslDistro: `distro-${index}`, signal })
+        .then((grant) => grant.release())
+    )
+    abortedReads = 0
+
+    running.at(-1)?.release()
+    await queued.at(-1)
+
+    expect(abortedReads).toBeLessThanOrEqual(2)
+    expect(scheduler.snapshot().queued).toBe(routeCount - 1)
+
+    aborted = true
+    for (const listener of abortListeners) {
+      listener()
+    }
+    await Promise.allSettled(queued.slice(0, -1))
+    running.slice(0, -1).forEach((grant) => grant.release())
+    expect(scheduler.snapshot()).toMatchObject({ queued: 0, queuedWaiters: [] })
+  })
+
   it('captures killswitch state in each release closure', async () => {
     const scheduler = schedulerWithOneSlot()
     _resetGitAdmissionForTests(scheduler)

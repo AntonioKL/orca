@@ -22194,6 +22194,7 @@ export class OrcaRuntimeService {
         ['clone', '--progress', '--', trimmedUrl, clonePath],
         {
           cwd: trimmedDestination,
+          admissionTier: 'interactive',
           // Why: without the non-interactive guard, a clone that needs GitHub
           // auth makes Git Credential Manager pop its "Connect to GitHub" OAuth
           // window on Windows; in a network-restricted env the browser/device

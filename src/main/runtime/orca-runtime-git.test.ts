@@ -371,6 +371,7 @@ describe('RuntimeGitCommands', () => {
     })
 
     expect(mocks.getStagedCommitContext).toHaveBeenCalledWith(worktreePath, {
+      admissionTier: 'interactive',
       wslDistro: 'Ubuntu'
     })
     expect(prepareForCodexLaunch).toHaveBeenCalledWith({
