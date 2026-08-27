@@ -268,6 +268,56 @@ describe('local structured session tab projection', () => {
     expectExactSplit(hydrated)
   })
 
+  it('repairs stale legacy active pointers when restart republishes the native tab', () => {
+    const state = createSnapshot()
+    const restartedState: WebSessionTabsSyncState = {
+      ...state,
+      activeTabId: TERMINAL_ID,
+      activeTabIdByWorktree: { [WORKTREE_ID]: TERMINAL_ID },
+      activeTabType: 'terminal',
+      activeTabTypeByWorktree: { [WORKTREE_ID]: 'terminal' },
+      activeGroupIdByWorktree: { [WORKTREE_ID]: SECONDARY_GROUP }
+    }
+    const snapshot = {
+      worktree: WORKTREE_ID,
+      publicationEpoch: 'structured:restart-1',
+      snapshotVersion: 1,
+      activeGroupId: SECONDARY_GROUP,
+      activeTabId: 'agent-session:codex-1',
+      activeTabType: 'agent-session' as const,
+      tabGroups: [
+        {
+          id: SECONDARY_GROUP,
+          activeTabId: 'agent-session:codex-1',
+          tabOrder: ['agent-session:codex-1']
+        }
+      ],
+      tabs: [
+        {
+          type: 'agent-session' as const,
+          id: 'agent-session:codex-1',
+          title: 'Codex Chat',
+          sessionId: 'codex-1',
+          agent: 'codex' as const,
+          isActive: true
+        }
+      ]
+    } satisfies RuntimeMobileSessionTabsResult
+
+    const projected = projectLocalStructuredSessionTabs(snapshot)
+    const patch = applyWebSessionTabsSnapshot(
+      restartedState,
+      projected,
+      'local-structured-session',
+      1_700_000_000_000,
+      { preserveLocalLayout: true }
+    )
+    const applied = { ...restartedState, ...patch } as WebSessionTabsSyncState
+
+    expect(applied.activeTabTypeByWorktree[WORKTREE_ID]).toBe('agent-session')
+    expect(applied.activeTabIdByWorktree[WORKTREE_ID]).toBe(STRUCTURED_ID)
+  })
+
   it('honors the focus intent for a newly published local structured tab', () => {
     const initial = createSnapshot()
     const state: WebSessionTabsSyncState = {

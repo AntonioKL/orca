@@ -3162,6 +3162,13 @@ function applyWebSessionTabsSnapshotWithContext(
     worktreeId,
     nextUnifiedTabs ?? []
   )
+  const currentVisibleStructuredTabId =
+    currentVisibleUnifiedTabId &&
+    nextUnifiedTabs?.find(
+      (tab) => tab.id === currentVisibleUnifiedTabId && tab.contentType === 'agent-session'
+    )
+      ? currentVisibleUnifiedTabId
+      : null
   const activeGroupId = state.activeGroupIdByWorktree[worktreeId]
   // Why: Open Preview to the Side can activate an empty reserved group before the host
   // browser lands. A snapshot that still has the host terminal active must not treat
@@ -3751,12 +3758,14 @@ function applyWebSessionTabsSnapshotWithContext(
   )
   const nextActiveTabIdByWorktree =
     (state.activeTabIdByWorktree[worktreeId] ?? null) !==
-    (intentMirroredAgent?.unifiedTab.id ?? nextActiveTerminalId)
+    (intentMirroredAgent?.unifiedTab.id ?? currentVisibleStructuredTabId ?? nextActiveTerminalId)
       ? withWorktreeEntry(
           state,
           'activeTabIdByWorktree',
           worktreeId,
-          intentMirroredAgent?.unifiedTab.id ?? nextActiveTerminalId,
+          intentMirroredAgent?.unifiedTab.id ??
+            currentVisibleStructuredTabId ??
+            nextActiveTerminalId,
           (current, next) => (current ?? null) === next,
           batchContext,
           false
@@ -3811,19 +3820,21 @@ function applyWebSessionTabsSnapshotWithContext(
   const currentVisibleTabType =
     state.activeTabTypeByWorktree[worktreeId] ?? (isActiveWorktree ? state.activeTabType : null)
   const currentVisibleTabTypeStillValid =
-    currentVisibleTabType === 'agent-session' &&
-    currentVisibleUnifiedTabId &&
-    nextUnifiedTabs?.some(
-      (tab) => tab.id === currentVisibleUnifiedTabId && tab.contentType === 'agent-session'
-    )
+    currentVisibleStructuredTabId !== null
       ? ('agent-session' as const)
-      : currentVisibleTabType === 'browser' && currentActiveBrowserStillExists
-        ? ('browser' as const)
-        : currentVisibleTabType === 'editor' && currentActiveEditorStillExists
-          ? ('editor' as const)
-          : currentVisibleTabType === 'terminal' && currentActiveTerminalStillExists
-            ? ('terminal' as const)
-            : null
+      : currentVisibleTabType === 'agent-session' &&
+          currentVisibleUnifiedTabId &&
+          nextUnifiedTabs?.some(
+            (tab) => tab.id === currentVisibleUnifiedTabId && tab.contentType === 'agent-session'
+          )
+        ? ('agent-session' as const)
+        : currentVisibleTabType === 'browser' && currentActiveBrowserStillExists
+          ? ('browser' as const)
+          : currentVisibleTabType === 'editor' && currentActiveEditorStillExists
+            ? ('editor' as const)
+            : currentVisibleTabType === 'terminal' && currentActiveTerminalStillExists
+              ? ('terminal' as const)
+              : null
   const activeUnifiedTab =
     nextActiveUnifiedTabId && nextUnifiedTabs
       ? (nextUnifiedTabs.find((tab) => tab.id === nextActiveUnifiedTabId) ?? null)
