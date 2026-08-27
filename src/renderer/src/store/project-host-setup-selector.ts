@@ -143,7 +143,8 @@ export function getProjectHostSetupProjectionFromState(
     const coveredRepoIds = new Set<string>()
     for (const setup of state.projectHostSetups) {
       const repoId = typeof setup.repoId === 'string' ? setup.repoId : ''
-      if (repoIds.has(repoId)) {
+      // Why `repoId &&`: an empty repoId matches no repo, matching the normalizer's lookup guard.
+      if (repoId && repoIds.has(repoId)) {
         coveredRepoIds.add(repoId)
       }
       if (repoIds.has(setup.id)) {

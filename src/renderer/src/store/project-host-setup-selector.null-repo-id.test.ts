@@ -175,13 +175,30 @@ describe('project host setup projection with a non-string repoId', () => {
     })
 
     it('keeps projects in input order with their identities intact', () => {
+      // Why two: a single-project fixture cannot detect reordering.
+      const twoProjects = [projects[0], { ...projects[0], id: 'project-2' }] as Project[]
       const projection = getProjectHostSetupProjectionFromState({
         repos,
+        projects: twoProjects,
+        projectHostSetups: coveringSetups(null)
+      })
+      expect(projection.projects.map((project) => project.id)).toEqual(['project-1', 'project-2'])
+      expect(projection.projects[0]).toBe(twoProjects[0])
+      expect(projection.projects[1]).toBe(twoProjects[1])
+    })
+
+    // Why: a repo with a GitHub upstream gets an identity key that flips `changed`, routing to
+    // the normalized-merge exit — the one most real installs take, and otherwise untested here.
+    it('coerces on the normalized-merge exit as well', () => {
+      const upstreamRepos = [
+        { ...repos[0], upstream: { owner: 'alice', repo: 'orca' } }
+      ] as unknown as Repo[]
+      const projection = getProjectHostSetupProjectionFromState({
+        repos: upstreamRepos,
         projects,
         projectHostSetups: coveringSetups(null)
       })
-      expect(projection.projects).toEqual(projects)
-      expect(projection.projects[0]).toBe(projects[0])
+      expect(projection.setups.find((setup) => typeof setup.repoId !== 'string')).toBeUndefined()
     })
 
     it('does not invent extra setup or project rows because one repoId was null', () => {

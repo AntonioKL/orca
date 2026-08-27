@@ -20,7 +20,7 @@ export function normalizeHydratedProjectHostSetupProjection(
   const projectIdByHydratedProjectId = new Map<string, string>()
   let changed = false
   const normalizedSetups = setups.map((setup) => {
-    // Why: hydrated rows can carry a non-string repoId, yet consumers call `.trim()` on it.
+    // Why: hydrated and remote catalog rows can carry a non-string repoId, yet consumers call `.trim()` on it.
     // Why no `changed = true`: that flag unions in repo-derived rows, and coercing one
     // field must never change which rows exist.
     const repoId = typeof setup.repoId === 'string' ? setup.repoId : ''
