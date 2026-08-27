@@ -2,8 +2,8 @@ import type { RateLimitBucket, RateLimitWindow } from '../../shared/rate-limit-t
 
 /**
  * Shape of `RetrieveUserQuotaSummaryResponse` as the Antigravity LanguageServer serialises it
- * (Connect JSON, lowerCamelCase). The outer `buckets` field holds *groups* — "Gemini Models" and
- * "Claude and GPT models" — each with its own five-hour and weekly bucket and independent reset.
+ * (Connect JSON, lowerCamelCase). `response.groups` holds "Gemini Models" and "Claude and GPT
+ * models", each with its own five-hour and weekly bucket and independent reset.
  */
 type RawBucket = {
   bucketId?: unknown
@@ -106,7 +106,14 @@ export function parseAntigravityQuotaSummary(data: unknown): AntigravityQuotaSum
   if (typeof data !== 'object' || data === null) {
     return null
   }
-  const groups = (data as { buckets?: unknown }).buckets
+  const response = (data as { response?: unknown }).response
+  const responseGroups =
+    typeof response === 'object' && response !== null
+      ? (response as { groups?: unknown }).groups
+      : undefined
+  const groups = Array.isArray(responseGroups)
+    ? responseGroups
+    : (data as { buckets?: unknown }).buckets
   if (!Array.isArray(groups)) {
     return null
   }

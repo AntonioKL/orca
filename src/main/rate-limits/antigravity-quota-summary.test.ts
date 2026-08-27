@@ -2,57 +2,57 @@ import { describe, expect, it } from 'vitest'
 import { parseAntigravityQuotaSummary } from './antigravity-quota-summary'
 
 /**
- * Shape of `RetrieveUserQuotaSummaryResponse` as the Antigravity LanguageServer returns it: the
- * outer `buckets` field holds groups, each with its own five-hour and weekly bucket. Field names
- * come from the `QuotaSummaryGroup` / `QuotaSummaryBucket` descriptors in the `agy` 1.1.21 binary.
+ * Shape of `RetrieveUserQuotaSummaryResponse` as Antigravity LanguageServer 1.1.21 returns it.
  */
 function summaryResponse() {
   return {
-    buckets: [
-      {
-        displayName: 'Gemini Models',
-        description: 'Gemini model family',
-        buckets: [
-          {
-            bucketId: 'gemini-5h',
-            displayName: 'Five Hour Limit',
-            window: 'FIVE_HOURS',
-            remainingFraction: 0.75,
-            disabled: false,
-            resetTime: '2026-08-26T23:04:43Z'
-          },
-          {
-            bucketId: 'gemini-weekly',
-            displayName: 'Weekly Limit',
-            window: 'WEEKLY',
-            remainingFraction: 0.97,
-            disabled: false,
-            resetTime: '2026-09-02T18:04:43Z'
-          }
-        ]
-      },
-      {
-        displayName: 'Claude and GPT models',
-        buckets: [
-          {
-            bucketId: '3p-5h',
-            displayName: 'Five Hour Limit',
-            window: 'FIVE_HOURS',
-            remainingFraction: 0.4,
-            disabled: false,
-            resetTime: '2026-08-26T23:04:43Z'
-          },
-          {
-            bucketId: '3p-weekly',
-            displayName: 'Weekly Limit',
-            window: 'WEEKLY',
-            remainingFraction: 1,
-            disabled: false,
-            resetTime: '2026-09-02T18:04:43Z'
-          }
-        ]
-      }
-    ]
+    response: {
+      groups: [
+        {
+          displayName: 'Gemini Models',
+          description: 'Gemini model family',
+          buckets: [
+            {
+              bucketId: 'gemini-5h',
+              displayName: 'Five Hour Limit',
+              window: 'FIVE_HOURS',
+              remainingFraction: 0.75,
+              disabled: false,
+              resetTime: '2026-08-26T23:04:43Z'
+            },
+            {
+              bucketId: 'gemini-weekly',
+              displayName: 'Weekly Limit',
+              window: 'WEEKLY',
+              remainingFraction: 0.97,
+              disabled: false,
+              resetTime: '2026-09-02T18:04:43Z'
+            }
+          ]
+        },
+        {
+          displayName: 'Claude and GPT models',
+          buckets: [
+            {
+              bucketId: '3p-5h',
+              displayName: 'Five Hour Limit',
+              window: 'FIVE_HOURS',
+              remainingFraction: 0.4,
+              disabled: false,
+              resetTime: '2026-08-26T23:04:43Z'
+            },
+            {
+              bucketId: '3p-weekly',
+              displayName: 'Weekly Limit',
+              window: 'WEEKLY',
+              remainingFraction: 1,
+              disabled: false,
+              resetTime: '2026-09-02T18:04:43Z'
+            }
+          ]
+        }
+      ]
+    }
   }
 }
 
@@ -97,7 +97,7 @@ describe('parseAntigravityQuotaSummary', () => {
 
   it('skips a disabled bucket', () => {
     const response = summaryResponse()
-    response.buckets[1]!.buckets[0]!.disabled = true
+    response.response.groups[1]!.buckets[0]!.disabled = true
 
     const summary = parseAntigravityQuotaSummary(response)
 
@@ -108,7 +108,7 @@ describe('parseAntigravityQuotaSummary', () => {
     expect(summary?.session?.usedPercent).toBe(25)
   })
 
-  it('accepts snake_case field names', () => {
+  it('keeps compatibility with top-level buckets and snake_case field names', () => {
     const summary = parseAntigravityQuotaSummary({
       buckets: [
         {
