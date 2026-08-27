@@ -3879,17 +3879,82 @@
       },
       "skills": {
         "SkillsPage": {
-          "cb142070b4": "새로 고침", "a68dee6a32": "스킬 검색", "f43ad6edf3": "스킬", "ea72d6185b": "스킬을 검색하지 못했습니다", "dc4c3328ee": "파일 표시", "9963dff6d3": "설명을 찾을 수 없습니다.", "995fde8337": "스킬 파일을 표시하지 못했습니다", "4acd6d68ec": "스킬을 찾을 수 없습니다", "6a62a0168c": "일치하는 항목 없음", "08a321a984": "현재 검색 및 필터와 일치하는 스킬이 없습니다.", "cd7893fbc1": "스킬 검색 중", "35b9a724a0": "사용 가능", "c13b82793c": "설치 관리", "aee7b99cc6": "링크에서 설치", "filterProvider": "에이전트별 필터", "filterSource": "소스별 필터", "allSources": "전체", "clearFilters": "필터 지우기", "closeSkills": "스킬 닫기", "closeTooltip": "닫기 · Esc", "moreActions": "추가 작업", "sharedLinks": "공유 링크", "emptyCopy": "검색한 스킬 폴더가 비어 있습니다. 공유 번들을 설치하거나 스킬을 추가한 후 새로 고치세요.", "retry": "다시 시도", "remoteShareNotice": "이 스킬은 {{host}}에 있습니다. 공유하려면 해당 머신에서 스킬을 여세요.", "viewSwitch": "표시", "searchLinks": "링크 검색", "deleteSkills": "스킬 삭제…"
+          "cb142070b4": "새로 고침",
+          "a68dee6a32": "스킬 검색",
+          "f43ad6edf3": "스킬",
+          "ea72d6185b": "스킬을 검색하지 못했습니다",
+          "dc4c3328ee": "파일 표시",
+          "9963dff6d3": "설명을 찾을 수 없습니다.",
+          "995fde8337": "스킬 파일을 표시하지 못했습니다",
+          "4acd6d68ec": "스킬을 찾을 수 없습니다",
+          "6a62a0168c": "일치하는 항목 없음",
+          "08a321a984": "현재 검색 및 필터와 일치하는 스킬이 없습니다.",
+          "cd7893fbc1": "스킬 검색 중",
+          "35b9a724a0": "사용 가능",
+          "c13b82793c": "설치 관리",
+          "aee7b99cc6": "링크에서 설치",
+          "filterProvider": "에이전트별 필터",
+          "filterSource": "소스별 필터",
+          "allSources": "전체",
+          "clearFilters": "필터 지우기",
+          "closeSkills": "스킬 닫기",
+          "closeTooltip": "닫기 · Esc",
+          "moreActions": "추가 작업",
+          "sharedLinks": "공유 링크",
+          "emptyCopy": "검색한 스킬 폴더가 비어 있습니다. 공유 번들을 설치하거나 스킬을 추가한 후 새로 고치세요.",
+          "retry": "다시 시도",
+          "remoteShareNotice": "이 스킬은 {{host}}에 있습니다. 공유하려면 해당 머신에서 스킬을 여세요.",
+          "viewSwitch": "표시",
+          "searchLinks": "링크 검색",
+          "deleteSkills": "스킬 삭제…"
         },
         "SkillShareSelectionControls": { "01c5a15e02": "스킬 공유" },
-        "SkillRow": { "updatedUnknown": "날짜 없음", "pathCopied": "경로 복사됨", "copyPath": "경로 복사", "detailPath": "경로", "skillActions": "{{value0}} 작업", "viewDetails": "세부 정보 보기", "deleteSkill": "삭제…" },
+        "SkillRow": {
+          "updatedUnknown": "날짜 없음",
+          "pathCopied": "경로 복사됨",
+          "copyPath": "경로 복사",
+          "detailPath": "경로",
+          "skillActions": "{{value0}} 작업",
+          "viewDetails": "세부 정보 보기",
+          "deleteSkill": "삭제…"
+        },
         "SkillsList": { "listLabel": "스킬" },
-        "sourceStatus": { "missing": "폴더를 찾을 수 없음", "remoteRepo": "원격 리포지토리 — 검색 안 됨", "unavailable": "검색 안 됨" },
+        "sourceStatus": {
+          "missing": "폴더를 찾을 수 없음",
+          "remoteRepo": "원격 리포지토리 — 검색 안 됨",
+          "unavailable": "검색 안 됨"
+        },
         "sources": { "heading": "스킬 폴더" },
-        "sourceKind": { "home": "홈", "workspace": "워크스페이스", "bundled": "번들", "plugin": "플러그인" },
-        "count": { "skillOne": "스킬 {{count}}개", "skillOther": "스킬 {{count}}개", "sourceOne": "소스 {{count}}개", "sourceOther": "소스 {{count}}개", "fileOne": "파일 {{count}}개", "fileOther": "파일 {{count}}개", "resultOne": "결과 {{count}}개", "resultOther": "결과 {{count}}개", "selected": "{{count}}개 선택됨", "shareOne": "스킬 {{count}}개 공유", "shareOther": "스킬 {{count}}개 공유", "linkOne": "링크 {{count}}개", "linkOther": "링크 {{count}}개" },
+        "sourceKind": {
+          "home": "홈",
+          "workspace": "워크스페이스",
+          "bundled": "번들",
+          "plugin": "플러그인"
+        },
+        "count": {
+          "skillOne": "스킬 {{count}}개",
+          "skillOther": "스킬 {{count}}개",
+          "sourceOne": "소스 {{count}}개",
+          "sourceOther": "소스 {{count}}개",
+          "fileOne": "파일 {{count}}개",
+          "fileOther": "파일 {{count}}개",
+          "resultOne": "결과 {{count}}개",
+          "resultOther": "결과 {{count}}개",
+          "selected": "{{count}}개 선택됨",
+          "shareOne": "스킬 {{count}}개 공유",
+          "shareOther": "스킬 {{count}}개 공유",
+          "linkOne": "링크 {{count}}개",
+          "linkOther": "링크 {{count}}개"
+        },
         "filter": { "allAgents": "모든 에이전트", "sharedAgent": "공유됨 (.agents)" },
-        "SkillsSelectionHeader": { "exit": "선택 나가기", "exitTooltip": "선택 나가기 · Esc", "title": "공유할 스킬 선택", "selectAll": "가능한 {{count}}개 모두 선택", "clear": "지우기", "deleteTitle": "삭제할 스킬 선택" },
+        "SkillsSelectionHeader": {
+          "exit": "선택 나가기",
+          "exitTooltip": "선택 나가기 · Esc",
+          "title": "공유할 스킬 선택",
+          "selectAll": "가능한 {{count}}개 모두 선택",
+          "clear": "지우기",
+          "deleteTitle": "삭제할 스킬 선택"
+        },
         "SkillDetailDialog": { "agents": "에이전트", "updated": "업데이트됨", "copy": "복사" },
         "SkillFreshnessNudge": {
           "titleOne": "설치된 Orca 스킬이 오래되었습니다",
@@ -13682,6 +13747,7 @@
           "showMore": "더 보기"
         },
         "AutomationDetail": {
+          "host": "호스트",
           "007c8ad874": "프롬프트",
           "a1d52c2189": "사용 범위",
           "449fc83bf7": "토큰",
@@ -13845,6 +13911,8 @@
           "b11170a008": "자동화를 저장하지 못했습니다.",
           "2a20596d6b": "자동화가 저장되었습니다.",
           "244727e655": "자동화가 업데이트되었습니다.",
+          "moved": "자동화를 {host}(으)로 이동했습니다.",
+          "moveOriginalKept": "{host}에 생성했지만 원본을 삭제하지 못했습니다. 이전 호스트에서 삭제하세요.",
           "77b81bc4ac": "Hermes 자동화가 생성되었습니다.",
           "08efc3ae12": "Hermes 자동화가 업데이트되었습니다.",
           "e431bb85d4": "이 Hermes 자동화와 동일한 호스트에서 워크스페이스를 선택하세요.",
@@ -14041,6 +14109,19 @@
           "filters": "필터",
           "clear": "필터 지우기",
           "removeFilter": "{{value0}} 필터 제거"
+        },
+        "createDestination": {
+          "label": "호스트",
+          "placeholder": "호스트 선택",
+          "storedOn": "{authority}에서 저장하고 예약합니다.",
+          "unselected": "이 자동화를 저장하고 예약할 호스트를 선택하세요.",
+          "orphan": "호스트가 없는 자동화는 새 자동화를 보유할 수 없습니다. 이 자동화를 만들 호스트를 선택하세요.",
+          "unavailable": "해당 호스트는 아직 새 자동화를 보유할 수 없습니다. 이 자동화를 만들 다른 호스트를 선택하세요.",
+          "stale": "이 양식이 열려 있는 동안 {host}이(가) 변경되었습니다. 저장하기 전에 다시 선택하세요.",
+          "projectMismatch": "해당 프로젝트는 {host}에 없습니다. 그 호스트의 프로젝트를 선택하거나 다른 호스트를 선택하세요.",
+          "noProjects": "{host}에 설정된 프로젝트가 없습니다. 거기에 추가하거나 다른 호스트를 선택하세요.",
+          "updateRequired": "{hosts}의 Orca 서버를 업데이트하면 거기에 자동화를 저장할 수 있습니다.",
+          "move": "저장하면 이 자동화가 {host}에 생성되고 원본은 삭제됩니다. 실행 기록은 이전 호스트에 남습니다."
         }
       },
       "agent": {

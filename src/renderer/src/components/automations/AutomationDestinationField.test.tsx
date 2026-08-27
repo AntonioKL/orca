@@ -61,10 +61,12 @@ const LEGACY_ENTRY: AutomationHostCatalogEntry = {
 
 function control(
   projects: Repo[],
-  entries: AutomationHostCatalogEntry[] = [ENTRY]
+  entries: AutomationHostCatalogEntry[] = [ENTRY],
+  note?: string
 ): AutomationCreateDestinationControl {
   return {
     entries,
+    note,
     resolution: {
       status: 'ready',
       authority: OWNER.authority,
@@ -76,11 +78,11 @@ function control(
   }
 }
 
-function render(projects: Repo[], entries?: AutomationHostCatalogEntry[]): void {
+function render(projects: Repo[], entries?: AutomationHostCatalogEntry[], note?: string): void {
   act(() => {
     root.render(
       <TooltipProvider>
-        <AutomationDestinationField control={control(projects, entries)} />
+        <AutomationDestinationField control={control(projects, entries, note)} />
       </TooltipProvider>
     )
   })
@@ -115,6 +117,16 @@ describe('AutomationDestinationField', () => {
     render([{ id: 'repo-1' } as Repo])
 
     expect(container.querySelector('[data-testid="automation-create-update-required"]')).toBeNull()
+  })
+
+  it('states a move in place of the host it would otherwise just name', () => {
+    render([{ id: 'repo-1' } as Repo], undefined, 'Saving creates this automation on GPU box.')
+
+    // Both lines name the same host; the one that mentions the delete wins.
+    expect(container.querySelector('[data-testid="automation-host-move"]')?.textContent).toContain(
+      'GPU box'
+    )
+    expect(container.textContent).not.toContain('Stored and scheduled by')
   })
 
   it('names the host without a tense, so editing reads as a move', () => {

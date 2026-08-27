@@ -19,18 +19,9 @@ import {
 import { groupAutomationHostEntriesByAuthority } from './automation-host-picker-groups'
 import type { AutomationCreateDestinationControl } from './use-automation-create-destination'
 
-/**
- * Which host stores and schedules the automation, named on the form before submit.
- *
- * This is the storage authority, not the workspace's execution host — the two
- * routinely differ, and only this one decides which machine keeps and schedules
- * the record. A concrete host filter only preselects: the list filter narrows a
- * view, so it must not decide where a new record is allowed to live.
- *
- * Editing offers the same picker over the record's own authority, because a save
- * that lands on another host is a move, not a create. The copy stays tense-free
- * so both readings hold.
- */
+// The host that stores and schedules the automation, not the workspace's
+// execution host — the two routinely differ. Serves create and edit alike; on an
+// existing record a save that lands elsewhere is a move.
 
 export function AutomationDestinationField({
   control,
@@ -87,6 +78,12 @@ export function AutomationDestinationField({
             'auto.components.automations.createDestination.noProjects',
             'No projects are set up on {host}. Add one there, or choose another host.'
           ).replace('{host}', selected.label)}
+        </p>
+      ) : control.note ? (
+        // Replaces the storedOn line: both name the same host, and the move is
+        // the consequential half.
+        <p className="text-xs text-destructive" data-testid="automation-host-move">
+          {control.note}
         </p>
       ) : (
         <p className="text-xs text-muted-foreground">

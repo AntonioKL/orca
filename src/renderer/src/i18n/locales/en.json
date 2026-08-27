@@ -15376,6 +15376,8 @@
           "b11170a008": "Failed to save automation.",
           "2a20596d6b": "Automation saved.",
           "244727e655": "Automation updated.",
+          "moved": "Automation moved to {host}.",
+          "moveOriginalKept": "Created on {host}, but the original could not be deleted. Remove it on the old host.",
           "77b81bc4ac": "Hermes automation created.",
           "08efc3ae12": "Hermes automation updated.",
           "e431bb85d4": "Choose a workspace on the same host as this Hermes automation.",
@@ -15690,7 +15692,8 @@
           "stale": "{host} changed while this form was open. Choose it again before saving.",
           "projectMismatch": "That project is not on {host}. Choose a project on that host, or another host.",
           "noProjects": "No projects are set up on {host}. Add one there, or choose another host.",
-          "updateRequired": "Update the Orca server on {hosts} to store automations there."
+          "updateRequired": "Update the Orca server on {hosts} to store automations there.",
+          "move": "Saving creates this automation on {host} and deletes the original. Its run history stays on the old host."
         }
       },
       "agent": {

@@ -1,12 +1,6 @@
-/**
- * The host a stored automation belongs to, named on the detail view.
- *
- * The catalog entry the row was listed from is the truthful source: it names the
- * storing authority too, which the record's own execution target cannot — a
- * runtime-stored automation's target reads `local`, meaning local to that
- * server, not to this Mac. The record's target is only the fallback for a legacy
- * row no host answered for.
- */
+// The row's catalog entry names the storing authority; the record's own target
+// cannot — a runtime-stored automation reads `local`, meaning local to that
+// server. That target is only the fallback for a legacy row no host answered for.
 
 import type { Automation } from '../../../../shared/automations-types'
 import { getExecutionHostLabel, toSshExecutionHostId } from '../../../../shared/execution-host'

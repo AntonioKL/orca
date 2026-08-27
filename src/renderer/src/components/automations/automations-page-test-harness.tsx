@@ -21,6 +21,7 @@ import {
   AUTOMATION_OWNER_FENCING_RUNTIME_CAPABILITY
 } from '../../../../shared/protocol-version'
 import type { AppState } from '@/store'
+import type { AutomationHostCatalogEntry } from './automation-host-catalog-types'
 import type { AutomationHostCatalogView } from './use-automation-host-catalog'
 import type { AutomationCreateDestinationControl } from './use-automation-create-destination'
 import type { ExternalAutomationListEntry } from './external-automation-list-entries'
@@ -76,6 +77,7 @@ export type ListPanelProps = {
 
 export type DetailPaneProps = {
   selected: Automation | null
+  selectedHostEntry: AutomationHostCatalogEntry | null
   selectedRuns: AutomationRun[]
   selectedRunsNotice: { message: string } | null
   runNow: (automation: Automation) => void
