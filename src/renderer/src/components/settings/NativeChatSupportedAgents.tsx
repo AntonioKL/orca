@@ -14,18 +14,21 @@ export function NativeChatSupportedAgents(): React.JSX.Element {
             'Supported agents:'
           )}
         </span>
-        {NATIVE_CHAT_SUPPORTED_AGENT_LIST.map((agent) => (
-          <Tooltip key={agent}>
-            <TooltipTrigger asChild>
-              <span data-agent={agent} aria-label={getAgentLabel(agent)}>
-                <AgentIcon agent={agent} size={13} />
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="top" sideOffset={6}>
-              {getAgentLabel(agent)}
-            </TooltipContent>
-          </Tooltip>
-        ))}
+        {NATIVE_CHAT_SUPPORTED_AGENT_LIST.map((agent) => {
+          const label = getAgentLabel(agent)
+          return (
+            <Tooltip key={agent}>
+              <TooltipTrigger asChild>
+                <span data-agent={agent} aria-label={label}>
+                  <AgentIcon agent={agent} size={13} />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top" sideOffset={6}>
+                {label}
+              </TooltipContent>
+            </Tooltip>
+          )
+        })}
       </div>
     </TooltipProvider>
   )
