@@ -13,10 +13,19 @@ import {
   drainLegacyWslRuntimeAuth,
   startLegacyWslRuntimeAuthDrain
 } from './legacy-wsl-runtime-auth-drain'
+import { readWslCodexAuths } from './wsl-codex-auth-batch-reader'
 
 const SOURCE_AUTH = '{"tokens":{"expires_at":2000}}\n'
 const STALE_AUTH = '{"tokens":{"expires_at":1000}}\n'
 const NEWER_AUTH = '{"tokens":{"expires_at":3000}}\n'
+
+function inspection(auth: string, credentials?: string): string {
+  return [
+    Buffer.from(auth).toString('base64'),
+    credentials === undefined ? 'missing' : 'present',
+    credentials === undefined ? '' : Buffer.from(credentials).toString('base64')
+  ].join('\n')
+}
 
 function result(code: number, stdout = '') {
   return {
@@ -35,7 +44,9 @@ describe('legacy WSL runtime auth drain', () => {
   })
 
   it('promotes fresher auth guest-side while a legacy pane remains', async () => {
-    runWslProcessMock.mockResolvedValueOnce(result(0, SOURCE_AUTH)).mockResolvedValueOnce(result(0))
+    runWslProcessMock
+      .mockResolvedValueOnce(result(0, inspection(SOURCE_AUTH)))
+      .mockResolvedValueOnce(result(0))
     const resolveDestination = vi.fn(() => ({
       authContents: STALE_AUTH,
       linuxHomePath: '/home/alice/.local/share/orca/codex-accounts/account-1/home'
@@ -55,7 +66,8 @@ describe('legacy WSL runtime auth drain', () => {
       expect.any(String),
       expect.any(String),
       '1',
-      '0'
+      '0',
+      'missing'
     ])
     expect(runWslProcessMock.mock.calls[1]?.[0].script).toContain('readlink -f')
     expect(runWslProcessMock.mock.calls[1]?.[0].script).toContain('source_credentials=')
@@ -63,7 +75,7 @@ describe('legacy WSL runtime auth drain', () => {
   })
 
   it('does not write when freshness cannot be proven', async () => {
-    runWslProcessMock.mockResolvedValueOnce(result(0, '{"tokens":{}}\n'))
+    runWslProcessMock.mockResolvedValueOnce(result(0, inspection('{"tokens":{}}\n')))
 
     await drainLegacyWslRuntimeAuth({
       distro: 'Ubuntu',
@@ -79,7 +91,7 @@ describe('legacy WSL runtime auth drain', () => {
   })
 
   it('refuses a source with no unique destination', async () => {
-    runWslProcessMock.mockResolvedValueOnce(result(0, SOURCE_AUTH))
+    runWslProcessMock.mockResolvedValueOnce(result(0, inspection(SOURCE_AUTH)))
 
     await drainLegacyWslRuntimeAuth({
       distro: 'Ubuntu',
@@ -92,7 +104,9 @@ describe('legacy WSL runtime auth drain', () => {
   })
 
   it('retires stale legacy auth only after the last recorded pane exits', async () => {
-    runWslProcessMock.mockResolvedValueOnce(result(0, SOURCE_AUTH)).mockResolvedValueOnce(result(0))
+    runWslProcessMock
+      .mockResolvedValueOnce(result(0, inspection(SOURCE_AUTH)))
+      .mockResolvedValueOnce(result(0))
 
     await drainLegacyWslRuntimeAuth({
       distro: 'Ubuntu',
@@ -104,7 +118,7 @@ describe('legacy WSL runtime auth drain', () => {
       })
     })
 
-    expect(runWslProcessMock.mock.calls[1]?.[0].args.slice(-2)).toEqual(['0', '1'])
+    expect(runWslProcessMock.mock.calls[1]?.[0].args.slice(-3)).toEqual(['0', '1', 'missing'])
   })
 
   it('keeps an absent source retryable while a legacy pane remains', async () => {
@@ -167,5 +181,32 @@ describe('legacy WSL runtime auth drain', () => {
     await Promise.resolve()
 
     expect(runWslProcessMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads every candidate home in one bounded guest process', async () => {
+    runWslProcessMock.mockResolvedValueOnce(
+      result(
+        0,
+        [`present:${Buffer.from(SOURCE_AUTH).toString('base64')}`, 'missing', 'unreadable'].join(
+          '\n'
+        )
+      )
+    )
+
+    await expect(
+      readWslCodexAuths('Ubuntu', ['/home/alice/.codex-a', '/home/alice/.codex-b', '/bad'])
+    ).resolves.toEqual([
+      { kind: 'present', contents: SOURCE_AUTH },
+      { kind: 'missing' },
+      { kind: 'unreadable' }
+    ])
+    expect(runWslProcessMock).toHaveBeenCalledTimes(1)
+    expect(runWslProcessMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        args: ['/home/alice/.codex-a', '/home/alice/.codex-b', '/bad'],
+        maxOutputBytes: 2 * 1024 * 1024,
+        timeoutMs: 5_000
+      })
+    )
   })
 })

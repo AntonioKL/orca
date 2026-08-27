@@ -3,6 +3,7 @@ import { posix as pathPosix } from 'node:path'
 import { WSL_CODEX_RUNTIME_HOME_SEGMENTS } from '../pty/codex-home-wsl-env'
 import { runWslProcess } from '../wsl/wsl-runner'
 import { compareCodexAuthFreshness, codexAuthIsFresher } from './codex-auth-identity'
+import { decodeWslBase64Payload } from './wsl-codex-auth-batch-reader'
 
 const DRAIN_MARKER_NAME = 'direct-home-auth-drain-v1.json'
 const MARKER_PRESENT_EXIT = 20
@@ -13,9 +14,10 @@ export type LegacyWslRuntimeAuthDestination = {
   linuxHomePath: string
 }
 
-export type WslCodexAuthRead =
-  | { kind: 'missing' | 'unreadable' }
-  | { kind: 'present'; contents: string }
+type LegacyWslRuntimeInspection = {
+  authContents: string
+  credentials: { kind: 'missing' } | { kind: 'present'; contents: string }
+}
 
 type LegacyWslRuntimeAuthDrainOptions = {
   distro: string
@@ -81,15 +83,19 @@ export async function drainLegacyWslRuntimeAuth(
   }
   assertSuccessfulDrainStep('inspect', inspection)
 
-  const destination = await options.resolveDestination(inspection.stdout)
+  const inspected = parseLegacyRuntimeInspection(inspection.stdout)
+  if (!inspected) {
+    return 'pending'
+  }
+  const destination = await options.resolveDestination(inspected.authContents)
   if (!destination) {
     return 'pending'
   }
-  const freshness = compareCodexAuthFreshness(inspection.stdout, destination.authContents)
+  const freshness = compareCodexAuthFreshness(inspected.authContents, destination.authContents)
   if (freshness === null) {
     return 'pending'
   }
-  const promoteAuth = codexAuthIsFresher(inspection.stdout, destination.authContents)
+  const promoteAuth = codexAuthIsFresher(inspected.authContents, destination.authContents)
   const result = await runWslProcess({
     distro: options.distro,
     loginPath: 'none',
@@ -99,10 +105,11 @@ export async function drainLegacyWslRuntimeAuth(
       paths.activeHome,
       paths.marker,
       destination.linuxHomePath,
-      sha256(inspection.stdout),
+      sha256(inspected.authContents),
       sha256(destination.authContents),
       promoteAuth ? '1' : '0',
-      options.legacyPanePresent ? '0' : '1'
+      options.legacyPanePresent ? '0' : '1',
+      inspected.credentials.kind === 'present' ? sha256(inspected.credentials.contents) : 'missing'
     ],
     timeoutMs: 5_000,
     maxOutputBytes: 16 * 1024
@@ -111,25 +118,32 @@ export async function drainLegacyWslRuntimeAuth(
   return options.legacyPanePresent ? 'pending' : 'complete'
 }
 
-export async function readWslCodexAuth(
-  distro: string,
-  linuxHomePath: string
-): Promise<WslCodexAuthRead> {
-  const result = await runWslProcess({
-    distro,
-    loginPath: 'none',
-    script: READ_AUTH_SCRIPT,
-    args: [linuxHomePath],
-    timeoutMs: 5_000,
-    maxOutputBytes: 2 * 1024 * 1024
-  })
-  if (result.code === SOURCE_AUTH_ABSENT_EXIT) {
-    return { kind: 'missing' }
+function parseLegacyRuntimeInspection(stdout: string): LegacyWslRuntimeInspection | null {
+  const [authBase64, credentialsKind, credentialsBase64] = stdout.split('\n')
+  const authContents = decodeWslBase64Payload(authBase64 ?? '')
+  if (authContents === null) {
+    return null
   }
-  if (result.code !== 0 || result.timedOut) {
-    return { kind: 'unreadable' }
+  if (credentialsKind === 'missing') {
+    return { authContents, credentials: { kind: 'missing' } }
   }
-  return { kind: 'present', contents: result.stdout }
+  if (credentialsKind !== 'present') {
+    return null
+  }
+  const credentialsContents = decodeWslBase64Payload(credentialsBase64 ?? '')
+  if (!credentialsContents || !isJsonObject(credentialsContents)) {
+    return null
+  }
+  return { authContents, credentials: { kind: 'present', contents: credentialsContents } }
+}
+
+function isJsonObject(contents: string): boolean {
+  try {
+    const value = JSON.parse(contents) as unknown
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+  } catch {
+    return false
+  }
 }
 
 function resolveLegacyRuntimePaths(guestHomeLinuxPath: string): {
@@ -201,14 +215,22 @@ set -eu
 ${RESOLVE_LEGACY_HOME_SCRIPT}
 source_auth="$legacy_home/auth.json"
 [ -f "$source_auth" ] || exit ${SOURCE_AUTH_ABSENT_EXIT}
-cat -- "$source_auth"
-`
-
-const READ_AUTH_SCRIPT = `
-set -eu
-auth_path="$1/auth.json"
-[ -f "$auth_path" ] || exit ${SOURCE_AUTH_ABSENT_EXIT}
-cat -- "$auth_path"
+encode_file() {
+  encoded=$(base64 < "$1") || return 1
+  printf '%s' "$encoded" | tr -d '\n'
+}
+encode_file "$source_auth"
+printf '\n'
+source_credentials="$legacy_home/.credentials.json"
+if [ -f "$source_credentials" ]; then
+  printf 'present\n'
+  encode_file "$source_credentials"
+  printf '\n'
+elif [ ! -e "$source_credentials" ] && [ ! -L "$source_credentials" ]; then
+  printf 'missing\n\n'
+else
+  exit 44
+fi
 `
 
 const APPLY_LEGACY_AUTH_SCRIPT = `
@@ -227,15 +249,22 @@ hash_file() { sha256sum -- "$1" | cut -d ' ' -f 1; }
 umask 077
 temporary_auth="$target_auth.orca-drain-$$"
 temporary_credentials="$target_home/.credentials.json.orca-drain-$$"
+temporary_previous_auth="$target_auth.orca-drain-previous-$$"
 temporary_marker="$3.orca-drain-$$"
-cleanup() { rm -f -- "$temporary_auth" "$temporary_credentials" "$temporary_marker"; }
+cleanup() { rm -f -- "$temporary_auth" "$temporary_credentials" "$temporary_previous_auth" "$temporary_marker"; }
 trap cleanup EXIT HUP INT TERM
 source_credentials="$legacy_home/.credentials.json"
 target_credentials="$target_home/.credentials.json"
 if [ -f "$source_credentials" ] && [ ! -e "$target_credentials" ] && [ ! -L "$target_credentials" ]; then
+  [ "$9" != missing ] || exit 43
+  [ "$(hash_file "$source_credentials")" = "$9" ] || exit 43
   cp -- "$source_credentials" "$temporary_credentials"
   chmod 600 "$temporary_credentials"
+  [ "$(hash_file "$temporary_credentials")" = "$9" ] || exit 43
+  [ "$(hash_file "$source_credentials")" = "$9" ] || exit 43
   mv -n -- "$temporary_credentials" "$target_credentials"
+elif [ "$9" = missing ] && [ ! -e "$target_credentials" ] && [ ! -L "$target_credentials" ]; then
+  [ ! -e "$source_credentials" ] && [ ! -L "$source_credentials" ] || exit 43
 fi
 if [ "$7" = 1 ]; then
   cp -- "$source_auth" "$temporary_auth"
@@ -244,7 +273,16 @@ if [ "$7" = 1 ]; then
   # bytes being promoted, not the ones freshness was judged on.
   [ "$(hash_file "$temporary_auth")" = "$5" ] || exit 42
   [ "$(hash_file "$target_auth")" = "$6" ] || exit 39
+  # The hard link keeps the destination inode observable without creating a
+  # missing-path crash window. In-place writers update both names.
+  ln -- "$target_auth" "$temporary_previous_auth"
+  [ "$(hash_file "$temporary_previous_auth")" = "$6" ] || exit 39
   mv -f -- "$temporary_auth" "$target_auth"
+  if [ "$(hash_file "$temporary_previous_auth")" != "$6" ]; then
+    mv -f -- "$temporary_previous_auth" "$target_auth"
+    exit 39
+  fi
+  rm -- "$temporary_previous_auth"
 fi
 if [ "$8" = 1 ]; then
   [ "$(hash_file "$source_auth")" = "$5" ] || exit 40

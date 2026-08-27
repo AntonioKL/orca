@@ -98,11 +98,10 @@ import {
 } from '../codex/codex-pane-account-registry'
 import { isShellStartupEnvProbeSupported } from '../pty/shell-startup-env'
 import {
-  readWslCodexAuth,
   startLegacyWslRuntimeAuthDrain,
-  type LegacyWslRuntimeAuthDestination,
-  type WslCodexAuthRead
+  type LegacyWslRuntimeAuthDestination
 } from './legacy-wsl-runtime-auth-drain'
+import { readWslCodexAuths, type WslCodexAuthRead } from './wsl-codex-auth-batch-reader'
 
 type CodexSystemDefaultSnapshot = {
   authJson: string | null
@@ -1128,17 +1127,27 @@ export class CodexRuntimeHomeService {
       const parsedHome = parseWslUncPath(account.managedHomePath)
       return parsedHome?.distro.toLowerCase() === distro.toLowerCase()
     })
-    const authReads = new Map<string, WslCodexAuthRead>()
-    for (const account of accounts) {
+    const accountHomes = accounts.flatMap((account) => {
       const parsedHome = parseWslUncPath(account.managedHomePath)
-      if (parsedHome) {
-        try {
-          authReads.set(account.id, await readWslCodexAuth(distro, parsedHome.linuxPath))
-        } catch {
-          authReads.set(account.id, { kind: 'unreadable' })
-        }
+      return parsedHome ? [{ account, linuxPath: parsedHome.linuxPath }] : []
+    })
+    const systemHome = this.getWslSystemCodexHomePath({ runtime: 'wsl', wslDistro: distro })
+    const parsedSystemHome = systemHome ? parseWslUncPath(systemHome) : null
+    let reads: WslCodexAuthRead[]
+    try {
+      reads = await readWslCodexAuths(distro, [
+        ...accountHomes.map(({ linuxPath }) => linuxPath),
+        ...(parsedSystemHome ? [parsedSystemHome.linuxPath] : [])
+      ])
+    } catch {
+      reads = accountHomes.map(() => ({ kind: 'unreadable' }))
+      if (parsedSystemHome) {
+        reads.push({ kind: 'unreadable' })
       }
     }
+    const authReads = new Map<string, WslCodexAuthRead>(
+      accountHomes.map(({ account }, index) => [account.id, reads[index] ?? { kind: 'unreadable' }])
+    )
     const match = this.findManagedAccountForRuntimeAuth(runtimeAuthContents, undefined, {
       accounts,
       authReads
@@ -1157,17 +1166,10 @@ export class CodexRuntimeHomeService {
       }
     }
 
-    const systemHome = this.getWslSystemCodexHomePath({ runtime: 'wsl', wslDistro: distro })
-    const parsedSystemHome = systemHome ? parseWslUncPath(systemHome) : null
     if (!systemHome || !parsedSystemHome) {
       return null
     }
-    let systemAuth: WslCodexAuthRead
-    try {
-      systemAuth = await readWslCodexAuth(distro, parsedSystemHome.linuxPath)
-    } catch {
-      return null
-    }
+    const systemAuth = reads[accountHomes.length] ?? { kind: 'unreadable' }
     if (systemAuth.kind !== 'present') {
       return null
     }

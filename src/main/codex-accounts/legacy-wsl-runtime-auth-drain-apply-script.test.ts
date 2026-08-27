@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -10,8 +10,11 @@ const isWindows = process.platform === 'win32'
 
 const SOURCE_AUTH = '{"tokens":{"expires_at":2000}}\n'
 const TARGET_AUTH = '{"tokens":{"expires_at":1000}}\n'
+const NEWER_AUTH = '{"tokens":{"expires_at":3000}}\n'
 // Codex truncates before it writes, so a read landing mid-rotation sees this.
 const TORN_AUTH = '{"tokens":{"exp'
+const SOURCE_CREDENTIALS = '{"server":{"access_token":"source"}}\n'
+const TORN_CREDENTIALS = '{"server":'
 
 function sha256(contents: string): string {
   return createHash('sha256').update(contents).digest('hex')
@@ -22,10 +25,18 @@ function sha256(contents: string): string {
  * hash call can rewrite the source underneath the script. That is the only way
  * to land Codex's in-place rotation inside the window the script itself opens.
  */
-function runApplyScript(options: { rewriteSourceAfterHashCall?: number } = {}): {
+function runApplyScript(
+  options: {
+    rewriteSourceAfterHashCall?: number
+    rewriteBytes?: string
+    rewriteTarget?: 'source-auth' | 'source-credentials' | 'target-auth'
+    sourceCredentials?: string
+  } = {}
+): {
   legacyAuth: string
   status: number
   targetAuth: string
+  targetCredentials: string | null
 } {
   const root = mkdtempSync(join(tmpdir(), 'orca-drain-apply-'))
   const legacyHome = join(root, 'legacy')
@@ -36,8 +47,13 @@ function runApplyScript(options: { rewriteSourceAfterHashCall?: number } = {}): 
   }
   const legacyAuthPath = join(legacyHome, 'auth.json')
   const targetAuthPath = join(targetHome, 'auth.json')
+  const legacyCredentialsPath = join(legacyHome, '.credentials.json')
+  const targetCredentialsPath = join(targetHome, '.credentials.json')
   writeFileSync(legacyAuthPath, SOURCE_AUTH)
   writeFileSync(targetAuthPath, TARGET_AUTH)
+  if (options.sourceCredentials !== undefined) {
+    writeFileSync(legacyCredentialsPath, options.sourceCredentials)
+  }
 
   const counterPath = join(root, 'hash-calls')
   writeFileSync(counterPath, '0')
@@ -75,7 +91,8 @@ if (process.env.REWRITE_AFTER && calls === Number(process.env.REWRITE_AFTER)) {
         sha256(SOURCE_AUTH),
         sha256(TARGET_AUTH),
         '1',
-        '0'
+        '0',
+        options.sourceCredentials === undefined ? 'missing' : sha256(options.sourceCredentials)
       ],
       {
         encoding: 'utf8',
@@ -86,8 +103,13 @@ if (process.env.REWRITE_AFTER && calls === Number(process.env.REWRITE_AFTER)) {
           REWRITE_AFTER: options.rewriteSourceAfterHashCall
             ? String(options.rewriteSourceAfterHashCall)
             : '',
-          REWRITE_BYTES: TORN_AUTH,
-          REWRITE_TARGET: legacyAuthPath
+          REWRITE_BYTES: options.rewriteBytes ?? TORN_AUTH,
+          REWRITE_TARGET:
+            options.rewriteTarget === 'source-credentials'
+              ? legacyCredentialsPath
+              : options.rewriteTarget === 'target-auth'
+                ? targetAuthPath
+                : legacyAuthPath
         },
         stdio: ['ignore', 'pipe', 'pipe'],
         timeout: 20_000
@@ -99,7 +121,10 @@ if (process.env.REWRITE_AFTER && calls === Number(process.env.REWRITE_AFTER)) {
   return {
     legacyAuth: readFileSync(legacyAuthPath, 'utf8'),
     status,
-    targetAuth: readFileSync(targetAuthPath, 'utf8')
+    targetAuth: readFileSync(targetAuthPath, 'utf8'),
+    targetCredentials: existsSync(targetCredentialsPath)
+      ? readFileSync(targetCredentialsPath, 'utf8')
+      : null
   }
 }
 
@@ -120,5 +145,26 @@ describe.skipIf(isWindows)('legacy WSL auth drain apply script', () => {
     const outcome = runApplyScript({ rewriteSourceAfterHashCall: 1 })
     expect(outcome.status).toBe(42)
     expect(outcome.targetAuth).toBe(TARGET_AUTH)
+  })
+
+  it('refuses MCP credentials that changed after host validation', () => {
+    const outcome = runApplyScript({
+      rewriteSourceAfterHashCall: 2,
+      rewriteBytes: TORN_CREDENTIALS,
+      rewriteTarget: 'source-credentials',
+      sourceCredentials: SOURCE_CREDENTIALS
+    })
+    expect(outcome.status).toBe(43)
+    expect(outcome.targetCredentials).toBeNull()
+  })
+
+  it('does not overwrite auth changed after the destination hash check', () => {
+    const outcome = runApplyScript({
+      rewriteBytes: NEWER_AUTH,
+      rewriteSourceAfterHashCall: 4,
+      rewriteTarget: 'target-auth'
+    })
+    expect(outcome.status).toBe(39)
+    expect(outcome.targetAuth).toBe(NEWER_AUTH)
   })
 })
