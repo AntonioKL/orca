@@ -49,8 +49,11 @@ describe('runtime graph publication recovery', () => {
 
   it('lets the still-live renderer republish after a terminal reload failure', () => {
     const runtime = createRuntime()
+    const rendererGraphPublished = vi.fn()
+    runtime.setNotifier({ rendererGraphPublished } as never)
     runtime.attachWindow(WINDOW_ID)
     runtime.syncWindowGraph(WINDOW_ID, desktopGraph('renderer-a'))
+    rendererGraphPublished.mockClear()
     expect(runtime.getStatus()).toMatchObject({ graphStatus: 'ready' })
 
     // A renderer notification send failure suspends the graph while the same
@@ -68,6 +71,7 @@ describe('runtime graph publication recovery', () => {
       graphStatus: 'ready',
       liveTabCount: 1
     })
+    expect(rendererGraphPublished).toHaveBeenCalledExactlyOnceWith(WINDOW_ID)
   })
 
   it('still rejects the pre-reload document while its replacement is loading', () => {

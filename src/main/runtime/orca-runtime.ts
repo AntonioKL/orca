@@ -2253,6 +2253,7 @@ function resolveTerminalPresentation(opts: {
 }
 
 type RuntimeNotifier = {
+  rendererGraphPublished?(windowId: number): void
   worktreesChanged(repoId: string, renamed?: { oldWorktreeId: string; newWorktreeId: string }): void
   worktreeBaseStatus?(event: WorktreeBaseStatusEvent): void
   worktreeRemoteBranchConflict?(event: WorktreeRemoteBranchConflictEvent): void
@@ -7339,6 +7340,9 @@ export class OrcaRuntimeService {
     this.markGraphReady(windowId)
     if (rendererGeneration !== undefined) {
       this.rendererGeneration = rendererGeneration
+    }
+    if (windowId !== HEADLESS_RUNTIME_WINDOW_ID) {
+      this.notifier?.rendererGraphPublished?.(windowId)
     }
     for (const leaf of this.leaves.values()) {
       this.adoptPreAllocatedHandle(leaf)
