@@ -15,7 +15,7 @@ import {
   getCandidateFactStatuses,
   formatContextDetailLabels,
   getDirtyGitLabel,
-  getReviewPillTone,
+  getReviewPillToneClassName,
   shouldShowGitMetadataChip
 } from './workspace-cleanup-candidate-row-data'
 import type { WorkspaceCleanupReviewInfo } from './workspace-cleanup-presentation'
@@ -255,7 +255,9 @@ function ConfirmRemoveRow({
           </StatusPill>
         ))}
         {reviewInfo.label ? (
-          <StatusPill tone={getReviewPillTone(reviewInfo)}>{reviewInfo.label}</StatusPill>
+          <StatusPill toneClassName={getReviewPillToneClassName(reviewInfo)}>
+            {reviewInfo.label}
+          </StatusPill>
         ) : null}
         {contextPillLabels.map((label) => (
           <StatusPill key={label}>{label}</StatusPill>
