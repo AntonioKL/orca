@@ -116,8 +116,14 @@ try {
   const firstReady = await runtime.ready
   const firstPairing = firstReady.pairing.url
   const firstHealth = firstReady.health
-  if (firstHealth?.platform !== process.platform || firstHealth?.arch !== process.arch) {
-    fail(`unexpected Bun health platform: ${JSON.stringify(firstHealth)}`)
+  if (
+    firstHealth?.platform !== process.platform ||
+    firstHealth?.arch !== process.arch ||
+    firstHealth?.runtimeKind !== 'bun' ||
+    firstHealth?.ptyBackend !== 'bun-terminal' ||
+    !firstHealth?.runtimeVersion
+  ) {
+    fail(`unexpected Bun health metadata: ${JSON.stringify(firstHealth)}`)
   }
   if (!firstHealth?.terminalDaemon?.pid) {
     fail('Bun readiness omitted terminal daemon PID')

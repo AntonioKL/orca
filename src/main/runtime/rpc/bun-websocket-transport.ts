@@ -24,7 +24,7 @@ type BunRuntime = {
   serve(options: {
     hostname: string
     port: number
-    fetch(request: Request, server: BunServer): Response | Promise<Response> | undefined
+    ['fetch'](request: Request, server: BunServer): Response | Promise<Response> | undefined
     websocket: {
       data: Record<string, never>
       open(socket: BunServerWebSocket): void
