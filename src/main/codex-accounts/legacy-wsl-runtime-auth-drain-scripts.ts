@@ -24,6 +24,8 @@ session_link_manifest="$3.orca-drain-session-links"
 session_commit_marker="$3.orca-drain-session-commit"
 session_stage_root="$3.orca-drain-session-stage"
 ${ROLLBACK_SESSION_LINKS_FUNCTION}
+${RESOLVE_LEGACY_HOME_SCRIPT}
+source_auth="$legacy_home/auth.json"
 if [ -e "$3" ] || [ -L "$3" ]; then
   [ -f "$3" ] && [ ! -L "$3" ] || exit 46
   commit_session_links || exit 46
@@ -31,14 +33,16 @@ if [ -e "$3" ] || [ -L "$3" ]; then
     chmod 600 "$destination_recovery_auth"
   fi
   rm -f -- "$source_recovery_auth" "$source_quarantine_auth" "$destination_recovery_auth" "$destination_recovery_path"
-  exit ${MARKER_PRESENT_EXIT}
+  if [ ! -e "$source_auth" ] && [ ! -L "$source_auth" ]; then
+    exit ${MARKER_PRESENT_EXIT}
+  fi
+  [ -f "$source_auth" ] && [ ! -L "$source_auth" ] || exit 46
+  rm -- "$3"
 fi
 rollback_session_links
-${RESOLVE_LEGACY_HOME_SCRIPT}
 if [ "$legacy_home_resolved" = 0 ]; then
   exit ${LEGACY_HOME_ABSENT_EXIT}
 fi
-source_auth="$legacy_home/auth.json"
 if [ ! -e "$source_auth" ] && [ ! -L "$source_auth" ]; then
   if [ -f "$source_recovery_auth" ] && [ ! -L "$source_recovery_auth" ]; then
     mv -- "$source_recovery_auth" "$source_auth"
