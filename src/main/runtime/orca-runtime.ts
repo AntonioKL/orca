@@ -2135,6 +2135,7 @@ const BRACKETED_PASTE_QUIET_MS = 1500
 const AGENT_PROMPT_RENDER_TIMEOUT_MS = 8000
 const AGENT_PROMPT_RENDER_QUIET_MS = 1500
 const TERMINAL_INPUT_WRITE_QUEUE_MAX_PENDING = 2048
+const TERMINAL_INPUT_WRITE_QUEUE_MAX_BYTES = 1024 * 1024
 // Why: Claude and Codex emit show-cursor after accepting bracketed paste.
 const AGENT_PROMPT_RENDER_MARKER = '\x1b[?25h'
 
@@ -3436,6 +3437,7 @@ export class OrcaRuntimeService {
   private agentPromptSubmissionTailByPtyId = new Map<string, Promise<void>>()
   private terminalInputWriteTailByPtyId = new Map<string, Promise<void>>()
   private terminalInputWriteQueueDepthByPtyId = new Map<string, number>()
+  private terminalInputWriteQueueBytesByPtyId = new Map<string, number>()
   private providerSequenceInitializedPtys = new Set<string>()
   private providerSequenceOffsetByPtyId = new Map<string, number>()
   private providerSnapshotPreferredPtys = new Set<string>()
@@ -20067,6 +20069,9 @@ export class OrcaRuntimeService {
       })
       return Buffer.byteLength(protocolSubmitBytes, 'utf8')
     }
+    if (protocolSubmitBytes && protocolSubmitAborted) {
+      throw new Error('agent_prompt_foreground_changed')
+    }
 
     if (renderGate) {
       try {
@@ -20200,12 +20205,21 @@ export class OrcaRuntimeService {
   }
 
   /** Serialize writes admitted by separate terminal stream and RPC sockets. */
-  async enqueueTerminalInputWrite<T>(ptyId: string, write: () => Promise<T>): Promise<T> {
+  async enqueueTerminalInputWrite<T>(
+    ptyId: string,
+    write: () => Promise<T>,
+    estimatedBytes = 0
+  ): Promise<T> {
     const depth = this.terminalInputWriteQueueDepthByPtyId.get(ptyId) ?? 0
-    if (depth >= TERMINAL_INPUT_WRITE_QUEUE_MAX_PENDING) {
+    const bytes = this.terminalInputWriteQueueBytesByPtyId.get(ptyId) ?? 0
+    if (
+      depth >= TERMINAL_INPUT_WRITE_QUEUE_MAX_PENDING ||
+      (depth > 0 && bytes + Math.max(0, estimatedBytes) > TERMINAL_INPUT_WRITE_QUEUE_MAX_BYTES)
+    ) {
       throw new Error('terminal_input_queue_full')
     }
     this.terminalInputWriteQueueDepthByPtyId.set(ptyId, depth + 1)
+    this.terminalInputWriteQueueBytesByPtyId.set(ptyId, bytes + Math.max(0, estimatedBytes))
     const previous = this.terminalInputWriteTailByPtyId.get(ptyId) ?? Promise.resolve()
     const current = previous.catch(() => undefined).then(write)
     const tail = current.then(
@@ -20221,6 +20235,15 @@ export class OrcaRuntimeService {
         this.terminalInputWriteQueueDepthByPtyId.set(ptyId, nextDepth)
       } else {
         this.terminalInputWriteQueueDepthByPtyId.delete(ptyId)
+      }
+      const nextBytes = Math.max(
+        0,
+        (this.terminalInputWriteQueueBytesByPtyId.get(ptyId) ?? 0) - Math.max(0, estimatedBytes)
+      )
+      if (nextBytes > 0) {
+        this.terminalInputWriteQueueBytesByPtyId.set(ptyId, nextBytes)
+      } else {
+        this.terminalInputWriteQueueBytesByPtyId.delete(ptyId)
       }
       if (this.terminalInputWriteTailByPtyId.get(ptyId) === tail) {
         this.terminalInputWriteTailByPtyId.delete(ptyId)

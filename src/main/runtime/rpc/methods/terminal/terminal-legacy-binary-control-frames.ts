@@ -69,9 +69,13 @@ export function registerLegacyBinaryControlFrames(
       }
       void (
         runtime.enqueueTerminalInputWrite
-          ? runtime.enqueueTerminalInputWrite(ptyId, write)
+          ? runtime.enqueueTerminalInputWrite(ptyId, write, Buffer.byteLength(text, 'utf8'))
           : write()
-      ).catch(() => {})
+      ).catch(() => {
+        if (!controls.isClosed() && supportsWriteUnavailable) {
+          controls.sendFrame(TerminalStreamOpcode.WriteUnavailable)
+        }
+      })
       return
     }
     if (frame.opcode === TerminalStreamOpcode.Resize && params.client) {

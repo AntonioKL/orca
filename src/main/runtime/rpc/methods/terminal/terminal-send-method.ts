@@ -219,7 +219,11 @@ export const TERMINAL_SEND_METHODS: RpcAnyMethod[] = [
                 }
               )
         if (leaf?.ptyId && runtime.enqueueTerminalInputWrite) {
-          const queued = runtime.enqueueTerminalInputWrite(leaf.ptyId, write)
+          const queued = runtime.enqueueTerminalInputWrite(
+            leaf.ptyId,
+            write,
+            typeof params.text === 'string' ? Buffer.byteLength(params.text, 'utf8') : 0
+          )
           result = queued ? await queued : await write()
         } else {
           result = await write()
