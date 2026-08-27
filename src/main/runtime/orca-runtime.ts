@@ -3143,6 +3143,8 @@ export class OrcaRuntimeService {
   private headlessGraphFallbackAvailable = false
   private pendingHeadlessPromotionWindowId: number | null = null
   private rendererGeneration: string | null = null
+  /** Window whose graph was retired when the window closed; only a fresh attachWindow() revives it. */
+  private retiredGraphWindowId: number | null = null
   private readonly graphReloadLifecycle = new RuntimeGraphReloadLifecycle({
     timeoutMs: RUNTIME_GRAPH_RELOAD_TIMEOUT_MS,
     onSettled: ({ revision, windowId, outcome, durationMs }) => {
@@ -7121,10 +7123,13 @@ export class OrcaRuntimeService {
       // headless authority; accepting that late healthy graph is self-healing.
       this.attachWindow(windowId)
     }
-    if (this.authoritativeWindowId === null) {
-      this.authoritativeWindowId = windowId
+    if (windowId === this.retiredGraphWindowId && windowId !== this.authoritativeWindowId) {
+      // Why: the window that owned this graph closed, so a late publish from its
+      // renderer must not re-take the authority the next window has to claim.
+      // An explicit attachWindow() re-binding clears this by restoring authority.
+      throw new Error('Runtime graph publisher belongs to a retired window')
     }
-    if (windowId !== this.authoritativeWindowId) {
+    if (this.authoritativeWindowId !== null && windowId !== this.authoritativeWindowId) {
       throw new Error('Runtime graph publisher does not match the authoritative window')
     }
     const rendererGeneration =
@@ -7136,10 +7141,17 @@ export class OrcaRuntimeService {
     if (
       typeof rendererGeneration === 'string' &&
       rendererGeneration === this.rendererGeneration &&
-      this.graphStatus !== 'ready'
+      this.graphStatus === 'reloading'
     ) {
+      // Why only while reloading: a replacement document is on its way, so the
+      // pre-reload one must not settle the fence. Any other non-ready state has
+      // no successor coming — rejecting the live renderer there stranded the
+      // graph `unavailable` for the rest of the process (STA-5523).
       throw new Error('Runtime graph publisher belongs to a superseded renderer generation')
     }
+    // Why after the fences: a rejected publication used to keep the authority it
+    // took on the way in, pinning the graph to a window that could never publish.
+    this.authoritativeWindowId = windowId
     if (windowId === HEADLESS_RUNTIME_WINDOW_ID) {
       this.headlessGraphFallbackAvailable = true
       this.rendererGeneration = null
@@ -31728,12 +31740,16 @@ export class OrcaRuntimeService {
       this.authoritativeWindowId === HEADLESS_RUNTIME_WINDOW_ID &&
       windowId === this.pendingHeadlessPromotionWindowId
     ) {
+      this.retiredGraphWindowId = windowId
       this.pendingHeadlessPromotionWindowId = null
       return
     }
     if (windowId !== this.authoritativeWindowId) {
       return
     }
+    // Why: this runs when the window itself closed, so its renderer is finished
+    // publishing — record that before any branch drops the authority binding.
+    this.retiredGraphWindowId = windowId
     this.graphReloadLifecycle.settleActive('cancelled')
     if (this.shouldRestoreHeadlessGraph(windowId)) {
       this.pendingHeadlessPromotionWindowId = null
