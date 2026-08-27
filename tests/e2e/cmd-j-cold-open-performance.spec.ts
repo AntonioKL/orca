@@ -423,10 +423,9 @@ async function expectAccumulatedCatalogCompleteness(dialog: Locator): Promise<vo
   const rows = dialog.locator('[cmdk-item]:has([data-slot="palette-worktree-name"])')
   await expect(rows).toHaveCount(PALETTE_SECTION_RENDER_CAP)
   await expect(
-    dialog.getByText(
-      `${WORKSPACE_COUNT - PALETTE_SECTION_RENDER_CAP} more — scroll or keep typing to narrow`
-    )
+    dialog.getByText(`${WORKSPACE_COUNT - PALETTE_SECTION_RENDER_CAP} more`, { exact: true })
   ).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'See more' })).toBeVisible()
   const firstOrder = await rows.allTextContents()
   expect(new Set(firstOrder).size).toBe(50)
 
