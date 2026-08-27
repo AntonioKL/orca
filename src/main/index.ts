@@ -1211,13 +1211,11 @@ async function prepareCodexRuntimeHomeForLaunch(
   const hooksEnabled = isAgentStatusHooksEnabled(store?.getSettings())
   try {
     // Why: honor the persisted off switch so post-startup launches can't reinstall removed hooks.
-    const status = hooksEnabled
-      ? ((await codexHookService.installForRuntimeHome(runtimeHomePath, hookTarget)) ??
-        // Why: a managed account's launch home is its own self-contained
-        // CODEX_HOME, so hooks/trust must install there, not the shared mirror.
-        (await codexHookService.install(runtimeHomePath ?? undefined)))
-      : (codexHookService.refreshRuntimeUserHooksForRuntimeHome(runtimeHomePath, hookTarget) ??
-        (await codexHookService.refreshRuntimeUserHooks(runtimeHomePath ?? undefined)))
+    const status = await codexHookService.prepareRuntimeHomeForLaunch(
+      runtimeHomePath,
+      hookTarget,
+      hooksEnabled
+    )
     if (status.state === 'error') {
       console.warn(
         `[codex-hook-service] failed to ${
