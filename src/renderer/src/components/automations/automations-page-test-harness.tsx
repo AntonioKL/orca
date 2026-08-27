@@ -17,8 +17,9 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, type Mock, vi } from 'vitest'
 import type { Automation, AutomationRun } from '../../../../shared/automations-types'
 import {
-  AUTOMATION_LIST_HOST_SCOPE_RUNTIME_CAPABILITY,
-  AUTOMATION_OWNER_FENCING_RUNTIME_CAPABILITY
+  AUTOMATION_LIST_HOST_SCOPE_RUNTIME_CAPABILITY as LIST_HOST_SCOPE,
+  AUTOMATION_OWNER_FENCING_RUNTIME_CAPABILITY as OWNER_FENCING,
+  AUTOMATION_CREATE_IDEMPOTENCY_RUNTIME_CAPABILITY as CREATE_IDEMPOTENCY
 } from '../../../../shared/protocol-version'
 import type { AppState } from '@/store'
 import type { AutomationHostCatalogEntry } from './automation-host-catalog-types'
@@ -303,10 +304,7 @@ export const DESKTOP_SELF_OWNER = { authority: { kind: 'desktop' }, selector: { 
 
 export const RUNTIME_ID = 'gpu'
 /** A runtime that advertises both automation capabilities, so its rows carry owners. */
-const RUNTIME_CAPABILITIES = [
-  AUTOMATION_LIST_HOST_SCOPE_RUNTIME_CAPABILITY,
-  AUTOMATION_OWNER_FENCING_RUNTIME_CAPABILITY
-]
+const RUNTIME_CAPABILITIES = [LIST_HOST_SCOPE, OWNER_FENCING, CREATE_IDEMPOTENCY]
 export const RUNTIME_SELF_FILTER = {
   kind: 'host' as const,
   host: {

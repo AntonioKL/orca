@@ -20,7 +20,8 @@ import { groupAutomationHostEntriesByAuthority } from './automation-host-picker-
 import type { AutomationCreateDestinationControl } from './use-automation-create-destination'
 
 // The host that stores and schedules the automation, not the workspace's
-// execution host — the two routinely differ.
+// execution host — the two routinely differ. Serves create and edit alike; on an
+// existing record a save that lands elsewhere is a move.
 
 export function AutomationDestinationField({
   control,
@@ -77,6 +78,12 @@ export function AutomationDestinationField({
             'auto.components.automations.createDestination.noProjects',
             'No projects are set up on {host}. Add one there, or choose another host.'
           ).replace('{host}', selected.label)}
+        </p>
+      ) : control.note ? (
+        // Replaces the storedOn line: both name the same host, and the move is
+        // the consequential half.
+        <p className="text-xs text-destructive" data-testid="automation-host-move">
+          {control.note}
         </p>
       ) : (
         <p className="text-xs text-muted-foreground">
