@@ -86,22 +86,40 @@ afterEach(() => {
 
 const SPLIT_WORKTREE_ID = 'repo::/worktree'
 
-function makeSplitSourceState(hostTabId: string, leafId = 'leaf-1'): Record<string, unknown> {
+function makeSplitSourceState(
+  hostTabId: string,
+  leafId = 'leaf-1',
+  activeHostTabId = hostTabId
+): Record<string, unknown> {
   const tabId = toWebTerminalSurfaceTabId(hostTabId)
+  const activeTabId = toWebTerminalSurfaceTabId(activeHostTabId)
+  const tabs = [
+    {
+      id: tabId,
+      worktreeId: SPLIT_WORKTREE_ID,
+      contentType: 'terminal',
+      ptyId: 'remote:web-env-1@@terminal-1'
+    },
+    ...(activeTabId === tabId
+      ? []
+      : [{ id: activeTabId, worktreeId: SPLIT_WORKTREE_ID, contentType: 'terminal' }])
+  ]
   return {
     activeWorktreeId: SPLIT_WORKTREE_ID,
     activeWorkspaceExecutionHostId: 'runtime:web-env-1',
     activeTabType: 'terminal',
     activeTabTypeByWorktree: { [SPLIT_WORKTREE_ID]: 'terminal' },
-    activeTabIdByWorktree: { [SPLIT_WORKTREE_ID]: tabId },
-    tabsByWorktree: {
-      [SPLIT_WORKTREE_ID]: [{ id: tabId, worktreeId: SPLIT_WORKTREE_ID }]
-    },
-    unifiedTabsByWorktree: {
-      [SPLIT_WORKTREE_ID]: [{ id: tabId, contentType: 'terminal' }]
-    },
+    activeTabIdByWorktree: { [SPLIT_WORKTREE_ID]: activeTabId },
+    tabsByWorktree: { [SPLIT_WORKTREE_ID]: tabs },
+    unifiedTabsByWorktree: { [SPLIT_WORKTREE_ID]: tabs },
     groupsByWorktree: {},
-    terminalLayoutsByTabId: { [tabId]: { activeLeafId: leafId } }
+    terminalLayoutsByTabId: {
+      [tabId]: {
+        activeLeafId: leafId,
+        ptyIdsByLeafId: { [leafId]: 'remote:web-env-1@@terminal-1' }
+      },
+      ...(activeTabId === tabId ? {} : { [activeTabId]: { activeLeafId: 'active-leaf' } })
+    }
   }
 }
 
@@ -301,6 +319,59 @@ describe('splitWebRuntimeTerminal', () => {
     await vi.waitFor(() => expect(runtimeCall).toHaveBeenCalledOnce())
     expect(peekWebSessionFocusIntent({ environmentId: 'web-env-1' }, SPLIT_WORKTREE_ID)).toBeNull()
     expect(mocks.acceptReplayedWebSessionTabsSnapshot).not.toHaveBeenCalled()
+  })
+
+  it('focuses a split invoked from a non-focused group tab when the viewer stays put', async () => {
+    mocks.getState.mockReturnValue(makeSplitSourceState('tab-1', 'leaf-1', 'tab-2'))
+    const runtimeCall = vi.fn((request: { method: string }) =>
+      Promise.resolve(
+        request.method === 'terminal.split'
+          ? {
+              id: 'split',
+              ok: true,
+              result: {
+                split: {
+                  handle: 'terminal-2',
+                  tabId: 'tab-1',
+                  paneRuntimeId: -1,
+                  leafId: 'leaf-2'
+                }
+              }
+            }
+          : {
+              id: 'list',
+              ok: true,
+              result: {
+                worktree: SPLIT_WORKTREE_ID,
+                publicationEpoch: 'epoch-1',
+                snapshotVersion: 2,
+                activeGroupId: null,
+                activeTabId: null,
+                activeTabType: 'terminal',
+                tabs: []
+              }
+            }
+      )
+    )
+    vi.stubGlobal('window', { api: { runtimeEnvironments: { call: runtimeCall } } })
+
+    expect(
+      splitWebRuntimeTerminal('remote:web-env-1@@terminal-1', 'vertical', 'context_menu')
+    ).toBe(true)
+
+    await vi.waitFor(() =>
+      expect(mocks.activateTabAndFocusPane).toHaveBeenCalledWith(
+        toWebTerminalSurfaceTabId('tab-1'),
+        'leaf-2'
+      )
+    )
+    expect(
+      peekWebSessionFocusIntent({ environmentId: 'web-env-1' }, SPLIT_WORKTREE_ID)
+    ).toMatchObject({
+      hostTabId: 'tab-1',
+      leafId: 'leaf-2',
+      expectedCurrentLocalTabId: toWebTerminalSurfaceTabId('tab-2')
+    })
   })
 
   it('does not steal focus after the viewer switches tabs while the host splits', async () => {
