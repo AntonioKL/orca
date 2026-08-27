@@ -22,7 +22,7 @@ export type TerminalComposerDraft = {
 }
 
 const COMPOSER_FRAME_LINE = /^[─━-]{8,}\s*$/
-const CODEX_FOOTER_LINE = /^\s*\S.*\s[·•]\s.*$/
+const CODEX_FOOTER_LINE = /^\s*(?:gpt-\S+|o\d\S*)\s+[·•]\s+(?:~[/\\]|[/\\]|[A-Za-z]:[/\\]).*$/i
 
 function composerContinuationRows(
   context: TerminalCursorContext,

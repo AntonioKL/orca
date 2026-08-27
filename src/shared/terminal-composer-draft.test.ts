@@ -220,6 +220,25 @@ describe('detectTerminalComposerDraft', () => {
     ).toBe('proceed with the release')
   })
 
+  it('keeps a draft continuation containing a middle dot', () => {
+    expect(
+      detectTerminalComposerDraft({
+        rows: ['────────', '❯ proceed '],
+        typedRows: ['────────', '❯'],
+        promptGlyphBoldRows: [false, false],
+        rowsWrapped: [false, false],
+        rowsBelow: ['deploy · verify', '────────'],
+        typedRowsBelow: ['', '────────'],
+        rowsBelowWrapped: [true, false],
+        beforeCursor: '❯ ',
+        afterCursor: 'proceed ',
+        rawAfterCursor: 'proceed ',
+        cursorHidden: false,
+        cursorViewportRow: 8
+      })?.text
+    ).toBe('proceed deploy · verify')
+  })
+
   it('keeps typed soft-wrapped rows below a restored cursor in the draft', () => {
     expect(
       detectTerminalComposerDraft({
