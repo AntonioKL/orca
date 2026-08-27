@@ -150,6 +150,8 @@ try {
     serverExtensions
   ])
 
+  // Inject the fixture through Node's explicit CA input to isolate transport behavior;
+  // platform trust-store enumeration is covered by the unit matrix.
   process.env.NODE_EXTRA_CA_CERTS = rootCertificate
   const transport = require(join(projectDir, 'out/test/first-party-node18-trust-smoke.cjs'))
   const cloudRequests = []

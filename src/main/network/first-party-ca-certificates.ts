@@ -26,7 +26,7 @@ type WindowsCaModule = {
 
 const WINDOWS_STORE_TYPES = ['CERT_SYSTEM_STORE_LOCAL_MACHINE', 'CERT_SYSTEM_STORE_CURRENT_USER']
 
-type ReadTextFile = (path: string, encoding: 'utf8') => Promise<string>
+type ReadTextFile = (path: string, encoding: 'utf8', signal?: AbortSignal) => Promise<string>
 
 type CertificateSources = {
   platform?: NodeJS.Platform
@@ -147,13 +147,14 @@ function withinDeadline<T>(operation: Promise<T>, timeoutMs: number, fallback: T
 async function loadLinuxCertificates(
   env: NodeJS.ProcessEnv,
   loadFile: ReadTextFile,
-  now: number
+  now: number,
+  signal: AbortSignal
 ): Promise<string[]> {
   const paths = [...(env.SSL_CERT_FILE ? [env.SSL_CERT_FILE] : []), ...LINUX_CA_BUNDLES]
   for (const path of paths) {
     try {
       const certificates = filterCurrentCaCertificates(
-        parsePemCertificates(await loadFile(path, 'utf8')),
+        parsePemCertificates(await loadFile(path, 'utf8', signal)),
         now
       )
       if (certificates.length > 0) {
@@ -172,7 +173,12 @@ export async function loadCaCertificateFile(path: string | undefined): Promise<s
   }
   try {
     return filterCurrentCaCertificates(
-      parsePemCertificates(await readFile(path, 'utf8')),
+      parsePemCertificates(
+        await readFile(path, {
+          encoding: 'utf8',
+          signal: AbortSignal.timeout(MACOS_TRUST_LOAD_TIMEOUT_MS)
+        })
+      ),
       Date.now()
     )
   } catch {
@@ -209,7 +215,12 @@ export async function loadLegacySystemCaPolicy(
       return { certificates, disallowedDigests: new Set() }
     }
     if (platform === 'linux') {
-      const certificates = await loadLinuxCertificates(env, loadFile, now)
+      const signal = AbortSignal.timeout(trustLoadTimeoutMs)
+      const certificates = await withinDeadline(
+        loadLinuxCertificates(env, loadFile, now, signal),
+        trustLoadTimeoutMs,
+        []
+      )
       return { certificates, disallowedDigests: new Set() }
     }
     if (platform === 'win32') {

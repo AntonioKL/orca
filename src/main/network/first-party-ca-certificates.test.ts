@@ -48,6 +48,16 @@ describe('legacy system CA loading', () => {
     expect(certificates).toEqual([bundledRoot])
   })
 
+  it('bounds a stalled Linux certificate bundle read', async () => {
+    const certificates = await loadLegacySystemCaCertificates({
+      platform: 'linux',
+      trustLoadTimeoutMs: 5,
+      readFile: () => new Promise<string>(() => {})
+    })
+
+    expect(certificates).toEqual([])
+  })
+
   it('accepts only macOS roots that the host trust policy verifies', async () => {
     const signals: (AbortSignal | undefined)[] = []
     const accepted = await loadLegacySystemCaCertificates({
