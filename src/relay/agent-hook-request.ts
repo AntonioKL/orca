@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { normalizeHookPayload } from '../shared/agent-hook-listener'
+import { mergeAgentHookRequestHeaders } from '../shared/agent-hook-listener/hook-envelope'
 import { HOOK_REQUEST_SLOWLORIS_MS } from '../shared/agent-hook-listener/listener-limits'
 import { readRequestBody } from '../shared/agent-hook-listener/request-body'
 import { resolveHookSource } from '../shared/agent-hook-listener/source-routing'
@@ -59,22 +60,23 @@ export async function handleRelayHookRequest(
     req.destroy()
   })
   try {
-    const body = await readRequestBody(req)
     const source = resolveHookSource(new URL(req.url ?? '/', 'http://127.0.0.1').pathname)
     if (!source) {
       res.writeHead(404)
       res.end()
       return
     }
-    const event = normalizeHookPayload(options.state, source, body, options.env, {
+    const body = await readRequestBody(req)
+    const hookBody = mergeAgentHookRequestHeaders(body, req.headers)
+    const event = normalizeHookPayload(options.state, source, hookBody, options.env, {
       deferCompactOwnershipToClient: true
     })
     if (event) {
-      const env = options.bodyEnv(body),
-        version = options.bodyVersion(body)
+      const env = options.bodyEnv(hookBody),
+        version = options.bodyVersion(hookBody)
       options.applyEvent(event, source, env, version)
-      options.scheduleAssistantMessageRetry(source, body, event, env, version)
-      options.scheduleCodexSubagentPoll(source, body, event, env, version)
+      options.scheduleAssistantMessageRetry(source, hookBody, event, env, version)
+      options.scheduleCodexSubagentPoll(source, hookBody, event, env, version)
     }
     res.writeHead(204)
     res.end()
