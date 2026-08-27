@@ -24,7 +24,6 @@ vi.mock('react-native', () => ({
 }))
 vi.mock('lucide-react-native', () => ({
   AlertTriangle: 'AlertTriangle',
-  Bug: 'Bug',
   House: 'House',
   RefreshCw: 'RefreshCw'
 }))
@@ -126,6 +125,7 @@ describe('mobile root error boundary', () => {
       expect.objectContaining({ backgroundColor: colors.bgRaised })
     )
     expect(buttons[1]?.findByType('House').props.color).toBe(colors.textPrimary)
+    expect(buttons[2]?.findByType('AlertTriangle').props.color).toBe(colors.textPrimary)
 
     act(() => buttons[2]?.props.onPress())
     expect(mocks.shareDiagnostics).toHaveBeenCalledOnce()

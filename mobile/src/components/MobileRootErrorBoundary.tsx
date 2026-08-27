@@ -1,5 +1,5 @@
 import { Component, Fragment, type ErrorInfo, type ReactNode } from 'react'
-import { AlertTriangle, Bug, House, RefreshCw } from 'lucide-react-native'
+import { AlertTriangle, House, RefreshCw } from 'lucide-react-native'
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 import { colors, radii, spacing, typography } from '../theme/mobile-theme'
 import {
@@ -108,7 +108,7 @@ function MobileRootErrorFallback({
           style={styles.secondaryButton}
           onPress={onReport}
         >
-          <Bug size={16} color={colors.textPrimary} />
+          <AlertTriangle size={16} color={colors.textPrimary} />
           <Text style={styles.secondaryButtonText}>Report error</Text>
         </Pressable>
       </View>
