@@ -343,26 +343,23 @@ describe('Codex shell launch preflight command', () => {
     ).toBe(launcherPath)
   })
 
-  it.skipIf(process.platform !== 'win32')(
-    'carries the packaged Windows launcher as a guest-absolute WSL path',
-    () => {
-      const { userDataPath, resourcesPath } = makeCliRoot()
-      const launcherPath = join(resourcesPath, 'bin', 'orca.exe')
-      writeExecutable(launcherPath, '#!/bin/sh\nexit 0\n')
+  it('carries the packaged Windows launcher for WSLENV path translation', () => {
+    const { userDataPath, resourcesPath } = makeCliRoot()
+    const launcherPath = join(resourcesPath, 'bin', 'orca.exe')
+    writeExecutable(launcherPath, '#!/bin/sh\nexit 0\n')
 
-      expect(
-        resolveCodexShellLaunchPreflightCommand({
-          hooksEnabled: true,
-          isPackaged: true,
-          isWsl: true,
-          managedHomePath: '/home/jin/.local/share/orca/codex-runtime-home/home',
-          userDataPath,
-          resourcesPath,
-          platform: 'win32'
-        })
-      ).toMatch(/^\/mnt\/[a-z]\//)
-    }
-  )
+    expect(
+      resolveCodexShellLaunchPreflightCommand({
+        hooksEnabled: true,
+        isPackaged: true,
+        isWsl: true,
+        managedHomePath: '/home/jin/.local/share/orca/codex-runtime-home/home',
+        userDataPath,
+        resourcesPath,
+        platform: 'win32'
+      })
+    ).toBe(launcherPath)
+  })
 
   it('never returns an unqualified command name that a profile-rewritten PATH could hijack', () => {
     const { userDataPath, resourcesPath } = makeCliRoot()

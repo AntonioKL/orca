@@ -1,6 +1,5 @@
 import { accessSync, constants, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { toLinuxPath } from '../../shared/wsl-paths'
 import { getBundledLauncherPath } from '../cli/bundled-cli-launcher-path'
 
 const DEV_LAUNCHER_DIR = ['cli', 'bin']
@@ -49,8 +48,8 @@ export function resolveCodexShellLaunchPreflightCommand(
   if (!options.isWsl) {
     return candidate
   }
-  // Why: WSL executes the verified Windows launcher through interop; its guest path crosses WSLENV untranslated.
-  return platform === 'win32' && options.isPackaged ? toLinuxPath(candidate) : null
+  // Why: WSLENV /p translates the verified Windows launcher with the distro's configured automount root.
+  return platform === 'win32' && options.isPackaged ? candidate : null
 }
 
 function isExecutableFileOnDisk(path: string, platform: NodeJS.Platform): boolean {
