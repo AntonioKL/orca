@@ -32,7 +32,9 @@ import {
   hasCodexTranscriptSubagents,
   markCodexLeadTurnInterrupted,
   reconcileRemoteCodexState,
-  seedCodexStateFromSnapshot
+  seedCodexStateFromSnapshot,
+  getOrCreateCodexSubagentRoster,
+  getOrCreateCodexSubagentTranscriptState
 } from '../../shared/agent-hook-listener/providers/codex-state'
 import {
   hasPendingAgentResultText,
@@ -1717,11 +1719,8 @@ export class AgentHookServer {
       if (current !== original || (this.codexPaneGenerations.get(paneKey) ?? 0) !== generation) {
         return
       }
-      const transcript = this.state.codexSubagentTranscriptByPaneKey.get(paneKey)
-      const roster = this.state.codexSubagentRosterByPaneKey.get(paneKey)
-      if (!transcript || !roster) {
-        return
-      }
+      const transcript = getOrCreateCodexSubagentTranscriptState(this.state, paneKey)
+      const roster = getOrCreateCodexSubagentRoster(this.state, paneKey)
       reconcileCodexSubagentTranscript(transcript, roster, transcriptPath)
       const subagents = codexRosterToSnapshots(roster)
       const terminal = transcript.parentTerminalObserved === true
@@ -3423,12 +3422,7 @@ export class AgentHookServer {
         }
         // Why: restore live child hierarchy immediately; provider-specific reconciliation reaps stale seeds.
         if (entry.payload.agentType === 'codex') {
-          seedCodexStateFromSnapshot(
-            this.state,
-            resolvedPaneKey,
-            entry.payload,
-            entry.providerSession?.transcriptPath
-          )
+          seedCodexStateFromSnapshot(this.state, resolvedPaneKey, entry.payload)
           this.scheduleCodexRestartReconciliation(resolvedPaneKey)
         } else if (entry.payload.agentType === 'claude') {
           seedClaudeLeadTurnFromPersistedStatus(this.state, resolvedPaneKey, entry, {

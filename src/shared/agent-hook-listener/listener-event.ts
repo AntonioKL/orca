@@ -1,6 +1,7 @@
 import type { ParsedAgentStatusPayload } from '../agent-status-types'
 import type { AgentHookSource } from '../agent-hook-relay'
 import type { AgentProviderSessionMetadata } from '../agent-session-resume'
+import type { AgentReconcileDiagnostic } from '../agent-reconcile-diagnostic'
 
 export type AgentHookEventPayload = {
   paneKey: string
@@ -39,6 +40,7 @@ export type AgentHookEventPayload = {
   providerSessionOnly?: boolean
   /** True when this event is a relay cache replay rather than a live hook. */
   isReplay?: boolean
+  reconcileDiagnostic?: AgentReconcileDiagnostic | null
   /** Transport-only Claude background-work evidence used to reject false input-based interrupts. */
   claudeRunningNonAgentTask?: boolean
   payload: ParsedAgentStatusPayload

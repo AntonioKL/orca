@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { createHookListenerState, type AgentHookEventPayload } from '../shared/agent-hook-listener'
+import { createHookListenerState } from '../shared/agent-hook-listener/listener-state'
+import type { AgentHookEventPayload } from '../shared/agent-hook-listener/listener-event'
 import { applyRelayHookEvent } from './agent-hook-status-cache'
 import type { AgentHookRelayEnvelope } from '../shared/agent-hook-relay'
 

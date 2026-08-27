@@ -1,11 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 
-import {
-  resolveCachedClaudeCompactOwnership,
-  seedCodexStateFromSnapshot,
-  type AgentHookEventPayload,
-  type HookListenerState
-} from '../shared/agent-hook-listener'
+import type { AgentHookEventPayload } from '../shared/agent-hook-listener/listener-event'
+import type { HookListenerState } from '../shared/agent-hook-listener/listener-state'
 import { normalizeAgentStatusPayload } from '../shared/agent-status-types'
 import {
   isAgentHookSource,
@@ -16,6 +12,11 @@ import { codexRosterToSnapshots } from '../shared/codex-subagent-roster'
 import { reconcileCodexSubagentTranscript } from '../shared/codex-subagent-transcript'
 import { buildRelayHookEnvelope } from './agent-hook-envelope-build'
 import { parsePaneKey } from '../shared/stable-pane-id'
+import {
+  getOrCreateCodexSubagentTranscriptState,
+  seedCodexStateFromSnapshot
+} from '../shared/agent-hook-listener/providers/codex-state'
+import { seedCodexSubagentTranscriptFromSnapshot } from '../shared/codex-subagent-transcript-seeding'
 import { normalizeAgentProviderSession } from '../shared/agent-session-resume'
 import { normalizeAgentReconcileDiagnostic } from '../shared/agent-reconcile-diagnostic'
 
@@ -107,7 +108,7 @@ export function applyRelayHookEvent(options: {
     options.event.payload.agentType === 'codex' && options.event.hookEventName === 'SessionStart'
       ? { ...options.event, reconcileDiagnostic: null }
       : options.event
-  const cachedEvent = resolveCachedClaudeCompactOwnership(options.previous, diagnosticAwareEvent)
+  const cachedEvent = diagnosticAwareEvent
   options.state.lastStatusByPaneKey.delete(diagnosticAwareEvent.paneKey)
   options.state.lastStatusByPaneKey.set(diagnosticAwareEvent.paneKey, cachedEvent)
   options.metadata.set(diagnosticAwareEvent.paneKey, {
@@ -134,8 +135,11 @@ export function reconcileRelayCodexEvent(
   if (!transcriptPath || event.payload.agentType !== 'codex') {
     return event
   }
-  seedCodexStateFromSnapshot(state, event.paneKey, event.payload, transcriptPath)
-  const transcript = state.codexSubagentTranscriptByPaneKey.get(event.paneKey)
+  seedCodexStateFromSnapshot(state, event.paneKey, event.payload)
+  const transcript = getOrCreateCodexSubagentTranscriptState(state, event.paneKey)
+  if (event.payload.subagents?.length) {
+    seedCodexSubagentTranscriptFromSnapshot(transcript, event.payload.subagents)
+  }
   const roster = state.codexSubagentRosterByPaneKey.get(event.paneKey)
   if (!transcript || !roster) {
     return event
