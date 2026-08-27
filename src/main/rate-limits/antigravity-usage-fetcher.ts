@@ -140,7 +140,6 @@ export async function fetchAntigravityRateLimits(
     return unavailable(ANTIGRAVITY_NOT_RUNNING_REASON, 'cli-unavailable')
   }
 
-  let signedOut = false
   let lastFailure: ProviderRateLimits | null = null
   for (const endpoint of endpoints) {
     for (const target of endpointTargets(endpoint)) {
@@ -157,11 +156,11 @@ export async function fetchAntigravityRateLimits(
         )
         continue
       }
+      // Why: a signed-out answer is a settled fact about the account, not a transient fault.
+      // Falling through to an older `agy` here would resurrect the stale-account bug this
+      // ordering exists to prevent — that process still holds the account it started with.
       if (isSignedOutResponse(response)) {
-        // Why: the newest run owns the current account; keep probing older ones only to
-        // confirm nothing better exists, but never downgrade this to a transient error.
-        signedOut = true
-        continue
+        return unavailable(ANTIGRAVITY_SIGNED_OUT_REASON, 'missing-credentials')
       }
       if (response.statusCode !== 200) {
         lastFailure = failed(`Antigravity quota fetch failed (${response.statusCode})`, 'server')
@@ -173,9 +172,10 @@ export async function fetchAntigravityRateLimits(
       } catch {
         parsed = null
       }
+      // Why: an unreadable body is still the authoritative server answering; an older process
+      // runs the same build and would only return the same shape, from a staler account.
       if (!parsed) {
-        lastFailure = failed(ANTIGRAVITY_QUOTA_UNREADABLE_REASON, 'parse')
-        continue
+        return failed(ANTIGRAVITY_QUOTA_UNREADABLE_REASON, 'parse')
       }
       return {
         provider: 'antigravity',
@@ -190,8 +190,5 @@ export async function fetchAntigravityRateLimits(
     }
   }
 
-  if (signedOut) {
-    return unavailable(ANTIGRAVITY_SIGNED_OUT_REASON, 'missing-credentials')
-  }
   return lastFailure ?? unavailable(ANTIGRAVITY_NOT_RUNNING_REASON, 'cli-unavailable')
 }

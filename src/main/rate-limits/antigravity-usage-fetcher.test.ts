@@ -149,6 +149,48 @@ describe('fetchAntigravityRateLimits', () => {
     expect(limits.error).toBe(ANTIGRAVITY_SIGNED_OUT_REASON)
   })
 
+  // Why: an older `agy` still holds the account it started with. If the newest run says the
+  // user is signed out, reporting the old process's numbers would render a stale account's
+  // quota with nothing to indicate it — the exact hazard newest-first ordering exists to stop.
+  it('does not fall back to an older server after the newest reports signed out', async () => {
+    const transport: AntigravityQuotaTransport = vi.fn(async (target) =>
+      target.port === 61383
+        ? { statusCode: 500, body: SIGNED_OUT_BODY }
+        : { statusCode: 200, body: OK_BODY }
+    )
+
+    const limits = await fetchAntigravityRateLimits({
+      logSource: runningServers({
+        'cli-20260826_194033.log': logHead(82413, 61383),
+        'cli-20260821_123102.log': logHead(70000, 51000)
+      }),
+      transport
+    })
+
+    expect(limits.status).toBe('unavailable')
+    expect(limits.session).toBeNull()
+    expect(transport).toHaveBeenCalledTimes(1)
+  })
+
+  // Why: a transport failure teaches nothing about the account, so an older live server is
+  // still worth asking — that is the one case where falling through is correct.
+  it('falls through to an older server when the newest cannot be reached at all', async () => {
+    const limits = await fetchAntigravityRateLimits({
+      logSource: runningServers({
+        'cli-20260826_194033.log': logHead(82413, 61383),
+        'cli-20260821_123102.log': logHead(70000, 51000)
+      }),
+      transport: async (target) => {
+        if (target.port === 61383) {
+          throw new Error('ECONNREFUSED')
+        }
+        return { statusCode: 200, body: OK_BODY }
+      }
+    })
+
+    expect(limits.status).toBe('ok')
+  })
+
   it('surfaces a non-quota server failure as a retryable error', async () => {
     const limits = await fetchAntigravityRateLimits({
       logSource: runningServers({ 'cli-20260826_194033.log': logHead(82413, 61383) }),
