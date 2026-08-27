@@ -233,6 +233,10 @@ async function persistEntry(
   if (directory == null) {
     // Why: a failed write must leave the bad pixels intact; recovering here
     // would destroy the only evidence without producing a durable capture.
+    const entryIndex = evidence.indexOf(entry)
+    if (entryIndex !== -1) {
+      evidence.splice(entryIndex, 1)
+    }
     pendingPaneKeys.delete(entry.paneKey)
     return
   }

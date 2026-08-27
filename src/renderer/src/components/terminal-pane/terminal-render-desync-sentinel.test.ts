@@ -186,6 +186,20 @@ describe('terminal-render-desync-sentinel', () => {
     expect(getRenderDesyncEvidence()).toHaveLength(4)
   })
 
+  it('does not spend the capture budget on failed persistence attempts', async () => {
+    writeTerminalRenderDesyncEvidence.mockRejectedValue(new Error('disk unavailable'))
+
+    for (let pane = 1; pane <= 5; pane++) {
+      sampleWith(divergenceOf(manyCells(0)), false, `m1:p${pane}`)
+      sampleWith(divergenceOf(manyCells(0)), false, `m1:p${pane}`)
+      await vi.waitFor(() => expect(writeTerminalRenderDesyncEvidence).toHaveBeenCalledTimes(pane))
+      await vi.waitFor(() => expect(getRenderDesyncEvidence()).toHaveLength(0))
+    }
+
+    expect(getRenderDesyncEvidence()).toHaveLength(0)
+    expect(resetAndRefreshAllTerminalWebglAtlases).not.toHaveBeenCalled()
+  })
+
   it('resets tracking for paused panes instead of sampling them', () => {
     const cells = manyCells(0)
     sampleWith(divergenceOf(cells))
