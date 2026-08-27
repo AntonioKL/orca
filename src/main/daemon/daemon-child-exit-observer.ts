@@ -101,6 +101,7 @@ export function observeDaemonChildExit(
   }
 
   child.stderr?.on('data', onStderr)
+  child.stderr?.on('error', onStderrError)
   child.stderr?.on('end', onStderrEnd)
   child.stderr?.on('close', onStderrEnd)
 
@@ -113,7 +114,6 @@ export function observeDaemonChildExit(
         return
       }
       ready = true
-      child.stderr?.on('error', onStderrError)
       child.stderr?.unref?.()
       child.on('exit', onProcessExit)
     },

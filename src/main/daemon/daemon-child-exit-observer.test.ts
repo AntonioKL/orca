@@ -86,6 +86,16 @@ describe('observeDaemonChildExit', () => {
     expect(onExit).toHaveBeenCalledOnce()
   })
 
+  it('swallows stderr errors before readiness', () => {
+    const child = createChild()
+    const onExit = vi.fn()
+    const observer = observeDaemonChildExit(child, onExit)
+
+    expect(() => child.stderr.emit('error', new Error('startup pipe error'))).not.toThrow()
+    expect(onExit).not.toHaveBeenCalled()
+    observer.stop()
+  })
+
   it('does not infer an exit from stderr or contact loss', () => {
     const child = createChild()
     const onExit = vi.fn()
