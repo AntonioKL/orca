@@ -176,10 +176,13 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     const stderrDestroy = vi.fn()
     const stderrUnref = vi.fn()
     const stderrDataHandlers: ((chunk: Buffer) => void)[] = []
+    const stderrEndHandlers: (() => void)[] = []
     const stderr = {
       on(event: string, callback: (chunk: Buffer) => void) {
         if (event === 'data') {
           stderrDataHandlers.push(callback)
+        } else if (event === 'end' || event === 'close') {
+          stderrEndHandlers.push(callback as () => void)
         }
         return this
       },
@@ -220,6 +223,9 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     }
     for (const handler of handlers.exit) {
       handler(134)
+    }
+    for (const handler of stderrEndHandlers) {
+      handler()
     }
 
     expect(writeFileSyncMock).toHaveBeenCalledWith(

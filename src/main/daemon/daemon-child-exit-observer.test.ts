@@ -20,6 +20,7 @@ describe('observeDaemonChildExit', () => {
     observer.markReady()
     child.stderr.write('prefix-FATAL')
     child.emit('exit', 134, null)
+    child.stderr.emit('end')
 
     expect(child.stderr.unref).toHaveBeenCalledOnce()
     expect(onExit).toHaveBeenCalledWith({
@@ -30,7 +31,22 @@ describe('observeDaemonChildExit', () => {
     })
   })
 
-  it('reports from process exit without waiting for stderr close', () => {
+  it('retains trailing stderr until the pipe ends after process exit', () => {
+    const child = createChild()
+    const onExit = vi.fn()
+    const observer = observeDaemonChildExit(child, onExit)
+
+    observer.markReady()
+    child.emit('exit', 134, null)
+    child.stderr.write('late fatal bytes')
+    child.stderr.emit('end')
+
+    expect(onExit).toHaveBeenCalledWith(
+      expect.objectContaining({ exitCode: 134, stderrTail: 'late fatal bytes' })
+    )
+  })
+
+  it('swallows stderr errors after process exit while awaiting drain', () => {
     const child = createChild()
     const onExit = vi.fn()
     const observer = observeDaemonChildExit(child, onExit)
@@ -38,7 +54,9 @@ describe('observeDaemonChildExit', () => {
     observer.markReady()
     child.emit('exit', 134, null)
 
-    expect(onExit).toHaveBeenCalledWith(expect.objectContaining({ exitCode: 134 }))
+    expect(() => child.stderr.emit('error', new Error('late pipe error'))).not.toThrow()
+    child.stderr.emit('end')
+    expect(onExit).toHaveBeenCalledOnce()
   })
 
   it('does not infer an exit from stderr or contact loss', () => {
@@ -63,6 +81,7 @@ describe('observeDaemonChildExit', () => {
     child.stderr.write('FATAL ERROR before ready dispatch')
     observer.markReady()
     child.emit('exit', 134, null)
+    child.stderr.emit('end')
 
     expect(onExit).toHaveBeenCalledWith(
       expect.objectContaining({ stderrTail: 'FATAL ERROR before ready dispatch' })

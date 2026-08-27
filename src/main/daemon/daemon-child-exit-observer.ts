@@ -1,6 +1,7 @@
 import type { ChildProcess } from 'node:child_process'
 
 const DEFAULT_STDERR_TAIL_BYTES = 8 * 1024
+const STDERR_EXIT_DRAIN_MS = 250
 
 type UnrefableChildStderr = NonNullable<ChildProcess['stderr']> & {
   unref?: () => void
@@ -35,33 +36,59 @@ export function observeDaemonChildExit(
   let stderrTail = Buffer.alloc(0)
   let ready = false
   let stopped = false
+  let stderrEnded = child.stderr === null
+  let pendingExit: Pick<DaemonChildExitObservation, 'exitCode' | 'signal'> | null = null
+  let drainTimer: ReturnType<typeof setTimeout> | null = null
 
   const onStderr = (chunk: Buffer | string): void => {
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     stderrTail = Buffer.concat([stderrTail, bytes]).subarray(-maxStderrBytes)
   }
   const onStderrError = (): void => {}
-  const onProcessExit = (exitCode: number | null, signal: NodeJS.Signals | null): void => {
-    if (stopped || !ready) {
+  const finalizeExit = (): void => {
+    if (stopped || !pendingExit) {
       return
     }
     stopped = true
+    if (drainTimer) {
+      clearTimeout(drainTimer)
+    }
     child.off('exit', onProcessExit)
     child.stderr?.off('data', onStderr)
     child.stderr?.off('error', onStderrError)
+    child.stderr?.off('end', onStderrEnd)
+    child.stderr?.off('close', onStderrEnd)
+    child.stderr?.destroy()
     try {
       recordExit({
         verdict: 'exited',
-        exitCode,
-        signal,
+        ...pendingExit,
         stderrTail: stderrTail.toString('utf8').trim()
       })
     } catch {
       // Diagnostics must never escape daemon lifecycle handling.
     }
   }
+  const onStderrEnd = (): void => {
+    stderrEnded = true
+    finalizeExit()
+  }
+  const onProcessExit = (exitCode: number | null, signal: NodeJS.Signals | null): void => {
+    if (stopped || !ready) {
+      return
+    }
+    pendingExit = { exitCode, signal }
+    if (stderrEnded) {
+      finalizeExit()
+      return
+    }
+    drainTimer = setTimeout(finalizeExit, STDERR_EXIT_DRAIN_MS)
+    drainTimer.unref?.()
+  }
 
   child.stderr?.on('data', onStderr)
+  child.stderr?.on('end', onStderrEnd)
+  child.stderr?.on('close', onStderrEnd)
 
   return {
     startupStderrTail(): string {
@@ -81,9 +108,14 @@ export function observeDaemonChildExit(
         return
       }
       stopped = true
+      if (drainTimer) {
+        clearTimeout(drainTimer)
+      }
       child.off('exit', onProcessExit)
       child.stderr?.off('data', onStderr)
       child.stderr?.off('error', onStderrError)
+      child.stderr?.off('end', onStderrEnd)
+      child.stderr?.off('close', onStderrEnd)
       if (options.destroyStderr) {
         child.stderr?.destroy()
       }
