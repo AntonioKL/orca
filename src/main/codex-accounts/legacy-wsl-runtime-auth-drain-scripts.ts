@@ -205,7 +205,7 @@ if [ "$7" = 1 ]; then
   fi
   rm -- "$temporary_previous_auth"
 fi
-if [ "$8" != 1 ]; then
+if [ "$8" != 1 ] && [ "\${10}" = 1 ]; then
   expected_target_hash="$6"
   [ "$7" != 1 ] || expected_target_hash="$5"
   # Keep both live auth inodes observable while links are staged, then prove

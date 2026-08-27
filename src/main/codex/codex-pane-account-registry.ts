@@ -62,6 +62,9 @@ function readRegistryOrNull(): CodexPaneAccountRegistryFile | null {
   const parsedRegistry = parseRegistryJson(rawRegistry)
   cachedRegistryIsAuthoritative = isAuthoritativeRegistry(parsedRegistry)
   cachedRegistry = parseRegistry(parsedRegistry)
+  if (!cachedRegistryIsAuthoritative) {
+    cachedRegistry.legacyWslAttributionUnknown = true
+  }
   return cachedRegistry
 }
 
@@ -99,11 +102,16 @@ function isAuthoritativeRegistry(parsed: unknown): boolean {
     return false
   }
   const panes = (parsed as Partial<CodexPaneAccountRegistryFile>).panes
+  const version = (parsed as Partial<CodexPaneAccountRegistryFile>).version
+  const legacyWslAttributionUnknown = (parsed as Partial<CodexPaneAccountRegistryFile>)
+    .legacyWslAttributionUnknown
   return (
+    version === 2 &&
     Boolean(panes) &&
     typeof panes === 'object' &&
     !Array.isArray(panes) &&
-    Object.values(panes).every(isPaneAccountRecord)
+    Object.values(panes).every(isPaneAccountRecord) &&
+    (legacyWslAttributionUnknown === undefined || legacyWslAttributionUnknown === true)
   )
 }
 
@@ -115,6 +123,9 @@ function parseRegistry(parsed: unknown): CodexPaneAccountRegistryFile {
   const panes = (parsed as Partial<CodexPaneAccountRegistryFile>).panes
   if (!panes || typeof panes !== 'object' || Array.isArray(panes)) {
     return empty
+  }
+  if ((parsed as Partial<CodexPaneAccountRegistryFile>).legacyWslAttributionUnknown === true) {
+    empty.legacyWslAttributionUnknown = true
   }
   for (const [ptyId, record] of Object.entries(panes)) {
     if (isPaneAccountRecord(record)) {
@@ -163,7 +174,8 @@ function isPaneAccountRecord(value: unknown): value is CodexPaneAccountRecord {
   }
   const record = value as Partial<CodexPaneAccountRecord>
   return (
-    typeof record.selectionKey === 'string' &&
+    (record.selectionKey === 'host' ||
+      (typeof record.selectionKey === 'string' && /^wsl:.+/.test(record.selectionKey))) &&
     (record.accountId === null || typeof record.accountId === 'string')
   )
 }
@@ -285,11 +297,15 @@ export function hasRecordedLegacySharedCodexPane(): boolean {
 
 /** True when a retained WSL pane may still read the retired per-distro runtime home. */
 export function hasRecordedLegacyWslCodexPane(selectionKey: string): boolean {
-  return Object.values(readRegistryOrThrow().panes).some(
-    (record) =>
-      (wslSelectionKeysMatch(record.selectionKey, selectionKey) ||
-        record.selectionKey === 'wsl:__default__') &&
-      (record.homeRoute === undefined || record.homeRoute === 'wsl-home')
+  const registry = readRegistryOrThrow()
+  return (
+    Boolean(registry.legacyWslAttributionUnknown) ||
+    Object.values(registry.panes).some(
+      (record) =>
+        (wslSelectionKeysMatch(record.selectionKey, selectionKey) ||
+          record.selectionKey === 'wsl:__default__') &&
+        (record.homeRoute === undefined || record.homeRoute === 'wsl-home')
+    )
   )
 }
 
@@ -303,10 +319,14 @@ function wslSelectionKeysMatch(left: string, right: string): boolean {
 
 /** True when startup should reconcile a retained legacy WSL record with daemon inventory. */
 export function hasAnyRecordedLegacyWslCodexPane(): boolean {
-  return Object.values(readRegistry().panes).some(
-    (record) =>
-      record.selectionKey.startsWith('wsl:') &&
-      (record.homeRoute === undefined || record.homeRoute === 'wsl-home')
+  const registry = readRegistry()
+  return (
+    Boolean(registry.legacyWslAttributionUnknown) ||
+    Object.values(registry.panes).some(
+      (record) =>
+        record.selectionKey.startsWith('wsl:') &&
+        (record.homeRoute === undefined || record.homeRoute === 'wsl-home')
+    )
   )
 }
 
@@ -334,6 +354,13 @@ export function reconcileCodexPaneAccountsWithLivePtys(livePtyIds: readonly stri
   }
   const livePtyIdSet = new Set(livePtyIds)
   let changed = false
+  if (
+    registry.legacyWslAttributionUnknown &&
+    livePtyIds.every((ptyId) => ptyId in registry.panes)
+  ) {
+    delete registry.legacyWslAttributionUnknown
+    changed = true
+  }
   for (const ptyId of Object.keys(registry.panes)) {
     if (!livePtyIdSet.has(ptyId)) {
       delete registry.panes[ptyId]

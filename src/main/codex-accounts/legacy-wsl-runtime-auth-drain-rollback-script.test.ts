@@ -63,24 +63,33 @@ describe.skipIf(process.platform === 'win32')('legacy WSL auth drain rollback re
     writeFileSync(targetAuthPath, TARGET_AUTH)
 
     expect(runInspect(root, legacyHome, markerPath)).toBe(0)
-    execFileSync(
-      '/bin/sh',
-      [
-        '-c',
-        _internals.applyLegacyAuthScript,
-        'sh',
-        legacyHome,
-        join(root, 'absent-active-home'),
-        markerPath,
-        targetHome,
-        sha256(SOURCE_AUTH),
-        sha256(TARGET_AUTH),
-        '1',
-        '1',
-        sha256(SOURCE_CREDENTIALS)
-      ],
-      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20_000 }
-    )
+    const apply = (targetHash: string, promote: string, retire: string, bridge: string): void => {
+      execFileSync(
+        '/bin/sh',
+        [
+          '-c',
+          _internals.applyLegacyAuthScript,
+          'sh',
+          legacyHome,
+          join(root, 'absent-active-home'),
+          markerPath,
+          targetHome,
+          sha256(SOURCE_AUTH),
+          targetHash,
+          promote,
+          retire,
+          sha256(SOURCE_CREDENTIALS),
+          bridge
+        ],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20_000 }
+      )
+    }
+
+    apply(sha256(TARGET_AUTH), '1', '0', '0')
+    expect(existsSync(sourceSessionPath)).toBe(true)
+    expect(existsSync(targetSessionPath)).toBe(false)
+
+    apply(sha256(SOURCE_AUTH), '0', '1', '1')
 
     expect(existsSync(legacyAuthPath)).toBe(false)
     expect(readFileSync(targetAuthPath, 'utf8')).toBe(SOURCE_AUTH)
