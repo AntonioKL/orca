@@ -86,6 +86,62 @@ describe('orchestration RPC methods', () => {
       expect(current.run?.id).toBe(created.run.id)
     })
 
+    it('links a worker-created sub-Run to its active origin Dispatch', async () => {
+      setup(false)
+      const workerPane = 'tab_worker:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+      vi.spyOn(runtime, 'getTerminalPaneKey').mockImplementation((handle) =>
+        handle === 'term_coord' ? coordinatorPaneKey : workerPane
+      )
+      const root = db.createRun({
+        objective: 'supervise worker',
+        coordinatorHandle: 'term_coord',
+        coordinatorPaneKey
+      })
+      const task = db.createTask({ spec: 'worker task', runId: root.id })
+      const dispatch = db.createDispatchContext({
+        taskId: task.id,
+        assigneeHandle: 'term_worker',
+        assigneePaneKey: workerPane,
+        creator: { kind: 'system' },
+        maxDepth: 2
+      })
+
+      const created = (await call('orchestration.runCreate', {
+        objective: 'worker sub-run',
+        from: 'term_worker'
+      })) as { run: { id: string; parent_dispatch_id: string | null } }
+
+      expect(created.run.parent_dispatch_id).toBe(dispatch.id)
+      expect(db.listRuns().runs.find((run) => run.id === created.run.id)).toMatchObject({
+        parent_dispatch_id: dispatch.id
+      })
+    })
+
+    it('does not retain a parent link when the origin Dispatch is no longer active', () => {
+      setup(false)
+      const run = db.createRun({
+        objective: 'root',
+        coordinatorHandle: 'term_coord',
+        coordinatorPaneKey
+      })
+      const task = db.createTask({ spec: 'worker task', runId: run.id })
+      const dispatch = db.createDispatchContext({
+        taskId: task.id,
+        assigneeHandle: 'term_worker',
+        assigneePaneKey: 'tab_worker:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        creator: { kind: 'system' },
+        maxDepth: 2
+      })
+      db.completeDispatch(dispatch.id)
+      const subRun = db.createRun({
+        objective: 'late retry',
+        coordinatorHandle: 'term_worker',
+        coordinatorPaneKey: 'tab_worker:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        parentDispatchId: dispatch.id
+      })
+      expect(subRun.parent_dispatch_id).toBeNull()
+    })
+
     it('requires runtime-observed stable pane identity for binding', async () => {
       setup(false)
       vi.spyOn(runtime, 'getTerminalPaneKey').mockReturnValue(null)

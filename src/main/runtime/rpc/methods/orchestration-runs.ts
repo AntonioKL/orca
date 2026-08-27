@@ -38,10 +38,17 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
       })
       const db = runtime.getOrchestrationDb()
       const priorRun = db.getCurrentRunForPane(paneKey)
+      const authority = runtime.getOrchestrationDispatchAuthority(params.from)
+      const parentDispatchId = db.getActiveDispatchIdForTerminal(
+        params.from,
+        paneKey,
+        authority?.processIncarnation ?? undefined
+      )
       const run = db.createRun({
         objective: params.objective,
         coordinatorHandle: params.from,
-        coordinatorPaneKey: paneKey
+        coordinatorPaneKey: paneKey,
+        parentDispatchId
       })
       runtime.cancelMessageWaiters(params.from)
       if (priorRun) {

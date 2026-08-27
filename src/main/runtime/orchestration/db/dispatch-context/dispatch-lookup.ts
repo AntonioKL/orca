@@ -1,5 +1,5 @@
 import { parsePaneKey } from '../../../../../shared/stable-pane-id'
-import type { DispatchContextRow } from '../../types'
+import type { DispatchContextRow, RemoteDispatchAttachmentRow } from '../../types'
 import {
   DISPATCH_PANE_KEY_MATCH_SUFFIX_SQL,
   isEquivalentPaneKey,
@@ -15,6 +15,34 @@ export function getActiveDispatchForTerminal(
   assigneePaneKey?: string
 ): DispatchContextRow | undefined {
   return this.findActiveDispatchForAssignee(handle, assigneePaneKey)
+}
+
+/** Resolve the origin id across local Dispatch rows and live federated attachments. */
+export function getActiveDispatchIdForTerminal(
+  this: OrchestrationDb,
+  handle: string,
+  assigneePaneKey?: string,
+  processIncarnation?: string
+): string | undefined {
+  const local = this.findActiveDispatchForAssignee(handle, assigneePaneKey)
+  if (local) {
+    return local.id
+  }
+  if (!assigneePaneKey || !processIncarnation || !parsePaneKey(assigneePaneKey)) {
+    return undefined
+  }
+  const rows = this.db
+    .prepare(
+      `SELECT * FROM remote_dispatch_attachments
+       WHERE process_incarnation = ? AND pane_key IS NOT NULL
+         AND state IN ('starting', 'ready', 'start_unknown', 'stopping', 'stop_unknown')`
+    )
+    .all(processIncarnation) as RemoteDispatchAttachmentRow[]
+  const matches = rows.filter(
+    (row) => row.pane_key !== null && isEquivalentPaneKey(row.pane_key, assigneePaneKey)
+  )
+  // Ambiguous identity is fail-closed: never attribute a sub-Run to an arbitrary parent.
+  return matches.length === 1 ? matches[0].dispatch_id : undefined
 }
 
 /**
@@ -169,6 +197,7 @@ export function getLatestDispatchForTerminal(
 
 export type DispatchLookupMethods = {
   getActiveDispatchForTerminal: typeof getActiveDispatchForTerminal
+  getActiveDispatchIdForTerminal: typeof getActiveDispatchIdForTerminal
   hasAnyDispatchContexts: typeof hasAnyDispatchContexts
   getActiveDispatchForIdentity: typeof getActiveDispatchForIdentity
   getActiveDispatchMailboxOwners: typeof getActiveDispatchMailboxOwners
@@ -180,6 +209,7 @@ export type DispatchLookupMethods = {
 export function attachDispatchLookup(ctor: { prototype: object }): void {
   Object.assign(ctor.prototype, {
     getActiveDispatchForTerminal,
+    getActiveDispatchIdForTerminal,
     hasAnyDispatchContexts,
     getActiveDispatchForIdentity,
     getActiveDispatchMailboxOwners,

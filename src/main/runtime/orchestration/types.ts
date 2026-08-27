@@ -44,6 +44,8 @@ export type RunRow = {
   id: string
   objective: string
   home_database: string
+  /** Dispatch that created this Run, when a worker starts a sub-Run. */
+  parent_dispatch_id: string | null
   coordinator_handle: string | null
   coordinator_pane_key: string | null
   consumer_generation: number
