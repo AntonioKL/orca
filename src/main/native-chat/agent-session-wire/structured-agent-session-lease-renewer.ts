@@ -100,7 +100,11 @@ export class StructuredAgentSessionLeaseRenewer {
       let results: PromiseSettledResult<AgentSessionRecord>[]
       try {
         const renewed = await this.input.store.renewLeases(renewals)
-        await Promise.all(renewed.map((record) => this.input.onRenewed?.(record)))
+        await Promise.all(
+          renewed.map(async (record) => {
+            await this.input.onRenewed?.(record)
+          })
+        )
         results = renewed.map((record) => ({ status: 'fulfilled', value: record }) as const)
       } catch {
         results = await Promise.allSettled(
