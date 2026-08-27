@@ -19,6 +19,28 @@ export function createTerminalAccessoryRepeatSender<TInput>(
 export function createTerminalAccessoryRepeatController<TInput>() {
   let generation = 0
   let timer: ReturnType<typeof setTimeout> | null = null
+  let dispatchTail: Promise<void> | null = null
+
+  const dispatch = (
+    input: TInput,
+    send: TerminalAccessoryRepeatSender<TInput>,
+    activeGeneration: number
+  ) => {
+    const sendIfCurrent = () =>
+      generation === activeGeneration ? send(input) : Promise.resolve(false)
+    const result = dispatchTail ? dispatchTail.then(sendIfCurrent) : sendIfCurrent()
+    const settled = result.then(
+      () => undefined,
+      () => undefined
+    )
+    dispatchTail = settled
+    void settled.then(() => {
+      if (dispatchTail === settled) {
+        dispatchTail = null
+      }
+    })
+    return result
+  }
 
   const stop = () => {
     generation += 1
@@ -39,7 +61,7 @@ export function createTerminalAccessoryRepeatController<TInput>() {
         if (generation !== activeGeneration) {
           return
         }
-        void send(input).then(
+        void dispatch(input, send, activeGeneration).then(
           (sent) => {
             if (sent && generation === activeGeneration) {
               schedule(TERMINAL_ACCESSORY_REPEAT_INTERVAL_MS)
@@ -50,7 +72,7 @@ export function createTerminalAccessoryRepeatController<TInput>() {
       }, delayMs)
     }
 
-    void send(input).then(
+    void dispatch(input, send, activeGeneration).then(
       (sent) => {
         if (sent && generation === activeGeneration) {
           schedule(

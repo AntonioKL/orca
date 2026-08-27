@@ -60,6 +60,28 @@ describe('terminal accessory repeat', () => {
     expect(send).toHaveBeenCalledTimes(1)
   })
 
+  it('serializes a new press behind the previous press send', async () => {
+    vi.useFakeTimers()
+    const first = deferred()
+    const sent: string[] = []
+    const send = vi.fn((input: string) => {
+      sent.push(input)
+      return input === 'down' ? first.promise.then(() => true) : Promise.resolve(true)
+    })
+    const repeat = createTerminalAccessoryRepeatController<string>()
+
+    repeat.start('down', send)
+    repeat.stop()
+    repeat.start('up', send)
+
+    expect(sent).toEqual(['down'])
+
+    first.resolve()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(sent).toEqual(['down', 'up'])
+    repeat.stop()
+  })
+
   it('stops repeating when the transport rejects a send', async () => {
     vi.useFakeTimers()
     const send = vi.fn(() => Promise.reject(new Error('disconnected')))
