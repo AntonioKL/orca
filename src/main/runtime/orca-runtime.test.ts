@@ -733,7 +733,9 @@ function resetRuntimeTestMocks(): void {
   forgetLocalWatcherRemovalSnapshotMock.mockReset()
   forgetRemoteWatcherRemovalSnapshotMock.mockReset()
   vi.mocked(listWorktrees).mockResolvedValue(MOCK_GIT_WORKTREES)
-  vi.mocked(listWorktreesStrict).mockResolvedValue(MOCK_GIT_WORKTREES)
+  vi.mocked(listWorktreesStrict).mockImplementation((repoPath, options) =>
+    options ? listWorktrees(repoPath, options) : listWorktrees(repoPath)
+  )
   scanLocalRepoWorktreesForResolutionMock
     .mockReset()
     .mockImplementation(async (repoPath: string, options: { wslDistro?: string }) => {
@@ -48986,6 +48988,51 @@ describe('OrcaRuntimeService', () => {
     } finally {
       warn.mockRestore()
     }
+  })
+
+  it('verifies a runtime-created worktree without joining a stale shared listing', async () => {
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setNotifier({
+      worktreesChanged: vi.fn(),
+      reposChanged: vi.fn(),
+      activateWorktree: vi.fn(),
+      createTerminal: vi.fn(),
+      splitTerminal: vi.fn(),
+      renameTerminal: vi.fn(),
+      focusTerminal: vi.fn(),
+      closeTerminal: vi.fn(),
+      sleepWorktree: vi.fn(),
+      terminalFitOverrideChanged: vi.fn(),
+      terminalDriverChanged: vi.fn()
+    })
+    runtime.attachWindow(1)
+
+    const createdWorktree = {
+      path: '/tmp/workspaces/runtime-fresh-verification',
+      head: 'def',
+      branch: 'refs/heads/runtime-fresh-verification',
+      isBare: false,
+      isMainWorktree: false
+    }
+    computeWorktreePathMock.mockReturnValue(createdWorktree.path)
+    ensurePathWithinWorkspaceMock.mockReturnValue(createdWorktree.path)
+    vi.mocked(getEffectiveHooks).mockReturnValue(null)
+    vi.mocked(listWorktrees).mockResolvedValue([])
+    vi.mocked(listWorktreesStrict).mockResolvedValue([createdWorktree])
+
+    await expect(
+      runtime.createManagedWorktree({
+        repoSelector: 'id:repo-1',
+        name: 'runtime-fresh-verification'
+      })
+    ).resolves.toMatchObject({
+      worktree: {
+        path: createdWorktree.path,
+        branch: createdWorktree.branch
+      }
+    })
+
+    expect(listWorktreesStrict).toHaveBeenCalledWith(TEST_REPO_PATH)
   })
 
   it('activates CLI-created worktrees only when explicitly requested', async () => {

@@ -25581,9 +25581,10 @@ export class OrcaRuntimeService {
       )
     }
 
+    // A post-mutation verification must not join a pre-create shared scan.
     const gitWorktrees = hasLocalWorktreeGitOptions
-      ? await listWorktrees(repo.path, localWorktreeGitOptions)
-      : await listWorktrees(repo.path)
+      ? await listWorktreesStrict(repo.path, localWorktreeGitOptions)
+      : await listWorktreesStrict(repo.path)
     // Why: Git may canonicalize a symlinked create path; its exact branch identifies the listed row.
     const created = findCreatedWorktree(gitWorktrees, worktreePath, branchName)
     if (!created) {

@@ -5,6 +5,7 @@ const {
   handleMock,
   removeHandlerMock,
   listWorktreesMock,
+  listWorktreesStrictMock,
   assertWorktreeCleanForRemovalMock,
   addWorktreeMock,
   removeWorktreeMock,
@@ -35,6 +36,7 @@ const {
   handleMock: vi.fn(),
   removeHandlerMock: vi.fn(),
   listWorktreesMock: vi.fn(),
+  listWorktreesStrictMock: vi.fn(),
   assertWorktreeCleanForRemovalMock: vi.fn(),
   addWorktreeMock: vi.fn(),
   removeWorktreeMock: vi.fn(),
@@ -72,7 +74,7 @@ vi.mock('electron', () => ({
 
 vi.mock('../git/worktree', () => ({
   listWorktrees: listWorktreesMock,
-  listWorktreesStrict: listWorktreesMock,
+  listWorktreesStrict: listWorktreesStrictMock,
   assertWorktreeCleanForRemoval: assertWorktreeCleanForRemovalMock,
   addWorktree: addWorktreeMock,
   removeWorktree: removeWorktreeMock
@@ -176,6 +178,8 @@ describe('registerWorktreeHandlers – Windows path handling', () => {
     handleMock.mockReset()
     removeHandlerMock.mockReset()
     listWorktreesMock.mockReset()
+    listWorktreesStrictMock.mockReset()
+    listWorktreesStrictMock.mockImplementation((...args) => listWorktreesMock(...args))
     assertWorktreeCleanForRemovalMock.mockReset()
     addWorktreeMock.mockReset()
     removeWorktreeMock.mockReset()
@@ -333,6 +337,33 @@ describe('registerWorktreeHandlers – Windows path handling', () => {
         branch: 'refs/heads/improve-dashboard'
       })
     })
+  })
+
+  it('verifies a created Windows worktree without joining a stale shared listing', async () => {
+    listWorktreesMock.mockResolvedValue([])
+    listWorktreesStrictMock.mockResolvedValue([
+      {
+        path: 'C:/workspaces/improve-dashboard',
+        head: 'abc123',
+        branch: 'refs/heads/improve-dashboard',
+        isBare: false,
+        isMainWorktree: false
+      }
+    ])
+
+    await expect(
+      handlers['worktrees:create'](null, {
+        repoId: 'repo-1',
+        name: 'improve-dashboard'
+      })
+    ).resolves.toMatchObject({
+      worktree: {
+        path: 'C:/workspaces/improve-dashboard',
+        branch: 'refs/heads/improve-dashboard'
+      }
+    })
+
+    expect(listWorktreesStrictMock).toHaveBeenCalledWith('C:\\repo')
   })
 
   it('skips a retired generated name when the physical leaf is decorated', async () => {
