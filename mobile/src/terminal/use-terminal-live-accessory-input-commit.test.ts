@@ -190,7 +190,8 @@ describe('terminal live accessory input commit hook', () => {
     const result = await harness.commit({ bytes: '\x7f', localEdit: 'backspace' })
 
     // Then
-    expect(harness.applyLiveInputMirror).toHaveBeenCalledWith('terminal-a', '')
+    // composing: a held syllable is still a preedit, so the mirror must not commit it.
+    expect(harness.applyLiveInputMirror).toHaveBeenCalledWith('terminal-a', '', true)
     expect(result).toEqual({ kind: 'handled' })
     expect(harness.sent).toEqual([])
   })
@@ -207,7 +208,8 @@ describe('terminal live accessory input commit hook', () => {
     const result = await harness.commit({ bytes: '\x7f', localEdit: 'backspace' })
 
     // Then
-    expect(harness.applyLiveInputMirror).toHaveBeenCalledWith('terminal-a', 'a')
+    // not composing: nothing is held, so the shortened field is committed text and the diff DELs.
+    expect(harness.applyLiveInputMirror).toHaveBeenCalledWith('terminal-a', 'a', false)
     expect(result).toEqual({ kind: 'handled' })
   })
 })

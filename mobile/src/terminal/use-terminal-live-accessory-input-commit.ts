@@ -21,7 +21,7 @@ export async function getTerminalLiveAccessoryInactiveInputCommitResult(
 
 type TerminalLiveAccessoryInputCommitOptions = {
   readonly activeHandle: string | null
-  readonly applyLiveInputMirror: (handle: string, fieldText: string) => void
+  readonly applyLiveInputMirror: (handle: string, fieldText: string, composing?: boolean) => void
   readonly clearPendingLiveInputCommit: () => void
   readonly flushPendingLiveInputText: (expectedHandle: string | null) => Promise<boolean>
   readonly heldLiveInputTextRef: RefObject<string>
@@ -81,7 +81,10 @@ export function useTerminalLiveAccessoryInputCommit({
           // field is edited here and the mirror diff syncs the PTY echo.
           setLiveInputCapture(editedText)
           liveInputRef.current?.setNativeProps({ text: editedText })
-          applyLiveInputMirror(activeHandle, editedText)
+          // Why pass it: omitted, the mirror falls back to an Android-only
+          // code-point heuristic and commits a still-composing preedit — pinyin
+          // preedit is plain ASCII, so only the held range knows it is unfinished.
+          applyLiveInputMirror(activeHandle, editedText, heldText.length > 0)
           return { kind: 'handled' }
         }
         case 'commit-held-then-send':
