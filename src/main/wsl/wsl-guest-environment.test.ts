@@ -122,6 +122,28 @@ describe('probing', () => {
 
     releaseCanceled({ code: null, signal: null, stdout: '', stderr: '', timedOut: false })
   })
+
+  it('aborts a pending probe when its cache entry is invalidated', async () => {
+    let probeSignal!: AbortSignal
+    runProcessMock.mockImplementation(
+      (spec: { signal: AbortSignal }) =>
+        new Promise((resolve) => {
+          probeSignal = spec.signal
+          spec.signal.addEventListener(
+            'abort',
+            () => resolve({ code: null, signal: null, stdout: '', stderr: '', timedOut: false }),
+            { once: true }
+          )
+        })
+    )
+    const operation = getWslGuestEnvironment('Ubuntu', 4_000)
+    await vi.waitFor(() => expect(runProcessMock).toHaveBeenCalledOnce())
+
+    invalidateWslGuestEnvironment('Ubuntu')
+
+    expect(probeSignal.aborted).toBe(true)
+    await expect(operation).resolves.toBeNull()
+  })
 })
 
 describe('bad answers are not cached as good ones', () => {

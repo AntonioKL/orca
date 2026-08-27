@@ -259,6 +259,9 @@ export function invalidateWslGuestEnvironment(distro?: string, all = false): voi
   // default distro, so overloading it to mean "all" made a default-distro
   // Refresh evict every distro and pay a login shell for each.
   if (all) {
+    for (const probe of inFlight.values()) {
+      probe.controller.abort()
+    }
     inFlight.clear()
     resolved.clear()
     retryAfter.clear()
@@ -266,6 +269,7 @@ export function invalidateWslGuestEnvironment(distro?: string, all = false): voi
     return
   }
   const key = cacheKey(distro)
+  inFlight.get(key)?.controller.abort()
   inFlight.delete(key)
   resolved.delete(key)
   retryAfter.delete(key)
