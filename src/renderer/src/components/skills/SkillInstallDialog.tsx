@@ -32,6 +32,7 @@ import { useSkillInstallProgress } from './skill-install-progress-state'
 import { resolveSkillShareForInstall } from './skill-warning-preview-gate'
 import { useSkillInstallRisk } from './use-skill-install-risk'
 import { translateSkillInstallError } from './skill-install-error-copy'
+import { translate } from '@/i18n/i18n'
 
 export function SkillInstallDialog({
   open,
