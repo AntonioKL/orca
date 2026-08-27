@@ -44,7 +44,7 @@ export function observeDaemonChildExit(
   recordExit: (observation: DaemonChildExitObservation) => void,
   maxStderrBytes = DEFAULT_STDERR_TAIL_BYTES
 ): DaemonChildExitObserver {
-  let stderrTail = Buffer.alloc(0)
+  let stderrTail: Buffer = Buffer.alloc(0)
   let ready = false
   let stopped = false
   let stderrEnded = child.stderr === null
