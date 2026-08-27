@@ -9,6 +9,7 @@ import {
 } from './restored-claude-turn-confirmation'
 import type { AgentStatusIpcPayload } from '../../shared/agent-status-types'
 import type { NativeChatTurnLifecycle } from '../../shared/native-chat-types'
+import { wslHookRelayConnectionId } from '../../shared/wsl-hook-relay-contract'
 
 const NOW = 1_800_000_000_000
 /** The turn boundary the shared lifecycle decoder reports for a generation still running. */
@@ -82,6 +83,19 @@ describe('confirmRestoredWorkingClaudeTurns', () => {
     expect(readForegroundProcess).not.toHaveBeenCalled()
   })
 
+  it('allows a WSL relay row when its workspace execution host is local', async () => {
+    const rows = [
+      {
+        ...statusRow('tab-1:leaf-1', '/home/dev/session.jsonl'),
+        connectionId: wslHookRelayConnectionId('Ubuntu')
+      }
+    ]
+    const deps = makeDeps({ getStatusSnapshot: () => rows })
+
+    await expect(confirmRestoredWorkingClaudeTurns(deps)).resolves.toBe(1)
+    expect(deps.confirm).toHaveBeenCalledWith('tab-1:leaf-1')
+  })
+
   it('refuses an open boundary older than a plausible tool call', async () => {
     // Why: an abandoned mid-turn transcript stays open forever, so pairing one with a Claude that
     // happens to run in the pane now would confirm a session that died days ago. Measured: real
@@ -103,6 +117,12 @@ describe('confirmRestoredWorkingClaudeTurns', () => {
       readTurnLifecycle: async () => ({ ...OPEN_TURN, timestamp: null })
     })
     await expect(confirmRestoredWorkingClaudeTurns(undated)).resolves.toBe(0)
+
+    const future = makeDeps({
+      readTurnLifecycle: async () => ({ ...OPEN_TURN, timestamp: NOW + 1 })
+    })
+    await expect(confirmRestoredWorkingClaudeTurns(future)).resolves.toBe(0)
+    expect(future.confirm).not.toHaveBeenCalled()
   })
 
   it('refuses a turn with no boundary in the window — absence is not evidence of work', async () => {
@@ -302,6 +322,25 @@ describe('confirmRestoredWorkingClaudeTurns', () => {
 
     await expect(confirmRestoredWorkingClaudeTurns(deps)).resolves.toBe(0)
     expect(readForegroundProcess).not.toHaveBeenCalled()
+  })
+
+  it('does no provider or transcript work for a large irrelevant snapshot', async () => {
+    const rows = Array.from({ length: 4_097 }, (_, index) => ({
+      ...statusRow(`tab-${index}:leaf-1`, `/tmp/${index}.jsonl`),
+      agentType: 'codex' as const
+    }))
+    const readForegroundProcess = vi.fn(async () => 'claude')
+    const toReadableTranscriptPath = vi.fn(async (path: string) => path)
+    const deps = makeDeps({
+      getStatusSnapshot: () => rows,
+      readForegroundProcess,
+      toReadableTranscriptPath
+    })
+
+    await expect(confirmRestoredWorkingClaudeTurns(deps)).resolves.toBe(0)
+    expect(readForegroundProcess).not.toHaveBeenCalled()
+    expect(toReadableTranscriptPath).not.toHaveBeenCalled()
+    expect(deps.confirm).not.toHaveBeenCalled()
   })
 })
 
