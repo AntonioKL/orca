@@ -430,7 +430,7 @@ async function expectAccumulatedCatalogCompleteness(dialog: Locator): Promise<vo
   await input.fill('accumulated')
   await expect(rows.first()).toContainText('Accumulated')
   await expect(rows).toHaveCount(PALETTE_SECTION_RENDER_CAP)
-  expect(await rows.allTextContents()).toEqual(firstOrder)
+  await expect.poll(() => rows.allTextContents()).toEqual(firstOrder)
 }
 
 function expectFrameSafe(metrics: InteractionMetrics): void {

@@ -1355,7 +1355,10 @@ function WorktreeJumpPaletteContent({
   )
 
   const worktreeItems = useMemo<WorktreePaletteItem[]>(() => {
-    const items = worktreeMatches
+    const matches = hasQuery
+      ? worktreeMatches
+      : worktreeMatches.slice(0, EMPTY_QUERY_ROW_BUDGET + (expandedSectionCaps['worktrees'] ?? 0))
+    const items = matches
       .map((match) => {
         const worktree = resolveWorktree(match.worktreeId, match.worktreeHostId)
         if (!worktree) {
@@ -1384,7 +1387,7 @@ function WorktreeJumpPaletteContent({
         { rank: b.match.rank, order: orderById.get(b.id) ?? 0, id: b.id }
       )
     )
-  }, [hasQuery, resolveWorktree, worktreeMatches])
+  }, [expandedSectionCaps, hasQuery, resolveWorktree, worktreeMatches])
 
   const browserItems = useMemo<BrowserPaletteItem[]>(
     () =>
@@ -1899,7 +1902,7 @@ function WorktreeJumpPaletteContent({
       ? capPaletteSection(worktreeItems, worktreeCap)
       : {
           visible: worktreeItems.slice(0, worktreeCap),
-          overflowCount: Math.max(0, worktreeItems.length - worktreeCap)
+          overflowCount: Math.max(0, worktreeMatches.length - worktreeCap)
         }
     const projectTargetsCap = PALETTE_SECTION_RENDER_CAP + (expandedSectionCaps['projects'] ?? 0)
     const projectTargets = capPaletteSection(hasQuery ? projectTargetItems : [], projectTargetsCap)
@@ -1941,7 +1944,8 @@ function WorktreeJumpPaletteContent({
     openTabItems,
     recentTabItems,
     hasQuery,
-    openTabsLeadSections
+    openTabsLeadSections,
+    worktreeMatches.length
   ])
 
   // Why: badges number the snapshotted recent rows only — ⌘N is meaningless on a typed query.
