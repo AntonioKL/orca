@@ -19,7 +19,7 @@ describe('observeDaemonChildExit', () => {
     child.stderr.write('discarded startup\n')
     observer.markReady()
     child.stderr.write('prefix-FATAL')
-    child.emit('close', 134, null)
+    child.emit('exit', 134, null)
 
     expect(child.stderr.unref).toHaveBeenCalledOnce()
     expect(onExit).toHaveBeenCalledWith({
@@ -28,6 +28,17 @@ describe('observeDaemonChildExit', () => {
       signal: null,
       stderrTail: 'prefix-FATAL'
     })
+  })
+
+  it('reports from process exit without waiting for stderr close', () => {
+    const child = createChild()
+    const onExit = vi.fn()
+    const observer = observeDaemonChildExit(child, onExit)
+
+    observer.markReady()
+    child.emit('exit', 134, null)
+
+    expect(onExit).toHaveBeenCalledWith(expect.objectContaining({ exitCode: 134 }))
   })
 
   it('does not infer an exit from stderr or contact loss', () => {
@@ -51,7 +62,7 @@ describe('observeDaemonChildExit', () => {
 
     child.stderr.write('FATAL ERROR before ready dispatch')
     observer.markReady()
-    child.emit('close', 134, null)
+    child.emit('exit', 134, null)
 
     expect(onExit).toHaveBeenCalledWith(
       expect.objectContaining({ stderrTail: 'FATAL ERROR before ready dispatch' })
@@ -67,7 +78,7 @@ describe('observeDaemonChildExit', () => {
     child.stderr.write('startup failure')
     expect(observer.startupStderrTail()).toBe('startup failure')
     observer.stop({ destroyStderr: true })
-    child.emit('close', 1, null)
+    child.emit('exit', 1, null)
 
     expect(destroy).toHaveBeenCalledOnce()
     expect(onExit).not.toHaveBeenCalled()

@@ -6,12 +6,12 @@ type UnrefableChildStderr = NonNullable<ChildProcess['stderr']> & {
   unref?: () => void
 }
 
-type DaemonCloseListener = (exitCode: number | null, signal: NodeJS.Signals | null) => void
+type DaemonExitListener = (exitCode: number | null, signal: NodeJS.Signals | null) => void
 
 type ObservableDaemonChild = {
   stderr: UnrefableChildStderr | null
-  on(event: 'close', listener: DaemonCloseListener): unknown
-  off(event: 'close', listener: DaemonCloseListener): unknown
+  on(event: 'exit', listener: DaemonExitListener): unknown
+  off(event: 'exit', listener: DaemonExitListener): unknown
 }
 
 export type DaemonChildExitObservation = {
@@ -29,7 +29,7 @@ export type DaemonChildExitObserver = {
 
 export function observeDaemonChildExit(
   child: ObservableDaemonChild,
-  onExit: (observation: DaemonChildExitObservation) => void,
+  recordExit: (observation: DaemonChildExitObservation) => void,
   maxStderrBytes = DEFAULT_STDERR_TAIL_BYTES
 ): DaemonChildExitObserver {
   let stderrTail = Buffer.alloc(0)
@@ -41,16 +41,16 @@ export function observeDaemonChildExit(
     stderrTail = Buffer.concat([stderrTail, bytes]).subarray(-maxStderrBytes)
   }
   const onStderrError = (): void => {}
-  const onClose = (exitCode: number | null, signal: NodeJS.Signals | null): void => {
+  const onProcessExit = (exitCode: number | null, signal: NodeJS.Signals | null): void => {
     if (stopped || !ready) {
       return
     }
     stopped = true
-    child.off('close', onClose)
+    child.off('exit', onProcessExit)
     child.stderr?.off('data', onStderr)
     child.stderr?.off('error', onStderrError)
     try {
-      onExit({
+      recordExit({
         verdict: 'exited',
         exitCode,
         signal,
@@ -74,14 +74,14 @@ export function observeDaemonChildExit(
       ready = true
       child.stderr?.on('error', onStderrError)
       child.stderr?.unref?.()
-      child.on('close', onClose)
+      child.on('exit', onProcessExit)
     },
     stop(options = {}): void {
       if (stopped) {
         return
       }
       stopped = true
-      child.off('close', onClose)
+      child.off('exit', onProcessExit)
       child.stderr?.off('data', onStderr)
       child.stderr?.off('error', onStderrError)
       if (options.destroyStderr) {

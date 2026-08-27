@@ -94,7 +94,7 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     expect(offMock).toHaveBeenCalledWith('exit', expect.any(Function))
     expect(handlers.message).toHaveLength(0)
     expect(handlers.error).toHaveLength(0)
-    expect(handlers.exit).toHaveLength(0)
+    expect(handlers.exit).toHaveLength(1)
     expect(child.disconnect).toHaveBeenCalledOnce()
     expect(child.unref).toHaveBeenCalledOnce()
     expect(writeFileSyncMock).not.toHaveBeenCalled()
@@ -218,7 +218,7 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     for (const handler of stderrDataHandlers) {
       handler(Buffer.from('FATAL ERROR: heap limit reached'))
     }
-    for (const handler of handlers.close) {
+    for (const handler of handlers.exit) {
       handler(134)
     }
 
