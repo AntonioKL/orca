@@ -1,6 +1,14 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -11,8 +19,26 @@ const SOURCE = '{"tokens":{"expires_at":2000}}\n'
 const TARGET = '{"tokens":{"expires_at":1000}}\n'
 const NEWER = '{"tokens":{"expires_at":3000}}\n'
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex')
+type ApplyOutcome = {
+  firstStatus?: number
+  marker: boolean
+  quarantine?: string | null
+  source: string | null
+  status: number
+  target: string
+}
 
-function runApply(rewriteAfterHashCall?: number) {
+function runApply(
+  options: {
+    deleteSource?: boolean
+    crashBeforeCommit?: boolean
+    promoteAuth?: boolean
+    retryAfterCrash?: boolean
+    rewriteAfterHashCall?: number
+    rewriteBeforeDelete?: boolean
+    rewriteSourceBeforeDelete?: boolean
+  } = {}
+): ApplyOutcome {
   const root = mkdtempSync(join(tmpdir(), 'orca-drain-race-'))
   const legacy = join(root, 'legacy')
   const target = join(root, 'target')
@@ -38,55 +64,139 @@ if(process.env.REWRITE && n===Number(process.env.REWRITE)) fs.writeFileSync(proc
 `
   )
   chmodSync(shim, 0o755)
-  let status = 0
-  try {
-    execFileSync(
-      '/bin/sh',
-      [
-        '-c',
-        _internals.applyLegacyAuthScript,
-        'sh',
-        legacy,
-        join(root, 'active'),
-        marker,
-        target,
-        sha256(SOURCE),
-        sha256(TARGET),
-        '0',
-        '1',
-        'missing'
-      ],
-      {
+  const mvShim = join(bin, 'mv')
+  writeFileSync(
+    mvShim,
+    `#!/usr/bin/env node
+const { spawnSync } = require('node:child_process')
+const fs = require('node:fs')
+const args = process.argv.slice(2)
+const retiresSource = args.at(-2)?.endsWith('/legacy/auth.json')
+if (process.env.REWRITE_BEFORE_DELETE === '1' && retiresSource) {
+  const replacement = process.env.TARGET + '.replacement'
+  fs.writeFileSync(replacement, process.env.BYTES)
+  fs.renameSync(replacement, process.env.TARGET)
+}
+if (process.env.REWRITE_SOURCE_BEFORE_DELETE === '1' && retiresSource) {
+  const source = args.at(-2)
+  const replacement = source + '.replacement'
+  fs.writeFileSync(replacement, process.env.BYTES)
+  fs.renameSync(replacement, source)
+}
+const result = spawnSync('/bin/mv', args, { stdio: 'inherit' })
+if (result.status === 0 && process.env.CRASH_BEFORE_COMMIT === '1' && retiresSource) {
+  process.kill(process.ppid, 'SIGKILL')
+}
+process.exit(result.status ?? 1)
+`
+  )
+  chmodSync(mvShim, 0o755)
+  const applyArgs = [
+    '-c',
+    _internals.applyLegacyAuthScript,
+    'sh',
+    legacy,
+    join(root, 'active'),
+    marker,
+    target,
+    sha256(SOURCE),
+    sha256(TARGET),
+    options.promoteAuth ? '1' : '0',
+    options.deleteSource === false ? '0' : '1',
+    'missing'
+  ]
+  const apply = (crashBeforeCommit: boolean): number => {
+    try {
+      execFileSync('/bin/sh', applyArgs, {
         env: {
           ...process.env,
           PATH: `${bin}:${process.env.PATH ?? ''}`,
           COUNTER: counter,
-          REWRITE: rewriteAfterHashCall ? String(rewriteAfterHashCall) : '',
+          CRASH_BEFORE_COMMIT: crashBeforeCommit ? '1' : '',
+          REWRITE: options.rewriteAfterHashCall ? String(options.rewriteAfterHashCall) : '',
+          REWRITE_BEFORE_DELETE: options.rewriteBeforeDelete ? '1' : '',
+          REWRITE_SOURCE_BEFORE_DELETE: options.rewriteSourceBeforeDelete ? '1' : '',
           TARGET: targetPath,
           BYTES: NEWER
         },
         stdio: 'ignore'
-      }
-    )
-  } catch (error) {
-    status = (error as { status?: number }).status ?? -1
+      })
+      return 0
+    } catch (error) {
+      return (error as { status?: number }).status ?? -1
+    }
   }
-  return {
+  const firstStatus = apply(Boolean(options.crashBeforeCommit))
+  let status = firstStatus
+  if (options.retryAfterCrash) {
+    execFileSync(
+      '/bin/sh',
+      ['-c', _internals.inspectLegacyAuthScript, 'sh', legacy, join(root, 'active'), marker],
+      { env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` }, stdio: 'ignore' }
+    )
+    writeFileSync(counter, '0')
+    status = apply(false)
+  }
+  const outcome = {
     status,
     source: existsSync(sourcePath) ? readFileSync(sourcePath, 'utf8') : null,
     target: readFileSync(targetPath, 'utf8'),
     marker: existsSync(marker)
+  }
+  const quarantine = `${marker}.orca-drain-live-source`
+  const quarantineContents = existsSync(quarantine) ? readFileSync(quarantine, 'utf8') : null
+  rmSync(root, { recursive: true, force: true })
+  return {
+    ...outcome,
+    ...(options.retryAfterCrash ? { firstStatus } : {}),
+    ...(options.rewriteSourceBeforeDelete ? { quarantine: quarantineContents } : {})
   }
 }
 
 describe.skipIf(isWindows)('legacy WSL auth drain race guard', () => {
   it('retires an unchanged source', () =>
     expect(runApply()).toEqual({ status: 0, source: null, target: TARGET, marker: true }))
+  it('promotes the verified source before retiring it', () =>
+    expect(runApply({ promoteAuth: true })).toEqual({
+      status: 0,
+      source: null,
+      target: SOURCE,
+      marker: true
+    }))
+  it('retains the source and marker while a legacy pane is live', () =>
+    expect(runApply({ deleteSource: false, promoteAuth: true })).toEqual({
+      status: 0,
+      source: SOURCE,
+      target: SOURCE,
+      marker: false
+    }))
   it('retains source when destination is rewritten during validation', () => {
-    const outcome = runApply(3)
+    const outcome = runApply({ rewriteAfterHashCall: 3 })
     expect(outcome.status).toBe(45)
     expect(outcome.source).toBe(SOURCE)
     expect(outcome.target).toBe(NEWER)
     expect(outcome.marker).toBe(false)
+  })
+  it('retains source when destination is rewritten immediately before deletion', () => {
+    const outcome = runApply({ rewriteBeforeDelete: true })
+    expect(outcome.status).not.toBe(0)
+    expect(outcome.source).toBe(SOURCE)
+    expect(outcome.target).toBe(NEWER)
+    expect(outcome.marker).toBe(false)
+  })
+  it('restores verified source bytes when the source path is atomically replaced', () => {
+    const outcome = runApply({ rewriteSourceBeforeDelete: true })
+    expect(outcome.status).toBe(40)
+    expect(outcome.source).toBe(SOURCE)
+    expect(outcome.quarantine).toBe(NEWER)
+    expect(outcome.marker).toBe(false)
+  })
+  it('recovers and retries after interruption before the completion marker', () => {
+    const outcome = runApply({ crashBeforeCommit: true, retryAfterCrash: true })
+    expect(outcome.firstStatus).not.toBe(0)
+    expect(outcome.status).toBe(0)
+    expect(outcome.source).toBeNull()
+    expect(outcome.target).toBe(TARGET)
+    expect(outcome.marker).toBe(true)
   })
 })

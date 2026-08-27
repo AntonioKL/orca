@@ -3,10 +3,15 @@ import { posix as pathPosix } from 'node:path'
 import { WSL_CODEX_RUNTIME_HOME_SEGMENTS } from '../pty/codex-home-wsl-env'
 import { runWslProcess } from '../wsl/wsl-runner'
 import { compareCodexAuthFreshness, codexAuthIsFresher } from './codex-auth-identity'
+import {
+  APPLY_LEGACY_AUTH_SCRIPT,
+  FINALIZE_ABSENT_AUTH_SCRIPT,
+  INSPECT_LEGACY_AUTH_SCRIPT,
+  MARKER_PRESENT_EXIT,
+  SOURCE_AUTH_ABSENT_EXIT
+} from './legacy-wsl-runtime-auth-drain-scripts'
 
 const DRAIN_MARKER_NAME = 'direct-home-auth-drain-v1.json'
-const MARKER_PRESENT_EXIT = 20
-const SOURCE_AUTH_ABSENT_EXIT = 21
 
 export type LegacyWslRuntimeAuthDestination = { authContents: string; linuxHomePath: string }
 type Inspection = {
@@ -26,7 +31,7 @@ const inFlight = new Map<string, Promise<void>>()
 const complete = new Set<string>()
 
 export function startLegacyWslRuntimeAuthDrain(options: LegacyWslRuntimeAuthDrainOptions): void {
-  const key = options.distro.trim().toLowerCase()
+  const key = `${options.distro.trim().toLowerCase()}\0${pathPosix.normalize(options.guestHomeLinuxPath)}`
   if (complete.has(key) || inFlight.has(key)) {
     return
   }
@@ -173,74 +178,6 @@ function assertSuccessfulDrainStep(
 function sha256(contents: string): string {
   return createHash('sha256').update(contents).digest('hex')
 }
-
-const RESOLVE_LEGACY_HOME_SCRIPT = `
-legacy_home="$1"
-legacy_home_resolved=0
-if [ -e "$1" ] || [ -L "$1" ]; then legacy_home=$(readlink -f -- "$1") || exit 30; legacy_home_resolved=1; fi
-if [ -e "$2" ] || [ -L "$2" ]; then active_home=$(readlink -f -- "$2") || exit 31; if [ "$legacy_home_resolved" = 1 ]; then [ "$active_home" = "$legacy_home" ] || exit 32; else legacy_home="$active_home"; legacy_home_resolved=1; fi; fi
-`
-const INSPECT_LEGACY_AUTH_SCRIPT = `
-set -eu
-[ ! -f "$3" ] || exit ${MARKER_PRESENT_EXIT}
-${RESOLVE_LEGACY_HOME_SCRIPT}
-source_auth="$legacy_home/auth.json"
-[ -f "$source_auth" ] || exit ${SOURCE_AUTH_ABSENT_EXIT}
-encode_file() { base64 < "$1" | tr -d '\\n'; }
-encode_file "$source_auth"; printf '\\n'
-source_credentials="$legacy_home/.credentials.json"
-if [ -f "$source_credentials" ]; then printf 'present\\n'; encode_file "$source_credentials"; printf '\\n'; elif [ ! -e "$source_credentials" ] && [ ! -L "$source_credentials" ]; then printf 'missing\\n\\n'; else exit 44; fi
-`
-
-// The destination pin is a hard link to the exact inode being validated. A
-// concurrent in-place rewrite changes the pin; an atomic replacement breaks
-// -ef. Either case aborts before source retirement, preserving credentials.
-const APPLY_LEGACY_AUTH_SCRIPT = `
-set -eu
-[ ! -f "$3" ] || exit 0
-${RESOLVE_LEGACY_HOME_SCRIPT}
-target_home=$(readlink -f -- "$4") || exit 33
-[ "$legacy_home" != "$target_home" ] || exit 34
-source_auth="$legacy_home/auth.json"; target_auth="$target_home/auth.json"
-[ -f "$source_auth" ] || exit 35; [ -f "$target_auth" ] || exit 36
-hash_file() { sha256sum -- "$1" | cut -d ' ' -f 1; }
-[ "$(hash_file "$source_auth")" = "$5" ] || exit 37
-[ "$(hash_file "$target_auth")" = "$6" ] || exit 38
-umask 077
-temporary_auth="$target_auth.orca-drain-$$"; temporary_credentials="$target_home/.credentials.json.orca-drain-$$"; destination_pin="$target_auth.orca-drain-pin-$$"; temporary_marker="$3.orca-drain-$$"
-cleanup() { rm -f -- "$temporary_auth" "$temporary_credentials" "$destination_pin" "$temporary_marker"; }
-trap cleanup EXIT HUP INT TERM
-source_credentials="$legacy_home/.credentials.json"; target_credentials="$target_home/.credentials.json"
-if [ -f "$source_credentials" ] && [ ! -e "$target_credentials" ] && [ ! -L "$target_credentials" ]; then
-  [ "$9" != missing ] || exit 43; [ "$(hash_file "$source_credentials")" = "$9" ] || exit 43
-  cp -- "$source_credentials" "$temporary_credentials"; chmod 600 "$temporary_credentials"; [ "$(hash_file "$temporary_credentials")" = "$9" ] || exit 43; [ "$(hash_file "$source_credentials")" = "$9" ] || exit 43; mv -n -- "$temporary_credentials" "$target_credentials"
-elif [ "$9" = missing ] && [ ! -e "$target_credentials" ] && [ ! -L "$target_credentials" ]; then
-  [ ! -e "$source_credentials" ] && [ ! -L "$source_credentials" ] || exit 43
-fi
-if [ "$7" = 1 ]; then
-  cp -- "$source_auth" "$temporary_auth"; chmod 600 "$temporary_auth"; [ "$(hash_file "$temporary_auth")" = "$5" ] || exit 42
-  [ "$(hash_file "$target_auth")" = "$6" ] || exit 39
-  mv -f -- "$temporary_auth" "$target_auth"
-fi
-ln -- "$target_auth" "$destination_pin"
-expected_target_hash="$6"; [ "$7" != 1 ] || expected_target_hash="$5"
-[ "$(hash_file "$destination_pin")" = "$expected_target_hash" ] || exit 45
-[ "$target_auth" -ef "$destination_pin" ] || exit 45
-if [ "$8" = 1 ]; then
-  [ "$(hash_file "$destination_pin")" = "$expected_target_hash" ] || exit 45
-  [ "$target_auth" -ef "$destination_pin" ] || exit 45
-  [ "$(hash_file "$source_auth")" = "$5" ] || exit 40
-  rm -- "$source_auth"
-  printf '%s\\n' '{"completed":true}' > "$temporary_marker"; chmod 600 "$temporary_marker"; mv -f -- "$temporary_marker" "$3"
-fi
-`
-const FINALIZE_ABSENT_AUTH_SCRIPT = `
-set -eu
-[ ! -f "$3" ] || exit 0
-${RESOLVE_LEGACY_HOME_SCRIPT}
-[ ! -e "$legacy_home/auth.json" ] && [ ! -L "$legacy_home/auth.json" ] || exit 41
-umask 077; marker_parent=\${3%/*}; mkdir -p -- "$marker_parent"; temporary_marker="$3.orca-drain-$$"; trap 'rm -f -- "$temporary_marker"' EXIT HUP INT TERM; printf '%s\\n' '{"completed":true}' > "$temporary_marker"; chmod 600 "$temporary_marker"; mv -f -- "$temporary_marker" "$3"
-`
 
 export const _internals = {
   applyLegacyAuthScript: APPLY_LEGACY_AUTH_SCRIPT,

@@ -70,6 +70,20 @@ describe('legacy WSL runtime auth drain', () => {
     expect(runWslProcessMock.mock.calls[1][0].args.slice(-3)).toEqual(['0', '1', 'missing'])
   })
 
+  it('does not expose captured auth output when the guest apply fails', async () => {
+    runWslProcessMock
+      .mockResolvedValueOnce(result(0, inspection(SOURCE)))
+      .mockResolvedValueOnce(result(45, 'secret-auth-output'))
+    const operation = drainLegacyWslRuntimeAuth({
+      distro: 'Ubuntu',
+      guestHomeLinuxPath: '/home/alice',
+      legacyPanePresent: false,
+      resolveDestination: () => ({ authContents: STALE, linuxHomePath: '/home/alice/.codex' })
+    })
+    await expect(operation).rejects.toThrow('Legacy WSL auth drain apply failed (exit 45)')
+    await expect(operation).rejects.not.toThrow('secret-auth-output')
+  })
+
   it('coalesces concurrent launches and allows idempotent retries', async () => {
     let release!: (value: ReturnType<typeof result>) => void
     runWslProcessMock.mockImplementationOnce(
@@ -89,12 +103,11 @@ describe('legacy WSL runtime auth drain', () => {
     await Promise.resolve()
     expect(runWslProcessMock).toHaveBeenCalledTimes(1)
     release(result(0, inspection(SOURCE)))
-    await Promise.resolve()
-    await Promise.resolve()
     runWslProcessMock.mockResolvedValueOnce(result(0, inspection(SOURCE)))
-    startLegacyWslRuntimeAuthDrain(options)
-    await Promise.resolve()
-    expect(runWslProcessMock).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => {
+      startLegacyWslRuntimeAuthDrain(options)
+      expect(runWslProcessMock).toHaveBeenCalledTimes(2)
+    })
   })
 
   it('is idempotent when the completion marker is already present', async () => {
@@ -109,5 +122,18 @@ describe('legacy WSL runtime auth drain', () => {
       })
     ).resolves.toBe('complete')
     expect(resolveDestination).not.toHaveBeenCalled()
+  })
+
+  it('does not share completion across distinct guest homes in one distro', async () => {
+    runWslProcessMock.mockResolvedValue(result(20))
+    const options = {
+      distro: 'Ubuntu',
+      legacyPanePresent: false,
+      resolveDestination: vi.fn()
+    }
+    startLegacyWslRuntimeAuthDrain({ ...options, guestHomeLinuxPath: '/home/alice' })
+    await vi.waitFor(() => expect(runWslProcessMock).toHaveBeenCalledTimes(1))
+    startLegacyWslRuntimeAuthDrain({ ...options, guestHomeLinuxPath: '/home/bob' })
+    await vi.waitFor(() => expect(runWslProcessMock).toHaveBeenCalledTimes(2))
   })
 })
