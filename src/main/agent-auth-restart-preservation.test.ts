@@ -78,6 +78,58 @@ describe('preserveAgentAuthBeforeRestart', () => {
     expect(calls).toEqual(['codex-host', 'codex-wsl', 'flush'])
   })
 
+  it('does not release restart while the bounded WSL drain is still running', async () => {
+    vi.useFakeTimers()
+    let finishWslDrain!: () => void
+    let settled = false
+    const flushPendingOrThrowAsync = vi.fn()
+
+    const preservation = preserveAgentAuthBeforeRestart({
+      codexRuntimeHome: {
+        syncForCurrentSelection: vi.fn(),
+        syncActiveWslSelectionsBeforeRestart: vi.fn(
+          () =>
+            new Promise<void>((resolve) => {
+              finishWslDrain = resolve
+            })
+        )
+      },
+      store: { flushPendingOrThrowAsync }
+    }).then(() => {
+      settled = true
+    })
+
+    await vi.advanceTimersByTimeAsync(2_000)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(flushPendingOrThrowAsync).toHaveBeenCalledTimes(1)
+    expect(settled).toBe(false)
+
+    finishWslDrain()
+    await preservation
+    expect(settled).toBe(true)
+  })
+
+  it('continues after the bounded WSL drain fails without logging secrets', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const flushPendingOrThrowAsync = vi.fn()
+
+    await preserveAgentAuthBeforeRestart({
+      codexRuntimeHome: {
+        syncForCurrentSelection: vi.fn(),
+        syncActiveWslSelectionsBeforeRestart: vi.fn(async () => {
+          throw new Error('wsl-token-secret')
+        })
+      },
+      store: { flushPendingOrThrowAsync }
+    })
+
+    expect(flushPendingOrThrowAsync).toHaveBeenCalledTimes(1)
+    expect(warn).toHaveBeenCalledWith(
+      '[agent-auth-restart] Codex auth preservation failed (Error); continuing restart/update'
+    )
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('token-secret')
+  })
+
   it('flushes the store when auth services are missing', async () => {
     const flushPendingOrThrowAsync = vi.fn()
 
@@ -146,6 +198,36 @@ describe('preserveAgentAuthBeforeRestart', () => {
     await Promise.resolve()
 
     expect(calls).toEqual(['claude-start', 'flush', 'claude-finish'])
+  })
+
+  it('gives store persistence its own timeout after auth preservation expires', async () => {
+    vi.useFakeTimers()
+    let finishStoreFlush!: () => void
+    let settled = false
+
+    const preservation = preserveAgentAuthBeforeRestart({
+      claudeRuntimeAuth: {
+        syncForCurrentSelection: vi.fn(() => new Promise<void>(() => {}))
+      },
+      store: {
+        flushPendingOrThrowAsync: vi.fn(
+          () =>
+            new Promise<void>((resolve) => {
+              finishStoreFlush = resolve
+            })
+        )
+      }
+    }).then(() => {
+      settled = true
+    })
+
+    await vi.advanceTimersByTimeAsync(2_000)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(settled).toBe(false)
+
+    finishStoreFlush()
+    await preservation
+    expect(settled).toBe(true)
   })
 
   it('bounds a store flush that never settles', async () => {
