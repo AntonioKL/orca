@@ -84,12 +84,13 @@ export function useTerminalLiveAccessoryInputCommit({
           applyLiveInputMirror(activeHandle, editedText)
           return { kind: 'handled' }
         }
-        case 'commit-held-then-send':
-          await sendTerminalLiveControlAfterPendingFlush(
+        case 'commit-held-then-send': {
+          const sent = await sendTerminalLiveControlAfterPendingFlush(
             () => flushPendingLiveInputText(activeHandle),
             () => sendLiveTerminalInputRef.current(activeHandle, decision.bytes)
           )
-          return { kind: 'handled' }
+          return sent ? { kind: 'handled' } : { kind: 'suppress-raw' }
+        }
         default:
           decision satisfies never
           return { kind: 'handled' }
