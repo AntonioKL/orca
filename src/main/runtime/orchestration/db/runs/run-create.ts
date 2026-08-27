@@ -17,7 +17,12 @@ export function createRun(
   const id = generateId('run')
   this.db.exec('BEGIN IMMEDIATE')
   try {
-    this.unbindOtherRunsForPane(params.coordinatorPaneKey)
+    this.unbindOtherRunsForPane(params.coordinatorPaneKey, {
+      handle: params.coordinatorHandle,
+      paneKey: params.coordinatorPaneKey,
+      processIncarnation: params.coordinatorProcessIncarnation ?? null,
+      hostScope: params.coordinatorHostScope ?? null
+    })
     this.db
       .prepare(
         `INSERT INTO runs (

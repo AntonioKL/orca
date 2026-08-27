@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import Database from '../../sqlite/sync-database'
 import { OrchestrationDb } from './db'
 import { SCHEMA_VERSION } from './db/contract-constants'
+import { isCurrentRunCoordinator } from './run-coordinator-authority'
 
 describe('Run coordinator authority migration', () => {
   let directory: string | undefined
@@ -40,8 +41,17 @@ describe('Run coordinator authority migration', () => {
     expect(db.db.pragma('user_version', { simple: true })).toBe(SCHEMA_VERSION)
     expect(db.getRun(run.id)).toMatchObject({
       coordinator_process_incarnation: null,
-      coordinator_host_scope: null
+      coordinator_host_scope: null,
+      coordinator_authority_revision: -1
     })
+    expect(
+      isCurrentRunCoordinator(db.getRun(run.id)!, {
+        handle: 'term_replacement',
+        paneKey: 'tab_replacement:11111111-1111-4111-8111-111111111111',
+        processIncarnation: 'replacement:incarnation-1',
+        hostScope: JSON.stringify({ kind: 'local', hostId: 'local' })
+      })
+    ).toBe(false)
 
     const rebound = db.bindRun({
       runId: run.id,

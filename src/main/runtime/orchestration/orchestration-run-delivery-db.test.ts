@@ -267,7 +267,9 @@ describe('OrchestrationDb Run state', () => {
       const first = d.createRun({
         objective: 'First objective',
         coordinatorHandle: 'term_first',
-        coordinatorPaneKey: 'tab_a:11111111-1111-4111-8111-111111111111'
+        coordinatorPaneKey: 'tab_a:11111111-1111-4111-8111-111111111111',
+        coordinatorProcessIncarnation: 'pty:incarnation-1',
+        coordinatorHostScope: JSON.stringify({ kind: 'local', hostId: 'local' })
       })
       expect(first).toMatchObject({ consumer_generation: 1, legacy: 0 })
       expect(d.getCurrentRunForPane('tab_reminted:11111111-1111-4111-8111-111111111111')?.id).toBe(
@@ -277,7 +279,9 @@ describe('OrchestrationDb Run state', () => {
       const second = d.createRun({
         objective: 'Second objective',
         coordinatorHandle: 'term_second',
-        coordinatorPaneKey: 'tab_b:11111111-1111-4111-8111-111111111111'
+        coordinatorPaneKey: 'tab_b:11111111-1111-4111-8111-111111111111',
+        coordinatorProcessIncarnation: 'pty:incarnation-1',
+        coordinatorHostScope: JSON.stringify({ kind: 'local', hostId: 'local' })
       })
       expect(d.getRun(first.id)).toMatchObject({
         coordinator_handle: null,

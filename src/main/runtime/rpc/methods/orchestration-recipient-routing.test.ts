@@ -249,7 +249,8 @@ describe('orchestration recipient routing oracle', () => {
     db.bindRun({
       runId: senderRunId,
       coordinatorHandle: 'term_current',
-      coordinatorPaneKey: 'tab_current:leaf_current'
+      coordinatorPaneKey: 'tab_current:leaf_current',
+      authorityContinuity: true
     })
     mockTerminalPaneKeys((handle) =>
       handle === 'term_current' ? 'tab_current:leaf_current' : null
@@ -330,7 +331,8 @@ describe('orchestration recipient routing oracle', () => {
     db.bindRun({
       runId: foreignRun.id,
       coordinatorHandle: 'term_foreign_second',
-      coordinatorPaneKey: 'tab_foreign_second:leaf_foreign_second'
+      coordinatorPaneKey: 'tab_foreign_second:leaf_foreign_second',
+      authorityContinuity: true
     })
     vi.spyOn(runtime, 'listTerminals').mockResolvedValue({
       terminals: [
@@ -363,12 +365,14 @@ describe('orchestration recipient routing oracle', () => {
     db.bindRun({
       runId: senderRunId,
       coordinatorHandle: 'term_middle',
-      coordinatorPaneKey: 'tab_middle:leaf_middle'
+      coordinatorPaneKey: 'tab_middle:leaf_middle',
+      authorityContinuity: true
     })
     db.bindRun({
       runId: senderRunId,
       coordinatorHandle: 'term_sender',
-      coordinatorPaneKey: 'tab_sender:leaf_sender'
+      coordinatorPaneKey: 'tab_sender:leaf_sender',
+      authorityContinuity: true
     })
     vi.spyOn(runtime, 'listTerminals').mockResolvedValue({
       terminals: [

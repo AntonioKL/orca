@@ -65,9 +65,7 @@ export function bindRun(
       run.coordinator_process_incarnation ||
       run.coordinator_host_scope
     )
-    const requiresAuthorityProof =
-      hasIncumbentAuthority &&
-      Boolean(observation || run.coordinator_process_incarnation || run.coordinator_host_scope)
+    const requiresAuthorityProof = hasIncumbentAuthority
     const legacyAuthority = params.legacyCoordinatorAuthority
     const legacyPrincipalId = legacyAuthority?.principalId
     const legacyPrincipal = legacyPrincipalId
@@ -119,6 +117,10 @@ export function bindRun(
       run.coordinator_handle === params.coordinatorHandle &&
       coordinatorPrincipal?.status !== 'committed'
     )
+    const appliesLegacyTakeover = Boolean(
+      params.takeoverLegacy &&
+      (coordinatorPrincipal?.status === 'committed' || !hasIncumbentAuthority)
+    )
     const replacesLegacyCoordinator = Boolean(
       adoptedRun &&
       !provenLegacyBinding &&
@@ -135,7 +137,7 @@ export function bindRun(
     }
     // Why: only LIVE legacy work needs the flag — settled work has no competing authority left, and
     // fencing it would strand the recovered graph behind an attestation the caller may not have.
-    if (activeLegacyAssignment && !sameBinding && !provenLegacyBinding && !params.takeoverLegacy) {
+    if (activeLegacyAssignment && !sameBinding && !provenLegacyBinding && !appliesLegacyTakeover) {
       throw new OrchestrationError(
         'consumer_fenced',
         'This adopted Run still has live legacy work. Its attested coordinator may rebind it, or a current coordinator may explicitly use run-use --takeover-legacy.',
@@ -149,7 +151,7 @@ export function bindRun(
       requiresAuthorityProof &&
       !sameAuthority &&
       !provenLegacyBinding &&
-      !params.takeoverLegacy &&
+      !appliesLegacyTakeover &&
       (!observationMatches || observation.status !== 'exited')
     ) {
       const coordinatorStatus = observationMatches ? observation.status : 'unverifiable'
@@ -177,7 +179,16 @@ export function bindRun(
         { effectsApplied: false, coordinatorStatus, nextSteps }
       )
     }
-    this.unbindOtherRunsForPane(params.coordinatorPaneKey, params.runId)
+    this.unbindOtherRunsForPane(
+      params.coordinatorPaneKey,
+      {
+        handle: params.coordinatorHandle,
+        paneKey: params.coordinatorPaneKey,
+        processIncarnation: params.coordinatorProcessIncarnation ?? null,
+        hostScope: params.coordinatorHostScope ?? null
+      },
+      params.runId
+    )
     for (const handle of new Set(
       [run.coordinator_handle, params.coordinatorHandle].filter((value): value is string =>
         Boolean(value)
@@ -191,18 +202,18 @@ export function bindRun(
       run.coordinator_handle !== params.coordinatorHandle ||
       run.coordinator_process_incarnation !== (params.coordinatorProcessIncarnation ?? null) ||
       run.coordinator_host_scope !== (params.coordinatorHostScope ?? null)
-    if ((params.takeoverLegacy && !takeoverAlreadyApplied) || bindingMetadataChanged) {
-      if (adoptedRun && (params.takeoverLegacy || !activeLegacyAssignment)) {
+    if ((appliesLegacyTakeover && !takeoverAlreadyApplied) || bindingMetadataChanged) {
+      if (adoptedRun && (appliesLegacyTakeover || !activeLegacyAssignment)) {
         if (
           coordinatorPrincipal?.status === 'committed' &&
-          (params.takeoverLegacy ||
+          (appliesLegacyTakeover ||
             coordinatorPrincipal.terminal_handle !== params.coordinatorHandle ||
             !isEquivalentPaneKey(coordinatorPrincipal.pane_key, params.coordinatorPaneKey))
         ) {
           this.setLegacyCompatibilityPrincipalStatus(coordinatorPrincipal.id, 'revoked')
         }
       }
-      const changesAuthority = !sameAuthority || Boolean(params.takeoverLegacy)
+      const changesAuthority = !sameAuthority || appliesLegacyTakeover
       this.db
         .prepare(
           `UPDATE runs
@@ -224,7 +235,7 @@ export function bindRun(
       if (changesAuthority) {
         this.fenceOutstandingDelivery(params.runId)
       }
-      if (params.takeoverLegacy || replacesLegacyCoordinator) {
+      if (appliesLegacyTakeover || replacesLegacyCoordinator) {
         this.promoteLegacyCoordinatorMailForTakeover(params.runId, retainedCoordinatorHandle)
       }
     }

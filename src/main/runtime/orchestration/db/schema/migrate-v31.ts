@@ -12,7 +12,7 @@ export function applySchemaMigrationV31(this: OrchestrationDb, current: number):
   }
   if (!this.hasColumn('runs', 'coordinator_authority_revision')) {
     this.db.exec(
-      'ALTER TABLE runs ADD COLUMN coordinator_authority_revision INTEGER NOT NULL DEFAULT 0'
+      'ALTER TABLE runs ADD COLUMN coordinator_authority_revision INTEGER NOT NULL DEFAULT -1'
     )
   }
   this.db.exec(`

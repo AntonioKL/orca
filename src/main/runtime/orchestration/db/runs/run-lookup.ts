@@ -1,4 +1,9 @@
 import type { RunRow } from '../../types'
+import { OrchestrationError } from '../../orchestration-error'
+import {
+  isCurrentRunCoordinator,
+  type RunCoordinatorIdentity
+} from '../../run-coordinator-authority'
 import { ORCHESTRATION_RUN_PAGE_LIMIT } from '../../../../../shared/orchestration-run-pagination'
 import {
   isEquivalentPaneKey,
@@ -124,10 +129,25 @@ export function getRunRaw(this: OrchestrationDb, id: string): RunRow | undefined
 export function unbindOtherRunsForPane(
   this: OrchestrationDb,
   paneKey: string,
+  identity: RunCoordinatorIdentity,
   exceptRunId?: string
 ): void {
   for (const run of this.runsBoundToPane(paneKey)) {
     if (run.id !== exceptRunId) {
+      if (!isCurrentRunCoordinator(run, identity)) {
+        throw new OrchestrationError(
+          'consumer_fenced',
+          `Run ${run.id} is owned by another coordinator process in this pane. No effects were applied.`,
+          {
+            effectsApplied: false,
+            nextSteps: [
+              `Inspect current authority with orca orchestration run-show --id ${run.id} --json.`,
+              `To switch Runs from this replacement process, first claim the existing Run with orca orchestration run-use --id ${run.id} --json after its owning host proves the incumbent exited.`,
+              'Do not retry the create or bind command unchanged while another process owns the pane.'
+            ]
+          }
+        )
+      }
       if (run.coordinator_handle) {
         this.routeAllUnreadDirectMessagesToRunMailbox(run.id, run.coordinator_handle)
       }

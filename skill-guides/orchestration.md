@@ -105,7 +105,7 @@ Orca orchestration is agent-operated. A Run therefore has one current coordinato
 
 The single-writer rule prevents two agents from changing Task, Dispatch, worker, or gate state concurrently and prevents two consumers from acknowledging different views of the same FIFO Delivery. The current coordinator may create and update Tasks (`task-create`, `task-update`), start or dispatch workers (`worker-start`, `dispatch`), create and resolve gates (`gate-create`, `gate-resolve`), answer worker questions (`reply`), and consume or acknowledge Run mail (`check`). Explicit `run-show`, `task-list --run`, inbox, and peek calls remain read-only for non-owners and headless callers.
 
-`run-use` is an authority claim, not a read-only selection. Read `error.data.coordinatorStatus` and `error.data.nextSteps` from `--json` failures; never infer authority from a terminal handle alone.
+`run-use` is an authority claim, not a read-only selection. Read `error.data.coordinatorStatus` and `error.data.nextSteps` from `--json` failures; fenced failures report only `live` or `unverifiable` because a proven `exited` incumbent permits the claim to succeed. Never infer authority from a terminal handle alone.
 
 - Same coordinator process, reminted handle: authority and any outstanding Delivery are preserved without advancing the consumer generation.
 - Different process and `live` incumbent: `consumer_fenced`; continue from the owning coordinator terminal. To transfer intentionally, stop or exit the owning coordinator process before retrying from its replacement.
@@ -159,7 +159,7 @@ orca orchestration inbox [--limit <n>] [--json]
 
 Rules:
 
-- Omit `--from` unless impersonating another terminal; Orca auto-resolves it from the current terminal.
+- Omit `--from` unless an injected preamble or exact recovery command supplies it; Orca normally resolves the current terminal. A declared handle is routing input, never proof of coordinator authority or a transfer mechanism.
 - A coordinator `check` returns the bound Run's oldest FIFO Delivery (up to 50 messages) and replays that exact batch until `--ack <delivery_id>`. Process every message before acknowledging; `check --ack <id> --wait` acknowledges, checks, and waits in one operation.
 - Use `--peek` and `--all` only for read-only history/debugging. Type filters decide when a waiter wakes; the returned actionable Delivery is still the oldest full batch.
 - Use `dispatch:<id>` for coordinator guidance to one supervised worker. Orca routes that stable address locally or through the connected-server relay; do not substitute a remote terminal handle.

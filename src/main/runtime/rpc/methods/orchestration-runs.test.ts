@@ -176,7 +176,9 @@ describe('orchestration RPC methods', () => {
       setup(false)
       const oldPane = 'tab_old:11111111-1111-4111-8111-111111111111'
       vi.spyOn(runtime, 'getTerminalPaneKey').mockReturnValue(oldPane)
-      vi.spyOn(runtime, 'getLiveTerminalPaneKey').mockReturnValue(null)
+      vi.spyOn(runtime, 'getLiveTerminalPaneKey').mockImplementation((handle) =>
+        handle === 'term_new' ? oldPane : null
+      )
       const run = db.createRun({
         objective: 'Migrated disconnected owner',
         coordinatorHandle: 'term_old',
@@ -205,6 +207,42 @@ describe('orchestration RPC methods', () => {
             expect.stringContaining('only after the owning host proves the incumbent exited')
           ])
         }
+      })
+    })
+
+    it('recovers a migrated binding after the resolved incumbent process is proven exited', async () => {
+      setup(false)
+      const oldPane = 'tab_old:11111111-1111-4111-8111-111111111111'
+      const newPane = 'tab_new:22222222-2222-4222-9222-222222222222'
+      vi.spyOn(runtime, 'getTerminalPaneKey').mockImplementation((handle) =>
+        handle === 'term_old' ? oldPane : newPane
+      )
+      vi.spyOn(runtime, 'getOrchestrationDispatchAuthority').mockImplementation((handle) => ({
+        runtimeId: 'runtime_test',
+        terminalHandle: handle,
+        ptyId: handle,
+        worktreeId: 'folder:workspace',
+        processIncarnation: `${handle}:incarnation-1`,
+        paneKey: handle === 'term_old' ? oldPane : newPane,
+        launchTokenHash: null,
+        hostScope: { kind: 'local', hostId: 'local' }
+      }))
+      const run = db.createRun({
+        objective: 'Migrated exited owner',
+        coordinatorHandle: 'term_old',
+        coordinatorPaneKey: oldPane
+      })
+      db.db.prepare('UPDATE runs SET coordinator_authority_revision = -1 WHERE id = ?').run(run.id)
+      vi.spyOn(runtime, 'inspectTerminalProcessIncarnationLiveness').mockResolvedValue('exited')
+
+      const rebound = (await call('orchestration.runUse', {
+        id: run.id,
+        from: 'term_new'
+      })) as { run: { coordinator_handle: string; consumer_generation: number } }
+
+      expect(rebound.run).toMatchObject({
+        coordinator_handle: 'term_new',
+        consumer_generation: run.consumer_generation + 1
       })
     })
 
@@ -308,6 +346,38 @@ describe('orchestration RPC methods', () => {
       ).rejects.toMatchObject({
         code: 'consumer_fenced',
         data: { effectsApplied: false, coordinatorStatus: 'live' }
+      })
+
+      await expect(
+        call('orchestration.runCreate', {
+          objective: 'Must not evict the live owner',
+          from: 'term_new'
+        })
+      ).rejects.toMatchObject({ code: 'consumer_fenced', data: { effectsApplied: false } })
+      expect(db.getRun(created.run.id)).toMatchObject({
+        coordinator_handle: 'term_old',
+        consumer_generation: 1
+      })
+
+      const unboundTarget = db.createRun({
+        objective: 'Unbound target',
+        coordinatorHandle: 'term_target',
+        coordinatorPaneKey: 'tab_target:33333333-3333-4333-8333-333333333333'
+      })
+      db.db
+        .prepare(
+          `UPDATE runs
+           SET coordinator_handle = NULL, coordinator_pane_key = NULL,
+               coordinator_process_incarnation = NULL, coordinator_host_scope = NULL
+           WHERE id = ?`
+        )
+        .run(unboundTarget.id)
+      await expect(
+        call('orchestration.runUse', { id: unboundTarget.id, from: 'term_new' })
+      ).rejects.toMatchObject({ code: 'consumer_fenced', data: { effectsApplied: false } })
+      expect(db.getRun(created.run.id)).toMatchObject({
+        coordinator_handle: 'term_old',
+        consumer_generation: 1
       })
     })
 
@@ -423,6 +493,48 @@ describe('orchestration RPC methods', () => {
       expect(cancel).toHaveBeenCalledWith(`run:${overlapping.id}`)
     })
 
+    it('rejects a claimant process that reincarnates during incumbent observation', async () => {
+      setup(false)
+      const oldPane = 'tab_old:11111111-1111-4111-8111-111111111111'
+      const newPane = 'tab_new:22222222-2222-4222-9222-222222222222'
+      let claimantIncarnation = 'term_new:incarnation-1'
+      vi.spyOn(runtime, 'getTerminalPaneKey').mockImplementation((handle) =>
+        handle === 'term_old' ? oldPane : newPane
+      )
+      vi.spyOn(runtime, 'getOrchestrationDispatchAuthority').mockImplementation((handle) => ({
+        runtimeId: 'runtime_test',
+        terminalHandle: handle,
+        ptyId: handle,
+        worktreeId: 'folder:workspace',
+        processIncarnation: handle === 'term_old' ? 'term_old:incarnation-1' : claimantIncarnation,
+        paneKey: handle === 'term_old' ? oldPane : newPane,
+        launchTokenHash: null,
+        hostScope: { kind: 'local', hostId: 'local' }
+      }))
+      const target = (await call('orchestration.runCreate', {
+        objective: 'Keep claimant exact',
+        from: 'term_old'
+      })) as { run: { id: string } }
+      let finishObservation: ((status: 'exited') => void) | undefined
+      vi.spyOn(runtime, 'inspectTerminalProcessIncarnationLiveness').mockImplementation(
+        () => new Promise((resolve) => (finishObservation = resolve))
+      )
+
+      const use = call('orchestration.runUse', { id: target.run.id, from: 'term_new' })
+      await vi.waitFor(() => expect(finishObservation).toBeTypeOf('function'))
+      claimantIncarnation = 'term_new:incarnation-2'
+      finishObservation?.('exited')
+
+      await expect(use).rejects.toMatchObject({
+        code: 'consumer_fenced',
+        data: { effectsApplied: false }
+      })
+      expect(db.getRun(target.run.id)).toMatchObject({
+        coordinator_handle: 'term_old',
+        consumer_generation: 1
+      })
+    })
+
     it('requires an explicit binding before task mutation', async () => {
       setup(false)
       vi.spyOn(runtime, 'getTerminalPaneKey').mockReturnValue(coordinatorPaneKey)
@@ -446,6 +558,7 @@ describe('orchestration RPC methods', () => {
       setup(false)
       const oldPane = 'tab_old:11111111-1111-4111-8111-111111111111'
       const newPane = 'tab_new:22222222-2222-4222-9222-222222222222'
+      const otherPane = 'tab_other:33333333-3333-4333-8333-333333333333'
       vi.spyOn(runtime, 'getTerminalPaneKey').mockImplementation((handle) =>
         handle === 'term_old' ? oldPane : newPane
       )
@@ -457,7 +570,7 @@ describe('orchestration RPC methods', () => {
       const runB = db.createRun({
         objective: 'B',
         coordinatorHandle: 'term_other',
-        coordinatorPaneKey: newPane
+        coordinatorPaneKey: otherPane
       })
       const taskA = db.createTask({ spec: 'A work', runId: runA.id })
       db.createTask({ spec: 'B work', runId: runB.id })

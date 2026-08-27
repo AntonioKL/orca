@@ -8,7 +8,10 @@ import {
   resolveOrchestrationCaller
 } from './orchestration-run-scope'
 import type { RunRow } from '../../orchestration/types'
-import { isCurrentRunCoordinator } from '../../orchestration/run-coordinator-authority'
+import {
+  isCurrentRunCoordinator,
+  type RunCoordinatorIdentity
+} from '../../orchestration/run-coordinator-authority'
 import {
   isCallerCurrentRunCoordinator,
   resolveRunCoordinatorIdentity
@@ -16,14 +19,15 @@ import {
 
 async function observeRunCoordinator(
   runtime: Parameters<typeof resolveOrchestrationCaller>[0],
-  run: RunRow
+  run: RunRow,
+  resolvedIdentity?: RunCoordinatorIdentity | null
 ) {
   let status: 'live' | 'unverifiable' | 'exited' = 'unverifiable'
-  if (run.coordinator_process_incarnation && run.coordinator_host_scope) {
-    status = await runtime.inspectTerminalProcessIncarnationLiveness(
-      run.coordinator_process_incarnation,
-      run.coordinator_host_scope
-    )
+  const processIncarnation =
+    run.coordinator_process_incarnation ?? resolvedIdentity?.processIncarnation
+  const hostScope = run.coordinator_host_scope ?? resolvedIdentity?.hostScope
+  if (processIncarnation && hostScope) {
+    status = await runtime.inspectTerminalProcessIncarnationLiveness(processIncarnation, hostScope)
   } else if (run.coordinator_handle) {
     const verdict = runtime.getTerminalLivenessVerdict(run.coordinator_handle)
     if (runtime.getLiveTerminalPaneKey(run.coordinator_handle) || verdict?.status === 'live') {
@@ -142,7 +146,47 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
         ? isCurrentRunCoordinator(targetRun, identity) || dynamicProcessContinuity
         : false
       const incumbentObservation =
-        targetRun && !sameAuthority ? await observeRunCoordinator(runtime, targetRun) : undefined
+        targetRun && !sameAuthority
+          ? await observeRunCoordinator(runtime, targetRun, incumbentIdentity)
+          : undefined
+      const currentPaneKey = resolveOrchestrationCaller(runtime, {
+        callerTerminalHandle: params.from,
+        callerEvidence: orchestrationCompatibilityEvidence,
+        callerAuthority,
+        requireStablePane: true,
+        evidenceAssertedByCaller: true
+      })
+      assertCallerHandleMatchesEvidence(runtime, params.from, orchestrationCompatibilityEvidence)
+      const currentIdentity = resolveRunCoordinatorIdentity(runtime, params.from, currentPaneKey)
+      const revalidatedCaller = orchestrationCompatibilityEvidence
+        ? runtime.verifyOrchestrationCompatibilityCaller(
+            orchestrationCompatibilityEvidence,
+            params.takeoverLegacy ? { currentRuntimeLaunchSufficient: true } : undefined
+          )
+        : null
+      const claimantStillLive = revalidatedCaller
+        ? revalidatedCaller.terminalHandle === params.from && revalidatedCaller.paneKey === paneKey
+        : legacyCoordinatorAuthority || !orchestrationCompatibilityEvidence
+          ? runtime.getLiveTerminalPaneKey(params.from) === paneKey
+          : false
+      if (
+        (incumbentObservation && !claimantStillLive) ||
+        currentPaneKey !== paneKey ||
+        currentIdentity.processIncarnation !== identity.processIncarnation ||
+        currentIdentity.hostScope !== identity.hostScope
+      ) {
+        throw new OrchestrationError(
+          'consumer_fenced',
+          'The claiming coordinator process changed while Run authority was being checked. No effects were applied.',
+          {
+            effectsApplied: false,
+            nextSteps: [
+              `Inspect current authority with orca orchestration run-show --id ${params.id} --json.`,
+              `Retry orca orchestration run-use --id ${params.id} --json from the replacement coordinator process.`
+            ]
+          }
+        )
+      }
       const priorRun = db.getCurrentRunForPane(paneKey)
       const run = db.bindRun({
         runId: params.id,

@@ -59,6 +59,8 @@ describe('orchestration skill guidance', () => {
     expect(authority).toContain('per-Run authority')
     expect(authority).toContain('not an operating-system or global Orca privilege')
     expect(authority).toContain('`run-use` is an authority claim, not a read-only selection')
+    expect(authority).toContain('fenced failures report only `live` or `unverifiable`')
+    expect(authority).toContain('a proven `exited` incumbent permits the claim to succeed')
     expect(authority).toContain('`live`')
     expect(authority).toContain('`unverifiable`')
     expect(authority).toContain('`exited`')
@@ -74,6 +76,10 @@ describe('orchestration skill guidance', () => {
     expect(authority).toContain('run-show --id <run_id> --json')
     expect(authority).toContain('binding.currentConsumer')
     expect(authority).toContain('stop or exit the owning coordinator process')
+    expect(skill).not.toContain('unless impersonating another terminal')
+    expect(skill).toContain(
+      'A declared handle is routing input, never proof of coordinator authority'
+    )
   })
 
   it('teaches attested adoption without reviving the retired scheduler', () => {

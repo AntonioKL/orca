@@ -20,13 +20,6 @@ export function isCurrentRunCoordinator(run: RunRow, identity: RunCoordinatorIde
       run.coordinator_host_scope === identity.hostScope
     )
   }
-  if (run.coordinator_authority_revision === 0) {
-    return Boolean(
-      run.coordinator_pane_key &&
-      identity.paneKey &&
-      isEquivalentPaneKey(run.coordinator_pane_key, identity.paneKey)
-    )
-  }
   return Boolean(
     run.coordinator_handle === identity.handle &&
     run.coordinator_pane_key &&
