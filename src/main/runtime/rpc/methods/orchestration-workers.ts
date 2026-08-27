@@ -117,7 +117,8 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
           ? params.setup
             ? 'explicit_request'
             : 'orchestration_default'
-          : 'existing_worktree'
+          : 'existing_worktree',
+        capacitySlot: params.capacitySlot ?? false
       }
       const started = db.createStartingWorkerDispatch({
         creator: resolveDispatchCreator(runtime, params.from),
@@ -126,7 +127,8 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
         retryOf: params.retryOf,
         startOptions,
         runtimeEpoch: runtime.getRuntimeId(),
-        mutationReceipt: orchestrationMutation
+        mutationReceipt: orchestrationMutation,
+        capacitySlot: params.capacitySlot
       })
       const effects: WorkerEffect[] = []
       if (resolvedWorktree) {
