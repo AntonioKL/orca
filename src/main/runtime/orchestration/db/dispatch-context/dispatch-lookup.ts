@@ -36,7 +36,7 @@ export function getActiveRunParentDispatch(
     .prepare(
       `SELECT * FROM dispatch_contexts
        WHERE process_incarnation = ? AND assignee_pane_key IS NOT NULL
-         AND status IN ('pending', 'dispatched')
+         AND status IN ('pending', 'dispatched') AND capability_revoked_at IS NULL
          AND ${DISPATCH_PANE_KEY_MATCH_SUFFIX_SQL} = ?`
     )
     .all(processIncarnation, paneKeyMatchSuffix(assigneePaneKey)) as DispatchContextRow[]

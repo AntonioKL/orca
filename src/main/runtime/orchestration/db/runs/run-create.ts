@@ -56,6 +56,7 @@ function validateRunParentDispatch(
     const dispatch = this.getDispatchContextById(parent.dispatchId)
     return dispatch &&
       ['pending', 'dispatched'].includes(dispatch.status) &&
+      !dispatch.capability_revoked_at &&
       dispatch.assignee_pane_key &&
       isEquivalentPaneKey(dispatch.assignee_pane_key, parent.paneKey) &&
       dispatch.process_incarnation === parent.processIncarnation

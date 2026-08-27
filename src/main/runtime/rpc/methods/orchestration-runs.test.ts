@@ -294,6 +294,39 @@ describe('orchestration RPC methods', () => {
       expect(subRun.parent_dispatch_id).toBeNull()
     })
 
+    it('does not link a superseded Dispatch with a revoked capability', async () => {
+      setup(false)
+      const workerPane = 'tab_worker:abababab-abab-4aba-8aba-abababababab'
+      const workerProcess = 'runtime_test:term_worker:1'
+      vi.spyOn(runtime, 'getTerminalPaneKey').mockReturnValue(workerPane)
+      vi.spyOn(runtime, 'getOrchestrationDispatchAuthority').mockReturnValue({
+        paneKey: workerPane,
+        processIncarnation: workerProcess
+      } as never)
+      const root = db.createRun({
+        objective: 'root',
+        coordinatorHandle: 'term_coord',
+        coordinatorPaneKey
+      })
+      const task = db.createTask({ spec: 'worker task', runId: root.id })
+      const dispatch = db.createDispatchContext({
+        taskId: task.id,
+        assigneeHandle: 'term_worker',
+        assigneePaneKey: workerPane,
+        processIncarnation: workerProcess,
+        creator: { kind: 'system' },
+        maxDepth: 2
+      })
+      db.revokeDispatchCapability(dispatch.id)
+
+      const created = (await call('orchestration.runCreate', {
+        objective: 'superseded worker sub-run',
+        from: 'term_worker'
+      })) as { run: { parent_dispatch_id: string | null } }
+
+      expect(created.run.parent_dispatch_id).toBeNull()
+    })
+
     it('revalidates the origin process identity inside the Run write transaction', () => {
       setup(false)
       const workerPane = 'tab_worker:ffffffff-ffff-4fff-8fff-ffffffffffff'
