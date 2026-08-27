@@ -1,9 +1,12 @@
+import { realpath } from 'node:fs/promises'
 import type { AgentHookInstallStatus } from '../../shared/agent-hook-types'
+import { withTimeout } from '../../shared/promise-timeout-fallback'
 import type { CodexWslRuntimeHookTarget } from './codex-wsl-hook-install-plan'
 import { codexHookService } from './hook-service'
 import {
   isAbsolutePosixPathWithoutDotSegments,
-  resolveManagedWslCodexHome
+  resolveManagedWslCodexHome,
+  wslRuntimeHomePathsEqual
 } from './managed-wsl-codex-home-registry'
 
 type WslShellPreflightEnvironment = {
@@ -11,6 +14,8 @@ type WslShellPreflightEnvironment = {
   ORCA_CODEX_HOME?: string
   WSL_DISTRO_NAME?: string
 }
+
+const WSL_MANAGED_HOME_REALPATH_TIMEOUT_MS = 5_000
 
 export type ManagedWslCodexShellPreflightTarget = {
   runtimeHomePath: string
@@ -49,6 +54,14 @@ export async function prepareManagedWslCodexHomeBeforeShellLaunch(args: {
   }
   const target = resolveManagedWslCodexShellPreflightTarget(args.env)
   if (!target) {
+    return null
+  }
+  const realHome = await withTimeout(
+    realpath(target.runtimeHomePath),
+    WSL_MANAGED_HOME_REALPATH_TIMEOUT_MS,
+    null
+  )
+  if (!realHome || !wslRuntimeHomePathsEqual(realHome, target.runtimeHomePath)) {
     return null
   }
   const install =

@@ -28,8 +28,8 @@ type AgentHookCommandResult = {
   statuses: AgentHookInstallStatus[]
 }
 
-// Covers the 5s WSL identity probe, 30s trust grant, and bounded app-server reap.
-const WSL_CODEX_PREPARE_TIMEOUT_MS = 40_000
+// Covers managed-home verification, WSL identity, trust grant, and bounded app-server reap.
+const WSL_CODEX_PREPARE_TIMEOUT_MS = 50_000
 
 function getDataPath(): string {
   const userDataPath = getDefaultUserDataPath()

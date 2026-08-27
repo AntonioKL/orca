@@ -2,6 +2,13 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+
+const { wslRealpathMock } = vi.hoisted(() => ({
+  wslRealpathMock: vi.fn(async (path: string) => path)
+}))
+
+vi.mock('node:fs/promises', () => ({ realpath: wslRealpathMock }))
+
 import {
   prepareManagedCodexHomeBeforeShellLaunch,
   resolveManagedCodexShellPreflightHome
@@ -24,6 +31,7 @@ function makeRoot(): string {
 }
 
 afterEach(() => {
+  wslRealpathMock.mockClear()
   managedWslHomeRegistryInternals.clearRecordedManagedWslCodexHomes()
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true })

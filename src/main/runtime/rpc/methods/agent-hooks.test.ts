@@ -2,13 +2,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { OrcaRuntimeService } from '../../orca-runtime'
 import { isStreamingMethod, type RpcContext } from '../core'
 
-const { installForRuntimeHomeSerializedMock } = vi.hoisted(() => ({
-  installForRuntimeHomeSerializedMock: vi.fn()
+const { installForRuntimeHomeSerializedMock, realpathMock } = vi.hoisted(() => ({
+  installForRuntimeHomeSerializedMock: vi.fn(),
+  realpathMock: vi.fn()
 }))
 
 vi.mock('../../../codex/hook-service', () => ({
   codexHookService: { installForRuntimeHomeSerialized: installForRuntimeHomeSerializedMock }
 }))
+vi.mock('node:fs/promises', () => ({ realpath: realpathMock }))
 
 import { AGENT_HOOK_METHODS } from './agent-hooks'
 import {
@@ -42,6 +44,8 @@ function runtimeWithSettings(enabled = true, disabledTuiAgents: string[] = []): 
 describe('agent hook RPC methods', () => {
   beforeEach(() => {
     installForRuntimeHomeSerializedMock.mockReset()
+    realpathMock.mockReset()
+    realpathMock.mockImplementation(async (path: string) => path)
     managedWslHomeRegistryInternals.clearRecordedManagedWslCodexHomes()
     recordManagedWslCodexHome('Ubuntu-24.04', RUNTIME_HOME)
   })
@@ -110,6 +114,21 @@ describe('agent hook RPC methods', () => {
       'install failed'
     )
     expect(installForRuntimeHomeSerializedMock).toHaveBeenCalledOnce()
+  })
+
+  it('rejects a managed-looking home that resolves through a symlink', async () => {
+    realpathMock.mockResolvedValue(
+      '\\\\wsl.localhost\\Ubuntu-24.04\\home\\jin\\outside-managed-home'
+    )
+    const method = prepareMethod()
+    const params = method.params!.parse({
+      codexHome: LINUX_HOME,
+      orcaCodexHome: LINUX_HOME,
+      wslDistro: 'Ubuntu-24.04'
+    })
+
+    await expect(method.handler(params, { runtime: runtimeWithSettings() })).resolves.toBeNull()
+    expect(installForRuntimeHomeSerializedMock).not.toHaveBeenCalled()
   })
 
   it('rejects malformed distro names at the RPC schema', () => {
