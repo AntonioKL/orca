@@ -4,7 +4,7 @@ import { isTerminalImeEnterKeyUp } from './terminal-ime-deferred-newline'
 import { isEditableTarget } from './terminal-keyboard-shortcut-matching'
 import { hasPendingTerminalImeComposition } from './terminal-ime-composition-route'
 import { keyboardEventBelongsToScope } from './terminal-keyboard-scope'
-import { resolveTerminalKeyboardPane } from './terminal-keyboard-pane-resolution'
+import { synchronizeTerminalKeyboardPane } from './terminal-keyboard-pane-resolution'
 
 type Runtime = ReturnType<typeof createTerminalKeyboardRuntime>
 type ReleaseContext = KeyboardHandlersDeps &
@@ -102,7 +102,7 @@ export function createTerminalKeyboardReleaseHandlers(context: ReleaseContextWit
         !isEditableTarget(e.target) &&
         (!scope || keyboardEventBelongsToScope(e, scope))
       ) {
-        const pane = resolveTerminalKeyboardPane(manager, e.target)
+        const pane = synchronizeTerminalKeyboardPane(manager, e.target)
         if (pane && hasPendingTerminalImeComposition(pane.terminal.element)) {
           const action = resolveShortcutEvent({
             key: 'Enter',
