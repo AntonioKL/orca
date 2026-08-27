@@ -33,6 +33,7 @@ function probeMain(resultPath: string, protectedGuest: boolean): string {
 const { app, BrowserWindow, session } = require('electron')
 const dgram = require('node:dgram')
 const net = require('node:net')
+const os = require('node:os')
 const { writeFileSync } = require('node:fs')
 
 function bind(socket, host) {
@@ -55,13 +56,22 @@ function listen(server, host) {
   })
 }
 
+function viewerAddress() {
+  for (const entries of Object.values(os.networkInterfaces())) {
+    for (const entry of entries || []) {
+      if (entry.family === 'IPv4' && !entry.internal) return entry.address
+    }
+  }
+  return '127.0.0.1'
+}
+
 async function probe() {
   const udp = dgram.createSocket('udp4')
   const tcp = net.createServer((socket) => socket.destroy())
   const packets = []
   udp.on('message', (message) => packets.push(message.length))
   const [udpAddress, tcpAddress] = await Promise.all([
-    bind(udp, '127.0.0.1'),
+    bind(udp, '0.0.0.0'),
     listen(tcp, '127.0.0.1')
   ])
   const partition = 'persist:webrtc-egress-${protectedGuest}-' + Date.now()
@@ -69,7 +79,7 @@ async function probe() {
   await routeSession.setProxy({
     mode: 'fixed_servers',
     proxyRules: 'socks5://127.0.0.1:' + tcpAddress.port,
-    proxyBypassRules: '127.0.0.1'
+    proxyBypassRules: '<-loopback>'
   })
   await routeSession.closeAllConnections()
   const resolvedProxy = await routeSession.resolveProxy('https://example.invalid/')
@@ -82,10 +92,11 @@ async function probe() {
   }
   const policy = window.webContents.getWebRTCIPHandlingPolicy()
   await window.loadURL('data:text/html,<title>WebRTC egress probe</title>')
+  const target = viewerAddress()
   const script = \`
     (async () => {
       const peer = new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:127.0.0.1:\${udpAddress.port}' }],
+        iceServers: [{ urls: 'stun:\${target}:\${udpAddress.port}' }],
         iceCandidatePoolSize: 1
       })
       peer.createDataChannel('probe')
