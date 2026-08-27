@@ -49,8 +49,9 @@ export function registerWorktreeCatalogHandlers(context: WorktreeIpcContext): vo
 
   ipcMain.handle('worktrees:listAll', async () => {
     const repos = store.getRepos()
+    const allMeta = repos.some((repo) => repo.connectionId) ? store.getAllWorktreeMeta() : undefined
     const sshWorktreeMetaIndex = repos.some((repo) => repo.connectionId)
-      ? createSshWorktreeMetaIndex(Object.entries(store.getAllWorktreeMeta()))
+      ? createSshWorktreeMetaIndex(Object.entries(allMeta ?? {}))
       : new Map()
 
     // Why: each local repo listing can spawn `git worktree list`; cap fan-out so large fleets don't start unbounded subprocesses.
@@ -92,9 +93,10 @@ export function registerWorktreeCatalogHandlers(context: WorktreeIpcContext): vo
           pruneLineageForMissingRepoWorktrees(store, repo, gitWorktrees)
         }
         loggedWorktreeListFailures.delete(`${repo.id}:${repo.path}`)
-        return buildDetectedGitWorktrees(store, repo, gitWorktrees)
+        const metadata = allMeta ?? store.getAllWorktreeMeta()
+        return buildDetectedGitWorktrees(store, repo, gitWorktrees, metadata)
           .filter((worktree) => worktree.visible)
-          .map((worktree) => stampAndMergeVisibleDetectedWorktree(store, repo, worktree))
+          .map((worktree) => stampAndMergeVisibleDetectedWorktree(store, repo, worktree, metadata))
       } catch (err) {
         warnOnce(
           loggedWorktreeListFailures,
@@ -123,8 +125,9 @@ export function registerWorktreeCatalogHandlers(context: WorktreeIpcContext): vo
     if (!repo) {
       return []
     }
+    const allMeta = repo.connectionId ? store.getAllWorktreeMeta() : undefined
     const sshWorktreeMetaIndex = repo.connectionId
-      ? createSshWorktreeMetaIndex(Object.entries(store.getAllWorktreeMeta()))
+      ? createSshWorktreeMetaIndex(Object.entries(allMeta ?? {}))
       : new Map()
 
     try {
@@ -164,9 +167,10 @@ export function registerWorktreeCatalogHandlers(context: WorktreeIpcContext): vo
         pruneLineageForMissingRepoWorktrees(store, repo, gitWorktrees)
       }
       loggedWorktreeListFailures.delete(`${repo.id}:${repo.path}`)
-      return buildDetectedGitWorktrees(store, repo, gitWorktrees)
+      const metadata = allMeta ?? store.getAllWorktreeMeta()
+      return buildDetectedGitWorktrees(store, repo, gitWorktrees, metadata)
         .filter((worktree) => worktree.visible)
-        .map((worktree) => stampAndMergeVisibleDetectedWorktree(store, repo, worktree))
+        .map((worktree) => stampAndMergeVisibleDetectedWorktree(store, repo, worktree, metadata))
     } catch (err) {
       warnOnce(
         loggedWorktreeListFailures,

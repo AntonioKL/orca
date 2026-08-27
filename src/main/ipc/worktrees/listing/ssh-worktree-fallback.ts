@@ -136,7 +136,8 @@ export function listDisconnectedSshWorktrees(
 export function buildDetectedGitWorktrees(
   store: Store,
   repo: Repo,
-  gitWorktrees: GitWorktreeInfo[]
+  gitWorktrees: GitWorktreeInfo[],
+  allMetaOverride?: Record<string, WorktreeMeta>
 ): DetectedWorktree[] {
   const settings = store.getSettings()
   const knownOrcaLayouts = buildKnownOrcaWorkspaceLayouts(settings, repo)
@@ -150,7 +151,7 @@ export function buildDetectedGitWorktrees(
     resolveCustomWorktreeVisibilitySources(repo, settings.worktreeVisibilityDefaults),
     resolveConfiguredWorktreeBasePaths(repo)
   )
-  const allMeta = store.getAllWorktreeMeta?.()
+  const allMeta = allMetaOverride ?? store.getAllWorktreeMeta?.()
   const detected = liveWorktrees.map((gitWorktree) => {
     const worktreeId = `${repo.id}::${gitWorktree.path}`
     const repoOwnerCount = store.getRepos().filter((candidate) => candidate.id === repo.id).length
@@ -173,7 +174,7 @@ export function buildDetectedGitWorktrees(
       return detected
     }
 
-    meta = resolveWorktreeMetaWithDiscoveryBackfill(store, repo, worktreeId)
+    meta = resolveWorktreeMetaWithDiscoveryBackfill(store, repo, worktreeId, allMeta)
     return toDetectedWorktree({
       repo,
       worktree: mergeWorktree(repo.id, gitWorktree, meta, repo.displayName),
@@ -190,8 +191,9 @@ export function buildDetectedGitWorktrees(
 export function stampAndMergeVisibleDetectedWorktree(
   store: Store,
   repo: Repo,
-  detected: DetectedWorktree
+  detected: DetectedWorktree,
+  allMetaOverride?: Record<string, WorktreeMeta>
 ) {
-  const meta = resolveWorktreeMetaWithDiscoveryBackfill(store, repo, detected.id)
+  const meta = resolveWorktreeMetaWithDiscoveryBackfill(store, repo, detected.id, allMetaOverride)
   return mergeWorktree(repo.id, detected, meta, repo.displayName)
 }

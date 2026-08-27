@@ -35,12 +35,13 @@ export function getProjectHostSetupMetaUpdates(
 export function resolveWorktreeMetaWithDiscoveryBackfill(
   store: Store,
   repo: Repo,
-  worktreeId: string
+  worktreeId: string,
+  allMetaOverride?: Record<string, WorktreeMeta>
 ): WorktreeMeta {
   const executionHostId = getRepoExecutionHostId(repo)
   const repoOwnerCount = store.getRepos().filter((candidate) => candidate.id === repo.id).length
   const legacyMeta = store.getWorktreeMeta?.(worktreeId)
-  const allMeta = store.getAllWorktreeMeta?.()
+  const allMeta = allMetaOverride ?? store.getAllWorktreeMeta?.()
   const existing =
     readWorktreeMetaForHost(store, worktreeId, executionHostId) ??
     getRepoOwnedWorktreeMeta(
