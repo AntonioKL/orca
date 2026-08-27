@@ -97,9 +97,9 @@ import { MAX_QUICK_COMMANDS } from '../../shared/terminal-quick-commands'
 import {
   AGENT_PROMPT_BRACKETED_PASTE_END,
   AGENT_PROMPT_BRACKETED_PASTE_START,
-  AGENT_PROMPT_CSI_U_SUBMIT,
-  AGENT_PROMPT_SUBMIT_DELAY_MS,
-  buildAgentPromptPasteBytes
+  buildAgentPromptPasteBytes,
+  getAgentPromptSubmitDelayMs,
+  getTerminalPasteIngestMs
 } from '../../shared/agent-prompt-injection'
 import { CLIPBOARD_TEXT_MEASURE_YIELD_CODE_UNITS } from '../../shared/clipboard-text'
 import { projectHostSetupProjectionFromRepos } from '../../shared/project-host-setup-projection'
@@ -145,6 +145,7 @@ import {
 } from './terminal-view-attribute-store'
 import { clearConfiguredWorktreeSharedDirectoriesCacheForTests } from '../git/worktree-shared-directories'
 import { setWorktreeWatcherRemoval } from '../ipc/worktree-watcher-removal'
+import { createRootDispatch } from './orchestration/db/root-dispatch-test-fixture'
 
 const ORIGINAL_PLATFORM = process.platform
 const ORIGINAL_PLATFORM_DESCRIPTOR = Object.getOwnPropertyDescriptor(process, 'platform')
@@ -185,7 +186,7 @@ function acknowledgeAgentPromptSubmit(
   ptyId: string,
   data: string
 ): void {
-  if (data === '\r' || data.includes(AGENT_PROMPT_CSI_U_SUBMIT)) {
+  if (data === '\r') {
     runtime.onPtyData(ptyId, '\x1b]0;Codex working\x07', Date.now())
   }
 }
@@ -1049,6 +1050,17 @@ const TEST_REPO_ID = 'repo-1'
 const TEST_REPO_PATH = '/tmp/repo'
 const TEST_WORKTREE_PATH = '/tmp/worktree-a'
 const TEST_WORKTREE_ID = `${TEST_REPO_ID}::${TEST_WORKTREE_PATH}`
+/** The render gate's hard cap bounds the wait *after* the paste lands, so it carries the
+ *  payload's ingest bound on top of the flat 8 s settlement budget. */
+function renderGateCapMs(prompt: string): number {
+  return (
+    8_000 +
+    getTerminalPasteIngestMs(
+      process.platform,
+      Buffer.byteLength(buildAgentPromptPasteBytes(prompt), 'utf8')
+    )
+  )
+}
 const TEST_FOLDER_PROJECT_GROUP_ID = 'folder-project-group-1'
 const TEST_FOLDER_WORKSPACE_ID = 'folder-workspace-1'
 const TEST_FOLDER_WORKSPACE_KEY = `folder:${TEST_FOLDER_WORKSPACE_ID}`
@@ -17412,345 +17424,6 @@ describe('OrcaRuntimeService', () => {
     }
   })
 
-  it.each([
-    { agent: 'claude' as const, flags: 1, prompt: 'review this change' },
-    { agent: 'codex' as const, flags: 7, prompt: 'line one\nline two' },
-    { agent: 'codex' as const, flags: 8, prompt: 'report all keys' }
-  ])(
-    'submits a negotiated $agent prompt in one zero-wait PTY write',
-    async ({ agent, flags, prompt }) => {
-      const writes: string[] = []
-      const runtime = new OrcaRuntimeService(store)
-      runtime.setPtyController({
-        spawn: vi.fn().mockResolvedValue({ id: 'pty-negotiated' }),
-        write: (_ptyId, data) => {
-          writes.push(data)
-          acknowledgeAgentPromptSubmit(runtime, 'pty-negotiated', data)
-          return true
-        },
-        kill: () => true,
-        getForegroundProcess: async () => agent,
-        confirmForegroundProcess: async () => agent
-      })
-      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
-        launchAgent: agent
-      })
-      runtime.onPtyData('pty-negotiated', `\x1b[>${flags}u`, Date.now())
-      await new Promise<void>((resolve) => setImmediate(resolve))
-
-      await expect(runtime.isTerminalRunningSettledPromptAgent(handle)).resolves.toBe(true)
-      await expect(
-        runtime.sendTerminalAgentPrompt(handle, prompt, { preferProtocolSubmit: true })
-      ).resolves.toMatchObject({
-        accepted: true,
-        bytesWritten: Buffer.byteLength(
-          `${buildAgentPromptPasteBytes(prompt)}${AGENT_PROMPT_CSI_U_SUBMIT}`,
-          'utf8'
-        )
-      })
-
-      expect(writes).toEqual([`${buildAgentPromptPasteBytes(prompt)}${AGENT_PROMPT_CSI_U_SUBMIT}`])
-    }
-  )
-
-  it('reconfirms foreground ownership after queued output settles', async () => {
-    vi.useFakeTimers()
-    try {
-      const writes: string[] = []
-      const outputGate = deferred<void>()
-      let confirmedProcess = 'codex'
-      const confirmForegroundProcess = vi.fn(async () => confirmedProcess)
-      const runtime = new OrcaRuntimeService(store)
-      runtime.setPtyController({
-        spawn: vi.fn().mockResolvedValue({ id: 'pty-reconfirmed' }),
-        write: (_ptyId, data) => {
-          writes.push(data)
-          acknowledgeAgentPromptSubmit(runtime, 'pty-reconfirmed', data)
-          return true
-        },
-        kill: () => true,
-        getForegroundProcess: async () => 'codex',
-        confirmForegroundProcess
-      })
-      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
-        launchAgent: 'codex'
-      })
-      runtime.onPtyData('pty-reconfirmed', '\x1b[>1u', Date.now())
-      await vi.advanceTimersByTimeAsync(0)
-      const internals = runtime as unknown as {
-        headlessTerminals: Map<string, { writeChain: Promise<void> }>
-      }
-      internals.headlessTerminals.get('pty-reconfirmed')!.writeChain = outputGate.promise
-
-      await expect(runtime.isTerminalRunningSettledPromptAgent(handle)).resolves.toBe(true)
-      const send = runtime.sendTerminalAgentPrompt(handle, 'ownership changed', {
-        preferProtocolSubmit: true
-      })
-      await vi.advanceTimersByTimeAsync(0)
-      expect(confirmForegroundProcess).not.toHaveBeenCalled()
-
-      confirmedProcess = 'zsh'
-      outputGate.resolve()
-      await vi.runAllTimersAsync()
-      const result = await send
-
-      expect(confirmForegroundProcess).toHaveBeenCalledTimes(2)
-      expect(writes).toEqual([buildAgentPromptPasteBytes('ownership changed')])
-      expect(result.bytesWritten).toBe(
-        Buffer.byteLength(buildAgentPromptPasteBytes('ownership changed'), 'utf8')
-      )
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('keeps mixed-version confirmation failures on the settled fallback', async () => {
-    vi.useFakeTimers()
-    try {
-      const writes: string[] = []
-      const confirmForegroundProcess = vi.fn(async () => {
-        throw new Error('unknown_method')
-      })
-      const runtime = new OrcaRuntimeService(store)
-      runtime.setPtyController({
-        spawn: vi.fn().mockResolvedValue({ id: 'pty-old-host' }),
-        write: (_ptyId, data) => {
-          writes.push(data)
-          acknowledgeAgentPromptSubmit(runtime, 'pty-old-host', data)
-          return true
-        },
-        kill: () => true,
-        getForegroundProcess: async () => 'codex',
-        confirmForegroundProcess
-      })
-      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
-        launchAgent: 'codex'
-      })
-      runtime.onPtyData('pty-old-host', '\x1b[>1u', Date.now())
-      await vi.advanceTimersByTimeAsync(0)
-
-      await expect(runtime.isTerminalRunningSettledPromptAgent(handle)).resolves.toBe(true)
-      const send = runtime.sendTerminalAgentPrompt(handle, 'old host', {
-        preferProtocolSubmit: true
-      })
-      await vi.runAllTimersAsync()
-      await send
-
-      expect(confirmForegroundProcess).toHaveBeenCalledTimes(2)
-      expect(writes).toEqual([buildAgentPromptPasteBytes('old host'), '\r'])
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('keeps concurrent negotiated submissions independently confirmed', async () => {
-    const writes: string[] = []
-    const confirmForegroundProcess = vi.fn(async () => 'codex')
-    const runtime = new OrcaRuntimeService(store)
-    runtime.setPtyController({
-      spawn: vi.fn().mockResolvedValue({ id: 'pty-concurrent-negotiated' }),
-      write: (_ptyId, data) => {
-        writes.push(data)
-        acknowledgeAgentPromptSubmit(runtime, 'pty-concurrent-negotiated', data)
-        runtime.onPtyData('pty-concurrent-negotiated', '\x1b]0;Codex idle\x07', Date.now())
-        return true
-      },
-      kill: () => true,
-      getForegroundProcess: async () => 'codex',
-      confirmForegroundProcess
-    })
-    const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
-      launchAgent: 'codex'
-    })
-    runtime.onPtyData('pty-concurrent-negotiated', '\x1b[>1u', Date.now())
-    await new Promise<void>((resolve) => setImmediate(resolve))
-
-    await Promise.all([
-      runtime.isTerminalRunningSettledPromptAgent(handle),
-      runtime.isTerminalRunningSettledPromptAgent(handle)
-    ])
-    await Promise.all([
-      runtime.sendTerminalAgentPrompt(handle, 'first', { preferProtocolSubmit: true }),
-      runtime.sendTerminalAgentPrompt(handle, 'second', { preferProtocolSubmit: true })
-    ])
-
-    expect(confirmForegroundProcess).toHaveBeenCalledTimes(4)
-    expect(writes).toEqual([
-      `${buildAgentPromptPasteBytes('first')}${AGENT_PROMPT_CSI_U_SUBMIT}`,
-      `${buildAgentPromptPasteBytes('second')}${AGENT_PROMPT_CSI_U_SUBMIT}`
-    ])
-  })
-
-  it.each([0, 2, 4])(
-    'keeps the settled fallback when kitty flags %i do not accept synthetic CSI-u Enter',
-    async (flags) => {
-      vi.useFakeTimers()
-      try {
-        const writes: string[] = []
-        const runtime = new OrcaRuntimeService(store)
-        runtime.setPtyController({
-          spawn: vi.fn().mockResolvedValue({ id: 'pty-unnegotiated' }),
-          write: (_ptyId, data) => {
-            writes.push(data)
-            acknowledgeAgentPromptSubmit(runtime, 'pty-unnegotiated', data)
-            return true
-          },
-          kill: () => true,
-          getForegroundProcess: async () => 'codex',
-          confirmForegroundProcess: async () => 'codex'
-        })
-        const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
-          launchAgent: 'codex'
-        })
-        if (flags !== 0) {
-          runtime.onPtyData('pty-unnegotiated', `\x1b[>${flags}u`, Date.now())
-          await vi.advanceTimersByTimeAsync(0)
-        }
-
-        await expect(runtime.isTerminalRunningSettledPromptAgent(handle)).resolves.toBe(true)
-        const send = runtime.sendTerminalAgentPrompt(handle, 'fallback prompt', {
-          preferProtocolSubmit: true
-        })
-        await vi.runAllTimersAsync()
-        await send
-
-        expect(writes).toEqual([buildAgentPromptPasteBytes('fallback prompt'), '\r'])
-      } finally {
-        vi.useRealTimers()
-      }
-    }
-  )
-
-  it('keeps the settled fallback when negotiated flags lack a fresh foreground confirmation', async () => {
-    vi.useFakeTimers()
-    try {
-      const writes: string[] = []
-      const confirmForegroundProcess = vi.fn(async () => null)
-      const runtime = new OrcaRuntimeService(store)
-      runtime.setPtyController({
-        spawn: vi.fn().mockResolvedValue({ id: 'pty-unconfirmed' }),
-        write: (_ptyId, data) => {
-          writes.push(data)
-          acknowledgeAgentPromptSubmit(runtime, 'pty-unconfirmed', data)
-          return true
-        },
-        kill: () => true,
-        getForegroundProcess: async () => 'codex',
-        confirmForegroundProcess
-      })
-      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
-        launchAgent: 'codex'
-      })
-      runtime.onPtyData('pty-unconfirmed', '\x1b[>1u', Date.now())
-      await vi.advanceTimersByTimeAsync(0)
-
-      await expect(runtime.isTerminalRunningSettledPromptAgent(handle)).resolves.toBe(true)
-      const send = runtime.sendTerminalAgentPrompt(handle, 'unconfirmed prompt', {
-        preferProtocolSubmit: true
-      })
-      await vi.runAllTimersAsync()
-      await send
-
-      expect(confirmForegroundProcess).toHaveBeenCalledTimes(2)
-      expect(writes).toEqual([buildAgentPromptPasteBytes('unconfirmed prompt'), '\r'])
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('rejects the settled fallback when the PTY exits during final foreground confirmation', async () => {
-    vi.useFakeTimers()
-    try {
-      const writes: string[] = []
-      const confirmation = deferred<string | null>()
-      const confirmForegroundProcess = vi.fn(() => confirmation.promise)
-      const runtime = new OrcaRuntimeService(store)
-      runtime.setPtyController({
-        spawn: vi.fn().mockResolvedValue({ id: 'pty-fallback-race' }),
-        write: (_ptyId, data) => {
-          writes.push(data)
-          if (data.includes(AGENT_PROMPT_BRACKETED_PASTE_END)) {
-            setTimeout(() => runtime.onPtyData('pty-fallback-race', '\x1b[?25h', Date.now()), 0)
-          }
-          return true
-        },
-        kill: () => true,
-        getForegroundProcess: async () => 'codex',
-        confirmForegroundProcess
-      })
-      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
-        launchAgent: 'codex'
-      })
-      await expect(runtime.isTerminalRunningSettledPromptAgent(handle)).resolves.toBe(true)
-
-      const send = runtime.sendTerminalAgentPrompt(handle, 'fallback race')
-      await vi.advanceTimersByTimeAsync(1_600)
-      await vi.waitFor(() => expect(confirmForegroundProcess).toHaveBeenCalledOnce())
-      runtime.onPtyExit('pty-fallback-race', 0)
-      confirmation.resolve('codex')
-
-      await expect(send).rejects.toThrow('terminal_handle_stale')
-      expect(writes).toEqual([buildAgentPromptPasteBytes('fallback race')])
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('does not force foreground confirmation for a shell Quick Command target', async () => {
-    const confirmForegroundProcess = vi.fn(async () => 'codex')
-    const runtime = new OrcaRuntimeService(store)
-    runtime.setPtyController({
-      spawn: vi.fn().mockResolvedValue({ id: 'pty-shell' }),
-      write: () => true,
-      kill: () => true,
-      getForegroundProcess: async () => 'zsh',
-      confirmForegroundProcess
-    })
-    const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
-
-    await expect(runtime.isTerminalRunningSettledPromptAgent(handle)).resolves.toBe(false)
-    expect(confirmForegroundProcess).not.toHaveBeenCalled()
-  })
-
-  it('keeps oversized negotiated prompts on the settled fallback', async () => {
-    vi.useFakeTimers()
-    try {
-      const writes: string[] = []
-      const runtime = new OrcaRuntimeService(store)
-      runtime.setPtyController({
-        spawn: vi.fn().mockResolvedValue({ id: 'pty-large-negotiated' }),
-        write: (_ptyId, data) => {
-          writes.push(data)
-          acknowledgeAgentPromptSubmit(runtime, 'pty-large-negotiated', data)
-          return true
-        },
-        kill: () => true,
-        getForegroundProcess: async () => 'codex',
-        confirmForegroundProcess: async () => 'codex'
-      })
-      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
-        launchAgent: 'codex'
-      })
-      runtime.onPtyData('pty-large-negotiated', '\x1b[>1u', Date.now())
-      await vi.advanceTimersByTimeAsync(0)
-      const prompt = 'x'.repeat(TERMINAL_INPUT_CHUNK_MAX_BYTES * 2)
-
-      await expect(runtime.isTerminalRunningSettledPromptAgent(handle)).resolves.toBe(true)
-      const send = runtime.sendTerminalAgentPrompt(handle, prompt, { preferProtocolSubmit: true })
-      await vi.runAllTimersAsync()
-      await send
-
-      expect(writes.length).toBeGreaterThan(1)
-      expect(writes.at(-1)).toBe('\r')
-      expect(writes.some((write) => write.includes(AGENT_PROMPT_CSI_U_SUBMIT))).toBe(false)
-      expect(
-        writes.every((write) => Buffer.byteLength(write, 'utf8') <= TERMINAL_INPUT_CHUNK_MAX_BYTES)
-      ).toBe(true)
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
   it.each(['claude', 'codex'] as const)(
     'waits for %s composer output frames to settle before one submit',
     async (agent) => {
@@ -17825,56 +17498,11 @@ describe('OrcaRuntimeService', () => {
     }
   )
 
-  it('does not submit between a render marker and a sparse final composer frame', async () => {
-    vi.useFakeTimers()
-    try {
-      const writes: string[] = []
-      let composerReady = false
-      const runtime = new OrcaRuntimeService(store)
-      runtime.setPtyController({
-        spawn: vi.fn().mockResolvedValue({ id: 'pty-sparse' }),
-        write: (_ptyId, data) => {
-          writes.push(data)
-          if (data.includes(AGENT_PROMPT_BRACKETED_PASTE_END)) {
-            setTimeout(() => runtime.onPtyData('pty-sparse', '\x1b[?25h', Date.now()), 100)
-            setTimeout(() => {
-              composerReady = true
-              runtime.onPtyData('pty-sparse', 'final composer frame', Date.now())
-            }, 1_600)
-          }
-          if (data === '\r') {
-            expect(composerReady).toBe(true)
-            acknowledgeAgentPromptSubmit(runtime, 'pty-sparse', data)
-          }
-          return true
-        },
-        kill: () => true,
-        getForegroundProcess: async () => null
-      })
-      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
-        launchAgent: 'codex'
-      })
-
-      const sendPromise = runtime.sendTerminalAgentPrompt(handle, 'review this change')
-      await vi.advanceTimersByTimeAsync(1_599)
-      expect(writes).not.toContain('\r')
-      await vi.advanceTimersByTimeAsync(1)
-      expect(writes).not.toContain('\r')
-      await vi.advanceTimersByTimeAsync(1_499)
-      expect(writes).not.toContain('\r')
-      await vi.advanceTimersByTimeAsync(1)
-      await sendPromise
-      expect(writes.filter((data) => data === '\r')).toHaveLength(1)
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
   it.each(
     (Object.keys(TUI_AGENT_CONFIG) as TuiAgent[]).filter(
       (agent) => agent !== 'claude' && agent !== 'codex'
     )
-  )('preserves the legacy fixed submit delay for %s', async (agent) => {
+  )('holds Enter for the full open-loop submit delay for %s', async (agent) => {
     vi.useFakeTimers()
     try {
       const writes: string[] = []
@@ -17893,8 +17521,12 @@ describe('OrcaRuntimeService', () => {
         launchAgent: agent
       })
 
+      const submitDelayMs = getAgentPromptSubmitDelayMs(
+        process.platform,
+        Buffer.byteLength(buildAgentPromptPasteBytes('review this change'), 'utf8')
+      )
       const sendPromise = runtime.sendTerminalAgentPrompt(handle, 'review this change')
-      await vi.advanceTimersByTimeAsync(AGENT_PROMPT_SUBMIT_DELAY_MS - 1)
+      await vi.advanceTimersByTimeAsync(submitDelayMs - 1)
       expect(writes).not.toContain('\r')
 
       await vi.advanceTimersByTimeAsync(1)
@@ -17965,7 +17597,7 @@ describe('OrcaRuntimeService', () => {
       })
 
       const sendPromise = runtime.sendTerminalAgentPrompt(handle, 'review this change')
-      await vi.advanceTimersByTimeAsync(7_999)
+      await vi.advanceTimersByTimeAsync(renderGateCapMs('review this change') - 1)
       expect(writes).not.toContain('\r')
 
       await vi.advanceTimersByTimeAsync(1)
@@ -18046,7 +17678,9 @@ describe('OrcaRuntimeService', () => {
       })
 
       const sendPromise = runtime.sendTerminalAgentPrompt(handle, 'review this change')
-      await vi.advanceTimersByTimeAsync(8_099)
+      // The marker at 100 ms re-arms the cap, but the ingest term is absolute: a prompt this
+      // small is already ingested by then, so the fallback is one flat render timeout later.
+      await vi.advanceTimersByTimeAsync(100 + 8_000 - 1)
       expect(writes).not.toContain('\r')
 
       await vi.advanceTimersByTimeAsync(1)
@@ -22389,6 +22023,8 @@ describe('OrcaRuntimeService', () => {
     try {
       const task = db.createTask({ spec: 'continue after missing worker recovery' })
       const started = db.createStartingWorkerDispatch({
+        creator: { kind: 'system' },
+        maxDepth: Number.MAX_SAFE_INTEGER,
         taskId: task.id,
         startOptions: { topology: 'current', agent: 'codex' }
       })
@@ -22494,6 +22130,8 @@ describe('OrcaRuntimeService', () => {
     try {
       const task = db.createTask({ spec: 'retry missing worker recovery' })
       const started = db.createStartingWorkerDispatch({
+        creator: { kind: 'system' },
+        maxDepth: Number.MAX_SAFE_INTEGER,
         taskId: task.id,
         startOptions: { topology: 'current', agent: 'codex' }
       })
@@ -44229,11 +43867,12 @@ describe('OrcaRuntimeService', () => {
           ['worker-folder', runB.id]
         ].map(([name, runId]) => {
           const task = db.createTask({ spec: name, runId })
-          return [name, db.createDispatchContext(task.id, handles[name], paneKey(name))]
+          return [name, createRootDispatch(db, task.id, handles[name], paneKey(name))]
         })
       )
       const legacyTask = db.createTask({ spec: 'legacy worker' })
-      const legacyDispatch = db.createDispatchContext(
+      const legacyDispatch = createRootDispatch(
+        db,
         legacyTask.id,
         handles['legacy-worker'],
         paneKey('legacy-worker')
@@ -44361,7 +44000,8 @@ describe('OrcaRuntimeService', () => {
       expect(creatorAuthority?.processIncarnation).toBeTruthy()
       expect(coordinatorAuthority?.processIncarnation).toBeTruthy()
       const creatorTask = db.createTask({ spec: 'create nested work', runId: runA.id })
-      db.createDispatchContext(
+      createRootDispatch(
+        db,
         creatorTask.id,
         handles.creator,
         paneKey('creator'),
@@ -44376,7 +44016,8 @@ describe('OrcaRuntimeService', () => {
         createdByProcessIncarnation: creatorAuthority?.processIncarnation ?? undefined,
         createdByRunGeneration: runA.consumer_generation
       })
-      const workerDispatch = db.createDispatchContext(
+      const workerDispatch = createRootDispatch(
+        db,
         workerTask.id,
         handles.worker,
         paneKey('worker')
@@ -44389,7 +44030,8 @@ describe('OrcaRuntimeService', () => {
         createdByProcessIncarnation: coordinatorAuthority?.processIncarnation ?? undefined,
         createdByRunGeneration: runA.consumer_generation
       })
-      const coordinatorCreatedDispatch = db.createDispatchContext(
+      const coordinatorCreatedDispatch = createRootDispatch(
+        db,
         coordinatorCreatedTask.id,
         handles['coordinator-created-worker'],
         paneKey('coordinator-created-worker')
@@ -44477,7 +44119,8 @@ describe('OrcaRuntimeService', () => {
         coordinatorPaneKey: makePaneKey(terminals[99].tabId, terminals[99].leafId)
       })
       const task = db.createTask({ spec: 'one dispatched terminal', runId: run.id })
-      const dispatch = db.createDispatchContext(
+      const dispatch = createRootDispatch(
+        db,
         task.id,
         handles[0],
         makePaneKey(terminals[0].tabId, terminals[0].leafId)
