@@ -1,5 +1,6 @@
-import type { RunRow } from '../../types'
+import type { RunParentDispatch, RunRow } from '../../types'
 import { generateId } from '../generated-id'
+import { isEquivalentPaneKey } from '../pane-key-match'
 import type { OrchestrationDb } from '../orchestration-db'
 
 // ── Runs ──
@@ -10,8 +11,8 @@ export function createRun(
     objective: string
     coordinatorHandle: string
     coordinatorPaneKey: string
-    /** The active worker Dispatch that created this sub-Run, if any. */
-    parentDispatchId?: string
+    /** The attested active worker Dispatch that created this sub-Run, if any. */
+    parentDispatch?: RunParentDispatch
   }
 ): RunRow {
   const id = generateId('run')
@@ -19,16 +20,7 @@ export function createRun(
   try {
     // Re-check inside the write transaction so a completed/revoked Dispatch is never
     // recorded as the origin of a Run after its lifecycle authority has ended.
-    const parentDispatchId = params.parentDispatchId
-      ? ((
-          this.db
-            .prepare(
-              `SELECT id FROM dispatch_contexts
-             WHERE id = ? AND status IN ('pending', 'dispatched')`
-            )
-            .get(params.parentDispatchId) as { id: string } | undefined
-        )?.id ?? null)
-      : null
+    const parentDispatchId = validateRunParentDispatch.call(this, params.parentDispatch)
     this.unbindOtherRunsForPane(params.coordinatorPaneKey)
     this.db
       .prepare(
@@ -51,6 +43,33 @@ export function createRun(
     throw error
   }
   return this.getRun(id) as RunRow
+}
+
+function validateRunParentDispatch(
+  this: OrchestrationDb,
+  parent: RunParentDispatch | undefined
+): string | null {
+  if (!parent) {
+    return null
+  }
+  if (parent.source === 'local') {
+    const dispatch = this.getDispatchContextById(parent.dispatchId)
+    return dispatch &&
+      ['pending', 'dispatched'].includes(dispatch.status) &&
+      dispatch.assignee_pane_key &&
+      isEquivalentPaneKey(dispatch.assignee_pane_key, parent.paneKey) &&
+      dispatch.process_incarnation === parent.processIncarnation
+      ? dispatch.id
+      : null
+  }
+  const attachment = this.getRemoteDispatchAttachment(parent.dispatchId)
+  return attachment &&
+    ['starting', 'ready', 'start_unknown', 'stopping', 'stop_unknown'].includes(attachment.state) &&
+    attachment.pane_key &&
+    isEquivalentPaneKey(attachment.pane_key, parent.paneKey) &&
+    attachment.process_incarnation === parent.processIncarnation
+    ? attachment.dispatch_id
+    : null
 }
 
 export type RunCreateMethods = {

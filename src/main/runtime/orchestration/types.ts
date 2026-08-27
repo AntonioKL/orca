@@ -54,6 +54,13 @@ export type RunRow = {
   updated_at: string
 }
 
+export type RunParentDispatch = {
+  dispatchId: string
+  source: 'local' | 'remote'
+  paneKey: string
+  processIncarnation: string
+}
+
 export type DeliveryStatus = 'outstanding' | 'acknowledged' | 'fenced'
 
 export type DeliveryRow = {
