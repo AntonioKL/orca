@@ -114,7 +114,12 @@ describe('host-qualified worktree metadata', () => {
     const repaired = createStore()
     expect(repaired.getWorktreeMetaForHost(worktreeId, 'local')?.displayName).toBe('Second')
     repaired.flush()
-    expect((readDataFile() as PersistedState).worktreeIdentityAliases?.[alias]).toEqual([secondKey])
+    const afterRead = readDataFile() as PersistedState
+    expect(afterRead.worktreeIdentityAliases?.[alias]).toEqual([
+      persisted.worktreeIdentityAliases?.[alias]?.[0],
+      secondKey
+    ])
+    expect(Object.keys(afterRead.worktreeMetaByIdentity ?? {})).toHaveLength(2)
   })
 
   it('removes only the selected legacy-owner metadata when locators collide', () => {

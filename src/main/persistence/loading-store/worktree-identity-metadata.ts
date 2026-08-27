@@ -68,12 +68,12 @@ function resolveAliasIdentityKey(
     }
     return key > best ? key : best
   })
-  if (identityKeys.length === 1 && identityKeys[0] === winner) {
+  if (identityKeys.length > 1) {
+    // Reads need a deterministic row for the catalog, but preserving every alias
+    // keeps an ambiguous instance recoverable and makes writes fail closed.
     return { identityKey: winner, changed: false }
   }
-  state.worktreeIdentityAliases ??= {}
-  state.worktreeIdentityAliases[alias] = [winner]
-  return { identityKey: winner, changed: true }
+  return { identityKey: winner, changed: false }
 }
 
 /** Drop identity metadata no alias points at any more. */
