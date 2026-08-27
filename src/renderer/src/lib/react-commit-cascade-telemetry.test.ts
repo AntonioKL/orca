@@ -215,6 +215,9 @@ describe('driver attribution', () => {
     // Why: the path redaction is keyed on the detail NAME, so a path inside the
     // value would ship a developer's home directory.
     expect(String(payload.driverStack)).not.toContain('/')
+    // Why the key name is asserted: only a key ending in `stack` gets the
+    // 4000-char detail budget, so renaming it silently truncates the frames.
+    expect(Object.keys(payload).some((key) => /stack$/i.test(key))).toBe(true)
   })
 
   it('clears samples when a cascade ends', () => {

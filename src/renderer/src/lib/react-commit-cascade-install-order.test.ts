@@ -115,6 +115,12 @@ describe('react commit cascade shim install order', () => {
     const graph = transitiveSpecifiers(shimFile)
     expect(Array.from(graph).filter((specifier) => specifier.includes('react-dom'))).toEqual([])
     expect(Array.from(graph)).toEqual([])
+    // Why a source scan too: the specifier regex only sees an import whose `from`
+    // shares a line with the keyword, and a multi-line import is the common form
+    // here — so the graph check alone would miss the one edit that matters.
+    expect(readFileSync(shimFile, 'utf8')).not.toMatch(
+      /^\s*(?:import|export)\b[\s\S]*?\bfrom\b|^\s*import\s*['"]/m
+    )
   })
 
   it('follows local hops when checking a graph for react-dom', () => {

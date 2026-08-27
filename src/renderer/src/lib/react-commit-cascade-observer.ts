@@ -56,8 +56,8 @@ export function installReactCommitCascadeObserver(): void {
     const hook = ensureReactDevtoolsCommitHook()
     if (hook) {
       installObserverOnHook(hook)
-      // Why only here: a hook that refuses the assignment must stay uninstalled,
-      // so the self-check below can still report the failure.
+      // Why only after the assignment: a hook that refuses it stays uninstalled,
+      // so a later call can retry rather than being gated out.
       installed = true
     }
   } catch {
