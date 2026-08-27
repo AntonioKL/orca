@@ -7,6 +7,7 @@ import {
   readWorktreeMetaForHost,
   writeWorktreeMetaForHost
 } from '../../../persistence/host-qualified-worktree-meta'
+import { getRepoOwnedWorktreeMeta } from '../../../worktree-metadata-ownership'
 import { randomUUID } from 'node:crypto'
 
 export function getProjectHostSetupMetaUpdates(
@@ -36,10 +37,11 @@ export function resolveWorktreeMetaWithDiscoveryBackfill(
   repo: Repo,
   worktreeId: string
 ): WorktreeMeta {
-  // Host-qualified: the same repoId::path is a different checkout on each execution host.
   const executionHostId = getRepoExecutionHostId(repo)
+  const repoOwnerCount = store.getRepos().filter((candidate) => candidate.id === repo.id).length
   const existing =
-    readWorktreeMetaForHost(store, worktreeId, executionHostId) ?? store.getWorktreeMeta(worktreeId)
+    readWorktreeMetaForHost(store, worktreeId, executionHostId) ??
+    getRepoOwnedWorktreeMeta(repo, worktreeId, store.getAllWorktreeMeta(), repoOwnerCount)
   const ownershipUpdates = getProjectHostSetupMetaUpdates(store, repo, existing)
   if (existing) {
     const updates = {

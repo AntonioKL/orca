@@ -27,8 +27,8 @@ import {
   settingsForWorktreeOwner,
   trySettingsForWorktreeOwner
 } from '../listing/worktree-owner-settings'
-import { findRepoForHost } from '../../repo-host-identity'
 
+import { findRepoForHost } from '../../repo-host-identity'
 export function createUpdateWorktreeMeta(
   set: WorktreeSliceSet,
   get: WorktreeSliceGet
@@ -37,7 +37,10 @@ export function createUpdateWorktreeMeta(
     const shouldApplyUpdate = options?.shouldApply
     const requestedHostId = options?.executionHostId
     const existingWorktree = findKnownWorktreeById(get(), worktreeId, requestedHostId)
-    const executionHostId = requestedHostId ?? existingWorktree?.hostId
+    const executionHostId =
+      requestedHostId ??
+      existingWorktree?.hostId ??
+      (get().settings?.activeRuntimeEnvironmentId ? undefined : 'local')
     if (shouldApplyUpdate && !shouldApplyUpdate(existingWorktree)) {
       return { ok: true }
     }

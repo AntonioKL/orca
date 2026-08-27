@@ -149,7 +149,7 @@ export async function resolveRepoWorktreeRows(
         : undefined
     const merged = {
       ...mergeWorktree(repo.id, gitWorktree, meta, repo.displayName),
-      hostId: repoOwnerCount === 1 ? (existingMeta?.hostId ?? expectedHostId) : expectedHostId
+      hostId: meta?.hostId ?? expectedHostId
     }
     return {
       ...merged,

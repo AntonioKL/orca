@@ -107,7 +107,11 @@ export function useWorktreeCardActivationActions({
     // Inline rename has no surface for the failure; the store already logs and
     // refetches, which reverts the optimistic title in place.
     async (displayName: string): Promise<void> => {
-      await updateWorktreeMeta(worktree.id, { displayName }, { executionHostId: worktree.hostId })
+      await updateWorktreeMeta(
+        worktree.id,
+        { displayName },
+        { executionHostId: worktree.hostId ?? 'local' }
+      )
     },
     [updateWorktreeMeta, worktree.hostId, worktree.id]
   )
@@ -150,7 +154,7 @@ export function useWorktreeCardActivationActions({
       updateWorktreeMeta(
         worktree.id,
         { isUnread: !worktree.isUnread },
-        { executionHostId: worktree.hostId }
+        { executionHostId: worktree.hostId ?? 'local' }
       )
     },
     [worktree.hostId, worktree.id, worktree.isUnread, updateWorktreeMeta]

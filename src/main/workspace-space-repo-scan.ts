@@ -11,6 +11,7 @@ import type {
 import { mapWithConcurrency } from '../shared/map-with-concurrency'
 import { getRepoExecutionHostId } from '../shared/execution-host'
 import { readWorktreeMetaForHost } from './persistence/host-qualified-worktree-meta'
+import { getRepoOwnedWorktreeMeta } from './worktree-metadata-ownership'
 import { getSshFilesystemProvider } from './providers/ssh-filesystem-dispatch'
 import { getSshGitProvider } from './providers/ssh-git-dispatch'
 import { createFolderWorktree, listRepoWorktrees } from './repo-worktrees'
@@ -106,9 +107,11 @@ function reportProgress(
 function mergeForSpaceScan(repo: Repo, gitWorktree: GitWorktreeInfo, store: Store): Worktree {
   const worktreeId = `${repo.id}::${gitWorktree.path}`
   // Host-qualified: the same repoId::path can be a different checkout on each execution host.
+  const executionHostId = getRepoExecutionHostId(repo)
+  const repoOwnerCount = store.getRepos().filter((candidate) => candidate.id === repo.id).length
   const meta =
-    readWorktreeMetaForHost(store, worktreeId, getRepoExecutionHostId(repo)) ??
-    store.getWorktreeMeta(worktreeId)
+    readWorktreeMetaForHost(store, worktreeId, executionHostId) ??
+    getRepoOwnedWorktreeMeta(repo, worktreeId, store.getAllWorktreeMeta(), repoOwnerCount)
   return mergeWorktree(repo.id, gitWorktree, meta, repo.displayName)
 }
 

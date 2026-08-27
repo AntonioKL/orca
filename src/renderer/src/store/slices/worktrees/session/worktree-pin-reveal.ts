@@ -78,9 +78,17 @@ export function createSetWorktreesPinnedAndReveal(
       changedWorktreeIds.add(worktreeId)
       const workspaceScope = parseWorkspaceKey(worktreeId)
       if (workspaceScope?.type === 'folder') {
-        void get().updateWorktreeMeta(worktreeId, { isPinned }, { executionHostId: current.hostId })
+        void get().updateWorktreeMeta(
+          worktreeId,
+          { isPinned },
+          { executionHostId: current.hostId ?? 'local' }
+        )
       } else {
-        updates.push({ worktreeId, updates: { isPinned }, executionHostId: current.hostId })
+        updates.push({
+          worktreeId,
+          updates: { isPinned },
+          executionHostId: current.hostId ?? 'local'
+        })
       }
       if (revealWorktreeId === null && worktreeId === activeSidebarWorktreeId) {
         revealWorktreeId = worktreeId

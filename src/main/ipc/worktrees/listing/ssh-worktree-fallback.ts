@@ -12,6 +12,7 @@ import {
   readWorktreeMetaForHost,
   writeWorktreeMetaForHost
 } from '../../../persistence/host-qualified-worktree-meta'
+import { getRepoOwnedWorktreeMeta } from '../../../worktree-metadata-ownership'
 import {
   buildKnownOrcaWorkspaceLayouts,
   isLegacyRepoForExternalWorktreeVisibility,
@@ -151,9 +152,10 @@ export function buildDetectedGitWorktrees(
   )
   const detected = liveWorktrees.map((gitWorktree) => {
     const worktreeId = `${repo.id}::${gitWorktree.path}`
+    const repoOwnerCount = store.getRepos().filter((candidate) => candidate.id === repo.id).length
     let meta =
       readWorktreeMetaForHost(store, worktreeId, getRepoExecutionHostId(repo)) ??
-      store.getWorktreeMeta(worktreeId)
+      getRepoOwnedWorktreeMeta(repo, worktreeId, store.getAllWorktreeMeta(), repoOwnerCount)
     const worktree = mergeWorktree(repo.id, gitWorktree, meta, repo.displayName)
     const detected = toDetectedWorktree({
       repo,

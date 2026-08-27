@@ -41,7 +41,7 @@ export function useWorktreeStatusMutations(args: {
       void updateWorktreeMeta(
         worktreeId,
         { workspaceStatus: status },
-        { executionHostId: current.hostId }
+        { executionHostId: current.hostId ?? 'local' }
       )
     },
     [updateWorktreeMeta, worktreeMap, workspaceStatuses]
@@ -58,7 +58,7 @@ export function useWorktreeStatusMutations(args: {
         updates.push({
           worktreeId,
           updates: { workspaceStatus: status },
-          executionHostId: current.hostId
+          executionHostId: current.hostId ?? 'local'
         })
       }
       if (updates.length > 0) {
@@ -92,7 +92,7 @@ export function useWorktreeStatusMutations(args: {
         updates.set(worktreeId, {
           worktreeId,
           updates: next,
-          executionHostId: current.hostId
+          executionHostId: current.hostId ?? 'local'
         })
       }
       for (const [worktreeId, manualOrder] of order.updates) {
@@ -145,17 +145,18 @@ export function useWorktreeStatusMutations(args: {
         rankByWorktreeId: manualOrderCatalog.rankByWorktreeId,
         allWorktreeIds: manualOrderCatalog.orderedIds
       })
+      if (result.changed) {
+        setSortBy('manual')
+      }
       void updateWorktreesMeta(
         [...result.updates].map(([worktreeId, updates]) => ({
           worktreeId,
           updates,
-          ...(worktreeMap.get(worktreeId)?.hostId
-            ? { executionHostId: worktreeMap.get(worktreeId)?.hostId }
-            : {})
+          executionHostId: worktreeMap.get(worktreeId)?.hostId ?? 'local'
         }))
       )
     },
-    [manualOrderCatalog, updateWorktreesMeta, worktreeMap]
+    [manualOrderCatalog, setSortBy, updateWorktreesMeta, worktreeMap]
   )
 
   const shouldShowWorkspaceBoardDropIndicator = useCallback(

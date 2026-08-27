@@ -45,7 +45,7 @@ export function useWorktreeContextMenuCommands(args: {
     args.updateWorktreeMeta(
       args.worktree.id,
       { isUnread: !args.worktree.isUnread },
-      { executionHostId: args.worktree.hostId }
+      { executionHostId: args.worktree.hostId ?? 'local' }
     )
   }, [args])
   const handleTogglePin = useCallback(() => {
@@ -112,7 +112,7 @@ export function useWorktreeContextMenuCommands(args: {
             args.updateWorktreeMeta(
               worktree.id,
               { workspaceStatus: status },
-              { executionHostId: worktree.hostId }
+              { executionHostId: worktree.hostId ?? 'local' }
             )
           )
       )

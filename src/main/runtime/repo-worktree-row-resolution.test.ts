@@ -111,6 +111,43 @@ describe('host-qualified scoped worktree resolution', () => {
       displayName: 'feature'
     })
   })
+  it('uses the host-qualified metadata owner when a legacy row has another host', async () => {
+    const deps = createDeps([
+      repo('shared', '/remote/repo', {
+        connectionId: 'builder',
+        executionHostId: 'ssh:builder'
+      })
+    ])
+    const worktreeId = 'shared::/same/worktree'
+    const remoteMeta = {
+      displayName: 'remote workspace',
+      hostId: 'ssh:builder',
+      instanceId: 'remote-instance'
+    } as unknown as WorktreeMeta
+    deps.metaById[worktreeId] = {
+      displayName: 'stale local workspace',
+      hostId: 'local',
+      instanceId: 'local-instance'
+    } as unknown as WorktreeMeta
+    ;(
+      deps.store as Store & {
+        getWorktreeMetaForHost: () => WorktreeMeta
+      }
+    ).getWorktreeMetaForHost = () => remoteMeta
+
+    const rows = await resolveRepoWorktreeRows(
+      deps,
+      deps.store.getRepos()[0]!,
+      deps.metaById,
+      new Map()
+    )
+
+    expect(rows[0]).toMatchObject({
+      displayName: 'remote workspace',
+      hostId: 'ssh:builder',
+      instanceId: 'remote-instance'
+    })
+  })
 
   it.each([
     ['runtime:windows', String.raw`C:\Users\dev\orca worktree`],

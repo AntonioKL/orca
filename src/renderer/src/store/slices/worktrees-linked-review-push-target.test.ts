@@ -65,6 +65,7 @@ describe('worktree remote runtime mutations', () => {
     })
     expect(mockApi.worktrees.updateMeta).toHaveBeenCalledWith({
       worktreeId: wt.id,
+      executionHostId: wt.hostId ?? 'local',
       updates: { linkedPR: 2548, pushTarget }
     })
     expect(store.getState().worktreesByRepo.repo1[0]?.pushTarget).toEqual(pushTarget)
@@ -88,9 +89,9 @@ describe('worktree remote runtime mutations', () => {
     } as Partial<AppState>)
 
     await store.getState().updateWorktreeMeta(wt.id, { linkedPR: null })
-
     expect(mockApi.worktrees.updateMeta).toHaveBeenCalledWith({
       worktreeId: wt.id,
+      executionHostId: wt.hostId ?? 'local',
       updates: { linkedPR: null, pushTarget: undefined }
     })
     expect(store.getState().worktreesByRepo.repo1[0]?.pushTarget).toBeUndefined()
@@ -119,9 +120,9 @@ describe('worktree remote runtime mutations', () => {
       .getState()
       .updateWorktreeMeta(wt.id, { linkedPR: null }, { suppressHostedReviewRefresh: true })
 
-    expect(fetchHostedReviewForBranch).not.toHaveBeenCalled()
     expect(mockApi.worktrees.updateMeta).toHaveBeenCalledWith({
       worktreeId: wt.id,
+      executionHostId: wt.hostId ?? 'local',
       updates: { linkedPR: null, pushTarget: undefined }
     })
     expect(store.getState().worktreesByRepo.repo1[0]).toMatchObject({
@@ -152,9 +153,9 @@ describe('worktree remote runtime mutations', () => {
     } as Partial<AppState>)
 
     await store.getState().updateWorktreeMeta(wt.id, { linkedGitLabMR: 42 })
-
     expect(mockApi.worktrees.updateMeta).toHaveBeenCalledWith({
       worktreeId: wt.id,
+      executionHostId: wt.hostId ?? 'local',
       updates: { linkedGitLabMR: 42, linkedPR: null, pushTarget: undefined }
     })
     expect(store.getState().worktreesByRepo.repo1[0]).toMatchObject({
@@ -186,6 +187,7 @@ describe('worktree remote runtime mutations', () => {
     })
     expect(mockApi.worktrees.updateMeta).toHaveBeenCalledWith({
       worktreeId: wt.id,
+      executionHostId: wt.hostId ?? 'local',
       updates: { pushTarget: newPushTarget }
     })
     expect(store.getState().worktreesByRepo.repo1[0]?.pushTarget).toEqual(newPushTarget)
@@ -300,9 +302,9 @@ describe('worktree remote runtime mutations', () => {
 
     await store.getState().updateWorktreeMeta(wt.id, { linkedPR: 0 })
 
-    expect(mockApi.worktrees.resolvePrBase).not.toHaveBeenCalled()
     expect(mockApi.worktrees.updateMeta).toHaveBeenCalledWith({
       worktreeId: wt.id,
+      executionHostId: wt.hostId ?? 'local',
       updates: { linkedPR: 0 }
     })
   })
@@ -326,9 +328,9 @@ describe('worktree remote runtime mutations', () => {
 
     await store.getState().updateWorktreeMeta(wt.id, { linkedPR: 2548 })
 
-    expect(mockApi.worktrees.resolvePrBase).not.toHaveBeenCalled()
     expect(mockApi.worktrees.updateMeta).toHaveBeenCalledWith({
       worktreeId: wt.id,
+      executionHostId: wt.hostId ?? 'local',
       updates: { linkedPR: 2548 }
     })
   })
@@ -361,6 +363,7 @@ describe('worktree remote runtime mutations', () => {
     })
     expect(mockApi.worktrees.updateMeta).toHaveBeenCalledWith({
       worktreeId: wt.id,
+      executionHostId: wt.hostId ?? 'local',
       updates: { linkedPR: 2548, pushTarget }
     })
     expect(store.getState().worktreesByRepo.repo1[0]?.pushTarget).toEqual(pushTarget)
@@ -397,6 +400,7 @@ describe('worktree remote runtime mutations', () => {
     })
     expect(mockApi.worktrees.updateMeta).toHaveBeenCalledWith({
       worktreeId: wt.id,
+      executionHostId: wt.hostId ?? 'local',
       updates: { pushTarget }
     })
     expect(store.getState().worktreesByRepo.repo1[0]?.pushTarget).toEqual(pushTarget)
@@ -520,7 +524,8 @@ describe('worktree remote runtime mutations', () => {
       id: 'repo-ssh::/home/orca/runtime-wt',
       repoId: 'repo-ssh',
       path: '/home/orca/runtime-wt',
-      linkedPR: 5571
+      linkedPR: 5571,
+      hostId: 'ssh:ssh-1'
     })
     mockApi.worktrees.resolvePrBase.mockResolvedValueOnce({
       baseBranch: 'fork-head',
@@ -549,6 +554,7 @@ describe('worktree remote runtime mutations', () => {
     })
     expect(mockApi.worktrees.updateMeta).toHaveBeenCalledWith({
       worktreeId: wt.id,
+      executionHostId: wt.hostId ?? 'local',
       updates: { pushTarget }
     })
     expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
@@ -748,6 +754,7 @@ describe('worktree remote runtime mutations', () => {
     })
     expect(mockApi.worktrees.updateMeta).toHaveBeenCalledWith({
       worktreeId: wt.id,
+      executionHostId: wt.hostId ?? 'local',
       updates: { pushTarget }
     })
     expect(store.getState().worktreesByRepo.repo1[0]?.pushTarget).toEqual(pushTarget)

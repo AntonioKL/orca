@@ -117,6 +117,19 @@ describe('host-qualified worktree metadata', () => {
     expect((readDataFile() as PersistedState).worktreeIdentityAliases?.[alias]).toEqual([secondKey])
   })
 
+  it('removes only the selected legacy-owner metadata when locators collide', () => {
+    const store = createStore()
+    store.setWorktreeMetaForHost(worktreeId, 'local', { displayName: 'Local feature' })
+    store.setWorktreeMetaForHost(worktreeId, 'ssh:build-box', { displayName: 'Remote feature' })
+
+    store.removeWorktreeMeta(worktreeId, 'local')
+
+    expect(store.getWorktreeMetaForHost(worktreeId, 'local')).toBeUndefined()
+    expect(store.getWorktreeMetaForHost(worktreeId, 'ssh:build-box')?.displayName).toBe(
+      'Remote feature'
+    )
+  })
+
   it('removes only the selected host metadata when locators collide', () => {
     const store = createStore()
     store.setWorktreeMetaForHost(worktreeId, 'local', { displayName: 'Local feature' })

@@ -58,7 +58,7 @@ export function useWorkspaceKanbanWorktreeActions(args: {
       void args.updateWorktreeMeta(
         worktreeId,
         { workspaceStatus: status },
-        { executionHostId: current.hostId }
+        { executionHostId: current.hostId ?? 'local' }
       )
       args.maybeSyncTaskStatuses([worktreeId], status)
     },
@@ -77,7 +77,7 @@ export function useWorkspaceKanbanWorktreeActions(args: {
         updates.push({
           worktreeId,
           updates: { workspaceStatus: status },
-          executionHostId: current.hostId
+          executionHostId: current.hostId ?? 'local'
         })
       }
       if (changedIds.length === 0) {
@@ -119,7 +119,11 @@ export function useWorkspaceKanbanWorktreeActions(args: {
         if (getWorkspaceStatus(current, args.workspaceStatuses) !== drop.status) {
           next.workspaceStatus = drop.status
         }
-        updates.push({ worktreeId, updates: next, executionHostId: current.hostId })
+        updates.push({
+          worktreeId,
+          updates: next,
+          executionHostId: current.hostId ?? 'local'
+        })
       }
       for (const [worktreeId, manualOrder] of order.updates) {
         const entry = updates.find((candidate) => candidate.worktreeId === worktreeId)
@@ -173,7 +177,7 @@ export function useWorkspaceKanbanWorktreeActions(args: {
       void args.updateWorktreeMeta(
         worktreeId,
         { isPinned: true },
-        { executionHostId: current.hostId }
+        { executionHostId: current.hostId ?? 'local' }
       )
     },
     [args]
@@ -184,7 +188,11 @@ export function useWorkspaceKanbanWorktreeActions(args: {
       for (const worktreeId of worktreeIds) {
         const current = args.worktreeById.get(worktreeId)
         if (current && !current.isPinned) {
-          updates.push({ worktreeId, updates: { isPinned: true }, executionHostId: current.hostId })
+          updates.push({
+            worktreeId,
+            updates: { isPinned: true },
+            executionHostId: current.hostId ?? 'local'
+          })
         }
       }
       if (updates.length > 0) {

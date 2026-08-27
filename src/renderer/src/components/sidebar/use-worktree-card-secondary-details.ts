@@ -149,7 +149,7 @@ export function useWorktreeCardSecondaryDetails({
     (hoverReviewProvider === 'azure-devops' && linkedAzureDevOpsPR !== null) ||
     (hoverReviewProvider === 'gitea' && linkedGiteaPR !== null)
   const handleUnlinkReview = useCallback(() => {
-    const options = { executionHostId: worktree.hostId }
+    const options = { executionHostId: worktree.hostId ?? 'local' }
     switch (hoverReviewProvider) {
       case 'github':
         void updateWorktreeMeta(worktree.id, { linkedPR: null }, options)

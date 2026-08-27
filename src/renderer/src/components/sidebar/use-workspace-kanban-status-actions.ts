@@ -93,7 +93,7 @@ export function useWorkspaceKanbanStatusActions(args: {
           void args.updateWorktreeMeta(
             worktree.id,
             { workspaceStatus: fallbackStatus },
-            { executionHostId: worktree.hostId }
+            { executionHostId: worktree.hostId ?? 'local' }
           )
         }
       }

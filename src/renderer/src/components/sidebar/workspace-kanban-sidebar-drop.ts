@@ -259,7 +259,7 @@ export function buildWorkspaceKanbanSidebarDropUpdates(args: {
     updates.push({
       worktreeId,
       updates: next,
-      ...(current.hostId ? { executionHostId: current.hostId } : {})
+      executionHostId: current.hostId ?? 'local'
     })
   }
 
@@ -273,7 +273,7 @@ export function buildWorkspaceKanbanSidebarDropUpdates(args: {
         updates.push({
           worktreeId,
           updates: manualOrder,
-          ...(current.hostId ? { executionHostId: current.hostId } : {})
+          executionHostId: current.hostId ?? 'local'
         })
       }
     }

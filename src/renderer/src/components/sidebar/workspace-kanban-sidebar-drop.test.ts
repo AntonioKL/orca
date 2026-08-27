@@ -575,7 +575,7 @@ describe('workspace kanban sidebar drop updates', () => {
 
     expect(result.shouldSwitchToManual).toBe(false)
     expect(result.updates).toEqual([
-      { worktreeId: 'todo-a', updates: { workspaceStatus: 'doing' } }
+      { worktreeId: 'todo-a', updates: { workspaceStatus: 'doing' }, executionHostId: 'local' }
     ])
   })
 
@@ -669,7 +669,11 @@ describe('workspace kanban sidebar drop updates', () => {
     })
 
     expect(result.updates).toEqual([
-      { worktreeId: 'todo-a', updates: { workspaceStatus: 'doing', manualOrder: 1500 } }
+      {
+        worktreeId: 'todo-a',
+        updates: { workspaceStatus: 'doing', manualOrder: 1500 },
+        executionHostId: 'local'
+      }
     ])
   })
 })

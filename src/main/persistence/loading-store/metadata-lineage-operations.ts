@@ -164,7 +164,7 @@ export class MetadataLineageOperations {
     removeWorktreeMetadataForHost(
       this[metadataLineageOperationsContext].runtime.state,
       worktreeId,
-      preservesDifferentPersistedOwner ? owner : undefined
+      hostId === undefined ? undefined : (hostId ?? undefined)
     )
     // Skip partitions main never wrote: materializing one fences every sibling worktree of the repo.
     const partitions = new Set<ExecutionHostId>(
@@ -242,10 +242,14 @@ export class MetadataLineageOperations {
     executionHostId?: ExecutionHostId
   ): void {
     const state = this[metadataLineageOperationsContext].runtime.state
-    const legacyChanged = migrateWorktreeIdentityOperation(state, oldWorktreeId, newWorktreeId)
-    // Only the host that moved the folder re-points its alias; the rest still live at the old path.
-    const mover =
-      executionHostId ?? state.worktreeMeta[oldWorktreeId]?.hostId ?? LOCAL_EXECUTION_HOST_ID
+    const persistedOwner = state.worktreeMeta[oldWorktreeId]?.hostId
+    const mover = executionHostId ?? persistedOwner ?? LOCAL_EXECUTION_HOST_ID
+    const legacyChanged =
+      executionHostId !== undefined &&
+      persistedOwner !== undefined &&
+      persistedOwner !== executionHostId
+        ? false
+        : migrateWorktreeIdentityOperation(state, oldWorktreeId, newWorktreeId)
     const canonicalChanged = migrateWorktreeMetadataLocator(
       state,
       oldWorktreeId,

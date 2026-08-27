@@ -155,7 +155,8 @@ describe('worktree remote runtime mutations', () => {
     const wt = makeWorktree({
       id: 'repo-ssh::/home/orca/wt1',
       repoId: 'repo-ssh',
-      path: '/home/orca/wt1'
+      path: '/home/orca/wt1',
+      hostId: 'ssh:ssh-1'
     })
     store.setState({
       settings: { activeRuntimeEnvironmentId: 'env-1' } as never,
@@ -176,6 +177,7 @@ describe('worktree remote runtime mutations', () => {
 
     expect(mockApi.worktrees.updateMeta).toHaveBeenCalledWith({
       worktreeId: wt.id,
+      executionHostId: 'ssh:ssh-1',
       updates: expect.objectContaining({ comment: 'ssh note' })
     })
     expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
@@ -199,6 +201,7 @@ describe('worktree remote runtime mutations', () => {
 
     expect(mockApi.worktrees.updateMeta).toHaveBeenCalledWith({
       worktreeId: wt.id,
+      executionHostId: 'local',
       updates: {
         displayName: 'Fix auth',
         pendingFirstAgentMessageRename: false,
