@@ -39,6 +39,7 @@ function runApply(
     rewriteAfterHashCall?: number
     rewriteBeforeDelete?: boolean
     rewriteSourceBeforeDelete?: boolean
+    symlinkMarkerBeforeDelete?: boolean
     symlinkSource?: boolean
     symlinkTarget?: boolean
   } = {}
@@ -80,6 +81,16 @@ if(process.env.REWRITE && n===Number(process.env.REWRITE)) fs.writeFileSync(proc
 `
   )
   chmodSync(shim, 0o755)
+  const statShim = join(bin, 'stat')
+  writeFileSync(
+    statShim,
+    `#!/usr/bin/env node
+const fs = require('node:fs')
+const mode = fs.statSync(process.argv.at(-1)).mode & 0o777
+process.stdout.write(mode.toString(8) + '\\n')
+`
+  )
+  chmodSync(statShim, 0o755)
   const mvShim = join(bin, 'mv')
   writeFileSync(
     mvShim,
@@ -98,6 +109,10 @@ if (process.env.REWRITE_SOURCE_BEFORE_DELETE === '1' && retiresSource) {
   const replacement = source + '.replacement'
   fs.writeFileSync(replacement, process.env.BYTES)
   fs.renameSync(replacement, source)
+}
+if (process.env.SYMLINK_MARKER_BEFORE_DELETE === '1' && retiresSource) {
+  fs.writeFileSync(process.env.MARKER_TARGET, '{"completed":true}\\n')
+  fs.symlinkSync(process.env.MARKER_TARGET, process.env.MARKER)
 }
 const result = spawnSync('/bin/mv', args, { stdio: 'inherit' })
 if (result.status === 0 && process.env.CRASH_BEFORE_COMMIT === '1' && retiresSource) {
@@ -132,6 +147,9 @@ process.exit(result.status ?? 1)
           REWRITE: options.rewriteAfterHashCall ? String(options.rewriteAfterHashCall) : '',
           REWRITE_BEFORE_DELETE: options.rewriteBeforeDelete ? '1' : '',
           REWRITE_SOURCE_BEFORE_DELETE: options.rewriteSourceBeforeDelete ? '1' : '',
+          SYMLINK_MARKER_BEFORE_DELETE: options.symlinkMarkerBeforeDelete ? '1' : '',
+          MARKER: marker,
+          MARKER_TARGET: join(root, 'marker-target'),
           TARGET: targetPath,
           BYTES: NEWER
         },
@@ -170,6 +188,10 @@ process.exit(result.status ?? 1)
 }
 
 describe.skipIf(isWindows)('legacy WSL auth drain race guard', () => {
+  it('checks recovery modes without root write-access semantics', () => {
+    expect(_internals.applyLegacyAuthScript).not.toContain('[ ! -w ')
+    expect(_internals.applyLegacyAuthScript).toContain("stat -c '%a'")
+  })
   it('retires an unchanged source', () =>
     expect(runApply()).toEqual({ status: 0, source: null, target: TARGET, marker: true }))
   it('promotes the verified source before retiring it', () =>
@@ -218,6 +240,12 @@ describe.skipIf(isWindows)('legacy WSL auth drain race guard', () => {
     expect(outcome.source).toBe(SOURCE)
     expect(outcome.quarantine).toBe(NEWER)
     expect(outcome.marker).toBe(false)
+  })
+  it('does not accept a symlink marker while recovering a failed source retirement', () => {
+    const outcome = runApply({ rewriteSourceBeforeDelete: true, symlinkMarkerBeforeDelete: true })
+    expect(outcome.status).toBe(40)
+    expect(outcome.source).toBe(SOURCE)
+    expect(outcome.quarantine).toBe(NEWER)
   })
   it('recovers and retries after interruption before the completion marker', () => {
     const outcome = runApply({ crashBeforeCommit: true, retryAfterCrash: true })

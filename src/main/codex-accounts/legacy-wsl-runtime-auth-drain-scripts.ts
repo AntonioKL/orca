@@ -59,6 +59,7 @@ target_home=$(readlink -f -- "$4") || exit 33
 source_auth="$legacy_home/auth.json"; target_auth="$target_home/auth.json"
 [ -f "$source_auth" ] && [ ! -L "$source_auth" ] || exit 35; [ -f "$target_auth" ] && [ ! -L "$target_auth" ] || exit 36
 hash_file() { sha256sum -- "$1" | cut -d ' ' -f 1; }
+mode_file() { stat -c '%a' -- "$1"; }
 if [ -e "$source_quarantine_auth" ] || [ -L "$source_quarantine_auth" ]; then
   [ -f "$source_quarantine_auth" ] && [ ! -L "$source_quarantine_auth" ] || exit 46
   [ "$(hash_file "$source_auth")" = "$5" ] || exit 37
@@ -79,16 +80,17 @@ fi
 umask 077
 temporary_auth="$target_auth.orca-drain-$$"; temporary_credentials="$target_home/.credentials.json.orca-drain-$$"; destination_pin="$target_auth.orca-drain-pin-$$"; temporary_destination_snapshot="$target_auth.orca-drain-snapshot-$$"; temporary_source_snapshot="$source_auth.orca-drain-source-$$"; temporary_marker="$3.orca-drain-$$"
 drain_marker="$3"; expected_source_hash="$5"
+marker_committed() { [ -f "$drain_marker" ] && [ ! -L "$drain_marker" ]; }
 cleanup() {
-  if [ ! -f "$drain_marker" ] && [ ! -e "$source_auth" ] && [ ! -L "$source_auth" ]; then
+  if ! marker_committed && [ ! -e "$source_auth" ] && [ ! -L "$source_auth" ]; then
     if [ -f "$source_recovery_auth" ] && [ ! -L "$source_recovery_auth" ] && [ "$(hash_file "$source_recovery_auth")" = "$expected_source_hash" ]; then mv -- "$source_recovery_auth" "$source_auth" || :; chmod 600 "$source_auth" || :
     elif [ -f "$source_quarantine_auth" ] && [ ! -L "$source_quarantine_auth" ] && [ "$(hash_file "$source_quarantine_auth")" = "$expected_source_hash" ]; then mv -- "$source_quarantine_auth" "$source_auth" || :; chmod 600 "$source_auth" || :; fi
   fi
   if [ -f "$destination_recovery_auth" ] && [ ! -L "$destination_recovery_auth" ]; then
     if [ "$target_auth" -ef "$destination_recovery_auth" ]; then chmod 600 "$target_auth" || :; fi
-    [ ! -f "$drain_marker" ] || rm -f -- "$destination_recovery_auth"
+    if marker_committed; then rm -f -- "$destination_recovery_auth"; fi
   fi
-  [ ! -f "$drain_marker" ] || rm -f -- "$source_recovery_auth" "$source_quarantine_auth"
+  if marker_committed; then rm -f -- "$source_recovery_auth" "$source_quarantine_auth"; fi
   rm -f -- "$temporary_auth" "$temporary_credentials" "$destination_pin" "$temporary_destination_snapshot" "$temporary_source_snapshot" "$temporary_marker"
 }
 trap cleanup EXIT
@@ -114,18 +116,18 @@ expected_target_hash="$6"; [ "$7" != 1 ] || expected_target_hash="$5"
 [ "$(hash_file "$destination_pin")" = "$expected_target_hash" ] || exit 45
 [ "$target_auth" -ef "$destination_pin" ] || exit 45
 if [ "$8" != 1 ]; then exit 0; fi
-cp -- "$target_auth" "$temporary_destination_snapshot"; chmod 400 "$temporary_destination_snapshot"; [ ! -w "$temporary_destination_snapshot" ] || exit 45; [ "$(hash_file "$temporary_destination_snapshot")" = "$expected_target_hash" ] || exit 45
-cp -- "$source_auth" "$temporary_source_snapshot"; chmod 400 "$temporary_source_snapshot"; [ ! -w "$temporary_source_snapshot" ] || exit 40; [ "$(hash_file "$temporary_source_snapshot")" = "$5" ] || exit 40
+cp -- "$target_auth" "$temporary_destination_snapshot"; chmod 400 "$temporary_destination_snapshot"; [ "$(mode_file "$temporary_destination_snapshot")" = 400 ] || exit 45; [ "$(hash_file "$temporary_destination_snapshot")" = "$expected_target_hash" ] || exit 45
+cp -- "$source_auth" "$temporary_source_snapshot"; chmod 400 "$temporary_source_snapshot"; [ "$(mode_file "$temporary_source_snapshot")" = 400 ] || exit 40; [ "$(hash_file "$temporary_source_snapshot")" = "$5" ] || exit 40
 mv -f -- "$temporary_source_snapshot" "$source_recovery_auth"; [ "$(hash_file "$source_recovery_auth")" = "$5" ] || exit 40
 ln -- "$temporary_destination_snapshot" "$destination_recovery_auth"; [ "$temporary_destination_snapshot" -ef "$destination_recovery_auth" ] || exit 45
 [ "$(hash_file "$destination_pin")" = "$expected_target_hash" ] || exit 45; [ "$target_auth" -ef "$destination_pin" ] || exit 45
 mv -f -- "$temporary_destination_snapshot" "$target_auth"
 [ "$(hash_file "$destination_pin")" = "$expected_target_hash" ] || exit 45
-[ ! -w "$target_auth" ] || exit 45
+[ "$(mode_file "$target_auth")" = 400 ] || exit 45
 [ "$(hash_file "$target_auth")" = "$expected_target_hash" ] || exit 45
 [ "$target_auth" -ef "$destination_recovery_auth" ] || exit 45
 [ "$(hash_file "$source_auth")" = "$5" ] || exit 40
-mv -- "$source_auth" "$source_quarantine_auth"; chmod 400 "$source_quarantine_auth"; [ ! -w "$source_quarantine_auth" ] || exit 40
+mv -- "$source_auth" "$source_quarantine_auth"; chmod 400 "$source_quarantine_auth"; [ "$(mode_file "$source_quarantine_auth")" = 400 ] || exit 40
 [ "$(hash_file "$source_quarantine_auth")" = "$5" ] || exit 40
 [ "$(hash_file "$target_auth")" = "$expected_target_hash" ] || exit 45
 [ "$target_auth" -ef "$destination_recovery_auth" ] || exit 45
