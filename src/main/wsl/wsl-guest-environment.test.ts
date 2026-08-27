@@ -103,6 +103,45 @@ describe('probing', () => {
     await first
   })
 
+  it('observes an abort that races between the initial check and listener registration', async () => {
+    let release!: (value: unknown) => void
+    runProcessMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve
+        })
+    )
+    const first = getWslGuestEnvironment('Ubuntu', 4_000)
+    await vi.waitFor(() => expect(runProcessMock).toHaveBeenCalledOnce())
+    const reason = new Error('raced abort')
+    const controller = new AbortController()
+    const signal = {
+      get aborted() {
+        return controller.signal.aborted
+      },
+      get reason() {
+        return controller.signal.reason
+      },
+      addEventListener: (
+        type: string,
+        listener: EventListenerOrEventListenerObject,
+        options?: boolean | AddEventListenerOptions
+      ) => {
+        controller.abort(reason)
+        controller.signal.addEventListener(type, listener, options)
+      },
+      removeEventListener: (
+        type: string,
+        listener: EventListenerOrEventListenerObject,
+        options?: boolean | EventListenerOptions
+      ) => controller.signal.removeEventListener(type, listener, options)
+    } as unknown as AbortSignal
+
+    await expect(getWslGuestEnvironment('Ubuntu', 1, signal)).rejects.toBe(reason)
+    release({ code: 0, signal: null, stdout: '', stderr: '', timedOut: false })
+    await first
+  })
+
   it('starts a fresh probe immediately after the prior probe is canceled', async () => {
     let releaseCanceled!: (value: unknown) => void
     runProcessMock.mockImplementationOnce(

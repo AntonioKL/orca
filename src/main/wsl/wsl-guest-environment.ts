@@ -156,6 +156,9 @@ function waitForProbe(
     const timer = setTimeout(() => finish(() => resolve(null)), budgetMs)
     timer.unref?.()
     signal?.addEventListener('abort', onAbort, { once: true })
+    if (signal?.aborted) {
+      onAbort()
+    }
     probe.promise.then(
       (environment) => finish(() => resolve(environment)),
       (error: unknown) => finish(() => reject(error))
