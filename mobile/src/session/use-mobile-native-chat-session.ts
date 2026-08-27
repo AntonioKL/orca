@@ -17,7 +17,13 @@ import {
   type MobileNativeChatStreamFrame
 } from './mobile-native-chat-stream-frame'
 
-export type MobileNativeChatStatus = 'idle' | 'loading' | 'waiting-session' | 'ready' | 'error'
+export type MobileNativeChatStatus =
+  | 'idle'
+  | 'loading'
+  | 'waiting-session'
+  | 'awaiting-transcript'
+  | 'ready'
+  | 'error'
 
 export type MobileNativeChatSession = {
   messages: NativeChatMessage[]

@@ -18,7 +18,7 @@ patchedDependencies:
     hash: 0ca49eb732c1b1b7a5316592ad85c6bbddd37f529b610e620eb4b60296f25448
     path: patches/react-native-webview@13.16.1.patch
   react-native@0.83.9:
-    hash: a6502e7d63769bf1fd639cbbaab1cc0b8aebef31d22048e8f2186fb399d0c16e
+    hash: 44876634a8efbb0f2c3f66cd4332be170ec821d1cbfc0264ac80680983e8513d
     path: patches/react-native@0.83.9.patch
 
 importers:

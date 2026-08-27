@@ -17,7 +17,7 @@ type BrowserScreencastMessageHandlerDeps = {
   queueFrame: (frame: PendingScreencastFrame) => void
   ackScreencastFrame: (sessionId: number | undefined) => void
   scheduleNavigationFrameCapture: () => void
-  emitNavigationState: () => void
+  emitNavigationState?: () => void
   clearNavigationCaptureTimer: () => void
   bumpSnapshotGeneration: () => void
 }
@@ -59,13 +59,13 @@ export function createBrowserScreencastMessageHandler(
         params && typeof params === 'object' ? (params as Record<string, unknown>) : {}
       const frame = payload.frame && typeof payload.frame === 'object' ? payload.frame : null
       if (!frame || !('parentId' in frame)) {
-        emitNavigationState()
+        emitNavigationState?.()
         scheduleNavigationFrameCapture()
       }
       return
     }
     if (method === 'Page.loadEventFired') {
-      emitNavigationState()
+      emitNavigationState?.()
       scheduleNavigationFrameCapture()
       return
     }
@@ -74,8 +74,15 @@ export function createBrowserScreencastMessageHandler(
     }
     const payload = params && typeof params === 'object' ? (params as Record<string, unknown>) : {}
     const data = typeof payload.data === 'string' ? payload.data : null
-    const sessionId = typeof payload.sessionId === 'number' ? payload.sessionId : null
-    if (!data || sessionId === null) {
+    const sessionId =
+      typeof payload.sessionId === 'number' && Number.isFinite(payload.sessionId)
+        ? payload.sessionId
+        : null
+    if (sessionId === null) {
+      return
+    }
+    if (!data) {
+      ackScreencastFrame(sessionId)
       return
     }
     if (isStopping()) {

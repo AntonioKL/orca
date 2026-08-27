@@ -8,6 +8,12 @@ import type { RetiredNameRegistry } from '../../../src/shared/worktree/retired-n
 
 type ReadRetiredWorktreeNames = (repoId: string) => Promise<RetiredNameRegistry>
 
+export function buildRetiredWorktreeNamesRefreshKey(
+  existingWorktreePaths: readonly string[] | undefined
+): string {
+  return [...(existingWorktreePaths ?? [])].sort().join('\0')
+}
+
 /** Names already spent in a repo, including workspaces that have since been deleted.
  *
  *  Why a targeted request rather than the workspace catalog: the catalog is served by `worktree.ps`,

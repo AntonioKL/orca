@@ -3,15 +3,7 @@
 // a narrow interrupt fallback synthesizes a final `done` when an agent misses its cancellation hook.
 
 import type { AgentProviderSessionMetadata } from './agent-session-resume'
-import type { AgentStatusRowFacets, WithAgentStatusObservation } from './agent-status-observation'
-import {
-  AGENT_STATUS_ASSISTANT_MESSAGE_MAX_LENGTH,
-  AGENT_STATUS_INTERACTIVE_PROMPT_MAX_LENGTH,
-  AGENT_STATUS_TOOL_INPUT_MAX_LENGTH,
-  AGENT_STATUS_TOOL_NAME_MAX_LENGTH,
-  AGENT_MODEL_MAX_LENGTH,
-  AGENT_TYPE_MAX_LENGTH
-} from './agent-status-limits'
+import type { AgentStatusRowFacets } from './agent-status-observation'
 import {
   normalizeInteractivePromptField,
   normalizeOptionalField,
@@ -22,18 +14,15 @@ import {
 import { assertJsonTextStructureWithinLimits } from './json-text-structure-limit'
 
 export { AGENT_STATUS_MAX_FIELD_LENGTH } from './agent-status-field-normalization'
-export { agentSubagentsEqual } from './agent-subagent-equality'
-export {
-  AGENT_STATUS_ASSISTANT_MESSAGE_MAX_LENGTH,
-  AGENT_STATUS_INTERACTIVE_PROMPT_MAX_LENGTH,
-  AGENT_STATUS_TOOL_INPUT_MAX_LENGTH,
-  AGENT_STATUS_TOOL_NAME_MAX_LENGTH,
-  AGENT_MODEL_MAX_LENGTH,
-  AGENT_TYPE_MAX_LENGTH
-} from './agent-status-limits'
+export type {
+  AgentStatusClearIpcPayload,
+  AgentStatusIpcPayload,
+  MigrationUnsupportedPtyEntry
+} from './agent-status-ipc-payload'
 
 export const AGENT_STATUS_STATES = ['working', 'blocked', 'waiting', 'done'] as const
 export type AgentStatusState = (typeof AGENT_STATUS_STATES)[number]
+export type AgentWorkingMode = 'monitoring'
 // Why: agent types aren't a fixed set (custom agents exist); any non-empty string is
 // accepted — these well-known names are just a convenience union for pattern-matching.
 export type WellKnownAgentType =
@@ -110,6 +99,8 @@ export type AgentSubagentSnapshot = {
 
 export type AgentStatusEntry = {
   state: AgentStatusState
+  /** Ongoing work that does not require foreground agent execution. Only valid while working. */
+  workingMode?: AgentWorkingMode
   /** The user's most recent prompt. Cached across the turn — later tool-use events
    *  omit it, so the last value persists until a new prompt or pane reset. Empty when unknown. */
   prompt: string
@@ -171,23 +162,13 @@ export type AgentStatusEntry = {
   restoredUnconfirmed?: boolean
 } & AgentStatusRowFacets
 
-export type MigrationUnsupportedPtyEntry = {
-  ptyId: string
-  worktreeId?: string
-  tabId?: string
-  leafId?: string
-  /** Registry-backed UUID pane proof, when available. */
-  paneKey?: string
-  reason: 'legacy-numeric-pane-key'
-  source: 'local' | 'ssh'
-  updatedAt: number
-}
-
 // ─── Agent status payload shape (what hook receivers send via IPC) ──────────
 // Hook integrations provide only normalized state fields; the renderer fills the rest (updatedAt, paneKey, …) on IPC receipt.
 
 export type AgentStatusPayload = {
   state: AgentStatusState
+  /** Ongoing work that does not require foreground agent execution. Only valid while working. */
+  workingMode?: AgentWorkingMode
   prompt?: string
   agentType?: AgentType
   model?: string
@@ -229,6 +210,7 @@ export function pickParsedAgentStatusPayload(
 ): ParsedAgentStatusPayload {
   return {
     state: row.state,
+    ...(row.workingMode !== undefined ? { workingMode: row.workingMode } : {}),
     prompt: row.prompt,
     ...(row.agentType !== undefined ? { agentType: row.agentType } : {}),
     ...(row.model !== undefined ? { model: row.model } : {}),
@@ -249,38 +231,16 @@ export function pickParsedAgentStatusPayload(
  * Wire shape for agent-status IPC. Both `agentStatus:set` and `agentStatus:getSnapshot`
  * produce this shape so renderer call sites share a single `setAgentStatus` path.
  */
-export type AgentStatusIpcPayload = ParsedAgentStatusPayload & {
-  paneKey: string
-  launchToken?: string
-  terminalHandle?: string
-  tabId?: string
-  worktreeId?: string
-  /** Identifies the SSH connection the event arrived on, or null for local.
-   *  Only the remote-ingest path (`ingestRemote`) can stamp it from mux identity; the HTTP path has no mux and always sets null. */
-  connectionId: string | null
-  /** Timestamp (ms) when the hook server received this latest status event. */
-  receivedAt: number
-  /** Timestamp (ms) when the current state first appeared for this pane. */
-  stateStartedAt: number
-  orchestration?: AgentStatusOrchestrationContext
-  providerSession?: AgentProviderSessionMetadata
-  /** Resume identity update only; the status-shaped fields are transport placeholders. */
-  providerSessionOnly?: boolean
-  /** Live-only Command Code turn boundary key; not persisted to last-status.json. */
-  promptInteractionKey?: string
-  /** See AgentStatusEntry.restoredUnconfirmed — hydrated nonterminal provenance. */
-  restoredUnconfirmed?: boolean
-} & WithAgentStatusObservation
-
-/** Wire shape for ordinary pane teardown or a stamped SSH disconnect batch. */
-export type AgentStatusClearIpcPayload =
-  | { paneKey: string }
-  | {
-      transient: true
-      connectionId: string
-      clearedAt: number
-    }
-
+/** Maximum character length for the toolName field. */
+export const AGENT_STATUS_TOOL_NAME_MAX_LENGTH = 60
+/** Maximum character length for the toolInput preview. */
+export const AGENT_STATUS_TOOL_INPUT_MAX_LENGTH = 160
+/** Maximum character length for the lastAssistantMessage preview.
+ *  Why: 8 KB fits a multi-paragraph summary while bounding per-pane cache against a buggy/malicious agent spamming huge strings. */
+export const AGENT_STATUS_ASSISTANT_MESSAGE_MAX_LENGTH = 8000
+/** Maximum character length for the interactivePrompt field.
+ *  Why: holds full AskUserQuestion JSON — truncating to a preview like toolInput would corrupt it and drop options; capped to still bound cache growth. */
+export const AGENT_STATUS_INTERACTIVE_PROMPT_MAX_LENGTH = 16000
 /**
  * Freshness threshold for explicit agent status: retained past this so WorktreeCard's
  * sidebar dot can decay "working" back to "active" when the hook stream goes silent.
@@ -303,6 +263,10 @@ export function isFreshNonDoneAgentStatus(
 
 // Why: ReadonlySet<string> so .has() accepts any string without a cast here; the narrowing cast stays on the return line where it's proven safe.
 const VALID_STATES: ReadonlySet<string> = new Set<string>(AGENT_STATUS_STATES)
+/** Maximum character length for the agentType label. Truncated on parse. */
+export const AGENT_TYPE_MAX_LENGTH = 40
+export const AGENT_MODEL_MAX_LENGTH = 120
+
 /** Maximum subagent child rows carried per status entry. Bounds per-pane cache
  *  and IPC fanout against a runaway spawner. */
 export const AGENT_STATUS_MAX_SUBAGENTS = 32
@@ -360,6 +324,35 @@ function normalizeSubagentsField(value: unknown): AgentSubagentSnapshot[] | unde
   return normalized.length > 0 ? normalized : undefined
 }
 
+/** Structural equality for subagent lists so stores can reuse the previous
+ *  array reference (and skip fanout) when nothing actually changed. */
+export function agentSubagentsEqual(
+  a: AgentSubagentSnapshot[] | undefined,
+  b: AgentSubagentSnapshot[] | undefined
+): boolean {
+  if (a === b) {
+    return true
+  }
+  if (!a || !b || a.length !== b.length) {
+    return !a && !b
+  }
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]
+    const y = b[i]
+    if (
+      x.id !== y.id ||
+      x.state !== y.state ||
+      x.startedAt !== y.startedAt ||
+      x.agentType !== y.agentType ||
+      x.model !== y.model ||
+      x.description !== y.description
+    ) {
+      return false
+    }
+  }
+  return true
+}
+
 /**
  * Normalize and validate an already-parsed agent status object. Shared by the
  * JSON string entry point (`parseAgentStatusPayload`) and the object entry
@@ -381,6 +374,7 @@ function normalizeAgentStatusObject(parsed: unknown): ParsedAgentStatusPayload |
   }
   return {
     state: state as AgentStatusState,
+    workingMode: state === 'working' && obj.workingMode === 'monitoring' ? 'monitoring' : undefined,
     prompt: normalizePromptField(obj.prompt),
     // Why: normalize like the other single-line fields so embedded newlines (e.g. `agentType: "claude\nrogue"`) can't break single-line UI and equality checks.
     agentType: normalizeOptionalField(obj.agentType, AGENT_TYPE_MAX_LENGTH),

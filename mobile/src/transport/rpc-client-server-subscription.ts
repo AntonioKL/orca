@@ -10,3 +10,10 @@ export function buildServerSubscriptionUnsubscribe(
   }[method]
   return unsubscribeMethod ? { method: unsubscribeMethod, params: { subscriptionId } } : null
 }
+
+export function buildReadyStreamUnsubscribe(
+  method: string,
+  subscriptionId: string
+): { method: string; params: { subscriptionId: string } } | null {
+  return buildServerSubscriptionUnsubscribe(method, subscriptionId)
+}
