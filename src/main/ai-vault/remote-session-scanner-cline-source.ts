@@ -19,6 +19,7 @@ export function remoteClineSource(
     extensions: ['.json'],
     filePredicate: isClineSessionMetadataPath,
     contentDependencyPath: clineMessagesPathForMetadata,
+    directoryPredicate: (_name, depth) => depth === 0,
     parse: async (file, content, context) => {
       let messagesContent: string | null = null
       try {

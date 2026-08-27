@@ -238,7 +238,9 @@ export const AI_VAULT_AGENT_SOURCES: AiVaultAgentSourceTable = {
       ]),
     extensions: ['.json'],
     filePredicate: isClineSessionMetadataPath,
-    contentDependencyPath: clineMessagesPathForMetadata
+    contentDependencyPath: clineMessagesPathForMetadata,
+    // Cline stores one manifest directly beneath each session directory.
+    directoryPredicate: (_name, depth) => depth === 0
   },
   kimi: {
     rootDirs: (options, wslHomeDirs) =>

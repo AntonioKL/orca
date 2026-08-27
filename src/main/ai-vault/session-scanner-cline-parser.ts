@@ -48,11 +48,19 @@ export async function parseClineSessionFile(
   } catch (error) {
     // The manifest is written before the first turn; a missing messages file is
     // a valid metadata-only session, while a WSL gate refusal must stay visible.
-    if (error instanceof WslTranscriptFsError) {
+    if (error instanceof WslTranscriptFsError || !isMissingSessionPathError(error)) {
       throw error
     }
   }
   return parseClineSessionContent(file, metadataContent, messagesContent, platform)
+}
+
+function isMissingSessionPathError(error: unknown): boolean {
+  const code =
+    error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
+      ? error.code
+      : null
+  return code === 'ENOENT' || code === 'ENOTDIR'
 }
 
 export function parseClineSessionContent(
