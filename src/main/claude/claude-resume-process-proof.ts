@@ -11,10 +11,7 @@ export function isClaudeResumeProcessCommandLine(
   if (!tokens || !sessionId) {
     return false
   }
-  return tokens.some(
-    (token, index) =>
-      (token === '--resume' || token === '--session-id') && tokens[index + 1] === sessionId
-  )
+  return tokens.some((token, index) => token === '--resume' && tokens[index + 1] === sessionId)
 }
 
 type StructuredTuiIdentityInput = Parameters<typeof readStructuredTuiProcessIdentity>[0]

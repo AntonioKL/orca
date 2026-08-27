@@ -71,7 +71,6 @@ export function observeClaudeTopLevelLeaf(
 export type ClaudeDispatchWaiter = {
   resolve: (uuid: string | null) => void
   timer: ReturnType<typeof setTimeout>
-  acceptsResult: boolean
 }
 
 export type ClaudeSession = {

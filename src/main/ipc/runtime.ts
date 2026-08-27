@@ -10,9 +10,17 @@ import type {
 import type { RuntimeRpcResponse } from '../../shared/runtime-rpc-envelope'
 import type { ClientHostedBrowserRowsEvent } from '../../shared/client-hosted-browser-rows'
 import { TERMINAL_FIT_RESTORE_DEADLINE_MS } from '../../shared/terminal-fit-restore-deadline'
-import { STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY } from '../../shared/protocol-version'
+import {
+  CLAUDE_STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY,
+  STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY
+} from '../../shared/protocol-version'
 import { RpcDispatcher } from '../runtime/rpc/dispatcher'
 import { ALL_RPC_METHODS } from '../runtime/rpc/methods'
+
+const LOCAL_RUNTIME_CLIENT_CAPABILITIES = [
+  STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY,
+  CLAUDE_STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY
+] as const
 
 function boundTerminalFitRestore(pending: Promise<boolean>): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -71,7 +79,7 @@ export function registerRuntimeHandlers(runtime: OrcaRuntimeService): void {
         {
           clientId: 'desktop-renderer',
           clientKind: 'runtime',
-          clientCapabilities: [STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY]
+          clientCapabilities: LOCAL_RUNTIME_CLIENT_CAPABILITIES
         }
       )) as RuntimeRpcResponse<unknown>
     }
@@ -113,7 +121,7 @@ export function registerRuntimeHandlers(runtime: OrcaRuntimeService): void {
             signal: controller.signal,
             clientId: 'desktop-renderer',
             clientKind: 'runtime',
-            clientCapabilities: [STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY]
+            clientCapabilities: LOCAL_RUNTIME_CLIENT_CAPABILITIES
           }
         )
         .finally(stop)

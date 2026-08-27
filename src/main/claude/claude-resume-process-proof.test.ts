@@ -61,13 +61,13 @@ describe('Claude resume process proof', () => {
     ).rejects.toThrow('PID-reuse-safe start time')
   })
 
-  it('matches adjacent resume and session-id argv tokens exactly', () => {
+  it('matches only adjacent resume argv tokens exactly', () => {
     expect(
       isClaudeResumeProcessCommandLine(`claude --resume ${SESSION_ID}`, SESSION_ID, 'darwin')
     ).toBe(true)
     expect(
       isClaudeResumeProcessCommandLine(`claude --session-id ${SESSION_ID}`, SESSION_ID, 'darwin')
-    ).toBe(true)
+    ).toBe(false)
     expect(
       isClaudeResumeProcessCommandLine(`claude --resume ${SESSION_ID}-other`, SESSION_ID, 'darwin')
     ).toBe(false)

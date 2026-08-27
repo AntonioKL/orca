@@ -1,7 +1,20 @@
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { spawnProcess } from '../../shared/child-process/run-process'
+
+const { forceTerminateProcessTreeMock, waitForProcessExitUntilMock } = vi.hoisted(() => ({
+  forceTerminateProcessTreeMock: vi.fn(),
+  waitForProcessExitUntilMock: vi.fn()
+}))
+
+vi.mock('../../shared/child-process/process-tree-termination', () => ({
+  forceTerminateProcessTree: forceTerminateProcessTreeMock
+}))
+
+vi.mock('../codex/codex-process-exit-deadline', () => ({
+  waitForProcessExitUntil: waitForProcessExitUntilMock
+}))
 import {
   openClaudeStreamJsonConnection,
   type ClaudeControlRequest
@@ -43,6 +56,11 @@ function writtenFrames(child: FakeChild): Promise<Record<string, unknown>[]> {
 }
 
 describe('Claude stream-json connection', () => {
+  beforeEach(() => {
+    forceTerminateProcessTreeMock.mockReset().mockResolvedValue(true)
+    waitForProcessExitUntilMock.mockReset().mockResolvedValue(undefined)
+  })
+
   afterEach(() => vi.unstubAllEnvs())
 
   it('spawns in the pinned workspace and routes acknowledged control requests', async () => {
@@ -193,5 +211,20 @@ describe('Claude stream-json connection', () => {
       true
     ])
     await expect(connection.close()).resolves.toBe(true)
+  })
+
+  it('retries process termination after an unproven close', async () => {
+    forceTerminateProcessTreeMock.mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+    const process = fakeSpawn()
+    const connection = await openClaudeStreamJsonConnection(
+      { command: 'claude', args: [], cwd: '/work' },
+      {},
+      process.spawnImpl
+    )
+
+    await expect(connection.close()).resolves.toBe(false)
+    process.child.emit('exit', 0, null)
+    await expect(connection.close()).resolves.toBe(true)
+    expect(forceTerminateProcessTreeMock).toHaveBeenCalledTimes(2)
   })
 })

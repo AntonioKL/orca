@@ -123,6 +123,44 @@ describe('registerRuntimeHandlers', () => {
     })
   })
 
+  it('publishes Claude structured tabs to the local desktop renderer', async () => {
+    const claudeTab = {
+      type: 'agent-session' as const,
+      id: 'agent-session:claude-1',
+      title: 'Claude Chat',
+      sessionId: 'claude-1',
+      agent: 'claude' as const,
+      isActive: true
+    }
+    const runtime = {
+      getRuntimeId: vi.fn().mockReturnValue('runtime-1'),
+      restoreStructuredAgentSessionTabs: vi.fn().mockResolvedValue(undefined),
+      supportsAuthoritativeSessionTabsInventory: vi.fn().mockReturnValue(false),
+      listAllMobileSessionTabs: vi.fn().mockResolvedValue([
+        {
+          worktree: 'worktree-1',
+          publicationEpoch: 'structured-1',
+          snapshotVersion: 1,
+          activeGroupId: 'group-1',
+          activeTabId: claudeTab.id,
+          activeTabType: 'agent-session',
+          tabGroups: [{ id: 'group-1', activeTabId: claudeTab.id, tabOrder: [claudeTab.id] }],
+          tabs: [claudeTab]
+        }
+      ])
+    }
+
+    registerRuntimeHandlers(runtime as never)
+
+    const handler = handleMock.mock.calls.find(([channel]) => channel === 'runtime:call')![1]
+    const result = await handler({ sender: {} }, { method: 'session.tabs.listAll', params: {} })
+
+    expect(result).toMatchObject({
+      ok: true,
+      result: { snapshots: [{ tabs: [claudeTab] }] }
+    })
+  })
+
   it('registers project group runtime RPC methods for local desktop callers', async () => {
     const runtime = {
       syncWindowGraph: vi.fn(),

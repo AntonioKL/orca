@@ -253,7 +253,7 @@ export async function openClaudeStreamJsonConnection(
     return promise
   }
 
-  const close = (): Promise<boolean> => {
+  const close = async (): Promise<boolean> => {
     closePromise ??= (async () => {
       closing = true
       try {
@@ -267,7 +267,11 @@ export async function openClaudeStreamJsonConnection(
       failPending(new Error('claude stream-json connection closed'))
       return descendantsExited && exited
     })()
-    return closePromise
+    const provenExited = await closePromise
+    if (!provenExited) {
+      closePromise = null
+    }
+    return provenExited
   }
 
   return {

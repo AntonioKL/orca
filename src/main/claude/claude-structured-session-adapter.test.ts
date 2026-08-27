@@ -62,6 +62,7 @@ function fakeClaude(
     settings?: unknown
     replayUuid?: string | null
     routes?: Record<string, Route>
+    closeResults?: boolean[]
   } = {}
 ): {
   connections: FakeConnection[]
@@ -135,7 +136,7 @@ function fakeClaude(
       close: async () => {
         connection.closeCount += 1
         connection.closed = true
-        return true
+        return options.closeResults?.shift() ?? true
       }
     }
     connections.push(connection)
@@ -537,6 +538,35 @@ describe('ClaudeStructuredSessionAdapter turns and controls', () => {
       'custom-model'
     ])
     expect(result.current).toEqual({ model: 'custom-model', effort: 'high' })
+  })
+})
+
+describe('ClaudeStructuredSessionAdapter shutdown', () => {
+  it('returns false and retains a published session until exit is proven', async () => {
+    const claude = fakeClaude({ closeResults: [false, true] })
+    const adapter = await acquired(claude)
+
+    await expect(adapter.closeSession('session-1')).resolves.toBe(false)
+    await expect(adapter.closeSession('session-1')).resolves.toBe(true)
+    expect(claude.connections[0].closeCount).toBe(2)
+  })
+
+  it('retries shutdown until a later attempt proves child exit', async () => {
+    const claude = fakeClaude({ closeResults: [false, true] })
+    const adapter = await acquired(claude)
+
+    await expect(adapter.closeAll()).resolves.toBeUndefined()
+    expect(claude.connections[0].closeCount).toBe(2)
+  })
+
+  it('bounds persistent unproven shutdown attempts', async () => {
+    const claude = fakeClaude({ closeResults: [false, false, false] })
+    const adapter = await acquired(claude)
+
+    await expect(adapter.closeAll()).rejects.toThrow(
+      'claude structured session teardown could not prove provider-child exit'
+    )
+    expect(claude.connections[0].closeCount).toBe(3)
   })
 })
 

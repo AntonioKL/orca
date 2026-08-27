@@ -26,7 +26,7 @@ function userMessage(blocks: AgentJournalMessageItem['blocks']): AgentJournalMes
 }
 
 describe('Claude structured text dispatch', () => {
-  it('accepts a slash command from its result receipt when Claude omits the user replay', async () => {
+  it('leaves a result-only slash command receipt unconfirmed', async () => {
     const session = sessionFor()
     const dispatched = dispatchClaudeTurn(
       session,
@@ -43,12 +43,8 @@ describe('Claude structured text dispatch', () => {
     })
 
     await expect(dispatched).resolves.toEqual({
-      state: 'accepted',
-      providerIdentity: {
-        provider: 'claude',
-        sessionId: 'provider-session',
-        uuid: 'command-result-uuid'
-      }
+      state: 'unknown',
+      reason: 'claude accepted a message but did not replay its uuid in time'
     })
   })
 

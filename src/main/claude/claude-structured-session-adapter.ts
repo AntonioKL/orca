@@ -8,6 +8,7 @@ import {
   rethrowAfterAgentSessionAcquisitionCleanup as rethrowAfterCleanup
 } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
 import type { AgentSessionExecutionLocation } from '../../shared/agent-session-record'
+import { closeProcessRegistry } from '../../shared/child-process/close-process-registry'
 import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import { openClaudeStreamJsonConnection } from './claude-stream-json-connection'
 import { answerClaudePrompt, cancelClaudeTurn } from './claude-structured-control-actions'
@@ -255,11 +256,13 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
 
   async closeAll(): Promise<void> {
     this.acquisitions.close()
-    const ids = new Set([...this.sessions.keys(), ...this.acquisitions.sessionIds()])
-    const outcomes = await Promise.all([...ids].map((sessionId) => this.closeSession(sessionId)))
-    if (outcomes.some((exited) => !exited)) {
-      throw new Error('claude structured session teardown could not prove provider-child exit')
-    }
+    await closeProcessRegistry({
+      attempts: 3,
+      hasEntries: () => this.sessions.size > 0 || this.acquisitions.size > 0,
+      entryIds: () => new Set([...this.sessions.keys(), ...this.acquisitions.sessionIds()]),
+      closeEntry: (sessionId) => this.closeSession(sessionId),
+      failureMessage: 'claude structured session teardown could not prove provider-child exit'
+    })
   }
 
   private session(sessionId: string): ClaudeSession {
