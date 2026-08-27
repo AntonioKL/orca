@@ -51,6 +51,105 @@ worktree. I could not replay which of the three faces fired in the recording —
 retain the PTY command line, and the terminal-history entries for those two PTYs had already
 rotated. The fix closes all three regardless, which is what the brief asked for.
 
+## Confirmation round (2026-08-27, second agent) — rendered replay, control, post-fix
+
+All on my own dev instance (CDP 9343, renderer 5183, own `ORCA_DEV_USER_DATA_PATH` under
+`/tmp/lane2-confirm/`, `ORCA_DEV_INSTANCE_KEY=lane2-confirm-prefix`, `HOME` untouched, identity
+verified via `window.api.app.getIdentity()` before every capture; Playwright CDP only). Fixture:
+a throwaway repo at `/private/tmp/lane2fx/repo` with an `orca.yaml` setup that exits 9, repo policy
+`wait-for-setup` set through the real store action, worktrees created through the real **Create
+worktree** dialog (Agent: Claude — same as the recording). Worktree names chosen so the runner path
+is exactly **110 chars → 1033-byte** pre-fix gated command, the incident's own numbers. Screenshots
+in `~/orca-qa/mobile-video-triage-2026-08-27/lane2-setup-hang/confirm-*.png`. All fixture worktrees,
+the fixture repo, and both dev instances were torn down afterwards (kills by recorded pgid only).
+
+### The race lever, and why it is legitimate
+
+A first replay on the pre-fix build did **not** hang: the gated 1033-byte command survived, because
+`writeStartupCommandWhenShellReady` (src/main/providers/local-pty-shell-ready-startup-command.ts)
+types the command into the PTY when the shell reports ready, **or after at most
+1500 ms + 200 ms fallback if it never does**. The canonical-mode 1024-byte cap only bites when the
+write lands before the shell's line editor takes the tty out of canonical mode — i.e. when the
+shell loses that race (slow dotfiles, cold start, machine under load — exactly the conditions of a
+worktree create). To make the race deterministic I relaunched **my instance only** with
+`SHELL=/tmp/lane2-confirm/slowsh` (a wrapper that sleeps, then `exec /bin/bash "$@"`); the local
+PTY provider resolves the pane shell from `process.env.SHELL` (local-pty-provider.ts:709). The
+mechanism under test — the kernel's canonical input cap on typed bytes — is untouched by the lever.
+The fast-shell run is kept as evidence (`confirm-prefix-long-fastshell-no-hang.png`): same build,
+same 1033 bytes, shell wins the race, gate works — which is why the incident was intermittent.
+
+### 1. The incident, reproduced pre-fix (fecdf0bde8, long path, slow shell)
+
+- Setup tab: the typed gated command sits at the prompt **cut off exactly at 1024 bytes** — the
+  visible text ends `exit "` with the final `$status"'` (9 chars; 1033 − 1024 = 9) and the submit
+  newline dropped. It never executes; the fixture's output never appears
+  (`confirm-prefix-long-setup-truncated-at-1024.png`).
+- No `.done` marker (or `.tmp`) was ever written beside the runner — checked repeatedly, including
+  minutes later.
+- Agent terminal: `bash -lc 'eval "$ORCA_SEQUENCED_STARTUP_SCRIPT"'` →
+  `Waiting for setup to finish before starting agent...` and then **nothing, indefinitely**
+  (`confirm-prefix-long-agent-hangs.png`) — Brennan's screen from `t015.png`, reproduced.
+
+### 2. The control that makes the cap the cause
+
+Same build, same slow shell, same fixture, same dialog flow, only the worktree name shortened
+(runner path 71 chars → **799-byte** command): the full command survives the canonical buffer, runs,
+records `9`, and the agent terminal prints `Setup failed; skipping agent startup.` within seconds
+(`confirm-prefix-short-control-gate-works.png`, `confirm-prefix-short-control-setup-ran.png`).
+Long hangs, short works, one variable. Combined with the fast-shell run: the full mechanism is
+**byte count past 1024 × shell losing the readiness race** — both are needed, which is exactly why
+the recording's hang was intermittent rather than universal.
+
+### 3. Post-fix, same long path, same slow shell (50abb889f1)
+
+The Setup tab types the new ~230-byte `ORCA_SEQUENCED_SETUP_SCRIPT` command (fits the canonical
+buffer even when typed into a sleeping shell), setup runs and fails, the outcome is recorded, and
+the agent terminal reports `Setup started; waiting for it to finish.` →
+`Setup failed; skipping agent startup. Setup exited with status 9; open the Setup tab for its
+output, then start the agent yourself once it is fixed.`
+(`confirm-postfix-long-agent-reports-status9.png`, `confirm-postfix-long-setup-short-command.png`).
+The 15 s progress ticks were also captured live (`confirm-postfix-progress-ticks.png`).
+
+### 4. The other two arms, driven through the UI
+
+- **Never started** (previously shell-test-only): with the slow-shell window widened, the Setup tab
+  was closed before the gate script ever ran, so no `.started` sentinel exists. The agent terminal
+  printed the exact grace message — `Setup never reported starting within 45s, so this terminal
+  cannot tell whether it ran. Starting the agent without waiting for setup.` — and then **started
+  the agent** (Claude's trust prompt on screen). Reproduced on the rendered surface
+  (`confirm-postfix-never-started-grace-message.png`).
+- **Torn down mid-run** (previously shell-test-only): three variants, one finding.
+  - In-pane `kill -TERM -<pgid>` (what the committed test models, but against the real app pane):
+    records and reports — `Setup exited with status 143` on the agent terminal
+    (`confirm-postfix-teardown-sigterm-reports-143.png`). The script mechanics are sound end-to-end.
+  - **Real tab close without the confirm dialog (observed twice): setup's processes die but no
+    outcome is recorded** — `.started` remains, no `.done` ever appears, and the gate stays on its
+    (now legible, 15 s-ticking, 30-min-bounded) wait
+    (`confirm-postfix-teardown-tabclose-no-record.png`). The kill the close path delivers defeats
+    the HUP/INT/TERM traps — SIGKILL, or a teardown order that prevents the trap from completing.
+  - Tab close through the `Stop running command?` dialog: the gate resolved and the agent started;
+    Claude's TUI clear hid which status line printed first, so I do not claim which branch fired.
+  - Net: the fix's primary promise (never a silent two-hour hang) holds on every variant; the
+    `killed-setup:143` recording is real but does **not** engage on the dialog-less tab-close path.
+    That is a follow-up defect in the close/kill path, not a reason to change this fix; filed in
+    the PR's limits.
+
+### What this says about which face fired in the recording
+
+Face 1 (typed truncation) is now proven real at the incident's exact byte count — but truncation
+means setup **never runs**, and the recording's Setup tab visibly ran `pnpm install` to failure.
+So the recording itself was most consistent with **face 2/3** (a bare-runner or never-recorded
+launch on the host-side create path), which the same fix closes via `applySequencedSetupLaunch`
+folding command+env into one record. The recording's exact face remains unproven — the original
+limit stands — but the mechanism, the control, and the fix are now all demonstrated on the
+rendered app.
+
+### Post-rebase gates
+
+Rebased onto `origin/main` @ 7ee8b5e1a601 (moved twice since fecdf0bde8; clean rebase, no
+conflicts). `pnpm tc` exit 0. Affected vitest (14 files, `--no-file-parallelism`):
+**1357 passed, 10 skipped, 0 failed.**
+
 ## The fix
 
 ### (a) An outcome is recorded on every path — structurally
