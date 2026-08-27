@@ -73,7 +73,7 @@ function choiceMessage(reason: AutomationCreateDestinationChoiceReason): string 
   }
   return translate(
     'auto.components.automations.createDestination.unselected',
-    'Choose the host this automation will be created on.'
+    'Choose the host that stores and schedules this automation.'
   )
 }
 

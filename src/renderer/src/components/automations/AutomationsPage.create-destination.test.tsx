@@ -32,6 +32,7 @@ import {
 } from './automations-page-test-harness'
 import { makeAutomation, REPO_ID, WORKSPACE_ID } from './automations-page-fixtures'
 import type { Repo } from '../../../../shared/repo-types'
+import type { ProjectHostSetup } from '../../../../shared/project-types'
 
 installAutomationsPageHarness()
 
@@ -71,6 +72,23 @@ function addSshProject(): void {
   } as Repo
   mocks.state.repos = [...(mocks.state.repos as Repo[]), repo]
   mocks.repoMap.set(SSH_REPO_ID, repo)
+  // Without a ready setup on that host the project has no run context, and a
+  // save against it is refused before any destination is stated.
+  mocks.state.projectHostSetups = [
+    ...(mocks.state.projectHostSetups as ProjectHostSetup[]),
+    {
+      id: 'setup-ssh',
+      projectId: 'project-ssh',
+      hostId: `ssh:${SSH_TARGET_ID}`,
+      repoId: SSH_REPO_ID,
+      path: '/repos/orca',
+      displayName: 'orca',
+      setupState: 'ready',
+      setupMethod: 'legacy-repo',
+      createdAt: 1,
+      updatedAt: 1
+    }
+  ]
 }
 
 /** The runtime answers a create; without this the RPC double returns an empty result. */
@@ -392,6 +410,68 @@ describe('AutomationsPage edit dialog projects', () => {
 
     expect(mocks.editorDialog?.isEditing).toBe(true)
     expect(mocks.editorDialog?.repos?.map((repo) => repo.id)).toEqual([RUNTIME_REPO_ID])
+  })
+})
+
+describe('AutomationsPage edit destination', () => {
+  it('names the edited row’s own host, and only its authority’s hosts', async () => {
+    const automation = makeAutomation({ id: 'a-1' })
+    api.automations.list.mockResolvedValue([])
+    scopedList([automation])
+    addSshHost()
+    addSshProject()
+    runtimeHost([], [])
+
+    await renderPage()
+    await settleHostQueries()
+    await act(async () => {
+      void mocks.listPanel?.openEditDialog(listedRow(automation.id))
+    })
+
+    const resolution = mocks.editorDialog?.editDestination?.resolution
+    expect(resolution?.status === 'ready' && resolution.entry.stableKey).toBe(DESKTOP_SELF_KEY)
+    // A record cannot move between authorities, so the runtime is not offered.
+    expect(mocks.editorDialog?.editDestination?.entries.map((entry) => entry.stableKey)).toEqual([
+      DESKTOP_SELF_KEY,
+      SSH_HOST_KEY
+    ])
+  })
+
+  it('moves the record to the host the user picks, clearing the stranded project', async () => {
+    const automation = makeAutomation({ id: 'a-1' })
+    api.automations.list.mockResolvedValue([])
+    scopedList([automation])
+    addSshHost()
+    addSshProject()
+
+    await renderPage()
+    await settleHostQueries()
+    await act(async () => {
+      void mocks.listPanel?.openEditDialog(listedRow(automation.id))
+    })
+    await act(async () => {
+      mocks.editorDialog?.editDestination?.onSelect(SSH_HOST_KEY)
+    })
+
+    // Keeping the local project selected only defers the same refusal to submit.
+    expect(mocks.editorDialog?.repos?.map((repo) => repo.id)).toEqual([SSH_REPO_ID])
+    expect(mocks.editorDialog?.draft?.projectId).toBe('')
+
+    await act(async () => {
+      mocks.editorDialog?.onDraftChange((current) => ({
+        ...(current as Record<string, unknown>),
+        projectId: SSH_REPO_ID,
+        workspaceMode: 'new_per_run',
+        workspaceId: ''
+      }))
+    })
+    await save()
+
+    expect(api.automations.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        destination: { selector: { kind: 'ssh', targetId: SSH_TARGET_ID, targetGeneration: 1 } }
+      })
+    )
   })
 })
 

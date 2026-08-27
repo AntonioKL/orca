@@ -139,13 +139,18 @@ import {
   groupReposByAutomationAuthority
 } from './automation-authority-identity'
 import {
+  automationCreateEligibleProjects,
   automationCreateHostOffered,
   automationCreateHostStableKey,
+  automationCreateProjectMismatch,
   resolveAutomationCreateDestination,
   revalidateAutomationCreateDestination,
   type AutomationCreateDestination
 } from './automation-create-destination'
-import { useAutomationCreateDestination } from './use-automation-create-destination'
+import {
+  useAutomationCreateDestination,
+  type AutomationCreateDestinationControl
+} from './use-automation-create-destination'
 import { persistSkipDeleteAutomationConfirm } from './automation-delete-confirm-preference'
 import { buildAutomationEditDraft, buildExternalAutomationEditDraft } from './automation-edit-draft'
 import { createAutomationAtDestination } from './automation-owner-action-runner'
@@ -277,6 +282,9 @@ export default function AutomationsPage(): React.JSX.Element {
     projectId: string
     destination: AutomationCreateDestination
   } | null>(null)
+  // The host the edit form names. It filters the project list; the destination a
+  // save commits still comes from the chosen project, which is what moves the record.
+  const [editingHostStableKey, setEditingHostStableKey] = useState<string | null>(null)
   const [relativeNow, setRelativeNow] = useState(Date.now())
   const [activePaneTab, setActivePaneTab] = useState<AutomationPaneTab>('overview')
   const [selectedAutomationRunPageId, setSelectedAutomationRunPageId] = useState<string | null>(
@@ -1015,9 +1023,53 @@ export default function AutomationsPage(): React.JSX.Element {
     )
   })()
   const isOrcaForm = createTarget === 'orca' && editingExternalTarget === null
+  const dialogAuthorityRepos = getAutomationCreateRepos(repos, automationDialogTarget)
+  // An update moves the record's execution target, never the authority that
+  // stores it, so the edit picker offers only that authority's own hosts.
+  const dialogAuthorityKey = automationAuthorityCatalogKey(
+    automationDialogTarget.kind === 'environment'
+      ? { kind: 'runtime', environmentId: automationDialogTarget.environmentId }
+      : { kind: 'desktop' }
+  )
+  const editHostEntries = hostCatalog.entries.filter(
+    (entry) => automationAuthorityCatalogKey(entry.stableRef.authority) === dialogAuthorityKey
+  )
+  const editHostResolution = resolveAutomationCreateDestination(
+    editingHostStableKey
+      ? editHostEntries.find((entry) => entry.stableKey === editingHostStableKey)
+      : null
+  )
+  const editHostProjects =
+    editHostResolution.status === 'ready'
+      ? automationCreateEligibleProjects(repoTables, editHostResolution, dialogAuthorityRepos)
+      : dialogAuthorityRepos
+  // Picking a host strands a project that lives on another one; clearing it here
+  // states the move instead of deferring the same refusal to submit.
+  const handleEditHostChange = (stableKey: string): void => {
+    setEditingHostStableKey(stableKey)
+    const resolved = resolveAutomationCreateDestination(
+      editHostEntries.find((entry) => entry.stableKey === stableKey)
+    )
+    const projectId = draftRef.current.projectId
+    if (
+      projectId &&
+      resolved.status === 'ready' &&
+      !automationCreateProjectMismatch(repoTables, resolved, projectId)
+    ) {
+      return
+    }
+    setEditingDestination(null)
+    setDraft((current) => ({ ...current, projectId: '', workspaceId: '', baseBranch: '' }))
+  }
+  const editDestinationControl: AutomationCreateDestinationControl = {
+    entries: editHostEntries,
+    resolution: editHostResolution,
+    onSelect: handleEditHostChange,
+    projects: editHostProjects
+  }
   const dialogRepos = isOrcaForm
     ? editingAutomationId !== null
-      ? getAutomationCreateRepos(repos, automationDialogTarget)
+      ? editHostProjects
       : editorProjects
     : getAutomationCreateRepos(repos, { kind: 'local' })
 
@@ -1158,7 +1210,9 @@ export default function AutomationsPage(): React.JSX.Element {
   }, [refresh])
 
   useEffect(() => {
-    if (!draft.projectId) {
+    // Creates only: an edit whose project was cleared is waiting for one on the
+    // chosen host, and this default would reinstate a project that host lacks.
+    if (!draft.projectId && editingAutomationId === null) {
       const target = getDefaultTarget()
       if (!target.projectId) {
         return
@@ -1169,7 +1223,7 @@ export default function AutomationsPage(): React.JSX.Element {
         workspaceId: target.workspaceId
       }))
     }
-  }, [draft.projectId, getDefaultTarget])
+  }, [draft.projectId, editingAutomationId, getDefaultTarget])
 
   useEffect(() => {
     if (!draft.projectId) {
@@ -1280,6 +1334,7 @@ export default function AutomationsPage(): React.JSX.Element {
     setEditingAutomationId(null)
     setEditingExternalTarget(null)
     setEditingDestination(null)
+    setEditingHostStableKey(null)
     setCreateTarget('orca')
     const baseDraft: AutomationDraft = {
       name: '',
@@ -1348,6 +1403,7 @@ export default function AutomationsPage(): React.JSX.Element {
     setEditingDestination(
       initialDestination ? { projectId: latest.projectId, destination: initialDestination } : null
     )
+    setEditingHostStableKey(initialDestination?.entry.stableKey ?? null)
     const nextDraft = buildAutomationEditDraft(latest)
     setDraft(nextDraft)
     setDraftAtOpen(nextDraft)
@@ -1383,6 +1439,7 @@ export default function AutomationsPage(): React.JSX.Element {
     setEditingAutomationId(null)
     setEditingRowKey(null)
     setEditingDestination(null)
+    setEditingHostStableKey(null)
     setEditingExternalTarget({ manager, job, scope })
     setCreateTarget('hermes')
     setDraft(nextDraft)
@@ -1397,6 +1454,9 @@ export default function AutomationsPage(): React.JSX.Element {
       if (editingAutomationId !== null) {
         const destination = destinationForProject(projectId)
         setEditingDestination(destination ? { projectId, destination } : null)
+        if (destination) {
+          setEditingHostStableKey(destination.entry.stableKey)
+        }
       }
       setDraft((current) => ({
         ...current,
@@ -1435,6 +1495,9 @@ export default function AutomationsPage(): React.JSX.Element {
       ) {
         const destination = destinationForProject(next.projectId)
         setEditingDestination(destination ? { projectId: next.projectId, destination } : null)
+        if (destination) {
+          setEditingHostStableKey(destination.entry.stableKey)
+        }
       }
     },
     [destinationForProject, editingAutomationId]
@@ -2283,6 +2346,7 @@ export default function AutomationsPage(): React.JSX.Element {
         settings={settings}
         draft={draft}
         createDestination={createDestination.control}
+        editDestination={isOrcaForm ? editDestinationControl : undefined}
         notice={editorNotice}
         onNoticeRecover={(action) => {
           setEditorNotice(null)
@@ -2350,6 +2414,7 @@ export default function AutomationsPage(): React.JSX.Element {
           selectedAutomationRunPage={selectedAutomationRunPage}
           selectedRuns={selectedRuns}
           selectedRunsNotice={selectedRunsNotice}
+          selectedHostEntry={rowRecoveryHost(selectedRowKey)}
           recoverSelectedRuns={(action) => {
             // Reconnect/Update server act on the selected row's own host; the
             // re-ask is what brings this automation's history back either way.

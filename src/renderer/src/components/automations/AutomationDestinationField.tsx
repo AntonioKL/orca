@@ -20,15 +20,19 @@ import { groupAutomationHostEntriesByAuthority } from './automation-host-picker-
 import type { AutomationCreateDestinationControl } from './use-automation-create-destination'
 
 /**
- * Where the new automation will be stored, named on the form before submit.
+ * Which host stores and schedules the automation, named on the form before submit.
  *
  * This is the storage authority, not the workspace's execution host — the two
  * routinely differ, and only this one decides which machine keeps and schedules
  * the record. A concrete host filter only preselects: the list filter narrows a
  * view, so it must not decide where a new record is allowed to live.
+ *
+ * Editing offers the same picker over the record's own authority, because a save
+ * that lands on another host is a move, not a create. The copy stays tense-free
+ * so both readings hold.
  */
 
-export function AutomationCreateDestinationField({
+export function AutomationDestinationField({
   control,
   labelClassName
 }: {
@@ -42,7 +46,7 @@ export function AutomationCreateDestinationField({
     control.entries.filter(automationCreateHostOffered)
   )
   const updateRequiredAuthorities = automationCreateUpdateRequiredAuthorityLabels(control.entries)
-  const label = translate('auto.components.automations.createDestination.label', 'Create on')
+  const label = translate('auto.components.automations.createDestination.label', 'Host')
 
   return (
     <Field label={label} labelClassName={labelClassName}>
@@ -93,7 +97,7 @@ export function AutomationCreateDestinationField({
               ).replace('{authority}', selected.authorityLabel)
             : translate(
                 'auto.components.automations.createDestination.unselected',
-                'Choose the host this automation will be created on.'
+                'Choose the host that stores and schedules this automation.'
               )}
         </p>
       )}
@@ -103,11 +107,13 @@ export function AutomationCreateDestinationField({
           className="text-xs text-muted-foreground"
           data-testid="automation-create-update-required"
         >
-          {translate(
-            'auto.components.automations.createDestination.updateRequired',
-            'Update the Orca server on {hosts} to create automations there.'
+          {
             // Replacer fn: a literal replacement would expand `$` patterns in host labels.
-          ).replace('{hosts}', () => updateRequiredAuthorities.join(', '))}
+            translate(
+              'auto.components.automations.createDestination.updateRequired',
+              'Update the Orca server on {hosts} to store automations there.'
+            ).replace('{hosts}', () => updateRequiredAuthorities.join(', '))
+          }
         </p>
       ) : null}
     </Field>

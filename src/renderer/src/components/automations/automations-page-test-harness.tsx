@@ -95,6 +95,7 @@ export type EditorDialogProps = {
   open: boolean
   isEditing: boolean
   createDestination?: AutomationCreateDestinationControl
+  editDestination?: AutomationCreateDestinationControl
   notice?: { message: string; recovery: string | null } | null
   onNoticeRecover?: (action: string) => void
   repos?: { id: string }[]

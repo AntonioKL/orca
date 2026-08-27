@@ -4,7 +4,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { TooltipProvider } from '@/components/ui/tooltip'
-import { AutomationCreateDestinationField } from './AutomationCreateDestinationField'
+import { AutomationDestinationField } from './AutomationDestinationField'
 import type { AutomationHostCatalogEntry } from './automation-host-catalog-types'
 import type { AutomationOwnerRef } from '../../../../shared/automation-owner-ref'
 import type { AutomationCreateDestinationControl } from './use-automation-create-destination'
@@ -80,7 +80,7 @@ function render(projects: Repo[], entries?: AutomationHostCatalogEntry[]): void 
   act(() => {
     root.render(
       <TooltipProvider>
-        <AutomationCreateDestinationField control={control(projects, entries)} />
+        <AutomationDestinationField control={control(projects, entries)} />
       </TooltipProvider>
     )
   })
@@ -90,7 +90,7 @@ function emptyNote(): HTMLElement | null {
   return container.querySelector('[data-testid="automation-create-no-projects"]')
 }
 
-describe('AutomationCreateDestinationField', () => {
+describe('AutomationDestinationField', () => {
   it('names the host that has no projects rather than leaving Create dead', () => {
     render([])
 
@@ -115,5 +115,14 @@ describe('AutomationCreateDestinationField', () => {
     render([{ id: 'repo-1' } as Repo])
 
     expect(container.querySelector('[data-testid="automation-create-update-required"]')).toBeNull()
+  })
+
+  it('names the host without a tense, so editing reads as a move', () => {
+    render([{ id: 'repo-1' } as Repo])
+
+    // The same field serves both modes; create-only wording would misread on an
+    // existing record, whose save moves it rather than creating it.
+    expect(container.querySelector('[aria-label="Host"]')).not.toBeNull()
+    expect(container.textContent).not.toContain('created')
   })
 })
