@@ -220,10 +220,11 @@ export function resolveWorktreeOperationRouteResult(
       }
     }
   }
-  // Why: with a runtime catalog, only a current local scan affirms local identity for an ownerless row.
+  // Why: no saved runtime can publish a remote ownerless row; otherwise current detected presence affirms identity under the stamped-writer invariant.
   const mayBeLegacyLocal =
     savedRuntimeIds === undefined ||
-    (state.runtimeEnvironmentCatalogHydrated === true && hasDetectedWorktree)
+    (state.runtimeEnvironmentCatalogHydrated === true &&
+      (savedRuntimeIds.length === 0 || hasDetectedWorktree))
   return mayBeLegacyLocal
     ? { kind: 'resolved', route: { executionHostId: 'local', runtimeEnvironmentId: null } }
     : { kind: 'missing' }

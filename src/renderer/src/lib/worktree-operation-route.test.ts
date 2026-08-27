@@ -326,6 +326,23 @@ describe('resolveWorktreeOperationRouteResult', () => {
     })
   })
 
+  it('preserves ownerless local compatibility before detected scan with no saved runtimes', () => {
+    expect(
+      resolveWorktreeOperationRouteResult(
+        {
+          repos: [{ id: 'repo-1' } as never],
+          runtimeEnvironments: [],
+          runtimeEnvironmentCatalogHydrated: true,
+          worktreesByRepo: { 'repo-1': [worktree(undefined)] }
+        },
+        WORKTREE_ID
+      )
+    ).toEqual({
+      kind: 'resolved',
+      route: { executionHostId: 'local', runtimeEnvironmentId: null }
+    })
+  })
+
   it('fails an unknown stale worktree closed instead of routing it through focus', () => {
     expect(
       resolveWorktreeOperationRouteResult(
