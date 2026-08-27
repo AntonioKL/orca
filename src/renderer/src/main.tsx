@@ -1,3 +1,6 @@
+// Why first: react-dom reads __REACT_DEVTOOLS_GLOBAL_HOOK__ once at module
+// evaluation, so the per-commit cascade hook has to be installed before it.
+import './lib/react-commit-cascade-observer'
 import './assets/main.css'
 
 import { StrictMode } from 'react'

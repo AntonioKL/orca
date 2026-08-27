@@ -21,7 +21,10 @@ export default defineConfig({
     // Why: happy-dom drops MutationObserver callbacks on GC; keep them alive like a browser does.
     setupFiles: [
       resolve('config/scripts/happy-dom-mutation-observer-retention.ts'),
-      resolve('config/scripts/vitest-host-ports-setup.ts')
+      resolve('config/scripts/vitest-host-ports-setup.ts'),
+      // Why here: react-dom reads the devtools global once at module evaluation,
+      // so the commit shim has to beat the test module graph, not join it.
+      resolve('config/scripts/react-commit-cascade-observer-setup.ts')
     ],
     include: [
       'src/**/*.test.ts',
