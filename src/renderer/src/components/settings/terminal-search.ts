@@ -2,7 +2,6 @@ import type { SettingsSearchEntry } from './settings-search'
 import {
   getTerminalAdvancedSearchEntries,
   getTerminalGhosttyImportSearchEntries,
-  getTerminalMacAccentMenuSearchEntries,
   getTerminalMacOptionSearchEntries,
   getTerminalMacYenSearchEntries
 } from './terminal-advanced-platform-search'
@@ -53,7 +52,6 @@ export {
 } from './terminal-theme-search'
 export {
   getTerminalAdvancedSearchEntries,
-  getTerminalMacAccentMenuSearchEntries,
   getTerminalMacOptionSearchEntries,
   getTerminalMacYenSearchEntries,
   getTerminalGhosttyImportSearchEntries
@@ -103,8 +101,6 @@ export function getTerminalPaneSearchEntries(platform: {
   isWindows: boolean
   isWindowsTerminalHost?: boolean
   isMac: boolean
-  /** The accent-menu opt-out is written by this machine's own app, so a web client cannot apply it. */
-  isDesktopMac?: boolean
 }): SettingsSearchEntry[] {
   const isWindowsTerminalHost = platform.isWindowsTerminalHost ?? platform.isWindows
   // Why: the settings search index must mirror the visible controls. Keeping
@@ -125,7 +121,6 @@ export function getTerminalPaneSearchEntries(platform: {
     ...getTerminalAdvancedSearchEntries(),
     ...(platform.isMac
       ? [...getTerminalMacOptionSearchEntries(), ...getTerminalMacYenSearchEntries()]
-      : []),
-    ...(platform.isDesktopMac ? getTerminalMacAccentMenuSearchEntries() : [])
+      : [])
   ]
 }

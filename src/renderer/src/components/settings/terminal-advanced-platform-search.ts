@@ -93,36 +93,6 @@ export const getTerminalMacYenSearchEntries = createLocalizedCatalog(() => [
   }
 ])
 
-export const getTerminalMacAccentMenuSearchEntries = createLocalizedCatalog(() => [
-  {
-    title: translate(
-      'auto.components.settings.terminal.search.macAccentMenuTitle',
-      'Character Accent Menu'
-    ),
-    description: translate(
-      'auto.components.settings.terminal.search.macAccentMenuDescription',
-      'Hold a key to pick an accented character instead of repeating it. Applies everywhere in Orca and requires restart.'
-    ),
-    keywords: [
-      ...translateSearchKeyword('auto.components.settings.terminal.search.accent', 'accent'),
-      ...translateSearchKeyword('auto.components.settings.terminal.search.diacritic', 'diacritic'),
-      ...translateSearchKeyword(
-        'auto.components.settings.terminal.search.pressAndHold',
-        'press and hold'
-      ),
-      ...translateSearchKeyword('auto.components.settings.terminal.search.keyRepeat', 'key repeat'),
-      ...translateSearchKeyword('auto.components.settings.terminal.search.repeat', 'repeat'),
-      ...translateSearchKeyword('auto.components.settings.terminal.search.1ab57a0fbd', 'mac'),
-      ...translateSearchKeyword('auto.components.settings.terminal.search.d8d6f7a3c5', 'macos'),
-      ...translateSearchKeyword('auto.components.settings.terminal.search.abaa24752d', 'keyboard'),
-      // Why: the bug that motivated this was held `j` in vim inserting one character (#14746).
-      ...translateSearchKeyword('auto.components.settings.terminal.search.vim', 'vim', {
-        englishOnly: true
-      })
-    ]
-  }
-])
-
 export const getTerminalGhosttyImportSearchEntries = createLocalizedCatalog(() => [
   {
     title: translate('auto.components.settings.terminal.search.a979df0083', 'Import from Ghostty'),

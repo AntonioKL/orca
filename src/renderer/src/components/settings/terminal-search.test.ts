@@ -48,23 +48,6 @@ describe('getTerminalPaneSearchEntries', () => {
     expect(entries.some((entry) => entry.title === 'PowerShell Version')).toBe(false)
   })
 
-  it('indexes the accent menu setting only for a desktop Mac', () => {
-    // Why not isMac alone: a web client on a Mac cannot write the macOS preference behind it, and
-    // the index has to mirror the controls the pane actually renders.
-    const desktop = getTerminalPaneSearchEntries({
-      isWindows: false,
-      isMac: true,
-      isDesktopMac: true
-    })
-    const web = getTerminalPaneSearchEntries({ isWindows: false, isMac: true })
-    const linux = getTerminalPaneSearchEntries({ isWindows: false, isMac: false })
-
-    expect(desktop.some((entry) => entry.title === 'Character Accent Menu')).toBe(true)
-    expect(matchesSettingsSearch('press and hold', desktop)).toBe(true)
-    expect(web.some((entry) => entry.title === 'Character Accent Menu')).toBe(false)
-    expect(linux.some((entry) => entry.title === 'Character Accent Menu')).toBe(false)
-  })
-
   it('includes the Option as Alt setting on macOS', () => {
     const entries = getTerminalPaneSearchEntries({ isWindows: false, isMac: true })
     expect(entries.some((entry) => entry.title === 'Option as Alt')).toBe(true)

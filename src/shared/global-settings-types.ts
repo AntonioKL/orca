@@ -387,10 +387,6 @@ export type GlobalSettings = {
   keepComputerAwakeWhileAgentsRun: boolean
   /** Optional for mixed-version compatibility; the legacy boolean maps true to Auto. */
   computerAwakeMode?: ComputerAwakeMode
-  /** macOS only. Shows the accent picker on press-and-hold instead of repeating the key.
-   *  Deliberately absent from DEFAULT_SETTINGS: `undefined` means "never chosen", which is what
-   *  lets startup leave a hand-run `defaults write ApplePressAndHoldEnabled` alone (#14746). */
-  macAccentMenuEnabled?: boolean
   /** macOS Option key: compose layout chars (@ German, € French) vs act as Meta/Esc for readline.
    *  'auto' (default) = layout-aware via navigator.keyboard.getLayoutMap() (US → Meta, else compose);
    *  'false' = compose; 'true' = Meta on both Option keys; 'left'/'right' = only that key is Meta.

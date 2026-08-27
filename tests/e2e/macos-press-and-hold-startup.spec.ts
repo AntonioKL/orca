@@ -15,7 +15,7 @@
  * real home regardless of the harness's HOME isolation, so a run that wrote anything would be
  * writing into a domain shared with every other unpackaged Electron app on the machine.
  */
-import type { ElectronApplication, Page } from '@stablyai/playwright-test'
+import type { ElectronApplication } from '@stablyai/playwright-test'
 import { expect, test } from './helpers/orca-app'
 
 test.use({ seedTestRepo: false })
@@ -56,18 +56,6 @@ async function readPressAndHoldStartupState(
   })
 }
 
-/** Round-trips through main's own store, so a value here has crossed the IPC boundary. */
-async function readAccentMenuSettingFromMain(page: Page): Promise<boolean | undefined> {
-  return page.evaluate(async () => (await window.api.settings.get()).macAccentMenuEnabled)
-}
-
-async function setAccentMenuEnabled(page: Page, enabled: boolean): Promise<void> {
-  await page.evaluate(
-    async (value) => window.__store?.getState().updateSettings({ macAccentMenuEnabled: value }),
-    enabled
-  )
-}
-
 test.describe('macOS press-and-hold default', () => {
   test.skip(process.platform !== 'darwin', 'macOS-only startup routine')
 
@@ -94,29 +82,6 @@ test.describe('macOS press-and-hold default', () => {
       // The unpackaged harness. Anything but a refusal means Orca wrote into a foreign domain.
       expect(record.decision).toBe('foreign-bundle')
     }
-  })
-})
-
-test.describe('macOS accent-menu setting', () => {
-  test.skip(process.platform !== 'darwin', 'macOS-only startup routine')
-
-  test('reaches main without writing into a domain Orca does not own', async ({
-    electronApp,
-    orcaPage
-  }) => {
-    // What this proves: the toggle's value crosses into main, and the ownership guard still refuses
-    // there. The harness runs unpackaged, so a write would land in the domain every other unpackaged
-    // Electron app on this machine shares.
-    //
-    // What it cannot prove: that the settings listener fired. Its only observable effect is the
-    // domain write the guard refuses here, so an unpackaged run cannot tell a refusal from missing
-    // wiring. The call sites are pinned by source position in the unit test instead.
-    const before = await readPressAndHoldStartupState(electronApp)
-    expect((JSON.parse(before.recordRaw!) as { decision: string }).decision).toBe('foreign-bundle')
-
-    await setAccentMenuEnabled(orcaPage, true)
-    await expect.poll(() => readAccentMenuSettingFromMain(orcaPage)).toBe(true)
-    expect((await readPressAndHoldStartupState(electronApp)).recordRaw).toBe(before.recordRaw)
   })
 })
 

@@ -1,65 +1,58 @@
 # macOS press-and-hold and key repeat
 
-macOS routes press-and-hold to the accent picker unless an application opts out for its own
-preferences domain, so holding `j` in vim inserted one character instead of repeating (#14746).
-The `ApplePressAndHoldEnabled` key is unset by default, which is why terminal-hosting Mac apps
-ship this opt-out. Orca writes `false` into `com.stablyai.orca` so held keys repeat.
+macOS opens the accent picker when a key is held unless an application opts out in its preferences
+domain. That prevents held keys from repeating in terminal applications such as vim. On the first
+eligible launch, Orca writes:
 
-Two properties are easy to break and worth stating plainly.
+```sh
+defaults write com.stablyai.orca ApplePressAndHoldEnabled -bool false
+```
 
-**The preference is per-application, not per-view.** It reaches every text surface in Orca — the
-Markdown editor and every input field, not only terminals. Anyone reasoning about this as a
-terminal setting will get the blast radius wrong.
+The write is scoped to Orca's packaged bundle domain. Bare Electron development bundles and
+non-macOS platforms are left untouched. A fresh write is conservatively treated as taking effect
+on the next launch.
 
-**The write is assumed to land for the *next* launch.** It goes out through a separate `defaults`
-process, so this app's cached copy may not observe it until relaunch — and
-nothing changes in the session that performs the write. Every user-facing control for it has to
-say so.
+## Precedence and decision record
 
-## Precedence
+Orca checks for an explicit domain value before writing. Either `true` or `false` is treated as a
+user choice and preserved. Only an unset key receives the `false` default.
 
-Three things can decide the key. Highest wins.
+The decision is stored once in
+`<userData>/macos-press-and-hold-default.json`. An `applied` or
+`kept-user-preference` decision prevents future launches from touching the domain again.
+Probe and write failures remain retryable so a transient failure does not permanently disable the
+fix.
 
-1. **The `macAccentMenuEnabled` setting** (Terminal → Advanced → macOS keyboard, desktop macOS
-   only). `undefined` until the user touches it. Once set, Orca owns the key and writes the value
-   the toggle asks for — `ApplePressAndHoldEnabled` *is* the accent-menu switch, so the toggle maps
-   straight through with no inversion.
-2. **An explicit value already in the domain**, from a hand-run
-   `defaults write com.stablyai.orca ApplePressAndHoldEnabled -bool true`. Left alone.
-3. **The one-time default.** If the key is unset and nothing above applies, Orca writes `false`
-   once and records that it did.
+`defaults read <domain> <key>` is used instead of
+`systemPreferences.getUserDefault`: the Electron API cannot distinguish an unset key from an
+explicit `false`. Only the missing-key exit status is interpreted as unset; spawn failures,
+timeouts, and other exit statuses leave the preference alone.
 
-The decision is recorded in `<userData>/macos-press-and-hold-default.json`. Two fields carry the
-no-clobber guarantee:
+## Restoring the accent picker
 
-- `decision` — a terminal value (`applied`, `kept-user-preference`, `followed-setting`) stops the
-  one-time default from ever touching the domain again, including after the user deletes the key.
-- `appliedSetting` — the toggle value last written. The setting path compares against *this*, not
-  against the domain, so a `defaults write` run after using the toggle is the newer choice and
-  survives the next launch. Dropping this field on read would rewrite the domain every launch,
-  which is the exact clobbering the design exists to prevent.
+Set the preference explicitly, then restart Orca:
 
-## Why `defaults read` and not `systemPreferences.getUserDefault`
+```sh
+defaults write com.stablyai.orca ApplePressAndHoldEnabled -bool true
+```
 
-`getUserDefault` reads through the whole NSUserDefaults search list and is typed non-nullable, so
-an unset key and an explicit `false` both come back `false` — and since the system default is
-unset, it reports `false` on a Mac where press-and-hold is on. `defaults read <domain> <key>` is
-domain-scoped and exits 1 when the key is absent, which is the only way to tell "unset" from a
-deliberate `false`. Only a real exit-1 may be read as unset; a spawn failure or timeout must not be,
-or a broken probe would overwrite a value the user chose.
+After Orca has recorded its one-time decision, deleting the key also restores the macOS default
+without Orca recreating it:
 
-Setting the key in `Info.plist` does nothing: the bundle's `Info.plist` is not part of the
-NSUserDefaults search list.
+```sh
+defaults delete com.stablyai.orca ApplePressAndHoldEnabled
+```
+
+Development and prerelease channels may use a channel-suffixed Orca bundle identifier; use that
+domain instead when applicable.
 
 ## Reverting
 
-Deleting this code is not enough. AppKit reads the plist, not the source, so removing the code
-alone leaves press-and-hold disabled forever for everyone who ran an affected build, with nothing
-left in the tree to explain it. A revert must also delete the key.
+Deleting the startup code is not enough. AppKit reads the persisted preference, so a code revert
+must also arrange to delete the key for users who ran an affected build.
 
-## What CI does not cover
+## Test coverage
 
-There is no macOS test runner. The e2e workflow is Ubuntu; the unit-test jobs are Ubuntu and
-Windows; the only macOS jobs build and package and run no tests. The tests that pin the
-`defaults(1)` exit-code semantics this design rests on, and the real-bundle e2e case, pass on a
-developer Mac and execute zero times in a green PR.
+Unit tests cover platform guards, explicit-value preservation, retry behavior, domain ownership,
+record persistence, and subprocess exit interpretation on CI. A macOS-only test additionally pins
+the real `defaults(1)` behavior, but current PR CI does not execute tests on macOS.

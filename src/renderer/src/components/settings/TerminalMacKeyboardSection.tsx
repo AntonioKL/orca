@@ -1,21 +1,17 @@
 import type { GlobalSettings } from '../../../../shared/global-settings-types'
 import { useDetectedOptionAsAlt } from '@/lib/keyboard-layout/use-effective-mac-option-as-alt'
 import { translate } from '@/i18n/i18n'
-import { MacAccentMenuSetting } from './MacAccentMenuSetting'
 import { SearchableSetting } from './SearchableSetting'
 import { SettingsRow, SettingsSegmentedControl, SettingsSwitchRow } from './SettingsFormControls'
 
 type TerminalMacKeyboardSectionProps = {
   settings: GlobalSettings
   updateSettings: (updates: Partial<GlobalSettings>) => void
-  /** Off in a web client: only the desktop app can write the macOS preference behind it. */
-  showAccentMenuSetting: boolean
 }
 
 export function TerminalMacKeyboardSection({
   settings,
-  updateSettings,
-  showAccentMenuSetting
+  updateSettings
 }: TerminalMacKeyboardSectionProps): React.JSX.Element {
   const detectedLayout = useDetectedOptionAsAlt()
   const detectedLayoutLabel =
@@ -150,10 +146,6 @@ export function TerminalMacKeyboardSection({
           }
         />
       </SearchableSetting>
-
-      {showAccentMenuSetting ? (
-        <MacAccentMenuSetting settings={settings} updateSettings={updateSettings} />
-      ) : null}
     </>
   )
 }

@@ -40,7 +40,6 @@ Always use the primary working directory (the worktree) for all file reads and e
 
 Orca targets macOS, Linux, and Windows. Keep all platform-dependent behavior behind runtime checks:
 
-- **macOS press-and-hold**: the accent-picker opt-out is a per-application preference that reaches every text surface, and a revert must delete the key as well as the code. See [`docs/reference/macos-press-and-hold.md`](./docs/reference/macos-press-and-hold.md).
 - **Keyboard shortcuts**: Never hardcode `e.metaKey`. Use a platform check (`navigator.userAgent.includes('Mac')`) to pick `metaKey` on Mac and `ctrlKey` on Linux/Windows. Electron menu accelerators should use `CmdOrCtrl`.
 - **Shortcut labels in UI**: Display `⌘` / `⇧` on Mac and `Ctrl+` / `Shift+` on other platforms.
 - **File paths**: Use `path.join` or Electron/Node path utilities — never assume `/` or `\`.

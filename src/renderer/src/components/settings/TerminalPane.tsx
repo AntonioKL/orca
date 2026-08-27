@@ -3,11 +3,9 @@ import { Separator } from '../ui/separator'
 import { matchesSettingsSearch } from './settings-search'
 import { useAppStore } from '../../store'
 import { isMacUserAgent, isWindowsUserAgent } from '@/components/terminal-pane/pane-helpers'
-import { isWebClientLocation } from '@/lib/web-client-location'
 import {
   getManageSessionsSearchEntries,
   getTerminalAdvancedSearchEntries,
-  getTerminalMacAccentMenuSearchEntries,
   getTerminalMacOptionSearchEntries,
   getTerminalMacYenSearchEntries,
   getTerminalPaneInteractionSearchEntries,
@@ -58,9 +56,6 @@ export function TerminalPane({
   const isWindows = isWindowsUserAgent()
   const showWindowsHostSettings = isWindowsTerminalHost ?? isWindows
   const isMac = isMacUserAgent()
-  // Why not isMac alone: the accent-menu opt-out is a macOS preference written by this machine's
-  // own desktop app, so a web client would show a control it cannot apply.
-  const isDesktopMac = isMac && !isWebClientLocation()
   const windowsShell = settings.terminalWindowsShell ?? 'powershell.exe'
   const showWindowsPowerShellImplementation =
     showWindowsHostSettings && windowsShell === 'powershell.exe'
@@ -109,9 +104,7 @@ export function TerminalPane({
       )) ||
     (isMac &&
       (matchesSettingsSearch(searchQuery, getTerminalMacOptionSearchEntries()) ||
-        matchesSettingsSearch(searchQuery, getTerminalMacYenSearchEntries()))) ||
-    (isDesktopMac &&
-      matchesSettingsSearch(searchQuery, getTerminalMacAccentMenuSearchEntries())) ? (
+        matchesSettingsSearch(searchQuery, getTerminalMacYenSearchEntries()))) ? (
       <TerminalAdvancedSection
         key="advanced"
         settings={settings}
@@ -122,7 +115,6 @@ export function TerminalPane({
         showWindowsPowerShellImplementation={showWindowsPowerShellImplementation}
         pwshAvailable={pwshAvailable}
         isMac={isMac}
-        isDesktopMac={isDesktopMac}
       />
     ) : null
   ].filter(Boolean)

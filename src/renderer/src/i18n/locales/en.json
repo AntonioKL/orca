@@ -10186,14 +10186,7 @@
               "title": "Theme Mode",
               "keyword_target": "target",
               "keyword_editing": "editing"
-            },
-            "macAccentMenuTitle": "Character Accent Menu",
-            "macAccentMenuDescription": "Hold a key to pick an accented character instead of repeating it. Applies everywhere in Orca and requires restart.",
-            "accent": "accent",
-            "diacritic": "diacritic",
-            "pressAndHold": "press and hold",
-            "keyRepeat": "key repeat",
-            "repeat": "repeat"
+            }
           },
           "windows": {
             "search": {
@@ -11477,11 +11470,6 @@
         },
         "shortcutDefinitionCatalog": {
           "missionControlConflict": "Blocked by Mission Control. Remap here or change it in System Settings."
-        },
-        "MacAccentMenuSetting": {
-          "title": "Character Accent Menu",
-          "description": "Hold a key to pick an accented character instead of repeating it. Applies everywhere in Orca and requires restart.",
-          "restart": "Restart Orca to apply the accent menu change."
         }
       },
       "right": {

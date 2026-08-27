@@ -7,7 +7,6 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { runProcessSync } from '../shared/child-process/run-process'
 import {
   PRESS_AND_HOLD_KEY,
-  applyMacPressAndHoldPreference,
   ensureMacPressAndHoldDefault,
   interpretDefaultsRead,
   readDomainPressAndHoldPreference,
@@ -151,19 +150,6 @@ describe.skipIf(process.platform !== 'darwin')(
       } finally {
         chmodSync(readOnly, 0o700)
         rmSync(readOnly, { recursive: true, force: true })
-      }
-    })
-
-    it('lands the accent-menu setting in the domain, in either direction', () => {
-      // The toggle maps straight through, so `on` must leave a 1 in the plist. An inversion here
-      // would hand every user the opposite of the switch they flipped.
-      for (const accentMenuEnabled of [true, false]) {
-        const domain = throwawayDomain()
-
-        expect(applyMacPressAndHoldPreference(hostFor(domain), accentMenuEnabled)).toBe(
-          'followed-setting'
-        )
-        expect(rawRead(domain)).toBe(accentMenuEnabled ? '1' : '0')
       }
     })
 

@@ -4,11 +4,9 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ProcessResult } from '../shared/child-process/run-process'
 import {
-  applyMacPressAndHoldPreference,
   ensureMacPressAndHoldDefault,
   interpretDefaultsRead,
   isOrcaPreferencesDomain,
-  parsePressAndHoldRecord,
   readBundleIdentifierFromExecutablePath,
   type PressAndHoldDecision,
   type PressAndHoldHost,
@@ -183,120 +181,6 @@ describe('ensureMacPressAndHoldDefault', () => {
   })
 })
 
-describe('applyMacPressAndHoldPreference', () => {
-  it('writes the accent-menu setting straight through to the preference', () => {
-    // Why not negated: ApplePressAndHoldEnabled *is* the accent-menu switch, so an inverted write
-    // would hand the user the opposite of the toggle they flipped.
-    for (const accentMenuEnabled of [true, false]) {
-      const { host, writes, records } = createHost()
-
-      expect(applyMacPressAndHoldPreference(host, accentMenuEnabled)).toBe('followed-setting')
-      expect(writes).toEqual([{ domain: ORCA_DOMAIN, value: accentMenuEnabled }])
-      expect(records.at(-1)?.appliedSetting).toBe(accentMenuEnabled)
-    }
-  })
-
-  it('does nothing at all until the toggle is used', () => {
-    const probe = vi.fn(() => 'unset' as const)
-    const readRecord = vi.fn(() => null)
-    const { host, writes, records } = createHost({ readDomainPreference: probe, readRecord })
-
-    expect(applyMacPressAndHoldPreference(host, undefined)).toBe('no-preference')
-    // Why assert the record read too: an untouched toggle must not even look at userData, which is
-    // what leaves the one-time default and a hand-run `defaults write` in charge.
-    expect(readRecord).not.toHaveBeenCalled()
-    expect(probe).not.toHaveBeenCalled()
-    expect(writes).toEqual([])
-    expect(records).toEqual([])
-  })
-
-  for (const platform of ['win32', 'linux'] as const) {
-    it(`does nothing at all on ${platform}`, () => {
-      const readRecord = vi.fn(() => null)
-      const { host, writes } = createHost({ platform, readRecord })
-
-      expect(applyMacPressAndHoldPreference(host, true)).toBe('not-macos')
-      expect(readRecord).not.toHaveBeenCalled()
-      expect(writes).toEqual([])
-    })
-  }
-
-  it('re-asserts nothing on a later launch with the same choice', () => {
-    const first = createHost()
-    expect(applyMacPressAndHoldPreference(first.host, true)).toBe('followed-setting')
-
-    const relaunch = createHost({ record: first.records.at(-1) })
-    expect(applyMacPressAndHoldPreference(relaunch.host, true)).toBe('setting-already-applied')
-    expect(relaunch.writes).toEqual([])
-  })
-
-  it('leaves a `defaults write` made after the toggle alone', () => {
-    // The record says what *we* wrote, not what the domain holds, so a hand edit since then is the
-    // newer choice and survives — the same no-clobber rule the one-time default follows.
-    const { host, writes } = createHost({
-      record: {
-        version: 1,
-        decision: 'followed-setting',
-        domain: ORCA_DOMAIN,
-        decidedAt: '2026-01-01T00:00:00.000Z',
-        appliedSetting: true
-      },
-      readDomainPreference: () => 'set'
-    })
-
-    expect(applyMacPressAndHoldPreference(host, true)).toBe('setting-already-applied')
-    expect(writes).toEqual([])
-  })
-
-  it('applies the opposite choice when the toggle is flipped back', () => {
-    const first = createHost()
-    expect(applyMacPressAndHoldPreference(first.host, true)).toBe('followed-setting')
-
-    const flipped = createHost({ record: first.records.at(-1) })
-    expect(applyMacPressAndHoldPreference(flipped.host, false)).toBe('followed-setting')
-    expect(flipped.writes).toEqual([{ domain: ORCA_DOMAIN, value: false }])
-  })
-
-  it('skips a bundle whose domain we do not own', () => {
-    const { host, writes, records } = createHost({
-      resolveBundleIdentifier: () => 'com.github.Electron'
-    })
-
-    expect(applyMacPressAndHoldPreference(host, true)).toBe('foreign-bundle')
-    expect(writes).toEqual([])
-    expect(records).toEqual([])
-  })
-
-  it('records nothing after a failed write, so the next launch retries', () => {
-    const { host, records } = createHost({ writeDomainPreference: () => false })
-    expect(applyMacPressAndHoldPreference(host, true)).toBe('write-failed')
-    expect(records).toEqual([])
-
-    const retry = createHost()
-    expect(applyMacPressAndHoldPreference(retry.host, true)).toBe('followed-setting')
-    expect(retry.writes).toEqual([{ domain: ORCA_DOMAIN, value: true }])
-  })
-
-  it('stops the one-time default from fighting the toggle', () => {
-    const { host, records } = createHost()
-    applyMacPressAndHoldPreference(host, true)
-
-    const nextLaunch = createHost({ record: records.at(-1) })
-    expect(ensureMacPressAndHoldDefault(nextLaunch.host)).toBe('already-decided')
-    expect(nextLaunch.writes).toEqual([])
-  })
-
-  it('survives the round trip through the record file', () => {
-    // Why: a dropped `appliedSetting` reads back as "never applied" and rewrites the domain on
-    // every single launch, which is exactly the clobbering this design exists to prevent.
-    const { host, records } = createHost()
-    applyMacPressAndHoldPreference(host, true)
-    const written = records.at(-1)!
-
-    expect(parsePressAndHoldRecord(JSON.stringify(written))?.appliedSetting).toBe(true)
-  })
-})
-
 /**
  * Why here and not only in the .defaults-domain file: that file is macOS-only and CI has no macOS
  * runner, so this three-way rule would otherwise be enforced nowhere in CI. These cases need no
@@ -398,18 +282,5 @@ describe('startup wiring', () => {
     // path is only captured there.
     expect(callIndex).toBeGreaterThan(initDataPathIndex)
     expect(callIndex).toBeLessThan(readyIndex)
-  })
-
-  it('applies the accent-menu setting once the store exists, and on every later change', () => {
-    // Why it cannot join the pre-ready call above: the setting lives in the store, which is
-    // constructed after `ready`. The write only lands next launch either way.
-    const storeIndex = source.indexOf('store = new Store({')
-    const startupIndex = source.indexOf(
-      'applyMacPressAndHoldPreferenceFromSettings(\n    getCanonicalUserDataPath(),\n    store.getSettings().macAccentMenuEnabled'
-    )
-
-    expect(storeIndex).toBeGreaterThanOrEqual(0)
-    expect(startupIndex).toBeGreaterThan(storeIndex)
-    expect(source).toContain("if ('macAccentMenuEnabled' in updates) {")
   })
 })
