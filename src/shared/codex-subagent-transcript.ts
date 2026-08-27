@@ -35,6 +35,7 @@ export type CodexSubagentTranscriptState = {
   parent: JsonlCursor
   subagents: Map<string, TrackedTranscriptSubagent>
   parentTerminalObserved?: boolean
+  parentReadable?: boolean
 }
 
 type JsonRecord = Record<string, unknown>
@@ -187,6 +188,7 @@ export function reconcileCodexSubagentTranscript(
 ): void {
   const normalizedPath = transcriptPath?.trim()
   if (!normalizedPath || !isAbsolute(normalizedPath) || extname(normalizedPath) !== '.jsonl') {
+    state.parentReadable = false
     return
   }
   if (state.parent.filePath !== normalizedPath) {
@@ -196,8 +198,11 @@ export function reconcileCodexSubagentTranscript(
     state.parent = { filePath: normalizedPath, offset: 0, carry: '' }
     state.subagents.clear()
     state.parentTerminalObserved = undefined
+    state.parentReadable = undefined
   }
-  for (const recordValue of readJsonlCursor(state.parent) ?? []) {
+  const parentRecords = readJsonlCursor(state.parent)
+  state.parentReadable = parentRecords !== undefined
+  for (const recordValue of parentRecords ?? []) {
     if (recordValue.type === 'event_msg') {
       const eventType = record(recordValue.payload)?.type
       if (eventType === 'task_started' || eventType === 'task_complete') {

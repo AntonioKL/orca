@@ -227,6 +227,7 @@ const ASSISTANT_MESSAGE_RETRY_MS = 50
 const CODEX_SUBAGENT_POLL_MS = 1_000
 const CODEX_RESTART_RECONCILE_ATTEMPTS = 5
 const CODEX_RESTART_RECONCILE_MS = 1_000
+const CODEX_RESTART_RECONCILE_YIELD_MS = 25
 const INTERRUPTED_DONE_LATE_WORKING_SUPPRESSION_MS = 15_000
 
 // Why: starts at 2 — pre-merge v1 lacked receivedAt/stateStartedAt (never shipped); a mismatched version hydrates empty (treated as corrupt).
@@ -351,13 +352,16 @@ function sanitizeHydratedEntry(
   ) {
     return null
   }
-  // Why: connectionId is null (local) or string (relay); any other shape is rejected to keep the typed surface honest.
+  // Why: only null is local; an empty relay id must not grant local transcript access.
   const connectionIdRaw = record.connectionId
   let connectionId: string | null
   if (connectionIdRaw === null || connectionIdRaw === undefined) {
     connectionId = null
   } else if (typeof connectionIdRaw === 'string') {
-    connectionId = connectionIdRaw
+    connectionId = connectionIdRaw.trim()
+    if (!connectionId) {
+      return null
+    }
   } else {
     return null
   }
@@ -755,6 +759,8 @@ export class AgentHookServer {
   private codexSubagentPollTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private codexRestartReconcileTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private codexPaneGenerations = new Map<string, number>()
+  private codexPaneGenerationCounter = 0
+  private codexRestartReconcileNextRunAt = 0
   private promptSentDedupeByPaneKey = new Map<string, AgentPromptSentDedupeEntry>()
   private activeHookTurnCompletedAtByPaneKey = new Map<string, number>()
   private promptSentHashSalt = randomBytes(16).toString('hex')
@@ -1677,9 +1683,14 @@ export class AgentHookServer {
   }
 
   private bumpCodexPaneGeneration(paneKey: string): number {
-    const generation = (this.codexPaneGenerations.get(paneKey) ?? 0) + 1
+    const generation = ++this.codexPaneGenerationCounter
     this.codexPaneGenerations.set(paneKey, generation)
     return generation
+  }
+
+  private retireCodexPaneGeneration(paneKey: string): void {
+    this.bumpCodexPaneGeneration(paneKey)
+    this.codexPaneGenerations.delete(paneKey)
   }
 
   private scheduleCodexRestartReconciliation(paneKey: string): void {
@@ -1692,7 +1703,7 @@ export class AgentHookServer {
     }
     // Transcript paths for relay/SSH/WSL panes belong to the execution host; reconciliation is
     // performed there and only its result crosses the wire.
-    if (entry.connectionId) {
+    if (entry.connectionId !== null) {
       return
     }
     if (!transcriptPath?.trim()) {
@@ -1713,11 +1724,21 @@ export class AgentHookServer {
       return
     }
     this.clearCodexRestartReconcile(paneKey)
-    const generation = this.codexPaneGenerations.get(paneKey) ?? 0
+    const generation =
+      this.codexPaneGenerations.get(paneKey) ?? this.bumpCodexPaneGeneration(paneKey)
     let original = entry
     let attempt = 0
     const reconcile = (): void => {
       this.codexRestartReconcileTimers.delete(paneKey)
+      const gateDelay = this.codexRestartReconcileNextRunAt - Date.now()
+      if (gateDelay > 0) {
+        const timer = setTimeout(reconcile, gateDelay)
+        this.codexRestartReconcileTimers.set(paneKey, timer)
+        if (typeof timer.unref === 'function') {
+          timer.unref()
+        }
+        return
+      }
       const current = this.state.lastStatusByPaneKey.get(paneKey) as
         | EnrichedAgentHookEventPayload
         | undefined
@@ -1727,8 +1748,12 @@ export class AgentHookServer {
       const transcript = getOrCreateCodexSubagentTranscriptState(this.state, paneKey)
       const roster = getOrCreateCodexSubagentRoster(this.state, paneKey)
       reconcileCodexSubagentTranscript(transcript, roster, transcriptPath)
+      this.codexRestartReconcileNextRunAt = Date.now() + CODEX_RESTART_RECONCILE_YIELD_MS
       const subagents = codexRosterToSnapshots(roster)
       const terminal = transcript.parentTerminalObserved === true
+      const transcriptUnreadable =
+        transcript.parentReadable === false ||
+        [...transcript.subagents.values()].some((child) => child.unresolvedSince)
       const nextPayload = {
         ...current.payload,
         ...(terminal
@@ -1744,7 +1769,8 @@ export class AgentHookServer {
       let latest = current
       if (
         JSON.stringify(nextPayload) !== JSON.stringify(current.payload) ||
-        (terminal && current.restoredUnconfirmed)
+        (terminal && current.restoredUnconfirmed) ||
+        (current.reconcileDiagnostic?.reason === 'transcript-unreadable' && !transcriptUnreadable)
       ) {
         const next: EnrichedAgentHookEventPayload = {
           ...current,
@@ -1761,9 +1787,8 @@ export class AgentHookServer {
       }
       attempt += 1
       if (!terminal && attempt >= CODEX_RESTART_RECONCILE_ATTEMPTS) {
-        const unreadable = [...transcript.subagents.values()].some((child) => child.unresolvedSince)
         if (
-          unreadable &&
+          transcriptUnreadable &&
           (latest.reconcileDiagnostic === undefined || latest.reconcileDiagnostic === null)
         ) {
           const diagnostic: EnrichedAgentHookEventPayload = {
@@ -2097,7 +2122,7 @@ export class AgentHookServer {
     this.clearAssistantMessageRetry(previousOwnerPaneKey)
     this.clearCodexSubagentPoll(previousOwnerPaneKey)
     this.clearCodexRestartReconcile(previousOwnerPaneKey)
-    this.bumpCodexPaneGeneration(previousOwnerPaneKey)
+    this.retireCodexPaneGeneration(previousOwnerPaneKey)
     this.scheduleCodexRestartReconciliation(toPaneKey)
     // Why: the live process keeps posting the physical source key after detach; persist a chain-safe mapping to the current owner.
     this.legacyPaneKeyAliases.set(physicalPaneKey, {
@@ -2138,7 +2163,7 @@ export class AgentHookServer {
       this.clearAssistantMessageRetry(key)
       this.clearCodexSubagentPoll(key)
       this.clearCodexRestartReconcile(key)
-      this.bumpCodexPaneGeneration(key)
+      this.retireCodexPaneGeneration(key)
       clearPaneCacheState(this.state, key)
       this.activeHookTurnCompletedAtByPaneKey.delete(key)
       this.runtimeObservedStatusPaneKeys.delete(key)
@@ -2875,6 +2900,8 @@ export class AgentHookServer {
     }
     this.codexRestartReconcileTimers.clear()
     this.codexPaneGenerations.clear()
+    this.codexPaneGenerationCounter = 0
+    this.codexRestartReconcileNextRunAt = 0
     // Why: don't unlink the endpoint file — a stale file matches fail-open and avoids a TOCTOU race with a concurrent Orca.
     this.endpointDir = null
     this.endpointFilePathCache = null
@@ -3004,7 +3031,7 @@ export class AgentHookServer {
           // Why: a replacement remote process may reuse the pane; don't merge it with the lost connection's children.
           this.clearCodexSubagentPoll(paneKey)
           this.clearCodexRestartReconcile(paneKey)
-          this.bumpCodexPaneGeneration(paneKey)
+          this.retireCodexPaneGeneration(paneKey)
           this.state.codexSubagentRosterByPaneKey.delete(paneKey)
           this.state.codexSubagentTranscriptByPaneKey.delete(paneKey)
           this.state.codexLeadStateByPaneKey.delete(paneKey)
@@ -3055,7 +3082,7 @@ export class AgentHookServer {
     this.clearAssistantMessageRetry(resolvedPaneKey)
     this.clearCodexSubagentPoll(resolvedPaneKey)
     this.clearCodexRestartReconcile(resolvedPaneKey)
-    this.bumpCodexPaneGeneration(resolvedPaneKey)
+    this.retireCodexPaneGeneration(resolvedPaneKey)
     this.runtimeObservedStatusPaneKeys.delete(resolvedPaneKey)
     this.currentAuthorityObservations.delete(resolvedPaneKey)
     if (existing.payload.state === 'done') {
@@ -3130,7 +3157,7 @@ export class AgentHookServer {
       this.clearAssistantMessageRetry(paneKey)
       this.clearCodexSubagentPoll(paneKey)
       this.clearCodexRestartReconcile(paneKey)
-      this.bumpCodexPaneGeneration(paneKey)
+      this.retireCodexPaneGeneration(paneKey)
       clearPaneCacheState(this.state, paneKey)
       this.activeHookTurnCompletedAtByPaneKey.delete(paneKey)
       this.runtimeObservedStatusPaneKeys.delete(paneKey)
@@ -3155,7 +3182,7 @@ export class AgentHookServer {
     this.clearAssistantMessageRetry(resolvedPaneKey)
     this.clearCodexSubagentPoll(resolvedPaneKey)
     this.clearCodexRestartReconcile(resolvedPaneKey)
-    this.bumpCodexPaneGeneration(resolvedPaneKey)
+    this.retireCodexPaneGeneration(resolvedPaneKey)
     clearPaneCacheState(this.state, resolvedPaneKey)
     this.activeHookTurnCompletedAtByPaneKey.delete(resolvedPaneKey)
     this.currentAuthorityObservations.delete(resolvedPaneKey)
@@ -3660,6 +3687,10 @@ export class AgentHookServer {
   /** Test-only accessor for the per-instance listener state (narrow getter avoids an `as unknown` cast). */
   _getStateForTests(): HookListenerState {
     return this.state
+  }
+
+  _getCodexPaneGenerationCountForTests(): number {
+    return this.codexPaneGenerations.size
   }
 
   _resetPromptSentDedupeForTests(): void {

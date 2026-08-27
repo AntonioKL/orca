@@ -8,15 +8,8 @@ import {
   type AgentHookRelayEnvelope,
   type AgentHookSource
 } from '../shared/agent-hook-relay'
-import { codexRosterToSnapshots } from '../shared/codex-subagent-roster'
-import { reconcileCodexSubagentTranscript } from '../shared/codex-subagent-transcript'
 import { buildRelayHookEnvelope } from './agent-hook-envelope-build'
 import { parsePaneKey } from '../shared/stable-pane-id'
-import {
-  getOrCreateCodexSubagentTranscriptState,
-  seedCodexStateFromSnapshot
-} from '../shared/agent-hook-listener/providers/codex-state'
-import { seedCodexSubagentTranscriptFromSnapshot } from '../shared/codex-subagent-transcript-seeding'
 import { normalizeAgentProviderSession } from '../shared/agent-session-resume'
 import { normalizeAgentReconcileDiagnostic } from '../shared/agent-reconcile-diagnostic'
 
@@ -35,6 +28,7 @@ const CACHE_VERSION = 1
 const MAX_CACHED_PANES = 256
 const MAX_RECONCILE_ATTEMPTS = 5
 const RECONCILE_INTERVAL_MS = 1_000
+const RECONCILE_YIELD_MS = 25
 
 function sanitizeHydratedEntry(
   rawEntry: unknown
@@ -137,43 +131,6 @@ export function applyRelayHookEvent(options: {
   options.forward(buildRelayHookEnvelope(cachedEvent, options.source, options.env, options.version))
 }
 
-export function reconcileRelayCodexEvent(
-  state: HookListenerState,
-  event: AgentHookEventPayload
-): AgentHookEventPayload {
-  const transcriptPath = event.providerSession?.transcriptPath
-  if (!transcriptPath || event.payload.agentType !== 'codex') {
-    return event
-  }
-  seedCodexStateFromSnapshot(state, event.paneKey, event.payload)
-  const transcript = getOrCreateCodexSubagentTranscriptState(state, event.paneKey)
-  if (event.payload.subagents?.length) {
-    seedCodexSubagentTranscriptFromSnapshot(transcript, event.payload.subagents, transcriptPath)
-  }
-  const roster = state.codexSubagentRosterByPaneKey.get(event.paneKey)
-  if (!transcript || !roster) {
-    return event
-  }
-  reconcileCodexSubagentTranscript(transcript, roster, transcriptPath)
-  const subagents = codexRosterToSnapshots(roster)
-  const payload = {
-    ...event.payload,
-    ...(subagents ? { subagents } : { subagents: undefined }),
-    ...(transcript.parentTerminalObserved === true
-      ? { state: 'done' as const }
-      : transcript.parentTerminalObserved === false
-        ? {
-            state: event.payload.state === 'waiting' ? ('waiting' as const) : ('working' as const)
-          }
-        : {})
-  }
-  return [...transcript.subagents.values()].some((child) => child.unresolvedSince)
-    ? { ...event, payload }
-    : event.reconcileDiagnostic !== undefined
-      ? { ...event, payload, reconcileDiagnostic: null }
-      : { ...event, payload }
-}
-
 export function hydrateRelayHookStatusCache(
   filePath: string,
   state: HookListenerState,
@@ -201,10 +158,7 @@ export function hydrateRelayHookStatusCache(
     if (!entry) {
       continue
     }
-    const event =
-      entry.event.payload.agentType === 'codex'
-        ? reconcileRelayCodexEvent(state, entry.event)
-        : entry.event
+    const event = entry.event
     state.lastStatusByPaneKey.set(event.paneKey, event)
     metadata.set(event.paneKey, entry.meta)
     if (event.payload.agentType === 'codex') {
@@ -248,7 +202,10 @@ export function scheduleRelayCodexReconciliation(options: {
   metadata: ReadonlyMap<string, RelayHookStatusMeta>
   forward: (envelope: AgentHookRelayEnvelope) => void
   persist: () => void
+  gate: { nextRunAt: number }
+  isReplay?: boolean
   attempt?: number
+  delayMs?: number
 }): void {
   const prior = options.timers.get(options.paneKey)
   if (prior) {
@@ -256,6 +213,11 @@ export function scheduleRelayCodexReconciliation(options: {
   }
   const timer = setTimeout(() => {
     options.timers.delete(options.paneKey)
+    const gateDelay = options.gate.nextRunAt - Date.now()
+    if (gateDelay > 0) {
+      scheduleRelayCodexReconciliation({ ...options, delayMs: gateDelay })
+      return
+    }
     if (!options.isListening()) {
       return
     }
@@ -264,11 +226,13 @@ export function scheduleRelayCodexReconciliation(options: {
       return
     }
     const next = options.reconcile(current)
+    options.gate.nextRunAt = Date.now() + RECONCILE_YIELD_MS
     const transcript = options.state.codexSubagentTranscriptByPaneKey.get(options.paneKey)
     const attempt = options.attempt ?? 0
     const unreadable =
       attempt + 1 >= MAX_RECONCILE_ATTEMPTS &&
       (!current.providerSession?.transcriptPath ||
+        transcript?.parentReadable === false ||
         Boolean(
           transcript && [...transcript.subagents.values()].some((child) => child.unresolvedSince)
         ))
@@ -287,13 +251,18 @@ export function scheduleRelayCodexReconciliation(options: {
       options.persist()
       const meta = options.metadata.get(options.paneKey)
       if (meta) {
-        options.forward(buildRelayHookEnvelope(updated, meta.source, meta.env, meta.version))
+        const envelope = buildRelayHookEnvelope(updated, meta.source, meta.env, meta.version)
+        options.forward(options.isReplay ? { ...envelope, isReplay: true } : envelope)
       }
     }
     if (!unreadable && attempt + 1 < MAX_RECONCILE_ATTEMPTS) {
-      scheduleRelayCodexReconciliation({ ...options, attempt: attempt + 1 })
+      scheduleRelayCodexReconciliation({
+        ...options,
+        attempt: attempt + 1,
+        delayMs: RECONCILE_INTERVAL_MS
+      })
     }
-  }, RECONCILE_INTERVAL_MS)
+  }, options.delayMs ?? RECONCILE_INTERVAL_MS)
   options.timers.set(options.paneKey, timer)
   if (typeof timer.unref === 'function') {
     timer.unref()

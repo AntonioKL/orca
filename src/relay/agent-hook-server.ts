@@ -37,12 +37,11 @@ import { buildRelayHookEnvelope, hookBodyEnv, hookBodyVersion } from './agent-ho
 import { AgentHookResultRetryScheduler } from './agent-hook-result-retry-scheduler'
 import { listenRelayHttpServer } from './relay-http-listener'
 import {
-  createRelayCodexReconciler,
   hydrateRelayHookStatusCache,
   persistRelayHookStatusCache,
-  reconcileRelayCodexEvent,
   type RelayHookStatusMeta
 } from './agent-hook-status-cache'
+import { createRelayCodexReconciliationSchedulers } from './agent-hook-codex-reconciliation'
 import { RelayHookStatusCacheWriter } from './agent-hook-status-cache-writer'
 import { handleRelayHookRequest } from './agent-hook-request'
 import { applyRelayEvent } from './agent-hook-event-application'
@@ -80,7 +79,8 @@ export class RelayAgentHookServer {
   private retryScheduler: AgentHookResultRetryScheduler
   private cacheFilePath: string
   private codexRestartReconcileTimers = new Map<string, ReturnType<typeof setTimeout>>()
-  private scheduleCodexRestartReconciliation: (paneKey: string) => void
+  private codexReconcileGate = { nextRunAt: 0 }
+  private codexReconciliationSchedulers: ReturnType<typeof createRelayCodexReconciliationSchedulers>
   private statusCacheWriter: RelayHookStatusCacheWriter
   constructor(options: RelayHookServerOptions) {
     this.env = options.env ?? REMOTE_AGENT_HOOK_ENV
@@ -106,14 +106,14 @@ export class RelayAgentHookServer {
         this.applyEvent(event, source, env, version)
       }
     })
-    this.scheduleCodexRestartReconciliation = createRelayCodexReconciler({
+    this.codexReconciliationSchedulers = createRelayCodexReconciliationSchedulers({
       state: this.state,
       isListening: () => this.server !== null,
       timers: this.codexRestartReconcileTimers,
-      reconcile: (event) => reconcileRelayCodexEvent(this.state, event),
       metadata: this.lastEnvelopeMetaByPaneKey,
       forward: this.forward,
-      persist: () => this.statusCacheWriter.schedule()
+      persist: () => this.statusCacheWriter.schedule(),
+      gate: this.codexReconcileGate
     })
   }
   async start(options: RelayHookServerStartOptions = {}): Promise<void> {
@@ -137,7 +137,7 @@ export class RelayAgentHookServer {
     const hydratedMetadata = hydrateRelayHookStatusCache(
       this.cacheFilePath,
       this.state,
-      (paneKey) => this.scheduleCodexRestartReconciliation(paneKey)
+      (paneKey) => this.codexReconciliationSchedulers.restart(paneKey)
     )
     this.lastEnvelopeMetaByPaneKey.clear()
     for (const [paneKey, metadata] of hydratedMetadata) {
@@ -208,6 +208,7 @@ export class RelayAgentHookServer {
       clearTimeout(timer)
     }
     this.codexRestartReconcileTimers.clear()
+    this.codexReconcileGate.nextRunAt = 0
     clearAllListenerCaches(this.state)
     this.lastEnvelopeMetaByPaneKey.clear()
   }
@@ -298,7 +299,8 @@ export class RelayAgentHookServer {
       persist: () => this.statusCacheWriter.schedule(),
       clearPaneState: (paneKey) => this.clearPaneState(paneKey),
       forward: this.forward,
-      scheduleCodexRestartReconciliation: this.scheduleCodexRestartReconciliation,
+      scheduleCodexReconciliation: this.codexReconciliationSchedulers.live,
+      scheduleCodexRestartReconciliation: this.codexReconciliationSchedulers.restart,
       clearAssistantMessageRetry: (paneKey) =>
         this.retryScheduler.clearAssistantMessageRetry(paneKey)
     })

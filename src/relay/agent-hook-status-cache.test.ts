@@ -5,7 +5,8 @@ import { join } from 'node:path'
 
 import { createHookListenerState } from '../shared/agent-hook-listener/listener-state'
 import type { AgentHookEventPayload } from '../shared/agent-hook-listener/listener-event'
-import { applyRelayHookEvent, reconcileRelayCodexEvent } from './agent-hook-status-cache'
+import { applyRelayHookEvent } from './agent-hook-status-cache'
+import { reconcileRelayCodexEvent } from './agent-hook-codex-reconciliation'
 import type { AgentHookRelayEnvelope } from '../shared/agent-hook-relay'
 
 const PANE_KEY = 'tab-1:11111111-1111-4111-8111-111111111111'
@@ -35,22 +36,26 @@ describe('relay agent-hook status cache', () => {
       )
       const state = createHookListenerState()
 
-      const reconciled = reconcileRelayCodexEvent(state, {
-        ...event('PostToolUse'),
-        providerSession: { key: 'session_id', id: 'session-1', transcriptPath },
-        payload: {
-          state: 'done',
-          prompt: 'prompt',
-          agentType: 'codex',
-          subagents: [
-            {
-              id: '019fa65f-3144-7151-9c02-cff7a28f316f',
-              state: 'working',
-              startedAt: 1234
-            }
-          ]
-        }
-      })
+      const reconciled = reconcileRelayCodexEvent(
+        state,
+        {
+          ...event('PostToolUse'),
+          providerSession: { key: 'session_id', id: 'session-1', transcriptPath },
+          payload: {
+            state: 'done',
+            prompt: 'prompt',
+            agentType: 'codex',
+            subagents: [
+              {
+                id: '019fa65f-3144-7151-9c02-cff7a28f316f',
+                state: 'working',
+                startedAt: 1234
+              }
+            ]
+          }
+        },
+        { reconcileParentState: true }
+      )
 
       expect(reconciled.payload.state).toBe('working')
     } finally {
@@ -84,19 +89,46 @@ describe('relay agent-hook status cache', () => {
       )
       const state = createHookListenerState()
 
-      const reconciled = reconcileRelayCodexEvent(state, {
-        ...event('PostToolUse'),
-        providerSession: { key: 'session_id', id: 'session-1', transcriptPath },
-        payload: {
-          state: 'waiting',
-          prompt: 'permission',
-          agentType: 'codex',
-          subagents: [{ id: childId, state: 'waiting', startedAt: 1234 }]
-        }
-      })
+      const reconciled = reconcileRelayCodexEvent(
+        state,
+        {
+          ...event('PostToolUse'),
+          providerSession: { key: 'session_id', id: 'session-1', transcriptPath },
+          payload: {
+            state: 'waiting',
+            prompt: 'permission',
+            agentType: 'codex',
+            subagents: [{ id: childId, state: 'waiting', startedAt: 1234 }]
+          }
+        },
+        { reconcileParentState: true }
+      )
 
       expect(reconciled.payload.state).toBe('waiting')
       expect(reconciled.payload.subagents?.[0]?.state).toBe('waiting')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('does not rewrite a live turn from a historical parent terminal record', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'relay-hook-status-cache-live-turn-'))
+    try {
+      const transcriptPath = join(dir, 'rollout-parent.jsonl')
+      writeFileSync(
+        transcriptPath,
+        `${JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete' } })}\n`
+      )
+      const state = createHookListenerState()
+      const live = {
+        ...event('UserPromptSubmit'),
+        providerSession: { key: 'session_id' as const, id: 'session-1', transcriptPath }
+      }
+
+      expect(reconcileRelayCodexEvent(state, live).payload.state).toBe('working')
+      expect(
+        reconcileRelayCodexEvent(state, live, { reconcileParentState: true }).payload.state
+      ).toBe('done')
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

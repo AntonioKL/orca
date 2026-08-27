@@ -130,8 +130,16 @@ describe('RelayAgentHookServer Codex subagent transcript polling', () => {
     await second.start()
     try {
       expect(second.replayCachedPayloadsForPanes()).toBe(1)
-      expect(secondForward.mock.calls.at(-1)?.[0].payload.subagents).toBeUndefined()
-      expect(secondForward.mock.calls.at(-1)?.[0].payload.state).toBe('working')
+      expect(secondForward.mock.calls.at(-1)?.[0].payload.subagents).toHaveLength(1)
+      await vi.waitFor(
+        () => {
+          expect(secondForward.mock.calls.at(-1)?.[0].payload.subagents).toBeUndefined()
+          expect(secondForward.mock.calls.at(-1)?.[0].payload.state).toBe('working')
+          expect(secondForward.mock.calls.at(-1)?.[0].isReplay).toBe(true)
+          expect(secondForward).toHaveBeenCalledTimes(2)
+        },
+        { timeout: 2_000, interval: 50 }
+      )
     } finally {
       second.stop()
     }

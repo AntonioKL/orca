@@ -21,6 +21,7 @@ export function seedCodexSubagentTranscriptFromSnapshot(
     state.parent = { filePath: normalizedPath, offset: 0, carry: '' }
     state.subagents.clear()
     state.parentTerminalObserved = undefined
+    state.parentReadable = undefined
   }
   for (const snapshot of snapshots) {
     if (!SAFE_THREAD_ID.test(snapshot.id) || state.subagents.has(snapshot.id)) {

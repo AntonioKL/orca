@@ -1,4 +1,5 @@
-import { applyRelayHookEvent, reconcileRelayCodexEvent } from './agent-hook-status-cache'
+import { applyRelayHookEvent } from './agent-hook-status-cache'
+import { reconcileRelayCodexEvent } from './agent-hook-codex-reconciliation'
 import type { AgentHookEventPayload } from '../shared/agent-hook-listener/listener-event'
 import type { AgentHookSource, AgentHookRelayEnvelope } from '../shared/agent-hook-relay'
 import type { HookListenerState } from '../shared/agent-hook-listener/listener-state'
@@ -15,6 +16,7 @@ export function applyRelayEvent(options: {
   persist: () => void
   clearPaneState: (paneKey: string) => void
   forward: (envelope: AgentHookRelayEnvelope) => void
+  scheduleCodexReconciliation: (paneKey: string) => void
   scheduleCodexRestartReconciliation: (paneKey: string) => void
   clearAssistantMessageRetry: (paneKey: string) => void
 }): void {
@@ -45,6 +47,9 @@ export function applyRelayEvent(options: {
       options.forward(options.isReplay ? { ...envelope, isReplay: true } : envelope)
   })
   if (reconciled.payload.agentType === 'codex') {
-    options.scheduleCodexRestartReconciliation(reconciled.paneKey)
+    const schedule = options.isReplay
+      ? options.scheduleCodexRestartReconciliation
+      : options.scheduleCodexReconciliation
+    schedule(reconciled.paneKey)
   }
 }
