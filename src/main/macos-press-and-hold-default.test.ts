@@ -2,9 +2,11 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { ProcessResult } from '../shared/child-process/run-process'
 import {
   applyMacPressAndHoldPreference,
   ensureMacPressAndHoldDefault,
+  interpretDefaultsRead,
   isOrcaPreferencesDomain,
   parsePressAndHoldRecord,
   readBundleIdentifierFromExecutablePath,
@@ -292,6 +294,50 @@ describe('applyMacPressAndHoldPreference', () => {
     const written = records.at(-1)!
 
     expect(parsePressAndHoldRecord(JSON.stringify(written))?.appliedSetting).toBe(true)
+  })
+})
+
+/**
+ * Why here and not only in the .defaults-domain file: that file is macOS-only and CI has no macOS
+ * runner, so this three-way rule would otherwise be enforced nowhere in CI. These cases need no
+ * `defaults` binary — the sibling file pins that the real binary produces them.
+ */
+describe('interpretDefaultsRead', () => {
+  function probe(overrides: Partial<ProcessResult>): () => ProcessResult {
+    return () => ({ code: 0, signal: null, stdout: '', stderr: '', timedOut: false, ...overrides })
+  }
+
+  it('reads a clean exit as an explicit value', () => {
+    expect(interpretDefaultsRead(probe({ code: 0 }))).toBe('set')
+  })
+
+  it('reads only "does not exist" as unset', () => {
+    expect(interpretDefaultsRead(probe({ code: 1 }))).toBe('unset')
+  })
+
+  describe('refuses to call a failed probe unset', () => {
+    // Each of these would otherwise overwrite a value the user deliberately set.
+    const failures: [string, () => ProcessResult][] = [
+      ['killed before it exited', probe({ code: null, signal: 'SIGTERM' })],
+      ['timed out', probe({ code: null, timedOut: true })],
+      [
+        'timed out after somehow reporting the missing-key code',
+        probe({ code: 1, timedOut: true })
+      ],
+      ['exited with some other error', probe({ code: 2 })],
+      ['exited with a negative status', probe({ code: -1 })],
+      [
+        'never started at all',
+        () => {
+          throw Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' })
+        }
+      ]
+    ]
+    for (const [name, failing] of failures) {
+      it(name, () => {
+        expect(interpretDefaultsRead(failing)).toBe('unknown')
+      })
+    }
   })
 })
 

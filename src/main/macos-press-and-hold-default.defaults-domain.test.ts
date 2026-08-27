@@ -1,14 +1,15 @@
 import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { rmSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { chmodSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { runProcessSync } from '../shared/child-process/run-process'
 import {
   PRESS_AND_HOLD_KEY,
   applyMacPressAndHoldPreference,
   ensureMacPressAndHoldDefault,
-  interpretDefaultsReadFailure,
+  interpretDefaultsRead,
   readDomainPressAndHoldPreference,
   writeDomainPressAndHoldPreference,
   type PressAndHoldHost,
@@ -29,6 +30,9 @@ import {
 // Why a real Orca-owned domain shape: the ownership guard rejects anything else, so a fake prefix
 // would exercise a different branch than production.
 const domains: string[] = []
+
+/** Pinned against the real binary below, then reused by the platform-agnostic unit tests. */
+const DEFAULTS_MISSING_EXIT_CODE = 1
 
 function throwawayDomain(): string {
   const domain = `com.stablyai.orca.defaults-domain-test.${randomUUID()}`
@@ -113,27 +117,41 @@ describe.skipIf(process.platform !== 'darwin')(
     })
 
     it('refuses to call a failed probe "unset"', () => {
-      // A real spawn failure, not a hand-built object: `execFileSync` reports it with no exit status,
-      // which is precisely what must not be mistaken for "the key does not exist".
-      let spawnFailure: unknown
-      try {
-        execFileSync('/usr/bin/defaults-does-not-exist', ['read'], { stdio: 'ignore' })
-      } catch (error) {
-        spawnFailure = error
-      }
-      expect((spawnFailure as { status?: number | null }).status ?? null).toBe(null)
-      expect(interpretDefaultsReadFailure(spawnFailure)).toBe('unknown')
-
-      let missingKeyFailure: unknown
-      try {
-        execFileSync('/usr/bin/defaults', ['read', throwawayDomain(), PRESS_AND_HOLD_KEY], {
-          stdio: 'ignore'
+      // Real runs, not hand-built results: a binary that is not there must come back 'unknown'
+      // through the same path production takes, not be mistaken for "the key does not exist".
+      const spawnFailure = (): ReturnType<typeof runProcessSync> =>
+        runProcessSync({
+          program: '/usr/bin/defaults-does-not-exist',
+          args: ['read'],
+          stdio: ['ignore', 'ignore', 'ignore']
         })
-      } catch (error) {
-        missingKeyFailure = error
+      expect(spawnFailure).toThrow()
+      expect(interpretDefaultsRead(spawnFailure)).toBe('unknown')
+
+      const missingKey = runProcessSync({
+        program: '/usr/bin/defaults',
+        args: ['read', throwawayDomain(), PRESS_AND_HOLD_KEY],
+        stdio: ['ignore', 'ignore', 'ignore']
+      })
+      // The one exit code the whole design reads as unset; every other outcome is 'unknown'.
+      expect(missingKey.code).toBe(DEFAULTS_MISSING_EXIT_CODE)
+      expect(missingKey.timedOut).toBe(false)
+      expect(interpretDefaultsRead(() => missingKey)).toBe('unset')
+    })
+
+    // Skipped as root, where the read-only directory below would still be writable.
+    it.skipIf(process.getuid?.() === 0)('reports a write the binary refused', () => {
+      // Why a real refusal: `defaults write` exits non-zero instead of throwing, so a caller that
+      // only caught exceptions would record 'applied' for a value that never reached the plist.
+      const readOnly = join(mkdtempSync(join(tmpdir(), 'orca-press-hold-ro-')), 'locked')
+      mkdirSync(readOnly)
+      chmodSync(readOnly, 0o500)
+      try {
+        expect(writeDomainPressAndHoldPreference(join(readOnly, 'domain'), false)).toBe(false)
+      } finally {
+        chmodSync(readOnly, 0o700)
+        rmSync(readOnly, { recursive: true, force: true })
       }
-      expect((missingKeyFailure as { status?: number }).status).toBe(1)
-      expect(interpretDefaultsReadFailure(missingKeyFailure)).toBe('unset')
     })
 
     it('lands the accent-menu setting in the domain, in either direction', () => {

@@ -1,6 +1,6 @@
-import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { runProcessSync, type ProcessResult } from '../shared/child-process/run-process'
 import { writeFileAtomically } from './codex-accounts/fs-utils'
 
 /**
@@ -40,8 +40,11 @@ export const PRESS_AND_HOLD_RECORD_VERSION = 1
  *  and the system default is unset, so it reports `false` on a Mac where press-and-hold is on.
  *  `defaults read <domain> <key>` is domain-scoped and exits 1 when the key is absent. */
 const DEFAULTS_BINARY = '/usr/bin/defaults'
+/** A hang cutoff, not a latency budget: the probe measures ~6ms, and cutting a slow-but-working
+ *  `defaults` short costs the user the feature for that launch. The shared 30s default is what
+ *  must not apply — this runs before `ready`, so a 30s block is a hung app. */
 const DEFAULTS_TIMEOUT_MS = 5_000
-/** Why: `defaults` exits 1 for "does not exist"; other statuses mean the probe itself failed. */
+/** Why: `defaults` exits 1 for "does not exist"; anything else means the probe itself failed. */
 const DEFAULTS_MISSING_STATUS = 1
 
 const ORCA_BUNDLE_ID = 'com.stablyai.orca'
@@ -114,36 +117,52 @@ export function readBundleIdentifierFromExecutablePath(execPath: string): string
 
 /**
  * Why this distinction carries the whole design: only a real "does not exist" answer may be read as
- * unset. A spawn failure or a timeout leaves `status` unset, and calling that unset would let a
- * broken probe overwrite a value the user chose.
+ * unset. A killed or timed-out probe never answered, and calling that unset would let a broken
+ * probe overwrite a value the user chose.
  */
-export function interpretDefaultsReadFailure(error: unknown): 'unset' | 'unknown' {
-  return (error as { status?: number | null }).status === DEFAULTS_MISSING_STATUS
-    ? 'unset'
-    : 'unknown'
+export function interpretDefaultsRead(probe: () => ProcessResult): 'set' | 'unset' | 'unknown' {
+  let result: ProcessResult
+  try {
+    result = probe()
+  } catch {
+    // `runProcessSync` throws only when the child never started, which answers nothing at all.
+    return 'unknown'
+  }
+  // Why before the code: a timeout kills mid-run, so any exit it leaves behind is not an answer.
+  if (result.timedOut) {
+    return 'unknown'
+  }
+  if (result.code === 0) {
+    return 'set'
+  }
+  return result.code === DEFAULTS_MISSING_STATUS ? 'unset' : 'unknown'
 }
 
 export function readDomainPressAndHoldPreference(domain: string): 'set' | 'unset' | 'unknown' {
-  try {
-    execFileSync(DEFAULTS_BINARY, ['read', domain, PRESS_AND_HOLD_KEY], {
-      encoding: 'utf8',
-      timeout: DEFAULTS_TIMEOUT_MS,
-      stdio: ['ignore', 'pipe', 'ignore']
+  // Why no captured output: the exit code is the whole answer, and reading only presence is what
+  // makes an explicit `true` and an explicit `false` both count as the user's.
+  return interpretDefaultsRead(() =>
+    runProcessSync({
+      program: DEFAULTS_BINARY,
+      args: ['read', domain, PRESS_AND_HOLD_KEY],
+      timeoutMs: DEFAULTS_TIMEOUT_MS,
+      stdio: ['ignore', 'ignore', 'ignore']
     })
-    return 'set'
-  } catch (error) {
-    return interpretDefaultsReadFailure(error)
-  }
+  )
 }
 
 export function writeDomainPressAndHoldPreference(domain: string, value: boolean): boolean {
   try {
-    execFileSync(
-      DEFAULTS_BINARY,
-      ['write', domain, PRESS_AND_HOLD_KEY, '-bool', value ? 'true' : 'false'],
-      { encoding: 'utf8', timeout: DEFAULTS_TIMEOUT_MS, stdio: ['ignore', 'ignore', 'ignore'] }
+    // Why the code check: a non-zero `defaults write` returns rather than throwing, so treating a
+    // completed run as success would record 'applied' for a write that never landed.
+    return (
+      runProcessSync({
+        program: DEFAULTS_BINARY,
+        args: ['write', domain, PRESS_AND_HOLD_KEY, '-bool', value ? 'true' : 'false'],
+        timeoutMs: DEFAULTS_TIMEOUT_MS,
+        stdio: ['ignore', 'ignore', 'ignore']
+      }).code === 0
     )
-    return true
   } catch {
     return false
   }
