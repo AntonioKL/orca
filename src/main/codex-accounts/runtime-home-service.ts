@@ -1065,12 +1065,13 @@ export class CodexRuntimeHomeService {
     if (!guestHomeLinuxPath.startsWith('/')) {
       return Promise.resolve()
     }
-    let legacyPanePresent: boolean
+    let legacyPanePresent = true
     try {
       legacyPanePresent = hasRecordedLegacyWslCodexPane(getCodexSelectionLaneKey(target))
     } catch (error) {
-      console.warn('[codex-wsl-auth-drain] Pane registry unavailable; deferring drain:', error)
-      return Promise.resolve()
+      // Why: unknown pane liveness must preserve the source, but promotion can
+      // still keep the direct home from launching stale auth.
+      console.warn('[codex-wsl-auth-drain] Pane registry unavailable; preserving source:', error)
     }
     return startLegacyWslRuntimeAuthDrain(
       {

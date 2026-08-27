@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join } from 'node:path'
 import type * as CodexConfigMirror from '../codex/codex-config-mirror'
 import type * as CodexHomePaths from '../codex/codex-home-paths'
+import type * as CodexPaneAccountRegistry from '../codex/codex-pane-account-registry'
 import type * as LegacyWslRuntimeAuthDrain from './legacy-wsl-runtime-auth-drain'
 import type * as WslCodexAuthBatchReader from './wsl-codex-auth-batch-reader'
 import { createSettings } from './runtime-home-settings-test-fixtures'
@@ -386,6 +387,44 @@ describe('CodexRuntimeHomeService', () => {
       vi.doUnmock('../codex/codex-home-paths')
       vi.doUnmock('../codex/wsl-codex-session-bridge')
       vi.doUnmock('./legacy-wsl-runtime-auth-drain')
+      vi.doUnmock('../wsl')
+      if (originalPlatform) {
+        Object.defineProperty(process, 'platform', originalPlatform)
+      }
+    }
+  })
+
+  it('preserves legacy auth while draining when pane attribution is unavailable', async () => {
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+    const wslHome = join(testState.userDataDir, 'wsl-home')
+    vi.doMock('../wsl', () => ({
+      getDefaultWslDistro: () => 'Ubuntu',
+      getWslHome: () => wslHome
+    }))
+    vi.doMock('../codex/codex-pane-account-registry', async (importOriginal) => ({
+      ...(await importOriginal<typeof CodexPaneAccountRegistry>()),
+      hasRecordedLegacyWslCodexPane: () => {
+        throw new Error('registry unavailable')
+      }
+    }))
+    const startLegacyWslRuntimeAuthDrain = vi.fn(() => Promise.resolve())
+    vi.doMock('./legacy-wsl-runtime-auth-drain', () => ({ startLegacyWslRuntimeAuthDrain }))
+    const store = createStore(createSettings())
+
+    try {
+      const { CodexRuntimeHomeService } = await import('./runtime-home-service')
+      const service = new CodexRuntimeHomeService(store as never)
+
+      await service.prepareForCodexLaunchAsync({ runtime: 'wsl', wslDistro: 'Ubuntu' })
+
+      expect(startLegacyWslRuntimeAuthDrain).toHaveBeenCalledWith(
+        expect.objectContaining({ legacyPanePresent: true }),
+        { throwOnFailure: true }
+      )
+    } finally {
+      vi.doUnmock('./legacy-wsl-runtime-auth-drain')
+      vi.doUnmock('../codex/codex-pane-account-registry')
       vi.doUnmock('../wsl')
       if (originalPlatform) {
         Object.defineProperty(process, 'platform', originalPlatform)
