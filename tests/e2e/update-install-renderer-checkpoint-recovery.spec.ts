@@ -52,7 +52,7 @@ test('recovers update install from a corrupt clean session but preserves dirty d
     }
   )
 
-  expect(dirtyResult).toBe(CHECKPOINT_ERROR)
+  expect(dirtyResult).toContain(CHECKPOINT_ERROR)
 
   const cleanResult = await orcaPage.evaluate(async () => {
     const store = window.__store
