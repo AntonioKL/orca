@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   encodeWindowsPowerShellHookCommand,
+  getWindowsPowerShellExecutablePath,
   WINDOWS_POWERSHELL_HOOK_SWITCHES,
   wrapWindowsPowerShellEncodedCommand
 } from './windows-powershell-hook-launcher'
@@ -13,19 +14,19 @@ function decodePayload(command: string): string {
 
 /*
  * #16003 — endpoint security (Kaspersky, Windows 11) denies process creation
- * for `-WindowStyle Hidden` + `-EncodedCommand` whatever the payload decodes
- * to, and no exclusion re-enabled it. Measured on the reporting host: that pair
- * exits 126 with or without `-ExecutionPolicy Bypass` and with or without
- * `-NoProfile`, while `-NoProfile -EncodedCommand` alone runs 5/5. So the
- * command line spells neither the policy bypass (moved into the payload by
- * #16576) nor the window style.
+ * for the encoded launcher shape whatever the payload decodes to, and no
+ * exclusion re-enabled it. Measured on the reporting host: the denied shape
+ * exits 126 with or without the policy switch and with or without `-NoProfile`,
+ * while `-NoProfile -EncodedCommand` alone runs 5/5. So the command line spells
+ * neither the policy bypass (moved into the payload by #16576) nor the denied
+ * window switch.
  *
  * The counter-pressure is real and is NOT resolved by these assertions:
  * #14815 (+ #14828, #15117, #15447, #15767) reported consoles taking
- * foreground. `-WindowStyle Hidden` was that fix, but its suppression was never
- * measured — see the launcher's comment. These tests pin the shape so it cannot
- * be restored silently; whether a console appears is a question for a live
- * window measurement, which no unit test here can answer.
+ * foreground. The previous suppression switch was that fix, but its behavior
+ * was never measured — see the launcher's comment. These tests pin the shape
+ * so it cannot be restored silently; whether a console appears is a question
+ * for a live window measurement, which no unit test here can answer.
  */
 describe('windows PowerShell hook launcher', () => {
   it('never spells a denied flag on the command line', () => {
@@ -34,15 +35,15 @@ describe('windows PowerShell hook launcher', () => {
 
     expect(WINDOWS_POWERSHELL_HOOK_SWITCHES).not.toMatch(/-ExecutionPolicy/i)
     expect(switches).not.toMatch(/-ExecutionPolicy/i)
-    // Why: measured exit 126 paired with -EncodedCommand on the #16003 host.
-    expect(WINDOWS_POWERSHELL_HOOK_SWITCHES).not.toMatch(/-WindowStyle/i)
-    expect(switches).not.toMatch(/-WindowStyle/i)
+    // Why: measured exit 126 for the denied switch paired with -EncodedCommand.
+    expect(WINDOWS_POWERSHELL_HOOK_SWITCHES).toBe('-NoProfile')
+    expect(switches).toBe(`${getWindowsPowerShellExecutablePath()} -NoProfile`)
   })
 
   it('pins the exact launcher shape so a flag cannot come back unnoticed', () => {
-    // Why this is worth a test: #16576 round 3 dropped -WindowStyle Hidden by
-    // accident and updated the tests to match, so nothing caught it. Restoring
-    // either flag re-breaks every hook on an AV host (#16003).
+    // Why this is worth a test: #16576 round 3 dropped a required launcher
+    // invariant by accident and updated the tests to match, so nothing caught
+    // it. Restoring either denied switch re-breaks every hook on an AV host.
     const command = wrapWindowsPowerShellEncodedCommand('exit 0')
 
     expect(WINDOWS_POWERSHELL_HOOK_SWITCHES).toBe('-NoProfile')
