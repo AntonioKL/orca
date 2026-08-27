@@ -20,7 +20,7 @@ import {
 } from './workspace-cleanup-candidate-row-data'
 import type { WorkspaceCleanupReviewInfo } from './workspace-cleanup-presentation'
 import { formatWorkspaceCleanupRelativeTime } from './workspace-cleanup-relative-time'
-import { getReviewTooltip } from './workspace-cleanup-row-labels'
+import { getReviewStateSrText } from './workspace-cleanup-row-labels'
 import { StatusPill } from './workspace-cleanup-status-pill'
 import { WorkspaceCleanupCandidateList } from './workspace-cleanup-candidate-list'
 import {
@@ -258,7 +258,7 @@ function ConfirmRemoveRow({
         {reviewInfo.label ? (
           <StatusPill toneClassName={getReviewPillToneClassName(reviewInfo)}>
             {reviewInfo.label}
-            <span className="sr-only">{getReviewTooltip(reviewInfo)}</span>
+            <span className="sr-only">{getReviewStateSrText(reviewInfo)}</span>
           </StatusPill>
         ) : null}
         {contextPillLabels.map((label) => (
