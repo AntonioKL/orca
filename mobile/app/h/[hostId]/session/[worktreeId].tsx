@@ -117,7 +117,10 @@ import {
 } from '../../../../src/terminal/terminal-accessory-layout'
 import { createTerminalLiveAccessoryInput } from '../../../../src/terminal/terminal-live-accessory-input'
 import { sendTerminalLiveAccessoryRawBytes } from '../../../../src/terminal/terminal-live-accessory-raw-send'
-import { createTerminalAccessoryRepeatController } from '../../../../src/terminal/terminal-accessory-repeat'
+import {
+  createTerminalAccessoryRepeatController,
+  createTerminalAccessoryRepeatSender
+} from '../../../../src/terminal/terminal-accessory-repeat'
 import {
   clearTerminalLiveInputFocusTimer,
   isTerminalLiveInputWithinByteLimit,
@@ -2994,11 +2997,13 @@ export default function SessionScreen() {
     }
   }
 
-  async function handleAccessoryKey(input: ReturnType<typeof createTerminalLiveAccessoryInput>) {
-    if (!client || !activeHandle || !canSend) {
+  async function handleAccessoryKey(
+    input: ReturnType<typeof createTerminalLiveAccessoryInput>,
+    targetHandle = activeHandleRef.current
+  ) {
+    if (!client || !targetHandle || targetHandle !== activeHandleRef.current || !canSend) {
       return false
     }
-    const targetHandle = activeHandle
     const accessoryCommit = await handleLiveInputAccessoryBytes(input)
     if (accessoryCommit.kind !== 'allow-raw') {
       return accessoryCommit.kind === 'handled'
@@ -3403,7 +3408,7 @@ export default function SessionScreen() {
   const accessoryRepeatRef = useRef(
     createTerminalAccessoryRepeatController<ReturnType<typeof createTerminalLiveAccessoryInput>>()
   )
-  // Why: ref keeps repeat firing the current callback; else a mid-hold tab switch/reconnect routes bytes to a stale terminal.
+  // Why: the current callback observes reconnect state while the sender pins the press to its original terminal.
   const handleAccessoryKeyRef = useRef(handleAccessoryKey)
   handleAccessoryKeyRef.current = handleAccessoryKey
   const stopAccessoryRepeat = useCallback(() => {
@@ -3411,8 +3416,13 @@ export default function SessionScreen() {
   }, [])
   const startAccessoryRepeat = useCallback(
     (input: ReturnType<typeof createTerminalLiveAccessoryInput>) => {
-      accessoryRepeatRef.current.start(input, (nextInput) =>
-        handleAccessoryKeyRef.current(nextInput)
+      accessoryRepeatRef.current.start(
+        input,
+        createTerminalAccessoryRepeatSender(
+          activeHandleRef.current,
+          () => activeHandleRef.current,
+          (nextInput, targetHandle) => handleAccessoryKeyRef.current(nextInput, targetHandle)
+        )
       )
     },
     []

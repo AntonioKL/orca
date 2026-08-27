@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   createTerminalAccessoryRepeatController,
+  createTerminalAccessoryRepeatSender,
   TERMINAL_ACCESSORY_REPEAT_DELAY_MS,
   TERMINAL_ACCESSORY_REPEAT_INTERVAL_MS
 } from './terminal-accessory-repeat'
@@ -79,5 +80,22 @@ describe('terminal accessory repeat', () => {
     await vi.runAllTimersAsync()
 
     expect(send).toHaveBeenCalledTimes(1)
+  })
+
+  it('stops sending when the terminal active at press time is no longer active', async () => {
+    let activeTerminal = 'terminal-a'
+    const sendToTerminal = vi.fn(async () => true)
+    const send = createTerminalAccessoryRepeatSender(
+      activeTerminal,
+      () => activeTerminal,
+      sendToTerminal
+    )
+
+    await expect(send('down')).resolves.toBe(true)
+    activeTerminal = 'terminal-b'
+    await expect(send('down')).resolves.toBe(false)
+
+    expect(sendToTerminal).toHaveBeenCalledTimes(1)
+    expect(sendToTerminal).toHaveBeenCalledWith('down', 'terminal-a')
   })
 })

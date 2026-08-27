@@ -1,4 +1,5 @@
 import { getTerminalLiveAccessoryRawSendTarget } from './terminal-live-accessory-raw-send-target'
+import { isTerminalSendRpcAccepted } from './terminal-send-rpc-response'
 import { buildTerminalSendParams, TERMINAL_INPUT_SEND_OPTIONS } from './terminal-send-request'
 import type { RpcClient } from '../transport/rpc-client'
 import type { ConnectionState } from '../transport/types'
@@ -36,8 +37,5 @@ export async function sendTerminalLiveAccessoryRawBytes(
       }),
       TERMINAL_INPUT_SEND_OPTIONS
     )
-    .then(
-      () => true,
-      () => false
-    )
+    .then(isTerminalSendRpcAccepted, () => false)
 }

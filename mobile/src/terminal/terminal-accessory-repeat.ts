@@ -3,6 +3,19 @@ export const TERMINAL_ACCESSORY_REPEAT_INTERVAL_MS = 45
 
 type TerminalAccessoryRepeatSender<TInput> = (input: TInput) => Promise<boolean>
 
+export function createTerminalAccessoryRepeatSender<TInput>(
+  targetHandle: string | null,
+  getActiveHandle: () => string | null,
+  sendToTerminal: (input: TInput, targetHandle: string) => Promise<boolean>
+): TerminalAccessoryRepeatSender<TInput> {
+  return (input) => {
+    if (!targetHandle || getActiveHandle() !== targetHandle) {
+      return Promise.resolve(false)
+    }
+    return sendToTerminal(input, targetHandle)
+  }
+}
+
 export function createTerminalAccessoryRepeatController<TInput>() {
   let generation = 0
   let timer: ReturnType<typeof setTimeout> | null = null
