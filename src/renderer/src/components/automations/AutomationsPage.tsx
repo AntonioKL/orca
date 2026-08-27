@@ -75,7 +75,6 @@ import {
 import {
   deleteAutomationForTarget,
   type AutomationHostTarget,
-  getAutomationAuthorityTarget,
   getAutomationHostTargetFromKey,
   getAutomationHostTargetKey,
   getAutomationListTarget,
@@ -1025,36 +1024,25 @@ export default function AutomationsPage(): React.JSX.Element {
   })()
   const isOrcaForm = createTarget === 'orca' && editingExternalTarget === null
   const dialogAuthorityRepos = getAutomationCreateRepos(repos, automationDialogTarget)
-  // The authority storing the edited record; a save landing on another one is a move.
+  // An update moves the record's execution target, never the authority that
+  // stores it, so the edit picker offers only that authority's own hosts.
   const dialogAuthorityKey = automationAuthorityCatalogKey(
     automationDialogTarget.kind === 'environment'
       ? { kind: 'runtime', environmentId: automationDialogTarget.environmentId }
       : { kind: 'desktop' }
   )
-  const editHostEntries = hostCatalog.entries
+  const editHostEntries = hostCatalog.entries.filter(
+    (entry) => automationAuthorityCatalogKey(entry.stableRef.authority) === dialogAuthorityKey
+  )
   const editHostResolution = resolveAutomationCreateDestination(
     editingHostStableKey
       ? editHostEntries.find((entry) => entry.stableKey === editingHostStableKey)
       : null
   )
-  // Projects follow the picked host's authority, not the record's: a move offers
-  // what the target stores, and nothing on the old authority is reachable there.
   const editHostProjects =
     editHostResolution.status === 'ready'
-      ? automationCreateEligibleProjects(
-          repoTables,
-          editHostResolution,
-          getAutomationCreateRepos(
-            repos,
-            getAutomationAuthorityTarget(editHostResolution.authority)
-          )
-        )
+      ? automationCreateEligibleProjects(repoTables, editHostResolution, dialogAuthorityRepos)
       : dialogAuthorityRepos
-  const editMoveTargetEntry =
-    editHostResolution.status === 'ready' &&
-    automationAuthorityCatalogKey(editHostResolution.authority) !== dialogAuthorityKey
-      ? editHostResolution.entry
-      : null
   // Picking a host strands a project that lives on another one; clearing it here
   // states the move instead of deferring the same refusal to submit.
   const handleEditHostChange = (stableKey: string): void => {
@@ -1077,14 +1065,7 @@ export default function AutomationsPage(): React.JSX.Element {
     entries: editHostEntries,
     resolution: editHostResolution,
     onSelect: handleEditHostChange,
-    projects: editHostProjects,
-    // Replacer fn: a literal replacement would expand `$` patterns in host labels.
-    note: editMoveTargetEntry
-      ? translate(
-          'auto.components.automations.createDestination.move',
-          'Saving creates this automation on {host} and deletes the original. Its run history stays on the old host.'
-        ).replace('{host}', () => editMoveTargetEntry.authorityLabel)
-      : null
+    projects: editHostProjects
   }
   const dialogRepos = isOrcaForm
     ? editingAutomationId !== null
@@ -1751,7 +1732,6 @@ export default function AutomationsPage(): React.JSX.Element {
         currentAutomation = (reread.ok ? reread.value : null) ?? currentAutomation
       }
       let editDestination: AutomationDestination | undefined
-      let moveTarget: AutomationCreateDestination | null = null
       const destinationChanged =
         currentAutomation &&
         (currentAutomation.projectId !== draft.projectId ||
@@ -1796,11 +1776,6 @@ export default function AutomationsPage(): React.JSX.Element {
           return
         }
         editDestination = revalidated.destination
-        // `update` reaches only the authority already holding the record, so a
-        // save landing on another one is a create there plus a delete here.
-        if (automationAuthorityCatalogKey(revalidated.authority) !== dialogAuthorityKey) {
-          moveTarget = revalidated
-        }
       }
       const updates: AutomationUpdateInput = {
         name: draft.name,
@@ -1836,39 +1811,29 @@ export default function AutomationsPage(): React.JSX.Element {
         reuseSession: draft.workspaceMode === 'existing' && draft.reuseSession,
         timezone,
         rrule,
-        dtstart: updates.dtstart ?? currentAutomation?.dtstart ?? now,
+        dtstart: now,
         missedRunGraceMinutes
       }
       const editSource = currentAutomation
-      const move = moveTarget
-        ? await moveAutomationToDestination(editSource, moveTarget, {
-            ...createInput,
-            // A move carries the record across; it does not resume a paused one.
-            enabled: editSource?.enabled ?? true,
-            sourceContext: editSource?.sourceContext ?? null
-          })
-        : null
-      const saved = move
-        ? move.saved
-        : editingAutomationId
-          ? await dispatchAutomationUpdate(
-              automationDispatchContext,
-              { rowKey: editingRowKey ?? '', automationId: editingAutomationId },
-              updates,
-              () => {
-                // Nothing names a host: no captured owner and no record to read one
-                // from, so the save is refused rather than sent unfenced.
-                if (!editSource) {
-                  throw new Error(
-                    automationOwnerConflictMessage(AUTOMATION_OWNER_CONFLICT_CODES.ownerChanged)
-                  )
-                }
-                return updateAutomationForTarget(editSource, updates, automationHostTarget)
-              },
-              'save',
-              editDestination
-            )
-          : await createDraftAutomation(createInput)
+      const saved = editingAutomationId
+        ? await dispatchAutomationUpdate(
+            automationDispatchContext,
+            { rowKey: editingRowKey ?? '', automationId: editingAutomationId },
+            updates,
+            () => {
+              // Nothing names a host: no captured owner and no record to read one
+              // from, so the save is refused rather than sent unfenced.
+              if (!editSource) {
+                throw new Error(
+                  automationOwnerConflictMessage(AUTOMATION_OWNER_CONFLICT_CODES.ownerChanged)
+                )
+              }
+              return updateAutomationForTarget(editSource, updates, automationHostTarget)
+            },
+            'save',
+            editDestination
+          )
+        : await createDraftAutomation(createInput)
       if (!saved.ok) {
         setEditorNotice(saved.notice)
         return
@@ -1887,9 +1852,7 @@ export default function AutomationsPage(): React.JSX.Element {
       })
       setDraft((current) => ({ ...current, name: '', prompt: '' }))
       await refresh()
-      // A move leaves the edited row behind: the record it selects is a new one
-      // on another host, so its key is found rather than restored.
-      if (editingAutomationId && editingRowKey && !moveTarget) {
+      if (editingAutomationId && editingRowKey) {
         setSelectedAutomationRunPageId(null)
         setSelectedRowKey(editingRowKey)
         setSelectedId(automation.id)
@@ -1900,25 +1863,13 @@ export default function AutomationsPage(): React.JSX.Element {
       if (!editingAutomationId) {
         useAppStore.getState().recordFeatureInteraction('automation-created')
       }
-      // A kept original already raised its own toast; "moved" would contradict it.
-      if (move && !move.originalRemoved) {
-        return
-      }
       toast.success(
-        moveTarget
+        editingAutomationId
           ? translate(
-              'auto.components.automations.AutomationsPage.moved',
-              'Automation moved to {host}.'
-            ).replace('{host}', () => moveTarget.entry.authorityLabel)
-          : editingAutomationId
-            ? translate(
-                'auto.components.automations.AutomationsPage.244727e655',
-                'Automation updated.'
-              )
-            : translate(
-                'auto.components.automations.AutomationsPage.2a20596d6b',
-                'Automation saved.'
-              )
+              'auto.components.automations.AutomationsPage.244727e655',
+              'Automation updated.'
+            )
+          : translate('auto.components.automations.AutomationsPage.2a20596d6b', 'Automation saved.')
       )
     } catch (error) {
       if (isHermesSave) {
@@ -1935,55 +1886,6 @@ export default function AutomationsPage(): React.JSX.Element {
     } finally {
       setIsSaving(false)
     }
-  }
-
-  /**
-   * A record cannot change the authority that stores it, so a save aimed at
-   * another one creates the automation there and deletes the original. A failed
-   * delete leaves two live copies, which is said rather than reported as a move.
-   */
-  const moveAutomationToDestination = async (
-    source: Automation | null,
-    target: AutomationCreateDestination,
-    input: AutomationCreateInput
-  ): Promise<{ saved: AutomationDispatchResult<Automation>; originalRemoved: boolean }> => {
-    if (!source) {
-      return {
-        saved: {
-          ok: false,
-          notice: {
-            message: automationOwnerConflictMessage(AUTOMATION_OWNER_CONFLICT_CODES.ownerChanged),
-            recovery: 'retry',
-            severity: 'owner'
-          }
-        },
-        originalRemoved: false
-      }
-    }
-    const created = toDispatchResult(
-      await createAutomationAtDestination(target.authority, input, target.destination)
-    )
-    if (!created.ok) {
-      return { saved: created, originalRemoved: false }
-    }
-    invalidateWrittenHost(target.entry.stableRef, 'definition')
-    const removed = await dispatchAutomationDelete(
-      automationDispatchContext,
-      { rowKey: editingRowKey ?? '', automationId: source.id },
-      // The dialog's own target, which names the edited row's host even when no
-      // owner was captured to fence the delete with.
-      () => deleteAutomationForTarget(source, automationDialogTarget)
-    )
-    if (!removed.ok) {
-      // Both copies are live; said as such rather than reported as a move.
-      toast.error(
-        translate(
-          'auto.components.automations.AutomationsPage.moveOriginalKept',
-          'Created on {host}, but the original could not be deleted. Remove it on the old host.'
-        ).replace('{host}', () => target.entry.authorityLabel)
-      )
-    }
-    return { saved: created, originalRemoved: removed.ok }
   }
 
   /** Creation states its destination and re-checks it at submit; it never infers one. */
