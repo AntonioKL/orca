@@ -20,17 +20,26 @@ export function normalizeHydratedProjectHostSetupProjection(
   const projectIdByHydratedProjectId = new Map<string, string>()
   let changed = false
   const normalizedSetups = setups.map((setup) => {
-    const repo = repoById.get(setup.repoId) ?? repoById.get(setup.id)
+    // Why: hydrated and remote catalog rows can carry a non-string repoId, but every
+    // consumer treats it as a string (`setup.repoId.trim()`). Coerce once here so a
+    // legacy row cannot crash Settings on open.
+    const repoId = typeof setup.repoId === 'string' ? setup.repoId : ''
+    const repoIdNormalized = repoId !== setup.repoId
+    if (repoIdNormalized) {
+      changed = true
+    }
+    const normalizedSetup = repoIdNormalized ? { ...setup, repoId } : setup
+    const repo = repoById.get(repoId) ?? repoById.get(setup.id)
     if (!repo) {
-      return setup
+      return normalizedSetup
     }
     const projectId = getProjectIdentityKey(repo)
     if (projectId === setup.projectId || projectId === `repo:${repo.id}`) {
-      return setup
+      return normalizedSetup
     }
     changed = true
     projectIdByHydratedProjectId.set(setup.projectId, projectId)
-    return { ...setup, projectId }
+    return { ...normalizedSetup, projectId }
   })
   const normalizedProjects = projects.flatMap((project) => {
     const projectId = projectIdByHydratedProjectId.get(project.id)
