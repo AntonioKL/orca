@@ -102,6 +102,9 @@ export class MobileCrashSessionJournal {
         activeSession,
         ...(abnormal || stored?.latestAbnormalSession
           ? { latestAbnormalSession: abnormal ?? stored?.latestAbnormalSession }
+          : {}),
+        ...(stored?.dismissedAbnormalSessionOpenedAt
+          ? { dismissedAbnormalSessionOpenedAt: stored.dismissedAbnormalSessionOpenedAt }
           : {})
       }
       await this.persistJournal()
@@ -144,6 +147,27 @@ export class MobileCrashSessionJournal {
   async getLatestAbnormalSession(): Promise<MobileCrashSessionSnapshot | null> {
     await this.start()
     return this.enqueue(async () => this.journal?.latestAbnormalSession ?? null)
+  }
+
+  async getUndismissedLatestAbnormalSession(): Promise<MobileCrashSessionSnapshot | null> {
+    await this.start()
+    return this.enqueue(async () => {
+      const latest = this.journal?.latestAbnormalSession
+      return latest?.openedAt === this.journal?.dismissedAbnormalSessionOpenedAt
+        ? null
+        : (latest ?? null)
+    })
+  }
+
+  async dismissLatestAbnormalSession(openedAt: string): Promise<void> {
+    await this.start()
+    await this.enqueue(async () => {
+      if (!this.journal || this.journal.latestAbnormalSession?.openedAt !== openedAt) {
+        return
+      }
+      this.journal.dismissedAbnormalSessionOpenedAt = openedAt
+      await this.persistJournal()
+    })
   }
 
   async buildReport(app: { version: string; platform: string }): Promise<string> {

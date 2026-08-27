@@ -213,7 +213,7 @@ export default function TroubleshootScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {hasPreviousCrashSession && <PreviousCrashSessionBanner />}
+        {hasPreviousCrashSession && <PreviousCrashSessionBanner style={styles.crashBanner} />}
 
         <Pressable
           style={({ pressed }) => [
@@ -320,6 +320,7 @@ export default function TroubleshootScreen() {
 }
 
 const styles = StyleSheet.create({
+  crashBanner: { marginBottom: spacing.lg },
   container: {
     flex: 1,
     backgroundColor: colors.bgBase,

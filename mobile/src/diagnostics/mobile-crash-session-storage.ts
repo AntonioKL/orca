@@ -23,6 +23,7 @@ export type PersistedMobileCrashJournal = {
   version: 1
   activeSession: PersistedMobileCrashSession
   latestAbnormalSession?: MobileCrashSessionSnapshot
+  dismissedAbnormalSessionOpenedAt?: string
 }
 
 export const MOBILE_CRASH_SESSION_STORAGE_KEY = 'orca.mobile-crash-session.v1'
@@ -52,10 +53,15 @@ export function parseMobileCrashJournal(raw: string): PersistedMobileCrashJourna
       return null
     }
     const latestAbnormalSession = parseSnapshot(parsed.latestAbnormalSession)
+    const dismissedAbnormalSessionOpenedAt =
+      typeof parsed.dismissedAbnormalSessionOpenedAt === 'string'
+        ? sanitizeCrashReportString(parsed.dismissedAbnormalSessionOpenedAt, 80)
+        : null
     return {
       version: 1,
       activeSession,
-      ...(latestAbnormalSession ? { latestAbnormalSession } : {})
+      ...(latestAbnormalSession ? { latestAbnormalSession } : {}),
+      ...(dismissedAbnormalSessionOpenedAt ? { dismissedAbnormalSessionOpenedAt } : {})
     }
   } catch {
     return null
@@ -76,6 +82,9 @@ export function serializeMobileCrashJournal(journal: PersistedMobileCrashJournal
             breadcrumbs: [...journal.latestAbnormalSession.breadcrumbs]
           }
         }
+      : {}),
+    ...(journal.dismissedAbnormalSessionOpenedAt
+      ? { dismissedAbnormalSessionOpenedAt: journal.dismissedAbnormalSessionOpenedAt }
       : {})
   }
   let serialized = JSON.stringify(bounded)

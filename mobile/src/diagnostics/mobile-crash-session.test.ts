@@ -149,9 +149,48 @@ describe('mobile crash session journal', () => {
     })
 
     await expect(second.start()).resolves.toBeNull()
+    await expect(second.getUndismissedLatestAbnormalSession()).resolves.toBeNull()
     await expect(
       second.buildReport({ version: '0.0.29', platform: 'android 15' })
     ).resolves.toContain('No previous abnormal session recorded.')
+  })
+
+  it('keeps a report dismissed across a clean relaunch without hiding the next crash', async () => {
+    const storage = new MemoryStorage()
+    const first = new MobileCrashSessionJournal(storage, {
+      now: () => FIRST_SESSION_AT,
+      createSessionId: () => 'session-one'
+    })
+    await first.start()
+
+    const second = new MobileCrashSessionJournal(storage, {
+      now: () => SECOND_SESSION_AT,
+      createSessionId: () => 'session-two'
+    })
+    const previous = await second.start()
+    expect(previous).not.toBeNull()
+    await expect(second.getUndismissedLatestAbnormalSession()).resolves.toEqual(previous)
+
+    await second.dismissLatestAbnormalSession(previous?.openedAt ?? '')
+    await second.recordAppState('background')
+
+    const third = new MobileCrashSessionJournal(storage, {
+      now: () => SECOND_SESSION_AT + 30_000,
+      createSessionId: () => 'session-three'
+    })
+    await third.start()
+    await expect(third.getUndismissedLatestAbnormalSession()).resolves.toBeNull()
+
+    await third.recordRenderError(new Error('a different crash'))
+    await third.recordAppState('background')
+    const fourth = new MobileCrashSessionJournal(storage, {
+      now: () => SECOND_SESSION_AT + 60_000,
+      createSessionId: () => 'session-four'
+    })
+    await fourth.start()
+    await expect(fourth.getUndismissedLatestAbnormalSession()).resolves.toMatchObject({
+      openedAt: new Date(SECOND_SESSION_AT + 30_000).toISOString()
+    })
   })
 
   it('reopens the marker when a backgrounded process becomes active again', async () => {

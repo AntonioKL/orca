@@ -28,6 +28,14 @@ export function getPreviousMobileCrashSession(): Promise<MobileCrashSessionSnaps
   return journal.getLatestAbnormalSession()
 }
 
+export function getUndismissedPreviousMobileCrashSession(): Promise<MobileCrashSessionSnapshot | null> {
+  return journal.getUndismissedLatestAbnormalSession()
+}
+
+export function dismissPreviousMobileCrashSession(openedAt: string): Promise<void> {
+  return journal.dismissLatestAbnormalSession(openedAt)
+}
+
 export function buildMobileCrashDiagnosticsReport(): Promise<string> {
   return journal.buildReport({
     version: Constants.expoConfig?.version ?? 'unknown',
