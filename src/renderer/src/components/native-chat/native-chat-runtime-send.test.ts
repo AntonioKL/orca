@@ -374,7 +374,7 @@ describe('sendNativeChatMessageWithImageAttachments', () => {
 
     expectWriteOrder(sendRuntimePtyInput.mock.calls, [
       NATIVE_CHAT_CLEAR_UNSUBMITTED_INPUT,
-      '\x1b[200~/tmp/a.png\x1b[201~ ',
+      '\x1b[200~/tmp/a.png\x1b[201~',
       '\x1b[200~/tmp/b.png\x1b[201~ '
     ])
   })

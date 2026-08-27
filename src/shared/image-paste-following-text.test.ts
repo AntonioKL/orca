@@ -25,10 +25,10 @@ describe('joinImagePastesAndPrompt', () => {
     expect(joinImagePastesAndPrompt([], PROMPT)).toBe(PROMPT)
   })
 
-  it('separates multiple attachments from each other and from the prompt', () => {
+  it('keeps back-to-back image frames bare and separates only the final frame from prompt text', () => {
     expect(joinImagePastesAndPrompt([IMAGE_A, IMAGE_B], PROMPT)).toBe(
-      `${IMAGE_A} ${IMAGE_B} ${PROMPT}`
+      `${IMAGE_A}${IMAGE_B} ${PROMPT}`
     )
-    expect(joinImagePastesAndPrompt([IMAGE_A, IMAGE_B], '')).toBe(`${IMAGE_A} ${IMAGE_B}`)
+    expect(joinImagePastesAndPrompt([IMAGE_A, IMAGE_B], '')).toBe(`${IMAGE_A}${IMAGE_B}`)
   })
 })

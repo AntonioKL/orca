@@ -19,7 +19,7 @@ export function imagePasteWritesFollowedByText(
   return framedImagePastes.map((paste, index) =>
     separateImagePasteFromFollowingText(
       paste,
-      index < framedImagePastes.length - 1 || followedByText
+      index === framedImagePastes.length - 1 && followedByText
     )
   )
 }
