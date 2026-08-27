@@ -136,7 +136,7 @@ rm -- "$source_recovery_auth" "$source_quarantine_auth" "$destination_recovery_a
 
 export const FINALIZE_ABSENT_AUTH_SCRIPT = `
 set -eu
-[ ! -f "$3" ] || exit 0
+if [ -e "$3" ] || [ -L "$3" ]; then [ -f "$3" ] && [ ! -L "$3" ] || exit 46; exit 0; fi
 ${RESOLVE_LEGACY_HOME_SCRIPT}
 [ ! -e "$legacy_home/auth.json" ] && [ ! -L "$legacy_home/auth.json" ] || exit 41
 umask 077; marker_parent=\${3%/*}; mkdir -p -- "$marker_parent"; temporary_marker="$3.orca-drain-$$"; trap 'rm -f -- "$temporary_marker"' EXIT; trap 'rm -f -- "$temporary_marker"; exit 129' HUP INT TERM; printf '%s\\n' '{"completed":true}' > "$temporary_marker"; chmod 600 "$temporary_marker"; mv -f -- "$temporary_marker" "$3"

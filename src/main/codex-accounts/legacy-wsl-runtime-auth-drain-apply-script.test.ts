@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { _internals } from './legacy-wsl-runtime-auth-drain'
+import { FINALIZE_ABSENT_AUTH_SCRIPT } from './legacy-wsl-runtime-auth-drain-scripts'
 
 const isWindows = process.platform === 'win32'
 const SOURCE = '{"tokens":{"expires_at":2000}}\n'
@@ -225,5 +226,32 @@ describe.skipIf(isWindows)('legacy WSL auth drain race guard', () => {
     expect(outcome.source).toBeNull()
     expect(outcome.target).toBe(TARGET)
     expect(outcome.marker).toBe(true)
+  })
+})
+
+describe.skipIf(isWindows)('legacy WSL auth drain absent-source finalization', () => {
+  it('rejects a symlinked completion marker', () => {
+    const root = mkdtempSync(join(tmpdir(), 'orca-drain-finalize-'))
+    const legacy = join(root, 'legacy')
+    const markerTarget = join(root, 'marker-target')
+    const marker = join(root, 'marker')
+    mkdirSync(legacy)
+    writeFileSync(markerTarget, '{"completed":true}\n')
+    symlinkSync(markerTarget, marker)
+
+    let status = 0
+    try {
+      execFileSync(
+        '/bin/sh',
+        ['-c', FINALIZE_ABSENT_AUTH_SCRIPT, 'sh', legacy, join(root, 'active'), marker],
+        { stdio: 'ignore' }
+      )
+    } catch (error) {
+      status = (error as { status?: number }).status ?? -1
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+
+    expect(status).toBe(46)
   })
 })
