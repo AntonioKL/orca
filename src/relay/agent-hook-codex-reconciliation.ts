@@ -45,8 +45,13 @@ export function reconcileRelayCodexEvent(
   }
   seedCodexStateFromSnapshot(state, event.paneKey, event.payload)
   const transcript = getOrCreateCodexSubagentTranscriptState(state, event.paneKey)
-  if (event.payload.subagents?.length) {
-    seedCodexSubagentTranscriptFromSnapshot(transcript, event.payload.subagents, transcriptPath)
+  if (event.payload.subagents?.length || event.codexSubagentsAuthoritative === true) {
+    seedCodexSubagentTranscriptFromSnapshot(
+      transcript,
+      event.payload.subagents ?? [],
+      transcriptPath,
+      { authoritative: event.codexSubagentsAuthoritative === true }
+    )
   }
   const roster = getOrCreateCodexSubagentRoster(state, event.paneKey)
   reconcileCodexSubagentTranscript(transcript, roster, transcriptPath)
@@ -64,12 +69,32 @@ export function reconcileRelayCodexEvent(
           : {}
       : {})
   }
+  const codexAuthoritativeParentState =
+    options.reconcileParentState &&
+    transcript.parentReadable === true &&
+    transcript.parentTerminalObserved !== undefined
+      ? transcript.parentTerminalObserved
+        ? ('done' as const)
+        : payload.state === 'waiting' &&
+            !payload.subagents?.some((subagent) => subagent.state === 'waiting')
+          ? ('waiting' as const)
+          : ('working' as const)
+      : undefined
   const transcriptUnreadable =
     transcript.parentReadable === false ||
     [...transcript.subagents.values()].some((child) => child.unresolvedSince)
+  const reconciledEvent = {
+    ...event,
+    payload,
+    codexSubagentsAuthoritative:
+      transcript.parentReadable === true && transcript.parent.coverageAuthoritative
+        ? true
+        : undefined,
+    codexAuthoritativeParentState
+  }
   return transcriptUnreadable
-    ? { ...event, payload }
+    ? reconciledEvent
     : event.reconcileDiagnostic?.reason === 'transcript-unreadable'
-      ? { ...event, payload, reconcileDiagnostic: null }
-      : { ...event, payload }
+      ? { ...reconciledEvent, reconcileDiagnostic: null }
+      : reconciledEvent
 }

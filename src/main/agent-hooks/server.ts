@@ -80,6 +80,7 @@ import { codexRosterToSnapshots } from '../../shared/codex-subagent-roster'
 import { reconcileCodexSubagentTranscript } from '../../shared/codex-subagent-transcript'
 import { seedCodexSubagentTranscriptFromSnapshot } from '../../shared/codex-subagent-transcript-seeding'
 import {
+  hasShedSubagentsField,
   isAgentHookSource,
   restoreShedStatusFields,
   type AgentHookSource
@@ -1506,7 +1507,12 @@ export class AgentHookServer {
               diagnosticAwarePayload.hookEventName,
               diagnosticAwarePayload.toolAgentId,
               diagnosticAwarePayload.payload,
-              previous?.payload
+              previous?.payload,
+              {
+                subagentsAuthoritative: diagnosticAwarePayload.codexSubagentsAuthoritative === true,
+                subagentsShed: diagnosticAwarePayload.codexSubagentsShed === true,
+                authoritativeParentState: diagnosticAwarePayload.codexAuthoritativeParentState
+              }
             )
           }
         : diagnosticAwarePayload
@@ -2486,6 +2492,8 @@ export class AgentHookServer {
       providerSessionOnly?: unknown
       reconcileDiagnostic?: unknown
       isReplay?: boolean
+      codexSubagentsAuthoritative?: unknown
+      codexAuthoritativeParentState?: unknown
       /** Payload fields the relay dropped to fit an oversized frame; validated below. */
       shedFields?: unknown
       claudeRunningNonAgentTask?: unknown
@@ -2708,6 +2716,17 @@ export class AgentHookServer {
       providerSessionOnly: envelope.providerSessionOnly === true ? true : undefined,
       ...(reconcileDiagnostic !== undefined ? { reconcileDiagnostic } : {}),
       isReplay: envelope.isReplay === true ? true : undefined,
+      codexSubagentsAuthoritative:
+        envelope.codexSubagentsAuthoritative === true && !hasShedSubagentsField(envelope.shedFields)
+          ? true
+          : undefined,
+      codexSubagentsShed: hasShedSubagentsField(envelope.shedFields) ? true : undefined,
+      codexAuthoritativeParentState:
+        envelope.codexAuthoritativeParentState === 'working' ||
+        envelope.codexAuthoritativeParentState === 'waiting' ||
+        envelope.codexAuthoritativeParentState === 'done'
+          ? envelope.codexAuthoritativeParentState
+          : undefined,
       claudeRunningNonAgentTask:
         typeof envelope.claudeRunningNonAgentTask === 'boolean'
           ? envelope.claudeRunningNonAgentTask

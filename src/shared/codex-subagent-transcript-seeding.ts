@@ -9,7 +9,8 @@ export function seedCodexSubagentTranscriptFromSnapshot(
   state: CodexSubagentTranscriptState,
   snapshots: readonly (Pick<AgentSubagentSnapshot, 'id' | 'description' | 'startedAt' | 'model'> &
     Partial<Pick<AgentSubagentSnapshot, 'state'>>)[],
-  transcriptPath?: string
+  transcriptPath?: string,
+  options: { authoritative?: boolean } = {}
 ): void {
   const normalizedPath = transcriptPath?.trim()
   if (
@@ -18,10 +19,13 @@ export function seedCodexSubagentTranscriptFromSnapshot(
     extname(normalizedPath) === '.jsonl' &&
     state.parent.filePath !== normalizedPath
   ) {
-    state.parent = { filePath: normalizedPath, offset: 0, carry: '' }
+    state.parent = { filePath: normalizedPath, offset: 0, carry: '', coverageAuthoritative: false }
     state.subagents.clear()
     state.parentTerminalObserved = undefined
     state.parentReadable = undefined
+  }
+  if (options.authoritative) {
+    state.parent.coverageAuthoritative = true
   }
   for (const snapshot of snapshots) {
     if (!SAFE_THREAD_ID.test(snapshot.id) || state.subagents.has(snapshot.id)) {
@@ -30,6 +34,7 @@ export function seedCodexSubagentTranscriptFromSnapshot(
     state.subagents.set(snapshot.id, {
       offset: 0,
       carry: '',
+      coverageAuthoritative: false,
       description: snapshot.description,
       model: snapshot.model,
       restoredState:

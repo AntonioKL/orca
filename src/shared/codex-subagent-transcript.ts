@@ -19,6 +19,7 @@ type JsonlCursor = {
   filePath?: string
   offset: number
   carry: string
+  coverageAuthoritative: boolean
 }
 
 type TrackedTranscriptSubagent = JsonlCursor & {
@@ -61,8 +62,12 @@ function readJsonlCursor(cursor: JsonlCursor): JsonRecord[] | undefined {
   if (stats.size < cursor.offset) {
     cursor.offset = 0
     cursor.carry = ''
+    cursor.coverageAuthoritative = false
   }
   if (stats.size === cursor.offset) {
+    if (cursor.offset === 0) {
+      cursor.coverageAuthoritative = true
+    }
     return []
   }
   const bytesToRead = Math.min(stats.size - cursor.offset, TRANSCRIPT_READ_MAX_BYTES)
@@ -81,6 +86,12 @@ function readJsonlCursor(cursor: JsonlCursor): JsonRecord[] | undefined {
     }
   }
   const skippedPrefix = start !== cursor.offset
+  if (skippedPrefix) {
+    cursor.coverageAuthoritative = false
+  }
+  if (start === 0 && cursor.offset === 0) {
+    cursor.coverageAuthoritative = true
+  }
   const content = `${skippedPrefix ? '' : cursor.carry}${buffer.toString('utf8', 0, bytesRead)}`
   const lines = content.split('\n')
   cursor.offset = start + bytesRead
@@ -168,7 +179,7 @@ function childIsComplete(records: JsonRecord[]): boolean {
 
 export function createCodexSubagentTranscriptState(): CodexSubagentTranscriptState {
   return {
-    parent: { offset: 0, carry: '' },
+    parent: { offset: 0, carry: '', coverageAuthoritative: false },
     subagents: new Map()
   }
 }
@@ -195,7 +206,7 @@ export function reconcileCodexSubagentTranscript(
     for (const id of state.subagents.keys()) {
       finishCodexSubagent(roster, id)
     }
-    state.parent = { filePath: normalizedPath, offset: 0, carry: '' }
+    state.parent = { filePath: normalizedPath, offset: 0, carry: '', coverageAuthoritative: false }
     state.subagents.clear()
     state.parentTerminalObserved = undefined
     state.parentReadable = undefined
@@ -221,6 +232,7 @@ export function reconcileCodexSubagentTranscript(
     const tracked = state.subagents.get(activity.id) ?? {
       offset: 0,
       carry: '',
+      coverageAuthoritative: false,
       startedAt: activity.startedAt
     }
     tracked.description = activity.description ?? tracked.description

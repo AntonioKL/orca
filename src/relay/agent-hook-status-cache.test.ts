@@ -126,9 +126,71 @@ describe('relay agent-hook status cache', () => {
       }
 
       expect(reconcileRelayCodexEvent(state, live).payload.state).toBe('working')
-      expect(
-        reconcileRelayCodexEvent(state, live, { reconcileParentState: true }).payload.state
-      ).toBe('done')
+      const restart = reconcileRelayCodexEvent(state, live, { reconcileParentState: true })
+      expect(restart.payload.state).toBe('done')
+      expect(restart.codexAuthoritativeParentState).toBe('done')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('does not claim an authoritative roster when an initial read skips old parent history', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'relay-hook-status-cache-long-parent-'))
+    try {
+      const transcriptPath = join(dir, 'rollout-parent.jsonl')
+      writeFileSync(
+        transcriptPath,
+        `${JSON.stringify({ type: 'ignored', payload: 'x'.repeat(1024 * 1024) })}\n${JSON.stringify(
+          { type: 'event_msg', payload: { type: 'task_started' } }
+        )}\n`
+      )
+      const state = createHookListenerState()
+      const reconciled = reconcileRelayCodexEvent(
+        state,
+        {
+          ...event('PostToolUse'),
+          providerSession: { key: 'session_id', id: 'session-1', transcriptPath }
+        },
+        { reconcileParentState: true }
+      )
+
+      expect(reconciled.codexSubagentsAuthoritative).toBeUndefined()
+      expect(reconciled.codexAuthoritativeParentState).toBe('working')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('drops seeded roster authority when more than one read window arrives between polls', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'relay-hook-status-cache-parent-gap-'))
+    try {
+      const transcriptPath = join(dir, 'rollout-parent.jsonl')
+      writeFileSync(
+        transcriptPath,
+        `${JSON.stringify({ type: 'event_msg', payload: { type: 'task_started' } })}\n`
+      )
+      const state = createHookListenerState()
+      const initial = reconcileRelayCodexEvent(state, {
+        ...event('PostToolUse'),
+        codexSubagentsAuthoritative: true,
+        providerSession: { key: 'session_id', id: 'session-1', transcriptPath }
+      })
+      expect(initial.codexSubagentsAuthoritative).toBe(true)
+
+      writeFileSync(
+        transcriptPath,
+        `${JSON.stringify({ type: 'event_msg', payload: { type: 'task_started' } })}\n${JSON.stringify({ type: 'ignored', payload: 'x'.repeat(1024 * 1024) })}\n${JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete' } })}\n`
+      )
+      const afterGap = reconcileRelayCodexEvent(
+        state,
+        {
+          ...event('PostToolUse'),
+          providerSession: { key: 'session_id', id: 'session-1', transcriptPath }
+        },
+        { reconcileParentState: true }
+      )
+
+      expect(afterGap.codexSubagentsAuthoritative).toBeUndefined()
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

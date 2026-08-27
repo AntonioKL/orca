@@ -69,6 +69,7 @@ describe('RelayAgentHookServer Codex subagent transcript polling', () => {
 
       expect(response.status).toBe(204)
       expect(forward.mock.calls[0]?.[0].payload.subagents).toHaveLength(1)
+      expect(forward.mock.calls[0]?.[0].codexSubagentsAuthoritative).toBe(true)
 
       appendFileSync(childPath, line({ type: 'event_msg', payload: { type: 'task_complete' } }))
       await vi.waitFor(
@@ -136,6 +137,7 @@ describe('RelayAgentHookServer Codex subagent transcript polling', () => {
           expect(secondForward.mock.calls.at(-1)?.[0].payload.subagents).toBeUndefined()
           expect(secondForward.mock.calls.at(-1)?.[0].payload.state).toBe('working')
           expect(secondForward.mock.calls.at(-1)?.[0].isReplay).toBe(true)
+          expect(secondForward.mock.calls.at(-1)?.[0].codexSubagentsAuthoritative).toBe(true)
           expect(secondForward).toHaveBeenCalledTimes(2)
         },
         { timeout: 2_000, interval: 50 }
