@@ -3441,15 +3441,14 @@ export default function SessionScreen() {
       clearPendingLiveInputCommit()
       sessionTabActionSheetRequestSeqRef.current += 1
       clearSessionTabActionSheetKeyboardListener()
-      stopAccessoryRepeat()
+      accessoryRepeatRef.current.cancel()
     },
     [
       clearPendingLiveInputCommit,
       clearDelayedActionTimers,
       clearSessionTabActionSheetKeyboardListener,
       clearTerminalCache,
-      clearToastHideTimer,
-      stopAccessoryRepeat
+      clearToastHideTimer
     ]
   )
 

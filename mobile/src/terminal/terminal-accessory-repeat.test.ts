@@ -82,6 +82,52 @@ describe('terminal accessory repeat', () => {
     repeat.stop()
   })
 
+  it('preserves a queued tap released before the previous send settles', async () => {
+    vi.useFakeTimers()
+    const first = deferred()
+    const sent: string[] = []
+    const send = vi.fn((input: string) => {
+      sent.push(input)
+      return input === 'down' ? first.promise.then(() => true) : Promise.resolve(true)
+    })
+    const repeat = createTerminalAccessoryRepeatController<string>()
+
+    repeat.start('down', send)
+    repeat.stop()
+    repeat.start('up', send)
+    repeat.stop()
+
+    expect(sent).toEqual(['down'])
+
+    first.resolve()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(sent).toEqual(['down', 'up'])
+
+    await vi.runAllTimersAsync()
+    expect(send).toHaveBeenCalledTimes(2)
+  })
+
+  it('cancels a queued tap during lifecycle cleanup', async () => {
+    vi.useFakeTimers()
+    const first = deferred()
+    const sent: string[] = []
+    const send = vi.fn((input: string) => {
+      sent.push(input)
+      return input === 'down' ? first.promise.then(() => true) : Promise.resolve(true)
+    })
+    const repeat = createTerminalAccessoryRepeatController<string>()
+
+    repeat.start('down', send)
+    repeat.stop()
+    repeat.start('up', send)
+    repeat.cancel()
+
+    first.resolve()
+    await vi.runAllTimersAsync()
+
+    expect(sent).toEqual(['down'])
+  })
+
   it('stops repeating when the transport rejects a send', async () => {
     vi.useFakeTimers()
     const send = vi.fn(() => Promise.reject(new Error('disconnected')))
