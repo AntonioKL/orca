@@ -10,6 +10,8 @@ export function createRun(
     objective: string
     coordinatorHandle: string
     coordinatorPaneKey: string
+    coordinatorProcessIncarnation?: string | null
+    coordinatorHostScope?: string | null
   }
 ): RunRow {
   const id = generateId('run')
@@ -20,10 +22,18 @@ export function createRun(
       .prepare(
         `INSERT INTO runs (
            id, objective, coordinator_handle, coordinator_pane_key,
+           coordinator_process_incarnation, coordinator_host_scope,
            consumer_generation, legacy
-         ) VALUES (?, ?, ?, ?, 1, 0)`
+         ) VALUES (?, ?, ?, ?, ?, ?, 1, 0)`
       )
-      .run(id, params.objective, params.coordinatorHandle, params.coordinatorPaneKey)
+      .run(
+        id,
+        params.objective,
+        params.coordinatorHandle,
+        params.coordinatorPaneKey,
+        params.coordinatorProcessIncarnation ?? null,
+        params.coordinatorHostScope ?? null
+      )
     this.rememberRunCoordinatorHandle(id, params.coordinatorHandle)
     this.db.exec('COMMIT')
   } catch (error) {

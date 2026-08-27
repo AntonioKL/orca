@@ -142,7 +142,14 @@ describe('OrchestrationDb Run state', () => {
       const rebound = d.bindRun({
         runId: run.id,
         coordinatorHandle: 'term_new',
-        coordinatorPaneKey: 'tab_new:22222222-2222-4222-9222-222222222222'
+        coordinatorPaneKey: 'tab_new:22222222-2222-4222-9222-222222222222',
+        incumbentObservation: {
+          coordinatorHandle: 'term_coord',
+          coordinatorPaneKey: 'tab_coord:11111111-1111-4111-8111-111111111111',
+          coordinatorProcessIncarnation: null,
+          coordinatorHostScope: null,
+          status: 'exited'
+        }
       })!
 
       let fencedError: unknown
@@ -162,6 +169,38 @@ describe('OrchestrationDb Run state', () => {
       })
       expect(replacement?.delivery.id).not.toBe(oldDelivery.delivery.id)
       expect(replacement?.messages.map((message) => message.subject)).toEqual(['one'])
+    })
+
+    it('preserves an outstanding batch across a same-process handle remint', () => {
+      const d = createDb()
+      const run = d.createRun({
+        objective: 'Mailbox continuity',
+        coordinatorHandle: 'term_old',
+        coordinatorPaneKey: 'tab_old:11111111-1111-4111-8111-111111111111',
+        coordinatorProcessIncarnation: 'pty:incarnation-1',
+        coordinatorHostScope: JSON.stringify({ kind: 'local', hostId: 'local' })
+      })
+      d.insertMessage({ from: 'a', to: `run:${run.id}`, subject: 'one', runId: run.id })
+      const delivery = d.getOrCreateRunDelivery({
+        runId: run.id,
+        consumerGeneration: run.consumer_generation
+      })!
+
+      const rebound = d.bindRun({
+        runId: run.id,
+        coordinatorHandle: 'term_reminted',
+        coordinatorPaneKey: 'tab_reminted:22222222-2222-4222-9222-222222222222',
+        coordinatorProcessIncarnation: 'pty:incarnation-1',
+        coordinatorHostScope: JSON.stringify({ kind: 'local', hostId: 'local' })
+      })!
+
+      expect(rebound.consumer_generation).toBe(run.consumer_generation)
+      expect(
+        d.getOrCreateRunDelivery({
+          runId: run.id,
+          consumerGeneration: run.consumer_generation
+        })?.delivery.id
+      ).toBe(delivery.delivery.id)
     })
 
     it('does not move a mismatched Run through another Run Dispatch mailbox', () => {
@@ -250,7 +289,7 @@ describe('OrchestrationDb Run state', () => {
       )
     })
 
-    it('rebinds a Run by incrementing its consumer generation', () => {
+    it('rebinds a Run after proven coordinator exit by incrementing its consumer generation', () => {
       const d = createDb()
       const run = d.createRun({
         objective: 'Move coordinator',
@@ -262,7 +301,14 @@ describe('OrchestrationDb Run state', () => {
         d.bindRun({
           runId: run.id,
           coordinatorHandle: 'term_new',
-          coordinatorPaneKey: 'tab_new:22222222-2222-4222-9222-222222222222'
+          coordinatorPaneKey: 'tab_new:22222222-2222-4222-9222-222222222222',
+          incumbentObservation: {
+            coordinatorHandle: 'term_old',
+            coordinatorPaneKey: 'tab_old:11111111-1111-4111-8111-111111111111',
+            coordinatorProcessIncarnation: null,
+            coordinatorHostScope: null,
+            status: 'exited'
+          }
         })
       ).toMatchObject({
         coordinator_handle: 'term_new',
@@ -276,6 +322,49 @@ describe('OrchestrationDb Run state', () => {
           coordinatorPaneKey: 'tab_new:22222222-2222-4222-9222-222222222222'
         })
       ).toBeUndefined()
+    })
+
+    it('fences a second takeover that races using a stale exited-owner observation', () => {
+      const d = createDb()
+      const oldPane = 'tab_old:11111111-1111-4111-8111-111111111111'
+      const run = d.createRun({
+        objective: 'Single winner',
+        coordinatorHandle: 'term_old',
+        coordinatorPaneKey: oldPane,
+        coordinatorProcessIncarnation: 'pty-old:incarnation-1',
+        coordinatorHostScope: JSON.stringify({ kind: 'ssh', targetId: 'target-1' })
+      })
+      const observation = {
+        coordinatorHandle: 'term_old',
+        coordinatorPaneKey: oldPane,
+        coordinatorProcessIncarnation: 'pty-old:incarnation-1',
+        coordinatorHostScope: JSON.stringify({ kind: 'ssh', targetId: 'target-1' }),
+        status: 'exited' as const
+      }
+
+      d.bindRun({
+        runId: run.id,
+        coordinatorHandle: 'term_winner',
+        coordinatorPaneKey: 'tab_winner:22222222-2222-4222-9222-222222222222',
+        coordinatorProcessIncarnation: 'pty-winner:incarnation-1',
+        coordinatorHostScope: JSON.stringify({ kind: 'local', hostId: 'local' }),
+        incumbentObservation: observation
+      })
+
+      expect(() =>
+        d.bindRun({
+          runId: run.id,
+          coordinatorHandle: 'term_loser',
+          coordinatorPaneKey: 'tab_loser:33333333-3333-4333-8333-333333333333',
+          coordinatorProcessIncarnation: 'pty-loser:incarnation-1',
+          coordinatorHostScope: JSON.stringify({ kind: 'wsl', hostId: 'local', distro: 'Ubuntu' }),
+          incumbentObservation: observation
+        })
+      ).toThrow(expect.objectContaining({ code: 'consumer_fenced' }))
+      expect(d.getRun(run.id)).toMatchObject({
+        coordinator_handle: 'term_winner',
+        consumer_generation: run.consumer_generation + 1
+      })
     })
 
     it('associates task, dispatch, message, and gate rows with the selected Run', () => {

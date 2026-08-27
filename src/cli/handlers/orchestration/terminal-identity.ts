@@ -127,6 +127,21 @@ export async function resolveCoordinatorTerminalHandle(
   })
 }
 
+export async function resolveOptionalCoordinatorTerminalHandle(
+  flags: Map<string, string | boolean>,
+  cwd: string,
+  client: RuntimeClient
+): Promise<string | undefined> {
+  try {
+    return await resolveCoordinatorTerminalHandle(flags, cwd, client)
+  } catch (err) {
+    if (getClientErrorCode(err) === 'no_active_sender_terminal') {
+      return undefined
+    }
+    throw err
+  }
+}
+
 async function resolveImplicitOrchestrationSender(
   flags: Map<string, string | boolean>,
   cwd: string,

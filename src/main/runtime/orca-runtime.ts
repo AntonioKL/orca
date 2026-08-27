@@ -18094,8 +18094,11 @@ export class OrcaRuntimeService {
     if (!hostScope || !this.ptyController?.listProcesses) {
       return 'unverifiable'
     }
+    const deadlineMs = Date.now() + PTY_CONTROLLER_LIST_TIMEOUT_MS
     const listed = await withTimeoutResult(
-      this.ptyController.listProcesses(hostScope.kind === 'ssh' ? hostScope.targetId : null),
+      this.ptyController.listProcesses(hostScope.kind === 'ssh' ? hostScope.targetId : null, {
+        deadlineMs
+      }),
       PTY_CONTROLLER_LIST_TIMEOUT_MS
     )
     if (!listed.ok) {

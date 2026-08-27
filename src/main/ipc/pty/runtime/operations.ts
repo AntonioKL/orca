@@ -184,7 +184,7 @@ export async function listProcessesWithHostScopeFromRuntimeController(
         : LOCAL_EXECUTION_HOST_ID
       try {
         return {
-          processes: await (connectionId ? provider.listProcesses(opts) : provider.listProcesses()),
+          processes: await provider.listProcesses(opts),
           hostId
         }
       } catch (error) {
@@ -209,7 +209,7 @@ export async function listProcessesFromRuntimeController(
   opts?: { deadlineMs?: number }
 ) {
   if (connectionId === null) {
-    return localProvider.listProcesses()
+    return localProvider.listProcesses(opts)
   }
   if (connectionId !== undefined) {
     try {

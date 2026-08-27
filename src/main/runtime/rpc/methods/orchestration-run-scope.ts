@@ -6,6 +6,7 @@ import type {
   OrcaRuntimeService,
   OrchestrationCompatibilityCallerAuthority
 } from '../../orca-runtime'
+import { isCallerCurrentRunCoordinator } from './orchestration-coordinator-caller'
 
 export type RunScopeParams = {
   runId?: string
@@ -109,7 +110,10 @@ export function resolveRunScope(runtime: OrcaRuntimeService, params: RunScopePar
     )
   }
   const current = db.getCurrentRunForPane(paneKey)
-  if (!current) {
+  if (
+    !current ||
+    !isCallerCurrentRunCoordinator(runtime, current, params.callerTerminalHandle, paneKey)
+  ) {
     if (explicit) {
       throw new OrchestrationError(
         'consumer_fenced',

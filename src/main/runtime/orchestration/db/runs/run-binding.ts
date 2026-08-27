@@ -1,8 +1,17 @@
 import type { RunRow } from '../../types'
 import { OrchestrationError } from '../../orchestration-error'
+import { isCurrentRunCoordinator } from '../../run-coordinator-authority'
 import { LEGACY_CONTRACT_VERSION } from '../contract-constants'
 import { isEquivalentPaneKey } from '../pane-key-match'
 import type { OrchestrationDb } from '../orchestration-db'
+
+export type RunCoordinatorObservation = {
+  coordinatorHandle: string | null
+  coordinatorPaneKey: string | null
+  coordinatorProcessIncarnation: string | null
+  coordinatorHostScope: string | null
+  status: 'live' | 'unverifiable' | 'exited'
+}
 
 export function bindRun(
   this: OrchestrationDb,
@@ -10,6 +19,10 @@ export function bindRun(
     runId: string
     coordinatorHandle: string
     coordinatorPaneKey: string
+    coordinatorProcessIncarnation?: string | null
+    coordinatorHostScope?: string | null
+    authorityContinuity?: boolean
+    incumbentObservation?: RunCoordinatorObservation
     takeoverLegacy?: boolean
     legacyCoordinatorAuthority?: {
       runId: string
@@ -30,8 +43,31 @@ export function bindRun(
     const sameBinding =
       run.coordinator_pane_key !== null &&
       isEquivalentPaneKey(run.coordinator_pane_key, params.coordinatorPaneKey)
+    const sameAuthority =
+      params.authorityContinuity === true ||
+      isCurrentRunCoordinator(run, {
+        handle: params.coordinatorHandle,
+        paneKey: params.coordinatorPaneKey,
+        processIncarnation: params.coordinatorProcessIncarnation ?? null,
+        hostScope: params.coordinatorHostScope ?? null
+      })
     const adoption = this.getLegacyAdoption()
     const adoptedRun = adoption?.adopted_run_id === params.runId
+    const observation = params.incumbentObservation
+    const observationMatches =
+      observation?.coordinatorHandle === run.coordinator_handle &&
+      observation.coordinatorPaneKey === run.coordinator_pane_key &&
+      observation.coordinatorProcessIncarnation === run.coordinator_process_incarnation &&
+      observation.coordinatorHostScope === run.coordinator_host_scope
+    const hasIncumbentAuthority = Boolean(
+      run.coordinator_handle ||
+      run.coordinator_pane_key ||
+      run.coordinator_process_incarnation ||
+      run.coordinator_host_scope
+    )
+    const requiresAuthorityProof =
+      hasIncumbentAuthority &&
+      Boolean(observation || run.coordinator_process_incarnation || run.coordinator_host_scope)
     const legacyAuthority = params.legacyCoordinatorAuthority
     const legacyPrincipalId = legacyAuthority?.principalId
     const legacyPrincipal = legacyPrincipalId
@@ -109,6 +145,22 @@ export function bindRun(
         }
       )
     }
+    if (
+      requiresAuthorityProof &&
+      !sameAuthority &&
+      !provenLegacyBinding &&
+      !params.takeoverLegacy &&
+      (!observationMatches || observation.status !== 'exited')
+    ) {
+      const coordinatorStatus = observationMatches ? observation.status : 'unverifiable'
+      throw new OrchestrationError(
+        'consumer_fenced',
+        coordinatorStatus === 'live'
+          ? 'This Run is owned by another live coordinator. No effects were applied.'
+          : 'This Run coordinator could not be proven exited. Retry from the owning coordinator terminal after connectivity is restored. No effects were applied.',
+        { effectsApplied: false, coordinatorStatus }
+      )
+    }
     this.unbindOtherRunsForPane(params.coordinatorPaneKey, params.runId)
     for (const handle of new Set(
       [run.coordinator_handle, params.coordinatorHandle].filter((value): value is string =>
@@ -118,11 +170,12 @@ export function bindRun(
       this.rememberRunCoordinatorHandle(params.runId, handle)
       this.routeAllUnreadDirectMessagesToRunMailbox(params.runId, handle)
     }
-    if (
-      (params.takeoverLegacy && !takeoverAlreadyApplied) ||
+    const bindingMetadataChanged =
       !sameBinding ||
-      run.coordinator_handle !== params.coordinatorHandle
-    ) {
+      run.coordinator_handle !== params.coordinatorHandle ||
+      run.coordinator_process_incarnation !== (params.coordinatorProcessIncarnation ?? null) ||
+      run.coordinator_host_scope !== (params.coordinatorHostScope ?? null)
+    if ((params.takeoverLegacy && !takeoverAlreadyApplied) || bindingMetadataChanged) {
       if (adoptedRun && (params.takeoverLegacy || !activeLegacyAssignment)) {
         if (
           coordinatorPrincipal?.status === 'committed' &&
@@ -133,16 +186,28 @@ export function bindRun(
           this.setLegacyCompatibilityPrincipalStatus(coordinatorPrincipal.id, 'revoked')
         }
       }
+      const changesAuthority = !sameAuthority || Boolean(params.takeoverLegacy)
       this.db
         .prepare(
           `UPDATE runs
            SET coordinator_handle = ?, coordinator_pane_key = ?,
-               consumer_generation = consumer_generation + 1,
+               coordinator_process_incarnation = ?, coordinator_host_scope = ?,
+               coordinator_authority_revision = coordinator_authority_revision + 1,
+               consumer_generation = consumer_generation + ?,
                updated_at = datetime('now')
            WHERE id = ?`
         )
-        .run(params.coordinatorHandle, params.coordinatorPaneKey, params.runId)
-      this.fenceOutstandingDelivery(params.runId)
+        .run(
+          params.coordinatorHandle,
+          params.coordinatorPaneKey,
+          params.coordinatorProcessIncarnation ?? null,
+          params.coordinatorHostScope ?? null,
+          changesAuthority ? 1 : 0,
+          params.runId
+        )
+      if (changesAuthority) {
+        this.fenceOutstandingDelivery(params.runId)
+      }
       if (params.takeoverLegacy || replacesLegacyCoordinator) {
         this.promoteLegacyCoordinatorMailForTakeover(params.runId, retainedCoordinatorHandle)
       }

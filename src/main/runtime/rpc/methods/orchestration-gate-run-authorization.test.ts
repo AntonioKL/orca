@@ -237,7 +237,12 @@ describe('orchestration gate Run authorization', () => {
 
     expect(response).toMatchObject({
       ok: true,
-      result: { runId: runA, count: 1, gates: [{ id: ownGate.id }] }
+      result: {
+        runId: runA,
+        binding: { currentConsumer: false },
+        count: 1,
+        gates: [{ id: ownGate.id }]
+      }
     })
   })
 

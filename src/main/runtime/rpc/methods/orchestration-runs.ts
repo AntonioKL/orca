@@ -7,6 +7,41 @@ import {
   assertCallerHandleMatchesEvidence,
   resolveOrchestrationCaller
 } from './orchestration-run-scope'
+import type { RunRow } from '../../orchestration/types'
+import { isCurrentRunCoordinator } from '../../orchestration/run-coordinator-authority'
+import {
+  isCallerCurrentRunCoordinator,
+  resolveRunCoordinatorIdentity
+} from './orchestration-coordinator-caller'
+
+async function observeRunCoordinator(
+  runtime: Parameters<typeof resolveOrchestrationCaller>[0],
+  run: RunRow
+) {
+  let status: 'live' | 'unverifiable' | 'exited' = 'unverifiable'
+  if (run.coordinator_process_incarnation && run.coordinator_host_scope) {
+    status = await runtime.inspectTerminalProcessIncarnationLiveness(
+      run.coordinator_process_incarnation,
+      run.coordinator_host_scope
+    )
+  } else if (run.coordinator_handle) {
+    const verdict = runtime.getTerminalLivenessVerdict(run.coordinator_handle)
+    if (runtime.getLiveTerminalPaneKey(run.coordinator_handle) || verdict?.status === 'live') {
+      status = 'live'
+    } else if (verdict?.status === 'unverifiable') {
+      status = 'unverifiable'
+    } else if (verdict?.status === 'exited') {
+      status = 'exited'
+    }
+  }
+  return {
+    coordinatorHandle: run.coordinator_handle,
+    coordinatorPaneKey: run.coordinator_pane_key,
+    coordinatorProcessIncarnation: run.coordinator_process_incarnation,
+    coordinatorHostScope: run.coordinator_host_scope,
+    status
+  }
+}
 
 const RunCreateParams = z.object({
   objective: requiredString('Missing --objective'),
@@ -38,10 +73,13 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
       })
       const db = runtime.getOrchestrationDb()
       const priorRun = db.getCurrentRunForPane(paneKey)
+      const identity = resolveRunCoordinatorIdentity(runtime, params.from, paneKey)
       const run = db.createRun({
         objective: params.objective,
         coordinatorHandle: params.from,
-        coordinatorPaneKey: paneKey
+        coordinatorPaneKey: paneKey,
+        coordinatorProcessIncarnation: identity.processIncarnation,
+        coordinatorHostScope: identity.hostScope
       })
       runtime.cancelMessageWaiters(params.from)
       if (priorRun) {
@@ -53,7 +91,7 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
   defineMethod({
     name: 'orchestration.runUse',
     params: RunUseParams,
-    handler: (
+    handler: async (
       params,
       {
         runtime,
@@ -81,11 +119,39 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
       }
       assertCallerHandleMatchesEvidence(runtime, params.from, orchestrationCompatibilityEvidence)
       const db = runtime.getOrchestrationDb()
+      const targetRun = db.getRun(params.id)
+      const identity = resolveRunCoordinatorIdentity(runtime, params.from, paneKey)
+      const incumbentIdentity =
+        targetRun &&
+        !targetRun.coordinator_process_incarnation &&
+        targetRun.coordinator_handle &&
+        targetRun.coordinator_handle !== params.from
+          ? resolveRunCoordinatorIdentity(
+              runtime,
+              targetRun.coordinator_handle,
+              targetRun.coordinator_pane_key
+            )
+          : null
+      const dynamicProcessContinuity = Boolean(
+        incumbentIdentity?.processIncarnation &&
+        identity.processIncarnation &&
+        incumbentIdentity.processIncarnation === identity.processIncarnation &&
+        incumbentIdentity.hostScope === identity.hostScope
+      )
+      const sameAuthority = targetRun
+        ? isCurrentRunCoordinator(targetRun, identity) || dynamicProcessContinuity
+        : false
+      const incumbentObservation =
+        targetRun && !sameAuthority ? await observeRunCoordinator(runtime, targetRun) : undefined
       const priorRun = db.getCurrentRunForPane(paneKey)
       const run = db.bindRun({
         runId: params.id,
         coordinatorHandle: params.from,
         coordinatorPaneKey: paneKey,
+        coordinatorProcessIncarnation: identity.processIncarnation,
+        coordinatorHostScope: identity.hostScope,
+        authorityContinuity: dynamicProcessContinuity,
+        incumbentObservation,
         takeoverLegacy: params.takeoverLegacy,
         legacyCoordinatorAuthority
       })
@@ -112,7 +178,10 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
         callerEvidence: orchestrationCompatibilityEvidence,
         requireStablePane: true
       })
-      return { run: runtime.getOrchestrationDb().getCurrentRunForPane(paneKey) ?? null }
+      const run = runtime.getOrchestrationDb().getCurrentRunForPane(paneKey)
+      return {
+        run: run && isCallerCurrentRunCoordinator(runtime, run, params.from, paneKey) ? run : null
+      }
     }
   }),
   defineMethod({
@@ -124,11 +193,24 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
     name: 'orchestration.runShow',
     params: RunShowParams,
     handler: (params, { runtime }) => {
-      const run = runtime.getOrchestrationDb().getRun(params.id)
+      const db = runtime.getOrchestrationDb()
+      const run = db.getRun(params.id)
       if (!run) {
         throw new OrchestrationError('run_not_found', `Run ${params.id} was not found.`)
       }
-      return { run }
+      const callerPaneKey = params.from ? runtime.getLiveTerminalPaneKey(params.from) : null
+      return {
+        run,
+        binding: {
+          currentConsumer: Boolean(
+            params.from &&
+            run.legacy === 0 &&
+            callerPaneKey !== null &&
+            db.getCurrentRunForPane(callerPaneKey)?.id === run.id &&
+            isCallerCurrentRunCoordinator(runtime, run, params.from, callerPaneKey)
+          )
+        }
+      }
     }
   })
 ]

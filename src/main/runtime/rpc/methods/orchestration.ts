@@ -38,6 +38,7 @@ import type { OrcaRuntimeService } from '../../orca-runtime'
 import type { RunRow } from '../../orchestration/types'
 import { encodeFederatedControlMessage } from '../../orchestration/federation-control-message'
 import { bindCoordinatorMutationPayload } from '../../orchestration/dispatch-message-binding'
+import { isCallerCurrentRunCoordinator } from './orchestration-coordinator-caller'
 import {
   ORCHESTRATION_FEDERATION_CONTROL_MAIL_PROTOCOL_VERSION,
   ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_PROTOCOL_VERSION
@@ -1549,9 +1550,21 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
         }
         return base
       })
+      const callerPaneKey = params.callerTerminalHandle
+        ? runtime.getLiveTerminalPaneKey(params.callerTerminalHandle)
+        : null
       return {
         runId: run.id,
         legacyReadOnly: run.legacy === 1,
+        binding: {
+          currentConsumer: Boolean(
+            params.callerTerminalHandle &&
+            run.legacy === 0 &&
+            callerPaneKey !== null &&
+            db.getCurrentRunForPane(callerPaneKey)?.id === run.id &&
+            isCallerCurrentRunCoordinator(runtime, run, params.callerTerminalHandle, callerPaneKey)
+          )
+        },
         tasks: params.brief ? abbreviateOrchestrationTasks(tasks) : tasks,
         count: tasks.length
       }
