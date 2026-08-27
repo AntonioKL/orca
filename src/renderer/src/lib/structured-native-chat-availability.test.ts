@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppState } from '@/store/types'
+import type * as localPreflightContext from '@/lib/local-preflight-context'
+import type { ProjectExecutionRuntimeResolution } from '../../../shared/project-execution-runtime'
 import { canUseStructuredNativeChat } from './structured-native-chat-availability'
 
 const { mockGetRendererAppPlatform } = vi.hoisted(() => ({
@@ -9,6 +11,43 @@ const { mockGetRendererAppPlatform } = vi.hoisted(() => ({
 vi.mock('@/lib/renderer-app-platform', () => ({
   getRendererAppPlatform: mockGetRendererAppPlatform
 }))
+
+type GetLocalProjectExecutionRuntimeContext =
+  typeof localPreflightContext.getLocalProjectExecutionRuntimeContext
+
+const projectRuntimeMock = vi.hoisted(() => ({
+  fn: vi.fn<GetLocalProjectExecutionRuntimeContext>(),
+  actual: undefined as GetLocalProjectExecutionRuntimeContext | undefined
+}))
+
+vi.mock('@/lib/local-preflight-context', async (importOriginal) => {
+  const actual = await importOriginal<typeof localPreflightContext>()
+  projectRuntimeMock.actual = actual.getLocalProjectExecutionRuntimeContext
+  return { ...actual, getLocalProjectExecutionRuntimeContext: projectRuntimeMock.fn }
+})
+
+const wslRuntimeResolution: ProjectExecutionRuntimeResolution = {
+  status: 'resolved',
+  runtime: {
+    kind: 'wsl',
+    hostPlatform: 'wsl',
+    projectId: 'repo-1',
+    distro: 'Ubuntu',
+    reason: 'project-override',
+    cacheKey: 'repo-1|wsl|Ubuntu'
+  }
+}
+
+const repairRequiredResolution: ProjectExecutionRuntimeResolution = {
+  status: 'repair-required',
+  repair: {
+    projectId: 'repo-1',
+    preferredRuntime: { kind: 'wsl', distro: null },
+    reason: 'wsl-distro-required',
+    source: 'project-override',
+    cacheKey: 'repo-1|wsl|repair'
+  }
+}
 
 function stateFor(input: {
   connectionId?: string | null
@@ -46,6 +85,13 @@ function stateFor(input: {
 describe('canUseStructuredNativeChat', () => {
   beforeEach(() => {
     mockGetRendererAppPlatform.mockReturnValue('darwin')
+    projectRuntimeMock.fn.mockReset()
+    projectRuntimeMock.fn.mockImplementation((...args) => {
+      if (!projectRuntimeMock.actual) {
+        throw new Error('real getLocalProjectExecutionRuntimeContext was never captured')
+      }
+      return projectRuntimeMock.actual(...args)
+    })
   })
 
   it('allows the structured stack on a local worktree', () => {
@@ -101,4 +147,27 @@ describe('canUseStructuredNativeChat', () => {
     } as unknown as AppState
     expect(canUseStructuredNativeChat(state, 'folder:folder-1')).toBe(true)
   })
+
+  it.each(['darwin', 'linux'] as const)('allows a supported local worktree on %s', (platform) => {
+    mockGetRendererAppPlatform.mockReturnValue(platform)
+    expect(canUseStructuredNativeChat(stateFor({}), 'wt-1')).toBe(true)
+  })
+
+  it.each(['darwin', 'linux'] as const)(
+    'refuses a WSL project runtime even when the renderer reports %s',
+    (platform) => {
+      mockGetRendererAppPlatform.mockReturnValue(platform)
+      projectRuntimeMock.fn.mockReturnValue(wslRuntimeResolution)
+      expect(canUseStructuredNativeChat(stateFor({}), 'wt-1')).toBe(false)
+    }
+  )
+
+  it.each(['darwin', 'linux'] as const)(
+    'refuses a repair-required runtime even when the renderer reports %s',
+    (platform) => {
+      mockGetRendererAppPlatform.mockReturnValue(platform)
+      projectRuntimeMock.fn.mockReturnValue(repairRequiredResolution)
+      expect(canUseStructuredNativeChat(stateFor({}), 'wt-1')).toBe(false)
+    }
+  )
 })
