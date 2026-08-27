@@ -10,12 +10,21 @@ const mountedRoots: Root[] = []
 
 async function renderDialog(
   command: TerminalQuickCommand,
-  props: { defaultAdvancedOpen?: boolean } = {}
-): Promise<void> {
+  props: {
+    defaultAdvancedOpen?: boolean
+    onOpenChange?: ReturnType<typeof vi.fn<(open: boolean) => void>>
+    onSave?: ReturnType<typeof vi.fn<(command: TerminalQuickCommand) => void>>
+  } = {}
+): Promise<{
+  onOpenChange: ReturnType<typeof vi.fn<(open: boolean) => void>>
+  onSave: ReturnType<typeof vi.fn<(command: TerminalQuickCommand) => void>>
+}> {
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root = createRoot(container)
   mountedRoots.push(root)
+  const onOpenChange = props.onOpenChange ?? vi.fn<(open: boolean) => void>()
+  const onSave = props.onSave ?? vi.fn<(command: TerminalQuickCommand) => void>()
 
   await act(async () => {
     root.render(
@@ -25,10 +34,23 @@ async function renderDialog(
         command={command}
         repos={[]}
         defaultAdvancedOpen={props.defaultAdvancedOpen}
-        onOpenChange={vi.fn()}
-        onSave={vi.fn()}
+        onOpenChange={onOpenChange}
+        onSave={onSave}
       />
     )
+  })
+  return { onOpenChange, onSave }
+}
+
+async function click(element: HTMLElement): Promise<void> {
+  await act(async () => element.click())
+}
+
+async function replaceTextareaValue(textarea: HTMLTextAreaElement, value: string): Promise<void> {
+  await act(async () => {
+    const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+    valueSetter?.call(textarea, value)
+    textarea.dispatchEvent(new Event('input', { bubbles: true }))
   })
 }
 
@@ -123,6 +145,45 @@ describe('TerminalQuickCommandDialog animation structure', () => {
 
     expect(document.body.textContent).toContain('Append Enter — run immediately')
     expect(document.body.textContent).not.toContain('Supports /goal, skills, paths')
+  })
+
+  it('keeps the command editable and saves insertion-only mode after toggling Enter off', async () => {
+    const { onOpenChange, onSave } = await renderDialog({
+      id: 'qc-editable',
+      label: 'Start dev server',
+      action: 'terminal-command',
+      command: 'npm run dev',
+      appendEnter: true,
+      scope: { type: 'global' }
+    })
+    const appendEnterSwitch = document.body.querySelector<HTMLElement>(
+      '[aria-label="Toggle append Enter"]'
+    )
+    const textarea = document.body.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Command"]'
+    )
+    const saveButton = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button')).find(
+      (button) => button.textContent?.includes('Save')
+    )
+    expect(appendEnterSwitch).not.toBeNull()
+    expect(textarea).not.toBeNull()
+    expect(saveButton).not.toBeUndefined()
+
+    await click(appendEnterSwitch!)
+    expect(appendEnterSwitch?.getAttribute('aria-checked')).toBe('false')
+    await replaceTextareaValue(textarea!, 'npm run dev -- --watch')
+    expect(textarea?.value).toBe('npm run dev -- --watch')
+    await click(saveButton!)
+
+    expect(onSave).toHaveBeenCalledWith({
+      id: 'qc-editable',
+      label: 'Start dev server',
+      action: 'terminal-command',
+      command: 'npm run dev -- --watch',
+      appendEnter: false,
+      scope: { type: 'global' }
+    })
+    expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
   it('hides append enter and shows agent toolbar hint in agent mode', async () => {

@@ -77,6 +77,7 @@ writeFileSync(${JSON.stringify(identityPath)}, JSON.stringify(identity), { flag:
 process.stdout.write(${JSON.stringify(`${marker}\n`)})
 `.trim()
     )
+    const queuedCommand = `${staged.command}\r`
 
     try {
       await orcaPage.evaluate(
@@ -138,7 +139,7 @@ process.stdout.write(${JSON.stringify(`${marker}\n`)})
           tabId
         }
       })
-      expect(blocked.pending).toBe(staged.command)
+      expect(blocked.pending).toBe(queuedCommand)
       expect(blocked.status).toBe('blocked')
 
       await orcaPage.evaluate((tabId) => {
@@ -197,7 +198,7 @@ process.stdout.write(${JSON.stringify(`${marker}\n`)})
         .toEqual({
           generation: blocked.generation + 1,
           leafReady: true,
-          pending: staged.command,
+          pending: queuedCommand,
           expectedGeneration: blocked.generation + 1
         })
       await orcaPage.evaluate(() => window.__terminalPtyPreSpawnE2EBarrier?.release())

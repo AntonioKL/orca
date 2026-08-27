@@ -1,6 +1,7 @@
 import type * as React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TERMINAL_PASTE_DIRECT_MAX_BYTES } from './terminal-paste-coordinator'
+import { wrapTerminalBracketedPasteText } from './terminal-bracketed-paste'
 import { makePaneKey } from '../../../../shared/stable-pane-id'
 import { toAppSshPtyId } from '../../../../shared/ssh-pty-id'
 import { flushAsyncTicks, drainPendingTimeouts } from './pty-connection-test-async'
@@ -478,7 +479,7 @@ describe('connectPanePty', () => {
     )
   })
 
-  it('keeps SSH terminal-paste startup commands renderer-owned', async () => {
+  it('retries insertion-only local startup paste after a silent-prompt rejection', async () => {
     const pendingTimeouts: (() => void)[] = []
     const originalSetTimeout = globalThis.setTimeout
     globalThis.setTimeout = vi.fn((fn: () => void) => {
@@ -491,10 +492,12 @@ describe('connectPanePty', () => {
 
       const capturedDataCallback: { current: ((data: string) => void) | null } = { current: null }
       const transport = createMockTransport('pty-id')
+      let acceptInput = false
+      transport.sendInput.mockImplementation(() => acceptInput)
       transport.connect.mockImplementation(
         async ({ callbacks }: { callbacks: ConnectCallbacks }) => {
           capturedDataCallback.current = callbacks.onData ?? null
-          return 'pty-ssh-paste'
+          return 'pty-local-paste'
         }
       )
       transportFactoryQueue.push(transport)
@@ -502,8 +505,7 @@ describe('connectPanePty', () => {
       mockStoreState = {
         ...mockStoreState,
         tabsByWorktree: { 'wt-1': [{ id: 'tab-1', ptyId: null }] },
-        repos: [{ id: 'repo1', connectionId: 'ssh-conn-1' }],
-        sshConnectionStates: new Map([['ssh-conn-1', { status: 'connected' }]])
+        repos: [{ id: 'repo1', connectionId: null }]
       }
 
       const pane = createPane(1)
@@ -513,20 +515,37 @@ describe('connectPanePty', () => {
       })
       const manager = createManager(1)
       const command = 'cd packages\nbun run build\ncd ..'
-      const deps = createDeps({ startup: { command, delivery: 'terminal-paste' } })
+      const onQueuedStartupDelivered = vi.fn()
+      const deps = createDeps({
+        startup: { command, submit: false, delivery: 'terminal-paste' },
+        onQueuedStartupDelivered
+      })
 
       connectPanePty(pane as never, manager as never, deps as never)
       expect(createdTransportOptions[0]?.command).toBeUndefined()
       expect(createdTransportOptions[0]?.commandDelivery).toBeUndefined()
       expect(capturedDataCallback.current).not.toBeNull()
+      expect(onQueuedStartupDelivered).not.toHaveBeenCalled()
 
+      await flushAsyncTicks(20)
+      await drainPendingTimeouts(pendingTimeouts)
+      await flushAsyncTicks()
+
+      expect(pane.terminal.paste).not.toHaveBeenCalled()
+      expect(transport.sendInput).toHaveBeenCalled()
+      expect(transport.sendInput).not.toHaveBeenCalledWith('\r')
+      expect(transport.sendInput).not.toHaveBeenCalledWith(`${command}\r`)
+      expect(onQueuedStartupDelivered).not.toHaveBeenCalled()
+
+      const retryStart = transport.sendInput.mock.calls.length
+      acceptInput = true
       capturedDataCallback.current?.('user@host $ ')
       await drainPendingTimeouts(pendingTimeouts)
       await flushAsyncTicks()
 
-      expect(pane.terminal.paste).toHaveBeenCalledWith(command)
-      expect(transport.sendInput).toHaveBeenCalledWith('\r')
-      expect(transport.sendInput).not.toHaveBeenCalledWith(`${command}\r`)
+      const retryInput = transport.sendInput.mock.calls.slice(retryStart).map((call) => call[0])
+      expect(retryInput.join('')).toBe(wrapTerminalBracketedPasteText(command))
+      expect(onQueuedStartupDelivered).toHaveBeenCalledTimes(1)
     } finally {
       globalThis.setTimeout = originalSetTimeout
     }
@@ -600,9 +619,11 @@ describe('connectPanePty', () => {
       const capturedDataCallback: { current: ((data: string) => void) | null } = { current: null }
       const transport = createMockTransport('pty-id')
       let livePtyId = 'pty-local-paste'
+      let replaceOnNextDataWrite = true
       transport.getPtyId.mockImplementation(() => livePtyId)
       transport.sendInput.mockImplementation((data: string) => {
-        if (data !== '\r') {
+        if (data !== '\r' && replaceOnNextDataWrite) {
+          replaceOnNextDataWrite = false
           livePtyId = 'pty-replaced'
         }
         return true
@@ -627,7 +648,11 @@ describe('connectPanePty', () => {
       })
       const manager = createManager(1)
       const command = `${'x'.repeat(TERMINAL_PASTE_DIRECT_MAX_BYTES)}tail`
-      const deps = createDeps({ startup: { command, delivery: 'terminal-paste' } })
+      const onQueuedStartupDelivered = vi.fn()
+      const deps = createDeps({
+        startup: { command, delivery: 'terminal-paste' },
+        onQueuedStartupDelivered
+      })
 
       connectPanePty(pane as never, manager as never, deps as never)
       expect(capturedDataCallback.current).not.toBeNull()
@@ -639,6 +664,18 @@ describe('connectPanePty', () => {
       expect(pane.terminal.paste).not.toHaveBeenCalled()
       expect(transport.sendInput).not.toHaveBeenCalledWith('\r')
       expect(transport.sendInput.mock.calls.map((call) => call[0]).join('')).not.toBe(command)
+      expect(onQueuedStartupDelivered).not.toHaveBeenCalled()
+
+      const retryStart = transport.sendInput.mock.calls.length
+      livePtyId = 'pty-local-paste'
+      capturedDataCallback.current?.('user@host $ ')
+      await drainPendingTimeouts(pendingTimeouts)
+      await flushAsyncTicks()
+
+      const retryInput = transport.sendInput.mock.calls.slice(retryStart).map((call) => call[0])
+      expect(retryInput.at(-1)).toBe('\r')
+      expect(retryInput.slice(0, -1).join('')).toBe(command)
+      expect(onQueuedStartupDelivered).toHaveBeenCalledTimes(1)
     } finally {
       globalThis.setTimeout = originalSetTimeout
     }

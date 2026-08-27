@@ -58,7 +58,7 @@ describe('runQuickCommandInNewTab', () => {
     mocks.launchAgentInNewTab.mockReset()
   })
 
-  it('flattens multiline quick commands before queuing', () => {
+  it('flattens multiline quick commands and appends Enter before queuing', () => {
     const result = runQuickCommandInNewTab({
       command: {
         id: 'build',
@@ -76,7 +76,7 @@ describe('runQuickCommandInNewTab', () => {
       quickCommandLabel: 'Build'
     })
     expect(mockState.queueTabStartupCommand).toHaveBeenCalledWith('tab-new', {
-      command: 'cd packages; bun run build; cd ..'
+      command: 'cd packages; bun run build; cd ..\r'
     })
     expect(mockState.setRecentQuickCommandForGroup).toHaveBeenCalledWith('group-1', 'build')
   })
@@ -101,7 +101,7 @@ describe('runQuickCommandInNewTab', () => {
     )
   })
 
-  it('keeps single-line quick commands unchanged', () => {
+  it('keeps single-line quick commands and their submit setting', () => {
     runQuickCommandInNewTab({
       command: {
         id: 'status',
@@ -115,7 +115,27 @@ describe('runQuickCommandInNewTab', () => {
     })
 
     expect(mockState.queueTabStartupCommand).toHaveBeenCalledWith('tab-new', {
-      command: 'git status'
+      command: 'git status\r'
+    })
+  })
+
+  it('does not append Enter when the quick command is insertion-only', () => {
+    runQuickCommandInNewTab({
+      command: {
+        id: 'status',
+        label: 'Status',
+        action: 'terminal-command',
+        command: 'git status',
+        appendEnter: false
+      },
+      worktreeId: 'wt-1',
+      groupId: 'group-1'
+    })
+
+    expect(mockState.queueTabStartupCommand).toHaveBeenCalledWith('tab-new', {
+      command: 'git status',
+      submit: false,
+      delivery: 'terminal-paste'
     })
   })
 

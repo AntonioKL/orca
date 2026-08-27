@@ -19,6 +19,10 @@ import { bindStartFreshSpawn } from './fresh-spawn-start'
 
 import { bindFreshSpawnFollowReset } from './fresh-spawn-follow-reset'
 
+const STARTUP_DELIVERY_MAX_ATTEMPTS_PER_PTY = 5
+const STARTUP_DELIVERY_RETRY_BASE_MS = 50
+const STARTUP_DELIVERY_RETRY_MAX_MS = 2_000
+
 export function bindDeferredColdRestoreAndSnapshot(session: ConnectPanePtySession): void {
   session.applyColdRestoreAgentResumeStartup = (
     startup: ColdRestoreAgentResumeStartup | null
@@ -71,10 +75,14 @@ export function bindDeferredColdRestoreAndSnapshot(session: ConnectPanePtySessio
     !session.disposed &&
     session.deps.paneTransportsRef.current.get(session.pane.id) === session.transport &&
     session.transport.getPtyId() === ptyId
-  const runTerminalPasteStartupCommand = async (command: string): Promise<boolean> => {
+  const runTerminalPasteStartupCommand = async (
+    command: string,
+    submit: boolean | undefined
+  ): Promise<{ delivered: boolean; partial: boolean }> => {
     const ptyId = session.transport.getPtyId()
     const result = await executeTerminalStartupCommandPaste({
       command,
+      submit,
       pane: session.pane,
       ptyId,
       runtime: resolveTerminalPasteRuntime({
@@ -89,42 +97,106 @@ export function bindDeferredColdRestoreAndSnapshot(session: ConnectPanePtySessio
       isTargetCurrent: isStartupPasteTargetCurrent
     })
     if (result.status !== 'pasted' || !isStartupPasteTargetCurrent(ptyId)) {
-      return false
+      return { delivered: false, partial: result.chunksWritten > 0 }
     }
-    return session.transport.sendInput('\r')
+    return {
+      delivered: true,
+      partial: false
+    }
   }
+  let startupDeliveryInFlight = false
+  let startupDeliveryRetryRequested = false
+  let startupDeliveryAttemptPtyId: string | null = null
+  let startupDeliveryAttempts = 0
   session.schedulePendingStartupCommandDelivery = (): void => {
     const startup = session.pendingStartupCommand
     if (!startup) {
       return
     }
+    const currentPtyId = session.transport.getPtyId()
+    if (currentPtyId !== startupDeliveryAttemptPtyId) {
+      startupDeliveryAttemptPtyId = currentPtyId
+      startupDeliveryAttempts = 0
+    }
+    if (startupDeliveryAttempts >= STARTUP_DELIVERY_MAX_ATTEMPTS_PER_PTY) {
+      return
+    }
+    if (startupDeliveryInFlight) {
+      startupDeliveryRetryRequested = true
+      return
+    }
     if (session.startupInjectTimer !== null) {
       clearTimeout(session.startupInjectTimer)
     }
-    session.startupInjectTimer = setTimeout(() => {
-      session.startupInjectTimer = null
-      void (async () => {
-        if (session.pendingStartupCommand !== startup || session.disposed) {
-          return
-        }
-        if (session.shouldDeliverStartupViaTerminalPaste) {
-          await waitForTerminalOutputParsed(session.pane.terminal)
-        }
-        if (session.pendingStartupCommand !== startup || session.disposed) {
-          return
-        }
-        const command = startup.command
-        const submitted = session.shouldDeliverStartupViaTerminalPaste
-          ? await runTerminalPasteStartupCommand(command)
-          : session.transport.sendInput(`${command}\r`)
-        if (submitted) {
-          session.armStartupDraftReadinessObservation()
-        } else {
-          session.releaseUnattemptedStartupDraftPasteDelivery()
-        }
-        session.pendingStartupCommand = null
-      })()
-    }, 50)
+    session.startupInjectTimer = setTimeout(
+      () => {
+        session.startupInjectTimer = null
+        void (async () => {
+          if (startupDeliveryInFlight) {
+            startupDeliveryRetryRequested = true
+            return
+          }
+          startupDeliveryInFlight = true
+          startupDeliveryRetryRequested = false
+          startupDeliveryAttempts += 1
+          try {
+            if (session.pendingStartupCommand !== startup || session.disposed) {
+              return
+            }
+            if (session.shouldDeliverStartupViaTerminalPaste) {
+              await waitForTerminalOutputParsed(session.pane.terminal)
+            }
+            if (session.pendingStartupCommand !== startup || session.disposed) {
+              return
+            }
+            const command = startup.command
+            let outcome = { delivered: false, partial: false }
+            try {
+              outcome = session.shouldDeliverStartupViaTerminalPaste
+                ? await runTerminalPasteStartupCommand(command, startup.submit)
+                : {
+                    delivered:
+                      startup.submit === false
+                        ? session.transport.sendInput(command)
+                        : session.transport.sendInput(`${command}\r`),
+                    partial: false
+                  }
+            } catch {
+              outcome = { delivered: false, partial: false }
+            }
+            if (outcome.delivered) {
+              session.armStartupDraftReadinessObservation()
+              try {
+                session.deps.onQueuedStartupDelivered?.()
+              } catch {
+                // Do not invalidate a completed paste because queue cleanup failed.
+              }
+              if (session.pendingStartupCommand === startup) {
+                session.pendingStartupCommand = null
+              }
+            } else {
+              if (outcome.partial) {
+                startupDeliveryAttempts = STARTUP_DELIVERY_MAX_ATTEMPTS_PER_PTY
+              }
+              session.releaseUnattemptedStartupDraftPasteDelivery()
+            }
+          } finally {
+            startupDeliveryInFlight = false
+            if (
+              startupDeliveryRetryRequested &&
+              session.pendingStartupCommand === startup &&
+              !session.disposed
+            ) {
+              session.schedulePendingStartupCommandDelivery()
+            }
+          }
+        })()
+      },
+      Math.min(
+        STARTUP_DELIVERY_RETRY_BASE_MS * 2 ** startupDeliveryAttempts,
+        STARTUP_DELIVERY_RETRY_MAX_MS
+      )
+    )
   }
 
   session.freshSpawnFollowResetDisposables = []

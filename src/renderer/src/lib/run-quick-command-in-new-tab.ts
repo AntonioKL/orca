@@ -2,6 +2,7 @@ import { useAppStore } from '@/store'
 import { reconcileTabOrder } from '@/components/tab-bar/reconcile-order'
 import { launchAgentInNewTab } from '@/lib/launch-agent-in-new-tab'
 import {
+  buildTerminalQuickCommandInput,
   flattenTerminalQuickCommand,
   isTerminalAgentQuickCommand,
   supportsTerminalAgentQuickCommand
@@ -40,10 +41,9 @@ function resolveQuickCommandGroupId(
  * the command runs (mirrors the agent quick-launch path in
  * `launchAgentInNewTab`).
  *
- * Terminal-command quick commands always append Enter — the split-button is
- * a "run" affordance, distinct from the right-click "Insert" mode where
- * `appendEnter: false` is honored. Agent-prompt quick commands use the
- * agent's normal prompt launch command instead of post-launch TUI paste.
+ * Terminal-command quick commands preserve their append-Enter setting. Agent-
+ * prompt quick commands use the agent's normal prompt launch command instead
+ * of post-launch TUI paste.
  */
 export function runQuickCommandInNewTab({
   command,
@@ -88,7 +88,8 @@ export function runQuickCommandInNewTab({
   })
 
   store.queueTabStartupCommand(tab.id, {
-    command: flattenTerminalQuickCommand(command).command
+    command: buildTerminalQuickCommandInput(flattenTerminalQuickCommand(command)),
+    ...(command.appendEnter === false ? { submit: false, delivery: 'terminal-paste' as const } : {})
   })
 
   // Why: match `+` button's createNewTerminalTab — without this, a worktree
