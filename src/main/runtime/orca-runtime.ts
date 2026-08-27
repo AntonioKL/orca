@@ -3835,7 +3835,10 @@ export class OrcaRuntimeService {
     | ((args: AiVaultPrepareSessionResumeArgs) => Promise<AiVaultPrepareSessionResumeResult>)
     | null
   private readonly prepareCodexStructuredLaunchFn:
-    | ((input: { workspacePath: string; launchEnv: NodeJS.ProcessEnv }) => string | null)
+    | ((input: {
+        workspacePath: string
+        launchEnv: NodeJS.ProcessEnv
+      }) => string | null | Promise<string | null>)
     | null
   private readonly agentSessionClaimSigner: AgentSessionClaimSigner
   private readonly agentSessionCreateOperations = new Map<string, AgentSessionCreateOperation>()
@@ -3928,7 +3931,7 @@ export class OrcaRuntimeService {
       prepareCodexStructuredLaunch?: (input: {
         workspacePath: string
         launchEnv: NodeJS.ProcessEnv
-      }) => string | null
+      }) => string | null | Promise<string | null>
       buildAgentHookPtyEnv?: () => Record<string, string>
       getDesktopWindowStatus?: () => RuntimeDesktopWindowStatus
       agentSessionClaimSigner?: AgentSessionClaimSigner
@@ -12013,9 +12016,9 @@ export class OrcaRuntimeService {
         ({ launchEnv }) => launchEnv.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), '.claude')
       )
     }
-    return this.resolveStructuredAgentSessionIntent(input, ({ workspacePath, launchEnv }) => {
+    return this.resolveStructuredAgentSessionIntent(input, async ({ workspacePath, launchEnv }) => {
       // A create has no process yet, so the current selection is what it must follow.
-      const preparedHome = this.prepareCodexStructuredLaunchFn?.({ workspacePath, launchEnv })
+      const preparedHome = await this.prepareCodexStructuredLaunchFn?.({ workspacePath, launchEnv })
       const configuredHome = launchEnv.CODEX_HOME
       return (
         preparedHome?.trim() ||
@@ -12034,7 +12037,7 @@ export class OrcaRuntimeService {
     resolveAccountHomePath: (context: {
       workspacePath: string
       launchEnv: NodeJS.ProcessEnv
-    }) => string
+    }) => string | Promise<string>
   ): Promise<AgentSessionAttachParams> {
     const support = await this.getStructuredAgentSessionCreateSupport(input.worktree, input.agent)
     if (!support.supported) {
@@ -12056,7 +12059,7 @@ export class OrcaRuntimeService {
       agent: input.agent,
       accountHome: {
         variable: input.agent === 'claude' ? 'CLAUDE_CONFIG_DIR' : 'CODEX_HOME',
-        path: resolveAccountHomePath({ workspacePath, launchEnv })
+        path: await resolveAccountHomePath({ workspacePath, launchEnv })
       },
       runtimeKind: 'native'
     }
