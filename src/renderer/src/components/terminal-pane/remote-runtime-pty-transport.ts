@@ -2029,6 +2029,12 @@ export function createRemoteRuntimePtyTransport(
                     kittyKeyboardFlags: meta.kittyKeyboardFlags,
                     snapshotSeq: meta.seq
                   }
+                : {}),
+              ...(meta?.terminalOwner && meta.seq !== undefined
+                ? { terminalOwner: meta.terminalOwner }
+                : {}),
+              ...(meta?.alternateScreen !== undefined && meta.seq !== undefined
+                ? { alternateScreen: meta.alternateScreen }
                 : {})
             })
           }
