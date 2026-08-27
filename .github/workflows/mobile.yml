@@ -12,6 +12,8 @@ on:
       # Why: the mobile terminal link parsers are conformance-tested against
       # these shared fixtures; desktop-side fixture edits must re-run this suite.
       - 'src/shared/terminal-file-link-conformance.ts'
+      # Why: mobile typechecks shared scheduling code under DOM timer types.
+      - 'src/shared/pane-agent-identity-observation-scheduler.ts'
       # Why: this job holds the only checks that load the Fastfile, so edits to
       # it or to the release workflow it guards must re-run them.
       - '.github/workflows/mobile.yml'

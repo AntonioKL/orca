@@ -89,20 +89,17 @@ export function aggregatePaneAgentIdentityAvailability(
 }
 
 export type RelayMergeResult =
-  | {
-      kind: 'baseline'
-      rows: PaneAgentIdentityAggregate[]
-      candidateCoverage: PaneAgentIdentityCandidateCoverage[]
-    }
+  | { kind: 'baseline' }
   | {
       kind: 'delta'
       rows: PaneAgentIdentityAggregate[]
       candidateCoverage: PaneAgentIdentityCandidateCoverage[]
     }
+  | { kind: 'epoch-reset' }
   | { kind: 'stale' }
   | {
       kind: 'failed-closed'
-      reason: 'epoch-changed' | 'counter-regressed' | 'capacity'
+      reason: 'counter-regressed' | 'capacity'
     }
   | { kind: 'unavailable' }
 
@@ -111,7 +108,7 @@ type RelayState = {
   revision: number
   rows: Map<string, PaneAgentIdentityAggregate>
   candidates: Map<PaneAgentIdentityHostKind, number>
-  failedClosedReason: 'epoch-changed' | 'counter-regressed' | null
+  failedClosedReason: 'counter-regressed' | null
 }
 
 const rowKey = (row: PaneAgentIdentityAggregate): string => `${row.hostKind}:${row.launchMode}`
@@ -169,14 +166,7 @@ export class PaneAgentIdentityRelaySnapshotMerger {
         failedClosedReason: null
       }
       this.states.set(environmentKey, state)
-      return {
-        kind: 'baseline',
-        rows: decodedRows,
-        candidateCoverage: [...state.candidates].map(([hostKind, exposures]) => ({
-          hostKind,
-          exposures
-        }))
-      }
+      return { kind: 'baseline' }
     }
     if (state.epoch !== snapshot.epoch) {
       state.epoch = snapshot.epoch
@@ -184,14 +174,7 @@ export class PaneAgentIdentityRelaySnapshotMerger {
       state.rows = new Map(decodedRows.map((row) => [rowKey(row), row]))
       state.candidates = new Map((snapshot.candidateCoverage ?? []).map((row) => [row[0], row[1]]))
       state.failedClosedReason = null
-      return {
-        kind: 'delta',
-        rows: decodedRows,
-        candidateCoverage: [...state.candidates].map(([hostKind, exposures]) => ({
-          hostKind,
-          exposures
-        }))
-      }
+      return { kind: 'epoch-reset' }
     }
     if (state.failedClosedReason) {
       return { kind: 'failed-closed', reason: state.failedClosedReason }

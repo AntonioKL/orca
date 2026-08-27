@@ -98,7 +98,7 @@ export class PaneAgentIdentityCensus {
     if (result.kind !== 'unavailable') {
       this.addCoverage('relay', 'snapshot')
     }
-    if (result.kind === 'delta' || result.kind === 'baseline') {
+    if (result.kind === 'delta') {
       for (const row of result.rows) {
         // Apply cumulative deltas without reclassifying every run.
         const key = keyOf(row.hostKind, row.launchMode)
@@ -122,15 +122,10 @@ export class PaneAgentIdentityCensus {
     }
     if (result.kind === 'baseline') {
       this.addCoverage('relay', 'baseline')
+    } else if (result.kind === 'epoch-reset') {
+      this.addCoverage('relay', 'epoch_changed')
     } else if (result.kind === 'failed-closed') {
-      this.addCoverage(
-        'relay',
-        result.reason === 'capacity'
-          ? 'capacity'
-          : result.reason === 'counter-regressed'
-            ? 'counter_regressed'
-            : 'epoch_changed'
-      )
+      this.addCoverage('relay', result.reason === 'capacity' ? 'capacity' : 'counter_regressed')
     }
   }
 

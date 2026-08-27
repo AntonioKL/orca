@@ -1,6 +1,7 @@
 import { app, ipcMain } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { resolveEnvironment } from '../../shared/runtime-environment-store'
+import { withRuntimeEnvironmentLocalIpcMetadata } from '../../shared/runtime-environment-local-ipc'
 import type { RemoteRuntimeSubscription } from '../../shared/remote-runtime-client'
 import type { Store } from '../persistence'
 import {
@@ -185,10 +186,18 @@ export function registerRuntimeEnvironmentHandlers(store: Store): void {
                 return
               }
               if (transportIsCurrent() && !sender.isDestroyed()) {
-                sender.send('runtimeEnvironments:subscriptionEvent', {
+                const eventPayload = {
                   subscriptionId,
                   ...payload
-                })
+                }
+                sender.send(
+                  'runtimeEnvironments:subscriptionEvent',
+                  args.method === 'terminal.list' &&
+                    payload.type === 'response' &&
+                    payload.response.ok
+                    ? withRuntimeEnvironmentLocalIpcMetadata(eventPayload, environment.id)
+                    : eventPayload
+                )
               }
             },
             onClose: () => {

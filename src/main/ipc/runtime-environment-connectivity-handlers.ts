@@ -12,6 +12,7 @@ import {
 import { RemoteRuntimeClientError } from '../../shared/remote-runtime-client-error'
 import { RuntimeRpcCallQueueOverloadError } from '../../shared/runtime-rpc-call-queue'
 import type { RuntimeRpcFailure, RuntimeRpcResponse } from '../../shared/runtime-rpc-envelope'
+import { withRuntimeEnvironmentLocalIpcMetadata } from '../../shared/runtime-environment-local-ipc'
 import type { RuntimeStatus } from '../../shared/runtime-types'
 import type { Store } from '../persistence'
 import { clearBrowserRoutePartitionStorageForEnvironment } from '../browser/browser-route-partition-storage-runtime'
@@ -220,9 +221,12 @@ function registerPassiveCallHandler(getUserDataPath: () => string): void {
         }
         throw error
       }
-      return isRuntimeEnvironmentManuallyDisconnected(environment.id)
+      const finalResponse = isRuntimeEnvironmentManuallyDisconnected(environment.id)
         ? manuallyDisconnectedResponse(environment)
         : response
+      return args.method === 'terminal.list' && finalResponse.ok
+        ? withRuntimeEnvironmentLocalIpcMetadata(finalResponse, environment.id)
+        : finalResponse
     }
   )
 }

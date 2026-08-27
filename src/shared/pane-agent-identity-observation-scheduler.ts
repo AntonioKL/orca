@@ -16,6 +16,10 @@ export type PaneAgentIdentityObservationSchedulerDeps = {
   ) => void
 }
 
+function unrefTimer(timer: ReturnType<typeof setTimeout>): void {
+  ;(timer as unknown as { unref?: () => void }).unref?.()
+}
+
 /** Event-driven settle/deadline scheduler; it never probes or polls a host. */
 export class PaneAgentIdentityObservationScheduler {
   private readonly pending = new Map<string, ReturnType<typeof setTimeout>>()
@@ -44,7 +48,7 @@ export class PaneAgentIdentityObservationScheduler {
       },
       Math.max(0, settleMs)
     )
-    timer.unref?.()
+    unrefTimer(timer)
     this.pending.set(key, timer)
     return true
   }
@@ -70,7 +74,7 @@ export class PaneAgentIdentityObservationScheduler {
       },
       Math.max(0, windowMs)
     )
-    timer.unref?.()
+    unrefTimer(timer)
     this.candidates.set(key, timer)
     return true
   }

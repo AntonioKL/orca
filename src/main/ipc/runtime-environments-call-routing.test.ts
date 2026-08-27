@@ -10,6 +10,7 @@ import * as environmentStore from '../../shared/runtime-environment-store'
 import { RemoteRuntimeClientError } from '../../shared/remote-runtime-client-error'
 import { RuntimeRpcCallQueueOverloadError } from '../../shared/runtime-rpc-call-queue'
 import type { RuntimeRpcResponse } from '../../shared/runtime-rpc-envelope'
+import { RUNTIME_ENVIRONMENT_LOCAL_ID_KEY } from '../../shared/runtime-environment-local-ipc'
 
 const {
   handleMock,
@@ -348,6 +349,45 @@ describe('registerRuntimeEnvironmentHandlers', () => {
     )
     expect(sendRemoteRuntimeSharedControlRequestMock).toHaveBeenCalledTimes(2)
     expect(sendRemoteRuntimeConnectionRequestMock).not.toHaveBeenCalled()
+  })
+
+  it('canonicalizes terminal-list local metadata across selector aliases', async () => {
+    registerRuntimeEnvironmentHandlers(store as never)
+    sendRemoteRuntimeRequestMock.mockResolvedValue({
+      id: 'status',
+      ok: true,
+      result: {
+        runtimeId: 'runtime-remote',
+        capabilities: [REMOTE_RUNTIME_SHARED_CONTROL_CAPABILITY]
+      },
+      _meta: { runtimeId: 'runtime-remote' }
+    })
+    sendRemoteRuntimeSharedControlRequestMock.mockResolvedValue({
+      id: 'terminal-list',
+      ok: true,
+      result: { terminals: [] },
+      _meta: { runtimeId: 'runtime-remote' }
+    })
+    const add = handler<
+      { name: string; pairingCode: string },
+      { environment: { id: string; name: string } }
+    >('runtimeEnvironments:addFromPairingCode')
+    const added = await add(null, { name: 'desk', pairingCode: pairingCode() })
+    const call = handler<
+      { selector: string; method: string },
+      RuntimeRpcResponse<unknown> & { [RUNTIME_ENVIRONMENT_LOCAL_ID_KEY]?: string }
+    >('runtimeEnvironments:call')
+
+    const byName = await call(null, { selector: 'desk', method: 'terminal.list' })
+    const byId = await call(null, {
+      selector: added.environment.id,
+      method: 'terminal.list'
+    })
+
+    expect([
+      byName[RUNTIME_ENVIRONMENT_LOCAL_ID_KEY],
+      byId[RUNTIME_ENVIRONMENT_LOCAL_ID_KEY]
+    ]).toEqual([added.environment.id, added.environment.id])
   })
 
   it('rechecks shared-control support when the saved runtime identity changes', async () => {

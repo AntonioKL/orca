@@ -3,6 +3,7 @@ import {
   observeRuntimeEnvironmentTerminalListResponse,
   subscribeRuntimeEnvironmentFromPreload
 } from './runtime-environment-subscriptions'
+import { RUNTIME_ENVIRONMENT_LOCAL_ID_KEY } from '../shared/runtime-environment-local-ipc'
 
 function deferred<T>(): {
   promise: Promise<T>
@@ -28,7 +29,11 @@ type SubscriptionEvent =
   | { subscriptionId: string; type: 'error'; code: string; message: string }
   | { subscriptionId: string; type: 'close' }
 
-type SubscriptionEventListener = (_event: unknown, payload: SubscriptionEvent) => void
+type LocalSubscriptionEvent = SubscriptionEvent & {
+  [RUNTIME_ENVIRONMENT_LOCAL_ID_KEY]?: string
+}
+
+type SubscriptionEventListener = (_event: unknown, payload: LocalSubscriptionEvent) => void
 
 function createIpc() {
   const listeners = new Set<SubscriptionEventListener>()
@@ -41,7 +46,7 @@ function createIpc() {
     removeListener: vi.fn((_channel: string, listener: SubscriptionEventListener) => {
       listeners.delete(listener)
     }),
-    emitSubscriptionEvent: (event: SubscriptionEvent): void => {
+    emitSubscriptionEvent: (event: LocalSubscriptionEvent): void => {
       const currentListeners = Array.from(listeners)
       for (const listener of currentListeners) {
         listener(null, event)
@@ -51,7 +56,7 @@ function createIpc() {
   }
 }
 
-function dispatch(ipc: ReturnType<typeof createIpc>, event: SubscriptionEvent): void {
+function dispatch(ipc: ReturnType<typeof createIpc>, event: LocalSubscriptionEvent): void {
   // A single shared channel listener is registered for the ipc instance; route
   // through it the same way the real ipcRenderer would deliver the frame.
   ipc.emitSubscriptionEvent(event)
@@ -70,7 +75,8 @@ describe('subscribeRuntimeEnvironmentFromPreload', () => {
         ok: true,
         result: { terminals: [], agentIdentityAvailability: snapshot },
         _meta: { runtimeId: 'rt' }
-      }
+      },
+      'desk'
     )
 
     expect(ipc.invoke).toHaveBeenCalledWith('telemetry:ingestPaneAgentIdentityAvailability', {
@@ -87,7 +93,8 @@ describe('subscribeRuntimeEnvironmentFromPreload', () => {
         ok: true,
         result: { terminals: [] },
         _meta: { runtimeId: 'rt' }
-      }
+      },
+      'desk'
     )
     observeRuntimeEnvironmentTerminalListResponse(
       ipc,
@@ -97,7 +104,8 @@ describe('subscribeRuntimeEnvironmentFromPreload', () => {
         ok: true,
         result: { agentIdentityAvailability: snapshot },
         _meta: { runtimeId: 'rt' }
-      }
+      },
+      'desk'
     )
     observeRuntimeEnvironmentTerminalListResponse(
       ipc,
@@ -107,7 +115,8 @@ describe('subscribeRuntimeEnvironmentFromPreload', () => {
         ok: true,
         result: { agentIdentityAvailability: { ...snapshot, rawTitle: 'private' } },
         _meta: { runtimeId: 'rt' }
-      }
+      },
+      'desk'
     )
     expect(ipc.invoke).not.toHaveBeenCalled()
   })
@@ -131,6 +140,7 @@ describe('subscribeRuntimeEnvironmentFromPreload', () => {
     dispatch(ipc, {
       subscriptionId: 'sub-list',
       type: 'response',
+      [RUNTIME_ENVIRONMENT_LOCAL_ID_KEY]: 'desk',
       response: {
         id: 'rpc-list',
         ok: true,
@@ -145,6 +155,48 @@ describe('subscribeRuntimeEnvironmentFromPreload', () => {
       environmentKey: 'desk',
       snapshot
     })
+    cleanup.unsubscribe()
+  })
+
+  it('deduplicates unique-name and id selectors through canonical local identity', async () => {
+    const ipc = createIpc()
+    ipc.invoke.mockImplementation((channel: string) =>
+      channel === 'runtimeEnvironments:subscribe'
+        ? Promise.resolve({ subscriptionId: 'sub-list', requestId: 'rpc-list' })
+        : (Promise.resolve({}) as Promise<unknown>)
+    )
+    const snapshot = { epoch: 'epoch', revision: 1, rows: [] }
+    const response = {
+      id: 'rpc-list',
+      ok: true as const,
+      result: { terminals: [], agentIdentityAvailability: snapshot },
+      _meta: { runtimeId: 'rt' }
+    }
+
+    observeRuntimeEnvironmentTerminalListResponse(
+      ipc,
+      { selector: 'desk', method: 'terminal.list' },
+      response,
+      'environment-id'
+    )
+    const cleanup = await subscribeRuntimeEnvironmentFromPreload(
+      ipc,
+      { selector: 'environment-id', method: 'terminal.list' },
+      { onResponse: vi.fn() },
+      () => 'sub-list'
+    )
+    dispatch(ipc, {
+      subscriptionId: 'sub-list',
+      type: 'response',
+      response,
+      [RUNTIME_ENVIRONMENT_LOCAL_ID_KEY]: 'environment-id'
+    })
+
+    expect(
+      ipc.invoke.mock.calls
+        .filter(([channel]) => channel === 'telemetry:ingestPaneAgentIdentityAvailability')
+        .map(([, payload]) => (payload as { environmentKey: string }).environmentKey)
+    ).toEqual(['environment-id', 'environment-id'])
     cleanup.unsubscribe()
   })
 

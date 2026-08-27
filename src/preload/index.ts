@@ -37,6 +37,11 @@ import type { MobilePairingConnectionMode } from '../shared/mobile-pairing-conne
 import type { RuntimePairingReach } from '../shared/runtime-pairing-reach'
 import type { MobileRelayMintFailure } from '../shared/mobile-relay-mint-failure'
 import type { VerifyAndAddRuntimeEnvironmentResult } from '../shared/remote-pairing-verification'
+import {
+  getRuntimeEnvironmentLocalId,
+  stripRuntimeEnvironmentLocalIpcMetadata,
+  type RuntimeEnvironmentLocalIpcMetadata
+} from '../shared/runtime-environment-local-ipc'
 import type {
   SshMutationExpectation,
   SshConnectionState,
@@ -4713,9 +4718,14 @@ const api = {
       const response = (await ipcRenderer.invoke(
         'runtimeEnvironments:call',
         args
-      )) as RuntimeRpcResponse<unknown>
-      observeRuntimeEnvironmentTerminalListResponse(ipcRenderer, args, response)
-      return response
+      )) as RuntimeRpcResponse<unknown> & RuntimeEnvironmentLocalIpcMetadata
+      observeRuntimeEnvironmentTerminalListResponse(
+        ipcRenderer,
+        args,
+        response,
+        getRuntimeEnvironmentLocalId(response)
+      )
+      return stripRuntimeEnvironmentLocalIpcMetadata(response)
     },
     subscribe: async (
       args: {

@@ -1,5 +1,9 @@
 import type { RuntimeRpcResponse } from '../shared/runtime-rpc-envelope'
 import { isPaneAgentIdentityAvailabilitySnapshot } from '../shared/pane-agent-identity-availability-validator'
+import {
+  getRuntimeEnvironmentLocalId,
+  type RuntimeEnvironmentLocalIpcMetadata
+} from '../shared/runtime-environment-local-ipc'
 
 type RuntimeEnvironmentSubscribeArgs = {
   selector: string
@@ -15,6 +19,13 @@ type RuntimeEnvironmentSubscriptionCallbacks = {
   onClose?: () => void
 }
 
+type RuntimeEnvironmentSubscriptionDispatchCallbacks = Omit<
+  RuntimeEnvironmentSubscriptionCallbacks,
+  'onResponse'
+> & {
+  onResponse: (response: RuntimeRpcResponse<unknown>, environmentId?: string) => void
+}
+
 export type RuntimeEnvironmentSubscriptionHandle = {
   unsubscribe: () => void
   sendBinary: (bytes: Uint8Array<ArrayBufferLike>) => void
@@ -26,16 +37,19 @@ type RuntimeEnvironmentSubscriptionEvent =
   | { subscriptionId: string; type: 'error'; code: string; message: string }
   | { subscriptionId: string; type: 'close' }
 
+type RuntimeEnvironmentLocalSubscriptionEvent = RuntimeEnvironmentSubscriptionEvent &
+  RuntimeEnvironmentLocalIpcMetadata
+
 type RuntimeEnvironmentSubscriptionIpc = {
   invoke: (channel: string, args: unknown) => Promise<unknown>
   send: (channel: string, args: unknown) => void
   on: (
     channel: string,
-    listener: (event: unknown, payload: RuntimeEnvironmentSubscriptionEvent) => void
+    listener: (event: unknown, payload: RuntimeEnvironmentLocalSubscriptionEvent) => void
   ) => void
   removeListener: (
     channel: string,
-    listener: (event: unknown, payload: RuntimeEnvironmentSubscriptionEvent) => void
+    listener: (event: unknown, payload: RuntimeEnvironmentLocalSubscriptionEvent) => void
   ) => void
 }
 
@@ -49,8 +63,8 @@ const SUBSCRIPTION_EVENT_CHANNEL = 'runtimeEnvironments:subscriptionEvent'
 // ipc instance keeps listener retention O(1) while per-subscription state lives
 // only in this map.
 type RuntimeEnvironmentSubscriptionDispatcher = {
-  callbacks: Map<string, RuntimeEnvironmentSubscriptionCallbacks>
-  listener: (event: unknown, payload: RuntimeEnvironmentSubscriptionEvent) => void
+  callbacks: Map<string, RuntimeEnvironmentSubscriptionDispatchCallbacks>
+  listener: (event: unknown, payload: RuntimeEnvironmentLocalSubscriptionEvent) => void
 }
 
 const subscriptionDispatchers = new WeakMap<
@@ -61,9 +75,10 @@ const subscriptionDispatchers = new WeakMap<
 export function observeRuntimeEnvironmentTerminalListResponse(
   ipc: RuntimeEnvironmentTerminalListObserverIpc,
   args: Pick<RuntimeEnvironmentSubscribeArgs, 'selector' | 'method'>,
-  response: RuntimeRpcResponse<unknown>
+  response: RuntimeRpcResponse<unknown>,
+  environmentId: string | undefined
 ): void {
-  if (args.method !== 'terminal.list' || !response.ok || !response.result) {
+  if (args.method !== 'terminal.list' || !environmentId || !response.ok || !response.result) {
     return
   }
   if (typeof response.result !== 'object') {
@@ -75,14 +90,14 @@ export function observeRuntimeEnvironmentTerminalListResponse(
     return
   }
   void ipc.invoke('telemetry:ingestPaneAgentIdentityAvailability', {
-    environmentKey: args.selector,
+    environmentKey: environmentId,
     snapshot
   })
 }
 
 function releaseIdleDispatcher(
   ipc: RuntimeEnvironmentSubscriptionIpc,
-  callbacks: Map<string, RuntimeEnvironmentSubscriptionCallbacks>,
+  callbacks: Map<string, RuntimeEnvironmentSubscriptionDispatchCallbacks>,
   listener: RuntimeEnvironmentSubscriptionDispatcher['listener']
 ): void {
   if (callbacks.size > 0) {
@@ -110,14 +125,19 @@ function getOrCreateDispatcher(
   if (existing) {
     return existing
   }
-  const callbacks = new Map<string, RuntimeEnvironmentSubscriptionCallbacks>()
-  const listener = (_event: unknown, event: RuntimeEnvironmentSubscriptionEvent): void => {
+  const callbacks = new Map<string, RuntimeEnvironmentSubscriptionDispatchCallbacks>()
+  const listener = (_event: unknown, event: RuntimeEnvironmentLocalSubscriptionEvent): void => {
     const subscriptionCallbacks = callbacks.get(event.subscriptionId)
     if (!subscriptionCallbacks) {
       return
     }
     if (event.type === 'response') {
-      subscriptionCallbacks.onResponse(event.response)
+      const environmentId = getRuntimeEnvironmentLocalId(event)
+      if (environmentId) {
+        subscriptionCallbacks.onResponse(event.response, environmentId)
+      } else {
+        subscriptionCallbacks.onResponse(event.response)
+      }
     } else if (event.type === 'binary') {
       subscriptionCallbacks.onBinary?.(event.bytes)
     } else if (event.type === 'error') {
@@ -161,8 +181,8 @@ export async function subscribeRuntimeEnvironmentFromPreload(
     args.method === 'terminal.list'
       ? {
           ...callbacks,
-          onResponse: (response: RuntimeRpcResponse<unknown>): void => {
-            observeRuntimeEnvironmentTerminalListResponse(ipc, args, response)
+          onResponse: (response: RuntimeRpcResponse<unknown>, environmentId?: string): void => {
+            observeRuntimeEnvironmentTerminalListResponse(ipc, args, response, environmentId)
             callbacks.onResponse(response)
           }
         }

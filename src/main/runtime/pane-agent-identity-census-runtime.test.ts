@@ -501,7 +501,7 @@ describe('runtime pane identity census wiring', () => {
     runtime.shutdownPaneAgentIdentityCensus(false)
   })
 
-  it('publishes title-only availability and freezes a run on production rebind', async () => {
+  it('publishes attested title-only availability and freezes a run on production rebind', async () => {
     vi.useFakeTimers()
     const runtime = new OrcaRuntimeService()
     const binding = {
@@ -510,8 +510,9 @@ describe('runtime pane identity census wiring', () => {
       incarnationId: 'incarnation-1'
     }
     runtime.registerPty('pty-title', 'folder:/tmp', null, binding)
+    runtime.observeAcceptedPtyWrite('pty-title', 'codex\r')
     runtime.onPtyData('pty-title', '\x1b]0;Codex working\x07', Date.now())
-    vi.advanceTimersByTime(30_000)
+    vi.advanceTimersByTime(5_000)
     expect(await availabilityRows(runtime)).toEqual([
       expect.objectContaining({
         hostKind: 'native',

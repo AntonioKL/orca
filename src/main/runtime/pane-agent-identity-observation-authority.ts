@@ -156,8 +156,7 @@ export class PaneAgentIdentityObservationAuthority {
     const candidate = {
       key: `${this.authorityId}:${context.ptyId}:${context.incarnationId ?? 'unknown'}:candidate`,
       ptyId: context.ptyId,
-      hostKind,
-      agent
+      hostKind
     }
     if (!this.scheduler.scheduleTitleCandidate(candidate.key, candidate.hostKind)) {
       this.sink.addCoverage(hostKind, 'overflow')
@@ -266,15 +265,7 @@ export class PaneAgentIdentityObservationAuthority {
     const candidate = this.candidatesByKey.get(key)
     this.candidatesByKey.delete(key)
     const candidateState = candidate ? this.states.get(candidate.ptyId) : undefined
-    if (candidate) {
-      this.sink.record(
-        reducePaneAgentIdentityAvailability(candidate.hostKind, 'typed', {
-          facts: [{ source: 'title', agent: candidate.agent }]
-        })
-      )
-    } else {
-      this.sink.addCoverage(hostKind, 'candidate')
-    }
+    this.sink.addCoverage(candidate?.hostKind ?? hostKind, 'candidate')
     if (candidateState) {
       candidateState.candidate = null
       candidateState.finalizedCandidateKey = key

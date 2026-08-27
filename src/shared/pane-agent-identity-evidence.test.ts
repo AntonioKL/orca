@@ -43,6 +43,20 @@ describe('pane identity evidence census', () => {
     expect(result.identityNull).toBe(false)
   })
 
+  it('keeps duplicate same-source title facts bitwise-idempotent', () => {
+    const availability = reducePaneAgentIdentityAvailability('native', 'typed', {
+      facts: [
+        { source: 'title', agent: 'codex' },
+        { source: 'title', agent: 'claude' }
+      ]
+    })
+
+    expect({
+      sourceMask: availability.sourceMask,
+      titleOnly: aggregatePaneAgentIdentityAvailability(availability).titleOnly
+    }).toEqual({ sourceMask: 64, titleOnly: 1 })
+  })
+
   it('reduces no evidence and ambiguity without exposing the winning agent', () => {
     expect(reducePaneAgentIdentityAvailability('native', 'typed', { facts: [] })).toMatchObject({
       sourceMask: 0,
@@ -113,21 +127,7 @@ describe('pane identity evidence census', () => {
       revision: 1,
       rows: [['relay', 'typed', 1, 1, 0, 1, 0] as const]
     }
-    expect(merger.merge('env', snapshot)).toMatchObject({
-      kind: 'baseline',
-      rows: [
-        {
-          hostKind: 'relay',
-          launchMode: 'typed',
-          attestedRuns: 1,
-          noEvidence: 1,
-          titleOnly: 0,
-          identityNull: 1,
-          ambiguousTopRank: 0
-        }
-      ],
-      candidateCoverage: []
-    })
+    expect(merger.merge('env', snapshot)).toEqual({ kind: 'baseline' })
     expect(merger.merge('env', { ...snapshot, revision: 0 })).toEqual({ kind: 'stale' })
     expect(
       merger.merge('env', {
@@ -137,19 +137,7 @@ describe('pane identity evidence census', () => {
       })
     ).toMatchObject({ kind: 'delta' })
     expect(merger.merge('env', { ...snapshot, revision: 3, epoch: 'new' })).toEqual({
-      kind: 'delta',
-      rows: [
-        {
-          hostKind: 'relay',
-          launchMode: 'typed',
-          attestedRuns: 1,
-          noEvidence: 1,
-          titleOnly: 0,
-          identityNull: 1,
-          ambiguousTopRank: 0
-        }
-      ],
-      candidateCoverage: []
+      kind: 'epoch-reset'
     })
     expect(
       merger.merge('env', {
@@ -190,11 +178,7 @@ describe('pane identity evidence census', () => {
       rows: [],
       candidateCoverage: [['relay', 2] as const]
     }
-    expect(merger.merge('env', baseline)).toMatchObject({
-      kind: 'baseline',
-      rows: [],
-      candidateCoverage: [{ hostKind: 'relay', exposures: 2 }]
-    })
+    expect(merger.merge('env', baseline)).toEqual({ kind: 'baseline' })
     expect(
       merger.merge('env', {
         ...baseline,

@@ -117,7 +117,7 @@ describe('PaneAgentIdentityObservationAuthority', () => {
     expect(records).toHaveLength(1)
   })
 
-  it('records a title candidate only after its authority window and cancels it on attestation', () => {
+  it('records title candidates only as coverage and cancels them on attestation', () => {
     vi.useFakeTimers()
     const { authority, records, coverage } = createHarness()
     const context = { ptyId: 'pty', incarnationId: 'inc-1', hostKinds: ['ssh'] as const }
@@ -125,22 +125,22 @@ describe('PaneAgentIdentityObservationAuthority', () => {
     vi.advanceTimersByTime(29_999)
     expect(coverage).toEqual([])
     vi.advanceTimersByTime(1)
-    expect(records).toEqual([
-      expect.objectContaining({ hostKind: 'ssh', launchMode: 'typed', sourceMask: 64 })
-    ])
-    expect(coverage).toEqual([])
+    expect({ records, coverage }).toEqual({
+      records: [],
+      coverage: [{ hostKind: 'ssh', reason: 'candidate', amount: 1 }]
+    })
 
     authority.exitOrRebind(context.ptyId, context.incarnationId)
     authority.observeTitle(context, 'codex')
     authority.attestRun(context, 'typed', 'codex', 'typed:1')
     vi.advanceTimersByTime(30_000)
-    expect(records).toHaveLength(2)
-    expect(coverage).toHaveLength(0)
 
     authority.observeTitle(context, 'codex')
     vi.advanceTimersByTime(30_000)
-    expect(records).toHaveLength(2)
-    expect(coverage).toHaveLength(0)
+    expect({ records, coverage }).toEqual({
+      records: [expect.objectContaining({ hostKind: 'ssh', launchMode: 'typed', sourceMask: 0 })],
+      coverage: [{ hostKind: 'ssh', reason: 'candidate', amount: 1 }]
+    })
     authority.shutdown()
   })
 

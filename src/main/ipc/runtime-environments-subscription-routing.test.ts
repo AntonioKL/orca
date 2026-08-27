@@ -6,6 +6,8 @@ import {
   ELECTRON_REMOTE_RUNTIME_CLIENT_CAPABILITIES,
   REMOTE_RUNTIME_SHARED_CONTROL_CAPABILITY
 } from '../../shared/protocol-version'
+import { RUNTIME_ENVIRONMENT_LOCAL_ID_KEY } from '../../shared/runtime-environment-local-ipc'
+import type { RuntimeRpcResponse } from '../../shared/runtime-rpc-envelope'
 
 const {
   handleMock,
@@ -231,6 +233,55 @@ describe('registerRuntimeEnvironmentHandlers', () => {
       expect.any(Object)
     )
     expect(subscribeRemoteRuntimeRequestMock).not.toHaveBeenCalled()
+  })
+
+  it('attaches canonical local metadata to terminal-list response events', async () => {
+    registerRuntimeEnvironmentHandlers(store as never)
+    subscribeRemoteRuntimeRequestMock.mockResolvedValue({
+      requestId: 'terminal-list',
+      close: vi.fn(),
+      sendBinary: vi.fn()
+    })
+    const add = handler<
+      { name: string; pairingCode: string },
+      { environment: { id: string; name: string } }
+    >('runtimeEnvironments:addFromPairingCode')
+    const added = await add(null, { name: 'desk', pairingCode: pairingCode() })
+    const senderSend = vi.fn()
+    const subscribe = handler<
+      { selector: string; method: string; subscriptionId: string },
+      { subscriptionId: string; requestId: string }
+    >('runtimeEnvironments:subscribe')
+    await subscribe(
+      {
+        sender: {
+          id: 1,
+          isDestroyed: () => false,
+          send: senderSend,
+          once: vi.fn(),
+          removeListener: vi.fn()
+        }
+      },
+      { selector: 'desk', method: 'terminal.list', subscriptionId: 'sub-list' }
+    )
+    const callbacks = subscribeRemoteRuntimeRequestMock.mock.calls[0]![4] as {
+      onResponse: (response: RuntimeRpcResponse<unknown>) => void
+    }
+
+    callbacks.onResponse({
+      id: 'terminal-list',
+      ok: true,
+      result: { terminals: [] },
+      _meta: { runtimeId: 'runtime-remote' }
+    })
+
+    expect(senderSend).toHaveBeenCalledWith(
+      'runtimeEnvironments:subscriptionEvent',
+      expect.objectContaining({
+        subscriptionId: 'sub-list',
+        [RUNTIME_ENVIRONMENT_LOCAL_ID_KEY]: added.environment.id
+      })
+    )
   })
 
   it('keeps shared-control subscriptions retained across transient errors until final close', async () => {
