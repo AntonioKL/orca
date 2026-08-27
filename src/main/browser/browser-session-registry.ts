@@ -12,7 +12,6 @@ import type {
   BrowserSessionProfileCreateOptions,
   BrowserSessionProfileScope
 } from '../../shared/browser-workspace-types'
-import { isBrowserRoutePartition } from './browser-route-identity'
 import {
   applyPendingBrowserCookieImports,
   clearPendingBrowserCookieImport,
@@ -32,6 +31,10 @@ import {
 } from './browser-session-partition-policies'
 import { isValidPersistedBrowserSessionProfile } from './browser-session-persisted-profile-validation'
 import { clearBrowserSessionUserAgentMode } from './browser-session-user-agent-mode'
+import {
+  clearBrowserRoutePartitionPolicies,
+  installBrowserRoutePartitionPolicies
+} from './browser-session-route-policies'
 import {
   releaseProxySessionApplication,
   retireProxySessionApplication
@@ -190,10 +193,10 @@ class BrowserSessionRegistry {
 
   setupRoutePartitionPolicies(partition: string, browserProfileId: string): void {
     const profile = this.profiles.get(browserProfileId)
-    if (!profile || !isBrowserRoutePartition(partition)) {
+    if (!profile) {
       throw new Error('browser_route_partition_profile_unavailable')
     }
-    installBrowserSessionPartitionPolicies({ ...profile, partition })
+    installBrowserRoutePartitionPolicies(profile, partition)
   }
 
   requireRouteBrowserProfile(browserProfileId: string): void {
@@ -203,12 +206,7 @@ class BrowserSessionRegistry {
   }
 
   clearRoutePartitionPolicies(partition: string): void {
-    if (!isBrowserRoutePartition(partition)) {
-      return
-    }
-    const sess = session.fromPartition(partition)
-    clearBrowserSessionUserAgentMode(sess)
-    clearBrowserSessionPartitionPolicies(partition, sess)
+    clearBrowserRoutePartitionPolicies(partition)
   }
 
   async createProfile(

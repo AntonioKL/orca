@@ -70,16 +70,18 @@ export type BrowserPartitionPermissionPolicy = 'browser' | 'deny'
 
 export function installBrowserSessionPartitionPolicies(
   profile: BrowserSessionProfile,
-  options?: {
+  options: {
     downloads?: BrowserPartitionDownloadPolicy
     permissions?: BrowserPartitionPermissionPolicy
-  }
+    applyAppWideProxy?: boolean
+  } = {}
 ): Promise<void> {
   const { partition } = profile
   const sess = session.fromPartition(partition)
   setBrowserSessionUserAgentMode(sess, profile.userAgentMode ?? 'clean')
-  // Why: every caller receives the current proxy-readiness barrier, including retries after policy installation.
-  const proxyReady = applyProxyToBrowserSession(sess)
+  // Why: route partitions own a SOCKS transport policy that the app proxy must not overwrite.
+  const proxyReady =
+    options.applyAppWideProxy === false ? Promise.resolve() : applyProxyToBrowserSession(sess)
   if (configuredPartitions.has(partition)) {
     return proxyReady
   }

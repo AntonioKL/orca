@@ -324,6 +324,10 @@ describe('BrowserSessionRegistry', () => {
   it('applies and clears existing browser-profile policy on an opaque route partition', () => {
     const partition =
       'persist:orca-browser-v1-1111111111111111222222222222222233333333333333334444444444444444'
+    setBrowserNetworkProxySettingsResolver(() => ({
+      httpProxyUrl: 'http://app-proxy.example:8080',
+      httpProxyBypassRules: ''
+    }))
 
     browserSessionRegistry.setupRoutePartitionPolicies(partition, 'default')
 
@@ -331,6 +335,7 @@ describe('BrowserSessionRegistry', () => {
     const configuredSession = sessionFromPartitionMock.mock.results[0]?.value
     expect(configuredSession.setPermissionRequestHandler).toHaveBeenCalled()
     expect(configuredSession.setPermissionCheckHandler).toHaveBeenCalled()
+    expect(configuredSession.setProxy).not.toHaveBeenCalled()
 
     browserSessionRegistry.clearRoutePartitionPolicies(partition)
     const clearedSession = sessionFromPartitionMock.mock.results.at(-1)?.value

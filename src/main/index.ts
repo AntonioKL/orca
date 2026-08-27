@@ -2450,6 +2450,9 @@ void app.whenReady().then(async () => {
     dataFile: activeOrcaProfile.dataFile,
     storageAuthority: isServeMode ? 'runtime' : 'desktop'
   })
+  // Why: create pending readiness before the guard can observe the default session.
+  const initialProxyApplication = applyElectronProxySettings(store.getSettings())
+  installElectronProxyRequestGuard(session.defaultSession)
   // Why armed here and not at install time: the report remembers what it last said, and
   // that state lives beside the profile data file, which does not exist until now.
   // Why scheduled and not called: the report probes the OS keyring, which blocks on Linux
@@ -2544,7 +2547,7 @@ void app.whenReady().then(async () => {
   }
   try {
     // Why: Dock/Launchpad launches don't inherit shell proxy env vars, so apply the persisted proxy before any app-owned network fetchers run.
-    const proxyApplyResult = await applyElectronProxySettings(store.getSettings())
+    const proxyApplyResult = await initialProxyApplication
     if (proxyApplyResult.source === 'invalid-settings') {
       // Why (STA-3442): a silent DIRECT fallback made a dead configured proxy undiagnosable.
       console.warn('[proxy] persisted proxy settings are invalid; using direct networking')
