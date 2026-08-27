@@ -1,9 +1,8 @@
 import { useAppStore } from '@/store'
 import type { PtyConnectResult } from '../pty-transport'
 import { createBrowserUuid } from '@/lib/browser-uuid'
-import { parseLegacyNumericPaneKey } from '../../../../../shared/stable-pane-id'
-import { getProviderSessionClaimKey } from '@/lib/sleeping-agent-pane-ownership'
 import type { SleepingAgentSessionRecord } from '../../../../../shared/agent-session-resume'
+import { findSleepingAgentResumeRecordForPane } from '@/lib/confirmed-agent-exit-resume-retirement'
 import { recognizeAgentProcessFromCommandLine } from '../../../../../shared/agent-process-recognition'
 import type { TuiAgent } from '../../../../../shared/tui-agent'
 import { TUI_AGENT_CONFIG } from '../../../../../shared/tui-agent-config'
@@ -19,46 +18,13 @@ import { installCommandInferredPaneAgent } from './command-inferred-pane-agent'
 export function installSleepingRecordAccess(session: ConnectPanePtySession): void {
   session.getSleepingRecordForPane = (
     state: ReturnType<typeof useAppStore.getState>
-  ): { paneKey: string; record: SleepingAgentSessionRecord } | null => {
-    const stableRecord = state.sleepingAgentSessionsByPaneKey[session.cacheKey]
-    if (stableRecord) {
-      return { paneKey: session.cacheKey, record: stableRecord }
-    }
-    const legacyMatches = Object.entries(state.sleepingAgentSessionsByPaneKey).filter(
-      ([paneKey, record]) => {
-        const legacy = parseLegacyNumericPaneKey(paneKey)
-        return (
-          legacy?.tabId === session.deps.tabId &&
-          record.worktreeId === session.deps.worktreeId &&
-          (!record.tabId || record.tabId === session.deps.tabId)
-        )
-      }
-    )
-    const exactLegacyMatch = legacyMatches.find(([paneKey]) => {
-      const legacy = parseLegacyNumericPaneKey(paneKey)
-      return legacy?.numericPaneId === String(session.pane.id)
+  ): { paneKey: string; record: SleepingAgentSessionRecord } | null =>
+    findSleepingAgentResumeRecordForPane(state.sleepingAgentSessionsByPaneKey, {
+      paneKey: session.cacheKey,
+      tabId: session.deps.tabId,
+      worktreeId: session.deps.worktreeId,
+      paneId: session.pane.id
     })
-    const providerSessionKeys = new Set(
-      legacyMatches.map(([, record]) => getProviderSessionClaimKey(record))
-    )
-    const oldestLegacyMatch = legacyMatches
-      .slice()
-      .sort(([, a], [, b]) => a.capturedAt - b.capturedAt || a.updatedAt - b.updatedAt)[0]
-    // Why: duplicate legacy aliases can point at one provider session; consume
-    // the oldest capture as canonical and clear its aliases after resume.
-    const selectedLegacyMatch =
-      exactLegacyMatch ??
-      (providerSessionKeys.size === 1
-        ? legacyMatches.length === 1
-          ? legacyMatches[0]
-          : oldestLegacyMatch
-        : null)
-    if (!selectedLegacyMatch) {
-      return null
-    }
-    const [paneKey, record] = selectedLegacyMatch
-    return { paneKey, record }
-  }
   session.isLegacyWorkerAutomaticResumeBlocked = (): boolean =>
     session.getSleepingRecordForPane(useAppStore.getState())?.record.automaticResumeBlockedBy ===
     'legacy-orchestration-worker'

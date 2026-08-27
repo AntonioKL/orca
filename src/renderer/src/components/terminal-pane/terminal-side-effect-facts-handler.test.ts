@@ -462,6 +462,21 @@ describe('registerTerminalSideEffectFactConsumer', () => {
     expect(events).toEqual([])
   })
 
+  it('keeps host-confirmed exits fail-closed when attribution is unknown', () => {
+    const { callbacks, events } = createCallbackRecorder()
+    registerTerminalSideEffectFactConsumer({
+      ptyId: PTY_ID,
+      incarnationId: 'inc-new',
+      callbacks
+    })
+
+    _dispatchTerminalSideEffectBatchForTest(
+      batch([{ kind: 'agent-exited', executionHostConfirmed: true, incarnationId: 'inc-new' }])
+    )
+
+    expect(events).toEqual([])
+  })
+
   it('keeps host-confirmed exits fail-closed when pane attribution is stale', () => {
     const { callbacks, events } = createCallbackRecorder()
     registerTerminalSideEffectFactConsumer({

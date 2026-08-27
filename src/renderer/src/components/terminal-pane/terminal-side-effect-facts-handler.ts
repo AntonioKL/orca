@@ -151,10 +151,16 @@ function applyLiveFact(
         if (
           !fact.incarnationId ||
           !entry.incarnationId ||
+          !entry.paneKey ||
+          !entry.tabId ||
+          !entry.worktreeId ||
+          !batch.paneKey ||
+          !batch.tabId ||
+          !batch.worktreeId ||
           fact.incarnationId !== entry.incarnationId ||
-          entry.paneKey !== (batch.paneKey ?? null) ||
-          entry.tabId !== (batch.tabId ?? null) ||
-          entry.worktreeId !== (batch.worktreeId ?? null)
+          entry.paneKey !== batch.paneKey ||
+          entry.tabId !== batch.tabId ||
+          entry.worktreeId !== batch.worktreeId
         ) {
           return
         }
@@ -221,14 +227,22 @@ export function dispatchTerminalSideEffectBatch(batch: TerminalSideEffectBatch):
     if (
       !batch.replay &&
       batch.paneKey &&
+      batch.tabId &&
+      batch.worktreeId &&
       confirmedExit?.kind === 'agent-exited' &&
       confirmedExit.incarnationId &&
+      handoffAuthority?.paneKey &&
+      handoffAuthority.tabId &&
+      handoffAuthority.worktreeId &&
       handoffAuthority?.incarnationId === confirmedExit.incarnationId &&
       handoffAuthority.paneKey === batch.paneKey &&
-      handoffAuthority.tabId === (batch.tabId ?? null) &&
-      handoffAuthority.worktreeId === (batch.worktreeId ?? null)
+      handoffAuthority.tabId === batch.tabId &&
+      handoffAuthority.worktreeId === batch.worktreeId
     ) {
-      retireConfirmedAgentExitResumeAuthority(useAppStore.getState(), batch.paneKey)
+      retireConfirmedAgentExitResumeAuthority(useAppStore.getState(), batch.paneKey, {
+        tabId: batch.tabId,
+        worktreeId: batch.worktreeId
+      })
     }
     bufferTerminalSideEffectFactHandoff(batch)
     return

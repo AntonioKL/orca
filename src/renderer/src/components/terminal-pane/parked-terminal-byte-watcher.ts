@@ -252,7 +252,11 @@ export function startParkedTerminalByteWatcher(
           ...sideEffectCallbacks,
           onAgentExited: (fact) => {
             if (fact.executionHostConfirmed === true) {
-              retireConfirmedAgentExitResumeAuthority(useAppStore.getState(), paneKey)
+              retireConfirmedAgentExitResumeAuthority(useAppStore.getState(), paneKey, {
+                tabId,
+                worktreeId,
+                paneId: options.paneId
+              })
             }
             sideEffectCallbacks.onAgentExited?.()
           },

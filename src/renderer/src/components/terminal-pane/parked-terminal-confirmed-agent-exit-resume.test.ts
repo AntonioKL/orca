@@ -144,4 +144,50 @@ describe('parked terminal confirmed agent-exit resume retirement', () => {
     expect(mockStoreState.sleepingAgentSessionsByPaneKey[PANE_KEY]).toBeUndefined()
     dispose()
   })
+
+  it('retires a legacy numeric-key resume record for the parked pane', async () => {
+    const { startParkedTerminalByteWatcher } = await import('./parked-terminal-byte-watcher')
+    const handler = await import('./terminal-side-effect-facts-handler')
+    const legacyPaneKey = `${TAB_ID}:1`
+    mockStoreState.sleepingAgentSessionsByPaneKey = {
+      [legacyPaneKey]: {
+        paneKey: legacyPaneKey,
+        tabId: TAB_ID,
+        worktreeId: WORKTREE_ID,
+        agent: 'claude',
+        providerSession: { key: 'session_id', id: 'parked-session' },
+        prompt: 'finish the task',
+        state: 'working',
+        capturedAt: 1,
+        updatedAt: 1,
+        origin: 'live'
+      }
+    }
+
+    const dispose = startParkedTerminalByteWatcher({
+      ptyId: PTY_ID,
+      incarnationId: 'inc-parked-exit',
+      tabId: TAB_ID,
+      worktreeId: WORKTREE_ID,
+      leafId: LEAF_ID,
+      paneId: 1
+    } satisfies ParkedTerminalByteWatcherOptions)
+    handler._dispatchTerminalSideEffectBatchForTest({
+      ptyId: PTY_ID,
+      seq: 1,
+      paneKey: PANE_KEY,
+      tabId: TAB_ID,
+      worktreeId: WORKTREE_ID,
+      facts: [
+        {
+          kind: 'agent-exited',
+          executionHostConfirmed: true,
+          incarnationId: 'inc-parked-exit'
+        }
+      ]
+    })
+
+    expect(mockStoreState.sleepingAgentSessionsByPaneKey[legacyPaneKey]).toBeUndefined()
+    dispose()
+  })
 })

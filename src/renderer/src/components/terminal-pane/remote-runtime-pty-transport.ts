@@ -1458,7 +1458,10 @@ export function createRemoteRuntimePtyTransport(
     }
   }
 
-  function rebindRemoteTerminalHandle(nextHandle: string): void {
+  function rebindRemoteTerminalHandle(
+    nextHandle: string,
+    incarnationId?: RuntimeTerminalResolvePane['incarnationId']
+  ): void {
     clearPublishedHandleWait()
     const replacedPtyId = remotePtyId
     unregisterShutdownHandlers(replacedPtyId)
@@ -1472,7 +1475,7 @@ export function createRemoteRuntimePtyTransport(
     if (replacedPtyId) {
       replaceFitOverridePtyId(replacedPtyId, remotePtyId)
       replaceDriverPtyId(replacedPtyId, remotePtyId)
-      onPtyRebind?.(remotePtyId, replacedPtyId)
+      notifyPtyRebindForRemote(remotePtyId, replacedPtyId, incarnationId)
     }
   }
 
@@ -1682,7 +1685,7 @@ export function createRemoteRuntimePtyTransport(
         return
       }
       if (resolved.handle !== previousHandle) {
-        rebindRemoteTerminalHandle(resolved.handle)
+        rebindRemoteTerminalHandle(resolved.handle, resolved.incarnationId)
       }
     }
     clearPublishedHandleWait()
