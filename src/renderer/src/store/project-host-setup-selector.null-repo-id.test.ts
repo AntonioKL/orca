@@ -143,6 +143,23 @@ describe('project host setup projection with a non-string repoId', () => {
       )
     })
 
+    // Why: this path's cache is keyed on (projects, setups) only, so a repos array
+    // rebuilt with identical content must still hit it — a miss here is a re-render
+    // storm in a zustand selector compared with Object.is.
+    it.each([
+      ['a real repoId', 'repo-1'],
+      ['a coerced repoId', null]
+    ])('survives a new repos array of identical content (%s)', (_label, repoId) => {
+      const projectHostSetups = coveringSetups(repoId)
+      const first = getProjectHostSetupProjectionFromState({ repos, projects, projectHostSetups })
+      const second = getProjectHostSetupProjectionFromState({
+        repos: [...repos],
+        projects,
+        projectHostSetups
+      })
+      expect(second).toBe(first)
+    })
+
     it('does not invent extra setup or project rows because one repoId was null', () => {
       const rowIds = (repoId: unknown): { setups: string[]; projects: string[] } => {
         const projection = getProjectHostSetupProjectionFromState({
