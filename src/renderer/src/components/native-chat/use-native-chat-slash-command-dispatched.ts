@@ -1,4 +1,4 @@
-import { useCallback, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from 'react'
 import type { AgentType } from '../../../../shared/agent-status-types'
 import { getVerifiedNativeChatCommands } from '../../../../shared/native-chat-agent-profiles'
 import { nativeChatSlashCommandOpensAgentPicker } from '../../../../shared/native-chat-slash-commands'
@@ -35,6 +35,13 @@ export function useNativeChatSlashCommandDispatched(args: {
   onSwitchToTerminal?: (agent: AgentType) => void
 }): (command: string, settled?: Promise<void>, cancelled?: () => boolean) => void {
   const { agent, commandMarkerScope, setCommandMarkers, onSwitchToTerminal } = args
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
   return useCallback(
     (command: string, settled?: Promise<void>, cancelled?: () => boolean) => {
       setCommandMarkers(appendCommandMarkerCache(commandMarkerScope, command))
@@ -42,7 +49,7 @@ export function useNativeChatSlashCommandDispatched(args: {
         return
       }
       const reveal = (): void => {
-        if (cancelled?.()) {
+        if (!mountedRef.current || cancelled?.()) {
           return
         }
         onSwitchToTerminal?.(agent)

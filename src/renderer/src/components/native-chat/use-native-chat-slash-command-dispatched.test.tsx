@@ -84,6 +84,21 @@ describe('useNativeChatSlashCommandDispatched', () => {
     expect(onSwitchToTerminal).not.toHaveBeenCalled()
   })
 
+  it('does not reveal after the originating chat view unmounts', async () => {
+    let settle = (): void => {}
+    const settled = new Promise<void>((resolve) => {
+      settle = resolve
+    })
+    const hook = render('claude')
+    act(() => hook.result.current('/resume', settled))
+
+    hook.unmount()
+    settle()
+    await settled
+
+    expect(onSwitchToTerminal).not.toHaveBeenCalled()
+  })
+
   it('records the marker immediately, not on settle', async () => {
     // The `Ran /x` line is local feedback for a command with no transcript turn;
     // holding it until the writes finish would lag the user's own action.
