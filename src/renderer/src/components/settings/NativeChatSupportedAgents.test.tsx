@@ -20,13 +20,14 @@ const EXPECTED_SUPPORTED_AGENTS = [
 ] as const satisfies readonly TuiAgent[]
 const SUPPORTED_AGENTS_LABEL_KEY = 'auto.components.settings.NativeChatSupportedAgents.label'
 
-function getRenderedChips(): { agent: string; label: string }[] {
+function getRenderedChips(): { agent: string; label: string; role: string }[] {
   const markup = renderToStaticMarkup(<NativeChatSupportedAgents />)
   const container = document.createElement('div')
   container.innerHTML = markup
   return Array.from(container.querySelectorAll('[data-agent]')).map((node) => ({
     agent: node.getAttribute('data-agent') ?? '',
-    label: node.getAttribute('aria-label') ?? ''
+    label: node.getAttribute('aria-label') ?? '',
+    role: node.getAttribute('role') ?? ''
   }))
 }
 
@@ -52,6 +53,7 @@ describe('NativeChatSupportedAgents', () => {
     for (const chip of getRenderedChips()) {
       const entry = getAgentCatalog().find((candidate) => candidate.id === chip.agent)
       expect(chip.label).toBe(entry?.label)
+      expect(chip.role).toBe('img')
     }
   })
 

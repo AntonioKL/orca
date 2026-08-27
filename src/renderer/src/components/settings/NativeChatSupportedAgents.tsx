@@ -19,7 +19,7 @@ export function NativeChatSupportedAgents(): React.JSX.Element {
           return (
             <Tooltip key={agent}>
               <TooltipTrigger asChild>
-                <span data-agent={agent} aria-label={label}>
+                <span data-agent={agent} role="img" aria-label={label}>
                   <AgentIcon agent={agent} size={13} />
                 </span>
               </TooltipTrigger>
