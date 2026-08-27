@@ -160,6 +160,30 @@ describe('project host setup projection with a non-string repoId', () => {
       expect(second).toBe(first)
     })
 
+    // Why: TerminalPane and TabBarQuickCommandsButton use projection.setups as a useMemo
+    // dep, so an untouched row must keep its object identity across normalization.
+    it('reuses the original row objects and only reallocates the coerced one', () => {
+      const projectHostSetups = coveringSetups(null)
+      const projection = getProjectHostSetupProjectionFromState({
+        repos,
+        projects,
+        projectHostSetups
+      })
+      const byId = new Map(projection.setups.map((setup) => [setup.id, setup]))
+      expect(byId.get('repo:repo-1::local')).toBe(projectHostSetups[0])
+      expect(byId.get('repo:repo-1::local::2')).not.toBe(projectHostSetups[1])
+    })
+
+    it('keeps projects in input order with their identities intact', () => {
+      const projection = getProjectHostSetupProjectionFromState({
+        repos,
+        projects,
+        projectHostSetups: coveringSetups(null)
+      })
+      expect(projection.projects).toEqual(projects)
+      expect(projection.projects[0]).toBe(projects[0])
+    })
+
     it('does not invent extra setup or project rows because one repoId was null', () => {
       const rowIds = (repoId: unknown): { setups: string[]; projects: string[] } => {
         const projection = getProjectHostSetupProjectionFromState({

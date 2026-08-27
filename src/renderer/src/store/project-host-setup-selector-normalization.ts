@@ -20,15 +20,13 @@ export function normalizeHydratedProjectHostSetupProjection(
   const projectIdByHydratedProjectId = new Map<string, string>()
   let changed = false
   const normalizedSetups = setups.map((setup) => {
-    // Why: hydrated and remote catalog rows can carry a non-string repoId, but every
-    // consumer treats it as a string (`setup.repoId.trim()`). Coerce once here so a
-    // legacy row cannot crash Settings on open.
-    // Why not `changed = true` here: that flag routes callers onto the merged
-    // projection, which unions in repo-derived rows. A coerced repoId must not
-    // change which rows exist — only the value of this one field.
+    // Why: hydrated rows can carry a non-string repoId, yet consumers call `.trim()` on it.
+    // Why no `changed = true`: that flag unions in repo-derived rows, and coercing one
+    // field must never change which rows exist.
     const repoId = typeof setup.repoId === 'string' ? setup.repoId : ''
     const normalizedSetup = repoId === setup.repoId ? setup : { ...setup, repoId }
-    const repo = repoById.get(repoId) ?? repoById.get(setup.id)
+    // Why the guard: an empty repoId means "no repo attached", so it must match nothing.
+    const repo = (repoId ? repoById.get(repoId) : undefined) ?? repoById.get(setup.id)
     if (!repo) {
       return normalizedSetup
     }
