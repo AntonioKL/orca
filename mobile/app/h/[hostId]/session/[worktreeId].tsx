@@ -3420,7 +3420,7 @@ export default function SessionScreen() {
   }, [])
   const startAccessoryRepeat = useCallback(
     (input: ReturnType<typeof createTerminalLiveAccessoryInput>) => {
-      // Why: the controller queue sits outside RPC, so fence pre-outage taps from a later connection.
+      // Why: a held repeat must not resume through a replacement client or connection.
       const targetClient = clientRef.current
       const targetConnectedAt = targetClient?.getLastConnectedAt() ?? null
       const isDeliveryTargetCurrent = (targetHandle: string) =>

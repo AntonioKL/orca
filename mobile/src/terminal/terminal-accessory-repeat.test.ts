@@ -60,54 +60,29 @@ describe('terminal accessory repeat', () => {
     expect(send).toHaveBeenCalledTimes(1)
   })
 
-  it('serializes a new press behind the previous press send', async () => {
+  it('dispatches distinct taps without waiting for prior acknowledgements', async () => {
     vi.useFakeTimers()
-    const first = deferred()
+    const pending = Array.from({ length: 5 }, () => deferred())
     const sent: string[] = []
     const send = vi.fn((input: string) => {
       sent.push(input)
-      return input === 'down' ? first.promise.then(() => true) : Promise.resolve(true)
+      return pending[sent.length - 1]!.promise.then(() => true)
     })
     const repeat = createTerminalAccessoryRepeatController<string>()
 
-    repeat.start('down', send)
-    repeat.stop()
-    repeat.start('up', send)
+    for (let index = 0; index < pending.length; index += 1) {
+      repeat.start(`tap-${index}`, send)
+      repeat.stop()
+    }
 
-    expect(sent).toEqual(['down'])
+    expect(sent).toEqual(['tap-0', 'tap-1', 'tap-2', 'tap-3', 'tap-4'])
 
-    first.resolve()
-    await vi.advanceTimersByTimeAsync(0)
-    expect(sent).toEqual(['down', 'up'])
-    repeat.stop()
-  })
-
-  it('preserves a queued tap released before the previous send settles', async () => {
-    vi.useFakeTimers()
-    const first = deferred()
-    const sent: string[] = []
-    const send = vi.fn((input: string) => {
-      sent.push(input)
-      return input === 'down' ? first.promise.then(() => true) : Promise.resolve(true)
-    })
-    const repeat = createTerminalAccessoryRepeatController<string>()
-
-    repeat.start('down', send)
-    repeat.stop()
-    repeat.start('up', send)
-    repeat.stop()
-
-    expect(sent).toEqual(['down'])
-
-    first.resolve()
-    await vi.advanceTimersByTimeAsync(0)
-    expect(sent).toEqual(['down', 'up'])
-
+    pending.forEach(({ resolve }) => resolve())
     await vi.runAllTimersAsync()
-    expect(send).toHaveBeenCalledTimes(2)
+    expect(send).toHaveBeenCalledTimes(5)
   })
 
-  it('cancels a queued tap during lifecycle cleanup', async () => {
+  it('cancels repeats without dropping a distinct tap already dispatched by the user', async () => {
     vi.useFakeTimers()
     const first = deferred()
     const sent: string[] = []
@@ -125,7 +100,8 @@ describe('terminal accessory repeat', () => {
     first.resolve()
     await vi.runAllTimersAsync()
 
-    expect(sent).toEqual(['down'])
+    expect(sent).toEqual(['down', 'up'])
+    expect(send).toHaveBeenCalledTimes(2)
   })
 
   it('stops repeating when the transport rejects a send', async () => {
@@ -186,7 +162,7 @@ describe('terminal accessory repeat', () => {
     await expect(result).resolves.toBe(false)
   })
 
-  it('drops a queued send when its press-time connection is no longer current', async () => {
+  it('stops held repeats when the press-time connection is no longer current', async () => {
     vi.useFakeTimers()
     let connectionGeneration = 1
     const first = deferred()
@@ -206,9 +182,6 @@ describe('terminal accessory repeat', () => {
     const repeat = createTerminalAccessoryRepeatController<string>()
 
     repeat.start('down', createSender())
-    repeat.stop()
-    repeat.start('up', createSender())
-    repeat.stop()
 
     connectionGeneration = 2
     first.resolve()
