@@ -1081,7 +1081,7 @@ export class CodexHookService {
   }
 
   private readonly wslReconciliationGeneration = new Map<string, number>()
-  private readonly wslInstallQueues = new Map<string, Promise<void>>()
+  private readonly wslInstallsInFlight = new Map<string, Promise<AgentHookInstallStatus | null>>()
 
   private supersedeWslReconciliation(runtimeHomePath: string | null | undefined): number {
     if (!runtimeHomePath) {
@@ -1185,21 +1185,20 @@ export class CodexHookService {
     if (!runtimeHomePath) {
       return Promise.resolve(null)
     }
-    const key = getWslReconciliationKey(runtimeHomePath)
-    const previous = this.wslInstallQueues.get(key) ?? Promise.resolve()
-    const install = previous
-      .catch(() => undefined)
-      .then(() => this.installForRuntimeHome(runtimeHomePath, target))
-    const settled = install.then(
-      () => undefined,
-      () => undefined
-    )
-    this.wslInstallQueues.set(key, settled)
-    void settled.then(() => {
-      if (this.wslInstallQueues.get(key) === settled) {
-        this.wslInstallQueues.delete(key)
+    const targetKey = target?.runtime === 'wsl' ? target.wslDistro?.trim().toLowerCase() : ''
+    const key = `${getWslReconciliationKey(runtimeHomePath)}\0${targetKey ?? ''}`
+    const active = this.wslInstallsInFlight.get(key)
+    if (active) {
+      return active
+    }
+    const install = this.installForRuntimeHome(runtimeHomePath, target)
+    this.wslInstallsInFlight.set(key, install)
+    const clear = (): void => {
+      if (this.wslInstallsInFlight.get(key) === install) {
+        this.wslInstallsInFlight.delete(key)
       }
-    })
+    }
+    void install.then(clear, clear)
     return install
   }
 
