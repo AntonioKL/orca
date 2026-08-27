@@ -95,11 +95,10 @@ export class RuntimeGitSyncCommands {
       }
       return provider.syncForkDefaultBranch(target.worktree.path, expectedUpstream)
     }
-    return gitSyncForkDefaultBranch(
-      target.worktree.path,
-      expectedUpstream,
-      localGitOptionsForTarget(target)
-    )
+    return gitSyncForkDefaultBranch(target.worktree.path, expectedUpstream, {
+      ...localGitOptionsForTarget(target),
+      admissionTier: 'interactive'
+    })
   }
 
   async pullRuntimeGit(

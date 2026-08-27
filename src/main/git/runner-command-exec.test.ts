@@ -22,7 +22,10 @@ import {
   translateWslOutputPaths,
   wslAwareSpawn
 } from './runner'
-import { _resetGitAdmissionForTests } from './command-runner/git-subprocess-admission'
+import {
+  GitAdmissionScheduler,
+  _resetGitAdmissionForTests
+} from './command-runner/git-subprocess-admission'
 
 afterEach(() => _resetGitAdmissionForTests())
 
@@ -415,6 +418,36 @@ describe('runner execFile timeout handling', () => {
     expect(calls[1]?.env.GIT_SSH_COMMAND).toBe(
       'ssh -F ~/.ssh/github-work -i ~/.ssh/work_key -o BatchMode=yes'
     )
+  })
+
+  it('admits the core.sshCommand probe before spawning it', async () => {
+    const scheduler = new GitAdmissionScheduler({ generalCap: 1, generalHeadroom: 0 })
+    _resetGitAdmissionForTests(scheduler)
+    const blocker = await scheduler.acquire({ args: ['status'], cwd: '/repo', tier: 'status' })
+    const calls: string[][] = []
+    execFileMock.mockImplementation((_cmd, args, _opts, cb) => {
+      const child = createMockChildProcess(1234 + calls.length)
+      calls.push(args)
+      cb(null, '', '')
+      queueMicrotask(() => child.emit('close', 0, null))
+      return child
+    })
+
+    const pending = gitExecFileAsync(['fetch', '--no-write-fetch-head', 'origin'], {
+      cwd: '/repo',
+      env: {},
+      useConfiguredSshCommandForNetwork: true
+    })
+    await Promise.resolve()
+    expect(execFileMock).not.toHaveBeenCalled()
+
+    blocker.release()
+    await pending
+
+    expect(calls).toEqual([
+      ['config', '--get', 'core.sshCommand'],
+      ['fetch', '--no-write-fetch-head', 'origin']
+    ])
   })
 
   it('replaces configured BatchMode for opted-in mergeable OpenSSH commands', async () => {

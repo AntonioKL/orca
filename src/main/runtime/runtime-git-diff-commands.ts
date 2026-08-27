@@ -133,7 +133,10 @@ export class RuntimeGitDiffCommands {
           filePath: relativePath,
           oldPath: oldRelativePath
         },
-        localGitOptionsForTarget(target)
+        {
+          ...localGitOptionsForTarget(target),
+          admissionTier: 'interactive'
+        }
       ),
       maxContentBytes
     )
@@ -171,7 +174,10 @@ export class RuntimeGitDiffCommands {
           filePath: relativePath,
           oldPath: oldRelativePath
         },
-        localGitOptionsForTarget(target)
+        {
+          ...localGitOptionsForTarget(target),
+          admissionTier: 'interactive'
+        }
       ),
       maxContentBytes
     )

@@ -129,7 +129,10 @@ export class RuntimeGitStagingCommands {
       await provider.discardChanges(target.worktree.path, relativePath)
       return { ok: true }
     }
-    await discardChanges(target.worktree.path, relativePath, localGitOptionsForTarget(target))
+    await discardChanges(target.worktree.path, relativePath, {
+      ...localGitOptionsForTarget(target),
+      admissionTier: 'interactive'
+    })
     return { ok: true }
   }
 }

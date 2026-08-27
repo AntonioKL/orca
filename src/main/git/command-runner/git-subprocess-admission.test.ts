@@ -369,6 +369,48 @@ describe('GitAdmissionScheduler', () => {
     expect(scheduler.snapshot()).toMatchObject({ queued: 0, queuedWaiters: [] })
   })
 
+  it('skips a 4k saturated-route lane without rescanning its blocked prefix', async () => {
+    const scheduler = new GitAdmissionScheduler({
+      generalCap: 2,
+      generalHeadroom: 0,
+      routeCap: 1,
+      routeHeadroom: 0
+    })
+    const routedRunning = await scheduler.acquire({
+      ...local('background'),
+      wslDistro: 'Ubuntu'
+    })
+    const localRunning = await scheduler.acquire(local('background'))
+    let abortedReads = 0
+    const signal = {
+      get aborted() {
+        abortedReads += 1
+        return false
+      },
+      addEventListener: () => {},
+      removeEventListener: () => {}
+    } as unknown as AbortSignal
+    const count = 4_000
+    const routed = Array.from({ length: count }, () =>
+      scheduler
+        .acquire({ ...local('background'), wslDistro: 'Ubuntu', signal })
+        .then((grant) => grant.release())
+    )
+    const localWork = Array.from({ length: count }, () =>
+      scheduler.acquire({ ...local('background'), signal }).then((grant) => grant.release())
+    )
+    abortedReads = 0
+
+    localRunning.release()
+    await Promise.all(localWork)
+    expect(scheduler.snapshot().queued).toBe(count)
+
+    routedRunning.release()
+    await Promise.all(routed)
+    expect(abortedReads).toBeLessThan(30_000)
+    expect(scheduler.snapshot()).toMatchObject({ queued: 0, queuedWaiters: [] })
+  })
+
   it('captures killswitch state in each release closure', async () => {
     const scheduler = schedulerWithOneSlot()
     _resetGitAdmissionForTests(scheduler)

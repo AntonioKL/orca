@@ -132,7 +132,10 @@ export class RuntimeGitStatusCommands {
       await provider.checkoutBranch(target.worktree.path, branch)
       return { ok: true, branch }
     }
-    await checkoutBranch(target.worktree.path, branch, localGitOptionsForTarget(target))
+    await checkoutBranch(target.worktree.path, branch, {
+      ...localGitOptionsForTarget(target),
+      admissionTier: 'interactive'
+    })
     return { ok: true, branch }
   }
 

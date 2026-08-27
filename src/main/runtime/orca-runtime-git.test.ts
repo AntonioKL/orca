@@ -10,6 +10,7 @@ import { RuntimeGitCommands, type ResolvedRuntimeGitWorktree } from './orca-runt
 
 const mocks = vi.hoisted(() => ({
   checkoutBranch: vi.fn(),
+  discardChanges: vi.fn(),
   listLocalBranches: vi.fn(),
   getStagedCommitContext: vi.fn(),
   getPullRequestDraftContext: vi.fn(),
@@ -24,6 +25,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../git/status', async () => ({
   ...(await vi.importActual<typeof GitStatusModule>('../git/status')),
+  discardChanges: mocks.discardChanges,
   getStagedCommitContext: mocks.getStagedCommitContext,
   getStatus: mocks.getStatus
 }))
@@ -105,6 +107,7 @@ describe('RuntimeGitCommands', () => {
     mocks.getSshGitProvider.mockReset()
     mocks.getStatus.mockReset()
     mocks.checkoutBranch.mockReset()
+    mocks.discardChanges.mockReset()
     mocks.listLocalBranches.mockReset()
   })
 
@@ -157,7 +160,13 @@ describe('RuntimeGitCommands', () => {
   it('checks out a local branch through the resolved worktree', async () => {
     const worktreePath = mkdtempSync(join(tmpdir(), 'orca-runtime-git-'))
     tempDirs.push(worktreePath)
-    const commands = makeCommands(worktreePath)
+    const commands = new RuntimeGitCommands({
+      resolveRuntimeGitTarget: async () => ({
+        worktree: makeWorktree(worktreePath),
+        localGitOptions: { wslDistro: 'Ubuntu' }
+      }),
+      getRuntimeSettings: () => ({}) as GlobalSettings
+    })
     mocks.checkoutBranch.mockResolvedValue(undefined)
 
     await expect(commands.checkoutRuntimeGitBranch('id:wt-1', 'feature/x')).resolves.toEqual({
@@ -165,7 +174,10 @@ describe('RuntimeGitCommands', () => {
       branch: 'feature/x'
     })
 
-    expect(mocks.checkoutBranch).toHaveBeenCalledWith(worktreePath, 'feature/x', {})
+    expect(mocks.checkoutBranch).toHaveBeenCalledWith(worktreePath, 'feature/x', {
+      admissionTier: 'interactive',
+      wslDistro: 'Ubuntu'
+    })
   })
 
   it('checks out a remote branch through the SSH git provider', async () => {
@@ -200,6 +212,40 @@ describe('RuntimeGitCommands', () => {
     })
 
     expect(mocks.listLocalBranches).toHaveBeenCalledWith(worktreePath, {})
+  })
+
+  it('prioritizes a local single-file discard without losing WSL routing', async () => {
+    const commands = new RuntimeGitCommands({
+      resolveRuntimeGitTarget: async () => ({
+        worktree: makeWorktree('/workspace/repo'),
+        localGitOptions: { wslDistro: 'Ubuntu' }
+      }),
+      getRuntimeSettings: () => ({}) as GlobalSettings
+    })
+
+    await commands.discardRuntimeGitPath('id:wt-1', 'src/app.ts')
+
+    expect(mocks.discardChanges).toHaveBeenCalledWith('/workspace/repo', 'src/app.ts', {
+      admissionTier: 'interactive',
+      wslDistro: 'Ubuntu'
+    })
+  })
+
+  it('keeps a remote single-file discard owned by the SSH provider', async () => {
+    const provider = { discardChanges: vi.fn() }
+    mocks.getSshGitProvider.mockReturnValue(provider)
+    const commands = new RuntimeGitCommands({
+      resolveRuntimeGitTarget: async () => ({
+        worktree: makeWorktree('/remote/repo'),
+        connectionId: 'conn-1'
+      }),
+      getRuntimeSettings: () => ({}) as GlobalSettings
+    })
+
+    await commands.discardRuntimeGitPath('id:wt-1', 'src/app.ts')
+
+    expect(provider.discardChanges).toHaveBeenCalledWith('/remote/repo', 'src/app.ts')
+    expect(mocks.discardChanges).not.toHaveBeenCalled()
   })
 
   it('lists remote local branches through the SSH git provider', async () => {

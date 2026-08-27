@@ -14,19 +14,17 @@ type WaiterLane = {
 
 const TIERS = ['interactive', 'status', 'background'] as const
 const createLane = (): WaiterLane => ({ items: [], head: 0, count: 0 })
+type TierLanes = Record<GitAdmissionTier, Map<string | null, WaiterLane>>
+const createTierLanes = (): TierLanes => ({
+  interactive: new Map(),
+  status: new Map(),
+  background: new Map()
+})
 
 export class GitAdmissionWaiterQueue {
-  private readonly lanes: Record<AdmissionClass, Record<GitAdmissionTier, WaiterLane>> = {
-    general: {
-      interactive: createLane(),
-      status: createLane(),
-      background: createLane()
-    },
-    network: {
-      interactive: createLane(),
-      status: createLane(),
-      background: createLane()
-    }
+  private readonly lanes: Record<AdmissionClass, TierLanes> = {
+    general: createTierLanes(),
+    network: createTierLanes()
   }
   private readonly countsByBudget = new Map<string, number>()
   private totalCount = 0
@@ -36,7 +34,12 @@ export class GitAdmissionWaiterQueue {
   }
 
   enqueue(waiter: AdmissionWaiter): void {
-    const lane = this.lanes[waiter.admissionClass][waiter.tier]
+    const lanes = this.lanes[waiter.admissionClass][waiter.tier]
+    let lane = lanes.get(waiter.route)
+    if (!lane) {
+      lane = createLane()
+      lanes.set(waiter.route, lane)
+    }
     lane.items.push(waiter)
     lane.count += 1
     this.totalCount += 1
@@ -46,7 +49,11 @@ export class GitAdmissionWaiterQueue {
   }
 
   dequeue(waiter: AdmissionWaiter): void {
-    const lane = this.lanes[waiter.admissionClass][waiter.tier]
+    const lanes = this.lanes[waiter.admissionClass][waiter.tier]
+    const lane = lanes.get(waiter.route)
+    if (!lane) {
+      return
+    }
     lane.count -= 1
     this.totalCount -= 1
     for (const key of waiter.budgetKeys) {
@@ -58,6 +65,9 @@ export class GitAdmissionWaiterQueue {
       }
     }
     this.compact(lane)
+    if (lane.count === 0) {
+      lanes.delete(waiter.route)
+    }
   }
 
   hasBudget(key: string): boolean {
@@ -68,8 +78,9 @@ export class GitAdmissionWaiterQueue {
     return (['general', 'network'] as const)
       .flatMap((admissionClass) =>
         TIERS.flatMap((tier) => {
-          const lane = this.lanes[admissionClass][tier]
-          return lane.items.slice(lane.head).filter((waiter) => waiter.state === 'queued')
+          return [...this.lanes[admissionClass][tier].values()].flatMap((lane) =>
+            lane.items.slice(lane.head).filter((waiter) => waiter.state === 'queued')
+          )
         })
       )
       .sort((left, right) => left.id - right.id)
@@ -83,29 +94,31 @@ export class GitAdmissionWaiterQueue {
   ): SelectedWaiter | null {
     let selected: (SelectedWaiter & { tier: number }) | null = null
     for (const rawTier of TIERS) {
-      const lane = this.lanes[admissionClass][rawTier]
-      for (let index = lane.head; index < lane.items.length; index += 1) {
-        const waiter = lane.items[index]
-        if (waiter.state !== 'queued') {
-          continue
+      for (const lane of this.lanes[admissionClass][rawTier].values()) {
+        for (let index = lane.head; index < lane.items.length; index += 1) {
+          const waiter = lane.items[index]
+          if (waiter.state !== 'queued') {
+            continue
+          }
+          if (waiter.signal?.aborted) {
+            abort(waiter)
+            continue
+          }
+          const slotKind = slotKindFor(waiter)
+          if (slotKind) {
+            const tier = effectiveTier(waiter)
+            if (
+              !selected ||
+              tier < selected.tier ||
+              (tier === selected.tier && waiter.id < selected.waiter.id)
+            ) {
+              selected = { waiter, slotKind, tier }
+            }
+          }
+          // Every waiter in this route lane has the same budget shape, so a
+          // blocked head proves the rest cannot fit either.
+          break
         }
-        if (waiter.signal?.aborted) {
-          abort(waiter)
-          continue
-        }
-        const slotKind = slotKindFor(waiter)
-        if (!slotKind) {
-          continue
-        }
-        const tier = effectiveTier(waiter)
-        if (
-          !selected ||
-          tier < selected.tier ||
-          (tier === selected.tier && waiter.id < selected.waiter.id)
-        ) {
-          selected = { waiter, slotKind, tier }
-        }
-        break
       }
     }
     return selected
