@@ -52,6 +52,8 @@ export type ParkedTabWatcherEntry = {
   /** Runtime-title slot each watcher writes, so parked PTY-exit handling can
    *  clear the dead leaf's slot (no live pane will ever overwrite it). */
   paneIdByPtyId: Map<string, number>
+  /** Known process identity for each watcher; same PTY ids may be re-minted. */
+  incarnationIdByPtyId?: Map<string, PtyIncarnationId | null>
   disposersByPtyId: Map<string, () => void>
 }
 

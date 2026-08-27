@@ -1,4 +1,5 @@
 import type { TerminalTab } from '../../../../shared/terminal-tab-types'
+import type { PtyIncarnationId } from '../../../../shared/pty-incarnation'
 import type { useAppStore } from '@/store'
 import {
   collectLeafIdsInOrder,
@@ -83,19 +84,32 @@ export function reconcileParkedWatcherPtyIds(args: {
   currentTabPtyId: string | null
   entryTabPtyId: string | null
   paneIdByPtyId: ReadonlyMap<string, number>
+  incarnationIdByPtyId?: ReadonlyMap<string, PtyIncarnationId | null | undefined>
+  expectedIncarnationIdByPtyId?: ReadonlyMap<string, PtyIncarnationId | null | undefined>
   expectedPtyIds: ReadonlySet<string>
 }): {
   restartAll: boolean
   addedPtyIds: string[]
+  replacedPtyIds: string[]
   retainedPtyIds: string[]
   retiredPaneIds: number[]
 } {
-  const retainedPtyIds = Array.from(args.paneIdByPtyId.keys()).filter((ptyId) =>
-    args.expectedPtyIds.has(ptyId)
+  const replacedPtyIds = Array.from(args.paneIdByPtyId.keys()).filter((ptyId) => {
+    if (!args.expectedPtyIds.has(ptyId)) {
+      return false
+    }
+    const expected = args.expectedIncarnationIdByPtyId?.get(ptyId)
+    const current = args.incarnationIdByPtyId?.get(ptyId)
+    return Boolean(expected && expected !== current)
+  })
+  const replacedPtyIdSet = new Set(replacedPtyIds)
+  const retainedPtyIds = Array.from(args.paneIdByPtyId.keys()).filter(
+    (ptyId) => args.expectedPtyIds.has(ptyId) && !replacedPtyIdSet.has(ptyId)
   )
   return {
     restartAll: args.entryTabPtyId !== args.currentTabPtyId,
     addedPtyIds: Array.from(args.expectedPtyIds).filter((ptyId) => !args.paneIdByPtyId.has(ptyId)),
+    replacedPtyIds,
     retainedPtyIds,
     retiredPaneIds: Array.from(args.paneIdByPtyId)
       .filter(([ptyId]) => !args.expectedPtyIds.has(ptyId))

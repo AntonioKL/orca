@@ -132,6 +132,7 @@ export function startParkedPtyWatcher(args: {
     ? () => {}
     : subscribeToPtyExit(ptyId, handlePtyExit)
   entry.paneIdByPtyId.set(ptyId, pane.paneId)
+  ;(entry.incarnationIdByPtyId ??= new Map()).set(ptyId, pane.incarnationId ?? null)
   entry.disposersByPtyId.set(ptyId, () => {
     unsubscribeExit()
     disposeWatcher()

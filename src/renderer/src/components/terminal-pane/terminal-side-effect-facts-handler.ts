@@ -145,22 +145,19 @@ function applyLiveFact(
       )
       return
     case 'agent-exited':
-      if (
-        fact.executionHostConfirmed === true &&
-        fact.incarnationId &&
-        entry.incarnationId &&
-        fact.incarnationId !== entry.incarnationId
-      ) {
-        return
-      }
-      if (
-        fact.executionHostConfirmed === true &&
-        fact.incarnationId &&
-        entry.incarnationId === fact.incarnationId &&
-        entry.paneKey === (batch.paneKey ?? null) &&
-        entry.tabId === (batch.tabId ?? null) &&
-        entry.worktreeId === (batch.worktreeId ?? null)
-      ) {
+      if (fact.executionHostConfirmed === true) {
+        // Why: confirmed authority is valid only for this exact process and
+        // pane boundary; never downgrade an ambiguous fact to an unconfirmed exit.
+        if (
+          !fact.incarnationId ||
+          !entry.incarnationId ||
+          fact.incarnationId !== entry.incarnationId ||
+          entry.paneKey !== (batch.paneKey ?? null) ||
+          entry.tabId !== (batch.tabId ?? null) ||
+          entry.worktreeId !== (batch.worktreeId ?? null)
+        ) {
+          return
+        }
         entry.callbacks.onAgentExited?.(fact)
         return
       }
