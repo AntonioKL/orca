@@ -8,7 +8,7 @@ import { yieldToPalettePaint } from '@/lib/palette-cooperative-scheduler'
 import type { Worktree } from '../../../../shared/worktree/types'
 
 const EMPTY_DOCUMENTS: ReadonlyMap<string, PaletteDocument> = new Map()
-const DOCUMENT_BUILD_TIME_SLICE_MS = 16
+const DOCUMENT_BUILD_TIME_SLICE_MS = 12
 
 type CompletedBuild =
   | {
