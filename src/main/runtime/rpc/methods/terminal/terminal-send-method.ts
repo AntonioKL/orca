@@ -180,9 +180,6 @@ export const TERMINAL_SEND_METHODS: RpcAnyMethod[] = [
           : undefined
       const beforeWrite = assertSendPreconditions ?? quickCommandBeforeWrite
       const settledAgentPrompt = quickCommandPrompt ?? (isCliAgentPrompt ? params.text! : null)
-      const useSettledAgentPrompt =
-        settledAgentPrompt !== null &&
-        (await runtime.isTerminalRunningSettledPromptAgent(params.terminal))
       const reserveWrite =
         params.inputKind !== 'query-reply' && leaf?.ptyId && mobileFloorClientId
           ? (ptyId: string): void => {
@@ -195,8 +192,11 @@ export const TERMINAL_SEND_METHODS: RpcAnyMethod[] = [
           : undefined
       let result
       try {
-        const write = () =>
-          useSettledAgentPrompt
+        const write = async () => {
+          const useSettledAgentPrompt =
+            settledAgentPrompt !== null &&
+            (await runtime.isTerminalRunningSettledPromptAgent(params.terminal))
+          return useSettledAgentPrompt
             ? runtime.sendTerminalAgentPrompt(params.terminal, settledAgentPrompt!, {
                 beforeWrite,
                 signal,
@@ -218,6 +218,7 @@ export const TERMINAL_SEND_METHODS: RpcAnyMethod[] = [
                     : {})
                 }
               )
+        }
         if (leaf?.ptyId && runtime.enqueueTerminalInputWrite) {
           const queued = runtime.enqueueTerminalInputWrite(
             leaf.ptyId,

@@ -1422,10 +1422,23 @@ export function createRemoteRuntimePtyTransport(
           },
           REMOTE_QUICK_COMMAND_SEND_TIMEOUT_MS
         )
+        if (
+          !connected ||
+          handle !== targetHandle ||
+          lifecycleEpoch !== targetLifecycleEpoch ||
+          currentRuntimeEnvironmentId !== targetEnvironmentId ||
+          recoveryBlocksIo()
+        ) {
+          return false
+        }
         return result.send.accepted === true
       } catch (error) {
         if (lifecycleEpoch === targetLifecycleEpoch && handle === targetHandle) {
-          handleRemoteTerminalError(error)
+          if (runtimeTerminalErrorMessage(error).includes('terminal_input_queue_full')) {
+            notifyWriteUnavailable()
+          } else {
+            handleRemoteTerminalError(error)
+          }
         }
         return false
       }
@@ -1485,7 +1498,11 @@ export function createRemoteRuntimePtyTransport(
         if (lifecycleEpoch !== targetLifecycleEpoch || handle !== targetHandle) {
           return
         }
-        if (runtimeTerminalErrorMessage(error).includes('terminal_not_writable')) {
+        const message = runtimeTerminalErrorMessage(error)
+        if (
+          message.includes('terminal_not_writable') ||
+          message.includes('terminal_input_queue_full')
+        ) {
           notifyWriteUnavailable()
         } else {
           handleRemoteTerminalError(error)

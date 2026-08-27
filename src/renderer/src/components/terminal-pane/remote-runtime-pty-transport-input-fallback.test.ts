@@ -309,6 +309,50 @@ describe('createRemoteRuntimePtyTransport', () => {
     }
   })
 
+  it('reports terminal_input_queue_full as write unavailable', async () => {
+    vi.useFakeTimers()
+    runtimeSubscribe.mockImplementation(
+      async (_args: unknown, callbacks: typeof subscriptionCallbacks) => {
+        subscriptionCallbacks = callbacks
+        return { unsubscribe: vi.fn(), sendBinary: subscriptionSendBinary }
+      }
+    )
+    try {
+      const defaultRuntimeCall = runtimeCall.getMockImplementation()
+      runtimeCall.mockImplementation((args: { method: string }) => {
+        if (args.method === 'terminal.send') {
+          return Promise.resolve({
+            ok: false,
+            error: { code: 'terminal_input_queue_full', message: 'terminal_input_queue_full' }
+          })
+        }
+        return defaultRuntimeCall?.(args)
+      })
+      const { createRemoteRuntimePtyTransport } = await import('./remote-runtime-pty-transport')
+      const onWriteUnavailable = vi.fn()
+      const onError = vi.fn()
+      const transport = createRemoteRuntimePtyTransport('env-1', {
+        worktreeId: 'wt-1',
+        tabId: 'tab-1',
+        leafId: 'pane:1'
+      })
+
+      transport.attach({
+        existingPtyId: 'remote:env-1@@terminal-1',
+        callbacks: { onWriteUnavailable, onError }
+      })
+      await vi.waitFor(() => expect(transport.getPtyId()).toBe('remote:env-1@@terminal-1'))
+      expect(transport.sendInput('x')).toBe(true)
+      await vi.advanceTimersByTimeAsync(8)
+
+      await vi.waitFor(() => expect(onWriteUnavailable).toHaveBeenCalledOnce())
+      expect(onError).not.toHaveBeenCalled()
+      transport.destroy?.()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('does not report a delayed fallback rejection after same-handle reattach', async () => {
     vi.useFakeTimers()
     runtimeSubscribe.mockImplementation(

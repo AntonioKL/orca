@@ -11,13 +11,15 @@ export async function sendRuntimeTerminalQuickCommand({
   tabId,
   leafId,
   expectedPtyId,
-  text
+  text,
+  isCurrent
 }: {
   worktreeId: string
   tabId: string
   leafId: string
   expectedPtyId: string
   text: string
+  isCurrent?: () => boolean
 }): Promise<boolean> {
   // Keep the PTY transport module out of the store's slice-construction cycle.
   const [{ useAppStore }, { getSettingsForWorktreeRuntimeOwner }] = await Promise.all([
@@ -41,6 +43,9 @@ export async function sendRuntimeTerminalQuickCommand({
     ) {
       return false
     }
+    if (isCurrent && !isCurrent()) {
+      return false
+    }
     const { send } = await callRuntimeRpc<{ send: RuntimeTerminalSend }>(
       target,
       'terminal.send',
@@ -52,6 +57,9 @@ export async function sendRuntimeTerminalQuickCommand({
       },
       { timeoutMs: QUICK_COMMAND_SEND_TIMEOUT_MS }
     )
+    if (isCurrent && !isCurrent()) {
+      return false
+    }
     return send.accepted === true
   } catch {
     return false

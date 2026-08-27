@@ -98,7 +98,8 @@ describe('createIpcPtyTransport', () => {
       tabId: 'tab-1',
       leafId: 'd45db739-fb66-40d3-9533-d537772ad03f',
       expectedPtyId: 'pty-1',
-      text: 'echo x\r'
+      text: 'echo x\r',
+      isCurrent: expect.any(Function)
     })
     expect(vi.mocked(window.api.pty.write).mock.invocationCallOrder[0]).toBeLessThan(
       mocks.sendRuntimeTerminalQuickCommand.mock.invocationCallOrder[0]!
@@ -138,7 +139,10 @@ describe('createIpcPtyTransport', () => {
   it('drops deferred input after a same-id PTY rebind', async () => {
     let releaseFirst!: (accepted: boolean) => void
     mocks.sendRuntimeTerminalQuickCommand.mockImplementationOnce(
-      () => new Promise<boolean>((resolve) => (releaseFirst = resolve))
+      (args: { isCurrent?: () => boolean }) =>
+        new Promise<boolean>((resolve) => {
+          releaseFirst = () => resolve(args.isCurrent?.() ?? true)
+        })
     )
     const { createIpcPtyTransport } = await import('./pty-transport')
     const transport = createIpcPtyTransport({
@@ -155,7 +159,7 @@ describe('createIpcPtyTransport', () => {
     transport.attach?.({ existingPtyId: 'pty-1', callbacks: {} })
 
     releaseFirst(true)
-    await expect(quickCommand).resolves.toBe(true)
+    await expect(quickCommand).resolves.toBe(false)
     await Promise.resolve()
 
     expect(window.api.pty.write).not.toHaveBeenCalled()

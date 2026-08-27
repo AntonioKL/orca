@@ -105,4 +105,42 @@ describe('sendRuntimeTerminalQuickCommand', () => {
 
     expect(mocks.callRuntimeRpc).toHaveBeenCalledOnce()
   })
+
+  it('does not send when the transport binding changes after pane resolution', async () => {
+    let current = true
+    let releaseResolution!: () => void
+    const paneResolved = new Promise<void>((resolve) => {
+      releaseResolution = resolve
+    })
+    mocks.callRuntimeRpc.mockImplementationOnce(async () => {
+      await paneResolved
+      return {
+        terminal: {
+          handle: 'terminal-1',
+          tabId: 'tab-1',
+          leafId,
+          ptyId: 'pty-1',
+          worktreeId: 'worktree-1'
+        }
+      }
+    })
+
+    const isCurrent = vi.fn(() => current)
+    const request = sendRuntimeTerminalQuickCommand({
+      worktreeId: 'worktree-1',
+      tabId: 'tab-1',
+      leafId,
+      expectedPtyId: 'pty-1',
+      text: 'echo x\r',
+      isCurrent
+    })
+    await vi.waitFor(() => expect(mocks.callRuntimeRpc).toHaveBeenCalledOnce())
+    current = false
+    releaseResolution()
+
+    await expect(request).resolves.toBe(false)
+
+    expect(isCurrent).toHaveBeenCalled()
+    expect(mocks.callRuntimeRpc).toHaveBeenCalledOnce()
+  })
 })

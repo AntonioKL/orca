@@ -195,7 +195,8 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
           tabId,
           leafId,
           expectedPtyId: targetId,
-          text: data
+          text: data,
+          isCurrent: () => connected && ptyId === targetId && bindingGeneration === targetGeneration
         })
       })
     },
