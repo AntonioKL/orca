@@ -1082,7 +1082,12 @@ async function reconcileRestoredAgentPanes(): Promise<void> {
         // read: the cheap one reports the immediate foreground, which for Claude is a wrapper
         // named after its version ("2.1.246"); only this variant resolves through to the agent.
         readForegroundProcess: (ptyId) => provider.confirmForegroundProcess(ptyId),
-        toReadableTranscriptPath: (path, signal) => toHostReadableTranscriptPath(path, { signal }),
+        toReadableTranscriptPath: (path, signal, wslDistro) =>
+          toHostReadableTranscriptPath(path, {
+            signal,
+            // WSL relay ids carry the execution distro; preserve it through path translation.
+            wslDistro: wslDistro ?? undefined
+          }),
         getStatusSnapshot: () => agentHookServer.getStatusSnapshot(),
         confirm: (paneKey) => agentHookServer.confirmRestoredWorkingTurn(paneKey)
       })

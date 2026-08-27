@@ -90,10 +90,16 @@ describe('confirmRestoredWorkingClaudeTurns', () => {
         connectionId: wslHookRelayConnectionId('Ubuntu')
       }
     ]
-    const deps = makeDeps({ getStatusSnapshot: () => rows })
+    const toReadableTranscriptPath = vi.fn(async (path: string) => path)
+    const deps = makeDeps({ getStatusSnapshot: () => rows, toReadableTranscriptPath })
 
     await expect(confirmRestoredWorkingClaudeTurns(deps)).resolves.toBe(1)
     expect(deps.confirm).toHaveBeenCalledWith('tab-1:leaf-1')
+    expect(toReadableTranscriptPath).toHaveBeenCalledWith(
+      '/home/dev/session.jsonl',
+      expect.any(AbortSignal),
+      'Ubuntu'
+    )
   })
 
   it('refuses an open boundary older than a plausible tool call', async () => {
@@ -286,6 +292,30 @@ describe('confirmRestoredWorkingClaudeTurns', () => {
 
     await expect(confirmRestoredWorkingClaudeTurns(deps)).resolves.toBe(2)
     expect(readForegroundProcess).toHaveBeenCalledTimes(1)
+  })
+
+  it('bounds concurrent eligible-row inspection and eventually confirms every row', async () => {
+    const rows = Array.from({ length: 80 }, (_, index) =>
+      statusRow(`tab-${index}:leaf-1`, `/tmp/${index}.jsonl`)
+    )
+    let active = 0
+    let maxActive = 0
+    const readForegroundProcess = vi.fn(async () => {
+      active += 1
+      maxActive = Math.max(maxActive, active)
+      await new Promise((resolve) => setTimeout(resolve, 2))
+      active -= 1
+      return 'claude'
+    })
+    const deps = makeDeps({
+      getStatusSnapshot: () => rows,
+      getBoundPtyIdForPaneKey: (paneKey) => paneKey,
+      readForegroundProcess
+    })
+
+    await expect(confirmRestoredWorkingClaudeTurns(deps)).resolves.toBe(rows.length)
+    expect(maxActive).toBeLessThanOrEqual(2)
+    expect(readForegroundProcess).toHaveBeenCalledTimes(rows.length)
   })
 
   it('refuses an interrupted turn — the notice ends the generation it lands in', async () => {

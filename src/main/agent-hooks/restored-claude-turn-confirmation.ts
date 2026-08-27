@@ -1,6 +1,9 @@
 // Restore only from provider-authored lifecycle records; the renderer hides hydrated working rows.
 import { recognizeAgentProcess } from '../../shared/agent-process-recognition'
-import { isWslHookRelayConnectionId } from '../../shared/wsl-hook-relay-contract'
+import {
+  isWslHookRelayConnectionId,
+  wslHookRelayDistro
+} from '../../shared/wsl-hook-relay-contract'
 import type { AgentStatusIpcPayload } from '../../shared/agent-status-types'
 import type { NativeChatTurnLifecycle } from '../../shared/native-chat-types'
 import {
@@ -18,6 +21,9 @@ const PASS_DEADLINE_MS = 30_000
 /** Measured live boundaries were under 1h; abandoned ones began at 25h. */
 const OPEN_BOUNDARY_MAX_AGE_MS = 12 * 60 * 60 * 1000
 
+/** Keep confirmation work below the shared WSL transcript gate's pending-task budget. */
+const MAX_CONCURRENT_CONFIRMATIONS = 2
+
 export type RestoredClaudeTurnConfirmationDeps = {
   getStatusSnapshot: () => readonly AgentStatusIpcPayload[]
   isLocalExecutionHost: (worktreeId: string | undefined) => boolean
@@ -27,7 +33,11 @@ export type RestoredClaudeTurnConfirmationDeps = {
   /** Confirming foreground read, resolved through version-named wrappers. */
   readForegroundProcess: (ptyId: string) => Promise<string | null>
   /** Rewrites guest paths into host-readable paths and honors the pass signal. */
-  toReadableTranscriptPath: (path: string, signal?: AbortSignal) => Promise<string | null>
+  toReadableTranscriptPath: (
+    path: string,
+    signal?: AbortSignal,
+    wslDistro?: string | null
+  ) => Promise<string | null>
   confirm: (paneKey: string) => boolean
   /** Cancels in-flight transcript reads; defaults to this pass's own deadline. */
   signal?: AbortSignal
@@ -107,48 +117,67 @@ export async function confirmRestoredWorkingClaudeTurns(
     return pending
   }
 
-  const verdicts = await Promise.all(
-    deps.getStatusSnapshot().map(async (row): Promise<ConfirmableTurn | null> => {
-      // One bad workspace or transcript must not strand the other panes in Promise.all.
-      try {
-        const transcriptPath = row.providerSession?.transcriptPath
-        if (!transcriptPath || !isRestoredWorkingClaudeTurn(row)) {
-          return null
-        }
-        const { paneKey, worktreeId } = row
-        // Local absence cannot decide a remote execution host's liveness.
-        if (!deps.isLocalExecutionHost(worktreeId)) {
-          return null
-        }
-        const ptyId =
-          deps.getBoundPtyIdForPaneKey(paneKey) ?? deps.getPersistedPtyIdForPaneKey(paneKey)
-        if (!ptyId) {
-          return null
-        }
-        const foreground = await readForeground(ptyId)
-        // Reattach to the inspected PTY is valid; another PTY is a different session.
-        if (
-          isReboundAway(deps.getBoundPtyIdForPaneKey(paneKey), ptyId) ||
-          recognizeAgentProcess(foreground)?.agent !== row.agentType
-        ) {
-          return null
-        }
-        const readablePath = await deps.toReadableTranscriptPath(transcriptPath, signal)
-        if (readablePath === null) {
-          return null
-        }
-        // Absence is not evidence: a quiet pane may emit no hook to correct a false spinner.
-        const lifecycle = await readTurnLifecycle(readablePath, signal)
-        // A fresh Claude must not confirm an abandoned transcript from an earlier session.
-        const openedAt = lifecycle?.state === 'working' ? lifecycle.timestamp : null
-        const age = openedAt === null ? null : now() - openedAt
-        const open = age !== null && age >= 0 && age <= OPEN_BOUNDARY_MAX_AGE_MS
-        return open ? { paneKey, ptyId } : null
-      } catch {
-        // Fail closed per pane without rejecting the pass.
+  const rows = deps.getStatusSnapshot()
+  const verdicts: (ConfirmableTurn | null)[] = Array.from({ length: rows.length }, () => null)
+  let nextRowIndex = 0
+  const inspectRow = async (row: AgentStatusIpcPayload): Promise<ConfirmableTurn | null> => {
+    // One bad workspace or transcript must not strand the other panes in Promise.all.
+    try {
+      const transcriptPath = row.providerSession?.transcriptPath
+      if (!transcriptPath || !isRestoredWorkingClaudeTurn(row)) {
         return null
       }
-    })
+      const { paneKey, worktreeId } = row
+      // Local absence cannot decide a remote execution host's liveness.
+      if (!deps.isLocalExecutionHost(worktreeId)) {
+        return null
+      }
+      const ptyId =
+        deps.getBoundPtyIdForPaneKey(paneKey) ?? deps.getPersistedPtyIdForPaneKey(paneKey)
+      if (!ptyId) {
+        return null
+      }
+      const foreground = await readForeground(ptyId)
+      // Reattach to the inspected PTY is valid; another PTY is a different session.
+      if (
+        isReboundAway(deps.getBoundPtyIdForPaneKey(paneKey), ptyId) ||
+        recognizeAgentProcess(foreground)?.agent !== row.agentType
+      ) {
+        return null
+      }
+      const readablePath = await deps.toReadableTranscriptPath(
+        transcriptPath,
+        signal,
+        wslHookRelayDistro(row.connectionId)
+      )
+      if (readablePath === null) {
+        return null
+      }
+      // Absence is not evidence: a quiet pane may emit no hook to correct a false spinner.
+      const lifecycle = await readTurnLifecycle(readablePath, signal)
+      // A fresh Claude must not confirm an abandoned transcript from an earlier session.
+      const openedAt = lifecycle?.state === 'working' ? lifecycle.timestamp : null
+      const age = openedAt === null ? null : now() - openedAt
+      const open = age !== null && age >= 0 && age <= OPEN_BOUNDARY_MAX_AGE_MS
+      return open ? { paneKey, ptyId } : null
+    } catch {
+      // Fail closed per pane without rejecting the pass.
+      return null
+    }
+  }
+  const inspectWorker = async (): Promise<void> => {
+    while (true) {
+      const rowIndex = nextRowIndex++
+      if (rowIndex >= rows.length) {
+        return
+      }
+      verdicts[rowIndex] = await inspectRow(rows[rowIndex])
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(MAX_CONCURRENT_CONFIRMATIONS, rows.length) }, () =>
+      inspectWorker()
+    )
   )
 
   let confirmed = 0
