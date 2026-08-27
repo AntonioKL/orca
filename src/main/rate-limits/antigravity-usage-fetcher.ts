@@ -59,16 +59,32 @@ export const requestAntigravityQuotaSummary: AntigravityQuotaTransport = (target
         })
         res.on('end', () => {
           if (overflowed) {
-            reject(new Error('Antigravity quota response too large'))
+            rejectWithCleanup(new Error('Antigravity quota response too large'))
             return
           }
-          resolve({ statusCode: res.statusCode ?? 0, body })
+          resolveWithCleanup({ statusCode: res.statusCode ?? 0, body })
         })
       }
     )
+    const cleanupAbortListener = (): void => signal?.removeEventListener('abort', onAbort)
+    const resolveWithCleanup = (response: QuotaSummaryResponse): void => {
+      cleanupAbortListener()
+      resolve(response)
+    }
+    const rejectWithCleanup = (error: unknown): void => {
+      cleanupAbortListener()
+      reject(error)
+    }
+    const onAbort = (): void => {
+      req.destroy(new Error('aborted'))
+    }
     req.on('timeout', () => req.destroy(new Error('Antigravity quota request timed out')))
-    req.on('error', reject)
-    signal?.addEventListener('abort', () => req.destroy(new Error('aborted')), { once: true })
+    req.on('error', rejectWithCleanup)
+    if (signal?.aborted) {
+      onAbort()
+    } else {
+      signal?.addEventListener('abort', onAbort, { once: true })
+    }
     req.end('{}')
   })
 
@@ -163,8 +179,7 @@ export async function fetchAntigravityRateLimits(
         return unavailable(ANTIGRAVITY_SIGNED_OUT_REASON, 'missing-credentials')
       }
       if (response.statusCode !== 200) {
-        lastFailure = failed(`Antigravity quota fetch failed (${response.statusCode})`, 'server')
-        continue
+        return failed(`Antigravity quota fetch failed (${response.statusCode})`, 'server')
       }
       let parsed: ReturnType<typeof parseAntigravityQuotaSummary>
       try {

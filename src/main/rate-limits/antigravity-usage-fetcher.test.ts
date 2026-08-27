@@ -1,8 +1,12 @@
+import { createServer } from 'node:http'
+import { getEventListeners } from 'node:events'
+import type { AddressInfo } from 'node:net'
 import { describe, expect, it, vi } from 'vitest'
 import {
   ANTIGRAVITY_NOT_RUNNING_REASON,
   ANTIGRAVITY_SIGNED_OUT_REASON,
   fetchAntigravityRateLimits,
+  requestAntigravityQuotaSummary,
   type AntigravityQuotaTransport
 } from './antigravity-usage-fetcher'
 import type { AntigravityLogSource } from './antigravity-language-server-log'
@@ -172,6 +176,26 @@ describe('fetchAntigravityRateLimits', () => {
     expect(transport).toHaveBeenCalledTimes(1)
   })
 
+  it('does not fall back to an older server after the newest returns a server error', async () => {
+    const transport: AntigravityQuotaTransport = vi.fn(async (target) =>
+      target.port === 61383
+        ? { statusCode: 503, body: 'unavailable' }
+        : { statusCode: 200, body: OK_BODY }
+    )
+
+    const limits = await fetchAntigravityRateLimits({
+      logSource: runningServers({
+        'cli-20260826_194033.log': logHead(82413, 61383),
+        'cli-20260821_123102.log': logHead(70000, 51000)
+      }),
+      transport
+    })
+
+    expect(limits.status).toBe('error')
+    expect(limits.error).toContain('503')
+    expect(transport).toHaveBeenCalledTimes(1)
+  })
+
   // Why: a transport failure teaches nothing about the account, so an older live server is
   // still worth asking — that is the one case where falling through is correct.
   it('falls through to an older server when the newest cannot be reached at all', async () => {
@@ -239,5 +263,25 @@ describe('fetchAntigravityRateLimits', () => {
     })
 
     expect(limits.error).toBe(ANTIGRAVITY_NOT_RUNNING_REASON)
+  })
+})
+
+describe('requestAntigravityQuotaSummary', () => {
+  it('removes its abort listener after the request settles', async () => {
+    const server = createServer((_request, response) => {
+      response.end('{}')
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as AddressInfo).port
+    const controller = new AbortController()
+
+    try {
+      await requestAntigravityQuotaSummary({ scheme: 'http', port }, controller.signal)
+
+      expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0)
+    } finally {
+      server.closeAllConnections()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
   })
 })
