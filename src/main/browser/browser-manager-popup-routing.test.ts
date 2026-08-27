@@ -169,11 +169,12 @@ describe('browserManager', () => {
     expect(rendererSendMock).not.toHaveBeenCalled()
   })
 
-  it('keeps featureless window.open popups in-app for every disposition', () => {
+  it('keeps opener-dependent window.open popups in-app for every disposition', () => {
     // Regression guard for the reverted #8332: gating the allow on
     // disposition === 'new-window' silently broke featureless window.open()
-    // OAuth flows (disposition 'foreground-tab'), whose returned handle must
-    // stay live. Disposition is a UX hint, not a trust signal.
+    // OAuth flows, whose returned handle must stay live. A named target, a
+    // features string, and a blank URL each mark such a flow, so all three keep
+    // a real child window no matter which disposition Chromium reports.
     const guest = {
       id: 140,
       isDestroyed: vi.fn(() => false),
@@ -199,11 +200,75 @@ describe('browserManager', () => {
       features: string
       disposition: string
     }) => { action: 'allow' | 'deny' }
+    const openerDependentOpens = [
+      { url: 'https://sso.example.com/auth', frameName: 'ssoWindow', features: '' },
+      { url: 'https://sso.example.com/auth', frameName: '', features: 'width=500,height=600' },
+      { url: 'about:blank', frameName: '', features: '' }
+    ]
     for (const disposition of ['foreground-tab', 'background-tab', 'new-window']) {
-      expect(
-        handler({ url: 'https://sso.example.com/auth', frameName: '', features: '', disposition })
-      ).toMatchObject({ action: 'allow' })
+      for (const open of openerDependentOpens) {
+        expect(handler({ ...open, disposition })).toMatchObject({ action: 'allow' })
+      }
     }
+    expect(shellOpenExternalMock).not.toHaveBeenCalled()
+  })
+
+  it('routes unnamed featureless window.open to an Orca tab instead of a popup window', () => {
+    const rendererSendMock = vi.fn()
+    const guest = {
+      id: 142,
+      isDestroyed: vi.fn(() => false),
+      getType: vi.fn(() => 'webview'),
+      setBackgroundThrottling: guestSetBackgroundThrottlingMock,
+      setWindowOpenHandler: guestSetWindowOpenHandlerMock,
+      on: guestOnMock,
+      off: guestOffMock,
+      openDevTools: guestOpenDevToolsMock
+    }
+    webContentsFromIdMock.mockImplementation((id: number) => {
+      if (id === guest.id) {
+        return guest
+      }
+      if (id === rendererWebContentsId) {
+        return { isDestroyed: vi.fn(() => false), send: rendererSendMock }
+      }
+      return null
+    })
+
+    browserManager.attachGuestPolicies(guest as never)
+    browserManager.registerGuest({
+      browserPageId: 'browser-1',
+      webContentsId: guest.id,
+      rendererWebContentsId
+    })
+
+    const handler = guestSetWindowOpenHandlerMock.mock.calls[0][0] as (details: {
+      url: string
+      frameName: string
+      features: string
+      disposition: string
+    }) => { action: 'allow' | 'deny' }
+    for (const disposition of ['foreground-tab', 'background-tab']) {
+      expect(
+        handler({
+          url: 'https://docs.example.com/guide',
+          frameName: '',
+          features: '',
+          disposition
+        })
+      ).toEqual({ action: 'deny' })
+    }
+
+    expect(rendererSendMock).toHaveBeenCalledWith('browser:open-link-in-orca-tab', {
+      browserPageId: 'browser-1',
+      url: 'https://docs.example.com/guide'
+    })
+    expect(rendererSendMock).toHaveBeenCalledWith('browser:popup', {
+      browserPageId: 'browser-1',
+      origin: 'https://docs.example.com',
+      action: 'opened-in-orca'
+    })
+    expect(openPopupWithOriginBarMock).not.toHaveBeenCalled()
     expect(shellOpenExternalMock).not.toHaveBeenCalled()
   })
 

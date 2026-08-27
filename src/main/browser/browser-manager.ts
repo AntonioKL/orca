@@ -43,6 +43,8 @@ import {
   buildBrowserClickedLinkRoutingScript,
   buildBrowserIframeClickedLinkRoutingScript
 } from './browser-clicked-link-routing'
+import { createPageInitiatedTabBudget } from './browser-page-initiated-tab-budget'
+import { isNewBrowserTabPopupIntent } from './browser-popup-new-tab-intent'
 import { cleanElectronUserAgent } from './browser-session-ua'
 import { getBrowserSessionUserAgentMode } from './browser-session-user-agent-mode'
 import { googleAuthUserAgent, isGoogleAuthUrl } from './browser-google-auth-ua'
@@ -758,7 +760,8 @@ export class BrowserManager {
       this.attachGuestPolicies(window.webContents, this.resolvePopupOwnerContext(guest.id))
     }
     guest.on('did-create-window', handleDidCreateWindow)
-    guest.setWindowOpenHandler(({ url, frameName }) => {
+    const pageInitiatedTabBudget = createPageInitiatedTabBudget()
+    guest.setWindowOpenHandler(({ url, frameName, disposition, features }) => {
       const browserTabId = this.resolveBrowserTabIdForGuestWebContentsId(guest.id)
       const browserUrl = normalizeBrowserNavigationUrl(url)
       const externalUrl = normalizeExternalBrowserUrl(url)
@@ -782,6 +785,32 @@ export class BrowserManager {
         }
         // Why: a recognized gesture must never fall through to a native popup if its renderer vanished mid-click.
         return { action: 'deny' }
+      }
+
+      // Why: an unnamed, featureless window.open() is Chromium's own new-tab shape, so an Orca tab is
+      // the honest presentation; a floating origin-bar window is not. Opener-dependent shapes are
+      // excluded by isNewBrowserTabPopupIntent and still get a real child window below.
+      if (
+        browserTabId &&
+        externalUrl &&
+        isNewBrowserTabPopupIntent({ frameName, disposition, features })
+      ) {
+        // Why: one activation lets a page loop window.open, and each routed tab persists into
+        // workspace session state, so it survives the quit that used to clear popup windows.
+        if (!pageInitiatedTabBudget.tryConsume(Date.now())) {
+          this.forwardOrQueuePopupEvent(guest.id, {
+            origin: safeOrigin(externalUrl),
+            action: 'blocked'
+          })
+          return { action: 'deny' }
+        }
+        if (this.openLinkInOrcaTab(browserTabId, externalUrl)) {
+          this.forwardOrQueuePopupEvent(guest.id, {
+            origin: safeOrigin(externalUrl),
+            action: 'opened-in-orca'
+          })
+          return { action: 'deny' }
+        }
       }
 
       // Why: file URLs are fine for in-pane previews, but must not spawn native child windows targeting local paths.
