@@ -60,7 +60,7 @@ describe('normalizeLoadedProjectCatalog', () => {
   })
 
   it('tolerates missing or non-array collections', () => {
-    const result = normalizeLoadedProjectCatalog({} as PersistedState, vi.fn())
+    const result = normalizeLoadedProjectCatalog({}, vi.fn())
     expect(result.projects).toEqual([])
     expect(result.projectHostSetups).toEqual([])
   })
