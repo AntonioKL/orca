@@ -45,8 +45,9 @@ describe('terminal agent prompt send RPC', () => {
     expect(response.ok).toBe(true)
     expect(runtime.isTerminalRunningSettledPromptAgent).toHaveBeenCalledWith('terminal-1')
     expect(sendTerminalAgentPrompt).toHaveBeenCalledWith('terminal-1', 'review this change', {
-      beforeWrite: undefined,
-      signal: undefined
+      beforeWrite: expect.any(Function),
+      signal: undefined,
+      preferProtocolSubmit: true
     })
     expect(sendTerminal).not.toHaveBeenCalled()
   })
@@ -81,7 +82,7 @@ describe('terminal agent prompt send RPC', () => {
     expect(sendTerminal).toHaveBeenCalledWith(
       'terminal-1',
       { text: 'echo x', enter: true, interrupt: false },
-      { beforeWrite: undefined, signal: undefined }
+      { beforeWrite: expect.any(Function), signal: undefined }
     )
     expect(sendTerminalAgentPrompt).not.toHaveBeenCalled()
   })
