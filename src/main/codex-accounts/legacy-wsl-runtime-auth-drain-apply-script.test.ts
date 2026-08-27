@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -25,6 +26,7 @@ type ApplyOutcome = {
   firstStatus?: number
   marker: boolean
   quarantine?: string | null
+  markerKind?: 'file' | 'other' | 'symlink'
   source: string | null
   status: number
   target: string
@@ -35,10 +37,11 @@ function runApply(
     deleteSource?: boolean
     crashBeforeCommit?: boolean
     promoteAuth?: boolean
-    retryAfterCrash?: boolean
+    retry?: boolean
     rewriteAfterHashCall?: number
     rewriteBeforeDelete?: boolean
     rewriteSourceBeforeDelete?: boolean
+    symlinkMarkerDirectoryBeforeCommit?: boolean
     symlinkMarkerBeforeDelete?: boolean
     symlinkSource?: boolean
     symlinkTarget?: boolean
@@ -99,6 +102,7 @@ const { spawnSync } = require('node:child_process')
 const fs = require('node:fs')
 const args = process.argv.slice(2)
 const retiresSource = args.at(-2)?.endsWith('/legacy/auth.json')
+const commitsMarker = args.at(-1) === process.env.MARKER && args.at(-2)?.includes('.orca-drain-')
 if (process.env.REWRITE_BEFORE_DELETE === '1' && retiresSource) {
   const replacement = process.env.TARGET + '.replacement'
   fs.writeFileSync(replacement, process.env.BYTES)
@@ -113,6 +117,20 @@ if (process.env.REWRITE_SOURCE_BEFORE_DELETE === '1' && retiresSource) {
 if (process.env.SYMLINK_MARKER_BEFORE_DELETE === '1' && retiresSource) {
   fs.writeFileSync(process.env.MARKER_TARGET, '{"completed":true}\\n')
   fs.symlinkSync(process.env.MARKER_TARGET, process.env.MARKER)
+}
+if (process.env.SYMLINK_MARKER_DIRECTORY_BEFORE_COMMIT === '1' && commitsMarker) {
+  fs.mkdirSync(process.env.MARKER_DIRECTORY)
+  fs.symlinkSync(process.env.MARKER_DIRECTORY, process.env.MARKER)
+}
+if (args.includes('-T')) {
+  const target = args.at(-1)
+  let targetStat
+  try { targetStat = fs.lstatSync(target) } catch {}
+  if (targetStat) {
+    if (targetStat.isSymbolicLink()) fs.unlinkSync(target)
+    else if (targetStat.isDirectory()) process.exit(1)
+  }
+  args.splice(args.indexOf('-T'), 1)
 }
 const result = spawnSync('/bin/mv', args, { stdio: 'inherit' })
 if (result.status === 0 && process.env.CRASH_BEFORE_COMMIT === '1' && retiresSource) {
@@ -136,7 +154,7 @@ process.exit(result.status ?? 1)
     options.deleteSource === false ? '0' : '1',
     'missing'
   ]
-  const apply = (crashBeforeCommit: boolean): number => {
+  const apply = (crashBeforeCommit: boolean, rewriteSourceBeforeDelete: boolean): number => {
     try {
       execFileSync('/bin/sh', applyArgs, {
         env: {
@@ -146,9 +164,13 @@ process.exit(result.status ?? 1)
           CRASH_BEFORE_COMMIT: crashBeforeCommit ? '1' : '',
           REWRITE: options.rewriteAfterHashCall ? String(options.rewriteAfterHashCall) : '',
           REWRITE_BEFORE_DELETE: options.rewriteBeforeDelete ? '1' : '',
-          REWRITE_SOURCE_BEFORE_DELETE: options.rewriteSourceBeforeDelete ? '1' : '',
+          REWRITE_SOURCE_BEFORE_DELETE: rewriteSourceBeforeDelete ? '1' : '',
           SYMLINK_MARKER_BEFORE_DELETE: options.symlinkMarkerBeforeDelete ? '1' : '',
+          SYMLINK_MARKER_DIRECTORY_BEFORE_COMMIT: options.symlinkMarkerDirectoryBeforeCommit
+            ? '1'
+            : '',
           MARKER: marker,
+          MARKER_DIRECTORY: join(root, 'marker-directory'),
           MARKER_TARGET: join(root, 'marker-target'),
           TARGET: targetPath,
           BYTES: NEWER
@@ -160,16 +182,19 @@ process.exit(result.status ?? 1)
       return (error as { status?: number }).status ?? -1
     }
   }
-  const firstStatus = apply(Boolean(options.crashBeforeCommit))
+  const firstStatus = apply(
+    Boolean(options.crashBeforeCommit),
+    Boolean(options.rewriteSourceBeforeDelete)
+  )
   let status = firstStatus
-  if (options.retryAfterCrash) {
+  if (options.retry) {
     execFileSync(
       '/bin/sh',
       ['-c', _internals.inspectLegacyAuthScript, 'sh', legacy, join(root, 'active'), marker],
       { env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` }, stdio: 'ignore' }
     )
     writeFileSync(counter, '0')
-    status = apply(false)
+    status = apply(false, false)
   }
   const outcome = {
     status,
@@ -179,10 +204,18 @@ process.exit(result.status ?? 1)
   }
   const quarantine = `${marker}.orca-drain-live-source`
   const quarantineContents = existsSync(quarantine) ? readFileSync(quarantine, 'utf8') : null
+  const markerKind = existsSync(marker)
+    ? lstatSync(marker).isSymbolicLink()
+      ? 'symlink'
+      : lstatSync(marker).isFile()
+        ? 'file'
+        : 'other'
+    : undefined
   rmSync(root, { recursive: true, force: true })
   return {
     ...outcome,
-    ...(options.retryAfterCrash ? { firstStatus } : {}),
+    ...(options.retry ? { firstStatus } : {}),
+    ...(options.symlinkMarkerDirectoryBeforeCommit ? { markerKind } : {}),
     ...(options.rewriteSourceBeforeDelete ? { quarantine: quarantineContents } : {})
   }
 }
@@ -247,8 +280,22 @@ describe.skipIf(isWindows)('legacy WSL auth drain race guard', () => {
     expect(outcome.source).toBe(SOURCE)
     expect(outcome.quarantine).toBe(NEWER)
   })
+  it('commits a real marker when the path becomes a symlink to a directory', () => {
+    const outcome = runApply({ symlinkMarkerDirectoryBeforeCommit: true })
+    expect(outcome.status).toBe(0)
+    expect(outcome.source).toBeNull()
+    expect(outcome.markerKind).toBe('file')
+  })
+  it('preserves conflicting quarantined source bytes across a retry', () => {
+    const outcome = runApply({ rewriteSourceBeforeDelete: true, retry: true })
+    expect(outcome.firstStatus).toBe(40)
+    expect(outcome.status).toBe(40)
+    expect(outcome.source).toBe(SOURCE)
+    expect(outcome.quarantine).toBe(NEWER)
+    expect(outcome.marker).toBe(false)
+  })
   it('recovers and retries after interruption before the completion marker', () => {
-    const outcome = runApply({ crashBeforeCommit: true, retryAfterCrash: true })
+    const outcome = runApply({ crashBeforeCommit: true, retry: true })
     expect(outcome.firstStatus).not.toBe(0)
     expect(outcome.status).toBe(0)
     expect(outcome.source).toBeNull()

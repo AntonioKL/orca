@@ -63,11 +63,13 @@ mode_file() { stat -c '%a' -- "$1"; }
 if [ -e "$source_quarantine_auth" ] || [ -L "$source_quarantine_auth" ]; then
   [ -f "$source_quarantine_auth" ] && [ ! -L "$source_quarantine_auth" ] || exit 46
   [ "$(hash_file "$source_auth")" = "$5" ] || exit 37
+  [ "$(hash_file "$source_quarantine_auth")" = "$5" ] || exit 40
   rm -- "$source_quarantine_auth"
 fi
 if [ -e "$source_recovery_auth" ] || [ -L "$source_recovery_auth" ]; then
   [ -f "$source_recovery_auth" ] && [ ! -L "$source_recovery_auth" ] || exit 46
   [ "$(hash_file "$source_auth")" = "$5" ] || exit 37
+  [ "$(hash_file "$source_recovery_auth")" = "$5" ] || exit 40
   rm -- "$source_recovery_auth"
 fi
 if [ -e "$destination_recovery_auth" ] || [ -L "$destination_recovery_auth" ]; then
@@ -131,9 +133,9 @@ mv -- "$source_auth" "$source_quarantine_auth"; chmod 400 "$source_quarantine_au
 [ "$(hash_file "$source_quarantine_auth")" = "$5" ] || exit 40
 [ "$(hash_file "$target_auth")" = "$expected_target_hash" ] || exit 45
 [ "$target_auth" -ef "$destination_recovery_auth" ] || exit 45
-printf '%s\\n' '{"completed":true}' > "$temporary_marker"; chmod 600 "$temporary_marker"; mv -f -- "$temporary_marker" "$3"
+printf '%s\\n' '{"completed":true}' > "$temporary_marker"; chmod 600 "$temporary_marker"; mv -f -T -- "$temporary_marker" "$3"
+marker_committed || exit 46
 chmod 600 "$destination_recovery_auth"
-rm -- "$source_recovery_auth" "$source_quarantine_auth" "$destination_recovery_auth"
 `
 
 export const FINALIZE_ABSENT_AUTH_SCRIPT = `
@@ -141,5 +143,5 @@ set -eu
 if [ -e "$3" ] || [ -L "$3" ]; then [ -f "$3" ] && [ ! -L "$3" ] || exit 46; exit 0; fi
 ${RESOLVE_LEGACY_HOME_SCRIPT}
 [ ! -e "$legacy_home/auth.json" ] && [ ! -L "$legacy_home/auth.json" ] || exit 41
-umask 077; marker_parent=\${3%/*}; mkdir -p -- "$marker_parent"; temporary_marker="$3.orca-drain-$$"; trap 'rm -f -- "$temporary_marker"' EXIT; trap 'rm -f -- "$temporary_marker"; exit 129' HUP INT TERM; printf '%s\\n' '{"completed":true}' > "$temporary_marker"; chmod 600 "$temporary_marker"; mv -f -- "$temporary_marker" "$3"
+umask 077; marker_parent=\${3%/*}; mkdir -p -- "$marker_parent"; temporary_marker="$3.orca-drain-$$"; trap 'rm -f -- "$temporary_marker"' EXIT; trap 'rm -f -- "$temporary_marker"; exit 129' HUP INT TERM; printf '%s\\n' '{"completed":true}' > "$temporary_marker"; chmod 600 "$temporary_marker"; mv -f -T -- "$temporary_marker" "$3"; [ -f "$3" ] && [ ! -L "$3" ] || exit 46
 `
