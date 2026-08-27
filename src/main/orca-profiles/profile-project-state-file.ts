@@ -5,6 +5,10 @@ import { dirname } from 'node:path'
 import { getDefaultPersistedState, getDefaultWorkspaceSession } from '../../shared/constants'
 import type { ExecutionHostId } from '../../shared/execution-host'
 import { projectHostSetupProjectionFromRepos } from '../../shared/project-host-setup-projection'
+import {
+  normalizeProjectHostSetupRows,
+  normalizeProjectRows
+} from '../../shared/project-catalog-row-normalization'
 import { carryProjectStateThroughIdentityChange } from '../../shared/project-identity-succession'
 import type { PersistedState } from '../../shared/persisted-state-types'
 import type { Project, ProjectHostSetup } from '../../shared/project-types'
@@ -39,8 +43,12 @@ export function readProfileState(profileId: string, userDataPath: string): Trans
     ...defaults,
     ...parsed,
     repos: arrayOrEmpty<Repo>(parsed.repos),
-    projects: arrayOrEmpty<Project>(parsed.projects),
-    projectHostSetups: arrayOrEmpty<ProjectHostSetup>(parsed.projectHostSetups),
+    // Why normalize: another profile's file is untrusted JSON, and a null repoId/path here would be
+    // carried straight into the importing app's state. Cast — these arrays stay mutably owned.
+    projects: normalizeProjectRows(arrayOrEmpty<Project>(parsed.projects)) as Project[],
+    projectHostSetups: normalizeProjectHostSetupRows(
+      arrayOrEmpty<ProjectHostSetup>(parsed.projectHostSetups)
+    ) as ProjectHostSetup[],
     projectGroups: arrayOrEmpty(parsed.projectGroups),
     folderWorkspaces: arrayOrEmpty(parsed.folderWorkspaces),
     sparsePresetsByRepo: recordOrEmpty<SparsePreset[]>(parsed.sparsePresetsByRepo),
