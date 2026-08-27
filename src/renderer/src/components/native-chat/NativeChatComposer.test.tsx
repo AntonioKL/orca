@@ -43,6 +43,8 @@ const mocks = vi.hoisted(() => ({
   sendNativeChatMessage: vi.fn(),
   sendNativeChatTypedCommand: vi.fn(),
   sendNativeChatMessageVerified: vi.fn(),
+  waitForNativeChatSendQueueIdle: vi.fn(),
+  trackNativeSend: vi.fn(),
   typeNativeChatCommand: vi.fn(),
   trackPendingSend: vi.fn(),
   setDraft: vi.fn(),
@@ -79,6 +81,11 @@ vi.mock('./native-chat-runtime-send', () => ({
   typeNativeChatCommand: (...args: unknown[]) => mocks.typeNativeChatCommand(...args),
   sendNativeChatMessageWithImageAttachments: vi.fn(),
   submitNativeChatPrompt: vi.fn()
+}))
+vi.mock('./native-chat-send-settlement', () => ({
+  waitForNativeChatSendQueueIdle: (...args: unknown[]) =>
+    mocks.waitForNativeChatSendQueueIdle(...args),
+  trackNativeSend: (...args: unknown[]) => mocks.trackNativeSend(...args)
 }))
 vi.mock('./claude-model-switch-confirmation', () => ({
   createClaudeModelSwitchConfirmationObserver: (...args: unknown[]) =>
@@ -196,6 +203,18 @@ describe('NativeChatComposer', () => {
     mocks.sendNativeChatMessage.mockReturnValue(mocks.sendHandle)
     mocks.sendNativeChatTypedCommand.mockReturnValue(mocks.sendHandle)
     mocks.sendNativeChatMessageVerified.mockResolvedValue(true)
+    mocks.waitForNativeChatSendQueueIdle.mockReturnValue(mocks.sendHandle.settled)
+    mocks.trackNativeSend.mockImplementation(
+      (
+        handle: unknown,
+        track: (handle: unknown, pendingId?: string) => void,
+        pendingId?: string
+      ) => {
+        if (handle) {
+          track(handle, pendingId)
+        }
+      }
+    )
     mocks.typeNativeChatCommand.mockResolvedValue(true)
     mocks.sendHandle.settleAfterMs = 500
     Object.defineProperty(window, 'api', {
@@ -303,7 +322,7 @@ describe('NativeChatComposer', () => {
 
   it.each(['claude', 'openclaude'] as const)(
     'reports a %s /resume send as a verified command, so the view can reveal the TUI',
-    (agent) => {
+    async (agent) => {
       // STA-4617: the reveal hangs off this callback (the composer cannot know the
       // chat surface is covering the terminal), so an unreported send strands it.
       const onSlashCommand = vi.fn()
@@ -320,11 +339,18 @@ describe('NativeChatComposer', () => {
       )
 
       act(() => mocks.fieldProps?.onSend?.())
+      await act(async () => {
+        await Promise.resolve()
+      })
 
       expect(mocks.sendNativeChatMessage).toHaveBeenCalledWith({}, 'pty-1', '/resume', undefined)
       // The send handle rides along: a view switch cancels every tracked handle,
       // so the reveal has to wait for these writes to finish.
-      expect(onSlashCommand).toHaveBeenCalledWith('/resume', mocks.sendHandle.settled)
+      expect(onSlashCommand).toHaveBeenCalledWith('/resume', expect.any(Promise))
+      expect(mocks.waitForNativeChatSendQueueIdle).toHaveBeenCalledWith(
+        'pty-1',
+        mocks.sendHandle.settled
+      )
     }
   )
 

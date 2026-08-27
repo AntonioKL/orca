@@ -31,7 +31,7 @@ import {
 } from './native-chat-pty-send-queue'
 
 export { NATIVE_CHAT_ADVANCE_BUFFER_MS, NATIVE_CHAT_QUESTION_STEP_MS, NATIVE_CHAT_SUBMIT_DELAY_MS }
-export { resetNativeChatPtySendQueuesForTests }
+export { resetNativeChatPtySendQueuesForTests, waitForNativeChatPtyIdle }
 
 export const NATIVE_CHAT_IMAGE_ATTACHMENT_SETTLE_MS = 300
 
