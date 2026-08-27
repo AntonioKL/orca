@@ -85,7 +85,9 @@ import {
   ModifierDoubleTapDetector,
   toModifierDoubleTapEvent
 } from '../../../../shared/modifier-double-tap-detector'
-import type { BrowserTab as BrowserTabState, Tab, TerminalTab } from '../../../../shared/types'
+import type { BrowserTab as BrowserTabState } from '../../../../shared/browser-workspace-types'
+import type { Tab } from '../../../../shared/tab-types'
+import type { TerminalTab } from '../../../../shared/terminal-tab-types'
 import { resolveUnifiedTabLabel } from '../../../../shared/tab-title-resolution'
 import { FloatingBrowserSlot } from './FloatingBrowserSlot'
 import { FloatingTerminalOrchestrationDialog } from './FloatingTerminalOrchestrationDialog'
@@ -894,8 +896,8 @@ export function FloatingTerminalPanel({
         if (item.contentType === 'terminal') {
           closeTab(item.entityId, { reason: 'cleanup' })
         } else if (item.contentType === 'browser') {
-          destroyWorkspaceWebviews(state.browserPagesByWorkspace, item.entityId)
           closeBrowserTab(item.entityId)
+          destroyWorkspaceWebviews(state.browserPagesByWorkspace, item.entityId)
         } else if (item.contentType === 'simulator') {
           closeUnifiedTab(item.id)
         } else {
@@ -950,8 +952,8 @@ export function FloatingTerminalPanel({
         onClose: () => {
           const latest = useAppStore.getState()
           if (item.contentType === 'browser') {
-            destroyWorkspaceWebviews(latest.browserPagesByWorkspace, item.entityId)
             closeBrowserTab(item.entityId)
+            destroyWorkspaceWebviews(latest.browserPagesByWorkspace, item.entityId)
           } else if (item.contentType === 'simulator') {
             closeUnifiedTab(item.id)
           } else {
