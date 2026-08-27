@@ -237,6 +237,100 @@ Skill deviations, both deliberate:
 
 Screenshots are in `/tmp/lane3-host/` (`f1`–`f21.jpg`) and were not committed.
 
+## Confirmation round (2026-08-27, second dispatch)
+
+The coordinator was right that my first-round experiment was the wrong animal: `env -u ORCA_PANE_KEY`
+suppresses the whole hook, so the pane loses its agent identity and native chat is never offered.
+Brennan kept `ORCA_PANE_KEY` set. I reproduced his exact sequence and it changes the conclusion.
+
+### The reproduction (all UI interaction via `orca emulator`, iPhone 17 by UDID)
+
+Configured the repo the way his was — `hookSettings.setupAgentStartupPolicy: 'wait-for-setup'` plus a
+slow setup script — then created a worktree **from the phone**. Orca produced exactly his layout:
+two tabs, `Terminal 1` (Claude glyph) and `Setup`, with the agent pane sitting on
+
+```
+$ bash -lc 'eval "$ORCA_SEQUENCED_STARTUP_SCRIPT"'
+Waiting for setup to finish before starting agent...
+```
+
+Interrupted it with the pane's own **Interrupt terminal** key, landing back at `[cownose] $` with the
+full Orca environment intact, then typed `claude` at that prompt. That is his sequence, not a synthetic
+stand-in.
+
+### Answer to the question my first report could not answer
+
+**The pane lands in `ready` — settled, non-pending, zero messages. Not `waiting-session`, and not
+`awaiting-transcript`.** Logged from the host every 2s:
+
+```
+  0s  agent=claude state=done   sessionId=null
+116s  agent=claude state=done   sessionId=aff0000b-2b6a-4831-b0d4-699c9da876a5
+      transcriptPath=~/.claude/projects/-Users-…-cownose/aff0000b-….jsonl
+120s  agent=claude state=working sessionId=aff0000b   (unchanged)
+124s  agent=claude state=done    sessionId=aff0000b   (unchanged)
+```
+
+`providerSession` is published within a second or two of the hand-started agent booting, and it never
+goes null afterwards. On screen the pane read **"Start a chat with Claude"**, which under the new copy
+map means `ready` + agent-not-working — confirmed against a second, still-unprompted pane whose
+session `714a8c63` is published while its transcript file does not exist on disk.
+
+It stays in `ready` only until there is something to read: I sent the first native-chat message, the
+transcript file appeared, and **the conversation rendered within 8 seconds**. No stuck state, no
+manual recovery, no toggle needed.
+
+### So: does fix (a) cover Brennan's case? No — and neither does follow-up #2
+
+Stated plainly, because the coordinator asked for the uncomfortable answer if that is the true one:
+
+- **Fix (a) does not unblock him.** His pane had a session id. `sessionId` is only null when the hook
+  never reaches the host at all, which is not what happens when `ORCA_PANE_KEY` survives. Fix (a) is a
+  real fix for a real case — an agent whose hook identity never arrives — but that is not his case.
+- **Follow-up #2 is not his fix either, and I did not implement it.** The coordinator's condition was
+  "if it lands in `awaiting-transcript` and stays there". It never entered `awaiting-transcript` on
+  this host: a live session whose transcript file does not exist resolves to a settled empty window,
+  not a pending one. Promoting `native-chat-read-retry-timer.ts` would have been a fix for a state
+  this reproduction never produced. I am not shipping speculation.
+- **His symptom did not reproduce.** A faithful re-run of his sequence behaves correctly end to end.
+  Something about his instance — not the sequence — produced a settled *empty* window over a
+  transcript that already had ~30 rows at the path the host held. I could not reproduce that, so I
+  cannot name it, and I will not guess at it in a PR body.
+
+### What fix (b) is worth, measured rather than asserted
+
+His frame is `"Start a chat with Claude"` above a footer reading `"Agent is working"`. That pairing is
+now impossible: `ready` + working renders **"Claude is working / This conversation has no messages
+yet."** Whichever of the three states he was actually in, the new build names it — which is the whole
+reason the question above was unanswerable from his recording. This round it *was* answerable, from
+the running app, in one screenshot. That is the fix earning its keep.
+
+### Evidence limits, stated rather than papered over
+
+- Device captures of the changed copy: `awaiting-transcript` → "Transcript not written yet"
+  (first round, `/tmp/lane3-host/f21.jpg`), and `ready` → "Start a chat with Claude" (this round).
+- **I do not have a valid on-device before/after pair for the states whose copy changed.** I checked
+  out the base sources to shoot a "before" and discovered **Expo Fast Refresh was not applying source
+  changes** — a sentinel-string probe never appeared on device. Every frame in this round therefore
+  came from the fixed bundle loaded at app start. The "before" is established by the base source
+  itself (all three statuses return the same `empty` entry) and by the failing test run above, not by
+  a screenshot. Reloading the bundle per arm would have cost another full navigation cycle; I chose
+  to spend the remaining budget on the rebase and gates instead and to say so here.
+- `orca emulator` **drag gestures do work** — contradicting my earlier note and the standing memo.
+  A single `gesture` call with timed points does nothing, but separate `exec` calls for
+  `begin` → several `move`s → `end` produce a real 1:1 drag. That is how the terminal key row was
+  scrolled to reach **Interrupt terminal**, which is what made a pure-`orca emulator` Ctrl+C possible.
+  Momentum/fling is not simulated: each swipe moves exactly the dragged distance.
+
+### Post-rebase gates (base `6ba6d58cd2`, past the `9635e6822f` the coordinator named)
+
+| Gate | Result |
+| --- | --- |
+| `cd mobile && npx tsc --noEmit` | clean |
+| `pnpm tc` | clean, exit 0 |
+| `cd mobile && npx vitest run src/session` | 137 files / 1258 tests passed |
+| `check:code-quality:changed` | passed since `6ba6d58cd2d3` — 0 / 0 / 0 findings |
+
 ## Files changed
 
 ```
