@@ -19,6 +19,7 @@ import {
   writeManagedScript,
   type HookDefinition
 } from '../agent-hooks/installer-utils'
+import { buildPosixAgentHookPostCommand } from '../agent-hooks/hook-post-command'
 import { refreshManagedScriptIfPresent } from '../agent-hooks/managed-hook-script-refresh'
 import { resolveHooksJsonWritePath } from '../agent-hooks/hook-config-write-path'
 import { writeFileAtomically } from '../codex-accounts/fs-utils'
@@ -823,6 +824,7 @@ function getManagedScript(target: 'local' | 'posix' = 'local'): string {
     // Why: sourcing refreshes PORT/TOKEN/ENV/VERSION from the current Orca so a surviving PTY keeps reporting after a restart (see claude/hook-service.ts).
     'load_hook_endpoint() {',
     '  endpoint_path="$1"',
+    '  unset ORCA_AGENT_HOOK_TRANSPORT',
     '  case "$endpoint_path" in',
     '    *.cmd)',
     // Why: Windows passes endpoint.cmd into WSL via WSLENV; parse only Orca's known assignments since cmd.exe `set` lines aren't shell syntax.
@@ -834,6 +836,7 @@ function getManagedScript(target: 'local' | 'posix' = 'local'): string {
     '          "set ORCA_AGENT_HOOK_TOKEN="*) ORCA_AGENT_HOOK_TOKEN=${endpoint_line#*=} ;;',
     '          "set ORCA_AGENT_HOOK_ENV="*) ORCA_AGENT_HOOK_ENV=${endpoint_line#*=} ;;',
     '          "set ORCA_AGENT_HOOK_VERSION="*) ORCA_AGENT_HOOK_VERSION=${endpoint_line#*=} ;;',
+    '          "set ORCA_AGENT_HOOK_TRANSPORT="*) ORCA_AGENT_HOOK_TRANSPORT=${endpoint_line#*=} ;;',
     '        esac',
     '      done < "$endpoint_path"',
     '      ;;',
@@ -853,20 +856,11 @@ function getManagedScript(target: 'local' | 'posix' = 'local'): string {
     '  curl_bin="$1"',
     '  connect_timeout="${2:-0.5}"',
     '  max_time="${3:-1.5}"',
-    // Why: worktreeId embeds a path, so hand-building JSON in shell is unsafe with quotes/newlines; post raw payload plus metadata as form fields instead.
-    // Why: pipe payload to curl's stdin (`payload@-`) not an inline arg, so tens-of-KB tool output stays off the command line (EDR false positives).
-    '  printf \'%s\' "$payload" | "$curl_bin" -sS -X POST "http://127.0.0.1:${ORCA_AGENT_HOOK_PORT}/hook/codex" \\',
-    '    --connect-timeout "$connect_timeout" --max-time "$max_time" \\',
-    '    --noproxy "127.0.0.1" \\',
-    '    -H "Content-Type: application/x-www-form-urlencoded" \\',
-    '    -H "X-Orca-Agent-Hook-Token: ${ORCA_AGENT_HOOK_TOKEN}" \\',
-    '    --data-urlencode "paneKey=${ORCA_PANE_KEY}" \\',
-    '    --data-urlencode "tabId=${ORCA_TAB_ID}" \\',
-    '    --data-urlencode "launchToken=${ORCA_AGENT_LAUNCH_TOKEN}" \\',
-    '    --data-urlencode "worktreeId=${ORCA_WORKTREE_ID}" \\',
-    '    --data-urlencode "env=${ORCA_AGENT_HOOK_ENV}" \\',
-    '    --data-urlencode "version=${ORCA_AGENT_HOOK_VERSION}" \\',
-    '    --data-urlencode "payload@-"',
+    // Why: keep full hook JSON off the command line and avoid URL-encoding paths/commands into IDS-friendly traversal signatures.
+    ...buildPosixAgentHookPostCommand('codex', {
+      curlCommand: '"$curl_bin"',
+      indent: '    '
+    }).map((line) => `  ${line}`),
     '}',
     'is_wsl_runtime() {',
     '  [ -n "$WSL_DISTRO_NAME" ] && return 0',
