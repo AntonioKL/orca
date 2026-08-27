@@ -1,3 +1,4 @@
+import { SETUP_AGENT_SEQUENCE_SETUP_SCRIPT_ENV } from '../../../shared/setup-agent-sequencing'
 import { describe, expect, it, vi } from 'vitest'
 import { ensureWorktreeHasInitialTerminal } from './worktree-initial-terminal-seeding'
 import type { AppStoreState } from './worktree-activation-test-harness'
@@ -88,7 +89,9 @@ describe('ensureWorktreeHasInitialTerminal', () => {
     expect(store.queueTabStartupCommand).toHaveBeenCalledWith(
       'tab-2',
       expect.objectContaining({
-        command: expect.stringContaining('printf')
+        env: expect.objectContaining({
+          [SETUP_AGENT_SEQUENCE_SETUP_SCRIPT_ENV]: expect.stringContaining('printf')
+        })
       })
     )
   })

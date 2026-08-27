@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import { SETUP_AGENT_SEQUENCE_STARTUP_SCRIPT_ENV } from '../../../shared/setup-agent-sequencing'
+import {
+  SETUP_AGENT_SEQUENCE_SETUP_SCRIPT_ENV,
+  SETUP_AGENT_SEQUENCE_STARTUP_SCRIPT_ENV
+} from '../../../shared/setup-agent-sequencing'
 import { ensureWorktreeHasInitialTerminal } from './worktree-initial-terminal-seeding'
 import {
   createMockStore,
@@ -121,7 +124,11 @@ describe('ensureWorktreeHasInitialTerminal', () => {
     expect(store.queueTabStartupCommand).toHaveBeenCalledWith(
       'tab-2',
       expect.objectContaining({
-        command: expect.stringContaining('printf')
+        env: expect.objectContaining({
+          [SETUP_AGENT_SEQUENCE_SETUP_SCRIPT_ENV]: expect.stringContaining(
+            '/tmp/repo/.git/orca/setup-runner.sh.'
+          )
+        })
       })
     )
     expect(store.queueTabSetupSplit).not.toHaveBeenCalled()
@@ -188,7 +195,11 @@ describe('ensureWorktreeHasInitialTerminal', () => {
     expect(store.queueTabStartupCommand).toHaveBeenCalledWith(
       'tab-2',
       expect.objectContaining({
-        command: expect.stringContaining('printf')
+        env: expect.objectContaining({
+          [SETUP_AGENT_SEQUENCE_SETUP_SCRIPT_ENV]: expect.stringContaining(
+            '/tmp/repo/.git/orca/setup-runner.sh.'
+          )
+        })
       })
     )
     expect(store.queueTabStartupCommand).toHaveBeenCalledWith(
@@ -250,12 +261,12 @@ describe('ensureWorktreeHasInitialTerminal', () => {
     )
     expect(store.queueTabSetupSplit).toHaveBeenCalledWith('tab-1', {
       command: expect.stringContaining('bash /tmp/repo/.git/orca/setup-runner.sh'),
-      env: { ORCA_ROOT_PATH: '/tmp/repo' },
-      direction: 'vertical'
-    })
-    expect(store.queueTabSetupSplit).toHaveBeenCalledWith('tab-1', {
-      command: expect.stringContaining('printf'),
-      env: { ORCA_ROOT_PATH: '/tmp/repo' },
+      env: expect.objectContaining({
+        ORCA_ROOT_PATH: '/tmp/repo',
+        [SETUP_AGENT_SEQUENCE_SETUP_SCRIPT_ENV]: expect.stringContaining(
+          '/tmp/repo/.git/orca/setup-runner.sh.'
+        )
+      }),
       direction: 'vertical'
     })
   })
@@ -288,7 +299,12 @@ describe('ensureWorktreeHasInitialTerminal', () => {
     )
     expect(store.queueTabSetupSplit).toHaveBeenCalledWith('tab-1', {
       command: expect.stringContaining('bash /mnt/c/repo/.git/orca/setup-runner.sh'),
-      env: { ORCA_ROOT_PATH: 'C:\\repo' },
+      env: expect.objectContaining({
+        ORCA_ROOT_PATH: 'C:\\repo',
+        [SETUP_AGENT_SEQUENCE_SETUP_SCRIPT_ENV]: expect.stringContaining(
+          '/mnt/c/repo/.git/orca/setup-runner.sh.'
+        )
+      }),
       direction: 'vertical'
     })
   })

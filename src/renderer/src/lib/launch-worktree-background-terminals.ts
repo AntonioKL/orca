@@ -125,11 +125,17 @@ function registerBackgroundPaneBuffer(tabId: string, leafId: string, pane: Spawn
 }
 
 function buildSetupCommand(setup: WorktreeSetupLaunch): string {
+  // Why: a sequenced launch carries the gated command that records setup's outcome for a waiting
+  // agent terminal; rebuilding the bare runner here ran setup but recorded nothing, so the agent
+  // waited out its whole bound.
   // Why: background setup tabs can launch later, so they must reuse the same shell chosen when the runner was written.
-  return buildSetupRunnerCommand(
-    setup.runnerScriptPath,
-    getSetupRunnerCommandPlatformForPath(setup.runnerScriptPath, 'posix'),
-    setup.shell
+  return (
+    setup.command ??
+    buildSetupRunnerCommand(
+      setup.runnerScriptPath,
+      getSetupRunnerCommandPlatformForPath(setup.runnerScriptPath, 'posix'),
+      setup.shell
+    )
   )
 }
 

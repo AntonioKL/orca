@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { resolve } from 'node:path'
 import type { CreateWorktreeResult } from '../../shared/worktree/create-types'
+import { SETUP_AGENT_SEQUENCE_SETUP_SCRIPT_ENV } from '../../shared/setup-agent-sequencing'
 import { resolveRegisteredWorktreePath } from './registered-worktree-roots-cache'
 import {
   listWorktreesMock,
@@ -738,7 +739,9 @@ describe('registerWorktreeHandlers', () => {
           request_kind: 'new'
         }
       }
-    })) as { setup?: { command?: string; runnerScriptPath: string } }
+    })) as {
+      setup?: { command?: string; runnerScriptPath: string; envVars?: Record<string, string> }
+    }
 
     expect(result.setup).toEqual(
       expect.objectContaining({
@@ -746,7 +749,7 @@ describe('registerWorktreeHandlers', () => {
         command: expect.stringContaining('bash /mnt/c/workspace/repo/.git/orca/setup-runner.sh')
       })
     )
-    expect(result.setup?.command).toContain('printf')
+    expect(result.setup?.envVars?.[SETUP_AGENT_SEQUENCE_SETUP_SCRIPT_ENV]).toContain('printf')
   })
 
   it('rejects ask-policy creates before mutating git state when setup decision is missing', async () => {

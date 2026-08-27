@@ -127,7 +127,10 @@ import {
   buildSetupRunnerCommand,
   getSetupRunnerCommandPlatformForPath
 } from '../../shared/setup-runner-command'
-import { createSequencedSetupAgentCommands } from '../../shared/setup-agent-sequencing'
+import {
+  applySequencedSetupLaunch,
+  createSequencedSetupAgentCommands
+} from '../../shared/setup-agent-sequencing'
 import { shouldWaitForSetupBeforeAgentStartup } from '../../shared/setup-agent-startup-policy'
 import { createWorktreeCreateTimingRecorder } from '../worktree-create-timing'
 import {
@@ -364,7 +367,10 @@ async function spawnLocalStartupAndSetupTerminals(args: {
   let startupTerminal: CreateWorktreeResult['startupTerminal']
 
   let sequencedStartup = startup
-  let wrappedSetupCommandStr: string | undefined
+  // Why: the gated setup command and the env carrying its script travel together as one launch
+  // record, so no downstream branch can run the setup runner without the half that records the
+  // outcome the agent terminal is waiting on.
+  let sequencedSetup: CreateWorktreeResult['setup']
   if (startup && setup?.waitForAgentStartup === true) {
     const platform = getSetupRunnerCommandPlatformForLaunch(
       setup,
@@ -381,7 +387,7 @@ async function spawnLocalStartupAndSetupTerminals(args: {
       command: sequenced.startupCommand,
       ...(sequenced.startupEnv ? { env: { ...startup.env, ...sequenced.startupEnv } } : {})
     }
-    wrappedSetupCommandStr = sequenced.setupCommand
+    sequencedSetup = applySequencedSetupLaunch(setup, sequenced)
   }
 
   try {
@@ -426,8 +432,9 @@ async function spawnLocalStartupAndSetupTerminals(args: {
   let didSpawnSetup = false
   if (setup) {
     try {
+      const setupLaunch = sequencedSetup ?? setup
       const setupCommand =
-        wrappedSetupCommandStr ??
+        setupLaunch.command ??
         buildSetupRunnerCommand(
           setup.runnerScriptPath,
           getSetupRunnerCommandPlatformForLaunch(
@@ -446,14 +453,14 @@ async function spawnLocalStartupAndSetupTerminals(args: {
         await runtime.splitTerminal(startupTerminalHandle, {
           direction: setupLaunchMode === 'split-horizontal' ? 'horizontal' : 'vertical',
           command: setupCommand,
-          env: setup.envVars,
+          env: setupLaunch.envVars,
           activate: false
         })
       } else {
         await runtime.createTerminal(`id:${worktree.id}`, {
           title: 'Setup',
           command: setupCommand,
-          env: setup.envVars,
+          env: setupLaunch.envVars,
           activate: false
         })
       }
@@ -467,16 +474,7 @@ async function spawnLocalStartupAndSetupTerminals(args: {
   }
 
   return {
-    ...(setup && !didSpawnSetup
-      ? {
-          activationSetup: {
-            ...setup,
-            ...(startupTerminalHandle && wrappedSetupCommandStr
-              ? { command: wrappedSetupCommandStr }
-              : {})
-          }
-        }
-      : {}),
+    ...(setup && !didSpawnSetup ? { activationSetup: sequencedSetup ?? setup } : {}),
     ...(startupTerminal ? { startupTerminal } : {}),
     didSpawnSetup,
     ...(warning ? { warning } : {})

@@ -3,7 +3,10 @@ import type {
   WorktreeSetupLaunch
 } from '../../../shared/worktree/launch-types'
 import { shouldAutoCreateInitialTerminal } from '@/components/terminal/initial-terminal'
-import { createSequencedSetupAgentCommands } from '../../../shared/setup-agent-sequencing'
+import {
+  applySequencedSetupLaunch,
+  createSequencedSetupAgentCommands
+} from '../../../shared/setup-agent-sequencing'
 import { getSetupRunnerCommandPlatformForPath } from '../../../shared/setup-runner-command'
 import { agentKindToTuiAgent } from '../../../shared/agent-kind'
 import { useAppStore } from '@/store'
@@ -51,7 +54,10 @@ export function ensureWorktreeHasInitialTerminal(
       ? store
       : useAppStore.getState()
   let sequencedStartup = startup
-  let wrappedSetupCommandStr: string | undefined
+  // Why: sequencing rewrites both halves at once — the gate the agent pane waits on and the
+  // gated setup launch that records the outcome — so the setup record itself carries the pairing
+  // from here on instead of a second argument every caller has to remember to thread.
+  let sequencedSetup = setup
 
   if (startup && setup?.waitForAgentStartup === true) {
     const platform = getSetupRunnerCommandPlatformForLaunch(setup)
@@ -66,7 +72,7 @@ export function ensureWorktreeHasInitialTerminal(
       command: sequenced.startupCommand,
       ...(sequenced.startupEnv ? { env: { ...startup.env, ...sequenced.startupEnv } } : {})
     }
-    wrappedSetupCommandStr = sequenced.setupCommand
+    sequencedSetup = applySequencedSetupLaunch(setup, sequenced)
   }
 
   const backendStartupTerminalSpawned = opts?.backendStartupTerminalSpawned === true
@@ -79,9 +85,8 @@ export function ensureWorktreeHasInitialTerminal(
         store,
         worktreeId,
         existingTerminalTabId,
-        setup,
+        sequencedSetup,
         issueCommand,
-        wrappedSetupCommandStr,
         opts
       )
       return existingTerminalTabId
@@ -98,9 +103,8 @@ export function ensureWorktreeHasInitialTerminal(
             state,
             worktreeId,
             firstTerminalTabId,
-            setup,
+            sequencedSetup,
             issueCommand,
-            wrappedSetupCommandStr,
             opts
           )
       })
@@ -136,9 +140,8 @@ export function ensureWorktreeHasInitialTerminal(
         store,
         worktreeId,
         existingTerminalTabId,
-        setup,
+        sequencedSetup,
         issueCommand,
-        wrappedSetupCommandStr,
         opts
       )
       return existingTerminalTabId
@@ -150,10 +153,9 @@ export function ensureWorktreeHasInitialTerminal(
     store,
     worktreeId,
     sequencedStartup,
-    setup,
+    sequencedSetup,
     issueCommand,
     defaultTabs,
-    wrappedSetupCommandStr,
     opts
   )
   if (templatedTabId) {
@@ -200,15 +202,7 @@ export function ensureWorktreeHasInitialTerminal(
     }
     store.queueTabStartupCommand(terminalTab.id, sequencedStartup)
   }
-  queueSetupAndIssueCommands(
-    store,
-    worktreeId,
-    terminalTab.id,
-    setup,
-    issueCommand,
-    wrappedSetupCommandStr,
-    opts
-  )
+  queueSetupAndIssueCommands(store, worktreeId, terminalTab.id, sequencedSetup, issueCommand, opts)
 
   return terminalTab.id
 }
