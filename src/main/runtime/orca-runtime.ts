@@ -2134,6 +2134,7 @@ const BRACKETED_PASTE_QUIET_MS = 1500
 // redraw cadence, and a shorter window submits mid-redraw.
 const AGENT_PROMPT_RENDER_TIMEOUT_MS = 8000
 const AGENT_PROMPT_RENDER_QUIET_MS = 1500
+const TERMINAL_INPUT_WRITE_QUEUE_MAX_PENDING = 2048
 // Why: Claude and Codex emit show-cursor after accepting bracketed paste.
 const AGENT_PROMPT_RENDER_MARKER = '\x1b[?25h'
 
@@ -3434,6 +3435,7 @@ export class OrcaRuntimeService {
   private agentPromptExplicitStatusFloorByPtyId = new Map<string, number>()
   private agentPromptSubmissionTailByPtyId = new Map<string, Promise<void>>()
   private terminalInputWriteTailByPtyId = new Map<string, Promise<void>>()
+  private terminalInputWriteQueueDepthByPtyId = new Map<string, number>()
   private providerSequenceInitializedPtys = new Set<string>()
   private providerSequenceOffsetByPtyId = new Map<string, number>()
   private providerSnapshotPreferredPtys = new Set<string>()
@@ -20050,10 +20052,7 @@ export class OrcaRuntimeService {
       throw error
     }
 
-    if (protocolSubmitBytes && protocolSubmitAborted) {
-      return 0
-    }
-    if (protocolSubmitBytes) {
+    if (protocolSubmitBytes && !protocolSubmitAborted) {
       assertAgentPromptRequestActive(options.signal)
       this.assertAgentPromptGeneration(ptyId, generation)
       await verifyAgentPromptSubmission({
@@ -20198,6 +20197,11 @@ export class OrcaRuntimeService {
 
   /** Serialize writes admitted by separate terminal stream and RPC sockets. */
   async enqueueTerminalInputWrite<T>(ptyId: string, write: () => Promise<T>): Promise<T> {
+    const depth = this.terminalInputWriteQueueDepthByPtyId.get(ptyId) ?? 0
+    if (depth >= TERMINAL_INPUT_WRITE_QUEUE_MAX_PENDING) {
+      throw new Error('terminal_input_queue_full')
+    }
+    this.terminalInputWriteQueueDepthByPtyId.set(ptyId, depth + 1)
     const previous = this.terminalInputWriteTailByPtyId.get(ptyId) ?? Promise.resolve()
     const current = previous.catch(() => undefined).then(write)
     const tail = current.then(
@@ -20208,6 +20212,12 @@ export class OrcaRuntimeService {
     try {
       return await current
     } finally {
+      const nextDepth = (this.terminalInputWriteQueueDepthByPtyId.get(ptyId) ?? 1) - 1
+      if (nextDepth > 0) {
+        this.terminalInputWriteQueueDepthByPtyId.set(ptyId, nextDepth)
+      } else {
+        this.terminalInputWriteQueueDepthByPtyId.delete(ptyId)
+      }
       if (this.terminalInputWriteTailByPtyId.get(ptyId) === tail) {
         this.terminalInputWriteTailByPtyId.delete(ptyId)
       }

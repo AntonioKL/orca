@@ -1621,6 +1621,8 @@ export function createRemoteRuntimePtyTransport(
   function rebindRemoteTerminalHandle(nextHandle: string): void {
     advanceLifecycleEpoch()
     clearPublishedHandleWait()
+    clearPendingViewportClaim()
+    inputOrderingLane.clear()
     const replacedPtyId = remotePtyId
     unregisterShutdownHandlers(replacedPtyId)
     handle = nextHandle
@@ -2410,6 +2412,7 @@ export function createRemoteRuntimePtyTransport(
 
     attach(options) {
       const attachLifecycleEpoch = advanceLifecycleEpoch()
+      inputOrderingLane.clear()
       const generation = ++attachGeneration
       cancelTerminalCreateRetryWait()
       recovery.cancel()
