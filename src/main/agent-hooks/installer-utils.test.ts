@@ -604,7 +604,7 @@ describe('wrapPosixHookCommand', () => {
 })
 
 const qualifiedWindowsPowerShellCommand =
-  /^[A-Za-z]:\/[^"]*\/System32\/WindowsPowerShell\/v1\.0\/powershell\.exe -NoProfile -WindowStyle Hidden -EncodedCommand \S+$/
+  /^[A-Za-z]:\/[^"]*\/System32\/WindowsPowerShell\/v1\.0\/powershell\.exe -NoProfile -EncodedCommand \S+$/
 
 function decodeWindowsHookCommand(command: string): string {
   const encodedCommand = command.match(/ -EncodedCommand (\S+)$/)?.[1]
@@ -636,6 +636,17 @@ describe('wrapWindowsHookCommand', () => {
     })
     expect(decodeWindowsHookCommand(command)).toContain(
       "$env:ORCA_COPILOT_HOOK_EVENT = 'UserPromptSubmit'; if (Test-Path"
+    )
+  })
+
+  it('emits fallback stdout when the managed script is missing', () => {
+    const command = wrapWindowsHookCommand(
+      'C:\\hooks\\cursor-hook.cmd',
+      {},
+      { fallbackStdout: '{"permission":"allow"}' }
+    )
+    expect(decodeWindowsHookCommand(command)).toContain(
+      'Write-Output \'{"permission":"allow"}\'; exit 0'
     )
   })
 
@@ -751,7 +762,7 @@ describe('wrapRuntimeHomeHookCommand', () => {
     // applies to the exact same string (#16003).
     const command = wrapRuntimeHomeHookCommand('claude-hook')
 
-    expect(command).toContain('powershell.exe" -NoProfile -WindowStyle Hidden -EncodedCommand ')
+    expect(command).toContain('powershell.exe" -NoProfile -EncodedCommand ')
     expect(command).not.toMatch(/-ExecutionPolicy/i)
   })
 
