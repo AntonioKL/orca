@@ -15,10 +15,18 @@ async function createFixture(): Promise<{ root: string; env: NodeJS.ProcessEnv }
   const logDir = join(home, '.gemini', 'antigravity-cli', 'log')
   const binDir = join(root, 'bin')
   const probeTmp = join(root, 'tmp')
+  const procRoot = join(root, 'proc')
+  const procDir = join(procRoot, String(process.pid))
   await Promise.all([
     mkdir(logDir, { recursive: true }),
     mkdir(binDir, { recursive: true }),
-    mkdir(probeTmp, { recursive: true })
+    mkdir(probeTmp, { recursive: true }),
+    mkdir(procDir, { recursive: true })
+  ])
+  await Promise.all([
+    writeFile(join(procDir, 'comm'), 'agy\n'),
+    writeFile(join(procDir, 'stat'), `${process.pid} (agy) S${' 0'.repeat(18)} 100 0 0\n`),
+    writeFile(join(procRoot, 'stat'), 'btime 0\n')
   ])
   await writeFile(
     join(logDir, 'cli-20260827_000000.log'),
@@ -62,6 +70,12 @@ head -c "$FAKE_CURL_BYTES" /dev/zero | tr '\000' x > "$output"
 `
   )
   await chmod(curl, 0o755)
+  const getconf = join(binDir, 'getconf')
+  await writeFile(getconf, "#!/bin/sh\nprintf '100\\n'\n")
+  await chmod(getconf, 0o755)
+  const stat = join(binDir, 'stat')
+  await writeFile(stat, '#!/bin/sh\nprintf \'%s\\n\' "${FAKE_LOG_MTIME:-2000}"\n')
+  await chmod(stat, 0o755)
   return {
     root,
     env: {
@@ -69,6 +83,8 @@ head -c "$FAKE_CURL_BYTES" /dev/zero | tr '\000' x > "$output"
       PATH: `${binDir}:${process.env.PATH ?? ''}`,
       HOME: home,
       TMPDIR: probeTmp,
+      ORCA_AGY_PROC_ROOT: procRoot,
+      FAKE_LOG_MTIME: '2000',
       FAKE_CURL_STARTED: join(root, 'curl-started')
     }
   }
@@ -139,6 +155,45 @@ describe('Antigravity WSL probe response boundary', () => {
     expect(result.timedOut).toBe(false)
     expect(result.stdout).toBe('ORCA_AGY_UNVERIFIABLE')
     await expect(readdir(fixture.env.TMPDIR as string)).resolves.toEqual([])
+  })
+
+  it('ignores a stale log whose pid belongs to a different process', async () => {
+    const fixture = await createFixture()
+    await writeFile(
+      join(fixture.env.ORCA_AGY_PROC_ROOT as string, String(process.pid), 'comm'),
+      'node\n'
+    )
+    const result = await runProcess({
+      program: '/bin/sh',
+      args: ['-c', ANTIGRAVITY_WSL_PROBE_SCRIPT],
+      env: {
+        ...fixture.env,
+        FAKE_CURL_BYTES: '0',
+        FAKE_CURL_MODE: 'connect-fail'
+      },
+      timeoutMs: 1_000
+    })
+
+    expect(result.timedOut).toBe(false)
+    expect(result.stdout).toBe('ORCA_AGY_NOT_RUNNING')
+  })
+
+  it('ignores a stale log whose pid was reused by a later Agy process', async () => {
+    const fixture = await createFixture()
+    await writeFile(join(fixture.env.ORCA_AGY_PROC_ROOT as string, 'stat'), 'btime 3000\n')
+    const result = await runProcess({
+      program: '/bin/sh',
+      args: ['-c', ANTIGRAVITY_WSL_PROBE_SCRIPT],
+      env: {
+        ...fixture.env,
+        FAKE_CURL_BYTES: '0',
+        FAKE_CURL_MODE: 'connect-fail'
+      },
+      timeoutMs: 1_000
+    })
+
+    expect(result.timedOut).toBe(false)
+    expect(result.stdout).toBe('ORCA_AGY_NOT_RUNNING')
   })
 
   it('removes partial response files when the probe is aborted', async () => {

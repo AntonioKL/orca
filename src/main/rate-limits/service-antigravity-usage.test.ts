@@ -5,6 +5,7 @@ import { fetchCodexRateLimits } from './codex-fetcher'
 import { fetchGeminiRateLimits } from './gemini-usage-fetcher'
 import { fetchAntigravityRateLimits } from './antigravity-usage-fetcher'
 import {
+  deferred,
   errorProvider,
   okProvider,
   resetRateLimitProviderMocks,
@@ -110,6 +111,57 @@ describe('RateLimitService Antigravity usage', () => {
       signal: expect.any(AbortSignal),
       target: { runtime: 'wsl', wslDistro: 'Ubuntu' }
     })
+  })
+
+  it('discards an in-flight result after the Antigravity runtime target changes', async () => {
+    const hostFetch = deferred<ProviderRateLimits>()
+    vi.mocked(fetchAntigravityRateLimits)
+      .mockReturnValueOnce(hostFetch.promise)
+      .mockResolvedValueOnce(agyProvider(80, 40))
+    const service = new RateLimitService()
+    const observed: (ProviderRateLimits | null)[] = []
+    service.onStateChange((state) => observed.push(state.antigravity))
+
+    const hostRefresh = service.refresh()
+    await vi.waitFor(() => expect(fetchAntigravityRateLimits).toHaveBeenCalledOnce())
+    service.setAntigravityFetchTarget({ runtime: 'wsl', wslDistro: 'Ubuntu' })
+    const wslRefresh = service.refresh()
+    hostFetch.resolve(agyProvider(10, 5))
+
+    await Promise.all([hostRefresh, wslRefresh])
+
+    expect(fetchAntigravityRateLimits).toHaveBeenNthCalledWith(1, {
+      signal: expect.any(AbortSignal),
+      target: { runtime: 'host', wslDistro: null }
+    })
+    expect(fetchAntigravityRateLimits).toHaveBeenNthCalledWith(2, {
+      signal: expect.any(AbortSignal),
+      target: { runtime: 'wsl', wslDistro: 'Ubuntu' }
+    })
+    expect(observed.some((limits) => limits?.session?.usedPercent === 10)).toBe(false)
+    expect(service.getState().antigravity?.session?.usedPercent).toBe(80)
+  })
+
+  it('discards an in-flight result after the runtime target changes away and back', async () => {
+    const firstHostFetch = deferred<ProviderRateLimits>()
+    vi.mocked(fetchAntigravityRateLimits)
+      .mockReturnValueOnce(firstHostFetch.promise)
+      .mockResolvedValueOnce(agyProvider(70, 30))
+    const service = new RateLimitService()
+    const observed: (ProviderRateLimits | null)[] = []
+    service.onStateChange((state) => observed.push(state.antigravity))
+
+    const firstRefresh = service.refresh()
+    await vi.waitFor(() => expect(fetchAntigravityRateLimits).toHaveBeenCalledOnce())
+    service.setAntigravityFetchTarget({ runtime: 'wsl', wslDistro: 'Ubuntu' })
+    service.setAntigravityFetchTarget({ runtime: 'host', wslDistro: null })
+    const currentRefresh = service.refresh()
+    firstHostFetch.resolve(agyProvider(10, 5))
+
+    await Promise.all([firstRefresh, currentRefresh])
+
+    expect(observed.some((limits) => limits?.session?.usedPercent === 10)).toBe(false)
+    expect(service.getState().antigravity?.session?.usedPercent).toBe(70)
   })
 
   // Why: this is the defect in #9122 — the Antigravity segment was `{...gemini, provider:

@@ -215,6 +215,7 @@ export class RateLimitService {
   private fetchIdleResolvers: (() => void)[] = []
   private codexFetchGeneration = 0
   private claudeFetchGeneration = 0
+  private antigravityFetchGeneration = 0
   // Why: statusline ingest must attribute live windows to the selected account without re-running the side-effectful auth sync per post.
   private lastClaudeAuthSnapshot: { configDir: string | null; provenance: string } | null = null
   private opencodeFetchGeneration = 0
@@ -308,10 +309,20 @@ export class RateLimitService {
   }
 
   setAntigravityFetchTarget(target: RateLimitRuntimeTarget): void {
-    this.antigravityFetchTarget = {
+    const nextTarget: RateLimitRuntimeTarget = {
       runtime: target.runtime,
       wslDistro: target.runtime === 'wsl' ? target.wslDistro : null
     }
+    if (this.isSameRateLimitTarget(this.antigravityFetchTarget, nextTarget)) {
+      return
+    }
+    this.antigravityFetchTarget = nextTarget
+    this.antigravityFetchGeneration += 1
+    this.activeFailureStreakByProvider.antigravity = 0
+    this.updateState({
+      ...this.state,
+      antigravity: this.withFetchingStatus(null, 'antigravity')
+    })
   }
 
   setOpenCodeGoConfigResolver(resolver: () => OpenCodeGoRateLimitConfig): void {
@@ -1319,6 +1330,13 @@ export class RateLimitService {
     return left.runtime === right.runtime && left.wslDistro === right.wslDistro
   }
 
+  private isSameRateLimitTarget(
+    left: RateLimitRuntimeTarget,
+    right: RateLimitRuntimeTarget
+  ): boolean {
+    return left.runtime === right.runtime && left.wslDistro === right.wslDistro
+  }
+
   private getCodexProvenance(
     target: NormalizedCodexAccountSelectionTarget,
     codexHomePath: string | null
@@ -1625,6 +1643,8 @@ export class RateLimitService {
     this.rememberClaudeAuthSnapshot(claudeAuthPreparation, claudeGeneration, claudeTarget)
     const claudeProvenance = claudeAuthPreparation?.provenance ?? 'system'
     const codexTarget = this.codexFetchTarget
+    const antigravityTarget = this.antigravityFetchTarget
+    const antigravityGeneration = this.antigravityFetchGeneration
     const previousState = this.state
     // Why: a skipped Codex poll must not stop the other providers' cycle, so gate
     // only the Codex slot instead of returning early (#STA-4422).
@@ -1740,7 +1760,7 @@ export class RateLimitService {
             groupId: miniMaxGroupId,
             models: miniMaxModels
           }),
-      fetchAntigravityRateLimits({ signal, target: this.antigravityFetchTarget })
+      fetchAntigravityRateLimits({ signal, target: antigravityTarget })
     ])
 
     if (signal.aborted) {
@@ -1867,6 +1887,9 @@ export class RateLimitService {
       this.isSameClaudeTarget(claudeTarget, this.claudeFetchTarget)
     const shouldApplyOpencode = opencodeGeneration === this.opencodeFetchGeneration
     const shouldApplyMiniMax = miniMaxGeneration === this.minimaxFetchGeneration
+    const shouldApplyAntigravity =
+      antigravityGeneration === this.antigravityFetchGeneration &&
+      this.isSameRateLimitTarget(antigravityTarget, this.antigravityFetchTarget)
 
     if (shouldApplyClaude) {
       this.trackActiveFailureStreak('claude', claude)
@@ -1875,7 +1898,9 @@ export class RateLimitService {
       this.trackActiveFailureStreak('codex', codex)
     }
     this.trackActiveFailureStreak('gemini', gemini)
-    this.trackActiveFailureStreak('antigravity', antigravity)
+    if (shouldApplyAntigravity) {
+      this.trackActiveFailureStreak('antigravity', antigravity)
+    }
     if (shouldApplyOpencode) {
       this.trackActiveFailureStreak('opencode-go', opencodeGo)
     }
@@ -1902,7 +1927,9 @@ export class RateLimitService {
           : this.applyStalePolicy(opencodeGo, previousState.opencodeGo)
         : this.state.opencodeGo,
       kimi: this.applyStalePolicy(kimi, previousState.kimi),
-      antigravity: this.applyStalePolicy(antigravity, previousState.antigravity),
+      antigravity: shouldApplyAntigravity
+        ? this.applyStalePolicy(antigravity, previousState.antigravity)
+        : this.state.antigravity,
       minimax: shouldApplyMiniMax
         ? miniMaxConfigChanged
           ? miniMax

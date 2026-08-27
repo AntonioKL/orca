@@ -7,14 +7,26 @@ const MAX_CAPTURE_BYTES = MAX_RESPONSE_BYTES + 64 * 1024
 export const ANTIGRAVITY_WSL_PROBE_SCRIPT = String.raw`
 set -u
 log_dir="$HOME/.gemini/antigravity-cli/log"
+proc_root=${'$'}{ORCA_AGY_PROC_ROOT:-/proc}
 if [ ! -d "$log_dir" ]; then
   printf 'ORCA_AGY_NOT_RUNNING'
   exit 0
 fi
-if ! command -v curl >/dev/null 2>&1 || ! command -v head >/dev/null 2>&1; then
+if ! command -v curl >/dev/null 2>&1 || ! command -v head >/dev/null 2>&1 || ! command -v getconf >/dev/null 2>&1 || ! command -v stat >/dev/null 2>&1; then
   printf 'ORCA_AGY_UNVERIFIABLE'
   exit 0
 fi
+clock_ticks=$(getconf CLK_TCK 2>/dev/null) || {
+  printf 'ORCA_AGY_UNVERIFIABLE'
+  exit 0
+}
+boot_time=$(sed -n 's/^btime //p' "$proc_root/stat" 2>/dev/null | sed -n '1p')
+case "$clock_ticks:$boot_time" in
+  *[!0-9:]*|0:*|*:)
+    printf 'ORCA_AGY_UNVERIFIABLE'
+    exit 0
+    ;;
+esac
 candidates=$(find "$log_dir" -maxdepth 1 -type f -name 'cli-*.log' -print 2>/dev/null | sort -r | sed -n '1,12p')
 if [ -z "$candidates" ]; then
   printf 'ORCA_AGY_NOT_RUNNING'
@@ -41,6 +53,21 @@ while IFS= read -r log_file; do
   pid=$(printf '%s\n' "$log_head" | sed -n 's/.*Starting language server process with pid \([0-9][0-9]*\).*/\1/p' | sed -n '1p')
   [ -n "$pid" ] || continue
   kill -0 "$pid" 2>/dev/null || continue
+  process_name=''
+  IFS= read -r process_name < "$proc_root/$pid/comm" || continue
+  [ "$process_name" = 'agy' ] || continue
+  proc_stat=''
+  IFS= read -r proc_stat < "$proc_root/$pid/stat" || continue
+  proc_fields=${'$'}{proc_stat##*) }
+  set -- $proc_fields
+  [ "$#" -ge 20 ] || continue
+  shift 19
+  start_ticks=$1
+  case "$start_ticks" in ''|*[!0-9]*) continue ;; esac
+  process_started_at=$((boot_time + start_ticks / clock_ticks))
+  log_updated_at=$(stat -c %Y "$log_file" 2>/dev/null) || continue
+  case "$log_updated_at" in ''|*[!0-9]*) continue ;; esac
+  [ "$process_started_at" -le "$((log_updated_at + 2))" ] || continue
   found_live=1
   http_port=$(printf '%s\n' "$log_head" | sed -n 's/.*random port at \([0-9][0-9]*\) for HTTP$/\1/p' | sed -n '1p')
   https_port=$(printf '%s\n' "$log_head" | sed -n 's/.*random port at \([0-9][0-9]*\) for HTTPS.*/\1/p' | sed -n '1p')
