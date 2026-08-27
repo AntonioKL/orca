@@ -339,7 +339,7 @@ function scheduleRuntimeGraphSyncRetry(): void {
 }
 
 export function scheduleRuntimeGraphSync(): void {
-  if (!syncEnabled || syncScheduled) {
+  if (!syncEnabled || syncScheduled || syncRetryTimer !== null) {
     return
   }
   if (syncInFlight) {
