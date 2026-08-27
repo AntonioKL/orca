@@ -1522,6 +1522,7 @@ export class AgentHookServer {
     if (
       stateReconciledPayload.connectionId &&
       stateReconciledPayload.isReplay === true &&
+      stateReconciledPayload.payload.agentType === 'codex' &&
       stateReconciledPayload.payload.state !== 'done'
     ) {
       stateReconciledPayload = { ...stateReconciledPayload, restoredUnconfirmed: true }
