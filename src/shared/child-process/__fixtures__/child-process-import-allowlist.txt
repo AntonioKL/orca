@@ -49,7 +49,6 @@ src/main/codex/codex-app-server-process-teardown.ts
 src/main/codex/codex-app-server-grant-bridge.ts
 src/main/codex/codex-app-server-session.ts
 src/main/codex/codex-state-db-backfill-recovery.ts
-src/main/codex/codex-trust-grant-host.ts
 src/main/codex/codex-wsl-hook-install-plan.ts
 src/main/computer/desktop-script-provider-bridge.ts
 src/main/computer/macos-computer-use-permission-status.ts

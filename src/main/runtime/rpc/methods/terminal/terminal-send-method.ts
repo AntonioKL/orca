@@ -191,6 +191,7 @@ export const TERMINAL_SEND_METHODS: RpcAnyMethod[] = [
               },
               {
                 beforeWrite,
+                signal,
                 ...(reserveWrite ? { reserveWrite } : {}),
                 ...(params.inputKind !== 'query-reply' && mobileFloorClientId
                   ? { afterWrite: () => commitMobileInputFloorClaim(mobileFloorClaim) }
