@@ -196,10 +196,39 @@ describe('LocalPtyProvider', () => {
         'powershell.exe',
         expect.any(Object)
       )
+      await expect(provider.inspectProcess(id)).resolves.toEqual({
+        foregroundProcess: 'powershell.exe',
+        hasChildProcesses: false
+      })
     })
 
     it('returns null for unknown PTY ids', async () => {
       expect(await provider.getForegroundProcess('nonexistent')).toBeNull()
+    })
+
+    it('marks a degraded local scan unavailable for completion-sensitive inspection', async () => {
+      resolveAgentForegroundProcessMock.mockResolvedValue({
+        available: false,
+        processName: 'zsh'
+      })
+      const { id } = await provider.spawn({ cols: 80, rows: 24 })
+
+      await expect(provider.inspectProcess(id)).resolves.toEqual({
+        foregroundProcess: 'zsh',
+        hasChildProcesses: false,
+        unavailable: true
+      })
+    })
+
+    it('reports live child evidence in completion-sensitive inspection', async () => {
+      const { id } = await provider.spawn({ cols: 80, rows: 24 })
+      mockProc.process = 'node'
+      resolveAgentForegroundProcessMock.mockResolvedValue({ available: true, processName: null })
+
+      await expect(provider.inspectProcess(id)).resolves.toEqual({
+        foregroundProcess: null,
+        hasChildProcesses: true
+      })
     })
 
     it('keeps a recognized agent across an unavailable scan without adding probes', async () => {

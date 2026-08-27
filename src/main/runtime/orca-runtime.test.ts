@@ -114,6 +114,11 @@ import {
 } from '../memory/pty-registry'
 import { inspectPtyProviderProcess } from '../providers/pty-process-inspection'
 import type { IPtyProvider } from '../providers/types'
+import {
+  getForegroundProcessFromRuntimeController,
+  inspectProcessFromRuntimeController
+} from '../ipc/pty/runtime/operations'
+import { getLocalPtyProvider, setLocalPtyProvider } from '../ipc/pty/provider/registry'
 import * as worktreePathComparison from '../ipc/worktree-path-comparison'
 import * as localWorktreeFilesystem from '../local-worktree-filesystem'
 import {
@@ -981,6 +986,15 @@ function syncSinglePty(
         paneTitle: options.paneTitle ?? null
       }
     ]
+  })
+}
+
+function inspectForegroundProcessWith(
+  readForegroundProcess: (ptyId: string) => string | null | Promise<string | null>
+): (ptyId: string) => Promise<{ foregroundProcess: string | null; hasChildProcesses: boolean }> {
+  return async (ptyId) => ({
+    foregroundProcess: await readForegroundProcess(ptyId),
+    hasChildProcesses: false
   })
 }
 
@@ -10365,11 +10379,12 @@ describe('OrcaRuntimeService', () => {
       runtime.ingestSyntheticTitleFrame('pty-1', '\x1b]0;Codex ready\x07')
       batches.length = 0
 
-      const getForegroundProcess = vi.fn().mockResolvedValueOnce('codex')
+      const getForegroundProcess = vi.fn().mockResolvedValueOnce('codex').mockResolvedValue('zsh')
       runtime.setPtyController({
         write: () => true,
         kill: () => true,
-        getForegroundProcess
+        getForegroundProcess,
+        inspectProcess: inspectForegroundProcessWith(getForegroundProcess)
       })
       runtime.onPtyData('pty-1', '\x1b]0;bichir\x07', 101)
 
@@ -10400,7 +10415,7 @@ describe('OrcaRuntimeService', () => {
           incarnationId: 'inc-agent-exit'
         })
       )
-      expect(getForegroundProcess).toHaveBeenCalledTimes(2)
+      expect(getForegroundProcess).toHaveBeenCalledTimes(3)
     })
 
     it('settles a pending title exit when command completion proves the agent returned to shell', async () => {
@@ -10416,7 +10431,8 @@ describe('OrcaRuntimeService', () => {
       runtime.setPtyController({
         write: () => true,
         kill: () => true,
-        getForegroundProcess
+        getForegroundProcess,
+        inspectProcess: inspectForegroundProcessWith(getForegroundProcess)
       })
       runtime.onPtyData('pty-1', '\x1b]0;bichir\x07', 101)
 
@@ -10543,7 +10559,8 @@ describe('OrcaRuntimeService', () => {
       runtime.setPtyController({
         write: () => true,
         kill: () => true,
-        getForegroundProcess
+        getForegroundProcess,
+        inspectProcess: inspectForegroundProcessWith(getForegroundProcess)
       })
 
       runtime.ingestSyntheticTitleFrame('pty-1', '\x1b]0;Codex ready\x07')
@@ -10568,7 +10585,8 @@ describe('OrcaRuntimeService', () => {
       runtime.setPtyController({
         write: () => true,
         kill: () => true,
-        getForegroundProcess
+        getForegroundProcess,
+        inspectProcess: inspectForegroundProcessWith(getForegroundProcess)
       })
 
       runtime.onPtyData('pty-1', '\x1b]0;bichir\x07', 100)
@@ -10577,6 +10595,108 @@ describe('OrcaRuntimeService', () => {
         expect(batches.flatMap((batch) => batch.facts)).toContainEqual({ kind: 'agent-exited' })
       )
       expect(getForegroundProcess).toHaveBeenCalledOnce()
+    })
+
+    it('does not certify an adapter-swallowed foreground query failure as an agent exit', async () => {
+      const { runtime, batches } = createSideEffectRuntime()
+      syncSinglePty(runtime)
+      runtime.onPtySpawned('pty-1', 'inc-unverifiable-exit', { awaitsRegistration: false })
+      runtime.ingestSyntheticTitleFrame('pty-1', '\x1b]0;Codex ready\x07')
+      batches.length = 0
+
+      const originalProvider = getLocalPtyProvider()
+      const providerQuery = vi.fn(async () => {
+        throw new Error('socket_closed')
+      })
+      setLocalPtyProvider({ getForegroundProcess: providerQuery } as unknown as IPtyProvider)
+      onTestFinished(() => setLocalPtyProvider(originalProvider))
+      runtime.setPtyController({
+        write: () => true,
+        kill: () => true,
+        // Production's legacy read swallows this failure while strong inspection preserves it.
+        getForegroundProcess: getForegroundProcessFromRuntimeController,
+        inspectProcess: inspectProcessFromRuntimeController
+      })
+
+      runtime.onPtyData('pty-1', '\x1b]0;bichir\x07', 100)
+
+      await vi.waitFor(() => expect(providerQuery).toHaveBeenCalled())
+      await vi.waitFor(() =>
+        expect(
+          (
+            runtime as unknown as {
+              ptyForegroundProcessReads: Map<string, unknown>
+            }
+          ).ptyForegroundProcessReads.size
+        ).toBe(0)
+      )
+      expect(batches.flatMap((batch) => batch.facts)).toEqual([
+        { kind: 'title', normalizedTitle: 'bichir', rawTitle: 'bichir' },
+        { kind: 'agent-exited' }
+      ])
+    })
+
+    it('still certifies an agent exit when process inspection confirms no foreground agent', async () => {
+      const { runtime, batches } = createSideEffectRuntime()
+      syncSinglePty(runtime)
+      runtime.onPtySpawned('pty-1', 'inc-confirmed-exit', { awaitsRegistration: false })
+      runtime.ingestSyntheticTitleFrame('pty-1', '\x1b]0;Codex ready\x07')
+      batches.length = 0
+
+      const originalProvider = getLocalPtyProvider()
+      const providerQuery = vi.fn(async () => null)
+      setLocalPtyProvider({
+        getForegroundProcess: providerQuery,
+        hasChildProcesses: async () => false
+      } as unknown as IPtyProvider)
+      onTestFinished(() => setLocalPtyProvider(originalProvider))
+      runtime.setPtyController({
+        write: () => true,
+        kill: () => true,
+        getForegroundProcess: getForegroundProcessFromRuntimeController,
+        inspectProcess: inspectProcessFromRuntimeController
+      })
+
+      runtime.onPtyData('pty-1', '\x1b]0;bichir\x07', 100)
+
+      await vi.waitFor(() =>
+        expect(batches.flatMap((batch) => batch.facts)).toContainEqual({
+          kind: 'agent-exited',
+          executionHostConfirmed: true,
+          incarnationId: 'inc-confirmed-exit'
+        })
+      )
+      expect(providerQuery).toHaveBeenCalledOnce()
+    })
+
+    it('does not certify an agent exit while process inspection still sees children', async () => {
+      const { runtime, batches } = createSideEffectRuntime()
+      syncSinglePty(runtime)
+      runtime.onPtySpawned('pty-1', 'inc-live-child', { awaitsRegistration: false })
+      runtime.ingestSyntheticTitleFrame('pty-1', '\x1b]0;Codex ready\x07')
+      batches.length = 0
+      runtime.setPtyController({
+        write: () => true,
+        kill: () => true,
+        getForegroundProcess: async () => null,
+        inspectProcess: async () => ({ foregroundProcess: null, hasChildProcesses: true })
+      })
+
+      runtime.onPtyData('pty-1', '\x1b]0;bichir\x07', 100)
+
+      await vi.waitFor(() =>
+        expect(
+          (
+            runtime as unknown as {
+              ptyForegroundProcessReads: Map<string, unknown>
+            }
+          ).ptyForegroundProcessReads.size
+        ).toBe(0)
+      )
+      expect(batches.flatMap((batch) => batch.facts)).toEqual([
+        { kind: 'title', normalizedTitle: 'bichir', rawTitle: 'bichir' },
+        { kind: 'agent-exited' }
+      ])
     })
 
     it('does not confirm an agent exit when the SSH host is unverifiable', async () => {
@@ -10590,7 +10710,8 @@ describe('OrcaRuntimeService', () => {
       runtime.setPtyController({
         write: () => true,
         kill: () => true,
-        getForegroundProcess
+        getForegroundProcess,
+        inspectProcess: inspectForegroundProcessWith(getForegroundProcess)
       })
 
       runtime.onPtyData('pty-1', '\x1b]0;bichir\x07', 100)
@@ -10613,7 +10734,8 @@ describe('OrcaRuntimeService', () => {
       runtime.setPtyController({
         write: () => true,
         kill: () => true,
-        getForegroundProcess
+        getForegroundProcess,
+        inspectProcess: inspectForegroundProcessWith(getForegroundProcess)
       })
 
       runtime.onPtyData('pty-1', '\x1b]0;bichir\x07', 100)
@@ -10639,7 +10761,8 @@ describe('OrcaRuntimeService', () => {
       runtime.setPtyController({
         write: () => true,
         kill: () => true,
-        getForegroundProcess
+        getForegroundProcess,
+        inspectProcess: inspectForegroundProcessWith(getForegroundProcess)
       })
 
       runtime.onPtyData('pty-1', '\x1b]0;bichir\x07', 100)
@@ -36907,11 +37030,13 @@ describe('OrcaRuntimeService', () => {
     const runtime = new OrcaRuntimeService(store)
     const db = new InMemoryOrchestrationMessages()
     const write = vi.fn().mockReturnValue(true)
+    const getForegroundProcess = vi.fn(async () => 'codex')
     setInMemoryOrchestrationMessages(runtime, db)
     runtime.setPtyController({
       write,
       kill: vi.fn(),
-      getForegroundProcess: async () => 'codex'
+      getForegroundProcess,
+      inspectProcess: inspectForegroundProcessWith(getForegroundProcess)
     })
     syncSinglePty(runtime)
 

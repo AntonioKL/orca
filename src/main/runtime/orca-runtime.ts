@@ -1703,12 +1703,14 @@ type PtyForegroundAgentRefresh = {
 type PtyForegroundProcessRead = {
   controller: RuntimePtyController
   process: string | null
+  hasChildProcesses: boolean | null
   available: boolean
 }
 
 type PtyForegroundProcessReadEntry = {
   controller: RuntimePtyController
   startedAfterTitleObservation: number
+  verifiedAbsence: boolean
   promise: Promise<PtyForegroundProcessRead>
 }
 
@@ -19634,7 +19636,8 @@ export class OrcaRuntimeService {
 
   private readPtyForegroundProcessFromController(
     ptyId: string,
-    afterTitleObservation = 0
+    afterTitleObservation = 0,
+    verifiedAbsence = false
   ): Promise<PtyForegroundProcessRead> | null {
     const controller = this.ptyController
     if (!controller) {
@@ -19643,32 +19646,61 @@ export class OrcaRuntimeService {
     const pending = this.ptyForegroundProcessReads.get(ptyId)
     if (
       pending?.controller === controller &&
-      pending.startedAfterTitleObservation >= afterTitleObservation
+      pending.startedAfterTitleObservation >= afterTitleObservation &&
+      (!verifiedAbsence || pending.verifiedAbsence)
     ) {
       return pending.promise
     }
     if (pending?.controller === controller) {
-      return pending.promise.then(
-        () =>
-          this.readPtyForegroundProcessFromController(ptyId, afterTitleObservation) ?? {
-            controller,
-            process: null,
-            available: false
-          }
-      )
+      return pending.promise.then((result) => {
+        // A recognized agent disproves exit; every absence claim needs strong inspection.
+        if (
+          (!verifiedAbsence ||
+            pending.verifiedAbsence ||
+            recognizeAgentProcess(result.process) !== null) &&
+          pending.startedAfterTitleObservation >= afterTitleObservation
+        ) {
+          return result
+        }
+        return (
+          this.readPtyForegroundProcessFromController(
+            ptyId,
+            afterTitleObservation,
+            verifiedAbsence
+          ) ?? { controller, process: null, hasChildProcesses: null, available: false }
+        )
+      })
     }
     const unavailable: PtyForegroundProcessRead = {
       controller,
       process: null,
+      hasChildProcesses: null,
       available: false
     }
-    let processRead: Promise<string | null>
+    let processRead: Promise<{
+      process: string | null
+      hasChildProcesses: boolean | null
+      available: boolean
+    }>
     try {
-      processRead = Promise.resolve(controller.getForegroundProcess(ptyId))
+      processRead = verifiedAbsence
+        ? controller.inspectProcess
+          ? Promise.resolve(controller.inspectProcess(ptyId)).then((inspection) => ({
+              process: inspection.foregroundProcess,
+              hasChildProcesses: inspection.hasChildProcesses,
+              available: inspection.unavailable !== true
+            }))
+          : Promise.resolve({ process: null, hasChildProcesses: null, available: false })
+        : Promise.resolve(controller.getForegroundProcess(ptyId)).then((process) => ({
+            process,
+            hasChildProcesses: null,
+            available: true
+          }))
     } catch {
       const entry: PtyForegroundProcessReadEntry = {
         controller,
         startedAfterTitleObservation: afterTitleObservation,
+        verifiedAbsence,
         promise: Promise.resolve(unavailable)
       }
       entry.promise = entry.promise.finally(() => {
@@ -19681,7 +19713,7 @@ export class OrcaRuntimeService {
     }
     let entry: PtyForegroundProcessReadEntry
     const promise = processRead
-      .then((process) => ({ controller, process, available: true }))
+      .then((result) => ({ controller, ...result }))
       .catch(() => unavailable)
       .finally(() => {
         if (this.ptyForegroundProcessReads.get(ptyId) === entry) {
@@ -19691,6 +19723,7 @@ export class OrcaRuntimeService {
     entry = {
       controller,
       startedAfterTitleObservation: afterTitleObservation,
+      verifiedAbsence,
       promise
     }
     this.ptyForegroundProcessReads.set(ptyId, entry)
@@ -19797,7 +19830,11 @@ export class OrcaRuntimeService {
           : { kind: 'agent-exited' }
       )
     }
-    const foregroundRead = this.readPtyForegroundProcessFromController(ptyId, titleObservedAt ?? 0)
+    const foregroundRead = this.readPtyForegroundProcessFromController(
+      ptyId,
+      titleObservedAt ?? 0,
+      true
+    )
     if (!pty?.connected || !foregroundRead) {
       // Why: a local PTY that is already gone after a shell-title exit is
       // `exited`. A remote PTY that we cannot observe is `unverifiable`.
@@ -19831,7 +19868,6 @@ export class OrcaRuntimeService {
       }
       if (
         result.controller === this.ptyController &&
-        result.available &&
         recognizeAgentProcess(result.process) !== null
       ) {
         const restoredStatus = this.ptyTitleTrackersByPtyId
@@ -19852,10 +19888,10 @@ export class OrcaRuntimeService {
         }
         return
       }
-      if (!result.available && current.connectionId) {
+      if ((!result.available || result.hasChildProcesses !== false) && current.connectionId) {
         return
       }
-      recordExit(result.available)
+      recordExit(result.available && result.hasChildProcesses === false)
     })
   }
 

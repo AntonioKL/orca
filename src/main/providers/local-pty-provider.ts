@@ -99,6 +99,7 @@ import {
   expandWindowsPathEnvironmentVariables
 } from '../../shared/windows-environment-expansion'
 import { resolveProcessExitCause, type TerminalExitCause } from '../../shared/terminal-exit-cause'
+import type { PtyProcessInspection } from './pty-process-inspection'
 
 const PANE_IDENTITY_ENV_KEYS = [
   'ORCA_PANE_KEY',
@@ -1419,11 +1420,13 @@ export class LocalPtyProvider implements IPtyProvider {
     }
   }
 
-  async getForegroundProcess(id: string): Promise<string | null> {
+  private async inspectForegroundProcessResolution(
+    id: string
+  ): Promise<{ processName: string | null; available: boolean }> {
     const proc = ptyProcesses.get(id)
     if (!proc) {
       ptyLastRecognizedForeground.delete(id)
-      return null
+      return { processName: null, available: false }
     }
     const fallbackProcess = resolveForegroundFallbackProcess(
       proc.process || null,
@@ -1444,7 +1447,7 @@ export class LocalPtyProvider implements IPtyProvider {
       try {
         const paneProcessIds = readWindowsPtyJobProcessIds(proc)
         if (ptyProcesses.get(id) !== proc) {
-          return null
+          return { processName: null, available: false }
         }
         const verdict = judgeCachedAgentJobEvidence({
           jobProcessIds: paneProcessIds,
@@ -1454,7 +1457,7 @@ export class LocalPtyProvider implements IPtyProvider {
           identityAgeMs: Date.now() - (cachedEntry?.at ?? 0)
         })
         if (verdict === 'confirmed' || verdict === 'unproven') {
-          return cachedAgent
+          return { processName: cachedAgent, available: verdict === 'confirmed' }
         }
         if (verdict === 'exited') {
           // The shell stands alone in a complete, inescapable job list: no
@@ -1486,7 +1489,7 @@ export class LocalPtyProvider implements IPtyProvider {
       )
       // Why: the scan can outlive PTY teardown/id reuse; stale results must not resurrect cache for a foreign id.
       if (ptyProcesses.get(id) !== proc) {
-        return null
+        return { processName: null, available: false }
       }
       // Why: a degraded scan reporting shell-as-foreground fires a false "agent done"; keep last recognized agent instead.
       const lastRecognizedAgent = ptyLastRecognizedForeground.get(id)?.name ?? null
@@ -1525,13 +1528,47 @@ export class LocalPtyProvider implements IPtyProvider {
       } else if (!stable.lastRecognizedAgent) {
         ptyLastRecognizedForeground.delete(id)
       }
-      return stable.processName
+      return { processName: stable.processName, available: stableResolution.available }
     } catch {
       if (ptyProcesses.get(id) !== proc) {
-        return null
+        return { processName: null, available: false }
       }
-      // Why: an inspection error is a degraded read; fall back to last recognized agent (null reads as an exit).
-      return ptyLastRecognizedForeground.get(id)?.name ?? null
+      return {
+        processName: ptyLastRecognizedForeground.get(id)?.name ?? null,
+        available: false
+      }
+    }
+  }
+
+  async getForegroundProcess(id: string): Promise<string | null> {
+    return (await this.inspectForegroundProcessResolution(id)).processName
+  }
+
+  async inspectProcess(id: string): Promise<PtyProcessInspection> {
+    const proc = ptyProcesses.get(id)
+    if (!proc) {
+      return { foregroundProcess: null, hasChildProcesses: false, unavailable: true }
+    }
+    const foreground = await this.inspectForegroundProcessResolution(id)
+    if (ptyProcesses.get(id) !== proc) {
+      return { foregroundProcess: null, hasChildProcesses: false, unavailable: true }
+    }
+    let hasChildProcesses: boolean
+    try {
+      const shell = ptyShellName.get(id)
+      const currentProcess = resolveForegroundFallbackProcess(proc.process || null, shell)
+      hasChildProcesses = !shell || (currentProcess !== null && currentProcess !== shell)
+    } catch {
+      return {
+        foregroundProcess: foreground.processName,
+        hasChildProcesses: false,
+        unavailable: true
+      }
+    }
+    return {
+      foregroundProcess: foreground.processName,
+      hasChildProcesses,
+      ...(foreground.available ? {} : { unavailable: true as const })
     }
   }
 
