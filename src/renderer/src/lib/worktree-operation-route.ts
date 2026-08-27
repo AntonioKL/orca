@@ -219,10 +219,9 @@ export function resolveWorktreeOperationRouteResult(
       }
     }
   }
+  // Why: global saved-runtime entries and tombstones cannot own a known identity without row provenance.
   const mayBeLegacyLocal =
-    (savedRuntimeIds === undefined ||
-      (state.runtimeEnvironmentCatalogHydrated === true && savedRuntimeIds.length === 0)) &&
-    (state.removedRuntimeEnvironmentIds?.size ?? 0) === 0
+    savedRuntimeIds === undefined || state.runtimeEnvironmentCatalogHydrated === true
   return mayBeLegacyLocal
     ? { kind: 'resolved', route: { executionHostId: 'local', runtimeEnvironmentId: null } }
     : { kind: 'missing' }
