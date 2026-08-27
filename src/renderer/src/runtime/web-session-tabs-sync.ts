@@ -1444,7 +1444,7 @@ function buildMirroredAgentStatusPatch(
               (hostIdentityPredatesCurrentTurn ? undefined : entry.lastAssistantMessage) ??
               existing.lastAssistantMessage,
             reconcileDiagnostic:
-              entry.reconcileDiagnostic === undefined
+              hostIdentityPredatesCurrentTurn || entry.reconcileDiagnostic === undefined
                 ? existing.reconcileDiagnostic
                 : entry.reconcileDiagnostic
           }

@@ -335,7 +335,12 @@ describe('applyWebSessionTabsSnapshot', () => {
             stateStartedAt: NOW,
             worktreeId: 'stale-worktree',
             tabId: 'stale-tab',
-            providerSession: undefined
+            providerSession: undefined,
+            reconcileDiagnostic: {
+              kind: 'unverifiable',
+              reason: 'owner-unavailable',
+              observedAt: NOW
+            }
           }
         }
       }),
@@ -349,7 +354,12 @@ describe('applyWebSessionTabsSnapshot', () => {
                 agentStatus: {
                   ...tab.agentStatus,
                   state: 'done',
-                  providerSession: { key: 'session_id', id: 'previous-session' }
+                  providerSession: { key: 'session_id', id: 'previous-session' },
+                  reconcileDiagnostic: {
+                    kind: 'unverifiable',
+                    reason: 'transcript-unreadable',
+                    observedAt: NOW - 1_000
+                  }
                 }
               }
             : tab
@@ -366,6 +376,11 @@ describe('applyWebSessionTabsSnapshot', () => {
       tabId: existing.tabId
     })
     expect(nextTurnPatch.agentStatusByPaneKey?.[mirroredPaneKey]?.providerSession).toBeUndefined()
+    expect(nextTurnPatch.agentStatusByPaneKey?.[mirroredPaneKey]?.reconcileDiagnostic).toEqual({
+      kind: 'unverifiable',
+      reason: 'owner-unavailable',
+      observedAt: NOW
+    })
   })
 
   it('keeps mirrored OMP tabs from repainting to Pi-compatible titles', () => {
