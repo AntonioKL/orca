@@ -72,6 +72,10 @@ function failBootstrapWithBanner(options: {
   return processMock
 }
 
+function invokeScheduledCallback(callback: (() => void) | null): void {
+  callback?.()
+}
+
 describe('Electron Vite output contract', () => {
   it('keeps main-process and plain-Node entries at stable CommonJS paths', () => {
     const output = electronViteConfig.main?.build?.rollupOptions?.output
@@ -98,12 +102,20 @@ describe('Electron Vite output contract', () => {
     expect(external('@xterm/addon-serialize', undefined, false)).toBe(false)
     expect(external('psl', undefined, false)).toBe(false)
     expect(external('zod', undefined, false)).toBe(false)
-    expect(electronViteConfig.main?.build?.externalizeDeps?.exclude).toContain('psl')
-    expect(electronViteConfig.main?.build?.externalizeDeps?.exclude).toContain('zod')
+    const externalizeDeps = electronViteConfig.main?.build?.externalizeDeps
+    if (!externalizeDeps || typeof externalizeDeps === 'boolean') {
+      throw new Error('Expected main-process externalizeDeps options')
+    }
+    expect(externalizeDeps.exclude).toContain('psl')
+    expect(externalizeDeps.exclude).toContain('zod')
   })
 
   it('bundles validation dependencies used by the sandboxed preload', () => {
-    expect(electronViteConfig.preload?.build?.externalizeDeps?.exclude).toContain('zod')
+    const externalizeDeps = electronViteConfig.preload?.build?.externalizeDeps
+    if (!externalizeDeps || typeof externalizeDeps === 'boolean') {
+      throw new Error('Expected preload externalizeDeps options')
+    }
+    expect(externalizeDeps.exclude).toContain('zod')
   })
 
   it('exits when a static import fails before source error guards load', () => {
@@ -136,7 +148,7 @@ describe('Electron Vite output contract', () => {
 
     expect(processMock.exitCode).toBe(1)
     expect(scheduledExit).not.toBeNull()
-    scheduledExit?.()
+    invokeScheduledCallback(scheduledExit)
     expect(exitedWith).toBe(1)
     expect(context).toHaveProperty(BOOTSTRAP_FATAL_EXIT_GUARD_KEY)
     expect(stderrWrites.join('')).toContain("Cannot find module 'zod'")
