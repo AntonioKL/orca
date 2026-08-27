@@ -438,7 +438,8 @@ test.describe('Source Control large file count (#8013)', () => {
       // explicit recovery path after the underlying change count drops.
       removeLargeFileCountUntrackedTree(fixture.repoPath)
       await expect(tooManyChangesBanner).toBeVisible()
-      const retryButton = tooManyChangesBanner.getByRole('button', { name: 'Retry' })
+      // The message and Retry control are sibling elements in the banner row.
+      const retryButton = orcaPage.getByRole('button', { name: 'Retry' })
       await expect(retryButton).toBeVisible()
       await retryButton.click()
       await expect(tooManyChangesBanner).not.toBeVisible()

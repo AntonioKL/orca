@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { test, expect } from './helpers/orca-app'
 
-const CHECKPOINT_ERROR = 'Renderer shutdown checkpoint was not completed.'
+const CHECKPOINT_ERROR = 'Renderer shutdown checkpoint was not completed'
 
 test('recovers update install from a corrupt clean session but preserves dirty drafts', async ({
   orcaPage,
