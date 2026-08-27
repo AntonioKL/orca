@@ -464,15 +464,21 @@ describe('SidebarNav', () => {
     expect(searchButton?.querySelector('kbd')).toBeNull()
   })
 
-  it('hides task source shortcuts until the Tasks row is hovered or focused', async () => {
+  it('keeps task source shortcuts keyboard-reachable and revealed on Tasks row hover or focus', async () => {
     const container = await renderSidebarNav()
 
     const tasksButton = getButtonByText(container, 'Tasks')
-    const shortcuts = tasksButton.querySelector('[aria-label="Open GitHub tasks"]')?.parentElement
+    const githubShortcut = tasksButton.parentElement?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Open GitHub tasks"]'
+    )
+    expect(githubShortcut).not.toBeNull()
+    expect(githubShortcut?.tabIndex).toBe(0)
+    expect(tasksButton.contains(githubShortcut ?? null)).toBe(false)
 
-    expect(shortcuts?.className).toContain('hidden')
-    expect(shortcuts?.className).toContain('group-hover:flex')
-    expect(shortcuts?.className).toContain('group-focus-within:flex')
+    const shortcuts = githubShortcut?.parentElement
+    expect(shortcuts?.className).toContain('can-hover:opacity-0')
+    expect(shortcuts?.className).toContain('can-hover:group-hover:opacity-100')
+    expect(shortcuts?.className).toContain('can-hover:group-focus-within:opacity-100')
   })
 
   it('hides available Tasks from its sidebar context menu', async () => {
@@ -495,7 +501,9 @@ describe('SidebarNav', () => {
     expect(tasksButton.getAttribute('aria-disabled')).toBeNull()
     expect(tasksButton.disabled).toBe(false)
     expect(tasksButton.className).not.toContain('opacity-50')
-    expect(tasksButton.querySelector('[aria-label="Open GitHub tasks"]')).not.toBeNull()
+    expect(
+      tasksButton.parentElement?.querySelector('button[aria-label="Open GitHub tasks"]')
+    ).not.toBeNull()
 
     await clickButton(tasksButton)
     expect(mocks.openTaskPage).toHaveBeenCalled()
