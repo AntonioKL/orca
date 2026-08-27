@@ -1,8 +1,8 @@
 import {
   ORCHESTRATION_CONTRACT_PREFLIGHT_TIMEOUT_MS,
-  ORCHESTRATION_READINESS_TIMEOUT_MS,
   isWorkerStartTimeoutWithinTimerLimit,
   resolveFederationAttachDeadlineMs,
+  resolveWorkerStartReadinessTimeoutMs,
   resolveWorkerStartClientTimeoutMs
 } from '../../../../shared/orchestration-timing-budgets'
 
@@ -15,7 +15,9 @@ export function resolveFederatedWorkerStartBudgets(
       '--timeout-ms is too large for worker-start transport grace; the derived timeout must fit within the timer limit.'
     )
   }
-  const readinessTimeoutMs = timeoutMs ?? ORCHESTRATION_READINESS_TIMEOUT_MS
+  // Normalize non-positive/invalid values exactly as the client does so local
+  // and federated transports share the ordinary default contract.
+  const readinessTimeoutMs = resolveWorkerStartReadinessTimeoutMs(timeoutMs)
   const outerDeadlineMs = nowMs + resolveWorkerStartClientTimeoutMs(readinessTimeoutMs)
   return {
     readinessTimeoutMs,
