@@ -1,5 +1,9 @@
 import { win32 as pathWin32 } from 'node:path'
-import { foldWslUncPathCaseInsensitiveParts, parseWslUncPath } from '../../shared/wsl-paths'
+import {
+  foldWslUncPathCaseInsensitiveParts,
+  parseWslUncPath,
+  toWindowsWslPath
+} from '../../shared/wsl-paths'
 
 type ManagedWslCodexHome = {
   runtimeHomePath: string
@@ -76,6 +80,21 @@ export function resolveRecordedManagedWslCodexHome(
     return null
   }
   return managedHomesByDistro.get(distroKey(distro))?.get(linuxHomePath)?.runtimeHomePath ?? null
+}
+
+export function resolveManagedWslCodexHome(distro: string, linuxHomePath: string): string | null {
+  if (
+    !distro.trim() ||
+    /[\\/\r\n]/.test(distro) ||
+    !isAbsolutePosixPathWithoutDotSegments(linuxHomePath) ||
+    !isOrcaManagedWslCodexHome(linuxHomePath)
+  ) {
+    return null
+  }
+  return (
+    resolveRecordedManagedWslCodexHome(distro, linuxHomePath) ??
+    toWindowsWslPath(linuxHomePath, distro)
+  )
 }
 
 export function wslRuntimeHomePathsEqual(left: string | undefined, right: string): boolean {

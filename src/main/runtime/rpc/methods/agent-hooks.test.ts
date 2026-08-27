@@ -80,7 +80,7 @@ describe('agent hook RPC methods', () => {
     expect(installForRuntimeHomeSerializedMock).not.toHaveBeenCalled()
   })
 
-  it('rejects non-local callers', async () => {
+  it.each(['runtime', 'mobile'] as const)('rejects non-local %s callers', async (clientKind) => {
     const method = prepareMethod()
     const params = method.params!.parse({
       codexHome: '/home/jin/.local/share/orca/codex-runtime-home/home',
@@ -91,7 +91,7 @@ describe('agent hook RPC methods', () => {
     await expect(
       method.handler(params, {
         runtime: runtimeWithSettings(),
-        clientKind: 'runtime'
+        clientKind
       } as RpcContext)
     ).rejects.toThrow(/only available to the local Orca CLI/)
     expect(installForRuntimeHomeSerializedMock).not.toHaveBeenCalled()

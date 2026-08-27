@@ -3,7 +3,7 @@ import type { CodexWslRuntimeHookTarget } from './codex-wsl-hook-install-plan'
 import { codexHookService } from './hook-service'
 import {
   isAbsolutePosixPathWithoutDotSegments,
-  resolveRecordedManagedWslCodexHome
+  resolveManagedWslCodexHome
 } from './managed-wsl-codex-home-registry'
 
 type WslShellPreflightEnvironment = {
@@ -32,7 +32,7 @@ export function resolveManagedWslCodexShellPreflightTarget(
   ) {
     return null
   }
-  const runtimeHomePath = resolveRecordedManagedWslCodexHome(wslDistro, codexHome)
+  const runtimeHomePath = resolveManagedWslCodexHome(wslDistro, codexHome)
   return runtimeHomePath ? { runtimeHomePath, wslDistro } : null
 }
 

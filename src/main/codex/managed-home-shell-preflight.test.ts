@@ -188,6 +188,13 @@ describe('managed WSL Codex shell preflight', () => {
     })
   })
 
+  it('reconstructs a validated managed home when a restarted runtime has no record', () => {
+    expect(resolveManagedWslCodexShellPreflightTarget(env)).toEqual({
+      runtimeHomePath: runtimeHome,
+      wslDistro: 'Ubuntu-24.04'
+    })
+  })
+
   it('installs once through the WSL runtime-home lane while hooks are enabled', async () => {
     recordManagedWslCodexHome('Ubuntu-24.04', runtimeHome)
     const status = {
@@ -254,7 +261,7 @@ describe('managed WSL Codex shell preflight', () => {
     expect(resolveManagedWslCodexShellPreflightTarget(candidate)).toBeNull()
   })
 
-  it('accepts only homes Orca issued and supports direct managed account homes', () => {
+  it('preserves a recorded runtime spelling for a managed account home', () => {
     const directHome = '/home/jin/.local/share/orca/codex-accounts/account-1/home'
     const directRuntimeHome =
       '\\\\wsl$\\Ubuntu-24.04\\home\\jin\\.local\\share\\orca\\codex-accounts\\account-1\\home'
@@ -267,7 +274,6 @@ describe('managed WSL Codex shell preflight', () => {
         WSL_DISTRO_NAME: 'ubuntu-24.04'
       })
     ).toEqual({ runtimeHomePath: directRuntimeHome, wslDistro: 'ubuntu-24.04' })
-    expect(resolveManagedWslCodexShellPreflightTarget(env)).toBeNull()
   })
 
   it('never authorizes a WSL system home even when it was offered by a PTY lane', () => {
