@@ -20,6 +20,7 @@ import { bindStartFreshSpawn } from './fresh-spawn-start'
 import { bindFreshSpawnFollowReset } from './fresh-spawn-follow-reset'
 
 const STARTUP_DELIVERY_MAX_ATTEMPTS_PER_PTY = 5
+const STARTUP_DELIVERY_MAX_REJECTION_RETRIES = 2
 const STARTUP_DELIVERY_RETRY_BASE_MS = 50
 const STARTUP_DELIVERY_RETRY_MAX_MS = 2_000
 
@@ -108,7 +109,8 @@ export function bindDeferredColdRestoreAndSnapshot(session: ConnectPanePtySessio
   let startupDeliveryRetryRequested = false
   let startupDeliveryAttemptPtyId: string | null = null
   let startupDeliveryAttempts = 0
-  session.schedulePendingStartupCommandDelivery = (): void => {
+  let startupDeliveryRejectionRetries = 0
+  const scheduleStartupDeliveryAttempt = (): void => {
     const startup = session.pendingStartupCommand
     if (!startup) {
       return
@@ -177,6 +179,11 @@ export function bindDeferredColdRestoreAndSnapshot(session: ConnectPanePtySessio
             } else {
               if (outcome.partial) {
                 startupDeliveryAttempts = STARTUP_DELIVERY_MAX_ATTEMPTS_PER_PTY
+              } else if (startupDeliveryRejectionRetries < STARTUP_DELIVERY_MAX_REJECTION_RETRIES) {
+                // Why: a zero-write rejection leaves the command pending, and a
+                // quiet shell emits no further output to re-trigger delivery.
+                startupDeliveryRejectionRetries += 1
+                startupDeliveryRetryRequested = true
               }
               session.releaseUnattemptedStartupDraftPasteDelivery()
             }
@@ -187,7 +194,7 @@ export function bindDeferredColdRestoreAndSnapshot(session: ConnectPanePtySessio
               session.pendingStartupCommand === startup &&
               !session.disposed
             ) {
-              session.schedulePendingStartupCommandDelivery()
+              scheduleStartupDeliveryAttempt()
             }
           }
         })()
@@ -197,6 +204,12 @@ export function bindDeferredColdRestoreAndSnapshot(session: ConnectPanePtySessio
         STARTUP_DELIVERY_RETRY_MAX_MS
       )
     )
+  }
+  // Why: an external trigger is fresh evidence the pane may accept input now,
+  // so rejection retries start a new chain instead of staying exhausted.
+  session.schedulePendingStartupCommandDelivery = (): void => {
+    startupDeliveryRejectionRetries = 0
+    scheduleStartupDeliveryAttempt()
   }
 
   session.freshSpawnFollowResetDisposables = []

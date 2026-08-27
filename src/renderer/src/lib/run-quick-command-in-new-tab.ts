@@ -2,7 +2,6 @@ import { useAppStore } from '@/store'
 import { reconcileTabOrder } from '@/components/tab-bar/reconcile-order'
 import { launchAgentInNewTab } from '@/lib/launch-agent-in-new-tab'
 import {
-  buildTerminalQuickCommandInput,
   flattenTerminalQuickCommand,
   isTerminalAgentQuickCommand,
   supportsTerminalAgentQuickCommand
@@ -88,7 +87,9 @@ export function runQuickCommandInNewTab({
   })
 
   store.queueTabStartupCommand(tab.id, {
-    command: buildTerminalQuickCommandInput(flattenTerminalQuickCommand(command)),
+    // Why: startup delivery owns the terminator; `submit` adds the only `\r`,
+    // so the queued text must stay unterminated.
+    command: flattenTerminalQuickCommand(command).command,
     ...(command.appendEnter === false ? { submit: false, delivery: 'terminal-paste' as const } : {})
   })
 

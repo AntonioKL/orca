@@ -551,6 +551,62 @@ describe('connectPanePty', () => {
     }
   })
 
+  it('retries a rejected startup command without waiting for more PTY output', async () => {
+    const pendingTimeouts: (() => void)[] = []
+    const originalSetTimeout = globalThis.setTimeout
+    globalThis.setTimeout = vi.fn((fn: () => void) => {
+      pendingTimeouts.push(fn)
+      return 999 as unknown as ReturnType<typeof setTimeout>
+    }) as unknown as typeof setTimeout
+
+    try {
+      const { connectPanePty } = await import('./pty-connection')
+
+      const transport = createMockTransport('pty-id')
+      let rejectsRemaining = 1
+      transport.sendInput.mockImplementation(() => {
+        if (rejectsRemaining > 0) {
+          rejectsRemaining -= 1
+          return false
+        }
+        return true
+      })
+      transport.connect.mockImplementation(async () => 'pty-local-retry')
+      transportFactoryQueue.push(transport)
+
+      mockStoreState = {
+        ...mockStoreState,
+        tabsByWorktree: { 'wt-1': [{ id: 'tab-1', ptyId: null }] },
+        repos: [{ id: 'repo1', connectionId: null }]
+      }
+
+      const pane = createPane(1)
+      pane.terminal.write.mockImplementation((_data: string, callback?: () => void) => {
+        callback?.()
+      })
+      const manager = createManager(1)
+      const command = 'git status'
+      const onQueuedStartupDelivered = vi.fn()
+      const deps = createDeps({
+        startup: { command, submit: false, delivery: 'terminal-paste' },
+        onQueuedStartupDelivered
+      })
+
+      connectPanePty(pane as never, manager as never, deps as never)
+      await flushAsyncTicks(20)
+      // No PTY output ever arrives: the rejected write must schedule its own retry.
+      await drainPendingTimeouts(pendingTimeouts)
+      await flushAsyncTicks(20)
+
+      expect(rejectsRemaining).toBe(0)
+      expect(transport.sendInput.mock.calls.length).toBeGreaterThan(1)
+      expect(transport.sendInput).not.toHaveBeenCalledWith('\r')
+      expect(onQueuedStartupDelivered).toHaveBeenCalledTimes(1)
+    } finally {
+      globalThis.setTimeout = originalSetTimeout
+    }
+  })
+
   it('chunks large terminal-paste startup commands through the PTY before submitting', async () => {
     const pendingTimeouts: (() => void)[] = []
     const originalSetTimeout = globalThis.setTimeout
