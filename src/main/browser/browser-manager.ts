@@ -809,8 +809,9 @@ export class BrowserManager {
             origin: safeOrigin(externalUrl),
             action: 'opened-in-orca'
           })
-          return { action: 'deny' }
         }
+        // Why: a recognized new-tab intent must never fall through to a native popup if its renderer vanished mid-open.
+        return { action: 'deny' }
       }
 
       // Why: file URLs are fine for in-pane previews, but must not spawn native child windows targeting local paths.

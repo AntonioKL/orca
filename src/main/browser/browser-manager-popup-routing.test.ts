@@ -213,8 +213,9 @@ describe('browserManager', () => {
     expect(shellOpenExternalMock).not.toHaveBeenCalled()
   })
 
-  it('routes unnamed featureless window.open to an Orca tab instead of a popup window', () => {
+  it('routes unnamed featureless window.open safely, including after renderer destruction', () => {
     const rendererSendMock = vi.fn()
+    let rendererDestroyed = false
     const guest = {
       id: 142,
       isDestroyed: vi.fn(() => false),
@@ -230,7 +231,7 @@ describe('browserManager', () => {
         return guest
       }
       if (id === rendererWebContentsId) {
-        return { isDestroyed: vi.fn(() => false), send: rendererSendMock }
+        return { isDestroyed: vi.fn(() => rendererDestroyed), send: rendererSendMock }
       }
       return null
     })
@@ -268,6 +269,17 @@ describe('browserManager', () => {
       origin: 'https://docs.example.com',
       action: 'opened-in-orca'
     })
+    expect(openPopupWithOriginBarMock).not.toHaveBeenCalled()
+    expect(shellOpenExternalMock).not.toHaveBeenCalled()
+    rendererDestroyed = true
+    expect(
+      handler({
+        url: 'https://docs.example.com/guide',
+        frameName: '',
+        features: '',
+        disposition: 'foreground-tab'
+      })
+    ).toEqual({ action: 'deny' })
     expect(openPopupWithOriginBarMock).not.toHaveBeenCalled()
     expect(shellOpenExternalMock).not.toHaveBeenCalled()
   })

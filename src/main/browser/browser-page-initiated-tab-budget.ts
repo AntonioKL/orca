@@ -7,15 +7,7 @@ export type PageInitiatedTabBudget = {
   tryConsume: (now: number) => boolean
 }
 
-/**
- * Rate limit for tabs a page opens through `window.open` rather than a click Orca recognised.
- *
- * Chromium's popup blocker only requires *one* user activation, so a single click can run
- * `window.open` in a loop — and unlike the native popup windows this routing replaced, an Orca tab
- * persists into workspace session state and comes back on the next launch. A short rolling window
- * absorbs the loop (which fires within one tick) while leaving a person opening tab after tab
- * unaffected. Gesture-routed links need no budget: each one costs a real trusted click.
- */
+/** Rolling window, so it absorbs a same-tick `window.open` loop without capping real browsing. */
 export function createPageInitiatedTabBudget(
   maxPerWindow = MAX_PAGE_INITIATED_TABS_PER_WINDOW,
   windowMs = PAGE_INITIATED_TAB_WINDOW_MS
