@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -37,6 +38,8 @@ function runApply(
     rewriteAfterHashCall?: number
     rewriteBeforeDelete?: boolean
     rewriteSourceBeforeDelete?: boolean
+    symlinkSource?: boolean
+    symlinkTarget?: boolean
   } = {}
 ): ApplyOutcome {
   const root = mkdtempSync(join(tmpdir(), 'orca-drain-race-'))
@@ -51,6 +54,18 @@ function runApply(
   const marker = join(root, 'marker')
   writeFileSync(sourcePath, SOURCE)
   writeFileSync(targetPath, TARGET)
+  if (options.symlinkSource) {
+    const sourceBytes = join(root, 'source-bytes')
+    writeFileSync(sourceBytes, SOURCE)
+    rmSync(sourcePath)
+    symlinkSync(sourceBytes, sourcePath)
+  }
+  if (options.symlinkTarget) {
+    const targetBytes = join(root, 'target-bytes')
+    writeFileSync(targetBytes, TARGET)
+    rmSync(targetPath)
+    symlinkSync(targetBytes, targetPath)
+  }
   const counter = join(root, 'counter')
   writeFileSync(counter, '0')
   const shim = join(bin, 'sha256sum')
@@ -182,6 +197,18 @@ describe.skipIf(isWindows)('legacy WSL auth drain race guard', () => {
     expect(outcome.status).not.toBe(0)
     expect(outcome.source).toBe(SOURCE)
     expect(outcome.target).toBe(NEWER)
+    expect(outcome.marker).toBe(false)
+  })
+  it('rejects a symlinked source auth file', () => {
+    const outcome = runApply({ symlinkSource: true })
+    expect(outcome.status).toBe(35)
+    expect(outcome.source).toBe(SOURCE)
+    expect(outcome.marker).toBe(false)
+  })
+  it('rejects a symlinked destination auth file', () => {
+    const outcome = runApply({ symlinkTarget: true })
+    expect(outcome.status).toBe(36)
+    expect(outcome.source).toBe(SOURCE)
     expect(outcome.marker).toBe(false)
   })
   it('restores verified source bytes when the source path is atomically replaced', () => {

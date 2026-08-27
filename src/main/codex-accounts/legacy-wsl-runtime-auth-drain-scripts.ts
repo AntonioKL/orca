@@ -22,7 +22,9 @@ fi
 [ ! -e "$destination_recovery_auth" ] && [ ! -L "$destination_recovery_auth" ] || { [ -f "$destination_recovery_auth" ] && [ ! -L "$destination_recovery_auth" ] || exit 46; chmod 600 "$destination_recovery_auth"; }
 ${RESOLVE_LEGACY_HOME_SCRIPT}
 source_auth="$legacy_home/auth.json"
-if [ ! -e "$source_auth" ] && [ ! -L "$source_auth" ]; then
+if [ -e "$source_auth" ] || [ -L "$source_auth" ]; then
+  [ -f "$source_auth" ] && [ ! -L "$source_auth" ] || exit 46
+else
   if [ -f "$source_recovery_auth" ] && [ ! -L "$source_recovery_auth" ]; then
     mv -- "$source_recovery_auth" "$source_auth"; chmod 600 "$source_auth"
   elif [ -f "$source_quarantine_auth" ] && [ ! -L "$source_quarantine_auth" ]; then
@@ -31,11 +33,11 @@ if [ ! -e "$source_auth" ] && [ ! -L "$source_auth" ]; then
     exit 46
   fi
 fi
-[ -f "$source_auth" ] || exit ${SOURCE_AUTH_ABSENT_EXIT}
+[ -f "$source_auth" ] && [ ! -L "$source_auth" ] || exit ${SOURCE_AUTH_ABSENT_EXIT}
 encode_file() { base64 < "$1" | tr -d '\\n'; }
 encode_file "$source_auth"; printf '\\n'
 source_credentials="$legacy_home/.credentials.json"
-if [ -f "$source_credentials" ]; then printf 'present\\n'; encode_file "$source_credentials"; printf '\\n'; elif [ ! -e "$source_credentials" ] && [ ! -L "$source_credentials" ]; then printf 'missing\\n\\n'; else exit 44; fi
+if [ -f "$source_credentials" ] && [ ! -L "$source_credentials" ]; then printf 'present\\n'; encode_file "$source_credentials"; printf '\\n'; elif [ ! -e "$source_credentials" ] && [ ! -L "$source_credentials" ]; then printf 'missing\\n\\n'; else exit 44; fi
 `
 
 // Freeze a verified destination snapshot before source quarantine so the
@@ -55,7 +57,7 @@ ${RESOLVE_LEGACY_HOME_SCRIPT}
 target_home=$(readlink -f -- "$4") || exit 33
 [ "$legacy_home" != "$target_home" ] || exit 34
 source_auth="$legacy_home/auth.json"; target_auth="$target_home/auth.json"
-[ -f "$source_auth" ] || exit 35; [ -f "$target_auth" ] || exit 36
+[ -f "$source_auth" ] && [ ! -L "$source_auth" ] || exit 35; [ -f "$target_auth" ] && [ ! -L "$target_auth" ] || exit 36
 hash_file() { sha256sum -- "$1" | cut -d ' ' -f 1; }
 if [ -e "$source_quarantine_auth" ] || [ -L "$source_quarantine_auth" ]; then
   [ -f "$source_quarantine_auth" ] && [ ! -L "$source_quarantine_auth" ] || exit 46
@@ -89,7 +91,8 @@ cleanup() {
   [ ! -f "$drain_marker" ] || rm -f -- "$source_recovery_auth" "$source_quarantine_auth"
   rm -f -- "$temporary_auth" "$temporary_credentials" "$destination_pin" "$temporary_destination_snapshot" "$temporary_source_snapshot" "$temporary_marker"
 }
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+trap 'cleanup; exit 129' HUP INT TERM
 ln -- "$target_auth" "$destination_pin"
 [ "$(hash_file "$destination_pin")" = "$6" ] || exit 38
 [ "$target_auth" -ef "$destination_pin" ] || exit 38
@@ -136,5 +139,5 @@ set -eu
 [ ! -f "$3" ] || exit 0
 ${RESOLVE_LEGACY_HOME_SCRIPT}
 [ ! -e "$legacy_home/auth.json" ] && [ ! -L "$legacy_home/auth.json" ] || exit 41
-umask 077; marker_parent=\${3%/*}; mkdir -p -- "$marker_parent"; temporary_marker="$3.orca-drain-$$"; trap 'rm -f -- "$temporary_marker"' EXIT HUP INT TERM; printf '%s\\n' '{"completed":true}' > "$temporary_marker"; chmod 600 "$temporary_marker"; mv -f -- "$temporary_marker" "$3"
+umask 077; marker_parent=\${3%/*}; mkdir -p -- "$marker_parent"; temporary_marker="$3.orca-drain-$$"; trap 'rm -f -- "$temporary_marker"' EXIT; trap 'rm -f -- "$temporary_marker"; exit 129' HUP INT TERM; printf '%s\\n' '{"completed":true}' > "$temporary_marker"; chmod 600 "$temporary_marker"; mv -f -- "$temporary_marker" "$3"
 `
