@@ -9,7 +9,7 @@ type TranscriptNode = {
 
 export type ClaudeTranscriptBranchProof = {
   leafUuid: string
-  relation: 'initial' | 'same' | 'descendant'
+  relation: 'initial' | 'same' | 'descendant' | 'sibling'
 }
 
 function nonEmptyString(value: unknown): string | null {
@@ -120,7 +120,7 @@ export function proveClaudeTranscriptBranchFromJsonl(input: {
   }
   const previous = nodes.get(previousLeafUuid)
   if (!previous || previous.sessionId !== input.providerSessionId) {
-    throw transcriptError('previous cursor is missing from the session graph')
+    return { leafUuid, relation: 'sibling' }
   }
   if (leafUuid === previousLeafUuid) {
     return { leafUuid, relation: 'same' }
@@ -144,7 +144,7 @@ export function proveClaudeTranscriptBranchFromJsonl(input: {
   if (cursor !== null) {
     throw transcriptError('ancestry exceeds the bounded proof limit')
   }
-  throw transcriptError('latest marker is on a sibling branch')
+  return { leafUuid, relation: 'sibling' }
 }
 
 export async function proveClaudeTranscriptBranch(input: {

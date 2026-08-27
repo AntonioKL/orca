@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { claudeProcessIdentity } from './claude-structured-owner-identity'
+import { claudeProcessIdentity, claudeProviderHandleLink } from './claude-structured-owner-identity'
 
 const IDENTITY = {
   sessionId: 'session-identity',
@@ -10,6 +10,25 @@ const IDENTITY = {
 }
 
 describe('claude process identity', () => {
+  it('keeps the provider link id stable when the advisory leaf advances', () => {
+    const first = claudeProviderHandleLink({
+      sessionId: 'provider-1',
+      leafUuid: 'leaf-a',
+      resumed: false,
+      fence: 7,
+      observedAt: 1
+    })
+    const second = claudeProviderHandleLink({
+      sessionId: 'provider-1',
+      leafUuid: 'leaf-b',
+      resumed: true,
+      fence: 7,
+      observedAt: 2
+    })
+    expect(second.linkId).toBe(first.linkId)
+    expect(second.handle).toMatchObject({ provider: 'claude', leafUuid: 'leaf-b' })
+  })
+
   it('records the observed start time alongside the spawn token', async () => {
     await expect(
       claudeProcessIdentity(

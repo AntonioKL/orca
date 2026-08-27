@@ -103,6 +103,7 @@ import {
 import { codexProviderHandleLink } from '../codex/codex-structured-owner-identity'
 import { claudeProviderHandleLink } from '../claude/claude-structured-owner-identity'
 import { readCodexResumeProcessIdentity } from '../codex/codex-resume-process-proof'
+import { readClaudeResumeProcessIdentity } from '../claude/claude-resume-process-proof'
 import {
   proveCodexTuiRollout,
   resolvePinnedCodexRolloutProof
@@ -11317,11 +11318,14 @@ export class OrcaRuntimeService {
                     spawnToken,
                     threadId: head.handle.threadId
                   })
-                : await readStructuredTuiProcessIdentity({
+                : await readClaudeResumeProcessIdentity({
                     hostId: record.location.executionHostId,
                     rootPid: terminal.processId,
                     spawnToken,
-                    agent: provider
+                    sessionId: head.handle.sessionId,
+                    excludedProcessTreeRootIdentities: record.lease.ownerProcess
+                      ? [record.lease.ownerProcess]
+                      : undefined
                   }),
             link:
               provider === 'codex'

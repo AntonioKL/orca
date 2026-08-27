@@ -48,9 +48,7 @@ export function claudeProviderHandleLink(input: {
   observedAt: number
 }): AgentSessionProviderHandleLink {
   return {
-    linkId:
-      input.linkId ??
-      `claude-${input.fence}-${input.sessionId}-${input.leafUuid ?? 'empty'}`.slice(0, 128),
+    linkId: input.linkId ?? `claude-${input.fence}-${input.sessionId}`.slice(0, 128),
     handle: { provider: 'claude', sessionId: input.sessionId, leafUuid: input.leafUuid },
     origin: input.origin ?? (input.resumed ? 'resumed' : 'created'),
     mintedAtFence: input.fence,
