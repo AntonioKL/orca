@@ -33969,7 +33969,7 @@ export class OrcaRuntimeService {
     const hookAgent = isTuiAgent(hookRow?.agentType) ? hookRow.agentType : null
     const agentIdentity = resolvePublishedPaneAgentIdentity({
       hookAgent,
-      hookIsLive: hookRow?.live != null,
+      hookIsLive: hookRow?.agentIsLive,
       launchAgent,
       foregroundAgent,
       title
@@ -35227,6 +35227,7 @@ export class OrcaRuntimeService {
     providerSessionAgentType: string | null
     providerSessionReceivedAt: number | null
     agentType: string | null
+    agentIsLive: boolean
     live: HookLiveAgentRow | null
   } {
     let session: AgentStatusIpcPayload | null = null
@@ -35267,6 +35268,9 @@ export class OrcaRuntimeService {
       providerSessionAgentType: session?.agentType ?? null,
       providerSessionReceivedAt: session?.receivedAt ?? null,
       agentType: agent?.agentType ?? null,
+      // A fresh completed row still projects its terminal `done` status, but it is
+      // past-tense identity evidence and must not outrank process or launch facts.
+      agentIsLive: agent != null && agent.state !== 'done',
       live: live
         ? {
             payload: pickParsedAgentStatusPayload(live),
