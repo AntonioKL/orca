@@ -35,6 +35,7 @@ import { browserSessionRegistry } from './browser-session-registry'
 import { googleAuthUserAgent } from './browser-google-auth-ua'
 import { setupClientHintsOverride } from './browser-session-ua'
 import { setBrowserNetworkProxySettingsResolver } from './browser-session-proxy'
+import { handleElectronProxyLogin } from '../network/electron-proxy-credentials'
 import { ORCA_BROWSER_PARTITION } from '../../shared/constants'
 import {
   DEFAULT_LOCAL_ORCA_PROFILE_ID,
@@ -146,6 +147,33 @@ describe('BrowserSessionRegistry', () => {
     expect(browserSessionRegistry.listProfiles()).toHaveLength(before)
     expect(proxySession.setPermissionRequestHandler).toHaveBeenLastCalledWith(null)
     expect(proxySession.setPermissionCheckHandler).toHaveBeenLastCalledWith(null)
+  })
+
+  it('retires credentials when profile creation and proxy rollback both fail', async () => {
+    const proxySession = sessionFromPartitionMock()
+    proxySession.setProxy
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValue(new Error('proxy rollback failed'))
+    proxySession.closeAllConnections.mockRejectedValueOnce(new Error('proxy settlement failed'))
+    sessionFromPartitionMock.mockReturnValue(proxySession)
+    setBrowserNetworkProxySettingsResolver(() => ({
+      httpProxyUrl: 'http://alice:secret@proxy.example:8080',
+      httpProxyBypassRules: ''
+    }))
+
+    await expect(
+      browserSessionRegistry.createProfile('isolated', 'Proxy Rollback')
+    ).rejects.toThrow('proxy rollback failed')
+    const callback = vi.fn()
+    handleElectronProxyLogin(
+      { preventDefault: vi.fn() } as never,
+      { session: proxySession } as never,
+      {} as never,
+      { isProxy: true, host: 'proxy.example', port: 8080 },
+      callback
+    )
+
+    expect(callback).not.toHaveBeenCalled()
   })
 
   it('rejects creating a profile with scope default', async () => {

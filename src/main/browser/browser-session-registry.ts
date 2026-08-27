@@ -35,10 +35,7 @@ import {
   clearBrowserRoutePartitionPolicies,
   installBrowserRoutePartitionPolicies
 } from './browser-session-route-policies'
-import {
-  releaseProxySessionApplication,
-  retireProxySessionApplication
-} from '../network/proxy-settings'
+import { retireProxySessionApplication } from '../network/proxy-settings'
 import { invalidateBrowserSessionProxyApplication } from './browser-session-proxy'
 import { cancelBrowserWebAuthnAccountRequestsForSession } from './browser-webauthn-account-picker'
 
@@ -241,7 +238,7 @@ class BrowserSessionRegistry {
       clearBrowserSessionUserAgentMode(sess)
       clearBrowserSessionPartitionPolicies(partition, sess)
       try {
-        await releaseProxySessionApplication(sess)
+        await retireProxySessionApplication(sess)
       } catch {
         console.warn('[proxy] Failed to release proxy from browser partition', partition)
       }
