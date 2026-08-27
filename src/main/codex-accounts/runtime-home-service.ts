@@ -91,6 +91,7 @@ import {
   type CodexPaneHomeRoute
 } from '../codex/codex-pane-account-registry'
 import { isShellStartupEnvProbeSupported } from '../pty/shell-startup-env'
+import { wslCodexRuntimeHomeForGuestHome } from '../pty/codex-home-wsl-env'
 import {
   startLegacyWslRuntimeAuthDrain,
   type LegacyWslRuntimeAuthDestination
@@ -139,6 +140,11 @@ type CodexReadBackMatch =
       managedAuthContents: string
     }
   | { kind: 'none' | 'ambiguous' }
+
+type LegacyWslSessionBridgeAuthorization = {
+  destinationLinuxPath: string
+  retiredHomeLinuxPath: string
+}
 
 function readCodexLastRefresh(authJson: string): number | null {
   try {
@@ -204,6 +210,10 @@ export class CodexRuntimeHomeService {
   private hostSystemDefaultSessionMigrationPending = false
   private pendingHostSystemDefaultSessionMigrationNeedsFullScan = false
   private pendingHostSystemDefaultSessionMigrationTarget: string | null = null
+  private readonly legacyWslSessionBridgeAuthorizationByDistro = new Map<
+    string,
+    LegacyWslSessionBridgeAuthorization
+  >()
 
   constructor(private readonly store: Store) {
     this.safeRecoverInterruptedRuntimeAuthOperation()
@@ -590,14 +600,30 @@ export class CodexRuntimeHomeService {
     const systemCodexHomePath =
       resolveWslCodexSessionSourceHome(this.store.getSettings(), distro) ??
       this.getWslSystemCodexHomePath({ runtime: 'wsl', wslDistro: distro })
-    if (!systemCodexHomePath || systemCodexHomePath === runtimeHomePath) {
+    if (systemCodexHomePath && systemCodexHomePath !== runtimeHomePath) {
+      // Why: WSL history must be hardlinked inside the distro; host-side links can't bridge Windows and WSL filesystems in a resume-visible way.
+      void startWslCodexSessionBridgeInBackground({
+        distro,
+        systemCodexHomePath,
+        managedCodexHomePath: runtimeHomePath
+      })
+    }
+
+    const authorization = this.legacyWslSessionBridgeAuthorizationByDistro.get(distro.toLowerCase())
+    const launchLinuxHomePath = this.getWslLaunchLinuxHomePath(target, runtimeHomePath, distro)
+    if (
+      !authorization ||
+      !launchLinuxHomePath ||
+      pathPosix.normalize(authorization.destinationLinuxPath) !==
+        pathPosix.normalize(launchLinuxHomePath)
+    ) {
       return
     }
-    // Why: WSL history must be hardlinked inside the distro; host-side links can't bridge Windows and WSL filesystems in a resume-visible way.
+    // Why: only the unique auth match may authorize retired history for this exact destination.
     void startWslCodexSessionBridgeInBackground({
       distro,
-      systemCodexHomePath,
-      managedCodexHomePath: runtimeHomePath
+      systemCodexHomePath: authorization.retiredHomeLinuxPath,
+      managedCodexHomePath: authorization.destinationLinuxPath
     })
   }
 
@@ -995,13 +1021,7 @@ export class CodexRuntimeHomeService {
   }
 
   private getWslManagedHomePath(account: CodexManagedAccount | null): string | null {
-    if (!account) {
-      return null
-    }
-    if (account.managedHomeRuntime === 'wsl') {
-      return account.managedHomePath
-    }
-    return parseWslUncPath(account.managedHomePath) ? account.managedHomePath : null
+    return this.getWslManagedHomeIdentity(account) ? (account?.managedHomePath ?? null) : null
   }
 
   private getPreparedWslRateLimitHomePath(target: CodexAccountSelectionTarget): string | null {
@@ -1028,32 +1048,54 @@ export class CodexRuntimeHomeService {
     account: CodexManagedAccount,
     targetDistro: string | undefined
   ): string | null {
-    const managedHome = parseWslUncPath(account.managedHomePath)
-    const accountDistro = account.wslDistro?.trim() || managedHome?.distro
-    if (
-      accountDistro &&
-      targetDistro &&
-      accountDistro.toLowerCase() !== targetDistro.toLowerCase()
-    ) {
+    const wslHome = this.getWslManagedHomeIdentity(account)
+    if (!wslHome) {
       return null
     }
-    if (account.managedHomeRuntime === 'wsl') {
-      const linuxHomePath = account.wslLinuxHomePath?.trim() || managedHome?.linuxPath
-      const distro = accountDistro || targetDistro
-      if (managedHome) {
-        return account.managedHomePath
-      }
-      if (/^[A-Za-z]:[\\/]/.test(account.managedHomePath)) {
-        return linuxHomePath?.startsWith('/') && distro
-          ? toWindowsWslUncPath(linuxHomePath, distro)
-          : null
-      }
-      return account.managedHomePath.startsWith('/') ? account.managedHomePath : null
+    const accountDistro = wslHome.distro
+    if (targetDistro && accountDistro.toLowerCase() !== targetDistro.toLowerCase()) {
+      return null
     }
-    if (managedHome) {
-      return account.managedHomePath
+    if (/^[A-Za-z]:[\\/]/.test(account.managedHomePath)) {
+      return toWindowsWslUncPath(wslHome.linuxHomePath, accountDistro)
     }
-    return null
+    return account.managedHomePath || toWindowsWslUncPath(wslHome.linuxHomePath, accountDistro)
+  }
+
+  private getWslManagedHomeIdentity(
+    account: CodexManagedAccount | null
+  ): { distro: string; linuxHomePath: string } | null {
+    if (!account) {
+      return null
+    }
+    const distro = account.wslDistro?.trim()
+    const linuxHomePath = account.wslLinuxHomePath?.trim()
+    if (account.managedHomeRuntime === 'wsl' && distro && linuxHomePath?.startsWith('/')) {
+      return { distro, linuxHomePath }
+    }
+    const legacyHome = parseWslUncPath(account.managedHomePath)
+    return legacyHome ? { distro: legacyHome.distro, linuxHomePath: legacyHome.linuxPath } : null
+  }
+
+  private getWslLaunchLinuxHomePath(
+    target: CodexAccountSelectionTarget,
+    runtimeHomePath: string,
+    distro: string
+  ): string | null {
+    const settings = this.store.getSettings()
+    const account = this.getActiveAccount(
+      settings.codexManagedAccounts,
+      getSelectedCodexAccountIdForTarget(settings, target)
+    )
+    const wslHome = this.getWslManagedHomeIdentity(account)
+    if (wslHome?.distro.toLowerCase() === distro.toLowerCase()) {
+      return wslHome.linuxHomePath
+    }
+    const parsedRuntimeHome = parseWslUncPath(runtimeHomePath)
+    if (parsedRuntimeHome?.distro.toLowerCase() === distro.toLowerCase()) {
+      return parsedRuntimeHome.linuxPath
+    }
+    return runtimeHomePath.startsWith('/') ? runtimeHomePath : null
   }
 
   private startLegacyWslAuthDrain(
@@ -1067,6 +1109,8 @@ export class CodexRuntimeHomeService {
     if (!distro) {
       return Promise.resolve()
     }
+    const authorizationKey = distro.toLowerCase()
+    this.legacyWslSessionBridgeAuthorizationByDistro.delete(authorizationKey)
     const guestHome = getWslHome(distro)
     const guestHomeLinuxPath = guestHome ? toLinuxPath(guestHome).trim() : ''
     if (!guestHomeLinuxPath.startsWith('/')) {
@@ -1085,7 +1129,13 @@ export class CodexRuntimeHomeService {
         guestHomeLinuxPath,
         legacyPanePresent,
         resolveDestination: (runtimeAuthContents) =>
-          this.resolveLegacyWslAuthDestination(distro, runtimeAuthContents)
+          this.resolveLegacyWslAuthDestination(distro, runtimeAuthContents),
+        onDestinationAuthorized: (destination) => {
+          this.legacyWslSessionBridgeAuthorizationByDistro.set(authorizationKey, {
+            destinationLinuxPath: destination.linuxHomePath,
+            retiredHomeLinuxPath: wslCodexRuntimeHomeForGuestHome(guestHomeLinuxPath)
+          })
+        }
       },
       options
     )
@@ -1124,10 +1174,9 @@ export class CodexRuntimeHomeService {
     runtimeAuthContents: string
   ): Promise<LegacyWslRuntimeAuthDestination | null> {
     const accountHomes = this.store.getSettings().codexManagedAccounts.flatMap((account) => {
-      const accountDistro = account.wslDistro?.trim()
-      const linuxPath = account.wslLinuxHomePath?.trim()
-      return accountDistro?.toLowerCase() === distro.toLowerCase() && linuxPath?.startsWith('/')
-        ? [{ account, linuxPath }]
+      const wslHome = this.getWslManagedHomeIdentity(account)
+      return wslHome?.distro.toLowerCase() === distro.toLowerCase()
+        ? [{ account, linuxPath: wslHome.linuxHomePath }]
         : []
     })
     const accounts = accountHomes.map(({ account }) => account)
