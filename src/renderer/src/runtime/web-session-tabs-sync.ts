@@ -1442,7 +1442,11 @@ function buildMirroredAgentStatusPatch(
             // (#12906). Host-first unlike providerSession: only the host can mint one.
             lastAssistantMessage:
               (hostIdentityPredatesCurrentTurn ? undefined : entry.lastAssistantMessage) ??
-              existing.lastAssistantMessage
+              existing.lastAssistantMessage,
+            reconcileDiagnostic:
+              entry.reconcileDiagnostic === undefined
+                ? existing.reconcileDiagnostic
+                : entry.reconcileDiagnostic
           }
         : entry
     nextByPaneKey.set(entry.paneKey, nextEntry)

@@ -158,13 +158,22 @@ describe('applyWebSessionTabsSnapshot', () => {
       NOW
     ) as Partial<WebSessionTabsSyncState>
     const mirroredPaneKey = Object.keys(initial.agentStatusByPaneKey ?? {})[0]!
+    const newerClientState = makeState({
+      ...initial,
+      agentStatusByPaneKey: {
+        [mirroredPaneKey]: {
+          ...initial.agentStatusByPaneKey![mirroredPaneKey]!,
+          updatedAt: NOW
+        }
+      }
+    })
     const diagnostic = {
       kind: 'unverifiable' as const,
       reason: 'transcript-unreadable' as const,
       observedAt: 123
     }
     const degraded = applyWebSessionTabsSnapshot(
-      makeState({ ...initial }),
+      newerClientState,
       {
         ...snapshot,
         snapshotVersion: 2,
@@ -184,7 +193,7 @@ describe('applyWebSessionTabsSnapshot', () => {
     expect(degraded.agentStatusEpoch).toBe(2)
 
     const cleared = applyWebSessionTabsSnapshot(
-      makeState({ ...initial, ...degraded }),
+      makeState({ ...newerClientState, ...degraded }),
       {
         ...snapshot,
         snapshotVersion: 3,
