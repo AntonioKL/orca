@@ -27,10 +27,7 @@ import type { AgentStatus } from '../../shared/agent-detection'
 import type { TerminalOscLinkRange } from '../../shared/terminal-osc-link-ranges'
 import type { TerminalOscColorQueryReplyColors } from '../../shared/terminal-osc-color-reply'
 import type { TerminalOutputSourceRange } from '../../shared/terminal-output-source-range'
-import {
-  detectTerminalComposerDraft,
-  TERMINAL_COMPOSER_CONTEXT_ROWS
-} from '../../shared/terminal-composer-draft'
+import { detectTerminalComposerDraft } from '../../shared/terminal-composer-draft'
 import type {
   RemoteTerminalSourceRangeConsumerHooks,
   RemoteTerminalSourceRangeReplacementPublication,
@@ -40963,9 +40960,7 @@ function projectVisibleTerminalLines(emulator: HeadlessEmulator): {
   draft?: string
 } {
   const lines = emulator.getVisibleLines()
-  const draft = detectTerminalComposerDraft(
-    emulator.getCursorLineContext(TERMINAL_COMPOSER_CONTEXT_ROWS)
-  )
+  const draft = detectTerminalComposerDraft(emulator.getCursorLineContext())
   if (draft) {
     lines[draft.promptRow] = draft.promptGlyph
     for (let row = draft.promptRow + 1; row <= draft.endRow; row += 1) {
@@ -40985,23 +40980,17 @@ export function projectTerminalTailLines(
   const tail = emulator.getBufferTailLines(limit)
   const visible = emulator.getVisibleLines()
   const visibleRange = emulator.getVisibleBufferRange()
-  const draft = detectTerminalComposerDraft(
-    emulator.getCursorLineContext(TERMINAL_COMPOSER_CONTEXT_ROWS)
-  )
+  const draft = detectTerminalComposerDraft(emulator.getCursorLineContext())
   if (draft && visibleRange.endExclusive === visibleRange.totalLength) {
     visible[draft.promptRow] = draft.promptGlyph
     for (let row = draft.promptRow + 1; row <= draft.endRow; row += 1) {
       visible[row] = ''
     }
-    const visibleTailLength = Math.min(tail.length, visible.length)
-    tail.splice(
-      tail.length - visibleTailLength,
-      visibleTailLength,
-      ...visible.slice(-visibleTailLength)
-    )
+    const scrollbackTail = tail.slice(0, Math.max(0, tail.length - visible.length))
+    tail.splice(0, tail.length, ...scrollbackTail, ...visibleNonBlankTerminalLines(visible))
   }
   return {
-    lines: visibleNonBlankTerminalLines(tail),
+    lines: visibleNonBlankTerminalLines(tail).slice(-limit),
     ...(draft ? { draft: draft.text } : {})
   }
 }

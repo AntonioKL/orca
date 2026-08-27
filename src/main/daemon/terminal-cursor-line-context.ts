@@ -1,7 +1,7 @@
 import type { IBufferLine, Terminal } from '@xterm/headless'
 import type { TerminalCursorContext } from '../../shared/terminal-composer-draft'
 
-function undimmedText(line: IBufferLine, fromX = 0): string {
+function undimmedText(line: IBufferLine, fromX = 0, trimRight = true): string {
   let text = ''
   for (let x = fromX; x < line.length; x += 1) {
     const cell = line.getCell(x)
@@ -10,7 +10,7 @@ function undimmedText(line: IBufferLine, fromX = 0): string {
     }
     text += cell.getChars() || ' '
   }
-  return text.trimEnd()
+  return trimRight ? text.trimEnd() : text
 }
 
 function firstVisibleCellIsBold(line: IBufferLine): boolean {
@@ -41,8 +41,9 @@ export function readTerminalCursorLineContext(
   const start = Math.max(buffer.viewportY, cursorRow - Math.max(0, Math.floor(rowsAbove)))
   for (let row = start; row <= cursorRow; row += 1) {
     const line = buffer.getLine(row)
-    rows.push(line?.translateToString(true) ?? '')
-    typedRows.push(line ? undimmedText(line) : '')
+    const nextLineIsWrapped = buffer.getLine(row + 1)?.isWrapped ?? false
+    rows.push(line?.translateToString(!nextLineIsWrapped) ?? '')
+    typedRows.push(line ? undimmedText(line, 0, !nextLineIsWrapped) : '')
     promptGlyphBoldRows.push(line ? firstVisibleCellIsBold(line) : false)
     rowsWrapped.push(line?.isWrapped ?? false)
   }
@@ -55,8 +56,9 @@ export function readTerminalCursorLineContext(
   )
   for (let row = cursorRow + 1; row <= end; row += 1) {
     const line = buffer.getLine(row)
-    rowsBelow.push(line?.translateToString(true) ?? '')
-    typedRowsBelow.push(line ? undimmedText(line) : '')
+    const nextLineIsWrapped = buffer.getLine(row + 1)?.isWrapped ?? false
+    rowsBelow.push(line?.translateToString(!nextLineIsWrapped) ?? '')
+    typedRowsBelow.push(line ? undimmedText(line, 0, !nextLineIsWrapped) : '')
     rowsBelowWrapped.push(line?.isWrapped ?? false)
   }
   return {
@@ -68,8 +70,15 @@ export function readTerminalCursorLineContext(
     typedRowsBelow,
     rowsBelowWrapped,
     beforeCursor: cursorLine.translateToString(true, 0, buffer.cursorX),
-    afterCursor: undimmedText(cursorLine, buffer.cursorX),
-    rawAfterCursor: cursorLine.translateToString(true, buffer.cursorX),
+    afterCursor: undimmedText(
+      cursorLine,
+      buffer.cursorX,
+      !(buffer.getLine(cursorRow + 1)?.isWrapped ?? false)
+    ),
+    rawAfterCursor: cursorLine.translateToString(
+      !(buffer.getLine(cursorRow + 1)?.isWrapped ?? false),
+      buffer.cursorX
+    ),
     cursorHidden: !terminal.modes.showCursor,
     cursorViewportRow: cursorRow - buffer.viewportY
   }

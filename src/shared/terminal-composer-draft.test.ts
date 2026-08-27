@@ -122,8 +122,8 @@ describe('detectTerminalComposerDraft', () => {
         rows: ['» review the change'],
         typedRows: ['» review the change'],
         promptGlyphBoldRows: [true],
-        rowsBelow: [],
-        typedRowsBelow: [],
+        rowsBelow: ['gpt-5.6 · ~/repo'],
+        typedRowsBelow: ['gpt-5.6 · ~/repo'],
         beforeCursor: '» review the change',
         afterCursor: '',
         rawAfterCursor: '',
@@ -133,12 +133,29 @@ describe('detectTerminalComposerDraft', () => {
     ).toMatchObject({ text: 'review the change', promptGlyph: '»' })
   })
 
+  it('recognizes the bold Codex composer when its footer is visible', () => {
+    expect(
+      detectTerminalComposerDraft({
+        rows: ['› review the change'],
+        typedRows: ['› review the change'],
+        promptGlyphBoldRows: [true],
+        rowsBelow: ['gpt-5.6 · ~/repo'],
+        typedRowsBelow: ['gpt-5.6 · ~/repo'],
+        beforeCursor: '› review the change',
+        afterCursor: '',
+        rawAfterCursor: '',
+        cursorHidden: false,
+        cursorViewportRow: 4
+      })
+    ).toMatchObject({ text: 'review the change', promptGlyph: '›' })
+  })
+
   it('preserves an ordinary shell prompt that uses the Codex glyph', () => {
     expect(
       detectTerminalComposerDraft({
         rows: ['last command output', '› git status'],
         typedRows: ['last command output', '› git status'],
-        promptGlyphBoldRows: [false, false],
+        promptGlyphBoldRows: [false, true],
         rowsBelow: [],
         typedRowsBelow: [],
         beforeCursor: '› git status',
@@ -196,10 +213,84 @@ describe('detectTerminalComposerDraft', () => {
         rowsBelowWrapped: [true],
         beforeCursor: '❯ ',
         afterCursor: '',
-        rawAfterCursor: 'proceed with the',
+        rawAfterCursor: 'proceed with the ',
         cursorHidden: false,
         cursorViewportRow: 8
       })?.text
-    ).toBe('proceed with therelease')
+    ).toBe('proceed with the release')
+  })
+
+  it('keeps typed soft-wrapped rows below a restored cursor in the draft', () => {
+    expect(
+      detectTerminalComposerDraft({
+        rows: ['────────', '❯ proceed with the '],
+        typedRows: ['────────', '❯ proceed with the '],
+        promptGlyphBoldRows: [false, false],
+        rowsWrapped: [false, false],
+        rowsBelow: ['release'],
+        typedRowsBelow: ['release'],
+        rowsBelowWrapped: [true],
+        beforeCursor: '❯ proceed',
+        afterCursor: ' with the ',
+        rawAfterCursor: ' with the ',
+        cursorHidden: false,
+        cursorViewportRow: 8
+      })?.text
+    ).toBe('proceed with the release')
+  })
+
+  it('keeps typed hard-newline rows below a restored cursor in the draft', () => {
+    expect(
+      detectTerminalComposerDraft({
+        rows: ['────────', '❯ first line'],
+        typedRows: ['────────', '❯ first line'],
+        promptGlyphBoldRows: [false, false],
+        rowsWrapped: [false, false],
+        rowsBelow: ['  second line', '────────'],
+        typedRowsBelow: ['  second line', '────────'],
+        rowsBelowWrapped: [false, false],
+        beforeCursor: '❯ first',
+        afterCursor: ' line',
+        rawAfterCursor: ' line',
+        cursorHidden: false,
+        cursorViewportRow: 8
+      })?.text
+    ).toBe('first line\nsecond line')
+  })
+
+  it('keeps typed continuation rows after an intentional blank draft line', () => {
+    expect(
+      detectTerminalComposerDraft({
+        rows: ['────────', '❯ first line'],
+        typedRows: ['────────', '❯ first line'],
+        promptGlyphBoldRows: [false, false],
+        rowsWrapped: [false, false],
+        rowsBelow: ['', '  second line', '────────'],
+        typedRowsBelow: ['', '  second line', '────────'],
+        rowsBelowWrapped: [false, false, false],
+        beforeCursor: '❯ first',
+        afterCursor: ' line',
+        rawAfterCursor: ' line',
+        cursorHidden: false,
+        cursorViewportRow: 8
+      })
+    ).toMatchObject({ text: 'first line\n\nsecond line', endRow: 10 })
+  })
+
+  it('stops before a blank row that only precedes the composer frame', () => {
+    expect(
+      detectTerminalComposerDraft({
+        rows: ['────────', '❯ first line'],
+        typedRows: ['────────', '❯ first line'],
+        promptGlyphBoldRows: [false, false],
+        rowsBelow: ['', '────────'],
+        typedRowsBelow: ['', '────────'],
+        beforeCursor: '❯ first line',
+        afterCursor: '',
+        rawAfterCursor: '',
+        cursorHidden: false,
+        cursorViewportRow: 8
+      })
+    ).toMatchObject({ text: 'first line', endRow: 8 })
   })
 })

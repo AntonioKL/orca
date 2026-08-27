@@ -21,23 +21,41 @@ export type TerminalComposerDraft = {
   promptGlyph: '❯' | '›' | '»'
 }
 
-export const TERMINAL_COMPOSER_CONTEXT_ROWS = 16
+const COMPOSER_FRAME_LINE = /^[─━-]{8,}\s*$/
+const CODEX_FOOTER_LINE = /^\s*\S.*\s[·•]\s.*$/
 
-function dimmedContinuationRows(
+function composerContinuationRows(
   context: TerminalCursorContext,
   afterCursor: string
 ): { text: string; wrapped: boolean }[] {
-  if (!afterCursor.trim() || context.afterCursor.trim()) {
+  if (!afterCursor.trim() && !context.typedRowsBelow.some((row) => row.trim())) {
     return []
   }
   const continuation: { text: string; wrapped: boolean }[] = []
+  const hasTypedContinuationAfter = context.rowsBelow.map(() => false)
+  let hasFollowingTyped = false
+  for (let index = context.rowsBelow.length - 1; index >= 0; index -= 1) {
+    const raw = context.rowsBelow[index] ?? ''
+    if (COMPOSER_FRAME_LINE.test(raw) || CODEX_FOOTER_LINE.test(raw)) {
+      hasFollowingTyped = false
+      continue
+    }
+    hasTypedContinuationAfter[index] = hasFollowingTyped
+    if ((context.typedRowsBelow[index] ?? '').trim()) {
+      hasFollowingTyped = true
+    }
+  }
   for (let index = 0; index < context.rowsBelow.length; index += 1) {
     const raw = context.rowsBelow[index] ?? ''
-    if (!raw.trim() || (context.typedRowsBelow[index] ?? '').trim()) {
+    if (COMPOSER_FRAME_LINE.test(raw) || CODEX_FOOTER_LINE.test(raw)) {
       break
     }
+    if (!raw.trim() && !hasTypedContinuationAfter[index]) {
+      break
+    }
+    const typed = context.typedRowsBelow[index] ?? ''
     continuation.push({
-      text: raw.trim(),
+      text: typed.trim() ? typed : raw,
       wrapped: context.rowsBelowWrapped?.[index] ?? false
     })
   }
@@ -67,7 +85,7 @@ export function detectTerminalComposerDraft(
   }
   const cursorIndex = context.rows.length - 1
   let afterCursor = context.afterCursor || context.rawAfterCursor
-  let continuationRows = dimmedContinuationRows(context, afterCursor)
+  let continuationRows = composerContinuationRows(context, afterCursor)
   if (isStockPlaceholder(afterCursor, continuationRows)) {
     afterCursor = ''
     continuationRows = []
@@ -77,10 +95,14 @@ export function detectTerminalComposerDraft(
     const row = context.rows[index] ?? ''
     const glyph = row.match(/^\s*([❯›»])/)?.[1] as '❯' | '›' | '»' | undefined
     if (glyph) {
-      if (glyph === '❯' && !/^[─━-]{8,}\s*$/.test(context.rows[index - 1] ?? '')) {
+      if (glyph === '❯' && !COMPOSER_FRAME_LINE.test(context.rows[index - 1] ?? '')) {
         return null
       }
-      if ((glyph === '›' || glyph === '»') && context.promptGlyphBoldRows[index] !== true) {
+      if (
+        (glyph === '›' || glyph === '»') &&
+        (context.promptGlyphBoldRows[index] !== true ||
+          !context.rowsBelow.some((line) => CODEX_FOOTER_LINE.test(line)))
+      ) {
         return null
       }
       const lines: { text: string; wrapped: boolean }[] =
@@ -102,9 +124,13 @@ export function detectTerminalComposerDraft(
               ...continuationRows
             ]
       const text = lines
-        .map(
-          (line, lineIndex) => `${lineIndex > 0 && !line.wrapped ? '\n' : ''}${line.text.trim()}`
-        )
+        .map((line, lineIndex) => {
+          const continuesPrevious = lineIndex > 0 && line.wrapped
+          const continuesNext = lines[lineIndex + 1]?.wrapped ?? false
+          const start = continuesPrevious ? '' : lineIndex > 0 ? '\n' : ''
+          const content = continuesPrevious ? line.text : line.text.trimStart()
+          return `${start}${continuesNext ? content : content.trimEnd()}`
+        })
         .join('')
         .trim()
       if (!text) {
@@ -118,7 +144,7 @@ export function detectTerminalComposerDraft(
         promptGlyph: glyph
       }
     }
-    if (row.length > 0 && !/^\s/.test(row)) {
+    if (row.length > 0 && context.rowsWrapped?.[index] !== true && !/^\s/.test(row)) {
       return null
     }
   }

@@ -314,7 +314,7 @@ export class HeadlessEmulator {
     }
   }
 
-  getCursorLineContext(rowsAbove: number): TerminalCursorContext | null {
+  getCursorLineContext(rowsAbove = this.terminal.rows): TerminalCursorContext | null {
     return readTerminalCursorLineContext(this.terminal, rowsAbove)
   }
 
