@@ -1793,6 +1793,8 @@ export type RuntimeTerminalAgentStatusEvent = {
 
 type RuntimePtyTitleTrackerEntry = {
   tracker: TerminalTitleTracker
+  // Why: OSC 133 completion can prove an exit after an early foreground read still sees the agent.
+  pendingAgentExitCandidate: RuntimePtyAgentExitCandidate | null
   // Why: onPtyData batches the mobile session-tab touch to once per chunk;
   // the stale-working-title timer fires between chunks and must touch
   // immediately. This flag routes the tracker callback to the right mode.
@@ -1807,6 +1809,24 @@ type RuntimePtyTitleTrackerEntry = {
   // TUI output. Null when no side-effect consumer exists (headless serve) —
   // the scrape produces facts only.
   commandCodeDetector: { observe: (data: string) => boolean } | null
+}
+
+type RuntimeTerminalSideEffectAttribution = {
+  worktreeId?: string
+  tabId?: string
+  paneKey?: string
+  connectionId?: string | null
+}
+
+type RuntimePtyAgentExitCandidate = {
+  pty: RuntimePtyWorktreeRecord
+  controller: RuntimePtyController | null
+  titleObservedAt: number | null
+  incarnationId: PtyIncarnationId
+  attribution: Required<
+    Pick<RuntimeTerminalSideEffectAttribution, 'worktreeId' | 'tabId' | 'paneKey'>
+  > &
+    Pick<RuntimeTerminalSideEffectAttribution, 'connectionId'>
 }
 
 // Why: the full OSC 9999 payload flows through emitTerminalAgentStatusEvents and
@@ -11934,6 +11954,7 @@ export class OrcaRuntimeService {
         this.recordTerminalSideEffectFact(ptyId, { kind: 'bell' })
         return
       case 'command-finished':
+        this.settlePendingPtyAgentExitOnCommandFinished(ptyId)
         this.retirePtyAgentLaunchAuthority(ptyId)
         this.recordTerminalSideEffectFact(ptyId, {
           kind: 'command-finished',
@@ -12020,12 +12041,9 @@ export class OrcaRuntimeService {
 
   /** Same attribution resolution as emitTerminalAgentStatusEvents: prefer the
    *  first mounted leaf, fall back to the spawn-time PTY record binding. */
-  private resolveTerminalSideEffectAttribution(ptyId: string): {
-    worktreeId?: string
-    tabId?: string
-    paneKey?: string
-    connectionId?: string | null
-  } {
+  private resolveTerminalSideEffectAttribution(
+    ptyId: string
+  ): RuntimeTerminalSideEffectAttribution {
     const pty = this.ptysById.get(ptyId)
     const connectionId = pty?.connectionId ?? null
     for (const leaf of this.getLeavesForPty(ptyId)) {
@@ -12169,6 +12187,10 @@ export class OrcaRuntimeService {
           const changed = this.applyTrackedPtyTitle(ptyId, rawTitle, normalizedTitle, meta)
           const identityOnlyTitle = this.isLiveCursorNativeTitle(rawTitle, meta)
           const live = this.ptyTitleTrackersByPtyId.get(ptyId)
+          const observedAgentStatus = detectAgentStatusFromTitle(rawTitle)
+          if (live && observedAgentStatus !== null) {
+            live.pendingAgentExitCandidate = null
+          }
           const gateKey = this.makeDecorativeTitleGateKey(rawTitle, normalizedTitle)
           const decorativeOnly = live?.lastMobileTitleGateKey === gateKey
           if (live) {
@@ -12176,7 +12198,7 @@ export class OrcaRuntimeService {
           }
           const tracksReplicatedStatus =
             live?.applyingChunk === true && this.mobileSessionTabListeners.size > 0
-          const titleStatus = tracksReplicatedStatus ? detectAgentStatusFromTitle(rawTitle) : null
+          const titleStatus = tracksReplicatedStatus ? observedAgentStatus : null
           if (
             tracksReplicatedStatus &&
             decorativeOnly &&
@@ -12223,6 +12245,7 @@ export class OrcaRuntimeService {
           this.confirmPtyAgentExit(ptyId)
         },
         onCommandFinished: (exitCode: number | null) => {
+          this.settlePendingPtyAgentExitOnCommandFinished(ptyId)
           this.retirePtyAgentLaunchAuthority(ptyId)
           this.recordTerminalSideEffectFact(ptyId, { kind: 'command-finished', exitCode })
         },
@@ -12245,6 +12268,7 @@ export class OrcaRuntimeService {
     tracker.setTransientSideEffectScanningEnabled(this.terminalSideEffectConsumerAvailable)
     const entry: RuntimePtyTitleTrackerEntry = {
       tracker,
+      pendingAgentExitCandidate: null,
       applyingChunk: false,
       lastMobileTitleGateKey: null,
       chunkTouchedSessionTabs: false,
@@ -19679,6 +19703,39 @@ export class OrcaRuntimeService {
     return Boolean(pty?.connectionId && !pty.connected && !pty.hostExitConfirmed)
   }
 
+  private settlePendingPtyAgentExitOnCommandFinished(ptyId: string): void {
+    const entry = this.ptyTitleTrackersByPtyId.get(ptyId)
+    const candidate = entry?.pendingAgentExitCandidate
+    if (!entry || !candidate) {
+      return
+    }
+    entry.pendingAgentExitCandidate = null
+    const current = this.ptysById.get(ptyId)
+    if (
+      current !== candidate.pty ||
+      this.ptyController !== candidate.controller ||
+      current.incarnationId !== candidate.incarnationId ||
+      this.isPtyAgentExitUnverifiable(current, ptyId) ||
+      (current.lastOscTitleAt !== candidate.titleObservedAt && current.lastAgentStatus !== null)
+    ) {
+      return
+    }
+    const currentAttribution = this.resolveTerminalSideEffectAttribution(ptyId)
+    if (
+      currentAttribution.worktreeId !== candidate.attribution.worktreeId ||
+      currentAttribution.tabId !== candidate.attribution.tabId ||
+      currentAttribution.paneKey !== candidate.attribution.paneKey ||
+      currentAttribution.connectionId !== candidate.attribution.connectionId
+    ) {
+      return
+    }
+    this.recordTerminalSideEffectFact(ptyId, {
+      kind: 'agent-exited',
+      executionHostConfirmed: true,
+      incarnationId: candidate.incarnationId
+    })
+  }
+
   private confirmPtyAgentExit(ptyId: string): void {
     const pty = this.ptysById.get(ptyId)
     if (this.isPtyAgentExitUnverifiable(pty, ptyId)) {
@@ -19688,6 +19745,25 @@ export class OrcaRuntimeService {
     const incarnationId = pty?.incarnationId ?? null
     const controller = this.ptyController
     const attribution = this.resolveTerminalSideEffectAttribution(ptyId)
+    const trackerEntry = this.ptyTitleTrackersByPtyId.get(ptyId)
+    const pendingCandidate: RuntimePtyAgentExitCandidate | null =
+      pty && incarnationId && attribution.worktreeId && attribution.tabId && attribution.paneKey
+        ? {
+            pty,
+            controller,
+            titleObservedAt,
+            incarnationId,
+            attribution: {
+              worktreeId: attribution.worktreeId,
+              tabId: attribution.tabId,
+              paneKey: attribution.paneKey,
+              connectionId: attribution.connectionId
+            }
+          }
+        : null
+    if (trackerEntry) {
+      trackerEntry.pendingAgentExitCandidate = pendingCandidate
+    }
     const recordExit = (executionHostConfirmed: boolean): void => {
       const current = this.ptysById.get(ptyId)
       if (
@@ -19706,6 +19782,9 @@ export class OrcaRuntimeService {
           currentAttribution.paneKey !== attribution.paneKey)
       ) {
         return
+      }
+      if (pendingCandidate && trackerEntry?.pendingAgentExitCandidate === pendingCandidate) {
+        trackerEntry.pendingAgentExitCandidate = null
       }
       this.recordTerminalSideEffectFact(
         ptyId,
@@ -19727,6 +19806,13 @@ export class OrcaRuntimeService {
     void foregroundRead.then((result) => {
       const current = this.ptysById.get(ptyId)
       if (current !== pty) {
+        return
+      }
+      if (
+        current.connected &&
+        pendingCandidate &&
+        trackerEntry?.pendingAgentExitCandidate !== pendingCandidate
+      ) {
         return
       }
       if (this.isPtyAgentExitUnverifiable(current, ptyId)) {

@@ -10375,6 +10375,132 @@ describe('OrcaRuntimeService', () => {
       expect(getForegroundProcess).toHaveBeenCalledTimes(2)
     })
 
+    it('settles a pending title exit when command completion proves the agent returned to shell', async () => {
+      const { runtime, batches } = createSideEffectRuntime()
+      syncSinglePty(runtime)
+      runtime.onPtySpawned('pty-1', 'inc-command-finished-exit', { awaitsRegistration: false })
+      runtime.ingestSyntheticTitleFrame('pty-1', '\x1b]0;Codex ready\x07')
+      runtime.onPtyData('pty-1', '\x1b]0;⠋ bichir\x07', 100)
+      runtime.ingestSyntheticTitleFrame('pty-1', '\x1b]0;Codex ready\x07')
+      batches.length = 0
+
+      const getForegroundProcess = vi.fn().mockResolvedValue('codex')
+      runtime.setPtyController({
+        write: () => true,
+        kill: () => true,
+        getForegroundProcess
+      })
+      runtime.onPtyData('pty-1', '\x1b]0;bichir\x07', 101)
+
+      await vi.waitFor(() => expect(getForegroundProcess).toHaveBeenCalledOnce())
+      await vi.waitFor(() =>
+        expect(batches.flatMap((batch) => batch.facts)).toEqual([
+          { kind: 'title', normalizedTitle: 'bichir', rawTitle: 'bichir' }
+        ])
+      )
+
+      runtime.onPtyData('pty-1', '\x1b]133;D;0\x07', 102)
+
+      expect(batches.flatMap((batch) => batch.facts)).toEqual([
+        { kind: 'title', normalizedTitle: 'bichir', rawTitle: 'bichir' },
+        {
+          kind: 'agent-exited',
+          executionHostConfirmed: true,
+          incarnationId: 'inc-command-finished-exit'
+        },
+        { kind: 'command-finished', exitCode: 0 }
+      ])
+    })
+
+    it('settles a pending title exit from a daemon-relayed command completion', async () => {
+      const { runtime, batches } = createSideEffectRuntime()
+      syncSinglePty(runtime)
+      runtime.onPtySpawned('pty-1', 'inc-daemon-command-finished-exit', {
+        awaitsRegistration: false
+      })
+      runtime.ingestSyntheticTitleFrame('pty-1', '\x1b]0;Codex ready\x07')
+      runtime.onPtyData('pty-1', '\x1b]0;⠋ bichir\x07', 100)
+      runtime.ingestSyntheticTitleFrame('pty-1', '\x1b]0;Codex ready\x07')
+      batches.length = 0
+
+      runtime.setPtyController({
+        write: () => true,
+        kill: () => true,
+        getForegroundProcess: vi.fn().mockResolvedValue('codex')
+      })
+      runtime.onPtyData('pty-1', '\x1b]0;bichir\x07', 101)
+      await vi.waitFor(() => expect(batches).toHaveLength(1))
+
+      runtime.emitDaemonPtyTransientFact('pty-1', { kind: 'command-finished', exitCode: 0 })
+
+      expect(batches.flatMap((batch) => batch.facts)).toEqual([
+        { kind: 'title', normalizedTitle: 'bichir', rawTitle: 'bichir' },
+        {
+          kind: 'agent-exited',
+          executionHostConfirmed: true,
+          incarnationId: 'inc-daemon-command-finished-exit'
+        },
+        { kind: 'command-finished', exitCode: 0 }
+      ])
+    })
+
+    it('drops a pending title exit when fresh agent-title evidence arrives', async () => {
+      const { runtime, batches } = createSideEffectRuntime()
+      syncSinglePty(runtime)
+      runtime.onPtySpawned('pty-1', 'inc-renewed-agent-title', { awaitsRegistration: false })
+      runtime.ingestSyntheticTitleFrame('pty-1', '\x1b]0;Codex ready\x07')
+      runtime.onPtyData('pty-1', '\x1b]0;⠋ bichir\x07', 100)
+      runtime.ingestSyntheticTitleFrame('pty-1', '\x1b]0;Codex ready\x07')
+      batches.length = 0
+
+      runtime.setPtyController({
+        write: () => true,
+        kill: () => true,
+        getForegroundProcess: vi.fn().mockResolvedValue('codex')
+      })
+      runtime.onPtyData('pty-1', '\x1b]0;bichir\x07', 101)
+      await vi.waitFor(() => expect(batches).toHaveLength(1))
+      runtime.onPtyData('pty-1', '\x1b]0;Codex ready\x07', 102)
+      runtime.onPtyData('pty-1', '\x1b]133;D;0\x07', 103)
+
+      expect(batches.flatMap((batch) => batch.facts)).not.toContainEqual(
+        expect.objectContaining({ kind: 'agent-exited' })
+      )
+    })
+
+    it('drops a pending title exit after the PTY incarnation changes', async () => {
+      const { runtime, batches } = createSideEffectRuntime()
+      syncSinglePty(runtime)
+      runtime.onPtySpawned('pty-1', 'inc-pending-exit-old', { awaitsRegistration: false })
+      runtime.ingestSyntheticTitleFrame('pty-1', '\x1b]0;Codex ready\x07')
+      runtime.onPtyData('pty-1', '\x1b]0;⠋ bichir\x07', 100)
+      runtime.ingestSyntheticTitleFrame('pty-1', '\x1b]0;Codex ready\x07')
+      batches.length = 0
+
+      runtime.setPtyController({
+        write: () => true,
+        kill: () => true,
+        getForegroundProcess: vi.fn().mockResolvedValue('codex')
+      })
+      runtime.onPtyData('pty-1', '\x1b]0;bichir\x07', 101)
+      await vi.waitFor(() => expect(batches).toHaveLength(1))
+      const pty = (
+        runtime as unknown as {
+          ptysById: Map<string, { incarnationId: string | null }>
+        }
+      ).ptysById.get('pty-1')
+      if (!pty) {
+        throw new Error('missing PTY fixture')
+      }
+      pty.incarnationId = 'inc-pending-exit-new'
+
+      runtime.onPtyData('pty-1', '\x1b]133;D;0\x07', 102)
+
+      expect(batches.flatMap((batch) => batch.facts)).not.toContainEqual(
+        expect.objectContaining({ kind: 'agent-exited' })
+      )
+    })
+
     it('does not confirm an agent exit from a foreground read predating its title', async () => {
       const { runtime, batches } = createSideEffectRuntime()
       syncSinglePty(runtime)
