@@ -49,6 +49,7 @@ import {
 import { isTuiAgent } from '../shared/tui-agent-config'
 import type { TuiAgent } from '../shared/tui-agent'
 import { forceKillPosixPtyProcessGroups } from '../main/pty/posix-pty-process-groups'
+import { terminatePtyJob } from '../main/windows/windows-pty-job'
 import { stripInheritedBuildModeEnv } from '../main/pty/build-mode-env'
 import { stripLegacyTerminalShimEnv } from '../main/pty/legacy-terminal-shim-dir'
 import { dropIncoherentCondaActivationEnv } from '../main/pty/conda-activation-env'
@@ -2470,6 +2471,28 @@ export class PtyHandler {
     if (this.graceTimer) {
       clearTimeout(this.graceTimer)
       this.graceTimer = null
+    }
+  }
+
+  forceKillAllPtyProcesses(): void {
+    let firstError: unknown
+    let hasError = false
+    for (const managed of this.ptys.values()) {
+      try {
+        if (process.platform === 'win32' && terminatePtyJob(managed.pty) === 'terminated') {
+          managed.forceKillSent = true
+          continue
+        }
+        this.requestForceKill(managed)
+      } catch (error) {
+        if (!hasError) {
+          firstError = error
+          hasError = true
+        }
+      }
+    }
+    if (hasError) {
+      throw firstError
     }
   }
 

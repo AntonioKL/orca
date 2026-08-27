@@ -20,8 +20,14 @@ export async function runRelayDaemon(
   }
 
   const socketOwnership = new RelaySocketOwnership(options.sockPath)
+  let fatalPtyHandler: RelayRuntimeServices['ptyHandler'] | null = null
   process.on('uncaughtException', (error) => {
     relayLogLine(`[relay] Uncaught exception: ${error.message}\n${error.stack}`)
+    try {
+      fatalPtyHandler?.forceKillAllPtyProcesses()
+    } catch {
+      // Exit must win over best-effort reap failure.
+    }
     socketOwnership.cleanup()
     process.exit(1)
   })
@@ -36,6 +42,7 @@ export async function runRelayDaemon(
     options.graceTimeMs,
     launchVersion
   )
+  fatalPtyHandler = runtime.ptyHandler
   let reconnectListener: RelayReconnectListener | null = null
   const agentHooks = new RelayAgentHookRuntime(
     primaryChannel.dispatcher,
