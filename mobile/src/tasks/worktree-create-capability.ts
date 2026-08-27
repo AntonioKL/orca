@@ -16,6 +16,11 @@ import {
 export const MOBILE_WORKTREE_CREATE_IDEMPOTENCY_CAPABILITY = 'worktree.create-idempotency.v1'
 
 const STATUS_CUTOVER_MAX_RETRIES = 5
+const AUTHORITATIVE_STATUS_ERROR_CODES = new Set([
+  'method_not_found',
+  'forbidden',
+  'invalid_argument'
+])
 
 export type NewWorktreeRuntimeCapabilities = {
   tasksSupported: boolean
@@ -32,18 +37,23 @@ const UNSUPPORTED_CAPABILITIES: NewWorktreeRuntimeCapabilities = {
 type CapabilityProbeResult = {
   capabilities: NewWorktreeRuntimeCapabilities
   cache: 'authoritative' | 'transient'
+  runtimeId: string | null
 }
 
 type CapabilityProbeRecord = {
   client: RpcClient | null
   connectionRevision: number
+  runtimeRevision: number
+  activationRevision: number
   cache: 'pending' | CapabilityProbeResult['cache']
+  result: CapabilityProbeResult | null
   promise: Promise<CapabilityProbeResult>
 }
 
 type ConnectionRevision = {
   client: RpcClient | null
   revision: number
+  runtimeRevision: number
   state: ReturnType<RpcClient['getState']> | null
   generation: number | null
   connectedAt: number | null
@@ -64,7 +74,13 @@ async function probeNewWorktreeRuntimeCapabilities(
     try {
       const response = await client.sendRequest('status.get')
       if (!response.ok) {
-        return { capabilities: UNSUPPORTED_CAPABILITIES, cache: 'authoritative' }
+        return {
+          capabilities: UNSUPPORTED_CAPABILITIES,
+          cache: AUTHORITATIVE_STATUS_ERROR_CODES.has(response.error.code)
+            ? 'authoritative'
+            : 'transient',
+          runtimeId: response._meta.runtimeId
+        }
       }
       const result = (response as RpcSuccess).result as {
         capabilities?: string[]
@@ -91,11 +107,16 @@ async function probeNewWorktreeRuntimeCapabilities(
             : false,
           hostPlatform: readMobileRuntimeHostPlatform(result)
         },
-        cache: 'authoritative'
+        cache: 'authoritative',
+        runtimeId: response._meta.runtimeId
       }
     } catch (error) {
       if (!isLogicalClientCutoverError(error) || migrationRetry >= STATUS_CUTOVER_MAX_RETRIES) {
-        return { capabilities: UNSUPPORTED_CAPABILITIES, cache: 'transient' }
+        return {
+          capabilities: UNSUPPORTED_CAPABILITIES,
+          cache: 'transient',
+          runtimeId: null
+        }
       }
     }
   }
@@ -113,35 +134,62 @@ export function useNewWorktreeRuntimeCapabilities(
   const [hostPlatform, setHostPlatform] = useState<NodeJS.Platform | null>(null)
   const capabilityProbeRef = useRef<CapabilityProbeRecord | null>(null)
   const connectionRevisionRef = useRef<ConnectionRevision>(makeConnectionRevision(client))
+  const enabledRef = useRef(enabled)
+  const activationRevisionRef = useRef(0)
   if (connectionRevisionRef.current.client !== client) {
     connectionRevisionRef.current = makeConnectionRevision(client)
     capabilityProbeRef.current = null
+    activationRevisionRef.current = 0
+  } else if (enabled && !enabledRef.current) {
+    activationRevisionRef.current += 1
   }
+  enabledRef.current = enabled
 
   const getCapabilityProbe = useCallback((): CapabilityProbeRecord => {
     updateConnectionRevision(connectionRevisionRef.current)
     const current = capabilityProbeRef.current
-    // Why: a transient answer gets one shared retry per recovered connection,
-    // while a host's authoritative answer remains durable across reconnects.
+    // Why: transient answers retry per recovery/activation, while authoritative
+    // answers remain pinned until a connection can prove the runtime changed.
     if (
       current?.client === client &&
-      (current.cache === 'authoritative' ||
-        current.connectionRevision === connectionRevisionRef.current.revision)
+      ((current.cache === 'pending' &&
+        current.connectionRevision === connectionRevisionRef.current.revision) ||
+        (current.cache === 'authoritative' &&
+          current.runtimeRevision === connectionRevisionRef.current.runtimeRevision) ||
+        (current.cache === 'transient' &&
+          current.connectionRevision === connectionRevisionRef.current.revision &&
+          current.activationRevision === activationRevisionRef.current))
     ) {
       return current
     }
+    const previousAuthoritative = current?.cache === 'authoritative' ? current.result : null
+    const probe = client
+      ? probeNewWorktreeRuntimeCapabilities(client)
+      : Promise.resolve({
+          capabilities: UNSUPPORTED_CAPABILITIES,
+          cache: 'authoritative' as const,
+          runtimeId: null
+        })
     const record: CapabilityProbeRecord = {
       client,
       connectionRevision: connectionRevisionRef.current.revision,
+      runtimeRevision: connectionRevisionRef.current.runtimeRevision,
+      activationRevision: activationRevisionRef.current,
       cache: 'pending',
-      promise: client
-        ? probeNewWorktreeRuntimeCapabilities(client)
-        : Promise.resolve({ capabilities: UNSUPPORTED_CAPABILITIES, cache: 'authoritative' })
+      result: null,
+      promise: probe.then((result) =>
+        previousAuthoritative &&
+        result.cache === 'authoritative' &&
+        result.runtimeId === previousAuthoritative.runtimeId
+          ? previousAuthoritative
+          : result
+      )
     }
     capabilityProbeRef.current = record
     void record.promise.then((result) => {
       if (capabilityProbeRef.current === record) {
         record.cache = result.cache
+        record.result = result
       }
     })
     return record
@@ -164,10 +212,7 @@ export function useNewWorktreeRuntimeCapabilities(
     const unsubscribe = client.onStateChange(() => {
       const previousRevision = connectionRevisionRef.current.revision
       updateConnectionRevision(connectionRevisionRef.current)
-      if (
-        connectionRevisionRef.current.revision !== previousRevision &&
-        capabilityProbeRef.current?.cache !== 'authoritative'
-      ) {
+      if (connectionRevisionRef.current.revision !== previousRevision) {
         refresh()
       }
     })
@@ -192,6 +237,7 @@ function makeConnectionRevision(client: RpcClient | null): ConnectionRevision {
   return {
     client,
     revision: 0,
+    runtimeRevision: 0,
     state: client?.getState() ?? null,
     generation: readLogicalClientGeneration(client),
     connectedAt: client?.getLastConnectedAt() ?? null
@@ -214,6 +260,9 @@ function updateConnectionRevision(connection: ConnectionRevision): void {
   connection.connectedAt = connectedAt
   if (reconnected || migrated || connectionChanged) {
     connection.revision += 1
+  }
+  if (migrated || connectionChanged) {
+    connection.runtimeRevision += 1
   }
 }
 

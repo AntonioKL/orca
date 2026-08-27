@@ -11,6 +11,8 @@ type CapabilityHook = ReturnType<typeof useNewWorktreeRuntimeCapabilities>
 class CapabilityClient implements RpcClient {
   private readonly listeners = new Set<(state: ConnectionState) => void>()
   private state: ConnectionState = 'connected'
+  private generation = 1
+  private connectedAt = 1
   readonly statusRequests = vi.fn<() => Promise<RpcResponse>>()
   readonly createRequests: Record<string, unknown>[] = []
 
@@ -46,7 +48,7 @@ class CapabilityClient implements RpcClient {
     return 0
   }
   getLastConnectedAt(): number | null {
-    return null
+    return this.connectedAt
   }
   onStateChange(listener: (state: ConnectionState) => void): () => void {
     this.listeners.add(listener)
@@ -57,44 +59,64 @@ class CapabilityClient implements RpcClient {
 
   emitState(state: ConnectionState): void {
     this.state = state
+    this.emitCurrentState()
+  }
+
+  bumpGeneration(): void {
+    this.generation += 1
+    this.emitCurrentState()
+  }
+
+  bumpConnectedAt(): void {
+    this.connectedAt += 1
+    this.emitCurrentState()
+  }
+
+  getGeneration = (): number => this.generation
+
+  private emitCurrentState(): void {
     for (const listener of this.listeners) {
-      listener(state)
+      listener(this.state)
     }
   }
 }
 
-function success(result: unknown): RpcResponse {
-  return { id: '1', ok: true, result, _meta: { runtimeId: 'r' } }
+function success(result: unknown, runtimeId = 'r'): RpcResponse {
+  return { id: '1', ok: true, result, _meta: { runtimeId } }
 }
 
-function unsupported(): RpcResponse {
+function failure(code: string, runtimeId = 'r'): RpcResponse {
   return {
     id: '1',
     ok: false,
-    error: { code: 'unsupported', message: 'unsupported' },
-    _meta: { runtimeId: 'r' }
+    error: { code, message: code },
+    _meta: { runtimeId }
   }
 }
 
-function supported(): RpcResponse {
-  return success({
-    capabilities: ['mobile.tasks.v1', 'worktree.create-idempotency.v1'],
-    hostPlatform: 'darwin'
-  })
+function supported(runtimeId = 'r'): RpcResponse {
+  return success(
+    {
+      capabilities: ['mobile.tasks.v1', 'worktree.create-idempotency.v1'],
+      hostPlatform: 'darwin'
+    },
+    runtimeId
+  )
 }
 
 async function mountCapabilities(client: RpcClient): Promise<{
   readonly current: CapabilityHook
+  setEnabled(enabled: boolean): Promise<void>
   unmount(): void
 }> {
   let current: CapabilityHook | null = null
   let renderer: ReactTestRenderer | null = null
-  function Probe(): null {
-    current = useNewWorktreeRuntimeCapabilities(client, true)
+  function Probe({ enabled }: { enabled: boolean }): null {
+    current = useNewWorktreeRuntimeCapabilities(client, enabled)
     return null
   }
   await act(async () => {
-    renderer = create(createElement(Probe))
+    renderer = create(createElement(Probe, { enabled: true }))
     await Promise.resolve()
   })
   return {
@@ -103,6 +125,12 @@ async function mountCapabilities(client: RpcClient): Promise<{
         throw new Error('capability probe did not render')
       }
       return current
+    },
+    setEnabled: async (enabled) => {
+      await act(async () => {
+        renderer?.update(createElement(Probe, { enabled }))
+        await Promise.resolve()
+      })
     },
     unmount: () => act(() => renderer?.unmount())
   }
@@ -122,7 +150,7 @@ describe('useNewWorktreeRuntimeCapabilities reconnect recovery', () => {
       client,
       baseName: 'otter',
       buildParams: (name) => ({ repo: 'id:r', name }),
-      supportsIdempotentCutoverRetry: capabilities.current.getWorktreeCreateCutoverSupport(),
+      worktreeCreateIdempotency: capabilities.current.getWorktreeCreateCutoverSupport(),
       mintMutationId: () => 'mutation-after-reconnect'
     })
 
@@ -139,7 +167,7 @@ describe('useNewWorktreeRuntimeCapabilities reconnect recovery', () => {
   })
 
   it('keeps an authoritative unsupported response cached across reconnect', async () => {
-    const client = new CapabilityClient([unsupported(), supported()])
+    const client = new CapabilityClient([failure('method_not_found'), supported()])
     const capabilities = await mountCapabilities(client)
 
     await act(async () => {
@@ -150,6 +178,96 @@ describe('useNewWorktreeRuntimeCapabilities reconnect recovery', () => {
 
     expect(client.statusRequests).toHaveBeenCalledOnce()
     expect(capabilities.current.tasksSupported).toBe(false)
+    capabilities.unmount()
+  })
+
+  it.each(['forbidden', 'invalid_argument'])(
+    'keeps an authoritative %s response cached across reconnect',
+    async (code) => {
+      const client = new CapabilityClient([failure(code), supported()])
+      const capabilities = await mountCapabilities(client)
+
+      await act(async () => {
+        client.emitState('reconnecting')
+        client.emitState('connected')
+        await Promise.resolve()
+      })
+
+      expect(client.statusRequests).toHaveBeenCalledOnce()
+      expect(capabilities.current.tasksSupported).toBe(false)
+      capabilities.unmount()
+    }
+  )
+
+  it('re-probes an internal error response after reconnect', async () => {
+    const client = new CapabilityClient([failure('internal_error'), supported()])
+    const capabilities = await mountCapabilities(client)
+
+    await act(async () => {
+      client.emitState('reconnecting')
+      client.emitState('connected')
+      await Promise.resolve()
+    })
+
+    expect(client.statusRequests).toHaveBeenCalledTimes(2)
+    expect(capabilities.current.tasksSupported).toBe(true)
+    capabilities.unmount()
+  })
+
+  it('re-probes a transient result when the capability consumer is reopened', async () => {
+    const client = new CapabilityClient([new Error('timeout'), supported()])
+    const capabilities = await mountCapabilities(client)
+
+    await capabilities.setEnabled(false)
+    await capabilities.setEnabled(true)
+
+    expect(client.statusRequests).toHaveBeenCalledTimes(2)
+    expect(capabilities.current.tasksSupported).toBe(true)
+    capabilities.unmount()
+  })
+
+  it('invalidates an authoritative result when the runtime identity changes', async () => {
+    const client = new CapabilityClient([
+      failure('method_not_found', 'runtime-1'),
+      supported('runtime-2')
+    ])
+    const capabilities = await mountCapabilities(client)
+
+    await act(async () => {
+      client.bumpConnectedAt()
+      await Promise.resolve()
+    })
+
+    expect(client.statusRequests).toHaveBeenCalledTimes(2)
+    expect(capabilities.current.tasksSupported).toBe(true)
+    capabilities.unmount()
+  })
+
+  it('re-probes a transient result when the logical client generation changes', async () => {
+    const client = new CapabilityClient([new Error('timeout'), supported()])
+    const capabilities = await mountCapabilities(client)
+
+    await act(async () => {
+      client.bumpGeneration()
+      await Promise.resolve()
+    })
+
+    expect(client.statusRequests).toHaveBeenCalledTimes(2)
+    expect(capabilities.current.tasksSupported).toBe(true)
+    capabilities.unmount()
+  })
+
+  it('re-probes a transient result when connectedAt changes', async () => {
+    const client = new CapabilityClient([new Error('timeout'), supported()])
+    const capabilities = await mountCapabilities(client)
+
+    await act(async () => {
+      client.bumpConnectedAt()
+      await Promise.resolve()
+    })
+
+    expect(client.statusRequests).toHaveBeenCalledTimes(2)
+    expect(capabilities.current.tasksSupported).toBe(true)
     capabilities.unmount()
   })
 
