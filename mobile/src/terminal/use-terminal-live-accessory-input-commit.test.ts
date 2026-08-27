@@ -70,7 +70,7 @@ function createAccessoryInputCommitHarness({
     }
   }
   const applyLiveInputMirror = vi.fn(
-    (_handle: string, _fieldText: string, _composing?: boolean) => {}
+    async (_handle: string, _fieldText: string, _composing?: boolean) => true
   )
   const clearPendingLiveInputCommit = vi.fn(() => {})
   const flushPendingLiveInputText = vi.fn(async (_expectedHandle: string | null) => flushResult)
