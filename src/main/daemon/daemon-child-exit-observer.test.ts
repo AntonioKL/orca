@@ -46,6 +46,33 @@ describe('observeDaemonChildExit', () => {
     )
   })
 
+  it('retains only the configured bytes from an oversized stderr chunk', () => {
+    const child = createChild()
+    const onExit = vi.fn()
+    const observer = observeDaemonChildExit(child, onExit, 8)
+
+    observer.markReady()
+    child.stderr.write(Buffer.from(`${'x'.repeat(1024 * 1024)}FATAL`))
+    child.emit('exit', 134, null)
+    child.stderr.emit('end')
+
+    expect(onExit).toHaveBeenCalledWith(expect.objectContaining({ stderrTail: 'xxxFATAL' }))
+  })
+
+  it('reports once when stderr closes before the child exits', () => {
+    const child = createChild()
+    const onExit = vi.fn()
+    const observer = observeDaemonChildExit(child, onExit)
+
+    observer.markReady()
+    child.stderr.emit('close')
+    child.emit('exit', 134, null)
+    child.emit('exit', 134, null)
+
+    expect(onExit).toHaveBeenCalledOnce()
+    expect(onExit).toHaveBeenCalledWith(expect.objectContaining({ stderrTail: '' }))
+  })
+
   it('swallows stderr errors after process exit while awaiting drain', () => {
     const child = createChild()
     const onExit = vi.fn()

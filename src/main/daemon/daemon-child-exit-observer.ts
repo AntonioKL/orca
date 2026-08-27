@@ -28,6 +28,17 @@ export type DaemonChildExitObserver = {
   stop(options?: { destroyStderr?: boolean }): void
 }
 
+function appendStderrTail(current: Buffer, chunk: Buffer, maxBytes: number): Buffer {
+  if (maxBytes <= 0) {
+    return Buffer.alloc(0)
+  }
+  if (chunk.length >= maxBytes) {
+    return Buffer.from(chunk.subarray(-maxBytes))
+  }
+  const currentBytes = Math.min(current.length, maxBytes - chunk.length)
+  return Buffer.concat([current.subarray(-currentBytes), chunk], currentBytes + chunk.length)
+}
+
 export function observeDaemonChildExit(
   child: ObservableDaemonChild,
   recordExit: (observation: DaemonChildExitObservation) => void,
@@ -42,7 +53,7 @@ export function observeDaemonChildExit(
 
   const onStderr = (chunk: Buffer | string): void => {
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
-    stderrTail = Buffer.concat([stderrTail, bytes]).subarray(-maxStderrBytes)
+    stderrTail = appendStderrTail(stderrTail, bytes, maxStderrBytes)
   }
   const onStderrError = (): void => {}
   const finalizeExit = (): void => {
