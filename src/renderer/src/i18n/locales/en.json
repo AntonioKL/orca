@@ -6875,7 +6875,7 @@
             "defaultViewTerminal": "Terminal chat",
             "defaultViewNative": "Chat UI",
             "structuredTitle": "Use updated structured native chat",
-            "structuredCopy": "Opt in to the host-owned structured Codex runtime. Off keeps the existing terminal-backed chat path.",
+            "structuredCopy": "Opt in to the host-owned structured Claude and Codex runtimes. Off keeps the existing terminal-backed chat path.",
             "structuredScope": "Local macOS and Linux sessions only for now. Windows, WSL, remote, and SSH sessions continue to use terminal chat.",
             "structuredToggleLabel": "Toggle updated structured native chat"
           },
@@ -16064,8 +16064,8 @@
         "contextMenu": {
           "copy": "Copy"
         },
-        "structuredSessionLaunchStarting": "Opening Codex chat…",
-        "structuredSessionLaunchInProgress": "Codex chat is still opening"
+        "structuredSessionLaunchStarting": "Opening {{providerLabel}} chat…",
+        "structuredSessionLaunchInProgress": "{{providerLabel}} chat is still opening"
       },
       "orca": {
         "profiles": {
@@ -16507,7 +16507,8 @@
         "command": "orca orchestration check"
       },
       "structuredSessionCloseFailed": "Could not close this Codex chat",
-      "structuredSessionLaunchFailed": "Could not open Codex chat",
+      "structuredSessionLaunchFailed": "Could not open {{providerLabel}} chat",
+      "structuredSessionLaunchTerminalAction": "Open terminal agent",
       "structuredSessionCloseFailedDescription": "The terminal stayed open so the provider remains recoverable."
     },
     "tab": {

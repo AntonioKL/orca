@@ -2,6 +2,7 @@ import type {
   AgentSessionAttachResult,
   AgentSessionMutationResult
 } from '../../../shared/agent-session-wire'
+import type { AgentSessionHandleProvider } from '../../../shared/agent-session-provider-handle'
 import {
   createStructuredAgentSessionOperationId,
   structuredAgentSessionPayloadFingerprint
@@ -16,13 +17,13 @@ import {
 } from '@/runtime/web-session-focus-intent'
 import { LOCAL_STRUCTURED_SESSION_OWNER } from '@/runtime/local-structured-session-tabs-sync'
 
-function newSessionId(agent: 'claude' | 'codex'): string {
+function newSessionId(agent: AgentSessionHandleProvider): string {
   return `${agent}_${crypto.randomUUID().replaceAll('-', '_')}`
 }
 
 export async function launchStructuredAgentSession(
   worktreeId: string,
-  agent: 'claude' | 'codex'
+  agent: AgentSessionHandleProvider
 ): Promise<string> {
   const sessionId = newSessionId(agent)
   const fields = { worktree: toRuntimeWorktreeSelector(worktreeId), agent }
@@ -64,8 +65,4 @@ export async function launchStructuredAgentSession(
     )
     throw error
   }
-}
-
-export function launchStructuredCodexSession(worktreeId: string): Promise<string> {
-  return launchStructuredAgentSession(worktreeId, 'codex')
 }

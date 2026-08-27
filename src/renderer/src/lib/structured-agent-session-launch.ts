@@ -1,7 +1,9 @@
 import { toast } from 'sonner'
-import { launchStructuredCodexSession } from '@/lib/launch-structured-codex-session'
+import { launchStructuredAgentSession } from '@/lib/launch-structured-agent-session'
 import { refreshLocalStructuredSessionTabs } from '@/runtime/local-structured-session-tabs-sync'
 import { translate } from '@/i18n/i18n'
+import type { AgentSessionHandleProvider } from '../../../shared/agent-session-provider-handle'
+import { agentSessionProviderLabel } from '../../../shared/agent-session-provider-label'
 
 type StructuredLaunchState = {
   promise: Promise<string>
@@ -9,29 +11,30 @@ type StructuredLaunchState = {
   visibilityUnknown: boolean
 }
 
-const pendingStructuredLaunchesByWorktree = new Map<string, StructuredLaunchState>()
+const pendingStructuredLaunchesByKey = new Map<string, StructuredLaunchState>()
+
+function structuredLaunchKey(worktreeId: string, agent: AgentSessionHandleProvider): string {
+  return JSON.stringify([worktreeId, agent])
+}
 
 function trackLaunchSettlement(
-  worktreeId: string,
+  key: string,
   state: StructuredLaunchState,
   promise: Promise<string>
 ): void {
   void promise.then(
     () => {
-      if (
-        state.promise === promise &&
-        pendingStructuredLaunchesByWorktree.get(worktreeId) === state
-      ) {
-        pendingStructuredLaunchesByWorktree.delete(worktreeId)
+      if (state.promise === promise && pendingStructuredLaunchesByKey.get(key) === state) {
+        pendingStructuredLaunchesByKey.delete(key)
       }
     },
     () => {
       if (
         state.promise === promise &&
         !state.visibilityUnknown &&
-        pendingStructuredLaunchesByWorktree.get(worktreeId) === state
+        pendingStructuredLaunchesByKey.get(key) === state
       ) {
-        pendingStructuredLaunchesByWorktree.delete(worktreeId)
+        pendingStructuredLaunchesByKey.delete(key)
       }
     }
   )
@@ -50,8 +53,12 @@ async function verifyPublishedSession(worktreeId: string, sessionId: string): Pr
   return sessionId
 }
 
-function launchStructuredCodexSessionOnce(worktreeId: string): Promise<string> {
-  const existing = pendingStructuredLaunchesByWorktree.get(worktreeId)
+function launchStructuredAgentSessionOnce(
+  worktreeId: string,
+  agent: AgentSessionHandleProvider
+): Promise<string> {
+  const key = structuredLaunchKey(worktreeId, agent)
+  const existing = pendingStructuredLaunchesByKey.get(key)
   if (existing) {
     if (existing.visibilityUnknown && existing.sessionId) {
       existing.visibilityUnknown = false
@@ -59,7 +66,7 @@ function launchStructuredCodexSessionOnce(worktreeId: string): Promise<string> {
         existing.visibilityUnknown = true
         throw error
       })
-      trackLaunchSettlement(worktreeId, existing, existing.promise)
+      trackLaunchSettlement(key, existing, existing.promise)
     }
     return existing.promise
   }
@@ -70,7 +77,7 @@ function launchStructuredCodexSessionOnce(worktreeId: string): Promise<string> {
     promise: Promise.resolve(''),
     visibilityUnknown: false
   }
-  state.promise = launchStructuredCodexSession(worktreeId)
+  state.promise = launchStructuredAgentSession(worktreeId, agent)
     .then((sessionId) => {
       state.sessionId = sessionId
       return verifyPublishedSession(worktreeId, sessionId)
@@ -81,28 +88,46 @@ function launchStructuredCodexSessionOnce(worktreeId: string): Promise<string> {
       }
       throw error
     })
-  pendingStructuredLaunchesByWorktree.set(worktreeId, state)
-  trackLaunchSettlement(worktreeId, state, state.promise)
+  pendingStructuredLaunchesByKey.set(key, state)
+  trackLaunchSettlement(key, state, state.promise)
   return state.promise
 }
 
-export function startStructuredCodexLaunch(worktreeId: string): void {
-  const alreadyOpening = pendingStructuredLaunchesByWorktree.has(worktreeId)
+export function startStructuredAgentLaunch(
+  worktreeId: string,
+  agent: AgentSessionHandleProvider,
+  openTerminalAgent: () => void
+): void {
+  const alreadyOpening = pendingStructuredLaunchesByKey.has(structuredLaunchKey(worktreeId, agent))
+  const providerLabel = agentSessionProviderLabel(agent)
   toast.message(
     translate(
       alreadyOpening
         ? 'auto.components.nativeChat.structuredSessionLaunchInProgress'
         : 'auto.components.nativeChat.structuredSessionLaunchStarting',
-      alreadyOpening ? 'Codex chat is still opening' : 'Opening Codex chat…'
+      alreadyOpening
+        ? '{{providerLabel}} chat is still opening'
+        : 'Opening {{providerLabel}} chat…',
+      { providerLabel }
     )
   )
-  void launchStructuredCodexSessionOnce(worktreeId).catch((error) => {
+  void launchStructuredAgentSessionOnce(worktreeId, agent).catch((error) => {
     toast.error(
       translate(
         'components.native-chat.structuredSessionLaunchFailed',
-        'Could not open Codex chat'
+        'Could not open {{providerLabel}} chat',
+        { providerLabel }
       ),
-      { description: error instanceof Error ? error.message : String(error) }
+      {
+        description: error instanceof Error ? error.message : String(error),
+        action: {
+          label: translate(
+            'components.native-chat.structuredSessionLaunchTerminalAction',
+            'Open terminal agent'
+          ),
+          onClick: openTerminalAgent
+        }
+      }
     )
   })
 }

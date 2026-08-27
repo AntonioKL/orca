@@ -30,7 +30,8 @@ import { getConnectionIdFromState } from '@/lib/connection-context'
 import { resolveInitialNativeChatSessionOptions } from '@/components/native-chat/native-chat-launch-session-options'
 import { seedNativeChatAppliedSessionOptions } from '@/components/native-chat/native-chat-session-option-cache'
 import { canUseStructuredNativeChat } from '@/lib/structured-native-chat-availability'
-import { startStructuredCodexLaunch } from '@/lib/structured-agent-session-launch'
+import { startStructuredAgentLaunch } from '@/lib/structured-agent-session-launch'
+import { isAgentSessionHandleProvider } from '../../../shared/agent-session-provider-handle'
 
 export type LaunchAgentInNewTabArgs = {
   agent: TuiAgent
@@ -80,6 +81,13 @@ export function shouldQueueTerminalFocusAfterMenuClose(
  * Returns `null` when no startup plan can be built (e.g. a whitespace-only prompt).
  */
 export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentInNewTabResult {
+  return launchAgentInNewTabWithStructuredEligibility(args, true)
+}
+
+function launchAgentInNewTabWithStructuredEligibility(
+  args: LaunchAgentInNewTabArgs,
+  allowStructuredLaunch: boolean
+): LaunchAgentInNewTabResult {
   const {
     agent,
     worktreeId,
@@ -184,12 +192,15 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
   }
 
   const launchDirectStructuredChat =
-    agent === 'codex' &&
+    allowStructuredLaunch &&
+    isAgentSessionHandleProvider(agent) &&
     !hasPrompt &&
     store.settings?.experimentalNativeChat === true &&
     canUseStructuredNativeChat(store, worktreeId)
   if (launchDirectStructuredChat) {
-    startStructuredCodexLaunch(worktreeId)
+    startStructuredAgentLaunch(worktreeId, agent, () => {
+      launchAgentInNewTabWithStructuredEligibility(args, false)
+    })
     return {
       tabId: null,
       startupPlan,

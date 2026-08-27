@@ -241,6 +241,9 @@ describe('ExperimentalPane', () => {
 
     expect(container.textContent).toContain('Use updated structured native chat')
     expect(container.textContent).toContain(
+      'Opt in to the host-owned structured Claude and Codex runtimes. Off keeps the existing terminal-backed chat path.'
+    )
+    expect(container.textContent).toContain(
       'Local macOS and Linux sessions only for now. Windows, WSL, remote, and SSH sessions continue to use terminal chat.'
     )
     expect(container.textContent).toContain('Chat UI')
