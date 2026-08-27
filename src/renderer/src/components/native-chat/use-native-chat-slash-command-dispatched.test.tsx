@@ -34,7 +34,7 @@ describe('useNativeChatSlashCommandDispatched', () => {
       const hook = render(agent)
       act(() => hook.result.current('/resume'))
 
-      expect(onSwitchToTerminal).toHaveBeenCalledTimes(1)
+      expect(onSwitchToTerminal).toHaveBeenCalledWith(agent)
     }
   )
 

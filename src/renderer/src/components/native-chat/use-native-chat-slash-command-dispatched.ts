@@ -32,7 +32,7 @@ export function useNativeChatSlashCommandDispatched(args: {
   agent: AgentType
   commandMarkerScope: NativeChatCommandMarkerScope
   setCommandMarkers: Dispatch<SetStateAction<NativeChatCommandMarker[]>>
-  onSwitchToTerminal?: () => void
+  onSwitchToTerminal?: (agent: AgentType) => void
 }): (command: string, settled?: Promise<void>, cancelled?: () => boolean) => void {
   const { agent, commandMarkerScope, setCommandMarkers, onSwitchToTerminal } = args
   return useCallback(
@@ -45,7 +45,7 @@ export function useNativeChatSlashCommandDispatched(args: {
         if (cancelled?.()) {
           return
         }
-        onSwitchToTerminal?.()
+        onSwitchToTerminal?.(agent)
       }
       if (settled) {
         void settled.then(reveal, reveal)

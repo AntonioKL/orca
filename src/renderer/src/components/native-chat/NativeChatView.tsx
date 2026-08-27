@@ -159,6 +159,10 @@ function NativeChatResolvedView({
     (s) => s.agentStatusByPaneKey[paneKey]?.stateStartedAt ?? null
   )
   const canSend = useNativeChatCanSend(targetPtyId)
+  const switchToTerminal = useCallback(
+    () => onSwitchToTerminal?.(agent),
+    [agent, onSwitchToTerminal]
+  )
   // Reuse the verified composer send path for interactive cards and composer
   // stop (Stop sends ESC, the agent-TUI interrupt key).
   const interactiveSend = useNativeChatInteractiveSend(terminalTabId, paneKey, targetPtyId, agent)
@@ -181,7 +185,7 @@ function NativeChatResolvedView({
   })
   const contextMenu = useNativeChatContextMenu({
     rootRef,
-    onSwitchToTerminal,
+    onSwitchToTerminal: switchToTerminal,
     actions: {
       onPaste: pasteClipboardIntoComposer,
       ...(contextMenuActions ?? emptyNativeChatContextMenuActions)
@@ -447,7 +451,7 @@ function NativeChatResolvedView({
           onOptimisticSend={onOptimisticSend}
           onOptimisticSendCanceled={onOptimisticSendCanceled}
           onSlashCommand={onSlashCommand}
-          onSwitchToTerminal={onSwitchToTerminal}
+          onSwitchToTerminal={switchToTerminal}
           readTerminalScreen={readTerminalScreen}
           {...launchDraftSignal}
         />

@@ -83,14 +83,13 @@ vi.mock('./native-chat-runtime-send', () => ({
   submitNativeChatPrompt: vi.fn()
 }))
 vi.mock('./native-chat-send-settlement', () => ({
-  waitForNativeChatSendQueueIdle: (...args: unknown[]) =>
-    mocks.waitForNativeChatSendQueueIdle(...args),
   trackNativeSend: (...args: unknown[]) => mocks.trackNativeSend(...args),
-  notifyNativeChatSlashCommand: (
+  reportNativeChatCommand: (
     onSlashCommand: ((command: string, settled?: Promise<void>) => void) | undefined,
     command: string,
-    settled?: Promise<void>
-  ) => onSlashCommand?.(command, settled)
+    ptyId: string,
+    handle: { settled?: Promise<void> } | null
+  ) => onSlashCommand?.(command, mocks.waitForNativeChatSendQueueIdle(ptyId, handle?.settled))
 }))
 vi.mock('./claude-model-switch-confirmation', () => ({
   createClaudeModelSwitchConfirmationObserver: (...args: unknown[]) =>

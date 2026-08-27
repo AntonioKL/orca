@@ -8,11 +8,7 @@ import {
   sendNativeChatMessageWithImageAttachments,
   submitNativeChatPrompt
 } from './native-chat-runtime-send'
-import {
-  notifyNativeChatSlashCommand,
-  trackNativeSend,
-  waitForNativeChatSendQueueIdle
-} from './native-chat-send-settlement'
+import { reportNativeChatCommand, trackNativeSend } from './native-chat-send-settlement'
 import type { NativeChatSendHandle } from './native-chat-runtime-send'
 import { resolveNativeChatLaunchDraftSend } from './native-chat-launch-draft-send'
 import { getVerifiedNativeChatCommands } from '../../../../shared/native-chat-agent-profiles'
@@ -286,13 +282,7 @@ export const NativeChatComposer = forwardRef<NativeChatComposerHandle, NativeCha
       if (classification !== 'chat') {
         trackNativeSend(pendingHandle, trackPendingSend)
         if (classification === 'command') {
-          const settled = waitForNativeChatSendQueueIdle(target.ptyId, pendingHandle?.settled)
-          notifyNativeChatSlashCommand(
-            onSlashCommand,
-            text.trim(),
-            settled,
-            pendingHandle?.cancelled
-          )
+          reportNativeChatCommand(onSlashCommand, text.trim(), target.ptyId, pendingHandle)
           sessionOptionsSurface?.recordOutgoingCommand(text.trim())
         }
       } else {
