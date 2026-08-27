@@ -115,10 +115,13 @@ import {
 import { waitForStructuredTuiExitProof } from './structured-tui-exit-proof'
 import { readStructuredTuiProcessIdentity } from './structured-tui-process-identity'
 import {
-  readClaudeTranscriptLeafUuid,
+  readClaudeTranscriptBranchProof,
   resolveSessionFilePath
 } from '../native-chat/session-file-resolver'
-import { ClaudeTranscriptTailIncompleteError } from '../claude/claude-transcript-branch-proof'
+import {
+  ClaudeTranscriptTailIncompleteError,
+  type ClaudeTranscriptBranchProof
+} from '../claude/claude-transcript-branch-proof'
 import { hasStructuredTuiIdleEvidence } from './structured-tui-idle-evidence'
 import { evaluateStructuredTuiRecoveryClaim } from './structured-tui-recovery-claim-match'
 import { getProfileUserDataPath } from '../orca-profiles/profile-storage-paths'
@@ -12017,7 +12020,7 @@ export class OrcaRuntimeService {
     /** Set when this call launched a new Claude process; a cached transcript marker is not enough. */
     spawnToken?: string
     minimumProviderSessionReceivedAt?: number
-  }): Promise<{ transcriptPath: string; leafUuid: string }> {
+  }): Promise<{ transcriptPath: string } & ClaudeTranscriptBranchProof> {
     const deadline = Date.now() + 15_000
     let incompleteTail: ClaudeTranscriptTailIncompleteError | null = null
     while (Date.now() < deadline) {
@@ -12052,12 +12055,12 @@ export class OrcaRuntimeService {
           throw new Error('The Claude terminal reported a transcript outside its account root.')
         }
         try {
-          const leafUuid = await readClaudeTranscriptLeafUuid(
+          const proof = await readClaudeTranscriptBranchProof(
             transcriptPath,
             input.sessionId,
             input.previousLeafUuid
           )
-          return { transcriptPath, leafUuid }
+          return { transcriptPath, ...proof }
         } catch (error) {
           if (!(error instanceof ClaudeTranscriptTailIncompleteError)) {
             throw error

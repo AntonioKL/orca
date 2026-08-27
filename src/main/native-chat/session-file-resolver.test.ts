@@ -1,10 +1,14 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ClaudeTranscriptTailIncompleteError } from '../claude/claude-transcript-branch-proof'
-import { readClaudeTranscriptLeafUuid, resolveSessionFilePath } from './session-file-resolver'
+import {
+  readClaudeTranscriptBranchProof,
+  readClaudeTranscriptLeafUuid,
+  resolveSessionFilePath
+} from './session-file-resolver'
 
 let tempRoots: string[] = []
 
@@ -82,7 +86,7 @@ describe('resolveSessionFilePath', () => {
     )
   })
 
-  it('refuses a Claude marker on a sibling branch', async () => {
+  it('accepts and reports a Claude marker on a sibling branch', async () => {
     const root = await makeRoot('orca-native-chat-resolve-claude-sibling-')
     const transcript = join(root, 'session.jsonl')
     await writeFile(
@@ -98,9 +102,26 @@ describe('resolveSessionFilePath', () => {
       'utf8'
     )
 
-    await expect(readClaudeTranscriptLeafUuid(transcript, 'session-1', 'expected')).rejects.toThrow(
-      'sibling branch'
-    )
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      await expect(readClaudeTranscriptLeafUuid(transcript, 'session-1', 'expected')).resolves.toBe(
+        'sibling'
+      )
+      const proof = await readClaudeTranscriptBranchProof(transcript, 'session-1', 'expected')
+      expect(proof.leafUuid).toBe('sibling')
+      expect(proof.relation).toBe('sibling')
+      expect(warn).toHaveBeenCalledWith(
+        '[claude-transcript-branch] sibling branch observed',
+        expect.objectContaining({
+          sessionId: 'session-1',
+          previousLeafUuid: 'expected',
+          leafUuid: 'sibling',
+          transcriptPath: transcript
+        })
+      )
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it('refuses missing and cyclic Claude parent chains', async () => {

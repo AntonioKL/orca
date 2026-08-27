@@ -17,7 +17,10 @@ import {
 import { toHostReadableTranscriptPath, wslCodexSessionsDirs } from './host-readable-transcript-path'
 import { findWslCodexSessionPath } from './wsl-codex-session-path-scan'
 import { wslTranscriptFsRefusal, type WslTranscriptFsError } from './wsl-transcript-fs-gate'
-import { proveClaudeTranscriptBranch } from '../claude/claude-transcript-branch-proof'
+import {
+  proveClaudeTranscriptBranch,
+  type ClaudeTranscriptBranchProof
+} from '../claude/claude-transcript-branch-proof'
 
 // Why: these mirror the path constants in ai-vault/session-scanner.ts. Reads
 // run in the main process against the runtime's own home directory; over SSH
@@ -131,12 +134,30 @@ export async function readClaudeTranscriptLeafUuid(
   previousLeafUuid: string | null = null
 ): Promise<string> {
   return (
-    await proveClaudeTranscriptBranch({
-      transcriptPath,
-      providerSessionId,
-      previousLeafUuid
-    })
+    await readClaudeTranscriptBranchProof(transcriptPath, providerSessionId, previousLeafUuid)
   ).leafUuid
+}
+
+/** Read Claude's branch marker and retain concurrency evidence for callers. */
+export async function readClaudeTranscriptBranchProof(
+  transcriptPath: string,
+  providerSessionId: string,
+  previousLeafUuid: string | null = null
+): Promise<ClaudeTranscriptBranchProof> {
+  const proof = await proveClaudeTranscriptBranch({
+    transcriptPath,
+    providerSessionId,
+    previousLeafUuid
+  })
+  if (proof.relation === 'sibling') {
+    console.warn('[claude-transcript-branch] sibling branch observed', {
+      sessionId: providerSessionId,
+      previousLeafUuid,
+      leafUuid: proof.leafUuid,
+      transcriptPath
+    })
+  }
+  return proof
 }
 
 async function resolveSessionFileById(
