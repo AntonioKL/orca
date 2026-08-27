@@ -8,6 +8,7 @@ import {
   RECOVER_DESTINATION_AUTH_COMMAND,
   RESOLVE_LEGACY_HOME_SCRIPT,
   RETIRED_SESSION_BRIDGE_COMMAND,
+  RETIRED_RECENT_SESSION_BRIDGE_COMMAND,
   ROLLBACK_SESSION_LINKS_FUNCTION
 } from './legacy-wsl-runtime-auth-drain-shell-commands'
 
@@ -93,6 +94,7 @@ destination_recovery_path="$3.orca-drain-destination-path"
 session_link_manifest="$3.orca-drain-session-links"
 session_commit_marker="$3.orca-drain-session-commit"
 session_stage_root="$3.orca-drain-session-stage"
+session_scan_watermark="$3.orca-drain-session-watermark"
 ${ROLLBACK_SESSION_LINKS_FUNCTION}
 if [ -e "$3" ] || [ -L "$3" ]; then
   [ -f "$3" ] && [ ! -L "$3" ] || exit 46
@@ -134,6 +136,7 @@ temporary_destination_snapshot="$target_auth.orca-drain-snapshot-$$"
 temporary_destination_path="$3.orca-drain-destination-path-$$"
 temporary_source_snapshot="$3.orca-drain-source-$$"
 temporary_marker="$3.orca-drain-$$"
+temporary_session_scan_watermark="$session_scan_watermark.$$"
 drain_marker="$3"
 expected_source_hash="$5"
 cleanup() {
@@ -171,7 +174,7 @@ cleanup() {
   if [ -f "$target_auth" ]; then
     chmod 600 "$target_auth" || :
   fi
-  rm -f -- "$temporary_auth" "$temporary_credentials" "$temporary_previous_auth" "$temporary_destination_auth" "$temporary_source_auth" "$temporary_destination_snapshot" "$temporary_destination_path" "$temporary_source_snapshot" "$temporary_marker"
+  rm -f -- "$temporary_auth" "$temporary_credentials" "$temporary_previous_auth" "$temporary_destination_auth" "$temporary_source_auth" "$temporary_destination_snapshot" "$temporary_destination_path" "$temporary_source_snapshot" "$temporary_marker" "$temporary_session_scan_watermark"
 }
 trap cleanup EXIT HUP INT TERM
 source_credentials="$legacy_home/.credentials.json"
@@ -205,7 +208,8 @@ if [ "$7" = 1 ]; then
   fi
   rm -- "$temporary_previous_auth"
 fi
-if [ "$8" != 1 ] && [ "\${10}" = 1 ]; then
+if [ "$8" != 1 ]; then
+  session_scan_day=$(date +%Y/%m/%d) || exit 46
   expected_target_hash="$6"
   [ "$7" != 1 ] || expected_target_hash="$5"
   # Keep both live auth inodes observable while links are staged, then prove
@@ -216,13 +220,29 @@ if [ "$8" != 1 ] && [ "\${10}" = 1 ]; then
   [ "$(hash_file "$temporary_destination_auth")" = "$expected_target_hash" ] || exit 45
   [ "$source_auth" -ef "$temporary_source_auth" ] || exit 40
   [ "$target_auth" -ef "$temporary_destination_auth" ] || exit 45
-  ${RETIRED_SESSION_BRIDGE_COMMAND}
+  if [ "\${10}" = full ]; then
+    ${RETIRED_SESSION_BRIDGE_COMMAND}
+  elif [ "\${10}" = recent ]; then
+    session_scan_start=''
+    if [ -f "$session_scan_watermark" ] && [ ! -L "$session_scan_watermark" ]; then
+      IFS= read -r session_scan_start < "$session_scan_watermark" || session_scan_start=''
+    fi
+    case "$session_scan_start" in
+      ????/??/??) ${RETIRED_RECENT_SESSION_BRIDGE_COMMAND} ;;
+      *) ${RETIRED_SESSION_BRIDGE_COMMAND} ;;
+    esac
+  else
+    exit 46
+  fi
   [ "$(hash_file "$temporary_source_auth")" = "$5" ] || exit 40
   [ "$(hash_file "$temporary_destination_auth")" = "$expected_target_hash" ] || exit 45
   [ "$source_auth" -ef "$temporary_source_auth" ] || exit 40
   [ "$target_auth" -ef "$temporary_destination_auth" ] || exit 45
   rm -- "$temporary_source_auth" "$temporary_destination_auth"
   commit_session_links
+  printf '%s\n' "$session_scan_day" > "$temporary_session_scan_watermark"
+  chmod 600 "$temporary_session_scan_watermark"
+  mv -f -- "$temporary_session_scan_watermark" "$session_scan_watermark"
 fi
 if [ "$8" = 1 ]; then
   expected_target_hash="$6"

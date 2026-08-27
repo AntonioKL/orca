@@ -1,16 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { runWslProcessMock, startWslCodexSessionBridgeInBackgroundMock } = vi.hoisted(() => ({
-  runWslProcessMock: vi.fn(),
-  startWslCodexSessionBridgeInBackgroundMock: vi.fn(() => Promise.resolve())
-}))
+const { runWslProcessMock } = vi.hoisted(() => ({ runWslProcessMock: vi.fn() }))
 
 vi.mock('../wsl/wsl-runner', () => ({
   runWslProcess: runWslProcessMock
-}))
-
-vi.mock('../codex/wsl-codex-session-bridge', () => ({
-  startWslCodexSessionBridgeInBackground: startWslCodexSessionBridgeInBackgroundMock
 }))
 
 import {
@@ -45,7 +38,6 @@ function result(code: number, stdout = '') {
 describe('legacy WSL runtime auth drain', () => {
   beforeEach(() => {
     runWslProcessMock.mockReset()
-    startWslCodexSessionBridgeInBackgroundMock.mockClear()
     _internals.resetDrainQueue()
   })
 
@@ -73,7 +65,7 @@ describe('legacy WSL runtime auth drain', () => {
       '1',
       '0',
       'missing',
-      '1'
+      'full'
     ])
     expect(runWslProcessMock.mock.calls[1]?.[0].script).toContain('readlink -f')
     expect(runWslProcessMock.mock.calls[1]?.[0].script).toContain('source_credentials=')
@@ -97,7 +89,12 @@ describe('legacy WSL runtime auth drain', () => {
     })
 
     expect(runWslProcessMock).toHaveBeenCalledTimes(2)
-    expect(runWslProcessMock.mock.calls[1]?.[0].args.slice(-4)).toEqual(['0', '0', 'missing', '1'])
+    expect(runWslProcessMock.mock.calls[1]?.[0].args.slice(-4)).toEqual([
+      '0',
+      '0',
+      'missing',
+      'full'
+    ])
   })
 
   it('refuses a source with no unique destination', async () => {
@@ -128,7 +125,12 @@ describe('legacy WSL runtime auth drain', () => {
       })
     })
 
-    expect(runWslProcessMock.mock.calls[1]?.[0].args.slice(-4)).toEqual(['0', '1', 'missing', '1'])
+    expect(runWslProcessMock.mock.calls[1]?.[0].args.slice(-4)).toEqual([
+      '0',
+      '1',
+      'missing',
+      'full'
+    ])
     expect(runWslProcessMock.mock.calls[1]?.[0].timeoutMs).toBe(30_000)
   })
 
@@ -243,7 +245,7 @@ describe('legacy WSL runtime auth drain', () => {
     expect(runWslProcessMock).toHaveBeenCalledTimes(1)
   })
 
-  it('does not block sequential pending launches on repeated session walks', async () => {
+  it('bounds sequential pending launches to recent session dates', async () => {
     runWslProcessMock.mockImplementation((options: { script: string }) =>
       Promise.resolve(
         options.script === _internals.inspectLegacyAuthScript
@@ -272,13 +274,8 @@ describe('legacy WSL runtime auth drain', () => {
       ([call]) => call.script === _internals.applyLegacyAuthScript
     )
     expect(applyCalls).toHaveLength(3)
-    expect(applyCalls.map(([call]) => call.args.at(-1))).toEqual(['1', '0', '1'])
+    expect(applyCalls.map(([call]) => call.args.at(-1))).toEqual(['full', 'recent', 'full'])
     expect(applyCalls.map(([call]) => call.timeoutMs)).toEqual([30_000, 5_000, 30_000])
-    expect(startWslCodexSessionBridgeInBackgroundMock).toHaveBeenCalledExactlyOnceWith({
-      distro: 'Ubuntu',
-      systemCodexHomePath: '/home/alice/.local/share/orca/codex-runtime-home/home',
-      managedCodexHomePath: '/home/alice/.local/share/orca/codex-accounts/account-1/home'
-    })
   })
 
   it('reads every candidate home in one bounded guest process', async () => {

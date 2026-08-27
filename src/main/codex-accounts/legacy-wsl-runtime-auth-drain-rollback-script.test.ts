@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   symlinkSync,
   writeFileSync
 } from 'node:fs'
@@ -17,7 +18,15 @@ const SOURCE_AUTH = '{"tokens":{"expires_at":2000}}\n'
 const TARGET_AUTH = '{"tokens":{"expires_at":1000}}\n'
 const SOURCE_CREDENTIALS = '{"server":{"access_token":"source"}}\n'
 const RETIRED_SESSION = '{"session":"retired"}\n'
-const SESSION_SEGMENTS = ['sessions', '2026', '08', '26', 'retired.jsonl']
+const LATER_SESSION = '{"session":"later"}\n'
+const now = new Date()
+const SESSION_SEGMENTS = [
+  'sessions',
+  String(now.getFullYear()),
+  String(now.getMonth() + 1).padStart(2, '0'),
+  String(now.getDate()).padStart(2, '0'),
+  'retired.jsonl'
+]
 
 function sha256(contents: string): string {
   return createHash('sha256').update(contents).digest('hex')
@@ -54,6 +63,10 @@ describe.skipIf(process.platform === 'win32')('legacy WSL auth drain rollback re
     const targetCredentialsPath = join(targetHome, '.credentials.json')
     const sourceSessionPath = join(legacyHome, ...SESSION_SEGMENTS)
     const targetSessionPath = join(targetHome, ...SESSION_SEGMENTS)
+    const laterSourceSessionPath = join(sourceSessionPath, '..', 'later.jsonl')
+    const laterTargetSessionPath = join(targetSessionPath, '..', 'later.jsonl')
+    const oldSourceSessionPath = join(legacyHome, 'sessions', '1999', '01', '01', 'old.jsonl')
+    const oldTargetSessionPath = join(targetHome, 'sessions', '1999', '01', '01', 'old.jsonl')
     mkdirSync(join(sourceSessionPath, '..'), { recursive: true })
     mkdirSync(targetHome)
     writeFileSync(markerPath, '{"completed":true}\n')
@@ -85,16 +98,32 @@ describe.skipIf(process.platform === 'win32')('legacy WSL auth drain rollback re
       )
     }
 
-    apply(sha256(TARGET_AUTH), '1', '0', '0')
+    apply(sha256(TARGET_AUTH), '1', '0', 'recent')
     expect(existsSync(sourceSessionPath)).toBe(true)
-    expect(existsSync(targetSessionPath)).toBe(false)
+    expect(readFileSync(targetSessionPath, 'utf8')).toBe(RETIRED_SESSION)
 
-    apply(sha256(SOURCE_AUTH), '0', '1', '1')
+    mkdirSync(join(oldSourceSessionPath, '..'), { recursive: true })
+    writeFileSync(laterSourceSessionPath, LATER_SESSION)
+    writeFileSync(oldSourceSessionPath, RETIRED_SESSION)
+    apply(sha256(SOURCE_AUTH), '0', '0', 'recent')
+    expect(readFileSync(laterTargetSessionPath, 'utf8')).toBe(LATER_SESSION)
+    expect(existsSync(oldTargetSessionPath)).toBe(false)
+
+    const watermarkPath = `${markerPath}.orca-drain-session-watermark`
+    const linkedWatermarkPath = join(root, 'linked-watermark')
+    writeFileSync(linkedWatermarkPath, '1999/01/01\n')
+    rmSync(watermarkPath)
+    symlinkSync(linkedWatermarkPath, watermarkPath)
+    apply(sha256(SOURCE_AUTH), '0', '0', 'recent')
+    expect(readFileSync(oldTargetSessionPath, 'utf8')).toBe(RETIRED_SESSION)
+
+    apply(sha256(SOURCE_AUTH), '0', '1', 'full')
 
     expect(existsSync(legacyAuthPath)).toBe(false)
     expect(readFileSync(targetAuthPath, 'utf8')).toBe(SOURCE_AUTH)
     expect(readFileSync(targetCredentialsPath, 'utf8')).toBe(SOURCE_CREDENTIALS)
     expect(readFileSync(targetSessionPath, 'utf8')).toBe(RETIRED_SESSION)
+    expect(readFileSync(oldTargetSessionPath, 'utf8')).toBe(RETIRED_SESSION)
     expect(existsSync(markerPath)).toBe(true)
   })
 

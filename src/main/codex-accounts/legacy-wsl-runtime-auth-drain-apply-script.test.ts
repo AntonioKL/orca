@@ -253,7 +253,7 @@ process.exit(result.status ?? 1)
         options.promoteAuth === false ? '0' : '1',
         options.deleteSource ? '1' : '0',
         options.sourceCredentials === undefined ? 'missing' : sha256(options.sourceCredentials),
-        '1'
+        'full'
       ],
       {
         encoding: 'utf8',

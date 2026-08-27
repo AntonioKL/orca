@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto'
 import { posix as pathPosix } from 'node:path'
 import { wslCodexRuntimeHomeForGuestHome } from '../pty/codex-home-wsl-env'
-import { startWslCodexSessionBridgeInBackground } from '../codex/wsl-codex-session-bridge'
 import { WSL_SESSION_BRIDGE_TIMEOUT_MS } from '../codex/wsl-codex-session-bridge-script'
 import { runWslProcess } from '../wsl/wsl-runner'
 import { compareCodexAuthFreshness, codexAuthIsFresher } from './codex-auth-identity'
@@ -121,7 +120,7 @@ export async function drainLegacyWslRuntimeAuth(
     destination.linuxHomePath,
     options.legacyPanePresent ? 'retained' : 'released'
   ].join('\0')
-  const bridgeSessions =
+  const bridgeAllSessions =
     deleteSource || pendingSessionBridgeRouteByDistro.get(distroKey) !== sessionBridgeRoute
   const result = await runWslProcess({
     distro: options.distro,
@@ -137,9 +136,9 @@ export async function drainLegacyWslRuntimeAuth(
       promoteAuth ? '1' : '0',
       deleteSource ? '1' : '0',
       inspected.credentials.kind === 'present' ? sha256(inspected.credentials.contents) : 'missing',
-      bridgeSessions ? '1' : '0'
+      bridgeAllSessions ? 'full' : 'recent'
     ],
-    timeoutMs: bridgeSessions ? WSL_SESSION_BRIDGE_TIMEOUT_MS : 5_000,
+    timeoutMs: bridgeAllSessions ? WSL_SESSION_BRIDGE_TIMEOUT_MS : 5_000,
     maxOutputBytes: 16 * 1024
   })
   try {
@@ -147,14 +146,8 @@ export async function drainLegacyWslRuntimeAuth(
   } catch {
     return recoverAfterFailedApply(options.distro, paths)
   }
-  if (!deleteSource && bridgeSessions) {
+  if (!deleteSource) {
     pendingSessionBridgeRouteByDistro.set(distroKey, sessionBridgeRoute)
-  } else if (!deleteSource) {
-    void startWslCodexSessionBridgeInBackground({
-      distro: options.distro,
-      systemCodexHomePath: paths.runtimeHome,
-      managedCodexHomePath: destination.linuxHomePath
-    })
   }
   return deleteSource ? 'complete' : 'pending'
 }
