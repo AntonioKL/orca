@@ -28,7 +28,7 @@ import {
 } from './skill-managed-install-groups'
 import { SkillInstallMachineSelect } from './SkillInstallMachineSelect'
 import { SkillInstallManagementStatus } from './SkillInstallManagementStatus'
-import { translate } from '@/i18n/i18n'
+import { getSkillInstallErrorMessage } from './skill-install-error-copy'
 
 export function SkillInstallManagementDialog({
   open,
@@ -91,12 +91,7 @@ export function SkillInstallManagementDialog({
         return
       }
       console.warn('[skills] managed install listing failed:', cause)
-      setError(
-        translate(
-          'auto.components.skills.install.inspectManagedFailed',
-          'Orca could not inspect managed installs on this machine.'
-        )
-      )
+      setError(getSkillInstallErrorMessage('inspectManagedFailed'))
     } finally {
       if (generation === loadGeneration.current) {
         setBusy(false)
@@ -126,10 +121,7 @@ export function SkillInstallManagementDialog({
       if (operation.status !== 'ok') {
         setError(
           operation.status === 'reconnect-required'
-            ? translate(
-                'auto.components.skills.install.reconnectForVersionHistory',
-                'Reconnect your Orca account to load version history.'
-              )
+            ? getSkillInstallErrorMessage('reconnectForVersionHistory')
             : operation.message
         )
         return
@@ -141,12 +133,7 @@ export function SkillInstallManagementDialog({
         return
       }
       console.warn('[skills] package history failed:', cause)
-      setError(
-        translate(
-          'auto.components.skills.install.versionHistoryUnavailable',
-          'Version history is unavailable for this skill.'
-        )
-      )
+      setError(getSkillInstallErrorMessage('versionHistoryUnavailable'))
     } finally {
       if (generation === detailGeneration.current) {
         setBusy(false)
@@ -182,12 +169,7 @@ export function SkillInstallManagementDialog({
           installedNames.has(skill.name)
         )
         if (selectedSkills.length === 0) {
-          setError(
-            translate(
-              'auto.components.skills.install.bundleSkillsMissing',
-              'This version does not contain any of the installed bundle skills.'
-            )
-          )
+          setError(getSkillInstallErrorMessage('bundleSkillsMissing'))
           return
         }
         const operation = await window.api.skills.installBundlePackageVersion({
@@ -212,10 +194,7 @@ export function SkillInstallManagementDialog({
         if (operation.status !== 'ok') {
           setError(
             operation.status === 'reconnect-required'
-              ? translate(
-                  'auto.components.skills.install.reconnectBeforeVersionChange',
-                  'Reconnect your Orca account before changing versions.'
-                )
+              ? getSkillInstallErrorMessage('reconnectBeforeVersionChange')
               : operation.message
           )
           return
@@ -241,10 +220,7 @@ export function SkillInstallManagementDialog({
       if (operation.status !== 'ok') {
         setError(
           operation.status === 'reconnect-required'
-            ? translate(
-                'auto.components.skills.install.reconnectBeforeVersionChange',
-                'Reconnect your Orca account before changing versions.'
-              )
+            ? getSkillInstallErrorMessage('reconnectBeforeVersionChange')
             : operation.message
         )
         return
@@ -258,12 +234,7 @@ export function SkillInstallManagementDialog({
       }
     } catch (cause) {
       console.warn('[skills] version installation failed:', cause)
-      setError(
-        translate(
-          'auto.components.skills.install.versionVerificationFailed',
-          'Orca could not verify the requested version.'
-        )
-      )
+      setError(getSkillInstallErrorMessage('versionVerificationFailed'))
     } finally {
       installProgress.finish()
       setBusy(false)
@@ -279,12 +250,7 @@ export function SkillInstallManagementDialog({
       ...(environmentId === 'local' || environmentId.startsWith('ssh:') ? {} : { environmentId })
     })
     if (!cancelled.cancelled) {
-      setError(
-        translate(
-          'auto.components.skills.install.destinationAlreadyFinished',
-          'The destination had already finished this installation.'
-        )
-      )
+      setError(getSkillInstallErrorMessage('destinationAlreadyFinished'))
     }
   }
 
@@ -329,12 +295,7 @@ export function SkillInstallManagementDialog({
       }
     } catch (cause) {
       console.warn('[skills] managed removal failed:', cause)
-      setError(
-        translate(
-          'auto.components.skills.install.removeFailed',
-          'Orca could not safely remove this skill.'
-        )
-      )
+      setError(getSkillInstallErrorMessage('removeFailed'))
     } finally {
       setBusy(false)
     }
