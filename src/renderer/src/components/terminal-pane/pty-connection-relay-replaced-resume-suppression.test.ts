@@ -166,14 +166,18 @@ function seedResumableSshPane(): void {
 }
 
 /** Fails the reattach the way a relay that no longer knows the PTY does, then lets the
- *  fallback run. `expiry` is the exact message main surfaces for that absence. */
+ *  fallback run. A string is the exact message main surfaces for that absence; an object is
+ *  the expiry the IPC transport reports as a result instead of a rejection. */
 async function runAbsenceFallback(
-  expiry: string
+  expiry: string | { relayReplaced: true }
 ): Promise<{ transport: MockTransport; deps: ReturnType<typeof createDeps> }> {
   const { connectPanePty } = await import('./pty-connection')
   const transport = createMockTransport('fresh-pty')
   transport.connect
     .mockImplementationOnce(async (options: { callbacks?: ConnectCallbacks }) => {
+      if (typeof expiry !== 'string') {
+        return { id: RESTORED_PTY_ID, sessionExpired: true, ...expiry }
+      }
       options.callbacks?.onError?.(expiry)
       return undefined
     })
@@ -233,6 +237,17 @@ describe('absence fallback after a relay daemon replacement', () => {
     expect(freshSpawn.launchConfig).toBeUndefined()
     expect(freshSpawn.launchToken).toBeUndefined()
     // ...and the pane says the agent did not come back.
+    expect(deps.onShowSessionRestoredBanner).toHaveBeenCalledWith(1, 'resume-unavailable')
+  })
+
+  it('declines the resume when the expiry arrives as a result rather than a rejection', async () => {
+    const { transport, deps } = await runAbsenceFallback({ relayReplaced: true })
+
+    expect(transport.connect).toHaveBeenCalledTimes(2)
+    const freshSpawn = transport.connect.mock.calls[1]?.[0] as Record<string, unknown>
+    expect(freshSpawn.launchAgent).toBeUndefined()
+    expect(freshSpawn.resumeProviderSession).toBeUndefined()
+    expect(freshSpawn.command).toBeUndefined()
     expect(deps.onShowSessionRestoredBanner).toHaveBeenCalledWith(1, 'resume-unavailable')
   })
 })
