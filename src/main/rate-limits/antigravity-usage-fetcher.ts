@@ -8,6 +8,7 @@ import {
   type AntigravityLogSource
 } from './antigravity-language-server-log'
 import { parseAntigravityQuotaSummary } from './antigravity-quota-summary'
+import { probeAntigravityQuotaInWsl } from './antigravity-wsl-usage-probe'
 
 const QUOTA_RPC_PATH = '/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary'
 const LOOPBACK_HOST = '127.0.0.1'
@@ -32,9 +33,13 @@ export type AntigravityQuotaTransport = (
  * Posts the empty Connect request the LanguageServer expects. The HTTPS port presents a
  * self-signed certificate; that exception is safe only because the request never leaves loopback.
  */
-export const requestAntigravityQuotaSummary: AntigravityQuotaTransport = (target, signal) =>
+export const requestAntigravityQuotaSummary = (
+  target: { scheme: 'http' | 'https'; port: number },
+  signal?: AbortSignal,
+  requestOverride?: typeof httpRequest
+): Promise<QuotaSummaryResponse> =>
   new Promise((resolve, reject) => {
-    const send = target.scheme === 'https' ? httpsRequest : httpRequest
+    const send = requestOverride ?? (target.scheme === 'https' ? httpsRequest : httpRequest)
     const req = send(
       {
         host: LOOPBACK_HOST,
@@ -47,11 +52,17 @@ export const requestAntigravityQuotaSummary: AntigravityQuotaTransport = (target
       },
       (res) => {
         let body = ''
+        let bodyBytes = 0
         let overflowed = false
         res.setEncoding('utf8')
         res.on('data', (chunk: string) => {
-          if (body.length + chunk.length > MAX_RESPONSE_BYTES) {
+          if (overflowed) {
+            return
+          }
+          bodyBytes += Buffer.byteLength(chunk, 'utf8')
+          if (bodyBytes > MAX_RESPONSE_BYTES) {
             overflowed = true
+            rejectWithCleanup(new Error('Antigravity quota response too large'))
             req.destroy()
             return
           }
@@ -136,12 +147,41 @@ function endpointTargets(
 
 export type AntigravityUsageFetchOptions = {
   signal?: AbortSignal
+  target?: { runtime: 'host' | 'wsl'; wslDistro: string | null }
   logSource?: AntigravityLogSource
   transport?: AntigravityQuotaTransport
 }
 
+function providerFromResponse(response: QuotaSummaryResponse): ProviderRateLimits {
+  if (isSignedOutResponse(response)) {
+    return unavailable(ANTIGRAVITY_SIGNED_OUT_REASON, 'missing-credentials')
+  }
+  if (response.statusCode !== 200) {
+    return failed(`Antigravity quota fetch failed (${response.statusCode})`, 'server')
+  }
+  let parsed: ReturnType<typeof parseAntigravityQuotaSummary>
+  try {
+    parsed = parseAntigravityQuotaSummary(JSON.parse(response.body))
+  } catch {
+    parsed = null
+  }
+  if (!parsed) {
+    return failed(ANTIGRAVITY_QUOTA_UNREADABLE_REASON, 'parse')
+  }
+  return {
+    provider: 'antigravity',
+    session: parsed.session,
+    weekly: parsed.weekly,
+    buckets: parsed.buckets,
+    updatedAt: Date.now(),
+    error: null,
+    status: 'ok',
+    usageMetadata: { source: 'cli' }
+  }
+}
+
 /**
- * Reads Antigravity quota from Antigravity's own host-local LanguageServer.
+ * Reads Antigravity quota from the LanguageServer on the selected host or WSL runtime.
  *
  * Why not the Gemini snapshot: the two products bill different pools, and `agy` keeps its token in
  * the OS keyring where no Gemini CLI credential file can describe it (#9122).
@@ -149,6 +189,16 @@ export type AntigravityUsageFetchOptions = {
 export async function fetchAntigravityRateLimits(
   options: AntigravityUsageFetchOptions = {}
 ): Promise<ProviderRateLimits> {
+  if (options.target?.runtime === 'wsl') {
+    const result = await probeAntigravityQuotaInWsl(options.target.wslDistro, options.signal)
+    if (result.kind === 'not-running') {
+      return unavailable(ANTIGRAVITY_NOT_RUNNING_REASON, 'cli-unavailable')
+    }
+    if (result.kind === 'unverifiable') {
+      return failed(result.reason, 'network')
+    }
+    return providerFromResponse(result)
+  }
   const logSource = options.logSource ?? createAntigravityLogSource()
   const transport = options.transport ?? requestAntigravityQuotaSummary
   const endpoints = await discoverAntigravityLanguageServers(logSource)
@@ -175,33 +225,7 @@ export async function fetchAntigravityRateLimits(
       // Why: a signed-out answer is a settled fact about the account, not a transient fault.
       // Falling through to an older `agy` here would resurrect the stale-account bug this
       // ordering exists to prevent — that process still holds the account it started with.
-      if (isSignedOutResponse(response)) {
-        return unavailable(ANTIGRAVITY_SIGNED_OUT_REASON, 'missing-credentials')
-      }
-      if (response.statusCode !== 200) {
-        return failed(`Antigravity quota fetch failed (${response.statusCode})`, 'server')
-      }
-      let parsed: ReturnType<typeof parseAntigravityQuotaSummary>
-      try {
-        parsed = parseAntigravityQuotaSummary(JSON.parse(response.body))
-      } catch {
-        parsed = null
-      }
-      // Why: an unreadable body is still the authoritative server answering; an older process
-      // runs the same build and would only return the same shape, from a staler account.
-      if (!parsed) {
-        return failed(ANTIGRAVITY_QUOTA_UNREADABLE_REASON, 'parse')
-      }
-      return {
-        provider: 'antigravity',
-        session: parsed.session,
-        weekly: parsed.weekly,
-        buckets: parsed.buckets,
-        updatedAt: Date.now(),
-        error: null,
-        status: 'ok',
-        usageMetadata: { source: 'cli' }
-      }
+      return providerFromResponse(response)
     }
   }
 

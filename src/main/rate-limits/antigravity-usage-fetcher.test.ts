@@ -1,7 +1,9 @@
 import { createServer } from 'node:http'
-import { getEventListeners } from 'node:events'
+import { EventEmitter, getEventListeners } from 'node:events'
+import type { ClientRequest, IncomingMessage, request as httpRequest } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { describe, expect, it, vi } from 'vitest'
+import { runWslProcess } from '../wsl/wsl-runner'
 import {
   ANTIGRAVITY_NOT_RUNNING_REASON,
   ANTIGRAVITY_SIGNED_OUT_REASON,
@@ -10,6 +12,8 @@ import {
   type AntigravityQuotaTransport
 } from './antigravity-usage-fetcher'
 import type { AntigravityLogSource } from './antigravity-language-server-log'
+
+vi.mock('../wsl/wsl-runner', () => ({ runWslProcess: vi.fn() }))
 
 /** Verbatim body `agy` 1.1.21 returns for a quota call while signed out — HTTP 500, not 401. */
 const SIGNED_OUT_BODY = JSON.stringify({
@@ -58,6 +62,45 @@ function runningServers(heads: Record<string, string>, alivePids?: number[]): An
 }
 
 describe('fetchAntigravityRateLimits', () => {
+  it('runs discovery and quota requests inside the selected WSL execution host', async () => {
+    vi.mocked(runWslProcess).mockResolvedValue({
+      environmentResolved: true,
+      code: 0,
+      stdout: `ORCA_AGY_RESPONSE 200\n${OK_BODY}`,
+      stderr: '',
+      timedOut: false
+    })
+
+    const limits = await fetchAntigravityRateLimits({
+      target: { runtime: 'wsl', wslDistro: 'Ubuntu' },
+      logSource: runningServers({})
+    } as never)
+
+    expect(runWslProcess).toHaveBeenCalledWith(
+      expect.objectContaining({ distro: 'Ubuntu', loginPath: 'preferred' })
+    )
+    expect(limits.status).toBe('ok')
+    expect(limits.session?.usedPercent).toBe(90)
+  })
+
+  it('does not report Agy absent when the WSL execution host cannot be verified', async () => {
+    vi.mocked(runWslProcess).mockResolvedValue({
+      environmentResolved: false,
+      code: 127,
+      stdout: '',
+      stderr: 'curl: not found',
+      timedOut: false
+    })
+
+    const limits = await fetchAntigravityRateLimits({
+      target: { runtime: 'wsl', wslDistro: 'Ubuntu' }
+    })
+
+    expect(limits.status).toBe('error')
+    expect(limits.usageMetadata?.failureKind).toBe('network')
+    expect(limits.usageMetadata?.failureKind).not.toBe('cli-unavailable')
+  })
+
   it('reports both Antigravity pools from the language server', async () => {
     const transport: AntigravityQuotaTransport = vi.fn(async () => ({
       statusCode: 200,
@@ -267,6 +310,35 @@ describe('fetchAntigravityRateLimits', () => {
 })
 
 describe('requestAntigravityQuotaSummary', () => {
+  it('rejects and removes its abort listener before destroying an oversized response', async () => {
+    const controller = new AbortController()
+    const response = Object.assign(new EventEmitter(), {
+      statusCode: 200,
+      setEncoding: vi.fn()
+    }) as unknown as IncomingMessage
+    const request = Object.assign(new EventEmitter(), {
+      destroy: vi.fn(),
+      end: vi.fn()
+    }) as unknown as ClientRequest
+    const send = vi.fn((_options, onResponse) => {
+      onResponse?.(response)
+      queueMicrotask(() => response.emit('data', 'x'.repeat(1024 * 1024 + 1)))
+      return request
+    }) as unknown as typeof httpRequest
+
+    const outcome = await Promise.race([
+      requestAntigravityQuotaSummary({ scheme: 'http', port: 61383 }, controller.signal, send).then(
+        () => 'resolved',
+        (error: unknown) => error
+      ),
+      new Promise<'pending'>((resolve) => setTimeout(() => resolve('pending'), 50))
+    ])
+
+    expect(outcome).toEqual(new Error('Antigravity quota response too large'))
+    expect(request.destroy).toHaveBeenCalledOnce()
+    expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0)
+  })
+
   it('removes its abort listener after the request settles', async () => {
     const server = createServer((_request, response) => {
       response.end('{}')

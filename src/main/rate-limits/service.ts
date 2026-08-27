@@ -233,6 +233,10 @@ export class RateLimitService {
     runtime: 'host',
     wslDistro: null
   }
+  private antigravityFetchTarget: RateLimitRuntimeTarget = {
+    runtime: 'host',
+    wslDistro: null
+  }
   private openCodeGoConfigResolver: (() => OpenCodeGoRateLimitConfig) | null = null
   private miniMaxConfigResolver: (() => MiniMaxRateLimitConfig) | null = null
   private geminiCliOAuthEnabledResolver: GeminiCliOAuthEnabledResolver | null = null
@@ -301,6 +305,13 @@ export class RateLimitService {
 
   setClaudeFetchTarget(target?: ClaudeAccountSelectionTarget): void {
     this.claudeFetchTarget = normalizeClaudeAccountSelectionTarget(target)
+  }
+
+  setAntigravityFetchTarget(target: RateLimitRuntimeTarget): void {
+    this.antigravityFetchTarget = {
+      runtime: target.runtime,
+      wslDistro: target.runtime === 'wsl' ? target.wslDistro : null
+    }
   }
 
   setOpenCodeGoConfigResolver(resolver: () => OpenCodeGoRateLimitConfig): void {
@@ -1729,7 +1740,7 @@ export class RateLimitService {
             groupId: miniMaxGroupId,
             models: miniMaxModels
           }),
-      fetchAntigravityRateLimits({ signal })
+      fetchAntigravityRateLimits({ signal, target: this.antigravityFetchTarget })
     ])
 
     if (signal.aborted) {

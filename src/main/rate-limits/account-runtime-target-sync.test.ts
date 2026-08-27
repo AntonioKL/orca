@@ -11,7 +11,8 @@ function createServiceTargets(
   return {
     getState: vi.fn(() => state),
     refreshClaudeForTarget: vi.fn(async () => state),
-    refreshCodexForTarget: vi.fn(async () => state)
+    refreshCodexForTarget: vi.fn(async () => state),
+    setAntigravityFetchTarget: vi.fn()
   }
 }
 
@@ -42,6 +43,7 @@ describe('createAccountRuntimeTargetSettingsSync', () => {
     expect(service.refreshClaudeForTarget).toHaveBeenCalledWith(expectedTarget)
     expect(service.refreshCodexForTarget).toHaveBeenCalledOnce()
     expect(service.refreshCodexForTarget).toHaveBeenCalledWith(expectedTarget)
+    expect(service.setAntigravityFetchTarget).toHaveBeenCalledWith(expectedTarget)
   })
 
   it('does no work for unrelated settings updates', async () => {
@@ -57,6 +59,7 @@ describe('createAccountRuntimeTargetSettingsSync', () => {
     expect(service.getState).not.toHaveBeenCalled()
     expect(service.refreshClaudeForTarget).not.toHaveBeenCalled()
     expect(service.refreshCodexForTarget).not.toHaveBeenCalled()
+    expect(service.setAntigravityFetchTarget).not.toHaveBeenCalled()
   })
 
   it('preserves a manual runtime when the settings-derived policy does not change', async () => {

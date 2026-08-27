@@ -3,10 +3,11 @@ import type { RateLimitState } from '../../shared/rate-limit-types'
 import type { RateLimitService } from './service'
 import { getInitialClaudeRateLimitTarget } from './claude-rate-limit-target'
 import { getInitialCodexRateLimitTarget } from './codex-rate-limit-target'
+import { resolveLocalAccountRuntimeTarget } from '../../shared/local-account-runtime'
 
 type AccountRuntimeRateLimitService = Pick<
   RateLimitService,
-  'getState' | 'refreshClaudeForTarget' | 'refreshCodexForTarget'
+  'getState' | 'refreshClaudeForTarget' | 'refreshCodexForTarget' | 'setAntigravityFetchTarget'
 >
 
 type RuntimeTarget = {
@@ -27,6 +28,7 @@ export function createAccountRuntimeTargetSettingsSync(
     }
 
     const nextSettingsTargets = getSettingsTargets(settings, platform)
+    rateLimits.setAntigravityFetchTarget(resolveLocalAccountRuntimeTarget(settings, platform))
     const claudePolicyChanged = !isSameTarget(settingsTargets.claude, nextSettingsTargets.claude)
     const codexPolicyChanged = !isSameTarget(settingsTargets.codex, nextSettingsTargets.codex)
     settingsTargets = nextSettingsTargets

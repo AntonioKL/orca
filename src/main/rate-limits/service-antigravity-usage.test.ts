@@ -99,6 +99,19 @@ describe('RateLimitService Antigravity usage', () => {
     vi.mocked(fetchCodexRateLimits).mockResolvedValue(okProvider('codex', 20))
   })
 
+  it('passes the selected WSL execution host to Antigravity discovery', async () => {
+    vi.mocked(fetchAntigravityRateLimits).mockResolvedValue(agyProvider(90, 50))
+    const service = new RateLimitService()
+    service.setAntigravityFetchTarget({ runtime: 'wsl', wslDistro: 'Ubuntu' })
+
+    await service.refresh()
+
+    expect(fetchAntigravityRateLimits).toHaveBeenCalledWith({
+      signal: expect.any(AbortSignal),
+      target: { runtime: 'wsl', wslDistro: 'Ubuntu' }
+    })
+  })
+
   // Why: this is the defect in #9122 — the Antigravity segment was `{...gemini, provider:
   // 'antigravity'}`, so it reported Gemini Code Assist per-model quota under an Antigravity label.
   it('publishes Agy-native quota instead of a copy of the Gemini snapshot', async () => {
