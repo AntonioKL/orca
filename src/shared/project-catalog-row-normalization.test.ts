@@ -151,6 +151,20 @@ describe('normalizeProjectRow', () => {
 })
 
 describe('row array normalization', () => {
+  it('repairs null rows without throwing', () => {
+    const setups = [null] as unknown as ProjectHostSetup[]
+    const projects = [null] as unknown as Project[]
+    expect(normalizeProjectHostSetupRows(setups)[0]).toMatchObject({
+      id: '',
+      repoId: '',
+      path: ''
+    })
+    expect(normalizeProjectRows(projects)[0]).toMatchObject({
+      id: '',
+      sourceRepoIds: []
+    })
+  })
+
   it('returns the input array when nothing needed repair', () => {
     const setups = [makeSetup(), makeSetup({ id: 'setup-2' })]
     expect(normalizeProjectHostSetupRows(setups)).toBe(setups)

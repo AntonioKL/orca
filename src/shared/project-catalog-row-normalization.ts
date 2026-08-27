@@ -18,64 +18,83 @@ import type { Project, ProjectHostSetup } from './project-types'
  * would silently change what a corrupt row claims about itself.
  */
 
-function isString(value: unknown): boolean {
+function isString(value: unknown): value is string {
   return typeof value === 'string'
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 // Why 0 and not now(): the catalog merge already reads 0 as "timestamp unknown", not as the epoch.
-function isTimestamp(value: unknown): boolean {
+function isTimestamp(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
+function stringValue(value: unknown, fallback = ''): string {
+  return isString(value) ? value : fallback
+}
+
+function timestampValue(value: unknown): number {
+  return isTimestamp(value) ? value : 0
+}
+
 export function normalizeProjectHostSetupRow(setup: ProjectHostSetup): ProjectHostSetup {
+  const row: Record<string, unknown> = isRecord(setup) ? setup : {}
   const needsRepair =
-    !isString(setup.id) ||
-    !isString(setup.projectId) ||
-    !isString(setup.hostId) ||
-    !isString(setup.repoId) ||
-    !isString(setup.path) ||
-    !isString(setup.displayName) ||
-    !isTimestamp(setup.createdAt) ||
-    !isTimestamp(setup.updatedAt)
+    !isString(row.id) ||
+    !isString(row.projectId) ||
+    !isString(row.hostId) ||
+    !isString(row.repoId) ||
+    !isString(row.path) ||
+    !isString(row.displayName) ||
+    !isTimestamp(row.createdAt) ||
+    !isTimestamp(row.updatedAt)
   if (!needsRepair) {
     return setup
   }
   return {
-    ...setup,
-    id: isString(setup.id) ? setup.id : '',
-    projectId: isString(setup.projectId) ? setup.projectId : '',
-    hostId: isString(setup.hostId) ? setup.hostId : LOCAL_EXECUTION_HOST_ID,
-    repoId: isString(setup.repoId) ? setup.repoId : '',
-    path: isString(setup.path) ? setup.path : '',
-    displayName: isString(setup.displayName) ? setup.displayName : '',
-    createdAt: isTimestamp(setup.createdAt) ? setup.createdAt : 0,
-    updatedAt: isTimestamp(setup.updatedAt) ? setup.updatedAt : 0
+    ...row,
+    id: stringValue(row.id),
+    projectId: stringValue(row.projectId),
+    hostId: stringValue(row.hostId, LOCAL_EXECUTION_HOST_ID) as ProjectHostSetup['hostId'],
+    repoId: stringValue(row.repoId),
+    path: stringValue(row.path),
+    displayName: stringValue(row.displayName),
+    setupState: (row.setupState === undefined
+      ? 'error'
+      : row.setupState) as ProjectHostSetup['setupState'],
+    setupMethod: (row.setupMethod === undefined
+      ? 'legacy-repo'
+      : row.setupMethod) as ProjectHostSetup['setupMethod'],
+    createdAt: timestampValue(row.createdAt),
+    updatedAt: timestampValue(row.updatedAt)
   }
 }
 
 export function normalizeProjectRow(project: Project): Project {
-  const sourceRepoIdsConform =
-    Array.isArray(project.sourceRepoIds) && project.sourceRepoIds.every(isString)
+  const row: Record<string, unknown> = isRecord(project) ? project : {}
+  const sourceRepoIdsConform = Array.isArray(row.sourceRepoIds) && row.sourceRepoIds.every(isString)
   const needsRepair =
-    !isString(project.id) ||
-    !isString(project.displayName) ||
-    !isString(project.badgeColor) ||
+    !isString(row.id) ||
+    !isString(row.displayName) ||
+    !isString(row.badgeColor) ||
     !sourceRepoIdsConform ||
-    !isTimestamp(project.createdAt) ||
-    !isTimestamp(project.updatedAt)
+    !isTimestamp(row.createdAt) ||
+    !isTimestamp(row.updatedAt)
   if (!needsRepair) {
     return project
   }
   return {
-    ...project,
-    id: isString(project.id) ? project.id : '',
-    displayName: isString(project.displayName) ? project.displayName : '',
-    badgeColor: isString(project.badgeColor) ? project.badgeColor : '',
-    sourceRepoIds: Array.isArray(project.sourceRepoIds)
-      ? project.sourceRepoIds.filter((repoId): repoId is string => isString(repoId))
+    ...row,
+    id: stringValue(row.id),
+    displayName: stringValue(row.displayName),
+    badgeColor: stringValue(row.badgeColor),
+    sourceRepoIds: Array.isArray(row.sourceRepoIds)
+      ? row.sourceRepoIds.filter((repoId): repoId is string => isString(repoId))
       : [],
-    createdAt: isTimestamp(project.createdAt) ? project.createdAt : 0,
-    updatedAt: isTimestamp(project.updatedAt) ? project.updatedAt : 0
+    createdAt: timestampValue(row.createdAt),
+    updatedAt: timestampValue(row.updatedAt)
   }
 }
 
