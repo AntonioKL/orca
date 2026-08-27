@@ -82,4 +82,23 @@ describe('canUseStructuredNativeChat', () => {
       false
     )
   })
+
+  it('refuses a Windows folder workspace even though its key resolves no project runtime', () => {
+    mockGetRendererAppPlatform.mockReturnValue('win32')
+    const state = {
+      ...stateFor({}),
+      activeRepoId: null,
+      activeWorktreeId: null
+    } as unknown as AppState
+    expect(canUseStructuredNativeChat(state, 'folder:folder-1')).toBe(false)
+  })
+
+  it('allows a folder workspace on a non-Windows platform', () => {
+    const state = {
+      ...stateFor({}),
+      activeRepoId: null,
+      activeWorktreeId: null
+    } as unknown as AppState
+    expect(canUseStructuredNativeChat(state, 'folder:folder-1')).toBe(true)
+  })
 })

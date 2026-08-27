@@ -1,5 +1,4 @@
 import type { AppState } from '@/store/types'
-import { getLocalProjectExecutionRuntimeContext } from '@/lib/local-preflight-context'
 import { getExecutionHostIdForWorktree } from '@/lib/worktree-runtime-owner'
 import { getRendererAppPlatform } from '@/lib/renderer-app-platform'
 
@@ -10,13 +9,9 @@ export function canUseStructuredNativeChat(state: AppState, worktreeId: string):
   if (getExecutionHostIdForWorktree(state, worktreeId) !== 'local') {
     return false
   }
-  const projectRuntime = getLocalProjectExecutionRuntimeContext(state, worktreeId)
-  return !(
-    projectRuntime?.status === 'repair-required' ||
-    projectRuntime?.runtime.kind === 'wsl' ||
-    // The shipped Windows process-tree addon may not expose creation time. Until
-    // the host advertises that proof, keep this experimental surface on the
-    // ordinary terminal path instead of letting create fail after the click.
-    (getRendererAppPlatform() === 'win32' && projectRuntime?.runtime.kind === 'windows-host')
-  )
+  // The shipped Windows process-tree addon may not expose creation time. Until
+  // the host advertises that proof, refuse every local Windows execution path —
+  // windows-host, WSL, and keys that resolve no project runtime (folder
+  // workspaces, floating terminal) — so create cannot fail after the click.
+  return getRendererAppPlatform() !== 'win32'
 }
