@@ -12,38 +12,41 @@ function decodePayload(command: string): string {
 }
 
 /*
- * Two reproduced Windows failures constrain this one string, in opposite
- * directions:
+ * #16003 — endpoint security (Kaspersky, Windows 11) denies process creation
+ * for `-WindowStyle Hidden` + `-EncodedCommand` whatever the payload decodes
+ * to, and no exclusion re-enabled it. Measured on the reporting host: that pair
+ * exits 126 with or without `-ExecutionPolicy Bypass` and with or without
+ * `-NoProfile`, while `-NoProfile -EncodedCommand` alone runs 5/5. So the
+ * command line spells neither the policy bypass (moved into the payload by
+ * #16576) nor the window style.
  *
- * #16003 — endpoint security (Kaspersky Premium, Windows 11) denies process
- * creation for `-ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand`
- * whatever the payload decodes to, and no exclusion re-enabled it. The triple
- * must stop being spelled.
- *
- * #14815 (+ #14828, #15117, #15447, #15767) — without `-WindowStyle Hidden`
- * every hook event allocates a console that takes foreground and eats the
- * user's keystrokes, and strands a visible window outright when the hook blocks
- * on stdin. Window suppression must stay.
- *
- * Both hold only if the flag that leaves the command line is the policy bypass,
- * which is the one with an exact in-payload equivalent.
+ * The counter-pressure is real and is NOT resolved by these assertions:
+ * #14815 (+ #14828, #15117, #15447, #15767) reported consoles taking
+ * foreground. `-WindowStyle Hidden` was that fix, but its suppression was never
+ * measured — see the launcher's comment. These tests pin the shape so it cannot
+ * be restored silently; whether a console appears is a question for a live
+ * window measurement, which no unit test here can answer.
  */
 describe('windows PowerShell hook launcher', () => {
-  it('never spells the denied flag triple on the command line', () => {
+  it('never spells a denied flag on the command line', () => {
     const command = wrapWindowsPowerShellEncodedCommand('exit 0')
+    const switches = command.replace(/ -EncodedCommand \S+$/, '')
 
     expect(WINDOWS_POWERSHELL_HOOK_SWITCHES).not.toMatch(/-ExecutionPolicy/i)
-    expect(command.replace(/ -EncodedCommand \S+$/, '')).not.toMatch(/-ExecutionPolicy/i)
+    expect(switches).not.toMatch(/-ExecutionPolicy/i)
+    // Why: measured exit 126 paired with -EncodedCommand on the #16003 host.
+    expect(WINDOWS_POWERSHELL_HOOK_SWITCHES).not.toMatch(/-WindowStyle/i)
+    expect(switches).not.toMatch(/-WindowStyle/i)
   })
 
-  it('keeps hiding the console window on every hook event (#14815)', () => {
-    // Dropping this flag is not a cosmetic flash: the console takes foreground
-    // and swallows what the user is typing into Orca (#14828), and never closes
-    // at all when the hook blocks reading stdin (#14815).
+  it('pins the exact launcher shape so a flag cannot come back unnoticed', () => {
+    // Why this is worth a test: #16576 round 3 dropped -WindowStyle Hidden by
+    // accident and updated the tests to match, so nothing caught it. Restoring
+    // either flag re-breaks every hook on an AV host (#16003).
     const command = wrapWindowsPowerShellEncodedCommand('exit 0')
 
-    expect(WINDOWS_POWERSHELL_HOOK_SWITCHES).toBe('-NoProfile -WindowStyle Hidden')
-    expect(command).toMatch(/ -NoProfile -WindowStyle Hidden -EncodedCommand [A-Za-z0-9+/=]+$/)
+    expect(WINDOWS_POWERSHELL_HOOK_SWITCHES).toBe('-NoProfile')
+    expect(command).toMatch(/ -NoProfile -EncodedCommand [A-Za-z0-9+/=]+$/)
   })
 
   it('keeps the execution-policy bypass, in the payload where AV cannot read it', () => {
