@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { posix as pathPosix } from 'node:path'
-import { WSL_CODEX_RUNTIME_HOME_SEGMENTS } from '../pty/codex-home-wsl-env'
+import { wslCodexRuntimeHomeForGuestHome } from '../pty/codex-home-wsl-env'
 import { WSL_SESSION_BRIDGE_TIMEOUT_MS } from '../codex/wsl-codex-session-bridge-script'
 import { runWslProcess } from '../wsl/wsl-runner'
 import { compareCodexAuthFreshness, codexAuthIsFresher } from './codex-auth-identity'
@@ -199,7 +199,7 @@ function resolveLegacyRuntimePaths(guestHomeLinuxPath: string): {
   marker: string
   runtimeHome: string
 } {
-  const runtimeHome = pathPosix.join(guestHomeLinuxPath, ...WSL_CODEX_RUNTIME_HOME_SEGMENTS)
+  const runtimeHome = wslCodexRuntimeHomeForGuestHome(guestHomeLinuxPath)
   const runtimeRoot = pathPosix.dirname(runtimeHome)
   return {
     activeHome: pathPosix.join(runtimeRoot, 'active', 'wsl', 'home'),
