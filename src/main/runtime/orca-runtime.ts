@@ -20835,7 +20835,7 @@ export class OrcaRuntimeService {
         workspaceKind: 'git',
         worktreeId: worktree.id,
         repoId: worktree.repoId,
-        ...((worktree.hostId ?? meta?.hostId) ? { hostId: worktree.hostId ?? meta?.hostId } : {}),
+        ...((meta?.hostId ?? worktree.hostId) ? { hostId: meta?.hostId ?? worktree.hostId } : {}),
         terminalPlatform,
         repo: repo?.displayName ?? worktree.repoId,
         path: worktree.path,

@@ -150,12 +150,15 @@ export function buildDetectedGitWorktrees(
     resolveCustomWorktreeVisibilitySources(repo, settings.worktreeVisibilityDefaults),
     resolveConfiguredWorktreeBasePaths(repo)
   )
+  const allMeta = store.getAllWorktreeMeta?.()
   const detected = liveWorktrees.map((gitWorktree) => {
     const worktreeId = `${repo.id}::${gitWorktree.path}`
     const repoOwnerCount = store.getRepos().filter((candidate) => candidate.id === repo.id).length
+    const legacyMeta = store.getWorktreeMeta?.(worktreeId)
+    const metaById = allMeta ?? (legacyMeta ? { [worktreeId]: legacyMeta } : {})
     let meta =
       readWorktreeMetaForHost(store, worktreeId, getRepoExecutionHostId(repo)) ??
-      getRepoOwnedWorktreeMeta(repo, worktreeId, store.getAllWorktreeMeta(), repoOwnerCount)
+      getRepoOwnedWorktreeMeta(repo, worktreeId, metaById, repoOwnerCount)
     const worktree = mergeWorktree(repo.id, gitWorktree, meta, repo.displayName)
     const detected = toDetectedWorktree({
       repo,

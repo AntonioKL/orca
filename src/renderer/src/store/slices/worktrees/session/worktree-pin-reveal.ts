@@ -1,4 +1,4 @@
-import type { WorktreeSlice } from '../../worktree-helpers'
+import type { WorktreeMetaBatchUpdate, WorktreeSlice } from '../../worktree-helpers'
 import type { WorktreeSliceGet, WorktreeSliceSet } from '../listing/worktree-slice-types'
 import {
   getActiveSidebarWorkspaceId,
@@ -10,7 +10,6 @@ import {
 } from '../../../../../../shared/resolved-worktree-lineage'
 import type { WorktreeLineage } from '../../../../../../shared/worktree/lineage-types'
 import type { Worktree } from '../../../../../../shared/worktree/types'
-import type { WorktreeMetaBatchUpdate } from '../../worktree-helpers'
 
 type WorktreeWithEmbeddedLineage = Worktree & { lineage?: WorktreeLineage | null }
 function getProjectedLineage(get: WorktreeSliceGet, worktree: Worktree): WorktreeLineage | null {

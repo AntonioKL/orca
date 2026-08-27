@@ -106,12 +106,14 @@ function reportProgress(
 
 function mergeForSpaceScan(repo: Repo, gitWorktree: GitWorktreeInfo, store: Store): Worktree {
   const worktreeId = `${repo.id}::${gitWorktree.path}`
-  // Host-qualified: the same repoId::path can be a different checkout on each execution host.
   const executionHostId = getRepoExecutionHostId(repo)
   const repoOwnerCount = store.getRepos().filter((candidate) => candidate.id === repo.id).length
+  const allMeta = store.getAllWorktreeMeta?.()
+  const legacyMeta = store.getWorktreeMeta?.(worktreeId)
+  const metaById = allMeta ?? (legacyMeta ? { [worktreeId]: legacyMeta } : {})
   const meta =
     readWorktreeMetaForHost(store, worktreeId, executionHostId) ??
-    getRepoOwnedWorktreeMeta(repo, worktreeId, store.getAllWorktreeMeta(), repoOwnerCount)
+    getRepoOwnedWorktreeMeta(repo, worktreeId, metaById, repoOwnerCount)
   return mergeWorktree(repo.id, gitWorktree, meta, repo.displayName)
 }
 
