@@ -1,10 +1,6 @@
 import { translate } from '@/i18n/i18n'
-import { getReviewStateTone } from '@/components/github/review-state-presentation'
 import type { WorkspaceCleanupCandidate } from '../../../../shared/workspace-cleanup'
-import {
-  getWorkspaceCleanupGitLabel,
-  type WorkspaceCleanupReviewInfo
-} from './workspace-cleanup-presentation'
+import { getWorkspaceCleanupGitLabel } from './workspace-cleanup-presentation'
 import {
   formatUnpushedCommitCount,
   formatWorkspaceCleanupContextDetail,
@@ -171,11 +167,6 @@ function hasGitStatusPill(candidate: WorkspaceCleanupCandidate): boolean {
     return false
   }
   return (candidate.git.upstreamAhead ?? 0) > 0 || candidate.git.clean === false
-}
-
-/** Review pills carry the same state colors as the PR page and item dialog. */
-export function getReviewPillToneClassName(reviewInfo: WorkspaceCleanupReviewInfo): string {
-  return getReviewStateTone(reviewInfo.state)
 }
 
 export function getContextCount(candidate: WorkspaceCleanupCandidate): number {

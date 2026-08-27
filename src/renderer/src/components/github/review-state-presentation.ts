@@ -4,6 +4,10 @@ import type { HostedReviewState } from '../../../../shared/hosted-review'
 /** Every review surface renders state from here; `unknown` means we have a number but no fetched state. */
 export type ReviewStateForDisplay = HostedReviewState | 'unknown' | null | undefined
 
+/** Also the tone for an open issue, which reads the same as an open review. */
+export const OPEN_REVIEW_STATE_TONE =
+  'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300'
+
 /** Outline-pill tone: purple merged, rose closed, slate draft, emerald open, neutral unknown. */
 export function getReviewStateTone(state: ReviewStateForDisplay): string {
   if (state === 'merged') {
@@ -16,7 +20,7 @@ export function getReviewStateTone(state: ReviewStateForDisplay): string {
     return 'border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-300'
   }
   if (state === 'open') {
-    return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300'
+    return OPEN_REVIEW_STATE_TONE
   }
   return 'border-border bg-background text-muted-foreground'
 }

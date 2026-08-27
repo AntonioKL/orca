@@ -6,7 +6,7 @@ export function formatCompactActivityLabel(label: string): string {
 }
 
 export function getReviewTooltip(reviewInfo: WorkspaceCleanupReviewInfo): string {
-  return [reviewInfo.label, reviewInfo.state, reviewInfo.title].filter(Boolean).join(' · ')
+  return [reviewInfo.label, getReviewStateSrText(reviewInfo)].filter(Boolean).join(' · ')
 }
 
 /** Text equivalent for the state color on pills that render the number visibly. */
