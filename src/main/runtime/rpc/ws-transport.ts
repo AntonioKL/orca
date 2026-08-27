@@ -188,6 +188,7 @@ export class WebSocketTransport implements RpcTransport {
     this.bunTransport = new BunWebSocketTransport({
       host: this.host,
       port: this.port,
+      staticRoot: this.staticRoot,
       preAuthTimeoutMs: this.preAuthTimeoutMs,
       heartbeat: this.heartbeat,
       callbacks: {

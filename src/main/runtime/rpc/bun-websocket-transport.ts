@@ -1,5 +1,6 @@
 import type { WebSocket } from 'ws'
 import type { RemoteRuntimeServerHeartbeat } from './remote-runtime-server-heartbeat'
+import { createStaticWebClientResponse } from './static-web-client-handler'
 
 const MAX_WS_CONNECTIONS = 128
 
@@ -23,7 +24,7 @@ type BunRuntime = {
   serve(options: {
     hostname: string
     port: number
-    fetch(request: Request, server: BunServer): Response | undefined
+    fetch(request: Request, server: BunServer): Response | Promise<Response> | undefined
     websocket: {
       data: Record<string, never>
       open(socket: BunServerWebSocket): void
@@ -117,6 +118,7 @@ export class BunWebSocketTransport {
     private readonly options: {
       host: string
       port: number
+      staticRoot?: string
       preAuthTimeoutMs: number
       heartbeat: RemoteRuntimeServerHeartbeat
       callbacks: BunWebSocketTransportCallbacks
@@ -144,7 +146,9 @@ export class BunWebSocketTransport {
       port: this.options.port,
       fetch: (request, server) => {
         if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') {
-          return new Response('Orca runtime WebSocket endpoint', { status: 426 })
+          return this.options.staticRoot
+            ? createStaticWebClientResponse(this.options.staticRoot, request)
+            : new Response('Orca runtime WebSocket endpoint', { status: 426 })
         }
         if (this.clients.size >= MAX_WS_CONNECTIONS) {
           return new Response('Maximum connections reached', { status: 503 })

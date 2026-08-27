@@ -37,16 +37,20 @@ Sources: [Bun installation](https://bun.com/docs/installation), [Bun PTY API](ht
 
 ## Full-runtime migration POC
 
-A Node orcad created a real terminal, wrote a nonce, stopped cleanly, and left its daemon alive. The same bundle then started under Bun against the same data root.
+The current implementation now has a Bun-native WebSocket transport and Bun.Terminal daemon
+backend. A Node CLI can pair to Bun orcad; a Bun orcad can start and reattach its Bun daemon.
 
 Results:
 
-- Bun published readiness and adopted the exact legacy daemon PID.
-- `node:sqlite` was absent. A narrow `bun:sqlite` adapter restored synchronous persistence startup.
-- The Node `ws` client could not connect to Bun orcad. A bare WebSocket upgrade also timed out: Bun's `node:http` listener bound, but the `ws` server never received/completed the upgrade.
-- The terminal remains `live` in the adopted Node daemon, but its state is **unverifiable** through the Bun control plane. It was not proved exited or lost.
+- Bun publishes readiness with a real WebSocket RPC endpoint.
+- Node CLI pairing, repo RPC, worktree RPC, terminal creation, input, output, and scrollback work.
+- Runtime restart preserves the daemon PID and terminal scrollback.
+- `node:sqlite` is absent under Bun; the narrow synchronous adapter uses `bun:sqlite`.
+- Static web-client requests are served through the Bun fetch path.
+- A legacy Node daemon can still be adopted by Bun orcad; backend identity stays outside the daemon wire.
 
-Therefore daemon adoption—the no-stranding mechanism—is sound, but full user migration is blocked before PTY backend selection by the runtime WebSocket server. `WebSocketTransport` needs a Bun-native `Bun.serve` implementation (or a proven upstream `node:http`/`ws` fix) behind the existing `RpcTransport` contract.
+The POC does not claim production portability yet. Bun's missing read-side PTY pause/resume and
+Windows process-job handles remain explicit platform gaps.
 
 ## Shipping shape
 
@@ -73,23 +77,19 @@ Build and deploy rules:
 
 The launch command should name a runtime executable rather than `nodePath`. Activation records need an optional per-version runtime descriptor. Its absence means the legacy Node launch path, so rollback can still start an older Node slot instead of incorrectly feeding it to Bun.
 
-## PTY backend boundary
-
-The daemon already exposes the right internal seam: `SubprocessHandle`. Add a Bun implementation behind `spawnNativeDaemonPty`; do not let Bun types reach the daemon protocol, RPC, renderer, or SSH layers.
-
-| Required behavior                                         | Bun mapping                                                           | State                            |
-| --------------------------------------------------------- | --------------------------------------------------------------------- | -------------------------------- |
-| spawn with cwd/env/cols/rows                              | `Bun.spawn({ terminal })`                                             | proven                           |
-| output                                                    | `terminal.data`, streaming `TextDecoder`                              | proven                           |
-| input                                                     | `terminal.write()`                                                    | proven in POC                    |
-| resize                                                    | `terminal.resize()`                                                   | proven in POC                    |
-| real exit code                                            | `await subprocess.exited`, not terminal `exit`                        | proven                           |
-| signal/kill                                               | `subprocess.kill(signal)` plus existing process-tree enforcement      | needs contract tests             |
-| foreground process                                        | shell name fallback plus existing PID-anchored process-table resolver | needs agent tests                |
-| POSIX slave path                                          | not exposed by Bun                                                    | needs shell-ready fallback proof |
-| pause/resume producer                                     | no Bun API                                                            | release blocker                  |
-| Windows per-PTY job membership and exact tree termination | not exposed by Bun                                                    | release blocker                  |
-| ConPTY clear/wrap behavior                                | differs from patched `node-pty`                                       | release blocker                  |
+| Required behavior                                         | Bun mapping                                                           | State                               |
+| --------------------------------------------------------- | --------------------------------------------------------------------- | ----------------------------------- |
+| spawn with cwd/env/cols/rows                              | `Bun.spawn({ terminal })`                                             | proven local + Linux host           |
+| output                                                    | `terminal.data`, streaming `TextDecoder`                              | proven local + Linux host           |
+| input                                                     | `terminal.write()`                                                    | proven local + Linux host           |
+| resize                                                    | `terminal.resize()`                                                   | proven local + Linux host           |
+| real exit code                                            | `await subprocess.exited`, not terminal `exit`                        | proven                              |
+| signal/kill                                               | `subprocess.kill(signal)` plus existing process-tree enforcement      | basic path proven; Windows caveat  |
+| foreground process                                        | shell name fallback plus existing PID-anchored process-table resolver | basic path proven; needs agent E2E  |
+| POSIX slave path                                          | not exposed by Bun                                                    | shell-ready fallback still needed  |
+| pause/resume producer                                     | no Bun API                                                            | release blocker                     |
+| Windows per-PTY job membership and exact tree termination | not exposed by Bun                                                    | release blocker                     |
+| ConPTY clear/wrap behavior                                | differs from patched `node-pty`                                       | release blocker                     |
 
 ### Why pause/resume blocks a default switch
 
@@ -107,13 +107,12 @@ Windows stays on the legacy daemon until a Bun backend passes the existing nativ
 
 No live PTY needs to move between backends.
 
-1. **Additive metadata.** Add optional runtime/backend health fields and optional activation-record runtime metadata. Old peers ignore them; new peers treat absence as legacy/unknown.
-2. **Ship slot-local Bun dark.** Build, hash, upload, and smoke-load it without changing the active runtime.
-3. **Canary the orcad process.** Run orcad under slot-local Bun while explicitly retaining the legacy Node daemon. This proves RPC, persistence, watchers, detached fork/IPC, and rollback separately from terminal-backend risk. It requires a Bun-native implementation of `WebSocketTransport`; the current `ws` server over Bun's `node:http` stalls upgrades.
-4. **Add the Bun daemon backend behind an explicit capability/flag.** Keep the daemon protocol and endpoint layout unchanged.
-5. **Preserve live legacy daemons.** The existing rule remains load-bearing: a stale daemon with live sessions is adopted, never replaced. It continues serving those sessions under Node. When its session count reaches zero, orcad may retire it and launch the Bun daemon.
-6. **Make Bun the default only after the platform matrix is green.** Rollback starts each slot with that slot's recorded runtime. A Bun daemon must remain protocol-compatible with the immediately previous Node orcad so rollback can adopt it.
-7. **Remove Node/node-pty artifacts after the mixed-version window.** Removal is last, after supported clients no longer create legacy daemons and telemetry/health shows none active.
+1. **Additive metadata.** Runtime health now reports optional `runtimeKind`, `runtimeVersion`, and `ptyBackend`; old clients ignore them.
+2. **Ship Bun dark.** The Bun runtime and backend are available through explicit Bun smoke commands; production artifact pinning and deploy selection remain separate work.
+3. **Canary the orcad process.** Bun orcad now uses a Bun-native WebSocket transport and Bun daemon PTYs while preserving the existing Node transport and daemon protocol.
+4. **Preserve live legacy daemons.** A Bun orcad adopts a live legacy Node daemon rather than replacing it; the migration E2E proves the daemon PID and session scrollback remain stable.
+5. **Default only after platform gates.** Bun is not yet the production default. Rollback must continue to start each slot with its recorded runtime.
+6. **Remove Node/node-pty last.** Keep legacy Node/node-pty support until output backpressure, Windows process ownership, and mixed-version rollback are proven.
 
 Persistent state, pairing credentials, terminal session IDs, daemon socket names, and RPC frames do not change. Backend identity is diagnostic metadata, not a new terminal stream opcode. If a new opcode becomes necessary, capability-negotiate it; unknown opcodes are silently dropped by old decoders.
 
@@ -131,4 +130,6 @@ Persistent state, pairing credentials, terminal session IDs, daemon socket names
 
 ## Next implementation slice
 
-Implement a Bun-native `WebSocketTransport` behind the existing `RpcTransport` contract and rerun the Node-daemon-to-Bun-orcad adoption POC. Keep the current Node transport as the default. After RPC reattach passes, build the internal Bun `SubprocessHandle` adapter behind an explicit development flag. Output backpressure and Windows job ownership remain blockers before changing the default or deleting `node-pty`.
+Pin and ship Bun executables in remote install slots, then close the remaining PTY parity gates: read-side
+backpressure, POSIX slave-path behavior, and Windows job ownership/ConPTY compatibility. Only then remove
+the Node/node-pty fallback or change the production default.
