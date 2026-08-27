@@ -211,9 +211,7 @@ async function isCandidateSafeToRemove(
     if (!(await isRelayInstallLockStale(conn, lockDir, host))) {
       return false
     }
-    process.stderr.write?.(
-      `[${model.id}] GC: lock at ${lockDir} is stale; treating as recoverable\n`
-    )
+    process.stderr.write?.(`[${model.id}] GC: lock at ${lockDir} is stale; treating as recoverable\n`)
   }
 
   // Legacy dirs predate .install-complete; skip the sentinel and rely on the live-socket probe alone.
@@ -232,6 +230,7 @@ async function isCandidateSafeToRemove(
 
   return !(await options.isDirLive(dir))
 }
+
 
 /**
  * The relay's GC, bound to its own namespace and its own liveness probe (a live unix socket

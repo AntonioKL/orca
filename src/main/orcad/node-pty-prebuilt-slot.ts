@@ -27,12 +27,7 @@ export type PrebuiltSlotManifest = {
 
 export type PrebuiltSlotOutcome =
   | { installed: true; slot: string; spawnHelper: boolean }
-  | {
-      installed: false
-      slot: string
-      why: 'no-slot' | 'no-prebuilds-dir' | 'abi-mismatch'
-      detail?: string
-    }
+  | { installed: false; slot: string; why: 'no-slot' | 'no-prebuilds-dir' | 'abi-mismatch'; detail?: string }
 
 /**
  * Where a deployment's prebuilds live: beside the bundle that is running. `argv[1]` is
@@ -60,9 +55,7 @@ export function readPrebuiltSlotManifest(prebuildsDir: string): PrebuiltSlotMani
       module: typeof manifest.module === 'string' ? manifest.module : 'node-pty',
       version: manifest.version,
       nodeAbi: manifest.nodeAbi,
-      slots: Array.isArray(manifest.slots)
-        ? manifest.slots.filter((s) => typeof s === 'string')
-        : []
+      slots: Array.isArray(manifest.slots) ? manifest.slots.filter((s) => typeof s === 'string') : []
     }
   } catch {
     return null

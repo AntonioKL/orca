@@ -109,7 +109,9 @@ async function readStateWritesSinceActivation(
   return newest === null ? null : newest >= activatedAtSeconds
 }
 
-export async function rollbackOrcad(options: OrcadRollbackOptions): Promise<OrcadRollbackResult> {
+export async function rollbackOrcad(
+  options: OrcadRollbackOptions
+): Promise<OrcadRollbackResult> {
   const now = options.now ?? ((): Date => new Date())
   const snapshotPresent = options.record.snapshot
     ? (
@@ -181,7 +183,11 @@ export async function rollbackOrcad(options: OrcadRollbackOptions): Promise<Orca
     }
   }
 
-  const targetDir = computeRemoteInstallDir(ORCAD_INSTALL_MODEL, options.remoteHome, safety.target)
+  const targetDir = computeRemoteInstallDir(
+    ORCAD_INSTALL_MODEL,
+    options.remoteHome,
+    safety.target
+  )
   await exec(
     options,
     orcadLaunchCommand(options.host, {

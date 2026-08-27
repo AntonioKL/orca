@@ -11,8 +11,7 @@ import {
   slotName
 } from './build-orcad-prebuilds.mjs'
 
-const PATCHED_BINDING_GYP =
-  "'ldflags': ['-Wl,--no-as-needed,-l:libutil.so.1,-l:libpthread.so.0,--as-needed']"
+const PATCHED_BINDING_GYP = "'ldflags': ['-Wl,--no-as-needed,-l:libutil.so.1,-l:libpthread.so.0,--as-needed']"
 const PATCHED_PTY_CC = '__asm__(".symver openpty,openpty@" ORCA_GLIBC_COMPAT_VERSION);'
 
 const dirs = []
@@ -108,9 +107,8 @@ describe('mergeManifest', () => {
 
   it('does not duplicate a slot rebuilt twice', () => {
     const once = mergeManifest(null, { slot: 'darwin-arm64', version: '1.1.0', nodeAbi: '127' })
-    expect(
-      mergeManifest(once, { slot: 'darwin-arm64', version: '1.1.0', nodeAbi: '127' }).slots
-    ).toEqual(['darwin-arm64'])
+    expect(mergeManifest(once, { slot: 'darwin-arm64', version: '1.1.0', nodeAbi: '127' }).slots)
+      .toEqual(['darwin-arm64'])
   })
 })
 
