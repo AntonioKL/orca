@@ -2,6 +2,11 @@ import type { Store } from '../../../persistence/loading-store/store'
 import type { Repo } from '../../../../shared/repo-types'
 import type { WorktreeMeta } from '../../../../shared/worktree/meta-types'
 import { getProjectHostSetupWorktreeMeta } from '../../../../shared/project-host-setup-projection'
+import { getRepoExecutionHostId } from '../../../../shared/execution-host'
+import {
+  readWorktreeMetaForHost,
+  writeWorktreeMetaForHost
+} from '../../../persistence/host-qualified-worktree-meta'
 import { randomUUID } from 'node:crypto'
 
 export function getProjectHostSetupMetaUpdates(
@@ -31,7 +36,10 @@ export function resolveWorktreeMetaWithDiscoveryBackfill(
   repo: Repo,
   worktreeId: string
 ): WorktreeMeta {
-  const existing = store.getWorktreeMeta(worktreeId)
+  // Host-qualified: the same repoId::path is a different checkout on each execution host.
+  const executionHostId = getRepoExecutionHostId(repo)
+  const existing =
+    readWorktreeMetaForHost(store, worktreeId, executionHostId) ?? store.getWorktreeMeta(worktreeId)
   const ownershipUpdates = getProjectHostSetupMetaUpdates(store, repo, existing)
   if (existing) {
     const updates = {
@@ -40,11 +48,11 @@ export function resolveWorktreeMetaWithDiscoveryBackfill(
     }
     if (Object.keys(updates).length > 0) {
       // Why: pre-lineage profiles already have WorktreeMeta rows; backfill on discovery so upgraded workspaces get lineage and host routing.
-      return store.setWorktreeMeta(worktreeId, updates)
+      return writeWorktreeMetaForHost(store, worktreeId, executionHostId, updates)
     }
     return existing
   }
-  return store.setWorktreeMeta(worktreeId, {
+  return writeWorktreeMetaForHost(store, worktreeId, executionHostId, {
     lastActivityAt: Date.now(),
     ...ownershipUpdates
   })

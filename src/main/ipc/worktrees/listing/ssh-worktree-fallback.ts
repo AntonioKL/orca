@@ -9,6 +9,10 @@ import type { GitWorktreeInfo, DetectedWorktree, Worktree } from '../../../../sh
 import type { Store } from '../../../persistence/loading-store/store'
 import { getRepoExecutionHostId } from '../../../../shared/execution-host'
 import {
+  readWorktreeMetaForHost,
+  writeWorktreeMetaForHost
+} from '../../../persistence/host-qualified-worktree-meta'
+import {
   buildKnownOrcaWorkspaceLayouts,
   isLegacyRepoForExternalWorktreeVisibility,
   toDetectedWorktree
@@ -110,7 +114,7 @@ export function listDisconnectedSshWorktrees(
         ? { ...candidate.meta, ...ownershipUpdates }
         : candidate.meta
     if (Object.keys(ownershipUpdates).length > 0) {
-      store.setWorktreeMeta(candidate.id, ownershipUpdates)
+      writeWorktreeMetaForHost(store, candidate.id, expectedHostId, ownershipUpdates)
     }
     // Why: synthesized rows carry no branch, so the title would fall through to the DESKTOP's basename()
     // applied to a REMOTE path — a Windows remote then renders its whole C:\... path as the name. Rows must
@@ -147,7 +151,9 @@ export function buildDetectedGitWorktrees(
   )
   const detected = liveWorktrees.map((gitWorktree) => {
     const worktreeId = `${repo.id}::${gitWorktree.path}`
-    let meta = store.getWorktreeMeta(worktreeId)
+    let meta =
+      readWorktreeMetaForHost(store, worktreeId, getRepoExecutionHostId(repo)) ??
+      store.getWorktreeMeta(worktreeId)
     const worktree = mergeWorktree(repo.id, gitWorktree, meta, repo.displayName)
     const detected = toDetectedWorktree({
       repo,

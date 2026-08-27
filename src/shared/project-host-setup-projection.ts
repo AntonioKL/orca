@@ -336,7 +336,11 @@ export function getProjectHostSetupForRepo(
   setups: readonly ProjectHostSetup[],
   repo: Repo
 ): ProjectHostSetup {
+  // Setups are unique per (projectId, hostId), so one repoId registered on two hosts has two of
+  // them; matching on repoId alone returns whichever is stored first and stamps the wrong host.
+  const executionHostId = getRepoExecutionHostId(repo)
   return (
+    setups.find((setup) => setup.repoId === repo.id && setup.hostId === executionHostId) ??
     setups.find((setup) => setup.repoId === repo.id) ??
     projectHostSetupProjectionFromRepos([repo]).setups[0]
   )

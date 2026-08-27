@@ -16,6 +16,8 @@ import { worktreeMatchesHost } from './worktree-host-ownership'
 
 const folderWorkspaceWorktreeCache = new WeakMap<FolderWorkspace, Worktree>()
 
+import { worktreeRowMatchesMetaHost } from './worktree-meta-host-match'
+
 export function applyDetectedWorktreeUpdates(
   detectedWorktreesByRepo: AppState['detectedWorktreesByRepo'],
   worktreeId: string,
@@ -30,10 +32,7 @@ export function applyDetectedWorktreeUpdates(
   for (const [repoId, result] of Object.entries(detectedWorktreesByRepo)) {
     let repoChanged = false
     const nextWorktrees = result.worktrees.map((worktree) => {
-      if (
-        worktree.id !== worktreeId ||
-        (executionHostId !== undefined && worktree.hostId !== executionHostId)
-      ) {
+      if (worktree.id !== worktreeId || !worktreeRowMatchesMetaHost(worktree, executionHostId)) {
         return worktree
       }
       repoChanged = true

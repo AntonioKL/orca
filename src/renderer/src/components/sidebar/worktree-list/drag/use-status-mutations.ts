@@ -37,7 +37,11 @@ export function useWorktreeStatusMutations(args: {
       if (!current || getWorkspaceStatus(current, workspaceStatuses) === status) {
         return
       }
-      void updateWorktreeMeta(worktreeId, { workspaceStatus: status })
+      void updateWorktreeMeta(
+        worktreeId,
+        { workspaceStatus: status },
+        { executionHostId: current.hostId }
+      )
     },
     [updateWorktreeMeta, worktreeMap, workspaceStatuses]
   )

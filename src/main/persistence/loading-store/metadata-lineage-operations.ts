@@ -5,7 +5,7 @@ import type { WorktreeMeta } from '../../../shared/worktree/meta-types'
 import { normalizeStoredTaskSourceContext } from '../../../shared/task-source-context'
 import { normalizeWorkspaceLinkedItem } from '../../../shared/workspace-linked-item'
 import { isWorkspaceLinkedItemSourceContextMatch } from '../../../shared/workspace-linked-item-source-context'
-import type { ExecutionHostId } from '../../../shared/execution-host'
+import { LOCAL_EXECUTION_HOST_ID, type ExecutionHostId } from '../../../shared/execution-host'
 import { getRepoIdFromWorktreeId } from '../../../shared/worktree/id'
 import { hasWorktreeRemovalRepoOwnerOnOtherHost } from '../../worktree-removal-repo-owner'
 import { DEFAULT_WORKSPACE_STATUS_ID } from '../../../shared/workspace-statuses'
@@ -159,13 +159,13 @@ export class MetadataLineageOperations {
           ownerPartition
         ))
     )
-    if (owner) {
-      removeWorktreeMetadataForHost(
-        this[metadataLineageOperationsContext].runtime.state,
-        worktreeId,
-        owner
-      )
-    }
+    // Mirror the legacy delete's scope below: a full removal takes every host's identity rows,
+    // otherwise the surviving owner keeps its own.
+    removeWorktreeMetadataForHost(
+      this[metadataLineageOperationsContext].runtime.state,
+      worktreeId,
+      preservesDifferentPersistedOwner ? owner : undefined
+    )
     // Skip partitions main never wrote: materializing one fences every sibling worktree of the repo.
     const partitions = new Set<ExecutionHostId>(
       workspaceSessionPartitionIdsForHost(owner).filter(
@@ -236,10 +236,22 @@ export class MetadataLineageOperations {
     scheduleSave(this[metadataLineageOperationsContext].scheduling)
   }
 
-  migrateWorktreeIdentity(oldWorktreeId: string, newWorktreeId: string): void {
+  migrateWorktreeIdentity(
+    oldWorktreeId: string,
+    newWorktreeId: string,
+    executionHostId?: ExecutionHostId
+  ): void {
     const state = this[metadataLineageOperationsContext].runtime.state
     const legacyChanged = migrateWorktreeIdentityOperation(state, oldWorktreeId, newWorktreeId)
-    const canonicalChanged = migrateWorktreeMetadataLocator(state, oldWorktreeId, newWorktreeId)
+    // Only the host that moved the folder re-points its alias; the rest still live at the old path.
+    const mover =
+      executionHostId ?? state.worktreeMeta[oldWorktreeId]?.hostId ?? LOCAL_EXECUTION_HOST_ID
+    const canonicalChanged = migrateWorktreeMetadataLocator(
+      state,
+      oldWorktreeId,
+      newWorktreeId,
+      mover
+    )
     if (legacyChanged || canonicalChanged) {
       scheduleSave(this[metadataLineageOperationsContext].scheduling)
     }

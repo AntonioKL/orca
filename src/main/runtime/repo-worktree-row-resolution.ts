@@ -4,6 +4,10 @@ import {
   worktreeIdComparisonKey
 } from '../../shared/worktree/id'
 import { getRepoExecutionHostId, type ExecutionHostId } from '../../shared/execution-host'
+import {
+  readWorktreeMetaForHost,
+  writeWorktreeMetaForHost
+} from '../persistence/host-qualified-worktree-meta'
 import { isFolderRepo } from '../../shared/repo-kind'
 import { projectResolvedWorktreeLineage } from '../../shared/resolved-worktree-lineage'
 import { withTimeout } from '../../shared/promise-timeout-fallback'
@@ -134,11 +138,14 @@ export async function resolveRepoWorktreeRows(
     const worktreeId = `${repo.id}::${gitWorktree.path}`
     // Why: lineage validation needs a durable instance ID even when the runtime sees a workspace before renderer discovery-stamp.
     const existingMeta = metaById[worktreeId]
-    const ownedExistingMeta = getRepoOwnedWorktreeMeta(repo, worktreeId, metaById, repoOwnerCount)
+    // A host-qualified row is exact; the locator-keyed one is only trustworthy when this repo owns it.
+    const ownedExistingMeta =
+      readWorktreeMetaForHost(store, worktreeId, expectedHostId) ??
+      getRepoOwnedWorktreeMeta(repo, worktreeId, metaById, repoOwnerCount)
     const meta = ownedExistingMeta?.instanceId
       ? ownedExistingMeta
       : ownedExistingMeta || (!existingMeta && repoOwnerCount === 1)
-        ? store.setWorktreeMeta(worktreeId, {})
+        ? writeWorktreeMetaForHost(store, worktreeId, expectedHostId, {})
         : undefined
     const merged = {
       ...mergeWorktree(repo.id, gitWorktree, meta, repo.displayName),

@@ -8,8 +8,6 @@ export type WorktreeIdentityRef = {
   executionHostId: ExecutionHostId
   /** Durable identity for this checkout occupant. */
   instanceId: string
-  /** Optional host registration incarnation fence. */
-  hostGeneration?: number
 }
 export type WorktreeIdentity = Omit<WorktreeIdentityRef, 'worktreeId'> & {
   key: string
@@ -31,14 +29,12 @@ export function composeWorktreeIdentityAlias(
  * The locator is deliberately excluded so a folder rename preserves identity.
  */
 export function canonicalWorktreeIdentity(ref: WorktreeIdentityRef): string {
-  const generation = ref.hostGeneration === undefined ? '' : `:${ref.hostGeneration}`
-  return `wt2:${encodeURIComponent(`${ref.executionHostId}${generation}`)}:${encodeURIComponent(ref.instanceId)}`
+  return `wt2:${encodeURIComponent(ref.executionHostId)}:${encodeURIComponent(ref.instanceId)}`
 }
 export function createWorktreeIdentity(ref: WorktreeIdentityRef): WorktreeIdentity {
   return {
     key: canonicalWorktreeIdentity(ref),
     executionHostId: ref.executionHostId,
-    instanceId: ref.instanceId,
-    ...(ref.hostGeneration === undefined ? {} : { hostGeneration: ref.hostGeneration })
+    instanceId: ref.instanceId
   }
 }

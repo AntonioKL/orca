@@ -15,6 +15,7 @@ import {
 } from '../../../shared/workspace-linked-item'
 import { isWorkspaceLinkedItemSourceContextMatch } from '../../../shared/workspace-linked-item-source-context'
 import type { PersistedState } from '../../../shared/persisted-state-types'
+import { removeWorktreeMetadataForHost } from '../loading-store/worktree-identity-metadata'
 import type { WorktreeMeta } from '../../../shared/worktree/meta-types'
 
 // Why: worktrees deleted outside Orca orphan their worktreeMeta, so the map grew monotonically (63% dead on a heavy install).
@@ -76,6 +77,9 @@ export function gcStaleWorktreeMeta(state: PersistedState): number {
     delete state.worktreeMeta[key]
     delete state.worktreeLineageById[key]
     delete state.workspaceLineageByChildKey[worktreeWorkspaceKey(key)]
+    // Identity rows are companions too: a surviving alias would re-attach this dead metadata to a
+    // worktree later created at the same repoId::path, and nothing else ever reclaims them.
+    removeWorktreeMetadataForHost(state, key, undefined)
     removed++
   }
   return removed
@@ -124,6 +128,8 @@ export function normalizeWorktreeLinkedItemMetadata(state: PersistedState): bool
     // worktree recreated at the same repoId::path.
     state.worktreeLineageById = {}
     state.workspaceLineageByChildKey = {}
+    state.worktreeMetaByIdentity = {}
+    state.worktreeIdentityAliases = {}
     changed ||= rawWorktreeMeta !== undefined || hadLineage
   }
   for (const [key, meta] of Object.entries(state.worktreeMeta)) {
@@ -135,6 +141,7 @@ export function normalizeWorktreeLinkedItemMetadata(state: PersistedState): bool
       // otherwise re-attach to a worktree recreated at the same repoId::path.
       delete state.worktreeLineageById[key]
       delete state.workspaceLineageByChildKey[worktreeWorkspaceKey(key)]
+      removeWorktreeMetadataForHost(state, key, undefined)
       changed = true
       continue
     }
@@ -173,9 +180,16 @@ export function normalizeWorktreeLinkedItemMetadata(state: PersistedState): bool
       changed = true
       continue
     }
+    // Drop keys with no backing row: a dangling key is what turns the next write into an
+    // ambiguous alias, and nothing downstream can resolve it anyway.
     const identityKeys = [
       ...new Set(
-        rawIdentityKeys.filter((key): key is string => typeof key === 'string' && key.length > 0)
+        rawIdentityKeys.filter(
+          (key): key is string =>
+            typeof key === 'string' &&
+            key.length > 0 &&
+            Boolean(state.worktreeMetaByIdentity?.[key])
+        )
       )
     ]
     if (identityKeys.length === 0) {

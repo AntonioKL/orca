@@ -22,6 +22,7 @@ export type TestStore = {
   getSparsePresets: StoreMock
   getSettings: StoreMock
   getWorktreeMeta: KeyedStoreMock
+  getWorktreeMetaForHost: StoreMock
   getAllWorktreeMeta: StoreMock
   setWorktreeMeta: KeyedStoreWriteMock
   setWorktreeMetaForHost: StoreMock
@@ -55,6 +56,7 @@ export const store: TestStore = {
   getSparsePresets: vi.fn(),
   getSettings: vi.fn(),
   getWorktreeMeta: vi.fn(),
+  getWorktreeMetaForHost: vi.fn(),
   getAllWorktreeMeta: vi.fn(),
   setWorktreeMeta: vi.fn(),
   setWorktreeMetaForHost: vi.fn(),

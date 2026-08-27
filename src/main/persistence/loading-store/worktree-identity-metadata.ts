@@ -13,6 +13,7 @@ import {
   getExecutionHostIdFromWorktreeHostIdentity,
   getWorktreeIdFromHostIdentity
 } from '../../../shared/worktree/host-qualified-identity'
+import type { PersistedState } from '../../../shared/persisted-state-types'
 import type { StoreRuntimeState } from './store-runtime-state'
 import type { WriteSchedulingOperations } from './write-scheduling'
 import { scheduleSave } from './write-scheduling'
@@ -43,8 +44,53 @@ function getDefaultWorktreeMeta(): WorktreeMeta {
   }
 }
 
+/**
+ * Collapse an alias to the single identity it can resolve to, dropping keys whose
+ * metadata is gone. Fails open on purpose: an ambiguous alias used to brick reads
+ * and throw out of the worktree listing loop with no path back.
+ */
+function resolveAliasIdentityKey(
+  state: PersistedState,
+  alias: string
+): { identityKey: string | undefined; changed: boolean } {
+  const identityKeys = state.worktreeIdentityAliases?.[alias] ?? []
+  if (identityKeys.length === 0) {
+    return { identityKey: undefined, changed: false }
+  }
+  const resolvable = identityKeys.filter((key) => state.worktreeMetaByIdentity?.[key])
+  const candidates = resolvable.length > 0 ? resolvable : identityKeys
+  // Newest activity wins, then the greater key, so every host agrees on the survivor.
+  const winner = candidates.reduce((best, key) => {
+    const bestTouch = state.worktreeMetaByIdentity?.[best]?.lastActivityAt ?? 0
+    const keyTouch = state.worktreeMetaByIdentity?.[key]?.lastActivityAt ?? 0
+    if (keyTouch !== bestTouch) {
+      return keyTouch > bestTouch ? key : best
+    }
+    return key > best ? key : best
+  })
+  if (identityKeys.length === 1 && identityKeys[0] === winner) {
+    return { identityKey: winner, changed: false }
+  }
+  state.worktreeIdentityAliases ??= {}
+  state.worktreeIdentityAliases[alias] = [winner]
+  return { identityKey: winner, changed: true }
+}
+
+/** Drop identity metadata no alias points at any more. */
+export function pruneUnreferencedWorktreeIdentityMeta(state: PersistedState): boolean {
+  const referenced = new Set(Object.values(state.worktreeIdentityAliases ?? {}).flat())
+  let changed = false
+  for (const identityKey of Object.keys(state.worktreeMetaByIdentity ?? {})) {
+    if (!referenced.has(identityKey)) {
+      delete state.worktreeMetaByIdentity?.[identityKey]
+      changed = true
+    }
+  }
+  return changed
+}
+
 function migrateLegacyWorktreeMetadata(
-  state: StoreRuntimeState['state'],
+  state: PersistedState,
   worktreeId: string,
   executionHostId: ExecutionHostId
 ): boolean {
@@ -86,52 +132,57 @@ function migrateLegacyWorktreeMetadata(
   return changed
 }
 
+/** Drop the identity rows a locator owns, for one host or for every host. */
 export function removeWorktreeMetadataForHost(
-  state: StoreRuntimeState['state'],
+  state: PersistedState,
   worktreeId: string,
-  executionHostId: ExecutionHostId
-): boolean {
-  const alias = composeWorktreeIdentityAlias(executionHostId, worktreeId)
-  const identityKeys = state.worktreeIdentityAliases?.[alias] ?? []
-  if (identityKeys.length === 0) {
-    return false
-  }
-  const doomed = new Set(identityKeys)
-  for (const identityKey of identityKeys) {
-    delete state.worktreeMetaByIdentity?.[identityKey]
-  }
-  for (const [candidateAlias, candidateKeys] of Object.entries(
-    state.worktreeIdentityAliases ?? {}
-  )) {
-    if (candidateKeys.some((identityKey) => doomed.has(identityKey))) {
-      delete state.worktreeIdentityAliases?.[candidateAlias]
-    }
-  }
-  return true
-}
-
-export function migrateWorktreeMetadataLocator(
-  state: StoreRuntimeState['state'],
-  oldWorktreeId: string,
-  newWorktreeId: string
+  executionHostId: ExecutionHostId | undefined
 ): boolean {
   let changed = false
-  for (const [oldAlias, identityKeys] of Object.entries(state.worktreeIdentityAliases ?? {})) {
-    if (getWorktreeIdFromHostIdentity(oldAlias) !== oldWorktreeId) {
+  for (const alias of Object.keys(state.worktreeIdentityAliases ?? {})) {
+    if (getWorktreeIdFromHostIdentity(alias) !== worktreeId) {
       continue
     }
-    const executionHostId = getExecutionHostIdFromWorktreeHostIdentity(oldAlias)
-    if (!executionHostId) {
+    if (
+      executionHostId !== undefined &&
+      getExecutionHostIdFromWorktreeHostIdentity(alias) !== executionHostId
+    ) {
       continue
     }
-    const newAlias = composeWorktreeIdentityAlias(executionHostId, newWorktreeId)
-    const existing = state.worktreeIdentityAliases?.[newAlias] ?? []
-    state.worktreeIdentityAliases ??= {}
-    state.worktreeIdentityAliases[newAlias] = [...new Set([...existing, ...identityKeys])]
-    delete state.worktreeIdentityAliases[oldAlias]
+    delete state.worktreeIdentityAliases?.[alias]
     changed = true
   }
-  return changed
+  return pruneUnreferencedWorktreeIdentityMeta(state) || changed
+}
+
+/**
+ * Re-point one host's alias at a renamed locator. Host-scoped on purpose: a local
+ * folder move must not drag a remote host's alias to a path that host does not have.
+ */
+export function migrateWorktreeMetadataLocator(
+  state: PersistedState,
+  oldWorktreeId: string,
+  newWorktreeId: string,
+  executionHostId: ExecutionHostId
+): boolean {
+  if (oldWorktreeId === newWorktreeId) {
+    return false
+  }
+  const oldAlias = composeWorktreeIdentityAlias(executionHostId, oldWorktreeId)
+  const identityKeys = state.worktreeIdentityAliases?.[oldAlias]
+  if (!identityKeys || identityKeys.length === 0) {
+    return false
+  }
+  const newAlias = composeWorktreeIdentityAlias(executionHostId, newWorktreeId)
+  state.worktreeIdentityAliases ??= {}
+  // A taken destination keeps its own occupant; stranding the mover at the old locator loses less
+  // than merging (which makes both unreadable) or dropping its row outright.
+  if ((state.worktreeIdentityAliases[newAlias] ?? []).length > 0) {
+    return false
+  }
+  state.worktreeIdentityAliases[newAlias] = [...identityKeys]
+  delete state.worktreeIdentityAliases[oldAlias]
+  return true
 }
 export function getWorktreeMetaForHost(
   runtime: MetadataRuntime,
@@ -140,16 +191,15 @@ export function getWorktreeMetaForHost(
   executionHostId: ExecutionHostId
 ): WorktreeMeta | undefined {
   const state = runtime.state
-  if (migrateLegacyWorktreeMetadata(state, worktreeId, executionHostId)) {
+  let changed = migrateLegacyWorktreeMetadata(state, worktreeId, executionHostId)
+  const alias = composeWorktreeIdentityAlias(executionHostId, worktreeId)
+  const resolved = resolveAliasIdentityKey(state, alias)
+  changed = resolved.changed || changed
+  if (changed) {
     scheduleSave(scheduling)
   }
-  const alias = composeWorktreeIdentityAlias(executionHostId, worktreeId)
-  const identityKeys = state.worktreeIdentityAliases?.[alias] ?? []
-  if (identityKeys.length > 1) {
-    return undefined
-  }
-  if (identityKeys.length === 1) {
-    return state.worktreeMetaByIdentity?.[identityKeys[0]!]
+  if (resolved.identityKey) {
+    return state.worktreeMetaByIdentity?.[resolved.identityKey]
   }
   const legacy = state.worktreeMeta[worktreeId]
   return !legacy?.hostId || legacy.hostId === executionHostId ? legacy : undefined
@@ -163,15 +213,9 @@ export function setWorktreeMetaForHost(
   meta: Partial<WorktreeMeta>
 ): WorktreeMeta {
   const state = runtime.state
-  if (migrateLegacyWorktreeMetadata(state, worktreeId, executionHostId)) {
-    scheduleSave(scheduling)
-  }
+  migrateLegacyWorktreeMetadata(state, worktreeId, executionHostId)
   const alias = composeWorktreeIdentityAlias(executionHostId, worktreeId)
-  const identityKeys = state.worktreeIdentityAliases?.[alias] ?? []
-  if (identityKeys.length > 1) {
-    throw new Error('Worktree identity is ambiguous for this host and locator.')
-  }
-  const existingIdentityKey = identityKeys.length === 1 ? identityKeys[0] : undefined
+  const existingIdentityKey = resolveAliasIdentityKey(state, alias).identityKey
   const existingIdentityMeta = existingIdentityKey
     ? state.worktreeMetaByIdentity?.[existingIdentityKey]
     : undefined
@@ -179,7 +223,8 @@ export function setWorktreeMetaForHost(
   const existing =
     existingIdentityMeta ??
     (!legacy?.hostId || legacy.hostId === executionHostId ? legacy : undefined)
-  const instanceId = existing?.instanceId ?? randomUUID()
+  // An explicit instanceId is a deliberate rotation (see worktree-lineage-pruning), so it wins.
+  const instanceId = meta.instanceId ?? existing?.instanceId ?? randomUUID()
   const identityKey = canonicalWorktreeIdentity({ worktreeId, executionHostId, instanceId })
   const updated = {
     ...(existing ?? getDefaultWorktreeMeta()),
@@ -197,8 +242,11 @@ export function setWorktreeMetaForHost(
     : null
   state.worktreeMetaByIdentity ??= {}
   state.worktreeIdentityAliases ??= {}
+  if (existingIdentityKey && existingIdentityKey !== identityKey) {
+    delete state.worktreeMetaByIdentity[existingIdentityKey]
+  }
   state.worktreeMetaByIdentity[identityKey] = updated
-  state.worktreeIdentityAliases[alias] = [...new Set([...identityKeys, identityKey])]
+  state.worktreeIdentityAliases[alias] = [identityKey]
   // Keep the legacy projection only for the first known owner.
   if (!legacy || legacy.hostId === executionHostId) {
     state.worktreeMeta[worktreeId] = updated

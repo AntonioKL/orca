@@ -27,6 +27,7 @@ import type { TaskSourceContext } from '../../../../shared/task-source-context'
 import type { WorktreeRemovalTarget } from '../../../../shared/worktree/removal'
 import type { TerminalGitHubPRLink } from '../../../../shared/terminal-github-pr-link-detector'
 import type { ExecutionHostId } from '../../../../shared/execution-host'
+import { worktreeRowMatchesMetaHost } from './worktrees/listing/worktree-meta-host-match'
 import type { RemoveWorktreeOptions } from './worktree-removal-options'
 import type {
   HostQualifiedDetectedWorktreeResult,
@@ -424,10 +425,7 @@ export function applyWorktreeUpdates(
 
   let changed = false
   const nextWorktrees = worktrees.map((worktree) => {
-    if (
-      worktree.id !== worktreeId ||
-      (executionHostId !== undefined && worktree.hostId !== executionHostId)
-    ) {
+    if (worktree.id !== worktreeId || !worktreeRowMatchesMetaHost(worktree, executionHostId)) {
       return worktree
     }
 

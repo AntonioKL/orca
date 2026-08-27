@@ -11,6 +11,7 @@ import { createStore, readDataFile, testState, writeDataFile } from './persisten
 
 describe('host-qualified worktree metadata', () => {
   const worktreeId = 'repo-1::/workspace/feature'
+  const ROTATED_INSTANCE_ID = '44444444-4444-4444-8444-444444444444'
 
   beforeEach(() => {
     testState.dir = mkdtempSync(join(tmpdir(), 'orca-worktree-identity-'))
@@ -78,7 +79,9 @@ describe('host-qualified worktree metadata', () => {
     expect(migrated.worktreeMeta[worktreeId]?.hostId).toBe('local')
     expect(Object.keys(migrated.worktreeMetaByIdentity ?? {})).toHaveLength(1)
   })
-  it('fails closed when one host-qualified locator names multiple instances', () => {
+  // Fails open on purpose: an ambiguous alias used to brick reads and throw out of the worktree
+  // listing loop, taking every workspace in the repo down with it and never self-healing.
+  it('collapses an ambiguous locator onto its most recently active instance', () => {
     const seed = createStore()
     const first = seed.setWorktreeMetaForHost(worktreeId, 'local', { displayName: 'First' })
     seed.flush()
@@ -94,7 +97,8 @@ describe('host-qualified worktree metadata', () => {
     persisted.worktreeMetaByIdentity[secondKey] = {
       ...first,
       instanceId: '33333333-3333-4333-8333-333333333333',
-      displayName: 'Second'
+      displayName: 'Second',
+      lastActivityAt: 1
     }
     persisted.worktreeIdentityAliases[alias] = [
       ...(persisted.worktreeIdentityAliases[alias] ?? []),
@@ -103,10 +107,14 @@ describe('host-qualified worktree metadata', () => {
     writeDataFile(persisted)
 
     const store = createStore()
-    expect(store.getWorktreeMetaForHost(worktreeId, 'local')).toBeUndefined()
-    expect(() =>
-      store.setWorktreeMetaForHost(worktreeId, 'local', { comment: 'ambiguous write' })
-    ).toThrow('Worktree identity is ambiguous for this host and locator.')
+    expect(store.getWorktreeMetaForHost(worktreeId, 'local')?.displayName).toBe('Second')
+    expect(
+      store.setWorktreeMetaForHost(worktreeId, 'local', { comment: 'no longer ambiguous' }).comment
+    ).toBe('no longer ambiguous')
+
+    // The repair is durable: the alias resolves to one instance after a reload.
+    store.flush()
+    expect((readDataFile() as PersistedState).worktreeIdentityAliases?.[alias]).toEqual([secondKey])
   })
 
   it('removes only the selected host metadata when locators collide', () => {
@@ -167,5 +175,54 @@ describe('host-qualified worktree metadata', () => {
     expect(composeWorktreeIdentityAlias('local', worktreeId)).toBe(
       'local|repo-1::/workspace/feature'
     )
+  })
+  it('honours a deliberate instanceId rotation instead of pinning the stored one', () => {
+    const store = createStore()
+    store.setWorktreeMetaForHost(worktreeId, 'local', { displayName: 'Feature' })
+
+    // worktree-lineage-pruning rotates a proven-missing parent so path reuse cannot
+    // validate old lineage; pinning the existing id silently disarmed that guard.
+    const rotated = store.setWorktreeMeta(worktreeId, { instanceId: ROTATED_INSTANCE_ID })
+
+    expect(rotated.instanceId).toBe(ROTATED_INSTANCE_ID)
+    expect(store.getWorktreeMetaForHost(worktreeId, 'local')?.instanceId).toBe(ROTATED_INSTANCE_ID)
+    store.flush()
+    const persisted = readDataFile() as PersistedState
+    // The old identity row goes with the rotation rather than lingering unreachable.
+    expect(Object.keys(persisted.worktreeMetaByIdentity ?? {})).toEqual([
+      canonicalWorktreeIdentity({
+        worktreeId,
+        executionHostId: 'local',
+        instanceId: ROTATED_INSTANCE_ID
+      })
+    ])
+  })
+
+  it('leaves other hosts at the old locator when one host renames its folder', () => {
+    const store = createStore()
+    store.setWorktreeMetaForHost(worktreeId, 'local', { displayName: 'Local feature' })
+    store.setWorktreeMetaForHost(worktreeId, 'ssh:build-box', { displayName: 'Remote feature' })
+    const renamedId = 'repo-1::/workspace/renamed-feature'
+
+    store.migrateWorktreeIdentity(worktreeId, renamedId, 'local')
+
+    expect(store.getWorktreeMetaForHost(renamedId, 'local')?.displayName).toBe('Local feature')
+    // The SSH host never moved, so its row must stay reachable at the path it still has.
+    expect(store.getWorktreeMetaForHost(worktreeId, 'ssh:build-box')?.displayName).toBe(
+      'Remote feature'
+    )
+  })
+
+  it('drops every host identity row when a locator is removed outright', () => {
+    const store = createStore()
+    store.setWorktreeMetaForHost(worktreeId, 'local', { displayName: 'Local feature' })
+    store.setWorktreeMetaForHost(worktreeId, 'ssh:build-box', { displayName: 'Remote feature' })
+
+    store.removeWorktreeMeta(worktreeId)
+
+    store.flush()
+    const persisted = readDataFile() as PersistedState
+    expect(persisted.worktreeMetaByIdentity ?? {}).toEqual({})
+    expect(persisted.worktreeIdentityAliases ?? {}).toEqual({})
   })
 })

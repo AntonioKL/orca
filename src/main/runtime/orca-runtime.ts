@@ -918,6 +918,7 @@ import {
   type RepoWorktreeRowDeps
 } from './repo-worktree-row-resolution'
 import { getRepoOwnedWorktreeMeta } from '../worktree-metadata-ownership'
+import { readWorktreeMetaForHost } from '../persistence/host-qualified-worktree-meta'
 import { withTimeout } from '../../shared/promise-timeout-fallback'
 import {
   getLocalWorktreePathAccess,
@@ -24260,7 +24261,10 @@ export class OrcaRuntimeService {
     const metaById = store.getAllWorktreeMeta()
     const detected = scan.worktrees.map((gitWorktree) => {
       const worktreeId = `${repo.id}::${gitWorktree.path}`
-      const meta = getRepoOwnedWorktreeMeta(repo, worktreeId, metaById, repoOwnerCount)
+      // A host-qualified row is exact; the locator-keyed one is only trustworthy when this repo owns it.
+      const meta =
+        readWorktreeMetaForHost(store, worktreeId, expectedHostId) ??
+        getRepoOwnedWorktreeMeta(repo, worktreeId, metaById, repoOwnerCount)
       const worktree = {
         ...mergeWorktree(repo.id, gitWorktree, meta, repo.displayName),
         hostId: repoOwnerCount === 1 ? (meta?.hostId ?? expectedHostId) : expectedHostId
