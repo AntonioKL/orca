@@ -33,15 +33,20 @@ export function useNativeChatSlashCommandDispatched(args: {
   commandMarkerScope: NativeChatCommandMarkerScope
   setCommandMarkers: Dispatch<SetStateAction<NativeChatCommandMarker[]>>
   onSwitchToTerminal?: () => void
-}): (command: string, settled?: Promise<void>) => void {
+}): (command: string, settled?: Promise<void>, cancelled?: () => boolean) => void {
   const { agent, commandMarkerScope, setCommandMarkers, onSwitchToTerminal } = args
   return useCallback(
-    (command: string, settled?: Promise<void>) => {
+    (command: string, settled?: Promise<void>, cancelled?: () => boolean) => {
       setCommandMarkers(appendCommandMarkerCache(commandMarkerScope, command))
       if (!nativeChatSlashCommandOpensAgentPicker(command, getVerifiedNativeChatCommands(agent))) {
         return
       }
-      const reveal = (): void => onSwitchToTerminal?.()
+      const reveal = (): void => {
+        if (cancelled?.()) {
+          return
+        }
+        onSwitchToTerminal?.()
+      }
       if (settled) {
         void settled.then(reveal, reveal)
         return

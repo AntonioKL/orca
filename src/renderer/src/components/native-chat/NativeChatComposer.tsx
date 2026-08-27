@@ -8,7 +8,11 @@ import {
   sendNativeChatMessageWithImageAttachments,
   submitNativeChatPrompt
 } from './native-chat-runtime-send'
-import { trackNativeSend, waitForNativeChatSendQueueIdle } from './native-chat-send-settlement'
+import {
+  notifyNativeChatSlashCommand,
+  trackNativeSend,
+  waitForNativeChatSendQueueIdle
+} from './native-chat-send-settlement'
 import type { NativeChatSendHandle } from './native-chat-runtime-send'
 import { resolveNativeChatLaunchDraftSend } from './native-chat-launch-draft-send'
 import { getVerifiedNativeChatCommands } from '../../../../shared/native-chat-agent-profiles'
@@ -282,9 +286,12 @@ export const NativeChatComposer = forwardRef<NativeChatComposerHandle, NativeCha
       if (classification !== 'chat') {
         trackNativeSend(pendingHandle, trackPendingSend)
         if (classification === 'command') {
-          onSlashCommand?.(
+          const settled = waitForNativeChatSendQueueIdle(target.ptyId, pendingHandle?.settled)
+          notifyNativeChatSlashCommand(
+            onSlashCommand,
             text.trim(),
-            waitForNativeChatSendQueueIdle(target.ptyId, pendingHandle?.settled)
+            settled,
+            pendingHandle?.cancelled
           )
           sessionOptionsSurface?.recordOutgoingCommand(text.trim())
         }
@@ -324,7 +331,6 @@ export const NativeChatComposer = forwardRef<NativeChatComposerHandle, NativeCha
       trackPendingSend,
       setDraft
     ])
-
     const interrupt = useCallback(() => {
       cancelPendingSends()
       if (isWorking && onStop) {
@@ -354,7 +360,6 @@ export const NativeChatComposer = forwardRef<NativeChatComposerHandle, NativeCha
       clearImageAttachments,
       setNotice
     })
-
     const handleKeyDown = useNativeChatComposerKeyDown({
       autocomplete,
       activeSuggestion,

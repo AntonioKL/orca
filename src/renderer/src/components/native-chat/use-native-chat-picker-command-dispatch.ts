@@ -7,6 +7,10 @@ import {
 } from '@/lib/native-chat-telemetry'
 import { sendNativeChatMessage, sendNativeChatTypedCommand } from './native-chat-runtime-send'
 import {
+  notifyNativeChatSlashCommand,
+  waitForNativeChatSendQueueIdle
+} from './native-chat-send-settlement'
+import {
   nativeChatComposerTargetIsRemote,
   type NativeChatResolvedTarget
 } from './native-chat-composer-target'
@@ -23,7 +27,7 @@ export function useNativeChatPickerCommandDispatch(args: {
   disabled: boolean
   isDispatchingSessionOption: boolean
   resolveTarget: () => NativeChatResolvedTarget | null
-  onSlashCommand?: (command: string, settled?: Promise<void>) => void
+  onSlashCommand?: (command: string, settled?: Promise<void>, cancelled?: () => boolean) => void
   sessionOptionsSurface: NativeChatPtySessionOptionsSurface | null
   trackPendingSend: NativeChatSendLifecycle['trackPendingSend']
   setHistory: Dispatch<SetStateAction<HistoryState>>
@@ -67,7 +71,8 @@ export function useNativeChatPickerCommandDispatch(args: {
       // the same telemetry and composer state as the typed path — including
       // disarming attachments, or a stale image rides the next prompt.
       emitNativeChatSendClassified({ agent, outcome: 'command' })
-      onSlashCommand?.(text, pendingHandle.settled)
+      const settled = waitForNativeChatSendQueueIdle(target.ptyId, pendingHandle.settled)
+      notifyNativeChatSlashCommand(onSlashCommand, text, settled, pendingHandle.cancelled)
       sessionOptionsSurface?.recordOutgoingCommand(text)
       emitNativeChatMessageSent({
         agent,

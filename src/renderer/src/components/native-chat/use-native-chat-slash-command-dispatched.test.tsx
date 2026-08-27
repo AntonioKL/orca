@@ -72,6 +72,18 @@ describe('useNativeChatSlashCommandDispatched', () => {
     expect(onSwitchToTerminal).toHaveBeenCalledTimes(1)
   })
 
+  it('does not reveal after the send was cancelled', async () => {
+    const settled = Promise.resolve()
+    const cancelled = vi.fn(() => true)
+    const hook = render('claude')
+    act(() => hook.result.current('/resume', settled, cancelled))
+
+    await act(async () => {
+      await settled
+    })
+    expect(onSwitchToTerminal).not.toHaveBeenCalled()
+  })
+
   it('records the marker immediately, not on settle', async () => {
     // The `Ran /x` line is local feedback for a command with no transcript turn;
     // holding it until the writes finish would lag the user's own action.

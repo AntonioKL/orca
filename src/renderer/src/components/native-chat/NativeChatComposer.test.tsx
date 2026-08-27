@@ -85,7 +85,12 @@ vi.mock('./native-chat-runtime-send', () => ({
 vi.mock('./native-chat-send-settlement', () => ({
   waitForNativeChatSendQueueIdle: (...args: unknown[]) =>
     mocks.waitForNativeChatSendQueueIdle(...args),
-  trackNativeSend: (...args: unknown[]) => mocks.trackNativeSend(...args)
+  trackNativeSend: (...args: unknown[]) => mocks.trackNativeSend(...args),
+  notifyNativeChatSlashCommand: (
+    onSlashCommand: ((command: string, settled?: Promise<void>) => void) | undefined,
+    command: string,
+    settled?: Promise<void>
+  ) => onSlashCommand?.(command, settled)
 }))
 vi.mock('./claude-model-switch-confirmation', () => ({
   createClaudeModelSwitchConfirmationObserver: (...args: unknown[]) =>

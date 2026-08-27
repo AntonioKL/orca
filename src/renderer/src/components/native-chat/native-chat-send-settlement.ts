@@ -19,3 +19,18 @@ export function trackNativeSend<THandle>(
     track(handle, pendingId)
   }
 }
+
+export function notifyNativeChatSlashCommand(
+  onSlashCommand:
+    | ((command: string, settled?: Promise<void>, cancelled?: () => boolean) => void)
+    | undefined,
+  command: string,
+  settled: Promise<void> | undefined,
+  cancelled?: () => boolean
+): void {
+  if (cancelled) {
+    onSlashCommand?.(command, settled, cancelled)
+  } else {
+    onSlashCommand?.(command, settled)
+  }
+}

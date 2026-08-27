@@ -8,6 +8,8 @@
 
 export type NativeChatPtySendQueueHandle = {
   cancel: () => void
+  /** Whether this sequence was cancelled before it submitted. */
+  cancelled: () => boolean
   settleAfterMs: number
   settled: Promise<void>
   bodyStarted: () => boolean
@@ -180,6 +182,7 @@ export function enqueueNativeChatPtySend(
         options?.onCancelUnsubmitted?.()
       }
     },
+    cancelled: () => cancelled,
     settleAfterMs,
     settled,
     bodyStarted: () => bodyStarted,

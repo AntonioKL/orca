@@ -30,8 +30,12 @@ import {
   waitForNativeChatPtyIdle
 } from './native-chat-pty-send-queue'
 
-export { NATIVE_CHAT_ADVANCE_BUFFER_MS, NATIVE_CHAT_QUESTION_STEP_MS, NATIVE_CHAT_SUBMIT_DELAY_MS }
-export { resetNativeChatPtySendQueuesForTests, waitForNativeChatPtyIdle }
+export {
+  NATIVE_CHAT_ADVANCE_BUFFER_MS,
+  NATIVE_CHAT_QUESTION_STEP_MS,
+  NATIVE_CHAT_SUBMIT_DELAY_MS,
+  resetNativeChatPtySendQueuesForTests
+}
 
 export const NATIVE_CHAT_IMAGE_ATTACHMENT_SETTLE_MS = 300
 
@@ -65,6 +69,7 @@ export type NativeChatSendOptions = {
  *  later question bodies/Enters). Safe to call after the send completes. */
 export type NativeChatSendHandle = {
   cancel: () => void
+  cancelled?: () => boolean
   /** Time after which every scheduled write has fired and the handle can drop. */
   settleAfterMs: number
   /** Actual completion, which can outlive the nominal schedule if the renderer stalls. */

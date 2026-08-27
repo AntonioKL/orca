@@ -22,7 +22,7 @@ export type NativeChatComposerProps = {
   /** Record a dispatched slash command that does not create a chat turn. */
   /** A verified catalog command went out. `settled` resolves when its writes
    *  finish, so a handler that changes views cannot cancel the send. */
-  onSlashCommand?: (command: string, settled?: Promise<void>) => void
+  onSlashCommand?: (command: string, settled?: Promise<void>, cancelled?: () => boolean) => void
   /** Picker-only agent commands continue in the hosted TUI after dispatch. */
   onSwitchToTerminal?: () => void
   /** Reads the hosted TUI's current rendered screen when chat is entered. */

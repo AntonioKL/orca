@@ -14,6 +14,7 @@ import { createPortal } from 'react-dom'
 import type { CSSProperties } from 'react'
 import type { IDisposable } from '@xterm/xterm'
 import { useAppStore } from '../../store'
+import { emitNativeChatToggled } from '@/lib/native-chat-telemetry'
 import { useLinkRoutingPreferenceDialog } from '@/components/link-routing-preference-dialog'
 import { DaemonActionDialog, useDaemonActions } from '@/components/shared/useDaemonActions'
 import {
@@ -709,9 +710,13 @@ function TerminalPane(
     if (!unifiedTabId) {
       return
     }
+    const tab = useAppStore.getState().getTab(unifiedTabId)
+    if (tab?.viewMode === 'chat') {
+      emitNativeChatToggled({ from: 'chat', to: 'terminal', agent: terminalTab?.launchAgent })
+    }
     setChatLeafId(null)
     setTabViewMode(unifiedTabId, 'terminal')
-  }, [setTabViewMode, unifiedTabId])
+  }, [setTabViewMode, terminalTab?.launchAgent, unifiedTabId])
   const readNativeChatTerminalScreen = useCallback((): string | null => {
     if (!chatLeafId) {
       return null
