@@ -14,7 +14,8 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true
 const cooperativeMocks = vi.hoisted(() => ({
   buildDocuments: vi.fn(),
   searchDocuments: vi.fn(),
-  searchDocumentsImmediately: vi.fn(() => [])
+  searchDocumentsImmediately: vi.fn(() => []),
+  yieldToPalettePaint: vi.fn(() => Promise.resolve())
 }))
 
 vi.mock('@/lib/worktree-palette-document', () => ({
@@ -24,6 +25,10 @@ vi.mock('@/lib/worktree-palette-document', () => ({
 vi.mock('@/lib/worktree-palette-search', () => ({
   searchWorktreeDocuments: cooperativeMocks.searchDocumentsImmediately,
   searchWorktreeDocumentsCooperatively: cooperativeMocks.searchDocuments
+}))
+
+vi.mock('@/lib/palette-cooperative-scheduler', () => ({
+  yieldToPalettePaint: cooperativeMocks.yieldToPalettePaint
 }))
 
 type Deferred<T> = {
@@ -125,6 +130,7 @@ describe('cooperative worktree palette hooks', () => {
     cooperativeMocks.buildDocuments.mockReset()
     cooperativeMocks.searchDocuments.mockReset()
     cooperativeMocks.searchDocumentsImmediately.mockReset().mockReturnValue([])
+    cooperativeMocks.yieldToPalettePaint.mockClear()
     container = document.createElement('div')
     document.body.append(container)
     root = createRoot(container)
@@ -133,6 +139,18 @@ describe('cooperative worktree palette hooks', () => {
   afterEach(async () => {
     await act(async () => root.unmount())
     document.body.replaceChildren()
+  })
+
+  it('waits for the first palette paint before building documents', async () => {
+    const paint = deferred<void>()
+    cooperativeMocks.yieldToPalettePaint.mockReturnValueOnce(paint.promise)
+    cooperativeMocks.buildDocuments.mockResolvedValueOnce(new Map())
+
+    await act(async () => root.render(<DocumentProbe worktrees={[makeWorktree(1)]} />))
+    expect(cooperativeMocks.buildDocuments).not.toHaveBeenCalled()
+
+    await act(async () => paint.resolve())
+    expect(cooperativeMocks.buildDocuments).toHaveBeenCalledOnce()
   })
 
   it('publishes only the latest document generation and cancels on unmount', async () => {

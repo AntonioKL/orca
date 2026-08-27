@@ -20,7 +20,7 @@ import type { HostedReviewInfo } from '../../../shared/hosted-review'
 import type { Repo } from '../../../shared/repo-types'
 import type { Worktree } from '../../../shared/worktree/types'
 import { resolvePaletteRepoForWorktree } from './palette-repo-resolution'
-import { yieldToPalettePaint } from './palette-cooperative-scheduler'
+import { yieldToEventLoop } from '../../../shared/event-loop-yield'
 
 export const WORKTREE_PALETTE_NAME_FIELD_ID = 'name'
 export const WORKTREE_PALETTE_BRANCH_FIELD_ID = 'branch'
@@ -207,7 +207,7 @@ export async function buildWorktreePaletteDocumentsCooperatively(
 ): Promise<Map<string, PaletteDocument> | null> {
   const shouldContinue = options.shouldContinue ?? (() => true)
   const timeSliceMs = options.timeSliceMs ?? 8
-  const yieldBetweenSlices = options.yieldBetweenSlices ?? yieldToPalettePaint
+  const yieldBetweenSlices = options.yieldBetweenSlices ?? yieldToEventLoop
   const documents = new Map<string, PaletteDocument>()
   let sliceStartedAt = performance.now()
 

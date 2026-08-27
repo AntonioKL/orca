@@ -30,7 +30,7 @@ import {
   matchWorktreePaletteTaskUrl,
   parseCmdJTaskSourceUrl
 } from './worktree-palette-task-url-match'
-import { yieldToPalettePaint } from './palette-cooperative-scheduler'
+import { yieldToEventLoop } from '../../../shared/event-loop-yield'
 
 export type { MatchRange }
 
@@ -228,7 +228,7 @@ export async function searchWorktreeDocumentsCooperatively(
 
   const shouldContinue = options.shouldContinue ?? (() => true)
   const timeSliceMs = options.timeSliceMs ?? 8
-  const yieldBetweenSlices = options.yieldBetweenSlices ?? yieldToPalettePaint
+  const yieldBetweenSlices = options.yieldBetweenSlices ?? yieldToEventLoop
   const results: PaletteSearchResult[] = []
   let sliceStartedAt = performance.now()
 
