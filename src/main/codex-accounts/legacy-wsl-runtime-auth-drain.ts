@@ -31,7 +31,6 @@ type LegacyWslRuntimeAuthDrainOptions = {
   distro: string
   guestHomeLinuxPath: string
   legacyPanePresent: boolean
-  onDestinationAuthorized?: (destination: LegacyWslRuntimeAuthDestination) => void
   resolveDestination: (
     runtimeAuthContents: string
   ) => LegacyWslRuntimeAuthDestination | null | Promise<LegacyWslRuntimeAuthDestination | null>
@@ -137,7 +136,6 @@ export async function drainLegacyWslRuntimeAuth(
   } catch {
     return recoverAfterFailedApply(options.distro, paths)
   }
-  options.onDestinationAuthorized?.(destination)
   return deleteSource ? 'complete' : 'pending'
 }
 

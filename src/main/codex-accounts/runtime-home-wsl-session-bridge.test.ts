@@ -263,6 +263,79 @@ describe('CodexRuntimeHomeService', () => {
     }
   })
 
+  it('does not rescan retired sessions after the launch drain bridges them', async () => {
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+    const startWslCodexSessionBridgeInBackground = vi.fn(() => Promise.resolve())
+    vi.doMock('../codex/wsl-codex-session-bridge', () => ({
+      startWslCodexSessionBridgeInBackground
+    }))
+    const wslHome = join(testState.userDataDir, 'ubuntu-home')
+    vi.doMock('../wsl', () => ({
+      getDefaultWslDistro: () => 'Ubuntu',
+      getWslHome: () => wslHome
+    }))
+    const managedHomePath = join(wslHome, '.local', 'share', 'orca', 'codex-accounts', 'a', 'home')
+    const retiredBridgeRuns = vi.fn()
+    vi.doMock('./legacy-wsl-runtime-auth-drain', async (importOriginal) => ({
+      ...(await importOriginal<typeof LegacyWslRuntimeAuthDrain>()),
+      startLegacyWslRuntimeAuthDrain: async (options: {
+        onDestinationAuthorized?: (destination: {
+          authContents: string
+          linuxHomePath: string
+        }) => void
+      }) => {
+        retiredBridgeRuns()
+        options.onDestinationAuthorized?.({
+          authContents: '{"account":"a"}\n',
+          linuxHomePath: managedHomePath
+        })
+      }
+    }))
+    const store = createStore(
+      createSettings({
+        codexManagedAccounts: [
+          {
+            id: 'a',
+            email: 'a@example.com',
+            managedHomePath,
+            managedHomeRuntime: 'wsl',
+            wslDistro: 'Ubuntu',
+            wslLinuxHomePath: managedHomePath,
+            providerAccountId: 'acct-a',
+            workspaceLabel: null,
+            workspaceAccountId: 'acct-a',
+            createdAt: 1,
+            updatedAt: 1,
+            lastAuthenticatedAt: 1
+          }
+        ],
+        activeCodexManagedAccountIdsByRuntime: { host: null, wsl: { Ubuntu: 'a' } }
+      })
+    )
+
+    try {
+      const { CodexRuntimeHomeService } = await import('./runtime-home-service')
+      const service = new CodexRuntimeHomeService(store as never)
+
+      await service.prepareForCodexLaunchAsync({ runtime: 'wsl', wslDistro: 'Ubuntu' })
+
+      expect(retiredBridgeRuns).toHaveBeenCalledTimes(1)
+      expect(startWslCodexSessionBridgeInBackground).toHaveBeenCalledExactlyOnceWith({
+        distro: 'Ubuntu',
+        systemCodexHomePath: join(wslHome, '.codex'),
+        managedCodexHomePath: managedHomePath
+      })
+    } finally {
+      vi.doUnmock('./legacy-wsl-runtime-auth-drain')
+      vi.doUnmock('../codex/wsl-codex-session-bridge')
+      vi.doUnmock('../wsl')
+      if (originalPlatform) {
+        Object.defineProperty(process, 'platform', originalPlatform)
+      }
+    }
+  })
+
   it.skipIf(process.platform === 'win32')(
     'links retired WSL sessions only into the auth-matched direct home',
     async () => {

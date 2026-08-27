@@ -91,7 +91,6 @@ import {
   type CodexPaneHomeRoute
 } from '../codex/codex-pane-account-registry'
 import { isShellStartupEnvProbeSupported } from '../pty/shell-startup-env'
-import { wslCodexRuntimeHomeForGuestHome } from '../pty/codex-home-wsl-env'
 import {
   startLegacyWslRuntimeAuthDrain,
   type LegacyWslRuntimeAuthDestination
@@ -140,11 +139,6 @@ type CodexReadBackMatch =
       managedAuthContents: string
     }
   | { kind: 'none' | 'ambiguous' }
-
-type LegacyWslSessionBridgeAuthorization = {
-  destinationLinuxPath: string
-  retiredHomeLinuxPath: string
-}
 
 function readCodexLastRefresh(authJson: string): number | null {
   try {
@@ -210,11 +204,6 @@ export class CodexRuntimeHomeService {
   private hostSystemDefaultSessionMigrationPending = false
   private pendingHostSystemDefaultSessionMigrationNeedsFullScan = false
   private pendingHostSystemDefaultSessionMigrationTarget: string | null = null
-  private readonly legacyWslSessionBridgeAuthorizationByDistro = new Map<
-    string,
-    LegacyWslSessionBridgeAuthorization
-  >()
-
   constructor(private readonly store: Store) {
     this.safeRecoverInterruptedRuntimeAuthOperation()
     this.safeMigrateLegacySharedAuth()
@@ -608,23 +597,6 @@ export class CodexRuntimeHomeService {
         managedCodexHomePath: runtimeHomePath
       })
     }
-
-    const authorization = this.legacyWslSessionBridgeAuthorizationByDistro.get(distro.toLowerCase())
-    const launchLinuxHomePath = this.getWslLaunchLinuxHomePath(target, runtimeHomePath, distro)
-    if (
-      !authorization ||
-      !launchLinuxHomePath ||
-      pathPosix.normalize(authorization.destinationLinuxPath) !==
-        pathPosix.normalize(launchLinuxHomePath)
-    ) {
-      return
-    }
-    // Why: only the unique auth match may authorize retired history for this exact destination.
-    void startWslCodexSessionBridgeInBackground({
-      distro,
-      systemCodexHomePath: authorization.retiredHomeLinuxPath,
-      managedCodexHomePath: authorization.destinationLinuxPath
-    })
   }
 
   getHostCodexHomePathsForSessionDiscovery(): string[] {
@@ -1077,27 +1049,6 @@ export class CodexRuntimeHomeService {
     return legacyHome ? { distro: legacyHome.distro, linuxHomePath: legacyHome.linuxPath } : null
   }
 
-  private getWslLaunchLinuxHomePath(
-    target: CodexAccountSelectionTarget,
-    runtimeHomePath: string,
-    distro: string
-  ): string | null {
-    const settings = this.store.getSettings()
-    const account = this.getActiveAccount(
-      settings.codexManagedAccounts,
-      getSelectedCodexAccountIdForTarget(settings, target)
-    )
-    const wslHome = this.getWslManagedHomeIdentity(account)
-    if (wslHome?.distro.toLowerCase() === distro.toLowerCase()) {
-      return wslHome.linuxHomePath
-    }
-    const parsedRuntimeHome = parseWslUncPath(runtimeHomePath)
-    if (parsedRuntimeHome?.distro.toLowerCase() === distro.toLowerCase()) {
-      return parsedRuntimeHome.linuxPath
-    }
-    return runtimeHomePath.startsWith('/') ? runtimeHomePath : null
-  }
-
   private startLegacyWslAuthDrain(
     target: CodexAccountSelectionTarget,
     options: { throwOnFailure?: boolean } = {}
@@ -1109,8 +1060,6 @@ export class CodexRuntimeHomeService {
     if (!distro) {
       return Promise.resolve()
     }
-    const authorizationKey = distro.toLowerCase()
-    this.legacyWslSessionBridgeAuthorizationByDistro.delete(authorizationKey)
     const guestHome = getWslHome(distro)
     const guestHomeLinuxPath = guestHome ? toLinuxPath(guestHome).trim() : ''
     if (!guestHomeLinuxPath.startsWith('/')) {
@@ -1129,13 +1078,7 @@ export class CodexRuntimeHomeService {
         guestHomeLinuxPath,
         legacyPanePresent,
         resolveDestination: (runtimeAuthContents) =>
-          this.resolveLegacyWslAuthDestination(distro, runtimeAuthContents),
-        onDestinationAuthorized: (destination) => {
-          this.legacyWslSessionBridgeAuthorizationByDistro.set(authorizationKey, {
-            destinationLinuxPath: destination.linuxHomePath,
-            retiredHomeLinuxPath: wslCodexRuntimeHomeForGuestHome(guestHomeLinuxPath)
-          })
-        }
+          this.resolveLegacyWslAuthDestination(distro, runtimeAuthContents)
       },
       options
     )

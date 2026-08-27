@@ -51,21 +51,14 @@ describe('legacy WSL runtime auth drain', () => {
       authContents: STALE_AUTH,
       linuxHomePath: '/home/alice/.local/share/orca/codex-accounts/account-1/home'
     }))
-    const onDestinationAuthorized = vi.fn()
-
     await drainLegacyWslRuntimeAuth({
       distro: 'Ubuntu',
       guestHomeLinuxPath: '/home/alice',
       legacyPanePresent: true,
-      onDestinationAuthorized,
       resolveDestination
     })
 
     expect(resolveDestination).toHaveBeenCalledWith(SOURCE_AUTH)
-    expect(onDestinationAuthorized).toHaveBeenCalledWith({
-      authContents: STALE_AUTH,
-      linuxHomePath: '/home/alice/.local/share/orca/codex-accounts/account-1/home'
-    })
     expect(runWslProcessMock).toHaveBeenCalledTimes(2)
     expect(runWslProcessMock.mock.calls[1]?.[0].args.slice(3)).toEqual([
       '/home/alice/.local/share/orca/codex-accounts/account-1/home',
@@ -138,13 +131,11 @@ describe('legacy WSL runtime auth drain', () => {
       .mockResolvedValueOnce(result(45))
       .mockResolvedValueOnce(result(0, inspection(SOURCE_AUTH)))
 
-    const onDestinationAuthorized = vi.fn()
     await expect(
       drainLegacyWslRuntimeAuth({
         distro: 'Ubuntu',
         guestHomeLinuxPath: '/home/alice',
         legacyPanePresent: false,
-        onDestinationAuthorized,
         resolveDestination: () => ({
           authContents: NEWER_AUTH,
           linuxHomePath: '/home/alice/.codex'
@@ -152,7 +143,6 @@ describe('legacy WSL runtime auth drain', () => {
       })
     ).resolves.toBe('pending')
 
-    expect(onDestinationAuthorized).not.toHaveBeenCalled()
     expect(runWslProcessMock).toHaveBeenCalledTimes(3)
     expect(runWslProcessMock.mock.calls[2]?.[0]).toEqual(
       expect.objectContaining({
