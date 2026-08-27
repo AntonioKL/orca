@@ -37,11 +37,6 @@ import type { MobilePairingConnectionMode } from '../shared/mobile-pairing-conne
 import type { RuntimePairingReach } from '../shared/runtime-pairing-reach'
 import type { MobileRelayMintFailure } from '../shared/mobile-relay-mint-failure'
 import type { VerifyAndAddRuntimeEnvironmentResult } from '../shared/remote-pairing-verification'
-import {
-  getRuntimeEnvironmentLocalId,
-  stripRuntimeEnvironmentLocalIpcMetadata,
-  type RuntimeEnvironmentLocalIpcMetadata
-} from '../shared/runtime-environment-local-ipc'
 import type {
   SshMutationExpectation,
   SshConnectionState,
@@ -331,10 +326,7 @@ import type {
   LocalLogTailReadResult,
   LocalLogTailWatchArgs
 } from '../shared/local-log-tail-types'
-import {
-  observeRuntimeEnvironmentTerminalListResponse,
-  subscribeRuntimeEnvironmentFromPreload
-} from './runtime-environment-subscriptions'
+import { subscribeRuntimeEnvironmentFromPreload } from './runtime-environment-subscriptions'
 import type { RuntimeEnvironmentSubscriptionHandle } from './runtime-environment-subscriptions'
 import type { HostedReviewForBranchArgs } from '../shared/hosted-review'
 import type { ReadClipboardTextOptions } from '../shared/clipboard-text'
@@ -4708,25 +4700,14 @@ const api = {
       ipcRenderer.invoke('runtimeEnvironments:prepareBrowserClientHostPlacement', args),
     retryConnectionsNow: (): Promise<void> =>
       ipcRenderer.invoke('runtimeEnvironments:retryConnectionsNow'),
-    call: async (args: {
+    call: (args: {
       selector: string
       method: string
       params?: unknown
       timeoutMs?: number
       expectedEnvironmentPairingRevision?: number
-    }): Promise<RuntimeRpcResponse<unknown>> => {
-      const response = (await ipcRenderer.invoke(
-        'runtimeEnvironments:call',
-        args
-      )) as RuntimeRpcResponse<unknown> & RuntimeEnvironmentLocalIpcMetadata
-      observeRuntimeEnvironmentTerminalListResponse(
-        ipcRenderer,
-        args,
-        response,
-        getRuntimeEnvironmentLocalId(response)
-      )
-      return stripRuntimeEnvironmentLocalIpcMetadata(response)
-    },
+    }): Promise<RuntimeRpcResponse<unknown>> =>
+      ipcRenderer.invoke('runtimeEnvironments:call', args),
     subscribe: async (
       args: {
         selector: string

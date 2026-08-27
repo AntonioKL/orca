@@ -12,7 +12,6 @@ import {
 import { RemoteRuntimeClientError } from '../../shared/remote-runtime-client-error'
 import { RuntimeRpcCallQueueOverloadError } from '../../shared/runtime-rpc-call-queue'
 import type { RuntimeRpcFailure, RuntimeRpcResponse } from '../../shared/runtime-rpc-envelope'
-import { withRuntimeEnvironmentLocalIpcMetadata } from '../../shared/runtime-environment-local-ipc'
 import type { RuntimeStatus } from '../../shared/runtime-types'
 import type { Store } from '../persistence'
 import { clearBrowserRoutePartitionStorageForEnvironment } from '../browser/browser-route-partition-storage-runtime'
@@ -50,6 +49,11 @@ type ConnectivityHandlerOptions = {
   getUserDataPath: () => string
   invalidateTransport: (environmentId: string) => Promise<void> | void
 }
+
+export type RuntimeEnvironmentTerminalListObserver = (
+  environmentId: string,
+  response: RuntimeRpcResponse<unknown>
+) => void
 
 export function registerRuntimeEnvironmentConnectivityHandlers({
   store,
@@ -132,9 +136,12 @@ export function registerRuntimeEnvironmentConnectivityHandlers({
   )
 }
 
-export function registerRuntimeEnvironmentPassiveHandlers(getUserDataPath: () => string): void {
+export function registerRuntimeEnvironmentPassiveHandlers(
+  getUserDataPath: () => string,
+  observeTerminalList?: RuntimeEnvironmentTerminalListObserver
+): void {
   registerPassiveStatusHandler(getUserDataPath)
-  registerPassiveCallHandler(getUserDataPath)
+  registerPassiveCallHandler(getUserDataPath, observeTerminalList)
 }
 
 function closeLegacySelectorTransport(selector: string, environmentId: string): void {
@@ -187,7 +194,10 @@ function runtimeEnvironmentCallFailure(
   }
 }
 
-function registerPassiveCallHandler(getUserDataPath: () => string): void {
+function registerPassiveCallHandler(
+  getUserDataPath: () => string,
+  observeTerminalList?: RuntimeEnvironmentTerminalListObserver
+): void {
   ipcMain.handle(
     'runtimeEnvironments:call',
     async (
@@ -224,9 +234,10 @@ function registerPassiveCallHandler(getUserDataPath: () => string): void {
       const finalResponse = isRuntimeEnvironmentManuallyDisconnected(environment.id)
         ? manuallyDisconnectedResponse(environment)
         : response
-      return args.method === 'terminal.list' && finalResponse.ok
-        ? withRuntimeEnvironmentLocalIpcMetadata(finalResponse, environment.id)
-        : finalResponse
+      if (args.method === 'terminal.list' && finalResponse.ok) {
+        observeTerminalList?.(environment.id, finalResponse)
+      }
+      return finalResponse
     }
   )
 }

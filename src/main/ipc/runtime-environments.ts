@@ -1,13 +1,16 @@
 import { app, ipcMain } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { resolveEnvironment } from '../../shared/runtime-environment-store'
-import { withRuntimeEnvironmentLocalIpcMetadata } from '../../shared/runtime-environment-local-ipc'
+import { isPaneAgentIdentityAvailabilitySnapshot } from '../../shared/pane-agent-identity-availability-validator'
 import type { RemoteRuntimeSubscription } from '../../shared/remote-runtime-client'
+import type { RuntimeRpcResponse } from '../../shared/runtime-rpc-envelope'
 import type { Store } from '../persistence'
+import type { PaneAgentIdentityCensus } from '../telemetry/pane-agent-identity-census'
 import {
   isRuntimeEnvironmentManuallyDisconnected,
   registerRuntimeEnvironmentConnectivityHandlers,
-  registerRuntimeEnvironmentPassiveHandlers
+  registerRuntimeEnvironmentPassiveHandlers,
+  type RuntimeEnvironmentTerminalListObserver
 } from './runtime-environment-connectivity-handlers'
 import { closeRemoteRuntimeRequestConnection } from './runtime-environment-request-connections'
 import { registerRuntimeEnvironmentRecoveryHandler } from './runtime-environment-recovery-handler'
@@ -76,7 +79,10 @@ export function invalidateRuntimeEnvironmentTransport(environmentId: string): Pr
   )
 }
 
-export function registerRuntimeEnvironmentHandlers(store: Store): void {
+export function registerRuntimeEnvironmentHandlers(
+  store: Store,
+  paneIdentityCensus?: PaneAgentIdentityCensus
+): void {
   // Why: keep direct re-registration safe even though register-core-handlers
   // normally guards this path; otherwise the binary send listener can stack.
   resetSharedControlSupport()
@@ -85,6 +91,10 @@ export function registerRuntimeEnvironmentHandlers(store: Store): void {
   }
   ipcMain.removeAllListeners('runtimeEnvironments:subscriptionBinary')
 
+  const observeTerminalList: RuntimeEnvironmentTerminalListObserver | undefined = paneIdentityCensus
+    ? (environmentId, response) =>
+        ingestPaneAgentIdentityAvailability(paneIdentityCensus, environmentId, response)
+    : undefined
   registerRuntimeEnvironmentConnectivityHandlers({
     store,
     getUserDataPath,
@@ -95,7 +105,7 @@ export function registerRuntimeEnvironmentHandlers(store: Store): void {
     getSettings: () => store.getSettings()
   })
   registerRuntimeEnvironmentRecoveryHandler()
-  registerRuntimeEnvironmentPassiveHandlers(getUserDataPath)
+  registerRuntimeEnvironmentPassiveHandlers(getUserDataPath, observeTerminalList)
   ipcMain.handle(
     'runtimeEnvironments:subscribe',
     async (
@@ -186,18 +196,17 @@ export function registerRuntimeEnvironmentHandlers(store: Store): void {
                 return
               }
               if (transportIsCurrent() && !sender.isDestroyed()) {
-                const eventPayload = {
+                if (
+                  args.method === 'terminal.list' &&
+                  payload.type === 'response' &&
+                  payload.response.ok
+                ) {
+                  observeTerminalList?.(environment.id, payload.response)
+                }
+                sender.send('runtimeEnvironments:subscriptionEvent', {
                   subscriptionId,
                   ...payload
-                }
-                sender.send(
-                  'runtimeEnvironments:subscriptionEvent',
-                  args.method === 'terminal.list' &&
-                    payload.type === 'response' &&
-                    payload.response.ok
-                    ? withRuntimeEnvironmentLocalIpcMetadata(eventPayload, environment.id)
-                    : eventPayload
-                )
+                })
               }
             },
             onClose: () => {
@@ -272,6 +281,21 @@ export function registerRuntimeEnvironmentHandlers(store: Store): void {
       }
     }
   )
+}
+
+function ingestPaneAgentIdentityAvailability(
+  census: PaneAgentIdentityCensus,
+  environmentId: string,
+  response: RuntimeRpcResponse<unknown>
+): void {
+  if (!response.ok || !response.result || typeof response.result !== 'object') {
+    return
+  }
+  const snapshot = (response.result as { agentIdentityAvailability?: unknown })
+    .agentIdentityAvailability
+  if (snapshot !== undefined && isPaneAgentIdentityAvailabilitySnapshot(snapshot)) {
+    census.ingestRelaySnapshot(environmentId, snapshot)
+  }
 }
 
 function toBinaryPayload(value: unknown): Uint8Array<ArrayBufferLike> | null {

@@ -6,7 +6,6 @@ import {
   ELECTRON_REMOTE_RUNTIME_CLIENT_CAPABILITIES,
   REMOTE_RUNTIME_SHARED_CONTROL_CAPABILITY
 } from '../../shared/protocol-version'
-import { RUNTIME_ENVIRONMENT_LOCAL_ID_KEY } from '../../shared/runtime-environment-local-ipc'
 import type { RuntimeRpcResponse } from '../../shared/runtime-rpc-envelope'
 
 const {
@@ -235,8 +234,9 @@ describe('registerRuntimeEnvironmentHandlers', () => {
     expect(subscribeRemoteRuntimeRequestMock).not.toHaveBeenCalled()
   })
 
-  it('attaches canonical local metadata to terminal-list response events', async () => {
-    registerRuntimeEnvironmentHandlers(store as never)
+  it('ingests terminal-list snapshots before forwarding subscription responses', async () => {
+    const ingestRelaySnapshot = vi.fn()
+    registerRuntimeEnvironmentHandlers(store as never, { ingestRelaySnapshot } as never)
     subscribeRemoteRuntimeRequestMock.mockResolvedValue({
       requestId: 'terminal-list',
       close: vi.fn(),
@@ -271,15 +271,22 @@ describe('registerRuntimeEnvironmentHandlers', () => {
     callbacks.onResponse({
       id: 'terminal-list',
       ok: true,
-      result: { terminals: [] },
+      result: {
+        terminals: [],
+        agentIdentityAvailability: { epoch: 'epoch-1', revision: 1, rows: [] }
+      },
       _meta: { runtimeId: 'runtime-remote' }
     })
 
+    expect(ingestRelaySnapshot).toHaveBeenCalledWith(added.environment.id, {
+      epoch: 'epoch-1',
+      revision: 1,
+      rows: []
+    })
     expect(senderSend).toHaveBeenCalledWith(
       'runtimeEnvironments:subscriptionEvent',
       expect.objectContaining({
-        subscriptionId: 'sub-list',
-        [RUNTIME_ENVIRONMENT_LOCAL_ID_KEY]: added.environment.id
+        subscriptionId: 'sub-list'
       })
     )
   })

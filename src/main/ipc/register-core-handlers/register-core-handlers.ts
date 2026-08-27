@@ -189,7 +189,7 @@ export function registerCoreHandlers(
   if (pluginService) {
     registerPluginHandlers(store, pluginService, runtime, marketplaceServices)
   }
-  registerTelemetryHandlers(store, runtime.getPaneAgentIdentityCensus())
+  registerTelemetryHandlers(store)
   registerOrcaProfileHandlers(store, {
     onBeforeRelaunch: lifecycleOptions.onBeforeRelaunch,
     onAuthMutation: lifecycleOptions.onOrcaProfileAuthMutation,
@@ -212,7 +212,7 @@ export function registerCoreHandlers(
   }
   registerFilesystemWatcherHandlers()
   registerRuntimeHandlers(runtime)
-  registerRuntimeEnvironmentHandlers(store)
+  registerRuntimeEnvironmentHandlers(store, runtime.getPaneAgentIdentityCensus())
   registerEphemeralVmHandlers(store, pluginService)
   registerAiVaultHandlers({
     getAdditionalCodexHomePaths: lifecycleOptions.getAdditionalAiVaultCodexHomePaths,

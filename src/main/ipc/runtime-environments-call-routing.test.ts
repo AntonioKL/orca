@@ -10,7 +10,6 @@ import * as environmentStore from '../../shared/runtime-environment-store'
 import { RemoteRuntimeClientError } from '../../shared/remote-runtime-client-error'
 import { RuntimeRpcCallQueueOverloadError } from '../../shared/runtime-rpc-call-queue'
 import type { RuntimeRpcResponse } from '../../shared/runtime-rpc-envelope'
-import { RUNTIME_ENVIRONMENT_LOCAL_ID_KEY } from '../../shared/runtime-environment-local-ipc'
 
 const {
   handleMock,
@@ -351,8 +350,9 @@ describe('registerRuntimeEnvironmentHandlers', () => {
     expect(sendRemoteRuntimeConnectionRequestMock).not.toHaveBeenCalled()
   })
 
-  it('canonicalizes terminal-list local metadata across selector aliases', async () => {
-    registerRuntimeEnvironmentHandlers(store as never)
+  it('ingests terminal-list snapshots under canonical identity across selector aliases', async () => {
+    const ingestRelaySnapshot = vi.fn()
+    registerRuntimeEnvironmentHandlers(store as never, { ingestRelaySnapshot } as never)
     sendRemoteRuntimeRequestMock.mockResolvedValue({
       id: 'status',
       ok: true,
@@ -365,7 +365,10 @@ describe('registerRuntimeEnvironmentHandlers', () => {
     sendRemoteRuntimeSharedControlRequestMock.mockResolvedValue({
       id: 'terminal-list',
       ok: true,
-      result: { terminals: [] },
+      result: {
+        terminals: [],
+        agentIdentityAvailability: { epoch: 'epoch-1', revision: 1, rows: [] }
+      },
       _meta: { runtimeId: 'runtime-remote' }
     })
     const add = handler<
@@ -373,21 +376,41 @@ describe('registerRuntimeEnvironmentHandlers', () => {
       { environment: { id: string; name: string } }
     >('runtimeEnvironments:addFromPairingCode')
     const added = await add(null, { name: 'desk', pairingCode: pairingCode() })
-    const call = handler<
-      { selector: string; method: string },
-      RuntimeRpcResponse<unknown> & { [RUNTIME_ENVIRONMENT_LOCAL_ID_KEY]?: string }
-    >('runtimeEnvironments:call')
+    const call = handler<{ selector: string; method: string }, unknown>('runtimeEnvironments:call')
 
-    const byName = await call(null, { selector: 'desk', method: 'terminal.list' })
-    const byId = await call(null, {
+    await call(null, { selector: 'desk', method: 'terminal.list' })
+    await call(null, {
       selector: added.environment.id,
       method: 'terminal.list'
     })
+    sendRemoteRuntimeSharedControlRequestMock.mockResolvedValue({
+      id: 'terminal-list-invalid',
+      ok: true,
+      result: {
+        terminals: [],
+        agentIdentityAvailability: {
+          epoch: 'epoch-1',
+          revision: 2,
+          rows: [],
+          rawTitle: 'private'
+        }
+      },
+      _meta: { runtimeId: 'runtime-remote' }
+    })
+    await call(null, { selector: 'desk', method: 'terminal.list' })
+    sendRemoteRuntimeSharedControlRequestMock.mockResolvedValue({
+      id: 'terminal-list-old-peer',
+      ok: true,
+      result: { terminals: [] },
+      _meta: { runtimeId: 'runtime-remote' }
+    })
+    await call(null, { selector: 'desk', method: 'terminal.list' })
 
-    expect([
-      byName[RUNTIME_ENVIRONMENT_LOCAL_ID_KEY],
-      byId[RUNTIME_ENVIRONMENT_LOCAL_ID_KEY]
-    ]).toEqual([added.environment.id, added.environment.id])
+    expect(ingestRelaySnapshot).toHaveBeenCalledTimes(2)
+    expect(ingestRelaySnapshot.mock.calls.map(([environmentId]) => environmentId)).toEqual([
+      added.environment.id,
+      added.environment.id
+    ])
   })
 
   it('rechecks shared-control support when the saved runtime identity changes', async () => {

@@ -544,7 +544,7 @@ describe('registerCoreHandlers', () => {
     expect(registerWorkspaceSpaceHandlersMock).toHaveBeenCalledWith(store)
     expect(registerWorkspacePortHandlersMock).toHaveBeenCalledWith(store)
     expect(registerLocalhostWorktreeLabelHandlersMock).toHaveBeenCalledWith(store)
-    expect(registerTelemetryHandlersMock).toHaveBeenCalledWith(store, paneAgentIdentityCensus)
+    expect(registerTelemetryHandlersMock).toHaveBeenCalledWith(store)
     expect(registerOrcaProfileHandlersMock).toHaveBeenCalledWith(store, { onBeforeRelaunch })
     expect(registerSessionHandlersMock).toHaveBeenCalledWith(store)
     expect(registerUIHandlersMock).toHaveBeenCalledWith(store, {
@@ -554,7 +554,10 @@ describe('registerCoreHandlers', () => {
     expect(registerEmulatorVideoStreamHandlersMock).toHaveBeenCalled()
     expect(registerFilesystemHandlersMock).toHaveBeenCalledWith(store)
     expect(registerRuntimeHandlersMock).toHaveBeenCalledWith(runtime)
-    expect(registerRuntimeEnvironmentHandlersMock).toHaveBeenCalledWith(store)
+    expect(registerRuntimeEnvironmentHandlersMock).toHaveBeenCalledWith(
+      store,
+      paneAgentIdentityCensus
+    )
     expect(registerEphemeralVmHandlersMock).toHaveBeenCalledWith(store, undefined)
     expect(registerAiVaultHandlersMock).toHaveBeenCalledWith(
       expect.objectContaining({
