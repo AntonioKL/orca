@@ -4,6 +4,7 @@ import {
   AGENT_PROMPT_HOOK_EFFECT_TIMEOUT_MS,
   type AgentPromptActivity,
   isAgentPromptStalledError,
+  readAgentPromptWaitText,
   resolveAgentPromptEffectTimeoutMs,
   verifyAgentPromptSubmission
 } from './agent-prompt-submission-verification'
@@ -22,6 +23,17 @@ function activity(overrides: Partial<AgentPromptActivity> = {}): AgentPromptActi
 
 describe('agent prompt submission verification', () => {
   afterEach(() => vi.useRealTimers())
+
+  it('reuses wait text while the PTY output sequence is unchanged', () => {
+    const cache: { outputSequence?: number; waitText?: string } = {}
+    const readWaitText = vi.fn(() => 'retained terminal tail')
+
+    expect(readAgentPromptWaitText(cache, 7, readWaitText)).toBe('retained terminal tail')
+    expect(readAgentPromptWaitText(cache, 7, readWaitText)).toBe('retained terminal tail')
+    expect(readAgentPromptWaitText(cache, 8, readWaitText)).toBe('retained terminal tail')
+
+    expect(readWaitText).toHaveBeenCalledTimes(2)
+  })
 
   it('accepts an observed working transition', async () => {
     vi.useFakeTimers()
