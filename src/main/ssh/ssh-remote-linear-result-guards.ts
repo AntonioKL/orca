@@ -47,7 +47,45 @@ function isLinearMcpIssue(issue: unknown): boolean {
     typeof issue.title === 'string' &&
     typeof issue.url === 'string' &&
     Array.isArray(issue.labels) &&
+    issue.labels.every(isLinearNamedEntity) &&
+    isOptionalLinearNamedEntity(issue.state) &&
+    isOptionalLinearNamedEntity(issue.team) &&
+    isOptionalLinearNamedEntity(issue.project) &&
+    isOptionalLinearNamedEntity(issue.cycle) &&
+    isOptionalLinearUser(issue.assignee) &&
+    (issue.priority === undefined ||
+      issue.priority === null ||
+      typeof issue.priority === 'number') &&
     isLinearWorkspaceCandidate(issue.workspace)
+  )
+}
+
+function isOptionalLinearNamedEntity(value: unknown): boolean {
+  return value === undefined || value === null || isLinearNamedEntity(value)
+}
+
+function isLinearNamedEntity(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    (value.id === undefined || value.id === null || typeof value.id === 'string') &&
+    (value.name === undefined || value.name === null || typeof value.name === 'string') &&
+    (value.color === undefined || value.color === null || typeof value.color === 'string') &&
+    (value.type === undefined || value.type === null || typeof value.type === 'string')
+  )
+}
+
+function isOptionalLinearUser(value: unknown): boolean {
+  return (
+    value === undefined ||
+    value === null ||
+    (isRecord(value) &&
+      (value.id === undefined || value.id === null || typeof value.id === 'string') &&
+      (value.displayName === undefined ||
+        value.displayName === null ||
+        typeof value.displayName === 'string') &&
+      (value.avatarUrl === undefined ||
+        value.avatarUrl === null ||
+        typeof value.avatarUrl === 'string'))
   )
 }
 
