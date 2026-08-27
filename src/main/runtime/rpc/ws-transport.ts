@@ -234,7 +234,7 @@ export class WebSocketTransport implements RpcTransport {
 
     wss.on('connection', (ws) => {
       if (wss.clients.size > MAX_WS_CONNECTIONS) {
-        rejectNodeWebSocketOverCapacity(ws)
+        this.rejectOverCapacity(ws)
         return
       }
       this.handleConnection(ws)
@@ -242,6 +242,10 @@ export class WebSocketTransport implements RpcTransport {
 
     this.httpServer = httpServer
     this.wss = wss
+  }
+
+  private rejectOverCapacity(ws: WebSocket): void {
+    rejectNodeWebSocketOverCapacity(ws)
   }
 
   async stop(): Promise<void> {
