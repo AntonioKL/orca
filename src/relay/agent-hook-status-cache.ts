@@ -20,7 +20,12 @@ import { seedCodexSubagentTranscriptFromSnapshot } from '../shared/codex-subagen
 import { normalizeAgentProviderSession } from '../shared/agent-session-resume'
 import { normalizeAgentReconcileDiagnostic } from '../shared/agent-reconcile-diagnostic'
 
-export type RelayHookStatusMeta = { source: AgentHookSource; env?: string; version?: string }
+export type RelayHookStatusMeta = {
+  source: AgentHookSource
+  env?: string
+  version?: string
+  receivedAt?: number
+}
 type PersistedCache = {
   version: number
   entries: { event: AgentHookEventPayload; meta: RelayHookStatusMeta }[]
@@ -61,7 +66,9 @@ function sanitizeHydratedEntry(
   }
   if (
     (rawMeta.env !== undefined && typeof rawMeta.env !== 'string') ||
-    (rawMeta.version !== undefined && typeof rawMeta.version !== 'string')
+    (rawMeta.version !== undefined && typeof rawMeta.version !== 'string') ||
+    (rawMeta.receivedAt !== undefined &&
+      (typeof rawMeta.receivedAt !== 'number' || !Number.isFinite(rawMeta.receivedAt)))
   ) {
     return null
   }
@@ -87,7 +94,8 @@ function sanitizeHydratedEntry(
     meta: {
       source: rawMeta.source,
       env: typeof rawMeta.env === 'string' ? rawMeta.env : undefined,
-      version: typeof rawMeta.version === 'string' ? rawMeta.version : undefined
+      version: typeof rawMeta.version === 'string' ? rawMeta.version : undefined,
+      receivedAt: typeof rawMeta.receivedAt === 'number' ? rawMeta.receivedAt : undefined
     }
   }
 }
@@ -99,6 +107,7 @@ export function applyRelayHookEvent(options: {
   source: AgentHookSource
   env?: string
   version?: string
+  receivedAt?: number
   metadata: Map<string, RelayHookStatusMeta>
   persist: () => void
   clearPaneState: (paneKey: string) => void
@@ -114,7 +123,8 @@ export function applyRelayHookEvent(options: {
   options.metadata.set(diagnosticAwareEvent.paneKey, {
     source: options.source,
     env: options.env,
-    version: options.version
+    version: options.version,
+    receivedAt: options.receivedAt ?? Date.now()
   })
   options.persist()
   while (options.state.lastStatusByPaneKey.size > MAX_CACHED_PANES) {
@@ -138,7 +148,7 @@ export function reconcileRelayCodexEvent(
   seedCodexStateFromSnapshot(state, event.paneKey, event.payload)
   const transcript = getOrCreateCodexSubagentTranscriptState(state, event.paneKey)
   if (event.payload.subagents?.length) {
-    seedCodexSubagentTranscriptFromSnapshot(transcript, event.payload.subagents)
+    seedCodexSubagentTranscriptFromSnapshot(transcript, event.payload.subagents, transcriptPath)
   }
   const roster = state.codexSubagentRosterByPaneKey.get(event.paneKey)
   if (!transcript || !roster) {
@@ -152,7 +162,9 @@ export function reconcileRelayCodexEvent(
     ...(transcript.parentTerminalObserved === true
       ? { state: 'done' as const }
       : transcript.parentTerminalObserved === false
-        ? { state: 'working' as const }
+        ? {
+            state: event.payload.state === 'waiting' ? ('waiting' as const) : ('working' as const)
+          }
         : {})
   }
   return [...transcript.subagents.values()].some((child) => child.unresolvedSince)

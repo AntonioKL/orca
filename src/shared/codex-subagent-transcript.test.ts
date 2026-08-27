@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import type * as NodeFs from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -106,7 +106,7 @@ describe('Codex subagent transcript reconciliation', () => {
     const childPath = join(dir, `rollout-child-${CHILD_ID}.jsonl`)
     writeFileSync(
       parentPath,
-      `${'x'.repeat(1024 * 1024 + 32)}\n${JSON.stringify(activity('started'))}\n`
+      `${JSON.stringify(activity('started'))}\n${'x'.repeat(1024 * 1024 + 32)}\n`
     )
     writeFileSync(
       childPath,
@@ -122,11 +122,38 @@ describe('Codex subagent transcript reconciliation', () => {
         { id: CHILD_ID, state: 'working', description: '/root/sidebar_repro', startedAt: 1234 }
       ]
     ])
-    seedCodexSubagentTranscriptFromSnapshot(state, [
-      { id: CHILD_ID, description: '/root/sidebar_repro', startedAt: 1234 }
-    ])
+    seedCodexSubagentTranscriptFromSnapshot(
+      state,
+      [{ id: CHILD_ID, description: '/root/sidebar_repro', state: 'working', startedAt: 1234 }],
+      parentPath
+    )
     reconcileCodexSubagentTranscript(state, roster, parentPath)
     expect(roster.size).toBe(0)
+  })
+
+  it('uses new transcript activity after preserving a hydrated waiting state', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'codex-subagent-transcript-waiting-'))
+    dirs.push(dir)
+    const parentPath = join(dir, 'rollout-parent.jsonl')
+    const childPath = join(dir, `rollout-child-${CHILD_ID}.jsonl`)
+    writeFileSync(parentPath, jsonl([activity('started')]))
+    writeFileSync(childPath, jsonl([{ type: 'event_msg', payload: { type: 'task_started' } }]))
+    const state = createCodexSubagentTranscriptState()
+    const roster: CodexSubagentRoster = new Map([
+      [CHILD_ID, { id: CHILD_ID, state: 'waiting', startedAt: 1234 }]
+    ])
+    seedCodexSubagentTranscriptFromSnapshot(
+      state,
+      [{ id: CHILD_ID, state: 'waiting', startedAt: 1234 }],
+      parentPath
+    )
+
+    reconcileCodexSubagentTranscript(state, roster, parentPath)
+    expect(codexRosterToSnapshots(roster)?.[0]?.state).toBe('waiting')
+
+    appendFileSync(parentPath, jsonl([activity('interacted', 2345)]))
+    reconcileCodexSubagentTranscript(state, roster, parentPath)
+    expect(codexRosterToSnapshots(roster)?.[0]?.state).toBe('working')
   })
 
   it('resolves a child rollout filed under a later session day than the parent', () => {

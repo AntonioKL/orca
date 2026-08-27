@@ -58,6 +58,50 @@ describe('relay agent-hook status cache', () => {
     }
   })
 
+  it('preserves persisted waits while reconciling historical nonterminal records', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'relay-hook-status-cache-waiting-'))
+    try {
+      const transcriptPath = join(dir, 'rollout-parent.jsonl')
+      const childId = '019fa65f-3144-7151-9c02-cff7a28f316f'
+      writeFileSync(
+        transcriptPath,
+        `${JSON.stringify({ type: 'event_msg', payload: { type: 'task_started' } })}\n${JSON.stringify(
+          {
+            type: 'event_msg',
+            payload: {
+              type: 'sub_agent_activity',
+              occurred_at_ms: 1234,
+              agent_thread_id: childId,
+              agent_path: '/root/waiting_child',
+              kind: 'started'
+            }
+          }
+        )}\n`
+      )
+      writeFileSync(
+        join(dir, `rollout-child-${childId}.jsonl`),
+        `${JSON.stringify({ type: 'event_msg', payload: { type: 'task_started' } })}\n`
+      )
+      const state = createHookListenerState()
+
+      const reconciled = reconcileRelayCodexEvent(state, {
+        ...event('PostToolUse'),
+        providerSession: { key: 'session_id', id: 'session-1', transcriptPath },
+        payload: {
+          state: 'waiting',
+          prompt: 'permission',
+          agentType: 'codex',
+          subagents: [{ id: childId, state: 'waiting', startedAt: 1234 }]
+        }
+      })
+
+      expect(reconciled.payload.state).toBe('waiting')
+      expect(reconciled.payload.subagents?.[0]?.state).toBe('waiting')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('clears an inherited Codex reconciliation diagnostic at SessionStart', () => {
     const state = createHookListenerState()
     const metadata = new Map<string, { source: 'codex' }>()

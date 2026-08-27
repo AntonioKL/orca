@@ -126,6 +126,82 @@ describe('applyWebSessionTabsSnapshot', () => {
     expect(degraded.sortEpoch).toBe(2)
   })
 
+  it('applies marker-only reconciliation diagnostic set and clear updates', () => {
+    const hostPaneKey = makePaneKey('host-tab-1', LEAF_ID)
+    const snapshot = makeSnapshot([
+      {
+        type: 'terminal',
+        id: HOST_SURFACE_ID,
+        title: 'codex [working]',
+        parentTabId: 'host-tab-1',
+        leafId: LEAF_ID,
+        isActive: true,
+        status: 'ready',
+        terminal: 'terminal-1',
+        agentStatus: {
+          state: 'working',
+          prompt: 'recover remote state',
+          updatedAt: NOW - 100,
+          stateStartedAt: NOW - 1_000,
+          agentType: 'codex',
+          paneKey: hostPaneKey,
+          tabId: 'host-tab-1',
+          worktreeId: WT,
+          stateHistory: []
+        }
+      }
+    ])
+    const initial = applyWebSessionTabsSnapshot(
+      makeState(),
+      snapshot,
+      ENV,
+      NOW
+    ) as Partial<WebSessionTabsSyncState>
+    const mirroredPaneKey = Object.keys(initial.agentStatusByPaneKey ?? {})[0]!
+    const diagnostic = {
+      kind: 'unverifiable' as const,
+      reason: 'transcript-unreadable' as const,
+      observedAt: 123
+    }
+    const degraded = applyWebSessionTabsSnapshot(
+      makeState({ ...initial }),
+      {
+        ...snapshot,
+        snapshotVersion: 2,
+        tabs: snapshot.tabs.map((tab) =>
+          tab.type === 'terminal' && tab.agentStatus
+            ? { ...tab, agentStatus: { ...tab.agentStatus, reconcileDiagnostic: diagnostic } }
+            : tab
+        )
+      },
+      ENV,
+      NOW
+    ) as Partial<WebSessionTabsSyncState>
+
+    expect(degraded.agentStatusByPaneKey?.[mirroredPaneKey]?.reconcileDiagnostic).toEqual(
+      diagnostic
+    )
+    expect(degraded.agentStatusEpoch).toBe(2)
+
+    const cleared = applyWebSessionTabsSnapshot(
+      makeState({ ...initial, ...degraded }),
+      {
+        ...snapshot,
+        snapshotVersion: 3,
+        tabs: snapshot.tabs.map((tab) =>
+          tab.type === 'terminal' && tab.agentStatus
+            ? { ...tab, agentStatus: { ...tab.agentStatus, reconcileDiagnostic: null } }
+            : tab
+        )
+      },
+      ENV,
+      NOW
+    ) as Partial<WebSessionTabsSyncState>
+
+    expect(cleared.agentStatusByPaneKey?.[mirroredPaneKey]?.reconcileDiagnostic).toBeNull()
+    expect(cleared.agentStatusEpoch).toBe(3)
+  })
+
   it('repairs mirrored same-state attribution and retains identity from an older snapshot', () => {
     const hostPaneKey = makePaneKey('host-tab-1', LEAF_ID)
     const snapshot = makeSnapshot([

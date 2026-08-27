@@ -40,7 +40,8 @@ import {
   createRelayCodexReconciler,
   hydrateRelayHookStatusCache,
   persistRelayHookStatusCache,
-  reconcileRelayCodexEvent
+  reconcileRelayCodexEvent,
+  type RelayHookStatusMeta
 } from './agent-hook-status-cache'
 import { RelayHookStatusCacheWriter } from './agent-hook-status-cache-writer'
 import { handleRelayHookRequest } from './agent-hook-request'
@@ -71,10 +72,7 @@ export class RelayAgentHookServer {
   })
   // Why: retain envelope metadata so replays match live POSTs.
   // Invariant: keys mirror state.lastStatusByPaneKey, populated/cleared in lockstep.
-  private lastEnvelopeMetaByPaneKey = new Map<
-    string,
-    { source: AgentHookSource; env?: string; version?: string }
-  >()
+  private lastEnvelopeMetaByPaneKey = new Map<string, RelayHookStatusMeta>()
   private forward: RelayHookForward
   private fixedToken: string | undefined
   private preferredPort: number
@@ -261,6 +259,10 @@ export class RelayAgentHookServer {
     if (!isAgentHookSource(record.source)) {
       return
     }
+    const cachedAt = this.lastEnvelopeMetaByPaneKey.get(record.paneKey)?.receivedAt
+    if (cachedAt !== undefined && record.receivedAt <= cachedAt) {
+      return
+    }
     const body = buildSpoolHookBody(record)
     const event = normalizeHookPayload(this.state, record.source, body, this.env, {
       deferCompactOwnershipToClient: true
@@ -269,7 +271,8 @@ export class RelayAgentHookServer {
       return
     }
     this.applyEvent(event, record.source, hookBodyEnv(body), hookBodyVersion(body), {
-      isReplay: true
+      isReplay: true,
+      receivedAt: record.receivedAt
     })
   }
 
@@ -278,7 +281,7 @@ export class RelayAgentHookServer {
     source: AgentHookSource,
     env?: string,
     version?: string,
-    options: { isReplay?: boolean } = {}
+    options: { isReplay?: boolean; receivedAt?: number } = {}
   ): void {
     if (!this.server) {
       return
@@ -289,6 +292,7 @@ export class RelayAgentHookServer {
       source,
       env,
       version,
+      receivedAt: options.receivedAt,
       isReplay: options.isReplay,
       metadata: this.lastEnvelopeMetaByPaneKey,
       persist: () => this.statusCacheWriter.schedule(),

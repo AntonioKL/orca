@@ -1,5 +1,5 @@
-import { closeSync, openSync, readSync, readdirSync, statSync, type Stats } from 'node:fs'
-import { basename, dirname, extname, isAbsolute, join } from 'node:path'
+import { closeSync, openSync, readSync, statSync, type Stats } from 'node:fs'
+import { extname, isAbsolute } from 'node:path'
 
 import {
   finishCodexSubagent,
@@ -7,10 +7,10 @@ import {
   upsertCodexSubagent,
   type CodexSubagentRoster
 } from './codex-subagent-roster'
+import { resolveCodexChildTranscript } from './codex-subagent-transcript-paths'
 
 const TRANSCRIPT_READ_MAX_BYTES = 1024 * 1024
 const TRANSCRIPT_LINE_MAX_BYTES = 256 * 1024
-const TRANSCRIPT_DIRECTORY_MAX_ENTRIES = 4096
 // Why: retire a child whose rollout stays unreadable this long, else a deleted/never-written file pins a phantom row forever.
 const CHILD_UNREADABLE_GRACE_MS = 60_000
 const SAFE_THREAD_ID = /^[A-Za-z0-9-]{1,64}$/
@@ -25,6 +25,8 @@ type TrackedTranscriptSubagent = JsonlCursor & {
   description?: string
   /** Retained because incremental reads usually omit the earlier `turn_context`. */
   model?: string
+  restoredState?: 'working' | 'waiting'
+  restoredFromSnapshot?: true
   startedAt: number
   unresolvedSince?: number
 }
@@ -100,72 +102,6 @@ function readJsonlCursor(cursor: JsonlCursor): JsonRecord[] | undefined {
   return records
 }
 
-function readTranscriptDirectory(directory: string): string[] {
-  let entries: string[]
-  try {
-    entries = readdirSync(directory)
-  } catch {
-    return []
-  }
-  if (entries.length > TRANSCRIPT_DIRECTORY_MAX_ENTRIES) {
-    entries = entries.slice(-TRANSCRIPT_DIRECTORY_MAX_ENTRIES)
-  }
-  return entries
-}
-
-// Why: Codex files each rollout under its OWN local start date, so a session running past midnight spawns children into a sibling day directory.
-function childDayDirectory(parentPath: string, startedAt: number): string | undefined {
-  const dayDir = dirname(parentPath)
-  const monthDir = dirname(dayDir)
-  const yearDir = dirname(monthDir)
-  if (
-    !/^\d{2}$/.test(basename(dayDir)) ||
-    !/^\d{2}$/.test(basename(monthDir)) ||
-    !/^\d{4}$/.test(basename(yearDir)) ||
-    !Number.isFinite(startedAt)
-  ) {
-    return undefined
-  }
-  const startedOn = new Date(startedAt)
-  if (Number.isNaN(startedOn.getTime())) {
-    return undefined
-  }
-  const pad = (value: number): string => String(value).padStart(2, '0')
-  return join(
-    dirname(yearDir),
-    String(startedOn.getFullYear()).padStart(4, '0'),
-    pad(startedOn.getMonth() + 1),
-    pad(startedOn.getDate())
-  )
-}
-
-function resolveChildTranscript(
-  parentPath: string,
-  threadId: string,
-  startedAt: number,
-  entriesByDirectory: Map<string, string[]>
-): string | undefined {
-  if (!SAFE_THREAD_ID.test(threadId)) {
-    return undefined
-  }
-  const suffix = `-${threadId}.jsonl`
-  const parentDir = dirname(parentPath)
-  const childDir = childDayDirectory(parentPath, startedAt)
-  const directories = childDir && childDir !== parentDir ? [parentDir, childDir] : [parentDir]
-  for (const directory of directories) {
-    let entries = entriesByDirectory.get(directory)
-    if (!entries) {
-      entries = readTranscriptDirectory(directory)
-      entriesByDirectory.set(directory, entries)
-    }
-    const fileName = entries.find((entry) => entry.endsWith(suffix))
-    if (fileName) {
-      return join(directory, fileName)
-    }
-  }
-  return undefined
-}
-
 function readActivity(recordValue: JsonRecord):
   | {
       id: string
@@ -239,7 +175,9 @@ export function createCodexSubagentTranscriptState(): CodexSubagentTranscriptSta
 export function hasTrackedCodexTranscriptSubagents(
   state: CodexSubagentTranscriptState | undefined
 ): boolean {
-  return Boolean(state && state.subagents.size > 0)
+  return Boolean(
+    state && [...state.subagents.values()].some((subagent) => !subagent.restoredFromSnapshot)
+  )
 }
 
 export function reconcileCodexSubagentTranscript(
@@ -281,19 +219,25 @@ export function reconcileCodexSubagentTranscript(
       startedAt: activity.startedAt
     }
     tracked.description = activity.description ?? tracked.description
+    tracked.restoredFromSnapshot = undefined
     state.subagents.set(activity.id, tracked)
     upsertCodexSubagent(
       roster,
       activity.id,
-      { description: tracked.description, state: 'working' },
+      { description: tracked.description, state: tracked.restoredState ?? 'working' },
       tracked.startedAt
     )
+  }
+  for (const tracked of state.subagents.values()) {
+    if (!tracked.restoredFromSnapshot) {
+      tracked.restoredState = undefined
+    }
   }
   const entriesByDirectory = new Map<string, string[]>()
   const now = Date.now()
   for (const [id, tracked] of state.subagents) {
     if (!tracked.filePath) {
-      tracked.filePath = resolveChildTranscript(
+      tracked.filePath = resolveCodexChildTranscript(
         normalizedPath,
         id,
         tracked.startedAt,
@@ -316,6 +260,8 @@ export function reconcileCodexSubagentTranscript(
       // otherwise drop a model found on an earlier poll.
       setCodexSubagentModel(roster, id, tracked.model)
       if (!childIsComplete(records)) {
+        tracked.restoredFromSnapshot = undefined
+        tracked.restoredState = undefined
         continue
       }
     }

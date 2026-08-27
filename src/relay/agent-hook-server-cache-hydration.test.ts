@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -90,6 +90,54 @@ describe('relay agent-hook server cache hydration', () => {
             observedAt: 123
           },
           isReplay: true
+        })
+      )
+    } finally {
+      server.stop()
+    }
+  })
+
+  it('does not let an older spool record overwrite a newer durable status', async () => {
+    const cachedAt = Date.now()
+    writeFileSync(
+      join(dir, 'hook-status-cache.json'),
+      JSON.stringify({
+        version: 1,
+        entries: [
+          {
+            event: {
+              paneKey: PANE_KEY,
+              payload: { state: 'working', prompt: 'newer cached turn', agentType: 'codex' }
+            },
+            meta: { source: 'codex', env: 'remote', version: '1', receivedAt: cachedAt }
+          }
+        ]
+      }),
+      'utf8'
+    )
+    const spoolDir = join(dir, 'spool')
+    mkdirSync(spoolDir)
+    writeFileSync(
+      join(spoolDir, 'pane.jsonl'),
+      `${JSON.stringify({
+        paneKey: PANE_KEY,
+        source: 'codex',
+        hookEventName: 'Stop',
+        payload: { hook_event_name: 'Stop' },
+        receivedAt: cachedAt - 1
+      })}\n`
+    )
+    const forward = vi.fn<(envelope: AgentHookRelayEnvelope) => void>()
+    const server = new RelayAgentHookServer({ endpointDir: dir, forward })
+
+    await server.start()
+    try {
+      expect(forward).not.toHaveBeenCalled()
+      expect(server.replayCachedPayloadsForPanes()).toBe(1)
+      expect(forward).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          isReplay: true,
+          payload: expect.objectContaining({ state: 'working', prompt: 'newer cached turn' })
         })
       )
     } finally {

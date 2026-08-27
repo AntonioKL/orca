@@ -265,6 +265,54 @@ describe('AgentHookServer Codex subagent transcript polling', () => {
     }
   })
 
+  it('reconciles a persisted child whose spawn record fell outside the transcript tail', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-hook-codex-restart-tail-'))
+    dirs.push(dir)
+    const parentPath = join(dir, 'rollout-parent.jsonl')
+    const childPath = join(dir, `rollout-child-${CHILD_ID}.jsonl`)
+    writeFileSync(parentPath, spawnLine(CHILD_ID, '/root/restart_tail'))
+    writeFileSync(childPath, line({ type: 'event_msg', payload: { type: 'task_started' } }))
+    const first = new AgentHookServer()
+    await first.start({ env: 'production', userDataPath: dir })
+    try {
+      const env = first.buildPtyEnv()
+      await fetch(`http://127.0.0.1:${env.ORCA_AGENT_HOOK_PORT}/hook/codex`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Orca-Agent-Hook-Token': env.ORCA_AGENT_HOOK_TOKEN
+        },
+        body: JSON.stringify({
+          paneKey: PANE_KEY,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          payload: {
+            hook_event_name: 'PostToolUse',
+            session_id: 'root-session',
+            transcript_path: parentPath,
+            tool_name: 'collaborationspawn_agent'
+          }
+        })
+      })
+      expect(first.getStatusSnapshot()[0]?.subagents).toHaveLength(1)
+    } finally {
+      first.stop()
+    }
+    appendFileSync(parentPath, `${'x'.repeat(1024 * 1024 + 32)}\n`)
+    appendFileSync(childPath, line({ type: 'event_msg', payload: { type: 'task_complete' } }))
+
+    const second = new AgentHookServer()
+    await second.start({ env: 'production', userDataPath: dir })
+    try {
+      await vi.waitFor(() => expect(second.getStatusSnapshot()[0]?.subagents).toBeUndefined(), {
+        timeout: 2_500,
+        interval: 50
+      })
+    } finally {
+      second.stop()
+    }
+  })
+
   it('preserves an unreadable transcript diagnostic across ordinary hooks', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'agent-hook-codex-unreadable-'))
     dirs.push(dir)

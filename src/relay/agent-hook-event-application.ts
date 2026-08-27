@@ -9,6 +9,7 @@ export function applyRelayEvent(options: {
   source: AgentHookSource
   env?: string
   version?: string
+  receivedAt?: number
   isReplay?: boolean
   metadata: Map<string, { source: AgentHookSource; env?: string; version?: string }>
   persist: () => void
@@ -36,6 +37,7 @@ export function applyRelayEvent(options: {
     source: options.source,
     env: options.env,
     version: options.version,
+    receivedAt: options.receivedAt,
     metadata: options.metadata,
     persist: options.persist,
     clearPaneState: options.clearPaneState,

@@ -78,6 +78,7 @@ import {
 } from '../../shared/claude-subagent-roster'
 import { codexRosterToSnapshots } from '../../shared/codex-subagent-roster'
 import { reconcileCodexSubagentTranscript } from '../../shared/codex-subagent-transcript'
+import { seedCodexSubagentTranscriptFromSnapshot } from '../../shared/codex-subagent-transcript-seeding'
 import {
   isAgentHookSource,
   restoreShedStatusFields,
@@ -1733,7 +1734,10 @@ export class AgentHookServer {
         ...(terminal
           ? { state: 'done' as const }
           : transcript.parentTerminalObserved === false
-            ? { state: 'working' as const }
+            ? {
+                state:
+                  current.payload.state === 'waiting' ? ('waiting' as const) : ('working' as const)
+              }
             : {}),
         ...(subagents ? { subagents } : { subagents: undefined })
       }
@@ -3434,6 +3438,13 @@ export class AgentHookServer {
         // Why: restore live child hierarchy immediately; provider-specific reconciliation reaps stale seeds.
         if (entry.payload.agentType === 'codex') {
           seedCodexStateFromSnapshot(this.state, resolvedPaneKey, entry.payload)
+          if (entry.payload.subagents?.length) {
+            seedCodexSubagentTranscriptFromSnapshot(
+              getOrCreateCodexSubagentTranscriptState(this.state, resolvedPaneKey),
+              entry.payload.subagents,
+              entry.providerSession?.transcriptPath
+            )
+          }
           this.scheduleCodexRestartReconciliation(resolvedPaneKey)
         } else if (entry.payload.agentType === 'claude') {
           seedClaudeLeadTurnFromPersistedStatus(this.state, resolvedPaneKey, entry, {
