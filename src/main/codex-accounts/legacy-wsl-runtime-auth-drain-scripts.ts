@@ -24,7 +24,8 @@ session_link_manifest="$3.orca-drain-session-links"
 session_commit_marker="$3.orca-drain-session-commit"
 session_stage_root="$3.orca-drain-session-stage"
 ${ROLLBACK_SESSION_LINKS_FUNCTION}
-if [ -f "$3" ]; then
+if [ -e "$3" ] || [ -L "$3" ]; then
+  [ -f "$3" ] && [ ! -L "$3" ] || exit 46
   commit_session_links || exit 46
   if [ -f "$destination_recovery_auth" ] && [ ! -L "$destination_recovery_auth" ]; then
     chmod 600 "$destination_recovery_auth"
@@ -57,7 +58,10 @@ elif [ -e "$destination_recovery_path" ] || [ -L "$destination_recovery_path" ];
   [ -f "$destination_recovery_path" ] && [ ! -L "$destination_recovery_path" ] || exit 46
   rm -- "$destination_recovery_path"
 fi
-[ -f "$source_auth" ] || exit ${SOURCE_AUTH_ABSENT_EXIT}
+if [ ! -e "$source_auth" ] && [ ! -L "$source_auth" ]; then
+  exit ${SOURCE_AUTH_ABSENT_EXIT}
+fi
+[ -f "$source_auth" ] && [ ! -L "$source_auth" ] || exit 46
 encode_file() {
   encoded=$(base64 < "$1") || return 1
   printf '%s' "$encoded" | tr -d '\n'
@@ -65,7 +69,7 @@ encode_file() {
 encode_file "$source_auth"
 printf '\n'
 source_credentials="$legacy_home/.credentials.json"
-if [ -f "$source_credentials" ]; then
+if [ -f "$source_credentials" ] && [ ! -L "$source_credentials" ]; then
   printf 'present\n'
   encode_file "$source_credentials"
   printf '\n'
@@ -100,8 +104,10 @@ target_home=$(readlink -f -- "$4") || exit 33
 [ "$legacy_home" != "$target_home" ] || exit 34
 source_auth="$legacy_home/auth.json"
 target_auth="$target_home/auth.json"
-[ -f "$source_auth" ] || exit 35
-[ -f "$target_auth" ] || exit 36
+if [ ! -e "$source_auth" ] && [ ! -L "$source_auth" ]; then exit 35; fi
+[ -f "$source_auth" ] && [ ! -L "$source_auth" ] || exit 46
+if [ ! -e "$target_auth" ] && [ ! -L "$target_auth" ]; then exit 36; fi
+[ -f "$target_auth" ] && [ ! -L "$target_auth" ] || exit 46
 hash_file() { sha256sum -- "$1" | cut -d ' ' -f 1; }
 [ "$(hash_file "$source_auth")" = "$5" ] || exit 37
 [ "$(hash_file "$target_auth")" = "$6" ] || exit 38

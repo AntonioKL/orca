@@ -7,6 +7,7 @@ import {
   _internals,
   forgetCodexPaneAccount,
   getCodexPaneAccount,
+  hasAnyRecordedLegacyWslCodexPane,
   hasRecordedLegacySharedCodexPane,
   hasRecordedLegacyWslCodexPane,
   hasRecordedManagedHostCodexPane,
@@ -162,11 +163,28 @@ describe('codex pane account registry', () => {
     })
 
     expect(hasRecordedLegacyWslCodexPane('wsl:Ubuntu')).toBe(true)
+    expect(hasRecordedLegacyWslCodexPane('wsl:ubuntu')).toBe(true)
     forgetCodexPaneAccount('pty-legacy')
     expect(hasRecordedLegacyWslCodexPane('wsl:Ubuntu')).toBe(true)
     forgetCodexPaneAccount('pty-default')
     expect(hasRecordedLegacyWslCodexPane('wsl:Ubuntu')).toBe(false)
     expect(hasRecordedLegacyWslCodexPane('wsl:Debian')).toBe(true)
+  })
+
+  it('requests daemon reconciliation for WSL-only legacy records', () => {
+    recordCodexPaneAccount('pty-direct', {
+      selectionKey: 'wsl:Ubuntu',
+      accountId: 'account-new',
+      homeRoute: 'account-home'
+    })
+    expect(hasAnyRecordedLegacyWslCodexPane()).toBe(false)
+
+    recordCodexPaneAccount('pty-legacy', {
+      selectionKey: 'wsl:Ubuntu',
+      accountId: 'account-old',
+      homeRoute: 'wsl-home'
+    })
+    expect(hasAnyRecordedLegacyWslCodexPane()).toBe(true)
   })
 
   it('requests startup inventory only for managed host panes', () => {
@@ -269,6 +287,16 @@ describe('codex pane account registry', () => {
     recordCodexPaneAccount('pty-1', { selectionKey: 'host', accountId: 'account-a' })
     _internals.resetCache()
     expect(getCodexPaneAccount('pty-1')).toEqual({ selectionKey: 'host', accountId: 'account-a' })
+  })
+
+  it.each([
+    ['unparseable JSON', '{ not json'],
+    ['a malformed pane record', '{"version":2,"panes":{"pty-1":{"selectionKey":7}}}']
+  ])('refuses to authorize a destructive WSL drain from %s', (_label, contents) => {
+    writeFileSync(join(userDataPath, 'codex-pane-accounts.json'), contents)
+    _internals.resetCache()
+
+    expect(() => hasRecordedLegacyWslCodexPane('wsl:Ubuntu')).toThrow('registry could not be read')
   })
 
   it('drops a malformed record without discarding its valid siblings', () => {

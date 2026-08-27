@@ -29,6 +29,7 @@ export type {
  */
 
 let cachedRegistry: CodexPaneAccountRegistryFile | null = null
+let cachedRegistryIsAuthoritative = true
 
 function getRegistryPath(): string {
   return join(getOrcaUserDataPath(), 'codex-pane-accounts.json')
@@ -58,7 +59,9 @@ function readRegistryOrNull(): CodexPaneAccountRegistryFile | null {
   // Why: a corrupt registry still degrades to empty and IS cached — rebuilding
   // unparseable state is the intent, and re-reading it every call would only
   // repeat the parse failure.
-  cachedRegistry = parseRegistry(parseRegistryJson(rawRegistry))
+  const parsedRegistry = parseRegistryJson(rawRegistry)
+  cachedRegistryIsAuthoritative = isAuthoritativeRegistry(parsedRegistry)
+  cachedRegistry = parseRegistry(parsedRegistry)
   return cachedRegistry
 }
 
@@ -85,10 +88,23 @@ function readRegistry(): CodexPaneAccountRegistryFile {
 function readRegistryOrThrow(): CodexPaneAccountRegistryFile {
   mutations.flush()
   const registry = readRegistryOrNull()
-  if (!registry) {
+  if (!registry || !cachedRegistryIsAuthoritative) {
     throw new Error('Codex pane account registry could not be read')
   }
   return registry
+}
+
+function isAuthoritativeRegistry(parsed: unknown): boolean {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return false
+  }
+  const panes = (parsed as Partial<CodexPaneAccountRegistryFile>).panes
+  return (
+    Boolean(panes) &&
+    typeof panes === 'object' &&
+    !Array.isArray(panes) &&
+    Object.values(panes).every(isPaneAccountRecord)
+  )
 }
 
 function parseRegistry(parsed: unknown): CodexPaneAccountRegistryFile {
@@ -172,6 +188,7 @@ function writeRegistry(registry: CodexPaneAccountRegistryFile): boolean {
       mode: 0o600
     })
     renameSync(temporaryPath, registryPath)
+    cachedRegistryIsAuthoritative = true
     return true
   } catch (error) {
     // Why: this record only powers a restart hint; losing it must never break a
@@ -270,7 +287,25 @@ export function hasRecordedLegacySharedCodexPane(): boolean {
 export function hasRecordedLegacyWslCodexPane(selectionKey: string): boolean {
   return Object.values(readRegistryOrThrow().panes).some(
     (record) =>
-      (record.selectionKey === selectionKey || record.selectionKey === 'wsl:__default__') &&
+      (wslSelectionKeysMatch(record.selectionKey, selectionKey) ||
+        record.selectionKey === 'wsl:__default__') &&
+      (record.homeRoute === undefined || record.homeRoute === 'wsl-home')
+  )
+}
+
+function wslSelectionKeysMatch(left: string, right: string): boolean {
+  return (
+    left.startsWith('wsl:') &&
+    right.startsWith('wsl:') &&
+    left.slice('wsl:'.length).toLowerCase() === right.slice('wsl:'.length).toLowerCase()
+  )
+}
+
+/** True when startup should reconcile a retained legacy WSL record with daemon inventory. */
+export function hasAnyRecordedLegacyWslCodexPane(): boolean {
+  return Object.values(readRegistry().panes).some(
+    (record) =>
+      record.selectionKey.startsWith('wsl:') &&
       (record.homeRoute === undefined || record.homeRoute === 'wsl-home')
   )
 }
@@ -311,6 +346,7 @@ export function reconcileCodexPaneAccountsWithLivePtys(livePtyIds: readonly stri
 export const _internals = {
   resetCache: (): void => {
     cachedRegistry = null
+    cachedRegistryIsAuthoritative = true
     mutations.reset()
   }
 }

@@ -9,6 +9,7 @@ import {
   readFileSync,
   renameSync,
   statSync,
+  symlinkSync,
   writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -56,6 +57,7 @@ function runApplyScript(
     rewriteSourceAfterSessionLink?: boolean
     rewriteTargetAfterSessionLink?: boolean
     rewriteTarget?: 'source-auth' | 'source-credentials' | 'target-auth'
+    sourceAuthSymlink?: boolean
     sourceSession?: string
     sourceCredentials?: string
   } = {}
@@ -87,6 +89,11 @@ function runApplyScript(
   const markerPath = join(root, 'drain-marker.json')
   writeFileSync(legacyAuthPath, SOURCE_AUTH)
   writeFileSync(targetAuthPath, TARGET_AUTH)
+  if (options.sourceAuthSymlink) {
+    const sourceAuthTarget = join(root, 'linked-source-auth.json')
+    renameSync(legacyAuthPath, sourceAuthTarget)
+    symlinkSync(sourceAuthTarget, legacyAuthPath)
+  }
   if (options.sourceCredentials !== undefined) {
     writeFileSync(legacyCredentialsPath, options.sourceCredentials)
   }
@@ -503,6 +510,15 @@ describe.skipIf(isWindows)('legacy WSL auth drain apply script', () => {
     const outcome = runApplyScript({ rewriteAfterHashCall: 1 })
     expect(outcome.status).toBe(42)
     expect(outcome.targetAuth).toBe(TARGET_AUTH)
+  })
+
+  it('refuses a symlinked live source before the destructive path can retire it', () => {
+    const result = runApplyScript({ deleteSource: true, sourceAuthSymlink: true })
+
+    expect(result.status).toBe(46)
+    expect(result.legacyAuth).toBe(SOURCE_AUTH)
+    expect(result.markerExists).toBe(false)
+    expect(result.targetAuth).toBe(TARGET_AUTH)
   })
 
   it('refuses MCP credentials that changed after host validation', () => {

@@ -15,7 +15,8 @@ session_link_manifest="$3.orca-drain-session-links"
 session_commit_marker="$3.orca-drain-session-commit"
 session_stage_root="$3.orca-drain-session-stage"
 ${ROLLBACK_SESSION_LINKS_FUNCTION}
-if [ -f "$3" ]; then
+if [ -e "$3" ] || [ -L "$3" ]; then
+  [ -f "$3" ] && [ ! -L "$3" ] || exit 46
   commit_session_links || exit 46
   if [ -f "$destination_recovery_auth" ] && [ ! -L "$destination_recovery_auth" ]; then
     chmod 600 "$destination_recovery_auth"
