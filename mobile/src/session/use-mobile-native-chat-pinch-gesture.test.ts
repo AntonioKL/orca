@@ -1,5 +1,5 @@
 import { createElement } from 'react'
-import { act, create, type ReactTestRenderer } from 'react-test-renderer'
+import { act, create } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FONT_SCALE_STEP, quantizeFontScale } from './mobile-native-chat-message-text'
 
@@ -45,7 +45,7 @@ describe('quantizeFontScale', () => {
 })
 
 describe('useMobileNativeChatPinchGesture', () => {
-  let renderer: ReactTestRenderer | null = null
+  let renderer: { unmount: () => void } | null = null
   let latest = 1
 
   function Probe(): null {
