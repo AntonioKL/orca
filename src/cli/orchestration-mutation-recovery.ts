@@ -1,4 +1,4 @@
-import { RuntimeClientError } from './runtime-client'
+import { RuntimeClientError, RuntimeRpcFailureError } from './runtime-client'
 import {
   recoverableOrchestrationArgs,
   resolveOrchestrationCliExecutable
@@ -55,13 +55,26 @@ export function orchestrationMutationRecoveryError(error: unknown): unknown {
       ? `Residual resources: ${JSON.stringify(data.residualResources)}.`
       : undefined
   ].filter((line): line is string => line !== undefined)
-  return new RuntimeClientError(error.code, message.join('\n'), {
+  const recoveredData = {
     ...safeData,
     orchestrationRequestId: requestId,
     ...(originalCommand ? { originalCommand } : {}),
     recovery,
     nextSteps
-  })
+  }
+  // Preserve the RPC failure envelope so --json callers retain the request id and
+  // runtime metadata while receiving the structured recovery guidance.
+  if (error instanceof RuntimeRpcFailureError) {
+    return new RuntimeRpcFailureError({
+      ...error.response,
+      error: {
+        ...error.response.error,
+        message: message.join('\n'),
+        data: recoveredData
+      }
+    })
+  }
+  return new RuntimeClientError(error.code, message.join('\n'), recoveredData)
 }
 
 function isUnknownMutationOutcomeCode(code: string): boolean {

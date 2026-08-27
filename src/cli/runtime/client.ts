@@ -11,6 +11,7 @@ import { getDefaultUserDataPath, readMetadata } from './metadata'
 import { getCliStatus, projectRemoteAppStatus } from './status'
 import { sendRequest } from './transport'
 import { RuntimeClientError, RuntimeRpcFailureError, type RuntimeRpcSuccess } from './types'
+import { attachMutationRecovery } from './client-error-recovery'
 import { markEnvironmentUsed, resolveEnvironmentPairingOffer } from './environments'
 import {
   ORCHESTRATION_CONTRACT_RUNTIME_CAPABILITY,
@@ -19,7 +20,12 @@ import {
 import { RemoteRuntimeCompatGate } from './remote-runtime-compat-gate'
 import { createOrchestrationCompatibilityEnvelope } from './orchestration-compatibility-envelope'
 import { getTimeoutMsParam, isWaitingCheck } from './runtime-request-timeout'
-import { resolveWorkerStartClientTimeoutMs } from '../../shared/orchestration-timing-budgets'
+import {
+  isWorkerStartTimeoutWithinTimerLimit,
+  resolveWorkerStartClientTimeoutMs,
+  resolveWorkerStartReadinessTimeoutMs
+} from '../../shared/orchestration-timing-budgets'
+import { MAX_TIMER_DELAY_MS } from '../../shared/timer-delay'
 import {
   buildOrchestrationRecoveryCommand,
   resolveOrchestrationCliExecutable
@@ -161,8 +167,15 @@ export class RuntimeClient {
   // See design doc §3.1.
   private resolveMethodTimeoutMs(method: string, params?: unknown): number {
     if (method === 'orchestration.workerStart') {
-      const inner = Number(getTimeoutMsParam(params))
-      const readiness = Number.isFinite(inner) && inner > 0 ? inner : 60_000
+      const requestedValue = getTimeoutMsParam(params)
+      const requested = typeof requestedValue === 'number' ? requestedValue : Number(requestedValue)
+      if (!isWorkerStartTimeoutWithinTimerLimit(requested)) {
+        throw new RuntimeClientError(
+          'invalid_argument',
+          `--timeout-ms is too large for worker-start transport grace; the derived timeout must be <= ${MAX_TIMER_DELAY_MS}ms.`
+        )
+      }
+      const readiness = resolveWorkerStartReadinessTimeoutMs(requested)
       return Math.max(resolveWorkerStartClientTimeoutMs(readiness), this.requestTimeoutMs)
     }
     if (
@@ -266,25 +279,6 @@ export class RuntimeClient {
       'Timed out waiting for an Orca desktop window. The runtime may still be running headlessly.'
     )
   }
-}
-
-function attachMutationRecovery(
-  error: unknown,
-  requestId: string | undefined,
-  originalCommand?: string[]
-): unknown {
-  if (!requestId || !(error instanceof RuntimeClientError)) {
-    return error
-  }
-  return new RuntimeClientError(
-    error.code,
-    `${error.message} Orchestration mutation request ID: ${requestId}.`,
-    {
-      ...(error.data && typeof error.data === 'object' ? error.data : {}),
-      orchestrationRequestId: requestId,
-      ...(originalCommand ? { originalCommand } : {})
-    }
-  )
 }
 
 function throwDesktopActivationBlocked(): never {

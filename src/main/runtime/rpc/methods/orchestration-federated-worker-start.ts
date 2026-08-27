@@ -17,8 +17,7 @@ import {
   assertWorkerLaunchPreferencesRuntimeSupported,
   assertWorkerLaunchPreferencesCreateTerminal,
   createPendingWorkerLaunchReceipt,
-  resolveFederatedWorkerLaunchReceipt,
-  type OrchestrationWorkerLaunchReceipt
+  resolveFederatedWorkerLaunchReceipt
 } from './orchestration-worker-launch-preferences'
 import { validateFederatedWorkerStartPlacement } from './orchestration-worker-start-validation'
 import { resolveFederatedWorkerStartBudgets } from './orchestration-worker-start-budgets'
@@ -27,6 +26,8 @@ import {
   isReadyRemoteFederatedWorkerStartReceipt,
   parseRemoteFederatedWorkerStartReceipt
 } from './orchestration-federated-attach-receipt'
+import { isWorkerStartTimeoutWithinTimerLimit } from '../../../../shared/orchestration-timing-budgets'
+import { federatedUnknownReceipt } from './orchestration-federated-worker-start-unknown-receipt'
 
 export async function startFederatedWorker(args: {
   params: WorkerStartInput
@@ -42,6 +43,12 @@ export async function startFederatedWorker(args: {
   }
 }): Promise<unknown> {
   const { params, runtime, db, task, runId, orchestrationMutation } = args
+  if (!isWorkerStartTimeoutWithinTimerLimit(params.timeoutMs)) {
+    throw new OrchestrationError(
+      'invalid_argument',
+      '--timeout-ms is too large for worker-start transport grace; the derived timeout must fit within the timer limit.'
+    )
+  }
   if (!orchestrationMutation) {
     throw new OrchestrationError(
       'invalid_argument',
@@ -273,28 +280,4 @@ function isKnownRemoteStartFailure(code: string): boolean {
     'terminal_worktree_mismatch',
     'capability_unsupported'
   ].includes(code)
-}
-
-function federatedUnknownReceipt(
-  worker: { dispatch_id: string; state: string; stage: string; last_error: string | null },
-  taskId: string,
-  serverName: string,
-  launch: OrchestrationWorkerLaunchReceipt
-): unknown {
-  return {
-    taskId,
-    dispatchId: worker.dispatch_id,
-    state: 'outcome_unknown',
-    stage: worker.stage,
-    server: { name: serverName },
-    launch,
-    failedStage: worker.stage,
-    lastError: worker.last_error,
-    effects: [],
-    residualResources: [],
-    nextCommands: [
-      `orca orchestration worker-show --dispatch ${worker.dispatch_id} --json`,
-      `orca orchestration worker-abandon --dispatch ${worker.dispatch_id} --json`
-    ]
-  }
 }

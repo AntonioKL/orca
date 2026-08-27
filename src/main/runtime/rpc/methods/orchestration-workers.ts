@@ -22,6 +22,7 @@ import { failWorkerStartWithReceipt } from './orchestration-worker-start-receipt
 import { prepareLocalWorkerStart } from './orchestration-worker-start-validation'
 import { resolveDispatchCreator } from './orchestration-dispatch-creator'
 import { resolveOrchestrationCaller } from './orchestration-run-scope'
+import { isWorkerStartTimeoutWithinTimerLimit } from '../../../../shared/orchestration-timing-budgets'
 
 export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
   defineMethod({
@@ -31,6 +32,12 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
       params,
       { runtime, orchestrationMutation, orchestrationCompatibilityEvidence }
     ) => {
+      if (!isWorkerStartTimeoutWithinTimerLimit(params.timeoutMs)) {
+        throw new OrchestrationError(
+          'invalid_argument',
+          `--timeout-ms is too large for worker-start transport grace; the derived timeout must fit within the timer limit.`
+        )
+      }
       const db = runtime.getOrchestrationDb()
       // Why: worker-start was the only Run-scoped verb that skipped this, so a
       // declared --from could name someone else's pane and inherit their depth.

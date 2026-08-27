@@ -5,10 +5,12 @@ import {
   ORCHESTRATION_FEDERATION_ATTACH_GRACE_MS,
   ORCHESTRATION_READINESS_TIMEOUT_MS,
   ORCHESTRATION_WORKER_START_CLIENT_GRACE_MS,
+  isWorkerStartTimeoutWithinTimerLimit,
   resolveFederationAttachDeadlineMs,
   resolveFederationAttachTimeoutMs,
   resolveWorkerStartClientTimeoutMs
 } from './orchestration-timing-budgets'
+import { MAX_TIMER_DELAY_MS } from './timer-delay'
 
 describe('orchestration timing budgets', () => {
   it('keeps the worker-start budget strictly nested', () => {
@@ -34,5 +36,16 @@ describe('orchestration timing budgets', () => {
         nowMs: 10_000
       })
     ).toBe(95_000)
+  })
+
+  it('accepts the exact maximum readiness timeout and rejects the first overflow', () => {
+    const maxValid = MAX_TIMER_DELAY_MS - ORCHESTRATION_WORKER_START_CLIENT_GRACE_MS
+    expect(isWorkerStartTimeoutWithinTimerLimit(maxValid)).toBe(true)
+    expect(isWorkerStartTimeoutWithinTimerLimit(maxValid + 1)).toBe(false)
+  })
+
+  it('keeps ordinary defaults within the timer limit', () => {
+    expect(isWorkerStartTimeoutWithinTimerLimit(undefined)).toBe(true)
+    expect(isWorkerStartTimeoutWithinTimerLimit(0)).toBe(true)
   })
 })
