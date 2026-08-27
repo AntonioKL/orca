@@ -227,22 +227,7 @@ export async function appendJournalRows(
   // concatenate a new durable row onto that fragment: truncate the torn tail
   // first, then fsync the repair before acknowledging this append.
   try {
-    // Read as bytes, not text: `truncate`/`write` take byte offsets, and a
-    // transcript's multi-byte characters make string indices the wrong unit.
-    const existing = await readFile(path)
-    if (existing.length > 0 && existing.at(-1) !== NEWLINE_BYTE) {
-      const boundary = existing.lastIndexOf(NEWLINE_BYTE)
-      const finalLine = existing.subarray(boundary + 1).toString('utf-8')
-      // A whole row that merely lost its newline is kept; a real fragment goes.
-      const complete = parseJournalRow(finalLine).ok
-      const handle = await open(path, 'r+')
-      try {
-        await (complete ? handle.write('\n', existing.length) : handle.truncate(boundary + 1))
-        await handle.sync()
-      } finally {
-        await handle.close()
-      }
-    }
+    await repairJournalLogTail(path)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
       throw error
@@ -263,6 +248,47 @@ export async function appendJournalRows(
     await directory.close()
   } catch {
     // Directory fsync is unavailable on some platforms (notably Windows).
+  }
+}
+
+/** Repair only a torn final row. The normal append path reads one byte; scanning
+ * backward is reserved for the crash-recovery case and never rereads the log. */
+async function repairJournalLogTail(path: string): Promise<void> {
+  const handle = await open(path, 'r+')
+  try {
+    const { size } = await handle.stat()
+    if (size === 0) {
+      return
+    }
+    const lastByte = Buffer.alloc(1)
+    await handle.read(lastByte, 0, 1, size - 1)
+    if (lastByte[0] === NEWLINE_BYTE) {
+      return
+    }
+
+    const scanChunkBytes = 64 * 1024
+    let scanEnd = size
+    let boundary = -1
+    while (scanEnd > 0 && boundary === -1) {
+      const scanStart = Math.max(0, scanEnd - scanChunkBytes)
+      const chunk = Buffer.alloc(scanEnd - scanStart)
+      await handle.read(chunk, 0, chunk.length, scanStart)
+      const newline = chunk.lastIndexOf(NEWLINE_BYTE)
+      if (newline !== -1) {
+        boundary = scanStart + newline
+      }
+      scanEnd = scanStart
+    }
+
+    const lineStart = boundary + 1
+    const finalLine = Buffer.alloc(size - lineStart)
+    await handle.read(finalLine, 0, finalLine.length, lineStart)
+    // A whole row that merely lost its newline is kept; a real fragment goes.
+    const complete = parseJournalRow(finalLine.toString('utf-8')).ok
+    await (complete ? handle.write('\n', size) : handle.truncate(lineStart))
+    await handle.sync()
+  } finally {
+    await handle.close()
   }
 }
 

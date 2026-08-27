@@ -71,7 +71,8 @@ export async function replaceJournalEpoch(input: {
       state,
       tailRows: rows,
       policy: input.compaction,
-      now: input.now()
+      now: input.now(),
+      maxSessionBytes: input.budget.maxSessionBytes
     })
     await publishPreparedFile(stagingDir, input.journalDir, JOURNAL_SNAPSHOT_FILE)
     state.oldestSequence = compacted.oldestSequence

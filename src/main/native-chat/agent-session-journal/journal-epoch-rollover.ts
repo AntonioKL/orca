@@ -12,6 +12,7 @@ import { applyJournalRow, createJournalReducerState } from './journal-reducer'
 import type { AgentJournalEpochReason, JournalRow } from './journal-row-schema'
 import { journalRowByteLength } from './journal-row-schema'
 import type { JournalLoad } from './journal-open'
+import { DEFAULT_JOURNAL_PAYLOAD_LIMITS } from './journal-payload-bounds'
 
 export async function publishNewEpoch(input: {
   journalDir: string
@@ -38,7 +39,8 @@ export async function publishNewEpoch(input: {
     state,
     tailRows: [row],
     policy: { minTailRows: 1, retainTailMs: Number.POSITIVE_INFINITY },
-    now: input.now
+    now: input.now,
+    maxSessionBytes: DEFAULT_JOURNAL_PAYLOAD_LIMITS.maxSessionBytes
   })
   applyJournalRow(state, row)
   state.oldestSequence = 1

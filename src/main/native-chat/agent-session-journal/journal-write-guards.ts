@@ -56,6 +56,10 @@ export class JournalAppendBudget {
     return new JournalAppendBudget(this.sessionId, this.limits)
   }
 
+  get maxSessionBytes(): number {
+    return this.limits.maxSessionBytes
+  }
+
   wouldExceedSize(row: JournalRow, sizeBytes: number): boolean {
     return sizeBytes + journalRowByteLength(row) > this.limits.maxSessionBytes
   }

@@ -90,9 +90,8 @@ describe('structured agent-session lease renewal', () => {
         })
       )
     })
-    const renewLease = vi.fn(
-      async (renewal: { sessionId: string }) =>
-        records.find((record) => record.sessionId === renewal.sessionId)!
+    const renewLeases = vi.fn(async (renewals: readonly { sessionId: string }[]) =>
+      renewals.map((renewal) => records.find((record) => record.sessionId === renewal.sessionId)!)
     )
     const probeMany = vi.fn(
       async () =>
@@ -104,7 +103,7 @@ describe('structured agent-session lease renewal', () => {
         )
     )
     const renewer = new StructuredAgentSessionLeaseRenewer({
-      store: { listRecords: () => records, renewLease } as unknown as AgentSessionRecordStore,
+      store: { listRecords: () => records, renewLeases } as unknown as AgentSessionRecordStore,
       probe: vi.fn(),
       probeMany,
       now: () => NOW + 10_000
@@ -113,7 +112,8 @@ describe('structured agent-session lease renewal', () => {
     await renewer.renewNow()
 
     expect(probeMany).toHaveBeenCalledOnce()
-    expect(renewLease).toHaveBeenCalledTimes(2)
+    expect(renewLeases).toHaveBeenCalledOnce()
+    expect(renewLeases.mock.calls[0]?.[0]).toHaveLength(2)
   })
 
   it('keeps a healthy lease alive when a sibling renewal is superseded', async () => {
@@ -135,6 +135,9 @@ describe('structured agent-session lease renewal', () => {
         })
       )
     )
+    const renewLeases = vi.fn(async () => {
+      throw new Error('agent_session_checkpoint_stale')
+    })
     const renewLease = vi.fn(async (renewal: { sessionId: string }) => {
       if (renewal.sessionId === 'session-b') {
         throw new Error('agent_session_checkpoint_stale')
@@ -144,7 +147,11 @@ describe('structured agent-session lease renewal', () => {
     const onRenewed = vi.fn()
     const onError = vi.fn()
     const renewer = new StructuredAgentSessionLeaseRenewer({
-      store: { listRecords: () => records, renewLease } as unknown as AgentSessionRecordStore,
+      store: {
+        listRecords: () => records,
+        renewLeases,
+        renewLease
+      } as unknown as AgentSessionRecordStore,
       probe: async () => ({
         outcome: 'identity-matched' as const,
         matchedOn: ['spawn-token' as const]
@@ -156,7 +163,9 @@ describe('structured agent-session lease renewal', () => {
 
     await renewer.renewNow()
 
+    expect(renewLeases).toHaveBeenCalledOnce()
     expect(onRenewed).toHaveBeenCalledOnce()
+    expect(renewLease).toHaveBeenCalledTimes(2)
     expect(onRenewed).toHaveBeenCalledWith(records[0])
     expect(onError).toHaveBeenCalledWith({
       sessionId: 'session-b',

@@ -46,7 +46,8 @@ export async function restoreStructuredAgentSessionRead(
   }
   const journal = await openAgentSessionJournal({
     identity: journalIdentityFor(record, params),
-    journalDir
+    journalDir,
+    loaded
   })
   // Read restore opens the journal and nothing else: no adapter call, so no provider child.
   return { journal, params, fence: record.lease.runtimeFence, hasProviderChild: false }

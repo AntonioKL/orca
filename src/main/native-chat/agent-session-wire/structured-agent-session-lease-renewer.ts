@@ -95,15 +95,22 @@ export class StructuredAgentSessionLeaseRenewer {
           now
         })
       }
-      // Renew each lease independently. A stale fence or an unverifiable owner must not
-      // poison one transaction and let otherwise healthy sessions expire with it.
-      const results = await Promise.allSettled(
-        renewals.map(async (renewal) => {
-          const renewed = await this.input.store.renewLease(renewal)
-          await this.input.onRenewed?.(renewed)
-          return renewed
-        })
-      )
+      // The store persists the whole record file per transaction, so keep the healthy path to
+      // one commit. If one renewal is superseded, retrying individually preserves isolation.
+      let results: PromiseSettledResult<AgentSessionRecord>[]
+      try {
+        const renewed = await this.input.store.renewLeases(renewals)
+        await Promise.all(renewed.map((record) => this.input.onRenewed?.(record)))
+        results = renewed.map((record) => ({ status: 'fulfilled', value: record }) as const)
+      } catch {
+        results = await Promise.allSettled(
+          renewals.map(async (renewal) => {
+            const renewed = await this.input.store.renewLease(renewal)
+            await this.input.onRenewed?.(renewed)
+            return renewed
+          })
+        )
+      }
       results.forEach((result, index) => {
         if (result.status === 'rejected') {
           const renewal = renewals[index]

@@ -9,6 +9,7 @@ import type {
 } from '../../../shared/agent-session-journal-types'
 import { readJournalBlob } from './journal-blob-store'
 import { JOURNAL_LOG_FILE, JOURNAL_SNAPSHOT_FILE } from './journal-log-file'
+import { loadJournal } from './journal-open'
 import {
   boundInlineText,
   boundPayload,
@@ -111,6 +112,19 @@ describe('fences', () => {
 })
 
 describe('replay', () => {
+  it('adopts a caller-provided load without reading the journal files again', async () => {
+    const journal = await open()
+    await journal.appendItem(item(0), body('a'), { fence: 1 })
+    const loaded = await loadJournal(root, IDENTITY.sessionId)
+    expect(loaded).not.toBeNull()
+
+    await rm(join(root, JOURNAL_LOG_FILE), { force: true })
+    await rm(join(root, JOURNAL_SNAPSHOT_FILE), { force: true })
+
+    const reopened = await open({ loaded })
+    expect(reopened.snapshot()).toEqual(journal.snapshot())
+  })
+
   it('reopens to the same render model the live writer held', async () => {
     const journal = await open()
     await journal.appendItem(item(0), body('a'), { fence: 1 })
@@ -201,28 +215,14 @@ describe('automatic compaction', () => {
     expect(journal.compactionBoundary).toBe(0)
   })
 
-  it('sheds a tail shorter than the row floor before the size bound refuses the append', async () => {
+  it('refuses an append when a tail shorter than the row floor cannot make room', async () => {
     const journal = await open({
       limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 900 },
       // The tail never reaches the floor, so honouring it would shed nothing.
       compaction: { minTailRows: 512, retainTailMs: 10_000 }
     })
-    for (let index = 0; index < 20; index += 1) {
-      await expect(
-        journal.appendItem(item(index), body('x'.repeat(96)), { fence: 1 })
-      ).resolves.toBeDefined()
-    }
-    expect(journal.compactionBoundary).toBeGreaterThan(0)
-    expect(journal.snapshot().items).toHaveLength(20)
-  })
-
-  it('sheds a tail that is entirely inside the retention window rather than refusing every append', async () => {
-    const journal = await open({
-      limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 900 },
-      compaction: { minTailRows: 10, retainTailMs: 2 * 60 * 60 * 1000 }
-    })
     let rejected = 0
-    for (let index = 0; index < 50; index += 1) {
+    for (let index = 0; index < 20; index += 1) {
       try {
         await journal.appendItem(item(index), body('x'.repeat(96)), { fence: 1 })
       } catch (error) {
@@ -230,20 +230,35 @@ describe('automatic compaction', () => {
         rejected += 1
       }
     }
+    expect(rejected).toBeGreaterThan(0)
+  })
 
-    expect(rejected).toBe(0)
-    // Shed rows are folded into the snapshot, so the conversation is intact.
-    expect(journal.snapshot().items).toHaveLength(50)
-    expect(journal.compactionBoundary).toBeGreaterThan(0)
+  it('refuses once the retained snapshot itself reaches the session bound', async () => {
+    const journal = await open({
+      limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 10_000 },
+      compaction: { minTailRows: 10, retainTailMs: 2 * 60 * 60 * 1000 }
+    })
+    let rejected = 0
+    for (let index = 0; index < 30; index += 1) {
+      try {
+        await journal.appendItem(item(index), body('x'.repeat(128)), { fence: 1 })
+      } catch (error) {
+        expect(error).toMatchObject({ code: 'journal_bound_exceeded' })
+        rejected += 1
+      }
+    }
+
+    expect(rejected).toBeGreaterThan(0)
+    expect(journal.snapshot().items.length).toBeLessThan(30)
   })
 
   it('keeps the newest rows resumable while shedding under budget pressure', async () => {
     const journal = await open({
-      limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 900 },
+      limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 10_000 },
       compaction: { minTailRows: 10, retainTailMs: 2 * 60 * 60 * 1000 }
     })
-    for (let index = 0; index < 50; index += 1) {
-      await journal.appendItem(item(index), body('x'.repeat(96)), { fence: 1 })
+    for (let index = 0; index < 30; index += 1) {
+      await journal.appendItem(item(index), body('x'.repeat(64)), { fence: 1 })
     }
 
     // The window yields oldest-first, never wholesale: the latest append is

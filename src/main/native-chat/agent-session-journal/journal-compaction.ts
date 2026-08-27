@@ -22,6 +22,7 @@ import {
 } from './journal-log-file'
 import { AGENT_SESSION_JOURNAL_SCHEMA_VERSION } from '../../../shared/agent-session-journal-types'
 import type { JournalRow } from './journal-row-schema'
+import { AgentSessionJournalError } from './journal-write-guards'
 
 export type JournalCompactionPolicy = {
   /** Always keep at least this many rows, however old they are. */
@@ -58,6 +59,7 @@ export async function compactJournal(input: {
   tailRows: readonly JournalRow[]
   policy?: JournalCompactionPolicy
   now: number
+  maxSessionBytes: number
 }): Promise<JournalCompactionResult> {
   const policy = input.policy ?? DEFAULT_JOURNAL_COMPACTION_POLICY
   const retained = retainTail(input.tailRows, policy, input.now)
@@ -87,6 +89,14 @@ export async function compactJournal(input: {
       revision
     })),
     tail: retained
+  }
+
+  const snapshotBytes = Buffer.byteLength(JSON.stringify(snapshot), 'utf8')
+  if (snapshotBytes > input.maxSessionBytes) {
+    throw new AgentSessionJournalError(
+      'journal_bound_exceeded',
+      `agent-session journal snapshot reached its ${input.maxSessionBytes}-byte bound`
+    )
   }
 
   await writeJournalSnapshotFile(input.journalDir, snapshot)

@@ -1,9 +1,4 @@
-// The append-only journal store for one agent session.
-//
-// Sequence numbers are assigned inside the same serialized append that makes
-// the row durable, so an `(epoch, sequence)` space has exactly one writer and
-// no gaps or reuse. Every mutating call carries the runtime fence; a stale
-// fence is rejected outright rather than merged or queued for the new owner.
+// Append-only journal store for one agent session.
 
 import { randomUUID } from 'node:crypto'
 import type {
@@ -86,6 +81,7 @@ export class AgentSessionJournal {
   private readonly autoCompact: boolean
   private readonly now: () => number
   private readonly mintEpoch: () => string
+  private readonly loaded: JournalLoad | null | undefined
 
   private state: JournalReducerState
   private tailRows: JournalRow[] = []
@@ -107,6 +103,7 @@ export class AgentSessionJournal {
     this.compaction = options.compaction ?? DEFAULT_JOURNAL_COMPACTION_POLICY
     this.now = options.now ?? (() => Date.now())
     this.mintEpoch = options.mintEpoch ?? randomUUID
+    this.loaded = options.loaded
     this.state = createJournalReducerState(options.identity.sessionId, '')
   }
 
@@ -130,7 +127,10 @@ export class AgentSessionJournal {
 
   async open(): Promise<void> {
     await ensureJournalDir(this.journalDir)
-    const loaded = await loadJournal(this.journalDir, this.identity.sessionId)
+    const loaded =
+      this.loaded !== undefined
+        ? this.loaded
+        : await loadJournal(this.journalDir, this.identity.sessionId)
     if (!loaded) {
       await this.startEpoch('session_created', 0)
       return
@@ -148,21 +148,17 @@ export class AgentSessionJournal {
     }
   }
 
-  cursor(): AgentJournalCursor {
-    return { epoch: this.state.epoch, sequence: this.state.lastSequence }
-  }
+  cursor = (): AgentJournalCursor => ({
+    epoch: this.state.epoch,
+    sequence: this.state.lastSequence
+  })
 
-  snapshot(): AgentJournalSnapshot {
-    return renderJournalState(this.state)
-  }
+  snapshot = (): AgentJournalSnapshot => renderJournalState(this.state)
 
-  submissions(): AgentJournalSubmission[] {
-    return [...this.state.submissions.values()]
-  }
+  submissions = (): AgentJournalSubmission[] => [...this.state.submissions.values()]
 
-  pendingSubmissions(): AgentJournalSubmission[] {
-    return this.submissions().filter((entry) => entry.dispatchState === 'pending')
-  }
+  pendingSubmissions = (): AgentJournalSubmission[] =>
+    this.submissions().filter((entry) => entry.dispatchState === 'pending')
 
   /** The durable answer to "did my send land?" — a reconnecting client asking
    *  again gets this instead of re-sending. */
@@ -170,9 +166,7 @@ export class AgentSessionJournal {
     return this.state.receipts.get(clientMessageId) ?? null
   }
 
-  canonicalItemId(itemId: string): string {
-    return resolveJournalItemId(this.state, itemId)
-  }
+  canonicalItemId = (itemId: string): string => resolveJournalItemId(this.state, itemId)
 
   referencedBlobDigests(): Set<string> {
     return referencedBlobDigests(this.state)
@@ -259,7 +253,8 @@ export class AgentSessionJournal {
       state: this.state,
       tailRows: this.tailRows,
       policy,
-      now
+      now,
+      maxSessionBytes: this.budget.maxSessionBytes
     })
     this.tailRows = result.tailRows
     this.compactedThrough = result.compactedThrough

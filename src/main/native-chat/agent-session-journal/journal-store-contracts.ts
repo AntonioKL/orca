@@ -5,6 +5,7 @@ import type {
   AgentSessionJournalIdentity
 } from '../../../shared/agent-session-journal-types'
 import type { JournalCompactionPolicy } from './journal-compaction'
+import type { JournalLoad } from './journal-open'
 import type { JournalPayloadLimits } from './journal-payload-bounds'
 import type { JournalRow } from './journal-row-schema'
 
@@ -17,6 +18,8 @@ export type AgentSessionJournalOptions = {
   autoCompact?: boolean
   now?: () => number
   mintEpoch?: () => string
+  /** A caller that already loaded the journal can avoid reading the same files again. */
+  loaded?: JournalLoad | null
 }
 
 export type JournalReadSince =
