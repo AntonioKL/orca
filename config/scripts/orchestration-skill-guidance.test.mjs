@@ -51,6 +51,31 @@ describe('orchestration skill guidance', () => {
     )
   })
 
+  it('defines coordinator authority and ordinary takeover for agents', () => {
+    const skill = readSkill()
+    const authority = getSection(skill, 'Run Coordinator Authority')
+
+    expect(authority).toContain('sole task-graph writer and consuming mailbox reader')
+    expect(authority).toContain('per-Run authority')
+    expect(authority).toContain('not an operating-system or global Orca privilege')
+    expect(authority).toContain('`run-use` is an authority claim, not a read-only selection')
+    expect(authority).toContain('`live`')
+    expect(authority).toContain('`unverifiable`')
+    expect(authority).toContain('`exited`')
+    expect(authority).toContain('Loss of contact is never evidence of exit')
+    expect(authority).toContain('No live-to-live transfer command exists')
+    expect(authority).toContain('`--takeover-legacy` is not a force override for ordinary Runs')
+    expect(authority).toContain('task-create')
+    expect(authority).toContain('task-update')
+    expect(authority).toContain('worker-start')
+    expect(authority).toContain('gate-create')
+    expect(authority).toContain('reply')
+    expect(authority).toContain('check')
+    expect(authority).toContain('run-show --id <run_id> --json')
+    expect(authority).toContain('binding.currentConsumer')
+    expect(authority).toContain('stop or exit the owning coordinator process')
+  })
+
   it('teaches attested adoption without reviving the retired scheduler', () => {
     const skill = readSkill()
     const migration = getSection(skill, 'Contract Migration')

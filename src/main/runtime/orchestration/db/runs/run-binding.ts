@@ -153,12 +153,28 @@ export function bindRun(
       (!observationMatches || observation.status !== 'exited')
     ) {
       const coordinatorStatus = observationMatches ? observation.status : 'unverifiable'
+      const inspectCommand = `orca orchestration run-show --id ${params.runId} --json`
+      const retryCommand = `orca orchestration run-use --id ${params.runId} --json`
+      const nextSteps =
+        coordinatorStatus === 'live'
+          ? [
+              'Continue from the owning coordinator terminal; this caller has read-only inspection authority.',
+              `To intentionally transfer authority, stop or exit that coordinator process, then run ${retryCommand} from the replacement.`,
+              `Inspect current authority with ${inspectCommand}; binding.currentConsumer is true only for the owner.`,
+              'Do not retry while coordinatorStatus is live. No force-steal exists for an ordinary Run.'
+            ]
+          : [
+              'Restore connectivity to the owning host. Loss of contact is not evidence of exit.',
+              `Inspect current authority with ${inspectCommand}; binding.currentConsumer is true only for the owner.`,
+              `Run ${retryCommand} only after the owning host proves the incumbent exited.`,
+              'If the incumbent is live, continue from its coordinator terminal; no force-steal exists for an ordinary Run.'
+            ]
       throw new OrchestrationError(
         'consumer_fenced',
         coordinatorStatus === 'live'
           ? 'This Run is owned by another live coordinator. No effects were applied.'
           : 'This Run coordinator could not be proven exited. Retry from the owning coordinator terminal after connectivity is restored. No effects were applied.',
-        { effectsApplied: false, coordinatorStatus }
+        { effectsApplied: false, coordinatorStatus, nextSteps }
       )
     }
     this.unbindOtherRunsForPane(params.coordinatorPaneKey, params.runId)

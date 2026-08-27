@@ -16,12 +16,14 @@ export const ORCHESTRATION_COMMAND_SPECS: CommandSpec[] = [
   },
   {
     path: ['orchestration', 'run-use'],
-    summary: 'Bind this coordinator terminal to an existing Run',
+    summary: 'Claim coordinator authority for an existing Run',
     usage:
       'orca orchestration run-use --id <run_id> [--from <handle>] [--takeover-legacy] [--retry-request <id>] [--json]',
     allowedFlags: [...GLOBAL_FLAGS, 'id', 'from', 'takeover-legacy', 'retry-request'],
     notes: [
-      '--takeover-legacy must run in the live coordinator agent terminal it binds; it preserves existing worker assignments.'
+      'Rebinding the same live coordinator preserves authority and Delivery. A different coordinator succeeds only when the owning host proves the prior coordinator exited.',
+      'A live or unverifiable owner returns consumer_fenced with structured recovery steps. Do not retry blindly or treat loss of contact as exit.',
+      '--takeover-legacy is only for the automatically adopted legacy Run; it is not a force override for ordinary Runs.'
     ]
   },
   {

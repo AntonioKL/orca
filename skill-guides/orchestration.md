@@ -99,6 +99,30 @@ Takeover fences only the old coordinator, binds the current one, and moves pendi
 
 Do not launch a replacement editor merely because the desktop app or runtime was updated. If adoption cannot prove continuing authority, keep the original worker as the only editor until it reaches a stable handoff point, then use a new current Dispatch in a conflict-free placement for any remaining work.
 
+## Run Coordinator Authority
+
+Orca orchestration is agent-operated. A Run therefore has one current coordinator agent, not a human operator. That coordinator is the sole task-graph writer and consuming mailbox reader for coordinator-side operations; workers retain only their exact Dispatch capabilities for heartbeat, questions, escalation, and `worker_done`. This is per-Run authority, not an operating-system or global Orca privilege.
+
+The single-writer rule prevents two agents from changing Task, Dispatch, worker, or gate state concurrently and prevents two consumers from acknowledging different views of the same FIFO Delivery. The current coordinator may create and update Tasks (`task-create`, `task-update`), start or dispatch workers (`worker-start`, `dispatch`), create and resolve gates (`gate-create`, `gate-resolve`), answer worker questions (`reply`), and consume or acknowledge Run mail (`check`). Explicit `run-show`, `task-list --run`, inbox, and peek calls remain read-only for non-owners and headless callers.
+
+`run-use` is an authority claim, not a read-only selection. Read `error.data.coordinatorStatus` and `error.data.nextSteps` from `--json` failures; never infer authority from a terminal handle alone.
+
+- Same coordinator process, reminted handle: authority and any outstanding Delivery are preserved without advancing the consumer generation.
+- Different process and `live` incumbent: `consumer_fenced`; continue from the owning coordinator terminal. To transfer intentionally, stop or exit the owning coordinator process before retrying from its replacement.
+- Different process and `unverifiable` incumbent: `consumer_fenced`; restore connectivity to the owning host. Loss of contact is never evidence of exit, including SSH, relay, Windows, WSL, and federated runtimes.
+- Different process and `exited` incumbent: the replacement may run `orca orchestration run-use --id <run_id> --json`. Orca advances the consumer generation, fences the old outstanding Delivery, preserves pending Run mail and worker assignments, and grants the replacement coordinator authority.
+
+Inspect without claiming authority:
+
+```bash
+orca orchestration run-show --id <run_id> --json
+orca orchestration task-list --run <run_id> --json
+```
+
+`binding.currentConsumer` is `true` only for the current coordinator. `false` permits inspection, not coordinator mutations or consuming `check` calls.
+
+No live-to-live transfer command exists. A seamless live handoff would require a separate owner-authorized protocol; do not simulate one by retrying, changing `--from`, or replacing a terminal handle. `--takeover-legacy` is not a force override for ordinary Runs: it is limited to the automatically adopted legacy Run described above.
+
 ## Ownership
 
 New orchestration messages and tasks belong to one explicitly bound Run. A Run is only a durable namespace and coordinator inbox; it never schedules or places workers. Lifecycle authority comes from the active Dispatch, and terminal handles remain routing metadata rather than durable identity. Send `worker_done` and `heartbeat` from the worker's own terminal; Orca routes them to that Dispatch's Run.

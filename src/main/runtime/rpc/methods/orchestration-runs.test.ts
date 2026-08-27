@@ -128,7 +128,16 @@ describe('orchestration RPC methods', () => {
         })
       ).rejects.toMatchObject({
         code: 'consumer_fenced',
-        data: { effectsApplied: false, coordinatorStatus: 'live' }
+        data: {
+          effectsApplied: false,
+          coordinatorStatus: 'live',
+          nextSteps: [
+            expect.stringContaining('owning coordinator terminal'),
+            expect.stringContaining('stop or exit that coordinator process'),
+            expect.stringContaining(`run-show --id ${created.run.id} --json`),
+            expect.stringContaining('No force-steal exists for an ordinary Run')
+          ]
+        }
       })
       const inspected = (await call('orchestration.taskList', {
         run: created.run.id,
@@ -186,7 +195,16 @@ describe('orchestration RPC methods', () => {
         call('orchestration.runUse', { id: run.id, from: 'term_new' })
       ).rejects.toMatchObject({
         code: 'consumer_fenced',
-        data: { effectsApplied: false, coordinatorStatus: 'unverifiable' }
+        data: {
+          effectsApplied: false,
+          coordinatorStatus: 'unverifiable',
+          nextSteps: expect.arrayContaining([
+            expect.stringContaining('Restore connectivity to the owning host'),
+            expect.stringContaining('Loss of contact is not evidence of exit'),
+            expect.stringContaining(`run-show --id ${run.id} --json`),
+            expect.stringContaining('only after the owning host proves the incumbent exited')
+          ])
+        }
       })
     })
 
