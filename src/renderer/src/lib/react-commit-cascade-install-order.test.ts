@@ -118,8 +118,12 @@ describe('react commit cascade shim install order', () => {
     // Why a source scan too: the specifier regex only sees an import whose `from`
     // shares a line with the keyword, and a multi-line import is the common form
     // here — so the graph check alone would miss the one edit that matters.
+    // Why `from` must be followed by a quote: bare `\bfrom\b` also matched the
+    // word in a comment, and a ratchet that fails on prose gets deleted.
+    // Why the `import(` arm: a top-level `await import(...)` makes this module
+    // async, so react-dom evaluates before the hook is installed.
     expect(readFileSync(shimFile, 'utf8')).not.toMatch(
-      /^\s*(?:import|export)\b[\s\S]*?\bfrom\b|^\s*import\s*['"]/m
+      /^\s*(?:import|export)\b[\s\S]*?\bfrom\s*(?:\/\*[\s\S]*?\*\/\s*)*['"]|^\s*import\s*['"]|\bimport\s*\(/m
     )
   })
 

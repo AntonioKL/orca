@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { sanitizeCrashReportDetails } from '../../../shared/crash-report-redaction'
 import { REACT_NESTED_UPDATE_LIMIT } from '../../../shared/react-update-depth-attribution'
 import {
   REACT_CASCADING_LANES,
@@ -215,9 +216,18 @@ describe('driver attribution', () => {
     // Why: the path redaction is keyed on the detail NAME, so a path inside the
     // value would ship a developer's home directory.
     expect(String(payload.driverStack)).not.toContain('/')
-    // Why the key name is asserted: only a key ending in `stack` gets the
-    // 4000-char detail budget, so renaming it silently truncates the frames.
-    expect(Object.keys(payload).some((key) => /stack$/i.test(key))).toBe(true)
+    // Why sanitize instead of matching the key name: the 4000-char budget is
+    // decided by a camel-split rule in crash-report-redaction, so a hand-copied
+    // regex here can pass while the real rule drops the frames to 240.
+    // Why resolve the key from the payload: hard-coding it here is the same
+    // drift this assertion exists to catch.
+    const stackKey = Object.keys(payload).find(
+      (key) => key !== 'driverFrame' && String(payload[key]).includes(String(payload.driverFrame))
+    )
+    expect(stackKey).toBeDefined()
+    const longFrames = 'a'.repeat(600)
+    const sanitized = sanitizeCrashReportDetails({ ...payload, [stackKey as string]: longFrames })
+    expect(String(sanitized[stackKey as string])).toHaveLength(longFrames.length)
   })
 
   it('clears samples when a cascade ends', () => {
