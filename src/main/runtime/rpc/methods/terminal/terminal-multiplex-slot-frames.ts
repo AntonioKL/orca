@@ -70,7 +70,8 @@ export function installMultiplexSlotFrames(
       }
       // Mobile already has the higher-priority floor, so a rejected desktop claim must not suppress later phone input.
       const inputClaimTail = stream.isMobile ? Promise.resolve(true) : stream.desktopClaimTail
-      void inputClaimTail.then(async (claimed) => {
+      const write = async (): Promise<void> => {
+        const claimed = await inputClaimTail
         if (!claimed || isTerminalInputLockedForClient(runtime, stream.ptyId, stream.client)) {
           return
         }
@@ -81,7 +82,10 @@ export function installMultiplexSlotFrames(
           isMobile: stream.isMobile
         })
         state.notifyStreamWriteUnavailable(stream, outcome)
-      })
+      }
+      void (runtime.enqueueTerminalInputWrite
+        ? runtime.enqueueTerminalInputWrite(stream.ptyId, write)
+        : write())
       return
     }
     if (frame.opcode === TerminalStreamOpcode.SetOutputPaused && stream.supportsOutputPause) {

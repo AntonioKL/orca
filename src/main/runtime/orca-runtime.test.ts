@@ -97,6 +97,7 @@ import { MAX_QUICK_COMMANDS } from '../../shared/terminal-quick-commands'
 import {
   AGENT_PROMPT_BRACKETED_PASTE_END,
   AGENT_PROMPT_BRACKETED_PASTE_START,
+  AGENT_PROMPT_CSI_U_SUBMIT,
   buildAgentPromptPasteBytes,
   getAgentPromptSubmitDelayMs,
   getTerminalPasteIngestMs
@@ -17422,6 +17423,38 @@ describe('OrcaRuntimeService', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('uses negotiated CSI-u submit for a supported agent TUI', async () => {
+    const writes: string[] = []
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: 'pty-negotiated' }),
+      write: (_ptyId, data) => {
+        writes.push(data)
+        if (data.includes(AGENT_PROMPT_CSI_U_SUBMIT)) {
+          runtime.onPtyData('pty-negotiated', 'agent accepted', Date.now())
+        }
+        return true
+      },
+      kill: () => true,
+      getForegroundProcess: async () => 'codex',
+      confirmForegroundProcess: async () => 'codex'
+    })
+    const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+      launchAgent: 'codex'
+    })
+    runtime.onPtyData('pty-negotiated', '\x1b[>1u', Date.now())
+    runtime.onPtyData('pty-negotiated', '\x1b]0;Codex working\x07', Date.now())
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    await expect(runtime.isTerminalRunningSettledPromptAgent(handle)).resolves.toBe(true)
+
+    await expect(
+      runtime.sendTerminalAgentPrompt(handle, 'review this', { preferProtocolSubmit: true })
+    ).resolves.toMatchObject({ accepted: true })
+    expect(writes).toEqual([
+      `${buildAgentPromptPasteBytes('review this')}${AGENT_PROMPT_CSI_U_SUBMIT}`
+    ])
   })
 
   it.each(['claude', 'codex'] as const)(

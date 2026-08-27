@@ -56,4 +56,28 @@ describe('terminal input ordering lane', () => {
     release()
     await expect(pending).resolves.toBe(true)
   })
+
+  it('rejects queued commands and drops deferred input when cleared', async () => {
+    const lane = createTerminalInputOrderingLane()
+    let release!: () => void
+    let startedResolve!: () => void
+    const started = new Promise<void>((resolve) => {
+      startedResolve = resolve
+    })
+    const running = lane.enqueueQuickCommand(
+      () =>
+        new Promise<boolean>((resolve) => {
+          startedResolve()
+          release = () => resolve(true)
+        })
+    )
+    await started
+    const queued = lane.enqueueQuickCommand(async () => true)
+    expect(lane.enqueueInput(() => true, 10)).toBe(true)
+
+    lane.clear()
+    await expect(queued).resolves.toBe(false)
+    release()
+    await expect(running).resolves.toBe(true)
+  })
 })

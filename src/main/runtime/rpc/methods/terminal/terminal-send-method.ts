@@ -195,27 +195,33 @@ export const TERMINAL_SEND_METHODS: RpcAnyMethod[] = [
           : undefined
       let result
       try {
-        result = useSettledAgentPrompt
-          ? await runtime.sendTerminalAgentPrompt(params.terminal, settledAgentPrompt!, {
-              beforeWrite,
-              signal
-            })
-          : await runtime.sendTerminal(
-              params.terminal,
-              {
-                text: params.text,
-                enter: params.enter === true,
-                interrupt: params.interrupt === true
-              },
-              {
+        const write = () =>
+          useSettledAgentPrompt
+            ? runtime.sendTerminalAgentPrompt(params.terminal, settledAgentPrompt!, {
                 beforeWrite,
                 signal,
-                ...(reserveWrite ? { reserveWrite } : {}),
-                ...(params.inputKind !== 'query-reply' && mobileFloorClientId
-                  ? { afterWrite: () => commitMobileInputFloorClaim(mobileFloorClaim) }
-                  : {})
-              }
-            )
+                preferProtocolSubmit: true
+              })
+            : runtime.sendTerminal(
+                params.terminal,
+                {
+                  text: params.text,
+                  enter: params.enter === true,
+                  interrupt: params.interrupt === true
+                },
+                {
+                  beforeWrite,
+                  signal,
+                  ...(reserveWrite ? { reserveWrite } : {}),
+                  ...(params.inputKind !== 'query-reply' && mobileFloorClientId
+                    ? { afterWrite: () => commitMobileInputFloorClaim(mobileFloorClaim) }
+                    : {})
+                }
+              )
+        result =
+          leaf?.ptyId && runtime.enqueueTerminalInputWrite
+            ? await runtime.enqueueTerminalInputWrite(leaf.ptyId, write)
+            : await write()
       } catch (error) {
         mobileFloorClaim.current?.rollback()
         const refusedReason = getTerminalSendGuardRefusedReason(error)

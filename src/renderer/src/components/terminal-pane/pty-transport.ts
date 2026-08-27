@@ -128,6 +128,7 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
     disconnect() {
       handlers.clearAccumulatedState()
       inputWriteQueue.clear()
+      inputOrderingLane.clear()
       if (ptyId) {
         const id = ptyId
         window.api.pty.kill(id)
@@ -142,6 +143,7 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
       outputProcessor.disposePendingSideEffectGauge()
       handlers.clearAccumulatedState()
       inputWriteQueue.clear()
+      inputOrderingLane.clear()
       if (ptyId) {
         if (options?.preserveExitObserver === false) {
           handlers.unregisterAll(ptyId)

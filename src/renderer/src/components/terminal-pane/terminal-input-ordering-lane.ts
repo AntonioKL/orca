@@ -75,7 +75,14 @@ export function createTerminalInputOrderingLane() {
     },
 
     clear(): void {
-      // Queued tasks perform their own connection/handle checks when they run.
+      // Reject deferred commands on detach so their promises and payload accounting do not linger.
+      for (const operation of queue) {
+        if (operation.kind === 'quick') {
+          operation.resolve(false)
+        }
+      }
+      queue.length = 0
+      pendingInputCodeUnits = 0
     }
   }
 }

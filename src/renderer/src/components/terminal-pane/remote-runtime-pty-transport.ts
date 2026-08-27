@@ -90,6 +90,7 @@ const REMOTE_TERMINAL_INPUT_FLUSH_MS = 8
 const REMOTE_QUICK_COMMAND_SEND_TIMEOUT_MS = 30_000
 const REMOTE_TERMINAL_VIEWPORT_FLUSH_MS = 33
 const REMOTE_RUNTIME_MAX_PENDING_QUERY_REPLIES = 64
+const REMOTE_RUNTIME_MAX_PENDING_CLAIM_INPUT_BYTES = 256 * 1024
 const HOST_SESSION_ATTACH_POLL_MS = 150
 const HOST_SESSION_REPLACEMENT_POLL_MAX_MS = 1_000
 const HOST_SESSION_ATTACH_TIMEOUT_MS = 15_000
@@ -317,6 +318,7 @@ export function createRemoteRuntimePtyTransport(
   } | null = null
   let pendingClaimInput: { text: string; queryReply: boolean }[] = []
   let pendingClaimQueryReplyCount = 0
+  let pendingClaimInputBytes = 0
   let terminalCreateRetryWait: {
     timer: ReturnType<typeof setTimeout>
     resolve: (continueRetrying: boolean) => void
@@ -398,15 +400,33 @@ export function createRemoteRuntimePtyTransport(
     pendingViewportClaim = false
     pendingClaimInput = []
     pendingClaimQueryReplyCount = 0
+    pendingClaimInputBytes = 0
     for (const resolve of viewportClaimReadyWaiters) {
       resolve(false)
     }
     viewportClaimReadyWaiters.clear()
   }
   const queuePendingClaimInput = (text: string, queryReply: boolean): void => {
+    const textBytes = new TextEncoder().encode(text).byteLength
+    if (textBytes > REMOTE_RUNTIME_MAX_PENDING_CLAIM_INPUT_BYTES) {
+      return
+    }
+    while (pendingClaimInputBytes + textBytes > REMOTE_RUNTIME_MAX_PENDING_CLAIM_INPUT_BYTES) {
+      const oldest = pendingClaimInput.shift()
+      if (!oldest) {
+        break
+      }
+      pendingClaimInputBytes -= new TextEncoder().encode(oldest.text).byteLength
+      if (oldest.queryReply) {
+        pendingClaimQueryReplyCount -= 1
+      }
+    }
     if (queryReply && pendingClaimQueryReplyCount >= REMOTE_RUNTIME_MAX_PENDING_QUERY_REPLIES) {
       const oldestReply = pendingClaimInput.findIndex((segment) => segment.queryReply)
       if (oldestReply !== -1) {
+        pendingClaimInputBytes -= new TextEncoder().encode(
+          pendingClaimInput[oldestReply].text
+        ).byteLength
         pendingClaimInput.splice(oldestReply, 1)
         pendingClaimQueryReplyCount -= 1
         const left = pendingClaimInput[oldestReply - 1]
@@ -420,9 +440,11 @@ export function createRemoteRuntimePtyTransport(
     const tail = pendingClaimInput.at(-1)
     if (!queryReply && tail && !tail.queryReply) {
       tail.text += text
+      pendingClaimInputBytes += textBytes
       return
     }
     pendingClaimInput.push({ text, queryReply })
+    pendingClaimInputBytes += textBytes
     if (queryReply) {
       pendingClaimQueryReplyCount += 1
     }
@@ -433,6 +455,7 @@ export function createRemoteRuntimePtyTransport(
     pendingViewportClaim = false
     pendingClaimInput = []
     pendingClaimQueryReplyCount = 0
+    pendingClaimInputBytes = 0
     for (const segment of queued) {
       stream.sendInput(segment.text)
     }
@@ -1241,6 +1264,7 @@ export function createRemoteRuntimePtyTransport(
         }
         adoptExecutionMetadata(terminal)
         const replacedPtyId = remotePtyId
+        advanceLifecycleEpoch()
         handle = terminal.handle
         remotePtyId = toRemoteRuntimePtyId(terminal.handle, currentRuntimeEnvironmentId)
         unregisterShutdownHandlers(replacedPtyId)
@@ -1595,6 +1619,7 @@ export function createRemoteRuntimePtyTransport(
   }
 
   function rebindRemoteTerminalHandle(nextHandle: string): void {
+    advanceLifecycleEpoch()
     clearPublishedHandleWait()
     const replacedPtyId = remotePtyId
     unregisterShutdownHandlers(replacedPtyId)
@@ -2493,6 +2518,7 @@ export function createRemoteRuntimePtyTransport(
       clearPublishedHandleWait()
       inputBatcher.flush()
       inputBatcher.clear()
+      inputOrderingLane.clear()
       viewportBatcher.flush()
       outputProcessor.clearAccumulatedState()
       if (!connected && !handle) {
@@ -2528,6 +2554,7 @@ export function createRemoteRuntimePtyTransport(
       clearPublishedHandleWait()
       inputBatcher.flush()
       inputBatcher.clear()
+      inputOrderingLane.clear()
       viewportBatcher.flush()
       outputProcessor.clearAccumulatedState()
       unregisterShutdownHandlers(remotePtyId)
@@ -2771,6 +2798,7 @@ export function createRemoteRuntimePtyTransport(
       }
       recovery.dispose()
       inputBatcher.clear()
+      inputOrderingLane.clear()
       viewportBatcher.clear()
     }
   }

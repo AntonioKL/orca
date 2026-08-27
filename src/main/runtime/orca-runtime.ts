@@ -46,7 +46,10 @@ import type {
 } from '../../shared/terminal-side-effect-facts'
 import type { TerminalGitHubPRLink } from '../../shared/terminal-github-pr-link-detector'
 import { TerminalKittyKeyboardModeTracker } from '../../shared/terminal-kitty-keyboard-mode-tracker'
-import { parseTerminalKittyKeyboardFlags } from '../../shared/terminal-kitty-keyboard-flags'
+import {
+  kittyModeAcceptsSyntheticCsiUEnter,
+  parseTerminalKittyKeyboardFlags
+} from '../../shared/terminal-kitty-keyboard-flags'
 import {
   AGENT_STATUS_STALE_AFTER_MS,
   isFreshNonDoneAgentStatus,
@@ -94,11 +97,13 @@ import {
 import { buildOrchestrationTaskDisplayMetadata } from '../../shared/orchestration-task-display'
 import {
   isTerminalInputTooLargeWithYield,
+  TERMINAL_INPUT_CHUNK_MAX_BYTES,
   TERMINAL_INPUT_TOO_LARGE_ERROR,
   iterateTerminalInputChunks
 } from '../../shared/terminal-input'
 import {
   AGENT_PROMPT_BRACKETED_PASTE_END,
+  AGENT_PROMPT_CSI_U_SUBMIT,
   AGENT_PROMPT_SUBMIT,
   buildAgentPromptPasteBytes,
   getAgentPromptSubmitDelayMs,
@@ -3428,6 +3433,7 @@ export class OrcaRuntimeService {
   private agentPromptPermissionSequenceByPtyId = new Map<string, number>()
   private agentPromptExplicitStatusFloorByPtyId = new Map<string, number>()
   private agentPromptSubmissionTailByPtyId = new Map<string, Promise<void>>()
+  private terminalInputWriteTailByPtyId = new Map<string, Promise<void>>()
   private providerSequenceInitializedPtys = new Set<string>()
   private providerSequenceOffsetByPtyId = new Map<string, number>()
   private providerSnapshotPreferredPtys = new Set<string>()
@@ -19192,6 +19198,7 @@ export class OrcaRuntimeService {
       beforeWrite?: (ptyId: string) => void | Promise<void>
       suffixFailureError?: string
       signal?: AbortSignal
+      preferProtocolSubmit?: boolean
     } = {}
   ): Promise<RuntimeTerminalSend> {
     const payload = buildAgentPromptPasteBytes(prompt)
@@ -19950,6 +19957,7 @@ export class OrcaRuntimeService {
       beforeWrite?: (ptyId: string) => void | Promise<void>
       suffixFailureError?: string
       signal?: AbortSignal
+      preferProtocolSubmit?: boolean
     } = {}
   ): Promise<number> {
     assertAgentPromptRequestActive(options.signal)
@@ -19961,31 +19969,69 @@ export class OrcaRuntimeService {
     const writeHostPlatform = this.getPtyWriteHostPlatform(ptyId)
     const pasteByteLength = Buffer.byteLength(pastePayload, 'utf8')
     const pasteIngestMs = getTerminalPasteIngestMs(writeHostPlatform, pasteByteLength)
-    const renderGate = this.createAgentPromptRenderGate(ptyId, pasteIngestMs)
+    const protocolSubmitBytes =
+      options.preferProtocolSubmit === true &&
+      pasteByteLength + Buffer.byteLength(AGENT_PROMPT_CSI_U_SUBMIT, 'utf8') <=
+        TERMINAL_INPUT_CHUNK_MAX_BYTES
+        ? await this.getAgentPromptProtocolSubmitBytes(
+            ptyId,
+            generation,
+            async () => {
+              await options.beforeWrite?.(ptyId)
+              assertAgentPromptRequestActive(options.signal)
+              this.assertAgentPromptGeneration(ptyId, generation)
+              this.assertAgentPromptPermissionSafe(
+                permissionBaseline,
+                this.getAgentPromptActivity(handle, ptyId)
+              )
+            },
+            options.signal
+          )
+        : null
+    const renderGate = protocolSubmitBytes
+      ? null
+      : this.createAgentPromptRenderGate(ptyId, pasteIngestMs)
+    const pasteChunkBytes = protocolSubmitBytes
+      ? TERMINAL_INPUT_CHUNK_MAX_BYTES - Buffer.byteLength(protocolSubmitBytes, 'utf8')
+      : TERMINAL_INPUT_CHUNK_MAX_BYTES
     let wrotePasteBytes = false
     let completedPaste = false
+    let protocolSubmitAborted = false
     try {
-      const chunks = iterateTerminalInputChunks(pastePayload)
+      const chunks = iterateTerminalInputChunks(pastePayload, pasteChunkBytes)
       let chunk = chunks.next()
       while (!chunk.done) {
         const nextChunk = chunks.next()
         assertAgentPromptRequestActive(options.signal)
         this.assertAgentPromptGeneration(ptyId, generation)
-        await options.beforeWrite?.(ptyId)
+        if (!protocolSubmitBytes) {
+          await options.beforeWrite?.(ptyId)
+        }
         assertAgentPromptRequestActive(options.signal)
         this.assertAgentPromptGeneration(ptyId, generation)
         this.assertAgentPromptPermissionSafe(
           permissionBaseline,
           this.getAgentPromptActivity(handle, ptyId)
         )
+        if (protocolSubmitBytes && nextChunk.done) {
+          const foregroundConfirmed = await this.confirmAgentPromptForeground(ptyId)
+          if (foregroundConfirmed !== true) {
+            protocolSubmitAborted = true
+          }
+        }
         if (nextChunk.done) {
           renderGate?.arm()
         }
-        const wrote = this.ptyController?.write(ptyId, chunk.value) ?? false
+        const writeBytes =
+          protocolSubmitBytes && nextChunk.done && !protocolSubmitAborted
+            ? `${chunk.value}${protocolSubmitBytes}`
+            : chunk.value
+        const wrote = this.ptyController?.write(ptyId, writeBytes) ?? false
         if (!wrote) {
           throw new Error('terminal_not_writable')
         }
         wrotePasteBytes = true
+        completedPaste = nextChunk.done === true
         chunk = nextChunk
         if (!chunk.done) {
           await yieldBetweenTerminalInputChunks()
@@ -20002,6 +20048,21 @@ export class OrcaRuntimeService {
       }
       renderGate?.dispose()
       throw error
+    }
+
+    if (protocolSubmitBytes && protocolSubmitAborted) {
+      return 0
+    }
+    if (protocolSubmitBytes) {
+      assertAgentPromptRequestActive(options.signal)
+      this.assertAgentPromptGeneration(ptyId, generation)
+      await verifyAgentPromptSubmission({
+        baseline: permissionBaseline,
+        readActivity: () => this.getAgentPromptActivity(handle, ptyId),
+        timeoutMs: resolveAgentPromptEffectTimeoutMs(this.getPtyAgent(ptyId)),
+        signal: options.signal
+      })
+      return Buffer.byteLength(protocolSubmitBytes, 'utf8')
     }
 
     if (renderGate) {
@@ -20043,6 +20104,76 @@ export class OrcaRuntimeService {
     return 1
   }
 
+  /** Recheck agent ownership immediately before a protocol submit reaches the PTY. */
+  private async confirmAgentPromptForeground(ptyId: string): Promise<boolean | null> {
+    const controller = this.ptyController
+    const expectedAgent = this.ptysById.get(ptyId)?.foregroundAgent
+    if (!controller?.confirmForegroundProcess || !isTerminalSendSettlementAgent(expectedAgent)) {
+      return null
+    }
+    try {
+      const confirmedProcess = await controller.confirmForegroundProcess(ptyId)
+      if (confirmedProcess === null) {
+        return null
+      }
+      return recognizeAgentProcess(confirmedProcess)?.agent === expectedAgent
+    } catch {
+      return null
+    }
+  }
+
+  private async getAgentPromptProtocolSubmitBytes(
+    ptyId: string,
+    generation: number,
+    beforeConfirmation: () => void | Promise<void>,
+    signal?: AbortSignal
+  ): Promise<string | null> {
+    if (process.env.ORCA_E2E_DISABLE_QUICK_COMMAND_AGENT_PROTOCOL === '1') {
+      return null
+    }
+    const controller = this.ptyController
+    const expectedAgent = this.ptysById.get(ptyId)?.foregroundAgent
+    if (!controller?.confirmForegroundProcess || !isTerminalSendSettlementAgent(expectedAgent)) {
+      return null
+    }
+    const state = this.headlessTerminals.get(ptyId)
+    if (!state) {
+      return null
+    }
+    try {
+      await waitForAgentPromptPromise(state.writeChain, signal)
+    } catch {
+      assertAgentPromptRequestActive(signal)
+      return null
+    }
+    if (
+      this.headlessTerminals.get(ptyId) !== state ||
+      !kittyModeAcceptsSyntheticCsiUEnter(state.emulator.getKittyKeyboardFlags())
+    ) {
+      return null
+    }
+    await beforeConfirmation()
+    let confirmedAgent: TuiAgent | null = null
+    try {
+      confirmedAgent =
+        recognizeAgentProcess(await controller.confirmForegroundProcess(ptyId))?.agent ?? null
+    } catch {
+      assertAgentPromptRequestActive(signal)
+      return null
+    }
+    if (
+      confirmedAgent !== expectedAgent ||
+      this.ptyController !== controller ||
+      this.getPtyLifecycleGeneration(ptyId) !== generation ||
+      this.headlessTerminals.get(ptyId) !== state ||
+      this.ptysById.get(ptyId)?.foregroundAgent !== expectedAgent ||
+      !kittyModeAcceptsSyntheticCsiUEnter(state.emulator.getKittyKeyboardFlags())
+    ) {
+      return null
+    }
+    return AGENT_PROMPT_CSI_U_SUBMIT
+  }
+
   private async serializeAgentPromptSubmission<T>(
     ptyId: string,
     generation: number,
@@ -20061,6 +20192,24 @@ export class OrcaRuntimeService {
     } finally {
       if (this.agentPromptSubmissionTailByPtyId.get(queueKey) === tail) {
         this.agentPromptSubmissionTailByPtyId.delete(queueKey)
+      }
+    }
+  }
+
+  /** Serialize writes admitted by separate terminal stream and RPC sockets. */
+  async enqueueTerminalInputWrite<T>(ptyId: string, write: () => Promise<T>): Promise<T> {
+    const previous = this.terminalInputWriteTailByPtyId.get(ptyId) ?? Promise.resolve()
+    const current = previous.catch(() => undefined).then(write)
+    const tail = current.then(
+      () => undefined,
+      () => undefined
+    )
+    this.terminalInputWriteTailByPtyId.set(ptyId, tail)
+    try {
+      return await current
+    } finally {
+      if (this.terminalInputWriteTailByPtyId.get(ptyId) === tail) {
+        this.terminalInputWriteTailByPtyId.delete(ptyId)
       }
     }
   }
