@@ -5,11 +5,11 @@ type TerminalAccessoryRepeatSender<TInput> = (input: TInput) => Promise<boolean>
 
 export function createTerminalAccessoryRepeatSender<TInput>(
   targetHandle: string | null,
-  getActiveHandle: () => string | null,
+  isDeliveryTargetCurrent: (targetHandle: string) => boolean,
   sendToTerminal: (input: TInput, targetHandle: string) => Promise<boolean>
 ): TerminalAccessoryRepeatSender<TInput> {
   return (input) => {
-    if (!targetHandle || getActiveHandle() !== targetHandle) {
+    if (!targetHandle || !isDeliveryTargetCurrent(targetHandle)) {
       return Promise.resolve(false)
     }
     return sendToTerminal(input, targetHandle)

@@ -155,7 +155,7 @@ describe('terminal accessory repeat', () => {
     const sendToTerminal = vi.fn(async () => true)
     const send = createTerminalAccessoryRepeatSender(
       activeTerminal,
-      () => activeTerminal,
+      (targetHandle) => activeTerminal === targetHandle,
       sendToTerminal
     )
 
@@ -165,5 +165,36 @@ describe('terminal accessory repeat', () => {
 
     expect(sendToTerminal).toHaveBeenCalledTimes(1)
     expect(sendToTerminal).toHaveBeenCalledWith('down', 'terminal-a')
+  })
+
+  it('drops a queued send when its press-time connection is no longer current', async () => {
+    vi.useFakeTimers()
+    let connectionGeneration = 1
+    const first = deferred()
+    const sent: string[] = []
+    const sendToTerminal = vi.fn((input: string) => {
+      sent.push(input)
+      return input === 'down' ? first.promise.then(() => true) : Promise.resolve(true)
+    })
+    const createSender = () => {
+      const pressedConnectionGeneration = connectionGeneration
+      return createTerminalAccessoryRepeatSender(
+        'terminal-a',
+        () => connectionGeneration === pressedConnectionGeneration,
+        sendToTerminal
+      )
+    }
+    const repeat = createTerminalAccessoryRepeatController<string>()
+
+    repeat.start('down', createSender())
+    repeat.stop()
+    repeat.start('up', createSender())
+    repeat.stop()
+
+    connectionGeneration = 2
+    first.resolve()
+    await vi.runAllTimersAsync()
+
+    expect(sent).toEqual(['down'])
   })
 })
