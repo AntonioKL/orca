@@ -2415,11 +2415,11 @@ export default function AutomationsPage(): React.JSX.Element {
           selectedAutomationRunPage={selectedAutomationRunPage}
           selectedRuns={selectedRuns}
           selectedRunsNotice={selectedRunsNotice}
-          selectedHostEntry={rowRecoveryHost(selectedRowKey)}
+          selectedHostEntry={rowRecoveryHost(selectedRow?.key ?? null)}
           recoverSelectedRuns={(action) => {
             // Reconnect/Update server act on the selected row's own host; the
             // re-ask is what brings this automation's history back either way.
-            hostCatalog.recover(action, rowRecoveryHost(selectedRowKey))
+            hostCatalog.recover(action, rowRecoveryHost(selectedRow?.key ?? null))
             setSelectedAutomationRuns((current) => ({ ...current, notice: null }))
             setRunHistoryReloadToken((token) => token + 1)
           }}
