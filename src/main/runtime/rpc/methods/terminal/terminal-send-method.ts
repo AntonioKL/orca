@@ -218,10 +218,12 @@ export const TERMINAL_SEND_METHODS: RpcAnyMethod[] = [
                     : {})
                 }
               )
-        result =
-          leaf?.ptyId && runtime.enqueueTerminalInputWrite
-            ? await runtime.enqueueTerminalInputWrite(leaf.ptyId, write)
-            : await write()
+        if (leaf?.ptyId && runtime.enqueueTerminalInputWrite) {
+          const queued = runtime.enqueueTerminalInputWrite(leaf.ptyId, write)
+          result = queued ? await queued : await write()
+        } else {
+          result = await write()
+        }
       } catch (error) {
         mobileFloorClaim.current?.rollback()
         const refusedReason = getTerminalSendGuardRefusedReason(error)

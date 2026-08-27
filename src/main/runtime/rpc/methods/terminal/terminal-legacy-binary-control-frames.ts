@@ -50,7 +50,11 @@ export function registerLegacyBinaryControlFrames(
       }
       const write = async (): Promise<void> => {
         const claimed = await controls.getDesktopClaimTail()
-        if (!claimed || isTerminalInputLockedForClient(runtime, ptyId, params.client)) {
+        if (
+          !claimed ||
+          controls.isClosed() ||
+          isTerminalInputLockedForClient(runtime, ptyId, params.client)
+        ) {
           return
         }
         const outcome = await sendTerminalStreamInput(runtime, {

@@ -72,7 +72,12 @@ export function installMultiplexSlotFrames(
       const inputClaimTail = stream.isMobile ? Promise.resolve(true) : stream.desktopClaimTail
       const write = async (): Promise<void> => {
         const claimed = await inputClaimTail
-        if (!claimed || isTerminalInputLockedForClient(runtime, stream.ptyId, stream.client)) {
+        if (
+          !claimed ||
+          state.closed ||
+          streams.get(stream.streamId) !== stream ||
+          isTerminalInputLockedForClient(runtime, stream.ptyId, stream.client)
+        ) {
           return
         }
         const outcome = await sendTerminalStreamInput(runtime, {

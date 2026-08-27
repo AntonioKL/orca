@@ -19854,6 +19854,7 @@ export class OrcaRuntimeService {
       signal?: AbortSignal
     } = {}
   ): Promise<void> {
+    assertAgentPromptRequestActive(options.signal)
     // Why: direct terminal.send can carry paste-sized text from RPC/mobile
     // clients; chunk text before PTY/ConPTY while preserving suffix separation.
     const text = typeof action.text === 'string' ? action.text : ''
@@ -19910,12 +19911,15 @@ export class OrcaRuntimeService {
       beforeWrite?: (ptyId: string) => void | Promise<void>
       reserveWrite?: (ptyId: string) => void
       afterWrite?: (ptyId: string) => void | Promise<void>
+      signal?: AbortSignal
     } = {}
   ): Promise<void> {
     const chunks = iterateTerminalInputChunks(text)
     let chunk = chunks.next()
     while (!chunk.done) {
+      assertAgentPromptRequestActive(options.signal)
       await options.beforeWrite?.(ptyId)
+      assertAgentPromptRequestActive(options.signal)
       options.reserveWrite?.(ptyId)
       const wrote = this.ptyController?.write(ptyId, chunk.value) ?? false
       if (!wrote) {

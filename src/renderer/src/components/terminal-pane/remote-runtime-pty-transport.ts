@@ -406,20 +406,13 @@ export function createRemoteRuntimePtyTransport(
     }
     viewportClaimReadyWaiters.clear()
   }
-  const queuePendingClaimInput = (text: string, queryReply: boolean): void => {
+  const queuePendingClaimInput = (text: string, queryReply: boolean): boolean => {
     const textBytes = new TextEncoder().encode(text).byteLength
     if (textBytes > REMOTE_RUNTIME_MAX_PENDING_CLAIM_INPUT_BYTES) {
-      return
+      return false
     }
-    while (pendingClaimInputBytes + textBytes > REMOTE_RUNTIME_MAX_PENDING_CLAIM_INPUT_BYTES) {
-      const oldest = pendingClaimInput.shift()
-      if (!oldest) {
-        break
-      }
-      pendingClaimInputBytes -= new TextEncoder().encode(oldest.text).byteLength
-      if (oldest.queryReply) {
-        pendingClaimQueryReplyCount -= 1
-      }
+    if (pendingClaimInputBytes + textBytes > REMOTE_RUNTIME_MAX_PENDING_CLAIM_INPUT_BYTES) {
+      return false
     }
     if (queryReply && pendingClaimQueryReplyCount >= REMOTE_RUNTIME_MAX_PENDING_QUERY_REPLIES) {
       const oldestReply = pendingClaimInput.findIndex((segment) => segment.queryReply)
@@ -441,13 +434,14 @@ export function createRemoteRuntimePtyTransport(
     if (!queryReply && tail && !tail.queryReply) {
       tail.text += text
       pendingClaimInputBytes += textBytes
-      return
+      return true
     }
     pendingClaimInput.push({ text, queryReply })
     pendingClaimInputBytes += textBytes
     if (queryReply) {
       pendingClaimQueryReplyCount += 1
     }
+    return true
   }
   // Why: clearing the claim flag without draining strands the queued bytes.
   const flushPendingClaimInput = (stream: RemoteRuntimeMultiplexedTerminal): void => {
@@ -1456,8 +1450,7 @@ export function createRemoteRuntimePtyTransport(
     }
     if (pendingViewportClaim) {
       // Why: a claim during subscribe/reconnect has no stream record yet; hold its input so the stream emits claim+input in one order.
-      queuePendingClaimInput(text, queryReply)
-      return true
+      return queuePendingClaimInput(text, queryReply)
     }
     const previous =
       unacknowledgedInputTail?.handle === targetHandle &&
