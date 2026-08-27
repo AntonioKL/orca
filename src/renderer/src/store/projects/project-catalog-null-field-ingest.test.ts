@@ -10,7 +10,7 @@ import { fetchProjectHostSetupCompatibility, setupWithFetchedOwner } from './pro
 // row is in the store, its declared field types hold.
 const repos = [
   { id: 'repo-1', path: '/Users/alice/orca', displayName: 'orca', badgeColor: '#000', addedAt: 1 }
-] as unknown as Repo[]
+] satisfies Repo[]
 
 const projects = [
   {
@@ -21,7 +21,7 @@ const projects = [
     createdAt: 1,
     updatedAt: 1
   }
-] as unknown as Project[]
+] satisfies Project[]
 
 // Mirrors the Settings.tsx projectByRepoId useMemo that crashed.
 function buildProjectByRepoIdLikeSettings(
@@ -44,36 +44,28 @@ function checkoutIdentityLikeSidebar(setup: ProjectHostSetup): string {
   return setup.path.trim() || setup.repoId || setup.id
 }
 
-function badSetups(): unknown[] {
-  return [
-    {
-      id: 'repo:repo-1::local',
-      projectId: 'repo:repo-1',
-      hostId: 'local',
-      repoId: 'repo-1',
-      path: '/Users/alice/orca',
-      displayName: 'orca',
-      setupState: 'ready',
-      setupMethod: 'legacy-repo',
-      createdAt: 1,
-      updatedAt: 1
-    },
-    {
-      id: 'repo:repo-1::local::2',
-      projectId: 'repo:repo-1',
-      hostId: 'local',
-      repoId: null,
-      path: null,
-      displayName: 'orca-2',
-      setupState: 'ready',
-      setupMethod: 'legacy-repo',
-      createdAt: 1,
-      updatedAt: 1
-    }
-  ]
+// Why Reflect.set and not a cast: the second row deliberately violates its declared types, which
+// is exactly what an older host publishes over the wire.
+function badSetups(): ProjectHostSetup[] {
+  const base = (id: string, displayName: string): ProjectHostSetup => ({
+    id,
+    projectId: 'repo:repo-1',
+    hostId: 'local',
+    repoId: 'repo-1',
+    path: '/Users/alice/orca',
+    displayName,
+    setupState: 'ready',
+    setupMethod: 'legacy-repo',
+    createdAt: 1,
+    updatedAt: 1
+  })
+  const corrupted = base('repo:repo-1::local::2', 'orca-2')
+  Reflect.set(corrupted, 'repoId', null)
+  Reflect.set(corrupted, 'path', null)
+  return [base('repo:repo-1::local', 'orca'), corrupted]
 }
 
-function stubProjectsApi(setups: unknown[], projectRows: unknown[] = projects): void {
+function stubProjectsApi(setups: ProjectHostSetup[], projectRows: Project[] = projects): void {
   vi.stubGlobal('window', {
     api: {
       projects: {
@@ -96,7 +88,7 @@ describe('project catalog ingest with non-string row fields', () => {
   // Why: a remote host on a different Orca version is a first-class source of these rows, and
   // decoders hand them over verbatim — the client cannot assume the host already repaired them.
   it('coerces on the remote adoption boundary too', () => {
-    const adopted = setupWithFetchedOwner(badSetups()[1] as ProjectHostSetup, {
+    const adopted = setupWithFetchedOwner(badSetups()[1]!, {
       kind: 'environment',
       environmentId: 'env-1'
     })

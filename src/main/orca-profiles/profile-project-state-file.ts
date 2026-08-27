@@ -44,11 +44,11 @@ export function readProfileState(profileId: string, userDataPath: string): Trans
     ...parsed,
     repos: arrayOrEmpty<Repo>(parsed.repos),
     // Why normalize: another profile's file is untrusted JSON, and a null repoId/path here would be
-    // carried straight into the importing app's state. Cast — these arrays stay mutably owned.
-    projects: normalizeProjectRows(arrayOrEmpty<Project>(parsed.projects)) as Project[],
+    // carried straight into the importing app's state.
+    projects: normalizeProjectRows(arrayOrEmpty<Project>(parsed.projects)),
     projectHostSetups: normalizeProjectHostSetupRows(
       arrayOrEmpty<ProjectHostSetup>(parsed.projectHostSetups)
-    ) as ProjectHostSetup[],
+    ),
     projectGroups: arrayOrEmpty(parsed.projectGroups),
     folderWorkspaces: arrayOrEmpty(parsed.folderWorkspaces),
     sparsePresetsByRepo: recordOrEmpty<SparsePreset[]>(parsed.sparsePresetsByRepo),

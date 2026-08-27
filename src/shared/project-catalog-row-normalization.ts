@@ -79,7 +79,7 @@ export function normalizeProjectRow(project: Project): Project {
   }
 }
 
-function normalizeRows<T>(rows: readonly T[], normalize: (row: T) => T): readonly T[] {
+function normalizeRows<T>(rows: T[], normalize: (row: T) => T): T[] {
   if (!Array.isArray(rows)) {
     return []
   }
@@ -95,12 +95,10 @@ function normalizeRows<T>(rows: readonly T[], normalize: (row: T) => T): readonl
   return repaired ?? rows
 }
 
-export function normalizeProjectHostSetupRows(
-  setups: readonly ProjectHostSetup[]
-): readonly ProjectHostSetup[] {
+export function normalizeProjectHostSetupRows(setups: ProjectHostSetup[]): ProjectHostSetup[] {
   return normalizeRows(setups, normalizeProjectHostSetupRow)
 }
 
-export function normalizeProjectRows(projects: readonly Project[]): readonly Project[] {
+export function normalizeProjectRows(projects: Project[]): Project[] {
   return normalizeRows(projects, normalizeProjectRow)
 }

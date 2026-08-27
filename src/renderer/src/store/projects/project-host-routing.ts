@@ -78,8 +78,8 @@ function normalizeProjectCatalogProjection(
   projection: ProjectHostSetupProjection
 ): ProjectHostSetupProjection {
   return {
-    projects: normalizeProjectRows(projection.projects),
-    setups: normalizeProjectHostSetupRows(projection.setups)
+    projects: normalizeProjectRows([...projection.projects]),
+    setups: normalizeProjectHostSetupRows([...projection.setups])
   }
 }
 
@@ -129,7 +129,7 @@ export async function fetchProjectHostSetupCompatibility(
     return {
       // Why projects too: the same wire response carries them, and a remote host on another
       // Orca version can publish a row whose declared field types do not hold.
-      projects: normalizeProjectRows(projectResponse.projects),
+      projects: normalizeProjectRows([...projectResponse.projects]),
       setups: setupResponse.setups.map((setup) => setupWithFetchedOwner(setup, target))
     }
   } catch {

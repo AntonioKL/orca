@@ -7,8 +7,17 @@ import {
   normalizeProjectRows
 } from './project-catalog-row-normalization'
 
+// Why Reflect.set and not a cast: these fixtures deliberately violate the declared types, which is
+// the whole point — writing the bad value onto a valid row says that outright.
+function corrupt<T extends object>(row: T, overrides: Record<string, unknown>): T {
+  for (const [key, value] of Object.entries(overrides)) {
+    Reflect.set(row, key, value)
+  }
+  return row
+}
+
 function makeSetup(overrides: Record<string, unknown> = {}): ProjectHostSetup {
-  return {
+  const setup: ProjectHostSetup = {
     id: 'setup-1',
     projectId: 'project-1',
     hostId: 'local',
@@ -18,21 +27,21 @@ function makeSetup(overrides: Record<string, unknown> = {}): ProjectHostSetup {
     setupState: 'ready',
     setupMethod: 'legacy-repo',
     createdAt: 1,
-    updatedAt: 2,
-    ...overrides
-  } as unknown as ProjectHostSetup
+    updatedAt: 2
+  }
+  return corrupt(setup, overrides)
 }
 
 function makeProject(overrides: Record<string, unknown> = {}): Project {
-  return {
+  const project: Project = {
     id: 'project-1',
     displayName: 'Project',
     badgeColor: '#737373',
     sourceRepoIds: ['repo-1'],
     createdAt: 1,
-    updatedAt: 2,
-    ...overrides
-  } as unknown as Project
+    updatedAt: 2
+  }
+  return corrupt(project, overrides)
 }
 
 describe('normalizeProjectHostSetupRow', () => {
@@ -175,7 +184,10 @@ describe('row array normalization', () => {
   })
 
   it('treats a non-array as empty', () => {
-    expect(normalizeProjectHostSetupRows(null as unknown as ProjectHostSetup[])).toEqual([])
-    expect(normalizeProjectRows(null as unknown as Project[])).toEqual([])
+    // Why JSON.parse: a persisted catalog really can hold a non-array here, and parsing is how it
+    // arrives — the parameter type cannot express it.
+    const notAnArray: never[] = JSON.parse('null')
+    expect(normalizeProjectHostSetupRows(notAnArray)).toEqual([])
+    expect(normalizeProjectRows(notAnArray)).toEqual([])
   })
 })

@@ -76,7 +76,7 @@ export function normalizeLoadedAutomationRuns(
  * every launch, and this host keeps publishing them to paired clients over the wire.
  */
 export function normalizeLoadedProjectCatalog(
-  parsed: PersistedState,
+  parsed: Partial<Pick<PersistedState, 'projects' | 'projectHostSetups'>>,
   markNeedsSave: () => void
 ): Pick<PersistedState, 'projects' | 'projectHostSetups'> {
   const projects = normalizeProjectRows(parsed.projects ?? [])
@@ -84,10 +84,5 @@ export function normalizeLoadedProjectCatalog(
   if (projects !== parsed.projects || projectHostSetups !== parsed.projectHostSetups) {
     markNeedsSave()
   }
-  // Cast: persisted catalog rows are owned mutably by the store; the normalizer is identity-preserving
-  // and hands back either the input array or a fresh one, never a frozen view.
-  return {
-    projects: projects as PersistedState['projects'],
-    projectHostSetups: projectHostSetups as PersistedState['projectHostSetups']
-  }
+  return { projects, projectHostSetups }
 }
