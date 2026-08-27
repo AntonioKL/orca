@@ -7,6 +7,7 @@ import type { AiVaultScanIssue } from '../../shared/ai-vault-types'
 import Database from '../sqlite/sync-database'
 import { listOpenCodeSqliteSessions } from './session-scanner-opencode-sqlite-list'
 import {
+  openCodeBusyTimeoutMs,
   openCodeDatabaseScanIssue,
   readOpenCodeDatabase
 } from './session-scanner-opencode-sqlite-open'
@@ -159,6 +160,23 @@ describe('readOpenCodeDatabase', () => {
       })
     ).toThrow('read blew up')
     expect(() => captured!.prepare('SELECT 1')).toThrow(/not open/i)
+  })
+})
+
+describe('openCodeBusyTimeoutMs', () => {
+  // Measured on a real Windows host against a real distro: a read over
+  // \\wsl.localhost fails whatever the timeout, and the wait is not bounded by
+  // it -- 1500 took ~2400 ms, 5000 took ~7250 ms, 0 failed in ~21 ms. Waiting
+  // there is dead time on every scan, and enough such databases would spend the
+  // list worker's whole deadline.
+  it('does not wait on a share where the wait provably cannot succeed', () => {
+    expect(openCodeBusyTimeoutMs('\\\\wsl.localhost\\Ubuntu\\home\\ada\\opencode.db')).toBe(0)
+    expect(openCodeBusyTimeoutMs('\\\\wsl$\\Ubuntu\\home\\ada\\opencode.db')).toBe(0)
+  })
+
+  it('still waits on a path where a writer really can be holding the lock', () => {
+    expect(openCodeBusyTimeoutMs('C:\\Users\\ada\\opencode.db')).toBe(1_500)
+    expect(openCodeBusyTimeoutMs('/home/ada/.local/share/opencode/opencode.db')).toBe(1_500)
   })
 })
 

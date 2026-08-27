@@ -255,7 +255,7 @@ export async function parseOpenCodeSqliteSession(args: {
   })
 }
 
-// Extracted so the bounded busy-timeout open/retry wrapper owns the handle.
+// Extracted so the open wrapper owns the handle's lifetime.
 function readSession(args: {
   db: SyncDatabase
   dbPath: string

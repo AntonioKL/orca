@@ -19,11 +19,27 @@ const OPENCODE_SQLITE_BUSY_TIMEOUT_MS = 1_500
  * @param dbPath - Absolute path to an opencode.db file.
  * @returns An open handle the caller must close.
  */
+/**
+ * Busy timeout for one database.
+ *
+ * Zero over the WSL share because waiting there is provably useless: Windows
+ * cannot take SQLite's locks over \\wsl.localhost at all, so the open fails
+ * whatever the timeout. Measured on a real host, the wait is not even bounded
+ * by the value — timeout 1500 took ~2400 ms and timeout 5000 took ~7250 ms,
+ * while 0 failed in ~21 ms. Paying that per database, per scan, buys nothing
+ * and enough such databases would spend the list worker's whole 30 s deadline.
+ * @param dbPath - Absolute path to an opencode.db file.
+ * @returns Milliseconds to let SQLite's busy handler wait.
+ */
+export function openCodeBusyTimeoutMs(dbPath: string): number {
+  return isWslUncPath(dbPath) ? 0 : OPENCODE_SQLITE_BUSY_TIMEOUT_MS
+}
+
 function openOpenCodeDatabaseReadonly(dbPath: string): SyncDatabase {
   const db = new SyncDatabase(dbPath, {
     readonly: true,
     fileMustExist: true,
-    timeout: OPENCODE_SQLITE_BUSY_TIMEOUT_MS
+    timeout: openCodeBusyTimeoutMs(dbPath)
   })
   db.pragma('query_only = ON')
   return db
