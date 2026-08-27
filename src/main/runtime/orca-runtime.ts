@@ -1199,6 +1199,7 @@ import {
 } from '../ipc/watcher-removal-drain'
 import { withWorktreeSpan } from '../observability/instrumentation'
 import { HeadlessEmulator } from '../daemon/headless-emulator'
+import { PtyShellOwnershipMirror } from './pty-shell-ownership-mirror'
 import {
   isNativeWindowsConptyPty,
   registerConptyDa1OverrideInstaller,
@@ -1863,6 +1864,7 @@ type RuntimeHeadlessTerminal = {
   // the seq actually painted into this emulator, not the latest PTY seq.
   outputSequence: number
   writeChain: Promise<void>
+  ownership: PtyShellOwnershipMirror
 }
 
 export type RuntimePtyDataAdmission = Readonly<{
@@ -1916,6 +1918,7 @@ type RuntimeTerminalBufferSnapshot = {
   /** Effective kitty flags proven at this snapshot's own `seq`. Absent means
    *  the winning source could not prove them. */
   kittyKeyboardFlags?: number
+  terminalOwner?: 'shell'
 }
 
 type HeadlessSeedMetadata = {
@@ -1927,6 +1930,7 @@ type HeadlessSeedMetadata = {
    *  emulator so hidden `CSI ? u` answers the real flags instead of ?0u
    *  (terminal-query-authority.md §kitty). */
   kittyKeyboardFlags?: number
+  terminalOwner?: 'shell'
 }
 
 type RuntimePtyController = {
@@ -2022,6 +2026,7 @@ type RuntimePtyController = {
     ptyId: string
   ): Promise<{ foregroundProcess: string | null; hasChildProcesses: boolean; unavailable?: true }>
   confirmForegroundProcess?(ptyId: string): Promise<string | null>
+  confirmShellForeground?(ptyId: string): Promise<boolean>
   hasChildProcesses?(ptyId: string): Promise<boolean>
   clearBuffer?(ptyId: string): Promise<void>
   resize?(ptyId: string, cols: number, rows: number): boolean
@@ -13150,6 +13155,7 @@ export class OrcaRuntimeService {
     oscLinks?: TerminalOscLinkRange[]
     alternateScreen?: boolean
     scrollbackAnsi?: string
+    terminalOwner?: 'shell'
   } | null> {
     return this.serializeHeadlessTerminalBuffer(ptyId, { ...opts, includeEmpty: true })
   }
@@ -13170,6 +13176,7 @@ export class OrcaRuntimeService {
     alternateScreen?: boolean
     scrollbackAnsi?: string
     pendingEscapeTailAnsi?: string
+    terminalOwner?: 'shell'
   } | null> {
     const headlessSnapshot = await this.serializeHeadlessTerminalBuffer(ptyId, {
       ...opts,
@@ -13270,6 +13277,12 @@ export class OrcaRuntimeService {
         if (metadata.oscLinks !== undefined) {
           state.emulator.setRestoredOscLinks(metadata.oscLinks)
         }
+        // Why derived from the emulator: the seed bytes bypass ownership.scan,
+        // so the scanner must inherit the restored alternate-screen state or a
+        // pane seeded mid-TUI never arms its recovery trigger.
+        state.ownership.seedOwner(metadata.terminalOwner, {
+          alternateScreen: state.emulator.isAlternateScreen
+        })
         this.providerSnapshotPreferredPtys.delete(ptyId)
       })
       .catch(() => {
@@ -13377,6 +13390,9 @@ export class OrcaRuntimeService {
         // (they feed main's tracker only), so its serializer lastTitle can be
         // stale here. Prefer main's tracked title; the renderer's is only the
         // seed when main has observed none (fresh relaunch, cold tracker).
+        state.ownership.seedOwner(undefined, {
+          alternateScreen: state.emulator.isAlternateScreen
+        })
         const seedTitle = this.getTrackedRawTitleForPty(ptyId) ?? rendered.lastTitle
         if (seedTitle) {
           state.emulator.setLastTitle(seedTitle)
@@ -13452,6 +13468,9 @@ export class OrcaRuntimeService {
     const completion = state.writeChain.then(async () => {
       // Why: the ingestion-time ownership decision is closed over this
       // chain link; async scheduling cannot retroactively change it.
+      // Why inside the chain: the ownership mirror must observe live bytes in
+      // the same total order as seeds (seedOwner also runs on this chain).
+      state.ownership.scan(data)
       await state.emulator.write(data, { forwardQueryReplies })
       state.outputSequence = outputSequence
     })
@@ -13511,7 +13530,28 @@ export class OrcaRuntimeService {
     if (viewAttributes) {
       emulator.applyPushedViewAttributes(viewAttributes)
     }
-    state = { emulator, outputSequence: 0, writeChain: Promise.resolve() }
+    const constructed: RuntimeHeadlessTerminal = {
+      emulator,
+      outputSequence: 0,
+      writeChain: Promise.resolve(),
+      ownership: new PtyShellOwnershipMirror(async () => {
+        const controller = this.ptyController
+        const lifecycleGeneration = this.getPtyLifecycleGeneration(ptyId)
+        if (
+          !controller?.confirmShellForeground ||
+          this.headlessTerminals.get(ptyId) !== constructed
+        ) {
+          return false
+        }
+        const confirmed = await controller.confirmShellForeground(ptyId)
+        return (
+          confirmed &&
+          this.headlessTerminals.get(ptyId) === constructed &&
+          this.getPtyLifecycleGeneration(ptyId) === lifecycleGeneration
+        )
+      })
+    }
+    state = constructed
     return state
   }
 
@@ -13563,6 +13603,9 @@ export class OrcaRuntimeService {
         if (snapshot.oscLinks !== undefined) {
           state.emulator.setRestoredOscLinks(snapshot.oscLinks)
         }
+        state.ownership.seedOwner(snapshot.terminalOwner, {
+          alternateScreen: state.emulator.isAlternateScreen
+        })
         state.outputSequence = snapshot.seq
       })
       .catch(() => {
@@ -13621,6 +13664,7 @@ export class OrcaRuntimeService {
     alternateScreen?: boolean
     pendingEscapeTailAnsi?: string
     kittyKeyboardFlags?: number
+    terminalOwner?: 'shell'
   } | null> {
     if (this.providerSnapshotPreferredPtys.has(ptyId)) {
       // Why: pre-attach stream bytes only form a suffix of restored state. A
@@ -14101,6 +14145,7 @@ export class OrcaRuntimeService {
     alternateScreen?: boolean
     scrollbackAnsi?: string
     kittyKeyboardFlags?: number
+    terminalOwner?: 'shell'
     // Why: dangling mid-escape tail the restorer must write LAST, after any
     // reset, so the next live chunk completes it instead of rendering it
     // literally (Bug E / #7329).
@@ -14111,11 +14156,12 @@ export class OrcaRuntimeService {
       return null
     }
     await state.writeChain
+    await state.ownership.settle()
     // Why: normal history is separated from an active alternate frame, so the
     // caller's scrollback policy can be honored without painting it into alt.
-    const isAlternateScreen = state.emulator.isAlternateScreen
     const scrollbackRows = opts.scrollbackRows ?? 0
     const snapshot = state.emulator.getSnapshot({ scrollbackRows })
+    const terminalOwner = state.ownership.owner
     const data = snapshot.rehydrateSequences + snapshot.snapshotAnsi
     return data.length > 0 || opts.includeEmpty === true
       ? this.preferTrackedLastTitle(ptyId, {
@@ -14138,10 +14184,11 @@ export class OrcaRuntimeService {
           ...(snapshot.pendingEscapeTailAnsi
             ? { pendingEscapeTailAnsi: snapshot.pendingEscapeTailAnsi }
             : {}),
+          ...(terminalOwner ? { terminalOwner } : {}),
           // Why: lets the renderer skip the destructive scrollback clear when
           // restoring an alt-screen snapshot — clearing wipes xterm's own
           // history that the TUI relies on for scroll-up after a tab return.
-          alternateScreen: isAlternateScreen,
+          alternateScreen: snapshot.modes?.alternateScreen ?? state.emulator.isAlternateScreen,
           // Why NOT folded into data: the renderer writes its post-replay
           // reset after data, and any ESC after a dangling partial aborts it.
           // The restorer writes this last (Bug E fix).
@@ -14161,6 +14208,7 @@ export class OrcaRuntimeService {
     // sever the reply sink now so they cannot write to a respawned PTY that
     // reused this id (belt to the sink's state-identity check).
     state.emulator.disableQueryReplyForwarding()
+    state.ownership.dispose()
     state.writeChain.finally(() => state.emulator.dispose()).catch(() => state.emulator.dispose())
   }
 
