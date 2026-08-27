@@ -4,14 +4,19 @@ import type { getWorktreePathSettings } from '../ipc/worktree-logic'
 import {
   computeWorktreePath,
   ensurePathWithinWorkspace,
-  sanitizeWorktreeName
+  sanitizeWorktreeName,
+  sanitizeWorktreeDisplayName
 } from '../ipc/worktree-logic'
 import { getBranchConflictKind } from '../git/repo'
 import {
   getBranchNameOverrideCandidate,
+  getGeneratedWorktreeCreateCandidate,
   getWorktreeCreateCandidate,
+  isGeneratedWorktreeCreateName,
   WORKTREE_CREATE_MAX_SUFFIX_ATTEMPTS
 } from '../worktree-create-candidates'
+import { createRetiredNameLookup } from '../../shared/worktree/retired-name-registry'
+import { getRetiredNameRegistryForRepo } from '../worktree-name-retirement'
 import type { RuntimeManagedWorktreeCreateArgs } from './runtime-managed-worktree-create-types'
 import {
   getSelectedReviewBranch,
@@ -25,6 +30,7 @@ import {
   resolveCreateBranchName
 } from './runtime-worktree-create-git'
 import { runtimePathExists } from './runtime-worktree-filesystem'
+import type { RuntimeStore } from './runtime-store-contract'
 
 export type RuntimeLocalWorktreeCreateCandidate = {
   effectiveRequestedName: string
@@ -45,6 +51,7 @@ export async function resolveRuntimeLocalWorktreeCreateCandidate(args: {
   worktreePathSettings: ReturnType<typeof getWorktreePathSettings>
   workspaceRoot: string
   username: string
+  store?: RuntimeStore
   baseBranch: string
   localWorktreeGitOptions: { wslDistro?: string }
   localWorktreeGitOptionArgs: [] | [{ wslDistro?: string }]
@@ -59,11 +66,37 @@ export async function resolveRuntimeLocalWorktreeCreateCandidate(args: {
   let branchConflictKind: 'local' | 'remote' | null = null
   let worktreePath = ''
   let worktreePathResolved = false
+  const shouldRetireGeneratedName =
+    args.request.nameWasGenerated === true && isGeneratedWorktreeCreateName(sanitizedName)
+  const retiredNameRegistry =
+    shouldRetireGeneratedName &&
+    args.store?.getRetiredWorktreeNameRegistry &&
+    args.store.addRetiredWorktreeName &&
+    args.store.mergeRetiredWorktreeNames
+      ? await getRetiredNameRegistryForRepo(
+          args.store as Parameters<typeof getRetiredNameRegistryForRepo>[0],
+          args.repo,
+          args.store.getRepos(),
+          args.settings
+        )
+      : null
+  const isRetiredName = retiredNameRegistry ? createRetiredNameLookup(retiredNameRegistry) : null
   for (let suffix = 1; suffix <= WORKTREE_CREATE_MAX_SUFFIX_ATTEMPTS; suffix += 1) {
-    effectiveSanitizedName = getWorktreeCreateCandidate(sanitizedName, suffix)
-    effectiveRequestedName = args.request.name.trim()
-      ? getWorktreeCreateCandidate(args.request.name, suffix)
-      : effectiveSanitizedName
+    effectiveSanitizedName = shouldRetireGeneratedName
+      ? getGeneratedWorktreeCreateCandidate(
+          sanitizedName,
+          suffix,
+          retiredNameRegistry?.exhaustedTiers
+        )
+      : getWorktreeCreateCandidate(sanitizedName, suffix)
+    effectiveRequestedName = shouldRetireGeneratedName
+      ? effectiveSanitizedName
+      : args.request.name.trim()
+        ? getWorktreeCreateCandidate(args.request.name, suffix)
+        : effectiveSanitizedName
+    if (isRetiredName?.(effectiveSanitizedName)) {
+      continue
+    }
     branchName = await resolveCreateBranchName(
       args.repo.path,
       selectedExistingLocalBranchName ??
@@ -161,7 +194,9 @@ export async function resolveRuntimeLocalWorktreeCreateCandidate(args: {
   }
   return {
     effectiveRequestedName,
-    requestedDisplayName: args.request.displayName?.trim() || undefined,
+    requestedDisplayName: args.request.displayName
+      ? sanitizeWorktreeDisplayName(args.request.displayName)
+      : undefined,
     effectiveSanitizedName,
     branchName,
     checkoutExistingBranch,

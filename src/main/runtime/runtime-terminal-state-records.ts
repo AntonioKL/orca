@@ -10,6 +10,7 @@ import type { HeadlessEmulator } from '../daemon/headless-emulator'
 import type { PtyProviderBufferSnapshot } from '../providers/types'
 import type { RetainedTailRedrawCursor } from './terminal-tail-redraw-buffer'
 import type { TerminalTailWaitState } from './terminal-wait-tail-state'
+import type { TerminalExitCause } from '../../shared/terminal-exit-cause'
 
 type RuntimeTerminalTailState = {
   tailBuffer: string[]
@@ -32,6 +33,7 @@ export type RuntimeLeafRecord = RuntimeSyncedLeaf &
     writable: boolean
     lastOutputAt: number | null
     lastExitCode: number | null
+    lastExitCause: TerminalExitCause | null
     lastAgentStatus: AgentStatus | null
     lastAgentStatusObservedLive: boolean
     lastOscTitle: string | null
@@ -57,6 +59,7 @@ export type RuntimePtyWorktreeRecord = RuntimeTerminalTailState & {
   connected: boolean
   disconnectedAt: number | null
   lastExitCode: number | null
+  lastExitCause: TerminalExitCause | null
   lastAgentStatus: AgentStatus | null
   lastAgentStatusObservedLive: boolean
   lastAgentStatusStartedAtEpochMs: number | null

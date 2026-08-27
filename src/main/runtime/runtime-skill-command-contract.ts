@@ -138,6 +138,9 @@ export type RuntimeSkillCommandHost = {
   listFolderWorkspaces(): { id: string; folderPath: string; connectionId?: string | null }[]
   listResolvedWorktrees(): Promise<{ id: string; path: string }[]>
   showManagedWorktree(selector: string): Promise<{ id: string; path: string }>
+  resolveProjectRuntimeForWorktree?(
+    worktreeId: string
+  ): { status: string; runtime?: { kind: string; distro?: string } } | undefined
   getSshProvider(connectionId: string): IPtyProvider | undefined
   getClaudeConfigDirectory?(
     target: { runtime: 'host' } | { runtime: 'wsl'; wslDistro: string }

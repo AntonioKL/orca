@@ -3,6 +3,7 @@ import type {
   RuntimeTerminalListResult,
   RuntimeTerminalSummary
 } from '../../shared/runtime-types'
+import type { ExecutionHostId } from '../../shared/execution-host'
 import type { PtyControllerInventory } from './runtime-pty-controller-contract'
 import type { ResolvedWorktreeSnapshot } from './runtime-resolved-worktree-cache'
 import type { RuntimeLeafRecord, RuntimePtyWorktreeRecord } from './runtime-terminal-state-records'
@@ -39,6 +40,12 @@ type RuntimeTerminalListDependencies = {
   getSnapshots(): ReadonlyMap<string, RuntimeMobileSessionTabsSnapshot>
   getTabTitle(tabId: string): string | null
   getTopologyRevision(worktreeId: string): number
+  buildHostScope(
+    targetWorktreeId: string | null,
+    terminals: readonly RuntimeTerminalSummary[],
+    worktrees: Iterable<ResolvedWorktree>,
+    queriedHostIds: ReadonlySet<ExecutionHostId>
+  ): { hostIds: ExecutionHostId[]; omittedHostIds: ExecutionHostId[] }
 }
 
 export class RuntimeTerminalList {
@@ -158,6 +165,12 @@ export class RuntimeTerminalList {
           })
     return {
       terminals: listed,
+      hostScope: this.deps.buildHostScope(
+        targetId,
+        matching,
+        worktreesById.values(),
+        (inventory?.queriedHostIds ?? new Set()) as ReadonlySet<ExecutionHostId>
+      ),
       ...(visualLayouts.length > 0 ? { visualLayouts } : {}),
       topologyRevisions: Object.fromEntries(
         [...new Set(matching.map((terminal) => terminal.worktreeId))].map((worktreeId) => [

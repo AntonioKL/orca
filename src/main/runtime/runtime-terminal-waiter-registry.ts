@@ -8,6 +8,10 @@ export class RuntimeTerminalWaiterRegistry {
     return this.byHandle.get(handle)
   }
 
+  handles(): Iterable<string> {
+    return this.byHandle.keys()
+  }
+
   add(waiter: TerminalWaiter): void {
     const waiters = this.byHandle.get(waiter.handle) ?? new Set<TerminalWaiter>()
     waiters.add(waiter)

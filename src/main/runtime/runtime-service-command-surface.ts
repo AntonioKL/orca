@@ -138,7 +138,6 @@ export function installRuntimeServiceCommandSurface(
     cancelMobileDictationForConnection: dictation.cancelForConnection.bind(dictation),
     getAllBrowserDrivers: browsers.getAll.bind(browsers),
     reclaimBrowserForDesktop: browsers.reclaimForDesktop.bind(browsers),
-    notifyMessageArrived: waiters.notify.bind(waiters),
     waitForMessage: waiters.wait.bind(waiters),
     cancelMessageWaiters: waiters.cancel.bind(waiters)
   })

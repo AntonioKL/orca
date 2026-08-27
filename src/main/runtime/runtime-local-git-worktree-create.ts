@@ -17,18 +17,23 @@ import type { RuntimeStore } from './runtime-store-contract'
 import type { RuntimeManagedWorktreeCreateArgs } from './runtime-managed-worktree-create-types'
 import type { RemoteFetchResult, RemoteTrackingBase } from './runtime-remote-fetch-controller'
 import { hasLocalWorktreeBaseRef } from './runtime-worktree-create-git'
+import { isGeneratedWorktreeCreateName } from '../worktree-create-candidates'
+import { retireGeneratedWorktreeName } from '../worktree-name-retirement'
 
 export async function createRuntimeLocalGitWorktree(args: {
   request: RuntimeManagedWorktreeCreateArgs
   repo: Repo
   store: RuntimeStore
   settings: {
+    workspaceDir: string
+    nestWorkspaces: boolean
     refreshLocalBaseRefOnWorktreeCreate: boolean
     localBaseRefSuggestionDismissed?: boolean
   }
   baseBranch: string
   branchName: string
   worktreePath: string
+  effectiveSanitizedName?: string
   checkoutExistingBranch: boolean
   localWorktreeGitOptions: { wslDistro?: string }
   hasLocalWorktreeGitOptions: boolean
@@ -196,6 +201,19 @@ export async function createRuntimeLocalGitWorktree(args: {
   const created = findCreatedWorktree(worktrees, args.worktreePath, args.branchName)
   if (!created) {
     throw new Error('Worktree created but not found in listing')
+  }
+  if (
+    args.request.nameWasGenerated === true &&
+    args.effectiveSanitizedName &&
+    isGeneratedWorktreeCreateName(args.effectiveSanitizedName) &&
+    args.store.addRetiredWorktreeName
+  ) {
+    await retireGeneratedWorktreeName(
+      args.store as Parameters<typeof retireGeneratedWorktreeName>[0],
+      args.repo,
+      args.settings,
+      args.effectiveSanitizedName
+    )
   }
   return {
     remoteTrackingBase,

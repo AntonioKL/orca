@@ -2,7 +2,7 @@ import { ORCHESTRATION_MESSAGE_WAIT_DEFAULT_TIMEOUT_MS } from '../../shared/orch
 
 export type MessageWaitResult = 'notified' | 'timed_out' | 'cancelled' | 'waiter_exists'
 
-type MessageWaiter = {
+export type RuntimeMessageWaiter = {
   handle: string
   typeFilter: string[] | undefined
   resolve: (result: MessageWaitResult) => void
@@ -11,7 +11,7 @@ type MessageWaiter = {
 }
 
 export class RuntimeMessageWaiters {
-  private readonly waitersByHandle = new Map<string, Set<MessageWaiter>>()
+  private readonly waitersByHandle = new Map<string, Set<RuntimeMessageWaiter>>()
 
   constructor(
     private readonly deliverPending: (handle: string, reservedTypes: ReadonlySet<string>) => void,
@@ -38,6 +38,27 @@ export class RuntimeMessageWaiters {
     }
   }
 
+  notifyRouted(handle: string, types: readonly string[]): void {
+    if (types.length === 0) {
+      return
+    }
+    const waiters = [...(this.waitersByHandle.get(handle) ?? [])]
+    if (waiters.length === 0) {
+      return
+    }
+    queueMicrotask(() => {
+      const liveWaiters = this.waitersByHandle.get(handle)
+      for (const waiter of waiters) {
+        if (
+          liveWaiters?.has(waiter) &&
+          (!waiter.typeFilter || types.some((type) => waiter.typeFilter?.includes(type)))
+        ) {
+          this.resolve(waiter, 'notified')
+        }
+      }
+    })
+  }
+
   wait(
     handle: string,
     options?: {
@@ -53,7 +74,7 @@ export class RuntimeMessageWaiters {
         resolve('waiter_exists')
         return
       }
-      const waiter: MessageWaiter = {
+      const waiter: RuntimeMessageWaiter = {
         handle,
         typeFilter: options?.typeFilter,
         resolve,
@@ -109,12 +130,26 @@ export class RuntimeMessageWaiters {
     return false
   }
 
-  private resolve(waiter: MessageWaiter, result: MessageWaitResult): void {
+  /** Internal mailbox routing needs a read-only view of active waiters. */
+  get(handle: string): ReadonlySet<RuntimeMessageWaiter> | undefined {
+    return this.waitersByHandle.get(handle)
+  }
+
+  get map(): ReadonlyMap<string, ReadonlySet<RuntimeMessageWaiter>> {
+    return this.waitersByHandle
+  }
+
+  /** Resolve a waiter selected by mailbox routing. */
+  resolveNotified(waiter: RuntimeMessageWaiter): void {
+    this.resolve(waiter, 'notified')
+  }
+
+  private resolve(waiter: RuntimeMessageWaiter, result: MessageWaitResult): void {
     this.remove(waiter)
     waiter.resolve(result)
   }
 
-  private remove(waiter: MessageWaiter): void {
+  private remove(waiter: RuntimeMessageWaiter): void {
     if (waiter.timeout) {
       clearTimeout(waiter.timeout)
     }

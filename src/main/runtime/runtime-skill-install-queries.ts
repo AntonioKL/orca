@@ -6,10 +6,10 @@ import { WslSkillInstallFilesystem } from '../skills/skill-wsl-install-filesyste
 import { nativeSkillInstallFilesystem } from '../skills/skill-install-filesystem'
 import {
   listSkillInstallsOnSshHost,
-  previewSkillBundleInstallOnSshHost,
   previewSkillInstallOnSshHost,
   removeSkillInstallOnSshHost
 } from '../skills/skill-ssh-relay-service'
+import { previewSkillBundleInstallOnSshHost } from '../skills/skill-bundle-ssh-relay-service'
 import {
   previewSharedSkillBundleInstall,
   previewSharedSkillInstall,
@@ -21,7 +21,9 @@ import type {
   SkillInstallPreviewRequest,
   SkillInstallRequest,
   SkillRemoveRequest,
-  ManagedSkillInstall
+  ManagedSkillInstall,
+  SkillUploadBeginRequest,
+  SkillUploadChunkRequest
 } from './runtime-skill-types'
 import { RuntimeSkillInstallCommands } from './runtime-skill-install-commands'
 
@@ -31,7 +33,13 @@ export class RuntimeSkillInstallQueries extends RuntimeSkillInstallCommands {
     if (target) {
       return previewSkillInstallOnSshHost({
         provider: target.provider,
-        request,
+        request: {
+          ...request,
+          destination:
+            request.destination.scope === 'global'
+              ? { scope: 'global', executionTarget: { kind: 'host' } }
+              : request.destination
+        },
         workspace: target.workspace
       })
     }
@@ -48,7 +56,13 @@ export class RuntimeSkillInstallQueries extends RuntimeSkillInstallCommands {
     if (target) {
       return previewSkillBundleInstallOnSshHost({
         provider: target.provider,
-        request,
+        request: {
+          ...request,
+          destination:
+            request.destination.scope === 'global'
+              ? { scope: 'global', executionTarget: { kind: 'host' } }
+              : request.destination
+        },
         workspace: target.workspace
       })
     }
@@ -65,7 +79,13 @@ export class RuntimeSkillInstallQueries extends RuntimeSkillInstallCommands {
     if (target) {
       return removeSkillInstallOnSshHost({
         provider: target.provider,
-        request,
+        request: {
+          ...request,
+          destination:
+            request.destination.scope === 'global'
+              ? { scope: 'global', executionTarget: { kind: 'host' } }
+              : request.destination
+        },
         workspace: target.workspace
       })
     }

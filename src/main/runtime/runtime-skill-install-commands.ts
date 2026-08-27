@@ -11,6 +11,7 @@ import {
   withClaudeSkillProviderRoot
 } from '../skills/skill-provider-runtime-roots'
 import { getWslHome } from '../wsl'
+import { parseWslUncPath } from '../../shared/wsl-paths'
 import type { IPtyProvider } from '../providers/types'
 import type {
   SkillBundleInstallProgress,
@@ -125,11 +126,31 @@ export class RuntimeSkillInstallCommands {
       homeDirectory: homedir(),
       resolveWorktree: async (id) => {
         const worktree = await this.host.showManagedWorktree(`id:${id}`).catch(() => null)
-        return worktree?.id === id ? { id, path: worktree.path } : null
+        if (!worktree || worktree.id !== id) {
+          return null
+        }
+        const projectRuntime = this.host.resolveProjectRuntimeForWorktree?.(id)
+        return {
+          id,
+          path: worktree.path,
+          ...(projectRuntime?.status === 'resolved' &&
+          projectRuntime.runtime?.kind === 'wsl' &&
+          projectRuntime.runtime.distro
+            ? { wslDistro: projectRuntime.runtime.distro }
+            : {})
+        }
       },
       resolveFolderWorkspace: async (id) => {
         const workspace = this.host.listFolderWorkspaces().find((candidate) => candidate.id === id)
-        return workspace ? { id, path: workspace.folderPath } : null
+        if (!workspace) {
+          return null
+        }
+        const wsl = parseWslUncPath(workspace.folderPath)
+        return {
+          id,
+          path: workspace.folderPath,
+          ...(wsl ? { wslDistro: wsl.distro } : {})
+        }
       },
       resolveWsl: async (distro) => {
         if (process.platform !== 'win32') {
@@ -149,7 +170,13 @@ export class RuntimeSkillInstallCommands {
       return installSkillOnSshHost({
         provider: target.provider,
         userDataPath: this.userDataPath(),
-        request,
+        request: {
+          ...request,
+          destination:
+            request.destination.scope === 'global'
+              ? { scope: 'global', executionTarget: { kind: 'host' } }
+              : request.destination
+        },
         workspace: target.workspace,
         requireHttps: this.host.isPackaged(),
         signal
@@ -231,10 +258,18 @@ export class RuntimeSkillInstallCommands {
         })
       }
       await this.host.skillTransactionRecovery
+      const origins = ['https://storage.googleapis.com']
+      if (!this.host.isPackaged() && process.env.ORCA_SKILL_PACKAGE_DOWNLOAD_ORIGINS) {
+        origins.push(
+          ...process.env.ORCA_SKILL_PACKAGE_DOWNLOAD_ORIGINS.split(',')
+            .map((value) => value.trim())
+            .filter(Boolean)
+        )
+      }
       return await executeSkillBundleInstallRequest(request, {
         authority: this.authority(),
         stateDirectory: this.userDataPath(),
-        allowedDownloadOrigins: ['https://storage.googleapis.com'],
+        allowedDownloadOrigins: [...new Set(origins)],
         requireHttps: this.host.isPackaged(),
         resolveStagedUpload: (uploadId, identity) => this.requireUploads().take(uploadId, identity),
         detectProviders: detectInstalledAgentsWithShellPathHydration,
