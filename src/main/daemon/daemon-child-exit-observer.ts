@@ -1,9 +1,12 @@
-import type { ChildProcess } from 'node:child_process'
-
 const DEFAULT_STDERR_TAIL_BYTES = 8 * 1024
 const STDERR_EXIT_DRAIN_MS = 250
 
-type UnrefableChildStderr = NonNullable<ChildProcess['stderr']> & {
+type UnrefableChildStderr = {
+  on(event: 'data', listener: (chunk: Buffer | string) => void): unknown
+  on(event: 'error' | 'end' | 'close', listener: () => void): unknown
+  off(event: 'data', listener: (chunk: Buffer | string) => void): unknown
+  off(event: 'error' | 'end' | 'close', listener: () => void): unknown
+  destroy(): void
   unref?: () => void
 }
 
