@@ -15,7 +15,7 @@ export type WorktreeCreateParentPick = {
   parentWorkspace?: WorkspaceKey
   /** Set only for an accepted user pick, whose lineage row must come back from the host. */
   pickedParentWorktreeId?: string
-  /** Label for the drop warning; null when the parent record is already gone. */
+  /** Label for the drop warning; null when the parent record is already gone, '' when it has no name. */
   pickedDisplayName: string | null
   /** The pick no longer qualifies, so the create runs unattached. */
   staleBeforeCreate: boolean
@@ -54,8 +54,9 @@ export function resolveWorktreeCreateParent(
 /** Resolved late so the common create path never walks the folder-workspace list, and defensively
  *  so a missing label can never fail a create that already succeeded. */
 function parentLabel(state: AppState, parent: WorktreeCreateParentPick): string | null {
-  if (parent.pickedDisplayName) {
-    return parent.pickedDisplayName
+  // Why not truthiness: a picked-but-unnamed worktree must warn unnamed, not name the active folder.
+  if (parent.pickedDisplayName !== null) {
+    return parent.pickedDisplayName || null
   }
   const scope = parent.parentWorkspace ? parseWorkspaceKey(parent.parentWorkspace) : null
   if (scope?.type !== 'folder') {

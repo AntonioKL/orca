@@ -61,6 +61,9 @@ export type NewWorkspaceComposerCardProps = {
   onNameValueChange: (value: string) => void
   branchNameOverride: string | undefined
   onBranchNameOverrideChange: (value: string | undefined) => void
+  parentWorktreeId?: string | null
+  onParentWorktreeIdChange?: (value: string | null) => void
+  activeFolderWorkspaceId?: string | null
   onSmartGitHubItemSelect: (item: GitHubWorkItem) => void
   onSmartGitLabItemSelect: (item: GitLabWorkItem) => void
   onSmartBranchSelect: (refName: string, localBranchName: string) => void

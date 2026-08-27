@@ -55,6 +55,9 @@ export default function NewWorkspaceComposerCard(
     setupConfig,
     setupControlsEnabled = true,
     selectedProjectId = null,
+    parentWorktreeId,
+    onParentWorktreeIdChange,
+    activeFolderWorkspaceId,
     onAddProjectOverride,
     onNestedDialogOpenChange
   } = props
@@ -302,6 +305,9 @@ export default function NewWorkspaceComposerCard(
           setupRunButtonLabel={setupRunButtonLabel}
           setupSkipButtonLabel={setupSkipButtonLabel}
           showSetupAgentStartupPolicy={showSetupAgentStartupPolicy}
+          parentWorktreeId={parentWorktreeId}
+          onParentWorktreeIdChange={onParentWorktreeIdChange}
+          activeFolderWorkspaceId={activeFolderWorkspaceId}
         />
       </div>
       <NewWorkspaceComposerFooter

@@ -22,17 +22,18 @@ import type {
   WorktreeWithLineage
 } from '../listing/worktree-slice-types'
 
-type LineageKeysAtRequestStart = {
-  worktreeLineageIds: ReadonlySet<string>
-  workspaceLineageChildKeys: ReadonlySet<string>
+/** Per-row baseline the reply is merged against, so any local write since then outranks it. */
+type LineageAtRequestStart = {
+  worktreeLineageById: Readonly<Record<string, WorktreeLineage>>
+  workspaceLineageByChildKey: Readonly<Record<string, WorkspaceLineage>>
 }
 
-function captureLineageKeysAtRequestStart(
+function captureLineageAtRequestStart(
   state: Pick<AppState, 'worktreeLineageById' | 'workspaceLineageByChildKey'>
-): LineageKeysAtRequestStart {
+): LineageAtRequestStart {
   return {
-    worktreeLineageIds: new Set(Object.keys(state.worktreeLineageById)),
-    workspaceLineageChildKeys: new Set(Object.keys(state.workspaceLineageByChildKey))
+    worktreeLineageById: state.worktreeLineageById,
+    workspaceLineageByChildKey: state.workspaceLineageByChildKey
   }
 }
 
@@ -221,20 +222,20 @@ export function applyHostLineageRefresh(
     worktreeLineageById: Readonly<Record<string, WorktreeLineage>>
     workspaceLineageByChildKey: Readonly<Record<string, WorkspaceLineage>>
   },
-  keysAtRequestStart?: LineageKeysAtRequestStart
+  lineageAtRequestStart?: LineageAtRequestStart
 ): void {
   set((s) => {
     const worktreeLineageById = mergeLineageForHost(
       s,
       hostId,
       lineage.worktreeLineageById,
-      keysAtRequestStart?.worktreeLineageIds
+      lineageAtRequestStart?.worktreeLineageById
     )
     const workspaceLineageByChildKey = mergeWorkspaceLineageForHost(
       s,
       hostId,
       lineage.workspaceLineageByChildKey,
-      keysAtRequestStart?.workspaceLineageChildKeys
+      lineageAtRequestStart?.workspaceLineageByChildKey
     )
     if (
       worktreeLineageById === s.worktreeLineageById &&
@@ -252,13 +253,13 @@ export async function refreshWorktreeLineageForSettings(
   getState: () => Pick<AppState, 'worktreeLineageById' | 'workspaceLineageByChildKey'>,
   options: BackgroundRuntimeRefreshOptions = {}
 ): Promise<void> {
-  const keysAtRequestStart = captureLineageKeysAtRequestStart(getState())
+  const lineageAtRequestStart = captureLineageAtRequestStart(getState())
   const lineage = await listWorktreeLineageForRuntime(settings, options)
   applyHostLineageRefresh(
     set,
     getSettingsFocusedExecutionHostId(settings),
     lineage,
-    keysAtRequestStart
+    lineageAtRequestStart
   )
 }
 
@@ -271,7 +272,7 @@ export async function refreshRemoteWorktreeLineageBestEffort(
     return
   }
   try {
-    const keysAtRequestStart = captureLineageKeysAtRequestStart(getState())
+    const lineageAtRequestStart = captureLineageAtRequestStart(getState())
     const lineage = await listWorktreeLineageForRuntime(settings, {
       reuseRecentCompatibilityFailure: true
     })
@@ -279,7 +280,7 @@ export async function refreshRemoteWorktreeLineageBestEffort(
       set,
       getSettingsFocusedExecutionHostId(settings),
       lineage,
-      keysAtRequestStart
+      lineageAtRequestStart
     )
   } catch (err) {
     // Why: lineage is supplemental, so a remote timeout here must not discard a successful worktree refresh.

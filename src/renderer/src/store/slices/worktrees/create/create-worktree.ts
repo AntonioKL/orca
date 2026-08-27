@@ -45,29 +45,25 @@ async function runCreateAttempt(
   target: RuntimeTarget
 ): Promise<CreateAttemptOutcome> {
   const provisionedRoot = request.options?.provisionedRoot
-  if (provisionedRoot) {
-    return {
-      result: await window.api.worktrees.adoptProvisionedRoot({
-        ...buildLocalWorktreeCreateArgs(request, attempt),
-        ...provisionedRoot
-      }),
-      droppedParent: false
-    }
-  }
   const create = async (
     parentWorkspace: WorktreeCreateAttempt['parentWorkspace']
   ): Promise<CreateWorktreeResult> =>
-    target.kind === 'local'
-      ? // Why local can still reject on the parent: paired web clients route this API to their host.
-        await window.api.worktrees.create(
-          buildLocalWorktreeCreateArgs(request, { ...attempt, parentWorkspace })
-        )
-      : await callRuntimeRpc<CreateWorktreeResult>(
-          target,
-          'worktree.create',
-          buildRuntimeWorktreeCreateParams(request, { ...attempt, parentWorkspace }),
-          { timeoutMs: 10 * 60_000 }
-        )
+    provisionedRoot
+      ? await window.api.worktrees.adoptProvisionedRoot({
+          ...buildLocalWorktreeCreateArgs(request, { ...attempt, parentWorkspace }),
+          ...provisionedRoot
+        })
+      : target.kind === 'local'
+        ? // Why local can still reject on the parent: paired web clients route this API to their host.
+          await window.api.worktrees.create(
+            buildLocalWorktreeCreateArgs(request, { ...attempt, parentWorkspace })
+          )
+        : await callRuntimeRpc<CreateWorktreeResult>(
+            target,
+            'worktree.create',
+            buildRuntimeWorktreeCreateParams(request, { ...attempt, parentWorkspace }),
+            { timeoutMs: 10 * 60_000 }
+          )
   try {
     return { result: await create(attempt.parentWorkspace), droppedParent: false }
   } catch (error) {

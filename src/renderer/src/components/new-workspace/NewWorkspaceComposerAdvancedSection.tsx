@@ -11,6 +11,7 @@ import {
   shouldHandleTextControlPaste
 } from '@/lib/text-control-paste'
 import { translate } from '@/i18n/i18n'
+import { ComposerParentWorktreePicker } from './ComposerParentWorktreePicker'
 import type { NewWorkspaceComposerCardProps } from './new-workspace-composer-card-props'
 
 function SetupCommandPreview({
@@ -37,6 +38,9 @@ type NewWorkspaceComposerAdvancedSectionProps = Pick<
   | 'branchesEnabled'
   | 'branchNameOverride'
   | 'onBranchNameOverrideChange'
+  | 'parentWorktreeId'
+  | 'onParentWorktreeIdChange'
+  | 'activeFolderWorkspaceId'
   | 'note'
   | 'onNoteChange'
   | 'setupControlsEnabled'
@@ -74,6 +78,9 @@ export function NewWorkspaceComposerAdvancedSection({
   branchNameInputId,
   branchNameOverride,
   onBranchNameOverrideChange,
+  parentWorktreeId = null,
+  onParentWorktreeIdChange,
+  activeFolderWorkspaceId = null,
   note,
   onNoteChange,
   setupControlsEnabled = true,
@@ -189,6 +196,16 @@ export function NewWorkspaceComposerAdvancedSection({
                 className="w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-1.5 text-sm shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
               />
             </div>
+          ) : null}
+
+          {selectedRepoIsGit && branchesEnabled && onParentWorktreeIdChange ? (
+            <ComposerParentWorktreePicker
+              repoId={repoId}
+              value={parentWorktreeId}
+              onChange={onParentWorktreeIdChange}
+              activeFolderWorkspaceId={activeFolderWorkspaceId}
+              disabled={!advancedOpen}
+            />
           ) : null}
 
           <div className="space-y-1">

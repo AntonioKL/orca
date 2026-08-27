@@ -14,7 +14,6 @@ import { translate } from '@/i18n/i18n'
 import { useAppStore } from '@/store'
 import {
   getIndexedAllWorktrees,
-  getIndexedRepoMap,
   getIndexedWorktreeById,
   getIndexedWorktreeMap
 } from '@/store/worktree-repo-index'
@@ -35,7 +34,6 @@ import {
   getLineageChildWorktree
 } from '@/components/right-sidebar/folder-workspace-attached-worktrees'
 import { COMBOBOX_POPOVER_SURFACE } from './type-ahead-combobox-styles'
-import { getProjectHostSetupWorktreeMeta } from '../../../../shared/project-host-setup-projection'
 import {
   sharesWorktreeLineageBoundary,
   type WorktreeLineageBoundary
@@ -43,6 +41,7 @@ import {
 import { folderWorkspaceKey } from '../../../../shared/workspace-scope'
 import type { WorkspaceLineage, WorktreeLineage } from '../../../../shared/worktree/lineage-types'
 import type { Worktree } from '../../../../shared/worktree/types'
+import type { ExecutionHostId } from '../../../../shared/execution-host'
 
 /** Single-line row: text-sm leading (20px) over py-2. Set as the row's explicit height. */
 const NO_PARENT_ROW_HEIGHT = 36
@@ -50,6 +49,9 @@ const NO_PARENT_ROW_KEY = 'no-parent'
 
 type ComposerParentWorktreePickerProps = {
   repoId: string
+  /** Parent must belong to the same execution host that will create the child. */
+  executionHostId?: ExecutionHostId | null
+  projectId?: string | null
   value: string | null
   onChange: (id: string | null) => void
   disabled?: boolean
@@ -59,6 +61,8 @@ type ComposerParentWorktreePickerProps = {
 
 type ParentWorktreeCandidateListProps = {
   repoId: string
+  executionHostId?: ExecutionHostId | null
+  projectId?: string | null
   value: string | null
   activeFolderWorkspaceId: string | null
   onSelect: (id: string | null) => void
@@ -73,6 +77,8 @@ type ParentWorktreeCandidateListProps = {
  */
 function ComposerParentWorktreePickerImpl({
   repoId,
+  executionHostId,
+  projectId,
   value,
   onChange,
   disabled = false,
@@ -148,6 +154,8 @@ function ComposerParentWorktreePickerImpl({
         >
           <ParentWorktreeCandidateList
             repoId={repoId}
+            executionHostId={executionHostId}
+            projectId={projectId}
             value={value}
             activeFolderWorkspaceId={activeFolderWorkspaceId}
             onSelect={handleSelect}
@@ -200,13 +208,13 @@ function getFolderWorkspaceSubtreeIds(
 
 function ParentWorktreeCandidateList({
   repoId,
+  executionHostId,
+  projectId,
   value,
   activeFolderWorkspaceId,
   onSelect
 }: ParentWorktreeCandidateListProps): React.JSX.Element {
   const worktreesByRepo = useAppStore((s) => s.worktreesByRepo)
-  const repos = useAppStore((s) => s.repos)
-  const projectHostSetups = useAppStore((s) => s.projectHostSetups)
   const worktreeLineageById = useAppStore((s) => s.worktreeLineageById)
   const workspaceLineageByChildKey = useAppStore((s) => s.workspaceLineageByChildKey)
   const listRef = useRef<HTMLDivElement>(null)
@@ -217,16 +225,8 @@ function ParentWorktreeCandidateList({
   const [highlightedIndex, setHighlightedIndex] = useState(0)
 
   const candidates = useMemo(() => {
-    const repo = getIndexedRepoMap(repos).get(repoId)
-    if (!repo) {
-      return [] as Worktree[]
-    }
-    const meta = getProjectHostSetupWorktreeMeta(projectHostSetups, repo)
-    const childBoundary: WorktreeLineageBoundary = {
-      repoId,
-      hostId: meta.hostId,
-      projectId: meta.projectId
-    }
+    const childBoundary: WorktreeLineageBoundary | null =
+      executionHostId && projectId ? { repoId, hostId: executionHostId, projectId } : null
     const worktreeMap = getIndexedWorktreeMap(worktreesByRepo)
     const cyclicLineageIds = getCyclicProjectedWorktreeLineageIds(worktreeLineageById, worktreeMap)
     const folderSubtreeIds = activeFolderWorkspaceId
@@ -241,17 +241,18 @@ function ParentWorktreeCandidateList({
       .filter(
         (candidate) =>
           candidate.repoId === repoId &&
+          (executionHostId === undefined || candidate.hostId === executionHostId) &&
           !candidate.isArchived &&
-          sharesWorktreeLineageBoundary(childBoundary, candidate) &&
+          (childBoundary === null || sharesWorktreeLineageBoundary(childBoundary, candidate)) &&
           !cyclicLineageIds.has(candidate.id) &&
           (folderSubtreeIds === null || folderSubtreeIds.has(candidate.id))
       )
       .sort(compareWorktreeDisplayName)
   }, [
     activeFolderWorkspaceId,
-    projectHostSetups,
+    executionHostId,
+    projectId,
     repoId,
-    repos,
     workspaceLineageByChildKey,
     worktreeLineageById,
     worktreesByRepo

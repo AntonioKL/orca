@@ -38,20 +38,23 @@ export function mergeLineageForHost(
   >,
   hostId: ExecutionHostId,
   lineage: Readonly<Record<string, WorktreeLineage>>,
-  idsAtRequestStart?: ReadonlySet<string>
+  lineageAtRequestStart?: Readonly<Record<string, WorktreeLineage>>
 ): Readonly<Record<string, WorktreeLineage>> {
+  // Why per-row and not just per-key: any local write that landed after this request started
+  // outranks the reply — a create, a parent reassignment, or a delete the reply would restore.
+  const writtenSinceRequestStart = (worktreeId: string): boolean =>
+    lineageAtRequestStart !== undefined &&
+    lineageAtRequestStart[worktreeId] !== state.worktreeLineageById[worktreeId]
   const next: Record<string, WorktreeLineage> = {}
   for (const [worktreeId, existing] of Object.entries(state.worktreeLineageById)) {
-    // Why: preserve an optimistic create write that landed after this request started.
-    if (
-      getWorktreeHostId(state, worktreeId) !== hostId ||
-      (idsAtRequestStart !== undefined && !idsAtRequestStart.has(worktreeId))
-    ) {
+    if (getWorktreeHostId(state, worktreeId) !== hostId || writtenSinceRequestStart(worktreeId)) {
       next[worktreeId] = existing
     }
   }
   for (const [worktreeId, incoming] of Object.entries(lineage)) {
-    next[worktreeId] = incoming
+    if (!writtenSinceRequestStart(worktreeId)) {
+      next[worktreeId] = incoming
+    }
   }
   return reuseEqualRecordMap(state.worktreeLineageById, next)
 }
@@ -67,8 +70,11 @@ export function mergeWorkspaceLineageForHost(
   >,
   hostId: ExecutionHostId,
   lineage: Readonly<Record<string, WorkspaceLineage>>,
-  childKeysAtRequestStart?: ReadonlySet<string>
+  lineageAtRequestStart?: Readonly<Record<string, WorkspaceLineage>>
 ): Readonly<Record<string, WorkspaceLineage>> {
+  const writtenSinceRequestStart = (childKey: string): boolean =>
+    lineageAtRequestStart !== undefined &&
+    lineageAtRequestStart[childKey] !== state.workspaceLineageByChildKey[childKey]
   const next: Record<string, WorkspaceLineage> = {}
   for (const [childKey, existing] of Object.entries(state.workspaceLineageByChildKey)) {
     const childScope = parseWorkspaceKey(existing.childWorkspaceKey)
@@ -78,13 +84,15 @@ export function mergeWorkspaceLineageForHost(
     if (
       childScope?.type !== 'worktree' ||
       (childHostId !== null && childHostId !== hostId) ||
-      (childKeysAtRequestStart !== undefined && !childKeysAtRequestStart.has(childKey))
+      writtenSinceRequestStart(childKey)
     ) {
       next[childKey] = existing
     }
   }
   for (const [childKey, incoming] of Object.entries(lineage)) {
-    next[childKey] = incoming
+    if (!writtenSinceRequestStart(childKey)) {
+      next[childKey] = incoming
+    }
   }
   return reuseEqualRecordMap(state.workspaceLineageByChildKey, next)
 }
