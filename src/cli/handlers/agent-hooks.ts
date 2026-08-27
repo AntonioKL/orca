@@ -28,6 +28,9 @@ type AgentHookCommandResult = {
   statuses: AgentHookInstallStatus[]
 }
 
+// Covers the 5s WSL identity probe, 30s trust grant, and bounded app-server reap.
+const WSL_CODEX_PREPARE_TIMEOUT_MS = 40_000
+
 function getDataPath(): string {
   const userDataPath = getDefaultUserDataPath()
   const indexPath = join(userDataPath, 'orca-profile-index.json')
@@ -216,7 +219,7 @@ export const AGENT_HOOK_HANDLERS: Record<string, CommandHandler> = {
             orcaCodexHome: process.env.ORCA_CODEX_HOME ?? '',
             wslDistro: process.env.WSL_DISTRO_NAME
           },
-          { timeoutMs: 10_000 }
+          { timeoutMs: WSL_CODEX_PREPARE_TIMEOUT_MS }
         )
       } catch {
         // Best effort: old or unavailable runtimes must not block Codex launch.

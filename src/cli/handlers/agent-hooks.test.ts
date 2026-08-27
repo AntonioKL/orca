@@ -152,7 +152,7 @@ describe('agent hooks CLI handler', () => {
     expect(callMock).toHaveBeenCalledExactlyOnceWith(
       'agentHooks.prepareCodexForWslPane',
       { codexHome: home, orcaCodexHome: home, wslDistro: 'Ubuntu-24.04' },
-      { timeoutMs: 10_000 }
+      { timeoutMs: 40_000 }
     )
     expect(prepareManagedCodexHomeBeforeShellLaunchMock).not.toHaveBeenCalled()
   })
