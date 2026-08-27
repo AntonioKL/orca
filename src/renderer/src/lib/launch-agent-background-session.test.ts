@@ -90,11 +90,11 @@ describe('launchAgentBackgroundSession', () => {
     })
   })
 
-  it('spawns a PTY first and creates the inactive tab already bound to it', async () => {
+  it('spawns the Codex PTY first and publishes the inactive tab already bound to it', async () => {
     const { launchAgentBackgroundSession } = await import('./launch-agent-background-session')
 
     const result = await launchAgentBackgroundSession({
-      agent: 'claude',
+      agent: 'codex',
       worktreeId: 'wt-1',
       prompt: 'run the automation',
       title: 'Nightly audit'
@@ -123,7 +123,8 @@ describe('launchAgentBackgroundSession', () => {
     expect(mockSpawn).toHaveBeenCalledWith(
       expect.objectContaining({
         cwd: '/repo/worktree',
-        command: "claude '--dangerously-skip-permissions' 'run the automation'",
+        command: "codex '--dangerously-bypass-approvals-and-sandbox' 'run the automation'",
+        startupCommandDelivery: 'shell-ready',
         env: expect.objectContaining({
           ORCA_TAB_ID: tabId,
           ORCA_WORKTREE_ID: 'wt-1'
@@ -146,11 +147,11 @@ describe('launchAgentBackgroundSession', () => {
     expect(mockSetTabLayout.mock.calls.at(-1)?.[1]).not.toHaveProperty('titlesByLeafId')
     expect(mockSpawn.mock.calls[0]?.[0]).toMatchObject({
       launchConfig: {
-        agentCommand: "claude '--dangerously-skip-permissions'",
-        agentArgs: '--dangerously-skip-permissions',
+        agentCommand: "codex '--dangerously-bypass-approvals-and-sandbox'",
+        agentArgs: '--dangerously-bypass-approvals-and-sandbox',
         agentEnv: {}
       },
-      launchAgent: 'claude',
+      launchAgent: 'codex',
       launchToken: expect.stringMatching(UUID_RE)
     })
     expect(mockSpawn.mock.calls[0]?.[0].launchToken).toBe(

@@ -595,6 +595,7 @@ export function useAutomationDispatchEvents(): void {
               }
             }
           }
+          let freshLaunchSawWorking = false
           const result = await launchAgentBackgroundSession({
             agent: automation.agentId,
             worktreeId: worktree.id,
@@ -607,8 +608,15 @@ export function useAutomationDispatchEvents(): void {
             onAgentStatus: (payload) => {
               latestAssistantMessage =
                 payload.lastAssistantMessage?.trim() || latestAssistantMessage
-              // Why: session-boundary done = launch connect, not run completion (see observeAgentStatus).
-              if (payload.state !== 'done' || payload.sessionBoundary === true) {
+              if (payload.state === 'working') {
+                freshLaunchSawWorking = true
+              }
+              // Why: Claude marks launch boundaries done; Codex reports initial idle before its prompt turn works.
+              if (
+                payload.state !== 'done' ||
+                payload.sessionBoundary === true ||
+                (automation.agentId === 'codex' && !freshLaunchSawWorking)
+              ) {
                 return
               }
               handleAgentDone()
@@ -634,7 +642,9 @@ export function useAutomationDispatchEvents(): void {
             releaseTerminalOwnership()
           }
           const launchedTabId = result.tabId
-          observeAgentStatus(result.paneKey, dispatchStartedAt)
+          observeAgentStatus(result.paneKey, dispatchStartedAt, {
+            requireWorkingAfterStart: automation.agentId === 'codex'
+          })
           try {
             await markDispatchResult({
               runId: run.id,

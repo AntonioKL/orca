@@ -537,7 +537,7 @@ describe('useAutomationDispatchEvents setup launch', () => {
     )
   })
 
-  it('finalizes a fresh non-reuse terminal only after completed result persistence', async () => {
+  it('finalizes fresh Codex only after working and completed result persistence', async () => {
     const order: string[] = []
     let launchArgs: { onAgentStatus?: (payload: { state: string }) => void } = {}
     mockMarkDispatchResult.mockImplementation(
@@ -569,7 +569,10 @@ describe('useAutomationDispatchEvents setup launch', () => {
       }
     })
 
-    await registerAndDispatch()
+    await registerAndDispatch(makeAutomation({ agentId: 'codex' }))
+    launchArgs.onAgentStatus?.({ state: 'done' })
+    expect(mockFinalizeTerminalOwnership).not.toHaveBeenCalled()
+    launchArgs.onAgentStatus?.({ state: 'working' })
     launchArgs.onAgentStatus?.({ state: 'done' })
     await vi.waitFor(() => expect(mockFinalizeTerminalOwnership).toHaveBeenCalledOnce())
 
