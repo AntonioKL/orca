@@ -3,6 +3,7 @@ import { isPtyIncarnationId, type PtyIncarnationId } from '../../shared/pty-inca
 import {
   SSH_PTY_IDENTITY_MISMATCH_ERROR,
   SSH_SESSION_EXPIRED_ERROR,
+  SshPtyAbsentFromRelayError,
   isSshPtyIdentityMismatchError,
   isSshPtyNotFoundError
 } from './ssh-pty-errors'
@@ -225,10 +226,12 @@ export async function reattachSshPtySession(args: {
     // Why: an expired relay lease must be surfaced distinctly so the renderer clears its binding.
     console.warn(`[ssh-pty] pty.attach FAILED for ${args.sessionId}:`, error)
     if (isSshPtyNotFoundError(error)) {
-      const mismatchMarker = isSshPtyIdentityMismatchError(error)
-        ? ` ${SSH_PTY_IDENTITY_MISMATCH_ERROR}`
-        : ''
-      throw new Error(`${SSH_SESSION_EXPIRED_ERROR}: ${relaySessionId}${mismatchMarker}`)
+      if (isSshPtyIdentityMismatchError(error)) {
+        throw new Error(
+          `${SSH_SESSION_EXPIRED_ERROR}: ${relaySessionId} ${SSH_PTY_IDENTITY_MISMATCH_ERROR}`
+        )
+      }
+      throw new SshPtyAbsentFromRelayError(`${SSH_SESSION_EXPIRED_ERROR}: ${relaySessionId}`)
     }
     throw error
   }
