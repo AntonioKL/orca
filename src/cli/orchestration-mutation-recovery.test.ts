@@ -220,8 +220,33 @@ describe('orchestration mutation recovery', () => {
       'equals',
       ['orca', 'orchestration', 'send', '--pairing-code=equals-secret', '--subject', 'status'],
       'equals-secret'
+    ],
+    [
+      'dispatch split',
+      [
+        'orca',
+        'orchestration',
+        'send',
+        '--dispatch-capability',
+        'split-dispatch-secret',
+        '--subject',
+        'status'
+      ],
+      'split-dispatch-secret'
+    ],
+    [
+      'dispatch equals',
+      [
+        'orca',
+        'orchestration',
+        'send',
+        '--dispatch-capability=equals-dispatch-secret',
+        '--subject',
+        'status'
+      ],
+      'equals-dispatch-secret'
     ]
-  ])('blocks recovery and removes %s pairing credentials', (_name, originalCommand, secret) => {
+  ])('blocks recovery and removes %s credentials', (_name, originalCommand, secret) => {
     const result = orchestrationMutationRecoveryError(
       new RuntimeClientError('runtime_timeout', 'request timed out', {
         orchestrationRequestId: 'request_secret',

@@ -89,8 +89,16 @@ describe('orchestration recovery command identity', () => {
 
   it.each([
     ['split', ['orchestration', 'send', '--pairing-code', 'secret', '--subject', 'status']],
-    ['equals', ['orchestration', 'send', '--pairing-code=secret', '--subject', 'status']]
-  ])('blocks %s pairing-code argv instead of exposing a credential', (_name, args) => {
+    ['equals', ['orchestration', 'send', '--pairing-code=secret', '--subject', 'status']],
+    [
+      'dispatch split',
+      ['orchestration', 'send', '--dispatch-capability', 'secret', '--subject', 'status']
+    ],
+    [
+      'dispatch equals',
+      ['orchestration', 'send', '--dispatch-capability=secret', '--subject', 'status']
+    ]
+  ])('blocks %s credential argv instead of exposing it', (_name, args) => {
     expect(
       buildOrchestrationRecoveryCommand('orchestration.send', {}, 'orca', args)
     ).toBeUndefined()
