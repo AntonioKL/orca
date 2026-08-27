@@ -6,6 +6,7 @@ import { notifyCodexPaneBoundForStaleSweep } from '@/lib/codex-stale-pane-sweep'
 import { createTerminalGitHubPRLinkDetector } from '../../../../../shared/terminal-github-pr-link-detector'
 import { setRendererPtyVisibilityClaim } from '../pty-renderer-delivery-claims'
 import { AGENT_TASK_COMPLETE_NOTIFICATION_GRACE_MS } from '../agent-task-complete-policy'
+import type { PtyIncarnationId } from '../../../../../shared/pty-incarnation'
 
 import {
   isAgentTaskCompleteNotificationEnabled,
@@ -103,7 +104,7 @@ export function installPanePtyVisibilityBind(session: ConnectPanePtySession): vo
     }
   }
 
-  session.onPtySpawn = (ptyId: string): void => {
+  session.onPtySpawn = (ptyId: string, incarnationId?: PtyIncarnationId): void => {
     if (!session.claimCapturedDirectSshRetryPty(ptyId)) {
       // Why: this callback proves a fresh process was created, so rejecting its obsolete lease must also retire it.
       queueMicrotask(() => {
@@ -118,6 +119,7 @@ export function installPanePtyVisibilityBind(session: ConnectPanePtySession): vo
     // just-created worktree) can be kept visible rather than tearing down the
     // worktree. Reattach/coldRestore skip onPtySpawn (pty-transport.ts).
     session.spawnedFreshPtyId = ptyId
+    session.ptyIncarnationId = incarnationId ?? null
     // Why: Command Code has no prompt-start hook. Seed the visible working row
     // once the PTY exists, then let real hook events refine or complete it.
     session.bindActivePanePty(ptyId, { seedInitialAgentStatus: true })

@@ -19676,6 +19676,35 @@ export class OrcaRuntimeService {
       return
     }
     const titleObservedAt = pty?.lastOscTitleAt ?? null
+    const incarnationId = pty?.incarnationId ?? null
+    const controller = this.ptyController
+    const attribution = this.resolveTerminalSideEffectAttribution(ptyId)
+    const recordExit = (executionHostConfirmed: boolean): void => {
+      const current = this.ptysById.get(ptyId)
+      if (
+        current !== pty ||
+        this.ptyController !== controller ||
+        current?.incarnationId !== incarnationId ||
+        (current?.lastOscTitleAt !== titleObservedAt && current?.lastAgentStatus !== null)
+      ) {
+        return
+      }
+      const currentAttribution = this.resolveTerminalSideEffectAttribution(ptyId)
+      if (
+        incarnationId &&
+        (currentAttribution.worktreeId !== attribution.worktreeId ||
+          currentAttribution.tabId !== attribution.tabId ||
+          currentAttribution.paneKey !== attribution.paneKey)
+      ) {
+        return
+      }
+      this.recordTerminalSideEffectFact(
+        ptyId,
+        executionHostConfirmed && incarnationId
+          ? { kind: 'agent-exited', executionHostConfirmed: true, incarnationId }
+          : { kind: 'agent-exited' }
+      )
+    }
     const foregroundRead = this.readPtyForegroundProcessFromController(ptyId, titleObservedAt ?? 0)
     if (!pty?.connected || !foregroundRead) {
       // Why: a local PTY that is already gone after a shell-title exit is
@@ -19683,7 +19712,7 @@ export class OrcaRuntimeService {
       if (pty?.connectionId) {
         return
       }
-      this.recordTerminalSideEffectFact(ptyId, { kind: 'agent-exited' })
+      recordExit(Boolean(pty && !pty.connected))
       return
     }
     void foregroundRead.then((result) => {
@@ -19695,7 +19724,7 @@ export class OrcaRuntimeService {
         return
       }
       if (!current.connected) {
-        this.recordTerminalSideEffectFact(ptyId, { kind: 'agent-exited' })
+        recordExit(true)
         return
       }
       if (current.lastOscTitleAt !== titleObservedAt && current.lastAgentStatus !== null) {
@@ -19727,7 +19756,7 @@ export class OrcaRuntimeService {
       if (!result.available && current.connectionId) {
         return
       }
-      this.recordTerminalSideEffectFact(ptyId, { kind: 'agent-exited' })
+      recordExit(result.available)
     })
   }
 

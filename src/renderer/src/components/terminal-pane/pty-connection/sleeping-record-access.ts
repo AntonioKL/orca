@@ -3,10 +3,7 @@ import type { PtyConnectResult } from '../pty-transport'
 import { createBrowserUuid } from '@/lib/browser-uuid'
 import { parseLegacyNumericPaneKey } from '../../../../../shared/stable-pane-id'
 import { getProviderSessionClaimKey } from '@/lib/sleeping-agent-pane-ownership'
-import {
-  agentProviderSessionsEqual,
-  type SleepingAgentSessionRecord
-} from '../../../../../shared/agent-session-resume'
+import type { SleepingAgentSessionRecord } from '../../../../../shared/agent-session-resume'
 import { recognizeAgentProcessFromCommandLine } from '../../../../../shared/agent-process-recognition'
 import type { TuiAgent } from '../../../../../shared/tui-agent'
 import { TUI_AGENT_CONFIG } from '../../../../../shared/tui-agent-config'
@@ -65,28 +62,6 @@ export function installSleepingRecordAccess(session: ConnectPanePtySession): voi
   session.isLegacyWorkerAutomaticResumeBlocked = (): boolean =>
     session.getSleepingRecordForPane(useAppStore.getState())?.record.automaticResumeBlockedBy ===
     'legacy-orchestration-worker'
-  session.clearSleepingRecordProviderDuplicates = (
-    state: ReturnType<typeof useAppStore.getState>,
-    consumed: { paneKey: string; record: SleepingAgentSessionRecord }
-  ): void => {
-    state.clearSleepingAgentSession(consumed.paneKey)
-    for (const [paneKey, record] of Object.entries(state.sleepingAgentSessionsByPaneKey)) {
-      if (
-        paneKey !== consumed.paneKey &&
-        record.worktreeId === consumed.record.worktreeId &&
-        record.agent === consumed.record.agent &&
-        agentProviderSessionsEqual(
-          record.agent,
-          record.providerSession,
-          consumed.record.providerSession
-        )
-      ) {
-        // Why: legacy pane aliases can leave multiple sleeping rows for one
-        // provider session; once this pane resumes it, every alias is stale.
-        state.clearSleepingAgentSession(paneKey)
-      }
-    }
-  }
   session.launchToken = session.paneStartup?.launchConfig
     ? (session.paneStartup.launchToken ?? createBrowserUuid())
     : undefined

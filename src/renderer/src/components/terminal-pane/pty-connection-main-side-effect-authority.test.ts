@@ -397,6 +397,10 @@ describe('connectPanePty', () => {
       const { connectPanePty } = await import('./pty-connection')
       const handler = await import('./terminal-side-effect-facts-handler')
       const transport = createMockTransport('pty-agent-exit')
+      transport.connect.mockResolvedValue({
+        id: 'pty-agent-exit',
+        incarnationId: 'inc-agent-exit'
+      })
       transportFactoryQueue.push(transport)
       const paneKey = makePaneKey('tab-1', LEAF_1)
       const duplicatePaneKey = 'tab-1:1'
@@ -432,14 +436,44 @@ describe('connectPanePty', () => {
       const deps = createDeps()
 
       connectPanePty(createPane(1) as never, createManager(1) as never, deps as never)
-      const onPtySpawn = createdTransportOptions[0]?.onPtySpawn as (ptyId: string) => void
-      onPtySpawn('pty-agent-exit')
+      const onPtySpawn = createdTransportOptions[0]?.onPtySpawn as (
+        ptyId: string,
+        incarnationId?: string
+      ) => void
+      onPtySpawn('pty-agent-exit', 'inc-agent-exit')
+      await flushAsyncTicks()
 
       handler._dispatchTerminalSideEffectBatchForTest({
         ptyId: 'pty-agent-exit',
         seq: 1,
-        facts: [{ kind: 'agent-exited' }]
+        paneKey,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        facts: [
+          {
+            kind: 'agent-exited',
+            executionHostConfirmed: true,
+            incarnationId: 'older-incarnation'
+          }
+        ]
       })
+      expect(mockStoreState.sleepingAgentSessionsByPaneKey[paneKey]).toBe(record)
+
+      handler._dispatchTerminalSideEffectBatchForTest({
+        ptyId: 'pty-agent-exit',
+        seq: 2,
+        paneKey,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        facts: [
+          {
+            kind: 'agent-exited',
+            executionHostConfirmed: true,
+            incarnationId: 'inc-agent-exit'
+          }
+        ]
+      })
+      expect(mockStoreState.sleepingAgentSessionsByPaneKey[paneKey]).toBeUndefined()
       const onPtyExit = createdTransportOptions[0]?.onPtyExit as (ptyId: string) => void
       onPtyExit('pty-agent-exit')
 
@@ -461,6 +495,10 @@ describe('connectPanePty', () => {
       const { connectPanePty } = await import('./pty-connection')
       const handler = await import('./terminal-side-effect-facts-handler')
       const transport = createMockTransport('pty-late-exit')
+      transport.connect.mockResolvedValue({
+        id: 'pty-late-exit',
+        incarnationId: 'inc-late-exit'
+      })
       transportFactoryQueue.push(transport)
       const paneKey = makePaneKey('tab-1', LEAF_1)
       const record = {
@@ -480,6 +518,7 @@ describe('connectPanePty', () => {
       connectPanePty(createPane(1) as never, createManager(1) as never, createDeps() as never)
       const onPtySpawn = createdTransportOptions[0]?.onPtySpawn as (ptyId: string) => void
       onPtySpawn('pty-late-exit')
+      await flushAsyncTicks()
       const onPtyExit = createdTransportOptions[0]?.onPtyExit as (ptyId: string) => void
       onPtyExit('pty-late-exit')
 
@@ -487,7 +526,15 @@ describe('connectPanePty', () => {
         ptyId: 'pty-late-exit',
         seq: 1,
         paneKey,
-        facts: [{ kind: 'agent-exited' }]
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        facts: [
+          {
+            kind: 'agent-exited',
+            executionHostConfirmed: true,
+            incarnationId: 'inc-late-exit'
+          }
+        ]
       })
 
       expect(mockStoreState.sleepingAgentSessionsByPaneKey[paneKey]).toBeUndefined()
@@ -803,7 +850,7 @@ describe('connectPanePty', () => {
         paneKey,
         facts: [{ kind: 'agent-exited' }]
       })
-      expect(mockStoreState.sleepingAgentSessionsByPaneKey[paneKey]).toBeUndefined()
+      expect(mockStoreState.sleepingAgentSessionsByPaneKey[paneKey]).toBe(record)
     })
   })
 })

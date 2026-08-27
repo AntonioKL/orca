@@ -19,8 +19,17 @@ import type {
   TerminalSideEffectBatch,
   TerminalSideEffectFact
 } from '../../../../shared/terminal-side-effect-facts'
+import type { PtyIncarnationId } from '../../../../shared/pty-incarnation'
 import { useAppStore } from '@/store'
 import { retireConfirmedAgentExitResumeAuthority } from '@/lib/confirmed-agent-exit-resume-retirement'
+import {
+  bufferTerminalSideEffectFactHandoff,
+  drainTerminalSideEffectFactHandoff,
+  getTerminalSideEffectFactHandoffAuthority,
+  openTerminalSideEffectFactHandoff,
+  resetTerminalSideEffectFactHandoffs,
+  type TerminalSideEffectFactAuthority
+} from './terminal-side-effect-fact-handoff'
 
 // Why: cached once per session — the blocking read should only ever run on
 // the pre-hydration startup path, never per pane bind.
@@ -78,7 +87,7 @@ export type TerminalSideEffectFactConsumerCallbacks = {
   onBell?: () => void
   onAgentBecameIdle?: (title: string, meta?: { staleWorkingTitleClear?: boolean }) => void
   onAgentBecameWorking?: () => void
-  onAgentExited?: () => void
+  onAgentExited?: (fact: Extract<TerminalSideEffectFact, { kind: 'agent-exited' }>) => void
   /** OSC 133;D — same policy hook the byte-mode commandLifecycle drove
    *  (stale agent-status row drop + interrupt-inference coordination). */
   onCommandFinished?: (bestEffortExitCode: number | null) => void
@@ -96,7 +105,7 @@ export type TerminalSideEffectFactConsumerCallbacks = {
   onMode2031Unsubscribe?: () => void
 }
 
-type ConsumerEntry = {
+type ConsumerEntry = TerminalSideEffectFactAuthority & {
   callbacks: TerminalSideEffectFactConsumerCallbacks
   /** Output sequence of the last live title fact applied. Replay snapshots at
    *  or before this point are stale and must not regress the title state. */
@@ -106,13 +115,17 @@ type ConsumerEntry = {
 const consumersByPtyId = new Map<string, ConsumerEntry>()
 let channelUnsubscribe: (() => void) | null = null
 
-function applyLiveFact(entry: ConsumerEntry, fact: TerminalSideEffectFact, seq: number): void {
+function applyLiveFact(
+  entry: ConsumerEntry,
+  fact: TerminalSideEffectFact,
+  batch: TerminalSideEffectBatch
+): void {
   switch (fact.kind) {
     case 'agent-status':
       entry.callbacks.onAgentStatus?.(fact.payload)
       return
     case 'title':
-      entry.lastLiveTitleSeq = seq
+      entry.lastLiveTitleSeq = batch.seq
       entry.callbacks.onTitleChange?.(
         fact.normalizedTitle,
         fact.rawTitle,
@@ -132,7 +145,26 @@ function applyLiveFact(entry: ConsumerEntry, fact: TerminalSideEffectFact, seq: 
       )
       return
     case 'agent-exited':
-      entry.callbacks.onAgentExited?.()
+      if (
+        fact.executionHostConfirmed === true &&
+        fact.incarnationId &&
+        entry.incarnationId &&
+        fact.incarnationId !== entry.incarnationId
+      ) {
+        return
+      }
+      if (
+        fact.executionHostConfirmed === true &&
+        fact.incarnationId &&
+        entry.incarnationId === fact.incarnationId &&
+        entry.paneKey === (batch.paneKey ?? null) &&
+        entry.tabId === (batch.tabId ?? null) &&
+        entry.worktreeId === (batch.worktreeId ?? null)
+      ) {
+        entry.callbacks.onAgentExited?.(fact)
+        return
+      }
+      entry.callbacks.onAgentExited?.({ kind: 'agent-exited' })
       return
     case 'command-finished':
       entry.callbacks.onCommandFinished?.(fact.exitCode)
@@ -170,7 +202,7 @@ function applyBatchToConsumer(entry: ConsumerEntry, batch: TerminalSideEffectBat
     return
   }
   for (const fact of batch.facts) {
-    applyLiveFact(entry, fact, batch.seq)
+    applyLiveFact(entry, fact, batch)
   }
 }
 
@@ -180,98 +212,28 @@ function applyBatchToConsumer(entry: ConsumerEntry, batch: TerminalSideEffectBat
 // dropped in that window is lost for good. Only a PTY that just lost its
 // consumer buffers (never-consumed PTYs still drop, per the module contract),
 // bounded in time, batches, and PTYs so an abandoned handoff retains nothing.
-const HANDOFF_FACT_BUFFER_TTL_MS = 15_000
-const MAX_HANDOFF_FACT_BATCHES = 64
-const MAX_HANDOFF_FACT_PTYS = 32
-
-type HandoffFactBuffer = {
-  batches: TerminalSideEffectBatch[]
-  expiresAtMs: number
-  expiryTimer: ReturnType<typeof setTimeout>
-}
-const handoffFactBuffersByPtyId = new Map<string, HandoffFactBuffer>()
-
-function deleteHandoffFactBuffer(ptyId: string): void {
-  const buffer = handoffFactBuffersByPtyId.get(ptyId)
-  if (buffer) {
-    clearTimeout(buffer.expiryTimer)
-    handoffFactBuffersByPtyId.delete(ptyId)
-  }
-}
-
-function openHandoffFactBuffer(ptyId: string): void {
-  const nowMs = Date.now()
-  for (const [bufferedPtyId, buffer] of handoffFactBuffersByPtyId) {
-    if (buffer.expiresAtMs <= nowMs) {
-      deleteHandoffFactBuffer(bufferedPtyId)
-    }
-  }
-  deleteHandoffFactBuffer(ptyId)
-  if (handoffFactBuffersByPtyId.size >= MAX_HANDOFF_FACT_PTYS) {
-    const oldestPtyId = handoffFactBuffersByPtyId.keys().next().value
-    if (typeof oldestPtyId === 'string') {
-      deleteHandoffFactBuffer(oldestPtyId)
-    }
-  }
-  const buffer: HandoffFactBuffer = {
-    batches: [],
-    expiresAtMs: nowMs + HANDOFF_FACT_BUFFER_TTL_MS,
-    expiryTimer: setTimeout(() => {
-      if (handoffFactBuffersByPtyId.get(ptyId) === buffer) {
-        handoffFactBuffersByPtyId.delete(ptyId)
-      }
-    }, HANDOFF_FACT_BUFFER_TTL_MS)
-  }
-  buffer.expiryTimer.unref?.()
-  handoffFactBuffersByPtyId.set(ptyId, buffer)
-}
-
-function bufferHandoffFactBatch(batch: TerminalSideEffectBatch): void {
-  const buffer = handoffFactBuffersByPtyId.get(batch.ptyId)
-  if (!buffer) {
-    return
-  }
-  if (buffer.expiresAtMs <= Date.now()) {
-    deleteHandoffFactBuffer(batch.ptyId)
-    return
-  }
-  // Why: replay batches are snapshots the next consumer requests for itself.
-  if (batch.replay) {
-    return
-  }
-  if (buffer.batches.length >= MAX_HANDOFF_FACT_BATCHES) {
-    buffer.batches.shift()
-  }
-  buffer.batches.push(batch)
-}
-
-function drainHandoffFactBuffer(ptyId: string, entry: ConsumerEntry): void {
-  const buffer = handoffFactBuffersByPtyId.get(ptyId)
-  if (!buffer) {
-    return
-  }
-  deleteHandoffFactBuffer(ptyId)
-  if (buffer.expiresAtMs <= Date.now()) {
-    return
-  }
-  for (const batch of buffer.batches) {
-    applyBatchToConsumer(entry, batch)
-  }
-}
-
 export function dispatchTerminalSideEffectBatch(batch: TerminalSideEffectBatch): void {
   const entry = consumersByPtyId.get(batch.ptyId)
   if (!entry) {
     // Why: a confirmed exit can race pane teardown or arrive for byte-mode
     // panes that never register here; main's fact attribution outlives both.
+    const handoffAuthority = getTerminalSideEffectFactHandoffAuthority(batch.ptyId)
+    const confirmedExit = batch.facts.find(
+      (fact) => fact.kind === 'agent-exited' && fact.executionHostConfirmed === true
+    )
     if (
       !batch.replay &&
       batch.paneKey &&
-      batch.facts.some((fact) => fact.kind === 'agent-exited')
+      confirmedExit?.kind === 'agent-exited' &&
+      confirmedExit.incarnationId &&
+      handoffAuthority?.incarnationId === confirmedExit.incarnationId &&
+      handoffAuthority.paneKey === batch.paneKey &&
+      handoffAuthority.tabId === (batch.tabId ?? null) &&
+      handoffAuthority.worktreeId === (batch.worktreeId ?? null)
     ) {
       retireConfirmedAgentExitResumeAuthority(useAppStore.getState(), batch.paneKey)
     }
-    bufferHandoffFactBatch(batch)
+    bufferTerminalSideEffectFactHandoff(batch)
     return
   }
   applyBatchToConsumer(entry, batch)
@@ -292,6 +254,10 @@ function ensureSideEffectChannelSubscription(): void {
 
 export type TerminalSideEffectFactConsumerOptions = {
   ptyId: string
+  incarnationId?: PtyIncarnationId | null
+  paneKey?: string
+  tabId?: string
+  worktreeId?: string
   callbacks: TerminalSideEffectFactConsumerCallbacks
   /** Pull main's title-only replay snapshot on registration. Pane transports
    *  use this in place of deriving titles from eager-buffer byte replay.
@@ -309,13 +275,23 @@ export function registerTerminalSideEffectFactConsumer(
   options: TerminalSideEffectFactConsumerOptions
 ): () => void {
   ensureSideEffectChannelSubscription()
+  const inheritedAuthority = getTerminalSideEffectFactHandoffAuthority(options.ptyId)
+  const canInherit =
+    options.incarnationId == null &&
+    inheritedAuthority?.paneKey === (options.paneKey ?? null) &&
+    inheritedAuthority?.tabId === (options.tabId ?? null) &&
+    inheritedAuthority?.worktreeId === (options.worktreeId ?? null)
   const entry: ConsumerEntry = {
     callbacks: options.callbacks,
+    incarnationId: options.incarnationId ?? (canInherit ? inheritedAuthority.incarnationId : null),
+    paneKey: options.paneKey ?? null,
+    tabId: options.tabId ?? null,
+    worktreeId: options.worktreeId ?? null,
     lastLiveTitleSeq: null
   }
   consumersByPtyId.set(options.ptyId, entry)
   // Why before the snapshot request: draining live facts sets lastLiveTitleSeq, so the async title replay is correctly dropped as stale.
-  drainHandoffFactBuffer(options.ptyId, entry)
+  drainTerminalSideEffectFactHandoff(options.ptyId, (batch) => applyBatchToConsumer(entry, batch))
 
   if (options.restoreTitleOnRegister) {
     const getSnapshot = (globalThis as { window?: Window }).window?.api?.pty?.getSideEffectSnapshot
@@ -336,7 +312,7 @@ export function registerTerminalSideEffectFactConsumer(
     if (consumersByPtyId.get(options.ptyId) === entry) {
       consumersByPtyId.delete(options.ptyId)
       // Why: the pane that replaces this consumer registers only after its async reattach resolves; hold facts across that handoff.
-      openHandoffFactBuffer(options.ptyId)
+      openTerminalSideEffectFactHandoff(options.ptyId, entry)
     }
   }
 }
@@ -349,9 +325,7 @@ export function _dispatchTerminalSideEffectBatchForTest(batch: TerminalSideEffec
 /** Test seam: reset module state between tests. */
 export function _resetTerminalSideEffectFactConsumersForTest(): void {
   consumersByPtyId.clear()
-  for (const ptyId of Array.from(handoffFactBuffersByPtyId.keys())) {
-    deleteHandoffFactBuffer(ptyId)
-  }
+  resetTerminalSideEffectFactHandoffs()
   channelUnsubscribe?.()
   channelUnsubscribe = null
   persistedAuthorityFlagCache = undefined

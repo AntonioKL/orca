@@ -28,6 +28,7 @@ import { dispatchTerminalNotification } from './use-notification-dispatch'
 import { acquireHiddenRendererPtyDeliveryClaim } from './pty-renderer-delivery-claims'
 import { isRemoteRuntimePtyId } from '@/runtime/runtime-terminal-inspection'
 import { retireConfirmedAgentExitResumeAuthority } from '@/lib/confirmed-agent-exit-resume-retirement'
+import type { PtyIncarnationId } from '../../../../shared/pty-incarnation'
 
 // Why: keep the live path's BEL-vs-completion race window so notification behavior is identical whether a tab is parked or mounted.
 const PARKED_NOTIFICATION_GRACE_MS = AGENT_TASK_COMPLETE_NOTIFICATION_GRACE_MS
@@ -44,6 +45,8 @@ function isAgentTaskCompleteTrackingEnabled(state: StoreState): boolean {
 
 export type ParkedTerminalByteWatcherOptions = {
   ptyId: string
+  /** Captured process identity when the mounted pane handed ownership off. */
+  incarnationId?: PtyIncarnationId
   tabId: string
   worktreeId: string
   /** Stable terminal-layout leaf UUID; combined with tabId into the paneKey for cache-timer, unread, and notification attribution. */
@@ -184,9 +187,7 @@ export function startParkedTerminalByteWatcher(
     },
     onAgentExited: (): void => {
       // Why: title reverting to a plain shell means the agent session ended; clear the countdown so it doesn't survive in the sidebar while parked.
-      const state = useAppStore.getState()
-      state.setCacheTimerStartedAt(paneKey, null)
-      retireConfirmedAgentExitResumeAuthority(state, paneKey)
+      useAppStore.getState().setCacheTimerStartedAt(paneKey, null)
     }
   }
 
@@ -242,9 +243,19 @@ export function startParkedTerminalByteWatcher(
   const unregisterFactConsumer = factSideEffectAuthority
     ? registerTerminalSideEffectFactConsumer({
         ptyId,
+        incarnationId: options.incarnationId ?? null,
+        paneKey,
+        tabId,
+        worktreeId,
         // Why: ordinary park already has a pane-owned title; the flag below requests a snapshot only when no pane did.
         callbacks: {
           ...sideEffectCallbacks,
+          onAgentExited: (fact) => {
+            if (fact.executionHostConfirmed === true) {
+              retireConfirmedAgentExitResumeAuthority(useAppStore.getState(), paneKey)
+            }
+            sideEffectCallbacks.onAgentExited?.()
+          },
           onCommandFinished: commandStatusPolicy.onCommandFinished,
           onCommandCodeWorking: commandStatusPolicy.onCommandCodeWorking,
           onCommandCodeDone: commandStatusPolicy.onCommandCodeDone,

@@ -145,7 +145,7 @@ describe('confirmed agent-exit resume retirement', () => {
     expect(resumeSleepingAgentSessionsForWorktree('wt-1')).toBe(1)
   })
 
-  it('retires from fact attribution when no pane consumer is registered', () => {
+  it('preserves authority for a fact with no prior pane consumer', () => {
     const record = makeRecord()
     seedOrphanRecord(record)
 
@@ -156,8 +156,8 @@ describe('confirmed agent-exit resume retirement', () => {
       facts: [{ kind: 'agent-exited' }]
     })
 
-    expect(useAppStore.getState().sleepingAgentSessionsByPaneKey[record.paneKey]).toBeUndefined()
-    expect(resumeSleepingAgentSessionsForWorktree('wt-1')).toBe(0)
+    expect(useAppStore.getState().sleepingAgentSessionsByPaneKey[record.paneKey]).toEqual(record)
+    expect(resumeSleepingAgentSessionsForWorktree('wt-1')).toBe(1)
   })
 
   it('keeps resume authority for unattributed or replayed exit facts', () => {

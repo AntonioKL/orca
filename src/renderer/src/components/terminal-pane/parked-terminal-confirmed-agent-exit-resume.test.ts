@@ -92,7 +92,7 @@ describe('parked terminal confirmed agent-exit resume retirement', () => {
     }
   })
 
-  it('retires the parked pane resume record on a confirmed agent-exited fact', async () => {
+  it('retires only a host-confirmed parked-pane agent exit', async () => {
     const { startParkedTerminalByteWatcher } = await import('./parked-terminal-byte-watcher')
     const handler = await import('./terminal-side-effect-facts-handler')
     mockStoreState.sleepingAgentSessionsByPaneKey = {
@@ -112,6 +112,7 @@ describe('parked terminal confirmed agent-exit resume retirement', () => {
 
     const dispose = startParkedTerminalByteWatcher({
       ptyId: PTY_ID,
+      incarnationId: 'inc-parked-exit',
       tabId: TAB_ID,
       worktreeId: WORKTREE_ID,
       leafId: LEAF_ID,
@@ -121,6 +122,23 @@ describe('parked terminal confirmed agent-exit resume retirement', () => {
       ptyId: PTY_ID,
       seq: 1,
       facts: [{ kind: 'agent-exited' }]
+    })
+
+    expect(mockStoreState.sleepingAgentSessionsByPaneKey[PANE_KEY]).toBeDefined()
+
+    handler._dispatchTerminalSideEffectBatchForTest({
+      ptyId: PTY_ID,
+      seq: 2,
+      paneKey: PANE_KEY,
+      tabId: TAB_ID,
+      worktreeId: WORKTREE_ID,
+      facts: [
+        {
+          kind: 'agent-exited',
+          executionHostConfirmed: true,
+          incarnationId: 'inc-parked-exit'
+        }
+      ]
     })
 
     expect(mockStoreState.sleepingAgentSessionsByPaneKey[PANE_KEY]).toBeUndefined()
