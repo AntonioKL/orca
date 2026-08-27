@@ -9,7 +9,9 @@ const nativePackages = [
   '@parcel/watcher',
   'node-pty',
   'sherpa-onnx',
-  '@vscode/windows-process-tree'
+  '@vscode/windows-process-tree',
+  'cpu-features',
+  ...(process.platform === 'darwin' ? ['fsevents'] : [])
 ]
 const loaded = nativePackages.map((name) => {
   const module = require(name)
