@@ -3143,6 +3143,8 @@ export class OrcaRuntimeService {
   private headlessGraphFallbackAvailable = false
   private pendingHeadlessPromotionWindowId: number | null = null
   private rendererGeneration: string | null = null
+  // Only a live renderer whose notification frame failed may heal with the last accepted generation.
+  private sameGenerationGraphRecoveryAllowed = false
   /** Window whose graph was retired when the window closed; only a fresh attachWindow() revives it. */
   private retiredGraphWindowId: number | null = null
   private readonly graphReloadLifecycle = new RuntimeGraphReloadLifecycle({
@@ -7141,17 +7143,17 @@ export class OrcaRuntimeService {
     if (
       typeof rendererGeneration === 'string' &&
       rendererGeneration === this.rendererGeneration &&
-      this.graphStatus === 'reloading'
+      this.graphStatus !== 'ready' &&
+      !this.sameGenerationGraphRecoveryAllowed
     ) {
-      // Why only while reloading: a replacement document is on its way, so the
-      // pre-reload one must not settle the fence. Any other non-ready state has
-      // no successor coming — rejecting the live renderer there stranded the
-      // graph `unavailable` for the rest of the process (STA-5523).
+      // Only an explicit frame-unavailable failure proves the last document may heal;
+      // a reload timeout or process exit must keep its superseded generation fenced.
       throw new Error('Runtime graph publisher belongs to a superseded renderer generation')
     }
     // Why after the fences: a rejected publication used to keep the authority it
     // took on the way in, pinning the graph to a window that could never publish.
     this.authoritativeWindowId = windowId
+    this.sameGenerationGraphRecoveryAllowed = false
     if (windowId === HEADLESS_RUNTIME_WINDOW_ID) {
       this.headlessGraphFallbackAvailable = true
       this.rendererGeneration = null
@@ -31663,6 +31665,7 @@ export class OrcaRuntimeService {
     // Why: the rebuilt graph decides whether an incarnation survived; do not stale proven process identities before that comparison.
     this.rendererGraphEpoch += 1
     this.graphStatus = 'reloading'
+    this.sameGenerationGraphRecoveryAllowed = false
     const revision = this.graphReloadLifecycle.begin(windowId)
     this.setTerminalSideEffectConsumerAvailable(false)
     this.rememberDetachedPreAllocatedLeaves()
@@ -31717,13 +31720,14 @@ export class OrcaRuntimeService {
       this.pendingHeadlessPromotionWindowId = null
     }
     this.graphStatus = 'ready'
+    this.sameGenerationGraphRecoveryAllowed = false
     this.setTerminalSideEffectConsumerAvailable(windowId !== HEADLESS_RUNTIME_WINDOW_ID)
     this.refreshWritableFlags()
   }
 
   markGraphReloadFailed(
     windowId: number,
-    _reason: 'renderer-frame-unavailable' | 'renderer-process-gone'
+    reason: 'renderer-frame-unavailable' | 'renderer-process-gone'
   ): void {
     if (windowId !== this.authoritativeWindowId) {
       return
@@ -31732,6 +31736,7 @@ export class OrcaRuntimeService {
       this.beginGraphReload(windowId)
     }
     this.graphReloadLifecycle.settleActive('failure')
+    this.sameGenerationGraphRecoveryAllowed = reason === 'renderer-frame-unavailable'
     this.transitionGraphReloadToTerminalState(windowId)
   }
 
@@ -31750,6 +31755,7 @@ export class OrcaRuntimeService {
     // Why: this runs when the window itself closed, so its renderer is finished
     // publishing — record that before any branch drops the authority binding.
     this.retiredGraphWindowId = windowId
+    this.sameGenerationGraphRecoveryAllowed = false
     this.graphReloadLifecycle.settleActive('cancelled')
     if (this.shouldRestoreHeadlessGraph(windowId)) {
       this.pendingHeadlessPromotionWindowId = null
@@ -31778,6 +31784,7 @@ export class OrcaRuntimeService {
     if (windowId !== this.authoritativeWindowId || this.graphStatus !== 'reloading') {
       return
     }
+    this.sameGenerationGraphRecoveryAllowed = false
     this.transitionGraphReloadToTerminalState(windowId)
   }
 
@@ -31808,6 +31815,7 @@ export class OrcaRuntimeService {
     this.authoritativeWindowId = HEADLESS_RUNTIME_WINDOW_ID
     this.graphStatus = 'ready'
     this.rendererGeneration = null
+    this.sameGenerationGraphRecoveryAllowed = false
     this.setTerminalSideEffectConsumerAvailable(false)
     this.tabs.clear()
     this.leaves.clear()
