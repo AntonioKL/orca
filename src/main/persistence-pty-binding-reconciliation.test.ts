@@ -221,6 +221,56 @@ describe('Store', () => {
     })
   })
 
+  it('advances topology when a host-admitted PTY fills an existing renderer tab', async () => {
+    const store = await createStore()
+    store.setWorkspaceSession({
+      ...getDefaultWorkspaceSession(),
+      tabsByWorktree: {
+        wt1: [makeTerminalTab({ id: 'tab1', worktreeId: 'wt1', ptyId: null })]
+      },
+      terminalLayoutsByTabId: {
+        tab1: {
+          root: { type: 'leaf', leafId: TEST_LEAF_1 },
+          activeLeafId: TEST_LEAF_1,
+          expandedLeafId: null,
+          ptyIdsByLeafId: {}
+        }
+      }
+    })
+
+    expect(
+      store.persistPtyBinding({
+        worktreeId: 'wt1',
+        tabId: 'tab1',
+        leafId: TEST_LEAF_1,
+        ptyId: 'host-pty',
+        hostAdmittedMembership: true
+      })
+    ).toBe(true)
+
+    expect(store.getWorkspaceSession().terminalTopologyRevisionByRepoId?.wt1).toBe(1)
+
+    // The renderer's pre-spawn snapshot must not erase the host's binding.
+    store.setWorkspaceSession({
+      ...getDefaultWorkspaceSession(),
+      tabsByWorktree: {
+        wt1: [makeTerminalTab({ id: 'tab1', worktreeId: 'wt1', ptyId: null })]
+      },
+      terminalLayoutsByTabId: {
+        tab1: {
+          root: { type: 'leaf', leafId: TEST_LEAF_1 },
+          activeLeafId: TEST_LEAF_1,
+          expandedLeafId: null,
+          ptyIdsByLeafId: {}
+        }
+      }
+    })
+    expect(store.getWorkspaceSession().tabsByWorktree.wt1[0].ptyId).toBe('host-pty')
+    expect(
+      store.getWorkspaceSession().terminalLayoutsByTabId.tab1?.ptyIdsByLeafId?.[TEST_LEAF_1]
+    ).toBe('host-pty')
+  })
+
   it('admits a fresh host spawn after retirement while rejecting an older renderer topology', async () => {
     const store = await createStore()
     store.setWorkspaceSession({
