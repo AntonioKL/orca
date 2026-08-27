@@ -123,6 +123,7 @@ export function bindLiveDataCallback(session: ConnectPanePtySession): void {
       session.schedulePendingStartupCommandDelivery()
       return
     }
+    // Keep source order aligned with sibling producers; xterm's async write buffer made the old inversion latent.
     if (pendingForegroundQuery?.oscColorQueryData) {
       sendTerminalOscColorQueryReplies(
         pendingForegroundQuery.oscColorQueryData,
