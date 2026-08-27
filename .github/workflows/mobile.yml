@@ -34,6 +34,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: Load base mobile diagnostic baseline
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          git cat-file -e "$BASE_SHA^{commit}"
+          if git cat-file -e "$BASE_SHA:mobile/typecheck-test-diagnostics.json" 2>/dev/null; then
+            base_baseline="$RUNNER_TEMP/typecheck-mobile-base.json"
+            git show "$BASE_SHA:mobile/typecheck-test-diagnostics.json" > "$base_baseline"
+            echo "TYPECHECK_BASELINE_BASE_PATH=$base_baseline" >> "$GITHUB_ENV"
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v6

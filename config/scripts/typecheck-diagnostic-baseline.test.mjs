@@ -26,6 +26,7 @@ function createFixture(source) {
   writeFileSync(join(fixtureDir, 'source.ts'), source)
   return {
     baseline: join(fixtureDir, 'baseline.json'),
+    baseBaseline: join(fixtureDir, 'base-baseline.json'),
     project: join(fixtureDir, 'tsconfig.json'),
     source: join(fixtureDir, 'source.ts')
   }
@@ -40,7 +41,17 @@ function runBaseline(paths, extraArgs = []) {
 }
 
 describe('typecheck diagnostic baseline', () => {
-  it('accepts only the exact recorded diagnostics', () => {
+  it('loads PR-base baselines in desktop and mobile CI', () => {
+    const desktopWorkflow = readFileSync(join(repoRoot, '.github/workflows/pr.yml'), 'utf8')
+    const mobileWorkflow = readFileSync(join(repoRoot, '.github/workflows/mobile.yml'), 'utf8')
+
+    expect(desktopWorkflow).toContain('$BASE_SHA:config/typecheck-e2e-diagnostics.json')
+    expect(mobileWorkflow).toContain('$BASE_SHA:mobile/typecheck-test-diagnostics.json')
+    expect(desktopWorkflow).toContain('TYPECHECK_BASELINE_BASE_PATH=')
+    expect(mobileWorkflow).toContain('TYPECHECK_BASELINE_BASE_PATH=')
+  })
+
+  it('requires recorded diagnostics to remain present', () => {
     const paths = createFixture("const value: number = 'bad'\n")
     expect(runBaseline(paths, ['--write']).status).toBe(0)
     expect(JSON.parse(readFileSync(paths.baseline, 'utf8')).diagnostics).toHaveLength(1)
@@ -60,5 +71,35 @@ describe('typecheck diagnostic baseline', () => {
     const unexpected = runBaseline(paths)
     expect(unexpected.status).toBe(1)
     expect(unexpected.stderr).toContain('Unexpected diagnostics (1)')
+  })
+
+  it('rejects another occurrence of an allowlisted diagnostic', () => {
+    const paths = createFixture("const first: number = 'bad'\n")
+    expect(runBaseline(paths, ['--write']).status).toBe(0)
+
+    writeFileSync(paths.source, "const first: number = 'bad'\nconst second: number = 'also-bad'\n")
+    const unexpected = runBaseline(paths)
+    expect(unexpected.status).toBe(1)
+    expect(unexpected.stderr).toContain('Unexpected diagnostics (1)')
+  })
+
+  it('does not drift when only diagnostic positions move', () => {
+    const paths = createFixture("const value: number = 'bad'\n")
+    expect(runBaseline(paths, ['--write']).status).toBe(0)
+
+    writeFileSync(paths.source, "\nconst value: number = 'bad'\n")
+    expect(runBaseline(paths).status).toBe(0)
+  })
+
+  it('refuses to regenerate a baseline that grows from the PR base', () => {
+    const paths = createFixture("const first: number = 'bad'\n")
+    expect(runBaseline(paths, ['--write']).status).toBe(0)
+    writeFileSync(paths.baseBaseline, readFileSync(paths.baseline, 'utf8'))
+
+    writeFileSync(paths.source, "const first: number = 'bad'\nconst second: boolean = 'also-bad'\n")
+    const growth = runBaseline(paths, ['--write', '--base-baseline', paths.baseBaseline])
+    expect(growth.status).toBe(1)
+    expect(growth.stderr).toContain('Diagnostic baseline grew (1)')
+    expect(JSON.parse(readFileSync(paths.baseline, 'utf8')).diagnostics).toHaveLength(1)
   })
 })

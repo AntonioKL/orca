@@ -33,12 +33,13 @@ let checksum = 0
 let expectedChecksum = 0
 let validatedCases = 0
 let cappedCalibrations = 0
+let sessionSink: NativeChatSession | null = null
 let messageArraySink: NativeChatMessage[] | null = null
 let contentSink = ''
 let pendingMatchSink: Set<number> | null = null
 let userRowSink: readonly NativeChatUserRow[] | null = null
 const benchmarkStartedAt = performance.now()
-const getPendingSink = (): Set<number> | null => pendingMatchSink
+const getSinks = () => [sessionSink, pendingMatchSink] as const
 
 function proseFixture(count: number, bytes: number, withTurnId: boolean): NativeChatMessage[] {
   const payload = 'Ab Cd  '.repeat(Math.ceil(bytes / 7)).slice(0, bytes)
@@ -127,6 +128,7 @@ function messageWeight(message: NativeChatMessage, content: string): number {
 }
 
 function consumeSession(session: NativeChatSession, index: number): number {
+  sessionSink = session
   messageArraySink = session.messages
   const message = session.messages[index % session.messages.length]
   if (!message) {
@@ -325,9 +327,10 @@ benchmark(
 )
 
 strictEqual(checksum, expectedChecksum, 'benchmark checksum accounting drifted')
+strictEqual(getSinks()[0]?.sessionId, 'benchmark', 'session outputs did not escape')
 strictEqual(Array.isArray(messageArraySink), true, 'message arrays did not escape')
 strictEqual(contentSink.length > 0, true, 'message content did not escape')
-strictEqual(getPendingSink() instanceof Set, true, 'pending baseline scan did not escape')
+strictEqual(getSinks()[1] instanceof Set, true, 'pending baseline scan did not escape')
 strictEqual(Array.isArray(userRowSink), true, 'user row scan did not escape')
 console.log(
   `validated=${validatedCases} cases, checksum=${checksum}, capped calibrations=${cappedCalibrations}, runtime=${(

@@ -209,7 +209,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
+          fetch-depth: 2
           persist-credentials: false
+
+      - name: Load base E2E diagnostic baseline
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          git cat-file -e "$BASE_SHA^{commit}"
+          if git cat-file -e "$BASE_SHA:config/typecheck-e2e-diagnostics.json" 2>/dev/null; then
+            base_baseline="$RUNNER_TEMP/typecheck-e2e-base.json"
+            git show "$BASE_SHA:config/typecheck-e2e-diagnostics.json" > "$base_baseline"
+            echo "TYPECHECK_BASELINE_BASE_PATH=$base_baseline" >> "$GITHUB_ENV"
+          fi
 
       - uses: ./.github/actions/install-node-dependencies
 

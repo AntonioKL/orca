@@ -21,6 +21,8 @@ function parseArgs(argv) {
       options.project = next
     } else if (value === '--baseline') {
       options.baseline = next
+    } else if (value === '--base-baseline') {
+      options.baseBaseline = next
     } else if (value === '--tsc') {
       options.tsc = next
     } else {
@@ -29,7 +31,9 @@ function parseArgs(argv) {
     index += 1
   }
   if (!options.project || !options.baseline) {
-    throw new Error('Usage: --project <tsconfig> --baseline <json> [--tsc <binary>] [--write]')
+    throw new Error(
+      'Usage: --project <tsconfig> --baseline <json> [--base-baseline <json>] [--tsc <binary>] [--write]'
+    )
   }
   return options
 }
@@ -102,7 +106,11 @@ function collectDiagnostics(projectPath, tscPath) {
 function diagnosticCounts(diagnostics) {
   const counts = new Map()
   for (const diagnostic of diagnostics) {
-    const key = JSON.stringify(diagnostic)
+    const key = JSON.stringify({
+      file: diagnostic.file,
+      code: diagnostic.code,
+      message: diagnostic.message
+    })
     counts.set(key, (counts.get(key) ?? 0) + 1)
   }
   return counts
@@ -111,7 +119,11 @@ function diagnosticCounts(diagnostics) {
 function subtractDiagnostics(left, right) {
   const remaining = diagnosticCounts(right)
   return left.filter((diagnostic) => {
-    const key = JSON.stringify(diagnostic)
+    const key = JSON.stringify({
+      file: diagnostic.file,
+      code: diagnostic.code,
+      message: diagnostic.message
+    })
     const count = remaining.get(key) ?? 0
     if (count === 0) {
       return true
@@ -128,23 +140,51 @@ function formatDiagnostic(diagnostic) {
   return `${location} TS${diagnostic.code}: ${diagnostic.message}`
 }
 
+async function readBaseline(baselinePath) {
+  const baseline = JSON.parse(await readFile(baselinePath, 'utf8'))
+  if (baseline.version !== 1 || !Array.isArray(baseline.diagnostics)) {
+    throw new Error(`Invalid diagnostic baseline: ${relative(repoRoot, baselinePath)}`)
+  }
+  return baseline
+}
+
+function reportBaselineGrowth(diagnostics, baseDiagnostics) {
+  const added = subtractDiagnostics(diagnostics, baseDiagnostics)
+  if (added.length === 0) {
+    return false
+  }
+  console.error(`Diagnostic baseline grew (${added.length}); only removals are allowed:`)
+  for (const diagnostic of added) {
+    console.error(formatDiagnostic(diagnostic))
+  }
+  process.exitCode = 1
+  return true
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2))
   const projectPath = resolve(repoRoot, options.project)
   const baselinePath = resolve(repoRoot, options.baseline)
+  const baseBaselinePath = options.baseBaseline
+    ? resolve(repoRoot, options.baseBaseline)
+    : process.env.TYPECHECK_BASELINE_BASE_PATH
   const tscPath = resolve(repoRoot, options.tsc ?? 'node_modules/typescript/bin/tsc')
   const diagnostics = collectDiagnostics(projectPath, tscPath)
+  const baseBaseline = baseBaselinePath ? await readBaseline(baseBaselinePath) : null
 
   if (options.write) {
+    if (baseBaseline && reportBaselineGrowth(diagnostics, baseBaseline.diagnostics)) {
+      return
+    }
     const baseline = { version: 1, diagnostics }
     await writeFile(baselinePath, `${JSON.stringify(baseline, null, 2)}\n`)
     console.log(`Wrote ${diagnostics.length} diagnostics to ${relative(repoRoot, baselinePath)}`)
     return
   }
 
-  const baseline = JSON.parse(await readFile(baselinePath, 'utf8'))
-  if (baseline.version !== 1 || !Array.isArray(baseline.diagnostics)) {
-    throw new Error(`Invalid diagnostic baseline: ${relative(repoRoot, baselinePath)}`)
+  const baseline = await readBaseline(baselinePath)
+  if (baseBaseline && reportBaselineGrowth(baseline.diagnostics, baseBaseline.diagnostics)) {
+    return
   }
   const unexpected = subtractDiagnostics(diagnostics, baseline.diagnostics)
   const stale = subtractDiagnostics(baseline.diagnostics, diagnostics)
