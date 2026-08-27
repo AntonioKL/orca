@@ -104,7 +104,12 @@ export async function releaseProxySessionApplication(
 export async function retireProxySessionApplication(proxySession: ProxySession): Promise<void> {
   const state = getSessionProxyApplicationState(proxySession)
   state.retired = true
-  await releaseProxySessionApplication(proxySession, true)
+  try {
+    await releaseProxySessionApplication(proxySession, true)
+  } finally {
+    state.credentials = null
+    clearElectronProxyCredentialsForSession(proxySession)
+  }
 }
 
 function getSessionProxyApplicationState(proxySession: ProxySession): SessionProxyApplicationState {

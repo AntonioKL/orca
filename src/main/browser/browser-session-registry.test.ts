@@ -321,7 +321,7 @@ describe('BrowserSessionRegistry', () => {
     expect(mockSession?.setDevicePermissionHandler).toHaveBeenCalled()
   })
 
-  it('applies and clears existing browser-profile policy on an opaque route partition', () => {
+  it('applies and clears existing browser-profile policy on an opaque route partition', async () => {
     const partition =
       'persist:orca-browser-v1-1111111111111111222222222222222233333333333333334444444444444444'
     setBrowserNetworkProxySettingsResolver(() => ({
@@ -335,6 +335,7 @@ describe('BrowserSessionRegistry', () => {
     const configuredSession = sessionFromPartitionMock.mock.results[0]?.value
     expect(configuredSession.setPermissionRequestHandler).toHaveBeenCalled()
     expect(configuredSession.setPermissionCheckHandler).toHaveBeenCalled()
+    await new Promise<void>((resolve) => setImmediate(resolve))
     expect(configuredSession.setProxy).not.toHaveBeenCalled()
 
     browserSessionRegistry.clearRoutePartitionPolicies(partition)

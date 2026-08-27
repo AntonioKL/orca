@@ -281,6 +281,31 @@ describe('applyProxySettingsToSession', () => {
     await expect(awaitProxySessionApplication(proxySession)).resolves.toBe(false)
   })
 
+  it('forgets credentials when a retired partition cannot release its proxy', async () => {
+    const proxySession = createProxySession()
+    resetSessionProxyApplicationForTests(proxySession)
+    await applyProxySettingsToSession(
+      proxySession,
+      { httpProxyUrl: 'http://alice:secret@proxy.example:8080' },
+      { env: {} }
+    )
+    proxySession.setProxy.mockRejectedValue(new Error('proxy release failed'))
+
+    await expect(retireProxySessionApplication(proxySession)).rejects.toThrow(
+      'proxy release failed'
+    )
+    const callback = vi.fn()
+    handleElectronProxyLogin(
+      { preventDefault: vi.fn() } as never,
+      { session: proxySession } as never,
+      {} as never,
+      { isProxy: true, host: 'proxy.example', port: 8080 },
+      callback
+    )
+
+    expect(callback).not.toHaveBeenCalled()
+  })
+
   it('orders a slow environment probe before a newer explicit setting', async () => {
     let finishProbe: ((result: string) => void) | undefined
     const proxySession = createProxySession()
