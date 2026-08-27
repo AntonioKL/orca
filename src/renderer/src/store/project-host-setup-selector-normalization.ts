@@ -23,12 +23,11 @@ export function normalizeHydratedProjectHostSetupProjection(
     // Why: hydrated and remote catalog rows can carry a non-string repoId, but every
     // consumer treats it as a string (`setup.repoId.trim()`). Coerce once here so a
     // legacy row cannot crash Settings on open.
+    // Why not `changed = true` here: that flag routes callers onto the merged
+    // projection, which unions in repo-derived rows. A coerced repoId must not
+    // change which rows exist — only the value of this one field.
     const repoId = typeof setup.repoId === 'string' ? setup.repoId : ''
-    const repoIdNormalized = repoId !== setup.repoId
-    if (repoIdNormalized) {
-      changed = true
-    }
-    const normalizedSetup = repoIdNormalized ? { ...setup, repoId } : setup
+    const normalizedSetup = repoId === setup.repoId ? setup : { ...setup, repoId }
     const repo = repoById.get(repoId) ?? repoById.get(setup.id)
     if (!repo) {
       return normalizedSetup

@@ -98,6 +98,68 @@ describe('project host setup projection with a non-string repoId', () => {
     ]).toEqual(['repo-1'])
   })
 
+  // Why these two: the fixtures above leave every repo uncovered, which always takes the
+  // merge path. A row that covers every repo takes the passthrough path instead, and that
+  // is the shape the production crash had.
+  describe('when every repo is already covered (passthrough path)', () => {
+    const coveringSetups = (repoId: unknown): ProjectHostSetup[] =>
+      [
+        {
+          id: 'repo:repo-1::local',
+          projectId: 'repo:repo-1',
+          hostId: 'local',
+          repoId: 'repo-1',
+          path: '/Users/alice/orca',
+          displayName: 'orca',
+          setupState: 'ready',
+          setupMethod: 'legacy-repo',
+          createdAt: 1,
+          updatedAt: 1
+        },
+        {
+          id: 'repo:repo-1::local::2',
+          projectId: 'repo:repo-1',
+          hostId: 'local',
+          repoId,
+          path: '/Users/alice/orca-2',
+          displayName: 'orca-2',
+          setupState: 'ready',
+          setupMethod: 'legacy-repo',
+          createdAt: 1,
+          updatedAt: 1
+        }
+      ] as unknown as ProjectHostSetup[]
+
+    it('still coerces a null repoId instead of leaking it through', () => {
+      const projection = getProjectHostSetupProjectionFromState({
+        repos,
+        projects,
+        projectHostSetups: coveringSetups(null)
+      })
+      const leaked = projection.setups.find((setup) => typeof setup.repoId !== 'string')
+      expect(leaked).toBeUndefined()
+      expect(projection.setups.find((setup) => setup.id === 'repo:repo-1::local::2')?.repoId).toBe(
+        ''
+      )
+    })
+
+    it('does not invent extra setup or project rows because one repoId was null', () => {
+      const rowIds = (repoId: unknown): { setups: string[]; projects: string[] } => {
+        const projection = getProjectHostSetupProjectionFromState({
+          repos,
+          projects,
+          projectHostSetups: coveringSetups(repoId)
+        })
+        return {
+          setups: projection.setups.map((setup) => setup.id).sort(),
+          projects: projection.projects.map((project) => project.id).sort()
+        }
+      }
+      // Why: a coerced field must change one value, never which rows exist.
+      expect(rowIds(null)).toEqual(rowIds(''))
+    })
+  })
+
   it('keeps the projection reference-stable for a repeated input', () => {
     const setups = makeSetups(null)
     const args = { repos, projects, projectHostSetups: setups }

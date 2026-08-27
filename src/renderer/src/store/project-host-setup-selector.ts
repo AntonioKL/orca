@@ -33,7 +33,8 @@ function getCachedProjectHostSetupProjection(repos: AppState['repos']): ProjectH
 
 function getCachedProvidedProjectHostSetupProjection(
   projects: Project[],
-  setups: ProjectHostSetup[]
+  setups: ProjectHostSetup[],
+  normalized: ProjectHostSetupProjection
 ): ProjectHostSetupProjection {
   const cachedBySetups = providedProjectHostSetupProjectionCache.get(projects)
   const cachedProjection = cachedBySetups?.get(setups)
@@ -41,7 +42,9 @@ function getCachedProvidedProjectHostSetupProjection(
     return cachedProjection
   }
 
-  const projection = { projects, setups }
+  // Why serve the normalized rows: field-level coercion (a non-string repoId)
+  // must reach callers on this path too, and it leaves row identity untouched.
+  const projection = { projects: normalized.projects, setups: normalized.setups }
   const nextCachedBySetups =
     cachedBySetups ?? new WeakMap<ProjectHostSetup[], ProjectHostSetupProjection>()
   nextCachedBySetups.set(setups, projection)
@@ -175,7 +178,8 @@ export function getProjectHostSetupProjectionFromState(
     }
     return getCachedProvidedProjectHostSetupProjection(
       state.projects as Project[],
-      state.projectHostSetups as ProjectHostSetup[]
+      state.projectHostSetups as ProjectHostSetup[],
+      normalized
     )
   }
   return getCachedProjectHostSetupProjection(state.repos)
