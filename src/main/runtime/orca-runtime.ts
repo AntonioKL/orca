@@ -40741,7 +40741,7 @@ function projectVisibleTerminalLines(emulator: HeadlessEmulator): {
   )
   if (draft) {
     lines[draft.promptRow] = draft.promptGlyph
-    for (let row = draft.promptRow + 1; row <= draft.cursorRow; row += 1) {
+    for (let row = draft.promptRow + 1; row <= draft.endRow; row += 1) {
       lines[row] = ''
     }
   }
@@ -40762,7 +40762,7 @@ function projectTerminalTailLines(
   )
   if (draft) {
     visible[draft.promptRow] = draft.promptGlyph
-    for (let row = draft.promptRow + 1; row <= draft.cursorRow; row += 1) {
+    for (let row = draft.promptRow + 1; row <= draft.endRow; row += 1) {
       visible[row] = ''
     }
     const visibleTailLength = Math.min(tail.length, visible.length)

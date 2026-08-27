@@ -19280,7 +19280,7 @@ describe('OrcaRuntimeService', () => {
     syncSinglePty(runtime)
     runtime.onPtyData(
       'pty-1',
-      '\x1b[?1049hBuild passed\r\n────────\r\n❯ \x1b[2mproceed with the release\x1b[22m\x1b[3G',
+      '\x1b[?1049hBuild passed\r\n────────\r\n❯ \x1b[2mproceed with the release\r\n  and close the pull request\x1b[22m\x1b[1A\x1b[3G',
       100
     )
     const [terminal] = (await runtime.listTerminals()).terminals
@@ -19290,7 +19290,7 @@ describe('OrcaRuntimeService', () => {
     expect(read).toMatchObject({
       source: 'screen',
       tail: ['Build passed', '────────', '❯'],
-      draft: 'proceed with the release'
+      draft: 'proceed with the release\nand close the pull request'
     })
   })
 
