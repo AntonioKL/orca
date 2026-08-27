@@ -38,6 +38,53 @@ describe('splitTerminalPaneWithInheritedCwd', () => {
     mocks.splitWebRuntimeTerminal.mockReturnValue(false)
   })
 
+  it.each(['keyboard', 'context_menu'] as const)(
+    'delegates remote %s splits without creating a competing local pane',
+    (source) => {
+      const splitPane = vi.fn()
+      const transport = { getPtyId: () => 'remote:web-env-1@@terminal-1' } as PtyTransport
+      mocks.splitWebRuntimeTerminal.mockReturnValue(true)
+
+      splitTerminalPaneWithInheritedCwd({
+        manager: makeManager(splitPane),
+        paneTransports: new Map([[1, transport]]),
+        paneCwdMap: new Map(),
+        fallbackCwd: '/fallback',
+        pane: { id: 1 } as ManagedPane,
+        direction: 'vertical',
+        source
+      })
+
+      expect(mocks.splitWebRuntimeTerminal).toHaveBeenCalledWith(
+        'remote:web-env-1@@terminal-1',
+        'vertical',
+        source
+      )
+      expect(splitPane).not.toHaveBeenCalled()
+    }
+  )
+
+  it('keeps the existing local split-and-focus path unchanged', () => {
+    const createdPane = { id: 2 }
+    const splitPane = vi.fn(() => createdPane)
+
+    splitTerminalPaneWithInheritedCwd({
+      manager: makeManager(splitPane),
+      paneTransports: new Map(),
+      paneCwdMap: new Map([[1, { cwd: '/cached', confirmed: true }]]),
+      fallbackCwd: '/fallback',
+      pane: { id: 1 } as ManagedPane,
+      direction: 'horizontal',
+      source: 'keyboard'
+    })
+
+    expect(splitPane).toHaveBeenCalledWith(1, 'horizontal', { cwd: '/cached' })
+    expect(mocks.recordCreatedTerminalPaneSplit).toHaveBeenCalledWith(createdPane, {
+      source: 'keyboard',
+      direction: 'horizontal'
+    })
+  })
+
   it('uses the live manager after async cwd resolution', async () => {
     const staleSplitPane = vi.fn()
     const liveSplitPane = vi.fn(() => ({ id: 2 }))

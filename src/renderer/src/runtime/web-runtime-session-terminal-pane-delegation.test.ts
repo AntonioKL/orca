@@ -6,8 +6,15 @@ import {
   splitWebRuntimeTerminal
 } from './web-runtime-session'
 import { resetWebSessionCloseIntentForTests } from './web-session-close-intent'
+import {
+  peekWebSessionFocusIntent,
+  resetWebSessionFocusIntentForTests
+} from './web-session-focus-intent'
+import { toWebTerminalSurfaceTabId } from '../../../shared/terminal-surface-id'
+import { replaceRuntimeEnvironmentRevisions } from './runtime-environment-revision'
 
 const mocks = vi.hoisted(() => ({
+  activateTabAndFocusPane: vi.fn(),
   getState: vi.fn(),
   setState: vi.fn(),
   subscribe: vi.fn(),
@@ -35,6 +42,10 @@ vi.mock('../store', () => ({
     setState: mocks.setState,
     subscribe: mocks.subscribe
   }
+}))
+
+vi.mock('../lib/activate-tab-and-focus-pane', () => ({
+  activateTabAndFocusPane: mocks.activateTabAndFocusPane
 }))
 
 vi.mock('./web-session-tabs-sync', () => ({
@@ -67,7 +78,36 @@ vi.mock('./web-runtime-browser-materialization', () => ({
   hasMaterializedWebRuntimeBrowserPage: mocks.hasMaterializedWebRuntimeBrowserPage
 }))
 
-afterEach(() => resetWebSessionCloseIntentForTests())
+afterEach(() => {
+  resetWebSessionCloseIntentForTests()
+  resetWebSessionFocusIntentForTests()
+  replaceRuntimeEnvironmentRevisions([])
+})
+
+const SPLIT_WORKTREE_ID = 'repo::/worktree'
+
+function makeSplitSourceState(hostTabId: string, leafId = 'leaf-1'): Record<string, unknown> {
+  const tabId = toWebTerminalSurfaceTabId(hostTabId)
+  return {
+    activeWorktreeId: SPLIT_WORKTREE_ID,
+    activeWorkspaceExecutionHostId: 'runtime:web-env-1',
+    activeTabType: 'terminal',
+    activeTabTypeByWorktree: { [SPLIT_WORKTREE_ID]: 'terminal' },
+    activeTabIdByWorktree: { [SPLIT_WORKTREE_ID]: tabId },
+    tabsByWorktree: {
+      [SPLIT_WORKTREE_ID]: [{ id: tabId, worktreeId: SPLIT_WORKTREE_ID }]
+    },
+    unifiedTabsByWorktree: {
+      [SPLIT_WORKTREE_ID]: [{ id: tabId, contentType: 'terminal' }]
+    },
+    groupsByWorktree: {},
+    terminalLayoutsByTabId: { [tabId]: { activeLeafId: leafId } }
+  }
+}
+
+function stubSplitSourceTab(hostTabId: string): void {
+  mocks.getState.mockReturnValue(makeSplitSourceState(hostTabId))
+}
 
 describe('splitWebRuntimeTerminal', () => {
   beforeEach(() => {
@@ -112,6 +152,7 @@ describe('splitWebRuntimeTerminal', () => {
     await vi.waitFor(() => expect(runtimeCall).toHaveBeenCalledTimes(1))
     expect(runtimeCall).toHaveBeenCalledWith({
       selector: 'web-env-1',
+      expectedEnvironmentPairingRevision: undefined,
       method: 'terminal.split',
       params: {
         terminal: 'terminal-1',
@@ -173,6 +214,222 @@ describe('splitWebRuntimeTerminal', () => {
     )
 
     await vi.waitFor(() => expect(runtimeCall).toHaveBeenCalledTimes(1))
+  })
+
+  it('records the exact host-created leaf before replaying the mirrored layout', async () => {
+    stubSplitSourceTab('tab-1')
+    replaceRuntimeEnvironmentRevisions([{ id: 'web-env-1', createdAt: 7 }])
+    const runtimeCall = vi.fn((request: { method: string }) =>
+      Promise.resolve(
+        request.method === 'terminal.split'
+          ? {
+              id: 'split',
+              ok: true,
+              result: {
+                split: {
+                  handle: 'terminal-2',
+                  tabId: 'tab-1',
+                  paneRuntimeId: -1,
+                  leafId: 'leaf-2'
+                }
+              }
+            }
+          : {
+              id: 'list',
+              ok: true,
+              result: {
+                worktree: SPLIT_WORKTREE_ID,
+                publicationEpoch: 'epoch-1',
+                snapshotVersion: 2,
+                activeGroupId: null,
+                activeTabId: null,
+                activeTabType: 'terminal',
+                tabs: []
+              }
+            }
+      )
+    )
+    vi.stubGlobal('window', { api: { runtimeEnvironments: { call: runtimeCall } } })
+
+    expect(splitWebRuntimeTerminal('remote:web-env-1@@terminal-1', 'vertical', 'keyboard')).toBe(
+      true
+    )
+
+    await vi.waitFor(() =>
+      expect(
+        peekWebSessionFocusIntent(
+          { environmentId: 'web-env-1', pairingRevision: 7 },
+          SPLIT_WORKTREE_ID
+        )
+      ).toEqual({
+        hostTabId: 'tab-1',
+        leafId: 'leaf-2',
+        expectedCurrentLocalTabId: toWebTerminalSurfaceTabId('tab-1')
+      })
+    )
+    expect(mocks.acceptReplayedWebSessionTabsSnapshot).toHaveBeenCalledWith(
+      'web-env-1',
+      SPLIT_WORKTREE_ID
+    )
+    expect(mocks.activateTabAndFocusPane).toHaveBeenCalledWith(
+      toWebTerminalSurfaceTabId('tab-1'),
+      'leaf-2'
+    )
+    expect(runtimeCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'terminal.split',
+        expectedEnvironmentPairingRevision: 7
+      })
+    )
+  })
+
+  it('does not claim focus from an old host that omits the leaf identity', async () => {
+    stubSplitSourceTab('tab-1')
+    const runtimeCall = vi.fn().mockResolvedValue({
+      id: 'split',
+      ok: true,
+      result: {
+        split: { handle: 'terminal-2', tabId: 'tab-1', paneRuntimeId: -1 }
+      }
+    })
+    vi.stubGlobal('window', { api: { runtimeEnvironments: { call: runtimeCall } } })
+
+    expect(splitWebRuntimeTerminal('remote:web-env-1@@terminal-1', 'vertical', 'keyboard')).toBe(
+      true
+    )
+
+    await vi.waitFor(() => expect(runtimeCall).toHaveBeenCalledOnce())
+    expect(peekWebSessionFocusIntent({ environmentId: 'web-env-1' }, SPLIT_WORKTREE_ID)).toBeNull()
+    expect(mocks.acceptReplayedWebSessionTabsSnapshot).not.toHaveBeenCalled()
+  })
+
+  it('does not steal focus after the viewer switches tabs while the host splits', async () => {
+    stubSplitSourceTab('tab-1')
+    let resolveSplit!: (response: unknown) => void
+    const runtimeCall = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveSplit = resolve
+        })
+    )
+    vi.stubGlobal('window', { api: { runtimeEnvironments: { call: runtimeCall } } })
+
+    expect(splitWebRuntimeTerminal('remote:web-env-1@@terminal-1', 'vertical', 'keyboard')).toBe(
+      true
+    )
+    await vi.waitFor(() => expect(runtimeCall).toHaveBeenCalledOnce())
+    mocks.getState.mockReturnValue(makeSplitSourceState('tab-2'))
+    resolveSplit({
+      id: 'split',
+      ok: true,
+      result: {
+        split: {
+          handle: 'terminal-2',
+          tabId: 'tab-1',
+          paneRuntimeId: -1,
+          leafId: 'leaf-2'
+        }
+      }
+    })
+
+    await vi.waitFor(() => expect(runtimeCall).toHaveBeenCalledOnce())
+    expect(peekWebSessionFocusIntent({ environmentId: 'web-env-1' }, SPLIT_WORKTREE_ID)).toBeNull()
+    expect(mocks.acceptReplayedWebSessionTabsSnapshot).not.toHaveBeenCalled()
+    expect(mocks.activateTabAndFocusPane).not.toHaveBeenCalled()
+  })
+
+  it('drops a completed split intent after the environment re-pairs', async () => {
+    stubSplitSourceTab('tab-1')
+    replaceRuntimeEnvironmentRevisions([{ id: 'web-env-1', createdAt: 7 }])
+    let resolveSplit!: (response: unknown) => void
+    const runtimeCall = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveSplit = resolve
+        })
+    )
+    vi.stubGlobal('window', { api: { runtimeEnvironments: { call: runtimeCall } } })
+
+    expect(splitWebRuntimeTerminal('remote:web-env-1@@terminal-1', 'vertical', 'keyboard')).toBe(
+      true
+    )
+    await vi.waitFor(() => expect(runtimeCall).toHaveBeenCalledOnce())
+    replaceRuntimeEnvironmentRevisions([{ id: 'web-env-1', createdAt: 9 }])
+    resolveSplit({
+      id: 'split',
+      ok: true,
+      result: {
+        split: {
+          handle: 'terminal-2',
+          tabId: 'tab-1',
+          paneRuntimeId: -1,
+          leafId: 'leaf-2'
+        }
+      }
+    })
+
+    await vi.waitFor(() => expect(runtimeCall).toHaveBeenCalledOnce())
+    expect(
+      peekWebSessionFocusIntent(
+        { environmentId: 'web-env-1', pairingRevision: 9 },
+        SPLIT_WORKTREE_ID
+      )
+    ).toBeNull()
+    expect(mocks.acceptReplayedWebSessionTabsSnapshot).not.toHaveBeenCalled()
+  })
+
+  it('drops local focus when the environment re-pairs during snapshot replay', async () => {
+    stubSplitSourceTab('tab-1')
+    replaceRuntimeEnvironmentRevisions([{ id: 'web-env-1', createdAt: 7 }])
+    let resolveList!: (response: unknown) => void
+    const runtimeCall = vi.fn((request: { method: string }) =>
+      request.method === 'terminal.split'
+        ? Promise.resolve({
+            id: 'split',
+            ok: true,
+            result: {
+              split: {
+                handle: 'terminal-2',
+                tabId: 'tab-1',
+                paneRuntimeId: -1,
+                leafId: 'leaf-2'
+              }
+            }
+          })
+        : new Promise((resolve) => {
+            resolveList = resolve
+          })
+    )
+    vi.stubGlobal('window', { api: { runtimeEnvironments: { call: runtimeCall } } })
+
+    expect(splitWebRuntimeTerminal('remote:web-env-1@@terminal-1', 'vertical', 'keyboard')).toBe(
+      true
+    )
+    await vi.waitFor(() => expect(runtimeCall).toHaveBeenCalledTimes(2))
+    replaceRuntimeEnvironmentRevisions([{ id: 'web-env-1', createdAt: 9 }])
+    resolveList({
+      id: 'list',
+      ok: true,
+      result: {
+        worktree: SPLIT_WORKTREE_ID,
+        publicationEpoch: 'epoch-1',
+        snapshotVersion: 2,
+        activeGroupId: null,
+        activeTabId: null,
+        activeTabType: 'terminal',
+        tabs: []
+      }
+    })
+
+    await vi.waitFor(() =>
+      expect(
+        peekWebSessionFocusIntent(
+          { environmentId: 'web-env-1', pairingRevision: 7 },
+          SPLIT_WORKTREE_ID
+        )
+      ).toBeNull()
+    )
+    expect(mocks.activateTabAndFocusPane).not.toHaveBeenCalled()
   })
 })
 
