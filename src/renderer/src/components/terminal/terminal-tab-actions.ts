@@ -19,9 +19,9 @@ import {
 import {
   closeStructuredTerminalSessionWithRetry,
   disposeStructuredTerminalSession,
-  structuredTerminalSessionId
+  findStructuredTerminalTab
 } from './structured-terminal-session-disposal'
-import { toast } from 'sonner'
+import { reportStructuredSessionCloseFailure } from '../native-chat/structured-session-close-failure-toast'
 import type {
   TerminalTabCloseReason,
   TerminalTabRetirementPlan
@@ -140,10 +140,11 @@ export function closeTerminalTab(
   }
 
   const runtimeEnvironmentId = worktreeRoute.runtimeEnvironmentId
-  const structuredSessionId = structuredTerminalSessionId(
+  const structuredTab = findStructuredTerminalTab(
     state.unifiedTabsByWorktree?.[owningWorktreeId],
     terminalTabId
   )
+  const structuredSessionId = structuredTab?.structuredSessionId ?? null
   if (
     structuredSessionId &&
     options?.reason !== 'pty-exit' &&
@@ -154,18 +155,13 @@ export function closeTerminalTab(
       : ({ kind: 'local' } as const)
     void closeStructuredTerminalSessionWithRetry(target, structuredSessionId).then((closed) => {
       if (!closed) {
-        toast.error(
-          translate(
-            'components.native-chat.structuredSessionCloseFailed',
-            'Could not close this Codex chat'
-          ),
-          {
-            description: translate(
-              'components.native-chat.structuredSessionCloseFailedDescription',
-              'The terminal stayed open so the provider remains recoverable.'
-            )
-          }
-        )
+        reportStructuredSessionCloseFailure({
+          agent: structuredTab?.agentSessionAgent,
+          description: translate(
+            'components.native-chat.structuredSessionCloseFailedDescription',
+            'The terminal stayed open so the provider remains recoverable.'
+          )
+        })
         options?.onCancel?.()
         return
       }

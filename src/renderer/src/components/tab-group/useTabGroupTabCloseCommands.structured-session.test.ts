@@ -76,7 +76,8 @@ vi.mock('@/runtime/runtime-worktree-selector', () => ({
 }))
 
 vi.mock('@/i18n/i18n', () => ({
-  translate: (_key: string, fallback: string) => fallback
+  translate: (_key: string, fallback: string, options?: Record<string, unknown>) =>
+    fallback.replace(/\{\{(\w+)\}\}/g, (_match, name: string) => String(options?.[name] ?? ''))
 }))
 
 vi.mock('sonner', () => ({
@@ -124,6 +125,35 @@ describe('structured agent-session close ordering', () => {
     closeItem(AGENT_TAB.id)
 
     await vi.waitFor(() => expect(order).toEqual(['agent-close', 'tab-close', 'local-remove']))
+  })
+
+  it.each([
+    ['claude', 'Could not close this Claude chat'],
+    ['codex', 'Could not close this Codex chat']
+  ] as const)('names %s in the close-failure toast', async (agent, expected) => {
+    mocks.closeStructuredAgentSession.mockRejectedValueOnce(new Error('owner unavailable'))
+
+    const { closeItem } = useTabGroupTabCloseCommands({
+      worktreeId: 'wt-1',
+      groupTabs: [{ ...AGENT_TAB, agentSessionAgent: agent }]
+    })
+    closeItem(AGENT_TAB.id)
+
+    await vi.waitFor(() => expect(mocks.toastError).toHaveBeenCalled())
+    expect(mocks.toastError.mock.calls[0]?.[0]).toBe(expected)
+  })
+
+  it('leaves the provider unnamed when the tab carries no agent', async () => {
+    mocks.closeStructuredAgentSession.mockRejectedValueOnce(new Error('owner unavailable'))
+
+    const { closeItem } = useTabGroupTabCloseCommands({
+      worktreeId: 'wt-1',
+      groupTabs: [AGENT_TAB]
+    })
+    closeItem(AGENT_TAB.id)
+
+    await vi.waitFor(() => expect(mocks.toastError).toHaveBeenCalled())
+    expect(mocks.toastError.mock.calls[0]?.[0]).toBe('Could not close this chat')
   })
 
   it('keeps the tab available when owner disposal fails, so close can be retried', async () => {

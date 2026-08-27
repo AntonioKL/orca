@@ -16506,7 +16506,8 @@
         "message": "Structured Chat blocks terminal prompts and sends. Orchestration messages remain queued; switch to Terminal, then check the Orca inbox with",
         "command": "orca orchestration check"
       },
-      "structuredSessionCloseFailed": "Could not close this Codex chat",
+      "structuredSessionCloseFailed": "Could not close this {{providerLabel}} chat",
+      "structuredSessionCloseFailedUnknownProvider": "Could not close this chat",
       "structuredSessionLaunchFailed": "Could not open {{providerLabel}} chat",
       "structuredSessionLaunchTerminalAction": "Open terminal agent",
       "structuredSessionCloseFailedDescription": "The terminal stayed open so the provider remains recoverable."

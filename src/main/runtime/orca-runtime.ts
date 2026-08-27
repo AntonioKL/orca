@@ -94,6 +94,7 @@ import {
   agentSessionProviderHandleRoot,
   agentSessionProviderHandlesEqual
 } from '../../shared/agent-session-provider-handle'
+import { agentSessionChatLabel } from '../../shared/agent-session-provider-label'
 import { SESSION_TAB_NOT_FOUND_ERROR } from '../../shared/session-tab-close'
 import {
   agentSessionOwnerBindingsEqual,
@@ -12296,7 +12297,7 @@ export class OrcaRuntimeService {
     const tab: RuntimeMobileSessionAgentTab = {
       type: 'agent-session',
       id,
-      title: input.agent === 'claude' ? 'Claude Chat' : 'Codex Chat',
+      title: agentSessionChatLabel(input.agent),
       sessionId: input.sessionId,
       agent: input.agent,
       isActive: input.activate

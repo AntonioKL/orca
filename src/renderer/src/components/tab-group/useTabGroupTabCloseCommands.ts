@@ -1,5 +1,4 @@
 import { useCallback } from 'react'
-import { toast } from 'sonner'
 import type { Tab } from '../../../../shared/tab-types'
 import { useAppStore } from '../../store'
 import { destroyWorkspaceWebviews } from '../../store/slices/browser-webview-cleanup'
@@ -11,16 +10,13 @@ import { closeBrowserWorkspaceTabOnHosts } from '@/runtime/browser-workspace-tab
 import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
 import { closeStructuredAgentSession } from '@/runtime/structured-agent-session-close'
 import { toRuntimeWorktreeSelector } from '@/runtime/runtime-worktree-selector'
-import { translate } from '@/i18n/i18n'
+import { reportStructuredSessionCloseFailure } from '../native-chat/structured-session-close-failure-toast'
 
-function reportStructuredSessionCloseError(error: unknown): void {
-  toast.error(
-    translate(
-      'components.native-chat.structuredSessionCloseFailed',
-      'Could not close this Codex chat'
-    ),
-    { description: error instanceof Error ? error.message : String(error) }
-  )
+function reportStructuredSessionCloseError(agent: unknown, error: unknown): void {
+  reportStructuredSessionCloseFailure({
+    agent,
+    description: error instanceof Error ? error.message : String(error)
+  })
 }
 
 export function useTabGroupTabCloseCommands({
@@ -139,7 +135,7 @@ export function useTabGroupTabCloseCommands({
               leaveWorktreeIfEmpty()
             }
           })
-          .catch(reportStructuredSessionCloseError)
+          .catch((error) => reportStructuredSessionCloseError(item.agentSessionAgent, error))
         return
       }
       if (item.contentType === 'terminal') {
@@ -205,7 +201,7 @@ export function useTabGroupTabCloseCommands({
               })
             )
             .then(() => closeUnifiedTab(item.id))
-            .catch(reportStructuredSessionCloseError)
+            .catch((error) => reportStructuredSessionCloseError(item.agentSessionAgent, error))
           continue
         }
         if (item.contentType === 'terminal' && isWebRuntimeSessionActive(runtimeEnvironmentId)) {

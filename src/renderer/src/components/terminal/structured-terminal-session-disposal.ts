@@ -5,16 +5,23 @@ import type { TerminalTabCloseReason } from '@/store/slices/terminal-tab-retirem
 
 const STRUCTURED_SESSION_CLOSE_RETRY_DELAYS_MS = [0, 250, 1_000, 3_000] as const
 
-export function structuredTerminalSessionId(
+export function findStructuredTerminalTab(
   unifiedTabs: readonly Tab[] | undefined,
   terminalTabId: string
-): string | null {
+): Tab | null {
   return (
     unifiedTabs?.find(
       (tab) =>
         tab.contentType === 'terminal' && tab.entityId === terminalTabId && tab.viewMode === 'chat'
-    )?.structuredSessionId ?? null
+    ) ?? null
   )
+}
+
+export function structuredTerminalSessionId(
+  unifiedTabs: readonly Tab[] | undefined,
+  terminalTabId: string
+): string | null {
+  return findStructuredTerminalTab(unifiedTabs, terminalTabId)?.structuredSessionId ?? null
 }
 
 export async function closeStructuredTerminalSessionWithRetry(
