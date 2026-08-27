@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { OrcaRuntimeService } from './orca-runtime'
 import { OrchestrationDb } from './orchestration/db'
 import { readRuntimeMetadata } from './runtime-metadata'
-import { longPollClassOf, OrcaRuntimeRpcServer } from './runtime-rpc'
+import { classifyRuntimeLongPoll, OrcaRuntimeRpcServer } from './runtime-rpc'
 import {
   sendRequest,
   openFramedSession,
@@ -14,6 +14,7 @@ import {
   waitFor,
   seedSupervisedAskWorkers
 } from './runtime-rpc-test-harness'
+import { createRootDispatch } from './orchestration/db/root-dispatch-test-fixture'
 
 vi.mock('../git/worktree', () => {
   const worktrees = [
@@ -34,7 +35,7 @@ vi.mock('../git/worktree', () => {
 describe('OrcaRuntimeRpcServer', () => {
   it('classifies worker-start as a keepalive-backed long poll', () => {
     expect(
-      longPollClassOf({
+      classifyRuntimeLongPoll({
         id: 'req_worker_start',
         authToken: 'token',
         method: 'orchestration.workerStart',
@@ -45,7 +46,7 @@ describe('OrcaRuntimeRpcServer', () => {
 
   it('keeps agent-prompt submission sockets alive during verification', () => {
     expect(
-      longPollClassOf({
+      classifyRuntimeLongPoll({
         id: 'req_prompt',
         authToken: 'token',
         method: 'terminal.send',
@@ -53,7 +54,7 @@ describe('OrcaRuntimeRpcServer', () => {
       })
     ).toBe('wait')
     expect(
-      longPollClassOf({
+      classifyRuntimeLongPoll({
         id: 'req_direct',
         authToken: 'token',
         method: 'terminal.send',
@@ -198,7 +199,7 @@ describe('OrcaRuntimeRpcServer', () => {
         coordinatorPaneKey: 'tab_coord:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
       })
       const task = db.createTask({ spec: 'Wait for an answer', runId: run.id })
-      db.createDispatchContext(task.id, 'term_asker', askerPaneKey)
+      createRootDispatch(db, task.id, 'term_asker', askerPaneKey)
       const server = new OrcaRuntimeRpcServer({
         runtime,
         userDataPath,

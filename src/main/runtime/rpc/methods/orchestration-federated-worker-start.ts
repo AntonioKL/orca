@@ -22,6 +22,8 @@ import {
 } from './orchestration-worker-launch-preferences'
 import { validateFederatedWorkerStartPlacement } from './orchestration-worker-start-validation'
 import { resolveFederatedWorkerStartBudgets } from './orchestration-worker-start-budgets'
+import { resolveDispatchCreator } from './orchestration-dispatch-creator'
+import type { RemoteFederatedWorkerStartReceipt } from './orchestration-federated-attach-receipt'
 
 export async function startFederatedWorker(args: {
   params: WorkerStartInput
@@ -98,6 +100,8 @@ export async function startFederatedWorker(args: {
 
   const setupDecision = createsWorktree ? (params.setup ?? 'run') : 'not_applicable'
   const started = db.createStartingWorkerDispatch({
+    creator: resolveDispatchCreator(runtime, params.from),
+    maxDepth: runtime.getNestedWorkerMaxDepth(),
     taskId: task.id,
     retryOf: params.retryOf,
     startOptions: {
@@ -136,6 +140,9 @@ export async function startFederatedWorker(args: {
         dispatchId: started.dispatch.id,
         taskId: task.id,
         taskSpec: task.spec,
+        // Carry the home dispatch depth across the federation boundary so a
+        // remote worker cannot be mistaken for a root when it dispatches again.
+        depth: started.dispatch.depth,
         protocolVersion: federationProtocolVersion,
         worktree,
         name: params.name,
@@ -159,7 +166,7 @@ export async function startFederatedWorker(args: {
       budgets.attachDeadlineMs,
       { orchestrationRequestId: orchestrationMutation.requestId },
       { contractVerified: true }
-    )) as RemoteStartReceipt
+    )) as RemoteFederatedWorkerStartReceipt
     if (remote.dispatchId !== started.dispatch.id) {
       throw new OrchestrationError(
         'resource_server_mismatch',
@@ -251,19 +258,6 @@ export async function startFederatedWorker(args: {
     const worker = db.markWorkerStartUnknown(started.dispatch.id, 'remote_attach', reason)
     return federatedUnknownReceipt(worker, task.id, server.name, requestedLaunch)
   }
-}
-type RemoteStartReceipt = {
-  dispatchId: string
-  state: string
-  runtimeEpoch: string
-  worktreeId?: string
-  terminalHandle?: string
-  setup?: { state: string }
-  launch?: OrchestrationWorkerLaunchReceipt
-  effects?: unknown[]
-  residualResources?: unknown[]
-  failedStage?: string
-  lastError?: string
 }
 
 function isKnownRemoteStartFailure(code: string): boolean {
