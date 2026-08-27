@@ -147,24 +147,17 @@ const WINDOWS_PROCESS_QUERY_TIMEOUT_MS = 3_000
 
 /**
  * Reads that missed their deadline and have not called back yet.
- *
- * Why the wedge is sticky rather than a cooldown: a timed-out call leaves its
- * callback in the vendored module's queue, and that queue drains only when the
- * latched request completes -- which, in the wedge this guards against, never
- * happens. Probing again on a timer bounded the *rate* of new callbacks, not
- * the total: a permanently wedged reader retained one more closure every
- * cooldown for the life of the app. Refusing while the earlier read is still
- * out bounds it at one, and that read's callback finally firing is the only
- * honest evidence the queue drained -- strictly better than a wall-clock guess,
- * because a probe enqueued behind the latch could never have observed recovery
- * anyway. It also keeps the relay's bare addon, which has no queue of its own,
- * from re-entering CreateToolhelp32Snapshot while a call is still running.
- *
- * A set rather than a counter so a test reset, or a callback that arrives after
- * one, can never drive the tally negative and re-open the gate.
+ * Refusing re-entry bounds both vendored callbacks and relay addon workers to
+ * one; read ids keep a late callback from clearing a newer wedge.
  */
 const unreturnedReads = new Set<number>()
 let readSequence = 0
+let nativeReaderEpoch = 0
+
+function resetNativeReaderState(): void {
+  nativeReaderEpoch += 1
+  unreturnedReads.clear()
+}
 
 function readNativeRows(): Promise<WindowsProcessRow[]> {
   const native = moduleLoader()
@@ -188,6 +181,7 @@ function readNativeRows(): Promise<WindowsProcessRow[]> {
     )
   }
   const readId = ++readSequence
+  const readerEpoch = nativeReaderEpoch
   // Why always both flags: each adds an OpenProcess per process (Memory a
   // GetProcessMemoryInfo, CommandLine a PEB read), so asking for less would be
   // cheaper -- 15.9ms p50 versus 30.6ms at 1050 processes. But every read shares
@@ -202,7 +196,10 @@ function readNativeRows(): Promise<WindowsProcessRow[]> {
     let deadline: ReturnType<typeof setTimeout> | undefined
     try {
       deadline = setTimeout(() => {
-        unreturnedReads.add(readId)
+        // Test resets invalidate deadlines owned by the prior injected reader.
+        if (readerEpoch === nativeReaderEpoch) {
+          unreturnedReads.add(readId)
+        }
         reject(new Error('windows process table timed out'))
       }, WINDOWS_PROCESS_QUERY_TIMEOUT_MS)
       deadline.unref?.()
@@ -299,7 +296,7 @@ export function __setWindowsProcessTreeLoaderForTests(
 ): void {
   moduleLoader = loader ?? loadWindowsProcessTree
   cachedModule = undefined
-  unreturnedReads.clear()
+  resetNativeReaderState()
   snapshotReader.reset()
 }
 
@@ -310,7 +307,7 @@ export function __setWindowsProcessTreeRequireForTests(
   requireNative = resolve ?? requireFromMain
   moduleLoader = loadWindowsProcessTree
   cachedModule = undefined
-  unreturnedReads.clear()
+  resetNativeReaderState()
   snapshotReader.reset()
 }
 
@@ -326,5 +323,5 @@ export function __setWindowsProcessTableCimScanForTests(
 export function resetWindowsProcessTableForTests(): void {
   snapshotReader.reset()
   cachedModule = undefined
-  unreturnedReads.clear()
+  resetNativeReaderState()
 }

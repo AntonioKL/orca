@@ -288,6 +288,27 @@ describe('sticky wedge', () => {
     expect(getAllProcesses).toHaveBeenCalledTimes(2)
   })
 
+  it('ignores a pending timeout from before a test reset', async () => {
+    vi.useFakeTimers()
+    const getAllProcesses = vi.fn((_cb: (rows: typeof NATIVE | undefined) => void) => {})
+    __setWindowsProcessTreeLoaderForTests(() => ({
+      ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2 },
+      getAllProcesses
+    }))
+
+    const staleRead = readWindowsProcessTableFresh()
+    const staleAssertion = expect(staleRead).rejects.toThrow(/timed out/)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(getAllProcesses).toHaveBeenCalledTimes(1)
+    resetWindowsProcessTableForTests()
+    await vi.advanceTimersByTimeAsync(3_000)
+    await staleAssertion
+
+    getAllProcesses.mockImplementation((cb) => cb(NATIVE))
+    await expect(readWindowsProcessTableFresh()).resolves.toHaveLength(NATIVE.length)
+    expect(getAllProcesses).toHaveBeenCalledTimes(2)
+  })
+
   it('clears the deadline when the reader throws synchronously', async () => {
     // An orphaned timer would fire later and wedge a reader that had recovered.
     vi.useFakeTimers()
