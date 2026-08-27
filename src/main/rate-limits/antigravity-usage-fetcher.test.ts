@@ -77,7 +77,15 @@ describe('fetchAntigravityRateLimits', () => {
     } as never)
 
     expect(runWslProcess).toHaveBeenCalledWith(
-      expect.objectContaining({ distro: 'Ubuntu', loginPath: 'preferred' })
+      expect.objectContaining({
+        distro: 'Ubuntu',
+        loginPath: 'preferred',
+        terminationBarrier: expect.objectContaining({
+          wrapGuestArgs: expect.any(Function),
+          signal: expect.any(Function),
+          force: expect.any(Function)
+        })
+      })
     )
     expect(limits.status).toBe('ok')
     expect(limits.session?.usedPercent).toBe(90)
@@ -310,7 +318,11 @@ describe('fetchAntigravityRateLimits', () => {
 })
 
 describe('requestAntigravityQuotaSummary', () => {
-  it('rejects and removes its abort listener before destroying an oversized response', async () => {
+  it.each([
+    ['aborted', undefined],
+    ['error', new Error('response stream failed')],
+    ['close', undefined]
+  ] as const)('settles when the response emits %s before end', async (event, error) => {
     const controller = new AbortController()
     const response = Object.assign(new EventEmitter(), {
       statusCode: 200,
@@ -318,6 +330,42 @@ describe('requestAntigravityQuotaSummary', () => {
     }) as unknown as IncomingMessage
     const request = Object.assign(new EventEmitter(), {
       destroy: vi.fn(),
+      end: vi.fn()
+    }) as unknown as ClientRequest
+    const send = vi.fn((_options, onResponse) => {
+      onResponse?.(response)
+      queueMicrotask(() => {
+        response.emit(event, error)
+        if (event === 'aborted') {
+          response.emit('error', new Error('aborted stream error'))
+        }
+      })
+      return request
+    }) as unknown as typeof httpRequest
+
+    const outcome = await Promise.race([
+      requestAntigravityQuotaSummary({ scheme: 'http', port: 61383 }, controller.signal, send).then(
+        () => 'resolved',
+        (failure: unknown) => failure
+      ),
+      new Promise<'pending'>((resolve) => setTimeout(() => resolve('pending'), 50))
+    ])
+
+    expect(outcome).toBeInstanceOf(Error)
+    expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0)
+    for (const responseEvent of ['data', 'end', 'aborted', 'error', 'close']) {
+      expect(getEventListeners(response, responseEvent)).toHaveLength(0)
+    }
+  })
+
+  it('rejects and removes its abort listener before destroying an oversized response', async () => {
+    const controller = new AbortController()
+    const response = Object.assign(new EventEmitter(), {
+      statusCode: 200,
+      setEncoding: vi.fn()
+    }) as unknown as IncomingMessage
+    const request = Object.assign(new EventEmitter(), {
+      destroy: vi.fn(() => response.emit('close')),
       end: vi.fn()
     }) as unknown as ClientRequest
     const send = vi.fn((_options, onResponse) => {
@@ -337,6 +385,9 @@ describe('requestAntigravityQuotaSummary', () => {
     expect(outcome).toEqual(new Error('Antigravity quota response too large'))
     expect(request.destroy).toHaveBeenCalledOnce()
     expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0)
+    for (const event of ['data', 'end', 'aborted', 'error', 'close']) {
+      expect(getEventListeners(response, event)).toHaveLength(0)
+    }
   })
 
   it('removes its abort listener after the request settles', async () => {

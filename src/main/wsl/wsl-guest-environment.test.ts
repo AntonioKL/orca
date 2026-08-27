@@ -1,3 +1,4 @@
+import { getEventListeners } from 'node:events'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const runProcessMock = vi.hoisted(() => vi.fn())
@@ -57,6 +58,69 @@ describe('probing', () => {
     await getWslGuestEnvironment('Ubuntu')
     await getWslGuestEnvironment('Debian')
     expect(runProcessMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('stops the cached wsl.exe probe when its only waiter is canceled', async () => {
+    runProcessMock.mockImplementation(
+      (spec: { signal: AbortSignal }) =>
+        new Promise((resolve) => {
+          spec.signal.addEventListener(
+            'abort',
+            () => resolve({ code: null, signal: null, stdout: '', stderr: '', timedOut: false }),
+            { once: true }
+          )
+        })
+    )
+    const controller = new AbortController()
+    const reason = new Error('refresh canceled')
+    const operation = getWslGuestEnvironment('Ubuntu', 4_000, controller.signal)
+    await vi.waitFor(() => expect(runProcessMock).toHaveBeenCalledOnce())
+
+    controller.abort(reason)
+
+    await expect(operation).rejects.toBe(reason)
+    expect(runProcessMock.mock.calls[0]?.[0]?.signal.aborted).toBe(true)
+    expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0)
+  })
+
+  it('keeps a shared probe alive while another waiter still needs it', async () => {
+    let release!: (value: unknown) => void
+    runProcessMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve
+        })
+    )
+    const first = getWslGuestEnvironment('Ubuntu', 4_000)
+    const controller = new AbortController()
+    const reason = new Error('one refresh canceled')
+    const canceled = getWslGuestEnvironment('Ubuntu', 4_000, controller.signal)
+    controller.abort(reason)
+
+    await expect(canceled).rejects.toBe(reason)
+    expect(runProcessMock.mock.calls[0]?.[0]?.signal.aborted).toBe(false)
+    release({ code: 0, signal: null, stdout: '', stderr: '', timedOut: false })
+    await first
+  })
+
+  it('starts a fresh probe immediately after the prior probe is canceled', async () => {
+    let releaseCanceled!: (value: unknown) => void
+    runProcessMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseCanceled = resolve
+        })
+    )
+    const controller = new AbortController()
+    const canceled = getWslGuestEnvironment('Ubuntu', 4_000, controller.signal)
+    controller.abort(new Error('refresh canceled'))
+    await expect(canceled).rejects.toThrow('refresh canceled')
+
+    respondWithPayload(GOOD)
+    await expect(getWslGuestEnvironment('Ubuntu', 4_000)).resolves.not.toBeNull()
+    expect(runProcessMock).toHaveBeenCalledTimes(2)
+
+    releaseCanceled({ code: null, signal: null, stdout: '', stderr: '', timedOut: false })
   })
 })
 

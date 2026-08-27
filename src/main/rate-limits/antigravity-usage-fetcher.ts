@@ -39,8 +39,38 @@ export const requestAntigravityQuotaSummary = (
   requestOverride?: typeof httpRequest
 ): Promise<QuotaSummaryResponse> =>
   new Promise((resolve, reject) => {
+    let settled = false
+    let cleanupResponseListeners = (): void => {}
+    let cleanupResponseBodyListeners = (): void => {}
+    let req: ReturnType<typeof httpRequest>
+    const cleanupAbortListener = (): void => signal?.removeEventListener('abort', onAbort)
+    const settle = (action: () => void, waitForResponseClose = false): void => {
+      if (settled) {
+        return
+      }
+      settled = true
+      cleanupAbortListener()
+      if (waitForResponseClose) {
+        cleanupResponseBodyListeners()
+      } else {
+        cleanupResponseListeners()
+      }
+      action()
+    }
+    const resolveWithCleanup = (response: QuotaSummaryResponse): void => {
+      settle(() => resolve(response))
+    }
+    const rejectWithCleanup = (error: unknown): void => {
+      settle(() => reject(error))
+    }
+    const rejectBeforeResponseClose = (error: unknown): void => {
+      settle(() => reject(error), true)
+    }
+    const onAbort = (): void => {
+      req.destroy(new Error('aborted'))
+    }
     const send = requestOverride ?? (target.scheme === 'https' ? httpsRequest : httpRequest)
-    const req = send(
+    req = send(
       {
         host: LOOPBACK_HOST,
         port: target.port,
@@ -53,42 +83,56 @@ export const requestAntigravityQuotaSummary = (
       (res) => {
         let body = ''
         let bodyBytes = 0
-        let overflowed = false
         res.setEncoding('utf8')
-        res.on('data', (chunk: string) => {
-          if (overflowed) {
+        const onData = (chunk: string): void => {
+          if (settled) {
             return
           }
           bodyBytes += Buffer.byteLength(chunk, 'utf8')
           if (bodyBytes > MAX_RESPONSE_BYTES) {
-            overflowed = true
-            rejectWithCleanup(new Error('Antigravity quota response too large'))
+            rejectBeforeResponseClose(new Error('Antigravity quota response too large'))
             req.destroy()
             return
           }
           body += chunk
-        })
-        res.on('end', () => {
-          if (overflowed) {
-            rejectWithCleanup(new Error('Antigravity quota response too large'))
+        }
+        const onEnd = (): void => {
+          resolveWithCleanup({ statusCode: res.statusCode ?? 0, body })
+        }
+        const onAborted = (): void => {
+          rejectBeforeResponseClose(new Error('Antigravity quota response was aborted'))
+        }
+        const onError = (error: Error): void => {
+          if (settled) {
+            cleanupResponseListeners()
             return
           }
-          resolveWithCleanup({ statusCode: res.statusCode ?? 0, body })
-        })
+          rejectWithCleanup(error)
+        }
+        const onClose = (): void => {
+          if (settled) {
+            cleanupResponseListeners()
+            return
+          }
+          rejectWithCleanup(new Error('Antigravity quota response closed before completion'))
+        }
+        cleanupResponseBodyListeners = (): void => {
+          res.removeListener('data', onData)
+          res.removeListener('end', onEnd)
+          res.removeListener('aborted', onAborted)
+        }
+        cleanupResponseListeners = (): void => {
+          cleanupResponseBodyListeners()
+          res.removeListener('error', onError)
+          res.removeListener('close', onClose)
+        }
+        res.on('data', onData)
+        res.once('end', onEnd)
+        res.once('aborted', onAborted)
+        res.once('error', onError)
+        res.once('close', onClose)
       }
     )
-    const cleanupAbortListener = (): void => signal?.removeEventListener('abort', onAbort)
-    const resolveWithCleanup = (response: QuotaSummaryResponse): void => {
-      cleanupAbortListener()
-      resolve(response)
-    }
-    const rejectWithCleanup = (error: unknown): void => {
-      cleanupAbortListener()
-      reject(error)
-    }
-    const onAbort = (): void => {
-      req.destroy(new Error('aborted'))
-    }
     req.on('timeout', () => req.destroy(new Error('Antigravity quota request timed out')))
     req.on('error', rejectWithCleanup)
     if (signal?.aborted) {

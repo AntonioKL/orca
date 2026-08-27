@@ -1,16 +1,17 @@
 import { runWslProcess } from '../wsl/wsl-runner'
+import { createWslProcessGroupTermination } from '../git/wsl-process-group-termination'
 
 const MAX_RESPONSE_BYTES = 1024 * 1024
 const MAX_CAPTURE_BYTES = MAX_RESPONSE_BYTES + 64 * 1024
 
-const WSL_PROBE_SCRIPT = String.raw`
+export const ANTIGRAVITY_WSL_PROBE_SCRIPT = String.raw`
 set -u
 log_dir="$HOME/.gemini/antigravity-cli/log"
 if [ ! -d "$log_dir" ]; then
   printf 'ORCA_AGY_NOT_RUNNING'
   exit 0
 fi
-if ! command -v curl >/dev/null 2>&1; then
+if ! command -v curl >/dev/null 2>&1 || ! command -v head >/dev/null 2>&1; then
   printf 'ORCA_AGY_UNVERIFIABLE'
   exit 0
 fi
@@ -19,11 +20,20 @@ if [ -z "$candidates" ]; then
   printf 'ORCA_AGY_NOT_RUNNING'
   exit 0
 fi
-response_file=$(mktemp "\${TMPDIR:-/tmp}/orca-agy-quota.XXXXXX") || {
+response_dir=$(mktemp -d "${'$'}{TMPDIR:-/tmp}/orca-agy-quota.XXXXXX") || {
   printf 'ORCA_AGY_UNVERIFIABLE'
   exit 0
 }
-trap 'rm -f "$response_file"' EXIT HUP INT TERM
+response_file="$response_dir/response"
+overflow_file="$response_dir/overflow"
+status_file="$response_dir/status"
+curl_code_file="$response_dir/curl-code"
+cleanup() {
+  rm -f "$response_file" "$overflow_file" "$status_file" "$curl_code_file"
+  rmdir "$response_dir" 2>/dev/null || true
+}
+trap cleanup EXIT
+trap 'exit 143' HUP INT TERM
 found_live=0
 while IFS= read -r log_file; do
   [ -n "$log_file" ] || continue
@@ -35,26 +45,39 @@ while IFS= read -r log_file; do
   http_port=$(printf '%s\n' "$log_head" | sed -n 's/.*random port at \([0-9][0-9]*\) for HTTP$/\1/p' | sed -n '1p')
   https_port=$(printf '%s\n' "$log_head" | sed -n 's/.*random port at \([0-9][0-9]*\) for HTTPS.*/\1/p' | sed -n '1p')
   for target in "http:$http_port" "https:$https_port"; do
-    scheme=\${target%%:*}
-    port=\${target#*:}
+    scheme=${'$'}{target%%:*}
+    port=${'$'}{target#*:}
     [ -n "$port" ] || continue
     : > "$response_file"
+    : > "$overflow_file"
+    : > "$status_file"
+    : > "$curl_code_file"
     insecure=''
     [ "$scheme" = 'https' ] && insecure='--insecure'
-    status=$(curl --silent --show-error $insecure --connect-timeout 2.5 --max-time 2.5 \
-      --max-filesize 1048576 --output "$response_file" --write-out '%{http_code}' \
-      --header 'content-type: application/json' --header 'connect-protocol-version: 1' \
-      --request POST --data '{}' \
-      "$scheme://127.0.0.1:$port/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary" \
-      2>/dev/null)
-    curl_code=$?
-    if [ "$curl_code" -eq 0 ]; then
-      printf 'ORCA_AGY_RESPONSE %s\n' "$status"
-      cat "$response_file"
+    (
+      curl --silent --show-error $insecure --connect-timeout 2.5 --max-time 2.5 \
+        --output /dev/fd/3 --write-out '%{http_code}' \
+        --header 'content-type: application/json' --header 'connect-protocol-version: 1' \
+        --request POST --data '{}' \
+        "$scheme://127.0.0.1:$port/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary" \
+        3>&1 > "$status_file" 2>/dev/null
+      printf '%s' "$?" > "$curl_code_file"
+    ) | {
+      head -c 1048576 > "$response_file"
+      dd bs=1 count=1 of="$overflow_file" 2>/dev/null
+    }
+    reader_code=$?
+    curl_code=$(cat "$curl_code_file")
+    [ -n "$curl_code" ] || curl_code=1
+    if [ -s "$overflow_file" ] || [ "$curl_code" -eq 63 ]; then
+      printf 'ORCA_AGY_RESPONSE_TOO_LARGE'
       exit 0
     fi
-    if [ "$curl_code" -eq 63 ]; then
-      printf 'ORCA_AGY_RESPONSE_TOO_LARGE'
+    if [ "$curl_code" -eq 0 ] && [ "$reader_code" -eq 0 ]; then
+      status=$(cat "$status_file")
+      case "$status" in [0-9][0-9][0-9]) ;; *) continue ;; esac
+      printf 'ORCA_AGY_RESPONSE %s\n' "$status"
+      cat "$response_file"
       exit 0
     fi
   done
@@ -77,14 +100,16 @@ export async function probeAntigravityQuotaInWsl(
   wslDistro: string | null,
   signal?: AbortSignal
 ): Promise<AntigravityWslProbeResult> {
+  const terminationBarrier = createWslProcessGroupTermination(wslDistro ?? undefined)
   const result = await runWslProcess({
-    script: WSL_PROBE_SCRIPT,
+    script: ANTIGRAVITY_WSL_PROBE_SCRIPT,
     shell: 'sh',
     loginPath: 'preferred',
     ...(wslDistro ? { distro: wslDistro } : {}),
     timeoutMs: 30_000,
     maxOutputBytes: MAX_CAPTURE_BYTES,
-    signal
+    signal,
+    terminationBarrier
   })
   if (signal?.aborted) {
     throw signal.reason
