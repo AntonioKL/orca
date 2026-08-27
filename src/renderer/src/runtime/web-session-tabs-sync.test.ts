@@ -85,6 +85,36 @@ describe('applyWebSessionTabsSnapshot', () => {
     ).toBe(agentTab.id)
   })
 
+  it('labels an untitled mirrored Claude session as Claude chat', () => {
+    const agentTab = {
+      type: 'agent-session' as const,
+      id: 'agent-session:claude-session-1',
+      title: '   ',
+      sessionId: 'claude-session-1',
+      agent: 'claude' as const,
+      isActive: true
+    }
+    const patch = applyWebSessionTabsSnapshot(
+      makeState(),
+      makeSnapshot([agentTab], {
+        activeTabId: agentTab.id,
+        activeTabType: 'agent-session',
+        tabGroups: [
+          {
+            id: 'host-group-1',
+            activeTabId: agentTab.id,
+            tabOrder: [agentTab.id]
+          }
+        ]
+      }),
+      ENV,
+      NOW
+    )
+
+    expect(patch.unifiedTabsByWorktree?.[WT]?.[0]?.label).toBe('Claude Chat')
+    expect(patch.unifiedTabsByWorktree?.[WT]?.[0]?.agentSessionAgent).toBe('claude')
+  })
+
   it('removes a restored structured tab when the host publishes no structured sessions', () => {
     const structuredTab: Tab = {
       id: 'structured-agent-session-session-1',

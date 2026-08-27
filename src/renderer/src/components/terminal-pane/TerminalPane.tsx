@@ -12,7 +12,8 @@ import {
 import { useShallow } from 'zustand/react/shallow'
 import { createPortal } from 'react-dom'
 import type { CSSProperties } from 'react'
-import type { TuiAgent } from '../../../../shared/tui-agent'
+import { isAgentSessionHandleProvider } from '../../../../shared/agent-session-provider-handle'
+import { resolveNativeChatRenderAgent } from './native-chat-render-agent'
 import type { IDisposable } from '@xterm/xterm'
 import { useAppStore } from '../../store'
 import { useLinkRoutingPreferenceDialog } from '@/components/link-routing-preference-dialog'
@@ -528,6 +529,9 @@ function TerminalPane(
       getCachedUnifiedTerminalTabForWorktree(store.unifiedTabsByWorktree, worktreeId, tabId)
         ?.agentSessionAgent
   )
+  const validatedStructuredSessionAgent = isAgentSessionHandleProvider(structuredSessionAgent)
+    ? structuredSessionAgent
+    : null
   const isChatViewMode = useAppStore(
     (store) =>
       getCachedUnifiedTerminalTabForWorktree(store.unifiedTabsByWorktree, worktreeId, tabId)
@@ -639,15 +643,18 @@ function TerminalPane(
         // foreground hook has not republished agent status after returning to TUI.
         resolvedAgent: detectedAgent
           ? null
-          : ((structuredSessionAgent as TuiAgent | null) ?? resolveTitleAgentForLeaf(leafId)),
+          : structuredSessionId
+            ? validatedStructuredSessionAgent
+            : resolveTitleAgentForLeaf(leafId),
         nativeChatTranscriptIsLocalReadable
       })
     },
     [
       tabAgentTypeByLeaf,
       nativeChatEnabled,
-      structuredSessionAgent,
+      validatedStructuredSessionAgent,
       nativeChatTranscriptIsLocalReadable,
+      structuredSessionId,
       terminalTab?.launchAgent,
       getNativeChatLeafIds,
       getTabWideAgentHintLeafId,
@@ -2981,7 +2988,11 @@ function TerminalPane(
     leafId: chatPane?.leafId ?? null,
     leafIds: getNativeChatLeafIds()
   })
-  const structuredChatAgent = structuredSessionAgent ?? chatPaneResolvedAgent ?? chatPaneLaunchAgent
+  const structuredChatAgent = resolveNativeChatRenderAgent({
+    structuredSessionId,
+    structuredSessionAgent,
+    terminalAgent: chatPaneResolvedAgent ?? chatPaneLaunchAgent
+  })
   const structuredChatTarget = useMemo(() => ({ kind: 'local' as const }), [])
   // A split can host different agents, so continuation resolves the specific leaf before using tab-wide hints.
   const resolveAgentForLeaf = (leafId: string | null): string | null => {
@@ -3136,17 +3147,19 @@ function TerminalPane(
       {effectiveChatViewMode && chatPane?.container
         ? createPortal(
             <div className="native-chat-pane-shell absolute inset-0 z-10 flex min-h-0 min-w-0 bg-background">
-              {structuredSessionId && structuredChatAgent ? (
-                <NativeChatView
-                  mode="structured"
-                  tabId={unifiedTabId ?? tabId}
-                  sessionId={structuredSessionId}
-                  agent={structuredChatAgent}
-                  isVisible={isRendererVisible}
-                  target={structuredChatTarget}
-                  allowFileUriLinks
-                  orchestrationDispatchStatus={chatPaneDispatchStatus}
-                />
+              {structuredSessionId ? (
+                structuredChatAgent ? (
+                  <NativeChatView
+                    mode="structured"
+                    tabId={unifiedTabId ?? tabId}
+                    sessionId={structuredSessionId}
+                    agent={structuredChatAgent}
+                    isVisible={isRendererVisible}
+                    target={structuredChatTarget}
+                    allowFileUriLinks
+                    orchestrationDispatchStatus={chatPaneDispatchStatus}
+                  />
+                ) : null
               ) : (
                 <NativeChatView
                   terminalTabId={tabId}

@@ -13,6 +13,7 @@ import {
 import { agentEntryCompletionAt } from '../../../shared/agent-completion-time'
 import { normalizeTurnCompletedAtField } from '../../../shared/agent-status-field-normalization'
 import { agentProviderSessionsEqual } from '../../../shared/agent-session-resume'
+import { agentSessionChatLabel } from '../../../shared/agent-session-provider-label'
 import type {
   RuntimeMobileSessionTabsResult,
   RuntimeMobileSessionAgentTab,
@@ -997,7 +998,7 @@ function buildMirroredAgentTabs(
         worktreeId: snapshot.worktree,
         contentType: 'agent-session',
         agentSessionAgent: tab.agent,
-        label: tab.title.trim() || 'Codex Chat',
+        label: tab.title.trim() || agentSessionChatLabel(tab.agent),
         customLabel: null,
         color: tab.color !== undefined ? tab.color : (existing?.color ?? null),
         sortOrder: sortOffset + index,
