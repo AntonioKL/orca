@@ -343,6 +343,54 @@ describe('pty input write queue', () => {
     }
   })
 
+  it('keeps xterm OSC 11 ahead of the following CPR at the PTY host', async () => {
+    const term = new Terminal({ cols: 80, rows: 24, allowProposedApi: true })
+    term.options.theme = { background: '#00131a' }
+    const ptyWrites: string[] = []
+    const generatedReplies: string[] = []
+    const ingress = new PtyStartupIngress({
+      ownerBackend: 'posix-pty',
+      write: (data) => ptyWrites.push(data),
+      onEmission: () => {}
+    })
+    const queue = createPtyInputWriteQueue({
+      isWritable: () => true,
+      write: (_id, data) => {
+        if (ingress.answerLiveQueryReply(data)) {
+          return
+        }
+        ptyWrites.push(data)
+      },
+      yieldBetweenWrites: () => Promise.resolve()
+    })
+    const enqueueReply = (data: string): boolean => {
+      generatedReplies.push(data)
+      return queue.enqueueQueryReply('pty-1', data)
+    }
+    const capabilityReplies = installTerminalCapabilityReplyHandlers({
+      terminal: term as never,
+      parser: term.parser,
+      sendInput: enqueueReply,
+      isReplaying: () => false
+    })
+    const xtermReplies = term.onData(enqueueReply)
+
+    try {
+      await writeTerminal(term, '\x1b[7;1H\x1b]11;?\x1b\\\x1b[6n')
+      await queue.waitForDrain()
+
+      const oscReply = '\x1b]11;rgb:0000/1313/1a1a\x1b\\'
+      const cprReply = '\x1b[7;1R'
+      expect(generatedReplies).toEqual([oscReply, cprReply])
+      expect(ptyWrites.join('')).toBe(oscReply + cprReply)
+    } finally {
+      xtermReplies.dispose()
+      capabilityReplies.dispose()
+      ingress.drainAndClose()
+      term.dispose()
+    }
+  })
+
   it('rejects one reply larger than the total reply retention budget', async () => {
     const { writes, queue } = createRecordingQueue()
     const prefix = '\x1b]10;'
