@@ -164,7 +164,26 @@ describe('terminal accessory repeat', () => {
     await expect(send('down')).resolves.toBe(false)
 
     expect(sendToTerminal).toHaveBeenCalledTimes(1)
-    expect(sendToTerminal).toHaveBeenCalledWith('down', 'terminal-a')
+    expect(sendToTerminal).toHaveBeenCalledWith('down', 'terminal-a', expect.any(Function))
+  })
+
+  it('provides a live target guard for async send preflight', async () => {
+    let targetCurrent = true
+    const preflight = deferred()
+    const send = createTerminalAccessoryRepeatSender(
+      'terminal-a',
+      () => targetCurrent,
+      async (_input, _targetHandle, isDeliveryTargetCurrent) => {
+        await preflight.promise
+        return isDeliveryTargetCurrent()
+      }
+    )
+
+    const result = send('down')
+    targetCurrent = false
+    preflight.resolve()
+
+    await expect(result).resolves.toBe(false)
   })
 
   it('drops a queued send when its press-time connection is no longer current', async () => {

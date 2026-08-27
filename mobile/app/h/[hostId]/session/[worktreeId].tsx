@@ -2999,12 +2999,16 @@ export default function SessionScreen() {
 
   async function handleAccessoryKey(
     input: ReturnType<typeof createTerminalLiveAccessoryInput>,
-    targetHandle = activeHandleRef.current
+    targetHandle = activeHandleRef.current,
+    isDeliveryTargetCurrent: () => boolean = () => targetHandle === activeHandleRef.current
   ) {
-    if (!client || !targetHandle || targetHandle !== activeHandleRef.current || !canSend) {
+    if (!client || !targetHandle || !isDeliveryTargetCurrent() || !canSend) {
       return false
     }
     const accessoryCommit = await handleLiveInputAccessoryBytes(input)
+    if (!isDeliveryTargetCurrent()) {
+      return false
+    }
     if (accessoryCommit.kind !== 'allow-raw') {
       return accessoryCommit.kind === 'handled'
     }
@@ -3419,17 +3423,19 @@ export default function SessionScreen() {
       // Why: the controller queue sits outside RPC, so fence pre-outage taps from a later connection.
       const targetClient = clientRef.current
       const targetConnectedAt = targetClient?.getLastConnectedAt() ?? null
+      const isDeliveryTargetCurrent = (targetHandle: string) =>
+        activeHandleRef.current === targetHandle &&
+        targetClient !== null &&
+        clientRef.current === targetClient &&
+        connStateRef.current === 'connected' &&
+        targetClient.getLastConnectedAt() === targetConnectedAt
       accessoryRepeatRef.current.start(
         input,
         createTerminalAccessoryRepeatSender(
           activeHandleRef.current,
-          (targetHandle) =>
-            activeHandleRef.current === targetHandle &&
-            targetClient !== null &&
-            clientRef.current === targetClient &&
-            connStateRef.current === 'connected' &&
-            targetClient.getLastConnectedAt() === targetConnectedAt,
-          (nextInput, targetHandle) => handleAccessoryKeyRef.current(nextInput, targetHandle)
+          isDeliveryTargetCurrent,
+          (nextInput, targetHandle, isTargetCurrent) =>
+            handleAccessoryKeyRef.current(nextInput, targetHandle, isTargetCurrent)
         )
       )
     },
