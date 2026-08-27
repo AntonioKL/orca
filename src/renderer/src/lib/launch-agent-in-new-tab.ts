@@ -29,6 +29,7 @@ import type { LaunchSource } from '../../../shared/telemetry-events'
 import { getConnectionIdFromState } from '@/lib/connection-context'
 import { resolveInitialNativeChatSessionOptions } from '@/components/native-chat/native-chat-launch-session-options'
 import { seedNativeChatAppliedSessionOptions } from '@/components/native-chat/native-chat-session-option-cache'
+import { warnIfConfiguredClaudeProxy } from '@/lib/claude-launch-proxy-notice'
 
 export type LaunchAgentInNewTabArgs = {
   agent: TuiAgent
@@ -171,6 +172,11 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
         ? { promptDeliveryResult: webHostDelivery }
         : {})
     }
+  }
+
+  // The app-level proxy is injected into local PTYs (including WSL), not SSH or paired web hosts.
+  if (!isRemote) {
+    warnIfConfiguredClaudeProxy(agent, store.settings)
   }
 
   // Why: queue startup BEFORE TerminalPane mounts — it snapshots pendingStartupByTabId in useState on first render.
