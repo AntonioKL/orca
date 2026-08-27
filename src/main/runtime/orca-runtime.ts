@@ -495,6 +495,7 @@ import type {
   LinearTeamStatesResult,
   LinearStatusSetResult
 } from '../../shared/linear/agent-access'
+import { runtimeTerminalDegradation } from './native-terminal-availability'
 import {
   BROWSER_UNAVAILABLE_ERROR_CODE,
   browserUnavailableMessage,
@@ -2906,6 +2907,7 @@ const AGENT_HOOK_RUNTIME_ENV_KEYS = [
   'ORCA_AGENT_HOOK_TOKEN',
   'ORCA_AGENT_HOOK_ENV',
   'ORCA_AGENT_HOOK_VERSION',
+  'ORCA_AGENT_HOOK_TRANSPORT',
   'ORCA_AGENT_HOOK_ENDPOINT'
 ] as const
 
@@ -6557,6 +6559,12 @@ export class OrcaRuntimeService {
           }
         ]
       : []
+    // Why appended rather than merged into the ternary: PTY loss and browser loss are
+    // independent, and a host can be degraded on both at once.
+    const terminalDegradation = runtimeTerminalDegradation()
+    if (terminalDegradation) {
+      degradations.push(terminalDegradation)
+    }
     return {
       runtimeId: this.runtimeId,
       rendererGraphEpoch: this.rendererGraphEpoch,

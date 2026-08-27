@@ -2,6 +2,10 @@ import type { AgentStatusOrchestrationContext } from './agent-status-types'
 import type { RemoteServerUpdateSupport } from './remote-server-update'
 import type { RemoteRuntimeSharedConnectionDiagnostics } from './remote-runtime-shared-control-types'
 import type { RuntimeCapability } from './protocol-version'
+import type {
+  RuntimeBrowserUnavailableReason,
+  RuntimeDegradation
+} from './runtime-capability-degradation'
 import type { TabGroupLayoutNode } from './tab-types'
 import type { TerminalPaneLayoutNode } from './terminal-tab-types'
 import type {
@@ -29,22 +33,6 @@ export type RuntimeBrowserDriverState = RuntimeTerminalDriverState
 
 export const BROWSER_UNAVAILABLE_ERROR_CODE = 'browser_unavailable' as const
 
-/**
- * Why a host declined browser automation. Members are opaque to clients: new ones
- * ship without a protocol bump, so render `message` and never switch exhaustively
- * (same contract as RuntimeTerminalWaitBlockedReason).
- */
-export type RuntimeBrowserUnavailableReason =
-  | 'unconfigured'
-  | 'driver_missing'
-  | 'executable_not_found'
-  | 'executable_not_executable'
-  | 'electron_start_failed'
-  | 'chromium_start_failed'
-  | 'provider_unhealthy'
-  | 'desktop_window_unavailable'
-  | 'unknown'
-
 // Why: one sentence per cause, each naming the thing the operator can change. The host
 // renders these so an older client still shows an accurate reason it cannot decode.
 const BROWSER_UNAVAILABLE_MESSAGES: Record<RuntimeBrowserUnavailableReason, string> = {
@@ -70,19 +58,6 @@ export function browserUnavailableMessage(
 ): string {
   const base = BROWSER_UNAVAILABLE_MESSAGES[reason]
   return detail ? `${base} (${detail})` : base
-}
-
-export type RuntimeDegradation = {
-  code: typeof BROWSER_UNAVAILABLE_ERROR_CODE
-  capability: 'browser.headless.v1'
-  message: string
-  /**
-   * Machine-readable cause. Optional for mixed-version peers: absence means the host
-   * predates structured causes, NOT that the cause is 'unconfigured'.
-   */
-  reason?: RuntimeBrowserUnavailableReason
-  /** Underlying error text when the host has one. Diagnostic only; never load-bearing. */
-  detail?: string
 }
 
 export type RuntimeStatus = {
