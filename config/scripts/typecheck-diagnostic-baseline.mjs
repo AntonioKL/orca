@@ -1,9 +1,10 @@
 import { spawnSync } from 'node:child_process'
+import { realpathSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const repoRoot = fileURLToPath(new URL('../..', import.meta.url))
+const repoRoot = realpathSync(fileURLToPath(new URL('../..', import.meta.url)))
 
 function parseArgs(argv) {
   const options = { write: false }
@@ -95,10 +96,12 @@ function collectDiagnostics(projectPath, tscPath) {
   if (result.signal) {
     throw new Error(`TypeScript exited with signal ${result.signal}`)
   }
-  const output = `${result.stdout ?? ''}${result.stderr ?? ''}`
-  const diagnostics = parseDiagnostics(output)
+  const stdout = result.stdout ?? ''
+  const diagnostics = parseDiagnostics(stdout)
   if (result.status !== 0 && diagnostics.length === 0) {
-    throw new Error(`TypeScript exited ${result.status} without parseable diagnostics:\n${output}`)
+    throw new Error(
+      `TypeScript exited ${result.status} without parseable diagnostics:\nstdout:\n${stdout}\nstderr:\n${result.stderr ?? ''}`
+    )
   }
   return diagnostics
 }

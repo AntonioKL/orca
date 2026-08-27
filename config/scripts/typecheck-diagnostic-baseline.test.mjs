@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -32,11 +32,25 @@ function createFixture(source) {
   }
 }
 
-function runBaseline(paths, extraArgs = []) {
+function runBaseline(paths, extraArgs = [], spawnOptions = {}) {
   return spawnSync(
     process.execPath,
-    [script, '--project', paths.project, '--baseline', paths.baseline, '--tsc', tsc, ...extraArgs],
-    { cwd: repoRoot, encoding: 'utf8' }
+    [
+      ...(spawnOptions.nodeArgs ?? []),
+      spawnOptions.script ?? script,
+      '--project',
+      paths.project,
+      '--baseline',
+      paths.baseline,
+      '--tsc',
+      paths.tsc ?? tsc,
+      ...extraArgs
+    ],
+    {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      env: { ...process.env, ...spawnOptions.env }
+    }
   )
 }
 
@@ -89,6 +103,46 @@ describe('typecheck diagnostic baseline', () => {
 
     writeFileSync(paths.source, "\nconst value: number = 'bad'\n")
     expect(runBaseline(paths).status).toBe(0)
+  })
+
+  it('matches recorded diagnostics through a symlinked checkout path', () => {
+    fixtureDir = mkdtempSync(join(tmpdir(), 'orca-typecheck-symlink-'))
+    const linkedCheckout = join(fixtureDir, 'checkout')
+    symlinkSync(repoRoot, linkedCheckout, process.platform === 'win32' ? 'junction' : 'dir')
+
+    const result = runBaseline(
+      {
+        project: 'config/tsconfig.e2e.json',
+        baseline: 'config/typecheck-e2e-diagnostics.json'
+      },
+      [],
+      {
+        nodeArgs: ['--preserve-symlinks-main'],
+        script: join(linkedCheckout, 'config/scripts/typecheck-diagnostic-baseline.mjs')
+      }
+    )
+
+    expect(result.status).toBe(0)
+    expect(result.stdout).toContain('240 known diagnostics, no drift')
+  })
+
+  it('ignores stderr warnings while parsing compiler diagnostics', () => {
+    const paths = createFixture("const value: number = 'bad'\n")
+    paths.tsc = join(fixtureDir, 'fake-tsc.mjs')
+    writeFileSync(
+      paths.tsc,
+      [
+        "if (process.env.INJECT_TSC_WARNING) process.stderr.write('pnpm warning: unsupported engine\\n')",
+        "process.stdout.write(\"source.ts(1,7): error TS2322: Type 'string' is not assignable to type 'number'.\\n\")",
+        'process.exitCode = 1'
+      ].join('\n')
+    )
+    expect(runBaseline(paths, ['--write']).status).toBe(0)
+
+    const result = runBaseline(paths, [], { env: { INJECT_TSC_WARNING: '1' } })
+
+    expect(result.status).toBe(0)
+    expect(result.stdout).toContain('1 known diagnostics, no drift')
   })
 
   it('refuses to regenerate a baseline that grows from the PR base', () => {
