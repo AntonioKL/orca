@@ -1,26 +1,32 @@
 import { NATIVE_CHAT_SUPPORTED_AGENT_LIST } from '../../../../shared/native-chat-agent-support'
 import { AgentIcon, getAgentLabel } from '@/lib/agent-catalog'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { translate } from '@/i18n/i18n'
-import { Badge } from '../ui/badge'
 
 /** Names the agents so unsupported-agent terminal fallback does not look broken. */
 export function NativeChatSupportedAgents(): React.JSX.Element {
   return (
-    <div className="flex flex-wrap items-center gap-1.5 pt-1">
-      <span className="text-xs text-muted-foreground">
-        {translate('auto.components.settings.NativeChatSupportedAgents.label', 'Supported agents:')}
-      </span>
-      {NATIVE_CHAT_SUPPORTED_AGENT_LIST.map((agent) => (
-        <Badge
-          key={agent}
-          data-agent={agent}
-          variant="outline"
-          className="border-border/60 bg-muted/20"
-        >
-          <AgentIcon agent={agent} size={12} />
-          {getAgentLabel(agent)}
-        </Badge>
-      ))}
-    </div>
+    <TooltipProvider delayDuration={250}>
+      <div className="flex flex-wrap items-center gap-1.5 pt-1 text-xs text-muted-foreground">
+        <span>
+          {translate(
+            'auto.components.settings.NativeChatSupportedAgents.label',
+            'Supported agents:'
+          )}
+        </span>
+        {NATIVE_CHAT_SUPPORTED_AGENT_LIST.map((agent) => (
+          <Tooltip key={agent}>
+            <TooltipTrigger asChild>
+              <span data-agent={agent} aria-label={getAgentLabel(agent)}>
+                <AgentIcon agent={agent} size={13} />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={6}>
+              {getAgentLabel(agent)}
+            </TooltipContent>
+          </Tooltip>
+        ))}
+      </div>
+    </TooltipProvider>
   )
 }

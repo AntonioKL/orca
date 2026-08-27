@@ -24,9 +24,9 @@ function getRenderedChips(): { agent: string; label: string }[] {
   const markup = renderToStaticMarkup(<NativeChatSupportedAgents />)
   const container = document.createElement('div')
   container.innerHTML = markup
-  return Array.from(container.querySelectorAll('[data-slot="badge"][data-agent]')).map((node) => ({
+  return Array.from(container.querySelectorAll('[data-agent]')).map((node) => ({
     agent: node.getAttribute('data-agent') ?? '',
-    label: node.textContent?.trim() ?? ''
+    label: node.getAttribute('aria-label') ?? ''
   }))
 }
 
@@ -48,7 +48,7 @@ describe('NativeChatSupportedAgents', () => {
     expect(getRenderedChips().map((chip) => chip.agent)).toEqual(EXPECTED_SUPPORTED_AGENTS)
   })
 
-  it('labels each chip with the catalog agent name', () => {
+  it('gives each icon an accessible catalog agent name', () => {
     for (const chip of getRenderedChips()) {
       const entry = getAgentCatalog().find((candidate) => candidate.id === chip.agent)
       expect(chip.label).toBe(entry?.label)
