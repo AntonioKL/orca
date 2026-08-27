@@ -189,6 +189,12 @@ const CODEX_ITEM_CLASSIFICATIONS: Record<string, ProviderFrameClassification> = 
   contextCompaction: 'status-chrome'
 }
 
+const CLAUDE_CONTROL_FRAME_CLASSIFICATIONS: Record<string, ProviderFrameClassification> = {
+  'control_request:can_use_tool': 'timeline-substantive',
+  'control_request:request_user_dialog': 'timeline-substantive',
+  control_cancel_request: 'timeline-substantive'
+}
+
 function notificationKind(kind: string): string {
   return kind.startsWith('notification:') ? kind.slice('notification:'.length) : kind
 }
@@ -215,7 +221,10 @@ function catalogClassification(
     ]
   }
   if (provider === 'claude') {
-    return PROVIDER_FRAME_CLASSIFICATIONS.claude[kind as ClaudeStreamJsonFrameKind]
+    return (
+      PROVIDER_FRAME_CLASSIFICATIONS.claude[kind as ClaudeStreamJsonFrameKind] ??
+      CLAUDE_CONTROL_FRAME_CLASSIFICATIONS[kind]
+    )
   }
   return undefined
 }
