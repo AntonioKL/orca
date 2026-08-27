@@ -1,4 +1,5 @@
 import type { CodexAppServerConnection } from './codex-app-server-connection'
+import { decodeAgentSessionQuestionOptionId } from '../native-chat/agent-session-wire/agent-session-question-option-id'
 
 // Codex asks for approvals and tool input by sending JSON-RPC REQUESTS back to
 // Orca, and the turn blocks until each one is answered. The journal answers them
@@ -27,29 +28,6 @@ export type CodexPendingPrompt = {
   /** One entry per question for a user-input request; empty for an approval. */
   questionIds: readonly string[]
   answers: Map<string, string>
-}
-
-/** A user-input request can carry several questions but takes ONE reply, so an
- *  option id has to name the question it answers. */
-export function encodeCodexQuestionOptionId(questionId: string, answer: string): string {
-  return `${encodeURIComponent(questionId)}:${encodeURIComponent(answer)}`
-}
-
-export function decodeCodexQuestionOptionId(
-  optionId: string
-): { questionId: string; answer: string } | null {
-  const separator = optionId.indexOf(':')
-  if (separator <= 0) {
-    return null
-  }
-  try {
-    return {
-      questionId: decodeURIComponent(optionId.slice(0, separator)),
-      answer: decodeURIComponent(optionId.slice(separator + 1))
-    }
-  } catch {
-    return null
-  }
 }
 
 function readString(params: unknown, key: string): string | null {
@@ -169,7 +147,7 @@ export function applyCodexPromptAnswer(
     }
     return { decision: optionId }
   }
-  const decoded = decodeCodexQuestionOptionId(optionId)
+  const decoded = decodeAgentSessionQuestionOptionId(optionId)
   const questionId =
     decoded?.questionId ?? (prompt.questionIds.length === 1 ? prompt.questionIds[0] : null)
   const answer = decoded?.answer ?? optionId

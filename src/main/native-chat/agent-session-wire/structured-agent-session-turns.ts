@@ -12,7 +12,6 @@ import type {
   AgentJournalResolution
 } from '../../../shared/agent-session-journal-types'
 import { parseAgentJournalItemKey } from '../../../shared/agent-session-journal-item-key'
-import { decodeCodexQuestionOptionId } from '../../codex/codex-structured-prompt-replies'
 import type {
   AgentSessionCancelResult,
   AgentSessionOptionResult,
@@ -26,6 +25,7 @@ import type {
   StructuredAgentSessionAdapter
 } from './structured-agent-session-adapter'
 import { isAgentSessionOptionRejectedError } from './structured-agent-session-option-error'
+import { decodeAgentSessionQuestionOptionId } from './agent-session-question-option-id'
 
 export type AgentSessionTurnContext = {
   sessionId: string
@@ -213,7 +213,7 @@ export async function performPrompt(
       }
     }
   }
-  const freeText = decodeCodexQuestionOptionId(input.optionId)
+  const freeText = decodeAgentSessionQuestionOptionId(input.optionId)
   const acceptsFreeText =
     item.body.kind === 'question' &&
     prompt.freeTextQuestionId !== undefined &&

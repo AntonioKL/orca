@@ -76,7 +76,60 @@ describe('Claude structured text dispatch', () => {
     })
   })
 
-  it('leaves image dispatch explicitly unavailable for slice 2', async () => {
+  it('sends a local attachment as a base64 image Claude accepts', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'orca-claude-image-'))
+    try {
+      const path = join(directory, 'shot.png')
+      const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47])
+      await writeFile(path, bytes)
+      const session = sessionFor()
+      const body = userMessage([
+        { type: 'text', text: 'look' },
+        { type: 'image-ref', path }
+      ])
+
+      const dispatched = dispatchClaudeTurn(session, { clientMessageId: 'client-1', body }, 100)
+      await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
+      resolveClaudeReplayWaiter(session, {
+        type: 'user',
+        parent_tool_use_id: null,
+        session_id: 'provider-session',
+        uuid: 'replayed-uuid'
+      })
+
+      await expect(dispatched).resolves.toEqual({
+        state: 'accepted',
+        providerIdentity: {
+          provider: 'claude',
+          sessionId: 'provider-session',
+          uuid: 'replayed-uuid'
+        }
+      })
+      expect(session.connection.send).toHaveBeenCalledWith({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'look' },
+            {
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: 'image/png',
+                data: bytes.toString('base64')
+              }
+            }
+          ]
+        },
+        parent_tool_use_id: null,
+        session_id: 'provider-session'
+      })
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a message carrying more images than one turn may inline', async () => {
     const session = sessionFor()
     const body = userMessage(
       Array.from({ length: 21 }, (_, index) => ({
@@ -89,7 +142,7 @@ describe('Claude structured text dispatch', () => {
       dispatchClaudeTurn(session, { clientMessageId: 'client-1', body }, 1)
     ).resolves.toEqual({
       state: 'rejected',
-      reason: 'Claude structured image dispatch is not available yet'
+      reason: 'Claude accepts at most 20 images per message; this one has 21'
     })
     expect(session.connection.send).not.toHaveBeenCalled()
   })
@@ -111,7 +164,7 @@ describe('Claude structured text dispatch', () => {
         dispatchClaudeTurn(session, { clientMessageId: 'client-1', body }, 1)
       ).resolves.toEqual({
         state: 'rejected',
-        reason: 'Claude structured image dispatch is not available yet'
+        reason: 'Claude accepts up to 20971520 bytes of images per message'
       })
       expect(session.connection.send).not.toHaveBeenCalled()
     } finally {
@@ -131,7 +184,7 @@ describe('Claude structured text dispatch', () => {
         dispatchClaudeTurn(session, { clientMessageId: 'client-1', body }, 1)
       ).resolves.toEqual({
         state: 'rejected',
-        reason: 'Claude structured image dispatch is not available yet'
+        reason: `Claude accepts images up to 5242880 bytes; ${path} is 5242881`
       })
       expect(session.connection.send).not.toHaveBeenCalled()
     } finally {

@@ -12,13 +12,13 @@ import type {
 } from './claude-stream-json-connection'
 import { ClaudeControlRequestError } from './claude-stream-json-connection'
 import { CLAUDE_SPAWN_TOKEN_ENV } from './claude-structured-owner-identity'
-import { encodeClaudeQuestionOptionId } from './claude-structured-prompt-replies'
 import {
   CLAUDE_STRUCTURED_INIT_TIMEOUT_MS,
   ClaudeStructuredSessionAdapter,
   type ClaudeStructuredLaunch,
   type ClaudeStructuredSessionEvent
 } from './claude-structured-session-adapter'
+import { encodeAgentSessionQuestionOptionId } from '../native-chat/agent-session-wire/agent-session-question-option-id'
 
 const PROVIDER_SESSION_ID = '819cf9f8-e43c-4ad7-b50f-54aa158a726a'
 
@@ -637,7 +637,7 @@ describe('ClaudeStructuredSessionAdapter prompts', () => {
       sessionId: 'session-1',
       itemId: 'journal-q1',
       kind: 'question',
-      optionId: encodeClaudeQuestionOptionId('Library?', 'Luxon'),
+      optionId: encodeAgentSessionQuestionOptionId('Library?', 'Luxon'),
       fence: 7
     })
     expect(claude.connections[0].replies).toEqual([])
@@ -645,7 +645,7 @@ describe('ClaudeStructuredSessionAdapter prompts', () => {
       sessionId: 'session-1',
       itemId: 'journal-q2',
       kind: 'question',
-      optionId: encodeClaudeQuestionOptionId('Ship now?', 'Yes'),
+      optionId: encodeAgentSessionQuestionOptionId('Ship now?', 'Yes'),
       fence: 7
     })
     expect(claude.connections[0].replies[0]).toMatchObject({

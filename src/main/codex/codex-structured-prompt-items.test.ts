@@ -7,9 +7,9 @@ import {
 } from './codex-structured-prompt-items'
 import {
   CODEX_COMMAND_APPROVAL_METHOD,
-  CODEX_FILE_CHANGE_APPROVAL_METHOD,
-  encodeCodexQuestionOptionId
+  CODEX_FILE_CHANGE_APPROVAL_METHOD
 } from './codex-structured-prompt-replies'
+import { encodeAgentSessionQuestionOptionId } from '../native-chat/agent-session-wire/agent-session-question-option-id'
 
 const THREAD_ID = 'thread-abc'
 const CODEX_ITEM_ID = 'item-4'
@@ -126,8 +126,8 @@ describe('codex question items', () => {
     const items = codexQuestionItems({ threadId: THREAD_ID, promptKey: CODEX_ITEM_ID, params })
 
     expect(items[0]?.body.options).toEqual([
-      { id: encodeCodexQuestionOptionId('q1', 'main'), label: 'main' },
-      { id: encodeCodexQuestionOptionId('q1', 'release/1.0'), label: 'release/1.0' }
+      { id: encodeAgentSessionQuestionOptionId('q1', 'main'), label: 'main' },
+      { id: encodeAgentSessionQuestionOptionId('q1', 'release/1.0'), label: 'release/1.0' }
     ])
     expect(items[0]?.body.options[1]?.id).toBe('q1:release%2F1.0')
   })

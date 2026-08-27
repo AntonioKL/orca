@@ -1,11 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import { applyCodexPromptAnswer, CodexPromptRegistry } from './codex-structured-prompt-replies'
 import {
-  applyCodexPromptAnswer,
-  CodexPromptRegistry,
-  decodeCodexQuestionOptionId,
-  encodeCodexQuestionOptionId
-} from './codex-structured-prompt-replies'
-
+  decodeAgentSessionQuestionOptionId,
+  encodeAgentSessionQuestionOptionId
+} from '../native-chat/agent-session-wire/agent-session-question-option-id'
 function userInputRequest(questionIds: string[]): {
   id: number
   method: string
@@ -25,16 +23,16 @@ function userInputRequest(questionIds: string[]): {
 
 describe('codex question option ids', () => {
   it('round-trips a question id that itself contains the separator', () => {
-    const optionId = encodeCodexQuestionOptionId('scope:write', 'yes / no')
+    const optionId = encodeAgentSessionQuestionOptionId('scope:write', 'yes / no')
 
-    expect(decodeCodexQuestionOptionId(optionId)).toEqual({
+    expect(decodeAgentSessionQuestionOptionId(optionId)).toEqual({
       questionId: 'scope:write',
       answer: 'yes / no'
     })
   })
 
   it('reads nothing from an id with no separator', () => {
-    expect(decodeCodexQuestionOptionId('accept')).toBeNull()
+    expect(decodeAgentSessionQuestionOptionId('accept')).toBeNull()
   })
 })
 
@@ -122,7 +120,7 @@ describe('applyCodexPromptAnswer', () => {
     expect(() =>
       applyCodexPromptAnswer(
         many as NonNullable<typeof many>,
-        encodeCodexQuestionOptionId('q3', 'sure')
+        encodeAgentSessionQuestionOptionId('q3', 'sure')
       )
     ).toThrow('does not name a question')
   })
@@ -132,9 +130,11 @@ describe('applyCodexPromptAnswer', () => {
     const single = registry.register(userInputRequest(['q1']))
     const prompt = single as NonNullable<typeof single>
 
-    applyCodexPromptAnswer(prompt, encodeCodexQuestionOptionId('q1', 'first'))
+    applyCodexPromptAnswer(prompt, encodeAgentSessionQuestionOptionId('q1', 'first'))
 
-    expect(applyCodexPromptAnswer(prompt, encodeCodexQuestionOptionId('q1', 'second'))).toEqual({
+    expect(
+      applyCodexPromptAnswer(prompt, encodeAgentSessionQuestionOptionId('q1', 'second'))
+    ).toEqual({
       answers: { q1: { answers: ['second'] } }
     })
   })

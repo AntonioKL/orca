@@ -8,10 +8,9 @@ import {
   CODEX_APPROVAL_DECISIONS,
   CODEX_COMMAND_APPROVAL_METHOD,
   CODEX_FILE_CHANGE_APPROVAL_METHOD,
-  encodeCodexQuestionOptionId,
   type CodexApprovalDecision
 } from './codex-structured-prompt-replies'
-
+import { encodeAgentSessionQuestionOptionId } from '../native-chat/agent-session-wire/agent-session-question-option-id'
 // Codex prompt requests → durable journal items.
 //
 // Codex blocks the turn on these, but the answer may arrive minutes later from
@@ -165,7 +164,7 @@ function questionOptions(
     if (label !== null && option.isOther !== true) {
       // The option id has to name its question: Codex's reply is a map keyed by
       // question id, and the client only ever hands back an option id.
-      mapped.push({ id: encodeCodexQuestionOptionId(questionId, label), label })
+      mapped.push({ id: encodeAgentSessionQuestionOptionId(questionId, label), label })
     }
   }
   return mapped

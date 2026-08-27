@@ -1,4 +1,5 @@
 import type { ClaudeControlRequest } from './claude-stream-json-connection'
+import { decodeAgentSessionQuestionOptionId } from '../native-chat/agent-session-wire/agent-session-question-option-id'
 
 export const CLAUDE_APPROVAL_DECISIONS = ['allow', 'allowForSession', 'deny', 'cancel'] as const
 export type ClaudeApprovalDecision = (typeof CLAUDE_APPROVAL_DECISIONS)[number]
@@ -40,7 +41,7 @@ function questionIdFromAddress(prompt: ClaudePendingPrompt, address: string): st
 }
 
 function questionAnswer(prompt: ClaudePendingPrompt, questionId: string, optionId: string): string {
-  const decoded = decodeClaudeQuestionOptionId(optionId)
+  const decoded = decodeAgentSessionQuestionOptionId(optionId)
   if (!decoded) {
     return optionId
   }
@@ -70,27 +71,6 @@ function questionAnswer(prompt: ClaudePendingPrompt, questionId: string, optionI
 
 function questionId(question: Record<string, unknown>, index: number): string {
   return readString(question.question) ?? readString(question.header) ?? `question-${index + 1}`
-}
-
-export function encodeClaudeQuestionOptionId(questionId: string, answer: string): string {
-  return `${encodeURIComponent(questionId)}:${encodeURIComponent(answer)}`
-}
-
-export function decodeClaudeQuestionOptionId(
-  optionId: string
-): { questionId: string; answer: string } | null {
-  const separator = optionId.indexOf(':')
-  if (separator <= 0) {
-    return null
-  }
-  try {
-    return {
-      questionId: decodeURIComponent(optionId.slice(0, separator)),
-      answer: decodeURIComponent(optionId.slice(separator + 1))
-    }
-  } catch {
-    return null
-  }
 }
 
 export class ClaudePromptRegistry {
@@ -194,7 +174,7 @@ function questionResponse(
   optionId: string,
   boundQuestionId?: string
 ): Record<string, unknown> | null {
-  const decoded = decodeClaudeQuestionOptionId(optionId)
+  const decoded = decodeAgentSessionQuestionOptionId(optionId)
   const decodedQuestionId = decoded
     ? (questionIdFromAddress(prompt, decoded.questionId) ??
       (prompt.questionIds.includes(decoded.questionId) ? decoded.questionId : null))

@@ -12,13 +12,13 @@ import type {
 } from './codex-app-server-connection'
 import type { StructuredAgentSessionEventSink } from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
 import { CODEX_SPAWN_TOKEN_ENV } from './codex-structured-owner-identity'
-import { encodeCodexQuestionOptionId } from './codex-structured-prompt-replies'
 import {
   CodexStructuredSessionAdapter,
   type CodexStructuredLaunch,
   type CodexStructuredSessionAdapterDeps,
   type CodexStructuredSessionEvent
 } from './codex-structured-session-adapter'
+import { encodeAgentSessionQuestionOptionId } from '../native-chat/agent-session-wire/agent-session-question-option-id'
 
 const THREAD_ID = 'thread-abc'
 
@@ -695,7 +695,7 @@ describe('CodexStructuredSessionAdapter prompts', () => {
       sessionId: 'session-1',
       itemId: 'codex-item-2',
       kind: 'question',
-      optionId: encodeCodexQuestionOptionId('q1', 'yes'),
+      optionId: encodeAgentSessionQuestionOptionId('q1', 'yes'),
       fence: 7
     })
     expect(codex.connections[0].replies).toEqual([])
@@ -704,7 +704,7 @@ describe('CodexStructuredSessionAdapter prompts', () => {
       sessionId: 'session-1',
       itemId: 'codex-item-2',
       kind: 'question',
-      optionId: encodeCodexQuestionOptionId('q2', 'no'),
+      optionId: encodeAgentSessionQuestionOptionId('q2', 'no'),
       fence: 7
     })
 
