@@ -189,6 +189,8 @@ export class WebSocketTransport implements RpcTransport {
       host: this.host,
       port: this.port,
       staticRoot: this.staticRoot,
+      tlsCert: this.tlsCert,
+      tlsKey: this.tlsKey,
       preAuthTimeoutMs: this.preAuthTimeoutMs,
       heartbeat: this.heartbeat,
       callbacks: {

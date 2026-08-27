@@ -24,6 +24,7 @@ type BunRuntime = {
   serve(options: {
     hostname: string
     port: number
+    tls?: { cert: string; key: string }
     ['fetch'](request: Request, server: BunServer): Response | Promise<Response> | undefined
     websocket: {
       data: Record<string, never>
@@ -119,6 +120,8 @@ export class BunWebSocketTransport {
       host: string
       port: number
       staticRoot?: string
+      tlsCert?: string
+      tlsKey?: string
       preAuthTimeoutMs: number
       heartbeat: RemoteRuntimeServerHeartbeat
       callbacks: BunWebSocketTransportCallbacks
@@ -144,6 +147,9 @@ export class BunWebSocketTransport {
     this.server = runtime.serve({
       hostname: this.options.host,
       port: this.options.port,
+      ...(this.options.tlsCert && this.options.tlsKey
+        ? { tls: { cert: this.options.tlsCert, key: this.options.tlsKey } }
+        : {}),
       fetch: (request, server) => {
         if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') {
           return this.options.staticRoot
