@@ -243,6 +243,8 @@ export type RuntimeTerminalCreate = {
   tabId?: string
   paneKey?: string | null
   ptyId?: string | null
+  /** Opaque process identity behind a reusable PTY id; absence is unknown. */
+  incarnationId?: PtyIncarnationId
   worktreeId: string
   title: string | null
   executionHostId?: ExecutionHostId
@@ -264,6 +266,8 @@ export type RuntimeTerminalResolvePane = {
   tabId: string
   leafId: string
   ptyId: string | null
+  /** Opaque process identity behind a reusable PTY id; absence is unknown. */
+  incarnationId?: PtyIncarnationId
   connected?: boolean
   worktreeId?: string
   executionHostId?: ExecutionHostId

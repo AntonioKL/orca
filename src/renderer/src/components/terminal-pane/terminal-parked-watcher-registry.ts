@@ -10,9 +10,12 @@
 import { discardPreHandlerPtyState, hasPreHandlerPtyExit } from './pty-pre-handler-buffer'
 import { parseRemoteRuntimePtyId } from '../../../../shared/remote-runtime-pty-id'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../../shared/constants'
+import type { PtyIncarnationId } from '../../../../shared/pty-incarnation'
 
 export type ParkedTerminalPaneCapture = {
   ptyId: string | null
+  /** Process identity carried across the mounted-to-parked handoff. */
+  incarnationId?: PtyIncarnationId | null
   /** PaneManager numeric pane id the live pane used for runtime titles. */
   paneId: number
   /** Stable terminal-layout leaf UUID (paneKey attribution). */

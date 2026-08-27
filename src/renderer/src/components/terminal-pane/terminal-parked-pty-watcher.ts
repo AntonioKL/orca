@@ -119,6 +119,7 @@ export function startParkedPtyWatcher(args: {
   const initialTitle = state.runtimePaneTitlesByTabId[tab.id]?.[pane.paneId]
   const disposeWatcher = startParkedTerminalByteWatcher({
     ptyId,
+    ...(pane.incarnationId ? { incarnationId: pane.incarnationId } : {}),
     tabId: tab.id,
     worktreeId,
     leafId: pane.leafId,

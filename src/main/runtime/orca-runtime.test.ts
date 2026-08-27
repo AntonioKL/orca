@@ -10471,6 +10471,37 @@ describe('OrcaRuntimeService', () => {
       expect(batches.flatMap((batch) => batch.facts)).not.toContainEqual({ kind: 'agent-exited' })
     })
 
+    it('confirms a host-certified SSH exit that races the foreground read', async () => {
+      const { runtime, batches } = createSideEffectRuntime()
+      runtime.registerPty('pty-1', TEST_WORKTREE_ID, 'conn-1')
+      syncSinglePty(runtime)
+      runtime.onPtySpawned('pty-1', 'inc-ssh-exit', { awaitsRegistration: false })
+      runtime.ingestSyntheticTitleFrame('pty-1', '\x1b]0;Codex ready\x07')
+      let resolveForeground!: (process: string) => void
+      const foregroundRead = new Promise<string>((resolve) => {
+        resolveForeground = resolve
+      })
+      const getForegroundProcess = vi.fn(() => foregroundRead)
+      runtime.setPtyController({
+        write: () => true,
+        kill: () => true,
+        getForegroundProcess
+      })
+
+      runtime.onPtyData('pty-1', '\x1b]0;bichir\x07', 100)
+      await vi.waitFor(() => expect(getForegroundProcess).toHaveBeenCalledOnce())
+      runtime.onPtyExit('pty-1', -1, 'inc-ssh-exit', { hostExitConfirmed: true })
+      resolveForeground('zsh')
+
+      await vi.waitFor(() =>
+        expect(batches.flatMap((batch) => batch.facts)).toContainEqual({
+          kind: 'agent-exited',
+          executionHostConfirmed: true,
+          incarnationId: 'inc-ssh-exit'
+        })
+      )
+    })
+
     it('still confirms a local agent exit if the PTY disconnects during the foreground read', async () => {
       const { runtime, batches } = createSideEffectRuntime()
       runtime.registerPty('pty-1', TEST_WORKTREE_ID)
@@ -15549,7 +15580,7 @@ describe('OrcaRuntimeService', () => {
   })
 
   it('adopts renderer pane identity for remote runtime terminal creates', async () => {
-    const spawn = vi.fn().mockResolvedValue({ id: 'pty-bg' })
+    const spawn = vi.fn().mockResolvedValue({ id: 'pty-bg', incarnationId: 'inc-remote-create' })
     const runtime = new OrcaRuntimeService(store)
     const tabId = 'tab-remote-runtime'
     const leafId = '11111111-1111-4111-8111-111111111111'
@@ -15560,7 +15591,7 @@ describe('OrcaRuntimeService', () => {
       getForegroundProcess: async () => null
     })
 
-    await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+    const terminal = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
       focus: false,
       tabId,
       leafId,
@@ -15574,6 +15605,7 @@ describe('OrcaRuntimeService', () => {
       (spawn.mock.calls[0]?.[0] as { env?: Record<string, string> } | undefined)?.env ?? {}
     expect(spawnedEnv.ORCA_TAB_ID).toBe(tabId)
     expect(spawnedEnv.ORCA_PANE_KEY).toBe(`${tabId}:${leafId}`)
+    expect(terminal.incarnationId).toBe('inc-remote-create')
   })
 
   it('does not adopt web mirror ids as host terminal ids', async () => {

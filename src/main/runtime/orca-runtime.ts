@@ -1560,6 +1560,8 @@ type RuntimePtyWorktreeRecord = {
   launchAgent: TuiAgent | null
   foregroundAgent: TuiAgent | null
   connected: boolean
+  /** Host-certified exit survives connected=false until pending title reads settle. */
+  hostExitConfirmed: boolean
   disconnectedAt: number | null
   lastExitCode: number | null
   lastExitCause: TerminalExitCause | null
@@ -11259,6 +11261,7 @@ export class OrcaRuntimeService {
     this.spawnPublishedPtys.add(ptyId)
     const pty = this.getOrCreatePtyWorktreeRecord(ptyId)
     if (pty) {
+      pty.hostExitConfirmed = false
       if (incarnationId) {
         pty.incarnationId = incarnationId
       }
@@ -11303,6 +11306,7 @@ export class OrcaRuntimeService {
       ...(binding && paneKey ? { tabId: binding.tabId, paneKey } : {}),
       ...(binding?.incarnationId ? { incarnationId: binding.incarnationId } : {})
     })
+    pty.hostExitConfirmed = false
     const agentLaunchAuthority = binding?.agentLaunchAuthority
     if (
       agentLaunchAuthority &&
@@ -15917,6 +15921,9 @@ export class OrcaRuntimeService {
     this.remoteDesktopViewerRevisions.delete(ptyId)
     this.disposeHeadlessTerminal(ptyId)
     if (pty) {
+      if (options?.hostExitConfirmed === true) {
+        pty.hostExitConfirmed = true
+      }
       pty.connected = false
       pty.runtimeSessionOwned = false
       this.setPairedRendererSessionOwnership(pty.ptyId, false)
@@ -18953,6 +18960,7 @@ export class OrcaRuntimeService {
       tabId: parsed?.tabId ?? record?.tabId ?? '',
       leafId: parsed?.leafId ?? record?.leafId ?? '',
       ptyId: record?.ptyId ?? null,
+      ...(pty?.incarnationId ? { incarnationId: pty.incarnationId } : {}),
       connected: pty?.connected === true,
       ...(worktreeId ? { worktreeId } : {}),
       ...this.getPtyExecutionHostMetadata(record?.ptyId ?? pty?.ptyId ?? null)
@@ -19003,6 +19011,7 @@ export class OrcaRuntimeService {
       tabId: parsed.tabId,
       leafId: parsed.leafId,
       ptyId: terminal.ptyId ?? null,
+      ...(terminal.incarnationId ? { incarnationId: terminal.incarnationId } : {}),
       worktreeId: expectedWorktreeId
     }))
     this.terminalPaneRecoveryByIdentity.set(recoveryKey, recovery)
@@ -19667,7 +19676,7 @@ export class OrcaRuntimeService {
     if (this.getPtyLivenessVerdict(ptyId)?.status === 'unverifiable') {
       return true
     }
-    return Boolean(pty?.connectionId && !pty.connected)
+    return Boolean(pty?.connectionId && !pty.connected && !pty.hostExitConfirmed)
   }
 
   private confirmPtyAgentExit(ptyId: string): void {
@@ -29131,6 +29140,7 @@ export class OrcaRuntimeService {
           tabId,
           paneKey,
           ptyId: result.id,
+          ...(result.incarnationId ? { incarnationId: result.incarnationId } : {}),
           worktreeId: workspace.id,
           title: pty?.title ?? launchOpts.title ?? null,
           ...this.getPtyExecutionHostMetadata(result.id),
@@ -29212,12 +29222,15 @@ export class OrcaRuntimeService {
     // populates this.leaves may not have arrived yet. Wait for the leaf to
     // appear so we can return a valid handle the caller can use right away.
     const handle = await this.waitForTerminalHandle(reply.tabId)
+    const ptyId = this.handles.get(handle)?.ptyId ?? null
+    const incarnationId = ptyId ? (this.ptysById.get(ptyId)?.incarnationId ?? null) : null
     return {
       handle,
       tabId: reply.tabId,
       worktreeId: worktreeId ?? '',
       title: reply.title,
-      ...this.getPtyExecutionHostMetadata(this.handles.get(handle)?.ptyId ?? null),
+      ...(incarnationId ? { incarnationId } : {}),
+      ...this.getPtyExecutionHostMetadata(ptyId),
       surface: 'visible'
     }
   }
@@ -29301,7 +29314,8 @@ export class OrcaRuntimeService {
     this.adoptControllerTerminalHandle(session.id, terminalHandle)
     const pty = this.recordPtyWorktree(session.id, worktreeId, {
       connected: true,
-      title: session.title
+      title: session.title,
+      ...(session.incarnationId ? { incarnationId: session.incarnationId } : {})
     })
     const adoptedHandle = this.issuePtyHandle(pty)
     if (adoptedHandle !== terminalHandle) {
@@ -29310,6 +29324,7 @@ export class OrcaRuntimeService {
     return {
       handle: adoptedHandle,
       ptyId: session.id,
+      ...(session.incarnationId ? { incarnationId: session.incarnationId } : {}),
       worktreeId,
       title: session.title || null,
       surface: 'background'
@@ -33182,6 +33197,7 @@ export class OrcaRuntimeService {
         launchAgent: null,
         foregroundAgent: null,
         connected: state.connected ?? true,
+        hostExitConfirmed: false,
         disconnectedAt: state.connected === false ? Date.now() : null,
         lastExitCode: null,
         lastExitCause: null,
