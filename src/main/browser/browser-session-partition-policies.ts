@@ -57,10 +57,16 @@ function resolvePermissionNoticeUrl(
 
 /** `route` hands the item to the owning page's download flow; `deny` cancels it before it starts. */
 export type BrowserPartitionDownloadPolicy = 'route' | 'deny'
+export type BrowserPartitionPermissionPolicy = 'browser' | 'deny'
+
+type BrowserPartitionPolicyOptions = {
+  downloads?: BrowserPartitionDownloadPolicy
+  permissions?: BrowserPartitionPermissionPolicy
+}
 
 export function installBrowserSessionPartitionPolicies(
   profile: BrowserSessionProfile,
-  options?: { downloads?: BrowserPartitionDownloadPolicy }
+  options?: BrowserPartitionPolicyOptions
 ): void {
   const { partition } = profile
   const sess = session.fromPartition(partition)
@@ -75,7 +81,12 @@ export function installBrowserSessionPartitionPolicies(
     sess.setUserAgent(cleanUA)
     setupClientHintsOverride(sess, cleanUA)
   }
+  const denyPermissions = options?.permissions === 'deny'
   sess.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    if (denyPermissions) {
+      callback(false)
+      return
+    }
     // Why: defer media to macOS TCC; denying at the session layer throws NotAllowedError even after the user granted Camera/Mic to the OS.
     if (permission === 'media') {
       // Capture before async handling; opaque frames cannot be attributed to a named site.
@@ -117,6 +128,9 @@ export function installBrowserSessionPartitionPolicies(
     callback(allowed)
   })
   sess.setPermissionCheckHandler((_webContents, permission, _origin, details) => {
+    if (denyPermissions) {
+      return false
+    }
     if (permission === 'media') {
       return hasSystemMediaAccess(details?.mediaType)
     }
@@ -125,7 +139,11 @@ export function installBrowserSessionPartitionPolicies(
     }
     return isAutoGrantedBrowserSessionPermission(permission)
   })
-  installBrowserWebAuthnAccessHandlers(sess)
+  if (denyPermissions) {
+    sess.setDevicePermissionHandler(() => false)
+  } else {
+    installBrowserWebAuthnAccessHandlers(sess)
+  }
   sess.setDisplayMediaRequestHandler((_request, callback) => {
     callback({ video: undefined, audio: undefined })
   })

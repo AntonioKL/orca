@@ -20,6 +20,7 @@ type FakeSession = {
   setUserAgent: ReturnType<typeof vi.fn>
   setPermissionRequestHandler: ReturnType<typeof vi.fn>
   setPermissionCheckHandler: ReturnType<typeof vi.fn>
+  setDevicePermissionHandler: ReturnType<typeof vi.fn>
   setDisplayMediaRequestHandler: ReturnType<typeof vi.fn>
 }
 
@@ -47,6 +48,7 @@ function fakeSession(): FakeSession {
     setUserAgent: vi.fn(),
     setPermissionRequestHandler: vi.fn(),
     setPermissionCheckHandler: vi.fn(),
+    setDevicePermissionHandler: vi.fn(),
     setDisplayMediaRequestHandler: vi.fn()
   }
 }
@@ -94,7 +96,7 @@ vi.mock('./browser-webauthn-access', () => ({
 
 type PartitionPolicyInstaller = (
   profile: BrowserSessionProfile,
-  options?: { downloads?: 'route' | 'deny' }
+  options?: { downloads?: 'route' | 'deny'; permissions?: 'browser' | 'deny' }
 ) => void
 
 // Why imported per test rather than at the top: the installer remembers which partitions it has
@@ -181,5 +183,37 @@ describe('partition download policy', () => {
     expect(fireWillDownload('orca-doc-preview').cancelled).toBe(true)
     expect(fireWillDownload('persist:browsing-1').cancelled).toBe(false)
     expect(mocks.handleGuestWillDownload).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('partition permission policy', () => {
+  it('denies browser and device permissions on a partition that asks for the deny', async () => {
+    const install = await loadInstaller()
+    install(profileFor('orca-doc-preview'), { permissions: 'deny' })
+
+    const sess = sessionsByPartition.get('orca-doc-preview')
+    const requestHandler = sess?.setPermissionRequestHandler.mock.calls[0]?.[0] as (
+      webContents: { id: number },
+      permission: string,
+      callback: (allowed: boolean) => void,
+      details?: object
+    ) => void
+    const checkHandler = sess?.setPermissionCheckHandler.mock.calls[0]?.[0] as (
+      webContents: { id: number },
+      permission: string,
+      origin: string,
+      details?: object
+    ) => boolean
+    const deviceHandler = sess?.setDevicePermissionHandler.mock.calls[0]?.[0] as (
+      details: object
+    ) => boolean
+
+    for (const permission of ['media', 'clipboard-read', 'notifications']) {
+      let allowed: boolean | null = null
+      requestHandler({ id: 42 }, permission, (decision) => (allowed = decision), {})
+      expect(allowed).toBe(false)
+      expect(checkHandler({ id: 42 }, permission, 'orca-preview://grant', {})).toBe(false)
+    }
+    expect(deviceHandler({})).toBe(false)
   })
 })

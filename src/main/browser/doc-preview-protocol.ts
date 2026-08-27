@@ -124,8 +124,7 @@ export function installDocPreviewProtocolHandler(): void {
   previewSession.webRequest.onBeforeRequest((details, callback) => {
     callback({ cancel: !isAllowedDocPreviewRequestUrl(details.url) })
   })
-  // Why: preview guests are webviews like any other, so they inherit the same deny-by-default
-  // permission, display-media and user-agent policy every browser partition gets.
+  // Why: agent-authored previews must not inherit the grants needed by user-opened browser pages.
   installBrowserSessionPartitionPolicies(
     {
       id: DOC_PREVIEW_PARTITION,
@@ -139,6 +138,6 @@ export function installDocPreviewProtocolHandler(): void {
     // page to attribute the file to, and a previewed document is not one. Routed here it would
     // reserve a name in this desktop's Downloads folder and write remote-authored bytes into it
     // with nothing in the UI naming the tab that asked, and no prompt in front of it.
-    { downloads: 'deny' }
+    { downloads: 'deny', permissions: 'deny' }
   )
 }

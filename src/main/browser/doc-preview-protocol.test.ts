@@ -261,8 +261,8 @@ describe('installDocPreviewProtocolHandler', () => {
     expect(cancelled(`orca-preview://${'a'.repeat(32)}/index.html`)).toBe(false)
   })
 
-  // Why: preview guests are webviews like any other, so they must not skip the deny-by-default
-  // permission and display-media policy every browser partition gets.
+  // Why: preview guests need the shared session policy installer even though they deny more than
+  // user-opened browser pages.
   it('applies the shared browser partition policies to the preview session', () => {
     installDocPreviewProtocolHandler()
 
@@ -272,14 +272,12 @@ describe('installDocPreviewProtocolHandler', () => {
     )
   })
 
-  // Why downloads and nothing else: the browser download flow attributes a file to the page that
-  // asked for it, and a previewed document is no page. Routed, it would write remote-authored bytes
-  // into this desktop's Downloads folder with no prompt and no tab to name as the source.
-  it('asks for downloads to be denied on the preview partition', () => {
+  it('asks for downloads and runtime permissions to be denied on the preview partition', () => {
     installDocPreviewProtocolHandler()
 
     expect(mocks.installBrowserSessionPartitionPolicies).toHaveBeenCalledWith(expect.anything(), {
-      downloads: 'deny'
+      downloads: 'deny',
+      permissions: 'deny'
     })
   })
 })
