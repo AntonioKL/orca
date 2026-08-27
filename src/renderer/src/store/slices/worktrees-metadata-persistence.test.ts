@@ -429,4 +429,40 @@ describe('worktree remote runtime mutations', () => {
       timeoutMs: 15_000
     })
   })
+  it('persists an explicit bulk host update to only the selected owner', async () => {
+    const store = createTestStore()
+    const worktreeId = 'repo1::/same/path'
+    const local = makeWorktree({ id: worktreeId, repoId: 'repo1', hostId: 'local' })
+    const remote = makeWorktree({
+      id: worktreeId,
+      repoId: 'repo1',
+      hostId: 'runtime:env-1'
+    })
+    runtimeEnvironmentCall.mockResolvedValue({
+      id: 'rpc-set-selected-owner',
+      ok: true,
+      result: { worktree: { ...remote, comment: 'selected' } },
+      _meta: { runtimeId: 'runtime-remote' }
+    })
+    store.setState({ worktreesByRepo: { repo1: [local, remote] } } as Partial<AppState>)
+
+    await store
+      .getState()
+      .updateWorktreesMeta([
+        { worktreeId, updates: { comment: 'selected' }, executionHostId: 'runtime:env-1' }
+      ])
+
+    expect(store.getState().worktreesByRepo.repo1).toEqual([
+      expect.objectContaining({ hostId: 'local', comment: '' }),
+      expect.objectContaining({ hostId: 'runtime:env-1', comment: 'selected' })
+    ])
+    expect(mockApi.worktrees.updateMeta).not.toHaveBeenCalled()
+    expect(runtimeEnvironmentCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selector: 'env-1',
+        method: 'worktree.set',
+        params: expect.objectContaining({ comment: 'selected' })
+      })
+    )
+  })
 })

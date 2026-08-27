@@ -107,13 +107,13 @@ describe('host-qualified worktree metadata', () => {
     writeDataFile(persisted)
 
     const store = createStore()
-    expect(store.getWorktreeMetaForHost(worktreeId, 'local')?.displayName).toBe('Second')
-    expect(
-      store.setWorktreeMetaForHost(worktreeId, 'local', { comment: 'no longer ambiguous' }).comment
-    ).toBe('no longer ambiguous')
+    expect(() =>
+      store.setWorktreeMetaForHost(worktreeId, 'local', { comment: 'ambiguous write' })
+    ).toThrow('Worktree identity is ambiguous for this host and locator.')
 
-    // The repair is durable: the alias resolves to one instance after a reload.
-    store.flush()
+    const repaired = createStore()
+    expect(repaired.getWorktreeMetaForHost(worktreeId, 'local')?.displayName).toBe('Second')
+    repaired.flush()
     expect((readDataFile() as PersistedState).worktreeIdentityAliases?.[alias]).toEqual([secondKey])
   })
 

@@ -9,6 +9,7 @@ import {
 } from './worktree-manual-order'
 import type { WorktreeMeta } from '../../../../shared/worktree/meta-types'
 import type { WorkspaceStatus, Worktree } from '../../../../shared/worktree/types'
+import type { WorktreeMetaBatchUpdate } from '../../store/slices/worktree-helpers'
 import type { WorktreeManualOrderCatalog } from './worktree-manual-order-catalog'
 
 type LaneView = { items: readonly Worktree[] }
@@ -65,7 +66,7 @@ export function useWorkspaceKanbanWorktreeActions(args: {
   )
   const moveWorktreesToStatus = useCallback(
     (worktreeIds: readonly string[], status: WorkspaceStatus) => {
-      const updates = new Map<string, Partial<WorktreeMeta>>()
+      const updates: WorktreeMetaBatchUpdate[] = []
       const changedIds: string[] = []
       for (const worktreeId of worktreeIds) {
         const current = args.worktreeById.get(worktreeId)
@@ -73,7 +74,11 @@ export function useWorkspaceKanbanWorktreeActions(args: {
           continue
         }
         changedIds.push(worktreeId)
-        updates.set(worktreeId, { workspaceStatus: status })
+        updates.push({
+          worktreeId,
+          updates: { workspaceStatus: status },
+          executionHostId: current.hostId
+        })
       }
       if (changedIds.length === 0) {
         return
@@ -91,7 +96,7 @@ export function useWorkspaceKanbanWorktreeActions(args: {
       dropIndex: number
       writeManualOrder?: boolean
     }) => {
-      const updates = new Map<string, Partial<WorktreeMeta>>()
+      const updates: WorktreeMetaBatchUpdate[] = []
       const writeManualOrder =
         drop.writeManualOrder ?? shouldWriteDropManualOrder(drop.worktreeIds, drop.status)
       const order = writeManualOrder
@@ -110,23 +115,27 @@ export function useWorkspaceKanbanWorktreeActions(args: {
         if (!current) {
           continue
         }
+        const next: Partial<WorktreeMeta> = {}
         if (getWorkspaceStatus(current, args.workspaceStatuses) !== drop.status) {
-          updates.set(worktreeId, { workspaceStatus: drop.status })
+          next.workspaceStatus = drop.status
+        }
+        updates.push({ worktreeId, updates: next, executionHostId: current.hostId })
+      }
+      for (const [worktreeId, manualOrder] of order.updates) {
+        const entry = updates.find((candidate) => candidate.worktreeId === worktreeId)
+        if (entry) {
+          entry.updates = { ...entry.updates, ...manualOrder }
         }
       }
-      if (writeManualOrder) {
-        for (const [worktreeId, manualOrder] of order.updates) {
-          updates.set(worktreeId, { ...updates.get(worktreeId), ...manualOrder })
-        }
-      }
-      if (updates.size === 0) {
+      const changed = updates.filter((entry) => Object.keys(entry.updates).length > 0)
+      if (changed.length === 0) {
         return
       }
       if (writeManualOrder && order.changed) {
         args.setSortBy('manual')
       }
       recordInteraction()
-      void args.updateWorktreesMeta(updates)
+      void args.updateWorktreesMeta(changed)
       args.maybeSyncTaskStatuses(drop.worktreeIds, drop.status)
     },
     [args, shouldWriteDropManualOrder]
@@ -171,14 +180,14 @@ export function useWorkspaceKanbanWorktreeActions(args: {
   )
   const pinWorktrees = useCallback(
     (worktreeIds: readonly string[]) => {
-      const updates = new Map<string, { isPinned: true }>()
+      const updates: WorktreeMetaBatchUpdate[] = []
       for (const worktreeId of worktreeIds) {
         const current = args.worktreeById.get(worktreeId)
         if (current && !current.isPinned) {
-          updates.set(worktreeId, { isPinned: true })
+          updates.push({ worktreeId, updates: { isPinned: true }, executionHostId: current.hostId })
         }
       }
-      if (updates.size > 0) {
+      if (updates.length > 0) {
         recordInteraction()
         void args.updateWorktreesMeta(updates)
       }

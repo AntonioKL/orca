@@ -27,6 +27,7 @@ import {
   settingsForWorktreeOwner,
   trySettingsForWorktreeOwner
 } from '../listing/worktree-owner-settings'
+import { findRepoForHost } from '../../repo-host-identity'
 
 export function createUpdateWorktreeMeta(
   set: WorktreeSliceSet,
@@ -34,8 +35,9 @@ export function createUpdateWorktreeMeta(
 ): WorktreeSlice['updateWorktreeMeta'] {
   return async (worktreeId, updates, options) => {
     const shouldApplyUpdate = options?.shouldApply
-    const executionHostId = options?.executionHostId
-    const existingWorktree = findKnownWorktreeById(get(), worktreeId, executionHostId)
+    const requestedHostId = options?.executionHostId
+    const existingWorktree = findKnownWorktreeById(get(), worktreeId, requestedHostId)
+    const executionHostId = requestedHostId ?? existingWorktree?.hostId
     if (shouldApplyUpdate && !shouldApplyUpdate(existingWorktree)) {
       return { ok: true }
     }
@@ -79,7 +81,7 @@ export function createUpdateWorktreeMeta(
       normalizedUpdates.pushTarget === undefined &&
       existingWorktree &&
       !existingWorktree.pushTarget
-        ? trySettingsForWorktreeOwner(get(), worktreeId)
+        ? trySettingsForWorktreeOwner(get(), worktreeId, executionHostId)
         : null
     const resolvedPushTarget =
       pushTargetOwnerSettings && existingWorktree && linkedPrForPushTarget !== null
@@ -102,7 +104,7 @@ export function createUpdateWorktreeMeta(
       resolvedPushTarget === undefined &&
       existingHostedReviewPushTargetLookup !== null &&
       existingHostedReviewPushTargetLookup.key !== nextHostedReviewPushTargetLookup?.key
-    const worktreeForUpdate = get().getKnownWorktreeById(worktreeId)
+    const worktreeForUpdate = get().getKnownWorktreeById(worktreeId, executionHostId)
     if (shouldApplyUpdate && !shouldApplyUpdate(worktreeForUpdate)) {
       return { ok: true }
     }
@@ -117,7 +119,10 @@ export function createUpdateWorktreeMeta(
       (normalizedUpdates.linkedGiteaPR === null &&
         (worktreeForUpdate?.linkedGiteaPR ?? null) !== null)
     const reviewRepo = shouldRefreshHostedReview
-      ? get().repos.find((repo) => repo.id === worktreeForUpdate?.repoId)
+      ? (findRepoForHost(get().repos, worktreeForUpdate?.repoId ?? '', {
+          hostId: executionHostId,
+          settings: get().settings
+        }) ?? undefined)
       : undefined
     const reviewBranch = worktreeForUpdate?.branch.replace(/^refs\/heads\//, '')
 

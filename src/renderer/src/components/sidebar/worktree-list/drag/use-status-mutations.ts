@@ -6,6 +6,7 @@ import type {
   Worktree
 } from '../../../../../../shared/worktree/types'
 import type { WorktreeMeta } from '../../../../../../shared/worktree/meta-types'
+import type { WorktreeMetaBatchUpdate } from '../../../../store/slices/worktree-helpers'
 import { getWorkspaceStatus, getWorkspaceStatusGroupKey } from '../../workspace-status'
 import {
   buildManualOrderUpdatesForGroupDrop,
@@ -48,15 +49,19 @@ export function useWorktreeStatusMutations(args: {
 
   const moveWorktreesToStatus = useCallback(
     (worktreeIds: readonly string[], status: WorkspaceStatus) => {
-      const updates = new Map<string, { workspaceStatus: WorkspaceStatus }>()
+      const updates: WorktreeMetaBatchUpdate[] = []
       for (const worktreeId of worktreeIds) {
         const current = worktreeMap.get(worktreeId)
         if (!current || getWorkspaceStatus(current, workspaceStatuses) === status) {
           continue
         }
-        updates.set(worktreeId, { workspaceStatus: status })
+        updates.push({
+          worktreeId,
+          updates: { workspaceStatus: status },
+          executionHostId: current.hostId
+        })
       }
-      if (updates.size > 0) {
+      if (updates.length > 0) {
         void updateWorktreesMeta(updates)
       }
     },
@@ -74,7 +79,7 @@ export function useWorktreeStatusMutations(args: {
         rankByWorktreeId: manualOrderCatalog.rankByWorktreeId,
         allWorktreeIds: manualOrderCatalog.orderedIds
       })
-      const updates = new Map<string, Partial<WorktreeMeta>>()
+      const updates = new Map<string, WorktreeMetaBatchUpdate>()
       for (const worktreeId of dropArgs.worktreeIds) {
         const current = worktreeMap.get(worktreeId)
         if (!current) {
@@ -84,13 +89,20 @@ export function useWorktreeStatusMutations(args: {
         if (getWorkspaceStatus(current, workspaceStatuses) !== dropArgs.status) {
           next.workspaceStatus = dropArgs.status
         }
-        updates.set(worktreeId, next)
+        updates.set(worktreeId, {
+          worktreeId,
+          updates: next,
+          executionHostId: current.hostId
+        })
       }
       for (const [worktreeId, manualOrder] of order.updates) {
-        updates.set(worktreeId, { ...updates.get(worktreeId), ...manualOrder })
+        const entry = updates.get(worktreeId)
+        if (entry) {
+          entry.updates = { ...entry.updates, ...manualOrder }
+        }
       }
-      for (const [worktreeId, update] of Array.from(updates)) {
-        if (Object.keys(update).length === 0) {
+      for (const [worktreeId, entry] of updates) {
+        if (Object.keys(entry.updates).length === 0) {
           updates.delete(worktreeId)
         }
       }
@@ -101,7 +113,7 @@ export function useWorktreeStatusMutations(args: {
       if (order.changed) {
         setSortBy('manual')
       }
-      void updateWorktreesMeta(updates)
+      void updateWorktreesMeta([...updates.values()])
     },
     [manualOrderCatalog, setSortBy, updateWorktreesMeta, worktreeMap, workspaceStatuses]
   )
@@ -133,14 +145,17 @@ export function useWorktreeStatusMutations(args: {
         rankByWorktreeId: manualOrderCatalog.rankByWorktreeId,
         allWorktreeIds: manualOrderCatalog.orderedIds
       })
-      if (!result.changed) {
-        return
-      }
-      // Why: only switch to Manual after a real move so accidental click-drags don't change the sort.
-      setSortBy('manual')
-      void updateWorktreesMeta(result.updates)
+      void updateWorktreesMeta(
+        [...result.updates].map(([worktreeId, updates]) => ({
+          worktreeId,
+          updates,
+          ...(worktreeMap.get(worktreeId)?.hostId
+            ? { executionHostId: worktreeMap.get(worktreeId)?.hostId }
+            : {})
+        }))
+      )
     },
-    [manualOrderCatalog, setSortBy, updateWorktreesMeta]
+    [manualOrderCatalog, updateWorktreesMeta, worktreeMap]
   )
 
   const shouldShowWorkspaceBoardDropIndicator = useCallback(
@@ -169,7 +184,7 @@ export function useWorktreeStatusMutations(args: {
         allWorktreeIds: manualOrderCatalog.orderedIds,
         rankByWorktreeId: manualOrderCatalog.rankByWorktreeId
       })
-      if (result.updates.size === 0) {
+      if (result.updates.length === 0) {
         return
       }
       // Why: switch to Manual when the drop changes order so the placement stays visible.

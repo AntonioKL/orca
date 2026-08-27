@@ -27,7 +27,6 @@ import type { TaskSourceContext } from '../../../../shared/task-source-context'
 import type { WorktreeRemovalTarget } from '../../../../shared/worktree/removal'
 import type { TerminalGitHubPRLink } from '../../../../shared/terminal-github-pr-link-detector'
 import type { ExecutionHostId } from '../../../../shared/execution-host'
-import { worktreeRowMatchesMetaHost } from './worktrees/listing/worktree-meta-host-match'
 import type { RemoveWorktreeOptions } from './worktree-removal-options'
 import type {
   HostQualifiedDetectedWorktreeResult,
@@ -38,7 +37,6 @@ import type {
   PendingWorktreeCreation,
   WorktreeCreationPhase
 } from '@/lib/pending-worktree-creation'
-import { getRepoIdFromWorktreeId } from '../../../../shared/worktree/id'
 import type { AppState } from '../types'
 import type { WorktreeRefreshAllOptions } from './worktree-refresh-options'
 export type { WorktreePurgeTarget, WorktreePurgeTargets } from './worktree-purge-target'
@@ -47,6 +45,10 @@ export type { WorktreeDeleteState, WorktreeDeleteStateTarget } from './worktree-
 import type { WorktreeDeleteState, WorktreeDeleteStateTarget } from './worktree-delete-state-types'
 export { getRepoIdFromWorktreeId } from '../../../../shared/worktree/id'
 
+export {
+  applyWorktreeUpdates,
+  withoutErasedRequiredWorktreeFields
+} from './worktree-meta-update-application'
 import type { RendererRemoveWorktreeResult } from './renderer-remove-worktree-result'
 
 export type WorktreeFetchOptions = {
@@ -70,6 +72,11 @@ export type WorktreeMetaUpdateOptions = {
   shouldApply?: WorktreeMetaUpdateGuard
   /** Skip the automatic review refetch when the caller owns an equivalent refresh. */
   suppressHostedReviewRefresh?: boolean
+}
+export type WorktreeMetaBatchUpdate = {
+  worktreeId: string
+  updates: Partial<WorktreeMeta>
+  executionHostId?: ExecutionHostId
 }
 
 export type WorktreeRenameRequest = {
@@ -268,7 +275,9 @@ export type WorktreeSlice = {
   ) => Promise<{ ok: true } | { ok: false; error: string }>
   ensureHostedReviewPushTarget: (worktreeId: string) => Promise<void>
   updateWorktreesMeta: (
-    updatesByWorktreeId: ReadonlyMap<string, Partial<WorktreeMeta>>
+    updatesByWorktreeId:
+      | readonly WorktreeMetaBatchUpdate[]
+      | ReadonlyMap<string, Partial<WorktreeMeta>>
   ) => Promise<void>
   /**
    * Pin/unpin worktrees, then reveal the first changed one. The reveal keeps
@@ -371,70 +380,4 @@ export function findWorktreeById(
   }
 
   return undefined
-}
-
-type RequiredKey<T> = { [K in keyof T]-?: undefined extends T[K] ? never : K }[keyof T]
-
-// Why: a present-but-undefined key in a spread ERASES the field. That is the
-// intended wire signal for clearing optional metadata (pushTarget), but on a
-// field Worktree declares required it produced a live `displayName: undefined`
-// that crashed the worktree palette (crash a1f81ea1). Typed off Worktree so a
-// newly-required field is protected automatically.
-const ERASURE_PROTECTED_KEYS: Record<Extract<RequiredKey<Worktree>, keyof WorktreeMeta>, true> = {
-  displayName: true,
-  comment: true,
-  linkedIssue: true,
-  linkedPR: true,
-  linkedLinearIssue: true,
-  isArchived: true,
-  isUnread: true,
-  isPinned: true,
-  sortOrder: true,
-  lastActivityAt: true
-}
-
-export function withoutErasedRequiredWorktreeFields(
-  updates: Partial<WorktreeMeta>
-): Partial<WorktreeMeta> {
-  const erased = Object.keys(ERASURE_PROTECTED_KEYS).filter(
-    (key) => updates[key as keyof WorktreeMeta] === undefined && Object.hasOwn(updates, key)
-  )
-  if (erased.length === 0) {
-    return updates
-  }
-
-  const next = { ...updates }
-  for (const key of erased) {
-    delete next[key as keyof WorktreeMeta]
-  }
-  return next
-}
-
-export function applyWorktreeUpdates(
-  worktreesByRepo: Record<string, Worktree[]>,
-  worktreeId: string,
-  rawUpdates: Partial<WorktreeMeta>,
-  executionHostId?: ExecutionHostId
-): Record<string, Worktree[]> {
-  const updates = withoutErasedRequiredWorktreeFields(rawUpdates)
-  const repoId = getRepoIdFromWorktreeId(worktreeId)
-  const worktrees = worktreesByRepo[repoId]
-  if (!worktrees) {
-    return worktreesByRepo
-  }
-
-  let changed = false
-  const nextWorktrees = worktrees.map((worktree) => {
-    if (worktree.id !== worktreeId || !worktreeRowMatchesMetaHost(worktree, executionHostId)) {
-      return worktree
-    }
-
-    changed = true
-    return { ...worktree, ...updates }
-  })
-  if (!changed) {
-    return worktreesByRepo
-  }
-
-  return { ...worktreesByRepo, [repoId]: nextWorktrees }
 }

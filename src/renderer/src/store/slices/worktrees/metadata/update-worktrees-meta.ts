@@ -1,4 +1,4 @@
-import type { WorktreeSlice } from '../../worktree-helpers'
+import type { WorktreeMetaBatchUpdate, WorktreeSlice } from '../../worktree-helpers'
 import type { WorktreeSliceGet, WorktreeSliceSet } from '../listing/worktree-slice-types'
 import { applyWorktreeUpdates, getRepoIdFromWorktreeId } from '../../worktree-helpers'
 import {
@@ -26,25 +26,33 @@ function getKnownOwnerHostIds(
   }
   return [...hostIds]
 }
+function isBatchUpdateArray(
+  input: readonly WorktreeMetaBatchUpdate[] | ReadonlyMap<string, Partial<WorktreeMeta>>
+): input is readonly WorktreeMetaBatchUpdate[] {
+  return Array.isArray(input)
+}
 
 export function createUpdateWorktreesMeta(
   set: WorktreeSliceSet,
   get: WorktreeSliceGet
 ): WorktreeSlice['updateWorktreesMeta'] {
-  return async (updatesByWorktreeId) => {
-    if (updatesByWorktreeId.size === 0) {
+  return async (input) => {
+    const updates: WorktreeMetaBatchUpdate[] = isBatchUpdateArray(input)
+      ? [...input]
+      : [...input].map(([worktreeId, updates]) => ({ worktreeId, updates }))
+    if (updates.length === 0) {
       return
     }
 
-    const gitWorktreeUpdates = new Map<string, Partial<WorktreeMeta>>()
+    const gitWorktreeUpdates: WorktreeMetaBatchUpdate[] = []
     const folderWorkspaceUpdates: {
       folderWorkspaceId: string
       updates: ReturnType<typeof getFolderWorkspaceMetaUpdates>
     }[] = []
-    for (const [worktreeId, updates] of updatesByWorktreeId) {
-      const scope = parseWorkspaceKey(worktreeId)
+    for (const entry of updates) {
+      const scope = parseWorkspaceKey(entry.worktreeId)
       if (scope?.type === 'folder') {
-        const folderUpdates = getFolderWorkspaceMetaUpdates(updates)
+        const folderUpdates = getFolderWorkspaceMetaUpdates(entry.updates)
         if (Object.keys(folderUpdates).length > 0) {
           folderWorkspaceUpdates.push({
             folderWorkspaceId: scope.folderWorkspaceId,
@@ -52,19 +60,25 @@ export function createUpdateWorktreesMeta(
           })
         }
       } else {
-        gitWorktreeUpdates.set(worktreeId, updates)
+        gitWorktreeUpdates.push(entry)
       }
     }
 
     set((s) => {
       let nextWorktrees = s.worktreesByRepo
       let nextDetectedWorktrees = s.detectedWorktreesByRepo
-      for (const [worktreeId, updates] of gitWorktreeUpdates) {
-        nextWorktrees = applyWorktreeUpdates(nextWorktrees, worktreeId, updates)
+      for (const entry of gitWorktreeUpdates) {
+        nextWorktrees = applyWorktreeUpdates(
+          nextWorktrees,
+          entry.worktreeId,
+          entry.updates,
+          entry.executionHostId
+        )
         nextDetectedWorktrees = applyDetectedWorktreeUpdates(
           nextDetectedWorktrees,
-          worktreeId,
-          updates
+          entry.worktreeId,
+          entry.updates,
+          entry.executionHostId
         )
       }
       return nextWorktrees === s.worktreesByRepo &&
@@ -84,10 +98,12 @@ export function createUpdateWorktreesMeta(
       ...folderWorkspaceUpdates.map(({ folderWorkspaceId, updates }) =>
         get().updateFolderWorkspace(folderWorkspaceId, updates)
       ),
-      ...Array.from(gitWorktreeUpdates, async ([worktreeId, updates]) => {
+      ...gitWorktreeUpdates.map(async ({ worktreeId, updates, executionHostId }) => {
         try {
           const state = get()
-          const ownerHostIds = getKnownOwnerHostIds(state, worktreeId)
+          const ownerHostIds = executionHostId
+            ? [executionHostId]
+            : getKnownOwnerHostIds(state, worktreeId)
           await (ownerHostIds.length === 0
             ? persistWorktreeMeta(settingsForWorktreeOwner(state, worktreeId), worktreeId, updates)
             : Promise.all(
