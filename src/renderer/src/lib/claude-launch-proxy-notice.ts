@@ -1,4 +1,5 @@
 import { toast } from 'sonner'
+import { translate } from '@/i18n/i18n'
 import type { TuiAgent } from '../../../shared/tui-agent'
 import { normalizeProxyUrl } from '../../../shared/network-proxy'
 
@@ -14,7 +15,10 @@ export function warnIfConfiguredClaudeProxy(
     return
   }
   toast.warning(
-    'Orca network proxy is configured for this Claude launch; the target host is routed through it unless covered by its bypass rules. If Claude reports ConnectionRefused, check Settings → Advanced → Network.',
+    translate(
+      'auto.lib.claude.launch.proxy.notice.9f4a8d7c21',
+      'Orca network proxy is configured for this Claude launch; the target host is routed through it unless covered by its bypass rules. If Claude reports ConnectionRefused, check Settings → Advanced → Network.'
+    ),
     { duration: 12_000 }
   )
 }
