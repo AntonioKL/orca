@@ -3223,7 +3223,7 @@ function WorktreeJumpPaletteContent({
         data-worktree-index-pending={worktreeDocumentsPending ? 'true' : 'false'}
         data-worktree-search-pending={worktreeSearchPending ? 'true' : 'false'}
       >
-        {(isLoading || worktreeSearchPending) &&
+        {(isLoading || worktreeDocumentsPending || worktreeSearchPending) &&
         selectableItems.length === 0 &&
         !showCreateAction ? (
           <PaletteState
