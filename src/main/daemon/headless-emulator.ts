@@ -304,6 +304,16 @@ export class HeadlessEmulator {
     return lines
   }
 
+  getVisibleBufferRange(): { start: number; endExclusive: number; totalLength: number } {
+    const buffer = this.terminal.buffer.active
+    const start = buffer.viewportY
+    return {
+      start,
+      endExclusive: Math.min(buffer.length, start + this.terminal.rows),
+      totalLength: buffer.length
+    }
+  }
+
   getCursorLineContext(rowsAbove: number): TerminalCursorContext | null {
     return readTerminalCursorLineContext(this.terminal, rowsAbove)
   }

@@ -40751,16 +40751,17 @@ function projectVisibleTerminalLines(emulator: HeadlessEmulator): {
   }
 }
 
-function projectTerminalTailLines(
+export function projectTerminalTailLines(
   emulator: HeadlessEmulator,
   limit: number
 ): RuntimeTerminalProjection {
   const tail = emulator.getBufferTailLines(limit)
   const visible = emulator.getVisibleLines()
+  const visibleRange = emulator.getVisibleBufferRange()
   const draft = detectTerminalComposerDraft(
     emulator.getCursorLineContext(TERMINAL_COMPOSER_CONTEXT_ROWS)
   )
-  if (draft) {
+  if (draft && visibleRange.endExclusive === visibleRange.totalLength) {
     visible[draft.promptRow] = draft.promptGlyph
     for (let row = draft.promptRow + 1; row <= draft.endRow; row += 1) {
       visible[row] = ''

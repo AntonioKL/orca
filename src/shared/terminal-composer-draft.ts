@@ -2,8 +2,10 @@ export type TerminalCursorContext = {
   rows: string[]
   typedRows: string[]
   promptGlyphBoldRows: boolean[]
+  rowsWrapped?: boolean[]
   rowsBelow: string[]
   typedRowsBelow: string[]
+  rowsBelowWrapped?: boolean[]
   beforeCursor: string
   afterCursor: string
   rawAfterCursor: string
@@ -21,23 +23,35 @@ export type TerminalComposerDraft = {
 
 export const TERMINAL_COMPOSER_CONTEXT_ROWS = 16
 
-function dimmedContinuationRows(context: TerminalCursorContext, afterCursor: string): string[] {
+function dimmedContinuationRows(
+  context: TerminalCursorContext,
+  afterCursor: string
+): { text: string; wrapped: boolean }[] {
   if (!afterCursor.trim() || context.afterCursor.trim()) {
     return []
   }
-  const continuation: string[] = []
+  const continuation: { text: string; wrapped: boolean }[] = []
   for (let index = 0; index < context.rowsBelow.length; index += 1) {
     const raw = context.rowsBelow[index] ?? ''
     if (!raw.trim() || (context.typedRowsBelow[index] ?? '').trim()) {
       break
     }
-    continuation.push(raw.trim())
+    continuation.push({
+      text: raw.trim(),
+      wrapped: context.rowsBelowWrapped?.[index] ?? false
+    })
   }
   return continuation
 }
 
-function isStockPlaceholder(afterCursor: string, continuationRows: string[]): boolean {
-  const text = [afterCursor, ...continuationRows].join(' ').replace(/\s+/g, ' ').trim()
+function isStockPlaceholder(
+  afterCursor: string,
+  continuationRows: { text: string; wrapped: boolean }[]
+): boolean {
+  const text = [afterCursor, ...continuationRows.map((row) => row.text)]
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim()
   return (
     /^Try\s+["“]/.test(text) ||
     text === 'Ask Codex to do anything' ||
@@ -69,18 +83,29 @@ export function detectTerminalComposerDraft(
       if ((glyph === '›' || glyph === '»') && context.promptGlyphBoldRows[index] !== true) {
         return null
       }
-      const lines =
+      const lines: { text: string; wrapped: boolean }[] =
         index === cursorIndex
-          ? [cursorText.replace(/^\s*[❯›»]\s?/, ''), ...continuationRows]
+          ? [{ text: cursorText.replace(/^\s*[❯›»]\s?/, ''), wrapped: false }, ...continuationRows]
           : [
-              (context.typedRows[index] ?? row).replace(/^\s*[❯›»]\s?/, ''),
-              ...context.typedRows.slice(index + 1, cursorIndex),
-              cursorText,
+              {
+                text: (context.typedRows[index] ?? row).replace(/^\s*[❯›»]\s?/, ''),
+                wrapped: false
+              },
+              ...context.typedRows.slice(index + 1, cursorIndex).map((text, offset) => ({
+                text,
+                wrapped: context.rowsWrapped?.[index + 1 + offset] ?? false
+              })),
+              {
+                text: cursorText,
+                wrapped: context.rowsWrapped?.[cursorIndex] ?? false
+              },
               ...continuationRows
             ]
       const text = lines
-        .map((line) => line.trim())
-        .join('\n')
+        .map(
+          (line, lineIndex) => `${lineIndex > 0 && !line.wrapped ? '\n' : ''}${line.text.trim()}`
+        )
+        .join('')
         .trim()
       if (!text) {
         return null

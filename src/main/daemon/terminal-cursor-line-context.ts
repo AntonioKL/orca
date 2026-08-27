@@ -37,15 +37,18 @@ export function readTerminalCursorLineContext(
   const rows: string[] = []
   const typedRows: string[] = []
   const promptGlyphBoldRows: boolean[] = []
+  const rowsWrapped: boolean[] = []
   const start = Math.max(buffer.viewportY, cursorRow - Math.max(0, Math.floor(rowsAbove)))
   for (let row = start; row <= cursorRow; row += 1) {
     const line = buffer.getLine(row)
     rows.push(line?.translateToString(true) ?? '')
     typedRows.push(line ? undimmedText(line) : '')
     promptGlyphBoldRows.push(line ? firstVisibleCellIsBold(line) : false)
+    rowsWrapped.push(line?.isWrapped ?? false)
   }
   const rowsBelow: string[] = []
   const typedRowsBelow: string[] = []
+  const rowsBelowWrapped: boolean[] = []
   const end = Math.min(
     buffer.viewportY + terminal.rows - 1,
     cursorRow + Math.max(0, Math.floor(rowsAbove))
@@ -54,13 +57,16 @@ export function readTerminalCursorLineContext(
     const line = buffer.getLine(row)
     rowsBelow.push(line?.translateToString(true) ?? '')
     typedRowsBelow.push(line ? undimmedText(line) : '')
+    rowsBelowWrapped.push(line?.isWrapped ?? false)
   }
   return {
     rows,
     typedRows,
     promptGlyphBoldRows,
+    rowsWrapped,
     rowsBelow,
     typedRowsBelow,
+    rowsBelowWrapped,
     beforeCursor: cursorLine.translateToString(true, 0, buffer.cursorX),
     afterCursor: undimmedText(cursorLine, buffer.cursorX),
     rawAfterCursor: cursorLine.translateToString(true, buffer.cursorX),

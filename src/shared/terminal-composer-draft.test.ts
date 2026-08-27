@@ -183,4 +183,23 @@ describe('detectTerminalComposerDraft', () => {
       })
     ).toBeNull()
   })
+
+  it('joins soft-wrapped continuation rows without inserting a newline', () => {
+    expect(
+      detectTerminalComposerDraft({
+        rows: ['────────', '❯ proceed with the'],
+        typedRows: ['────────', '❯'],
+        promptGlyphBoldRows: [false, false],
+        rowsWrapped: [false, false],
+        rowsBelow: ['release'],
+        typedRowsBelow: [''],
+        rowsBelowWrapped: [true],
+        beforeCursor: '❯ ',
+        afterCursor: '',
+        rawAfterCursor: 'proceed with the',
+        cursorHidden: false,
+        cursorViewportRow: 8
+      })?.text
+    ).toBe('proceed with therelease')
+  })
 })
