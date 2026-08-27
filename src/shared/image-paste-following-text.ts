@@ -23,11 +23,3 @@ export function imagePasteWritesFollowedByText(
     )
   )
 }
-
-/** Exact PTY bytes for image pastes plus optional prompt text. */
-export function joinImagePastesAndPrompt(
-  framedImagePastes: readonly string[],
-  prompt: string
-): string {
-  return `${imagePasteWritesFollowedByText(framedImagePastes, prompt.length > 0).join('')}${prompt}`
-}

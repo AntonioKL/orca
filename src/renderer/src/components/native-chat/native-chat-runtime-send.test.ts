@@ -369,7 +369,16 @@ describe('sendNativeChatMessageWithImageAttachments', () => {
     expect(sendRuntimePtyInput).toHaveBeenLastCalledWith(SETTINGS, PTY, NATIVE_CHAT_SUBMIT)
   })
 
-  it('separates multiple image pastes from each other and from following prompt text', () => {
+  it('treats whitespace-only prompt input as attachment-only', () => {
+    sendNativeChatMessageWithImageAttachments(SETTINGS, PTY, '   ', ['/tmp/orca-paste-image.png'])
+
+    expectWriteOrder(sendRuntimePtyInput.mock.calls, [
+      NATIVE_CHAT_CLEAR_UNSUBMITTED_INPUT,
+      '\x1b[200~/tmp/orca-paste-image.png\x1b[201~'
+    ])
+  })
+
+  it('keeps multiple image frames bare and separates only the final frame from prompt text', () => {
     sendNativeChatMessageWithImageAttachments(SETTINGS, PTY, 'hello', ['/tmp/a.png', '/tmp/b.png'])
 
     expectWriteOrder(sendRuntimePtyInput.mock.calls, [
