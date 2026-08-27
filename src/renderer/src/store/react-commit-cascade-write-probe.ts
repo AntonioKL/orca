@@ -22,7 +22,12 @@ export function withReactCommitCascadeWriteProbe<TState>(
   return (set, get, api) => {
     const wrapped = ((partial: unknown, replace?: unknown): void => {
       if (reactCommitCascadeWriteProbe.armed) {
-        noteReactCommitCascadeStoreWrite(wrapped, partial)
+        try {
+          noteReactCommitCascadeStoreWrite(wrapped, partial)
+        } catch {
+          // This is the app's universal write path: a diagnostic that throws here
+          // would drop the write itself.
+        }
       }
       ;(set as (nextPartial: unknown, nextReplace?: unknown) => void)(partial, replace)
     }) as typeof set

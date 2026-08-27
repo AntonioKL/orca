@@ -17,12 +17,19 @@
  */
 export const reactCommitCascadeWriteProbe = { armed: false }
 
-/** Enough frames to cross React's commit/effect frames into app code. */
+/** Frame 0 is the store action; the rest reach up into whatever loops over it. */
 const CAPTURE_STACK_FRAME_LIMIT = 8
+/**
+ * Frame 0 alone names a slice action, which every cascade shares. Two frames of
+ * caller is what distinguishes the effect driving the loop from its neighbours.
+ */
+const REPORTED_FRAMES_PER_SITE = 3
+/** Whole frames only, inside the 4000-char budget a `stack`-suffixed detail gets. */
+const MAX_DRIVER_STACK_CHARS = 3_800
 /** A loop repeats; six samples name every distinct participant worth naming. */
-const MAX_SAMPLED_WRITES = 6
+export const MAX_SAMPLED_WRITES = 6
 /** Keeps `changedKeys` inside the 240-char detail cap without truncating mid-key. */
-const MAX_REPORTED_CHANGED_KEYS = 12
+export const MAX_REPORTED_CHANGED_KEYS = 12
 
 type SampledWrite = { stack?: string }
 
@@ -56,7 +63,10 @@ export function resetReactCommitCascadeWriteSamples(): void {
  */
 export function noteReactCommitCascadeStoreWrite(boundary: object, partial: unknown): void {
   storeWrites += 1
-  if (samples.length >= MAX_SAMPLED_WRITES) {
+  // Why the write count and not samples.length: samples only grows where
+  // Error.captureStackTrace exists, so that cap would never engage without it and
+  // key collection would run for the whole cascade.
+  if (storeWrites > MAX_SAMPLED_WRITES) {
     return
   }
   // Why object-only: a functional updater's keys are unknowable without running it.
@@ -99,27 +109,49 @@ function reduceFrame(frame: string): string | undefined {
   return fn ? `${basename}:${line}:${column} ${fn}` : `${basename}:${line}:${column}`
 }
 
-function callerFrames(): string[] {
-  const frames: string[] = []
+/** One reduced frame group per distinct call site, deepest frame first. */
+function sampledSiteFrames(): string[][] {
+  const sites: string[][] = []
+  const seen = new Set<string>()
   for (const sample of samples) {
-    const first = sample.stack?.split('\n').find((line) => /^\s*at\s/.test(line))
-    const reduced = first ? reduceFrame(first) : undefined
-    if (reduced && !frames.includes(reduced)) {
-      frames.push(reduced)
+    const frames = (sample.stack?.split('\n') ?? [])
+      .map(reduceFrame)
+      .filter((frame): frame is string => frame !== undefined)
+      .slice(0, REPORTED_FRAMES_PER_SITE)
+    const site = frames[0]
+    if (site === undefined || seen.has(site)) {
+      continue
     }
+    seen.add(site)
+    sites.push(frames)
   }
-  return frames
+  return sites
+}
+
+/** Drops whole frames, so a truncated stack never ends mid-frame. */
+function joinWithinBudget(frames: string[]): string | undefined {
+  const kept: string[] = []
+  let remaining = MAX_DRIVER_STACK_CHARS
+  for (const frame of frames) {
+    if (frame.length + 1 > remaining) {
+      break
+    }
+    kept.push(frame)
+    remaining -= frame.length + 1
+  }
+  return kept.length > 0 ? kept.join('\n') : undefined
 }
 
 /** Formats only here, so an unreported cascade pays nothing for its samples. */
 export function readReactCommitCascadeWriteSummary(): ReactCommitCascadeWriteSummary {
-  const frames = callerFrames()
+  const sites = sampledSiteFrames()
   const keys = changedKeys ? Array.from(changedKeys).slice(0, MAX_REPORTED_CHANGED_KEYS) : []
   return {
     storeWrites,
-    storeWriteSites: frames.length,
-    driverFrame: frames[0],
-    driverStack: frames.length > 0 ? frames.join('\n') : undefined,
+    storeWriteSites: sites.length,
+    // Why frame 0 stays alone: the main-side coalesce key clusters on it.
+    driverFrame: sites[0]?.[0],
+    driverStack: joinWithinBudget(sites.flat()),
     changedKeys: keys.length > 0 ? keys.join(',') : undefined
   }
 }

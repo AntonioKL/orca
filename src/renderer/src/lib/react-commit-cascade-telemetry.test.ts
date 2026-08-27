@@ -14,7 +14,8 @@ import {
 } from './react-commit-cascade-telemetry'
 import {
   noteReactCommitCascadeStoreWrite,
-  reactCommitCascadeWriteProbe
+  reactCommitCascadeWriteProbe,
+  readReactCommitCascadeWriteSummary
 } from './react-commit-cascade-store-write-samples'
 
 const recordBreadcrumb = vi.fn()
@@ -265,5 +266,61 @@ describe('report throttle', () => {
     expect(recordBreadcrumb).toHaveBeenCalledTimes(2)
     expect(cascadePayload(1).suppressed).toBe(2)
     expect(state.suppressed).toBe(0)
+  })
+})
+
+/**
+ * Why dimensional and not just functional: a cascade that ends releases its
+ * samples, but a renderer that oscillates for minutes runs that arm/end cycle
+ * thousands of times, and anything the reset misses accumulates there.
+ */
+describe('repeated arm and end cycles', () => {
+  const CYCLES = 1_000
+  /** The steady state is a few KB of live objects; a per-cycle leak is megabytes. */
+  const MAX_HEAP_GROWTH_BYTES = 1_000_000
+
+  function drivingWrite(): void {
+    noteReactCommitCascadeStoreWrite(drivingWrite, { tabs: [], panes: [] })
+  }
+
+  function runCascadeCycle(state: ReactCommitCascadeState): void {
+    driveCommits({
+      state,
+      count: REACT_COMMIT_CASCADE_NOTICE_LIMIT,
+      onCommit: () => {
+        if (reactCommitCascadeWriteProbe.armed) {
+          drivingWrite()
+        }
+      }
+    })
+    driveCommits({ state, count: 1, lanes: 0 })
+  }
+
+  it('leaves nothing behind across a thousand cascades', () => {
+    const collectGarbage = (globalThis as { gc?: () => void }).gc
+    // --expose-gc is pinned in config/vitest.config.ts execArgv.
+    expect(typeof collectGarbage).toBe('function')
+    const state = createReactCommitCascadeState()
+    for (let warmup = 0; warmup < 20; warmup += 1) {
+      runCascadeCycle(state)
+    }
+    collectGarbage?.()
+    const before = process.memoryUsage().heapUsed
+
+    for (let cycle = 0; cycle < CYCLES; cycle += 1) {
+      runCascadeCycle(state)
+    }
+    collectGarbage?.()
+
+    expect(process.memoryUsage().heapUsed - before).toBeLessThan(MAX_HEAP_GROWTH_BYTES)
+    expect(reactCommitCascadeWriteProbe.armed).toBe(false)
+    expect(readReactCommitCascadeWriteSummary()).toMatchObject({
+      storeWrites: 0,
+      storeWriteSites: 0,
+      driverFrame: undefined,
+      driverStack: undefined,
+      changedKeys: undefined
+    })
+    expect(state.cascadeRoot).toBeNull()
   })
 })

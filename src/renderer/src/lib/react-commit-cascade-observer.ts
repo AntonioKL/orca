@@ -8,15 +8,17 @@
  * once per commit per root in both bundles, inside its own try/catch, and hands
  * us the FiberRoot whose `pendingLanes` drive the reset rule.
  *
- * Ordering: react-dom reads __REACT_DEVTOOLS_GLOBAL_HOOK__ once, at module
- * evaluation, so a fresh shim only lands if it exists before react-dom is
- * imported — hence module-scope install and the first-import placement guarded
- * by react-commit-cascade-install-order.test.ts. Wrapping an existing hook is
- * timing-independent: react-dom re-reads the property at every commit.
+ * Ordering: this module only WRAPS `onCommitFiberRoot`, which react-dom re-reads
+ * at every commit, so it may be imported anywhere. The deadline belongs to
+ * react-devtools-commit-hook-shim, which must merely exist before react-dom's
+ * module evaluation and is therefore the entries' first import.
  */
 import { observeReactCommit } from '@/lib/react-commit-cascade-telemetry'
 import { recordRendererCrashBreadcrumb } from '@/lib/crash-breadcrumb-recorder'
-import { ensureReactDevtoolsCommitHook } from '@/lib/react-devtools-commit-hook-shim'
+import {
+  ensureReactDevtoolsCommitHook,
+  type ReactDevtoolsCommitHook
+} from '@/lib/react-devtools-commit-hook-shim'
 
 export const REACT_COMMIT_CASCADE_UNINSTALLED_BREADCRUMB = 'react_commit_cascade_uninstalled'
 
@@ -34,7 +36,7 @@ let installCheckTimer: ReturnType<typeof setTimeout> | undefined
  * test failure. Make that visible in the field instead of silent.
  */
 function scheduleInstallSelfCheck(): void {
-  if (typeof setTimeout !== 'function') {
+  if (installCheckTimer !== undefined || typeof setTimeout !== 'function') {
     return
   }
   installCheckTimer = setTimeout(() => {
@@ -50,34 +52,40 @@ export function installReactCommitCascadeObserver(): void {
   if (installed) {
     return
   }
-  const hook = ensureReactDevtoolsCommitHook()
-  if (!hook) {
-    return
-  }
   try {
-    installed = true
-    const previous = hook.onCommitFiberRoot
-    // Fixed arity, not rest args: this runs on every commit and must not allocate.
-    hook.onCommitFiberRoot = (rendererId, root, priorityLevel, didError) => {
-      // Why our own try/catch when react-dom already has one: theirs would
-      // swallow the rest of this callback, silently unhooking DevTools and
-      // Fast Refresh from the chain below.
-      try {
-        commitsSeen += 1
-        const pendingLanes = (root as FiberRootLike | null)?.pendingLanes
-        // Why 0 and not a skip: a React shape change that hides pendingLanes must
-        // end the cascade, not freeze a stale depth that later commits push over
-        // the limit. 0 is the lane value that means "nothing pending", so it
-        // takes the same reset path and this fails safe to no crumb.
-        observeReactCommit(root, typeof pendingLanes === 'number' ? pendingLanes : 0)
-      } catch {
-        // Best-effort crash evidence only.
-      }
-      previous?.call(hook, rendererId, root, priorityLevel, didError)
+    const hook = ensureReactDevtoolsCommitHook()
+    if (hook) {
+      installObserverOnHook(hook)
+      // Why only here: a hook that refuses the assignment must stay uninstalled,
+      // so the self-check below can still report the failure.
+      installed = true
     }
-    scheduleInstallSelfCheck()
   } catch {
     // A renderer without a patchable global still has to boot.
+  }
+  // Why outside the try: a failed install is exactly when the crumb matters.
+  scheduleInstallSelfCheck()
+}
+
+function installObserverOnHook(hook: ReactDevtoolsCommitHook): void {
+  const previous = hook.onCommitFiberRoot
+  // Fixed arity, not rest args: this runs on every commit and must not allocate.
+  hook.onCommitFiberRoot = (rendererId, root, priorityLevel, didError) => {
+    // Why our own try/catch when react-dom already has one: theirs would
+    // swallow the rest of this callback, silently unhooking DevTools and
+    // Fast Refresh from the chain below.
+    try {
+      commitsSeen += 1
+      const pendingLanes = (root as FiberRootLike | null)?.pendingLanes
+      // Why 0 and not a skip: a React shape change that hides pendingLanes must
+      // end the cascade, not freeze a stale depth that later commits push over
+      // the limit. 0 is the lane value that means "nothing pending", so it
+      // takes the same reset path and this fails safe to no crumb.
+      observeReactCommit(root, typeof pendingLanes === 'number' ? pendingLanes : 0)
+    } catch {
+      // Best-effort crash evidence only.
+    }
+    previous?.call(hook, rendererId, root, priorityLevel, didError)
   }
 }
 

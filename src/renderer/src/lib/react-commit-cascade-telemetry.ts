@@ -50,7 +50,12 @@ export const REACT_COMMIT_CASCADE_ARM_COMMITS = 20
 export const REACT_COMMIT_CASCADE_MIN_REPORT_INTERVAL_MS = 30_000
 
 export type ReactCommitCascadeState = {
-  /** Identity only; never dereferenced, so it cannot retain a detached tree. */
+  /**
+   * Held strongly, and never dereferenced. The next commit that leaves no
+   * cascading lanes clears the slot — milliseconds away in a live renderer —
+   * so the only tree this pins is a React root unmounted mid-cascade, such as
+   * the per-decoration roots in useDiffCommentDecorator.
+   */
   cascadeRoot: unknown
   commits: number
   reported: boolean
