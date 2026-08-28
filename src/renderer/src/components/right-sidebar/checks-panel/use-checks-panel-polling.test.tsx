@@ -36,6 +36,7 @@ function createModel(overrides: Partial<PollingInput> = {}): PollingInput {
   const fetchPRChecks = vi.fn<() => Promise<PRCheckDetail[]>>().mockResolvedValue([])
   return {
     activeGitLabReview: null,
+    activeWorktree: null,
     asyncResultKeyRef: { current: 'cache::main::42' },
     branch: 'main',
     fetchPRChecks,
@@ -124,5 +125,40 @@ describe('useChecksPanelPolling live behavior', () => {
 
     expect(gitlab.fetchDetails).toHaveBeenCalledOnce()
     expect(model.fetchPRChecks).not.toHaveBeenCalled()
+  })
+
+  it('uses an explicit owner and missing head override for a replacement MR', async () => {
+    const ownerSettings = {
+      activeRuntimeEnvironmentId: 'owner-runtime'
+    } as PollingInput['settings']
+    const model = createModel({
+      activeGitLabReview: {
+        provider: 'gitlab',
+        number: 17,
+        headSha: 'old-head'
+      } as NonNullable<PollingInput['activeGitLabReview']>,
+      activeWorktree: { hostId: 'runtime:owner-runtime' } as PollingInput['activeWorktree'],
+      settings: { activeRuntimeEnvironmentId: 'focused-runtime' } as PollingInput['settings']
+    })
+    const { result } = renderHook(() => useChecksPanelPolling(model))
+
+    await act(async () =>
+      result.current.fetchGitLabDetails({
+        mrNumberOverride: 18,
+        headShaOverride: null,
+        commitAsCurrent: true,
+        settingsOverride: ownerSettings
+      })
+    )
+
+    expect(gitlab.fetchDetails).toHaveBeenCalledWith(
+      expect.objectContaining({
+        iid: 18,
+        settings: ownerSettings,
+        repoOwnerExecutionHostId: 'runtime:owner-runtime'
+      })
+    )
+    expect(model.asyncResultKeyRef.current).toContain('::18::none')
+    expect(model.asyncResultKeyRef.current).not.toContain('old-head')
   })
 })

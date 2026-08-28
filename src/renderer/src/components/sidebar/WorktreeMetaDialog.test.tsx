@@ -134,6 +134,8 @@ function openDialog(
     otherRepos?: { repoId: string; worktree?: Partial<Worktree> }[]
     modalRepoId?: string
     modalExecutionHostId?: string
+    modalReviewProvider?: 'github' | 'gitlab'
+    modalCurrentReview?: number
     linearViewerOrganizationUrlKey?: string
   } = {}
 ): void {
@@ -171,6 +173,8 @@ function openDialog(
       worktreeId: options.worktreeId ?? worktree.id,
       ...(options.modalRepoId ? { repoId: options.modalRepoId } : {}),
       ...(options.modalExecutionHostId ? { executionHostId: options.modalExecutionHostId } : {}),
+      ...(options.modalReviewProvider ? { reviewProvider: options.modalReviewProvider } : {}),
+      ...(options.modalCurrentReview ? { currentReview: options.modalCurrentReview } : {}),
       currentDisplayName: worktree.displayName,
       currentComment: worktree.comment,
       focus: 'comment'
@@ -223,6 +227,26 @@ describe('WorktreeMetaDialog issue link row', () => {
 
     expect(providerChip().textContent).toContain('GitHub')
     expect(issueInput().value).toBe('42')
+  })
+
+  it('seeds and saves the GitLab MR row through the GitLab slot', async () => {
+    openDialog({
+      worktree: { linkedGitLabMR: 42 },
+      modalReviewProvider: 'gitlab',
+      modalCurrentReview: 42
+    })
+    const input = screen.getByPlaceholderText('MR ! or GitLab URL')
+
+    expect(screen.getByText('GitLab MR')).toBeTruthy()
+    expect((input as HTMLInputElement).value).toBe('42')
+    fireEvent.change(input, { target: { value: '!43' } })
+    await act(async () => fireEvent.click(saveButton()))
+
+    await waitFor(() => expect(updateWorktreeMeta).toHaveBeenCalledTimes(1))
+    expect(updateWorktreeMeta.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({ linkedGitLabMR: 43 })
+    )
+    expect(updateWorktreeMeta.mock.calls[0]?.[1]).not.toHaveProperty('linkedPR')
   })
 
   it('replaces a completed emoji shortcode in the display name', () => {

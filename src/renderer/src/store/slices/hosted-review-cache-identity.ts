@@ -21,10 +21,14 @@ export function getHostedReviewCacheKey(
   repoId?: string | null,
   connectionId?: string | null,
   executionHostId?: string | null,
-  hasRepoOwner = false
+  hasRepoOwner = false,
+  ownerCacheScope?: string | null
 ): string {
   const scope = getHostedReviewCacheHostScope(settings, connectionId, executionHostId, hasRepoOwner)
-  return `${scope}::${repoId ?? repoPath}::${branch}`
+  const repoIdentity = ownerCacheScope
+    ? `${repoId ?? repoPath}::${repoPath}::${ownerCacheScope}`
+    : (repoId ?? repoPath)
+  return `${scope}::${repoIdentity}::${branch}`
 }
 
 function getHostedReviewCacheHostScope(

@@ -17,6 +17,7 @@ type ChecksPanelPollingInput = Pick<
   Pick<
     ChecksPanelControllerState,
     | 'asyncResultKeyRef'
+    | 'activeWorktree'
     | 'branch'
     | 'fetchPRChecks'
     | 'isPanelVisible'
@@ -34,6 +35,7 @@ type ChecksPanelPollingInput = Pick<
 
 export function useChecksPanelPolling(model: ChecksPanelPollingInput) {
   const {
+    activeWorktree,
     activeGitLabReview,
     asyncResultKeyRef,
     branch,
@@ -136,14 +138,17 @@ export function useChecksPanelPolling(model: ChecksPanelPollingInput) {
     async ({
       mrNumberOverride,
       headShaOverride,
-      commitAsCurrent = false
+      commitAsCurrent = false,
+      settingsOverride
     }: {
       mrNumberOverride?: number | null
       headShaOverride?: string | null
       commitAsCurrent?: boolean
+      settingsOverride?: ChecksPanelControllerState['settings']
     } = {}) => {
       const targetMRNumber = mrNumberOverride ?? activeGitLabReview?.number ?? null
-      const targetHeadSha = headShaOverride ?? activeGitLabReview?.headSha ?? null
+      const targetHeadSha =
+        headShaOverride === undefined ? (activeGitLabReview?.headSha ?? null) : headShaOverride
       if (!repo || !targetMRNumber) {
         return
       }
@@ -163,8 +168,9 @@ export function useChecksPanelPolling(model: ChecksPanelPollingInput) {
         const details = await fetchGitLabMRDetailsForChecks({
           repoPath: repo.path,
           repoId: repo.id,
-          settings,
-          iid: targetMRNumber
+          settings: settingsOverride ?? settings,
+          iid: targetMRNumber,
+          repoOwnerExecutionHostId: activeWorktree?.hostId
         })
         if (!isCurrentAsyncResult(requestKey)) {
           return
@@ -196,6 +202,7 @@ export function useChecksPanelPolling(model: ChecksPanelPollingInput) {
     [
       activeGitLabReview?.headSha,
       activeGitLabReview?.number,
+      activeWorktree?.hostId,
       branch,
       hostedReviewCacheKey,
       isCurrentAsyncResult,

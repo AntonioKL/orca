@@ -2,6 +2,7 @@ import type { ChecksPanelContextState } from './use-checks-panel-context-state'
 import type { ChecksPanelControllerState } from './use-checks-panel-controller-state'
 import type { ChecksPanelComposerState } from './use-checks-panel-composer-state'
 import type { ChecksPanelReviewState } from './use-checks-panel-review-state'
+import type { ChecksPanelPollingState } from './use-checks-panel-polling'
 
 export type ChecksPanelCheckAndReviewActionsInput = Pick<
   ChecksPanelContextState,
@@ -28,10 +29,14 @@ export type ChecksPanelCheckAndReviewActionsInput = Pick<
     | 'fetchPRForBranch'
     | 'gitLabProjectRefRef'
     | 'isFixingChecksWithAI'
+    | 'localExecutionScope'
     | 'openModal'
+    | 'ownerSettings'
     | 'panelContextKey'
     | 'panelContextKeyRef'
     | 'repo'
+    | 'repoConnectionId'
+    | 'runtimeEnvironmentId'
     | 'settings'
     | 'setChecks'
     | 'setChecksLoading'
@@ -40,5 +45,6 @@ export type ChecksPanelCheckAndReviewActionsInput = Pick<
     | 'setIsFixingChecksWithAI'
     | 'updateWorktreeMeta'
   > &
+  Pick<ChecksPanelPollingState, 'fetchGitLabDetails'> &
   Pick<ChecksPanelComposerState, 'isCurrentAsyncResult' | 'stateRequestKey'> &
   Pick<ChecksPanelReviewState, 'sourceControlAiActionsVisible'>

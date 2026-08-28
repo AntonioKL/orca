@@ -39,6 +39,8 @@ type FetchOptions = {
    * that branch per minute and paces the O(N) card list far slower (#11532).
    */
   active?: boolean
+  repoOwnerExecutionHostId?: string
+  repoOwnerCacheScope?: string
 }
 type CreateHostedReviewStoreInput = CreateHostedReviewInput & { repoId?: string | null }
 type CreateStackedHostedReviewStoreInput = CreateStackedHostedReviewInput & {
@@ -110,11 +112,20 @@ function isFresh<T>(entry: CacheEntry<T> | undefined): entry is CacheEntry<T> {
 function findHostedReviewRepoByPath(
   repos: readonly Repo[] | undefined,
   repoPath: string,
-  repoId?: string | null
+  repoId?: string | null,
+  repoOwnerExecutionHostId?: string
 ): Repo | undefined {
-  return repos?.find((candidate) =>
-    repoId ? candidate.id === repoId : candidate.path === repoPath
+  const matches = repos?.filter(
+    (candidate) =>
+      (repoId ? candidate.id === repoId : candidate.path === repoPath) &&
+      (!repoOwnerExecutionHostId || candidate.path === repoPath)
   )
+  if (repoOwnerExecutionHostId) {
+    return matches?.find(
+      (candidate) => getRepoExecutionHostId(candidate) === repoOwnerExecutionHostId
+    )
+  }
+  return matches?.[0]
 }
 
 function shouldRefetchForLinkedHint(
@@ -268,6 +279,8 @@ type RefreshHostedReviewCardArgs = {
   linkedBitbucketPR?: number | null
   linkedAzureDevOpsPR?: number | null
   linkedGiteaPR?: number | null
+  repoOwnerExecutionHostId?: string
+  repoOwnerCacheScope?: string
 }
 
 export function refreshHostedReviewCard(
@@ -278,6 +291,8 @@ export function refreshHostedReviewCard(
   return fetchHostedReviewForBranch(args.repoPath, args.branch, {
     force: true,
     repoId: args.repoId,
+    repoOwnerExecutionHostId: args.repoOwnerExecutionHostId,
+    repoOwnerCacheScope: args.repoOwnerCacheScope,
     linkedGitHubPR: args.linkedGitHubPR ?? null,
     ...(fallbackGitHubPR !== null ? { fallbackGitHubPR } : {}),
     linkedGitLabMR: args.linkedGitLabMR ?? null,
@@ -381,9 +396,15 @@ export const createHostedReviewSlice: StateCreator<AppState, [], [], HostedRevie
     options
   ): Promise<HostedReviewInfo | null> => {
     const settings = get().settings
-    const repo = get().repos?.find((candidate) =>
-      options?.repoId ? candidate.id === options.repoId : candidate.path === repoPath
+    const repo = findHostedReviewRepoByPath(
+      get().repos,
+      repoPath,
+      options?.repoId,
+      options?.repoOwnerExecutionHostId
     )
+    if (options?.repoOwnerExecutionHostId && !repo) {
+      return null
+    }
     const ownerSettings = settingsForHostedReviewRepoOwner(settings, repo)
     const target = getActiveRuntimeTarget(ownerSettings)
     const repoId = options?.repoId ?? repo?.id
@@ -394,7 +415,8 @@ export const createHostedReviewSlice: StateCreator<AppState, [], [], HostedRevie
       repoId,
       repo?.connectionId,
       repo?.executionHostId,
-      repo !== undefined
+      repo !== undefined,
+      options?.repoOwnerCacheScope
     )
     const cached = get().hostedReviewCache[cacheKey]
     const hintKey = linkedReviewHintKey(options)
@@ -450,6 +472,9 @@ export const createHostedReviewSlice: StateCreator<AppState, [], [], HostedRevie
                 )
               : await window.api.hostedReview.forBranch({
                   repoPath,
+                  ...(options?.repoOwnerExecutionHostId
+                    ? { repoOwnerExecutionHostId: options.repoOwnerExecutionHostId }
+                    : {}),
                   ...args
                 })
           if (requestGenerations.get(cacheKey) === generation) {

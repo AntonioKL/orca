@@ -85,10 +85,10 @@ export type ChecksPanelActiveContentModel = Pick<
   Pick<
     ChecksPanelCheckAndReviewActionsState,
     | 'handleFixChecksWithAI'
-    | 'handleLinkAnotherPullRequest'
+    | 'handleLinkAnotherReview'
     | 'handleOpenPR'
     | 'handleOpenStackPR'
-    | 'handleUnlinkPullRequest'
+    | 'handleUnlinkReview'
   > &
   Pick<ChecksPanelRefreshState, 'handleRefresh'> &
   Pick<ChecksPanelAiQueueState, 'handleResolveCommentsWithAI' | 'handleResolveConflictsWithAI'> &
