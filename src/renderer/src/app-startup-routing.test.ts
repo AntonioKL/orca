@@ -25,7 +25,7 @@ describe('renderer startup runtime routing', () => {
       'utf8'
     )
     const gateStart = source.indexOf('const startupActivationGateWorktreeIdsRef')
-    const gateEnd = source.indexOf('const handleNewTab', gateStart)
+    const gateEnd = source.indexOf('const startupResumeWorktreeIdsRef', gateStart)
     const gateEffect = source.slice(gateStart, gateEnd)
 
     expect(gateStart).toBeGreaterThanOrEqual(0)
@@ -360,7 +360,7 @@ describe('renderer startup runtime routing', () => {
     )
     const readyIndex = appSource.indexOf('actions.setTerminalStartupRestorationReady(true)')
     const gateStart = terminalSource.indexOf('const startupActivationGateWorktreeIdsRef')
-    const gateEnd = terminalSource.indexOf('const handleNewTab', gateStart)
+    const gateEnd = terminalSource.indexOf('const startupResumeWorktreeIdsRef', gateStart)
     const gateBlock = terminalSource.slice(gateStart, gateEnd)
     const gateIndex = gateBlock.indexOf('gateWorktreeAgentActivation(activeWorktreeId)')
     const createIndex = gateBlock.indexOf(
