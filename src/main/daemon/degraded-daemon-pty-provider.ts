@@ -1,7 +1,7 @@
 import type { DaemonPtyAdapter } from './daemon-pty-adapter'
 import { combineUnsubscribes } from './combine-unsubscribes'
 import { shutdownDegradedFallbackSessions } from './degraded-daemon-fallback-shutdown'
-import { inspectPtyProviderProcess } from '../providers/pty-process-inspection'
+import { PtyGoneError, inspectPtyProviderProcess } from '../providers/pty-process-inspection'
 import type {
   IPtyProvider,
   PtyBackgroundStreamEvent,
@@ -93,6 +93,11 @@ export class DegradedDaemonPtyProvider implements IPtyProvider {
     const mapped = this.sessionProviders.get(id)
     return mapped ? (mapped.hasPty?.(id) ?? true) : this.findProviderForExistingSession(id) !== null
   }
+
+  // Why only the mapped owner: an id with no route was never observed here, so its absence
+  // is a lost route, not a death certificate.
+  ptyAbsenceVerdict = (id: string): 'exited' | 'unverifiable' =>
+    this.sessionProviders.get(id)?.ptyAbsenceVerdict?.(id) ?? 'unverifiable'
 
   async probePtyLiveness(id: string): Promise<boolean | null> {
     const mapped = this.sessionProviders.get(id)
@@ -189,7 +194,7 @@ export class DegradedDaemonPtyProvider implements IPtyProvider {
   inspectProcess(id: string) {
     return this.hasPty(id)
       ? inspectPtyProviderProcess(this.providerFor(id), id)
-      : Promise.reject(new Error('terminal_gone'))
+      : Promise.reject(new PtyGoneError(this.ptyAbsenceVerdict(id)))
   }
   async confirmForegroundProcess(id: string): Promise<string | null> {
     return this.providerFor(id).confirmForegroundProcess?.(id) ?? null

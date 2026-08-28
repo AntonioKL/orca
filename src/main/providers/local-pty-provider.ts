@@ -45,6 +45,7 @@ import { stripInheritedBuildModeEnv } from '../pty/build-mode-env'
 import { stripLegacyTerminalShimEnv } from '../pty/legacy-terminal-shim-dir'
 import { dropIncoherentCondaActivationEnv } from '../pty/conda-activation-env'
 import { SessionNotFoundError } from '../daemon/daemon-errors'
+import { BoundedMap } from '../../shared/bounded-map'
 import { resolvePathEnvKey } from '../pty/windows-environment-path'
 import { isHostCodexHomeForWsl, isWslCodexHomeForHost } from '../pty/codex-home-wsl-env'
 import { addWslEnvKeys } from '../wsl-env'
@@ -154,6 +155,10 @@ const ptyPhysicalExits = new Map<string, PhysicalExitTracker>()
 // shell's, so its exit numbers must not be read as the agent's (STA-4536).
 const ptyReportsChildExitStatus = new Map<string, boolean>()
 const ptyForceKillTimers = new Map<string, ReturnType<typeof setTimeout>>()
+// Why a tombstone rather than `!ptyProcesses.has(id)`: bare absence also describes an id this
+// provider never owned (a restored daemon session read before the swap), which observes nothing.
+// Only ids whose exit this provider watched may answer `exited`; eviction degrades to unverifiable.
+const ptyObservedExits = new BoundedMap<string, true>({ maxEntries: 1_024 })
 
 export const LOCAL_PTY_PHYSICAL_EXIT_TIMEOUT_MS = 8_000
 export const LOCAL_PTY_GRACEFUL_FORCE_TIMEOUT_MS = 5_000
@@ -872,6 +877,7 @@ export class LocalPtyProvider implements IPtyProvider {
     createPtyPhysicalExit(id)
     ptyReportsChildExitStatus.set(id, spawnResult.reportsChildExitStatus !== false)
     ptyProcesses.set(id, proc)
+    ptyObservedExits.delete(id)
     ptyInitialCwd.set(id, cwd)
     if (spawnedWslDistro !== undefined) {
       ptyWslDistroById.set(id, spawnedWslDistro)
@@ -1041,6 +1047,7 @@ export class LocalPtyProvider implements IPtyProvider {
       })
       const wasTerminationRequested = ptyTerminationMode.has(id)
       ptyPhysicalExits.get(id)?.markExited()
+      ptyObservedExits.set(id, true)
       // Why: neutralize proc.kill before destroy — node-pty SIGHUPs on socket 'close', which can race here and signal a reaped/recycled pid.
       if (process.platform !== 'win32') {
         ;(proc as unknown as { kill: (sig?: string) => void }).kill = () => {}
@@ -1104,6 +1111,8 @@ export class LocalPtyProvider implements IPtyProvider {
   hasPty(id: string): boolean {
     return ptyProcesses.has(id)
   }
+  ptyAbsenceVerdict = (id: string): 'exited' | 'unverifiable' =>
+    ptyObservedExits.has(id) ? 'exited' : 'unverifiable'
   write(id: string, data: string): boolean {
     // Cooked PTYs echo private DSR/OSC replies; CPR/DA stay immediate unless one of
     // those is still held, which they must not overtake (#13137, #7329, #15559).
@@ -1636,6 +1645,7 @@ export class LocalPtyProvider implements IPtyProvider {
       destroyPtyProcess(proc, { alreadyKilled: true })
       // Why: app quit replaces node-pty's onExit as final owner; overlapping shutdown waiters must join this boundary.
       ptyPhysicalExits.get(id)?.markExited()
+      ptyObservedExits.set(id, true)
       clearPtyState(id)
     }
   }
@@ -1647,5 +1657,6 @@ export function _resetLocalPtyProviderStateForTest(): void {
   for (const id of ptyProcesses.keys()) {
     clearPtyState(id)
   }
+  ptyObservedExits.clear()
   loadGeneration = 0
 }

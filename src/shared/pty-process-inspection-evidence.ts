@@ -54,6 +54,34 @@ export function buildPtyProcessInspectionWireResult(
   }
 }
 
+const LOST_ROUTE_REASON = 'no provider could route to this PTY'
+
+/**
+ * The published shape for a PTY the host has no handle for, honest about which
+ * absence it is: a watched exit publishes positive `exited` evidence and no
+ * `unavailable`, while a lost route publishes `unverifiable` and keeps
+ * `unavailable` — which now means exactly "could not ask". The legacy fields are
+ * `null` / `false` either way, so a client that reads only those sees no change.
+ */
+export function buildAbsentPtyInspection(
+  absence: 'exited' | 'unverifiable',
+  reason = LOST_ROUTE_REASON
+): PtyProcessInspectionWireResult & { unavailable?: true } {
+  if (absence === 'exited') {
+    return buildPtyProcessInspectionWireResult(
+      { verdict: 'observed', processName: null },
+      { verdict: 'exited' }
+    )
+  }
+  return {
+    ...buildPtyProcessInspectionWireResult(
+      { verdict: 'unverifiable', reason },
+      { verdict: 'unverifiable', reason }
+    ),
+    unavailable: true
+  }
+}
+
 /**
  * Read the evidence off a wire result, tolerating peers this client cannot
  * vouch for. A host that predates the field gets the legacy interpretation —

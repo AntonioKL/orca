@@ -271,6 +271,51 @@ it('rejects completion inspection instead of borrowing the fallback provider', a
   await expect(provider.inspectProcess('unmapped-session')).rejects.toThrow('terminal_gone')
 })
 
+describe('DegradedDaemonPtyProvider.ptyAbsenceVerdict', () => {
+  it('calls an id with no route unverifiable, never exited', () => {
+    const provider = new DegradedDaemonPtyProvider({
+      current: createDaemonAdapter('daemon'),
+      legacy: [],
+      fallback: createProvider('fallback')
+    })
+
+    expect(provider.hasPty('unmapped-session')).toBe(false)
+    expect(provider.ptyAbsenceVerdict('unmapped-session')).toBe('unverifiable')
+  })
+
+  it('passes through the routed owner verdict for a watched exit', async () => {
+    const fallbackSessions: string[] = []
+    const fallback = createProvider('fallback', fallbackSessions) as ReturnType<
+      typeof createProvider
+    > & { ptyAbsenceVerdict: (id: string) => 'exited' | 'unverifiable' }
+    fallback.ptyAbsenceVerdict = vi.fn(() => 'exited' as const)
+    const provider = new DegradedDaemonPtyProvider({
+      current: createDaemonAdapter('daemon'),
+      legacy: [],
+      fallback
+    })
+    const fresh = await provider.spawn({ cols: 80, rows: 24 })
+    fallbackSessions.splice(0)
+
+    expect(provider.hasPty(fresh.id)).toBe(false)
+    expect(provider.ptyAbsenceVerdict(fresh.id)).toBe('exited')
+  })
+
+  it('stays unverifiable when the routed owner cannot vouch for the absence', async () => {
+    const fallbackSessions: string[] = []
+    const fallback = createProvider('fallback', fallbackSessions)
+    const provider = new DegradedDaemonPtyProvider({
+      current: createDaemonAdapter('daemon'),
+      legacy: [],
+      fallback
+    })
+    const fresh = await provider.spawn({ cols: 80, rows: 24 })
+    fallbackSessions.splice(0)
+
+    expect(provider.ptyAbsenceVerdict(fresh.id)).toBe('unverifiable')
+  })
+})
+
 it('preserves unavailable inspection from an owning daemon', async () => {
   const daemon = createDaemonAdapter('daemon', ['daemon-session'])
   vi.mocked(daemon.inspectProcess).mockResolvedValue({

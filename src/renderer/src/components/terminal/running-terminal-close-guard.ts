@@ -127,16 +127,18 @@ export function guardRunningTerminalClose(params: {
       if (decided) {
         return
       }
-      // Why: fail open on an *answered* probe, matching the Cmd+W pane path — a rejection
-      // (wedged relay, legacy provider) or a stale remote handle is not evidence of a live
-      // child, and a close button that silently does nothing is worse than closing a busy tab.
+      // Why: fail open on a *rejection* (wedged relay, legacy provider), matching the Cmd+W
+      // pane path — a close button that silently does nothing is worse than closing a busy
+      // tab. But `unavailable` is an answered "could not route to this pane", and this
+      // guard's own timeout already asks on an unanswered probe, so it asks here too — the
+      // same verdict the window-close guard blocks on. A watched local exit no longer
+      // carries it, so a confirmed-dead pane still closes silently.
       const busyPtyIds = ptyIds.filter((_, index) => {
         const result = results[index]
-        return (
-          result?.status === 'fulfilled' &&
-          result.value.hasChildProcesses &&
-          result.value.unavailable !== true
-        )
+        if (result?.status !== 'fulfilled') {
+          return false
+        }
+        return result.value.unavailable === true || result.value.hasChildProcesses
       })
       if (busyPtyIds.length === 0) {
         closeNow()
