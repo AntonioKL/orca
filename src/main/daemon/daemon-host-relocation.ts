@@ -373,8 +373,6 @@ export function pruneOldDaemonHosts(evidence: PinnedDaemonVersionsEvidence): voi
         continue
       case 'exited':
         break
-      default:
-        verdict satisfies never
     }
     try {
       rmSync(join(root, entry.name), { recursive: true, force: true })

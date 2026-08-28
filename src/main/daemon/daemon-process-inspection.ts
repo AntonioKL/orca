@@ -43,8 +43,6 @@ export function inspectProcessLiveness(pid: number): ProcessLivenessVerdict {
       return { status: 'exited' }
     case 'unavailable':
       return { status: 'unverifiable', reason: 'the daemon process could not be queried' }
-    default:
-      return signal satisfies never
   }
 }
 
@@ -59,8 +57,6 @@ export function mergeProcessLivenessVerdict(
       return current?.status === 'live' ? current : next
     case 'exited':
       return current ?? next
-    default:
-      return next satisfies never
   }
 }
 
