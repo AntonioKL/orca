@@ -190,4 +190,34 @@ describe('fish private command markers (real fish)', () => {
 
     expect(stdout).not.toContain(`${OSC}133;D`)
   })
+
+  // Why this pairing matters: `onCommandStarted` (OSC 133;C) is what cancels the
+  // deferred identity drop a previous `D` scheduled. A `D` with no `C` therefore
+  // retires a pane's live agent identity with nothing left to invalidate it, so
+  // the two markers have to share one capability gate.
+  itWithFish('emits neither lifecycle marker when base64 is unavailable', () => {
+    const empty = mkdtempSync(join(tmpdir(), 'orca-no-b64-'))
+    // Replaces PATH rather than prefixing it: the point is that `base64` resolves nowhere.
+    const stripBase64 = `set -gx PATH ${JSON.stringify(empty)}; `
+    const run = (script: string): string =>
+      execFileSync(FISH_PATH, ['-l', '-C', fishInit(), '-c', `${stripBase64}${script}`], {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          [SHELL_COMMAND_NONCE_ENV]: NONCE,
+          [SHELL_INTEGRATION_CONTEXT_ENV]: SHELL_INTEGRATION_DIRECT_CONTEXT
+        }
+      })
+    try {
+      // Pre-existing behaviour: no command text and no command-start.
+      const started = run('emit fish_preexec "echo no-b64"')
+      expect(started).not.toContain('orca-cmd')
+      expect(started).not.toContain(`${OSC}133;C`)
+      // The half that was unguarded: postexec must stay silent too.
+      const finished = run('false; emit fish_postexec "false"')
+      expect(finished).not.toContain(`${OSC}133;D`)
+    } finally {
+      rmSync(empty, { recursive: true, force: true })
+    }
+  })
 })

@@ -68,6 +68,10 @@ function __orca_command_finished --on-event fish_postexec --no-scope-shadowing
   # Why captured first: every later command overwrites $status before it is read.
   set -l __orca_exit_status $status
   __orca_command_markers_allowed; or return
+  # Why the same base64 gate as fish_preexec, which the exit status does not need:
+  # it is the only condition that can stop preexec emitting 133;C, and a D with no
+  # C retires a pane's live identity with nothing left to invalidate it.
+  type -q base64; or return
   builtin printf '\\e]133;D;%s\\a' "$__orca_exit_status"
 end`
 }
