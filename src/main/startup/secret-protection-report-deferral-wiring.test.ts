@@ -39,7 +39,17 @@ describe('secret protection report deferral wiring', () => {
     expect(start).toBeGreaterThanOrEqual(0)
     const end = source.indexOf('\n  })', start)
     expect(end).toBeGreaterThan(start)
+    // Why bound the length too: `end` is the next call-shaped close at this indent, not
+    // necessarily this call's. Nest the call one level deeper and that anchor overshoots into
+    // unrelated code, so the assertions below pass against a call site that never runs.
+    expect(end - start).toBeLessThan(500)
     const call = source.slice(start, end)
+
+    // Why anchor the indent: `SCHEDULE` matches anywhere, including as the body of an added
+    // `if (...) schedule(...)` guard, which leaves every assertion here true while the call
+    // stops running unconditionally. Pinning it as a statement at whenReady's own indent is
+    // what makes "this runs on every desktop startup" the thing under test.
+    expect(source).toContain(`\n  ${SCHEDULE}`)
 
     expect(call).toContain('deferUntilFirstWindow: !isServeMode')
     // Why assert the constants are absent too: `!isServeMode` being present does not stop a
