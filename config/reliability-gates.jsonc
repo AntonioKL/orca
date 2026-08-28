@@ -2148,9 +2148,7 @@
         },
         {
           "file": "src/cli/runtime/serve-signal-exit-diagnostic.test.ts",
-          "assertions": [
-            "late update handoff failure cannot rearm termination after child exit"
-          ]
+          "assertions": ["late update handoff failure cannot rearm termination after child exit"]
         },
         {
           "file": "src/main/serve-update-handoff.test.ts",
@@ -16840,9 +16838,7 @@
         },
         {
           "file": "src/main/browser/agent-browser-bridge-tab-routing.test.ts",
-          "assertions": [
-            "closing a tab retires the exact named agent-browser session"
-          ]
+          "assertions": ["closing a tab retires the exact named agent-browser session"]
         },
         {
           "file": "src/main/startup/serve-signal-handlers.test.ts",
