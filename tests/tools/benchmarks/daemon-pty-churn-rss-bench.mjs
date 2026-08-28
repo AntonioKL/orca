@@ -59,8 +59,10 @@ function parseArgs(argv) {
     const next = () => argv[++i]
     const num = (name) => {
       const value = Number(next())
-      if (!Number.isFinite(value) || value < 0) {
-        throw new Error(`${name} requires a non-negative number`)
+      // Integers only: a fractional cadence samples erratically through `%`,
+      // and fractional byte/cycle counts have no meaning here.
+      if (!Number.isSafeInteger(value) || value < 0) {
+        throw new Error(`${name} requires a non-negative integer`)
       }
       return value
     }
@@ -73,6 +75,11 @@ function parseArgs(argv) {
         break
       case '--sample-every':
         args.sampleEvery = num('--sample-every')
+        // `cycle % 0` is NaN: the run would complete with only the baseline
+        // sample and summarize as a plausible-looking zero-growth series.
+        if (args.sampleEvery === 0) {
+          throw new Error('--sample-every requires a positive integer')
+        }
         break
       case '--output-bytes':
         args.outputBytes = num('--output-bytes')
@@ -180,10 +187,13 @@ async function runSeries({ seriesName, args, protocolVersion, forceGcBeforeSampl
   const client = new BenchDaemonClient(socketPath, tokenPath, protocolVersion, (sessionId, chars) =>
     outputCharsBySession.set(sessionId, (outputCharsBySession.get(sessionId) ?? 0) + chars)
   )
-  const inspector = new InspectorSession(await inspectorUrlPromise)
   const samples = []
   const startedAt = Date.now()
+  // Inside the try: a rejected inspector-URL wait (timeout, early child exit)
+  // must still reach the finally that kills the child and removes runDir.
+  let inspector = null
   try {
+    inspector = new InspectorSession(await inspectorUrlPromise)
     await withTimeout(
       new Promise((resolvePromise, reject) => {
         child.once('message', (message) => {
@@ -258,7 +268,9 @@ async function runSeries({ seriesName, args, protocolVersion, forceGcBeforeSampl
       }
       await client.request('kill', { sessionId, immediate: true })
       outputCharsBySession.delete(sessionId)
-      if (cycle % args.sampleEvery === 0) {
+      // Always sample the terminal cycle too: a cadence that does not divide
+      // --cycles would otherwise drop the final measurement from the summary.
+      if (cycle % args.sampleEvery === 0 || cycle === args.cycles) {
         await takeSample(cycle)
       }
     }
@@ -301,7 +313,7 @@ async function runSeries({ seriesName, args, protocolVersion, forceGcBeforeSampl
     error.message = `${error.message}\ndaemon stderr tail:\n${stderrTail}`
     throw error
   } finally {
-    inspector.close()
+    inspector?.close()
     client.destroy()
     if (!childExited) {
       // Only the exact child we spawned — never a pattern or name kill.
