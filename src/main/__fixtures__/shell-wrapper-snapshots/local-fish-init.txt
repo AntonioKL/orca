@@ -1,5 +1,5 @@
-set -l __orca_shell_command_nonce "$ORCA_SHELL_COMMAND_NONCE"
-set -l __orca_shell_integration_context "$ORCA_SHELL_INTEGRATION_CONTEXT"
+set -g __orca_shell_command_nonce "$ORCA_SHELL_COMMAND_NONCE"
+set -g __orca_shell_integration_context "$ORCA_SHELL_INTEGRATION_CONTEXT"
 set -e ORCA_SHELL_COMMAND_NONCE ORCA_SHELL_INTEGRATION_CONTEXT
 function __orca_command_markers_allowed --no-scope-shadowing
   test -n "$__orca_shell_command_nonce"; or return 1

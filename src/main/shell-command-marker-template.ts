@@ -39,8 +39,10 @@ export const ZSH_COMMAND_MARKER_EMIT_BLOCK = `if __orca_command_markers_allowed 
   fi`
 
 export function getFishCommandMarkerInitCommand(): string {
-  return `set -l __orca_shell_command_nonce "$${SHELL_COMMAND_NONCE_ENV}"
-set -l __orca_shell_integration_context "$${SHELL_INTEGRATION_CONTEXT_ENV}"
+  // Why -g: `set -l` here is scoped to the sourced init file and is already gone
+  // when fish_preexec fires, so a local nonce silently disables every marker.
+  return `set -g __orca_shell_command_nonce "$${SHELL_COMMAND_NONCE_ENV}"
+set -g __orca_shell_integration_context "$${SHELL_INTEGRATION_CONTEXT_ENV}"
 set -e ${SHELL_COMMAND_NONCE_ENV} ${SHELL_INTEGRATION_CONTEXT_ENV}
 function __orca_command_markers_allowed --no-scope-shadowing
   test -n "$__orca_shell_command_nonce"; or return 1
