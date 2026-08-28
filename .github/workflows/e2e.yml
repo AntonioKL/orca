@@ -40,10 +40,9 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.ref }}
 
-      # Why: the build's plain-Node daemon smoke load resolves node-pty.
+      # Why no native-runtime: this job only produces JS bundles. Native modules
+      # are prepared in the consumer shards that actually launch Electron.
       - uses: ./.github/actions/install-node-dependencies
-        with:
-          native-runtime: node
 
       # Why: building here avoids parallel builds inside Playwright globalSetup;
       # paired-browser specs also need the standalone web bundle.
