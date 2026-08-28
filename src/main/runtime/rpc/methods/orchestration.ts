@@ -29,7 +29,7 @@ import {
   type SendRecipientWarning
 } from './orchestration-recipient-routing'
 import { buildInjectRejectionMessage } from './orchestration-inject-rejection-message'
-import { resolveRunScope } from './orchestration-run-scope'
+import { assertCallerHandleMatchesEvidence, resolveRunScope } from './orchestration-run-scope'
 import { ORCHESTRATION_RUN_METHODS } from './orchestration-runs'
 import { ORCHESTRATION_WORKER_METHODS } from './orchestration-worker-methods'
 import { ORCHESTRATION_FEDERATION_METHODS } from './orchestration-federation-methods'
@@ -38,7 +38,7 @@ import type { OrcaRuntimeService } from '../../orca-runtime'
 import type { RunRow } from '../../orchestration/types'
 import { encodeFederatedControlMessage } from '../../orchestration/federation-control-message'
 import { bindCoordinatorMutationPayload } from '../../orchestration/dispatch-message-binding'
-import { isCallerCurrentRunCoordinator } from './orchestration-coordinator-caller'
+import { resolveAttestedRunCoordinatorPane } from './orchestration-coordinator-caller'
 import {
   ORCHESTRATION_FEDERATION_CONTROL_MAIL_PROTOCOL_VERSION,
   ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_PROTOCOL_VERSION
@@ -450,8 +450,10 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
         runtime,
         orchestrationCapability,
         legacyCoordinatorRunId,
+        legacyCoordinatorAuthority,
         revalidateLegacyCoordinator,
         orchestrationCompatibilityCallerAuthority,
+        orchestrationCompatibilityEvidence,
         recordMutationReceipt,
         signal
       }
@@ -561,6 +563,22 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
           },
           ...(lifecycle ? { lifecycle } : {})
         }
+      }
+      const lifecyclePayload = isDispatchMutationMessageType(params.type)
+        ? parseRemoteWorkerPayload(params.payload)
+        : undefined
+      const lifecycleDispatch =
+        typeof lifecyclePayload?.dispatchId === 'string'
+          ? db.getDispatchContextById(lifecyclePayload.dispatchId)
+          : undefined
+      const dispatchCapabilityAuthenticatesLifecycle = Boolean(
+        orchestrationCapability && lifecycleDispatch?.capability_hash
+      )
+      if (!dispatchCapabilityAuthenticatesLifecycle) {
+        assertCallerHandleMatchesEvidence(runtime, from, orchestrationCompatibilityEvidence, {
+          callerAuthority: attestedCaller,
+          allowLegacyAuthority: Boolean(legacyCoordinatorAuthority)
+        })
       }
       const routing = resolveMessageRun(runtime, {
         from,
@@ -1377,13 +1395,24 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
     params: ReplyParams,
     handler: async (
       params,
-      { orchestrationCompatibilityEvidence, runtime, legacyCoordinatorRunId }
+      {
+        orchestrationCompatibilityCallerAuthority,
+        orchestrationCompatibilityEvidence,
+        legacyCoordinatorAuthority,
+        legacyCoordinatorRunId,
+        runtime
+      }
     ) => {
       const db = runtime.getOrchestrationDb()
       const original = db.getMessageById(params.id)
       if (!original) {
         throw new Error(`Message not found: ${params.id}`)
       }
+      const from = params.from ?? original.to_handle
+      assertCallerHandleMatchesEvidence(runtime, from, orchestrationCompatibilityEvidence, {
+        callerAuthority: orchestrationCompatibilityCallerAuthority,
+        allowLegacyAuthority: Boolean(legacyCoordinatorAuthority)
+      })
       if (
         legacyCoordinatorRunId &&
         (original.run_id !== legacyCoordinatorRunId ||
@@ -1445,10 +1474,18 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
         }
       }
 
+      resolveRunScope(runtime, {
+        runId: original.run_id,
+        callerTerminalHandle: from,
+        requireCurrentConsumer: true,
+        legacyCoordinatorRunId,
+        callerEvidence: orchestrationCompatibilityEvidence
+      })
+
       db.markAsRead([original.id])
 
       const reply = db.insertMessage({
-        from: params.from ?? original.to_handle,
+        from,
         to: original.from_handle,
         subject: `Re: ${original.subject}`,
         body: params.body,
@@ -1551,7 +1588,12 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
         return base
       })
       const callerPaneKey = params.callerTerminalHandle
-        ? runtime.getLiveTerminalPaneKey(params.callerTerminalHandle)
+        ? resolveAttestedRunCoordinatorPane(
+            runtime,
+            run,
+            params.callerTerminalHandle,
+            orchestrationCompatibilityEvidence
+          )
         : null
       return {
         runId: run.id,
@@ -1561,8 +1603,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
             params.callerTerminalHandle &&
             run.legacy === 0 &&
             callerPaneKey !== null &&
-            db.getCurrentRunForPane(callerPaneKey)?.id === run.id &&
-            isCallerCurrentRunCoordinator(runtime, run, params.callerTerminalHandle, callerPaneKey)
+            db.getCurrentRunForPane(callerPaneKey)?.id === run.id
           )
         },
         tasks: params.brief ? abbreviateOrchestrationTasks(tasks) : tasks,

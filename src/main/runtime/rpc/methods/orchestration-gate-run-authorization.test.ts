@@ -242,7 +242,7 @@ describe('orchestration gate Run authorization', () => {
       ok: true,
       result: {
         runId: runA,
-        binding: { currentConsumer: false },
+        binding: { currentConsumer: true },
         count: 1,
         gates: [{ id: ownGate.id }]
       }

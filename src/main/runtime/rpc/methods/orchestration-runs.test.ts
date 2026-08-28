@@ -135,6 +135,8 @@ describe('orchestration RPC methods', () => {
         data: {
           effectsApplied: false,
           coordinatorStatus: 'live',
+          inspectCommandArgs: ['orchestration', 'run-show', '--id', created.run.id, '--json'],
+          retryCommandArgs: ['orchestration', 'run-use', '--id', created.run.id, '--json'],
           nextSteps: [
             expect.stringContaining('owning coordinator terminal'),
             expect.stringContaining('stop or exit that coordinator process'),
@@ -204,6 +206,8 @@ describe('orchestration RPC methods', () => {
         data: {
           effectsApplied: false,
           coordinatorStatus: 'unverifiable',
+          inspectCommandArgs: ['orchestration', 'run-show', '--id', run.id, '--json'],
+          retryCommandArgs: ['orchestration', 'run-use', '--id', run.id, '--json'],
           nextSteps: expect.arrayContaining([
             expect.stringContaining('Restore connectivity to the owning host'),
             expect.stringContaining('Loss of contact is not evidence of exit'),
@@ -636,7 +640,17 @@ describe('orchestration RPC methods', () => {
 
       await expect(use).rejects.toMatchObject({
         code: 'consumer_fenced',
-        data: { effectsApplied: false }
+        data: {
+          effectsApplied: false,
+          coordinatorStatus: 'unverifiable',
+          claimantStatus: 'changed',
+          inspectCommandArgs: ['orchestration', 'run-show', '--id', target.run.id, '--json'],
+          retryCommandArgs: ['orchestration', 'run-use', '--id', target.run.id, '--json'],
+          nextSteps: expect.arrayContaining([
+            expect.stringContaining('same Orca CLI executable'),
+            expect.stringContaining('one stable replacement agent process')
+          ])
+        }
       })
       expect(db.getRun(target.run.id)).toMatchObject({
         coordinator_handle: 'term_old',

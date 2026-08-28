@@ -6,7 +6,10 @@ import type { OrcaRuntimeService } from '../../orca-runtime'
 import type { RpcContext, RpcRequest } from '../core'
 import { RpcDispatcher } from '../dispatcher'
 import { ORCHESTRATION_METHODS } from './orchestration'
-import { createOrchestrationRpcHarness } from './orchestration-rpc-test-harness'
+import {
+  COORDINATOR_PANE_KEY,
+  createOrchestrationRpcHarness
+} from './orchestration-rpc-test-harness'
 import { createRootDispatch } from '../../orchestration/db/root-dispatch-test-fixture'
 
 type SendWarning = { code: string; recipient: string; message: string }
@@ -582,6 +585,11 @@ function request(
     method: 'orchestration.send',
     params: { from: 'term_coord', to, subject: 'retry', ...extraParams },
     orchestrationContractVersion: ORCHESTRATION_CONTRACT_VERSION,
-    orchestrationRequestId: requestId
+    orchestrationRequestId: requestId,
+    orchestrationCompatibilityEvidence: {
+      terminalHandle: 'term_coord',
+      paneKey: COORDINATOR_PANE_KEY,
+      launchToken: 'coordinator-launch-token'
+    }
   }
 }

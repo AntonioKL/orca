@@ -7,46 +7,14 @@ import {
   assertCallerHandleMatchesEvidence,
   resolveOrchestrationCaller
 } from './orchestration-run-scope'
-import type { RunRow } from '../../orchestration/types'
-import {
-  isCurrentRunCoordinator,
-  type RunCoordinatorIdentity
-} from '../../orchestration/run-coordinator-authority'
+import { isCurrentRunCoordinator } from '../../orchestration/run-coordinator-authority'
 import { isEquivalentPaneKey } from '../../orchestration/db/pane-key-match'
 import {
   isCallerCurrentRunCoordinator,
+  resolveAttestedRunCoordinatorPane,
   resolveRunCoordinatorIdentity
 } from './orchestration-coordinator-caller'
-
-async function observeRunCoordinator(
-  runtime: Parameters<typeof resolveOrchestrationCaller>[0],
-  run: RunRow,
-  resolvedIdentity?: RunCoordinatorIdentity | null
-) {
-  let status: 'live' | 'unverifiable' | 'exited' = 'unverifiable'
-  const processIncarnation =
-    run.coordinator_process_incarnation ?? resolvedIdentity?.processIncarnation
-  const hostScope = run.coordinator_host_scope ?? resolvedIdentity?.hostScope
-  if (processIncarnation && hostScope) {
-    status = await runtime.inspectTerminalProcessIncarnationLiveness(processIncarnation, hostScope)
-  } else if (run.coordinator_handle) {
-    const verdict = runtime.getTerminalLivenessVerdict(run.coordinator_handle)
-    if (runtime.getLiveTerminalPaneKey(run.coordinator_handle) || verdict?.status === 'live') {
-      status = 'live'
-    } else if (verdict?.status === 'unverifiable') {
-      status = 'unverifiable'
-    } else if (verdict?.status === 'exited') {
-      status = 'exited'
-    }
-  }
-  return {
-    coordinatorHandle: run.coordinator_handle,
-    coordinatorPaneKey: run.coordinator_pane_key,
-    coordinatorProcessIncarnation: run.coordinator_process_incarnation,
-    coordinatorHostScope: run.coordinator_host_scope,
-    status
-  }
-}
+import { observeRunCoordinator } from './orchestration-run-coordinator-observation'
 
 const RunCreateParams = z.object({
   objective: requiredString('Missing --objective'),
@@ -105,7 +73,7 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
         orchestrationCompatibilityCallerAuthority: preflightCallerAuthority
       }
     ) => {
-      const callerAuthority =
+      let callerAuthority =
         preflightCallerAuthority ??
         runtime.verifyOrchestrationCompatibilityCaller(orchestrationCompatibilityEvidence) ??
         undefined
@@ -126,10 +94,6 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
           { effectsApplied: false }
         )
       }
-      assertCallerHandleMatchesEvidence(runtime, params.from, orchestrationCompatibilityEvidence, {
-        callerAuthority,
-        allowLegacyAuthority: Boolean(legacyCoordinatorAuthority)
-      })
       const db = runtime.getOrchestrationDb()
       const targetRun = db.getRun(params.id)
       const identity = resolveRunCoordinatorIdentity(runtime, params.from, paneKey)
@@ -150,6 +114,23 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
         incumbentIdentity.processIncarnation === identity.processIncarnation &&
         incumbentIdentity.hostScope === identity.hostScope
       )
+      const persistedProcessContinuity = Boolean(
+        targetRun?.coordinator_process_incarnation &&
+        targetRun.coordinator_handle !== params.from &&
+        targetRun.coordinator_process_incarnation === identity.processIncarnation &&
+        targetRun.coordinator_host_scope === identity.hostScope
+      )
+      const sameProcessRemint = dynamicProcessContinuity || persistedProcessContinuity
+      if (!callerAuthority && sameProcessRemint && orchestrationCompatibilityEvidence) {
+        callerAuthority =
+          runtime.verifyOrchestrationCompatibilityCaller(orchestrationCompatibilityEvidence, {
+            currentRuntimeLaunchSufficient: true
+          }) ?? undefined
+      }
+      assertCallerHandleMatchesEvidence(runtime, params.from, orchestrationCompatibilityEvidence, {
+        callerAuthority,
+        allowLegacyAuthority: Boolean(legacyCoordinatorAuthority)
+      })
       const restoredMigratedContinuity = Boolean(
         targetRun &&
         targetRun.coordinator_authority_revision < 0 &&
@@ -184,7 +165,9 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
       const revalidatedCaller = orchestrationCompatibilityEvidence
         ? runtime.verifyOrchestrationCompatibilityCaller(
             orchestrationCompatibilityEvidence,
-            params.takeoverLegacy ? { currentRuntimeLaunchSufficient: true } : undefined
+            params.takeoverLegacy || sameProcessRemint
+              ? { currentRuntimeLaunchSufficient: true }
+              : undefined
           )
         : null
       const restoredContinuityStillAttested =
@@ -208,14 +191,21 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
         currentIdentity.processIncarnation !== identity.processIncarnation ||
         currentIdentity.hostScope !== identity.hostScope
       ) {
+        const coordinatorStatus = incumbentObservation?.status === 'live' ? 'live' : 'unverifiable'
         throw new OrchestrationError(
           'consumer_fenced',
           'The claiming coordinator process changed while Run authority was being checked. No effects were applied.',
           {
             effectsApplied: false,
+            coordinatorStatus,
+            claimantStatus: 'changed',
+            inspectCommandArgs: ['orchestration', 'run-show', '--id', params.id, '--json'],
+            retryCommandArgs: ['orchestration', 'run-use', '--id', params.id, '--json'],
             nextSteps: [
-              `Inspect current authority with orca orchestration run-show --id ${params.id} --json.`,
-              `Retry orca orchestration run-use --id ${params.id} --json from the replacement coordinator process.`
+              `Inspect current authority by running orchestration run-show --id ${params.id} --json with the same Orca CLI executable.`,
+              coordinatorStatus === 'live'
+                ? 'Continue from the owning coordinator; do not retry while it remains live.'
+                : `From one stable replacement agent process, run orchestration run-use --id ${params.id} --json with that executable so Orca can re-prove the incumbent state.`
             ]
           }
         )
@@ -227,7 +217,7 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
         coordinatorPaneKey: paneKey,
         coordinatorProcessIncarnation: identity.processIncarnation,
         coordinatorHostScope: identity.hostScope,
-        authorityContinuity: dynamicProcessContinuity || restoredMigratedContinuity,
+        authorityContinuity: sameProcessRemint || restoredMigratedContinuity,
         incumbentObservation,
         takeoverLegacy: params.takeoverLegacy,
         legacyCoordinatorAuthority
@@ -269,13 +259,20 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
   defineMethod({
     name: 'orchestration.runShow',
     params: RunShowParams,
-    handler: (params, { runtime }) => {
+    handler: (params, { orchestrationCompatibilityEvidence, runtime }) => {
       const db = runtime.getOrchestrationDb()
       const run = db.getRun(params.id)
       if (!run) {
         throw new OrchestrationError('run_not_found', `Run ${params.id} was not found.`)
       }
-      const callerPaneKey = params.from ? runtime.getLiveTerminalPaneKey(params.from) : null
+      const callerPaneKey = params.from
+        ? resolveAttestedRunCoordinatorPane(
+            runtime,
+            run,
+            params.from,
+            orchestrationCompatibilityEvidence
+          )
+        : null
       return {
         run,
         binding: {
@@ -283,8 +280,7 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
             params.from &&
             run.legacy === 0 &&
             callerPaneKey !== null &&
-            db.getCurrentRunForPane(callerPaneKey)?.id === run.id &&
-            isCallerCurrentRunCoordinator(runtime, run, params.from, callerPaneKey)
+            db.getCurrentRunForPane(callerPaneKey)?.id === run.id
           )
         }
       }

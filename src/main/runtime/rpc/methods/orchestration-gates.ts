@@ -5,7 +5,7 @@ import type { GateStatus } from '../../orchestration/db'
 import { Coordinator } from '../../orchestration/coordinator'
 import { resolveRunScope } from './orchestration-run-scope'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
-import { isCallerCurrentRunCoordinator } from './orchestration-coordinator-caller'
+import { resolveAttestedRunCoordinatorPane } from './orchestration-coordinator-caller'
 
 // Why: the coordinator instance is stored at module scope so orchestration.runStop
 // can signal it to halt. Only one coordinator can run at a time (enforced by
@@ -203,7 +203,14 @@ export const ORCHESTRATION_GATE_METHODS: RpcMethod[] = [
           status: params.status as GateStatus
         })
         .filter((gate) => gate.run_id === run.id)
-      const callerPaneKey = params.from ? runtime.getLiveTerminalPaneKey(params.from) : null
+      const callerPaneKey = params.from
+        ? resolveAttestedRunCoordinatorPane(
+            runtime,
+            run,
+            params.from,
+            orchestrationCompatibilityEvidence
+          )
+        : null
       return {
         runId: run.id,
         binding: {
@@ -211,8 +218,7 @@ export const ORCHESTRATION_GATE_METHODS: RpcMethod[] = [
             params.from &&
             run.legacy === 0 &&
             callerPaneKey !== null &&
-            db.getCurrentRunForPane(callerPaneKey)?.id === run.id &&
-            isCallerCurrentRunCoordinator(runtime, run, params.from, callerPaneKey)
+            db.getCurrentRunForPane(callerPaneKey)?.id === run.id
           )
         },
         gates,

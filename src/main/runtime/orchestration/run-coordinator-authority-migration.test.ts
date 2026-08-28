@@ -44,6 +44,22 @@ describe('Run coordinator authority migration', () => {
       coordinator_host_scope: null,
       coordinator_authority_revision: -1
     })
+    const currentRun = db.createRun({
+      objective: 'Created after v31 migration',
+      coordinatorHandle: 'term_current',
+      coordinatorPaneKey: 'tab_current:22222222-2222-4222-9222-222222222222',
+      coordinatorProcessIncarnation: 'current:incarnation-1',
+      coordinatorHostScope: JSON.stringify({ kind: 'local', hostId: 'local' })
+    })
+    expect(currentRun.coordinator_authority_revision).toBe(0)
+    expect(
+      isCurrentRunCoordinator(currentRun, {
+        handle: 'term_current',
+        paneKey: 'tab_current:22222222-2222-4222-9222-222222222222',
+        processIncarnation: 'current:incarnation-1',
+        hostScope: JSON.stringify({ kind: 'local', hostId: 'local' })
+      })
+    ).toBe(true)
     expect(
       isCurrentRunCoordinator(db.getRun(run.id)!, {
         handle: 'term_replacement',

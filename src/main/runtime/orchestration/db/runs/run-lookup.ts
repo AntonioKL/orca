@@ -140,9 +140,11 @@ export function unbindOtherRunsForPane(
           `Run ${run.id} is owned by another coordinator process in this pane. No effects were applied.`,
           {
             effectsApplied: false,
+            inspectCommandArgs: ['orchestration', 'run-show', '--id', run.id, '--json'],
+            retryCommandArgs: ['orchestration', 'run-use', '--id', run.id, '--json'],
             nextSteps: [
-              `Inspect current authority with orca orchestration run-show --id ${run.id} --json.`,
-              `To switch Runs from this replacement process, first claim the existing Run with orca orchestration run-use --id ${run.id} --json after its owning host proves the incumbent exited.`,
+              `Inspect current authority by running orchestration run-show --id ${run.id} --json with the same Orca CLI executable.`,
+              `To switch Runs from this replacement process, first run orchestration run-use --id ${run.id} --json with that executable after its owning host proves the incumbent exited.`,
               'Do not retry the create or bind command unchanged while another process owns the pane.'
             ]
           }

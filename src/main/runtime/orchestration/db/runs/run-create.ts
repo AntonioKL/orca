@@ -28,8 +28,8 @@ export function createRun(
         `INSERT INTO runs (
            id, objective, coordinator_handle, coordinator_pane_key,
            coordinator_process_incarnation, coordinator_host_scope,
-           consumer_generation, legacy
-         ) VALUES (?, ?, ?, ?, ?, ?, 1, 0)`
+           coordinator_authority_revision, consumer_generation, legacy
+         ) VALUES (?, ?, ?, ?, ?, ?, 0, 1, 0)`
       )
       .run(
         id,

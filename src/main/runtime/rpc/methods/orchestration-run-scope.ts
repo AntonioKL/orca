@@ -44,11 +44,11 @@ export function assertCallerHandleMatchesEvidence(
   if (!attested) {
     throw new OrchestrationError(
       'consumer_fenced',
-      'Coordinator mutations require authenticated identity from a live Orca agent terminal. No effects were applied.',
+      'Orchestration mutations require authenticated identity from a live Orca agent terminal. No effects were applied.',
       {
         effectsApplied: false,
         nextSteps: [
-          'Run the command inside the coordinator agent terminal with the version-matched Orca CLI.',
+          'Run the command inside the invoking agent terminal with the version-matched Orca CLI.',
           'Omit --from; Orca resolves and attests the invoking agent terminal automatically.',
           'Use explicit Run reads for inspection; a copied terminal handle does not grant mutation authority.'
         ]
