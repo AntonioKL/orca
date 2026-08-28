@@ -771,7 +771,9 @@ describe('WorktreeCardAgents', () => {
     const markup = renderToStaticMarkup(<WorktreeCardAgents worktreeId="wt-1" />)
     const iconTitles = [...markup.matchAll(/title="([^"]+)"/g)].map((match) => match[1])
 
-    expect(iconTitles).toEqual([])
+    // Variety icons stay identity-free; the lone title is the group's state
+    // label, which every state glyph now carries (STA-5794).
+    expect(iconTitles).toEqual(['Working'])
     expect(markup).not.toContain('>5 working<')
     expect(markup).toContain('>+2<')
   })

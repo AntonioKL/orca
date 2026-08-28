@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { AgentStateDot, type AgentDotState } from './AgentStateDot'
+import { AgentStateDot, agentStateLabel, type AgentDotState } from './AgentStateDot'
 
 function renderMarkup(state: AgentDotState): string {
   return renderToStaticMarkup(React.createElement(AgentStateDot, { state }))
@@ -42,11 +42,11 @@ describe('AgentStateDot', () => {
     expect(markup).toContain('motion-reduce:border-t-yellow-500')
   })
 
-  it('renders monitoring as a static yellow radio glyph', () => {
+  it('renders monitoring as a static yellow heartbeat glyph', () => {
     const markup = renderMarkup('monitoring')
 
     expect(markup).toContain('aria-label="Monitoring background tasks"')
-    expect(markup).toContain('lucide-radio')
+    expect(markup).toContain('lucide-activity')
     expect(markup).toContain('text-yellow-500')
     expect(markup).not.toContain('data-agent-spinner')
   })
@@ -86,4 +86,39 @@ describe('AgentStateDot', () => {
       expect(classNames).not.toContain('bg-amber-500')
     }
   )
+
+  // Why: aria-label renders no hover tooltip, so every glyph read as unlabeled
+  // to sighted users until each branch also emitted a native title (STA-5794).
+  const ALL_STATES = [
+    'working',
+    'monitoring',
+    'blocked',
+    'waiting',
+    'interrupted',
+    'failed',
+    'done',
+    'idle',
+    'permission'
+  ] satisfies AgentDotState[]
+
+  it.each(ALL_STATES)('labels %s with a native hover tooltip', (state) => {
+    const title = renderMarkup(state).match(/<span[^>]*\stitle="([^"]*)"/)?.[1]
+
+    expect(title).toBe(agentStateLabel(state))
+  })
+
+  // Typecheck-time guard: a new AgentDotState member that ALL_STATES omits
+  // fails `pnpm tc`, so the tooltip case above can never silently skip a state.
+  type UncoveredState = Exclude<AgentDotState, (typeof ALL_STATES)[number]>
+  const _allStatesAreCovered: UncoveredState extends never ? true : never = true
+  void _allStatesAreCovered
+
+  it('lets a caller override the tooltip', () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(AgentStateDot, { state: 'done', title: 'Finished 2m ago' })
+    )
+
+    expect(markup).toContain('title="Finished 2m ago"')
+    expect(markup).toContain('aria-label="Done"')
+  })
 })

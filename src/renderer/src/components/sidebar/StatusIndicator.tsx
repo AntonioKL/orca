@@ -1,5 +1,5 @@
 import React from 'react'
-import { Radio } from 'lucide-react'
+import { Activity } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AgentQuestionIcon } from '@/components/AgentQuestionIcon'
 import { AgentWorkingSpinner } from '@/components/AgentWorkingSpinner'
@@ -48,7 +48,7 @@ const StatusIndicator = React.memo(function StatusIndicator({
         title={resolvedTitle}
         {...rest}
       >
-        <Radio className="size-3 text-yellow-500" aria-hidden="true" />
+        <Activity className="size-3 text-yellow-500" aria-hidden="true" />
       </span>
     )
   }
