@@ -195,6 +195,27 @@ describe('listTerminals liveness truth for restored leaves', () => {
     expect(runtime.getPtyLivenessVerdict('pty-proven-absent')).toBeNull()
   })
 
+  // A confirmed absence is positive evidence of the exit, so lost-contact doubt
+  // recorded by an earlier unanswerable probe is stale. Publishing
+  // `connected:false` while still reporting `unverifiable` would under-report a
+  // pane we hold proof about.
+  it('clears recorded doubt when the presence query later proves the pane absent', async () => {
+    let answer: boolean | null = null
+    const runtime = makeRuntimeWithLeaf({
+      leafPtyId: 'pty-doubted-then-absent',
+      controllerSessions: [],
+      hasPty: () => answer
+    })
+
+    await runtime.listTerminals(`id:${WORKTREE_ID}`)
+    expect(runtime.getPtyLivenessVerdict('pty-doubted-then-absent')?.status).toBe('unverifiable')
+
+    answer = false
+    const { terminals } = await runtime.listTerminals(`id:${WORKTREE_ID}`)
+    expect(terminals[0]).toMatchObject({ connected: false, writable: false })
+    expect(runtime.getPtyLivenessVerdict('pty-doubted-then-absent')).toBeNull()
+  })
+
   it('clears recorded doubt when the presence query later proves the pane live', async () => {
     let answer: boolean | null = null
     const runtime = makeRuntimeWithLeaf({

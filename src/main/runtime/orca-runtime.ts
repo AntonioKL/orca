@@ -34101,6 +34101,12 @@ export class OrcaRuntimeService {
           break
         case 'exited':
           provenAbsent = isConfirmedPtyAbsence(unlistedPresence)
+          // The probe positively answered absence, so lost-contact doubt from an
+          // earlier unanswerable probe is stale; leaving it would publish a pane
+          // we hold proof about as `unverifiable`.
+          if (provenAbsent) {
+            this.forgetPtyLivenessVerdict(leaf.ptyId)
+          }
           break
       }
     }
