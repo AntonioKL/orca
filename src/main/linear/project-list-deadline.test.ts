@@ -111,6 +111,25 @@ describe('Linear project list read deadline', () => {
     vi.useRealTimers()
   })
 
+  // Why: the page ceiling is the backstop the deadline cannot cover — a provider that keeps
+  // handing out fresh cursors inside the budget would otherwise walk forever.
+  it('stops an unbounded walk at the page ceiling and still reports truncation', async () => {
+    let page = 0
+    rawRequest.mockImplementation(() => {
+      page += 1
+      return Promise.resolve(
+        projectPage([`project-${page}`], { hasNextPage: true, endCursor: `cursor-${page}` })
+      )
+    })
+    const { listProjects } = await import('./linear-project-queries')
+
+    const result = await listProjects(undefined, null, 'workspace-1', true)
+
+    expect(result.items).toHaveLength(200)
+    expect(result.hasMore).toBe(true)
+    expect(rawRequest).toHaveBeenCalledTimes(200)
+  })
+
   // Why: an exhausted deadline that returned nothing must not be reported as an empty workspace.
   it('distinguishes a zero-result deadline exhaustion from an empty result', async () => {
     vi.useFakeTimers()

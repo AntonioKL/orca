@@ -44,4 +44,13 @@ describe('SSH Linear pagination contract', () => {
     expect(projectHelp).toContain('Omit --limit to walk until exhaustion or a safety backstop')
     expect(issueHelp).toContain('Omit --limit to walk until exhaustion or a safety backstop')
   })
+
+  // Why: the same command must not describe a different contract depending on the execution host.
+  it('matches the local command summaries in the remote linear listing', () => {
+    const groupHelp = getRemoteLinearHelp(parseRemoteCliArgs(['linear', '--help']))
+
+    expect(groupHelp).toContain('List Linear projects; omit --limit to walk until exhaustion')
+    expect(groupHelp).toContain('List Linear issues; omit --limit to walk until exhaustion')
+    expect(groupHelp).not.toContain('List connected Linear projects')
+  })
 })
