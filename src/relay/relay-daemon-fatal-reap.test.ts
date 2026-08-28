@@ -6,7 +6,9 @@ const daemonMocks = vi.hoisted(() => ({
   runtimePtyHandler: null as unknown,
   mockCreateShellPromptReadinessProbe: vi.fn(),
   mockPtySpawn: vi.fn(),
-  socketCleanup: vi.fn()
+  socketCleanup: vi.fn(),
+  relayLogLine: vi.fn(),
+  forceKillPosixPtyProcessGroups: vi.fn((_pid: number, fallback: () => void) => fallback())
 }))
 
 vi.mock('node-pty', () => ({ spawn: daemonMocks.mockPtySpawn }))
@@ -16,10 +18,10 @@ vi.mock('../main/shell-prompt-readiness-probe', () => ({
 }))
 
 vi.mock('../main/pty/posix-pty-process-groups', () => ({
-  forceKillPosixPtyProcessGroups: vi.fn((_pid: number, fallback: () => void) => fallback())
+  forceKillPosixPtyProcessGroups: daemonMocks.forceKillPosixPtyProcessGroups
 }))
 
-vi.mock('./relay-diagnostic-log', () => ({ relayLogLine: vi.fn() }))
+vi.mock('./relay-diagnostic-log', () => ({ relayLogLine: daemonMocks.relayLogLine }))
 vi.mock('./relay-handshake', () => ({ readLaunchVersion: vi.fn(() => 'test-version') }))
 
 vi.mock('./relay-primary-channel', () => ({
@@ -101,7 +103,6 @@ describe('relay daemon fatal PTY reap', () => {
 
   beforeEach(() => {
     originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')
-    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
     originalUncaughtListeners = new Set(process.listeners('uncaughtException'))
     originalRejectionListeners = new Set(process.listeners('unhandledRejection'))
     daemonMocks.dispatcher = createMockDispatcher()
@@ -113,7 +114,13 @@ describe('relay daemon fatal PTY reap', () => {
       dispose: vi.fn()
     })
     daemonMocks.socketCleanup.mockReset()
+    daemonMocks.relayLogLine.mockReset()
+    daemonMocks.forceKillPosixPtyProcessGroups.mockClear()
   })
+
+  function usePlatform(platform: NodeJS.Platform): void {
+    Object.defineProperty(process, 'platform', { configurable: true, value: platform })
+  }
 
   afterEach(async () => {
     for (const listener of process.listeners('uncaughtException')) {
@@ -136,6 +143,7 @@ describe('relay daemon fatal PTY reap', () => {
   })
 
   it('synchronously reaps every Windows PTY job before fatal exit', async () => {
+    usePlatform('win32')
     const firstKill = vi.fn(() => {
       throw new Error('ConPTY close failed')
     })
@@ -178,6 +186,70 @@ describe('relay daemon fatal PTY reap', () => {
     expect(firstKill).toHaveBeenCalledOnce()
     expect(firstKill.mock.calls[0]).toEqual([])
     expect(secondKill).not.toHaveBeenCalled()
+    expect(daemonMocks.socketCleanup).toHaveBeenCalledOnce()
+    expect(exit).toHaveBeenCalledWith(1)
+  })
+
+  async function bootDaemonWithTwoPtys(
+    firstKill: ReturnType<typeof vi.fn>,
+    secondKill: ReturnType<typeof vi.fn>
+  ) {
+    daemonMocks.mockPtySpawn
+      .mockReturnValueOnce(createMockPty(11, 101, firstKill))
+      .mockReturnValueOnce(createMockPty(22, 202, secondKill))
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never)
+    await runRelayDaemon(
+      {
+        graceTimeMs: 0,
+        connectMode: false,
+        detached: false,
+        cliMode: false,
+        sockPath: 'relay-test-socket'
+      },
+      undefined
+    )
+    const dispatcher = daemonMocks.dispatcher as ReturnType<typeof createMockDispatcher>
+    await dispatcher.callRequest('pty.spawn', {})
+    await dispatcher.callRequest('pty.spawn', {})
+    const fatalListener = process
+      .listeners('uncaughtException')
+      .find((listener) => !originalUncaughtListeners.has(listener))
+    expect(fatalListener).toBeDefined()
+    return { exit, crash: () => fatalListener!(new Error('relay crashed'), 'uncaughtException') }
+  }
+
+  it('reaps every POSIX PTY process group before fatal exit', async () => {
+    usePlatform('linux')
+    const firstKill = vi.fn()
+    const secondKill = vi.fn()
+
+    const { exit, crash } = await bootDaemonWithTwoPtys(firstKill, secondKill)
+    crash()
+
+    // Why the group, not the pid: a shell setpgid's its children away from the root.
+    expect(daemonMocks.forceKillPosixPtyProcessGroups.mock.calls.map(([pid]) => pid)).toEqual([
+      101, 202
+    ])
+    expect(firstKill.mock.calls).toEqual([['SIGKILL']])
+    expect(secondKill.mock.calls).toEqual([['SIGKILL']])
+    expect(daemonMocks.socketCleanup).toHaveBeenCalledOnce()
+    expect(exit).toHaveBeenCalledWith(1)
+  })
+
+  it('reaps past a failing PTY and records the failure instead of exiting silently', async () => {
+    usePlatform('linux')
+    const firstKill = vi.fn(() => {
+      throw new Error('SIGKILL refused')
+    })
+    const secondKill = vi.fn()
+
+    const { exit, crash } = await bootDaemonWithTwoPtys(firstKill, secondKill)
+    crash()
+
+    expect(secondKill.mock.calls).toEqual([['SIGKILL']])
+    expect(daemonMocks.relayLogLine.mock.calls.map(([line]) => String(line)).join('\n')).toContain(
+      '[relay] Fatal PTY reap failed: SIGKILL refused'
+    )
     expect(daemonMocks.socketCleanup).toHaveBeenCalledOnce()
     expect(exit).toHaveBeenCalledWith(1)
   })

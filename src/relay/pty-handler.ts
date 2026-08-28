@@ -2474,14 +2474,23 @@ export class PtyHandler {
     }
   }
 
+  /**
+   * Reap every owned PTY synchronously, for the fatal-exit path only.
+   *
+   * Runs to completion across all PTYs: one shell that refuses to die must not
+   * strand the rest. The first failure is rethrown so the caller can record it --
+   * a reap that failed on a remote host is otherwise invisible.
+   */
   forceKillAllPtyProcesses(): void {
     let firstError: unknown
     let hasError = false
     for (const managed of this.ptys.values()) {
       try {
+        // Why mark rather than skip: the job already took the whole tree, and the
+        // flag is what suppresses the redundant signal -- here in requestForceKill,
+        // and in any dispose that still runs after this.
         if (process.platform === 'win32' && terminatePtyJob(managed.pty) === 'terminated') {
           managed.forceKillSent = true
-          continue
         }
         this.requestForceKill(managed)
       } catch (error) {

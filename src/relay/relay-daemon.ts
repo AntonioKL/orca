@@ -25,8 +25,12 @@ export async function runRelayDaemon(
     relayLogLine(`[relay] Uncaught exception: ${error.message}\n${error.stack}`)
     try {
       fatalPtyHandler?.forceKillAllPtyProcesses()
-    } catch {
-      // Exit must win over best-effort reap failure.
+    } catch (reapError) {
+      // Why log rather than swallow: exit must still win, but this line is the only
+      // forensic trace a crashed remote daemon leaves behind for an orphaned shell.
+      relayLogLine(
+        `[relay] Fatal PTY reap failed: ${reapError instanceof Error ? reapError.message : String(reapError)}`
+      )
     }
     socketOwnership.cleanup()
     process.exit(1)
