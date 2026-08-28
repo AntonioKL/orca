@@ -79,7 +79,6 @@ vi.mock('./native-chat-runtime-send', () => ({
   sendNativeChatMessageVerified: (...args: unknown[]) =>
     mocks.sendNativeChatMessageVerified(...args),
   typeNativeChatCommand: (...args: unknown[]) => mocks.typeNativeChatCommand(...args),
-  sendNativeChatMessageWithImageAttachments: vi.fn(),
   submitNativeChatPrompt: vi.fn()
 }))
 vi.mock('./native-chat-send-settlement', () => ({
@@ -90,6 +89,9 @@ vi.mock('./native-chat-send-settlement', () => ({
     ptyId: string,
     handle: { settled?: Promise<void> } | null
   ) => onSlashCommand?.(command, mocks.waitForNativeChatSendQueueIdle(ptyId, handle?.settled))
+}))
+vi.mock('./native-chat-runtime-image-send', () => ({
+  sendNativeChatMessageWithImageAttachments: vi.fn()
 }))
 vi.mock('./claude-model-switch-confirmation', () => ({
   createClaudeModelSwitchConfirmationObserver: (...args: unknown[]) =>
