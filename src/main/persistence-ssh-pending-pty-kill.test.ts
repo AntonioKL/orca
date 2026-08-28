@@ -63,6 +63,53 @@ describe('Store SSH pending PTY kills', () => {
     expect(reloaded.getSshRemotePtyKillIntents('ssh-1', NOW).map((e) => e.ptyId)).toEqual(['pty-9'])
   })
 
+  // The row it invents must not be reattachable: the user closed this PTY, and reattach fences only
+  // on paneKey/tabId — neither of which a row created here carries.
+  it('creates the missing lease terminated so reattach cannot adopt it', async () => {
+    const store = await createStore()
+    store.recordSshRemotePtyKillIntent('ssh-1', 'pty-9', {
+      requestedAt: NOW,
+      incarnationId: 'inc-z',
+      attempts: 0
+    })
+
+    const lease = store.getSshRemotePtyLeases('ssh-1')[0]
+    expect(lease?.state).toBe('terminated')
+    expect(lease?.tabId).toBeUndefined()
+    expect(lease?.leafId).toBeUndefined()
+  })
+
+  it('deletes expired intents durably rather than only filtering them on read', async () => {
+    const store = await createStore()
+    store.upsertSshRemotePtyLease({ targetId: 'ssh-1', ptyId: 'pty-1', state: 'attached' })
+    store.recordSshRemotePtyKillIntent('ssh-1', 'pty-1', {
+      requestedAt: NOW,
+      incarnationId: 'inc-a',
+      attempts: 0
+    })
+    store.pruneExpiredSshRemotePtyKillIntents('ssh-1', NOW + SSH_PENDING_PTY_KILL_TTL_MS + 1)
+    store.flush()
+
+    const reloaded = await createStore()
+    expect(reloaded.getSshRemotePtyLeases('ssh-1')[0]?.pendingKill).toBeUndefined()
+    // Ageing out observes nothing about the process, so the lease state is left exactly as it was.
+    expect(reloaded.getSshRemotePtyLeases('ssh-1')[0]?.state).toBe('attached')
+  })
+
+  it('leaves an intent that is still inside its TTL alone', async () => {
+    const store = await createStore()
+    store.recordSshRemotePtyKillIntent('ssh-1', 'pty-1', {
+      requestedAt: NOW,
+      incarnationId: 'inc-a',
+      attempts: 0
+    })
+    store.pruneExpiredSshRemotePtyKillIntents('ssh-1', NOW + SSH_PENDING_PTY_KILL_TTL_MS)
+
+    expect(store.getSshRemotePtyKillIntents('ssh-1', NOW)).toHaveLength(1)
+  })
+
+  // The replay reads every lease state on purpose: the close path tombstones the lease locally and
+  // the remote process is still running, so a terminated lease is exactly where an order lives.
   it('keeps an intent on a lease its own kill path tombstoned as terminated', async () => {
     const store = await createStore()
     store.upsertSshRemotePtyLease({ targetId: 'ssh-1', ptyId: 'pty-1', state: 'attached' })

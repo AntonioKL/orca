@@ -19,12 +19,22 @@ export function killPtyFromRuntimeController(
     rememberSyntheticKillExit,
     sendPtyExitToRenderer,
     finishPtyShutdown,
-    retiredRejectedPtyIds
+    retiredRejectedPtyIds,
+    reversibleStopOwnersByPtyId
   } = deps
   runtime?.markPtyStopRequested?.(ptyId)
   let connectionId: string | null | undefined = ptyOwnership.get(ptyId)
   const parsedSshId = connectionId === undefined ? parseAppSshPtyId(ptyId) : null
   connectionId ??= parsedSshId?.connectionId
+  const recordUndelivered = (incarnationId?: string): void => {
+    recordUndeliveredSshPtyKill({
+      store,
+      ptyId,
+      connectionId,
+      reversible: reversibleStopOwnersByPtyId.has(ptyId),
+      incarnationId
+    })
+  }
   const killWithCurrentProvider = (): boolean => {
     let provider: IPtyProvider
     try {
@@ -36,7 +46,7 @@ export function killPtyFromRuntimeController(
         // not revive a terminal the user explicitly closed.
         const incarnationId = finishPtyShutdown(ptyId, connectionId, store)
         // The relay was never asked, so the remote shell is still running. Keep the order.
-        recordUndeliveredSshPtyKill(deps, ptyId, connectionId, incarnationId)
+        recordUndelivered(incarnationId)
         runtime?.onPtyExit(ptyId, -1, incarnationId)
         rememberSyntheticKillExit(ptyId)
         sendPtyExitToRenderer({
@@ -95,7 +105,7 @@ export function killPtyFromRuntimeController(
         }
         // Outside the `retired` guard: the remote process outlives this client's bookkeeping
         // either way, and the intent is what the next handshake replays.
-        recordUndeliveredSshPtyKill(deps, ptyId, connectionId)
+        recordUndelivered()
       })
     return true
   }
@@ -115,7 +125,7 @@ export function killPtyFromRuntimeController(
         }
         runtime?.onPtyExit(ptyId, -1, ptyIncarnationById.get(ptyId))
       }
-      recordUndeliveredSshPtyKill(deps, ptyId, connectionId)
+      recordUndelivered()
     })
     return true
   }

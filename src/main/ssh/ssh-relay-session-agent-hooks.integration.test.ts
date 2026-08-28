@@ -162,6 +162,7 @@ function createSession(targetId: string): InstanceType<typeof SshRelaySession> {
     markSshRemotePtyLeasesAsync: vi.fn(),
     markSshRemotePtyLeasesAttachedAsync: vi.fn(),
     getSshRemotePtyKillIntents: vi.fn().mockReturnValue([]),
+    pruneExpiredSshRemotePtyKillIntents: vi.fn(),
     recordSshRemotePtyKillIntent: vi.fn(),
     clearSshRemotePtyKillIntent: vi.fn(),
     noteSshRemotePtyKillReplayAttempt: vi.fn()

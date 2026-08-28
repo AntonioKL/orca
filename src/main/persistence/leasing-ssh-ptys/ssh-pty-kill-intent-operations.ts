@@ -1,6 +1,7 @@
 import type { PersistedState } from '../../../shared/persisted-state-types'
 import {
   MAX_SSH_PENDING_PTY_KILLS_PER_TARGET,
+  isSshPendingPtyKillExpired,
   pendingSshPtyKillEntries,
   prunePendingSshPtyKills,
   type SshPendingPtyKill,
@@ -18,6 +19,33 @@ export function getSshRemotePtyKillIntents(
 ): SshPendingPtyKillEntry[] {
   const leases = (state.sshRemotePtyLeases ?? []).filter((lease) => lease.targetId === targetId)
   return prunePendingSshPtyKills(pendingSshPtyKillEntries(leases), now)
+}
+
+/** Deletes orders past their TTL, durably.
+ *
+ *  The read path filters them out too, but filtering alone would leave the field on disk forever
+ *  and make the cap the only thing that ever reclaimed it. This is the TTL retirement path, and it
+ *  deliberately leaves `state` alone: an order aging out observes nothing about the process. */
+export function pruneExpiredSshRemotePtyKillIntents(
+  operations: SshPtyLeaseOperations,
+  targetId: string,
+  now: number
+): void {
+  let changed = false
+  for (const lease of operations.state.sshRemotePtyLeases ?? []) {
+    if (
+      lease.targetId === targetId &&
+      lease.pendingKill &&
+      isSshPendingPtyKillExpired(lease.pendingKill, now)
+    ) {
+      delete lease.pendingKill
+      lease.updatedAt = now
+      changed = true
+    }
+  }
+  if (changed) {
+    operations.flush()
+  }
 }
 
 /** Drops the oldest intents past the cap so an unreachable target cannot grow the store. Runs over
@@ -45,8 +73,10 @@ function capPendingKillsForTarget(
 /** Records a stop this client asked for and could not confirm.
  *
  *  Creates the lease when none exists — a kill that found no provider registered writes no lease of
- *  its own, and that offline close is the case most likely to strand a remote process. The state is
- *  `attached` because that is the client's honest belief: the host may still be running it. */
+ *  its own, and that offline close is the case most likely to strand a remote process. It is
+ *  created `terminated`, carrying no pane identity, because the user closed this PTY: reattach must
+ *  not adopt it. That is a routing tombstone and not a claim the process died — the process
+ *  question is exactly what `pendingKill` is now tracking, and the replay reads every lease state. */
 export function recordSshRemotePtyKillIntent(
   operations: SshPtyLeaseOperations,
   targetId: string,
@@ -71,7 +101,7 @@ export function recordSshRemotePtyKillIntent(
     leases.push({
       targetId,
       ptyId: relayPtyId,
-      state: 'attached',
+      state: 'terminated',
       createdAt: now,
       updatedAt: now,
       pendingKill: intent

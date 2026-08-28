@@ -32,6 +32,7 @@ export type SshLeaseStoreMock = {
   markSshRemotePtyLeasesAttachedAsync: Mock
   removeSshRemotePtyLeases: Mock
   getSshRemotePtyKillIntents: Mock
+  pruneExpiredSshRemotePtyKillIntents: Mock
   recordSshRemotePtyKillIntent: Mock
   clearSshRemotePtyKillIntent: Mock
   noteSshRemotePtyKillReplayAttempt: Mock
@@ -108,6 +109,7 @@ export function createSshIpcHarness(mocks: SshIpcMocks): SshIpcHarness {
     markSshRemotePtyLeasesAttachedAsync: vi.fn(),
     removeSshRemotePtyLeases: vi.fn(),
     getSshRemotePtyKillIntents: vi.fn().mockReturnValue([]),
+    pruneExpiredSshRemotePtyKillIntents: vi.fn(),
     recordSshRemotePtyKillIntent: vi.fn(),
     clearSshRemotePtyKillIntent: vi.fn(),
     noteSshRemotePtyKillReplayAttempt: vi.fn()

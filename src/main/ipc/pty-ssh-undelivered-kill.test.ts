@@ -182,8 +182,11 @@ describe('undelivered SSH stops', () => {
       expect(kill(SCOPED_PTY_ID)).toBe(true)
       await vi.waitFor(() => expect(store.markSshRemotePtyLease).toHaveBeenCalled())
       expect(store.recordSshRemotePtyKillIntent).not.toHaveBeenCalled()
-      // A completed shutdown answers any earlier undelivered order for the same id.
-      expect(store.clearSshRemotePtyKillIntent).toHaveBeenCalledWith('ssh-1', 'pty-7')
+      // And it does not retire one either. A resolved RPC is not a death certificate — the relay
+      // answers identically for a PTY it never had — so retirement is left to the replay, which
+      // only acts on a live inventory. Clearing here would be the mechanism by which a still-valid
+      // order is destroyed on an unconfirmed success.
+      expect(store.clearSshRemotePtyKillIntent).not.toHaveBeenCalled()
     } finally {
       unregisterSshPtyProvider('ssh-1')
       deletePtyOwnership(SCOPED_PTY_ID)
@@ -207,6 +210,77 @@ describe('undelivered SSH stops', () => {
 
     try {
       await expect(stopAndWait(SCOPED_PTY_ID, { keepHistory: true })).resolves.toBe(false)
+      expect(store.recordSshRemotePtyKillIntent).not.toHaveBeenCalled()
+    } finally {
+      unregisterSshPtyProvider('ssh-1')
+      deletePtyOwnership(SCOPED_PTY_ID)
+    }
+  })
+
+  // The path the UI actually takes. `window.api.pty.kill` -> `pty:kill`, a separate implementation
+  // from the runtime controller, and the one #12447 describes.
+  it('records the stop when the renderer pty:kill shutdown rejects', async () => {
+    const store = createKillStore()
+    registerSshPtyProvider(
+      'ssh-1',
+      sshProviderStub(async () => {
+        throw new Error('socket closed')
+      })
+    )
+    setPtyOwnership(SCOPED_PTY_ID, 'ssh-1')
+    restorePtyIncarnation(SCOPED_PTY_ID, 'inc-r1')
+    install(store)
+
+    try {
+      await expect(handlers.get('pty:kill')!(null, { id: SCOPED_PTY_ID })).rejects.toThrow(
+        'socket closed'
+      )
+      expect(store.recordSshRemotePtyKillIntent).toHaveBeenCalledWith(
+        'ssh-1',
+        'pty-7',
+        expect.objectContaining({ incarnationId: 'inc-r1' })
+      )
+    } finally {
+      unregisterSshPtyProvider('ssh-1')
+      deletePtyOwnership(SCOPED_PTY_ID)
+    }
+  })
+
+  it('records the stop when renderer pty:kill finds no provider to deliver it', async () => {
+    const store = createKillStore()
+    setPtyOwnership(SCOPED_PTY_ID, 'ssh-1')
+    restorePtyIncarnation(SCOPED_PTY_ID, 'inc-r2')
+    install(store)
+
+    try {
+      await handlers.get('pty:kill')!(null, { id: SCOPED_PTY_ID })
+      expect(store.recordSshRemotePtyKillIntent).toHaveBeenCalledWith(
+        'ssh-1',
+        'pty-7',
+        expect.objectContaining({ incarnationId: 'inc-r2' })
+      )
+    } finally {
+      deletePtyOwnership(SCOPED_PTY_ID)
+    }
+  })
+
+  // Pane hibernation is the reversible caller on this IPC and is the only one passing keepHistory.
+  it('records nothing for a renderer pty:kill that keeps history', async () => {
+    const store = createKillStore()
+    registerSshPtyProvider(
+      'ssh-1',
+      sshProviderStub(async () => {
+        throw new Error('socket closed')
+      })
+    )
+    setPtyOwnership(SCOPED_PTY_ID, 'ssh-1')
+    restorePtyIncarnation(SCOPED_PTY_ID, 'inc-r3')
+    install(store)
+
+    try {
+      await expect(
+        handlers.get('pty:kill')!(null, { id: SCOPED_PTY_ID, keepHistory: true })
+      ).rejects.toThrow('socket closed')
       expect(store.recordSshRemotePtyKillIntent).not.toHaveBeenCalled()
     } finally {
       unregisterSshPtyProvider('ssh-1')

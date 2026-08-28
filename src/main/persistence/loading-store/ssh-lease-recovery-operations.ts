@@ -7,6 +7,7 @@ import {
   clearSshRemotePtyKillIntent as clearSshRemotePtyKillIntentOperation,
   getSshRemotePtyKillIntents as getSshRemotePtyKillIntentsOperation,
   noteSshRemotePtyKillReplayAttempt as noteSshRemotePtyKillReplayAttemptOperation,
+  pruneExpiredSshRemotePtyKillIntents as pruneExpiredSshRemotePtyKillIntentsOperation,
   recordSshRemotePtyKillIntent as recordSshRemotePtyKillIntentOperation
 } from '../leasing-ssh-ptys/ssh-pty-kill-intent-operations'
 import {
@@ -149,6 +150,10 @@ export class SshLeaseRecoveryOperations {
 
   noteSshRemotePtyKillReplayAttempt(targetId: string, ptyId: string): void {
     noteSshRemotePtyKillReplayAttemptOperation(getSshPtyLeaseOperations(this), targetId, ptyId)
+  }
+
+  pruneExpiredSshRemotePtyKillIntents(targetId: string, now = Date.now()): void {
+    pruneExpiredSshRemotePtyKillIntentsOperation(getSshPtyLeaseOperations(this), targetId, now)
   }
 }
 

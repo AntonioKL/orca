@@ -59,6 +59,12 @@ export const SSH_PENDING_PTY_KILL_TTL_MS = 30 * 24 * 60 * 60 * 1000
 /** Per target, newest kept. A permanently unreachable host must not grow the store without bound. */
 export const MAX_SSH_PENDING_PTY_KILLS_PER_TARGET = 200
 
+/** The single definition of "too old to act on". Both the durable prune and the decision function
+ *  read it, so a stale order cannot be replayed by one and kept by the other. */
+export function isSshPendingPtyKillExpired(intent: SshPendingPtyKill, now: number): boolean {
+  return now - intent.requestedAt > SSH_PENDING_PTY_KILL_TTL_MS
+}
+
 /** What the authoritative host just said about this relay PTY id, from one `pty.listProcesses`. */
 export type SshPendingPtyKillObservation = {
   /** False only when the host answered and did not list the id: positive evidence of absence.
@@ -70,7 +76,6 @@ export type SshPendingPtyKillObservation = {
 }
 
 export type SshPendingPtyKillRetirement =
-  | 'expired'
   | 'host-reports-absent'
   | 'relay-id-recycled'
   | 'stop-confirmed'
@@ -82,6 +87,11 @@ export type SshPendingPtyKillDecision =
 
 /** Decides what to do with one recorded kill, given what the host just said about its id.
  *
+ *  The TTL is deliberately NOT a branch here. `isSshPendingPtyKillExpired` owns it, applied as a
+ *  durable prune before any of this runs, so expired orders are actually deleted from the store
+ *  rather than merely skipped — and so there is exactly one place that decides what "too old"
+ *  means. A branch here would be unreachable behind that prune and would only look tested.
+ *
  *  `defer` is the `unverifiable` branch and asserts nothing: the record stays and the next
  *  handshake asks again. No branch concludes that a PTY exited — only `host-reports-absent` is an
  *  observation of absence, and it comes from the host that owns the process. */
@@ -90,9 +100,10 @@ export function decideSshPendingPtyKill(
   observation: SshPendingPtyKillObservation,
   now: number
 ): SshPendingPtyKillDecision {
-  // First, so a stale intent is dropped rather than aimed at whatever holds the id today.
-  if (now - intent.requestedAt > SSH_PENDING_PTY_KILL_TTL_MS) {
-    return { action: 'retire', reason: 'expired' }
+  if (isSshPendingPtyKillExpired(intent, now)) {
+    // Unreachable behind the prune, but a stale order must never be aimed at whatever holds the
+    // id today if a future caller reaches this without pruning first.
+    return { action: 'defer', reason: 'order is past its TTL and awaiting prune' }
   }
   if (!observation.hostListsPty) {
     return { action: 'retire', reason: 'host-reports-absent' }
@@ -117,7 +128,7 @@ export function prunePendingSshPtyKills(
   now: number
 ): SshPendingPtyKillEntry[] {
   return entries
-    .filter((entry) => now - entry.intent.requestedAt <= SSH_PENDING_PTY_KILL_TTL_MS)
+    .filter((entry) => !isSshPendingPtyKillExpired(entry.intent, now))
     .sort((a, b) => b.intent.requestedAt - a.intent.requestedAt)
     .slice(0, MAX_SSH_PENDING_PTY_KILLS_PER_TARGET)
 }

@@ -39,12 +39,16 @@ describe('decideSshPendingPtyKill', () => {
     ).toEqual({ action: 'retire', reason: 'host-reports-absent' })
   })
 
-  it('retires past the TTL, ahead of every other branch', () => {
+  // TTL retirement belongs to the durable prune, not to a branch here — a branch would be
+  // unreachable behind it and would only look tested. This guards the belt-and-braces refusal:
+  // an expired order that somehow reaches this function is never dispatched.
+  it('refuses to replay past the TTL, ahead of every other branch', () => {
     const stale = intent()
     const later = NOW + SSH_PENDING_PTY_KILL_TTL_MS + 1
     expect(
       decideSshPendingPtyKill(stale, { hostListsPty: true, hostIncarnationId: 'inc-a' }, later)
-    ).toEqual({ action: 'retire', reason: 'expired' })
+        .action
+    ).toBe('defer')
     expect(
       decideSshPendingPtyKill(stale, { hostListsPty: true, hostIncarnationId: 'inc-a' }, NOW + 1)
     ).toEqual({ action: 'replay' })
