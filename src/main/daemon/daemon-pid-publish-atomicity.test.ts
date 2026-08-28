@@ -130,6 +130,9 @@ describe('publishDaemonPidFile atomicity', () => {
     expect(() => publishDaemonPidFile(pidPath, RECORD)).toThrow(/EEXIST/)
     expect(readFileSync(pidPath, 'utf8')).toBe(existing)
     expect(listPublishScratch()).toEqual([])
+    // An ownership conflict is routine, not a degrade: warning here would make the
+    // real non-atomic warning below indistinguishable from a lost publish race.
+    expect(warnSpy).not.toHaveBeenCalled()
   })
 
   it('degrades to the exclusive direct write when the filesystem cannot hard-link', () => {
