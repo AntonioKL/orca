@@ -141,13 +141,18 @@ export function WorktreeCardStatusSlot({
     ) : newCardStyle && showStatus ? (
       <>
         <span className={cn('inline-flex size-5 items-center justify-center', className)}>
-          <StatusIndicator status={status} aria-hidden="true" />
+          <StatusIndicator status={status} aria-hidden="true" tooltipSide="right" />
         </span>
         <span className="sr-only">{passiveStatusAnnouncement}</span>
       </>
     ) : (
       <>
-        <StatusIndicator status={status} aria-hidden="true" className={className} />
+        <StatusIndicator
+          status={status}
+          aria-hidden="true"
+          className={className}
+          tooltipSide="right"
+        />
         <span className="sr-only">{statusLabel}</span>
       </>
     )
@@ -198,7 +203,7 @@ export function WorktreeCardStatusSlot({
                   {branchStatusIcon}
                 </span>
               ) : showStatus ? (
-                <StatusIndicator status={status} aria-hidden="true" />
+                <StatusIndicator status={status} aria-hidden="true" showTooltip={false} />
               ) : (
                 <span className="sr-only">{actionLabel}</span>
               )
@@ -209,6 +214,7 @@ export function WorktreeCardStatusSlot({
                 <StatusIndicator
                   status={status}
                   aria-hidden="true"
+                  showTooltip={false}
                   className="transition-opacity group-hover/unread:opacity-0 group-focus-within/unread:opacity-0"
                 />
                 <Bell className="absolute size-3 text-muted-foreground/40 opacity-0 transition-opacity group-hover/unread:opacity-100 group-focus-within/unread:opacity-100" />
