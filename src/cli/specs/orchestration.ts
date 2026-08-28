@@ -22,8 +22,9 @@ export const ORCHESTRATION_COMMAND_SPECS: CommandSpec[] = [
     allowedFlags: [...GLOBAL_FLAGS, 'id', 'from', 'takeover-legacy', 'retry-request'],
     notes: [
       'Rebinding the same live coordinator preserves authority and Delivery. A different coordinator succeeds only when the owning host proves the prior coordinator exited.',
-      'A live or unverifiable owner returns consumer_fenced with structured recovery steps. Do not retry blindly or treat loss of contact as exit.',
-      '--takeover-legacy is only for the automatically adopted legacy Run; it is not a force override for ordinary Runs.'
+      'From the intended replacement agent, one run-use is the safe decision point: success preserves or transfers authority; rejection applies no effects and returns coordinatorStatus, claimantStatus, and exact recovery steps.',
+      'A live or unverifiable owner returns consumer_fenced. Do not retry blindly, treat loss of contact as exit, infer an unowned Run from currentConsumer: false, or use --from to copy the owner handle.',
+      '--takeover-legacy explicitly replaces only the automatically adopted legacy Run coordinator. It is not a force override for ordinary Runs and must not be used while the legacy coordinator is actively coordinating.'
     ]
   },
   {

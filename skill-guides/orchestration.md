@@ -105,7 +105,9 @@ Orca orchestration is agent-operated. A Run therefore has one current coordinato
 
 The single-writer rule prevents two agents from changing Task, Dispatch, worker, or gate state concurrently and prevents two consumers from acknowledging different views of the same FIFO Delivery. The current coordinator may create and update Tasks (`task-create`, `task-update`), start or dispatch workers (`worker-start`, `dispatch`), create and resolve gates (`gate-create`, `gate-resolve`), answer worker questions (`reply`), and consume or acknowledge Run mail (`check`). Explicit `run-show`, `task-list --run`, inbox, and peek calls remain read-only for non-owners and headless callers.
 
-`run-use` is an authority claim, not a read-only selection. Read `error.data.coordinatorStatus` and `error.data.nextSteps` from `--json` failures; fenced failures report only `live` or `unverifiable` because a proven `exited` incumbent permits the claim to succeed. Never infer authority from a terminal handle alone.
+`run-use` is an authority claim, not a read-only selection. When a transfer is intended, make one claim from the stable replacement agent terminal with `orca orchestration run-use --id <run_id> --json`; do not guess whether its process is a remint or spoof the owner with `--from`. Orca either preserves same-process authority, grants replacement authority after proving exit, or rejects the claim with `effectsApplied: false`.
+
+On rejection, read `error.data.coordinatorStatus`, `claimantStatus`, `nextSteps`, and any exact command-argument fields. `coordinatorStatus` is `live` or `unverifiable` because a proven `exited` incumbent permits the claim to succeed. If `claimantStatus` is `changed`, the invoking agent changed during proof; follow the returned retry arguments once from one stable process instead of treating it as a network verdict or retrying blindly. Never infer authority from a terminal handle alone.
 
 - Same coordinator process, reminted handle: authority and any outstanding Delivery are preserved without advancing the consumer generation.
 - Different process and `live` incumbent: `consumer_fenced`; continue from the owning coordinator terminal. To transfer intentionally, stop or exit the owning coordinator process before retrying from its replacement.
@@ -119,7 +121,7 @@ orca orchestration run-show --id <run_id> --json
 orca orchestration task-list --run <run_id> --json
 ```
 
-`binding.currentConsumer` is `true` only for the current coordinator. `false` permits inspection, not coordinator mutations or consuming `check` calls.
+`binding.currentConsumer` is `true` only for the current coordinator. `false` permits inspection, not coordinator mutations or consuming `check` calls, and never proves that the Run is unowned.
 
 No live-to-live transfer command exists. A seamless live handoff would require a separate owner-authorized protocol; do not simulate one by retrying, changing `--from`, or replacing a terminal handle. `--takeover-legacy` is not a force override for ordinary Runs: it is limited to the automatically adopted legacy Run described above.
 
@@ -222,7 +224,9 @@ Two limits worth knowing:
 
 - **It is a guardrail, not a security boundary.** A caller that declares another terminal's
   handle while its own launch evidence is unverifiable (an ordinary restored terminal, for
-  example) can be counted as that terminal instead. Orca does not treat workers as hostile.
+  example) can be counted as that terminal instead. This affects only nesting-depth
+  classification; it never grants coordinator or Dispatch authority. Orca does not treat
+  workers as hostile.
 - **It applies while a Dispatch is active.** After `worker_done`, or after a coordinator
   settles the task, the terminal is no longer a worker and is counted as a root again. The
   process may still be alive; that is the documented boundary, not an accident.
