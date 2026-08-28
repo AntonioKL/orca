@@ -24,6 +24,19 @@ vi.mock('electron', () => ({
 import { registerRuntimeHandlers } from './runtime'
 import { TERMINAL_FIT_RESTORE_DEADLINE_MS } from '../../shared/terminal-fit-restore-deadline'
 
+function runtimeCallEvent() {
+  const mainFrame = {}
+  return {
+    sender: {
+      id: 1,
+      mainFrame,
+      on: vi.fn(),
+      once: vi.fn()
+    },
+    senderFrame: mainFrame
+  }
+}
+
 describe('registerRuntimeHandlers', () => {
   beforeEach(() => {
     handleMock.mockReset()
@@ -114,7 +127,7 @@ describe('registerRuntimeHandlers', () => {
     expect(callRegistration).toBeTruthy()
 
     const handler = callRegistration![1]
-    const result = await handler({ sender: {} }, { method: 'status.get' })
+    const result = await handler(runtimeCallEvent(), { method: 'status.get' })
 
     expect(result).toMatchObject({
       ok: true,
@@ -137,7 +150,7 @@ describe('registerRuntimeHandlers', () => {
     expect(callRegistration).toBeTruthy()
 
     const handler = callRegistration![1]
-    const result = await handler({ sender: {} }, { method: 'projectGroup.list' })
+    const result = await handler(runtimeCallEvent(), { method: 'projectGroup.list' })
 
     expect(result).toMatchObject({
       ok: true,

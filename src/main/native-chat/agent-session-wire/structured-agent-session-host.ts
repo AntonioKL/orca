@@ -82,6 +82,7 @@ export class StructuredAgentSessionHost {
     this.reconcileLeases = createRestartReconciler({
       store: deps.store,
       probe: (record) => this.runtimeState.probeRecord(record),
+      ...(deps.probeOwners ? { probeMany: deps.probeOwners } : {}),
       now: () => this.now()
     })
     this.handoffs = createStructuredAgentSessionHostHandoff(deps, {
@@ -183,8 +184,15 @@ export class StructuredAgentSessionHost {
     return listStructuredAgentSessionTabs(this.sessions)
   }
 
-  restoreReadableSessions = (): Promise<void> =>
-    this.restartRestore.run(() => this.readableRestorer.restore())
+  reconcileRestartLeases = async (): Promise<void> => {
+    const refusal = await this.reconcileLeases('startup')
+    if (refusal) {
+      throw new Error(refusal.code)
+    }
+  }
+
+  restoreReadableSessions = (sessionIds?: readonly string[]): Promise<void> =>
+    this.restartRestore.run(() => this.readableRestorer.restore(sessionIds))
 
   private serialize = <T>(sessionId: string, task: () => Promise<T>): Promise<T> =>
     this.tasks.serialize(sessionId, task)

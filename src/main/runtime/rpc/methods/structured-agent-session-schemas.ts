@@ -98,7 +98,7 @@ export const CreateIntentParams = z
   .object({
     envelope: MutationEnvelope,
     worktree: Identifier('Invalid worktree selector'),
-    agent: z.enum(['claude', 'codex'])
+    agent: z.literal('codex')
   })
   .strict()
 
@@ -107,7 +107,7 @@ export const CreateParams = z.union([AttachParams, CreateIntentParams])
 export const CreateSupportParams = z
   .object({
     worktree: Identifier('Invalid worktree selector'),
-    agent: z.enum(['claude', 'codex'])
+    agent: z.literal('codex')
   })
   .strict()
 
@@ -172,8 +172,8 @@ export const SetOptionParams = z
 
 export const OptionsParams = z.object({ sessionId: SessionId }).strict()
 
-/** One surface's claim on one session. The id names the surface, not the client: a chat tab and a
- *  paired phone looking at the same session are two holders, and either leaving must not release
+/** One surface's claim on one session. The id names the surface, not the client: two chat views
+ *  looking at the same session are two holders, and either leaving must not release
  *  the other's. */
 export const HoldParams = z
   .object({ sessionId: SessionId, holderId: Identifier('Invalid holder id') })

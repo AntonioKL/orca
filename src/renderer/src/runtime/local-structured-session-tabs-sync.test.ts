@@ -4,8 +4,15 @@ import type { Tab } from '../../../shared/tab-types'
 import type { WorkspaceSessionState } from '../../../shared/workspace-session-state-types'
 import { buildPersistedUnifiedTabSessionData } from '../lib/workspace-session-unified-tabs'
 import { buildHydratedTabState } from '../store/slices/tabs-hydration'
-import { projectLocalStructuredSessionTabs } from './local-structured-session-tabs-sync'
-import { applyWebSessionTabsSnapshot, type WebSessionTabsSyncState } from './web-session-tabs-sync'
+import {
+  applyLocalStructuredSessionTabSnapshots,
+  projectLocalStructuredSessionTabs
+} from './local-structured-session-tabs-sync'
+import {
+  applyWebSessionTabsSnapshot,
+  resetWebSessionTabsSnapshotFreshnessForTests,
+  type WebSessionTabsSyncState
+} from './web-session-tabs-sync'
 import {
   recordWebSessionFocusIntent,
   resetWebSessionFocusIntentForTests
@@ -19,6 +26,7 @@ const SECONDARY_GROUP = 'secondary-group'
 
 afterEach(() => {
   resetWebSessionFocusIntentForTests()
+  resetWebSessionTabsSnapshotFreshnessForTests()
 })
 
 function createSnapshot(): WebSessionTabsSyncState {
@@ -384,4 +392,67 @@ describe('local structured session tab projection', () => {
       ])
     )
   })
+
+  it('rejects a reordered list reply after a newer subscription frame', () => {
+    const stale = structuredInventory('epoch-a', 7, 'stale-session')
+    const fresh = structuredInventory('epoch-a', 8, 'fresh-session')
+    const afterStale = applyLocalStructuredSessionTabSnapshots(createSnapshot(), [stale])
+    const afterFresh = applyLocalStructuredSessionTabSnapshots(afterStale, [fresh])
+    const afterReorderedList = applyLocalStructuredSessionTabSnapshots(afterFresh, [stale])
+
+    expect(afterReorderedList).toBe(afterFresh)
+    expect(afterReorderedList.unifiedTabsByWorktree[WORKTREE_ID]).toEqual(
+      expect.arrayContaining([expect.objectContaining({ entityId: 'fresh-session' })])
+    )
+    expect(afterReorderedList.unifiedTabsByWorktree[WORKTREE_ID]).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ entityId: 'stale-session' })])
+    )
+  })
+
+  it('rejects same-version replay but accepts a new owner epoch', () => {
+    const first = structuredInventory('epoch-a', 8, 'session-a')
+    const afterFirst = applyLocalStructuredSessionTabSnapshots(createSnapshot(), [first])
+    const replayed = applyLocalStructuredSessionTabSnapshots(afterFirst, [first])
+    const restarted = applyLocalStructuredSessionTabSnapshots(replayed, [
+      structuredInventory('epoch-b', 1, 'session-b')
+    ])
+
+    expect(replayed).toBe(afterFirst)
+    expect(restarted).not.toBe(replayed)
+    expect(restarted.unifiedTabsByWorktree[WORKTREE_ID]).toEqual(
+      expect.arrayContaining([expect.objectContaining({ entityId: 'session-b' })])
+    )
+  })
 })
+
+function structuredInventory(
+  publicationEpoch: string,
+  snapshotVersion: number,
+  sessionId: string
+): RuntimeMobileSessionTabsResult {
+  return {
+    worktree: WORKTREE_ID,
+    publicationEpoch,
+    snapshotVersion,
+    activeGroupId: SECONDARY_GROUP,
+    activeTabId: `agent-session:${sessionId}`,
+    activeTabType: 'agent-session',
+    tabGroups: [
+      {
+        id: SECONDARY_GROUP,
+        activeTabId: `agent-session:${sessionId}`,
+        tabOrder: [`agent-session:${sessionId}`]
+      }
+    ],
+    tabs: [
+      {
+        type: 'agent-session',
+        id: `agent-session:${sessionId}`,
+        title: 'Codex Chat',
+        sessionId,
+        agent: 'codex',
+        isActive: true
+      }
+    ]
+  }
+}

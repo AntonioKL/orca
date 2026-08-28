@@ -37,10 +37,6 @@ import type { RpcRequest, RpcResponse } from './rpc/core'
 import { RpcDispatcher } from './rpc/dispatcher'
 import { STRUCTURED_AGENT_SESSION_METHODS } from './rpc/methods/structured-agent-session'
 import {
-  recordMobileClipboardImagePath,
-  resetMobileClipboardImageProvenanceForTest
-} from './rpc/mobile-clipboard-image-provenance'
-import {
   ensureStructuredAgentSessionHost,
   stopStructuredAgentSessionRuntime
 } from './structured-agent-session-runtime'
@@ -51,7 +47,7 @@ const TURN = 'turn-1'
 const WORKSPACE = 'workspace-1'
 const CLIENT = {
   clientId: 'device-a',
-  clientKind: 'mobile' as const,
+  clientKind: 'runtime' as const,
   clientCapabilities: [STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY]
 }
 
@@ -288,7 +284,6 @@ async function historyPage(
 }
 
 beforeEach(async () => {
-  resetMobileClipboardImageProvenanceForTest()
   operations = 0
   root = await mkdtemp(join(tmpdir(), 'orca-structured-integration-'))
   codex = fakeCodex()
@@ -343,7 +338,6 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await stopStructuredAgentSessionRuntime()
-  resetMobileClipboardImageProvenanceForTest()
   await rm(root, { recursive: true, force: true })
 })
 
@@ -376,11 +370,11 @@ describe('a structured codex session over agentSession.*', () => {
       ]
     })
 
-    const created = await ok<{ snapshot: { items: AgentJournalRenderItem[] } }>(
+    const created = await ok<{ page: { items: AgentJournalRenderItem[] } }>(
       'agentSession.create',
       createIntentParams()
     )
-    expect(created.snapshot.items.map(textOf)).toContain('legacy question')
+    expect(created.page.items.map(textOf)).toContain('legacy question')
     expect(await call('agentSession.options', { sessionId: SESSION })).toMatchObject({
       ok: true,
       result: {
@@ -391,11 +385,11 @@ describe('a structured codex session over agentSession.*', () => {
   })
 
   it('dispatches and streams a plain first send from a fresh session', async () => {
-    const created = await ok<{ fence: number; snapshot: { items: unknown[] } }>(
+    const created = await ok<{ fence: number; page: { items: unknown[] } }>(
       'agentSession.create',
       createIntentParams()
     )
-    expect(created.snapshot.items).toEqual([])
+    expect(created.page.items).toEqual([])
     expect(codex.live().launch.env).toMatchObject({
       CODEX_PROFILE: 'configured',
       EXAMPLE_GATEWAY_TOKEN: 'shell-exported',
@@ -441,11 +435,11 @@ describe('a structured codex session over agentSession.*', () => {
     // ── create ──────────────────────────────────────────────────────────────
     // No host exists yet; `create` is the call that builds one.
     expect(getStructuredAgentSessionHost()).toBeNull()
-    const created = await ok<{ fence: number; snapshot: { items: unknown[] } }>(
+    const created = await ok<{ fence: number; page: { items: unknown[] } }>(
       'agentSession.create',
       createIntentParams()
     )
-    expect(created.snapshot.items).toEqual([])
+    expect(created.page.items).toEqual([])
     expect(codex.live().calls[0]).toMatchObject({
       method: 'thread/start',
       params: { cwd: `/repos/${WORKSPACE}` }
@@ -597,7 +591,7 @@ describe('a structured codex session over agentSession.*', () => {
     // fence advances, the old child is reaped, and its replacement resumes the
     // thread this session proved rather than forking a new one.
     const reaped = codex.live()
-    const resumed = await ok<{ fence: number; snapshot: { items: AgentJournalRenderItem[] } }>(
+    const resumed = await ok<{ fence: number; page: { items: AgentJournalRenderItem[] } }>(
       'agentSession.ensure',
       attachParams(fence)
     )
@@ -612,7 +606,7 @@ describe('a structured codex session over agentSession.*', () => {
       }
     })
     // The journal belongs to the session, not to the process that just died.
-    expect(resumed.snapshot.items.map(textOf)).toContain('Two files.')
+    expect(resumed.page.items.map(textOf)).toContain('Two files.')
 
     // ── page history ────────────────────────────────────────────────────────
     const tail = await historyPage('tail', { limit: 2 })
@@ -678,7 +672,7 @@ describe('a structured codex session over agentSession.*', () => {
         params: attachParams(null)
       },
       (raw) => replies.push(JSON.parse(raw)),
-      { clientKind: 'mobile', clientCapabilities: ['terminal.stream.v1'] }
+      { clientKind: 'runtime', clientCapabilities: ['terminal.stream.v1'] }
     )
 
     expect(replies[0]).toMatchObject({ ok: false })
@@ -777,10 +771,9 @@ describe('a structured codex session over agentSession.*', () => {
     expect(await readJournalBlob(journal.directory, bounded?.digest ?? '')).toBe(output)
   })
 
-  it('replays a durable image send after ephemeral upload provenance is gone', async () => {
+  it('replays a durable image send without dispatching it twice', async () => {
     const created = await ok<{ fence: number }>('agentSession.create', createIntentParams())
     const path = '/tmp/orca-paste-image.png'
-    recordMobileClipboardImagePath('device-a', path)
     const body = {
       kind: 'message' as const,
       role: 'user' as const,
@@ -792,7 +785,6 @@ describe('a structured codex session over agentSession.*', () => {
     }
 
     await ok('agentSession.send', params)
-    resetMobileClipboardImageProvenanceForTest()
     const replay = await call('agentSession.send', params)
 
     expect(replay).toMatchObject({ ok: true, result: { ok: true, replayed: true } })
@@ -874,7 +866,7 @@ function itemsOf(frames: AgentSessionSubscribeEvent[]): AgentJournalRenderItem[]
   for (const frame of frames) {
     const published =
       frame.type === 'snapshot' || frame.type === 'reset'
-        ? frame.snapshot.items
+        ? frame.page.items
         : frame.type === 'batch'
           ? frame.batch.items
           : []
@@ -892,7 +884,7 @@ function cursorOf(frames: AgentSessionSubscribeEvent[]): { epoch: string; sequen
       return frame.batch.cursor
     }
     if (frame.type === 'snapshot' || frame.type === 'reset') {
-      return frame.snapshot.cursor
+      return frame.page.liveCursor ?? frame.page.window.nextCursor
     }
   }
   throw new Error('subscription published no cursor')

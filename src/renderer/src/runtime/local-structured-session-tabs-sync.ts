@@ -4,7 +4,11 @@ import type { RuntimeMobileSessionTabsResult } from '../../../shared/runtime-typ
 import { useAppStore } from '../store'
 import type { WorktreeRuntimeOwnerState } from '../lib/worktree-runtime-owner'
 import { getExecutionHostIdForWorktree } from '../lib/worktree-runtime-owner'
-import { applyWebSessionTabsSnapshot, applyWebSessionTabsStorePatch } from './web-session-tabs-sync'
+import {
+  applyWebSessionTabsSnapshot,
+  applyWebSessionTabsStorePatch,
+  decideWebSessionTabsSnapshot
+} from './web-session-tabs-sync'
 import type { WebSessionTabsSyncState } from './web-session-tabs-sync'
 
 export const LOCAL_STRUCTURED_SESSION_OWNER = 'local-structured-session'
@@ -73,6 +77,9 @@ export function applyLocalStructuredSessionTabSnapshots<
   for (const snapshot of snapshots) {
     // Why: the execution host owns its tabs; local inventory must not rewrite paired or SSH panes.
     if (getExecutionHostIdForWorktree(next, snapshot.worktree) !== 'local') {
+      continue
+    }
+    if (!decideWebSessionTabsSnapshot(snapshot, owner).apply) {
       continue
     }
     const patch = applyWebSessionTabsSnapshot(

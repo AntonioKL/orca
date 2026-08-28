@@ -6,7 +6,6 @@
 // is the whole visibility rule, because nothing else on the runtime publishes a
 // structured session.
 
-import { STRUCTURED_AGENT_SESSION_HOLD_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
 import {
   agentSessionFingerprintConflict,
   computeAgentSessionPayloadFingerprint
@@ -34,26 +33,8 @@ import {
   SubscribeParams,
   UnsubscribeParams
 } from './structured-agent-session-schemas'
-import { hasMobileClipboardImagePath } from '../mobile-clipboard-image-provenance'
 
 const SUBSCRIPTION_PREFIX = 'agentSession'
-
-function assertMobileImageProvenance(
-  ctx: RpcContext,
-  body: { blocks: { type: string; path?: string; url?: string }[] }
-): void {
-  if (ctx.clientKind !== 'mobile') {
-    return
-  }
-  for (const block of body.blocks) {
-    if (block.type !== 'image-ref') {
-      continue
-    }
-    if (block.url || !block.path || !hasMobileClipboardImagePath(ctx.clientId, block.path)) {
-      throw new Error('agent_session_image_untrusted')
-    }
-  }
-}
 
 function subscriptionIdFor(ctx: RpcContext, sessionId: string): string {
   const base = `${SUBSCRIPTION_PREFIX}:${ctx.connectionId ?? 'local'}:${sessionId}`
@@ -109,18 +90,15 @@ export const STRUCTURED_AGENT_SESSION_METHODS: RpcAnyMethod[] = [
           ...resolved,
           envelope: { ...params.envelope, payloadFingerprint: hostFingerprint }
         })
-        if (result.ok) {
+        if (result.ok && resolved.agent === 'codex') {
           ctx.runtime.publishStructuredAgentSessionTab({
             workspaceId: resolved.location.workspaceId,
             sessionId: result.value.sessionId,
-            agent: resolved.agent === 'claude' ? 'claude' : 'codex',
+            agent: 'codex',
             activate: true
           })
         }
         return result
-      }
-      if (ctx.clientKind === 'mobile') {
-        throw new Error('agent_session_create_intent_required')
       }
       await ensureHostInstalled(ctx)
       return requireHost(ctx).attach(callerFor(ctx), params)
@@ -137,13 +115,7 @@ export const STRUCTURED_AGENT_SESSION_METHODS: RpcAnyMethod[] = [
   defineMethod({
     name: 'agentSession.send',
     params: SendParams,
-    handler: async (params, ctx) => {
-      const host = requireHost(ctx)
-      return host.send(callerFor(ctx), {
-        ...params,
-        beforeRun: () => assertMobileImageProvenance(ctx, params.body)
-      })
-    }
+    handler: async (params, ctx) => requireHost(ctx).send(callerFor(ctx), params)
   }),
   defineMethod({
     name: 'agentSession.cancel',
@@ -198,21 +170,12 @@ export const STRUCTURED_AGENT_SESSION_METHODS: RpcAnyMethod[] = [
     handler: async (params, ctx, emit) => {
       const host = requireHost(ctx)
       const subscriptionId = subscriptionIdFor(ctx, params.sessionId)
-      // A live stream is a surface too. This is what keeps a client that never learned to hold —
-      // an older paired build — from having its session evicted while it is reading, and what
-      // releases one whose socket dies without a word.
+      // A live stream is a surface too: it keeps a session from being evicted while it is read and
+      // releases that retention when the transport dies without a word.
       //
-      // Retain-only for a client that holds its own surfaces: reading history must never be what
-      // starts a provider process. A paired build that predates holds gets the resuming kind,
-      // because subscribing IS the only thing it does to say a chat is open, and the host no longer
-      // resumes every record at launch on its behalf.
+      // Retain-only: reading history must never be what starts a provider process. Current clients
+      // explicitly hold every open surface before subscribing.
       const streamHolder = `subscription:${subscriptionId}`
-      const streamResumes =
-        ctx.clientKind === 'mobile' &&
-        !(
-          ctx.clientCapabilities?.includes(STRUCTURED_AGENT_SESSION_HOLD_RUNTIME_CAPABILITY) ??
-          false
-        )
       let closed = false
       let dispose = (): void => {}
       let releaseTransportSubscription = (): void => {}
@@ -256,7 +219,7 @@ export const STRUCTURED_AGENT_SESSION_METHODS: RpcAnyMethod[] = [
         // Fire-and-forget, but never unhandled: a resume that refuses leaves the stream holding a
         // readable session, which is exactly what the client sees anyway.
         void host
-          .hold(params.sessionId, streamHolder, { resume: streamResumes })
+          .hold(params.sessionId, streamHolder, { resume: false })
           .catch((error: unknown) =>
             console.warn('[agent-session] stream hold failed', params.sessionId, error)
           )

@@ -267,7 +267,7 @@ describe('cross-version structured agent sessions', () => {
       expect(baseline.capabilities).not.toContain(STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY)
       for (const { method } of STRUCTURED_CALLS) {
         const replies = await callBuild(current, method, paramsFor(method), {
-          clientKind: 'mobile',
+          clientKind: 'runtime',
           clientCapabilities: baseline.capabilities
         })
         expect(replies, `${method} must answer exactly once`).toHaveLength(1)
@@ -284,7 +284,7 @@ describe('cross-version structured agent sessions', () => {
     it('is served the same calls once it advertises the capability', async () => {
       for (const { method, hostMethod } of STRUCTURED_CALLS) {
         const replies = await callBuild(current, method, paramsFor(method), {
-          clientKind: 'mobile',
+          clientKind: 'runtime',
           clientCapabilities: [
             ...baseline.capabilities,
             STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY
@@ -325,7 +325,7 @@ describe('cross-version structured agent sessions', () => {
     it('gets a clean method_not_found from the old dispatcher rather than silence', async () => {
       for (const { method } of STRUCTURED_CALLS) {
         const replies = await callBuild(baseline, method, paramsFor(method), {
-          clientKind: 'mobile',
+          clientKind: 'runtime',
           clientCapabilities: current.capabilities
         })
         expect(replies, `${method} must answer exactly once`).toHaveLength(1)
@@ -428,7 +428,7 @@ describe('cross-version structured agent sessions', () => {
           'aiVault.listSessions',
           {},
           {
-            clientKind: 'mobile',
+            clientKind: 'runtime',
             clientCapabilities: baseline.capabilities
           },
           runtime
@@ -442,7 +442,7 @@ describe('cross-version structured agent sessions', () => {
           'aiVault.listSessions',
           {},
           {
-            clientKind: 'mobile',
+            clientKind: 'runtime',
             clientCapabilities: [STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY]
           },
           runtime
@@ -473,7 +473,7 @@ describe('cross-version structured agent sessions', () => {
             'aiVault.prepareSessionResume',
             params,
             {
-              clientKind: 'mobile',
+              clientKind: 'runtime',
               clientCapabilities: baseline.capabilities
             },
             runtime
@@ -487,7 +487,7 @@ describe('cross-version structured agent sessions', () => {
             current,
             'session.tabs.createTerminal',
             { worktree: `id:${WORKSPACE}`, command: `codex resume '${THREAD}'` },
-            { clientKind: 'mobile', clientCapabilities: baseline.capabilities },
+            { clientKind: 'runtime', clientCapabilities: baseline.capabilities },
             runtime
           )
         )[0]
@@ -498,7 +498,7 @@ describe('cross-version structured agent sessions', () => {
             current,
             'terminal.send',
             { terminal: 'terminal-1', text: `codex resume '${THREAD}'`, enter: true },
-            { clientKind: 'mobile', clientCapabilities: baseline.capabilities },
+            { clientKind: 'runtime', clientCapabilities: baseline.capabilities },
             runtime
           )
         )[0]
@@ -592,7 +592,7 @@ describe('cross-version structured agent sessions', () => {
         method,
         params,
         {
-          clientKind: 'mobile',
+          clientKind: 'runtime',
           clientCapabilities: [STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY],
           clientId: 'paired-device-1',
           connectionId: 'connection-1'

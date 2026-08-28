@@ -9,6 +9,7 @@ import type {
 } from '../../shared/agent-session-record'
 import {
   createStructuredAgentSessionOwnerProbe,
+  createStructuredAgentSessionOwnerProbes,
   ensureStructuredAgentSessionHost,
   stopStructuredAgentSessionRuntime
 } from './structured-agent-session-runtime'
@@ -56,6 +57,34 @@ describe('structured agent-session owner probe', () => {
       deps: { readEchoedSpawnToken: expect.any(Function) }
     })
     expect(result).toEqual({ outcome: 'pid-absent' })
+  })
+
+  it('reads the process table once for many local owners', async () => {
+    const secondOwner = { ...OWNER, pid: 5252, spawnToken: 'token-2' }
+    const probeMany = vi.fn(async () => [
+      { outcome: 'identity-matched' as const, matchedOn: ['process-start-time' as const] },
+      { outcome: 'pid-absent' as const }
+    ])
+    const probeOne = vi.fn(async () => ({ outcome: 'indeterminate' as const, reason: 'unused' }))
+    const records = [
+      record(OWNER),
+      { ...record(secondOwner), sessionId: 'session-2' }
+    ] as AgentSessionRecord[]
+
+    const results = await createStructuredAgentSessionOwnerProbes(
+      HOST_ID,
+      probeMany,
+      probeOne
+    )(records)
+
+    expect(probeMany).toHaveBeenCalledOnce()
+    expect(probeMany).toHaveBeenCalledWith({
+      identities: [OWNER, secondOwner],
+      deps: { readEchoedSpawnToken: expect.any(Function) }
+    })
+    expect(probeOne).not.toHaveBeenCalled()
+    expect(results.get('session-1')?.outcome).toBe('identity-matched')
+    expect(results.get('session-2')).toEqual({ outcome: 'pid-absent' })
   })
 
   it('refuses to probe an owner on another host, whose pid means nothing here', async () => {

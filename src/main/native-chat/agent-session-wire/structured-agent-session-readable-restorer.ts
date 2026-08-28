@@ -21,18 +21,24 @@ export class StructuredAgentSessionReadableRestorer {
     }
   ) {}
 
-  restore(): Promise<void> {
-    this.restorePromise ??= this.restoreReadableSessions().catch((error: unknown) => {
+  restore(sessionIds?: readonly string[]): Promise<void> {
+    this.restorePromise ??= this.restoreReadableSessions(sessionIds).catch((error: unknown) => {
       this.restorePromise = null
       throw error
     })
     return this.restorePromise
   }
 
-  private async restoreReadableSessions(): Promise<void> {
+  private async restoreReadableSessions(sessionIds?: readonly string[]): Promise<void> {
+    const targeted = sessionIds ? new Set(sessionIds) : null
     await restoreStructuredAgentSessionsOnRestart({
       ...this.input,
-      records: this.input.store.listRecords().filter(this.input.supportsRecord)
+      records: this.input.store
+        .listRecords()
+        .filter(
+          (record) =>
+            this.input.supportsRecord(record) && (!targeted || targeted.has(record.sessionId))
+        )
     })
   }
 }

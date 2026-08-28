@@ -42,7 +42,12 @@ export function useStructuredAgentSession(args: {
   const { agent, isVisible, sessionId, target } = args
   // Declared first: the hold is what gives a restored session its provider child back, and the
   // read below is useless for sending until it lands.
-  useStructuredAgentSessionHold({ sessionId, target, surface: 'desktop-chat' })
+  useStructuredAgentSessionHold({
+    sessionId,
+    target,
+    surface: 'desktop-chat',
+    enabled: isVisible
+  })
   const { state, loadingOlder, loadOlder } = useStructuredAgentSessionRead({
     sessionId,
     target,
@@ -132,7 +137,7 @@ export function useStructuredAgentSession(args: {
   )
 
   useEffect(() => {
-    if (!optionCatalog) {
+    if (!isVisible || !optionCatalog) {
       return
     }
     let stale = false
@@ -152,7 +157,7 @@ export function useStructuredAgentSession(args: {
     return () => {
       stale = true
     }
-  }, [optionCatalog, sessionId, state.fence, target])
+  }, [isVisible, optionCatalog, sessionId, state.fence, target])
 
   const optionSnapshot = useMemo(
     () => structuredAgentSessionOptionSnapshot(optionState),

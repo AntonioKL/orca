@@ -1,27 +1,19 @@
 import { useEffect, useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import type { AgentSessionHistoryResult } from '../../../../shared/agent-session-wire'
 import type { AgentProviderSessionMetadata } from '../../../../shared/agent-session-resume'
+import { agentProviderSessionsEqual } from '../../../../shared/agent-session-resume'
 import {
   hasPersistedStructuredAgentSessionTurn,
   projectStructuredAgentSessionStatus,
   structuredAgentSessionPaneKey
 } from '../../../../shared/structured-agent-session-projection'
-import {
-  EMPTY_STRUCTURED_AGENT_SESSION,
-  reduceStructuredAgentSession,
-  shouldAdvanceStructuredResumeCursor,
-  type StructuredAgentSessionState
-} from '../../../../shared/structured-agent-session-reducer'
+import type { StructuredAgentSessionState } from '../../../../shared/structured-agent-session-reducer'
 import type { Tab } from '../../../../shared/tab-types'
 import { isAgentSessionHandleProvider } from '../../../../shared/agent-session-provider-handle'
 import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
 import { useAppStore } from '@/store'
-import { getActiveRuntimeTarget, type RuntimeClientTarget } from '@/runtime/runtime-rpc-client'
-import {
-  callStructuredAgentSession,
-  subscribeStructuredAgentSession
-} from '@/runtime/structured-agent-session-client'
+import { getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
+import { useStructuredAgentSessionReadObservation } from './use-structured-agent-session-read'
 
 type StructuredTab = Tab & { contentType: 'agent-session' }
 
@@ -40,22 +32,38 @@ function projectStatus(
   state: StructuredAgentSessionState,
   providerSession: AgentProviderSessionMetadata | undefined
 ): void {
-  // A newly-created session has no turn to report; publishing `done` here
-  // makes an untouched chat look completed in the sidebar.
+  const paneKey = structuredAgentSessionPaneKey(tab.id, tab.entityId)
+  const store = useAppStore.getState()
   if (!hasPersistedStructuredAgentSessionTurn(state.items)) {
-    useAppStore.getState().removeAgentStatus(structuredAgentSessionPaneKey(tab.id, tab.entityId))
+    if (store.agentStatusByPaneKey?.[paneKey]) {
+      store.removeAgentStatus(paneKey)
+    }
     return
   }
   const projection = projectStructuredAgentSessionStatus(state.items)
-  const store = useAppStore.getState()
+  const desired = {
+    state: projection === 'working' ? 'working' : projection === 'attention' ? 'blocked' : 'done',
+    prompt: latestPrompt(state),
+    agentType: tab.agentSessionAgent,
+    sessionBoundary: projection === 'idle'
+  } as const
+  const current = store.agentStatusByPaneKey?.[paneKey]
+  if (
+    current?.state === desired.state &&
+    current.prompt === desired.prompt &&
+    current.agentType === desired.agentType &&
+    current.sessionBoundary === desired.sessionBoundary &&
+    current.terminalTitle === tab.label &&
+    current.tabId === tab.id &&
+    current.worktreeId === tab.worktreeId &&
+    current.terminalResumeEligible === false &&
+    agentProviderSessionsEqual(tab.agentSessionAgent, current.providerSession, providerSession)
+  ) {
+    return
+  }
   store.setAgentStatus(
-    structuredAgentSessionPaneKey(tab.id, tab.entityId),
-    {
-      state: projection === 'working' ? 'working' : projection === 'attention' ? 'blocked' : 'done',
-      prompt: latestPrompt(state),
-      agentType: tab.agentSessionAgent,
-      sessionBoundary: projection === 'idle'
-    },
+    paneKey,
+    desired,
     tab.label,
     undefined,
     { tabId: tab.id, worktreeId: tab.worktreeId },
@@ -66,121 +74,6 @@ function projectStatus(
   )
 }
 
-function startStatusProjection(tab: StructuredTab, target: RuntimeClientTarget): () => void {
-  let state = EMPTY_STRUCTURED_AGENT_SESSION
-  let stopped = false
-  let connected = false
-  let opening = false
-  let unsubscribe = (): void => {}
-  let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-  let providerSession: AgentProviderSessionMetadata | undefined
-  const apply = (action: Parameters<typeof reduceStructuredAgentSession>[1]): void => {
-    state = reduceStructuredAgentSession(state, action)
-    projectStatus(tab, state, providerSession)
-  }
-  const scheduleReconnect = (): void => {
-    if (stopped || connected || reconnectTimer) {
-      return
-    }
-    reconnectTimer = setTimeout(() => {
-      reconnectTimer = null
-      void open()
-    }, 750)
-  }
-  const open = async (): Promise<void> => {
-    if (stopped || connected) {
-      return
-    }
-    if (opening) {
-      scheduleReconnect()
-      return
-    }
-    opening = true
-    unsubscribe()
-    unsubscribe = (): void => {}
-    try {
-      let closedDuringOpen = false
-      const handle = await subscribeStructuredAgentSession(
-        target,
-        { sessionId: tab.entityId, ...(state.cursor ? { cursor: state.cursor } : {}) },
-        (event) => {
-          if (
-            event.type === 'batch' &&
-            !shouldAdvanceStructuredResumeCursor(state.cursor, event.batch.cursor)
-          ) {
-            return
-          }
-          if (event.type === 'end') {
-            closedDuringOpen = true
-            connected = false
-            scheduleReconnect()
-          }
-          apply({ type: 'event', event })
-        },
-        () => {
-          closedDuringOpen = true
-          connected = false
-          scheduleReconnect()
-        },
-        () => {
-          closedDuringOpen = true
-          connected = false
-          scheduleReconnect()
-        }
-      )
-      if (stopped || closedDuringOpen) {
-        handle.unsubscribe()
-        if (!stopped) {
-          scheduleReconnect()
-        }
-      } else {
-        connected = true
-        unsubscribe = handle.unsubscribe
-      }
-    } catch {
-      connected = false
-      scheduleReconnect()
-    } finally {
-      opening = false
-    }
-  }
-  void callStructuredAgentSession<AgentSessionHistoryResult>(target, 'agentSession.history', {
-    sessionId: tab.entityId,
-    direction: 'tail',
-    limit: 40
-  })
-    .then(async (result) => {
-      if (stopped) {
-        return
-      }
-      providerSession = result.providerSession
-      if (result.ok) {
-        apply({ type: 'tail-page', page: result.page })
-      } else {
-        apply({
-          type: 'event',
-          event: {
-            type: 'reset',
-            sessionId: tab.entityId,
-            reset: result.reset,
-            snapshot: result.snapshot,
-            fence: result.fence ?? 0
-          }
-        })
-      }
-      await open()
-    })
-    .catch(scheduleReconnect)
-  return () => {
-    stopped = true
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer)
-    }
-    unsubscribe()
-    useAppStore.getState().removeAgentStatus(structuredAgentSessionPaneKey(tab.id, tab.entityId))
-  }
-}
-
 function StructuredAgentSessionStatusProjection({ tab }: { tab: StructuredTab }): null {
   const environmentId = useAppStore((state) =>
     getRuntimeEnvironmentIdForWorktree(state, tab.worktreeId)
@@ -189,7 +82,18 @@ function StructuredAgentSessionStatusProjection({ tab }: { tab: StructuredTab })
     () => getActiveRuntimeTarget({ activeRuntimeEnvironmentId: environmentId }),
     [environmentId]
   )
-  useEffect(() => startStatusProjection(tab, target), [tab, target])
+  const { providerSession, state } = useStructuredAgentSessionReadObservation({
+    sessionId: tab.entityId,
+    target
+  })
+  useEffect(() => {
+    projectStatus(tab, state, providerSession)
+  }, [providerSession, state, tab])
+  useEffect(
+    () => () =>
+      useAppStore.getState().removeAgentStatus(structuredAgentSessionPaneKey(tab.id, tab.entityId)),
+    [tab.entityId, tab.id]
+  )
   return null
 }
 

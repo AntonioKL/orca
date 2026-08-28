@@ -1,7 +1,6 @@
 import type {
   AgentJournalCursor,
   AgentJournalRenderItem,
-  AgentJournalSnapshot,
   AgentJournalSubmission
 } from './agent-session-journal-types'
 import type {
@@ -43,19 +42,18 @@ export const EMPTY_STRUCTURED_AGENT_SESSION: StructuredAgentSessionState = {
 
 const MAX_RETAINED_SUBMISSIONS = 256
 
-function replaceSnapshot(
-  snapshot: AgentJournalSnapshot,
+function replacePage(
+  page: AgentSessionHistoryPage,
   fence: number,
   handoff?: AgentSessionHandoffStatus
 ): StructuredAgentSessionState {
   return {
-    epoch: snapshot.cursor.epoch,
-    cursor: snapshot.cursor,
+    epoch: page.epoch,
+    cursor: page.liveCursor ?? page.window.nextCursor,
     fence,
-    items: [...snapshot.items].sort((left, right) => left.sequence - right.sequence),
-    submissions: snapshot.submissions,
-    // Snapshots contain the full reduced journal, unlike bounded history pages.
-    hasOlder: false,
+    items: [...page.items].sort((left, right) => left.sequence - right.sequence),
+    submissions: page.submissions,
+    hasOlder: page.hasOlder,
     status: 'ready',
     handoff: handoff ?? null
   }
@@ -114,6 +112,13 @@ export function reduceStructuredAgentSession(
       state.cursor &&
       (!pageCursor || pageCursor.sequence <= state.cursor.sequence)
     ) {
+      if (
+        pageCursor?.sequence === state.cursor.sequence &&
+        action.page.fence !== undefined &&
+        action.page.fence !== state.fence
+      ) {
+        return { ...state, fence: action.page.fence, status: 'ready', error: undefined }
+      }
       return state
     }
     const sameEpoch = state.epoch === action.page.epoch
@@ -146,7 +151,7 @@ export function reduceStructuredAgentSession(
     return state
   }
   if (event.type === 'snapshot' || event.type === 'reset') {
-    return replaceSnapshot(event.snapshot, event.fence, event.handoff)
+    return replacePage(event.page, event.fence, event.handoff)
   }
   if (state.epoch !== event.batch.cursor.epoch) {
     return state

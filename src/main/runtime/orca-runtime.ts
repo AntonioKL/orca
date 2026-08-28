@@ -284,6 +284,7 @@ import { ORCHESTRATION_MESSAGE_WAIT_DEFAULT_TIMEOUT_MS } from '../../shared/orch
 import { shouldForwardHeadlessTerminalQueryReply } from './headless-terminal-query-reply-policy'
 import type { TerminalRevealIdentity } from '../../shared/terminal-reveal-identity'
 import { structuredAgentSessionTabId } from '../../shared/structured-agent-session-projection'
+import { collectSavedStructuredAgentSessionIds } from './saved-structured-agent-session-restoration'
 import type {
   OrchestrationCompatibilityEvidence,
   OrchestrationCompatibilityHostStamp
@@ -11714,7 +11715,7 @@ export class OrcaRuntimeService {
       tuiStatus: (owner) => this.structuredTuiStatus(owner),
       closeTuiOwner: (owner) => this.closeStructuredTuiOwner(owner),
       revealNativeSession: ({ workspaceId, sessionId, agent = 'codex', adoptedTerminal }) => {
-        if (adoptedTerminal) {
+        if (adoptedTerminal || agent !== 'codex') {
           return
         }
         this.publishStructuredAgentSessionTab({
@@ -12125,11 +12126,8 @@ export class OrcaRuntimeService {
 
   async getStructuredAgentSessionCreateSupport(
     worktreeSelector: string,
-    agent: 'claude' | 'codex'
+    agent: 'codex'
   ): Promise<{ supported: boolean; reason?: 'agent' | 'remote' | 'wsl' }> {
-    if (agent !== 'codex' && agent !== 'claude') {
-      return { supported: false, reason: 'agent' }
-    }
     const location = await this.resolveStructuredAgentSessionLocation(worktreeSelector)
     await this.ensureStructuredAgentSessionHost()
     if (getStructuredAgentSessionHost()?.supportsCreate(location, agent)) {
@@ -12193,14 +12191,8 @@ export class OrcaRuntimeService {
   async resolveStructuredAgentSessionCreateIntent(input: {
     envelope: { sessionId: string; clientOperationId: string }
     worktree: string
-    agent: 'claude' | 'codex'
+    agent: 'codex'
   }): Promise<AgentSessionAttachParams> {
-    if (input.agent === 'claude') {
-      return this.resolveStructuredAgentSessionIntent(
-        input,
-        ({ launchEnv }) => launchEnv.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), '.claude')
-      )
-    }
     return this.resolveStructuredAgentSessionIntent(input, async ({ workspacePath, launchEnv }) => {
       // A create has no process yet, so the current selection is what it must follow.
       const preparedHome = await this.prepareCodexStructuredLaunchFn?.({ workspacePath, launchEnv })
@@ -12217,7 +12209,7 @@ export class OrcaRuntimeService {
     input: {
       envelope: { sessionId: string; clientOperationId: string }
       worktree: string
-      agent: 'claude' | 'codex'
+      agent: 'codex'
     },
     resolveAccountHomePath: (context: {
       workspacePath: string
@@ -12243,7 +12235,7 @@ export class OrcaRuntimeService {
       provider: input.agent,
       agent: input.agent,
       accountHome: {
-        variable: input.agent === 'claude' ? 'CLAUDE_CONFIG_DIR' : 'CODEX_HOME',
+        variable: 'CODEX_HOME',
         path: await resolveAccountHomePath({ workspacePath, launchEnv })
       },
       runtimeKind: 'native'
@@ -12272,11 +12264,17 @@ export class OrcaRuntimeService {
     // Durable agent records must exist before daemon inventory can be reconciled against them.
     await this.ensureStructuredAgentSessionHost()
     await this.refreshMobileSessionPtyRecords()
-    await getStructuredAgentSessionHost()?.restoreReadableSessions()
+    await getStructuredAgentSessionHost()?.reconcileRestartLeases()
   }
 
   private async restoreStructuredAgentSessionTabsOnce(): Promise<void> {
     await this.prepareStructuredAgentSessionStartupRestoration()
+    const host = getStructuredAgentSessionHost()
+    await host?.restoreReadableSessions(
+      collectSavedStructuredAgentSessionIds(
+        this.store?.getWorkspaceSession?.(LOCAL_EXECUTION_HOST_ID) ?? null
+      )
+    )
     for (const worktreeId of this.getKnownWorkspaceSessionWorktreeIds()) {
       this.hydrateHeadlessMobileSessionTabsFromWorkspaceSession(worktreeId, {
         allowAttachedWindow: true,
@@ -12284,14 +12282,17 @@ export class OrcaRuntimeService {
       })
     }
     this.hydrateHeadlessMobileSessionTabsFromWorkspaceSession()
-    const host = getStructuredAgentSessionHost()
     for (const session of host?.listSessionTabs() ?? []) {
+      if (session.agent !== 'codex') {
+        continue
+      }
       let sessionId = session.sessionId
       while (sessionId.startsWith('agent-session:')) {
         sessionId = sessionId.slice('agent-session:'.length)
       }
       this.publishStructuredAgentSessionTab({
         ...session,
+        agent: 'codex',
         sessionId,
         activate: false,
         notify: false
@@ -12302,7 +12303,7 @@ export class OrcaRuntimeService {
   publishStructuredAgentSessionTab(input: {
     workspaceId: string
     sessionId: string
-    agent: 'claude' | 'codex'
+    agent: 'codex'
     activate: boolean
     notify?: boolean
   }): void {
@@ -12314,7 +12315,7 @@ export class OrcaRuntimeService {
     const tab: RuntimeMobileSessionAgentTab = {
       type: 'agent-session',
       id,
-      title: input.agent === 'claude' ? 'Claude Chat' : 'Codex Chat',
+      title: 'Codex Chat',
       sessionId: input.sessionId,
       agent: input.agent,
       isActive: input.activate

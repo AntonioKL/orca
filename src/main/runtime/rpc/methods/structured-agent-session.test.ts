@@ -5,9 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { StructuredAgentSessionHost } from '../../../native-chat/agent-session-wire/structured-agent-session-host'
 import { setStructuredAgentSessionHost } from '../../../native-chat/agent-session-wire/structured-agent-session-registry'
 import {
-  CLAUDE_STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY,
   RUNTIME_CAPABILITIES,
   RUNTIME_PROTOCOL_VERSION,
+  STRUCTURED_AGENT_SESSION_HOLD_RUNTIME_CAPABILITY,
   STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY
 } from '../../../../shared/protocol-version'
 import type { OrcaRuntimeService } from '../../orca-runtime'
@@ -16,10 +16,6 @@ import { RpcDispatcher } from '../dispatcher'
 import { ALL_RPC_METHODS } from './index'
 import { STRUCTURED_AGENT_SESSION_METHODS } from './structured-agent-session'
 import { computeAgentSessionPayloadFingerprint } from '../../../../shared/agent-session-mutation-envelope'
-import {
-  recordMobileClipboardImagePath,
-  resetMobileClipboardImageProvenanceForTest
-} from '../mobile-clipboard-image-provenance'
 
 const SESSION = 'session-alpha'
 const FINGERPRINT = 'f'.repeat(64)
@@ -78,19 +74,26 @@ function hostStub(): StructuredAgentSessionHost {
       value: {
         sessionId: SESSION,
         fence: 1,
-        snapshot: {
+        page: {
           sessionId: SESSION,
-          cursor: { epoch: 'epoch-a', sequence: 0 },
+          epoch: 'epoch-a',
+          direction: 'tail',
           items: [],
-          submissions: []
+          removedItemIds: [],
+          submissions: [],
+          window: {
+            oldest: null,
+            newest: null,
+            nextCursor: { epoch: 'epoch-a', sequence: 0 }
+          },
+          liveCursor: { epoch: 'epoch-a', sequence: 0 },
+          hasOlder: false,
+          hasNewer: false
         },
         unconfirmedClientMessageIds: []
       }
     })),
-    send: vi.fn(async (_caller, params) => {
-      params.beforeRun?.()
-      return { ok: true, replayed: false }
-    }),
+    send: vi.fn(async () => ({ ok: true, replayed: false })),
     cancel: vi.fn(async () => ({ ok: true, replayed: false })),
     respondToPrompt: vi.fn(async () => ({ ok: true, replayed: false })),
     setOption: vi.fn(async () => ({ ok: true, replayed: false })),
@@ -162,24 +165,22 @@ async function call(
 }
 
 const STRUCTURED_CLIENT = {
-  clientKind: 'mobile' as const,
+  clientKind: 'runtime' as const,
   clientCapabilities: [STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY]
 }
 
 beforeEach(() => {
   setStructuredAgentSessionHost(hostStub())
-  resetMobileClipboardImageProvenanceForTest()
 })
 
 afterEach(() => {
   setStructuredAgentSessionHost(null)
-  resetMobileClipboardImageProvenanceForTest()
 })
 
 describe('capability gating', () => {
   it('advertises the capability without bumping the protocol version', () => {
     expect(RUNTIME_CAPABILITIES).toContain(STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY)
-    expect(RUNTIME_CAPABILITIES).toContain(CLAUDE_STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY)
+    expect(RUNTIME_CAPABILITIES).toContain(STRUCTURED_AGENT_SESSION_HOLD_RUNTIME_CAPABILITY)
     // Additive methods do not break an old client; bumping would strand every
     // paired device that has not updated.
     expect(RUNTIME_PROTOCOL_VERSION).toBe(3)
@@ -197,7 +198,7 @@ describe('capability gating', () => {
 
   it('hides the surface from a declared client that did not advertise it', async () => {
     const response = await call('agentSession.send', sendParams(), {
-      clientKind: 'mobile',
+      clientKind: 'runtime',
       clientCapabilities: ['terminal.stream.v1']
     })
     expect(response).toMatchObject({
@@ -223,7 +224,7 @@ describe('capability gating', () => {
         worktree,
         agent: 'codex'
       },
-      { clientKind: 'mobile', clientCapabilities: [] }
+      { clientKind: 'runtime', clientCapabilities: [] }
     )
 
     expect(response).toMatchObject({
@@ -239,16 +240,6 @@ describe('capability gating', () => {
     expect(hostCalls.send).toHaveBeenCalledTimes(1)
   })
 
-  it('rejects host-authoritative attach fields from a mobile caller', async () => {
-    const response = await call('agentSession.create', attachParams(), STRUCTURED_CLIENT)
-
-    expect(response).toMatchObject({
-      ok: false,
-      error: { message: expect.stringContaining('agent_session_create_intent_required') }
-    })
-    expect(hostCalls.attach).not.toHaveBeenCalled()
-  })
-
   it('serves an in-process caller, which negotiates no capabilities at all', async () => {
     const response = await call('agentSession.send', sendParams())
     expect(response).toMatchObject({ ok: true })
@@ -262,7 +253,7 @@ describe('capability gating', () => {
 })
 
 describe('method routing', () => {
-  it('creates from mobile intent while the host resolves paths and provider identity', async () => {
+  it('creates from a client intent while the host resolves paths and provider identity', async () => {
     const worktree = 'id:workspace-1'
     const params = {
       envelope: envelope({
@@ -329,65 +320,6 @@ describe('method routing', () => {
   })
 })
 
-describe('mobile image provenance', () => {
-  const path = '/tmp/orca-paste-image.png'
-  const mobileClient = (clientId: string) => ({ ...STRUCTURED_CLIENT, clientId })
-  const imageParams = (block: { type: 'image-ref'; path?: string; url?: string }) =>
-    sendParams({
-      body: { kind: 'message', role: 'user', blocks: [block] }
-    })
-
-  it('accepts a same-client upload across retries without consuming provenance', async () => {
-    recordMobileClipboardImagePath('device-a', path)
-
-    await expect(
-      call('agentSession.send', imageParams({ type: 'image-ref', path }), mobileClient('device-a'))
-    ).resolves.toMatchObject({ ok: true })
-    await expect(
-      call('agentSession.send', imageParams({ type: 'image-ref', path }), mobileClient('device-a'))
-    ).resolves.toMatchObject({ ok: true })
-    expect(hostCalls.send).toHaveBeenCalledTimes(2)
-  })
-
-  it('rejects forged, cross-client, and URL image references from mobile', async () => {
-    recordMobileClipboardImagePath('device-a', path)
-
-    const forged = await call(
-      'agentSession.send',
-      imageParams({ type: 'image-ref', path: '/etc/private.png' }),
-      mobileClient('device-a')
-    )
-    const crossClient = await call(
-      'agentSession.send',
-      imageParams({ type: 'image-ref', path }),
-      mobileClient('device-b')
-    )
-    const url = await call(
-      'agentSession.send',
-      imageParams({ type: 'image-ref', url: 'https://example.com/image.png' }),
-      mobileClient('device-a')
-    )
-
-    for (const response of [forged, crossClient, url]) {
-      expect(response).toMatchObject({
-        ok: false,
-        error: { message: expect.stringContaining('agent_session_image_untrusted') }
-      })
-    }
-    expect(hostCalls.send).toHaveBeenCalledTimes(3)
-  })
-
-  it('keeps trusted in-process image paths unchanged', async () => {
-    const response = await call(
-      'agentSession.send',
-      imageParams({ type: 'image-ref', path: '/trusted/local/image.png' })
-    )
-
-    expect(response).toMatchObject({ ok: true })
-    expect(hostCalls.send).toHaveBeenCalledTimes(1)
-  })
-})
-
 describe('parameter validation', () => {
   const rejects = async (method: string, params: unknown): Promise<void> => {
     const response = await call(method, params, STRUCTURED_CLIENT)
@@ -422,6 +354,25 @@ describe('parameter validation', () => {
       'agentSession.create',
       attachParams({ providerHandle: { kind: 'opaque', agent: 'codex', value: 'thread-1' } })
     )
+  })
+
+  it('rejects Claude structured create shapes', async () => {
+    await rejects('agentSession.createSupport', {
+      worktree: 'id:workspace-1',
+      agent: 'claude'
+    })
+    const fields = { worktree: 'id:workspace-1', agent: 'claude' }
+    await rejects('agentSession.create', {
+      envelope: envelope({
+        expectedRuntimeFence: null,
+        payloadFingerprint: computeAgentSessionPayloadFingerprint({
+          method: 'agentSession.create',
+          sessionId: SESSION,
+          fields
+        })
+      }),
+      ...fields
+    })
   })
 
   it('requires a sha256 fingerprint and a positive fence', async () => {

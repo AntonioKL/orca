@@ -118,7 +118,7 @@ export function readAgentSessionHistory(
 ): AgentSessionHistoryResult {
   const snapshot = journal.snapshot()
   if (journal.isReadOnly) {
-    return { ok: false, reset: 'schema_unreadable', snapshot }
+    return historyReset(snapshot, 'schema_unreadable')
   }
   const limit = resolveHistoryLimit(request.limit)
   if (request.direction === 'after') {
@@ -127,10 +127,10 @@ export function readAgentSessionHistory(
   const cursor = request.direction === 'before' ? request.cursor : undefined
   if (cursor) {
     if (cursor.epoch !== snapshot.cursor.epoch) {
-      return { ok: false, reset: 'epoch_changed', snapshot }
+      return historyReset(snapshot, 'epoch_changed')
     }
     if (cursor.sequence > snapshot.cursor.sequence) {
-      return { ok: false, reset: 'cursor_ahead', snapshot }
+      return historyReset(snapshot, 'cursor_ahead')
     }
   }
   const older = cursor
@@ -159,6 +159,49 @@ export function readAgentSessionHistory(
   }
 }
 
+export function readAgentSessionHydrationPage(
+  journal: AgentSessionJournal,
+  fence?: number
+): AgentSessionHistoryPage {
+  return buildHydrationPage(journal.snapshot(), fence)
+}
+
+function buildHydrationPage(
+  snapshot: AgentJournalSnapshot,
+  fence?: number
+): AgentSessionHistoryPage {
+  const items = snapshot.items.slice(-AGENT_SESSION_HISTORY_MAX_LIMIT)
+  const bounded = boundHistoryItemsByBytes(
+    items,
+    'newest',
+    submissionBytesByItemId(snapshot.submissions),
+    AGENT_SESSION_HISTORY_MAX_PAGE_BYTES
+  )
+  return buildPage({
+    snapshot,
+    direction: 'tail',
+    items: bounded.items,
+    hasOlder: snapshot.items.length > items.length || bounded.dropped > 0,
+    hasNewer: false,
+    fallbackCursor: { epoch: snapshot.cursor.epoch, sequence: 0 },
+    nextCursor: bounded.items[0]
+      ? { epoch: snapshot.cursor.epoch, sequence: bounded.items[0].sequence }
+      : undefined,
+    fence
+  })
+}
+
+function historyReset(
+  snapshot: AgentJournalSnapshot,
+  reset: Extract<AgentSessionHistoryResult, { ok: false }>['reset']
+): AgentSessionHistoryResult {
+  return {
+    ok: false,
+    reset,
+    page: buildHydrationPage(snapshot)
+  }
+}
+
 function readForward(
   journal: AgentSessionJournal,
   snapshot: AgentJournalSnapshot,
@@ -169,11 +212,11 @@ function readForward(
     // Why: forward paging replays rows after a position; without one there is
     // nothing to be after, and silently serving the tail would hand the client
     // a page it cannot place.
-    return { ok: false, reset: 'cursor_ahead', snapshot }
+    return historyReset(snapshot, 'cursor_ahead')
   }
   const since = journal.readSince(cursor)
   if (!since.ok) {
-    return { ok: false, reset: since.reset, snapshot }
+    return historyReset(snapshot, since.reset)
   }
   const submissionBytes = submissionBytesByItemId(snapshot.submissions)
   const batchBytes = (items: readonly AgentJournalRenderItem[]): number =>
@@ -189,7 +232,7 @@ function readForward(
     canonicalItemId: (itemId) => journal.canonicalItemId(itemId)
   })
   if (!projected.ok) {
-    return { ok: false, reset: projected.reset, snapshot }
+    return historyReset(snapshot, projected.reset)
   }
   while (
     rows.length > 1 &&
@@ -203,7 +246,7 @@ function readForward(
       canonicalItemId: (itemId) => journal.canonicalItemId(itemId)
     })
     if (!shrunk.ok) {
-      return { ok: false, reset: shrunk.reset, snapshot }
+      return historyReset(snapshot, shrunk.reset)
     }
     projected = shrunk
   }
@@ -243,6 +286,7 @@ function buildPage(input: {
   hasNewer: boolean
   fallbackCursor: AgentJournalCursor
   nextCursor: AgentJournalCursor | undefined
+  fence?: number
 }): AgentSessionHistoryPage {
   const epoch = input.snapshot.cursor.epoch
   const pageItemIds = new Set(input.items.map((item) => item.itemId))
@@ -251,6 +295,7 @@ function buildPage(input: {
   return {
     sessionId: input.snapshot.sessionId,
     epoch,
+    ...(input.fence !== undefined ? { fence: input.fence } : {}),
     direction: input.direction,
     items: input.items,
     removedItemIds: input.removedItemIds ?? [],

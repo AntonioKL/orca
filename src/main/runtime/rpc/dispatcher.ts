@@ -30,7 +30,7 @@ import { createDispatcherStreamingFeatureEmitter } from './dispatcher-streaming-
 export type DispatcherOptions = { runtime: OrcaRuntimeService; methods?: readonly RpcAnyMethod[] }
 
 // oxfmt-ignore
-type DispatchCallOptions = Pick<RpcDispatchStreamingOptions, 'signal' | 'clientId' | 'clientKind' | 'clientCapabilities' | 'authenticatedCallerFingerprint'>
+type DispatchCallOptions = Pick<RpcDispatchStreamingOptions, 'signal' | 'connectionId' | 'clientId' | 'clientKind' | 'clientCapabilities' | 'authenticatedCallerFingerprint'>
 
 export class RpcDispatcher {
   private readonly runtime: OrcaRuntimeService
@@ -118,6 +118,7 @@ export class RpcDispatcher {
         return method.handler(effectiveParams, {
           runtime: this.runtime,
           signal: options?.signal,
+          connectionId: options?.connectionId,
           requestId: request.id,
           clientId: options?.clientId,
           clientKind: options?.clientKind,

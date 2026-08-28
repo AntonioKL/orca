@@ -109,64 +109,6 @@ describe('session tab move validation', () => {
     expect(snapshot?.tabGroups?.[0]?.tabOrder).toEqual(['terminal-tab', 'agent-session:session-a'])
   })
 
-  it('keeps a newly published active Claude tab active across an omitting renderer snapshot', () => {
-    const runtime = new OrcaRuntimeService()
-    setMobileSessionSnapshot(runtime, {
-      worktree: 'wt-1',
-      publicationEpoch: 'renderer-epoch',
-      snapshotVersion: 1,
-      activeGroupId: 'group-1',
-      activeTabId: 'terminal-tab::leaf-1',
-      activeTabType: 'terminal',
-      tabGroups: [{ id: 'group-1', activeTabId: 'terminal-tab', tabOrder: ['terminal-tab'] }],
-      tabs: [terminalTab()]
-    })
-    runtime.publishStructuredAgentSessionTab({
-      workspaceId: 'wt-1',
-      sessionId: 'claude-session-a',
-      agent: 'claude',
-      activate: true
-    })
-
-    ;(
-      runtime as unknown as {
-        syncMobileSessionTabs(snapshots: RuntimeMobileSessionTabsSnapshot[]): Set<string>
-      }
-    ).syncMobileSessionTabs([
-      {
-        worktree: 'wt-1',
-        publicationEpoch: 'renderer-epoch',
-        snapshotVersion: 2,
-        activeGroupId: 'group-1',
-        activeTabId: 'terminal-tab::leaf-1',
-        activeTabType: 'terminal',
-        tabGroups: [{ id: 'group-1', activeTabId: 'terminal-tab', tabOrder: ['terminal-tab'] }],
-        tabs: [terminalTab()]
-      }
-    ])
-
-    const snapshot = getMobileSessionSnapshot(runtime, 'wt-1')
-    expect(snapshot).toMatchObject({
-      activeGroupId: 'group-1',
-      activeTabId: 'agent-session:claude-session-a',
-      activeTabType: 'agent-session'
-    })
-    expect(snapshot?.tabs).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: 'agent-session:claude-session-a',
-          agent: 'claude',
-          isActive: true
-        }),
-        expect.objectContaining({ id: 'terminal-tab::leaf-1', isActive: false })
-      ])
-    )
-    expect(snapshot?.tabGroups?.[0]).toMatchObject({
-      activeTabId: 'agent-session:claude-session-a',
-      tabOrder: ['terminal-tab', 'agent-session:claude-session-a']
-    })
-  })
-
   it('publishes a structured tab into the active group instead of the first group', () => {
     const runtime = new OrcaRuntimeService()
     setMobileSessionSnapshot(runtime, {

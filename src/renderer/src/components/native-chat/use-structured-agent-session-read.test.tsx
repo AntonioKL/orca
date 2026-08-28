@@ -18,7 +18,11 @@ vi.mock('@/runtime/structured-agent-session-client', () => ({
   subscribeStructuredAgentSession: mocks.subscribe
 }))
 
-import { useStructuredAgentSessionRead } from './use-structured-agent-session-read'
+import {
+  useStructuredAgentSessionRead,
+  useStructuredAgentSessionReadObservation
+} from './use-structured-agent-session-read'
+import { resetStructuredAgentSessionReadOwnersForTests } from './structured-agent-session-read-owner'
 
 const LOCAL_TARGET = { kind: 'local' } as const
 
@@ -81,6 +85,7 @@ describe('useStructuredAgentSessionRead history window', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    resetStructuredAgentSessionReadOwnersForTests()
     mocks.subscribe.mockResolvedValue({ unsubscribe: vi.fn() })
   })
 
@@ -175,11 +180,12 @@ describe('useStructuredAgentSessionRead history window', () => {
         isVisible: false
       })
     )
-    await waitFor(() => expect(mocks.call).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(mocks.call).toHaveBeenCalledTimes(1))
+    expect(mocks.subscribe).toHaveBeenCalledTimes(1)
 
     act(() => window.dispatchEvent(new Event('focus')))
 
-    await waitFor(() => expect(mocks.call).toHaveBeenCalledTimes(3))
+    await waitFor(() => expect(mocks.call).toHaveBeenCalledTimes(2))
     expect(mocks.call).toHaveBeenLastCalledWith(LOCAL_TARGET, 'agentSession.history', {
       sessionId: 'session-visible',
       direction: 'tail',
@@ -188,5 +194,100 @@ describe('useStructuredAgentSessionRead history window', () => {
     visible.unmount()
     hidden.unmount()
     hasFocus.mockRestore()
+  })
+
+  it('does no host work for retained inactive sessions', async () => {
+    const first = renderHook(() =>
+      useStructuredAgentSessionRead({
+        sessionId: 'session-inactive-a',
+        target: LOCAL_TARGET,
+        isVisible: false
+      })
+    )
+    const second = renderHook(() =>
+      useStructuredAgentSessionRead({
+        sessionId: 'session-inactive-b',
+        target: LOCAL_TARGET,
+        isVisible: false
+      })
+    )
+
+    await act(() => Promise.resolve())
+
+    expect(mocks.call).not.toHaveBeenCalled()
+    expect(mocks.subscribe).not.toHaveBeenCalled()
+    first.unmount()
+    second.unmount()
+  })
+
+  it('shares one subscriber when pane and projection observe the same visible session', async () => {
+    const unsubscribe = vi.fn()
+    mocks.call.mockResolvedValue({ ok: true, page: page('tail', [], false) })
+    mocks.subscribe.mockResolvedValue({ unsubscribe })
+
+    const view = renderHook(() => {
+      const pane = useStructuredAgentSessionRead({
+        sessionId: 'session-shared',
+        target: LOCAL_TARGET,
+        isVisible: true
+      })
+      const projection = useStructuredAgentSessionReadObservation({
+        sessionId: 'session-shared',
+        target: LOCAL_TARGET
+      })
+      return { pane, projection }
+    })
+
+    await waitFor(() => expect(mocks.subscribe).toHaveBeenCalledOnce())
+    expect(mocks.call).toHaveBeenCalledOnce()
+    expect(view.result.current.pane.state).toBe(view.result.current.projection.state)
+
+    view.unmount()
+    expect(unsubscribe).toHaveBeenCalledOnce()
+  })
+
+  it('preserves cached state while switching away and refreshes once on re-entry', async () => {
+    const unsubscribe = vi.fn()
+    mocks.call.mockImplementation((_target, _method, params) => {
+      const sessionId = (params as { sessionId: string }).sessionId
+      return Promise.resolve({
+        ok: true,
+        page: {
+          ...page('tail', [message(`${sessionId}-message`, 1, 'user')], false),
+          sessionId
+        }
+      })
+    })
+    mocks.subscribe.mockResolvedValue({ unsubscribe })
+    const view = renderHook(
+      ({ active }: { active: 'first' | 'second' | null }) => ({
+        first: useStructuredAgentSessionRead({
+          sessionId: 'session-switch-a',
+          target: LOCAL_TARGET,
+          isVisible: active === 'first'
+        }),
+        second: useStructuredAgentSessionRead({
+          sessionId: 'session-switch-b',
+          target: LOCAL_TARGET,
+          isVisible: active === 'second'
+        })
+      }),
+      { initialProps: { active: null as 'first' | 'second' | null } }
+    )
+    expect(mocks.call).not.toHaveBeenCalled()
+
+    view.rerender({ active: 'first' })
+    await waitFor(() => expect(mocks.subscribe).toHaveBeenCalledTimes(1))
+    expect(view.result.current.first.state.items[0]?.itemId).toBe('session-switch-a-message')
+
+    view.rerender({ active: 'second' })
+    await waitFor(() => expect(mocks.subscribe).toHaveBeenCalledTimes(2))
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+
+    view.rerender({ active: 'first' })
+    expect(view.result.current.first.state.items[0]?.itemId).toBe('session-switch-a-message')
+    await waitFor(() => expect(mocks.subscribe).toHaveBeenCalledTimes(3))
+    expect(mocks.call).toHaveBeenCalledTimes(3)
+    expect(unsubscribe).toHaveBeenCalledTimes(2)
   })
 })

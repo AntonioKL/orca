@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { AgentJournalRenderItem } from './agent-session-journal-types'
+import type { AgentJournalRenderItem, AgentJournalSubmission } from './agent-session-journal-types'
+import type { AgentSessionHistoryPage } from './agent-session-wire'
 import {
   EMPTY_STRUCTURED_AGENT_SESSION,
   reduceStructuredAgentSession
@@ -28,20 +29,41 @@ function submission(index: number) {
   }
 }
 
+function hydrationPage(
+  items: AgentJournalRenderItem[],
+  submissions: AgentJournalSubmission[] = []
+): AgentSessionHistoryPage {
+  const oldest = items[0]?.sequence ?? 0
+  const newest = items.at(-1)?.sequence ?? 0
+  return {
+    sessionId: 'session-a',
+    epoch: 'epoch-a',
+    direction: 'tail',
+    items,
+    removedItemIds: [],
+    submissions,
+    window: {
+      oldest: items[0] ? { epoch: 'epoch-a', sequence: oldest } : null,
+      newest: items.at(-1) ? { epoch: 'epoch-a', sequence: newest } : null,
+      nextCursor: { epoch: 'epoch-a', sequence: oldest }
+    },
+    liveCursor: { epoch: 'epoch-a', sequence: newest },
+    hasOlder: false,
+    hasNewer: false
+  }
+}
+
 describe('structured agent session reducer', () => {
-  it('does not offer older history after receiving a full snapshot', () => {
+  it('uses the bounded hydration page pagination boundary', () => {
     const restored = reduceStructuredAgentSession(EMPTY_STRUCTURED_AGENT_SESSION, {
       type: 'event',
       event: {
         type: 'snapshot',
         sessionId: 'session-a',
         fence: 1,
-        snapshot: {
-          sessionId: 'session-a',
-          cursor: { epoch: 'epoch-a', sequence: 84 },
-          items: Array.from({ length: 84 }, (_, index) => item(`item-${index}`, index + 1)),
-          submissions: []
-        }
+        page: hydrationPage(
+          Array.from({ length: 84 }, (_, index) => item(`item-${index}`, index + 1))
+        )
       }
     })
 
@@ -56,12 +78,7 @@ describe('structured agent session reducer', () => {
         type: 'snapshot',
         sessionId: 'session-a',
         fence: 1,
-        snapshot: {
-          sessionId: 'session-a',
-          cursor: { epoch: 'epoch-a', sequence: 50 },
-          items: [item('streamed', 50)],
-          submissions: []
-        }
+        page: hydrationPage([item('streamed', 50)])
       }
     })
     const afterRefresh = reduceStructuredAgentSession(streamed, {
@@ -94,12 +111,7 @@ describe('structured agent session reducer', () => {
         type: 'snapshot',
         sessionId: 'session-a',
         fence: 1,
-        snapshot: {
-          sessionId: 'session-a',
-          cursor: { epoch: 'epoch-a', sequence: 50 },
-          items: [item('newest', 50)],
-          submissions: []
-        }
+        page: hydrationPage([item('newest', 50)])
       }
     })
     const withOlder = reduceStructuredAgentSession(snapshot, {
@@ -145,6 +157,24 @@ describe('structured agent session reducer', () => {
     expect(afterRefresh.items.map((entry) => entry.itemId)).toEqual(['older', 'newest'])
   })
 
+  it('accepts a newer fence from an equal-cursor tail refresh', () => {
+    const initial = reduceStructuredAgentSession(EMPTY_STRUCTURED_AGENT_SESSION, {
+      type: 'event',
+      event: {
+        type: 'snapshot',
+        sessionId: 'session-a',
+        fence: 1,
+        page: hydrationPage([item('newest', 50)])
+      }
+    })
+    const page = { ...hydrationPage([item('newest', 50)]), fence: 2 }
+
+    const refreshed = reduceStructuredAgentSession(initial, { type: 'tail-page', page })
+
+    expect(refreshed.fence).toBe(2)
+    expect(refreshed.items).toBe(initial.items)
+  })
+
   it('keeps rapid-send submissions when a newer tail refresh contains only the last one', () => {
     const initial = reduceStructuredAgentSession(EMPTY_STRUCTURED_AGENT_SESSION, {
       type: 'event',
@@ -152,12 +182,10 @@ describe('structured agent session reducer', () => {
         type: 'snapshot',
         sessionId: 'session-a',
         fence: 1,
-        snapshot: {
-          sessionId: 'session-a',
-          cursor: { epoch: 'epoch-a', sequence: 10 },
-          items: [item('first', 10)],
-          submissions: Array.from({ length: 8 }, (_, index) => submission(index))
-        }
+        page: hydrationPage(
+          [item('first', 10)],
+          Array.from({ length: 8 }, (_, index) => submission(index))
+        )
       }
     })
     const refreshed = reduceStructuredAgentSession(initial, {
@@ -192,12 +220,7 @@ describe('structured agent session reducer', () => {
         type: 'snapshot',
         sessionId: 'session-a',
         fence: 1,
-        snapshot: {
-          sessionId: 'session-a',
-          cursor: { epoch: 'epoch-a', sequence: 1 },
-          items: [item('first', 1)],
-          submissions: []
-        }
+        page: hydrationPage([item('first', 1)])
       }
     })
 

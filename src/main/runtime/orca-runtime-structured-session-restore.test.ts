@@ -5,11 +5,34 @@ import { OrcaRuntimeService } from './orca-runtime'
 afterEach(() => setStructuredAgentSessionHost(null))
 
 describe('structured session cold restoration', () => {
+  it('keeps historical journal parsing outside the terminal-safety fence', async () => {
+    const runtime = new OrcaRuntimeService()
+    const refresh = vi.fn(async () => new Set<string>())
+    const ensureHost = vi.fn(async () => undefined)
+    const reconcileRestartLeases = vi.fn(async () => undefined)
+    const restoreReadableSessions = vi.fn(async () => undefined)
+    const internal = runtime as unknown as {
+      refreshMobileSessionPtyRecords(): Promise<Set<string> | null>
+      ensureStructuredAgentSessionHost(): Promise<void>
+    }
+    internal.refreshMobileSessionPtyRecords = refresh
+    internal.ensureStructuredAgentSessionHost = ensureHost
+    setStructuredAgentSessionHost({ reconcileRestartLeases, restoreReadableSessions } as never)
+
+    await runtime.prepareStructuredAgentSessionStartupRestoration()
+
+    expect(ensureHost).toHaveBeenCalledOnce()
+    expect(refresh).toHaveBeenCalledOnce()
+    expect(reconcileRestartLeases).toHaveBeenCalledOnce()
+    expect(restoreReadableSessions).not.toHaveBeenCalled()
+  })
+
   it('loads records, inventories PTYs, restores ownership, then projects tabs exactly once', async () => {
     const runtime = new OrcaRuntimeService()
     const hydrate = vi.fn()
     const refresh = vi.fn(async () => new Set<string>())
     const ensureHost = vi.fn(async () => undefined)
+    const reconcileRestartLeases = vi.fn(async () => undefined)
     const restoreReadableSessions = vi.fn(async () => undefined)
     const internal = runtime as unknown as {
       getKnownWorkspaceSessionWorktreeIds(): Set<string>
@@ -25,6 +48,7 @@ describe('structured session cold restoration', () => {
     internal.refreshMobileSessionPtyRecords = refresh
     internal.ensureStructuredAgentSessionHost = ensureHost
     setStructuredAgentSessionHost({
+      reconcileRestartLeases,
       restoreReadableSessions,
       listSessionTabs: () => []
     } as never)
@@ -40,12 +64,16 @@ describe('structured session cold restoration', () => {
     })
     expect(hydrate).toHaveBeenCalledWith()
     expect(refresh).toHaveBeenCalledOnce()
+    expect(reconcileRestartLeases).toHaveBeenCalledOnce()
     expect(restoreReadableSessions).toHaveBeenCalledOnce()
     expect(ensureHost).toHaveBeenCalledOnce()
     expect(ensureHost.mock.invocationCallOrder[0]).toBeLessThan(
       refresh.mock.invocationCallOrder[0] ?? Infinity
     )
     expect(refresh.mock.invocationCallOrder[0]).toBeLessThan(
+      reconcileRestartLeases.mock.invocationCallOrder[0] ?? Infinity
+    )
+    expect(reconcileRestartLeases.mock.invocationCallOrder[0]).toBeLessThan(
       restoreReadableSessions.mock.invocationCallOrder[0] ?? Infinity
     )
     expect(restoreReadableSessions.mock.invocationCallOrder[0]).toBeLessThan(
@@ -68,6 +96,7 @@ describe('structured session cold restoration', () => {
     internal.refreshMobileSessionPtyRecords = async () => new Set()
     internal.ensureStructuredAgentSessionHost = async () => undefined
     setStructuredAgentSessionHost({
+      reconcileRestartLeases: async () => undefined,
       restoreReadableSessions: async () => undefined,
       listSessionTabs: () => [
         {

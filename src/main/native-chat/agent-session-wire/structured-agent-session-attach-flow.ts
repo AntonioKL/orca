@@ -34,6 +34,7 @@ import {
 import type { StructuredAgentSessionEventSink } from './structured-agent-session-event-sink'
 import { readNativeSessionOptions } from './structured-agent-session-option-restoration'
 import { resolveAgentSessionReplayOutcome } from './structured-agent-session-replay-outcome'
+import { readAgentSessionHydrationPage } from './agent-session-history-page'
 
 export type AttachFlowInput = {
   store: AgentSessionRecordStore
@@ -189,7 +190,7 @@ export async function performAttach(
     value: {
       sessionId,
       fence,
-      snapshot: attached.journal.snapshot(),
+      page: readAgentSessionHydrationPage(attached.journal, fence),
       unconfirmedClientMessageIds: attached.unconfirmedClientMessageIds
     }
   }

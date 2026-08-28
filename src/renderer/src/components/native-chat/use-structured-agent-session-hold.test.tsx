@@ -97,4 +97,28 @@ describe('a mounted structured chat', () => {
     expect(callsTo('agentSession.release')).toHaveLength(0)
     unmount()
   })
+
+  it('holds only while a retained pane is visible', async () => {
+    const view = renderHook(
+      ({ visible }: { visible: boolean }) =>
+        useStructuredAgentSessionHold({
+          sessionId: 'session-restored',
+          target: LOCAL_TARGET,
+          surface: 'desktop-chat',
+          enabled: visible
+        }),
+      { initialProps: { visible: false } }
+    )
+
+    expect(callsTo('agentSession.hold')).toHaveLength(0)
+    view.rerender({ visible: true })
+    await waitFor(() => expect(callsTo('agentSession.hold')).toHaveLength(1))
+
+    view.rerender({ visible: false })
+    await waitFor(() => expect(callsTo('agentSession.release')).toHaveLength(1))
+
+    view.rerender({ visible: true })
+    await waitFor(() => expect(callsTo('agentSession.hold')).toHaveLength(2))
+    expect(callsTo('agentSession.release')).toHaveLength(1)
+  })
 })

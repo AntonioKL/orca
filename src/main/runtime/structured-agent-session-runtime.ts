@@ -224,9 +224,10 @@ export function createStructuredAgentSessionOwnerProbe(
 }
 
 export function createStructuredAgentSessionOwnerProbes(
-  hostId: string
+  hostId: string,
+  probeMany: typeof probeAgentSessionProcessIdentities = probeAgentSessionProcessIdentities,
+  probeOne = createStructuredAgentSessionOwnerProbe(hostId)
 ): (records: readonly AgentSessionRecord[]) => Promise<Map<string, AgentSessionOwnerProbe>> {
-  const probeOne = createStructuredAgentSessionOwnerProbe(hostId)
   return async (records) => {
     const results = new Map<string, AgentSessionOwnerProbe>()
     const localOwners: {
@@ -241,7 +242,7 @@ export function createStructuredAgentSessionOwnerProbes(
         results.set(record.sessionId, await probeOne(record))
       }
     }
-    const probes = await probeAgentSessionProcessIdentities({
+    const probes = await probeMany({
       identities: localOwners.map(({ owner }) => owner),
       deps: { readEchoedSpawnToken: readEchoedAgentSessionSpawnToken }
     })

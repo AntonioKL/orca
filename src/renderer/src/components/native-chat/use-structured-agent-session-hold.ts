@@ -3,8 +3,8 @@
 // A structured chat is an in-place view on a terminal tab, so closing the tab unmounts this and
 // nothing else in the close path knows a provider process is involved: `closeUnifiedTab` retires
 // the PTY and drops the tab, main hears nothing, and a codex app-server outlives the chat for the
-// rest of the app's life. Mount/unmount is the honest signal — it covers closing the tab, closing
-// the window, and switching the pane back to the terminal, none of which share a code path.
+// rest of the app's life. Surface activity is the honest signal — it covers closing the tab,
+// closing the window, and visibility changes for retained panes, none of which share a code path.
 //
 // The release CHAINS off the hold rather than racing it: an unmount during the hold's round trip
 // would otherwise release a hold that has not landed yet, and the late hold would never be undone.
@@ -24,8 +24,9 @@ export function useStructuredAgentSessionHold(args: {
   sessionId: string
   target: RuntimeClientTarget
   surface: string
+  enabled?: boolean
 }): void {
-  const { sessionId, surface, target } = args
+  const { enabled = true, sessionId, surface, target } = args
   // Keyed by VALUE, not identity: callers build the target inline, so an identity dependency would
   // release and re-take the hold on every render of the pane.
   const targetKey = target.kind === 'local' ? 'local' : `environment:${target.environmentId}`
@@ -36,6 +37,9 @@ export function useStructuredAgentSessionHold(args: {
     targetRef.current = target
   }, [target])
   useEffect(() => {
+    if (!enabled) {
+      return
+    }
     const runtimeTarget = targetRef.current
     const holderId = structuredAgentSessionHolderId(surface)
     const held = callStructuredAgentSession(runtimeTarget, 'agentSession.hold', {
@@ -51,5 +55,5 @@ export function useStructuredAgentSessionHold(args: {
         }).catch(() => undefined)
       )
     }
-  }, [sessionId, surface, targetKey])
+  }, [enabled, sessionId, surface, targetKey])
 }

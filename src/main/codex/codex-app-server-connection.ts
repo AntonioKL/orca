@@ -73,12 +73,11 @@ export async function openCodexAppServerConnection(
   const spawnSpec = createProviderSpawnSpec(launch, childEnv, process.platform)
   const child = spawnImpl(spawnSpec)
   const spawnToken = launch.env?.[CODEX_SPAWN_TOKEN_ENV]
-  const hasDedicatedProcessGroup = spawnImpl === spawnProcess && spawnSpec.detached
 
   function terminateProcessTree(): Promise<boolean> {
-    return terminateCodexAppServerProcessTree(child, spawnToken, {
-      dedicatedProcessGroup: hasDedicatedProcessGroup
-    })
+    // The supervisor and provider own separate POSIX groups so the supervisor can prove the
+    // provider group empty before relaying its exit. Forced wrapper teardown uses descendant proof.
+    return terminateCodexAppServerProcessTree(child, spawnToken)
   }
 
   const pending = new Map<number, PendingRequest>()

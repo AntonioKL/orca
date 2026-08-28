@@ -1,16 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 type StreamRecord = {
+  connectionId: string | undefined
   emit: (response: string) => void
   settled: boolean
   signal: AbortSignal
   subscriptionId: string
 }
 
-const { handlers, listeners, streams } = vi.hoisted(() => ({
+const { handlers, listeners, streams, unaryConnections } = vi.hoisted(() => ({
   handlers: new Map<string, (_event: unknown, args?: unknown) => unknown>(),
   listeners: new Map<string, (_event: unknown, args?: unknown) => unknown>(),
-  streams: [] as StreamRecord[]
+  streams: [] as StreamRecord[],
+  unaryConnections: [] as (string | undefined)[]
 }))
 
 vi.mock('electron', () => ({
@@ -29,12 +31,18 @@ vi.mock('electron', () => ({
 
 vi.mock('../runtime/rpc/dispatcher', () => ({
   RpcDispatcher: class {
+    dispatch(_request: unknown, options: { connectionId?: string }): Promise<unknown> {
+      unaryConnections.push(options.connectionId)
+      return Promise.resolve({ ok: true, result: {} })
+    }
+
     dispatchStreaming(
       request: { id: string },
       emit: (response: string) => void,
-      options: { signal: AbortSignal }
+      options: { connectionId?: string; signal: AbortSignal }
     ): Promise<void> {
       const record: StreamRecord = {
+        connectionId: options.connectionId,
         emit,
         settled: false,
         signal: options.signal,
@@ -61,6 +69,7 @@ type SenderHarness = {
   sender: {
     id: number
     isDestroyed: () => boolean
+    mainFrame: object
     on: (eventName: string, callback: () => void) => void
     once: (eventName: string, callback: () => void) => void
     send: ReturnType<typeof vi.fn>
@@ -80,6 +89,7 @@ function createSender(id: number): SenderHarness {
       callback()
     }
   }
+  const mainFrame = {}
   return {
     destroy: () => {
       destroyed = true
@@ -91,6 +101,7 @@ function createSender(id: number): SenderHarness {
     sender: {
       id,
       isDestroyed: () => destroyed,
+      mainFrame,
       on: add,
       once: (eventName, callback) => {
         const wrapped = (): void => {
@@ -108,12 +119,23 @@ function createSender(id: number): SenderHarness {
   }
 }
 
+async function call(sender: SenderHarness['sender']): Promise<void> {
+  const handler = handlers.get('runtime:call')
+  if (!handler) {
+    throw new Error('runtime:call handler not registered')
+  }
+  await handler({ sender, senderFrame: sender.mainFrame }, { method: 'agentSession.hold' })
+}
+
 function subscribe(sender: SenderHarness['sender'], subscriptionId: string): void {
   const handler = handlers.get('runtime:subscribe')
   if (!handler) {
     throw new Error('runtime:subscribe handler not registered')
   }
-  handler({ sender }, { subscriptionId, method: 'agentSession.watch' })
+  handler(
+    { sender, senderFrame: sender.mainFrame },
+    { subscriptionId, method: 'agentSession.watch' }
+  )
 }
 
 function streamFor(subscriptionId: string): StreamRecord {
@@ -131,7 +153,8 @@ describe('runtime:subscribe renderer lifecycle cleanup', () => {
     handlers.clear()
     listeners.clear()
     streams.length = 0
-    registerRuntimeHandlers({} as never)
+    unaryConnections.length = 0
+    registerRuntimeHandlers({ cleanupSubscriptionsForConnection: vi.fn() } as never)
   })
 
   it('aborts a live stream once its sender commits a navigation', () => {
@@ -263,5 +286,30 @@ describe('runtime:subscribe renderer lifecycle cleanup', () => {
 
     expect(first.signal.aborted).toBe(true)
     expect(second.signal.aborted).toBe(false)
+  })
+
+  it('rotates unary document ownership before sweeping navigation replacements', async () => {
+    const cleanupSubscriptionsForConnection = vi.fn()
+    handlers.clear()
+    listeners.clear()
+    streams.length = 0
+    unaryConnections.length = 0
+    registerRuntimeHandlers({ cleanupSubscriptionsForConnection } as never)
+    const harness = createSender(11)
+
+    await call(harness.sender)
+    const retired = unaryConnections[0]
+    harness.emitDidNavigate()
+    await call(harness.sender)
+    const replacement = unaryConnections[1]
+
+    expect(retired).toMatch(/^desktop-renderer:11:/)
+    expect(replacement).toMatch(/^desktop-renderer:11:/)
+    expect(replacement).not.toBe(retired)
+    expect(cleanupSubscriptionsForConnection).toHaveBeenCalledWith(retired)
+    expect(cleanupSubscriptionsForConnection).not.toHaveBeenCalledWith(replacement)
+
+    harness.emitRenderProcessGone()
+    expect(cleanupSubscriptionsForConnection).toHaveBeenCalledWith(replacement)
   })
 })

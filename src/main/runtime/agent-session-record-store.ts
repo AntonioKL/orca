@@ -2,7 +2,6 @@
 
 import {
   agentSessionOperationKey,
-  pruneAgentSessionOperationRows,
   settleAgentSessionOperation,
   type AgentSessionOperationDecision,
   type AgentSessionOperationOutcome,
@@ -39,8 +38,11 @@ import {
   renewAgentSessionLeases,
   type AgentSessionLeaseRenewal
 } from './agent-session-lease-renewal'
-import { applyAgentSessionRestartAdjudication } from './agent-session-restart-lease-transitions'
-import { agentSessionReconciliationTargetMatches } from './agent-session-reconciliation-target'
+import {
+  applyAgentSessionRestartProbes,
+  collectAgentSessionRestartProbes,
+  type AgentSessionRestartProbeArgs
+} from './agent-session-restart-reconciliation'
 import { replaceAgentSessionRecordOptions } from './agent-session-record-options'
 import {
   setAgentSessionReservationProcesslessProof,
@@ -249,36 +251,12 @@ export class AgentSessionRecordStore {
   }
 
   /** Adjudicate every lease this host loaded. No lease grants a writer until it appears here. */
-  async reconcileOnRestart(args: {
-    probe: (record: AgentSessionRecord) => Promise<AgentSessionOwnerProbe>
-    now: number
-  }): Promise<Map<string, AgentSessionRecord>> {
+  async reconcileOnRestart(
+    args: AgentSessionRestartProbeArgs
+  ): Promise<Map<string, AgentSessionRecord>> {
     const pending = this.listRecords().filter((record) => record.lease.unreconciled)
-    const probes = new Map<string, { record: AgentSessionRecord; probe: AgentSessionOwnerProbe }>()
-    for (const record of pending) {
-      probes.set(record.sessionId, { record, probe: await args.probe(record) })
-    }
-    return this.transact(() => {
-      const reconciled = new Map<string, AgentSessionRecord>()
-      for (const [sessionId, probed] of probes) {
-        const record = this.state.records.get(sessionId)
-        if (
-          !record?.lease.unreconciled ||
-          !agentSessionReconciliationTargetMatches(record, probed.record)
-        ) {
-          continue
-        }
-        const next = applyAgentSessionRestartAdjudication({
-          record,
-          probe: probed.probe,
-          now: args.now
-        })
-        this.state.records.set(sessionId, next)
-        reconciled.set(sessionId, next)
-      }
-      this.state.operations = pruneAgentSessionOperationRows(this.state.operations, args.now)
-      return reconciled
-    })
+    const probes = await collectAgentSessionRestartProbes(pending, args)
+    return this.transact(() => applyAgentSessionRestartProbes(this.state, probes, args.now))
   }
 
   /** Admits one non-reservation mutation through the durable ledger. */

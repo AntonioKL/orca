@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { structuredAgentSessionPayloadFingerprint } from '../../../shared/structured-agent-session-mutation'
 import { callStructuredAgentSession } from '@/runtime/structured-agent-session-client'
-import { launchStructuredCodexSession } from './launch-structured-codex-session'
+import {
+  createStructuredCodexSessionLaunchIntent,
+  launchStructuredCodexSession
+} from './launch-structured-codex-session'
 
 vi.mock('@/runtime/structured-agent-session-client', () => ({
   callStructuredAgentSession: vi.fn()
@@ -21,12 +24,28 @@ describe('structured Codex launch', () => {
       value: {
         sessionId: (params as { envelope: { sessionId: string } }).envelope.sessionId,
         fence: 1,
-        snapshot: { cursor: { epoch: 'epoch-1', sequence: 0 }, items: [] },
+        page: {
+          sessionId: 'session-1',
+          epoch: 'epoch-1',
+          direction: 'tail',
+          items: [],
+          removedItemIds: [],
+          submissions: [],
+          window: {
+            oldest: null,
+            newest: null,
+            nextCursor: { epoch: 'epoch-1', sequence: 0 }
+          },
+          liveCursor: { epoch: 'epoch-1', sequence: 0 },
+          hasOlder: false,
+          hasNewer: false
+        },
         unconfirmedClientMessageIds: []
       }
     }))
 
-    const sessionId = await launchStructuredCodexSession('workspace-1')
+    const intent = createStructuredCodexSessionLaunchIntent('workspace-1')
+    const sessionId = await launchStructuredCodexSession(intent)
     const params = vi.mocked(callStructuredAgentSession).mock.calls[0]?.[2] as {
       envelope: { sessionId: string; payloadFingerprint: string }
       worktree: string
@@ -46,5 +65,20 @@ describe('structured Codex launch', () => {
         fields: { worktree: 'id:workspace-1', agent: 'codex' }
       })
     )
+    expect(params).toBe(intent.params)
+  })
+
+  it('replays the exact create envelope when an unknown outcome is retried', async () => {
+    const intent = createStructuredCodexSessionLaunchIntent('workspace-retry')
+    vi.mocked(callStructuredAgentSession).mockRejectedValue(new Error('response lost'))
+
+    await expect(launchStructuredCodexSession(intent)).rejects.toThrow('response lost')
+    await expect(launchStructuredCodexSession(intent)).rejects.toThrow('response lost')
+
+    const first = vi.mocked(callStructuredAgentSession).mock.calls[0]?.[2]
+    const second = vi.mocked(callStructuredAgentSession).mock.calls[1]?.[2]
+    expect(first).toBe(intent.params)
+    expect(second).toBe(first)
+    expect(intent.params.envelope.clientOperationId).toMatch(/^\d{13}-[0-9a-f]{32}$/)
   })
 })

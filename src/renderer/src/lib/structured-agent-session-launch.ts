@@ -1,11 +1,16 @@
 import { toast } from 'sonner'
-import { launchStructuredCodexSession } from '@/lib/launch-structured-codex-session'
+import {
+  createStructuredCodexSessionLaunchIntent,
+  launchStructuredCodexSession,
+  StructuredAgentSessionCreateRefusalError,
+  type StructuredAgentSessionLaunchIntent
+} from '@/lib/launch-structured-codex-session'
 import { refreshLocalStructuredSessionTabs } from '@/runtime/local-structured-session-tabs-sync'
 import { translate } from '@/i18n/i18n'
 
 type StructuredLaunchState = {
+  intent: StructuredAgentSessionLaunchIntent
   promise: Promise<string>
-  sessionId?: string
   visibilityUnknown: boolean
 }
 
@@ -37,50 +42,82 @@ function trackLaunchSettlement(
   )
 }
 
-async function verifyPublishedSession(worktreeId: string, sessionId: string): Promise<string> {
+async function verifyPublishedSession(intent: StructuredAgentSessionLaunchIntent): Promise<string> {
   const snapshots = await refreshLocalStructuredSessionTabs()
   const published = snapshots.some(
     (snapshot) =>
-      snapshot.worktree === worktreeId &&
-      snapshot.tabs.some((tab) => tab.type === 'agent-session' && tab.sessionId === sessionId)
+      snapshot.worktree === intent.worktreeId &&
+      snapshot.tabs.some(
+        (tab) => tab.type === 'agent-session' && tab.sessionId === intent.sessionId
+      )
   )
   if (!published) {
     throw new Error('structured session tab publication unavailable')
   }
-  return sessionId
+  return intent.sessionId
+}
+
+async function retrySameIntent(state: StructuredLaunchState, priorError: unknown): Promise<string> {
+  try {
+    await launchStructuredCodexSession(state.intent)
+    return await verifyPublishedSession(state.intent)
+  } catch (error) {
+    if (error instanceof StructuredAgentSessionCreateRefusalError) {
+      throw error
+    }
+    try {
+      return await verifyPublishedSession(state.intent)
+    } catch {
+      state.visibilityUnknown = true
+      throw error ?? priorError
+    }
+  }
+}
+
+async function launchAndReconcile(state: StructuredLaunchState): Promise<string> {
+  try {
+    await launchStructuredCodexSession(state.intent)
+  } catch (error) {
+    if (error instanceof StructuredAgentSessionCreateRefusalError) {
+      throw error
+    }
+    try {
+      return await verifyPublishedSession(state.intent)
+    } catch {
+      return retrySameIntent(state, error)
+    }
+  }
+  try {
+    return await verifyPublishedSession(state.intent)
+  } catch (error) {
+    return retrySameIntent(state, error)
+  }
+}
+
+async function reconcileUnknownLaunch(state: StructuredLaunchState): Promise<string> {
+  state.visibilityUnknown = false
+  try {
+    return await verifyPublishedSession(state.intent)
+  } catch (error) {
+    return retrySameIntent(state, error)
+  }
 }
 
 function launchStructuredCodexSessionOnce(worktreeId: string): Promise<string> {
   const existing = pendingStructuredLaunchesByWorktree.get(worktreeId)
   if (existing) {
-    if (existing.visibilityUnknown && existing.sessionId) {
-      existing.visibilityUnknown = false
-      existing.promise = verifyPublishedSession(worktreeId, existing.sessionId).catch((error) => {
-        existing.visibilityUnknown = true
-        throw error
-      })
+    if (existing.visibilityUnknown) {
+      existing.promise = reconcileUnknownLaunch(existing)
       trackLaunchSettlement(worktreeId, existing, existing.promise)
     }
     return existing.promise
   }
-  // Keep the single-flight reservation through the inventory refresh. The
-  // provider create can resolve before its published tab reaches the
-  // renderer; clearing here lets a rapid second click create a sibling chat.
   const state: StructuredLaunchState = {
+    intent: createStructuredCodexSessionLaunchIntent(worktreeId),
     promise: Promise.resolve(''),
     visibilityUnknown: false
   }
-  state.promise = launchStructuredCodexSession(worktreeId)
-    .then((sessionId) => {
-      state.sessionId = sessionId
-      return verifyPublishedSession(worktreeId, sessionId)
-    })
-    .catch((error) => {
-      if (state.sessionId) {
-        state.visibilityUnknown = true
-      }
-      throw error
-    })
+  state.promise = launchAndReconcile(state)
   pendingStructuredLaunchesByWorktree.set(worktreeId, state)
   trackLaunchSettlement(worktreeId, state, state.promise)
   return state.promise

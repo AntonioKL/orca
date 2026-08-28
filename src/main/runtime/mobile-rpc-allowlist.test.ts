@@ -43,7 +43,6 @@ const MOBILE_STREAMING_CLEANUP_RPC_METHODS = [
   // Why: shared-control unsubscribe methods are sent from generated cleanup
   // paths, so literal mobile source scanning cannot discover every one.
   'accounts.unsubscribe',
-  'agentSession.unsubscribe',
   'browser.screencast.unsubscribe',
   'notifications.unsubscribe',
   'runtime.clientEvents.unsubscribe',
@@ -140,6 +139,12 @@ describe('mobile RPC allowlist', () => {
       ['updater.getStatus', 'updater.check', 'updater.download', 'updater.install'].filter(
         (method) => allowed.has(method)
       )
+    ).toEqual([])
+  })
+
+  it('does not expose structured agent sessions to mobile credentials', () => {
+    expect(
+      [...mobileRpcAllowlist()].filter((method) => method.startsWith('agentSession.'))
     ).toEqual([])
   })
 })

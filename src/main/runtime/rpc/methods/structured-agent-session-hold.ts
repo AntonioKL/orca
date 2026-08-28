@@ -5,7 +5,7 @@
 // can release.
 //
 // The registered cleanup is the backstop, and the ONLY thing that covers a client which vanishes —
-// a phone that loses signal mid-turn never gets to send its release. Registering it before taking
+// a paired client that disconnects mid-turn never gets to send its release. Registering it before taking
 // the hold is deliberate: re-registering an id runs the previous cleanup synchronously, so the
 // stale release lands before this hold rather than after it.
 

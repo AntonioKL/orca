@@ -42,6 +42,10 @@ describe('structured provider supervision', () => {
     expect(POSIX_PROVIDER_SUPERVISOR_SCRIPT).toContain(
       "process.stdin.once('close', scheduleOwnerShutdown)"
     )
+    expect(POSIX_PROVIDER_SUPERVISOR_SCRIPT).toContain('detached: true')
+    expect(POSIX_PROVIDER_SUPERVISOR_SCRIPT).toContain("process.kill(-child.pid, 'SIGKILL')")
+    expect(POSIX_PROVIDER_SUPERVISOR_SCRIPT).toContain('providerGroupExists()')
+    expect(POSIX_PROVIDER_SUPERVISOR_SCRIPT).toContain('finishWithProviderOutcome(code, signal)')
     expect(POSIX_PROVIDER_SUPERVISOR_SCRIPT).not.toContain('process.ppid === 1')
   })
 

@@ -1,15 +1,15 @@
 // ─── Structured agent-session wire contract ─────────────────────────────────
 // The shapes `agentSession.*` accepts and publishes. Phase 2 builds provider
-// adapters and the mobile client against exactly these types, so everything
-// here must be plain JSON and every new field must be optional to old readers
-// (docs/reference/remote-wire-compatibility.md).
+// adapters and clients against exactly these types, so everything here must be
+// plain JSON. The whole surface is gated by agent-session.structured.v1, which
+// no released baseline advertises; after that capability ships, every new field
+// must remain optional to old readers (docs/reference/remote-wire-compatibility.md).
 
 import type {
   AgentJournalCursor,
   AgentJournalRenderItem,
   AgentJournalResetReason,
   AgentJournalResolution,
-  AgentJournalSnapshot,
   AgentJournalSubmission
 } from './agent-session-journal-types'
 import type { AgentSessionHandoffStage, AgentSessionOwnerRuntimeKind } from './agent-session-record'
@@ -96,12 +96,12 @@ export type AgentSessionHistoryPage = {
 
 export type AgentSessionHistoryResult =
   | { ok: true; page: AgentSessionHistoryPage; providerSession?: AgentProviderSessionMetadata }
-  /** Every reset forces a clean reload; the snapshot is inlined so the client
-   *  never has to make a second call to recover. */
+  /** Every reset carries a byte-bounded tail page so recovery cannot exceed
+   *  remote outbound admission or require another call before resubscribing. */
   | {
       ok: false
       reset: AgentJournalResetReason
-      snapshot: AgentJournalSnapshot
+      page: AgentSessionHistoryPage
       fence?: number
       providerSession?: AgentProviderSessionMetadata
     }
@@ -120,7 +120,7 @@ export type AgentSessionSubscribeEvent =
   | {
       type: 'snapshot'
       sessionId: string
-      snapshot: AgentJournalSnapshot
+      page: AgentSessionHistoryPage
       fence: number
       handoff?: AgentSessionHandoffStatus
     }
@@ -136,7 +136,7 @@ export type AgentSessionSubscribeEvent =
       type: 'reset'
       sessionId: string
       reset: AgentJournalResetReason
-      snapshot: AgentJournalSnapshot
+      page: AgentSessionHistoryPage
       fence: number
       handoff?: AgentSessionHandoffStatus
     }
@@ -203,7 +203,7 @@ export type AgentSessionMutationResult<TValue> =
 export type AgentSessionAttachResult = {
   sessionId: string
   fence: number
-  snapshot: AgentJournalSnapshot
+  page: AgentSessionHistoryPage
   /** Submissions the crash boundary settled as `unknown` while attaching. */
   unconfirmedClientMessageIds: string[]
 }

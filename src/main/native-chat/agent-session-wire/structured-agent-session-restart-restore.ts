@@ -14,10 +14,13 @@
 import type { AgentSessionRecord } from '../../../shared/agent-session-record'
 import type { AgentSessionWireRefusal } from '../../../shared/agent-session-wire'
 import type { AgentSessionRecordStore } from '../../runtime/agent-session-record-store'
+import { mapWithConcurrency } from '../../../shared/map-with-concurrency'
 import {
   restoreStructuredAgentSessionRead,
   type RestoredStructuredAgentSessionRead
 } from './structured-agent-session-read-restore'
+
+const JOURNAL_RESTORE_CONCURRENCY = 4
 
 export async function restoreStructuredAgentSessionsOnRestart(input: {
   store: AgentSessionRecordStore
@@ -30,30 +33,28 @@ export async function restoreStructuredAgentSessionsOnRestart(input: {
   onReadable: (sessionId: string, restored: RestoredStructuredAgentSessionRead) => void
   restoreHandoff: (sessionId: string) => Promise<void>
 }): Promise<void> {
-  await Promise.all(
-    input.records.map(async ({ sessionId }) => {
-      const unreconciled = await input.reconcile(sessionId)
-      if (!unreconciled) {
-        // A session latched in recovery exits here at startup, without waiting for a client.
-        await input.resolveRecovery(sessionId)
-      }
-      await input.serialize(sessionId, async () => {
-        if (input.hasSession(sessionId)) {
-          // A surface that took a hold mid-restore already attached this one.
-          await input.restoreHandoff(sessionId)
-          return
-        }
-        const restored = await restoreStructuredAgentSessionRead(
-          input.store,
-          input.journalRoot,
-          sessionId
-        )
-        if (!restored) {
-          return
-        }
-        input.onReadable(sessionId, restored)
+  await mapWithConcurrency(input.records, JOURNAL_RESTORE_CONCURRENCY, async ({ sessionId }) => {
+    const unreconciled = await input.reconcile(sessionId)
+    if (!unreconciled) {
+      // A session latched in recovery exits here at startup, without waiting for a client.
+      await input.resolveRecovery(sessionId)
+    }
+    await input.serialize(sessionId, async () => {
+      if (input.hasSession(sessionId)) {
+        // A surface that took a hold mid-restore already attached this one.
         await input.restoreHandoff(sessionId)
-      })
+        return
+      }
+      const restored = await restoreStructuredAgentSessionRead(
+        input.store,
+        input.journalRoot,
+        sessionId
+      )
+      if (!restored) {
+        return
+      }
+      input.onReadable(sessionId, restored)
+      await input.restoreHandoff(sessionId)
     })
-  )
+  })
 }

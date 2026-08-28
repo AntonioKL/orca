@@ -22,6 +22,43 @@ afterEach(async () => {
 })
 
 describe('AgentSessionSubscribers', () => {
+  it('publishes the current fence when a resumed cursor is already caught up', async () => {
+    const journal = await openAgentSessionJournal({
+      identity: {
+        sessionId: SESSION,
+        workspaceId: 'workspace-1',
+        hostId: 'local',
+        agent: 'codex',
+        providerHandle: { kind: 'codex', threadId: 'thread-1' }
+      },
+      journalDir: join(root, 'checkpoint-journal')
+    })
+    const events: AgentSessionSubscribeEvent[] = []
+
+    new AgentSessionSubscribers().open({
+      id: 'subscriber-1',
+      sessionId: SESSION,
+      journal,
+      fence: 7,
+      cursor: journal.cursor(),
+      emit: (event) => events.push(event)
+    })
+
+    expect(events).toEqual([
+      {
+        type: 'batch',
+        sessionId: SESSION,
+        batch: {
+          cursor: journal.cursor(),
+          items: [],
+          removedItemIds: [],
+          submissions: []
+        },
+        fence: 7
+      }
+    ])
+  })
+
   it('publishes handoff-only changes without serializing a transcript snapshot', async () => {
     const journal = await openAgentSessionJournal({
       identity: {

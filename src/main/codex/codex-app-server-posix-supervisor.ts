@@ -7,22 +7,48 @@ const spec = JSON.parse(Buffer.from(process.env.ORCA_PROVIDER_SUPERVISOR_SPEC, '
 const childEnv = { ...process.env }
 delete childEnv.ORCA_PROVIDER_SUPERVISOR_SPEC
 delete childEnv.ELECTRON_RUN_AS_NODE
-const child = spawn(spec.command, spec.args, { cwd: spec.cwd, env: childEnv, stdio: ['pipe', 'pipe', 'pipe'] })
+const child = spawn(spec.command, spec.args, {
+  cwd: spec.cwd,
+  env: childEnv,
+  stdio: ['pipe', 'pipe', 'pipe'],
+  detached: true
+})
 const originalParent = process.ppid
 let timer
 let ownerShutdownTimer
-let ownerLost = false
+let settling = false
+const providerGroupExists = () => {
+  if (!child.pid) return false
+  try {
+    process.kill(-child.pid, 0)
+    return true
+  } catch (error) {
+    return Boolean(error && error.code !== 'ESRCH')
+  }
+}
+const reapOwnedProviderGroup = async () => {
+  if (!child.pid) return false
+  try { process.kill(-child.pid, 'SIGKILL') } catch (error) {
+    if (error && error.code !== 'ESRCH') return false
+  }
+  const deadline = Date.now() + 1500
+  while (providerGroupExists()) {
+    if (Date.now() >= deadline) return false
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  return true
+}
 const terminateOwnedGroup = () => {
-  if (ownerLost) return
-  ownerLost = true
+  if (settling) return
+  settling = true
   clearInterval(timer)
-  try { process.kill(-process.pid, 'SIGKILL') } catch { process.exit(137) }
+  void reapOwnedProviderGroup().then((reaped) => process.exit(reaped ? 137 : 1))
 }
 const scheduleOwnerShutdown = () => {
-  if (ownerShutdownTimer) return
+  if (settling || ownerShutdownTimer) return
   // A normal close ends the provider's stdin first; allow it to flush and
   // exit before forcing the group, while still bounding an orphaned child.
-  ownerShutdownTimer = setTimeout(terminateOwnedGroup, 1500)
+  ownerShutdownTimer = setTimeout(terminateOwnedGroup, 1250)
   ownerShutdownTimer.unref()
 }
 process.stdin.once('end', scheduleOwnerShutdown)
@@ -31,6 +57,18 @@ process.stdin.pipe(child.stdin)
 child.stdout.pipe(process.stdout)
 child.stderr.pipe(process.stderr)
 for (const stream of [process.stdin, child.stdin, child.stdout, child.stderr]) stream.on('error', () => {})
+const finishWithProviderOutcome = (code, signal) => {
+  if (!signal) return process.exit(code ?? 1)
+  process.kill(process.pid, signal)
+}
+const reapProviderExit = async (code, signal) => {
+  if (settling) return
+  settling = true
+  clearInterval(timer)
+  if (ownerShutdownTimer) clearTimeout(ownerShutdownTimer)
+  if (!(await reapOwnedProviderGroup())) return process.exit(1)
+  finishWithProviderOutcome(code, signal)
+}
 timer = setInterval(() => {
   // A detached supervisor is reparented when its owner exits. The new parent
   // may be PID 1 or a platform subreaper, so any parent change is proof that
@@ -45,10 +83,7 @@ child.once('error', () => {
   process.exit(127)
 })
 child.once('exit', (code, signal) => {
-  clearInterval(timer)
-  if (ownerShutdownTimer) clearTimeout(ownerShutdownTimer)
-  if (signal) process.kill(process.pid, signal)
-  else process.exit(code ?? 1)
+  void reapProviderExit(code, signal)
 })
 `
 
