@@ -3,6 +3,7 @@ import { readLaunchVersion } from './relay-handshake'
 import type { RelayLaunchOptions } from './relay-launch-options'
 import { RELAY_EMPTY_DETACHED_STARTUP_GRACE_MS, RELAY_IDLE_GRACE_MS } from './relay-launch-options'
 import { relayLogLine } from './relay-diagnostic-log'
+import { assignRelayProcessToKillOnCloseJob } from './relay-windows-pty-job'
 import { RelayPrimaryChannel } from './relay-primary-channel'
 import { RelayRuntimeServices } from './relay-runtime-services'
 import { RelayAgentHookRuntime } from './relay-agent-hook-runtime'
@@ -18,6 +19,7 @@ export async function runRelayDaemon(
   if (options.detached && options.logFile) {
     installRelayLogRotation(options.logFile)
   }
+  assignRelayProcessToKillOnCloseJob()
 
   const socketOwnership = new RelaySocketOwnership(options.sockPath)
   let fatalPtyHandler: RelayRuntimeServices['ptyHandler'] | null = null
