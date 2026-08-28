@@ -13,10 +13,10 @@ import {
 } from '../listing/detected-worktree-meta'
 import {
   bumpHostedReviewLinkMutationGeneration,
-  clearOlderHostedReviewLinksForReplacement,
   getHostedReviewLinkForMetaRefresh,
   hasHostedReviewLinkUpdates
 } from './hosted-review-link-mutation'
+import { normalizeHostedReviewLinkReplacementUpdates } from './hosted-review-link-update-normalization'
 import {
   getHostedReviewPushTargetLookup,
   resolveGitHubReviewPushTarget
@@ -29,7 +29,6 @@ import {
 } from '../listing/worktree-owner-settings'
 
 import { findRepoForHost } from '../../repo-host-identity'
-import { normalizeGitHubPRSuppressionUpdate } from '../../../../../../shared/worktree/github-pr-suppression'
 export function createUpdateWorktreeMeta(
   set: WorktreeSliceSet,
   get: WorktreeSliceGet
@@ -72,11 +71,7 @@ export function createUpdateWorktreeMeta(
         return { ok: false, error: err instanceof Error ? err.message : String(err) }
       }
     }
-    const normalizedUpdates = normalizeGitHubPRSuppressionUpdate(
-      existingWorktree
-        ? clearOlderHostedReviewLinksForReplacement(updates, existingWorktree)
-        : updates
-    )
+    const normalizedUpdates = normalizeHostedReviewLinkReplacementUpdates(updates, existingWorktree)
     // Why: manual PR linking supplies only the number; resolve the head branch so Push targets the review branch.
     const linkedPrForPushTarget = isPositiveHostedReviewNumber(normalizedUpdates.linkedPR)
       ? normalizedUpdates.linkedPR

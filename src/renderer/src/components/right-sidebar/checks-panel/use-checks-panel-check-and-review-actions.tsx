@@ -16,6 +16,7 @@ import { translate } from '@/i18n/i18n'
 import type { PRCheckDetail, PRCheckRunDetails } from '../../../../../shared/github/check-types'
 import type { GitHubPRStackMapNavigationModifiers } from '../GitHubPRStackMap'
 import type { ChecksPanelCheckAndReviewActionsInput } from './check-and-review-action-dependencies'
+import { useUnlinkGitHubPullRequest } from './use-unlink-github-pull-request'
 
 function hasGitHubCheckHandle(check: PRCheckDetail): boolean {
   return Boolean(check.checkRunId || check.workflowRunId || check.url)
@@ -349,19 +350,13 @@ export function useChecksPanelCheckAndReviewActions(model: ChecksPanelCheckAndRe
     [activeWorktreeId]
   )
 
-  const handleUnlinkPullRequest = useCallback(async () => {
-    if (!activeWorktreeId || !activeWorktree || activeReview?.provider !== 'github') {
-      return
-    }
-    const result = await updateWorktreeMeta(
-      activeWorktreeId,
-      { linkedPR: null, suppressedGitHubPR: linkedPR ?? activeReview.number },
-      { executionHostId: activeWorktree.hostId }
-    )
-    if (!result.ok) {
-      toast.error(result.error)
-    }
-  }, [activeReview, activeWorktree, activeWorktreeId, linkedPR, updateWorktreeMeta])
+  const handleUnlinkPullRequest = useUnlinkGitHubPullRequest({
+    activeReview,
+    activeWorktree,
+    activeWorktreeId,
+    linkedPR,
+    updateWorktreeMeta
+  })
 
   const openLinkPullRequestModal = useCallback(
     (currentPR: number) => {
