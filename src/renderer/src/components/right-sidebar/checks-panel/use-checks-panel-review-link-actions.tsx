@@ -1,5 +1,4 @@
 import { useCallback, useRef } from 'react'
-import { refreshHostedReviewCard } from '@/store/slices/hosted-review-card-refresh'
 import type { ChecksPanelCheckAndReviewActionsInput } from './check-and-review-action-dependencies'
 
 type RefreshLinkedGitHubPullRequest = (linkedPRNumber: number) => Promise<void>
@@ -37,7 +36,10 @@ export function useChecksPanelReviewLinkActions(
     runtimeEnvironmentId,
     localExecutionScope
   ])
+  const linkedGitLabMRRef = useRef(linkedGitLabMR)
   const reviewLinkScopeKeyRef = useRef(reviewLinkScopeKey)
+  const reviewLinkActionGenerationRef = useRef(0)
+  linkedGitLabMRRef.current = linkedGitLabMR
   reviewLinkScopeKeyRef.current = reviewLinkScopeKey
 
   const handleUnlinkReview = useCallback(() => {
@@ -55,6 +57,7 @@ export function useChecksPanelReviewLinkActions(
     if (!updates) {
       return
     }
+    reviewLinkActionGenerationRef.current += 1
     void updateWorktreeMeta(activeWorktreeId, updates, { executionHostId: activeWorktree.hostId })
   }, [activeReview, activeWorktree, activeWorktreeId, linkedGitLabMR, linkedPR, updateWorktreeMeta])
 
@@ -79,12 +82,18 @@ export function useChecksPanelReviewLinkActions(
           : (activeWorktree.linkedPR ?? activeReview.number),
       currentComment: activeWorktree.comment,
       focus: 'pr',
+      suppressHostedReviewRefresh: true,
       afterSave: async ({
         updates
       }: {
         updates?: { linkedPR?: unknown; linkedGitLabMR?: unknown }
       }) => {
-        if (reviewLinkScopeKeyRef.current !== openedScopeKey) {
+        const actionGeneration = reviewLinkActionGenerationRef.current + 1
+        reviewLinkActionGenerationRef.current = actionGeneration
+        const isActionCurrent = (): boolean =>
+          reviewLinkScopeKeyRef.current === openedScopeKey &&
+          reviewLinkActionGenerationRef.current === actionGeneration
+        if (!isActionCurrent()) {
           return
         }
         if (provider === 'github') {
@@ -97,21 +106,19 @@ export function useChecksPanelReviewLinkActions(
         if (typeof nextMR !== 'number') {
           return
         }
-        const refreshedReview = await refreshHostedReviewCard(fetchHostedReviewForBranch, {
-          repoPath: repo.path,
+        const isRequestCurrent = (): boolean =>
+          isActionCurrent() && linkedGitLabMRRef.current === nextMR
+        const refreshedReview = await fetchHostedReviewForBranch(repo.path, branch, {
           repoId: repo.id,
-          branch,
+          repoOwnerExecutionHostId: activeWorktree.hostId,
           linkedGitHubPR: null,
           linkedGitLabMR: nextMR,
           linkedBitbucketPR: null,
           linkedAzureDevOpsPR: null,
-          linkedGiteaPR: null,
-          repoOwnerExecutionHostId: activeWorktree.hostId,
-          repoOwnerCacheScope:
-            localExecutionScope ?? runtimeEnvironmentId ?? repoConnectionId ?? activeWorktree.hostId
+          linkedGiteaPR: null
         })
         if (
-          reviewLinkScopeKeyRef.current !== openedScopeKey ||
+          !isRequestCurrent() ||
           refreshedReview?.provider !== 'gitlab' ||
           refreshedReview.number !== nextMR
         ) {
@@ -121,7 +128,8 @@ export function useChecksPanelReviewLinkActions(
           mrNumberOverride: nextMR,
           headShaOverride: refreshedReview.headSha ?? null,
           commitAsCurrent: true,
-          settingsOverride: capturedOwnerSettings
+          settingsOverride: capturedOwnerSettings,
+          isRequestCurrent
         })
       }
     })
@@ -132,14 +140,11 @@ export function useChecksPanelReviewLinkActions(
     branch,
     fetchGitLabDetails,
     fetchHostedReviewForBranch,
-    localExecutionScope,
     openModal,
     ownerSettings,
     refreshLinkedGitHubPullRequest,
     repo,
-    repoConnectionId,
-    reviewLinkScopeKey,
-    runtimeEnvironmentId
+    reviewLinkScopeKey
   ])
 
   return { handleUnlinkReview, handleLinkAnotherReview }

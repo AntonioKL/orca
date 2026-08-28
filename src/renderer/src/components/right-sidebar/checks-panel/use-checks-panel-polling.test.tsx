@@ -166,4 +166,79 @@ describe('useChecksPanelPolling live behavior', () => {
     expect(model.asyncResultKeyRef.current).toContain('::18::none')
     expect(model.asyncResultKeyRef.current).not.toContain('old-head')
   })
+
+  it('drops replacement MR details when the relink scope changes in flight', async () => {
+    let resolveDetails!: (value: {
+      item: { projectRef: null }
+      pipelineJobs: PRCheckDetail[]
+      comments: []
+    }) => void
+    gitlab.fetchDetails.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveDetails = resolve
+      })
+    )
+    let requestCurrent = true
+    const model = createModel()
+    const { result } = renderHook(() => useChecksPanelPolling(model))
+
+    const request = result.current.fetchGitLabDetails({
+      mrNumberOverride: 18,
+      commitAsCurrent: true,
+      isRequestCurrent: () => requestCurrent
+    })
+    await act(() => Promise.resolve())
+    requestCurrent = false
+    resolveDetails({
+      item: { projectRef: null },
+      pipelineJobs: [],
+      comments: []
+    })
+    await act(async () => request)
+
+    expect(model.setChecks).not.toHaveBeenCalled()
+    expect(model.setComments).not.toHaveBeenCalled()
+    expect(model.setChecksLoading).toHaveBeenLastCalledWith(false)
+    expect(model.setCommentsLoading).toHaveBeenLastCalledWith(false)
+  })
+
+  it('keeps loading owned by the newest replacement MR details request', async () => {
+    const detailsResolvers: ((value: {
+      item: { projectRef: null }
+      pipelineJobs: []
+      comments: []
+    }) => void)[] = []
+    gitlab.fetchDetails.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          detailsResolvers.push(resolve)
+        })
+    )
+    let firstRequestCurrent = true
+    const model = createModel()
+    const { result } = renderHook(() => useChecksPanelPolling(model))
+
+    const firstRequest = result.current.fetchGitLabDetails({
+      mrNumberOverride: 18,
+      commitAsCurrent: true,
+      isRequestCurrent: () => firstRequestCurrent
+    })
+    await act(() => Promise.resolve())
+    firstRequestCurrent = false
+    const secondRequest = result.current.fetchGitLabDetails({
+      mrNumberOverride: 18,
+      commitAsCurrent: true
+    })
+    await act(() => Promise.resolve())
+
+    detailsResolvers[0]?.({ item: { projectRef: null }, pipelineJobs: [], comments: [] })
+    await act(async () => firstRequest)
+    expect(model.setChecksLoading).not.toHaveBeenCalledWith(false)
+    expect(model.setCommentsLoading).not.toHaveBeenCalledWith(false)
+
+    detailsResolvers[1]?.({ item: { projectRef: null }, pipelineJobs: [], comments: [] })
+    await act(async () => secondRequest)
+    expect(model.setChecksLoading).toHaveBeenLastCalledWith(false)
+    expect(model.setCommentsLoading).toHaveBeenLastCalledWith(false)
+  })
 })

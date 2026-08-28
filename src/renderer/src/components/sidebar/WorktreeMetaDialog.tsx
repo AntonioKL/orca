@@ -70,6 +70,7 @@ const WorktreeMetaDialog = React.memo(function WorktreeMetaDialog() {
   const focusField = typeof modalData.focus === 'string' ? modalData.focus : 'comment'
   const reviewProvider: WorktreeReviewProvider =
     modalData.reviewProvider === 'gitlab' ? 'gitlab' : 'github'
+  const suppressHostedReviewRefresh = modalData.suppressHostedReviewRefresh === true
   const afterSave =
     typeof modalData.afterSave === 'function'
       ? (modalData.afterSave as (payload: WorktreeMetaSavedPayload) => void | Promise<void>)
@@ -241,9 +242,13 @@ const WorktreeMetaDialog = React.memo(function WorktreeMetaDialog() {
     try {
       const updates = buildWorktreeMetaUpdates(draft, snapshot, liveLinks, reviewProvider)
 
-      const result = executionHostId
-        ? await updateWorktreeMeta(worktreeId, updates, { executionHostId })
-        : await updateWorktreeMeta(worktreeId, updates)
+      const result =
+        executionHostId || suppressHostedReviewRefresh
+          ? await updateWorktreeMeta(worktreeId, updates, {
+              ...(executionHostId ? { executionHostId } : {}),
+              ...(suppressHostedReviewRefresh ? { suppressHostedReviewRefresh: true } : {})
+            })
+          : await updateWorktreeMeta(worktreeId, updates)
       // Why: a failed save refetches and reverts the optimistic write. Closing
       // here would report success for an edit that silently undid itself, and
       // would discard the name, comment and PR changes in the same payload.
@@ -269,6 +274,7 @@ const WorktreeMetaDialog = React.memo(function WorktreeMetaDialog() {
   }, [
     worktreeId,
     executionHostId,
+    suppressHostedReviewRefresh,
     canSave,
     draft,
     snapshot,
