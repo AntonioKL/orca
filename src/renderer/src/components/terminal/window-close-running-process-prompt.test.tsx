@@ -202,6 +202,86 @@ describe('window close with a degraded local process read', () => {
     expect(confirmWindowClose).not.toHaveBeenCalled()
   })
 
+  /** Two overlapping close attempts: main re-sends `window:close-requested` on every one
+   *  (main-window-close-lifecycle.ts), the coordinator's `closeInFlight` is released before
+   *  the handler runs, and Terminal's re-entrancy ref only trips on dirty editors — so both
+   *  probes are live at once and the older one must not get to decide. */
+  function installDeferredInspections(): ((value: InspectionShape) => void)[] {
+    const settle: ((value: InspectionShape) => void)[] = []
+    installInspectProcess(() => new Promise<InspectionShape>((resolve) => settle.push(resolve)))
+    return settle
+  }
+
+  function clickCancel(): void {
+    const cancel = [...document.querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === 'Cancel'
+    )
+    expect(cancel).toBeDefined()
+    act(() => {
+      cancel!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+  }
+
+  it('does not close the window on a stale probe after the user cancelled a newer one', async () => {
+    const settle = installDeferredInspections()
+
+    act(() => proceed!(false))
+    act(() => proceed!(false))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(settle).toHaveLength(2)
+
+    // The newer attempt answers first and finds live work, so the warning goes up.
+    await act(async () => {
+      settle[1]!(observedLiveInspection())
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(warningIsVisible()).toBe(true)
+
+    // The user chooses to keep the window.
+    clickCancel()
+    expect(warningIsVisible()).toBe(false)
+
+    // The older probe finally settles, reporting a table it read before the dialog existed.
+    await act(async () => {
+      settle[0]!(observedIdleInspection())
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(confirmWindowClose).not.toHaveBeenCalled()
+    expect(warningIsVisible()).toBe(false)
+  })
+
+  it('does not reopen a dismissed warning when a stale probe reports live work', async () => {
+    const settle = installDeferredInspections()
+
+    act(() => proceed!(false))
+    act(() => proceed!(false))
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    await act(async () => {
+      settle[1]!(observedLiveInspection())
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    clickCancel()
+    expect(warningIsVisible()).toBe(false)
+
+    await act(async () => {
+      settle[0]!(observedLiveInspection())
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(warningIsVisible()).toBe(false)
+    expect(confirmWindowClose).not.toHaveBeenCalled()
+  })
+
   it('reads a malformed foreign evidence payload as unverifiable, not as idle', async () => {
     installInspectProcess(async () => ({
       foregroundProcess: SHELL,

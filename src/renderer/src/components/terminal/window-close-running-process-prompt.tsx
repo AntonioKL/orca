@@ -1,4 +1,4 @@
-import { useCallback, useState, type ReactElement } from 'react'
+import { useCallback, useRef, useState, type ReactElement } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -31,6 +31,7 @@ export type WindowCloseRunningProcessPrompt = {
  */
 export function useWindowCloseRunningProcessPrompt(): WindowCloseRunningProcessPrompt {
   const [windowCloseDialogOpen, setWindowCloseDialogOpen] = useState(false)
+  const closeRequestSeqRef = useRef(0)
 
   const confirmNativeWindowClose = useCallback(() => {
     // Why: capture only after every close guard has committed. A canceled child-
@@ -66,11 +67,20 @@ export function useWindowCloseRunningProcessPrompt(): WindowCloseRunningProcessP
         if (localPtyIds.length > 0) {
           // Why the same bound as the tab and pane close paths: an unanswered probe
           // must not leave the window silently stuck (#10142).
+          // Why a generation and not an in-flight flag: main re-sends
+          // window:close-requested on every attempt (main-window-close-lifecycle.ts) and
+          // nothing upstream fences the probe, so two can be outstanding at once. Only the
+          // newest may decide — an older answer would reopen a dialog the user dismissed,
+          // or close the window they just chose to keep.
+          const requestSeq = (closeRequestSeqRef.current += 1)
           void anyLocalPtyBlocksWindowClose(
             state.settings,
             localPtyIds,
             RUNNING_CLOSE_PROBE_TIMEOUT_MS
           ).then((blocked) => {
+            if (requestSeq !== closeRequestSeqRef.current) {
+              return
+            }
             if (blocked) {
               setWindowCloseDialogOpen(true)
             } else {
