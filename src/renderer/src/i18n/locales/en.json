@@ -7126,7 +7126,7 @@
         "HiddenExperimentalGroup": {
           "232cf83de8": "Unlisted toggles for internal testing. Nothing here is supported.",
           "3e9e827ca5": "Hidden experimental",
-          "7c4e18d2f6": "Arms the bold-glitch capture gestures on this machine: Cmd/Ctrl-click a terminal starts a sampling burst; add Shift to capture pane evidence to disk.",
+          "7c4e18d2f6": "Arms the bold-glitch capture gestures on this machine: {{samplingShortcut}} starts a sampling burst; {{captureShortcut}} captures pane evidence to disk.",
           "b09f24a51d": "Terminal render diagnostics"
         },
         "InputPane": {

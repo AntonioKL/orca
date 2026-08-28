@@ -140,7 +140,7 @@ export function sampleRenderDesyncOnce(
       // Keep recovery available after the per-session evidence budget is spent.
       console.warn(`[terminal] render desync detected on pane ${paneKey}; capture budget exhausted`)
       resetAndRefreshAllTerminalWebglAtlases('render-desync')
-      stopSampleBurst()
+      stopRenderDesyncSampleBurst()
       return
     }
     const entry = buildEvidenceEntry(paneKey, terminal, internals, divergence, 'divergence')
@@ -255,7 +255,7 @@ async function persistEntry(
 }
 
 export function stopTerminalRenderDesyncSentinelForTesting(): void {
-  stopSampleBurst()
+  stopRenderDesyncSampleBurst()
   missingHistoryByPane.clear()
   pendingPaneKeys.clear()
   for (const timeoutId of healedCaptureTimeoutIds) {
@@ -266,14 +266,14 @@ export function stopTerminalRenderDesyncSentinelForTesting(): void {
 }
 
 export function startRenderDesyncSampleBurst(terminal: unknown): void {
-  stopSampleBurst()
+  stopRenderDesyncSampleBurst()
   burstTerminal = terminal
   sampleRenderDesyncOnce()
   burstIntervalId = setInterval(sampleRenderDesyncOnce, SAMPLE_INTERVAL_MS)
-  burstTimeoutId = setTimeout(stopSampleBurst, SAMPLE_BURST_MS)
+  burstTimeoutId = setTimeout(stopRenderDesyncSampleBurst, SAMPLE_BURST_MS)
 }
 
-function stopSampleBurst(): void {
+export function stopRenderDesyncSampleBurst(): void {
   if (burstIntervalId != null) {
     clearInterval(burstIntervalId)
     burstIntervalId = null

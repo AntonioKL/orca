@@ -6,12 +6,14 @@ import {
   setTerminalRenderDesyncSentinelArmed
 } from '../terminal-pane/terminal-render-desync-trigger'
 import { translate } from '@/i18n/i18n'
+import { getShortcutPlatform } from '@/lib/shortcut-platform'
 
 // Why: anything in this group is deliberately unfinished or staff-only. The
 // orange treatment (header tint, label colors) is the shared visual signal
 // for hidden-experimental items so future entries inherit the same
 // affordance without another round of styling decisions.
 export function HiddenExperimentalGroup(): React.JSX.Element {
+  const isMac = getShortcutPlatform() === 'darwin'
   const [renderDiagnosticsArmed, setRenderDiagnosticsArmed] = useState(
     isTerminalRenderDesyncSentinelArmed
   )
@@ -47,7 +49,11 @@ export function HiddenExperimentalGroup(): React.JSX.Element {
           <p className="text-xs text-orange-600/80 dark:text-orange-300/80">
             {translate(
               'auto.components.settings.HiddenExperimentalGroup.7c4e18d2f6',
-              'Arms the bold-glitch capture gestures on this machine: Cmd/Ctrl-click a terminal starts a sampling burst; add Shift to capture pane evidence to disk.'
+              'Arms the bold-glitch capture gestures on this machine: {{samplingShortcut}} starts a sampling burst; {{captureShortcut}} captures pane evidence to disk.',
+              {
+                samplingShortcut: isMac ? '⌘-click' : 'Ctrl+click',
+                captureShortcut: isMac ? '⇧⌘-click' : 'Shift+Ctrl+click'
+              }
             )}
           </p>
         </div>

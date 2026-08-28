@@ -1,7 +1,8 @@
 import { forEachLivePaneForDesyncSentinel } from '@/lib/pane-manager/pane-manager-registry'
 import {
   captureRenderDesyncNow,
-  startRenderDesyncSampleBurst
+  startRenderDesyncSampleBurst,
+  stopRenderDesyncSampleBurst
 } from './terminal-render-desync-sentinel'
 
 /**
@@ -23,18 +24,17 @@ type SentinelPane = {
 }
 
 let clickListener: ((event: MouseEvent) => void) | null = null
+let sessionArmedOverride: boolean | null = null
 
 export function maybeStartTerminalRenderDesyncSentinel(): void {
-  if (clickListener != null) {
+  if (!isTerminalRenderDesyncSentinelArmed()) {
     return
   }
-  let enabled = false
-  try {
-    enabled = globalThis.localStorage?.getItem(RENDER_DESYNC_SENTINEL_FLAG) === '1'
-  } catch {
-    enabled = false
-  }
-  if (!enabled) {
+  installClickListener()
+}
+
+function installClickListener(): void {
+  if (clickListener != null) {
     return
   }
   clickListener = (event) => {
@@ -69,6 +69,9 @@ export function maybeStartTerminalRenderDesyncSentinel(): void {
 }
 
 export function isTerminalRenderDesyncSentinelArmed(): boolean {
+  if (sessionArmedOverride != null) {
+    return sessionArmedOverride
+  }
   try {
     return globalThis.localStorage?.getItem(RENDER_DESYNC_SENTINEL_FLAG) === '1'
   } catch {
@@ -84,18 +87,24 @@ export function isTerminalRenderDesyncSentinelArmed(): boolean {
  */
 export function setTerminalRenderDesyncSentinelArmed(armed: boolean): void {
   try {
-    if (armed) {
-      globalThis.localStorage?.setItem(RENDER_DESYNC_SENTINEL_FLAG, '1')
+    const storage = globalThis.localStorage
+    if (!storage) {
+      sessionArmedOverride = armed
+    } else if (armed) {
+      storage.setItem(RENDER_DESYNC_SENTINEL_FLAG, '1')
+      sessionArmedOverride = null
     } else {
-      globalThis.localStorage?.removeItem(RENDER_DESYNC_SENTINEL_FLAG)
+      storage.removeItem(RENDER_DESYNC_SENTINEL_FLAG)
+      sessionArmedOverride = null
     }
   } catch {
-    // Why: storage failure still allows a session-scoped arm/disarm below.
+    sessionArmedOverride = armed
   }
   if (armed) {
-    maybeStartTerminalRenderDesyncSentinel()
+    installClickListener()
   } else {
     removeClickListener()
+    stopRenderDesyncSampleBurst()
   }
 }
 

@@ -18,6 +18,7 @@ describe('HiddenExperimentalGroup', () => {
   })
   afterEach(() => {
     cleanup()
+    vi.unstubAllGlobals()
   })
 
   function renderDiagnosticsSwitch(): HTMLElement {
@@ -42,5 +43,16 @@ describe('HiddenExperimentalGroup', () => {
     fireEvent.click(renderDiagnosticsSwitch())
     expect(setArmed).toHaveBeenCalledWith(false)
     expect(renderDiagnosticsSwitch().getAttribute('data-state')).toBe('unchecked')
+  })
+
+  it.each([
+    ['Mac', '⌘-click', '⇧⌘-click'],
+    ['Windows', 'Ctrl+click', 'Shift+Ctrl+click']
+  ])('renders the platform-native capture chords on %s', (userAgent, sampling, capture) => {
+    vi.stubGlobal('navigator', { userAgent })
+    render(<HiddenExperimentalGroup />)
+
+    expect(screen.getByText(new RegExp(sampling.replace('+', '\\+')))).toBeTruthy()
+    expect(screen.getByText(new RegExp(capture.replaceAll('+', '\\+')))).toBeTruthy()
   })
 })

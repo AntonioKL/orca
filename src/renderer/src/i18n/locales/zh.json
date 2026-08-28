@@ -6206,7 +6206,7 @@
         "HiddenExperimentalGroup": {
           "232cf83de8": "用于内部测试的未列出的切换。这里什么都不支持。",
           "3e9e827ca5": "隐藏实验",
-          "7c4e18d2f6": "在本机启用粗体故障捕获手势：Cmd/Ctrl 点击终端开始采样突发；加上 Shift 可将窗格证据捕获到磁盘。",
+          "7c4e18d2f6": "在本机启用粗体故障捕获手势：{{samplingShortcut}} 开始采样突发；{{captureShortcut}} 将窗格证据捕获到磁盘。",
           "b09f24a51d": "终端渲染诊断"
         },
         "InputPane": {
