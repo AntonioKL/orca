@@ -6,6 +6,12 @@ const OWNER_DIRECTORY_PREFIX = 'owner-'
 const OWNER_DIRECTORY_PATTERN =
   /^owner-(\d+)-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i
 const STAGING_ENTRY_SCAN_LIMIT = 64
+const STAGING_REMOVAL_OPTIONS = {
+  recursive: true,
+  force: true,
+  maxRetries: 3,
+  retryDelay: 50
+} as const
 
 export const SKILL_UPLOAD_STAGING_ROOT_NAME = 'remote-uploads-v2'
 
@@ -36,7 +42,7 @@ export class SkillUploadStagingOwnership {
   }
 
   async remove(): Promise<void> {
-    await rm(this.directory, { recursive: true, force: true })
+    await rm(this.directory, STAGING_REMOVAL_OPTIONS)
   }
 
   private async cleanupAbandonedOwners(): Promise<void> {
@@ -55,7 +61,7 @@ export class SkillUploadStagingOwnership {
         const candidate = join(this.root, entry.name)
         const stats = await lstat(candidate).catch(() => null)
         if (stats?.isDirectory() && !stats.isSymbolicLink()) {
-          await rm(candidate, { recursive: true, force: true })
+          await rm(candidate, STAGING_REMOVAL_OPTIONS)
         }
       }
     } finally {
