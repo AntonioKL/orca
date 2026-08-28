@@ -43,8 +43,13 @@ ${getPowerShellCodexShellLaunchPreflight()}
         Esc = [char]27
         Bel = [char]7
         CommandNonce = $__orcaCommandNonce
-        CommandMarkersAllowed = $__orcaIntegrationContext -eq '${SHELL_INTEGRATION_DIRECT_CONTEXT}' -or
-            (-not $env:TMUX -and -not $env:STY -and $env:TERM -notmatch '^(tmux|screen)')
+        # Why the context test gates both arms: it is the same signal the PTY
+        # authority uses to install its scanner. Without it a pane whose markers
+        # Orca disabled would still paint raw orca-cmd rows. The nonce cannot be
+        # the gate here — Windows 10 emits untrusted rows with no nonce.
+        CommandMarkersAllowed = -not [string]::IsNullOrEmpty($__orcaIntegrationContext) -and
+            ($__orcaIntegrationContext -eq '${SHELL_INTEGRATION_DIRECT_CONTEXT}' -or
+            (-not $env:TMUX -and -not $env:STY -and $env:TERM -notmatch '^(tmux|screen)'))
     }
 
     function Global:prompt {
