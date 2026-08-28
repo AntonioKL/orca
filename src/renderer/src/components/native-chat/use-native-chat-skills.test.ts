@@ -123,6 +123,35 @@ describe('isNativeChatSkillForAgent', () => {
     })
     expect(isNativeChatSkillForAgent('claude', codexOnly, result)).toBe(false)
   })
+
+  it('does not let a non-granting source at a path hide a granting one behind it', () => {
+    // Two roots can resolve to one path (see `rootScanKey` in main/skills/discovery.ts),
+    // and a provider root override can put an unowned root ahead of the agent's own.
+    const result = {
+      sources: [
+        {
+          id: 'shared-home',
+          label: 'Agent skills home',
+          path: '/Users/test/.claude/skills',
+          sourceKind: 'home' as const,
+          providers: ['agent-skills' as const],
+          owner: null,
+          exists: true
+        },
+        {
+          id: 'home-claude',
+          label: 'Claude home',
+          path: '/Users/test/.claude/skills',
+          sourceKind: 'home' as const,
+          providers: ['claude' as const],
+          owner: 'claude' as const,
+          exists: true
+        }
+      ]
+    } satisfies Pick<SkillDiscoveryResult, 'sources'>
+    const shared = skill({ rootPath: '/Users/test/.claude/skills' })
+    expect(isNativeChatSkillForAgent('claude', shared, result)).toBe(true)
+  })
 })
 
 describe('resolveNativeChatSkillDiscoveryCwd', () => {
