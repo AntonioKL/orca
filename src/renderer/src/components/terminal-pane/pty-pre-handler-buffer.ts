@@ -301,15 +301,38 @@ export function discardPreHandlerPtyState(ptyId: string): void {
   discardedPreHandlerPtyStates.set(ptyId, timer)
 }
 
-export function hasPreHandlerPtyExit(ptyId: string): boolean {
-  return (preHandlerPtyExit.get(ptyId)?.length ?? 0) > 0
+/** The records for `ptyId` that could describe `incarnationId`'s lifetime.
+ *
+ *  Every read of the exit buffer goes through here, so a record proven to belong to a different
+ *  lifetime is unreachable BY CONSTRUCTION rather than because each caller remembered to discard
+ *  first. A caller that cannot name an incarnation — a reattach that has not round-tripped yet —
+ *  still sees everything, which is the honest answer: it holds no evidence to discriminate with. */
+function admissiblePreHandlerPtyExits(
+  ptyId: string,
+  incarnationId: unknown
+): BufferedPreHandlerPtyExit[] {
+  const exits = preHandlerPtyExit.get(ptyId) ?? []
+  if (!isPtyIncarnationId(incarnationId)) {
+    return exits
+  }
+  return exits.filter(
+    (exit) => exit.incarnationId === undefined || exit.incarnationId === incarnationId
+  )
 }
 
-export function drainPreHandlerPtyExit(ptyId: string, handler: (code: number) => void): void {
-  // Newest survivor: after the discards above at most one lifetime's records can still be ours, and
-  // picking by sequence keeps the last-write-wins delivery a single-slot buffer always had.
+export function hasPreHandlerPtyExit(ptyId: string, incarnationId?: unknown): boolean {
+  return admissiblePreHandlerPtyExits(ptyId, incarnationId).length > 0
+}
+
+export function drainPreHandlerPtyExit(
+  ptyId: string,
+  handler: (code: number) => void,
+  incarnationId?: unknown
+): void {
+  // Newest admissible record: picking by sequence keeps the last-write-wins delivery a single-slot
+  // buffer always had, now scoped to the lifetime actually asking.
   let exit: BufferedPreHandlerPtyExit | undefined
-  for (const candidate of preHandlerPtyExit.get(ptyId) ?? []) {
+  for (const candidate of admissiblePreHandlerPtyExits(ptyId, incarnationId)) {
     if (!exit || candidate.sequence > exit.sequence) {
       exit = candidate
     }

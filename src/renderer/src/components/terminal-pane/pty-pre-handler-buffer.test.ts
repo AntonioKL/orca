@@ -319,6 +319,21 @@ describe('pre-handler PTY buffer', () => {
     expect(exit).toHaveBeenCalledWith(9)
   })
 
+  // Reads are filtered by lifetime inside the buffer, so a consumer that never calls the discard —
+  // a background launch registering an eager buffer straight off its own spawn — still cannot be
+  // handed the previous owner's exit and tear its freshly started session down.
+  it('never reports or delivers a foreign exit to a reader that names its lifetime', () => {
+    bufferPreHandlerPtyExit(RECYCLED_PTY_ID, 0, PRIOR_INCARNATION_ID)
+
+    const exit = vi.fn()
+    expect(hasPreHandlerPtyExit(RECYCLED_PTY_ID, FRESH_INCARNATION_ID)).toBe(false)
+    drainPreHandlerPtyExit(RECYCLED_PTY_ID, exit, FRESH_INCARNATION_ID)
+    expect(exit).not.toHaveBeenCalled()
+
+    // A reader with no incarnation still sees it: absence is unknown, so it has nothing to judge by.
+    expect(hasPreHandlerPtyExit(RECYCLED_PTY_ID)).toBe(true)
+  })
+
   // A malformed incarnation is evidence of nothing. Treating it as a value that disagrees with
   // everything would discard the very exits the buffer exists to deliver.
   it('treats a malformed incarnation as unknown rather than as a disagreement', () => {

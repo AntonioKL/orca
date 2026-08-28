@@ -108,7 +108,7 @@ export async function connectIpcPty(
       onPtySpawn?.(spawnResult.id)
     }
     handlers.registerData(spawnResult.id)
-    const exitedBeforeAttach = handlers.registerExit(spawnResult.id)
+    const exitedBeforeAttach = handlers.registerExit(spawnResult.id, spawnResult.incarnationId)
     if (exitedBeforeAttach) {
       return { id: spawnResult.id, exitedBeforeAttach: true }
     }
