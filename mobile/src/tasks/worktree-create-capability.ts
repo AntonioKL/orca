@@ -4,6 +4,7 @@ import { readRpcClientGeneration } from '../transport/rpc-client-generation'
 import { isLogicalClientCutoverError } from '../transport/stable-logical-rpc-client'
 import type { RpcSuccess } from '../transport/types'
 import { readMobileRuntimeHostPlatform } from '../transport/mobile-runtime-host-platform'
+import { startSettlingStatusProbe } from '../transport/runtime-capability-probe'
 import { MOBILE_TASKS_CAPABILITY } from './mobile-tasks-capability'
 import {
   WORKTREE_CREATE_DEDUPE_TTL_LEGACY_HOST_MS,
@@ -163,7 +164,6 @@ export function useNewWorktreeRuntimeCapabilities(
     ) {
       return current
     }
-    const previousAuthoritative = current?.cache === 'authoritative' ? current.result : null
     const probe = client
       ? probeNewWorktreeRuntimeCapabilities(client)
       : Promise.resolve({
@@ -178,13 +178,10 @@ export function useNewWorktreeRuntimeCapabilities(
       activationRevision: activationRevisionRef.current,
       cache: 'pending',
       result: null,
-      promise: probe.then((result) =>
-        previousAuthoritative &&
-        result.cache === 'authoritative' &&
-        result.runtimeId === previousAuthoritative.runtimeId
-          ? previousAuthoritative
-          : result
-      )
+      // Why: the fresh answer always wins. Grafting the previous authoritative result
+      // over a same-runtimeId re-probe would re-latch a negative the host has since
+      // stopped giving (a permission grant landing inside one runtime).
+      promise: probe
     }
     capabilityProbeRef.current = record
     void record.promise.then((result) => {
@@ -201,12 +198,50 @@ export function useNewWorktreeRuntimeCapabilities(
       return
     }
     let stale = false
+    let cancelRecovery: (() => void) | null = null
+    const publish = (capabilities: NewWorktreeRuntimeCapabilities): void => {
+      setTasksSupported(capabilities.tasksSupported)
+      setHostPlatform(capabilities.hostPlatform)
+    }
+    // Why: a status.get that times out never moves connState, so no revision or
+    // activation bump follows and nothing else would ever re-ask. Keep asking until
+    // the host gives an answer worth pinning, then install it as the live record.
+    const startRecovery = (): (() => void) =>
+      startSettlingStatusProbe<CapabilityProbeResult>(
+        () =>
+          probeNewWorktreeRuntimeCapabilities(client).then((result) =>
+            result.cache === 'authoritative'
+              ? ({ settled: true, result } as const)
+              : ({ settled: false, cutover: false } as const)
+          ),
+        (result) => {
+          if (stale) {
+            return
+          }
+          capabilityProbeRef.current = {
+            client,
+            connectionRevision: connectionRevisionRef.current.revision,
+            runtimeRevision: connectionRevisionRef.current.runtimeRevision,
+            activationRevision: activationRevisionRef.current,
+            cache: result.cache,
+            result,
+            promise: Promise.resolve(result)
+          }
+          publish(result.capabilities)
+        },
+        { deferFirstAttempt: true }
+      )
     const refresh = (): void => {
+      cancelRecovery?.()
+      cancelRecovery = null
       const record = getCapabilityProbe()
-      void record.promise.then(({ capabilities }) => {
-        if (!stale && capabilityProbeRef.current === record) {
-          setTasksSupported(capabilities.tasksSupported)
-          setHostPlatform(capabilities.hostPlatform)
+      void record.promise.then((result) => {
+        if (stale || capabilityProbeRef.current !== record) {
+          return
+        }
+        publish(result.capabilities)
+        if (result.cache === 'transient') {
+          cancelRecovery = startRecovery()
         }
       })
     }
@@ -220,6 +255,7 @@ export function useNewWorktreeRuntimeCapabilities(
     refresh()
     return () => {
       stale = true
+      cancelRecovery?.()
       unsubscribe()
     }
   }, [client, enabled, getCapabilityProbe, setTasksSupported])
