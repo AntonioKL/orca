@@ -335,10 +335,12 @@ export function SourceControlBranchContextRow({
     )
   }
 
+  // Why: only a rebase moves HEAD onto transient replay commits; a merge or
+  // cherry-pick keeps HEAD on the branch, so its counts stay honest and stay shown.
   const compareStatNodes = buildSourceControlCompareBaseStats(
     summary,
     displayedBaseRef,
-    conflictOperation !== undefined && conflictOperation !== 'unknown'
+    conflictOperation === 'rebase'
   ).map((stat) => <ContextStat key={stat.key} stat={stat} />)
 
   return (

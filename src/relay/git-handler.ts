@@ -104,19 +104,13 @@ export class GitHandler {
       (params, context) => this.cancelResponseStream(params, context)
     )
     this.dispatcher.onRequest('git.continueMerge', (p) =>
-      this.sequencerAction(p, ['merge', '--continue'])
+      this.sequencerAction(p, ['merge', '--continue'], 'MERGE_HEAD')
     )
     this.dispatcher.onRequest('git.continueRebase', (p) =>
-      this.sequencerAction(p, ['rebase', '--continue'])
+      this.sequencerAction(p, ['rebase', '--continue'], 'REBASE_HEAD')
     )
     this.dispatcher.onRequest('git.continueCherryPick', (p) =>
-      this.sequencerAction(p, ['cherry-pick', '--continue'])
-    )
-    this.dispatcher.onRequest('git.skipRebase', (p) =>
-      this.sequencerAction(p, ['rebase', '--skip'])
-    )
-    this.dispatcher.onRequest('git.skipCherryPick', (p) =>
-      this.sequencerAction(p, ['cherry-pick', '--skip'])
+      this.sequencerAction(p, ['cherry-pick', '--continue'], 'CHERRY_PICK_HEAD')
     )
     // Why: a detached client's git.responseAck frames never arrive; wake any pump parked on the ack window so it re-checks staleness and exits.
     this.dispatcher.onClientDetached?.(() => this.responseStreams.wakeAll())
@@ -221,12 +215,35 @@ export class GitHandler {
     return stdout
   }
 
+  private async readSequencerMarkerOid(
+    worktreePath: string,
+    marker: string
+  ): Promise<string | null> {
+    try {
+      const { stdout } = await this.git(['rev-parse', '-q', '--verify', marker], worktreePath)
+      return stdout.trim() || null
+    } catch {
+      return null
+    }
+  }
+
   // Why: sequencer continuations must not open an interactive commit-message editor.
-  private async sequencerAction(params: Record<string, unknown>, args: string[]) {
+  private async sequencerAction(
+    params: Record<string, unknown>,
+    args: string[],
+    marker: string
+  ) {
     this.clearGitMutationReadCaches()
     const worktreePath = params.worktreePath as string
+    const markerBefore = await this.readSequencerMarkerOid(worktreePath, marker)
     try {
       await this.git(args, worktreePath, { suppressEditor: true, terminationBarrier: true })
+    } catch (error) {
+      // Why: --continue may advance to another conflicted step and still exit nonzero.
+      const markerAfter = await this.readSequencerMarkerOid(worktreePath, marker)
+      if (!markerBefore || markerAfter === markerBefore) {
+        throw error
+      }
     } finally {
       this.clearGitMutationReadCaches()
     }

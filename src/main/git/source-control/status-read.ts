@@ -115,10 +115,11 @@ async function runGetStatus(
 
   // Why: detectConflictOperation and git status are independent, so run them concurrently to save I/O latency.
   const conflictPromise = detectConflictOperation(worktreePath)
-  // Why: only sequencer operations have state on disk, so a clean repo reads nothing.
+  // Why: only a rebase has readable step state (rebase-merge/rebase-apply) — a
+  // cherry-pick's sequencer dir has no reader here, so probing it would be pure ENOENT churn.
   const operationProgressPromise = conflictPromise
     .then(async (operation) =>
-      operation === 'rebase' || operation === 'cherry-pick'
+      operation === 'rebase'
         ? await readGitRebaseProgress(await resolveGitDir(worktreePath))
         : undefined
     )

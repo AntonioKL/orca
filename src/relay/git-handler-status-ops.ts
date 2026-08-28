@@ -96,10 +96,11 @@ export async function getStatusOp(
   // Why: reject NaN/negative limits — NaN would silently disable capping, negatives would over-truncate.
   const limit = resolveGitStatusLimit(params.limit)
   const conflictPromise = detectConflictOperation(worktreePath)
-  // Why: only the sequencer operations have state on disk, so chain the read off the probe — a clean repo reads nothing.
+  // Why: only a rebase has readable step state (rebase-merge/rebase-apply) — a
+  // cherry-pick's sequencer dir has no reader here, so probing it would be pure ENOENT churn.
   const operationProgressPromise = conflictPromise
     .then(async (operation) =>
-      operation === 'rebase' || operation === 'cherry-pick'
+      operation === 'rebase'
         ? await readGitRebaseProgress(await resolveGitDir(worktreePath))
         : undefined
     )

@@ -48,8 +48,9 @@ describe('OperationBanner heading', () => {
       operationProgress: { ...progress, onto: 'bc98655a3965fe350f77acb14bf4a53f1e2d3c4b' }
     })
 
-    expect(markup).toContain('Rebasing onto bc98655a')
-    expect(markup).not.toContain('bc98655a3965fe350f77acb14bf4a53f1e2d3c4b')
+    // 7 chars — the same abbreviation the head identity chip uses.
+    expect(markup).toContain('Rebasing onto bc98655')
+    expect(markup).not.toContain('bc98655a')
   })
 
   // Wire compatibility: a host that predates operationProgress omits it entirely.
@@ -133,6 +134,16 @@ describe('ConflictSummaryCard', () => {
         {...props}
       />
     )
+
+  // Review opens a read-only view, so it must stay reachable while an agent resolves.
+  it('keeps Review conflicts clickable while Resolve with AI is in flight', () => {
+    const markup = renderSummary({ isResolvingWithAI: true })
+
+    // `disabled=""` is the rendered attribute; a bare "disabled" also matches Tailwind's disabled: variants.
+    expect(buttonContaining(markup, 'Review conflicts')).not.toContain('disabled=""')
+    expect(buttonContaining(markup, 'Resolve with AI')).toContain('disabled=""')
+    expect(buttonContaining(markup, 'Abort rebase')).toContain('disabled=""')
+  })
 
   it('offers only Resolve with AI, Review and Abort while conflicts are unresolved', () => {
     const markup = renderSummary()

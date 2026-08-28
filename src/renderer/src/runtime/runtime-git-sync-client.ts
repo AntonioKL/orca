@@ -2,6 +2,7 @@ import type { GitForkSyncExpectedUpstream, GitForkSyncResult } from '../../../sh
 import type { GitUpstreamStatus } from '../../../shared/git-status-types'
 import { REBASE_FROM_BASE_RPC_TIMEOUT_MS } from '../../../shared/git-rebase-source'
 import type { GitPushTarget } from '../../../shared/worktree/types'
+import { isRuntimeMethodNotFoundError } from '@/store/slices/worktrees/listing/runtime-worktree-rpc-errors'
 import { resolveLocalWorktreePath, type RuntimeGitContext } from './runtime-git-client-context'
 import { callRuntimeRpc, getActiveRuntimeTarget } from './runtime-rpc-client'
 import { toRuntimeWorktreeSelector } from './runtime-worktree-selector'
@@ -49,11 +50,11 @@ export async function continueRuntimeGitMerge(context: RuntimeGitContext): Promi
     })
     return
   }
-  await callRuntimeRpc(
+  await callSequencerContinueRpc(
     target,
     'git.continueMerge',
-    { worktree: toRuntimeWorktreeSelector(context.worktreeId) },
-    { timeoutMs: 30_000 }
+    context.worktreeId,
+    'continue a merge'
   )
 }
 
@@ -66,11 +67,11 @@ export async function continueRuntimeGitRebase(context: RuntimeGitContext): Prom
     })
     return
   }
-  await callRuntimeRpc(
+  await callSequencerContinueRpc(
     target,
     'git.continueRebase',
-    { worktree: toRuntimeWorktreeSelector(context.worktreeId) },
-    { timeoutMs: 30_000 }
+    context.worktreeId,
+    'continue a rebase'
   )
 }
 
@@ -83,12 +84,37 @@ export async function continueRuntimeGitCherryPick(context: RuntimeGitContext): 
     })
     return
   }
-  await callRuntimeRpc(
+  await callSequencerContinueRpc(
     target,
     'git.continueCherryPick',
-    { worktree: toRuntimeWorktreeSelector(context.worktreeId) },
-    { timeoutMs: 30_000 }
+    context.worktreeId,
+    'continue a cherry-pick'
   )
+}
+
+// Why: mixed client/host versions are the normal state; the raw method-not-found
+// text would otherwise surface verbatim in the failure toast.
+async function callSequencerContinueRpc(
+  target: Parameters<typeof callRuntimeRpc>[0],
+  method: string,
+  worktreeId: string,
+  action: string
+): Promise<void> {
+  try {
+    await callRuntimeRpc(
+      target,
+      method,
+      { worktree: toRuntimeWorktreeSelector(worktreeId) },
+      { timeoutMs: 30_000 }
+    )
+  } catch (error) {
+    if (isRuntimeMethodNotFoundError(error)) {
+      throw new Error(
+        `This remote Orca host is running an older version that cannot ${action}. Update Orca on the host, then try again.`
+      )
+    }
+    throw error
+  }
 }
 
 export async function getRuntimeGitUpstreamStatus(

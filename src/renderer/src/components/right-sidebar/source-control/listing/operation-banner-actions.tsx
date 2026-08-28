@@ -43,6 +43,8 @@ type OperationAction = {
   onClick: () => void
   // Escape hatches never take the primary slot, so they never read as a way forward.
   quiet?: boolean
+  // Read-only navigation stays clickable while a mutation is in flight.
+  enabledWhileBusy?: boolean
 }
 
 const SPINNER = <RefreshCw className="size-3.5 animate-spin" />
@@ -93,7 +95,8 @@ export function SourceControlOperationBannerActions({
         'Review conflicts'
       ),
       icon: <GitMerge className="size-3.5" />,
-      onClick: onReviewConflicts
+      onClick: onReviewConflicts,
+      enabledWhileBusy: true
     })
   }
   if ((conflictOperation === 'merge' || conflictOperation === 'rebase') && onAbortOperation) {
@@ -120,7 +123,7 @@ export function SourceControlOperationBannerActions({
       variant={variant}
       size="sm"
       className="h-7 w-full min-w-0 text-xs"
-      disabled={busy}
+      disabled={busy && !action.enabledWhileBusy}
       onClick={action.onClick}
     >
       {action.icon}

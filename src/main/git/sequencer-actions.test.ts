@@ -27,7 +27,7 @@ const CASES: readonly [string, SequencerAction, string[]][] = [
   ['continueCherryPick', continueCherryPick, ['cherry-pick', '--continue']]
 ]
 
-// The HEAD probe runs before the sequencer step, so calls are matched by argv, not index.
+// The marker probe runs before the sequencer step, so calls are matched by argv, not index.
 function optionsFor(args: readonly string[]): { env?: NodeJS.ProcessEnv } | undefined {
   const call = gitExecFileAsyncMock.mock.calls.find(
     (called: unknown[]) => (called[0] as string[]).join(' ') === args.join(' ')
@@ -35,7 +35,7 @@ function optionsFor(args: readonly string[]): { env?: NodeJS.ProcessEnv } | unde
   return call?.[1] as { env?: NodeJS.ProcessEnv } | undefined
 }
 
-function headProbe(oid: string) {
+function markerProbe(oid: string) {
   return (args: readonly string[]) =>
     args[0] === 'rev-parse'
       ? Promise.resolve({ stdout: `${oid}\n`, stderr: '' })
@@ -45,7 +45,7 @@ function headProbe(oid: string) {
 describe('git sequencer actions', () => {
   beforeEach(() => {
     gitExecFileAsyncMock.mockReset()
-    gitExecFileAsyncMock.mockImplementation(headProbe('abc123'))
+    gitExecFileAsyncMock.mockImplementation(markerProbe('abc123'))
   })
 
   it.each(CASES)('%s runs the matching git command in the worktree', async (_name, run, args) => {
@@ -74,21 +74,37 @@ describe('git sequencer actions', () => {
   })
 
   // `git rebase --continue` exits nonzero when it lands the resolution and then stops on the
-  // NEXT commit's conflict. HEAD moved, so that is the sequencer advancing, not a failed step.
-  it('treats a stop on the next commit as progress once HEAD has moved', async () => {
-    let head = 'aaa111'
+  // NEXT commit's conflict. REBASE_HEAD now names that next commit — the sequencer advancing.
+  it('treats a stop on the next commit as progress once the marker has moved', async () => {
+    let rebaseHead = 'aaa111'
     gitExecFileAsyncMock.mockImplementation((args: string[]) => {
       if (args[0] === 'rev-parse') {
-        return Promise.resolve({ stdout: `${head}\n`, stderr: '' })
+        expect(args).toEqual(['rev-parse', '-q', '--verify', 'REBASE_HEAD'])
+        return Promise.resolve({ stdout: `${rebaseHead}\n`, stderr: '' })
       }
-      head = 'bbb222'
+      rebaseHead = 'bbb222'
       return Promise.reject(new Error('error: could not apply ec9b3362... feat: add thing'))
     })
 
     await expect(continueRebase('/repo')).resolves.toBeUndefined()
   })
 
-  it('still fails a step that refused to run, leaving HEAD where it was', async () => {
+  it('treats a marker that cleared as the operation completing', async () => {
+    let mergeHead: string | null = 'aaa111'
+    gitExecFileAsyncMock.mockImplementation((args: string[]) => {
+      if (args[0] === 'rev-parse') {
+        return mergeHead
+          ? Promise.resolve({ stdout: `${mergeHead}\n`, stderr: '' })
+          : Promise.reject(new Error('fatal: needed a single revision'))
+      }
+      mergeHead = null
+      return Promise.reject(new Error('warning: post-commit cleanup failed'))
+    })
+
+    await expect(continueMerge('/repo')).resolves.toBeUndefined()
+  })
+
+  it('still fails a step that refused to run, leaving the marker where it was', async () => {
     gitExecFileAsyncMock.mockImplementation((args: string[]) =>
       args[0] === 'rev-parse'
         ? Promise.resolve({ stdout: 'aaa111\n', stderr: '' })
@@ -98,8 +114,24 @@ describe('git sequencer actions', () => {
     await expect(continueRebase('/repo')).rejects.toThrow('needs merge')
   })
 
-  // An unborn HEAD (or an unreadable one) proves nothing, so the original failure stands.
-  it('rethrows when HEAD cannot be read', async () => {
+  // The whole point of probing the marker instead of HEAD: another actor committing in
+  // the worktree moves HEAD but not the sequencer's own ref, so a refused step still fails.
+  it('is not fooled by a concurrent commit in the worktree', async () => {
+    gitExecFileAsyncMock.mockImplementation((args: string[]) =>
+      args[0] === 'rev-parse'
+        ? Promise.resolve({ stdout: 'aaa111\n', stderr: '' })
+        : Promise.reject(new Error('f.txt: needs merge'))
+    )
+
+    await expect(continueRebase('/repo')).rejects.toThrow('needs merge')
+    expect(gitExecFileAsyncMock).not.toHaveBeenCalledWith(
+      ['rev-parse', '--verify', 'HEAD'],
+      expect.anything()
+    )
+  })
+
+  // No marker before the step proves nothing ran, so the original failure stands.
+  it('rethrows when the marker was already absent', async () => {
     gitExecFileAsyncMock.mockImplementation((args: string[]) =>
       args[0] === 'rev-parse'
         ? Promise.reject(new Error('fatal: bad revision'))

@@ -1,6 +1,7 @@
 import React from 'react'
 import { GitMerge, GitPullRequestArrow, TriangleAlert } from 'lucide-react'
 import { translate } from '@/i18n/i18n'
+import { shortGitHead } from '@/lib/worktree-git-identity-display'
 import type {
   GitConflictOperation,
   GitOperationProgress
@@ -49,8 +50,9 @@ function conflictsHeading(conflictOperation: GitConflictOperation): string {
 }
 
 // Full 40-char oids only get truncated by CSS, which reads as a broken value.
+// shortGitHead keeps this abbreviation in step with the head identity chip's.
 function shortenOnto(onto: string | undefined): string | undefined {
-  return onto && /^[0-9a-f]{40}$/i.test(onto) ? onto.slice(0, 8) : onto
+  return onto && /^[0-9a-f]{40}$/i.test(onto) ? shortGitHead(onto) : onto
 }
 
 function inProgressHeading(conflictOperation: GitConflictOperation): string {

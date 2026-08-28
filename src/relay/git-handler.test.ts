@@ -216,6 +216,38 @@ describe('GitHandler', () => {
       await expect(readFileText()).resolves.toBe('resolved\n')
     })
 
+    it('treats a continue that advances into the next conflict as success', async () => {
+      const baseBranch = seedDivergedBranches()
+      execFileSync('git', ['checkout', 'feature'], { cwd: tmpDir, stdio: 'pipe' })
+      writeFileSync(path.join(tmpDir, 'file.txt'), 'feature two\n')
+      gitCommit(tmpDir, 'feature change two')
+      expect(() =>
+        execFileSync('git', ['rebase', baseBranch], { cwd: tmpDir, stdio: 'pipe' })
+      ).toThrow()
+      resolveConflict()
+
+      // Git exits nonzero here (it committed step 1, then stopped on step 2's
+      // conflict) — the moved HEAD must read as success, exactly like the local path.
+      await dispatcher.callRequest('git.continueRebase', { worktreePath: tmpDir })
+
+      await expect(fs.access(path.join(tmpDir, '.git', 'rebase-merge'))).resolves.toBeUndefined()
+    })
+
+    it('still rejects a continue that could not advance', async () => {
+      const baseBranch = seedDivergedBranches()
+      execFileSync('git', ['checkout', 'feature'], { cwd: tmpDir, stdio: 'pipe' })
+      expect(() =>
+        execFileSync('git', ['rebase', baseBranch], { cwd: tmpDir, stdio: 'pipe' })
+      ).toThrow()
+
+      // Conflict left unresolved: git refuses, HEAD does not move, the error surfaces.
+      await expect(
+        dispatcher.callRequest('git.continueRebase', { worktreePath: tmpDir })
+      ).rejects.toThrow()
+
+      await expect(fs.access(path.join(tmpDir, '.git', 'rebase-merge'))).resolves.toBeUndefined()
+    })
+
     it('continues a conflicted merge without waiting on an editor', async () => {
       seedDivergedBranches()
       expect(() =>
