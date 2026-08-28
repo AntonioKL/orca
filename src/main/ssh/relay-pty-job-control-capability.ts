@@ -32,7 +32,8 @@ export function relayPtyJobControlProbeJs(nativeModuleNameExpr: string): string 
   // Why "unknown" on throw: a probe that could not look is not evidence of absence.
   return (
     `let jc="unknown";try{const n=require("node-pty/lib/utils").loadNativeModule(${nativeModuleNameExpr}).module;` +
-    `jc=${symbols}.every(s=>n&&typeof n[s]==="function")?"present":"absent"}catch{jc="unknown"}` +
+    // Why the `if`: a loader that hands back no module never let us look, so leave the verdict unanswered.
+    `if(n){jc=${symbols}.every(s=>typeof n[s]==="function")?"present":"absent"}}catch{jc="unknown"}` +
     `console.log(${JSON.stringify(RELAY_PTY_JOB_CONTROL_MARKER)}+jc);`
   )
 }
