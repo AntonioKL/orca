@@ -36,7 +36,7 @@ import { setSpeechServiceFactories } from './speech/speech-runtime-service'
 import { setWorktreeWatcherRemoval } from './ipc/worktree-watcher-removal'
 import { setSecretStore } from '../shared/secret-store'
 import { ElectronSecretStore } from './host/electron-secret-store'
-import { reportSecretProtectionGap } from './host/secret-protection-report'
+import { scheduleSecretProtectionGapReport } from './host/deferred-secret-protection-report'
 import { initSessionParseCachePersistence } from './ai-vault/session-parse-cache-persistence'
 import { ensureActiveOrcaProfile, initOrcaProfilePaths } from './orca-profiles/profile-index-store'
 import { getOrcaCloudAuthConfig } from './orca-profiles/profile-cloud-auth-config'
@@ -89,10 +89,11 @@ import {
   sweepRestoredSubagentsWithoutLiveAgent
 } from './agent-hooks/restored-subagent-liveness-sweep'
 import {
-  applyAgentStatusHooksEnabled,
+  installManagedAgentHooks,
   isAgentStatusHooksEnabled,
-  removeManagedAgentHooks,
   removeManagedAgentHooksAsync,
+  resolveStartupManagedHookAction,
+  shouldInstallStartupManagedAgentHook,
   shouldContinueManagedHookStartup
 } from './agent-hooks/managed-agent-hook-controls'
 import { initCohortClassifier } from './telemetry/cohort-classifier'
@@ -2346,11 +2347,14 @@ void app.whenReady().then(async () => {
     dataFile: activeOrcaProfile.dataFile,
     storageAuthority: isServeMode ? 'runtime' : 'desktop'
   })
-  // Why here and not at install time: the report remembers what it last said, and that
-  // state lives beside the profile data file, which does not exist until now.
-  reportSecretProtectionGap({
+  // Why armed here and not at install time: the report remembers what it last said, and
+  // that state lives beside the profile data file, which does not exist until now.
+  // Why scheduled and not called: the report probes the OS keyring, which blocks on Linux
+  // and must not gate the first window (STA-5765).
+  scheduleSecretProtectionGapReport({
     dataFile: activeOrcaProfile.dataFile,
-    force: process.env.ORCA_ALWAYS_REPORT_SECRET_PROTECTION === '1'
+    force: process.env.ORCA_ALWAYS_REPORT_SECRET_PROTECTION === '1',
+    deferUntilFirstWindow: !isServeMode
   })
   // Why here: the host key store is a sidecar of the same profile, and every SSH connect consults
   // it. Left unbound it reports nothing trusted, which is safe but silently discards our own
@@ -3089,37 +3093,40 @@ void app.whenReady().then(async () => {
   // ordered before managed-hook reconciliation — an incapable host must re-arm
   // and complete the legacy real-home sweep first — but awaiting it inline
   // stalled app init behind that session, so chain instead of blocking.
-  const realHomeCodexHookState = codexRuntimeHome.isHostSystemDefaultRealHomeSelected()
-    ? ensureRealHomeCodexHookState({
-        hooksEnabled: isAgentStatusHooksEnabled(store.getSettings()),
-        userDataPath: app.getPath('userData')
-      }).catch((error: unknown) => {
-        console.warn('[codex-real-home-hooks] startup ensure failed:', error)
-      })
-    : Promise.resolve()
-  if (shouldInstallManagedHooks(is.dev)) {
-    // Why: check the persisted off switch before any auto-install so removed hooks don't silently reappear on launch.
-    if (isAgentStatusHooksEnabled(store.getSettings())) {
-      const managedHookStore = store
-      void realHomeCodexHookState
-        .then(() =>
-          applyAgentStatusHooksEnabled(true, managedHookStore.getSettings(), {
-            shouldHydrateShellPath: app.isPackaged,
-            onInstallError: recordManagedHookInstallFailure,
-            shouldContinue: (agent) => {
-              const settings = managedHookStore.getSettings()
-              return shouldContinueManagedHookStartup(isQuitting, settings, agent)
-            }
-          })
-        )
-        .catch((error: unknown) => {
-          console.warn('[agent-hooks] failed to reconcile managed hooks on startup:', error)
+  const startupManagedHookSettings = store.getSettings()
+  const shouldReconcileStartupManagedHooks =
+    shouldInstallManagedHooks(is.dev) &&
+    resolveStartupManagedHookAction(startupManagedHookSettings) === 'install'
+  const realHomeCodexHookState =
+    shouldReconcileStartupManagedHooks &&
+    shouldInstallStartupManagedAgentHook(startupManagedHookSettings, 'codex') &&
+    codexRuntimeHome.isHostSystemDefaultRealHomeSelected()
+      ? ensureRealHomeCodexHookState({
+          hooksEnabled: true,
+          userDataPath: app.getPath('userData')
+        }).catch((error: unknown) => {
+          console.warn('[codex-real-home-hooks] startup ensure failed:', error)
         })
-    } else {
-      void removeManagedAgentHooks().catch((error: unknown) => {
-        console.warn('[agent-hooks] failed to remove managed hooks on startup:', error)
+      : Promise.resolve()
+  // Why skip rather than remove when the off switch is set: the hook files are user-global but this
+  // decision reads only THIS profile's settings, so removing here deletes the hooks every other Orca
+  // instance depends on (STA-5679). Skipping already keeps removed hooks from reappearing on launch.
+  if (shouldReconcileStartupManagedHooks) {
+    const managedHookStore = store
+    void realHomeCodexHookState
+      .then(() =>
+        installManagedAgentHooks(managedHookStore.getSettings(), {
+          shouldHydrateShellPath: app.isPackaged,
+          onInstallError: recordManagedHookInstallFailure,
+          shouldContinue: (agent) => {
+            const settings = managedHookStore.getSettings()
+            return shouldContinueManagedHookStartup(isQuitting, settings, agent)
+          }
+        })
+      )
+      .catch((error: unknown) => {
+        console.warn('[agent-hooks] failed to reconcile managed hooks on startup:', error)
       })
-    }
   }
   // Why: process-gone metrics only see survivors; retain a recent whole-app
   // snapshot for comparison in crash reports.
