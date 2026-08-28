@@ -1,4 +1,5 @@
 import React, { useCallback } from 'react'
+import { toast } from 'sonner'
 
 import type { GitHubWorkItem } from '../../../../shared/github/work-item-types'
 import { hasWorktreeCardDetails } from './WorktreeCardMeta'
@@ -148,16 +149,19 @@ export function useWorktreeCardSecondaryDetails({
     (hoverReviewProvider === 'bitbucket' && linkedBitbucketPR !== null) ||
     (hoverReviewProvider === 'azure-devops' && linkedAzureDevOpsPR !== null) ||
     (hoverReviewProvider === 'gitea' && linkedGiteaPR !== null)
-  const handleUnlinkReview = useCallback(() => {
+  const handleUnlinkReview = useCallback(async () => {
     const options = { executionHostId: worktree.hostId ?? 'local' }
     switch (hoverReviewProvider) {
       case 'github':
         if (hoverReview) {
-          void updateWorktreeMeta(
+          const result = await updateWorktreeMeta(
             worktree.id,
             { linkedPR: null, suppressedGitHubPR: hoverReview.number },
             options
           )
+          if (!result.ok) {
+            toast.error(result.error)
+          }
         }
         return
       case 'gitlab':

@@ -349,16 +349,19 @@ export function useChecksPanelCheckAndReviewActions(model: ChecksPanelCheckAndRe
     [activeWorktreeId]
   )
 
-  const handleUnlinkPullRequest = useCallback(() => {
+  const handleUnlinkPullRequest = useCallback(async () => {
     if (!activeWorktreeId || !activeWorktree || activeReview?.provider !== 'github') {
       return
     }
-    void updateWorktreeMeta(
+    const result = await updateWorktreeMeta(
       activeWorktreeId,
-      { linkedPR: null, suppressedGitHubPR: activeReview.number },
+      { linkedPR: null, suppressedGitHubPR: linkedPR ?? activeReview.number },
       { executionHostId: activeWorktree.hostId }
     )
-  }, [activeReview, activeWorktree, activeWorktreeId, updateWorktreeMeta])
+    if (!result.ok) {
+      toast.error(result.error)
+    }
+  }, [activeReview, activeWorktree, activeWorktreeId, linkedPR, updateWorktreeMeta])
 
   const openLinkPullRequestModal = useCallback(
     (currentPR: number) => {

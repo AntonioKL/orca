@@ -44,6 +44,9 @@ export function selectChecksPanelReview({
   if (hasNonGitHubLinkedReview) {
     return null
   }
+  if (pr && linkedPR !== null && pr.number !== linkedPR) {
+    return null
+  }
   if (pr && isGitHubPRSuppressed({ linkedPR, suppressedGitHubPR }, pr.number)) {
     return null
   }

@@ -78,7 +78,7 @@ describe('worktree remote runtime mutations', () => {
     expect(mockApi.worktrees.updateMeta).toHaveBeenCalledWith({
       worktreeId: wt.id,
       executionHostId: 'local',
-      updates: { linkedPR: 42 }
+      updates: { linkedPR: 42, suppressedGitHubPR: null }
     })
   })
 
@@ -146,7 +146,7 @@ describe('worktree remote runtime mutations', () => {
     expect(mockApi.worktrees.updateMeta).toHaveBeenCalledWith({
       worktreeId: wt.id,
       executionHostId: 'local',
-      updates: { linkedPR: 43 }
+      updates: { linkedPR: 43, suppressedGitHubPR: null }
     })
   })
 
@@ -240,7 +240,7 @@ describe('worktree remote runtime mutations', () => {
     expect(mockApi.worktrees.updateMeta).toHaveBeenCalledWith({
       worktreeId: wt.id,
       executionHostId: 'local',
-      updates: { linkedPR: 42 }
+      updates: { linkedPR: 42, suppressedGitHubPR: null }
     })
   })
 
@@ -432,7 +432,7 @@ describe('worktree remote runtime mutations', () => {
     expect(mockApi.worktrees.updateMeta).toHaveBeenCalledWith({
       worktreeId: wt.id,
       executionHostId: 'local',
-      updates: { linkedPR: 42 }
+      updates: { linkedPR: 42, suppressedGitHubPR: null }
     })
   })
 })

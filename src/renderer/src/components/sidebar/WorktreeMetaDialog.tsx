@@ -43,7 +43,8 @@ const EMPTY_SNAPSHOT: WorktreeMetaSnapshot = {
   displayName: '',
   comment: '',
   issueInput: '',
-  issueProvider: 'github'
+  issueProvider: 'github',
+  prInput: ''
 }
 
 const WorktreeMetaDialog = React.memo(function WorktreeMetaDialog() {
@@ -132,6 +133,7 @@ const WorktreeMetaDialog = React.memo(function WorktreeMetaDialog() {
       comment: currentComment,
       issueInput: currentIssue,
       issueProvider: currentProvider,
+      prInput: worktree?.linkedPR != null ? String(worktree.linkedPR) : '',
       linkedLinearIssueOrganizationUrlKey: worktree?.linkedLinearIssueOrganizationUrlKey ?? null
     })
     setSaveError(null)

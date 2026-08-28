@@ -5,8 +5,13 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ChecksPanelCheckAndReviewActionsInput } from './check-and-review-action-dependencies'
 import { useChecksPanelCheckAndReviewActions } from './use-checks-panel-check-and-review-actions'
 
+const mocks = vi.hoisted(() => ({ toastError: vi.fn() }))
+vi.mock('sonner', () => ({
+  toast: { error: mocks.toastError, message: vi.fn(), success: vi.fn() }
+}))
+
 function renderActions(overrides: Partial<ChecksPanelCheckAndReviewActionsInput> = {}) {
-  const updateWorktreeMeta = vi.fn()
+  const updateWorktreeMeta = vi.fn().mockResolvedValue({ ok: true })
   const openModal = vi.fn()
   const model = {
     activeReview: {
@@ -44,15 +49,48 @@ function renderActions(overrides: Partial<ChecksPanelCheckAndReviewActionsInput>
 }
 
 describe('useChecksPanelCheckAndReviewActions', () => {
-  it('unlinks an auto-detected PR with a durable suppression tombstone', () => {
+  it('unlinks an auto-detected PR with a durable suppression tombstone', async () => {
     const { result, updateWorktreeMeta } = renderActions()
 
-    act(() => result.current.handleUnlinkPullRequest())
+    await act(() => result.current.handleUnlinkPullRequest())
 
     expect(updateWorktreeMeta).toHaveBeenCalledWith(
       'wt-1',
       { linkedPR: null, suppressedGitHubPR: 42 },
       { executionHostId: 'ssh:devbox' }
+    )
+  })
+
+  it('tombstones the explicit link rather than stale displayed cache data', async () => {
+    const { result, updateWorktreeMeta } = renderActions({
+      activeReview: {
+        provider: 'github',
+        number: 43,
+        title: 'Stale branch PR'
+      } as never,
+      linkedPR: 42
+    })
+
+    await act(() => result.current.handleUnlinkPullRequest())
+
+    expect(updateWorktreeMeta).toHaveBeenCalledWith(
+      'wt-1',
+      { linkedPR: null, suppressedGitHubPR: 42 },
+      { executionHostId: 'ssh:devbox' }
+    )
+  })
+
+  it('surfaces a remote-host capability rejection instead of silently restoring the PR', async () => {
+    const updateWorktreeMeta = vi.fn().mockResolvedValue({
+      ok: false,
+      error: 'Update the remote runtime to unlink GitHub pull requests'
+    })
+    const { result } = renderActions({ updateWorktreeMeta: updateWorktreeMeta as never })
+
+    await act(() => result.current.handleUnlinkPullRequest())
+
+    expect(mocks.toastError).toHaveBeenCalledWith(
+      'Update the remote runtime to unlink GitHub pull requests'
     )
   })
 

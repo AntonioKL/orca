@@ -5,6 +5,7 @@ import { normalizeWorkspaceLinkedItem } from '../../../shared/workspace-linked-i
 import { isWorkspaceLinkedItemSourceContextMatch } from '../../../shared/workspace-linked-item-source-context'
 import { DEFAULT_WORKSPACE_STATUS_ID } from '../../../shared/workspace-statuses'
 import type { WorktreeMeta } from '../../../shared/worktree/meta-types'
+import { normalizeGitHubPRSuppressionUpdate } from '../../../shared/worktree/github-pr-suppression'
 
 type WorktreeMetaIdentity = {
   instanceId: string
@@ -41,9 +42,10 @@ export function mergeWorktreeMetaForWrite(
   updates: Partial<WorktreeMeta>,
   identity?: WorktreeMetaIdentity
 ): WorktreeMeta {
-  const updated = { ...(existing ?? createDefaultWorktreeMeta()), ...updates, ...identity }
-  if (typeof updates.linkedPR === 'number' && updates.linkedPR > 0) {
-    updated.suppressedGitHubPR = null
+  const updated = {
+    ...(existing ?? createDefaultWorktreeMeta()),
+    ...normalizeGitHubPRSuppressionUpdate(updates),
+    ...identity
   }
   updated.linkedWorkItem = normalizeWorkspaceLinkedItem(updated.linkedWorkItem)
   const sourceContext = normalizeStoredTaskSourceContext(updated.linkedTaskSourceContext)

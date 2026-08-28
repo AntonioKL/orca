@@ -175,7 +175,7 @@ export function buildWorktreeCardPresentation(card: WorktreeCardController) {
             }
             onOpenAutomation={affiliateListMode ? undefined : handleOpenAutomation}
             onOpenAutomationRun={affiliateListMode ? undefined : handleOpenAutomationRun}
-            // Why: compact mode hides the metadata badge row, so title hover carries the explicit-link affordance.
+            // Why: compact mode hides the metadata badge row, so title hover carries the review affordance.
             onUnlinkReview={!affiliateListMode && canUnlinkReview ? handleUnlinkReview : undefined}
           >
             {title}
@@ -235,7 +235,6 @@ export function buildWorktreeCardPresentation(card: WorktreeCardController) {
         }
         onOpenAutomation={affiliateListMode ? undefined : handleOpenAutomation}
         onOpenAutomationRun={affiliateListMode ? undefined : handleOpenAutomationRun}
-        // Why: branch lookup can surface a review without persisted metadata; only unlink when explicitly linked.
         onUnlinkReview={!affiliateListMode && canUnlinkReview ? handleUnlinkReview : undefined}
       >
         {detailsAndPortsContent}

@@ -129,6 +129,21 @@ describe('selectChecksPanelReview', () => {
     ).toBeNull()
   })
 
+  it('does not substitute a stale branch PR for an explicit GitHub link', () => {
+    expect(
+      selectChecksPanelReview({
+        hostedReview: null,
+        pr: makePR({ number: 43 }),
+        linkedPR: 42,
+        suppressedGitHubPR: null,
+        linkedGitLabMR: null,
+        linkedBitbucketPR: null,
+        linkedAzureDevOpsPR: null,
+        linkedGiteaPR: null
+      })
+    ).toBeNull()
+  })
+
   it('keeps a different detected PR and lets an explicit link override stale suppression', () => {
     const common = {
       hostedReview: null,

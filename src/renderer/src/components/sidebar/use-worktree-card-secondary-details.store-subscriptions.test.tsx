@@ -11,6 +11,9 @@ import { usePromptCacheCountdownStartedAt } from './CacheTimer'
 import { useWorktreeCardSecondaryDetails } from './use-worktree-card-secondary-details'
 import { useWorktreeAgentRows } from './useWorktreeAgentRows'
 
+const mocks = vi.hoisted(() => ({ toastError: vi.fn() }))
+vi.mock('sonner', () => ({ toast: { error: mocks.toastError } }))
+
 const WORKTREE_ID = 'repo-1::/repo/worktrees/card'
 const originalState = useAppStore.getState()
 
@@ -167,9 +170,9 @@ describe('useWorktreeCardSecondaryDetails store subscriptions', () => {
     expect(cacheTtlMs).toBe(0)
   })
 
-  it('writes a suppression tombstone when the user unlinks a displayed GitHub PR', () => {
-    const updateWorktreeMeta = vi.fn()
-    let unlink: (() => void) | null = null
+  it('writes a suppression tombstone when the user unlinks a displayed GitHub PR', async () => {
+    const updateWorktreeMeta = vi.fn().mockResolvedValue({ ok: true })
+    let unlink: (() => Promise<void>) | null = null
     function Probe(): null {
       const details = useWorktreeCardSecondaryDetails({
         ...secondaryDetailsArgs(makeSettings(300_000)),
@@ -186,12 +189,36 @@ describe('useWorktreeCardSecondaryDetails store subscriptions', () => {
     }
 
     mount(<Probe />)
-    act(() => unlink?.())
+    await act(() => unlink?.())
 
     expect(updateWorktreeMeta).toHaveBeenCalledWith(
       WORKTREE_ID,
       { linkedPR: null, suppressedGitHubPR: 42 },
       { executionHostId: 'ssh:builder' }
+    )
+  })
+
+  it('surfaces a failed GitHub unlink after the optimistic card update is reverted', async () => {
+    const updateWorktreeMeta = vi.fn().mockResolvedValue({
+      ok: false,
+      error: 'Update the remote runtime to unlink GitHub pull requests'
+    })
+    let unlink: (() => Promise<void>) | null = null
+    function Probe(): null {
+      const details = useWorktreeCardSecondaryDetails({
+        ...secondaryDetailsArgs(makeSettings(300_000)),
+        prDisplay: { provider: 'github', number: 42, title: 'Branch PR' },
+        updateWorktreeMeta: updateWorktreeMeta as never
+      })
+      unlink = details.handleUnlinkReview
+      return null
+    }
+
+    mount(<Probe />)
+    await act(() => unlink?.())
+
+    expect(mocks.toastError).toHaveBeenCalledWith(
+      'Update the remote runtime to unlink GitHub pull requests'
     )
   })
 })

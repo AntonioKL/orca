@@ -30,6 +30,7 @@ export type WorktreeMetaSnapshot = {
   comment: string
   issueInput: string
   issueProvider: IssueLinkProvider
+  prInput: string
   /** Stands in for an org key the typed value omits, so re-saving a stored bare
    *  identifier does not read as a change. */
   linkedLinearIssueOrganizationUrlKey?: string | null
@@ -236,14 +237,15 @@ function buildIssueLinkUpdates(
   return linearUpdates ? { linkedIssue: null, ...linearUpdates, ...displacedWorkItem } : {}
 }
 
-// Requires the dialog to seed `prInput` from the persisted `linkedPR`: the blank
-// input is written through as a clear, so an unseeded field drops the link on an
-// untouched save.
 function buildPrLinkUpdate(
   draft: WorktreeMetaDraft,
+  current: WorktreeMetaSnapshot,
   live: WorktreeMetaLiveLinks
 ): Partial<WorktreeMeta> {
   const trimmed = draft.prInput.trim()
+  if (trimmed === current.prInput.trim()) {
+    return {}
+  }
   if (trimmed === '') {
     return {
       linkedPR: null,
@@ -267,6 +269,6 @@ export function buildWorktreeMetaUpdates(
     ...buildCommentUpdate(draft, current),
     ...buildDisplayNameUpdate(draft, current),
     ...buildIssueLinkUpdates(draft, current, live),
-    ...buildPrLinkUpdate(draft, live)
+    ...buildPrLinkUpdate(draft, current, live)
   }
 }

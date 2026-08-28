@@ -104,7 +104,6 @@ export function WorktreeCardSurface({ card }: { card: WorktreeCardController }):
         }
         onOpenAutomation={affiliateListMode ? undefined : handleOpenAutomation}
         onOpenAutomationRun={affiliateListMode ? undefined : handleOpenAutomationRun}
-        // Why: branch lookup can surface a review without persisted metadata; only unlink when explicitly linked.
         onUnlinkReview={!affiliateListMode && canUnlinkReview ? handleUnlinkReview : undefined}
       >
         {parentHoverTriggerBody}
