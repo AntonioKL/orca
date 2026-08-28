@@ -1,0 +1,220 @@
+import { describe, expect, it, vi } from 'vitest'
+import { setupPtyIpcSuite } from './pty-ipc-test-harness'
+import { SSH_SESSION_EXPIRED_ERROR } from '../providers/ssh-pty-errors'
+import {
+  registerPtyHandlers,
+  registerSshPtyProvider,
+  unregisterSshPtyProvider,
+  deletePtyOwnership,
+  setPtyOwnership,
+  restorePtyIncarnation
+} from './pty'
+
+vi.mock('electron', () => import('./pty-ipc-mock-registry').then((m) => m.electronModuleMock()))
+vi.mock('fs', () => import('./pty-ipc-mock-registry').then((m) => m.fsModuleMock()))
+vi.mock('node-pty', () => import('./pty-ipc-mock-registry').then((m) => m.nodePtyModuleMock()))
+vi.mock('node:child_process', async (importOriginal) =>
+  (await import('./pty-ipc-mock-registry')).childProcessModuleMock(await importOriginal())
+)
+vi.mock('../opencode/hook-service', () =>
+  import('./pty-ipc-mock-registry').then((m) => m.openCodeHookServiceModuleMock())
+)
+vi.mock('../mimo/hook-service', () =>
+  import('./pty-ipc-mock-registry').then((m) => m.mimoHookServiceModuleMock())
+)
+vi.mock('../agent-hooks/server', () =>
+  import('./pty-ipc-mock-registry').then((m) => m.agentHookServerModuleMock())
+)
+vi.mock('../pi/titlebar-extension-service', () =>
+  import('./pty-ipc-mock-registry').then((m) => m.piTitlebarExtensionModuleMock())
+)
+vi.mock('../pwsh', () => import('./pty-ipc-mock-registry').then((m) => m.pwshModuleMock()))
+vi.mock('../wsl', async (importOriginal) =>
+  (await import('./pty-ipc-mock-registry')).wslModuleMock(await importOriginal())
+)
+vi.mock('../telemetry/client', () =>
+  import('./pty-ipc-mock-registry').then((m) => m.telemetryClientModuleMock())
+)
+vi.mock('../telemetry/classify-error', () =>
+  import('./pty-ipc-mock-registry').then((m) => m.classifyErrorModuleMock())
+)
+vi.mock('../cli/linux-terminal-orca-cli-shim', () =>
+  import('./pty-ipc-mock-registry').then((m) => m.linuxCliShimModuleMock())
+)
+vi.mock('../memory/pty-registry', () =>
+  import('./pty-ipc-mock-registry').then((m) => m.ptyRegistryModuleMock())
+)
+vi.mock('../agent-hooks/migration-unsupported-pty-state', () =>
+  import('./pty-ipc-mock-registry').then((m) => m.migrationUnsupportedPtyModuleMock())
+)
+vi.mock('../codex/codex-pane-account-registry', () =>
+  import('./pty-ipc-mock-registry').then((m) => m.codexPaneAccountRegistryModuleMock())
+)
+vi.mock('../codex/codex-state-db-backfill-recovery', () =>
+  import('./pty-ipc-mock-registry').then((m) => m.codexBackfillRecoveryModuleMock())
+)
+
+const SCOPED_PTY_ID = 'ssh:ssh-1@@pty-7'
+
+function createKillStore() {
+  return {
+    markSshRemotePtyLease: vi.fn(),
+    recordSshRemotePtyKillIntent: vi.fn(),
+    clearSshRemotePtyKillIntent: vi.fn()
+  }
+}
+
+function sshProviderStub(shutdown: () => Promise<void>) {
+  return {
+    shutdown: vi.fn(shutdown),
+    onExit: vi.fn(() => () => {}),
+    onData: vi.fn(() => () => {}),
+    onReplay: vi.fn(() => () => {}),
+    listProcesses: vi.fn(async () => [])
+  } as never
+}
+
+function installController(handlers: Map<string, never>) {
+  const runtime = {
+    setPtyController: vi.fn(),
+    markPtyStopRequested: vi.fn(),
+    markPtyLivenessUnverifiable: vi.fn(),
+    onPtyExit: vi.fn()
+  }
+  handlers.clear()
+  return { runtime }
+}
+
+describe('undelivered SSH stops', () => {
+  const { handlers, mainWindow } = setupPtyIpcSuite()
+
+  function install(store: ReturnType<typeof createKillStore>): {
+    kill: (ptyId: string) => boolean
+    runtime: ReturnType<typeof installController>['runtime']
+  } {
+    const { runtime } = installController(handlers as never)
+    registerPtyHandlers(
+      mainWindow as never,
+      runtime as never,
+      undefined,
+      undefined,
+      undefined,
+      store as never
+    )
+    const controller = runtime.setPtyController.mock.calls[0]?.[0] as {
+      kill: (ptyId: string) => boolean
+    }
+    return { kill: controller.kill, runtime }
+  }
+
+  // The leak: the shutdown died on the transport, the verdict is correctly `unverifiable`, and
+  // before this fix nothing retried — the remote shell survived forever.
+  it('records the stop when the shutdown RPC rejects with a transport failure', async () => {
+    const store = createKillStore()
+    registerSshPtyProvider(
+      'ssh-1',
+      sshProviderStub(async () => {
+        throw new Error('socket closed')
+      })
+    )
+    setPtyOwnership(SCOPED_PTY_ID, 'ssh-1')
+    restorePtyIncarnation(SCOPED_PTY_ID, 'inc-a')
+    const { kill, runtime } = install(store)
+
+    try {
+      expect(kill(SCOPED_PTY_ID)).toBe(true)
+      await vi.waitFor(() => expect(store.recordSshRemotePtyKillIntent).toHaveBeenCalled())
+      expect(store.recordSshRemotePtyKillIntent).toHaveBeenCalledWith(
+        'ssh-1',
+        'pty-7',
+        expect.objectContaining({ incarnationId: 'inc-a', attempts: 0 })
+      )
+      expect(runtime.markPtyLivenessUnverifiable).toHaveBeenCalledWith(
+        SCOPED_PTY_ID,
+        'socket closed'
+      )
+    } finally {
+      unregisterSshPtyProvider('ssh-1')
+      deletePtyOwnership(SCOPED_PTY_ID)
+    }
+  })
+
+  // The offline close: no provider is registered, so the relay is never even asked. The lease is
+  // tombstoned locally, and without the record the remote shell has nothing left to retire it.
+  it('records the stop when no provider is registered to deliver it', async () => {
+    const store = createKillStore()
+    setPtyOwnership(SCOPED_PTY_ID, 'ssh-1')
+    restorePtyIncarnation(SCOPED_PTY_ID, 'inc-b')
+    const { kill } = install(store)
+
+    try {
+      expect(kill(SCOPED_PTY_ID)).toBe(false)
+      expect(store.recordSshRemotePtyKillIntent).toHaveBeenCalledWith(
+        'ssh-1',
+        'pty-7',
+        expect.objectContaining({ incarnationId: 'inc-b' })
+      )
+    } finally {
+      deletePtyOwnership(SCOPED_PTY_ID)
+    }
+  })
+
+  it('records nothing when the shutdown RPC is delivered', async () => {
+    const store = createKillStore()
+    registerSshPtyProvider(
+      'ssh-1',
+      sshProviderStub(async () => {})
+    )
+    setPtyOwnership(SCOPED_PTY_ID, 'ssh-1')
+    restorePtyIncarnation(SCOPED_PTY_ID, 'inc-c')
+    const { kill } = install(store)
+
+    try {
+      expect(kill(SCOPED_PTY_ID)).toBe(true)
+      await vi.waitFor(() => expect(store.markSshRemotePtyLease).toHaveBeenCalled())
+      expect(store.recordSshRemotePtyKillIntent).not.toHaveBeenCalled()
+      // A completed shutdown answers any earlier undelivered order for the same id.
+      expect(store.clearSshRemotePtyKillIntent).toHaveBeenCalledWith('ssh-1', 'pty-7')
+    } finally {
+      unregisterSshPtyProvider('ssh-1')
+      deletePtyOwnership(SCOPED_PTY_ID)
+    }
+  })
+
+  it('records nothing for a local PTY, which has no later host to ask', async () => {
+    const store = createKillStore()
+    setPtyOwnership('local-pty', null)
+    restorePtyIncarnation('local-pty', 'inc-d')
+    const { kill } = install(store)
+
+    try {
+      kill('local-pty')
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(store.recordSshRemotePtyKillIntent).not.toHaveBeenCalled()
+    } finally {
+      deletePtyOwnership('local-pty')
+    }
+  })
+
+  // No incarnation means no fence, and an unfenced order can only be discarded or guessed at.
+  it('records nothing when the PTY incarnation was never learned', async () => {
+    const store = createKillStore()
+    registerSshPtyProvider(
+      'ssh-1',
+      sshProviderStub(async () => {
+        throw new Error(`${SSH_SESSION_EXPIRED_ERROR}-transport`)
+      })
+    )
+    setPtyOwnership('ssh:ssh-1@@pty-8', 'ssh-1')
+    const { kill } = install(store)
+
+    try {
+      kill('ssh:ssh-1@@pty-8')
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(store.recordSshRemotePtyKillIntent).not.toHaveBeenCalled()
+    } finally {
+      unregisterSshPtyProvider('ssh-1')
+      deletePtyOwnership('ssh:ssh-1@@pty-8')
+    }
+  })
+})

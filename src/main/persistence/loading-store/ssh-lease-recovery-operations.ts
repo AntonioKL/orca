@@ -1,4 +1,14 @@
+import type {
+  SshPendingPtyKill,
+  SshPendingPtyKillEntry
+} from '../../../shared/ssh-pending-pty-kill'
 import type { SshPtyConsumerRecovery, SshRemotePtyLease } from '../../../shared/ssh-types'
+import {
+  clearSshRemotePtyKillIntent as clearSshRemotePtyKillIntentOperation,
+  getSshRemotePtyKillIntents as getSshRemotePtyKillIntentsOperation,
+  noteSshRemotePtyKillReplayAttempt as noteSshRemotePtyKillReplayAttemptOperation,
+  recordSshRemotePtyKillIntent as recordSshRemotePtyKillIntentOperation
+} from '../leasing-ssh-ptys/ssh-pty-kill-intent-operations'
 import {
   getSshRemotePtyLeases as getSshRemotePtyLeasesOperation,
   markSshRemotePtyLease as markSshRemotePtyLeaseOperation,
@@ -119,6 +129,26 @@ export class SshLeaseRecoveryOperations {
 
   removeSshRemotePtyLeases(targetId: string): void {
     removeSshRemotePtyLeasesOperation(getSshPtyLeaseOperations(this), targetId)
+  }
+
+  getSshRemotePtyKillIntents(targetId: string, now = Date.now()): SshPendingPtyKillEntry[] {
+    return getSshRemotePtyKillIntentsOperation(
+      this[sshLeaseRecoveryOperationsContext].runtime.state,
+      targetId,
+      now
+    )
+  }
+
+  recordSshRemotePtyKillIntent(targetId: string, ptyId: string, intent: SshPendingPtyKill): void {
+    recordSshRemotePtyKillIntentOperation(getSshPtyLeaseOperations(this), targetId, ptyId, intent)
+  }
+
+  clearSshRemotePtyKillIntent(targetId: string, ptyId: string): void {
+    clearSshRemotePtyKillIntentOperation(getSshPtyLeaseOperations(this), targetId, ptyId)
+  }
+
+  noteSshRemotePtyKillReplayAttempt(targetId: string, ptyId: string): void {
+    noteSshRemotePtyKillReplayAttemptOperation(getSshPtyLeaseOperations(this), targetId, ptyId)
   }
 }
 

@@ -4,6 +4,7 @@ import { parseAppSshPtyId } from '../../../providers/ssh-pty-id'
 import { ptyOwnership, ptyIncarnationById } from '../provider/ownership-state'
 import { getProvider, getProviderForPty } from '../provider/registry'
 import { isPtyAlreadyGoneError, delay, verifyPtyStopped } from '../provider/liveness'
+import { recordUndeliveredSshPtyKill } from './undelivered-ssh-kill'
 import type { PtyRuntimeControllerDeps } from './controller-deps'
 
 export function killPtyFromRuntimeController(
@@ -34,6 +35,8 @@ export function killPtyFromRuntimeController(
         // provider was unregistered. Tombstone the lease so reconnect does
         // not revive a terminal the user explicitly closed.
         const incarnationId = finishPtyShutdown(ptyId, connectionId, store)
+        // The relay was never asked, so the remote shell is still running. Keep the order.
+        recordUndeliveredSshPtyKill({ store, ptyId, connectionId, incarnationId })
         runtime?.onPtyExit(ptyId, -1, incarnationId)
         rememberSyntheticKillExit(ptyId)
         sendPtyExitToRenderer({
@@ -90,6 +93,9 @@ export function killPtyFromRuntimeController(
           }
           runtime?.onPtyExit(ptyId, -1, ptyIncarnationById.get(ptyId))
         }
+        // Outside the `retired` guard: the remote process outlives this client's bookkeeping
+        // either way, and the intent is what the next handshake replays.
+        recordUndeliveredSshPtyKill({ store, ptyId, connectionId })
       })
     return true
   }
@@ -109,6 +115,7 @@ export function killPtyFromRuntimeController(
         }
         runtime?.onPtyExit(ptyId, -1, ptyIncarnationById.get(ptyId))
       }
+      recordUndeliveredSshPtyKill({ store, ptyId, connectionId })
     })
     return true
   }
@@ -244,6 +251,7 @@ export async function stopAndWaitPtyFromRuntimeController(
       // Why: an absent SSH provider means there is no live target left to
       // await, but the relay lease must still be tombstoned.
       const incarnationId = finishPtyShutdown(ptyId, connectionId, store)
+      recordUndeliveredSshPtyKill({ store, ptyId, connectionId, incarnationId })
       runtime?.onPtyExit(ptyId, -1, incarnationId)
       rememberSyntheticKillExit(ptyId)
       sendPtyExitToRenderer({
@@ -273,12 +281,15 @@ export async function stopAndWaitPtyFromRuntimeController(
       console.warn(
         `[pty] Failed to stop PTY ${ptyId}: ${err instanceof Error ? err.message : String(err)}`
       )
+      recordUndeliveredSshPtyKill({ store, ptyId, connectionId })
       return false
     }
   }
   try {
     if (!(await verifyPtyStopped(provider, ptyId, opts))) {
       runtime?.markPtyLivenessLive?.(ptyId)
+      // The host still lists it, so the stop did not take. Same intent, replayed the same way.
+      recordUndeliveredSshPtyKill({ store, ptyId, connectionId })
       return false
     }
   } catch (err) {
@@ -293,6 +304,7 @@ export async function stopAndWaitPtyFromRuntimeController(
         err instanceof Error ? err.message : String(err)
       }`
     )
+    recordUndeliveredSshPtyKill({ store, ptyId, connectionId })
     return false
   }
   const incarnationId = finishPtyShutdown(ptyId, connectionId, store)

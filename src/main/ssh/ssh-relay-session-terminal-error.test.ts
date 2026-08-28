@@ -107,7 +107,11 @@ function createMockDeps(): {
     markSshRemotePtyLease: vi.fn(),
     markSshRemotePtyLeases: vi.fn(),
     markSshRemotePtyLeasesAsync: vi.fn(),
-    markSshRemotePtyLeasesAttachedAsync: vi.fn()
+    markSshRemotePtyLeasesAttachedAsync: vi.fn(),
+    getSshRemotePtyKillIntents: vi.fn().mockReturnValue([]),
+    recordSshRemotePtyKillIntent: vi.fn(),
+    clearSshRemotePtyKillIntent: vi.fn(),
+    noteSshRemotePtyKillReplayAttempt: vi.fn()
   } as unknown as Store
   const mockPortForward = {
     removeAllForwards: vi.fn()

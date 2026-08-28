@@ -143,7 +143,11 @@ export function finishPtyShutdown(
   const incarnationId = ptyIncarnationById.get(id)
   clearProviderPtyState(id)
   if (connectionId) {
-    store?.markSshRemotePtyLease(connectionId, getRelayPtyId(connectionId, id), 'terminated')
+    const relayPtyId = getRelayPtyId(connectionId, id)
+    store?.markSshRemotePtyLease(connectionId, relayPtyId, 'terminated')
+    // Reaching here means the shutdown completed, so any earlier undelivered stop for this id is
+    // answered. Callers that got here WITHOUT delivering re-record it immediately after.
+    store?.clearSshRemotePtyKillIntent(connectionId, relayPtyId)
   }
   ptyOwnership.delete(id)
   markClaudePtyExited(id)
