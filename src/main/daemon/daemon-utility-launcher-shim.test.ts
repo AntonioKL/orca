@@ -75,6 +75,31 @@ function specFor(
   }
 }
 
+type SpawnDouble = EventEmitter & {
+  pid: number
+  connected: boolean
+  stderr: EventEmitter & { destroy: ReturnType<typeof vi.fn> }
+  disconnect: ReturnType<typeof vi.fn>
+  unref: ReturnType<typeof vi.fn>
+  kill: ReturnType<typeof vi.fn>
+}
+
+/** A daemon child that records the detach calls a real ChildProcess would take. */
+function createSpawnDouble(): SpawnDouble {
+  const child = new EventEmitter() as SpawnDouble
+  const stderr = new EventEmitter() as SpawnDouble['stderr']
+  stderr.destroy = vi.fn()
+  child.pid = 4242
+  child.connected = true
+  child.stderr = stderr
+  child.disconnect = vi.fn(() => {
+    child.connected = false
+  })
+  child.unref = vi.fn()
+  child.kill = vi.fn()
+  return child
+}
+
 const spawnedPids: number[] = []
 
 afterEach(() => {
@@ -146,6 +171,37 @@ describe('daemon-utility-launcher-shim', () => {
     expect(port.posted).toContainEqual({ kind: 'spawn-error', message: 'daemon child has no pid' })
     expect(child.kill).toHaveBeenCalled()
     expect(exit).toHaveBeenCalledWith(1)
+  })
+
+  // The real-child case below proves release leaves the daemon alive; it cannot see
+  // WHICH of the detach steps ran, so a dropped disconnect/destroy/unref stays green
+  // there. Assert each one, and that release is idempotent.
+  it('release detaches the daemon child without killing it, exactly once', () => {
+    const port = createFakePort()
+    const child = createSpawnDouble()
+    const exit = vi.fn()
+    runDaemonUtilityLauncherShim(port, () => child as never, exit)
+    port.deliver({ kind: 'spawn', spec: specFor('/fake/daemon-entry.js') })
+
+    port.deliver({ kind: 'release' })
+    port.deliver({ kind: 'release' })
+
+    expect(child.disconnect).toHaveBeenCalledOnce()
+    expect(child.stderr.destroy).toHaveBeenCalledOnce()
+    expect(child.unref).toHaveBeenCalledOnce()
+    expect(child.kill).not.toHaveBeenCalled()
+    expect(exit).toHaveBeenCalledExactlyOnceWith(0)
+  })
+
+  it('relays a daemon spawn error to the parent instead of dropping it', () => {
+    const port = createFakePort()
+    const child = createSpawnDouble()
+    runDaemonUtilityLauncherShim(port, () => child as never, vi.fn())
+    port.deliver({ kind: 'spawn', spec: specFor('/fake/daemon-entry.js') })
+
+    child.emit('error', new Error('EPERM'))
+
+    expect(port.posted).toContainEqual({ kind: 'daemon-error', message: 'EPERM' })
   })
 
   it('relays IPC readiness and stderr from a real daemon child', async () => {
