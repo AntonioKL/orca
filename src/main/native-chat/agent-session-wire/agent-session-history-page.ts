@@ -7,7 +7,10 @@
 // read would silently skip that revision. Rows carry the revision, which is why
 // `after` is the only direction that can answer `cursor_compacted`.
 
-import { agentJournalSubmissionKey } from '../../../shared/agent-session-journal-item-key'
+import {
+  agentJournalSubmissionKey,
+  boundJournalKeyComponent
+} from '../../../shared/agent-session-journal-item-key'
 import type {
   AgentJournalCursor,
   AgentJournalRenderItem,
@@ -33,6 +36,14 @@ import { projectJournalBatch } from './agent-session-journal-batch'
  *  reopen. Pages degrade to fewer rows instead; `hasOlder`/`hasNewer` keep the
  *  client paging. */
 export const AGENT_SESSION_HISTORY_MAX_PAGE_BYTES = REMOTE_RUNTIME_MAX_OUTBOUND_JSON_BYTES / 2
+
+/** Reserved for everything the page carries beyond its items and removal ids:
+ *  cursors, session/epoch ids, and the RPC envelope. Charged up front so the
+ *  content budget bounds the COMPLETE serialized result, not just the rows. */
+const HISTORY_PAGE_ENVELOPE_RESERVE_BYTES = 64 * 1024
+
+const HISTORY_PAGE_CONTENT_BUDGET_BYTES =
+  AGENT_SESSION_HISTORY_MAX_PAGE_BYTES - HISTORY_PAGE_ENVELOPE_RESERVE_BYTES
 
 /** Item bytes plus the submission the page would carry alongside it. */
 function historyEntryBytes(
@@ -62,6 +73,10 @@ function oversizedHistoryItem(
 ): AgentJournalRenderItem {
   return {
     ...item,
+    // A pre-bounding id can exceed the budget by itself; the stand-in must not
+    // re-inflate the page it exists to bound. Bounding is deterministic, so
+    // re-reads keep deduplicating on the same key.
+    itemId: boundJournalKeyComponent(item.itemId),
     body: {
       kind: 'status',
       text: `[Orca: item truncated — ${byteLength} bytes exceeds the history page budget]`
@@ -141,7 +156,7 @@ export function readAgentSessionHistory(
     windowed,
     'newest',
     submissionBytesByItemId(snapshot.submissions),
-    AGENT_SESSION_HISTORY_MAX_PAGE_BYTES
+    HISTORY_PAGE_CONTENT_BUDGET_BYTES
   )
   return {
     ok: true,
@@ -175,7 +190,7 @@ function buildHydrationPage(
     items,
     'newest',
     submissionBytesByItemId(snapshot.submissions),
-    AGENT_SESSION_HISTORY_MAX_PAGE_BYTES
+    HISTORY_PAGE_CONTENT_BUDGET_BYTES
   )
   return buildPage({
     snapshot,
@@ -219,8 +234,18 @@ function readForward(
     return historyReset(snapshot, since.reset)
   }
   const submissionBytes = submissionBytesByItemId(snapshot.submissions)
-  const batchBytes = (items: readonly AgentJournalRenderItem[]): number =>
-    items.reduce((total, item) => total + historyEntryBytes(item, submissionBytes), 0)
+  // The page cost is EVERYTHING variable it carries: items with their
+  // submissions AND removal ids — a legal pre-bounding tombstone id can dwarf
+  // every item on the page.
+  const pageContentBytes = (
+    items: readonly AgentJournalRenderItem[],
+    removedItemIds: readonly string[]
+  ): number =>
+    items.reduce((total, item) => total + historyEntryBytes(item, submissionBytes), 0) +
+    removedItemIds.reduce(
+      (total, itemId) => total + Buffer.byteLength(JSON.stringify(itemId), 'utf8') + 1,
+      0
+    )
   // Rows replay forward, so the byte bound shrinks the ROW window rather than
   // clipping projected items: dropping an item while advancing the cursor past
   // the rows that touched it would lose that revision for good.
@@ -236,7 +261,8 @@ function readForward(
   }
   while (
     rows.length > 1 &&
-    batchBytes(projected.batch.items) > AGENT_SESSION_HISTORY_MAX_PAGE_BYTES
+    pageContentBytes(projected.batch.items, projected.batch.removedItemIds) >
+      HISTORY_PAGE_CONTENT_BUDGET_BYTES
   ) {
     rows = rows.slice(0, Math.ceil(rows.length / 2))
     const shrunk = projectJournalBatch({
@@ -252,14 +278,23 @@ function readForward(
   }
   // One row can still touch an over-budget item; degrade it visibly.
   const items =
-    batchBytes(projected.batch.items) > AGENT_SESSION_HISTORY_MAX_PAGE_BYTES
+    pageContentBytes(projected.batch.items, projected.batch.removedItemIds) >
+    HISTORY_PAGE_CONTENT_BUDGET_BYTES
       ? projected.batch.items.map((item) => {
           const bytes = historyEntryBytes(item, submissionBytes)
-          return bytes > AGENT_SESSION_HISTORY_MAX_PAGE_BYTES
+          return bytes > HISTORY_PAGE_CONTENT_BUDGET_BYTES
             ? oversizedHistoryItem(item, bytes)
             : item
         })
       : projected.batch.items
+  if (pageContentBytes(items, projected.batch.removedItemIds) > HISTORY_PAGE_CONTENT_BUDGET_BYTES) {
+    // A single row's semantic payload — in practice a pre-bounding oversized
+    // removal id — can never fit any page, and truncating a removal id would
+    // break the client's keying. A bounded tail replaces the client's state
+    // wholesale, which applies the removal without carrying the id, and the
+    // client resumes from the live cursor past this row.
+    return historyReset(snapshot, 'cursor_compacted')
+  }
   const lastSequence = rows.at(-1)?.seq ?? cursor.sequence
   return {
     ok: true,

@@ -8,8 +8,39 @@ import type { AgentJournalItemIdentity } from './agent-session-journal-types'
 
 const KEY_DELIMITER = ':'
 
+/** Longest raw component a key may embed. Real provider ids are tens of bytes;
+ *  anything larger would push the composed key past wire page budgets, so it
+ *  travels as a stable digest instead of verbatim. */
+export const MAX_JOURNAL_KEY_COMPONENT_CHARS = 1024
+
+/**
+ * Deterministic stand-in for an oversized key component: same input, same
+ * output, so revisions and tombstones of one identity still share a key, and
+ * re-deriving from a parsed key is a fixed point (the bounded form is far
+ * below the cap). The head keeps keys debuggable; length plus two independent
+ * hashes makes an accidental collision practically impossible. Pure JS because
+ * clients derive keys too and cannot reach node:crypto.
+ */
+export function boundJournalKeyComponent(value: string): string {
+  if (value.length <= MAX_JOURNAL_KEY_COMPONENT_CHARS) {
+    return value
+  }
+  const h1 = fnv1a32(value, 0x811c9dc5).toString(16).padStart(8, '0')
+  const h2 = fnv1a32(value, 0x0100_0193).toString(16).padStart(8, '0')
+  return `${value.slice(0, 40)}~orca-oversized~${value.length}~${h1}${h2}`
+}
+
+function fnv1a32(value: string, seed: number): number {
+  let hash = seed >>> 0
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 0x0100_0193) >>> 0
+  }
+  return hash >>> 0
+}
+
 function encodePart(value: string | number): string {
-  return encodeURIComponent(String(value))
+  return encodeURIComponent(boundJournalKeyComponent(String(value)))
 }
 
 /**

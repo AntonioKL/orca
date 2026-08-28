@@ -181,6 +181,10 @@ describe('per-job path classification', () => {
     for (const file of [
       'src/shared/protocol-version.ts',
       'src/shared/terminal-stream-protocol.ts',
+      'src/shared/agent-session-wire.ts',
+      'src/shared/agent-session-mutation-envelope.ts',
+      'src/main/native-chat/agent-session-wire/structured-agent-session-host.ts',
+      'src/main/runtime/agent-session-record-store.ts',
       'src/main/runtime/rpc/dispatcher.ts',
       'src/main/runtime/rpc/methods/browser-tab-create-schema.ts',
       'src/main/runtime/rpc/methods/terminal.ts',

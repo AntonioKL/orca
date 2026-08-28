@@ -1,4 +1,4 @@
-import type { ChildProcess } from 'node:child_process'
+import type { ChildProcessHandle } from '../../shared/child-process/run-process'
 import { captureDescendantSnapshot, type DescendantSnapshot } from '../pty-descendant-termination'
 import { terminateDescendantSnapshotAndWait } from '../pty-descendant-exit-verification'
 import { terminateWindowsProcessTree } from '../windows-process-tree-kill'
@@ -8,7 +8,7 @@ const TOKEN_PROCESS_EXIT_TIMEOUT_MS = 3_500
 const TOKEN_PROCESS_POLL_MS = 25
 const activeTeardowns = new WeakMap<object, Promise<boolean>>()
 
-type TeardownChild = Pick<ChildProcess, 'pid' | 'kill'>
+type TeardownChild = Pick<ChildProcessHandle, 'pid' | 'kill'>
 
 export type CodexAppServerProcessTeardownDeps = {
   platform?: NodeJS.Platform

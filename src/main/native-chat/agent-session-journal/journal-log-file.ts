@@ -8,7 +8,7 @@
 // between publishing the snapshot and truncating the log leaves the log a
 // superset of the tail, and recovery unions the two by sequence — never a hole.
 
-import { appendFile, mkdir, open, readFile } from 'node:fs/promises'
+import { appendFile, mkdir, open, readFile, type FileHandle } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { durableWriteTempPath, renameDurable, writeFileDurable } from '../../durable-file-write'
@@ -156,12 +156,17 @@ function isJournalSnapshotFile(value: unknown): value is JournalSnapshotFile {
     typeof snapshot.v === 'number' &&
     typeof snapshot.epoch === 'string' &&
     snapshot.epoch.length > 0 &&
-    typeof snapshot.compactedThrough === 'number' &&
-    typeof snapshot.highestFence === 'number' &&
+    Number.isInteger(snapshot.compactedThrough) &&
+    (snapshot.compactedThrough as number) >= 0 &&
+    Number.isInteger(snapshot.highestFence) &&
     arrayOf(snapshot.items, isRenderItem) &&
     arrayOf(snapshot.submissions, isSubmission) &&
     arrayOf(snapshot.receipts, isReceipt) &&
     arrayOf(snapshot.aliases, isAlias) &&
+    // Older snapshots predate tombstones; absence is fine, a non-array is not —
+    // seeding iterates this collection, so a JSON-valid wrong shape must land
+    // in quarantine rather than throw through startup restoration.
+    (snapshot.tombstones === undefined || arrayOf(snapshot.tombstones, isTombstone)) &&
     arrayOf(snapshot.tail, (row) => parseJournalRow(JSON.stringify(row)).ok)
   )
 }
@@ -181,8 +186,16 @@ function isRenderItem(value: unknown): boolean {
   return Boolean(
     item &&
     typeof item.itemId === 'string' &&
-    typeof item.revision === 'number' &&
+    Number.isInteger(item.revision) &&
+    Number.isInteger(item.sequence) &&
     recordOf(item.body)
+  )
+}
+
+function isTombstone(value: unknown): boolean {
+  const tombstone = recordOf(value)
+  return Boolean(
+    tombstone && typeof tombstone.itemId === 'string' && Number.isInteger(tombstone.revision)
   )
 }
 
@@ -242,12 +255,16 @@ export async function appendJournalRows(
   } finally {
     await handle.close()
   }
+  let directory: FileHandle | undefined
   try {
-    const directory = await open(journalDir, 'r')
+    directory = await open(journalDir, 'r')
     await directory.sync()
-    await directory.close()
   } catch {
     // Directory fsync is unavailable on some platforms (notably Windows).
+  } finally {
+    // The tolerance above must not leak the descriptor when open succeeded
+    // but sync failed — one leaked handle per append adds up fast.
+    await directory?.close().catch(() => undefined)
   }
 }
 

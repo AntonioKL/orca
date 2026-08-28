@@ -39,6 +39,7 @@ export function startStructuredAgentSessionReadTransport(args: {
   let stopped = false
   let connected = false
   let opening = false
+  let generation = 0
   let unsubscribe = (): void => {}
   let resumeCursor = args.getCursor()
   const coalescer = createStructuredAgentSessionEventCoalescer(args.applyEvent)
@@ -46,7 +47,11 @@ export function startStructuredAgentSessionReadTransport(args: {
     shouldStop: () => stopped || connected,
     reconnect: () => void open()
   })
-  const handleEvent = (event: AgentSessionSubscribeEvent): void => {
+  const isCurrentGeneration = (candidate: number): boolean => !stopped && candidate === generation
+  const handleEvent = (event: AgentSessionSubscribeEvent, eventGeneration: number): void => {
+    if (!isCurrentGeneration(eventGeneration)) {
+      return
+    }
     if (event.type === 'snapshot' || event.type === 'reset') {
       resumeCursor = event.page.liveCursor ?? event.page.window.nextCursor
     } else if (
@@ -69,6 +74,8 @@ export function startStructuredAgentSessionReadTransport(args: {
       return
     }
     opening = true
+    coalescer.flush()
+    const openGeneration = ++generation
     unsubscribe()
     unsubscribe = (): void => {}
     try {
@@ -76,22 +83,28 @@ export function startStructuredAgentSessionReadTransport(args: {
       const handle = await subscribeStructuredAgentSession(
         args.target,
         { sessionId: args.sessionId, ...(resumeCursor ? { cursor: resumeCursor } : {}) },
-        handleEvent,
+        (event) => handleEvent(event, openGeneration),
         (error) => {
+          if (!isCurrentGeneration(openGeneration)) {
+            return
+          }
           closedDuringOpen = true
           connected = false
           args.applyError(String(error))
           reconnectScheduler.schedule()
         },
         () => {
+          if (!isCurrentGeneration(openGeneration)) {
+            return
+          }
           closedDuringOpen = true
           connected = false
           reconnectScheduler.schedule()
         }
       )
-      if (stopped || closedDuringOpen) {
+      if (!isCurrentGeneration(openGeneration) || closedDuringOpen) {
         handle.unsubscribe()
-        if (!stopped) {
+        if (isCurrentGeneration(openGeneration)) {
           reconnectScheduler.schedule()
         }
       } else {
@@ -99,37 +112,57 @@ export function startStructuredAgentSessionReadTransport(args: {
         unsubscribe = handle.unsubscribe
       }
     } catch (error) {
+      if (!isCurrentGeneration(openGeneration)) {
+        return
+      }
       connected = false
       args.applyError(String(error))
       reconnectScheduler.schedule()
     } finally {
-      opening = false
+      if (openGeneration === generation) {
+        opening = false
+      }
     }
   }
   const refresh = (): void => {
+    const refreshGeneration = generation
     void args
       .refreshTail(() => stopped)
       .then(() => {
+        if (!isCurrentGeneration(refreshGeneration)) {
+          return
+        }
         resumeCursor = args.getCursor()
         if (!connected) {
           reconnectScheduler.schedule(0)
         }
       })
-      .catch((error) => args.applyError(String(error)))
+      .catch((error) => {
+        if (isCurrentGeneration(refreshGeneration)) {
+          args.applyError(String(error))
+        }
+      })
   }
+  const initialGeneration = generation
   void args
     .refreshTail(() => stopped)
     .then(() => {
+      if (!isCurrentGeneration(initialGeneration)) {
+        return
+      }
       resumeCursor = args.getCursor()
       return open()
     })
     .catch((error) => {
-      args.applyError(String(error))
-      reconnectScheduler.schedule()
+      if (isCurrentGeneration(initialGeneration)) {
+        args.applyError(String(error))
+        reconnectScheduler.schedule()
+      }
     })
   return {
     dispose: () => {
       stopped = true
+      generation += 1
       reconnectScheduler.dispose()
       coalescer.dispose()
       unsubscribe()
