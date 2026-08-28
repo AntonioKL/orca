@@ -68,10 +68,10 @@ function assertPatchApplied() {
         'config/patches/@vscode__windows-process-tree@0.8.0.patch; run pnpm install.'
     )
   }
-  if (!bindingGyp.includes("require.resolve('node-addon-api/node_addon_api.gyp')")) {
+  if (!bindingGyp.includes('node_modules/node-addon-api/node_addon_api.gyp')) {
     throw new Error(
-      'binding.gyp still uses require("node-addon-api").targets. That path is ' +
-        'cwd-relative and misses node_addon_api.gyp under pnpm on Windows. ' +
+      'binding.gyp still uses a dynamic node-addon-api path. The local package path avoids ' +
+        'pnpm store and Windows drive-letter normalization issues. ' +
         'pnpm did not apply config/patches/@vscode__windows-process-tree@0.8.0.patch; run pnpm install.'
     )
   }
@@ -94,10 +94,13 @@ function applyWindowsProcessTreeBuildFixes() {
   const originalBinding = bindingGyp
   const originalProcess = processCc
 
-  bindingGyp = bindingGyp.replace(
-    "require('node-addon-api').targets",
-    "require.resolve('node-addon-api/node_addon_api.gyp')"
-  )
+  const localDependency = 'node_modules/node-addon-api/node_addon_api.gyp:node_addon_api_except'
+  for (const dynamicDependency of [
+    String.raw`<!(node -p \"require('node-addon-api').targets\"):node_addon_api_except`,
+    String.raw`<!(node -p \"require.resolve('node-addon-api/node_addon_api.gyp')\"):node_addon_api_except`
+  ]) {
+    bindingGyp = bindingGyp.replace(dynamicDependency, localDependency)
+  }
   bindingGyp = bindingGyp.replace(
     /\r?\n\s*"msvs_configuration_attributes": \{\s*"SpectreMitigation": "Spectre"\s*\},?/s,
     ''

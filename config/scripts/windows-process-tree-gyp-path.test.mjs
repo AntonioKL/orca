@@ -9,23 +9,24 @@ const PATCH = readFileSync(
   'utf8'
 )
 const PACKAGE_DIR = join(projectDir, 'node_modules', '@vscode', 'windows-process-tree')
-const ABSOLUTE_GYP = "require.resolve('node-addon-api/node_addon_api.gyp')"
+const LOCAL_GYP = 'node_modules/node-addon-api/node_addon_api.gyp'
+const RESOLVED_GYP = "require.resolve('node-addon-api/node_addon_api.gyp')"
 
 describe('windows-process-tree node-addon-api gyp path', () => {
-  it('keeps the gyp project path absolute so pnpm Windows source builds find it', () => {
+  it('keeps the gyp project path local so pnpm Windows source builds find it', () => {
     expect(PATCH).toContain(
-      String.raw`+        "<!(node -p \"require.resolve('node-addon-api/node_addon_api.gyp')\"):node_addon_api_except"`
+      '+        "node_modules/node-addon-api/node_addon_api.gyp:node_addon_api_except",'
     )
     const buildScript = readFileSync(
       join(projectDir, 'config/scripts/build-windows-process-tree-relay-addon.mjs'),
       'utf8'
     )
-    expect(buildScript).toContain(ABSOLUTE_GYP)
+    expect(buildScript).toContain(LOCAL_GYP)
     expect(buildScript).toContain('Repaired un-applied pnpm patch hunks before build.')
   })
 
   it('resolves node_addon_api.gyp to a real file from the package directory', () => {
-    const resolved = execFileSync(process.execPath, ['-p', ABSOLUTE_GYP], {
+    const resolved = execFileSync(process.execPath, ['-p', RESOLVED_GYP], {
       cwd: PACKAGE_DIR,
       encoding: 'utf8'
     }).trim()
