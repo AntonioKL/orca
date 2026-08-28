@@ -1,22 +1,23 @@
-import { execFile as execFileCb } from 'node:child_process'
-import { promisify } from 'node:util'
-
-const execFile = promisify(execFileCb)
+import { runProcess } from '../shared/child-process/run-process'
 
 export async function inspectProcessChildren(pid: number): Promise<{
   hasChildProcesses: boolean
   unavailable?: true
 }> {
   try {
-    const { stdout } = await execFile('pgrep', ['-P', String(pid)], {
-      encoding: 'utf-8',
-      timeout: 3000
+    const result = await runProcess({
+      program: 'pgrep',
+      args: ['-P', String(pid)],
+      timeoutMs: 3000
     })
-    return { hasChildProcesses: stdout.trim().length > 0 }
-  } catch (error) {
-    if ((error as { code?: string | number }).code === 1) {
+    if (result.code === 0 && result.stdout.trim().length > 0) {
+      return { hasChildProcesses: true }
+    }
+    if (result.code === 1 && !result.timedOut) {
       return { hasChildProcesses: false }
     }
+    return { hasChildProcesses: false, unavailable: true }
+  } catch {
     return { hasChildProcesses: false, unavailable: true }
   }
 }
