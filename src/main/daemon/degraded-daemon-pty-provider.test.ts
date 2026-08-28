@@ -3,7 +3,10 @@ import { DegradedDaemonPtyProvider } from './degraded-daemon-pty-provider'
 import { DEGRADED_DAEMON_RECOVERY_RETRY_MS } from './degraded-daemon-fresh-spawn-routing'
 import type { DaemonPtyAdapter } from './daemon-pty-adapter'
 import type { IPtyProvider, PtySpawnOptions, PtySpawnResult } from '../providers/types'
-import type { PtyProcessInspection } from '../providers/pty-process-inspection'
+import {
+  inspectPtyProviderProcessForRenderer,
+  type PtyProcessInspection
+} from '../providers/pty-process-inspection'
 import { SessionNotFoundError, TerminalSessionOwnerUnverifiedError } from './daemon-errors'
 
 type ProviderMock = IPtyProvider & {
@@ -271,6 +274,14 @@ it('rejects completion inspection instead of borrowing the fallback provider', a
   await expect(provider.inspectProcess('unmapped-session')).rejects.toThrow('terminal_gone')
 })
 
+/** A provider double that can actually vouch for an absence, like the real LocalPtyProvider. */
+function withAbsenceVerdict<T extends ProviderMock>(
+  provider: T,
+  verdict: 'exited' | 'unverifiable'
+): T & { ptyAbsenceVerdict: (id: string) => 'exited' | 'unverifiable' } {
+  return Object.assign(provider, { ptyAbsenceVerdict: vi.fn(() => verdict) })
+}
+
 describe('DegradedDaemonPtyProvider.ptyAbsenceVerdict', () => {
   it('calls an id with no route unverifiable, never exited', () => {
     const provider = new DegradedDaemonPtyProvider({
@@ -283,12 +294,32 @@ describe('DegradedDaemonPtyProvider.ptyAbsenceVerdict', () => {
     expect(provider.ptyAbsenceVerdict('unmapped-session')).toBe('unverifiable')
   })
 
+  it('publishes no death certificate for an id it never routed, even when the fallback holds one', async () => {
+    // Why a fallback that CAN vouch: `providerFor` resolves an unknown id to the fallback as
+    // its default route, and the real fallback is a LocalPtyProvider whose watched-exit table
+    // is module-global. Consulting the routed provider here would let an id this router never
+    // saw borrow that table's answer — the same fabrication the verdict contract exists to
+    // prevent. A fallback double that omits the method cannot tell the two readings apart.
+    const fallback = withAbsenceVerdict(createProvider('fallback'), 'exited')
+    const provider = new DegradedDaemonPtyProvider({
+      current: createDaemonAdapter('daemon'),
+      legacy: [],
+      fallback
+    })
+
+    expect(provider.hasPty('never-routed-here')).toBe(false)
+    // Asserted on the shape the renderer actually reads, not on the verdict string.
+    await expect(
+      inspectPtyProviderProcessForRenderer(provider, 'never-routed-here')
+    ).resolves.toMatchObject({
+      unavailable: true,
+      processEvidence: { children: { verdict: 'unverifiable' } }
+    })
+  })
+
   it('passes through the routed owner verdict for a watched exit', async () => {
     const fallbackSessions: string[] = []
-    const fallback = createProvider('fallback', fallbackSessions) as ReturnType<
-      typeof createProvider
-    > & { ptyAbsenceVerdict: (id: string) => 'exited' | 'unverifiable' }
-    fallback.ptyAbsenceVerdict = vi.fn(() => 'exited' as const)
+    const fallback = withAbsenceVerdict(createProvider('fallback', fallbackSessions), 'exited')
     const provider = new DegradedDaemonPtyProvider({
       current: createDaemonAdapter('daemon'),
       legacy: [],

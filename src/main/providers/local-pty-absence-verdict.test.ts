@@ -88,7 +88,8 @@ vi.mock('../shell-prompt-readiness-probe', () => ({
   createShellPromptReadinessProbe: createShellPromptReadinessProbeMock
 }))
 
-import { LocalPtyProvider } from './local-pty-provider'
+import { LocalPtyProvider, _resetLocalPtyProviderStateForTest } from './local-pty-provider'
+import { inspectPtyProviderProcessForRenderer } from './pty-process-inspection'
 import {
   applyLocalPtyProviderMockDefaults,
   createLocalPtyMockProcess,
@@ -154,6 +155,28 @@ describe('LocalPtyProvider.ptyAbsenceVerdict', () => {
 
     expect(provider.hasPty(id)).toBe(false)
     expect(provider.ptyAbsenceVerdict(id)).toBe('exited')
+  })
+
+  it('retires every exit record when the suite resets provider state', async () => {
+    // The watched-exit table is module-global and clearPtyState deliberately does not touch
+    // it, so without this the record outlives its suite and the next one starts holding a
+    // death certificate for an id it never owned — the exact verdict this contract forbids.
+    const leakedId = 'pane-session-leaked'
+    await provider.spawn({ cols: 80, rows: 24, sessionId: leakedId })
+    exitCb?.({ exitCode: 0 })
+    // Asserted on the shape the renderer reads, not on the verdict string.
+    await expect(inspectPtyProviderProcessForRenderer(provider, leakedId)).resolves.toMatchObject({
+      processEvidence: { children: { verdict: 'exited' } }
+    })
+
+    _resetLocalPtyProviderStateForTest()
+
+    await expect(
+      inspectPtyProviderProcessForRenderer(new LocalPtyProvider(), leakedId)
+    ).resolves.toMatchObject({
+      unavailable: true,
+      processEvidence: { children: { verdict: 'unverifiable' } }
+    })
   })
 
   it('retires the exit record when the same id is spawned again', async () => {
