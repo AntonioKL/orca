@@ -6,6 +6,14 @@ import { buildWorkspaceCleanupFacets } from '@/components/workspace-cleanup/work
 import { enrichWorkspaceCleanupCandidates } from './workspace-cleanup-candidate-enrichment'
 import { probeTerminalLiveness } from './workspace-cleanup-local-evidence'
 import { WORKTREE_ID, makeCandidate, makeState } from './workspace-cleanup-slice-test-harness'
+import {
+  buildPtyProcessInspectionWireResult,
+  type PtyProcessInspectionEvidence
+} from '../../../../shared/pty-process-inspection-evidence'
+
+type PtyInspectionWithEvidence = PtyInspection & {
+  processEvidence: PtyProcessInspectionEvidence
+}
 
 const TAB_ID = 'tab-1'
 const PTY_ID = 'pty-1'
@@ -187,5 +195,107 @@ describe('verified reads keep their existing verdicts', () => {
 
     expect(candidate.blockers).toEqual([])
     expect(isSweptBySelectAll(candidate)).toBe(true)
+  })
+})
+
+describe('a degraded read whose host DID answer is still unverifiable, never idle', () => {
+  /**
+   * The exact bytes `LocalPtyProvider.inspectProcess` publishes when the
+   * foreground scan is degraded: the legacy fields keep the pre-evidence
+   * collapse on purpose (see buildPtyProcessInspectionWireResult), so a failed
+   * probe is byte-identical to an idle shell unless the reader consults
+   * `processEvidence`. Built through the real classifier rather than a literal
+   * so a change to the producer cannot leave this fixture describing a shape
+   * the host never sends.
+   */
+  function degradedLocalInspection(shell: string): PtyInspectionWithEvidence {
+    return {
+      ...buildPtyProcessInspectionWireResult(
+        { verdict: 'unverifiable', reason: 'process table scan degraded' },
+        {
+          verdict: 'unverifiable',
+          reason: 'pty title matches the shell while the foreground scan is degraded'
+        }
+      ),
+      // The one deliberate override: the provider publishes its stable-cache
+      // legacy value, which for a pane that never ran an agent is the shell
+      // name. See local-pty-provider-inspect-process-evidence.test.ts,
+      // "keeps the stable-cache legacy value but marks a degraded scan
+      // unverifiable".
+      foregroundProcess: shell
+    }
+  }
+
+  it('reports unverifiable for a degraded local probe that looks like an idle shell', async () => {
+    installDegradedPtyApi(async () => degradedLocalInspection('zsh'))
+
+    await expect(
+      probeTerminalLiveness(stateWithOnePty(), [{ id: TAB_ID, title: 'zsh' }])
+    ).resolves.toBe('unverifiable')
+  })
+
+  it('withholds a degraded local probe from select-all', async () => {
+    installDegradedPtyApi(async () => degradedLocalInspection('zsh'))
+
+    const candidate = await enrichOne(stateWithOnePty())
+
+    expect(candidate.blockers).toContain('terminal-liveness-unknown')
+    expect(isSweptBySelectAll(candidate)).toBe(false)
+    // Still individually removable: unverifiable is not a dead end.
+    expect(canQueueWorkspaceCleanupCandidate(candidate)).toBe(true)
+  })
+
+  it('reports unverifiable for a relay host whose probes timed out', async () => {
+    // The real relay producer, so the legacy collapse is the host's own.
+    installDegradedPtyApi(async () =>
+      buildPtyProcessInspectionWireResult(
+        { verdict: 'unverifiable', reason: 'ps did not answer before its deadline' },
+        { verdict: 'unverifiable', reason: 'pgrep did not answer before its deadline' }
+      )
+    )
+
+    await expect(
+      probeTerminalLiveness(stateWithOnePty(), [{ id: TAB_ID, title: 'zsh' }])
+    ).resolves.toBe('unverifiable')
+  })
+
+  it('reports unverifiable when only the child probe failed', async () => {
+    installDegradedPtyApi(async () =>
+      buildPtyProcessInspectionWireResult(
+        { verdict: 'observed', processName: 'zsh' },
+        { verdict: 'unverifiable', reason: 'pgrep is not installed on this host' }
+      )
+    )
+
+    await expect(
+      probeTerminalLiveness(stateWithOnePty(), [{ id: TAB_ID, title: 'zsh' }])
+    ).resolves.toBe('unverifiable')
+  })
+
+  it('still permits cleanup when the host observed an idle shell and said so', async () => {
+    installDegradedPtyApi(async () =>
+      buildPtyProcessInspectionWireResult(
+        { verdict: 'observed', processName: 'zsh' },
+        { verdict: 'exited' }
+      )
+    )
+
+    const candidate = await enrichOne(stateWithOnePty())
+
+    expect(candidate.blockers).toEqual([])
+    expect(isSweptBySelectAll(candidate)).toBe(true)
+  })
+
+  it('still blocks when the host observed a live agent', async () => {
+    installDegradedPtyApi(async () =>
+      buildPtyProcessInspectionWireResult(
+        { verdict: 'observed', processName: 'claude' },
+        { verdict: 'live' }
+      )
+    )
+
+    const candidate = await enrichOne(stateWithOnePty())
+
+    expect(candidate.blockers).toContain('running-terminal')
   })
 })
