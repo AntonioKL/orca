@@ -57,7 +57,7 @@ export function currentPreHandlerPtySequence(): number {
 }
 
 /** Map preserves insertion order, so the first key is the least recently admitted id. */
-function reserveBoundedPtySlot<V>(map: Map<string, V>, ptyId: string, cap: number): void {
+function evictOldestPtyIfAtCap<V>(map: Map<string, V>, ptyId: string, cap: number): void {
   if (map.has(ptyId) || map.size < cap) {
     return
   }
@@ -103,7 +103,7 @@ export function bufferPreHandlerPtyData(ptyId: string, data: string, meta?: PtyD
   if (!chunk.data) {
     return
   }
-  reserveBoundedPtySlot(preHandlerPtyData, ptyId, PRE_HANDLER_PTY_DATA_MAX_PTYS)
+  evictOldestPtyIfAtCap(preHandlerPtyData, ptyId, PRE_HANDLER_PTY_DATA_MAX_PTYS)
   const bufferedMeta =
     meta && chunk.data.length !== data.length && typeof meta.rawLength === 'number'
       ? { ...meta, rawLength: chunk.bytes }
@@ -175,7 +175,7 @@ export function bufferPreHandlerPtyExit(
   if (consumedPreHandlerPtyExits.has(ptyId) || discardedPreHandlerPtyStates.has(ptyId)) {
     return
   }
-  reserveBoundedPtySlot(preHandlerPtyExit, ptyId, PRE_HANDLER_PTY_EXIT_MAX_PTYS)
+  evictOldestPtyIfAtCap(preHandlerPtyExit, ptyId, PRE_HANDLER_PTY_EXIT_MAX_PTYS)
   preHandlerPtyExit.set(ptyId, {
     code,
     sequence: nextPreHandlerPtySequence(),
