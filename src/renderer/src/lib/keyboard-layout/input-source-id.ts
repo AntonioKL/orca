@@ -15,8 +15,10 @@
  *
  * The only layouts where Option-as-Meta is the right default are plain
  * US Standard and US-International-PC — matching Ghostty's
- * `detectOptionAsAlt`, which whitelists only `com.apple.keylayout.US`
- * and `com.apple.keylayout.USInternational-PC`.
+ * `detectOptionAsAlt` (~/projects/ghostty/src/input/keyboard.zig:25-57
+ * + ~/projects/ghostty/macos/Sources/Helpers/KeyboardLayout.swift,
+ * which whitelists only `com.apple.keylayout.US` and
+ * `com.apple.keylayout.USInternational-PC`).
  *
  * When the main-process IPC returns a non-null ID, this classifier is
  * authoritative: `'meta'` → Option-as-Meta is safe; `'compose'` →

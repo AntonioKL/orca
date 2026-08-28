@@ -5,15 +5,17 @@ import process from 'node:process'
 import { pathToFileURL } from 'node:url'
 import { resolvePullRequestDiffBase } from './git-pull-request-diff-base.mjs'
 
-// Why this gate exists: the `ref-oss` workflow reads open-source projects from
-// local checkouts. Its output — home-directory checkout citations, headers that
-// name the source that was read, and precedent/absence findings —
-// must never reach a shipped file. PR #909 carried such citations into the
-// renderer for four months because nothing looked at comment text.
+// Why this gate exists: the `ref-oss` workflow reads a set of projects that is
+// not itself public, and its findings describe that corpus — what it contains,
+// what was surveyed, and what was NOT found in it. Those findings must never
+// reach a shipped file. Nine pull request descriptions carried them before
+// anyone looked, because no check reads prose.
 //
-// Naming a public project is NOT the leak and must keep passing: Orca
-// integrates with several, and behavioural claims about them are real
-// documentation. Only the reading-session provenance is rejected.
+// What is NOT policed, and must keep passing: naming a public project, linking
+// its docs or spec, describing its observable behaviour, or saying where in it
+// something was read. Orca integrates with several public projects and those
+// statements are ordinary engineering documentation. Only claims about the
+// unnamed corpus are rejected.
 
 // Why assembled from fragments: this file is itself a changed file whenever the
 // marker set is edited, so a spelled-out marker here would trip its own gate.
@@ -21,45 +23,47 @@ function phrase(...words) {
   return words.join(String.raw`\s+`)
 }
 
+// Citation reaching INTO the corpus: a preposition, then the corpus itself.
+// Naming the corpus without citing it — as the skill's own description does —
+// is not a finding about what it contains.
+const CORPUS = phrase('reference', '(?:repos?|repositories|set|corpus)')
+const INTO_CORPUS = String.raw`\b(?:in|from|across|against|per|within|throughout|among|amongst)\s+(?:the\s+|our\s+|these\s+|those\s+|all\s+|\d+\s+)?(?:local\s+)?(?:oss\s+)?`
+
 export const PROVENANCE_MARKERS = [
   {
-    id: 'local-checkout-path',
-    hint: 'Local reference-checkout path. Cite the public project by name instead.',
-    // Two path segments after the prefix: `~/projects/app` is an ordinary
-    // fixture path, `~/projects/<repo>/<file>` is a citation into a checkout.
-    pattern: /~[\\/](?:projects|repos|src|code|dev|work|oss|github)[\\/][\w.-]+[\\/][\w.-]/i
+    id: 'reference-corpus-citation',
+    hint: 'Citation into the reference corpus. Describe the named public project instead.',
+    pattern: new RegExp(INTO_CORPUS + CORPUS + String.raw`\b`, 'i')
   },
   {
-    id: 'reference-implementation-citation',
-    hint: 'Reading-session citation header. State the behaviour, not the source you read.',
-    pattern: new RegExp(phrase('reference', 'implementation', 'in') + String.raw`\b`, 'i')
-  },
-  {
-    id: 'reference-repo-citation',
-    hint: 'Citation pointing at a local reference checkout.',
+    id: 'reference-survey-framing',
+    hint: 'Reference-survey framing. State the design conclusion on its own terms.',
     pattern: new RegExp(
-      String.raw`\b(?:in|from|across|against|per|within)\s+(?:the\s+|our\s+|these\s+|those\s+)?(?:local\s+)?(?:oss\s+)?` +
-        phrase('reference', 'repos?') +
-        String.raw`\b`,
+      String.raw`\b` + phrase('reference', '(?:survey|sweep|audit)') + String.raw`\b`,
       'i'
     )
   },
   {
-    id: 'precedent-audit',
-    hint: 'Precedent-audit framing from a reference sweep.',
-    pattern: /\bprecedent (?:audit|check|sweep|survey)\b/i
+    id: 'precedent-framing',
+    hint: 'Precedent-audit framing. Say what the design does and why.',
+    pattern: /\bprecedent\s+(?:audit|check|survey|sweep|review)\b/i
   },
   {
     id: 'absence-claim',
-    hint: 'Absence claim sourced from a reference sweep.',
+    hint: 'Absence claim about the reference corpus. Drop it; it reports a search, not a fact.',
     pattern:
-      /\b(?:no|zero|found no)\s+(?:known\s+)?(?:precedent|prior art)\b|\bprior[- ]art\s+(?:survey|audit|check|sweep)\b/i
+      /\b(?:no|zero)\s+(?:known\s+|directly\s+|closely\s+)?(?:precedent|prior art)\b|\bprior[- ]art\s+(?:survey|audit|check|sweep)\b|\bn(?:o|obody)\b.{0,60}?\b(?:directly\s+|closely\s+)?comparable\b.{0,120}?\bw(?:as|ere)\s+found\b/i
+  },
+  {
+    id: 'sole-comparable-claim',
+    hint: 'Claim about a single comparable case in an unnamed corpus. Name the project or drop it.',
+    pattern: /\bthe\s+(?:one|only|single)\s+(?:directly\s+|closely\s+)?comparable\b/i
   },
   {
     id: 'repo-survey-claim',
-    hint: 'Survey-of-repositories framing from a reference sweep.',
+    hint: 'Survey-of-repositories claim. Cite a named project or drop the count.',
     pattern:
-      /\b(?:surveyed|audited|reviewed)\s+(?:all\s+|\d+\s+|the\s+)?(?:local\s+)?(?:oss|open[- ]source|reference)\s+repos?\b|\b(?:none|neither)\s+of\s+the\s+(?:surveyed|reference|audited)\s+repos?\b/i
+      /\b(?:surveyed|audited|reviewed)\s+(?:all\s+|\d+\s+|the\s+)?(?:local\s+)?(?:oss|open[- ]source|reference)\s+(?:repos?|repositories|projects)\b|\b(?:none|neither)\s+of\s+the\s+(?:surveyed|reference|audited)\s+(?:repos?|repositories|projects)\b/i
   }
 ]
 
@@ -69,22 +73,47 @@ const SCANNABLE_FILE_PATTERN =
 // the only files this large, and a cap needs no maintenance as they are renamed.
 const MAX_SCANNED_BYTES = 1024 * 1024
 
+// Why the text is flattened first: these claims are prose, and prose wraps. The
+// real #14661 bullet splits its "was found" clause across two lines behind a
+// list indent, so a per-line scan would miss the very claim this gate exists to
+// catch. Leading indent and a comment marker are dropped so a wrapped sentence
+// reads as one.
+function flattenForMatching(text) {
+  const segments = []
+  const lineStarts = []
+  let cursor = 0
+  for (const line of text.split(/\r?\n/)) {
+    const segment = line.replace(/^\s*(?:\/\/+|\*+)?\s*/, '')
+    lineStarts.push(cursor)
+    segments.push(segment)
+    cursor += segment.length + 1
+  }
+  return { flattened: segments.join(' '), lineStarts }
+}
+
+function lineForIndex(lineStarts, index) {
+  let line = 1
+  for (let candidate = 0; candidate < lineStarts.length; candidate += 1) {
+    if (lineStarts[candidate] > index) {
+      break
+    }
+    line = candidate + 1
+  }
+  return line
+}
+
 export function findProvenanceMarkers(text) {
   const findings = []
   const lines = text.split(/\r?\n/)
-  for (const [index, line] of lines.entries()) {
-    for (const marker of PROVENANCE_MARKERS) {
-      if (marker.pattern.test(line)) {
-        findings.push({
-          markerId: marker.id,
-          hint: marker.hint,
-          line: index + 1,
-          text: line.trim()
-        })
-      }
+  const { flattened, lineStarts } = flattenForMatching(text)
+  for (const marker of PROVENANCE_MARKERS) {
+    const scanner = new RegExp(marker.pattern.source, `${marker.pattern.flags.replace('g', '')}g`)
+    for (const match of flattened.matchAll(scanner)) {
+      const line = lineForIndex(lineStarts, match.index)
+      findings.push({ markerId: marker.id, hint: marker.hint, line, text: lines[line - 1].trim() })
     }
   }
-  return findings
+  return findings.sort((a, b) => a.line - b.line)
 }
 
 function runGit(root, args) {
@@ -157,7 +186,7 @@ export function main(
       failures += 1
       const message = `${finding.hint} (${finding.markerId})`
       console.error(
-        `::error file=${annotationValue(file)},line=${finding.line},title=${annotationValue('local reference provenance')}::${annotationValue(message)}`
+        `::error file=${annotationValue(file)},line=${finding.line},title=${annotationValue('reference-corpus provenance')}::${annotationValue(message)}`
       )
       console.error(`${file}:${finding.line} ${finding.markerId}: ${finding.hint}`)
     }
@@ -165,7 +194,7 @@ export function main(
 
   if (failures > 0) {
     console.error(
-      `Reference-provenance gate failed with ${failures} finding(s) across ${files.length} changed file(s). Remove the citation; keep the technical claim.`
+      `Reference-provenance gate failed with ${failures} finding(s) across ${files.length} changed file(s). Drop the claim about the corpus; keep the engineering conclusion.`
     )
     return 1
   }
