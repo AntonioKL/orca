@@ -32,8 +32,9 @@ export function buildDocPreviewGrantRequest(
   }
   const connectionId = getConnectionIdForFileFromState(state, worktreeId, filePath)
   if (connectionId) {
-    // Outside a workspace there is no broader request base; the document directory is both the
-    // resolution boundary and the initial authority.
+    // Outside a workspace there is no broader request base: the document directory bounds
+    // resolution, and main starts such a grant at the entry file alone — an out-of-workspace
+    // directory is often a home directory, which is where secrets live.
     return { owner: { kind: 'ssh', connectionId }, requestBase, root, entryRelativePath }
   }
   const environmentId = getRuntimeEnvironmentIdForWorktree(state, worktreeId)

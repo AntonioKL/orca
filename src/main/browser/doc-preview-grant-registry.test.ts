@@ -47,13 +47,45 @@ describe('doc preview grants', () => {
 })
 
 describe('resolveDocPreviewTargetPath', () => {
-  it('resolves paths inside the grant root', () => {
+  // A grant whose root IS its request base — a document at the workspace root, or outside any
+  // workspace — starts with the entry file alone: that directory is where secrets live, and a
+  // DNS-prefetch beacon needs no click, so nothing beside the entry reads without the reader.
+  it('reads only the entry document until the reader approves its directory', () => {
     const grant = mintPosixGrant()
 
     expect(resolveDocPreviewTargetPath(grant, 'index.html')).toBe('/srv/repo/docs/index.html')
+    expect(resolveDocPreviewTargetPath(grant, 'assets/logo.png')).toBeNull()
+    expect(resolveDocPreviewTargetPath(grant, 'secrets.env')).toBeNull()
+
+    expect(authorizeDocPreviewDirectory(grant.id, 'assets/logo.png')).toBe(true)
     expect(resolveDocPreviewTargetPath(grant, 'assets/logo.png')).toBe(
       '/srv/repo/docs/assets/logo.png'
     )
+    expect(resolveDocPreviewTargetPath(grant, 'secrets.env')).toBeNull()
+  })
+
+  it('keeps silent authority over a document directory strictly inside the workspace, and only there', () => {
+    const nested = mintDocPreviewGrant({
+      owner: sshOwner,
+      requestBase: '/srv/repo',
+      root: '/srv/repo/docs',
+      entryRelativePath: 'docs/report.html',
+      browserPageId: 'page-1'
+    })
+    expect(resolveDocPreviewTargetPath(nested, 'docs/styles.css')).toBe('/srv/repo/docs/styles.css')
+
+    const atWorkspaceRoot = mintDocPreviewGrant({
+      owner: sshOwner,
+      requestBase: '/srv/repo',
+      root: '/srv/repo',
+      entryRelativePath: 'report.html',
+      browserPageId: 'page-2'
+    })
+    expect(resolveDocPreviewTargetPath(atWorkspaceRoot, 'report.html')).toBe(
+      '/srv/repo/report.html'
+    )
+    expect(resolveDocPreviewTargetPath(atWorkspaceRoot, '.env')).toBeNull()
+    expect(resolveDocPreviewTargetPath(atWorkspaceRoot, 'docs/styles.css')).toBeNull()
   })
 
   it('refuses parent traversal, absolute escapes and empty paths', () => {
@@ -102,6 +134,7 @@ describe('resolveDocPreviewTargetPath', () => {
       browserPageId: 'page-1'
     })
 
+    expect(authorizeDocPreviewDirectory(windowsGrant.id, 'assets/logo.png')).toBe(true)
     expect(resolveDocPreviewTargetPath(windowsGrant, 'assets/logo.png')).toBe(
       'C:\\srv\\repo\\docs\\assets\\logo.png'
     )
@@ -183,7 +216,7 @@ describe('resolveCanonicalDocPreviewPath', () => {
     const grant = mintPosixGrant()
 
     await expect(
-      resolveCanonicalDocPreviewPath(grant, '/srv/repo/docs/report.html', async (path) =>
+      resolveCanonicalDocPreviewPath(grant, '/srv/repo/docs/index.html', async (path) =>
         path === grant.root ? path : '/srv/repo/docs-private/secret.html'
       )
     ).resolves.toBeNull()
@@ -193,8 +226,16 @@ describe('resolveCanonicalDocPreviewPath', () => {
     const grant = mintPosixGrant()
 
     await expect(
-      resolveCanonicalDocPreviewPath(grant, '/srv/repo/docs/report.html', async (path) => path)
-    ).resolves.toBe('/srv/repo/docs/report.html')
+      resolveCanonicalDocPreviewPath(grant, '/srv/repo/docs/index.html', async (path) => path)
+    ).resolves.toBe('/srv/repo/docs/index.html')
+  })
+
+  it('refuses a sibling of an entry-only document even when it canonicalizes cleanly', async () => {
+    const grant = mintPosixGrant()
+
+    await expect(
+      resolveCanonicalDocPreviewPath(grant, '/srv/repo/docs/notes.txt', async (path) => path)
+    ).resolves.toBeNull()
   })
 
   it('keeps an approved SSH directory inside the canonical workspace boundary', async () => {

@@ -97,7 +97,7 @@ export function DocPreviewDirectoryAccessBanner({
       <span className="min-w-0 flex-1 text-muted-foreground">
         {translate(
           'auto.components.editor.HtmlDocPreview.directoryAccessRequest',
-          'This preview needs access to {{path}}.',
+          'This preview wants to read files in {{path}}.',
           { path: requestedDirectoryLabel(request.relativePath, worktreeRoot) }
         )}
       </span>
@@ -106,7 +106,8 @@ export function DocPreviewDirectoryAccessBanner({
       </Button>
       <Button type="button" size="xs" disabled={busy} onClick={() => void onAllow()}>
         {busy ? <Loader2 className="size-3 animate-spin" /> : null}
-        {translate('auto.components.editor.HtmlDocPreview.allowDirectoryOnce', 'Allow once')}
+        {/* "folder", not "once": approval covers the whole directory for as long as this preview stays open */}
+        {translate('auto.components.editor.HtmlDocPreview.allowDirectory', 'Allow folder')}
       </Button>
     </div>
   )

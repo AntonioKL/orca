@@ -723,12 +723,16 @@ test('asks before a paired preview reads a sibling directory', async ({
     await focusBrowserWorkspace(page, worktreeId, workspace)
     await page.locator(`[data-tab-id="${workspace}"]`).click()
 
-    await expect(page.getByText('This preview needs access to preview-assets.')).toBeVisible({
-      timeout: 30_000
-    })
+    await expect(page.getByText('This preview wants to read files in preview-assets.')).toBeVisible(
+      {
+        timeout: 30_000
+      }
+    )
     await expect.poll(() => readDocPreviewRenderedText(page, '#asset-result')).toBe('blocked')
-    await page.getByRole('button', { name: 'Allow once', exact: true }).click()
-    await expect(page.getByText('This preview needs access to preview-assets.')).not.toBeVisible()
+    await page.getByRole('button', { name: 'Allow folder', exact: true }).click()
+    await expect(
+      page.getByText('This preview wants to read files in preview-assets.')
+    ).not.toBeVisible()
     await expect
       .poll(() => readDocPreviewRenderedText(page, '#asset-result'), {
         timeout: 60_000,

@@ -241,9 +241,9 @@ describe('HtmlDocPreview failure messages', () => {
       })
     })
 
-    expect(container.textContent).toContain('This preview needs access to assets.')
+    expect(container.textContent).toContain('This preview wants to read files in assets.')
     expect(container.textContent).toContain('Dismiss')
-    expect(container.textContent).toContain('Allow once')
+    expect(container.textContent).toContain('Allow folder')
     expect(grantRuntime.authorizations).toEqual([])
   })
 
@@ -258,10 +258,10 @@ describe('HtmlDocPreview failure messages', () => {
       })
     })
 
-    expect(container.textContent).toContain('This preview needs access to /repo.')
+    expect(container.textContent).toContain('This preview wants to read files in /repo.')
   })
 
-  it('authorizes only after Allow once and reloads the guest', async () => {
+  it('authorizes only after Allow folder and reloads the guest', async () => {
     await renderPreview(container, root)
     const reload = vi.fn()
     Object.assign(container.querySelector('webview')!, { reload })
@@ -274,7 +274,7 @@ describe('HtmlDocPreview failure messages', () => {
       })
     })
     const allowButton = [...container.querySelectorAll('button')].find(
-      (button) => button.textContent?.trim() === 'Allow once'
+      (button) => button.textContent?.trim() === 'Allow folder'
     )
 
     await act(async () => {
@@ -285,7 +285,7 @@ describe('HtmlDocPreview failure messages', () => {
       { grantId: GRANT_ID, relativePath: 'assets/app.js' }
     ])
     expect(reload).toHaveBeenCalledOnce()
-    expect(container.textContent).not.toContain('This preview needs access to assets.')
+    expect(container.textContent).not.toContain('This preview wants to read files in assets.')
   })
 
   it('does not reprompt for a dismissed directory during the grant lifetime', async () => {
@@ -310,7 +310,7 @@ describe('HtmlDocPreview failure messages', () => {
       })
     })
 
-    expect(container.textContent).not.toContain('This preview needs access to assets.')
+    expect(container.textContent).not.toContain('This preview wants to read files in assets.')
     expect(grantRuntime.authorizations).toEqual([])
   })
 

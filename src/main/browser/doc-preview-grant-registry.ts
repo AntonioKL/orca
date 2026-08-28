@@ -23,7 +23,12 @@ export type DocPreviewGrant = {
   owner: DocPreviewOwner
   /** Directory relative preview URLs resolve against. */
   requestBase: string
-  /** Containing directory of the opened document, on the owning host. */
+  /**
+   * Containing directory of the opened document, on the owning host. It carries silent read
+   * authority only while it sits strictly inside `requestBase`: a document at the workspace root —
+   * or outside any workspace, where its directory IS the request base — starts with the entry file
+   * alone, because that directory is where secrets live and a DNS-prefetch beacon needs no click.
+   */
   root: string
   /** Additional directories the reader approved for this grant. */
   authorizedRoots: string[]
@@ -173,11 +178,18 @@ function isAtOrInsideRoot(
   return candidate === root || isInsideRoot(root, candidate, flavor)
 }
 
-function authorizedRoots(grant: DocPreviewGrant): string[] {
-  return [grant.root, ...grant.authorizedRoots]
+function directoryAuthorityRoots(grant: DocPreviewGrant): string[] {
+  return grant.root === grant.requestBase
+    ? [...grant.authorizedRoots]
+    : [grant.root, ...grant.authorizedRoots]
 }
 
-/** Resolves a request only when its directory is authorized by this grant. */
+/** The one path an entry-only grant can read before the reader approves a directory. */
+function resolveEntryAbsolutePath(grant: DocPreviewGrant): string | null {
+  return resolveDocPreviewCandidatePath(grant, grant.entryRelativePath)
+}
+
+/** Resolves a request only when it is the entry document or its directory is authorized. */
 export function resolveDocPreviewTargetPath(
   grant: DocPreviewGrant,
   relativePath: string
@@ -186,8 +198,11 @@ export function resolveDocPreviewTargetPath(
   if (!resolved) {
     return null
   }
+  if (resolved === resolveEntryAbsolutePath(grant)) {
+    return resolved
+  }
   const flavor = pathFlavorFor(grant.requestBase)
-  return authorizedRoots(grant).some((root) => isInsideRoot(root, resolved, flavor))
+  return directoryAuthorityRoots(grant).some((root) => isInsideRoot(root, resolved, flavor))
     ? resolved
     : null
 }
@@ -207,7 +222,7 @@ export function authorizeDocPreviewDirectory(grantId: string, relativePath: stri
   if (!isAtOrInsideRoot(grant.requestBase, directory, flavor)) {
     return false
   }
-  if (!authorizedRoots(grant).some((root) => isAtOrInsideRoot(root, directory, flavor))) {
+  if (!directoryAuthorityRoots(grant).some((root) => isAtOrInsideRoot(root, directory, flavor))) {
     grant.authorizedRoots.push(directory)
     canonicalRootByGrantId.delete(grant.id)
   }
@@ -215,7 +230,10 @@ export function authorizeDocPreviewDirectory(grantId: string, relativePath: stri
 }
 
 /** Why: realpath is a host round-trip, and a grant's root is fixed for its lifetime. */
-const canonicalRootByGrantId = new Map<string, Promise<{ boundary: string; roots: string[] }>>()
+const canonicalRootByGrantId = new Map<
+  string,
+  Promise<{ boundary: string; roots: string[]; entry: string | null }>
+>()
 
 /**
  * Second containment pass for hosts where the lexical one is not enough: a symlink
@@ -231,28 +249,31 @@ export async function resolveCanonicalDocPreviewPath(
   try {
     let canonicalRoots = canonicalRootByGrantId.get(grant.id)
     if (!canonicalRoots) {
+      const entryAbsolute = resolveEntryAbsolutePath(grant)
       canonicalRoots = Promise.all([
         realpath(grant.requestBase),
-        ...authorizedRoots(grant).map((root) => realpath(root))
-      ]).then(([boundaryPath, ...rootPaths]) => {
+        entryAbsolute === null ? Promise.resolve(null) : realpath(entryAbsolute),
+        ...directoryAuthorityRoots(grant).map((root) => realpath(root))
+      ]).then(([boundaryPath, entryPath, ...rootPaths]) => {
         const boundary = normalizeRootPath(boundaryPath)
         const flavor = pathFlavorFor(boundary)
         return {
           boundary,
           roots: rootPaths
             .map(normalizeRootPath)
-            .filter((root) => isAtOrInsideRoot(boundary, root, flavor))
+            .filter((root) => isAtOrInsideRoot(boundary, root, flavor)),
+          entry: entryPath !== null && isInsideRoot(boundary, entryPath, flavor) ? entryPath : null
         }
       })
       canonicalRootByGrantId.set(grant.id, canonicalRoots)
     }
-    const [{ boundary, roots }, canonicalPath] = await Promise.all([
+    const [{ boundary, roots, entry }, canonicalPath] = await Promise.all([
       canonicalRoots,
       realpath(absolutePath)
     ])
     const flavor = pathFlavorFor(boundary)
     return isInsideRoot(boundary, canonicalPath, flavor) &&
-      roots.some((root) => isInsideRoot(root, canonicalPath, flavor))
+      (canonicalPath === entry || roots.some((root) => isInsideRoot(root, canonicalPath, flavor)))
       ? canonicalPath
       : null
   } catch {

@@ -23,17 +23,21 @@ import {
   revokeAllDocPreviewGrants
 } from './doc-preview-grant-registry'
 
+// Why the fixtures approve the document directory up front: these tests exercise the transport
+// half of a read — an entry-only grant's approval flow is pinned in its own test below.
 function sshGrant(): ReturnType<typeof mintDocPreviewGrant> {
-  return mintDocPreviewGrant({
+  const grant = mintDocPreviewGrant({
     owner: { kind: 'ssh', connectionId: 'ssh-1' },
     root: '/home/alice/docs',
     entryRelativePath: 'index.html',
     browserPageId: 'page-1'
   })
+  authorizeDocPreviewDirectory(grant.id, grant.entryRelativePath)
+  return grant
 }
 
 function runtimeGrant(root = '/srv/repo/docs'): ReturnType<typeof mintDocPreviewGrant> {
-  return mintDocPreviewGrant({
+  const grant = mintDocPreviewGrant({
     owner: {
       kind: 'runtime',
       environmentId: 'env-1',
@@ -44,6 +48,8 @@ function runtimeGrant(root = '/srv/repo/docs'): ReturnType<typeof mintDocPreview
     entryRelativePath: 'index.html',
     browserPageId: 'page-1'
   })
+  authorizeDocPreviewDirectory(grant.id, grant.entryRelativePath)
+  return grant
 }
 
 beforeEach(() => {

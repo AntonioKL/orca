@@ -47,8 +47,11 @@ export function DocPreviewDocumentChip({
             <span className="text-muted-foreground">{identity.directoryPrefix}</span>
             <span className="text-foreground">{identity.fileName}</span>
           </span>
+          {/* Why everything here can shrink: a fixed-width child of a squeezed flex row overflows
+              its parent's layout box even under overflow-hidden, and this row sits beside a path
+              that can be arbitrarily long in an arbitrarily narrow pane. */}
           <span className="hidden min-w-0 items-center gap-1.5 text-xs text-muted-foreground sm:flex">
-            <span className="shrink-0">
+            <span className="min-w-0 truncate">
               {translate(
                 'auto.components.editor.HtmlDocPreview.workspaceFileChipLabel',
                 'Workspace file'
