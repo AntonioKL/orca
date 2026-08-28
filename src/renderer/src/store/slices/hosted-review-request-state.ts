@@ -100,14 +100,38 @@ function startHostedReviewRevalidationLane(
   clearHostedReviewRevalidationTimer(lane)
   lane.pendingStartRequest = null
   const startedAt = Date.now()
-  observeHostedReviewRevalidationPromise(requestKey, lane, startRequest(), startedAt)
+  const promise = startRequest()
+  if (lane.inFlight !== promise) {
+    observeHostedReviewRevalidationPromise(requestKey, lane, promise, startedAt)
+  }
+}
+
+export function supersedeHostedReviewRevalidation(
+  requestKey: string,
+  request: { promise: Promise<HostedReviewInfo | null>; startedAt: number }
+): void {
+  const lane = hostedReviewRevalidationLanes.get(requestKey)
+  if (!lane) {
+    return
+  }
+  clearHostedReviewRevalidationTimer(lane)
+  lane.pendingStartRequest = null
+  observeHostedReviewRevalidationPromise(requestKey, lane, request.promise, request.startedAt)
 }
 
 export function queueHostedReviewRevalidation(
   requestKey: string,
   startRequest: () => Promise<HostedReviewInfo | null>,
-  inflightRequest?: { promise: Promise<HostedReviewInfo | null>; startedAt: number }
+  inflightRequest?: {
+    promise: Promise<HostedReviewInfo | null>
+    startedAt: number
+    force: boolean
+  }
 ): void {
+  if (inflightRequest?.force) {
+    supersedeHostedReviewRevalidation(requestKey, inflightRequest)
+    return
+  }
   let lane = hostedReviewRevalidationLanes.get(requestKey)
   if (!lane) {
     lane = {

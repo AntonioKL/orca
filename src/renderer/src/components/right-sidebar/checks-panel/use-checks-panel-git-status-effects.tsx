@@ -107,6 +107,15 @@ export function useChecksPanelGitStatusEffects(model: ChecksPanelGitStatusEffect
   } = model
   const gitStatusRequestRef = useRef<(() => Promise<void>) | null>(null)
   const gitStatusPollRunnerRef = useRef<CoalescedPollRunner | null>(null)
+  const gitStatusPollingReady = Boolean(
+    repo &&
+    !isFolder &&
+    branch &&
+    isPanelVisible &&
+    activeWorktreeId &&
+    activeWorktreePath &&
+    (runtimeEnvironmentId || !repoConnectionId || sshConnectionStatus === 'connected')
+  )
 
   useEffect(() => {
     const runner = createCoalescedPollRunner(
@@ -124,7 +133,7 @@ export function useChecksPanelGitStatusEffects(model: ChecksPanelGitStatusEffect
         gitStatusPollRunnerRef.current = null
       }
     }
-  }, [panelContextKey])
+  }, [gitStatusPollingReady, panelContextKey])
 
   useEffect(() => {
     if (

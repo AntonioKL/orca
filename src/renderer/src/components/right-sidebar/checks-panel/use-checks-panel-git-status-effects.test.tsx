@@ -24,17 +24,23 @@ const updateWorktreeGitIdentity = vi.fn()
 function Probe({
   nonce,
   contextKey = 'context-A',
+  isPanelVisible = true,
+  repoConnectionId = null,
+  sshConnectionStatus,
   worktreeId = 'worktree-A',
   worktreePath = '/repo'
 }: {
   nonce: number
   contextKey?: string
+  isPanelVisible?: boolean
+  repoConnectionId?: string | null
+  sshConnectionStatus?: 'connected' | 'connecting' | 'disconnected'
   worktreeId?: string
   worktreePath?: string
 }): null {
   panelContextKeyRef.current = contextKey
   useChecksPanelGitStatusEffects({
-    activeConnectionId: null,
+    activeConnectionId: repoConnectionId,
     activeWorktreeId: worktreeId,
     activeWorktreePath: worktreePath,
     activeWorktreePushTarget: null,
@@ -49,7 +55,7 @@ function Probe({
     hasUncommittedChanges: false,
     hostedReviewCreationRequestKey: 'eligibility-A',
     isFolder: false,
-    isPanelVisible: true,
+    isPanelVisible,
     linkedAzureDevOpsPR: null,
     linkedBitbucketPR: null,
     linkedGiteaPR: null,
@@ -62,14 +68,14 @@ function Probe({
     panelContextKeyRef,
     remoteStatus: undefined,
     remoteStatusInvalidation: 0,
-    repo: { id: 'repo-A', path: '/repo', worktreeBaseRef: 'main' },
-    repoConnectionId: null,
+    repo: { id: 'repo-A', path: '/repo', connectionId: repoConnectionId, worktreeBaseRef: 'main' },
+    repoConnectionId,
     runtimeEnvironmentId: null,
     setGitStatusProbeErrorContextKey,
     setGitStatusRefreshNonce,
     setGitStatusSnapshot,
     setHostedReviewCreationSnapshot: vi.fn(),
-    sshConnectionStatus: undefined,
+    sshConnectionStatus,
     updateWorktreeGitIdentity
   } as never)
   return null
@@ -169,5 +175,71 @@ describe('useChecksPanelGitStatusEffects poll runner', () => {
     expect(mocks.getRuntimeGitStatus).toHaveBeenLastCalledWith(
       expect.objectContaining({ worktreeId: 'worktree-B', worktreePath: '/repo-b' })
     )
+  })
+
+  it('does not carry a discarded hidden run backoff into the reopened panel', async () => {
+    const first = deferred<{
+      entries: never[]
+      head: string
+      branch: string
+      upstreamStatus: { hasUpstream: boolean; ahead: number; behind: number }
+    }>()
+    const status = {
+      entries: [],
+      head: 'head-A',
+      branch: 'feature',
+      upstreamStatus: { hasUpstream: true, ahead: 0, behind: 0 }
+    }
+    mocks.getRuntimeGitStatus.mockReturnValueOnce(first.promise).mockResolvedValue(status)
+    const root: Root = await mountProbe(<Probe nonce={0} />)
+    expect(mocks.getRuntimeGitStatus).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+      root.render(<Probe nonce={0} isPanelVisible={false} />)
+    })
+    first.resolve(status)
+    await flush()
+
+    await act(async () => {
+      root.render(<Probe nonce={0} />)
+    })
+    await flush()
+
+    expect(mocks.getRuntimeGitStatus).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not carry a discarded disconnected run backoff through SSH reconnect', async () => {
+    const first = deferred<{
+      entries: never[]
+      head: string
+      branch: string
+      upstreamStatus: { hasUpstream: boolean; ahead: number; behind: number }
+    }>()
+    const status = {
+      entries: [],
+      head: 'head-A',
+      branch: 'feature',
+      upstreamStatus: { hasUpstream: true, ahead: 0, behind: 0 }
+    }
+    mocks.getRuntimeGitStatus.mockReturnValueOnce(first.promise).mockResolvedValue(status)
+    const root: Root = await mountProbe(
+      <Probe nonce={0} repoConnectionId="ssh-1" sshConnectionStatus="connected" />
+    )
+    expect(mocks.getRuntimeGitStatus).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+      root.render(<Probe nonce={0} repoConnectionId="ssh-1" sshConnectionStatus="disconnected" />)
+    })
+    first.resolve(status)
+    await flush()
+
+    await act(async () => {
+      root.render(<Probe nonce={0} repoConnectionId="ssh-1" sshConnectionStatus="connected" />)
+    })
+    await flush()
+
+    expect(mocks.getRuntimeGitStatus).toHaveBeenCalledTimes(2)
   })
 })

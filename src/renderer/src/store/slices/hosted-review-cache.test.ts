@@ -194,6 +194,50 @@ describe('hosted review cache revalidation', () => {
     expect(mockApi.hostedReview.forBranch).toHaveBeenCalledTimes(3)
   })
 
+  it('lets a force refresh supersede queued stale-while-revalidate work', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+    let resolveBackground: (value: HostedReviewInfo) => void = () => {}
+    let resolveForce: (value: HostedReviewInfo) => void = () => {}
+    const background = new Promise<HostedReviewInfo>((resolve) => {
+      resolveBackground = resolve
+    })
+    const force = new Promise<HostedReviewInfo>((resolve) => {
+      resolveForce = resolve
+    })
+    const forcedReview = { ...review, title: 'Manual refresh result' }
+    mockApi.hostedReview.forBranch
+      .mockResolvedValueOnce(review)
+      .mockReturnValueOnce(background)
+      .mockReturnValueOnce(force)
+      .mockResolvedValue(review)
+    const store = makeStore()
+    const branch = 'feature/force-supersedes-poll'
+    const staleOptions = { linkedGitHubPR: 42, staleWhileRevalidate: true }
+
+    await store.getState().fetchHostedReviewForBranch('/repo', branch, { linkedGitHubPR: 42 })
+    vi.setSystemTime(60_001)
+    await store.getState().fetchHostedReviewForBranch('/repo', branch, staleOptions)
+    await store.getState().fetchHostedReviewForBranch('/repo', branch, staleOptions)
+    const forceRefresh = store
+      .getState()
+      .fetchHostedReviewForBranch('/repo', branch, { linkedGitHubPR: 42, force: true })
+    await store.getState().fetchHostedReviewForBranch('/repo', branch, staleOptions)
+    expect(mockApi.hostedReview.forBranch).toHaveBeenCalledTimes(3)
+
+    await vi.advanceTimersByTimeAsync(10_000)
+    resolveBackground(review)
+    await background
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(300_000)
+    expect(mockApi.hostedReview.forBranch).toHaveBeenCalledTimes(3)
+
+    resolveForce(forcedReview)
+    await expect(forceRefresh).resolves.toEqual(forcedReview)
+    await vi.advanceTimersByTimeAsync(300_000)
+    expect(mockApi.hostedReview.forBranch).toHaveBeenCalledTimes(3)
+  })
+
   it('does not serve stale metadata when a stronger linked PR hint changes the lookup', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(0)

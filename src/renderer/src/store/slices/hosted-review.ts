@@ -34,7 +34,8 @@ import {
   hostedReviewRequestKey,
   hostedReviewRequestGenerations as requestGenerations,
   inflightHostedReviewRequests,
-  queueHostedReviewRevalidation
+  queueHostedReviewRevalidation,
+  supersedeHostedReviewRevalidation
 } from './hosted-review-request-state'
 
 export type HostedReviewSlice = {
@@ -291,6 +292,10 @@ export const createHostedReviewSlice: StateCreator<AppState, [], [], HostedRevie
         promise: request,
         force: Boolean(options?.force),
         generation,
+        startedAt: requestStartedAt
+      })
+      supersedeHostedReviewRevalidation(requestKey, {
+        promise: request,
         startedAt: requestStartedAt
       })
       return request
