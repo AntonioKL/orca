@@ -20,6 +20,7 @@ import {
 import { guardRunningTerminalClose } from './running-terminal-close-guard'
 
 const LEAF_A = '11111111-1111-4111-8111-111111111111'
+const LEAF_B = '22222222-2222-4222-8222-222222222222'
 
 function visibleRequest() {
   return useRunningTerminalCloseConfirmStore.getState().runningTerminalCloseConfirm
@@ -50,6 +51,19 @@ describe('terminal-tab close on PTY absence evidence', () => {
     return onClose
   }
 
+  /** A layout that still names a leaf the liveness map has dropped — the shape left behind
+   *  by a pane that exited, by a restart, and by any tab whose layout outlives its panes. */
+  function withStaleLayoutLeaf(): void {
+    getStateMock.mockReturnValue({
+      settings: { activeRuntimeEnvironmentId: null },
+      ptyIdsByTabId: { 'tab-1': ['pty-a'] },
+      terminalLayoutsByTabId: {
+        'tab-1': { ptyIdsByLeafId: { [LEAF_A]: 'pty-a', [LEAF_B]: 'pty-stale' } }
+      },
+      agentStatusByPaneKey: {}
+    })
+  }
+
   it('asks before closing when the host lost the route to the pane', async () => {
     inspectRuntimeTerminalProcessMock.mockResolvedValue(buildAbsentPtyInspection('unverifiable'))
 
@@ -66,6 +80,42 @@ describe('terminal-tab close on PTY absence evidence', () => {
 
     expect(visibleRequest()).toBeNull()
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('closes silently when the only live pane exited and the layout kept a stale leaf', async () => {
+    // The stale id has no owner, so the host answers "could not ask" about it forever. Asking
+    // on that would put a dialog in front of every cleanly-exited tab whose layout outlived
+    // its panes — daemon and remote panes, and local panes after a restart.
+    withStaleLayoutLeaf()
+    inspectRuntimeTerminalProcessMock.mockImplementation(async (_settings, ptyId: string) =>
+      ptyId === 'pty-a'
+        ? buildAbsentPtyInspection('exited')
+        : buildAbsentPtyInspection('unverifiable', 'no registered provider owns this PTY id')
+    )
+
+    const onClose = await closeTab()
+
+    expect(visibleRequest()).toBeNull()
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('still asks for a layout-only pane that answers with a live child process', async () => {
+    // The narrowing above must not close the mounting-pane window: a layout leaf the map has
+    // not caught up to can still block the close by answering positively.
+    withStaleLayoutLeaf()
+    inspectRuntimeTerminalProcessMock.mockImplementation(async (_settings, ptyId: string) =>
+      ptyId === 'pty-a'
+        ? buildAbsentPtyInspection('exited')
+        : buildPtyProcessInspectionWireResult(
+            { verdict: 'observed', processName: 'node' },
+            { verdict: 'live' }
+          )
+    )
+
+    const onClose = await closeTab()
+
+    expect(visibleRequest()).not.toBeNull()
+    expect(onClose).not.toHaveBeenCalled()
   })
 
   it('asks before closing a pane with a live child process', async () => {

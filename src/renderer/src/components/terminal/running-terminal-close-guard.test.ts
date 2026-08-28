@@ -194,8 +194,8 @@ describe('guardRunningTerminalClose', () => {
 
   it('asks when a remote handle reports the inspection as unavailable', async () => {
     // Why not fail open: the host answered "I could not route to this pane", which is the
-    // same non-answer this guard's own timeout already prompts on, and the verdict the
-    // window-close guard blocks on. See running-terminal-close-absence-evidence.test.ts.
+    // same non-answer this guard's own timeout already prompts on. It applies only to an id
+    // the liveness map still vouches for; see running-terminal-close-absence-evidence.test.ts.
     inspectRuntimeTerminalProcessMock.mockResolvedValue({
       foregroundProcess: null,
       hasChildProcesses: true,
