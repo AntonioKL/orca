@@ -68,7 +68,7 @@ function assertPatchApplied() {
         'config/patches/@vscode__windows-process-tree@0.8.0.patch; run pnpm install.'
     )
   }
-  if (!bindingGyp.includes('node_modules/node-addon-api/node_addon_api.gyp')) {
+  if (!bindingGyp.includes('../../node-addon-api/node_addon_api.gyp')) {
     throw new Error(
       'binding.gyp still uses a dynamic node-addon-api path. The local package path avoids ' +
         'pnpm store and Windows drive-letter normalization issues. ' +
@@ -94,7 +94,7 @@ function applyWindowsProcessTreeBuildFixes() {
   const originalBinding = bindingGyp
   const originalProcess = processCc
 
-  const localDependency = 'node_modules/node-addon-api/node_addon_api.gyp:node_addon_api_except'
+  const localDependency = '../../node-addon-api/node_addon_api.gyp:node_addon_api_except'
   for (const dynamicDependency of [
     String.raw`<!(node -p \"require('node-addon-api').targets\"):node_addon_api_except`,
     String.raw`<!(node -p \"require.resolve('node-addon-api/node_addon_api.gyp')\"):node_addon_api_except`
