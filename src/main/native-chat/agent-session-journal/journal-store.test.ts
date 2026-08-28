@@ -7,6 +7,10 @@ import type {
   AgentJournalItemIdentity,
   AgentSessionJournalIdentity
 } from '../../../shared/agent-session-journal-types'
+import {
+  boundJournalKeyComponent,
+  MAX_JOURNAL_KEY_COMPONENT_CHARS
+} from '../../../shared/agent-session-journal-item-key'
 import { readJournalBlob } from './journal-blob-store'
 import { JOURNAL_LOG_FILE, JOURNAL_SNAPSHOT_FILE } from './journal-log-file'
 import { loadJournal } from './journal-open'
@@ -90,6 +94,37 @@ describe('sequences', () => {
     expect(results.map((result) => result.revision)).toEqual([1, 2, 3])
     expect(journal.snapshot().items).toHaveLength(1)
     expect(journal.snapshot().items[0]?.revision).toBe(3)
+  })
+
+  it('preserves an oversized identity and its raw digest-form mimic across reopen', async () => {
+    const oversizedTurnId = 'a'.repeat(MAX_JOURNAL_KEY_COMPONENT_CHARS + 1)
+    const digestFormMimic = boundJournalKeyComponent(oversizedTurnId)
+    const identityFor = (turnId: string): AgentJournalItemIdentity => ({
+      provider: 'codex',
+      threadId: 'thread-1',
+      turnId,
+      ordinal: 0
+    })
+    const oversizedIdentity = identityFor(oversizedTurnId)
+    const mimicIdentity = identityFor(digestFormMimic)
+    const journal = await open()
+
+    const oversized = await journal.appendItem(oversizedIdentity, body('oversized'), { fence: 1 })
+    const mimic = await journal.appendItem(mimicIdentity, body('mimic'), { fence: 1 })
+    expect(oversized.itemId).not.toBe(mimic.itemId)
+    expect([oversized.revision, mimic.revision]).toEqual([1, 1])
+
+    const reopened = await open()
+    expect(reopened.snapshot().items.map((entry) => entry.body)).toEqual([
+      body('oversized'),
+      body('mimic')
+    ])
+
+    await reopened.appendTombstone(oversizedIdentity, { fence: 1 })
+    const afterTombstoneReopen = await open()
+    expect(afterTombstoneReopen.snapshot().items.map((entry) => entry.body)).toEqual([
+      body('mimic')
+    ])
   })
 })
 

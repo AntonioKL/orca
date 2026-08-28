@@ -147,6 +147,34 @@ describe('key encoding', () => {
   })
 })
 
+describe('bounded component domain separation', () => {
+  const oversizedTurnId = 'a'.repeat(MAX_JOURNAL_KEY_COMPONENT_CHARS + 1)
+  const digestFormMimic = boundJournalKeyComponent(oversizedTurnId)
+  const keyFor = (turnId: string) =>
+    agentJournalItemKey({ provider: 'codex', threadId: THREAD, turnId, ordinal: 0 })
+
+  it('separates an oversized component from the raw string matching its digest form', () => {
+    const oversizedKey = keyFor(oversizedTurnId)
+    expect(oversizedKey).toBe(`codex:${THREAD}:${digestFormMimic}:0`)
+    expect(oversizedKey).not.toBe(keyFor(digestFormMimic))
+  })
+
+  it('keeps both persisted key spellings stable through parse and re-key', () => {
+    for (const turnId of [oversizedTurnId, digestFormMimic]) {
+      const key = keyFor(turnId)
+      const parsed = parseAgentJournalItemKey(key)
+      expect(parsed).not.toBeNull()
+      expect(agentJournalItemKey(parsed as AgentJournalItemIdentity)).toBe(key)
+    }
+    expect(parseAgentJournalItemKey(keyFor(digestFormMimic))).toEqual({
+      provider: 'codex',
+      threadId: THREAD,
+      turnId: digestFormMimic,
+      ordinal: 0
+    })
+  })
+})
+
 describe('oversized identity bounding on Unicode boundaries', () => {
   // 39 UTF-16 units of ASCII put the astral character's surrogate pair across
   // the 40-unit diagnostic-head cut. Pre-fix the head ended in a lone high

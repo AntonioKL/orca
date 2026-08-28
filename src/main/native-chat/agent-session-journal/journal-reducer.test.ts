@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { agentJournalSubmissionKey } from '../../../shared/agent-session-journal-item-key'
+import {
+  agentJournalItemKey,
+  agentJournalSubmissionKey,
+  boundJournalKeyComponent,
+  MAX_JOURNAL_KEY_COMPONENT_CHARS
+} from '../../../shared/agent-session-journal-item-key'
 import type { AgentJournalMessageItem } from '../../../shared/agent-session-journal-types'
 import { structuredAgentSessionPayloadFingerprint } from '../../../shared/structured-agent-session-mutation'
 import {
@@ -416,5 +421,26 @@ describe('malformed persisted item keys', () => {
       { kind: 'item', itemId: '%', revision: 1, body: userText('hi'), ...base(1) }
     ])
     expect(renderJournalState(state).items[0]?.itemId).toBe('%')
+  })
+})
+
+describe('bounded item-key collisions', () => {
+  it('keeps an oversized turn and its raw digest-form mimic as separate items', () => {
+    const oversizedTurnId = 'a'.repeat(MAX_JOURNAL_KEY_COMPONENT_CHARS + 1)
+    const digestFormMimic = boundJournalKeyComponent(oversizedTurnId)
+    const keyFor = (turnId: string) =>
+      agentJournalItemKey({ provider: 'codex', threadId: 'thread-1', turnId, ordinal: 0 })
+    const oversizedKey = keyFor(oversizedTurnId)
+    const mimicKey = keyFor(digestFormMimic)
+
+    const state = fold([
+      { kind: 'item', itemId: oversizedKey, revision: 1, body: text('oversized'), ...base(1) },
+      { kind: 'item', itemId: mimicKey, revision: 1, body: text('mimic'), ...base(2) }
+    ])
+
+    expect(renderJournalState(state).items.map((item) => item.itemId)).toEqual([
+      oversizedKey,
+      mimicKey
+    ])
   })
 })

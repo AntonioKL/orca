@@ -7,6 +7,13 @@
 import type { AgentJournalItemIdentity } from './agent-session-journal-types'
 
 const KEY_DELIMITER = ':'
+const VERBATIM_BOUNDED_COMPONENT_TAG = '%FF'
+const BOUNDED_COMPONENT_PATTERN = /^[\s\S]{0,40}~orca-oversized~(?:[1-9]\d*)~[0-9a-f]{16}$/
+const PARSED_JOURNAL_ITEM_KEY = Symbol('parsedJournalItemKey')
+
+type ParsedJournalItemIdentity = AgentJournalItemIdentity & {
+  readonly [PARSED_JOURNAL_ITEM_KEY]?: string
+}
 
 /** Longest raw component a key may embed. Real provider ids are tens of bytes;
  *  anything larger would push the composed key past wire page budgets, so it
@@ -92,7 +99,17 @@ function fnv1a32(value: string, seed: number): number {
 }
 
 function encodePart(value: string | number): string {
-  return encodeURIComponent(boundJournalKeyComponent(String(value)))
+  const raw = String(value)
+  const bounded = boundJournalKeyComponent(raw)
+  const encoded = encodeURIComponent(bounded)
+  // `%FF` is not valid UTF-8 and cannot be emitted by encodeURIComponent.
+  return raw === bounded && isBoundedComponentRepresentation(raw)
+    ? `${VERBATIM_BOUNDED_COMPONENT_TAG}${encoded}`
+    : encoded
+}
+
+function isBoundedComponentRepresentation(value: string): boolean {
+  return BOUNDED_COMPONENT_PATTERN.test(value)
 }
 
 /**
@@ -106,6 +123,11 @@ function encodePart(value: string | number): string {
  * plus the uuid. Text never participates.
  */
 export function agentJournalItemKey(identity: AgentJournalItemIdentity): string {
+  // Parsed pre-tag digest keys must keep addressing their persisted revision chain.
+  const parsedKey = (identity as ParsedJournalItemIdentity)[PARSED_JOURNAL_ITEM_KEY]
+  if (parsedKey !== undefined) {
+    return parsedKey
+  }
   if (identity.provider === 'codex') {
     return [
       'codex',
@@ -136,40 +158,77 @@ export function agentJournalSubmissionKey(clientMessageId: string): string {
 /**
  * Inverse of {@link agentJournalItemKey}. Clients hold item KEYS, but an upsert
  * needs the identity behind one — answering an approval re-appends the same
- * item at the next revision. Every component is percent-encoded, and
- * `encodeURIComponent` escapes the delimiter, so the split is unambiguous.
+ * item at the next revision. Components are percent-encoded; raw strings that
+ * imitate a bounded component carry a reserved encoded-domain tag.
  */
 export function parseAgentJournalItemKey(key: string): AgentJournalItemIdentity | null {
   // Persisted keys can be corrupted: a malformed percent sequence must fail
   // the parse, never throw through journal replay or open.
   const parts: string[] = []
+  let preserveExactKey = false
   for (const part of key.split(KEY_DELIMITER)) {
-    try {
-      parts.push(decodeURIComponent(part))
-    } catch {
+    const decoded = decodePart(part)
+    if (!decoded) {
       return null
     }
+    parts.push(decoded.value)
+    preserveExactKey ||= decoded.tagged || isBoundedComponentRepresentation(decoded.value)
   }
   const [provider, ...rest] = parts
   if (provider === 'codex' && rest.length === 3) {
     const ordinal = Number(rest[2])
     return Number.isSafeInteger(ordinal) && ordinal >= 0
-      ? { provider, threadId: rest[0] as string, turnId: rest[1] as string, ordinal }
+      ? parsedIdentity(
+          { provider, threadId: rest[0] as string, turnId: rest[1] as string, ordinal },
+          key,
+          preserveExactKey
+        )
       : null
   }
   if (provider === 'claude' && rest.length === 2) {
-    return { provider, sessionId: rest[0] as string, uuid: rest[1] as string }
+    return parsedIdentity(
+      { provider, sessionId: rest[0] as string, uuid: rest[1] as string },
+      key,
+      preserveExactKey
+    )
   }
   if (provider === 'orca' && rest.length === 1) {
-    return { provider, clientMessageId: rest[0] as string }
+    return parsedIdentity({ provider, clientMessageId: rest[0] as string }, key, preserveExactKey)
   }
   if (provider === 'legacy' && rest.length === 3) {
-    return {
-      provider,
-      agent: rest[0] as string,
-      sessionId: rest[1] as string,
-      recordId: rest[2] as string
-    }
+    return parsedIdentity(
+      {
+        provider,
+        agent: rest[0] as string,
+        sessionId: rest[1] as string,
+        recordId: rest[2] as string
+      },
+      key,
+      preserveExactKey
+    )
   }
   return null
+}
+
+function decodePart(part: string): { value: string; tagged: boolean } | null {
+  const tagged = part.startsWith(VERBATIM_BOUNDED_COMPONENT_TAG)
+  try {
+    const value = decodeURIComponent(
+      tagged ? part.slice(VERBATIM_BOUNDED_COMPONENT_TAG.length) : part
+    )
+    return !tagged || isBoundedComponentRepresentation(value) ? { value, tagged } : null
+  } catch {
+    return null
+  }
+}
+
+function parsedIdentity<T extends AgentJournalItemIdentity>(
+  identity: T,
+  key: string,
+  preserveExactKey: boolean
+): T {
+  if (preserveExactKey) {
+    Object.defineProperty(identity, PARSED_JOURNAL_ITEM_KEY, { value: key })
+  }
+  return identity
 }
