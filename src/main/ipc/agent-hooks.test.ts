@@ -9,6 +9,7 @@ import { makePaneKey } from '../../shared/stable-pane-id'
 
 const dropStatusEntry = vi.fn()
 const dropStatusEntriesByTabPrefix = vi.fn()
+const liftClosedAgentStatusTabs = vi.fn()
 const retirePaneAuthority = vi.fn()
 const transferPaneAuthority = vi.fn()
 const canTransferPaneAuthority = vi.fn(() => true)
@@ -45,6 +46,7 @@ vi.mock('../agent-hooks/server', async () => {
     agentHookServer: {
       dropStatusEntry,
       dropStatusEntriesByTabPrefix,
+      liftClosedAgentStatusTabs,
       retirePaneAuthority,
       transferPaneAuthority,
       canTransferPaneAuthority,
@@ -106,6 +108,7 @@ vi.mock('../kimi/hook-service', () => ({
 beforeEach(() => {
   dropStatusEntry.mockReset()
   dropStatusEntriesByTabPrefix.mockReset()
+  liftClosedAgentStatusTabs.mockReset()
   retirePaneAuthority.mockReset()
   transferPaneAuthority.mockReset()
   canTransferPaneAuthority.mockReset()
@@ -386,6 +389,65 @@ describe('agentStatus:dropByTabPrefix IPC', () => {
     registerAgentHookHandlers()
 
     expect(removeAllListeners).toHaveBeenCalledWith('agentStatus:dropByTabPrefix')
+  })
+})
+
+describe('agentStatus:liftClosedTabs IPC', () => {
+  it('forwards validated tab ids so a returning tab stops being suppressed', async () => {
+    const { registerAgentHookHandlers } = await import('./agent-hooks')
+    registerAgentHookHandlers()
+
+    const handler = onHandlers.get('agentStatus:liftClosedTabs')
+    expect(handler).toBeDefined()
+    handler!({}, ['tab-1', 'tab-2'])
+
+    expect(liftClosedAgentStatusTabs).toHaveBeenCalledWith(['tab-1', 'tab-2'])
+  })
+
+  it('ignores a payload that is not an array', async () => {
+    const { registerAgentHookHandlers } = await import('./agent-hooks')
+    registerAgentHookHandlers()
+
+    const handler = onHandlers.get('agentStatus:liftClosedTabs')!
+    for (const value of ['tab-1', 123, undefined, null, {}] as unknown[]) {
+      expect(() => handler({}, value)).not.toThrow()
+    }
+
+    expect(liftClosedAgentStatusTabs).not.toHaveBeenCalled()
+  })
+
+  it('filters malformed ids out of an otherwise valid array', async () => {
+    const { registerAgentHookHandlers } = await import('./agent-hooks')
+    registerAgentHookHandlers()
+
+    onHandlers.get('agentStatus:liftClosedTabs')!({}, [
+      'tab-1',
+      123,
+      null,
+      'tab-1:leaf',
+      ' leading-space',
+      'x'.repeat(161)
+    ])
+
+    // Why assert the exact argument: a filter that let a malformed id through would still
+    // "have been called", so only the forwarded value proves the boundary held.
+    expect(liftClosedAgentStatusTabs).toHaveBeenCalledWith(['tab-1'])
+  })
+
+  it('skips the server entirely when every id is rejected', async () => {
+    const { registerAgentHookHandlers } = await import('./agent-hooks')
+    registerAgentHookHandlers()
+
+    onHandlers.get('agentStatus:liftClosedTabs')!({}, ['', 'tab-1:leaf', 'x'.repeat(161)])
+
+    expect(liftClosedAgentStatusTabs).not.toHaveBeenCalled()
+  })
+
+  it('removes any existing listener before registering the lift channel', async () => {
+    const { registerAgentHookHandlers } = await import('./agent-hooks')
+    registerAgentHookHandlers()
+
+    expect(removeAllListeners).toHaveBeenCalledWith('agentStatus:liftClosedTabs')
   })
 })
 

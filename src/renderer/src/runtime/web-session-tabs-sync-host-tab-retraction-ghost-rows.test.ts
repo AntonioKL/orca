@@ -273,16 +273,23 @@ function observeSidebar(store: TestStore, now: number): SidebarObservation {
   }
 }
 
+const liftClosedTabs = vi.fn()
+
 describe('a host-retracted paired tab leaves no ghost agent row behind', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(T0)
     resetWebSessionTabsSnapshotFreshnessForTests()
     resetRendererOwnedAgentStatusPanesForTests()
+    liftClosedTabs.mockClear()
+    // Why stub the bridge: lifting only the renderer marker leaves the tab suppressed in the
+    // main-process closed-tab set, which gates every hook event upstream of the renderer.
+    vi.stubGlobal('window', { ...globalThis.window, api: { agentStatus: { liftClosedTabs } } })
   })
 
   afterEach(() => {
     vi.useRealTimers()
+    vi.unstubAllGlobals()
     resetRendererOwnedAgentStatusPanesForTests()
   })
 
@@ -591,6 +598,10 @@ describe('a host-retracted paired tab leaves no ghost agent row behind', () => {
       store.getState().recentlyClosedAgentStatusTabIds[mirrorTabId(RETRACTED_TAB)],
       'a re-mirrored tab id kept its closed-tab marker'
     ).toBeUndefined()
+    expect(
+      liftClosedTabs.mock.calls.flatMap(([tabIds]) => tabIds as string[]),
+      'the renderer lifted its own marker but left the tab suppressed in the main process'
+    ).toContain(mirrorTabId(RETRACTED_TAB))
 
     // The returning pane's byte-derived status must land again.
     const release2 = replayClientByteStatus(
