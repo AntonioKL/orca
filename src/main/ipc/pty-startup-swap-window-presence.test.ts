@@ -145,14 +145,23 @@ describe('registerPtyHandlers daemon-swap-window presence', () => {
   })
 
   it('runtime controller hasPty never answers a paired-runtime handle from the local registry', () => {
-    const barrier = makeDeferred()
-    const controller = installRuntimeControllerWithBarrier(barrier.promise)
-    barrier.resolve()
+    // No startup barrier: the remote-handle guard must hold on its own, not
+    // ride on the swap-window gate. Same routing hazard the async probe and
+    // pty:hasPty already guard — no locally routed provider can
+    // authoritatively answer for a remote host's PTY, so remote-scoped ids
+    // stay unknown, never absent.
+    let controller: { hasPty: (ptyId: string) => boolean | null } | undefined
+    registerPtyHandlers(mainWindow as never, {
+      setPtyController: vi.fn((next) => {
+        controller = next
+      }),
+      registerPty: vi.fn(),
+      onPtySpawned: vi.fn(),
+      onPtyExit: vi.fn(),
+      onPtyData: vi.fn()
+    } as never)
 
-    // Same routing hazard the async probe and pty:hasPty already guard: no
-    // locally routed provider can authoritatively answer for a remote host's
-    // PTY, so remote-scoped ids stay unknown, never absent.
-    expect(controller.hasPty('remote:environment@@pty-1')).toBe(null)
+    expect(controller?.hasPty('remote:environment@@pty-1')).toBe(null)
   })
 
   it('runtime controller hasPty answers SSH-owned ids without waiting on the local swap', () => {
