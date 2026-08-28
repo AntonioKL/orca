@@ -127,6 +127,27 @@ describe('bottom drawer window hand-back', () => {
     act(() => renderer.unmount())
   })
 
+  it('remounts the sheet view when it takes the window back', () => {
+    const renderer = render(true)
+    update(renderer, false)
+    const drawerId = () =>
+      renderer.root
+        .findAll((node) => typeof node.props.nativeID === 'string')
+        .map((node) => node.props.nativeID as string)
+        .find((id) => id.startsWith('bottom-drawer-window-'))
+    const pinnedId = drawerId()
+    expect(pinnedId).toBeDefined()
+
+    update(renderer, true)
+
+    // Shared-value writes cannot heal a sheet whose native view was rebuilt
+    // under Reanimated (verified on device); only a remount repaints it. The
+    // epoch-keyed nativeID is the observable proof the remount happened.
+    expect(drawerId()).toBeDefined()
+    expect(drawerId()).not.toBe(pinnedId)
+    act(() => renderer.unmount())
+  })
+
   it('does not re-assert while the sheet stays pinned', () => {
     const renderer = render(true)
     update(renderer, false)

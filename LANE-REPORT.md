@@ -300,3 +300,88 @@ window and no focus stealing. I did not fall back to any other interaction metho
   before/after on a deterministic repro.
 * The `-ss`-before-`-i` trap in the brief is real; every frame timestamp here used output
   seeking.
+
+---
+
+# Confirmation round (2026-08-27, second agent)
+
+A follow-up session on the same worktree and the same **iPhone 17 Pro Max**
+(`CCA8A76F-77D1-4461-8318-63C7ED69D28E`, attached by UDID) re-verified the branch on device,
+scripted the whole flow through `orca emulator tap`/`type` with a 3-band luma classifier over
+frames from the helper's MJPEG stream, and ran attempt blocks against base, the committed fix,
+and two candidate heals. Confirmed frames land in `lane1-evidence/07-13`.
+
+## The dead screen was reproduced on base, with the full predicted fingerprint
+
+Under a "commit churn" condition (open the picker over the pinned form, flip Smart↔GitHub tabs
+twice — each flip re-runs the source fan-out and re-renders the whole modal content — then select
+a row), base hit the dead screen live (`07-confirm-dead-screen-base-tab-churn.png`):
+
+* dimmed workspace list, **no sheet anywhere** — the form's backdrop paints (so the form is
+  interactive with `progress = 1`) while the sheet itself does not;
+* the accessibility tree collapses to the 6 status-bar nodes — the empty modal window owns the
+  screen (`09-confirm-dead-ax-status-bar-only.json`);
+* every tap is swallowed; the only escape is a backdrop tap, which closes the whole modal
+  (`08-confirm-backdrop-tap-closed-modal.png`) — exactly the user's video.
+
+**Determinism was not achieved.** ~99 valid base attempts across seven conditions (settled-list
+selects, mid-search selects, fresh-modal-per-attempt, keystrokes inside the swap window, tab-flip
+churn, churn + 4-6 CPU burners through the pinned window) produced exactly one dead hit, in the
+churn condition during a spike of unrelated machine load. Commit pressure over the pinned sheet
+plus machine load raises the odds; nothing tried forces it on demand. The last hop stays inside
+the Fabric commit / Reanimated props race, not on an app-code line.
+
+## The committed fix did NOT close the hole — A1's re-assert was a no-op
+
+On the committed branch build (verified served: `hostEpochRef` in the bundle), the identical
+churn block hit the **same dead state 1 in 25** (`12-committed-fix-still-dead-1-of-25.png`,
+band-identical to the base dead frame). Mechanism: at hand-back `translateY` is already 0 and
+`progress` already 1, so `withTiming(1)` produces no style delta and nothing reaches the native
+view — the committed A1 cannot heal the state it targets.
+
+A value-level strengthening (seed a sub-pixel `translateY` nudge so the style output changes)
+was built, unit-tested, and **also died on device** (1 in 9, `13-nudge-fix-still-dead-1-of-9.png`):
+when the native view is rebuilt with a new tag, shared-value writes land on the stale binding.
+
+## The shipped heal: remount the sheet's view on window hand-back
+
+`MountedBottomDrawer` now keys the sheet's `Animated.View` on a `windowEpoch` that increments
+whenever a visible sheet takes the window back (`interactive` false → true). The fresh native
+view mounts with the style computed from the **current** shared values — `progress` is already 1,
+so it paints in place with no visible animation and no feel change. This is the in-app
+equivalent of the tint/Fast-Refresh experiment above, the only intervention that provably
+repaints. Cost: the sheet's native subtree is rebuilt once per picker close, and its scroll
+position resets (the user is at the form top at that moment anyway).
+
+Regression test: `bottom-drawer-window-handback.test.ts` now asserts the hand-back remount via
+the epoch-carrying `nativeID` (fails against the committed code: `expected undefined to be
+defined`) and keeps the no-remount-while-pinned guard.
+
+## Rates, same device, same host, same steps (churn condition, fresh modal per attempt)
+
+| build | attempts (valid) | dead |
+|---|---|---|
+| base `fecdf0bde8` | ~99 across all conditions | **1** (+ first agent's independent live repro) |
+| committed fix `b99232f764` | 24 | **1** |
+| nudge variant (discarded) | 9 | **1** |
+| **remount build (this branch)** | **50 (44 valid selections)** | **0** |
+
+`11-remount-fix-form-returns-with-pr.png` shows the form back on screen ~1.9 s after the row
+tap, still holding the picked PR (#16908). One 25-attempt block that overlapped source edits
+(Metro Fast Refresh mid-block) was discarded as mixed-build.
+
+## Confirmation-round honest limits
+
+* The dead state is rare at rest (~1-4 % per attempt under churn on this rig). 0/44 on the
+  remount build is strong but not proof; the mechanism argument (remount is the only heal that
+  rebinds a rebuilt native view, verified negatively twice) carries the rest of the weight.
+* The software keyboard could not be exercised (`orca emulator type` injects HID events without
+  raising it), so keyboard-dismissal-during-swap remains untested as an amplifier.
+* Bug B's reconnect-remount and Bug C's latency numbers were not re-measured; the first agent's
+  regression tests and measurements stand.
+* Rig incidents, all recovered and none affecting results: the dev-client app terminated three
+  times during long tap-loops (no crash report — likely jetsam); one scripted recovery tap
+  accidentally submitted the create form up to the setup-trust sheet, which was cancelled with
+  nothing created (verified against the host's worktree list); a later stray tap opened one idle
+  Terminal tab in the "main" session of the **lane1 dev instance** — it runs no commands and
+  dies with that dev host.
