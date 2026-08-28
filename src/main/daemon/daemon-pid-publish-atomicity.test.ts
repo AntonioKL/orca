@@ -14,14 +14,20 @@ import { parseDaemonPidFile } from './daemon-pid-file-parse'
  */
 const fsFaults: {
   tornWriteBytes: number | null
+  claimWriteError: NodeJS.ErrnoException | null
   linkError: NodeJS.ErrnoException | null
   events: string[]
-} = { tornWriteBytes: null, linkError: null, events: [] }
+} = { tornWriteBytes: null, claimWriteError: null, linkError: null, events: [] }
 
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof NodeFs>()
   const writeFileSync: typeof actual.writeFileSync = (file, data, options) => {
     fsFaults.events.push(`write:${String(file)}`)
+    // A full-disk or permission failure on the claim leaves no file behind at all,
+    // unlike the torn write above which persists a prefix first.
+    if (fsFaults.claimWriteError && String(file).includes('.publish-')) {
+      throw fsFaults.claimWriteError
+    }
     if (fsFaults.tornWriteBytes !== null && typeof data === 'string') {
       actual.writeFileSync(file, data.slice(0, fsFaults.tornWriteBytes), options)
       throw Object.assign(new Error('injected crash mid-write'), { code: 'EIO' })
@@ -61,6 +67,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'daemon-pid-atomic-'))
   pidPath = join(dir, 'daemon-v1.pid')
   fsFaults.tornWriteBytes = null
+  fsFaults.claimWriteError = null
   fsFaults.linkError = null
   fsFaults.events = []
   warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -133,6 +140,31 @@ describe('publishDaemonPidFile atomicity', () => {
     // An ownership conflict is routine, not a degrade: warning here would make the
     // real non-atomic warning below indistinguishable from a lost publish race.
     expect(warnSpy).not.toHaveBeenCalled()
+  })
+
+  it('refuses an ownership conflict outright instead of retrying it as a direct write', () => {
+    // Why the conflict is modelled at link time with the canonical path FREE: the record
+    // can be reclaimed between the failed link and the fallback write. Retrying the
+    // conflict as an exclusive write would then succeed and silently take ownership the
+    // EEXIST exists to deny. The conflict must be refused where it is detected.
+    fsFaults.linkError = Object.assign(new Error('injected EEXIST'), { code: 'EEXIST' })
+
+    expect(() => publishDaemonPidFile(pidPath, RECORD)).toThrow(/EEXIST/)
+
+    expect(fsFaults.events).not.toContain(`write:${pidPath}`)
+    expect(warnSpy).not.toHaveBeenCalled()
+    expect(listPublishScratch()).toEqual([])
+  })
+
+  it('surfaces the original publish failure, not the failure of its own cleanup', () => {
+    // Why: when the claim write fails outright no claim exists, so the `finally` unlink
+    // fails too. An unswallowed cleanup error replaces the real cause — an operator
+    // debugging a full disk would be handed ENOENT instead of ENOSPC.
+    fsFaults.claimWriteError = Object.assign(new Error('injected claim write failure'), {
+      code: 'ENOSPC'
+    })
+
+    expect(() => publishDaemonPidFile(pidPath, RECORD)).toThrow('injected claim write failure')
   })
 
   it('degrades to the exclusive direct write when the filesystem cannot hard-link', () => {
