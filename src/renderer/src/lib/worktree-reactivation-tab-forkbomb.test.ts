@@ -95,16 +95,21 @@ describe('STA-1111 worktree reopen does not fork-bomb tabs', () => {
       // its first PTY spawn consumes that startup command.
       if (reopen === 0) {
         expect(state.sleepingAgentSessionsByPaneKey[paneKey]).toBeDefined()
-        const consumed = state.consumeTabStartupCommand(tabs[0]!.id)
-        expect(consumed?.resumeProviderSession).toEqual(providerSession)
-        // The real pane lifecycle invokes this on the fresh PTY boundary.
+        // The real pane lifecycle invokes this on the fresh PTY boundary. Consume inside the
+        // callback so the tab the helper asks for is what actually gets spent.
+        let consumed: ReturnType<typeof state.consumeTabStartupCommand> = null
         consumeQueuedStartupAndClearSleepingRecord(
           tabs[0]!.id,
-          () => consumed,
+          (consumeTabId) => {
+            consumed = useAppStore.getState().consumeTabStartupCommand(consumeTabId)
+            return consumed
+          },
           (identityPaneKey) =>
             useAppStore.getState().sleepingAgentSessionsByPaneKey[identityPaneKey],
           useAppStore.getState().clearSleepingAgentSession
         )
+        expect(consumed).not.toBeNull()
+        expect(consumed!.resumeProviderSession).toEqual(providerSession)
         expect(useAppStore.getState().sleepingAgentSessionsByPaneKey[paneKey]).toBeUndefined()
       } else {
         // Later captures are stale replays of the already claimed session and
