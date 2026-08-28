@@ -11,13 +11,15 @@ export function openGitHubPRLinkModal({
   worktree,
   worktreeId,
   currentPR,
+  suppressHostedReviewRefresh = false,
   afterLinked
 }: {
   openModal: AppState['openModal']
   worktree: GitHubPRLinkModalWorktree
   worktreeId: string
   currentPR: number
-  afterLinked?: (linkedPR: number) => void
+  suppressHostedReviewRefresh?: boolean
+  afterLinked?: (linkedPR: number) => void | Promise<void>
 }): void {
   openModal('edit-meta', {
     worktreeId,
@@ -27,14 +29,16 @@ export function openGitHubPRLinkModal({
     executionHostId: worktree.hostId,
     currentDisplayName: worktree.displayName,
     currentIssue: worktree.linkedIssue,
-    currentPR,
+    reviewProvider: 'github',
+    currentReview: currentPR,
     currentComment: worktree.comment,
     focus: 'pr',
+    ...(suppressHostedReviewRefresh ? { suppressHostedReviewRefresh: true } : {}),
     ...(afterLinked
       ? {
-          afterSave: ({ updates }: { updates?: { linkedPR?: unknown } }) => {
+          afterSave: async ({ updates }: { updates?: { linkedPR?: unknown } }) => {
             if (typeof updates?.linkedPR === 'number') {
-              afterLinked(updates.linkedPR)
+              await afterLinked(updates.linkedPR)
             }
           }
         }

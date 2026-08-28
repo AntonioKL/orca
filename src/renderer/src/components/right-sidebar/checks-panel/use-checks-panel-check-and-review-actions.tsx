@@ -15,9 +15,8 @@ import { isMacPlatform } from '../../terminal-pane/terminal-link-open-hints'
 import { translate } from '@/i18n/i18n'
 import type { PRCheckDetail, PRCheckRunDetails } from '../../../../../shared/github/check-types'
 import type { GitHubPRStackMapNavigationModifiers } from '../GitHubPRStackMap'
-import { openGitHubPRLinkModal } from '../github-pr-link-modal'
 import type { ChecksPanelCheckAndReviewActionsInput } from './check-and-review-action-dependencies'
-import { useUnlinkGitHubPullRequest } from './use-unlink-github-pull-request'
+import { useChecksPanelReviewLinkActions } from './use-checks-panel-review-link-actions'
 
 function hasGitHubCheckHandle(check: PRCheckDetail): boolean {
   return Boolean(check.checkRunId || check.workflowRunId || check.url)
@@ -26,7 +25,6 @@ function hasGitHubCheckHandle(check: PRCheckDetail): boolean {
 export function useChecksPanelCheckAndReviewActions(model: ChecksPanelCheckAndReviewActionsInput) {
   const {
     activeReview,
-    activeWorktree,
     activeWorktreeId,
     asyncResultKeyRef,
     branch,
@@ -43,9 +41,6 @@ export function useChecksPanelCheckAndReviewActions(model: ChecksPanelCheckAndRe
     linkedBitbucketPR,
     linkedGiteaPR,
     linkedGitLabMR,
-    linkedPR,
-    suppressedGitHubPR,
-    openModal,
     panelContextKey,
     panelContextKeyRef,
     pr,
@@ -58,8 +53,7 @@ export function useChecksPanelCheckAndReviewActions(model: ChecksPanelCheckAndRe
     setCommentsLoading,
     setIsFixingChecksWithAI,
     sourceControlAiActionsVisible,
-    stateRequestKey,
-    updateWorktreeMeta
+    stateRequestKey
   } = model
   const handleFixChecksWithAI = useCallback(async (): Promise<void> => {
     if (
@@ -351,52 +345,15 @@ export function useChecksPanelCheckAndReviewActions(model: ChecksPanelCheckAndRe
     [activeWorktreeId]
   )
 
-  const handleUnlinkPullRequest = useUnlinkGitHubPullRequest({
-    activeReview,
-    activeWorktree,
-    activeWorktreeId,
-    linkedPR,
-    updateWorktreeMeta
-  })
-
-  const openLinkPullRequestModal = useCallback(
-    (currentPR: number) => {
-      if (!activeWorktreeId || !activeWorktree) {
-        return
-      }
-      openGitHubPRLinkModal({
-        openModal,
-        worktree: activeWorktree,
-        worktreeId: activeWorktreeId,
-        currentPR,
-        afterLinked: (linkedPR) => {
-          void refreshLinkedGitHubPullRequest(linkedPR)
-        }
-      })
-    },
-    [activeWorktree, activeWorktreeId, openModal, refreshLinkedGitHubPullRequest]
-  )
-
-  const handleLinkAnotherPullRequest = useCallback(() => {
-    if (!activeWorktreeId || !activeWorktree || activeReview?.provider !== 'github') {
-      return
-    }
-    openLinkPullRequestModal(activeWorktree.linkedPR ?? activeReview.number)
-  }, [activeReview, activeWorktree, activeWorktreeId, openLinkPullRequestModal])
-
-  const handleLinkSuppressedPullRequest = useCallback(() => {
-    if (linkedPR !== null || suppressedGitHubPR === null) {
-      return
-    }
-    openLinkPullRequestModal(suppressedGitHubPR)
-  }, [linkedPR, openLinkPullRequestModal, suppressedGitHubPR])
+  const { handleUnlinkReview, handleLinkAnotherReview, handleLinkSuppressedPullRequest } =
+    useChecksPanelReviewLinkActions(model, refreshLinkedGitHubPullRequest)
   return {
     handleFixChecksWithAI,
     refreshLinkedGitHubPullRequest,
     handleOpenPR,
     handleOpenStackPR,
-    handleUnlinkPullRequest,
-    handleLinkAnotherPullRequest,
+    handleUnlinkReview,
+    handleLinkAnotherReview,
     handleLinkSuppressedPullRequest
   }
 }

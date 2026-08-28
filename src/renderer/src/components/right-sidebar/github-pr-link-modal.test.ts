@@ -28,14 +28,15 @@ describe('openGitHubPRLinkModal', () => {
         worktreeId: 'wt-1',
         repoId: 'repo-1',
         executionHostId: 'ssh:host',
-        currentPR: 42,
+        reviewProvider: 'github',
+        currentReview: 42,
         focus: 'pr'
       })
     )
     const data = openModal.mock.calls[0]?.[1] as {
       afterSave: (result: { updates?: { linkedPR?: unknown } }) => void
     }
-    data.afterSave({ updates: { linkedPR: 42 } })
+    void data.afterSave({ updates: { linkedPR: 42 } })
     expect(afterLinked).toHaveBeenCalledWith(42)
   })
 })

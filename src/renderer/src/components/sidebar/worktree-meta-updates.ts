@@ -7,6 +7,9 @@ import { parseIssueLinkInput, type IssueLinkProvider } from '../../../../shared/
 import type { WorkspaceSourceProvider } from '../../../../shared/new-workspace/workspace-source'
 import type { WorktreeMeta } from '../../../../shared/worktree/meta-types'
 import type { WorkspaceLinkedItem } from '../../../../shared/worktree/types'
+import { parseGitLabIssueOrMRLink } from '../../../../shared/new-workspace/gitlab-links'
+
+export type WorktreeReviewProvider = 'github' | 'gitlab'
 
 export type WorktreeMetaSavedPayload = {
   worktreeId: string
@@ -18,7 +21,7 @@ export type WorktreeMetaDraft = {
   displayNameInput: string
   issueInput: string
   issueProvider: IssueLinkProvider
-  prInput: string
+  reviewInput: string
   commentInput: string
 }
 
@@ -73,6 +76,28 @@ export function parseGitHubWorkItemNumberForMetaField(
   }
 
   return parseGitHubIssueOrPRNumber(input)
+}
+
+export function parseGitLabMergeRequestNumberForMetaField(input: string): number | null {
+  const trimmed = input.trim()
+  const direct = trimmed.startsWith('!') ? trimmed.slice(1) : trimmed
+  if (/^\d+$/.test(direct)) {
+    const number = Number(direct)
+    return Number.isSafeInteger(number) && number > 0 ? number : null
+  }
+  let url: URL
+  try {
+    url = new URL(trimmed)
+  } catch {
+    return null
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return null
+  }
+  const link = parseGitLabIssueOrMRLink(trimmed)
+  return link?.type === 'mr' && Number.isSafeInteger(link.number) && link.number > 0
+    ? link.number
+    : null
 }
 
 // Why: blanking the field means "fall back to the branch/folder name", and the
@@ -237,23 +262,32 @@ function buildIssueLinkUpdates(
   return linearUpdates ? { linkedIssue: null, ...linearUpdates, ...displacedWorkItem } : {}
 }
 
-function buildPrLinkUpdate(
+function buildReviewLinkUpdate(
   draft: WorktreeMetaDraft,
   current: WorktreeMetaSnapshot,
-  live: WorktreeMetaLiveLinks
+  live: WorktreeMetaLiveLinks,
+  provider: WorktreeReviewProvider
 ): Partial<WorktreeMeta> {
-  const trimmed = draft.prInput.trim()
-  if (trimmed === current.prInput.trim()) {
+  const trimmed = draft.reviewInput.trim()
+  if (provider === 'github' && trimmed === current.prInput.trim()) {
     return {}
   }
   if (trimmed === '') {
-    return {
-      linkedPR: null,
-      ...(typeof live.linkedPR === 'number' ? { suppressedGitHubPR: live.linkedPR } : {})
-    }
+    return provider === 'gitlab'
+      ? { linkedGitLabMR: null }
+      : {
+          linkedPR: null,
+          ...(typeof live.linkedPR === 'number' ? { suppressedGitHubPR: live.linkedPR } : {})
+        }
   }
-  const number = parseGitHubWorkItemNumberForMetaField(trimmed, 'pr')
-  return number === null ? {} : { linkedPR: number }
+  const number =
+    provider === 'gitlab'
+      ? parseGitLabMergeRequestNumberForMetaField(trimmed)
+      : parseGitHubWorkItemNumberForMetaField(trimmed, 'pr')
+  if (number === null) {
+    return {}
+  }
+  return provider === 'gitlab' ? { linkedGitLabMR: number } : { linkedPR: number }
 }
 
 /** Pure save-payload builder for the worktree meta dialog: empty inputs clear
@@ -263,12 +297,13 @@ function buildPrLinkUpdate(
 export function buildWorktreeMetaUpdates(
   draft: WorktreeMetaDraft,
   current: WorktreeMetaSnapshot,
-  live: WorktreeMetaLiveLinks
+  live: WorktreeMetaLiveLinks,
+  reviewProvider: WorktreeReviewProvider = 'github'
 ): Partial<WorktreeMeta> {
   return {
     ...buildCommentUpdate(draft, current),
     ...buildDisplayNameUpdate(draft, current),
     ...buildIssueLinkUpdates(draft, current, live),
-    ...buildPrLinkUpdate(draft, current, live)
+    ...buildReviewLinkUpdate(draft, current, live, reviewProvider)
   }
 }
