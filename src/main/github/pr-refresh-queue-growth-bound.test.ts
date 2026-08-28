@@ -158,6 +158,50 @@ describe('pr-refresh queue growth bounds', () => {
     expect(lastBroadcast?.[1].aliases.map((alias) => alias.cacheKey)).toEqual(['/repo::churn/2'])
   })
 
+  it('does not restore an older candidate over a fresher branch switch', async () => {
+    const { reportVisiblePRRefreshCandidates } = await import('./pr-refresh-coordinator')
+    const first = makeCandidate({
+      cacheKey: '/repo::churn/1',
+      branch: 'churn/1',
+      worktreeId: 'wt-churn',
+      linkedPRNumber: 42,
+      cachedFetchedAt: null
+    })
+    const switched = makeCandidate({
+      cacheKey: '/repo::churn/2',
+      branch: 'churn/2',
+      worktreeId: 'wt-churn',
+      linkedPRNumber: 42,
+      cachedFetchedAt: Date.now(),
+      cachedHasPR: true,
+      cachedPRState: 'open',
+      cachedChecksStatus: 'success'
+    })
+
+    let didSwitch = false
+    getPRForBranchOutcomeMock.mockImplementation(async () => {
+      if (!didSwitch) {
+        didSwitch = true
+        reportVisiblePRRefreshCandidates([switched], 2, 1)
+      }
+      return {
+        kind: 'found' as const,
+        pr: makePR({ checksStatus: 'pending' as const }),
+        fetchedAt: Date.now()
+      }
+    })
+
+    reportVisiblePRRefreshCandidates([first], 1, 1)
+    await vi.advanceTimersByTimeAsync(100_000)
+
+    expect(getPRForBranchOutcomeMock.mock.calls.map((call) => call[1])).toEqual(['churn/1'])
+    await vi.advanceTimersByTimeAsync(500_001)
+    expect(getPRForBranchOutcomeMock.mock.calls.map((call) => call[1])).toEqual([
+      'churn/1',
+      'churn/2'
+    ])
+  })
+
   it('keeps distinct worktrees sharing one linked-PR key in the fan-out', async () => {
     const { enqueuePRRefresh, _getPRRefreshAliasCountForTests } =
       await import('./pr-refresh-coordinator')

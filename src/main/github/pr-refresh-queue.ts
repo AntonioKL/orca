@@ -53,21 +53,40 @@ function setLiveAlias(
 }
 
 /** Follow-up aliases were captured before the request ran, so anything enqueued
- *  while it was in flight is newer: a worktree already present here must keep the
- *  alias it was re-enqueued with, or a branch switch during the request would
- *  hand the fan-out back to the branch it just left. */
+ *  while it was in flight is newer. Return that preserved alias so callers do
+ *  not pair it with the stale request candidate. */
 function mergeFollowUpAlias(
   aliases: Map<string, GitHubPRRefreshAlias>,
   alias: GitHubPRRefreshAlias
-): void {
+): GitHubPRRefreshAlias | undefined {
   if (alias.worktreeId) {
     for (const existing of aliases.values()) {
       if (existing.worktreeId === alias.worktreeId) {
-        return
+        return existing
       }
     }
   }
   setLiveAlias(aliases, alias)
+  return undefined
+}
+
+function sameAliasRequestIdentity(
+  left: GitHubPRRefreshAlias,
+  right: GitHubPRRefreshAlias
+): boolean {
+  return (
+    left.cacheKey === right.cacheKey &&
+    left.repoId === right.repoId &&
+    left.repoPath === right.repoPath &&
+    left.branch === right.branch &&
+    left.worktreeId === right.worktreeId &&
+    left.connectionId === right.connectionId &&
+    left.executionHostId === right.executionHostId &&
+    left.linkedPRNumber === right.linkedPRNumber &&
+    left.fallbackPRNumber === right.fallbackPRNumber &&
+    left.fallbackPRSource === right.fallbackPRSource &&
+    left.currentHeadOid === right.currentHeadOid
+  )
 }
 
 /** A manual refresh merges its alias into its own copy of the map and writes it
@@ -249,10 +268,19 @@ export class PRRefreshQueue {
       this.set(entry.key, entry)
       return
     }
+    let candidateSuperseded = false
     for (const alias of entry.aliases.values()) {
-      mergeFollowUpAlias(existing.aliases, alias)
+      const preserved = mergeFollowUpAlias(existing.aliases, alias)
+      if (
+        preserved &&
+        alias.worktreeId === entry.candidate.worktreeId &&
+        !sameAliasRequestIdentity(preserved, alias)
+      ) {
+        candidateSuperseded = true
+      }
     }
     if (
+      candidateSuperseded ||
       bypassesFreshnessDelay(existing.reason) ||
       existing.priority > entry.priority ||
       existing.dueAt <= entry.dueAt

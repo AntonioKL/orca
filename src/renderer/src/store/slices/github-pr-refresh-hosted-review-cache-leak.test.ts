@@ -61,7 +61,7 @@ function foundEvent(branch: string, sequence: number): GitHubPRRefreshEvent {
     ],
     outcome: {
       kind: 'found',
-      fetchedAt: Date.now(),
+      fetchedAt: sequence,
       pr: {
         number: 1,
         title: 'pr',
