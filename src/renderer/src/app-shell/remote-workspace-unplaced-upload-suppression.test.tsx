@@ -227,7 +227,8 @@ describe('uploads from a client that could not place the host tabs', () => {
     const persistence = renderHook(() => useAppSessionPersistence())
     const sync = createSync()
 
-    expect(await sync.applyUnsolicitedSnapshot(TARGET_ID, snapshot())).toBe('placed')
+    await sync.applyUnsolicitedSnapshot(TARGET_ID, snapshot())
+    // Adoption is the observable outcome; the apply reports nothing back by design.
     expect(useAppStore.getState().tabsByWorktree[WORKTREE_ID]?.map((tab) => tab.id)).toEqual([
       'T1',
       'T2'

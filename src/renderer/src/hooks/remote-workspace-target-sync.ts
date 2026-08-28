@@ -15,10 +15,7 @@ import type {
 } from './direct-ssh-reconnect-coordinator'
 import { buildDirectSshSnapshotApplyToken } from './direct-ssh-reconnect-coordinator'
 import { resolveDirectSshTargetScope } from '../lib/direct-ssh-target-scope'
-import {
-  applyDirectSshRemoteWorkspaceSnapshot,
-  type DirectSshSnapshotPlacement
-} from './remote-workspace-snapshot-apply'
+import { applyDirectSshRemoteWorkspaceSnapshot } from './remote-workspace-snapshot-apply'
 
 const WORKSPACE_HYDRATION_TIMEOUT_MS = 10_000
 
@@ -46,10 +43,7 @@ export type RemoteWorkspaceTargetSyncDeps = {
 
 export type RemoteWorkspaceTargetSync = {
   syncAfterConnect: (token: DirectSshPreparationToken) => Promise<void>
-  applyUnsolicitedSnapshot: (
-    targetId: string,
-    snapshot: RemoteWorkspaceSnapshot
-  ) => Promise<DirectSshSnapshotPlacement>
+  applyUnsolicitedSnapshot: (targetId: string, snapshot: RemoteWorkspaceSnapshot) => Promise<void>
   stop: () => void
 }
 
@@ -217,11 +211,11 @@ export function createRemoteWorkspaceTargetSync(
   const applyUnsolicitedSnapshot = async (
     targetId: string,
     snapshot: RemoteWorkspaceSnapshot
-  ): Promise<DirectSshSnapshotPlacement> => {
+  ): Promise<void> => {
     const arrival = beginArrival(targetId)
     const authority = deps.getCurrentAuthority(targetId)
     if (!authority) {
-      return 'not-applied'
+      return
     }
     const input = await deps.capturePreparationInput(
       authority,
@@ -229,17 +223,17 @@ export function createRemoteWorkspaceTargetSync(
       snapshot.revision
     )
     if (!input || !isArrivalCurrent(targetId, arrival)) {
-      return 'not-applied'
+      return
     }
     const prepared = await deps.prepareOnly(input)
     if (!prepared.token || !isArrivalCurrent(targetId, arrival)) {
-      return 'not-applied'
+      return
     }
     const applyToken = buildDirectSshSnapshotApplyToken(prepared.token, snapshot.revision)
     if (!applyToken) {
-      return 'not-applied'
+      return
     }
-    const placement = await applyDirectSshRemoteWorkspaceSnapshot({
+    await applyDirectSshRemoteWorkspaceSnapshot({
       store: deps.store,
       snapshot,
       token: applyToken,
@@ -249,7 +243,6 @@ export function createRemoteWorkspaceTargetSync(
       waitForWorkspaceSessionReady,
       finalizeHydratedTerminals: deps.finalizeHydratedTerminals
     })
-    return placement
   }
 
   return {
