@@ -271,6 +271,116 @@ describe('Store', () => {
     ).toBe('host-pty')
   })
 
+  // Why a second, non-empty replay: the empty-binding case above is already carried by the
+  // Issue #217 merge in setLocalWorkspaceSession, so only the fence pins this one.
+  it('rejects a stale renderer replay that renames a host-bound PTY', async () => {
+    const store = await createStore()
+    const rendererReplay = (): void => {
+      store.setWorkspaceSession({
+        ...getDefaultWorkspaceSession(),
+        tabsByWorktree: {
+          wt1: [makeTerminalTab({ id: 'tab1', worktreeId: 'wt1', ptyId: 'stale-pty' })]
+        },
+        terminalLayoutsByTabId: {
+          tab1: {
+            root: { type: 'leaf', leafId: TEST_LEAF_1 },
+            activeLeafId: TEST_LEAF_1,
+            expandedLeafId: null,
+            ptyIdsByLeafId: { [TEST_LEAF_1]: 'stale-pty' }
+          }
+        }
+      })
+    }
+    rendererReplay()
+
+    expect(
+      store.persistPtyBinding({
+        worktreeId: 'wt1',
+        tabId: 'tab1',
+        leafId: TEST_LEAF_1,
+        ptyId: 'host-pty',
+        hostAdmittedMembership: true
+      })
+    ).toBe(true)
+
+    rendererReplay()
+
+    expect(
+      store.getWorkspaceSession().terminalLayoutsByTabId.tab1?.ptyIdsByLeafId?.[TEST_LEAF_1]
+    ).toBe('host-pty')
+    expect(store.getWorkspaceSession().tabsByWorktree.wt1[0].ptyId).toBe('host-pty')
+  })
+
+  // The tab record and the layout leaf are two separate persisted spellings of the same
+  // binding, and the renderer can desync either one alone — each must raise the fence.
+  it('fences a host binding that only corrects the tab record', async () => {
+    const store = await createStore()
+    const rendererReplay = (): void => {
+      store.setWorkspaceSession({
+        ...getDefaultWorkspaceSession(),
+        tabsByWorktree: {
+          wt1: [makeTerminalTab({ id: 'tab1', worktreeId: 'wt1', ptyId: 'stale-pty' })]
+        },
+        terminalLayoutsByTabId: {
+          tab1: {
+            root: { type: 'leaf', leafId: TEST_LEAF_1 },
+            activeLeafId: TEST_LEAF_1,
+            expandedLeafId: null,
+            ptyIdsByLeafId: { [TEST_LEAF_1]: 'host-pty' }
+          }
+        }
+      })
+    }
+    rendererReplay()
+
+    store.persistPtyBinding({
+      worktreeId: 'wt1',
+      tabId: 'tab1',
+      leafId: TEST_LEAF_1,
+      ptyId: 'host-pty',
+      hostAdmittedMembership: true
+    })
+
+    rendererReplay()
+
+    expect(store.getWorkspaceSession().tabsByWorktree.wt1[0].ptyId).toBe('host-pty')
+  })
+
+  it('fences a host binding that only corrects the layout leaf', async () => {
+    const store = await createStore()
+    const rendererReplay = (): void => {
+      store.setWorkspaceSession({
+        ...getDefaultWorkspaceSession(),
+        tabsByWorktree: {
+          wt1: [makeTerminalTab({ id: 'tab1', worktreeId: 'wt1', ptyId: 'host-pty' })]
+        },
+        terminalLayoutsByTabId: {
+          tab1: {
+            root: { type: 'leaf', leafId: TEST_LEAF_1 },
+            activeLeafId: TEST_LEAF_1,
+            expandedLeafId: null,
+            ptyIdsByLeafId: { [TEST_LEAF_1]: 'stale-pty' }
+          }
+        }
+      })
+    }
+    rendererReplay()
+
+    store.persistPtyBinding({
+      worktreeId: 'wt1',
+      tabId: 'tab1',
+      leafId: TEST_LEAF_1,
+      ptyId: 'host-pty',
+      hostAdmittedMembership: true
+    })
+
+    rendererReplay()
+
+    expect(
+      store.getWorkspaceSession().terminalLayoutsByTabId.tab1?.ptyIdsByLeafId?.[TEST_LEAF_1]
+    ).toBe('host-pty')
+  })
+
   it('admits a fresh host spawn after retirement while rejecting an older renderer topology', async () => {
     const store = await createStore()
     store.setWorkspaceSession({
