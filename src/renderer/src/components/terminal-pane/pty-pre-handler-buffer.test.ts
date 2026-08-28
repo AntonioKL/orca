@@ -269,11 +269,54 @@ describe('pre-handler PTY buffer', () => {
     expect(hasPreHandlerPtyExit(RECYCLED_PTY_ID)).toBe(true)
     drainPreHandlerPtyExit(RECYCLED_PTY_ID, vi.fn())
 
-    bufferPreHandlerPtyExit(RECYCLED_PTY_ID, 3, PRIOR_INCARNATION_ID)
     clearConsumedPreHandlerPtyExit(RECYCLED_PTY_ID)
     bufferPreHandlerPtyExit(RECYCLED_PTY_ID, 3, PRIOR_INCARNATION_ID)
     discardPreHandlerPtyExitFromForeignIncarnation(RECYCLED_PTY_ID, undefined)
     expect(hasPreHandlerPtyExit(RECYCLED_PTY_ID)).toBe(true)
+  })
+
+  // The identity rule is about exits only. `pty:data` carries no incarnation, so buffered bytes
+  // stay on the sequence fence and must survive a discard that rejects an exit beside them.
+  it('leaves buffered bytes alone when it discards a foreign exit', () => {
+    bufferPreHandlerPtyExit(RECYCLED_PTY_ID, 0, PRIOR_INCARNATION_ID)
+    bufferPreHandlerPtyData(RECYCLED_PTY_ID, 'startup bytes')
+
+    discardPreHandlerPtyExitFromForeignIncarnation(RECYCLED_PTY_ID, FRESH_INCARNATION_ID)
+
+    const data = vi.fn()
+    expect(hasPreHandlerPtyExit(RECYCLED_PTY_ID)).toBe(false)
+    drainPreHandlerPtyData(RECYCLED_PTY_ID, data)
+    expect(data).toHaveBeenCalledWith('startup bytes', undefined)
+  })
+
+  // The intersection of the two races this buffer exists for: the shell we just spawned dies before
+  // the pane attaches, AND the relay flushes the previous owner's exit for the same recycled id
+  // afterwards. Keyed on the id alone, the stranger overwrites our own exit and the identity discard
+  // then removes the only survivor — a pane bound to a PTY that is dead and never reported dead.
+  it("keeps our own pre-attach exit when a late stranger's exit lands on the same recycled id", () => {
+    const fence = currentPreHandlerPtySequence()
+    bufferPreHandlerPtyExit(RECYCLED_PTY_ID, 1, FRESH_INCARNATION_ID)
+    bufferPreHandlerPtyExit(RECYCLED_PTY_ID, 0, PRIOR_INCARNATION_ID)
+
+    discardPreHandlerPtyExitFromForeignIncarnation(RECYCLED_PTY_ID, FRESH_INCARNATION_ID)
+    discardPreHandlerPtyStateFromPriorIncarnation(RECYCLED_PTY_ID, fence)
+
+    const exit = vi.fn()
+    expect(hasPreHandlerPtyExit(RECYCLED_PTY_ID)).toBe(true)
+    drainPreHandlerPtyExit(RECYCLED_PTY_ID, exit)
+    expect(exit).toHaveBeenCalledWith(1)
+  })
+
+  it('replaces a duplicate exit for the same lifetime instead of crowding out another lifetime', () => {
+    bufferPreHandlerPtyExit(RECYCLED_PTY_ID, 1, FRESH_INCARNATION_ID)
+    bufferPreHandlerPtyExit(RECYCLED_PTY_ID, 9, FRESH_INCARNATION_ID)
+    bufferPreHandlerPtyExit(RECYCLED_PTY_ID, 0, PRIOR_INCARNATION_ID)
+
+    discardPreHandlerPtyExitFromForeignIncarnation(RECYCLED_PTY_ID, FRESH_INCARNATION_ID)
+
+    const exit = vi.fn()
+    drainPreHandlerPtyExit(RECYCLED_PTY_ID, exit)
+    expect(exit).toHaveBeenCalledWith(9)
   })
 
   // A malformed incarnation is evidence of nothing. Treating it as a value that disagrees with

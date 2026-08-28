@@ -35,29 +35,27 @@ describe('createIpcPtyTransport against a relay-recycled PTY id', () => {
     restorePtySpecWindow(originalWindow)
   })
 
-  /** Deliver `exit` while the spawn request is in flight, then settle the spawn. */
+  /** Deliver `exit` while the spawn request is in flight, then settle the spawn.
+   *
+   *  Firing from inside the spawn mock makes "after the request left the renderer" *definitional*
+   *  rather than microtask-scheduled: the fence is read before `spawnIpcPty` is called, so an exit
+   *  buffered during the call is always newer than the fence. That is the whole point — the fence
+   *  keeps this record, and only the incarnation can reject it. */
   async function connectWithExitDuringSpawn(
     exit: PtyExitPayload,
     spawnResponse: { id: string; incarnationId?: string }
   ): Promise<{ result: unknown; paneExit: ReturnType<typeof vi.fn> }> {
     const { createIpcPtyTransport } = await import('./pty-transport')
     const spawn = window.api.pty.spawn as unknown as ReturnType<typeof vi.fn>
-    let settleSpawn!: (value: { id: string; incarnationId?: string }) => void
-    spawn.mockReturnValueOnce(
-      new Promise((resolve) => {
-        settleSpawn = resolve
-      })
-    )
+    spawn.mockImplementationOnce(() => {
+      onExit?.(exit)
+      return Promise.resolve(spawnResponse)
+    })
     const paneExit = vi.fn()
     const transport = createIpcPtyTransport({})
-    const connecting = transport.connect({ url: '', callbacks: { onExit: paneExit } })
 
-    // Strictly after the spawn request left the renderer, so it is NEWER than #16970's fence.
-    await Promise.resolve()
-    onExit?.(exit)
-    settleSpawn(spawnResponse)
-
-    return { result: await connecting, paneExit }
+    const result = await transport.connect({ url: '', callbacks: { onExit: paneExit } })
+    return { result, paneExit }
   }
 
   it('does not report a fresh shell as exited when the id’s previous incarnation exits mid-spawn', async () => {
@@ -66,7 +64,9 @@ describe('createIpcPtyTransport against a relay-recycled PTY id', () => {
       { id: RECYCLED_PTY_ID, incarnationId: FRESH_INCARNATION_ID }
     )
 
-    expect(result).not.toMatchObject({ exitedBeforeAttach: true })
+    // Positive, not just "not dead": a bare `not.toMatchObject` would also pass on a bailed-out
+    // connect that returned undefined. A healthy fresh spawn resolves to its pty id.
+    expect(result).toBe(RECYCLED_PTY_ID)
     expect(paneExit).not.toHaveBeenCalled()
   })
 
@@ -82,9 +82,10 @@ describe('createIpcPtyTransport against a relay-recycled PTY id', () => {
     expect(paneExit).toHaveBeenCalledWith(3)
   })
 
-  // Absence is unknown, never a mismatch. An execution host that predates the field keeps exactly
-  // the behaviour #16970 shipped, which is what holds `remote:` runtime and older SSH hosts safe.
-  it('falls back to the sequence fence when the host names no incarnation', async () => {
+  // Absence is unknown, never a mismatch — so an SSH host predating the field, and the relay's own
+  // unnamed `{ id, code: -1 }` drop, keep exactly the behaviour #16970 shipped. (`remote:` runtime
+  // PTYs are not covered by this: their exits never traverse `pty:exit` at all.)
+  it('never discards on incarnation when the host names none', async () => {
     const { result, paneExit } = await connectWithExitDuringSpawn(
       { id: RECYCLED_PTY_ID, code: 3 },
       { id: RECYCLED_PTY_ID }

@@ -24,7 +24,11 @@ type BufferedPreHandlerPtyExit = {
 }
 
 const preHandlerPtyData = new Map<string, BufferedPreHandlerPtyState>()
-const preHandlerPtyExit = new Map<string, BufferedPreHandlerPtyExit>()
+// Why one record per lifetime and not one per id: a recycled id can have its previous lifetime's
+// exit still in flight while the lifetime that just replaced it also dies pre-attach. With a single
+// slot the late stranger overwrites the real exit, and the identity discard below then removes the
+// only survivor — leaving a pane bound to a PTY that is dead and will never be reported dead.
+const preHandlerPtyExit = new Map<string, BufferedPreHandlerPtyExit[]>()
 const consumedPreHandlerPtyExits = new Map<string, true>()
 const discardedPreHandlerPtyStates = new Map<string, ReturnType<typeof setTimeout>>()
 const DISCARDED_PRE_HANDLER_PTY_STATE_TTL_MS = 60_000
@@ -35,6 +39,9 @@ const DISCARDED_PRE_HANDLER_PTY_STATE_TTL_MS = 60_000
 const PRE_HANDLER_PTY_DATA_MAX_BYTES = 512 * 1024
 const PRE_HANDLER_PTY_DATA_MAX_PTYS = 64
 const PRE_HANDLER_PTY_EXIT_MAX_PTYS = 64
+// Why small: only lifetimes racing the same pre-attach window can coexist, which in practice is the
+// outgoing one and the incoming one.
+const PRE_HANDLER_PTY_EXIT_MAX_INCARNATIONS_PER_PTY = 4
 // Why: legit pre-attach windows drain within milliseconds and hold little
 // data. Sustained accumulation means a pane lost its data handler (the
 // frozen-pane detach/attach race) — leave a breadcrumb for trace capture.
@@ -89,10 +96,29 @@ export function discardPreHandlerPtyExitFromForeignIncarnation(
   if (!isPtyIncarnationId(incarnationId)) {
     return
   }
-  const exit = preHandlerPtyExit.get(ptyId)
-  if (exit?.incarnationId !== undefined && exit.incarnationId !== incarnationId) {
-    preHandlerPtyExit.delete(ptyId)
+  retainPreHandlerPtyExits(
+    ptyId,
+    (exit) => exit.incarnationId === undefined || exit.incarnationId === incarnationId
+  )
+}
+
+function retainPreHandlerPtyExits(
+  ptyId: string,
+  keep: (exit: BufferedPreHandlerPtyExit) => boolean
+): void {
+  const exits = preHandlerPtyExit.get(ptyId)
+  if (!exits) {
+    return
   }
+  const kept = exits.filter(keep)
+  if (kept.length === exits.length) {
+    return
+  }
+  if (kept.length === 0) {
+    preHandlerPtyExit.delete(ptyId)
+    return
+  }
+  preHandlerPtyExit.set(ptyId, kept)
 }
 
 export function bufferPreHandlerPtyData(ptyId: string, data: string, meta?: PtyDataMeta): void {
@@ -176,12 +202,28 @@ export function bufferPreHandlerPtyExit(
     return
   }
   evictOldestPtyIfAtCap(preHandlerPtyExit, ptyId, PRE_HANDLER_PTY_EXIT_MAX_PTYS)
-  preHandlerPtyExit.set(ptyId, {
+  const exit: BufferedPreHandlerPtyExit = {
     code,
     sequence: nextPreHandlerPtySequence(),
     // Record only a well-formed incarnation; a malformed one must not become evidence.
     ...(isPtyIncarnationId(incarnationId) ? { incarnationId } : {})
-  })
+  }
+  const exits = preHandlerPtyExit.get(ptyId)
+  if (!exits) {
+    preHandlerPtyExit.set(ptyId, [exit])
+    return
+  }
+  // A duplicate exit for a lifetime replaces that lifetime's record rather than crowding out
+  // another one's; unnamed records share the single `undefined` slot, as they did before.
+  const sameLifetime = exits.findIndex((entry) => entry.incarnationId === exit.incarnationId)
+  if (sameLifetime !== -1) {
+    exits[sameLifetime] = exit
+    return
+  }
+  exits.push(exit)
+  if (exits.length > PRE_HANDLER_PTY_EXIT_MAX_INCARNATIONS_PER_PTY) {
+    exits.shift()
+  }
 }
 
 /** Drop pre-handler state a freshly spawned PTY inherited from an earlier owner of its id.
@@ -200,10 +242,7 @@ export function discardPreHandlerPtyStateFromPriorIncarnation(
   ptyId: string,
   fenceSequence: number
 ): void {
-  const exit = preHandlerPtyExit.get(ptyId)
-  if (exit && exit.sequence <= fenceSequence) {
-    preHandlerPtyExit.delete(ptyId)
-  }
+  retainPreHandlerPtyExits(ptyId, (exit) => exit.sequence > fenceSequence)
   const data = preHandlerPtyData.get(ptyId)
   if (data && data.sequence <= fenceSequence) {
     preHandlerPtyData.delete(ptyId)
@@ -263,11 +302,18 @@ export function discardPreHandlerPtyState(ptyId: string): void {
 }
 
 export function hasPreHandlerPtyExit(ptyId: string): boolean {
-  return preHandlerPtyExit.has(ptyId)
+  return (preHandlerPtyExit.get(ptyId)?.length ?? 0) > 0
 }
 
 export function drainPreHandlerPtyExit(ptyId: string, handler: (code: number) => void): void {
-  const exit = preHandlerPtyExit.get(ptyId)
+  // Newest survivor: after the discards above at most one lifetime's records can still be ours, and
+  // picking by sequence keeps the last-write-wins delivery a single-slot buffer always had.
+  let exit: BufferedPreHandlerPtyExit | undefined
+  for (const candidate of preHandlerPtyExit.get(ptyId) ?? []) {
+    if (!exit || candidate.sequence > exit.sequence) {
+      exit = candidate
+    }
+  }
   if (exit === undefined) {
     return
   }
