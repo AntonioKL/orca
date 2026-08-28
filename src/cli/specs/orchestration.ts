@@ -109,7 +109,7 @@ export const ORCHESTRATION_COMMAND_SPECS: CommandSpec[] = [
       'On Windows PowerShell, quote comma-separated type filters, e.g. --types "worker_done,escalation".',
       '--format renders the returned rows as local text only; it never writes to another terminal.',
       'A bound Run replays the same Delivery until --ack; process every message before acknowledging.',
-      'Human output labels new versus replayed Deliveries. JSON also reports queuedMatchingMessages when newer filter-matching mail is blocked behind the fixed batch.'
+      'Human output labels new versus replayed Deliveries. JSON also reports queuedMatchingMessages when other filter-matching mail is blocked behind the fixed batch.'
     ]
   },
   {

@@ -128,12 +128,13 @@ function formatDeliveryAction(result: OrchestrationCheckOutput): string {
   if (!result.deliveryId) {
     return ''
   }
+  // Why: only an observed `false` may render as silence; every other value is unestablished.
   const queued =
     result.queuedMatchingMessages === true
-      ? '\nNewer messages matching this check are queued behind this Delivery.'
-      : result.queuedMatchingMessages === undefined
-        ? '\nQueued matching-message status is unavailable from this runtime.'
-        : ''
+      ? '\nOther messages matching this check are queued behind this Delivery.'
+      : result.queuedMatchingMessages === false
+        ? ''
+        : '\nQueued matching-message status is unavailable from this runtime.'
   const runFlag = result.runId ? ` --run ${result.runId}` : ''
   return `${queued}\nAfter processing every message, acknowledge this exact batch with \`orca orchestration check${runFlag} --ack ${result.deliveryId}\`.\n`
 }

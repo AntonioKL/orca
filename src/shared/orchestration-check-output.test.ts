@@ -66,7 +66,7 @@ describe('formatOrchestrationCheckText', () => {
     )
 
     expect(output).toContain('Delivery delivery_1 [replay: unacknowledged]')
-    expect(output).toContain('Newer messages matching this check are queued behind this Delivery.')
+    expect(output).toContain('Other messages matching this check are queued behind this Delivery.')
     expect(output).toContain('orchestration check --run run_1 --ack delivery_1')
   })
 
@@ -99,5 +99,41 @@ describe('formatOrchestrationCheckText', () => {
     expect(olderRuntimeOutput).toContain(
       'Queued matching-message status is unavailable from this runtime.'
     )
+  })
+
+  // Why: the SSH path casts the payload without validating, so an off-contract value
+  // must not read as a positively-established "nothing is queued".
+  it('treats an off-contract queued value as unavailable rather than silence', () => {
+    const output = formatOrchestrationCheckText(
+      {
+        count: 1,
+        deliveryId: 'delivery_bad',
+        replayed: true,
+        queuedMatchingMessages: null as unknown as boolean,
+        messages: [],
+        formatted: 'formatted message'
+      },
+      'term_coord'
+    )
+
+    expect(output).toContain('Queued matching-message status is unavailable from this runtime.')
+    expect(output).not.toContain('Other messages matching this check are queued')
+  })
+
+  it('stays silent about queued mail only when the runtime observed none', () => {
+    const output = formatOrchestrationCheckText(
+      {
+        count: 1,
+        deliveryId: 'delivery_clear',
+        replayed: true,
+        queuedMatchingMessages: false,
+        messages: [],
+        formatted: 'formatted message'
+      },
+      'term_coord'
+    )
+
+    expect(output).not.toContain('Queued matching-message status is unavailable')
+    expect(output).not.toContain('Other messages matching this check are queued')
   })
 })
