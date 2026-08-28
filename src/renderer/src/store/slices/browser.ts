@@ -97,6 +97,8 @@ type CreateBrowserPageOptions = {
   activate?: boolean
   title?: string
   browserRuntimeEnvironmentId?: string | null
+  /** Creates a page that shows a workspace document instead of a URL. */
+  docLocation?: BrowserPageDocLocation
 }
 
 type BrowserTabPageState = {
@@ -1187,6 +1189,7 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
         activate: true,
         sessionProfileId,
         sessionPartition,
+        ...(snap.docLocation ? { docLocation: snap.docLocation } : {}),
         targetGroupId: entryToRestore.position?.groupId
       })
       restoreRecentlyClosedTabPosition(get, worktreeId, restored.id, entryToRestore.position)
@@ -1201,14 +1204,16 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
       sessionProfileId,
       sessionPartition,
       targetGroupId: entryToRestore.position?.groupId,
-      browserRuntimeEnvironmentId: firstPage.browserRuntimeEnvironmentId
+      browserRuntimeEnvironmentId: firstPage.browserRuntimeEnvironmentId,
+      ...(firstPage.docLocation ? { docLocation: firstPage.docLocation } : {})
     })
 
     for (const p of restPages) {
       get().createBrowserPage(restored.id, p.url, {
         activate: false,
         title: p.title,
-        browserRuntimeEnvironmentId: p.browserRuntimeEnvironmentId
+        browserRuntimeEnvironmentId: p.browserRuntimeEnvironmentId,
+        ...(p.docLocation ? { docLocation: p.docLocation } : {})
       })
     }
 
@@ -1288,7 +1293,9 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
       workspace.worktreeId,
       url,
       options?.title,
-      options?.browserRuntimeEnvironmentId
+      options?.browserRuntimeEnvironmentId,
+      undefined,
+      options?.docLocation
     )
 
     set((s) => {
@@ -1309,6 +1316,7 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
         s.activeBrowserTabIdByWorktree[workspace.worktreeId] === workspaceId
       const shouldFocusAddressBar =
         shouldUpdateGlobalActiveSurface &&
+        !page.docLocation &&
         (page.url === 'about:blank' || page.url === ORCA_BROWSER_BLANK_URL)
 
       return {
@@ -1476,7 +1484,8 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
     return get().createBrowserPage(workspaceId, pageToRestore.url, {
       title: pageToRestore.title,
       activate: true,
-      browserRuntimeEnvironmentId: pageToRestore.browserRuntimeEnvironmentId
+      browserRuntimeEnvironmentId: pageToRestore.browserRuntimeEnvironmentId,
+      ...(pageToRestore.docLocation ? { docLocation: pageToRestore.docLocation } : {})
     })
   },
 
