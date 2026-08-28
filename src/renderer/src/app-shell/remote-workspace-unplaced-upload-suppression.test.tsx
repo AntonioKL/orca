@@ -34,7 +34,7 @@ const REPO_ROOT = '/srv/proj'
 const HOST_PATH = `${REPO_ROOT}/alpha`
 const WORKTREE_ID = `repo-a::${HOST_PATH}`
 /** Long enough that any deferred retry or debounce would have fired if one existed. */
-const TOTAL_CHAIN_MS = 12_000
+const SETTLE_MS = 12_000
 /** Longer than the post-apply session-write suppression in remote-workspace-snapshot-apply.ts. */
 const WRITE_SUPPRESSION_MS = 1_500
 const DEBOUNCE_MS = 300
@@ -191,10 +191,15 @@ describe('uploads from a client that could not place the host tabs', () => {
     const persistence = renderHook(() => useAppSessionPersistence())
     const sync = createSync()
 
-    expect(await sync.applyUnsolicitedSnapshot(TARGET_ID, snapshot())).toBe('unplaced')
-    expect(useAppStore.getState().tabsByWorktree[WORKTREE_ID]).toBeUndefined()
+    // Deliberately not asserting the placement verdict first: the oracle is the upload, and a
+    // precondition on the verdict would fail ahead of it and hide whether the upload gate holds.
+    await sync.applyUnsolicitedSnapshot(TARGET_ID, snapshot())
+    expect(
+      useAppStore.getState().tabsByWorktree[WORKTREE_ID],
+      'the host named two terminals and this client placed neither'
+    ).toBeUndefined()
 
-    // Mid-chain: retries are still running and the target is not authoritative yet.
+    // Before the client has settled: it is not authoritative for this target yet.
     await touchSessionAndSettle('mid-chain')
     expect(
       uploadedTargetIds(),
@@ -202,14 +207,15 @@ describe('uploads from a client that could not place the host tabs', () => {
     ).not.toContain(TARGET_ID)
 
     // Still no upload once everything has settled: not adopting is not permission to overwrite the host.
-    await vi.advanceTimersByTimeAsync(TOTAL_CHAIN_MS)
-    expect(useAppStore.getState().remoteWorkspaceSyncStatusByTargetId[TARGET_ID]?.phase).toBe(
-      'error'
-    )
-    await touchSessionAndSettle('post-exhaustion')
+    await vi.advanceTimersByTimeAsync(SETTLE_MS)
+    expect(
+      useAppStore.getState().remoteWorkspaceSyncStatusByTargetId[TARGET_ID]?.phase,
+      'a client that placed none of the host tabs reported a healthy sync'
+    ).not.toBe('synced')
+    await touchSessionAndSettle('settled')
     expect(
       uploadedTargetIds(),
-      'exhaustion authorised a replace-session upload built from an incomplete projection'
+      'settling authorised a replace-session upload built from an incomplete projection'
     ).not.toContain(TARGET_ID)
 
     sync.stop()
