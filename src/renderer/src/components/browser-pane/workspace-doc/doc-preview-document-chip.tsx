@@ -35,7 +35,7 @@ export function DocPreviewDocumentChip({
           type="button"
           onClick={() => void copyText()}
           aria-label={copied ? copiedLabel : copyLabel}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-border bg-background px-3 py-1 text-left shadow-sm hover:bg-accent/40 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+          className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-xl border border-border bg-background px-3 py-1 text-left shadow-sm hover:bg-accent/40 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
         >
           {copied ? (
             <Check className="size-4 shrink-0 text-muted-foreground" />
@@ -47,13 +47,15 @@ export function DocPreviewDocumentChip({
             <span className="text-muted-foreground">{identity.directoryPrefix}</span>
             <span className="text-foreground">{identity.fileName}</span>
           </span>
-          <span className="hidden shrink-0 items-center gap-1.5 text-xs text-muted-foreground sm:flex">
-            {translate(
-              'auto.components.editor.HtmlDocPreview.workspaceFileChipLabel',
-              'Workspace file'
-            )}
+          <span className="hidden min-w-0 items-center gap-1.5 text-xs text-muted-foreground sm:flex">
+            <span className="shrink-0">
+              {translate(
+                'auto.components.editor.HtmlDocPreview.workspaceFileChipLabel',
+                'Workspace file'
+              )}
+            </span>
             {identity.hostLabel ? (
-              <Badge variant="secondary" className="max-w-40 truncate font-normal">
+              <Badge variant="secondary" className="min-w-0 max-w-40 shrink truncate font-normal">
                 {identity.hostLabel}
               </Badge>
             ) : null}

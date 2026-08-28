@@ -264,6 +264,22 @@ describe('a browser page that shows a workspace document', () => {
     expect(mocks.releaseDocPreviewGrant).toHaveBeenCalledTimes(1)
   })
 
+  it('revokes a document grant when only that page is closed', () => {
+    mocks.releaseDocPreviewGrant.mockClear()
+    const store = createStoreWithWorktree()
+    const tab = store.getState().createBrowserTab(WORKTREE_ID, LIVE_GRANT_URL, {
+      docLocation: DOC_LOCATION,
+      browserRuntimeEnvironmentId: null
+    })
+    const docPageId = store.getState().browserPagesByWorkspace[tab.id]?.[0]?.id ?? ''
+    store.getState().createBrowserPage(tab.id, 'https://example.com/')
+
+    store.getState().closeBrowserPage(docPageId)
+
+    expect(mocks.releaseDocPreviewGrant).toHaveBeenCalledExactlyOnceWith(docPageId)
+    expect(store.getState().browserPagesByWorkspace[tab.id]).toHaveLength(1)
+  })
+
   it('writes the document and not the grant to the session', () => {
     const store = createStoreWithWorktree()
     const tab = store.getState().createBrowserTab(WORKTREE_ID, LIVE_GRANT_URL, {

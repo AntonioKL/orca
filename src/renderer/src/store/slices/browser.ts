@@ -1351,6 +1351,7 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
 
   closeBrowserPage: (pageId) => {
     let closedWorkspaceIdForLabel: string | null = null
+    let docPageIdToRelease: string | null = null
     const remotePagesToClose: { worktreeId: string; handle: RemoteBrowserPageHandle }[] = []
     set((s) => {
       const page = findPage(s.browserPagesByWorkspace, pageId)
@@ -1362,6 +1363,7 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
         return s
       }
       closedWorkspaceIdForLabel = page.workspaceId
+      docPageIdToRelease = page.docLocation ? page.id : null
       const currentPages = s.browserPagesByWorkspace[workspace.id] ?? []
       const nextPages = currentPages.filter((entry) => entry.id !== pageId)
       const closedIdx = currentPages.findIndex((entry) => entry.id === pageId)
@@ -1430,6 +1432,10 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
 
     for (const remotePage of remotePagesToClose) {
       closeRemoteBrowserPageInOwningEnvironment(remotePage.worktreeId, remotePage.handle)
+    }
+
+    if (docPageIdToRelease) {
+      releaseDocPreviewGrant(docPageIdToRelease)
     }
 
     const closedWorkspaceId = closedWorkspaceIdForLabel

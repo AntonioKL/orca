@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
+  authorizeDocPreviewDirectory,
   getDocPreviewGrant,
   mintDocPreviewGrant,
   resolveCanonicalDocPreviewPath,
@@ -118,6 +119,60 @@ describe('resolveDocPreviewTargetPath', () => {
     expect(resolveDocPreviewTargetPath(grant, 'index.html')).toBe('/srv/repo/docs/index.html')
     expect(resolveDocPreviewTargetPath(grant, '../secret.env')).toBeNull()
   })
+
+  it('authorizes only the requested sibling directory', () => {
+    const grant = mintDocPreviewGrant({
+      owner: sshOwner,
+      requestBase: '/srv/repo',
+      root: '/srv/repo/docs',
+      entryRelativePath: 'docs/report.html',
+      browserPageId: 'page-1'
+    })
+
+    expect(resolveDocPreviewTargetPath(grant, 'docs/report.html')).toBe(
+      '/srv/repo/docs/report.html'
+    )
+    expect(resolveDocPreviewTargetPath(grant, 'assets/chart.js')).toBeNull()
+    expect(resolveDocPreviewTargetPath(grant, '.env')).toBeNull()
+
+    expect(authorizeDocPreviewDirectory(grant.id, 'assets/chart.js')).toBe(true)
+    expect(resolveDocPreviewTargetPath(grant, 'assets/chart.js')).toBe('/srv/repo/assets/chart.js')
+    expect(resolveDocPreviewTargetPath(grant, 'assets/theme.css')).toBe(
+      '/srv/repo/assets/theme.css'
+    )
+    expect(resolveDocPreviewTargetPath(grant, '.env')).toBeNull()
+  })
+
+  it('refuses malformed authorization requests and unknown grants', () => {
+    const grant = mintDocPreviewGrant({
+      owner: sshOwner,
+      requestBase: '/srv/repo',
+      root: '/srv/repo/docs',
+      entryRelativePath: 'docs/report.html',
+      browserPageId: 'page-1'
+    })
+
+    expect(authorizeDocPreviewDirectory(grant.id, '../outside/secret.txt')).toBe(false)
+    expect(authorizeDocPreviewDirectory(grant.id, 'assets\\secret.txt')).toBe(false)
+    expect(authorizeDocPreviewDirectory('0'.repeat(32), 'assets/chart.js')).toBe(false)
+    expect(grant.authorizedRoots).toEqual([])
+  })
+
+  it('uses Windows semantics when authorizing a sibling directory', () => {
+    const grant = mintDocPreviewGrant({
+      owner: sshOwner,
+      requestBase: 'C:\\srv\\repo',
+      root: 'C:\\srv\\repo\\docs',
+      entryRelativePath: 'docs/report.html',
+      browserPageId: 'page-1'
+    })
+
+    expect(authorizeDocPreviewDirectory(grant.id, 'assets/chart.js')).toBe(true)
+    expect(resolveDocPreviewTargetPath(grant, 'assets/chart.js')).toBe(
+      'C:\\srv\\repo\\assets\\chart.js'
+    )
+    expect(authorizeDocPreviewDirectory(grant.id, '../outside/secret.txt')).toBe(false)
+  })
 })
 
 describe('resolveCanonicalDocPreviewPath', () => {
@@ -140,6 +195,29 @@ describe('resolveCanonicalDocPreviewPath', () => {
     await expect(
       resolveCanonicalDocPreviewPath(grant, '/srv/repo/docs/report.html', async (path) => path)
     ).resolves.toBe('/srv/repo/docs/report.html')
+  })
+
+  it('keeps an approved SSH directory inside the canonical workspace boundary', async () => {
+    const grant = mintDocPreviewGrant({
+      owner: sshOwner,
+      requestBase: '/srv/repo',
+      root: '/srv/repo/docs',
+      entryRelativePath: 'docs/report.html',
+      browserPageId: 'page-1'
+    })
+    authorizeDocPreviewDirectory(grant.id, 'assets/chart.js')
+
+    await expect(
+      resolveCanonicalDocPreviewPath(grant, '/srv/repo/assets/chart.js', async (path) => {
+        if (path === '/srv/repo/assets') {
+          return '/srv/repo/assets'
+        }
+        if (path === '/srv/repo/assets/chart.js') {
+          return '/etc/shadow'
+        }
+        return path
+      })
+    ).resolves.toBeNull()
   })
 })
 
