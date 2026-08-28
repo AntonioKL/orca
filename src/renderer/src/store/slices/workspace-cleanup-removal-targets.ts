@@ -30,9 +30,9 @@ import type { WorkspaceCleanupFailure } from './workspace-cleanup'
 import {
   getWorkspaceCleanupGitUnavailableFailure,
   getWorkspaceCleanupMissingFailure,
+  getWorkspaceCleanupPostConfirmationMessage,
   getWorkspaceCleanupRepoScanFailure,
-  hasValidWorkspaceCleanupUnverifiedConsent,
-  hasWorkspaceCleanupRiskEscalated
+  hasValidWorkspaceCleanupUnverifiedConsent
 } from './workspace-cleanup-preflight-failures'
 
 /** Distinct from every ExecutionHostId, so a hostless row cannot alias one. */
@@ -311,16 +311,13 @@ export function evaluateWorkspaceCleanupPreflight(
       )
     )
   }
-  const approvedCandidate = target.approvedCandidate
-  if (approvedCandidate) {
-    if (hasWorkspaceCleanupRiskEscalated(candidate, approvedCandidate)) {
-      return failure(
-        translate(
-          'auto.store.slices.workspace.cleanup.changedSinceConfirmation',
-          'Workspace changed after confirmation. Refresh to review it before removing.'
-        )
-      )
-    }
+  // This rescan also re-probes terminals; any verdict it adds post-confirmation
+  // was never shown to the user, so deleting on it would delete without consent.
+  const changedSinceConfirmation = target.approvedCandidate
+    ? getWorkspaceCleanupPostConfirmationMessage(candidate, target.approvedCandidate)
+    : null
+  if (changedSinceConfirmation) {
+    return failure(changedSinceConfirmation)
   }
   const sameIdSurvivingHostId = [...(identitiesByWorktreeId.get(target.worktreeId) ?? [])]
     .filter((identity) => identity !== candidateIdentity)

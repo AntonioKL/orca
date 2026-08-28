@@ -1,5 +1,6 @@
 import type { ExecutionHostId } from '../../../../shared/execution-host'
 import type {
+  WorkspaceCleanupBlocker,
   WorkspaceCleanupCandidate,
   WorkspaceCleanupScanError,
   WorkspaceCleanupUnverifiedRemovalConsent
@@ -29,17 +30,51 @@ export function getWorkspaceCleanupMissingFailure(
   }
 }
 
-export function hasWorkspaceCleanupRiskEscalated(
+/**
+ * Why the removal must stop, when the rescan the user never saw changed the
+ * picture they confirmed against. `null` when nothing new appeared — a verdict
+ * the confirmed row already carried is still covered by that consent.
+ *
+ * Each message states the verdict the preflight holds now. A verdict absent from
+ * the approved snapshot need not have *arisen* after the confirmation — that
+ * snapshot may simply never have observed it — so no message claims it did.
+ *
+ * The liveness messages stay distinct from each other because the verdicts are:
+ * `running-terminal` and `live-agent` are positive evidence of live work, while
+ * `terminal-liveness-unknown` is loss of contact, which is never evidence that
+ * anything is running.
+ */
+export function getWorkspaceCleanupPostConfirmationMessage(
   candidate: WorkspaceCleanupCandidate,
   approvedCandidate: WorkspaceCleanupCandidate
-): boolean {
-  return (
+): string | null {
+  const added = (blocker: WorkspaceCleanupBlocker): boolean =>
+    candidate.blockers.includes(blocker) && !approvedCandidate.blockers.includes(blocker)
+  if (
     (shouldForceWorkspaceCleanupRemoval(candidate) &&
       !shouldForceWorkspaceCleanupRemoval(approvedCandidate)) ||
-    WORKSPACE_CLEANUP_RECONFIRM_BLOCKERS.some(
-      (blocker) =>
-        candidate.blockers.includes(blocker) && !approvedCandidate.blockers.includes(blocker)
+    WORKSPACE_CLEANUP_CONCRETE_RISK_BLOCKERS.some(added)
+  ) {
+    return translate(
+      'auto.store.slices.workspace.cleanup.changedSinceConfirmation',
+      'Workspace changed after confirmation. Refresh to review it before removing.'
     )
+  }
+  if (WORKSPACE_CLEANUP_LIVE_WORK_BLOCKERS.some(added)) {
+    return translate(
+      'auto.store.slices.workspace.cleanup.liveWorkSinceConfirmation',
+      'A terminal or agent in this workspace is running. Review it before removing.'
+    )
+  }
+  // Blocks without proving risk: the confirm screen names this verdict, so a row
+  // confirmed while its terminal read idle was authorized on evidence the
+  // preflight no longer has. Deleting anyway spends consent the user never gave.
+  if (!added('terminal-liveness-unknown')) {
+    return null
+  }
+  return translate(
+    'auto.store.slices.workspace.cleanup.livenessUnverifiableSinceConfirmation',
+    "Orca cannot verify this workspace's terminals. Review it before removing."
   )
 }
 
@@ -105,10 +140,8 @@ export function getWorkspaceCleanupGitUnavailableFailure(
 // Unlike unknown-base and git-status-error, these facts prove known work is at risk.
 const WORKSPACE_CLEANUP_CONCRETE_RISK_BLOCKERS = ['dirty-files', 'unpushed-commits'] as const
 
-// Why 'terminal-liveness-unknown' joins them without proving risk: the confirm screen
-// names it, so a row confirmed while its terminal read idle was authorized on evidence
-// the preflight no longer has. Deleting anyway spends consent the user never gave.
-const WORKSPACE_CLEANUP_RECONFIRM_BLOCKERS = [
-  ...WORKSPACE_CLEANUP_CONCRETE_RISK_BLOCKERS,
-  'terminal-liveness-unknown'
-] as const
+// Kept apart from the risk blockers above on purpose: these two are positive
+// evidence that work is live, while `terminal-liveness-unknown` is the loss of
+// contact that proves nothing either way. Both invalidate a confirmation, but
+// only these may be reported to the user as running.
+const WORKSPACE_CLEANUP_LIVE_WORK_BLOCKERS = ['running-terminal', 'live-agent'] as const
