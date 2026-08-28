@@ -12,7 +12,9 @@ export type ChecksPanelEmptyContentModel = Pick<
   | 'activeReview'
   | 'isFolder'
   | 'linkedGitLabMR'
+  | 'linkedPR'
   | 'linkedReviewNumber'
+  | 'prNumber'
   | 'prRefreshState'
   | 'suppressedGitHubPR'
 > &

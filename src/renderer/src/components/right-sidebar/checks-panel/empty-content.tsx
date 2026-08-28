@@ -9,6 +9,7 @@ import {
 import { openChecksPanelHostedReviewUrl } from '../checks-panel-hosted-review-click-routing'
 import { isMacPlatform } from '../../terminal-pane/terminal-link-open-hints'
 import { translate } from '@/i18n/i18n'
+import { isGitHubPRSuppressed } from '../../../../../shared/worktree/github-pr-suppression'
 import type { ChecksPanelEmptyContentModel } from './empty-content-props'
 
 export function ChecksPanelEmptyContent({
@@ -53,6 +54,7 @@ export function ChecksPanelEmptyContent({
     isRemoteOperationActive,
     isSyncingBranch,
     linkedGitLabMR,
+    linkedPR,
     linkedReviewNumber,
     panelContextKey,
     prAiGenerationEnabled,
@@ -67,6 +69,7 @@ export function ChecksPanelEmptyContent({
     prGenerateDisabledReason,
     prGenerateError,
     prGenerating,
+    prNumber,
     prRepoDefaultBaseRef,
     prStackedCreationSupported,
     prTitle,
@@ -117,7 +120,9 @@ export function ChecksPanelEmptyContent({
     )
   }
 
-  if (!activeReview && linkedReviewNumber === null && suppressedGitHubPR !== null) {
+  const currentGitHubPRIsSuppressed =
+    prNumber !== null && isGitHubPRSuppressed({ linkedPR, suppressedGitHubPR }, prNumber)
+  if (!activeReview && linkedReviewNumber === null && currentGitHubPRIsSuppressed) {
     return (
       <div className="px-4 py-6">
         <div className="text-sm font-medium text-foreground">
