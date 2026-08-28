@@ -13,6 +13,7 @@ import {
   type Tray,
   session
 } from 'electron'
+import { applyMacPressAndHoldDefaultAtStartup } from './macos-press-and-hold-default'
 import { initTccPromptNotice, stopTccPromptNotice } from './macos-tcc-prompt-notice'
 import { electronApp, is } from '@electron-toolkit/utils'
 import {
@@ -211,6 +212,7 @@ import {
 } from './startup/single-instance-lock'
 import { startEventLoopStallProbe } from './startup/event-loop-stall-probe'
 import { startMainThreadChurnProbe } from './diagnostics/main-thread-churn-probe'
+import { settledDiffCache } from './git/source-control/git-read-cache-invalidation'
 import { parseSkillShareId } from '../shared/skill-share-link'
 import { SkillShareDeepLinkState } from './startup/skill-share-deep-link-state'
 import {
@@ -317,6 +319,11 @@ import { browserCertificateTrustController, browserManager } from './browser/bro
 import { RpcDispatcher } from './runtime/rpc/dispatcher'
 import { OffscreenBrowserBackend } from './browser/offscreen-browser-backend'
 import { initializeBrowserSessionsForApp } from './browser/browser-session-startup'
+import {
+  installDocPreviewProtocolHandler,
+  registerDocPreviewSchemePrivileges
+} from './browser/doc-preview-protocol'
+import { registerDocPreviewGrantHandlers } from './ipc/doc-preview-grant-ipc'
 import { initializeBrowserClientHostId } from './browser/browser-client-host-id'
 import { setUnreadDockBadgeCount } from './dock/unread-badge'
 import { AutomationService } from './automations/service'
@@ -740,7 +747,9 @@ if (startupDiagnosticsEnabled) {
   startEventLoopStallProbe()
 }
 // Self-gated on ORCA_MAIN_THREAD_DIAGNOSTICS; runs the whole session to catch steady-state churn (issue #7576).
-startMainThreadChurnProbe()
+// Why the diff-cache counters ride along: a stamp the filesystem reports unstably makes the cache
+// look exactly like a cold start, and only the hit/miss/unprovable split tells the two apart.
+startMainThreadChurnProbe({ extraStats: () => ({ diffCache: settledDiffCache.stats() }) })
 
 function focusExistingWindow(): void {
   focusExistingMainWindow({
@@ -935,6 +944,9 @@ if (hasSingleInstanceLock) {
   installDevParentSignalQuit(shouldCoupleToDevParent)
   // Why: run after configureDevUserDataPath but before app.setName('Orca') (whenReady), which changes the resolved path on case-sensitive filesystems.
   initDataPath()
+  // Why here: initDataPath above gives the canonical userData path for the record file; the write
+  // itself lands for the next launch (see macos-press-and-hold-default.ts).
+  applyMacPressAndHoldDefaultAtStartup(getCanonicalUserDataPath())
   // Why: use the canonical userData path — late app.getPath('userData') can resolve differently across restarts, defeating persistence.
   initSessionParseCachePersistence({
     filePath: join(getCanonicalUserDataPath(), 'ai-vault', 'session-parse-cache.json'),
@@ -955,6 +967,9 @@ if (hasSingleInstanceLock) {
   if (shouldApplyPreReadyAppName(devInstanceIdentity)) {
     app.setName(devInstanceIdentity.appName)
   }
+  // Why: Electron freezes the privileged scheme table at ready, so the doc-preview
+  // scheme must be declared here or its webview loses fetch/secure-origin privileges.
+  registerDocPreviewSchemePrivileges()
   // Why: must precede app.whenReady() so Crashpad is installed before the
   // first renderer spawns; a CHECK before this point is still exit-code-only.
   startCrashpadCapture()
@@ -1070,12 +1085,17 @@ function startTerminalRuntimeStartupServices(): WindowsDesktopStartupServices {
         if (livePtyIds) {
           reconcileCodexPaneAccountsWithLivePtys(livePtyIds)
           const settings = store?.getSettings()
-          reconcileRetainedCodexHookHomes({
+          // Why (#16441): each retained home can run a codex app-server grant
+          // session. Awaiting them here delayed the first window by N sessions;
+          // a retained shell cannot invoke Codex before this provider serves.
+          void reconcileRetainedCodexHookHomes({
             hookService: codexHookService,
             hooksEnabled:
               isAgentStatusHooksEnabled(settings) &&
               settings?.disabledTuiAgents.includes('codex') !== true,
             runtimeHomePaths: codexRuntimeHome.getRetainedHostCodexHookHomePaths(livePtyIds)
+          }).catch((error: unknown) => {
+            console.warn('[codex-hook-service] retained Codex home reconcile failed:', error)
           })
         }
       }
@@ -1136,24 +1156,24 @@ function bindTerminalRuntimeStartupServices(
   localPtyProviderStartupReady = services.then((value) => value.localPtyProviderReady)
 }
 
-function prepareCodexRuntimeHomeForLaunch(
+async function prepareCodexRuntimeHomeForLaunch(
   target?: CodexAccountSelectionTarget,
   launchEnv?: NodeJS.ProcessEnv,
   launchContext?: CodexHomeLaunchContext
-): string | null {
+): Promise<string | null> {
   if (
     target?.runtime !== 'wsl' &&
     launchContext?.launchAgent === 'codex' &&
     launchContext.workspacePath
   ) {
     try {
-      // Why: renderer quick-launch cannot await trust IPC before its PTY mounts; launch prep runs synchronously before every recognized Codex spawn.
-      markCodexProjectTrusted(launchContext.workspacePath)
+      // Why: renderer quick-launch cannot await trust IPC before its PTY mounts; launch prep runs before every recognized Codex spawn.
+      await markCodexProjectTrusted(launchContext.workspacePath)
     } catch (error) {
       console.warn('[codex-project-trust] failed to pre-mark launch workspace:', error)
     }
   }
-  const ensureRealHomeHooksIfSelected = (): boolean => {
+  const ensureRealHomeHooksIfSelected = async (): Promise<boolean> => {
     if (
       target?.runtime === 'wsl' ||
       !codexRuntimeHome!.isHostSystemDefaultRealHomeSelected(launchEnv)
@@ -1164,13 +1184,13 @@ function prepareCodexRuntimeHomeForLaunch(
     // and trusted by codex's own app-server grant — in the real ~/.codex before
     // the pane spawns. An incapable grant flips the lane gate so the launch
     // below falls back to the managed home instead of a status-blind pane.
-    ensureRealHomeCodexHookState({
+    await ensureRealHomeCodexHookState({
       hooksEnabled: isAgentStatusHooksEnabled(store?.getSettings()),
       userDataPath: app.getPath('userData')
     })
     return true
   }
-  let realHomeHooksPrepared = ensureRealHomeHooksIfSelected()
+  let realHomeHooksPrepared = await ensureRealHomeHooksIfSelected()
   // Why: a ManagedCodexHomeTemporarilyUnavailableError must escape uncaught —
   // the fallbacks below all key off `null`, which means "system default", so
   // swallowing the refusal would launch the wrong account (#STA-4422).
@@ -1181,7 +1201,7 @@ function prepareCodexRuntimeHomeForLaunch(
     // Why: launch prep can reject an untrusted managed home and clear its
     // selection. Establish hook capability for that newly selected lane, then
     // re-resolve if the capability gate rejects it.
-    realHomeHooksPrepared = ensureRealHomeHooksIfSelected()
+    realHomeHooksPrepared = await ensureRealHomeHooksIfSelected()
     if (realHomeHooksPrepared) {
       runtimeHomePath = codexRuntimeHome!.prepareForCodexLaunch(target, launchEnv, {
         unavailableManagedHomePath: launchContext?.unavailableManagedHomePath
@@ -1204,12 +1224,12 @@ function prepareCodexRuntimeHomeForLaunch(
   try {
     // Why: honor the persisted off switch so post-startup launches can't reinstall removed hooks.
     const status = hooksEnabled
-      ? (codexHookService.installForRuntimeHome(runtimeHomePath, hookTarget) ??
+      ? ((await codexHookService.installForRuntimeHome(runtimeHomePath, hookTarget)) ??
         // Why: a managed account's launch home is its own self-contained
         // CODEX_HOME, so hooks/trust must install there, not the shared mirror.
-        codexHookService.install(runtimeHomePath ?? undefined))
+        (await codexHookService.install(runtimeHomePath ?? undefined)))
       : (codexHookService.refreshRuntimeUserHooksForRuntimeHome(runtimeHomePath, hookTarget) ??
-        codexHookService.refreshRuntimeUserHooks(runtimeHomePath ?? undefined))
+        (await codexHookService.refreshRuntimeUserHooks(runtimeHomePath ?? undefined)))
     if (status.state === 'error') {
       console.warn(
         `[codex-hook-service] failed to ${
@@ -1303,7 +1323,7 @@ async function prepareCodexSessionResumeForLaunch(args: {
 
       if (args.workspacePath) {
         try {
-          markCodexProjectTrusted(args.workspacePath)
+          await markCodexProjectTrusted(args.workspacePath)
         } catch (error) {
           console.warn('[codex-project-trust] failed to pre-mark resumed workspace:', error)
         }
@@ -1314,11 +1334,14 @@ async function prepareCodexSessionResumeForLaunch(args: {
       const hooksEnabled = isAgentStatusHooksEnabled(settingsStore.getSettings())
       try {
         if (isSystemHome) {
-          ensureRealHomeCodexHookState({ hooksEnabled, userDataPath: app.getPath('userData') })
+          await ensureRealHomeCodexHookState({
+            hooksEnabled,
+            userDataPath: app.getPath('userData')
+          })
         } else if (hooksEnabled) {
-          codexHookService.install(resumeHome)
+          await codexHookService.install(resumeHome)
         } else {
-          codexHookService.refreshRuntimeUserHooks(resumeHome)
+          await codexHookService.refreshRuntimeUserHooks(resumeHome)
         }
       } catch (error) {
         // Why: hook repair is best-effort; session provenance must still win over the currently selected home.
@@ -2422,6 +2445,9 @@ void app.whenReady().then(async () => {
   } catch {
     console.warn('[proxy] Failed to apply network proxy settings')
   }
+  // Why: the preview session is protocol-scoped, so the handler must exist before any preview webview attaches.
+  installDocPreviewProtocolHandler()
+  registerDocPreviewGrantHandlers()
   // Why: browser sessions serve desktop webviews and runtime profile commands, so init at app startup rather than via a renderer IPC path.
   initializeBrowserSessionsForApp({
     orcaProfileId: activeOrcaProfile.profile.id,
@@ -2586,7 +2612,8 @@ void app.whenReady().then(async () => {
     isQuitting: () => isQuitting,
     resolveSystemCodexHomePathOverride: () =>
       resolveHostCodexSessionSourceHome(store!.getSettings()),
-    prepareScheduledRun: () => codexRuntimeHome?.prepareHostSystemDefaultSessionMigrationPass(),
+    prepareScheduledRun: (scanDates) =>
+      codexRuntimeHome?.prepareHostSystemDefaultSessionMigrationPass(scanDates),
     finishScheduledRun: () => codexRuntimeHome?.finishHostSystemDefaultSessionMigrationPass(),
     startBackfill: startCodexSessionBackfillInBackground,
     startIndexHeal: startCodexSessionIndexHealInBackground
@@ -3023,6 +3050,8 @@ void app.whenReady().then(async () => {
     onTabsChanged: (worktreeId) => runtimeService.notifyMobileSessionTabsChanged(worktreeId)
   })
   runtimeService.setAgentBrowserBridge(agentBrowserBridge)
+  // Why: daemons a crashed or SIGKILL'd previous run left behind answer to nobody; nothing else reclaims them.
+  void agentBrowserBridge.sweepOrphanedSessions()
   const browserClientAutomationDispatcher = new RpcDispatcher({ runtime: runtimeService })
   configureBrowserClientPageAutomationRuntime({
     browserManager,
@@ -3056,30 +3085,40 @@ void app.whenReady().then(async () => {
     console.warn('[worktrees] Failed to sweep leftover worktree directories:', error)
   })
   nativeTheme.themeSource = store.getSettings().theme ?? 'system'
-  if (codexRuntimeHome.isHostSystemDefaultRealHomeSelected()) {
-    // Why: establish capability before managed-hook reconciliation so an
-    // incapable host re-arms and completes the legacy real-home sweep now.
-    ensureRealHomeCodexHookState({
-      hooksEnabled: isAgentStatusHooksEnabled(store.getSettings()),
-      userDataPath: app.getPath('userData')
-    })
-  }
+  // Why (#16441): the real-home grant runs a codex app-server session. It stays
+  // ordered before managed-hook reconciliation — an incapable host must re-arm
+  // and complete the legacy real-home sweep first — but awaiting it inline
+  // stalled app init behind that session, so chain instead of blocking.
+  const realHomeCodexHookState = codexRuntimeHome.isHostSystemDefaultRealHomeSelected()
+    ? ensureRealHomeCodexHookState({
+        hooksEnabled: isAgentStatusHooksEnabled(store.getSettings()),
+        userDataPath: app.getPath('userData')
+      }).catch((error: unknown) => {
+        console.warn('[codex-real-home-hooks] startup ensure failed:', error)
+      })
+    : Promise.resolve()
   if (shouldInstallManagedHooks(is.dev)) {
     // Why: check the persisted off switch before any auto-install so removed hooks don't silently reappear on launch.
     if (isAgentStatusHooksEnabled(store.getSettings())) {
       const managedHookStore = store
-      void applyAgentStatusHooksEnabled(true, managedHookStore.getSettings(), {
-        shouldHydrateShellPath: app.isPackaged,
-        onInstallError: recordManagedHookInstallFailure,
-        shouldContinue: (agent) => {
-          const settings = managedHookStore.getSettings()
-          return shouldContinueManagedHookStartup(isQuitting, settings, agent)
-        }
-      }).catch((error) => {
-        console.warn('[agent-hooks] failed to reconcile managed hooks on startup:', error)
-      })
+      void realHomeCodexHookState
+        .then(() =>
+          applyAgentStatusHooksEnabled(true, managedHookStore.getSettings(), {
+            shouldHydrateShellPath: app.isPackaged,
+            onInstallError: recordManagedHookInstallFailure,
+            shouldContinue: (agent) => {
+              const settings = managedHookStore.getSettings()
+              return shouldContinueManagedHookStartup(isQuitting, settings, agent)
+            }
+          })
+        )
+        .catch((error: unknown) => {
+          console.warn('[agent-hooks] failed to reconcile managed hooks on startup:', error)
+        })
     } else {
-      removeManagedAgentHooks()
+      void removeManagedAgentHooks().catch((error: unknown) => {
+        console.warn('[agent-hooks] failed to remove managed hooks on startup:', error)
+      })
     }
   }
   // Why: process-gone metrics only see survivors; retain a recent whole-app
@@ -3512,7 +3551,10 @@ app.on('will-quit', (e) => {
   // Why: cancels relay restart/reinstall timers and kills wsl.exe children deterministically, not via stdio-pipe teardown.
   wslHookRelayManager.disposeAll()
   const statsFlush = stats?.flushAsync() ?? Promise.resolve()
-  // Why: retire headless page owners first, then sweep residual helper sessions without duplicate close fanout.
+  // Why: agent-browser daemon processes would otherwise linger after quit, holding ports and stale session state on disk.
+  // Why the barrier below: each session's close is its own agent-browser child taking hundreds of ms,
+  // so an unawaited call reaches app.quit() first and every open tab's daemon survives the quit (#16367).
+  // Why retire headless page owners first: it closes those helpers without a duplicate close fanout.
   const browserShutdown = (async (): Promise<void> => {
     await runtime?.getOffscreenBrowserBackend()?.destroyAll?.()
     await runtime?.getAgentBrowserBridge()?.destroyAllSessions()
