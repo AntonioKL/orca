@@ -4,11 +4,20 @@ import type { RuntimeTerminalSend } from '../../../shared/runtime-types'
 import { makePaneKey } from '../../../shared/stable-pane-id'
 import { isTerminalInputTooLargeWithDeferredMeasurement } from '../../../shared/terminal-input'
 import { useAppStore } from '../store'
-import { RuntimeRpcCallError, callRuntimeRpc, getActiveRuntimeTarget } from './runtime-rpc-client'
+import { callRuntimeRpc, getActiveRuntimeTarget } from './runtime-rpc-client'
 import {
   getRemoteRuntimePtyEnvironmentId,
   getRemoteRuntimeTerminalHandle
 } from './runtime-terminal-stream'
+import {
+  inspectRuntimeTerminalProcess,
+  isTerminalGoneError
+} from './runtime-terminal-process-inspection'
+
+// Why: the inspection read moved to a store-free module so the cleanup store can
+// call it without a store->runtime import cycle. Re-exported so callers keep one
+// import site.
+export { inspectRuntimeTerminalProcess }
 
 export type RuntimeTerminalProcessInspection = {
   foregroundProcess: string | null
@@ -31,26 +40,6 @@ export function isRemoteRuntimePtyId(ptyId: string): boolean {
   return ptyId.startsWith(REMOTE_PTY_ID_PREFIX)
 }
 
-function isTerminalGoneError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error)
-  const code =
-    error instanceof RuntimeRpcCallError
-      ? error.code
-      : error && typeof error === 'object' && 'code' in error
-        ? String((error as { code?: unknown }).code)
-        : ''
-  return (
-    code === 'no_connected_pty' ||
-    code === 'terminal_handle_stale' ||
-    code === 'terminal_exited' ||
-    code === 'terminal_gone' ||
-    message.includes('terminal_handle_stale') ||
-    message.includes('terminal_exited') ||
-    message.includes('terminal_gone') ||
-    message.includes('no_connected_pty')
-  )
-}
-
 export function recordRuntimeTerminalInputForPtyId(ptyId: string, timestamp = Date.now()): void {
   const state = useAppStore.getState()
   for (const [tabId, layout] of Object.entries(state.terminalLayoutsByTabId)) {
@@ -68,35 +57,6 @@ export function recordRuntimeTerminalInputForPtyId(ptyId: string, timestamp = Da
       }
       return
     }
-  }
-}
-
-export async function inspectRuntimeTerminalProcess(
-  settings: Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> | null | undefined,
-  ptyId: string
-): Promise<RuntimeTerminalProcessInspection> {
-  const ownerEnvironmentId = getRemoteRuntimePtyEnvironmentId(ptyId)
-  const target = ownerEnvironmentId
-    ? ({ kind: 'environment', environmentId: ownerEnvironmentId } as const)
-    : getActiveRuntimeTarget(settings)
-  const terminal = getRemoteRuntimeTerminalHandle(ptyId)
-  if (target.kind !== 'environment' || !terminal) {
-    return window.api.pty.inspectProcess(ptyId)
-  }
-
-  try {
-    const result = await callRuntimeRpc<{ process: RuntimeTerminalProcessInspection }>(
-      target,
-      'terminal.inspectProcess',
-      { terminal },
-      { timeoutMs: 15_000 }
-    )
-    return result.process
-  } catch (error) {
-    if (isTerminalGoneError(error)) {
-      return { foregroundProcess: null, hasChildProcesses: false, unavailable: true }
-    }
-    throw error
   }
 }
 

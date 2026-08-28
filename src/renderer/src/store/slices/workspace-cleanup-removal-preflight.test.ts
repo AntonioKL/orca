@@ -528,7 +528,11 @@ describe('workspace cleanup removal and protection', () => {
       api: {
         pty: {
           hasChildProcesses: vi.fn().mockResolvedValue(true),
-          getForegroundProcess: vi.fn().mockResolvedValue('codex')
+          getForegroundProcess: vi.fn().mockResolvedValue('codex'),
+          inspectProcess: vi.fn().mockResolvedValue({
+            foregroundProcess: 'codex',
+            hasChildProcesses: true
+          })
         }
       }
     }
@@ -556,7 +560,11 @@ describe('workspace cleanup removal and protection', () => {
           hasChildProcesses: vi.fn(async (ptyId: string) => ptyId === 'pty-running'),
           getForegroundProcess: vi.fn(async (ptyId: string) =>
             ptyId === 'pty-running' ? 'codex' : 'zsh'
-          )
+          ),
+          inspectProcess: vi.fn(async (ptyId: string) => ({
+            foregroundProcess: ptyId === 'pty-running' ? 'codex' : 'zsh',
+            hasChildProcesses: ptyId === 'pty-running'
+          }))
         }
       }
     }

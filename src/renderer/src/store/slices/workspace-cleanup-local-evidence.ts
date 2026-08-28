@@ -6,6 +6,7 @@ import {
 import { classifyTitleActivity, isExplicitAgentStatusFresh } from '@/lib/pane-agent-evidence'
 import type { WorkspaceCleanupCandidate } from '../../../../shared/workspace-cleanup'
 import { getWorktreeVisitTimestamp } from '@/lib/worktree-visit-recency'
+import { inspectRuntimeTerminalProcess } from '@/runtime/runtime-terminal-process-inspection'
 
 const RECENT_VISIBLE_CONTEXT_MS = 24 * 60 * 60 * 1000
 const VIEWED_FROM_CLEANUP_MS = 2 * 60 * 60 * 1000
@@ -158,7 +159,7 @@ export function hasWorkingTitleAgent(
 export async function probeTerminalLiveness(
   state: AppState,
   tabs: { id: string; title: string }[]
-): Promise<'idle' | 'running' | 'unknown'> {
+): Promise<'idle' | 'running' | 'unverifiable'> {
   const ptyChecks = tabs.flatMap((tab) =>
     (state.ptyIdsByTabId[tab.id] ?? []).map((ptyId) => ({ tab, ptyId }))
   )
@@ -166,15 +167,20 @@ export async function probeTerminalLiveness(
     return 'idle'
   }
 
-  let unknown = false
+  let unverifiable = false
   for (const { tab, ptyId } of ptyChecks) {
     try {
-      const [hasChildProcesses, foregroundProcess] = await Promise.all([
-        window.api.pty.hasChildProcesses(ptyId),
-        window.api.pty.getForegroundProcess(ptyId)
-      ])
-      const processName = normalizeProcessName(foregroundProcess)
-      if (!hasChildProcesses && (!processName || SHELL_PROCESS_NAMES.has(processName))) {
+      // Why: the standalone hasChildProcesses/getForegroundProcess handlers coerce a
+      // degraded read to false/null below IPC, so an unreachable host arrived here as
+      // an idle shell and cleanup dropped its blocker. inspectProcess is the only read
+      // that carries `unavailable` across the boundary; loss of contact is never idle.
+      const inspection = await inspectRuntimeTerminalProcess(state.settings, ptyId)
+      if (inspection.unavailable === true) {
+        unverifiable = true
+        continue
+      }
+      const processName = normalizeProcessName(inspection.foregroundProcess)
+      if (!inspection.hasChildProcesses && (!processName || SHELL_PROCESS_NAMES.has(processName))) {
         continue
       }
       if (
@@ -186,11 +192,11 @@ export async function probeTerminalLiveness(
       }
       return 'running'
     } catch {
-      unknown = true
+      unverifiable = true
     }
   }
 
-  return unknown ? 'unknown' : 'idle'
+  return unverifiable ? 'unverifiable' : 'idle'
 }
 
 function hasIdleAgentTitleForPty(
