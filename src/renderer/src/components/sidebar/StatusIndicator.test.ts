@@ -1,23 +1,7 @@
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import StatusIndicator, { type Status } from './StatusIndicator'
-
-vi.mock('@/components/StateIndicatorTooltip', async () => {
-  const { createElement } = await import('react')
-  return {
-    StateIndicatorTooltip: ({
-      label,
-      children
-    }: {
-      label: string | null
-      children: React.ReactElement
-    }) =>
-      label === null
-        ? children
-        : createElement('span', { 'data-state-indicator-tooltip': label }, children)
-  }
-})
 
 function renderMarkup(status: Status): string {
   return renderToStaticMarkup(React.createElement(StatusIndicator, { status }))
@@ -50,7 +34,7 @@ describe('StatusIndicator', () => {
   it('renders monitoring as a static heartbeat glyph', () => {
     const markup = renderMarkup('monitoring')
 
-    expect(markup).toContain('data-state-indicator-tooltip="Monitoring background tasks"')
+    expect(markup).not.toContain('data-state-indicator-tooltip')
     expect(markup).not.toContain(' title=')
     expect(markup).toContain('lucide-activity')
     expect(markup).toContain('text-yellow-500')
@@ -85,35 +69,18 @@ describe('StatusIndicator', () => {
     expect(classNames).not.toContain('bg-emerald-500')
   })
 
-  it.each([
-    ['working', 'Working'],
-    ['monitoring', 'Monitoring background tasks'],
-    ['permission', 'Needs permission'],
-    ['interrupted', 'Interrupted'],
-    ['done', 'Done']
-  ] as const)('labels the agent-derived %s workspace state', (status, label) => {
+  it.each<Status>([
+    'active',
+    'working',
+    'monitoring',
+    'permission',
+    'interrupted',
+    'done',
+    'inactive'
+  ])('keeps the workspace-level %s indicator tooltip-free', (status) => {
     const markup = renderMarkup(status)
 
-    expect(markup).toContain(`data-state-indicator-tooltip="${label}"`)
+    expect(markup).not.toContain('data-slot="tooltip-trigger"')
     expect(markup).not.toContain(' title=')
-  })
-
-  it.each(['active', 'inactive'] as const)(
-    'does not label the passive %s workspace state',
-    (status) => {
-      const markup = renderMarkup(status)
-
-      expect(markup).not.toContain('data-state-indicator-tooltip')
-      expect(markup).not.toContain(' title=')
-    }
-  )
-
-  it('lets an enclosing action own the tooltip', () => {
-    const markup = renderToStaticMarkup(
-      React.createElement(StatusIndicator, { status: 'working', showTooltip: false })
-    )
-
-    expect(markup).not.toContain('data-state-indicator-tooltip')
-    expect(markup).toContain('data-agent-spinner')
   })
 })

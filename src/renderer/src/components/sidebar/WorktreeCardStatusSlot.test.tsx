@@ -366,8 +366,7 @@ describe('WorktreeCardStatusSlot', () => {
     expect(markup).toContain('Working')
     expect(markup).toContain('inline-flex size-5 items-center justify-center')
     expect(markup).toContain('border-yellow-500')
-    expect(markup).toContain('data-tooltip-root')
-    expect(markup).toContain('data-tooltip-content="">Working')
+    expect(markup).not.toContain('data-tooltip-root')
     expect(markup).not.toContain('PR checks: Failed')
   })
 
@@ -390,8 +389,7 @@ describe('WorktreeCardStatusSlot', () => {
     expect(markup).toContain('Needs permission')
     expect(markup).toContain('lucide-message-circle-question-mark')
     expect(markup).toContain('text-agent-question')
-    expect(markup).toContain('data-tooltip-root')
-    expect(markup).toContain('data-tooltip-content="">Needs permission')
+    expect(markup).not.toContain('data-tooltip-root')
     expect(markup).not.toContain('PR checks: Failed')
   })
 

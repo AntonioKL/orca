@@ -136,7 +136,7 @@ describe('palette live status', () => {
     setAgentState('working')
     await render()
     expect(dotLabels()).toEqual(['Working'])
-    expect(testContainer.querySelector('[data-slot="tooltip-trigger"]')).not.toBeNull()
+    expect(testContainer.querySelector('[data-slot="tooltip-trigger"]')).toBeNull()
 
     await act(async () => {
       setAgentState('blocked')
