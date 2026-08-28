@@ -13,10 +13,6 @@
  * we could run). We match Ghostty's taxonomy: US / US-International map to
  * `true`; everything else — including Dvorak, Colemak, UK, every
  * international layout — maps to `false`.
- *
- * Reference implementation in Ghostty:
- *   ~/projects/ghostty/src/input/keyboard.zig:25-57 (Layout enum + detectOptionAsAlt)
- *   ~/projects/ghostty/macos/Sources/Helpers/KeyboardLayout.swift (Carbon probe)
  */
 
 /** Minimal shape of the `KeyboardLayoutMap` we consume, so callers can stub
