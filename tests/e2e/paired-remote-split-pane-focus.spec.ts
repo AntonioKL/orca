@@ -25,6 +25,8 @@ type HostTerminalSurface = {
   parentLayout?: { activeLeafId?: string | null }
 }
 
+const splitRightChord = process.platform === 'darwin' ? 'Meta+d' : 'Control+Shift+d'
+
 test('focuses the pane a client split creates on a paired remote workspace @headful', async ({
   orcaPage
 }, testInfo) => {
@@ -69,7 +71,7 @@ test('focuses the pane a client split creates on a paired remote workspace @head
     }
 
     await focusActiveTerminalInput(client.page)
-    await client.page.keyboard.press('Meta+d')
+    await client.page.keyboard.press(splitRightChord)
 
     let after = await waitForPaneIdentitySnapshot(client.page, 2)
     let createdPane = after.panes.find((pane) => pane.leafId !== sourceLeafId)
