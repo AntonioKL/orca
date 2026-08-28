@@ -185,6 +185,40 @@ describe('daemon foreground observation evidence', () => {
     expect(handle.observeForegroundProcess?.()?.evidence.verdict).toBe('unverifiable')
   })
 
+  it('stops corroborating with a snapshot captured before an agent the scan could not see', async () => {
+    // A scan stamps its settlement when it SETTLES, but its process snapshot was taken
+    // when it STARTED. An agent that appears in between is invisible to that snapshot,
+    // so settle-time ordering alone still lets a pre-agent scan corroborate the shell.
+    let settleScan: (value: { available: boolean; processName: string }) => void = () => {}
+    resolveAgentForegroundProcessMock.mockReturnValue(
+      new Promise<{ available: boolean; processName: string }>((resolve) => {
+        settleScan = resolve
+      })
+    )
+    // Starts the agent-free scan; its snapshot is taken now.
+    expect(handle.observeForegroundProcess?.()?.evidence.verdict).toBe('unverifiable')
+
+    // The agent starts while that scan is still in flight.
+    await vi.advanceTimersByTimeAsync(2_000)
+    nodePty.process = 'codex'
+    expect(handle.observeForegroundProcess?.()?.evidence).toEqual({
+      verdict: 'observed',
+      processName: 'codex'
+    })
+
+    // Only now does the pre-agent scan settle, so its `at` is newer than the agent stamp.
+    await vi.advanceTimersByTimeAsync(1_000)
+    settleScan({ available: true, processName: 'zsh' })
+    await vi.advanceTimersByTimeAsync(0)
+
+    // The title degrades back to the shell while the agent is still running.
+    resolveAgentForegroundProcessMock.mockReturnValue(new Promise(() => {}))
+    nodePty.process = 'zsh'
+    await vi.advanceTimersByTimeAsync(2_000)
+
+    expect(handle.observeForegroundProcess?.()?.evidence.verdict).toBe('unverifiable')
+  })
+
   it('leaves the legacy foreground read identical to the observed name', async () => {
     resolveAgentForegroundProcessMock.mockResolvedValue({ available: false, processName: 'zsh' })
     await readAfterSettledScan()
