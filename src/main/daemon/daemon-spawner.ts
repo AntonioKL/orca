@@ -160,6 +160,12 @@ function isExistingFileError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'EEXIST'
 }
 
+function describeErrnoCode(error: unknown): string {
+  return typeof error === 'object' && error !== null && 'code' in error
+    ? String(error.code)
+    : 'no errno'
+}
+
 /**
  * Scratch for the atomic publish below. Distinct from the swap/hold claims: those can hold
  * the ONLY copy of a live record and must be restored, while publish scratch holds a record
@@ -190,7 +196,13 @@ export function publishDaemonPidFile(pidPath: string, pidFile: DaemonPidFile): v
       }
       // Why: hard links can be unsupported on exotic volumes. The exclusive direct write
       // is exactly the pre-atomic behavior, so those filesystems keep a working daemon
-      // instead of trading a torn-write window for no pid record at all.
+      // instead of trading a torn-write window for no pid record at all. Warn because the
+      // degrade is otherwise invisible: an operator on such a volume (network mount,
+      // container overlay) should be able to tell the atomic path is not in use.
+      console.warn(
+        `[daemon] pid-record hard-link publish failed (${describeErrnoCode(error)}); ` +
+          'degrading to the non-atomic exclusive write — torn-write protection is off for this record'
+      )
       writeFileSync(pidPath, serializeDaemonPidFile(pidFile), { mode: 0o600, flag: 'wx' })
     }
   } finally {

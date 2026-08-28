@@ -55,15 +55,19 @@ function listPublishScratch(): string[] {
   return readdirSync(dir).filter((name) => name !== 'daemon-v1.pid')
 }
 
+let warnSpy: ReturnType<typeof vi.spyOn>
+
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'daemon-pid-atomic-'))
   pidPath = join(dir, 'daemon-v1.pid')
   fsFaults.tornWriteBytes = null
   fsFaults.linkError = null
   fsFaults.events = []
+  warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 })
 
 afterEach(() => {
+  warnSpy.mockRestore()
   rmSync(dir, { recursive: true, force: true })
 })
 
@@ -100,6 +104,9 @@ describe('publishDaemonPidFile atomicity', () => {
 
     expect(parseDaemonPidFile(readFileSync(pidPath, 'utf8'))).toMatchObject(RECORD)
     expect(listPublishScratch()).toEqual([])
+    // The atomic path is the normal one; warning on it would train operators to ignore
+    // the degrade warning below.
+    expect(warnSpy).not.toHaveBeenCalled()
   })
 
   it('flushes the record to disk before it becomes visible at the canonical path', () => {
@@ -132,6 +139,11 @@ describe('publishDaemonPidFile atomicity', () => {
 
     expect(parseDaemonPidFile(readFileSync(pidPath, 'utf8'))).toMatchObject(RECORD)
     expect(listPublishScratch()).toEqual([])
+    // The degrade must be operator-visible: on a volume without hard links every publish
+    // silently loses torn-write protection otherwise.
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('ENOTSUP'))
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('non-atomic'))
   })
 
   it('keeps exclusive-create semantics on the degraded path too', () => {
