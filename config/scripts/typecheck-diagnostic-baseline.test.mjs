@@ -122,8 +122,14 @@ describe('typecheck diagnostic baseline', () => {
       }
     )
 
+    // Derived, not hardcoded: the backlog shrinks by design, and a literal count
+    // would make the ratchet working as intended fail this test.
+    const recorded = JSON.parse(
+      readFileSync(join(repoRoot, 'config/typecheck-e2e-diagnostics.json'), 'utf8')
+    ).diagnostics.length
+
     expect(result.status).toBe(0)
-    expect(result.stdout).toContain('240 known diagnostics, no drift')
+    expect(result.stdout).toContain(`${recorded} known diagnostics, no drift`)
   })
 
   it('ignores stderr warnings while parsing compiler diagnostics', () => {

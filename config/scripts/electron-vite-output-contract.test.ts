@@ -72,10 +72,6 @@ function failBootstrapWithBanner(options: {
   return processMock
 }
 
-function invokeScheduledCallback(callback: (() => void) | null): void {
-  callback?.()
-}
-
 describe('Electron Vite output contract', () => {
   it('keeps main-process and plain-Node entries at stable CommonJS paths', () => {
     const output = electronViteConfig.main?.build?.rollupOptions?.output
@@ -148,7 +144,8 @@ describe('Electron Vite output contract', () => {
 
     expect(processMock.exitCode).toBe(1)
     expect(scheduledExit).not.toBeNull()
-    invokeScheduledCallback(scheduledExit)
+    // Assigned inside the scheduler mock, so tsc narrows it to never here.
+    ;(scheduledExit as (() => void) | null)?.()
     expect(exitedWith).toBe(1)
     expect(context).toHaveProperty(BOOTSTRAP_FATAL_EXIT_GUARD_KEY)
     expect(stderrWrites.join('')).toContain("Cannot find module 'zod'")

@@ -443,6 +443,20 @@
       "message": "Argument of type '\"Pressable\"' is not assignable to parameter of type 'ElementType'."
     },
     {
+      "file": "mobile/src/diagnostics/connection-diagnostics-submission.test.ts",
+      "line": 12,
+      "column": 7,
+      "code": 2345,
+      "message": "Argument of type 'Mock<{ (input: URL | RequestInfo, init?: RequestInit | undefined): Promise<Response>; (input: string | URL | Request, init?: RequestInit | undefined): Promise<...>; (input: RequestInfo, init?: RequestInit | undefined): Promise<...>; }>' is not assignable to parameter of type '{ (input: URL | RequestInfo, init?: RequestInit | undefined): Promise<Response>; (input: string | URL | Request, init?: RequestInit | undefined): Promise<...>; (input: RequestInfo, init?: RequestInit | undefined): Promise<...>; } | undefined'.\n  Type 'Mock<{ (input: URL | RequestInfo, init?: RequestInit | undefined): Promise<Response>; (input: string | URL | Request, init?: RequestInit | undefined): Promise<...>; (input: RequestInfo, init?: RequestInit | undefined): Promise<...>; }>' is not assignable to type '{ (input: URL | RequestInfo, init?: RequestInit | undefined): Promise<Response>; (input: string | URL | Request, init?: RequestInit | undefined): Promise<...>; (input: RequestInfo, init?: RequestInit | undefined): Promise<...>; }'.\n    Types of parameters 'input' and 'input' are incompatible.\n      Type 'URL | RequestInfo' is not assignable to type 'RequestInfo'.\n        Type 'URL' is not assignable to type 'RequestInfo'.\n          Type 'URL' is missing the following properties from type 'Request': cache, credentials, destination, headers, and 18 more."
+    },
+    {
+      "file": "mobile/src/diagnostics/connection-diagnostics-submission.test.ts",
+      "line": 31,
+      "column": 9,
+      "code": 2345,
+      "message": "Argument of type 'Mock<{ (input: URL | RequestInfo, init?: RequestInit | undefined): Promise<Response>; (input: string | URL | Request, init?: RequestInit | undefined): Promise<...>; (input: RequestInfo, init?: RequestInit | undefined): Promise<...>; }>' is not assignable to parameter of type '{ (input: URL | RequestInfo, init?: RequestInit | undefined): Promise<Response>; (input: string | URL | Request, init?: RequestInit | undefined): Promise<...>; (input: RequestInfo, init?: RequestInit | undefined): Promise<...>; } | undefined'.\n  Type 'Mock<{ (input: URL | RequestInfo, init?: RequestInit | undefined): Promise<Response>; (input: string | URL | Request, init?: RequestInit | undefined): Promise<...>; (input: RequestInfo, init?: RequestInit | undefined): Promise<...>; }>' is not assignable to type '{ (input: URL | RequestInfo, init?: RequestInit | undefined): Promise<Response>; (input: string | URL | Request, init?: RequestInit | undefined): Promise<...>; (input: RequestInfo, init?: RequestInit | undefined): Promise<...>; }'.\n    Types of parameters 'input' and 'input' are incompatible.\n      Type 'URL | RequestInfo' is not assignable to type 'RequestInfo'.\n        Type 'URL' is not assignable to type 'RequestInfo'.\n          Type 'URL' is missing the following properties from type 'Request': cache, credentials, destination, headers, and 18 more."
+    },
+    {
       "file": "mobile/src/dictation/mobile-dictation-setup.test.ts",
       "line": 105,
       "column": 11,
@@ -2068,42 +2082,42 @@
     },
     {
       "file": "mobile/src/transport/host-status-gates.test.ts",
-      "line": 104,
+      "line": 114,
       "column": 17,
       "code": 2339,
       "message": "Property 'unmount' does not exist on type 'never'."
     },
     {
       "file": "mobile/src/transport/host-status-gates.test.ts",
-      "line": 134,
+      "line": 144,
       "column": 21,
       "code": 2339,
       "message": "Property 'floatingWorkspaceEnabled' does not exist on type 'never'."
     },
     {
       "file": "mobile/src/transport/host-status-gates.test.ts",
-      "line": 168,
+      "line": 178,
       "column": 17,
       "code": 2339,
       "message": "Property 'unmount' does not exist on type 'never'."
     },
     {
       "file": "mobile/src/transport/host-status-gates.test.ts",
-      "line": 195,
+      "line": 205,
       "column": 21,
       "code": 2339,
       "message": "Property 'hostCapabilities' does not exist on type 'never'."
     },
     {
       "file": "mobile/src/transport/host-status-gates.test.ts",
-      "line": 202,
+      "line": 212,
       "column": 17,
       "code": 2339,
       "message": "Property 'unmount' does not exist on type 'never'."
     },
     {
       "file": "mobile/src/transport/host-status-gates.test.ts",
-      "line": 71,
+      "line": 78,
       "column": 17,
       "code": 2339,
       "message": "Property 'unmount' does not exist on type 'never'."
@@ -2285,14 +2299,14 @@
     },
     {
       "file": "mobile/src/transport/mobile-relay-rpc-session-liveness.test.ts",
-      "line": 82,
+      "line": 84,
       "column": 29,
       "code": 2352,
       "message": "Conversion of type 'undefined' to type 'string' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first."
     },
     {
       "file": "mobile/src/transport/mobile-relay-rpc-session-liveness.test.ts",
-      "line": 82,
+      "line": 84,
       "column": 7,
       "code": 2493,
       "message": "Tuple type '[]' of length '0' has no element at index '0'."
@@ -2411,52 +2425,52 @@
     },
     {
       "file": "mobile/src/transport/rpc-session-liveness-watchdog.test.ts",
-      "line": 104,
-      "column": 5,
-      "code": 2349,
-      "message": "This expression is not callable.\n  Type 'never' has no call signatures."
-    },
-    {
-      "file": "mobile/src/transport/rpc-session-liveness-watchdog.test.ts",
-      "line": 106,
-      "column": 5,
-      "code": 2349,
-      "message": "This expression is not callable.\n  Type 'never' has no call signatures."
-    },
-    {
-      "file": "mobile/src/transport/rpc-session-liveness-watchdog.test.ts",
-      "line": 118,
-      "column": 18,
-      "code": 7006,
-      "message": "Parameter 'callback' implicitly has an 'any' type."
-    },
-    {
-      "file": "mobile/src/transport/rpc-session-liveness-watchdog.test.ts",
-      "line": 118,
-      "column": 7,
-      "code": 2741,
-      "message": "Property '__promisify__' is missing in type '(callback: any) => ReturnType<typeof setTimeout>' but required in type 'typeof setTimeout'."
-    },
-    {
-      "file": "mobile/src/transport/rpc-session-liveness-watchdog.test.ts",
-      "line": 66,
-      "column": 7,
-      "code": 2322,
-      "message": "Type 'Mock<typeof setTimeout>' is not assignable to type 'typeof setTimeout | undefined'.\n  Type 'Mock<typeof setTimeout>' is not assignable to type 'typeof setTimeout'.\n    Types of parameters 'handler' and 'handler' are incompatible.\n      Type 'TimerHandler' is not assignable to type '(...args: any[]) => void'.\n        Type 'string' is not assignable to type '(...args: any[]) => void'."
-    },
-    {
-      "file": "mobile/src/transport/rpc-session-liveness-watchdog.test.ts",
-      "line": 94,
+      "line": 125,
       "column": 18,
       "code": 7006,
       "message": "Parameter 'next' implicitly has an 'any' type."
     },
     {
       "file": "mobile/src/transport/rpc-session-liveness-watchdog.test.ts",
-      "line": 94,
+      "line": 125,
       "column": 7,
       "code": 2741,
       "message": "Property '__promisify__' is missing in type '(next: any) => ReturnType<typeof setTimeout>' but required in type 'typeof setTimeout'."
+    },
+    {
+      "file": "mobile/src/transport/rpc-session-liveness-watchdog.test.ts",
+      "line": 135,
+      "column": 5,
+      "code": 2349,
+      "message": "This expression is not callable.\n  Type 'never' has no call signatures."
+    },
+    {
+      "file": "mobile/src/transport/rpc-session-liveness-watchdog.test.ts",
+      "line": 137,
+      "column": 5,
+      "code": 2349,
+      "message": "This expression is not callable.\n  Type 'never' has no call signatures."
+    },
+    {
+      "file": "mobile/src/transport/rpc-session-liveness-watchdog.test.ts",
+      "line": 149,
+      "column": 18,
+      "code": 7006,
+      "message": "Parameter 'callback' implicitly has an 'any' type."
+    },
+    {
+      "file": "mobile/src/transport/rpc-session-liveness-watchdog.test.ts",
+      "line": 149,
+      "column": 7,
+      "code": 2741,
+      "message": "Property '__promisify__' is missing in type '(callback: any) => ReturnType<typeof setTimeout>' but required in type 'typeof setTimeout'."
+    },
+    {
+      "file": "mobile/src/transport/rpc-session-liveness-watchdog.test.ts",
+      "line": 97,
+      "column": 7,
+      "code": 2322,
+      "message": "Type 'Mock<typeof setTimeout>' is not assignable to type 'typeof setTimeout | undefined'.\n  Type 'Mock<typeof setTimeout>' is not assignable to type 'typeof setTimeout'.\n    Types of parameters 'handler' and 'handler' are incompatible.\n      Type 'TimerHandler' is not assignable to type '(...args: any[]) => void'.\n        Type 'string' is not assignable to type '(...args: any[]) => void'."
     },
     {
       "file": "mobile/src/transport/runtime-capability-probe.test.ts",
@@ -2464,6 +2478,20 @@
       "column": 5,
       "code": 2349,
       "message": "This expression is not callable.\n  Type 'never' has no call signatures."
+    },
+    {
+      "file": "mobile/src/transport/settings-host-client-lifecycle.test.ts",
+      "line": 11,
+      "column": 8,
+      "code": 2724,
+      "message": "'\"./client-context\"' has no exported member named 'RpcClientContextValue'. Did you mean 'useRpcClientContext'?"
+    },
+    {
+      "file": "mobile/src/transport/settings-host-client-lifecycle.test.ts",
+      "line": 185,
+      "column": 13,
+      "code": 7031,
+      "message": "Binding element 'hostId' implicitly has an 'any' type."
     },
     {
       "file": "mobile/src/transport/settings-host-client-lifecycle.test.ts",

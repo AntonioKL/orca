@@ -338,27 +338,6 @@
       "message": "'state.settings' is possibly 'null'."
     },
     {
-      "file": "tests/e2e/helpers/paired-html-preview-inventory.ts",
-      "line": 54,
-      "column": 9,
-      "code": 18046,
-      "message": "'response.result' is of type 'unknown'."
-    },
-    {
-      "file": "tests/e2e/helpers/paired-html-preview-inventory.ts",
-      "line": 76,
-      "column": 40,
-      "code": 18046,
-      "message": "'response.result' is of type 'unknown'."
-    },
-    {
-      "file": "tests/e2e/helpers/paired-html-preview-inventory.ts",
-      "line": 83,
-      "column": 11,
-      "code": 18046,
-      "message": "'response.result' is of type 'unknown'."
-    },
-    {
       "file": "tests/e2e/helpers/paired-terminal-cold-activation-oracle.ts",
       "line": 141,
       "column": 70,
@@ -450,6 +429,13 @@
       "message": "'activeGroup' is possibly 'undefined'."
     },
     {
+      "file": "tests/e2e/helpers/terminal-pane-operations.ts",
+      "line": 49,
+      "column": 15,
+      "code": 2339,
+      "message": "Property 'movePane' does not exist on type 'PaneManagerLike'."
+    },
+    {
       "file": "tests/e2e/helpers/terminal-pty-write-spy.ts",
       "line": 93,
       "column": 52,
@@ -458,14 +444,7 @@
     },
     {
       "file": "tests/e2e/helpers/terminal.ts",
-      "line": 408,
-      "column": 15,
-      "code": 2339,
-      "message": "Property 'movePane' does not exist on type 'PaneManagerLike'."
-    },
-    {
-      "file": "tests/e2e/helpers/terminal.ts",
-      "line": 43,
+      "line": 55,
       "column": 25,
       "code": 2345,
       "message": "Argument of type 'string | null' is not assignable to parameter of type 'string'.\n  Type 'null' is not assignable to type 'string'."
@@ -709,216 +688,6 @@
       "message": "Argument of type 'string' is not assignable to parameter of type 'ExecutionHostId | undefined'."
     },
     {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 101,
-      "column": 27,
-      "code": 2339,
-      "message": "Property 'hostResponseOk' does not exist on type 'never'."
-    },
-    {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 102,
-      "column": 56,
-      "code": 18047,
-      "message": "'browserBaseline' is possibly 'null'."
-    },
-    {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 134,
-      "column": 17,
-      "code": 18046,
-      "message": "'response.result' is of type 'unknown'."
-    },
-    {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 199,
-      "column": 29,
-      "code": 2339,
-      "message": "Property 'clientWorkspaceIds' does not exist on type 'never'."
-    },
-    {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 200,
-      "column": 29,
-      "code": 2339,
-      "message": "Property 'clientUnifiedTabs' does not exist on type 'never'."
-    },
-    {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 201,
-      "column": 29,
-      "code": 2339,
-      "message": "Property 'hostTabIds' does not exist on type 'never'."
-    },
-    {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 202,
-      "column": 29,
-      "code": 2339,
-      "message": "Property 'clientRemotePageIds' does not exist on type 'never'."
-    },
-    {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 202,
-      "column": 75,
-      "code": 2339,
-      "message": "Property 'hostPageIds' does not exist on type 'never'."
-    },
-    {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 203,
-      "column": 29,
-      "code": 2339,
-      "message": "Property 'totalClientUnified' does not exist on type 'never'."
-    },
-    {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 203,
-      "column": 70,
-      "code": 2339,
-      "message": "Property 'totalClientUnified' does not exist on type 'never'."
-    },
-    {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 204,
-      "column": 29,
-      "code": 2339,
-      "message": "Property 'totalClientWorkspaces' does not exist on type 'never'."
-    },
-    {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 204,
-      "column": 73,
-      "code": 2339,
-      "message": "Property 'totalClientWorkspaces' does not exist on type 'never'."
-    },
-    {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 205,
-      "column": 29,
-      "code": 2339,
-      "message": "Property 'totalHost' does not exist on type 'never'."
-    },
-    {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 205,
-      "column": 61,
-      "code": 2339,
-      "message": "Property 'totalHost' does not exist on type 'never'."
-    },
-    {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 206,
-      "column": 29,
-      "code": 2339,
-      "message": "Property 'clientUnifiedTabs' does not exist on type 'never'."
-    },
-    {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 208,
-      "column": 24,
-      "code": 2339,
-      "message": "Property 'hostTabGroups' does not exist on type 'never'."
-    },
-    {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 209,
-      "column": 33,
-      "code": 18047,
-      "message": "'htmlTabInventory' is possibly 'null'."
-    },
-    {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 212,
-      "column": 49,
-      "code": 2339,
-      "message": "Property 'hostTabGroups' does not exist on type 'never'."
-    },
-    {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 213,
-      "column": 31,
-      "code": 18047,
-      "message": "'htmlTabInventory' is possibly 'null'."
-    },
-    {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 218,
-      "column": 65,
-      "code": 2339,
-      "message": "Property 'clientUnifiedTabs' does not exist on type 'never'."
-    },
-    {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 289,
-      "column": 17,
-      "code": 18046,
-      "message": "'response.result' is of type 'unknown'."
-    },
-    {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 289,
-      "column": 63,
-      "code": 18046,
-      "message": "'response.result' is of type 'unknown'."
-    },
-    {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 293,
-      "column": 30,
-      "code": 18047,
-      "message": "'client' is possibly 'null'."
-    },
-    {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 298,
-      "column": 45,
-      "code": 2339,
-      "message": "Property 'hostTabs' does not exist on type 'never'."
-    },
-    {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 351,
-      "column": 62,
-      "code": 18047,
-      "message": "'client' is possibly 'null'."
-    },
-    {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 380,
-      "column": 19,
-      "code": 18046,
-      "message": "'response.result' is of type 'unknown'."
-    },
-    {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 380,
-      "column": 65,
-      "code": 18046,
-      "message": "'response.result' is of type 'unknown'."
-    },
-    {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 426,
-      "column": 21,
-      "code": 18046,
-      "message": "'response.result' is of type 'unknown'."
-    },
-    {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 437,
-      "column": 29,
-      "code": 18047,
-      "message": "'htmlTabInventory' is possibly 'null'."
-    },
-    {
-      "file": "tests/e2e/paired-remote-html-browser-focus.spec.ts",
-      "line": 438,
-      "column": 28,
-      "code": 18047,
-      "message": "'htmlTabInventory' is possibly 'null'."
-    },
-    {
       "file": "tests/e2e/paired-remote-pane-layout-retry.spec.ts",
       "line": 176,
       "column": 11,
@@ -1035,7 +804,7 @@
       "line": 206,
       "column": 9,
       "code": 2322,
-      "message": "Type '{ [x: string]: { head: string; branch: string; isBare: boolean; isSparse?: boolean; locked?: boolean; lockReason?: string; prunable?: boolean; prunableReason?: string; isMainWorktree: boolean; ... 44 more ...; runtimeOwnerEnvironmentId: null; }[] | Worktree[]; }' is not assignable to type 'Record<string, Worktree[]>'.\n  'string' index signatures are incompatible.\n    Type '{ head: string; branch: string; isBare: boolean; isSparse?: boolean | undefined; locked?: boolean | undefined; lockReason?: string | undefined; prunable?: boolean | undefined; prunableReason?: string | undefined; ... 45 more ...; runtimeOwnerEnvironmentId: null; }[] | Worktree[]' is not assignable to type 'Worktree[]'.\n      Type '{ head: string; branch: string; isBare: boolean; isSparse?: boolean | undefined; locked?: boolean | undefined; lockReason?: string | undefined; prunable?: boolean | undefined; prunableReason?: string | undefined; ... 45 more ...; runtimeOwnerEnvironmentId: null; }[]' is not assignable to type 'Worktree[]'.\n        Type '{ head: string; branch: string; isBare: boolean; isSparse?: boolean; locked?: boolean; lockReason?: string; prunable?: boolean; prunableReason?: string; isMainWorktree: boolean; id: string; ... 43 more ...; runtimeOwnerEnvironmentId: null; }' is not assignable to type 'Worktree'.\n          Type '{ head: string; branch: string; isBare: boolean; isSparse?: boolean; locked?: boolean; lockReason?: string; prunable?: boolean; prunableReason?: string; isMainWorktree: boolean; id: string; ... 43 more ...; runtimeOwnerEnvironmentId: null; }' is not assignable to type '{ id: string; instanceId?: string | undefined; repoId: string; projectId?: string | undefined; hostId?: ExecutionHostId | undefined; runtimeOwnerEnvironmentId?: string | undefined; ... 37 more ...; cliProvenance?: CliWorkspaceProvenance | undefined; }'.\n            Types of property 'runtimeOwnerEnvironmentId' are incompatible.\n              Type 'null' is not assignable to type 'string | undefined'."
+      "message": "Type '{ [x: string]: { head: string; branch: string; isBare: boolean; isSparse?: boolean; locked?: boolean; lockReason?: string; prunable?: boolean; prunableReason?: string; isMainWorktree: boolean; ... 45 more ...; runtimeOwnerEnvironmentId: null; }[] | Worktree[]; }' is not assignable to type 'Record<string, Worktree[]>'.\n  'string' index signatures are incompatible.\n    Type '{ head: string; branch: string; isBare: boolean; isSparse?: boolean | undefined; locked?: boolean | undefined; lockReason?: string | undefined; prunable?: boolean | undefined; prunableReason?: string | undefined; ... 46 more ...; runtimeOwnerEnvironmentId: null; }[] | Worktree[]' is not assignable to type 'Worktree[]'.\n      Type '{ head: string; branch: string; isBare: boolean; isSparse?: boolean | undefined; locked?: boolean | undefined; lockReason?: string | undefined; prunable?: boolean | undefined; prunableReason?: string | undefined; ... 46 more ...; runtimeOwnerEnvironmentId: null; }[]' is not assignable to type 'Worktree[]'.\n        Type '{ head: string; branch: string; isBare: boolean; isSparse?: boolean; locked?: boolean; lockReason?: string; prunable?: boolean; prunableReason?: string; isMainWorktree: boolean; id: string; ... 44 more ...; runtimeOwnerEnvironmentId: null; }' is not assignable to type 'Worktree'.\n          Type '{ head: string; branch: string; isBare: boolean; isSparse?: boolean; locked?: boolean; lockReason?: string; prunable?: boolean; prunableReason?: string; isMainWorktree: boolean; id: string; ... 44 more ...; runtimeOwnerEnvironmentId: null; }' is not assignable to type '{ id: string; instanceId?: string | undefined; identity?: WorktreeIdentity | undefined; repoId: string; projectId?: string | undefined; hostId?: ExecutionHostId | undefined; ... 38 more ...; cliProvenance?: CliWorkspaceProvenance | undefined; }'.\n            Types of property 'runtimeOwnerEnvironmentId' are incompatible.\n              Type 'null' is not assignable to type 'string | undefined'."
     },
     {
       "file": "tests/e2e/project-group-manual-sort.spec.ts",
@@ -1640,6 +1409,13 @@
       "message": "Type '{ worktreeId: string; repoId: string; repoDisplayName: string; repoPath: string; displayName: string; path: string; branch: string; isMainWorktree: boolean; isRemote: boolean; isSparse: boolean | undefined; ... 10 more ...; omittedTopLevelSizeBytes: number; }[]' is not assignable to type 'WorkspaceSpaceWorktree[]'.\n  Type '{ worktreeId: string; repoId: string; repoDisplayName: string; repoPath: string; displayName: string; path: string; branch: string; isMainWorktree: boolean; isRemote: boolean; isSparse: boolean | undefined; ... 10 more ...; omittedTopLevelSizeBytes: number; }' is not assignable to type 'WorkspaceSpaceWorktree'.\n    Types of property 'isSparse' are incompatible.\n      Type 'boolean | undefined' is not assignable to type 'boolean'.\n        Type 'undefined' is not assignable to type 'boolean'."
     },
     {
+      "file": "tests/e2e/worktree-card-downward-drag.spec.ts",
+      "line": 89,
+      "column": 42,
+      "code": 2339,
+      "message": "Property 'get' does not exist on type 'readonly WorktreeMetaBatchUpdate[]'."
+    },
+    {
       "file": "tests/e2e/worktree-jump-palette-filter.spec.ts",
       "line": 66,
       "column": 11,
@@ -1658,7 +1434,7 @@
       "line": 73,
       "column": 9,
       "code": 2322,
-      "message": "Type '{ [x: string]: { head: string; isBare: boolean; isSparse?: boolean; locked?: boolean; lockReason?: string; prunable?: boolean; prunableReason?: string; instanceId?: string; projectId?: string; ... 45 more ...; hostId: string; }[] | Worktree[]; }' is not assignable to type 'Record<string, Worktree[]>'.\n  'string' index signatures are incompatible.\n    Type '{ head: string; isBare: boolean; isSparse?: boolean | undefined; locked?: boolean | undefined; lockReason?: string | undefined; prunable?: boolean | undefined; prunableReason?: string | undefined; ... 47 more ...; hostId: string; }[] | Worktree[]' is not assignable to type 'Worktree[]'.\n      Type '{ head: string; isBare: boolean; isSparse?: boolean | undefined; locked?: boolean | undefined; lockReason?: string | undefined; prunable?: boolean | undefined; prunableReason?: string | undefined; ... 47 more ...; hostId: string; }[]' is not assignable to type 'Worktree[]'.\n        Type '{ head: string; isBare: boolean; isSparse?: boolean; locked?: boolean; lockReason?: string; prunable?: boolean; prunableReason?: string; instanceId?: string; projectId?: string; runtimeOwnerEnvironmentId?: string; ... 44 more ...; hostId: string; }' is not assignable to type 'Worktree'.\n          Type '{ head: string; isBare: boolean; isSparse?: boolean; locked?: boolean; lockReason?: string; prunable?: boolean; prunableReason?: string; instanceId?: string; projectId?: string; runtimeOwnerEnvironmentId?: string; ... 44 more ...; hostId: string; }' is not assignable to type '{ id: string; instanceId?: string | undefined; repoId: string; projectId?: string | undefined; hostId?: ExecutionHostId | undefined; runtimeOwnerEnvironmentId?: string | undefined; ... 37 more ...; cliProvenance?: CliWorkspaceProvenance | undefined; }'.\n            Types of property 'hostId' are incompatible.\n              Type 'string' is not assignable to type 'ExecutionHostId | undefined'."
+      "message": "Type '{ [x: string]: { head: string; isBare: boolean; isSparse?: boolean; locked?: boolean; lockReason?: string; prunable?: boolean; prunableReason?: string; instanceId?: string; identity?: WorktreeIdentity; ... 46 more ...; hostId: string; }[] | Worktree[]; }' is not assignable to type 'Record<string, Worktree[]>'.\n  'string' index signatures are incompatible.\n    Type '{ head: string; isBare: boolean; isSparse?: boolean | undefined; locked?: boolean | undefined; lockReason?: string | undefined; prunable?: boolean | undefined; prunableReason?: string | undefined; ... 48 more ...; hostId: string; }[] | Worktree[]' is not assignable to type 'Worktree[]'.\n      Type '{ head: string; isBare: boolean; isSparse?: boolean | undefined; locked?: boolean | undefined; lockReason?: string | undefined; prunable?: boolean | undefined; prunableReason?: string | undefined; ... 48 more ...; hostId: string; }[]' is not assignable to type 'Worktree[]'.\n        Type '{ head: string; isBare: boolean; isSparse?: boolean; locked?: boolean; lockReason?: string; prunable?: boolean; prunableReason?: string; instanceId?: string; identity?: WorktreeIdentity; projectId?: string; ... 45 more ...; hostId: string; }' is not assignable to type 'Worktree'.\n          Type '{ head: string; isBare: boolean; isSparse?: boolean; locked?: boolean; lockReason?: string; prunable?: boolean; prunableReason?: string; instanceId?: string; identity?: WorktreeIdentity; projectId?: string; ... 45 more ...; hostId: string; }' is not assignable to type '{ id: string; instanceId?: string | undefined; identity?: WorktreeIdentity | undefined; repoId: string; projectId?: string | undefined; hostId?: ExecutionHostId | undefined; ... 38 more ...; cliProvenance?: CliWorkspaceProvenance | undefined; }'.\n            Types of property 'hostId' are incompatible.\n              Type 'string' is not assignable to type 'ExecutionHostId | undefined'."
     },
     {
       "file": "tests/e2e/worktree-lineage-agent-expansion.spec.ts",
