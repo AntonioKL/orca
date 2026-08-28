@@ -1,4 +1,4 @@
-import { createElement } from 'react'
+import { createElement, Suspense, type ReactElement } from 'react'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RpcClient } from '../transport/rpc-client'
@@ -417,6 +417,84 @@ describe('NewWorktreeModal project targets', () => {
     expect(sourceInputs(renderer).map((input) => input.props.value)).toEqual([
       'feat/keep-me',
       'feat/keep-me'
+    ])
+  })
+
+  // react-native-screens freezes a blurred screen by suspending its subtree
+  // (react-freeze), so React runs this component and then throws that render away.
+  // Anything the render mutated in place outlives the work React discarded.
+  function suspendableTree(frozen: () => boolean, child: ReactElement) {
+    const never = new Promise<void>(() => {})
+    const Freezer = () => {
+      if (frozen()) {
+        throw never
+      }
+      return null
+    }
+    // The modal renders first, so its render completes before the freeze throws.
+    return createElement(Suspense, { fallback: null }, child, createElement(Freezer, null))
+  }
+
+  it('keeps the form when a host switch renders but never commits', async () => {
+    setCachedRepos('host-2', repos)
+    const client = {
+      sendRequest: vi.fn().mockImplementation(() => new Promise(() => {}))
+    } as unknown as RpcClient
+    const modalProps = { visible: true, client, onCreated: () => {}, onClose: () => {} }
+    let frozen = false
+    const tree = (hostId: string) =>
+      suspendableTree(() => frozen, createElement(NewWorktreeModal, { ...modalProps, hostId }))
+
+    await act(async () => {
+      renderer = create(tree('host-1'))
+    })
+    act(() => sourceInputs(renderer)[0]!.props.onChangeText('keep-me'))
+
+    frozen = true
+    await act(async () => {
+      renderer.update(tree('host-2'))
+    })
+    frozen = false
+    await act(async () => {
+      renderer.update(tree('host-1'))
+    })
+
+    // host-2 never committed, so host-1's session was never superseded.
+    expect(sourceInputs(renderer).map((input) => input.props.value)).toEqual(['keep-me', 'keep-me'])
+  })
+
+  it('keeps the form when a close renders but never commits', async () => {
+    const client = {
+      sendRequest: vi.fn().mockImplementation(() => new Promise(() => {}))
+    } as unknown as RpcClient
+    const modalProps = {
+      client,
+      hostId: 'host-1',
+      onCreated: () => {},
+      onClose: () => {}
+    }
+    let frozen = false
+    const tree = (visible: boolean) =>
+      suspendableTree(() => frozen, createElement(NewWorktreeModal, { ...modalProps, visible }))
+
+    await act(async () => {
+      renderer = create(tree(true))
+    })
+    act(() => sourceInputs(renderer)[0]!.props.onChangeText('keep-me-too'))
+
+    frozen = true
+    await act(async () => {
+      renderer.update(tree(false))
+    })
+    frozen = false
+    await act(async () => {
+      renderer.update(tree(true))
+    })
+
+    // The drawer never committed a closed state, so this is not a reopening.
+    expect(sourceInputs(renderer).map((input) => input.props.value)).toEqual([
+      'keep-me-too',
+      'keep-me-too'
     ])
   })
 
