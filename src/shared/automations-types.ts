@@ -158,7 +158,9 @@ export type AutomationRun = {
   error: string | null
   startedAt: number | null
   dispatchedAt: number | null
-  /** Canonical hook-preview prompt captured so restart recovery binds the dispatched turn. */
+  /** Canonical hook-preview prompt captured so restart recovery binds the dispatched turn.
+   *  Carries the authority-internal run-id marker: strip it (stripAutomationTurnMarker) before
+   *  any client renders it, the way published agent-status prompts already do. */
   dispatchPromptPreview?: string
   createdAt: number
   /** Why: run titles must stay unique once retention prunes old runs, so the

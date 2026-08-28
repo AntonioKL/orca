@@ -57,7 +57,11 @@ import {
   type AgentStatusOrchestrationContext,
   type AgentStatusEntry
 } from '../../shared/agent-status-types'
-import { isAutomationTurnPrompt } from '../../shared/automation-turn-prompt'
+import {
+  isAutomationTurnPrompt,
+  stripAutomationTurnMarker,
+  stripAutomationTurnMarkerFromPublishedStatus
+} from '../../shared/automation-turn-prompt'
 import { terminalStatusPayloadMatchesHook } from '../../shared/agent-terminal-status-equivalence'
 import { indexAgentStatusRowsByPaneKey } from '../agent-hooks/agent-status-pane-index'
 import type { AgentHookAuthorityAttestation } from '../agent-hooks/server'
@@ -21640,7 +21644,8 @@ export class OrcaRuntimeService {
         state: src.state,
         ...(src.workingMode ? { workingMode: src.workingMode } : {}),
         agentType: src.agentType,
-        prompt: src.prompt,
+        // Rule 3: worktree.ps reaches old mobile clients and `orca worktree ps --json` verbatim.
+        prompt: stripAutomationTurnMarker(src.prompt),
         taskTitle,
         displayName,
         lastAssistantMessage: src.lastAssistantMessage,
@@ -35200,7 +35205,11 @@ export class OrcaRuntimeService {
       const { turnCompletedAt: projectedTurnCompletedAt, ...clientStatusFields } =
         projectedStatusEntry ?? {}
       const clientAgentStatus = projectedStatusEntry
-        ? { agentStatus: clientStatusFields as AgentStatusEntry }
+        ? {
+            agentStatus: stripAutomationTurnMarkerFromPublishedStatus(
+              clientStatusFields as AgentStatusEntry
+            )
+          }
         : {}
       const rawTurnCompletedAt =
         hookAgentStatus?.live?.payload.turnCompletedAt ??

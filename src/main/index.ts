@@ -328,7 +328,10 @@ import { initializeBrowserClientHostId } from './browser/browser-client-host-id'
 import { setUnreadDockBadgeCount } from './dock/unread-badge'
 import { AutomationService } from './automations/service'
 import { buildHeadlessAutomationWorktreeCreateArgs } from './automations/headless-workspace-create'
-import { buildAutomationTurnPrompt } from '../shared/automation-turn-prompt'
+import {
+  buildAutomationTurnPrompt,
+  stripAutomationTurnMarkerFromPublishedStatus
+} from '../shared/automation-turn-prompt'
 import { createRuntimeAutomationRunTerminalObserver } from './automations/runtime-terminal-run-observer'
 import { AgentAwakeService } from './agent-awake-service'
 import { normalizeComputerAwakeMode } from '../shared/computer-awake-mode'
@@ -1707,7 +1710,7 @@ function openMainWindow(options: { revealOnDidFinishLoad?: boolean } = {}): Brow
       if (providerSessionOnly) {
         // Why: session_start just refreshes durable resume identity while Pi is idle; forward it without titles, telemetry, or status UI.
         mainWindow?.webContents.send('agentStatus:set', {
-          ...payload,
+          ...stripAutomationTurnMarkerFromPublishedStatus(payload),
           paneKey,
           ...(launchToken ? { launchToken } : {}),
           tabId,
@@ -1735,8 +1738,10 @@ function openMainWindow(options: { revealOnDidFinishLoad?: boolean } = {}): Brow
               launchConfig: runtime?.getAgentStatusLaunchConfigForPaneKey(paneKey, { launchToken })
             })
           : false
+      // Why: the marker is authority-internal turn identity; every window renders this row
+      // and the desktop republishes it to mobile through syncWindowGraph.
       const statusEvent = {
-        ...payload,
+        ...stripAutomationTurnMarkerFromPublishedStatus(payload),
         paneKey,
         ...(launchToken ? { launchToken } : {}),
         ...(terminalHandle ? { terminalHandle } : {}),
