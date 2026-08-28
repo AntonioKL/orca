@@ -72,6 +72,11 @@ function parseArgs(argv) {
         break
       case '--cycles':
         args.cycles = num('--cycles')
+        // Zero cycles churns nothing: the loop never runs, `samples` holds only the
+        // baseline, and the summary reports a flat zero-growth series from no work.
+        if (args.cycles === 0) {
+          throw new Error('--cycles requires a positive integer')
+        }
         break
       case '--sample-every':
         args.sampleEvery = num('--sample-every')
@@ -83,6 +88,11 @@ function parseArgs(argv) {
         break
       case '--output-bytes':
         args.outputBytes = num('--output-bytes')
+        // Zero bytes leaves `command` null, so every cycle degenerates to bare
+        // create+kill and the RSS series flattens for lack of churn, not for lack of a leak.
+        if (args.outputBytes === 0) {
+          throw new Error('--output-bytes requires a positive integer')
+        }
         break
       case '--settle-ms':
         args.settleMs = num('--settle-ms')

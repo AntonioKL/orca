@@ -31,14 +31,28 @@ export function assertDaemonBuildProvenance(repoRoot) {
   const headSha = git('rev-parse', 'HEAD')
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD')
 
-  const relevant = ['src/main/', 'src/shared/', 'config/patches/', 'pnpm-lock.yaml', 'package.json']
-  // NOTE: no .trim() on the whole output — porcelain lines start with a
-  // two-character status whose first column may be a meaningful space.
-  const dirty = execFileSync('git', ['status', '--porcelain'], { cwd: repoRoot, encoding: 'utf8' })
-    .split('\n')
-    .filter((line) => line.length > 3)
-    .map((line) => line.slice(3))
-    .filter((file) => relevant.some((prefix) => file.startsWith(prefix)))
+  const relevant = [
+    'src/main',
+    'src/shared',
+    'config/patches',
+    'config/scripts/build-orcad.mjs',
+    'pnpm-lock.yaml',
+    'package.json'
+  ]
+  // Why -z and a pathspec rather than parsing paths out of the default format: the
+  // default quotes any path with a space or non-ASCII byte (core.quotePath), and a
+  // rename prints `old -> new`, so a prefix test on the sliced line misses both — a
+  // daemon source moved in, or one with a space in its name, would read as clean.
+  // With -z git never quotes, and letting git do the matching removes the parse.
+  const dirty = execFileSync('git', ['status', '--porcelain', '-z', '--', ...relevant], {
+    cwd: repoRoot,
+    encoding: 'utf8'
+  })
+    .split('\0')
+    // -z emits a bare `new\0old\0` pair for R/C; the status record is the one with
+    // the two-column prefix, and the trailing source path carries none.
+    .filter((record) => record.length > 3 && record[2] === ' ')
+    .map((record) => record.slice(3))
   if (dirty.length > 0) {
     throw new Error(
       `PROVENANCE FAILURE: daemon-relevant paths are dirty; results would not be attributable to HEAD ${headSha}:\n  ${dirty.join('\n  ')}`
@@ -63,7 +77,7 @@ export function assertDaemonBuildProvenance(repoRoot) {
       `PROVENANCE FAILURE: installed node-pty at ${installedRealRoot} was not built from the checked-out patch (expected patch_hash=${patchSha256}). Run pnpm install.`
     )
   }
-  if (!installedRealRoot.startsWith(repoRoot + sep)) {
+  if (!installedRealRoot.startsWith(realpathSync(repoRoot) + sep)) {
     throw new Error(
       `PROVENANCE FAILURE: node_modules/node-pty resolves outside this worktree (${installedRealRoot}); a sibling worktree's install cannot prove this HEAD`
     )
