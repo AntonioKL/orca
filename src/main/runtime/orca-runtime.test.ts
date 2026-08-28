@@ -37707,12 +37707,66 @@ describe('OrcaRuntimeService', () => {
     const wait = runtime.waitForTerminal(terminal.handle, {
       condition: 'tui-idle',
       timeoutMs: 1_000,
-      agentTurnStartedAfter: observedAfter
+      agentTurnStartedAfter: observedAfter,
+      agentTurnPrompt: 'automation prompt'
     })
 
     runtime.onPtyData('pty-1', '\x1b]0;Codex done\x07', 200)
 
     await expect(wait).resolves.toMatchObject({ satisfied: true })
+  })
+
+  it('does not let a different post-restart prompt consume retained dispatch evidence', async () => {
+    const observedAfter = Date.now() - 1_000
+    const leafId = '11111111-2222-4333-8444-555555555555'
+    const statuses = [
+      {
+        state: 'working' as const,
+        prompt: 'different prompt',
+        agentType: 'codex' as const,
+        paneKey: `tab-1:${leafId}`,
+        connectionId: null,
+        receivedAt: observedAfter + 100,
+        stateStartedAt: observedAfter + 100,
+        observation: {
+          origin: 'hook' as const,
+          authorityId: 'post-restart',
+          incarnation: 0,
+          revision: 1,
+          observedAt: observedAfter + 100,
+          kind: 'snapshot' as const
+        }
+      }
+    ]
+    const runtime = new OrcaRuntimeService(store, undefined, {
+      getAgentStatusSnapshot: () => statuses
+    })
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, {
+      tabs: [
+        {
+          tabId: 'tab-1',
+          worktreeId: 'repo-1::/tmp/worktree-a',
+          title: 'Codex',
+          activeLeafId: leafId,
+          layout: null
+        }
+      ],
+      leaves: [
+        {
+          tabId: 'tab-1',
+          worktreeId: 'repo-1::/tmp/worktree-a',
+          leafId,
+          paneRuntimeId: 1,
+          ptyId: 'pty-1'
+        }
+      ]
+    })
+    const [terminal] = (await runtime.listTerminals()).terminals
+
+    expect(
+      runtime.hasTerminalAgentWorkedSince(terminal.handle, observedAfter, 'automation prompt')
+    ).toBe(false)
   })
 
   it('rejects a stale clock-ahead remote completion before a reused dispatch', async () => {
@@ -37757,6 +37811,84 @@ describe('OrcaRuntimeService', () => {
     const [terminal] = (await runtime.listTerminals()).terminals
 
     expect(runtime.hasTerminalAgentWorkedSince(terminal.handle, observedAfter)).toBe(false)
+  })
+
+  it('rejects replayed hook completion but retains a live hook-only working to done turn', async () => {
+    const observedAfter = Date.now()
+    const leafId = '11111111-2222-4333-8444-555555555555'
+    const paneKey = `tab-1:${leafId}`
+    let snapshots: never[] = []
+    const runtime = new OrcaRuntimeService(store, undefined, {
+      getAgentStatusSnapshot: () => snapshots
+    })
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, {
+      tabs: [
+        {
+          tabId: 'tab-1',
+          worktreeId: 'repo-1::/tmp/worktree-a',
+          title: 'Codex',
+          activeLeafId: leafId,
+          layout: null
+        }
+      ],
+      leaves: [
+        {
+          tabId: 'tab-1',
+          worktreeId: 'repo-1::/tmp/worktree-a',
+          leafId,
+          paneRuntimeId: 1,
+          ptyId: 'pty-1'
+        }
+      ]
+    })
+    const [terminal] = (await runtime.listTerminals()).terminals
+    const evidence = () =>
+      (
+        runtime as unknown as {
+          getTerminalAgentTurnEvidence: (
+            handle: string,
+            after: number,
+            expectedPrompt?: string
+          ) => { started: boolean; finished: boolean }
+        }
+      ).getTerminalAgentTurnEvidence(terminal.handle, observedAfter, 'automation prompt')
+    const row = (
+      state: 'working' | 'done',
+      revision: number,
+      kind: 'snapshot' | 'transition',
+      replayedAt?: number
+    ) => ({
+      state,
+      prompt: 'automation prompt',
+      agentType: 'codex',
+      paneKey,
+      connectionId: 'ssh-1',
+      receivedAt: observedAfter + revision,
+      stateStartedAt: observedAfter + revision,
+      observation: {
+        origin: 'hook',
+        authorityId: 'authority-1',
+        incarnation: 0,
+        revision,
+        observedAt: observedAfter + revision,
+        kind,
+        ...(replayedAt !== undefined ? { replayedAt } : {})
+      }
+    })
+
+    snapshots = [row('done', 1, 'snapshot', observedAfter - 1) as never]
+    expect(evidence()).toEqual({ started: false, finished: false })
+
+    snapshots = [row('done', 2, 'snapshot', observedAfter + 2) as never]
+    expect(evidence()).toEqual({ started: true, finished: true })
+
+    snapshots = []
+    runtime.recordAutomationAgentStatus(row('working', 2, 'transition') as never)
+    expect(evidence()).toEqual({ started: true, finished: false })
+
+    runtime.recordAutomationAgentStatus(row('done', 3, 'transition') as never)
+    expect(evidence()).toEqual({ started: true, finished: true })
   })
 
   it('builds a compact worktree summary from persisted and live runtime state', async () => {

@@ -2454,6 +2454,7 @@ type TerminalWaiter = {
   handle: string
   condition: RuntimeTerminalWaitCondition
   agentTurnStartedAfter: number | null
+  agentTurnPrompt: string | null
   resolve: (result: RuntimeTerminalWait) => void
   reject: (error: Error) => void
   timeout: NodeJS.Timeout | null
@@ -3441,6 +3442,16 @@ export class OrcaRuntimeService {
       lastWorkingAt: number | null
       lastIdleAt: number | null
       updatedAt: number
+    }
+  >()
+  private automationHookTurnEvidenceByPaneKey = new Map<
+    string,
+    {
+      authorityId: string
+      incarnation: number
+      prompt: string
+      startedAt: number | null
+      finishedAt: number | null
     }
   >()
   private agentPromptPermissionSequenceByPtyId = new Map<string, number>()
@@ -19514,21 +19525,79 @@ export class OrcaRuntimeService {
     return { handle, isRunningAgent, status: null }
   }
 
-  hasTerminalAgentWorkedSince(handle: string, observedAfter: number): boolean {
-    return this.getTerminalAgentTurnEvidence(handle, observedAfter).started
+  hasTerminalAgentWorkedSince(
+    handle: string,
+    observedAfter: number,
+    expectedPrompt?: string
+  ): boolean {
+    return this.getTerminalAgentTurnEvidence(handle, observedAfter, expectedPrompt).started
   }
 
-  private hasTerminalAgentFinishedSince(handle: string, observedAfter: number): boolean {
-    return this.getTerminalAgentTurnEvidence(handle, observedAfter).finished
+  recordAutomationAgentStatus(entry: AgentStatusIpcPayload): void {
+    const observation = entry.observation
+    if (
+      entry.providerSessionOnly === true ||
+      observation?.kind === 'snapshot' ||
+      observation?.kind === 'identity-only'
+    ) {
+      return
+    }
+    const previous = this.automationHookTurnEvidenceByPaneKey.get(entry.paneKey)
+    const sameIncarnation =
+      previous?.authorityId === observation?.authorityId &&
+      previous?.incarnation === observation?.incarnation
+    if (entry.state === 'working') {
+      const startsNewTurn =
+        observation?.boundary === true ||
+        !sameIncarnation ||
+        !previous ||
+        previous.finishedAt !== null
+      this.automationHookTurnEvidenceByPaneKey.set(entry.paneKey, {
+        authorityId: observation?.authorityId ?? 'legacy',
+        incarnation: observation?.incarnation ?? 0,
+        prompt: entry.prompt,
+        startedAt: startsNewTurn ? entry.receivedAt : (previous.startedAt ?? entry.receivedAt),
+        finishedAt: startsNewTurn ? null : previous.finishedAt
+      })
+      return
+    }
+    if (entry.state !== 'done' || entry.sessionBoundary === true) {
+      return
+    }
+    const authoritativeCompletion = entry.turnCompletedAt !== undefined
+    if (!authoritativeCompletion && (!sameIncarnation || previous?.startedAt === null)) {
+      return
+    }
+    this.automationHookTurnEvidenceByPaneKey.set(entry.paneKey, {
+      authorityId: observation?.authorityId ?? previous?.authorityId ?? 'legacy',
+      incarnation: observation?.incarnation ?? previous?.incarnation ?? 0,
+      prompt: entry.prompt || previous?.prompt || '',
+      startedAt: previous?.startedAt ?? (authoritativeCompletion ? entry.receivedAt : null),
+      finishedAt: entry.receivedAt
+    })
+  }
+
+  forgetAutomationAgentStatus(paneKey: string): void {
+    this.automationHookTurnEvidenceByPaneKey.delete(paneKey)
+  }
+
+  private hasTerminalAgentFinishedSince(
+    handle: string,
+    observedAfter: number,
+    expectedPrompt?: string | null
+  ): boolean {
+    return this.getTerminalAgentTurnEvidence(handle, observedAfter, expectedPrompt).finished
   }
 
   private getTerminalAgentTurnEvidence(
     handle: string,
-    observedAfter: number
+    observedAfter: number,
+    expectedPrompt?: string | null
   ): { started: boolean; finished: boolean } {
     const ptyId = this.getTerminalAgentStatusPtyId(handle)
     const lifecycle = this.agentPromptLifecycleByPtyId.get(ptyId)
     let startedAt =
+      !expectedPrompt &&
       lifecycle?.lastWorkingAt !== null &&
       lifecycle?.lastWorkingAt !== undefined &&
       lifecycle.lastWorkingAt >= observedAfter
@@ -19536,6 +19605,25 @@ export class OrcaRuntimeService {
         : null
     let completedFromHook = false
     const paneKey = this.getPaneKeyForTerminalHandle(handle)
+    const liveHookEvidence = paneKey
+      ? this.automationHookTurnEvidenceByPaneKey.get(paneKey)
+      : undefined
+    if (
+      liveHookEvidence?.startedAt !== null &&
+      liveHookEvidence?.startedAt !== undefined &&
+      (!expectedPrompt || liveHookEvidence.prompt === expectedPrompt)
+    ) {
+      if (liveHookEvidence.startedAt >= observedAfter) {
+        startedAt = Math.max(startedAt ?? observedAfter, liveHookEvidence.startedAt)
+      }
+      if (
+        liveHookEvidence.finishedAt !== null &&
+        liveHookEvidence.finishedAt > observedAfter &&
+        (liveHookEvidence.startedAt >= observedAfter || liveHookEvidence.startedAt === null)
+      ) {
+        completedFromHook = true
+      }
+    }
     for (const entry of this.getAgentStatusSnapshotFn?.() ?? []) {
       if (entry.providerSessionOnly === true) {
         continue
@@ -19543,14 +19631,31 @@ export class OrcaRuntimeService {
       if (entry.terminalHandle !== handle && (!paneKey || entry.paneKey !== paneKey)) {
         continue
       }
-      if (entry.state === 'working' && entry.stateStartedAt >= observedAfter) {
+      const replayedCompletion =
+        entry.observation?.kind === 'snapshot' &&
+        entry.observation.origin === 'hook' &&
+        entry.observation.replayedAt !== undefined &&
+        entry.observation.replayedAt > observedAfter
+      if (
+        entry.observation?.kind === 'snapshot' &&
+        entry.state !== 'working' &&
+        !replayedCompletion
+      ) {
+        continue
+      }
+      if (
+        entry.state === 'working' &&
+        entry.stateStartedAt >= observedAfter &&
+        (!expectedPrompt || entry.prompt === expectedPrompt)
+      ) {
         startedAt = Math.max(startedAt ?? observedAfter, entry.stateStartedAt)
       }
       if (
         entry.state === 'done' &&
         entry.sessionBoundary !== true &&
-        entry.turnCompletedAt !== undefined &&
-        entry.receivedAt > observedAfter
+        (entry.turnCompletedAt !== undefined || replayedCompletion) &&
+        entry.receivedAt > observedAfter &&
+        (!expectedPrompt || entry.prompt === expectedPrompt)
       ) {
         completedFromHook = true
       }
@@ -19570,7 +19675,11 @@ export class OrcaRuntimeService {
   private canResolveTerminalTuiIdleWaiter(waiter: TerminalWaiter): boolean {
     return (
       waiter.agentTurnStartedAfter === null ||
-      this.hasTerminalAgentFinishedSince(waiter.handle, waiter.agentTurnStartedAfter)
+      this.hasTerminalAgentFinishedSince(
+        waiter.handle,
+        waiter.agentTurnStartedAfter,
+        waiter.agentTurnPrompt
+      )
     )
   }
 
@@ -20538,13 +20647,15 @@ export class OrcaRuntimeService {
       timeoutMs?: number
       signal?: AbortSignal
       agentTurnStartedAfter?: number
+      agentTurnPrompt?: string
     }
   ): Promise<RuntimeTerminalWait> {
     const condition = options?.condition ?? 'exit'
     const agentTurnStartedAfter = options?.agentTurnStartedAfter ?? null
+    const agentTurnPrompt = options?.agentTurnPrompt ?? null
     const hasOrderedAgentCompletion = (): boolean =>
       agentTurnStartedAfter !== null &&
-      this.hasTerminalAgentFinishedSince(handle, agentTurnStartedAfter)
+      this.hasTerminalAgentFinishedSince(handle, agentTurnStartedAfter, agentTurnPrompt)
     const pty = this.getLivePtyForHandle(handle)
     if (pty) {
       if (condition === 'exit' && !pty.pty.connected) {
@@ -20588,6 +20699,7 @@ export class OrcaRuntimeService {
           handle,
           condition,
           agentTurnStartedAfter,
+          agentTurnPrompt,
           resolve,
           reject,
           timeout: null,
@@ -20698,6 +20810,7 @@ export class OrcaRuntimeService {
         handle,
         condition,
         agentTurnStartedAfter,
+        agentTurnPrompt,
         resolve,
         reject,
         timeout: null,

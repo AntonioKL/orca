@@ -5,6 +5,7 @@ import type {
   AutomationRun,
   AutomationRunTrigger
 } from '../../../shared/automations-types'
+import { normalizePromptField } from '../../../shared/agent-status-field-normalization'
 import type { PersistedState } from '../../../shared/persisted-state-types'
 import {
   nextAutomationRunNumber,
@@ -84,6 +85,7 @@ export function createAutomationRun(
     error: null,
     startedAt: null,
     dispatchedAt: null,
+    dispatchPromptPreview: normalizePromptField(automation.prompt),
     createdAt: now
   }
   operations.state.automationRuns = pruneAutomationRuns([

@@ -2485,6 +2485,7 @@ void app.whenReady().then(async () => {
   // would keep the pane's last projection until an unrelated PTY touch came along.
   const hookStatusChangedSessionTabs = createHookStatusSessionTabsInvalidator()
   const unsubscribeHookStatusSessionTabs = agentHookServer.subscribeEnrichedStatus((enriched) => {
+    runtime?.recordAutomationAgentStatus({ ...enriched, ...enriched.payload })
     if (hookStatusChangedSessionTabs(enriched)) {
       runtime?.touchMobileSessionTabsForPane(enriched.paneKey, enriched.worktreeId ?? null)
     }
@@ -2498,6 +2499,7 @@ void app.whenReady().then(async () => {
         : hookStatusChangedSessionTabs.forgetConnection(clear.connectionId)
     for (const paneKey of clearedPaneKeys) {
       hookStatusChangedSessionTabs.forgetPane(paneKey)
+      runtime?.forgetAutomationAgentStatus(paneKey)
       runtime?.touchMobileSessionTabsForPane(paneKey)
     }
   })

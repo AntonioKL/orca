@@ -17,6 +17,7 @@ import {
 } from '../../../shared/task-source-context'
 import { getRepoExecutionHostId, parseExecutionHostId } from '../../../shared/execution-host'
 import { parsePaneKey } from '../../../shared/stable-pane-id'
+import { normalizePromptField } from '../../../shared/agent-status-field-normalization'
 
 export function normalizeAutomationRunWorkspaceDisplayName(value: string | null): string | null {
   const trimmed = value?.trim()
@@ -182,6 +183,7 @@ export function backfillLegacyAutomationContexts(
 } {
   let changed = false
   const contextsByAutomationId = new Map<string, Pick<Automation, 'runContext' | 'sourceContext'>>()
+  const promptByAutomationId = new Map<string, string>()
   const reposById = new Map((state.repos ?? []).map((repo) => [repo.id, repo]))
   const automations = (state.automations ?? []).map((automation) => {
     const contexts = getAutomationContextsForRepo(
@@ -202,6 +204,7 @@ export function backfillLegacyAutomationContexts(
       runContext: next.runContext ?? null,
       sourceContext: next.sourceContext ?? null
     })
+    promptByAutomationId.set(next.id, normalizePromptField(next.prompt))
     return next
   })
   const automationRuns = (state.automationRuns ?? []).map((run) => {
@@ -221,6 +224,10 @@ export function backfillLegacyAutomationContexts(
     }
     if (!Object.hasOwn(next, 'terminalPtyId')) {
       next.terminalPtyId = null
+      changed = true
+    }
+    if (!Object.hasOwn(next, 'dispatchPromptPreview')) {
+      next.dispatchPromptPreview = promptByAutomationId.get(run.automationId)
       changed = true
     }
     return next

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import type { Repo } from '../../shared/repo-types'
 import type { Automation, AutomationRun } from '../../shared/automations-types'
 import type { AutomationsChangedPayload } from '../../shared/runtime-client-events'
+import { normalizePromptField } from '../../shared/agent-status-field-normalization'
 import { AutomationService } from './service'
 import type {
   AutomationRunCompletionObservation,
@@ -50,11 +51,11 @@ const makeRepo = (overrides: Partial<Repo> = {}): Repo => ({
 
 type TestStore = Awaited<ReturnType<typeof createStore>>
 
-function createAutomation(store: TestStore): Automation {
+function createAutomation(store: TestStore, prompt = 'Check the repo'): Automation {
   store.addRepo(makeRepo())
   return store.createAutomation({
     name: 'Nightly check',
-    prompt: 'Check the repo',
+    prompt,
     agentId: 'claude',
     projectId: 'r1',
     workspaceMode: 'existing',
@@ -83,14 +84,16 @@ function readRun(store: TestStore, automationId: string, runId: string): Automat
 function createObserver(
   observe: (
     signal: AbortSignal,
-    observedAfter: number
+    observedAfter: number,
+    expectedPrompt?: string
   ) => Promise<AutomationRunCompletionObservation>,
   resolveRunTerminal: (run: AutomationRun) => string | null = (run) =>
     run.terminalPaneKey ? 'handle-1' : null
 ): AutomationRunTerminalObserver {
   return {
     resolveRunTerminal,
-    observeCompletion: (_handle, { signal, observedAfter }) => observe(signal, observedAfter)
+    observeCompletion: (_handle, { signal, observedAfter, expectedPrompt }) =>
+      observe(signal, observedAfter, expectedPrompt)
   }
 }
 
@@ -262,6 +265,34 @@ describe('authority-owned automation run completion', () => {
     service.start()
 
     await vi.waitFor(() => expect(observedAfter).toBe(dispatchedAt))
+    service.stop()
+  })
+
+  it('persists the canonical hook prompt preview for multiline restart recovery', async () => {
+    const store = await createStore()
+    const prompt = `line one\n${'x'.repeat(250)}`
+    const automation = createAutomation(store, prompt)
+    const run = store.createAutomationRun(automation, 1_000, 'manual')
+    store.updateAutomationRun({
+      runId: run.id,
+      status: 'dispatched',
+      ...LAUNCH_TARGET,
+      error: null
+    })
+    let expectedPrompt: string | undefined
+    const service = new AutomationService(store, {
+      terminalObserver: createObserver((_signal, _boundary, promptPreview) => {
+        expectedPrompt = promptPreview
+        return new Promise(() => {})
+      })
+    })
+
+    service.start()
+
+    await vi.waitFor(() => expect(expectedPrompt).toBe(normalizePromptField(prompt)))
+    expect(readRun(store, automation.id, run.id).dispatchPromptPreview).toBe(
+      normalizePromptField(prompt)
+    )
     service.stop()
   })
 

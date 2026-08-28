@@ -156,6 +156,8 @@ export type AutomationRun = {
   error: string | null
   startedAt: number | null
   dispatchedAt: number | null
+  /** Canonical hook-preview prompt captured so restart recovery binds the dispatched turn. */
+  dispatchPromptPreview?: string
   createdAt: number
   /** Why: run titles must stay unique once retention prunes old runs, so the
    *  number can no longer be derived from how many runs are currently kept. */
