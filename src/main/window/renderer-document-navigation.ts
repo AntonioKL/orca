@@ -19,6 +19,7 @@ export function isRendererDocumentNavigation(currentUrl: string, nextUrl: string
     }
     return (
       (current.protocol === 'http:' || current.protocol === 'https:') &&
+      (next.protocol === 'http:' || next.protocol === 'https:') &&
       next.origin === current.origin
     )
   } catch {

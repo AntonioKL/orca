@@ -55,13 +55,16 @@ describe('privileged window navigation policy', () => {
     expect(openExternal).toHaveBeenCalledWith('https://example.com/')
   })
 
-  it('lets the dev renderer origin navigate but not a foreign origin', () => {
+  it('lets the dev renderer origin navigate but blocks foreign documents', () => {
     const fixture = createFixture('http://localhost:5173/')
 
     expect(
       fixture.willNavigate('http://localhost:5173/index.html').preventDefault
     ).not.toHaveBeenCalled()
     expect(fixture.willNavigate('https://example.com/').preventDefault).toHaveBeenCalled()
+    expect(
+      fixture.willNavigate('blob:http://localhost:5173/attacker-document').preventDefault
+    ).toHaveBeenCalled()
   })
 
   // Why: the packaged file: path is the whole privilege boundary, so a foreign host or a
