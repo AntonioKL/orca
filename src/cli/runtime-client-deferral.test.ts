@@ -1,11 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 
-const { constructorArgsMock, callMock, getCliStatusMock } = vi.hoisted(() => ({
+const {
+  applyAgentStatusHooksEnabledMock,
+  constructorArgsMock,
+  callMock,
+  getCliStatusMock,
+  testUserDataPathRef
+} = vi.hoisted(() => ({
+  applyAgentStatusHooksEnabledMock: vi.fn(async () => []),
   constructorArgsMock: vi.fn(),
   callMock: vi.fn(),
-  getCliStatusMock: vi.fn()
+  getCliStatusMock: vi.fn(),
+  testUserDataPathRef: { current: '' }
 }))
 
 // Why: `main` reaches RuntimeClient through `await import('./runtime-client.js')`
@@ -30,7 +39,7 @@ vi.mock('./runtime/environments', async (importOriginal) => {
 // Stubbed, not dropped: the row is the only case that reads ctx.client, so it carries the
 // null-vs-undefined coverage the rest of the table cannot.
 vi.mock('../main/agent-hooks/managed-agent-hook-controls', () => ({
-  applyAgentStatusHooksEnabled: vi.fn(async () => []),
+  applyAgentStatusHooksEnabled: applyAgentStatusHooksEnabledMock,
   getManagedAgentHookStatuses: vi.fn(() => []),
   prepareManagedCodexHomeBeforeShellLaunch: vi.fn(async () => {})
 }))
@@ -45,7 +54,7 @@ vi.mock('./runtime-client', () => {
       constructorArgsMock(...args)
     }
   }
-  return { RuntimeClient, getDefaultUserDataPath: () => '/tmp/orca-user-data' }
+  return { RuntimeClient, getDefaultUserDataPath: () => testUserDataPathRef.current }
 })
 
 import { main } from './index'
@@ -58,6 +67,8 @@ describe('RuntimeClient module-graph deferral', () => {
   let errorSpy: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
+    testUserDataPathRef.current = mkdtempSync(join(tmpdir(), 'orca-runtime-deferral-userdata-'))
+    applyAgentStatusHooksEnabledMock.mockClear()
     constructorArgsMock.mockClear()
     callMock.mockReset()
     getCliStatusMock.mockReset()
@@ -69,6 +80,7 @@ describe('RuntimeClient module-graph deferral', () => {
     logSpy.mockRestore()
     errorSpy.mockRestore()
     vi.unstubAllEnvs()
+    rmSync(testUserDataPathRef.current, { recursive: true, force: true })
     process.exitCode = 0
   })
 
@@ -145,6 +157,20 @@ describe('RuntimeClient module-graph deferral', () => {
       for (const call of calls) {
         expect(call[2], `${argv.join(' ')} pairing code`).toBeNull()
         expect(call[3], `${argv.join(' ')} environment`).toBeNull()
+      }
+      if (argv.join(' ') === 'agent hooks off') {
+        expect(
+          applyAgentStatusHooksEnabledMock,
+          `${argv.join(' ')} hook application`
+        ).toHaveBeenCalledExactlyOnceWith(false, {
+          agentCmdOverrides: {},
+          disabledTuiAgents: []
+        })
+      } else {
+        expect(
+          applyAgentStatusHooksEnabledMock,
+          `${argv.join(' ')} hook application`
+        ).not.toHaveBeenCalled()
       }
     }
   )
