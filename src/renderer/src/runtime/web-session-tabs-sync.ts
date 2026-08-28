@@ -1302,15 +1302,17 @@ function updateBatchAgentPaneKey(
 function buildRemirroredClosedTabMarkerLiftPatch(
   recentlyClosedAgentStatusTabIds: WebSessionTabsSyncState['recentlyClosedAgentStatusTabIds'],
   mirroredTerminalIds: ReadonlySet<string>
-): Partial<WebSessionTabsSyncState> | null {
+): { patch: Partial<WebSessionTabsSyncState>; liftedTabIds: string[] } | null {
   let next: WebSessionTabsSyncState['recentlyClosedAgentStatusTabIds'] | null = null
+  const liftedTabIds: string[] = []
   for (const tabId of mirroredTerminalIds) {
     if (tabId in (recentlyClosedAgentStatusTabIds ?? {})) {
       next ??= { ...recentlyClosedAgentStatusTabIds }
       delete next[tabId]
+      liftedTabIds.push(tabId)
     }
   }
-  return next ? { recentlyClosedAgentStatusTabIds: next } : null
+  return next ? { patch: { recentlyClosedAgentStatusTabIds: next }, liftedTabIds } : null
 }
 
 /**
@@ -3794,11 +3796,17 @@ function applyWebSessionTabsSnapshotWithContext(
   // a lingering closed-tab marker would blackhole its byte-derived status for the whole
   // session (host-restart subset frames, cross-host collision replays). The close-intent
   // filter already holds genuinely closing tabs out of the snapshot.
-  const remirroredClosedTabLiftPatch = buildRemirroredClosedTabMarkerLiftPatch(
+  const remirroredClosedTabLift = buildRemirroredClosedTabMarkerLiftPatch(
     retractedTabSweepPatch?.recentlyClosedAgentStatusTabIds ??
       state.recentlyClosedAgentStatusTabIds,
     mirroredTerminalIds
   )
+  const remirroredClosedTabLiftPatch = remirroredClosedTabLift?.patch ?? null
+  // Why: main's closed-tab set gates every hook event and had no expiry or revive path, so lifting
+  // only the renderer marker left the tab blackholed upstream of the renderer entirely (STA-5679).
+  if (remirroredClosedTabLift && typeof window !== 'undefined') {
+    window.api?.agentStatus?.liftClosedTabs?.(remirroredClosedTabLift.liftedTabIds)
+  }
 
   const patch: Partial<WebSessionTabsSyncState> = {
     ...agentStatusPatch,

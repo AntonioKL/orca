@@ -2892,6 +2892,19 @@ export class AgentHookServer {
     return existing
   }
 
+  /**
+   * Lift the closed-tab suppression for tab ids the renderer has proven alive again (a mirrored
+   * id republished in a snapshot). The pane-key set below has a new-turn revive path; this set had
+   * none, so a tab retracted by a transient/subset frame stayed suppressed in `getAgentStatusDisposition`
+   * for the whole session — upstream of the renderer, so the renderer's own marker lift could not
+   * reach it, and every later hook 204'd into nothing (STA-5679).
+   */
+  liftClosedAgentStatusTabs(tabIds: readonly string[]): void {
+    for (const tabId of tabIds) {
+      this.closedAgentStatusTabIds.delete(tabId)
+    }
+  }
+
   dropStatusEntriesByTabPrefix(tabId: string): void {
     this.markTabClosedForAgentStatus(tabId)
     const paneKeysToClear = new Set<string>()

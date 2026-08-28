@@ -743,3 +743,76 @@ describe('AgentHookServer closed-tab suppression bound', () => {
     expect(internals.closedAgentStatusTabIds.has(`closed-tab-${total - 1}`)).toBe(true)
   })
 })
+
+describe('closed-tab lift for a republished tab (STA-5679)', () => {
+  it('suppresses before the lift and accepts after it', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    try {
+      const server = new AgentHookServer()
+      const listener = vi.fn()
+      server.setListener(listener)
+
+      server.dropStatusEntriesByTabPrefix('tab-1')
+
+      // Control arm: proves the tab really is blackholed, so the accept below is a behavioral
+      // difference rather than a vacuous pass.
+      listener.mockClear()
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          payload: { state: 'working', prompt: 'while suppressed', agentType: 'claude' }
+        },
+        'conn-1'
+      )
+      expect(listener).not.toHaveBeenCalled()
+
+      // The renderer saw this mirrored id republished, so the tab is provably alive again.
+      server.liftClosedAgentStatusTabs(['tab-1'])
+
+      listener.mockClear()
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          payload: { state: 'working', prompt: 'after lift', agentType: 'claude' }
+        },
+        'conn-1'
+      )
+      expect(listener).toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('lifts only the named tabs', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    try {
+      const server = new AgentHookServer()
+      const listener = vi.fn()
+      server.setListener(listener)
+      server.dropStatusEntriesByTabPrefix('tab-1')
+      server.dropStatusEntriesByTabPrefix('tab-2')
+
+      server.liftClosedAgentStatusTabs(['tab-1'])
+
+      listener.mockClear()
+      server.ingestRemote(
+        {
+          paneKey: makePaneKey('tab-2', LEAF_2),
+          tabId: 'tab-2',
+          worktreeId: 'wt-1',
+          payload: { state: 'working', prompt: 'still closed', agentType: 'claude' }
+        },
+        'conn-1'
+      )
+      expect(listener).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})

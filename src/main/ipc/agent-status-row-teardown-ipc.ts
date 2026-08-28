@@ -16,6 +16,7 @@ import { isValidAgentStatusDropTabId } from './agent-status-ipc-boundary'
  * the pane's next event straight back to `working`.
  */
 export function registerAgentStatusRowTeardownIpcHandlers(): void {
+  ipcMain.removeAllListeners('agentStatus:liftClosedTabs')
   ipcMain.removeAllListeners('agentStatus:drop')
   ipcMain.removeAllListeners('agentStatus:reconcileEndedProcess')
   ipcMain.removeAllListeners('agentStatus:dropByTabPrefix')
@@ -52,6 +53,25 @@ export function registerAgentStatusRowTeardownIpcHandlers(): void {
       clearMigrationUnsupportedPtysForPaneKey(paneKey)
     } catch (err) {
       console.warn('[agent-hooks] reconcileEndedProcessForPaneKeys failed:', err)
+    }
+  })
+
+  // Why: the drop above marks the tab closed with no expiry, and the main-side gate checks that
+  // set before anything else — so a tab retracted by a transient snapshot frame and then
+  // republished stayed blackholed for the session. The renderer already lifts its own marker on
+  // re-mirror; this is the other half of that lift (STA-5679).
+  ipcMain.on('agentStatus:liftClosedTabs', (_event, tabIds: unknown) => {
+    if (!Array.isArray(tabIds)) {
+      return
+    }
+    const valid = tabIds.filter((tabId): tabId is string => isValidAgentStatusDropTabId(tabId))
+    if (valid.length === 0) {
+      return
+    }
+    try {
+      agentHookServer.liftClosedAgentStatusTabs(valid)
+    } catch (err) {
+      console.warn('[agent-hooks] liftClosedAgentStatusTabs failed:', err)
     }
   })
 

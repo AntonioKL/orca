@@ -5158,6 +5158,9 @@ const api = {
     dropByTabPrefix: (tabId: string): void => {
       ipcRenderer.send('agentStatus:dropByTabPrefix', tabId)
     },
+    liftClosedTabs: (tabIds: string[]): void => {
+      ipcRenderer.send('agentStatus:liftClosedTabs', tabIds)
+    },
     retirePaneAuthority: (paneKey: string): void => {
       ipcRenderer.send('agentStatus:retirePaneAuthority', paneKey)
     },

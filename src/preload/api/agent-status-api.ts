@@ -35,6 +35,7 @@ export type AgentStatusApi = {
   reconcileEndedProcess: (paneKey: string) => void
   /** Drop every cached hook status under one terminal tab prefix. Fire-and-forget. */
   dropByTabPrefix: (tabId: string) => void
+  liftClosedTabs: (tabIds: string[]) => void
   /** Permanently retire one pane's hook authority while siblings stay live. */
   retirePaneAuthority: (paneKey: string) => void
   /** Lift one pane's retirement fence when a live PTY re-attaches to it. Closed tabs stay retired. */
