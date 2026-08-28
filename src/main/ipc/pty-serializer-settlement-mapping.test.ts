@@ -461,6 +461,8 @@ describe('registerPtyHandlers', () => {
   })
   it('forwards the trusted Orca terminal handle into managed WSL terminals', async () => {
     const platform = Object.getOwnPropertyDescriptor(process, 'platform')
+    const savedSequencedStartupCommand = process.env.ORCA_SEQUENCED_STARTUP_COMMAND
+    const savedSequencedStartupScript = process.env.ORCA_SEQUENCED_STARTUP_SCRIPT
     Object.defineProperty(process, 'platform', {
       configurable: true,
       value: 'win32'
@@ -473,6 +475,8 @@ describe('registerPtyHandlers', () => {
       onPtyExit: vi.fn(),
       onPtyData: vi.fn()
     }
+    process.env.ORCA_SEQUENCED_STARTUP_COMMAND = 'parent-agent'
+    process.env.ORCA_SEQUENCED_STARTUP_SCRIPT = 'parent-gate'
 
     try {
       registerPtyHandlers(mainWindow as never, runtime as never)
@@ -485,6 +489,16 @@ describe('registerPtyHandlers', () => {
       if (platform) {
         Object.defineProperty(process, 'platform', platform)
       }
+      if (savedSequencedStartupCommand === undefined) {
+        delete process.env.ORCA_SEQUENCED_STARTUP_COMMAND
+      } else {
+        process.env.ORCA_SEQUENCED_STARTUP_COMMAND = savedSequencedStartupCommand
+      }
+      if (savedSequencedStartupScript === undefined) {
+        delete process.env.ORCA_SEQUENCED_STARTUP_SCRIPT
+      } else {
+        process.env.ORCA_SEQUENCED_STARTUP_SCRIPT = savedSequencedStartupScript
+      }
     }
 
     const spawnCall = spawnMock.mock.calls.at(-1)!
@@ -493,6 +507,8 @@ describe('registerPtyHandlers', () => {
     expect(env.ORCA_TERMINAL_HANDLE).toBe('term_wsl')
     expect(env.ORCA_USER_DATA_PATH).toBe('/tmp/orca-user-data')
     expect(env.ORCA_CLI_COMMAND).toBe('orca-ide')
+    expect(env.ORCA_SEQUENCED_STARTUP_COMMAND).toBeUndefined()
+    expect(env.ORCA_SEQUENCED_STARTUP_SCRIPT).toBeUndefined()
     expect(env.WSLENV?.split(':')).toEqual(
       expect.arrayContaining([
         'ORCA_TERMINAL_HANDLE/u',

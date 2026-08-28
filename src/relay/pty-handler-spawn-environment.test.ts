@@ -89,6 +89,43 @@ describe('PtyHandler', () => {
     expect(spawnOptions.env.PATH).toBe(expectedEnv.PATH)
   })
 
+  it('does not inherit parent-scoped Orca env and preserves explicit child values', async () => {
+    const keys = [
+      'ORCA_PANE_KEY',
+      'ORCA_TAB_ID',
+      'ORCA_WORKTREE_ID',
+      'ORCA_AGENT_LAUNCH_TOKEN',
+      'ORCA_SEQUENCED_STARTUP_COMMAND',
+      'ORCA_SEQUENCED_STARTUP_SCRIPT'
+    ] as const
+    const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
+    for (const key of keys) {
+      process.env[key] = `parent-${key}`
+    }
+
+    try {
+      await dispatcher.callRequest('pty.spawn', {})
+      await dispatcher.callRequest('pty.spawn', {
+        env: Object.fromEntries(keys.map((key) => [key, `child-${key}`]))
+      })
+    } finally {
+      for (const key of keys) {
+        if (saved[key] === undefined) {
+          delete process.env[key]
+        } else {
+          process.env[key] = saved[key]
+        }
+      }
+    }
+
+    const inherited = mockPtySpawn.mock.calls[0][2] as { env: Record<string, string> }
+    const explicit = mockPtySpawn.mock.calls[1][2] as { env: Record<string, string> }
+    for (const key of keys) {
+      expect(inherited.env[key]).toBeUndefined()
+      expect(explicit.env[key]).toBe(`child-${key}`)
+    }
+  })
+
   describe('half-activated conda env (#14195)', () => {
     const CONDA_KEYS = [
       'CONDA_SHLVL',
