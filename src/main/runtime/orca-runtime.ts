@@ -942,25 +942,31 @@ import {
   testConnection as testLinearConnection
 } from '../linear/client'
 import {
-  addIssueComment as addLinearIssueComment,
-  addIssueCommentForAgent as addLinearIssueCommentForAgent,
-  createIssueAttachment as createLinearIssueAttachment,
-  createIssueForAgent as createLinearIssueForAgent,
-  createIssue as createLinearIssue,
   getAttachmentByUuidForAgent as getLinearAttachmentByUuidForAgent,
   getCommentByUuidForAgent as getLinearCommentByUuidForAgent,
   getIssue as getLinearIssue,
   getIssueByUuidForAgent as getLinearIssueByUuidForAgent,
   getIssueCommentThreadRoot as getLinearIssueCommentThreadRoot,
-  getIssueComments as getLinearIssueComments,
+  searchIssues as searchLinearIssues
+} from '../linear/linear-issue-lookups'
+import {
   listIssues as listLinearIssues,
-  searchIssues as searchLinearIssues,
+  type LinearListFilter
+} from '../linear/linear-issue-listing'
+import {
+  createIssueForAgent as createLinearIssueForAgent,
+  createIssue as createLinearIssue,
   updateIssueForAgent as updateLinearIssueForAgent,
-  updateIssue as updateLinearIssue,
-  LinearWriteFailure,
-  type LinearListFilter,
-  type LinearIssueListOptions
-} from '../linear/issues'
+  updateIssue as updateLinearIssue
+} from '../linear/linear-issue-mutations'
+import {
+  addIssueComment as addLinearIssueComment,
+  addIssueCommentForAgent as addLinearIssueCommentForAgent,
+  createIssueAttachment as createLinearIssueAttachment,
+  getIssueComments as getLinearIssueComments
+} from '../linear/linear-issue-comments'
+import { LinearWriteFailure } from '../linear/linear-issue-write-support'
+import type { LinearIssueListOptions } from '../linear/linear-issue-query-documents'
 import {
   LinearAgentAccessError,
   getLinearCurrentIssueFromWorktree,
@@ -1148,7 +1154,6 @@ import {
   isGeneratedWorktreeCreateName,
   WORKTREE_CREATE_MAX_SUFFIX_ATTEMPTS
 } from '../worktree-create-candidates'
-import { WORKTREE_CREATE_DEDUPE_TTL_MS } from '../../shared/new-workspace/worktree-create-retry-policy'
 import {
   failedWorktreeCreationNeedsRetirement,
   getRetiredNameRegistryForRepo,
@@ -2133,11 +2138,9 @@ function getAgentLaunchPlatformForRepo(
 // Why: long enough for a phone to reconnect and retry a create whose response
 // was lost, short enough that an intentional later re-resume forks fresh.
 const MOBILE_TERMINAL_CREATE_RESULT_TTL_MS = 60_000
-// Why: same idempotency window for worktree.create — a phone whose create was
-// interrupted by a connection migration retries with the same clientMutationId
-// and reuses the just-created worktree instead of spawning a duplicate. Shared with
-// the mobile client so its replay budget is sized against the real window.
-const WORKTREE_CREATE_RESULT_TTL_MS = WORKTREE_CREATE_DEDUPE_TTL_MS
+// Why: a phone whose create was interrupted retries with the same clientMutationId
+// and reuses the just-created worktree instead of spawning a duplicate.
+const WORKTREE_CREATE_RESULT_TTL_MS = 60_000
 const FOREGROUND_AGENT_WRAPPER_RETRY_INTERVAL_MS = 150
 const FOREGROUND_AGENT_WRAPPER_RETRY_TIMEOUT_MS = 6_500
 const BRACKETED_PASTE_BEGIN = '\x1b[200~'
@@ -6518,6 +6521,7 @@ export class OrcaRuntimeService {
       // must not treat browser panes as supported just because runtime RPC is up.
       capabilities,
       ...(degradations.length > 0 ? { degradations } : {}),
+      worktreeCreateIdempotency: { dedupeTtlMs: WORKTREE_CREATE_RESULT_TTL_MS },
       hostPlatform: process.platform,
       terminalWindowsShell: this.store?.getSettings?.().terminalWindowsShell ?? null,
       floatingWorkspaceEnabled: this.store?.getSettings?.().floatingTerminalEnabled !== false,
