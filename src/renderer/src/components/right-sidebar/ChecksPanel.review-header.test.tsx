@@ -108,10 +108,10 @@ describe('ChecksPanelReviewHeader', () => {
     expect(markup).not.toContain('Ctrl+click to open')
   })
 
-  it('disables unlinking when the displayed PR is not manually linked', () => {
-    const markup = renderHeader({ canUnlinkPullRequest: false })
+  it('enables unlinking for a displayed auto-detected PR', () => {
+    const markup = renderHeader({ canUnlinkPullRequest: true })
 
-    expect(markup).toContain('data-disabled="true"')
+    expect(markup).not.toContain('data-disabled="true"')
     expect(markup).toContain('unlink PR')
   })
 

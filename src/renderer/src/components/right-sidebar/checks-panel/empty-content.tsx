@@ -36,6 +36,7 @@ export function ChecksPanelEmptyContent({
     handleCancelGeneratePullRequestFields,
     handleCreatePullRequest,
     handleGeneratePullRequestFields,
+    handleLinkSuppressedPullRequest,
     handlePrBaseChange,
     handlePrTitleChange,
     handlePublishBranch,
@@ -52,6 +53,7 @@ export function ChecksPanelEmptyContent({
     isRemoteOperationActive,
     isSyncingBranch,
     linkedGitLabMR,
+    linkedReviewNumber,
     panelContextKey,
     prAiGenerationEnabled,
     prBase,
@@ -77,7 +79,8 @@ export function ChecksPanelEmptyContent({
     setPrBody,
     setPrDraft,
     sourceControlAiActionsVisible,
-    stackParentReview
+    stackParentReview,
+    suppressedGitHubPR
   } = model
   // ── Empty state ──
   if (!activeWorktree) {
@@ -110,6 +113,28 @@ export function ChecksPanelEmptyContent({
             'Checks require a Git branch and hosted review context'
           )}
         </div>
+      </div>
+    )
+  }
+
+  if (!activeReview && linkedReviewNumber === null && suppressedGitHubPR !== null) {
+    return (
+      <div className="px-4 py-6">
+        <div className="text-sm font-medium text-foreground">
+          {translate('checksPanel.unlinked.title', 'Pull request unlinked')}
+        </div>
+        <div className="mt-1 text-xs text-muted-foreground">
+          {translate(
+            'checksPanel.unlinked.description',
+            'PR #{{number}} is hidden for this workspace. Link it again to restore checks and review details.',
+            { number: suppressedGitHubPR }
+          )}
+        </div>
+        <Button size="xs" className="mt-3" onClick={handleLinkSuppressedPullRequest}>
+          {translate('checksPanel.unlinked.relink', 'Link PR #{{number}}', {
+            number: suppressedGitHubPR
+          })}
+        </Button>
       </div>
     )
   }

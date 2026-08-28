@@ -61,7 +61,7 @@ export function buildWorktreeCardPresentation(card: WorktreeCardController) {
     handleOpenReviewInOrca,
     handleOpenAutomation,
     handleOpenAutomationRun,
-    hasExplicitLinkedReview,
+    canUnlinkReview,
     handleUnlinkReview,
     detailsHoverControl,
     showDeleteQuickAction
@@ -176,9 +176,7 @@ export function buildWorktreeCardPresentation(card: WorktreeCardController) {
             onOpenAutomation={affiliateListMode ? undefined : handleOpenAutomation}
             onOpenAutomationRun={affiliateListMode ? undefined : handleOpenAutomationRun}
             // Why: compact mode hides the metadata badge row, so title hover carries the explicit-link affordance.
-            onUnlinkReview={
-              !affiliateListMode && hasExplicitLinkedReview ? handleUnlinkReview : undefined
-            }
+            onUnlinkReview={!affiliateListMode && canUnlinkReview ? handleUnlinkReview : undefined}
           >
             {title}
           </WorktreeCardDetailsHover>
@@ -238,9 +236,7 @@ export function buildWorktreeCardPresentation(card: WorktreeCardController) {
         onOpenAutomation={affiliateListMode ? undefined : handleOpenAutomation}
         onOpenAutomationRun={affiliateListMode ? undefined : handleOpenAutomationRun}
         // Why: branch lookup can surface a review without persisted metadata; only unlink when explicitly linked.
-        onUnlinkReview={
-          !affiliateListMode && hasExplicitLinkedReview ? handleUnlinkReview : undefined
-        }
+        onUnlinkReview={!affiliateListMode && canUnlinkReview ? handleUnlinkReview : undefined}
       >
         {detailsAndPortsContent}
       </WorktreeCardDetailsHover>

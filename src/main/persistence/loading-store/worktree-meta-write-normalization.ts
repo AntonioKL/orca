@@ -42,6 +42,9 @@ export function mergeWorktreeMetaForWrite(
   identity?: WorktreeMetaIdentity
 ): WorktreeMeta {
   const updated = { ...(existing ?? createDefaultWorktreeMeta()), ...updates, ...identity }
+  if (typeof updates.linkedPR === 'number' && updates.linkedPR > 0) {
+    updated.suppressedGitHubPR = null
+  }
   updated.linkedWorkItem = normalizeWorkspaceLinkedItem(updated.linkedWorkItem)
   const sourceContext = normalizeStoredTaskSourceContext(updated.linkedTaskSourceContext)
   updated.linkedTaskSourceContext = isWorkspaceLinkedItemSourceContextMatch(

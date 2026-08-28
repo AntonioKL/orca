@@ -2,7 +2,7 @@
 
 import { act, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useAppStore } from '@/store'
 import { readStoreListenerCount } from '@/store/store-listener-census'
 import type { GlobalSettings } from '../../../../shared/global-settings-types'
@@ -165,5 +165,33 @@ describe('useWorktreeCardSecondaryDetails store subscriptions', () => {
 
     mount(<Probe />)
     expect(cacheTtlMs).toBe(0)
+  })
+
+  it('writes a suppression tombstone when the user unlinks a displayed GitHub PR', () => {
+    const updateWorktreeMeta = vi.fn()
+    let unlink: (() => void) | null = null
+    function Probe(): null {
+      const details = useWorktreeCardSecondaryDetails({
+        ...secondaryDetailsArgs(makeSettings(300_000)),
+        worktree: { ...makeWorktree(), hostId: 'ssh:builder' },
+        prDisplay: {
+          provider: 'github',
+          number: 42,
+          title: 'Branch PR'
+        },
+        updateWorktreeMeta: updateWorktreeMeta as never
+      })
+      unlink = details.handleUnlinkReview
+      return null
+    }
+
+    mount(<Probe />)
+    act(() => unlink?.())
+
+    expect(updateWorktreeMeta).toHaveBeenCalledWith(
+      WORKTREE_ID,
+      { linkedPR: null, suppressedGitHubPR: 42 },
+      { executionHostId: 'ssh:builder' }
+    )
   })
 })

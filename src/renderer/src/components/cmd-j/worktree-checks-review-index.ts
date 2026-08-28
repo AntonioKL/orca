@@ -61,6 +61,8 @@ export function buildWorktreeChecksReviewIndex({
     const review = selectChecksPanelReview({
       hostedReview: hostedReviewCache[hostedReviewKey]?.data,
       pr: prCache[prKey]?.data,
+      linkedPR: worktree.linkedPR ?? null,
+      suppressedGitHubPR: worktree.suppressedGitHubPR ?? null,
       linkedGitLabMR: worktree.linkedGitLabMR ?? null,
       linkedBitbucketPR: worktree.linkedBitbucketPR ?? null,
       linkedAzureDevOpsPR: worktree.linkedAzureDevOpsPR ?? null,

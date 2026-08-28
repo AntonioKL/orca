@@ -37,6 +37,26 @@ describe('checks panel concrete content', () => {
     expect(screen.queryByRole('button')).toBeNull()
   })
 
+  it('renders a durable unlinked state that can relink before PR data refetches', () => {
+    const handleLinkSuppressedPullRequest = vi.fn()
+    const model = {
+      activeReview: null,
+      activeWorktree: { id: 'worktree-1' },
+      isFolder: false,
+      linkedReviewNumber: null,
+      suppressedGitHubPR: 42,
+      handleLinkSuppressedPullRequest
+    } as ChecksPanelEmptyContentModel
+
+    render(<ChecksPanelEmptyContent model={model} />)
+
+    expect(screen.getByText('Pull request unlinked')).toBeTruthy()
+    expect(screen.getByText(/PR #42 is hidden/)).toBeTruthy()
+    screen.getByRole('button', { name: 'Link PR #42' }).click()
+    expect(handleLinkSuppressedPullRequest).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText(/Create PR/)).toBeNull()
+  })
+
   it('renders the active review header and empty check/comment sections with accessible actions', () => {
     const model = {
       activeConnectionId: null,
@@ -95,7 +115,6 @@ describe('checks panel concrete content', () => {
       isFixingChecksWithAI: false,
       isRefreshing: false,
       isResolvingConflictsWithAI: false,
-      linkedPR: null,
       pendingCommentResolutionRef: { current: null },
       pr: null,
       prRefreshState: undefined,

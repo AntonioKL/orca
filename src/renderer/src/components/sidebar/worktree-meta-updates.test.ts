@@ -326,6 +326,19 @@ describe('buildWorktreeMetaUpdates', () => {
     })
   })
 
+  it('records suppression when the user clears an explicit PR link', () => {
+    expect(buildUpdates({ prInput: '' }, {}, { linkedPR: 6934 })).toEqual({
+      linkedPR: null,
+      suppressedGitHubPR: 6934
+    })
+  })
+
+  it('does not invent suppression for an already-unlinked PR field', () => {
+    expect(buildUpdates({ prInput: '' }, {}, { linkedPR: null })).toEqual({
+      linkedPR: null
+    })
+  })
+
   it('accepts issue URLs in the issue input', () => {
     expect(
       buildUpdates(

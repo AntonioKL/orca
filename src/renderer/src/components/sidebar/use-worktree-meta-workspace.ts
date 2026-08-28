@@ -74,6 +74,7 @@ export function useWorktreeMetaWorkspace(args: {
   // the dialog was open cannot outlive a save that promised to displace it.
   const liveLinks = useMemo<WorktreeMetaLiveLinks>(
     () => ({
+      linkedPR: worktree?.linkedPR ?? null,
       linkedIssue,
       linkedLinearIssue,
       linkedLinearIssueOrganizationUrlKey: worktree?.linkedLinearIssueOrganizationUrlKey ?? null,
@@ -83,6 +84,7 @@ export function useWorktreeMetaWorkspace(args: {
     [
       linkedIssue,
       linkedLinearIssue,
+      worktree?.linkedPR,
       worktree?.linkedLinearIssueOrganizationUrlKey,
       worktree?.linkedWorkItem
     ]

@@ -56,7 +56,7 @@ export function WorktreeCardSurface({ card }: { card: WorktreeCardController }):
     handleOpenReviewInOrca,
     handleOpenAutomation,
     handleOpenAutomationRun,
-    hasExplicitLinkedReview,
+    canUnlinkReview,
     handleUnlinkReview,
     showRenameErrorDialog,
     setShowRenameErrorDialog
@@ -105,9 +105,7 @@ export function WorktreeCardSurface({ card }: { card: WorktreeCardController }):
         onOpenAutomation={affiliateListMode ? undefined : handleOpenAutomation}
         onOpenAutomationRun={affiliateListMode ? undefined : handleOpenAutomationRun}
         // Why: branch lookup can surface a review without persisted metadata; only unlink when explicitly linked.
-        onUnlinkReview={
-          !affiliateListMode && hasExplicitLinkedReview ? handleUnlinkReview : undefined
-        }
+        onUnlinkReview={!affiliateListMode && canUnlinkReview ? handleUnlinkReview : undefined}
       >
         {parentHoverTriggerBody}
       </WorktreeCardDetailsHover>

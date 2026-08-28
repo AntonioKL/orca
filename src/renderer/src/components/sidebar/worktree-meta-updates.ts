@@ -41,6 +41,7 @@ export type WorktreeMetaSnapshot = {
  *  displace it, and a clear must not be emitted for a slot that is already empty
  *  — persistence gates the remote Linear capability on key presence, not value. */
 export type WorktreeMetaLiveLinks = {
+  linkedPR?: number | null
   linkedIssue?: number | null
   linkedLinearIssue?: string | null
   linkedLinearIssueOrganizationUrlKey?: string | null
@@ -238,10 +239,16 @@ function buildIssueLinkUpdates(
 // Requires the dialog to seed `prInput` from the persisted `linkedPR`: the blank
 // input is written through as a clear, so an unseeded field drops the link on an
 // untouched save.
-function buildPrLinkUpdate(draft: WorktreeMetaDraft): Partial<WorktreeMeta> {
+function buildPrLinkUpdate(
+  draft: WorktreeMetaDraft,
+  live: WorktreeMetaLiveLinks
+): Partial<WorktreeMeta> {
   const trimmed = draft.prInput.trim()
   if (trimmed === '') {
-    return { linkedPR: null }
+    return {
+      linkedPR: null,
+      ...(typeof live.linkedPR === 'number' ? { suppressedGitHubPR: live.linkedPR } : {})
+    }
   }
   const number = parseGitHubWorkItemNumberForMetaField(trimmed, 'pr')
   return number === null ? {} : { linkedPR: number }
@@ -260,6 +267,6 @@ export function buildWorktreeMetaUpdates(
     ...buildCommentUpdate(draft, current),
     ...buildDisplayNameUpdate(draft, current),
     ...buildIssueLinkUpdates(draft, current, live),
-    ...buildPrLinkUpdate(draft)
+    ...buildPrLinkUpdate(draft, live)
   }
 }

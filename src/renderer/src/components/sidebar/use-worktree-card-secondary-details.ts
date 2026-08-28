@@ -142,8 +142,8 @@ export function useWorktreeCardSecondaryDetails({
     [hoverReview, openTaskPage, repo]
   )
   const hoverReviewProvider = hoverReview?.provider
-  const hasExplicitLinkedReview =
-    (hoverReviewProvider === 'github' && worktree.linkedPR !== null) ||
+  const canUnlinkReview =
+    hoverReviewProvider === 'github' ||
     (hoverReviewProvider === 'gitlab' && linkedGitLabMR !== null) ||
     (hoverReviewProvider === 'bitbucket' && linkedBitbucketPR !== null) ||
     (hoverReviewProvider === 'azure-devops' && linkedAzureDevOpsPR !== null) ||
@@ -152,7 +152,13 @@ export function useWorktreeCardSecondaryDetails({
     const options = { executionHostId: worktree.hostId ?? 'local' }
     switch (hoverReviewProvider) {
       case 'github':
-        void updateWorktreeMeta(worktree.id, { linkedPR: null }, options)
+        if (hoverReview) {
+          void updateWorktreeMeta(
+            worktree.id,
+            { linkedPR: null, suppressedGitHubPR: hoverReview.number },
+            options
+          )
+        }
         return
       case 'gitlab':
         void updateWorktreeMeta(worktree.id, { linkedGitLabMR: null }, options)
@@ -170,7 +176,7 @@ export function useWorktreeCardSecondaryDetails({
       case undefined:
         break
     }
-  }, [hoverReviewProvider, updateWorktreeMeta, worktree.hostId, worktree.id])
+  }, [hoverReview, hoverReviewProvider, updateWorktreeMeta, worktree.hostId, worktree.id])
   const handleOpenLinearIssueInOrca = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
@@ -215,7 +221,7 @@ export function useWorktreeCardSecondaryDetails({
     compactInlineAgentRows,
     handleOpenGitHubIssueInOrca,
     handleOpenReviewInOrca,
-    hasExplicitLinkedReview,
+    canUnlinkReview,
     handleUnlinkReview,
     handleOpenLinearIssueInOrca,
     hasDetails,

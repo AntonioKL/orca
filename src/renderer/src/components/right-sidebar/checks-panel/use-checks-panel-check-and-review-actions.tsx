@@ -42,6 +42,7 @@ export function useChecksPanelCheckAndReviewActions(model: ChecksPanelCheckAndRe
     linkedGiteaPR,
     linkedGitLabMR,
     linkedPR,
+    suppressedGitHubPR,
     openModal,
     panelContextKey,
     panelContextKeyRef,
@@ -349,51 +350,64 @@ export function useChecksPanelCheckAndReviewActions(model: ChecksPanelCheckAndRe
   )
 
   const handleUnlinkPullRequest = useCallback(() => {
-    if (
-      !activeWorktreeId ||
-      !activeWorktree ||
-      activeReview?.provider !== 'github' ||
-      linkedPR === null
-    ) {
+    if (!activeWorktreeId || !activeWorktree || activeReview?.provider !== 'github') {
       return
     }
     void updateWorktreeMeta(
       activeWorktreeId,
-      { linkedPR: null },
+      { linkedPR: null, suppressedGitHubPR: activeReview.number },
       { executionHostId: activeWorktree.hostId }
     )
-  }, [activeReview?.provider, activeWorktree, activeWorktreeId, linkedPR, updateWorktreeMeta])
+  }, [activeReview, activeWorktree, activeWorktreeId, updateWorktreeMeta])
+
+  const openLinkPullRequestModal = useCallback(
+    (currentPR: number) => {
+      if (!activeWorktreeId || !activeWorktree) {
+        return
+      }
+      openModal('edit-meta', {
+        worktreeId: activeWorktreeId,
+        // Why: the same workspace ID can exist under two hosts. Naming the owner
+        // keeps the dialog on this workspace instead of the ambiguous lookup.
+        repoId: activeWorktree.repoId,
+        executionHostId: activeWorktree.hostId,
+        currentDisplayName: activeWorktree.displayName,
+        currentIssue: activeWorktree.linkedIssue,
+        currentPR,
+        currentComment: activeWorktree.comment,
+        focus: 'pr',
+        afterSave: ({ updates }: { updates?: { linkedPR?: unknown } }) => {
+          const nextLinkedPR = updates?.linkedPR
+          if (typeof nextLinkedPR === 'number') {
+            void refreshLinkedGitHubPullRequest(nextLinkedPR)
+          }
+        }
+      })
+    },
+    [activeWorktree, activeWorktreeId, openModal, refreshLinkedGitHubPullRequest]
+  )
 
   const handleLinkAnotherPullRequest = useCallback(() => {
     if (!activeWorktreeId || !activeWorktree || activeReview?.provider !== 'github') {
       return
     }
-    openModal('edit-meta', {
-      worktreeId: activeWorktreeId,
-      // Why: the same workspace ID can exist under two hosts. Naming the owner
-      // keeps the dialog on this workspace instead of the ambiguous lookup.
-      repoId: activeWorktree.repoId,
-      executionHostId: activeWorktree.hostId,
-      currentDisplayName: activeWorktree.displayName,
-      currentIssue: activeWorktree.linkedIssue,
-      currentPR: activeWorktree.linkedPR ?? activeReview.number,
-      currentComment: activeWorktree.comment,
-      focus: 'pr',
-      afterSave: ({ updates }: { updates?: { linkedPR?: unknown } }) => {
-        const nextLinkedPR = updates?.linkedPR
-        if (typeof nextLinkedPR === 'number') {
-          void refreshLinkedGitHubPullRequest(nextLinkedPR)
-        }
-      }
-    })
-  }, [activeReview, activeWorktree, activeWorktreeId, openModal, refreshLinkedGitHubPullRequest])
+    openLinkPullRequestModal(activeWorktree.linkedPR ?? activeReview.number)
+  }, [activeReview, activeWorktree, activeWorktreeId, openLinkPullRequestModal])
+
+  const handleLinkSuppressedPullRequest = useCallback(() => {
+    if (linkedPR !== null || suppressedGitHubPR === null) {
+      return
+    }
+    openLinkPullRequestModal(suppressedGitHubPR)
+  }, [linkedPR, openLinkPullRequestModal, suppressedGitHubPR])
   return {
     handleFixChecksWithAI,
     refreshLinkedGitHubPullRequest,
     handleOpenPR,
     handleOpenStackPR,
     handleUnlinkPullRequest,
-    handleLinkAnotherPullRequest
+    handleLinkAnotherPullRequest,
+    handleLinkSuppressedPullRequest
   }
 }
 

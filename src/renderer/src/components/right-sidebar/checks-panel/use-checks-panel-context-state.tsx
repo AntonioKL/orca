@@ -212,6 +212,7 @@ export function useChecksPanelContextState(model: ChecksPanelContextStateInput) 
     null
   // Why: branch lookup is lossy for fork/deleted-head PRs; reuse a known PR number from metadata or cache whenever we have one.
   const linkedPR = activeWorktree?.linkedPR ?? null
+  const suppressedGitHubPR = activeWorktree?.suppressedGitHubPR ?? null
   const fallbackGitHubPRNumber = linkedPR == null ? (pr?.number ?? null) : null
   const linkedGitLabMR = activeWorktree?.linkedGitLabMR ?? null
   const linkedBitbucketPR = activeWorktree?.linkedBitbucketPR ?? null
@@ -220,6 +221,8 @@ export function useChecksPanelContextState(model: ChecksPanelContextStateInput) 
   const activeReview: ChecksPanelReview | null = selectChecksPanelReview({
     hostedReview,
     pr,
+    linkedPR,
+    suppressedGitHubPR,
     linkedGitLabMR,
     linkedBitbucketPR,
     linkedAzureDevOpsPR,
@@ -336,6 +339,7 @@ export function useChecksPanelContextState(model: ChecksPanelContextStateInput) 
     hostedReview,
     linkedReviewNumber,
     linkedPR,
+    suppressedGitHubPR,
     fallbackGitHubPRNumber,
     linkedGitLabMR,
     linkedBitbucketPR,
