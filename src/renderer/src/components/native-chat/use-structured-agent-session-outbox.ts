@@ -81,6 +81,13 @@ export function useStructuredAgentSessionOutbox(args: {
   const dispatchGenerationRef = useRef(0)
   const blockedIdRef = useRef<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [errorSession, setErrorSession] = useState(sessionId)
+  // Render-time reset (react.dev: adjusting state when a prop changes), so the
+  // old session's banner neither flashes for a frame nor resurrects on return.
+  if (errorSession !== sessionId) {
+    setErrorSession(sessionId)
+    setError(null)
+  }
 
   useEffect(() => {
     outboxRef.current = outbox
@@ -104,9 +111,6 @@ export function useStructuredAgentSessionOutbox(args: {
       outboxRef.current = next
       setOutbox(next)
       writeOutbox(sessionId, next)
-    }
-    if (sessionChanged) {
-      setError(null)
     }
   }, [fence, sessionId, target])
 
