@@ -282,6 +282,71 @@ describe('window close with a degraded local process read', () => {
     expect(confirmWindowClose).not.toHaveBeenCalled()
   })
 
+  /** The newest attempt is not automatically the user's newest intent. Cancel is,
+   *  and a probe that was already outstanding when they pressed it still belongs to
+   *  a close they have since called off. */
+  it('does not close the window on a probe the user cancelled out from under', async () => {
+    const settle = installDeferredInspections()
+
+    act(() => proceed!(false))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    await act(async () => {
+      settle[0]!(observedLiveInspection())
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(warningIsVisible()).toBe(true)
+
+    // A second attempt lands while the warning is still asking — the traffic
+    // lights stay clickable under it — so its probe is the newest one.
+    act(() => proceed!(false))
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    clickCancel()
+    expect(warningIsVisible()).toBe(false)
+
+    await act(async () => {
+      settle[1]!(observedIdleInspection())
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(confirmWindowClose).not.toHaveBeenCalled()
+  })
+
+  /** Keeps the newest-attempt fence pinned on its own. Both cancel cases above are
+   *  also satisfied by the dismissal fence, so without a case that never cancels,
+   *  deleting the per-attempt bump leaves every test green. */
+  it('does not let an older idle probe close the window while the newer one is still asking', async () => {
+    const settle = installDeferredInspections()
+
+    act(() => proceed!(false))
+    act(() => proceed!(false))
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    await act(async () => {
+      settle[1]!(observedLiveInspection())
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(warningIsVisible()).toBe(true)
+
+    await act(async () => {
+      settle[0]!(observedIdleInspection())
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(confirmWindowClose).not.toHaveBeenCalled()
+    expect(warningIsVisible(), 'the warning must stay up until the user answers it').toBe(true)
+  })
+
   it('reads a malformed foreign evidence payload as unverifiable, not as idle', async () => {
     installInspectProcess(async () => ({
       foregroundProcess: SHELL,

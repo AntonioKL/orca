@@ -33,6 +33,15 @@ export function useWindowCloseRunningProcessPrompt(): WindowCloseRunningProcessP
   const [windowCloseDialogOpen, setWindowCloseDialogOpen] = useState(false)
   const closeRequestSeqRef = useRef(0)
 
+  /** Ends the current attempt. Why the bump and not just the state: the newest
+   *  attempt is not the newest intent — a probe still outstanding when the user
+   *  dismisses belongs to a close they have since called off, and letting it
+   *  decide closes the window they just chose to keep. */
+  const dismissWindowCloseDialog = useCallback(() => {
+    closeRequestSeqRef.current += 1
+    setWindowCloseDialogOpen(false)
+  }, [])
+
   const confirmNativeWindowClose = useCallback(() => {
     // Why: capture only after every close guard has committed. A canceled child-
     // process prompt must not consume App's synthetic/native unload guard.
@@ -100,7 +109,7 @@ export function useWindowCloseRunningProcessPrompt(): WindowCloseRunningProcessP
       open={windowCloseDialogOpen}
       onOpenChange={(open) => {
         if (!open) {
-          setWindowCloseDialogOpen(false)
+          dismissWindowCloseDialog()
         }
       }}
     >
@@ -117,12 +126,7 @@ export function useWindowCloseRunningProcessPrompt(): WindowCloseRunningProcessP
           </DialogDescription>
         </DialogHeader>
         <DialogFooter className="gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setWindowCloseDialogOpen(false)}
-          >
+          <Button type="button" variant="outline" size="sm" onClick={dismissWindowCloseDialog}>
             {translate('auto.components.Terminal.f82e9f02df', 'Cancel')}
           </Button>
           <Button
@@ -131,7 +135,7 @@ export function useWindowCloseRunningProcessPrompt(): WindowCloseRunningProcessP
             size="sm"
             autoFocus
             onClick={() => {
-              setWindowCloseDialogOpen(false)
+              dismissWindowCloseDialog()
               confirmNativeWindowClose()
             }}
           >
