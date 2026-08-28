@@ -132,7 +132,7 @@ function applyWindowsProcessTreeBuildFixes() {
     writeFileSync(processPath, processCc)
   }
   mkdirSync(stagedHeaderDir, { recursive: true })
-  for (const header of ['napi.h', 'napi-inl.h']) {
+  for (const header of ['napi.h', 'napi-inl.h', 'napi-inl.deprecated.h']) {
     copyFileSync(join(nodeAddonApiDir, header), join(stagedHeaderDir, header))
   }
   if (bindingGyp !== originalBinding || processCc !== originalProcess) {

@@ -20,7 +20,9 @@ describe('windows-process-tree node-addon-api gyp path', () => {
       join(projectDir, 'config/scripts/build-windows-process-tree-relay-addon.mjs'),
       'utf8'
     )
-    expect(buildScript).toContain("for (const header of ['napi.h', 'napi-inl.h'])")
+    expect(buildScript).toContain(
+      "for (const header of ['napi.h', 'napi-inl.h', 'napi-inl.deprecated.h'])"
+    )
     expect(buildScript).toContain("import { createRequire } from 'node:module'")
     expect(buildScript).toContain("import { dirname, join, resolve } from 'node:path'")
     expect(buildScript).toContain(
