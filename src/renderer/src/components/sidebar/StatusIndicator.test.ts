@@ -1,7 +1,23 @@
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import StatusIndicator, { type Status } from './StatusIndicator'
+
+vi.mock('@/components/StateIndicatorTooltip', async () => {
+  const { createElement } = await import('react')
+  return {
+    StateIndicatorTooltip: ({
+      label,
+      children
+    }: {
+      label: string | null
+      children: React.ReactElement
+    }) =>
+      label === null
+        ? children
+        : createElement('span', { 'data-state-indicator-tooltip': label }, children)
+  }
+})
 
 function renderMarkup(status: Status): string {
   return renderToStaticMarkup(React.createElement(StatusIndicator, { status }))
@@ -34,7 +50,8 @@ describe('StatusIndicator', () => {
   it('renders monitoring as a static heartbeat glyph', () => {
     const markup = renderMarkup('monitoring')
 
-    expect(markup).toContain('title="Monitoring background tasks"')
+    expect(markup).toContain('data-state-indicator-tooltip="Monitoring background tasks"')
+    expect(markup).not.toContain(' title=')
     expect(markup).toContain('lucide-activity')
     expect(markup).toContain('text-yellow-500')
     expect(markup).not.toContain('data-agent-spinner')

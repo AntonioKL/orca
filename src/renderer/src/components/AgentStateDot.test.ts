@@ -2,8 +2,24 @@ import React from 'react'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { AgentStateDot, agentStateLabel, type AgentDotState } from './AgentStateDot'
+
+vi.mock('@/components/StateIndicatorTooltip', async () => {
+  const { createElement } = await import('react')
+  return {
+    StateIndicatorTooltip: ({
+      label,
+      children
+    }: {
+      label: string | null
+      children: React.ReactElement
+    }) =>
+      label === null
+        ? children
+        : createElement('span', { 'data-state-indicator-tooltip': label }, children)
+  }
+})
 
 function renderMarkup(state: AgentDotState): string {
   return renderToStaticMarkup(React.createElement(AgentStateDot, { state }))
@@ -87,8 +103,6 @@ describe('AgentStateDot', () => {
     }
   )
 
-  // Why: aria-label renders no hover tooltip, so every glyph read as unlabeled
-  // to sighted users until each branch also emitted a native title (STA-5794).
   const ALL_STATES = [
     'working',
     'monitoring',
@@ -101,10 +115,11 @@ describe('AgentStateDot', () => {
     'permission'
   ] satisfies AgentDotState[]
 
-  it.each(ALL_STATES)('labels %s with a native hover tooltip', (state) => {
-    const title = renderMarkup(state).match(/<span[^>]*\stitle="([^"]*)"/)?.[1]
+  it.each(ALL_STATES)('labels %s with the shared hover tooltip', (state) => {
+    const markup = renderMarkup(state)
 
-    expect(title).toBe(agentStateLabel(state))
+    expect(markup).toContain(`data-state-indicator-tooltip="${agentStateLabel(state)}"`)
+    expect(markup).not.toContain(' title=')
   })
 
   // Typecheck-time guard: a new AgentDotState member that ALL_STATES omits
@@ -118,20 +133,20 @@ describe('AgentStateDot', () => {
       React.createElement(AgentStateDot, { state: 'done', title: 'Finished 2m ago' })
     )
 
-    expect(markup).toContain('title="Finished 2m ago"')
+    expect(markup).toContain('data-state-indicator-tooltip="Finished 2m ago"')
+    expect(markup).not.toContain(' title=')
     expect(markup).toContain('aria-label="Done"')
   })
 
-  it('lets a caller with an existing tooltip suppress the native title', () => {
+  it('lets a caller with an existing tooltip suppress the shared tooltip', () => {
     const markup = renderToStaticMarkup(
       React.createElement(AgentStateDot, { state: 'interrupted', title: null })
     )
 
-    expect(markup.match(/<span[^>]*\stitle="([^"]*)"/)?.[1]).toBe(undefined)
+    expect(markup).not.toContain('data-state-indicator-tooltip')
     expect(markup).toContain('aria-label="Interrupted"')
-    // Differential: the same state still labels itself when the caller omits `title`.
-    expect(renderMarkup('interrupted').match(/<span[^>]*\stitle="([^"]*)"/)?.[1]).toBe(
-      agentStateLabel('interrupted')
+    expect(renderMarkup('interrupted')).toContain(
+      `data-state-indicator-tooltip="${agentStateLabel('interrupted')}"`
     )
   })
 })

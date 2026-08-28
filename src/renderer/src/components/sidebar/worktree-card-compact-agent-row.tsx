@@ -205,13 +205,17 @@ export const CompactAgentRow = React.memo(function CompactAgentRow({
         state={dotState}
         size="sm"
         title={sendTargetDisabledReason ? null : undefined}
+        tooltipSide="right"
       />
       {!hideIcon && (
         <span className="inline-flex shrink-0" title={formatAgentTypeLabel(agent.agentType)}>
           <AgentIcon agent={agentTypeToIconAgent(agent.agentType)} size={13} />
         </span>
       )}
-      <span className="min-w-0 flex-1 truncate">
+      <span
+        className="min-w-0 flex-1 truncate"
+        title={sendTargetDisabledReason ? undefined : rowTitle}
+      >
         {/* Why: the selected-row fill is strong enough to wash out the dimmed
             prompt/secondary text, so lift both toward full foreground when focused. */}
         <span className={isFocusedPane ? 'text-foreground' : 'text-muted-foreground/90'}>
@@ -283,7 +287,7 @@ export const CompactAgentRow = React.memo(function CompactAgentRow({
       role={agent.lineage ? 'treeitem' : undefined}
       aria-level={agent.lineage ? agent.lineage.depth + 1 : undefined}
       aria-expanded={hasChildDisclosure ? childAgentsExpanded : undefined}
-      title={sendTargetDisabledReason ?? rowTitle}
+      title={sendTargetDisabledReason}
     >
       {rowBody}
     </div>

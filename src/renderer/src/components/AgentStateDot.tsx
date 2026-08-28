@@ -3,6 +3,10 @@ import { Activity, CircleCheck } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AgentQuestionIcon } from '@/components/AgentQuestionIcon'
 import { AgentWorkingSpinner } from '@/components/AgentWorkingSpinner'
+import {
+  StateIndicatorTooltip,
+  type StateIndicatorTooltipSide
+} from '@/components/StateIndicatorTooltip'
 
 // Why: shared state-indicator primitive so the dashboard and the sidebar's
 // agent hover share a single state vocabulary. Most states render as a dot;
@@ -61,8 +65,9 @@ type Props = {
   state: AgentDotState
   size?: 'sm' | 'md'
   className?: string
-  /** Overrides the native hover tooltip; null suppresses it for an existing tooltip. */
+  /** Overrides the hover tooltip; null suppresses it for an existing tooltip. */
   title?: string | null
+  tooltipSide?: StateIndicatorTooltipSide
 }
 
 /** Render the compact state glyph used by agent rows and terminal tabs. */
@@ -70,82 +75,78 @@ export const AgentStateDot = React.memo(function AgentStateDot({
   state,
   size = 'sm',
   className,
-  title
+  title,
+  tooltipSide
 }: Props): React.JSX.Element {
   const box = size === 'md' ? 'h-3 w-3' : 'h-2.5 w-2.5'
   const inner = size === 'md' ? 'size-2' : 'size-1.5'
   const icon = size === 'md' ? 'size-3' : 'size-2.5'
-  // Why: aria-label alone never renders a hover tooltip, so these glyphs read as
-  // unlabeled to sighted users (STA-5794). Mirrors StatusIndicator's `title`.
-  const resolvedTitle = title === null ? undefined : (title ?? agentStateLabel(state))
+  const tooltipLabel = title === null ? null : (title ?? agentStateLabel(state))
+
+  let indicator: React.JSX.Element
 
   if (state === 'working') {
-    return (
+    indicator = (
       <span
         className={cn('inline-flex shrink-0 items-center justify-center', box, className)}
         aria-label={agentStateLabel(state)}
-        title={resolvedTitle}
       >
         <AgentWorkingSpinner className={inner} />
       </span>
     )
-  }
-
-  if (state === 'monitoring') {
-    return (
+  } else if (state === 'monitoring') {
+    indicator = (
       <span
         className={cn('inline-flex shrink-0 items-center justify-center', box, className)}
         aria-label={agentStateLabel(state)}
-        title={resolvedTitle}
       >
         <Activity className={cn('text-yellow-500', icon)} aria-hidden="true" />
       </span>
     )
-  }
-
-  if (state === 'done') {
+  } else if (state === 'done') {
     // Why: the dashboard lists many agents, so a check glyph scans well for
     // agent-reported completion and keeps 'done' visually distinct from
     // 'idle' and other dot states at a glance. The sidebar's StatusIndicator
     // intentionally diverges (emerald dot + tooltip) — see file header.
-    return (
+    indicator = (
       <span
         className={cn('inline-flex shrink-0 items-center justify-center', box, className)}
         aria-label={agentStateLabel(state)}
-        title={resolvedTitle}
       >
         <CircleCheck className={cn('text-emerald-500', icon)} aria-hidden="true" />
       </span>
     )
-  }
-
-  if (state === 'permission' || state === 'waiting') {
-    return (
+  } else if (state === 'permission' || state === 'waiting') {
+    indicator = (
       <span
         className={cn('inline-flex shrink-0 items-center justify-center', box, className)}
         aria-label={agentStateLabel(state)}
-        title={resolvedTitle}
       >
         <AgentQuestionIcon className={icon} />
+      </span>
+    )
+  } else {
+    indicator = (
+      <span
+        className={cn('inline-flex shrink-0 items-center justify-center', box, className)}
+        aria-label={agentStateLabel(state)}
+      >
+        <span
+          className={cn(
+            'block rounded-full',
+            inner,
+            state === 'blocked' || state === 'interrupted' || state === 'failed'
+              ? 'bg-red-500'
+              : 'bg-neutral-500/40'
+          )}
+        />
       </span>
     )
   }
 
   return (
-    <span
-      className={cn('inline-flex shrink-0 items-center justify-center', box, className)}
-      aria-label={agentStateLabel(state)}
-      title={resolvedTitle}
-    >
-      <span
-        className={cn(
-          'block rounded-full',
-          inner,
-          state === 'blocked' || state === 'interrupted' || state === 'failed'
-            ? 'bg-red-500'
-            : 'bg-neutral-500/40'
-        )}
-      />
-    </span>
+    <StateIndicatorTooltip label={tooltipLabel} side={tooltipSide}>
+      {indicator}
+    </StateIndicatorTooltip>
   )
 })
