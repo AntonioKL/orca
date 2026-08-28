@@ -1,5 +1,3 @@
-import { execFile as execFileCb } from 'node:child_process'
-import { promisify } from 'node:util'
 import {
   isAgentForegroundWrapperProcess,
   isExpectedAgentProcess,
@@ -22,8 +20,9 @@ import {
   shouldInspectWindowsAgentForeground
 } from '../main/providers/windows-agent-foreground-process'
 import { queryWindowsPaneProcessInventory } from '../main/providers/windows-foreground-process-rows'
+import { runProcess, type ProcessResult } from '../shared/child-process/run-process'
 
-const execFile = promisify(execFileCb)
+const PROBE_TIMEOUT_MS = 3000
 
 /**
  * Check whether a process has child processes (via pgrep).
@@ -34,37 +33,34 @@ const execFile = promisify(execFileCb)
  */
 export async function processHasChildren(pid: number): Promise<boolean> {
   try {
-    const { stdout } = await execFile('pgrep', ['-P', String(pid)], {
-      encoding: 'utf-8',
-      timeout: 3000
-    })
-    return stdout.trim().length > 0
+    const result = await runProbe('pgrep', ['-P', String(pid)])
+    return result.code === 0 && result.stdout.trim().length > 0
   } catch {
     return false
   }
 }
 
-// Why not NodeJS.ErrnoException: execFile stamps the numeric exit status into
-// `code`, which the lib types declare as string-only.
-type SubprocessProbeError = {
-  code?: number | string
-  killed?: boolean
-  signal?: NodeJS.Signals | null
-  message?: string
+// Rejects only when the probe binary could not be spawned at all (ENOENT,
+// fork pressure); a probe that ran resolves with its exit status as data.
+function runProbe(program: string, args: string[]): Promise<ProcessResult> {
+  return runProcess({ program, args, timeoutMs: PROBE_TIMEOUT_MS })
 }
 
 // Exit code 1 without a kill signal: pgrep/ps RAN and matched nothing — that
 // is positive absence, not a failed probe.
-function subprocessRanAndMatchedNothing(error: unknown): boolean {
-  const failure = error as SubprocessProbeError
-  return failure?.code === 1 && failure.killed !== true && !failure.signal
+function subprocessRanAndMatchedNothing(result: ProcessResult): boolean {
+  return result.code === 1 && !result.timedOut && !result.signal
 }
 
-function describeProcessProbeFailure(command: string, error: unknown): string {
-  const failure = error as SubprocessProbeError
-  if (failure?.killed === true || failure?.signal) {
+function describeProcessProbeFailure(command: string, result: ProcessResult): string {
+  if (result.timedOut || result.signal) {
     return `${command} did not answer before its deadline`
   }
+  return `${command} could not run: exit ${result.code ?? 'unknown'}`
+}
+
+function describeProcessSpawnFailure(command: string, error: unknown): string {
+  const failure = error as NodeJS.ErrnoException | undefined
   return `${command} could not run: ${failure?.code ?? failure?.message ?? 'unknown failure'}`
 }
 
@@ -86,18 +82,19 @@ export async function probeProcessChildren(pid: number): Promise<PtyChildProcess
     }
     return inventory.candidates.length > 0 ? { verdict: 'live' } : { verdict: 'exited' }
   }
+  let result: ProcessResult
   try {
-    const { stdout } = await execFile('pgrep', ['-P', String(pid)], {
-      encoding: 'utf-8',
-      timeout: 3000
-    })
-    return stdout.trim().length > 0 ? { verdict: 'live' } : { verdict: 'exited' }
+    result = await runProbe('pgrep', ['-P', String(pid)])
   } catch (error) {
-    if (subprocessRanAndMatchedNothing(error)) {
-      return { verdict: 'exited' }
-    }
-    return { verdict: 'unverifiable', reason: describeProcessProbeFailure('pgrep', error) }
+    return { verdict: 'unverifiable', reason: describeProcessSpawnFailure('pgrep', error) }
   }
+  if (result.code === 0) {
+    return result.stdout.trim().length > 0 ? { verdict: 'live' } : { verdict: 'exited' }
+  }
+  if (subprocessRanAndMatchedNothing(result)) {
+    return { verdict: 'exited' }
+  }
+  return { verdict: 'unverifiable', reason: describeProcessProbeFailure('pgrep', result) }
 }
 
 // Why: signal 0 probes existence without delivering a signal. Only ESRCH ("no
@@ -265,16 +262,17 @@ export async function observeForegroundProcess(
   if (fallbackProcess) {
     return observedForeground(fallbackProcess)
   }
+  let result: ProcessResult
   try {
-    const { stdout } = await execFile('ps', ['-o', 'comm=', '-p', String(pid)], {
-      encoding: 'utf-8',
-      timeout: 3000
-    })
-    return observedForeground(stdout.trim() || null)
+    result = await runProbe('ps', ['-o', 'comm=', '-p', String(pid)])
   } catch (error) {
-    if (subprocessRanAndMatchedNothing(error)) {
-      return observedForeground(null)
-    }
-    return { verdict: 'unverifiable', reason: describeProcessProbeFailure('ps', error) }
+    return { verdict: 'unverifiable', reason: describeProcessSpawnFailure('ps', error) }
   }
+  if (result.code === 0) {
+    return observedForeground(result.stdout.trim() || null)
+  }
+  if (subprocessRanAndMatchedNothing(result)) {
+    return observedForeground(null)
+  }
+  return { verdict: 'unverifiable', reason: describeProcessProbeFailure('ps', result) }
 }
