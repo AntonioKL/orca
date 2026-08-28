@@ -566,19 +566,14 @@ test('renders a paired HTML doc as a document browser tab while the host gains n
       hostBrowserPages: linkBaseline.hostBrowserPages.length,
       routedCalls: []
     })
-    console.log(
-      `[preview-e2e] before-focus ${JSON.stringify(
-        await page.evaluate(() => {
-          const active = document.activeElement
-          const guest = document.querySelector(
-            'webview[src^="orca-preview://"]'
-          ) as HTMLElement | null
-          const before = active?.tagName ?? null
-          guest?.focus()
-          return { before, after: document.activeElement?.tagName ?? null }
-        })
-      )}`
-    )
+    const guestFocus = await page.evaluate(() => {
+      const active = document.activeElement
+      const guest = document.querySelector('webview[src^="orca-preview://"]') as HTMLElement | null
+      const before = active?.tagName ?? null
+      guest?.focus()
+      return { before, after: document.activeElement?.tagName ?? null }
+    })
+    console.log(`[preview-e2e] before-focus ${JSON.stringify(guestFocus)}`)
     const confirmationTitle = page.getByRole('heading', { name: 'Open link to example.com?' })
     await expect
       .poll(
