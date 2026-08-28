@@ -129,19 +129,18 @@ export function guardRunningTerminalClose(params: {
       if (decided) {
         return
       }
-      // Why: fail open on a *rejection* (wedged relay, legacy provider), matching the Cmd+W
-      // pane path — a close button that silently does nothing is worse than closing a busy
-      // tab. `unavailable` now means exactly "could not ask", which this guard's own timeout
-      // already prompts on, so an answered non-answer asks too — but only for an id the
-      // liveness map still vouches for, the same id set the window-close guard reads. A
-      // layout-only id is usually a leftover leaf whose pane is long gone: it answers
-      // `unavailable` forever, and prompting on it would put a dialog in front of every
-      // cleanly-exited tab. It can still block the close by answering *positively*, which is
-      // the mounting-pane window the union exists for.
+      // Why: a non-answer asks — a rejection (wedged relay, legacy provider) and
+      // `unavailable` ("could not ask") are the same evidence as this guard's own timeout,
+      // and this close kills the pty, so it owes the same prompt the window-close path
+      // already gives. Both narrow to an id the liveness map still vouches for, the id set
+      // the window-close guard reads. A layout-only id is usually a leftover leaf whose pane
+      // is long gone — it answers `unavailable` or throws forever, and prompting on it would
+      // put a dialog in front of every cleanly-exited tab and every reconnecting ssh tab. It
+      // can still block by answering *positively*, the mounting-pane window the union exists for.
       const busyPtyIds = ptyIds.filter((ptyId, index) => {
         const result = results[index]
         if (result?.status !== 'fulfilled') {
-          return false
+          return trackedPtyIds.has(ptyId)
         }
         if (result.value.hasChildProcesses) {
           return true
