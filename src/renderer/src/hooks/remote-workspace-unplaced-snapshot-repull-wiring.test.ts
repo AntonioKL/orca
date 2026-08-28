@@ -215,10 +215,15 @@ describe('target sync re-pulling a snapshot it could not place', () => {
     await vi.advanceTimersByTimeAsync(TOTAL_CHAIN_MS)
     expect(harness.get).toHaveBeenCalledTimes(UNPLACED_SNAPSHOT_REPULL_DELAYS_MS.length)
 
-    // Settling back to hydrated is deliberate: a host-side deletion makes a path unplaceable for
-    // good, and a permanently un-hydrated target would never upload its workspace again.
-    expect(isHydrated(harness.store)).toBe(true)
-    expect(syncPhase(harness.store)).toBe('synced')
+    // Staying un-hydrated is the data-safety property, not an oversight: hydration authorises
+    // uploads, and an upload is a `replace-session` patch that wholesale replaces the host
+    // snapshot. Hydrating on a picture known to be missing rows would delete the very tabs we
+    // failed to adopt. Suppressed uploads are recoverable; a wiped host snapshot is not.
+    expect(
+      isHydrated(harness.store),
+      'exhaustion authorised uploads from a picture known to be incomplete'
+    ).toBe(false)
+    expect(syncPhase(harness.store)).toBe('error')
 
     await vi.advanceTimersByTimeAsync(TOTAL_CHAIN_MS * 10)
     expect(harness.get, 'the chain kept re-pulling past exhaustion').toHaveBeenCalledTimes(

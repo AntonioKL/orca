@@ -45,6 +45,14 @@ export function createUnplacedSnapshotRepull(
   // report still lands here, and re-announcing it would re-mark the target hydrated and rewrite
   // its status on every host push. Exhaustion is announced once per chain.
   const exhaustedTargets = new Set<string>()
+  // Why in-flight is tracked apart from the timer: the callback drops its timer entry before
+  // awaiting the host, so the timer map alone leaves a gap in which a concurrent report arms a
+  // second, overlapping chain and can trip exhaustion before the pending apply resolves.
+  const inFlightTargets = new Set<string>()
+  // Why a generation: `resetTarget` cannot cancel a callback already past its await, so a stale
+  // one would reschedule on top of the new connection's chain. It stamps its generation and exits
+  // if the target has since been reset.
+  const generationByTarget = new Map<string, number>()
 
   const clearTimer = (targetId: string): void => {
     const timer = timerByTarget.get(targetId)
@@ -66,7 +74,7 @@ export function createUnplacedSnapshotRepull(
     // Why this precedes the exhaustion check: once the last attempt is armed the count is already
     // spent, so testing exhaustion first would let a concurrent report cancel that still-pending
     // retry and declare the chain over one attempt early.
-    if (timerByTarget.has(targetId)) {
+    if (timerByTarget.has(targetId) || inFlightTargets.has(targetId)) {
       return
     }
     const attempt = attemptByTarget.get(targetId) ?? 0
@@ -83,6 +91,8 @@ export function createUnplacedSnapshotRepull(
       targetId,
       setTimeout(() => {
         timerByTarget.delete(targetId)
+        inFlightTargets.add(targetId)
+        const generation = generationByTarget.get(targetId) ?? 0
         void (async () => {
           if (deps.isStopped()) {
             return
@@ -108,8 +118,19 @@ export function createUnplacedSnapshotRepull(
             // un-hydrated target never uploads again. Staying `unplaced` walks the chain to
             // exhaustion, which settles it.
           }
+          if ((generationByTarget.get(targetId) ?? 0) !== generation) {
+            // A reconnect reset this target while we were awaiting; its own chain owns it now.
+            return
+          }
+          // Released before rescheduling: the guard exists to keep *others* out, and holding it
+          // here would block this chain's own next attempt.
+          inFlightTargets.delete(targetId)
           schedule(targetId, outcome)
-        })().catch(() => {})
+        })()
+          .catch(() => {})
+          .finally(() => {
+            inFlightTargets.delete(targetId)
+          })
       }, delayMs)
     )
   }
@@ -120,6 +141,8 @@ export function createUnplacedSnapshotRepull(
       clearTimer(targetId)
       attemptByTarget.delete(targetId)
       exhaustedTargets.delete(targetId)
+      inFlightTargets.delete(targetId)
+      generationByTarget.set(targetId, (generationByTarget.get(targetId) ?? 0) + 1)
     },
     stop: () => {
       for (const timer of timerByTarget.values()) {
@@ -128,6 +151,8 @@ export function createUnplacedSnapshotRepull(
       timerByTarget.clear()
       attemptByTarget.clear()
       exhaustedTargets.clear()
+      inFlightTargets.clear()
+      generationByTarget.clear()
     }
   }
 }

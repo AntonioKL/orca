@@ -71,7 +71,8 @@ function createHarness(options: HarnessOptions = {}) {
     stop: () => {
       stopped = true
     },
-    dropAuthority: (targetId: string) => targetsWithAuthority.delete(targetId)
+    dropAuthority: (targetId: string) => targetsWithAuthority.delete(targetId),
+    restoreAuthority: (targetId: string) => targetsWithAuthority.add(targetId)
   }
 }
 
@@ -289,7 +290,7 @@ describe('the re-pull chain after an unplaced snapshot', () => {
     expect(harness.applySnapshot).not.toHaveBeenCalled()
   })
 
-  it('abandons the chain when the target lost its authority before the retry fired', async () => {
+  it('abandons the chain when the target lost its authority, stranding no attempt count', async () => {
     const harness = createHarness()
     harness.repull.schedule(TARGET, 'unplaced')
 
@@ -297,6 +298,78 @@ describe('the re-pull chain after an unplaced snapshot', () => {
     await vi.advanceTimersByTimeAsync(LONG_AFTER_MS)
 
     expect(harness.applySnapshot).not.toHaveBeenCalled()
+    expect(harness.exhaustedTargets, 'a target that went away is not an exhausted chain').toEqual(
+      []
+    )
+    expect(vi.getTimerCount()).toBe(0)
+
+    // The spent attempt must not outlive the connection. If it did, the target would come back
+    // with a partly burned chain — observable here as a short first wait and a short chain.
+    harness.restoreAuthority(TARGET)
+    harness.repull.schedule(TARGET, 'unplaced')
+    await vi.advanceTimersByTimeAsync(UNPLACED_SNAPSHOT_REPULL_DELAYS_MS[0] - 1)
+    expect(
+      harness.applySnapshot,
+      'the recovered target resumed mid-backoff instead of starting over'
+    ).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(LONG_AFTER_MS)
+    expect(harness.applySnapshot).toHaveBeenCalledTimes(UNPLACED_SNAPSHOT_REPULL_DELAYS_MS.length)
+    expect(harness.exhaustedTargets).toEqual([TARGET])
+  })
+
+  it('keeps the final armed attempt when a concurrent report lands after the count is spent', async () => {
+    const harness = createHarness()
+    harness.repull.schedule(TARGET, 'unplaced')
+    for (const delayMs of UNPLACED_SNAPSHOT_REPULL_DELAYS_MS.slice(0, -1)) {
+      await vi.advanceTimersByTimeAsync(delayMs)
+    }
+    // The last attempt is armed, so the count is already spent while the retry is still pending.
+    expect(harness.applySnapshot).toHaveBeenCalledTimes(
+      UNPLACED_SNAPSHOT_REPULL_DELAYS_MS.length - 1
+    )
+    expect(vi.getTimerCount()).toBe(1)
+
+    // An unsolicited host push reports its own unplaced apply against that spent count.
+    harness.repull.schedule(TARGET, 'unplaced')
+
+    expect(
+      harness.exhaustedTargets,
+      'exhaustion was declared while the last retry was still pending'
+    ).toEqual([])
+    expect(vi.getTimerCount(), 'the concurrent report cancelled the final retry').toBe(1)
+
+    await vi.advanceTimersByTimeAsync(UNPLACED_SNAPSHOT_REPULL_DELAYS_MS.at(-1) ?? 0)
+    expect(harness.applySnapshot, 'the chain silently lost its last attempt').toHaveBeenCalledTimes(
+      UNPLACED_SNAPSHOT_REPULL_DELAYS_MS.length
+    )
+    expect(harness.exhaustedTargets).toEqual([TARGET])
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('carries on after a single transient host read failure', async () => {
+    let call = 0
+    const harness = createHarness({
+      getSnapshot: async () => {
+        call += 1
+        if (call === 2) {
+          throw new Error('ssh channel closed')
+        }
+        return snapshot()
+      }
+    })
+    harness.repull.schedule(TARGET, 'unplaced')
+
+    await vi.advanceTimersByTimeAsync(LONG_AFTER_MS)
+
+    // The failed attempt still counts as unplaced, so the chain walks on and settles the target
+    // rather than stranding it on `pulling`, un-hydrated, with no timer armed.
+    expect(harness.getSnapshot).toHaveBeenCalledTimes(UNPLACED_SNAPSHOT_REPULL_DELAYS_MS.length)
+    expect(
+      harness.applySnapshot,
+      'the chain stalled on the transient failure'
+    ).toHaveBeenCalledTimes(UNPLACED_SNAPSHOT_REPULL_DELAYS_MS.length - 1)
+    expect(harness.exhaustedTargets).toEqual([TARGET])
     expect(vi.getTimerCount()).toBe(0)
   })
 

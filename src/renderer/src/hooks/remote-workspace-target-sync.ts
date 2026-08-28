@@ -128,21 +128,19 @@ export function createRemoteWorkspaceTargetSync(
     getSnapshot: (targetId) => deps.remoteWorkspace.get({ targetId }),
     applySnapshot: (targetId, snapshot) => applyPreparedSnapshot(targetId, snapshot),
     reportExhausted: (targetId) => {
-      // Why hydrate on exhaustion rather than stay un-hydrated: a path can be unplaceable for good
-      // (its worktree was deleted host-side), and an un-hydrated target is filtered out of
-      // `hydratedTargetIds` in use-app-session-persistence.ts, so it would never upload again —
-      // a permanent regression strictly worse than the tab loss this fix targets. Retries cover the
-      // transient degraded-lineage case; past them we settle back to the pre-fix behaviour.
-      const store = deps.store.getState()
-      const previous = store.remoteWorkspaceSyncStatusByTargetId[targetId]
-      store.markRemoteWorkspaceHydrated(targetId)
-      store.setRemoteWorkspaceSyncStatus(targetId, {
-        phase: 'synced',
+      // Why the target stays UN-hydrated: hydration authorises uploads
+      // (use-app-session-persistence.ts), and an upload is a `replace-session` patch
+      // (remote-workspace-relay-sync.ts) that wholesale replaces the host snapshot. Hydrating on a
+      // picture we know is missing rows would therefore delete the very tabs we failed to adopt —
+      // unrecoverable, where not uploading is merely deferred. Suppressed uploads are the safe
+      // side of this trade, so exhaustion reports the failure and leaves authority `unverifiable`.
+      deps.store.getState().setRemoteWorkspaceSyncStatus(targetId, {
+        phase: 'error',
         direction: 'pull',
-        ...(previous?.revision === undefined ? {} : { revision: previous.revision }),
-        ...(previous?.updatedAt === undefined ? {} : { updatedAt: previous.updatedAt }),
-        lastSyncedAt: Date.now(),
-        message: translate('auto.hooks.useIpcEvents.4f78ba5885', 'Workspace synced')
+        message: translate(
+          'auto.hooks.useIpcEvents.2fe88c2e06',
+          'Remote workspace sync unavailable'
+        )
       })
     }
   })
