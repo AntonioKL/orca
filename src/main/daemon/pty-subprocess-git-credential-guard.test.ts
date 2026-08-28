@@ -308,4 +308,62 @@ describe('createPtySubprocess', () => {
       restoreGitCredentialGuardEnv(saved)
     }
   })
+  it('does not double the guard when the daemon inherited one and the request carries its own', async () => {
+    const proc = mockPtyProcess()
+    spawnMock.mockReturnValue(proc)
+    // Orca was launched from a guarded agent pane, so the daemon it forked
+    // inherits that pane's guard AND that pane's provenance marker.
+    const inherited: Record<string, string> = {
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'core.quotePath',
+      GIT_CONFIG_VALUE_0: 'false',
+      GIT_TERMINAL_PROMPT: '1',
+      GCM_INTERACTIVE: 'auto'
+    }
+    applyTerminalGitCredentialPromptGuard(inherited, {
+      launchCommand: 'claude',
+      platform: process.platform
+    })
+    const saved = takeGitCredentialGuardEnv(inherited)
+
+    try {
+      // Exactly what main puts on the wire for a guarded pane it defers to the daemon.
+      const requested: Record<string, string> = {}
+      applyTerminalGitCredentialPromptGuard(requested, {
+        launchCommand: 'claude',
+        platform: process.platform,
+        deferGitConfigGuardToHost: true
+      })
+      await createPtySubprocess({
+        sessionId: 'inherited-and-requested-guard',
+        cols: 80,
+        rows: 24,
+        env: { SHELL: '/bin/bash', ...requested }
+      })
+
+      const paneEnv = spawnMock.mock.calls.at(-1)?.[2]?.env as Record<string, string>
+      // One caller entry plus one guard pair — not two guard pairs.
+      expect(paneEnv.GIT_CONFIG_COUNT).toBe('3')
+      expect(paneEnv.GIT_CONFIG_KEY_1).toBe('credential.interactive')
+      expect(paneEnv.GIT_CONFIG_KEY_2).toBe('credential.guiPrompt')
+      expect(paneEnv.GIT_CONFIG_KEY_3).toBeUndefined()
+
+      // And the pane's own marker still describes the user's real pre-guard env,
+      // so a plain shell launched inside it lands exactly back on those values.
+      const child = { ...paneEnv }
+      expect(
+        applyTerminalGitCredentialPromptGuard(child, {
+          launchCommand: '/bin/zsh',
+          platform: process.platform
+        })
+      ).toBe(false)
+      expect(child.GIT_TERMINAL_PROMPT).toBe('1')
+      expect(child.GCM_INTERACTIVE).toBe('auto')
+      expect(child.GIT_CONFIG_COUNT).toBe('1')
+      expect(child.GIT_CONFIG_KEY_0).toBe('core.quotePath')
+      expect(Object.values(child)).not.toContain('credential.interactive')
+    } finally {
+      restoreGitCredentialGuardEnv(saved)
+    }
+  })
 })

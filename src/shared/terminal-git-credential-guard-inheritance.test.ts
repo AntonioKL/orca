@@ -1,4 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import {
+  restoreGitCredentialGuardEnv,
+  takeGitCredentialGuardEnv
+} from './git-credential-guard-env-test-harness'
 import { TERMINAL_GIT_CREDENTIAL_GUARD_RESTORE_ENV } from './git-credential-guard-provenance'
 import {
   applyTerminalGitCredentialPromptGuard,
@@ -212,5 +216,88 @@ describe('guard env inherited by a terminal the guard declines to guard', () => 
     }
 
     expect(env.GIT_CONFIG_COUNT).toBe('2')
+  })
+  it('keeps a guard variable the pane itself re-exported', () => {
+    const parent = guardedParentEnv('linux')
+    // The pane's own shell rc re-enabled prompting after Orca guarded the pane.
+    parent.GIT_TERMINAL_PROMPT = '1'
+    parent.GCM_INTERACTIVE = 'auto'
+
+    const { env } = spawnChild(parent, { launchCommand: '/bin/zsh', platform: 'linux' })
+
+    expect(env.GIT_TERMINAL_PROMPT).toBe('1')
+    expect(env.GCM_INTERACTIVE).toBe('auto')
+  })
+
+  it('keeps a guard config slot whose value the pane overrode', () => {
+    const parent = guardedParentEnv('linux')
+    // Someone inside the pane flipped Orca's own entry back on.
+    parent.GIT_CONFIG_VALUE_0 = 'true'
+
+    const { env } = spawnChild(parent, { launchCommand: '/bin/zsh', platform: 'linux' })
+
+    expect(env.GIT_CONFIG_COUNT).toBe('1')
+    expect(env.GIT_CONFIG_KEY_0).toBe('credential.interactive')
+    expect(env.GIT_CONFIG_VALUE_0).toBe('true')
+  })
+
+  it("keeps the caller's own WSLENV token for a guard variable, flags and all", () => {
+    const saved = takeGitCredentialGuardEnv()
+    try {
+      const parent = guardedParentEnv('win32', { WSLENV: 'GIT_ASKPASS/p' })
+
+      const { env } = spawnChild(parent, { launchCommand: '/bin/zsh', platform: 'win32' })
+
+      expect(env.WSLENV).toBe('GIT_ASKPASS/p')
+    } finally {
+      restoreGitCredentialGuardEnv(saved)
+    }
+  })
+
+  it('removes WSLENV rather than leaving an empty one behind', () => {
+    const saved = takeGitCredentialGuardEnv()
+    try {
+      const parent = guardedParentEnv('win32')
+      expect(parent.WSLENV).toBeTruthy()
+
+      const { env } = spawnChild(parent, { launchCommand: '/bin/zsh', platform: 'win32' })
+
+      expect(Object.hasOwn(env, 'WSLENV')).toBe(false)
+    } finally {
+      restoreGitCredentialGuardEnv(saved)
+    }
+  })
+
+  it('never lets a detached-host marker remove indexed config the host owns', () => {
+    const wire: Record<string, string> = { PATH: '/usr/bin' }
+    expect(
+      applyTerminalGitCredentialPromptGuard(wire, {
+        launchCommand: 'claude',
+        platform: 'linux',
+        deferGitConfigGuardToHost: true
+      })
+    ).toBe(true)
+
+    // The host's own environment already hardens Git the same way Orca does.
+    const host: Record<string, string> = {
+      ...wire,
+      GIT_CONFIG_COUNT: '2',
+      GIT_CONFIG_KEY_0: 'credential.interactive',
+      GIT_CONFIG_VALUE_0: 'false',
+      GIT_CONFIG_KEY_1: 'credential.guiPrompt',
+      GIT_CONFIG_VALUE_1: 'false'
+    }
+    delete host[TERMINAL_GIT_CREDENTIAL_GUARD_POLICY_ENV]
+
+    expect(
+      applyTerminalGitCredentialPromptGuard(host, {
+        launchCommand: '/bin/zsh',
+        platform: 'linux'
+      })
+    ).toBe(false)
+    expect(host.GIT_CONFIG_COUNT).toBe('2')
+    expect(host.GIT_CONFIG_KEY_0).toBe('credential.interactive')
+    expect(host.GIT_CONFIG_VALUE_0).toBe('false')
+    expect(host.GIT_CONFIG_KEY_1).toBe('credential.guiPrompt')
   })
 })
