@@ -49,8 +49,13 @@ export function assertDaemonBuildProvenance(repoRoot) {
     encoding: 'utf8'
   })
     .split('\0')
-    // -z emits a bare `new\0old\0` pair for R/C; the status record is the one with
-    // the two-column prefix, and the trailing source path carries none.
+    // -z emits a bare `new\0old\0` pair for R/C, so drop the trailing source path:
+    // only the status record has the two-column prefix. This test depends on the
+    // pathspec above -- git refuses to pair a rename whose source is outside it and
+    // downgrades to `A`, so every bare source record still reaching here starts with
+    // a watched prefix and never has a space at index 2. Drop the pathspec and a
+    // source like `zz a/f.ts` would be misread as a status record (fail-closed: it
+    // adds a spurious dirty entry rather than hiding one).
     .filter((record) => record.length > 3 && record[2] === ' ')
     .map((record) => record.slice(3))
   if (dirty.length > 0) {
