@@ -43,13 +43,19 @@ substitute the unsuffixed names:
 - `libcups2t64` becomes `libcups2`
 - `libatspi2.0-0t64` becomes `libatspi2.0-0`
 
-The other names are identical on every supported release. The two sets are not
-interchangeable: `apt-get install` fails outright on a name the release does not
-carry, and on Ubuntu 24.04 `libasound2` survives only as a virtual package for an
-unrelated library, so it installs without giving Electron what it needs.
+The other names are identical on every supported release. The substitution is not
+symmetric, so use the list that matches the release. A `t64` name on Ubuntu 20.04,
+Ubuntu 22.04, or Debian 12 fails immediately with `E: Unable to locate package
+libgtk-3-0t64`. In the other direction the old names mostly still resolve, because
+each renamed package declares `Provides:` its unsuffixed name — except `libasound2`
+on Ubuntu 24.04, where `liboss4-salsa-asound2` in `universe` claims that name too.
+apt will not choose between two providers and exits with `E: Package 'libasound2'
+has no installation candidate`, which aborts the entire install line and leaves none
+of the libraries installed.
 
-On Ubuntu 22.04, install `libfuse2` to execute the AppImage through FUSE. On
-Ubuntu 24.04 and Debian, the equivalent package may be `libfuse2t64`. FUSE is
+On Ubuntu 20.04 and 22.04, install `libfuse2` to execute the AppImage through
+FUSE. On Ubuntu 24.04 and Debian 13 the package is `libfuse2t64`, though the plain
+`libfuse2` name also resolves there because nothing else provides it. FUSE is
 optional: without it, use the AppImage's supported extraction path:
 
 ```bash
