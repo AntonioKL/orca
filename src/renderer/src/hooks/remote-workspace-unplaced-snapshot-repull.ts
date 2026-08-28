@@ -48,11 +48,24 @@ export function createUnplacedSnapshotRepull(
   // Why in-flight is tracked apart from the timer: the callback drops its timer entry before
   // awaiting the host, so the timer map alone leaves a gap in which a concurrent report arms a
   // second, overlapping chain and can trip exhaustion before the pending apply resolves.
-  const inFlightTargets = new Set<string>()
-  // Why a generation: `resetTarget` cannot cancel a callback already past its await, so a stale
-  // one would reschedule on top of the new connection's chain. It stamps its generation and exits
-  // if the target has since been reset.
+  // Why it stores the owning generation rather than membership: a superseded callback's cleanup
+  // must not release a marker a newer chain now owns.
+  const inFlightByTarget = new Map<string, number>()
+  // Why a generation: nothing can cancel a callback already past its await, so retirement and
+  // reconnect reset both bump it and the callback exits if its stamp no longer matches. Without
+  // bumping on retirement, an in-flight apply resolving `unplaced` after a `placed` report would
+  // restart the chain from attempt 0 — repeat that and the budget never runs out.
   const generationByTarget = new Map<string, number>()
+
+  const bumpGeneration = (targetId: string): void => {
+    generationByTarget.set(targetId, (generationByTarget.get(targetId) ?? 0) + 1)
+  }
+
+  const releaseInFlight = (targetId: string, generation: number): void => {
+    if (inFlightByTarget.get(targetId) === generation) {
+      inFlightByTarget.delete(targetId)
+    }
+  }
 
   const clearTimer = (targetId: string): void => {
     const timer = timerByTarget.get(targetId)
@@ -69,12 +82,13 @@ export function createUnplacedSnapshotRepull(
       clearTimer(targetId)
       attemptByTarget.delete(targetId)
       exhaustedTargets.delete(targetId)
+      bumpGeneration(targetId)
       return
     }
     // Why this precedes the exhaustion check: once the last attempt is armed the count is already
     // spent, so testing exhaustion first would let a concurrent report cancel that still-pending
     // retry and declare the chain over one attempt early.
-    if (timerByTarget.has(targetId) || inFlightTargets.has(targetId)) {
+    if (timerByTarget.has(targetId) || inFlightByTarget.has(targetId)) {
       return
     }
     const attempt = attemptByTarget.get(targetId) ?? 0
@@ -91,8 +105,8 @@ export function createUnplacedSnapshotRepull(
       targetId,
       setTimeout(() => {
         timerByTarget.delete(targetId)
-        inFlightTargets.add(targetId)
         const generation = generationByTarget.get(targetId) ?? 0
+        inFlightByTarget.set(targetId, generation)
         void (async () => {
           if (deps.isStopped()) {
             return
@@ -124,12 +138,12 @@ export function createUnplacedSnapshotRepull(
           }
           // Released before rescheduling: the guard exists to keep *others* out, and holding it
           // here would block this chain's own next attempt.
-          inFlightTargets.delete(targetId)
+          releaseInFlight(targetId, generation)
           schedule(targetId, outcome)
         })()
           .catch(() => {})
           .finally(() => {
-            inFlightTargets.delete(targetId)
+            releaseInFlight(targetId, generation)
           })
       }, delayMs)
     )
@@ -138,11 +152,13 @@ export function createUnplacedSnapshotRepull(
   return {
     schedule,
     resetTarget: (targetId: string) => {
+      // Deliberately does NOT drop the in-flight marker: its owner is the only party that may
+      // release it, and clearing it here would let a new chain arm while that apply is still
+      // running. The superseded callback exits on the generation bump and releases its own marker.
       clearTimer(targetId)
       attemptByTarget.delete(targetId)
       exhaustedTargets.delete(targetId)
-      inFlightTargets.delete(targetId)
-      generationByTarget.set(targetId, (generationByTarget.get(targetId) ?? 0) + 1)
+      bumpGeneration(targetId)
     },
     stop: () => {
       for (const timer of timerByTarget.values()) {
@@ -151,7 +167,7 @@ export function createUnplacedSnapshotRepull(
       timerByTarget.clear()
       attemptByTarget.clear()
       exhaustedTargets.clear()
-      inFlightTargets.clear()
+      inFlightByTarget.clear()
       generationByTarget.clear()
     }
   }
