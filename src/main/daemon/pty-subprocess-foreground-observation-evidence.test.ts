@@ -12,7 +12,8 @@ vi.mock('../providers/agent-foreground-process', () => ({
 }))
 
 import { createDaemonPtySubprocessHandle } from './pty-subprocess/subprocess-handle'
-import type { SubprocessHandle } from './session-subprocess-handle'
+import { buildDaemonInspectProcessResult } from './terminal-host-process-evidence'
+import type { ForegroundProcessObservation, SubprocessHandle } from './session-subprocess-handle'
 
 const SHELL_PID = 999_999_517
 // Above the idle-shell refresh throttle (5s) so each read starts a fresh scan.
@@ -25,6 +26,26 @@ describe('daemon foreground observation evidence', () => {
   let platformDescriptor: PropertyDescriptor | undefined
   let nodePty: pty.IPty & { process: string }
   let handle: SubprocessHandle
+  let exitListeners: ((event: { exitCode: number; signal?: number }) => void)[]
+
+  function observe(): ForegroundProcessObservation {
+    const observation = handle.observeForegroundProcess?.()
+    if (!observation) {
+      throw new Error('handle exposes no foreground evidence channel')
+    }
+    return observation
+  }
+
+  /** The children verdict the completion monitor actually acts on. */
+  function childrenVerdict(observation: ForegroundProcessObservation): string | undefined {
+    return buildDaemonInspectProcessResult(observation).processEvidence?.children.verdict
+  }
+
+  function exitPty(): void {
+    for (const listener of exitListeners) {
+      listener({ exitCode: 0 })
+    }
+  }
 
   async function readAfterSettledScan(): Promise<ReturnType<
     NonNullable<SubprocessHandle['observeForegroundProcess']>
@@ -46,11 +67,15 @@ describe('daemon foreground observation evidence', () => {
     resolveAgentForegroundProcessMock.mockReset()
     // Default: a scan that runs and finds no agent. Individual tests override.
     resolveAgentForegroundProcessMock.mockResolvedValue({ available: true, processName: 'zsh' })
+    exitListeners = []
     nodePty = {
       pid: SHELL_PID,
       process: 'zsh',
       onData: vi.fn(() => ({ dispose: vi.fn() })),
-      onExit: vi.fn(() => ({ dispose: vi.fn() })),
+      onExit: vi.fn((listener) => {
+        exitListeners.push(listener)
+        return { dispose: vi.fn() }
+      }),
       write: vi.fn(),
       resize: vi.fn(),
       kill: vi.fn()
@@ -143,5 +168,56 @@ describe('daemon foreground observation evidence', () => {
 
     // The wire's legacy field must not change shape when evidence degrades.
     expect(handle.getForegroundProcess()).toBe('zsh')
+  })
+
+  it('withholds observation when the title read names nothing usable', () => {
+    // node-pty's POSIX title read reports an empty name when the native read
+    // fails on a live pane, so "no name" is a failed read, not an observed exit.
+    nodePty.process = ''
+
+    const observation = observe()
+
+    expect(observation.processName).toBeNull()
+    expect(observation.evidence.verdict).toBe('unverifiable')
+    expect(childrenVerdict(observation)).toBe('unverifiable')
+  })
+
+  it('withholds observation when the title read throws', () => {
+    Object.defineProperty(nodePty, 'process', {
+      configurable: true,
+      get: () => {
+        throw new Error('foreground title read failed')
+      }
+    })
+
+    const observation = observe()
+
+    expect(observation.processName).toBeNull()
+    expect(observation.evidence.verdict).toBe('unverifiable')
+    expect(childrenVerdict(observation)).toBe('unverifiable')
+  })
+
+  it('withholds observation after a corroborating scan is followed by an unavailable one', async () => {
+    resolveAgentForegroundProcessMock.mockResolvedValue({ available: true, processName: 'zsh' })
+    expect((await readAfterSettledScan())?.evidence.verdict).toBe('observed')
+
+    // A scan that ran but could not answer is a relay host's normal steady
+    // state. It settles too, so the corroboration it failed to refresh must
+    // retire rather than be inherited from the last scan that succeeded.
+    resolveAgentForegroundProcessMock.mockResolvedValue({ available: false, processName: 'zsh' })
+    const observation = await readAfterSettledScan()
+
+    expect(observation?.evidence.verdict).toBe('unverifiable')
+  })
+
+  it('observes the exit node-pty itself reported', () => {
+    // The conservative arms must not swallow a real completion: once the host
+    // watched the pty exit, absence is something it observed happen.
+    exitPty()
+
+    const observation = observe()
+
+    expect(observation.evidence).toEqual({ verdict: 'observed', processName: null })
+    expect(childrenVerdict(observation)).toBe('exited')
   })
 })
