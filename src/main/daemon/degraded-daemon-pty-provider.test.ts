@@ -355,6 +355,45 @@ describe('DegradedDaemonPtyProvider.ptyAbsenceVerdict', () => {
     })
   })
 
+  it('does not let a previous incarnation vouch after the session id is reused', async () => {
+    // Reopening a pane reuses the session id. The fallback's certificate belongs to the
+    // incarnation that died, so it must not answer for the one that replaced it.
+    const fallbackSessions: string[] = []
+    const fallback = withAbsenceVerdict(createProvider('fallback', fallbackSessions), 'exited')
+    const current = createDaemonAdapter('daemon')
+    const probeCurrentDaemonSpawn = vi
+      .fn<() => Promise<boolean>>()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true)
+    const provider = new DegradedDaemonPtyProvider({
+      current,
+      legacy: [],
+      fallback,
+      probeCurrentDaemonSpawn
+    })
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000)
+
+    try {
+      await expect(provider.recoverFreshSpawnRouting()).resolves.toBe(false)
+      const first = await provider.spawn({ cols: 80, rows: 24, sessionId: 'reused-session' })
+      fallbackSessions.splice(0)
+      fallback.emitExit(first.id, 0)
+      expect(provider.ptyAbsenceVerdict(first.id)).toBe('exited')
+
+      // The pane reopens on the same id, now routed to the recovered daemon.
+      now.mockReturnValue(1_000 + DEGRADED_DAEMON_RECOVERY_RETRY_MS)
+      await expect(provider.recoverFreshSpawnRouting()).resolves.toBe(true)
+      await provider.spawn({ cols: 80, rows: 24, sessionId: 'reused-session' })
+
+      // A daemon restart drops that route without observing anything.
+      provider.fanoutCurrentDaemonSyntheticExits(1)
+
+      expect(provider.ptyAbsenceVerdict('reused-session')).toBe('unverifiable')
+    } finally {
+      now.mockRestore()
+    }
+  })
+
   it('stays unverifiable when the routed owner cannot vouch for the absence', async () => {
     const fallbackSessions: string[] = []
     const fallback = createProvider('fallback', fallbackSessions)

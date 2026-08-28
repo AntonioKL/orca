@@ -1,5 +1,5 @@
 import { BoundedMap } from '../../shared/bounded-map'
-import type { IPtyProvider } from '../providers/types'
+import type { IPtyProvider, PtySpawnResult } from '../providers/types'
 
 /**
  * What a session id's absence proves in the degraded router.
@@ -18,6 +18,15 @@ export class DegradedDaemonAbsenceVerdict {
   /** The provider that emitted the exit is the one that watched it. */
   recordWatchedExit(sessionId: string, owner: IPtyProvider): void {
     this.watchedExitOwners.set(sessionId, owner)
+  }
+
+  /** A reopened pane reuses the session id, so spawning retires any certificate held for
+   *  it — the dead incarnation's owner must not answer for its replacement, the same
+   *  reason LocalPtyProvider drops its own tombstone on spawn. */
+  async observeSpawn(spawn: Promise<PtySpawnResult>): Promise<PtySpawnResult> {
+    const spawned = await spawn
+    this.watchedExitOwners.delete(spawned.id)
+    return spawned
   }
 
   read(sessionId: string): 'exited' | 'unverifiable' {
