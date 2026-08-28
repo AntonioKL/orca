@@ -60,6 +60,9 @@ export type UtilityProcessLike = {
   on(event: 'message', listener: (message: unknown) => void): unknown
   on(event: 'spawn', listener: () => void): unknown
   on(event: 'exit', listener: (code: number) => void): unknown
+  // Electron's experimental V8 fatal-error event; unlistened, its EventEmitter
+  // 'error' emission is an uncaught exception in the main process.
+  on(event: 'error', listener: (type: string, location: string, report: string) => void): unknown
   kill(): boolean
 }
 
@@ -132,6 +135,7 @@ class UtilityForkedDaemonChild extends EventEmitter implements LaunchedDaemonChi
 
   private daemonExited = false
   private releasedShim = false
+  private shimFatalError: Error | null = null
 
   constructor(private readonly shim: UtilityProcessLike) {
     super()
@@ -147,6 +151,11 @@ class UtilityForkedDaemonChild extends EventEmitter implements LaunchedDaemonChi
       return false
     }
     return super.emit(event, ...args)
+  }
+
+  /** A fatal shim error is always followed by shim exit; keep the cause for it. */
+  noteShimFatalError(error: Error): void {
+    this.shimFatalError = error
   }
 
   handleShimMessage(message: DaemonShimUpMessage): void {
@@ -187,7 +196,14 @@ class UtilityForkedDaemonChild extends EventEmitter implements LaunchedDaemonChi
     // The relay died while the launch still depended on it. The daemon may be
     // fine, but readiness/exit can no longer be observed — surface it like a
     // fork error so the launcher's failure path owns cleanup by pid.
-    this.emit('error', new Error('Daemon utility launcher exited before the daemon settled'))
+    this.emit(
+      'error',
+      new Error(
+        `Daemon utility launcher exited before the daemon settled${
+          this.shimFatalError ? `: ${this.shimFatalError.message}` : ''
+        }`
+      )
+    )
   }
 
   disconnect(): void {
@@ -244,6 +260,15 @@ export async function forkDaemonThroughUtilityProcess(
       reject(error)
     }
 
+    shim.on('error', (type, location) => {
+      const error = new Error(`Daemon utility launcher hit a fatal error: ${type} at ${location}`)
+      if (!settled) {
+        fail(error)
+        return
+      }
+      // Electron always follows 'error' with 'exit'; the exit path surfaces it.
+      child.noteShimFatalError(error)
+    })
     shim.on('message', (raw) => {
       const message = raw as DaemonShimUpMessage | null
       if (!message || typeof message !== 'object') {

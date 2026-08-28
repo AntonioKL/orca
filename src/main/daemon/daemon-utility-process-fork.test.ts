@@ -155,6 +155,31 @@ describe('forkDaemonThroughUtilityProcess', () => {
     expect(shim.killed).toBe(true)
   })
 
+  it('fails an unsettled handshake on the utility process error event instead of crashing main', async () => {
+    const promise = forkDaemonThroughUtilityProcess(SPEC, forkFn)
+    shim.emit('message', { kind: 'shim-ready' })
+    // Electron forwards V8 fatal errors through EventEmitter 'error'; with no
+    // listener that is an uncaught exception in the main process, thrown before
+    // the launcher ever sees the handshake rejection.
+    expect(() => shim.emit('error', 'FatalError', 'v8::internal::Heap', '{}')).not.toThrow()
+    await expect(promise).rejects.toThrow('FatalError')
+    expect(shim.killed).toBe(true)
+  })
+
+  it('routes no late shim events to the orphan child after a rejected launch', async () => {
+    vi.useFakeTimers()
+    const promise = forkDaemonThroughUtilityProcess(SPEC, forkFn)
+    const assertion = expect(promise).rejects.toThrow('handshake timed out')
+    await vi.advanceTimersByTimeAsync(10_001)
+    await assertion
+    // The rejected launch was the only consumer — the child was never handed
+    // out, so a relayed 'error' emission has no listener and would crash main.
+    expect(() => shim.emit('exit', 1)).not.toThrow()
+    expect(() =>
+      shim.emit('message', { kind: 'daemon-error', message: 'late failure' })
+    ).not.toThrow()
+  })
+
   it('surfaces an unexpected shim death after launch as a child error', async () => {
     const child = await forkSettledChild()
     const errors: Error[] = []

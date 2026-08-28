@@ -277,7 +277,20 @@ describe('electron-builder config', () => {
     const viteConfig = await readFile(join(REPO_ROOT, 'electron.vite.config.ts'), 'utf8')
     expect(viteConfig).toMatch(new RegExp(`'${entryFilename.replace(/\.js$/, '')}':\\s*resolve\\(`))
     // utilityProcess reads asar directly, so the shim deliberately stays packed.
-    expect(electronBuilderConfig.asarUnpack).not.toContain(`out/main/${entryFilename}`)
+    // Drive the real matcher: an exact-string check would let a future broad
+    // pattern (e.g. out/main/**) unpack the shim without tripping the pin.
+    const unpacksPath = (patterns, repoPath) =>
+      new FileMatcher('/app', '/dest', (value) => value, patterns).createFilter()(
+        join('/app', repoPath),
+        { isDirectory: () => false }
+      )
+    expect(unpacksPath(electronBuilderConfig.asarUnpack, `out/main/${entryFilename}`)).toBe(false)
+    // Controls: the same matcher sees the entry that must stay unpacked, and a
+    // broad glob does trip the shim check — so the assertion cannot go vacuous.
+    expect(unpacksPath(electronBuilderConfig.asarUnpack, 'out/main/daemon-entry.js')).toBe(true)
+    expect(
+      unpacksPath([...electronBuilderConfig.asarUnpack, 'out/main/**'], `out/main/${entryFilename}`)
+    ).toBe(true)
   })
 
   it('uses the multi-size icon source for Linux packages', () => {
