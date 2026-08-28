@@ -37663,6 +37663,91 @@ describe('OrcaRuntimeService', () => {
     }
   })
 
+  it('rejects an ordered wait on a disconnected PTY as terminal_gone without leaking a waiter', async () => {
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+    const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
+    const internals = runtime as unknown as {
+      ptysById: Map<string, { connected: boolean }>
+      waitersByHandle: Map<string, Set<unknown>>
+    }
+    const pty = internals.ptysById.get('pty-bg')
+    expect(pty).toBeDefined()
+    // The SSH liveness sweep clears `connected` with no exit evidence.
+    pty!.connected = false
+
+    // terminal_gone (loss of contact), never terminal_exited (proven death).
+    await expect(
+      runtime.waitForTerminal(handle, {
+        condition: 'tui-idle',
+        timeoutMs: 60_000,
+        agentTurnStartedAfter: Date.now()
+      })
+    ).rejects.toThrow('terminal_gone')
+    // The rejection must not strand a waiter and its timeout in the registry.
+    expect(internals.waitersByHandle.size).toBe(0)
+  })
+
+  it('holds an ordered wait through a mid-wait disconnect instead of inventing an outcome', async () => {
+    vi.useFakeTimers()
+    try {
+      const runtime = new OrcaRuntimeService(store)
+      runtime.setPtyController({
+        spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+        write: () => true,
+        kill: () => true,
+        getForegroundProcess: async () => null
+      })
+      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
+      const observedAfter = Date.now()
+      let outcome: 'resolved' | Error | null = null
+      const wait = runtime
+        .waitForTerminal(handle, {
+          condition: 'tui-idle',
+          timeoutMs: 60_000,
+          agentTurnStartedAfter: observedAfter
+        })
+        .then(
+          () => {
+            outcome = 'resolved'
+          },
+          (error: Error) => {
+            outcome = error
+          }
+        )
+
+      const internals = runtime as unknown as {
+        ptysById: Map<string, { connected: boolean }>
+        waitersByHandle: Map<string, Set<unknown>>
+      }
+      const pty = internals.ptysById.get('pty-bg')
+      expect(pty).toBeDefined()
+      pty!.connected = false
+
+      // Poll ticks on the unreachable PTY must not read the disconnect as
+      // completion or exit — a reconnect could still resolve this wait honestly.
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(outcome).toBeNull()
+      // And the unreachable terminal refuses "no work since" instead of asserting it.
+      expect(() => runtime.hasTerminalAgentWorkedSince(handle, observedAfter)).toThrow(
+        'terminal_gone'
+      )
+
+      await vi.advanceTimersByTimeAsync(60_000)
+      await wait
+      expect(outcome).toBeInstanceOf(Error)
+      expect((outcome as unknown as Error).message).toBe('timeout')
+      expect(internals.waitersByHandle.size).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('restores ordered completion from persisted working evidence after restart', async () => {
     const observedAfter = Date.now() - 1_000
     const leafId = '11111111-2222-4333-8444-555555555555'

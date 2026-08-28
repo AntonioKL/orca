@@ -20747,39 +20747,48 @@ export class OrcaRuntimeService {
           this.waitersByHandle.set(handle, waiters)
         }
         waiters.add(waiter)
-        const live = this.getLivePtyForHandle(handle)
-        if (!live) {
-          this.removeWaiter(waiter)
-          reject(new Error('terminal_handle_stale'))
-        } else if (condition === 'exit' && !live.pty.connected) {
-          this.resolveWaiter(waiter, buildPtyTerminalWaitResult(handle, condition, live.pty))
-        } else if (condition === 'tui-idle') {
-          const livePtyWaitText = buildTerminalWaitText(
-            live.pty.tailBuffer,
-            live.pty.tailPartialLine,
-            live.pty.preview
-          )
-          const blockedReason = detectTerminalWaitBlockedReason(livePtyWaitText)
-          if (blockedReason) {
-            this.resolveWaiter(
-              waiter,
-              buildPtyTerminalWaitBlockedResult(handle, condition, live.pty, blockedReason)
+        // Why: mirror the leaf branch — an inspection throw after registration
+        // (ordered waits ask getTerminalAgentStatusPtyId, which throws
+        // terminal_gone on a disconnected PTY) must tear the waiter and its
+        // timeout down instead of stranding them until the timeout fires.
+        try {
+          const live = this.getLivePtyForHandle(handle)
+          if (!live) {
+            this.removeWaiter(waiter)
+            reject(new Error('terminal_handle_stale'))
+          } else if (condition === 'exit' && !live.pty.connected) {
+            this.resolveWaiter(waiter, buildPtyTerminalWaitResult(handle, condition, live.pty))
+          } else if (condition === 'tui-idle') {
+            const livePtyWaitText = buildTerminalWaitText(
+              live.pty.tailBuffer,
+              live.pty.tailPartialLine,
+              live.pty.preview
             )
-          } else if (
-            agentTurnStartedAfter !== null
-              ? this.canResolveTerminalTuiIdleWaiter(waiter)
-              : live.pty.lastAgentStatus === 'idle'
-          ) {
-            this.resolveWaiter(waiter, buildPtyTerminalWaitResult(handle, condition, live.pty))
-          } else if (
-            agentTurnStartedAfter === null &&
-            (this.getAdoptedPtyExplicitIdleStatus(live.pty) === 'idle' ||
-              isKnownReadyPromptPreview(livePtyWaitText))
-          ) {
-            this.resolveWaiter(waiter, buildPtyTerminalWaitResult(handle, condition, live.pty))
-          } else {
-            this.startPtyTuiIdleFallbackPoll(waiter, live.pty, effectiveTimeoutMs)
+            const blockedReason = detectTerminalWaitBlockedReason(livePtyWaitText)
+            if (blockedReason) {
+              this.resolveWaiter(
+                waiter,
+                buildPtyTerminalWaitBlockedResult(handle, condition, live.pty, blockedReason)
+              )
+            } else if (
+              agentTurnStartedAfter !== null
+                ? this.canResolveTerminalTuiIdleWaiter(waiter)
+                : live.pty.lastAgentStatus === 'idle'
+            ) {
+              this.resolveWaiter(waiter, buildPtyTerminalWaitResult(handle, condition, live.pty))
+            } else if (
+              agentTurnStartedAfter === null &&
+              (this.getAdoptedPtyExplicitIdleStatus(live.pty) === 'idle' ||
+                isKnownReadyPromptPreview(livePtyWaitText))
+            ) {
+              this.resolveWaiter(waiter, buildPtyTerminalWaitResult(handle, condition, live.pty))
+            } else {
+              this.startPtyTuiIdleFallbackPoll(waiter, live.pty, effectiveTimeoutMs)
+            }
           }
+        } catch (error) {
+          this.removeWaiter(waiter)
+          reject(error instanceof Error ? error : new Error(String(error)))
         }
       })
     }

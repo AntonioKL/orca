@@ -287,6 +287,62 @@ describe('createRuntimeAutomationRunTerminalObserver', () => {
     await run.promise
   })
 
+  it('propagates a thrown (non-timeout) wait error instead of inventing an outcome', async () => {
+    const runtime = createFakeRuntime({ lastAgentStatus: 'working' })
+    const disconnected: AutomationRunTerminalHost = {
+      ...runtime,
+      waitForTerminal: () => Promise.reject(new Error('terminal_gone'))
+    }
+    const run = observe(disconnected)
+
+    await run.promise
+    // Loss of contact is not evidence of completion or failure; the watcher owns
+    // the truthful "stopped watching" close.
+    expect(run.settled).toEqual([])
+    expect(run.errors).toHaveLength(1)
+    expect((run.errors[0] as Error).message).toBe('terminal_gone')
+  })
+
+  it('propagates a hasTerminalAgentWorkedSince throw instead of claiming the agent never started', async () => {
+    const runtime = createFakeRuntime({ lastAgentStatus: 'working' })
+    const disconnected: AutomationRunTerminalHost = {
+      ...runtime,
+      hasTerminalAgentWorkedSince: () => {
+        throw new Error('terminal_gone')
+      }
+    }
+    const run = observe(disconnected)
+
+    // The start deadline expires while the terminal is unreachable. A terminal
+    // that cannot be asked must not be read as "no work since" — that would turn
+    // an SSH disconnect into a dispatch_failed('never started') fact.
+    await vi.advanceTimersByTimeAsync(2 * 60 * 1000 + 1_000)
+    await run.promise
+    expect(run.settled).toEqual([])
+    expect(run.errors).toHaveLength(1)
+    expect((run.errors[0] as Error).message).toBe('terminal_gone')
+  })
+
+  it('propagates a disconnect from a re-armed ordered wait instead of completing', async () => {
+    const runtime = createFakeRuntime({ lastAgentStatus: 'working' })
+    let waitCalls = 0
+    const disconnecting: AutomationRunTerminalHost = {
+      ...runtime,
+      // The agent verifiably worked, then the terminal drops mid-wait: the first
+      // wait expires on its own schedule, the re-armed wait hits the dead PTY.
+      waitForTerminal: () => {
+        waitCalls += 1
+        return Promise.reject(new Error(waitCalls === 1 ? 'timeout' : 'terminal_gone'))
+      }
+    }
+    const run = observe(disconnecting)
+
+    await run.promise
+    expect(run.settled).toEqual([])
+    expect(run.errors).toHaveLength(1)
+    expect((run.errors[0] as Error).message).toBe('terminal_gone')
+  })
+
   it('stops re-arming the tui-idle wait instead of looping for the process lifetime', async () => {
     const runtime = createFakeRuntime({ lastAgentStatus: 'working' })
     const run = observe(runtime)
