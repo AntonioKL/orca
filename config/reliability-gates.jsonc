@@ -12299,7 +12299,7 @@
         "pnpm run build:cli && pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orchestration-message-delivery-identity.test.ts --reporter=dot --testTimeout=5000",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orchestration-mailbox-routing-races.test.ts src/main/runtime/orchestration-mailbox-notification-consistency.test.ts src/main/runtime/orchestration-mailbox-detached-routing.test.ts src/main/runtime/orchestration-mailbox-transport-settlement.test.ts src/main/runtime/orchestration/run-coordinator-handle-migration.test.ts src/main/runtime/orchestration/orchestration-run-delivery-db.test.ts src/main/runtime/orchestration/orchestration-worker-dispatch-db.test.ts src/main/runtime/orchestration/formatter.test.ts src/main/providers/ssh-pty-provider.test.ts src/main/providers/ssh-pty-write.test.ts src/main/daemon/client.test.ts src/main/daemon/daemon-pty-router.test.ts src/main/daemon/degraded-daemon-pty-provider.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orca-runtime.test.ts src/main/runtime/terminal-send-stale-leaf-liveness.test.ts src/main/runtime/rpc/methods/orchestration-runs.test.ts src/main/runtime/rpc/methods/orchestration-send.test.ts src/main/runtime/rpc/methods/orchestration-check.test.ts",
-        "pnpm exec vitest run --config config/vitest.config.ts src/shared/orchestration-check-output.test.ts src/cli/handlers/orchestration-timeout.test.ts src/cli/index-orchestration.test.ts src/main/ssh/ssh-remote-orchestration-compatibility.test.ts --reporter=dot",
+        "pnpm exec vitest run --config config/vitest.config.ts src/shared/orchestration-check-output.test.ts src/cli/handlers/orchestration-timeout.test.ts src/cli/index-orchestration.test.ts src/main/ssh/ssh-remote-orchestration-compatibility.test.ts src/main/runtime/orchestration/orchestration-delivery-queue-boundary.test.ts --reporter=dot",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orchestration/federation-sync.test.ts src/main/runtime/rpc/methods/orchestration-federation.test.ts src/main/runtime/rpc/methods/orchestration-federation-lifecycle-settlement.test.ts --reporter=dot"
       ],
       "testFiles": [
@@ -12326,6 +12326,7 @@
         "src/cli/handlers/orchestration-timeout.test.ts",
         "src/cli/index-orchestration.test.ts",
         "src/main/ssh/ssh-remote-orchestration-compatibility.test.ts",
+        "src/main/runtime/orchestration/orchestration-delivery-queue-boundary.test.ts",
         "src/main/runtime/orchestration/federation-sync.test.ts",
         "src/main/runtime/rpc/methods/orchestration-federation.test.ts",
         "src/main/runtime/rpc/methods/orchestration-federation-lifecycle-settlement.test.ts"
@@ -12338,7 +12339,7 @@
             "notification count equals the concurrently replayed fixed Delivery batch",
             "unread, peek, all, and type filters preserve explicit acknowledgment semantics",
             "restart replays one outstanding Delivery ID without inserting another Delivery row",
-            "a replay explicitly reports its fixed Delivery ID and whether other filter-matching mail is queued without exposing or consuming it, including mail routed in at a lower sequence",
+            "a replay returns its fixed Delivery ID and the same fixed rows without exposing or consuming anything else",
             "a filtered check --wait wakes once without a duplicate terminal pointer",
             "a 125-row old-handle backlog is atomically rebound before coordinator identity changes",
             "committed coordinator mail is canonicalized without relying on notification delivery",
@@ -12364,6 +12365,22 @@
             "a submitted actionable pointer is durably deduplicated across restart without marking mail read",
             "newer Run mail is not pointed behind an outstanding fixed Delivery",
             "same-owner filtered checks drain later 50-row pages before waiting"
+          ]
+        },
+        {
+          "file": "src/main/runtime/orchestration/orchestration-run-delivery-db.test.ts",
+          "assertions": [
+            "a replay reports whether other filter-matching mail is queued behind it without exposing or consuming it",
+            "mail routed into the Run mailbox at a lower sequence than the batch is still reported as queued",
+            "acknowledgment releases exactly the mail that was reported as queued"
+          ]
+        },
+        {
+          "file": "src/main/runtime/orchestration/orchestration-delivery-queue-boundary.test.ts",
+          "assertions": [
+            "a full 50-member batch plus type filters binds within SQLite variable limits",
+            "a batch member is never reported as queued behind itself",
+            "a type filter matching nothing queued reports false"
           ]
         },
         {
@@ -12459,6 +12476,15 @@
         }
       ],
       "evidenceRuns": [
+        {
+          "date": "2026-08-28",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/shared/orchestration-check-output.test.ts src/cli/handlers/orchestration-timeout.test.ts src/cli/index-orchestration.test.ts src/main/ssh/ssh-remote-orchestration-compatibility.test.ts src/main/runtime/orchestration/orchestration-delivery-queue-boundary.test.ts --reporter=dot",
+          "result": "passed",
+          "durationSeconds": 6.75,
+          "summary": "58 tests passed covering new-versus-replayed Delivery labelling, an off-contract queued value rendering as unavailable rather than silence, Run-scoped acknowledgment guidance, bare and empty --ack rejected before any RPC, remote SSH output parity, and the queued-mail probe at the 50-id batch boundary including a batch member never reporting as queued behind itself."
+        },
         {
           "date": "2026-08-13",
           "runner": "local",
