@@ -126,6 +126,29 @@ describe('PtyHandler', () => {
     }
   })
 
+  it('leaves an ordinary user terminal unguarded when the relay itself was launched from a gated agent pane', async () => {
+    // Why: the scrub has to run BEFORE buildSpawnEnv's consumers read the env.
+    // An inherited sequencing command otherwise becomes this pane's launch-command
+    // hint, and the credential guard then disables Git prompts in a user terminal.
+    const saved = process.env[SETUP_AGENT_SEQUENCE_STARTUP_COMMAND_ENV]
+    process.env[SETUP_AGENT_SEQUENCE_STARTUP_COMMAND_ENV] = 'claude --dangerously-skip-permissions'
+
+    try {
+      await dispatcher.callRequest('pty.spawn', { env: { GIT_TERMINAL_PROMPT: '1' } })
+    } finally {
+      if (saved === undefined) {
+        delete process.env[SETUP_AGENT_SEQUENCE_STARTUP_COMMAND_ENV]
+      } else {
+        process.env[SETUP_AGENT_SEQUENCE_STARTUP_COMMAND_ENV] = saved
+      }
+    }
+
+    const userEnv = mockPtySpawn.mock.calls[0][2].env as Record<string, string>
+    expect(userEnv.GIT_TERMINAL_PROMPT).toBe('1')
+    const state = (await dispatcher.callRequest('pty.serialize', { ids: ['pty-1'] })) as string
+    expect(JSON.parse(state)[0]?.gitCredentialPromptGuarded).toBe(false)
+  })
+
   describe('half-activated conda env (#14195)', () => {
     const CONDA_KEYS = [
       'CONDA_SHLVL',
