@@ -214,7 +214,7 @@ export function createRemoteWorkspaceTargetSync(
     applyPatchStatus(deps.store.getState(), authority.targetId, result)
   }
 
-  const applyPreparedSnapshot = async (
+  const applyUnsolicitedSnapshot = async (
     targetId: string,
     snapshot: RemoteWorkspaceSnapshot
   ): Promise<DirectSshSnapshotPlacement> => {
@@ -249,15 +249,6 @@ export function createRemoteWorkspaceTargetSync(
       waitForWorkspaceSessionReady,
       finalizeHydratedTerminals: deps.finalizeHydratedTerminals
     })
-    return placement
-  }
-
-  /** Public entry: a snapshot arriving unsolicited starts its own re-pull chain. */
-  const applyUnsolicitedSnapshot = async (
-    targetId: string,
-    snapshot: RemoteWorkspaceSnapshot
-  ): Promise<DirectSshSnapshotPlacement> => {
-    const placement = await applyPreparedSnapshot(targetId, snapshot)
     return placement
   }
 
