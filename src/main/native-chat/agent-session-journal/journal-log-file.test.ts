@@ -234,6 +234,39 @@ describe('readJournalSnapshot validation', () => {
   })
 })
 
+describe('future-version snapshot classification', () => {
+  it('classifies a future version before shape validation so unknown bodies stay unreadable', async () => {
+    // The version can only advance because bodies changed, so a future snapshot
+    // legitimately carries kinds this build cannot parse. That is the
+    // schema-unreadable contract, not corruption.
+    const future = validSnapshot() as unknown as Record<string, unknown>
+    future.v = 99
+    future.items = [
+      {
+        itemId: 'codex:thread-1:turn-1:1',
+        revision: 1,
+        body: { kind: 'future-render-kind', payload: { anything: true } },
+        sequence: 2,
+        observedAt: 1_000
+      }
+    ]
+    await writeSnapshot(future)
+    expect((await readJournalSnapshot(root)).status).toBe('unreadable')
+  })
+
+  it('classifies a future version as unreadable even when its shapes still parse today', async () => {
+    await writeSnapshot({ ...validSnapshot(), v: 99 })
+    expect((await readJournalSnapshot(root)).status).toBe('unreadable')
+  })
+
+  it('treats a non-integer or sub-1 version as invalid, matching row admission', async () => {
+    for (const v of [0, 1.5]) {
+      await writeSnapshot({ ...validSnapshot(), v })
+      expect((await readJournalSnapshot(root)).status).toBe('invalid')
+    }
+  })
+})
+
 describe('journal startup isolation from a malformed snapshot', () => {
   it('quarantines a JSON-valid malformed snapshot instead of throwing through open', async () => {
     await writeSnapshot({ ...validSnapshot(), tombstones: {} })

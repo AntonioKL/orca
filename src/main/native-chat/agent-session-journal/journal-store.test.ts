@@ -568,6 +568,87 @@ describe('schema', () => {
     })
   })
 
+  it('preserves a future-version snapshot with an unknown body kind in place instead of quarantining it', async () => {
+    const journal = await open()
+    await journal.appendItem(item(0), body('a'), { fence: 1 })
+    const snapshotPath = join(root, JOURNAL_SNAPSHOT_FILE)
+    const snapshot = JSON.parse(await readFile(snapshotPath, 'utf-8')) as Record<string, unknown>
+    snapshot.v = 99
+    // The version advances because bodies changed: a valid newer snapshot
+    // carries kinds this build cannot parse and must stay unreadable in place.
+    snapshot.items = [
+      {
+        itemId: 'codex:thread-1:turn-1:1',
+        revision: 1,
+        body: { kind: 'future-render-kind', payload: { anything: true } },
+        sequence: 1,
+        observedAt: 1_000
+      }
+    ]
+    await writeFile(snapshotPath, JSON.stringify(snapshot), 'utf-8')
+
+    const reopened = await open()
+    const entries = await readdir(root)
+    expect(entries.some((name) => name.startsWith('quarantine-'))).toBe(false)
+    expect(entries.includes(JOURNAL_SNAPSHOT_FILE)).toBe(true)
+    expect(reopened.isReadOnly).toBe(true)
+    expect(reopened.snapshot().items).toHaveLength(0)
+    await expect(reopened.appendItem(item(1), body('b'), { fence: 1 })).rejects.toMatchObject({
+      code: 'journal_read_only'
+    })
+  })
+
+  it('keeps the future-version snapshot bytes when the schema escape hatch rolls the epoch', async () => {
+    const journal = await open()
+    await journal.appendItem(item(0), body('a'), { fence: 1 })
+    const snapshotPath = join(root, JOURNAL_SNAPSHOT_FILE)
+    const snapshot = JSON.parse(await readFile(snapshotPath, 'utf-8')) as Record<string, unknown>
+    snapshot.v = 99
+    snapshot.items = [
+      {
+        itemId: 'codex:thread-1:turn-1:1',
+        revision: 1,
+        body: { kind: 'future-render-kind', payload: { anything: true } },
+        sequence: 1,
+        observedAt: 1_000
+      }
+    ]
+    await writeFile(snapshotPath, JSON.stringify(snapshot), 'utf-8')
+    const reopened = await open()
+    // Still live in place before the explicit escape hatch runs.
+    expect((await readdir(root)).some((name) => name.startsWith('quarantine-'))).toBe(false)
+
+    await reopened.rollEpoch('schema_unreadable', 2)
+    expect(reopened.isReadOnly).toBe(false)
+    const quarantine = (await readdir(root)).find((name) => name.startsWith('quarantine-'))
+    expect(quarantine).toBeDefined()
+    expect(await readFile(join(root, quarantine!), 'utf-8')).toContain('future-render-kind')
+  })
+
+  it('reopens a log holding an admitted malformed-percent item id without throwing', async () => {
+    const journal = await open()
+    await journal.appendItem(item(0), body('a'), { fence: 1 })
+    const logPath = join(root, JOURNAL_LOG_FILE)
+    // `parseJournalRow` admits any string itemId, so replay must degrade a
+    // malformed percent key to an opaque id instead of throwing URIError.
+    const malformedKeyRow = JSON.stringify({
+      v: 1,
+      epoch: journal.epoch,
+      seq: journal.cursor().sequence + 1,
+      fence: 1,
+      ts: 1,
+      kind: 'item',
+      itemId: '%',
+      revision: 1,
+      body: { kind: 'message', role: 'user', blocks: [{ type: 'text', text: 'hi' }] }
+    })
+    await writeFile(logPath, `${await readFile(logPath, 'utf-8')}${malformedKeyRow}\n`, 'utf-8')
+
+    const reopened = await open()
+    expect(reopened.isReadOnly).toBe(false)
+    expect(reopened.snapshot().items.some((entry) => entry.itemId === '%')).toBe(true)
+  })
+
   it('allows the explicit schema-unreadable epoch escape hatch while preserving the old files', async () => {
     const journal = await open()
     await journal.appendItem(item(0), body('a'), { fence: 1 })

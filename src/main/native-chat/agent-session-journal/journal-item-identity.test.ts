@@ -194,3 +194,78 @@ describe('oversized identity bounding on Unicode boundaries', () => {
     expect(() => encodeURIComponent(bounded)).not.toThrow()
   })
 })
+
+describe('ill-formed UTF-16 identity totality', () => {
+  // JSON.parse admits lone surrogates, so any JSON string is a legal component;
+  // pre-fix these threw `URIError: URI malformed` in `encodeURIComponent`.
+  const LONE_HIGH = '\ud83d'
+  const LONE_LOW = '\ude00'
+
+  it('keys a lone-high-surrogate id without throwing, deterministically', () => {
+    const identity: AgentJournalItemIdentity = {
+      provider: 'claude',
+      sessionId: LONE_HIGH,
+      uuid: 'u-1'
+    }
+    expect(() => agentJournalItemKey(identity)).not.toThrow()
+    expect(agentJournalItemKey(identity)).toBe(agentJournalItemKey(identity))
+  })
+
+  it('keys an oversized id carrying a lone low surrogate inside the head', () => {
+    const identity: AgentJournalItemIdentity = {
+      provider: 'codex',
+      threadId: THREAD,
+      turnId: `${LONE_LOW}${'x'.repeat(1100)}`,
+      ordinal: 0
+    }
+    expect(() => agentJournalItemKey(identity)).not.toThrow()
+  })
+
+  it('keys an oversized id with a lone high surrogate away from the head cut', () => {
+    const identity: AgentJournalItemIdentity = {
+      provider: 'codex',
+      threadId: THREAD,
+      turnId: `${'a'.repeat(10)}${LONE_HIGH}${'b'.repeat(1100)}`,
+      ordinal: 0
+    }
+    expect(() => agentJournalItemKey(identity)).not.toThrow()
+  })
+
+  it('cannot collide an ill-formed id with its replacement-character spelling', () => {
+    const keyFor = (sessionId: string) =>
+      agentJournalItemKey({ provider: 'claude', sessionId, uuid: 'u-1' })
+    expect(keyFor(LONE_HIGH)).not.toBe(keyFor('�'))
+    expect(keyFor(LONE_HIGH)).not.toBe(keyFor(LONE_LOW))
+    const oversized = (head: string) => `${head}${'x'.repeat(1100)}`
+    expect(keyFor(oversized(LONE_HIGH))).not.toBe(keyFor(oversized('�')))
+  })
+
+  it('re-deriving from a parsed ill-formed key is a fixed point', () => {
+    const key = agentJournalItemKey({ provider: 'claude', sessionId: LONE_HIGH, uuid: 'u-1' })
+    const parsed = parseAgentJournalItemKey(key)
+    expect(parsed).not.toBeNull()
+    expect(agentJournalItemKey(parsed as AgentJournalItemIdentity)).toBe(key)
+  })
+
+  it('leaves well-formed short components verbatim', () => {
+    expect(boundJournalKeyComponent('turn-1')).toBe('turn-1')
+    expect(boundJournalKeyComponent('😀 café')).toBe('😀 café')
+  })
+})
+
+describe('malformed persisted keys decode to null instead of throwing', () => {
+  it('returns null for malformed percent sequences', () => {
+    for (const key of ['%', 'claude:%E0%A4%A:u-1', 'codex:a:b:1%ZZ', 'claude:%ED%A0%BD:u-1']) {
+      expect(parseAgentJournalItemKey(key)).toBeNull()
+    }
+  })
+
+  it('still round-trips well-formed keys containing the delimiter and spaces', () => {
+    const identity: AgentJournalItemIdentity = {
+      provider: 'claude',
+      sessionId: 's:1',
+      uuid: 'u 1'
+    }
+    expect(parseAgentJournalItemKey(agentJournalItemKey(identity))).toEqual(identity)
+  })
+})

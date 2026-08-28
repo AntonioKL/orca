@@ -32,27 +32,54 @@ export function startStructuredAgentSessionReadTransport(args: {
   applyEvent: (event: AgentSessionSubscribeEvent) => void
   applyError: (message: string) => void
   getCursor: () => AgentJournalCursor | null
+  onHistoryReadInvalidated: () => void
   refreshTail: (shouldStop: () => boolean) => Promise<void>
   sessionId: string
   target: RuntimeClientTarget
-}): { dispose: () => void; refresh: () => void } {
+}): {
+  captureHistoryReadGuard: () => () => boolean
+  dispose: () => void
+  refresh: () => void
+} {
   let stopped = false
   let connected = false
   let opening = false
-  let generation = 0
+  let openGeneration = 0
+  let stateGeneration = 0
   let unsubscribe = (): void => {}
   let resumeCursor = args.getCursor()
-  const coalescer = createStructuredAgentSessionEventCoalescer(args.applyEvent)
+  let shouldStopCoalescedEvent = (): boolean => true
+  const coalescer = createStructuredAgentSessionEventCoalescer((event) => {
+    if (!shouldStopCoalescedEvent()) {
+      args.applyEvent(event)
+    }
+  })
   const reconnectScheduler = createReconnectScheduler({
     shouldStop: () => stopped || connected,
     reconnect: () => void open()
   })
-  const isCurrentGeneration = (candidate: number): boolean => !stopped && candidate === generation
-  const handleEvent = (event: AgentSessionSubscribeEvent, eventGeneration: number): void => {
-    if (!isCurrentGeneration(eventGeneration)) {
+  const isCurrentOpenGeneration = (candidate: number): boolean =>
+    !stopped && candidate === openGeneration
+  const captureHistoryReadGuard = (): (() => boolean) => {
+    const readOpenGeneration = openGeneration
+    const readStateGeneration = stateGeneration
+    return () =>
+      !isCurrentOpenGeneration(readOpenGeneration) || readStateGeneration !== stateGeneration
+  }
+  const handleEvent = (event: AgentSessionSubscribeEvent, eventOpenGeneration: number): void => {
+    if (!isCurrentOpenGeneration(eventOpenGeneration)) {
       return
     }
     if (event.type === 'snapshot' || event.type === 'reset') {
+      coalescer.flush()
+      if (!isCurrentOpenGeneration(eventOpenGeneration)) {
+        return
+      }
+      stateGeneration += 1
+      args.onHistoryReadInvalidated()
+      if (!isCurrentOpenGeneration(eventOpenGeneration)) {
+        return
+      }
       resumeCursor = event.page.liveCursor ?? event.page.window.nextCursor
     } else if (
       event.type === 'batch' &&
@@ -63,6 +90,7 @@ export function startStructuredAgentSessionReadTransport(args: {
       connected = false
       reconnectScheduler.schedule()
     }
+    shouldStopCoalescedEvent = captureHistoryReadGuard()
     coalescer.push(event)
   }
   async function open(): Promise<void> {
@@ -75,17 +103,25 @@ export function startStructuredAgentSessionReadTransport(args: {
     }
     opening = true
     coalescer.flush()
-    const openGeneration = ++generation
+    if (stopped) {
+      opening = false
+      return
+    }
+    const currentOpenGeneration = ++openGeneration
+    args.onHistoryReadInvalidated()
     unsubscribe()
     unsubscribe = (): void => {}
     try {
+      if (!isCurrentOpenGeneration(currentOpenGeneration)) {
+        return
+      }
       let closedDuringOpen = false
       const handle = await subscribeStructuredAgentSession(
         args.target,
         { sessionId: args.sessionId, ...(resumeCursor ? { cursor: resumeCursor } : {}) },
-        (event) => handleEvent(event, openGeneration),
+        (event) => handleEvent(event, currentOpenGeneration),
         (error) => {
-          if (!isCurrentGeneration(openGeneration)) {
+          if (!isCurrentOpenGeneration(currentOpenGeneration)) {
             return
           }
           closedDuringOpen = true
@@ -94,7 +130,7 @@ export function startStructuredAgentSessionReadTransport(args: {
           reconnectScheduler.schedule()
         },
         () => {
-          if (!isCurrentGeneration(openGeneration)) {
+          if (!isCurrentOpenGeneration(currentOpenGeneration)) {
             return
           }
           closedDuringOpen = true
@@ -102,9 +138,9 @@ export function startStructuredAgentSessionReadTransport(args: {
           reconnectScheduler.schedule()
         }
       )
-      if (!isCurrentGeneration(openGeneration) || closedDuringOpen) {
+      if (!isCurrentOpenGeneration(currentOpenGeneration) || closedDuringOpen) {
         handle.unsubscribe()
-        if (isCurrentGeneration(openGeneration)) {
+        if (isCurrentOpenGeneration(currentOpenGeneration)) {
           reconnectScheduler.schedule()
         }
       } else {
@@ -112,24 +148,24 @@ export function startStructuredAgentSessionReadTransport(args: {
         unsubscribe = handle.unsubscribe
       }
     } catch (error) {
-      if (!isCurrentGeneration(openGeneration)) {
+      if (!isCurrentOpenGeneration(currentOpenGeneration)) {
         return
       }
       connected = false
       args.applyError(String(error))
       reconnectScheduler.schedule()
     } finally {
-      if (openGeneration === generation) {
+      if (currentOpenGeneration === openGeneration) {
         opening = false
       }
     }
   }
   const refresh = (): void => {
-    const refreshGeneration = generation
+    const shouldStop = captureHistoryReadGuard()
     void args
-      .refreshTail(() => !isCurrentGeneration(refreshGeneration))
+      .refreshTail(shouldStop)
       .then(() => {
-        if (!isCurrentGeneration(refreshGeneration)) {
+        if (shouldStop()) {
           return
         }
         resumeCursor = args.getCursor()
@@ -138,31 +174,33 @@ export function startStructuredAgentSessionReadTransport(args: {
         }
       })
       .catch((error) => {
-        if (isCurrentGeneration(refreshGeneration)) {
+        if (!shouldStop()) {
           args.applyError(String(error))
         }
       })
   }
-  const initialGeneration = generation
+  const shouldStopInitialRead = captureHistoryReadGuard()
   void args
-    .refreshTail(() => !isCurrentGeneration(initialGeneration))
+    .refreshTail(shouldStopInitialRead)
     .then(() => {
-      if (!isCurrentGeneration(initialGeneration)) {
+      if (shouldStopInitialRead()) {
         return
       }
       resumeCursor = args.getCursor()
       return open()
     })
     .catch((error) => {
-      if (isCurrentGeneration(initialGeneration)) {
+      if (!shouldStopInitialRead()) {
         args.applyError(String(error))
         reconnectScheduler.schedule()
       }
     })
   return {
+    captureHistoryReadGuard,
     dispose: () => {
       stopped = true
-      generation += 1
+      openGeneration += 1
+      args.onHistoryReadInvalidated()
       reconnectScheduler.dispose()
       coalescer.dispose()
       unsubscribe()

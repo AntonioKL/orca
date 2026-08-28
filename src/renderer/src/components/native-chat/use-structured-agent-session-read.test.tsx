@@ -8,7 +8,8 @@ import type {
 } from '../../../../shared/agent-session-journal-types'
 import {
   AGENT_SESSION_HISTORY_MAX_LIMIT,
-  type AgentSessionHistoryPage
+  type AgentSessionHistoryPage,
+  type AgentSessionSubscribeEvent
 } from '../../../../shared/agent-session-wire'
 
 const mocks = vi.hoisted(() => ({ call: vi.fn(), subscribe: vi.fn() }))
@@ -57,14 +58,15 @@ function providerFrame(id: string, sequence: number): AgentJournalRenderItem {
 function page(
   direction: 'tail' | 'before',
   items: AgentJournalRenderItem[],
-  hasOlder: boolean
+  hasOlder: boolean,
+  epoch = 'epoch-a'
 ): AgentSessionHistoryPage {
-  const cursor = (sequence: number): AgentJournalCursor => ({ epoch: 'epoch-a', sequence })
+  const cursor = (sequence: number): AgentJournalCursor => ({ epoch, sequence })
   const oldest = items[0]?.sequence ?? 0
   const newest = items.at(-1)?.sequence ?? oldest
   return {
     sessionId: 'session-a',
-    epoch: 'epoch-a',
+    epoch,
     direction,
     items,
     removedItemIds: [],
@@ -254,6 +256,82 @@ describe('useStructuredAgentSessionRead history window', () => {
       hasFocus.mockRestore()
     }
   })
+
+  it.each(['snapshot', 'reset'] as const)(
+    'drops a delayed refresh after a same-stream %s advances the epoch',
+    async (eventType) => {
+      const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+      const delayedRefresh = Promise.withResolvers<{
+        ok: true
+        page: AgentSessionHistoryPage
+        providerSession: { key: 'session_id'; id: string }
+      }>()
+      const onEvents: ((event: AgentSessionSubscribeEvent) => void)[] = []
+      const initialProviderSession = { key: 'session_id', id: 'provider-initial' } as const
+      mocks.call
+        .mockResolvedValueOnce({
+          ok: true,
+          page: page('tail', [message('initial', 1, 'assistant')], false),
+          providerSession: initialProviderSession
+        })
+        .mockReturnValueOnce(delayedRefresh.promise)
+      mocks.subscribe.mockImplementation((_target, _params, onEvent) => {
+        onEvents.push(onEvent)
+        return Promise.resolve({ unsubscribe: vi.fn() })
+      })
+
+      const view = renderHook(() =>
+        useStructuredAgentSessionRead({ sessionId: 'session-a', target: LOCAL_TARGET })
+      )
+
+      try {
+        await waitFor(() => expect(onEvents).toHaveLength(1))
+        act(() => window.dispatchEvent(new Event('focus')))
+        await waitFor(() => expect(mocks.call).toHaveBeenCalledTimes(2))
+
+        const replacementPage = page(
+          'tail',
+          [message('new-epoch', 2, 'assistant')],
+          false,
+          'epoch-b'
+        )
+        const replacementEvent: AgentSessionSubscribeEvent =
+          eventType === 'reset'
+            ? {
+                type: 'reset',
+                sessionId: 'session-a',
+                reset: 'epoch_changed',
+                page: replacementPage,
+                fence: 2
+              }
+            : { type: 'snapshot', sessionId: 'session-a', page: replacementPage, fence: 2 }
+        act(() => onEvents[0]?.(replacementEvent))
+
+        expect(view.result.current.state.epoch).toBe('epoch-b')
+        expect(view.result.current.state.items[0]?.itemId).toBe('new-epoch')
+        expect(view.result.current.providerSession).toBe(initialProviderSession)
+        const stateAfterReplacement = view.result.current.state
+
+        await act(async () => {
+          delayedRefresh.resolve({
+            ok: true,
+            page: page('tail', [message('stale-refresh', 3, 'assistant')], false),
+            providerSession: { key: 'session_id', id: 'provider-stale' }
+          })
+          await delayedRefresh.promise
+          await Promise.resolve()
+        })
+
+        expect(view.result.current.state).toBe(stateAfterReplacement)
+        expect(view.result.current.state.epoch).toBe('epoch-b')
+        expect(view.result.current.state.items[0]?.itemId).toBe('new-epoch')
+        expect(view.result.current.providerSession).toBe(initialProviderSession)
+      } finally {
+        view.unmount()
+        hasFocus.mockRestore()
+      }
+    }
+  )
 
   it('does no host work for retained inactive sessions', async () => {
     const first = renderHook(() =>

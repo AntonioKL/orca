@@ -14,29 +14,72 @@ const KEY_DELIMITER = ':'
 export const MAX_JOURNAL_KEY_COMPONENT_CHARS = 1024
 
 /**
- * Deterministic stand-in for an oversized key component: same input, same
- * output, so revisions and tombstones of one identity still share a key, and
- * re-deriving from a parsed key is a fixed point (the bounded form is far
- * below the cap). The head keeps keys debuggable; length plus two independent
- * hashes makes an accidental collision practically impossible. Pure JS because
- * clients derive keys too and cannot reach node:crypto.
+ * Deterministic stand-in for an oversized or ill-formed key component: same
+ * input, same output, so revisions and tombstones of one identity still share
+ * a key, and re-deriving from a parsed key is a fixed point (the bounded form
+ * is well-formed and far below the cap). The head keeps keys debuggable;
+ * length plus two independent hashes makes an accidental collision practically
+ * impossible. Pure JS because clients derive keys too and cannot reach
+ * node:crypto.
+ *
+ * JSON strings are arbitrary UTF-16 code units, so a component can carry a
+ * lone surrogate that `encodeURIComponent` throws on. Those values take the
+ * digest form too: the hashes run over the raw code units, so a value and its
+ * replacement-character spelling keep distinct keys.
  */
 export function boundJournalKeyComponent(value: string): string {
-  if (value.length <= MAX_JOURNAL_KEY_COMPONENT_CHARS) {
+  if (value.length <= MAX_JOURNAL_KEY_COMPONENT_CHARS && !hasLoneSurrogate(value)) {
     return value
   }
   const h1 = fnv1a32(value, 0x811c9dc5).toString(16).padStart(8, '0')
   const h2 = fnv1a32(value, 0x0100_0193).toString(16).padStart(8, '0')
-  return `${codePointBoundedHead(value, 40)}~orca-oversized~${value.length}~${h1}${h2}`
+  return `${wellFormedBoundedHead(value, 40)}~orca-oversized~${value.length}~${h1}${h2}`
 }
 
-/** `slice` cuts UTF-16 code units, so a head ending mid-astral-character would
- *  carry a lone high surrogate and make `encodeURIComponent` throw on a valid
- *  id. Dropping that unit keeps the head valid Unicode and deterministic. */
-function codePointBoundedHead(value: string, maxUnits: number): string {
-  const head = value.slice(0, maxUnits)
-  const last = head.charCodeAt(head.length - 1)
-  return last >= 0xd800 && last <= 0xdbff ? head.slice(0, -1) : head
+/** The diagnostic head must be valid Unicode for `encodeURIComponent`: a pair
+ *  split by the cut is dropped and a lone surrogate becomes U+FFFD — the
+ *  hashes over the raw units keep the full key collision-safe regardless.
+ *  Digest forms are persisted, so for well-formed input the head must stay
+ *  byte-stable across builds or one identity would stop sharing a key. */
+function wellFormedBoundedHead(value: string, maxUnits: number): string {
+  let head = ''
+  let index = 0
+  while (index < value.length && index < maxUnits) {
+    const unit = value.charCodeAt(index)
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = index + 1 < value.length ? value.charCodeAt(index + 1) : 0
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        if (index + 1 >= maxUnits) {
+          break
+        }
+        head += value.charAt(index) + value.charAt(index + 1)
+        index += 2
+        continue
+      }
+      head += '�'
+      index += 1
+      continue
+    }
+    head += unit >= 0xdc00 && unit <= 0xdfff ? '�' : value.charAt(index)
+    index += 1
+  }
+  return head
+}
+
+function hasLoneSurrogate(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index)
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = index + 1 < value.length ? value.charCodeAt(index + 1) : 0
+      if (next < 0xdc00 || next > 0xdfff) {
+        return true
+      }
+      index += 1
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      return true
+    }
+  }
+  return false
 }
 
 function fnv1a32(value: string, seed: number): number {
@@ -97,7 +140,16 @@ export function agentJournalSubmissionKey(clientMessageId: string): string {
  * `encodeURIComponent` escapes the delimiter, so the split is unambiguous.
  */
 export function parseAgentJournalItemKey(key: string): AgentJournalItemIdentity | null {
-  const parts = key.split(KEY_DELIMITER).map((part) => decodeURIComponent(part))
+  // Persisted keys can be corrupted: a malformed percent sequence must fail
+  // the parse, never throw through journal replay or open.
+  const parts: string[] = []
+  for (const part of key.split(KEY_DELIMITER)) {
+    try {
+      parts.push(decodeURIComponent(part))
+    } catch {
+      return null
+    }
+  }
   const [provider, ...rest] = parts
   if (provider === 'codex' && rest.length === 3) {
     const ordinal = Number(rest[2])

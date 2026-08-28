@@ -69,6 +69,7 @@ describe('structured agent-session read transport generations', () => {
       applyEvent,
       applyError,
       getCursor: () => null,
+      onHistoryReadInvalidated: () => undefined,
       refreshTail: async () => undefined,
       sessionId: 'session-a',
       target

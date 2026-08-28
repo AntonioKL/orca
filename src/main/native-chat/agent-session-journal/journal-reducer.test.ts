@@ -407,3 +407,14 @@ describe('blob retention', () => {
     expect(referencedBlobDigests(state).size).toBe(0)
   })
 })
+
+describe('malformed persisted item keys', () => {
+  it('degrades a malformed-percent item id to an opaque key instead of throwing', () => {
+    // A user-message body drives identity resolution through the key parser;
+    // pre-fix `parseAgentJournalItemKey('%')` threw `URIError: URI malformed`.
+    const state = fold([
+      { kind: 'item', itemId: '%', revision: 1, body: userText('hi'), ...base(1) }
+    ])
+    expect(renderJournalState(state).items[0]?.itemId).toBe('%')
+  })
+})

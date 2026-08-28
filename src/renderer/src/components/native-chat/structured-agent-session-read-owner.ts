@@ -54,6 +54,8 @@ function createReadOwner(
   }
   let stopActiveRun: (() => void) | null = null
   let refreshActiveRun = (): void => {}
+  const retiredHistoryRead = (): boolean => true
+  let captureActiveHistoryReadGuard = (): (() => boolean) => retiredHistoryRead
   const activations = new Set<symbol>()
   const listeners = new Set<() => void>()
 
@@ -80,6 +82,11 @@ function createReadOwner(
       setSnapshot({ ...snapshot, providerSession })
     }
   }
+  const clearLoadingOlder = (): void => {
+    if (snapshot.loadingOlder) {
+      setSnapshot({ ...snapshot, loadingOlder: false })
+    }
+  }
   const refreshTail = async (shouldStop: () => boolean): Promise<void> => {
     const result = await callStructuredAgentSession<AgentSessionHistoryResult>(
       target,
@@ -91,6 +98,9 @@ function createReadOwner(
     }
     setProviderSession(result.providerSession)
     if (!result.ok) {
+      if (shouldStop()) {
+        return
+      }
       apply({
         type: 'event',
         event: {
@@ -103,7 +113,13 @@ function createReadOwner(
       })
       return
     }
+    if (shouldStop()) {
+      return
+    }
     apply({ type: 'tail-page', page: result.page })
+    if (shouldStop()) {
+      return
+    }
     let restored = snapshot.state.items.filter(countsTowardInitialHistory).length
     while (snapshot.state.hasOlder && restored < NATIVE_CHAT_INITIAL_LIMIT) {
       const oldest = oldestStructuredAgentSessionCursor(snapshot.state)
@@ -127,7 +143,13 @@ function createReadOwner(
       if (!older.ok || older.page.window.oldest?.sequence === oldest.sequence) {
         break
       }
+      if (shouldStop()) {
+        return
+      }
       apply({ type: 'older-page', requestedEpoch: oldest.epoch, page: older.page })
+      if (shouldStop()) {
+        return
+      }
       restored = snapshot.state.items.filter(countsTowardInitialHistory).length
     }
   }
@@ -140,12 +162,15 @@ function createReadOwner(
       applyEvent: (event) => apply({ type: 'event', event }),
       applyError: (message) => apply({ type: 'error', message }),
       getCursor: () => snapshot.state.cursor,
+      onHistoryReadInvalidated: clearLoadingOlder,
       refreshTail,
       sessionId,
       target
     })
+    captureActiveHistoryReadGuard = transport.captureHistoryReadGuard
     refreshActiveRun = transport.refresh
     stopActiveRun = () => {
+      captureActiveHistoryReadGuard = () => retiredHistoryRead
       refreshActiveRun = (): void => {}
       transport.dispose()
       stopActiveRun = null
@@ -180,8 +205,15 @@ function createReadOwner(
     },
     getSnapshot: () => snapshot,
     loadOlder: async () => {
+      const shouldStop = captureActiveHistoryReadGuard()
+      if (shouldStop()) {
+        return
+      }
       const cursor = oldestStructuredAgentSessionCursor(snapshot.state)
       if (!cursor || !snapshot.state.hasOlder || snapshot.loadingOlder) {
+        return
+      }
+      if (shouldStop()) {
         return
       }
       setSnapshot({ ...snapshot, loadingOlder: true })
@@ -191,13 +223,20 @@ function createReadOwner(
           'agentSession.history',
           { sessionId, direction: 'before', cursor, limit: AGENT_SESSION_HISTORY_MAX_LIMIT }
         )
-        if (result.ok) {
+        if (shouldStop()) {
+          return
+        }
+        if (result.ok && !shouldStop()) {
           apply({ type: 'older-page', requestedEpoch: cursor.epoch, page: result.page })
         }
       } catch (error) {
-        apply({ type: 'error', message: String(error) })
+        if (!shouldStop()) {
+          apply({ type: 'error', message: String(error) })
+        }
       } finally {
-        setSnapshot({ ...snapshot, loadingOlder: false })
+        if (!shouldStop()) {
+          clearLoadingOlder()
+        }
       }
     },
     refresh: () => refreshActiveRun(),

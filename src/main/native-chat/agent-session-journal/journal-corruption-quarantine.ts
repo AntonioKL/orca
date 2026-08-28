@@ -2,10 +2,12 @@
 // keeps its intact prefix live and moves the unreadable remainder aside, so the
 // bytes stay on disk for inspection instead of being rebuilt into an empty epoch.
 
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import {
+  JOURNAL_SNAPSHOT_FILE,
   quarantineJournalRemainder,
   readJournalLog,
-  readJournalSnapshotFile,
   rewriteJournalLog
 } from './journal-log-file'
 import type { JournalRow } from './journal-row-schema'
@@ -23,12 +25,14 @@ export async function quarantineCorruptSuffix(
 }
 
 /** Copy everything aside before a read-only journal is rebuilt under a newer
- *  schema: those rows are unreadable to THIS build, not worthless. */
+ *  schema: those rows are unreadable to THIS build, not worthless. The
+ *  snapshot is preserved as raw bytes — a future-version snapshot does not
+ *  parse under this build's schema, and its bytes must survive verbatim. */
 export async function quarantineUnreadableSchema(journalDir: string): Promise<void> {
-  const snapshot = await readJournalSnapshotFile(journalDir)
+  const snapshot = await readSnapshotBytes(journalDir)
   const log = await readJournalLog(journalDir)
   const preserved = [
-    snapshot ? JSON.stringify(snapshot) : '',
+    snapshot ?? '',
     log.rows.map((row) => JSON.stringify(row)).join('\n'),
     log.remainder ?? ''
   ]
@@ -36,6 +40,17 @@ export async function quarantineUnreadableSchema(journalDir: string): Promise<vo
     .join('\n')
   if (preserved) {
     await quarantineJournalRemainder(journalDir, preserved)
+  }
+}
+
+async function readSnapshotBytes(journalDir: string): Promise<string | null> {
+  try {
+    return await readFile(join(journalDir, JOURNAL_SNAPSHOT_FILE), 'utf-8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null
+    }
+    throw error
   }
 }
 

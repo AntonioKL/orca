@@ -12,9 +12,10 @@ import { appendFile, mkdir, open, readFile, type FileHandle } from 'node:fs/prom
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { durableWriteTempPath, renameDurable, writeFileDurable } from '../../durable-file-write'
-import type {
-  AgentJournalRenderItem,
-  AgentJournalSubmission
+import {
+  AGENT_SESSION_JOURNAL_SCHEMA_VERSION,
+  type AgentJournalRenderItem,
+  type AgentJournalSubmission
 } from '../../../shared/agent-session-journal-types'
 import {
   isAdmissibleAgentJournalRenderItem,
@@ -68,6 +69,9 @@ export type JournalSnapshotReadResult =
   | { status: 'missing' }
   | { status: 'valid'; snapshot: JournalSnapshotFile }
   | { status: 'invalid' }
+  /** A future schema version: unreadable by this build, not corrupt. The file
+   *  stays authoritative in place and the caller degrades to read-only. */
+  | { status: 'unreadable' }
 
 const NEWLINE_BYTE = 0x0a
 
@@ -75,17 +79,20 @@ export async function ensureJournalDir(journalDir: string): Promise<void> {
   await mkdir(journalDir, { recursive: true })
 }
 
-export async function readJournalSnapshotFile(
-  journalDir: string
-): Promise<JournalSnapshotFile | null> {
-  const result = await readJournalSnapshot(journalDir)
-  return result.status === 'valid' ? result.snapshot : null
-}
-
 export async function readJournalSnapshot(journalDir: string): Promise<JournalSnapshotReadResult> {
   try {
     const raw = await readFile(join(journalDir, JOURNAL_SNAPSHOT_FILE), 'utf-8')
     const parsed: unknown = JSON.parse(raw)
+    const version = snapshotSchemaVersion(parsed)
+    if (version === null) {
+      return { status: 'invalid' }
+    }
+    // Version is classified BEFORE shape validation, matching row admission: a
+    // version only advances because bodies changed, so a valid newer snapshot
+    // carries kinds this build cannot parse — unreadable, never corruption.
+    if (version > AGENT_SESSION_JOURNAL_SCHEMA_VERSION) {
+      return { status: 'unreadable' }
+    }
     return isJournalSnapshotFile(parsed)
       ? { status: 'valid', snapshot: parsed }
       : { status: 'invalid' }
@@ -149,6 +156,14 @@ export async function readJournalLog(journalDir: string): Promise<JournalReadRes
     return { rows, unreadable, malformed, remainder: raw.slice(offset), hasBytes: raw.length > 0 }
   }
   return { rows, unreadable, malformed, hasBytes: raw.length > 0 }
+}
+
+/** Row admission requires an integer version of at least 1; a snapshot whose
+ *  version cannot even be read is malformed, not a schema statement. */
+function snapshotSchemaVersion(value: unknown): number | null {
+  const snapshot = recordOf(value)
+  const version = snapshot?.v
+  return typeof version === 'number' && Number.isInteger(version) && version >= 1 ? version : null
 }
 
 function isJournalSnapshotFile(value: unknown): value is JournalSnapshotFile {

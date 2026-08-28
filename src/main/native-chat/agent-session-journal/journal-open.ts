@@ -14,7 +14,6 @@ import {
   readJournalSnapshot,
   type JournalSnapshotFile
 } from './journal-log-file'
-import { AGENT_SESSION_JOURNAL_SCHEMA_VERSION } from '../../../shared/agent-session-journal-types'
 import {
   applyJournalRow,
   createJournalReducerState,
@@ -46,6 +45,13 @@ export async function loadJournal(
   sessionId: string
 ): Promise<JournalLoad | null> {
   const snapshotRead = await readJournalSnapshot(journalDir)
+  if (snapshotRead.status === 'unreadable') {
+    // Written by a newer schema: not corrupt, so never quarantined. The file
+    // stays authoritative in place, and this build must not write, compact,
+    // delete, or render a partial timeline from rows it cannot anchor to the
+    // snapshot it cannot read.
+    return emptyReadOnlyLoad(sessionId)
+  }
   if (snapshotRead.status === 'invalid') {
     await quarantineInvalidJournalSnapshot(journalDir)
   }
@@ -94,7 +100,9 @@ export async function loadJournal(
     state,
     tailRows,
     compactedThrough,
-    readOnly: log.unreadable || (snapshot?.v ?? 0) > AGENT_SESSION_JOURNAL_SCHEMA_VERSION,
+    // A future-version snapshot never reaches here: it is classified
+    // unreadable above, so `valid` implies a version this build can write.
+    readOnly: log.unreadable,
     corrupt,
     malformedRows: log.malformed,
     sizeBytes: tailRows.reduce((total, row) => total + journalRowByteLength(row), 0),
