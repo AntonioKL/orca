@@ -2352,7 +2352,8 @@ void app.whenReady().then(async () => {
   // and must not gate the first window (STA-5765).
   scheduleSecretProtectionGapReport({
     dataFile: activeOrcaProfile.dataFile,
-    force: process.env.ORCA_ALWAYS_REPORT_SECRET_PROTECTION === '1'
+    force: process.env.ORCA_ALWAYS_REPORT_SECRET_PROTECTION === '1',
+    deferUntilFirstWindow: !isServeMode
   })
   // Why here: the host key store is a sidecar of the same profile, and every SSH connect consults
   // it. Left unbound it reports nothing trusted, which is safe but silently discards our own

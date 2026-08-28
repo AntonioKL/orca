@@ -19,11 +19,27 @@ import { reportSecretProtectionGap } from './secret-protection-report'
 // serve has no window to wait on.
 const REPORT_FALLBACK_MS = 15_000
 
-export function scheduleSecretProtectionGapReport(options: {
+export function scheduleSecretProtectionGapReport({
+  deferUntilFirstWindow,
+  ...options
+}: {
   dataFile: string
   force?: boolean
   log?: (message: string) => void
+  /**
+   * Why headless serve reports inline instead: it never opens a window, so the fallback
+   * timer is the only path — and by then the runtime has been advertised as ready and
+   * clients may have paired. Freezing the main thread under a live client stalls pings
+   * and PTY pumps, which reads as a dead host. Blocking before anything is advertised is
+   * the timing serve already had, and the safer of the two.
+   */
+  deferUntilFirstWindow: boolean
 }): void {
+  if (!deferUntilFirstWindow) {
+    reportSecretProtectionGap(options)
+    return
+  }
+
   let ran = false
   const run = (): void => {
     if (ran) {

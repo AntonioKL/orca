@@ -73,7 +73,11 @@ describe('scheduleSecretProtectionGapReport', () => {
   })
 
   const schedule = (): void =>
-    scheduleSecretProtectionGapReport({ dataFile, log: (m) => void logged.push(m) })
+    scheduleSecretProtectionGapReport({
+      dataFile,
+      log: (m) => void logged.push(m),
+      deferUntilFirstWindow: true
+    })
 
   /** Runs an already-queued setImmediate; the 1ms is slack, not a delay under test. */
   const drain = (): void => void vi.advanceTimersByTime(1)
@@ -124,6 +128,29 @@ describe('scheduleSecretProtectionGapReport', () => {
     window.reveal()
     vi.runAllTimers()
     vi.advanceTimersByTime(60_000)
+    vi.runAllTimers()
+    expect(probes).toBe(1)
+  })
+
+  it('reports inline in headless serve, before the runtime is advertised as ready', () => {
+    // Why not deferred: serve opens no window, so the fallback would fire only after
+    // clients could already have paired, and a frozen main thread reads as a dead host.
+    scheduleSecretProtectionGapReport({
+      dataFile,
+      log: (m) => void logged.push(m),
+      deferUntilFirstWindow: false
+    })
+    expect(probes).toBe(1)
+    expect(logged).toEqual(['[secrets] The OS keyring is unavailable.'])
+  })
+
+  it('leaves no timer armed in headless serve', () => {
+    scheduleSecretProtectionGapReport({
+      dataFile,
+      log: (m) => void logged.push(m),
+      deferUntilFirstWindow: false
+    })
+    expect(vi.getTimerCount()).toBe(0)
     vi.runAllTimers()
     expect(probes).toBe(1)
   })
