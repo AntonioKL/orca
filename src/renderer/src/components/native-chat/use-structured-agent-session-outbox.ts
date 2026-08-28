@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { AgentJournalSubmission } from '../../../../shared/agent-session-journal-types'
 import type {
   AgentSessionMutationResult,
@@ -93,10 +93,13 @@ export function useStructuredAgentSessionOutbox(args: {
     outboxRef.current = outbox
   }, [outbox])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     dispatchGenerationRef.current += 1
     dispatchingRef.current = false
     blockedIdRef.current = null
+  }, [fence, sessionId, target])
+
+  useEffect(() => {
     const sessionChanged = outboxSessionRef.current !== sessionId
     outboxSessionRef.current = sessionId
     const current = sessionChanged ? readOutbox(sessionId) : outboxRef.current

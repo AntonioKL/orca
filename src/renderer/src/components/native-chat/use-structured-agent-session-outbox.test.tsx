@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 
 import { act, renderHook, waitFor } from '@testing-library/react'
+import { useLayoutEffect } from 'react'
+import { createRoot } from 'react-dom/client'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentJournalSubmission } from '../../../../shared/agent-session-journal-types'
 import type { AgentSessionWireRefusalCode } from '../../../../shared/agent-session-wire'
@@ -377,29 +379,50 @@ describe('useStructuredAgentSessionOutbox', () => {
     })
   })
 
-  it('drops a session error on switch and does not resurrect it on return', async () => {
-    const redispatch = deferred<ReturnType<typeof acceptedResult>>()
-    mocks.call
-      .mockResolvedValueOnce(refusedResult('agent_session_checkpoint_stale'))
-      .mockReturnValueOnce(redispatch.promise)
-    const { result, rerender } = renderHook(
-      ({ sessionId }: { sessionId: string }) =>
-        useStructuredAgentSessionOutbox({
-          sessionId,
-          target: LOCAL_TARGET,
-          fence: 1,
-          submissions: []
-        }),
-      { initialProps: { sessionId: 'session-1' } }
-    )
+  it('invalidates an old dispatch before it settles during a session switch', async () => {
+    const oldDispatch = deferred<ReturnType<typeof refusedResult>>()
+    const sessionTwoCommitted = deferred<void>()
+    mocks.call.mockReturnValueOnce(oldDispatch.promise)
+    const controllerRef: {
+      current: ReturnType<typeof useStructuredAgentSessionOutbox> | null
+    } = { current: null }
+    function Probe({ sessionId }: { sessionId: string }): null {
+      controllerRef.current = useStructuredAgentSessionOutbox({
+        sessionId,
+        target: LOCAL_TARGET,
+        fence: 1,
+        submissions: []
+      })
+      useLayoutEffect(() => {
+        if (sessionId === 'session-2') {
+          oldDispatch.resolve(refusedResult('agent_session_checkpoint_stale'))
+          sessionTwoCommitted.resolve()
+        }
+      }, [sessionId])
+      return null
+    }
 
-    act(() => expect(result.current.send('hello')).toBe(true))
-    await waitFor(() => expect(result.current.error).toBe('agent_session_checkpoint_stale'))
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    const actEnvironment = globalThis.IS_REACT_ACT_ENVIRONMENT
+    try {
+      await act(async () => root.render(<Probe sessionId="session-1" />))
+      act(() => expect(controllerRef.current?.send('hello')).toBe(true))
+      await waitFor(() => expect(mocks.call).toHaveBeenCalledTimes(1))
+      const oldSettlementProcessed = oldDispatch.promise.then(() => undefined)
 
-    rerender({ sessionId: 'session-2' })
-    expect(result.current.error).toBeNull()
+      globalThis.IS_REACT_ACT_ENVIRONMENT = false
+      root.render(<Probe sessionId="session-2" />)
+      await sessionTwoCommitted.promise
+      globalThis.IS_REACT_ACT_ENVIRONMENT = actEnvironment
+      await act(async () => oldSettlementProcessed)
 
-    rerender({ sessionId: 'session-1' })
-    expect(result.current.error).toBeNull()
+      expect(controllerRef.current?.error).toBeNull()
+      await act(async () => root.render(<Probe sessionId="session-1" />))
+      expect(controllerRef.current?.error).toBeNull()
+    } finally {
+      globalThis.IS_REACT_ACT_ENVIRONMENT = actEnvironment
+      await act(async () => root.unmount())
+    }
   })
 })
