@@ -222,8 +222,23 @@ import {
   type TerminalPasteSource,
   type TerminalPasteTextOptions
 } from './terminal-paste-coordinator'
+import {
+  createDeferredPasteFocusInHandler,
+  createDeferredTerminalPasteQueue,
+  isDeferrablePasteFocusCancellation,
+  isFocusInsideOtherPane,
+  type DeferredTerminalPasteQueue
+} from './terminal-deferred-paste'
 import { appendTerminalErrorMessage } from './terminal-error-accumulation'
-import { formatTerminalPasteExecutionError } from './terminal-paste-errors'
+import {
+  installInertFocusPasteFallback,
+  restoreInertFocusPasteTarget
+} from './terminal-inert-focus-paste-fallback'
+import {
+  formatDeferredTerminalPasteDroppedError,
+  formatTerminalPasteExecutionError,
+  TERMINAL_CLIPBOARD_READ_UNAVAILABLE_MESSAGE
+} from './terminal-paste-errors'
 import { resolveTerminalPasteRuntime } from './terminal-paste-runtime'
 import { getTerminalPasteSshRemotePlatform } from './terminal-paste-ssh-platform'
 import {
@@ -402,6 +417,15 @@ function TerminalPane(
   const [agentSessionContinuation, setAgentSessionContinuation] =
     useState<AgentSessionContinuationRequest | null>(null)
   const [terminalError, setTerminalError] = useState<string | null>(null)
+  // Why: outlives the paste effect so a keybinding change mid-deferral does not
+  // silently drop the payload; only unmount does.
+  const deferredPasteRef = useRef<DeferredTerminalPasteQueue | null>(null)
+  useEffect(() => {
+    return () => {
+      deferredPasteRef.current?.dispose()
+      deferredPasteRef.current = null
+    }
+  }, [])
   const [paneProcessExitsByPaneId, setPaneProcessExitsByPaneId] = useState<
     Record<number, PaneProcessExit>
   >({})
@@ -1949,12 +1973,25 @@ function TerminalPane(
       })
     }
 
+    const getDeferredPasteQueue = (): DeferredTerminalPasteQueue => {
+      if (!deferredPasteRef.current) {
+        deferredPasteRef.current = createDeferredTerminalPasteQueue({
+          onExpire: () =>
+            setTerminalError(formatDeferredTerminalPasteDroppedError(shortcutPlatform))
+        })
+      }
+      return deferredPasteRef.current
+    }
+
     const executePanePasteText = async (
       pane: ManagedPane,
       source: TerminalPasteSource,
       activeElementAtDispatch: Element | null,
       text: string,
-      options?: TerminalPasteTextOptions
+      options?: TerminalPasteTextOptions,
+      // Why: a redelivered paste never re-defers, so a pane that keeps refusing
+      // focus cannot loop the payload past its deadline.
+      allowDeferOnFocusLoss = true
     ): Promise<void> => {
       const connectionId = getConnectionId(worktreeId) ?? null
       const transport = paneTransportsRef.current.get(pane.id)
@@ -2000,6 +2037,28 @@ function TerminalPane(
         canContinue: () => isPanePasteTargetMounted(pane, transport, ptyId)
       })
       if (execution.status !== 'pasted') {
+        if (
+          allowDeferOnFocusLoss &&
+          isDeferrablePasteFocusCancellation({
+            status: execution.status,
+            reason: execution.reason,
+            targetMounted: isPanePasteTargetMounted(pane, transport, ptyId),
+            focusMovedToOtherPane: isFocusInsideOtherPane({
+              panes: managerRef.current?.getPanes() ?? [],
+              paneId: pane.id,
+              focusedElement: document.activeElement
+            })
+          })
+        ) {
+          getDeferredPasteQueue().defer({
+            paneId: pane.id,
+            leafId: pane.leafId,
+            source,
+            text,
+            options
+          })
+          return
+        }
         setTerminalError(formatTerminalPasteExecutionError(execution.reason))
         return
       }
@@ -2055,7 +2114,9 @@ function TerminalPane(
           executePanePasteText(pane, source, activeElementAtDispatch, text, options),
         onTextPasteError: () =>
           setTerminalError('Paste failed: clipboard text is too large for a safe terminal paste.'),
-        onImagePasteError: (error) => setTerminalError(formatClipboardImagePasteError(error))
+        onImagePasteError: (error) => setTerminalError(formatClipboardImagePasteError(error)),
+        onClipboardReadUnavailable: () =>
+          setTerminalError(TERMINAL_CLIPBOARD_READ_UNAVAILABLE_MESSAGE)
       }).catch(() => {
         setTerminalError('Paste failed.')
       })
@@ -2071,7 +2132,19 @@ function TerminalPane(
         (!isMac && e.key === 'Insert' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey)
       )
     }
-    const onKeyPaste = (e: KeyboardEvent): void => {
+    // Why: focus sits on <body> after a dictation/IME/overlay handoff, so the pane's
+    // own dispatch-element guard would read this paste as aimed somewhere else.
+    // Put focus back on the pane that still owns it before the shared path runs.
+    const restoreInertPaneFocus = (): ManagedPane | null => {
+      const pane = managerRef.current?.getActivePane() ?? managerRef.current?.getPanes()[0] ?? null
+      if (!pane) {
+        return null
+      }
+      restoreInertFocusPasteTarget(pane, document.activeElement)
+      return pane
+    }
+
+    const onKeyPaste = (e: KeyboardEvent, recoveredFromInertFocus = false): void => {
       const target = e.target
       if (
         (target instanceof Element && target.closest('[data-terminal-search-root]')) ||
@@ -2098,6 +2171,9 @@ function TerminalPane(
             suppressNextNativePaste = false
           }, 0)
         }
+        return
+      }
+      if (recoveredFromInertFocus && !restoreInertPaneFocus()) {
         return
       }
       if (isClipboardEventPasteRequired() && firesNativePasteEvent(e, isMac)) {
@@ -2129,7 +2205,7 @@ function TerminalPane(
     }
 
     // Fallback: paste events from non-keyboard sources (Edit > Paste menu, programmatic paste, etc.).
-    const onPaste = (e: ClipboardEvent): void => {
+    const onPaste = (e: ClipboardEvent, recoveredFromInertFocus = false): void => {
       const target = e.target
       if (
         (target instanceof Element && target.closest('[data-terminal-search-root]')) ||
@@ -2149,6 +2225,9 @@ function TerminalPane(
       }
       e.preventDefault()
       e.stopPropagation()
+      if (recoveredFromInertFocus && !restoreInertPaneFocus()) {
+        return
+      }
       const manager = managerRef.current
       if (!manager) {
         return
@@ -2202,7 +2281,9 @@ function TerminalPane(
           executePanePasteText(pane, 'app-menu', activeElementAtDispatch, text, options),
         onTextPasteError: () =>
           setTerminalError('Paste failed: clipboard text is too large for a safe terminal paste.'),
-        onImagePasteError: (error) => setTerminalError(formatClipboardImagePasteError(error))
+        onImagePasteError: (error) => setTerminalError(formatClipboardImagePasteError(error)),
+        onClipboardReadUnavailable: () =>
+          setTerminalError(TERMINAL_CLIPBOARD_READ_UNAVAILABLE_MESSAGE)
       }).catch(() => {
         setTerminalError('Paste failed.')
       })
@@ -2242,8 +2323,32 @@ function TerminalPane(
       }
     }
 
+    // A deferred payload lands the moment its own pane has focus again; focus
+    // reaching a different pane is the wrong-target case the guard exists for.
+    const onDeferredPasteFocusIn = createDeferredPasteFocusInHandler<ManagedPane>({
+      queue: getDeferredPasteQueue(),
+      getPanes: () => managerRef.current?.getPanes() ?? [],
+      getFocusedElement: () => document.activeElement,
+      deliver: (pane, deferred) =>
+        void executePanePasteText(
+          pane,
+          deferred.source,
+          document.activeElement,
+          deferred.text,
+          deferred.options,
+          false
+        ),
+      onDropped: () => setTerminalError(formatDeferredTerminalPasteDroppedError(shortcutPlatform))
+    })
+
     container.addEventListener('keydown', onKeyPaste, { capture: true })
     container.addEventListener('paste', onPaste, { capture: true })
+    container.addEventListener('focusin', onDeferredPasteFocusIn)
+    const inertFocusPasteFallback = installInertFocusPasteFallback({
+      container,
+      onPasteKey: (event) => onKeyPaste(event, true),
+      onPasteEvent: (event) => onPaste(event, true)
+    })
     window.addEventListener(APP_MENU_PASTE_EVENT, onAppMenuPaste)
     window.addEventListener(APP_MENU_SELECTION_ACTION_EVENT, onAppMenuSelectionAction)
     return () => {
@@ -2252,6 +2357,8 @@ function TerminalPane(
       }
       container.removeEventListener('keydown', onKeyPaste, { capture: true })
       container.removeEventListener('paste', onPaste, { capture: true })
+      container.removeEventListener('focusin', onDeferredPasteFocusIn)
+      inertFocusPasteFallback.dispose()
       window.removeEventListener(APP_MENU_PASTE_EVENT, onAppMenuPaste)
       window.removeEventListener(APP_MENU_SELECTION_ACTION_EVENT, onAppMenuSelectionAction)
     }

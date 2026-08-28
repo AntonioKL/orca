@@ -1,4 +1,8 @@
+import { getShortcutPlatform } from '@/lib/shortcut-platform'
 import type { TerminalPasteExecutionReason } from './terminal-paste-model'
+
+export const TERMINAL_CLIPBOARD_READ_UNAVAILABLE_MESSAGE =
+  'Paste failed: could not read the clipboard. Copy again, then retry.'
 
 export function formatTerminalPasteExecutionError(
   reason: TerminalPasteExecutionReason | undefined
@@ -19,4 +23,13 @@ export function formatTerminalPasteExecutionError(
     return 'Paste cancelled: terminal did not accept paste before the safety timeout.'
   }
   return 'Paste failed.'
+}
+
+/** The payload is gone by the time this shows, so the copy has to tell the user
+ *  what to do next rather than only what went wrong. */
+export function formatDeferredTerminalPasteDroppedError(
+  platform: NodeJS.Platform = getShortcutPlatform()
+): string {
+  const shortcut = platform === 'darwin' ? '⌘V' : 'Ctrl+V'
+  return `Paste cancelled: terminal focus did not return in time. Click the terminal and press ${shortcut} to paste again.`
 }
