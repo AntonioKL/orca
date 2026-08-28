@@ -38,14 +38,14 @@ describe('checks panel concrete content', () => {
   })
 
   it('renders a durable unlinked state that can relink before PR data refetches', () => {
-    const handleLinkSuppressedPullRequest = vi.fn()
+    const handleLinkSuppressedPullRequest = vi.fn<() => void>()
     const model = {
       activeReview: null,
       activeWorktree: { id: 'worktree-1' },
       isFolder: false,
       linkedReviewNumber: null,
-      suppressedGitHubPR: 42,
-      handleLinkSuppressedPullRequest
+      suppressedGitHubPR: 42 as number | null,
+      handleLinkSuppressedPullRequest: handleLinkSuppressedPullRequest as () => void
     } as ChecksPanelEmptyContentModel
 
     render(<ChecksPanelEmptyContent model={model} />)
