@@ -91,8 +91,8 @@ import {
 import {
   applyAgentStatusHooksEnabled,
   isAgentStatusHooksEnabled,
-  removeManagedAgentHooks,
   removeManagedAgentHooksAsync,
+  resolveStartupManagedHookAction,
   shouldContinueManagedHookStartup
 } from './agent-hooks/managed-agent-hook-controls'
 import { initCohortClassifier } from './telemetry/cohort-classifier'
@@ -3097,29 +3097,28 @@ void app.whenReady().then(async () => {
         console.warn('[codex-real-home-hooks] startup ensure failed:', error)
       })
     : Promise.resolve()
-  if (shouldInstallManagedHooks(is.dev)) {
-    // Why: check the persisted off switch before any auto-install so removed hooks don't silently reappear on launch.
-    if (isAgentStatusHooksEnabled(store.getSettings())) {
-      const managedHookStore = store
-      void realHomeCodexHookState
-        .then(() =>
-          applyAgentStatusHooksEnabled(true, managedHookStore.getSettings(), {
-            shouldHydrateShellPath: app.isPackaged,
-            onInstallError: recordManagedHookInstallFailure,
-            shouldContinue: (agent) => {
-              const settings = managedHookStore.getSettings()
-              return shouldContinueManagedHookStartup(isQuitting, settings, agent)
-            }
-          })
-        )
-        .catch((error: unknown) => {
-          console.warn('[agent-hooks] failed to reconcile managed hooks on startup:', error)
+  // Why skip rather than remove when the off switch is set: the hook files are user-global but this
+  // decision reads only THIS profile's settings, so removing here deletes the hooks every other Orca
+  // instance depends on (STA-5679). Skipping already keeps removed hooks from reappearing on launch.
+  if (
+    shouldInstallManagedHooks(is.dev) &&
+    resolveStartupManagedHookAction(store.getSettings()) === 'install'
+  ) {
+    const managedHookStore = store
+    void realHomeCodexHookState
+      .then(() =>
+        applyAgentStatusHooksEnabled(true, managedHookStore.getSettings(), {
+          shouldHydrateShellPath: app.isPackaged,
+          onInstallError: recordManagedHookInstallFailure,
+          shouldContinue: (agent) => {
+            const settings = managedHookStore.getSettings()
+            return shouldContinueManagedHookStartup(isQuitting, settings, agent)
+          }
         })
-    } else {
-      void removeManagedAgentHooks().catch((error: unknown) => {
-        console.warn('[agent-hooks] failed to remove managed hooks on startup:', error)
+      )
+      .catch((error: unknown) => {
+        console.warn('[agent-hooks] failed to reconcile managed hooks on startup:', error)
       })
-    }
   }
   // Why: process-gone metrics only see survivors; retain a recent whole-app
   // snapshot for comparison in crash reports.
