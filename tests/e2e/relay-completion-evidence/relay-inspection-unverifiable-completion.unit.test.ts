@@ -2,28 +2,42 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Mock } from 'vitest'
 import * as ptyProcessProbes from '../../../src/relay/pty-process-probes'
 
-const { execFileMock, execFileSyncMock, mockPtySpawn, mockPtyInstance, mockReadinessProbe } =
-  vi.hoisted(() => ({
-    execFileMock: vi.fn(),
-    execFileSyncMock: vi.fn(),
-    mockPtySpawn: vi.fn(),
-    mockReadinessProbe: vi.fn(),
-    mockPtyInstance: {
-      pid: process.pid,
-      onData: vi.fn(),
-      onExit: vi.fn(),
-      write: vi.fn(),
-      resize: vi.fn(),
-      kill: vi.fn(),
-      clear: vi.fn(),
-      pause: vi.fn(),
-      resume: vi.fn()
-    }
-  }))
+const {
+  execFileMock,
+  execFileSyncMock,
+  runProcessMock,
+  mockPtySpawn,
+  mockPtyInstance,
+  mockReadinessProbe
+} = vi.hoisted(() => ({
+  execFileMock: vi.fn(),
+  execFileSyncMock: vi.fn(),
+  runProcessMock: vi.fn(),
+  mockPtySpawn: vi.fn(),
+  mockReadinessProbe: vi.fn(),
+  mockPtyInstance: {
+    pid: process.pid,
+    onData: vi.fn(),
+    onExit: vi.fn(),
+    write: vi.fn(),
+    resize: vi.fn(),
+    kill: vi.fn(),
+    clear: vi.fn(),
+    pause: vi.fn(),
+    resume: vi.fn()
+  }
+}))
 
+// The process-table snapshot (`ps -axo`) reads through execFile; the
+// pgrep/ps probes go through the runProcess chokepoint.
 vi.mock('child_process', () => ({
   execFile: execFileMock,
   execFileSync: execFileSyncMock
+}))
+
+vi.mock('../../../src/shared/child-process/run-process', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  runProcess: runProcessMock
 }))
 
 vi.mock('node-pty', () => ({
@@ -72,7 +86,7 @@ describe('relay inspection under probe failure', () => {
   const { spawnPty } = createPtyRequestHelpers(() => dispatcher)
 
   // Timeout-killed subprocess: what execFile yields when the host is too
-  // loaded to answer `ps`/`pgrep` inside the 3s probe deadline.
+  // loaded to answer the `ps -axo` table read inside the probe deadline.
   function timeoutKilledError(command: string): Error {
     const error = new Error(`spawn ${command} ETIMEDOUT`) as Error & {
       killed: boolean
@@ -109,19 +123,31 @@ describe('relay inspection under probe failure', () => {
           })
           return
         }
-        if (command === 'pgrep') {
-          callback(null, { stdout: '99999\n', stderr: '' })
-          return
-        }
         callback(new Error(`unexpected command ${command}`), { stdout: '', stderr: '' })
       }
     )
   }
 
+  // The pgrep/ps probes reach the host through runProcess, which resolves
+  // exit status as data and reports a probe deadline as `timedOut`.
+  function installRunProcess(): void {
+    runProcessMock.mockImplementation(async (spec: { program: string }) => {
+      if (execBehavior === 'probe-failure') {
+        return { code: null, signal: 'SIGTERM', stdout: '', stderr: '', timedOut: true }
+      }
+      if (spec.program === 'pgrep') {
+        return { code: 0, signal: null, stdout: '99999\n', stderr: '', timedOut: false }
+      }
+      throw new Error(`unexpected command ${spec.program}`)
+    })
+  }
+
   beforeEach(() => {
     execBehavior = 'healthy'
     execFileMock.mockReset()
+    runProcessMock.mockReset()
     installExecFile()
+    installRunProcess()
     resetProcessTableSnapshotForTests()
     ;({ dispatcher, handler, originalPlatform } = beginPtyHandlerTest({
       mockPtySpawn,
@@ -248,17 +274,16 @@ describe('relay inspection under probe failure', () => {
           callback(null, { stdout: `${process.pid} 1 Ss+  bash -l`, stderr: '' })
           return
         }
-        if (command === 'pgrep') {
-          // pgrep ran and matched nothing: exits 1 with empty output.
-          const noMatch = new Error('pgrep exited 1') as Error & { code: number; killed: boolean }
-          noMatch.code = 1
-          noMatch.killed = false
-          callback(noMatch, { stdout: '', stderr: '' })
-          return
-        }
         callback(new Error(`unexpected command ${command}`), { stdout: '', stderr: '' })
       }
     )
+    runProcessMock.mockImplementation(async (spec: { program: string }) => {
+      if (spec.program === 'pgrep') {
+        // pgrep ran and matched nothing: exits 1 with empty output.
+        return { code: 1, signal: null, stdout: '', stderr: '', timedOut: false }
+      }
+      throw new Error(`unexpected command ${spec.program}`)
+    })
 
     await vi.advanceTimersByTimeAsync(30_000)
 

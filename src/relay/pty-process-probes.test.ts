@@ -1,14 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { execFileMock, execFileSyncMock, getAllProcessesMock } = vi.hoisted(() => ({
+const { execFileMock, execFileSyncMock, getAllProcessesMock, runProcessMock } = vi.hoisted(() => ({
   execFileMock: vi.fn(),
   getAllProcessesMock: vi.fn(),
-  execFileSyncMock: vi.fn()
+  execFileSyncMock: vi.fn(),
+  runProcessMock: vi.fn()
 }))
 
+// The process-table snapshot (`ps -axo`) is an allowlisted direct execFile
+// caller; the probes themselves go through runProcess.
 vi.mock('child_process', () => ({
   execFile: execFileMock,
   execFileSync: execFileSyncMock
+}))
+
+vi.mock('../shared/child-process/run-process', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  runProcess: runProcessMock
 }))
 
 import { resetWindowsProcessRowsSnapshotForTests } from '../main/providers/windows-foreground-process-rows'
@@ -36,6 +44,45 @@ function mockExecFile(
       callback(null, { stdout: result.stdout, stderr: result.stderr ?? '' })
     }
   )
+}
+
+type ProbeProcessResult = {
+  code: number | null
+  stdout?: string
+  signal?: NodeJS.Signals | null
+  timedOut?: boolean
+}
+
+/**
+ * Feed the probes' runProcess calls. Return an Error to reject the way
+ * runProcess does when the probe binary could not be spawned at all.
+ */
+function mockRunProcess(
+  implementation: (program: string, args: string[]) => ProbeProcessResult | Error
+): void {
+  runProcessMock.mockImplementation(async (spec: { program: string; args?: readonly string[] }) => {
+    const result = implementation(spec.program, [...(spec.args ?? [])])
+    if (result instanceof Error) {
+      throw result
+    }
+    return {
+      code: result.code,
+      signal: result.signal ?? null,
+      stdout: result.stdout ?? '',
+      stderr: '',
+      timedOut: result.timedOut ?? false
+    }
+  })
+}
+
+function spawnFailure(message: string, code: string): Error {
+  const error = new Error(message) as NodeJS.ErrnoException
+  error.code = code
+  return error
+}
+
+function timedOutProbe(): ProbeProcessResult {
+  return { code: null, signal: 'SIGTERM', timedOut: true }
 }
 
 /**
@@ -72,6 +119,7 @@ beforeEach(() => {
   vi.resetModules()
   execFileMock.mockReset()
   execFileSyncMock.mockReset()
+  runProcessMock.mockReset()
   resetProcessTableSnapshotForTests()
   resetWindowsProcessRowsSnapshotForTests()
   __setWindowsProcessTreeLoaderForTests()
@@ -116,6 +164,7 @@ describe('getForegroundProcessName', () => {
     await expect(getForegroundProcessName(100, 'vim')).resolves.toBe('vim')
 
     expect(execFileMock).not.toHaveBeenCalled()
+    expect(runProcessMock).not.toHaveBeenCalled()
   })
 
   it('recognizes SSH relay node-wrapped agents from descendant command lines', async () => {
@@ -240,9 +289,11 @@ describe('getForegroundProcessName', () => {
 
   it('returns an outer omp fallback without a process-table scan', async () => {
     mockExecFile(() => new Error('unexpected process-table scan'))
+    mockRunProcess(() => new Error('unexpected probe subprocess'))
 
     await expect(getForegroundProcessName(100, 'omp')).resolves.toBe('omp')
     expect(execFileMock).not.toHaveBeenCalled()
+    expect(runProcessMock).not.toHaveBeenCalled()
   })
 
   it('rescans a Windows pi fallback for its outer omp wrapper', async () => {
@@ -271,60 +322,41 @@ describe('getForegroundProcessName', () => {
   })
 
   it('falls back to the root process command when descendant inspection fails', async () => {
-    mockExecFile((_command, args) => {
-      if (args[0] === '-axo') {
-        return new Error('ps table unavailable')
-      }
-      return { stdout: 'bash\n' }
-    })
+    mockExecFile(() => new Error('ps table unavailable'))
+    mockRunProcess(() => ({ code: 0, stdout: 'bash\n' }))
 
     await expect(getForegroundProcessName(100)).resolves.toBe('bash')
   })
 })
 
-function subprocessExitError(
-  message: string,
-  overrides: { code?: number | string; killed?: boolean; signal?: string | null } = {}
-): Error {
-  const error = new Error(message) as Error & {
-    code?: number | string
-    killed?: boolean
-    signal?: string | null
-  }
-  error.code = overrides.code
-  error.killed = overrides.killed ?? false
-  error.signal = overrides.signal ?? null
-  return error
-}
-
 describe('probeProcessChildren', () => {
   it('reports live children from pgrep output', async () => {
-    mockExecFile(() => ({ stdout: '4242\n' }))
+    mockRunProcess(() => ({ code: 0, stdout: '4242\n' }))
 
     await expect(probeProcessChildren(100)).resolves.toEqual({ verdict: 'live' })
   })
 
   it('treats pgrep exit 1 as positive absence', async () => {
     // pgrep exits 1 with no output when it ran and matched nothing.
-    mockExecFile(() => subprocessExitError('no match', { code: 1 }))
+    mockRunProcess(() => ({ code: 1 }))
 
     await expect(probeProcessChildren(100)).resolves.toEqual({ verdict: 'exited' })
   })
 
   it('keeps a missing pgrep binary unverifiable, never exited', async () => {
-    mockExecFile(() => subprocessExitError('spawn pgrep ENOENT', { code: 'ENOENT' }))
+    mockRunProcess(() => spawnFailure('spawn pgrep ENOENT', 'ENOENT'))
 
     await expect(probeProcessChildren(100)).resolves.toMatchObject({ verdict: 'unverifiable' })
   })
 
   it('keeps a timed-out pgrep unverifiable, never exited', async () => {
-    mockExecFile(() => subprocessExitError('killed', { killed: true, signal: 'SIGTERM' }))
+    mockRunProcess(() => timedOutProbe())
 
     await expect(probeProcessChildren(100)).resolves.toMatchObject({ verdict: 'unverifiable' })
   })
 
   it('keeps a pgrep fatal error (exit 3) unverifiable', async () => {
-    mockExecFile(() => subprocessExitError('fatal', { code: 3 }))
+    mockRunProcess(() => ({ code: 3 }))
 
     await expect(probeProcessChildren(100)).resolves.toMatchObject({ verdict: 'unverifiable' })
   })
@@ -357,7 +389,13 @@ describe('probeProcessChildren', () => {
   })
 
   it('collapses every probe failure to false for the legacy boolean', async () => {
-    mockExecFile(() => subprocessExitError('spawn pgrep ENOENT', { code: 'ENOENT' }))
+    mockRunProcess(() => spawnFailure('spawn pgrep ENOENT', 'ENOENT'))
+
+    await expect(processHasChildren(100)).resolves.toBe(false)
+  })
+
+  it('collapses a non-zero pgrep exit to false for the legacy boolean', async () => {
+    mockRunProcess(() => ({ code: 1 }))
 
     await expect(processHasChildren(100)).resolves.toBe(false)
   })
@@ -369,8 +407,9 @@ describe('observeForegroundProcess', () => {
       if (args[0] === '-axo') {
         return { stdout: '' }
       }
-      return { stdout: 'vim\n' }
+      return new Error('unexpected direct subprocess')
     })
+    mockRunProcess(() => ({ code: 0, stdout: 'vim\n' }))
 
     await expect(observeForegroundProcess(100)).resolves.toEqual({
       verdict: 'observed',
@@ -379,12 +418,8 @@ describe('observeForegroundProcess', () => {
   })
 
   it('reports ps exit 1 as an observed absence of the process', async () => {
-    mockExecFile((_command, args) => {
-      if (args[0] === '-axo') {
-        return new Error('ps table unavailable')
-      }
-      return subprocessExitError('no such pid', { code: 1 })
-    })
+    mockExecFile(() => new Error('ps table unavailable'))
+    mockRunProcess(() => ({ code: 1 }))
 
     await expect(observeForegroundProcess(100)).resolves.toEqual({
       verdict: 'observed',
@@ -393,7 +428,8 @@ describe('observeForegroundProcess', () => {
   })
 
   it('keeps a timed-out ps read unverifiable', async () => {
-    mockExecFile(() => subprocessExitError('killed', { killed: true, signal: 'SIGTERM' }))
+    mockExecFile(() => new Error('ps table unavailable'))
+    mockRunProcess(() => timedOutProbe())
 
     await expect(observeForegroundProcess(100)).resolves.toMatchObject({
       verdict: 'unverifiable'
@@ -401,7 +437,8 @@ describe('observeForegroundProcess', () => {
   })
 
   it('keeps the node-pty fallback observed when descendant enrichment fails', async () => {
-    mockExecFile(() => subprocessExitError('killed', { killed: true, signal: 'SIGTERM' }))
+    mockExecFile(() => new Error('ps table unavailable'))
+    mockRunProcess(() => timedOutProbe())
 
     await expect(observeForegroundProcess(100, 'node')).resolves.toEqual({
       verdict: 'observed',
@@ -410,7 +447,8 @@ describe('observeForegroundProcess', () => {
   })
 
   it('collapses an unverifiable observation to null for the legacy reader', async () => {
-    mockExecFile(() => subprocessExitError('killed', { killed: true, signal: 'SIGTERM' }))
+    mockExecFile(() => new Error('ps table unavailable'))
+    mockRunProcess(() => timedOutProbe())
 
     await expect(getForegroundProcessName(100)).resolves.toBeNull()
   })

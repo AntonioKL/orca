@@ -5,6 +5,10 @@ import {
   useAgentCompletionCoordinatorLifecycle
 } from './agent-completion-coordinator-test-harness'
 import type { RuntimeTerminalProcessInspection } from '@/runtime/runtime-terminal-inspection'
+import type { PtyApi } from '../../../../preload/api/pty-api'
+
+// The renderer-visible type of the local `window.api.pty.inspectProcess` leg.
+type LocalInspectProcessResult = Awaited<ReturnType<PtyApi['inspectProcess']>>
 
 function unverifiableChildren(foregroundProcess: string | null): RuntimeTerminalProcessInspection {
   return {
@@ -64,6 +68,28 @@ describe('agent completion with inspection evidence', () => {
 
     // The host stops being able to answer pgrep; codex may still be running.
     result = unverifiableChildren('zsh')
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    expect(dispatchCompletion).not.toHaveBeenCalled()
+  })
+
+  it('carries unverifiable evidence through the preload-typed local inspection result', async () => {
+    // Pins the preload contract: `processEvidence` must exist on the renderer-
+    // visible type of the local IPC leg, not only on the runtime-RPC shape —
+    // otherwise a typed consumer cannot see the evidence the host published.
+    let result: LocalInspectProcessResult = processResult('codex')
+    const { dispatchCompletion } = startCoordinator(() => result)
+
+    await vi.advanceTimersByTimeAsync(2_000)
+
+    result = {
+      foregroundProcess: 'zsh',
+      hasChildProcesses: false,
+      processEvidence: {
+        foreground: { verdict: 'observed', processName: 'zsh' },
+        children: { verdict: 'unverifiable', reason: 'pgrep did not answer before its deadline' }
+      }
+    }
     await vi.advanceTimersByTimeAsync(60_000)
 
     expect(dispatchCompletion).not.toHaveBeenCalled()
