@@ -1,13 +1,10 @@
 import { useCallback, useEffect, useRef, type MutableRefObject } from 'react'
 import {
-  buildAskAnswerKeys,
-  buildCodexAskAnswerKeys,
   formatAskAnswer,
   hasAskAnswer,
   type AskAnswerSelection,
   type AskPrompt
 } from '../../../src/shared/native-chat-ask'
-import { buildGrokAskAnswerKeys } from '../../../src/shared/native-chat-grok-ask-answer'
 import type { RpcClient } from '../transport/rpc-client'
 import { MOBILE_NATIVE_CHAT_QUESTION_STEP_MS } from './mobile-native-chat-answer-stepping'
 import {
@@ -19,12 +16,9 @@ import {
   acquireMobileNativeChatTerminalWrite,
   releaseMobileNativeChatTerminalWrite
 } from './mobile-native-chat-terminal-write-lock'
-import {
-  resolveNativeChatTranscriptAgent,
-  shouldStepNativeChatAskAnswer
-} from '../../../src/shared/native-chat-agent-support'
+import { resolveNativeChatAskAnswerBuilder } from '../../../src/shared/native-chat-agent-support'
 
-/** Sends an ask-user answer to the active chat pane. Claude and Codex selectors
+/** Sends an ask-user answer to the active chat pane. Stepped selectors
  *  use their agent-specific keystrokes; other agents get pasted label text.
  *  Extracted from the session route to keep that file under its line cap and to
  *  own the pending-timer lifecycle in one place. */
@@ -226,7 +220,8 @@ export function useMobileNativeChatAnswerSend(args: {
         }
         // Claude, Codex, and Grok need selector-specific keystrokes paced so each
         // step renders before the next lands; other agents commit pasted labels.
-        if (!shouldStepNativeChatAskAnswer(agentRef.current)) {
+        const answerBuilder = resolveNativeChatAskAnswerBuilder(agentRef.current)
+        if (!answerBuilder) {
           // This shape pastes the label into the composer and commits it, so an
           // orphaned image paste would be submitted along with the answer (#10228).
           // The selector shapes below deliberately skip the heal: their keys are
@@ -259,13 +254,7 @@ export function useMobileNativeChatAnswerSend(args: {
           const sent = (await sendTerminal(formatAskAnswer(prompt, selections), true)) || fail()
           return sent && writeTurnsRef.current.get(handle) === turn
         }
-        const transcriptAgent = resolveNativeChatTranscriptAgent(agentRef.current)
-        const groups =
-          transcriptAgent === 'codex'
-            ? buildCodexAskAnswerKeys(prompt, selections)
-            : transcriptAgent === 'grok'
-              ? buildGrokAskAnswerKeys(prompt, selections)
-              : buildAskAnswerKeys(prompt, selections)
+        const groups = answerBuilder(prompt, selections)
         for (let index = 0; index < groups.length; index += 1) {
           if (generationRef.current !== generation) {
             return false

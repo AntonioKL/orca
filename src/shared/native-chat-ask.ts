@@ -5,6 +5,7 @@ import type {
   InteractiveQuestionParser
 } from './native-chat-ask-types'
 import { isInterruptedStatusMessage, type NativeChatMessage } from './native-chat-types'
+import { isNativeChatMultiSelectQuestion } from './native-chat-question-shape'
 
 export type { AskOption, AskPrompt, AskQuestion, InteractiveQuestionParser }
 
@@ -37,7 +38,7 @@ function parseQuestionsShape(input: unknown): AskPrompt | null {
       questions.push({
         question: text,
         header: typeof question.header === 'string' ? question.header : undefined,
-        multiSelect: question.multiSelect === true || question.multi_select === true,
+        multiSelect: isNativeChatMultiSelectQuestion(question),
         options
       })
     }

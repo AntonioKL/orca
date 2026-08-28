@@ -90,7 +90,7 @@ describe('useNativeChatInteractiveSend', () => {
     expect(mocks.sendNativeChatAskAnswer).toHaveBeenCalledWith(
       { terminalTabId: 'tab-1' },
       'pty-1',
-      [{ raw: '2' }, { raw: '\r' }],
+      [{ raw: '2' }],
       expect.any(Function)
     )
     expect(mocks.sendNativeChatMessage).not.toHaveBeenCalled()

@@ -256,7 +256,7 @@ describe('useMobileNativeChatAnswerSend', () => {
     ])
   })
 
-  it('answers Grok selector prompts with its pick and submit keys', async () => {
+  it('answers Grok single-select prompts with the auto-submitting pick key', async () => {
     const sendRequest = vi.fn().mockResolvedValue(acceptedResponse())
     await mount({ sendRequest } as unknown as RpcClient, vi.fn(), 'grok')
 
@@ -268,8 +268,7 @@ describe('useMobileNativeChatAnswerSend', () => {
 
     await expect(result).resolves.toBe(true)
     expect(sendRequest.mock.calls.map((call) => call[1])).toEqual([
-      expect.objectContaining({ text: '2', enter: false }),
-      expect.objectContaining({ text: '\r', enter: false })
+      expect.objectContaining({ text: '2', enter: false })
     ])
   })
 
@@ -286,8 +285,7 @@ describe('useMobileNativeChatAnswerSend', () => {
 
     await expect(result).resolves.toBe(true)
     expect(sendRequest.mock.calls.map((call) => call[1])).toEqual([
-      expect.objectContaining({ text: '2', enter: false }),
-      expect.objectContaining({ text: '\r', enter: false })
+      expect.objectContaining({ text: '2', enter: false })
     ])
     expect(isMobileNativeChatInputStale('terminal')).toBe(true)
   })

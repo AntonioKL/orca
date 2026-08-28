@@ -1,4 +1,5 @@
 import type { AgentType } from './agent-status-types'
+import { isNativeChatMultiSelectQuestion } from './native-chat-question-shape'
 
 /** Baseline snapshot the renderer captured when it observed the submit
  *  keystroke. The main process re-validates every field against its own
@@ -43,15 +44,10 @@ function readSingleSelectOptionCount(interactivePrompt: string | undefined): num
     if (!Array.isArray(parsed.questions) || parsed.questions.length !== 1) {
       return -1
     }
-    const [question] = parsed.questions as {
-      multiSelect?: unknown
-      multi_select?: unknown
-      options?: unknown
-    }[]
+    const [question] = parsed.questions as { options?: unknown }[]
     if (
       !question ||
-      question.multiSelect === true ||
-      question.multi_select === true ||
+      isNativeChatMultiSelectQuestion(question) ||
       !Array.isArray(question.options)
     ) {
       return -1

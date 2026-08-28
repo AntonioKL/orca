@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest'
 import {
   isNativeChatSupportedAgent,
   nativeChatRequiresLocalTranscript,
+  resolveNativeChatAskAnswerBuilder,
   resolveNativeChatTranscriptAgent,
   shouldStepNativeChatAskAnswer
 } from './native-chat-agent-support'
+import { buildAskAnswerKeys, buildCodexAskAnswerKeys } from './native-chat-ask'
+import { buildGrokAskAnswerKeys } from './native-chat-grok-ask-answer'
 
 describe('resolveNativeChatTranscriptAgent', () => {
   it('maps OpenClaude onto the Claude transcript format', () => {
@@ -49,6 +52,14 @@ describe('nativeChatRequiresLocalTranscript', () => {
 })
 
 describe('shouldStepNativeChatAskAnswer', () => {
+  it('resolves selector builders from the shared agent policy', () => {
+    expect(resolveNativeChatAskAnswerBuilder('claude')).toBe(buildAskAnswerKeys)
+    expect(resolveNativeChatAskAnswerBuilder('openclaude')).toBe(buildAskAnswerKeys)
+    expect(resolveNativeChatAskAnswerBuilder('codex')).toBe(buildCodexAskAnswerKeys)
+    expect(resolveNativeChatAskAnswerBuilder('grok')).toBe(buildGrokAskAnswerKeys)
+    expect(resolveNativeChatAskAnswerBuilder('omp')).toBeNull()
+  })
+
   it('steps the digit-commit selector agents (Claude, OpenClaude, Codex, Grok)', () => {
     expect(shouldStepNativeChatAskAnswer('claude')).toBe(true)
     expect(shouldStepNativeChatAskAnswer('openclaude')).toBe(true)

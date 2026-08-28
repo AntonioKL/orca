@@ -1,6 +1,27 @@
+import {
+  buildAskAnswerKeys,
+  buildCodexAskAnswerKeys,
+  type AskAnswerKeyGroup,
+  type AskAnswerSelection,
+  type AskPrompt
+} from './native-chat-ask'
+import { buildGrokAskAnswerKeys } from './native-chat-grok-ask-answer'
 import type { TuiAgent } from './tui-agent'
 
 export type NativeChatTranscriptAgent = 'claude' | 'codex' | 'grok' | 'omp'
+
+export type NativeChatAskAnswerBuilder = (
+  prompt: AskPrompt,
+  selections: AskAnswerSelection[]
+) => AskAnswerKeyGroup[]
+
+const NATIVE_CHAT_ASK_ANSWER_BUILDERS: Partial<
+  Record<NativeChatTranscriptAgent, NativeChatAskAnswerBuilder>
+> = {
+  claude: buildAskAnswerKeys,
+  codex: buildCodexAskAnswerKeys,
+  grok: buildGrokAskAnswerKeys
+}
 
 /** Agents whose transcripts the native chat view can parse and render, in the
  *  order the settings pane advertises them. */
@@ -36,8 +57,15 @@ export function nativeChatRequiresLocalTranscript(agent: string | null | undefin
  *  so answers must be delivered as per-option keystrokes. Other agents commit
  *  a pasted answer. */
 export function shouldStepNativeChatAskAnswer(agent: string | null | undefined): boolean {
+  return resolveNativeChatAskAnswerBuilder(agent) !== null
+}
+
+/** Returns the selector strategy registered for an agent's transcript format. */
+export function resolveNativeChatAskAnswerBuilder(
+  agent: string | null | undefined
+): NativeChatAskAnswerBuilder | null {
   const transcriptAgent = resolveNativeChatTranscriptAgent(agent)
-  return transcriptAgent === 'claude' || transcriptAgent === 'codex' || transcriptAgent === 'grok'
+  return transcriptAgent ? (NATIVE_CHAT_ASK_ANSWER_BUILDERS[transcriptAgent] ?? null) : null
 }
 
 export function resolveNativeChatTranscriptAgent(

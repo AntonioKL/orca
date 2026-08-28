@@ -245,13 +245,10 @@ describe('buildGrokAskAnswerKeys', () => {
         { question: 'q', multiSelect: false, options: [{ label: 'Tabs' }, { label: 'Spaces' }] }
       ]
     }
-    expect(buildGrokAskAnswerKeys(prompt, [{ indices: [1] }])).toEqual([
-      { raw: '2' },
-      { raw: '\r' }
-    ])
+    expect(buildGrokAskAnswerKeys(prompt, [{ indices: [1] }])).toEqual([{ raw: '2' }])
   })
 
-  it('moves between questions with Grok navigation before submitting', () => {
+  it('lets each Grok single-select digit advance or submit', () => {
     const prompt = {
       questions: [
         { question: 'q1', multiSelect: false, options: [{ label: 'A' }, { label: 'B' }] },
@@ -260,13 +257,11 @@ describe('buildGrokAskAnswerKeys', () => {
     }
     expect(buildGrokAskAnswerKeys(prompt, [{ indices: [1] }, { indices: [0] }])).toEqual([
       { raw: '2' },
-      { raw: 'l' },
-      { raw: '1' },
-      { raw: '\r' }
+      { raw: '1' }
     ])
   })
 
-  it('picks every Grok multi-select option before submitting', () => {
+  it('toggles Grok multi-select rows with Space before submitting', () => {
     const prompt = {
       questions: [
         {
@@ -277,8 +272,10 @@ describe('buildGrokAskAnswerKeys', () => {
       ]
     }
     expect(buildGrokAskAnswerKeys(prompt, [{ indices: [0, 2] }])).toEqual([
-      { raw: '1' },
-      { raw: '3' },
+      { raw: ' ' },
+      { raw: '\x1b[B' },
+      { raw: '\x1b[B' },
+      { raw: ' ' },
       { raw: '\r' }
     ])
   })

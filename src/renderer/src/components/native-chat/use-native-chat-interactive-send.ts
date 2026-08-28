@@ -3,14 +3,8 @@ import { useAppStore } from '../../store'
 import { sendRuntimePtyInput } from '@/runtime/runtime-terminal-inspection'
 import { getSettingsForAgentTabRuntimeOwner } from '@/lib/agent-paste-draft'
 import type { AgentType } from '../../../../shared/native-chat-types'
+import { resolveNativeChatAskAnswerBuilder } from '../../../../shared/native-chat-agent-support'
 import {
-  resolveNativeChatTranscriptAgent,
-  shouldStepNativeChatAskAnswer
-} from '../../../../shared/native-chat-agent-support'
-import {
-  buildAskAnswerKeys,
-  buildCodexAskAnswerKeys,
-  buildGrokAskAnswerKeys,
   formatAskAnswer,
   hasAskAnswer,
   type AskAnswerSelection,
@@ -96,8 +90,8 @@ export function useNativeChatInteractiveSend(
       const settings = getSettingsForAgentTabRuntimeOwner(terminalTabId)
       // Claude, Codex, and Grok ignore pasted labels but have different selector
       // state machines. OpenClaude follows Claude's path.
-      const stepsAnswer = shouldStepNativeChatAskAnswer(agent)
-      const transcriptAgent = resolveNativeChatTranscriptAgent(agent)
+      const answerBuilder = resolveNativeChatAskAnswerBuilder(agent)
+      const stepsAnswer = answerBuilder !== null
       // Why: pin the answered question's baseline BEFORE delivery. A late settle
       // callback (paced writes + remote acceptance can span seconds on SSH) must
       // not read the live status and mint a fresh baseline for a replacement
@@ -133,11 +127,7 @@ export function useNativeChatInteractiveSend(
         ? sendNativeChatAskAnswer(
             settings,
             targetPtyId,
-            transcriptAgent === 'codex'
-              ? buildCodexAskAnswerKeys(prompt, selections)
-              : transcriptAgent === 'grok'
-                ? buildGrokAskAnswerKeys(prompt, selections)
-                : buildAskAnswerKeys(prompt, selections),
+            answerBuilder!(prompt, selections),
             onSettled
           )
         : sendNativeChatMessage(settings, targetPtyId, formatAskAnswer(prompt, selections))
