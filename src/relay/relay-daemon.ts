@@ -127,6 +127,7 @@ function registerRelayStatus(
 ): void {
   primaryChannel.dispatcher.onRequest('relay.status', async () => ({
     capabilities: SKILL_RELAY_CAPABILITIES,
+    ptyIdMintEpoch: runtime.ptyHandler.mintEpoch,
     pid: process.pid,
     uptimeMs: Date.now() - startedAt,
     detached: options.detached,

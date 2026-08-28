@@ -2026,6 +2026,7 @@ type RuntimePtyController = {
     wslDistro?: string
     stablePaneOwner?: { handle: string; tabId: string; leafId: string }
     agentSessionEnsure?: AgentSessionClaimedSpawnResult
+    agentResumeUnavailable?: true
   }>
   write(ptyId: string, data: string): boolean
   writeWithSettlement?(ptyId: string, data: string): Promise<boolean>
@@ -29202,6 +29203,7 @@ export class OrcaRuntimeService {
           reportPtySpawnCommitted()
         }
         const adoptedStablePane = Boolean(result.stablePaneOwner)
+        const agentResumeDeclined = result.agentResumeUnavailable === true
         if (result.agentSessionEnsure) {
           const canonicalSurface = result.agentSessionEnsure.owner.surface
           preAllocatedHandle = canonicalSurface.terminalHandle
@@ -29246,12 +29248,13 @@ export class OrcaRuntimeService {
               pty.title = null
               pty.titleUpdatedAt = null
             }
-            pty.launchConfig = effectiveLaunchConfig
-              ? copySleepingAgentLaunchConfig(effectiveLaunchConfig)
-              : null
-            pty.launchToken = launchToken ?? null
-            pty.launchIncarnationId = launchToken ? pty.incarnationId : null
-            pty.launchAgent = launchOpts.launchAgent ?? null
+            pty.launchConfig =
+              !agentResumeDeclined && effectiveLaunchConfig
+                ? copySleepingAgentLaunchConfig(effectiveLaunchConfig)
+                : null
+            pty.launchToken = agentResumeDeclined ? null : (launchToken ?? null)
+            pty.launchIncarnationId = !agentResumeDeclined && launchToken ? pty.incarnationId : null
+            pty.launchAgent = agentResumeDeclined ? null : (launchOpts.launchAgent ?? null)
           }
           pty.tabId = tabId
           pty.paneKey = paneKey
@@ -29282,9 +29285,13 @@ export class OrcaRuntimeService {
               ptyId: result.id,
               title: launchOpts.title ?? null,
               ...(cwd !== workspace.path ? { cwd } : {}),
-              ...(effectiveLaunchConfig ? { launchConfig: effectiveLaunchConfig } : {}),
-              ...(launchToken ? { launchToken } : {}),
-              ...(launchOpts.launchAgent ? { launchAgent: launchOpts.launchAgent } : {}),
+              ...(!agentResumeDeclined && effectiveLaunchConfig
+                ? { launchConfig: effectiveLaunchConfig }
+                : {}),
+              ...(!agentResumeDeclined && launchToken ? { launchToken } : {}),
+              ...(!agentResumeDeclined && launchOpts.launchAgent
+                ? { launchAgent: launchOpts.launchAgent }
+                : {}),
               ...(launchOpts.viewMode ? { viewMode: launchOpts.viewMode } : {}),
               activate: presentation === 'focused',
               ...(presentation ? { presentation } : {}),
@@ -29312,6 +29319,7 @@ export class OrcaRuntimeService {
           ...(result.agentSessionEnsure
             ? { agentSessionDisposition: result.agentSessionEnsure.disposition }
             : {}),
+          ...(agentResumeDeclined ? { agentResumeUnavailable: true as const } : {}),
           ...(adoptedStablePane ? { isReattach: true as const } : {}),
           ...(warning ? { warning } : {})
         }
