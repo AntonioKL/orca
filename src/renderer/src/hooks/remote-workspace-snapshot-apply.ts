@@ -176,11 +176,7 @@ export async function applyDirectSshRemoteWorkspaceSnapshot({
         phase: 'conflict',
         direction: 'pull',
         revision: snapshot.revision,
-        updatedAt: snapshot.updatedAt,
-        message: translate(
-          'auto.hooks.useIpcEvents.2fe88c2e06',
-          'Remote workspace sync unavailable'
-        )
+        updatedAt: snapshot.updatedAt
       })
     }
     const reconnectAbort = new AbortController()
