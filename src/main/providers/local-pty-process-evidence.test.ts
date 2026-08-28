@@ -84,6 +84,21 @@ describe('classifyLocalPtyChildProcesses', () => {
     ).toEqual({ hasChildProcesses: false, evidence: { verdict: 'exited' } })
   })
 
+  it('reads a completed scan that observed nothing as positive absence', () => {
+    // The canonical completion input: the agent exited, the scan ran to
+    // completion and resolved no foreground process, and node-pty's title is
+    // back to the shell. `processName: null` is the observation, not an
+    // absent one, so this is the one shape that may say exited.
+    expect(
+      classifyLocalPtyChildProcesses({
+        procPresent: true,
+        titleRead: { ok: true, title: 'zsh' },
+        shell: 'zsh',
+        foreground: { verdict: 'observed', processName: null }
+      })
+    ).toEqual({ hasChildProcesses: false, evidence: { verdict: 'exited' } })
+  })
+
   it('reads a shell title under a degraded scan as unverifiable', () => {
     // node-pty's POSIX title read silently falls back to the spawned shell
     // when the native read fails, so under scan distress "title == shell"

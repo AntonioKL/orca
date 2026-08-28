@@ -204,6 +204,51 @@ describe('LocalPtyProvider.inspectProcess evidence', () => {
     })
   })
 
+  it('reports a pty the provider no longer owns as positive absence', async () => {
+    // The provider owns this table, so a missing entry is a reaped PTY rather
+    // than a failed probe. It has to stay a positive observation: the monitor
+    // refuses to complete on anything it cannot read, so publishing
+    // `unverifiable` here would strand the pane's last completion forever.
+    await expect(provider.inspectProcess('pty-the-provider-never-owned')).resolves.toEqual({
+      foregroundProcess: null,
+      hasChildProcesses: false,
+      processEvidence: {
+        foreground: { verdict: 'observed', processName: null },
+        children: { verdict: 'exited' }
+      }
+    })
+  })
+
+  it('marks a pty replaced mid-scan unverifiable instead of an exit', async () => {
+    const { id } = await provider.spawn({ cols: 80, rows: 24, sessionId: 'pane-1' })
+    await recognizeCodex(id)
+
+    mockProc.process = 'zsh'
+    resolveAgentForegroundProcessMock.mockImplementationOnce(async () => {
+      // The scan outlives the pane: the PTY exits and the same caller session
+      // id is reattached to a fresh node-pty while the scan is still running.
+      exitCb?.({ exitCode: 0 })
+      const replacement = createLocalPtyMockProcess({
+        get: () => exitCb,
+        set: (cb) => {
+          exitCb = cb
+        }
+      })
+      replacement.process = 'zsh'
+      spawnMock.mockReturnValue(replacement)
+      await provider.spawn({ cols: 80, rows: 24, sessionId: 'pane-1' })
+      return { available: true, processName: 'zsh' }
+    })
+
+    // The stale scan answered about a process that is no longer this pane's.
+    // Its `null` name predates the evidence contract and reads as an exit.
+    await expect(provider.inspectProcess(id)).resolves.toMatchObject({
+      processEvidence: {
+        foreground: { verdict: 'unverifiable', reason: 'pty replaced during inspection' }
+      }
+    })
+  })
+
   it('treats a successful Windows job confirmation as an observation', async () => {
     Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
     mockProc.process = 'powershell.exe'
