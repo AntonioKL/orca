@@ -1,5 +1,6 @@
 import { createElement } from 'react'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
+import { Keyboard } from 'react-native'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { radii, spacing } from '../theme/mobile-theme'
 import { MobileNativeChatComposer } from './MobileNativeChatComposer'
@@ -407,5 +408,26 @@ describe('MobileNativeChatComposer', () => {
     expect(mic().props.onPress).toBe(onMicPress)
     expect(mic().props.onPressIn).toBeUndefined()
     expect(mic().props.onPressOut).toBeUndefined()
+  })
+
+  it('dismisses the keyboard once a send is accepted', async () => {
+    // Why: the reply the user is now waiting on sits behind the keyboard.
+    vi.mocked(Keyboard.dismiss).mockClear()
+    await render(vi.fn().mockResolvedValue(true), vi.fn())
+
+    await act(async () => sendButton().props.onPress())
+
+    expect(Keyboard.dismiss).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the keyboard up when the send is rejected', async () => {
+    // A rejected send hands the draft back for editing, so yanking the keyboard
+    // would make the user re-open it to fix and retry.
+    vi.mocked(Keyboard.dismiss).mockClear()
+    await render(vi.fn().mockResolvedValue(false), vi.fn())
+
+    await act(async () => sendButton().props.onPress())
+
+    expect(Keyboard.dismiss).not.toHaveBeenCalled()
   })
 })

@@ -82,6 +82,7 @@ import {
 } from '../../../../src/session/mobile-bulk-close-sheet-actions'
 import { useMobilePrBranchContext } from '../../../../src/session/use-mobile-pr-branch-context'
 import { isFloatingWorkspaceWorktreeId } from '../../../../src/session/floating-workspace'
+import { shouldDismissKeyboardAfterTerminalSend } from '../../../../src/session/agent-send-keyboard-dismissal'
 import { SessionDockColumn } from '../../../../src/session/SessionDockColumn'
 import { MobileSessionHeaderIconButton } from '../../../../src/session/MobileSessionHeaderIconButton'
 import { MobileSessionHeaderMoreActionsSheet } from '../../../../src/session/MobileSessionHeaderMoreActionsSheet'
@@ -2968,6 +2969,23 @@ export default function SessionScreen() {
     }
   }, [activeSessionTab, fileDocs, readFileTab])
 
+  const dismissSoftwareKeyboard = useCallback(() => {
+    dismissTerminalKeyboard({
+      clearPendingLiveInputFocus: () => clearTerminalLiveInputFocusTimer(liveInputFocusTimerRef),
+      commandInput: commandInputRef.current,
+      dismissKeyboard: () => Keyboard.dismiss(),
+      liveInput: liveInputRef.current
+    })
+  }, [])
+
+  // Sending to an agent hands the turn over, so the keyboard gets out of the way
+  // of the reply. A plain shell keeps it — commands come in bursts.
+  const dismissKeyboardAfterAgentSend = useCallback(() => {
+    if (shouldDismissKeyboardAfterTerminalSend(activeSessionTab)) {
+      dismissSoftwareKeyboard()
+    }
+  }, [activeSessionTab, dismissSoftwareKeyboard])
+
   async function handleSend() {
     // Why: the return key still submits while offline; hold the composed text instead of firing a doomed RPC (#6713).
     if (!client || !activeHandle || sendingRef.current || !canSend) {
@@ -2990,6 +3008,7 @@ export default function SessionScreen() {
         }),
         TERMINAL_INPUT_SEND_OPTIONS
       )
+      dismissKeyboardAfterAgentSend()
     } catch {
       setInput(text)
     } finally {
@@ -3127,15 +3146,6 @@ export default function SessionScreen() {
       scheduleDelayedAction
     ]
   )
-
-  const dismissSoftwareKeyboard = useCallback(() => {
-    dismissTerminalKeyboard({
-      clearPendingLiveInputFocus: () => clearTerminalLiveInputFocusTimer(liveInputFocusTimerRef),
-      commandInput: commandInputRef.current,
-      dismissKeyboard: () => Keyboard.dismiss(),
-      liveInput: liveInputRef.current
-    })
-  }, [])
 
   // Tap a terminal or chat file path → resolve on host, open as file tab/preview.
   const { handleFileTap, handleNativeChatFileTap } = useMobileFileTapHandlers<MobileSessionTab>({
@@ -4973,7 +4983,10 @@ export default function SessionScreen() {
                       // marked-text report that says whether this text is still preedit.
                       onChange={handleLiveInputChange}
                       onKeyPress={handleLiveInputKeyPress}
-                      onSubmitEditing={handleLiveInputSubmit}
+                      onSubmitEditing={() => {
+                        handleLiveInputSubmit()
+                        dismissKeyboardAfterAgentSend()
+                      }}
                       placeholder=""
                       showSoftInputOnFocus
                       autoCapitalize="none"

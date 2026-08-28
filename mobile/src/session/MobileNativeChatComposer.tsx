@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Image,
+  Keyboard,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -156,6 +157,9 @@ export function MobileNativeChatComposer({
       const accepted = await onSend(value)
       if (accepted) {
         setCursor(0)
+        // Why: the turn is now the agent's — the keyboard would cover the reply.
+        // A rejected send keeps it up so the handed-back draft stays editable.
+        Keyboard.dismiss()
       }
     } finally {
       sendingRef.current = false
