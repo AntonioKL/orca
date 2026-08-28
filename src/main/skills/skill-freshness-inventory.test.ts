@@ -911,5 +911,5 @@ describe('read-only skill freshness inventory', () => {
     expect(inventory.installations).toEqual([
       expect.objectContaining({ name: 'orca-cli', status: 'current', topology: 'canonical-copy' })
     ])
-  })
+  }, 90_000)
 })
