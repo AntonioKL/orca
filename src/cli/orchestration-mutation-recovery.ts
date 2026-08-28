@@ -28,24 +28,24 @@ export function orchestrationMutationRecoveryError(error: unknown): unknown {
     ? [...originalCommand, '--retry-request', requestId]
     : undefined
   const executable = originalCommand?.[0] ?? resolveOrchestrationCliExecutable()
+  // Why: a lost response usually carries no dispatch id, and the old code then emitted
+  // no read-only step at all — leaving retry as the only way to learn what happened.
   const queryCommand = dispatchId
     ? [executable, 'orchestration', 'worker-show', '--dispatch', dispatchId, '--json']
-    : undefined
+    : [executable, 'orchestration', 'request-show', '--request', requestId, '--json']
   const recovery = {
     orchestrationRequestId: requestId,
     ...(dispatchId ? { dispatchId } : {}),
-    ...(queryCommand ? { queryCommand } : {}),
+    queryCommand,
     ...(retryCommand ? { retryCommand } : {}),
     recoveryBlocked: !retryCommand,
     disposition: 'outcome_unknown',
     workerDeathInferred: false
   }
   const retryStep = retryCommand
-    ? `Run ${renderCommand(retryCommand)}.`
+    ? `Run ${renderCommand(retryCommand)}. --retry-request replays the recorded outcome instead of starting a second operation.`
     : 'Recovery is blocked until the exact original command is available; no retry command was emitted.'
-  const nextSteps = queryCommand
-    ? [`Run ${renderCommand(queryCommand)} before retrying.`, retryStep]
-    : [retryStep]
+  const nextSteps = [`Run ${renderCommand(queryCommand)} before retrying.`, retryStep]
   const message = [
     stripUnsafeRetryAdvice(error.message, requestId),
     'The orchestration mutation may already have taken effect; do not assume it failed.',
