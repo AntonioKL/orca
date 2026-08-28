@@ -461,6 +461,48 @@ describe('Git Bash console-capacity pane retention (STA-5604)', () => {
     expect(started.deps.onPaneProcessDied).not.toHaveBeenCalled()
   })
 
+  it('tears the pane down when the host wired no process-died handler', async () => {
+    // Why: `onPaneProcessDied` is optional on PaneConnectionDeps. Without the
+    // presence check the capacity branch would call `undefined` and abort the exit
+    // handler mid-teardown, leaving the pane neither retained nor closed.
+    const started = await startPane({
+      paneCount: 2,
+      deps: {
+        onPaneProcessDied: undefined,
+        paneTransportsRef: { current: new Map([[2, createMockTransport('pty-pane-2')]]) }
+      }
+    })
+
+    started.spawn('tab-pty')
+    started.emitOutput(CAPACITY_OUTPUT)
+    started.exit('tab-pty', 1)
+
+    expect(started.manager.closePane).toHaveBeenCalledWith(1)
+  })
+
+  it('keys an in-flight write to the PTY bound at the time, not the incoming generation', async () => {
+    // Why: a new stream generation installs its exit state when its callbacks are
+    // captured, which is BEFORE the transport rebinds its PTY id. A write landing in
+    // that window belongs to the outgoing PTY; crediting it to the incoming one would
+    // make a newborn shell look typed-into and silently drop its capacity overlay.
+    const { installPtyExitHibernate } = await import('./pty-connection/pty-exit-hibernate')
+    const session = { paneStartup: { command: 'zsh' } } as never as Parameters<
+      typeof installPtyExitHibernate
+    >[0]
+    installPtyExitHibernate(session)
+
+    const outgoing = session.currentProcessExitState
+    session.bindProcessExitState('outgoing-pty')
+    // The incoming generation's state is installed before its PTY id is bound.
+    const incoming = session.createProcessExitState({ command: 'zsh' })
+    session.currentProcessExitState = incoming
+
+    session.noteTerminalInputForPty('outgoing-pty')
+
+    expect(outgoing.userInteracted).toBe(true)
+    expect(incoming.userInteracted).toBe(false)
+  })
+
   it('keeps a freshly split Windows pane visible when its newborn PTY hits the console ceiling', async () => {
     const startup = { command: 'codex' }
     const started = await startPane({
