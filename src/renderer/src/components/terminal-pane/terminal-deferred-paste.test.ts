@@ -2,6 +2,7 @@
 import { describe, expect, it, vi, type Mock } from 'vitest'
 
 import { executeTerminalPastePlan, planTerminalPaste } from './terminal-paste-coordinator'
+import type { TerminalPasteExecutionResult } from './terminal-paste-model'
 import {
   createDeferredPasteFocusInHandler,
   createDeferredTerminalPasteQueue,
@@ -9,7 +10,8 @@ import {
   isFocusInsideOtherPane,
   resolveDeferredPasteFocusIn,
   TERMINAL_DEFERRED_PASTE_TIMEOUT_MS,
-  type DeferredTerminalPaste
+  type DeferredTerminalPaste,
+  type DeferredTerminalPasteDropCause
 } from './terminal-deferred-paste'
 
 type Timer = { id: number; callback: () => void; ms: number }
@@ -172,6 +174,38 @@ describe('deferred terminal paste queue', () => {
     expect(timers.live()).toEqual([])
   })
 
+  // The deadline is read at three entry points; `claim` is only one of them. A
+  // throttled timer means an expired payload must not answer as pending to any of
+  // them, or the focusin path resolves against a target it can no longer deliver to.
+  it('reports nothing pending once the deadline passes, timer fired or not', () => {
+    const timers = createTimerHarness()
+    const onExpire = vi.fn()
+    let nowMs = 1_000
+    const queue = createDeferredTerminalPasteQueue({ onExpire, now: () => nowMs, ...timers })
+
+    queue.defer(entry())
+    expect(queue.pendingTarget()).toEqual({ paneId: 1, leafId: 'leaf-a' })
+    nowMs += TERMINAL_DEFERRED_PASTE_TIMEOUT_MS + 1
+
+    expect(queue.pendingTarget()).toBe(null)
+    expect(onExpire).toHaveBeenCalledTimes(1)
+    expect(timers.live()).toEqual([])
+  })
+
+  it('reports not-pending on the deadline even when nothing claims it', () => {
+    const timers = createTimerHarness()
+    const onExpire = vi.fn()
+    let nowMs = 1_000
+    const queue = createDeferredTerminalPasteQueue({ onExpire, now: () => nowMs, ...timers })
+
+    queue.defer(entry())
+    expect(queue.isPending()).toBe(true)
+    nowMs += TERMINAL_DEFERRED_PASTE_TIMEOUT_MS
+
+    expect(queue.isPending()).toBe(false)
+    expect(onExpire).toHaveBeenCalledTimes(1)
+  })
+
   it('still honours a claim made inside the deadline', () => {
     const timers = createTimerHarness()
     const onExpire = vi.fn()
@@ -199,11 +233,22 @@ describe('deferred terminal paste queue', () => {
   })
 })
 
+// The executor's own result goes in whole: a caller that could spread three fields
+// out of it could pass a literal `chunksWritten: 0` over a partial write.
+const executionResult = (
+  overrides: Partial<TerminalPasteExecutionResult> = {}
+): TerminalPasteExecutionResult => ({
+  status: 'cancelled',
+  reason: 'stale-target',
+  chunksWritten: 0,
+  diagnostic: 'paste cancelled',
+  durationMs: 3,
+  ...overrides
+})
+
 describe('isDeferrablePasteFocusCancellation', () => {
   const base = {
-    status: 'cancelled' as const,
-    reason: 'stale-target' as const,
-    chunksWritten: 0,
+    execution: executionResult(),
     targetMounted: true,
     focusMovedToOtherPane: false
   }
@@ -227,21 +272,43 @@ describe('isDeferrablePasteFocusCancellation', () => {
   // terminal-paste-coordinator planning), so this pins the contract, not a
   // currently reachable pairing.
   it('refuses to defer anything that is not a cancellation, whatever the reason says', () => {
-    expect(isDeferrablePasteFocusCancellation({ ...base, status: 'rejected' })).toBe(false)
-    expect(isDeferrablePasteFocusCancellation({ ...base, status: 'pasted' })).toBe(false)
-  })
-
-  it('refuses to defer non-focus cancellations and rejections', () => {
-    expect(isDeferrablePasteFocusCancellation({ ...base, reason: 'target-disconnected' })).toBe(
-      false
-    )
-    expect(isDeferrablePasteFocusCancellation({ ...base, reason: 'operation-timeout' })).toBe(false)
-    expect(isDeferrablePasteFocusCancellation({ ...base, reason: undefined })).toBe(false)
     expect(
       isDeferrablePasteFocusCancellation({
         ...base,
-        status: 'rejected',
-        reason: 'payload-too-large'
+        execution: executionResult({ status: 'rejected' })
+      })
+    ).toBe(false)
+    expect(
+      isDeferrablePasteFocusCancellation({
+        ...base,
+        execution: executionResult({ status: 'pasted' })
+      })
+    ).toBe(false)
+  })
+
+  it('refuses to defer non-focus cancellations and rejections', () => {
+    expect(
+      isDeferrablePasteFocusCancellation({
+        ...base,
+        execution: executionResult({ reason: 'target-disconnected' })
+      })
+    ).toBe(false)
+    expect(
+      isDeferrablePasteFocusCancellation({
+        ...base,
+        execution: executionResult({ reason: 'operation-timeout' })
+      })
+    ).toBe(false)
+    expect(
+      isDeferrablePasteFocusCancellation({
+        ...base,
+        execution: executionResult({ reason: undefined })
+      })
+    ).toBe(false)
+    expect(
+      isDeferrablePasteFocusCancellation({
+        ...base,
+        execution: executionResult({ status: 'rejected', reason: 'payload-too-large' })
       })
     ).toBe(false)
   })
@@ -296,6 +363,7 @@ describe('deferred paste focus resolution', () => {
     })
 
     expect(resolution.action).toBe('drop')
+    expect(resolution.action === 'drop' && resolution.cause).toBe('focus-moved-to-other-pane')
     expect(resolution.action === 'drop' && resolution.entry?.text).toBe('dictated paragraph')
     expect(queue.isPending()).toBe(false)
   })
@@ -352,7 +420,9 @@ describe('deferred paste focusin handler', () => {
     handler: () => void
     queue: ReturnType<typeof createDeferredTerminalPasteQueue>
     deliver: Mock<(pane: { id: number }, deferred: DeferredTerminalPaste) => void>
-    onDropped: Mock<(deferred: DeferredTerminalPaste) => void>
+    onDropped: Mock<
+      (deferred: DeferredTerminalPaste, cause: DeferredTerminalPasteDropCause) => void
+    >
     onExpire: Mock<(deferred: DeferredTerminalPaste) => void>
     timers: ReturnType<typeof createTimerHarness>
     focusables: HTMLElement[]
@@ -373,7 +443,8 @@ describe('deferred paste focusin handler', () => {
     const onExpire = vi.fn<(deferred: DeferredTerminalPaste) => void>()
     const queue = createDeferredTerminalPasteQueue({ onExpire, ...timers })
     const deliver = vi.fn<(pane: { id: number }, deferred: DeferredTerminalPaste) => void>()
-    const onDropped = vi.fn<(deferred: DeferredTerminalPaste) => void>()
+    const onDropped =
+      vi.fn<(deferred: DeferredTerminalPaste, cause: DeferredTerminalPasteDropCause) => void>()
     const handler = createDeferredPasteFocusInHandler({
       queue,
       getPanes: () => panes,
@@ -429,6 +500,7 @@ describe('deferred paste focusin handler', () => {
 
     expect(scene.deliver).not.toHaveBeenCalled()
     expect(scene.onDropped).toHaveBeenCalledTimes(1)
+    expect(scene.onDropped.mock.calls[0]?.[1]).toBe('focus-moved-to-other-pane')
     expect(scene.queue.isPending()).toBe(false)
   })
 
@@ -509,24 +581,47 @@ describe('partially written pastes are not deferrable', () => {
     expect(writes.join('')).not.toBe('abcdefgh12345678zzzzzzzz')
   })
 
-  it('refuses to defer a cancellation that already wrote bytes to the pty', () => {
+  // End to end on the real executor: the verdict is taken from the result object
+  // the executor actually produced, never from fields re-stated by the caller.
+  it('refuses to defer the real executor result of a partially written paste', async () => {
+    const writes: string[] = []
+    let focusHeld = true
+    const execution = await executeTerminalPastePlan(chunkedPlan('abcdefgh12345678zzzzzzzz'), {
+      pasteText: () => {},
+      writePty: (data) => {
+        writes.push(data)
+        return true
+      },
+      isTargetCurrent: () => {
+        if (writes.length >= 1) {
+          focusHeld = false
+        }
+        return focusHeld
+      }
+    })
+
     expect(
       isDeferrablePasteFocusCancellation({
-        status: 'cancelled',
-        reason: 'stale-target',
-        chunksWritten: 3,
+        execution,
         targetMounted: true,
         focusMovedToOtherPane: false
       })
     ).toBe(false)
   })
 
-  it('still defers a cancellation that wrote nothing', () => {
+  it('still defers the real executor result of a paste cancelled before any write', async () => {
+    const execution = await executeTerminalPastePlan(chunkedPlan('abcdefgh12345678zzzzzzzz'), {
+      pasteText: () => {},
+      writePty: () => {
+        throw new Error('nothing may be written')
+      },
+      isTargetCurrent: () => false
+    })
+
+    expect(execution.chunksWritten).toBe(0)
     expect(
       isDeferrablePasteFocusCancellation({
-        status: 'cancelled',
-        reason: 'stale-target',
-        chunksWritten: 0,
+        execution,
         targetMounted: true,
         focusMovedToOtherPane: false
       })
@@ -543,7 +638,9 @@ describe('a deferred paste whose pane is destroyed before focus returns', () => 
     ptyWrites: string[]
     queue: ReturnType<typeof createDeferredTerminalPasteQueue>
     handler: () => void
-    onDropped: Mock<(deferred: DeferredTerminalPaste) => void>
+    onDropped: Mock<
+      (deferred: DeferredTerminalPaste, cause: DeferredTerminalPasteDropCause) => void
+    >
     onExpire: Mock<(deferred: DeferredTerminalPaste) => void>
     outside: HTMLInputElement
   } => {
@@ -563,7 +660,8 @@ describe('a deferred paste whose pane is destroyed before focus returns', () => 
     const ptyWrites: string[] = []
     const onExpire = vi.fn<(deferred: DeferredTerminalPaste) => void>()
     const queue = createDeferredTerminalPasteQueue({ onExpire, ...createTimerHarness() })
-    const onDropped = vi.fn<(deferred: DeferredTerminalPaste) => void>()
+    const onDropped =
+      vi.fn<(deferred: DeferredTerminalPaste, cause: DeferredTerminalPasteDropCause) => void>()
     const handler = createDeferredPasteFocusInHandler({
       queue,
       getPanes: () => panes,
@@ -589,6 +687,8 @@ describe('a deferred paste whose pane is destroyed before focus returns', () => 
     expect(scene.ptyWrites).toEqual([])
     expect(scene.onDropped).toHaveBeenCalledTimes(1)
     expect(scene.onDropped.mock.calls[0]?.[0]?.text).toBe('secret token')
+    // Not the deadline copy: this pane was closed, and the toast has to say so.
+    expect(scene.onDropped.mock.calls[0]?.[1]).toBe('target-pane-closed')
     // Retention: the clipboard text is released with the pane, not held to the deadline.
     expect(scene.queue.isPending()).toBe(false)
     expect(scene.onExpire).not.toHaveBeenCalled()
@@ -605,6 +705,7 @@ describe('a deferred paste whose pane is destroyed before focus returns', () => 
 
     expect(scene.ptyWrites).toEqual([])
     expect(scene.onDropped).toHaveBeenCalledTimes(1)
+    expect(scene.onDropped.mock.calls[0]?.[1]).toBe('target-pane-closed')
     expect(scene.queue.isPending()).toBe(false)
   })
 

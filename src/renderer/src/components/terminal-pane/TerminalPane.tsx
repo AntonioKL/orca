@@ -1977,7 +1977,9 @@ function TerminalPane(
       if (!deferredPasteRef.current) {
         deferredPasteRef.current = createDeferredTerminalPasteQueue({
           onExpire: () =>
-            setTerminalError(formatDeferredTerminalPasteDroppedError(shortcutPlatform))
+            setTerminalError(
+              formatDeferredTerminalPasteDroppedError('deadline-passed', shortcutPlatform)
+            )
         })
       }
       return deferredPasteRef.current
@@ -2040,9 +2042,7 @@ function TerminalPane(
         if (
           allowDeferOnFocusLoss &&
           isDeferrablePasteFocusCancellation({
-            status: execution.status,
-            reason: execution.reason,
-            chunksWritten: execution.chunksWritten,
+            execution,
             targetMounted: isPanePasteTargetMounted(pane, transport, ptyId),
             focusMovedToOtherPane: isFocusInsideOtherPane({
               panes: managerRef.current?.getPanes() ?? [],
@@ -2339,7 +2339,8 @@ function TerminalPane(
           deferred.options,
           false
         ),
-      onDropped: () => setTerminalError(formatDeferredTerminalPasteDroppedError(shortcutPlatform))
+      onDropped: (_entry, cause) =>
+        setTerminalError(formatDeferredTerminalPasteDroppedError(cause, shortcutPlatform))
     })
 
     container.addEventListener('keydown', onKeyPaste, { capture: true })

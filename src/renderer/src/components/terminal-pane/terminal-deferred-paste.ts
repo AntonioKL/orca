@@ -1,5 +1,4 @@
 import type {
-  TerminalPasteExecutionReason,
   TerminalPasteExecutionResult,
   TerminalPasteSource,
   TerminalPasteTextOptions
@@ -118,24 +117,24 @@ export function createDeferredTerminalPasteQueue({
  *  live target and no other pane has taken focus — the case the guard exists for.
  *  `chunksWritten` is load-bearing: the chunked writer re-checks focus between
  *  chunks, so a cancel can arrive with bytes already in the PTY, and redelivering
- *  the whole payload would duplicate everything written before the cancel. */
+ *  the whole payload would duplicate everything written before the cancel.
+ *  Why the whole `execution` rather than its three fields: a caller that spreads
+ *  them can quietly pass a literal `chunksWritten: 0` and reinstate the duplicate,
+ *  and no unit test of this function would notice. Taking the executor's own
+ *  result leaves the call site nothing to substitute. */
 export function isDeferrablePasteFocusCancellation({
-  status,
-  reason,
-  chunksWritten,
+  execution,
   targetMounted,
   focusMovedToOtherPane
 }: {
-  status: TerminalPasteExecutionResult['status']
-  reason: TerminalPasteExecutionReason | undefined
-  chunksWritten: number
+  execution: TerminalPasteExecutionResult
   targetMounted: boolean
   focusMovedToOtherPane: boolean
 }): boolean {
   return (
-    status === 'cancelled' &&
-    reason === 'stale-target' &&
-    chunksWritten === 0 &&
+    execution.status === 'cancelled' &&
+    execution.reason === 'stale-target' &&
+    execution.chunksWritten === 0 &&
     targetMounted &&
     !focusMovedToOtherPane
   )
@@ -147,10 +146,23 @@ type DeferredPasteFocusPane = {
   container: { contains: (node: Node | null) => boolean }
 }
 
+/** Why named rather than a single "dropped" signal: the deadline, a closed pane,
+ *  and focus landing in a sibling are three different things to tell the user, and
+ *  the timeout copy is wrong for the other two. */
+export type DeferredTerminalPasteDropCause =
+  | 'deadline-passed'
+  | 'target-pane-closed'
+  | 'focus-moved-to-other-pane'
+
 export type DeferredPasteFocusResolution<TPane extends DeferredPasteFocusPane> =
   | { action: 'ignore' }
   | { action: 'deliver'; pane: TPane; entry: DeferredTerminalPaste }
-  | { action: 'drop'; pane: TPane | null; entry: DeferredTerminalPaste | null }
+  | {
+      action: 'drop'
+      cause: Exclude<DeferredTerminalPasteDropCause, 'deadline-passed'>
+      pane: TPane | null
+      entry: DeferredTerminalPaste | null
+    }
 
 /** Focus landing back inside the deferred pane delivers it; focus landing in a
  *  different pane drops it, because that is the wrong-target case the guard protects. */
@@ -175,7 +187,12 @@ export function resolveDeferredPasteFocusIn<TPane extends DeferredPasteFocusPane
     panes.length > 0 &&
     !panes.some((candidate) => candidate.id === target.paneId && candidate.leafId === target.leafId)
   if (targetGone) {
-    return { action: 'drop', pane: pane ?? null, entry: queue.cancel() }
+    return {
+      action: 'drop',
+      cause: 'target-pane-closed',
+      pane: pane ?? null,
+      entry: queue.cancel()
+    }
   }
   if (!pane) {
     return { action: 'ignore' }
@@ -184,7 +201,7 @@ export function resolveDeferredPasteFocusIn<TPane extends DeferredPasteFocusPane
   if (entry) {
     return { action: 'deliver', pane, entry }
   }
-  return { action: 'drop', pane, entry: queue.cancel() }
+  return { action: 'drop', cause: 'focus-moved-to-other-pane', pane, entry: queue.cancel() }
 }
 
 /** True when focus currently sits in a pane other than the paste's own target. */
@@ -218,7 +235,10 @@ export function createDeferredPasteFocusInHandler<TPane extends DeferredPasteFoc
   getPanes: () => readonly TPane[]
   getFocusedElement: () => Node | null
   deliver: (pane: TPane, entry: DeferredTerminalPaste) => void
-  onDropped: (entry: DeferredTerminalPaste) => void
+  onDropped: (
+    entry: DeferredTerminalPaste,
+    cause: Exclude<DeferredTerminalPasteDropCause, 'deadline-passed'>
+  ) => void
 }): () => void {
   return () => {
     const resolution = resolveDeferredPasteFocusIn({
@@ -231,7 +251,7 @@ export function createDeferredPasteFocusInHandler<TPane extends DeferredPasteFoc
       return
     }
     if (resolution.action === 'drop' && resolution.entry) {
-      onDropped(resolution.entry)
+      onDropped(resolution.entry, resolution.cause)
     }
   }
 }
