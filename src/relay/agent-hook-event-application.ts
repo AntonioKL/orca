@@ -19,7 +19,16 @@ export function applyRelayEvent(options: {
   scheduleCodexReconciliation: (paneKey: string) => void
   scheduleCodexRestartReconciliation: (paneKey: string) => void
   clearAssistantMessageRetry: (paneKey: string) => void
+  isPaneSurfaceRetired: (paneKey: string) => boolean
 }): void {
+  // Why: this post came from a process still running inside a pane whose tab the user closed.
+  // Caching or forwarding it makes every connected client advertise a live, resumable agent pane
+  // that no tab owns — the advertisement that ends up auto-typing a second `--resume` onto a
+  // transcript the orphan is still writing (#12447). Drop the stale cache with it.
+  if (options.isPaneSurfaceRetired(options.event.paneKey)) {
+    options.clearPaneState(options.event.paneKey)
+    return
+  }
   if (options.event.payload.state !== 'done' || options.event.payload.lastAssistantMessage) {
     options.clearAssistantMessageRetry(options.event.paneKey)
   }

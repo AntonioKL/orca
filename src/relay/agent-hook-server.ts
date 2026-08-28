@@ -24,7 +24,6 @@ import {
 import {
   isAgentHookSource,
   REMOTE_AGENT_HOOK_ENV,
-  type AgentHookRelayEnvelope,
   type AgentHookSource
 } from '../shared/agent-hook-relay'
 import {
@@ -45,18 +44,21 @@ import { createRelayCodexReconciliationSchedulers } from './agent-hook-codex-rec
 import { RelayHookStatusCacheWriter } from './agent-hook-status-cache-writer'
 import { handleRelayHookRequest } from './agent-hook-request'
 import { applyRelayEvent } from './agent-hook-event-application'
-export type RelayHookForward = (envelope: AgentHookRelayEnvelope) => void
+import { selectReplayableCachedPanes } from './agent-hook-cached-pane-status'
+import type {
+  RelayHookForward,
+  RelayHookServerOptions,
+  RelayHookServerStartOptions
+} from './agent-hook-server-options'
+
+export type {
+  RelayHookForward,
+  RelayHookServerOptions,
+  RelayHookServerStartOptions
+} from './agent-hook-server-options'
+
 const HOOK_STATUS_CACHE_FILE = 'hook-status-cache.json'
-export type RelayHookServerOptions = {
-  endpointDir?: string
-  env?: string
-  token?: string
-  preferredPort?: number
-  forward: RelayHookForward
-}
-export type RelayHookServerStartOptions = {
-  publishEndpoint?: boolean
-}
+
 export class RelayAgentHookServer {
   private server: Server | null = null
   private port = 0
@@ -73,6 +75,7 @@ export class RelayAgentHookServer {
   // Invariant: keys mirror state.lastStatusByPaneKey, populated/cleared in lockstep.
   private lastEnvelopeMetaByPaneKey = new Map<string, RelayHookStatusMeta>()
   private forward: RelayHookForward
+  private isPaneSurfaceRetired: (paneKey: string) => boolean
   private fixedToken: string | undefined
   private preferredPort: number
   private portFallbackApplied = false
@@ -98,6 +101,7 @@ export class RelayAgentHookServer {
         this.lastEnvelopeMetaByPaneKey
       )
     )
+    this.isPaneSurfaceRetired = options.isPaneSurfaceRetired ?? (() => false)
     this.retryScheduler = new AgentHookResultRetryScheduler({
       state: this.state,
       env: this.env,
@@ -213,19 +217,18 @@ export class RelayAgentHookServer {
     this.lastEnvelopeMetaByPaneKey.clear()
   }
   replayCachedPayloadsForPanes(): number {
-    let count = 0
-    for (const [paneKey, event] of this.state.lastStatusByPaneKey.entries()) {
-      const meta = this.lastEnvelopeMetaByPaneKey.get(paneKey)
-      // Why: invariant — status-cache keys always have meta; if it drifted, skip rather than guess a source that mis-tags downstream.
-      if (!meta) {
-        continue
-      }
+    const replayable = selectReplayableCachedPanes({
+      cachedByPaneKey: this.state.lastStatusByPaneKey,
+      metaByPaneKey: this.lastEnvelopeMetaByPaneKey,
+      isPaneSurfaceRetired: this.isPaneSurfaceRetired,
+      dropPane: (paneKey) => this.clearPaneState(paneKey)
+    })
+    for (const { event, meta } of replayable) {
       this.forward(
         buildRelayHookEnvelope(event, meta.source, meta.env, meta.version, { isReplay: true })
       )
-      count++
     }
-    return count
+    return replayable.length
   }
 
   clearPaneState(paneKey: string): void {
@@ -302,7 +305,8 @@ export class RelayAgentHookServer {
       scheduleCodexReconciliation: this.codexReconciliationSchedulers.live,
       scheduleCodexRestartReconciliation: this.codexReconciliationSchedulers.restart,
       clearAssistantMessageRetry: (paneKey) =>
-        this.retryScheduler.clearAssistantMessageRetry(paneKey)
+        this.retryScheduler.clearAssistantMessageRetry(paneKey),
+      isPaneSurfaceRetired: this.isPaneSurfaceRetired
     })
   }
 }
