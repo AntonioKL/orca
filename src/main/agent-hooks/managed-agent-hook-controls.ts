@@ -54,6 +54,16 @@ export function resolveStartupManagedHookAction(
   return isAgentStatusHooksEnabled(settings) ? 'install' : 'skip'
 }
 
+export function shouldInstallStartupManagedAgentHook(
+  settings: ManagedHookSettings,
+  agent: AgentHookTarget
+): boolean {
+  return (
+    resolveStartupManagedHookAction(settings) === 'install' &&
+    !normalizeDisabledTuiAgents(settings?.disabledTuiAgents).includes(agent)
+  )
+}
+
 export function shouldContinueManagedHookStartup(
   isQuitting: boolean,
   settings: ManagedHookSettings,

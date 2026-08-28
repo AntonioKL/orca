@@ -46,6 +46,7 @@ import {
   installManagedAgentHooks,
   removeManagedAgentHooksAsync,
   resolveStartupManagedHookAction,
+  shouldInstallStartupManagedAgentHook,
   shouldContinueManagedHookStartup
 } from './managed-agent-hook-controls'
 
@@ -290,6 +291,41 @@ describe('startup managed hook reconciliation (STA-5679)', () => {
     expect(resolveStartupManagedHookAction({ agentStatusHooksEnabled: true })).toBe('install')
     expect(resolveStartupManagedHookAction({})).toBe('install')
     expect(resolveStartupManagedHookAction(null)).toBe('install')
+  })
+
+  it('only allows startup installs for globally enabled and agent-enabled hooks', () => {
+    expect(shouldInstallStartupManagedAgentHook({ agentStatusHooksEnabled: false }, 'codex')).toBe(
+      false
+    )
+    expect(
+      shouldInstallStartupManagedAgentHook(
+        { agentStatusHooksEnabled: true, disabledTuiAgents: ['codex'] },
+        'codex'
+      )
+    ).toBe(false)
+    expect(
+      shouldInstallStartupManagedAgentHook(
+        { agentStatusHooksEnabled: true, disabledTuiAgents: ['claude'] },
+        'codex'
+      )
+    ).toBe(true)
+  })
+
+  it('does not remove disabled agents during startup install reconciliation', async () => {
+    const settings = {
+      agentStatusHooksEnabled: true,
+      agentCmdOverrides: {},
+      disabledTuiAgents: ['claude' as const]
+    }
+    mocks.detect.mockResolvedValue({ codex: { state: 'found' } })
+
+    await installManagedAgentHooks(settings, {
+      shouldContinue: (agent) => shouldContinueManagedHookStartup(false, settings, agent)
+    })
+
+    expect(mocks.removeClaude).not.toHaveBeenCalled()
+    expect(mocks.installClaude).not.toHaveBeenCalled()
+    expect(mocks.installCodex).toHaveBeenCalledTimes(1)
   })
 
   it('still removes through the explicit Settings toggle', async () => {

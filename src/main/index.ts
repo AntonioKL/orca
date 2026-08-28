@@ -89,10 +89,11 @@ import {
   sweepRestoredSubagentsWithoutLiveAgent
 } from './agent-hooks/restored-subagent-liveness-sweep'
 import {
-  applyAgentStatusHooksEnabled,
+  installManagedAgentHooks,
   isAgentStatusHooksEnabled,
   removeManagedAgentHooksAsync,
   resolveStartupManagedHookAction,
+  shouldInstallStartupManagedAgentHook,
   shouldContinueManagedHookStartup
 } from './agent-hooks/managed-agent-hook-controls'
 import { initCohortClassifier } from './telemetry/cohort-classifier'
@@ -3089,25 +3090,29 @@ void app.whenReady().then(async () => {
   // ordered before managed-hook reconciliation — an incapable host must re-arm
   // and complete the legacy real-home sweep first — but awaiting it inline
   // stalled app init behind that session, so chain instead of blocking.
-  const realHomeCodexHookState = codexRuntimeHome.isHostSystemDefaultRealHomeSelected()
-    ? ensureRealHomeCodexHookState({
-        hooksEnabled: isAgentStatusHooksEnabled(store.getSettings()),
-        userDataPath: app.getPath('userData')
-      }).catch((error: unknown) => {
-        console.warn('[codex-real-home-hooks] startup ensure failed:', error)
-      })
-    : Promise.resolve()
+  const startupManagedHookSettings = store.getSettings()
+  const shouldReconcileStartupManagedHooks =
+    shouldInstallManagedHooks(is.dev) &&
+    resolveStartupManagedHookAction(startupManagedHookSettings) === 'install'
+  const realHomeCodexHookState =
+    shouldReconcileStartupManagedHooks &&
+    shouldInstallStartupManagedAgentHook(startupManagedHookSettings, 'codex') &&
+    codexRuntimeHome.isHostSystemDefaultRealHomeSelected()
+      ? ensureRealHomeCodexHookState({
+          hooksEnabled: true,
+          userDataPath: app.getPath('userData')
+        }).catch((error: unknown) => {
+          console.warn('[codex-real-home-hooks] startup ensure failed:', error)
+        })
+      : Promise.resolve()
   // Why skip rather than remove when the off switch is set: the hook files are user-global but this
   // decision reads only THIS profile's settings, so removing here deletes the hooks every other Orca
   // instance depends on (STA-5679). Skipping already keeps removed hooks from reappearing on launch.
-  if (
-    shouldInstallManagedHooks(is.dev) &&
-    resolveStartupManagedHookAction(store.getSettings()) === 'install'
-  ) {
+  if (shouldReconcileStartupManagedHooks) {
     const managedHookStore = store
     void realHomeCodexHookState
       .then(() =>
-        applyAgentStatusHooksEnabled(true, managedHookStore.getSettings(), {
+        installManagedAgentHooks(managedHookStore.getSettings(), {
           shouldHydrateShellPath: app.isPackaged,
           onInstallError: recordManagedHookInstallFailure,
           shouldContinue: (agent) => {
