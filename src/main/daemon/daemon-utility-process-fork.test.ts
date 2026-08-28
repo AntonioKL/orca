@@ -1,4 +1,7 @@
 import { EventEmitter } from 'node:events'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setAppEnvironment, type AppEnvironment } from '../../shared/app-environment'
 import {
@@ -34,8 +37,11 @@ const SPEC: UtilityDaemonForkSpec = {
 let shim: FakeShim
 let forkedPaths: string[]
 
-const forkFn: UtilityProcessForkFn = (modulePath) => {
+let forkOptions: (Record<string, unknown> | undefined)[]
+
+const forkFn: UtilityProcessForkFn = (modulePath, _args, options) => {
   forkedPaths.push(modulePath)
+  forkOptions.push(options)
   return shim
 }
 
@@ -47,11 +53,9 @@ async function forkSettledChild() {
   return await promise
 }
 
-beforeEach(() => {
-  shim = new FakeShim()
-  forkedPaths = []
+function setFakeAppEnvironment(appPath: string): void {
   setAppEnvironment({
-    getAppPath: () => '/fake/app',
+    getAppPath: () => appPath,
     getPath: () => '/fake/userData',
     getVersion: () => '1.2.3',
     isPackaged: () => false,
@@ -59,6 +63,20 @@ beforeEach(() => {
     exit: () => {},
     getAppMetrics: () => []
   } as unknown as AppEnvironment)
+}
+
+/** Runs a body against a throwaway bundle root so shim-path resolution is real. */
+function withBundleRoot(body: (appPath: string) => Promise<void>): Promise<void> {
+  const appPath = mkdtempSync(join(tmpdir(), 'orca-shim-path-'))
+  setFakeAppEnvironment(appPath)
+  return body(appPath).finally(() => rmSync(appPath, { recursive: true, force: true }))
+}
+
+beforeEach(() => {
+  shim = new FakeShim()
+  forkedPaths = []
+  forkOptions = []
+  setFakeAppEnvironment('/fake/app')
 })
 
 afterEach(() => {
@@ -186,16 +204,65 @@ describe('forkDaemonThroughUtilityProcess', () => {
     child.on('error', (error) => errors.push(error))
     shim.emit('exit', 1)
     expect(errors).toHaveLength(1)
-    expect(errors[0].message).toContain('before the daemon settled')
+    // Exact: with no fatal error recorded the message must not trail a cause.
+    expect(errors[0].message).toBe('Daemon utility launcher exited before the daemon settled')
+  })
+
+  it('carries a post-launch fatal shim error into the child error as the cause', async () => {
+    const child = await forkSettledChild()
+    const errors: Error[] = []
+    child.on('error', (error) => errors.push(error))
+    // Electron emits 'error' then 'exit'; failing the settled launch again would
+    // drop the cause, leaving only "exited before the daemon settled" to triage.
+    shim.emit('error', 'FatalError', 'v8::internal::Heap', '{}')
+    shim.emit('exit', 1)
+    expect(errors).toHaveLength(1)
+    expect(errors[0].message).toBe(
+      'Daemon utility launcher exited before the daemon settled: Daemon utility launcher hit a fatal error: FatalError at v8::internal::Heap'
+    )
   })
 
   it('suppresses late daemon-error relays after release: no listener remains to catch them', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const child = await forkSettledChild()
+      child.disconnect()
+      // Would be an uncaught exception if emitted with no 'error' listener.
+      expect(() =>
+        shim.emit('message', { kind: 'daemon-error', message: 'late failure' })
+      ).not.toThrow()
+      // The launch already succeeded and the daemon is detached; degrading this
+      // to the no-listener warn would log a launch failure that did not happen.
+      expect(warnSpy).not.toHaveBeenCalled()
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('treats the shim exit that follows a relayed daemon exit as shutdown, not a launch failure', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      await forkSettledChild()
+      shim.emit('message', { kind: 'daemon-exit', code: 1, signal: null })
+      expect(shim.killed).toBe(true)
+      // Electron emits 'exit' after that kill(), by which point the launcher has
+      // already dropped its startup listeners and reported the real exit code.
+      shim.emit('exit', 0)
+      expect(warnSpy).not.toHaveBeenCalled()
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('releases a shim that is already gone without throwing out of disconnect', async () => {
     const child = await forkSettledChild()
-    child.disconnect()
-    // Would be an uncaught exception if emitted with no 'error' listener.
-    expect(() =>
-      shim.emit('message', { kind: 'daemon-error', message: 'late failure' })
-    ).not.toThrow()
+    // Reachable: a daemon that dies during startup makes the exit relay kill the
+    // shim, and the launcher's cleanup path still calls disconnect() afterwards.
+    shim.postMessage = () => {
+      throw new Error('Utility process is not running')
+    }
+    expect(() => child.disconnect()).not.toThrow()
+    expect(child.connected).toBe(false)
   })
 
   // Pre-guard, every leg below re-raised as [main_uncaught_exception]: the relay
@@ -243,6 +310,44 @@ describe('forkDaemonThroughUtilityProcess', () => {
       } finally {
         warnSpy.mockRestore()
       }
+    })
+  })
+
+  it('forks through the port the desktop installed when called with a spec alone', async () => {
+    // The only shape production uses: daemon-init passes no fork argument.
+    setDaemonUtilityProcessFork(forkFn)
+    const promise = forkDaemonThroughUtilityProcess(SPEC)
+    shim.emit('message', { kind: 'shim-ready' })
+    shim.emit('message', { kind: 'spawned', pid: 777 })
+    await expect(promise).resolves.toMatchObject({ pid: 777 })
+    expect(forkedPaths).toHaveLength(1)
+  })
+
+  it('gives the shim no inheritable stdio and a named service entry', async () => {
+    await forkSettledChild()
+    // 'ignore': nobody drains the shim's output, and an unread pipe from main
+    // both blocks exit and hands the shim descriptors this hop exists to avoid.
+    expect(forkOptions[0]).toEqual({ stdio: 'ignore', serviceName: 'orca-daemon-launcher' })
+  })
+
+  it('rejects by name when no port is installed rather than throwing a bare TypeError', async () => {
+    await expect(forkDaemonThroughUtilityProcess(SPEC)).rejects.toThrow(
+      'No utility-process fork is installed on this host'
+    )
+  })
+
+  it('resolves the shim under out/main, the layout every host taking the hop ships', async () => {
+    await withBundleRoot(async (appPath) => {
+      await forkSettledChild()
+      expect(forkedPaths[0]).toBe(join(appPath, 'out', 'main', 'daemon-utility-launcher-shim.js'))
+    })
+  })
+
+  it('prefers a shim sitting directly in the bundle root when one is there', async () => {
+    await withBundleRoot(async (appPath) => {
+      writeFileSync(join(appPath, 'daemon-utility-launcher-shim.js'), '')
+      await forkSettledChild()
+      expect(forkedPaths[0]).toBe(join(appPath, 'daemon-utility-launcher-shim.js'))
     })
   })
 

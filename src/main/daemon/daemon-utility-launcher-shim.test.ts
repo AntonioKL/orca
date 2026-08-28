@@ -172,12 +172,33 @@ describe('daemon-utility-launcher-shim', () => {
 
   it('relays the daemon exit code from a real child', async () => {
     const port = createFakePort()
-    runDaemonUtilityLauncherShim(port, undefined, () => {})
+    const exit = vi.fn()
+    runDaemonUtilityLauncherShim(port, undefined, exit)
     port.deliver({ kind: 'spawn', spec: specFor(EXITING_FIXTURE) })
 
     const spawned = await port.waitFor('spawned')
     spawnedPids.push(spawned.pid)
     const exited = await port.waitFor('daemon-exit')
     expect(exited).toEqual({ kind: 'daemon-exit', code: 7, signal: null })
+    // Exiting inside the relay would race process.exit against delivery of the
+    // exit code the launcher reports as the startup-failure cause.
+    expect(exit).not.toHaveBeenCalled()
+  })
+
+  it('releases a shim whose daemon already exited without posting a phantom daemon error', async () => {
+    const port = createFakePort()
+    const exit = vi.fn()
+    runDaemonUtilityLauncherShim(port, undefined, exit)
+    port.deliver({ kind: 'spawn', spec: specFor(EXITING_FIXTURE) })
+
+    const spawned = await port.waitFor('spawned')
+    spawnedPids.push(spawned.pid)
+    await port.waitFor('daemon-exit')
+
+    // Release still arrives here: the parent kills this shim on the exit relay,
+    // but its own cleanup path calls disconnect() and kills are not instant.
+    port.deliver({ kind: 'release' })
+    expect(exit).toHaveBeenCalledWith(0)
+    expect(port.posted.filter((message) => message.kind === 'daemon-error')).toEqual([])
   })
 })
