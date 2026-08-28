@@ -87,6 +87,9 @@ export class DaemonPtyAdapter extends DaemonPtyDaemonRecovery implements IPtyPro
         ) {
           return
         }
+        // Why here and not on any other absence: this is the one place the daemon
+        // reports a process it watched go, so it is the only absence that proves an exit.
+        this.sessionExitObservations.recordExit(event.sessionId)
         this.activeSessionIds.delete(event.sessionId)
         this.clearSessionAwaitingDaemonRecovery(event.sessionId)
         this.dirtySessionVersions.delete(event.sessionId)
@@ -123,6 +126,12 @@ export class DaemonPtyAdapter extends DaemonPtyDaemonRecovery implements IPtyPro
         }
       }
     })
+  }
+
+  // Why the adapter and not the router: only the adapter sees the daemon's exit events,
+  // and only ids it watched exit may answer `exited` (docs/reference/ssh-execution-boundary.md).
+  ptyAbsenceVerdict(id: string): 'exited' | 'unverifiable' {
+    return this.sessionExitObservations.verdict(id)
   }
 
   async closeStartupQueryAuthority(id: string): Promise<number> {

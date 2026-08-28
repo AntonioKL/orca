@@ -22,6 +22,7 @@ import {
   type TakePendingOutputResult
 } from './types'
 import { ColdRestorePayloadCache } from './cold-restore-payload-cache'
+import { DaemonSessionExitObservations } from './daemon-session-exit-observations'
 import {
   HistoryManager,
   type HistoryCheckpointResult,
@@ -121,6 +122,14 @@ export abstract class DaemonPtyRuntimeState {
     this.sleepRestoreSessionIds.delete(sessionId)
   })
   protected activeSessionIds = new Set<string>()
+  protected readonly sessionExitObservations = new DaemonSessionExitObservations()
+
+  /** The one way a session becomes live again: tracking and its exit certificate move together,
+   *  so a reused session id can never answer for the incarnation that already died. */
+  protected markSessionActive(sessionId: string): void {
+    this.activeSessionIds.add(sessionId)
+    this.sessionExitObservations.clearForLiveSession(sessionId)
+  }
   protected getSizeUnsupported = false
   protected sessionsAwaitingDaemonRecovery = new Set<string>()
   protected sessionIncarnations = new Map<string, string>()

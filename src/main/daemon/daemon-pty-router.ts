@@ -85,6 +85,16 @@ export class DaemonPtyRouter implements IPtyProvider {
     return this.current.hasPty(id) || this.legacy.some((adapter) => adapter.hasPty(id))
   }
 
+  // Why every adapter and not the route: the exit fan-out forgets a session's route before
+  // anything reads this, so a routed-only lookup turns every watched exit `unverifiable`.
+  // Widening is safe because each adapter vouches only for exits it watched — an id no
+  // adapter observed still answers `unverifiable` rather than borrowing a death certificate.
+  ptyAbsenceVerdict(id: string): 'exited' | 'unverifiable' {
+    return this.allAdapters().some((adapter) => adapter.ptyAbsenceVerdict(id) === 'exited')
+      ? 'exited'
+      : 'unverifiable'
+  }
+
   async probePtyLiveness(id: string): Promise<boolean | null> {
     return await this.ownerResolver.probe(id)
   }
