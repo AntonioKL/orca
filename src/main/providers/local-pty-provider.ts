@@ -822,7 +822,8 @@ export class LocalPtyProvider implements IPtyProvider {
             waitsForShellReady,
             // Why identical: the identity marker exists so the readiness
             // handshake can bind output to the right shell PID.
-            emitsStartupIdentity: waitsForShellReady
+            emitsStartupIdentity: waitsForShellReady,
+            injectsCommandMarkers: true
           }),
           { commandNonce, hostClass: 'local-native' }
         )

@@ -44,6 +44,8 @@ export type ShellStartupFeatureInput = {
   waitsForShellReady: boolean
   /** True when Orca needs the shell to announce its PID at startup. */
   emitsStartupIdentity: boolean
+  /** True only when the owning provider can consume private command markers. */
+  injectsCommandMarkers?: boolean
 }
 
 function shellName(shellPath: string): string {
@@ -77,7 +79,7 @@ export function selectShellStartupFeatures(input: ShellStartupFeatureInput): She
   if (history) {
     features.push('history')
   }
-  if (wrappedBefore || supportedCommandMarkerShell) {
+  if (wrappedBefore || (input.injectsCommandMarkers === true && supportedCommandMarkerShell)) {
     features.push('markers')
   }
   if (ready) {

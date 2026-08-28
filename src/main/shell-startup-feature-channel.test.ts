@@ -7,8 +7,8 @@
  *    `process.env` can turn a feature on or off for a shell or its children.
  *    (#15197 shipped exported switches twice and re-broke #11146 and agent
  *    status both times.)
- * 2. Behaviour parity — a pane wrapped only because Orca injected a worktree
- *    HISTFILE runs exactly what an unwrapped pane runs, with no OSC 133.
+ * 2. Behaviour parity — widening wrapping for private command markers preserves
+ *    the user's startup files, history path, ZDOTDIR handback, and line editor.
  */
 import { execFileSync, spawnSync } from 'node:child_process'
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -47,6 +47,7 @@ describe('shell startup feature selection', () => {
       selectShellStartupFeatures({
         shellPath: '/bin/zsh',
         env: { ORCA_SHELL_FEATURES: 'overlay,markers,ready,identity,history' },
+        injectsCommandMarkers: true,
         ...PLAIN_PANE
       })
     ).toEqual(['markers'])
@@ -59,6 +60,7 @@ describe('shell startup feature selection', () => {
       selectShellStartupFeatures({
         shellPath: '/bin/zsh',
         env: { ORCA_SHELL_FEATURES: '', ORCA_HISTFILE: '/tmp/wt/zsh_history' },
+        injectsCommandMarkers: true,
         ...PLAIN_PANE
       })
     ).toEqual(['history', 'markers'])
@@ -69,6 +71,7 @@ describe('shell startup feature selection', () => {
       selectShellStartupFeatures({
         shellPath: '/bin/zsh',
         env: { ORCA_HISTFILE: '/tmp/wt/zsh_history' },
+        injectsCommandMarkers: true,
         ...PLAIN_PANE
       })
     ).toContain('markers')
@@ -91,9 +94,16 @@ describe('shell startup feature selection', () => {
       selectShellStartupFeatures({
         shellPath: '/bin/bash',
         env: { ORCA_HISTFILE: '/tmp/wt/bash_history' },
+        injectsCommandMarkers: true,
         ...PLAIN_PANE
       })
     ).toEqual(['markers'])
+  })
+
+  it('does not widen wrapping for a caller without private marker intake', () => {
+    expect(selectShellStartupFeatures({ shellPath: '/bin/zsh', env: {}, ...PLAIN_PANE })).toEqual(
+      []
+    )
   })
 })
 
@@ -240,10 +250,11 @@ describePosix('epilogue under hostile user shell options', () => {
         env: spawnEnv,
         hasStartupCommand: true,
         waitsForShellReady: true,
-        emitsStartupIdentity: true
+        emitsStartupIdentity: true,
+        injectsCommandMarkers: true
       })
       const { getShellLaunchConfig } = await importFreshLocalPtyShellReady()
-      const launch = getShellLaunchConfig(ZSH_PATH, features)
+      const launch = getShellLaunchConfig(ZSH_PATH, features, { commandNonce: 'test-nonce' })
 
       // Why a PTY: every feature is delivered from a precmd hook, and a shell
       // started with -c never reaches a prompt to run one.
@@ -312,6 +323,7 @@ describePosix('history-only pane in a real zsh', () => {
     const features = selectShellStartupFeatures({
       shellPath: ZSH_PATH,
       env: spawnEnv,
+      injectsCommandMarkers: true,
       ...PLAIN_PANE
     })
     expect(features).toEqual(['history', 'markers'])
@@ -360,7 +372,7 @@ describePosix('history-only pane in a real zsh', () => {
       'PRECMD="${precmd_functions[*]}"; PREEXEC="${preexec_functions[*]}"',
       'LINEINIT="${widgets[zle-line-init]:-none}"'
     ]
-    const report = ['PRECMD', 'PREEXEC', 'LINEINIT', 'ZDOTDIR', 'ORCA_SHELL_FEATURES']
+    const report = ['PRECMD', 'PREEXEC', 'LINEINIT', 'ZDOTDIR', 'HISTFILE', 'ORCA_SHELL_FEATURES']
 
     const wrapped = await runZshPty({ env, commands: capture, report })
     const unwrapped = await runZshPty({
@@ -380,6 +392,7 @@ describePosix('history-only pane in a real zsh', () => {
     expect(wrapped.values.LINEINIT).toBe(unwrapped.values.LINEINIT)
     // ZDOTDIR matches too, because the wrapper hands back exactly what it found.
     expect(wrapped.values.ZDOTDIR).toBe(unwrapped.values.ZDOTDIR)
+    expect(wrapped.values.HISTFILE).toBe(env.HISTFILE)
     expect(wrapped.values.ORCA_SHELL_FEATURES).toBe('UNSET')
   })
 })

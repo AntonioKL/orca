@@ -222,7 +222,8 @@ export function createPtyShellLaunchPlan(
         env,
         hasStartupCommand: Boolean(opts.command),
         waitsForShellReady,
-        emitsStartupIdentity: waitsForShellReady
+        emitsStartupIdentity: waitsForShellReady,
+        injectsCommandMarkers: true
       }),
       { commandNonce }
     )

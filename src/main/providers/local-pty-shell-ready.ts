@@ -48,6 +48,7 @@ export type ShellReadyLaunchConfig = {
   supportsCommandMarkers: boolean
   failureReason?:
     | 'host-class-disabled'
+    | 'marker-injection-unavailable'
     | 'unsupported-shell'
     | 'wrapper-tree-unavailable'
     | 'fish-init-unavailable'
@@ -89,18 +90,27 @@ export function getShellLaunchConfig(
 ): ShellReadyLaunchConfig {
   const shellName = pathWin32.basename(basename(shellPath)).toLowerCase()
   const commandMarkersRequested = features.includes('markers')
+  const commandMarkerPolicyEnabled =
+    !options.hostClass || isShellCommandMarkerInjectionEnabled(options.hostClass)
   const commandMarkersEnabled =
-    commandMarkersRequested &&
-    (!options.hostClass || isShellCommandMarkerInjectionEnabled(options.hostClass))
+    commandMarkersRequested && commandMarkerPolicyEnabled && Boolean(options.commandNonce)
+  const effectiveFeatures = commandMarkersEnabled
+    ? features
+    : features.filter((feature) => feature !== 'markers')
   const markerEnv =
     commandMarkersEnabled && options.commandNonce ? shellCommandMarkerEnv(options.commandNonce) : {}
 
-  if (commandMarkersRequested && !commandMarkersEnabled) {
-    return { ...UNWRAPPED, failureReason: 'host-class-disabled' }
+  if (commandMarkersRequested && effectiveFeatures.length === 0) {
+    return {
+      ...UNWRAPPED,
+      failureReason: commandMarkerPolicyEnabled
+        ? 'marker-injection-unavailable'
+        : 'host-class-disabled'
+    }
   }
 
   if (shellName === 'zsh') {
-    if (features.length === 0) {
+    if (effectiveFeatures.length === 0) {
       return UNWRAPPED
     }
     if (!wrapperTreeUsable()) {
@@ -118,16 +128,16 @@ export function getShellLaunchConfig(
       env: {
         ...inheritedZdotdirEnv(resolveInheritedZdotdir(process.env)),
         ZDOTDIR: `${getShellReadyWrapperRoot()}/zsh`,
-        [SHELL_STARTUP_FEATURE_ENV]: encodeShellStartupFeatures(features),
+        [SHELL_STARTUP_FEATURE_ENV]: encodeShellStartupFeatures(effectiveFeatures),
         ...markerEnv
       },
-      supportsReadyMarker: features.includes('ready'),
+      supportsReadyMarker: effectiveFeatures.includes('ready'),
       supportsCommandMarkers: commandMarkersEnabled
     }
   }
 
   if (shellName === 'bash') {
-    if (features.length === 0) {
+    if (effectiveFeatures.length === 0) {
       return UNWRAPPED
     }
     ensureShellReadyWrappers()
@@ -139,10 +149,10 @@ export function getShellLaunchConfig(
       mode: 'wrapped',
       args,
       env: {
-        [SHELL_STARTUP_FEATURE_ENV]: encodeShellStartupFeatures(features),
+        [SHELL_STARTUP_FEATURE_ENV]: encodeShellStartupFeatures(effectiveFeatures),
         ...markerEnv
       },
-      supportsReadyMarker: features.includes('ready'),
+      supportsReadyMarker: effectiveFeatures.includes('ready'),
       supportsCommandMarkers: commandMarkersEnabled
     }
   }
@@ -164,10 +174,10 @@ export function getShellLaunchConfig(
 
   // Why: mirrors daemon/shell-ready.ts; markerless fish stays unwrapped. The
   // selection is baked into the init command, so fish needs no feature env var.
-  if (shellName === 'fish' && (features.includes('ready') || commandMarkersEnabled)) {
+  if (shellName === 'fish' && (effectiveFeatures.includes('ready') || commandMarkersEnabled)) {
     const initCommands = [
       commandMarkersEnabled ? getFishCommandMarkerInitCommand() : null,
-      features.includes('ready')
+      effectiveFeatures.includes('ready')
         ? `${getFishShellReadyInitCommand(SHELL_READY_MARKER_ESCAPED)}\n${getFishCodexShellLaunchPreflight()}`
         : null
     ].filter((command): command is string => command !== null)
@@ -175,7 +185,7 @@ export function getShellLaunchConfig(
       mode: 'wrapped',
       args: ['-l', '-C', initCommands.join('\n')],
       env: markerEnv,
-      supportsReadyMarker: features.includes('ready'),
+      supportsReadyMarker: effectiveFeatures.includes('ready'),
       supportsCommandMarkers: commandMarkersEnabled
     }
   }

@@ -123,7 +123,11 @@ export type ShellLaunchConfig = {
   env: Record<string, string>
   supportsReadyMarker: boolean
   supportsCommandMarkers: boolean
-  failureReason?: 'host-class-disabled' | 'unsupported-shell' | 'wrapper-tree-unavailable'
+  failureReason?:
+    | 'host-class-disabled'
+    | 'marker-injection-unavailable'
+    | 'unsupported-shell'
+    | 'wrapper-tree-unavailable'
 }
 
 const UNWRAPPED: ShellLaunchConfig = {
@@ -146,16 +150,25 @@ export function getShellLaunchConfig(
 ): ShellLaunchConfig {
   const shellName = pathWin32.basename(basename(shellPath)).toLowerCase()
   const commandMarkersRequested = features.includes('markers')
+  const commandMarkerPolicyEnabled = isShellCommandMarkerInjectionEnabled('daemon-native')
   const commandMarkersEnabled =
-    commandMarkersRequested && isShellCommandMarkerInjectionEnabled('daemon-native')
+    commandMarkersRequested && commandMarkerPolicyEnabled && Boolean(options.commandNonce)
+  const effectiveFeatures = commandMarkersEnabled
+    ? features
+    : features.filter((feature) => feature !== 'markers')
   const markerEnv =
     commandMarkersEnabled && options.commandNonce ? shellCommandMarkerEnv(options.commandNonce) : {}
-  if (commandMarkersRequested && !commandMarkersEnabled) {
-    return { ...UNWRAPPED, failureReason: 'host-class-disabled' }
+  if (commandMarkersRequested && effectiveFeatures.length === 0) {
+    return {
+      ...UNWRAPPED,
+      failureReason: commandMarkerPolicyEnabled
+        ? 'marker-injection-unavailable'
+        : 'host-class-disabled'
+    }
   }
 
   if (shellName === 'zsh') {
-    if (features.length === 0) {
+    if (effectiveFeatures.length === 0) {
       return UNWRAPPED
     }
     if (!ensureShellReadyWrappers()) {
@@ -169,26 +182,26 @@ export function getShellLaunchConfig(
       env: {
         ...inheritedZdotdirEnv(resolveInheritedZdotdir(process.env)),
         ZDOTDIR: join(getShellReadyWrapperRoot(), 'zsh'),
-        [SHELL_STARTUP_FEATURE_ENV]: encodeShellStartupFeatures(features),
+        [SHELL_STARTUP_FEATURE_ENV]: encodeShellStartupFeatures(effectiveFeatures),
         ...markerEnv
       },
-      supportsReadyMarker: features.includes('ready'),
+      supportsReadyMarker: effectiveFeatures.includes('ready'),
       supportsCommandMarkers: commandMarkersEnabled
     }
   }
 
   if (shellName === 'bash') {
-    if (features.length === 0 || !ensureShellReadyWrappers()) {
+    if (effectiveFeatures.length === 0 || !ensureShellReadyWrappers()) {
       return UNWRAPPED
     }
     return {
       mode: 'wrapped',
       args: ['--rcfile', join(getShellReadyWrapperRoot(), 'bash', 'rcfile')],
       env: {
-        [SHELL_STARTUP_FEATURE_ENV]: encodeShellStartupFeatures(features),
+        [SHELL_STARTUP_FEATURE_ENV]: encodeShellStartupFeatures(effectiveFeatures),
         ...markerEnv
       },
-      supportsReadyMarker: features.includes('ready'),
+      supportsReadyMarker: effectiveFeatures.includes('ready'),
       supportsCommandMarkers: commandMarkersEnabled
     }
   }
@@ -210,10 +223,10 @@ export function getShellLaunchConfig(
 
   // Why: mirrors local-pty-shell-ready.ts; markerless fish stays unwrapped. The
   // selection is baked into the init command, so fish needs no feature env var.
-  if (shellName === 'fish' && (features.includes('ready') || commandMarkersEnabled)) {
+  if (shellName === 'fish' && (effectiveFeatures.includes('ready') || commandMarkersEnabled)) {
     const initCommands = [
       commandMarkersEnabled ? getFishCommandMarkerInitCommand() : null,
-      features.includes('ready')
+      effectiveFeatures.includes('ready')
         ? `${getFishShellReadyInitCommand(SHELL_READY_MARKER)}\n${getFishCodexShellLaunchPreflight()}`
         : null
     ].filter((command): command is string => command !== null)
@@ -221,7 +234,7 @@ export function getShellLaunchConfig(
       mode: 'wrapped',
       args: ['-l', '-C', initCommands.join('\n')],
       env: markerEnv,
-      supportsReadyMarker: features.includes('ready'),
+      supportsReadyMarker: effectiveFeatures.includes('ready'),
       supportsCommandMarkers: commandMarkersEnabled
     }
   }

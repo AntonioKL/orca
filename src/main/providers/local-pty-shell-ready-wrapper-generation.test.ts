@@ -166,9 +166,12 @@ describePosix('local PTY shell-ready launch config', () => {
     const config = getShellReadyLaunchConfig('/opt/homebrew/bin/fish')
 
     expect(config.supportsReadyMarker).toBe(true)
-    // Why empty: fish's selection is baked into the init command text, so it
-    // needs no exported feature variable at all.
-    expect(config.env).toEqual({})
+    // Fish's feature selection is baked into the init command; only the private
+    // marker nonce crosses through env and the wrapper consumes it immediately.
+    expect(config.env).toEqual({
+      ORCA_SHELL_COMMAND_NONCE: 'test-nonce',
+      ORCA_SHELL_INTEGRATION_CONTEXT: 'direct'
+    })
     expect(config.args?.slice(0, 2)).toEqual(['-l', '-C'])
     const init = config.args?.[2] ?? ''
     expect(init).toContain('--on-event fish_prompt')
