@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AppState } from '../types'
+import type { WorkspaceCleanupCandidate } from '../../../../shared/workspace-cleanup'
+import { canQueueWorkspaceCleanupCandidate } from '../../../../shared/workspace-cleanup'
+import { buildWorkspaceCleanupFacets } from '@/components/workspace-cleanup/workspace-cleanup-facets'
 import { enrichWorkspaceCleanupCandidates } from './workspace-cleanup-candidate-enrichment'
 import { probeTerminalLiveness } from './workspace-cleanup-local-evidence'
 import { WORKTREE_ID, makeCandidate, makeState } from './workspace-cleanup-slice-test-harness'
@@ -66,6 +69,15 @@ function stateWithOnePty(overrides: Partial<AppState> = {}): AppState {
   })
 }
 
+/**
+ * The gate the dialog actually reads. `tier`/`selectedByDefault` are @deprecated and no
+ * renderer consults them, so asserting on those would pass against dead code and read as
+ * protection that does not exist.
+ */
+function isSweptBySelectAll(candidate: WorkspaceCleanupCandidate): boolean {
+  return buildWorkspaceCleanupFacets(candidate).isSelectable
+}
+
 async function enrichOne(state: AppState) {
   const [candidate] = await enrichWorkspaceCleanupCandidates([makeCandidate()], state, {
     applyDismissals: false
@@ -102,8 +114,10 @@ describe('a degraded terminal read is unverifiable, never idle', () => {
 
     expect(candidate.blockers).toContain('terminal-liveness-unknown')
     expect(candidate.blockers).not.toContain('running-terminal')
-    expect(candidate.tier).toBe('protected')
-    expect(candidate.selectedByDefault).toBe(false)
+    // Withheld from select-all...
+    expect(isSweptBySelectAll(candidate)).toBe(false)
+    // ...but still deletable on purpose, so an unverifiable workspace is never a dead end.
+    expect(canQueueWorkspaceCleanupCandidate(candidate)).toBe(true)
   })
 
   it('reports unverifiable when contact with the host is lost mid-read', async () => {
@@ -116,7 +130,7 @@ describe('a degraded terminal read is unverifiable, never idle', () => {
     const candidate = await enrichOne(stateWithOnePty())
 
     expect(candidate.blockers).toContain('terminal-liveness-unknown')
-    expect(candidate.tier).toBe('protected')
+    expect(isSweptBySelectAll(candidate)).toBe(false)
   })
 
   it('reads the evidence-carrying handler, not the coerced ones', async () => {
@@ -145,8 +159,7 @@ describe('verified reads keep their existing verdicts', () => {
     const candidate = await enrichOne(stateWithOnePty())
 
     expect(candidate.blockers).toEqual([])
-    expect(candidate.tier).toBe('ready')
-    expect(candidate.selectedByDefault).toBe(true)
+    expect(isSweptBySelectAll(candidate)).toBe(true)
   })
 
   it('still blocks cleanup for a live agent', async () => {
@@ -159,7 +172,6 @@ describe('verified reads keep their existing verdicts', () => {
     const candidate = await enrichOne(stateWithOnePty())
 
     expect(candidate.blockers).toContain('running-terminal')
-    expect(candidate.tier).toBe('protected')
   })
 
   it('still permits cleanup for a worktree with no terminals at all', async () => {
@@ -174,6 +186,6 @@ describe('verified reads keep their existing verdicts', () => {
     const candidate = await enrichOne(makeState())
 
     expect(candidate.blockers).toEqual([])
-    expect(candidate.tier).toBe('ready')
+    expect(isSweptBySelectAll(candidate)).toBe(true)
   })
 })
