@@ -90,6 +90,15 @@ export const GIT_CREDENTIAL_GUARD_CONFIG_ENTRIES = [
 ] as const satisfies readonly (readonly [key: string, value: string])[]
 
 /**
+ * The scalar guard variables the guard forwards into WSL. Provenance reads it so
+ * restoration removes exactly the names the guard adds to WSLENV and no others.
+ */
+export const GIT_CREDENTIAL_GUARD_WSLENV_SCALAR_KEYS = [
+  'GIT_TERMINAL_PROMPT',
+  'GCM_INTERACTIVE'
+] as const
+
+/**
  * Disable interactive Git credential UI while preserving cached credentials
  * and caller-provided askpass programs.
  */
@@ -115,7 +124,7 @@ export function gitCredentialPromptGuardEnv(
       readValidGitConfigEnvCount(next) === null
         ? []
         : Object.keys(next).filter((key) => GIT_CONFIG_WSLENV_KEY_RE.test(key))
-    addWslEnvKeys(next, ['GIT_TERMINAL_PROMPT', 'GCM_INTERACTIVE', ...configKeys])
+    addWslEnvKeys(next, [...GIT_CREDENTIAL_GUARD_WSLENV_SCALAR_KEYS, ...configKeys])
   }
   return next
 }

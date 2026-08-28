@@ -98,6 +98,26 @@ describe('restoreUnguardedGitCredentialEnv marker handling', () => {
     expect(env.GIT_CONFIG_KEY_1).toBe('credential.guiPrompt')
   })
 
+  // The guard forwards only its scalars and the indexed-config protocol into
+  // WSLENV -- never the askpass names. Removing a name the guard never added
+  // strips the user's own WSL forwarding, which is the leak's mirror image.
+  it('keeps a WSLENV name the guard never forwards, even when it appeared after the guard', () => {
+    const saved = takeGitCredentialGuardEnv()
+    try {
+      const env: Record<string, string> = { WSLENV: 'MY_VAR/u' }
+      const pre = captureGitCredentialGuardPreGuardState(env)
+      Object.assign(env, gitCredentialPromptGuardEnv(env, 'win32') as Record<string, string>)
+      recordGitCredentialGuardProvenance(env, pre, { appendedConfig: true, forwardToWsl: true })
+      // The user forwards their own askpass into WSL from inside the guarded pane.
+      env.WSLENV = `${env.WSLENV}:GIT_ASKPASS/p`
+
+      expect(restoreUnguardedGitCredentialEnv(env)).toBe(true)
+      expect(env.WSLENV).toBe('MY_VAR/u:GIT_ASKPASS/p')
+    } finally {
+      restoreGitCredentialGuardEnv(saved)
+    }
+  })
+
   // A marker that names no config base did not append config, so nothing indexed
   // in this environment is Orca's — including a pair that looks exactly like ours.
   it('never removes indexed config when the marker claims no config base', () => {

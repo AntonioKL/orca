@@ -1,5 +1,6 @@
 import {
   GIT_CREDENTIAL_GUARD_CONFIG_ENTRIES,
+  GIT_CREDENTIAL_GUARD_WSLENV_SCALAR_KEYS,
   readValidGitConfigEnvCount
 } from './git-credential-prompt-env'
 import { addWslEnvKeys } from './wsl-env'
@@ -187,9 +188,11 @@ function restoreWslEnv(env: Record<string, string>, state: RestoreState): void {
       if (priorNames.has(name)) {
         return true
       }
+      // Why: the guard never forwards the askpass names, so a WSLENV token it
+      // never added is the user's even when it postdates the pre-guard snapshot.
       return !(
         name === TERMINAL_GIT_CREDENTIAL_GUARD_RESTORE_ENV ||
-        (SCALAR_KEYS as readonly string[]).includes(name) ||
+        (GIT_CREDENTIAL_GUARD_WSLENV_SCALAR_KEYS as readonly string[]).includes(name) ||
         GIT_CONFIG_PROTOCOL_KEY_RE.test(name)
       )
     })
