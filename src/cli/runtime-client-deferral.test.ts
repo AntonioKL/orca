@@ -21,6 +21,20 @@ vi.mock('./runtime/environments', async (importOriginal) => {
   }
 })
 
+// Why: this suite runs the REAL `main()`, and `agent hooks off` below reaches the production
+// handler, which calls removeManagedAgentHooks() against the developer's OWN ~/.claude and
+// ~/.cursor — a green test run silently deleted every Orca-managed hook on the machine, so agent
+// status stopped reporting until the next Orca restart (STA-5679). The byte-for-byte equivalence
+// twin already refuses these tokens for exactly this reason
+// (config/scripts/cli-runtime-client-deferral-equivalence.mjs); this is the same guard for vitest.
+// Stubbed, not dropped: the row is the only case that reads ctx.client, so it carries the
+// null-vs-undefined coverage the rest of the table cannot.
+vi.mock('../main/agent-hooks/managed-agent-hook-controls', () => ({
+  applyAgentStatusHooksEnabled: vi.fn(async () => []),
+  getManagedAgentHookStatuses: vi.fn(() => []),
+  prepareManagedCodexHomeBeforeShellLaunch: vi.fn(async () => {})
+}))
+
 vi.mock('./runtime-client', () => {
   class RuntimeClient {
     call = callMock
