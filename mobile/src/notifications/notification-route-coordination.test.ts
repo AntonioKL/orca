@@ -1,5 +1,5 @@
 import { createElement } from 'react'
-import { act, create, type ReactTestRenderer } from 'react-test-renderer'
+import { act, create } from 'react-test-renderer'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import { getNotificationNavigationTarget } from './notification-routing'
@@ -20,6 +20,11 @@ vi.mock('expo-router', () => ({
 const rootLayoutSource = readFileSync(new URL('../../app/_layout.tsx', import.meta.url), 'utf8')
 const HOST_ID = 'host/one'
 const WORKTREE_ID = 'repo::/Users/me/orca/workspaces/feature'
+
+type TestRendererHandle = Readonly<{
+  unmount: () => void
+  update: (element: unknown) => void
+}>
 
 function navigationHarness(initialState: HostStackNavigationState | undefined) {
   const stateListeners = new Set<() => void>()
@@ -152,7 +157,7 @@ describe('notification route coordination', () => {
       return null
     }
 
-    let renderer: ReactTestRenderer | null = null
+    let renderer: TestRendererHandle | null = null
     await act(async () => {
       renderer = create(createElement(LeaseHarness))
     })
@@ -180,7 +185,7 @@ describe('notification route coordination', () => {
       return null
     }
 
-    let notificationRenderer: ReactTestRenderer | null = null
+    let notificationRenderer: TestRendererHandle | null = null
     await act(async () => {
       notificationRenderer = create(createElement(NotificationHookHarness))
     })
@@ -296,7 +301,7 @@ describe('notification route coordination', () => {
       return null
     }
 
-    let renderer: ReactTestRenderer | null = null
+    let renderer: TestRendererHandle | null = null
     await act(async () => {
       renderer = create(createElement(LeaseHarness, { connected: false }))
     })
