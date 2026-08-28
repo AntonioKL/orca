@@ -45,7 +45,7 @@ export const SHELL_STARTUP_IDENTITY_V2_MARKER_BLOCK = `if __orca_has_feature ide
   if [[ -r "/proc/$$/stat" ]]; then
     builtin read -r _orca_proc_stat < "/proc/$$/stat" || _orca_proc_stat=""
     _orca_proc_suffix="\${_orca_proc_stat##*) }"
-    _orca_shell_start_ticks="$(printf %s "$_orca_proc_suffix" | command awk '{print $20}')"
+    _orca_shell_start_ticks="$(printf %s "$_orca_proc_suffix" | command awk '{print $20}' 2>/dev/null || true)"
   fi
   _orca_shell_tty="$(command tty 2>/dev/null || true)"
   _orca_shell_tty_b64=""

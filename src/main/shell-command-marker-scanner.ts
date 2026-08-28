@@ -4,7 +4,9 @@ import { SHELL_COMMAND_MAX_CHARS } from './shell-command-marker-template'
 
 const COMMAND_MARKER_PREFIX = '\x1b]777;orca-cmd;'
 const MAX_NONCE_CHARS = 128
-const MAX_ENCODED_CHARS = Math.ceil((SHELL_COMMAND_MAX_CHARS * 4) / 3) + 8
+// Why *4: the shells truncate in characters, not bytes, so a 4096-character
+// command can be 16384 UTF-8 bytes before base64 widens it again.
+const MAX_ENCODED_CHARS = Math.ceil((SHELL_COMMAND_MAX_CHARS * 4 * 4) / 3) + 8
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/
 
 export type ShellCommandStartedEvent = {
@@ -77,9 +79,9 @@ export class ShellCommandMarkerScanner {
         ) {
           appendData(items, candidate[0] as string)
           input = candidate.slice(1)
-        } else {
-          this.held = candidate
+          continue
         }
+        this.held = candidate
         break
       }
       const terminatorLength = terminatorStart === st ? 2 : 1
@@ -90,7 +92,8 @@ export class ShellCommandMarkerScanner {
           ? decodeCommand(fields[1] as string)
           : null
       if (command === null) {
-        appendData(items, candidate.slice(0, markerLength))
+        // Why dropped and not forwarded: nothing else may emit this private prefix, and
+        // the row carries the nonce — re-emitting it would publish the nonce downstream.
       } else {
         items.push({
           kind: 'command-started',

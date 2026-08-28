@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ShellCommandMarkerScanner } from './shell-command-marker-scanner'
+import { SHELL_COMMAND_MAX_CHARS } from './shell-command-marker-template'
 
 const marker = (nonce: string, command: string): string =>
   `\x1b]777;orca-cmd;${nonce};${Buffer.from(command).toString('base64')}\x07`
@@ -41,11 +42,46 @@ describe('ShellCommandMarkerScanner', () => {
     ])
   })
 
-  it('preserves malformed private candidates byte-for-byte', () => {
+  // Why this replaces the old byte-for-byte preservation: the row carries the nonce, and
+  // nothing outside Orca's own wrapper may emit this private prefix, so forwarding an
+  // undecodable row published the nonce into the pane's own stream.
+  it('drops a malformed private candidate instead of republishing its nonce', () => {
     const malformed = '\x1b]777;orca-cmd;nonce;not_base64!\x07'
-    expect(new ShellCommandMarkerScanner('nonce').accept(malformed)).toEqual([
-      { kind: 'data', data: malformed }
-    ])
+    expect(new ShellCommandMarkerScanner('nonce').accept(malformed)).toEqual([])
+  })
+
+  it('decodes a 4096-character multibyte command instead of leaking the marker', () => {
+    const command = '\u6f22'.repeat(SHELL_COMMAND_MAX_CHARS)
+    const row = marker('nonce', command)
+    const items = new ShellCommandMarkerScanner('nonce').accept(row)
+    expect(items.every((item) => item.kind === 'command-started')).toBe(true)
+    expect(items.length).toBe(1)
+  })
+
+  it('keeps scanning after an over-cap unterminated candidate', () => {
+    const scanner = new ShellCommandMarkerScanner('nonce')
+    const unterminated = `\x1b]777;orca-cmd;nonce;${'A'.repeat(60_000)}`
+    const items = scanner.accept(unterminated)
+    const data = items.map((item) => (item.kind === 'data' ? item.data : '')).join('')
+    expect(data + scanner.drain()).toBe(unterminated)
+  })
+
+  it('reassembles byte-for-byte across every chunk split', () => {
+    const row = marker('nonce', 'claude --resume')
+    const stream = `before${row}after`
+    for (let split = 1; split < stream.length; split += 1) {
+      const scanner = new ShellCommandMarkerScanner('nonce')
+      const items = [
+        ...scanner.accept(stream.slice(0, split)),
+        ...scanner.accept(stream.slice(split))
+      ]
+      const data = items.map((item) => (item.kind === 'data' ? item.data : '')).join('')
+      expect({ split, text: data + scanner.drain() }).toEqual({ split, text: 'beforeafter' })
+      expect({ split, facts: items.filter((item) => item.kind !== 'data').length }).toEqual({
+        split,
+        facts: 1
+      })
+    }
   })
 
   it('emits null for a valid non-agent command', () => {

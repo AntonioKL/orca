@@ -16,7 +16,7 @@ function __orca_command_marker --on-event fish_preexec --no-scope-shadowing
   __orca_command_markers_allowed; or return
   type -q base64; or return
   set -l __orca_command_text (string sub -l 4096 -- "$argv[1]")
-  set -l __orca_command_b64 (builtin printf %s "$__orca_command_text" | command base64 | string collect | string replace -a '\n' '' | string replace -a '\r' '')
+  set -l __orca_command_b64 (builtin printf %s "$__orca_command_text" | command base64 | command tr -d '\r\n')
   builtin printf '\e]777;orca-cmd;%s;%s\a' "$__orca_shell_command_nonce" "$__orca_command_b64"
   builtin printf '\e]133;C\a'
 end

@@ -95,6 +95,10 @@ function getZshOsc133FunctionBlock(commandIdentityMarkers: boolean): string {
   builtin printf "\\033]133;A\\007"
 }
 __orca_osc133_preexec() {
+  # Why emulate: under KSH_ARRAYS the unbraced +commands[base64] test parses as
+  # arithmetic and the capture range turns 0-based, so the guard errors on every
+  # command and the captured text loses its first character.
+  builtin emulate -L zsh
   ${commandIdentityMarkers ? ZSH_COMMAND_MARKER_EMIT_BLOCK : ''}
   builtin printf "\\033]133;C\\007"
   # Why typeset -g: a plain assignment here creates a global inside a function,
