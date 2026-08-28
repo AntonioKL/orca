@@ -170,6 +170,37 @@ describe('runQuickCommandInNewTab', () => {
     expect(mockState.setRecentQuickCommandForGroup).toHaveBeenCalledWith('group-1', 'agent-review')
   })
 
+  it('launches insertion-only agent prompts as editable drafts', () => {
+    mocks.launchAgentInNewTab.mockReturnValue({ tabId: 'tab-agent' })
+    mockState.unifiedTabsByWorktree['repo::worktree'] = [
+      { entityId: 'tab-agent', contentType: 'terminal', groupId: 'group-1' }
+    ]
+
+    const result = runQuickCommandInNewTab({
+      command: {
+        id: 'agent-review-draft',
+        label: 'Review draft',
+        action: 'agent-prompt',
+        agent: 'codex',
+        prompt: 'Review this diff',
+        submitPrompt: false
+      },
+      worktreeId: 'repo::worktree',
+      groupId: 'group-1'
+    })
+
+    expect(result).toEqual({ tabId: 'tab-agent' })
+    expect(mocks.launchAgentInNewTab).toHaveBeenCalledWith({
+      agent: 'codex',
+      prompt: 'Review this diff',
+      worktreeId: 'repo::worktree',
+      groupId: 'group-1',
+      promptDelivery: 'draft',
+      launchSource: 'quick_command',
+      quickCommandLabel: 'Review draft'
+    })
+  })
+
   it('falls back to the active group when context-menu group resolution is missing', () => {
     mockState.activeGroupIdByWorktree['repo::worktree'] = 'active-group'
     mocks.launchAgentInNewTab.mockReturnValue({ tabId: 'tab-agent' })

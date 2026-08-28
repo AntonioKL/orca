@@ -3,7 +3,11 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ExecutionHostId } from '../../../../shared/execution-host'
+import { TERMINAL_QUICK_COMMAND_AGENT_DRAFTS_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
 import type { TerminalQuickCommand } from '../../../../shared/terminal-quick-command-types'
+import { useAppStore } from '@/store'
+import type { AppState } from '@/store/types'
 import { TerminalQuickCommandDialog } from './TerminalQuickCommandDialog'
 
 const mountedRoots: Root[] = []
@@ -12,6 +16,7 @@ async function renderDialog(
   command: TerminalQuickCommand,
   props: {
     defaultAdvancedOpen?: boolean
+    hostId?: ExecutionHostId
     onOpenChange?: ReturnType<typeof vi.fn<(open: boolean) => void>>
     onSave?: ReturnType<typeof vi.fn<(command: TerminalQuickCommand) => void>>
   } = {}
@@ -32,6 +37,7 @@ async function renderDialog(
         open={true}
         mode="add"
         command={command}
+        hostId={props.hostId ?? 'local'}
         repos={[]}
         defaultAdvancedOpen={props.defaultAdvancedOpen}
         onOpenChange={onOpenChange}
@@ -67,6 +73,7 @@ function findAnimatedRowContaining(text: string): HTMLElement {
 describe('TerminalQuickCommandDialog animation structure', () => {
   beforeEach(() => {
     vi.stubGlobal('navigator', { userAgent: 'Macintosh' })
+    useAppStore.setState({ runtimeStatusByEnvironmentId: new Map() })
   })
 
   afterEach(async () => {
@@ -186,18 +193,71 @@ describe('TerminalQuickCommandDialog animation structure', () => {
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
-  it('hides append enter and shows agent toolbar hint in agent mode', async () => {
-    await renderDialog({
+  it('saves an agent prompt as an editable draft when immediate submission is toggled off', async () => {
+    useAppStore.setState({
+      runtimeStatusByEnvironmentId: new Map([
+        [
+          'env-new',
+          {
+            checkedAt: 1,
+            status: {
+              capabilities: [TERMINAL_QUICK_COMMAND_AGENT_DRAFTS_RUNTIME_CAPABILITY]
+            }
+          }
+        ]
+      ]) as AppState['runtimeStatusByEnvironmentId']
+    })
+    const { onOpenChange, onSave } = await renderDialog(
+      {
+        id: 'qc-3',
+        label: 'Investigate',
+        action: 'agent-prompt',
+        agent: 'claude',
+        prompt: 'Look into the build',
+        scope: { type: 'global' }
+      },
+      { hostId: 'runtime:env-new' }
+    )
+    const submitPromptSwitch = document.body.querySelector<HTMLElement>(
+      '[aria-label="Toggle immediate prompt submission"]'
+    )
+    const saveButton = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button')).find(
+      (button) => button.textContent?.includes('Save')
+    )
+
+    expect(document.body.textContent).toContain('Supports /goal, skills, paths')
+    expect(document.body.textContent).toContain('Submit prompt — run immediately')
+    expect(submitPromptSwitch?.getAttribute('aria-checked')).toBe('true')
+
+    await click(submitPromptSwitch!)
+    await click(saveButton!)
+
+    expect(onSave).toHaveBeenCalledWith({
       id: 'qc-3',
       label: 'Investigate',
       action: 'agent-prompt',
       agent: 'claude',
       prompt: 'Look into the build',
+      submitPrompt: false,
       scope: { type: 'global' }
     })
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
 
-    expect(document.body.textContent).toContain('Supports /goal, skills, paths')
-    expect(document.body.textContent).not.toContain('Append Enter — run immediately')
+  it('hides agent draft submission controls for older remote hosts', async () => {
+    await renderDialog(
+      {
+        id: 'qc-legacy-agent',
+        label: 'Investigate',
+        action: 'agent-prompt',
+        agent: 'claude',
+        prompt: 'Look into the build'
+      },
+      { hostId: 'runtime:env-old' }
+    )
+
+    expect(document.body.textContent).not.toContain('Submit prompt — run immediately')
+    expect(document.body.textContent).toContain('Multi-line prompts are fine — keep them focused.')
   })
 
   it('shows scope summary on the collapsed advanced toggle', async () => {

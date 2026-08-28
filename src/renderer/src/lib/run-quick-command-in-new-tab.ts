@@ -60,6 +60,7 @@ export function runQuickCommandInNewTab({
       prompt: command.prompt,
       worktreeId,
       groupId: targetGroupId,
+      ...(command.submitPrompt === false ? { promptDelivery: 'draft' as const } : {}),
       launchSource: 'quick_command',
       quickCommandLabel: command.label
     })
