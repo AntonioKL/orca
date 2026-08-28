@@ -39,21 +39,4 @@ describe('repo owner cache identity', () => {
       getHostedReviewCacheKey('/repo', 'feature/ssh', focusedRuntime, 'repo-1', 'ssh-1', null, true)
     ).toBe('ssh:ssh-1::repo-1::feature/ssh')
   })
-
-  it('isolates explicit local execution lanes and repo paths', () => {
-    expect(
-      getHostedReviewCacheKey(
-        '/repo-a',
-        'feature/local',
-        null,
-        'repo-1',
-        null,
-        null,
-        true,
-        'wsl:Ubuntu'
-      )
-    ).not.toBe(
-      getHostedReviewCacheKey('/repo-b', 'feature/local', null, 'repo-1', null, null, true, 'host')
-    )
-  })
 })

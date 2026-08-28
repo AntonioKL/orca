@@ -27,7 +27,6 @@ export type HostedReviewFetchOptions = {
    */
   active?: boolean
   repoOwnerExecutionHostId?: string
-  repoOwnerCacheScope?: string
 }
 export type CreateHostedReviewStoreInput = CreateHostedReviewInput & { repoId?: string | null }
 export type CreateStackedHostedReviewStoreInput = CreateStackedHostedReviewInput & {

@@ -164,8 +164,7 @@ export const createHostedReviewSlice: StateCreator<AppState, [], [], HostedRevie
       options?.repoId ?? repo?.id,
       repo?.connectionId,
       repo?.executionHostId,
-      repo !== undefined,
-      options?.repoOwnerCacheScope
+      repo !== undefined
     )
     const cached = get().hostedReviewCache[cacheKey]
     const hintKey = linkedReviewHintKey(options)

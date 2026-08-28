@@ -260,7 +260,6 @@ export function createUpdateWorktreeMeta(
         void get().fetchHostedReviewForBranch(reviewRepo.path, reviewBranch, {
           repoId: reviewRepo.id,
           repoOwnerExecutionHostId: executionHostId ?? worktreeForUpdate?.hostId,
-          repoOwnerCacheScope: executionHostId ?? worktreeForUpdate?.hostId,
           linkedGitHubPR: getHostedReviewLinkForMetaRefresh(
             targetEnriched,
             worktreeForUpdate,

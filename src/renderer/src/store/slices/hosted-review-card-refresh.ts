@@ -19,7 +19,6 @@ type RefreshHostedReviewCardArgs = {
   linkedAzureDevOpsPR?: number | null
   linkedGiteaPR?: number | null
   repoOwnerExecutionHostId?: string
-  repoOwnerCacheScope?: string
 }
 
 export function refreshHostedReviewCard(
@@ -31,7 +30,6 @@ export function refreshHostedReviewCard(
     force: true,
     repoId: args.repoId,
     repoOwnerExecutionHostId: args.repoOwnerExecutionHostId,
-    repoOwnerCacheScope: args.repoOwnerCacheScope,
     linkedGitHubPR: args.linkedGitHubPR ?? null,
     ...(fallbackGitHubPR !== null ? { fallbackGitHubPR } : {}),
     linkedGitLabMR: args.linkedGitLabMR ?? null,
