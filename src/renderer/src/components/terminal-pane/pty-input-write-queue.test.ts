@@ -345,8 +345,10 @@ describe('pty input write queue', () => {
 
   it.each([
     ['one write', ['\x1b[7;1H\x1b]11;?\x1b\\\x1b[6n']],
-    // The color query is torn mid-sequence, so its reply is only produced by the chunk that
-    // also carries the CPR query — the ordering the single-write case cannot exercise.
+    // Tears the color query itself, so xterm resumes its OSC parse across chunks; both replies
+    // still come from one parse turn. Do not "improve" this into a tear BETWEEN the two queries:
+    // the chunk boundary lets a held reply flush before the CPR exists, so that shape passes
+    // even when the order is genuinely inverted.
     ['a query torn across output chunks', ['\x1b[7;1H\x1b]11;', '?\x1b\\\x1b[6n']]
   ] as const)(
     'keeps xterm OSC 11 ahead of the following CPR at the PTY host (%s)',
@@ -391,7 +393,8 @@ describe('pty input write queue', () => {
         const oscReply = '\x1b]11;rgb:0000/1313/1a1a\x1b\\'
         const cprReply = '\x1b[7;1R'
         expect(generatedReplies).toEqual([oscReply, cprReply])
-        expect(ptyWrites.join('')).toBe(oscReply + cprReply)
+        // Not joined: the array also pins the OSC reply as its own atomic write (#13892).
+        expect(ptyWrites).toEqual([oscReply, cprReply])
       } finally {
         xtermReplies.dispose()
         capabilityReplies.dispose()
