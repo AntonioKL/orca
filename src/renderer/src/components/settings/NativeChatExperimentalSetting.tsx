@@ -2,6 +2,7 @@ import type { GlobalSettings } from '../../../../shared/global-settings-types'
 import { translate } from '@/i18n/i18n'
 import { Label } from '../ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
+import { NativeChatSupportedAgents } from './NativeChatSupportedAgents'
 import { SearchableSetting } from './SearchableSetting'
 import { SettingsSwitch } from './SettingsFormControls'
 import { getExperimentalSearchEntry } from './experimental-search'
@@ -44,6 +45,7 @@ export function NativeChatExperimentalSetting({
               'Enables the experimental Chat UI for newly created supported local sessions. Existing terminal sessions keep the terminal chat path while we tune transcript fidelity, streaming, and parity.'
             )}
           </p>
+          <NativeChatSupportedAgents />
         </div>
         <SettingsSwitch
           checked={nativeChatEnabled}
