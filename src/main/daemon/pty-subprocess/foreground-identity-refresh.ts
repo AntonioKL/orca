@@ -141,6 +141,11 @@ export function createForegroundIdentityRefresh(args: {
       state.cachedAgentForeground !== null &&
       Date.now() - state.cachedAgentForeground.refreshedAt > ms
     const retireStaleForegroundIdentity = ({ onlyWhenAged = false } = {}): void => {
+      // This scan sampled the process table at `now`; an identity stamped after that is
+      // evidence it never had a chance to see, so it cannot be retired on this answer.
+      if (state.cachedAgentForeground !== null && state.cachedAgentForeground.refreshedAt > now) {
+        return
+      }
       const currentFallbackProcess = args.getFallbackProcess()
       if (
         fallbackIsShell &&
