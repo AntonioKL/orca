@@ -1,11 +1,9 @@
 /* eslint-disable max-lines -- Why: owns the full daemon lifecycle (init, launch, adapter wiring,
 restart, teardown); the "swap the provider atomically" invariant keeps restart + singletons co-located. */
-import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { getAppEnvironment } from '../../shared/app-environment'
-import { mkdirSync, existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { fork, type ChildProcess } from 'node:child_process'
-import { connect } from 'node:net'
 import {
   DaemonSpawner,
   getDaemonPidPath,
@@ -52,7 +50,6 @@ import {
   rebindLocalProviderListeners
 } from '../ipc/pty'
 import { isStartupDiagnosticsEnabled, logStartupDiagnostic } from '../startup/startup-diagnostics'
-import { getDaemonLogFilePath } from '../observability/logs-directory'
 import {
   confirmSeededClaudeLivePtys,
   hasSeededUnconfirmedClaudePtys
@@ -63,6 +60,17 @@ import {
   observeDaemonChildExit,
   type DaemonChildExitObservation
 } from './daemon-child-exit-observer'
+import {
+  daemonDiagnosticsDisabled,
+  daemonLogArgs,
+  getAliveDaemonSessionCount,
+  getDaemonEntryPath,
+  getDaemonHistoryDir as getHistoryDir,
+  getDaemonRuntimeDir as getRuntimeDir,
+  probeDaemonSocket as probeSocket,
+  resolvePackagedDarwinAppVersion
+} from './daemon-launch-paths'
+import { getDaemonLogFilePath } from '../observability/logs-directory'
 
 // Why: daemon init runs concurrent with window load, so an in-process t timestamp (not harness stderr timing) measures cold-start.
 function logDaemonMilestone(event: string, details: Record<string, unknown> = {}): void {
@@ -105,52 +113,6 @@ let adapter: DaemonProvider | null = null
 // Why: coalesce concurrent restartDaemon() calls so two entries can't race the 7-step sequence against a half-spawned replacement.
 let restartInFlight: Promise<RestartDaemonResult> | null = null
 
-function getRuntimeDir(): string {
-  const dir = join(getAppEnvironment().getPath('userData'), 'daemon')
-  mkdirSync(dir, { recursive: true })
-  return dir
-}
-
-function getHistoryDir(): string {
-  const dir = join(getAppEnvironment().getPath('userData'), 'terminal-history')
-  mkdirSync(dir, { recursive: true })
-  return dir
-}
-
-function getDaemonEntryPath(): string {
-  const appPath = getAppEnvironment().getAppPath()
-  // Why: packaged getAppPath() points at app.asar, so redirect to app.asar.unpacked where daemon-entry.js is fork-executable.
-  // Why asar and not isPackaged: orcad is a packaged non-Electron host whose bundle root holds
-  // orcad.js and daemon-entry.js side by side with no asar to redirect (see parcel-watcher-entry-path.ts).
-  const basePath = appPath.includes('app.asar')
-    ? appPath.replace('app.asar', 'app.asar.unpacked')
-    : appPath
-  const directEntryPath = join(basePath, 'daemon-entry.js')
-  if (existsSync(directEntryPath)) {
-    return directEntryPath
-  }
-  return join(basePath, 'out', 'main', 'daemon-entry.js')
-}
-
-// macOS TCC attribution pins the daemon to a packaged app bundle; there is none on a Node host.
-function resolvePackagedDarwinAppVersion(): string | null {
-  const environment = getAppEnvironment()
-  return process.platform === 'darwin' && environment.isPackaged() ? environment.getVersion() : null
-}
-
-// Why: pass a log-file arg so field failures are diagnosable, but honor the ORCA_DIAGNOSTICS_DISABLED privacy switch.
-function daemonDiagnosticsDisabled(): boolean {
-  const disabled = (process.env.ORCA_DIAGNOSTICS_DISABLED ?? '').trim().toLowerCase()
-  return disabled === '1' || disabled === 'true'
-}
-
-function daemonLogArgs(): string[] {
-  if (daemonDiagnosticsDisabled()) {
-    return []
-  }
-  return ['--log-file', getDaemonLogFilePath()]
-}
-
 function recordDaemonChildExit(
   identity: DaemonEndpointIdentity | null,
   observation: DaemonChildExitObservation
@@ -175,63 +137,6 @@ function recordDaemonChildExit(
     )
   } catch {
     // Diagnostics are fail-open.
-  }
-}
-
-// Why: a socket that accepts a connection proves a daemon survived a previous app session and can be reused.
-function probeSocket(socketPath: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    if (process.platform !== 'win32' && !existsSync(socketPath)) {
-      resolve(false)
-      return
-    }
-    const sock = connect({ path: socketPath })
-    let settled = false
-    let timer: ReturnType<typeof setTimeout>
-    function finish(alive: boolean, options?: { destroy?: boolean }): void {
-      if (settled) {
-        return
-      }
-      settled = true
-      clearTimeout(timer)
-      sock.removeListener('connect', onConnect)
-      sock.removeListener('error', onError)
-      if (options?.destroy) {
-        sock.destroy()
-      }
-      resolve(alive)
-    }
-
-    function onConnect(): void {
-      finish(true, { destroy: true })
-    }
-
-    function onError(): void {
-      finish(false)
-    }
-
-    timer = setTimeout(() => {
-      finish(false, { destroy: true })
-    }, 1000)
-    sock.on('connect', onConnect)
-    sock.on('error', onError)
-  })
-}
-
-async function getAliveDaemonSessionCount(
-  socketPath: string,
-  tokenPath: string,
-  protocolVersion = PROTOCOL_VERSION
-): Promise<number | null> {
-  const client = new DaemonClient({ socketPath, tokenPath, protocolVersion })
-  try {
-    await client.ensureConnected()
-    const result = await client.request<ListSessionsResult>('listSessions', undefined)
-    return result.sessions.filter((session) => session.isAlive).length
-  } catch {
-    return null
-  } finally {
-    client.disconnect()
   }
 }
 
