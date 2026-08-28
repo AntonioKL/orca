@@ -7,6 +7,7 @@ import {
   DaemonSpawner,
   getDaemonArtifactHoldClaimPath,
   getDaemonPidPath,
+  getDaemonPidPublishClaimPath,
   getDaemonPidSwapClaimPath,
   getDaemonSocketPath,
   getDaemonTokenPath,
@@ -366,7 +367,8 @@ describe('daemon socket publication', () => {
       const names = [
         basename(getDaemonSocketBindPath(getDaemonSocketPath('/tmp/orca-daemon'))),
         basename(getDaemonPidSwapClaimPath('/tmp/orca-daemon/daemon-v32.pid')),
-        basename(getDaemonArtifactHoldClaimPath('/tmp/orca-daemon/daemon-v32.token'))
+        basename(getDaemonArtifactHoldClaimPath('/tmp/orca-daemon/daemon-v32.token')),
+        basename(getDaemonPidPublishClaimPath('/tmp/orca-daemon/daemon-v32.pid'))
       ]
       for (const name of names) {
         expect(name).not.toMatch(RELEASED_SWEEPER_PATTERN)
