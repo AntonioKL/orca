@@ -74,6 +74,16 @@ function currentRecoveryTabIds(
   )
 }
 
+/**
+ * `placed` — every terminal-tab row in the snapshot landed on a local workspace, so this client's
+ * picture is the host's and may be declared authoritative.
+ * `unplaced` — the snapshot carried tab rows whose worktree path the local catalog could not
+ * resolve. That is `unverifiable` (the host lineage read came back degraded, so `worktreesByRepo`
+ * is still empty), never proof the rows are not ours — so the target stays un-hydrated and the
+ * caller re-pulls. See docs/reference/ssh-execution-boundary.md.
+ */
+export type DirectSshSnapshotPlacement = 'placed' | 'unplaced' | 'not-applied'
+
 export async function applyDirectSshRemoteWorkspaceSnapshot({
   store,
   snapshot,
@@ -83,16 +93,16 @@ export async function applyDirectSshRemoteWorkspaceSnapshot({
   isPreparationTokenCurrent,
   waitForWorkspaceSessionReady,
   finalizeHydratedTerminals
-}: RemoteWorkspaceSnapshotApplyInput): Promise<void> {
+}: RemoteWorkspaceSnapshotApplyInput): Promise<DirectSshSnapshotPlacement> {
   const { authority } = token
   if (!isArrivalCurrent(authority.targetId, arrival)) {
-    return
+    return 'not-applied'
   }
   if (
     !isPreparationTokenCurrent(token) ||
     !admitDirectSshSnapshotApplyToken(token, authority, snapshot.revision)
   ) {
-    return
+    return 'not-applied'
   }
   if (!(await waitForWorkspaceSessionReady())) {
     if (isArrivalCurrent(authority.targetId, arrival) && isPreparationTokenCurrent(token)) {
@@ -105,13 +115,15 @@ export async function applyDirectSshRemoteWorkspaceSnapshot({
         )
       })
     }
-    return
+    return 'not-applied'
   }
   const state = store.getState()
   const worktreeIds = exactTargetWorktreeIds(state, authority)
+  const unplacedTabWorktreePaths: string[] = []
   const remoteSession = importRemoteWorkspaceSession(snapshot.session, {
     resolveWorktreeId: uniqueWorktreeIdByPath(worktreeIds),
-    executionHostId: toSshExecutionHostId(authority.targetId)
+    executionHostId: toSshExecutionHostId(authority.targetId),
+    onUnplacedTerminalTabs: (worktreePath) => unplacedTabWorktreePaths.push(worktreePath)
   })
   const merged = mergeDirectSshRemoteWorkspaceSession(
     buildWorkspaceSessionPayload(state),
@@ -123,8 +135,10 @@ export async function applyDirectSshRemoteWorkspaceSnapshot({
     snapshot.revision
   )
   if (!isArrivalCurrent(authority.targetId, arrival) || !isPreparationTokenCurrent(token)) {
-    return
+    return 'not-applied'
   }
+  const placement: DirectSshSnapshotPlacement =
+    unplacedTabWorktreePaths.length > 0 ? 'unplaced' : 'placed'
   snapshotApplyDepth += 1
   try {
     const currentStore = store.getState()
@@ -135,15 +149,29 @@ export async function applyDirectSshRemoteWorkspaceSnapshot({
     })
     currentStore.hydrateTabsSession(merged, { replaceWorkspaceKeys })
     // Why: direct SSH snapshots project terminal state only; global editor/browser hydration would reset unrelated hosts.
-    currentStore.markRemoteWorkspaceHydrated(authority.targetId)
-    currentStore.setRemoteWorkspaceSyncStatus(authority.targetId, {
-      phase: 'synced',
-      direction: 'pull',
-      revision: snapshot.revision,
-      updatedAt: snapshot.updatedAt,
-      lastSyncedAt: Date.now(),
-      message: translate('auto.hooks.useIpcEvents.4f78ba5885', 'Workspace synced')
-    })
+    if (placement === 'placed') {
+      currentStore.markRemoteWorkspaceHydrated(authority.targetId)
+      currentStore.setRemoteWorkspaceSyncStatus(authority.targetId, {
+        phase: 'synced',
+        direction: 'pull',
+        revision: snapshot.revision,
+        updatedAt: snapshot.updatedAt,
+        message: translate('auto.hooks.useIpcEvents.4f78ba5885', 'Workspace synced'),
+        lastSyncedAt: Date.now()
+      })
+    } else {
+      // Why not hydrated: the host listed tabs on paths this client cannot place yet, so adopting
+      // zero of them is not the host's picture. Marking hydrated would freeze that emptiness in —
+      // nothing re-pulls a hydrated target — and would flip the seeding gate in
+      // workspace-terminal-host-authority.ts from `unverifiable` to `none`, authorising a fresh
+      // default tab beside the host's orphaned ones (STA-3593).
+      currentStore.setRemoteWorkspaceSyncStatus(authority.targetId, {
+        phase: 'pulling',
+        direction: 'pull',
+        revision: snapshot.revision,
+        updatedAt: snapshot.updatedAt
+      })
+    }
     const reconnectAbort = new AbortController()
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null
     await Promise.race([
@@ -172,4 +200,5 @@ export async function applyDirectSshRemoteWorkspaceSnapshot({
     snapshotWriteSuppressUntil = Date.now() + REMOTE_WORKSPACE_SNAPSHOT_WRITE_SUPPRESS_MS
     snapshotApplyDepth -= 1
   }
+  return placement
 }

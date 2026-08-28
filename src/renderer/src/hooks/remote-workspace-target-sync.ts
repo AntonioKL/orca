@@ -15,7 +15,11 @@ import type {
 } from './direct-ssh-reconnect-coordinator'
 import { buildDirectSshSnapshotApplyToken } from './direct-ssh-reconnect-coordinator'
 import { resolveDirectSshTargetScope } from '../lib/direct-ssh-target-scope'
-import { applyDirectSshRemoteWorkspaceSnapshot } from './remote-workspace-snapshot-apply'
+import {
+  applyDirectSshRemoteWorkspaceSnapshot,
+  type DirectSshSnapshotPlacement
+} from './remote-workspace-snapshot-apply'
+import { createUnplacedSnapshotRepull } from './remote-workspace-unplaced-snapshot-repull'
 
 const WORKSPACE_HYDRATION_TIMEOUT_MS = 10_000
 
@@ -43,7 +47,10 @@ export type RemoteWorkspaceTargetSyncDeps = {
 
 export type RemoteWorkspaceTargetSync = {
   syncAfterConnect: (token: DirectSshPreparationToken) => Promise<void>
-  applyUnsolicitedSnapshot: (targetId: string, snapshot: RemoteWorkspaceSnapshot) => Promise<void>
+  applyUnsolicitedSnapshot: (
+    targetId: string,
+    snapshot: RemoteWorkspaceSnapshot
+  ) => Promise<DirectSshSnapshotPlacement>
   stop: () => void
 }
 
@@ -115,6 +122,31 @@ export function createRemoteWorkspaceTargetSync(
   const isArrivalCurrent = (targetId: string, arrival: number): boolean =>
     !stopped && arrivalByTarget.get(targetId) === arrival
 
+  const repull = createUnplacedSnapshotRepull({
+    isStopped: () => stopped,
+    hasCurrentAuthority: (targetId) => deps.getCurrentAuthority(targetId) !== null,
+    getSnapshot: (targetId) => deps.remoteWorkspace.get({ targetId }),
+    applySnapshot: (targetId, snapshot) => applyPreparedSnapshot(targetId, snapshot),
+    reportExhausted: (targetId) => {
+      // Why hydrate on exhaustion rather than stay un-hydrated: a path can be unplaceable for good
+      // (its worktree was deleted host-side), and an un-hydrated target is filtered out of
+      // `hydratedTargetIds` in use-app-session-persistence.ts, so it would never upload again —
+      // a permanent regression strictly worse than the tab loss this fix targets. Retries cover the
+      // transient degraded-lineage case; past them we settle back to the pre-fix behaviour.
+      const store = deps.store.getState()
+      const previous = store.remoteWorkspaceSyncStatusByTargetId[targetId]
+      store.markRemoteWorkspaceHydrated(targetId)
+      store.setRemoteWorkspaceSyncStatus(targetId, {
+        phase: 'synced',
+        direction: 'pull',
+        ...(previous?.revision === undefined ? {} : { revision: previous.revision }),
+        ...(previous?.updatedAt === undefined ? {} : { updatedAt: previous.updatedAt }),
+        lastSyncedAt: Date.now(),
+        message: translate('auto.hooks.useIpcEvents.4f78ba5885', 'Workspace synced')
+      })
+    }
+  })
+
   const waitForWorkspaceSessionReady = async (): Promise<boolean> => {
     const deadline = Date.now() + WORKSPACE_HYDRATION_TIMEOUT_MS
     while (!stopped && Date.now() < deadline) {
@@ -171,7 +203,7 @@ export function createRemoteWorkspaceTargetSync(
     if (snapshot.revision > 0) {
       const applyToken = buildDirectSshSnapshotApplyToken(token, snapshot.revision)
       if (applyToken) {
-        await applyDirectSshRemoteWorkspaceSnapshot({
+        const placement = await applyDirectSshRemoteWorkspaceSnapshot({
           store: deps.store,
           snapshot,
           token: applyToken,
@@ -181,6 +213,7 @@ export function createRemoteWorkspaceTargetSync(
           waitForWorkspaceSessionReady,
           finalizeHydratedTerminals: deps.finalizeHydratedTerminals
         })
+        repull.schedule(authority.targetId, placement, 0)
       }
       return
     }
@@ -208,14 +241,14 @@ export function createRemoteWorkspaceTargetSync(
     applyPatchStatus(deps.store.getState(), authority.targetId, result)
   }
 
-  const applyUnsolicitedSnapshot = async (
+  const applyPreparedSnapshot = async (
     targetId: string,
     snapshot: RemoteWorkspaceSnapshot
-  ): Promise<void> => {
+  ): Promise<DirectSshSnapshotPlacement> => {
     const arrival = beginArrival(targetId)
     const authority = deps.getCurrentAuthority(targetId)
     if (!authority) {
-      return
+      return 'not-applied'
     }
     const input = await deps.capturePreparationInput(
       authority,
@@ -223,25 +256,37 @@ export function createRemoteWorkspaceTargetSync(
       snapshot.revision
     )
     if (!input || !isArrivalCurrent(targetId, arrival)) {
-      return
+      return 'not-applied'
     }
     const prepared = await deps.prepareOnly(input)
     if (!prepared.token || !isArrivalCurrent(targetId, arrival)) {
-      return
+      return 'not-applied'
     }
     const applyToken = buildDirectSshSnapshotApplyToken(prepared.token, snapshot.revision)
-    if (applyToken) {
-      await applyDirectSshRemoteWorkspaceSnapshot({
-        store: deps.store,
-        snapshot,
-        token: applyToken,
-        arrival,
-        isArrivalCurrent,
-        isPreparationTokenCurrent: deps.isPreparationTokenCurrent,
-        waitForWorkspaceSessionReady,
-        finalizeHydratedTerminals: deps.finalizeHydratedTerminals
-      })
+    if (!applyToken) {
+      return 'not-applied'
     }
+    const placement = await applyDirectSshRemoteWorkspaceSnapshot({
+      store: deps.store,
+      snapshot,
+      token: applyToken,
+      arrival,
+      isArrivalCurrent,
+      isPreparationTokenCurrent: deps.isPreparationTokenCurrent,
+      waitForWorkspaceSessionReady,
+      finalizeHydratedTerminals: deps.finalizeHydratedTerminals
+    })
+    return placement
+  }
+
+  /** Public entry: a snapshot arriving unsolicited starts its own re-pull chain. */
+  const applyUnsolicitedSnapshot = async (
+    targetId: string,
+    snapshot: RemoteWorkspaceSnapshot
+  ): Promise<DirectSshSnapshotPlacement> => {
+    const placement = await applyPreparedSnapshot(targetId, snapshot)
+    repull.schedule(targetId, placement, 0)
+    return placement
   }
 
   return {
@@ -250,6 +295,7 @@ export function createRemoteWorkspaceTargetSync(
     stop: () => {
       stopped = true
       arrivalByTarget.clear()
+      repull.stop()
     }
   }
 }
