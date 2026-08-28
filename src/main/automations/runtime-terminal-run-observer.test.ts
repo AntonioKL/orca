@@ -5,6 +5,7 @@ import type { AutomationRunCompletionObservation } from './run-completion-watche
 
 const HANDLE = 'terminal-1'
 const RUNTIME_TUI_IDLE_TIMEOUT_MS = 5 * 60 * 1000
+const AGENT_START_PROBE_SETTLE_MS = 300
 
 /** The three shapes the runtime satisfies tui-idle from. `lastAgentStatus` is the
  *  sticky pty record, `paneTitle` the leaf branch's inlined title read, `preview`
@@ -19,6 +20,7 @@ type FakeWaiter = {
   resolve: (value: { satisfied: boolean; blockedReason?: string }) => void
   reject: (error: Error) => void
   timer: ReturnType<typeof setTimeout>
+  agentTurnStartedAfter: number | null
 }
 
 function createFakeRuntime(initial: Partial<FakePane>) {
@@ -28,6 +30,9 @@ function createFakeRuntime(initial: Partial<FakePane>) {
     preview: '',
     ...initial
   }
+  let lastWorkingAt = pane.lastAgentStatus === 'working' ? Date.now() : null
+  let lastIdleAt = pane.lastAgentStatus === 'idle' ? Date.now() : null
+  let lifecycleStatus = pane.lastAgentStatus
   const waiters = new Set<FakeWaiter>()
   let waitCalls = 0
 
@@ -38,24 +43,51 @@ function createFakeRuntime(initial: Partial<FakePane>) {
     (pane.paneTitle?.toLowerCase().includes('idle') ?? false) ||
     pane.preview.trimEnd().endsWith('$')
 
+  const completedTurnSince = (observedAfter: number | null): boolean =>
+    observedAfter === null ||
+    (lastWorkingAt !== null &&
+      lastWorkingAt >= observedAfter &&
+      lifecycleStatus === 'idle' &&
+      lastIdleAt !== null &&
+      lastIdleAt >= lastWorkingAt)
+
+  const resolveSatisfiedWaiters = (): void => {
+    if (!satisfiedNow()) {
+      return
+    }
+    for (const waiter of waiters) {
+      if (!completedTurnSince(waiter.agentTurnStartedAfter)) {
+        continue
+      }
+      waiters.delete(waiter)
+      clearTimeout(waiter.timer)
+      waiter.resolve({ satisfied: true })
+    }
+  }
+
   const runtime: AutomationRunTerminalHost & {
     setPane: (next: Partial<FakePane>) => void
+    setAgentLifecycleStatus: (status: 'idle' | 'working') => void
     waitCalls: () => number
   } = {
     getTerminalHandleForPaneKey: () => HANDLE,
+    hasTerminalAgentWorkedSince: (_handle, observedAfter) =>
+      lastWorkingAt !== null && lastWorkingAt >= observedAfter,
     readTerminal: async () => ({ tail: ['previous run output'] }),
     waitForTerminal: (_handle, options) => {
       waitCalls += 1
       if (options?.signal?.aborted) {
         return Promise.reject(new Error('request_aborted'))
       }
-      if (satisfiedNow()) {
+      const agentTurnStartedAfter = options?.agentTurnStartedAfter ?? null
+      if (satisfiedNow() && completedTurnSince(agentTurnStartedAfter)) {
         return Promise.resolve({ satisfied: true })
       }
       return new Promise((resolve, reject) => {
         const waiter: FakeWaiter = {
           resolve,
           reject,
+          agentTurnStartedAfter,
           timer: setTimeout(() => {
             waiters.delete(waiter)
             reject(new Error('timeout'))
@@ -65,15 +97,33 @@ function createFakeRuntime(initial: Partial<FakePane>) {
       })
     },
     setPane: (next) => {
+      const wasWorking =
+        pane.lastAgentStatus === 'working' ||
+        (pane.paneTitle?.toLowerCase().includes('working') ?? false)
       Object.assign(pane, next)
-      if (!satisfiedNow()) {
-        return
+      const isWorking =
+        pane.lastAgentStatus === 'working' ||
+        (pane.paneTitle?.toLowerCase().includes('working') ?? false)
+      const isIdle =
+        pane.lastAgentStatus === 'idle' || (pane.paneTitle?.toLowerCase().includes('idle') ?? false)
+      if (isWorking && !wasWorking) {
+        lastWorkingAt = Date.now()
+        lifecycleStatus = 'working'
       }
-      for (const waiter of waiters) {
-        waiters.delete(waiter)
-        clearTimeout(waiter.timer)
-        waiter.resolve({ satisfied: true })
+      if (!isWorking && wasWorking && isIdle) {
+        lastIdleAt = Date.now()
+        lifecycleStatus = 'idle'
       }
+      resolveSatisfiedWaiters()
+    },
+    setAgentLifecycleStatus: (status) => {
+      if (status === 'working' && lifecycleStatus !== 'working') {
+        lastWorkingAt = Date.now()
+      } else if (status === 'idle' && lifecycleStatus !== 'idle') {
+        lastIdleAt = Date.now()
+      }
+      lifecycleStatus = status
+      resolveSatisfiedWaiters()
     },
     waitCalls: () => waitCalls
   }
@@ -86,7 +136,7 @@ function observe(runtime: AutomationRunTerminalHost) {
   const errors: unknown[] = []
   const observer = createRuntimeAutomationRunTerminalObserver(runtime)
   const promise = observer
-    .observeCompletion(HANDLE, { signal: controller.signal })
+    .observeCompletion(HANDLE, { signal: controller.signal, observedAfter: Date.now() })
     .then((observation) => {
       settled.push(observation)
     })
@@ -147,7 +197,7 @@ describe('createRuntimeAutomationRunTerminalObserver', () => {
     await vi.advanceTimersByTimeAsync(10_000)
     expect(run.settled).toEqual([])
 
-    runtime.setPane({ preview: 'claude is thinking…' })
+    runtime.setPane({ lastAgentStatus: 'working', preview: 'claude is thinking…' })
     await vi.advanceTimersByTimeAsync(1_000)
     expect(run.settled).toEqual([])
 
@@ -178,6 +228,62 @@ describe('createRuntimeAutomationRunTerminalObserver', () => {
     await vi.advanceTimersByTimeAsync(10)
     expect(run.settled[0]?.status).toBe('completed')
     expect(run.settled[0]?.outputSnapshot?.content).toContain('previous run output')
+    await run.promise
+  })
+
+  it('orders fresh terminal completion after the agent starts, works, and finishes', async () => {
+    const runtime = createFakeRuntime({})
+    const controller = new AbortController()
+    const order: string[] = []
+    const observer = createRuntimeAutomationRunTerminalObserver(runtime)
+    const completion = observer
+      .observeCompletion(HANDLE, { signal: controller.signal, observedAfter: Date.now() })
+      .then((observation) => {
+        order.push('completion-persisted')
+        return observation
+      })
+
+    await vi.advanceTimersByTimeAsync(AGENT_START_PROBE_SETTLE_MS)
+    runtime.setPane({ preview: 'user@host repo %\n$' })
+    order.push('fresh-terminal-idle')
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    // The explicit Codex hook can prove the turn started while the PTY still
+    // retains a ready prompt or idle status from startup.
+    runtime.setAgentLifecycleStatus('working')
+    order.push('agent-started')
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    runtime.setPane({ lastAgentStatus: 'working', paneTitle: 'Codex — working', preview: '' })
+    order.push('agent-working')
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    runtime.setAgentLifecycleStatus('idle')
+    runtime.setPane({ lastAgentStatus: 'idle', paneTitle: 'Codex ready' })
+    order.push('agent-finished')
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    expect((await completion).status).toBe('completed')
+    expect(order).toEqual([
+      'fresh-terminal-idle',
+      'agent-started',
+      'agent-working',
+      'agent-finished',
+      'completion-persisted'
+    ])
+  })
+
+  it('does not complete from stale idle evidence when working begins in the same millisecond', async () => {
+    const runtime = createFakeRuntime({ lastAgentStatus: 'idle' })
+    const run = observe(runtime)
+
+    runtime.setAgentLifecycleStatus('working')
+    await vi.advanceTimersByTimeAsync(AGENT_START_PROBE_SETTLE_MS)
+    expect(run.settled).toEqual([])
+
+    runtime.setAgentLifecycleStatus('idle')
+    await vi.advanceTimersByTimeAsync(AGENT_START_PROBE_SETTLE_MS)
+    expect(run.settled[0]?.status).toBe('completed')
     await run.promise
   })
 

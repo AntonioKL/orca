@@ -507,7 +507,6 @@ export function useAutomationDispatchEvents(): void {
             unsubscribeAgentStatus = useAppStore.subscribe(checkCurrentStatus)
             checkCurrentStatus()
           }
-          const dispatchStartedAt = Date.now()
           if (automation.reuseSession) {
             const reusableSession = findReusableAutomationSession({
               automationId: automation.id,
@@ -524,6 +523,7 @@ export function useAutomationDispatchEvents(): void {
               if (releaseTab) {
                 releaseReuseDispatchTab = releaseTab
                 try {
+                  const reuseCompletionStartedAt = Date.now()
                   const submitted = await submitPromptToAgentPty({
                     tabId: reusableSession.tabId,
                     ptyId: reusableSession.ptyId,
@@ -542,7 +542,6 @@ export function useAutomationDispatchEvents(): void {
                         handleAgentDone()
                       }
                     }
-                    const reuseCompletionStartedAt = Date.now()
                     unsubscribeSessionObserver = await observeExistingAutomationSession({
                       ptyId: reusableSession.ptyId,
                       paneKey: reusableSession.paneKey,
@@ -572,6 +571,7 @@ export function useAutomationDispatchEvents(): void {
                     await markDispatchResult({
                       runId: run.id,
                       status: 'dispatched',
+                      dispatchedAt: reuseCompletionStartedAt,
                       workspaceId: worktree.id,
                       workspaceDisplayName: worktree.displayName,
                       terminalSessionId: reusableSession.tabId,
@@ -596,6 +596,7 @@ export function useAutomationDispatchEvents(): void {
             }
           }
           let freshLaunchSawWorking = false
+          const freshDispatchStartedAt = Date.now()
           const result = await launchAgentBackgroundSession({
             agent: automation.agentId,
             worktreeId: worktree.id,
@@ -642,13 +643,14 @@ export function useAutomationDispatchEvents(): void {
             releaseTerminalOwnership()
           }
           const launchedTabId = result.tabId
-          observeAgentStatus(result.paneKey, dispatchStartedAt, {
+          observeAgentStatus(result.paneKey, freshDispatchStartedAt, {
             requireWorkingAfterStart: automation.agentId === 'codex'
           })
           try {
             await markDispatchResult({
               runId: run.id,
               status: 'dispatched',
+              dispatchedAt: freshDispatchStartedAt,
               workspaceId: worktree.id,
               workspaceDisplayName: worktree.displayName,
               terminalSessionId: launchedTabId,

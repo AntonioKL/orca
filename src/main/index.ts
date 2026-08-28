@@ -321,7 +321,6 @@ import { initializeBrowserSessionsForApp } from './browser/browser-session-start
 import { initializeBrowserClientHostId } from './browser/browser-client-host-id'
 import { setUnreadDockBadgeCount } from './dock/unread-badge'
 import { AutomationService } from './automations/service'
-import { createHeadlessAutomationOutputSnapshotBuffer } from './automations/headless-dispatch'
 import { buildHeadlessAutomationWorktreeCreateArgs } from './automations/headless-workspace-create'
 import { createRuntimeAutomationRunTerminalObserver } from './automations/runtime-terminal-run-observer'
 import { AgentAwakeService } from './agent-awake-service'
@@ -2795,15 +2794,16 @@ void app.whenReady().then(async () => {
     allowRemoteHostScheduling: isServeMode,
     headlessDispatcher: isServeMode
       ? async ({ automation, run, target }) => {
-          const terminalSnapshotLimit = 2_000
           let terminalHandle: string
           let terminalSessionId: string | null = null
           let terminalPaneKey: string | null = null
           let terminalPtyId: string | null = null
+          let dispatchedAt: number
           let workspaceId: string
           let workspaceDisplayName: string | null = null
 
           if (automation.workspaceMode === 'new_per_run') {
+            dispatchedAt = Date.now()
             const created = await runtimeService.createManagedWorktree({
               ...buildHeadlessAutomationWorktreeCreateArgs({
                 automation,
@@ -2827,6 +2827,7 @@ void app.whenReady().then(async () => {
             if (!automation.workspaceId) {
               throw new Error('The target workspace is no longer available.')
             }
+            dispatchedAt = Date.now()
             const terminal = await runtimeService.launchAgentTerminal(
               `id:${automation.workspaceId}`,
               {
@@ -2844,38 +2845,13 @@ void app.whenReady().then(async () => {
             workspaceDisplayName = worktree.displayName ?? null
           }
 
-          const completion = (async () => {
-            const wait = await runtimeService.waitForTerminal(terminalHandle, {
-              condition: 'tui-idle'
-            })
-            const read = await runtimeService.readTerminal(terminalHandle, {
-              limit: terminalSnapshotLimit
-            })
-            const snapshotBuffer = createHeadlessAutomationOutputSnapshotBuffer()
-            snapshotBuffer.append(read.tail.join('\n'))
-            if (wait.satisfied) {
-              return {
-                status: 'completed' as const,
-                outputSnapshot: snapshotBuffer.snapshot(),
-                error: null
-              }
-            }
-            return {
-              status: 'dispatch_failed' as const,
-              outputSnapshot: snapshotBuffer.snapshot(),
-              error: wait.blockedReason
-                ? `Automation agent is blocked: ${wait.blockedReason}.`
-                : 'Automation agent did not report completion.'
-            }
-          })()
-
           return {
+            dispatchedAt,
             workspaceId,
             workspaceDisplayName,
             terminalSessionId,
             terminalPaneKey,
-            terminalPtyId,
-            completion
+            terminalPtyId
           }
         }
       : undefined

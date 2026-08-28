@@ -222,6 +222,8 @@ export type AutomationDispatchRequest = {
 export type AutomationDispatchResult = {
   runId: string
   status: AutomationRunStatus
+  /** Authority timestamp captured immediately before the agent prompt dispatch. */
+  dispatchedAt?: number
   workspaceId?: string | null
   workspaceDisplayName?: string | null
   terminalSessionId?: string | null

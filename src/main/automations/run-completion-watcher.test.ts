@@ -81,13 +81,16 @@ function readRun(store: TestStore, automationId: string, runId: string): Automat
 }
 
 function createObserver(
-  observe: (signal: AbortSignal) => Promise<AutomationRunCompletionObservation>,
+  observe: (
+    signal: AbortSignal,
+    observedAfter: number
+  ) => Promise<AutomationRunCompletionObservation>,
   resolveRunTerminal: (run: AutomationRun) => string | null = (run) =>
     run.terminalPaneKey ? 'handle-1' : null
 ): AutomationRunTerminalObserver {
   return {
     resolveRunTerminal,
-    observeCompletion: (_handle, { signal }) => observe(signal)
+    observeCompletion: (_handle, { signal, observedAfter }) => observe(signal, observedAfter)
   }
 }
 
@@ -231,6 +234,34 @@ describe('authority-owned automation run completion', () => {
     await vi.waitFor(() => {
       expect(readRun(store, automation.id, run.id).status).toBe('completed')
     })
+    service.stop()
+  })
+
+  it('re-attaches from the persisted prompt-dispatch boundary', async () => {
+    const store = await createStore()
+    const automation = createAutomation(store)
+    const run = store.createAutomationRun(automation, 1_000, 'manual')
+    const dispatchedAt = run.createdAt + 10_000
+    store.updateAutomationRun({
+      runId: run.id,
+      status: 'dispatched',
+      dispatchedAt,
+      ...LAUNCH_TARGET,
+      error: null
+    })
+    let observedAfter: number | null = null
+    const service = new AutomationService(store, {
+      terminalObserver: createObserver((signal, boundary) => {
+        observedAfter = boundary
+        return new Promise((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
+        })
+      })
+    })
+
+    service.start()
+
+    await vi.waitFor(() => expect(observedAfter).toBe(dispatchedAt))
     service.stop()
   })
 

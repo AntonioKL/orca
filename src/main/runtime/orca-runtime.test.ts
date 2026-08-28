@@ -37609,6 +37609,156 @@ describe('OrcaRuntimeService', () => {
     expect(result.satisfied).toBe(true)
   })
 
+  it('keeps an ordered tui-idle wait pending while the current lifecycle is working', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-08-27T20:00:00Z'))
+      const runtime = new OrcaRuntimeService(store)
+
+      runtime.attachWindow(1)
+      runtime.syncWindowGraph(1, {
+        tabs: [
+          {
+            tabId: 'tab-1',
+            worktreeId: 'repo-1::/tmp/worktree-a',
+            title: 'Codex',
+            activeLeafId: 'pane:1',
+            layout: null
+          }
+        ],
+        leaves: [
+          {
+            tabId: 'tab-1',
+            worktreeId: 'repo-1::/tmp/worktree-a',
+            leafId: 'pane:1',
+            paneRuntimeId: 1,
+            ptyId: 'pty-1'
+          }
+        ]
+      })
+      const observedAfter = Date.now()
+      runtime.onPtyData('pty-1', '\x1b]0;Codex done\x07', 100)
+      runtime.onPtyData('pty-1', '\x1b]0;Codex working\x07', 101)
+      const [terminal] = (await runtime.listTerminals()).terminals
+      let settled = false
+      const wait = runtime
+        .waitForTerminal(terminal.handle, {
+          condition: 'tui-idle',
+          timeoutMs: 1_000,
+          agentTurnStartedAfter: observedAfter
+        })
+        .then((result) => {
+          settled = true
+          return result
+        })
+
+      await Promise.resolve()
+      expect(settled).toBe(false)
+
+      runtime.onPtyData('pty-1', '\x1b]0;Codex done\x07', 102)
+      await expect(wait).resolves.toMatchObject({ satisfied: true })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('restores ordered completion from persisted working evidence after restart', async () => {
+    const observedAfter = Date.now() - 1_000
+    const leafId = '11111111-2222-4333-8444-555555555555'
+    const statuses = [
+      {
+        state: 'working' as const,
+        prompt: 'automation prompt',
+        agentType: 'codex' as const,
+        paneKey: `tab-1:${leafId}`,
+        connectionId: null,
+        receivedAt: observedAfter + 100,
+        stateStartedAt: observedAfter + 100,
+        restoredUnconfirmed: true
+      }
+    ]
+    const runtime = new OrcaRuntimeService(store, undefined, {
+      getAgentStatusSnapshot: () => statuses
+    })
+
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, {
+      tabs: [
+        {
+          tabId: 'tab-1',
+          worktreeId: 'repo-1::/tmp/worktree-a',
+          title: 'Codex',
+          activeLeafId: leafId,
+          layout: null
+        }
+      ],
+      leaves: [
+        {
+          tabId: 'tab-1',
+          worktreeId: 'repo-1::/tmp/worktree-a',
+          leafId,
+          paneRuntimeId: 1,
+          ptyId: 'pty-1'
+        }
+      ]
+    })
+    const [terminal] = (await runtime.listTerminals()).terminals
+    expect(runtime.hasTerminalAgentWorkedSince(terminal.handle, observedAfter)).toBe(true)
+    const wait = runtime.waitForTerminal(terminal.handle, {
+      condition: 'tui-idle',
+      timeoutMs: 1_000,
+      agentTurnStartedAfter: observedAfter
+    })
+
+    runtime.onPtyData('pty-1', '\x1b]0;Codex done\x07', 200)
+
+    await expect(wait).resolves.toMatchObject({ satisfied: true })
+  })
+
+  it('rejects a stale clock-ahead remote completion before a reused dispatch', async () => {
+    const observedAfter = Date.now()
+    const leafId = '11111111-2222-4333-8444-555555555555'
+    const runtime = new OrcaRuntimeService(store, undefined, {
+      getAgentStatusSnapshot: () => [
+        {
+          state: 'done',
+          prompt: 'previous automation prompt',
+          agentType: 'codex',
+          paneKey: `tab-1:${leafId}`,
+          connectionId: 'ssh-1',
+          receivedAt: observedAfter - 100,
+          stateStartedAt: observedAfter - 200,
+          turnCompletedAt: observedAfter + 60 * 60 * 1000
+        }
+      ]
+    })
+
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, {
+      tabs: [
+        {
+          tabId: 'tab-1',
+          worktreeId: 'repo-1::/tmp/worktree-a',
+          title: 'Codex',
+          activeLeafId: leafId,
+          layout: null
+        }
+      ],
+      leaves: [
+        {
+          tabId: 'tab-1',
+          worktreeId: 'repo-1::/tmp/worktree-a',
+          leafId,
+          paneRuntimeId: 1,
+          ptyId: 'pty-1'
+        }
+      ]
+    })
+    const [terminal] = (await runtime.listTerminals()).terminals
+
+    expect(runtime.hasTerminalAgentWorkedSince(terminal.handle, observedAfter)).toBe(false)
+  })
+
   it('builds a compact worktree summary from persisted and live runtime state', async () => {
     const runtime = new OrcaRuntimeService(store)
 
