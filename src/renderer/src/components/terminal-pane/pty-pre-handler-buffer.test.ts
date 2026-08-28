@@ -8,6 +8,7 @@ import {
   currentPreHandlerPtySequence,
   drainPreHandlerPtyData,
   drainPreHandlerPtyExit,
+  discardPreHandlerPtyExitFromForeignIncarnation,
   discardPreHandlerPtyState,
   discardPreHandlerPtyStateFromPriorIncarnation,
   hasPreHandlerPtyExit,
@@ -19,6 +20,10 @@ const TRIM_PTY_ID = 'pty-pre-handler-trim'
 const EXIT_PTY_ID = 'pty-pre-handler-exit'
 const CAPPED_EXIT_PTY_IDS = Array.from({ length: 65 }, (_, index) => `pty-capped-exit-${index}`)
 const RECYCLED_PTY_ID = 'ssh:target@@pty-2'
+// Two lifetimes of the same relay-renumbered id: the shell that died while the transport was down,
+// and the one the fresh spawn just got handed.
+const PRIOR_INCARNATION_ID = 'incarnation-before-the-relay-restarted'
+const FRESH_INCARNATION_ID = 'incarnation-of-the-shell-now-attaching'
 
 describe('pre-handler PTY buffer', () => {
   afterEach(() => {
@@ -226,6 +231,49 @@ describe('pre-handler PTY buffer', () => {
     drainPreHandlerPtyExit(RECYCLED_PTY_ID, exit)
     expect(exit).toHaveBeenCalledWith(1)
     expect(data).toHaveBeenCalledWith('startup bytes', undefined)
+  })
+
+  // The case the sequence fence structurally cannot reach: the stale exit is recorded AFTER the
+  // renderer asked for a fresh PTY, so it is newer than the fence and passes it. Only the
+  // incarnation says the exit describes a lifetime of the id that ended before this one began.
+  it("drops a recycled id's exit that arrived after the spawn request, on incarnation alone", () => {
+    const fence = currentPreHandlerPtySequence()
+    bufferPreHandlerPtyExit(RECYCLED_PTY_ID, 0, PRIOR_INCARNATION_ID)
+
+    discardPreHandlerPtyExitFromForeignIncarnation(RECYCLED_PTY_ID, FRESH_INCARNATION_ID)
+    discardPreHandlerPtyStateFromPriorIncarnation(RECYCLED_PTY_ID, fence)
+
+    const exit = vi.fn()
+    expect(hasPreHandlerPtyExit(RECYCLED_PTY_ID)).toBe(false)
+    drainPreHandlerPtyExit(RECYCLED_PTY_ID, exit)
+    expect(exit).not.toHaveBeenCalled()
+  })
+
+  it('keeps a post-fence exit from the incarnation that is attaching, so an instantly dead shell still reports', () => {
+    const fence = currentPreHandlerPtySequence()
+    bufferPreHandlerPtyExit(RECYCLED_PTY_ID, 1, FRESH_INCARNATION_ID)
+
+    discardPreHandlerPtyExitFromForeignIncarnation(RECYCLED_PTY_ID, FRESH_INCARNATION_ID)
+    discardPreHandlerPtyStateFromPriorIncarnation(RECYCLED_PTY_ID, fence)
+
+    const exit = vi.fn()
+    drainPreHandlerPtyExit(RECYCLED_PTY_ID, exit)
+    expect(exit).toHaveBeenCalledWith(1)
+  })
+
+  // Absence is unknown, never a mismatch: a host that predates the field, and the relay's own
+  // `{ id, code: -1 }` stale-PTY drop, must keep the fence's behaviour exactly.
+  it('never discards on incarnation when either side is unnamed', () => {
+    bufferPreHandlerPtyExit(RECYCLED_PTY_ID, 2)
+    discardPreHandlerPtyExitFromForeignIncarnation(RECYCLED_PTY_ID, FRESH_INCARNATION_ID)
+    expect(hasPreHandlerPtyExit(RECYCLED_PTY_ID)).toBe(true)
+    drainPreHandlerPtyExit(RECYCLED_PTY_ID, vi.fn())
+
+    bufferPreHandlerPtyExit(RECYCLED_PTY_ID, 3, PRIOR_INCARNATION_ID)
+    clearConsumedPreHandlerPtyExit(RECYCLED_PTY_ID)
+    bufferPreHandlerPtyExit(RECYCLED_PTY_ID, 3, PRIOR_INCARNATION_ID)
+    discardPreHandlerPtyExitFromForeignIncarnation(RECYCLED_PTY_ID, undefined)
+    expect(hasPreHandlerPtyExit(RECYCLED_PTY_ID)).toBe(true)
   })
 
   it('re-admits exits for a recycled id whose prior incarnation was consumed', () => {
