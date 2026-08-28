@@ -13770,6 +13770,15 @@
       ],
       "evidenceRuns": [
         {
+          "date": "2026-08-28",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/pty-input-write-queue.test.ts src/renderer/src/components/terminal-pane/pty-transport-input-write.test.ts src/shared/terminal-query-reply.test.ts src/shared/pty-startup-ingress-live-query-reply.test.ts src/shared/pty-startup-reply-echo-shapes.test.ts",
+          "result": "passed",
+          "durationSeconds": 0.63,
+          "summary": "Five files and 118 tests passed, covering the OSC 11 then CSI 6n ordering assertion added for #16672 in both its one-write and torn-color-query forms. Non-vacuity was checked by ablation rather than assumed: holding the echo-safe reply so the immediate CPR lane overtakes it reds both cases with the inverted bytes from the report. A control tearing between the two queries instead of inside the color query stays green under a hold shorter than the inter-chunk gap, which is why that weaker shape is recorded in knownGaps rather than pinned."
+        },
+        {
           "date": "2026-08-25",
           "runner": "local",
           "platform": "macos",
