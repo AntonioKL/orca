@@ -47,7 +47,7 @@ function runBaseline(paths, extraArgs = [], spawnOptions = {}) {
       ...extraArgs
     ],
     {
-      cwd: repoRoot,
+      cwd: spawnOptions.cwd ?? repoRoot,
       encoding: 'utf8',
       env: { ...process.env, ...spawnOptions.env }
     }
@@ -149,6 +149,80 @@ describe('typecheck diagnostic baseline', () => {
 
     expect(result.status).toBe(0)
     expect(result.stdout).toContain('1 known diagnostics, no drift')
+  })
+
+  it('rejects a committed baseline that grew from the PR base', () => {
+    const paths = createFixture("const first: number = 'bad'\n")
+    expect(runBaseline(paths, ['--write']).status).toBe(0)
+    // Base knows only the first error; the committed baseline was raised to cover a second.
+    const base = JSON.parse(readFileSync(paths.baseline, 'utf8'))
+    writeFileSync(paths.baseBaseline, JSON.stringify(base))
+    writeFileSync(paths.source, "const first: number = 'bad'\nconst second: boolean = 'also-bad'\n")
+    expect(runBaseline(paths, ['--write', '--base-baseline', paths.baseBaseline]).status).toBe(1)
+    writeFileSync(
+      paths.baseline,
+      JSON.stringify({
+        version: 1,
+        diagnostics: [
+          ...base.diagnostics,
+          {
+            file: 'source.ts',
+            line: 2,
+            column: 7,
+            code: 2322,
+            message: "Type 'string' is not assignable to type 'boolean'."
+          }
+        ]
+      })
+    )
+
+    const check = runBaseline(paths, ['--base-baseline', paths.baseBaseline])
+
+    expect(check.status).toBe(1)
+    expect(check.stderr).toContain('Diagnostic baseline grew (1)')
+  })
+
+  it('reads the PR base from the environment the way CI passes it', () => {
+    const paths = createFixture("const value: number = 'bad'\n")
+    expect(runBaseline(paths, ['--write']).status).toBe(0)
+    writeFileSync(paths.baseBaseline, JSON.stringify({ version: 1, diagnostics: [] }))
+
+    const result = runBaseline(paths, [], {
+      env: { TYPECHECK_BASELINE_BASE_PATH: paths.baseBaseline }
+    })
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('Diagnostic baseline grew (1)')
+  })
+
+  it('resolves the env-supplied PR base against the repo, not the working directory', () => {
+    // Mobile CI runs this with working-directory: mobile, so a repo-relative base
+    // path must not resolve against the caller's cwd.
+    const result = runBaseline(
+      {
+        project: 'config/tsconfig.e2e.json',
+        baseline: 'config/typecheck-e2e-diagnostics.json'
+      },
+      [],
+      {
+        cwd: join(repoRoot, 'mobile'),
+        env: { TYPECHECK_BASELINE_BASE_PATH: 'config/typecheck-e2e-diagnostics.json' }
+      }
+    )
+
+    expect(result.stderr).not.toContain('ENOENT')
+    expect(result.status).toBe(0)
+  })
+
+  it('names the regeneration command when the baseline drifts', () => {
+    const paths = createFixture("const value: number = 'bad'\n")
+    expect(runBaseline(paths, ['--write']).status).toBe(0)
+    writeFileSync(paths.source, 'const value: number = 1\n')
+
+    const stale = runBaseline(paths)
+
+    expect(stale.status).toBe(1)
+    expect(stale.stderr).toContain('--write')
   })
 
   it('refuses to regenerate a baseline that grows from the PR base', () => {

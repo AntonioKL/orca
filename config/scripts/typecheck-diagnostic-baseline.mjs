@@ -136,6 +136,12 @@ function subtractDiagnostics(left, right) {
   })
 }
 
+/** Failures here are routine, so the message carries its own fix. */
+function regenerationHint() {
+  const argv = process.argv.slice(2).filter((value) => value !== '--write')
+  return `Regenerate with: node ${relative(repoRoot, import.meta.filename)} ${argv.join(' ')} --write`
+}
+
 function formatDiagnostic(diagnostic) {
   const location = diagnostic.file
     ? `${diagnostic.file}:${diagnostic.line}:${diagnostic.column}`
@@ -168,9 +174,9 @@ async function main() {
   const options = parseArgs(process.argv.slice(2))
   const projectPath = resolve(repoRoot, options.project)
   const baselinePath = resolve(repoRoot, options.baseline)
-  const baseBaselinePath = options.baseBaseline
-    ? resolve(repoRoot, options.baseBaseline)
-    : process.env.TYPECHECK_BASELINE_BASE_PATH
+  // Resolve the env form like the flag: mobile runs with working-directory: mobile.
+  const baseBaselineOption = options.baseBaseline ?? process.env.TYPECHECK_BASELINE_BASE_PATH
+  const baseBaselinePath = baseBaselineOption ? resolve(repoRoot, baseBaselineOption) : undefined
   const tscPath = resolve(repoRoot, options.tsc ?? 'node_modules/typescript/bin/tsc')
   const diagnostics = collectDiagnostics(projectPath, tscPath)
   const baseBaseline = baseBaselinePath ? await readBaseline(baseBaselinePath) : null
@@ -207,6 +213,7 @@ async function main() {
       console.error(formatDiagnostic(diagnostic))
     }
   }
+  console.error(regenerationHint())
   process.exitCode = 1
 }
 
