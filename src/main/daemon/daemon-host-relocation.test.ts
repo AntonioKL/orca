@@ -6,6 +6,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  utimesSync,
   writeFileSync
 } from 'node:fs'
 import os from 'node:os'
@@ -267,6 +268,13 @@ describe('getRelocatedDaemonHost', () => {
   })
 })
 
+// Why: quarantine refuses records written in the last minute, because an in-flight publish is
+// indistinguishable from a torn one. Age a record so it stands for a settled corrupt record.
+function ageRecordPastQuarantineFloor(recordPath: string): void {
+  const aged = new Date(Date.now() - 5 * 60_000)
+  utimesSync(recordPath, aged, aged)
+}
+
 describe('pruneOldDaemonHosts', () => {
   it('removes unpinned non-current version dirs, keeping current and pinned', () => {
     const root = join(localAppDataDir, 'Orca', 'daemon-host')
@@ -437,6 +445,7 @@ describe('pruneOldDaemonHosts', () => {
     // writer of a mid-digits tear died mid-write, so quarantine must not consult any probe.
     const pidPath = join(runtimeDir, 'daemon-v7.pid')
     writeFileSync(pidPath, '{"pid":123')
+    ageRecordPastQuarantineFloor(pidPath)
     const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
       throw Object.assign(new Error('no such process'), { code: 'ESRCH' })
     })
@@ -464,6 +473,7 @@ describe('pruneOldDaemonHosts', () => {
     // Trusting it would re-create for this one record the eternal veto pruning must not have.
     const pidPath = join(runtimeDir, 'daemon-v7.pid')
     writeFileSync(pidPath, '{"pid":4')
+    ageRecordPastQuarantineFloor(pidPath)
     const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
       throw Object.assign(new Error('access denied'), { code: 'EPERM' })
     })
@@ -483,6 +493,57 @@ describe('pruneOldDaemonHosts', () => {
     expect(existsSync(join(root, '1.0.0'))).toBe(false)
     warnSpy.mockRestore()
     killSpy.mockRestore()
+  })
+
+  it('never quarantines a corrupt record that was just written', () => {
+    // A live daemon's record is created before it is written (writeFileSync 'wx'), so a
+    // concurrent launch can read it as empty. Quarantining it would strand the running daemon's
+    // record and let the NEXT launch reclaim its host image.
+    const root = join(localAppDataDir, 'Orca', 'daemon-host')
+    const runtimeDir = join(userDataDir, 'daemon')
+    mkdirSync(join(root, '1.0.0'), { recursive: true })
+    mkdirSync(runtimeDir, { recursive: true })
+    const pidPath = join(runtimeDir, 'daemon-v7.pid')
+    writeFileSync(pidPath, '')
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const evidence = collectPinnedDaemonVersions(runtimeDir)
+
+    expect(evidence).toEqual({
+      status: 'unverifiable',
+      reason:
+        'the daemon pid file could not be parsed and was written too recently to quarantine: daemon-v7.pid'
+    })
+    expect(existsSync(pidPath)).toBe(true)
+    expect(existsSync(join(runtimeDir, 'daemon-v7.pid.corrupt'))).toBe(false)
+    pruneOldDaemonHosts(evidence)
+    expect(existsSync(join(root, '1.0.0'))).toBe(true)
+    warnSpy.mockRestore()
+  })
+
+  it('never treats a settled empty record as a valid pre-relocation daemon', () => {
+    // Number('') === 0, so the parser's legacy bare-integer fallback accepts an empty record as
+    // pid 0 with appVersion null. Skipping it as "pins no host dir" would leave the version
+    // unpinned and let the prune below reclaim a live daemon's host image. Aged past the
+    // quarantine floor so this pins the pid guard rather than the freshness guard.
+    const root = join(localAppDataDir, 'Orca', 'daemon-host')
+    const runtimeDir = join(userDataDir, 'daemon')
+    mkdirSync(join(root, '1.0.0'), { recursive: true })
+    mkdirSync(runtimeDir, { recursive: true })
+    const pidPath = join(runtimeDir, 'daemon-v7.pid')
+    writeFileSync(pidPath, '   ')
+    ageRecordPastQuarantineFloor(pidPath)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const evidence = collectPinnedDaemonVersions(runtimeDir)
+
+    expect(evidence).toEqual({
+      status: 'unverifiable',
+      reason: 'the daemon pid file could not be parsed and was quarantined: daemon-v7.pid'
+    })
+    pruneOldDaemonHosts(evidence)
+    expect(existsSync(join(root, '1.0.0'))).toBe(true)
+    warnSpy.mockRestore()
   })
 
   it('vetoes pruning while a pid salvaged from a corrupt record still answers', () => {
@@ -518,6 +579,7 @@ describe('pruneOldDaemonHosts', () => {
     mkdirSync(runtimeDir, { recursive: true })
     const pidPath = join(runtimeDir, 'daemon-v7.pid')
     writeFileSync(pidPath, 'not a daemon record')
+    ageRecordPastQuarantineFloor(pidPath)
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
     // Launch with the corrupt record: prune skips once, and the record is quarantined in place

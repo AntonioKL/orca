@@ -326,7 +326,15 @@ export function collectPinnedDaemonVersions(runtimeDir: string): PinnedDaemonVer
       }
     }
     const parsed = parseDaemonPidFile(contents)
-    if (!parsed) {
+    // Why not just `!parsed`: the parser's legacy bare-integer fallback coerces an empty or
+    // whitespace-only record to pid 0 (Number('') === 0), which is the exact shape a concurrent
+    // read sees while a live daemon publishes its record — writeFileSync 'wx' creates the file
+    // before writing it. Such a record would otherwise pass as a valid pre-relocation daemon,
+    // skip on appVersion === null, and leave its version unpinned, so the prune below would
+    // reclaim a running daemon's host image. A pid that is not a positive integer names no
+    // process — process.kill(0, 0) probes the caller's own process group, never a daemon — so
+    // it is not liveness evidence and must veto rather than be skipped.
+    if (!parsed || !Number.isInteger(parsed.pid) || parsed.pid <= 0) {
       return {
         status: 'unverifiable',
         reason: quarantineCorruptDaemonPidRecord(runtimeDir, entry.name, contents)
