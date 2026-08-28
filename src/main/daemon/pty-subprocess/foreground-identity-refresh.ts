@@ -32,8 +32,16 @@ export type CachedAgentForeground = {
 }
 
 /** Outcome of the most recently settled identity scan. `sawAgent` is only
- *  meaningful when `available` — an unavailable scan observed nothing. */
-export type ForegroundScanSettlement = { at: number; available: boolean; sawAgent: boolean }
+ *  meaningful when `available` — an unavailable scan observed nothing.
+ *  `startedAt` dates the process snapshot the scan read; `at` dates the answer. An
+ *  agent that appears between the two is invisible to the snapshot, so ordering
+ *  against other evidence must use `startedAt`. */
+export type ForegroundScanSettlement = {
+  at: number
+  startedAt: number
+  available: boolean
+  sawAgent: boolean
+}
 
 export type ForegroundIdentityState = {
   cachedAgentForeground: CachedAgentForeground | null
@@ -65,9 +73,11 @@ export function getActiveStartupAgent(
  * degrades the scan, "title == shell" observes nothing — and a scan that last
  * saw the agent cannot corroborate its absence either.
  *
- * `agentEvidence` outdates the settlement: the synchronous title fast path
- * stamps a recognized agent without running a scan, so an agent-free settlement
- * can still be inside the window while an agent that started after it is live.
+ * `agentEvidence` outdates the settlement: the synchronous title fast path stamps a
+ * recognized agent without running a scan, so an agent-free settlement can still be
+ * inside the window while an agent that started after it is live. Compared against
+ * `startedAt`, not `at` — a scan that settles after the agent appeared still read a
+ * process table from before it.
  */
 export function isShellTitleCorroborated(
   settlement: ForegroundScanSettlement | null,
@@ -79,7 +89,7 @@ export function isShellTitleCorroborated(
     settlement.available &&
     !settlement.sawAgent &&
     now - settlement.at <= SHELL_TITLE_SCAN_CORROBORATION_MAX_AGE_MS &&
-    (agentEvidence === null || settlement.at >= agentEvidence.refreshedAt)
+    (agentEvidence === null || settlement.startedAt >= agentEvidence.refreshedAt)
   )
 }
 
@@ -159,6 +169,7 @@ export function createForegroundIdentityRefresh(args: {
       .then<string | void>(({ processName, processId, available, anchorPidForeign }) => {
         state.lastScanSettlement = {
           at: Date.now(),
+          startedAt: now,
           available,
           sawAgent: available && recognizeAgentProcess(processName) !== null
         }
@@ -227,7 +238,12 @@ export function createForegroundIdentityRefresh(args: {
       })
       .catch(() => {
         // Best-effort only: foreground enrichment must never affect PTY health.
-        state.lastScanSettlement = { at: Date.now(), available: false, sawAgent: false }
+        state.lastScanSettlement = {
+          at: Date.now(),
+          startedAt: now,
+          available: false,
+          sawAgent: false
+        }
       })
       .finally(() => {
         state.refreshInFlight = false
