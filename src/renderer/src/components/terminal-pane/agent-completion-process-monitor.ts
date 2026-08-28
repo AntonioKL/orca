@@ -108,7 +108,14 @@ export function createAgentCompletionProcessMonitor({
       // its `false` conflates "no children" with "could not ask", while every
       // producer sets `true` from a positive observation. So a `true` beside a
       // disagreeing 'exited' must refuse, exactly as the boolean-only gate did.
-      if (evidence.children.verdict !== 'exited' || result.hasChildProcesses) {
+      // The legacy foreground scalar is the same rule one axis over: only its
+      // `null` conflates "no agent" with "could not ask", so a still-recognized
+      // name beside a union reporting none must refuse too.
+      if (
+        evidence.children.verdict !== 'exited' ||
+        result.hasChildProcesses ||
+        recognizeAgentProcess(result.foregroundProcess) !== null
+      ) {
         state.pendingProcessExitAgent = null
         scheduleNextPoll()
         return false
