@@ -204,6 +204,10 @@ export function publishDaemonPidFile(
       // instead of trading a torn-write window for no pid record at all. Warn because the
       // degrade is otherwise invisible: an operator on such a volume (network mount,
       // container overlay) should be able to tell the atomic path is not in use.
+      writeFileSync(pidPath, serializeDaemonPidFile(pidFile), { mode: 0o600, flag: 'wx' })
+      // Announced only once the degraded write has actually landed: this same arm is
+      // reached by a lost ownership race, where the write throws EEXIST and nothing
+      // was published — claiming torn-write exposure for that would be a lie.
       // Both channels, matching daemon-endpoint-lifecycle.ts: inside the detached
       // daemon stdio is 'ignore' and its startup stderr pipe is destroyed once it is
       // up, so console alone reaches nobody on the path this warning exists for.
@@ -212,7 +216,6 @@ export function publishDaemonPidFile(
         `[daemon] pid-record hard-link publish failed (${describeErrnoCode(error)}); ` +
           'degrading to the non-atomic exclusive write — torn-write protection is off for this record'
       )
-      writeFileSync(pidPath, serializeDaemonPidFile(pidFile), { mode: 0o600, flag: 'wx' })
     }
   } finally {
     try {

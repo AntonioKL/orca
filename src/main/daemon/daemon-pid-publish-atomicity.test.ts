@@ -170,6 +170,28 @@ describe('publishDaemonPidFile atomicity', () => {
     expect(entries).toEqual([])
   })
 
+  it('stays silent when the degraded write itself loses the ownership race', () => {
+    // Same catch arm as the degrade, but nothing was published: announcing lost
+    // torn-write protection for a record that was never written is a false alarm.
+    const entries: string[] = []
+    publishDaemonPidFile(pidPath, { pid: 1, startedAtMs: 5, launchNonce: 'other' })
+    fsFaults.linkError = Object.assign(new Error('injected ENOTSUP'), { code: 'ENOTSUP' })
+
+    expect(() =>
+      publishDaemonPidFile(pidPath, RECORD, { log: (event) => entries.push(event) })
+    ).toThrow(/EEXIST/)
+    expect(warnSpy).not.toHaveBeenCalled()
+    expect(entries).toEqual([])
+  })
+
+  it('names the errno even when the link error carries none', () => {
+    fsFaults.linkError = new Error('injected link failure with no code')
+
+    publishDaemonPidFile(pidPath, RECORD)
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('no errno'))
+  })
+
   it('keeps exclusive-create semantics on the degraded path too', () => {
     publishDaemonPidFile(pidPath, { pid: 1, startedAtMs: 5, launchNonce: 'other' })
     fsFaults.linkError = Object.assign(new Error('injected ENOTSUP'), { code: 'ENOTSUP' })
