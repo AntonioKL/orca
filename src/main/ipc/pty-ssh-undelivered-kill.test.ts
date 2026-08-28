@@ -90,6 +90,8 @@ describe('undelivered SSH stops', () => {
 
   function install(store: ReturnType<typeof createKillStore>): {
     kill: (ptyId: string) => boolean
+    stopAndWait: (ptyId: string, opts?: { keepHistory?: boolean }) => Promise<boolean>
+    markReversibleStops: (ptyIds: readonly string[]) => () => void
     runtime: ReturnType<typeof installController>['runtime']
   } {
     const { runtime } = installController(handlers as never)
@@ -103,8 +105,15 @@ describe('undelivered SSH stops', () => {
     )
     const controller = runtime.setPtyController.mock.calls[0]?.[0] as {
       kill: (ptyId: string) => boolean
+      stopAndWait: (ptyId: string, opts?: { keepHistory?: boolean }) => Promise<boolean>
+      markReversibleStops: (ptyIds: readonly string[]) => () => void
     }
-    return { kill: controller.kill, runtime }
+    return {
+      kill: controller.kill,
+      stopAndWait: controller.stopAndWait,
+      markReversibleStops: controller.markReversibleStops,
+      runtime
+    }
   }
 
   // The leak: the shutdown died on the transport, the verdict is correctly `unverifiable`, and
@@ -176,6 +185,54 @@ describe('undelivered SSH stops', () => {
       // A completed shutdown answers any earlier undelivered order for the same id.
       expect(store.clearSshRemotePtyKillIntent).toHaveBeenCalledWith('ssh-1', 'pty-7')
     } finally {
+      unregisterSshPtyProvider('ssh-1')
+      deletePtyOwnership(SCOPED_PTY_ID)
+    }
+  })
+
+  // Worktree sleep stops through stopAndWait and marks those stops reversible: when one does not
+  // land, the pane stays live and the user keeps using it. A durable order recorded here would come
+  // back on a later handshake and kill that terminal out from under them.
+  it('records nothing for a reversible stopAndWait that could not be delivered', async () => {
+    const store = createKillStore()
+    registerSshPtyProvider(
+      'ssh-1',
+      sshProviderStub(async () => {
+        throw new Error('socket closed')
+      })
+    )
+    setPtyOwnership(SCOPED_PTY_ID, 'ssh-1')
+    restorePtyIncarnation(SCOPED_PTY_ID, 'inc-e')
+    const { stopAndWait } = install(store)
+
+    try {
+      await expect(stopAndWait(SCOPED_PTY_ID, { keepHistory: true })).resolves.toBe(false)
+      expect(store.recordSshRemotePtyKillIntent).not.toHaveBeenCalled()
+    } finally {
+      unregisterSshPtyProvider('ssh-1')
+      deletePtyOwnership(SCOPED_PTY_ID)
+    }
+  })
+
+  it('records nothing while a reversible stop owns the PTY', async () => {
+    const store = createKillStore()
+    registerSshPtyProvider(
+      'ssh-1',
+      sshProviderStub(async () => {
+        throw new Error('socket closed')
+      })
+    )
+    setPtyOwnership(SCOPED_PTY_ID, 'ssh-1')
+    restorePtyIncarnation(SCOPED_PTY_ID, 'inc-f')
+    const { kill, markReversibleStops } = install(store)
+    const release = markReversibleStops([SCOPED_PTY_ID])
+
+    try {
+      kill(SCOPED_PTY_ID)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(store.recordSshRemotePtyKillIntent).not.toHaveBeenCalled()
+    } finally {
+      release()
       unregisterSshPtyProvider('ssh-1')
       deletePtyOwnership(SCOPED_PTY_ID)
     }
