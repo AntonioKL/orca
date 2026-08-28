@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { RpcClient } from '../transport/rpc-client'
+import { readRpcClientGeneration } from '../transport/rpc-client-generation'
 import { isLogicalClientCutoverError } from '../transport/stable-logical-rpc-client'
 import type { RpcSuccess } from '../transport/types'
 import { readMobileRuntimeHostPlatform } from '../transport/mobile-runtime-host-platform'
@@ -239,7 +240,7 @@ function makeConnectionRevision(client: RpcClient | null): ConnectionRevision {
     revision: 0,
     runtimeRevision: 0,
     state: client?.getState() ?? null,
-    generation: readLogicalClientGeneration(client),
+    generation: readRpcClientGeneration(client),
     connectedAt: client?.getLastConnectedAt() ?? null
   }
 }
@@ -250,7 +251,7 @@ function updateConnectionRevision(connection: ConnectionRevision): void {
     return
   }
   const state = client.getState()
-  const generation = readLogicalClientGeneration(client)
+  const generation = readRpcClientGeneration(client)
   const connectedAt = client.getLastConnectedAt()
   const reconnected = state === 'connected' && connection.state !== 'connected'
   const migrated = generation !== null && generation !== connection.generation
@@ -264,10 +265,4 @@ function updateConnectionRevision(connection: ConnectionRevision): void {
   if (migrated || connectionChanged) {
     connection.runtimeRevision += 1
   }
-}
-
-function readLogicalClientGeneration(client: RpcClient | null): number | null {
-  const getGeneration = (client as (RpcClient & { getGeneration?: () => number }) | null)
-    ?.getGeneration
-  return getGeneration?.() ?? null
 }
