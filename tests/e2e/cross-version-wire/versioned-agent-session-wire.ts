@@ -1,7 +1,11 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
-import { materializeReleaseCheckout, REPO_ROOT, type ReleaseCheckout } from './release-checkout'
+import {
+  importReleaseCheckoutModule,
+  materializeReleaseCheckout,
+  REPO_ROOT,
+  type ReleaseCheckout
+} from './release-checkout'
 
 /**
  * The two things that decide whether a structured agent session exists for a given
@@ -118,20 +122,11 @@ async function loadWorkingTreeBuild(): Promise<AgentSessionWireBuild> {
   }
 }
 
-// Why @vite-ignore: the checkout is created at run time, so Vite cannot glob it at
-// transform time. Vite-node still resolves and transforms the target on demand.
-function importFromCheckout(specifier: string): Promise<Record<string, unknown>> {
-  return import(/* @vite-ignore */ pathToFileURL(specifier).href) as Promise<
-    Record<string, unknown>
-  >
-}
-
 async function loadReleaseBuild(checkout: ReleaseCheckout): Promise<AgentSessionWireBuild> {
-  const base = `${checkout.root}/src`
   const [protocol, dispatcher, terminalMethods] = await Promise.all([
-    importFromCheckout(`${base}/shared/protocol-version.ts`),
-    importFromCheckout(`${base}/main/runtime/rpc/dispatcher.ts`),
-    importFromCheckout(`${base}/main/runtime/rpc/methods/terminal.ts`)
+    importReleaseCheckoutModule(checkout, '/src/shared/protocol-version.ts'),
+    importReleaseCheckoutModule(checkout, '/src/main/runtime/rpc/dispatcher.ts'),
+    importReleaseCheckoutModule(checkout, '/src/main/runtime/rpc/methods/terminal.ts')
   ])
   const module = dispatcher as unknown as DispatcherModule
   return {
@@ -156,5 +151,5 @@ export async function loadAgentSessionWireBuild(ref: string): Promise<AgentSessi
   if (ref === WORKING_TREE) {
     return loadWorkingTreeBuild()
   }
-  return loadReleaseBuild(materializeReleaseCheckout(ref))
+  return loadReleaseBuild(await materializeReleaseCheckout(ref))
 }

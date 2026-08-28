@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import {
   existsSync,
+  mkdtempSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -8,13 +9,14 @@ import {
   rmSync,
   writeFileSync
 } from 'node:fs'
-import { dirname, join, relative, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { lock } from 'proper-lockfile'
 
 export const REPO_ROOT = resolve(import.meta.dirname, '..', '..', '..')
-const CACHE_ROOT = join(REPO_ROOT, 'tests', 'e2e', '.cross-version-checkouts')
+const DEFAULT_CACHE_ROOT = join(REPO_ROOT, 'tests', 'e2e', '.cross-version-checkouts')
 
 // Bump when extraction or the alias rewrite changes so cached trees are rebuilt.
-const CHECKOUT_FORMAT = 1
+const CHECKOUT_FORMAT = 2
 
 // Why: the wire endpoints only need the runtime RPC host, the renderer client, and
 // the shared codec. Skipping cli/relay keeps a cold CI extraction a few seconds.
@@ -32,6 +34,10 @@ export type ReleaseCheckout = {
   label: string
   /** Absolute path to the extracted checkout root (contains `src/`). */
   root: string
+}
+
+export type MaterializeReleaseCheckoutOptions = {
+  cacheRoot?: string
 }
 
 function git(args: string[]): string {
@@ -191,24 +197,75 @@ function readStamp(root: string): CheckoutStamp | null {
   }
 }
 
+function checkoutMatches(root: string, commit: string): boolean {
+  const stamp = readStamp(root)
+  return stamp?.commit === commit && stamp.format === CHECKOUT_FORMAT
+}
+
+function checkoutModulePath(checkout: ReleaseCheckout, rootRelativePath: string): string {
+  const fromRoot = rootRelativePath.replace(/^[/\\]+/, '')
+  const absolute = resolve(checkout.root, fromRoot)
+  const fromCheckout = relative(checkout.root, absolute)
+  if (
+    !fromRoot ||
+    fromCheckout === '..' ||
+    fromCheckout.startsWith(`..${sep}`) ||
+    isAbsolute(fromCheckout)
+  ) {
+    throw new Error(
+      `Cross-version module path must stay inside the release checkout: ${rootRelativePath}`
+    )
+  }
+  return absolute.split('\\').join('/')
+}
+
+/** Import a source module with `/src/...` anchored to the extracted release root. */
+export function importReleaseCheckoutModule(
+  checkout: ReleaseCheckout,
+  rootRelativePath: string
+): Promise<Record<string, unknown>> {
+  const specifier = checkoutModulePath(checkout, rootRelativePath)
+  return import(/* @vite-ignore */ specifier) as Promise<Record<string, unknown>>
+}
+
 /**
  * Extract `src/` at `ref` into a cached, gitignored checkout the test can import.
  * Cached by resolved commit, so a moved tag or a bumped rewrite format re-extracts.
  */
-export function materializeReleaseCheckout(ref: string): ReleaseCheckout {
+export async function materializeReleaseCheckout(
+  ref: string,
+  options: MaterializeReleaseCheckoutOptions = {}
+): Promise<ReleaseCheckout> {
   const commit = resolveCommit(ref)
   const label = ref.replace(/[^A-Za-z0-9._-]/g, '_')
-  const root = join(CACHE_ROOT, label)
-  const stamp = readStamp(root)
-  if (stamp?.commit === commit && stamp.format === CHECKOUT_FORMAT) {
+  const cacheRoot = options.cacheRoot ?? DEFAULT_CACHE_ROOT
+  const root = join(cacheRoot, label, `${commit}-format-${CHECKOUT_FORMAT}`)
+  if (checkoutMatches(root, commit)) {
     return { ref, commit, label, root }
   }
 
-  mkdirSync(CACHE_ROOT, { recursive: true })
-  const staging = join(CACHE_ROOT, `.staging-${label}-${process.pid}`)
-  rmSync(staging, { recursive: true, force: true })
-  mkdirSync(staging, { recursive: true })
+  mkdirSync(dirname(root), { recursive: true })
+  let releaseLock: (() => Promise<void>) | undefined
   try {
+    releaseLock = await lock(root, {
+      realpath: false,
+      stale: 60_000,
+      update: 10_000,
+      retries: { retries: 480, factor: 1, minTimeout: 250, maxTimeout: 250, randomize: true }
+    })
+  } catch (error) {
+    if (checkoutMatches(root, commit)) {
+      return { ref, commit, label, root }
+    }
+    throw new Error(`Cross-version harness could not lock ${ref} (${commit}): ${String(error)}`)
+  }
+
+  let staging: string | undefined
+  try {
+    if (checkoutMatches(root, commit)) {
+      return { ref, commit, label, root }
+    }
+    staging = mkdtempSync(join(dirname(root), `.staging-${commit.slice(0, 12)}-`))
     // `git archive | tar -x` keeps the extraction independent of the working tree,
     // so an injected violation in the working tree cannot leak into the old side.
     execFileSync(
@@ -223,12 +280,17 @@ export function materializeReleaseCheckout(ref: string): ReleaseCheckout {
     )
     rmSync(root, { recursive: true, force: true })
     renameSync(staging, root)
+    staging = undefined
   } catch (error) {
-    rmSync(staging, { recursive: true, force: true })
-    if (readStamp(root)?.commit === commit) {
+    if (checkoutMatches(root, commit)) {
       return { ref, commit, label, root }
     }
     throw new Error(`Cross-version harness failed to extract ${ref} (${commit}): ${String(error)}`)
+  } finally {
+    if (staging) {
+      rmSync(staging, { recursive: true, force: true })
+    }
+    await releaseLock()
   }
 
   if (!existsSync(join(root, 'src', 'shared', 'terminal-stream-protocol.ts'))) {
