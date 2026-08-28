@@ -63,6 +63,12 @@ function __orca_command_marker --on-event fish_preexec --no-scope-shadowing
   set -l __orca_command_b64 (builtin printf %s "$__orca_command_text" | command base64 | command tr -d '\\r\\n')
   builtin printf '\\e]777;orca-cmd;%s;%s\\a' "$__orca_shell_command_nonce" "$__orca_command_b64"
   builtin printf '\\e]133;C\\a'
+end
+function __orca_command_finished --on-event fish_postexec --no-scope-shadowing
+  # Why captured first: every later command overwrites $status before it is read.
+  set -l __orca_exit_status $status
+  __orca_command_markers_allowed; or return
+  builtin printf '\\e]133;D;%s\\a' "$__orca_exit_status"
 end`
 }
 

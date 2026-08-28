@@ -152,4 +152,42 @@ describe('fish private command markers (real fish)', () => {
 
     expect(stdout).not.toContain('orca-cmd')
   })
+
+  // Why postexec: fish_preexec alone leaves 133;C unpaired, so a fish pane never
+  // reports command-finished -- no clear-on-finish and no exit code.
+  function runPostexec(seed: string, command: string): string {
+    return execFileSync(
+      FISH_PATH,
+      ['-l', '-C', fishInit(), '-c', `${seed}; emit fish_postexec ${JSON.stringify(command)}`],
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          [SHELL_COMMAND_NONCE_ENV]: NONCE,
+          [SHELL_INTEGRATION_CONTEXT_ENV]: SHELL_INTEGRATION_DIRECT_CONTEXT
+        }
+      }
+    )
+  }
+
+  itWithFish('closes the OSC 133 lifecycle with the real command exit status', () => {
+    expect(runPostexec('true', 'true')).toContain(`${OSC}133;D;0${BEL}`)
+    expect(runPostexec('false', 'false')).toContain(`${OSC}133;D;1${BEL}`)
+  })
+
+  itWithFish('emits no command-finished when the pane carries no nonce', () => {
+    const env = {
+      ...process.env,
+      [SHELL_INTEGRATION_CONTEXT_ENV]: SHELL_INTEGRATION_DIRECT_CONTEXT
+    }
+    delete env[SHELL_COMMAND_NONCE_ENV]
+
+    const stdout = execFileSync(
+      FISH_PATH,
+      ['-l', '-C', fishInit(), '-c', 'false; emit fish_postexec "false"'],
+      { encoding: 'utf8', env }
+    )
+
+    expect(stdout).not.toContain(`${OSC}133;D`)
+  })
 })

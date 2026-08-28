@@ -100,6 +100,22 @@ describe('shell startup feature selection', () => {
     ).toEqual(['markers'])
   })
 
+  it('selects markers for a plain PowerShell pane', () => {
+    // Why: the PowerShell bootstrap carries the same nonce-gated orca-cmd emitter
+    // and is wrapped unconditionally, so without `markers` it never gets a nonce
+    // and that emitter can never fire.
+    for (const shellPath of ['powershell.exe', 'C:\\Program Files\\PowerShell\\7\\pwsh.exe']) {
+      expect(
+        selectShellStartupFeatures({
+          shellPath,
+          env: {},
+          injectsCommandMarkers: true,
+          ...PLAIN_PANE
+        })
+      ).toEqual(['markers'])
+    }
+  })
+
   it('does not widen wrapping for a caller without private marker intake', () => {
     expect(selectShellStartupFeatures({ shellPath: '/bin/zsh', env: {}, ...PLAIN_PANE })).toEqual(
       []
