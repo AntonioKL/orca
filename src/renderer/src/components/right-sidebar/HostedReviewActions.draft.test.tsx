@@ -60,7 +60,7 @@ describe('HostedReviewActions draft state', () => {
   ] as const)('renders Ready as primary and Close as secondary for %s', (provider, shortLabel) => {
     const markup = renderDraft(provider)
 
-    expect(markup).toContain('Ready for review')
+    expect(markup).toContain('Mark ready for review')
     expect(markup).toContain(`Close ${shortLabel}`)
     expect(markup).not.toContain('Merge')
     expect(markup).not.toContain('auto-merge')

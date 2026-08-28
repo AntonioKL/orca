@@ -11684,7 +11684,7 @@
             "73e0e1819d": "Queueing stack...",
             "e555a41d32": "Merging stack...",
             "markingReady": "Marking ready...",
-            "markReady": "Ready for review",
+            "markReady": "Mark ready for review",
             "draftMoreActions": "More {{value0}} actions",
             "closeDraft": "Close",
             "readyToast": "{{value0}} marked ready for review"

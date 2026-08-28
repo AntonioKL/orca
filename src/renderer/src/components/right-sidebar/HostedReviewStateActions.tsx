@@ -72,7 +72,7 @@ export function DraftReviewActions({
                 )
               : translate(
                   'auto.components.right.sidebar.HostedReviewActions.markReady',
-                  'Ready for review'
+                  'Mark ready for review'
                 )}
           </span>
         </Button>
