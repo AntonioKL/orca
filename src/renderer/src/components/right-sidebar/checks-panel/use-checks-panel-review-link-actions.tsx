@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useLayoutEffect, useRef } from 'react'
 import type { ChecksPanelCheckAndReviewActionsInput } from './check-and-review-action-dependencies'
 
 type RefreshLinkedGitHubPullRequest = (linkedPRNumber: number) => Promise<void>
@@ -39,8 +39,10 @@ export function useChecksPanelReviewLinkActions(
   const linkedGitLabMRRef = useRef(linkedGitLabMR)
   const reviewLinkScopeKeyRef = useRef(reviewLinkScopeKey)
   const reviewLinkActionGenerationRef = useRef(0)
-  linkedGitLabMRRef.current = linkedGitLabMR
-  reviewLinkScopeKeyRef.current = reviewLinkScopeKey
+  useLayoutEffect(() => {
+    linkedGitLabMRRef.current = linkedGitLabMR
+    reviewLinkScopeKeyRef.current = reviewLinkScopeKey
+  }, [linkedGitLabMR, reviewLinkScopeKey])
 
   const handleUnlinkReview = useCallback(() => {
     if (!activeWorktreeId || !activeWorktree || !activeReview) {
