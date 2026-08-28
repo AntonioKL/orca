@@ -2,12 +2,8 @@ import React from 'react'
 import { Activity } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AgentQuestionIcon } from '@/components/AgentQuestionIcon'
-import {
-  StateIndicatorTooltip,
-  type StateIndicatorTooltipSide
-} from '@/components/StateIndicatorTooltip'
 import { AgentWorkingSpinner } from '@/components/AgentWorkingSpinner'
-import { getWorktreeStatusLabel, type WorktreeStatus } from '@/lib/worktree-status'
+import type { WorktreeStatus } from '@/lib/worktree-status'
 
 // Why: re-export WorktreeStatus under the existing `Status` alias so the
 // sidebar component and the canonical lib share one source of truth — the
@@ -17,20 +13,13 @@ export type Status = WorktreeStatus
 
 type StatusIndicatorProps = Omit<React.ComponentProps<'span'>, 'title'> & {
   status: Status
-  /** Overrides the hover tooltip; null suppresses it for an existing tooltip. */
-  title?: string | null
-  tooltipSide?: StateIndicatorTooltipSide
 }
 
 const StatusIndicator = React.memo(function StatusIndicator({
   status,
   className,
-  title,
-  tooltipSide,
   ...rest
 }: StatusIndicatorProps) {
-  const tooltipLabel = title === null ? null : (title ?? getWorktreeStatusLabel(status))
-
   let indicator: React.JSX.Element
 
   if (status === 'working') {
@@ -90,11 +79,7 @@ const StatusIndicator = React.memo(function StatusIndicator({
     )
   }
 
-  return (
-    <StateIndicatorTooltip label={tooltipLabel} side={tooltipSide}>
-      {indicator}
-    </StateIndicatorTooltip>
-  )
+  return indicator
 })
 
 export default StatusIndicator
