@@ -19,7 +19,6 @@ inline src/main/index.ts
 inline src/main/ipc/filesystem-watcher.ts
 inline src/main/ipc/filesystem.ts
 inline src/main/ipc/worktree-remote.ts
-inline src/main/linear/issues.ts
 inline src/main/providers/local-pty-provider.ts
 inline src/main/rate-limits/service.ts
 inline src/main/runtime/orca-runtime-browser.ts
@@ -42,7 +41,6 @@ inline src/relay/git-handler.ts
 inline src/relay/pty-handler.ts
 inline src/relay/workspace-space-scan.ts
 inline src/renderer/src/components/GitLabItemDialog.tsx
-inline src/renderer/src/components/JiraIssueWorkspace.tsx
 inline src/renderer/src/components/LinearItemDrawer.tsx
 inline src/renderer/src/components/TaskPage.tsx
 inline src/renderer/src/components/Terminal.tsx
@@ -53,7 +51,6 @@ inline src/renderer/src/components/editor/CombinedDiffViewer.tsx
 inline src/renderer/src/components/editor/MarkdownPreview.tsx
 inline src/renderer/src/components/floating-terminal/FloatingTerminalPanel.tsx
 inline src/renderer/src/components/new-workspace/SmartWorkspaceNameField.tsx
-inline src/renderer/src/components/onboarding/use-onboarding-flow.ts
 inline src/renderer/src/components/right-sidebar/PortsPanel.tsx
 inline src/renderer/src/components/settings/AccountsPane.tsx
 inline src/renderer/src/components/settings/RuntimeEnvironmentsPane.tsx
