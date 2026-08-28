@@ -344,6 +344,7 @@ import type { ListWorkItemsResult } from '../../shared/github/work-item-types'
 import type {
   GitLabIssueUpdate,
   GitLabMRInlineCommentInput,
+  GitLabMRUpdate,
   GitLabProjectRef,
   GitLabWorkItem,
   MRListState
@@ -873,6 +874,7 @@ import {
   updatePRTitle,
   updatePRDetails,
   mergePR,
+  markPRReadyForReview,
   setPRAutoMerge,
   updatePRState,
   requestPRReviewers,
@@ -24630,7 +24632,7 @@ export class OrcaRuntimeService {
   async updateGitLabRepoMR(
     repoSelector: string,
     iid: number,
-    updates: { title?: string; body?: string; addLabels?: string[]; removeLabels?: string[] },
+    updates: GitLabMRUpdate,
     projectRef?: GitLabProjectRef | null
   ): Promise<Awaited<ReturnType<typeof updateGitLabMR>>> {
     const repo = await this.resolveRepoSelector(repoSelector)
@@ -24940,6 +24942,21 @@ export class OrcaRuntimeService {
       prNumber,
       enabled,
       method,
+      repo.connectionId ?? null,
+      prRepo ?? null,
+      ...this.getLocalGitExecutionOptionArgs(repo)
+    )
+  }
+
+  async markRepoPRReadyForReview(
+    repoSelector: string,
+    prNumber: number,
+    prRepo?: GitHubOwnerRepo | null
+  ): Promise<Awaited<ReturnType<typeof markPRReadyForReview>>> {
+    const repo = await this.resolveRepoSelector(repoSelector)
+    return markPRReadyForReview(
+      repo.path,
+      prNumber,
       repo.connectionId ?? null,
       prRepo ?? null,
       ...this.getLocalGitExecutionOptionArgs(repo)
