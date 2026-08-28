@@ -11,6 +11,10 @@ function createClaimedSubprocess(): SubprocessHandle & {
   return {
     pid: 99_999,
     getForegroundProcess: () => 'codex',
+    observeForegroundProcess: () => ({
+      processName: 'codex',
+      evidence: { verdict: 'observed' as const, processName: 'codex' }
+    }),
     write: vi.fn(),
     resize: vi.fn(),
     kill: vi.fn(),

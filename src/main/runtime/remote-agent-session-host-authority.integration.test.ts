@@ -33,6 +33,10 @@ function createControlledSubprocess(): ControlledSubprocess {
   return {
     pid: 41_000,
     getForegroundProcess: () => (exited ? null : 'claude'),
+    observeForegroundProcess: () => ({
+      processName: exited ? null : 'claude',
+      evidence: { verdict: 'observed' as const, processName: exited ? null : 'claude' }
+    }),
     write: vi.fn(),
     resize: vi.fn(),
     kill: () => exit(0),

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Session } from './session'
+import type { ForegroundProcessObservation } from './session-subprocess-handle'
 import { PRODUCER_PAUSE_FAILSAFE_MS } from './session-producer-pause'
 
 function createRecordingSubprocess() {
@@ -29,6 +30,10 @@ function createRecordingSubprocess() {
     },
     getForegroundProcess(): string | null {
       return this.foregroundProcess
+    },
+    observeForegroundProcess(): ForegroundProcessObservation {
+      const processName = this.foregroundProcess
+      return { processName, evidence: { verdict: 'observed', processName } }
     },
     write(data: string) {
       written.push(data)

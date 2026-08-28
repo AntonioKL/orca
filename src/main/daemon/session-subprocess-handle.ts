@@ -1,12 +1,26 @@
 import type { TerminalExitCause } from '../../shared/terminal-exit-cause'
+import type { PtyForegroundProcessEvidence } from '../../shared/pty-process-inspection-evidence'
 
 import type { JobTerminationOutcome } from '../windows/windows-pty-job'
+
+/** A foreground read plus the evidence verdict behind it. `processName` keeps
+ *  the exact legacy collapse every existing caller sees; the evidence says
+ *  whether anything actually observed the pane, so a degraded read is never
+ *  exit evidence (docs/reference/ssh-execution-boundary.md). */
+export type ForegroundProcessObservation = {
+  processName: string | null
+  evidence: PtyForegroundProcessEvidence
+}
 
 export type SubprocessHandle = {
   pid: number
   /** Live foreground process name of the PTY (node-pty's `.process`), e.g.
    *  'claude' / 'codex' / 'zsh'. Null once the child has exited. */
   getForegroundProcess(): string | null
+  /** getForegroundProcess plus the evidence verdict behind the read. Required,
+   *  not optional: an omitting handle would silently recreate the coercion of
+   *  degraded reads into exit evidence. */
+  observeForegroundProcess(): ForegroundProcessObservation
   /** Await process-table evidence captured after this confirmation request. */
   confirmForegroundProcess?(): Promise<string | null>
   /** Proves a fresh post-boundary PTY process tree contains only the shell. */

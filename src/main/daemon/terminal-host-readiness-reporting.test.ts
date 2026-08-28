@@ -15,6 +15,10 @@ function createSubprocess(): SubprocessHandle & { exit: () => void } {
     pid: 4242,
     shellPath: '/opt/homebrew/bin/zsh',
     getForegroundProcess: () => 'zsh',
+    observeForegroundProcess: () => ({
+      processName: 'zsh',
+      evidence: { verdict: 'observed' as const, processName: 'zsh' }
+    }),
     write: vi.fn(),
     resize: vi.fn(),
     kill: vi.fn(),

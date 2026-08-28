@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Session } from './session'
+import type { ForegroundProcessObservation } from './session-subprocess-handle'
 import { SESSION_FORCE_KILL_RETRY_MS } from './session-termination-controller'
 import { HeadlessEmulator } from './headless-emulator'
 import type { SessionState, ShellReadyState } from './types'
@@ -40,6 +41,10 @@ function createMockSubprocess() {
     foregroundProcess: null as string | null,
     getForegroundProcess(): string | null {
       return this.foregroundProcess
+    },
+    observeForegroundProcess(): ForegroundProcessObservation {
+      const processName = this.foregroundProcess
+      return { processName, evidence: { verdict: 'observed', processName } }
     },
     confirmShellForeground: vi.fn(async () => true),
     write(data: string) {

@@ -66,6 +66,10 @@ function makeSubprocess(): SubprocessHandle & { emit: (data: string) => void } {
   return {
     pid: 4242,
     getForegroundProcess: () => 'bench',
+    observeForegroundProcess: () => ({
+      processName: 'bench',
+      evidence: { verdict: 'observed' as const, processName: 'bench' }
+    }),
     write: () => {},
     resize: () => {},
     kill: () => {},

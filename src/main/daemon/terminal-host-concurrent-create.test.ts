@@ -17,6 +17,10 @@ function mockSubprocess(
   return {
     pid: 4242,
     getForegroundProcess: vi.fn(() => null),
+    observeForegroundProcess: () => ({
+      processName: null,
+      evidence: { verdict: 'observed' as const, processName: null }
+    }),
     ...(options.confirmShellForeground
       ? { confirmShellForeground: options.confirmShellForeground }
       : {}),

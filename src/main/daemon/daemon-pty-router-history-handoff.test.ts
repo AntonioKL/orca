@@ -19,6 +19,10 @@ function createMockSubprocess(): SubprocessHandle & {
   return {
     pid: 999_999_999,
     getForegroundProcess: () => null,
+    observeForegroundProcess: () => ({
+      processName: null,
+      evidence: { verdict: 'observed' as const, processName: null }
+    }),
     write: vi.fn(),
     resize: vi.fn(),
     pause: vi.fn(),

@@ -39,6 +39,10 @@ export function createMockSubprocess(dataOnSubscribe?: string): SubprocessHandle
     // Why: getCwd falls back to OS pid lookup; an implausibly-high fake pid can't collide with a real process' cwd.
     pid: 999_999_999,
     getForegroundProcess: vi.fn(() => null),
+    observeForegroundProcess: () => ({
+      processName: null,
+      evidence: { verdict: 'observed' as const, processName: null }
+    }),
     confirmShellForeground: vi.fn(async () => false),
     write: vi.fn(),
     resize: vi.fn(),

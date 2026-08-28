@@ -19,6 +19,10 @@ function fixtureSubprocess(): SubprocessHandle {
   return {
     pid: 1234,
     getForegroundProcess: () => null,
+    observeForegroundProcess: () => ({
+      processName: null,
+      evidence: { verdict: 'observed' as const, processName: null }
+    }),
     write: () => {},
     resize: () => {},
     kill: () => {

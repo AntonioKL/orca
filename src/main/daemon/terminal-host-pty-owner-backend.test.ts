@@ -18,6 +18,10 @@ function createSubprocess(shellPath: string): TestSubprocess {
     pid: 99_999,
     shellPath,
     getForegroundProcess: vi.fn(() => null),
+    observeForegroundProcess: () => ({
+      processName: null,
+      evidence: { verdict: 'observed' as const, processName: null }
+    }),
     write: vi.fn(),
     resize: vi.fn(),
     kill: vi.fn(() => onExit?.(0)),

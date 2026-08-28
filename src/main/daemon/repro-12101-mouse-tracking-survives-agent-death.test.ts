@@ -50,6 +50,10 @@ function createFakeSubprocess(foregroundProcess: string) {
     forceKilled: false,
     pid: 4242,
     getForegroundProcess: () => foregroundProcess,
+    observeForegroundProcess: () => ({
+      processName: foregroundProcess,
+      evidence: { verdict: 'observed' as const, processName: foregroundProcess }
+    }),
     write: (data: string) => void written.push(data),
     resize: () => {},
     kill: () => {},

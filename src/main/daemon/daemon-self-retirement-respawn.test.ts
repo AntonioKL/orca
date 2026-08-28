@@ -12,6 +12,10 @@ function fixtureSubprocess(): SubprocessHandle {
   return {
     pid: process.pid,
     getForegroundProcess: () => null,
+    observeForegroundProcess: () => ({
+      processName: null,
+      evidence: { verdict: 'observed' as const, processName: null }
+    }),
     write: () => {},
     resize: () => {},
     kill: () => queueMicrotask(() => onExit?.(0)),

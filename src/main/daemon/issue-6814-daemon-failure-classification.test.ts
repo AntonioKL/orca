@@ -22,6 +22,10 @@ function createMockSubprocess(): SubprocessHandle {
   return {
     pid: 55555,
     getForegroundProcess: () => null,
+    observeForegroundProcess: () => ({
+      processName: null,
+      evidence: { verdict: 'observed' as const, processName: null }
+    }),
     write() {},
     resize() {},
     kill() {},

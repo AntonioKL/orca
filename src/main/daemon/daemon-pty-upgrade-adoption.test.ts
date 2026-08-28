@@ -18,6 +18,10 @@ function createFixtureSubprocess(pid: number): FixtureSubprocess {
   return {
     pid,
     getForegroundProcess: vi.fn(() => null),
+    observeForegroundProcess: () => ({
+      processName: null,
+      evidence: { verdict: 'observed' as const, processName: null }
+    }),
     write: vi.fn(),
     resize: vi.fn(),
     pause: vi.fn(),
