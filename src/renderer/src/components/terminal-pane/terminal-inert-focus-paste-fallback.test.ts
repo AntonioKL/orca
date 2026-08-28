@@ -252,6 +252,59 @@ describe('inert-focus paste fallback', () => {
     expect(onPasteKey).toHaveBeenCalledTimes(1)
   })
 
+  // Coordinator finding, verified here at the fallback level: with several panes
+  // mounted, a pane that lost focus only because it was HIDDEN must not claim the
+  // chord. Real Tailwind `hidden` is display:none on a WRAPPER, and computed
+  // `display` does not cascade to descendants in either engine, so the check has
+  // to walk ancestors — reading `visibility` off the container alone fails OPEN.
+  it('does not claim inert focus when an ancestor wrapper is display:none', () => {
+    const wrapper = document.createElement('div')
+    document.body.append(wrapper)
+    wrapper.append(container)
+    const fallback = install()
+    inside.focus()
+    inside.blur()
+    expect(fallback.ownsInertFocus()).toBe(true)
+
+    // Exactly what Terminal.tsx does to a hidden worktree: `absolute inset-0 hidden`.
+    wrapper.style.display = 'none'
+
+    expect(fallback.ownsInertFocus()).toBe(false)
+    pressPasteChordOn(document.body)
+    expect(onPasteKey).not.toHaveBeenCalled()
+  })
+
+  // The defensive path has to fail CLOSED. A missed recovery is a dropped chord —
+  // the pre-PR behaviour, and the user can click and retry. A false claim pastes
+  // into an invisible terminal and consumes the chord app-wide, which they cannot
+  // undo. So an engine that can tell us nothing must not be read as "rendered".
+  it('refuses to claim when the container has no view to ask about visibility', () => {
+    const foreign = document.implementation.createHTMLDocument('detached')
+    const foreignContainer = foreign.createElement('div')
+    const foreignInside = foreign.createElement('textarea')
+    foreignContainer.append(foreignInside)
+    foreign.body.append(foreignContainer)
+    expect(foreignContainer.isConnected).toBe(true)
+    expect(foreignContainer.ownerDocument.defaultView).toBe(null)
+
+    // Claim ownership at install time, the path the pane itself takes on remount.
+    foreignInside.focus()
+    expect(foreign.activeElement).toBe(foreignInside)
+    const recovered: KeyboardEvent[] = []
+    const fallback = installInertFocusPasteFallback({
+      container: foreignContainer,
+      documentTarget: foreign,
+      onPasteKey: (event) => recovered.push(event),
+      onPasteEvent: () => {}
+    })
+    foreignInside.blur()
+    expect(foreign.activeElement).toBe(foreign.body)
+
+    expect(fallback.ownsInertFocus()).toBe(false)
+    expect(recovered).toEqual([])
+    fallback.dispose()
+  })
+
   it('stops recovering pastes after dispose', () => {
     const fallback = install()
     inside.focus()
@@ -264,6 +317,91 @@ describe('inert-focus paste fallback', () => {
 
     expect(onPasteKey).not.toHaveBeenCalled()
     expect(onPasteEvent).not.toHaveBeenCalled()
+  })
+})
+
+// Coordinator finding on #17020: `TerminalPane` is not a singleton, so several
+// fallbacks are installed at the document at once. Two questions follow — can a
+// hidden instance capture a chord aimed elsewhere, and can two instances both act
+// on the same event? Real DOM and real dispatched events throughout.
+describe('inert-focus paste fallback with several panes mounted', () => {
+  type Scene = {
+    panes: { container: HTMLElement; inside: HTMLTextAreaElement; keys: KeyboardEvent[] }[]
+    dispose: () => void
+  }
+
+  const buildScene = (count: number): Scene => {
+    document.body.innerHTML = ''
+    const disposers: (() => void)[] = []
+    const panes = Array.from({ length: count }, () => {
+      const wrapper = document.createElement('div')
+      const paneContainer = document.createElement('div')
+      const helper = document.createElement('textarea')
+      helper.className = 'xterm-helper-textarea'
+      paneContainer.append(helper)
+      wrapper.append(paneContainer)
+      document.body.append(wrapper)
+      const keys: KeyboardEvent[] = []
+      const fallback = installInertFocusPasteFallback({
+        container: paneContainer,
+        onPasteKey: (event) => keys.push(event),
+        onPasteEvent: () => {}
+      })
+      disposers.push(fallback.dispose)
+      return { container: paneContainer, inside: helper, keys }
+    })
+    return { panes, dispose: () => disposers.forEach((d) => d()) }
+  }
+
+  const chord = (): void => {
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'v', ctrlKey: true, bubbles: true, cancelable: true })
+    )
+  }
+
+  it('lets a hidden background pane capture nothing after a focus-less switch away', () => {
+    // The reported chain: pane A holds focus, the user switches by KEYBOARD (no
+    // pointerdown), A's wrapper is hidden so the browser blurs it to <body> with
+    // NO focusin, and the destination surface takes no focus of its own.
+    const scene = buildScene(3)
+    scene.panes[0]!.inside.focus()
+    ;(scene.panes[0]!.container.parentElement as HTMLElement).style.display = 'none'
+    expect(document.activeElement).toBe(scene.panes[0]!.inside)
+    // happy-dom does not blur on hide, so blur explicitly: the browser's behaviour
+    // is the premise, not the thing under test.
+    scene.panes[0]!.inside.blur()
+    expect(document.activeElement).toBe(document.body)
+
+    chord()
+
+    expect(scene.panes.map((pane) => pane.keys.length)).toEqual([0, 0, 0])
+    scene.dispose()
+  })
+
+  it('never lets two panes act on the same chord', () => {
+    const scene = buildScene(3)
+    scene.panes[0]!.inside.focus()
+    // A real focus move to another pane, which every instance sees at the document.
+    scene.panes[1]!.inside.focus()
+    scene.panes[1]!.inside.blur()
+
+    chord()
+
+    expect(scene.panes.map((pane) => pane.keys.length)).toEqual([0, 1, 0])
+    scene.dispose()
+  })
+
+  it('leaves the chord to the app when no pane ever held focus', () => {
+    const scene = buildScene(3)
+    const elsewhere = document.createElement('input')
+    document.body.append(elsewhere)
+    elsewhere.focus()
+    elsewhere.blur()
+
+    chord()
+
+    expect(scene.panes.map((pane) => pane.keys.length)).toEqual([0, 0, 0])
+    scene.dispose()
   })
 })
 

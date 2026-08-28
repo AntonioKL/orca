@@ -95,9 +95,24 @@ function isContainerRendered(container: HTMLElement): boolean {
   if (typeof checkVisibility === 'function') {
     return checkVisibility.call(container, { visibilityProperty: true })
   }
-  // Fallback for engines without checkVisibility; `visibility` is inherited, so
-  // reading it off the container also catches a hidden ancestor.
-  return container.ownerDocument.defaultView?.getComputedStyle(container).visibility !== 'hidden'
+  // Why: only for engines without checkVisibility. `display` does not cascade to
+  // descendants, so reading it off the container alone would report a pane inside
+  // a `hidden` wrapper as rendered — failing open, toward claiming the chord. Walk
+  // the ancestors instead. `visibility` is inherited, so the container answers for
+  // itself. Bounded by tree depth and only reached on this defensive path.
+  const view = container.ownerDocument.defaultView
+  if (!view) {
+    return false
+  }
+  if (view.getComputedStyle(container).visibility === 'hidden') {
+    return false
+  }
+  for (let node: HTMLElement | null = container; node; node = node.parentElement) {
+    if (view.getComputedStyle(node).display === 'none') {
+      return false
+    }
+  }
+  return true
 }
 
 /** Focus is on <body> but the pane still owns it logically; putting it back before
