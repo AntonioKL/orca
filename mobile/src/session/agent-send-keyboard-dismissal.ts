@@ -11,11 +11,12 @@ export type AgentSendKeyboardDismissalTab = {
  *  reply the user is now waiting on. A plain shell keeps it — commands come in
  *  bursts, and re-opening the keyboard between each one costs more than the
  *  covered rows. `launchAgent` counts before the first agent-status update
- *  lands, so the very first prompt of a session already dismisses. */
+ *  lands, so the very first accepted prompt of a session already dismisses. */
 export function shouldDismissKeyboardAfterTerminalSend(
-  tab: AgentSendKeyboardDismissalTab | null | undefined
+  tab: AgentSendKeyboardDismissalTab | null | undefined,
+  accepted: boolean
 ): boolean {
-  if (!tab || tab.type !== 'terminal') {
+  if (!accepted || !tab || tab.type !== 'terminal') {
     return false
   }
   const agent = tab.agentStatus?.agentType ?? tab.launchAgent ?? null

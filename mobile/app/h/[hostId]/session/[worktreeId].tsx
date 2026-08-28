@@ -2980,11 +2980,14 @@ export default function SessionScreen() {
 
   // Sending to an agent hands the turn over, so the keyboard gets out of the way
   // of the reply. A plain shell keeps it — commands come in bursts.
-  const dismissKeyboardAfterAgentSend = useCallback(() => {
-    if (shouldDismissKeyboardAfterTerminalSend(activeSessionTab)) {
-      dismissSoftwareKeyboard()
-    }
-  }, [activeSessionTab, dismissSoftwareKeyboard])
+  const dismissKeyboardAfterAgentSend = useCallback(
+    (accepted: boolean) => {
+      if (shouldDismissKeyboardAfterTerminalSend(activeSessionTab, accepted)) {
+        dismissSoftwareKeyboard()
+      }
+    },
+    [activeSessionTab, dismissSoftwareKeyboard]
+  )
 
   async function handleSend() {
     // Why: the return key still submits while offline; hold the composed text instead of firing a doomed RPC (#6713).
@@ -2998,7 +3001,7 @@ export default function SessionScreen() {
 
     try {
       // Why: fail now and restore the text — a send parked across a reconnect would execute long after the tap.
-      await client.sendRequest(
+      const response = await client.sendRequest(
         'terminal.send',
         buildTerminalSendParams({
           terminal: activeHandle,
@@ -3008,7 +3011,7 @@ export default function SessionScreen() {
         }),
         TERMINAL_INPUT_SEND_OPTIONS
       )
-      dismissKeyboardAfterAgentSend()
+      dismissKeyboardAfterAgentSend(isTerminalSendRpcAccepted(response))
     } catch {
       setInput(text)
     } finally {
@@ -4983,10 +4986,9 @@ export default function SessionScreen() {
                       // marked-text report that says whether this text is still preedit.
                       onChange={handleLiveInputChange}
                       onKeyPress={handleLiveInputKeyPress}
-                      onSubmitEditing={() => {
-                        handleLiveInputSubmit()
-                        dismissKeyboardAfterAgentSend()
-                      }}
+                      onSubmitEditing={() =>
+                        void handleLiveInputSubmit().then(dismissKeyboardAfterAgentSend)
+                      }
                       placeholder=""
                       showSoftInputOnFocus
                       autoCapitalize="none"

@@ -239,9 +239,10 @@ describe('terminal live input commit hook', () => {
     changeLiveInput(handlers, '한')
 
     // When
-    handlers.handleLiveInputSubmit()
+    const accepted = await handlers.handleLiveInputSubmit()
 
     // Then
+    expect(accepted).toBe(true)
     await vi.waitFor(() => expect(sent).toEqual(['한', '\r']))
   })
 
@@ -250,9 +251,10 @@ describe('terminal live input commit hook', () => {
     const { handlers, sent } = createTerminalLiveInputCommitHarness()
 
     // When
-    handlers.handleLiveInputSubmit()
+    const accepted = await handlers.handleLiveInputSubmit()
 
     // Then
+    expect(accepted).toBe(true)
     await vi.waitFor(() => expect(sent).toEqual(['\r']))
   })
 
@@ -262,12 +264,20 @@ describe('terminal live input commit hook', () => {
     changeLiveInput(handlers, '한')
 
     // When
-    handlers.handleLiveInputSubmit()
-    await Promise.resolve()
-    await Promise.resolve()
+    const accepted = await handlers.handleLiveInputSubmit()
 
     // Then: the held commit went out but was not accepted, so no \r follows
+    expect(accepted).toBe(false)
     await vi.waitFor(() => expect(sent).toEqual(['한']))
+  })
+
+  it('Given a rejected carriage return When submit is requested Then reports rejection', async () => {
+    const { handlers, sent } = createTerminalLiveInputCommitHarness({ sendResult: false })
+
+    const accepted = await handlers.handleLiveInputSubmit()
+
+    expect(accepted).toBe(false)
+    expect(sent).toEqual(['\r'])
   })
 
   it('Given ASCII typing When changes arrive Then mirrors immediately', async () => {

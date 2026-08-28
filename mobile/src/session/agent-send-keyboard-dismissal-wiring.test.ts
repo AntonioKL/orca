@@ -19,10 +19,10 @@ function routeSlice(anchorStart: string, anchorEnd: string): string {
 describe('terminal send keyboard dismissal wiring', () => {
   it('gates the dismissal on the agent-session predicate', () => {
     const slice = routeSlice(
-      'const dismissKeyboardAfterAgentSend = useCallback(() => {',
-      '}, [activeSessionTab, dismissSoftwareKeyboard])'
+      'const dismissKeyboardAfterAgentSend = useCallback(',
+      '[activeSessionTab, dismissSoftwareKeyboard]\n  )'
     )
-    expect(slice).toContain('shouldDismissKeyboardAfterTerminalSend(activeSessionTab)')
+    expect(slice).toContain('shouldDismissKeyboardAfterTerminalSend(activeSessionTab, accepted)')
     expect(slice).toContain('dismissSoftwareKeyboard()')
     expect(sessionRouteSource).toContain(
       "import { shouldDismissKeyboardAfterTerminalSend } from '../../../../src/session/agent-send-keyboard-dismissal'"
@@ -33,8 +33,7 @@ describe('terminal send keyboard dismissal wiring', () => {
     // terminal-live-input.ts deliberately keeps Enter off the key map, so
     // onSubmitEditing is the single send seam for the live field.
     const slice = routeSlice('ref={liveInputRef}', 'importantForAutofill="no"')
-    expect(slice).toContain('handleLiveInputSubmit()')
-    expect(slice).toContain('dismissKeyboardAfterAgentSend()')
+    expect(slice).toContain('handleLiveInputSubmit().then(dismissKeyboardAfterAgentSend)')
     // Explicit dismissal replaces RN's blur, which stays off so a shell send
     // does not drop focus.
     expect(slice).toContain('blurOnSubmit={false}')
@@ -42,13 +41,18 @@ describe('terminal send keyboard dismissal wiring', () => {
 
   it('dismisses the buffered command send only once the write is accepted', () => {
     const slice = routeSlice('async function handleSend() {', 'async function handleAccessoryKey(')
-    const dismissAt = slice.indexOf('dismissKeyboardAfterAgentSend()')
+    const dismissAt = slice.indexOf(
+      'dismissKeyboardAfterAgentSend(isTerminalSendRpcAccepted(response))'
+    )
+    const responseAt = slice.indexOf('const response = await client.sendRequest(')
     const catchAt = slice.indexOf('} catch {')
     expect(dismissAt).toBeGreaterThan(0)
+    expect(responseAt).toBeGreaterThan(0)
+    expect(dismissAt).toBeGreaterThan(responseAt)
     expect(catchAt).toBeGreaterThan(0)
-    // A failed send restores the draft, so it must not drop the keyboard.
+    // Rejected responses stay focused; transport failures restore the draft in catch.
     expect(dismissAt).toBeLessThan(catchAt)
-    expect(slice.slice(catchAt)).not.toContain('dismissKeyboardAfterAgentSend()')
+    expect(slice.slice(catchAt)).not.toContain('dismissKeyboardAfterAgentSend(')
   })
 
   it('leaves the accessory shortcut keys alone, Enter included', () => {

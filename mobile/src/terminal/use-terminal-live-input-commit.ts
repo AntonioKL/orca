@@ -48,7 +48,7 @@ type TerminalLiveInputCommitHandlers = {
   ) => Promise<TerminalLiveAccessoryInputCommitResult>
   readonly handleLiveInputChange: (event: TerminalLiveInputChangeEvent) => void
   readonly handleLiveInputKeyPress: (event: TerminalLiveInputKeyPressEvent) => void
-  readonly handleLiveInputSubmit: () => void
+  readonly handleLiveInputSubmit: () => Promise<boolean>
 }
 
 export function useTerminalLiveInputCommit<TTabType extends string>({
@@ -207,11 +207,11 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
     waitForPendingLiveInputFlush
   })
 
-  const handleLiveInputSubmit = useCallback(() => {
+  const handleLiveInputSubmit = useCallback((): Promise<boolean> => {
     if (!activeHandle || !liveInputTerminalHandles.has(activeHandle)) {
-      return
+      return Promise.resolve(false)
     }
-    void sendTerminalLiveControlAfterPendingFlush(
+    return sendTerminalLiveControlAfterPendingFlush(
       () => flushPendingLiveInputText(activeHandle),
       () => sendLiveTerminalInputRef.current(activeHandle, '\r')
     )
