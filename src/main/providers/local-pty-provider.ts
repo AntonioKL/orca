@@ -61,6 +61,7 @@ import {
 import { WINDOWS_GIT_BASH_SHELL } from '../../shared/windows-terminal-shell'
 import {
   confirmShellForegroundProcess,
+  inspectAgentPtyProcess,
   resolveAgentForegroundProcessWithAvailability
 } from './agent-foreground-process'
 import { resolveStableForegroundProcess } from './stable-foreground-process'
@@ -1549,26 +1550,44 @@ export class LocalPtyProvider implements IPtyProvider {
     if (!proc) {
       return { foregroundProcess: null, hasChildProcesses: false, unavailable: true }
     }
-    const foreground = await this.inspectForegroundProcessResolution(id)
-    if (ptyProcesses.get(id) !== proc) {
-      return { foregroundProcess: null, hasChildProcesses: false, unavailable: true }
-    }
-    let hasChildProcesses: boolean
-    try {
-      const shell = ptyShellName.get(id)
-      const currentProcess = resolveForegroundFallbackProcess(proc.process || null, shell)
-      hasChildProcesses = !shell || (currentProcess !== null && currentProcess !== shell)
-    } catch {
+    if (ptyWslDistroById.get(id) !== null && ptyWslDistroById.has(id)) {
       return {
-        foregroundProcess: foreground.processName,
+        foregroundProcess: (await this.inspectForegroundProcessResolution(id)).processName,
         hasChildProcesses: false,
         unavailable: true
       }
     }
-    return {
-      foregroundProcess: foreground.processName,
-      hasChildProcesses,
-      ...(foreground.available ? {} : { unavailable: true as const })
+    try {
+      const shell = ptyShellName.get(id)
+      const inspection = await inspectAgentPtyProcess(
+        proc.pid,
+        resolveForegroundFallbackProcess(proc.process || null, shell),
+        {
+          contextPaths: ptyAgentForegroundContextPaths.get(id),
+          forceProcessScan: true,
+          ...(process.platform === 'win32'
+            ? {
+                readWindowsConsoleAttachedProcessIds: () =>
+                  readWindowsConsoleAttachedProcessIds(proc.pid),
+                readWindowsPtyJobProcessIds: () => readWindowsPtyJobProcessIds(proc)
+              }
+            : {})
+        }
+      )
+      if (ptyProcesses.get(id) !== proc) {
+        return { foregroundProcess: null, hasChildProcesses: false, unavailable: true }
+      }
+      return {
+        foregroundProcess: inspection.processName,
+        hasChildProcesses: inspection.hasChildProcesses,
+        ...(inspection.available ? {} : { unavailable: true as const })
+      }
+    } catch {
+      return {
+        foregroundProcess: null,
+        hasChildProcesses: false,
+        unavailable: true
+      }
     }
   }
 

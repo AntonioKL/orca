@@ -768,6 +768,7 @@ import type {
   PtySpawnResult,
   PtyTransientFact
 } from '../providers/types'
+import { normalizePtyProcessInspection } from '../providers/pty-process-inspection'
 import { ClaudeAgentTeamsService } from './claude-agent-teams-service'
 import type {
   AgentTeamsTmuxCompatRequest,
@@ -2235,6 +2236,7 @@ async function waitForAgentPromptDelay(delayMs: number, signal?: AbortSignal): P
 }
 
 const MOBILE_TERMINAL_SURFACE_TIMEOUT_MS = 10_000
+export const PTY_FOREGROUND_PROCESS_READ_TIMEOUT_MS = 10_000
 // Why: the split already failed; the caller waits on this teardown only to learn whether the
 // fallback kill is needed, so keep it short — an unreachable host must not stall the rejection.
 const REJECTED_SPLIT_PTY_STOP_TIMEOUT_MS = 2_000
@@ -15951,7 +15953,7 @@ export class OrcaRuntimeService {
     this.remoteDesktopViewerRevisions.delete(ptyId)
     this.disposeHeadlessTerminal(ptyId)
     if (pty) {
-      if (options?.hostExitConfirmed === true) {
+      if (processDeathCertified) {
         pty.hostExitConfirmed = true
       }
       pty.connected = false
@@ -19685,11 +19687,14 @@ export class OrcaRuntimeService {
     try {
       processRead = verifiedAbsence
         ? controller.inspectProcess
-          ? Promise.resolve(controller.inspectProcess(ptyId)).then((inspection) => ({
-              process: inspection.foregroundProcess,
-              hasChildProcesses: inspection.hasChildProcesses,
-              available: inspection.unavailable !== true
-            }))
+          ? Promise.resolve(controller.inspectProcess(ptyId)).then((value) => {
+              const inspection = normalizePtyProcessInspection(value)
+              return {
+                process: inspection.foregroundProcess,
+                hasChildProcesses: inspection.hasChildProcesses,
+                available: inspection.unavailable !== true
+              }
+            })
           : Promise.resolve({ process: null, hasChildProcesses: null, available: false })
         : Promise.resolve(controller.getForegroundProcess(ptyId)).then((process) => ({
             process,
@@ -19712,7 +19717,11 @@ export class OrcaRuntimeService {
       return entry.promise
     }
     let entry: PtyForegroundProcessReadEntry
-    const promise = processRead
+    const promise = withTimeout(processRead, PTY_FOREGROUND_PROCESS_READ_TIMEOUT_MS, {
+      process: null,
+      hasChildProcesses: null,
+      available: false
+    })
       .then((result) => ({ controller, ...result }))
       .catch(() => unavailable)
       .finally(() => {
@@ -19737,7 +19746,7 @@ export class OrcaRuntimeService {
     if (this.getPtyLivenessVerdict(ptyId)?.status === 'unverifiable') {
       return true
     }
-    return Boolean(pty?.connectionId && !pty.connected && !pty.hostExitConfirmed)
+    return Boolean(pty && !pty.connected && !pty.hostExitConfirmed)
   }
 
   private settlePendingPtyAgentExitOnCommandFinished(ptyId: string): void {

@@ -61,6 +61,7 @@ import { OrchestrationDb } from './orchestration/db'
 import type { MessagePriority, MessageRow, MessageType } from './orchestration/types'
 import {
   AUTHORITATIVE_TERMINAL_SNAPSHOT_TIMEOUT_MS,
+  PTY_FOREGROUND_PROCESS_READ_TIMEOUT_MS,
   appendNormalizedToTailBuffer,
   buildPreview,
   OrcaRuntimeService,
@@ -10608,7 +10609,13 @@ describe('OrcaRuntimeService', () => {
       const providerQuery = vi.fn(async () => {
         throw new Error('socket_closed')
       })
-      setLocalPtyProvider({ getForegroundProcess: providerQuery } as unknown as IPtyProvider)
+      setLocalPtyProvider({
+        getForegroundProcess: providerQuery,
+        inspectProcess: async () => ({
+          foregroundProcess: await providerQuery(),
+          hasChildProcesses: false
+        })
+      } as unknown as IPtyProvider)
       onTestFinished(() => setLocalPtyProvider(originalProvider))
       runtime.setPtyController({
         write: () => true,
@@ -10636,6 +10643,147 @@ describe('OrcaRuntimeService', () => {
       ])
     })
 
+    it('does not certify an adapter that lacks completion-sensitive inspection', async () => {
+      const { runtime, batches } = createSideEffectRuntime()
+      syncSinglePty(runtime)
+      runtime.onPtySpawned('pty-1', 'inc-legacy-inspection', { awaitsRegistration: false })
+      runtime.ingestSyntheticTitleFrame('pty-1', '\x1b]0;Codex ready\x07')
+      batches.length = 0
+
+      const originalProvider = getLocalPtyProvider()
+      setLocalPtyProvider({
+        getForegroundProcess: async () => null,
+        hasChildProcesses: async () => false
+      } as unknown as IPtyProvider)
+      onTestFinished(() => setLocalPtyProvider(originalProvider))
+      runtime.setPtyController({
+        write: () => true,
+        kill: () => true,
+        getForegroundProcess: getForegroundProcessFromRuntimeController,
+        inspectProcess: inspectProcessFromRuntimeController
+      })
+
+      runtime.onPtyData('pty-1', '\x1b]0;bichir\x07', 100)
+
+      await vi.waitFor(() =>
+        expect(
+          (
+            runtime as unknown as {
+              ptyForegroundProcessReads: Map<string, unknown>
+            }
+          ).ptyForegroundProcessReads.size
+        ).toBe(0)
+      )
+      expect(batches.flatMap((batch) => batch.facts)).toEqual([
+        { kind: 'title', normalizedTitle: 'bichir', rawTitle: 'bichir' },
+        { kind: 'agent-exited' }
+      ])
+    })
+
+    it.each([
+      ['resolved null', async () => null],
+      ['resolved undefined', async () => undefined],
+      ['missing child evidence', async () => ({ foregroundProcess: null })],
+      ['missing foreground evidence', async () => ({ hasChildProcesses: false })],
+      ['rejection', () => Promise.reject(new Error('socket_closed'))],
+      [
+        'synchronous throw',
+        () => {
+          throw new Error('socket_closed')
+        }
+      ]
+    ])('does not certify a %s inspection result', async (_shape, inspectProcess) => {
+      const { runtime, batches } = createSideEffectRuntime()
+      syncSinglePty(runtime)
+      runtime.onPtySpawned('pty-1', 'inc-malformed-inspection', { awaitsRegistration: false })
+      runtime.ingestSyntheticTitleFrame('pty-1', '\x1b]0;Codex ready\x07')
+      batches.length = 0
+      runtime.setPtyController({
+        write: () => true,
+        kill: () => true,
+        getForegroundProcess: async () => null,
+        inspectProcess: inspectProcess as never
+      })
+
+      runtime.onPtyData('pty-1', '\x1b]0;bichir\x07', 100)
+
+      await vi.waitFor(() =>
+        expect(
+          (
+            runtime as unknown as {
+              ptyForegroundProcessReads: Map<string, unknown>
+            }
+          ).ptyForegroundProcessReads.size
+        ).toBe(0)
+      )
+      expect(batches.flatMap((batch) => batch.facts)).toEqual([
+        { kind: 'title', normalizedTitle: 'bichir', rawTitle: 'bichir' },
+        { kind: 'agent-exited' }
+      ])
+    })
+
+    it('times out a stalled completion-sensitive inspection as unavailable', async () => {
+      vi.useFakeTimers()
+      try {
+        const { runtime, batches } = createSideEffectRuntime()
+        syncSinglePty(runtime)
+        runtime.onPtySpawned('pty-1', 'inc-stalled-inspection', { awaitsRegistration: false })
+        runtime.ingestSyntheticTitleFrame('pty-1', '\x1b]0;Codex ready\x07')
+        batches.length = 0
+        runtime.setPtyController({
+          write: () => true,
+          kill: () => true,
+          getForegroundProcess: async () => null,
+          inspectProcess: () => new Promise<never>(() => {})
+        })
+
+        runtime.onPtyData('pty-1', '\x1b]0;bichir\x07', 100)
+        await vi.advanceTimersByTimeAsync(PTY_FOREGROUND_PROCESS_READ_TIMEOUT_MS)
+
+        expect(
+          (
+            runtime as unknown as {
+              ptyForegroundProcessReads: Map<string, unknown>
+            }
+          ).ptyForegroundProcessReads.size
+        ).toBe(0)
+        expect(batches.flatMap((batch) => batch.facts)).not.toContainEqual(
+          expect.objectContaining({ executionHostConfirmed: true })
+        )
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('keeps recognized foreground evidence from a partial inspection live', async () => {
+      const { runtime, batches } = createSideEffectRuntime()
+      syncSinglePty(runtime)
+      runtime.onPtySpawned('pty-1', 'inc-partial-live-inspection', { awaitsRegistration: false })
+      runtime.ingestSyntheticTitleFrame('pty-1', '\x1b]0;Codex ready\x07')
+      batches.length = 0
+      runtime.setPtyController({
+        write: () => true,
+        kill: () => true,
+        getForegroundProcess: async () => null,
+        inspectProcess: async () => ({ foregroundProcess: 'codex' }) as never
+      })
+
+      runtime.onPtyData('pty-1', '\x1b]0;bichir\x07', 100)
+
+      await vi.waitFor(() =>
+        expect(
+          (
+            runtime as unknown as {
+              ptyForegroundProcessReads: Map<string, unknown>
+            }
+          ).ptyForegroundProcessReads.size
+        ).toBe(0)
+      )
+      expect(batches.flatMap((batch) => batch.facts)).toEqual([
+        { kind: 'title', normalizedTitle: 'bichir', rawTitle: 'bichir' }
+      ])
+    })
+
     it('still certifies an agent exit when process inspection confirms no foreground agent', async () => {
       const { runtime, batches } = createSideEffectRuntime()
       syncSinglePty(runtime)
@@ -10647,7 +10795,11 @@ describe('OrcaRuntimeService', () => {
       const providerQuery = vi.fn(async () => null)
       setLocalPtyProvider({
         getForegroundProcess: providerQuery,
-        hasChildProcesses: async () => false
+        hasChildProcesses: async () => false,
+        inspectProcess: async () => ({
+          foregroundProcess: await providerQuery(),
+          hasChildProcesses: false
+        })
       } as unknown as IPtyProvider)
       onTestFinished(() => setLocalPtyProvider(originalProvider))
       runtime.setPtyController({
@@ -10805,6 +10957,33 @@ describe('OrcaRuntimeService', () => {
           executionHostConfirmed: true,
           incarnationId: 'inc-local-exit'
         })
+      )
+    })
+
+    it('does not certify a synthetic local disconnect while inspection is pending', async () => {
+      const { runtime, batches } = createSideEffectRuntime()
+      runtime.registerPty('pty-1', TEST_WORKTREE_ID)
+      syncSinglePty(runtime)
+      runtime.onPtySpawned('pty-1', 'inc-local-unverified-stop', { awaitsRegistration: false })
+      runtime.ingestSyntheticTitleFrame('pty-1', '\x1b]0;Codex ready\x07')
+      let rejectInspection!: (error: Error) => void
+      const inspection = new Promise<never>((_resolve, reject) => {
+        rejectInspection = reject
+      })
+      runtime.setPtyController({
+        write: () => true,
+        kill: () => true,
+        getForegroundProcess: async () => null,
+        inspectProcess: () => inspection
+      })
+
+      runtime.onPtyData('pty-1', '\x1b]0;bichir\x07', 100)
+      runtime.onPtyExit('pty-1', -1, 'inc-local-unverified-stop')
+      rejectInspection(new Error('shutdown failed'))
+      await Promise.resolve()
+
+      expect(batches.flatMap((batch) => batch.facts)).not.toContainEqual(
+        expect.objectContaining({ executionHostConfirmed: true })
       )
     })
 
