@@ -32,7 +32,8 @@ import { PreviousCrashSessionLaunchNotice } from './PreviousCrashSessionLaunchNo
 
 const previousCrash = {
   openedAt: '2026-08-24T18:00:00.000Z',
-  breadcrumbs: []
+  breadcrumbs: [],
+  endedAbnormally: true
 }
 
 describe('PreviousCrashSessionLaunchNotice', () => {
@@ -69,5 +70,21 @@ describe('PreviousCrashSessionLaunchNotice', () => {
     expect(renderer.root.findAllByProps({ testID: 'previous-crash-session-banner' })).toHaveLength(
       0
     )
+  })
+
+  it('describes a contained-then-clean session without calling it abnormal', async () => {
+    mocks.getUndismissed.mockResolvedValue({ ...previousCrash, endedAbnormally: false })
+    let renderer!: ReactTestRenderer
+    await act(async () => {
+      renderer = create(createElement(PreviousCrashSessionLaunchNotice))
+      await Promise.resolve()
+    })
+
+    expect(
+      renderer.root.findByProps({ children: 'Previous session recovered from a render error' })
+    ).toBeDefined()
+    expect(
+      renderer.root.findAllByProps({ children: 'Previous session ended abnormally' })
+    ).toHaveLength(0)
   })
 })

@@ -12,10 +12,10 @@ export type MobileCrashStorage = {
 export type MobileCrashSessionSnapshot = {
   openedAt: string
   breadcrumbs: CrashReportBreadcrumb[]
+  endedAbnormally: boolean
 }
 
-export type PersistedMobileCrashSession = MobileCrashSessionSnapshot & {
-  id: string
+export type PersistedMobileCrashSession = Omit<MobileCrashSessionSnapshot, 'endedAbnormally'> & {
   marker: 'open' | 'closed'
 }
 
@@ -28,13 +28,14 @@ export type PersistedMobileCrashJournal = {
 
 export const MOBILE_CRASH_SESSION_STORAGE_KEY = 'orca.mobile-crash-session.v1'
 export const MAX_MOBILE_CRASH_DIAGNOSTICS_CHARS = 24_000
-export const MAX_MOBILE_CRASH_BREADCRUMBS = 30
+export const MAX_STORED_MOBILE_CRASH_BREADCRUMBS = 30
 
 export function snapshotMobileCrashSession(
   session: PersistedMobileCrashSession
 ): MobileCrashSessionSnapshot {
   return {
     openedAt: session.openedAt,
+    endedAbnormally: session.marker === 'open',
     breadcrumbs: session.breadcrumbs.map((breadcrumb) => ({
       ...breadcrumb,
       ...(breadcrumb.data ? { data: { ...breadcrumb.data } } : {})
@@ -104,26 +105,33 @@ export function serializeMobileCrashJournal(journal: PersistedMobileCrashJournal
 }
 
 function parseSession(value: unknown): PersistedMobileCrashSession | null {
-  if (!value || typeof value !== 'object') {
-    return null
-  }
-  const candidate = value as Record<string, unknown>
-  const snapshot = parseSnapshot(candidate)
-  if (
-    !snapshot ||
-    typeof candidate.id !== 'string' ||
-    (candidate.marker !== 'open' && candidate.marker !== 'closed')
-  ) {
+  const candidate = value as Record<string, unknown> | null
+  const session = parseSessionData(value)
+  if (!candidate || !session || (candidate.marker !== 'open' && candidate.marker !== 'closed')) {
     return null
   }
   return {
-    ...snapshot,
-    id: sanitizeCrashReportString(candidate.id, 80),
+    ...session,
     marker: candidate.marker
   }
 }
 
 function parseSnapshot(value: unknown): MobileCrashSessionSnapshot | null {
+  const candidate = value as Record<string, unknown> | null
+  const session = parseSessionData(value)
+  if (!candidate || !session) {
+    return null
+  }
+  const endedAbnormally =
+    typeof candidate.endedAbnormally === 'boolean'
+      ? candidate.endedAbnormally
+      : !session.breadcrumbs.some((breadcrumb) => breadcrumb.name === 'render_error_contained')
+  return { ...session, endedAbnormally }
+}
+
+function parseSessionData(
+  value: unknown
+): Omit<MobileCrashSessionSnapshot, 'endedAbnormally'> | null {
   if (!value || typeof value !== 'object') {
     return null
   }
@@ -132,7 +140,7 @@ function parseSnapshot(value: unknown): MobileCrashSessionSnapshot | null {
     return null
   }
   const recentBreadcrumbs = (candidate.breadcrumbs as CrashReportBreadcrumb[]).slice(
-    -MAX_MOBILE_CRASH_BREADCRUMBS
+    -MAX_STORED_MOBILE_CRASH_BREADCRUMBS
   )
   const breadcrumbs = recentBreadcrumbs.flatMap(
     (breadcrumb) => sanitizeCrashReportBreadcrumbs([breadcrumb]) ?? []

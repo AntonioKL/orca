@@ -6,7 +6,7 @@ import {
 } from '../../../src/shared/crash-reporting'
 import { describeCrashError } from '../../../src/shared/crash-error-description'
 import {
-  MAX_MOBILE_CRASH_BREADCRUMBS,
+  MAX_STORED_MOBILE_CRASH_BREADCRUMBS,
   MOBILE_CRASH_SESSION_STORAGE_KEY,
   parseMobileCrashJournal,
   serializeMobileCrashJournal,
@@ -26,7 +26,6 @@ export {
 
 type JournalOptions = {
   now?: () => number
-  createSessionId?: () => string
 }
 
 const SAFE_ROUTE_SEGMENTS = new Set([
@@ -64,7 +63,6 @@ const SAFE_ROUTE_SEGMENTS = new Set([
 export class MobileCrashSessionJournal {
   private readonly storage: MobileCrashStorage
   private readonly now: () => number
-  private readonly createSessionId: () => string
   private queue: Promise<void> = Promise.resolve()
   private startPromise: Promise<MobileCrashSessionSnapshot | null> | null = null
   private journal: PersistedMobileCrashJournal | null = null
@@ -72,8 +70,6 @@ export class MobileCrashSessionJournal {
   constructor(storage: MobileCrashStorage, options: JournalOptions = {}) {
     this.storage = storage
     this.now = options.now ?? Date.now
-    this.createSessionId =
-      options.createSessionId ?? (() => `${this.now()}-${Math.random().toString(36).slice(2, 10)}`)
   }
 
   start(): Promise<MobileCrashSessionSnapshot | null> {
@@ -92,7 +88,6 @@ export class MobileCrashSessionJournal {
           : null
       const openedAt = new Date(this.now()).toISOString()
       const activeSession: PersistedMobileCrashSession = {
-        id: this.createSessionId(),
         openedAt,
         marker: 'open',
         breadcrumbs: [createBreadcrumb(openedAt, 'session_started')]
@@ -180,7 +175,7 @@ export class MobileCrashSessionJournal {
       ]
       const previous = this.journal?.latestAbnormalSession
       if (previous) {
-        lines.push('', 'Previous session ended abnormally')
+        lines.push('', previousSessionTitle(previous.endedAbnormally))
         appendSessionLines(lines, previous)
       } else {
         lines.push('', 'No previous abnormal session recorded.')
@@ -201,7 +196,7 @@ export class MobileCrashSessionJournal {
       createBreadcrumb(new Date(this.now()).toISOString(), name, data)
     )
     this.journal.activeSession.breadcrumbs = this.journal.activeSession.breadcrumbs.slice(
-      -MAX_MOBILE_CRASH_BREADCRUMBS
+      -MAX_STORED_MOBILE_CRASH_BREADCRUMBS
     )
   }
 
@@ -238,6 +233,12 @@ export class MobileCrashSessionJournal {
   }
 }
 
+export function previousSessionTitle(endedAbnormally: boolean): string {
+  return endedAbnormally
+    ? 'Previous session ended abnormally'
+    : 'Previous session recovered from a render error'
+}
+
 function createBreadcrumb(
   createdAt: string,
   name: string,
@@ -266,7 +267,10 @@ function normalizeAppState(state: string): string {
     : 'unknown'
 }
 
-function appendSessionLines(lines: string[], session: MobileCrashSessionSnapshot): void {
+function appendSessionLines(
+  lines: string[],
+  session: Pick<MobileCrashSessionSnapshot, 'openedAt' | 'breadcrumbs'>
+): void {
   lines.push(`Opened: ${session.openedAt}`)
   lines.push(`Breadcrumbs (${session.breadcrumbs.length}, oldest first):`)
   for (const breadcrumb of session.breadcrumbs) {

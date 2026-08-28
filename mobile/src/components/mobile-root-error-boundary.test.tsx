@@ -3,6 +3,8 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
+  dismissCrash: vi.fn().mockResolvedValue(undefined),
+  getUndismissedCrash: vi.fn().mockResolvedValue(null),
   hideSplash: vi.fn().mockResolvedValue(undefined),
   preventAutoHide: vi.fn().mockResolvedValue(undefined),
   recordAppState: vi.fn().mockResolvedValue(undefined),
@@ -21,6 +23,9 @@ vi.mock('react-native', () => ({
   StyleSheet: { create: <T,>(styles: T) => styles, hairlineWidth: 1 },
   Text: 'Text',
   View: 'View'
+}))
+vi.mock('react-native-safe-area-context', () => ({
+  useSafeAreaInsets: () => ({ top: 0 })
 }))
 vi.mock('lucide-react-native', () => ({
   AlertTriangle: 'AlertTriangle',
@@ -75,6 +80,8 @@ vi.mock('../transport/mobile-relay-pairing-recovery', () => ({
   recoverMobileRelayPairing: vi.fn().mockResolvedValue(undefined)
 }))
 vi.mock('../diagnostics/mobile-crash-diagnostics', () => ({
+  dismissPreviousMobileCrashSession: mocks.dismissCrash,
+  getUndismissedPreviousMobileCrashSession: mocks.getUndismissedCrash,
   recordMobileAppState: mocks.recordAppState,
   recordMobileRenderError: mocks.recordRenderError,
   recordMobileRouteBreadcrumb: mocks.recordRoute,

@@ -1,19 +1,22 @@
 import { AlertTriangle, ChevronRight, X } from 'lucide-react-native'
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native'
+import { previousSessionTitle } from '../diagnostics/mobile-crash-session'
 import { colors, radii, spacing, typography } from '../theme/mobile-theme'
 
 export function PreviousCrashSessionBanner({
+  endedAbnormally,
   onDismiss,
   onPress,
   style
 }: {
+  endedAbnormally: boolean
   onDismiss?: () => void
   onPress?: () => void
   style?: StyleProp<ViewStyle>
 }) {
   const copy = (
     <View style={styles.copy}>
-      <Text style={styles.title}>Previous session ended abnormally</Text>
+      <Text style={styles.title}>{previousSessionTitle(endedAbnormally)}</Text>
       <Text style={styles.description}>
         Crash diagnostics are available to copy and share with support.
       </Text>

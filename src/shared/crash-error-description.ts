@@ -1,8 +1,10 @@
-import { sanitizeCrashReportString, type CrashReportBreadcrumbData } from './crash-reporting'
+import {
+  MAX_CRASH_REPORT_STACK_CHARS,
+  sanitizeCrashReportString,
+  type CrashReportBreadcrumbData
+} from './crash-reporting'
 
 export type CrashErrorDescription = CrashReportBreadcrumbData
-
-const MAX_STACK_CHARS = 2_000
 
 export function describeCrashError(
   error: unknown,
@@ -23,14 +25,22 @@ export function describeCrashError(
   const name = rawName == null ? 'NonErrorThrown' : safeString(rawName, 'NonErrorThrown')
   const rawStack = readErrorProperty(candidate, 'stack')
   const stack = rawStack == null ? '' : safeString(rawStack, '')
+  const sanitizedMessage = sanitizeCrashReportString(message)
 
   return {
     errorName: sanitizeCrashReportString(name || 'NonErrorThrown', 80),
-    errorMessage: sanitizeCrashReportString(message),
-    errorFingerprint: fingerprint(message),
-    ...(stack ? { errorStack: sanitizeCrashReportString(stack, MAX_STACK_CHARS) } : {}),
+    errorMessage: sanitizedMessage,
+    errorFingerprint: fingerprint(sanitizedMessage),
+    ...(stack
+      ? { errorStack: sanitizeCrashReportString(stack, MAX_CRASH_REPORT_STACK_CHARS) }
+      : {}),
     ...(typeof componentStack === 'string' && componentStack.trim()
-      ? { componentStack: sanitizeCrashReportString(componentStack.trim(), MAX_STACK_CHARS) }
+      ? {
+          componentStack: sanitizeCrashReportString(
+            componentStack.trim(),
+            MAX_CRASH_REPORT_STACK_CHARS
+          )
+        }
       : {})
   }
 }

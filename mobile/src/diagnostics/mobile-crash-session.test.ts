@@ -24,10 +24,7 @@ const SECOND_SESSION_AT = FIRST_SESSION_AT + 30_000
 describe('mobile crash session journal', () => {
   it('surfaces durable breadcrumbs after a simulated abnormal termination', async () => {
     const storage = new MemoryStorage()
-    const first = new MobileCrashSessionJournal(storage, {
-      now: () => FIRST_SESSION_AT,
-      createSessionId: () => 'session-one'
-    })
+    const first = new MobileCrashSessionJournal(storage, { now: () => FIRST_SESSION_AT })
 
     await first.start()
     await first.recordRoute(['h', 'private-host-id', 'session', 'private-worktree-id'])
@@ -37,10 +34,7 @@ describe('mobile crash session journal', () => {
     )
     // No background transition: the first process disappears with its marker open.
 
-    const second = new MobileCrashSessionJournal(storage, {
-      now: () => SECOND_SESSION_AT,
-      createSessionId: () => 'session-two'
-    })
+    const second = new MobileCrashSessionJournal(storage, { now: () => SECOND_SESSION_AT })
     const previous = await second.start()
     const report = await second.buildReport({ version: '0.0.29', platform: 'ios 26.5' })
     const persisted = storage.values.get(MOBILE_CRASH_SESSION_STORAGE_KEY) ?? ''
@@ -50,6 +44,7 @@ describe('mobile crash session journal', () => {
       'route_changed',
       'render_error_contained'
     ])
+    expect(previous?.endedAbnormally).toBe(true)
     expect(report).toContain('Previous session ended abnormally')
     expect(report).toContain('h > [dynamic] > session > [dynamic]')
     expect(report).toContain('errorFingerprint')
@@ -64,14 +59,12 @@ describe('mobile crash session journal', () => {
     expect(persisted).not.toContain('do-not-store')
     expect(persisted).not.toContain('/Users/example/private-repo')
     expect(persisted.length).toBeLessThanOrEqual(MAX_MOBILE_CRASH_DIAGNOSTICS_CHARS)
+    expect(JSON.parse(persisted).activeSession).not.toHaveProperty('id')
   })
 
   it('sanitizes every line of a multi-line error message before persistence and reporting', async () => {
     const storage = new MemoryStorage()
-    const journal = new MobileCrashSessionJournal(storage, {
-      now: () => FIRST_SESSION_AT,
-      createSessionId: () => 'session-one'
-    })
+    const journal = new MobileCrashSessionJournal(storage, { now: () => FIRST_SESSION_AT })
     const error = new Error(
       [
         'Failed to render prompt: SECRET_TOKEN=first-secret',
@@ -110,43 +103,35 @@ describe('mobile crash session journal', () => {
 
   it('retains a contained render failure after a normal background handoff', async () => {
     const storage = new MemoryStorage()
-    const first = new MobileCrashSessionJournal(storage, {
-      now: () => FIRST_SESSION_AT,
-      createSessionId: () => 'session-one'
-    })
+    const first = new MobileCrashSessionJournal(storage, { now: () => FIRST_SESSION_AT })
     await first.start()
     await first.recordRenderError(new Error('contained render failure'))
     await first.recordAppState('background')
 
-    const second = new MobileCrashSessionJournal(storage, {
-      now: () => SECOND_SESSION_AT,
-      createSessionId: () => 'session-two'
-    })
+    const second = new MobileCrashSessionJournal(storage, { now: () => SECOND_SESSION_AT })
 
     await expect(second.start()).resolves.toMatchObject({
+      endedAbnormally: false,
       breadcrumbs: expect.arrayContaining([
         expect.objectContaining({ name: 'render_error_contained' })
       ])
     })
     await expect(
       second.buildReport({ version: '0.0.29', platform: 'android 15' })
-    ).resolves.toContain('render_error_contained')
+    ).resolves.toContain('Previous session recovered from a render error')
+    await expect(
+      second.buildReport({ version: '0.0.29', platform: 'android 15' })
+    ).resolves.not.toContain('Previous session ended abnormally')
   })
 
   it('does not classify a session backgrounded cleanly as a crash', async () => {
     const storage = new MemoryStorage()
-    const first = new MobileCrashSessionJournal(storage, {
-      now: () => FIRST_SESSION_AT,
-      createSessionId: () => 'session-one'
-    })
+    const first = new MobileCrashSessionJournal(storage, { now: () => FIRST_SESSION_AT })
     await first.start()
     await first.recordRoute(['settings'])
     await first.recordAppState('background')
 
-    const second = new MobileCrashSessionJournal(storage, {
-      now: () => SECOND_SESSION_AT,
-      createSessionId: () => 'session-two'
-    })
+    const second = new MobileCrashSessionJournal(storage, { now: () => SECOND_SESSION_AT })
 
     await expect(second.start()).resolves.toBeNull()
     await expect(second.getUndismissedLatestAbnormalSession()).resolves.toBeNull()
@@ -157,16 +142,10 @@ describe('mobile crash session journal', () => {
 
   it('keeps a report dismissed across a clean relaunch without hiding the next crash', async () => {
     const storage = new MemoryStorage()
-    const first = new MobileCrashSessionJournal(storage, {
-      now: () => FIRST_SESSION_AT,
-      createSessionId: () => 'session-one'
-    })
+    const first = new MobileCrashSessionJournal(storage, { now: () => FIRST_SESSION_AT })
     await first.start()
 
-    const second = new MobileCrashSessionJournal(storage, {
-      now: () => SECOND_SESSION_AT,
-      createSessionId: () => 'session-two'
-    })
+    const second = new MobileCrashSessionJournal(storage, { now: () => SECOND_SESSION_AT })
     const previous = await second.start()
     expect(previous).not.toBeNull()
     await expect(second.getUndismissedLatestAbnormalSession()).resolves.toEqual(previous)
@@ -175,8 +154,7 @@ describe('mobile crash session journal', () => {
     await second.recordAppState('background')
 
     const third = new MobileCrashSessionJournal(storage, {
-      now: () => SECOND_SESSION_AT + 30_000,
-      createSessionId: () => 'session-three'
+      now: () => SECOND_SESSION_AT + 30_000
     })
     await third.start()
     await expect(third.getUndismissedLatestAbnormalSession()).resolves.toBeNull()
@@ -184,8 +162,7 @@ describe('mobile crash session journal', () => {
     await third.recordRenderError(new Error('a different crash'))
     await third.recordAppState('background')
     const fourth = new MobileCrashSessionJournal(storage, {
-      now: () => SECOND_SESSION_AT + 60_000,
-      createSessionId: () => 'session-four'
+      now: () => SECOND_SESSION_AT + 60_000
     })
     await fourth.start()
     await expect(fourth.getUndismissedLatestAbnormalSession()).resolves.toMatchObject({
@@ -195,19 +172,13 @@ describe('mobile crash session journal', () => {
 
   it('reopens the marker when a backgrounded process becomes active again', async () => {
     const storage = new MemoryStorage()
-    const first = new MobileCrashSessionJournal(storage, {
-      now: () => FIRST_SESSION_AT,
-      createSessionId: () => 'session-one'
-    })
+    const first = new MobileCrashSessionJournal(storage, { now: () => FIRST_SESSION_AT })
     await first.start()
     await first.recordAppState('inactive')
     await first.recordAppState('background')
     await first.recordAppState('active')
 
-    const second = new MobileCrashSessionJournal(storage, {
-      now: () => SECOND_SESSION_AT,
-      createSessionId: () => 'session-two'
-    })
+    const second = new MobileCrashSessionJournal(storage, { now: () => SECOND_SESSION_AT })
 
     await expect(second.start()).resolves.toMatchObject({
       breadcrumbs: [
@@ -221,10 +192,7 @@ describe('mobile crash session journal', () => {
 
   it('caps the persisted breadcrumb ring and payload', async () => {
     const storage = new MemoryStorage()
-    const journal = new MobileCrashSessionJournal(storage, {
-      now: () => FIRST_SESSION_AT,
-      createSessionId: () => 'session-one'
-    })
+    const journal = new MobileCrashSessionJournal(storage, { now: () => FIRST_SESSION_AT })
     await journal.start()
 
     for (let index = 0; index < 80; index += 1) {

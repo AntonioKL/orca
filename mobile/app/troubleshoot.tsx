@@ -38,6 +38,7 @@ import {
   buildMobileCrashDiagnosticsReport,
   getPreviousMobileCrashSession
 } from '../src/diagnostics/mobile-crash-diagnostics'
+import type { MobileCrashSessionSnapshot } from '../src/diagnostics/mobile-crash-session'
 
 type DiagnosticStatus = 'idle' | 'running' | 'done'
 
@@ -68,7 +69,8 @@ export default function TroubleshootScreen() {
   const diagnosticRunRef = useRef(0)
   const activeInternetCheckRef = useRef<DiagnosticFetchTimeout | null>(null)
   const [crashDiagnosticsCopied, setCrashDiagnosticsCopied] = useState(false)
-  const [hasPreviousCrashSession, setHasPreviousCrashSession] = useState(false)
+  const [previousCrashSession, setPreviousCrashSession] =
+    useState<MobileCrashSessionSnapshot | null>(null)
   const crashSessionLoadedRef = useRef(false)
 
   const setTroubleshootRootRef = useCallback((node: View | null): void => {
@@ -77,7 +79,7 @@ export default function TroubleshootScreen() {
         crashSessionLoadedRef.current = true
         void getPreviousMobileCrashSession().then((session) => {
           if (!abortRef.current) {
-            setHasPreviousCrashSession(session !== null)
+            setPreviousCrashSession(session)
           }
         })
       }
@@ -213,7 +215,12 @@ export default function TroubleshootScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {hasPreviousCrashSession && <PreviousCrashSessionBanner style={styles.crashBanner} />}
+        {previousCrashSession && (
+          <PreviousCrashSessionBanner
+            endedAbnormally={previousCrashSession.endedAbnormally}
+            style={styles.crashBanner}
+          />
+        )}
 
         <Pressable
           style={({ pressed }) => [

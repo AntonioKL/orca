@@ -28,13 +28,18 @@ function makeJournal(
   return {
     version: 1,
     activeSession: {
-      id: 'active-session',
       openedAt: OPENED_AT,
       marker: 'open',
       breadcrumbs: activeBreadcrumbs
     },
     ...(previousBreadcrumbs
-      ? { latestAbnormalSession: { openedAt: OPENED_AT, breadcrumbs: previousBreadcrumbs } }
+      ? {
+          latestAbnormalSession: {
+            openedAt: OPENED_AT,
+            breadcrumbs: previousBreadcrumbs,
+            endedAbnormally: true
+          }
+        }
       : {})
   }
 }

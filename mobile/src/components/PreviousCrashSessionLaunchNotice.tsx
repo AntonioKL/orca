@@ -46,7 +46,11 @@ export function PreviousCrashSessionLaunchNotice() {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top + spacing.sm }]}>
-      <PreviousCrashSessionBanner onDismiss={dismiss} onPress={openTroubleshooting} />
+      <PreviousCrashSessionBanner
+        endedAbnormally={previousCrash.endedAbnormally}
+        onDismiss={dismiss}
+        onPress={openTroubleshooting}
+      />
     </View>
   )
 }

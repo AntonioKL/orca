@@ -83,4 +83,18 @@ describe('describeCrashError', () => {
     expect(description.errorStack).toContain('at PrivateScreen ([redacted-path]')
     expect(description.componentStack).toContain('at PrivateScreen ([redacted-path]')
   })
+
+  it('fingerprints the sanitized message and retains the desktop stack budget', () => {
+    const first = new Error('secret=first-private-value')
+    const second = new Error('secret=second-private-value')
+    first.stack = 'x'.repeat(4_500)
+
+    const firstDescription = describeCrashError(first)
+    const secondDescription = describeCrashError(second)
+
+    expect(firstDescription.errorMessage).toBe('secret=[redacted]')
+    expect(secondDescription.errorMessage).toBe(firstDescription.errorMessage)
+    expect(secondDescription.errorFingerprint).toBe(firstDescription.errorFingerprint)
+    expect(firstDescription.errorStack).toBe(`${'x'.repeat(4_000)}...`)
+  })
 })

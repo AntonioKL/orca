@@ -5,7 +5,8 @@ import { describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   getPreviousCrashSession: vi.fn().mockResolvedValue({
     openedAt: '2026-08-24T18:00:00.000Z',
-    breadcrumbs: []
+    breadcrumbs: [],
+    endedAbnormally: true
   })
 }))
 
