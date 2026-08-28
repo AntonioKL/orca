@@ -35,6 +35,9 @@ const DOC_PREVIEW_MAX_TEXT_BYTES = 10 * 1024 * 1024
 const DOC_PREVIEW_MAX_BINARY_BYTES = 50 * 1024 * 1024
 
 const OPEN_NOFOLLOW = typeof constants.O_NOFOLLOW === 'number' ? constants.O_NOFOLLOW : 0
+// Why: opening a writer-less FIFO blocks before the regular-file check can refuse it, pinning a
+// threadpool slot for good; non-blocking open returns at once and does not change regular-file reads.
+const OPEN_NONBLOCK = typeof constants.O_NONBLOCK === 'number' ? constants.O_NONBLOCK : 0
 
 function authorizationError(): Error {
   return new Error(DOC_PREVIEW_PATH_AUTHORIZATION_ERROR)
@@ -83,7 +86,7 @@ async function openAuthorizedDocPreviewTarget(
     throw authorizationError()
   }
 
-  const handle = await open(canonicalTarget, constants.O_RDONLY | OPEN_NOFOLLOW)
+  const handle = await open(canonicalTarget, constants.O_RDONLY | OPEN_NOFOLLOW | OPEN_NONBLOCK)
   try {
     const [openedStats, currentCanonicalTarget, currentTargetStats] = await Promise.all([
       handle.stat(),

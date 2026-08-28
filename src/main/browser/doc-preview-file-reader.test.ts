@@ -258,7 +258,10 @@ describe('readDocPreviewFile — paired runtime owner', () => {
     expect(await readDocPreviewFile(runtimeGrant(), 'assets/logo.png')).toMatchObject({
       ok: false,
       status: 404,
-      reason: 'unreadable'
+      reason: 'unreadable',
+      // Why: fail-closed is deliberate, so the reader is told the host is old, not that it broke.
+      message:
+        'Secure document previews require a newer Orca on the paired machine. Update it and try again.'
     })
     expect(mocks.callRuntimeEnvironment).toHaveBeenCalledOnce()
   })

@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { execFile } from 'node:child_process'
 import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { promisify } from 'node:util'
 import {
   DOC_PREVIEW_PATH_AUTHORIZATION_ERROR,
   readAuthorizedDocPreviewFile
@@ -113,6 +115,29 @@ describe('readAuthorizedDocPreviewFile', () => {
       })
     ).rejects.toThrow(DOC_PREVIEW_PATH_AUTHORIZATION_ERROR)
   })
+
+  // Why the skip: FIFOs are a POSIX shape; Windows has no mkfifo and no equivalent hazard here.
+  it.skipIf(process.platform === 'win32')(
+    'refuses a writer-less FIFO instead of blocking the open forever',
+    async () => {
+      const fixture = await createFixture()
+      const fifo = join(fixture.assets, 'pipe')
+      await promisify(execFile)('mkfifo', [fifo])
+
+      // Without O_NONBLOCK this open never returns, so the timeout itself is the regression oracle.
+      await expect(
+        readAuthorizedDocPreviewFile({
+          boundaryPath: fixture.workspace,
+          entryPath: fixture.entry,
+          implicitRootPath: null,
+          authorizedRootPaths: [fixture.assets],
+          targetPath: fifo,
+          maxTextBytes: 1024,
+          maxBinaryBytes: 1024
+        })
+      ).rejects.toThrow(DOC_PREVIEW_PATH_AUTHORIZATION_ERROR)
+    }
+  )
 
   it('returns typed binary bytes and enforces the read cap', async () => {
     const fixture = await createFixture()

@@ -29,6 +29,10 @@ const TRUNCATED_PREVIEW_MESSAGE = 'This document is too large for the server to 
 /** The paired host rejects an over-cap asset outright instead of clamping it. */
 const RUNTIME_TOO_LARGE_ERROR = 'file_too_large'
 
+/** Same stance as the SSH relay message: previews fail closed on a host without scoped reads. */
+const RUNTIME_DOC_PREVIEW_UPDATE_REQUIRED_MESSAGE =
+  'Secure document previews require a newer Orca on the paired machine. Update it and try again.'
+
 /** Both owners refuse an over-cap file; only their error shapes differ. */
 function isTooLargeReadError(error: unknown): boolean {
   return (
@@ -126,7 +130,13 @@ async function readRuntimeDocPreviewFile(
     DOC_PREVIEW_READ_TIMEOUT_MS
   )
   if (!response.ok) {
-    throw new Error(response.error.message)
+    // Why the rewrite: fail-closed on an old host is deliberate, so tell the reader what to do —
+    // the raw method_not_found wording reads as a broken preview, not an out-of-date machine.
+    throw new Error(
+      response.error.code === 'method_not_found'
+        ? RUNTIME_DOC_PREVIEW_UPDATE_REQUIRED_MESSAGE
+        : response.error.message
+    )
   }
   const preview = response.result as RuntimeFilePreviewResult
   return {
