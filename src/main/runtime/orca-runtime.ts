@@ -19665,14 +19665,23 @@ export class OrcaRuntimeService {
       expectedPrompt && expectedTurnId
         ? isAutomationTurnPrompt(expectedPrompt, expectedTurnId)
         : false
+    // Turn identity is the embedded run-id marker, not body equality: a reused
+    // run's later dispatch can submit an edited prompt body under the same run id.
+    const matchesExpectedTurn = (prompt: string | null | undefined): boolean =>
+      Boolean(
+        hasTurnIdentity &&
+        expectedTurnId &&
+        typeof prompt === 'string' &&
+        isAutomationTurnPrompt(prompt, expectedTurnId)
+      )
     const liveHookEvidence = paneKey
       ? this.automationHookTurnEvidenceByPaneKey.get(paneKey)
       : undefined
-    const liveEvidenceMatchesTurn = hasTurnIdentity && liveHookEvidence?.prompt === expectedPrompt
+    const liveEvidenceMatchesTurn = matchesExpectedTurn(liveHookEvidence?.prompt)
     if (
       liveHookEvidence?.startedAt !== null &&
       liveHookEvidence?.startedAt !== undefined &&
-      (!expectedPrompt || liveHookEvidence.prompt === expectedPrompt)
+      (!expectedPrompt || liveHookEvidence.prompt === expectedPrompt || liveEvidenceMatchesTurn)
     ) {
       if (liveEvidenceMatchesTurn || liveHookEvidence.startedAt >= observedAfter) {
         startedAt = Math.max(startedAt ?? observedAfter, liveHookEvidence.startedAt)
@@ -19698,8 +19707,7 @@ export class OrcaRuntimeService {
         entry.observation.origin === 'hook' &&
         entry.observation.replayedAt !== undefined &&
         entry.observation.replayedAt > observedAfter
-      const matchesTurnIdentity =
-        hasTurnIdentity && expectedPrompt !== null && entry.prompt === expectedPrompt
+      const matchesTurnIdentity = matchesExpectedTurn(entry.prompt)
       if (
         entry.observation?.kind === 'snapshot' &&
         entry.state !== 'working' &&
@@ -19711,7 +19719,7 @@ export class OrcaRuntimeService {
       if (
         entry.state === 'working' &&
         (matchesTurnIdentity || entry.stateStartedAt >= observedAfter) &&
-        (!expectedPrompt || entry.prompt === expectedPrompt)
+        (!expectedPrompt || entry.prompt === expectedPrompt || matchesTurnIdentity)
       ) {
         startedAt = Math.max(startedAt ?? observedAfter, entry.stateStartedAt)
       }
@@ -19720,7 +19728,7 @@ export class OrcaRuntimeService {
         entry.sessionBoundary !== true &&
         (entry.turnCompletedAt !== undefined || replayedCompletion || matchesTurnIdentity) &&
         (matchesTurnIdentity || entry.receivedAt > observedAfter) &&
-        (!expectedPrompt || entry.prompt === expectedPrompt)
+        (!expectedPrompt || entry.prompt === expectedPrompt || matchesTurnIdentity)
       ) {
         completedFromHook = true
       }

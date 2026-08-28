@@ -38107,6 +38107,55 @@ describe('OrcaRuntimeService', () => {
     ).toBe(false)
   })
 
+  it('accepts same-run marker evidence after the automation prompt body was edited', async () => {
+    // A reused run keeps the preview built at creation while a later dispatch
+    // submits the edited automation prompt. The run-id marker, not the body,
+    // is the turn identity — recovery must still find the turn.
+    const observedAfter = Date.now() - 1_000
+    const leafId = '11111111-2222-4333-8444-555555555555'
+    const expectedPrompt = buildAutomationTurnPrompt('automation prompt', 'run-1')
+    const runtime = new OrcaRuntimeService(store, undefined, {
+      getAgentStatusSnapshot: () => [
+        {
+          state: 'done',
+          prompt: buildAutomationTurnPrompt('edited automation prompt', 'run-1'),
+          agentType: 'codex',
+          paneKey: `tab-1:${leafId}`,
+          connectionId: null,
+          receivedAt: observedAfter + 100,
+          stateStartedAt: observedAfter + 100,
+          turnCompletedAt: observedAfter + 100
+        }
+      ]
+    })
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, {
+      tabs: [
+        {
+          tabId: 'tab-1',
+          worktreeId: 'repo-1::/tmp/worktree-a',
+          title: 'Codex',
+          activeLeafId: leafId,
+          layout: null
+        }
+      ],
+      leaves: [
+        {
+          tabId: 'tab-1',
+          worktreeId: 'repo-1::/tmp/worktree-a',
+          leafId,
+          paneRuntimeId: 1,
+          ptyId: 'pty-1'
+        }
+      ]
+    })
+    const [terminal] = (await runtime.listTerminals()).terminals
+
+    expect(
+      runtime.hasTerminalAgentWorkedSince(terminal.handle, observedAfter, expectedPrompt, 'run-1')
+    ).toBe(true)
+  })
+
   it('rejects a stale clock-ahead remote completion before a reused dispatch', async () => {
     const observedAfter = Date.now()
     const leafId = '11111111-2222-4333-8444-555555555555'
