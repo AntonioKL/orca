@@ -106,7 +106,7 @@ function deps(
 }
 
 describe('structured session recovery resolution', () => {
-  it('releases a latched ownerless native reservation', async () => {
+  it('does not release an ownerless native reservation without processless proof', async () => {
     const store = await openStore()
     await reserve(store)
     await latch(store, 'recovering')
@@ -116,12 +116,12 @@ describe('structured session recovery resolution', () => {
       SESSION
     )
 
-    expect(result).toBe('resolved')
+    expect(result).toBe('unresolved')
     expect(store.getRecord(SESSION)?.lease).toMatchObject({
-      claimStatus: 'released',
-      handoffStage: null,
-      runtimeFence: 2,
-      reservedSpawnToken: null
+      claimStatus: 'reserved',
+      handoffStage: 'recovering',
+      runtimeFence: 1,
+      reservedSpawnToken: 'spawn-recovery'
     })
   })
 

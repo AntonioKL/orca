@@ -2,8 +2,9 @@
  * Single-writer lease adjudication.
  *
  * Every decision here fails closed: expiry alone never grants a second owner, an unverifiable
- * process counts as possibly alive, and a stage that cannot prove an owner ends in manual
- * recovery rather than handing the session to the other runtime. This is the opposite polarity
+ * process counts as possibly alive, and a stage that cannot prove an owner keeps re-asking —
+ * or, when it names no process at all, ends in manual recovery — rather than handing the
+ * session to the other runtime. This is the opposite polarity
  * from daemon adoption checks, which fail open on a missing start time — a wrong answer there
  * refuses an adoption, a wrong answer here creates two writers on one provider session.
  */
@@ -142,7 +143,7 @@ export function evaluateAgentSessionAcquisition(args: {
     }
     if (
       lease.ownerProcess === null &&
-      lease.handoffStage === 'old-owner-stopped' &&
+      STAGES_ADMITTING_NEW_OWNER.has(lease.handoffStage) &&
       lease.claimStatus === 'reserved' &&
       lease.reservedSpawnToken !== null
     ) {
@@ -210,24 +211,9 @@ export function adjudicateAgentSessionRestart(args: {
         evidence: { kind: 'pid-absent', detail: 'reservation never spawned', observedAt }
       }
     }
-    if (lease.runtimeKind === 'native' && lease.claimStatus === 'reserved') {
-      // Why: adjudication itself proves the reserving runtime died before an owner was
-      // proven, and a never-proven native child lost its only request channel with that
-      // runtime — nothing under this token can reach the provider session again. A TUI
-      // child outlives the runtime inside its terminal, so it stays latched below.
-      return {
-        disposition: 'evicted',
-        nextFence: nextAgentSessionFence(lease),
-        evidence: {
-          kind: 'pid-absent',
-          detail: 'native reservation abandoned before an owner was proven',
-          observedAt
-        }
-      }
-    }
     return {
       disposition: 'recovering',
-      stage: 'recovering',
+      stage: 'manual-recovery',
       reason: 'reservation with no proven process'
     }
   }
@@ -249,6 +235,8 @@ export function adjudicateAgentSessionRestart(args: {
     return { disposition: 'evicted', nextFence: nextAgentSessionFence(lease), evidence }
   }
   return {
+    // Why: an exact recorded identity can still be probed later, so the system keeps
+    // re-asking; only a record naming nobody (above) needs the user to decide.
     disposition: 'recovering',
     stage: 'recovering',
     reason:

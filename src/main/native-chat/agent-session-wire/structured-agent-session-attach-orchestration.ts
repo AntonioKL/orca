@@ -43,7 +43,7 @@ export function attachStructuredAgentSession(
         await eventSink.drained()
       },
       authority: {
-        spawnToken: context.deps.mintSpawnToken?.() ?? randomUUID(),
+        spawnToken: () => context.deps.mintSpawnToken?.() ?? randomUUID(),
         claimKeyId: context.deps.claimKeyId,
         handoffOperationId: params.envelope.clientOperationId,
         probe: await context.runtimeState.probeOwner(sessionId),
@@ -53,6 +53,11 @@ export function attachStructuredAgentSession(
       callerKey,
       params,
       now: () => context.now(),
+      onAttachFailed: () => {
+        context.sessions.delete(sessionId)
+        eventSink.close()
+        context.runtimeState.discardEventSink(sessionId)
+      },
       onAttached: (attached) => {
         const fence = context.deps.store.getRecord(sessionId)?.lease.runtimeFence ?? 0
         const previousFence = context.sessions.get(sessionId)?.fence

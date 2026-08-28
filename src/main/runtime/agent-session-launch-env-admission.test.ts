@@ -18,8 +18,8 @@ function request(overrides: Partial<AgentSessionReserveRequest> = {}): AgentSess
       workspaceId: 'workspace-1',
       workspaceKind: 'git-worktree'
     },
-    provider: 'claude',
-    accountHome: { variable: 'CLAUDE_CONFIG_DIR', path: '/home/dev/.claude' },
+    provider: 'codex',
+    accountHome: { variable: 'CODEX_HOME', path: '/home/dev/.codex' },
     runtimeKind: 'native',
     expectedFence: null,
     spawnToken: 'spawn-a',
@@ -44,7 +44,7 @@ afterEach(async () => {
   await rm(directory, { recursive: true, force: true })
 })
 
-describe('legacy agent session launch environment', () => {
+describe('agent session launch environment admission', () => {
   it('does not persist ambient launch variables', async () => {
     const store = await AgentSessionRecordStore.open({ directory, hostId: 'local' })
     await store.reserveOwner(request())
@@ -54,7 +54,7 @@ describe('legacy agent session launch environment', () => {
         spawnToken: 'spawn-b',
         launchEnv: {
           PATH: '/custom/bin:/usr/bin',
-          ANTHROPIC_AUTH_TOKEN: 'fixture-token'
+          OPENAI_API_KEY: 'fixture-token'
         },
         operation: {
           callerKey: 'client-1',
@@ -65,13 +65,13 @@ describe('legacy agent session launch environment', () => {
     )
 
     const raw = await readFile(join(directory, 'agent-sessions.json'), 'utf-8')
-    expect(raw).not.toContain('ANTHROPIC_AUTH_TOKEN')
+    expect(raw).not.toContain('OPENAI_API_KEY')
     expect(raw).not.toContain('"PATH"')
     const reopened = await AgentSessionRecordStore.open({ directory, hostId: 'local' })
     expect(reopened.getRecord(SESSION)).not.toHaveProperty('launchEnv')
   })
 
-  it('rejects an environment that could not be reloaded before writing it', async () => {
+  it('rejects an environment that could not be validated before writing', async () => {
     const store = await AgentSessionRecordStore.open({ directory, hostId: 'local' })
     const launchEnv = Object.fromEntries(
       Array.from({ length: 257 }, (_, index) => [`KEY_${index}`, 'value'])

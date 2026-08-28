@@ -105,8 +105,7 @@ export class StructuredAgentSessionHost {
       serialize: (sessionId, task) => this.serialize(sessionId, task),
       hasSession: (sessionId) => this.sessions.has(sessionId),
       onReadable: (sessionId, restored) => this.sessions.set(sessionId, restored),
-      restoreHandoff: (sessionId) => this.handoffs.restore(sessionId),
-      reapOrphanChildren: () => this.runtimeState.reapOrphanChildren()
+      restoreHandoff: (sessionId) => this.handoffs.restore(sessionId)
     })
     this.runtimeState.startLeaseRenewal()
   }

@@ -1,7 +1,5 @@
-// A child spawned under a reservation whose record was lost is invisible to the lease, and
-// recovery is about to grant the same provider session a new owner. Nothing else in the host
-// stops it, so this is the only thing standing between the user and two live Codex children on
-// one thread.
+// A child spawned under a reservation whose record was lost is invisible to the lease. Reaping
+// is bounded cleanup only; it never replaces the lease proof required to grant another writer.
 
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentSessionRecordStore } from './agent-session-record-store'
@@ -52,5 +50,19 @@ describe('orphan agent-session child reaper', () => {
 
     expect(stopped).toEqual([])
     expect(stop).not.toHaveBeenCalled()
+  })
+
+  it('surfaces a failure to signal an observed orphan', async () => {
+    const failure = Object.assign(new Error('not permitted'), { code: 'EPERM' })
+
+    await expect(
+      stopOrphanAgentSessionChildren({
+        store: storeWithLeasedTokens([]),
+        scan: async () => new Map([['token-lost', [202]]]),
+        stop: () => {
+          throw failure
+        }
+      })
+    ).rejects.toBe(failure)
   })
 })

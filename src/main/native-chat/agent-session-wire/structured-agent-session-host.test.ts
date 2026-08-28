@@ -208,49 +208,7 @@ describe('attach', () => {
     expect(retry).toMatchObject({ ok: true, replayed: true })
   })
 
-  it('reuses the persisted spawn token when acquisition is retried', async () => {
-    const spawnTokens: string[] = []
-    const acquire = vi
-      .fn<StructuredAgentSessionAdapter['acquire']>()
-      .mockImplementationOnce(async ({ spawnToken }) => {
-        spawnTokens.push(spawnToken)
-        throw new Error('reply lost')
-      })
-      .mockImplementation(async ({ fence, spawnToken }) => {
-        spawnTokens.push(spawnToken)
-        return {
-          process: {
-            hostId: 'local',
-            pid: 4242,
-            processStartTimeMs: 1_700_000_000_000,
-            spawnToken
-          },
-          link: {
-            linkId: `link-${fence}`,
-            handle: { provider: 'codex', threadId: THREAD },
-            origin: 'created',
-            mintedAtFence: fence,
-            observedAt: NOW
-          }
-        }
-      })
-    let token = 0
-    host = new StructuredAgentSessionHost({
-      store,
-      adapter: { ...adapter(), acquire },
-      journalRoot: root,
-      claimKeyId: 'key-1',
-      mintSpawnToken: () => `spawn-${++token}`,
-      now: () => NOW
-    })
-    const params = attachParams()
-
-    await expect(host.attach(CALLER, params)).rejects.toThrow('reply lost')
-    expect(await host.attach(CALLER, params)).toMatchObject({ ok: true, replayed: true })
-    expect(spawnTokens).toEqual(['spawn-1', 'spawn-1'])
-  })
-
-  it('finishes proof when a retry finds the process identity already committed', async () => {
+  it('retires a failed proved acquisition before admitting a fresh operation', async () => {
     const acquire = vi
       .fn<StructuredAgentSessionAdapter['acquire']>()
       .mockImplementationOnce(async ({ fence, spawnToken }) => ({
@@ -296,7 +254,12 @@ describe('attach', () => {
     await expect(host.attach(CALLER, params)).rejects.toThrow(
       'agent_session_provider_handle_stale_fence'
     )
-    expect(await host.attach(CALLER, params)).toMatchObject({ ok: true, replayed: true })
+    expect(await host.attach(CALLER, params)).toMatchObject({
+      ok: false,
+      refusal: { code: 'agent_session_operation_invalid' }
+    })
+    const releasedFence = store.getRecord(SESSION)?.lease.runtimeFence ?? 0
+    expect(await host.attach(CALLER, ensureParams(releasedFence))).toMatchObject({ ok: true })
     expect(acquire).toHaveBeenCalledTimes(2)
     expect(store.getRecord(SESSION)?.lease.claimStatus).toBe('live')
     expect(releaseAcquisition).toHaveBeenCalledWith({ sessionId: SESSION })
@@ -407,6 +370,38 @@ describe('send', () => {
     expect(dispatch).toHaveBeenCalledTimes(2)
     const state = host.history({ sessionId: SESSION, direction: 'tail' })
     expect(state.ok && state.page.submissions).toHaveLength(1)
+  })
+
+  it('advances an explicit retry after a ledger-unknown send is reconciled in the journal', async () => {
+    await attach()
+    const journal = (
+      host as unknown as { sessions: Map<string, { journal: AgentSessionJournal }> }
+    ).sessions.get(SESSION)!.journal
+    vi.spyOn(journal, 'resolveDispatch').mockRejectedValueOnce(new Error('journal resolve failed'))
+    const body = hostTestMessage('possibly delivered before persistence failed')
+    const params = { envelope: envelope('agentSession.send', { body }), body }
+
+    await expect(host.send(CALLER, params)).rejects.toThrow('journal resolve failed')
+    expect(
+      store.listOperationRows().find((row) => row.operationId === params.envelope.clientOperationId)
+        ?.outcome
+    ).toEqual({ status: 'unknown' })
+    expect(dispatch).toHaveBeenCalledTimes(1)
+
+    await journal.markPendingSubmissionsUnknown(store.getRecord(SESSION)?.lease.runtimeFence ?? 1)
+    await expect(host.send(CALLER, params)).resolves.toMatchObject({
+      ok: false,
+      refusal: { code: 'agent_session_operation_unknown' }
+    })
+    expect(dispatch).toHaveBeenCalledTimes(1)
+
+    await expect(host.send(CALLER, { ...params, retryUnknown: true })).resolves.toMatchObject({
+      ok: true,
+      replayed: false,
+      value: { submission: { dispatchState: 'accepted' } }
+    })
+    expect(dispatch).toHaveBeenCalledTimes(2)
+    expect(journal.submissions()).toHaveLength(1)
   })
 
   it('refuses a stale fence and hands back the current one', async () => {

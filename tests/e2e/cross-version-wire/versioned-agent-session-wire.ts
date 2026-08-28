@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { materializeReleaseCheckout, REPO_ROOT, type ReleaseCheckout } from './release-checkout'
 
 /**
@@ -120,7 +121,9 @@ async function loadWorkingTreeBuild(): Promise<AgentSessionWireBuild> {
 // Why @vite-ignore: the checkout is created at run time, so Vite cannot glob it at
 // transform time. Vite-node still resolves and transforms the target on demand.
 function importFromCheckout(specifier: string): Promise<Record<string, unknown>> {
-  return import(/* @vite-ignore */ specifier) as Promise<Record<string, unknown>>
+  return import(/* @vite-ignore */ pathToFileURL(specifier).href) as Promise<
+    Record<string, unknown>
+  >
 }
 
 async function loadReleaseBuild(checkout: ReleaseCheckout): Promise<AgentSessionWireBuild> {

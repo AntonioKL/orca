@@ -25,7 +25,9 @@ import {
 import type { AgentSessionRecordStore } from '../../runtime/agent-session-record-store'
 import type { StructuredAgentSessionAdapter } from './structured-agent-session-adapter'
 import {
+  AgentSessionAcquisitionExitUnprovenError,
   AgentSessionAcquisitionRefusal,
+  AgentSessionPreSpawnError,
   isAgentSessionPreSpawnError,
   rethrowAfterAgentSessionAcquisitionCleanup
 } from './structured-agent-session-adapter'
@@ -52,6 +54,8 @@ export type AttachFlowInput = {
   onAcquiring?: () => Promise<void> | void
   /** Settles writes already captured by the superseded journal before opening another. */
   beforeJournalOpen?: () => Promise<void> | void
+  /** Removes any partial host publication after journal attachment fails. */
+  onAttachFailed?: () => void
 }
 
 export async function performAttach(
@@ -79,7 +83,6 @@ export async function performAttach(
       })
     )
     record = reserved.record
-    reservedRecord = record
     replayed = reserved.disposition === 'replayed'
     if (
       replayed &&
@@ -95,31 +98,58 @@ export async function performAttach(
         return { ok: false, refusal: replay.refusal }
       }
     }
+    reservedRecord = record
     if (!agentSessionLeaseAdmitsWriter(record.lease)) {
       record = await acquireOwner(input, record)
     }
   } catch (error) {
-    if (error instanceof AgentSessionAcquisitionRefusal) {
-      const refusal = { code: error.code, message: error.message }
-      await store.recordOperationOutcome({
-        callerKey: input.callerKey,
-        operationId: params.envelope.clientOperationId,
-        outcome: { status: 'failed', code: refusal.code, message: refusal.message }
-      })
-      return { ok: false, refusal }
-    }
-    if (reservedRecord && isAgentSessionPreSpawnError(error)) {
-      const spawnToken = reservedRecord.lease.reservedSpawnToken
-      if (spawnToken) {
-        const processlessAt = input.now()
-        await store.setReservationProcesslessProof({
+    const spawnToken = reservedRecord?.lease.reservedSpawnToken
+    if (reservedRecord && spawnToken) {
+      // A pre-spawn failure is its own processless proof; the settlement records the
+      // evidence and the failed operation in one durable transaction.
+      const exitProof = isAgentSessionPreSpawnError(error)
+        ? 'processless'
+        : error instanceof AgentSessionAcquisitionExitUnprovenError
+          ? 'unproven'
+          : 'exit-proven'
+      const outcome =
+        error instanceof AgentSessionAcquisitionExitUnprovenError
+          ? {
+              status: 'failed' as const,
+              code: 'agent_session_ownership_unknown',
+              message: error.message
+            }
+          : error instanceof AgentSessionAcquisitionRefusal
+            ? {
+                status: 'failed' as const,
+                code: error.code,
+                message: error.message
+              }
+            : {
+                status: 'failed' as const,
+                code: 'agent_session_operation_invalid',
+                message: error instanceof Error ? error.message : String(error)
+              }
+      try {
+        await store.settleFailedAcquisition({
           sessionId,
           fence: reservedRecord.lease.runtimeFence,
           spawnToken,
-          processlessAt,
-          now: processlessAt
+          callerKey: input.callerKey,
+          operationId: params.envelope.clientOperationId,
+          outcome,
+          exitProof,
+          now: input.now()
         })
+      } catch (settlementError) {
+        throw new AggregateError(
+          [error, settlementError],
+          'agent session acquisition failure settlement failed'
+        )
       }
+    }
+    if (error instanceof AgentSessionAcquisitionRefusal) {
+      return { ok: false, refusal: { code: error.code, message: error.message } }
     }
     return {
       ok: false,
@@ -131,19 +161,24 @@ export async function performAttach(
     }
   }
 
-  await input.beforeJournalOpen?.()
-  const attached = await attachJournal({
-    record,
-    params,
-    journalRoot: input.journalRoot,
-    adapter: input.adapter
-  })
-  input.onAttached(attached)
-  await store.recordOperationOutcome({
-    callerKey: input.callerKey,
-    operationId: params.envelope.clientOperationId,
-    outcome: { status: 'succeeded', sessionId }
-  })
+  let attached: AttachedJournal
+  try {
+    await input.beforeJournalOpen?.()
+    attached = await attachJournal({
+      record,
+      params,
+      journalRoot: input.journalRoot,
+      adapter: input.adapter
+    })
+    input.onAttached(attached)
+    await store.recordOperationOutcome({
+      callerKey: input.callerKey,
+      operationId: params.envelope.clientOperationId,
+      outcome: { status: 'succeeded', sessionId }
+    })
+  } catch (error) {
+    return settlePostAcquisitionAttachFailure(input, record, error)
+  }
 
   const fence = record.lease.runtimeFence
   return {
@@ -160,6 +195,45 @@ export async function performAttach(
   }
 }
 
+async function settlePostAcquisitionAttachFailure(
+  input: AttachFlowInput,
+  record: AgentSessionRecord,
+  cause: unknown
+): Promise<never> {
+  let cleanupError: unknown = cause
+  let exitProof: 'exit-proven' | 'unproven' = 'unproven'
+  try {
+    await rethrowAfterAgentSessionAcquisitionCleanup(input.adapter, record.sessionId, cause)
+  } catch (error) {
+    cleanupError = error
+    exitProof =
+      error instanceof AgentSessionAcquisitionExitUnprovenError ? 'unproven' : 'exit-proven'
+  }
+  input.onAttachFailed?.()
+  try {
+    await input.store.settleFailedPostAcquisitionAttachment({
+      sessionId: record.sessionId,
+      fence: record.lease.runtimeFence,
+      spawnToken: record.lease.reservedSpawnToken ?? '',
+      callerKey: input.callerKey,
+      operationId: input.params.envelope.clientOperationId,
+      outcome: {
+        status: 'failed',
+        code: 'agent_session_operation_invalid',
+        message: cause instanceof Error ? cause.message : String(cause)
+      },
+      exitProof,
+      now: input.now()
+    })
+  } catch (settlementError) {
+    throw new AggregateError(
+      [cleanupError, settlementError],
+      'agent session post-acquisition attachment failure settlement failed'
+    )
+  }
+  throw cleanupError
+}
+
 /** A reservation with no process behind it is only a promise to spawn; the
  *  adapter makes it real and the store then grants the writer. */
 async function acquireOwner(
@@ -172,23 +246,27 @@ async function acquireOwner(
     throw new Error('agent_session_ownership_unknown')
   }
   // Pre-spawn proof is single-use: this retry may create a child after the durable clear.
-  record = await input.store.setReservationProcesslessProof({
-    sessionId: record.sessionId,
-    fence,
-    spawnToken,
-    processlessAt: null,
-    now: input.now()
-  })
-  await input.onAcquiring?.()
-  const acquired = await input.adapter.acquire({
-    identity: journalIdentityFor(record, input.params),
-    fence,
-    // Retries must recover the original reservation, not mint a second child.
-    spawnToken,
-    ...(record.options ? { options: record.options } : {}),
-    ...(input.eventSink ? { events: input.eventSink } : {})
-  })
   try {
+    try {
+      record = await input.store.setReservationProcesslessProof({
+        sessionId: record.sessionId,
+        fence,
+        spawnToken,
+        processlessAt: null,
+        now: input.now()
+      })
+      await input.onAcquiring?.()
+    } catch (error) {
+      throw new AgentSessionPreSpawnError(error)
+    }
+    const acquired = await input.adapter.acquire({
+      identity: journalIdentityFor(record, input.params),
+      fence,
+      // Retries must recover the original reservation, not mint a second child.
+      spawnToken,
+      ...(record.options ? { options: record.options } : {}),
+      ...(input.eventSink ? { events: input.eventSink } : {})
+    })
     const options = await readNativeSessionOptions({
       adapter: input.adapter,
       sessionId: record.sessionId,
@@ -213,6 +291,9 @@ async function acquireOwner(
       ...(options ? { options } : {})
     })
   } catch (error) {
+    if (isAgentSessionPreSpawnError(error)) {
+      throw error
+    }
     return rethrowAfterAgentSessionAcquisitionCleanup(input.adapter, record.sessionId, error)
   }
 }

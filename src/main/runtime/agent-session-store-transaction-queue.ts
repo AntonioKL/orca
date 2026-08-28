@@ -138,7 +138,7 @@ export class AgentSessionStoreTransactionQueue {
     return run
   }
 
-  persistLoadedMigration(): Promise<void> {
+  persistLoadedRewrite(): Promise<void> {
     return this.transact(() => undefined)
   }
 

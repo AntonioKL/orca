@@ -12,6 +12,7 @@ type TeardownChild = Pick<ChildProcess, 'pid' | 'kill'>
 
 export type CodexAppServerProcessTeardownDeps = {
   platform?: NodeJS.Platform
+  dedicatedProcessGroup?: boolean
   /** Diagnostic/recovery injection only; never used by the primary teardown. */
   findSpawnTokenProcesses?: (spawnToken: string) => Promise<number[] | null>
   captureDescendants?: (rootPid: number) => Promise<DescendantSnapshot | null>
@@ -22,6 +23,21 @@ export type CodexAppServerProcessTeardownDeps = {
   isPidPresent?: (pid: number) => boolean
   wait?: (ms: number) => Promise<void>
   now?: () => number
+}
+
+function terminateDedicatedPosixGroup(
+  rootPid: number,
+  deps: CodexAppServerProcessTeardownDeps
+): boolean {
+  const signalGroup =
+    deps.signalProcessGroup ??
+    ((pgid: number, signal: NodeJS.Signals) => process.kill(-pgid, signal))
+  try {
+    signalGroup(rootPid, 'SIGKILL')
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ESRCH'
+  }
 }
 
 function sendSignal(pid: number, signal: NodeJS.Signals): void {
@@ -139,6 +155,9 @@ async function terminateOnce(
     // taskkill owns the tree; this preserves the prior direct-child fallback when it fails.
     child.kill('SIGKILL')
     return true
+  }
+  if (deps.dedicatedProcessGroup) {
+    return terminateDedicatedPosixGroup(rootPid, deps)
   }
   return terminatePosixTree(child, rootPid, spawnToken, deps)
 }

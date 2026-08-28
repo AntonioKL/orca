@@ -1,10 +1,17 @@
-import { describe, expect, it, vi } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
   AgentSessionClaimStatus,
   AgentSessionProcessIdentity,
   AgentSessionRecord
 } from '../../shared/agent-session-record'
-import { createStructuredAgentSessionOwnerProbe } from './structured-agent-session-runtime'
+import {
+  createStructuredAgentSessionOwnerProbe,
+  ensureStructuredAgentSessionHost,
+  stopStructuredAgentSessionRuntime
+} from './structured-agent-session-runtime'
 
 const HOST_ID = 'local'
 
@@ -123,5 +130,73 @@ describe('structured agent-session owner probe', () => {
 
     expect(probe).not.toHaveBeenCalled()
     expect(result).toEqual({ outcome: 'reservation-unused' })
+  })
+})
+
+describe('structured agent-session runtime install', () => {
+  let stateDirectory: string | null = null
+
+  afterEach(async () => {
+    await stopStructuredAgentSessionRuntime()
+    if (stateDirectory) {
+      await rm(stateDirectory, { recursive: true, force: true })
+      stateDirectory = null
+    }
+    vi.restoreAllMocks()
+  })
+
+  it('starts orphan reaping and reports failures without failing installation', async () => {
+    stateDirectory = await mkdtemp(join(tmpdir(), 'orca-structured-runtime-'))
+    const failure = new Error('scan failed')
+    const reapOrphanChildren = vi.fn(async () => {
+      throw failure
+    })
+    const onError = vi.fn()
+
+    await expect(
+      ensureStructuredAgentSessionHost({
+        stateDirectory,
+        hostId: HOST_ID,
+        claimKeyId: 'key-1',
+        resolveWorkspacePath: async () => stateDirectory!,
+        resolveEnvironment: async () => ({}),
+        reapOrphanChildren,
+        onError
+      })
+    ).resolves.toBeDefined()
+
+    await vi.waitFor(() =>
+      expect(onError).toHaveBeenCalledWith({
+        scope: 'agent-session-orphan-child-reaper',
+        error: failure
+      })
+    )
+    expect(reapOrphanChildren).toHaveBeenCalledWith({ store: expect.anything() })
+  })
+
+  it('logs an orphan-reaper failure when no reporter is configured', async () => {
+    stateDirectory = await mkdtemp(join(tmpdir(), 'orca-structured-runtime-'))
+    const failure = new Error('scan failed')
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await expect(
+      ensureStructuredAgentSessionHost({
+        stateDirectory,
+        hostId: HOST_ID,
+        claimKeyId: 'key-1',
+        resolveWorkspacePath: async () => stateDirectory!,
+        resolveEnvironment: async () => ({}),
+        reapOrphanChildren: async () => {
+          throw failure
+        }
+      })
+    ).resolves.toBeDefined()
+
+    await vi.waitFor(() =>
+      expect(consoleError).toHaveBeenCalledWith(
+        '[structured-agent-session] orphan reaper failed',
+        failure
+      )
+    )
   })
 })

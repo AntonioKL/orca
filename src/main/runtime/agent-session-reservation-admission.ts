@@ -12,7 +12,10 @@ import {
   type AgentSessionOperationDecision,
   type AgentSessionOperationRow
 } from '../../shared/agent-session-operation-ledger'
-import type { AgentSessionOwnerProbe } from '../../shared/agent-session-lease-adjudication'
+import {
+  evaluateAgentSessionAcquisition,
+  type AgentSessionOwnerProbe
+} from '../../shared/agent-session-lease-adjudication'
 import {
   AGENT_SESSION_RECORD_SCHEMA_VERSION,
   agentSessionExecutionLocationsEqual,
@@ -36,13 +39,15 @@ export type AgentSessionReserveRequest = {
   location: AgentSessionExecutionLocation
   provider: AgentSessionHandleProvider
   accountHome: AgentSessionAccountHome
-  /** Legacy internal input accepted for compatibility and deliberately discarded. */
+  /** Arguments pinned on first reservation so owner replacement repeats the same launch. */
   launchArgs?: AgentSessionLaunchArgs
+  /** Current launch input validated here but never written to the durable record. */
   launchEnv?: AgentSessionLaunchEnv
   runtimeKind: AgentSessionReservation['runtimeKind']
   /** Null when the session does not exist yet; otherwise the fence the caller last observed. */
   expectedFence: number | null
-  spawnToken: string
+  /** A supplier is invoked only when this operation wins a new reservation. */
+  spawnToken: string | (() => string)
   claimKeyId: string
   handoffOperationId: string | null
   probe: AgentSessionOwnerProbe
@@ -92,6 +97,26 @@ export function requireAgentSessionRecordForReplay(
   return record
 }
 
+export function admitPendingAgentSessionReservationReplay(
+  record: AgentSessionRecord,
+  request: AgentSessionReserveRequest
+): AgentSessionRecord {
+  const decision = evaluateAgentSessionAcquisition({
+    lease: record.lease,
+    expectedFence: record.lease.runtimeFence,
+    handoffOperationId: request.handoffOperationId,
+    probe: request.probe
+  })
+  if (decision.decision === 'refused') {
+    throw new Error(decision.code)
+  }
+  if (decision.decision !== 'retry-reservation') {
+    // A replay may continue only its still-present reservation; recovery requires a fresh intent.
+    throw new Error('agent_session_ownership_unknown')
+  }
+  return record
+}
+
 export function applyAgentSessionReservation(
   state: AgentSessionStoreState,
   request: AgentSessionReserveRequest,
@@ -108,7 +133,8 @@ export function applyAgentSessionReservation(
   }
   const reservation: AgentSessionReservation = {
     runtimeKind: request.runtimeKind,
-    spawnToken: request.spawnToken,
+    spawnToken:
+      typeof request.spawnToken === 'function' ? request.spawnToken() : request.spawnToken,
     claimKeyId: request.claimKeyId,
     handoffOperationId: request.handoffOperationId,
     leaseTtlMs: request.leaseTtlMs ?? leaseTtlMs,

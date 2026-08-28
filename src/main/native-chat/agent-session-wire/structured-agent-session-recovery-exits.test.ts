@@ -118,30 +118,84 @@ afterEach(async () => {
 })
 
 describe('recovery exits', () => {
-  it('frees a reservation stranded by a crash between reserve and identity commit', async () => {
+  it('keeps an ownerless unproven acquisition in manual recovery across restart', async () => {
     acquire.mockRejectedValueOnce(new Error('simulated crash before identity commit'))
-    await expect(host.attach(CALLER, hostTestAttachParams(null))).rejects.toThrow('simulated crash')
+    await expect(host.attach(CALLER, hostTestAttachParams(null))).rejects.toThrow(
+      'agent_session_acquisition_exit_unproven'
+    )
     expect(store.getRecord(SESSION)?.lease).toMatchObject({
       claimStatus: 'reserved',
-      ownerProcess: null
+      handoffStage: 'manual-recovery',
+      handoffOperationId: null,
+      ownerProcess: null,
+      runtimeFence: 1,
+      reservedSpawnToken: 'spawn-a'
     })
 
     await reopenStore()
     openHost({ mintSpawnToken: () => 'spawn-b' })
 
-    // The abandoned reservation is released at reconcile, so the stale client fence gets
-    // a retryable refusal that names the current fence instead of a dead-end latch.
-    const stale = await host.attach(CALLER, hostTestAttachParams(1))
-    expect(stale).toMatchObject({
+    const refused = await host.attach(CALLER, hostTestAttachParams(1))
+    expect(refused).toMatchObject({
       ok: false,
-      refusal: { code: 'agent_session_checkpoint_stale', currentFence: 2 }
+      refusal: { code: 'agent_session_ownership_unknown' }
     })
-    const retried = await host.attach(CALLER, hostTestAttachParams(2))
-    expect(retried).toMatchObject({ ok: true })
+    expect(acquire).toHaveBeenCalledOnce()
+  })
+
+  it('releases an unproven acquisition whose owner later dies, without replaying it as a handoff', async () => {
+    // A real session first, so restart restore has a journal to read and runs the
+    // handoff restorer over the residue instead of skipping the record.
+    expect((await host.attach(CALLER, hostTestAttachParams(null))).ok).toBe(true)
+    await reopenStore()
+
+    // The resume fails at owner proof and cleanup cannot prove exit: the settlement
+    // keeps the reservation latched at `recovering` with its committed owner identity.
+    vi.spyOn(store, 'proveOwner').mockRejectedValueOnce(new Error('handle proof lost'))
+    openHost({
+      mintSpawnToken: () => 'spawn-b',
+      probeOwner: async () => ({ outcome: 'pid-absent' })
+    })
+    await expect(host.attach(CALLER, hostTestAttachParams(2))).rejects.toThrow(
+      'agent_session_acquisition_exit_unproven'
+    )
+    expect(store.getRecord(SESSION)?.lease).toMatchObject({
+      claimStatus: 'reserved',
+      handoffStage: 'recovering',
+      handoffOperationId: null,
+      ownerProcess: { spawnToken: 'spawn-b' },
+      runtimeFence: 3,
+      reservedSpawnToken: 'spawn-b'
+    })
+
+    // The unproven owner dies before the next launch; reconciliation and handoff restore run.
+    await reopenStore()
+    openHost({
+      mintSpawnToken: () => 'spawn-c',
+      probeOwner: async () => ({ outcome: 'pid-absent' })
+    })
+    await host.restoreReadableSessions()
+
+    // Death proof releases the residue outright: no handoff continuation, no spawned child,
+    // no stage a user would have to clear by hand.
+    expect(acquire).toHaveBeenCalledTimes(2)
+    expect(store.getRecord(SESSION)?.lease).toMatchObject({
+      claimStatus: 'released',
+      handoffStage: null,
+      handoffOperationId: null,
+      ownerProcess: null,
+      reservedSpawnToken: null,
+      runtimeFence: 4
+    })
+
+    // The ordinary native recovery path remains: the first surface hold resumes it.
+    await host.hold(SESSION, 'surface-1')
+    expect(acquire).toHaveBeenCalledTimes(3)
     expect(store.getRecord(SESSION)?.lease).toMatchObject({
       claimStatus: 'live',
       handoffStage: null,
-      ownerProcess: { pid: 4242 }
+      runtimeFence: 5,
+      ownerProcess: { spawnToken: 'spawn-c' }
     })
   })
 

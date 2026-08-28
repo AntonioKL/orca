@@ -70,8 +70,16 @@ export async function openCodexAppServerConnection(
   for (const key of launch.envToDelete ?? []) {
     delete childEnv[key]
   }
-  const child = spawnImpl(createProviderSpawnSpec(launch, childEnv, process.platform))
+  const spawnSpec = createProviderSpawnSpec(launch, childEnv, process.platform)
+  const child = spawnImpl(spawnSpec)
   const spawnToken = launch.env?.[CODEX_SPAWN_TOKEN_ENV]
+  const hasDedicatedProcessGroup = spawnImpl === spawnProcess && spawnSpec.detached
+
+  function terminateProcessTree(): Promise<boolean> {
+    return terminateCodexAppServerProcessTree(child, spawnToken, {
+      dedicatedProcessGroup: hasDedicatedProcessGroup
+    })
+  }
 
   const pending = new Map<number, PendingRequest>()
   let stderrTail = ''
@@ -145,7 +153,7 @@ export async function openCodexAppServerConnection(
       failPending(error)
       return
     }
-    void terminateCodexAppServerProcessTree(child, spawnToken)
+    void terminateProcessTree()
     handleUnexpectedEnd(error)
   })
 
@@ -199,7 +207,7 @@ export async function openCodexAppServerConnection(
     stdoutBuffer += chunk
     if (Buffer.byteLength(stdoutBuffer) > STDOUT_LINE_MAX_BYTES) {
       child.stdout.destroy()
-      void terminateCodexAppServerProcessTree(child, spawnToken)
+      void terminateProcessTree()
       handleUnexpectedEnd(new Error('codex app-server emitted an oversized JSONL line'))
       return
     }
@@ -219,7 +227,7 @@ export async function openCodexAppServerConnection(
         dispatchMessage(parsed)
       } catch (error) {
         child.stdout.destroy()
-        void terminateCodexAppServerProcessTree(child, spawnToken)
+        void terminateProcessTree()
         handleUnexpectedEnd(error instanceof Error ? error : new Error(String(error)))
         return
       }
@@ -300,7 +308,7 @@ export async function openCodexAppServerConnection(
       if (!exited) {
         await waitForProcessExitUntil(exitPromise, GRACEFUL_EXIT_MS)
         if (!exited) {
-          const treeExited = await terminateCodexAppServerProcessTree(child, spawnToken)
+          const treeExited = await terminateProcessTree()
           if (!treeExited) {
             failPending(new Error('codex app-server process-tree exit was not proven'))
             return false

@@ -54,8 +54,8 @@ export type AgentSessionHandoffStage =
 
 /**
  * PID-reuse-safe process identity. `spawnToken` is the only element available on every platform:
- * process start time costs a CIM query on Windows and is absent in some containers, so a runtime
- * that cannot echo the token back qualifies for manual recovery only.
+ * process start time costs a CIM query on Windows and is absent in some containers. An exact
+ * identity stays in `recovering`; an ownerless, unattributable reservation uses `manual-recovery`.
  */
 export type AgentSessionProcessIdentity = {
   hostId: string
@@ -122,8 +122,6 @@ export type AgentSessionRecord = {
   /** Provider options acknowledged for the next turn, restored across owner replacement. */
   options?: Record<string, string>
   launchArgs?: AgentSessionLaunchArgs
-  /** Legacy read-compatible field; current stores scrub and omit it. */
-  launchEnv?: AgentSessionLaunchEnv
   lease: AgentSessionLease
   createdAt: number
   updatedAt: number
@@ -330,7 +328,7 @@ export function isAgentSessionRecord(value: unknown): value is AgentSessionRecor
     isAgentSessionAccountHome(record.accountHome) &&
     (record.options === undefined || isAgentSessionOptions(record.options)) &&
     (record.launchArgs === undefined || isAgentSessionLaunchArgs(record.launchArgs)) &&
-    (record.launchEnv === undefined || isAgentSessionLaunchEnv(record.launchEnv)) &&
+    !Object.hasOwn(record, 'launchEnv') &&
     isAgentSessionLease(record.lease) &&
     record.lease.sessionId === record.sessionId &&
     Number.isSafeInteger(record.createdAt) &&

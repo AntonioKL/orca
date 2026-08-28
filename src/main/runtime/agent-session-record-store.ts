@@ -30,6 +30,12 @@ import {
   type AgentSessionProcessIdentityCommit
 } from './agent-session-lease-transitions'
 import {
+  settleFailedAgentSessionAcquisition,
+  settleFailedAgentSessionPostAcquisitionAttachment,
+  type AgentSessionFailedAcquisitionSettlement,
+  type AgentSessionFailedPostAcquisitionAttachmentSettlement
+} from './agent-session-acquisition-failure-settlement'
+import {
   renewAgentSessionLeases,
   type AgentSessionLeaseRenewal
 } from './agent-session-lease-renewal'
@@ -41,6 +47,7 @@ import {
   type AgentSessionReservationProcesslessProof
 } from './agent-session-processless-reservation'
 import {
+  admitPendingAgentSessionReservationReplay,
   applyAgentSessionReservation,
   evaluateAgentSessionReserveOperation,
   requireAgentSessionRecordForReplay,
@@ -80,7 +87,7 @@ export class AgentSessionRecordStore {
       diskRevision
     )
     if (loaded.needsRewrite && !loaded.readOnly && !loaded.recoveredFromBackup) {
-      await transactions.persistLoadedMigration()
+      await transactions.persistLoadedRewrite()
     }
     return new AgentSessionRecordStore(transactions)
   }
@@ -101,13 +108,10 @@ export class AgentSessionRecordStore {
     return this.state.hostId
   }
 
-  getRecord(sessionId: string): AgentSessionRecord | null {
-    return this.state.records.get(sessionId) ?? null
-  }
+  getRecord = (sessionId: string): AgentSessionRecord | null =>
+    this.state.records.get(sessionId) ?? null
 
-  listRecords(): AgentSessionRecord[] {
-    return [...this.state.records.values()]
-  }
+  listRecords = (): AgentSessionRecord[] => [...this.state.records.values()]
 
   listByScope(location: AgentSessionExecutionLocation): AgentSessionRecord[] {
     const scope = agentSessionScopeKey(location)
@@ -119,9 +123,7 @@ export class AgentSessionRecordStore {
     return this.state.unreadableRecords.has(sessionId)
   }
 
-  listOperationRows(): AgentSessionOperationRow[] {
-    return [...this.state.operations.values()]
-  }
+  listOperationRows = (): AgentSessionOperationRow[] => [...this.state.operations.values()]
 
   isClaimKeyVerifiable(keyId: string, now: number): boolean {
     const retired = this.state.retiredClaimKeys.find((entry) => entry.keyId === keyId)
@@ -147,11 +149,10 @@ export class AgentSessionRecordStore {
         throw new Error(decision.code)
       }
       if (decision.decision === 'replay') {
-        const record = requireAgentSessionRecordForReplay(
-          this.state,
-          decision.row,
-          request.sessionId
-        )
+        let record = requireAgentSessionRecordForReplay(this.state, decision.row, request.sessionId)
+        if (decision.row.outcome.status === 'pending' && request.handoffOperationId !== null) {
+          record = admitPendingAgentSessionReservationReplay(record, request)
+        }
         return { record, disposition: 'replayed' as const, operationRow: decision.row }
       }
       const result = applyAgentSessionReservation(this.state, request, AGENT_SESSION_LEASE_TTL_MS)
@@ -200,6 +201,14 @@ export class AgentSessionRecordStore {
         : proved
     })
   }
+
+  /** Settle the failed attach and its reservation in one durable transaction. */
+  settleFailedAcquisition = (args: AgentSessionFailedAcquisitionSettlement) =>
+    this.transact(() => settleFailedAgentSessionAcquisition(this.state, args))
+
+  settleFailedPostAcquisitionAttachment = (
+    args: AgentSessionFailedPostAcquisitionAttachmentSettlement
+  ) => this.transact(() => settleFailedAgentSessionPostAcquisitionAttachment(this.state, args))
 
   async renewLease(args: AgentSessionLeaseRenewal): Promise<AgentSessionRecord> {
     const [renewed] = await this.renewLeases([args])

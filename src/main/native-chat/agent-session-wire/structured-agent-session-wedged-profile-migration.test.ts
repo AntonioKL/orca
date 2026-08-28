@@ -176,9 +176,8 @@ function isAcquirable(lease: NonNullable<ReturnType<typeof store.getRecord>>['le
 
 describe('already-wedged profiles become usable on load', () => {
   it('re-adjudicates a conflicted manual-recovery record whose owner is provably gone', async () => {
-    // The v1 -> v2 record upgrade stamps every migrated row `conflicted` + `manual-recovery`, and
-    // nothing in the system ever clears it: acquisition refuses `agent_session_conflict`, recovery
-    // resolution used to skip conflicted rows, and manual recovery needs a TUI owner.
+    // A crash can leave a conflicted current-schema row in manual recovery; positive death proof
+    // must make it acquirable again without discarding the provider handle.
     await seedStore(
       wedgedRecord({
         claimStatus: 'conflicted',

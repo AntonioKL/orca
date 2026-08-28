@@ -60,15 +60,6 @@ export class StructuredAgentSessionHostRuntimeState {
     await Promise.all([...this.eventSinks.values()].map((sink) => sink.drained()))
   }
 
-  /**
-   * Process ownership is enforced at spawn time by the OS supervisor. Token
-   * enumeration is retained as Linux-only recovery evidence and is never the
-   * orphan reaper of record (macOS/Windows are explicitly unverifiable).
-   */
-  reapOrphanChildren(): Promise<number[]> {
-    return Promise.resolve([])
-  }
-
   /** Exit from a latched recovery stage when present-time evidence permits one. */
   resolveRecovery(sessionId: string): Promise<'resolved' | 'unresolved' | 'not-applicable'> {
     return resolveStructuredSessionRecovery(

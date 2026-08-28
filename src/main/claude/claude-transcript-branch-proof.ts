@@ -27,38 +27,6 @@ export class ClaudeTranscriptTailIncompleteError extends Error {
   }
 }
 
-export async function retryClaudeTranscriptTailRead<T>(
-  read: () => Promise<T>,
-  options: {
-    timeoutMs?: number
-    retryDelayMs?: number
-    now?: () => number
-    wait?: (delayMs: number) => Promise<void>
-  } = {}
-): Promise<T> {
-  const timeoutMs = options.timeoutMs ?? 15_000
-  const retryDelayMs = options.retryDelayMs ?? 100
-  const now = options.now ?? Date.now
-  const wait =
-    options.wait ?? ((delayMs: number) => new Promise((resolve) => setTimeout(resolve, delayMs)))
-  const deadline = now() + timeoutMs
-  let incompleteTail: ClaudeTranscriptTailIncompleteError | null = null
-  do {
-    try {
-      return await read()
-    } catch (error) {
-      if (!(error instanceof ClaudeTranscriptTailIncompleteError)) {
-        throw error
-      }
-      incompleteTail = error
-    }
-    if (now() < deadline) {
-      await wait(retryDelayMs)
-    }
-  } while (now() < deadline)
-  throw incompleteTail
-}
-
 export function proveClaudeTranscriptBranchFromJsonl(input: {
   contents: string
   providerSessionId: string

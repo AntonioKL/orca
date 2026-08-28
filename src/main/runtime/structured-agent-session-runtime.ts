@@ -19,6 +19,7 @@ import { StructuredAgentSessionHost } from '../native-chat/agent-session-wire/st
 import type { StructuredAgentSessionHandoffTransport } from '../native-chat/agent-session-wire/structured-agent-session-handoff-types'
 import { setStructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-registry'
 import { AgentSessionRecordStore } from './agent-session-record-store'
+import { stopOrphanAgentSessionChildren } from './agent-session-orphan-child-reaper'
 import {
   probeAgentSessionProcessIdentities,
   probeAgentSessionProcessIdentity,
@@ -55,6 +56,7 @@ export type StructuredAgentSessionRuntimeDeps = {
   resolveCodexOverrides?: () => NodeJS.ProcessEnv
   onError?: (input: { scope: string; error: unknown }) => void
   handoffTransport?: StructuredAgentSessionHandoffTransport
+  reapOrphanChildren?: typeof stopOrphanAgentSessionChildren
 }
 
 type InstalledRuntime = {
@@ -109,6 +111,21 @@ async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<Install
     hostId: deps.hostId
   })
   agentSessionPtyWriteGate.attachRecordLookup((sessionId) => store.getRecord(sessionId))
+  // Why: only the durable store can identify a provider child lost before record publication.
+  void (deps.reapOrphanChildren ?? stopOrphanAgentSessionChildren)({ store }).catch((error) => {
+    try {
+      if (deps.onError) {
+        deps.onError({ scope: 'agent-session-orphan-child-reaper', error })
+      } else {
+        console.error('[structured-agent-session] orphan reaper failed', error)
+      }
+    } catch (reportingError) {
+      console.error(
+        '[structured-agent-session] orphan reaper error reporting failed',
+        reportingError
+      )
+    }
+  })
   try {
     const codex = new CodexStructuredSessionAdapter({
       resolveLaunch: createCodexStructuredLaunchResolver({
@@ -153,8 +170,8 @@ async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<Install
 
 /**
  * The lease's only source of truth about a previous owner. Everything it cannot
- * answer PID-reuse-safely reports `indeterminate`, which routes the session to
- * manual recovery instead of minting a second writer on the same Codex thread.
+ * answer PID-reuse-safely reports `indeterminate`. An exact owner stays fenced in `recovering`;
+ * an ownerless, unattributable reservation enters `manual-recovery`.
  */
 export function createStructuredAgentSessionOwnerProbe(
   hostId: string,

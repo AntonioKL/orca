@@ -18,6 +18,7 @@ import type {
 
 const NOW = 1_800_000_000_000
 const SESSION = 'session-handoff'
+const PLAIN_RESIDUE = 'session-plain-residue'
 const THREAD = '019fd532-7c11-7a90-b6de-4e1a2c3d5f60'
 
 let root: string
@@ -287,5 +288,97 @@ describe('structured session ownership recovery on restore', () => {
       SESSION,
       store.getRecord(SESSION)?.lease.runtimeFence
     )
+  })
+
+  it('continues only the persisted TUI handoff after a store restart', async () => {
+    const plainOperation = operationId()
+    await store.reserveOwner({
+      sessionId: PLAIN_RESIDUE,
+      location: {
+        executionHostId: 'local',
+        wslDistro: null,
+        workspaceId: 'workspace-1',
+        workspaceKind: 'git-worktree'
+      },
+      provider: 'codex',
+      accountHome: { variable: 'CODEX_HOME', path: join(root, 'codex-home') },
+      runtimeKind: 'native',
+      expectedFence: null,
+      spawnToken: 'plain-residue-token',
+      claimKeyId: 'key-1',
+      handoffOperationId: plainOperation,
+      probe: { outcome: 'reservation-unused' },
+      operation: { callerKey: 'test', operationId: plainOperation, fingerprint: 'plain-attach' },
+      now: NOW
+    })
+    const handoffOperation = operationId()
+    let interrupted = await setStoredAgentSessionHandoffStage(store, {
+      sessionId: SESSION,
+      fence: 1,
+      stage: 'preparing',
+      handoffOperationId: handoffOperation,
+      now: NOW
+    })
+    interrupted = await stopStoredAgentSessionOwnerForHandoff(store, {
+      sessionId: SESSION,
+      expectedFence: interrupted.lease.runtimeFence,
+      operationId: handoffOperation,
+      now: NOW
+    })
+    const interruptedFence = interrupted.lease.runtimeFence
+
+    store = await AgentSessionRecordStore.open({ directory: join(root, 'store'), hostId: 'local' })
+    await store.reconcileOnRestart({
+      probe: async (record) =>
+        record.sessionId === PLAIN_RESIDUE
+          ? { outcome: 'indeterminate', reason: 'plain reservation cannot be attributed' }
+          : { outcome: 'pid-absent' },
+      now: NOW + 1_000
+    })
+    journal = await openAgentSessionJournal({
+      identity: {
+        sessionId: SESSION,
+        workspaceId: 'workspace-1',
+        hostId: 'local',
+        agent: 'codex',
+        providerHandle: { kind: 'codex', threadId: THREAD }
+      },
+      journalDir: join(root, 'journal')
+    })
+    launchTui = vi.fn(async ({ fence, spawnToken }) => makeTuiOwner(fence, spawnToken))
+    coordinator = createCoordinator()
+
+    await coordinator.restore(PLAIN_RESIDUE)
+    expect(launchTui).not.toHaveBeenCalled()
+    expect(acquireNativeCalls).toBe(0)
+    expect(store.getRecord(PLAIN_RESIDUE)?.lease).toMatchObject({
+      runtimeKind: 'native',
+      runtimeFence: 1,
+      handoffStage: 'manual-recovery',
+      claimStatus: 'reserved',
+      reservedSpawnToken: 'plain-residue-token'
+    })
+    expect(
+      store.listOperationRows().find((row) => row.operationId === plainOperation)?.outcome
+    ).toMatchObject({ status: 'failed', code: 'agent_session_ownership_unknown' })
+
+    await coordinator.restore(SESSION)
+
+    expect(launchTui).toHaveBeenCalledOnce()
+    expect(acquireNativeCalls).toBe(1)
+    expect(launchTui.mock.calls[0]?.[0]).toMatchObject({
+      record: {
+        sessionId: SESSION,
+        lease: { handoffOperationId: handoffOperation }
+      },
+      fence: interruptedFence + 3
+    })
+    expect(store.getRecord(SESSION)?.lease).toMatchObject({
+      runtimeKind: 'tui',
+      runtimeFence: interruptedFence + 3,
+      handoffStage: null,
+      handoffOperationId: null,
+      claimStatus: 'live'
+    })
   })
 })

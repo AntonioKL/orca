@@ -25,7 +25,18 @@ function boundTerminalFitRestore(pending: Promise<boolean>): Promise<boolean> {
 
 export function registerRuntimeHandlers(runtime: OrcaRuntimeService): void {
   const pendingTerminalFitRestores = new Map<string, Promise<boolean>>()
-  const localSubscriptions = new Map<string, AbortController>()
+  const subscriptionsBySender = new Map<number, Map<string, AbortController>>()
+
+  const abortSenderSubscriptions = (senderId: number): void => {
+    const subscriptions = subscriptionsBySender.get(senderId)
+    if (!subscriptions) {
+      return
+    }
+    for (const controller of subscriptions.values()) {
+      controller.abort()
+    }
+    subscriptions.clear()
+  }
   ipcMain.removeHandler('runtime:syncWindowGraph')
   ipcMain.removeHandler('runtime:getStatus')
   ipcMain.removeHandler('runtime:call')
@@ -83,19 +94,30 @@ export function registerRuntimeHandlers(runtime: OrcaRuntimeService): void {
       event,
       args: { subscriptionId: string; method: string; params?: unknown }
     ): { subscribed: boolean } => {
-      const previous = localSubscriptions.get(args.subscriptionId)
+      const senderId = event.sender.id
+      let senderSubscriptions = subscriptionsBySender.get(senderId)
+      if (!senderSubscriptions) {
+        senderSubscriptions = new Map()
+        subscriptionsBySender.set(senderId, senderSubscriptions)
+        // Why: reload reuses WebContents, so destruction alone cannot stop the old document's streams.
+        const abortAll = (): void => abortSenderSubscriptions(senderId)
+        event.sender.on('did-navigate', abortAll)
+        event.sender.on('render-process-gone', abortAll)
+        event.sender.once('destroyed', () => {
+          abortAll()
+          subscriptionsBySender.delete(senderId)
+        })
+      }
+      const previous = senderSubscriptions.get(args.subscriptionId)
       previous?.abort()
       const controller = new AbortController()
-      localSubscriptions.set(args.subscriptionId, controller)
+      senderSubscriptions.set(args.subscriptionId, controller)
       const channel = `runtime:subscription:${args.subscriptionId}`
-      const onSenderDestroyed = (): void => controller.abort()
       const stop = (): void => {
-        event.sender.removeListener('destroyed', onSenderDestroyed)
-        if (localSubscriptions.get(args.subscriptionId) === controller) {
-          localSubscriptions.delete(args.subscriptionId)
+        if (senderSubscriptions.get(args.subscriptionId) === controller) {
+          senderSubscriptions.delete(args.subscriptionId)
         }
       }
-      event.sender.once('destroyed', onSenderDestroyed)
       void new RpcDispatcher({ runtime, methods: ALL_RPC_METHODS })
         .dispatchStreaming(
           {
@@ -121,9 +143,10 @@ export function registerRuntimeHandlers(runtime: OrcaRuntimeService): void {
     }
   )
 
-  ipcMain.on('runtime:unsubscribe', (_event, args: { subscriptionId: string }) => {
-    localSubscriptions.get(args.subscriptionId)?.abort()
-    localSubscriptions.delete(args.subscriptionId)
+  ipcMain.on('runtime:unsubscribe', (event, args: { subscriptionId: string }) => {
+    const senderSubscriptions = subscriptionsBySender.get(event.sender.id)
+    senderSubscriptions?.get(args.subscriptionId)?.abort()
+    senderSubscriptions?.delete(args.subscriptionId)
   })
 
   ipcMain.removeHandler('runtime:getTerminalFitOverrides')

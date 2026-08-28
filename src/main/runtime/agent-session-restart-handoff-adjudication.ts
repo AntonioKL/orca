@@ -30,20 +30,16 @@ export function adjudicateRestartedAgentSessionHandoff(
   if (adjudication.disposition !== 'evicted') {
     return updateLease(record, {
       ...record.lease,
-      handoffStage: 'recovering',
+      handoffStage:
+        adjudication.disposition === 'conflicted' ? 'manual-recovery' : adjudication.stage,
       claimStatus:
         adjudication.disposition === 'conflicted' ? 'conflicted' : record.lease.claimStatus,
       unreconciled: false,
       lastRenewedAt: now
     })
   }
-  if (
-    record.lease.ownerProcess === null &&
-    record.lease.runtimeKind === 'native' &&
-    record.lease.claimStatus === 'reserved'
-  ) {
-    // Why: an abandoned native reservation has no stoppable owner to hand back; parking it
-    // at old-owner-stopped would strand journal-less sessions behind a stale operation id.
+  if (record.lease.handoffStage === 'new-owner-proving' && record.lease.runtimeKind === 'native') {
+    // The attempted new owner is proven absent; no writer remains to roll back or readopt.
     return updateLease(record, {
       ...record.lease,
       runtimeFence: adjudication.nextFence,
@@ -58,14 +54,11 @@ export function adjudicateRestartedAgentSessionHandoff(
       deathEvidence: adjudication.evidence
     })
   }
-  const provingTarget = record.lease.handoffStage === 'new-owner-proving'
+  const provingTuiTarget =
+    record.lease.handoffStage === 'new-owner-proving' && record.lease.runtimeKind === 'tui'
   return updateLease(record, {
     ...record.lease,
-    runtimeKind: provingTarget
-      ? record.lease.runtimeKind === 'native'
-        ? 'tui'
-        : 'native'
-      : record.lease.runtimeKind,
+    runtimeKind: provingTuiTarget ? 'native' : record.lease.runtimeKind,
     runtimeFence: adjudication.nextFence,
     handoffStage: 'old-owner-stopped',
     ownerProcess: null,

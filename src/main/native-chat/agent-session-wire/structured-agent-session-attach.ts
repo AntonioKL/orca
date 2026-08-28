@@ -60,7 +60,7 @@ export type AgentSessionAttachParams = {
 
 /** Host-supplied half of the reservation. */
 export type AgentSessionAttachAuthority = {
-  spawnToken: string
+  spawnToken: string | (() => string)
   claimKeyId: string
   handoffOperationId: string | null
   probe: AgentSessionOwnerProbe

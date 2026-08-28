@@ -9,7 +9,7 @@ function canonicalize(value: unknown): string {
   }
   const entries = Object.entries(value as Record<string, unknown>)
     .filter(([, entry]) => entry !== undefined)
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
   return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalize(entry)}`).join(',')}}`
 }
 
@@ -36,30 +36,4 @@ export function createStructuredAgentSessionOperationId(
     throw new Error('Unable to create a durable operation id')
   }
   return `${timestamp}-${entropy}`
-}
-
-export function structuredAgentSessionCreateFingerprint(input: {
-  sessionId: string
-  worktree: string
-  agent?: StructuredAgent
-}): string {
-  return structuredAgentSessionPayloadFingerprint({
-    method: 'agentSession.create',
-    sessionId: input.sessionId,
-    fields: { worktree: input.worktree, agent: input.agent ?? 'codex' }
-  })
-}
-
-export type StructuredAgent = 'claude' | 'codex'
-
-export function showStructuredAgentSessionChoice(input: {
-  hostCapability: boolean
-  workspaceSupport: boolean
-  agent: string
-}): boolean {
-  return (
-    input.hostCapability &&
-    input.workspaceSupport &&
-    (input.agent === 'codex' || input.agent === 'claude')
-  )
 }

@@ -1,11 +1,11 @@
 /**
- * Stops provider children that carry an Orca spawn token no lease claims.
+ * Best-effort stop for provider children that carry an Orca spawn token no lease claims.
  *
  * A child spawned under a reservation whose record was lost — the primary store file went with it,
  * or the crash beat the durable write — is unreachable but still connected to the provider session.
- * Recovery will later grant a new owner for that same session, so without this the host ends up
- * with two live children on one provider thread. Only a token match justifies signalling a process;
- * neither age nor CPU is evidence, and a host that cannot enumerate tokens stops nothing.
+ * Only a token match justifies signalling a process; neither age nor CPU is evidence, and a host
+ * that cannot enumerate tokens stops nothing. This never proves process exit or licenses a new
+ * owner; lease adjudication remains the single-writer boundary.
  */
 
 import type { AgentSessionRecordStore } from './agent-session-record-store'
@@ -19,8 +19,10 @@ export type AgentSessionOrphanStopSignal = 'SIGTERM' | 'SIGKILL'
 function defaultStop(pid: number, signal: AgentSessionOrphanStopSignal): void {
   try {
     process.kill(pid, signal)
-  } catch {
-    // Already gone, or not ours to signal. Either way there is nothing further to do.
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') {
+      throw error
+    }
   }
 }
 

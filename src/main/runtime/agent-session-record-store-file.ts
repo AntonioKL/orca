@@ -15,9 +15,11 @@ import {
   isAgentSessionOperationRow,
   type AgentSessionOperationRow
 } from '../../shared/agent-session-operation-ledger'
-import { scrubAgentSessionRecordLaunchEnv } from '../../shared/agent-session-launch-env-scrub'
-import type { AgentSessionRecord } from '../../shared/agent-session-record'
-import { loadAgentSessionRecord } from '../../shared/agent-session-record-load'
+import {
+  AGENT_SESSION_RECORD_SCHEMA_VERSION,
+  isAgentSessionRecord,
+  type AgentSessionRecord
+} from '../../shared/agent-session-record'
 import {
   copyFileDurable,
   durableWriteTempPath,
@@ -48,7 +50,7 @@ export type LoadedAgentSessionStore = {
   readOnly: boolean
   /** True when the primary file was unusable and the previous committed copy was used. */
   recoveredFromBackup: boolean
-  /** True when a legacy row or store needs a durable current-schema rewrite. */
+  /** True when the normalized current-schema quarantine must be persisted. */
   needsRewrite: boolean
 }
 
@@ -108,8 +110,11 @@ function parseState(
     return null
   }
   const schemaVersion = file.schemaVersion as number
+  if (schemaVersion < AGENT_SESSION_STORE_SCHEMA_VERSION) {
+    return null
+  }
   if (
-    schemaVersion <= AGENT_SESSION_STORE_SCHEMA_VERSION &&
+    schemaVersion === AGENT_SESSION_STORE_SCHEMA_VERSION &&
     (typeof file.records !== 'object' || file.records === null || Array.isArray(file.records))
   ) {
     return null
@@ -127,59 +132,57 @@ function parseState(
     return null
   }
   const state = emptyState(hostId)
-  state.schemaVersion =
-    schemaVersion <= AGENT_SESSION_STORE_SCHEMA_VERSION
-      ? AGENT_SESSION_STORE_SCHEMA_VERSION
-      : schemaVersion
+  state.schemaVersion = schemaVersion
   state.hostId = file.hostId
-  let needsRewrite = schemaVersion < AGENT_SESSION_STORE_SCHEMA_VERSION
+  let needsRewrite = false
   if (typeof file.records === 'object' && file.records !== null) {
     for (const [sessionId, value] of Object.entries(file.records)) {
-      const scrubbed = scrubAgentSessionRecordLaunchEnv(value)
-      const loaded = loadAgentSessionRecord(scrubbed.value)
-      needsRewrite ||= scrubbed.changed
-      if (loaded.status !== 'unusable' && loaded.record.sessionId === sessionId) {
-        state.records.set(sessionId, loaded.record)
-        needsRewrite ||= loaded.status === 'upgraded'
+      const record = isAgentSessionRecord(value) ? value : null
+      if (record?.sessionId === sessionId) {
+        state.records.set(sessionId, record)
       } else {
-        state.unreadableRecords.set(sessionId, {
-          reason: loaded.status === 'unusable' ? loaded.reason : 'record_key_session_id_mismatch',
-          raw: scrubbed.value
-        })
-        needsRewrite ||= schemaVersion <= AGENT_SESSION_STORE_SCHEMA_VERSION
+        const valueSchemaVersion =
+          typeof value === 'object' &&
+          value !== null &&
+          (value as { schemaVersion?: unknown }).schemaVersion
+        const reason = record
+          ? 'record_key_session_id_mismatch'
+          : valueSchemaVersion === AGENT_SESSION_RECORD_SCHEMA_VERSION
+            ? 'current_shape_invalid'
+            : 'unsupported_schema'
+        state.unreadableRecords.set(sessionId, { reason, raw: value })
+        needsRewrite ||= schemaVersion === AGENT_SESSION_STORE_SCHEMA_VERSION
       }
     }
   }
   if (typeof file.unusableRecords === 'object' && file.unusableRecords !== null) {
     for (const [sessionId, value] of Object.entries(file.unusableRecords)) {
       if (typeof value !== 'object' || value === null) {
-        if (schemaVersion <= AGENT_SESSION_STORE_SCHEMA_VERSION) {
+        if (schemaVersion === AGENT_SESSION_STORE_SCHEMA_VERSION) {
           return null
         }
         continue
       }
       const unusable = value as { reason?: unknown; raw?: unknown }
       if (typeof unusable.reason !== 'string' || unusable.reason.length === 0) {
-        if (schemaVersion <= AGENT_SESSION_STORE_SCHEMA_VERSION) {
+        if (schemaVersion === AGENT_SESSION_STORE_SCHEMA_VERSION) {
           return null
         }
         continue
       }
-      const scrubbed = scrubAgentSessionRecordLaunchEnv(unusable.raw)
-      needsRewrite ||= scrubbed.changed
-      state.unreadableRecords.set(sessionId, { reason: unusable.reason, raw: scrubbed.value })
+      state.unreadableRecords.set(sessionId, { reason: unusable.reason, raw: unusable.raw })
     }
   }
   if (typeof file.operations === 'object' && file.operations !== null) {
     for (const [key, value] of Object.entries(file.operations)) {
       if (!isAgentSessionOperationRow(value)) {
-        if (schemaVersion <= AGENT_SESSION_STORE_SCHEMA_VERSION) {
+        if (schemaVersion === AGENT_SESSION_STORE_SCHEMA_VERSION) {
           return null
         }
         continue
       }
       if (key !== agentSessionOperationKey(value.callerKey, value.operationId)) {
-        if (schemaVersion <= AGENT_SESSION_STORE_SCHEMA_VERSION) {
+        if (schemaVersion === AGENT_SESSION_STORE_SCHEMA_VERSION) {
           return null
         }
         continue
@@ -197,7 +200,7 @@ function parseState(
         !Number.isSafeInteger(key.retiredAt) ||
         (key.retiredAt as number) < 0
       ) {
-        if (schemaVersion <= AGENT_SESSION_STORE_SCHEMA_VERSION) {
+        if (schemaVersion === AGENT_SESSION_STORE_SCHEMA_VERSION) {
           return null
         }
         continue

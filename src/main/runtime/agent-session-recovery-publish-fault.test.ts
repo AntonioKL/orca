@@ -71,7 +71,7 @@ describe('backup recovery publication', () => {
     )
 
     publishFault.armed = true
-    await expect(queue.persistLoadedMigration()).rejects.toThrow(
+    await expect(queue.persistLoadedRewrite()).rejects.toThrow(
       'simulated death before primary publish'
     )
 

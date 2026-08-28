@@ -4,8 +4,8 @@
  * Pids are reused within minutes on a busy host, and reuse happens precisely in the recovery
  * case, so a bare pid match is never proof. Every element of the identity tuple is unavailable
  * somewhere — start time costs a CIM query on Windows and is missing in some containers, /proc
- * does not exist on macOS — so an unanswerable probe reports `indeterminate` and the lease fails
- * closed to manual recovery rather than minting a second writer.
+ * does not exist on macOS — so an exact but unanswerable identity stays fenced in `recovering`;
+ * an ownerless, unattributable reservation enters `manual-recovery`.
  */
 
 import { readFile } from 'node:fs/promises'
