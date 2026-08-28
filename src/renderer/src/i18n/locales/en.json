@@ -17055,5 +17055,10 @@
       "description": "PR #{{number}} is hidden for this workspace. Link it again to restore checks and review details.",
       "relink": "Link PR #{{number}}"
     }
+  },
+  "sourceControl": {
+    "unlinkedPr": {
+      "status": "PR #{{number}} unlinked"
+    }
   }
 }
