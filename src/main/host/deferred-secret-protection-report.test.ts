@@ -35,7 +35,10 @@ function fakeWindow(): { once: (event: string, listener: Listener) => void; reve
 
 function createWindow(): ReturnType<typeof fakeWindow> {
   const window = fakeWindow()
-  appListeners.get('browser-window-created')?.splice(0).forEach((listener) => listener({}, window))
+  appListeners
+    .get('browser-window-created')
+    ?.splice(0)
+    .forEach((listener) => listener({}, window))
   return window
 }
 
@@ -72,11 +75,18 @@ describe('scheduleSecretProtectionGapReport', () => {
   const schedule = (): void =>
     scheduleSecretProtectionGapReport({ dataFile, log: (m) => void logged.push(m) })
 
+  /** Runs an already-queued setImmediate; the 1ms is slack, not a delay under test. */
+  const drain = (): void => void vi.advanceTimersByTime(1)
+
   it('does not probe the keyring while the first window is still being created', () => {
     // Why this is the regression: probing here blocked the window for 76s on a locked
     // Linux keyring, which reads to the user as "the app will not open" (STA-5765).
     schedule()
     createWindow()
+    // Why drain: creation alone must arm nothing. Asserting before the queue drains
+    // would also pass if the probe were merely queued off `browser-window-created`,
+    // which on the real path still lands before the window paints.
+    drain()
     expect(probes).toBe(0)
     expect(logged).toEqual([])
   })
@@ -85,7 +95,10 @@ describe('scheduleSecretProtectionGapReport', () => {
     schedule()
     const window = createWindow()
     window.reveal()
-    vi.runAllTimers()
+    // Why: the reveal handler must return before the blocking probe runs, or the paint
+    // it is waiting on is the thing being blocked.
+    expect(probes).toBe(0)
+    drain()
     expect(probes).toBe(1)
     expect(logged).toEqual(['[secrets] The OS keyring is unavailable.'])
   })
@@ -95,8 +108,13 @@ describe('scheduleSecretProtectionGapReport', () => {
     // serve has no window at all.
     schedule()
     createWindow()
-    vi.advanceTimersByTime(15_000)
-    vi.runAllTimers()
+    // Why bracket the wait instead of running every timer: an unbounded flush passes for
+    // any fallback delay, including one long enough to never arrive in a real session.
+    vi.advanceTimersByTime(14_000)
+    drain()
+    expect(probes).toBe(0)
+    vi.advanceTimersByTime(1_100)
+    drain()
     expect(probes).toBe(1)
   })
 
