@@ -137,7 +137,7 @@ export function createPtyForegroundProcessTracker(args: {
       }
       if (
         isShellProcess(fallbackProcess) &&
-        !isShellTitleCorroborated(state.lastScanSettlement, now)
+        !isShellTitleCorroborated(state.lastScanSettlement, now, state.cachedAgentForeground)
       ) {
         return unverifiable(fallbackProcess, 'shell title without a corroborating foreground scan')
       }

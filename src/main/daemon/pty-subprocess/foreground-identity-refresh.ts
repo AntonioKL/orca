@@ -64,16 +64,22 @@ export function getActiveStartupAgent(
  * shell file when the native read fails, so under the same distress that
  * degrades the scan, "title == shell" observes nothing — and a scan that last
  * saw the agent cannot corroborate its absence either.
+ *
+ * `agentEvidence` outdates the settlement: the synchronous title fast path
+ * stamps a recognized agent without running a scan, so an agent-free settlement
+ * can still be inside the window while an agent that started after it is live.
  */
 export function isShellTitleCorroborated(
   settlement: ForegroundScanSettlement | null,
-  now: number
+  now: number,
+  agentEvidence: CachedAgentForeground | null
 ): boolean {
   return (
     settlement !== null &&
     settlement.available &&
     !settlement.sawAgent &&
-    now - settlement.at <= SHELL_TITLE_SCAN_CORROBORATION_MAX_AGE_MS
+    now - settlement.at <= SHELL_TITLE_SCAN_CORROBORATION_MAX_AGE_MS &&
+    (agentEvidence === null || settlement.at >= agentEvidence.refreshedAt)
   )
 }
 

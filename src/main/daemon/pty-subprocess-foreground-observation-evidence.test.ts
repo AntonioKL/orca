@@ -162,6 +162,29 @@ describe('daemon foreground observation evidence', () => {
     })
   })
 
+  it('stops corroborating with a settlement older than an agent the title fast path saw', async () => {
+    // The sync fast path stamps a recognized title without running a scan, so the
+    // last agent-free settlement can still be inside the 30s window while an agent
+    // is running. Corroborating from it publishes a live agent as an idle shell.
+    resolveAgentForegroundProcessMock.mockResolvedValue({ available: true, processName: 'zsh' })
+    expect((await readAfterSettledScan())?.evidence.verdict).toBe('observed')
+
+    await vi.advanceTimersByTimeAsync(2_000)
+    nodePty.process = 'codex'
+    expect(handle.observeForegroundProcess?.()?.evidence).toEqual({
+      verdict: 'observed',
+      processName: 'codex'
+    })
+
+    // A wedged scan never refreshes the settlement, and node-pty's title read
+    // falls back to the spawned shell while the agent is still running.
+    resolveAgentForegroundProcessMock.mockReturnValue(new Promise(() => {}))
+    nodePty.process = 'zsh'
+    await vi.advanceTimersByTimeAsync(2_000)
+
+    expect(handle.observeForegroundProcess?.()?.evidence.verdict).toBe('unverifiable')
+  })
+
   it('leaves the legacy foreground read identical to the observed name', async () => {
     resolveAgentForegroundProcessMock.mockResolvedValue({ available: false, processName: 'zsh' })
     await readAfterSettledScan()
