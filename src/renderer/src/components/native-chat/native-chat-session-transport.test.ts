@@ -189,7 +189,10 @@ describe('runtime subscribe', () => {
 
     expect(runtimeEnvironmentsSubscribe).toHaveBeenCalledWith(
       expect.objectContaining({
-        params: expect.objectContaining({ preservesTranscriptOrder: true })
+        params: expect.objectContaining({
+          capabilities: { transcriptPending: 1 },
+          preservesTranscriptOrder: true
+        })
       }),
       expect.any(Object)
     )
@@ -297,6 +300,39 @@ describe('runtime subscribe', () => {
       messages: [],
       hasMore: false,
       error: 'boom'
+    })
+  })
+
+  it('forwards the pending flag and still treats the real snapshot as the initial frame', async () => {
+    markRuntimeEnvironmentCompatible(ENV)
+    const { deliver } = stubSubscribe()
+    const onFrame = vi.fn()
+    const transport = getNativeChatSessionTransport(ENV)
+
+    transport.subscribe(
+      { subscriptionId: 's-1', agent: 'claude', sessionId: 'sess-1', limit: 1 },
+      onFrame
+    )
+    await Promise.resolve()
+
+    // The host's unflushed-transcript frame, then the flush that follows it.
+    deliver({ type: 'snapshot', messages: [], hasMore: false, pending: true })
+    deliver({ type: 'snapshot', messages: [message('m-1')] })
+
+    expect(onFrame).toHaveBeenNthCalledWith(1, {
+      type: 'snapshot',
+      messages: [],
+      hasMore: false,
+      pending: true
+    })
+    // Dropping `pending` would settle an empty read; carrying it onto the real
+    // snapshot would keep the view unsettled over real history. hasMore proves the
+    // pending frame did not consume the initial slot — only the initial branch
+    // infers a filled window from the limit.
+    expect(onFrame).toHaveBeenNthCalledWith(2, {
+      type: 'snapshot',
+      messages: [message('m-1')],
+      hasMore: true
     })
   })
 
