@@ -22,7 +22,13 @@ export type UnplacedSnapshotRepullDeps = {
 
 export type UnplacedSnapshotRepull = {
   /** Call with every apply outcome; anything but `unplaced` retires the target's pending chain. */
-  schedule: (targetId: string, placement: DirectSshSnapshotPlacement, attempt: number) => void
+  schedule: (targetId: string, placement: DirectSshSnapshotPlacement) => void
+  /**
+   * Drop a target's spent attempt count so a new connection gets a fresh chain. Without this an
+   * exhausted counter sticks, and every later reconnect re-exhausts immediately — the retry would
+   * silently stop working for the rest of the session even when the next lineage read would succeed.
+   */
+  resetTarget: (targetId: string) => void
   stop: () => void
 }
 
@@ -30,6 +36,15 @@ export function createUnplacedSnapshotRepull(
   deps: UnplacedSnapshotRepullDeps
 ): UnplacedSnapshotRepull {
   const timerByTarget = new Map<string, ReturnType<typeof setTimeout>>()
+  // Why the module owns this and callers cannot pass it: an unsolicited `workspace.changed` push
+  // also reports a placement, and letting it re-arm at attempt 0 means a host that pushes faster
+  // than the backoff resets the chain forever — an unbounded loop re-dialling `workspace.get` that
+  // never reaches exhaustion. Only a placement that is not `unplaced` clears the count.
+  const attemptByTarget = new Map<string, number>()
+  // Why a separate set and not just the spent count: after exhaustion every further `unplaced`
+  // report still lands here, and re-announcing it would re-mark the target hydrated and rewrite
+  // its status on every host push. Exhaustion is announced once per chain.
+  const exhaustedTargets = new Set<string>()
 
   const clearTimer = (targetId: string): void => {
     const timer = timerByTarget.get(targetId)
@@ -39,38 +54,61 @@ export function createUnplacedSnapshotRepull(
     }
   }
 
-  const schedule = (
-    targetId: string,
-    placement: DirectSshSnapshotPlacement,
-    attempt: number
-  ): void => {
+  const schedule = (targetId: string, placement: DirectSshSnapshotPlacement): void => {
     if (placement !== 'unplaced' || deps.isStopped()) {
       // A `placed` or superseded apply retires the chain; a timer left armed would re-pull over a
       // target that has since hydrated correctly.
       clearTimer(targetId)
+      attemptByTarget.delete(targetId)
+      exhaustedTargets.delete(targetId)
       return
     }
+    // Why this precedes the exhaustion check: once the last attempt is armed the count is already
+    // spent, so testing exhaustion first would let a concurrent report cancel that still-pending
+    // retry and declare the chain over one attempt early.
+    if (timerByTarget.has(targetId)) {
+      return
+    }
+    const attempt = attemptByTarget.get(targetId) ?? 0
     const delayMs = UNPLACED_SNAPSHOT_REPULL_DELAYS_MS[attempt]
     if (delayMs === undefined) {
-      // Chain exhausted: report it rather than leaving the status stuck on `pulling` forever.
-      clearTimer(targetId)
-      deps.reportExhausted(targetId)
+      if (!exhaustedTargets.has(targetId)) {
+        exhaustedTargets.add(targetId)
+        deps.reportExhausted(targetId)
+      }
       return
     }
-    clearTimer(targetId)
+    attemptByTarget.set(targetId, attempt + 1)
     timerByTarget.set(
       targetId,
       setTimeout(() => {
         timerByTarget.delete(targetId)
         void (async () => {
-          if (deps.isStopped() || !deps.hasCurrentAuthority(targetId)) {
+          if (deps.isStopped()) {
             return
           }
-          const snapshot = await deps.getSnapshot(targetId)
-          if (deps.isStopped() || !snapshot || snapshot.revision <= 0) {
+          if (!deps.hasCurrentAuthority(targetId)) {
+            // The target went away; a later connect calls `resetTarget` and starts over.
+            attemptByTarget.delete(targetId)
+            exhaustedTargets.delete(targetId)
             return
           }
-          schedule(targetId, await deps.applySnapshot(targetId, snapshot), attempt + 1)
+          let outcome: DirectSshSnapshotPlacement = 'unplaced'
+          try {
+            const snapshot = await deps.getSnapshot(targetId)
+            if (deps.isStopped()) {
+              return
+            }
+            if (snapshot && snapshot.revision > 0) {
+              outcome = await deps.applySnapshot(targetId, snapshot)
+            }
+          } catch {
+            // Why the chain continues rather than dying here: a transient RPC failure that left no
+            // timer armed would strand the target on `pulling` and un-hydrated forever — and an
+            // un-hydrated target never uploads again. Staying `unplaced` walks the chain to
+            // exhaustion, which settles it.
+          }
+          schedule(targetId, outcome)
         })().catch(() => {})
       }, delayMs)
     )
@@ -78,11 +116,18 @@ export function createUnplacedSnapshotRepull(
 
   return {
     schedule,
+    resetTarget: (targetId: string) => {
+      clearTimer(targetId)
+      attemptByTarget.delete(targetId)
+      exhaustedTargets.delete(targetId)
+    },
     stop: () => {
       for (const timer of timerByTarget.values()) {
         clearTimeout(timer)
       }
       timerByTarget.clear()
+      attemptByTarget.clear()
+      exhaustedTargets.clear()
     }
   }
 }

@@ -18,6 +18,7 @@ import {
 const TARGET = 'target-a'
 const OTHER_TARGET = 'target-b'
 const LONG_AFTER_MS = 600_000
+const TOTAL_CHAIN_MS = UNPLACED_SNAPSHOT_REPULL_DELAYS_MS.reduce((sum, ms) => sum + ms, 0)
 
 function snapshot(revision = 7): RemoteWorkspaceSnapshot {
   return {
@@ -89,7 +90,7 @@ describe('the re-pull chain after an unplaced snapshot', () => {
 
   it('runs exactly one attempt per configured delay, then exhausts and stops for good', async () => {
     const harness = createHarness()
-    harness.repull.schedule(TARGET, 'unplaced', 0)
+    harness.repull.schedule(TARGET, 'unplaced')
 
     let elapsed = 0
     for (const [index, delayMs] of UNPLACED_SNAPSHOT_REPULL_DELAYS_MS.entries()) {
@@ -119,7 +120,7 @@ describe('the re-pull chain after an unplaced snapshot', () => {
 
   it('retires the chain as soon as a retry places the rows', async () => {
     const harness = createHarness({ placementByCall: () => 'placed' })
-    harness.repull.schedule(TARGET, 'unplaced', 0)
+    harness.repull.schedule(TARGET, 'unplaced')
 
     await vi.advanceTimersByTimeAsync(UNPLACED_SNAPSHOT_REPULL_DELAYS_MS[0])
     expect(harness.appliedTargets).toEqual([TARGET])
@@ -137,11 +138,11 @@ describe('the re-pull chain after an unplaced snapshot', () => {
     'cancels a pending attempt when a newer arrival reports %s',
     async (placement) => {
       const harness = createHarness()
-      harness.repull.schedule(TARGET, 'unplaced', 0)
+      harness.repull.schedule(TARGET, 'unplaced')
       await vi.advanceTimersByTimeAsync(UNPLACED_SNAPSHOT_REPULL_DELAYS_MS[0] - 100)
 
       // A snapshot that arrived on its own beat the pending retry to the answer.
-      harness.repull.schedule(TARGET, placement, 0)
+      harness.repull.schedule(TARGET, placement)
 
       await vi.advanceTimersByTimeAsync(LONG_AFTER_MS)
       expect(harness.applySnapshot, 'the superseded attempt still fired').not.toHaveBeenCalled()
@@ -150,26 +151,100 @@ describe('the re-pull chain after an unplaced snapshot', () => {
     }
   )
 
-  it('restarts a newer unplaced arrival from the first delay without arming two timers', async () => {
-    const harness = createHarness({ placementByCall: () => 'placed' })
-    harness.repull.schedule(TARGET, 'unplaced', 0)
+  it('lets a concurrent unplaced report ride the armed wait instead of restarting it', async () => {
+    const harness = createHarness()
+    harness.repull.schedule(TARGET, 'unplaced')
     await vi.advanceTimersByTimeAsync(UNPLACED_SNAPSHOT_REPULL_DELAYS_MS[0] - 100)
 
-    harness.repull.schedule(TARGET, 'unplaced', 0)
-    expect(vi.getTimerCount(), 'the replaced attempt left its timer armed').toBe(1)
+    // An unsolicited `workspace.changed` push reports its own unplaced apply mid-wait. Restarting
+    // the backoff here is how a chatty host turns a bounded chain into a permanent one.
+    harness.repull.schedule(TARGET, 'unplaced')
+    expect(vi.getTimerCount(), 'the concurrent report armed a second timer').toBe(1)
 
-    await vi.advanceTimersByTimeAsync(UNPLACED_SNAPSHOT_REPULL_DELAYS_MS[0] - 1)
+    await vi.advanceTimersByTimeAsync(99)
     expect(harness.applySnapshot).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)
     expect(
       harness.applySnapshot,
-      'both the original and the replacement timer fired'
+      'the concurrent report pushed the first attempt past its original deadline'
     ).toHaveBeenCalledTimes(1)
+  })
+
+  it('exhausts once and only once under a host that keeps reporting', async () => {
+    const harness = createHarness()
+    harness.repull.schedule(TARGET, 'unplaced')
+
+    // An unsolicited `workspace.changed` push reports its own unplaced apply. Over SSH the window
+    // between a retry firing and its apply resolving is a full IPC round trip, so pushes land
+    // inside it routinely.
+    for (let elapsed = 0; elapsed < 60_000; elapsed += 100) {
+      harness.repull.schedule(TARGET, 'unplaced')
+      await vi.advanceTimersByTimeAsync(100)
+    }
+
+    // The bound itself: a chatty host must not walk the chain back to attempt 0.
+    expect(
+      harness.applySnapshot,
+      'a repeatedly re-armed chain never reached its bound'
+    ).toHaveBeenCalledTimes(UNPLACED_SNAPSHOT_REPULL_DELAYS_MS.length)
+    expect(harness.getSnapshot, 'the chain kept re-dialling workspace.get').toHaveBeenCalledTimes(
+      UNPLACED_SNAPSHOT_REPULL_DELAYS_MS.length
+    )
+    expect(
+      harness.exhaustedTargets,
+      'every later report re-announced exhaustion, and each one re-marks the target hydrated'
+    ).toEqual([TARGET])
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('earns a full fresh chain after resetTarget, not an instant re-exhaustion', async () => {
+    const harness = createHarness()
+    harness.repull.schedule(TARGET, 'unplaced')
+    await vi.advanceTimersByTimeAsync(TOTAL_CHAIN_MS)
+    expect(harness.applySnapshot).toHaveBeenCalledTimes(UNPLACED_SNAPSHOT_REPULL_DELAYS_MS.length)
+    expect(harness.exhaustedTargets).toEqual([TARGET])
+
+    // A new connection: the next lineage read may well succeed, so the spent count must not
+    // outlive the connection that spent it.
+    harness.repull.resetTarget(TARGET)
+    harness.repull.schedule(TARGET, 'unplaced')
+
+    for (const [index, delayMs] of UNPLACED_SNAPSHOT_REPULL_DELAYS_MS.entries()) {
+      await vi.advanceTimersByTimeAsync(delayMs - 1)
+      expect(
+        harness.applySnapshot,
+        `post-reset attempt ${index} did not wait its ${delayMs}ms`
+      ).toHaveBeenCalledTimes(UNPLACED_SNAPSHOT_REPULL_DELAYS_MS.length + index)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(harness.applySnapshot).toHaveBeenCalledTimes(
+        UNPLACED_SNAPSHOT_REPULL_DELAYS_MS.length + index + 1
+      )
+    }
+
+    expect(
+      harness.applySnapshot,
+      'the reset target did not get a full second chain'
+    ).toHaveBeenCalledTimes(UNPLACED_SNAPSHOT_REPULL_DELAYS_MS.length * 2)
+    expect(harness.exhaustedTargets).toEqual([TARGET, TARGET])
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('drops an armed attempt when its target is reset', async () => {
+    const harness = createHarness()
+    harness.repull.schedule(TARGET, 'unplaced')
+    expect(vi.getTimerCount()).toBe(1)
+
+    harness.repull.resetTarget(TARGET)
+
+    expect(vi.getTimerCount()).toBe(0)
+    await vi.advanceTimersByTimeAsync(LONG_AFTER_MS)
+    expect(harness.applySnapshot).not.toHaveBeenCalled()
+    expect(harness.exhaustedTargets).toEqual([])
   })
 
   it('fires nothing after stop() clears an armed attempt', async () => {
     const harness = createHarness()
-    harness.repull.schedule(TARGET, 'unplaced', 0)
+    harness.repull.schedule(TARGET, 'unplaced')
     expect(vi.getTimerCount()).toBe(1)
 
     harness.repull.stop()
@@ -187,7 +262,7 @@ describe('the re-pull chain after an unplaced snapshot', () => {
       releaseSnapshot = resolve
     })
     const harness = createHarness({ getSnapshot: () => pending })
-    harness.repull.schedule(TARGET, 'unplaced', 0)
+    harness.repull.schedule(TARGET, 'unplaced')
 
     await vi.advanceTimersByTimeAsync(UNPLACED_SNAPSHOT_REPULL_DELAYS_MS[0])
     expect(harness.getSnapshot).toHaveBeenCalledOnce()
@@ -207,7 +282,7 @@ describe('the re-pull chain after an unplaced snapshot', () => {
     const harness = createHarness()
     harness.stop()
 
-    harness.repull.schedule(TARGET, 'unplaced', 0)
+    harness.repull.schedule(TARGET, 'unplaced')
 
     expect(vi.getTimerCount()).toBe(0)
     await vi.advanceTimersByTimeAsync(LONG_AFTER_MS)
@@ -216,7 +291,7 @@ describe('the re-pull chain after an unplaced snapshot', () => {
 
   it('abandons the chain when the target lost its authority before the retry fired', async () => {
     const harness = createHarness()
-    harness.repull.schedule(TARGET, 'unplaced', 0)
+    harness.repull.schedule(TARGET, 'unplaced')
 
     harness.dropAuthority(TARGET)
     await vi.advanceTimersByTimeAsync(LONG_AFTER_MS)
@@ -226,29 +301,38 @@ describe('the re-pull chain after an unplaced snapshot', () => {
   })
 
   it.each([
-    ['no snapshot', null],
-    ['a revision-zero snapshot', snapshot(0)]
-  ])('stops rather than retrying when the host returns %s', async (_label, response) => {
-    const harness = createHarness({ getSnapshot: async () => response })
-    harness.repull.schedule(TARGET, 'unplaced', 0)
+    ['returns no snapshot', async () => null],
+    ['returns a revision-zero snapshot', async () => snapshot(0)],
+    [
+      'throws',
+      async () => {
+        throw new Error('ssh channel closed')
+      }
+    ]
+  ])(
+    'walks the chain to exhaustion when the host read %s',
+    async (_label, getSnapshot: () => Promise<RemoteWorkspaceSnapshot | null>) => {
+      const harness = createHarness({ getSnapshot })
+      harness.repull.schedule(TARGET, 'unplaced')
 
-    await vi.advanceTimersByTimeAsync(LONG_AFTER_MS)
+      await vi.advanceTimersByTimeAsync(LONG_AFTER_MS)
 
-    expect(
-      harness.getSnapshot,
-      'the chain retried past an unusable host response'
-    ).toHaveBeenCalledOnce()
-    expect(harness.applySnapshot).not.toHaveBeenCalled()
-    expect(vi.getTimerCount()).toBe(0)
-  })
+      // Dying here instead would strand the target on `pulling`, un-hydrated — and an un-hydrated
+      // target is filtered out of `hydratedTargetIds`, so it would never upload again.
+      expect(harness.getSnapshot).toHaveBeenCalledTimes(UNPLACED_SNAPSHOT_REPULL_DELAYS_MS.length)
+      expect(harness.applySnapshot).not.toHaveBeenCalled()
+      expect(harness.exhaustedTargets, 'the chain died silently').toEqual([TARGET])
+      expect(vi.getTimerCount()).toBe(0)
+    }
+  )
 
   it('runs one independent chain per target', async () => {
     const harness = createHarness({
       // target-a keeps failing to place; target-b succeeds on its first retry.
       placementByCall: (call) => (call === 0 ? 'placed' : 'unplaced')
     })
-    harness.repull.schedule(OTHER_TARGET, 'unplaced', 0)
-    harness.repull.schedule(TARGET, 'unplaced', 0)
+    harness.repull.schedule(OTHER_TARGET, 'unplaced')
+    harness.repull.schedule(TARGET, 'unplaced')
     expect(vi.getTimerCount(), 'targets share a timer slot').toBe(2)
 
     await vi.advanceTimersByTimeAsync(UNPLACED_SNAPSHOT_REPULL_DELAYS_MS[0])

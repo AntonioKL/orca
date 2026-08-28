@@ -176,6 +176,9 @@ export function createRemoteWorkspaceTargetSync(
       })
       return
     }
+    // A new connection earns a fresh re-pull chain; a count left over from the previous one would
+    // exhaust immediately and skip the retry that this connect might well have won.
+    repull.resetTarget(authority.targetId)
     const stateBeforeGet = deps.store.getState()
     const worktreeIds = exactTargetWorktreeIds(stateBeforeGet, authority)
     const hasLocalTabs = [...worktreeIds].some(
@@ -213,7 +216,7 @@ export function createRemoteWorkspaceTargetSync(
           waitForWorkspaceSessionReady,
           finalizeHydratedTerminals: deps.finalizeHydratedTerminals
         })
-        repull.schedule(authority.targetId, placement, 0)
+        repull.schedule(authority.targetId, placement)
       }
       return
     }
@@ -285,7 +288,7 @@ export function createRemoteWorkspaceTargetSync(
     snapshot: RemoteWorkspaceSnapshot
   ): Promise<DirectSshSnapshotPlacement> => {
     const placement = await applyPreparedSnapshot(targetId, snapshot)
-    repull.schedule(targetId, placement, 0)
+    repull.schedule(targetId, placement)
     return placement
   }
 
