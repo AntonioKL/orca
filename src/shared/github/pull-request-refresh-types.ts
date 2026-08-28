@@ -76,7 +76,6 @@ export type GitHubPRRefreshCandidate = GitHubPRRefreshAlias & {
   cachedMergeStateStatus?: string | null
   localGitOptions?: {
     wslDistro?: string
-    admissionTier?: 'interactive' | 'status' | 'background'
   }
 }
 

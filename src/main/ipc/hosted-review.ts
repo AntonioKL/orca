@@ -83,7 +83,7 @@ export function registerHostedReviewHandlers(store: Store, stats: StatsCollector
     const repo = assertRegisteredRepo(args.repoPath, store, args.repoId)
     const localGitOptions = {
       ...getLocalProjectWorktreeGitOptions(store, repo),
-      admissionTier: 'background' as const
+      admissionTier: args.admissionTier ?? ('background' as const)
     }
     const review = await getHostedReviewForBranch({
       repoPath: repo.path,

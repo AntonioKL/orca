@@ -53,6 +53,7 @@ function getStatusReadKey(worktreePath: string, options: GetStatusOptions): stri
   return stableInFlightKey([
     worktreePath,
     options.wslDistro ?? '',
+    options.admissionTier ?? 'status',
     options.includeIgnored === true,
     options.includeLineStats !== false,
     options.reuseLineStats === true,

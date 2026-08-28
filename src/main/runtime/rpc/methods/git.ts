@@ -32,6 +32,7 @@ export const GIT_METHODS: RpcMethod[] = [
         params.bypassEffectiveUpstreamNegativeCache === undefined &&
         params.reuseLineStats === undefined &&
         params.branchLineTotalMergeBase === undefined &&
+        params.admissionTier === undefined &&
         signal === undefined
           ? undefined
           : {
@@ -48,10 +49,11 @@ export const GIT_METHODS: RpcMethod[] = [
               ...(params.branchLineTotalMergeBase === undefined
                 ? {}
                 : { branchLineTotalMergeBase: params.branchLineTotalMergeBase }),
+              admissionTier: params.admissionTier ?? 'status',
               ...(signal ? { signal } : {})
             }
       return options === undefined
-        ? runtime.getRuntimeGitStatus(params.worktree)
+        ? runtime.getRuntimeGitStatus(params.worktree, { admissionTier: 'status' })
         : runtime.getRuntimeGitStatus(params.worktree, options)
     }
   }),

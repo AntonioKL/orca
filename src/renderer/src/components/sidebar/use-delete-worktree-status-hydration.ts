@@ -81,7 +81,7 @@ export function useDeleteWorktreeStatusHydration({
             ? (owner?.connectionId ?? undefined)
             : (getConnectionId(target.id) ?? undefined)
         },
-        { includeLineStats: false, signal: controller.signal }
+        { admissionTier: 'background', includeLineStats: false, signal: controller.signal }
       )
         .then((status) => {
           if (!controller.signal.aborted && generationRef.current === generation) {

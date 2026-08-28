@@ -1,5 +1,6 @@
 // Kept separate so the central cross-provider contract stays within its enforced size limit.
 export type GitProviderStatusOptions = {
+  admissionTier?: 'interactive' | 'status' | 'background'
   includeIgnored?: boolean
   includeLineStats?: boolean
   bypassEffectiveUpstreamNegativeCache?: boolean

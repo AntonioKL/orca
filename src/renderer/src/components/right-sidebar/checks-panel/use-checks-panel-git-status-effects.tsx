@@ -172,7 +172,7 @@ export function useChecksPanelGitStatusEffects(model: ChecksPanelGitStatusEffect
     }
     const runRequest = async (): Promise<void> => {
       try {
-        const status = await getRuntimeGitStatus(context)
+        const status = await getRuntimeGitStatus(context, { admissionTier: 'status' })
         if (
           !stale &&
           shouldCommitChecksPanelGitStatusSnapshot(panelContextKeyRef.current, requestContextKey)

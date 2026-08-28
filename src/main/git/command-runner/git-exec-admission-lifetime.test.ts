@@ -100,6 +100,38 @@ describe('git exec admission lifetime', () => {
     expect(_gitAdmissionSnapshotForTests().budgets.general?.baseUsed).toBe(0)
   })
 
+  it('does not admit a same-repo fetch while it waits for the FETCH_HEAD lock', async () => {
+    _resetGitAdmissionForTests(new GitAdmissionScheduler({ networkCap: 2, networkHeadroom: 0 }))
+    const children = [mockChild(1001), mockChild(1002)]
+    const callbacks: ExecCallback[] = []
+    execFileMock.mockImplementation(
+      (_command: string, _args: string[], _options: unknown, callback: ExecCallback) => {
+        callbacks.push(callback)
+        return children[callbacks.length - 1]
+      }
+    )
+
+    const first = gitExecFileAsync(['fetch', 'origin'], { cwd: '/same-repo' })
+    await vi.waitFor(() => expect(execFileMock).toHaveBeenCalledOnce())
+    const second = gitExecFileAsync(['fetch', 'origin'], { cwd: '/same-repo' })
+    await Promise.resolve()
+
+    expect(execFileMock).toHaveBeenCalledOnce()
+    expect(_gitAdmissionSnapshotForTests()).toMatchObject({
+      queued: 0,
+      budgets: { network: { baseUsed: 1, headroomUsed: 0 } }
+    })
+
+    callbacks[0]?.(null, '', '')
+    children[0].emit('close', 0, null)
+    await expect(first).resolves.toEqual({ stdout: '', stderr: '' })
+    await vi.waitFor(() => expect(execFileMock).toHaveBeenCalledTimes(2))
+    callbacks[1]?.(null, '', '')
+    children[1].emit('close', 0, null)
+    await expect(second).resolves.toEqual({ stdout: '', stderr: '' })
+    expect(_gitAdmissionSnapshotForTests().budgets.network?.baseUsed).toBe(0)
+  })
+
   it('reports pre-aborted capture as a no-child termination', async () => {
     const controller = new AbortController()
     const onChildTerminated = vi.fn()
@@ -152,7 +184,7 @@ describe('git exec admission lifetime', () => {
     expect(_gitAdmissionSnapshotForTests().budgets.general?.baseUsed).toBe(0)
   })
 
-  it('admits interactive fetch before a background fetch can queue on FETCH_HEAD', async () => {
+  it('serializes FETCH_HEAD callers before they enter admission', async () => {
     _resetGitAdmissionForTests(new GitAdmissionScheduler({ networkCap: 1, networkHeadroom: 1 }))
     const children = new Map<string, ChildProcess>()
     const callbacks = new Map<string, ExecCallback>()
@@ -180,26 +212,26 @@ describe('git exec admission lifetime', () => {
       admissionTier: 'interactive'
     })
 
-    await vi.waitFor(() => expect(_gitAdmissionSnapshotForTests().queued).toBe(1))
+    await Promise.resolve()
+    expect(_gitAdmissionSnapshotForTests().queued).toBe(0)
     expect([...callbacks.keys()]).toEqual(['first'])
 
     callbacks.get('first')?.(null, '', '')
     await expect(first).resolves.toEqual({ stdout: '', stderr: '' })
-    await vi.waitFor(() => expect(callbacks.has('interactive')).toBe(true))
-    expect([...callbacks.keys()]).toEqual(['first', 'interactive'])
+    await vi.waitFor(() => expect(_gitAdmissionSnapshotForTests().queued).toBe(1))
+    expect([...callbacks.keys()]).toEqual(['first'])
 
     children.get('first')?.emit('close', 0, null)
-    await Promise.resolve()
-    expect(callbacks.has('background')).toBe(false)
-
-    callbacks.get('interactive')?.(null, '', '')
-    await expect(interactive).resolves.toEqual({ stdout: '', stderr: '' })
     await vi.waitFor(() => expect(callbacks.has('background')).toBe(true))
-    expect([...callbacks.keys()]).toEqual(['first', 'interactive', 'background'])
+    expect([...callbacks.keys()]).toEqual(['first', 'background'])
 
-    children.get('interactive')?.emit('close', 0, null)
     callbacks.get('background')?.(null, '', '')
     await expect(background).resolves.toEqual({ stdout: '', stderr: '' })
+    await vi.waitFor(() => expect(callbacks.has('interactive')).toBe(true))
+
     children.get('background')?.emit('close', 0, null)
+    callbacks.get('interactive')?.(null, '', '')
+    await expect(interactive).resolves.toEqual({ stdout: '', stderr: '' })
+    children.get('interactive')?.emit('close', 0, null)
   })
 })

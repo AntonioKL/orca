@@ -40,7 +40,7 @@ export class RuntimeGitStatusCommands {
     }
     const gitOptions = {
       ...localGitOptionsForTarget(target),
-      admissionTier: 'interactive' as const
+      admissionTier: options?.admissionTier ?? ('status' as const)
     }
     // Why: shared symlinks do not match Git's directory-only ignore rules.
     const sharedLinkPaths = target.repo ? getWorktreeSharedLinkPaths(target.repo) : []

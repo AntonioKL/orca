@@ -55,6 +55,7 @@ export type HostedReviewInfo = {
 export type HostedReviewForBranchArgs = {
   repoPath: string
   repoId?: string
+  admissionTier?: 'interactive' | 'status' | 'background'
   branch: string
   linkedGitHubPR?: number | null
   fallbackGitHubPR?: number | null

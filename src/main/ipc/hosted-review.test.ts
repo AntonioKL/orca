@@ -319,6 +319,25 @@ describe('registerHostedReviewHandlers', () => {
     )
   })
 
+  it('uses interactive git admission for an explicit card refresh', async () => {
+    getHostedReviewForBranchMock.mockResolvedValueOnce(null)
+    registerHostedReviewHandlers(store as never, stats as never)
+
+    await handlers['hostedReview:forBranch'](null, {
+      repoPath,
+      repoId: repo.id,
+      branch: 'feature/refresh',
+      admissionTier: 'interactive'
+    })
+
+    expect(getHostedReviewForBranchMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        branch: 'feature/refresh',
+        localGitExecOptions: { admissionTier: 'interactive' }
+      })
+    )
+  })
+
   it('passes SSH connectionId through create eligibility instead of blocking the worktree', async () => {
     getHostedReviewCreationEligibilityMock.mockResolvedValueOnce({
       provider: 'github',

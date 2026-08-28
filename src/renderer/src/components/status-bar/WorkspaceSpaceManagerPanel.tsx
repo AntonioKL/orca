@@ -1476,7 +1476,7 @@ export function WorkspaceSpaceManagerPanel(): React.JSX.Element {
                 worktreePath: worktree.path,
                 connectionId: owner.connectionId ?? undefined
               },
-              { includeLineStats: false }
+              { admissionTier: 'background', includeLineStats: false }
             )
           : Promise.reject(new Error('Workspace owner is no longer available'))
       )

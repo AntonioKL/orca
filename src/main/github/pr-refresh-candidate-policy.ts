@@ -29,13 +29,11 @@ export function hostedReviewOptionArgs(
   reason: GitHubPRRefreshReason = 'visible'
 ): [] | [GitHubPRBranchLookupOptions] {
   const options: GitHubPRBranchLookupOptions = {}
-  if (candidate.localGitOptions?.wslDistro || candidate.localGitOptions?.admissionTier || reason) {
-    options.localGitExecOptions = {
-      ...(candidate.localGitOptions?.wslDistro
-        ? { wslDistro: candidate.localGitOptions.wslDistro }
-        : {}),
-      admissionTier: admissionTierForRefreshReason(reason)
-    }
+  options.localGitExecOptions = {
+    ...(candidate.localGitOptions?.wslDistro
+      ? { wslDistro: candidate.localGitOptions.wslDistro }
+      : {}),
+    admissionTier: admissionTierForRefreshReason(reason)
   }
   if (shouldAcceptMergedFallbackPR(candidate)) {
     options.acceptMergedFallbackPR = true

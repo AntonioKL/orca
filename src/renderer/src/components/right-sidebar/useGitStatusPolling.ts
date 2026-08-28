@@ -36,6 +36,12 @@ export const SLOW_GIT_POLL_BACKOFF = {
   maxIntervalMs: 5 * 60_000
 }
 
+export function admissionTierForGitStatusRefreshReason(
+  reason: GitStatusRefreshReason
+): 'status' | 'background' {
+  return reason === 'safety' ? 'background' : 'status'
+}
+
 export function useGitStatusPolling(options: { enabled?: boolean } = {}): void {
   const enabled = options.enabled ?? true
   const activeWorktreeId = useAppStore((s) => s.activeWorktreeId)
@@ -143,6 +149,7 @@ export function useGitStatusPolling(options: { enabled?: boolean } = {}): void {
             fetchUpstreamStatus
           },
           request: {
+            admissionTier: admissionTierForGitStatusRefreshReason(request.reason),
             ...(request.reason === 'safety' ? { reuseLineStats: true } : {}),
             signal: request.signal,
             shouldApply: request.shouldApply,

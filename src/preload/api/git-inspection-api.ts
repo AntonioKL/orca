@@ -20,6 +20,7 @@ export type GitInspectionApi = {
   status: (args: {
     worktreePath: string
     connectionId?: string
+    admissionTier?: 'interactive' | 'status' | 'background'
     includeIgnored?: boolean
     includeLineStats?: boolean
     bypassEffectiveUpstreamNegativeCache?: boolean

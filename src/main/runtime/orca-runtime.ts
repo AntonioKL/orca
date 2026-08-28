@@ -22930,6 +22930,7 @@ export class OrcaRuntimeService {
   async getHostedReviewForBranch(args: {
     repoSelector: string
     branch: string
+    admissionTier?: GitAdmissionTier
     currentHeadOid?: string | null
     active?: boolean
     linkedGitHubPR?: number | null
@@ -22940,7 +22941,10 @@ export class OrcaRuntimeService {
     linkedGiteaPR?: number | null
   }): Promise<HostedReviewInfo | null> {
     const repo = await this.resolveRepoSelector(args.repoSelector)
-    const executionOptions = this.getHostedReviewExecutionOptions(repo, 'background')
+    const executionOptions = this.getHostedReviewExecutionOptions(
+      repo,
+      args.admissionTier ?? 'background'
+    )
     const review = await getHostedReviewForBranchFromRepo({
       repoPath: repo.path,
       connectionId: repo.connectionId ?? null,

@@ -1178,6 +1178,7 @@ export function registerFilesystemHandlers(
       args: {
         worktreePath: string
         connectionId?: string
+        admissionTier?: GitAdmissionTier
         includeIgnored?: boolean
         includeLineStats?: boolean
         bypassEffectiveUpstreamNegativeCache?: boolean
@@ -1189,6 +1190,7 @@ export function registerFilesystemHandlers(
       const controller = gitStatusCancellations.begin(event, args.requestToken)
       const options = {
         includeIgnored: args.includeIgnored ?? false,
+        admissionTier: args.admissionTier ?? ('status' as const),
         ...(args.includeLineStats === false ? { includeLineStats: false } : {}),
         ...(args.reuseLineStats === true ? { reuseLineStats: true } : {}),
         ...(args.branchLineTotalMergeBase === undefined

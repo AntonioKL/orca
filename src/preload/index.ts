@@ -1453,8 +1453,10 @@ const api = {
       currentHeadOid?: string | null
     }): Promise<unknown> => ipcRenderer.invoke('gh:prForBranch', args),
 
-    refreshPRNow: (args: { candidate: GitHubPRRefreshCandidate }): Promise<unknown> =>
-      ipcRenderer.invoke('gh:refreshPRNow', args),
+    refreshPRNow: (args: {
+      candidate: GitHubPRRefreshCandidate
+      reason?: GitHubPRRefreshReason
+    }): Promise<unknown> => ipcRenderer.invoke('gh:refreshPRNow', args),
 
     enqueuePRRefresh: (args: {
       candidate: GitHubPRRefreshCandidate
@@ -3590,6 +3592,7 @@ const api = {
     status: (args: {
       worktreePath: string
       connectionId?: string
+      admissionTier?: 'interactive' | 'status' | 'background'
       includeIgnored?: boolean
       includeLineStats?: boolean
       bypassEffectiveUpstreamNegativeCache?: boolean

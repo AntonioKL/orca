@@ -195,6 +195,7 @@ export const createHostedReviewSlice: StateCreator<AppState, [], [], HostedRevie
             options?.linkedGitHubPR == null ? (options?.fallbackGitHubPR ?? null) : null
           const args = {
             branch,
+            ...(options?.admissionTier ? { admissionTier: options.admissionTier } : {}),
             ...(options?.repoId !== undefined ? { repoId: options.repoId } : {}),
             currentHeadOid: options?.currentHeadOid ?? null,
             ...(options?.active === true ? { active: true } : {}),

@@ -26,6 +26,13 @@ describe('github RPC methods', () => {
     await dispatcher.dispatch(
       makeRequest('github.prForBranch', { repo: 'repo-1', branch: 'feature/legacy' })
     )
+    await dispatcher.dispatch(
+      makeRequest('github.prForBranch', {
+        repo: 'repo-1',
+        branch: 'feature/future',
+        reason: 'next-generation-refresh'
+      })
+    )
 
     expect(runtime.getRepoPRForBranch).toHaveBeenNthCalledWith(
       1,
@@ -41,6 +48,16 @@ describe('github RPC methods', () => {
       2,
       'repo-1',
       'feature/legacy',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined
+    )
+    expect(runtime.getRepoPRForBranch).toHaveBeenNthCalledWith(
+      3,
+      'repo-1',
+      'feature/future',
       undefined,
       undefined,
       undefined,

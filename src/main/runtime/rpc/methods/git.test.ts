@@ -25,7 +25,9 @@ describe('git RPC methods', () => {
 
     const response = await dispatcher.dispatch(makeRequest('git.status', { worktree: 'id:wt-1' }))
 
-    expect(runtime.getRuntimeGitStatus).toHaveBeenCalledWith('id:wt-1')
+    expect(runtime.getRuntimeGitStatus).toHaveBeenCalledWith('id:wt-1', {
+      admissionTier: 'status'
+    })
     expect(response).toMatchObject({
       ok: true,
       result: { entries: [], branch: 'main', didHitLimit: true, statusLength: 1_001 }
@@ -48,6 +50,7 @@ describe('git RPC methods', () => {
     )
 
     expect(runtime.getRuntimeGitStatus).toHaveBeenCalledWith('id:wt-1', {
+      admissionTier: 'status',
       includeIgnored: true
     })
     expect(response).toMatchObject({
@@ -68,6 +71,7 @@ describe('git RPC methods', () => {
     )
 
     expect(runtime.getRuntimeGitStatus).toHaveBeenCalledWith('id:wt-1', {
+      admissionTier: 'status',
       includeLineStats: false
     })
   })
@@ -90,6 +94,7 @@ describe('git RPC methods', () => {
     )
 
     expect(runtime.getRuntimeGitStatus).toHaveBeenCalledWith('id:wt-1', {
+      admissionTier: 'status',
       bypassEffectiveUpstreamNegativeCache: true
     })
     expect(response).toMatchObject({
@@ -115,6 +120,7 @@ describe('git RPC methods', () => {
     )
 
     expect(runtime.getRuntimeGitStatus).toHaveBeenCalledWith('id:wt-1', {
+      admissionTier: 'status',
       reuseLineStats: true,
       signal: controller.signal
     })
@@ -695,7 +701,7 @@ describe('git RPC methods', () => {
     expect(runtime.getRuntimeGitBranchCompare).not.toHaveBeenCalled()
   })
 
-  it('forwards valid branch-compare admission and rejects invalid tiers', async () => {
+  it('forwards valid branch-compare admission and defaults future tiers', async () => {
     const runtime = {
       getRuntimeId: () => 'test-runtime',
       getRuntimeGitBranchCompare: vi.fn().mockResolvedValue({ summary: {}, entries: [] })
@@ -709,7 +715,7 @@ describe('git RPC methods', () => {
         admissionTier: 'background'
       })
     )
-    const rejected = await dispatcher.dispatch(
+    const future = await dispatcher.dispatch(
       makeRequest('git.branchCompare', {
         worktree: 'id:wt-1',
         baseRef: 'origin/main',
@@ -718,13 +724,19 @@ describe('git RPC methods', () => {
     )
 
     expect(accepted.ok).toBe(true)
-    expect(runtime.getRuntimeGitBranchCompare).toHaveBeenCalledOnce()
-    expect(runtime.getRuntimeGitBranchCompare).toHaveBeenCalledWith(
+    expect(runtime.getRuntimeGitBranchCompare).toHaveBeenNthCalledWith(
+      1,
       'id:wt-1',
       'origin/main',
       'background'
     )
-    expect(rejected.ok).toBe(false)
+    expect(future.ok).toBe(true)
+    expect(runtime.getRuntimeGitBranchCompare).toHaveBeenNthCalledWith(
+      2,
+      'id:wt-1',
+      'origin/main',
+      undefined
+    )
   })
 
   it('rejects git history limits above the runtime cap', async () => {

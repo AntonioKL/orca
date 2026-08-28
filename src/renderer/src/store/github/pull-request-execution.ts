@@ -109,7 +109,10 @@ export function startPullRequestLookup(args: {
               cachedMergeStateStatus: cached?.data?.mergeStateStatus ?? null
             }
             const response = window.api.gh.refreshPRNow
-              ? await window.api.gh.refreshPRNow({ candidate })
+              ? await window.api.gh.refreshPRNow({
+                  candidate,
+                  reason: options?.reason ?? 'manual'
+                })
               : await window.api.gh.prForBranch({
                   repoPath,
                   repoId,

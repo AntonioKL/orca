@@ -134,7 +134,7 @@ describe('RuntimeGitCommands', () => {
     await commands.getRuntimeGitStatus('id:wt-1')
 
     expect(mocks.getStatus).toHaveBeenCalledWith('/workspace/feature', {
-      admissionTier: 'interactive',
+      admissionTier: 'status',
       sharedLinkPaths: ['node_modules']
     })
   })

@@ -20,7 +20,7 @@ export function createGitHubApi(): WebGitHubApi {
       route<WebGitHubResult<'repoUpstream'>>(GITHUB_WEB_RPC_METHODS.repoUpstream, args),
     prForBranch: (args) =>
       route<WebGitHubResult<'prForBranch'>>(GITHUB_WEB_RPC_METHODS.prForBranch, args),
-    refreshPRNow: async ({ candidate }) => {
+    refreshPRNow: async ({ candidate, reason }) => {
       const acceptMergedFallbackPR =
         candidate.linkedPRNumber == null &&
         candidate.fallbackPRNumber != null &&
@@ -32,6 +32,7 @@ export function createGitHubApi(): WebGitHubApi {
         linkedPRNumber: candidate.linkedPRNumber ?? null,
         fallbackPRNumber: candidate.fallbackPRNumber ?? null,
         currentHeadOid: candidate.currentHeadOid ?? null,
+        ...(reason ? { reason } : {}),
         ...(acceptMergedFallbackPR ? { acceptMergedFallbackPR: true } : {})
       })
       return pr

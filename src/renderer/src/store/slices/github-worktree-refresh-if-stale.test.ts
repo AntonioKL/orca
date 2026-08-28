@@ -179,7 +179,10 @@ describe('createGitHubSlice.refreshGitHubForWorktreeIfStale', () => {
     await Promise.resolve()
 
     expect(mockApi.gh.enqueuePRRefresh).toHaveBeenCalledTimes(1)
-    expect(mockApi.gh.refreshPRNow).toHaveBeenCalledTimes(1)
+    expect(mockApi.gh.refreshPRNow).toHaveBeenCalledWith({
+      candidate: expect.any(Object),
+      reason: 'active'
+    })
   })
 
   it('bounds rejected active PR refresh IPCs during worktree activation', async () => {
@@ -625,6 +628,7 @@ describe('createGitHubSlice.refreshGitHubForWorktreeIfStale', () => {
 
     expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
     expect(mockApi.gh.refreshPRNow).toHaveBeenCalledWith({
+      reason: 'manual',
       candidate: expect.objectContaining({
         cacheKey: `ssh:ssh-1::repo-ssh::${branch}`,
         connectionId: 'ssh-1',
