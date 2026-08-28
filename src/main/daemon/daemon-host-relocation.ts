@@ -12,7 +12,7 @@ import {
 import { dirname, join, win32 as winPath } from 'node:path'
 import { getAppEnvironment } from '../../shared/app-environment'
 import { parseDaemonPidFile } from './daemon-pid-file-parse'
-import { startTimeMatches } from './daemon-process-start-time'
+import { inspectProcessLiveness } from './daemon-process-inspection'
 
 /**
  * Relocate the terminal daemon's process image out of the app install dir into LOCAL userData so it
@@ -293,26 +293,21 @@ export function materializeRelocatedDaemonHost(): RelocatedDaemonHost | null {
   return getRelocatedDaemonHost()
 }
 
-function isDaemonPidAlive(pid: number, startedAtMs: number | null): boolean {
-  try {
-    process.kill(pid, 0)
-  } catch {
-    return false
-  }
-  return startTimeMatches(pid, startedAtMs)
-}
+export type PinnedDaemonVersionsEvidence =
+  | { status: 'complete'; pinnedVersions: ReadonlySet<string> }
+  | { status: 'unverifiable'; reason: string }
 
 /**
  * App versions still pinned by a live daemon (from daemon-v<N>.pid files under `runtimeDir`), whose
  * host dir must not be reclaimed while alive. On win32 start-time can't verify, so a matching pid pins conservatively.
  */
-export function collectPinnedDaemonVersions(runtimeDir: string): Set<string> {
+export function collectPinnedDaemonVersions(runtimeDir: string): PinnedDaemonVersionsEvidence {
   const pinned = new Set<string>()
   let entries
   try {
     entries = readdirSync(runtimeDir, { withFileTypes: true })
   } catch {
-    return pinned
+    return { status: 'unverifiable', reason: 'the daemon runtime directory could not be read' }
   }
   for (const entry of entries) {
     if (!entry.isFile() || !/^daemon-v\d+\.pid$/.test(entry.name)) {
@@ -322,22 +317,46 @@ export function collectPinnedDaemonVersions(runtimeDir: string): Set<string> {
     try {
       parsed = parseDaemonPidFile(readFileSync(join(runtimeDir, entry.name), 'utf8'))
     } catch {
-      continue
+      return {
+        status: 'unverifiable',
+        reason: `the daemon pid file could not be read: ${entry.name}`
+      }
+    }
+    if (!parsed) {
+      return {
+        status: 'unverifiable',
+        reason: `the daemon pid file could not be parsed: ${entry.name}`
+      }
     }
     // appVersion null => pre-relocation daemon forked from the install dir; pins no host dir here.
-    if (parsed && parsed.appVersion !== null && isDaemonPidAlive(parsed.pid, parsed.startedAtMs)) {
-      pinned.add(parsed.appVersion)
+    if (parsed.appVersion === null) {
+      continue
+    }
+    const verdict = inspectProcessLiveness(parsed.pid)
+    switch (verdict.status) {
+      case 'live':
+        pinned.add(parsed.appVersion)
+        break
+      case 'exited':
+        break
+      case 'unverifiable':
+        return verdict
+      default:
+        verdict satisfies never
     }
   }
-  return pinned
+  return { status: 'complete', pinnedVersions: pinned }
 }
 
 /**
  * Reclaim daemon-host/<ver> dirs that are neither the current version nor pinned by a live daemon.
  * Best-effort — never throws; a locked/staging dir is retried on a future launch.
  */
-export function pruneOldDaemonHosts(pinnedVersions: ReadonlySet<string>): void {
+export function pruneOldDaemonHosts(evidence: PinnedDaemonVersionsEvidence): void {
   if (!isPackagedElectronWin32()) {
+    return
+  }
+  if (evidence.status === 'unverifiable') {
     return
   }
   const version = getAppEnvironment().getVersion()
@@ -349,7 +368,7 @@ export function pruneOldDaemonHosts(pinnedVersions: ReadonlySet<string>): void {
     return
   }
   for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name === version || pinnedVersions.has(entry.name)) {
+    if (!entry.isDirectory() || entry.name === version || evidence.pinnedVersions.has(entry.name)) {
       continue
     }
     try {

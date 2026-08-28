@@ -4,6 +4,7 @@ import { promisify } from 'node:util'
 import { parseLinuxBootTimeSeconds, parseLinuxProcStartTicks } from './daemon-process-start-time'
 import type {
   LinuxStatEvidence,
+  ProcessLivenessVerdict,
   ProcessSignalEvidence,
   WindowsProcessEvidence
 } from './daemon-incarnation-evidence-types'
@@ -29,6 +30,21 @@ export function inspectProcessSignal(pid: number): ProcessSignalEvidence {
       return 'permission_denied'
     }
     return 'unavailable'
+  }
+}
+
+export function inspectProcessLiveness(pid: number): ProcessLivenessVerdict {
+  const signal = inspectProcessSignal(pid)
+  switch (signal) {
+    case 'occupied':
+    case 'permission_denied':
+      return { status: 'live' }
+    case 'missing':
+      return { status: 'exited' }
+    case 'unavailable':
+      return { status: 'unverifiable', reason: 'the daemon process could not be queried' }
+    default:
+      return signal satisfies never
   }
 }
 

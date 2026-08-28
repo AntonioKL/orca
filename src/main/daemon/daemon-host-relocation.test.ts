@@ -9,7 +9,7 @@ import {
 } from 'node:fs'
 import os from 'node:os'
 import { dirname, join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { setAppEnvironment, type AppEnvironment } from '../../shared/app-environment'
 
@@ -268,10 +268,54 @@ describe('pruneOldDaemonHosts', () => {
     for (const v of ['9.9.9', '1.0.0', '2.0.0']) {
       mkdirSync(join(root, v), { recursive: true })
     }
-    pruneOldDaemonHosts(new Set(['2.0.0']))
+    pruneOldDaemonHosts({ status: 'complete', pinnedVersions: new Set(['2.0.0']) })
     expect(existsSync(join(root, '9.9.9'))).toBe(true)
     expect(existsSync(join(root, '2.0.0'))).toBe(true)
     expect(existsSync(join(root, '1.0.0'))).toBe(false)
+  })
+
+  it('keeps a host when its pid liveness query is permission denied', () => {
+    const root = join(localAppDataDir, 'Orca', 'daemon-host')
+    const runtimeDir = join(userDataDir, 'daemon')
+    mkdirSync(join(root, '8.0.0'), { recursive: true })
+    mkdirSync(runtimeDir, { recursive: true })
+    writeFileSync(
+      join(runtimeDir, 'daemon-v8.pid'),
+      JSON.stringify({ pid: 4242, startedAtMs: null, appVersion: '8.0.0' })
+    )
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw Object.assign(new Error('access denied'), { code: 'EPERM' })
+    })
+
+    const evidence = collectPinnedDaemonVersions(runtimeDir)
+    pruneOldDaemonHosts(evidence)
+
+    expect(existsSync(join(root, '8.0.0'))).toBe(true)
+    killSpy.mockRestore()
+  })
+
+  it('keeps a host when its pid liveness query is unavailable', () => {
+    const root = join(localAppDataDir, 'Orca', 'daemon-host')
+    const runtimeDir = join(userDataDir, 'daemon')
+    mkdirSync(join(root, '7.0.0'), { recursive: true })
+    mkdirSync(runtimeDir, { recursive: true })
+    writeFileSync(
+      join(runtimeDir, 'daemon-v7.pid'),
+      JSON.stringify({ pid: 4242, startedAtMs: null, appVersion: '7.0.0' })
+    )
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw Object.assign(new Error('timed out'), { code: 'ETIMEDOUT' })
+    })
+
+    const evidence = collectPinnedDaemonVersions(runtimeDir)
+    expect(evidence).toEqual({
+      status: 'unverifiable',
+      reason: 'the daemon process could not be queried'
+    })
+    pruneOldDaemonHosts(evidence)
+
+    expect(existsSync(join(root, '7.0.0'))).toBe(true)
+    killSpy.mockRestore()
   })
 
   it('reclaims nothing for a packaged host with no asar root (orcad on win32)', () => {
@@ -279,7 +323,7 @@ describe('pruneOldDaemonHosts', () => {
     mkdirSync(join(root, '1.0.0'), { recursive: true })
     hostApp.appPath = join(installDir, 'resources', 'app')
     installHostApp()
-    pruneOldDaemonHosts(new Set())
+    pruneOldDaemonHosts({ status: 'complete', pinnedVersions: new Set() })
     // A Node host owns no daemon-host tree, so deleting under it would be reaching into a
     // directory layout it never created.
     expect(existsSync(join(root, '1.0.0'))).toBe(true)
@@ -299,7 +343,6 @@ describe('collectPinnedDaemonVersions', () => {
       JSON.stringify({ pid: 2147483646, startedAtMs: null, appVersion: '6.0.0' })
     )
     const pinned = collectPinnedDaemonVersions(runtimeDir)
-    expect(pinned.has('7.0.0')).toBe(true)
-    expect(pinned.has('6.0.0')).toBe(false)
+    expect(pinned).toEqual({ status: 'complete', pinnedVersions: new Set(['7.0.0']) })
   })
 })
