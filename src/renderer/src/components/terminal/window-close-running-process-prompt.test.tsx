@@ -26,6 +26,8 @@ vi.mock('@/lib/shutdown-checkpoint-failure-toast', () => ({
 }))
 
 import { useWindowCloseRunningProcessPrompt } from './window-close-running-process-prompt'
+import { anyLocalPtyBlocksWindowClose } from './window-close-running-process-evidence'
+import { RUNNING_CLOSE_PROBE_TIMEOUT_MS } from './running-terminal-close-guard'
 
 const PTY_ID = 'pty-local-1'
 const SHELL = 'zsh'
@@ -247,5 +249,50 @@ describe('Terminal.tsx routes the native window-close request through the guard'
       source.split('window.api.ui.confirmWindowClose(').length - 1,
       'Terminal.tsx may only close the window unprobed for an intentional app restart'
     ).toBe(1)
+  })
+})
+
+/**
+ * A local inspect is an IPC round trip into a process-table scan, and this path has
+ * no backstop anywhere: main arms its renderer-ack timer only when `isQuitting`,
+ * and that is precisely the branch that never probes. An unbounded wait therefore
+ * leaves the window neither closed nor prompting — the same silent death the guard
+ * exists to remove, arriving through a stall instead of a wrong verdict.
+ */
+describe('a probe that never answers cannot hang the window close', () => {
+  it('blocks once the deadline passes instead of waiting forever', async () => {
+    installInspectProcess(() => new Promise(() => {}))
+
+    await expect(
+      anyLocalPtyBlocksWindowClose({ activeRuntimeEnvironmentId: null }, [PTY_ID], 20)
+    ).resolves.toBe(true)
+  })
+
+  it('still returns the real answer when the probe beats the deadline', async () => {
+    installInspectProcess(async () => observedIdleInspection())
+
+    await expect(
+      anyLocalPtyBlocksWindowClose({ activeRuntimeEnvironmentId: null }, [PTY_ID], 20_000)
+    ).resolves.toBe(false)
+  })
+
+  it('bounds the window-close probe with the same deadline as the tab and pane close paths', async () => {
+    vi.useFakeTimers()
+    try {
+      installInspectProcess(() => new Promise(() => {}))
+      await act(async () => {
+        proceed!(false)
+        await Promise.resolve()
+      })
+      // Why assert the not-yet state first: without it a bound of 0 would pass.
+      expect(warningIsVisible()).toBe(false)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(RUNNING_CLOSE_PROBE_TIMEOUT_MS)
+      })
+      expect(warningIsVisible()).toBe(true)
+      expect(confirmWindowClose).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

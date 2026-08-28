@@ -15,6 +15,7 @@ import { isRemoteRuntimePtyId } from '@/runtime/runtime-terminal-inspection'
 import { useAppStore } from '@/store'
 import { runWithWindowCloseCheckpointScope } from '../window-close-request-coordinator'
 import { anyLocalPtyBlocksWindowClose } from './window-close-running-process-evidence'
+import { RUNNING_CLOSE_PROBE_TIMEOUT_MS } from './running-terminal-close-guard'
 
 export type WindowCloseRunningProcessPrompt = {
   /** Probes the window's local PTYs, then either raises the confirmation or closes. */
@@ -63,7 +64,13 @@ export function useWindowCloseRunningProcessPrompt(): WindowCloseRunningProcessP
           }
         )
         if (localPtyIds.length > 0) {
-          void anyLocalPtyBlocksWindowClose(state.settings, localPtyIds).then((blocked) => {
+          // Why the same bound as the tab and pane close paths: an unanswered probe
+          // must not leave the window silently stuck (#10142).
+          void anyLocalPtyBlocksWindowClose(
+            state.settings,
+            localPtyIds,
+            RUNNING_CLOSE_PROBE_TIMEOUT_MS
+          ).then((blocked) => {
             if (blocked) {
               setWindowCloseDialogOpen(true)
             } else {

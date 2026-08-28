@@ -1,5 +1,6 @@
 import type { GlobalSettings } from '../../../../shared/global-settings-types'
 import { readPtyProcessInspectionEvidence } from '../../../../shared/pty-process-inspection-evidence'
+import { withTimeout } from '../../../../shared/promise-timeout-fallback'
 import { inspectRuntimeTerminalProcess } from '@/runtime/runtime-terminal-inspection'
 
 /**
@@ -12,8 +13,23 @@ import { inspectRuntimeTerminalProcess } from '@/runtime/runtime-terminal-inspec
  * which is byte-identical to a genuinely idle pane unless the evidence is read.
  * Unlike every other consumer of this evidence, closing here acts for the user
  * and destroys the work the warning would have let them save, so unknown asks.
+ *
+ * `timeoutMs` bounds the whole probe. A local inspect is an IPC round trip into a
+ * process-table scan and can stall indefinitely, and this path has no backstop:
+ * main only arms its ack timer when `isQuitting`, which is exactly the branch that
+ * never probes. An unbounded wait leaves the window neither closed nor prompting —
+ * the silent-death shape this guard exists to remove. Unanswered blocks, matching
+ * the tab and pane close paths (#10142).
  */
 export async function anyLocalPtyBlocksWindowClose(
+  settings: Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> | null | undefined,
+  ptyIds: readonly string[],
+  timeoutMs: number
+): Promise<boolean> {
+  return withTimeout(inspectAllLocalPtys(settings, ptyIds), timeoutMs, true)
+}
+
+async function inspectAllLocalPtys(
   settings: Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> | null | undefined,
   ptyIds: readonly string[]
 ): Promise<boolean> {
