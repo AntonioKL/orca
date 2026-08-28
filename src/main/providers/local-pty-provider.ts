@@ -95,6 +95,20 @@ import {
 } from '../shell-prompt-readiness-probe'
 import { expandWindowsPathEnvironmentVariables } from '../../shared/windows-environment-expansion'
 import { resolveProcessExitCause, type TerminalExitCause } from '../../shared/terminal-exit-cause'
+import { addOrcaWslInteropEnv } from '../pty/wsl-orca-env'
+import { ShellCommandMarkerScanner } from '../shell-command-marker-scanner'
+import {
+  shellCommandMarkerEnv,
+  SHELL_COMMAND_NONCE_ENV,
+  SHELL_INTEGRATION_CONTEXT_ENV
+} from '../shell-command-marker-template'
+import {
+  isShellCommandMarkerInjectionEnabled,
+  resolvePowerShellCommandMarkerTrust,
+  scrubShellCommandMarkerPolicyEnv
+} from '../shell-integration-injection-policy'
+import type { TerminalSideEffectFact } from '../../shared/terminal-side-effect-facts'
+import { release as osRelease } from 'node:os'
 
 import {
   getDefaultCwd,
@@ -444,6 +458,7 @@ export type LocalPtyProviderOptions = {
     sequenceChars?: number,
     transformed?: boolean
   ) => void
+  onPrivateTerminalFact?: (id: string, fact: TerminalSideEffectFact) => void
 }
 
 export class LocalPtyProvider implements IPtyProvider {
@@ -480,6 +495,8 @@ export class LocalPtyProvider implements IPtyProvider {
     }
     const id = allocatePtyId(reattachId ?? undefined)
     const incarnationId = randomUUID()
+    const commandNonce = randomUUID()
+    let expectedCommandNonce: string | null = commandNonce
 
     const startupAgentRecognition = args.command
       ? recognizeAgentProcessFromCommandLine(args.command)
@@ -793,6 +810,8 @@ export class LocalPtyProvider implements IPtyProvider {
       // Why delete: ORCA_SHELL_FEATURES is Orca-owned, and only the launch
       // config below may name features for this shell.
       delete finalEnv.ORCA_SHELL_FEATURES
+      delete finalEnv[SHELL_COMMAND_NONCE_ENV]
+      delete finalEnv[SHELL_INTEGRATION_CONTEXT_ENV]
       getFallbackShellReadyConfig = (shell) =>
         getShellLaunchConfig(
           shell,
@@ -804,14 +823,43 @@ export class LocalPtyProvider implements IPtyProvider {
             // Why identical: the identity marker exists so the readiness
             // handshake can bind output to the right shell PID.
             emitsStartupIdentity: waitsForShellReady
-          })
+          }),
+          { commandNonce, hostClass: 'local-native' }
         )
       const shellLaunch = getFallbackShellReadyConfig(shellPath)
       Object.assign(finalEnv, shellLaunch.env)
       shellArgs = shellLaunch.args ?? shellArgs
-      shellReadyLaunch = args.command ? shellLaunch : null
+      shellReadyLaunch = shellLaunch
       primaryLaunchEnvKeys = Object.keys(shellLaunch.env)
     }
+
+    if (process.platform === 'win32') {
+      delete finalEnv[SHELL_COMMAND_NONCE_ENV]
+      delete finalEnv[SHELL_INTEGRATION_CONTEXT_ENV]
+      const shellBasename = pathWin32.basename(shellPath).toLowerCase()
+      if (shellBasename === 'wsl.exe' && isShellCommandMarkerInjectionEnabled('local-wsl')) {
+        const waitsForShellReady = Boolean(args.command)
+        finalEnv.ORCA_SHELL_FEATURES = waitsForShellReady ? 'markers,ready,identity' : 'markers'
+        Object.assign(finalEnv, shellCommandMarkerEnv(commandNonce))
+        addOrcaWslInteropEnv(finalEnv)
+      } else if (
+        (shellBasename === 'pwsh.exe' || shellBasename === 'powershell.exe') &&
+        isShellCommandMarkerInjectionEnabled('local-native')
+      ) {
+        expectedCommandNonce = resolvePowerShellCommandMarkerTrust(process.platform, osRelease())
+          ? commandNonce
+          : null
+        Object.assign(finalEnv, shellCommandMarkerEnv(expectedCommandNonce))
+        primaryLaunchEnvKeys.push(SHELL_COMMAND_NONCE_ENV, SHELL_INTEGRATION_CONTEXT_ENV)
+      } else if (
+        isWindowsGitBashShellPath(shellPath) &&
+        isShellCommandMarkerInjectionEnabled('local-native')
+      ) {
+        finalEnv.ORCA_SHELL_FEATURES = 'markers'
+        Object.assign(finalEnv, shellCommandMarkerEnv(commandNonce))
+      }
+    }
+    scrubShellCommandMarkerPolicyEnv(finalEnv)
 
     // Why: the async macOS capability probe runs before node-pty exists.
     await awaitCancelableLocalPtySpawn(id, prepareMacosTccLoginShell())
@@ -847,7 +895,7 @@ export class LocalPtyProvider implements IPtyProvider {
     if (spawnResult.startupCommandDeliveredInShellArgs !== undefined) {
       startupCommandDeliveredInShellArgs = spawnResult.startupCommandDeliveredInShellArgs
     }
-    if (args.command && getFallbackShellReadyConfig) {
+    if (getFallbackShellReadyConfig) {
       shellReadyLaunch = getFallbackShellReadyConfig(shellPath)
     }
 
@@ -889,25 +937,64 @@ export class LocalPtyProvider implements IPtyProvider {
     ptyIncarnations.set(id, incarnationId)
     this.opts.onSpawned?.(id, incarnationId)
 
-    const emitIngressData = (emission: PtyIngressEmission): void => {
-      const sequenceChars = emission.rawEndSeq - emission.rawStartSeq
-      if (emission.transformed || sequenceChars !== emission.data.length) {
-        this.opts.onData?.(id, emission.data, Date.now(), sequenceChars, true)
+    const commandMarkersActive =
+      shellReadyLaunch?.supportsCommandMarkers === true ||
+      (process.platform === 'win32' &&
+        (['wsl.exe', 'pwsh.exe', 'powershell.exe'].includes(
+          pathWin32.basename(shellPath).toLowerCase()
+        ) ||
+          isWindowsGitBashShellPath(shellPath)) &&
+        finalEnv[SHELL_INTEGRATION_CONTEXT_ENV] !== undefined)
+    const commandMarkerScanner = commandMarkersActive
+      ? new ShellCommandMarkerScanner(expectedCommandNonce)
+      : null
+    let commandEpoch = 0
+    const emitProviderData = (
+      data: string,
+      sequenceChars: number,
+      transformed: boolean,
+      seq?: number
+    ): void => {
+      if (transformed || sequenceChars !== data.length) {
+        this.opts.onData?.(id, data, Date.now(), sequenceChars, true)
       } else {
-        this.opts.onData?.(id, emission.data, Date.now())
+        this.opts.onData?.(id, data, Date.now())
       }
       for (const cb of dataListeners) {
         cb(
-          emission.transformed || sequenceChars !== emission.data.length
-            ? {
-                id,
-                data: emission.data,
-                sequenceChars,
-                seq: emission.rawEndSeq,
-                transformed: true
-              }
-            : { id, data: emission.data }
+          transformed || sequenceChars !== data.length
+            ? { id, data, sequenceChars, ...(seq === undefined ? {} : { seq }), transformed: true }
+            : { id, data }
         )
+      }
+    }
+    const emitIngressData = (emission: PtyIngressEmission): void => {
+      const sequenceChars = emission.rawEndSeq - emission.rawStartSeq
+      if (!commandMarkerScanner || emission.transformed) {
+        emitProviderData(
+          emission.data,
+          sequenceChars,
+          emission.transformed || sequenceChars !== emission.data.length,
+          emission.rawEndSeq
+        )
+        return
+      }
+      let rawCursor = emission.rawStartSeq
+      for (const item of commandMarkerScanner.accept(emission.data)) {
+        if (item.kind === 'data') {
+          rawCursor += item.data.length
+          emitProviderData(item.data, item.data.length, false)
+          continue
+        }
+        rawCursor += item.rawLength
+        emitProviderData('', item.rawLength, true, rawCursor)
+        commandEpoch += 1
+        this.opts.onPrivateTerminalFact?.(id, {
+          kind: 'command-started',
+          agent: item.event.agent,
+          trusted: item.event.trusted,
+          commandEpoch
+        })
       }
     }
     const startupIngress = new PtyStartupIngress({
@@ -1025,6 +1112,10 @@ export class LocalPtyProvider implements IPtyProvider {
     }
 
     const onExitDisposable = proc.onExit(({ exitCode, signal }) => {
+      const heldCommandMarkerBytes = commandMarkerScanner?.drain() ?? ''
+      if (heldCommandMarkerBytes) {
+        emitProviderData(heldCommandMarkerBytes, heldCommandMarkerBytes.length, false)
+      }
       // Why: node-pty reports a signalled death as {exitCode: 0, signal: N}; the
       // cause is built here, where the signal and the spawn's trustworthiness
       // are both still in hand.

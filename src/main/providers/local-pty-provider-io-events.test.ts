@@ -212,6 +212,36 @@ describe('LocalPtyProvider', () => {
   })
 
   describe('event listeners', () => {
+    it('strips command markers before delivery and emits an ordered trusted fact', async () => {
+      const runtimeData = vi.fn()
+      const privateFact = vi.fn()
+      const dataHandler = vi.fn()
+      provider.configure({ onData: runtimeData, onPrivateTerminalFact: privateFact })
+      provider.onData(dataHandler)
+      const { id } = await provider.spawn({ cols: 80, rows: 24 })
+      const spawnEnv = spawnMock.mock.calls.at(-1)?.[2]?.env as Record<string, string>
+      const nonce = spawnEnv.ORCA_SHELL_COMMAND_NONCE
+      expect(nonce).toEqual(expect.any(String))
+      const encoded = Buffer.from('codex --model test').toString('base64')
+      const row = `\x1b]777;orca-cmd;${nonce};${encoded}\x07`
+
+      const onDataCb = mockProc.onData.mock.calls[0][0]
+      onDataCb(`A${row}B`)
+
+      expect(runtimeData.mock.calls.map((call) => call.slice(1))).toEqual([
+        ['A', expect.any(Number)],
+        ['', expect.any(Number), row.length, true],
+        ['B', expect.any(Number)]
+      ])
+      expect(dataHandler.mock.calls.map(([payload]) => payload.data)).toEqual(['A', '', 'B'])
+      expect(privateFact).toHaveBeenCalledWith(id, {
+        kind: 'command-started',
+        agent: 'codex',
+        trusted: true,
+        commandEpoch: 1
+      })
+    })
+
     it('notifies data listeners when PTY produces output', async () => {
       const dataHandler = vi.fn()
       provider.onData(dataHandler)

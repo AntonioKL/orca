@@ -106,19 +106,25 @@ describe('spawnShellWithFallback on Windows', () => {
       throw new Error(ACCESS_DENIED_5)
     }) as unknown as typeof pty.spawn
 
+    const env = {
+      ORCA_SHELL_COMMAND_NONCE: 'private-nonce',
+      ORCA_SHELL_INTEGRATION_CONTEXT: 'direct'
+    }
     const result = spawnShellWithFallback({
       shellPath: PWSH7,
       shellArgs: attempts[0].shellArgs,
       cols: 80,
       rows: 24,
       cwd: 'C:\\repo',
-      env: {},
+      env,
+      launchEnvKeys: ['ORCA_SHELL_COMMAND_NONCE', 'ORCA_SHELL_INTEGRATION_CONTEXT'],
       ptySpawn,
       windowsFallbackAttempts: attempts
     })
 
     expect(result.shellPath).toBe(CMD)
     expect(result.startupCommandDeliveredInShellArgs).toBe(true)
+    expect(env).toEqual({})
   })
 
   it('throws a descriptive error when every Windows fallback fails', () => {

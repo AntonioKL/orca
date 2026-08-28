@@ -57,6 +57,7 @@ function shellName(shellPath: string): string {
  */
 export function selectShellStartupFeatures(input: ShellStartupFeatureInput): ShellStartupFeature[] {
   const overlay = OVERLAY_ENV_KEYS.some((key) => Boolean(input.env[key]))
+  const supportedCommandMarkerShell = ['bash', 'zsh', 'fish'].includes(shellName(input.shellPath))
   // Exactly the panes Orca wrapped before history widened wrapping.
   const wrappedBefore = overlay || input.hasStartupCommand
   const ready = input.waitsForShellReady
@@ -76,9 +77,7 @@ export function selectShellStartupFeatures(input: ShellStartupFeatureInput): She
   if (history) {
     features.push('history')
   }
-  // Why gated on wrappedBefore: a pane wrapped only for history must stay
-  // observably identical to the unwrapped pane it was before this change.
-  if (wrappedBefore) {
+  if (wrappedBefore || supportedCommandMarkerShell) {
     features.push('markers')
   }
   if (ready) {

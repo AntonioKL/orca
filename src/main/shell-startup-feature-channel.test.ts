@@ -49,7 +49,7 @@ describe('shell startup feature selection', () => {
         env: { ORCA_SHELL_FEATURES: 'overlay,markers,ready,identity,history' },
         ...PLAIN_PANE
       })
-    ).toEqual([])
+    ).toEqual(['markers'])
   })
 
   it('cannot be turned off for a pane that needs a feature', () => {
@@ -61,18 +61,17 @@ describe('shell startup feature selection', () => {
         env: { ORCA_SHELL_FEATURES: '', ORCA_HISTFILE: '/tmp/wt/zsh_history' },
         ...PLAIN_PANE
       })
-    ).toEqual(['history'])
+    ).toEqual(['history', 'markers'])
   })
 
-  it('gives a history-only pane no command markers', () => {
-    // Why: markers would be new output on a pane that emitted none before.
+  it('gives a history-only pane private command markers', () => {
     expect(
       selectShellStartupFeatures({
         shellPath: '/bin/zsh',
         env: { ORCA_HISTFILE: '/tmp/wt/zsh_history' },
         ...PLAIN_PANE
       })
-    ).not.toContain('markers')
+    ).toContain('markers')
   })
 
   it('keeps markers on a pane that already had them', () => {
@@ -85,7 +84,7 @@ describe('shell startup feature selection', () => {
     ).toContain('markers')
   })
 
-  it('does not wrap bash for history alone', () => {
+  it('wraps plain bash for private command markers', () => {
     // Why: bash has no system rc that clobbers HISTFILE, and `--rcfile` would
     // replace its login startup-file chain with Orca's approximation.
     expect(
@@ -94,7 +93,7 @@ describe('shell startup feature selection', () => {
         env: { ORCA_HISTFILE: '/tmp/wt/bash_history' },
         ...PLAIN_PANE
       })
-    ).toEqual([])
+    ).toEqual(['markers'])
   })
 })
 
@@ -141,9 +140,12 @@ describePosix('zsh launch config', () => {
     const config = getShellLaunchConfig('/bin/zsh', ['history'])
 
     expect(config).toEqual({
+      mode: 'unwrapped',
       args: ['-l'],
       env: {},
-      supportsReadyMarker: false
+      supportsReadyMarker: false,
+      supportsCommandMarkers: false,
+      failureReason: 'wrapper-tree-unavailable'
     })
   })
 
@@ -312,9 +314,9 @@ describePosix('history-only pane in a real zsh', () => {
       env: spawnEnv,
       ...PLAIN_PANE
     })
-    expect(features).toEqual(['history'])
+    expect(features).toEqual(['history', 'markers'])
     const { getShellLaunchConfig } = await importFreshLocalPtyShellReady()
-    const launch = getShellLaunchConfig(ZSH_PATH, features)
+    const launch = getShellLaunchConfig(ZSH_PATH, features, { commandNonce: 'test-nonce' })
     return {
       args: launch.args ?? ['-l'],
       env: {
@@ -350,38 +352,34 @@ describePosix('history-only pane in a real zsh', () => {
     expect(output).not.toContain('history')
   })
 
-  itWithZsh(
-    'emits no OSC 133 and leaves a pane observably identical to an unwrapped one',
-    async () => {
-      // Why a PTY: the hook runs from the first prompt's precmd sweep, so a shell
-      // started with -c would report a pane Orca had not finished setting up.
-      const { env } = await launchHistoryOnly()
-      const capture = [
-        'PRECMD="${precmd_functions[*]}"; PREEXEC="${preexec_functions[*]}"',
-        'LINEINIT="${widgets[zle-line-init]:-none}"'
-      ]
-      const report = ['PRECMD', 'PREEXEC', 'LINEINIT', 'ZDOTDIR', 'ORCA_SHELL_FEATURES']
+  itWithZsh('adds command lifecycle hooks while preserving config handback', async () => {
+    // Why a PTY: the hook runs from the first prompt's precmd sweep, so a shell
+    // started with -c would report a pane Orca had not finished setting up.
+    const { env } = await launchHistoryOnly()
+    const capture = [
+      'PRECMD="${precmd_functions[*]}"; PREEXEC="${preexec_functions[*]}"',
+      'LINEINIT="${widgets[zle-line-init]:-none}"'
+    ]
+    const report = ['PRECMD', 'PREEXEC', 'LINEINIT', 'ZDOTDIR', 'ORCA_SHELL_FEATURES']
 
-      const wrapped = await runZshPty({ env, commands: capture, report })
-      const unwrapped = await runZshPty({
-        env: { PATH: '/usr/bin:/bin', HOME: home },
-        commands: capture,
-        report
-      })
+    const wrapped = await runZshPty({ env, commands: capture, report })
+    const unwrapped = await runZshPty({
+      env: { PATH: '/usr/bin:/bin', HOME: home },
+      commands: capture,
+      report
+    })
 
-      expect(wrapped.output).not.toContain('\x1b]133;')
-      // The whole point of removing the hook rather than parking a no-op in its
-      // place: a history-only pane leaves no Orca name in the user's hook arrays.
-      expect(wrapped.values.PRECMD).toBe(unwrapped.values.PRECMD)
-      expect(wrapped.values.PREEXEC).toBe(unwrapped.values.PREEXEC)
-      // Why compared and not pinned to 'none': a host whose global zsh config
-      // installs its own zle-line-init widget has one either way, and what Orca
-      // owes is that it looks the same wrapped as unwrapped.
-      expect(wrapped.values.LINEINIT).toBe(unwrapped.values.LINEINIT)
-      expect(wrapped.values.PRECMD).not.toContain('orca')
-      // ZDOTDIR matches too, because the wrapper hands back exactly what it found.
-      expect(wrapped.values.ZDOTDIR).toBe(unwrapped.values.ZDOTDIR)
-      expect(wrapped.values.ORCA_SHELL_FEATURES).toBe('UNSET')
-    }
-  )
+    expect(wrapped.output).toContain('\x1b]777;orca-cmd;')
+    expect(wrapped.output).toContain('\x1b]133;C\x07')
+    expect(unwrapped.output).not.toContain('\x1b]777;orca-cmd;')
+    expect(wrapped.values.PRECMD).toContain('__orca_osc133_precmd')
+    expect(wrapped.values.PREEXEC).toContain('__orca_osc133_preexec')
+    // Why compared and not pinned to 'none': a host whose global zsh config
+    // installs its own zle-line-init widget has one either way, and what Orca
+    // owes is that it looks the same wrapped as unwrapped.
+    expect(wrapped.values.LINEINIT).toBe(unwrapped.values.LINEINIT)
+    // ZDOTDIR matches too, because the wrapper hands back exactly what it found.
+    expect(wrapped.values.ZDOTDIR).toBe(unwrapped.values.ZDOTDIR)
+    expect(wrapped.values.ORCA_SHELL_FEATURES).toBe('UNSET')
+  })
 })
