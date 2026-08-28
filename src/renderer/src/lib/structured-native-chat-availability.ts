@@ -7,6 +7,12 @@ export function canUseStructuredNativeChat(state: AppState, worktreeId: string):
   if (state.settings?.experimentalStructuredNativeChat !== true) {
     return false
   }
+  // Structured chat has no entry path of its own — it reuses the Chat UI default view. With
+  // Terminal chat selected the toggle is hidden but its persisted value survives, so gate on the
+  // default view too or a stale `true` would silently route new tabs into the structured runtime.
+  if (state.settings?.openAgentTabsInChatByDefault !== true) {
+    return false
+  }
   if (getExecutionHostIdForWorktree(state, worktreeId) !== 'local') {
     return false
   }

@@ -44,6 +44,7 @@ import { hasFeatureInteraction } from '../../../shared/feature-interactions'
 import BrowserPane from './browser-pane/BrowserPane'
 import { RetainedBrowserPaneOverlayLayer } from './browser-pane/assemble-chrome/BrowserPaneOverlayLayer'
 import EmulatorPaneOverlayLayer from './emulator-pane/EmulatorPaneOverlayLayer'
+import StructuredAgentSessionPaneOverlayLayer from './native-chat/StructuredAgentSessionPaneOverlayLayer'
 import { useClientHostedBrowserRows } from '@/lib/pane-manager/client-hosted-browser-row-state'
 import {
   onBrowserGuestPaintRetentionChange,
@@ -1518,12 +1519,7 @@ function Terminal(): React.JSX.Element | null {
     ? Object.hasOwn(tabsByWorktree, activeWorktreeId)
     : false
   useEffect(() => {
-    if (
-      !workspaceSessionReady ||
-      !terminalStartupRestorationReady ||
-      !hydrationSucceeded ||
-      !activeWorktreeId
-    ) {
+    if (!workspaceSessionReady || !terminalStartupRestorationReady || !activeWorktreeId) {
       return
     }
     // Why: host session-tabs are authoritative in the paired web client; a local fallback races the host's initial terminal and duplicates tabs.
@@ -1557,7 +1553,6 @@ function Terminal(): React.JSX.Element | null {
     activeWorktreeId,
     activeWorktreeHasTerminalState,
     createTab,
-    hydrationSucceeded,
     reconcileWorktreeTabModel,
     terminalStartupRestorationReady,
     workspaceSessionReady
@@ -2918,6 +2913,10 @@ const WorktreeSplitSurface = React.memo(function WorktreeSplitSurface({
       {isVisible || backgroundMountTabIds === null ? (
         <EmulatorPaneOverlayLayer worktreeId={worktreeId} isWorktreeActive={isVisible} />
       ) : null}
+      <StructuredAgentSessionPaneOverlayLayer
+        worktreeId={worktreeId}
+        isWorktreeActive={isVisible}
+      />
       <AiVaultSessionDropLayer worktreeId={worktreeId} enabled={isVisible} />
     </div>
   )

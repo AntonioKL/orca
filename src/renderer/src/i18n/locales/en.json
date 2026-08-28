@@ -3276,10 +3276,7 @@
             "ec2adf093e": "Launch {{value0}} in a new terminal",
             "465e432ef1": "Could not build launch command for {{value0}}.",
             "e518f544b1": "No agents detected",
-            "8dea9b5cdf": "No enabled agents",
-            "f378201fbd": "Could not create chat session",
-            "a847779775": "Start Codex without a terminal",
-            "0ea6a78efb": "Chat session"
+            "8dea9b5cdf": "No enabled agents"
           },
           "RecentTabSwitcher": {
             "329638ff6f": "Switch Tab",
@@ -6876,7 +6873,7 @@
             "defaultViewNative": "Chat UI",
             "structuredTitle": "Use updated structured native chat",
             "structuredCopy": "Opt in to the host-owned structured Codex runtime. Off keeps the existing terminal-backed chat path.",
-            "structuredScope": "Local macOS and Linux sessions only for now. Windows, WSL, remote, and SSH sessions continue to use terminal chat.",
+            "structuredScope": "Local macOS and Linux sessions only for now. Windows, WSL, and remote execution hosts (including SSH) continue to use terminal chat.",
             "structuredToggleLabel": "Toggle updated structured native chat"
           },
           "agentDashboard": {
@@ -16063,9 +16060,7 @@
       "nativeChat": {
         "contextMenu": {
           "copy": "Copy"
-        },
-        "structuredSessionLaunchStarting": "Opening Codex chat…",
-        "structuredSessionLaunchInProgress": "Codex chat is still opening"
+        }
       },
       "orca": {
         "profiles": {

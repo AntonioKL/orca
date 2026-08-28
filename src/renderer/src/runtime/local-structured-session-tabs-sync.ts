@@ -2,7 +2,10 @@ import { useEffect } from 'react'
 import { STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY } from '../../../shared/protocol-version'
 import type { RuntimeMobileSessionTabsResult } from '../../../shared/runtime-types'
 import { useAppStore } from '../store'
+import type { WorktreeRuntimeOwnerState } from '../lib/worktree-runtime-owner'
+import { getExecutionHostIdForWorktree } from '../lib/worktree-runtime-owner'
 import { applyWebSessionTabsSnapshot, applyWebSessionTabsStorePatch } from './web-session-tabs-sync'
+import type { WebSessionTabsSyncState } from './web-session-tabs-sync'
 
 export const LOCAL_STRUCTURED_SESSION_OWNER = 'local-structured-session'
 let localStructuredSessionTabsRestorePromise: Promise<void> | null = null
@@ -52,23 +55,40 @@ export function applyStructuredSessionTabSnapshots(
   owner = LOCAL_STRUCTURED_SESSION_OWNER
 ): void {
   const settleStructuredSessionMirror = applyWebSessionTabsStorePatch(
-    (state) => {
-      let next = state
-      for (const snapshot of snapshots) {
-        const patch = applyWebSessionTabsSnapshot(
-          next,
-          projectLocalStructuredSessionTabs(snapshot),
-          owner,
-          Date.now(),
-          { preserveLocalLayout: true, terminalPtyMode: 'local' }
-        )
-        next = patch === next ? next : ({ ...next, ...patch } as typeof state)
-      }
-      return next
-    },
+    (state) => applyLocalStructuredSessionTabSnapshots(state, snapshots, owner),
     { frames: [] }
   )
   settleStructuredSessionMirror()
+}
+
+export function applyLocalStructuredSessionTabSnapshots<
+  State extends WebSessionTabsSyncState & WorktreeRuntimeOwnerState
+>(
+  state: State,
+  snapshots: readonly RuntimeMobileSessionTabsResult[],
+  owner = LOCAL_STRUCTURED_SESSION_OWNER,
+  now = Date.now()
+): State {
+  let next = state
+  for (const snapshot of snapshots) {
+    // Why: the execution host owns its tabs; local inventory must not rewrite paired or SSH panes.
+    if (getExecutionHostIdForWorktree(next, snapshot.worktree) !== 'local') {
+      continue
+    }
+    const patch = applyWebSessionTabsSnapshot(
+      next,
+      projectLocalStructuredSessionTabs(snapshot),
+      owner,
+      now,
+      {
+        contentScope: 'agent-session',
+        preserveLocalLayout: true,
+        terminalPtyMode: 'local'
+      }
+    )
+    next = patch === next ? next : ({ ...next, ...patch } as State)
+  }
+  return next
 }
 
 export function restoreLocalStructuredSessionTabsOnce(): Promise<void> {

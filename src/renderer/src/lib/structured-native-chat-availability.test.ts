@@ -67,7 +67,7 @@ function stateFor(input: {
       }
     ],
     repos: [{ id: 'repo-1', connectionId: input.connectionId ?? null, path: 'C:\\repo' }],
-    settings: { experimentalStructuredNativeChat: true },
+    settings: { experimentalStructuredNativeChat: true, openAgentTabsInChatByDefault: true },
     worktreesByRepo: {
       'repo-1': [
         {
@@ -101,7 +101,37 @@ describe('canUseStructuredNativeChat', () => {
   it('keeps the legacy bridge when the updated runtime is opted out', () => {
     expect(
       canUseStructuredNativeChat(
-        { ...stateFor({}), settings: { experimentalStructuredNativeChat: false } } as AppState,
+        {
+          ...stateFor({}),
+          settings: {
+            experimentalStructuredNativeChat: false,
+            openAgentTabsInChatByDefault: true
+          }
+        } as AppState,
+        'wt-1'
+      )
+    ).toBe(false)
+  })
+
+  it('refuses a stale structured opt-in while the default view is Terminal chat', () => {
+    expect(
+      canUseStructuredNativeChat(
+        {
+          ...stateFor({}),
+          settings: {
+            experimentalStructuredNativeChat: true,
+            openAgentTabsInChatByDefault: false
+          }
+        } as AppState,
+        'wt-1'
+      )
+    ).toBe(false)
+  })
+
+  it('refuses a structured opt-in when the default view was never chosen', () => {
+    expect(
+      canUseStructuredNativeChat(
+        { ...stateFor({}), settings: { experimentalStructuredNativeChat: true } } as AppState,
         'wt-1'
       )
     ).toBe(false)

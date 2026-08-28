@@ -95,8 +95,7 @@ describe('structured chat adoption guard on the launch path', () => {
     store.settings.openAgentTabsInChatByDefault = true
   })
 
-  it('uses the updated structured-chat toggle without the legacy chat-default setting', async () => {
-    store.settings.openAgentTabsInChatByDefault = false
+  it('takes the structured path when the chat-default view is selected', async () => {
     const { launchAgentInNewTab, shouldQueueTerminalFocusAfterMenuClose } =
       await import('./launch-agent-in-new-tab')
 
@@ -111,6 +110,24 @@ describe('structured chat adoption guard on the launch path', () => {
     expect(mockLaunchStructuredCodexSession).toHaveBeenCalledWith('wt-1')
     expect(mockCreateTab).not.toHaveBeenCalled()
     expect(mockWaitForAgentReady).not.toHaveBeenCalled()
+  })
+
+  /** The toggle is hidden under Terminal chat but its persisted value survives, so the launch
+   *  path must re-check the default view rather than trust a stale opt-in. */
+  it('ignores a stale structured opt-in while the default view is Terminal chat', async () => {
+    store.settings.openAgentTabsInChatByDefault = false
+    const { launchAgentInNewTab } = await import('./launch-agent-in-new-tab')
+
+    const result = launchAgentInNewTab({ agent: 'codex', worktreeId: 'wt-1' })
+
+    expect(result?.tabId).toBe('tab-1')
+    expect(mockLaunchStructuredCodexSession).not.toHaveBeenCalled()
+    expect(mockCreateTab).toHaveBeenCalledWith(
+      'wt-1',
+      undefined,
+      undefined,
+      expect.objectContaining({ launchAgent: 'codex' })
+    )
   })
 
   it('surfaces a direct structured launch failure instead of silently doing nothing', async () => {

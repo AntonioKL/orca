@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { SleepingAgentSessionRecord } from '../../../shared/agent-session-resume'
-import { LEGACY_AGENT_SESSION_ID } from '../../../shared/agent-session-record-legacy.test-fixture'
 import { structuredAgentSessionTabId } from '../../../shared/structured-agent-session-projection'
 import type { PtyListedSession } from '../../../shared/pty-listed-session'
 import type { RuntimeMobileSessionTabsResult } from '../../../shared/runtime-types'
@@ -9,6 +8,7 @@ import type { TerminalSlice } from '@/store/slices/terminals'
 import { runWorktreeAgentActivationGate } from './worktree-agent-activation-gate'
 
 const WORKTREE_ID = 'repo::/worktree'
+const STALE_STRUCTURED_SESSION_ID = 'structured-session-stale'
 const LIVE_LEAF_ID = '11111111-1111-4111-8111-111111111111'
 const DEAD_LEAF_ID = '22222222-2222-4222-8222-222222222222'
 
@@ -252,10 +252,10 @@ describe('worktree agent activation gate', () => {
     expect(resume).not.toHaveBeenCalled()
   })
 
-  it('does not activate a terminal for a legacy structured sleeping projection', async () => {
-    const tabId = structuredAgentSessionTabId(LEGACY_AGENT_SESSION_ID)
-    const legacy = sleepingRecord(tabId, LIVE_LEAF_ID, LEGACY_AGENT_SESSION_ID)
-    const { deps, createTab, resume } = testDeps({ structured: true, sleeping: [legacy] })
+  it('does not activate a terminal for a stale structured sleeping projection', async () => {
+    const tabId = structuredAgentSessionTabId(STALE_STRUCTURED_SESSION_ID)
+    const stale = sleepingRecord(tabId, LIVE_LEAF_ID, STALE_STRUCTURED_SESSION_ID)
+    const { deps, createTab, resume } = testDeps({ structured: true, sleeping: [stale] })
 
     await expect(runWorktreeAgentActivationGate(WORKTREE_ID, deps)).resolves.toBe('blocked')
 

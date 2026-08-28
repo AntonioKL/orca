@@ -373,6 +373,7 @@ describe('renderer startup runtime routing', () => {
     expect(reconnectIndex).toBeLessThan(projectIndex)
     expect(projectIndex).toBeLessThan(readyIndex)
     expect(gateBlock).toContain('terminalStartupRestorationReady')
+    expect(gateBlock).not.toContain('hydrationSucceeded')
     expect(gateIndex).toBeGreaterThanOrEqual(0)
     expect(gateIndex).toBeLessThan(createIndex)
     expect(gateBlock.slice(gateIndex, createIndex)).toContain("outcome !== 'empty'")

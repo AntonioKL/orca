@@ -87,15 +87,6 @@ function launchStructuredCodexSessionOnce(worktreeId: string): Promise<string> {
 }
 
 export function startStructuredCodexLaunch(worktreeId: string): void {
-  const alreadyOpening = pendingStructuredLaunchesByWorktree.has(worktreeId)
-  toast.message(
-    translate(
-      alreadyOpening
-        ? 'auto.components.nativeChat.structuredSessionLaunchInProgress'
-        : 'auto.components.nativeChat.structuredSessionLaunchStarting',
-      alreadyOpening ? 'Codex chat is still opening' : 'Opening Codex chat…'
-    )
-  )
   void launchStructuredCodexSessionOnce(worktreeId).catch((error) => {
     toast.error(
       translate(
