@@ -5,6 +5,7 @@ import {
 import type { RecognizedAgentProcess } from '../../../../shared/agent-process-recognition'
 import { recognizeAgentProcess } from '../../../../shared/agent-process-recognition'
 import type { RuntimeTerminalProcessInspection } from '@/runtime/runtime-terminal-inspection'
+import { readPtyProcessInspectionEvidence } from '../../../../shared/pty-process-inspection-evidence'
 import {
   NO_EVIDENCE_ACTIVITY_HOT_WINDOW_MS,
   POLL_TIER_INTERVAL_MS,
@@ -74,18 +75,33 @@ export function createAgentCompletionProcessMonitor({
       scheduleNextPoll()
       return false
     }
-    state.consecutiveInspectionErrors = 0
-    const recognized = recognizeAgentProcess(result.foregroundProcess)
-    if (recognized) {
-      handleRecognizedProcess(recognized)
-      return true
+    const evidence = readPtyProcessInspectionEvidence(result)
+    if (evidence.foreground.verdict === 'observed') {
+      const recognized = recognizeAgentProcess(evidence.foreground.processName)
+      if (recognized) {
+        state.consecutiveInspectionErrors = 0
+        handleRecognizedProcess(recognized)
+        return true
+      }
     }
+    if (
+      evidence.foreground.verdict === 'unverifiable' ||
+      evidence.children.verdict === 'unverifiable'
+    ) {
+      // The host could not ask; that is never exit evidence. Re-arm the
+      // two-sample confirmation like any other failed inspection.
+      state.pendingProcessExitAgent = null
+      state.consecutiveInspectionErrors += 1
+      scheduleNextPoll()
+      return false
+    }
+    state.consecutiveInspectionErrors = 0
     if (hasPendingHookDone() || hasPendingCodexAttention()) {
       scheduleNextPoll()
       return false
     }
     if (state.lastForegroundAgent && state.hasAgentRunEvidence) {
-      if (result.hasChildProcesses) {
+      if (evidence.children.verdict === 'live') {
         state.pendingProcessExitAgent = null
         scheduleNextPoll()
         return false
