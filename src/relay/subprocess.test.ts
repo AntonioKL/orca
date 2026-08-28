@@ -204,7 +204,7 @@ describe('Subprocess: Relay entry point', () => {
     const repairedId = relay.send('pty.spawn', { cols: 80, rows: 24 })
     const repaired = await relay.waitForResponse(repairedId)
     expect(repaired.error).toBeUndefined()
-    expect(repaired.result).toMatchObject({ id: 'pty-1' })
+    expect(repaired.result).toMatchObject({ id: expect.any(String) })
   }, 10_000)
 
   it('reloads node-pty after a late native binding failure without restarting', async () => {
@@ -228,7 +228,7 @@ describe('Subprocess: Relay entry point', () => {
     const repairedId = relay.send('pty.spawn', { cols: 80, rows: 24 })
     const repaired = await relay.waitForResponse(repairedId)
     expect(repaired.error).toBeUndefined()
-    expect(repaired.result).toMatchObject({ id: 'pty-2' })
+    expect(repaired.result).toMatchObject({ id: expect.any(String) })
   }, 10_000)
 
   it('responds to fs.stat over stdin/stdout', async () => {
@@ -768,11 +768,13 @@ describe('Subprocess: Relay entry point', () => {
     expect(resp.error).toBeUndefined()
     const status = resp.result as {
       pid: number
+      ptyIdMintEpoch?: string
       memory: { rss: number }
       ptys: { active: number }
       socket: { owned: boolean; listening: boolean; clients: number }
     }
     expect(status.pid).toBeGreaterThan(0)
+    expect(status.ptyIdMintEpoch).toEqual(expect.any(String))
     expect(status.memory.rss).toBeGreaterThan(0)
     expect(status.ptys.active).toBe(0)
     expect(status.socket).toMatchObject({ owned: true, listening: true, clients: 0 })

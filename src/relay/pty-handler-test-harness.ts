@@ -4,6 +4,16 @@ import * as ptyShellUtils from './pty-shell-utils'
 import { PtyHandler } from './pty-handler'
 import type { RelayDispatcher } from './dispatcher'
 
+export const TEST_PTY_ID_MINT_EPOCH = 'test-mint-epoch'
+
+export function testPtyId(sequence: number): string {
+  return `pty2:${TEST_PTY_ID_MINT_EPOCH}:${sequence}`
+}
+
+export function createTestPtyHandler(dispatcher: MockDispatcher): PtyHandler {
+  return new PtyHandler(dispatcher as unknown as RelayDispatcher, undefined, TEST_PTY_ID_MINT_EPOCH)
+}
+
 export type TestRequestContext = {
   isStale: () => boolean
   signal?: AbortSignal
@@ -108,7 +118,7 @@ export function beginPtyHandlerTest(mocks: PtyHandlerTestMocks): {
   mockPtySpawn.mockReturnValue({ ...mockPtyInstance })
 
   const dispatcher = createMockDispatcher()
-  const handler = new PtyHandler(dispatcher as unknown as RelayDispatcher)
+  const handler = createTestPtyHandler(dispatcher)
   return { dispatcher, handler, originalPlatform }
 }
 

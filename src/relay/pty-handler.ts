@@ -409,7 +409,7 @@ type PtyIdentity = { paneKey?: string; tabId?: string }
 
 /**
  * True when a reattach's expected pane identity contradicts the target PTY's own.
- * Rejects cross-relay-generation id collisions (a reset relay reuses `pty-N`).
+ * Rejects legacy cross-relay-generation id collisions (a reset relay reused `pty-N`).
  * Only compares fields present on both sides; absent identity stays permissive.
  */
 export function attachIdentityMismatches(expected: PtyIdentity, managed: PtyIdentity): boolean {
@@ -435,6 +435,7 @@ export type RelayPtyWorktreeRemovalCoordinator = {
 
 export class PtyHandler {
   private ptys = new Map<string, ManagedPty>()
+  private readonly ptyIdMintEpoch: string
   private nextId = 1
   private dispatcher: RelayDispatcher
   private graceTimeMs: number
@@ -471,12 +472,21 @@ export class PtyHandler {
     Promise<RelayAgentSessionCreateResult>
   >()
 
-  constructor(dispatcher: RelayDispatcher, graceTimeMs = DEFAULT_GRACE_TIME_MS) {
+  constructor(
+    dispatcher: RelayDispatcher,
+    graceTimeMs = DEFAULT_GRACE_TIME_MS,
+    ptyIdMintEpoch: string = randomUUID()
+  ) {
     this.dispatcher = dispatcher
     this.graceTimeMs = graceTimeMs
+    this.ptyIdMintEpoch = ptyIdMintEpoch
     this.registerHandlers()
     this.removeLegacyCapacityListener =
       this.dispatcher.onLegacyPtyCapacity?.(() => this.handleLegacyCapacity()) ?? null
+  }
+
+  get mintEpoch(): string {
+    return this.ptyIdMintEpoch
   }
 
   setConsumerDeliveryPaused(id: string, paused: boolean): void {
@@ -1617,7 +1627,7 @@ export class PtyHandler {
     const shell = resolvedShellOverride || requestedEnvShell || resolveDefaultShell()
     let id: string
     do {
-      id = `pty-${this.nextId++}`
+      id = `pty2:${encodeURIComponent(this.ptyIdMintEpoch)}:${this.nextId++}`
     } while (this.ptys.has(id) || this.pendingReviveIds.has(id))
 
     // Why: augmenter values override renderer env so remote paths and hook coords win over local userData.
