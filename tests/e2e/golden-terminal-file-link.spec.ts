@@ -18,6 +18,11 @@ type LinkClientPoint = { x: number; y: number }
 
 const LINK_SCAN_CHAR_LIMIT = 12_000
 
+function canonicalFileIdentity(value: string): string {
+  const normalized = path.resolve(value).replaceAll('\\', '/')
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized
+}
+
 async function locateLink(page: Page, needle: string): Promise<LinkProbe | null> {
   return page.evaluate((needle) => {
     const state = window.__store?.getState()
@@ -162,14 +167,13 @@ test('opens a terminal file link and observes an external edit @golden', async (
     await expect(explorerRow).toHaveAttribute('data-selected', 'true', { timeout: 10_000 })
     await expect
       .poll(
-        () =>
-          orcaPage.evaluate(
-            (expectedPath) => window.__monacoEditorE2E?.filePath === expectedPath,
-            filePath
+        async () =>
+          canonicalFileIdentity(
+            (await orcaPage.evaluate(() => window.__monacoEditorE2E?.filePath)) ?? ''
           ),
         { timeout: 20_000, message: 'Monaco opened a different file identity' }
       )
-      .toBe(true)
+      .toBe(canonicalFileIdentity(filePath))
 
     writeFileSync(filePath, `${original.trimEnd()}\n\n${changedMarker}\n`)
     await expect
@@ -196,14 +200,18 @@ test('reuses a terminal file link already open in a sibling workspace @golden', 
   test.setTimeout(180_000)
   await waitForSessionReady(orcaPage)
   const sourceWorktreeId = await waitForActiveWorktree(orcaPage)
-  const sibling = await orcaPage.evaluate((sourceId) => {
+  const worktrees = await orcaPage.evaluate((sourceId) => {
     const state = window.__store?.getState()
-    return (
-      Object.values(state?.worktreesByRepo ?? {})
-        .flat()
-        .find((worktree) => worktree.id !== sourceId) ?? null
-    )
+    const entries = Object.values(state?.worktreesByRepo ?? {}).flat()
+    return {
+      source: entries.find((worktree) => worktree.id === sourceId) ?? null,
+      sibling: entries.find((worktree) => worktree.id !== sourceId) ?? null
+    }
   }, sourceWorktreeId)
+  const { source, sibling } = worktrees
+  if (!source) {
+    throw new Error('source worktree fixture unavailable')
+  }
   if (!sibling) {
     throw new Error('sibling worktree fixture unavailable')
   }
@@ -230,9 +238,11 @@ test('reuses a terminal file link already open in a sibling workspace @golden', 
 
   await ensureTerminalVisible(orcaPage)
   await waitForActiveTerminalManager(orcaPage, 30_000)
-  const ptyId = await waitForActivePanePtyId(orcaPage)
+  const ptyId = await waitForActivePanePtyId(orcaPage, 30_000)
   await waitForPtyShellEcho(orcaPage, ptyId, 15_000)
-  const printedPath = process.platform === 'win32' ? filePath.replaceAll('\\', '/') : filePath
+  const relativePath = path.relative(source.path, filePath)
+  const printedPath =
+    process.platform === 'win32' ? relativePath.replaceAll('\\', '/') : relativePath
   const command = nodeTerminalCommand(['-e', `console.log(${JSON.stringify(printedPath)})`])
   await sendToTerminal(orcaPage, ptyId, `${command}\r`)
   await expect
@@ -261,13 +271,18 @@ test('reuses a terminal file link already open in a sibling workspace @golden', 
   await expect(editorHeader).toContainText('package.json', { timeout: 20_000 })
   await expect
     .poll(
-      () =>
-        orcaPage.evaluate(() => ({
-          filePath: window.__monacoEditorE2E?.filePath ?? null,
+      async () => {
+        const rendered = await orcaPage.evaluate(() => ({
+          filePath: window.__monacoEditorE2E?.filePath ?? '',
           activeWorktreeId: window.__store?.getState()?.activeWorktreeId ?? null
-        })),
+        }))
+        return {
+          filePath: canonicalFileIdentity(rendered.filePath),
+          activeWorktreeId: rendered.activeWorktreeId
+        }
+      },
       { timeout: 20_000, message: 'sibling workspace never rendered the linked file' }
     )
-    .toEqual({ filePath, activeWorktreeId: sibling.id })
+    .toEqual({ filePath: canonicalFileIdentity(filePath), activeWorktreeId: sibling.id })
   await expect(orcaPage.getByText('Loading...', { exact: true })).toHaveCount(0)
 })
