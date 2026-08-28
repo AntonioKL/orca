@@ -14,7 +14,7 @@ import {
 // sidebar's StatusIndicator: the dashboard uses a check icon so completion
 // is visually distinct from 'idle' (grey dot) and the sidebar's 'active'
 // (emerald dot), while the sidebar collapses 'done'/'active' to the same
-// emerald dot and relies on a tooltip. It sits next to the agent icon
+// emerald dot with separate accessible text and no tooltip. It sits next to the agent icon
 // (Claude/Codex/etc.) — two distinct glyphs: one for *who* (agent icon) and
 // one for *what state* (this indicator). Keeping them separate keeps each
 // scannable instead of fused into one decorated icon.
@@ -107,7 +107,7 @@ export const AgentStateDot = React.memo(function AgentStateDot({
     // Why: the dashboard lists many agents, so a check glyph scans well for
     // agent-reported completion and keeps 'done' visually distinct from
     // 'idle' and other dot states at a glance. The sidebar's StatusIndicator
-    // intentionally diverges (emerald dot + tooltip) — see file header.
+    // intentionally diverges (emerald dot with separate accessible text) — see file header.
     indicator = (
       <span
         className={cn('inline-flex shrink-0 items-center justify-center', box, className)}
