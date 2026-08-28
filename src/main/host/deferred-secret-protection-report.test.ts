@@ -1,0 +1,112 @@
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { setSecretStore } from '../../shared/secret-store'
+
+type Listener = (...args: unknown[]) => void
+
+const appListeners = new Map<string, Listener[]>()
+
+vi.mock('electron', () => ({
+  app: {
+    once: (event: string, listener: Listener) => {
+      const existing = appListeners.get(event) ?? []
+      existing.push(listener)
+      appListeners.set(event, existing)
+    }
+  }
+}))
+
+const { scheduleSecretProtectionGapReport } = await import('./deferred-secret-protection-report')
+
+/** Stands in for the BrowserWindow the app creates first. */
+function fakeWindow(): { once: (event: string, listener: Listener) => void; reveal: () => void } {
+  const listeners: Listener[] = []
+  return {
+    once: (event, listener) => {
+      if (event === 'ready-to-show') {
+        listeners.push(listener)
+      }
+    },
+    reveal: () => listeners.splice(0).forEach((listener) => listener())
+  }
+}
+
+function createWindow(): ReturnType<typeof fakeWindow> {
+  const window = fakeWindow()
+  appListeners.get('browser-window-created')?.splice(0).forEach((listener) => listener({}, window))
+  return window
+}
+
+describe('scheduleSecretProtectionGapReport', () => {
+  let dir: string
+  let dataFile: string
+  let probes: number
+  let logged: string[]
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    appListeners.clear()
+    dir = mkdtempSync(join(tmpdir(), 'orca-deferred-secret-report-'))
+    dataFile = join(dir, 'orca-data.json')
+    probes = 0
+    logged = []
+    setSecretStore({
+      isEncryptionAvailable: () => true,
+      encryptString: (plainText) => Buffer.from(plainText),
+      decryptString: (cipher) => cipher.toString(),
+      describeProtectionGap: () => {
+        // Why count here: this is the call that blocks on the OS keyring.
+        probes += 1
+        return 'The OS keyring is unavailable.'
+      }
+    })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  const schedule = (): void =>
+    scheduleSecretProtectionGapReport({ dataFile, log: (m) => void logged.push(m) })
+
+  it('does not probe the keyring while the first window is still being created', () => {
+    // Why this is the regression: probing here blocked the window for 76s on a locked
+    // Linux keyring, which reads to the user as "the app will not open" (STA-5765).
+    schedule()
+    createWindow()
+    expect(probes).toBe(0)
+    expect(logged).toEqual([])
+  })
+
+  it('probes once the window is ready to show', () => {
+    schedule()
+    const window = createWindow()
+    window.reveal()
+    vi.runAllTimers()
+    expect(probes).toBe(1)
+    expect(logged).toEqual(['[secrets] The OS keyring is unavailable.'])
+  })
+
+  it('still reports when ready-to-show never fires, so a failed reveal is not silent', () => {
+    // Why: a GPU/driver failure can keep ready-to-show from ever firing, and headless
+    // serve has no window at all.
+    schedule()
+    createWindow()
+    vi.advanceTimersByTime(15_000)
+    vi.runAllTimers()
+    expect(probes).toBe(1)
+  })
+
+  it('probes only once when the window reveals and the fallback also elapses', () => {
+    schedule()
+    const window = createWindow()
+    window.reveal()
+    vi.runAllTimers()
+    vi.advanceTimersByTime(60_000)
+    vi.runAllTimers()
+    expect(probes).toBe(1)
+  })
+})
