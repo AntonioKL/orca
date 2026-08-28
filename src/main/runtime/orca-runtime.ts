@@ -34091,8 +34091,13 @@ export class OrcaRuntimeService {
           this.markPtyLivenessUnverifiable(leaf.ptyId, unlistedPresence.reason)
           break
         case 'live':
-          // The rescue observed the pane; any recorded lost-contact doubt is stale.
-          this.forgetPtyLivenessVerdict(leaf.ptyId)
+          // The rescue observed the pane, so recorded lost-contact doubt is stale
+          // — but only clear it while the leaf still publishes as connected.
+          // Dropping it under `connected:false` leaves no verdict at all, and
+          // worker observation reads that pair as a confirmed exit.
+          if (leaf.connected) {
+            this.forgetPtyLivenessVerdict(leaf.ptyId)
+          }
           break
         case 'exited':
           provenAbsent = isConfirmedPtyAbsence(unlistedPresence)
