@@ -62,11 +62,11 @@ const LEGACY_ENTRY: AutomationHostCatalogEntry = {
 function control(
   projects: Repo[],
   entries: AutomationHostCatalogEntry[] = [ENTRY],
-  note?: string
+  moveWarning?: string
 ): AutomationCreateDestinationControl {
   return {
     entries,
-    note,
+    moveWarning,
     resolution: {
       status: 'ready',
       authority: OWNER.authority,
@@ -78,11 +78,15 @@ function control(
   }
 }
 
-function render(projects: Repo[], entries?: AutomationHostCatalogEntry[], note?: string): void {
+function render(
+  projects: Repo[],
+  entries?: AutomationHostCatalogEntry[],
+  moveWarning?: string
+): void {
   act(() => {
     root.render(
       <TooltipProvider>
-        <AutomationDestinationField control={control(projects, entries, note)} />
+        <AutomationDestinationField control={control(projects, entries, moveWarning)} />
       </TooltipProvider>
     )
   })
@@ -109,8 +113,10 @@ describe('AutomationDestinationField', () => {
   it('names the hosts a server update would let create, instead of hiding them', () => {
     render([{ id: 'repo-1' } as Repo], [ENTRY, LEGACY_ENTRY])
 
-    const note = container.querySelector('[data-testid="automation-create-update-required"]')
-    expect(note?.textContent).toContain('legacy-box')
+    const updateRequired = container.querySelector(
+      '[data-testid="automation-create-update-required"]'
+    )
+    expect(updateRequired?.textContent).toContain('legacy-box')
   })
 
   it('says nothing about updates when every offered host is eligible', () => {

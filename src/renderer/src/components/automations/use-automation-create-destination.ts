@@ -35,8 +35,8 @@ export type AutomationCreateDestinationControl = {
   onSelect: (stableKey: string) => void
   /** Projects the resolved destination can hold; the whole list until one resolves. */
   projects: readonly Repo[]
-  /** Stated consequence of saving here, when it is not the plain one. */
-  note?: string | null
+  /** Set when saving would move the record to another host; replaces the plain line. */
+  moveWarning?: string | null
 }
 
 export type AutomationCreateDestinationCheck =

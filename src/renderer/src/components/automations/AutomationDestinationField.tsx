@@ -79,11 +79,11 @@ export function AutomationDestinationField({
             'No projects are set up on {host}. Add one there, or choose another host.'
           ).replace('{host}', selected.label)}
         </p>
-      ) : control.note ? (
+      ) : control.moveWarning ? (
         // Replaces the storedOn line: both name the same host, and the move is
         // the consequential half.
         <p className="text-xs text-destructive" data-testid="automation-host-move">
-          {control.note}
+          {control.moveWarning}
         </p>
       ) : (
         <p className="text-xs text-muted-foreground">

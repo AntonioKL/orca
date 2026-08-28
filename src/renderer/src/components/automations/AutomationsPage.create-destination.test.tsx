@@ -464,7 +464,7 @@ describe('AutomationsPage edit destination', () => {
     expect(mocks.editorDialog?.editDestination?.entries.map((entry) => entry.stableKey)).toContain(
       RUNTIME_SELF_KEY
     )
-    expect(mocks.editorDialog?.editDestination?.note).toBeFalsy()
+    expect(mocks.editorDialog?.editDestination?.moveWarning).toBeFalsy()
   })
 
   it('moves the record across authorities by creating there and deleting here', async () => {
@@ -484,7 +484,7 @@ describe('AutomationsPage edit destination', () => {
       mocks.editorDialog?.editDestination?.onSelect(RUNTIME_SELF_KEY)
     })
 
-    expect(mocks.editorDialog?.editDestination?.note).toBeTruthy()
+    expect(mocks.editorDialog?.editDestination?.moveWarning).toBeTruthy()
 
     await act(async () => {
       mocks.editorDialog?.onDraftChange((current) => ({

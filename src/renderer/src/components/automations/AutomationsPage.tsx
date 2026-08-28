@@ -1143,7 +1143,7 @@ export default function AutomationsPage(): React.JSX.Element {
     onSelect: handleEditHostChange,
     projects: editHostProjects,
     // Replacer fn: a literal replacement would expand `$` patterns in host labels.
-    note: editMoveTargetEntry
+    moveWarning: editMoveTargetEntry
       ? translate(
           'auto.components.automations.createDestination.move',
           'Saving creates this automation on {host} and deletes the original and its run history.'
