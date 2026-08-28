@@ -1795,7 +1795,7 @@ export class PtyHandler {
       throw new Error(`PTY "${id}" not found`)
     }
 
-    // Why: generation resets can reuse PTY IDs; reject conflicting identities.
+    // Why: legacy `pty-N` ids repeated across relay generations; reject conflicting identities.
     const mismatch = attachIdentityMismatches(
       {
         paneKey: typeof params.expectedPaneKey === 'string' ? params.expectedPaneKey : undefined,

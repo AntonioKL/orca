@@ -316,6 +316,24 @@ describe('PtyHandler', () => {
     expect(second.id).not.toBe(first.id)
   })
 
+  it('escapes the mint epoch so it cannot forge the id separators', async () => {
+    await handler.dispose({ waitForPhysicalExit: false })
+    dispatcher = createMockDispatcher()
+    // Why: the epoch is constructor-supplied. Encoding is what keeps a minted id
+    // exactly three fields, so it can never be read as another epoch/sequence and
+    // can never smuggle the `@@` that app-side SSH id routing splits on.
+    handler = new PtyHandler(dispatcher as unknown as RelayDispatcher, undefined, 'a:b@@c:9')
+
+    const spawned = (await dispatcher.callRequest('pty.spawn', {})) as { id: string }
+
+    const [prefix, epoch, sequence, ...extra] = spawned.id.split(':')
+    expect(extra).toEqual([])
+    expect(prefix).toBe('pty2')
+    expect(decodeURIComponent(epoch)).toBe('a:b@@c:9')
+    expect(sequence).toBe('1')
+    expect(spawned.id).not.toContain('@@')
+  })
+
   it('revives a legacy id and advances the legacy sequence', async () => {
     const state = JSON.stringify([
       { id: 'pty-7', pid: process.pid, cols: 80, rows: 24, cwd: process.cwd() }
