@@ -40,6 +40,8 @@ type NewWorkspaceComposerAdvancedSectionProps = Pick<
   | 'onBranchNameOverrideChange'
   | 'parentWorktreeId'
   | 'onParentWorktreeIdChange'
+  | 'selectedRepoExecutionHostId'
+  | 'selectedRepoProjectId'
   | 'activeFolderWorkspaceId'
   | 'note'
   | 'onNoteChange'
@@ -80,6 +82,8 @@ export function NewWorkspaceComposerAdvancedSection({
   onBranchNameOverrideChange,
   parentWorktreeId = null,
   onParentWorktreeIdChange,
+  selectedRepoExecutionHostId,
+  selectedRepoProjectId,
   activeFolderWorkspaceId = null,
   note,
   onNoteChange,
@@ -201,6 +205,8 @@ export function NewWorkspaceComposerAdvancedSection({
           {selectedRepoIsGit && branchesEnabled && onParentWorktreeIdChange ? (
             <ComposerParentWorktreePicker
               repoId={repoId}
+              executionHostId={selectedRepoExecutionHostId}
+              projectId={selectedRepoProjectId}
               value={parentWorktreeId}
               onChange={onParentWorktreeIdChange}
               activeFolderWorkspaceId={activeFolderWorkspaceId}

@@ -57,6 +57,8 @@ export default function NewWorkspaceComposerCard(
     selectedProjectId = null,
     parentWorktreeId,
     onParentWorktreeIdChange,
+    selectedRepoExecutionHostId,
+    selectedRepoProjectId,
     activeFolderWorkspaceId,
     onAddProjectOverride,
     onNestedDialogOpenChange
@@ -307,6 +309,8 @@ export default function NewWorkspaceComposerCard(
           showSetupAgentStartupPolicy={showSetupAgentStartupPolicy}
           parentWorktreeId={parentWorktreeId}
           onParentWorktreeIdChange={onParentWorktreeIdChange}
+          selectedRepoExecutionHostId={selectedRepoExecutionHostId}
+          selectedRepoProjectId={selectedRepoProjectId}
           activeFolderWorkspaceId={activeFolderWorkspaceId}
         />
       </div>

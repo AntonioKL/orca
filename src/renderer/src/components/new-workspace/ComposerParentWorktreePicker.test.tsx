@@ -323,6 +323,57 @@ describe('ComposerParentWorktreePicker', () => {
     expect(candidateLabels().join(' ')).not.toContain('Other repo')
   })
 
+  it('excludes candidates on another execution host or project', () => {
+    seed([
+      makeWorktree({ id: 'same', displayName: 'Same host', hostId: 'local', projectId: 'proj1' }),
+      makeWorktree({
+        id: 'otherHost',
+        displayName: 'Other host',
+        hostId: 'ssh:box',
+        projectId: 'proj1'
+      }),
+      makeWorktree({
+        id: 'otherProject',
+        displayName: 'Other project',
+        hostId: 'local',
+        projectId: 'proj2'
+      })
+    ])
+
+    render(
+      <ComposerParentWorktreePicker
+        repoId={REPO_ID}
+        executionHostId="local"
+        projectId="proj1"
+        value={null}
+        onChange={vi.fn()}
+      />
+    )
+    fireEvent.click(trigger())
+
+    expect(candidateLabels().join(' ')).toContain('Same host')
+    expect(candidateLabels().join(' ')).not.toContain('Other host')
+    expect(candidateLabels().join(' ')).not.toContain('Other project')
+  })
+
+  // A worktree with no recorded hostId inherits its repo's host, which is the child's host too.
+  it('keeps candidates whose host or project is unrecorded', () => {
+    seed([makeWorktree({ id: 'unscoped', displayName: 'Unscoped' })])
+
+    render(
+      <ComposerParentWorktreePicker
+        repoId={REPO_ID}
+        executionHostId="local"
+        projectId="proj1"
+        value={null}
+        onChange={vi.fn()}
+      />
+    )
+    fireEvent.click(trigger())
+
+    expect(candidateLabels().join(' ')).toContain('Unscoped')
+  })
+
   it('restricts candidates to the active folder workspace subtree', () => {
     const attached = makeWorktree({
       id: 'attached',

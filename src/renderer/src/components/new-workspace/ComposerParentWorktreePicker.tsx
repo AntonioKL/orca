@@ -117,7 +117,7 @@ function ComposerParentWorktreePickerImpl({
   return (
     <div className="space-y-1.5">
       <span id={labelId} className="block text-xs font-medium text-muted-foreground">
-        {translate('auto.components.ComposerParentWorktreePicker.label', 'Parent workspace')}
+        {translate('auto.components.ComposerParentWorktreePicker.label', 'Parent worktree')}
       </span>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
@@ -225,8 +225,14 @@ function ParentWorktreeCandidateList({
   const [highlightedIndex, setHighlightedIndex] = useState(0)
 
   const candidates = useMemo(() => {
-    const childBoundary: WorktreeLineageBoundary | null =
-      executionHostId && projectId ? { repoId, hostId: executionHostId, projectId } : null
+    // Why `?? undefined`: an unresolved host or project is "not known yet", not "no host", and
+    // the boundary check reads undefined on either side as a wildcard. A candidate in this repo
+    // with no recorded hostId inherits that repo's host, so it is on the child's host too.
+    const childBoundary: WorktreeLineageBoundary = {
+      repoId,
+      hostId: executionHostId ?? undefined,
+      projectId: projectId ?? undefined
+    }
     const worktreeMap = getIndexedWorktreeMap(worktreesByRepo)
     const cyclicLineageIds = getCyclicProjectedWorktreeLineageIds(worktreeLineageById, worktreeMap)
     const folderSubtreeIds = activeFolderWorkspaceId
@@ -241,9 +247,8 @@ function ParentWorktreeCandidateList({
       .filter(
         (candidate) =>
           candidate.repoId === repoId &&
-          (executionHostId === undefined || candidate.hostId === executionHostId) &&
           !candidate.isArchived &&
-          (childBoundary === null || sharesWorktreeLineageBoundary(childBoundary, candidate)) &&
+          sharesWorktreeLineageBoundary(childBoundary, candidate) &&
           !cyclicLineageIds.has(candidate.id) &&
           (folderSubtreeIds === null || folderSubtreeIds.has(candidate.id))
       )
