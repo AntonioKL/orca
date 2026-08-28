@@ -379,6 +379,32 @@ describe('useStructuredAgentSessionOutbox', () => {
     })
   })
 
+  it('drops a session error on switch and does not resurrect it on return', async () => {
+    const redispatch = deferred<ReturnType<typeof acceptedResult>>()
+    mocks.call
+      .mockResolvedValueOnce(refusedResult('agent_session_checkpoint_stale'))
+      .mockReturnValueOnce(redispatch.promise)
+    const { result, rerender } = renderHook(
+      ({ sessionId }: { sessionId: string }) =>
+        useStructuredAgentSessionOutbox({
+          sessionId,
+          target: LOCAL_TARGET,
+          fence: 1,
+          submissions: []
+        }),
+      { initialProps: { sessionId: 'session-1' } }
+    )
+
+    act(() => expect(result.current.send('hello')).toBe(true))
+    await waitFor(() => expect(result.current.error).toBe('agent_session_checkpoint_stale'))
+
+    rerender({ sessionId: 'session-2' })
+    expect(result.current.error).toBeNull()
+
+    rerender({ sessionId: 'session-1' })
+    expect(result.current.error).toBeNull()
+  })
+
   it('invalidates an old dispatch before it settles during a session switch', async () => {
     const oldDispatch = deferred<ReturnType<typeof refusedResult>>()
     const sessionTwoCommitted = deferred<void>()
