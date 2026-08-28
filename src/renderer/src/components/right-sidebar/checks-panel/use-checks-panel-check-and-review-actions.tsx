@@ -15,6 +15,7 @@ import { isMacPlatform } from '../../terminal-pane/terminal-link-open-hints'
 import { translate } from '@/i18n/i18n'
 import type { PRCheckDetail, PRCheckRunDetails } from '../../../../../shared/github/check-types'
 import type { GitHubPRStackMapNavigationModifiers } from '../GitHubPRStackMap'
+import { openGitHubPRLinkModal } from '../github-pr-link-modal'
 import type { ChecksPanelCheckAndReviewActionsInput } from './check-and-review-action-dependencies'
 import { useUnlinkGitHubPullRequest } from './use-unlink-github-pull-request'
 
@@ -363,22 +364,13 @@ export function useChecksPanelCheckAndReviewActions(model: ChecksPanelCheckAndRe
       if (!activeWorktreeId || !activeWorktree) {
         return
       }
-      openModal('edit-meta', {
+      openGitHubPRLinkModal({
+        openModal,
+        worktree: activeWorktree,
         worktreeId: activeWorktreeId,
-        // Why: the same workspace ID can exist under two hosts. Naming the owner
-        // keeps the dialog on this workspace instead of the ambiguous lookup.
-        repoId: activeWorktree.repoId,
-        executionHostId: activeWorktree.hostId,
-        currentDisplayName: activeWorktree.displayName,
-        currentIssue: activeWorktree.linkedIssue,
         currentPR,
-        currentComment: activeWorktree.comment,
-        focus: 'pr',
-        afterSave: ({ updates }: { updates?: { linkedPR?: unknown } }) => {
-          const nextLinkedPR = updates?.linkedPR
-          if (typeof nextLinkedPR === 'number') {
-            void refreshLinkedGitHubPullRequest(nextLinkedPR)
-          }
+        afterLinked: (linkedPR) => {
+          void refreshLinkedGitHubPullRequest(linkedPR)
         }
       })
     },
