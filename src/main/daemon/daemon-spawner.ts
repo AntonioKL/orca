@@ -343,27 +343,40 @@ export function restoreClaimedDaemonArtifact(
   claimedPath: string,
   canonicalPath: string,
   operations: {
+    linkExclusive?: (source: string, target: string) => void
     copyExclusive?: (source: string, target: string) => void
     canonicalExists?: (path: string) => boolean
   } = {}
 ): boolean {
+  const linkExclusive = operations.linkExclusive ?? linkSync
   const copyExclusive =
     operations.copyExclusive ??
     ((source: string, target: string) => copyFileSync(source, target, constants.COPYFILE_EXCL))
   const canonicalExists = operations.canonicalExists ?? existsSync
   try {
-    // Why: exclusive restore never overwrites a newer canonical replacement.
-    copyExclusive(claimedPath, canonicalPath)
+    // Why link and not copy: a copy creates the canonical entry and only then streams into
+    // it, so a concurrent reader can catch the record half-written — the same torn record
+    // publishDaemonPidFile links to avoid, and the one nothing heals for a retired protocol
+    // version. link is exclusive too, so a restore still never overwrites a newer canonical
+    // replacement; that invariant is preserved here, not traded away for atomicity.
+    linkExclusive(claimedPath, canonicalPath)
     return true
   } catch (error) {
-    // Why: copy failures can leave a partial canonical file. Only EEXIST proves
-    // another owner had already installed a replacement before our copy.
-    return (
-      typeof error === 'object' &&
-      error !== null &&
-      'code' in error &&
-      error.code === 'EEXIST' &&
-      canonicalExists(canonicalPath)
-    )
+    if (isExistingFileError(error)) {
+      // Why no copy attempt after this: EEXIST already proves a replacement holds the name,
+      // and an exclusive copy could only fail the same way against a live record.
+      return canonicalExists(canonicalPath)
+    }
+    try {
+      // Why: hard links are unsupported on some volumes (exFAT, network mounts). The
+      // exclusive copy is exactly the pre-atomic behaviour, so those filesystems keep a
+      // restorable record instead of losing the claim entirely.
+      copyExclusive(claimedPath, canonicalPath)
+      return true
+    } catch (copyError) {
+      // Why: copy failures can leave a partial canonical file. Only EEXIST proves
+      // another owner had already installed a replacement before our copy.
+      return isExistingFileError(copyError) && canonicalExists(canonicalPath)
+    }
   }
 }

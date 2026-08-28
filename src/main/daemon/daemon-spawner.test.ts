@@ -202,9 +202,15 @@ describe('DaemonSpawner', () => {
 })
 
 describe('restoreClaimedDaemonArtifact', () => {
+  /** Routes past the hard-link publish so these cases drive the copy degrade explicitly. */
+  const linkUnsupported = (): never => {
+    throw Object.assign(new Error('injected ENOTSUP'), { code: 'ENOTSUP' })
+  }
+
   it('retains the unique claim when restoration fails without a replacement', () => {
     expect(
       restoreClaimedDaemonArtifact('/claimed', '/canonical', {
+        linkExclusive: linkUnsupported,
         copyExclusive: () => {
           throw new Error('injected ENOSPC')
         },
@@ -219,6 +225,7 @@ describe('restoreClaimedDaemonArtifact', () => {
     try {
       expect(
         restoreClaimedDaemonArtifact('/claimed', canonicalPath, {
+          linkExclusive: linkUnsupported,
           copyExclusive: () => {
             writeFileSync(canonicalPath, 'partial')
             throw Object.assign(new Error('injected ENOSPC'), { code: 'ENOSPC' })
@@ -234,12 +241,14 @@ describe('restoreClaimedDaemonArtifact', () => {
   it('allows claim cleanup after successful restore or a confirmed replacement', () => {
     expect(
       restoreClaimedDaemonArtifact('/claimed', '/canonical', {
+        linkExclusive: linkUnsupported,
         copyExclusive: () => {},
         canonicalExists: () => false
       })
     ).toBe(true)
     expect(
       restoreClaimedDaemonArtifact('/claimed', '/canonical', {
+        linkExclusive: linkUnsupported,
         copyExclusive: () => {
           throw Object.assign(new Error('injected EEXIST'), { code: 'EEXIST' })
         },
