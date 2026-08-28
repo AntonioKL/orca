@@ -9,24 +9,22 @@ const PATCH = readFileSync(
   'utf8'
 )
 const PACKAGE_DIR = join(projectDir, 'node_modules', '@vscode', 'windows-process-tree')
-const LOCAL_GYP = '../../node-addon-api/node_addon_api.gyp'
 const RESOLVED_GYP = "require.resolve('node-addon-api/node_addon_api.gyp')"
 
 describe('windows-process-tree node-addon-api gyp path', () => {
-  it('keeps the gyp project path local so pnpm Windows source builds find it', () => {
-    expect(PATCH).toContain(
-      '+        "../../node-addon-api/node_addon_api.gyp:node_addon_api_except",'
-    )
+  it('stages headers without a pnpm-sensitive gyp dependency', () => {
+    expect(PATCH).not.toContain('+        "../../node-addon-api')
+    expect(PATCH).toContain('+          "include_dirs": ["deps/node-addon-api"],')
+    expect(PATCH).toContain('+          "defines": ["NAPI_CPP_EXCEPTIONS", "_HAS_EXCEPTIONS=1"],')
     const buildScript = readFileSync(
       join(projectDir, 'config/scripts/build-windows-process-tree-relay-addon.mjs'),
       'utf8'
     )
-    expect(buildScript).toContain(LOCAL_GYP)
+    expect(buildScript).toContain("for (const header of ['napi.h', 'napi-inl.h'])")
     expect(buildScript).toContain('Repaired un-applied pnpm patch hunks before build.')
   })
 
   it('resolves node_addon_api.gyp to a real file from the package directory', () => {
-    expect(existsSync(resolve(PACKAGE_DIR, LOCAL_GYP))).toBe(true)
     const resolved = execFileSync(process.execPath, ['-p', RESOLVED_GYP], {
       cwd: PACKAGE_DIR,
       encoding: 'utf8'
