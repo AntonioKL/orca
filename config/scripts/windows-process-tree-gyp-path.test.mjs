@@ -21,6 +21,7 @@ describe('windows-process-tree node-addon-api gyp path', () => {
       'utf8'
     )
     expect(buildScript).toContain("for (const header of ['napi.h', 'napi-inl.h'])")
+    expect(buildScript).toContain("import { dirname, join, resolve } from 'node:path'")
     expect(buildScript).toContain('Repaired un-applied pnpm patch hunks before build.')
   })
 

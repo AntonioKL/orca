@@ -29,7 +29,7 @@ import {
   readSync,
   writeFileSync
 } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { RELAY_WINDOWS_PROCESS_TREE_FILENAME } from '../../src/shared/relay-artifacts.ts'
 
 const ROOT = resolve(import.meta.dirname, '..', '..')
