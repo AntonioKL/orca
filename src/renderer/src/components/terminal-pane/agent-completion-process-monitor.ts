@@ -103,8 +103,12 @@ export function createAgentCompletionProcessMonitor({
     }
     if (state.lastForegroundAgent && state.hasAgentRunEvidence) {
       // Completion requires the positively matched 'exited' arm — "not live"
-      // is not exit evidence (the #16900/#16908 polarity rule).
-      if (evidence.children.verdict !== 'exited') {
+      // is not exit evidence (the #16900/#16908 polarity rule). The legacy
+      // boolean still gets a vote in the one direction it is not lossy: only
+      // its `false` conflates "no children" with "could not ask", while every
+      // producer sets `true` from a positive observation. So a `true` beside a
+      // disagreeing 'exited' must refuse, exactly as the boolean-only gate did.
+      if (evidence.children.verdict !== 'exited' || result.hasChildProcesses) {
         state.pendingProcessExitAgent = null
         scheduleNextPoll()
         return false
