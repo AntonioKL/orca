@@ -219,13 +219,21 @@ function checkoutModulePath(checkout: ReleaseCheckout, rootRelativePath: string)
   return absolute.split('\\').join('/')
 }
 
-/** Import a source module with `/src/...` anchored to the extracted release root. */
+/**
+ * Import a source module with `/src/...` anchored to the extracted release root.
+ *
+ * The specifier handed to `importModule` is a raw absolute forward-slash path,
+ * never a `file://` URL: CI vite-node resolves URL specifiers as root-relative
+ * ids and fails with `ERR_MODULE_NOT_FOUND` (run 33049571360). `importModule`
+ * is injectable only so tests can pin that contract deterministically.
+ */
 export function importReleaseCheckoutModule(
   checkout: ReleaseCheckout,
-  rootRelativePath: string
+  rootRelativePath: string,
+  importModule: (specifier: string) => Promise<Record<string, unknown>> = (specifier) =>
+    import(/* @vite-ignore */ specifier) as Promise<Record<string, unknown>>
 ): Promise<Record<string, unknown>> {
-  const specifier = checkoutModulePath(checkout, rootRelativePath)
-  return import(/* @vite-ignore */ specifier) as Promise<Record<string, unknown>>
+  return importModule(checkoutModulePath(checkout, rootRelativePath))
 }
 
 /**
