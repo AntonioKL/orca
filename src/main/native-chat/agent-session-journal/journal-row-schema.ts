@@ -12,6 +12,10 @@ import {
   type AgentJournalMessageItem,
   type AgentSessionProviderHandle
 } from '../../../shared/agent-session-journal-types'
+import {
+  isAdmissibleAgentJournalItemBody,
+  isAdmissibleAgentJournalMessageBody
+} from '../../../shared/agent-session-journal-schemas'
 
 type JournalRowBase = {
   /** Schema version of THIS row. */
@@ -138,14 +142,12 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/** Every render body is a kinded object; anything else would poison the reducer. */
-function isKindedBody(value: unknown): boolean {
-  return isPlainObject(value) && typeof value.kind === 'string' && value.kind.length > 0
-}
-
-/** Field values are type-checked, never enum-checked: a future build adding a
- *  dispatch state or handle kind must bump the row version, but this build
- *  should not misread a same-version row as malformed over a wider enum. */
+/** Open field values are type-checked, never enum-checked: a future build
+ *  adding a dispatch state or handle kind must bump the row version, but this
+ *  build should not misread a same-version row as malformed over a wider enum.
+ *  Render BODIES are the exception and validate against the canonical deep
+ *  schema — their nested shapes are dereferenced unguarded all the way to the
+ *  rendered surface, so a JSON-valid corruption must fail here, not there. */
 function isJournalRow(record: Record<string, unknown>): record is JournalRow {
   if (typeof record.kind !== 'string' || !ROW_KINDS.has(record.kind)) {
     return false
@@ -164,7 +166,7 @@ function isJournalRow(record: Record<string, unknown>): record is JournalRow {
     return (
       typeof record.itemId === 'string' &&
       Number.isInteger(record.revision) &&
-      isKindedBody(record.body)
+      isAdmissibleAgentJournalItemBody(record.body)
     )
   }
   if (record.kind === 'tombstone') {
@@ -176,7 +178,7 @@ function isJournalRow(record: Record<string, unknown>): record is JournalRow {
       record.clientMessageId.length > 0 &&
       typeof record.payloadFingerprint === 'string' &&
       isPlainObject(record.providerHandle) &&
-      isKindedBody(record.body)
+      isAdmissibleAgentJournalMessageBody(record.body)
     )
   }
   if (record.kind === 'dispatch') {

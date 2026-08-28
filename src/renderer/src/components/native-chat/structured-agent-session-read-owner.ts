@@ -80,13 +80,13 @@ function createReadOwner(
       setSnapshot({ ...snapshot, providerSession })
     }
   }
-  const refreshTail = async (isStopped: () => boolean): Promise<void> => {
+  const refreshTail = async (shouldStop: () => boolean): Promise<void> => {
     const result = await callStructuredAgentSession<AgentSessionHistoryResult>(
       target,
       'agentSession.history',
       { sessionId, direction: 'tail', limit: AGENT_SESSION_HISTORY_MAX_LIMIT }
     )
-    if (isStopped()) {
+    if (shouldStop()) {
       return
     }
     setProviderSession(result.providerSession)
@@ -107,7 +107,7 @@ function createReadOwner(
     let restored = snapshot.state.items.filter(countsTowardInitialHistory).length
     while (snapshot.state.hasOlder && restored < NATIVE_CHAT_INITIAL_LIMIT) {
       const oldest = oldestStructuredAgentSessionCursor(snapshot.state)
-      if (!oldest || isStopped()) {
+      if (!oldest || shouldStop()) {
         break
       }
       const missing = NATIVE_CHAT_INITIAL_LIMIT - restored
@@ -121,6 +121,9 @@ function createReadOwner(
           limit: Math.min(AGENT_SESSION_HISTORY_MAX_LIMIT, missing)
         }
       )
+      if (shouldStop()) {
+        return
+      }
       if (!older.ok || older.page.window.oldest?.sequence === oldest.sequence) {
         break
       }

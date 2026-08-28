@@ -196,6 +196,65 @@ describe('useStructuredAgentSessionRead history window', () => {
     hasFocus.mockRestore()
   })
 
+  it('drops a delayed refresh after reconnect without mutating state or provider session', async () => {
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+    const delayedRefresh = Promise.withResolvers<{
+      ok: true
+      page: AgentSessionHistoryPage
+      providerSession: { key: 'session_id'; id: string }
+    }>()
+    const closes: (() => void)[] = []
+    const initialProviderSession = { key: 'session_id', id: 'provider-initial' } as const
+    mocks.call
+      .mockResolvedValueOnce({
+        ok: true,
+        page: page('tail', [message('initial', 1, 'assistant')], false),
+        providerSession: initialProviderSession
+      })
+      .mockReturnValueOnce(delayedRefresh.promise)
+    mocks.subscribe.mockImplementation((_target, _params, _onEvent, _onError, onClose) => {
+      closes.push(onClose)
+      return Promise.resolve({ unsubscribe: vi.fn() })
+    })
+
+    const view = renderHook(() =>
+      useStructuredAgentSessionRead({ sessionId: 'session-a', target: LOCAL_TARGET })
+    )
+
+    try {
+      await waitFor(() => expect(mocks.subscribe).toHaveBeenCalledOnce())
+      expect(view.result.current.state.items[0]?.itemId).toBe('initial')
+      expect(view.result.current.providerSession).toBe(initialProviderSession)
+      const stateBeforeRefresh = view.result.current.state
+
+      act(() => window.dispatchEvent(new Event('focus')))
+      await waitFor(() => expect(mocks.call).toHaveBeenCalledTimes(2))
+
+      vi.useFakeTimers()
+      act(() => closes[0]?.())
+      await act(async () => vi.advanceTimersByTimeAsync(750))
+      expect(mocks.subscribe).toHaveBeenCalledTimes(2)
+
+      await act(async () => {
+        delayedRefresh.resolve({
+          ok: true,
+          page: page('tail', [message('stale', 2, 'assistant')], false),
+          providerSession: { key: 'session_id', id: 'provider-stale' }
+        })
+        await delayedRefresh.promise
+        await Promise.resolve()
+      })
+
+      expect(view.result.current.state).toBe(stateBeforeRefresh)
+      expect(view.result.current.state.items[0]?.itemId).toBe('initial')
+      expect(view.result.current.providerSession).toBe(initialProviderSession)
+    } finally {
+      vi.useRealTimers()
+      view.unmount()
+      hasFocus.mockRestore()
+    }
+  })
+
   it('does no host work for retained inactive sessions', async () => {
     const first = renderHook(() =>
       useStructuredAgentSessionRead({

@@ -32,7 +32,7 @@ export function startStructuredAgentSessionReadTransport(args: {
   applyEvent: (event: AgentSessionSubscribeEvent) => void
   applyError: (message: string) => void
   getCursor: () => AgentJournalCursor | null
-  refreshTail: (isStopped: () => boolean) => Promise<void>
+  refreshTail: (shouldStop: () => boolean) => Promise<void>
   sessionId: string
   target: RuntimeClientTarget
 }): { dispose: () => void; refresh: () => void } {
@@ -127,7 +127,7 @@ export function startStructuredAgentSessionReadTransport(args: {
   const refresh = (): void => {
     const refreshGeneration = generation
     void args
-      .refreshTail(() => stopped)
+      .refreshTail(() => !isCurrentGeneration(refreshGeneration))
       .then(() => {
         if (!isCurrentGeneration(refreshGeneration)) {
           return
@@ -145,7 +145,7 @@ export function startStructuredAgentSessionReadTransport(args: {
   }
   const initialGeneration = generation
   void args
-    .refreshTail(() => stopped)
+    .refreshTail(() => !isCurrentGeneration(initialGeneration))
     .then(() => {
       if (!isCurrentGeneration(initialGeneration)) {
         return

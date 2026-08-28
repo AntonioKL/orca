@@ -16,6 +16,10 @@ import type {
   AgentJournalRenderItem,
   AgentJournalSubmission
 } from '../../../shared/agent-session-journal-types'
+import {
+  isAdmissibleAgentJournalRenderItem,
+  isAdmissibleAgentJournalSubmission
+} from '../../../shared/agent-session-journal-schemas'
 import { parseJournalRow, serializeJournalRow, type JournalRow } from './journal-row-schema'
 
 export const JOURNAL_LOG_FILE = 'log.jsonl'
@@ -159,8 +163,11 @@ function isJournalSnapshotFile(value: unknown): value is JournalSnapshotFile {
     Number.isInteger(snapshot.compactedThrough) &&
     (snapshot.compactedThrough as number) >= 0 &&
     Number.isInteger(snapshot.highestFence) &&
-    arrayOf(snapshot.items, isRenderItem) &&
-    arrayOf(snapshot.submissions, isSubmission) &&
+    // Deep discriminated admission: a JSON-valid item with a corrupt nested
+    // shape (e.g. a question whose options are null) must land this snapshot
+    // in quarantine rather than throw later in projection or prompt render.
+    arrayOf(snapshot.items, isAdmissibleAgentJournalRenderItem) &&
+    arrayOf(snapshot.submissions, isAdmissibleAgentJournalSubmission) &&
     arrayOf(snapshot.receipts, isReceipt) &&
     arrayOf(snapshot.aliases, isAlias) &&
     // Older snapshots predate tombstones; absence is fine, a non-array is not —
@@ -181,27 +188,11 @@ function recordOf(value: unknown): Record<string, unknown> | null {
     : null
 }
 
-function isRenderItem(value: unknown): boolean {
-  const item = recordOf(value)
-  return Boolean(
-    item &&
-    typeof item.itemId === 'string' &&
-    Number.isInteger(item.revision) &&
-    Number.isInteger(item.sequence) &&
-    recordOf(item.body)
-  )
-}
-
 function isTombstone(value: unknown): boolean {
   const tombstone = recordOf(value)
   return Boolean(
     tombstone && typeof tombstone.itemId === 'string' && Number.isInteger(tombstone.revision)
   )
-}
-
-function isSubmission(value: unknown): boolean {
-  const submission = recordOf(value)
-  return Boolean(submission && typeof submission.clientMessageId === 'string')
 }
 
 function isReceipt(value: unknown): boolean {

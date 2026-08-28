@@ -27,7 +27,16 @@ export function boundJournalKeyComponent(value: string): string {
   }
   const h1 = fnv1a32(value, 0x811c9dc5).toString(16).padStart(8, '0')
   const h2 = fnv1a32(value, 0x0100_0193).toString(16).padStart(8, '0')
-  return `${value.slice(0, 40)}~orca-oversized~${value.length}~${h1}${h2}`
+  return `${codePointBoundedHead(value, 40)}~orca-oversized~${value.length}~${h1}${h2}`
+}
+
+/** `slice` cuts UTF-16 code units, so a head ending mid-astral-character would
+ *  carry a lone high surrogate and make `encodeURIComponent` throw on a valid
+ *  id. Dropping that unit keeps the head valid Unicode and deterministic. */
+function codePointBoundedHead(value: string, maxUnits: number): string {
+  const head = value.slice(0, maxUnits)
+  const last = head.charCodeAt(head.length - 1)
+  return last >= 0xd800 && last <= 0xdbff ? head.slice(0, -1) : head
 }
 
 function fnv1a32(value: string, seed: number): number {

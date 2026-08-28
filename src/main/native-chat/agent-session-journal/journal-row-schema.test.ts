@@ -107,6 +107,76 @@ describe('journal row validation', () => {
     expect(parse({ ...BASE, kind: 'epoch', reason: 'session_created' })).toBe(false)
   })
 
+  it('rejects JSON-valid nested body corruption that would throw during render', () => {
+    const item = (body: unknown) => ({ ...BASE, kind: 'item', itemId: 'i-1', revision: 1, body })
+    // A resolved question's options are mapped by the projection; null throws there.
+    expect(
+      parse(
+        item({
+          kind: 'question',
+          question: 'Deploy?',
+          options: null,
+          resolution: { state: 'resolved', selectedOptionId: 'a', resolvedBy: 'c', resolvedAt: 1 }
+        })
+      )
+    ).toBe(false)
+    // Prompt surfaces read `resolution.state` before anything else.
+    expect(
+      parse(item({ kind: 'question', question: 'Deploy?', options: [], resolution: null }))
+    ).toBe(false)
+    expect(parse(item({ kind: 'message', role: 'user', blocks: 'not-blocks' }))).toBe(false)
+    expect(parse(item({ kind: 'diff', path: 'a.ts', patch: { head: 'x' } }))).toBe(false)
+    expect(
+      parse(
+        item({ kind: 'approval', title: 't', detail: null, options: [{ id: 1 }], resolution: null })
+      )
+    ).toBe(false)
+    // `turnLifecycle.turnId` is read whenever the value is truthy.
+    expect(parse(item({ kind: 'status', text: 'x', turnLifecycle: true }))).toBe(false)
+  })
+
+  it('rejects a submission row whose body is not a message item', () => {
+    expect(
+      parse({
+        ...BASE,
+        kind: 'submission',
+        clientMessageId: 'm-1',
+        payloadFingerprint: 'a'.repeat(64),
+        providerHandle: { kind: 'codex', threadId: 't' },
+        body: { kind: 'status', text: 'not a message' }
+      })
+    ).toBe(false)
+  })
+
+  it('keeps forward compatibility for open string fields and unknown block types', () => {
+    const item = (body: unknown) => ({ ...BASE, kind: 'item', itemId: 'i-1', revision: 1, body })
+    // Renderers select known block types by equality and skip the rest.
+    expect(
+      parse(item({ kind: 'message', role: 'user', blocks: [{ type: 'future-block', data: 1 }] }))
+    ).toBe(true)
+    // Role and tool-call state are type-checked, never enum-checked.
+    expect(
+      parse(item({ kind: 'message', role: 'narrator', blocks: [{ type: 'text', text: 'hi' }] }))
+    ).toBe(true)
+    expect(parse(item({ kind: 'tool-call', name: 'Read', input: {}, state: 'paused' }))).toBe(true)
+    expect(
+      parse(
+        item({
+          kind: 'question',
+          question: 'Deploy?',
+          options: [{ id: 'a', label: 'Yes' }],
+          resolution: {
+            state: 'deferred',
+            selectedOptionId: null,
+            resolvedBy: null,
+            resolvedAt: null
+          },
+          futureField: 'ignored'
+        })
+      )
+    ).toBe(true)
+  })
+
   it('keeps forward compatibility for new dispatch states without a version bump', () => {
     expect(
       parse({
