@@ -160,16 +160,20 @@ export async function applyDirectSshRemoteWorkspaceSnapshot({
         lastSyncedAt: Date.now()
       })
     } else {
-      // Why not hydrated: the host listed tabs on paths this client cannot place, so adopting zero
-      // of them is not the host's picture. Hydrating would authorise uploads
-      // (use-app-session-persistence.ts), and an upload is a `replace-session` patch
-      // (remote-workspace-relay-sync.ts) that wholesale replaces the host snapshot — deleting the
-      // very tabs we failed to adopt. It would also flip the seeding gate in
-      // workspace-terminal-host-authority.ts from `unverifiable` to `none`, authorising a fresh
-      // default tab beside the host's orphaned ones (STA-3593). The next connect or host push
-      // re-pulls, so leaving this unresolved costs a retry, not the data.
+      // The host listed tabs on paths this client cannot place, so adopting zero of them is not
+      // the host's picture. `conflict` is the phase that says exactly that, and it is load-bearing
+      // twice over:
+      //   - use-app-session-persistence.ts filters conflicted targets out of uploads, and an
+      //     upload is a `replace-session` patch (remote-workspace-relay-sync.ts) that wholesale
+      //     replaces the host snapshot - it would delete the very tabs we failed to adopt;
+      //   - workspace-terminal-host-authority.ts treats `offline`/`error` on an un-hydrated target
+      //     as `none`, its bounded floor, which authorises seeding AND sleeping-agent resume.
+      //     `conflict` is deliberately not in that set, so authority stays `unverifiable`.
+      // Hydration is cleared, not merely withheld: the set is add-only, so a target that synced
+      // cleanly before would otherwise keep uploading from this incomplete picture (STA-3593).
+      currentStore.clearRemoteWorkspaceHydrated(authority.targetId)
       currentStore.setRemoteWorkspaceSyncStatus(authority.targetId, {
-        phase: 'error',
+        phase: 'conflict',
         direction: 'pull',
         revision: snapshot.revision,
         updatedAt: snapshot.updatedAt,

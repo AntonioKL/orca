@@ -24,6 +24,7 @@ import type { RemoteWorkspaceSnapshot } from '../../../shared/remote-workspace-t
 import type { DirectSshAuthority, SshProviderEpoch } from '../../../shared/ssh-types'
 import { createTestStore, makeWorktree } from '../store/slices/store-test-helpers'
 import { applyDirectSshRemoteWorkspaceSnapshot } from './remote-workspace-snapshot-apply'
+import { resolveWorkspaceTerminalHostAuthority } from '../lib/workspace-terminal-host-authority'
 import type { DirectSshSnapshotApplyToken } from './direct-ssh-reconnect-coordinator-types'
 
 vi.mock('sonner', () => ({ toast: { info: vi.fn(), success: vi.fn(), error: vi.fn() } }))
@@ -208,6 +209,38 @@ describe('a host snapshot whose terminal tabs cannot be placed locally', () => {
     ).not.toBe('synced')
   })
 
+  it('revokes a hydration it granted earlier when a later snapshot cannot be placed', async () => {
+    const store = createStore()
+    landHostLineage(store)
+    await applySnapshot(store, snapshot(1))
+    expect(isHydrated(store)).toBe(true)
+
+    // The lineage degrades on a later reconnect: the catalog rows this client had are gone.
+    store.setState({ worktreesByRepo: {}, detectedWorktreesByRepo: {} })
+    await applySnapshot(store, snapshot(2))
+
+    // Why revoke rather than merely withhold: the hydrated set is add-only, and hydration is what
+    // authorises uploads. A stale flag would keep uploading this incomplete picture, and an upload
+    // wholesale replaces the host snapshot — deleting the tabs we just failed to place.
+    expect(
+      isHydrated(store),
+      'a stale hydration still authorises a replace-session upload from an incomplete picture'
+    ).toBe(false)
+  })
+
+  it('leaves terminal authority unverifiable, so nothing seeds or resumes over the host', async () => {
+    const store = createStore()
+    await applySnapshot(store, snapshot(1))
+
+    // `offline`/`error` on an un-hydrated target are the authority resolver's bounded floor and
+    // resolve to `none`, which authorises seeding AND sleeping-agent resume. An unplaced snapshot
+    // must not land in that set: the host's tabs are live, we simply could not place them.
+    expect(
+      resolveWorkspaceTerminalHostAuthority(store.getState(), ALPHA_ID),
+      'an unplaced snapshot authorised seeding over live host terminals'
+    ).toBe('unverifiable')
+  })
+
   it('adopts every host tab and declares the target hydrated once the catalog is present', async () => {
     const store = createStore()
     landHostLineage(store)
@@ -217,6 +250,27 @@ describe('a host snapshot whose terminal tabs cannot be placed locally', () => {
     expect(adoptedTabIds(store)).toEqual(['T1', 'T2', 'T3'])
     expect(store.getState().tabsByWorktree[ALPHA_ID]?.map((tab) => tab.id)).toEqual(['T1', 'T2'])
     expect(store.getState().tabsByWorktree[BETA_ID]?.map((tab) => tab.id)).toEqual(['T3'])
+    expect(isHydrated(store)).toBe(true)
+    expect(syncPhase(store)).toBe('synced')
+  })
+
+  it('recovers on the next snapshot once the catalog lands', async () => {
+    const store = createStore()
+
+    // First pass: the lineage read was degraded, so nothing places and the target is left
+    // un-hydrated on purpose. With the retry chain gone, this is the only way back.
+    await applySnapshot(store, snapshot(1))
+    expect(adoptedTabIds(store)).toEqual([])
+    expect(isHydrated(store)).toBe(false)
+
+    // A later connect or host push arrives after the catalog landed.
+    landHostLineage(store)
+    await applySnapshot(store, snapshot(2))
+
+    expect(
+      adoptedTabIds(store),
+      'an un-hydrated target never recovered the host tabs it declined to guess at'
+    ).toEqual(['T1', 'T2', 'T3'])
     expect(isHydrated(store)).toBe(true)
     expect(syncPhase(store)).toBe('synced')
   })
