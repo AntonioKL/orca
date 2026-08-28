@@ -2880,7 +2880,7 @@ function TerminalPane(
         source: 'context_menu'
       })
     },
-    [cwd]
+    [cwd, tabId, worktreeId]
   )
 
   const beginPaneDragFromHeader = useCallback(

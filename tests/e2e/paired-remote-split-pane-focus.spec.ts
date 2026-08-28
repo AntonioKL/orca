@@ -88,7 +88,11 @@ test('focuses the pane a client split creates on a paired remote workspace @head
           }
           after = current
           createdPane = created
-          return current.activeLeafId === created.leafId && domLeafId === created.leafId
+          return (
+            current.activeLeafId === created.leafId &&
+            current.storeActiveLeafId === created.leafId &&
+            domLeafId === created.leafId
+          )
         },
         { timeout: 30_000, message: 'Host-created split leaf never claimed client focus' }
       )
@@ -105,20 +109,6 @@ test('focuses the pane a client split creates on a paired remote workspace @head
       () => document.activeElement?.closest<HTMLElement>('.pane')?.dataset.leafId ?? null
     )
     expect(focusedDomLeafId).toBe(createdPane.leafId)
-
-    const hostTabs = await callPairedRuntime<{ tabs: HostTerminalSurface[] }>(
-      client.page,
-      client.environmentId,
-      'session.tabs.list',
-      { worktree: `id:${hostWorktreeId}` }
-    )
-    const hostLeaves = hostTabs.tabs.filter(
-      (surface) => surface.type === 'terminal' && surface.parentTabId === created.tab.parentTabId
-    )
-    expect(hostLeaves.map((surface) => surface.leafId).sort()).toEqual(
-      after.panes.map((pane) => pane.leafId).sort()
-    )
-    expect(hostLeaves[0]?.parentLayout?.activeLeafId).toBe(createdPane.leafId)
 
     const marker = `STA_5518_FOCUSED_${Date.now()}`
     await client.page.keyboard.type(`printf '%s\\n' ${JSON.stringify(marker)}`)
@@ -139,6 +129,20 @@ test('focuses the pane a client split creates on a paired remote workspace @head
         { timeout: 30_000, message: 'Immediate post-split marker never reached the visible pane' }
       )
       .toMatchObject({ [createdLeafId]: expect.stringContaining(marker) })
+
+    const hostTabs = await callPairedRuntime<{ tabs: HostTerminalSurface[] }>(
+      client.page,
+      client.environmentId,
+      'session.tabs.list',
+      { worktree: `id:${hostWorktreeId}` }
+    )
+    const hostLeaves = hostTabs.tabs.filter(
+      (surface) => surface.type === 'terminal' && surface.parentTabId === created.tab.parentTabId
+    )
+    expect(hostLeaves.map((surface) => surface.leafId).sort()).toEqual(
+      after.panes.map((pane) => pane.leafId).sort()
+    )
+    expect(hostLeaves[0]?.parentLayout?.activeLeafId).toBe(createdPane.leafId)
 
     const surfaceByLeafId = new Map(hostLeaves.map((surface) => [surface.leafId, surface]))
     await expect
@@ -186,7 +190,11 @@ test('focuses the pane a client split creates on a paired remote workspace @head
           }
           afterHeaderSplit = current
           headerCreatedPane = created
-          return current.activeLeafId === created.leafId && domLeafId === created.leafId
+          return (
+            current.activeLeafId === created.leafId &&
+            current.storeActiveLeafId === created.leafId &&
+            domLeafId === created.leafId
+          )
         },
         { timeout: 30_000, message: 'Header-created split leaf never claimed client focus' }
       )
@@ -194,6 +202,26 @@ test('focuses the pane a client split creates on a paired remote workspace @head
     if (!headerCreatedPane) {
       throw new Error('Header split did not materialize a new pane')
     }
+    const headerCreatedLeafId = headerCreatedPane.leafId
+    const headerMarker = `STA_5518_HEADER_FOCUSED_${Date.now()}`
+    await client.page.keyboard.type(`printf '%s\\n' ${JSON.stringify(headerMarker)}`)
+    await client.page.keyboard.press('Enter')
+
+    await expect
+      .poll(
+        () =>
+          client.page.evaluate((tabId) => {
+            const manager = window.__paneManagers?.get(tabId)
+            return Object.fromEntries(
+              (manager?.getPanes() ?? []).map((pane) => [
+                pane.leafId,
+                pane.serializeAddon?.serialize?.() ?? ''
+              ])
+            )
+          }, webTabId),
+        { timeout: 30_000, message: 'Header split marker never reached the focused pane' }
+      )
+      .toMatchObject({ [headerCreatedLeafId]: expect.stringContaining(headerMarker) })
 
     const afterHeaderHostTabs = await callPairedRuntime<{ tabs: HostTerminalSurface[] }>(
       client.page,
@@ -208,6 +236,32 @@ test('focuses the pane a client split creates on a paired remote workspace @head
       afterHeaderSplit.panes.map((pane) => pane.leafId).sort()
     )
     expect(afterHeaderHostLeaves[0]?.parentLayout?.activeLeafId).toBe(headerCreatedPane.leafId)
+    const headerSurfaceByLeafId = new Map(
+      afterHeaderHostLeaves.map((surface) => [surface.leafId, surface])
+    )
+    await expect
+      .poll(
+        async () => {
+          const reads = await Promise.all(
+            afterHeaderSplit.panes.map(async ({ leafId }) => {
+              const surface = headerSurfaceByLeafId.get(leafId)
+              if (!surface) {
+                return false
+              }
+              const result = await callPairedRuntime<{ terminal: RuntimeTerminalRead }>(
+                client.page,
+                client.environmentId,
+                'terminal.read',
+                { terminal: surface.terminal }
+              )
+              return result.terminal.tail.join('\n').includes(headerMarker)
+            })
+          )
+          return reads
+        },
+        { timeout: 30_000, message: 'Header marker did not reach exactly its created host PTY' }
+      )
+      .toEqual(afterHeaderSplit.panes.map(({ leafId }) => leafId === headerCreatedLeafId))
 
     await testInfo.attach('paired-cmd-d-focused-pane', {
       body: await client.page.screenshot(),

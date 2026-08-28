@@ -132,6 +132,14 @@ function stubSplitSourceTab(hostTabId: string): void {
   mocks.getState.mockReturnValue(makeSplitSourceState(hostTabId))
 }
 
+function makeSplitResult(leafId: string): unknown {
+  return {
+    id: leafId,
+    ok: true,
+    result: { split: { handle: leafId, tabId: 'tab-1', paneRuntimeId: -1, leafId } }
+  }
+}
+
 describe('splitWebRuntimeTerminal', () => {
   beforeEach(() => {
     vi.stubGlobal('__ORCA_WEB_CLIENT__', true)
@@ -428,26 +436,14 @@ describe('splitWebRuntimeTerminal', () => {
     ).toBe(true)
     await vi.waitFor(() => expect(splitResolvers).toHaveLength(2))
 
-    splitResolvers[1]?.({
-      id: 'split-b',
-      ok: true,
-      result: {
-        split: { handle: 'terminal-b', tabId: 'tab-1', paneRuntimeId: -1, leafId: 'leaf-b' }
-      }
-    })
+    splitResolvers[1]?.(makeSplitResult('leaf-b'))
     await vi.waitFor(() =>
       expect(
         peekWebSessionFocusIntent({ environmentId: 'web-env-1' }, SPLIT_WORKTREE_ID)
       ).toMatchObject({ hostTabId: 'tab-1', leafId: 'leaf-b' })
     )
 
-    splitResolvers[0]?.({
-      id: 'split-a',
-      ok: true,
-      result: {
-        split: { handle: 'terminal-a', tabId: 'tab-1', paneRuntimeId: -1, leafId: 'leaf-a' }
-      }
-    })
+    splitResolvers[0]?.(makeSplitResult('leaf-a'))
     await Promise.resolve()
     await Promise.resolve()
     const intentAfterOlderCompletion = peekWebSessionFocusIntent(
@@ -479,6 +475,31 @@ describe('splitWebRuntimeTerminal', () => {
       toWebTerminalSurfaceTabId('tab-1'),
       'leaf-a'
     )
+  })
+
+  it('lets a newer split with an unreconciled source supersede older focus', async () => {
+    stubSplitSourceTab('tab-1')
+    const splitResolvers: ((response: unknown) => void)[] = []
+    const runtimeCall = vi.fn(() => new Promise((resolve) => splitResolvers.push(resolve)))
+    vi.stubGlobal('window', { api: { runtimeEnvironments: { call: runtimeCall } } })
+    const split = (): boolean =>
+      splitWebRuntimeTerminal('remote:web-env-1@@terminal-1', 'vertical', 'keyboard', SPLIT_SOURCE)
+    expect(split()).toBe(true)
+    await vi.waitFor(() => expect(splitResolvers).toHaveLength(1))
+    mocks.getState.mockReturnValue({
+      ...makeSplitSourceState('tab-1'),
+      terminalLayoutsByTabId: {}
+    })
+    expect(split()).toBe(true)
+    await vi.waitFor(() => expect(splitResolvers).toHaveLength(2))
+    splitResolvers[0]?.(makeSplitResult('leaf-a'))
+    await vi.waitFor(() =>
+      expect(
+        peekWebSessionFocusIntent({ environmentId: 'web-env-1' }, SPLIT_WORKTREE_ID)
+      ).toBeNull()
+    )
+    expect(mocks.activateTabAndFocusPane).not.toHaveBeenCalled()
+    splitResolvers[1]?.(makeSplitResult('leaf-b'))
   })
 
   it('does not let an older snapshot completion clear or focus over a newer split', async () => {
