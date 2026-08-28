@@ -64,7 +64,7 @@ jobs:
             echo "TYPECHECK_BASELINE_BASE_PATH=$base_baseline" >> "$GITHUB_ENV"
             echo "Mobile growth guard ACTIVE against $BASE_SHA."
           else
-            echo "Mobile base has no baseline; this is the introducing PR, growth guard INACTIVE."
+            echo "::warning::Mobile growth guard INACTIVE: base $BASE_SHA has no baseline yet. Expected only on the PR that introduces it."
           fi
 
       - name: Setup Node.js

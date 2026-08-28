@@ -139,7 +139,8 @@ function subtractDiagnostics(left, right) {
 /** Failures here are routine, so the message carries its own fix. */
 function regenerationHint() {
   const argv = process.argv.slice(2).filter((value) => value !== '--write')
-  return `Regenerate with: node ${relative(repoRoot, import.meta.filename)} ${argv.join(' ')} --write`
+  // Relative to the caller, not the repo: mobile runs this from mobile/.
+  return `Regenerate with: node ${relative(process.cwd(), import.meta.filename)} ${argv.join(' ')} --write`
 }
 
 function formatDiagnostic(diagnostic) {
