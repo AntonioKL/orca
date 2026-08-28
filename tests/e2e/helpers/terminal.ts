@@ -99,29 +99,36 @@ export async function waitForPaneIdentitySnapshot(
   page: Page,
   paneCount: number
 ): Promise<PaneIdentitySnapshot> {
-  await expect
-    .poll(
-      async () => {
-        const snapshot = await readPaneIdentitySnapshot(page)
-        return Boolean(
-          snapshot &&
-          snapshot.panes.length === paneCount &&
-          snapshot.panes.every(
-            (pane) =>
-              UUID_RE.test(pane.leafId) &&
-              pane.stablePaneId === pane.leafId &&
-              pane.datasetLeafId === pane.leafId &&
-              pane.ptyId !== null &&
-              snapshot.ptyIdsByLeafId[pane.leafId] === pane.ptyId
+  let latestSnapshot: PaneIdentitySnapshot | null = null
+  try {
+    await expect
+      .poll(
+        async () => {
+          latestSnapshot = await readPaneIdentitySnapshot(page)
+          return Boolean(
+            latestSnapshot &&
+            latestSnapshot.panes.length === paneCount &&
+            latestSnapshot.panes.every(
+              (pane) =>
+                UUID_RE.test(pane.leafId) &&
+                pane.stablePaneId === pane.leafId &&
+                pane.datasetLeafId === pane.leafId &&
+                pane.ptyId !== null &&
+                latestSnapshot?.ptyIdsByLeafId[pane.leafId] === pane.ptyId
+            )
           )
-        )
-      },
-      {
-        timeout: 15_000,
-        message: 'Split terminal panes did not settle with UUID leaf-keyed PTY bindings'
-      }
-    )
-    .toBe(true)
+        },
+        {
+          timeout: 15_000,
+          message: 'Split terminal panes did not settle with UUID leaf-keyed PTY bindings'
+        }
+      )
+      .toBe(true)
+  } catch (error) {
+    throw new Error(`Last pane identity snapshot: ${JSON.stringify(latestSnapshot)}`, {
+      cause: error
+    })
+  }
 
   const snapshot = await readPaneIdentitySnapshot(page)
   if (!snapshot) {

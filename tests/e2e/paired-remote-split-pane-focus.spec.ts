@@ -118,7 +118,7 @@ test('focuses the pane a client split creates on a paired remote workspace @head
     expect(hostLeaves[0]?.parentLayout?.activeLeafId).toBe(createdPane.leafId)
 
     const marker = `STA_5518_FOCUSED_${Date.now()}`
-    await client.page.keyboard.insertText(`printf '%s\\n' ${JSON.stringify(marker)}`)
+    await client.page.keyboard.type(`printf '%s\\n' ${JSON.stringify(marker)}`)
     await client.page.keyboard.press('Enter')
 
     await expect
