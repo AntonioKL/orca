@@ -149,6 +149,27 @@ describe('publishDaemonPidFile atomicity', () => {
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('non-atomic'))
   })
 
+  it('records the degrade on the daemon file log, which is the only channel the detached daemon keeps', () => {
+    // The daemon runs with stdio 'ignore' and its startup stderr pipe is destroyed once
+    // it is up, so a console-only warning never reaches the operator it is written for.
+    const entries: { event: string; details?: Record<string, unknown> }[] = []
+    fsFaults.linkError = Object.assign(new Error('injected ENOTSUP'), { code: 'ENOTSUP' })
+
+    publishDaemonPidFile(pidPath, RECORD, {
+      log: (event, details) => entries.push({ event, ...(details ? { details } : {}) })
+    })
+
+    expect(entries).toEqual([{ event: 'pid-publish-degraded', details: { errno: 'ENOTSUP' } }])
+  })
+
+  it('leaves the daemon file log untouched when the atomic path succeeds', () => {
+    const entries: string[] = []
+
+    publishDaemonPidFile(pidPath, RECORD, { log: (event) => entries.push(event) })
+
+    expect(entries).toEqual([])
+  })
+
   it('keeps exclusive-create semantics on the degraded path too', () => {
     publishDaemonPidFile(pidPath, { pid: 1, startedAtMs: 5, launchNonce: 'other' })
     fsFaults.linkError = Object.assign(new Error('injected ENOTSUP'), { code: 'ENOTSUP' })

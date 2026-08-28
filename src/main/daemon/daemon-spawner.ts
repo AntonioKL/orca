@@ -11,6 +11,7 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import { fsyncFileSync } from '../../shared/secure-file'
+import type { DaemonFileLog } from './daemon-file-log'
 import { PROTOCOL_VERSION } from './types'
 import { reapOrphanedDaemonPidPublishClaims } from './daemon-pid-publish-claim-reap'
 import { DaemonCrashLoopError, DaemonRespawnThrottle } from './daemon-respawn-throttle'
@@ -176,7 +177,11 @@ export function getDaemonPidPublishClaimPath(pidPath: string): string {
   return `${pidPath}.publish-${process.pid}-${randomUUID()}`
 }
 
-export function publishDaemonPidFile(pidPath: string, pidFile: DaemonPidFile): void {
+export function publishDaemonPidFile(
+  pidPath: string,
+  pidFile: DaemonPidFile,
+  log?: Pick<DaemonFileLog, 'log'>
+): void {
   const claimPath = getDaemonPidPublishClaimPath(pidPath)
   try {
     writeFileSync(claimPath, serializeDaemonPidFile(pidFile), { mode: 0o600, flag: 'wx' })
@@ -199,6 +204,10 @@ export function publishDaemonPidFile(pidPath: string, pidFile: DaemonPidFile): v
       // instead of trading a torn-write window for no pid record at all. Warn because the
       // degrade is otherwise invisible: an operator on such a volume (network mount,
       // container overlay) should be able to tell the atomic path is not in use.
+      // Both channels, matching daemon-endpoint-lifecycle.ts: inside the detached
+      // daemon stdio is 'ignore' and its startup stderr pipe is destroyed once it is
+      // up, so console alone reaches nobody on the path this warning exists for.
+      log?.log('pid-publish-degraded', { errno: describeErrnoCode(error) })
       console.warn(
         `[daemon] pid-record hard-link publish failed (${describeErrnoCode(error)}); ` +
           'degrading to the non-atomic exclusive write — torn-write protection is off for this record'
