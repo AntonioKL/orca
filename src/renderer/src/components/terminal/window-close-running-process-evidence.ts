@@ -20,12 +20,21 @@ export async function anyLocalPtyBlocksWindowClose(
   const results = await Promise.allSettled(
     ptyIds.map((ptyId) => inspectRuntimeTerminalProcess(settings, ptyId))
   )
-  return results.some((result) =>
+  return results.some((result) => {
     // Why rejected counts as blocking: a raised inspection answered nothing, and
     // the Promise.all this replaced had no catch — a rejection left the window
     // neither closed nor prompting.
-    result.status === 'rejected'
-      ? true
-      : readPtyProcessInspectionEvidence(result.value).children.verdict !== 'exited'
-  )
+    if (result.status === 'rejected') {
+      return true
+    }
+    // Why before the evidence read: `unavailable` is the host saying it could not
+    // route to this pane at all, and it rides with the legacy idle collapse
+    // (null/false) and no evidence — so reading it would fabricate `exited` out
+    // of fields nothing observed. `probeTerminalLiveness` fences the same shape
+    // on the cleanup path; this one is strictly more destructive.
+    if (result.value.unavailable === true) {
+      return true
+    }
+    return readPtyProcessInspectionEvidence(result.value).children.verdict !== 'exited'
+  })
 }

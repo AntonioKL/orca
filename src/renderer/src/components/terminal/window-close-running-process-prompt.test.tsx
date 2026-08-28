@@ -1,4 +1,6 @@
 // @vitest-environment happy-dom
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -170,10 +172,11 @@ describe('window close with a degraded local process read', () => {
     expect(confirmWindowClose).not.toHaveBeenCalled()
   })
 
-  it('leaves loss of contact unchanged: an unroutable handle publishes no verdict and closes', async () => {
-    // `pty:inspectProcess` answers this for an id it cannot route, and the relay
-    // path answers it on terminal_gone. No processEvidence rides along, so the
-    // legacy fields are the only answer the host can give.
+  it('asks when the host could not route the pane at all', async () => {
+    // `pty:inspectProcess` answers exactly this for an id it cannot route, and
+    // `inspectPtyProviderProcessForRenderer` answers it on terminal_gone. The
+    // legacy fields it carries are the idle collapse, so without an `unavailable`
+    // fence the evidence read fabricates `exited` from nothing anyone observed.
     installInspectProcess(async () => ({
       foregroundProcess: null,
       hasChildProcesses: false,
@@ -182,8 +185,8 @@ describe('window close with a degraded local process read', () => {
 
     await runWindowClose()
 
-    expect(warningIsVisible()).toBe(false)
-    expect(confirmWindowClose).toHaveBeenCalledTimes(1)
+    expect(warningIsVisible()).toBe(true)
+    expect(confirmWindowClose).not.toHaveBeenCalled()
   })
 
   it('asks when the inspection raises instead of leaving the window stuck', async () => {
@@ -211,5 +214,38 @@ describe('window close with a degraded local process read', () => {
 
     expect(warningIsVisible()).toBe(true)
     expect(confirmWindowClose).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * Terminal.tsx is the only caller, and the guard is bypassable there with every
+ * suite, `tsc` and oxlint still green. Mounting a 2800-line component to prove
+ * the wiring costs far more than it returns, so pin it as source text the same
+ * way initial-terminal-wiring.test.ts does.
+ */
+describe('Terminal.tsx routes the native window-close request through the guard', () => {
+  const source = readFileSync(
+    join(process.cwd(), 'src/renderer/src/components/Terminal.tsx'),
+    'utf8'
+  )
+
+  it('registers a handler that probes before closing', () => {
+    // Anchored on the effect's indent so a comment or a hoisted helper of the
+    // same name cannot stand in for the registered handler.
+    const start = source.indexOf('    setWindowCloseRequestHandler(({ isQuitting }) => {')
+    const end = source.indexOf('    return () => setWindowCloseRequestHandler(null)', start)
+    expect(start).toBeGreaterThanOrEqual(0)
+    expect(end).toBeGreaterThan(start)
+    expect(source.slice(start, end)).toContain('proceedToNativeWindowClose(isQuitting)')
+  })
+
+  it('keeps the intentional-restart bypass the only unprobed close', () => {
+    // Why a count: swapping the handler's call for a direct confirmWindowClose()
+    // restores the silent close this file exists to prevent, and nothing else in
+    // the tree observes it.
+    expect(
+      source.split('window.api.ui.confirmWindowClose(').length - 1,
+      'Terminal.tsx may only close the window unprobed for an intentional app restart'
+    ).toBe(1)
   })
 })
