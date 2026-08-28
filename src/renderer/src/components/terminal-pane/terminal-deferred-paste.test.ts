@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi, type Mock } from 'vitest'
 
+import { executeTerminalPastePlan, planTerminalPaste } from './terminal-paste-coordinator'
 import {
   createDeferredPasteFocusInHandler,
   createDeferredTerminalPasteQueue,
@@ -144,6 +145,46 @@ describe('deferred terminal paste queue', () => {
     )
   })
 
+  // STA-5272 review: Electron leaves `backgroundThrottling` on, so a hidden
+  // renderer's timers are aligned to 1s and, after 5 minutes hidden, to 1-minute
+  // buckets. The deadline timer can therefore still be pending long past 2s while
+  // restoring the window fires focusin first — landing the paste minutes later.
+  // The wall clock, not the timer, has to be what bounds the payload.
+  it('refuses a claim made after the deadline even if the timer has not fired yet', () => {
+    const timers = createTimerHarness()
+    const onExpire = vi.fn()
+    let nowMs = 1_000
+    const queue = createDeferredTerminalPasteQueue({
+      onExpire,
+      now: () => nowMs,
+      ...timers
+    })
+
+    queue.defer(entry())
+    // The window was hidden; the timer is still queued, unfired.
+    nowMs += TERMINAL_DEFERRED_PASTE_TIMEOUT_MS + 1
+    expect(timers.live()).toHaveLength(1)
+
+    expect(queue.claim(1, 'leaf-a')).toBe(null)
+    // and the user is told rather than silently robbed of the paste
+    expect(onExpire).toHaveBeenCalledTimes(1)
+    expect(queue.isPending()).toBe(false)
+    expect(timers.live()).toEqual([])
+  })
+
+  it('still honours a claim made inside the deadline', () => {
+    const timers = createTimerHarness()
+    const onExpire = vi.fn()
+    let nowMs = 1_000
+    const queue = createDeferredTerminalPasteQueue({ onExpire, now: () => nowMs, ...timers })
+
+    queue.defer(entry())
+    nowMs += TERMINAL_DEFERRED_PASTE_TIMEOUT_MS - 1
+
+    expect(queue.claim(1, 'leaf-a')).toEqual(entry())
+    expect(onExpire).not.toHaveBeenCalled()
+  })
+
   it('drops the payload on dispose without firing the expiry signal', () => {
     const timers = createTimerHarness()
     const onExpire = vi.fn()
@@ -162,6 +203,7 @@ describe('isDeferrablePasteFocusCancellation', () => {
   const base = {
     status: 'cancelled' as const,
     reason: 'stale-target' as const,
+    chunksWritten: 0,
     targetMounted: true,
     focusMovedToOtherPane: false
   }
@@ -177,6 +219,16 @@ describe('isDeferrablePasteFocusCancellation', () => {
 
   it('refuses to defer when the target is gone', () => {
     expect(isDeferrablePasteFocusCancellation({ ...base, targetMounted: false })).toBe(false)
+  })
+
+  // Ablation gap: every other case here is already excluded by the reason check,
+  // so the status conjunct needs a reason it would otherwise let through. Today
+  // the executor only pairs 'rejected' with 'payload-too-large' (see
+  // terminal-paste-coordinator planning), so this pins the contract, not a
+  // currently reachable pairing.
+  it('refuses to defer anything that is not a cancellation, whatever the reason says', () => {
+    expect(isDeferrablePasteFocusCancellation({ ...base, status: 'rejected' })).toBe(false)
+    expect(isDeferrablePasteFocusCancellation({ ...base, status: 'pasted' })).toBe(false)
   })
 
   it('refuses to defer non-focus cancellations and rejections', () => {
@@ -408,5 +460,183 @@ describe('deferred paste focusin handler', () => {
 
     expect(scene.deliver).not.toHaveBeenCalled()
     expect(scene.onDropped).not.toHaveBeenCalled()
+  })
+})
+
+// STA-5272 review: `stale-target` is not only a pre-write verdict. The chunked
+// writer re-checks the target between chunks, so a focus move part-way through a
+// large paste cancels with bytes already in the PTY. Deferring that payload and
+// replaying it whole duplicates everything written before the cancel.
+describe('partially written pastes are not deferrable', () => {
+  const chunkedPlan = (text: string) =>
+    planTerminalPaste({
+      text,
+      source: 'keyboard',
+      target: {
+        kind: 'terminal',
+        paneId: 1,
+        leafId: 'leaf-a',
+        ptyId: 'pty-1',
+        runtime: { platform: 'darwin', runtimeKey: 'local:darwin', kind: 'local' }
+      },
+      maxDirectBytes: 4,
+      maxChunkBytes: 8
+    })
+
+  it('premise: the real executor cancels mid-write with bytes already in the pty', async () => {
+    const writes: string[] = []
+    let focusHeld = true
+
+    const execution = await executeTerminalPastePlan(chunkedPlan('abcdefgh12345678zzzzzzzz'), {
+      pasteText: () => {},
+      writePty: (data) => {
+        writes.push(data)
+        return true
+      },
+      // Focus leaves the pane after the first chunk lands, exactly as a
+      // dictation/overlay handoff does mid-paste.
+      isTargetCurrent: () => {
+        if (writes.length >= 1) {
+          focusHeld = false
+        }
+        return focusHeld
+      }
+    })
+
+    expect(execution.status).toBe('cancelled')
+    expect(execution.reason).toBe('stale-target')
+    expect(execution.chunksWritten).toBeGreaterThan(0)
+    expect(writes.join('')).not.toBe('abcdefgh12345678zzzzzzzz')
+  })
+
+  it('refuses to defer a cancellation that already wrote bytes to the pty', () => {
+    expect(
+      isDeferrablePasteFocusCancellation({
+        status: 'cancelled',
+        reason: 'stale-target',
+        chunksWritten: 3,
+        targetMounted: true,
+        focusMovedToOtherPane: false
+      })
+    ).toBe(false)
+  })
+
+  it('still defers a cancellation that wrote nothing', () => {
+    expect(
+      isDeferrablePasteFocusCancellation({
+        status: 'cancelled',
+        reason: 'stale-target',
+        chunksWritten: 0,
+        targetMounted: true,
+        focusMovedToOtherPane: false
+      })
+    ).toBe(true)
+  })
+})
+
+// STA-5272 review: the pane the payload was aimed at can be closed while the
+// payload waits. Nothing may be written anywhere, and the user has to be told
+// now rather than after the full deadline, because the text is still retained.
+describe('a deferred paste whose pane is destroyed before focus returns', () => {
+  const buildScene = (): {
+    panes: { id: number; leafId: string; container: HTMLElement }[]
+    ptyWrites: string[]
+    queue: ReturnType<typeof createDeferredTerminalPasteQueue>
+    handler: () => void
+    onDropped: Mock<(deferred: DeferredTerminalPaste) => void>
+    onExpire: Mock<(deferred: DeferredTerminalPaste) => void>
+    outside: HTMLInputElement
+  } => {
+    document.body.innerHTML = ''
+    const root = document.createElement('div')
+    document.body.append(root)
+    const panes = [0, 1].map((index) => {
+      const container = document.createElement('div')
+      const helper = document.createElement('textarea')
+      helper.className = 'xterm-helper-textarea'
+      container.append(helper)
+      root.append(container)
+      return { id: index + 1, leafId: `leaf-${index}`, container }
+    })
+    const outside = document.createElement('input')
+    document.body.append(outside)
+    const ptyWrites: string[] = []
+    const onExpire = vi.fn<(deferred: DeferredTerminalPaste) => void>()
+    const queue = createDeferredTerminalPasteQueue({ onExpire, ...createTimerHarness() })
+    const onDropped = vi.fn<(deferred: DeferredTerminalPaste) => void>()
+    const handler = createDeferredPasteFocusInHandler({
+      queue,
+      getPanes: () => panes,
+      getFocusedElement: () => document.activeElement,
+      // The only thing delivery does in production is run the paste, which ends
+      // in a PTY write; a spy that records nothing would hide a real write.
+      deliver: (_pane, deferred) => ptyWrites.push(deferred.text),
+      onDropped
+    })
+    return { panes, ptyWrites, queue, handler, onDropped, onExpire, outside }
+  }
+
+  it('drops the payload and tells the user when focus lands outside every pane', () => {
+    const scene = buildScene()
+    scene.queue.defer(entry({ paneId: 1, leafId: 'leaf-0', text: 'secret token' }))
+
+    // The pane is closed: it is gone from the manager and out of the DOM.
+    scene.panes[0]!.container.remove()
+    scene.panes.splice(0, 1)
+    scene.outside.focus()
+    scene.handler()
+
+    expect(scene.ptyWrites).toEqual([])
+    expect(scene.onDropped).toHaveBeenCalledTimes(1)
+    expect(scene.onDropped.mock.calls[0]?.[0]?.text).toBe('secret token')
+    // Retention: the clipboard text is released with the pane, not held to the deadline.
+    expect(scene.queue.isPending()).toBe(false)
+    expect(scene.onExpire).not.toHaveBeenCalled()
+  })
+
+  it('drops the payload and tells the user when focus lands in a surviving sibling', () => {
+    const scene = buildScene()
+    scene.queue.defer(entry({ paneId: 1, leafId: 'leaf-0' }))
+
+    scene.panes[0]!.container.remove()
+    scene.panes.splice(0, 1)
+    ;(scene.panes[0]!.container.firstElementChild as HTMLElement).focus()
+    scene.handler()
+
+    expect(scene.ptyWrites).toEqual([])
+    expect(scene.onDropped).toHaveBeenCalledTimes(1)
+    expect(scene.queue.isPending()).toBe(false)
+  })
+
+  it('leaves the payload alone while the pane manager reports no panes at all', () => {
+    // A transiently empty manager during a re-render is not evidence the target
+    // pane was closed; treating it as one would drop a healthy deferred paste.
+    const scene = buildScene()
+    scene.queue.defer(entry({ paneId: 1, leafId: 'leaf-0' }))
+    const panesSnapshot = [...scene.panes]
+    scene.panes.length = 0
+
+    scene.outside.focus()
+    scene.handler()
+
+    expect(scene.onDropped).not.toHaveBeenCalled()
+    expect(scene.queue.isPending()).toBe(true)
+
+    // and it still lands once the manager reports the pane again
+    scene.panes.push(...panesSnapshot)
+    ;(scene.panes[0]!.container.firstElementChild as HTMLElement).focus()
+    scene.handler()
+    expect(scene.ptyWrites).toEqual(['dictated paragraph'])
+  })
+
+  it('keeps a live pane pending so the destroy check cannot swallow a normal defer', () => {
+    const scene = buildScene()
+    scene.queue.defer(entry({ paneId: 1, leafId: 'leaf-0' }))
+
+    scene.outside.focus()
+    scene.handler()
+
+    expect(scene.onDropped).not.toHaveBeenCalled()
+    expect(scene.queue.isPending()).toBe(true)
   })
 })

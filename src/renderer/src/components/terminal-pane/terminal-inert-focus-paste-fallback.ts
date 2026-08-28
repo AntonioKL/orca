@@ -37,10 +37,16 @@ export function installInertFocusPasteFallback({
       paneOwnsFocus = false
     }
   }
+  // Order matters: these run at the document on every keystroke in the app, once
+  // per mounted pane. The two boolean checks short-circuit before any DOM walk,
+  // and the layout-touching visibility check only runs for the at-most-one pane
+  // that both owns focus and has focus sitting on <body>.
   const ownsInertFocus = (): boolean =>
-    paneOwnsFocus && isInertDocumentFocus(documentTarget.activeElement)
+    paneOwnsFocus &&
+    isInertDocumentFocus(documentTarget.activeElement) &&
+    isContainerRendered(container)
   const shouldRecover = (event: Event): boolean =>
-    !containsNode(container, event.target) && ownsInertFocus()
+    ownsInertFocus() && !containsNode(container, event.target)
 
   const onKeyDown = (event: KeyboardEvent): void => {
     if (shouldRecover(event)) {
@@ -71,6 +77,27 @@ export function installInertFocusPasteFallback({
 
 function containsNode(container: HTMLElement, node: EventTarget | Node | null): boolean {
   return node instanceof Node && container.contains(node)
+}
+
+/** A pane that stopped being rendered (CSS-hidden floating panel, display:none
+ *  background surface) was blurred to `<body>` by the browser with no focusin, so
+ *  `paneOwnsFocus` stays stale. Claiming on that swallows the chord for the whole
+ *  app at the capture phase and routes the paste into an invisible terminal. */
+function isContainerRendered(container: HTMLElement): boolean {
+  if (!container.isConnected) {
+    return false
+  }
+  const checkVisibility = (
+    container as HTMLElement & {
+      checkVisibility?: (options?: { visibilityProperty?: boolean }) => boolean
+    }
+  ).checkVisibility
+  if (typeof checkVisibility === 'function') {
+    return checkVisibility.call(container, { visibilityProperty: true })
+  }
+  // Fallback for engines without checkVisibility; `visibility` is inherited, so
+  // reading it off the container also catches a hidden ancestor.
+  return container.ownerDocument.defaultView?.getComputedStyle(container).visibility !== 'hidden'
 }
 
 /** Focus is on <body> but the pane still owns it logically; putting it back before

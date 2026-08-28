@@ -178,6 +178,80 @@ describe('inert-focus paste fallback', () => {
     expect(fallback.ownsInertFocus()).toBe(false)
   })
 
+  // STA-5272 review: the pane can stop being rendered while `isActive` stays
+  // true (a CSS-hidden floating panel, a display:none background surface). The
+  // browser blurs its focus to <body> WITHOUT a focusin, so `paneOwnsFocus`
+  // stays stale. These listeners sit at the document in capture phase, so a
+  // stale claim swallows the chord (preventDefault + stopPropagation) for the
+  // whole app and routes the paste into an invisible terminal.
+  it('does not claim inert focus once the pane is no longer rendered', () => {
+    const fallback = install()
+    inside.focus()
+    inside.blur()
+    expect(fallback.ownsInertFocus()).toBe(true)
+
+    // Exactly how the closed floating terminal panel hides its subtree.
+    container.style.visibility = 'hidden'
+
+    expect(fallback.ownsInertFocus()).toBe(false)
+  })
+
+  it('does not swallow the paste chord for the rest of the app while hidden', () => {
+    install()
+    inside.focus()
+    inside.blur()
+    container.style.visibility = 'hidden'
+
+    pressPasteChordOn(document.body)
+    document.body.dispatchEvent(new Event('paste', { bubbles: true, cancelable: true }))
+
+    expect(onPasteKey).not.toHaveBeenCalled()
+    expect(onPasteEvent).not.toHaveBeenCalled()
+  })
+
+  it('does not claim inert focus after its container leaves the document', () => {
+    const fallback = install()
+    inside.focus()
+    inside.blur()
+    container.remove()
+
+    expect(fallback.ownsInertFocus()).toBe(false)
+    pressPasteChordOn(document.body)
+    expect(onPasteKey).not.toHaveBeenCalled()
+  })
+
+  it('honours the browser visibility check that covers display:none subtrees', () => {
+    // happy-dom has no checkVisibility; production Chromium does, and it is the
+    // only check that sees a display:none ancestor. Pin that we call it.
+    const calls: unknown[] = []
+    ;(container as HTMLElement & { checkVisibility?: (o?: unknown) => boolean }).checkVisibility = (
+      options
+    ) => {
+      calls.push(options)
+      return false
+    }
+    const fallback = install()
+    inside.focus()
+    inside.blur()
+
+    expect(fallback.ownsInertFocus()).toBe(false)
+    expect(calls.length).toBeGreaterThan(0)
+    pressPasteChordOn(document.body)
+    expect(onPasteKey).not.toHaveBeenCalled()
+  })
+
+  it('still recovers when the browser reports the container as visible', () => {
+    ;(container as HTMLElement & { checkVisibility?: (o?: unknown) => boolean }).checkVisibility =
+      () => true
+    install()
+    inside.focus()
+    inside.blur()
+
+    pressPasteChordOn(document.body)
+
+    expect(onPasteKey).toHaveBeenCalledTimes(1)
+  })
+
   it('stops recovering pastes after dispose', () => {
     const fallback = install()
     inside.focus()

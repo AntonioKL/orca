@@ -2042,6 +2042,7 @@ function TerminalPane(
           isDeferrablePasteFocusCancellation({
             status: execution.status,
             reason: execution.reason,
+            chunksWritten: execution.chunksWritten,
             targetMounted: isPanePasteTargetMounted(pane, transport, ptyId),
             focusMovedToOtherPane: isFocusInsideOtherPane({
               panes: managerRef.current?.getPanes() ?? [],
