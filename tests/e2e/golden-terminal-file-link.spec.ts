@@ -39,11 +39,19 @@ async function locateLink(page: Page, needle: string): Promise<LinkProbe | null>
       return null
     }
     const buffer = pane.terminal.buffer.active
-    for (let row = 0; row < pane.terminal.rows; row += 1) {
-      const line = buffer.getLine(buffer.viewportY + row)
-      const col = line?.translateToString(true).indexOf(needle) ?? -1
-      if (col >= 0) {
-        return { col: col + Math.floor(needle.length / 2), row, tabId }
+    // Preserve fixed-width cells so paths split across xterm rows stay searchable.
+    const visibleCells = Array.from({ length: pane.terminal.rows }, (_, row) =>
+      (buffer.getLine(buffer.viewportY + row)?.translateToString(false) ?? '').padEnd(
+        pane.terminal.cols
+      )
+    ).join('')
+    const start = visibleCells.indexOf(needle)
+    if (start !== -1) {
+      const center = start + Math.floor(needle.length / 2)
+      return {
+        col: center % pane.terminal.cols,
+        row: Math.floor(center / pane.terminal.cols),
+        tabId
       }
     }
     return null
