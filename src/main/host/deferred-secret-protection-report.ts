@@ -12,6 +12,12 @@ import { reportSecretProtectionGap } from './secret-protection-report'
  * (STA-5765). Run before the first window, that reads to the user as "the app will not
  * open"; the window is gated behind a diagnostic whose result nothing on the startup
  * path consumes.
+ *
+ * Why every platform and not just Linux: deferring costs nothing here — no caller reads the
+ * result, so the only thing that moves is when a console line appears. macOS pays the same
+ * shape against the Keychain, and a probe that has to answer before a window exists is wrong
+ * on any host. A deferral that withholds a real secret has to be scoped to the platform that
+ * needs it; this one withholds nothing.
  */
 
 // Why a fallback as well as the window event: `ready-to-show` can fail to fire at all
@@ -40,6 +46,25 @@ export function scheduleSecretProtectionGapReport({
     return
   }
 
+  // Why swallow here and not in reportSecretProtectionGap: deferred, this no longer runs on
+  // whenReady's promise chain, where a throw was an unhandled rejection the app survives
+  // (#9441). Off that chain it is an uncaughtException, and installUncaughtPipeErrorGuard
+  // re-throws those fatally — killing the app over a diagnostic the module documents as
+  // deliberately not fatal. Serve still reports inline and keeps the old posture.
+  const report = (): void => {
+    try {
+      reportSecretProtectionGap(options)
+    } catch (error) {
+      try {
+        ;(options.log ?? console.warn)(
+          `[secrets] could not run the deferred protection report: ${String(error)}`
+        )
+      } catch {
+        // A throwing log sink must not be what ends the process either.
+      }
+    }
+  }
+
   let ran = false
   const run = (): void => {
     if (ran) {
@@ -49,9 +74,7 @@ export function scheduleSecretProtectionGapReport({
     clearTimeout(fallback)
     // Why setImmediate: keep the blocking keyring probe off the event handler that
     // reveals the window, so the reveal paints first.
-    setImmediate(() => {
-      reportSecretProtectionGap(options)
-    })
+    setImmediate(report)
   }
 
   const fallback = setTimeout(run, REPORT_FALLBACK_MS)

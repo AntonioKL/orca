@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { setSecretStore } from '../../shared/secret-store'
+import { _resetSecretStoreForTests, setSecretStore } from '../../shared/secret-store'
 
 type Listener = (...args: unknown[]) => void
 
@@ -69,6 +69,7 @@ describe('scheduleSecretProtectionGapReport', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    _resetSecretStoreForTests()
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -126,10 +127,36 @@ describe('scheduleSecretProtectionGapReport', () => {
     schedule()
     const window = createWindow()
     window.reveal()
+    drain()
+    // Why assert the timer is gone and not just the probe count: the once-guard alone makes
+    // the count right, so without this the fallback could stay armed for 15s past the reveal
+    // and nothing here would notice.
+    expect(vi.getTimerCount()).toBe(0)
     vi.runAllTimers()
     vi.advanceTimersByTime(60_000)
     vi.runAllTimers()
     expect(probes).toBe(1)
+  })
+
+  it('does not let the fallback timer hold the process open', () => {
+    // Why: the report is diagnostics; a referenced 15s timer would keep a quitting app alive
+    // for up to 15s after its last window closed.
+    const timers: ReturnType<typeof setTimeout>[] = []
+    const original = globalThis.setTimeout
+    const spy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
+      ...args: Parameters<typeof setTimeout>
+    ) => {
+      const timer = original(...args)
+      timers.push(timer)
+      return timer
+    }) as typeof setTimeout)
+    try {
+      schedule()
+    } finally {
+      spy.mockRestore()
+    }
+    expect(timers).toHaveLength(1)
+    expect(timers[0]?.hasRef()).toBe(false)
   })
 
   it('does not probe again when the window reveals after the fallback already reported', () => {
@@ -144,6 +171,26 @@ describe('scheduleSecretProtectionGapReport', () => {
     window.reveal()
     drain()
     expect(probes).toBe(1)
+  })
+
+  it('does not turn a throwing report into a fatal main-process error', () => {
+    // Why: deferred, this runs off whenReady's promise chain, where a throw is an
+    // uncaughtException the main-process guard re-throws fatally (#9441) — not the
+    // unhandled rejection the app survives. A diagnostic must never end the process.
+    let thrown = 0
+    scheduleSecretProtectionGapReport({
+      dataFile,
+      log: () => {
+        thrown += 1
+        throw new Error('log sink is broken')
+      },
+      deferUntilFirstWindow: true
+    })
+    const window = createWindow()
+    window.reveal()
+    expect(() => drain()).not.toThrow()
+    expect(probes).toBe(1)
+    expect(thrown).toBeGreaterThan(0)
   })
 
   it('reports inline in headless serve, before the runtime is advertised as ready', () => {
