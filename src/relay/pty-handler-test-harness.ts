@@ -6,8 +6,10 @@ import type { RelayDispatcher } from './dispatcher'
 
 export const TEST_PTY_ID_MINT_EPOCH = 'test-mint-epoch'
 
+// Why encoded: production escapes the epoch at the mint site. A test epoch with a
+// reserved character would otherwise diverge silently across ~40 assertions.
 export function testPtyId(sequence: number): string {
-  return `pty2:${TEST_PTY_ID_MINT_EPOCH}:${sequence}`
+  return `pty2:${encodeURIComponent(TEST_PTY_ID_MINT_EPOCH)}:${sequence}`
 }
 
 export function createTestPtyHandler(dispatcher: MockDispatcher): PtyHandler {
