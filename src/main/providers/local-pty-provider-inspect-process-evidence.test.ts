@@ -93,6 +93,8 @@ vi.mock('../shell-prompt-readiness-probe', () => ({
 }))
 
 import { LocalPtyProvider } from './local-pty-provider'
+import { inspectPtyProviderProcess } from './pty-process-inspection'
+import { readPtyProcessInspectionEvidence } from '../../shared/pty-process-inspection-evidence'
 import {
   applyLocalPtyProviderMockDefaults,
   createLocalPtyMockProcess,
@@ -276,5 +278,35 @@ describe('LocalPtyProvider.inspectProcess evidence', () => {
       }
     })
     expect(resolveAgentForegroundProcessMock.mock.calls.length).toBe(scanCallsBefore)
+  })
+
+  it('reaches the renderer through the provider evidence path, not the legacy pair', async () => {
+    // The composition seam, with the real provider and no double: when a
+    // provider carries its own inspectProcess, inspectPtyProviderProcess must
+    // use it. The alternative branch rebuilds the answer from
+    // getForegroundProcess + hasChildProcesses, and BOTH of those coerce a
+    // degraded read (null / false) with no way to say "could not ask" — which
+    // is exactly the idle a workspace-cleanup row is swept up on.
+    const { id } = await provider.spawn({ cols: 80, rows: 24 })
+    await recognizeCodex(id)
+
+    mockProc.process = 'zsh'
+    resolveAgentForegroundProcessMock.mockResolvedValueOnce({
+      available: false,
+      processName: 'zsh'
+    })
+
+    const inspection = await inspectPtyProviderProcess(provider, id)
+
+    expect(inspection.processEvidence?.foreground.verdict).toBe('unverifiable')
+    expect(inspection.processEvidence?.children.verdict).toBe('unverifiable')
+    // The same degraded sample read through the legacy pair alone: a shell name
+    // and no children, indistinguishable from an idle terminal.
+    expect(
+      readPtyProcessInspectionEvidence({
+        foregroundProcess: inspection.foregroundProcess,
+        hasChildProcesses: inspection.hasChildProcesses
+      }).children.verdict
+    ).toBe('exited')
   })
 })
