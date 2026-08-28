@@ -217,10 +217,10 @@ describe('legacy coordinator delivery targets after takeover', () => {
       )
     )
 
-    // It still owns the Run binding, so it reads its own Run rather than being fenced read-only.
+    // Binding metadata alone is not caller identity after the coordinator pane changes.
     expect(response).toMatchObject({
-      ok: true,
-      result: { runId: harness.adoptedRunId, legacyReadOnly: false }
+      ok: false,
+      error: { code: 'consumer_fenced', data: { effectsApplied: false } }
     })
   })
 

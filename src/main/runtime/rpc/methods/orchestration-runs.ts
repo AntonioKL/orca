@@ -126,7 +126,10 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
           { effectsApplied: false }
         )
       }
-      assertCallerHandleMatchesEvidence(runtime, params.from, orchestrationCompatibilityEvidence)
+      assertCallerHandleMatchesEvidence(runtime, params.from, orchestrationCompatibilityEvidence, {
+        callerAuthority,
+        allowLegacyAuthority: Boolean(legacyCoordinatorAuthority)
+      })
       const db = runtime.getOrchestrationDb()
       const targetRun = db.getRun(params.id)
       const identity = resolveRunCoordinatorIdentity(runtime, params.from, paneKey)
@@ -173,7 +176,10 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
         requireStablePane: true,
         evidenceAssertedByCaller: true
       })
-      assertCallerHandleMatchesEvidence(runtime, params.from, orchestrationCompatibilityEvidence)
+      assertCallerHandleMatchesEvidence(runtime, params.from, orchestrationCompatibilityEvidence, {
+        callerAuthority,
+        allowLegacyAuthority: Boolean(legacyCoordinatorAuthority)
+      })
       const currentIdentity = resolveRunCoordinatorIdentity(runtime, params.from, currentPaneKey)
       const revalidatedCaller = orchestrationCompatibilityEvidence
         ? runtime.verifyOrchestrationCompatibilityCaller(

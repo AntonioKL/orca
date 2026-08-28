@@ -88,7 +88,11 @@ describe('orchestration RPC methods', () => {
 
     it('requires runtime-observed stable pane identity for binding', async () => {
       setup(false)
-      vi.spyOn(runtime, 'getTerminalPaneKey').mockReturnValue(null)
+      const transientPaneKey = 'tab_stale:33333333-3333-4333-8333-333333333333'
+      vi.spyOn(runtime, 'getTerminalPaneKey')
+        .mockReturnValueOnce(transientPaneKey)
+        .mockReturnValueOnce(transientPaneKey)
+        .mockReturnValue(null)
 
       await expect(
         call('orchestration.runCreate', { objective: 'No pane', from: 'term_stale' })
