@@ -268,7 +268,10 @@ describe('pruneOldDaemonHosts', () => {
     for (const v of ['9.9.9', '1.0.0', '2.0.0']) {
       mkdirSync(join(root, v), { recursive: true })
     }
-    pruneOldDaemonHosts({ status: 'complete', pinnedVersions: new Set(['2.0.0']) })
+    pruneOldDaemonHosts({
+      status: 'complete',
+      versionLiveness: new Map([['2.0.0', { status: 'live' }]])
+    })
     expect(existsSync(join(root, '9.9.9'))).toBe(true)
     expect(existsSync(join(root, '2.0.0'))).toBe(true)
     expect(existsSync(join(root, '1.0.0'))).toBe(false)
@@ -288,6 +291,10 @@ describe('pruneOldDaemonHosts', () => {
     })
 
     const evidence = collectPinnedDaemonVersions(runtimeDir)
+    expect(evidence).toEqual({
+      status: 'complete',
+      versionLiveness: new Map([['8.0.0', { status: 'live' }]])
+    })
     pruneOldDaemonHosts(evidence)
 
     expect(existsSync(join(root, '8.0.0'))).toBe(true)
@@ -298,6 +305,7 @@ describe('pruneOldDaemonHosts', () => {
     const root = join(localAppDataDir, 'Orca', 'daemon-host')
     const runtimeDir = join(userDataDir, 'daemon')
     mkdirSync(join(root, '7.0.0'), { recursive: true })
+    mkdirSync(join(root, '6.0.0'), { recursive: true })
     mkdirSync(runtimeDir, { recursive: true })
     writeFileSync(
       join(runtimeDir, 'daemon-v7.pid'),
@@ -309,12 +317,15 @@ describe('pruneOldDaemonHosts', () => {
 
     const evidence = collectPinnedDaemonVersions(runtimeDir)
     expect(evidence).toEqual({
-      status: 'unverifiable',
-      reason: 'the daemon process could not be queried'
+      status: 'complete',
+      versionLiveness: new Map([
+        ['7.0.0', { status: 'unverifiable', reason: 'the daemon process could not be queried' }]
+      ])
     })
     pruneOldDaemonHosts(evidence)
 
     expect(existsSync(join(root, '7.0.0'))).toBe(true)
+    expect(existsSync(join(root, '6.0.0'))).toBe(false)
     killSpy.mockRestore()
   })
 
@@ -323,7 +334,7 @@ describe('pruneOldDaemonHosts', () => {
     mkdirSync(join(root, '1.0.0'), { recursive: true })
     hostApp.appPath = join(installDir, 'resources', 'app')
     installHostApp()
-    pruneOldDaemonHosts({ status: 'complete', pinnedVersions: new Set() })
+    pruneOldDaemonHosts({ status: 'complete', versionLiveness: new Map() })
     // A Node host owns no daemon-host tree, so deleting under it would be reaching into a
     // directory layout it never created.
     expect(existsSync(join(root, '1.0.0'))).toBe(true)
@@ -343,6 +354,12 @@ describe('collectPinnedDaemonVersions', () => {
       JSON.stringify({ pid: 2147483646, startedAtMs: null, appVersion: '6.0.0' })
     )
     const pinned = collectPinnedDaemonVersions(runtimeDir)
-    expect(pinned).toEqual({ status: 'complete', pinnedVersions: new Set(['7.0.0']) })
+    expect(pinned).toEqual({
+      status: 'complete',
+      versionLiveness: new Map([
+        ['7.0.0', { status: 'live' }],
+        ['6.0.0', { status: 'exited' }]
+      ])
+    })
   })
 })

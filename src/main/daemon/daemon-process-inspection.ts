@@ -48,6 +48,22 @@ export function inspectProcessLiveness(pid: number): ProcessLivenessVerdict {
   }
 }
 
+export function mergeProcessLivenessVerdict(
+  current: ProcessLivenessVerdict | undefined,
+  next: ProcessLivenessVerdict
+): ProcessLivenessVerdict {
+  switch (next.status) {
+    case 'live':
+      return next
+    case 'unverifiable':
+      return current?.status === 'live' ? current : next
+    case 'exited':
+      return current ?? next
+    default:
+      return next satisfies never
+  }
+}
+
 export async function readLinuxStat(pid: number): Promise<LinuxStatEvidence> {
   try {
     return { status: 'present', value: await readFile(`/proc/${pid}/stat`, 'utf8') }

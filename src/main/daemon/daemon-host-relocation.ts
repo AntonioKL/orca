@@ -11,8 +11,9 @@ import {
 } from 'node:fs'
 import { dirname, join, win32 as winPath } from 'node:path'
 import { getAppEnvironment } from '../../shared/app-environment'
+import type { ProcessLivenessVerdict } from './daemon-incarnation-evidence-types'
 import { parseDaemonPidFile } from './daemon-pid-file-parse'
-import { inspectProcessLiveness } from './daemon-process-inspection'
+import { inspectProcessLiveness, mergeProcessLivenessVerdict } from './daemon-process-inspection'
 
 /**
  * Relocate the terminal daemon's process image out of the app install dir into LOCAL userData so it
@@ -294,7 +295,7 @@ export function materializeRelocatedDaemonHost(): RelocatedDaemonHost | null {
 }
 
 export type PinnedDaemonVersionsEvidence =
-  | { status: 'complete'; pinnedVersions: ReadonlySet<string> }
+  | { status: 'complete'; versionLiveness: ReadonlyMap<string, ProcessLivenessVerdict> }
   | { status: 'unverifiable'; reason: string }
 
 /**
@@ -302,7 +303,7 @@ export type PinnedDaemonVersionsEvidence =
  * host dir must not be reclaimed while alive. On win32 start-time can't verify, so a matching pid pins conservatively.
  */
 export function collectPinnedDaemonVersions(runtimeDir: string): PinnedDaemonVersionsEvidence {
-  const pinned = new Set<string>()
+  const versionLiveness = new Map<string, ProcessLivenessVerdict>()
   let entries
   try {
     entries = readdirSync(runtimeDir, { withFileTypes: true })
@@ -333,19 +334,12 @@ export function collectPinnedDaemonVersions(runtimeDir: string): PinnedDaemonVer
       continue
     }
     const verdict = inspectProcessLiveness(parsed.pid)
-    switch (verdict.status) {
-      case 'live':
-        pinned.add(parsed.appVersion)
-        break
-      case 'exited':
-        break
-      case 'unverifiable':
-        return verdict
-      default:
-        verdict satisfies never
-    }
+    versionLiveness.set(
+      parsed.appVersion,
+      mergeProcessLivenessVerdict(versionLiveness.get(parsed.appVersion), verdict)
+    )
   }
-  return { status: 'complete', pinnedVersions: pinned }
+  return { status: 'complete', versionLiveness }
 }
 
 /**
@@ -368,8 +362,19 @@ export function pruneOldDaemonHosts(evidence: PinnedDaemonVersionsEvidence): voi
     return
   }
   for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name === version || evidence.pinnedVersions.has(entry.name)) {
+    if (!entry.isDirectory() || entry.name === version) {
       continue
+    }
+    // A complete runtime-dir listing with no pid record for this version proves it is unowned.
+    const verdict = evidence.versionLiveness.get(entry.name) ?? { status: 'exited' }
+    switch (verdict.status) {
+      case 'live':
+      case 'unverifiable':
+        continue
+      case 'exited':
+        break
+      default:
+        verdict satisfies never
     }
     try {
       rmSync(join(root, entry.name), { recursive: true, force: true })
