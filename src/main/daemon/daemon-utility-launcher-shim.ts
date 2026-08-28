@@ -98,6 +98,13 @@ export function runDaemonUtilityLauncherShim(
       post({ kind: 'spawned', pid: child.pid })
     } else {
       post({ kind: 'spawn-error', message: 'daemon child has no pid' })
+      // A pid-less child may still be a live process the parent can never
+      // address (it never learns a pid to kill); don't leave an orphan behind.
+      try {
+        child.kill()
+      } catch {
+        // already gone
+      }
       exit(1)
     }
   }

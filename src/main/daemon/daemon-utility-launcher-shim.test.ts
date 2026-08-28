@@ -131,6 +131,23 @@ describe('daemon-utility-launcher-shim', () => {
     expect(exit).toHaveBeenCalledWith(1)
   })
 
+  it('kills a pid-less child before exiting so the reported spawn failure leaves no orphan', () => {
+    const port = createFakePort()
+    const child = new EventEmitter() as EventEmitter & {
+      pid: undefined
+      stderr: null
+      kill: ReturnType<typeof vi.fn>
+    }
+    child.stderr = null
+    child.kill = vi.fn()
+    const exit = vi.fn()
+    runDaemonUtilityLauncherShim(port, () => child as never, exit)
+    port.deliver({ kind: 'spawn', spec: specFor('/fake/daemon-entry.js') })
+    expect(port.posted).toContainEqual({ kind: 'spawn-error', message: 'daemon child has no pid' })
+    expect(child.kill).toHaveBeenCalled()
+    expect(exit).toHaveBeenCalledWith(1)
+  })
+
   it('relays IPC readiness and stderr from a real daemon child', async () => {
     const port = createFakePort()
     const exit = vi.fn()

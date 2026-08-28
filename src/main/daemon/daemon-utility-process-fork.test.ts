@@ -82,6 +82,23 @@ describe('canForkDaemonThroughUtilityProcess', () => {
     expect(canForkDaemonThroughUtilityProcess('linux')).toBe(false)
     expect(canForkDaemonThroughUtilityProcess('win32')).toBe(false)
   })
+
+  it('warns when an ELECTRON host has no port: a dropped bootstrap install is a silent revert to the leaky fork', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      expect(canForkDaemonThroughUtilityProcess('linux', { electron: '37.2.0' })).toBe(false)
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('No utility-process fork installed')
+      )
+      warnSpy.mockClear()
+      // Plain-node serve installs nothing by design; macOS never takes the hop. Both stay quiet.
+      expect(canForkDaemonThroughUtilityProcess('linux', {})).toBe(false)
+      expect(canForkDaemonThroughUtilityProcess('darwin', { electron: '37.2.0' })).toBe(false)
+      expect(warnSpy).not.toHaveBeenCalled()
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
 })
 
 describe('forkDaemonThroughUtilityProcess', () => {
@@ -154,6 +171,54 @@ describe('forkDaemonThroughUtilityProcess', () => {
     expect(() =>
       shim.emit('message', { kind: 'daemon-error', message: 'late failure' })
     ).not.toThrow()
+  })
+
+  // Pre-guard, every leg below re-raised as [main_uncaught_exception]: the relay
+  // emitted 'error' on a child no caller ever received, and an unlistened
+  // EventEmitter 'error' throws.
+  describe('failed-handshake crash guard', () => {
+    it('a shim exit after a rejected handshake degrades to a warn instead of crashing main', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const promise = forkDaemonThroughUtilityProcess(SPEC, forkFn)
+        shim.emit('message', { kind: 'shim-ready' })
+        shim.emit('message', { kind: 'spawn-error', message: 'ENOENT' })
+        await expect(promise).rejects.toThrow('ENOENT')
+        expect(() => shim.emit('exit', 1)).not.toThrow()
+        expect(warnSpy).toHaveBeenCalled()
+      } finally {
+        warnSpy.mockRestore()
+      }
+    })
+
+    it('a shim exit after a handshake timeout degrades instead of crashing main', async () => {
+      vi.useFakeTimers()
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const promise = forkDaemonThroughUtilityProcess(SPEC, forkFn)
+        const assertion = expect(promise).rejects.toThrow('handshake timed out')
+        await vi.advanceTimersByTimeAsync(10_001)
+        await assertion
+        expect(() => shim.emit('exit', 1)).not.toThrow()
+      } finally {
+        warnSpy.mockRestore()
+      }
+    })
+
+    it('a late daemon-error relay after a rejected handshake degrades instead of crashing main', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const promise = forkDaemonThroughUtilityProcess(SPEC, forkFn)
+        shim.emit('message', { kind: 'shim-ready' })
+        shim.emit('message', { kind: 'spawn-error', message: 'ENOENT' })
+        await expect(promise).rejects.toThrow('ENOENT')
+        expect(() =>
+          shim.emit('message', { kind: 'daemon-error', message: 'late failure' })
+        ).not.toThrow()
+      } finally {
+        warnSpy.mockRestore()
+      }
+    })
   })
 
   it('disconnect releases the shim instead of killing the daemon', async () => {

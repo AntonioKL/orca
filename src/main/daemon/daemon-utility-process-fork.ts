@@ -86,12 +86,25 @@ export function setDaemonUtilityProcessFork(fork: UtilityProcessForkFn | null): 
 }
 
 export function canForkDaemonThroughUtilityProcess(
-  platform: NodeJS.Platform = process.platform
+  platform: NodeJS.Platform = process.platform,
+  versions: { electron?: string } = process.versions
 ): boolean {
   if (platform === 'darwin') {
     return false
   }
-  return installedUtilityProcessFork !== null
+  if (installedUtilityProcessFork !== null) {
+    return true
+  }
+  // An Electron host with no installed port means the bootstrap install line was
+  // dropped — a silent revert of every Linux/Windows launch to the leaky direct
+  // fork. Plain-node hosts (orca serve) legitimately install nothing: their
+  // parent has no Chromium descriptors, so stay quiet there.
+  if (versions.electron) {
+    console.warn(
+      '[daemon] No utility-process fork installed on this Electron host; the daemon will inherit Chromium descriptors (was the bootstrap wiring dropped?)'
+    )
+  }
+  return false
 }
 
 function getDaemonUtilityLauncherShimPath(): string {
@@ -122,6 +135,18 @@ class UtilityForkedDaemonChild extends EventEmitter implements LaunchedDaemonChi
 
   constructor(private readonly shim: UtilityProcessLike) {
     super()
+  }
+
+  // A launch abandoned mid-handshake (or a shim crash after startup listeners
+  // detach) can still relay errors into a child nobody holds, and an unlistened
+  // EventEmitter 'error' throws — in main that is an uncaught exception, the
+  // exact failure mode this launcher exists to prevent. Degrade to a warn.
+  override emit(event: string | symbol, ...args: unknown[]): boolean {
+    if (event === 'error' && this.listenerCount('error') === 0) {
+      console.warn('[daemon] Utility-forked daemon launch error with no listener:', args[0])
+      return false
+    }
+    return super.emit(event, ...args)
   }
 
   handleShimMessage(message: DaemonShimUpMessage): void {
