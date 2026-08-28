@@ -59,14 +59,12 @@ function resolvePermissionNoticeUrl(
 export type BrowserPartitionDownloadPolicy = 'route' | 'deny'
 export type BrowserPartitionPermissionPolicy = 'browser' | 'deny'
 
-type BrowserPartitionPolicyOptions = {
-  downloads?: BrowserPartitionDownloadPolicy
-  permissions?: BrowserPartitionPermissionPolicy
-}
-
 export function installBrowserSessionPartitionPolicies(
   profile: BrowserSessionProfile,
-  options?: BrowserPartitionPolicyOptions
+  options?: {
+    downloads?: BrowserPartitionDownloadPolicy
+    permissions?: BrowserPartitionPermissionPolicy
+  }
 ): void {
   const { partition } = profile
   const sess = session.fromPartition(partition)
@@ -81,67 +79,61 @@ export function installBrowserSessionPartitionPolicies(
     sess.setUserAgent(cleanUA)
     setupClientHintsOverride(sess, cleanUA)
   }
-  const denyPermissions = options?.permissions === 'deny'
-  sess.setPermissionRequestHandler((webContents, permission, callback, details) => {
-    if (denyPermissions) {
-      callback(false)
-      return
-    }
-    // Why: defer media to macOS TCC; denying at the session layer throws NotAllowedError even after the user granted Camera/Mic to the OS.
-    if (permission === 'media') {
-      // Capture before async handling; opaque frames cannot be attributed to a named site.
-      const rawUrl = resolvePermissionNoticeUrl(webContents, details)
-      void requestSystemMediaAccess(
-        details as Electron.MediaAccessPermissionRequest | undefined
-      ).then(
-        (granted) => {
-          if (!granted) {
+  if (options?.permissions === 'deny') {
+    sess.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
+    sess.setPermissionCheckHandler(() => false)
+    clearBrowserWebAuthnAccessHandlers(sess)
+  } else {
+    sess.setPermissionRequestHandler((webContents, permission, callback, details) => {
+      // Why: defer media to macOS TCC; denying at the session layer throws NotAllowedError even after the user granted Camera/Mic to the OS.
+      if (permission === 'media') {
+        // Capture before async handling; opaque frames cannot be attributed to a named site.
+        const rawUrl = resolvePermissionNoticeUrl(webContents, details)
+        void requestSystemMediaAccess(
+          details as Electron.MediaAccessPermissionRequest | undefined
+        ).then(
+          (granted) => {
+            if (!granted) {
+              browserManager.notifyPermissionDenied({
+                guestWebContentsId: webContents.id,
+                permission,
+                rawUrl
+              })
+            }
+            callback(granted)
+          },
+          (error: unknown) => {
+            console.error('[permissions] Browser media access failed:', error)
             browserManager.notifyPermissionDenied({
               guestWebContentsId: webContents.id,
               permission,
               rawUrl
             })
+            callback(false)
           }
-          callback(granted)
-        },
-        (error: unknown) => {
-          console.error('[permissions] Browser media access failed:', error)
-          browserManager.notifyPermissionDenied({
-            guestWebContentsId: webContents.id,
-            permission,
-            rawUrl
-          })
-          callback(false)
-        }
-      )
-      return
-    }
-    const allowed = isAutoGrantedBrowserSessionPermission(permission)
-    if (!allowed) {
-      const rawUrl = resolvePermissionNoticeUrl(webContents, details)
-      browserManager.notifyPermissionDenied({
-        guestWebContentsId: webContents.id,
-        permission,
-        rawUrl
-      })
-    }
-    callback(allowed)
-  })
-  sess.setPermissionCheckHandler((_webContents, permission, _origin, details) => {
-    if (denyPermissions) {
-      return false
-    }
-    if (permission === 'media') {
-      return hasSystemMediaAccess(details?.mediaType)
-    }
-    if (allowsBrowserWebAuthnPermission(permission, details)) {
-      return true
-    }
-    return isAutoGrantedBrowserSessionPermission(permission)
-  })
-  if (denyPermissions) {
-    sess.setDevicePermissionHandler(() => false)
-  } else {
+        )
+        return
+      }
+      const allowed = isAutoGrantedBrowserSessionPermission(permission)
+      if (!allowed) {
+        const rawUrl = resolvePermissionNoticeUrl(webContents, details)
+        browserManager.notifyPermissionDenied({
+          guestWebContentsId: webContents.id,
+          permission,
+          rawUrl
+        })
+      }
+      callback(allowed)
+    })
+    sess.setPermissionCheckHandler((_webContents, permission, _origin, details) => {
+      if (permission === 'media') {
+        return hasSystemMediaAccess(details?.mediaType)
+      }
+      if (allowsBrowserWebAuthnPermission(permission, details)) {
+        return true
+      }
+      return isAutoGrantedBrowserSessionPermission(permission)
+    })
     installBrowserWebAuthnAccessHandlers(sess)
   }
   sess.setDisplayMediaRequestHandler((_request, callback) => {

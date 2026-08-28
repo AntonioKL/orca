@@ -261,8 +261,8 @@ describe('installDocPreviewProtocolHandler', () => {
     expect(cancelled(`orca-preview://${'a'.repeat(32)}/index.html`)).toBe(false)
   })
 
-  // Why: preview guests need the shared session policy installer even though they deny more than
-  // user-opened browser pages.
+  // Why: preview guests still use the shared installer for certificate, UA, permission and
+  // download hooks, with a stricter decision than ordinary browsing partitions.
   it('applies the shared browser partition policies to the preview session', () => {
     installDocPreviewProtocolHandler()
 
@@ -272,7 +272,7 @@ describe('installDocPreviewProtocolHandler', () => {
     )
   })
 
-  it('asks for downloads and runtime permissions to be denied on the preview partition', () => {
+  it('denies downloads and ambient browser permissions on the preview partition', () => {
     installDocPreviewProtocolHandler()
 
     expect(mocks.installBrowserSessionPartitionPolicies).toHaveBeenCalledWith(expect.anything(), {

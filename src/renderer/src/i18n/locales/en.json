@@ -14775,7 +14775,14 @@
           "openExternallyControl": "Open with default app",
           "copyDocumentRelativePathControl": "Copy relative path",
           "openExternallyUnknownHostError": "Can't open '{{value0}}': the host that owns it is no longer known.",
-          "downloadBlockedNotice": "Downloads are disabled in document previews."
+          "downloadBlockedNotice": "Downloads are disabled in document previews.",
+          "directoryAuthorizationFailed": "Could not allow access to this directory.",
+          "directoryAccessRequest": "This preview wants to read files in {{path}}.",
+          "dismissAccessRequest": "Dismiss",
+          "allowDirectory": "Allow folder",
+          "directoryAccessRequestOverflow": "{{folders}}, and {{count}} more",
+          "directoryAccessRequestMultiple": "This preview wants to read files in {{folders}}.",
+          "allowDirectories": "Allow {{count}} folders"
         }
       },
       "diff": {
@@ -16307,6 +16314,13 @@
         "remoteLabel": "Browsers on {{value0}}",
         "clientNoteLocalStorage": "Imports read this device’s browsers. Cookies are stored locally.",
         "remoteNoteRemoteStorage": "Imports read browsers on {{value0}}. Cookies are stored on that machine, and a permission prompt may appear on its screen."
+      },
+      "browserPane": {
+        "workspaceDoc": {
+          "externalLinkTitle": "Open link to {{host}}?",
+          "externalLinkConfirm": "Open link",
+          "externalLinkCancel": "Cancel"
+        }
       }
     },
     "i18n": {

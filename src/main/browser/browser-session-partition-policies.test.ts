@@ -3,7 +3,9 @@ import type { BrowserSessionProfile } from '../../shared/browser-workspace-types
 
 const mocks = vi.hoisted(() => ({
   handleGuestWillDownload: vi.fn(),
-  noticeDocPreviewDownloadBlocked: vi.fn()
+  noticeDocPreviewDownloadBlocked: vi.fn(),
+  clearBrowserWebAuthnAccessHandlers: vi.fn(),
+  installBrowserWebAuthnAccessHandlers: vi.fn()
 }))
 
 type WillDownloadListener = (
@@ -20,7 +22,6 @@ type FakeSession = {
   setUserAgent: ReturnType<typeof vi.fn>
   setPermissionRequestHandler: ReturnType<typeof vi.fn>
   setPermissionCheckHandler: ReturnType<typeof vi.fn>
-  setDevicePermissionHandler: ReturnType<typeof vi.fn>
   setDisplayMediaRequestHandler: ReturnType<typeof vi.fn>
 }
 
@@ -48,7 +49,6 @@ function fakeSession(): FakeSession {
     setUserAgent: vi.fn(),
     setPermissionRequestHandler: vi.fn(),
     setPermissionCheckHandler: vi.fn(),
-    setDevicePermissionHandler: vi.fn(),
     setDisplayMediaRequestHandler: vi.fn()
   }
 }
@@ -90,8 +90,8 @@ vi.mock('./browser-session-user-agent-mode', () => ({
 }))
 vi.mock('./browser-webauthn-access', () => ({
   allowsBrowserWebAuthnPermission: () => false,
-  clearBrowserWebAuthnAccessHandlers: vi.fn(),
-  installBrowserWebAuthnAccessHandlers: vi.fn()
+  clearBrowserWebAuthnAccessHandlers: mocks.clearBrowserWebAuthnAccessHandlers,
+  installBrowserWebAuthnAccessHandlers: mocks.installBrowserWebAuthnAccessHandlers
 }))
 
 type PartitionPolicyInstaller = (
@@ -187,33 +187,49 @@ describe('partition download policy', () => {
 })
 
 describe('partition permission policy', () => {
-  it('denies browser and device permissions on a partition that asks for the deny', async () => {
+  it('keeps ordinary browser partitions on the browser permission policy', async () => {
+    const install = await loadInstaller()
+    install(profileFor('persist:browsing-1'))
+
+    expect(mocks.installBrowserWebAuthnAccessHandlers).toHaveBeenCalledWith(
+      sessionsByPartition.get('persist:browsing-1')
+    )
+    expect(mocks.clearBrowserWebAuthnAccessHandlers).not.toHaveBeenCalled()
+  })
+
+  it('denies every request and check on a strict partition without WebAuthn handlers', async () => {
     const install = await loadInstaller()
     install(profileFor('orca-doc-preview'), { permissions: 'deny' })
-
     const sess = sessionsByPartition.get('orca-doc-preview')
-    const requestHandler = sess?.setPermissionRequestHandler.mock.calls[0]?.[0] as (
-      webContents: { id: number },
-      permission: string,
-      callback: (allowed: boolean) => void,
-      details?: object
-    ) => void
-    const checkHandler = sess?.setPermissionCheckHandler.mock.calls[0]?.[0] as (
-      webContents: { id: number },
-      permission: string,
-      origin: string,
-      details?: object
-    ) => boolean
-    const deviceHandler = sess?.setDevicePermissionHandler.mock.calls[0]?.[0] as (
-      details: object
-    ) => boolean
-
-    for (const permission of ['media', 'clipboard-read', 'notifications']) {
-      let allowed: boolean | null = null
-      requestHandler({ id: 42 }, permission, (decision) => (allowed = decision), {})
-      expect(allowed).toBe(false)
-      expect(checkHandler({ id: 42 }, permission, 'orca-preview://grant', {})).toBe(false)
+    if (!sess) {
+      throw new Error('Expected the preview session')
     }
-    expect(deviceHandler({})).toBe(false)
+    const requestHandler = sess.setPermissionRequestHandler.mock.calls[0]?.[0] as (
+      webContents: Electron.WebContents,
+      permission: string,
+      callback: (allowed: boolean) => void
+    ) => void
+    const checkHandler = sess.setPermissionCheckHandler.mock.calls[0]?.[0] as (
+      webContents: Electron.WebContents,
+      permission: string
+    ) => boolean
+    const displayMediaHandler = sess.setDisplayMediaRequestHandler.mock.calls[0]?.[0] as (
+      request: Electron.DisplayMediaRequestHandlerHandlerRequest,
+      callback: (streams: { video?: Electron.WebFrameMain; audio?: 'loopback' }) => void
+    ) => void
+
+    for (const permission of ['media', 'clipboard-read', 'notifications', 'fullscreen']) {
+      let decision: boolean | null = null
+      requestHandler({} as Electron.WebContents, permission, (allowed) => (decision = allowed))
+      expect(decision).toBe(false)
+      expect(checkHandler({} as Electron.WebContents, permission)).toBe(false)
+    }
+    expect(mocks.installBrowserWebAuthnAccessHandlers).not.toHaveBeenCalled()
+    expect(mocks.clearBrowserWebAuthnAccessHandlers).toHaveBeenCalledWith(sess)
+    let displayMediaDecision: { video?: Electron.WebFrameMain; audio?: 'loopback' } | null = null
+    displayMediaHandler({} as Electron.DisplayMediaRequestHandlerHandlerRequest, (decision) => {
+      displayMediaDecision = decision
+    })
+    expect(displayMediaDecision).toEqual({ video: undefined, audio: undefined })
   })
 })
