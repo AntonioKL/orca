@@ -151,15 +151,18 @@ describe('registerPtyHandlers daemon-swap-window presence', () => {
     // authoritatively answer for a remote host's PTY, so remote-scoped ids
     // stay unknown, never absent.
     let controller: { hasPty: (ptyId: string) => boolean | null } | undefined
-    registerPtyHandlers(mainWindow as never, {
-      setPtyController: vi.fn((next) => {
-        controller = next
-      }),
-      registerPty: vi.fn(),
-      onPtySpawned: vi.fn(),
-      onPtyExit: vi.fn(),
-      onPtyData: vi.fn()
-    } as never)
+    registerPtyHandlers(
+      mainWindow as never,
+      {
+        setPtyController: vi.fn((next) => {
+          controller = next
+        }),
+        registerPty: vi.fn(),
+        onPtySpawned: vi.fn(),
+        onPtyExit: vi.fn(),
+        onPtyData: vi.fn()
+      } as never
+    )
 
     expect(controller?.hasPty('remote:environment@@pty-1')).toBe(null)
   })
@@ -184,15 +187,18 @@ describe('registerPtyHandlers daemon-swap-window presence', () => {
     // no barrier; the installed provider is then the sole owner (#12393) and
     // its false stays an observed absence.
     let controller: { hasPty: (ptyId: string) => boolean | null } | undefined
-    registerPtyHandlers(mainWindow as never, {
-      setPtyController: vi.fn((next) => {
-        controller = next
-      }),
-      registerPty: vi.fn(),
-      onPtySpawned: vi.fn(),
-      onPtyExit: vi.fn(),
-      onPtyData: vi.fn()
-    } as never)
+    registerPtyHandlers(
+      mainWindow as never,
+      {
+        setPtyController: vi.fn((next) => {
+          controller = next
+        }),
+        registerPty: vi.fn(),
+        onPtySpawned: vi.fn(),
+        onPtyExit: vi.fn(),
+        onPtyData: vi.fn()
+      } as never
+    )
 
     expect(controller?.hasPty('never-spawned-pty')).toBe(false)
     await expect(handlers.get('pty:hasPty')!(null, { id: 'never-spawned-pty' })).resolves.toBe(

@@ -153,6 +153,7 @@ export async function clearBufferFromRuntimeController(
 }
 
 const settledLocalPtyProviderStartups = new WeakSet<Promise<void>>()
+const watchedLocalPtyProviderStartups = new WeakSet<Promise<void>>()
 
 export function hasPtyFromRuntimeController(
   deps: PtyRuntimeControllerDeps,
@@ -171,10 +172,13 @@ export function hasPtyFromRuntimeController(
       // probePtyLiveness does, and the pre-swap provider's "no PTY" for a
       // daemon-restored id is fabricated — answer unverifiable until the swap
       // settles (docs/reference/ssh-execution-boundary.md rule 2).
-      startupPromise.then(
-        () => settledLocalPtyProviderStartups.add(startupPromise),
-        () => settledLocalPtyProviderStartups.add(startupPromise)
-      )
+      if (!watchedLocalPtyProviderStartups.has(startupPromise)) {
+        watchedLocalPtyProviderStartups.add(startupPromise)
+        const markSettled = (): void => {
+          settledLocalPtyProviderStartups.add(startupPromise)
+        }
+        startupPromise.then(markSettled, markSettled)
+      }
       return null
     }
     return getProviderForPty(ptyId).hasPty?.(ptyId) ?? null
