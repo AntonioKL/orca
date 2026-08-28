@@ -1,5 +1,5 @@
 import { useCallback, useRef } from 'react'
-import { refreshHostedReviewCard } from '@/store/slices/hosted-review'
+import { refreshHostedReviewCard } from '@/store/slices/hosted-review-card-refresh'
 import type { ChecksPanelCheckAndReviewActionsInput } from './check-and-review-action-dependencies'
 
 type RefreshLinkedGitHubPullRequest = (linkedPRNumber: number) => Promise<void>
