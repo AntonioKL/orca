@@ -24,12 +24,16 @@ function Probe(props: { client: RpcClient; query: string }) {
 // provider fan-out and the exact-item lookup. Awaiting the fan-out first stacked
 // them, so the rows appeared a whole extra round trip late.
 describe('smart source paste lookup concurrency', () => {
-  let renderer: ReactTestRenderer | null = null
+  const mounted: ReactTestRenderer[] = []
 
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => {
-    act(() => renderer?.unmount())
-    renderer = null
+    act(() => {
+      for (const renderer of mounted) {
+        renderer.unmount()
+      }
+    })
+    mounted.length = 0
     vi.useRealTimers()
   })
 
@@ -43,7 +47,7 @@ describe('smart source paste lookup concurrency', () => {
     const client = { sendRequest } as unknown as RpcClient
 
     await act(async () => {
-      renderer = create(createElement(Probe, { client, query: '16831' }))
+      mounted.push(create(createElement(Probe, { client, query: '16831' })))
     })
     await act(async () => {
       await vi.advanceTimersByTimeAsync(300)

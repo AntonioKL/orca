@@ -1,4 +1,4 @@
-import { createElement } from 'react'
+import { createElement, useEffect } from 'react'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -77,32 +77,35 @@ import { MountedBottomDrawer } from './mounted-bottom-drawer'
 
 const noop = () => {}
 
+// Counts mounts of the sheet's CONTENT, so a test can tell an ordinary re-render
+// apart from the subtree rebuild the fix relies on to repaint a stale native view.
+const sheetBodyMounts = { count: 0 }
+function SheetBody() {
+  useEffect(() => {
+    sheetBodyMounts.count += 1
+  }, [])
+  return null
+}
+
+function drawer(interactive: boolean) {
+  return createElement(
+    MountedBottomDrawer,
+    { visible: true, interactive, onClose: noop, onHidden: noop },
+    createElement(SheetBody)
+  )
+}
+
 function render(interactive: boolean): ReactTestRenderer {
-  let renderer: ReactTestRenderer | null = null
+  let renderer!: ReactTestRenderer
   act(() => {
-    renderer = create(
-      createElement(
-        MountedBottomDrawer,
-        { visible: true, interactive, onClose: noop, onHidden: noop },
-        createElement('SheetBody')
-      )
-    )
+    renderer = create(drawer(interactive))
   })
-  if (!renderer) {
-    throw new Error('drawer did not render')
-  }
   return renderer
 }
 
 function update(renderer: ReactTestRenderer, interactive: boolean): void {
   act(() => {
-    renderer.update(
-      createElement(
-        MountedBottomDrawer,
-        { visible: true, interactive, onClose: noop, onHidden: noop },
-        createElement('SheetBody')
-      )
-    )
+    renderer.update(drawer(interactive))
   })
 }
 
@@ -114,6 +117,7 @@ describe('bottom drawer window hand-back', () => {
   afterEach(() => {
     withTimingCalls.length = 0
     sharedWrites.length = 0
+    sheetBodyMounts.count = 0
   })
 
   it('re-asserts the enter transform when a pinned sheet takes the window back', () => {
@@ -127,28 +131,22 @@ describe('bottom drawer window hand-back', () => {
     act(() => renderer.unmount())
   })
 
-  it('remounts the sheet view when it takes the window back', () => {
+  // Shared-value writes cannot heal a sheet whose native view was rebuilt under
+  // Reanimated (verified on device); only a fresh view repaints. Counting content
+  // mounts asserts the subtree actually rebuilt, not merely that a prop changed.
+  it('rebuilds the sheet subtree when it takes the window back', () => {
     const renderer = render(true)
     update(renderer, false)
-    const drawerId = () =>
-      renderer.root
-        .findAll((node) => typeof node.props.nativeID === 'string')
-        .map((node) => node.props.nativeID as string)
-        .find((id) => id.startsWith('bottom-drawer-window-'))
-    const pinnedId = drawerId()
-    expect(pinnedId).toBeDefined()
+    const mountsWhilePinned = sheetBodyMounts.count
+    expect(mountsWhilePinned).toBe(1)
 
     update(renderer, true)
 
-    // Shared-value writes cannot heal a sheet whose native view was rebuilt
-    // under Reanimated (verified on device); only a remount repaints it. The
-    // epoch-keyed nativeID is the observable proof the remount happened.
-    expect(drawerId()).toBeDefined()
-    expect(drawerId()).not.toBe(pinnedId)
+    expect(sheetBodyMounts.count).toBe(2)
     act(() => renderer.unmount())
   })
 
-  it('does not re-assert while the sheet stays pinned', () => {
+  it('does not re-assert or rebuild while the sheet stays pinned', () => {
     const renderer = render(true)
     update(renderer, false)
     const pinned = withTimingCalls.filter((call) => call.to === 1).length
@@ -156,6 +154,7 @@ describe('bottom drawer window hand-back', () => {
     update(renderer, false)
 
     expect(withTimingCalls.filter((call) => call.to === 1).length).toBe(pinned)
+    expect(sheetBodyMounts.count).toBe(1)
     act(() => renderer.unmount())
   })
 })

@@ -1,5 +1,5 @@
 import { createElement } from 'react'
-import { act, create, type ReactTestRenderer } from 'react-test-renderer'
+import { act, create } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   useNewWorktreeDrawerNavigation,
@@ -14,11 +14,9 @@ function renderNavigation(modalVisible: boolean): { current: Nav } {
     handle.current = useNewWorktreeDrawerNavigation(props.modalVisible)
     return null
   }
-  let renderer: ReactTestRenderer | null = null
   act(() => {
-    renderer = create(createElement(Probe, { modalVisible }))
+    create(createElement(Probe, { modalVisible }))
   })
-  void renderer
   return handle
 }
 

@@ -89,15 +89,15 @@ export function MountedBottomDrawer({
       })
     : undefined
 
-  // Why: a sheet pinned under a fill picker keeps progress at 1 while the picker
-  // owns the window, so nothing re-applies its transform when the picker leaves.
-  // If the native view was rebuilt underneath (shared modal host swaps the window
-  // contents), it is left with a stale transform and never paints — a dimmed,
-  // dead screen the user can only escape by dismissing the whole modal. Shared-
-  // value writes cannot heal that (verified on device: an unchanged or nudged
-  // style lands on the stale native binding), so remount the sheet's view on
-  // every window hand-back: the fresh native view mounts with the style computed
-  // from the CURRENT progress (already 1), painting in place with no animation.
+  // Why: a sheet pinned under a fill picker holds progress at its target while the
+  // picker owns the window, so nothing re-applies its transform when the picker
+  // leaves. If the native view was rebuilt underneath, it keeps a stale transform
+  // and never paints — a dimmed, dead screen the user can only escape by dismissing
+  // the whole modal. A shared-value write alone cannot heal that (verified on
+  // device: an unchanged or nudged style lands on the stale native binding), so the
+  // remount is what repaints; the writes below keep the shared values authoritative
+  // for the fresh view, which matters because the drawer swap (166ms) hands back
+  // before the 180ms enter animation has finished.
   const [windowEpoch, setWindowEpoch] = useState(0)
   const wasInteractiveRef = useRef(interactive)
   useEffect(() => {
@@ -382,7 +382,6 @@ export function MountedBottomDrawer({
           <Animated.View
             // Why: remount per window hand-back — see the windowEpoch effect.
             key={windowEpoch}
-            nativeID={`bottom-drawer-window-${windowEpoch}`}
             style={[
               styles.drawer,
               fillAvailable ? styles.drawerFill : null,
