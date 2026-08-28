@@ -106,8 +106,9 @@ describe('ClaudeRuntimePathResolver', () => {
   it('still creates the parent directory when the runtime config file is written', async () => {
     const inherited = join(testState.fakeHomeDir, 'inherited-claude-home')
     process.env.CLAUDE_CONFIG_DIR = inherited
-    mkdirSync(inherited, { recursive: true })
-    writeFileSync(join(inherited, '.claude.json'), '{}\n', { mode: 0o600 })
+    // Why absent: this is the writer half of the claim that lets the resolver stop
+    // creating the dir. Pre-creating it here would leave `writeJson`'s own mkdir unpinned.
+    expect(existsSync(inherited)).toBe(false)
 
     const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
     const service = new ClaudeRuntimeAuthService(store()) as unknown as {
@@ -115,11 +116,29 @@ describe('ClaudeRuntimePathResolver', () => {
     }
 
     expect(service.writeRuntimeOauthAccount({ emailAddress: 'user@example.com' })).toBe(true)
+    expect(existsSync(inherited)).toBe(true)
     expect(JSON.parse(readFileSync(join(inherited, '.claude.json'), 'utf-8')).oauthAccount).toEqual(
       {
         emailAddress: 'user@example.com'
       }
     )
+  })
+
+  it('preserves unrelated keys when updating an existing runtime config file', async () => {
+    const inherited = join(testState.fakeHomeDir, 'inherited-claude-home')
+    process.env.CLAUDE_CONFIG_DIR = inherited
+    mkdirSync(inherited, { recursive: true })
+    writeFileSync(join(inherited, '.claude.json'), '{"theme":"dark"}\n', { mode: 0o600 })
+
+    const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
+    const service = new ClaudeRuntimeAuthService(store()) as unknown as {
+      writeRuntimeOauthAccount: (account: unknown) => boolean
+    }
+
+    expect(service.writeRuntimeOauthAccount({ emailAddress: 'user@example.com' })).toBe(true)
+    const written = JSON.parse(readFileSync(join(inherited, '.claude.json'), 'utf-8'))
+    expect(written.oauthAccount).toEqual({ emailAddress: 'user@example.com' })
+    expect(written.theme).toBe('dark')
   })
 })
 
