@@ -200,7 +200,12 @@ export const CompactAgentRow = React.memo(function CompactAgentRow({
       ) : reserveDisclosureGutter ? (
         <span className="size-4 shrink-0" aria-hidden />
       ) : null}
-      <AgentStateDot state={dotState} size="sm" />
+      {/* Why: the row's actionable disabled reason must win on every hit area. */}
+      <AgentStateDot
+        state={dotState}
+        size="sm"
+        title={sendTargetDisabledReason ? null : undefined}
+      />
       {!hideIcon && (
         <span className="inline-flex shrink-0" title={formatAgentTypeLabel(agent.agentType)}>
           <AgentIcon agent={agentTypeToIconAgent(agent.agentType)} size={13} />

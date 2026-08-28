@@ -86,6 +86,22 @@ describe('SessionSubagentsSection', () => {
     expect(queryByText('First pass')).toBeNull()
   })
 
+  it('labels the subagent run state exactly once, on the dot itself', async () => {
+    listSubagentSessions.mockResolvedValueOnce({
+      sessions: [makeSubagent('Running task')],
+      issues: []
+    })
+    const { container } = render(<SessionSubagentsSection session={makeSession()} />)
+    await act(async () => {})
+
+    const titles = [...container.querySelectorAll('[title]')].map((element) =>
+      element.getAttribute('title')
+    )
+
+    // A wrapper title would stack a second identical tooltip on the dot's own hit area.
+    expect(titles).toEqual(['Working', 'Running task', 'View Log'])
+  })
+
   it('does not fetch for remote sessions even when the scan counted transcripts', async () => {
     const { container } = render(
       <SessionSubagentsSection

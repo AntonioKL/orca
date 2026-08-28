@@ -1180,7 +1180,11 @@ export function handleActivityFilterFocusShortcut({
   return true
 }
 
-function ThreadAgentStateIndicator({ thread }: { thread: AgentPaneThread }): React.JSX.Element {
+export function ThreadAgentStateIndicator({
+  thread
+}: {
+  thread: AgentPaneThread
+}): React.JSX.Element {
   const state = threadAgentState(thread)
   const label = threadAgentStateLabel(thread)
   return (

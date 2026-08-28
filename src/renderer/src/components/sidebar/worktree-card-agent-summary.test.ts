@@ -33,6 +33,10 @@ function monitoringAgent(): DashboardAgentRowData {
   }
 }
 
+function orderedTitles(markup: string): string[] {
+  return [...markup.matchAll(/\stitle="([^"]*)"/g)].map((match) => match[1])
+}
+
 describe('worktree card agent summary', () => {
   it('presents passive working as monitoring', () => {
     const agent = monitoringAgent()
@@ -54,6 +58,34 @@ describe('worktree card agent summary', () => {
     expect(markup).toMatch(
       /Monitoring background tasks<\/span><span[^>]*> - Run background checks<\/span>/
     )
+  })
+
+  it('hands the whole row to the send-target reason, and only then', () => {
+    const agent = monitoringAgent()
+    agent.entry.prompt = 'Run background checks'
+
+    const disabled = renderToStaticMarkup(
+      createElement(CompactAgentRow, {
+        agent,
+        now: 2000,
+        onActivate: vi.fn(),
+        sendTargetStatus: 'disabled',
+        sendTargetDisabledReason: 'Agent needs permission'
+      })
+    )
+
+    // The dot sits inside the row, so its own state title would shadow the reason on hover.
+    expect(orderedTitles(disabled)).toEqual(['Agent needs permission', 'Claude'])
+
+    const eligible = renderToStaticMarkup(
+      createElement(CompactAgentRow, { agent, now: 2000, onActivate: vi.fn() })
+    )
+
+    expect(orderedTitles(eligible)).toEqual([
+      'Monitoring background tasks - Run background checks',
+      'Monitoring background tasks',
+      'Claude'
+    ])
   })
 
   it('lists interrupted outcomes before clean completions', () => {

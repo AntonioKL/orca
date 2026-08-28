@@ -127,7 +127,11 @@ describe('AgentStateDot', () => {
       React.createElement(AgentStateDot, { state: 'interrupted', title: null })
     )
 
-    expect(markup).not.toContain(' title=')
+    expect(markup.match(/<span[^>]*\stitle="([^"]*)"/)?.[1]).toBe(undefined)
     expect(markup).toContain('aria-label="Interrupted"')
+    // Differential: the same state still labels itself when the caller omits `title`.
+    expect(renderMarkup('interrupted').match(/<span[^>]*\stitle="([^"]*)"/)?.[1]).toBe(
+      agentStateLabel('interrupted')
+    )
   })
 })
