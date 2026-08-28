@@ -12,6 +12,7 @@ export async function getRuntimeGitStatus(
   context: RuntimeGitContext,
   options?: {
     includeIgnored?: boolean
+    includeLineStats?: boolean
     bypassEffectiveUpstreamNegativeCache?: boolean
     reuseLineStats?: boolean
     branchLineTotalMergeBase?: string
@@ -20,6 +21,8 @@ export async function getRuntimeGitStatus(
 ): Promise<GitStatusResult> {
   const target = getActiveRuntimeTarget(context.settings)
   const includeIgnoredArgs = options?.includeIgnored ? { includeIgnored: true } : {}
+  const includeLineStatsArgs =
+    options?.includeLineStats === false ? { includeLineStats: false } : {}
   const upstreamCacheBypassArgs = options?.bypassEffectiveUpstreamNegativeCache
     ? { bypassEffectiveUpstreamNegativeCache: true }
     : {}
@@ -33,6 +36,7 @@ export async function getRuntimeGitStatus(
         worktreePath: resolveLocalWorktreePath(context),
         connectionId: context.connectionId,
         ...includeIgnoredArgs,
+        ...includeLineStatsArgs,
         ...upstreamCacheBypassArgs,
         ...lineStatsReuseArgs,
         ...branchLineTotalArgs
@@ -46,6 +50,7 @@ export async function getRuntimeGitStatus(
     {
       worktree: toRuntimeWorktreeSelector(context.worktreeId),
       ...includeIgnoredArgs,
+      ...includeLineStatsArgs,
       ...upstreamCacheBypassArgs,
       ...lineStatsReuseArgs,
       ...branchLineTotalArgs

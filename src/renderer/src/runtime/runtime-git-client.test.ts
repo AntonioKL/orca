@@ -208,6 +208,30 @@ describe('runtime git client', () => {
     })
   })
 
+  it('forwards a false line-stats request and accepts stats from an older local host', async () => {
+    const oldHostResult = {
+      entries: [{ path: 'src/a.ts', status: 'modified', area: 'unstaged', added: 3, removed: 2 }],
+      conflictOperation: 'unknown'
+    }
+    gitStatus.mockResolvedValue(oldHostResult)
+
+    const result = await getRuntimeGitStatus(
+      {
+        settings: { activeRuntimeEnvironmentId: null },
+        worktreeId: 'wt-1',
+        worktreePath: '/repo'
+      },
+      { includeLineStats: false }
+    )
+
+    expect(gitStatus).toHaveBeenCalledWith({
+      worktreePath: '/repo',
+      connectionId: undefined,
+      includeLineStats: false
+    })
+    expect(result).toBe(oldHostResult)
+  })
+
   it('forwards upstream-negative-cache bypass to local git status only when enabled', async () => {
     gitStatus.mockResolvedValue({ entries: [], conflictOperation: 'unknown' })
 
@@ -451,6 +475,36 @@ describe('runtime git client', () => {
       params: { worktree: 'id:wt-1', includeIgnored: true },
       timeoutMs: 15_000
     })
+  })
+
+  it('forwards a false line-stats request through the active runtime environment', async () => {
+    const oldHostResult = {
+      entries: [{ path: 'src/a.ts', status: 'modified', area: 'unstaged', added: 3, removed: 2 }],
+      conflictOperation: 'unknown'
+    }
+    runtimeEnvironmentCall.mockResolvedValue({
+      id: 'rpc-1',
+      ok: true,
+      result: oldHostResult,
+      _meta: { runtimeId: 'remote-runtime' }
+    })
+
+    const result = await getRuntimeGitStatus(
+      {
+        settings: { activeRuntimeEnvironmentId: 'env-1' },
+        worktreeId: 'wt-1',
+        worktreePath: '/repo'
+      },
+      { includeLineStats: false }
+    )
+
+    expect(runtimeEnvironmentCall).toHaveBeenCalledWith({
+      selector: 'env-1',
+      method: 'git.status',
+      params: { worktree: 'id:wt-1', includeLineStats: false },
+      timeoutMs: 15_000
+    })
+    expect(result).toEqual(oldHostResult)
   })
 
   it('forwards upstream-negative-cache bypass through the active runtime environment', async () => {

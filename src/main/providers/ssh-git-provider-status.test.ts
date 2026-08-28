@@ -57,6 +57,18 @@ describe('SshGitProvider', () => {
     )
   })
 
+  it('getStatus forwards a false line-stats request', async () => {
+    mux.request.mockResolvedValue({ entries: [], conflictOperation: 'unknown' })
+
+    await provider.getStatus('/home/user/repo', { includeLineStats: false })
+
+    expect(mux.request).toHaveBeenCalledWith(
+      'git.status',
+      { worktreePath: '/home/user/repo', includeLineStats: false },
+      { signal: expect.any(AbortSignal) }
+    )
+  })
+
   it('getStatus forwards upstream-negative-cache bypass only when requested', async () => {
     const statusResult = { entries: [], conflictOperation: 'unknown' }
     mux.request.mockResolvedValue(statusResult)

@@ -28,6 +28,7 @@ export const GIT_METHODS: RpcMethod[] = [
     handler: async (params, { runtime, signal }) => {
       const options =
         params.includeIgnored === undefined &&
+        params.includeLineStats === undefined &&
         params.bypassEffectiveUpstreamNegativeCache === undefined &&
         params.reuseLineStats === undefined &&
         params.branchLineTotalMergeBase === undefined &&
@@ -37,6 +38,9 @@ export const GIT_METHODS: RpcMethod[] = [
               ...(params.includeIgnored === undefined
                 ? {}
                 : { includeIgnored: params.includeIgnored }),
+              ...(params.includeLineStats === undefined
+                ? {}
+                : { includeLineStats: params.includeLineStats }),
               ...(params.bypassEffectiveUpstreamNegativeCache === true
                 ? { bypassEffectiveUpstreamNegativeCache: true }
                 : {}),

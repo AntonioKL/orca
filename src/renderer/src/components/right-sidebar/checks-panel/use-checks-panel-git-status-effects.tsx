@@ -60,7 +60,7 @@ type ChecksPanelGitStatusEffectsInput = Pick<
 const GIT_STATUS_FAILURE_RETRY_MS = 3000
 const CHECKS_PANEL_GIT_STATUS_MIN_INTERVAL_MS = 3000
 const CHECKS_PANEL_GIT_STATUS_SLOW_BACKOFF = {
-  idleMultiplier: 5,
+  idleMultiplier: 1,
   changeSignalMultiplier: 1,
   maxIntervalMs: 5 * 60_000
 }

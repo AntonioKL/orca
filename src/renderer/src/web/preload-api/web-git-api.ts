@@ -44,6 +44,7 @@ export function createGitApi(): NonNullable<Partial<PreloadApi>['git']> {
     status: async ({
       worktreePath,
       includeIgnored,
+      includeLineStats,
       bypassEffectiveUpstreamNegativeCache,
       reuseLineStats,
       branchLineTotalMergeBase,
@@ -53,6 +54,7 @@ export function createGitApi(): NonNullable<Partial<PreloadApi>['git']> {
       const params = {
         worktree: toRuntimeWorktreeSelector(worktree.id),
         includeIgnored,
+        includeLineStats,
         bypassEffectiveUpstreamNegativeCache,
         reuseLineStats,
         ...(branchLineTotalMergeBase ? { branchLineTotalMergeBase } : {})

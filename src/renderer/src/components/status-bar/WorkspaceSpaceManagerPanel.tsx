@@ -93,7 +93,6 @@ import {
   countWorkspaceSpaceActiveAgents,
   getLargestWorkspaceSpaceItemSize,
   getLargestWorkspaceSpaceRowSize,
-  getWorkspaceSpaceGitStatusRefreshCandidates,
   isWorkspaceSpaceRowReadyToDelete,
   pruneWorkspaceSpaceSelectedIds,
   resolveWorkspaceSpaceInspectedWorktreeId,
@@ -102,6 +101,7 @@ import {
   type WorkspaceSpaceSortDirection,
   type WorkspaceSpaceSortKey
 } from './workspace-space-presentation'
+import { getWorkspaceSpaceGitStatusRefreshCandidates } from './workspace-space-git-status-order'
 import { translate } from '@/i18n/i18n'
 
 const TREEMAP_FILLS = [
@@ -1469,12 +1469,15 @@ export function WorkspaceSpaceManagerPanel(): React.JSX.Element {
 
       return (
         owner
-          ? getRuntimeGitStatus({
-              settings: ownerSettings,
-              worktreeId: worktree.worktreeId,
-              worktreePath: worktree.path,
-              connectionId: owner.connectionId ?? undefined
-            })
+          ? getRuntimeGitStatus(
+              {
+                settings: ownerSettings,
+                worktreeId: worktree.worktreeId,
+                worktreePath: worktree.path,
+                connectionId: owner.connectionId ?? undefined
+              },
+              { includeLineStats: false }
+            )
           : Promise.reject(new Error('Workspace owner is no longer available'))
       )
         .then((status) => {
@@ -1569,7 +1572,12 @@ export function WorkspaceSpaceManagerPanel(): React.JSX.Element {
   }, [scanGeneration])
 
   useEffect(() => {
-    const candidates = getWorkspaceSpaceGitStatusRefreshCandidates(sourceRows)
+    const visibleWorktreeIdentities = new Set(rows.map(getWorkspaceSpaceWorktreeIdentity))
+    const candidates = getWorkspaceSpaceGitStatusRefreshCandidates(sourceRows, {
+      activeWorktreeId,
+      activeExecutionHostId: activeWorkspaceExecutionHostId,
+      visibleWorktreeIdentities
+    })
     if (candidates.length === 0) {
       return
     }
@@ -1592,7 +1600,13 @@ export function WorkspaceSpaceManagerPanel(): React.JSX.Element {
     return () => {
       cancelled = true
     }
-  }, [refreshWorkspaceGitStatus, sourceRows])
+  }, [
+    activeWorkspaceExecutionHostId,
+    activeWorktreeId,
+    refreshWorkspaceGitStatus,
+    rows,
+    sourceRows
+  ])
 
   const inspectedWorktree =
     rows.find((row) => getWorkspaceSpaceWorktreeIdentity(row) === nextInspectedWorktreeId) ??

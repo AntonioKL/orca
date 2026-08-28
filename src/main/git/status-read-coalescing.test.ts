@@ -294,16 +294,17 @@ describe('getStatus', () => {
       getStatus('/other-repo'),
       getStatus('/repo', { wslDistro: 'Ubuntu' }),
       getStatus('/repo', { includeIgnored: true }),
+      getStatus('/repo', { includeLineStats: false }),
       getStatus('/repo', { reuseLineStats: true }),
       getStatus('/repo', { bypassEffectiveUpstreamNegativeCache: true }),
       getStatus('/repo', { limit: 1 }),
       getStatus('/repo', { sharedLinkPaths: ['node_modules'] })
     ]
 
-    await vi.waitFor(() => expect(statusCommandCalls).toBe(8))
+    await vi.waitFor(() => expect(statusCommandCalls).toBe(9))
     releases.splice(0).forEach((release) => release())
     await Promise.all(reads)
-    expect(statusCommandCalls).toBe(8)
+    expect(statusCommandCalls).toBe(9)
   })
 
   it('clears in-flight status reads when a mutation runs', async () => {

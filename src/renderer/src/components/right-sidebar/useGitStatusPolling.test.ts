@@ -4,6 +4,8 @@ import type { FsChangedPayload } from '../../../../shared/filesystem-entry-types
 import type { GitStatusResult } from '../../../../shared/git-status-types'
 import type { GitPushTarget } from '../../../../shared/worktree/types'
 import { DEFAULT_GIT_STATUS_LIMIT } from '../../../../shared/git-status-limit'
+import { slowTaskRequiredIdleMs } from './coalesced-poll-runner'
+import { SLOW_GIT_POLL_BACKOFF } from './useGitStatusPolling'
 
 const worktree = { id: 'repo-1::/repo', repoId: 'repo-1', path: '/repo' }
 const repo = { id: 'repo-1', path: '/repo', kind: 'git', connectionId: null as string | null }
@@ -151,6 +153,17 @@ async function usePollingOnce(
 }
 
 describe('useGitStatusPolling', () => {
+  it('paces the safety scheduler and stale-conflict fan-out by one run duration', () => {
+    expect(
+      slowTaskRequiredIdleMs(
+        6_000,
+        SLOW_GIT_POLL_BACKOFF.idleMultiplier,
+        3_000,
+        SLOW_GIT_POLL_BACKOFF.maxIntervalMs
+      )
+    ).toBe(6_000)
+  })
+
   beforeEach(() => {
     vi.restoreAllMocks()
     vi.unstubAllGlobals()

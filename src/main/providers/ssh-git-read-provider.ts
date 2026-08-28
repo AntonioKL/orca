@@ -58,6 +58,7 @@ export class SshGitReadProvider {
     const request = {
       worktreePath,
       ...(options?.includeIgnored ? { includeIgnored: true } : {}),
+      ...(options?.includeLineStats === false ? { includeLineStats: false } : {}),
       ...(options?.bypassEffectiveUpstreamNegativeCache
         ? { bypassEffectiveUpstreamNegativeCache: true }
         : {}),
@@ -69,6 +70,7 @@ export class SshGitReadProvider {
     const key = stableInFlightKey([
       worktreePath,
       options?.includeIgnored === true,
+      options?.includeLineStats !== false,
       options?.bypassEffectiveUpstreamNegativeCache === true,
       options?.reuseLineStats === true,
       options?.branchLineTotalMergeBase ?? ''

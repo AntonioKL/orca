@@ -13,9 +13,9 @@ import {
 } from './compare-summary'
 import { slowTaskRequiredIdleMs } from '../../coalesced-poll-runner'
 
-// Why: 30s poll — 5s churned git subprocesses in large repos; explicit commit/remote/manual/base-ref refreshes still run immediately.
+// Why: 30s poll — slow runs idle for their own duration; explicit commit/remote/manual/base-ref refreshes still run immediately.
 export const BRANCH_REFRESH_INTERVAL_MS = 30_000
-const BRANCH_REFRESH_IDLE_MULTIPLIER = 5
+const BRANCH_REFRESH_IDLE_MULTIPLIER = 1
 const BRANCH_REFRESH_MAX_INTERVAL_MS = 5 * 60_000
 
 type BranchCompareRefreshKind = 'immediate' | 'interval'

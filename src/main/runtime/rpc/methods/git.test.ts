@@ -56,6 +56,22 @@ describe('git RPC methods', () => {
     })
   })
 
+  it('forwards a false line-stats request through the parsed RPC options', async () => {
+    const runtime = {
+      getRuntimeId: () => 'test-runtime',
+      getRuntimeGitStatus: vi.fn().mockResolvedValue({ entries: [], conflictOperation: 'unknown' })
+    } as unknown as OrcaRuntimeService
+    const dispatcher = new RpcDispatcher({ runtime, methods: GIT_METHODS })
+
+    await dispatcher.dispatch(
+      makeRequest('git.status', { worktree: 'id:wt-1', includeLineStats: false })
+    )
+
+    expect(runtime.getRuntimeGitStatus).toHaveBeenCalledWith('id:wt-1', {
+      includeLineStats: false
+    })
+  })
+
   it('forwards upstream-negative-cache bypass for status requests', async () => {
     const runtime = {
       getRuntimeId: () => 'test-runtime',

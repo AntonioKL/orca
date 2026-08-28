@@ -3546,6 +3546,7 @@ const api = {
       worktreePath: string
       connectionId?: string
       includeIgnored?: boolean
+      includeLineStats?: boolean
       bypassEffectiveUpstreamNegativeCache?: boolean
       reuseLineStats?: boolean
       branchLineTotalMergeBase?: string

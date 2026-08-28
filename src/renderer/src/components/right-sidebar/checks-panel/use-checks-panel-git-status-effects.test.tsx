@@ -132,7 +132,7 @@ describe('useChecksPanelGitStatusEffects poll runner', () => {
     expect(mocks.getRuntimeGitStatus).toHaveBeenCalledTimes(1)
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(49_999)
+      await vi.advanceTimersByTimeAsync(9_999)
     })
     expect(mocks.getRuntimeGitStatus).toHaveBeenCalledTimes(1)
     await act(async () => {

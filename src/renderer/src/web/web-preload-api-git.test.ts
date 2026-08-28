@@ -164,6 +164,10 @@ describe('web git preload API', () => {
       branchLineTotalMergeBase: TEST_COMMIT_OID
     })
     await globals.window.api.git.status({ worktreePath: '/workspace/repo' })
+    await globals.window.api.git.status({
+      worktreePath: '/workspace/repo',
+      includeLineStats: false
+    })
     await globals.window.api.git.branchCompare({
       worktreePath: '/workspace/repo',
       baseRef: 'origin/main',
@@ -179,6 +183,7 @@ describe('web git preload API', () => {
         params: {
           worktree: 'id:wt-1',
           includeIgnored: undefined,
+          includeLineStats: undefined,
           bypassEffectiveUpstreamNegativeCache: undefined,
           reuseLineStats: undefined,
           branchLineTotalMergeBase: TEST_COMMIT_OID
@@ -189,6 +194,17 @@ describe('web git preload API', () => {
         params: {
           worktree: 'id:wt-1',
           includeIgnored: undefined,
+          includeLineStats: undefined,
+          bypassEffectiveUpstreamNegativeCache: undefined,
+          reuseLineStats: undefined
+        }
+      },
+      {
+        method: 'git.status',
+        params: {
+          worktree: 'id:wt-1',
+          includeIgnored: undefined,
+          includeLineStats: false,
           bypassEffectiveUpstreamNegativeCache: undefined,
           reuseLineStats: undefined
         }

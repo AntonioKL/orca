@@ -257,6 +257,35 @@ describe('registerFilesystemHandlers', () => {
     })
   })
 
+  it('forwards a false line-stats request through local and SSH git status IPC', async () => {
+    registerWorktreeRootsForRepo(store as never, 'repo-1', [REPO_PATH, WORKTREE_FEATURE_PATH])
+    getStatusMock.mockResolvedValue({ entries: [], conflictOperation: 'unknown' })
+    const sshProvider = {
+      getStatus: vi.fn().mockResolvedValue({ entries: [], conflictOperation: 'unknown' })
+    }
+    getSshGitProviderMock.mockReturnValue(sshProvider)
+    registerFilesystemHandlers(store as never)
+
+    await handlers.get('git:status')!(null, {
+      worktreePath: WORKTREE_FEATURE_PATH,
+      includeLineStats: false
+    })
+    await handlers.get('git:status')!(null, {
+      worktreePath: '/remote/repo',
+      connectionId: 'ssh-1',
+      includeLineStats: false
+    })
+
+    expect(getStatusMock).toHaveBeenCalledWith(WORKTREE_FEATURE_PATH, {
+      includeIgnored: false,
+      includeLineStats: false
+    })
+    expect(sshProvider.getStatus).toHaveBeenCalledWith('/remote/repo', {
+      includeIgnored: false,
+      includeLineStats: false
+    })
+  })
+
   it('aborts tokenized local status without crossing renderer boundaries', async () => {
     registerWorktreeRootsForRepo(store as never, 'repo-1', [REPO_PATH, WORKTREE_FEATURE_PATH])
     const statusSignals: AbortSignal[] = []

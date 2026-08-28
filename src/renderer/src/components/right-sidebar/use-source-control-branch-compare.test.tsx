@@ -256,10 +256,10 @@ describe('useSourceControlBranchCompare scheduler', () => {
       await Promise.resolve()
     })
     // Three skipped ticks collapse into one pending run, but a 90s task must
-    // not start it back-to-back (5x is capped at the 5-minute horizon).
+    // idle for its own duration before the trailing run.
     expect(mocks.getRuntimeGitBranchCompare).toHaveBeenCalledTimes(1)
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(299_999)
+      await vi.advanceTimersByTimeAsync(89_999)
     })
     expect(mocks.getRuntimeGitBranchCompare).toHaveBeenCalledTimes(1)
     await act(async () => {
