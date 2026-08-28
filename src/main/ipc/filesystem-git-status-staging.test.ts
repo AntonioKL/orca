@@ -94,11 +94,9 @@ describe('registerFilesystemHandlers', () => {
 
     // Why: validateGitRelativeFilePath uses path.relative() which produces
     // platform-specific separators (backslashes on Windows).
-    expect(stageFileMock).toHaveBeenCalledWith(
-      WORKTREE_FEATURE_PATH,
-      path.join('src', 'file.ts'),
-      {}
-    )
+    expect(stageFileMock).toHaveBeenCalledWith(WORKTREE_FEATURE_PATH, path.join('src', 'file.ts'), {
+      admissionTier: 'interactive'
+    })
   })
 
   it('uses worktree roots seeded by worktrees:list without rebuilding the cache', async () => {
@@ -346,7 +344,9 @@ describe('registerFilesystemHandlers', () => {
       connectionId: 'ssh-1'
     })
 
-    expect(abortMergeMock).toHaveBeenCalledWith(WORKTREE_FEATURE_PATH, {})
+    expect(abortMergeMock).toHaveBeenCalledWith(WORKTREE_FEATURE_PATH, {
+      admissionTier: 'interactive'
+    })
     expect(sshProvider.abortMerge).toHaveBeenCalledWith('/remote/repo')
   })
 
@@ -366,7 +366,9 @@ describe('registerFilesystemHandlers', () => {
       connectionId: 'ssh-1'
     })
 
-    expect(abortRebaseMock).toHaveBeenCalledWith(WORKTREE_FEATURE_PATH, {})
+    expect(abortRebaseMock).toHaveBeenCalledWith(WORKTREE_FEATURE_PATH, {
+      admissionTier: 'interactive'
+    })
     expect(sshProvider.abortRebase).toHaveBeenCalledWith('/remote/repo')
   })
 
@@ -410,7 +412,7 @@ describe('registerFilesystemHandlers', () => {
     expect(bulkStageFilesMock).toHaveBeenCalledWith(
       WORKTREE_FEATURE_PATH,
       [path.join('src', 'file.ts'), path.join('nested', 'child.ts')],
-      {}
+      { admissionTier: 'interactive' }
     )
   })
 
@@ -427,7 +429,7 @@ describe('registerFilesystemHandlers', () => {
     expect(bulkDiscardChangesMock).toHaveBeenCalledWith(
       WORKTREE_FEATURE_PATH,
       [path.join('src', 'file.ts'), path.join('nested', 'child.ts')],
-      {}
+      { admissionTier: 'interactive' }
     )
   })
 

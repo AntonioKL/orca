@@ -67,6 +67,8 @@ export async function withGitAdmission(
         return
       }
       finalized = true
+      child.off('error', handleError)
+      child.off('close', handleClose)
       grant?.release()
       if (error) {
         span.fail(error)
@@ -74,21 +76,23 @@ export async function withGitAdmission(
         span.end()
       }
     }
-    child.on('error', (error) => {
+    const handleError = (error: Error): void => {
       if (!child.pid) {
         finalize(error)
       } else {
         liveError = error
       }
-    })
-    child.once('close', (code, signal) => {
+    }
+    const handleClose = (code: number | null, signal: NodeJS.Signals | null): void => {
       const exitError =
         liveError ??
         (code === 0 && signal === null
           ? undefined
           : new Error(`git exited with ${code ?? signal ?? 'unknown'}.`))
       finalize(exitError)
-    })
+    }
+    child.on('error', handleError)
+    child.once('close', handleClose)
     return child
   } catch (error) {
     grant?.release()

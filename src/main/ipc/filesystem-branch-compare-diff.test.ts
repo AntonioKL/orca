@@ -242,7 +242,7 @@ describe('registerFilesystemHandlers', () => {
         filePath: path.join('src', 'file.ts'),
         oldPath: path.join('src', 'old-file.ts')
       },
-      {}
+      { admissionTier: 'interactive' }
     )
   })
 
