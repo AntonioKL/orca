@@ -2,6 +2,7 @@
 
 import { act, cleanup, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { makeWorktree } from '@/store/slices/worktrees-slice-test-fixtures'
 import type { PRCheckDetail } from '../../../../../shared/github/check-types'
 import type * as GitLabReviewClient from './gitlab-review-client'
 
@@ -137,7 +138,11 @@ describe('useChecksPanelPolling live behavior', () => {
         number: 17,
         headSha: 'old-head'
       } as NonNullable<PollingInput['activeGitLabReview']>,
-      activeWorktree: { hostId: 'runtime:owner-runtime' } as PollingInput['activeWorktree'],
+      activeWorktree: makeWorktree({
+        id: 'worktree-1',
+        repoId: 'repo-1',
+        hostId: 'runtime:owner-runtime'
+      }),
       settings: { activeRuntimeEnvironmentId: 'focused-runtime' } as PollingInput['settings']
     })
     const { result } = renderHook(() => useChecksPanelPolling(model))
