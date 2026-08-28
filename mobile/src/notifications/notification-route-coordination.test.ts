@@ -1,5 +1,5 @@
 import { createElement } from 'react'
-import { act, create } from 'react-test-renderer'
+import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import { getNotificationNavigationTarget } from './notification-routing'
@@ -152,7 +152,7 @@ describe('notification route coordination', () => {
       return null
     }
 
-    let renderer: ReturnType<typeof create> | null = null
+    let renderer: ReactTestRenderer | null = null
     await act(async () => {
       renderer = create(createElement(LeaseHarness))
     })
@@ -180,7 +180,7 @@ describe('notification route coordination', () => {
       return null
     }
 
-    let notificationRenderer: ReturnType<typeof create> | null = null
+    let notificationRenderer: ReactTestRenderer | null = null
     await act(async () => {
       notificationRenderer = create(createElement(NotificationHookHarness))
     })
@@ -296,7 +296,7 @@ describe('notification route coordination', () => {
       return null
     }
 
-    let renderer: ReturnType<typeof create> | null = null
+    let renderer: ReactTestRenderer | null = null
     await act(async () => {
       renderer = create(createElement(LeaseHarness, { connected: false }))
     })
