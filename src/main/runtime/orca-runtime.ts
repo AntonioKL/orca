@@ -742,7 +742,9 @@ import {
 } from './mobile-session-terminal-retirement'
 import { retireTerminalSurfaceFromPersistence } from './mobile-session-terminal-persistence-retirement'
 import {
+  isConfirmedPtyAbsence,
   NO_OBSERVING_PROVIDER_REASON,
+  resolveUnlistedPtyPresence,
   SSH_EXIT_UNCONFIRMED_REASON,
   SSH_PROVIDER_UNREGISTERED_REASON,
   type PtyLivenessVerdict
@@ -34069,14 +34071,34 @@ export class OrcaRuntimeService {
     // be legitimately missing from it, and unknown liveness never demotes.
     // The sync hasPty rescue closes the spawn/list race: a just-spawned PTY can
     // register after the inventory snapshot, and federation reads one
-    // connected:false as exited.
-    const provenAbsent =
+    // connected:false as exited. A `null` rescue answer means the probe could
+    // not be asked; that records doubt instead of confirming the absence.
+    const unlistedPresence =
       provenLivePtyIds !== null &&
       leaf.ptyId !== null &&
       !provenLivePtyIds.has(leaf.ptyId) &&
       !leaf.ptyId.startsWith('remote:') &&
-      parseAppSshPtyId(leaf.ptyId) === null &&
-      this.ptyController?.hasPty?.(leaf.ptyId) !== true
+      parseAppSshPtyId(leaf.ptyId) === null
+        ? resolveUnlistedPtyPresence(
+            this.ptyController?.hasPty?.(leaf.ptyId),
+            NO_OBSERVING_PROVIDER_REASON
+          )
+        : null
+    let provenAbsent = false
+    if (unlistedPresence && leaf.ptyId !== null) {
+      switch (unlistedPresence.status) {
+        case 'unverifiable':
+          this.markPtyLivenessUnverifiable(leaf.ptyId, unlistedPresence.reason)
+          break
+        case 'live':
+          // The rescue observed the pane; any recorded lost-contact doubt is stale.
+          this.forgetPtyLivenessVerdict(leaf.ptyId)
+          break
+        case 'exited':
+          provenAbsent = isConfirmedPtyAbsence(unlistedPresence)
+          break
+      }
+    }
     return {
       handle: this.issueHandle(leaf),
       ptyId: leaf.ptyId,

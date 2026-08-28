@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { OrcaRuntimeService } from './orca-runtime'
 import { getDefaultWorkspaceSession } from '../../shared/constants'
+import { NO_OBSERVING_PROVIDER_REASON } from '../../shared/pty-liveness-verdict'
 import type { WorkspaceSessionState } from '../../shared/workspace-session-state-types'
 
 // run6-review-pr-11959 repro: leaf.connected mirrors the graph (`ptyId !== null`),
@@ -146,6 +147,83 @@ describe('listTerminals liveness truth for restored leaves', () => {
       connected: true,
       writable: true
     })
+  })
+
+  // Coercion site 4 of the failure-becomes-fact class: `hasPty` answering `null`
+  // means "the query could not be answered" — the controller adapter returns it
+  // for a failed provider lookup or a probe-less provider. That is doubt, never
+  // a confirmation of the inventory's absence, so it must not demote the pane.
+  it('keeps a leaf connected when the per-id presence query cannot answer (null)', async () => {
+    const runtime = makeRuntimeWithLeaf({
+      leafPtyId: 'pty-unqueryable',
+      controllerSessions: [],
+      hasPty: () => null
+    })
+
+    const { terminals } = await runtime.listTerminals(`id:${WORKTREE_ID}`)
+
+    expect(terminals).toHaveLength(1)
+    expect(terminals[0]).toMatchObject({
+      ptyId: 'pty-unqueryable',
+      connected: true,
+      writable: true
+    })
+    // The unanswerable query is recorded as its own answer, so worker
+    // observation reports `unverifiable` instead of inventing a verdict.
+    expect(runtime.getPtyLivenessVerdict('pty-unqueryable')).toEqual({
+      status: 'unverifiable',
+      reason: NO_OBSERVING_PROVIDER_REASON
+    })
+  })
+
+  it('still demotes on an observed-false answer, with no doubt recorded', async () => {
+    const runtime = makeRuntimeWithLeaf({
+      leafPtyId: 'pty-proven-absent',
+      controllerSessions: [],
+      hasPty: () => false
+    })
+
+    const { terminals } = await runtime.listTerminals(`id:${WORKTREE_ID}`)
+
+    expect(terminals).toHaveLength(1)
+    expect(terminals[0]).toMatchObject({
+      ptyId: 'pty-proven-absent',
+      connected: false,
+      writable: false
+    })
+    expect(runtime.getPtyLivenessVerdict('pty-proven-absent')).toBeNull()
+  })
+
+  it('clears recorded doubt when the presence query later proves the pane live', async () => {
+    let answer: boolean | null = null
+    const runtime = makeRuntimeWithLeaf({
+      leafPtyId: 'pty-recovering',
+      controllerSessions: [],
+      hasPty: () => answer
+    })
+
+    await runtime.listTerminals(`id:${WORKTREE_ID}`)
+    expect(runtime.getPtyLivenessVerdict('pty-recovering')?.status).toBe('unverifiable')
+
+    answer = true
+    const { terminals } = await runtime.listTerminals(`id:${WORKTREE_ID}`)
+    expect(terminals[0]).toMatchObject({ connected: true, writable: true })
+    expect(runtime.getPtyLivenessVerdict('pty-recovering')).toBeNull()
+  })
+
+  it('never consults the per-id probe for panes the inventory already lists', async () => {
+    const hasPty = vi.fn(() => null)
+    const runtime = makeRuntimeWithLeaf({
+      leafPtyId: 'pty-live-listed',
+      controllerSessions: [{ id: 'pty-live-listed', cwd: '/tmp/probe-worktree' }],
+      hasPty
+    })
+
+    const { terminals } = await runtime.listTerminals(`id:${WORKTREE_ID}`)
+
+    expect(terminals[0]).toMatchObject({ connected: true, writable: true })
+    expect(hasPty).not.toHaveBeenCalled()
+    expect(runtime.getPtyLivenessVerdict('pty-live-listed')).toBeNull()
   })
 
   it('does not demote remote-runtime-scoped leaves the local inventory never covers', async () => {
