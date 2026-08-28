@@ -170,3 +170,20 @@ export function _clearHostedReviewRequestGenerationsForTest(): void {
   }
   hostedReviewRevalidationLanes.clear()
 }
+
+/** Records a freshly issued request in the in-flight map and supersedes any queued revalidation for its key. */
+export function registerInflightHostedReviewRequest(
+  requestKey: string,
+  entry: {
+    promise: Promise<HostedReviewInfo | null>
+    force: boolean
+    generation: number
+    startedAt: number
+  }
+): void {
+  inflightHostedReviewRequests.set(requestKey, entry)
+  supersedeHostedReviewRevalidation(requestKey, {
+    promise: entry.promise,
+    startedAt: entry.startedAt
+  })
+}

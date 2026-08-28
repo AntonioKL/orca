@@ -19,6 +19,7 @@ type RefreshHostedReviewCardArgs = {
   linkedBitbucketPR?: number | null
   linkedAzureDevOpsPR?: number | null
   linkedGiteaPR?: number | null
+  repoOwnerExecutionHostId?: string
 }
 
 export function refreshHostedReviewCard(
@@ -30,6 +31,7 @@ export function refreshHostedReviewCard(
     force: true,
     repoId: args.repoId,
     ...(args.admissionTier ? { admissionTier: args.admissionTier } : {}),
+    repoOwnerExecutionHostId: args.repoOwnerExecutionHostId,
     linkedGitHubPR: args.linkedGitHubPR ?? null,
     ...(fallbackGitHubPR !== null ? { fallbackGitHubPR } : {}),
     linkedGitLabMR: args.linkedGitLabMR ?? null,
