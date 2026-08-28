@@ -77,7 +77,16 @@ async function resolveOrchestrationPaneTerminalHandle(
     const response = await client.call<{ terminal: { handle: string } }>('terminal.resolvePane', {
       paneKey
     })
-    return response.result.terminal.handle
+    const remintedHandle = response.result.terminal.handle
+    const previousHandle = process.env.ORCA_TERMINAL_HANDLE
+    if (previousHandle) {
+      client.refreshOrchestrationCallerHandleAfterPaneRemint?.(
+        previousHandle,
+        paneKey,
+        remintedHandle
+      )
+    }
+    return remintedHandle
   } catch (err) {
     if (
       isPaneRemintUnavailableError(err) ||
