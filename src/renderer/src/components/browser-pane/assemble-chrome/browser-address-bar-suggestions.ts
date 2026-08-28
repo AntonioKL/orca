@@ -11,6 +11,7 @@ import type {
   BrowserPageDocLocation
 } from '../../../../../shared/browser-workspace-types'
 import type { WorkspaceDocHistoryEntry } from '../../../../../shared/workspace-doc-history'
+import { matchBrowserHistory, prepareBrowserHistoryEntries } from '@/lib/browser-history-match'
 import { isClipboardTextByteLengthOverLimit } from '../../../../../shared/clipboard-text'
 import { translate } from '@/i18n/i18n'
 
@@ -49,28 +50,6 @@ export function isBrowserAddressBarQueryTooLarge(
   return isClipboardTextByteLengthOverLimit(query, maxBytes)
 }
 
-function scoreBrowserAddressBarSuggestion(
-  entry: { url: string; title: string; lastVisitedAt: number; visitCount: number },
-  query: string
-): number {
-  const lowerQuery = query.toLowerCase()
-  const lowerUrl = entry.url.toLowerCase()
-  const lowerTitle = entry.title.toLowerCase()
-
-  if (!lowerUrl.includes(lowerQuery) && !lowerTitle.includes(lowerQuery)) {
-    return -1
-  }
-
-  let score = 0
-  if (lowerUrl.startsWith(lowerQuery) || lowerUrl.startsWith(`https://${lowerQuery}`)) {
-    score += 100
-  }
-  score += Math.min(entry.visitCount, 50)
-  const ageHours = (Date.now() - entry.lastVisitedAt) / (1000 * 60 * 60)
-  score += Math.max(0, 24 - ageHours)
-  return score
-}
-
 export function buildBrowserAddressBarSuggestions({
   browserUrlHistory,
   workspaceDocHistory = [],
@@ -97,22 +76,33 @@ export function buildBrowserAddressBarSuggestions({
       .sort((a, b) => b.lastVisitedAt - a.lastVisitedAt)
       .slice(0, MAX_BROWSER_ADDRESS_BAR_SUGGESTIONS)
   }
-  const scoredRows: { row: BrowserAddressBarSuggestion; score: number }[] = [
+  const documentSuggestions = workspaceDocHistory.map(toWorkspaceDocSuggestion)
+  const historyRows: { entry: BrowserHistoryEntry; row: BrowserAddressBarSuggestion }[] = [
     ...browserUrlHistory.map((entry) => ({
-      row: { ...entry, subtitle: entry.url, isSearch: false },
-      score: scoreBrowserAddressBarSuggestion(entry, trimmed)
+      entry,
+      row: { ...entry, subtitle: entry.url, isSearch: false }
     })),
-    // The scorer only reads url/title/recency/visits, and a doc row's url is its path.
-    ...workspaceDocHistory.map(toWorkspaceDocSuggestion).map((row) => ({
-      row,
-      score: scoreBrowserAddressBarSuggestion(row, trimmed)
+    ...documentSuggestions.map((row) => ({
+      entry: {
+        url: row.url,
+        normalizedUrl: row.url,
+        title: row.title,
+        lastVisitedAt: row.lastVisitedAt,
+        visitCount: row.visitCount
+      },
+      row
     }))
   ]
-  const historySuggestions: BrowserAddressBarSuggestion[] = scoredRows
-    .filter((item) => item.score >= 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, MAX_BROWSER_ADDRESS_BAR_SUGGESTIONS - 1)
-    .map((item) => item.row)
+  const rowByEntry = new Map(historyRows.map(({ entry, row }) => [entry, row]))
+  // Why url-tail is kept here: the address bar is a navigation surface, so a
+  // path-only recall is still a destination — it just never outranks a real one.
+  const historySuggestions: BrowserAddressBarSuggestion[] = matchBrowserHistory({
+    prepared: prepareBrowserHistoryEntries(historyRows.map(({ entry }) => entry)),
+    query: trimmed,
+    limit: MAX_BROWSER_ADDRESS_BAR_SUGGESTIONS - 1
+  })
+    .map(({ entry }) => rowByEntry.get(entry))
+    .filter((row): row is BrowserAddressBarSuggestion => row !== undefined)
 
   const isQuery = looksLikeSearchQuery(trimmed)
   let topAction: BrowserAddressBarSuggestion | null
