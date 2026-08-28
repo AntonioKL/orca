@@ -289,16 +289,23 @@ test('renders a paired HTML doc as a document browser tab while the host gains n
     const pathChip = page.getByRole('button', { name: 'Copy file path', exact: true })
     await expect(pathChip).toBeVisible({ timeout: 30_000 })
     await expect(pathChip).toContainText(FIXTURE_NAME)
+    // Below 24rem of chip width the identity row hides whole instead of clipping into slivers;
+    // when it shows, the badge must sit inside the chip's own layout box. Which arm runs depends
+    // on how much width this platform's toolbar leaves the chip — both are the contract.
     const hostBadge = pathChip.locator('[data-slot="badge"]')
-    const [pathChipBox, hostBadgeBox] = await Promise.all([
-      pathChip.boundingBox(),
-      hostBadge.boundingBox()
-    ])
+    const pathChipBox = await pathChip.boundingBox()
     expect(pathChipBox).not.toBeNull()
-    expect(hostBadgeBox).not.toBeNull()
-    expect((hostBadgeBox?.x ?? 0) + (hostBadgeBox?.width ?? 0)).toBeLessThanOrEqual(
-      (pathChipBox?.x ?? 0) + (pathChipBox?.width ?? 0) + 0.5
-    )
+    if (await hostBadge.isVisible()) {
+      const hostBadgeBox = await hostBadge.boundingBox()
+      expect(hostBadgeBox).not.toBeNull()
+      expect((hostBadgeBox?.x ?? 0) + (hostBadgeBox?.width ?? 0)).toBeLessThanOrEqual(
+        (pathChipBox?.x ?? 0) + (pathChipBox?.width ?? 0) + 0.5
+      )
+    } else {
+      // A chip too narrow for the identity row hides it whole; a wide one must show it. 26rem of
+      // border-box width clears the 24rem content-box container threshold plus padding.
+      expect(pathChipBox?.width ?? 0).toBeLessThan(416)
+    }
 
     await expect(page.locator(`[data-tab-group-body-id="${sourceGroupId}"]`)).toBeVisible()
     await expect(page.locator(`[data-tab-group-body-id="${previewRow.groupId}"]`)).toBeVisible()
