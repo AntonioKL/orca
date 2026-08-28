@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { create } from 'zustand'
 import { createCompatibleRuntimeStatusResponse } from '../../runtime/runtime-compatibility-test-fixture'
 import { resetRestoredBrowserClientHostAttachForTests } from '@/runtime/restored-client-hosted-browser-host-attach'
+import { replayClientHostedBrowserCloseIntents } from '@/runtime/client-hosted-browser-close-intent-replay'
 import {
   clearRuntimeEnvironmentConnectionGenerationsForTests,
   createRuntimeStatusSlice,
@@ -10,6 +11,10 @@ import {
 
 vi.mock('sonner', () => ({
   toast: { warning: vi.fn(), dismiss: vi.fn() }
+}))
+
+vi.mock('@/runtime/client-hosted-browser-close-intent-replay', () => ({
+  replayClientHostedBrowserCloseIntents: vi.fn(async () => {})
 }))
 
 const prepareBrowserClientHostPlacement = vi.fn(async (_args: { selector: string }) => ({
@@ -48,6 +53,7 @@ describe('restored client-hosted browser host attach on reachability', () => {
     clearRuntimeEnvironmentConnectionGenerationsForTests()
     resetRestoredBrowserClientHostAttachForTests()
     prepareBrowserClientHostPlacement.mockClear()
+    vi.mocked(replayClientHostedBrowserCloseIntents).mockClear()
   })
 
   afterEach(() => {
@@ -65,6 +71,22 @@ describe('restored client-hosted browser host attach on reachability', () => {
       selector: 'env-a',
       preference: 'auto'
     })
+  })
+
+  // The reconnect policy suppresses the *failure* publish only. A probe that answered still owes
+  // both recovery follow-ups, or a restored client-hosted page never comes back after the gap.
+  it('still runs both recovery follow-ups when failures must not publish', async () => {
+    stubApi(vi.fn().mockResolvedValue(createCompatibleRuntimeStatusResponse('runtime-a')))
+
+    await storeWithRestoredHandles(true)
+      .getState()
+      .refreshRuntimeEnvironmentStatus('env-a', undefined, { publishUnreachable: false })
+
+    expect(prepareBrowserClientHostPlacement).toHaveBeenCalledWith({
+      selector: 'env-a',
+      preference: 'auto'
+    })
+    expect(replayClientHostedBrowserCloseIntents).toHaveBeenCalledWith('env-a', expect.anything())
   })
 
   it('starts no browser client host when the environment is unreachable', async () => {
