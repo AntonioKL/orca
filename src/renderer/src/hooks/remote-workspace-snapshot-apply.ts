@@ -160,16 +160,23 @@ export async function applyDirectSshRemoteWorkspaceSnapshot({
         lastSyncedAt: Date.now()
       })
     } else {
-      // Why not hydrated: the host listed tabs on paths this client cannot place yet, so adopting
-      // zero of them is not the host's picture. Marking hydrated would freeze that emptiness in —
-      // nothing re-pulls a hydrated target — and would flip the seeding gate in
+      // Why not hydrated: the host listed tabs on paths this client cannot place, so adopting zero
+      // of them is not the host's picture. Hydrating would authorise uploads
+      // (use-app-session-persistence.ts), and an upload is a `replace-session` patch
+      // (remote-workspace-relay-sync.ts) that wholesale replaces the host snapshot — deleting the
+      // very tabs we failed to adopt. It would also flip the seeding gate in
       // workspace-terminal-host-authority.ts from `unverifiable` to `none`, authorising a fresh
-      // default tab beside the host's orphaned ones (STA-3593).
+      // default tab beside the host's orphaned ones (STA-3593). The next connect or host push
+      // re-pulls, so leaving this unresolved costs a retry, not the data.
       currentStore.setRemoteWorkspaceSyncStatus(authority.targetId, {
-        phase: 'pulling',
+        phase: 'error',
         direction: 'pull',
         revision: snapshot.revision,
-        updatedAt: snapshot.updatedAt
+        updatedAt: snapshot.updatedAt,
+        message: translate(
+          'auto.hooks.useIpcEvents.2fe88c2e06',
+          'Remote workspace sync unavailable'
+        )
       })
     }
     const reconnectAbort = new AbortController()

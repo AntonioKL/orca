@@ -19,7 +19,6 @@ import {
   applyDirectSshRemoteWorkspaceSnapshot,
   type DirectSshSnapshotPlacement
 } from './remote-workspace-snapshot-apply'
-import { createUnplacedSnapshotRepull } from './remote-workspace-unplaced-snapshot-repull'
 
 const WORKSPACE_HYDRATION_TIMEOUT_MS = 10_000
 
@@ -122,29 +121,6 @@ export function createRemoteWorkspaceTargetSync(
   const isArrivalCurrent = (targetId: string, arrival: number): boolean =>
     !stopped && arrivalByTarget.get(targetId) === arrival
 
-  const repull = createUnplacedSnapshotRepull({
-    isStopped: () => stopped,
-    hasCurrentAuthority: (targetId) => deps.getCurrentAuthority(targetId) !== null,
-    getSnapshot: (targetId) => deps.remoteWorkspace.get({ targetId }),
-    applySnapshot: (targetId, snapshot) => applyPreparedSnapshot(targetId, snapshot),
-    reportExhausted: (targetId) => {
-      // Why the target stays UN-hydrated: hydration authorises uploads
-      // (use-app-session-persistence.ts), and an upload is a `replace-session` patch
-      // (remote-workspace-relay-sync.ts) that wholesale replaces the host snapshot. Hydrating on a
-      // picture we know is missing rows would therefore delete the very tabs we failed to adopt —
-      // unrecoverable, where not uploading is merely deferred. Suppressed uploads are the safe
-      // side of this trade, so exhaustion reports the failure and leaves authority `unverifiable`.
-      deps.store.getState().setRemoteWorkspaceSyncStatus(targetId, {
-        phase: 'error',
-        direction: 'pull',
-        message: translate(
-          'auto.hooks.useIpcEvents.2fe88c2e06',
-          'Remote workspace sync unavailable'
-        )
-      })
-    }
-  })
-
   const waitForWorkspaceSessionReady = async (): Promise<boolean> => {
     const deadline = Date.now() + WORKSPACE_HYDRATION_TIMEOUT_MS
     while (!stopped && Date.now() < deadline) {
@@ -174,9 +150,6 @@ export function createRemoteWorkspaceTargetSync(
       })
       return
     }
-    // A new connection earns a fresh re-pull chain; a count left over from the previous one would
-    // exhaust immediately and skip the retry that this connect might well have won.
-    repull.resetTarget(authority.targetId)
     const stateBeforeGet = deps.store.getState()
     const worktreeIds = exactTargetWorktreeIds(stateBeforeGet, authority)
     const hasLocalTabs = [...worktreeIds].some(
@@ -204,7 +177,7 @@ export function createRemoteWorkspaceTargetSync(
     if (snapshot.revision > 0) {
       const applyToken = buildDirectSshSnapshotApplyToken(token, snapshot.revision)
       if (applyToken) {
-        const placement = await applyDirectSshRemoteWorkspaceSnapshot({
+        await applyDirectSshRemoteWorkspaceSnapshot({
           store: deps.store,
           snapshot,
           token: applyToken,
@@ -214,7 +187,6 @@ export function createRemoteWorkspaceTargetSync(
           waitForWorkspaceSessionReady,
           finalizeHydratedTerminals: deps.finalizeHydratedTerminals
         })
-        repull.schedule(authority.targetId, placement)
       }
       return
     }
@@ -286,7 +258,6 @@ export function createRemoteWorkspaceTargetSync(
     snapshot: RemoteWorkspaceSnapshot
   ): Promise<DirectSshSnapshotPlacement> => {
     const placement = await applyPreparedSnapshot(targetId, snapshot)
-    repull.schedule(targetId, placement)
     return placement
   }
 
@@ -296,7 +267,6 @@ export function createRemoteWorkspaceTargetSync(
     stop: () => {
       stopped = true
       arrivalByTarget.clear()
-      repull.stop()
     }
   }
 }
