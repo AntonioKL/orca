@@ -9,6 +9,7 @@ import {
   fetchRuntimeGit,
   generateRuntimeCommitMessage,
   generateRuntimePullRequestFields,
+  getRuntimeGitBranchCompare,
   getRuntimeGitDiff,
   getRuntimeGitHistory,
   getRuntimeGitIgnoredPaths,
@@ -29,6 +30,7 @@ const gitCancelStatus = vi.fn()
 const gitCheckIgnored = vi.fn()
 const gitSubmoduleStatus = vi.fn()
 const gitDiff = vi.fn()
+const gitBranchCompare = vi.fn()
 const gitHistory = vi.fn()
 const gitBulkStage = vi.fn()
 const gitBulkDiscard = vi.fn()
@@ -53,6 +55,7 @@ beforeEach(() => {
   gitCheckIgnored.mockReset()
   gitSubmoduleStatus.mockReset()
   gitDiff.mockReset()
+  gitBranchCompare.mockReset()
   gitHistory.mockReset()
   gitBulkStage.mockReset()
   gitBulkDiscard.mockReset()
@@ -79,6 +82,7 @@ beforeEach(() => {
         checkIgnored: gitCheckIgnored,
         submoduleStatus: gitSubmoduleStatus,
         diff: gitDiff,
+        branchCompare: gitBranchCompare,
         history: gitHistory,
         bulkStage: gitBulkStage,
         bulkDiscard: gitBulkDiscard,
@@ -99,6 +103,28 @@ beforeEach(() => {
 })
 
 describe('runtime git client', () => {
+  it('preserves branch-compare admission through local IPC', async () => {
+    gitBranchCompare.mockResolvedValue({ summary: {}, entries: [] })
+
+    await getRuntimeGitBranchCompare(
+      {
+        settings: { activeRuntimeEnvironmentId: null },
+        worktreeId: 'wt-1',
+        worktreePath: '/repo',
+        connectionId: 'ssh-1'
+      },
+      'origin/main',
+      'background'
+    )
+
+    expect(gitBranchCompare).toHaveBeenCalledWith({
+      worktreePath: '/repo',
+      baseRef: 'origin/main',
+      connectionId: 'ssh-1',
+      admissionTier: 'background'
+    })
+  })
+
   it('uses local git IPC when no remote runtime is active', async () => {
     gitStatus.mockResolvedValue({ entries: [], conflictOperation: 'unknown' })
 

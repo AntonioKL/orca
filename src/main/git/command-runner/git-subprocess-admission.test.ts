@@ -285,6 +285,28 @@ describe('GitAdmissionScheduler', () => {
     running.release()
   })
 
+  it('bounds canceled candidate storage while the only permit stays saturated', async () => {
+    const scheduler = schedulerWithOneSlot()
+    const running = await scheduler.acquire(local())
+    const canceled: Promise<void>[] = []
+
+    for (let index = 0; index < 4_000; index += 1) {
+      const controller = new AbortController()
+      const request = scheduler.acquire({ ...local(), signal: controller.signal }).then(
+        () => undefined,
+        (error) => expect(error).toMatchObject({ name: 'AbortError' })
+      )
+      controller.abort()
+      canceled.push(request)
+    }
+    await Promise.all(canceled)
+
+    expect(scheduler.snapshot().queued).toBe(0)
+    expect(scheduler.snapshot().candidateCount).toBeLessThanOrEqual(64)
+    running.release()
+    expect(scheduler.snapshot().candidateCount).toBe(0)
+  })
+
   it('does not decrement for an already-aborted signal with a free slot', async () => {
     const scheduler = schedulerWithOneSlot()
     const controller = new AbortController()
@@ -293,7 +315,12 @@ describe('GitAdmissionScheduler', () => {
     await expect(
       scheduler.acquire({ ...local(), signal: controller.signal })
     ).rejects.toMatchObject({ name: 'AbortError' })
-    expect(scheduler.snapshot()).toEqual({ queued: 0, queuedWaiters: [], budgets: {} })
+    expect(scheduler.snapshot()).toEqual({
+      queued: 0,
+      queuedWaiters: [],
+      candidateCount: 0,
+      budgets: {}
+    })
   })
 
   it('returns a grant selected in the same tick when abort wins delivery', async () => {

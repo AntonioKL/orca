@@ -49,6 +49,8 @@ describe('isWslDirectGitReadCommand', () => {
     [['symbolic-ref', 'HEAD', 'refs/heads/main']],
     [['worktree', 'add', '/tmp/wt']],
     [['branch', '-D', 'feature']],
+    [['branch', '-r', '-d', 'origin/feature']],
+    [['branch', '-rd', 'origin/feature']],
     [['branch', 'newbranch']],
     [[]]
   ])('keeps %j on the login shell', (args) => {
@@ -103,6 +105,8 @@ describe('classifyGitCommand', () => {
     [['-C', '/repo', 'status', '--porcelain=v2'], 'read'],
     [['status', '--porcelain=v2'], 'read'],
     [['branch', '--show-current'], 'read'],
+    [['branch', '-r', '-d', 'origin/feature'], 'other'],
+    [['branch', '-rd', 'origin/feature'], 'other'],
     [['remote', 'get-url', 'origin'], 'read'],
     [['config', '--get-regexp', String.raw`^remote\.`], 'read'],
     [['show', '--end-of-options', 'HEAD:file'], 'read'],

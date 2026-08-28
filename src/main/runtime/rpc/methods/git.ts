@@ -103,7 +103,7 @@ export const GIT_METHODS: RpcMethod[] = [
     name: 'git.branchCompare',
     params: GitBranchCompare,
     handler: async (params, { runtime }) =>
-      runtime.getRuntimeGitBranchCompare(params.worktree, params.baseRef)
+      runtime.getRuntimeGitBranchCompare(params.worktree, params.baseRef, params.admissionTier)
   }),
   defineMethod({
     name: 'git.commitCompare',

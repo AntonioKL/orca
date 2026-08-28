@@ -50,6 +50,38 @@ const READ_FLAG_SUBCOMMANDS: Record<string, ReadonlySet<string>> = {
   config: new Set(['--get', '--get-all', '--get-regexp', '--get-urlmatch', '--list', '-l'])
 }
 
+const BRANCH_MUTATION_FLAGS = new Set([
+  '--copy',
+  '--create-reflog',
+  '--delete',
+  '--edit-description',
+  '--force',
+  '--move',
+  '--no-create-reflog',
+  '--no-track',
+  '--recurse-submodules',
+  '--set-upstream-to',
+  '--track',
+  '--unset-upstream'
+])
+const BRANCH_MUTATION_SHORT_FLAGS = new Set(['c', 'C', 'd', 'D', 'f', 'm', 'M', 't', 'u'])
+
+function hasBranchMutationFlag(args: readonly string[]): boolean {
+  return args.some((arg) => {
+    const flag = arg.split('=')[0]
+    if (BRANCH_MUTATION_FLAGS.has(flag)) {
+      return true
+    }
+    return (
+      /^-[^-]/.test(flag) &&
+      flag
+        .slice(1)
+        .split('')
+        .some((part) => BRANCH_MUTATION_SHORT_FLAGS.has(part))
+    )
+  })
+}
+
 // Read markers that must be the *first non-flag* argument, i.e. the action.
 // Position matters here: matching them anywhere would read `worktree remove list`
 // as a listing, because a worktree may legitimately be named "list".
@@ -95,6 +127,10 @@ export function isWslDirectGitReadCommand(args: readonly string[]): boolean {
     }
     // Reading takes one ref; a second positional is the value being written.
     return rest.filter((arg) => arg !== '--' && !arg.startsWith('-')).length <= 1
+  }
+
+  if (subcommand === 'branch' && hasBranchMutationFlag(rest)) {
+    return false
   }
 
   const readActions = READ_ACTION_SUBCOMMANDS[subcommand]

@@ -238,6 +238,11 @@ describe('useSourceControlBranchCompare scheduler', () => {
     // Visible mounts run once immediately through the visibility interval.
     await mount({ isBranchVisible: true })
     expect(mocks.getRuntimeGitBranchCompare).toHaveBeenCalledTimes(1)
+    expect(mocks.getRuntimeGitBranchCompare).toHaveBeenLastCalledWith(
+      expect.objectContaining({ worktreeId: 'A' }),
+      'origin/main',
+      'background'
+    )
 
     await act(async () => {
       vi.advanceTimersByTime(BRANCH_REFRESH_INTERVAL_MS * 3)
@@ -261,6 +266,11 @@ describe('useSourceControlBranchCompare scheduler', () => {
       await vi.advanceTimersByTimeAsync(1)
     })
     expect(mocks.getRuntimeGitBranchCompare).toHaveBeenCalledTimes(2)
+    expect(mocks.getRuntimeGitBranchCompare).toHaveBeenLastCalledWith(
+      expect.objectContaining({ worktreeId: 'A' }),
+      'origin/main',
+      'background'
+    )
   })
 
   it('preserves the existing summary on a poll refresh but resets to loading on a base-ref change', async () => {
@@ -315,7 +325,8 @@ describe('useSourceControlBranchCompare scheduler', () => {
     })
     expect(mocks.getRuntimeGitBranchCompare).toHaveBeenCalledWith(
       expect.objectContaining({ worktreeId: 'A' }),
-      'origin/dev'
+      'origin/dev',
+      'interactive'
     )
   })
 

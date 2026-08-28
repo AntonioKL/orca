@@ -92,11 +92,13 @@ export class GitAdmissionScheduler {
     queued: number
     queuedWaiters: { id: number; args: readonly string[]; tier: AdmissionWaiter['tier'] }[]
     budgets: Record<string, { baseUsed: number; headroomUsed: number }>
+    candidateCount: number
   } {
     const queuedWaiters = this.waiters.snapshot()
     return {
       queued: this.waiters.count,
       queuedWaiters: queuedWaiters.map(({ id, args, tier }) => ({ id, args, tier })),
+      candidateCount: this.waiters.candidateCountForTests,
       budgets: Object.fromEntries(
         [...this.budgets].map(([key, budget]) => [
           key,

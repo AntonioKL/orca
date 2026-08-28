@@ -5,6 +5,7 @@ import { RepoSelector, SlugRepo } from './github-repo-target-schemas'
 
 const PrForBranch = RepoSelector.extend({
   branch: requiredString('Missing branch'),
+  reason: z.enum(['visible', 'active', 'post-push', 'manual', 'swr']).optional(),
   linkedPRNumber: z.number().int().positive().nullable().optional(),
   fallbackPRNumber: z.number().int().positive().nullable().optional(),
   acceptMergedFallbackPR: z.boolean().optional(),
@@ -75,7 +76,8 @@ export const GITHUB_PULL_REQUEST_METHODS: RpcMethod[] = [
         params.linkedPRNumber,
         params.fallbackPRNumber,
         params.acceptMergedFallbackPR,
-        params.currentHeadOid
+        params.currentHeadOid,
+        params.reason
       )
   }),
   defineMethod({

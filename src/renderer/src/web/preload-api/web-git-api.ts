@@ -120,11 +120,12 @@ export function createGitApi(): NonNullable<Partial<PreloadApi>['git']> {
         compareAgainstHead
       })
     },
-    branchCompare: async ({ worktreePath, baseRef }) => {
+    branchCompare: async ({ worktreePath, baseRef, admissionTier }) => {
       const worktree = await resolveRuntimeWorktreeByPath(worktreePath)
       return callRuntimeResult('git.branchCompare', {
         worktree: toRuntimeWorktreeSelector(worktree.id),
-        baseRef
+        baseRef,
+        ...(admissionTier ? { admissionTier } : {})
       })
     },
     commitCompare: async ({ worktreePath, commitId }) => {

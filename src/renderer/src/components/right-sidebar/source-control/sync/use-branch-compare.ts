@@ -61,61 +61,65 @@ export function useSourceControlBranchCompare({
   const branchCompareStatusHeadRef = useRef<BranchCompareStatusHeadSnapshot | null>(null)
   const branchCompareRemoteStatusRef = useRef<BranchCompareRemoteStatusSnapshot | null>(null)
 
-  const runBranchCompare = useCallback(async () => {
-    if (!activeWorktreeId || !worktreePath || !compareBaseRef || isFolder) {
-      return
-    }
-    const requestKey = `${activeWorktreeId}:${compareBaseRef}:${Date.now()}`
-    const existingSummary =
-      useAppStore.getState().gitBranchCompareSummaryByWorktree[activeWorktreeId]
-    // Why: only reset to 'loading' on the first request or a base-ref change; resetting on every poll caused a visible loading→error→loading flicker.
-    const baseRefChanged = existingSummary && existingSummary.baseRef !== compareBaseRef
-    const shouldResetToLoading = !existingSummary || baseRefChanged
-    if (shouldResetToLoading) {
-      beginGitBranchCompareRequest(activeWorktreeId, requestKey, compareBaseRef)
-    } else {
-      beginGitBranchCompareRequest(activeWorktreeId, requestKey, compareBaseRef, {
-        preserveExistingSummary: true
-      })
-    }
-    try {
-      const connectionId = getConnectionId(activeWorktreeId) ?? undefined
-      const result = await getRuntimeGitBranchCompare(
-        {
-          // Why: route the branch compare by the repo OWNER host, not the focused runtime.
-          settings: activeRepoSettings,
-          worktreeId: activeWorktreeId,
-          worktreePath,
-          connectionId
-        },
-        compareBaseRef
-      )
-      setGitBranchCompareResult(activeWorktreeId, requestKey, result)
-    } catch (error) {
-      setGitBranchCompareResult(activeWorktreeId, requestKey, {
-        summary: {
-          baseRef: compareBaseRef,
-          baseOid: null,
-          compareRef: branchName,
-          headOid: null,
-          mergeBase: null,
-          changedFiles: 0,
-          status: 'error',
-          errorMessage: error instanceof Error ? error.message : 'Branch compare failed'
-        },
-        entries: []
-      })
-    }
-  }, [
-    activeRepoSettings,
-    activeWorktreeId,
-    beginGitBranchCompareRequest,
-    branchName,
-    compareBaseRef,
-    isFolder,
-    setGitBranchCompareResult,
-    worktreePath
-  ])
+  const runBranchCompare = useCallback(
+    async (kind: BranchCompareRefreshKind) => {
+      if (!activeWorktreeId || !worktreePath || !compareBaseRef || isFolder) {
+        return
+      }
+      const requestKey = `${activeWorktreeId}:${compareBaseRef}:${Date.now()}`
+      const existingSummary =
+        useAppStore.getState().gitBranchCompareSummaryByWorktree[activeWorktreeId]
+      // Why: only reset to 'loading' on the first request or a base-ref change; resetting on every poll caused a visible loading→error→loading flicker.
+      const baseRefChanged = existingSummary && existingSummary.baseRef !== compareBaseRef
+      const shouldResetToLoading = !existingSummary || baseRefChanged
+      if (shouldResetToLoading) {
+        beginGitBranchCompareRequest(activeWorktreeId, requestKey, compareBaseRef)
+      } else {
+        beginGitBranchCompareRequest(activeWorktreeId, requestKey, compareBaseRef, {
+          preserveExistingSummary: true
+        })
+      }
+      try {
+        const connectionId = getConnectionId(activeWorktreeId) ?? undefined
+        const result = await getRuntimeGitBranchCompare(
+          {
+            // Why: route the branch compare by the repo OWNER host, not the focused runtime.
+            settings: activeRepoSettings,
+            worktreeId: activeWorktreeId,
+            worktreePath,
+            connectionId
+          },
+          compareBaseRef,
+          kind === 'interval' ? 'background' : 'interactive'
+        )
+        setGitBranchCompareResult(activeWorktreeId, requestKey, result)
+      } catch (error) {
+        setGitBranchCompareResult(activeWorktreeId, requestKey, {
+          summary: {
+            baseRef: compareBaseRef,
+            baseOid: null,
+            compareRef: branchName,
+            headOid: null,
+            mergeBase: null,
+            changedFiles: 0,
+            status: 'error',
+            errorMessage: error instanceof Error ? error.message : 'Branch compare failed'
+          },
+          entries: []
+        })
+      }
+    },
+    [
+      activeRepoSettings,
+      activeWorktreeId,
+      beginGitBranchCompareRequest,
+      branchName,
+      compareBaseRef,
+      isFolder,
+      setGitBranchCompareResult,
+      worktreePath
+    ]
+  )
 
   const clearBranchComparePollTimer = useCallback((): void => {
     if (branchComparePollTimerRef.current !== null) {
@@ -177,7 +181,7 @@ export function useSourceControlBranchCompare({
       const runPromise = (async (): Promise<void> => {
         // Why: keep one branch-compare chain in flight and collapse skipped ticks into one trailing refresh instead of stacking git subprocesses.
         try {
-          await runBranchCompare()
+          await runBranchCompare(kind)
         } finally {
           const endedAt = Date.now()
           branchCompareLastRunEndedAtRef.current = endedAt

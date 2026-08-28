@@ -80,6 +80,7 @@ export function startPullRequestLookup(args: {
               branch,
               linkedPRNumber,
               currentHeadOid: requestHeadOid,
+              ...(options?.reason ? { reason: options.reason } : {}),
               ...(fallbackPRNumber !== null
                 ? { fallbackPRNumber, acceptMergedFallbackPR: fallbackPRSource !== null }
                 : {})
@@ -248,7 +249,8 @@ export function startPullRequestLookup(args: {
           void get().fetchPRForBranch(repoPath, branch, {
             force: true,
             repoId,
-            worktreeId: options.worktreeId
+            worktreeId: options.worktreeId,
+            reason: options.reason
           })
         }
       }

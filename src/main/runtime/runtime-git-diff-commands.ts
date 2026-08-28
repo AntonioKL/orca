@@ -13,6 +13,7 @@ import {
   getDiff
 } from '../git/status'
 import { awaitWindowsHostGitEnvironmentReady } from '../git/runner'
+import type { GitAdmissionTier } from '../git/command-runner/git-exec-options'
 import {
   getSshGitProvider,
   SSH_GIT_PROVIDER_UNAVAILABLE_MESSAGE
@@ -58,7 +59,8 @@ export class RuntimeGitDiffCommands {
 
   async getRuntimeGitBranchCompare(
     worktreeSelector: string,
-    baseRef: string
+    baseRef: string,
+    admissionTier: GitAdmissionTier = 'interactive'
   ): Promise<GitBranchCompareResult> {
     const target = await this.host.resolveRuntimeGitTarget(worktreeSelector)
     const provider = target.connectionId ? getSshGitProvider(target.connectionId) : null
@@ -66,11 +68,11 @@ export class RuntimeGitDiffCommands {
       if (!provider) {
         throw new Error(SSH_GIT_PROVIDER_UNAVAILABLE_MESSAGE)
       }
-      return provider.getBranchCompare(target.worktree.path, baseRef)
+      return provider.getBranchCompare(target.worktree.path, baseRef, { admissionTier })
     }
     return getBranchCompare(target.worktree.path, baseRef, {
       ...localGitOptionsForTarget(target),
-      admissionTier: 'interactive'
+      admissionTier
     })
   }
 

@@ -164,6 +164,11 @@ describe('web git preload API', () => {
       branchLineTotalMergeBase: TEST_COMMIT_OID
     })
     await globals.window.api.git.status({ worktreePath: '/workspace/repo' })
+    await globals.window.api.git.branchCompare({
+      worktreePath: '/workspace/repo',
+      baseRef: 'origin/main',
+      admissionTier: 'background'
+    })
 
     const statusCalls = runtimeCalls.filter((call) => call.method === 'git.status')
     // Why: strict — `toEqual` would pass on a forwarded `branchLineTotalMergeBase: undefined`,
@@ -189,5 +194,13 @@ describe('web git preload API', () => {
         }
       }
     ])
+    expect(runtimeCalls.find((call) => call.method === 'git.branchCompare')).toStrictEqual({
+      method: 'git.branchCompare',
+      params: {
+        worktree: 'id:wt-1',
+        baseRef: 'origin/main',
+        admissionTier: 'background'
+      }
+    })
   })
 })

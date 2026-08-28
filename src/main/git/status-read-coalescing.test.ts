@@ -71,15 +71,19 @@ describe('getStatus', () => {
     gitExecFileAsyncMock.mockResolvedValue({ stdout: '' })
   })
 
-  it('opts status reads into direct WSL Git without changing mutation options', async () => {
+  it('preserves status admission through the direct WSL stream without changing mutation options', async () => {
     readFileMock.mockResolvedValue('gitdir: /repo/.git/worktrees/feature\n')
     existsSyncMock.mockReturnValue(false)
 
-    await getStatus('/repo', { wslDistro: 'Ubuntu' })
+    await getStatus('/repo', { wslDistro: 'Ubuntu', admissionTier: 'interactive' })
     await stageFile('/repo', 'src/file.ts', { wslDistro: 'Ubuntu' })
 
     expect(gitStreamOptionsMock).toHaveBeenCalledWith(
-      expect.objectContaining({ preferWslDirectGit: true, wslDistro: 'Ubuntu' })
+      expect.objectContaining({
+        admissionTier: 'interactive',
+        preferWslDirectGit: true,
+        wslDistro: 'Ubuntu'
+      })
     )
     const addOptions = gitExecFileAsyncMock.mock.calls.find(([args]) =>
       (args as string[]).includes('add')

@@ -110,6 +110,7 @@ async function gitExecFileAsyncUnlocked(
           result = await capture(resolved)
         } catch (error) {
           if (directWslGitExitCode(error, resolved) !== null && !options.signal?.aborted) {
+            await terminationState.current
             const wasMissing = invalidateMissingDirectWslGit(error, resolved)
             const fallback = resolveGitCommand(
               args,

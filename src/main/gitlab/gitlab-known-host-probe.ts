@@ -152,7 +152,8 @@ async function probeGlabKnownHosts(
       timeout: GLAB_KNOWN_HOSTS_TIMEOUT_MS,
       ...(!connectionId && localGitOptions.wslDistro
         ? { wslDistro: localGitOptions.wslDistro }
-        : {})
+        : {}),
+      ...(localGitOptions.admissionTier ? { admissionTier: localGitOptions.admissionTier } : {})
     })
     const hosts = parseGlabAuthStatusHosts(`${stdout}\n${stderr}`)
     const remembered = knownHostsCacheByExecutionContext.get(key) ?? []

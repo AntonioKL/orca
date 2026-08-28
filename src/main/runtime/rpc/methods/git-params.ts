@@ -48,6 +48,7 @@ export const GitDiff = GitFilePath.extend({
 })
 
 export const GitBranchCompare = WorktreeSelector.extend({
+  admissionTier: z.enum(['interactive', 'status', 'background']).optional(),
   baseRef: z
     .unknown()
     .transform((v) => (typeof v === 'string' ? v : ''))

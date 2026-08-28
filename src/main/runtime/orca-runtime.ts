@@ -288,7 +288,11 @@ import type {
   GitHubPRReviewCommentInput,
   GitHubReactionContent
 } from '../../shared/github/comment-types'
-import type { PRRefreshOutcome } from '../../shared/github/pull-request-refresh-types'
+import type {
+  GitHubPRRefreshReason,
+  PRRefreshOutcome
+} from '../../shared/github/pull-request-refresh-types'
+import { admissionTierForRefreshReason } from '../github/pr-refresh-candidate-policy'
 import type { GitHubOwnerRepo, GitHubPRFile } from '../../shared/github/pull-request-types'
 import type { ListWorkItemsResult } from '../../shared/github/work-item-types'
 import type {
@@ -22880,10 +22884,15 @@ export class OrcaRuntimeService {
     linkedPRNumber?: number | null,
     fallbackPRNumber?: number | null,
     acceptMergedFallbackPR?: boolean,
-    currentHeadOid?: string | null
+    currentHeadOid?: string | null,
+    reason?: GitHubPRRefreshReason
   ): Promise<PRRefreshOutcome> {
     const repo = await this.resolveRepoSelector(repoSelector)
-    const options: GitHubPRBranchLookupOptions = this.getHostedReviewExecutionOptions(repo) ?? {}
+    const options: GitHubPRBranchLookupOptions =
+      this.getHostedReviewExecutionOptions(
+        repo,
+        reason ? admissionTierForRefreshReason(reason) : undefined
+      ) ?? {}
     const lookupOptions = { ...options }
     if (acceptMergedFallbackPR === true) {
       lookupOptions.acceptMergedFallbackPR = true

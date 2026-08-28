@@ -34,7 +34,7 @@ export function hostedReviewOptionArgs(
       ...(candidate.localGitOptions?.wslDistro
         ? { wslDistro: candidate.localGitOptions.wslDistro }
         : {}),
-      admissionTier: reason === 'manual' ? 'interactive' : 'background'
+      admissionTier: admissionTierForRefreshReason(reason)
     }
   }
   if (shouldAcceptMergedFallbackPR(candidate)) {
@@ -44,6 +44,12 @@ export function hostedReviewOptionArgs(
     options.currentHeadOid = candidate.currentHeadOid.trim()
   }
   return Object.keys(options).length > 0 ? [options] : []
+}
+
+export function admissionTierForRefreshReason(
+  reason: GitHubPRRefreshReason
+): 'interactive' | 'background' {
+  return reason === 'manual' ? 'interactive' : 'background'
 }
 
 export function refreshKey(candidate: GitHubPRRefreshCandidate): string {

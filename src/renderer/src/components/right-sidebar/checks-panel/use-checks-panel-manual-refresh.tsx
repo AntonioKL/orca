@@ -212,7 +212,8 @@ export function useChecksPanelManualRefresh(model: ChecksPanelManualRefreshInput
           repoId: repo.id,
           worktreeId: activeWorktreeId ?? undefined,
           linkedPRNumber: linkedPR,
-          fallbackPRNumber: fallbackGitHubPRNumber
+          fallbackPRNumber: fallbackGitHubPRNumber,
+          reason: 'manual'
         })
       } finally {
         if (startedPRRefreshToken) {

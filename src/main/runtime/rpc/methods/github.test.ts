@@ -9,6 +9,46 @@ function makeRequest(method: string, params?: unknown): RpcRequest {
 }
 
 describe('github RPC methods', () => {
+  it('forwards an optional PR refresh reason without requiring it from older clients', async () => {
+    const runtime = {
+      getRuntimeId: () => 'test-runtime',
+      getRepoPRForBranch: vi.fn().mockResolvedValue({ kind: 'no-pr', fetchedAt: 1 })
+    } as unknown as OrcaRuntimeService
+    const dispatcher = new RpcDispatcher({ runtime, methods: GITHUB_METHODS })
+
+    await dispatcher.dispatch(
+      makeRequest('github.prForBranch', {
+        repo: 'repo-1',
+        branch: 'feature/admission',
+        reason: 'manual'
+      })
+    )
+    await dispatcher.dispatch(
+      makeRequest('github.prForBranch', { repo: 'repo-1', branch: 'feature/legacy' })
+    )
+
+    expect(runtime.getRepoPRForBranch).toHaveBeenNthCalledWith(
+      1,
+      'repo-1',
+      'feature/admission',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'manual'
+    )
+    expect(runtime.getRepoPRForBranch).toHaveBeenNthCalledWith(
+      2,
+      'repo-1',
+      'feature/legacy',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined
+    )
+  })
+
   it('resolves the repo slug on the runtime server', async () => {
     const runtime = {
       getRuntimeId: () => 'test-runtime',

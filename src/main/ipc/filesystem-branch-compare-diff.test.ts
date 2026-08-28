@@ -90,10 +90,13 @@ describe('registerFilesystemHandlers', () => {
 
     await handlers.get('git:branchCompare')!(null, {
       worktreePath: WORKTREE_FEATURE_PATH,
-      baseRef: 'origin/main'
+      baseRef: 'origin/main',
+      admissionTier: 'background'
     })
 
-    expect(getBranchCompareMock).toHaveBeenCalledWith(WORKTREE_FEATURE_PATH, 'origin/main', {})
+    expect(getBranchCompareMock).toHaveBeenCalledWith(WORKTREE_FEATURE_PATH, 'origin/main', {
+      admissionTier: 'background'
+    })
   })
 
   it('allows git operations on worktrees outside repo/workspace roots', async () => {

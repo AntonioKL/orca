@@ -132,6 +132,7 @@ async function runGetStatus(
       const result = await gitStreamStdout(statusArgs, {
         cwd: worktreePath,
         wslDistro: options.wslDistro,
+        admissionTier: options.admissionTier,
         preferWslDirectGit: true,
         // Why: status polling is read-like; disable optional locks to avoid racing terminal Git on index.lock.
         env: gitOptionalLocksDisabledEnv(),

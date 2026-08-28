@@ -28,6 +28,7 @@ import type { Repo } from '../../shared/repo-types'
 import type { TuiAgent } from '../../shared/tui-agent'
 import type { GitPushTarget } from '../../shared/worktree/types'
 import type { GitHistoryOptions, GitHistoryResult } from '../../shared/git-history'
+import type { GitAdmissionTier } from '../git/command-runner/git-exec-options'
 import type { SshMutationExpectation } from '../../shared/ssh-types'
 import { sortDirEntries } from '../../shared/file-name-sort'
 import { assertSshMutationExpectation } from '../ssh/ssh-connection-generation'
@@ -1831,14 +1832,23 @@ export function registerFilesystemHandlers(
     'git:branchCompare',
     async (
       _event,
-      args: { worktreePath: string; baseRef: string; connectionId?: string }
+      args: {
+        worktreePath: string
+        baseRef: string
+        connectionId?: string
+        admissionTier?: GitAdmissionTier
+      }
     ): Promise<GitBranchCompareResult> => {
       if (args.connectionId) {
         const provider = getSshGitProvider(args.connectionId)
         if (!provider) {
           throw new Error(SSH_GIT_PROVIDER_UNAVAILABLE_MESSAGE)
         }
-        return provider.getBranchCompare(args.worktreePath, args.baseRef)
+        return args.admissionTier
+          ? provider.getBranchCompare(args.worktreePath, args.baseRef, {
+              admissionTier: args.admissionTier
+            })
+          : provider.getBranchCompare(args.worktreePath, args.baseRef)
       }
       const worktreePath = await resolveRegisteredWorktreePath(args.worktreePath, store)
       const gitOptions = getLocalGitOptionsForRegisteredWorktree(
@@ -1846,7 +1856,10 @@ export function registerFilesystemHandlers(
         args.worktreePath,
         worktreePath
       )
-      return getBranchCompare(worktreePath, args.baseRef, gitOptions)
+      return getBranchCompare(worktreePath, args.baseRef, {
+        ...gitOptions,
+        ...(args.admissionTier ? { admissionTier: args.admissionTier } : {})
+      })
     }
   )
 

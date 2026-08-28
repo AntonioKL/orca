@@ -530,7 +530,13 @@ describe('createGitHubSlice.refreshGitHubForWorktreeIfStale', () => {
     expect(runtimeEnvironmentCall).toHaveBeenCalledWith({
       selector: 'env-1',
       method: 'github.prForBranch',
-      params: { repo: 'repo-1', branch, linkedPRNumber: 12, currentHeadOid: null },
+      params: {
+        repo: 'repo-1',
+        branch,
+        linkedPRNumber: 12,
+        currentHeadOid: null,
+        reason: 'active'
+      },
       timeoutMs: 30_000
     })
     expect(store.getState().hostedReviewCache[hostedReviewCacheKey]).toMatchObject({

@@ -3596,6 +3596,7 @@ const api = {
       worktreePath: string
       baseRef: string
       connectionId?: string
+      admissionTier?: 'interactive' | 'status' | 'background'
     }): Promise<unknown> => ipcRenderer.invoke('git:branchCompare', args),
     commitCompare: (args: {
       worktreePath: string

@@ -33,7 +33,8 @@ export const createRefreshRoutingActions = (
         worktreeId: candidate.worktreeId,
         linkedPRNumber: candidate.linkedPRNumber ?? null,
         fallbackPRNumber: candidate.fallbackPRNumber ?? null,
-        fallbackPRSource: candidate.fallbackPRSource ?? null
+        fallbackPRSource: candidate.fallbackPRSource ?? null,
+        reason
       })
       return
     }
@@ -68,7 +69,8 @@ export const createRefreshRoutingActions = (
           worktreeId: candidate.worktreeId,
           linkedPRNumber: candidate.linkedPRNumber ?? null,
           fallbackPRNumber: candidate.fallbackPRNumber ?? null,
-          fallbackPRSource: candidate.fallbackPRSource ?? null
+          fallbackPRSource: candidate.fallbackPRSource ?? null,
+          reason: 'visible'
         })
         continue
       }

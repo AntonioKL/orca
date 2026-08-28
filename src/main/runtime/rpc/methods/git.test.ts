@@ -679,6 +679,38 @@ describe('git RPC methods', () => {
     expect(runtime.getRuntimeGitBranchCompare).not.toHaveBeenCalled()
   })
 
+  it('forwards valid branch-compare admission and rejects invalid tiers', async () => {
+    const runtime = {
+      getRuntimeId: () => 'test-runtime',
+      getRuntimeGitBranchCompare: vi.fn().mockResolvedValue({ summary: {}, entries: [] })
+    } as unknown as OrcaRuntimeService
+    const dispatcher = new RpcDispatcher({ runtime, methods: GIT_METHODS })
+
+    const accepted = await dispatcher.dispatch(
+      makeRequest('git.branchCompare', {
+        worktree: 'id:wt-1',
+        baseRef: 'origin/main',
+        admissionTier: 'background'
+      })
+    )
+    const rejected = await dispatcher.dispatch(
+      makeRequest('git.branchCompare', {
+        worktree: 'id:wt-1',
+        baseRef: 'origin/main',
+        admissionTier: 'urgent'
+      })
+    )
+
+    expect(accepted.ok).toBe(true)
+    expect(runtime.getRuntimeGitBranchCompare).toHaveBeenCalledOnce()
+    expect(runtime.getRuntimeGitBranchCompare).toHaveBeenCalledWith(
+      'id:wt-1',
+      'origin/main',
+      'background'
+    )
+    expect(rejected.ok).toBe(false)
+  })
+
   it('rejects git history limits above the runtime cap', async () => {
     const runtime = {
       getRuntimeId: () => 'test-runtime',
