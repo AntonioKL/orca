@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  restoreGitCredentialGuardEnv,
+  takeGitCredentialGuardEnv
+} from './git-credential-guard-env-test-harness'
+import { gitCredentialPromptGuardEnv } from './git-credential-prompt-env'
+import {
   captureGitCredentialGuardPreGuardState,
   recordGitCredentialGuardProvenance,
   restoreUnguardedGitCredentialEnv,
@@ -118,4 +123,35 @@ describe('restoreUnguardedGitCredentialEnv marker handling', () => {
     expect(restoreUnguardedGitCredentialEnv(env)).toBe(true)
     expect(env).toEqual(original)
   })
+  // The coupling ratchet. `guardOwnedValue` and SCALAR_KEYS mirror, by hand and in
+  // another file, what gitCredentialPromptGuardEnv writes. Nothing else enforces
+  // that: a guard key this module does not know is simply left in the child, which
+  // is the leak. Asserting guard-then-restore is the identity catches both a value
+  // that drifts and a key that is added.
+  it.each(['linux', 'darwin', 'win32'] as const)(
+    'undoes every key the real guard writes on %s',
+    (platform) => {
+      const saved = takeGitCredentialGuardEnv()
+      try {
+        const original = { PATH: '/usr/bin', HOME: '/home/u' }
+        const env: Record<string, string> = { ...original }
+        const pre = captureGitCredentialGuardPreGuardState(env)
+        const guarded = gitCredentialPromptGuardEnv(env, platform) as Record<string, string>
+        // Liveness: without this the marker alone would satisfy the round trip and
+        // a guard that stopped writing anything would still pass.
+        const touched = Object.keys(guarded).filter((key) => guarded[key] !== env[key])
+        expect(touched.length).toBeGreaterThan(0)
+        Object.assign(env, guarded)
+        recordGitCredentialGuardProvenance(env, pre, {
+          appendedConfig: true,
+          forwardToWsl: platform === 'win32'
+        })
+
+        expect(restoreUnguardedGitCredentialEnv(env)).toBe(true)
+        expect(env).toEqual(original)
+      } finally {
+        restoreGitCredentialGuardEnv(saved)
+      }
+    }
+  )
 })
