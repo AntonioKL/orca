@@ -52,6 +52,14 @@ describe('Run coordinator authority migration', () => {
         hostScope: JSON.stringify({ kind: 'local', hostId: 'local' })
       })
     ).toBe(false)
+    expect(
+      isCurrentRunCoordinator(db.getRun(run.id)!, {
+        handle: 'term_old',
+        paneKey: 'tab_replacement:11111111-1111-4111-8111-111111111111',
+        processIncarnation: 'replacement:incarnation-1',
+        hostScope: JSON.stringify({ kind: 'local', hostId: 'local' })
+      })
+    ).toBe(false)
 
     const rebound = db.bindRun({
       runId: run.id,

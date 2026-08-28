@@ -12,6 +12,7 @@ import {
   isCurrentRunCoordinator,
   type RunCoordinatorIdentity
 } from '../../orchestration/run-coordinator-authority'
+import { isEquivalentPaneKey } from '../../orchestration/db/pane-key-match'
 import {
   isCallerCurrentRunCoordinator,
   resolveRunCoordinatorIdentity
@@ -101,9 +102,13 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
         runtime,
         legacyCoordinatorAuthority,
         orchestrationCompatibilityEvidence,
-        orchestrationCompatibilityCallerAuthority: callerAuthority
+        orchestrationCompatibilityCallerAuthority: preflightCallerAuthority
       }
     ) => {
+      const callerAuthority =
+        preflightCallerAuthority ??
+        runtime.verifyOrchestrationCompatibilityCaller(orchestrationCompatibilityEvidence) ??
+        undefined
       const paneKey = resolveOrchestrationCaller(runtime, {
         callerTerminalHandle: params.from,
         callerEvidence: orchestrationCompatibilityEvidence,
@@ -142,8 +147,20 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
         incumbentIdentity.processIncarnation === identity.processIncarnation &&
         incumbentIdentity.hostScope === identity.hostScope
       )
+      const restoredMigratedContinuity = Boolean(
+        targetRun &&
+        targetRun.coordinator_authority_revision < 0 &&
+        callerAuthority?.terminalProvenance === 'restored' &&
+        callerAuthority.processIncarnation === identity.processIncarnation &&
+        JSON.stringify(callerAuthority.hostScope) === identity.hostScope &&
+        targetRun.coordinator_handle === params.from &&
+        targetRun.coordinator_pane_key &&
+        isEquivalentPaneKey(targetRun.coordinator_pane_key, paneKey)
+      )
       const sameAuthority = targetRun
-        ? isCurrentRunCoordinator(targetRun, identity) || dynamicProcessContinuity
+        ? isCurrentRunCoordinator(targetRun, identity) ||
+          dynamicProcessContinuity ||
+          restoredMigratedContinuity
         : false
       const incumbentObservation =
         targetRun && !sameAuthority
@@ -164,6 +181,15 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
             params.takeoverLegacy ? { currentRuntimeLaunchSufficient: true } : undefined
           )
         : null
+      const restoredContinuityStillAttested =
+        !restoredMigratedContinuity ||
+        Boolean(
+          revalidatedCaller?.terminalProvenance === 'restored' &&
+          revalidatedCaller.terminalHandle === params.from &&
+          revalidatedCaller.paneKey === paneKey &&
+          revalidatedCaller.processIncarnation === currentIdentity.processIncarnation &&
+          JSON.stringify(revalidatedCaller.hostScope) === currentIdentity.hostScope
+        )
       const claimantStillLive = revalidatedCaller
         ? revalidatedCaller.terminalHandle === params.from && revalidatedCaller.paneKey === paneKey
         : legacyCoordinatorAuthority || !orchestrationCompatibilityEvidence
@@ -171,6 +197,7 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
           : false
       if (
         (incumbentObservation && !claimantStillLive) ||
+        !restoredContinuityStillAttested ||
         currentPaneKey !== paneKey ||
         currentIdentity.processIncarnation !== identity.processIncarnation ||
         currentIdentity.hostScope !== identity.hostScope
@@ -194,7 +221,7 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
         coordinatorPaneKey: paneKey,
         coordinatorProcessIncarnation: identity.processIncarnation,
         coordinatorHostScope: identity.hostScope,
-        authorityContinuity: dynamicProcessContinuity,
+        authorityContinuity: dynamicProcessContinuity || restoredMigratedContinuity,
         incumbentObservation,
         takeoverLegacy: params.takeoverLegacy,
         legacyCoordinatorAuthority

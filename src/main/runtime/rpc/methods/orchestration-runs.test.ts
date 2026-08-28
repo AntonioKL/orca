@@ -210,6 +210,111 @@ describe('orchestration RPC methods', () => {
       })
     })
 
+    it('does not grant a migrated binding to a replacement incarnation on the same handle', async () => {
+      setup(false)
+      const pane = 'tab_old:11111111-1111-4111-8111-111111111111'
+      vi.spyOn(runtime, 'getTerminalPaneKey').mockReturnValue(pane)
+      vi.spyOn(runtime, 'getLiveTerminalPaneKey').mockReturnValue(pane)
+      vi.spyOn(runtime, 'getOrchestrationDispatchAuthority').mockReturnValue({
+        runtimeId: 'runtime_test',
+        terminalHandle: 'term_old',
+        ptyId: 'pty_replacement',
+        worktreeId: 'folder:workspace',
+        processIncarnation: 'pty_replacement:incarnation-2',
+        paneKey: pane,
+        launchTokenHash: 'replacement-launch',
+        hostScope: { kind: 'local', hostId: 'local' }
+      })
+      const run = db.createRun({
+        objective: 'Migrated same-handle owner',
+        coordinatorHandle: 'term_old',
+        coordinatorPaneKey: pane
+      })
+      db.db.prepare('UPDATE runs SET coordinator_authority_revision = -1 WHERE id = ?').run(run.id)
+
+      await expect(
+        call('orchestration.runUse', { id: run.id, from: 'term_old' })
+      ).rejects.toMatchObject({
+        code: 'consumer_fenced',
+        data: { effectsApplied: false, coordinatorStatus: 'live' }
+      })
+      expect(db.getRun(run.id)).toMatchObject({
+        coordinator_handle: 'term_old',
+        coordinator_process_incarnation: null,
+        consumer_generation: run.consumer_generation
+      })
+    })
+
+    it('backfills an exact migrated handle only from restored process authority', async () => {
+      setup(false)
+      const pane = 'tab_old:11111111-1111-4111-8111-111111111111'
+      const processIncarnation = 'pty_retained:incarnation-1'
+      vi.spyOn(runtime, 'getTerminalPaneKey').mockReturnValue(pane)
+      vi.spyOn(runtime, 'getOrchestrationDispatchAuthority').mockReturnValue({
+        runtimeId: 'runtime_test',
+        terminalHandle: 'term_old',
+        ptyId: 'pty_retained',
+        worktreeId: 'folder:workspace',
+        processIncarnation,
+        paneKey: pane,
+        launchTokenHash: null,
+        hostScope: { kind: 'local', hostId: 'local' }
+      })
+      ctx = {
+        runtime,
+        orchestrationCompatibilityEvidence: {
+          terminalHandle: 'term_old',
+          paneKey: pane,
+          launchToken: 'retained-launch'
+        }
+      }
+      let attestedProcessIncarnation = 'pty_retained:incarnation-stale'
+      let verificationCount = 0
+      let dropAttestationAfterFirstVerification = false
+      vi.spyOn(runtime, 'verifyOrchestrationCompatibilityCaller').mockImplementation(() => {
+        verificationCount += 1
+        return dropAttestationAfterFirstVerification && verificationCount > 1
+          ? null
+          : {
+              terminalHandle: 'term_old',
+              paneKey: pane,
+              processIncarnation: attestedProcessIncarnation,
+              launchTokenHash: 'retained-launch-hash',
+              hostScope: { kind: 'local', hostId: 'local' },
+              terminalProvenance: 'restored'
+            }
+      })
+      const run = db.createRun({
+        objective: 'Migrated retained owner',
+        coordinatorHandle: 'term_old',
+        coordinatorPaneKey: pane
+      })
+      db.db.prepare('UPDATE runs SET coordinator_authority_revision = -1 WHERE id = ?').run(run.id)
+
+      await expect(
+        call('orchestration.runUse', { id: run.id, from: 'term_old' })
+      ).rejects.toMatchObject({ code: 'consumer_fenced' })
+      attestedProcessIncarnation = processIncarnation
+      verificationCount = 0
+      dropAttestationAfterFirstVerification = true
+
+      await expect(
+        call('orchestration.runUse', { id: run.id, from: 'term_old' })
+      ).rejects.toMatchObject({ code: 'consumer_fenced' })
+      verificationCount = 0
+      dropAttestationAfterFirstVerification = false
+
+      const rebound = (await call('orchestration.runUse', {
+        id: run.id,
+        from: 'term_old'
+      })) as { run: { consumer_generation: number; coordinator_process_incarnation: string } }
+
+      expect(rebound.run).toMatchObject({
+        consumer_generation: run.consumer_generation,
+        coordinator_process_incarnation: processIncarnation
+      })
+    })
+
     it('recovers a migrated binding after the resolved incumbent process is proven exited', async () => {
       setup(false)
       const oldPane = 'tab_old:11111111-1111-4111-8111-111111111111'

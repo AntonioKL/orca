@@ -9,6 +9,9 @@ export type RunCoordinatorIdentity = {
 }
 
 export function isCurrentRunCoordinator(run: RunRow, identity: RunCoordinatorIdentity): boolean {
+  if (run.coordinator_authority_revision < 0) {
+    return false
+  }
   const hasProcessAuthority = Boolean(
     run.coordinator_process_incarnation || run.coordinator_host_scope
   )
