@@ -12,13 +12,11 @@ export function useChecksPanelReviewLinkActions(
     activeWorktree,
     activeWorktreeId,
     branch,
-    fetchGitLabDetails,
     fetchHostedReviewForBranch,
     linkedGitLabMR,
     linkedPR,
     localExecutionScope,
     openModal,
-    ownerSettings,
     repo,
     repoConnectionId,
     runtimeEnvironmentId,
@@ -36,13 +34,11 @@ export function useChecksPanelReviewLinkActions(
     runtimeEnvironmentId,
     localExecutionScope
   ])
-  const linkedGitLabMRRef = useRef(linkedGitLabMR)
   const reviewLinkScopeKeyRef = useRef(reviewLinkScopeKey)
   const reviewLinkActionGenerationRef = useRef(0)
   useLayoutEffect(() => {
-    linkedGitLabMRRef.current = linkedGitLabMR
     reviewLinkScopeKeyRef.current = reviewLinkScopeKey
-  }, [linkedGitLabMR, reviewLinkScopeKey])
+  }, [reviewLinkScopeKey])
 
   const handleUnlinkReview = useCallback(() => {
     if (!activeWorktreeId || !activeWorktree || !activeReview) {
@@ -69,7 +65,6 @@ export function useChecksPanelReviewLinkActions(
     }
     const provider = activeReview.provider
     const openedScopeKey = reviewLinkScopeKey
-    const capturedOwnerSettings = ownerSettings
     openModal('edit-meta', {
       worktreeId: activeWorktreeId,
       // Why: the same workspace ID can exist under two hosts, so pin the dialog to its owner.
@@ -108,9 +103,7 @@ export function useChecksPanelReviewLinkActions(
         if (typeof nextMR !== 'number') {
           return
         }
-        const isRequestCurrent = (): boolean =>
-          isActionCurrent() && linkedGitLabMRRef.current === nextMR
-        const refreshedReview = await fetchHostedReviewForBranch(repo.path, branch, {
+        await fetchHostedReviewForBranch(repo.path, branch, {
           repoId: repo.id,
           repoOwnerExecutionHostId: activeWorktree.hostId,
           linkedGitHubPR: null,
@@ -119,20 +112,6 @@ export function useChecksPanelReviewLinkActions(
           linkedAzureDevOpsPR: null,
           linkedGiteaPR: null
         })
-        if (
-          !isRequestCurrent() ||
-          refreshedReview?.provider !== 'gitlab' ||
-          refreshedReview.number !== nextMR
-        ) {
-          return
-        }
-        await fetchGitLabDetails({
-          mrNumberOverride: nextMR,
-          headShaOverride: refreshedReview.headSha ?? null,
-          commitAsCurrent: true,
-          settingsOverride: capturedOwnerSettings,
-          isRequestCurrent
-        })
       }
     })
   }, [
@@ -140,10 +119,8 @@ export function useChecksPanelReviewLinkActions(
     activeWorktree,
     activeWorktreeId,
     branch,
-    fetchGitLabDetails,
     fetchHostedReviewForBranch,
     openModal,
-    ownerSettings,
     refreshLinkedGitHubPullRequest,
     repo,
     reviewLinkScopeKey
