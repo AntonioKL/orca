@@ -132,6 +132,20 @@ describe('scheduleSecretProtectionGapReport', () => {
     expect(probes).toBe(1)
   })
 
+  it('does not probe again when the window reveals after the fallback already reported', () => {
+    // Why this order and not the reverse: a GPU that presents late reveals the window
+    // after the fallback has already reported, and a second blocking keyring probe would
+    // freeze the main thread exactly as the user starts interacting.
+    schedule()
+    const window = createWindow()
+    vi.advanceTimersByTime(15_100)
+    drain()
+    expect(probes).toBe(1)
+    window.reveal()
+    drain()
+    expect(probes).toBe(1)
+  })
+
   it('reports inline in headless serve, before the runtime is advertised as ready', () => {
     // Why not deferred: serve opens no window, so the fallback would fire only after
     // clients could already have paired, and a frozen main thread reads as a dead host.
