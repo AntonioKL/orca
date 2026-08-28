@@ -50,6 +50,16 @@ export function installPtyInspectIpcHandlers(deps: {
     sendPtyExitToRenderer
   } = deps
 
+  // Why: wait for daemon startup before selecting the local provider for an id
+  // the swap may re-own (#7742); ids owned by an SSH connection never wait.
+  // pty:kill inlines this — its listener teardown is ordering-sensitive and
+  // must not gain even a no-barrier microtask.
+  const awaitSwapWindow = async (id: string): Promise<void> => {
+    await getLocalPtyProviderStartupPromise(
+      ptyOwnership.get(id) ?? parseAppSshPtyId(id)?.connectionId
+    )
+  }
+
   ipcMain.handle('pty:kill', async (_event, args: { id: string; keepHistory?: boolean }) => {
     if (typeof args?.id !== 'string' || !args.id || args.id.startsWith('remote:')) {
       // Why: runtime terminal handles belong to terminal.close; unowned PTY routing could target the local provider.
@@ -196,15 +206,10 @@ export function installPtyInspectIpcHandlers(deps: {
       // authoritative dead. That is a fabricated answer about another host's PTY.
       return null
     }
-    // Why: wait for daemon startup before selecting the local provider — the
-    // pre-swap LocalPtyProvider does not own restored daemon ids, and its
-    // "no PTY" is exactly the false the renderer reconciler is allowed to
-    // close panes on (same swap-window hazard pty:kill guards, #7742).
-    const gateConnectionId = ptyOwnership.get(args.id) ?? parseAppSshPtyId(args.id)?.connectionId
-    const startupPromise = getLocalPtyProviderStartupPromise(gateConnectionId)
-    if (startupPromise) {
-      await startupPromise
-    }
+    // Why: the pre-swap LocalPtyProvider does not own restored daemon ids, and
+    // its "no PTY" is exactly the false the renderer reconciler is allowed to
+    // close panes on.
+    await awaitSwapWindow(args.id)
     const ownedConnectionId = ptyOwnership.get(args.id)
     const parsedSshId = ownedConnectionId === undefined ? parseAppSshPtyId(args.id) : null
     const provider = parsedSshId
@@ -243,12 +248,14 @@ export function installPtyInspectIpcHandlers(deps: {
 
   ipcMain.handle('pty:inspectProcess', async (_event, args: { id: string }) => {
     // Why: same routing hazard as pty:hasPty — an unroutable id must read as unavailable, not as a local-provider answer or a raised IPC error.
-    if (
-      typeof args?.id !== 'string' ||
-      !args.id ||
-      args.id.startsWith('remote:') ||
-      !hasPtyProviderForInspection(args.id)
-    ) {
+    if (typeof args?.id !== 'string' || !args.id || args.id.startsWith('remote:')) {
+      return { foregroundProcess: null, hasChildProcesses: false, unavailable: true as const }
+    }
+    // Why: the pre-swap LocalPtyProvider does not own restored daemon ids, so
+    // nothing it reports about one is an observation; the post-swap owner must
+    // answer completion-sensitive inspection.
+    await awaitSwapWindow(args.id)
+    if (!hasPtyProviderForInspection(args.id)) {
       return { foregroundProcess: null, hasChildProcesses: false, unavailable: true as const }
     }
     return inspectPtyProviderProcessForRenderer(getProviderForPty(args.id), args.id)

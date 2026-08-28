@@ -182,6 +182,61 @@ describe('registerPtyHandlers daemon-swap-window presence', () => {
     }
   })
 
+  it('pty:inspectProcess defers a restored daemon id until the provider swap lands instead of answering from the non-owning provider', async () => {
+    const barrier = makeDeferred()
+    registerWithStartupBarrier(barrier.promise)
+
+    const pending = Promise.resolve(
+      handlers.get('pty:inspectProcess')!(null, { id: 'daemon-restored-pty' })
+    )
+    let settled = false
+    void pending.then(() => {
+      settled = true
+    })
+
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+    // Pre-fix this has already resolved — the pre-swap LocalPtyProvider was
+    // consulted about a PTY it does not own. Its non-ownership happens to read
+    // as unavailable today only because the inspection funnel consults hasPty
+    // before the provider's own inspection; completion-sensitive evidence must
+    // come from the post-swap owner, not from that internal ordering.
+    expect(settled).toBe(false)
+
+    installDaemonTestProvider({
+      hasPty: (id: string) => id === 'daemon-restored-pty',
+      inspectProcess: vi.fn(async () => ({
+        foregroundProcess: 'codex',
+        hasChildProcesses: true
+      }))
+    })
+    barrier.resolve()
+
+    await expect(pending).resolves.toEqual({
+      foregroundProcess: 'codex',
+      hasChildProcesses: true
+    })
+  })
+
+  it('pty:inspectProcess answers SSH-owned ids from their provider without waiting on the local swap', async () => {
+    const barrier = makeDeferred()
+    const sshInspect = vi.fn(async () => ({
+      foregroundProcess: 'ssh-codex',
+      hasChildProcesses: true
+    }))
+    registerSshPtyProvider('ssh-1', {
+      hasPty: (id: string) => id === 'ssh:ssh-1@@pty-2',
+      inspectProcess: sshInspect
+    } as never)
+    registerWithStartupBarrier(barrier.promise)
+
+    await expect(
+      handlers.get('pty:inspectProcess')!(null, { id: 'ssh:ssh-1@@pty-2' })
+    ).resolves.toEqual({ foregroundProcess: 'ssh-codex', hasChildProcesses: true })
+    expect(sshInspect).toHaveBeenCalledWith('ssh:ssh-1@@pty-2')
+  })
+
   it('keeps the in-process provider authoritative when no startup barrier is configured', async () => {
     // Headless/orcad installs the daemon before registerPtyHandlers and passes
     // no barrier; the installed provider is then the sole owner (#12393) and
@@ -204,5 +259,10 @@ describe('registerPtyHandlers daemon-swap-window presence', () => {
     await expect(handlers.get('pty:hasPty')!(null, { id: 'never-spawned-pty' })).resolves.toBe(
       false
     )
+    // The sole owner's inspection answer stays immediate too: with no swap in
+    // flight there is no window in which its word could be fabricated.
+    await expect(
+      handlers.get('pty:inspectProcess')!(null, { id: 'never-spawned-pty' })
+    ).resolves.toEqual({ foregroundProcess: null, hasChildProcesses: false, unavailable: true })
   })
 })
