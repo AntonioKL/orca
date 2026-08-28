@@ -99,6 +99,24 @@ describe('reapOrphanedDaemonPidPublishClaims', () => {
     expect(existsSync(foreign)).toBe(true)
   })
 
+  it('keeps a claim whose owner is live but unsignalable on Windows', () => {
+    // Why a second errno: Windows reports a live foreign owner as EACCES, not the POSIX
+    // EPERM above (isPermissionError in win32-utils treats both as one). Only ESRCH reaps.
+    const foreign = join(dir, `daemon-v7.pid.publish-424242-${CLAIM_UUID}`)
+    writeFileSync(foreign, '{"pid":1')
+    const kill = vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw Object.assign(new Error('permission denied'), { code: 'EACCES' })
+    })
+
+    try {
+      reapOrphanedDaemonPidPublishClaims(dir)
+    } finally {
+      kill.mockRestore()
+    }
+
+    expect(existsSync(foreign)).toBe(true)
+  })
+
   it('never lets an unremovable claim abort the sweep or the launch', () => {
     // Why: reaping is hygiene on the launch funnel, so any failure here — a Windows file
     // lock, a permission error, a stray directory under a claim name — must not escape
