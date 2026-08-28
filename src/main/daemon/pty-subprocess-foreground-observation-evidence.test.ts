@@ -17,6 +17,9 @@ import type { SubprocessHandle } from './session-subprocess-handle'
 const SHELL_PID = 999_999_517
 // Above the idle-shell refresh throttle (5s) so each read starts a fresh scan.
 const PAST_THE_SCAN_THROTTLE_MS = 6_000
+// Bracket the 30s shell-title corroboration window from both sides.
+const INSIDE_CORROBORATION_WINDOW_MS = 25_000
+const PAST_CORROBORATION_WINDOW_MS = 35_000
 
 describe('daemon foreground observation evidence', () => {
   let platformDescriptor: PropertyDescriptor | undefined
@@ -107,6 +110,22 @@ describe('daemon foreground observation evidence', () => {
     const observation = await readAfterSettledScan()
 
     expect(observation?.evidence.verdict).toBe('unverifiable')
+  })
+
+  it('stops observing a shell title once corroboration ages past the 30s bound', async () => {
+    resolveAgentForegroundProcessMock.mockResolvedValue({ available: true, processName: 'zsh' })
+    expect((await readAfterSettledScan())?.evidence.verdict).toBe('observed')
+
+    // A permanently wedged `ps`: the scan starts and never settles, so nothing
+    // refreshes corroboration and it simply ages out. Brackets the 30s bound on
+    // both sides so widening or removing it fails here.
+    resolveAgentForegroundProcessMock.mockReturnValue(new Promise(() => {}))
+
+    await vi.advanceTimersByTimeAsync(INSIDE_CORROBORATION_WINDOW_MS)
+    expect(handle.observeForegroundProcess?.()?.evidence.verdict).toBe('observed')
+
+    await vi.advanceTimersByTimeAsync(PAST_CORROBORATION_WINDOW_MS - INSIDE_CORROBORATION_WINDOW_MS)
+    expect(handle.observeForegroundProcess?.()?.evidence.verdict).toBe('unverifiable')
   })
 
   it('keeps a live agent title an observation without needing a scan', () => {
