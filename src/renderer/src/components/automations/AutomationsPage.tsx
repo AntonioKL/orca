@@ -1345,12 +1345,13 @@ export default function AutomationsPage(): React.JSX.Element {
     if (!draft.projectId) {
       return
     }
-    const available = worktreesByRepo[draft.projectId] ?? []
-    const defaultWorktree = getDefaultWorktree(available)
+    // Authority-scoped: the merged cache would restore a source-host workspace
+    // after a host change clears it, which save validation then rejects.
+    const defaultWorktree = getDefaultWorktree(dialogWorktrees)
     if (!draft.workspaceId && defaultWorktree) {
       setDraft((current) => ({ ...current, workspaceId: defaultWorktree.id }))
     }
-  }, [draft.projectId, draft.workspaceId, worktreesByRepo])
+  }, [dialogWorktrees, draft.projectId, draft.workspaceId])
 
   useEffect(() => {
     if (
@@ -2026,7 +2027,8 @@ export default function AutomationsPage(): React.JSX.Element {
       })
       setDraft((current) => ({ ...current, name: '', prompt: '' }))
       await refresh()
-      // A move creates a new row on another authority; select it by its new id.
+      // A move retires the edited row key; the else branch selects the new copy
+      // by id alone and lets the refreshed list resolve its row.
       if (editingAutomationId && editingRowKey && !moveTarget) {
         setSelectedAutomationRunPageId(null)
         setSelectedRowKey(editingRowKey)
@@ -2094,7 +2096,10 @@ export default function AutomationsPage(): React.JSX.Element {
         originalRemoved: false
       }
     }
-    const operationKey = `${source.id}:${target.entry.stableKey}:${JSON.stringify(input)}`
+    // Keyed by the move, not its payload: dtstart is minted per attempt, so a
+    // payload-keyed retry would mint a fresh creationKey and let an ambiguous
+    // create failure schedule a second copy on the destination.
+    const operationKey = `${source.id}:${target.entry.stableKey}`
     const creationKey = moveCreationKeysRef.current.get(operationKey) ?? crypto.randomUUID()
     moveCreationKeysRef.current.set(operationKey, creationKey)
     const created = toDispatchResult(
