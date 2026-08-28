@@ -39,6 +39,7 @@ import { ElectronSecretStore } from './host/electron-secret-store'
 import { reportSecretProtectionGap } from './host/secret-protection-report'
 import { initSessionParseCachePersistence } from './ai-vault/session-parse-cache-persistence'
 import { deferUntilFirstWindowShown } from './window/defer-until-first-window-shown'
+import { shouldDeferKeyringProbe } from './startup/keyring-probe-deferral'
 import { ensureActiveOrcaProfile, initOrcaProfilePaths } from './orca-profiles/profile-index-store'
 import { getOrcaCloudAuthConfig } from './orca-profiles/profile-cloud-auth-config'
 import { getProfileUserDataPath } from './orca-profiles/profile-storage-paths'
@@ -2347,7 +2348,7 @@ void app.whenReady().then(async () => {
   // OS keyring — on Linux a blocking D-Bus round trip that a locked keyring never answers, run
   // here with no window on screen to explain the wait (STA-5782). Serve is excluded: it opens no
   // window, so deferring would move the block past the point clients can already pair.
-  const deferKeyringProbe = process.platform === 'linux' && !isServeMode
+  const deferKeyringProbe = shouldDeferKeyringProbe({ platform: process.platform, isServeMode })
   store = new Store({
     dataFile: activeOrcaProfile.dataFile,
     storageAuthority: isServeMode ? 'runtime' : 'desktop',

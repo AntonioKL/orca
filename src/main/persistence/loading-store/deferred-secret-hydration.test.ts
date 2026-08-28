@@ -37,6 +37,7 @@ function seal(plaintext: string): string {
 }
 
 let probes = 0
+let encryptions = 0
 
 function installBlockingKeyring(): void {
   setSecretStore({
@@ -51,13 +52,16 @@ function installBlockingKeyring(): void {
       }
       return true
     },
-    encryptString: (plainText) => Buffer.from(`encrypted:${plainText}`, 'utf-8'),
+    // Why a nonce: a real keyring seals with a fresh IV, so re-encrypting a value yields
+    // different bytes. Without that, a save that decrypted and re-encrypted a secret would be
+    // indistinguishable from one that preserved the stored ciphertext untouched.
+    encryptString: (plainText) => Buffer.from(`encrypted:${plainText}#${++encryptions}`, 'utf-8'),
     decryptString: (cipher) => {
       const decoded = cipher.toString('utf-8')
       if (!decoded.startsWith('encrypted:')) {
         throw new Error('invalid ciphertext')
       }
-      return decoded.slice('encrypted:'.length)
+      return decoded.slice('encrypted:'.length).replace(/#\d+$/, '')
     },
     describeProtectionGap: () => null
   })
@@ -90,6 +94,7 @@ describe('deferred protected-secret hydration', () => {
   beforeEach(() => {
     testState.dir = mkdtempSync(join(tmpdir(), 'orca-deferred-secret-'))
     probes = 0
+    encryptions = 0
     installBlockingKeyring()
   })
 
@@ -193,6 +198,47 @@ describe('deferred protected-secret hydration', () => {
           settings: { httpProxyUrl: string }
         }
         expect(saved.settings.httpProxyUrl).toBe('')
+      },
+      { timeout: 10_000, interval: 100 }
+    )
+    store.freezeWrites()
+  })
+
+  it('persists the drop when hydration finds an unusable SSH owner lease', async () => {
+    // Why: the lease decodes to a value normalization rejects, so hydration drops the record.
+    // Dropping it in memory only would resurrect it next launch and re-present a lease the
+    // relay will refuse, so the drop has to reach disk on hydration's own save.
+    writeDataFile({
+      sshPtyConsumerRecoveries: [
+        {
+          targetId: 'target-1',
+          clientInstanceId: 'client-1',
+          serverBuildId: 'build-1',
+          clientGeneration: 1,
+          ownerGeneration: 1,
+          ownerLease: seal('')
+        }
+      ]
+    })
+    const store = createStore({ deferKeyringProbe: true })
+    // Why flush first: load-time migrations schedule their own save, and a hydration that
+    // scheduled nothing would still reach disk on the back of it.
+    store.flushOrThrow()
+    expect(
+      (JSON.parse(readFileSync(dataFile(), 'utf-8')) as { sshPtyConsumerRecoveries: unknown[] })
+        .sshPtyConsumerRecoveries
+    ).toHaveLength(1)
+
+    const result = store.hydrateDeferredProtectedSecrets()
+
+    expect(result.needsSave).toBe(true)
+    await vi.waitFor(
+      async () => {
+        await store.waitForPendingWrite()
+        const saved = JSON.parse(readFileSync(dataFile(), 'utf-8')) as {
+          sshPtyConsumerRecoveries: unknown[]
+        }
+        expect(saved.sshPtyConsumerRecoveries).toEqual([])
       },
       { timeout: 10_000, interval: 100 }
     )
