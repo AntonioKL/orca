@@ -82,7 +82,10 @@ import {
   createEphemeralAgentSessionClaimSigner,
   type AgentSessionClaimSigner
 } from './agent-session-claim-identity'
-import { ensureStructuredAgentSessionHost as installStructuredAgentSessionHost } from './structured-agent-session-runtime'
+import {
+  ensureStructuredAgentSessionHost as installStructuredAgentSessionHost,
+  hasPersistedStructuredAgentSessionStore as hasPersistedStructuredAgentSessionStoreOnDisk
+} from './structured-agent-session-runtime'
 import { getStructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-registry'
 import type { AgentSessionAttachParams } from '../native-chat/agent-session-wire/structured-agent-session-attach'
 import {
@@ -12266,10 +12269,17 @@ export class OrcaRuntimeService {
   }
 
   private async prepareStructuredAgentSessionStartupRestorationOnce(): Promise<void> {
+    if (!this.hasPersistedStructuredAgentSessionStore()) {
+      return
+    }
     // Durable agent records must exist before daemon inventory can be reconciled against them.
     await this.ensureStructuredAgentSessionHost()
     await this.refreshMobileSessionPtyRecords()
     await getStructuredAgentSessionHost()?.reconcileRestartLeases()
+  }
+
+  private hasPersistedStructuredAgentSessionStore(): boolean {
+    return hasPersistedStructuredAgentSessionStoreOnDisk(getProfileUserDataPath())
   }
 
   private async restoreStructuredAgentSessionTabsOnce(): Promise<void> {

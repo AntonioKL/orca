@@ -5,6 +5,28 @@ import { OrcaRuntimeService } from './orca-runtime'
 afterEach(() => setStructuredAgentSessionHost(null))
 
 describe('structured session cold restoration', () => {
+  it('skips every heavy recovery step when no durable session store exists', async () => {
+    const runtime = new OrcaRuntimeService()
+    const refresh = vi.fn(async () => new Set<string>())
+    const ensureHost = vi.fn(async () => undefined)
+    const reconcileRestartLeases = vi.fn(async () => undefined)
+    const internal = runtime as unknown as {
+      hasPersistedStructuredAgentSessionStore(): boolean
+      refreshMobileSessionPtyRecords(): Promise<Set<string> | null>
+      ensureStructuredAgentSessionHost(): Promise<void>
+    }
+    internal.hasPersistedStructuredAgentSessionStore = () => false
+    internal.refreshMobileSessionPtyRecords = refresh
+    internal.ensureStructuredAgentSessionHost = ensureHost
+    setStructuredAgentSessionHost({ reconcileRestartLeases } as never)
+
+    await runtime.prepareStructuredAgentSessionStartupRestoration()
+
+    expect(ensureHost).not.toHaveBeenCalled()
+    expect(refresh).not.toHaveBeenCalled()
+    expect(reconcileRestartLeases).not.toHaveBeenCalled()
+  })
+
   it('keeps historical journal parsing outside the terminal-safety fence', async () => {
     const runtime = new OrcaRuntimeService()
     const refresh = vi.fn(async () => new Set<string>())
@@ -12,9 +34,11 @@ describe('structured session cold restoration', () => {
     const reconcileRestartLeases = vi.fn(async () => undefined)
     const restoreReadableSessions = vi.fn(async () => undefined)
     const internal = runtime as unknown as {
+      hasPersistedStructuredAgentSessionStore(): boolean
       refreshMobileSessionPtyRecords(): Promise<Set<string> | null>
       ensureStructuredAgentSessionHost(): Promise<void>
     }
+    internal.hasPersistedStructuredAgentSessionStore = () => true
     internal.refreshMobileSessionPtyRecords = refresh
     internal.ensureStructuredAgentSessionHost = ensureHost
     setStructuredAgentSessionHost({ reconcileRestartLeases, restoreReadableSessions } as never)
@@ -35,6 +59,7 @@ describe('structured session cold restoration', () => {
     const reconcileRestartLeases = vi.fn(async () => undefined)
     const restoreReadableSessions = vi.fn(async () => undefined)
     const internal = runtime as unknown as {
+      hasPersistedStructuredAgentSessionStore(): boolean
       getKnownWorkspaceSessionWorktreeIds(): Set<string>
       hydrateHeadlessMobileSessionTabsFromWorkspaceSession(
         worktreeId?: string,
@@ -43,6 +68,7 @@ describe('structured session cold restoration', () => {
       refreshMobileSessionPtyRecords(): Promise<Set<string> | null>
       ensureStructuredAgentSessionHost(): Promise<void>
     }
+    internal.hasPersistedStructuredAgentSessionStore = () => true
     internal.getKnownWorkspaceSessionWorktreeIds = () => new Set(['workspace-1'])
     internal.hydrateHeadlessMobileSessionTabsFromWorkspaceSession = hydrate
     internal.refreshMobileSessionPtyRecords = refresh
@@ -86,11 +112,13 @@ describe('structured session cold restoration', () => {
     const closeSessionTab = vi.fn(async () => undefined)
     runtime.setNotifier({ closeSessionTab } as never)
     const internal = runtime as unknown as {
+      hasPersistedStructuredAgentSessionStore(): boolean
       getKnownWorkspaceSessionWorktreeIds(): Set<string>
       hydrateHeadlessMobileSessionTabsFromWorkspaceSession(): Set<string>
       refreshMobileSessionPtyRecords(): Promise<Set<string> | null>
       ensureStructuredAgentSessionHost(): Promise<void>
     }
+    internal.hasPersistedStructuredAgentSessionStore = () => true
     internal.getKnownWorkspaceSessionWorktreeIds = () => new Set()
     internal.hydrateHeadlessMobileSessionTabsFromWorkspaceSession = () => new Set()
     internal.refreshMobileSessionPtyRecords = async () => new Set()

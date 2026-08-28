@@ -7,6 +7,7 @@
 // reads is module-level for the same reason the registry is — the runtime
 // service is already far past its size budget.
 
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AgentSessionOwnerProbe } from '../../shared/agent-session-lease-adjudication'
 import type { AgentSessionRecord } from '../../shared/agent-session-record'
@@ -19,6 +20,7 @@ import { StructuredAgentSessionHost } from '../native-chat/agent-session-wire/st
 import type { StructuredAgentSessionHandoffTransport } from '../native-chat/agent-session-wire/structured-agent-session-handoff-types'
 import { setStructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-registry'
 import { AgentSessionRecordStore } from './agent-session-record-store'
+import { agentSessionStorePath } from './agent-session-record-store-file'
 import { stopOrphanAgentSessionChildren } from './agent-session-orphan-child-reaper'
 import {
   probeAgentSessionProcessIdentities,
@@ -34,6 +36,14 @@ import { recordAgentSessionProviderHandle } from './agent-session-provider-handl
 /** Sibling of the journal tree rather than inside it: one file adjudicates every
  *  session's lease, while a journal is per session. */
 const RECORD_STORE_DIR_NAME = 'agent-sessions'
+
+export function hasPersistedStructuredAgentSessionStore(
+  stateDirectory: string,
+  fileExists: (path: string) => boolean = existsSync
+): boolean {
+  const filePath = agentSessionStorePath(join(stateDirectory, RECORD_STORE_DIR_NAME))
+  return fileExists(filePath) || fileExists(`${filePath}.bak`)
+}
 
 export type StructuredAgentSessionRuntimeDeps = {
   /** Host state root. The record store and the journal tree both hang off it. */

@@ -11,6 +11,7 @@ import {
   createStructuredAgentSessionOwnerProbe,
   createStructuredAgentSessionOwnerProbes,
   ensureStructuredAgentSessionHost,
+  hasPersistedStructuredAgentSessionStore,
   stopStructuredAgentSessionRuntime
 } from './structured-agent-session-runtime'
 
@@ -46,6 +47,39 @@ const OWNER: AgentSessionProcessIdentity = {
 }
 
 const deadProbe = () => vi.fn(async () => ({ outcome: 'pid-absent' }) as const)
+
+describe('structured agent-session store presence', () => {
+  it('stops after finding the durable primary store', () => {
+    const fileExists = vi.fn(() => true)
+
+    expect(hasPersistedStructuredAgentSessionStore('/profile', fileExists)).toBe(true)
+    expect(fileExists).toHaveBeenCalledOnce()
+    expect(fileExists).toHaveBeenCalledWith(
+      join('/profile', 'agent-sessions', 'agent-sessions.json')
+    )
+  })
+
+  it('checks the durable backup when the primary store is absent', () => {
+    const fileExists = vi.fn((path: string) => path.endsWith('.bak'))
+
+    expect(hasPersistedStructuredAgentSessionStore('/profile', fileExists)).toBe(true)
+    expect(fileExists).toHaveBeenNthCalledWith(
+      1,
+      join('/profile', 'agent-sessions', 'agent-sessions.json')
+    )
+    expect(fileExists).toHaveBeenNthCalledWith(
+      2,
+      join('/profile', 'agent-sessions', 'agent-sessions.json.bak')
+    )
+  })
+
+  it('reports a fresh profile absent after two bounded presence checks', () => {
+    const fileExists = vi.fn(() => false)
+
+    expect(hasPersistedStructuredAgentSessionStore('/profile', fileExists)).toBe(false)
+    expect(fileExists).toHaveBeenCalledTimes(2)
+  })
+})
 
 describe('structured agent-session owner probe', () => {
   it('probes an owner this host spawned', async () => {
