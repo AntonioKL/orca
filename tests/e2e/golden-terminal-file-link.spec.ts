@@ -246,11 +246,26 @@ test('reuses a terminal file link already open in a sibling workspace @golden', 
 
   await ensureTerminalVisible(orcaPage)
   await waitForActiveTerminalManager(orcaPage, 30_000)
+  await orcaPage.evaluate(() => {
+    const state = window.__store?.getState()
+    state?.setSidebarOpen(false)
+    state?.setRightSidebarOpen(false)
+  })
+  await expect
+    .poll(
+      () =>
+        orcaPage.evaluate(() => {
+          const state = window.__store?.getState()
+          const tabId = state?.activeTabId
+          const manager = tabId ? window.__paneManagers?.get(tabId) : null
+          return manager?.getActivePane?.()?.terminal.cols ?? 0
+        }),
+      { message: 'terminal did not expand after closing the sidebars' }
+    )
+    .toBeGreaterThan(120)
   const ptyId = await waitForActivePanePtyId(orcaPage, 30_000)
   await waitForPtyShellEcho(orcaPage, ptyId, 15_000)
-  const relativePath = path.relative(source.path, filePath)
-  const printedPath =
-    process.platform === 'win32' ? relativePath.replaceAll('\\', '/') : relativePath
+  const printedPath = process.platform === 'win32' ? filePath.replaceAll('\\', '/') : filePath
   const command = nodeTerminalCommand(['-e', `console.log(${JSON.stringify(printedPath)})`])
   await sendToTerminal(orcaPage, ptyId, `${command}\r`)
   await expect
