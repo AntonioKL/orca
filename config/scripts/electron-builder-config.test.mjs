@@ -262,6 +262,24 @@ describe('electron-builder config', () => {
     )
   })
 
+  // Why: the descriptor-clean daemon fork loads this entry with
+  // utilityProcess.fork; a dropped rollup input would silently put every
+  // Linux/Windows launch on the direct-fork fallback, resurrecting the
+  // inherited-descriptor leak into the daemon and its PTY children.
+  it('bundles the utility launcher shim the descriptor-clean daemon fork loads', async () => {
+    const forkSource = await readFile(
+      join(SRC_MAIN_DIR, 'daemon', 'daemon-utility-process-fork.ts'),
+      'utf8'
+    )
+    const entryFilename = forkSource.match(/'(daemon-utility-launcher-shim\.js)'/)?.[1]
+    expect(entryFilename).toBeDefined()
+
+    const viteConfig = await readFile(join(REPO_ROOT, 'electron.vite.config.ts'), 'utf8')
+    expect(viteConfig).toMatch(new RegExp(`'${entryFilename.replace(/\.js$/, '')}':\\s*resolve\\(`))
+    // utilityProcess reads asar directly, so the shim deliberately stays packed.
+    expect(electronBuilderConfig.asarUnpack).not.toContain(`out/main/${entryFilename}`)
+  })
+
   it('uses the multi-size icon source for Linux packages', () => {
     expect(electronBuilderConfig.linux.icon).toBe('resources/build/icon.icns')
   })
