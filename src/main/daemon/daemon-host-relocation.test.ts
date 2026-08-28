@@ -40,8 +40,10 @@ import {
   collectPinnedDaemonVersions,
   getRelocatedDaemonHost,
   materializeRelocatedDaemonHost,
-  pruneOldDaemonHosts
+  pruneOldDaemonHosts,
+  reclaimUnownedDaemonHostDir
 } from './daemon-host-relocation'
+import type { ProcessLivenessVerdict } from './daemon-incarnation-evidence-types'
 
 let tempDir: string
 let installDir: string
@@ -399,6 +401,87 @@ describe('pruneOldDaemonHosts', () => {
     pruneOldDaemonHosts(evidence)
 
     expect(existsSync(join(root, '7.0.0'))).toBe(true)
+    killSpy.mockRestore()
+  })
+
+  it('preserves a host dir for any verdict that is not positively exited', () => {
+    const root = join(localAppDataDir, 'Orca', 'daemon-host')
+    mkdirSync(join(root, '1.0.0'), { recursive: true })
+    // Why: deliberate out-of-contract cast — deletion must require a positive 'exited' match,
+    // so a future verdict status the prune does not know preserves the host dir, not deletes it.
+    const futureVerdict = {
+      status: 'suspended',
+      reason: 'hypothetical future verdict'
+    } as unknown as ProcessLivenessVerdict
+
+    pruneOldDaemonHosts({
+      status: 'complete',
+      versionLiveness: new Map([['1.0.0', futureVerdict]])
+    })
+    expect(existsSync(join(root, '1.0.0'))).toBe(true)
+
+    reclaimUnownedDaemonHostDir(futureVerdict, join(root, '1.0.0'))
+    expect(existsSync(join(root, '1.0.0'))).toBe(true)
+
+    reclaimUnownedDaemonHostDir({ status: 'exited' }, join(root, '1.0.0'))
+    expect(existsSync(join(root, '1.0.0'))).toBe(false)
+  })
+
+  it('quarantines a record torn inside the pid digits without probing the truncated prefix', () => {
+    const root = join(localAppDataDir, 'Orca', 'daemon-host')
+    const runtimeDir = join(userDataDir, 'daemon')
+    mkdirSync(join(root, '1.0.0'), { recursive: true })
+    mkdirSync(runtimeDir, { recursive: true })
+    // A tear inside the digits of pid 12345 leaves the prefix 123 — a DIFFERENT pid. Probing
+    // it would attribute an unrelated (here: dead) process's verdict to this record; the
+    // writer of a mid-digits tear died mid-write, so quarantine must not consult any probe.
+    const pidPath = join(runtimeDir, 'daemon-v7.pid')
+    writeFileSync(pidPath, '{"pid":123')
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw Object.assign(new Error('no such process'), { code: 'ESRCH' })
+    })
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const evidence = collectPinnedDaemonVersions(runtimeDir)
+
+    expect(evidence).toEqual({
+      status: 'unverifiable',
+      reason: 'the daemon pid file could not be parsed and was quarantined: daemon-v7.pid'
+    })
+    expect(killSpy).not.toHaveBeenCalled()
+    expect(existsSync(pidPath)).toBe(false)
+    expect(readFileSync(join(runtimeDir, 'daemon-v7.pid.corrupt'), 'utf8')).toBe('{"pid":123')
+    warnSpy.mockRestore()
+    killSpy.mockRestore()
+  })
+
+  it('never lets an immortal-pid prefix turn a torn record into a permanent prune veto', () => {
+    const root = join(localAppDataDir, 'Orca', 'daemon-host')
+    const runtimeDir = join(userDataDir, 'daemon')
+    mkdirSync(join(root, '1.0.0'), { recursive: true })
+    mkdirSync(runtimeDir, { recursive: true })
+    // Pid 41234 torn to the prefix 4 — the Windows System pid, which answers probes forever.
+    // Trusting it would re-create for this one record the eternal veto pruning must not have.
+    const pidPath = join(runtimeDir, 'daemon-v7.pid')
+    writeFileSync(pidPath, '{"pid":4')
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw Object.assign(new Error('access denied'), { code: 'EPERM' })
+    })
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const evidence = collectPinnedDaemonVersions(runtimeDir)
+
+    expect(evidence).toEqual({
+      status: 'unverifiable',
+      reason: 'the daemon pid file could not be parsed and was quarantined: daemon-v7.pid'
+    })
+    expect(killSpy).not.toHaveBeenCalled()
+    expect(readFileSync(join(runtimeDir, 'daemon-v7.pid.corrupt'), 'utf8')).toBe('{"pid":4')
+
+    // Next launch: the listing is complete again and the unowned host is reclaimed.
+    pruneOldDaemonHosts(collectPinnedDaemonVersions(runtimeDir))
+    expect(existsSync(join(root, '1.0.0'))).toBe(false)
+    warnSpy.mockRestore()
     killSpy.mockRestore()
   })
 

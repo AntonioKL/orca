@@ -345,6 +345,23 @@ export function collectPinnedDaemonVersions(runtimeDir: string): PinnedDaemonVer
   return { status: 'complete', versionLiveness }
 }
 
+// Why: deletion is the destructive direction and this is a statement position the compiler does
+// not police for exhaustiveness — reclaim must be opted into by a positively matched 'exited',
+// so any future unhandled verdict status preserves the host dir instead of deleting it.
+export function reclaimUnownedDaemonHostDir(
+  verdict: ProcessLivenessVerdict,
+  hostDir: string
+): void {
+  if (verdict.status !== 'exited') {
+    return
+  }
+  try {
+    rmSync(hostDir, { recursive: true, force: true })
+  } catch {
+    // Still locked or already gone — retry on a future launch.
+  }
+}
+
 /**
  * Reclaim daemon-host/<ver> dirs that are neither the current version nor pinned by a live daemon.
  * Best-effort — never throws; a locked/staging dir is retried on a future launch.
@@ -371,17 +388,6 @@ export function pruneOldDaemonHosts(evidence: PinnedDaemonVersionsEvidence): voi
     }
     // A complete runtime-dir listing with no pid record for this version proves it is unowned.
     const verdict = evidence.versionLiveness.get(entry.name) ?? { status: 'exited' }
-    switch (verdict.status) {
-      case 'live':
-      case 'unverifiable':
-        continue
-      case 'exited':
-        break
-    }
-    try {
-      rmSync(join(root, entry.name), { recursive: true, force: true })
-    } catch {
-      // Still locked or already gone — retry on a future launch.
-    }
+    reclaimUnownedDaemonHostDir(verdict, join(root, entry.name))
   }
 }
