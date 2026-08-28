@@ -332,6 +332,29 @@ describe('DegradedDaemonPtyProvider.ptyAbsenceVerdict', () => {
     expect(provider.ptyAbsenceVerdict(fresh.id)).toBe('exited')
   })
 
+  it('keeps the owner verdict after the exit event forgets the route', async () => {
+    // The exit callback forgets the route before anything reads the verdict, so a
+    // router that only consults a live route turns every watched exit unverifiable.
+    const fallbackSessions: string[] = []
+    const fallback = withAbsenceVerdict(createProvider('fallback', fallbackSessions), 'exited')
+    const provider = new DegradedDaemonPtyProvider({
+      current: createDaemonAdapter('daemon'),
+      legacy: [],
+      fallback
+    })
+    const fresh = await provider.spawn({ cols: 80, rows: 24 })
+    fallbackSessions.splice(0)
+    fallback.emitExit(fresh.id, 0)
+
+    expect(provider.ptyAbsenceVerdict(fresh.id)).toBe('exited')
+    // The shape the renderer reads: a watched exit carries no `unavailable`.
+    const inspection = await inspectPtyProviderProcessForRenderer(provider, fresh.id)
+    expect(inspection).not.toHaveProperty('unavailable')
+    expect(inspection).toMatchObject({
+      processEvidence: { foreground: { verdict: 'observed' }, children: { verdict: 'exited' } }
+    })
+  })
+
   it('stays unverifiable when the routed owner cannot vouch for the absence', async () => {
     const fallbackSessions: string[] = []
     const fallback = createProvider('fallback', fallbackSessions)
