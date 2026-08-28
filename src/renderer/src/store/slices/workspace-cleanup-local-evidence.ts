@@ -7,6 +7,7 @@ import { classifyTitleActivity, isExplicitAgentStatusFresh } from '@/lib/pane-ag
 import type { WorkspaceCleanupCandidate } from '../../../../shared/workspace-cleanup'
 import { getWorktreeVisitTimestamp } from '@/lib/worktree-visit-recency'
 import { inspectRuntimeTerminalProcess } from '@/runtime/runtime-terminal-process-inspection'
+import { readPtyProcessInspectionEvidence } from '../../../../shared/pty-process-inspection-evidence'
 
 const RECENT_VISIBLE_CONTEXT_MS = 24 * 60 * 60 * 1000
 const VIEWED_FROM_CLEANUP_MS = 2 * 60 * 60 * 1000
@@ -179,8 +180,24 @@ export async function probeTerminalLiveness(
         unverifiable = true
         continue
       }
-      const processName = normalizeProcessName(inspection.foregroundProcess)
-      if (!inspection.hasChildProcesses && (!processName || SHELL_PROCESS_NAMES.has(processName))) {
+      // Why the evidence and not the legacy fields: `unavailable` only covers a
+      // handle we could not route to. A host that DID answer but whose probes
+      // failed publishes the legacy collapse (null/false, or the shell name from
+      // the stable cache) — byte-identical to an idle shell. Only processEvidence
+      // separates "observed idle" from "could not ask", and this is a delete path.
+      const evidence = readPtyProcessInspectionEvidence(inspection)
+      if (
+        evidence.foreground.verdict === 'unverifiable' ||
+        evidence.children.verdict === 'unverifiable'
+      ) {
+        unverifiable = true
+        continue
+      }
+      const processName = normalizeProcessName(evidence.foreground.processName)
+      if (
+        evidence.children.verdict !== 'live' &&
+        (!processName || SHELL_PROCESS_NAMES.has(processName))
+      ) {
         continue
       }
       if (
