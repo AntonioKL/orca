@@ -29,6 +29,7 @@ import {
   readSync,
   writeFileSync
 } from 'node:fs'
+import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { RELAY_WINDOWS_PROCESS_TREE_FILENAME } from '../../src/shared/relay-artifacts.ts'
 
@@ -92,7 +93,9 @@ function assertPatchApplied() {
 function applyWindowsProcessTreeBuildFixes() {
   const bindingPath = join(PACKAGE_DIR, 'binding.gyp')
   const processPath = join(PACKAGE_DIR, 'src', 'process.cc')
-  const nodeAddonApiDir = dirname(require.resolve('node-addon-api/package.json'))
+  const nodeAddonApiDir = dirname(
+    createRequire(import.meta.url).resolve('node-addon-api/package.json')
+  )
   const stagedHeaderDir = join(PACKAGE_DIR, 'deps', 'node-addon-api')
   let bindingGyp = readFileSync(bindingPath, 'utf8')
   let processCc = readFileSync(processPath, 'utf8')
