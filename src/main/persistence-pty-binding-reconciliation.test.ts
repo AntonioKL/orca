@@ -381,6 +381,83 @@ describe('Store', () => {
     ).toBe('host-pty')
   })
 
+  // The host-partitioned path is separate code: a non-local binding reads and writes
+  // `workspaceSessionsByHostId[hostId]`, and its rollback restores that partition rather
+  // than `workspaceSession`. Fence a remote binding and pin that the local partition is
+  // left alone, so an SSH host can never correct a pane by writing over local state.
+  it('fences a remote host binding without touching the local session', async () => {
+    const store = await createStore()
+    const HOST_ID = 'ssh:remote-1'
+    const rendererReplay = (): void => {
+      store.setWorkspaceSession(
+        {
+          ...getDefaultWorkspaceSession(),
+          tabsByWorktree: {
+            wt1: [makeTerminalTab({ id: 'tab1', worktreeId: 'wt1', ptyId: 'stale-pty' })]
+          },
+          terminalLayoutsByTabId: {
+            tab1: {
+              root: { type: 'leaf', leafId: TEST_LEAF_1 },
+              activeLeafId: TEST_LEAF_1,
+              expandedLeafId: null,
+              ptyIdsByLeafId: { [TEST_LEAF_1]: 'stale-pty' }
+            }
+          }
+        },
+        HOST_ID
+      )
+    }
+    rendererReplay()
+
+    expect(
+      store.persistPtyBinding(
+        {
+          worktreeId: 'wt1',
+          tabId: 'tab1',
+          leafId: TEST_LEAF_1,
+          ptyId: 'host-pty',
+          hostAdmittedMembership: true
+        },
+        HOST_ID
+      )
+    ).toBe(true)
+
+    rendererReplay()
+
+    const remote = store.getWorkspaceSession(HOST_ID)
+    expect(remote.terminalLayoutsByTabId.tab1?.ptyIdsByLeafId?.[TEST_LEAF_1]).toBe('host-pty')
+    expect(remote.tabsByWorktree.wt1[0].ptyId).toBe('host-pty')
+    // Host isolation: the remote binding must not have leaked into the local partition.
+    expect(store.getWorkspaceSession().tabsByWorktree.wt1).toBeUndefined()
+  })
+
+  // The first binding on a host has no partition to mutate: `getWorkspaceSession` hands back
+  // a fresh default that is stored nowhere, so the binding only survives because the non-local
+  // branch writes the session into `workspaceSessionsByHostId`. Without that write the whole
+  // binding is silently dropped, and the remote pane comes back unbound.
+  it('creates the host partition when a remote host binds its first pane', async () => {
+    const store = await createStore()
+    const HOST_ID = 'ssh:remote-2'
+
+    expect(
+      store.persistPtyBinding(
+        {
+          worktreeId: 'wt1',
+          tabId: 'tab1',
+          leafId: TEST_LEAF_1,
+          ptyId: 'remote-pty',
+          hostAdmittedMembership: true
+        },
+        HOST_ID
+      )
+    ).toBe(true)
+
+    const remote = store.getWorkspaceSession(HOST_ID)
+    expect(remote.terminalLayoutsByTabId.tab1?.ptyIdsByLeafId?.[TEST_LEAF_1]).toBe('remote-pty')
+    expect(remote.tabsByWorktree.wt1?.[0]?.ptyId).toBe('remote-pty')
+    expect(store.getWorkspaceSession().tabsByWorktree.wt1).toBeUndefined()
+  })
+
   it('admits a fresh host spawn after retirement while rejecting an older renderer topology', async () => {
     const store = await createStore()
     store.setWorkspaceSession({
