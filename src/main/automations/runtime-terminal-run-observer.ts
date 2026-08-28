@@ -25,7 +25,8 @@ export type AutomationRunTerminalHost = {
   hasTerminalAgentWorkedSince(
     handle: string,
     observedAfter: number,
-    expectedPrompt?: string
+    expectedPrompt?: string,
+    expectedTurnId?: string
   ): boolean
   waitForTerminal(
     handle: string,
@@ -35,6 +36,7 @@ export type AutomationRunTerminalHost = {
       signal?: AbortSignal
       agentTurnStartedAfter?: number
       agentTurnPrompt?: string
+      agentTurnId?: string
     }
   ): Promise<{ satisfied: boolean; blockedReason?: string }>
   readTerminal(handle: string, opts?: { limit?: number }): Promise<{ tail: string[] }>
@@ -96,7 +98,10 @@ export function createRuntimeAutomationRunTerminalObserver(
   return {
     resolveRunTerminal: (run) =>
       run.terminalPaneKey ? runtime.getTerminalHandleForPaneKey(run.terminalPaneKey) : null,
-    observeCompletion: async (handle, { signal, observedAfter, expectedPrompt }) => {
+    observeCompletion: async (
+      handle,
+      { signal, observedAfter, expectedPrompt, expectedTurnId }
+    ) => {
       const startedAt = Date.now()
       // Why: shell startup and a ready prompt can both satisfy opposite sides of
       // tui-idle before the agent begins. Only a working lifecycle observed for
@@ -107,14 +112,22 @@ export function createRuntimeAutomationRunTerminalObserver(
           timeoutMs: AGENT_START_DEADLINE_MS,
           signal,
           agentTurnStartedAfter: observedAfter,
-          agentTurnPrompt: expectedPrompt
+          agentTurnPrompt: expectedPrompt,
+          agentTurnId: expectedTurnId
         })
         return await buildObservation(runtime, handle, initialWait)
       } catch (error) {
         if (signal.aborted || !isTerminalWaitTimeout(error)) {
           throw error
         }
-        if (!runtime.hasTerminalAgentWorkedSince(handle, observedAfter, expectedPrompt)) {
+        if (
+          !runtime.hasTerminalAgentWorkedSince(
+            handle,
+            observedAfter,
+            expectedPrompt,
+            expectedTurnId
+          )
+        ) {
           return await buildUnobservedObservation(
             runtime,
             handle,
@@ -129,7 +142,8 @@ export function createRuntimeAutomationRunTerminalObserver(
             condition: 'tui-idle',
             signal,
             agentTurnStartedAfter: observedAfter,
-            agentTurnPrompt: expectedPrompt
+            agentTurnPrompt: expectedPrompt,
+            agentTurnId: expectedTurnId
           })
           return await buildObservation(runtime, handle, wait)
         } catch (error) {

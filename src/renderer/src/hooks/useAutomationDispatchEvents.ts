@@ -34,6 +34,7 @@ import {
 import { parseWorkspaceKey } from '../../../shared/workspace-scope'
 import type { AgentStateHistoryEntry } from '../../../shared/agent-status-types'
 import { resolveFolderWorkspaceHost } from '../../../shared/folder-workspace-execution-host'
+import { buildAutomationTurnPrompt } from '../../../shared/automation-turn-prompt'
 
 const activeReuseDispatchTabIds = new Set<string>()
 
@@ -90,6 +91,7 @@ export function useAutomationDispatchEvents(): void {
   useEffect(() => {
     const unsubscribe = window.api.automations.onDispatchRequested(
       async ({ automation, run, dispatchToken }) => {
+        const dispatchPrompt = buildAutomationTurnPrompt(automation.prompt, run.id)
         const markDispatchResult = async (result: AutomationDispatchResult): Promise<void> => {
           // Deliberately no local emit: the write publishes its own host-scoped event
           // (automation-run-writer.ts) before this reply returns, and an unscoped one
@@ -527,7 +529,7 @@ export function useAutomationDispatchEvents(): void {
                   const submitted = await submitPromptToAgentPty({
                     tabId: reusableSession.tabId,
                     ptyId: reusableSession.ptyId,
-                    content: automation.prompt
+                    content: dispatchPrompt
                   })
                   if (!submitted) {
                     cleanupRunObservers()
@@ -600,7 +602,7 @@ export function useAutomationDispatchEvents(): void {
           const result = await launchAgentBackgroundSession({
             agent: automation.agentId,
             worktreeId: worktree.id,
-            prompt: automation.prompt,
+            prompt: dispatchPrompt,
             launchSource: 'unknown',
             title: run.title,
             onData: (chunk) => {

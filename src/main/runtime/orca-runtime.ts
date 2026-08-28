@@ -56,6 +56,7 @@ import {
   type AgentStatusOrchestrationContext,
   type AgentStatusEntry
 } from '../../shared/agent-status-types'
+import { isAutomationTurnPrompt } from '../../shared/automation-turn-prompt'
 import { terminalStatusPayloadMatchesHook } from '../../shared/agent-terminal-status-equivalence'
 import { indexAgentStatusRowsByPaneKey } from '../agent-hooks/agent-status-pane-index'
 import type { AgentHookAuthorityAttestation } from '../agent-hooks/server'
@@ -2455,6 +2456,7 @@ type TerminalWaiter = {
   condition: RuntimeTerminalWaitCondition
   agentTurnStartedAfter: number | null
   agentTurnPrompt: string | null
+  agentTurnId: string | null
   resolve: (result: RuntimeTerminalWait) => void
   reject: (error: Error) => void
   timeout: NodeJS.Timeout | null
@@ -19528,9 +19530,11 @@ export class OrcaRuntimeService {
   hasTerminalAgentWorkedSince(
     handle: string,
     observedAfter: number,
-    expectedPrompt?: string
+    expectedPrompt?: string,
+    expectedTurnId?: string
   ): boolean {
-    return this.getTerminalAgentTurnEvidence(handle, observedAfter, expectedPrompt).started
+    return this.getTerminalAgentTurnEvidence(handle, observedAfter, expectedPrompt, expectedTurnId)
+      .started
   }
 
   recordAutomationAgentStatus(entry: AgentStatusIpcPayload): void {
@@ -19584,15 +19588,18 @@ export class OrcaRuntimeService {
   private hasTerminalAgentFinishedSince(
     handle: string,
     observedAfter: number,
-    expectedPrompt?: string | null
+    expectedPrompt?: string | null,
+    expectedTurnId?: string | null
   ): boolean {
-    return this.getTerminalAgentTurnEvidence(handle, observedAfter, expectedPrompt).finished
+    return this.getTerminalAgentTurnEvidence(handle, observedAfter, expectedPrompt, expectedTurnId)
+      .finished
   }
 
   private getTerminalAgentTurnEvidence(
     handle: string,
     observedAfter: number,
-    expectedPrompt?: string | null
+    expectedPrompt?: string | null,
+    expectedTurnId?: string | null
   ): { started: boolean; finished: boolean } {
     const ptyId = this.getTerminalAgentStatusPtyId(handle)
     const lifecycle = this.agentPromptLifecycleByPtyId.get(ptyId)
@@ -19605,21 +19612,27 @@ export class OrcaRuntimeService {
         : null
     let completedFromHook = false
     const paneKey = this.getPaneKeyForTerminalHandle(handle)
+    const hasTurnIdentity =
+      expectedPrompt && expectedTurnId
+        ? isAutomationTurnPrompt(expectedPrompt, expectedTurnId)
+        : false
     const liveHookEvidence = paneKey
       ? this.automationHookTurnEvidenceByPaneKey.get(paneKey)
       : undefined
+    const liveEvidenceMatchesTurn = hasTurnIdentity && liveHookEvidence?.prompt === expectedPrompt
     if (
       liveHookEvidence?.startedAt !== null &&
       liveHookEvidence?.startedAt !== undefined &&
       (!expectedPrompt || liveHookEvidence.prompt === expectedPrompt)
     ) {
-      if (liveHookEvidence.startedAt >= observedAfter) {
+      if (liveEvidenceMatchesTurn || liveHookEvidence.startedAt >= observedAfter) {
         startedAt = Math.max(startedAt ?? observedAfter, liveHookEvidence.startedAt)
       }
       if (
         liveHookEvidence.finishedAt !== null &&
-        liveHookEvidence.finishedAt > observedAfter &&
-        (liveHookEvidence.startedAt >= observedAfter || liveHookEvidence.startedAt === null)
+        (liveEvidenceMatchesTurn ||
+          (liveHookEvidence.finishedAt > observedAfter &&
+            (liveHookEvidence.startedAt >= observedAfter || liveHookEvidence.startedAt === null)))
       ) {
         completedFromHook = true
       }
@@ -19636,16 +19649,19 @@ export class OrcaRuntimeService {
         entry.observation.origin === 'hook' &&
         entry.observation.replayedAt !== undefined &&
         entry.observation.replayedAt > observedAfter
+      const matchesTurnIdentity =
+        hasTurnIdentity && expectedPrompt !== null && entry.prompt === expectedPrompt
       if (
         entry.observation?.kind === 'snapshot' &&
         entry.state !== 'working' &&
-        !replayedCompletion
+        !replayedCompletion &&
+        !matchesTurnIdentity
       ) {
         continue
       }
       if (
         entry.state === 'working' &&
-        entry.stateStartedAt >= observedAfter &&
+        (matchesTurnIdentity || entry.stateStartedAt >= observedAfter) &&
         (!expectedPrompt || entry.prompt === expectedPrompt)
       ) {
         startedAt = Math.max(startedAt ?? observedAfter, entry.stateStartedAt)
@@ -19653,8 +19669,8 @@ export class OrcaRuntimeService {
       if (
         entry.state === 'done' &&
         entry.sessionBoundary !== true &&
-        (entry.turnCompletedAt !== undefined || replayedCompletion) &&
-        entry.receivedAt > observedAfter &&
+        (entry.turnCompletedAt !== undefined || replayedCompletion || matchesTurnIdentity) &&
+        (matchesTurnIdentity || entry.receivedAt > observedAfter) &&
         (!expectedPrompt || entry.prompt === expectedPrompt)
       ) {
         completedFromHook = true
@@ -19678,7 +19694,8 @@ export class OrcaRuntimeService {
       this.hasTerminalAgentFinishedSince(
         waiter.handle,
         waiter.agentTurnStartedAfter,
-        waiter.agentTurnPrompt
+        waiter.agentTurnPrompt,
+        waiter.agentTurnId
       )
     )
   }
@@ -20648,14 +20665,21 @@ export class OrcaRuntimeService {
       signal?: AbortSignal
       agentTurnStartedAfter?: number
       agentTurnPrompt?: string
+      agentTurnId?: string
     }
   ): Promise<RuntimeTerminalWait> {
     const condition = options?.condition ?? 'exit'
     const agentTurnStartedAfter = options?.agentTurnStartedAfter ?? null
     const agentTurnPrompt = options?.agentTurnPrompt ?? null
+    const agentTurnId = options?.agentTurnId ?? null
     const hasOrderedAgentCompletion = (): boolean =>
       agentTurnStartedAfter !== null &&
-      this.hasTerminalAgentFinishedSince(handle, agentTurnStartedAfter, agentTurnPrompt)
+      this.hasTerminalAgentFinishedSince(
+        handle,
+        agentTurnStartedAfter,
+        agentTurnPrompt,
+        agentTurnId
+      )
     const pty = this.getLivePtyForHandle(handle)
     if (pty) {
       if (condition === 'exit' && !pty.pty.connected) {
@@ -20700,6 +20724,7 @@ export class OrcaRuntimeService {
           condition,
           agentTurnStartedAfter,
           agentTurnPrompt,
+          agentTurnId,
           resolve,
           reject,
           timeout: null,
@@ -20811,6 +20836,7 @@ export class OrcaRuntimeService {
         condition,
         agentTurnStartedAfter,
         agentTurnPrompt,
+        agentTurnId,
         resolve,
         reject,
         timeout: null,

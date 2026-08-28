@@ -6,6 +6,7 @@ import type { Repo } from '../../shared/repo-types'
 import type { Automation, AutomationRun } from '../../shared/automations-types'
 import type { AutomationsChangedPayload } from '../../shared/runtime-client-events'
 import { normalizePromptField } from '../../shared/agent-status-field-normalization'
+import { buildAutomationTurnPrompt } from '../../shared/automation-turn-prompt'
 import { AutomationService } from './service'
 import type {
   AutomationRunCompletionObservation,
@@ -85,15 +86,16 @@ function createObserver(
   observe: (
     signal: AbortSignal,
     observedAfter: number,
-    expectedPrompt?: string
+    expectedPrompt?: string,
+    expectedTurnId?: string
   ) => Promise<AutomationRunCompletionObservation>,
   resolveRunTerminal: (run: AutomationRun) => string | null = (run) =>
     run.terminalPaneKey ? 'handle-1' : null
 ): AutomationRunTerminalObserver {
   return {
     resolveRunTerminal,
-    observeCompletion: (_handle, { signal, observedAfter, expectedPrompt }) =>
-      observe(signal, observedAfter, expectedPrompt)
+    observeCompletion: (_handle, { signal, observedAfter, expectedPrompt, expectedTurnId }) =>
+      observe(signal, observedAfter, expectedPrompt, expectedTurnId)
   }
 }
 
@@ -280,18 +282,22 @@ describe('authority-owned automation run completion', () => {
       error: null
     })
     let expectedPrompt: string | undefined
+    let expectedTurnId: string | undefined
     const service = new AutomationService(store, {
-      terminalObserver: createObserver((_signal, _boundary, promptPreview) => {
+      terminalObserver: createObserver((_signal, _boundary, promptPreview, turnId) => {
         expectedPrompt = promptPreview
+        expectedTurnId = turnId
         return new Promise(() => {})
       })
     })
 
     service.start()
 
-    await vi.waitFor(() => expect(expectedPrompt).toBe(normalizePromptField(prompt)))
+    const turnPrompt = buildAutomationTurnPrompt(prompt, run.id)
+    await vi.waitFor(() => expect(expectedPrompt).toBe(normalizePromptField(turnPrompt)))
+    expect(expectedTurnId).toBe(run.id)
     expect(readRun(store, automation.id, run.id).dispatchPromptPreview).toBe(
-      normalizePromptField(prompt)
+      normalizePromptField(turnPrompt)
     )
     service.stop()
   })

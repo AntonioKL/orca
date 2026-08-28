@@ -278,7 +278,7 @@ describe('useAutomationDispatchEvents setup launch', () => {
     expect(mockLaunchAgentBackgroundSession).toHaveBeenCalledWith(
       expect.objectContaining({
         worktreeId: 'wt-created',
-        prompt: 'run this'
+        prompt: '<!-- ORCA_AUTOMATION_RUN_ID:run-1 -->\nrun this'
       })
     )
     expect(order).toEqual(['agent'])
@@ -320,7 +320,7 @@ describe('useAutomationDispatchEvents setup launch', () => {
     expect(mockLaunchAgentBackgroundSession).toHaveBeenCalledWith(
       expect.objectContaining({
         worktreeId: 'wt-created',
-        prompt: 'run this'
+        prompt: '<!-- ORCA_AUTOMATION_RUN_ID:run-1 -->\nrun this'
       })
     )
   })
@@ -339,7 +339,7 @@ describe('useAutomationDispatchEvents setup launch', () => {
     expect(mockLaunchAgentBackgroundSession).toHaveBeenCalledWith(
       expect.objectContaining({
         agent: 'claude',
-        prompt: 'run this',
+        prompt: '<!-- ORCA_AUTOMATION_RUN_ID:run-1 -->\nrun this',
         worktreeId: 'wt-created'
       })
     )
@@ -358,7 +358,7 @@ describe('useAutomationDispatchEvents setup launch', () => {
     expect(mockLaunchAgentBackgroundSession).toHaveBeenCalledWith(
       expect.objectContaining({
         worktreeId: 'wt-created',
-        prompt: 'run this'
+        prompt: '<!-- ORCA_AUTOMATION_RUN_ID:run-1 -->\nrun this'
       })
     )
     expect(mockMarkDispatchResult).toHaveBeenCalledWith(
@@ -393,7 +393,7 @@ describe('useAutomationDispatchEvents setup launch', () => {
     expect(mockLaunchAgentBackgroundSession).toHaveBeenCalledWith(
       expect.objectContaining({
         worktreeId: 'wt-existing',
-        prompt: 'run this'
+        prompt: '<!-- ORCA_AUTOMATION_RUN_ID:run-1 -->\nrun this'
       })
     )
   })
@@ -439,7 +439,7 @@ describe('useAutomationDispatchEvents setup launch', () => {
     expect(mockLaunchAgentBackgroundSession).toHaveBeenCalledWith(
       expect.objectContaining({
         worktreeId: folderWorkspace.id,
-        prompt: 'run this'
+        prompt: '<!-- ORCA_AUTOMATION_RUN_ID:run-1 -->\nrun this'
       })
     )
     expect(mockMarkDispatchResult).toHaveBeenCalledWith(

@@ -322,6 +322,7 @@ import { initializeBrowserClientHostId } from './browser/browser-client-host-id'
 import { setUnreadDockBadgeCount } from './dock/unread-badge'
 import { AutomationService } from './automations/service'
 import { buildHeadlessAutomationWorktreeCreateArgs } from './automations/headless-workspace-create'
+import { buildAutomationTurnPrompt } from '../shared/automation-turn-prompt'
 import { createRuntimeAutomationRunTerminalObserver } from './automations/runtime-terminal-run-observer'
 import { AgentAwakeService } from './agent-awake-service'
 import { normalizeComputerAwakeMode } from '../shared/computer-awake-mode'
@@ -2834,7 +2835,7 @@ void app.whenReady().then(async () => {
               `id:${automation.workspaceId}`,
               {
                 agent: automation.agentId,
-                prompt: automation.prompt,
+                prompt: buildAutomationTurnPrompt(automation.prompt, run.id),
                 title: run.title
               }
             )

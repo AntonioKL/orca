@@ -27,6 +27,7 @@ import type { WorkspaceLineage, WorktreeLineage } from '../../shared/worktree/li
 import type { WorktreeMeta } from '../../shared/worktree/meta-types'
 import type { Worktree } from '../../shared/worktree/types'
 import { AGENT_STATUS_STALE_AFTER_MS } from '../../shared/agent-status-types'
+import { buildAutomationTurnPrompt } from '../../shared/automation-turn-prompt'
 import {
   reviewHeadRemoteRefComponent,
   REVIEW_HEAD_FETCH_TIMEOUT_MS
@@ -37665,10 +37666,11 @@ describe('OrcaRuntimeService', () => {
   it('restores ordered completion from persisted working evidence after restart', async () => {
     const observedAfter = Date.now() - 1_000
     const leafId = '11111111-2222-4333-8444-555555555555'
+    const turnPrompt = buildAutomationTurnPrompt('automation prompt', 'run-1')
     const statuses = [
       {
         state: 'working' as const,
-        prompt: 'automation prompt',
+        prompt: turnPrompt,
         agentType: 'codex' as const,
         paneKey: `tab-1:${leafId}`,
         connectionId: null,
@@ -37708,7 +37710,8 @@ describe('OrcaRuntimeService', () => {
       condition: 'tui-idle',
       timeoutMs: 1_000,
       agentTurnStartedAfter: observedAfter,
-      agentTurnPrompt: 'automation prompt'
+      agentTurnPrompt: turnPrompt,
+      agentTurnId: 'run-1'
     })
 
     runtime.onPtyData('pty-1', '\x1b]0;Codex done\x07', 200)
@@ -37719,6 +37722,7 @@ describe('OrcaRuntimeService', () => {
   it('does not let a different post-restart prompt consume retained dispatch evidence', async () => {
     const observedAfter = Date.now() - 1_000
     const leafId = '11111111-2222-4333-8444-555555555555'
+    const turnPrompt = buildAutomationTurnPrompt('automation prompt', 'run-1')
     const statuses = [
       {
         state: 'working' as const,
@@ -37765,7 +37769,111 @@ describe('OrcaRuntimeService', () => {
     const [terminal] = (await runtime.listTerminals()).terminals
 
     expect(
-      runtime.hasTerminalAgentWorkedSince(terminal.handle, observedAfter, 'automation prompt')
+      runtime.hasTerminalAgentWorkedSince(terminal.handle, observedAfter, turnPrompt, 'run-1')
+    ).toBe(false)
+  })
+
+  it('accepts an exact marker-matched SSH completion without working or clock ordering', async () => {
+    const observedAfter = Date.now()
+    const leafId = '11111111-2222-4333-8444-555555555555'
+    const turnPrompt = buildAutomationTurnPrompt('automation prompt', 'run-1')
+    const runtime = new OrcaRuntimeService(store, undefined, {
+      getAgentStatusSnapshot: () => [
+        {
+          state: 'done',
+          prompt: turnPrompt,
+          agentType: 'codex',
+          paneKey: `tab-1:${leafId}`,
+          connectionId: 'ssh-1',
+          receivedAt: observedAfter - 100,
+          stateStartedAt: observedAfter - 200,
+          observation: {
+            origin: 'hook',
+            authorityId: 'remote-authority',
+            incarnation: 0,
+            revision: 2,
+            observedAt: observedAfter + 60 * 60 * 1_000,
+            kind: 'snapshot'
+          }
+        }
+      ]
+    })
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, {
+      tabs: [
+        {
+          tabId: 'tab-1',
+          worktreeId: 'repo-1::/tmp/worktree-a',
+          title: 'Codex',
+          activeLeafId: leafId,
+          layout: null
+        }
+      ],
+      leaves: [
+        {
+          tabId: 'tab-1',
+          worktreeId: 'repo-1::/tmp/worktree-a',
+          leafId,
+          paneRuntimeId: 1,
+          ptyId: 'pty-1'
+        }
+      ]
+    })
+    const [terminal] = (await runtime.listTerminals()).terminals
+
+    expect(
+      runtime.hasTerminalAgentWorkedSince(terminal.handle, observedAfter, turnPrompt, 'run-1')
+    ).toBe(true)
+  })
+
+  it('rejects raw same-text and different-run completion evidence', async () => {
+    const observedAfter = Date.now() - 1_000
+    const leafId = '11111111-2222-4333-8444-555555555555'
+    const expectedPrompt = buildAutomationTurnPrompt('automation prompt', 'run-1')
+    let prompt = 'automation prompt'
+    const runtime = new OrcaRuntimeService(store, undefined, {
+      getAgentStatusSnapshot: () => [
+        {
+          state: 'done',
+          prompt,
+          agentType: 'codex',
+          paneKey: `tab-1:${leafId}`,
+          connectionId: null,
+          receivedAt: observedAfter + 100,
+          stateStartedAt: observedAfter + 100,
+          turnCompletedAt: observedAfter + 100
+        }
+      ]
+    })
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, {
+      tabs: [
+        {
+          tabId: 'tab-1',
+          worktreeId: 'repo-1::/tmp/worktree-a',
+          title: 'Codex',
+          activeLeafId: leafId,
+          layout: null
+        }
+      ],
+      leaves: [
+        {
+          tabId: 'tab-1',
+          worktreeId: 'repo-1::/tmp/worktree-a',
+          leafId,
+          paneRuntimeId: 1,
+          ptyId: 'pty-1'
+        }
+      ]
+    })
+    const [terminal] = (await runtime.listTerminals()).terminals
+
+    expect(
+      runtime.hasTerminalAgentWorkedSince(terminal.handle, observedAfter, expectedPrompt, 'run-1')
+    ).toBe(false)
+    prompt = buildAutomationTurnPrompt('automation prompt', 'run-2')
+    expect(
+      runtime.hasTerminalAgentWorkedSince(terminal.handle, observedAfter, expectedPrompt, 'run-1')
     ).toBe(false)
   })
 

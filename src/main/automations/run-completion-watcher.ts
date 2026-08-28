@@ -18,7 +18,12 @@ export type AutomationRunTerminalObserver = {
   resolveRunTerminal: (run: AutomationRun) => string | null
   observeCompletion: (
     handle: string,
-    options: { signal: AbortSignal; observedAfter: number; expectedPrompt?: string }
+    options: {
+      signal: AbortSignal
+      observedAfter: number
+      expectedPrompt?: string
+      expectedTurnId?: string
+    }
   ) => Promise<AutomationRunCompletionObservation>
 }
 
@@ -118,7 +123,8 @@ export class AutomationRunCompletionWatcher {
       observation = await this.observer.observeCompletion(handle, {
         signal: controller.signal,
         observedAfter: run.dispatchedAt ?? run.startedAt ?? run.createdAt,
-        expectedPrompt: run.dispatchPromptPreview
+        expectedPrompt: run.dispatchPromptPreview,
+        expectedTurnId: run.id
       })
     } catch (error) {
       if (controller.signal.aborted) {

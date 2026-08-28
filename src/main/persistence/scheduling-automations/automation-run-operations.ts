@@ -6,6 +6,7 @@ import type {
   AutomationRunTrigger
 } from '../../../shared/automations-types'
 import { normalizePromptField } from '../../../shared/agent-status-field-normalization'
+import { buildAutomationTurnPrompt } from '../../../shared/automation-turn-prompt'
 import type { PersistedState } from '../../../shared/persisted-state-types'
 import {
   nextAutomationRunNumber,
@@ -62,8 +63,9 @@ export function createAutomationRun(
   const runNumber = nextAutomationRunNumber(
     (operations.state.automationRuns ?? []).filter((run) => run.automationId === automation.id)
   )
+  const runId = randomUUID()
   const run: AutomationRun = {
-    id: randomUUID(),
+    id: runId,
     automationId: automation.id,
     runNumber,
     runContext: automation.runContext ?? null,
@@ -85,7 +87,9 @@ export function createAutomationRun(
     error: null,
     startedAt: null,
     dispatchedAt: null,
-    dispatchPromptPreview: normalizePromptField(automation.prompt),
+    dispatchPromptPreview: normalizePromptField(
+      buildAutomationTurnPrompt(automation.prompt, runId)
+    ),
     createdAt: now
   }
   operations.state.automationRuns = pruneAutomationRuns([
