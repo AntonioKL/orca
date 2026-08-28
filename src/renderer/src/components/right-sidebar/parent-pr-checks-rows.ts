@@ -8,7 +8,10 @@ import { isGitHubPRSuppressed } from '../../../../shared/worktree/github-pr-supp
 import { getWorktreeCardPrDisplay } from '@/components/sidebar/worktree-card-pr-display'
 import { getWorktreeGitIdentityDisplay } from '@/lib/worktree-git-identity-display'
 import { getGitHubRepoCacheKey } from '@/store/slices/github-cache-key'
-import { getHostedReviewCacheKey, linkedReviewHintKey } from '@/store/slices/hosted-review'
+import {
+  getHostedReviewCacheKey,
+  linkedReviewHintKey
+} from '@/store/slices/hosted-review-cache-identity'
 import { prChecksCacheSuffix } from '@/store/github/cache-identity'
 import {
   PARENT_PR_CHECKS_GROUP_LABELS,
@@ -33,15 +36,6 @@ import {
 import { canUseParentPrChecksHostedReviewCacheEntry } from './parent-pr-checks-hosted-review-cache'
 
 type ParentPrChecksRowSourceArgs = Omit<BuildParentPrChecksRowsArgs, 'repos'>
-
-export type {
-  ParentPrChecksGroupKey,
-  ParentPrChecksProjection,
-  ParentPrChecksRefreshOutcome,
-  ParentPrChecksRow,
-  ParentPrChecksRowStatus,
-  ParentPrChecksSummary
-} from './parent-pr-checks-row-types'
 
 export function buildParentPrChecksProjection(
   args: BuildParentPrChecksRowsArgs
