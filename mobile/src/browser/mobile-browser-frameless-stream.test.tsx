@@ -294,6 +294,57 @@ describe('MobileBrowserPane with a stream that reports ready but sends no frames
     expect(activeSubscriptionCount()).toBe(1)
   })
 
+  // Why: the load handler keys on (layer, decoderEpoch) and a B->C replacement reuses both,
+  // so a late B onLoad does promote. Pin what that promotion actually lands on.
+  it('promotes the newest frame when a superseded frame reports its load late', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    const { renderer, stream, nativeMocks } = await renderPane()
+
+    act(() => {
+      stream.onBinaryFrame?.(makeFrame('visible', 1))
+    })
+    const layers = getFrameLayers(renderer, nativeMocks)
+
+    act(() => {
+      stream.onBinaryFrame?.(makeFrame('superseded', 2))
+      vi.advanceTimersByTime(100)
+    })
+    expect(latestNativeImageUri(layers[1].imageNative)).toBe(frameUri('superseded'))
+
+    // The final frame replaces the hidden layer's source without a new transition.
+    act(() => {
+      stream.onBinaryFrame?.(makeFrame('final', 3))
+      vi.advanceTimersByTime(100)
+    })
+    expect(latestNativeImageUri(layers[1].imageNative)).toBe(frameUri('final'))
+
+    for (const layer of layers) {
+      layer.wrapperNative.setNativeProps.mockClear()
+    }
+
+    // The superseded frame's load arrives after its source was replaced.
+    act(() => layers[1].image.props.onLoad())
+
+    // The promoted layer is already pointed at the newest frame, not the superseded one,
+    // and the layer it replaces held a strictly older frame.
+    expect(latestNativeImageUri(layers[1].imageNative)).toBe(frameUri('final'))
+    expect(layers[0].wrapperNative.setNativeProps).toHaveBeenLastCalledWith({
+      style: { opacity: 0 }
+    })
+    expect(layers[1].wrapperNative.setNativeProps).toHaveBeenLastCalledWith({
+      style: { opacity: 1 }
+    })
+
+    // The newest frame's own load is then a no-op: the transition is already settled.
+    for (const layer of layers) {
+      layer.wrapperNative.setNativeProps.mockClear()
+    }
+    act(() => layers[1].image.props.onLoad())
+    expect(layers[0].wrapperNative.setNativeProps).not.toHaveBeenCalled()
+    expect(layers[1].wrapperNative.setNativeProps).not.toHaveBeenCalled()
+  })
+
   it('does no rendering or native work on a healthy connected boundary', async () => {
     const {
       renderer,

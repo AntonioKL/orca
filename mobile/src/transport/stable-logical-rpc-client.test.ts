@@ -128,8 +128,9 @@ describe('stable logical RPC client', () => {
       const replacement = new FakeSession('connected')
       const client = createStableLogicalRpcClient(oldSession, fromPath)
       const states: ConnectionState[] = []
+      const onBinaryFrame = vi.fn()
       client.subscribe('browser.screencast', { worktree: 'id:wt-1', page: 'page-1' }, vi.fn(), {
-        onBinaryFrame: vi.fn()
+        onBinaryFrame
       })
       client.onStateChange((state) => states.push(state))
 
@@ -142,6 +143,15 @@ describe('stable logical RPC client', () => {
         expect.any(Function),
         { onBinaryFrame: expect.any(Function) }
       )
+      // Why invoke it: asserting the shape alone passes on a no-op, which is exactly the
+      // dropped-frame bug this migration path is meant to fix.
+      const replayedOpts = replacement.subscribe.mock.calls[0]![3] as {
+        onBinaryFrame?: (frame: unknown) => void
+      }
+      const frame = { opcode: 1, seq: 7 }
+      replayedOpts.onBinaryFrame?.(frame)
+      expect(onBinaryFrame).toHaveBeenCalledOnce()
+      expect(onBinaryFrame).toHaveBeenCalledWith(frame)
       expect(oldSession.close).toHaveBeenCalledOnce()
       expect(states).toEqual(['connected'])
       expect(client.getActivePath()).toBe(toPath)
