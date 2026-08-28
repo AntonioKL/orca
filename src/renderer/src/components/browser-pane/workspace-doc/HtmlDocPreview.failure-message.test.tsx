@@ -288,6 +288,79 @@ describe('HtmlDocPreview failure messages', () => {
     expect(container.textContent).not.toContain('This preview wants to read files in assets.')
   })
 
+  it('batches folders blocked in one load into a single decision', async () => {
+    await renderPreview(container, root)
+    const reload = vi.fn()
+    Object.assign(container.querySelector('webview')!, { reload })
+
+    await act(async () => {
+      emitFailure({
+        grantId: GRANT_ID,
+        relativePath: 'assets/app.js',
+        reason: 'authorization-required'
+      })
+      emitFailure({
+        grantId: GRANT_ID,
+        relativePath: 'assets/theme.css',
+        reason: 'authorization-required'
+      })
+      emitFailure({
+        grantId: GRANT_ID,
+        relativePath: 'data/rows.json',
+        reason: 'authorization-required'
+      })
+    })
+
+    expect(container.textContent).toContain('This preview wants to read files in assets and data.')
+    const allowButton = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === 'Allow 2 folders'
+    )
+    expect(allowButton).toBeDefined()
+
+    await act(async () => {
+      allowButton?.click()
+    })
+
+    // One decision grants exactly the named set, then one reload picks it all up.
+    expect(grantRuntime.authorizations).toEqual([
+      { grantId: GRANT_ID, relativePath: 'assets/app.js' },
+      { grantId: GRANT_ID, relativePath: 'data/rows.json' }
+    ])
+    expect(reload).toHaveBeenCalledOnce()
+    expect(container.textContent).not.toContain('This preview wants to read files in')
+  })
+
+  it('dismisses every folder the banner named, not just the first', async () => {
+    await renderPreview(container, root)
+
+    await act(async () => {
+      emitFailure({
+        grantId: GRANT_ID,
+        relativePath: 'assets/app.js',
+        reason: 'authorization-required'
+      })
+      emitFailure({
+        grantId: GRANT_ID,
+        relativePath: 'data/rows.json',
+        reason: 'authorization-required'
+      })
+    })
+    const dismissButton = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === 'Dismiss'
+    )
+    await act(async () => {
+      dismissButton?.click()
+      emitFailure({
+        grantId: GRANT_ID,
+        relativePath: 'data/other.json',
+        reason: 'authorization-required'
+      })
+    })
+
+    expect(container.textContent).not.toContain('This preview wants to read files in')
+    expect(grantRuntime.authorizations).toEqual([])
+  })
+
   it('does not reprompt for a dismissed directory during the grant lifetime', async () => {
     await renderPreview(container, root)
 

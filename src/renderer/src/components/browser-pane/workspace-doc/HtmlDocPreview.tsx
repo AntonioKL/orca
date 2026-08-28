@@ -142,7 +142,7 @@ export function HtmlDocPreview({
   const [remintCount, setRemintCount] = useState(0)
   const [grantId, setGrantId] = useState<string | null>(null)
   const {
-    request: accessRequest,
+    requests: accessRequests,
     busy: accessRequestBusy,
     offer: offerDirectoryAccess,
     reset: resetDirectoryAccess,
@@ -403,9 +403,9 @@ export function HtmlDocPreview({
           <span className="min-w-0 flex-1 truncate">{notice}</span>
         </div>
       ))}
-      {accessRequest && !isUnavailable ? (
+      {accessRequests.length > 0 && !isUnavailable ? (
         <DocPreviewDirectoryAccessBanner
-          request={accessRequest}
+          requests={accessRequests}
           busy={accessRequestBusy}
           worktreeRoot={worktreeRoot}
           onDismiss={dismissDirectoryAccess}

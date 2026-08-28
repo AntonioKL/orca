@@ -14815,7 +14815,10 @@
           "directoryAuthorizationFailed": "Could not allow access to this directory.",
           "directoryAccessRequest": "This preview wants to read files in {{path}}.",
           "dismissAccessRequest": "Dismiss",
-          "allowDirectory": "Allow folder"
+          "allowDirectory": "Allow folder",
+          "directoryAccessRequestOverflow": "{{folders}}, and {{count}} more",
+          "directoryAccessRequestMultiple": "This preview wants to read files in {{folders}}.",
+          "allowDirectories": "Allow {{count}} folders"
         }
       },
       "diff": {
