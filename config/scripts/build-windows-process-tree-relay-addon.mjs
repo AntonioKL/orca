@@ -26,7 +26,8 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
-  readSync
+  readSync,
+  writeFileSync
 } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { RELAY_WINDOWS_PROCESS_TREE_FILENAME } from '../../src/shared/relay-artifacts.ts'
@@ -53,10 +54,11 @@ function parseArgs(argv) {
 /**
  * Refuse to build unpatched source.
  *
- * Both hunks are load-bearing and fail in opposite directions: with Spectre the
- * build dies outright, and with the cap it succeeds and lies. Checking the
- * source rather than trusting the install is what stops a silently unpatched
- * tree from being shipped as if it were patched.
+ * Each hunk fails differently: Spectre dies outright, the 1024-process cap
+ * succeeds and lies, and `.targets` is cwd-relative so pnpm's nested layout
+ * makes node-gyp miss node_addon_api.gyp on Windows. Checking the source
+ * rather than trusting the install is what stops a silently unpatched tree
+ * from being shipped as if it were patched.
  */
 function assertPatchApplied() {
   const bindingGyp = readFileSync(join(PACKAGE_DIR, 'binding.gyp'), 'utf8')
@@ -66,12 +68,50 @@ function assertPatchApplied() {
         'config/patches/@vscode__windows-process-tree@0.8.0.patch; run pnpm install.'
     )
   }
+  if (!bindingGyp.includes("require.resolve('node-addon-api/node_addon_api.gyp')")) {
+    throw new Error(
+      'binding.gyp still uses require("node-addon-api").targets. That path is ' +
+        'cwd-relative and misses node_addon_api.gyp under pnpm on Windows. ' +
+        'pnpm did not apply config/patches/@vscode__windows-process-tree@0.8.0.patch; run pnpm install.'
+    )
+  }
   const processCc = readFileSync(join(PACKAGE_DIR, 'src', 'process.cc'), 'utf8')
   if (processCc.includes('process_count < 1024')) {
     throw new Error(
       'src/process.cc still caps enumeration at 1024 processes. pnpm did not apply ' +
         'config/patches/@vscode__windows-process-tree@0.8.0.patch; run pnpm install.'
     )
+  }
+}
+
+// pnpm can materialize this CRLF package without applying its patch. Repair the
+// three load-bearing hunks before node-gyp so the release build stays safe.
+function applyWindowsProcessTreeBuildFixes() {
+  const bindingPath = join(PACKAGE_DIR, 'binding.gyp')
+  const processPath = join(PACKAGE_DIR, 'src', 'process.cc')
+  let bindingGyp = readFileSync(bindingPath, 'utf8')
+  let processCc = readFileSync(processPath, 'utf8')
+  const originalBinding = bindingGyp
+  const originalProcess = processCc
+
+  bindingGyp = bindingGyp.replace(
+    "require('node-addon-api').targets",
+    "require.resolve('node-addon-api/node_addon_api.gyp')"
+  )
+  bindingGyp = bindingGyp.replace(
+    /\r?\n\s*"msvs_configuration_attributes": \{\s*"SpectreMitigation": "Spectre"\s*\},?/s,
+    ''
+  )
+  processCc = processCc.replace(/process_count < 1024 && /, '')
+
+  if (bindingGyp !== originalBinding) {
+    writeFileSync(bindingPath, bindingGyp)
+  }
+  if (processCc !== originalProcess) {
+    writeFileSync(processPath, processCc)
+  }
+  if (bindingGyp !== originalBinding || processCc !== originalProcess) {
+    console.warn('[windows-process-tree] Repaired un-applied pnpm patch hunks before build.')
   }
 }
 
@@ -101,6 +141,7 @@ function main() {
   if (!existsSync(PACKAGE_DIR)) {
     throw new Error(`${PACKAGE_DIR} is missing. Run pnpm install first.`)
   }
+  applyWindowsProcessTreeBuildFixes()
   assertPatchApplied()
 
   console.log(`[windows-process-tree] building ${arch} from ${PACKAGE_DIR}`)
