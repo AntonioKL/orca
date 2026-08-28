@@ -276,6 +276,20 @@ describe('pre-handler PTY buffer', () => {
     expect(hasPreHandlerPtyExit(RECYCLED_PTY_ID)).toBe(true)
   })
 
+  // A malformed incarnation is evidence of nothing. Treating it as a value that disagrees with
+  // everything would discard the very exits the buffer exists to deliver.
+  it('treats a malformed incarnation as unknown rather than as a disagreement', () => {
+    bufferPreHandlerPtyExit(RECYCLED_PTY_ID, 4, { not: 'a string' })
+    discardPreHandlerPtyExitFromForeignIncarnation(RECYCLED_PTY_ID, FRESH_INCARNATION_ID)
+    expect(hasPreHandlerPtyExit(RECYCLED_PTY_ID)).toBe(true)
+    drainPreHandlerPtyExit(RECYCLED_PTY_ID, vi.fn())
+
+    clearConsumedPreHandlerPtyExit(RECYCLED_PTY_ID)
+    bufferPreHandlerPtyExit(RECYCLED_PTY_ID, 5, PRIOR_INCARNATION_ID)
+    discardPreHandlerPtyExitFromForeignIncarnation(RECYCLED_PTY_ID, 42)
+    expect(hasPreHandlerPtyExit(RECYCLED_PTY_ID)).toBe(true)
+  })
+
   it('re-admits exits for a recycled id whose prior incarnation was consumed', () => {
     consumePreHandlerPtyState(RECYCLED_PTY_ID)
 

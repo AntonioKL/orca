@@ -1,3 +1,4 @@
+import { isPtyIncarnationId } from '../../../../shared/pty-incarnation'
 import { clampUtf8Tail } from './pty-eager-buffer-clamp'
 import type { PtyDataMeta } from './pty-dispatcher'
 
@@ -81,9 +82,11 @@ function reserveBoundedPtySlot<V>(map: Map<string, V>, ptyId: string, cap: numbe
  *  existing id, and re-owning incarnation X is still proof that W's exit was not theirs. */
 export function discardPreHandlerPtyExitFromForeignIncarnation(
   ptyId: string,
-  incarnationId: string | undefined
+  incarnationId: unknown
 ): void {
-  if (!incarnationId) {
+  // Why the shared guard and not a truthiness check: anything that is not a well-formed incarnation
+  // is evidence of nothing, and must read as "unknown" rather than disagree with everything.
+  if (!isPtyIncarnationId(incarnationId)) {
     return
   }
   const exit = preHandlerPtyExit.get(ptyId)
@@ -164,7 +167,11 @@ export function replayPreHandlerPtyData(ptyId: string, observer: (data: string) 
   }
 }
 
-export function bufferPreHandlerPtyExit(ptyId: string, code: number, incarnationId?: string): void {
+export function bufferPreHandlerPtyExit(
+  ptyId: string,
+  code: number,
+  incarnationId?: unknown
+): void {
   if (consumedPreHandlerPtyExits.has(ptyId) || discardedPreHandlerPtyStates.has(ptyId)) {
     return
   }
@@ -172,7 +179,8 @@ export function bufferPreHandlerPtyExit(ptyId: string, code: number, incarnation
   preHandlerPtyExit.set(ptyId, {
     code,
     sequence: nextPreHandlerPtySequence(),
-    ...(incarnationId ? { incarnationId } : {})
+    // Record only a well-formed incarnation; a malformed one must not become evidence.
+    ...(isPtyIncarnationId(incarnationId) ? { incarnationId } : {})
   })
 }
 
