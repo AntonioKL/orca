@@ -346,9 +346,9 @@ describe('pty input write queue', () => {
   it.each([
     ['one write', ['\x1b[7;1H\x1b]11;?\x1b\\\x1b[6n']],
     // Tears the color query itself, so xterm resumes its OSC parse across chunks; both replies
-    // still come from one parse turn. Do not "improve" this into a tear BETWEEN the two queries:
-    // the chunk boundary lets a held reply flush before the CPR exists, so that shape passes
-    // even when the order is genuinely inverted.
+    // still come from one parse turn. A tear BETWEEN the two queries is strictly weaker, not an
+    // upgrade: a hold shorter than the inter-chunk gap flushes inside the gap and that shape stays
+    // green, while this one reds on a hold of any length.
     ['a query torn across output chunks', ['\x1b[7;1H\x1b]11;', '?\x1b\\\x1b[6n']]
   ] as const)(
     'keeps xterm OSC 11 ahead of the following CPR at the PTY host (%s)',
@@ -377,7 +377,7 @@ describe('pty input write queue', () => {
         return queue.enqueueQueryReply('pty-1', data)
       }
       const capabilityReplies = installTerminalCapabilityReplyHandlers({
-        terminal: term as never,
+        terminal: { cols: term.cols, rows: term.rows, element: undefined, options: term.options },
         parser: term.parser,
         sendInput: enqueueReply,
         isReplaying: () => false
