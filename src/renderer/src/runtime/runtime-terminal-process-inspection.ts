@@ -1,10 +1,20 @@
 import { RuntimeRpcCallError, callRuntimeRpc, getActiveRuntimeTarget } from './runtime-rpc-client'
 import type { GlobalSettings } from '../../../shared/global-settings-types'
-import type { RuntimeTerminalProcessInspection } from './runtime-terminal-inspection'
+import type { PtyProcessInspectionEvidence } from '../../../shared/pty-process-inspection-evidence'
 import {
   getRemoteRuntimePtyEnvironmentId,
   getRemoteRuntimeTerminalHandle
 } from './runtime-terminal-stream'
+
+export type RuntimeTerminalProcessInspection = {
+  foregroundProcess: string | null
+  hasChildProcesses: boolean
+  // Why: callers must not treat a stale remote handle as authoritative idle evidence.
+  unavailable?: true
+  // Why: relay hosts publish per-probe live/unverifiable/exited evidence so a
+  // failed host probe cannot be read as exit evidence; absent on older hosts.
+  processEvidence?: PtyProcessInspectionEvidence
+}
 
 export function isTerminalGoneError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error)

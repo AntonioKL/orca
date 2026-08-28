@@ -1,5 +1,4 @@
 import type { GlobalSettings } from '../../../shared/global-settings-types'
-import type { PtyProcessInspectionEvidence } from '../../../shared/pty-process-inspection-evidence'
 import type { RuntimeTerminalSend } from '../../../shared/runtime-types'
 import { makePaneKey } from '../../../shared/stable-pane-id'
 import { isTerminalInputTooLargeWithDeferredMeasurement } from '../../../shared/terminal-input'
@@ -11,23 +10,17 @@ import {
 } from './runtime-terminal-stream'
 import {
   inspectRuntimeTerminalProcess,
-  isTerminalGoneError
+  isTerminalGoneError,
+  type RuntimeTerminalProcessInspection
 } from './runtime-terminal-process-inspection'
 
 // Why: the inspection read moved to a store-free module so the cleanup store can
 // call it without a store->runtime import cycle. Re-exported so callers keep one
 // import site.
 export { inspectRuntimeTerminalProcess }
-
-export type RuntimeTerminalProcessInspection = {
-  foregroundProcess: string | null
-  hasChildProcesses: boolean
-  // Why: callers must not treat a stale remote handle as authoritative idle evidence.
-  unavailable?: true
-  // Why: relay hosts publish per-probe live/unverifiable/exited evidence so a
-  // failed host probe cannot be read as exit evidence; absent on older hosts.
-  processEvidence?: PtyProcessInspectionEvidence
-}
+// Why re-exported: the type now lives with the function in the leaf module, but many
+// callers still import it from here.
+export type { RuntimeTerminalProcessInspection }
 
 const REMOTE_PTY_ID_PREFIX = 'remote:'
 const DESKTOP_RUNTIME_CLIENT = { id: 'orca-desktop', type: 'desktop' } as const
