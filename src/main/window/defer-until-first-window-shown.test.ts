@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 type Listener = (...args: unknown[]) => void
@@ -95,6 +97,30 @@ describe('deferUntilFirstWindowShown', () => {
     vi.advanceTimersByTime(FIRST_WINDOW_SHOWN_FALLBACK_MS * 2)
     drain()
     expect(runs).toBe(1)
+  })
+
+  it('fires within the window-reveal fallback, so the task cannot trail an on-screen app', () => {
+    // Why read the peer constant instead of restating it: the deadline that matters is the one
+    // `main-window-state-lifecycle.ts` uses to reveal the window when `ready-to-show` never fires
+    // (#8421). A fallback later than that leaves the app interactive with the task still pending —
+    // for the keyring deferral, interactive with every protected secret still withheld.
+    // Why source text and not an import: that module pulls in electron and the e2e config at
+    // module scope, which this file's `electron` stub does not satisfy.
+    const revealSource = readFileSync(
+      join(process.cwd(), 'src/main/window/main-window-state-lifecycle.ts'),
+      'utf8'
+    )
+    const declaration = /export const INITIAL_REVEAL_FALLBACK_MS = ([\d_]+)/.exec(revealSource)
+    // Why assert the match: a rename would make the number `NaN`, and every comparison below
+    // would then pass vacuously.
+    expect(declaration).not.toBeNull()
+    const revealFallbackMs = Number(declaration![1].replaceAll('_', ''))
+    expect(revealFallbackMs).toBeGreaterThan(0)
+
+    expect(FIRST_WINDOW_SHOWN_FALLBACK_MS).toBeGreaterThan(revealFallbackMs)
+    // Why a ceiling and not just an ordering: 15s (the updater deferral's constant) sits 5s past
+    // the reveal, and being merely "after" the reveal is what made that gap invisible.
+    expect(FIRST_WINDOW_SHOWN_FALLBACK_MS).toBeLessThanOrEqual(revealFallbackMs + 2_000)
   })
 
   it('does not run again when the window reveals after the fallback already ran', () => {

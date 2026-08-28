@@ -1,7 +1,12 @@
 import { app, type BrowserWindow } from 'electron'
 
-/** Matches the updater deferral in attach-main-window-services.ts. */
-export const FIRST_WINDOW_SHOWN_FALLBACK_MS = 15_000
+/**
+ * Just past `main-window-state-lifecycle.ts`'s `INITIAL_REVEAL_FALLBACK_MS`, on the same reasoning
+ * as `TRAY_CREATE_FALLBACK_MS`: when `ready-to-show` never fires the window is still revealed on
+ * that timer, so a later deadline leaves the app on screen and interactive with the deferred task
+ * unrun. The updater deferral's 15s is safe to be late; withheld secrets are not.
+ */
+export const FIRST_WINDOW_SHOWN_FALLBACK_MS = 12_000
 
 /**
  * Run `task` exactly once, after the first window has painted — never on the pre-window

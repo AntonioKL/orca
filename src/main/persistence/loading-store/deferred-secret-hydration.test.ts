@@ -245,6 +245,42 @@ describe('deferred protected-secret hydration', () => {
     store.freezeWrites()
   })
 
+  it('keeps a secret written while the window was up instead of reverting it on hydration', async () => {
+    // Why this is reachable: the whole point of the deferral is that the window paints first, so
+    // there is a real interval in which the app is on screen and every protected slot still reads
+    // as empty. A write in that interval is the user's current intent; the retained ciphertext is
+    // the value they replaced. Hydrating over it silently restores the old proxy — and a proxy is
+    // where traffic goes, so a silent revert sends it somewhere the user has stopped choosing.
+    writeProfileWithEverySecretSlot()
+    const store = createStore({ deferKeyringProbe: true })
+    const seen: Partial<GlobalSettings>[] = []
+    store.onSettingsChanged((updates) => void seen.push(updates))
+
+    store.updateSettings({
+      httpProxyUrl: 'http://replacement.example:9090',
+      opencodeSessionCookie: 'auth=replacement-session-value'
+    })
+    store.updateUI({ browserKagiSessionLink: 'https://kagi.com/search?token=99998888aaaabbbb' })
+    const result = store.hydrateDeferredProtectedSecrets()
+
+    expect(store.getSettings().httpProxyUrl).toBe('http://replacement.example:9090')
+    expect(store.getSettings().opencodeSessionCookie).toBe('auth=replacement-session-value')
+    expect(store.getUI().browserKagiSessionLink).toBe(
+      'https://kagi.com/search?token=99998888aaaabbbb'
+    )
+    // Why the listener census too: a revert announced to listeners re-runs startup work — the
+    // proxy re-apply in index.ts above all — against the value the user just discarded.
+    expect(seen.map((updates) => updates.httpProxyUrl)).not.toContain(PROXY_URL)
+    expect(seen.map((updates) => updates.opencodeSessionCookie)).not.toContain(COOKIE)
+    expect(result.settingsUpdates.httpProxyUrl).toBeUndefined()
+    expect(result.settingsUpdates.opencodeSessionCookie).toBeUndefined()
+    // Why an untouched slot in the same run: the guard must be per slot, not a blanket bail that
+    // would strand every secret the user did not happen to overwrite.
+    expect(store.getSshPtyConsumerRecovery('target-1')?.ownerLease).toBe(OWNER_LEASE)
+    await store.waitForPendingWrite()
+    store.freezeWrites()
+  })
+
   it('probes inline when the host opens no window, so nothing pairs against a stalled main thread', () => {
     // Why pinned: headless serve advertises readiness with no window to defer behind, and an
     // earlier deferral moved this block to after clients could already connect (STA-5765).

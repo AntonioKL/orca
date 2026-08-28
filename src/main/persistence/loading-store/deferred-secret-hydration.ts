@@ -48,8 +48,11 @@ export function hydrateDeferredProtectedSecrets(
   let needsSave = false
   let uiChanged = false
 
+  // Why each slot is claimed only while still withheld: the deferred load left it at '', so a
+  // non-empty value now is a write that landed after the window came up and before hydration ran.
+  // Overwriting it from the retained ciphertext would silently revert the user's own change.
   const cookieBlob = secrets.retainedBlob(PROTECTED_SECRET_SLOT.opencodeSessionCookie)
-  if (cookieBlob) {
+  if (cookieBlob && !runtime.state.settings.opencodeSessionCookie) {
     const cookie = decodeOpencodeSessionCookie(secrets, cookieBlob)
     if (cookie !== runtime.state.settings.opencodeSessionCookie) {
       runtime.state.settings.opencodeSessionCookie = cookie
@@ -58,7 +61,7 @@ export function hydrateDeferredProtectedSecrets(
   }
 
   const proxyBlob = secrets.retainedBlob(PROTECTED_SECRET_SLOT.httpProxyUrl)
-  if (proxyBlob) {
+  if (proxyBlob && !(runtime.state.settings.httpProxyUrl ?? '')) {
     const proxy = decodeHttpProxyUrl(secrets, proxyBlob)
     needsSave ||= proxy.cleared
     if (proxy.value !== (runtime.state.settings.httpProxyUrl ?? '')) {
@@ -68,7 +71,7 @@ export function hydrateDeferredProtectedSecrets(
   }
 
   const kagiBlob = secrets.retainedBlob(PROTECTED_SECRET_SLOT.browserKagiSessionLink)
-  if (kagiBlob) {
+  if (kagiBlob && !(runtime.state.ui.browserKagiSessionLink ?? '')) {
     const link = decodeBrowserKagiSessionLink(secrets, kagiBlob)
     if (link !== (runtime.state.ui.browserKagiSessionLink ?? '')) {
       runtime.state.ui.browserKagiSessionLink = link
