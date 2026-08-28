@@ -942,25 +942,31 @@ import {
   testConnection as testLinearConnection
 } from '../linear/client'
 import {
-  addIssueComment as addLinearIssueComment,
-  addIssueCommentForAgent as addLinearIssueCommentForAgent,
-  createIssueAttachment as createLinearIssueAttachment,
-  createIssueForAgent as createLinearIssueForAgent,
-  createIssue as createLinearIssue,
   getAttachmentByUuidForAgent as getLinearAttachmentByUuidForAgent,
   getCommentByUuidForAgent as getLinearCommentByUuidForAgent,
   getIssue as getLinearIssue,
   getIssueByUuidForAgent as getLinearIssueByUuidForAgent,
   getIssueCommentThreadRoot as getLinearIssueCommentThreadRoot,
-  getIssueComments as getLinearIssueComments,
+  searchIssues as searchLinearIssues
+} from '../linear/linear-issue-lookups'
+import {
   listIssues as listLinearIssues,
-  searchIssues as searchLinearIssues,
+  type LinearListFilter
+} from '../linear/linear-issue-listing'
+import {
+  createIssueForAgent as createLinearIssueForAgent,
+  createIssue as createLinearIssue,
   updateIssueForAgent as updateLinearIssueForAgent,
-  updateIssue as updateLinearIssue,
-  LinearWriteFailure,
-  type LinearListFilter,
-  type LinearIssueListOptions
-} from '../linear/issues'
+  updateIssue as updateLinearIssue
+} from '../linear/linear-issue-mutations'
+import {
+  addIssueComment as addLinearIssueComment,
+  addIssueCommentForAgent as addLinearIssueCommentForAgent,
+  createIssueAttachment as createLinearIssueAttachment,
+  getIssueComments as getLinearIssueComments
+} from '../linear/linear-issue-comments'
+import { LinearWriteFailure } from '../linear/linear-issue-write-support'
+import type { LinearIssueListOptions } from '../linear/linear-issue-query-documents'
 import {
   LinearAgentAccessError,
   getLinearCurrentIssueFromWorktree,
@@ -1148,7 +1154,6 @@ import {
   isGeneratedWorktreeCreateName,
   WORKTREE_CREATE_MAX_SUFFIX_ATTEMPTS
 } from '../worktree-create-candidates'
-import { WORKTREE_CREATE_DEDUPE_TTL_MS } from '../../shared/new-workspace/worktree-create-retry-policy'
 import {
   failedWorktreeCreationNeedsRetirement,
   getRetiredNameRegistryForRepo,
@@ -2133,11 +2138,9 @@ function getAgentLaunchPlatformForRepo(
 // Why: long enough for a phone to reconnect and retry a create whose response
 // was lost, short enough that an intentional later re-resume forks fresh.
 const MOBILE_TERMINAL_CREATE_RESULT_TTL_MS = 60_000
-// Why: same idempotency window for worktree.create — a phone whose create was
-// interrupted by a connection migration retries with the same clientMutationId
-// and reuses the just-created worktree instead of spawning a duplicate. Shared with
-// the mobile client so its replay budget is sized against the real window.
-const WORKTREE_CREATE_RESULT_TTL_MS = WORKTREE_CREATE_DEDUPE_TTL_MS
+// Why: a phone whose create was interrupted retries with the same clientMutationId
+// and reuses the just-created worktree instead of spawning a duplicate.
+const WORKTREE_CREATE_RESULT_TTL_MS = 60_000
 const FOREGROUND_AGENT_WRAPPER_RETRY_INTERVAL_MS = 150
 const FOREGROUND_AGENT_WRAPPER_RETRY_TIMEOUT_MS = 6_500
 const BRACKETED_PASTE_BEGIN = '\x1b[200~'
@@ -2898,6 +2901,8 @@ type ResolvedTerminalWorkspaceLaunchTarget = {
 
 type WorktreeLineageInput = {
   parentWorkspace?: string
+  /** Set by in-app parent pickers so the row is not recorded as a CLI flag. */
+  parentWorkspaceOrigin?: 'manual'
   envParentWorkspace?: string
   parentWorktree?: string
   cwdParentWorktree?: string
@@ -4369,6 +4374,7 @@ export class OrcaRuntimeService {
       throw new Error('Session reuse requires an existing workspace target.')
     }
     const createInput: AutomationCreateInput = {
+      creationKey: input.creationKey,
       name: input.name,
       prompt: input.prompt,
       precheck: input.precheck,
@@ -6517,6 +6523,7 @@ export class OrcaRuntimeService {
       // must not treat browser panes as supported just because runtime RPC is up.
       capabilities,
       ...(degradations.length > 0 ? { degradations } : {}),
+      worktreeCreateIdempotency: { dedupeTtlMs: WORKTREE_CREATE_RESULT_TTL_MS },
       hostPlatform: process.platform,
       terminalWindowsShell: this.store?.getSettings?.().terminalWindowsShell ?? null,
       floatingWorkspaceEnabled: this.store?.getSettings?.().floatingTerminalEnabled !== false,
@@ -10985,6 +10992,8 @@ export class OrcaRuntimeService {
   }
   readFileExplorerPreview: RuntimeFileCommands['readFileExplorerPreview'] =
     this.fileCommands.readFileExplorerPreview.bind(this.fileCommands)
+  readDocPreviewFile: RuntimeFileCommands['readDocPreviewFile'] =
+    this.fileCommands.readDocPreviewFile.bind(this.fileCommands)
   readFileExplorerChunk: RuntimeFileCommands['readFileExplorerChunk'] =
     this.fileCommands.readFileExplorerChunk.bind(this.fileCommands)
   writeFileExplorerFile: RuntimeFileCommands['writeFileExplorerFile'] =
@@ -23069,13 +23078,16 @@ export class OrcaRuntimeService {
     repoSelector: string,
     state?: GitLabIssueListState,
     assignee?: string,
-    limit?: number
+    limit?: number,
+    page?: number
   ): Promise<{
     items: GitLabWorkItem[]
+    totalPages: number
     error?: Awaited<ReturnType<typeof listGitLabIssues>>['error']
   }> {
     const repo = await this.resolveRepoSelector(repoSelector)
-    const normalized = normalizeGitLabIssueListArgs({ state, assignee, limit })
+    const normalized = normalizeGitLabIssueListArgs({ state, assignee, limit, page })
+    // Why: page is after localGitOptions; never spread optional args before it (#13538).
     const result = await listGitLabIssues(
       repo.path,
       normalized.limit,
@@ -23083,7 +23095,8 @@ export class OrcaRuntimeService {
       normalized.state,
       normalized.assignee,
       repo.connectionId ?? null,
-      ...this.getLocalGitExecutionOptionArgs(repo)
+      this.getLocalGitExecutionOptionArgs(repo)[0] ?? {},
+      normalized.page
     )
     // Why: web runtime mirrors the desktop preload contract, where GitLab
     // issue rows share the GitLabWorkItem shape with MRs on TaskPage.
@@ -23099,7 +23112,11 @@ export class OrcaRuntimeService {
       author: issue.author ?? null,
       repoId: repo.id
     }))
-    return { items, ...(result.error ? { error: result.error } : {}) }
+    return {
+      items,
+      totalPages: result.totalPages,
+      ...(result.error ? { error: result.error } : {})
+    }
   }
 
   async listGitLabRepoTodos(
@@ -32569,11 +32586,20 @@ export class OrcaRuntimeService {
 
     if (input.parentWorkspace) {
       try {
+        const parent = await this.resolveWorkspaceParentSelector(input.parentWorkspace)
+        // Why: a picker in the app must record the same provenance as a local create, or the same
+        // user action would carry different cleanup semantics depending on where the repo lives.
         return {
           kind: 'lineage',
-          parent: await this.resolveWorkspaceParentSelector(input.parentWorkspace),
-          origin: 'cli',
-          capture: { source: 'explicit-cli-flag', confidence: 'explicit' }
+          parent,
+          origin: input.parentWorkspaceOrigin === 'manual' ? 'manual' : 'cli',
+          capture:
+            input.parentWorkspaceOrigin === 'manual'
+              ? {
+                  source: parent.type === 'worktree' ? 'manual-action' : 'active-workspace',
+                  confidence: 'explicit'
+                }
+              : { source: 'explicit-cli-flag', confidence: 'explicit' }
         }
       } catch (err) {
         throw new RuntimeLineageError(
