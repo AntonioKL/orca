@@ -86,6 +86,18 @@ describe('restoreUnguardedGitCredentialEnv marker handling', () => {
     }
   })
 
+  // A negative base is not a position the guard can ever have appended at, but it
+  // still satisfies Number.isSafeInteger. Left unvalidated it makes index 0 look
+  // guard-owned and deletes a pair the user configured themselves.
+  it('ignores a negative configBase instead of treating index 0 as a guard slot', () => {
+    const env = guardedEnv('{"v":1,"env":{},"configBase":-1}')
+    restoreUnguardedGitCredentialEnv(env)
+    expect(env.GIT_CONFIG_COUNT).toBe('2')
+    expect(env.GIT_CONFIG_KEY_0).toBe('credential.interactive')
+    expect(env.GIT_CONFIG_VALUE_0).toBe('false')
+    expect(env.GIT_CONFIG_KEY_1).toBe('credential.guiPrompt')
+  })
+
   // A marker that names no config base did not append config, so nothing indexed
   // in this environment is Orca's — including a pair that looks exactly like ours.
   it('never removes indexed config when the marker claims no config base', () => {

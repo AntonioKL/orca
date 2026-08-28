@@ -90,8 +90,12 @@ function readRestoreState(raw: string): RestoreState | null {
   return {
     v: 1,
     env: Object.fromEntries(entries),
+    // Why: a negative base is a position the guard cannot have appended at, and
+    // would make slot 0 look guard-owned and delete a pair the user set.
     configBase:
-      typeof configBase === 'number' && Number.isSafeInteger(configBase) ? configBase : null
+      typeof configBase === 'number' && Number.isSafeInteger(configBase) && configBase >= 0
+        ? configBase
+        : null
   }
 }
 
