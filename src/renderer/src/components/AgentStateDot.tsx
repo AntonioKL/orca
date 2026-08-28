@@ -61,8 +61,8 @@ type Props = {
   state: AgentDotState
   size?: 'sm' | 'md'
   className?: string
-  /** Overrides the native hover tooltip; defaults to the state's label. */
-  title?: string
+  /** Overrides the native hover tooltip; null suppresses it for an existing tooltip. */
+  title?: string | null
 }
 
 /** Render the compact state glyph used by agent rows and terminal tabs. */
@@ -77,7 +77,7 @@ export const AgentStateDot = React.memo(function AgentStateDot({
   const icon = size === 'md' ? 'size-3' : 'size-2.5'
   // Why: aria-label alone never renders a hover tooltip, so these glyphs read as
   // unlabeled to sighted users (STA-5794). Mirrors StatusIndicator's `title`.
-  const resolvedTitle = title ?? agentStateLabel(state)
+  const resolvedTitle = title === null ? undefined : (title ?? agentStateLabel(state))
 
   if (state === 'working') {
     return (

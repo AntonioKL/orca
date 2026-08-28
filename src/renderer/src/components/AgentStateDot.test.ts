@@ -121,4 +121,13 @@ describe('AgentStateDot', () => {
     expect(markup).toContain('title="Finished 2m ago"')
     expect(markup).toContain('aria-label="Done"')
   })
+
+  it('lets a caller with an existing tooltip suppress the native title', () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(AgentStateDot, { state: 'interrupted', title: null })
+    )
+
+    expect(markup).not.toContain(' title=')
+    expect(markup).toContain('aria-label="Interrupted"')
+  })
 })
