@@ -96,6 +96,7 @@ test('focuses the pane a client split creates on a paired remote workspace @head
     if (!createdPane) {
       throw new Error('Paired split did not materialize a new pane')
     }
+    const createdLeafId = createdPane.leafId
     const focusedPtyId = await waitForActivePanePtyId(client.page, 30_000)
     expect(focusedPtyId).toBe(createdPane.ptyId)
     expect(focusedPtyId).not.toBe(sourcePtyId)
@@ -137,14 +138,14 @@ test('focuses the pane a client split creates on a paired remote workspace @head
           }, webTabId),
         { timeout: 30_000, message: 'Immediate post-split marker never reached the visible pane' }
       )
-      .toMatchObject({ [createdPane.leafId]: expect.stringContaining(marker) })
+      .toMatchObject({ [createdLeafId]: expect.stringContaining(marker) })
 
     const surfaceByLeafId = new Map(hostLeaves.map((surface) => [surface.leafId, surface]))
     await expect
       .poll(
         async () => {
           const reads = await Promise.all(
-            [sourceLeafId, createdPane.leafId].map(async (leafId) => {
+            [sourceLeafId, createdLeafId].map(async (leafId) => {
               const surface = surfaceByLeafId.get(leafId)
               if (!surface) {
                 return false

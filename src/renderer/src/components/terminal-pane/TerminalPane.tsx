@@ -2868,6 +2868,8 @@ function TerminalPane(
         return
       }
       splitTerminalPaneWithInheritedCwd({
+        worktreeId,
+        tabId,
         manager,
         getManager: () => managerRef.current,
         paneTransports: paneTransportsRef.current,
