@@ -43,7 +43,9 @@ export function orchestrationMutationRecoveryError(error: unknown): unknown {
     workerDeathInferred: false
   }
   const retryStep = retryCommand
-    ? `Run ${renderCommand(retryCommand)}. --retry-request replays the recorded outcome instead of starting a second operation.`
+    ? dispatchId
+      ? `After inspecting the Dispatch, if keyed recovery is still needed, run ${renderCommand(retryCommand)}. --retry-request reuses the same operation identity so Orca can replay, join, or safely recover it without starting a separate duplicate.`
+      : `If request-show reports completed or pending, run ${renderCommand(retryCommand)}. --retry-request reuses the same operation identity so Orca can replay, join, or safely recover it without starting a separate duplicate. If request-show reports absent, inspect the affected state before deciding whether to retry; absence does not prove a retry is safe.`
     : 'Recovery is blocked until the exact original command is available; no retry command was emitted.'
   const nextSteps = [`Run ${renderCommand(queryCommand)} before retrying.`, retryStep]
   const message = [

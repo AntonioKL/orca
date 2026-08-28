@@ -45,7 +45,7 @@ describe('orchestration mutation recovery', () => {
     )
     expect((result.data as { nextSteps?: string[] }).nextSteps).toEqual([
       'Run orca orchestration worker-show --dispatch dispatch_1 --json before retrying.',
-      'Run orca orchestration worker-start --task task_1 --retry-request request_1. --retry-request replays the recorded outcome instead of starting a second operation.'
+      'After inspecting the Dispatch, if keyed recovery is still needed, run orca orchestration worker-start --task task_1 --retry-request request_1. --retry-request reuses the same operation identity so Orca can replay, join, or safely recover it without starting a separate duplicate.'
     ])
   })
 
@@ -86,7 +86,7 @@ describe('orchestration mutation recovery', () => {
     )
   })
 
-  it('says the keyed retry replays instead of starting a second operation', () => {
+  it('describes keyed retry without overclaiming one replay outcome', () => {
     const result = orchestrationMutationRecoveryError(
       new RuntimeClientError('runtime_timeout', 'request timed out', {
         orchestrationRequestId: 'request_5',
@@ -95,7 +95,10 @@ describe('orchestration mutation recovery', () => {
     ) as RuntimeClientError
 
     expect((result.data as { nextSteps?: string[] }).nextSteps?.[1]).toContain(
-      'replays the recorded outcome instead of starting a second operation'
+      'replay, join, or safely recover it without starting a separate duplicate'
+    )
+    expect((result.data as { nextSteps?: string[] }).nextSteps?.[1]).toContain(
+      'absence does not prove a retry is safe'
     )
   })
 
@@ -118,7 +121,7 @@ describe('orchestration mutation recovery', () => {
 
     expect((result.data as { nextSteps?: string[] }).nextSteps).toEqual([
       'Run orca-dev orchestration worker-show --dispatch dispatch_3 --json before retrying.',
-      "Run orca-dev orchestration worker-start --task 'task 3' --comment 'literal $(do-not-run)' --retry-request request_3. --retry-request replays the recorded outcome instead of starting a second operation."
+      "After inspecting the Dispatch, if keyed recovery is still needed, run orca-dev orchestration worker-start --task 'task 3' --comment 'literal $(do-not-run)' --retry-request request_3. --retry-request reuses the same operation identity so Orca can replay, join, or safely recover it without starting a separate duplicate."
     ])
     expect(result.message).toContain("'literal $(do-not-run)'")
   })

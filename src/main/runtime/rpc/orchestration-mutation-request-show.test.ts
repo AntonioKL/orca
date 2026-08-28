@@ -100,6 +100,47 @@ describe('orchestration.requestShow', () => {
     expect(result.interpretation).toContain('--retry-request mutation_pending')
   })
 
+  it('does not claim a concurrently running mutation was interrupted by a restart', async () => {
+    const db = new OrchestrationDb(':memory:')
+    const runtime = new OrcaRuntimeService()
+    runtime.setOrchestrationDb(db)
+    let finishMutation: (() => void) | undefined
+    let reportStarted: (() => void) | undefined
+    const mutationFinished = new Promise<void>((resolve) => {
+      finishMutation = resolve
+    })
+    const mutationStarted = new Promise<void>((resolve) => {
+      reportStarted = resolve
+    })
+    const dispatcher = new RpcDispatcher({
+      runtime,
+      methods: [
+        defineMethod({
+          name: 'orchestration.send',
+          params: Params,
+          handler: async () => {
+            reportStarted?.()
+            await mutationFinished
+            return { sent: true }
+          }
+        }),
+        ...REQUEST_SHOW_METHODS
+      ]
+    })
+
+    const runningMutation = dispatcher.dispatch(sendRequest('mutation_running'))
+    await mutationStarted
+
+    const response = await dispatcher.dispatch(showRequest('mutation_running'))
+    const result = (response as { result: { state: string; interpretation: string } }).result
+    expect(result.state).toBe('pending')
+    expect(result.interpretation).toContain('may still be running')
+    expect(result.interpretation).not.toContain('so Orca restarted')
+
+    finishMutation?.()
+    await runningMutation
+  })
+
   it('reports an unknown request as absent without claiming nothing happened', async () => {
     const { dispatcher } = createHarness()
 
