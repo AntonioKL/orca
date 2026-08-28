@@ -61,10 +61,19 @@ export function createUnplacedSnapshotRepull(
     generationByTarget.set(targetId, (generationByTarget.get(targetId) ?? 0) + 1)
   }
 
-  const releaseInFlight = (targetId: string, generation: number): void => {
-    if (inFlightByTarget.get(targetId) === generation) {
-      inFlightByTarget.delete(targetId)
+  // Why a pending bit: a report blocked by an in-flight marker it does not own is otherwise lost.
+  // After a reconnect the superseded apply still owns the marker, so the NEW connection's only
+  // `unplaced` result hits the guard and is dropped — and the superseded callback exits on its
+  // stale generation without scheduling, so no chain ever starts. The owner replays it on release.
+  const pendingUnplacedTargets = new Set<string>()
+
+  /** Releases only the marker this generation owns; reports whether it actually did. */
+  const releaseInFlight = (targetId: string, generation: number): boolean => {
+    if (inFlightByTarget.get(targetId) !== generation) {
+      return false
     }
+    inFlightByTarget.delete(targetId)
+    return true
   }
 
   const clearTimer = (targetId: string): void => {
@@ -82,13 +91,20 @@ export function createUnplacedSnapshotRepull(
       clearTimer(targetId)
       attemptByTarget.delete(targetId)
       exhaustedTargets.delete(targetId)
+      pendingUnplacedTargets.delete(targetId)
       bumpGeneration(targetId)
       return
     }
     // Why this precedes the exhaustion check: once the last attempt is armed the count is already
     // spent, so testing exhaustion first would let a concurrent report cancel that still-pending
     // retry and declare the chain over one attempt early.
-    if (timerByTarget.has(targetId) || inFlightByTarget.has(targetId)) {
+    if (timerByTarget.has(targetId)) {
+      return
+    }
+    if (inFlightByTarget.has(targetId)) {
+      // Held by an apply that may be superseded and may therefore never schedule. Record the
+      // result so its owner replays it on release rather than dropping it.
+      pendingUnplacedTargets.add(targetId)
       return
     }
     const attempt = attemptByTarget.get(targetId) ?? 0
@@ -143,7 +159,11 @@ export function createUnplacedSnapshotRepull(
         })()
           .catch(() => {})
           .finally(() => {
-            releaseInFlight(targetId, generation)
+            // Only the stale path reaches here still owning the marker; the normal path released
+            // it above and already scheduled its own outcome, so nothing is replayed twice.
+            if (releaseInFlight(targetId, generation) && pendingUnplacedTargets.delete(targetId)) {
+              schedule(targetId, 'unplaced')
+            }
           })
       }, delayMs)
     )
@@ -158,6 +178,7 @@ export function createUnplacedSnapshotRepull(
       clearTimer(targetId)
       attemptByTarget.delete(targetId)
       exhaustedTargets.delete(targetId)
+      pendingUnplacedTargets.delete(targetId)
       bumpGeneration(targetId)
     },
     stop: () => {
@@ -168,6 +189,7 @@ export function createUnplacedSnapshotRepull(
       attemptByTarget.clear()
       exhaustedTargets.clear()
       inFlightByTarget.clear()
+      pendingUnplacedTargets.clear()
       generationByTarget.clear()
     }
   }

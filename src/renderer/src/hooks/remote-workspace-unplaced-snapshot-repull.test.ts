@@ -35,6 +35,22 @@ function snapshot(revision = 7): RemoteWorkspaceSnapshot {
   }
 }
 
+/** Holds the `nth` (1-based) host read open so a test can act while an attempt is in flight. */
+function holdOne(nth = 1) {
+  let release: (value: RemoteWorkspaceSnapshot | null) => void = () => {}
+  const pending = new Promise<RemoteWorkspaceSnapshot | null>((resolve) => {
+    release = resolve
+  })
+  let call = 0
+  return {
+    getSnapshot: async () => {
+      call += 1
+      return call === nth ? pending : snapshot()
+    },
+    release: (value: RemoteWorkspaceSnapshot | null) => release(value)
+  }
+}
+
 type HarnessOptions = {
   /** Placement returned by the nth (0-based) re-pull apply. Defaults to `'unplaced'` forever. */
   placementByCall?: (call: number) => DirectSshSnapshotPlacement
@@ -241,6 +257,78 @@ describe('the re-pull chain after an unplaced snapshot', () => {
     await vi.advanceTimersByTimeAsync(LONG_AFTER_MS)
     expect(harness.applySnapshot).not.toHaveBeenCalled()
     expect(harness.exhaustedTargets).toEqual([])
+  })
+
+  it('does not arm a second chain while an attempt is awaiting the host', async () => {
+    const held = holdOne()
+    const harness = createHarness({ getSnapshot: held.getSnapshot })
+    harness.repull.schedule(TARGET, 'unplaced')
+
+    await vi.advanceTimersByTimeAsync(UNPLACED_SNAPSHOT_REPULL_DELAYS_MS[0])
+    // The callback drops its timer entry before awaiting, so the timer map alone says "idle".
+    expect(vi.getTimerCount()).toBe(0)
+
+    harness.repull.schedule(TARGET, 'unplaced')
+    expect(
+      vi.getTimerCount(),
+      'a concurrent report armed a second chain over the in-flight attempt'
+    ).toBe(0)
+
+    held.release(snapshot())
+    await vi.advanceTimersByTimeAsync(LONG_AFTER_MS)
+    expect(harness.applySnapshot).toHaveBeenCalledTimes(UNPLACED_SNAPSHOT_REPULL_DELAYS_MS.length)
+    expect(harness.exhaustedTargets).toEqual([TARGET])
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('does not declare exhaustion while the final attempt is awaiting the host', async () => {
+    const held = holdOne(UNPLACED_SNAPSHOT_REPULL_DELAYS_MS.length)
+    const harness = createHarness({ getSnapshot: held.getSnapshot })
+    harness.repull.schedule(TARGET, 'unplaced')
+
+    await vi.advanceTimersByTimeAsync(LONG_AFTER_MS)
+    // The count is spent and the last attempt is out at the host, not finished.
+    expect(harness.applySnapshot).toHaveBeenCalledTimes(
+      UNPLACED_SNAPSHOT_REPULL_DELAYS_MS.length - 1
+    )
+
+    harness.repull.schedule(TARGET, 'unplaced')
+    expect(
+      harness.exhaustedTargets,
+      'exhaustion was declared over an attempt still awaiting the host'
+    ).toEqual([])
+
+    held.release(snapshot())
+    await vi.advanceTimersByTimeAsync(LONG_AFTER_MS)
+    expect(harness.applySnapshot).toHaveBeenCalledTimes(UNPLACED_SNAPSHOT_REPULL_DELAYS_MS.length)
+    expect(harness.exhaustedTargets).toEqual([TARGET])
+  })
+
+  it('keeps a callback that outlived a reset out of the new connection chain', async () => {
+    const held = holdOne()
+    const harness = createHarness({ getSnapshot: held.getSnapshot })
+    harness.repull.schedule(TARGET, 'unplaced')
+    await vi.advanceTimersByTimeAsync(UNPLACED_SNAPSHOT_REPULL_DELAYS_MS[0])
+
+    // A reconnect lands while the first attempt is still out at the host.
+    harness.repull.resetTarget(TARGET)
+    held.release(snapshot())
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(
+      vi.getTimerCount(),
+      'the stale callback scheduled itself into the new connection chain'
+    ).toBe(0)
+    expect(harness.exhaustedTargets).toEqual([])
+
+    // The new connection now owns the target and gets its own untouched chain.
+    harness.repull.schedule(TARGET, 'unplaced')
+    const staleApplies = harness.applySnapshot.mock.calls.length
+    await vi.advanceTimersByTimeAsync(LONG_AFTER_MS)
+    expect(harness.applySnapshot).toHaveBeenCalledTimes(
+      staleApplies + UNPLACED_SNAPSHOT_REPULL_DELAYS_MS.length
+    )
+    expect(harness.exhaustedTargets).toEqual([TARGET])
   })
 
   it('fires nothing after stop() clears an armed attempt', async () => {
