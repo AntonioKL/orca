@@ -196,6 +196,15 @@ export function installPtyInspectIpcHandlers(deps: {
       // authoritative dead. That is a fabricated answer about another host's PTY.
       return null
     }
+    // Why: wait for daemon startup before selecting the local provider — the
+    // pre-swap LocalPtyProvider does not own restored daemon ids, and its
+    // "no PTY" is exactly the false the renderer reconciler is allowed to
+    // close panes on (same swap-window hazard pty:kill guards, #7742).
+    const gateConnectionId = ptyOwnership.get(args.id) ?? parseAppSshPtyId(args.id)?.connectionId
+    const startupPromise = getLocalPtyProviderStartupPromise(gateConnectionId)
+    if (startupPromise) {
+      await startupPromise
+    }
     const ownedConnectionId = ptyOwnership.get(args.id)
     const parsedSshId = ownedConnectionId === undefined ? parseAppSshPtyId(args.id) : null
     const provider = parsedSshId
