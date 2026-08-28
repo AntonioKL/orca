@@ -150,7 +150,8 @@ async function runBuiltCli(
       ...process.env,
       ORCA_USER_DATA_PATH: userDataPath,
       ORCA_TERMINAL_HANDLE: TERMINAL_HANDLE,
-      ORCA_PANE_KEY: PANE_KEY
+      ORCA_PANE_KEY: PANE_KEY,
+      ORCA_AGENT_LAUNCH_TOKEN: LAUNCH_TOKEN
     },
     stdio: ['ignore', 'pipe', 'pipe']
   })
@@ -444,11 +445,7 @@ describe('STA-4325 message and delivery identity', () => {
       const userDataPath = mkdtempSync(join(tmpdir(), 'orca-sta-4325-cli-'))
       temporaryDirectories.push(userDataPath)
       const db = new OrchestrationDb(join(userDataPath, 'orchestration.db'))
-      const runtime = new OrcaRuntimeService()
-      runtime.setOrchestrationDb(db)
-      vi.spyOn(runtime, 'getTerminalPaneKey').mockImplementation((handle) =>
-        handle === TERMINAL_HANDLE ? PANE_KEY : null
-      )
+      const { runtime } = createRuntime(db)
       const run = db.createRun({
         objective: 'STA-4325 built CLI',
         coordinatorHandle: TERMINAL_HANDLE,
