@@ -3,7 +3,11 @@ import { Activity } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AgentQuestionIcon } from '@/components/AgentQuestionIcon'
 import { AgentWorkingSpinner } from '@/components/AgentWorkingSpinner'
-import type { WorktreeStatus } from '@/lib/worktree-status'
+import {
+  StateIndicatorTooltip,
+  type StateIndicatorTooltipSide
+} from '@/components/StateIndicatorTooltip'
+import { getWorktreeStatusLabel, type WorktreeStatus } from '@/lib/worktree-status'
 
 // Why: re-export WorktreeStatus under the existing `Status` alias so the
 // sidebar component and the canonical lib share one source of truth — the
@@ -13,13 +17,22 @@ export type Status = WorktreeStatus
 
 type StatusIndicatorProps = Omit<React.ComponentProps<'span'>, 'title'> & {
   status: Status
+  /** Opts out where an ancestor already owns the hover copy for this glyph. */
+  showTooltip?: boolean
+  tooltipSide?: StateIndicatorTooltipSide
 }
 
 const StatusIndicator = React.memo(function StatusIndicator({
   status,
   className,
+  showTooltip = true,
+  tooltipSide,
   ...rest
 }: StatusIndicatorProps) {
+  // Why every status: 'active' and 'done' paint the identical emerald dot, so
+  // hover copy is the only thing that tells the pair apart. sr-only text does
+  // not reach a sighted user, which is what the report was about.
+  const tooltipLabel = showTooltip ? getWorktreeStatusLabel(status) : null
   let indicator: React.JSX.Element
 
   if (status === 'working') {
@@ -79,7 +92,11 @@ const StatusIndicator = React.memo(function StatusIndicator({
     )
   }
 
-  return indicator
+  return (
+    <StateIndicatorTooltip label={tooltipLabel} side={tooltipSide}>
+      {indicator}
+    </StateIndicatorTooltip>
+  )
 })
 
 export default StatusIndicator

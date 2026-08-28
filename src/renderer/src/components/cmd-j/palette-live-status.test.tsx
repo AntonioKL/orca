@@ -90,6 +90,16 @@ function dotLabels(): string[] {
   )
 }
 
+/** Opens the Radix tooltip the way focus does and returns the copy it paints. */
+async function openTooltipCopy(): Promise<string | null> {
+  const trigger = testContainer.querySelector<HTMLElement>('[data-slot="tooltip-trigger"]')
+  expect(trigger).not.toBeNull()
+  await act(async () => {
+    trigger?.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+  })
+  return document.querySelector('[data-slot="tooltip-content"]')?.textContent ?? null
+}
+
 function expectStyledStatusTooltip(label: string): void {
   const trigger = testContainer.querySelector<HTMLElement>('[data-slot="tooltip-trigger"]')
   expect(trigger).not.toBeNull()
@@ -136,7 +146,9 @@ describe('palette live status', () => {
     setAgentState('working')
     await render()
     expect(dotLabels()).toEqual(['Working'])
-    expect(testContainer.querySelector('[data-slot="tooltip-trigger"]')).toBeNull()
+    // Why: the dot's own hover copy is the only disambiguator for statuses that
+    // share a glyph, so the palette row must carry it rather than the row title.
+    expect(await openTooltipCopy()).toContain('Working')
 
     await act(async () => {
       setAgentState('blocked')

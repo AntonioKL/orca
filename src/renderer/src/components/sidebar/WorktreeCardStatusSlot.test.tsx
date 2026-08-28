@@ -20,6 +20,14 @@ vi.mock('./use-worktree-activity-status', () => ({
   useWorktreeActivityStatus: () => mocks.status
 }))
 
+// Why: the sr-only copy is read by AT only, so the tooltip text is the single
+// thing a sighted user hovering the status lane actually receives.
+function tooltipCopies(markup: string): string[] {
+  return [...markup.matchAll(/data-tooltip-content="">(?:<span>)?([^<]*)</g)].map(
+    (match) => match[1]
+  )
+}
+
 describe('WorktreeCardStatusSlot', () => {
   beforeEach(() => {
     mocks.status = 'active'
@@ -190,9 +198,9 @@ describe('WorktreeCardStatusSlot', () => {
       />
     )
 
-    expect(markup).toContain('Active')
     expect(markup).toContain('bg-emerald-500')
     expect(markup).not.toContain('PR checks: Failed')
+    expect(tooltipCopies(markup)).toEqual(['Active'])
   })
 
   it('uses PR status instead of the quiet active dot when new card style is on', () => {
@@ -215,7 +223,7 @@ describe('WorktreeCardStatusSlot', () => {
     expect(markup).toContain('size-[13px] translate-x-px')
     expect(markup).toContain('text-rose-500/85')
     expect(markup).not.toContain('bg-emerald-500')
-    expect(markup).not.toContain('data-tooltip-root')
+    expect(tooltipCopies(markup)).toEqual(['PR checks: Failed'])
   })
 
   it('uses the unified compact review glyph for GitLab MR status', () => {
@@ -302,7 +310,7 @@ describe('WorktreeCardStatusSlot', () => {
     expect(markup).toContain('size-[13px] translate-x-px text-muted-foreground/70')
     expect(markup).toContain('text-muted-foreground/70')
     expect(markup).not.toContain('bg-emerald-500')
-    expect(markup).not.toContain('data-tooltip-root')
+    expect(tooltipCopies(markup)).toEqual(['Branch'])
   })
 
   it('uses context-aware branch or folder path accessible copy', () => {
@@ -323,7 +331,7 @@ describe('WorktreeCardStatusSlot', () => {
 
     expect(markup).toContain('Branch or folder path')
     expect(markup).toContain('lucide-git-branch')
-    expect(markup).not.toContain('data-tooltip-root')
+    expect(tooltipCopies(markup)).toEqual(['Branch or folder path'])
   })
 
   it('keeps the quiet dot when the row has no branch identity', () => {
@@ -344,7 +352,7 @@ describe('WorktreeCardStatusSlot', () => {
     expect(markup).toContain('Active')
     expect(markup).toContain('bg-emerald-500')
     expect(markup).not.toContain('lucide-git-branch')
-    expect(markup).not.toContain('data-tooltip-root')
+    expect(tooltipCopies(markup)).toEqual(['Active'])
   })
 
   it('keeps working activity ahead of PR status in new card style', () => {
@@ -366,7 +374,7 @@ describe('WorktreeCardStatusSlot', () => {
     expect(markup).toContain('Working')
     expect(markup).toContain('inline-flex size-5 items-center justify-center')
     expect(markup).toContain('border-yellow-500')
-    expect(markup).not.toContain('data-tooltip-root')
+    expect(tooltipCopies(markup)).toEqual(['Working'])
     expect(markup).not.toContain('PR checks: Failed')
   })
 
@@ -389,7 +397,7 @@ describe('WorktreeCardStatusSlot', () => {
     expect(markup).toContain('Needs permission')
     expect(markup).toContain('lucide-message-circle-question-mark')
     expect(markup).toContain('text-agent-question')
-    expect(markup).not.toContain('data-tooltip-root')
+    expect(tooltipCopies(markup)).toEqual(['Needs permission'])
     expect(markup).not.toContain('PR checks: Failed')
   })
 
@@ -442,7 +450,7 @@ describe('WorktreeCardStatusSlot', () => {
     expect(markup).not.toContain('lucide-bell')
     expect(markup).not.toContain('text-amber-500')
     expect(markup).not.toContain('bg-emerald-500')
-    expect(markup).not.toContain('data-tooltip-root')
+    expect(tooltipCopies(markup)).toEqual(['PR checks: Failed · Unread'])
   })
 
   it('overlays an unread badge on the branch icon in new card style', () => {
@@ -471,6 +479,6 @@ describe('WorktreeCardStatusSlot', () => {
     expect(markup).not.toContain('lucide-bell')
     expect(markup).not.toContain('text-amber-500')
     expect(markup).not.toContain('bg-emerald-500')
-    expect(markup).not.toContain('data-tooltip-root')
+    expect(tooltipCopies(markup)).toEqual(['Branch · Unread'])
   })
 })

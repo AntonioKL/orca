@@ -1,7 +1,23 @@
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { getWorktreeStatusLabel } from '@/lib/worktree-status'
 import StatusIndicator, { type Status } from './StatusIndicator'
+
+// Why mock the Radix layer rather than StateIndicatorTooltip: it keeps the real
+// tooltip composition under test, so these read the copy a hovering user gets
+// instead of a prop handed to a stub.
+vi.mock('@/components/ui/tooltip', async () => {
+  const { createElement, Fragment } = await import('react')
+  return {
+    Tooltip: ({ children }: { children: React.ReactNode }) =>
+      createElement('span', { 'data-tooltip-root': '' }, children),
+    TooltipTrigger: ({ children }: { children: React.ReactNode }) =>
+      createElement(Fragment, null, children),
+    TooltipContent: ({ children }: { children: React.ReactNode }) =>
+      createElement('span', { 'data-tooltip-content': '' }, children)
+  }
+})
 
 function renderMarkup(status: Status): string {
   return renderToStaticMarkup(React.createElement(StatusIndicator, { status }))
@@ -69,7 +85,7 @@ describe('StatusIndicator', () => {
     expect(classNames).not.toContain('bg-emerald-500')
   })
 
-  it.each<Status>([
+  const ALL_STATUSES = [
     'active',
     'working',
     'monitoring',
@@ -77,10 +93,37 @@ describe('StatusIndicator', () => {
     'interrupted',
     'done',
     'inactive'
-  ])('keeps the workspace-level %s indicator tooltip-free', (status) => {
+  ] satisfies Status[]
+
+  it.each(ALL_STATUSES)('labels the %s workspace state on hover', (status) => {
     const markup = renderMarkup(status)
 
-    expect(markup).not.toContain('data-slot="tooltip-trigger"')
+    expect(markup).toContain(`data-tooltip-content="">${getWorktreeStatusLabel(status)}<`)
+    // Why: a native title on the glyph would win over any ancestor's title on
+    // hover, which is the shadowing regression this indicator already caused.
     expect(markup).not.toContain(' title=')
+  })
+
+  // Typecheck-time guard: a new WorktreeStatus member that ALL_STATUSES omits
+  // fails `pnpm tc`, so the hover case above can never silently skip a state.
+  type UncoveredStatus = Exclude<Status, (typeof ALL_STATUSES)[number]>
+  const _allStatusesAreCovered: UncoveredStatus extends never ? true : never = true
+  void _allStatusesAreCovered
+
+  // Why this is the whole point: 'active' and 'done' paint the identical
+  // emerald dot, so hover copy is the only thing that separates them.
+  it('separates the identical active and done dots by hover copy', () => {
+    expect(renderDotClassNames('active')).toEqual(renderDotClassNames('done'))
+    expect(renderMarkup('active')).toContain('data-tooltip-content="">Active<')
+    expect(renderMarkup('done')).toContain('data-tooltip-content="">Done<')
+  })
+
+  it('lets an enclosing action own the hover copy', () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(StatusIndicator, { status: 'working', showTooltip: false })
+    )
+
+    expect(markup).not.toContain('data-tooltip-root')
+    expect(markup).toContain('data-agent-spinner')
   })
 })
