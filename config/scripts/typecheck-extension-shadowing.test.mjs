@@ -22,8 +22,18 @@ const IGNORED_DIRECTORIES = new Set([
   'coverage',
   '.cross-version-checkouts'
 ])
-// TypeScript resolves these in order, so an earlier entry shadows a later one.
-const EXTENSION_PRIORITY = ['.ts', '.tsx', '.mts', '.cts', '.d.ts', '.d.mts', '.d.cts']
+/**
+ * Resolution groups, not one ranking: `.mts` and `.cts` are separate module formats
+ * that coexist with `.ts`. Only members of the same group shadow each other, so a
+ * routine `foo.ts` + `foo.mts` pairing must not be reported.
+ */
+const EXTENSION_GROUPS = [
+  ['.d.ts', '.ts', '.tsx'],
+  ['.d.mts', '.mts'],
+  ['.d.cts', '.cts']
+]
+// Within a group tsc prefers the implementation file over the declaration.
+const PRIORITY = ['.ts', '.tsx', '.mts', '.cts', '.d.ts', '.d.mts', '.d.cts']
 
 function collectFiles(root) {
   let found = []
@@ -51,37 +61,66 @@ function collectFiles(root) {
       found = found.concat(collectFiles(fullPath))
       continue
     }
-    if (EXTENSION_PRIORITY.some((extension) => entry.name.endsWith(extension))) {
-      found.push(fullPath)
-    }
+    found.push(fullPath)
   }
   return found
 }
 
 function extensionOf(path) {
-  return EXTENSION_PRIORITY.filter((extension) => path.endsWith(extension)).sort(
+  return PRIORITY.filter((extension) => path.endsWith(extension)).sort(
     (left, right) => right.length - left.length
   )[0]
 }
 
-describe('typecheck extension shadowing', () => {
-  it('has no file hidden from the program by a higher-priority extension', () => {
+/** Exported shape kept pure so the grouping rule is testable without touching the tree. */
+export function findShadowedFiles(paths) {
+  const shadowed = []
+  for (const group of EXTENSION_GROUPS) {
     const byStem = new Map()
-    for (const file of collectFiles(repoRoot)) {
-      const relativePath = relative(repoRoot, file).replaceAll('\\', '/')
-      const extension = extensionOf(relativePath)
-      const stem = relativePath.slice(0, -extension.length)
+    for (const path of paths) {
+      const extension = extensionOf(path)
+      if (!extension || !group.includes(extension)) {
+        continue
+      }
+      const stem = path.slice(0, -extension.length)
       byStem.set(stem, [...(byStem.get(stem) ?? []), extension])
     }
+    for (const [stem, extensions] of byStem) {
+      if (extensions.length < 2) {
+        continue
+      }
+      const ordered = PRIORITY.filter((extension) => extensions.includes(extension))
+      shadowed.push(`${stem}${ordered[1]} is shadowed by ${stem}${ordered[0]}`)
+    }
+  }
+  return shadowed.sort()
+}
 
-    const shadowed = [...byStem.entries()]
-      .filter(([, extensions]) => extensions.length > 1)
-      .map(([stem, extensions]) => {
-        const ordered = EXTENSION_PRIORITY.filter((extension) => extensions.includes(extension))
-        return `${stem}${ordered[1]} is shadowed by ${stem}${ordered[0]}`
-      })
-      .sort()
+describe('typecheck extension shadowing', () => {
+  it('has no file hidden from the program by a higher-priority extension', () => {
+    const paths = collectFiles(repoRoot).map((file) =>
+      relative(repoRoot, file).replaceAll('\\', '/')
+    )
 
-    expect(shadowed).toEqual([])
+    expect(findShadowedFiles(paths)).toEqual([])
+  })
+
+  it('reports a .tsx hidden behind a .ts of the same stem', () => {
+    expect(findShadowedFiles(['src/a.ts', 'src/a.tsx'])).toEqual([
+      'src/a.tsx is shadowed by src/a.ts'
+    ])
+  })
+
+  it('leaves .mts and .cts alone, since they are separate module formats', () => {
+    // Verified against tsc --listFilesOnly: a.ts, a.mts and a.cts all enter the
+    // program together; only a.tsx is dropped.
+    expect(findShadowedFiles(['src/a.ts', 'src/a.mts', 'src/a.cts'])).toEqual([])
+  })
+
+  it('still reports shadowing inside the .mts and .cts groups', () => {
+    expect(findShadowedFiles(['src/a.mts', 'src/a.d.mts', 'src/b.cts', 'src/b.d.cts'])).toEqual([
+      'src/a.d.mts is shadowed by src/a.mts',
+      'src/b.d.cts is shadowed by src/b.cts'
+    ])
   })
 })

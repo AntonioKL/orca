@@ -222,7 +222,20 @@ describe('typecheck diagnostic baseline', () => {
     const stale = runBaseline(paths)
 
     expect(stale.status).toBe(1)
+    expect(stale.stderr).toContain('config/scripts/typecheck-diagnostic-baseline.mjs')
     expect(stale.stderr).toContain('--write')
+  })
+
+  it('names a command runnable from the directory that printed it', () => {
+    // Mobile runs its typecheck from mobile/, where a repo-relative path is not runnable.
+    const paths = createFixture("const value: number = 'bad'\n")
+    expect(runBaseline(paths, ['--write']).status).toBe(0)
+    writeFileSync(paths.source, 'const value: number = 1\n')
+
+    const stale = runBaseline(paths, [], { cwd: join(repoRoot, 'mobile') })
+
+    expect(stale.status).toBe(1)
+    expect(stale.stderr).toContain('node ../config/scripts/typecheck-diagnostic-baseline.mjs')
   })
 
   it('refuses to regenerate a baseline that grows from the PR base', () => {
