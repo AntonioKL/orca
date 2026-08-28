@@ -80,6 +80,7 @@ import {
 import TabGroupSplitLayout from './tab-group/TabGroupSplitLayout'
 import AiVaultSessionDropLayer from './tab-group/AiVaultSessionDropLayer'
 import { shouldAutoCreateInitialTerminal } from './terminal/initial-terminal'
+import { createWorkspaceTerminalHostAuthoritySelector } from '@/lib/workspace-terminal-host-authority'
 import { useActiveTerminalRepair } from './terminal/use-active-terminal-repair'
 import { scheduleBackgroundTerminalWorktreeMeasure } from './terminal/background-terminal-worktree-visibility'
 import {
@@ -158,6 +159,7 @@ import {
 import { openMobileEmulatorTab } from '@/lib/open-mobile-emulator-tab'
 import { launchAgentInNewTab } from '@/lib/launch-agent-in-new-tab'
 import { gateWorktreeAgentActivation } from '@/lib/worktree-agent-activation-gate'
+import { resumeSleepingAgentSessionsForWorktree } from '@/lib/resume-sleeping-agent-session'
 import { listBoundAgentTabActions, resolveDefaultAgentForNewTab } from '@/lib/agent-tab-shortcuts'
 import { terminalProviderHasAuthoritativeSnapshot } from './terminal/terminal-provider-snapshot-capability'
 import { useTerminalProviderSnapshotCapability } from './terminal/use-terminal-provider-snapshot-capability'
@@ -1518,12 +1520,22 @@ function Terminal(): React.JSX.Element | null {
   const activeWorktreeHasTerminalState = activeWorktreeId
     ? Object.hasOwn(tabsByWorktree, activeWorktreeId)
     : false
+  // Why a store subscription rather than a read inside the effects: the verdict flips to `none` the
+  // moment the execution host answers, and that transition is what re-runs the passes below.
+  // Why the retained selector: resolution walks the owner catalogs, so recomputing it on every store
+  // write would be the STA-3363 render-path multiplier again.
+  const hostAuthoritySelector = useMemo(
+    () => createWorkspaceTerminalHostAuthoritySelector(activeWorktreeId),
+    [activeWorktreeId]
+  )
+  const activeWorktreeHostAuthority = useAppStore(hostAuthoritySelector)
   useEffect(() => {
     if (!workspaceSessionReady || !terminalStartupRestorationReady || !activeWorktreeId) {
       return
     }
-    // Why: host session-tabs are authoritative in the paired web client; a local fallback races the host's initial terminal and duplicates tabs.
-    if (isWebRuntimeSessionActive(getActiveWorktreeRuntimeEnvironmentId(activeWorktreeId))) {
+    // Why: the execution host owns terminal creation, and a host that has not answered is not a host
+    // with no terminals — seeding into that gap duplicates its tabs on every launch (STA-4658).
+    if (activeWorktreeHostAuthority !== 'none') {
       return
     }
     if (startupActivationGateWorktreeIdsRef.current.has(activeWorktreeId)) {
@@ -1552,11 +1564,30 @@ function Terminal(): React.JSX.Element | null {
   }, [
     activeWorktreeId,
     activeWorktreeHasTerminalState,
+    activeWorktreeHostAuthority,
     createTab,
     reconcileWorktreeTabModel,
     terminalStartupRestorationReady,
     workspaceSessionReady
   ])
+
+  const startupResumeWorktreeIdsRef = useRef(new Set<string>())
+  useEffect(() => {
+    if (!workspaceSessionReady || !hydrationSucceeded || !activeWorktreeId) {
+      return
+    }
+    if (startupResumeWorktreeIdsRef.current.has(activeWorktreeId)) {
+      return
+    }
+    // Why not consume the one-shot here: the sweep declines outright while the host is unanswered,
+    // so marking it done would strand every sleeping agent on the workspace for the session.
+    if (activeWorktreeHostAuthority === 'unverifiable') {
+      return
+    }
+    startupResumeWorktreeIdsRef.current.add(activeWorktreeId)
+    // Why: startup hydration restores the worktree without activateAndRevealWorktree, so orphaned live/quit records need a terminal-surface pass after cold restore.
+    resumeSleepingAgentSessionsForWorktree(activeWorktreeId)
+  }, [activeWorktreeId, activeWorktreeHostAuthority, hydrationSucceeded, workspaceSessionReady])
 
   const handleNewTab = useCallback(
     (shellOverride?: string) => {

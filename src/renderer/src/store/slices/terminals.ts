@@ -55,6 +55,7 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
   },
   restoredRuntimeHostIdByWorkspaceSessionKey: {},
   defaultTerminalTabsAppliedByWorktreeId: {},
+  closedTerminalTabTombstonesByTabId: {},
   hydrationSucceeded: false,
   pendingReconnectWorktreeIds: [],
   pendingReconnectTabByWorktree: {},
