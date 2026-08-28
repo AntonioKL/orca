@@ -13,6 +13,7 @@ import { dirname, join, win32 as winPath } from 'node:path'
 import { getAppEnvironment } from '../../shared/app-environment'
 import type { ProcessLivenessVerdict } from './daemon-incarnation-evidence-types'
 import { parseDaemonPidFile } from './daemon-pid-file-parse'
+import { quarantineCorruptDaemonPidRecord } from './daemon-pid-record-quarantine'
 import { inspectProcessLiveness, mergeProcessLivenessVerdict } from './daemon-process-inspection'
 
 /**
@@ -314,19 +315,21 @@ export function collectPinnedDaemonVersions(runtimeDir: string): PinnedDaemonVer
     if (!entry.isFile() || !/^daemon-v\d+\.pid$/.test(entry.name)) {
       continue
     }
-    let parsed
+    let contents
     try {
-      parsed = parseDaemonPidFile(readFileSync(join(runtimeDir, entry.name), 'utf8'))
+      contents = readFileSync(join(runtimeDir, entry.name), 'utf8')
     } catch {
+      // Read failures (AV lock, vanished file) are transient; the veto re-evaluates next launch.
       return {
         status: 'unverifiable',
         reason: `the daemon pid file could not be read: ${entry.name}`
       }
     }
+    const parsed = parseDaemonPidFile(contents)
     if (!parsed) {
       return {
         status: 'unverifiable',
-        reason: `the daemon pid file could not be parsed: ${entry.name}`
+        reason: quarantineCorruptDaemonPidRecord(runtimeDir, entry.name, contents)
       }
     }
     // appVersion null => pre-relocation daemon forked from the install dir; pins no host dir here.
@@ -351,6 +354,7 @@ export function pruneOldDaemonHosts(evidence: PinnedDaemonVersionsEvidence): voi
     return
   }
   if (evidence.status === 'unverifiable') {
+    console.warn(`[daemon] Skipping daemon-host prune: ${evidence.reason}`)
     return
   }
   const version = getAppEnvironment().getVersion()

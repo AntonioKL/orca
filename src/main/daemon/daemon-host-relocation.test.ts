@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -109,6 +110,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  // A test that fails between spyOn and mockRestore must not leak its mock into later tests.
+  vi.restoreAllMocks()
   setProcessProp('platform', originalPlatform)
   setProcessProp('execPath', originalExecPath)
   setProcessProp('resourcesPath', originalResourcesPath)
@@ -327,6 +330,165 @@ describe('pruneOldDaemonHosts', () => {
     expect(existsSync(join(root, '7.0.0'))).toBe(true)
     expect(existsSync(join(root, '6.0.0'))).toBe(false)
     killSpy.mockRestore()
+  })
+
+  it('prunes nothing and never throws when the evidence is unverifiable', () => {
+    const root = join(localAppDataDir, 'Orca', 'daemon-host')
+    for (const v of ['1.0.0', '2.0.0']) {
+      mkdirSync(join(root, v), { recursive: true })
+    }
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    expect(() =>
+      pruneOldDaemonHosts({
+        status: 'unverifiable',
+        reason: 'the daemon runtime directory could not be read'
+      })
+    ).not.toThrow()
+
+    expect(existsSync(join(root, '1.0.0'))).toBe(true)
+    expect(existsSync(join(root, '2.0.0'))).toBe(true)
+    // The reason must reach the field log — an unobservable no-op is undiagnosable.
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[daemon] Skipping daemon-host prune: the daemon runtime directory could not be read'
+    )
+    warnSpy.mockRestore()
+  })
+
+  it('skips pruning when the runtime directory cannot be read', () => {
+    const root = join(localAppDataDir, 'Orca', 'daemon-host')
+    mkdirSync(join(root, '1.0.0'), { recursive: true })
+
+    const evidence = collectPinnedDaemonVersions(join(userDataDir, 'daemon-never-created'))
+
+    expect(evidence).toEqual({
+      status: 'unverifiable',
+      reason: 'the daemon runtime directory could not be read'
+    })
+    pruneOldDaemonHosts(evidence)
+    expect(existsSync(join(root, '1.0.0'))).toBe(true)
+  })
+
+  it('keeps a version live when any of its pid records is live', () => {
+    const root = join(localAppDataDir, 'Orca', 'daemon-host')
+    const runtimeDir = join(userDataDir, 'daemon')
+    mkdirSync(join(root, '7.0.0'), { recursive: true })
+    mkdirSync(runtimeDir, { recursive: true })
+    // Two protocol generations of the same app version: one daemon live, one exited. The live
+    // record must win the merged verdict whichever order the directory scan visits them.
+    writeFileSync(
+      join(runtimeDir, 'daemon-v7.pid'),
+      JSON.stringify({ pid: 5001, startedAtMs: null, appVersion: '7.0.0' })
+    )
+    writeFileSync(
+      join(runtimeDir, 'daemon-v8.pid'),
+      JSON.stringify({ pid: 5002, startedAtMs: null, appVersion: '7.0.0' })
+    )
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation((pid: number) => {
+      if (pid === 5001) {
+        return true
+      }
+      throw Object.assign(new Error('no such process'), { code: 'ESRCH' })
+    })
+
+    const evidence = collectPinnedDaemonVersions(runtimeDir)
+    expect(evidence).toEqual({
+      status: 'complete',
+      versionLiveness: new Map([['7.0.0', { status: 'live' }]])
+    })
+    pruneOldDaemonHosts(evidence)
+
+    expect(existsSync(join(root, '7.0.0'))).toBe(true)
+    killSpy.mockRestore()
+  })
+
+  it('vetoes pruning while a pid salvaged from a corrupt record still answers', () => {
+    const root = join(localAppDataDir, 'Orca', 'daemon-host')
+    const runtimeDir = join(userDataDir, 'daemon')
+    mkdirSync(join(root, '1.0.0'), { recursive: true })
+    mkdirSync(runtimeDir, { recursive: true })
+    // A torn write preserves the pid prefix; the process behind it still answers, so the
+    // record may belong to a live daemon of unknown version and must keep its veto un-quarantined.
+    const pidPath = join(runtimeDir, 'daemon-v7.pid')
+    writeFileSync(pidPath, '{"pid": 4242, "startedAtMs": 17')
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const evidence = collectPinnedDaemonVersions(runtimeDir)
+
+    expect(evidence).toEqual({
+      status: 'unverifiable',
+      reason:
+        'the daemon pid file could not be parsed and salvaged pid 4242 may still be running: daemon-v7.pid'
+    })
+    expect(existsSync(pidPath)).toBe(true)
+    pruneOldDaemonHosts(evidence)
+    expect(existsSync(join(root, '1.0.0'))).toBe(true)
+    warnSpy.mockRestore()
+    killSpy.mockRestore()
+  })
+
+  it('quarantines a corrupt record naming no live pid so pruning resumes next launch', () => {
+    const root = join(localAppDataDir, 'Orca', 'daemon-host')
+    const runtimeDir = join(userDataDir, 'daemon')
+    mkdirSync(join(root, '1.0.0'), { recursive: true })
+    mkdirSync(runtimeDir, { recursive: true })
+    const pidPath = join(runtimeDir, 'daemon-v7.pid')
+    writeFileSync(pidPath, 'not a daemon record')
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    // Launch with the corrupt record: prune skips once, and the record is quarantined in place
+    // (bytes preserved) instead of vetoing every future launch.
+    const evidence = collectPinnedDaemonVersions(runtimeDir)
+    expect(evidence).toEqual({
+      status: 'unverifiable',
+      reason: 'the daemon pid file could not be parsed and was quarantined: daemon-v7.pid'
+    })
+    pruneOldDaemonHosts(evidence)
+    expect(existsSync(join(root, '1.0.0'))).toBe(true)
+    expect(existsSync(pidPath)).toBe(false)
+    expect(readFileSync(join(runtimeDir, 'daemon-v7.pid.corrupt'), 'utf8')).toBe(
+      'not a daemon record'
+    )
+
+    // Next launch: the listing is complete again and the unowned host is reclaimed.
+    const nextEvidence = collectPinnedDaemonVersions(runtimeDir)
+    expect(nextEvidence).toEqual({ status: 'complete', versionLiveness: new Map() })
+    pruneOldDaemonHosts(nextEvidence)
+    expect(existsSync(join(root, '1.0.0'))).toBe(false)
+    warnSpy.mockRestore()
+  })
+
+  it('vetoes pruning without quarantine when a pid record cannot be read', (ctx) => {
+    // The suite mocks process.platform; the chmod trick needs the REAL host to be POSIX.
+    if (originalPlatform === 'win32') {
+      return ctx.skip()
+    }
+    const root = join(localAppDataDir, 'Orca', 'daemon-host')
+    const runtimeDir = join(userDataDir, 'daemon')
+    mkdirSync(join(root, '1.0.0'), { recursive: true })
+    mkdirSync(runtimeDir, { recursive: true })
+    const pidPath = join(runtimeDir, 'daemon-v7.pid')
+    writeFileSync(pidPath, JSON.stringify({ pid: 4242, startedAtMs: null, appVersion: '1.0.0' }))
+    chmodSync(pidPath, 0o000)
+    try {
+      readFileSync(pidPath)
+      return ctx.skip() // Running as root: the permission bit cannot make the read fail.
+    } catch {
+      // The read fails as intended.
+    }
+
+    const evidence = collectPinnedDaemonVersions(runtimeDir)
+
+    // A read failure is transient (AV lock, vanished file): veto this launch, but leave the
+    // record alone so a launch that can read it re-evaluates from the real bytes.
+    expect(evidence).toEqual({
+      status: 'unverifiable',
+      reason: 'the daemon pid file could not be read: daemon-v7.pid'
+    })
+    expect(existsSync(pidPath)).toBe(true)
+    pruneOldDaemonHosts(evidence)
+    expect(existsSync(join(root, '1.0.0'))).toBe(true)
   })
 
   it('reclaims nothing for a packaged host with no asar root (orcad on win32)', () => {

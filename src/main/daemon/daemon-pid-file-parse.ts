@@ -9,6 +9,20 @@ export type ParsedDaemonPid = {
   spawnerExecPath: string | null
 }
 
+/**
+ * Best-effort pid recovery from a record parseDaemonPidFile rejected. The pid is the first key
+ * JSON.stringify writes, so a torn write usually preserves it; it gates whether a corrupt record
+ * may be quarantined (a process still answering for this pid keeps its conservative veto).
+ */
+export function salvagePidFromCorruptDaemonRecord(contents: string): number | null {
+  const match = /"pid"\s*:\s*(\d+)/.exec(contents)
+  if (!match) {
+    return null
+  }
+  const pid = Number(match[1])
+  return Number.isSafeInteger(pid) && pid > 0 ? pid : null
+}
+
 export function parseDaemonPidFile(contents: string): ParsedDaemonPid | null {
   const trimmed = contents.trim()
   try {
