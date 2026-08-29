@@ -17,8 +17,7 @@ import {
   initializeSttWorker,
   waitForSttWorkerReady
 } from './stt-worker-startup'
-
-export const START_DICTATION_TIMEOUT_MS = 60_000
+import { START_DICTATION_TIMEOUT_MS } from './stt-session-timeouts'
 
 export async function startSttDictation(
   state: SttSessionState,
