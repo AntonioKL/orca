@@ -3231,6 +3231,9 @@
           "TerminalQuickCommandsSubmenu": {
             "3ccc7981bb": "Host unavailable",
             "54f29b7c0d": "Loading host…"
+          },
+          "ipcPtyConnect": {
+            "unreadableConnectError": "The terminal could not start, and the failure did not include a readable reason."
           }
         }
       },
@@ -4990,7 +4993,8 @@
           "69f5b5380d": "Cloning...",
           "cloneOnHostDescription": "Enter the Git URL and choose where to clone it on {{value0}}.",
           "cloneParentFolder": "Parent folder",
-          "remoteCloneParentPlaceholder": "/home/user/projects"
+          "remoteCloneParentPlaceholder": "/home/user/projects",
+          "unreadableAddError": "Adding the project failed, and the failure did not include a readable reason."
         },
         "AutoRenameFailedDialog": {
           "aed1623b1e": "Close",
@@ -5739,7 +5743,8 @@
         },
         "useAddRepoCloneFlow": {
           "4d0013cc93": "Repository cloned",
-          "0dc4d1b657": "Enter a host path for the clone destination."
+          "0dc4d1b657": "Enter a host path for the clone destination.",
+          "unreadableCloneError": "The clone failed, and the failure did not include a readable reason."
         },
         "useAddRepoLocalFolderFlow": {
           "7ab10e4974": "Use a host path to add projects from a remote host.",
@@ -6177,6 +6182,9 @@
           "projectOnly": "Added in this project only.",
           "useGlobalFor": "Use global for {{value0}}",
           "useGlobal": "Use global"
+        },
+        "useCreateRepo": {
+          "unreadableCreateError": "Creating the repository failed, and the failure did not include a readable reason."
         }
       },
       "shared": {

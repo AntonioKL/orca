@@ -3,15 +3,13 @@ import { join, relative, sep } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 // Why: the envelope is one wire format, and every hand-rolled copy of it is a chance to
-// disagree. Six independent copies had already drifted — some kept a trailing `Error:` class
-// name, some scoped themselves to a single channel, and three rendered "Error" or an empty
-// string when the envelope carried no reason. This census is what stops a seventh appearing.
+// disagree. Ten independent copies had already drifted — some kept a trailing `Error:` class
+// name, some scoped themselves to a single channel, some rendered "Error" or an empty string
+// when the envelope carried no reason, and one leaked the wrapper itself to 30 user-facing
+// sites. This census is what stops an eleventh appearing.
 const ENVELOPE_OWNERS = [
   // The canonical stripper. The only place the wire format is described.
-  'src/shared/ipc-invoke-envelope.ts',
-  // `extractIpcErrorMessage` keeps its own fail-open regex on purpose: it returns the tail
-  // verbatim (class name included) and never returns null, which 18 call sites rely on.
-  'src/renderer/src/lib/ipc-error.ts'
+  'src/shared/ipc-invoke-envelope.ts'
 ]
 
 const REPO_ROOT = join(__dirname, '..', '..')

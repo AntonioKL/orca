@@ -1,7 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { Worktree } from '../../../shared/worktree/types'
 import { buildExcludePathPrefixes } from '../../../shared/quick-open-filter'
-import { vi } from 'vitest'
 import {
   cleanRuntimeFileListError,
   getRuntimeFileListTarget,
