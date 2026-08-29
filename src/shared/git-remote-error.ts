@@ -51,6 +51,8 @@ const COMMAND_FAILED_PREAMBLE_PATTERN = /^Command failed:[^\n]*\n/
 // one line, so the cause (first) and git's verdict (last) both cross IPC. Sliced, never line-split.
 const MAX_GIT_FAILURE_DETAIL_LENGTH = 4_000
 const GIT_FAILURE_DETAIL_HEAD_LENGTH = 3_000
+// Why: shared with the display layer, which must never show the marker as if it were a git diagnostic.
+export const GIT_FAILURE_DETAIL_ELISION_MARKER = '[…]'
 
 function readGitFailureDetail(error: Error): string {
   const { stderr } = error as { stderr?: unknown }
@@ -60,12 +62,18 @@ function readGitFailureDetail(error: Error): string {
       : error.message.replace(COMMAND_FAILED_PREAMBLE_PATTERN, '')
   // No line selection here: git prints the cause first and generic advice last, so keeping only one
   // line discards whichever half the caller needed. The display layer picks the line it can fit.
+  //
+  // Careful — this blob still carries local paths and env. Real ssh puts
+  // `Warning: Identity file <home path> not accessible` ahead of the denial, and a server hook can
+  // echo anything. Credential scrubbing is not path scrubbing and a toast character cap is not
+  // redaction, so whatever renders this must pick a line rather than dump the blob; see
+  // extractPublishFailureDetail in src/renderer/src/lib/source-control-remote-error.ts.
   const detail = stripCredentialsFromMessage(text).trim()
   if (detail.length <= MAX_GIT_FAILURE_DETAIL_LENGTH) {
     return detail
   }
   const tailLength = MAX_GIT_FAILURE_DETAIL_LENGTH - GIT_FAILURE_DETAIL_HEAD_LENGTH
-  return `${detail.slice(0, GIT_FAILURE_DETAIL_HEAD_LENGTH).trimEnd()}\n[…]\n${detail.slice(-tailLength).trimStart()}`
+  return `${detail.slice(0, GIT_FAILURE_DETAIL_HEAD_LENGTH).trimEnd()}\n${GIT_FAILURE_DETAIL_ELISION_MARKER}\n${detail.slice(-tailLength).trimStart()}`
 }
 
 // Why: Git 2.27+ refuses divergent pulls when no pull.rebase/pull.ff policy is set; detected so callers can retry as merge.
@@ -110,9 +118,11 @@ export function isExecKilledError(error: unknown): boolean {
 
 export type GitRemoteOperation = 'push' | 'pull' | 'fetch' | 'upstream'
 
+const GIT_REMOTE_OPERATION_FAILED_MESSAGE = 'Git remote operation failed.'
+
 export function normalizeGitErrorMessage(error: unknown, operation?: GitRemoteOperation): string {
   if (!(error instanceof Error)) {
-    return 'Git remote operation failed.'
+    return GIT_REMOTE_OPERATION_FAILED_MESSAGE
   }
 
   // Why: scrub credentials up-front so every downstream branch operates on already-redacted text.
@@ -168,8 +178,9 @@ export function normalizeGitErrorMessage(error: unknown, operation?: GitRemoteOp
   }
 
   // Fallthrough: nothing above recognized this failure, so hand the whole credential-scrubbed
-  // git output on rather than guessing which line mattered.
-  return readGitFailureDetail(error) || raw.trim()
+  // git output on rather than guessing which line mattered. When git itself said nothing, say that
+  // — an empty string renders as a blank toast, and all `raw` holds here is Orca's own argv.
+  return readGitFailureDetail(error) || GIT_REMOTE_OPERATION_FAILED_MESSAGE
 }
 
 // Why: require a `fatal:` prefix so wrapped command text or hook/progress output can't spuriously match and mask real failures.

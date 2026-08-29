@@ -1,5 +1,6 @@
 import {
   formatSubmodulePushFailureDetail,
+  GIT_FAILURE_DETAIL_ELISION_MARKER,
   stripCredentialsFromMessage
 } from '../../../shared/git-remote-error'
 import {
@@ -34,6 +35,12 @@ const IPC_INVOKE_PREFIX = /^Error invoking remote method '[^']*': (?:\w*Error: )
 /** Node's execFile rejection preamble names the argv Orca ran, so such a line is never git's own reason. */
 const COMMAND_PREAMBLE_LINE = /Command failed:/
 
+// Why: a detail is either something to show or nothing at all. An empty string is neither — it
+// survives every `??` below and reaches the user as a blank toast, which says less than a generic one.
+function emptyToNull(detail: string): string | null {
+  return detail.length > 0 ? detail : null
+}
+
 function extractPublishFailureDetail(message: string): string | null {
   let remoteDetail: string | null = null
   let causeBeforeFatal: string | null = null
@@ -48,20 +55,27 @@ function extractPublishFailureDetail(message: string): string | null {
       // line ("Could not read from remote repository."). The earlier line is the actionable one.
       return (
         causeBeforeFatal ??
-        truncateDetail(stripCredentialsFromMessage(line.slice('fatal:'.length).trim()))
+        emptyToNull(truncateDetail(stripCredentialsFromMessage(line.slice('fatal:'.length).trim())))
       )
     }
     if (line.startsWith('remote:')) {
-      remoteDetail ??= truncateDetail(
-        stripCredentialsFromMessage(line.slice('remote:'.length).trim())
+      // Why: a bare `remote:` with nothing after it is not a detail — `??=` would latch the empty
+      // string and every `?? fallback` below would then keep it, blanking the toast.
+      remoteDetail ??= emptyToNull(
+        truncateDetail(stripCredentialsFromMessage(line.slice('remote:'.length).trim()))
       )
       continue
     }
     // Why: only git's own local transport lines count as the cause. `remote:` is server chatter
-    // (progress, policy notes) that git's `fatal:` verdict should still outrank, and a wrapper
-    // preamble names Orca's argv rather than anything git reported.
-    if (!COMMAND_PREAMBLE_LINE.test(line)) {
-      causeBeforeFatal ??= truncateDetail(stripCredentialsFromMessage(line))
+    // (progress, policy notes) that git's `fatal:` verdict should still outrank, a wrapper preamble
+    // names Orca's argv rather than anything git reported, and the elision marker is our own
+    // truncation bookkeeping — showing it as the reason tells the user nothing at all.
+    if (!COMMAND_PREAMBLE_LINE.test(line) && line !== GIT_FAILURE_DETAIL_ELISION_MARKER) {
+      // Why: the *last* such line, not the first. Real ssh prints its own preamble ahead of the
+      // denial — `Warning: Identity file <home path> not accessible`, `Warning: Permanently
+      // added …` — so keeping the first hides `Permission denied (publickey)` behind noise and
+      // puts a home-directory path in the toast. The line nearest git's verdict is the cause.
+      causeBeforeFatal = truncateDetail(stripCredentialsFromMessage(line))
     }
   }
 
@@ -87,6 +101,14 @@ function* iterateRemoteErrorLines(message: string): Generator<string> {
   if (lineStart <= message.length) {
     yield message.slice(lineStart)
   }
+}
+
+// Why: the last resort when no line stood out. Electron's `Error invoking remote method …` wrapper is
+// Orca's own framing, never git's, so it is stripped here the same way the line scan strips it.
+function rawMessageDetail(message: string): string | null {
+  return emptyToNull(
+    truncateDetail(stripCredentialsFromMessage(message.replace(IPC_INVOKE_PREFIX, '')).trim())
+  )
 }
 
 function resolveSubmodulePushFailureMessage(
@@ -314,31 +336,30 @@ export function resolveRemoteOperationErrorMessage(
   }
 
   if (options?.isFetch) {
-    const detail =
-      extractPublishFailureDetail(error.message) ??
-      truncateDetail(stripCredentialsFromMessage(error.message))
-    return `Fetch failed. ${detail}`
+    const detail = extractPublishFailureDetail(error.message) ?? rawMessageDetail(error.message)
+    return detail ? `Fetch failed. ${detail}` : 'Fetch failed. Check your connection and try again.'
   }
 
   if (options?.isFastForward) {
-    const detail =
-      extractPublishFailureDetail(error.message) ??
-      truncateDetail(stripCredentialsFromMessage(error.message))
-    return `Fast-forward failed. ${detail}`
+    const detail = extractPublishFailureDetail(error.message) ?? rawMessageDetail(error.message)
+    return detail
+      ? `Fast-forward failed. ${detail}`
+      : 'Fast-forward failed. Check your connection and try again.'
   }
 
   if (options?.isRebase) {
-    const detail =
-      extractPublishFailureDetail(error.message) ??
-      truncateDetail(stripCredentialsFromMessage(error.message))
-    return `Rebase failed. ${detail}`
+    const detail = extractPublishFailureDetail(error.message) ?? rawMessageDetail(error.message)
+    return detail
+      ? `Rebase failed. ${detail}`
+      : 'Rebase failed. Check your connection and try again.'
   }
 
   // Why: unlabeled callers (Pull) share the toast's one-line budget, and git output reaching here is
   // multi-line, so pick the same actionable line the labeled operations do instead of dumping the blob.
   return (
     extractPublishFailureDetail(error.message) ??
-    truncateDetail(stripCredentialsFromMessage(error.message.replace(IPC_INVOKE_PREFIX, '')))
+    rawMessageDetail(error.message) ??
+    REMOTE_OPERATION_FAILED_MESSAGE
   )
 }
 

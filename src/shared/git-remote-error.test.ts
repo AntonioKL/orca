@@ -88,6 +88,22 @@ describe('normalizeGitErrorMessage', () => {
     )
   })
 
+  it('says something when git said nothing, instead of handing on Orca\u2019s argv', () => {
+    const error = new Error(
+      'Command failed: git -C /Users/example/repo fetch --prune\n'
+    ) as Error & {
+      stderr: string
+    }
+    error.stderr = ''
+
+    const message = normalizeGitErrorMessage(error, 'fetch')
+
+    expect(message).toBe('Git remote operation failed.')
+    // The argv is Orca's, not git's, and it names a local path.
+    expect(message).not.toContain('Command failed:')
+    expect(message).not.toContain('/Users/example')
+  })
+
   it('bounds a newline-heavy failure from both ends without line-array splitting', () => {
     const splitSpy = vi.spyOn(String.prototype, 'split')
     const error = new Error(
