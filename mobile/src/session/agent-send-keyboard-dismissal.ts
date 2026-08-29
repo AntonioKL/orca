@@ -1,6 +1,6 @@
 import type { AgentStatusEntry } from '../../../src/shared/agent-status-types'
 import type { TuiAgent } from '../../../src/shared/tui-agent'
-import { resolveMobileTerminalTabAgentId } from './mobile-terminal-tab-agent'
+import { resolveMobileTerminalTabOwnedAgentId } from './mobile-terminal-tab-agent'
 
 /** Minimal session-tab shape needed to tell an agent session from a plain shell. */
 export type AgentSendKeyboardDismissalTab = {
@@ -24,5 +24,5 @@ export function shouldDismissKeyboardAfterTerminalSend(
   if (!accepted || !tab || tab.type !== 'terminal') {
     return false
   }
-  return resolveMobileTerminalTabAgentId(tab) !== null
+  return resolveMobileTerminalTabOwnedAgentId(tab) !== null
 }

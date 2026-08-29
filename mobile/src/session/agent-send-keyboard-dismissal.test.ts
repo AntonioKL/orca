@@ -89,7 +89,7 @@ describe('shouldDismissKeyboardAfterTerminalSend', () => {
     expect(shouldDismissKeyboardAfterTerminalSend(undefined, true)).toBe(false)
   })
 
-  it('shares unknown and title-only semantics with the established mobile resolver', () => {
+  it('does not authorize dismissal from unknown status or a display-only title', () => {
     expect(
       shouldDismissKeyboardAfterTerminalSend(
         terminalTab({ agentStatus: { agentType: 'unknown' } }),
@@ -98,6 +98,6 @@ describe('shouldDismissKeyboardAfterTerminalSend', () => {
     ).toBe(false)
     expect(
       shouldDismissKeyboardAfterTerminalSend(terminalTab({ title: '✦ Gemini CLI' }), true)
-    ).toBe(true)
+    ).toBe(false)
   })
 })

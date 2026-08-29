@@ -1,4 +1,4 @@
-import { createElement } from 'react'
+import { createElement, Suspense } from 'react'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { describe, expect, it, vi } from 'vitest'
 import { useMobileSendCompletionGeneration } from './use-mobile-send-completion-generation'
@@ -36,6 +36,43 @@ describe('mobile send completion generation', () => {
     expect(getGeneration!()).toBeGreaterThan(surfaceGeneration)
     expect(onBlur).toHaveBeenCalledTimes(1)
 
+    act(() => renderer.unmount())
+  })
+
+  it('does not invalidate the committed surface during a suspended render', () => {
+    const never = new Promise<never>(() => undefined)
+    let getGeneration: (() => number) | null = null
+    let renderer: ReactTestRenderer
+
+    function Harness({ surfaceKey, suspend }: { surfaceKey: string; suspend: boolean }): null {
+      getGeneration = useMobileSendCompletionGeneration({ onBlur: vi.fn(), surfaceKey })
+      if (suspend) {
+        throw never
+      }
+      return null
+    }
+
+    act(() => {
+      renderer = create(
+        createElement(
+          Suspense,
+          { fallback: null },
+          createElement(Harness, { surfaceKey: 'tab-a', suspend: false })
+        )
+      )
+    })
+    const committedGeneration = getGeneration!()
+    act(() => {
+      renderer.update(
+        createElement(
+          Suspense,
+          { fallback: null },
+          createElement(Harness, { surfaceKey: 'tab-b', suspend: true })
+        )
+      )
+    })
+
+    expect(getGeneration!()).toBe(committedGeneration)
     act(() => renderer.unmount())
   })
 })

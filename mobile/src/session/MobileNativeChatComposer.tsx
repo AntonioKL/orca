@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Image,
@@ -94,13 +94,15 @@ export function MobileNativeChatComposer({
     null
   )
   const sendingRef = useRef(false)
-  const mountedRef = useRef(false)
+  const mountedRef = useRef(true)
   const sendSurfaceIdRef = useRef(sendSurfaceId)
   const sendSurfaceGenerationRef = useRef(0)
-  if (sendSurfaceIdRef.current !== sendSurfaceId) {
-    sendSurfaceIdRef.current = sendSurfaceId
-    sendSurfaceGenerationRef.current += 1
-  }
+  useLayoutEffect(() => {
+    if (sendSurfaceIdRef.current !== sendSurfaceId) {
+      sendSurfaceIdRef.current = sendSurfaceId
+      sendSurfaceGenerationRef.current += 1
+    }
+  }, [sendSurfaceId])
   const [sending, setSending] = useState(false)
   const trimmed = value.trim()
   const sessionOptionDispatching = sessionOptions?.controller.pendingId != null
@@ -141,7 +143,6 @@ export function MobileNativeChatComposer({
   }, [onNeedFiles, trigger?.kind, trigger?.query])
 
   useEffect(() => {
-    mountedRef.current = true
     return () => {
       mountedRef.current = false
       sendSurfaceGenerationRef.current += 1
