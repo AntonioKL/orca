@@ -73,25 +73,32 @@ describe('installTypingLatencyInputEvents', () => {
     expect(signals).toEqual([])
   })
 
-  it('settles a prevented routed commit before the outer input resumes', () => {
+  it('settles prevented and unprevented commits once after propagation', () => {
     const terminalElement = document.createElement('div')
     document.body.appendChild(terminalElement)
-    let discarded = 0
+    const settlements: boolean[] = []
     detach = installTypingLatencyInputEvents(window, (signal) =>
-      signal.source === 'ime' ? { discardIfPrevented: () => (discarded += 1) } : undefined
+      signal.source === 'ime'
+        ? { settleAfterPropagation: (defaultPrevented) => settlements.push(defaultPrevented) }
+        : undefined
     )
+
+    const dispatchSessionEnd = (): void => {
+      terminalElement.dispatchEvent(
+        new CustomEvent(XTERM_COMPOSITION_SESSION_END_EVENT, {
+          bubbles: true,
+          cancelable: true,
+          detail: { id: 1, data: '한' }
+        })
+      )
+    }
+    dispatchSessionEnd()
+
     terminalElement.addEventListener(XTERM_COMPOSITION_SESSION_END_EVENT, (event) =>
       event.preventDefault()
     )
+    dispatchSessionEnd()
 
-    terminalElement.dispatchEvent(
-      new CustomEvent(XTERM_COMPOSITION_SESSION_END_EVENT, {
-        bubbles: true,
-        cancelable: true,
-        detail: { id: 1, data: '한' }
-      })
-    )
-
-    expect(discarded).toBe(1)
+    expect(settlements).toEqual([false, true])
   })
 })

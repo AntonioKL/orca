@@ -242,20 +242,23 @@ function startProbe(): string {
       state.keystrokesWithoutTerminalFocus += 1
       return undefined
     }
-    state.byInputSource.recordInput(signal.source, signal.text)
     const recordedAt = performance.now()
     state.unmatchedKeystrokes += recordKeystroke(target, recordedAt, signal.source, signal.text)
     if (signal.source === 'ime') {
       return {
-        discardIfPrevented: () => {
-          if (
-            discardUndispatchedKeystroke(target, recordedAt, signal.source) === 'counted-unmatched'
-          ) {
+        settleAfterPropagation: (defaultPrevented) => {
+          const discardResult = defaultPrevented
+            ? discardUndispatchedKeystroke(target, recordedAt, signal.source)
+            : null
+          if (discardResult === null) {
+            state.byInputSource.recordInput(signal.source, signal.text)
+          } else if (discardResult === 'counted-unmatched') {
             state.unmatchedKeystrokes = Math.max(0, state.unmatchedKeystrokes - 1)
           }
         }
       }
     }
+    state.byInputSource.recordInput(signal.source, signal.text)
     return undefined
   })
 

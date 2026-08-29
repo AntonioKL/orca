@@ -81,7 +81,60 @@ describe('typing latency diagnostic lifecycle', () => {
     expect(mocks.findPaneOwningFocus).toHaveBeenLastCalledWith([])
   })
 
-  it('removes the queue-cap unmatched count when an IME commit is prevented', () => {
+  it('does not count a stale prevented IME commit', () => {
+    vi.spyOn(console, 'log').mockImplementation(() => undefined)
+    mocks.findPaneOwningNode.mockReturnValueOnce({ pane: mocks.panes[0] })
+    mocks.discardUndispatchedKeystroke.mockReturnValueOnce('pending')
+    installTypingLatencyDiagnostic()
+    const bridge = (window as DiagnosticWindow).__orcaTypingDiagnostic
+    if (!bridge || !mocks.inputListener) {
+      throw new Error('Typing latency diagnostic did not start')
+    }
+    bridge.start()
+
+    const registration = mocks.inputListener({
+      event: new CustomEvent('xterm-composition-session-end'),
+      source: 'ime',
+      text: '한'
+    })
+    registration?.settleAfterPropagation(true)
+
+    expect(bridge.report()).toMatchObject({
+      sampling: { unmatchedKeystrokes: 0 },
+      byInputSource: {
+        ime: { observedInputs: 0 },
+        imeCommitChars: { count: 0 }
+      }
+    })
+    bridge.stop()
+  })
+
+  it('counts a prevented IME commit that reached terminal input', () => {
+    vi.spyOn(console, 'log').mockImplementation(() => undefined)
+    mocks.findPaneOwningNode.mockReturnValueOnce({ pane: mocks.panes[0] })
+    mocks.discardUndispatchedKeystroke.mockReturnValueOnce(null)
+    installTypingLatencyDiagnostic()
+    const bridge = (window as DiagnosticWindow).__orcaTypingDiagnostic
+    if (!bridge || !mocks.inputListener) {
+      throw new Error('Typing latency diagnostic did not start')
+    }
+    bridge.start()
+
+    const registration = mocks.inputListener({
+      event: new CustomEvent('xterm-composition-session-end'),
+      source: 'ime',
+      text: '한'
+    })
+    registration?.settleAfterPropagation(true)
+
+    expect(bridge.report().byInputSource).toMatchObject({
+      ime: { observedInputs: 1 },
+      imeCommitChars: { count: 1, p50: 1 }
+    })
+    bridge.stop()
+  })
+
+  it('removes queue-cap accounting when a prevented IME commit was not retained', () => {
     vi.spyOn(console, 'log').mockImplementation(() => undefined)
     mocks.findPaneOwningNode.mockReturnValueOnce({ pane: mocks.panes[0] })
     mocks.recordKeystroke.mockReturnValueOnce(1)
@@ -99,9 +152,15 @@ describe('typing latency diagnostic lifecycle', () => {
       text: '한'
     })
     expect(bridge.report().sampling.unmatchedKeystrokes).toBe(1)
-    registration?.discardIfPrevented()
+    registration?.settleAfterPropagation(true)
 
-    expect(bridge.report().sampling.unmatchedKeystrokes).toBe(0)
+    expect(bridge.report()).toMatchObject({
+      sampling: { unmatchedKeystrokes: 0 },
+      byInputSource: {
+        ime: { observedInputs: 0 },
+        imeCommitChars: { count: 0 }
+      }
+    })
     bridge.stop()
   })
 })

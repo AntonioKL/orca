@@ -15,7 +15,7 @@ export type TypingInputSignal = {
 type InputEventTarget = Pick<Window, 'addEventListener' | 'removeEventListener'>
 
 export type TypingInputRegistration = {
-  discardIfPrevented: () => void
+  settleAfterPropagation: (defaultPrevented: boolean) => void
 }
 
 function isDirectEchoInput(event: KeyboardEvent): boolean {
@@ -30,7 +30,7 @@ export function installTypingLatencyInputEvents(
   target: InputEventTarget,
   onInput: (signal: TypingInputSignal) => TypingInputRegistration | void
 ): () => void {
-  const pendingPreventedCommits = new WeakMap<Event, TypingInputRegistration>()
+  const pendingCompositionInputs = new WeakMap<Event, TypingInputRegistration>()
   const onKeydown = (event: Event): void => {
     if (event instanceof KeyboardEvent && isDirectEchoInput(event)) {
       onInput({ source: 'direct', text: event.key, event })
@@ -43,15 +43,13 @@ export function installTypingLatencyInputEvents(
     }
     const registration = onInput({ source: 'ime', text: detail.data, event })
     if (registration) {
-      pendingPreventedCommits.set(event, registration)
+      pendingCompositionInputs.set(event, registration)
     }
   }
   const settleCompositionSessionEnd = (event: Event): void => {
-    const registration = pendingPreventedCommits.get(event)
-    pendingPreventedCommits.delete(event)
-    if (event.defaultPrevented) {
-      registration?.discardIfPrevented()
-    }
+    const registration = pendingCompositionInputs.get(event)
+    pendingCompositionInputs.delete(event)
+    registration?.settleAfterPropagation(event.defaultPrevented)
   }
 
   target.addEventListener('keydown', onKeydown, { capture: true })
