@@ -44,6 +44,23 @@ function degradedInContact(reason: string) {
   )
 }
 
+/** The daemon shape that would give a legacy `hasChildProcesses` vote something to say: a
+ *  pane whose subprocess handle has no evidence channel publishes the boolean from the raw
+ *  foreground title while the children verdict stays `unverifiable`. Pinned on the main side,
+ *  where that producer lives — src/main/daemon/terminal-host-inspection-degraded-handle.test.ts
+ *  ('does not upgrade a named agent to observed either'). */
+function degradedWithNonShellTitle(name: string) {
+  const reason = 'subprocess handle reports no foreground evidence'
+  return {
+    foregroundProcess: name,
+    hasChildProcesses: true,
+    processEvidence: {
+      foreground: { verdict: 'unverifiable' as const, reason },
+      children: { verdict: 'unverifiable' as const, reason }
+    }
+  }
+}
+
 function observedIdleShell() {
   return buildPtyProcessInspectionWireResult(
     { verdict: 'observed', processName: 'zsh' },
@@ -119,23 +136,35 @@ describe('terminal-tab close on an in-contact probe that could not tell', () => 
     expect(onClose).not.toHaveBeenCalled()
   })
 
-  // The legacy boolean keeps its vote in the one direction it is not lossy: every producer
-  // sets `true` from a positive observation, so a `true` beside a disagreeing 'exited' from
-  // an out-of-contract host must still refuse. Same polarity rule as the exit gate one
-  // directory over (agent-completion-legacy-live-children.test.ts).
-  it('asks when a host contradicts its own exited verdict with a legacy live boolean', async () => {
-    inspectRuntimeTerminalProcessMock.mockResolvedValue({
-      ...buildPtyProcessInspectionWireResult(
-        { verdict: 'observed', processName: 'node' },
-        { verdict: 'exited' }
-      ),
-      hasChildProcesses: true
-    })
+  // The shape that makes the legacy boolean unusable here, from the one producer that really
+  // emits it. Both cases below read the same probe; only the id set differs, so together they
+  // pin that the verdict decides and the boolean never gets a vote of its own.
+  it('asks when a tracked pane degrades to a title it cannot vouch for', async () => {
+    inspectRuntimeTerminalProcessMock.mockResolvedValue(degradedWithNonShellTitle('codex'))
 
     const onClose = await closeTab()
 
     expect(visibleRequest()).not.toBeNull()
     expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('closes a layout-only leaf on the degraded read the legacy boolean calls busy', async () => {
+    getStateMock.mockReturnValue({
+      settings: { activeRuntimeEnvironmentId: null },
+      ptyIdsByTabId: { 'tab-1': ['pty-a'] },
+      terminalLayoutsByTabId: {
+        'tab-1': { ptyIdsByLeafId: { [LEAF_A]: 'pty-a', [LEAF_B]: 'pty-stale' } }
+      },
+      agentStatusByPaneKey: {}
+    })
+    inspectRuntimeTerminalProcessMock.mockImplementation(async (_settings, ptyId: string) =>
+      ptyId === 'pty-a' ? observedIdleShell() : degradedWithNonShellTitle('codex')
+    )
+
+    const onClose = await closeTab()
+
+    expect(visibleRequest()).toBeNull()
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 
   // The narrowing #17076 added, on this arm too: an id the liveness map has dropped is a

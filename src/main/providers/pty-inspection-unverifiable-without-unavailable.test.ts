@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildDaemonInspectProcessResult } from '../daemon/terminal-host-process-evidence'
+import { readPtyProcessInspectionEvidence } from '../../shared/pty-process-inspection-evidence'
 import { classifyLocalPtyChildProcesses } from './local-pty-process-evidence'
 import type { PtyProcessInspection } from './pty-process-inspection'
 
@@ -34,6 +35,16 @@ describe('an in-contact PTY probe that could not determine child processes', () 
       hasChildProcesses: children.hasChildProcesses,
       processEvidence: { foreground, children: children.evidence }
     }
+  }
+
+  /** What a reader that ignores `processEvidence` concludes from the published legacy pair —
+   *  the same collapse every pre-evidence consumer applies, read through the shared reader
+   *  instead of restated here. */
+  function legacyOnlyChildrenVerdict(inspection: PtyProcessInspection): string {
+    return readPtyProcessInspectionEvidence({
+      foregroundProcess: inspection.foregroundProcess,
+      hasChildProcesses: inspection.hasChildProcesses
+    }).children.verdict
   }
 
   // node-pty's POSIX title read silently falls back to the spawned shell name when the
@@ -81,9 +92,12 @@ describe('an in-contact PTY probe that could not determine child processes', () 
     expect(inspection).not.toHaveProperty('unavailable')
   })
 
-  // The collapse itself: a completed scan that positively observed an idle shell publishes
-  // legacy fields indistinguishable from all three cases above.
-  it('is indistinguishable from an observed idle shell on the legacy fields alone', () => {
+  // The collapse itself, stated through the reader the guards call rather than by comparing
+  // two results of the helper above: those two inputs differ only in the foreground verdict,
+  // and no arm of the classifier separates them on the legacy pair, so an equality between
+  // them holds whatever that arm returns. Reading each one back with the evidence stripped is
+  // the claim that can actually fail — it reddens the moment the boolean stops collapsing.
+  it('reads as an exit to a consumer that sees only the legacy fields', () => {
     const degraded = localInspection(
       { verdict: 'unverifiable', reason: 'process table scan degraded' },
       { ok: true, title: 'zsh' },
@@ -98,9 +112,9 @@ describe('an in-contact PTY probe that could not determine child processes', () 
     )
 
     expect(observed.processEvidence?.children.verdict).toBe('exited')
-    expect(degraded.foregroundProcess).toBe(observed.foregroundProcess)
-    expect(degraded.hasChildProcesses).toBe(observed.hasChildProcesses)
-    expect(degraded.unavailable).toBe(observed.unavailable)
+    expect(degraded.processEvidence?.children.verdict).toBe('unverifiable')
+    expect(legacyOnlyChildrenVerdict(degraded)).toBe('exited')
+    expect(legacyOnlyChildrenVerdict(observed)).toBe('exited')
   })
 
   // The local classifier can also publish `false` beside a positively observed 'live' when
