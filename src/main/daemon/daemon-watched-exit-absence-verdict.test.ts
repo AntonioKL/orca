@@ -74,6 +74,38 @@ describe('a daemon-backed watched exit', () => {
     expect(adapter.ptyAbsenceVerdict(id)).toBe('unverifiable')
   })
 
+  itOnPosix('does not let a legacy generation certify the id its replacement reuses', async () => {
+    // Two real daemons, as in an upgrade: the legacy one watches the exit, and reopening the
+    // pane reuses that session id on the current one. `markSessionActive` clears only the
+    // certificate its own adapter issued, so the legacy one keeps its — and the router's
+    // verdict asks every adapter.
+    const replacement = await startDaemonAdapterHarness(() => createMockSubprocess())
+    const router = new DaemonPtyRouter({ current: replacement.adapter, legacy: [adapter] })
+    try {
+      const id = await watchedExitOf(adapter)
+      expect(adapter.ptyAbsenceVerdict(id)).toBe('exited')
+
+      await router.spawn({ cols: 80, rows: 24, sessionId: id })
+      expect(router.hasPty(id)).toBe(true)
+
+      // The replacement's daemon goes away without reporting an exit: tracking drops, no
+      // certificate is issued for it, and the session's fate is simply unknown.
+      replacement.adapter.fanoutSyntheticExits(1)
+      expect(router.hasPty(id)).toBe(false)
+
+      // The bytes the renderer reads: `unavailable` is what raises the running-process
+      // dialog, and a previous generation's certificate must not be able to strip it.
+      const inspection = await inspectPtyProviderProcessForRenderer(router, id)
+      expect(inspection).toEqual(buildAbsentPtyInspection('unverifiable'))
+      expect(inspection).toHaveProperty('unavailable')
+    } finally {
+      router.disposeRouterOnly()
+      replacement.adapter.dispose()
+      await replacement.server.shutdown()
+      rmSync(replacement.dir, { recursive: true, force: true })
+    }
+  })
+
   itOnPosix('publishes the payload the close prompt treats as silent', async () => {
     const router = new DaemonPtyRouter({ current: adapter, legacy: [] })
     const ptyId = await watchedExitOf(router)
