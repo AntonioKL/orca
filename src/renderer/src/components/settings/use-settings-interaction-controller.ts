@@ -4,7 +4,9 @@ import { useAppStore } from '../../store'
 import { translate } from '@/i18n/i18n'
 import { mergeFontSuggestions } from './SettingsConstants'
 import type { SettingsStoreModel } from './use-settings-store-model'
+import type { SettingsDeepLinkTargetWatch } from './settings-deep-link-target-watcher'
 import {
+  cancelPendingSettingsDeepLinkTargetWatch,
   cancelPendingSettingsSubsectionScrollFrame,
   readSourceControlAiSettings,
   SETTINGS_TARGET_HIGHLIGHT_MS
@@ -34,6 +36,7 @@ export function useSettingsInteractionController(model: SettingsStoreModel) {
   const pendingNavSectionRef = useRef<string | null>(null)
   const pendingScrollTargetRef = useRef<string | null>(null)
   const pendingSubsectionScrollFrameRef = useRef<number | null>(null)
+  const pendingScrollTargetWatchRef = useRef<SettingsDeepLinkTargetWatch | null>(null)
   const repoHooksRequestSeqRef = useRef(0)
   const shortcutsEscapeConfirmUntilRef = useRef(0)
   const sourceControlAiWriteQueueRef = useRef<Promise<void>>(Promise.resolve())
@@ -82,6 +85,7 @@ export function useSettingsInteractionController(model: SettingsStoreModel) {
     }
     // Why: cancel pending subsection jumps with the scroll container so a stale deep-link frame can't run after close.
     cancelPendingSettingsSubsectionScrollFrame(pendingSubsectionScrollFrameRef)
+    cancelPendingSettingsDeepLinkTargetWatch(pendingScrollTargetWatchRef)
   }, [])
 
   useEffect(() => {
@@ -177,6 +181,7 @@ export function useSettingsInteractionController(model: SettingsStoreModel) {
     pendingNavSectionRef,
     pendingScrollTargetRef,
     pendingSubsectionScrollFrameRef,
+    pendingScrollTargetWatchRef,
     repoHooksRequestSeqRef,
     shortcutsEscapeConfirmUntilRef,
     hasUnsavedSourceControlAiPromptChanges,
