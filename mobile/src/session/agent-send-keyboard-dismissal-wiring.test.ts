@@ -20,12 +20,10 @@ describe('terminal send keyboard dismissal wiring', () => {
   it('gates the dismissal on the agent-session predicate', () => {
     const slice = routeSlice(
       'const dismissKeyboardAfterAgentSend = useCallback(',
-      '[dismissSoftwareKeyboard]\n  )'
+      '[dismissSoftwareKeyboard, getSendCompletionGeneration]\n  )'
     )
     expect(slice).toContain('shouldDismissKeyboardAfterTerminalSend(origin.tab, accepted)')
-    expect(slice).toContain(
-      'origin.generation === terminalSendKeyboardDismissalGenerationRef.current'
-    )
+    expect(slice).toContain('origin.generation === getSendCompletionGeneration()')
     expect(slice).toContain('dismissSoftwareKeyboard()')
     expect(sessionRouteSource).toContain(
       "import { shouldDismissKeyboardAfterTerminalSend } from '../../../../src/session/agent-send-keyboard-dismissal'"
@@ -33,23 +31,21 @@ describe('terminal send keyboard dismissal wiring', () => {
   })
 
   it('invalidates pending terminal sends when the focused input surface changes', () => {
-    expect(sessionRouteSource).toContain(
-      'terminalSendKeyboardDismissalSurfaceRef.current !== terminalSendKeyboardDismissalSurface'
+    const slice = routeSlice(
+      'const getSendCompletionGeneration = useMobileSendCompletionGeneration({',
+      '})'
     )
-    expect(sessionRouteSource).toContain(
-      'activeSessionTabId,\n    activeHandle,\n    showNativeChat,\n    liveInputEnabled'
+    expect(slice).toContain(
+      'surfaceKey: JSON.stringify([activeSessionTabId, activeHandle, showNativeChat, liveInputEnabled])'
     )
-    expect(
-      sessionRouteSource.match(/terminalSendKeyboardDismissalGenerationRef\.current \+= 1/g)
-    ).toHaveLength(2)
   })
 
   it('dismisses after the live input submits, which is the only Enter path', () => {
     // terminal-live-input.ts deliberately keeps Enter off the key map, so
     // onSubmitEditing is the single send seam for the live field.
     const slice = routeSlice('ref={liveInputRef}', 'importantForAutofill="no"')
-    expect(slice).toContain('generation: terminalSendKeyboardDismissalGenerationRef.current')
-    expect(slice).toContain('dismissKeyboardAfterAgentSend(keyboardDismissalOrigin, accepted)')
+    expect(slice).toContain('generation: getSendCompletionGeneration()')
+    expect(slice).toContain('dismissKeyboardAfterAgentSend(sendOrigin, accepted)')
     // Explicit dismissal replaces RN's blur, which stays off so a shell send
     // does not drop focus.
     expect(slice).toContain('blurOnSubmit={false}')
@@ -58,12 +54,8 @@ describe('terminal send keyboard dismissal wiring', () => {
   it('dismisses the buffered command send only once the write is accepted', () => {
     const slice = routeSlice('async function handleSend() {', 'async function handleAccessoryKey(')
     const acceptedAt = slice.indexOf('const accepted = isTerminalSendRpcAccepted(response)')
-    const restoreAt = slice.indexOf(
-      'setInput((current) => restoreRejectedBufferedTerminalDraft(current, draft))'
-    )
-    const dismissAt = slice.indexOf(
-      'dismissKeyboardAfterAgentSend(keyboardDismissalOrigin, accepted)'
-    )
+    const restoreAt = slice.indexOf('restoreRejectedDraft()', acceptedAt)
+    const dismissAt = slice.indexOf('dismissKeyboardAfterAgentSend(sendOrigin, accepted)')
     const responseAt = slice.indexOf('const response = await client.sendRequest(')
     const catchAt = slice.indexOf('} catch {')
     expect(dismissAt).toBeGreaterThan(0)
@@ -75,7 +67,16 @@ describe('terminal send keyboard dismissal wiring', () => {
     // Both resolved rejections and transport failures restore the raw draft.
     expect(dismissAt).toBeLessThan(catchAt)
     expect(slice.slice(catchAt)).not.toContain('dismissKeyboardAfterAgentSend(')
-    expect(slice.slice(catchAt)).toContain('restoreRejectedBufferedTerminalDraft(current, draft)')
+    expect(slice.slice(catchAt)).toContain('restoreRejectedDraft()')
+  })
+
+  it('only restores a rejected buffered draft on its originating surface', () => {
+    const slice = routeSlice('async function handleSend() {', 'async function handleAccessoryKey(')
+    expect(slice.match(/restoreRejectedBufferedTerminalDraft\(/g)).toHaveLength(1)
+    expect(slice.match(/sendOrigin\.generation === getSendCompletionGeneration\(\)/g)).toHaveLength(
+      1
+    )
+    expect(slice.match(/restoreRejectedDraft\(\)/g)).toHaveLength(2)
   })
 
   it('leaves the accessory shortcut keys alone, Enter included', () => {

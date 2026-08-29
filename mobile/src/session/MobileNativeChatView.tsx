@@ -60,6 +60,8 @@ type Props = {
   onSend: (text: string) => Promise<boolean>
   /** Route identity used to fence accepted sends that settle after a tab/view switch. */
   sendSurfaceId: string
+  /** Reads the retained route's focus generation for accepted-send fencing. */
+  getSendCompletionGeneration: () => number
   /** Accepted user echoes awaiting transcript replacement, including image previews. */
   pending: MobileNativeChatPendingItem[]
   /** Local photo URIs retained when the authoritative transcript replaces an
@@ -129,6 +131,7 @@ export function MobileNativeChatView({
   onLoadEarlier,
   onSend,
   sendSurfaceId,
+  getSendCompletionGeneration,
   pending,
   imagePreviewsByMessageId,
   composerText,
@@ -435,6 +438,7 @@ export function MobileNativeChatView({
         onChangeText={onComposerTextChange}
         onSend={handleSend}
         sendSurfaceId={sendSurfaceId}
+        getSendCompletionGeneration={getSendCompletionGeneration}
         agent={agent}
         sessionOptions={sessionOptions}
         onAttachImage={onAttachImage}

@@ -83,6 +83,7 @@ import {
 import { useMobilePrBranchContext } from '../../../../src/session/use-mobile-pr-branch-context'
 import { isFloatingWorkspaceWorktreeId } from '../../../../src/session/floating-workspace'
 import { shouldDismissKeyboardAfterTerminalSend } from '../../../../src/session/agent-send-keyboard-dismissal'
+import { useMobileSendCompletionGeneration } from '../../../../src/session/use-mobile-send-completion-generation'
 import { SessionDockColumn } from '../../../../src/session/SessionDockColumn'
 import { MobileSessionHeaderIconButton } from '../../../../src/session/MobileSessionHeaderIconButton'
 import { MobileSessionHeaderMoreActionsSheet } from '../../../../src/session/MobileSessionHeaderMoreActionsSheet'
@@ -823,8 +824,6 @@ export default function SessionScreen() {
   const [coveredStreamRevision, setCoveredStreamRevision] = useState(0)
   const [activeSessionTabId, setActiveSessionTabId] = useState<string | null>(null)
   const activeSessionTabIdRef = useRef<string | null>(null)
-  const terminalSendKeyboardDismissalGenerationRef = useRef(0)
-  const terminalSendKeyboardDismissalSurfaceRef = useRef<string | null>(null)
   // Auto-scroll the tab strip so the desktop-synced active tab is revealed without a manual scroll.
   const tabStripRef = useRef<ScrollView>(null)
   const tabStripOffsetRef = useRef(0)
@@ -1004,15 +1003,6 @@ export default function SessionScreen() {
     liveInputEnabled,
     timerRef: liveInputFocusTimerRef
   })
-  useFocusEffect(
-    useCallback(() => {
-      // Expo retains this route while pushed screens are visible.
-      return () => {
-        terminalSendKeyboardDismissalGenerationRef.current += 1
-        resetLiveInputFocus()
-      }
-    }, [resetLiveInputFocus])
-  )
   const [browserScreencastSupported, setBrowserScreencastSupported] = useState<boolean | null>(null)
   // Why: hosts without aiVault.v1 reject listSessions, so hide the header entry instead of a dead-end "update this host" panel.
   const [agentSessionHistorySupported, setAgentSessionHistorySupported] = useState<boolean | null>(
@@ -1125,16 +1115,10 @@ export default function SessionScreen() {
   })
   const { toggleTabChatView, showNativeChat, showNativeChatRef } = nativeChatController
   nativeChatSendError.bannerMountedRef.current = showNativeChat
-  const terminalSendKeyboardDismissalSurface = JSON.stringify([
-    activeSessionTabId,
-    activeHandle,
-    showNativeChat,
-    liveInputEnabled
-  ])
-  if (terminalSendKeyboardDismissalSurfaceRef.current !== terminalSendKeyboardDismissalSurface) {
-    terminalSendKeyboardDismissalSurfaceRef.current = terminalSendKeyboardDismissalSurface
-    terminalSendKeyboardDismissalGenerationRef.current += 1
-  }
+  const getSendCompletionGeneration = useMobileSendCompletionGeneration({
+    onBlur: resetLiveInputFocus,
+    surfaceKey: JSON.stringify([activeSessionTabId, activeHandle, showNativeChat, liveInputEnabled])
+  })
 
   const dictation = useMobileDictation({
     client,
@@ -3002,13 +2986,13 @@ export default function SessionScreen() {
       accepted: boolean
     ) => {
       if (
-        origin.generation === terminalSendKeyboardDismissalGenerationRef.current &&
+        origin.generation === getSendCompletionGeneration() &&
         shouldDismissKeyboardAfterTerminalSend(origin.tab, accepted)
       ) {
         dismissSoftwareKeyboard()
       }
     },
-    [dismissSoftwareKeyboard]
+    [dismissSoftwareKeyboard, getSendCompletionGeneration]
   )
 
   async function handleSend() {
@@ -3020,10 +3004,18 @@ export default function SessionScreen() {
 
     const draft = input
     const text = normalizeTerminalTextInput(draft)
-    const keyboardDismissalOrigin = {
+    const sendOrigin = {
       tab: activeSessionTab,
-      generation: terminalSendKeyboardDismissalGenerationRef.current
+      generation: getSendCompletionGeneration()
     }
+    const restoreRejectedDraft = () =>
+      setInput((current) =>
+        restoreRejectedBufferedTerminalDraft(
+          current,
+          draft,
+          sendOrigin.generation === getSendCompletionGeneration()
+        )
+      )
     setInput('')
 
     try {
@@ -3040,11 +3032,11 @@ export default function SessionScreen() {
       )
       const accepted = isTerminalSendRpcAccepted(response)
       if (!accepted) {
-        setInput((current) => restoreRejectedBufferedTerminalDraft(current, draft))
+        restoreRejectedDraft()
       }
-      dismissKeyboardAfterAgentSend(keyboardDismissalOrigin, accepted)
+      dismissKeyboardAfterAgentSend(sendOrigin, accepted)
     } catch {
-      setInput((current) => restoreRejectedBufferedTerminalDraft(current, draft))
+      restoreRejectedDraft()
     } finally {
       sendingRef.current = false
     }
@@ -4763,6 +4755,7 @@ export default function SessionScreen() {
                   sendErrorMessage={nativeChatSendError.message}
                   onClearSendError={nativeChatSendError.clear}
                   sendSurfaceId={nativeChatScopeKey ?? ''}
+                  getSendCompletionGeneration={getSendCompletionGeneration}
                   keyboardInset={keyboardLift}
                 />
                 {toastMessage && (
@@ -5019,12 +5012,12 @@ export default function SessionScreen() {
                       onChange={handleLiveInputChange}
                       onKeyPress={handleLiveInputKeyPress}
                       onSubmitEditing={() => {
-                        const keyboardDismissalOrigin = {
+                        const sendOrigin = {
                           tab: activeSessionTab,
-                          generation: terminalSendKeyboardDismissalGenerationRef.current
+                          generation: getSendCompletionGeneration()
                         }
                         void handleLiveInputSubmit().then((accepted) =>
-                          dismissKeyboardAfterAgentSend(keyboardDismissalOrigin, accepted)
+                          dismissKeyboardAfterAgentSend(sendOrigin, accepted)
                         )
                       }}
                       placeholder=""

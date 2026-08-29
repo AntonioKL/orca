@@ -46,6 +46,7 @@ vi.mock('../components/BottomDrawer', async () => {
 
 describe('MobileNativeChatComposer', () => {
   let renderer: ReactTestRenderer | null = null
+  const getCurrentSendCompletionGeneration = () => 0
 
   afterEach(() => {
     act(() => renderer?.unmount())
@@ -56,7 +57,8 @@ describe('MobileNativeChatComposer', () => {
     onSend: (text: string) => Promise<boolean>,
     onChangeText: () => void,
     isAttaching = false,
-    sendSurfaceId = 'tab-a'
+    sendSurfaceId = 'tab-a',
+    getSendCompletionGeneration = () => 0
   ) {
     await act(async () => {
       renderer = create(
@@ -65,6 +67,7 @@ describe('MobileNativeChatComposer', () => {
           onChangeText,
           onSend,
           sendSurfaceId,
+          getSendCompletionGeneration,
           isAttaching
         })
       )
@@ -121,7 +124,8 @@ describe('MobileNativeChatComposer', () => {
           value: ' /clear is prose ',
           onChangeText: vi.fn(),
           onSend,
-          sendSurfaceId: 'tab-a'
+          sendSurfaceId: 'tab-a',
+          getSendCompletionGeneration: getCurrentSendCompletionGeneration
         })
       )
     })
@@ -169,6 +173,7 @@ describe('MobileNativeChatComposer', () => {
           onChangeText: vi.fn(),
           onSend,
           sendSurfaceId: 'tab-a',
+          getSendCompletionGeneration: getCurrentSendCompletionGeneration,
           sessionOptions: { isWorking: false, controller }
         })
       )
@@ -202,6 +207,7 @@ describe('MobileNativeChatComposer', () => {
           onChangeText: vi.fn(),
           onSend,
           sendSurfaceId: 'tab-a',
+          getSendCompletionGeneration: getCurrentSendCompletionGeneration,
           sessionOptions: {
             isWorking: false,
             controller: {
@@ -248,6 +254,7 @@ describe('MobileNativeChatComposer', () => {
           onChangeText: vi.fn(),
           onSend: vi.fn().mockResolvedValue(true),
           sendSurfaceId: 'tab-a',
+          getSendCompletionGeneration: getCurrentSendCompletionGeneration,
           disabled: true
         })
       )
@@ -270,6 +277,7 @@ describe('MobileNativeChatComposer', () => {
           onChangeText: vi.fn(),
           onSend: vi.fn().mockResolvedValue(true),
           sendSurfaceId: 'tab-a',
+          getSendCompletionGeneration: getCurrentSendCompletionGeneration,
           attachments: [
             { id: 'img-1', path: '/tmp/a.png', previewUri: 'file:///a.png' },
             { id: 'img-2', path: '/tmp/b.png', previewUri: 'file:///b.png' }
@@ -299,6 +307,7 @@ describe('MobileNativeChatComposer', () => {
           onChangeText: vi.fn(),
           onSend,
           sendSurfaceId: 'tab-a',
+          getSendCompletionGeneration: getCurrentSendCompletionGeneration,
           attachments: [{ id: 'img-1', path: '/tmp/a.png', previewUri: 'file:///a.png' }]
         })
       )
@@ -317,6 +326,7 @@ describe('MobileNativeChatComposer', () => {
           onChangeText,
           onSend: vi.fn().mockResolvedValue(true),
           sendSurfaceId: 'tab-a',
+          getSendCompletionGeneration: getCurrentSendCompletionGeneration,
           agent: 'claude'
         })
       )
@@ -356,6 +366,7 @@ describe('MobileNativeChatComposer', () => {
           onChangeText: vi.fn(),
           onSend: vi.fn().mockResolvedValue(true),
           sendSurfaceId: 'tab-a',
+          getSendCompletionGeneration: getCurrentSendCompletionGeneration,
           agent: 'codex'
         })
       )
@@ -390,6 +401,7 @@ describe('MobileNativeChatComposer', () => {
           onChangeText: vi.fn(),
           onSend: vi.fn().mockResolvedValue(true),
           sendSurfaceId: 'tab-a',
+          getSendCompletionGeneration: getCurrentSendCompletionGeneration,
           onMicPress,
           dictationMode: 'hold',
           onMicPressIn,
@@ -409,6 +421,7 @@ describe('MobileNativeChatComposer', () => {
           onChangeText: vi.fn(),
           onSend: vi.fn().mockResolvedValue(true),
           sendSurfaceId: 'tab-a',
+          getSendCompletionGeneration: getCurrentSendCompletionGeneration,
           onMicPress,
           dictationMode: 'toggle',
           onMicPressIn,
@@ -465,10 +478,37 @@ describe('MobileNativeChatComposer', () => {
           value: 'new surface draft',
           onChangeText: vi.fn(),
           onSend: vi.fn().mockResolvedValue(true),
-          sendSurfaceId: 'tab-b'
+          sendSurfaceId: 'tab-b',
+          getSendCompletionGeneration: getCurrentSendCompletionGeneration
         })
       )
     })
+    await act(async () => {
+      resolveSend?.(true)
+      await pendingSend
+    })
+
+    expect(Keyboard.dismiss).not.toHaveBeenCalled()
+  })
+
+  it('does not dismiss after its retained route loses focus', async () => {
+    vi.mocked(Keyboard.dismiss).mockClear()
+    let generation = 0
+    let resolveSend: ((accepted: boolean) => void) | null = null
+    const onSend = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSend = resolve
+        })
+    )
+    await render(onSend, vi.fn(), false, 'tab-a', () => generation)
+
+    let pendingSend!: Promise<void>
+    await act(async () => {
+      pendingSend = sendButton().props.onPress()
+      await Promise.resolve()
+    })
+    generation += 1
     await act(async () => {
       resolveSend?.(true)
       await pendingSend
