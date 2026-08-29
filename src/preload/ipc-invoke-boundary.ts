@@ -8,9 +8,17 @@
  * point it is rendered. Stripping here, where the envelope is created, is what makes the guarantee
  * hold for a call site nobody has written yet.
  *
- * The envelope is not lost, only demoted: the rejection keeps its identity, its properties and its
- * stack (V8 fixes `stack` at construction, so it still spells out the wrapped form), and the raw
- * message is logged with the channel that produced it before the message is narrowed.
+ * The envelope is not lost, only demoted: it is logged here, against the channel that produced it,
+ * before the message is narrowed. Preload is the last place it can be kept, because this rejection
+ * does not reach the renderer as this object. `contextBridge` copies what crosses it, so a renderer
+ * consumer receives a fresh plain `Error` carrying `message` and a `stack` regenerated from that
+ * message — the prototype, own properties and object identity stop here, and so does the wrapped
+ * form of the stack. Nothing is lost by narrowing in place that the bridge would not have dropped
+ * anyway: an `ipcRenderer.invoke` rejection arrives already flattened to `message` and `stack`, its
+ * own main-process class and properties gone one hop earlier.
+ *
+ * Measured across the real binary rather than reasoned about — see
+ * `ipc-invoke-boundary-bridge.electron.test.ts`, which asserts the renderer's view.
  */
 
 import { ipcRenderer } from 'electron'
