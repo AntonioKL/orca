@@ -3,6 +3,11 @@ import { parseAppSshPtyId } from '../../../providers/ssh-pty-id'
 
 const RELAY_STATUS_TIMEOUT_MS = 2_000
 const relayMintEpochByProvider = new WeakMap<IPtyProvider, Promise<string | undefined>>()
+const retiredRelayOwnerByPane = new Map<string, string>()
+
+function retiredRelayOwnerKey(connectionId: string, paneKey: string): string {
+  return `${connectionId}\0${paneKey}`
+}
 
 function parseRelayPtyMintEpoch(relayPtyId: string): string | undefined {
   const match = /^pty2:([^:]+):(\d+)$/.exec(relayPtyId)
@@ -35,6 +40,37 @@ function readRelayMintEpoch(provider: IPtyProvider): Promise<string | undefined>
   const result = read ?? Promise.resolve(undefined)
   relayMintEpochByProvider.set(provider, result)
   return result
+}
+
+export function rememberRetiredRelayEpochOwner(args: {
+  connectionId: string
+  paneKey: string | undefined
+  ownerPtyId: string
+}): void {
+  if (!args.paneKey) {
+    return
+  }
+  const parsed = parseAppSshPtyId(args.ownerPtyId)
+  if (parsed?.connectionId !== args.connectionId || !parseRelayPtyMintEpoch(parsed.relayPtyId)) {
+    return
+  }
+  retiredRelayOwnerByPane.set(
+    retiredRelayOwnerKey(args.connectionId, args.paneKey),
+    args.ownerPtyId
+  )
+}
+
+export function takeRetiredRelayEpochOwner(
+  connectionId: string | null | undefined,
+  paneKey: string | null | undefined
+): string | undefined {
+  if (!connectionId || !paneKey) {
+    return undefined
+  }
+  const key = retiredRelayOwnerKey(connectionId, paneKey)
+  const ownerPtyId = retiredRelayOwnerByPane.get(key)
+  retiredRelayOwnerByPane.delete(key)
+  return ownerPtyId
 }
 
 export async function compareStablePaneRelayEpoch(args: {
@@ -77,11 +113,17 @@ function stripAgentResumeOptions(options: PtySpawnOptions): PtySpawnOptions {
 
 export async function deriveStablePaneFreshSpawnOptions(args: {
   provider: IPtyProvider
-  ownerPtyId: string
+  ownerPtyId: string | undefined
   connectionId: string | null | undefined
   spawnOptions: PtySpawnOptions
 }): Promise<{ options: PtySpawnOptions; agentResumeDeclined: boolean }> {
-  const verdict = await compareStablePaneRelayEpoch(args)
+  const verdict = args.ownerPtyId
+    ? await compareStablePaneRelayEpoch({
+        provider: args.provider,
+        ownerPtyId: args.ownerPtyId,
+        connectionId: args.connectionId
+      })
+    : 'unknown'
   const hasAgentResumeIntent = Boolean(
     args.spawnOptions.launchAgent ||
     args.spawnOptions.resumeProviderSession ||

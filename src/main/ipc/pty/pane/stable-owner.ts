@@ -13,7 +13,10 @@ import {
 import { ptyIncarnationById, ptyOwnership } from '../provider/ownership-state'
 import { isPtyAlreadyGoneError } from '../provider/liveness'
 import { clearProviderPtyState } from '../provider/state-cleanup'
-import { deriveStablePaneFreshSpawnOptions } from './relay-pty-mint-epoch'
+import {
+  deriveStablePaneFreshSpawnOptions,
+  takeRetiredRelayEpochOwner
+} from './relay-pty-mint-epoch'
 
 export type StablePaneOwner = {
   handle?: string
@@ -165,6 +168,7 @@ export type StablePaneSpawnContext = {
   owner: StablePaneOwner | null
   worktreeId?: string
   connectionId?: string | null
+  paneKey?: string | null
   resolveOwner?: () => StablePaneOwner | null
   onFreshSpawn?: (result: PtySpawnResult) => void
 }
@@ -288,14 +292,18 @@ export async function spawnForStablePane(
       return attached
     }
   }
-  const freshSpawn = args.owner
-    ? await deriveStablePaneFreshSpawnOptions({
-        provider: args.provider,
-        ownerPtyId: args.owner.ptyId,
-        connectionId: args.connectionId,
-        spawnOptions: args.spawnOptions
-      })
-    : { options: args.spawnOptions, agentResumeDeclined: false }
+  const retiredRelayOwnerPtyId = takeRetiredRelayEpochOwner(args.connectionId, args.paneKey)
+  const relayEpochOwnerPtyId =
+    args.owner?.ptyId ??
+    (args.spawnOptions.resumeProviderSession || args.spawnOptions.agentSessionEnsure
+      ? retiredRelayOwnerPtyId
+      : undefined)
+  const freshSpawn = await deriveStablePaneFreshSpawnOptions({
+    provider: args.provider,
+    ownerPtyId: relayEpochOwnerPtyId,
+    connectionId: args.connectionId,
+    spawnOptions: args.spawnOptions
+  })
   const providerResult = await args.provider.spawn(freshSpawn.options)
   const result = freshSpawn.agentResumeDeclined
     ? { ...providerResult, agentResumeUnavailable: true as const }
