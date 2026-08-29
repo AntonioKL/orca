@@ -17,20 +17,54 @@ export function findWorktreeIdForTab(
   return undefined
 }
 
-export function indexTerminalTabsById(
-  session: WorkspaceSessionState
-): ReadonlyMap<string, TerminalTab> {
+export type TerminalTabLookup = {
+  get(tabId: string): TerminalTab | undefined
+}
+
+/** Resolves tabs on demand while retaining first-match ordering and scan progress. */
+export function createLazyTerminalTabLookup(session: WorkspaceSessionState): TerminalTabLookup {
+  const tabsByWorktree = Object.entries(session.tabsByWorktree ?? {})
   const tabsById = new Map<string, TerminalTab>()
-  for (const tabs of Object.values(session.tabsByWorktree ?? {})) {
-    for (const tab of tabs) {
-      const tabId = tab.id
-      // Preserve the prior Object.entries()/find() first-match behavior for duplicate IDs.
-      if (!tabsById.has(tabId)) {
-        tabsById.set(tabId, tab)
+  let worktreeIndex = 0
+  let tabIndex = 0
+  let exhausted = false
+
+  return {
+    get(requestedTabId: string): TerminalTab | undefined {
+      if (tabsById.has(requestedTabId)) {
+        return tabsById.get(requestedTabId)
       }
+      if (exhausted) {
+        return undefined
+      }
+
+      while (worktreeIndex < tabsByWorktree.length) {
+        const tabs = tabsByWorktree[worktreeIndex][1]
+        while (tabIndex < tabs.length) {
+          const currentIndex = tabIndex
+          tabIndex += 1
+          // Array#some, used by the prior lookup, skips sparse holes.
+          if (!(currentIndex in tabs)) {
+            continue
+          }
+          const tab = tabs[currentIndex]
+          const tabId = tab.id
+          // Preserve first-match behavior when persisted IDs collide.
+          if (!tabsById.has(tabId)) {
+            tabsById.set(tabId, tab)
+          }
+          if (tabId === requestedTabId) {
+            return tabsById.get(requestedTabId)
+          }
+        }
+        worktreeIndex += 1
+        tabIndex = 0
+      }
+
+      exhausted = true
+      return undefined
     }
   }
-  return tabsById
 }
 
 /** Bridges a tab's legacy numeric pane keys to stable ones; returns the alias rows worth persisting. */

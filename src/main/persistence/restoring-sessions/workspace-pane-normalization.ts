@@ -11,7 +11,7 @@ import type { SshRemotePtyLease } from '../../../shared/ssh-types'
 import { isTerminalLeafId, makePaneKey, parsePaneKey } from '../../../shared/stable-pane-id'
 import { findCrossHostPaneTabIds, withoutPaneTabIds } from './cross-host-pane-tab-ids'
 import {
-  indexTerminalTabsById,
+  createLazyTerminalTabLookup,
   registerLegacyPaneKeyAliasesForTab
 } from './pane-identity-migration'
 import { normalizeTerminalLayoutSnapshotForPersistence } from './terminal-layout-normalization'
@@ -43,7 +43,7 @@ export function normalizeWorkspaceSessionPaneIdentities(
   const migrationUnsupportedEntries: MigrationUnsupportedPtyEntry[] = []
   const legacyPaneKeyAliasEntries: LegacyPaneKeyAliasEntry[] = []
   const terminalLayoutsByTabId: Record<string, TerminalLayoutSnapshot> = {}
-  let tabsById: ReturnType<typeof indexTerminalTabsById> | null = null
+  let tabsById: ReturnType<typeof createLazyTerminalTabLookup> | null = null
   for (const [tabId, layout] of Object.entries(session.terminalLayoutsByTabId ?? {})) {
     const normalized = normalizeTerminalLayoutSnapshotForPersistence(
       layout,
@@ -52,7 +52,7 @@ export function normalizeWorkspaceSessionPaneIdentities(
     terminalLayoutsByTabId[tabId] = normalized.snapshot
     leafIdByInputLeafIdByTabId.set(tabId, normalized.leafIdByInputLeafId)
     if (!options.skipAliasTabIds?.has(tabId)) {
-      tabsById ??= indexTerminalTabsById(session)
+      tabsById ??= createLazyTerminalTabLookup(session)
       const tabAliasEntries = registerLegacyPaneKeyAliasesForTab({
         tabId,
         tab: tabsById.get(tabId),
