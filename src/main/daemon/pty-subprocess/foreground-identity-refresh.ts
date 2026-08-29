@@ -137,13 +137,22 @@ export function createForegroundIdentityRefresh(args: {
     }
     state.refreshInFlight = true
     state.lastRefreshStartedAt = now
+    // Why not `now` everywhere below: the POSIX process table is a process-wide cache
+    // shared by every pane, so this scan can be answered from one another pane started
+    // earlier. `now` is when this pane ASKED; the table can be a TTL older, and an agent
+    // that began in between is simply missing from it. Replaced by the measured scan
+    // start once the resolver reports one.
+    let scanStartedAt = now
     const identityOlderThan = (ms: number): boolean =>
       state.cachedAgentForeground !== null &&
       Date.now() - state.cachedAgentForeground.refreshedAt > ms
     const retireStaleForegroundIdentity = ({ onlyWhenAged = false } = {}): void => {
-      // This scan sampled the process table at `now`; an identity stamped after that is
-      // evidence it never had a chance to see, so it cannot be retired on this answer.
-      if (state.cachedAgentForeground !== null && state.cachedAgentForeground.refreshedAt > now) {
+      // This scan sampled the process table at `scanStartedAt`; an identity stamped after
+      // that is evidence it never had a chance to see, so it cannot be retired on this answer.
+      if (
+        state.cachedAgentForeground !== null &&
+        state.cachedAgentForeground.refreshedAt > scanStartedAt
+      ) {
         return
       }
       const currentFallbackProcess = args.getFallbackProcess()
@@ -171,81 +180,84 @@ export function createForegroundIdentityRefresh(args: {
         ? { anchorProcessId: anchor.pid, anchorProcessName: anchor.processName }
         : {})
     })
-      .then<string | void>(({ processName, processId, available, anchorPidForeign }) => {
-        state.lastScanSettlement = {
-          at: Date.now(),
-          startedAt: now,
-          available,
-          sawAgent: available && recognizeAgentProcess(processName) !== null
-        }
-        if (args.isDead() || !available) {
-          return
-        }
-        if (!processName || !recognizeAgentProcess(processName)) {
-          if (
-            process.platform === 'win32' &&
-            fallbackIsShell &&
-            state.cachedAgentForeground !== null
-          ) {
-            // Job, not console: needs no console attachment, so no fork (#10857).
-            const verdict = judgeCachedAgentJobEvidence({
-              jobProcessIds: readWindowsPtyJobProcessIds(proc),
-              jobSupported: isWindowsPtyJobReadable(),
-              shellPid: proc.pid,
-              anchorProcessId: state.cachedAgentForeground.pid,
-              identityAgeMs: Date.now() - state.cachedAgentForeground.refreshedAt
-            })
-            // Unverifiable is never exit proof (ssh-execution-boundary.md): hold.
-            if (verdict === 'unavailable') {
-              return
-            }
-            if (verdict === 'unsupported') {
-              // No job to consult on this build, and the scan that got here was
-              // available and found no agent. Trust it, as every other platform
-              // does, rather than holding a dead name forever (#16059).
-              retireStaleForegroundIdentity()
-              return
-            }
-            if (verdict === 'confirmed' || verdict === 'recheck') {
-              if (anchorPidForeign === true) {
-                // The scan proved the pid recycled to a non-agent: retire now.
+      .then<string | void>(
+        ({ processName, processId, available, anchorPidForeign, tableScanStartedAtMs }) => {
+          scanStartedAt = tableScanStartedAtMs ?? now
+          state.lastScanSettlement = {
+            at: Date.now(),
+            startedAt: scanStartedAt,
+            available,
+            sawAgent: available && recognizeAgentProcess(processName) !== null
+          }
+          if (args.isDead() || !available) {
+            return
+          }
+          if (!processName || !recognizeAgentProcess(processName)) {
+            if (
+              process.platform === 'win32' &&
+              fallbackIsShell &&
+              state.cachedAgentForeground !== null
+            ) {
+              // Job, not console: needs no console attachment, so no fork (#10857).
+              const verdict = judgeCachedAgentJobEvidence({
+                jobProcessIds: readWindowsPtyJobProcessIds(proc),
+                jobSupported: isWindowsPtyJobReadable(),
+                shellPid: proc.pid,
+                anchorProcessId: state.cachedAgentForeground.pid,
+                identityAgeMs: Date.now() - state.cachedAgentForeground.refreshedAt
+              })
+              // Unverifiable is never exit proof (ssh-execution-boundary.md): hold.
+              if (verdict === 'unavailable') {
+                return
+              }
+              if (verdict === 'unsupported') {
+                // No job to consult on this build, and the scan that got here was
+                // available and found no agent. Trust it, as every other platform
+                // does, rather than holding a dead name forever (#16059).
                 retireStaleForegroundIdentity()
                 return
               }
-              // The anchor pid is still in the job: the scan lost the row, not
-              // the agent. Restamp so a live agent never ages out (#9258).
-              state.cachedAgentForeground = {
-                ...state.cachedAgentForeground,
-                refreshedAt: Date.now()
+              if (verdict === 'confirmed' || verdict === 'recheck') {
+                if (anchorPidForeign === true) {
+                  // The scan proved the pid recycled to a non-agent: retire now.
+                  retireStaleForegroundIdentity()
+                  return
+                }
+                // The anchor pid is still in the job: the scan lost the row, not
+                // the agent. Restamp so a live agent never ages out (#9258).
+                state.cachedAgentForeground = {
+                  ...state.cachedAgentForeground,
+                  refreshedAt: Date.now()
+                }
+                return
               }
+              if (verdict === 'exited' || verdict === 'anchor-exited') {
+                // Safe mid-restart: an available scan already found no agent.
+                retireStaleForegroundIdentity()
+                return
+              }
+              // Unanchored superset evidence cannot tell a working agent from a
+              // leftover; the age bound settles it.
+              retireStaleForegroundIdentity({ onlyWhenAged: true })
               return
             }
-            if (verdict === 'exited' || verdict === 'anchor-exited') {
-              // Safe mid-restart: an available scan already found no agent.
-              retireStaleForegroundIdentity()
-              return
-            }
-            // Unanchored superset evidence cannot tell a working agent from a
-            // leftover; the age bound settles it.
-            retireStaleForegroundIdentity({ onlyWhenAged: true })
+            retireStaleForegroundIdentity()
             return
           }
-          retireStaleForegroundIdentity()
-          return
+          state.cachedAgentForeground = {
+            processName,
+            pid: processId ?? null,
+            refreshedAt: Date.now()
+          }
+          state.startupAgentForeground = null
+          return processName
         }
-        state.cachedAgentForeground = {
-          processName,
-          pid: processId ?? null,
-          refreshedAt: Date.now()
-        }
-        state.startupAgentForeground = null
-        return processName
-      })
+      )
       .catch(() => {
         // Best-effort only: foreground enrichment must never affect PTY health.
         state.lastScanSettlement = {
           at: Date.now(),
-          startedAt: now,
+          startedAt: scanStartedAt,
           available: false,
           sawAgent: false
         }
