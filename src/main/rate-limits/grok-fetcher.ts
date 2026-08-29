@@ -10,6 +10,7 @@ import {
   type GrokAuthReadResult,
   type GrokAuthSession
 } from './grok-auth'
+import { isReadableUsageBody } from './unreadable-usage-response'
 
 // Why: billing URL and headers must match Grok CLI or xAI rejects the request.
 const GROK_CLI_PROXY_BASE =
@@ -150,14 +151,27 @@ function grokRequestHeaders(session: GrokAuthSession): Record<string, string> {
   return headers
 }
 
-function resolveBillingConfig(data: GrokBillingResponse): GrokBillingConfig | null {
-  if (data.config) {
-    return data.config
+type GrokBillingConfigResolution =
+  | { kind: 'config'; config: GrokBillingConfig }
+  // Why: no config carrier at all is the documented "this plan has no weekly credits" answer.
+  | { kind: 'absent' }
+  | { kind: 'unreadable'; reason: string }
+
+// Why: a present carrier of the wrong type is a failed read, not an absent one — the old
+// truthiness test handed `[]`/`"invalid"` to the mappers, which produce no window, and the
+// windowless road answers `unavailable`: it discards the last good snapshot and hides the chip.
+function resolveBillingConfig(data: GrokBillingResponse): GrokBillingConfigResolution {
+  if (data.config !== undefined && data.config !== null) {
+    return isReadableUsageBody(data.config)
+      ? { kind: 'config', config: data.config }
+      : { kind: 'unreadable', reason: 'Grok billing config was not a billing reading' }
   }
-  if (typeof data.creditUsagePercent === 'number') {
-    return data
+  if (data.creditUsagePercent !== undefined && data.creditUsagePercent !== null) {
+    return typeof data.creditUsagePercent === 'number'
+      ? { kind: 'config', config: data }
+      : { kind: 'unreadable', reason: 'Grok credit usage was not a number' }
   }
-  return null
+  return { kind: 'absent' }
 }
 
 function billingUsageResult(
@@ -236,7 +250,11 @@ async function fetchMonthlyUsageFallback(
   if (outcome.kind === 'result') {
     return outcome
   }
-  const config = outcome.data.config ?? outcome.data
+  const resolution = resolveBillingConfig(outcome.data)
+  if (resolution.kind === 'unreadable') {
+    return { kind: 'result', result: result('error', resolution.reason) }
+  }
+  const config = resolution.kind === 'config' ? resolution.config : outcome.data
   return { kind: 'window', window: mapMonthlyUsage(config) }
 }
 
@@ -268,13 +286,17 @@ export async function fetchGrokRateLimits(
     if (outcome.kind === 'result') {
       return outcome.result
     }
-    const config = resolveBillingConfig(outcome.data)
+    const resolution = resolveBillingConfig(outcome.data)
+    if (resolution.kind === 'unreadable') {
+      return result('error', resolution.reason)
+    }
     // Why: a 200 without credit usage means the plan has no weekly credits —
     // 'unavailable' hides the bar (like Claude on API-key billing); 'error'
     // would paint a permanent alert for a signed-in account that has no quota.
-    if (!config) {
+    if (resolution.kind === 'absent') {
       return result('unavailable', 'Grok billing response did not include config')
     }
+    const config = resolution.config
     const weekly = mapWeeklyCredits(config)
     if (weekly) {
       return billingUsageResult({ weekly }, config, session)

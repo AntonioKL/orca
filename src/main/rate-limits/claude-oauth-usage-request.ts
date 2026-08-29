@@ -3,6 +3,7 @@ import type { ProviderRateLimits, RateLimitWindow } from '../../shared/rate-limi
 import { ensureElectronProxyFromEnvironment } from '../network/proxy-settings'
 import { createOAuthUsageError, OAuthUsageUnreadableError } from './claude-oauth-usage-error'
 import { mapClaudeUsageWindow, type ClaudeUsageWindowInput } from './claude-usage-window'
+import { isReadableUsageBody } from './unreadable-usage-response'
 import { abortedClaudeRateLimitResult } from './claude-usage-result'
 
 const OAUTH_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
@@ -103,13 +104,17 @@ export async function fetchClaudeOAuthUsage(
       throw await createOAuthUsageError(response)
     }
 
-    const data = (await response.json()) as OAuthUsageResponse
+    const data: unknown = await response.json()
     if (signal?.aborted) {
       return abortedClaudeRateLimitResult()
     }
-    const session = mapClaudeUsageWindow(data.five_hour, 300)
-    const weekly = mapClaudeUsageWindow(data.seven_day, 10080)
-    const fableWeekly = mapFableWeeklyWindow(data)
+    if (!isReadableUsageBody(data)) {
+      throw new OAuthUsageUnreadableError(describeUnreadableUsageResponse(data))
+    }
+    const body = data as OAuthUsageResponse
+    const session = mapClaudeUsageWindow(body.five_hour, 300)
+    const weekly = mapClaudeUsageWindow(body.seven_day, 10080)
+    const fableWeekly = mapFableWeeklyWindow(body)
     if (!session && !weekly && !fableWeekly) {
       throw new OAuthUsageUnreadableError(describeUnreadableUsageResponse(data))
     }

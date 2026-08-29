@@ -87,7 +87,8 @@ describe('Claude OAuth usage readings that carry no window', () => {
     ['a bare number', '7'],
     ['an error envelope', '{"error":{"type":"overloaded_error","message":"Overloaded"}}'],
     ['an object with no usage key', '{"detail":"Not Found"}'],
-    ['a malformed five_hour field', '{"five_hour":"eighty percent"}']
+    ['a malformed five_hour field', '{"five_hour":"eighty percent"}'],
+    ['a JSON null body', 'null']
   ]
 
   for (const [label, body] of unreadableBodies) {
@@ -101,6 +102,32 @@ describe('Claude OAuth usage readings that carry no window', () => {
       expect(limits.session).toBeNull()
       expect(limits.weekly).toBeNull()
       expect(limits.error).toBeTruthy()
+    })
+  }
+
+  // Why: a throw from field access is not a classification. Reading `five_hour` off a JSON `null`
+  // raises a TypeError, which the classifier files as `unknown` — the one failure kind
+  // `getProviderUsageErrorMessage` has no copy for, so it hands the engine's own words to the
+  // user. The CLI fallback is made to fail here because it otherwise answers first and hides
+  // which verdict the OAuth read reached.
+  const shapeCheckedBodies: [string, string][] = [
+    ['a JSON null body', 'null'],
+    ['a JSON array body', '[]'],
+    ['a bare string body', '"nope"'],
+    ['a bare number body', '7'],
+    ['an object with no usage key', '{"detail":"Not Found"}']
+  ]
+
+  for (const [label, body] of shapeCheckedBodies) {
+    it(`classifies ${label} as a failed read in Orca's own words`, async () => {
+      primeOAuthToken()
+      netFetchMock.mockResolvedValueOnce(new Response(body, { status: 200 }))
+      vi.mocked(fetchViaPty).mockRejectedValueOnce(new Error('CLI unavailable'))
+
+      const limits = await fetchClaudeRateLimits({ authPreparation })
+
+      expect(limits.usageMetadata?.failureKind).toBe('parse')
+      expect(limits.error).not.toMatch(/Cannot read propert/i)
     })
   }
 
