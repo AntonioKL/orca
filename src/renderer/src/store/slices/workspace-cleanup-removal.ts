@@ -73,6 +73,15 @@ export async function removeWorkspaceCleanupCandidates(
     removableTargets.push(target)
   }
 
+  // Why: the preflight's rescan is newer than the list the user confirmed
+  // against, but not newer than a refresh that settles while it runs. Hold the
+  // rows it was newer than so the republish below can tell the two apart.
+  const listedRowsBeforePreflight = new Map(
+    (get().workspaceCleanupScan?.candidates ?? []).map((candidate) => [
+      getWorkspaceCleanupCandidateIdentity(candidate),
+      candidate
+    ])
+  )
   const preflights = await preflightWorkspaceCleanupCandidates(
     removableTargets,
     get,
@@ -107,7 +116,7 @@ export async function removeWorkspaceCleanupCandidates(
         : {})
     })
   }
-  publishRefreshedWorkspaceCleanupCandidates(set, refreshedCandidates)
+  publishRefreshedWorkspaceCleanupCandidates(set, refreshedCandidates, listedRowsBeforePreflight)
   const scheduledRemovalIdentities = new Set(
     targetsToRemove.map(({ candidate }) => getWorkspaceCleanupCandidateIdentity(candidate))
   )
@@ -232,10 +241,15 @@ export async function removeWorkspaceCleanupCandidates(
  * Publishing is disclosure, never consent: it only rewrites rows the list
  * already holds, and the delete still needs a fresh confirmation against the
  * republished row.
+ *
+ * `listedBeforePreflight` is what makes it disclosure rather than a regression:
+ * a rescan may only replace the very row it was newer than, so a refresh the
+ * user completed while the preflight ran keeps the row it published.
  */
 function publishRefreshedWorkspaceCleanupCandidates(
   set: (partial: (state: AppState) => Partial<AppState>) => void,
-  refreshed: readonly WorkspaceCleanupCandidate[]
+  refreshed: readonly WorkspaceCleanupCandidate[],
+  listedBeforePreflight: ReadonlyMap<string, WorkspaceCleanupCandidate>
 ): void {
   if (refreshed.length === 0) {
     return
@@ -250,8 +264,14 @@ function publishRefreshedWorkspaceCleanupCandidates(
     )
     let changed = false
     const candidates = scan.candidates.map((candidate) => {
-      const next = refreshedByIdentity.get(getWorkspaceCleanupCandidateIdentity(candidate))
+      const identity = getWorkspaceCleanupCandidateIdentity(candidate)
+      const next = refreshedByIdentity.get(identity)
       if (!next) {
+        return candidate
+      }
+      // Identity alone also matches a row a settled refresh swapped in behind
+      // the preflight; that row is the newer read, so leave it standing.
+      if (listedBeforePreflight.get(identity) !== candidate) {
         return candidate
       }
       changed = true
