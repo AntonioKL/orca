@@ -21,3 +21,11 @@
     RMDir /r "$LOCALAPPDATA\Orca\daemon-host"
   ${endIf}
 !macroend
+
+; Why: ensure the install directory carries an explicit read/execute grant for
+; ALL RESTRICTED APPLICATION PACKAGES. When missing (e.g. from custom unpacking
+; or protected DACL inheritance), Chromium renderer and GPU processes fail to
+; start with STATUS_BREAKPOINT since their AppContainer cannot read the binaries.
+!macro customInstall
+  nsExec::Exec 'icacls "$INSTDIR" /grant *S-1-15-2-2:(OI)(CI)(RX)'
+!macroend
