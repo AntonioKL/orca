@@ -46,14 +46,12 @@ export function resolveWindowCloseAction(state: WindowCloseState): WindowCloseAc
  * daemon wiring exists) or a throwing one is an undetermined answer, and an
  * undetermined answer is not a yes.
  */
-export function resolveLocalPtysSurviveQuit(
-  getDaemonOwnsFreshPersistentPtys?: () => boolean
-): boolean {
-  if (!getDaemonOwnsFreshPersistentPtys) {
+export function resolveLocalPtysSurviveQuit(getLocalPtysSurviveQuit?: () => boolean): boolean {
+  if (!getLocalPtysSurviveQuit) {
     return false
   }
   try {
-    return getDaemonOwnsFreshPersistentPtys() === true
+    return getLocalPtysSurviveQuit() === true
   } catch {
     return false
   }

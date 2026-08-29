@@ -583,7 +583,7 @@ describe('createMainWindow', () => {
       const { windowHandlers, webContents } = installWindowMock()
       createMainWindow(null, {
         getIsQuitting: () => true,
-        getDaemonOwnsFreshPersistentPtys: () => true
+        getLocalPtysSurviveQuit: () => true
       })
 
       windowHandlers.close({ preventDefault: vi.fn() } as never)
@@ -596,7 +596,7 @@ describe('createMainWindow', () => {
       const { windowHandlers, webContents } = installWindowMock()
       createMainWindow(null, {
         getIsQuitting: () => true,
-        getDaemonOwnsFreshPersistentPtys: () => daemonOwnsPtys
+        getLocalPtysSurviveQuit: () => daemonOwnsPtys
       })
 
       windowHandlers.close({ preventDefault: vi.fn() } as never)
@@ -611,7 +611,7 @@ describe('createMainWindow', () => {
       const { windowHandlers, webContents } = installWindowMock()
       createMainWindow(null, {
         getIsQuitting: () => true,
-        getDaemonOwnsFreshPersistentPtys: () => {
+        getLocalPtysSurviveQuit: () => {
           throw new Error('daemon socket gone')
         }
       })
@@ -623,7 +623,7 @@ describe('createMainWindow', () => {
 
     it('answers the renderer-drawn X too, which never reaches the native close event', () => {
       const { webContents } = installWindowMock()
-      createMainWindow(null, { getDaemonOwnsFreshPersistentPtys: () => true })
+      createMainWindow(null, { getLocalPtysSurviveQuit: () => true })
 
       vi.mocked(ipcMain.on).mock.calls.find(
         ([channel]) => channel === 'window:request-close'

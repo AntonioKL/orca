@@ -126,7 +126,7 @@ export function installMainWindowCloseLifecycle(args: {
     // over a run, so a value captured at window creation would be stale.
     mainWindow.webContents.send('window:close-requested', {
       isQuitting,
-      localPtysSurviveQuit: resolveLocalPtysSurviveQuit(opts?.getDaemonOwnsFreshPersistentPtys),
+      localPtysSurviveQuit: resolveLocalPtysSurviveQuit(opts?.getLocalPtysSurviveQuit),
       requestId
     } satisfies WindowCloseRequestPayload)
   })
@@ -181,7 +181,7 @@ export function installMainWindowCloseLifecycle(args: {
     }
     mainWindow.webContents.send('window:close-requested', {
       isQuitting: false,
-      localPtysSurviveQuit: resolveLocalPtysSurviveQuit(opts?.getDaemonOwnsFreshPersistentPtys)
+      localPtysSurviveQuit: resolveLocalPtysSurviveQuit(opts?.getLocalPtysSurviveQuit)
     } satisfies WindowCloseRequestPayload)
   }
   // Why: renderer-drawn title-bar ··· menu button replicates the Alt-key reveal autoHideMenuBar provides (Windows/Linux).
