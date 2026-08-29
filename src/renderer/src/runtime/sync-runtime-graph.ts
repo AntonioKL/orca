@@ -1424,8 +1424,11 @@ export function buildMobileSessionTabSnapshots(
       tabGroups && tabGroups.length > 0
         ? pruneTabGroupLayout(inputs.tabGroupLayout, new Set(tabGroups.map((group) => group.id)))
         : groupProjection.tabGroupLayout
+    const publishedGroups = tabGroups && tabGroups.length > 0 ? tabGroups : undefined
     const content = {
-      activeGroupId,
+      // Why not the desktop's own active group: a group whose every tab was held back never reaches
+      // the client, so naming it here points at something the client was never sent (STA-5724).
+      activeGroupId: resolvePublishedActiveGroupId(activeGroupId, publishedGroups),
       activeTabId: active?.id ?? null,
       activeTabType: active?.type ?? null,
       ...(tabGroups && tabGroups.length > 0 ? { tabGroups } : {}),
@@ -1497,6 +1500,16 @@ function applyUnifiedEditorTabIdsToLegacyOrder(
     const tabId = firstUnifiedTabByFileId.get(item.id)
     return tabId ? { ...item, tabId } : item
   })
+}
+
+function resolvePublishedActiveGroupId(
+  activeGroupId: string | null,
+  publishedGroups: readonly RuntimeMobileSessionTabGroup[] | undefined
+): string | null {
+  if (activeGroupId && publishedGroups?.some((group) => group.id === activeGroupId)) {
+    return activeGroupId
+  }
+  return publishedGroups?.[0]?.id ?? null
 }
 
 function appendFallbackEditorTabsToGroups(
