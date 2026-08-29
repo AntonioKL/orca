@@ -549,6 +549,55 @@ describe('connectPanePty', () => {
     })
   })
 
+  it('respawns a retained cold-restore startup in the directory it carries', async () => {
+    // The capacity restart remounts the pane with the retained startup and no override, so the
+    // spawn must read the effective startup's directory; the transport baseline only knows the
+    // pane's worktree, which is the tree STA-5804 must not resume into.
+    const { connectPanePty } = await import('./pty-connection')
+    const transport = createMockTransport('restarted-pty')
+    transportFactoryQueue.push(transport)
+    mockStoreState = {
+      ...mockStoreState,
+      tabsByWorktree: { 'wt-1': [{ id: 'tab-1', ptyId: null }] },
+      ptyIdsByTabId: {}
+    }
+    const deps = createDeps({
+      cwd: '/repo/wt-1',
+      startup: {
+        command: "codex 'resume' 'codex-session-1'",
+        cwd: '/repo/wt-1/packages/api',
+        launchAgent: 'codex',
+        showSessionRestoredBanner: true
+      }
+    })
+
+    connectPanePty(createPane(1) as never, createManager(1) as never, deps as never)
+    await flushAsyncTicks(20)
+
+    expect(transport.connect).toHaveBeenCalledWith(
+      expect.objectContaining({ cwd: '/repo/wt-1/packages/api' })
+    )
+  })
+
+  it('leaves a startup with no directory on the pane transport baseline', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const transport = createMockTransport('plain-pty')
+    transportFactoryQueue.push(transport)
+    mockStoreState = {
+      ...mockStoreState,
+      tabsByWorktree: { 'wt-1': [{ id: 'tab-1', ptyId: null }] },
+      ptyIdsByTabId: {}
+    }
+    const deps = createDeps({ cwd: '/repo/wt-1', startup: { command: 'zsh -l' } })
+
+    connectPanePty(createPane(1) as never, createManager(1) as never, deps as never)
+    await flushAsyncTicks(20)
+
+    expect(transport.connect).toHaveBeenCalledWith(
+      expect.not.objectContaining({ cwd: expect.anything() })
+    )
+  })
+
   it('strips the bypass from an unknown-directory cold restore and its capacity retry', async () => {
     const { connectPanePty } = await import('./pty-connection')
     const callbacks: ConnectCallbacks[] = []

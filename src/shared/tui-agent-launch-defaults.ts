@@ -92,7 +92,18 @@ function stripYoloTuiAgentLaunchValue(
   if (!parsed.ok || parsed.spans.some((span) => span.divergesFromShell)) {
     return ''
   }
-  const yoloTokens = yoloArgs.trim().split(/\s+/)
+  // Why: the bypass form is a shell string too (`--allow "*"`), so a whitespace split would
+  // compare `"*"` against the launch path's `*` and silently strip nothing. Parse both sides
+  // the same way, and treat a bypass form this shell cannot model as unprovable-absent.
+  const parsedYolo = tokenizeStartupCommand(yoloArgs, shell)
+  if (
+    !parsedYolo.ok ||
+    parsedYolo.tokens.length === 0 ||
+    parsedYolo.spans.some((span) => span.divergesFromShell)
+  ) {
+    return ''
+  }
+  const yoloTokens = parsedYolo.tokens
   const ranges: { start: number; end: number }[] = []
   for (let index = 0; index <= parsed.tokens.length - yoloTokens.length; index += 1) {
     if (yoloTokens.every((token, offset) => parsed.tokens[index + offset] === token)) {
