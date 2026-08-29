@@ -5,10 +5,9 @@ import { Button } from '@/components/ui/button'
 import { RICH_MARKDOWN_MAX_SIZE_BYTES } from '../../../../shared/constants'
 import { formatBytes } from '../status-bar/workspace-space-format'
 import { MarkdownPreview, RichMarkdownEditor } from './editor-lazy-views'
-import { exceedsMarkdownRichModeSizeLimit } from './markdown-rich-size-limit'
 import { extractFrontMatter, prependFrontMatter } from './markdown-frontmatter'
 import { getMarkdownRenderMode } from './markdown-render-mode'
-import { getMarkdownRichModeUnsupportedMessage } from './markdown-rich-mode'
+import { getMarkdownRichModeEligibility } from './markdown-rich-mode'
 import { RichMarkdownErrorBoundary } from './RichMarkdownErrorBoundary'
 import type { useMarkdownDocuments } from './useMarkdownDocuments'
 
@@ -47,9 +46,10 @@ export function EditorMarkdownFileSurface({
 }): React.JSX.Element {
   const sizeOverridden = useAppStore((s) => s.markdownRichModeSizeOverride[activeFile.id] === true)
   const setSizeOverride = useAppStore((s) => s.setMarkdownRichModeSizeOverride)
-  const richModeUnsupportedMessage = getMarkdownRichModeUnsupportedMessage(currentContent)
+  const { exceedsSizeLimit, unsupportedMessage: richModeUnsupportedMessage } =
+    getMarkdownRichModeEligibility({ content: currentContent, sizeOverridden })
   const renderMode = getMarkdownRenderMode({
-    exceedsRichModeSizeLimit: !sizeOverridden && exceedsMarkdownRichModeSizeLimit(currentContent),
+    exceedsRichModeSizeLimit: exceedsSizeLimit,
     hasRichModeUnsupportedContent: richModeUnsupportedMessage !== null,
     viewMode: mdViewMode
   })

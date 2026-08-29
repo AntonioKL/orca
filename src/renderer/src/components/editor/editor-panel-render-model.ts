@@ -13,8 +13,7 @@ import type { EditorToggleValue } from './EditorViewToggle'
 import type { FileContent } from './editor-panel-content-types'
 import { canUseChangesModeForFile } from './editor-panel-file-mode'
 import { getMarkdownRenderMode } from './markdown-render-mode'
-import { getMarkdownRichModeUnsupportedMessage } from './markdown-rich-mode'
-import { exceedsMarkdownRichModeSizeLimit } from './markdown-rich-size-limit'
+import { getMarkdownRichModeEligibility } from './markdown-rich-mode'
 
 type StoreState = ReturnType<typeof useAppStore.getState>
 
@@ -129,17 +128,20 @@ export function getEditorPanelRenderModel({
   const shouldShowMarkdownExportAction =
     viewerLanguage === 'markdown' &&
     (activeFile.mode === 'edit' || activeFile.mode === 'markdown-preview')
-  const inlineMarkdownRenderMode =
+  const inlineMarkdownEligibility =
     activeFile.mode === 'edit' && inlineMarkdownContent !== null
-      ? getMarkdownRenderMode({
-          exceedsRichModeSizeLimit:
-            markdownRichModeSizeOverride[activeFile.id] !== true &&
-            exceedsMarkdownRichModeSizeLimit(inlineMarkdownContent),
-          hasRichModeUnsupportedContent:
-            getMarkdownRichModeUnsupportedMessage(inlineMarkdownContent) !== null,
-          viewMode: mdViewMode
+      ? getMarkdownRichModeEligibility({
+          content: inlineMarkdownContent,
+          sizeOverridden: markdownRichModeSizeOverride[activeFile.id] === true
         })
       : null
+  const inlineMarkdownRenderMode = inlineMarkdownEligibility
+    ? getMarkdownRenderMode({
+        exceedsRichModeSizeLimit: inlineMarkdownEligibility.exceedsSizeLimit,
+        hasRichModeUnsupportedContent: inlineMarkdownEligibility.unsupportedMessage !== null,
+        viewMode: mdViewMode
+      })
+    : null
   const canExportMarkdownToPdf =
     shouldShowMarkdownExportAction &&
     ((activeFile.mode === 'markdown-preview' &&
