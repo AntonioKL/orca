@@ -288,6 +288,7 @@ import { shouldForwardHeadlessTerminalQueryReply } from './headless-terminal-que
 import type { TerminalRevealIdentity } from '../../shared/terminal-reveal-identity'
 import { structuredAgentSessionTabId } from '../../shared/structured-agent-session-projection'
 import { collectSavedStructuredAgentSessionIds } from './saved-structured-agent-session-restoration'
+import { headStructuredProviderSessionId } from '../native-chat/agent-session-wire/structured-provider-session-ownership'
 import type {
   OrchestrationCompatibilityEvidence,
   OrchestrationCompatibilityHostStamp
@@ -12346,6 +12347,12 @@ export class OrcaRuntimeService {
     }
   }
 
+  /** Codex thread behind a structured session, or null while the provider has not proven one. */
+  private structuredAgentSessionProviderSessionId(sessionId: string): string | null {
+    const record = getStructuredAgentSessionHost()?.deps.store.getRecord(sessionId) ?? null
+    return record ? headStructuredProviderSessionId(record) : null
+  }
+
   publishStructuredAgentSessionTab(input: {
     workspaceId: string
     sessionId: string
@@ -12355,7 +12362,14 @@ export class OrcaRuntimeService {
   }): void {
     const existing = this.mobileSessionTabsByWorktree.get(input.workspaceId)
     const id = `agent-session:${input.sessionId}`
+    const providerSessionId = this.structuredAgentSessionProviderSessionId(input.sessionId)
     if (existing?.tabs.some((tab) => tab.id === id)) {
+      this.republishStructuredAgentSessionProviderSessionId({
+        existing,
+        id,
+        providerSessionId,
+        notify: input.notify
+      })
       return
     }
     const tab: RuntimeMobileSessionAgentTab = {
@@ -12364,6 +12378,9 @@ export class OrcaRuntimeService {
       title: 'Codex Chat',
       sessionId: input.sessionId,
       agent: input.agent,
+      // Why: omit rather than blank — an unproven identity is unknown, and an empty id would ask
+      // the title pipeline to name a conversation that has no name yet.
+      ...(providerSessionId ? { providerSessionId } : {}),
       isActive: input.activate
     }
     const tabs = [...(existing?.tabs ?? [])].map((candidate) => ({
@@ -12402,6 +12419,38 @@ export class OrcaRuntimeService {
       tabs
     }
     this.mobileSessionTabsByWorktree.set(input.workspaceId, snapshot)
+    if (input.notify !== false) {
+      this.emitMobileSessionTabsSnapshot(snapshot)
+    }
+  }
+
+  /** A thread proven after the tab was published (or replaced by a resume) still has to reach the
+   *  client, or the chat keeps the generic name for the life of the session. */
+  private republishStructuredAgentSessionProviderSessionId(input: {
+    existing: RuntimeMobileSessionTabsSnapshot
+    id: string
+    providerSessionId: string | null
+    notify?: boolean
+  }): void {
+    const current = input.existing.tabs.find(
+      (tab): tab is RuntimeMobileSessionAgentTab =>
+        tab.type === 'agent-session' && tab.id === input.id
+    )
+    if (
+      !current ||
+      !input.providerSessionId ||
+      current.providerSessionId === input.providerSessionId
+    ) {
+      return
+    }
+    const snapshot: RuntimeMobileSessionTabsSnapshot = {
+      ...input.existing,
+      snapshotVersion: input.existing.snapshotVersion + 1,
+      tabs: input.existing.tabs.map((tab) =>
+        tab.id === input.id ? { ...tab, providerSessionId: input.providerSessionId! } : tab
+      )
+    }
+    this.mobileSessionTabsByWorktree.set(snapshot.worktree, snapshot)
     if (input.notify !== false) {
       this.emitMobileSessionTabsSnapshot(snapshot)
     }

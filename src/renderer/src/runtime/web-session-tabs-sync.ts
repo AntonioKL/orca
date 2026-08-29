@@ -998,8 +998,17 @@ function buildMirroredAgentTabs(
         worktreeId: snapshot.worktree,
         contentType: 'agent-session',
         agentSessionAgent: tab.agent,
+        // Why: the host owns identity, the client owns the name. Dropping either on a republish
+        // renamed the tab back to the generic label and lost the user's own rename with it.
+        ...((tab.providerSessionId ?? existing?.agentSessionProviderSessionId)
+          ? {
+              agentSessionProviderSessionId:
+                tab.providerSessionId ?? existing?.agentSessionProviderSessionId
+            }
+          : {}),
         label: tab.title.trim() || 'Codex Chat',
-        customLabel: null,
+        ...(existing?.aiVaultTitle ? { aiVaultTitle: existing.aiVaultTitle } : {}),
+        customLabel: existing?.customLabel ?? null,
         color: tab.color !== undefined ? tab.color : (existing?.color ?? null),
         sortOrder: sortOffset + index,
         createdAt: existing?.createdAt ?? now + sortOffset + index,
@@ -2670,6 +2679,7 @@ function tabEqual(a: Tab, b: Tab): boolean {
     a.executionHostId === b.executionHostId &&
     a.contentType === b.contentType &&
     a.agentSessionAgent === b.agentSessionAgent &&
+    a.agentSessionProviderSessionId === b.agentSessionProviderSessionId &&
     a.label === b.label &&
     // Why: the generated label is the visible tab title; ignoring it let the
     // equality bail keep a unified tab that disagreed with its terminal tab.

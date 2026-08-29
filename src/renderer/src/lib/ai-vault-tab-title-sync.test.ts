@@ -81,6 +81,7 @@ function makeState(args: {
         }
       : {},
     tabsByWorktree: { [args.worktreeId]: [tab] },
+    unifiedTabsByWorktree: {},
     terminalLayoutsByTabId: {
       'tab-1': {
         root: { type: 'leaf', leafId: 'leaf-1' },
