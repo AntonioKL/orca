@@ -6,7 +6,7 @@ import {
 import { useRunningTerminalCloseConfirmStore } from '@/store/running-terminal-close-confirm'
 import type { TerminalTabCloseReason } from '@/store/slices/terminal-tab-retirement'
 import type { AppState } from '@/store/types'
-import { readPtyProcessInspectionEvidence } from '../../../../shared/pty-process-inspection-evidence'
+import { readPtyProcessInspectionEvidenceForAbsenceAction } from '../../../../shared/pty-process-inspection-evidence'
 import { resolveBusyPtyCloseCopyKind } from './terminal-close-copy-kind'
 
 export type RunningTerminalCloseGuardOptions = {
@@ -84,14 +84,20 @@ function shouldConfirmForProbe(
   if (probe.value.unavailable === true) {
     return tracked
   }
-  const children = readPtyProcessInspectionEvidence(probe.value).children
+  // Why the absence-action reader and not the plain one: closing here kills the pty, and the
+  // plain reader manufactures `exited` out of a host that published no verdict at all — a
+  // retained pre-v27 daemon, a provider with no `inspectProcess`, or any relay/runtime host
+  // older than the field. That shape carries neither `unavailable` nor `processEvidence`, so
+  // it slipped past both arms above and closed silently over work the window-close guard was
+  // already asking about.
+  const children = readPtyProcessInspectionEvidenceForAbsenceAction(probe.value).children
   // Why the verdict alone decides, with no vote from `hasChildProcesses`: the boolean is
   // `children.verdict === 'live'` collapsed, so it says nothing new on the positive pole and
   // nothing trustworthy on the others. The one producer that publishes `true` beside a
   // non-`live` verdict is a daemon pane whose handle has no evidence channel, and that host
   // states outright that such a read proves neither life nor exit — so voting on it would ask
   // for a non-shell title and close silently for a shell one, off the very same degraded read.
-  // The window-close guard reads this same single signal (#17077).
+  // The window-close guard reads this same single signal, off the same reader (#17077).
   if (children.verdict === 'live') {
     return true
   }
