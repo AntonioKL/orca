@@ -6,6 +6,7 @@ import {
   isWindowsProcessStartTimeAvailable,
   readWindowsProcessTable,
   readWindowsProcessTableFresh,
+  readWindowsProcessTableSnapshot,
   resetWindowsProcessTableForTests
 } from './windows-process-table'
 
@@ -99,6 +100,14 @@ describe('windows process table', () => {
   it('serves repeat reads from the shared snapshot', async () => {
     await readWindowsProcessTable()
     await readWindowsProcessTable()
+    expect(getAllProcesses).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves the native capture time when a cached snapshot is reused', async () => {
+    const first = await readWindowsProcessTableSnapshot()
+    const second = await readWindowsProcessTableSnapshot()
+
+    expect(second.capturedAtMs).toBe(first.capturedAtMs)
     expect(getAllProcesses).toHaveBeenCalledTimes(1)
   })
 

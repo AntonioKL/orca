@@ -1,6 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { cpSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
-import { readdirSync, renameSync, rmSync } from 'node:fs'
+import * as fs from 'node:fs'
 import { dirname, join, win32 as winPath } from 'node:path'
 import { getAppEnvironment } from '../../shared/app-environment'
 import type { ProcessLivenessVerdict } from './daemon-incarnation-evidence-types'
@@ -58,7 +57,7 @@ type DaemonHostSources = {
 function resolveEntrySourcePath(resourcesPath: string): string {
   const unpackedRoot = join(resourcesPath, 'app.asar.unpacked')
   const direct = join(unpackedRoot, 'daemon-entry.js')
-  if (existsSync(direct)) {
+  if (fs.existsSync(direct)) {
     return direct
   }
   return join(unpackedRoot, 'out', 'main', 'daemon-entry.js')
@@ -171,17 +170,17 @@ export function buildDaemonHostManifest(sources: DaemonHostSources): DaemonHostC
 
 function executeManifest(ops: DaemonHostCopyOperation[], stagingRoot: string): void {
   for (const op of ops) {
-    if (!existsSync(op.sourcePath)) {
+    if (!fs.existsSync(op.sourcePath)) {
       if (op.optional) {
         continue
       }
       throw new Error(`daemon-host relocation: missing required input ${op.sourcePath}`)
     }
     const dest = resolveDaemonHostPath(stagingRoot, op.destRel)
-    mkdirSync(dirname(dest), { recursive: true })
+    fs.mkdirSync(dirname(dest), { recursive: true })
     const { filter } = op
     // Dereference symlinks so the copy holds no link back into the install dir.
-    cpSync(op.sourcePath, dest, {
+    fs.cpSync(op.sourcePath, dest, {
       recursive: op.kind === 'dir',
       dereference: true,
       force: true,
@@ -217,7 +216,7 @@ export function getRelocatedDaemonHost(): RelocatedDaemonHost | null {
   }
   const execPath = join(dest, DAEMON_HOST_EXE_NAME)
   const entryPath = resolveDaemonHostPath(dest, marker.entryRelPath)
-  if (!existsSync(execPath) || !existsSync(entryPath)) {
+  if (!fs.existsSync(execPath) || !fs.existsSync(entryPath)) {
     return null
   }
   const relocatedAddonPath = resolveDaemonHostPath(
@@ -254,8 +253,8 @@ export function materializeRelocatedDaemonHost(): RelocatedDaemonHost | null {
   const dest = join(root, version)
   const staging = join(root, `${version}.staging-${randomBytes(6).toString('hex')}`)
   try {
-    mkdirSync(root, { recursive: true })
-    rmSync(staging, { recursive: true, force: true })
+    fs.mkdirSync(root, { recursive: true })
+    fs.rmSync(staging, { recursive: true, force: true })
     executeManifest(buildDaemonHostManifest(sources), staging)
     // Marker written LAST so an interrupted copy leaves a marker-less staging dir the next launch discards.
     writeDaemonHostMaterializationMarker(
@@ -268,11 +267,11 @@ export function materializeRelocatedDaemonHost(): RelocatedDaemonHost | null {
       sources.windowsProcessTreeAddonPath
     )
     // Replace any stale/partial dest, then publish the staging dir atomically.
-    rmSync(dest, { recursive: true, force: true })
-    renameSync(staging, dest)
+    fs.rmSync(dest, { recursive: true, force: true })
+    fs.renameSync(staging, dest)
   } catch {
     try {
-      rmSync(staging, { recursive: true, force: true })
+      fs.rmSync(staging, { recursive: true, force: true })
     } catch {
       // Best-effort staging cleanup.
     }
@@ -293,7 +292,7 @@ export function collectPinnedDaemonVersions(runtimeDir: string): PinnedDaemonVer
   const versionLiveness = new Map<string, ProcessLivenessVerdict>()
   let entries
   try {
-    entries = readdirSync(runtimeDir, { withFileTypes: true })
+    entries = fs.readdirSync(runtimeDir, { withFileTypes: true })
   } catch {
     return { status: 'unverifiable', reason: 'the daemon runtime directory could not be read' }
   }
@@ -303,7 +302,7 @@ export function collectPinnedDaemonVersions(runtimeDir: string): PinnedDaemonVer
     }
     let contents
     try {
-      contents = readFileSync(join(runtimeDir, entry.name), 'utf8')
+      contents = fs.readFileSync(join(runtimeDir, entry.name), 'utf8')
     } catch {
       // Read failures (AV lock, vanished file) are transient; the veto re-evaluates next launch.
       return {
@@ -350,7 +349,7 @@ export function reclaimUnownedDaemonHostDir(
     return
   }
   try {
-    rmSync(hostDir, { recursive: true, force: true })
+    fs.rmSync(hostDir, { recursive: true, force: true })
   } catch {
     // Still locked or already gone — retry on a future launch.
   }
@@ -372,7 +371,7 @@ export function pruneOldDaemonHosts(evidence: PinnedDaemonVersionsEvidence): voi
   const root = hostRootDir()
   let entries
   try {
-    entries = readdirSync(root, { withFileTypes: true })
+    entries = fs.readdirSync(root, { withFileTypes: true })
   } catch {
     return
   }

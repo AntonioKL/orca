@@ -45,7 +45,10 @@ vi.mock('../../shared/child-process/run-process', () => ({
 }))
 
 vi.mock('../windows/windows-process-table', () => ({
-  readWindowsProcessTable: () => readWindowsProcessTableMock()
+  readWindowsProcessTableSnapshot: async () => ({
+    rows: await readWindowsProcessTableMock(),
+    capturedAtMs: performance.now()
+  })
 }))
 
 vi.mock('./pty-registry', () => ({
@@ -162,6 +165,36 @@ describe('collectMemorySnapshot on Windows', () => {
     expect(runProcessMock).not.toHaveBeenCalled()
   })
 
+  it('does not advance the CPU baseline when a cached capture is reused', async () => {
+    vi.spyOn(os, 'platform').mockReturnValue('win32')
+    vi.spyOn(performance, 'now')
+      .mockReturnValueOnce(1_000)
+      .mockReturnValueOnce(1_000)
+      .mockReturnValueOnce(3_000)
+    registerPty(10)
+    const firstRow = row(10, 1, {
+      cpuTimeTicks: '90071992547409920',
+      startTimeId: '134324351598335799'
+    })
+    readWindowsProcessTableMock
+      .mockResolvedValueOnce([firstRow])
+      .mockResolvedValueOnce([firstRow])
+      .mockResolvedValueOnce([
+        row(10, 1, {
+          cpuTimeTicks: '90071992567409920',
+          startTimeId: '134324351598335799'
+        })
+      ])
+    const { collectMemorySnapshot } = await loadCollector()
+
+    await collectMemorySnapshot(emptyStore)
+    const cached = await collectMemorySnapshot(emptyStore)
+    const refreshed = await collectMemorySnapshot(emptyStore)
+
+    expect(cached.worktrees[0].sessions[0].cpu).toBe(0)
+    expect(refreshed.worktrees[0].sessions[0].cpu).toBe(100)
+  })
+
   it('does not carry CPU across a recycled PID', async () => {
     vi.spyOn(os, 'platform').mockReturnValue('win32')
     vi.spyOn(performance, 'now').mockReturnValueOnce(1_000).mockReturnValueOnce(3_000)
@@ -234,14 +267,12 @@ describe('collectMemorySnapshot on Windows', () => {
     expect(snapshot.worktrees[1].sessions[0].privateMemory).toBe(0)
   })
 
-  it('returns unavailable data without falling back to a subprocess', async () => {
+  it('rejects unavailable data without falling back to a subprocess', async () => {
     vi.spyOn(os, 'platform').mockReturnValue('win32')
     readWindowsProcessTableMock.mockRejectedValue(new Error('native inventory unavailable'))
     const { collectMemorySnapshot } = await loadCollector()
 
-    const snapshot = await collectMemorySnapshot(emptyStore)
-
-    expect(snapshot.worktrees).toEqual([])
+    await expect(collectMemorySnapshot(emptyStore)).rejects.toThrow('native inventory unavailable')
     expect(runProcessMock).not.toHaveBeenCalled()
     expect(execMock).not.toHaveBeenCalled()
   })

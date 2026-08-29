@@ -22,7 +22,16 @@ import {
   resolveElectronMainPid
 } from '../win-update-e2e/app-driver.mjs'
 import { readDaemonPidFiles } from '../win-update-e2e/daemon-processes.mjs'
-import { cadenceSummary, classifyProcessStart } from './consumer-classifier.mjs'
+import { cadenceSummary } from './consumer-classifier.mjs'
+import { correlateObserverStarts, exactStartsForWindow } from './observer-spawn-cross-check.mjs'
+import {
+  initializeOracleOutputDirectory,
+  trackChildExit,
+  waitForChildExit,
+  waitForObserverReady,
+  waitForSuccessfulChildExit
+} from './oracle-lifecycle.mjs'
+import { collectRendererWindowMetrics } from './renderer-window-probe.mjs'
 
 function arg(name, fallback) {
   const index = process.argv.indexOf(name)
@@ -30,17 +39,14 @@ function arg(name, fallback) {
 }
 
 const exePath = path.resolve(arg('--exe', ''))
-const outputDir = path.resolve(arg('--output', ''))
-const appDirArg = arg('--app-dir', '')
-const appDir = appDirArg ? path.resolve(appDirArg) : null
+const outputDirArg = arg('--output', '')
+const outputDir = outputDirArg ? path.resolve(outputDirArg) : ''
 const label = arg('--label', path.basename(exePath))
 const resourceState = arg('--resource', 'closed')
 const durationMs = Number(arg('--duration-ms', '60000'))
+const observerDurationMs = Number(arg('--observer-duration-ms', String(durationMs)))
 if (!existsSync(exePath)) {
   throw new Error(`--exe does not exist: ${exePath}`)
-}
-if (appDir && !existsSync(appDir)) {
-  throw new Error(`--app-dir does not exist: ${appDir}`)
 }
 if (!outputDir) {
   throw new Error('--output is required')
@@ -51,21 +57,27 @@ if (!['closed', 'open'].includes(resourceState)) {
 if (!Number.isFinite(durationMs) || durationMs < 5_000) {
   throw new Error('--duration-ms must be >= 5000')
 }
-mkdirSync(outputDir, { recursive: true })
+if (!Number.isFinite(observerDurationMs) || observerDurationMs < 5_000) {
+  throw new Error('--observer-duration-ms must be >= 5000')
+}
 
-const runRoot = mkdtempSync(path.join(tmpdir(), 'orca-process-oracle-'))
-const userDataDir = path.join(runRoot, 'profile')
-const isolatedLocalAppData = path.join(runRoot, 'local-app-data')
-const repo = createSeededRepo(path.join(runRoot, 'repo'))
 const startsPath = path.join(outputDir, 'process-starts.ndjson')
 const readyPath = path.join(outputDir, 'observer.ready')
+const stopPath = path.join(outputDir, 'observer.stop')
 const loopPath = path.join(outputDir, 'event-loop.ndjson')
 const spawnCallDir = path.join(outputDir, 'spawn-calls')
 const probePath = path.join(import.meta.dirname, 'event-loop-probe.cjs')
 const spawnProbePath = path.join(import.meta.dirname, 'spawn-call-probe.cjs')
 const watcherPath = path.join(import.meta.dirname, 'process-snapshot-watch.mjs')
+initializeOracleOutputDirectory(outputDir)
+mkdirSync(spawnCallDir)
+const runRoot = mkdtempSync(path.join(tmpdir(), 'orca-process-oracle-'))
+const userDataDir = path.join(runRoot, 'profile')
+const isolatedLocalAppData = path.join(runRoot, 'local-app-data')
+const repo = createSeededRepo(path.join(runRoot, 'repo'))
 let app
 let watcher
+let watcherExit
 let daemonPids = []
 let instrumentationRestartSucceeded = null
 mkdirSync(isolatedLocalAppData, { recursive: true })
@@ -83,8 +95,7 @@ try {
       NODE_OPTIONS: `--require=${probePath} --require=${spawnProbePath}`,
       ORCA_PROCESS_ORACLE_EVENT_LOOP_PATH: loopPath,
       ORCA_PROCESS_ORACLE_SPAWN_DIR: spawnCallDir
-    },
-    launchArgs: appDir ? [appDir] : []
+    }
   })
   app = launched.app
   const { page } = launched
@@ -96,7 +107,7 @@ try {
   })
   const daemonRestart = await page.evaluate(() => window.api.pty.management.restart())
   instrumentationRestartSucceeded = daemonRestart.success
-  await ensureTerminal(page, { requireSurface: false })
+  await ensureTerminal(page)
   await dismissOverlays(page)
   const ptyId = await waitForPersistedPtyId(userDataDir, 30_000)
   const mainPid = await resolveElectronMainPid(app, { allowLauncherFallback: false })
@@ -140,7 +151,16 @@ try {
   }
   await page.waitForTimeout(5_000)
   const memoryBefore = await page.evaluate(() => window.api.memory.getSnapshot())
+  const windowStart = new Date().toISOString()
+  const windowMetrics = await page.evaluate(collectRendererWindowMetrics, {
+    windowMs: durationMs,
+    ptyId
+  })
+  const windowEnd = new Date().toISOString()
+  const memoryAfter = await page.evaluate(() => window.api.memory.getSnapshot())
+  const resourceLabel = await resourceButton.getAttribute('aria-label')
 
+  // Keep the 25ms host-wide observer out of the event-loop evidence window.
   watcher = spawn(
     process.execPath,
     [
@@ -149,92 +169,42 @@ try {
       startsPath,
       '--ready',
       readyPath,
+      '--stop',
+      stopPath,
       '--duration-ms',
-      String(durationMs + 500)
+      String(observerDurationMs + 11_000)
     ],
     { stdio: 'inherit', windowsHide: true }
   )
-  const readyDeadline = Date.now() + 10_000
-  while (!existsSync(readyPath) && Date.now() < readyDeadline) {
-    await new Promise((resolve) => setTimeout(resolve, 25))
-  }
-  if (!existsSync(readyPath)) {
-    throw new Error('native process observer did not become ready')
-  }
-
-  const windowStart = new Date().toISOString()
-  const windowMetrics = await page.evaluate(
-    async ({ windowMs, ptyId }) => {
-      const intervalMs = 50
-      const delays = []
-      const foregroundResults = []
-      let expected = performance.now() + intervalMs
-      const poll = async () => {
-        const startedAt = Date.now()
-        try {
-          const foreground = await window.api.pty.confirmForegroundProcess(ptyId)
-          foregroundResults.push({ startedAt, finishedAt: Date.now(), foreground })
-        } catch (error) {
-          foregroundResults.push({ startedAt, finishedAt: Date.now(), error: String(error) })
-        }
-      }
-      void poll()
-      const pollTimer = setInterval(() => void poll(), 2_000)
-      await new Promise((resolve) => {
-        const timer = setInterval(() => {
-          const now = performance.now()
-          delays.push(Math.max(0, now - expected))
-          expected = now + intervalMs
-        }, intervalMs)
-        setTimeout(() => {
-          clearInterval(timer)
-          clearInterval(pollTimer)
-          resolve()
-        }, windowMs)
-      })
-      while (foregroundResults.some((row) => row.finishedAt === undefined)) {
-        await new Promise((resolve) => setTimeout(resolve, 10))
-      }
-      delays.sort((a, b) => a - b)
-      const percentile = (fraction) =>
-        delays[Math.min(delays.length - 1, Math.floor(delays.length * fraction))]
-      return {
-        rendererEventLoop: {
-          samples: delays.length,
-          p50Ms: percentile(0.5),
-          p95Ms: percentile(0.95),
-          maxMs: delays.at(-1)
-        },
-        foregroundProbe: {
-          ptyId,
-          requestCount: foregroundResults.length,
-          results: foregroundResults
-        }
-      }
-    },
-    { windowMs: durationMs, ptyId }
-  )
-  const windowEnd = new Date().toISOString()
-  const memoryAfter = await page.evaluate(() => window.api.memory.getSnapshot())
-  const resourceLabel = await resourceButton.getAttribute('aria-label')
-  await new Promise((resolve, reject) =>
-    watcher.once('exit', (code) =>
-      code === 0 ? resolve() : reject(new Error(`observer exited ${code}`))
-    )
-  )
+  watcherExit = trackChildExit(watcher)
+  await waitForObserverReady({ readyPath, exit: watcherExit, timeoutMs: 10_000 })
+  const observerWindowStart = new Date().toISOString()
+  const observerWindowMetrics = await page.evaluate(collectRendererWindowMetrics, {
+    windowMs: observerDurationMs,
+    ptyId,
+    collectEventLoop: false
+  })
+  const observerWindowEnd = new Date().toISOString()
+  writeFileSync(stopPath, '', { flag: 'wx' })
+  await waitForSuccessfulChildExit(watcherExit, 'native process observer', 10_000)
 
   const rawRows = readNdjson(startsPath)
   const observer = rawRows.find((row) => row.type === 'summary')
+  if (!observer) {
+    throw new Error('native process observer did not publish its summary')
+  }
   const startMs = Date.parse(windowStart)
   const endMs = Date.parse(windowEnd)
-  const rows = rawRows.filter(
+  const observerStartMs = Date.parse(observerWindowStart)
+  const observerEndMs = Date.parse(observerWindowEnd)
+  const observerRows = rawRows.filter(
     (row) =>
       row.type !== 'summary' &&
-      Date.parse(row.timestamp) >= startMs &&
-      Date.parse(row.timestamp) <= endMs
+      Date.parse(row.timestamp) >= observerStartMs &&
+      Date.parse(row.timestamp) <= observerEndMs
   )
   const rootPids = new Set([mainPid, ...daemonPids])
-  const observerDirectChildren = rows.filter((row) => rootPids.has(row.parentPid))
+  const observerDirectChildren = observerRows.filter((row) => rootPids.has(row.parentPid))
   const spawnRows = readNdjsonDirectory(spawnCallDir)
   const preloadPids = new Set(
     spawnRows.filter((row) => row.type === 'preload').map((row) => row.parentPid)
@@ -245,27 +215,14 @@ try {
       `spawn-call preload missing from authoritative roots: ${missingPreloads.join(', ')}`
     )
   }
-  const exactStarts = spawnRows
-    .filter(
-      (row) =>
-        (row.type === 'spawn' || row.type === 'spawn-sync') &&
-        rootPids.has(row.parentPid) &&
-        Number.isInteger(row.returnedPid) &&
-        Date.parse(row.timestamp) >= startMs &&
-        Date.parse(row.timestamp) <= endMs
-    )
-    .map((row) => {
-      const commandLine = row.argv.join(' ')
-      return {
-        ...row,
-        name: path.basename(row.executable ?? ''),
-        commandLine,
-        consumer: classifyProcessStart({
-          name: path.basename(row.executable ?? ''),
-          commandLine
-        })
-      }
-    })
+  const exactStarts = exactStartsForWindow(spawnRows, rootPids, startMs, endMs)
+  const observerExactStarts = exactStartsForWindow(
+    spawnRows,
+    rootPids,
+    observerStartMs,
+    observerEndMs
+  )
+  const observerCrossCheck = correlateObserverStarts(observerDirectChildren, observerExactStarts)
   const classified = exactStarts
   const byConsumer = Object.groupBy(classified, (row) => row.consumer)
   const eventLoop = readNdjson(loopPath).filter(
@@ -280,23 +237,24 @@ try {
     probePath,
     spawnProbePath,
     path.join(import.meta.dirname, 'consumer-classifier.mjs'),
+    path.join(import.meta.dirname, 'oracle-lifecycle.mjs'),
+    path.join(import.meta.dirname, 'observer-spawn-cross-check.mjs'),
+    path.join(import.meta.dirname, 'renderer-window-probe.mjs'),
+    path.join(import.meta.dirname, 'oracle-seam.mjs'),
     path.join(import.meta.dirname, '..', 'win-update-e2e', 'app-driver.mjs'),
     path.join(import.meta.dirname, '..', 'win-update-e2e', 'onboarding-profile.mjs'),
     path.join(import.meta.dirname, '..', 'win-update-e2e', 'daemon-processes.mjs'),
     requireResolveWindowsProcessTreeBinary()
   ]
   const report = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     label,
     resourceState,
     foregroundFixture: 'stable-shell',
     exePath,
     exeSha256: sha256Files([exePath]),
-    appDir,
-    appBundleSha256: appDir ? sha256Directory(path.join(appDir, 'out')) : null,
     productHashes: collectProductHashes({
       exePath,
-      appDir,
       isolatedLocalAppData
     }),
     oracleSha256: sha256Files(bundleFiles),
@@ -313,6 +271,7 @@ try {
     consumers: Object.fromEntries(
       Object.entries(byConsumer).map(([name, events]) => [name, cadenceSummary(events)])
     ),
+    // Compatibility projections; all observer data belongs to the later cross-check phase.
     observerSubprocessCount: observerDirectChildren.length,
     observerSubprocesses: observerDirectChildren,
     eventLoop,
@@ -320,15 +279,41 @@ try {
     rendererEventLoop: windowMetrics.rendererEventLoop,
     foregroundProbe: windowMetrics.foregroundProbe,
     observer,
+    observerCrossCheck: {
+      durationMs: observerDurationMs,
+      windowStart: observerWindowStart,
+      windowEnd: observerWindowEnd,
+      foregroundProbe: observerWindowMetrics.foregroundProbe,
+      exactSubprocessCount: observerExactStarts.length,
+      exactSubprocesses: observerExactStarts,
+      observerSubprocessCount: observerDirectChildren.length,
+      observerSubprocesses: observerDirectChildren,
+      ...observerCrossCheck,
+      observer
+    },
     memoryBefore,
     memoryAfter,
     resourceLabel
   }
-  writeFileSync(path.join(outputDir, 'report.json'), `${JSON.stringify(report, null, 2)}\n`)
+  writeFileSync(path.join(outputDir, 'report.json'), `${JSON.stringify(report, null, 2)}\n`, {
+    flag: 'wx'
+  })
   console.log(JSON.stringify(report, null, 2))
+  if (!observerCrossCheck.complete) {
+    throw new Error(
+      `native observer found ${observerCrossCheck.unmatchedObserverStarts.length} child start(s) missing from exact spawn instrumentation`
+    )
+  }
 } finally {
   if (watcher && watcher.exitCode === null) {
     watcher.kill()
+  }
+  if (watcherExit) {
+    try {
+      await waitForChildExit(watcherExit, 'native process observer cleanup', 5_000)
+    } catch (error) {
+      console.warn(error instanceof Error ? error.message : String(error))
+    }
   }
   await closeApp(app)
   const cleanupPids = new Set([
@@ -457,7 +442,7 @@ function hashExistingFiles(root, relativePaths) {
     }))
 }
 
-function collectProductHashes({ exePath, appDir, isolatedLocalAppData }) {
+function collectProductHashes({ exePath, isolatedLocalAppData }) {
   const resourcesDir = path.join(path.dirname(exePath), 'resources')
   const packaged = hashExistingFiles(resourcesDir, [
     'app.asar',
@@ -494,20 +479,9 @@ function collectProductHashes({ exePath, appDir, isolatedLocalAppData }) {
         }))
     : []
   return {
-    sourceOut: appDir ? { sha256: sha256Directory(path.join(appDir, 'out')) } : null,
     packaged,
     relocated
   }
-}
-
-function sha256Directory(directory) {
-  const files = listFiles(directory)
-  const hash = createHash('sha256')
-  for (const file of files) {
-    hash.update(path.relative(directory, file).replaceAll('\\', '/'))
-    hash.update(readFileSync(file))
-  }
-  return hash.digest('hex')
 }
 
 function listFiles(directory) {

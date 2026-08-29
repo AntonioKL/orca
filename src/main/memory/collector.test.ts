@@ -19,7 +19,8 @@ const { appMetricsMock, runProcessMock, execMock, listRegisteredPtysMock } = vi.
 
 vi.mock('child_process', () => ({
   exec: (cmd: string, opts: unknown, cb: (err: Error | null, out: { stdout: string }) => void) =>
-    execMock(cmd, opts, cb)
+    execMock(cmd, opts, cb),
+  execFile: vi.fn()
 }))
 
 // Why mock the chokepoint for the Windows sweep: maxBuffer, timeout and the
@@ -185,6 +186,7 @@ describe('collectMemorySnapshot', () => {
   beforeEach(() => {
     setAppEnvironment(appEnvironment())
     vi.restoreAllMocks()
+    vi.spyOn(os, 'platform').mockReturnValue('darwin')
     appMetricsMock.mockReset()
     appMetricsMock.mockReturnValue([])
     runProcessMock.mockReset()

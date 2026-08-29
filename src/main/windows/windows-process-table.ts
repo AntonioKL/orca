@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module'
+import { performance } from 'node:perf_hooks'
 import { createProcessTableSnapshotReader } from '../../shared/process-table-snapshot'
 
 /**
@@ -40,6 +41,11 @@ export type WindowsProcessRow = {
   cpuTimeTicks?: string
   /** Exact Windows process creation FILETIME, used to fence PID reuse. */
   startTimeId?: string
+}
+
+export type WindowsProcessTableSnapshot = {
+  rows: WindowsProcessRow[]
+  capturedAtMs: number
 }
 
 type NativeProcessInfo = {
@@ -201,7 +207,7 @@ function fileTimeToUnixMs(startTimeId: string | undefined): number | undefined {
   return Number.isSafeInteger(milliseconds) ? milliseconds : undefined
 }
 
-function readNativeRows(): Promise<WindowsProcessRow[]> {
+function readNativeRows(): Promise<WindowsProcessTableSnapshot> {
   const native = moduleLoader()
   if (!native) {
     // Reject rather than resolve empty: an empty table is a claim that nothing
@@ -261,8 +267,9 @@ function readNativeRows(): Promise<WindowsProcessRow[]> {
           reject(new Error('windows process table is unreadable'))
           return
         }
-        resolve(
-          processes.map((row) => {
+        resolve({
+          capturedAtMs: performance.now(),
+          rows: processes.map((row) => {
             const creationTimeMs =
               typeof row.creationTimeMs === 'number'
                 ? row.creationTimeMs
@@ -279,7 +286,7 @@ function readNativeRows(): Promise<WindowsProcessRow[]> {
               startTimeId: row.startTimeId
             }
           })
-        )
+        })
       }, flags)
     } catch (error) {
       clearTimeout(deadline)
@@ -291,13 +298,18 @@ function readNativeRows(): Promise<WindowsProcessRow[]> {
 // Why still cache: the snapshot is cheap but not free, and a worktree delete
 // tears down PTYs 32-wide. The shared TTL + single-in-flight reader collapses
 // that burst into one scan, exactly as the PowerShell path had to.
-const snapshotReader = createProcessTableSnapshotReader<WindowsProcessRow[]>({
+const snapshotReader = createProcessTableSnapshotReader<WindowsProcessTableSnapshot>({
   runPs: readNativeRows,
   now: () => Date.now()
 })
 
 /** Cached snapshot, refreshed on the shared TTL. */
-export function readWindowsProcessTable(): Promise<WindowsProcessRow[]> {
+export async function readWindowsProcessTable(): Promise<WindowsProcessRow[]> {
+  return (await snapshotReader.getSnapshot()).rows
+}
+
+/** Cached snapshot plus the native capture time used for counter deltas. */
+export function readWindowsProcessTableSnapshot(): Promise<WindowsProcessTableSnapshot> {
   return snapshotReader.getSnapshot()
 }
 
@@ -307,8 +319,8 @@ export function readWindowsProcessTable(): Promise<WindowsProcessRow[]> {
  * Identity checks during teardown must not reuse a cached row — it can predate
  * the very process exit it is being asked about.
  */
-export function readWindowsProcessTableFresh(): Promise<WindowsProcessRow[]> {
-  return snapshotReader.getFreshSnapshot()
+export async function readWindowsProcessTableFresh(): Promise<WindowsProcessRow[]> {
+  return (await snapshotReader.getFreshSnapshot()).rows
 }
 
 /** Whether the native table can be read at all on this host. */

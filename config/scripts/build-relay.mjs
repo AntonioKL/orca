@@ -27,6 +27,10 @@ import {
   isWindowsRelayPlatform,
   relayArtifactFilenames
 } from '../../src/shared/relay-artifacts.ts'
+import {
+  validateWindowsProcessTreeRelayAsset,
+  windowsProcessTreeRelayAssetPath
+} from './windows-process-tree-relay-asset.mjs'
 
 const __dirname = import.meta.dirname
 // Why: the script lives under config/scripts, so go two levels up to reach the repo root.
@@ -56,25 +60,19 @@ const NODE_PTY_CONSOLE_LIST_PATCH_SOURCE = join(
   'relay-assets',
   NODE_PTY_CONSOLE_LIST_PATCH_FILENAME
 )
-const WINDOWS_PROCESS_TREE_PREBUILD_DIR = join(
-  ROOT,
-  'config',
-  'relay-assets',
-  'windows-process-tree'
-)
-
 function stageWindowsProcessTreeAddon(platform, outDir) {
   if (!isWindowsRelayPlatform(platform)) {
     return
   }
   const arch = platform.slice('win32-'.length)
-  const source = join(WINDOWS_PROCESS_TREE_PREBUILD_DIR, arch, RELAY_WINDOWS_PROCESS_TREE_FILENAME)
+  const source = windowsProcessTreeRelayAssetPath(arch)
   if (!existsSync(source)) {
     throw new Error(
       `Relay ${platform} needs checked-in ${source}. Rebuild it on Windows with ` +
         `config/scripts/build-windows-process-tree-relay-addon.mjs --arch=${arch}.`
     )
   }
+  validateWindowsProcessTreeRelayAsset(arch)
   copyFileSync(source, join(outDir, RELAY_WINDOWS_PROCESS_TREE_FILENAME))
 }
 

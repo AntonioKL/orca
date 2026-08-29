@@ -1,13 +1,22 @@
 import { strict as assert } from 'node:assert'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs'
+import { execFileSync, spawn } from 'node:child_process'
+import { EventEmitter } from 'node:events'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { execFileSync, spawn } from 'node:child_process'
 import {
   cadenceSummary,
   classifyProcessStart,
   decodePowerShellCommand
 } from './consumer-classifier.mjs'
+import {
+  initializeOracleOutputDirectory,
+  trackChildExit,
+  waitForObserverReady,
+  waitForSuccessfulChildExit
+} from './oracle-lifecycle.mjs'
+import { correlateObserverStarts, exactStartsForWindow } from './observer-spawn-cross-check.mjs'
+import { collectRendererWindowMetrics } from './renderer-window-probe.mjs'
 
 const encoded = Buffer.from(
   'Get-CimInstance Win32_Process -Property PageFileUsage',
@@ -35,10 +44,142 @@ assert.deepEqual(
   [2000, 2100]
 )
 
+const lifecycleDir = mkdtempSync(path.join(tmpdir(), 'orca-process-oracle-lifecycle-'))
+try {
+  initializeOracleOutputDirectory(lifecycleDir)
+  writeFileSync(path.join(lifecycleDir, 'z-stale'), '')
+  writeFileSync(path.join(lifecycleDir, 'a-stale'), '')
+  assert.throws(
+    () => initializeOracleOutputDirectory(lifecycleDir),
+    /stale artifacts: a-stale, z-stale/
+  )
+
+  const exitedChild = new EventEmitter()
+  const immediateExit = trackChildExit(exitedChild)
+  exitedChild.emit('exit', 0, null)
+  await waitForSuccessfulChildExit(immediateExit, 'fixture child', 100)
+
+  const failedChild = new EventEmitter()
+  const failedExit = trackChildExit(failedChild)
+  failedChild.emit('exit', 7, null)
+  await assert.rejects(
+    waitForObserverReady({
+      readyPath: path.join(lifecycleDir, 'never-ready'),
+      exit: failedExit,
+      timeoutMs: 100
+    }),
+    /exited before becoming ready: code 7/
+  )
+  await assert.rejects(
+    waitForSuccessfulChildExit(new Promise(() => {}), 'wedged child', 20),
+    /did not exit within 20ms/
+  )
+
+  const roots = new Set([10])
+  const exact = exactStartsForWindow(
+    [
+      {
+        type: 'spawn',
+        timestamp: '2026-01-01T00:00:01.000Z',
+        parentPid: 10,
+        returnedPid: 20,
+        executable: 'powershell.exe',
+        argv: ['powershell.exe', '-NoProfile']
+      },
+      {
+        type: 'spawn',
+        timestamp: '2026-01-01T00:00:02.000Z',
+        parentPid: 10,
+        returnedPid: 21,
+        executable: 'node.exe',
+        argv: ['node.exe', 'brief.js']
+      }
+    ],
+    roots,
+    Date.parse('2026-01-01T00:00:00.000Z'),
+    Date.parse('2026-01-01T00:00:03.000Z')
+  )
+  const crossCheck = correlateObserverStarts(
+    [
+      { pid: 20, timestamp: '2026-01-01T00:00:01.025Z' },
+      { pid: 22, timestamp: '2026-01-01T00:00:02.025Z' }
+    ],
+    exact
+  )
+  assert.equal(crossCheck.complete, false)
+  assert.deepEqual(
+    crossCheck.unmatchedObserverStarts.map((row) => row.pid),
+    [22]
+  )
+  assert.deepEqual(
+    crossCheck.unobservedExactStarts.map((row) => row.returnedPid),
+    [21]
+  )
+
+  const previousWindow = globalThis.window
+  try {
+    globalThis.window = {
+      api: { pty: { confirmForegroundProcess: async () => 'stable-shell' } }
+    }
+    const settled = await collectRendererWindowMetrics({
+      windowMs: 30,
+      ptyId: 'pty-seam',
+      eventLoopIntervalMs: 5,
+      foregroundPollMs: 100,
+      probeSettleTimeoutMs: 20
+    })
+    assert.equal(settled.foregroundProbe.results.length, 1)
+    assert.equal(settled.foregroundProbe.results[0].requestId, 1)
+    assert.equal(typeof settled.foregroundProbe.results[0].finishedAt, 'number')
+
+    globalThis.window = {
+      api: {
+        pty: {
+          confirmForegroundProcess: () => {
+            throw new Error('synchronous probe failure')
+          }
+        }
+      }
+    }
+    const rejected = await collectRendererWindowMetrics({
+      windowMs: 20,
+      ptyId: 'pty-rejected',
+      collectEventLoop: false,
+      foregroundPollMs: 100,
+      probeSettleTimeoutMs: 20
+    })
+    assert.match(rejected.foregroundProbe.results[0].error, /synchronous probe failure/)
+    assert.equal(typeof rejected.foregroundProbe.results[0].finishedAt, 'number')
+
+    globalThis.window = {
+      api: { pty: { confirmForegroundProcess: () => new Promise(() => {}) } }
+    }
+    await assert.rejects(
+      collectRendererWindowMetrics({
+        windowMs: 20,
+        ptyId: 'pty-wedged',
+        collectEventLoop: false,
+        foregroundPollMs: 100,
+        probeSettleTimeoutMs: 20
+      }),
+      /foreground probes did not settle within 20ms: 1/
+    )
+  } finally {
+    if (previousWindow === undefined) {
+      delete globalThis.window
+    } else {
+      globalThis.window = previousWindow
+    }
+  }
+} finally {
+  rmSync(lifecycleDir, { recursive: true, force: true })
+}
+
 if (process.platform === 'win32') {
   const dir = mkdtempSync(path.join(tmpdir(), 'orca-process-oracle-'))
   const output = path.join(dir, 'starts.ndjson')
   const ready = path.join(dir, 'ready')
+  const stop = path.join(dir, 'stop')
   const watcher = spawn(
     process.execPath,
     [
@@ -47,16 +188,15 @@ if (process.platform === 'win32') {
       output,
       '--ready',
       ready,
+      '--stop',
+      stop,
       '--duration-ms',
       '5000'
     ],
     { stdio: 'inherit', windowsHide: true }
   )
-  const readyDeadline = Date.now() + 5_000
-  while (!existsSync(ready) && Date.now() < readyDeadline) {
-    await new Promise((resolve) => setTimeout(resolve, 25))
-  }
-  assert.ok(existsSync(ready), 'native observer did not become ready')
+  const watcherExit = trackChildExit(watcher)
+  await waitForObserverReady({ readyPath: ready, exit: watcherExit, timeoutMs: 5_000 })
   const fixture = spawn(
     process.execPath,
     [path.join(import.meta.dirname, 'process-start-fixture.mjs'), '3', '400'],
@@ -70,12 +210,13 @@ if (process.platform === 'win32') {
       code === 0 ? resolve() : reject(new Error(`fixture exited ${code}`))
     )
   )
-  await new Promise((resolve, reject) =>
-    watcher.once('exit', (code) =>
-      code === 0 ? resolve() : reject(new Error(`watcher exited ${code}`))
-    )
-  )
+  writeFileSync(stop, '', { flag: 'wx' })
+  await waitForSuccessfulChildExit(watcherExit, 'native observer fixture', 10_000)
   const rows = readFileSync(output, 'utf8').trim().split(/\r?\n/).filter(Boolean).map(JSON.parse)
+  const observerSummary = rows.find((row) => row.type === 'summary')
+  assert.equal(observerSummary.durationLimitMs, 5_000)
+  assert.equal(observerSummary.stoppedByMarker, true)
+  assert.ok(observerSummary.durationMs < observerSummary.durationLimitMs)
   const fixtureRows = rows.filter(
     (row) => row.parentPid === fixture.pid && row.name.toLowerCase() === 'node.exe'
   )

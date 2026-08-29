@@ -1,4 +1,4 @@
-import { appendFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, writeFileSync } from 'node:fs'
 import processTree from '@vscode/windows-process-tree'
 
 function readArg(name, fallback) {
@@ -8,11 +8,13 @@ function readArg(name, fallback) {
 
 const outputPath = readArg('--output')
 const readyPath = readArg('--ready')
-const durationMs = Number(readArg('--duration-ms', '5000'))
+const stopPath = readArg('--stop')
+const durationLimitMs = Number(readArg('--duration-ms', '5000'))
 const intervalMs = Number(readArg('--interval-ms', '25'))
 if (!outputPath || !readyPath) {
   throw new Error('--output and --ready are required')
 }
+writeFileSync(outputPath, '', { flag: 'wx' })
 
 function snapshot() {
   return new Promise((resolve, reject) => {
@@ -31,11 +33,12 @@ function snapshot() {
 }
 
 let active = new Set((await snapshot()).map((row) => row.pid))
-writeFileSync(readyPath, `${process.pid}\n`)
-const deadline = Date.now() + durationMs
+const startedAt = Date.now()
+writeFileSync(readyPath, `${process.pid}\n`, { flag: 'wx' })
+const deadline = startedAt + durationLimitMs
 let polls = 0
 const snapshotDurationsMs = []
-while (Date.now() < deadline) {
+while (Date.now() < deadline && (!stopPath || !existsSync(stopPath))) {
   const startedAt = Date.now()
   const rows = await snapshot()
   snapshotDurationsMs.push(Date.now() - startedAt)
@@ -64,6 +67,7 @@ while (Date.now() < deadline) {
   )
 }
 snapshotDurationsMs.sort((a, b) => a - b)
+const stoppedByMarker = Boolean(stopPath && existsSync(stopPath))
 const percentile = (fraction) =>
   snapshotDurationsMs[
     Math.min(snapshotDurationsMs.length - 1, Math.floor(snapshotDurationsMs.length * fraction))
@@ -73,7 +77,9 @@ appendFileSync(
   `${JSON.stringify({
     type: 'summary',
     polls,
-    durationMs,
+    durationMs: Date.now() - startedAt,
+    durationLimitMs,
+    stoppedByMarker,
     intervalMs,
     snapshotP50Ms: percentile(0.5),
     snapshotP95Ms: percentile(0.95),

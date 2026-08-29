@@ -1,6 +1,5 @@
 import os from 'node:os'
-import { performance } from 'node:perf_hooks'
-import { readWindowsProcessTable } from '../windows/windows-process-table'
+import { readWindowsProcessTableSnapshot } from '../windows/windows-process-table'
 import type {
   ParsedWindowsProcessSample,
   WindowsProcessResourceRow
@@ -19,30 +18,24 @@ type WindowsProcessSample = ParsedWindowsProcessSample & {
 let previousCpuSample: WindowsProcessSample | null = null
 
 export async function enumerateWindowsProcessResources(): Promise<WindowsProcessResourceRow[]> {
-  try {
-    const rows = await readWindowsProcessTable()
-    const cpuByPid = new Map<number, { cpuTicks: bigint; startTimeId: string }>()
-    const resources = rows.map((row) => {
-      const cpuTicks = parseUnsignedBigInt(row.cpuTimeTicks)
-      if (cpuTicks !== null && row.startTimeId) {
-        cpuByPid.set(row.pid, { cpuTicks, startTimeId: row.startTimeId })
-      }
-      return {
-        pid: row.pid,
-        ppid: row.ppid,
-        cpu: 0,
-        memory: nonNegativeNumber(row.memoryBytes),
-        ...(row.privateMemoryBytes === undefined
-          ? {}
-          : { privateMemory: nonNegativeNumber(row.privateMemoryBytes) })
-      }
-    })
-    return applyWindowsCpuSample({ rows: resources, cpuByPid, sampledAtMs: performance.now() })
-  } catch (error) {
-    previousCpuSample = null
-    console.warn('[memory] Native Windows process inventory unavailable', error)
-    return []
-  }
+  const { rows, capturedAtMs } = await readWindowsProcessTableSnapshot()
+  const cpuByPid = new Map<number, { cpuTicks: bigint; startTimeId: string }>()
+  const resources = rows.map((row) => {
+    const cpuTicks = parseUnsignedBigInt(row.cpuTimeTicks)
+    if (cpuTicks !== null && row.startTimeId) {
+      cpuByPid.set(row.pid, { cpuTicks, startTimeId: row.startTimeId })
+    }
+    return {
+      pid: row.pid,
+      ppid: row.ppid,
+      cpu: 0,
+      memory: nonNegativeNumber(row.memoryBytes),
+      ...(row.privateMemoryBytes === undefined
+        ? {}
+        : { privateMemory: nonNegativeNumber(row.privateMemoryBytes) })
+    }
+  })
+  return applyWindowsCpuSample({ rows: resources, cpuByPid, sampledAtMs: capturedAtMs })
 }
 
 function applyWindowsCpuSample(sample: WindowsProcessSample): WindowsProcessResourceRow[] {

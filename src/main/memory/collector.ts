@@ -47,7 +47,6 @@ import {
 } from './memory-snapshot-buckets'
 import {
   clampMemoryMetric,
-  emptyMemorySnapshot,
   optionalCommitField,
   snapshotCommitFields
 } from './memory-snapshot-values'
@@ -68,14 +67,9 @@ export async function collectMemorySnapshot(store: MemorySnapshotStore): Promise
   if (inflight) {
     return inflight
   }
-  inflight = runSnapshot(store)
-    .catch((err) => {
-      console.warn('[memory] snapshot failed; returning empty', err)
-      return emptyMemorySnapshot()
-    })
-    .finally(() => {
-      inflight = null
-    })
+  inflight = runSnapshot(store).finally(() => {
+    inflight = null
+  })
   return inflight
 }
 
