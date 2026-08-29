@@ -103,6 +103,26 @@ describe('readCodexRateLimitsViaRpc with an unreadable result', () => {
     })
   })
 
+  // STA-3445: rejecting the whole response because ONE window is unrecognised throws away a
+  // real reading -- the same harm from the other direction, and the one an app-server that
+  // grows a new window shape would trigger on every refresh.
+  it('still reads a window it understands next to one it does not', async () => {
+    const pending = readRateLimits({
+      rateLimits: {
+        primary: { usedPercent: 42, windowDurationMins: 300 },
+        secondary: 'a shape this build does not know'
+      }
+    })
+    await vi.advanceTimersByTimeAsync(1)
+    await vi.advanceTimersByTimeAsync(1)
+
+    await expect(pending).resolves.toMatchObject({
+      status: 'ok',
+      error: null,
+      session: { usedPercent: 42 }
+    })
+  })
+
   it('still settles ok when at least one window reads', async () => {
     const pending = readRateLimits({
       rateLimits: { primary: { usedPercent: 42, windowDurationMins: 300 } }
