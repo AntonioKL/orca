@@ -143,11 +143,14 @@ describe('WorktreeCardDetailsHover', () => {
     expect(moreActionsIndex).toBeGreaterThan(-1)
     expect(markup).toContain('More PR actions')
     expect(markup).toContain('Copy link')
-    expect(markup).toContain('Unlink PR')
+    expect(markup).toContain('Unlink PR from workspace')
+    expect(markup).toContain(
+      'Orca will hide PR #456 details for this workspace. The PR and branch on GitHub won’t be changed.'
+    )
     expect(moreActionsIndex).toBeLessThan(openInOrcaIndex)
     expect(openInOrcaIndex).toBeLessThan(viewOnGitHubIndex)
-    expect(markup).not.toContain('aria-label="Unlink PR"')
-    expect(markup.indexOf('Copy link')).toBeLessThan(markup.indexOf('Unlink PR'))
+    expect(markup).not.toContain('aria-label="Unlink PR from workspace"')
+    expect(markup.indexOf('Copy link')).toBeLessThan(markup.indexOf('Unlink PR from workspace'))
   })
 
   it('puts issue copy menu before edit and open actions and keeps GitHub last', () => {
@@ -209,7 +212,10 @@ describe('WorktreeCardDetailsHover', () => {
     )
 
     expect(markup).toContain('aria-label="More MR actions"')
-    expect(markup).toContain('Unlink MR')
+    expect(markup).toContain('Unlink MR from workspace')
+    expect(markup).toContain(
+      'Orca will hide MR !77 details for this workspace. The MR and branch on GitLab won’t be changed.'
+    )
     expect(markup).toContain('View on GitLab')
   })
 
