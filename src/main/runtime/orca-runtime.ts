@@ -1257,6 +1257,10 @@ import {
   resolveWorktreeRemovalRepoOwner
 } from '../worktree-removal-repo-owner'
 import { prefetchWorktreeCreateBase } from '../worktree-create-base-prefetch'
+import {
+  consumePreparedWorktreeCreate,
+  prepareWorktreeCreateForRepo
+} from '../worktree-create-preparation'
 import { prepareLocalWorktreeRootForRepo } from '../worktree-root-preparation'
 import { getWorktreeWatcherRemoval } from '../ipc/worktree-watcher-removal'
 import { acquireWatcherRemovalGate } from '../ipc/watcher-removal-gate'
@@ -26494,11 +26498,14 @@ export class OrcaRuntimeService {
     }
 
     const repo = await this.resolveRepoSelector(args.repoSelector)
-    await prefetchWorktreeCreateBase({
+    const baseBranch = await prefetchWorktreeCreateBase({
       repo,
       baseBranch: args.baseBranch,
       runtime: this
     })
+    if (baseBranch) {
+      await prepareWorktreeCreateForRepo(this.requireStore(), repo, baseBranch)
+    }
   }
 
   async createManagedWorktree(args: {
@@ -27082,9 +27089,27 @@ export class OrcaRuntimeService {
       ...(suggestLocalBaseRefUpdate ? { suggestLocalBaseRefUpdate } : {})
     }
     const defaultAddWorktreeOption = addProjectGitOptions()
+    const preparedWorktreeOptions = suggestLocalBaseRefUpdate
+      ? addProjectGitOptions({ ...remoteTrackingBaseOption, suggestLocalBaseRefUpdate })
+      : remoteTrackingBaseOption
+        ? addProjectGitOptions(remoteTrackingBaseOption)
+        : defaultAddWorktreeOption
     let addResult: AddWorktreeResult
     try {
+      const preparedResult =
+        sparseDirectories.length === 0 && !checkoutExistingBranch
+          ? await consumePreparedWorktreeCreate({
+              repoPath: repo.path,
+              workspaceRoot,
+              worktreePath,
+              branch: branchName,
+              baseBranch,
+              refreshLocalBaseRef: settings.refreshLocalBaseRefOnWorktreeCreate,
+              ...(preparedWorktreeOptions ? { options: preparedWorktreeOptions } : {})
+            })
+          : null
       addResult =
+        preparedResult ??
         (await (sparseDirectories.length > 0
           ? checkoutExistingBranch
             ? addSparseWorktree(
@@ -27180,7 +27205,8 @@ export class OrcaRuntimeService {
                       branchName,
                       baseBranch,
                       settings.refreshLocalBaseRefOnWorktreeCreate
-                    ))) ?? {}
+                    ))) ??
+        {}
     } catch (error) {
       if (shouldRetireGeneratedName && failedWorktreeCreationNeedsRetirement(error)) {
         await retireGeneratedWorktreeName(this.store, repo, settings, effectiveSanitizedName)
