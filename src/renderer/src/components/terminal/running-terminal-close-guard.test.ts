@@ -239,6 +239,24 @@ describe('guardRunningTerminalClose', () => {
     expect(visibleRequest()).not.toBeNull()
   })
 
+  it('asks when a tracked pty child-process inspection is unverifiable', async () => {
+    inspectRuntimeTerminalProcessMock.mockResolvedValue({
+      foregroundProcess: null,
+      hasChildProcesses: false,
+      processEvidence: {
+        foreground: { verdict: 'unverifiable', reason: 'ps timed out' },
+        children: { verdict: 'unverifiable', reason: 'ps timed out' }
+      }
+    })
+    const onClose = vi.fn()
+
+    guard(onClose)
+    await settleProbe()
+
+    expect(onClose).not.toHaveBeenCalled()
+    expect(visibleRequest()).toMatchObject({ terminalTabId: 'tab-1' })
+  })
+
   it('prompts once for a split tab where only the second pane is busy', async () => {
     setState({
       ptyIdsByTabId: { 'tab-1': ['pty-a', 'pty-b'] },
@@ -384,6 +402,38 @@ describe('guardRunningTerminalClose', () => {
     vi.useRealTimers()
 
     expect(visibleRequest()?.copyKind).toBe('agent')
+  })
+
+  it('closes after a tracked pty exits when only a stale layout probe times out', async () => {
+    setState({
+      ptyIdsByTabId: { 'tab-1': ['pty-a'] },
+      terminalLayoutsByTabId: {
+        'tab-1': { ptyIdsByLeafId: { [LEAF_A]: 'pty-a', [LEAF_B]: 'pty-stale' } }
+      }
+    })
+    inspectRuntimeTerminalProcessMock.mockImplementation(async (_settings, ptyId: string) => {
+      if (ptyId === 'pty-stale') {
+        return new Promise(() => {})
+      }
+      return {
+        foregroundProcess: 'zsh',
+        hasChildProcesses: false,
+        processEvidence: {
+          foreground: { verdict: 'observed' as const, processName: 'zsh' },
+          children: { verdict: 'exited' as const }
+        }
+      }
+    })
+    vi.useFakeTimers()
+    const onClose = vi.fn()
+
+    guard(onClose)
+    await settleProbe()
+    vi.advanceTimersByTime(RUNNING_CLOSE_PROBE_TIMEOUT_MS)
+    vi.useRealTimers()
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(visibleRequest()).toBeNull()
   })
 
   it('closes rather than wedging when the timed-out prompt throws', async () => {

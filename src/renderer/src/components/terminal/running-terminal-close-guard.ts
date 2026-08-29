@@ -1,8 +1,12 @@
 import { useAppStore } from '@/store'
-import { inspectRuntimeTerminalProcess } from '@/runtime/runtime-terminal-inspection'
+import {
+  inspectRuntimeTerminalProcess,
+  type RuntimeTerminalProcessInspection
+} from '@/runtime/runtime-terminal-inspection'
 import { useRunningTerminalCloseConfirmStore } from '@/store/running-terminal-close-confirm'
 import type { TerminalTabCloseReason } from '@/store/slices/terminal-tab-retirement'
 import type { AppState } from '@/store/types'
+import { readPtyProcessInspectionEvidence } from '../../../../shared/pty-process-inspection-evidence'
 import { resolveBusyPtyCloseCopyKind } from './terminal-close-copy-kind'
 
 export type RunningTerminalCloseGuardOptions = {
@@ -64,6 +68,26 @@ function collectTabPtyIds(
   return { ptyIds: [...ptyIds], trackedPtyIds }
 }
 
+type SettledCloseProbe =
+  | { status: 'fulfilled'; value: RuntimeTerminalProcessInspection }
+  | { status: 'rejected' }
+
+function shouldConfirmForProbe(
+  ptyId: string,
+  trackedPtyIds: ReadonlySet<string>,
+  probe: SettledCloseProbe | undefined
+): boolean {
+  const tracked = trackedPtyIds.has(ptyId)
+  if (probe === undefined || probe.status === 'rejected') {
+    return tracked
+  }
+  if (probe.value.unavailable === true) {
+    return tracked
+  }
+  const children = readPtyProcessInspectionEvidence(probe.value).children
+  return children.verdict === 'live' || (children.verdict === 'unverifiable' && tracked)
+}
+
 /**
  * Routes an interactive terminal-tab close through the running-process confirmation.
  * Closes immediately when nothing is running, so idle tabs keep today's behavior.
@@ -113,17 +137,34 @@ export function guardRunningTerminalClose(params: {
     decided = true
   }
 
+  const settledProbes = new Map<string, SettledCloseProbe>()
   const probeTimeout = setTimeout(() => {
     try {
-      // Why: a probe that has not answered yet is unknown, not idle. Ask, treating every pty
-      // as a candidate, so a degraded relay costs a click instead of a killed remote command.
-      confirmClose(ptyIds)
+      const busyPtyIds = ptyIds.filter((ptyId) =>
+        shouldConfirmForProbe(ptyId, trackedPtyIds, settledProbes.get(ptyId))
+      )
+      if (busyPtyIds.length === 0) {
+        closeNow()
+        return
+      }
+      confirmClose(busyPtyIds)
     } catch {
       closeNow()
     }
   }, RUNNING_CLOSE_PROBE_TIMEOUT_MS)
 
-  void Promise.allSettled(ptyIds.map((ptyId) => inspectRuntimeTerminalProcess(settings, ptyId)))
+  const probes = ptyIds.map(async (ptyId): Promise<SettledCloseProbe> => {
+    let probe: SettledCloseProbe
+    try {
+      probe = { status: 'fulfilled', value: await inspectRuntimeTerminalProcess(settings, ptyId) }
+    } catch {
+      probe = { status: 'rejected' }
+    }
+    settledProbes.set(ptyId, probe)
+    return probe
+  })
+
+  void Promise.all(probes)
     .then((results) => {
       clearTimeout(probeTimeout)
       if (decided) {
@@ -137,23 +178,16 @@ export function guardRunningTerminalClose(params: {
       // is long gone — it answers `unavailable` or throws forever, and prompting on it would
       // put a dialog in front of every cleanly-exited tab and every reconnecting ssh tab. It
       // can still block by answering *positively*, the mounting-pane window the union exists for.
-      const busyPtyIds = ptyIds.filter((ptyId, index) => {
-        const result = results[index]
-        if (result?.status !== 'fulfilled') {
-          return trackedPtyIds.has(ptyId)
-        }
-        if (result.value.hasChildProcesses) {
-          return true
-        }
-        return result.value.unavailable === true && trackedPtyIds.has(ptyId)
-      })
+      const busyPtyIds = ptyIds.filter((ptyId, index) =>
+        shouldConfirmForProbe(ptyId, trackedPtyIds, results[index])
+      )
       if (busyPtyIds.length === 0) {
         closeNow()
         return
       }
       confirmClose(busyPtyIds)
     })
-    // Why: allSettled never rejects, so this only fires when the decision above throws (a
+    // Why: each probe catches its own rejection, so this only fires when the decision above throws (a
     // copy-kind lookup, a store subscriber). Without it the tab would silently never close
     // and the user would get no feedback at all; the pane path it replaced had this catch.
     .catch(() => {
