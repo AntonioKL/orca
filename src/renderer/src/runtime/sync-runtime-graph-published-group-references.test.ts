@@ -35,8 +35,9 @@ function danglingGroupRefs(
 }
 
 describe('buildMobileSessionTabSnapshots published group references', () => {
-  // Why the same claim is driven again through tab groups: the test above takes the legacy nav
-  // order, where the only thing that has to hold the document back is the per-tab guard. With
+  // Why groups get their own fixture: 'omits a browser tab located by a workspace document from
+  // mobile snapshots' (in sync-runtime-graph-editor-diff-tabs.test.ts) drives the same document
+  // through the legacy nav order, where the per-tab guard is the only thing holding it back. With
   // groups the projection runs first and publishes group metadata of its own, so a document reaching
   // it leaves a group whose tabOrder and activeTabId name a tab the phone is never sent.
   it('keeps a workspace document out of published tab groups as well as the tab list', () => {
