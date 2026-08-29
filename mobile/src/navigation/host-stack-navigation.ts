@@ -134,6 +134,16 @@ function convergeOnMountedRoute(
   return actions.length > 0 ? 'converging' : 'settled'
 }
 
+/** Focus an already-mounted instance of `target` if the tree holds one. Returns
+ *  whether it converged, so a caller that owns its own cold-start navigation can
+ *  fall through to it unchanged and only skip the branch that would duplicate. */
+export function convergeOnMountedHostStackRoute(
+  navigation: HostStackRootNavigation,
+  target: HostStackRouteTarget
+): boolean {
+  return convergeOnMountedRoute(navigation, target) !== 'absent'
+}
+
 /** Opens a deep host route by mounting `/h/[hostId]` first and replacing it once
  *  its stack is committed. A cold push straight to a nested route resolves to the
  *  host index without the dynamic id, which lands on a blank host screen. */

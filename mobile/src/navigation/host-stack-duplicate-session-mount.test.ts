@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  convergeOnMountedHostStackRoute,
   navigateToHostStackRoute,
   type HostStackNavigationState,
   type HostStackRouteTarget
@@ -183,6 +184,10 @@ function drive(initial: MutableState) {
     open(hostId: string, target: HostStackRouteTarget) {
       return navigateToHostStackRoute(navigation as never, this.router, hostId, target)
     },
+    /** What a screen that owns its own cold-start navigation calls first. */
+    converge(target: HostStackRouteTarget) {
+      return convergeOnMountedHostStackRoute(navigation as never, target)
+    },
     /** Commit the queued pushes, the way expo-router drains its routing queue. */
     settle() {
       while (queued.length > 0) {
@@ -238,6 +243,63 @@ function tree(hostStack: { index: number; routes: MutableRoute[] }): MutableStat
 }
 
 describe('one mounted session screen per worktree', () => {
+  it('converges the review screen onto the live session instead of replacing into a second one', () => {
+    // Source Control stacked over a live session, then a changed file opened for review.
+    // `Open in session` used to router.replace() here, and REPLACE mints a fresh key.
+    const app = drive(
+      tree({
+        index: 2,
+        routes: [
+          sessionRoute('live-session'),
+          {
+            key: 'source-control',
+            name: '[hostId]/source-control/[worktreeId]',
+            params: { hostId: HOST, worktreeId: WORKTREE }
+          },
+          {
+            key: 'review',
+            name: '[hostId]/review/[worktreeId]',
+            params: { hostId: HOST, worktreeId: WORKTREE }
+          }
+        ]
+      })
+    )
+
+    expect(app.converge(TARGET)).toBe(true)
+
+    const sessions = mountedSessions(app.root, WORKTREE)
+    expect(sessions.map((route) => route.key)).toEqual(['live-session'])
+    expect(app.root.routes[0].state?.index).toBe(0)
+  })
+
+  it('converges a worktree row tap onto the session already mounted under the host list', () => {
+    // A host-level notification pushes `/h/<host>`, which appends a SECOND `[hostId]/index`
+    // above the live session; the row tap below it would otherwise push a second session.
+    const app = drive(
+      tree({
+        index: 2,
+        routes: [
+          { key: 'idx', name: '[hostId]/index', params: { hostId: HOST } },
+          sessionRoute('live-session'),
+          { key: 'idx-2', name: '[hostId]/index', params: { hostId: HOST } }
+        ]
+      })
+    )
+
+    expect(app.converge(TARGET)).toBe(true)
+
+    expect(mountedSessions(app.root, WORKTREE).map((route) => route.key)).toEqual(['live-session'])
+  })
+
+  it('reports no convergence when the worktree is not mounted, so the caller still navigates', () => {
+    const app = drive(
+      tree({ index: 0, routes: [{ key: 'idx', name: '[hostId]/index', params: { hostId: HOST } }] })
+    )
+
+    expect(app.converge(TARGET)).toBe(false)
+    expect(mountedSessions(app.root, WORKTREE)).toHaveLength(0)
+  })
+
   it('does not mount a second session when the tap arrives from Files for the same worktree', () => {
     const app = drive(
       tree({
