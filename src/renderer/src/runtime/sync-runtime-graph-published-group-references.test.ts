@@ -1,40 +1,21 @@
 import { describe, expect, it } from 'vitest'
 import { buildMobileSessionTabSnapshots } from './sync-runtime-graph'
 import { makeState } from './sync-runtime-graph-test-harness'
-import type { RuntimeMobileSessionTabsSnapshot } from '../../../shared/runtime-session-contracts'
+import {
+  collectLayoutGroupIds,
+  danglingGroupRefs,
+  danglingTabRefs
+} from './sync-runtime-graph-published-reference-invariants'
 import type { AppState } from '../store/types'
 
 // The invariant these share: the mobile snapshot may not publish an id that names something it did
 // not publish. Held-back tabs already drag their group out of `tabGroups`; these pin that the
 // snapshot's own `activeGroupId` and `tabGroupLayout` follow the group out rather than pointing at
-// a group the phone was never sent.
-
-function collectLayoutGroupIds(node: unknown, into: string[] = []): string[] {
-  if (!node || typeof node !== 'object') {
-    return into
-  }
-  const candidate = node as { type?: string; groupId?: string; first?: unknown; second?: unknown }
-  if (candidate.type === 'leaf' && candidate.groupId) {
-    into.push(candidate.groupId)
-    return into
-  }
-  collectLayoutGroupIds(candidate.first, into)
-  collectLayoutGroupIds(candidate.second, into)
-  return into
-}
-
-/** Published ids that name a tab group the snapshot never published — empty is the invariant. */
-function danglingGroupRefs(
-  snapshot: RuntimeMobileSessionTabsSnapshot | undefined
-): (string | null)[] {
-  const publishedGroupIds = new Set((snapshot?.tabGroups ?? []).map((group) => group.id))
-  return [
-    snapshot?.activeGroupId ?? null,
-    ...collectLayoutGroupIds(snapshot?.tabGroupLayout)
-  ].filter((groupId) => groupId !== null && !publishedGroupIds.has(groupId))
-}
+// a group the phone was never sent, and that every tab a group names is one the client can resolve.
 
 describe('buildMobileSessionTabSnapshots published group references', () => {
+  const mountedLeafId = '22222222-2222-4222-8222-222222222222'
+
   // Why groups get their own fixture: 'omits a browser tab located by a workspace document from
   // mobile snapshots' (in sync-runtime-graph-editor-diff-tabs.test.ts) drives the same document
   // through the legacy nav order, where the per-tab guard is the only thing holding it back. With
@@ -43,6 +24,7 @@ describe('buildMobileSessionTabSnapshots published group references', () => {
   it('keeps a workspace document out of published tab groups as well as the tab list', () => {
     const docWorkspaceId = 'browser-doc'
     const urlWorkspaceId = 'browser-url'
+    const rightLeafId = '11111111-1111-4111-8111-111111111111'
     const state = makeState({
       // The document's group is the active one: if it survived anywhere, this is where it shows.
       activeGroupIdByWorktree: { 'wt-1': 'group-left' },
@@ -57,8 +39,8 @@ describe('buildMobileSessionTabSnapshots published group references', () => {
           {
             id: 'group-right',
             activeTabId: 'unified-url',
-            tabOrder: ['unified-url'],
-            recentTabIds: ['unified-url']
+            tabOrder: ['unified-url', 'term-right'],
+            recentTabIds: ['unified-url', 'term-right']
           }
         ]
       } as unknown as AppState['groupsByWorktree'],
@@ -85,9 +67,41 @@ describe('buildMobileSessionTabSnapshots published group references', () => {
             contentType: 'browser',
             entityId: urlWorkspaceId,
             title: 'Example'
+          },
+          // A terminal's unified tab is self-backed (`id === entityId === the terminal tab id`),
+          // which is what puts the parent id — not a surface id — into the group's tabOrder.
+          {
+            id: 'term-right',
+            groupId: 'group-right',
+            contentType: 'terminal',
+            entityId: 'term-right',
+            title: 'Terminal'
           }
         ]
       } as unknown as AppState['unifiedTabsByWorktree'],
+      tabsByWorktree: {
+        'wt-1': [
+          {
+            id: 'term-right',
+            worktreeId: 'wt-1',
+            ptyId: 'pty-right',
+            title: 'Terminal',
+            defaultTitle: 'Terminal',
+            customTitle: null,
+            color: null,
+            sortOrder: 0,
+            createdAt: 1
+          }
+        ]
+      } as unknown as AppState['tabsByWorktree'],
+      terminalLayoutsByTabId: {
+        'term-right': {
+          root: { type: 'leaf', leafId: rightLeafId },
+          activeLeafId: rightLeafId,
+          expandedLeafId: null,
+          ptyIdsByLeafId: { [rightLeafId]: 'pty-right' }
+        }
+      } as unknown as AppState['terminalLayoutsByTabId'],
       browserTabsByWorktree: {
         'wt-1': [
           {
@@ -131,17 +145,17 @@ describe('buildMobileSessionTabSnapshots published group references', () => {
 
     // The presence half: the grouped URL tab beside it does publish, so a projection that had
     // stopped emitting browser tabs — or groups — fails here rather than passing on emptiness.
-    expect(snapshot?.tabs).toMatchObject([{ type: 'browser', browserWorkspaceId: urlWorkspaceId }])
-    expect(snapshot?.tabGroups).toMatchObject([{ id: 'group-right', tabOrder: ['unified-url'] }])
-    // Mechanical rather than by name: nothing a group points at may be missing from the tab list,
-    // whatever the reason it was held back.
-    const publishedTabIds = new Set(snapshot?.tabs.map((tab) => tab.id) ?? [])
-    for (const group of snapshot?.tabGroups ?? []) {
-      expect(group.tabOrder.filter((tabId) => !publishedTabIds.has(tabId))).toEqual([])
-      expect((group.recentTabIds ?? []).filter((tabId) => !publishedTabIds.has(tabId))).toEqual([])
-      expect(group.activeTabId === null || publishedTabIds.has(group.activeTabId)).toBe(true)
-    }
-    expect(snapshot?.activeTabId === null || publishedTabIds.has(snapshot.activeTabId)).toBe(true)
+    expect(snapshot?.tabs).toMatchObject([
+      { type: 'browser', browserWorkspaceId: urlWorkspaceId },
+      { type: 'terminal', id: `term-right::${rightLeafId}`, parentTabId: 'term-right' }
+    ])
+    expect(snapshot?.tabGroups).toMatchObject([
+      { id: 'group-right', tabOrder: ['unified-url', 'term-right'] }
+    ])
+    // Mechanical rather than by name: nothing a group points at may be unresolvable in the tab list,
+    // whatever the reason it was held back. The terminal is why this resolves through `parentTabId`
+    // rather than by id — 'term-right' is published as 'term-right::<leafId>'.
+    expect(danglingTabRefs(snapshot)).toEqual([])
     // The same claim one level up: the snapshot's own active-group pointer may not name a group the
     // phone was never sent. 'group-left' is the held-back one, so a pass-through of the desktop's
     // active group fails here.
@@ -233,6 +247,94 @@ describe('buildMobileSessionTabSnapshots published group references', () => {
     expect(danglingGroupRefs(snapshot)).toEqual([])
     // The display choice, by name: focus lands on the group the phone actually has.
     expect(snapshot?.activeGroupId).toBe('group-right')
+  })
+
+  // Why this arm: the mirrored-tab guard is applied twice — once choosing which terminals the group
+  // projection may name, once emitting rows. Ablating the projection copy alone leaves the emit copy
+  // holding the tab list, so without this the projection's copy is unpinned and its removal is
+  // invisible: the group would name a tab the client is never sent a row for.
+  it('keeps a web-only mirrored terminal out of its published group', () => {
+    const mirroredLeafId = '33333333-3333-4333-8333-333333333333'
+    const state = makeState({
+      activeGroupIdByWorktree: { 'wt-1': 'group-1' },
+      groupsByWorktree: {
+        'wt-1': [
+          {
+            id: 'group-1',
+            activeTabId: 'web-terminal-host%3A%3Aleaf',
+            tabOrder: ['web-terminal-host%3A%3Aleaf', 'term-mounted'],
+            recentTabIds: ['web-terminal-host%3A%3Aleaf', 'term-mounted']
+          }
+        ]
+      } as unknown as AppState['groupsByWorktree'],
+      layoutByWorktree: {
+        'wt-1': { type: 'leaf', groupId: 'group-1' }
+      } as unknown as AppState['layoutByWorktree'],
+      unifiedTabsByWorktree: {
+        'wt-1': [
+          {
+            id: 'web-terminal-host%3A%3Aleaf',
+            groupId: 'group-1',
+            contentType: 'terminal',
+            entityId: 'web-terminal-host%3A%3Aleaf',
+            title: 'Mirrored'
+          },
+          {
+            id: 'term-mounted',
+            groupId: 'group-1',
+            contentType: 'terminal',
+            entityId: 'term-mounted',
+            title: 'Terminal'
+          }
+        ]
+      } as unknown as AppState['unifiedTabsByWorktree'],
+      tabsByWorktree: {
+        'wt-1': [
+          {
+            id: 'web-terminal-host%3A%3Aleaf',
+            worktreeId: 'wt-1',
+            ptyId: null,
+            title: 'Mirrored',
+            defaultTitle: 'Mirrored',
+            customTitle: null,
+            color: null,
+            sortOrder: 0,
+            createdAt: 1
+          },
+          {
+            id: 'term-mounted',
+            worktreeId: 'wt-1',
+            ptyId: 'pty-mounted',
+            title: 'Terminal',
+            defaultTitle: 'Terminal',
+            customTitle: null,
+            color: null,
+            sortOrder: 1,
+            createdAt: 2
+          }
+        ]
+      } as unknown as AppState['tabsByWorktree'],
+      terminalLayoutsByTabId: {
+        // A persisted leaf, so it is the mirror guard holding this back and not the empty-layout one.
+        'web-terminal-host%3A%3Aleaf': {
+          root: { type: 'leaf', leafId: mirroredLeafId },
+          activeLeafId: mirroredLeafId,
+          expandedLeafId: null
+        },
+        'term-mounted': {
+          root: { type: 'leaf', leafId: mountedLeafId },
+          activeLeafId: mountedLeafId,
+          expandedLeafId: null,
+          ptyIdsByLeafId: { [mountedLeafId]: 'pty-mounted' }
+        }
+      } as unknown as AppState['terminalLayoutsByTabId']
+    } as unknown as Parameters<typeof makeState>[0])
+
+    const snapshot = buildMobileSessionTabSnapshots(state)[0]
+
+    expect(snapshot?.tabs.map((tab) => tab.id)).toEqual([`term-mounted::${mountedLeafId}`])
+    expect(danglingTabRefs(snapshot)).toEqual([])
+    expect(danglingGroupRefs(snapshot)).toEqual([])
   })
 
   it('does not recover unsupported combined diff tabs through split-group fallback', () => {
