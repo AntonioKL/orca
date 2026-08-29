@@ -335,17 +335,23 @@ export function formatWorktreeRemovalError(
     ? `Failed to force delete worktree at ${worktreePath}.`
     : `Failed to delete worktree at ${worktreePath}.`
 
-  if (!(error instanceof Error)) {
+  if (!(error instanceof Error) && typeof error !== 'string') {
     return fallback
   }
 
   const errorWithStreams = error as Error & { stderr?: string; stdout?: string }
-  const details = [errorWithStreams.stderr, errorWithStreams.stdout, error.message]
-    .map((value) => value?.trim())
-    .find(Boolean)
+  const details =
+    typeof error === 'string'
+      ? error.trim()
+      : [errorWithStreams.stderr, errorWithStreams.stdout, error.message]
+          .map((value) => value?.trim())
+          .find(Boolean)
 
   const message = details ? `${fallback} ${details}` : fallback
-  if (isHeldWorkspaceDirectoryRemovalError(message)) {
+  if (
+    isHeldWorkspaceDirectoryRemovalError(message) ||
+    message.includes(WORKSPACE_DIRECTORY_HELD_HINT)
+  ) {
     return message
   }
   // Why here and not at the delete: this is the one funnel every removal throw site already

@@ -20,7 +20,9 @@ import { recoverLocalWindowsWorktreeRemoval } from '../../../local-worktree-remo
 import { withWorktreeRemoveStageSpan } from '../../../observability/instrumentation'
 import {
   canSafelyRemoveOrphanedWorktreeDirectory,
-  findRegisteredDeletableWorktree
+  findRegisteredDeletableWorktree,
+  isWorktreePathMissing,
+  UNPROVEN_ORPHANED_WORKTREE_DIRECTORY_MESSAGE
 } from '../../../worktree-removal-safety'
 import {
   cleanupUnusedWorktreePushTargetRemote,
@@ -178,6 +180,13 @@ export async function removeRegisteredLocalWorktree(
             (error: unknown) => error ?? new Error('Recursive worktree directory removal failed.')
           )
         } else {
+          const runtimeWorktreePath = toLocalWorktreeRuntimePath(
+            canonicalWorktreePath,
+            localWorktreeGitOptions
+          )
+          if (!(await isWorktreePathMissing(runtimeWorktreePath, access.statPath))) {
+            directoryRemovalError = new Error(UNPROVEN_ORPHANED_WORKTREE_DIRECTORY_MESSAGE)
+          }
           console.warn(
             `[worktrees] Refusing recursive cleanup for unproven worktree directory: ${canonicalWorktreePath}`
           )

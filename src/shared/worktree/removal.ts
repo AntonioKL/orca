@@ -56,7 +56,7 @@ export function isProvenLivePtyRemovalError(error: string): boolean {
 // names the folder but not the cause, and no retry can clear it, so the delete just fails
 // again. Hint and matcher stay together for the same reason the force hint does.
 export const WORKSPACE_DIRECTORY_HELD_HINT =
-  'Windows would not delete the workspace folder because a program still has it open — most often a terminal, editor, or dev server whose current folder is the workspace. Close whatever is using the folder, then delete it again.'
+  'Windows would not delete the workspace folder because a program may still have it open or access was denied. Close any terminal, editor, or dev server whose current folder is the workspace, then delete it again; if nothing is using it, check the folder permissions.'
 
 export function isHeldWorkspaceDirectoryRemovalError(error: string): boolean {
   return error.includes(WORKSPACE_DIRECTORY_HELD_HINT)

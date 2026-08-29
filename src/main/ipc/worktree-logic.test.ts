@@ -597,9 +597,9 @@ describe('parseWorktreeId', () => {
 describe('formatWorktreeRemovalError', () => {
   const path = '/workspaces/feature'
 
-  it('returns fallback for non-Error input', () => {
+  it('includes raw string errors', () => {
     expect(formatWorktreeRemovalError('oops', path, false)).toBe(
-      `Failed to delete worktree at ${path}.`
+      `Failed to delete worktree at ${path}. oops`
     )
   })
 
@@ -619,7 +619,7 @@ describe('formatWorktreeRemovalError', () => {
 
   it('uses force text when force is true', () => {
     expect(formatWorktreeRemovalError('oops', path, true)).toBe(
-      `Failed to force delete worktree at ${path}.`
+      `Failed to force delete worktree at ${path}. oops`
     )
   })
 
@@ -663,6 +663,13 @@ describe('formatWorktreeRemovalError', () => {
     it('explains the failure when it arrives as prose with no error code', () => {
       const message = `EBUSY: resource busy or locked, rmdir '${nativePath}'`
       expect(formatWorktreeRemovalError(new Error(message), windowsPath, false)).toBe(
+        `Failed to delete worktree at ${windowsPath}. ${message} ${WORKSPACE_DIRECTORY_HELD_HINT}`
+      )
+    })
+
+    it('explains a raw string failure from the workspace directory itself', () => {
+      const message = `EBUSY: resource busy or locked, rmdir '${nativePath}'`
+      expect(formatWorktreeRemovalError(message, windowsPath, false)).toBe(
         `Failed to delete worktree at ${windowsPath}. ${message} ${WORKSPACE_DIRECTORY_HELD_HINT}`
       )
     })

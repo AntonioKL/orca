@@ -331,6 +331,44 @@ describe('registerWorktreeHandlers', () => {
     }
   })
 
+  it('keeps an existing orphan directory when its ownership cannot be proven', async () => {
+    const parentDir = await mkdtemp(join(tmpdir(), 'orca-ipc-orphan-unproven-'))
+    const repoPath = join(parentDir, 'repo')
+    const worktreePath = join(parentDir, 'feature-wt')
+    await mkdir(join(worktreePath, '.git'), { recursive: true })
+    const repo = {
+      id: 'repo-1',
+      path: repoPath,
+      displayName: 'repo',
+      badgeColor: '#000',
+      addedAt: 0
+    }
+    store.getRepos.mockReturnValue([repo])
+    store.getRepo.mockReturnValue({ ...repo, worktreeBaseRef: null })
+    mockKnownFeatureWorktree(worktreePath, repoPath)
+    getEffectiveHooksMock.mockReturnValue(null)
+    gitExecFileAsyncMock.mockResolvedValue({ stdout: '', stderr: '' })
+    removeWorktreeMock.mockRejectedValue(
+      Object.assign(new Error('git worktree remove failed'), {
+        stderr: `fatal: '${worktreePath}' is not a working tree`
+      })
+    )
+    const removePathSpy = vi.spyOn(localWorktreeFilesystem, 'removeLocalWorktreePath')
+    const worktreeId = `repo-1::${worktreePath}`
+
+    try {
+      await expect(handlers['worktrees:remove'](null, { worktreeId })).rejects.toThrow(
+        'Orca could not prove that its directory is safe to delete'
+      )
+      await expect(lstat(worktreePath)).resolves.toBeTruthy()
+      expect(removePathSpy).not.toHaveBeenCalled()
+      expect(store.removeWorktreeMeta).not.toHaveBeenCalled()
+    } finally {
+      removePathSpy.mockRestore()
+      await rm(parentDir, { recursive: true, force: true })
+    }
+  })
+
   it('recovers forced Windows long-path worktree removal through local deletion and prune', async () => {
     setPlatform('win32')
     const parentDir = await mkdtemp(join(tmpdir(), 'orca-ipc-long-path-'))

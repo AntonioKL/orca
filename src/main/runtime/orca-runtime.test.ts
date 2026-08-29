@@ -50022,6 +50022,36 @@ describe('OrcaRuntimeService', () => {
     }
   })
 
+  it('keeps an existing runtime orphan directory when its ownership cannot be proven', async () => {
+    const removeWorktreeMeta = vi.fn()
+    const runtime = createWorktreeRemovalRuntime({ ...store, removeWorktreeMeta })
+    vi.mocked(getEffectiveHooks).mockReturnValue(null)
+    vi.mocked(removeWorktree).mockRejectedValue(
+      Object.assign(new Error('git worktree remove failed'), {
+        stderr: `fatal: '${TEST_WORKTREE_PATH}' is not a working tree`
+      })
+    )
+    const gitSpy = vi.spyOn(gitRunner, 'gitExecFileAsync').mockResolvedValue({
+      stdout: '',
+      stderr: ''
+    })
+    await mkdir(join(TEST_WORKTREE_PATH, '.git'), { recursive: true })
+    const removePathSpy = vi.spyOn(localWorktreeFilesystem, 'removeLocalWorktreePath')
+
+    try {
+      await expect(runtime.removeManagedWorktree(TEST_WORKTREE_ID)).rejects.toThrow(
+        'Orca could not prove that its directory is safe to delete'
+      )
+      await expect(lstat(TEST_WORKTREE_PATH)).resolves.toBeTruthy()
+      expect(removePathSpy).not.toHaveBeenCalled()
+      expect(removeWorktreeMeta).not.toHaveBeenCalled()
+    } finally {
+      removePathSpy.mockRestore()
+      gitSpy.mockRestore()
+      await rm(TEST_WORKTREE_PATH, { recursive: true, force: true })
+    }
+  })
+
   it('refuses runtime Windows recovery while Git still reports the row and keeps metadata', async () => {
     setPlatform('win32')
     const removeWorktreeMeta = vi.fn()

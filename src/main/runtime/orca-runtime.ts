@@ -1249,6 +1249,7 @@ import {
   isWorktreePathMissing,
   ORPHANED_WORKTREE_DIRECTORY_MESSAGE,
   stripOrcaProvenanceMetaUpdates,
+  UNPROVEN_ORPHANED_WORKTREE_DIRECTORY_MESSAGE,
   UNREGISTERED_MISSING_WORKTREE_MESSAGE
 } from '../worktree-removal-safety'
 import {
@@ -29767,6 +29768,13 @@ export class OrcaRuntimeService {
                     removalError ?? new Error('Recursive worktree directory removal failed.')
                 )
               } else {
+                const runtimeWorktreePath = toLocalWorktreeRuntimePath(
+                  canonicalWorktreePath,
+                  localWorktreeGitOptions
+                )
+                if (!(await isWorktreePathMissing(runtimeWorktreePath, access.statPath))) {
+                  directoryRemovalError = new Error(UNPROVEN_ORPHANED_WORKTREE_DIRECTORY_MESSAGE)
+                }
                 console.warn(
                   `[worktrees] Refusing recursive cleanup for unproven worktree directory: ${canonicalWorktreePath}`
                 )
