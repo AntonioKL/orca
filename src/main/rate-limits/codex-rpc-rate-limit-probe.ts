@@ -33,6 +33,15 @@ type RpcRateLimitsResponse = {
   rateLimitResetCredits?: RpcRateLimitResetCredits
 }
 
+// Why: `result` crosses the app-server boundary as parsed JSON, so its shape is
+// a claim, not a fact. Only a plain object can carry the wrapper's fields; each
+// field inside is validated separately by its own mapper.
+function readRpcRateLimitsResult(result: unknown): RpcRateLimitsResponse | null {
+  return result && typeof result === 'object' && !Array.isArray(result)
+    ? (result as RpcRateLimitsResponse)
+    : null
+}
+
 type RpcDataStream = {
   on(event: 'data', listener: (chunk: Buffer) => void): unknown
   off(event: 'data', listener: (chunk: Buffer) => void): unknown
@@ -241,9 +250,27 @@ export function readCodexRateLimitsViaRpc(
             )
             return
           }
-          const wrapper = message.result as RpcRateLimitsResponse | undefined
-          const classified = classifyCodexRateLimitWindows(wrapper?.rateLimits)
-          const credits = mapRpcRateLimitResetCredits(wrapper?.rateLimitResetCredits)
+          const wrapper = readRpcRateLimitsResult(message.result)
+          if (!wrapper) {
+            // Why: a response carrying neither an error nor a readable result is
+            // one Orca could not understand. Classifying it anyway would settle
+            // two null windows as a successful reading, and the stale policy
+            // would write that over the account's last real usage (STA-3445).
+            settle(
+              {
+                provider: 'codex',
+                session: null,
+                weekly: null,
+                updatedAt: Date.now(),
+                error: 'Codex returned an unreadable usage response',
+                status: 'error'
+              },
+              { kill: true }
+            )
+            return
+          }
+          const classified = classifyCodexRateLimitWindows(wrapper.rateLimits)
+          const credits = mapRpcRateLimitResetCredits(wrapper.rateLimitResetCredits)
           settle(
             {
               provider: 'codex',
