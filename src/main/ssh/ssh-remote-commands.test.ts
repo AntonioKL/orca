@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   readdirSync,
   writeFileSync,
   rmSync,
@@ -37,6 +38,9 @@ import {
 } from '../../shared/relay-artifacts'
 
 const posix = getRemoteHostPlatform('linux-x64')
+const nativePosix = getRemoteHostPlatform(
+  process.platform === 'darwin' ? 'darwin-x64' : 'linux-x64'
+)
 const windows = getRemoteHostPlatform('win32-x64')
 const powerShellExecutable = [
   process.env.ORCA_POWERSHELL_EXECUTABLE,
@@ -415,6 +419,43 @@ describe('ssh remote command builders', () => {
         expect(outputs.filter((output) => output.trim().endsWith('OK'))).toHaveLength(1)
         expect(statSync(lockPath).isDirectory()).toBe(true)
         expect(statSync(join(lockPath, '.owner')).isFile()).toBe(true)
+        expect(readFileSync(join(lockPath, '.boot-id'), 'utf8')).toMatch(/^win32:\d+$/u)
+      } finally {
+        rmSync(root, { recursive: true, force: true })
+      }
+    },
+    30_000
+  )
+
+  it.runIf(powerShell51Executable)(
+    'atomically replaces a fresh Windows lock only after the remote boot changes',
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), 'orca-install-lock-windows-reboot-'))
+      try {
+        const lockPath = join(root, '.install-lock')
+        const acquire = decodePowerShellCommand(tryCreateInstallLockCommand(windows, lockPath))
+        const recover = decodePowerShellCommand(
+          tryStealInstallLockCommand(windows, lockPath, 20 * 60)
+        )
+
+        await expect(runPowerShellCommand(powerShell51Executable!, acquire)).resolves.toMatch(/OK/u)
+        await expect(runPowerShellCommand(powerShell51Executable!, recover)).resolves.toMatch(
+          /^BUSY\s*$/u
+        )
+
+        writeFileSync(join(lockPath, '.boot-id'), 'partial')
+        await expect(runPowerShellCommand(powerShell51Executable!, recover)).resolves.toMatch(
+          /^BUSY\s*$/u
+        )
+
+        writeFileSync(join(lockPath, '.boot-id'), 'win32:0')
+        const outputs = await Promise.all(
+          Array.from({ length: 4 }, () => runPowerShellCommand(powerShell51Executable!, recover))
+        )
+
+        expect(outputs.filter((output) => output.trim() === 'REBOOT_OK')).toHaveLength(1)
+        expect(readFileSync(join(lockPath, '.boot-id'), 'utf8')).toMatch(/^win32:\d+$/u)
+        expect(readdirSync(root).filter((name) => name.includes('.tombstone.'))).toHaveLength(0)
       } finally {
         rmSync(root, { recursive: true, force: true })
       }
@@ -525,6 +566,61 @@ describe('ssh remote command builders', () => {
         expect(existsSync(lockDir)).toBe(true)
         expect(readdirSync(root).filter((name) => name.includes('.steal.'))).toHaveLength(0)
         expect(Math.floor(statSync(lockDir).mtimeMs / 1000)).toBeGreaterThan(lockMtimeSeconds)
+      } finally {
+        rmSync(root, { recursive: true, force: true })
+      }
+    }
+  )
+
+  it.runIf(process.platform !== 'win32')(
+    'atomically replaces a fresh POSIX lock only after the execution host changes',
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), 'orca-install-lock-reboot-'))
+      try {
+        const lockDir = join(root, '.install-lock')
+        const acquire = tryCreateInstallLockCommand(nativePosix, lockDir)
+        const recover = tryStealInstallLockCommand(nativePosix, lockDir, 20 * 60)
+
+        expect((await runShellCommand(acquire)).trim()).toBe('OK')
+        const currentBootId = readFileSync(join(lockDir, '.boot-id'), 'utf8').trim()
+        expect(currentBootId).toMatch(/^(?:darwin|linux):/u)
+        expect((await runShellCommand(recover)).trim()).toBe('BUSY')
+
+        const previousBootId =
+          nativePosix.os === 'darwin' ? 'darwin:0' : 'linux:00000000-0000-0000-0000-000000000000:0'
+        writeFileSync(join(lockDir, '.boot-id'), previousBootId)
+        const outputs = await Promise.all(
+          Array.from({ length: 32 }, () => runShellCommand(recover))
+        )
+
+        expect(outputs.filter((output) => output.trim() === 'REBOOT_OK')).toHaveLength(1)
+        expect(readFileSync(join(lockDir, '.boot-id'), 'utf8').trim()).toBe(currentBootId)
+        expect(readdirSync(root).some((name) => name.includes('.tombstone'))).toBe(false)
+      } finally {
+        rmSync(root, { recursive: true, force: true })
+      }
+    }
+  )
+
+  it.runIf(process.platform !== 'win32')(
+    'keeps a fresh legacy POSIX lock when no boot identity is available',
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), 'orca-install-lock-legacy-'))
+      try {
+        const lockDir = join(root, '.install-lock')
+        mkdirSync(lockDir)
+
+        const output = await runShellCommand(
+          tryStealInstallLockCommand(nativePosix, lockDir, 20 * 60)
+        )
+
+        expect(output.trim()).toBe('BUSY')
+        expect(existsSync(lockDir)).toBe(true)
+
+        writeFileSync(join(lockDir, '.boot-id'), 'partial')
+        expect(
+          (await runShellCommand(tryStealInstallLockCommand(nativePosix, lockDir, 20 * 60))).trim()
+        ).toBe('BUSY')
       } finally {
         rmSync(root, { recursive: true, force: true })
       }
