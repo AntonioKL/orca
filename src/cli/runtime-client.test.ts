@@ -348,6 +348,56 @@ describe.skipIf(process.platform === 'win32')('RuntimeClient', () => {
     })
   })
 
+  // STA-3969: the poll carried the earlier reason forward with `?? lastReason`, so a runtime
+  // that RECOVERED mid-wait was still reported unreachable at the timeout -- a stale negative
+  // presented as the current diagnosis.
+  it('openOrca stops reporting a runtime unreachable once it answers again', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-client-'))
+    const endpoint = join(userDataPath, 'runtime.sock')
+    const server = createServer((socket) => {
+      sockets.add(socket)
+      socket.once('close', () => sockets.delete(socket))
+      socket.once('data', (data) => {
+        const request = JSON.parse(String(data).trim()) as { id: string }
+        socket.write(
+          `${JSON.stringify({
+            id: request.id,
+            ok: true,
+            result: {
+              runtimeId: 'runtime-1',
+              rendererGraphEpoch: 0,
+              graphStatus: 'ready',
+              authoritativeWindowId: 0,
+              desktopWindowStatus: 'initializing',
+              liveTabCount: 0,
+              liveLeafCount: 0
+            },
+            _meta: { runtimeId: 'runtime-1' }
+          })}\n`
+        )
+      })
+    })
+    servers.add(server)
+    await new Promise<void>((resolve) => server.listen(endpoint, resolve))
+    // Starts pointed at an endpoint nothing serves, then recovers onto the live one.
+    writeMetadata(userDataPath, join(userDataPath, 'never-listened.sock'), 'token', process.pid)
+    vi.mocked(launchOrcaApp).mockImplementationOnce(() => {
+      writeMetadata(userDataPath, endpoint, 'token', process.pid)
+    })
+
+    const client = new RuntimeClient(userDataPath, 100)
+
+    const failure = await client.openOrca(1_000).then(
+      () => null,
+      (error: unknown) => error as { code: string; message: string; data?: unknown }
+    )
+    expect(failure?.code).toBe('runtime_open_timeout')
+    expect(failure?.message).not.toContain('unreachable')
+    expect(failure?.data).toBeUndefined()
+    // The second timeout case: answers all the way through, just no window.
+    expect(failure?.message).toContain('is responding and still running headlessly')
+  })
+
   it('openOrca waits for a reachable headless runtime to expose a desktop window', async () => {
     const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-client-'))
     const endpoint = join(userDataPath, 'runtime.sock')

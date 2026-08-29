@@ -264,6 +264,7 @@ export class RuntimeClient {
 
     const startedAt = Date.now()
     let lastReason = initial.result.runtime.unreachableReason
+    let runtimeAnswered = initial.result.runtime.reachable
     while (Date.now() - startedAt < timeoutMs) {
       const status = await this.getCliStatus()
       if (status.result.app.desktopWindowStatus === 'blocked') {
@@ -272,18 +273,30 @@ export class RuntimeClient {
       if (status.result.app.desktopWindowStatus === 'available') {
         return status
       }
-      lastReason = status.result.runtime.unreachableReason ?? lastReason
+      // Why (STA-3969): a runtime that answered is reachable NOW, so carrying the earlier
+      // reason forward would report a stale negative -- naming an endpoint it no longer
+      // uses -- as the current diagnosis.
+      runtimeAnswered = status.result.runtime.reachable
+      lastReason = runtimeAnswered
+        ? undefined
+        : (status.result.runtime.unreachableReason ?? lastReason)
       await delay(250)
     }
 
     // Why: STA-3969 — this loop polls getCliStatus, so when the runtime is
     // unreachable it burns the whole timeout and then reported only that it timed
     // out. Carry the reachability failure the poll already diagnosed.
+    // Why: the two timeouts are different failures. One never got an answer from the
+    // runtime; the other got answers the whole time and no window with them -- telling that
+    // user the runtime "may" be running headlessly understates what the poll already proved.
+    const timeoutDetail = lastReason
+      ? `: the Orca app process is running but its runtime is unreachable. ${lastReason.message}`
+      : runtimeAnswered
+        ? '. The Orca runtime is responding and still running headlessly; it did not open a window in time.'
+        : '. The runtime may still be running headlessly.'
     throw new RuntimeClientError(
       'runtime_open_timeout',
-      lastReason
-        ? `Timed out waiting for an Orca desktop window: the Orca app process is running but its runtime is unreachable. ${lastReason.message}`
-        : 'Timed out waiting for an Orca desktop window. The runtime may still be running headlessly.',
+      `Timed out waiting for an Orca desktop window${timeoutDetail}`,
       lastReason ? { unreachableReason: lastReason } : undefined
     )
   }
