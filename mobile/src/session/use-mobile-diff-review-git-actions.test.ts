@@ -1,5 +1,5 @@
 import { createElement } from 'react'
-import { act, create, type ReactTestRenderer } from 'react-test-renderer'
+import { act, create } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RpcClient } from '../transport/rpc-client'
 import type { RpcResponse } from '../transport/types'
@@ -10,6 +10,10 @@ const haptics = vi.hoisted(() => ({ triggerError: vi.fn(), triggerSuccess: vi.fn
 vi.mock('../platform/haptics', () => haptics)
 
 type GitActions = ReturnType<typeof useMobileDiffReviewGitActions>
+type MountedHarness = {
+  unmount: () => void
+  update: (element: ReturnType<typeof createElement>) => void
+}
 
 function success(): RpcResponse {
   return { id: 'rpc', ok: true, result: { ok: true }, _meta: { runtimeId: 'runtime' } }
@@ -59,7 +63,7 @@ function createGenerationClient(sendRequest: ReturnType<typeof vi.fn>) {
 }
 
 describe('useMobileDiffReviewGitActions', () => {
-  let renderer: ReactTestRenderer | null = null
+  let renderer: MountedHarness | null = null
   let actions: GitActions | null = null
   let client: RpcClient
   let queue: MobileDiffReviewQueueItem[]
