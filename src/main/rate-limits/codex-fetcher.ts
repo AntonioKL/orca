@@ -207,7 +207,20 @@ export async function fetchCodexRateLimits(
       'error'
     )
   }
+  return withSignedInCodexStatus(await readSignedInCodexRateLimits(options))
+}
 
+// Why: `unavailable` is the UI's "provider is not set up" signal — it hides the
+// chip and feeds the status bar's "Connect an account" empty state. Everything
+// below the auth gate ran against a Codex sign-in Orca already found on disk, so
+// a probe that could not run is a failed reading, never an absent account.
+function withSignedInCodexStatus(limits: ProviderRateLimits): ProviderRateLimits {
+  return limits.status === 'unavailable' ? { ...limits, status: 'error' } : limits
+}
+
+async function readSignedInCodexRateLimits(
+  options?: FetchCodexRateLimitsOptions
+): Promise<ProviderRateLimits> {
   if (options?.codexHomePath && parseWslUncPath(options.codexHomePath)) {
     const backendResult = await fetchWslBackend(options)
     if (backendResult) {
