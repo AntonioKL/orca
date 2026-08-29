@@ -302,6 +302,9 @@ describe('cross-version structured agent sessions', () => {
 
     it('is served the same calls once it advertises the capability', async () => {
       for (const { method, hostMethod } of STRUCTURED_CALLS) {
+        // Two methods share one host method, so "has been called" would already be
+        // true from the earlier one: only this call's own delta pins the pairing.
+        const before = hostMethod ? hostCalls[hostMethod].mock.calls.length : 0
         const replies = await callBuild(current, method, paramsFor(method), {
           clientKind: 'runtime',
           clientCapabilities: [
@@ -312,7 +315,10 @@ describe('cross-version structured agent sessions', () => {
         // A subscription that opens with nothing to say answers with no reply at
         // all, so reaching the host is the signal that the gate opened.
         if (hostMethod) {
-          expect(hostCalls[hostMethod], `${method} did not reach the host`).toHaveBeenCalled()
+          expect(
+            hostCalls[hostMethod].mock.calls.length - before,
+            `${method} did not reach the host`
+          ).toBe(1)
         } else {
           expect(replies[0], `${method} was refused`).toMatchObject({ ok: true })
         }
@@ -384,10 +390,10 @@ describe('cross-version structured agent sessions', () => {
           { clientKind: 'runtime', clientCapabilities: current.capabilities }
         )
         expect(replies).toHaveLength(1)
-        expect(replies[0]).not.toMatchObject({
-          ok: false,
-          error: { code: 'method_not_found' }
-        })
+        // Anything weaker than the runtime's own answer passes a handler that is
+        // registered but unusable, which is the gap this test exists to close:
+        // any refusal other than `method_not_found` would satisfy it.
+        expect(replies[0]).toMatchObject({ ok: true, result: { supported: true } })
       },
       SUITE_TIMEOUT_MS
     )
