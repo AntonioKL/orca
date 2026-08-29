@@ -158,10 +158,18 @@ describe('a degraded terminal read is unverifiable, never idle', () => {
 
 describe('verified reads keep their existing verdicts', () => {
   it('still permits cleanup for a genuinely idle shell', async () => {
+    // The host must SAY it observed the shell. The same two legacy values with no
+    // evidence are what a pre-v27 daemon publishes for a degraded read too, and
+    // that case is unverifiable — see
+    // workspace-cleanup-legacy-host-liveness-evidence.test.ts.
     installPtyApi({
       hasChildProcesses: false,
       foregroundProcess: 'zsh',
-      inspectProcess: async () => ({ foregroundProcess: 'zsh', hasChildProcesses: false })
+      inspectProcess: async () =>
+        buildPtyProcessInspectionWireResult(
+          { verdict: 'observed', processName: 'zsh' },
+          { verdict: 'exited' }
+        )
     })
 
     const candidate = await enrichOne(stateWithOnePty())
@@ -171,6 +179,8 @@ describe('verified reads keep their existing verdicts', () => {
   })
 
   it('still blocks cleanup for a live agent', async () => {
+    // Evidence-less on purpose: a host that cannot publish evidence is still
+    // believed when it names live work, because that can only add a blocker.
     installPtyApi({
       hasChildProcesses: true,
       foregroundProcess: 'claude',
