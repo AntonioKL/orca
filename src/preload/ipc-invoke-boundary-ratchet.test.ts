@@ -29,7 +29,12 @@ const IGNORED_DIRECTORIES = new Set([
 
 /** Whitespace and newlines are legal between the receiver and the call, and one call site used them. */
 const RAW_INVOKE = /ipcRenderer\s*\.\s*invoke\s*\(/
-const RAW_BRIDGE = /window\s*\.\s*electron\s*\.\s*ipcRenderer/
+/** Not anchored on `window`: a cast (`(window as unknown as { electron: … }).electron.ipcRenderer`)
+ *  sits between `window` and `.electron`, and aliasing the receiver hides the call from RAW_INVOKE
+ *  as well — so a `window`-anchored arm 2 passed with a live raw-bridge escape in the tree. Typing
+ *  the global does not close that door: `Window.electron` IS declared (`src/preload/api-types.ts`),
+ *  and the cast spelling still compiles. The lookbehind keeps `electronFoo.ipcRenderer` out. */
+const RAW_BRIDGE = /(?<!\w)electron\s*\.\s*ipcRenderer/
 
 /**
  * Comments name this shape on purpose — the modules that consume the envelope explain where it
