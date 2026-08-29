@@ -85,10 +85,12 @@ function shouldConfirmForProbe(
     return tracked
   }
   const children = readPtyProcessInspectionEvidence(probe.value).children
-  // Why `hasChildProcesses` still votes: it is `children.verdict === 'live'` collapsed, so only
-  // its `false` pole is lossy. A `true` beside evidence this client cannot vouch for — a
-  // malformed or foreign `processEvidence`, which reads as `unverifiable` — is still a positive
-  // observation, and the #16900/#16908 polarity rule keeps a positive observation's vote.
+  // Why both halves of the positive vote: `hasChildProcesses` is `children.verdict === 'live'`
+  // collapsed, so only its `false` pole is lossy. A `true` from a host that predates the
+  // evidence is still a positive observation and keeps its vote (the #16900/#16908 polarity
+  // rule). Why the verdict and not the boolean on the negative pole: `unverifiable` collapses
+  // to `false`, arriving byte-identical to an observed-idle shell, and only the verdict
+  // separates "reached it, could not tell" from an exit this close may act on.
   if (children.verdict === 'live' || probe.value.hasChildProcesses) {
     return true
   }
@@ -177,14 +179,15 @@ export function guardRunningTerminalClose(params: {
       if (decided) {
         return
       }
-      // Why: a non-answer asks — a rejection (wedged relay, legacy provider) and
-      // `unavailable` ("could not ask") are the same evidence as this guard's own timeout,
-      // and this close kills the pty, so it owes the same prompt the window-close path
-      // already gives. Both narrow to an id the liveness map still vouches for, the id set
-      // the window-close guard reads. A layout-only id is usually a leftover leaf whose pane
-      // is long gone — it answers `unavailable` or throws forever, and prompting on it would
-      // put a dialog in front of every cleanly-exited tab and every reconnecting ssh tab. It
-      // can still block by answering *positively*, the mounting-pane window the union exists for.
+      // Why: a non-answer asks — a rejection (wedged relay, legacy provider), `unavailable`
+      // ("could not ask") and an `unverifiable` children verdict ("reached it, could not tell")
+      // are the same evidence as this guard's own timeout, and this close kills the pty, so it
+      // owes the same prompt the window-close path already gives. All three narrow to an id the
+      // liveness map still vouches for, the id set the window-close guard reads. A layout-only
+      // id is usually a leftover leaf whose pane is long gone — it answers a non-answer forever,
+      // and prompting on it would put a dialog in front of every cleanly-exited tab and every
+      // reconnecting ssh tab. It can still block by answering *positively*, the mounting-pane
+      // window the union exists for.
       const busyPtyIds = ptyIds.filter((ptyId, index) =>
         shouldConfirmForProbe(ptyId, trackedPtyIds, results[index])
       )
