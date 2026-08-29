@@ -1,5 +1,5 @@
 import type { LegacyPaneKeyAliasEntry } from '../../../shared/persisted-state-types'
-import type { TerminalLayoutSnapshot } from '../../../shared/terminal-tab-types'
+import type { TerminalLayoutSnapshot, TerminalTab } from '../../../shared/terminal-tab-types'
 import type { WorkspaceSessionState } from '../../../shared/workspace-session-state-types'
 import { isTerminalLeafId, makePaneKey } from '../../../shared/stable-pane-id'
 import { agentHookServer } from '../../agent-hooks/server'
@@ -17,23 +17,35 @@ export function findWorktreeIdForTab(
   return undefined
 }
 
+export function indexTerminalTabsById(
+  session: WorkspaceSessionState
+): ReadonlyMap<string, TerminalTab> {
+  const tabsById = new Map<string, TerminalTab>()
+  for (const tabs of Object.values(session.tabsByWorktree ?? {})) {
+    for (const tab of tabs) {
+      const tabId = tab.id
+      // Preserve the prior Object.entries()/find() first-match behavior for duplicate IDs.
+      if (!tabsById.has(tabId)) {
+        tabsById.set(tabId, tab)
+      }
+    }
+  }
+  return tabsById
+}
+
 /** Bridges a tab's legacy numeric pane keys to stable ones; returns the alias rows worth persisting. */
 export function registerLegacyPaneKeyAliasesForTab(args: {
-  session: WorkspaceSessionState
   tabId: string
+  tab: TerminalTab | undefined
   inputLayout: TerminalLayoutSnapshot
   normalizedLayout: TerminalLayoutSnapshot
   leafIdByInputLeafId: Map<string, string>
 }): LegacyPaneKeyAliasEntry[] {
-  const worktreeId = findWorktreeIdForTab(args.session, args.tabId)
-  const tab = worktreeId
-    ? args.session.tabsByWorktree?.[worktreeId]?.find((entry) => entry.id === args.tabId)
-    : undefined
   const legacyPaneKeyAliasEntries: LegacyPaneKeyAliasEntry[] = []
   const registeredLegacyPaneKeys = new Set<string>()
   const hasLeafPtyBindings = Object.keys(args.inputLayout.ptyIdsByLeafId ?? {}).length > 0
   const fallbackPtyId =
-    !hasLeafPtyBindings && typeof tab?.ptyId === 'string' ? tab.ptyId : undefined
+    !hasLeafPtyBindings && typeof args.tab?.ptyId === 'string' ? args.tab.ptyId : undefined
   const registerLegacyAlias = (inputLeafId: string, leafId: string, ptyId?: string): boolean => {
     if (!isTerminalLeafId(leafId)) {
       return false
@@ -80,7 +92,7 @@ export function registerLegacyPaneKeyAliasesForTab(args: {
       )
     }
   }
-  if (tab?.ptyId && !hasLeafPtyBindings) {
+  if (args.tab?.ptyId && !hasLeafPtyBindings) {
     const fallbackLeafId =
       args.normalizedLayout.activeLeafId ?? firstLayoutLeafId(args.normalizedLayout.root)
     let paneKey: string | undefined
@@ -96,9 +108,9 @@ export function registerLegacyPaneKeyAliasesForTab(args: {
         if (registeredLegacyPaneKeys.has(legacyPaneKey)) {
           continue
         }
-        agentHookServer.registerPaneKeyAlias(legacyPaneKey, paneKey, tab.ptyId)
+        agentHookServer.registerPaneKeyAlias(legacyPaneKey, paneKey, args.tab.ptyId)
         legacyPaneKeyAliasEntries.push({
-          ptyId: tab.ptyId,
+          ptyId: args.tab.ptyId,
           legacyPaneKey,
           stablePaneKey: paneKey,
           updatedAt: Date.now()
