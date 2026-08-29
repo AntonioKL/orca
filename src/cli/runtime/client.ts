@@ -263,6 +263,7 @@ export class RuntimeClient {
     }
 
     const startedAt = Date.now()
+    let lastReason = initial.result.runtime.unreachableReason
     while (Date.now() - startedAt < timeoutMs) {
       const status = await this.getCliStatus()
       if (status.result.app.desktopWindowStatus === 'blocked') {
@@ -271,12 +272,19 @@ export class RuntimeClient {
       if (status.result.app.desktopWindowStatus === 'available') {
         return status
       }
+      lastReason = status.result.runtime.unreachableReason
       await delay(250)
     }
 
+    // Why: STA-3969 — this loop polls getCliStatus, so when the runtime is
+    // unreachable it burns the whole timeout and then reported only that it timed
+    // out. Carry the reachability failure the poll already diagnosed.
     throw new RuntimeClientError(
       'runtime_open_timeout',
-      'Timed out waiting for an Orca desktop window. The runtime may still be running headlessly.'
+      lastReason
+        ? `Timed out waiting for an Orca desktop window: the Orca app process is running but its runtime is unreachable. ${lastReason.message}`
+        : 'Timed out waiting for an Orca desktop window. The runtime may still be running headlessly.',
+      lastReason ? { unreachableReason: lastReason } : undefined
     )
   }
 }

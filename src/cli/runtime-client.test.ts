@@ -316,6 +316,22 @@ describe.skipIf(process.platform === 'win32')('RuntimeClient', () => {
     expect(launchOrcaApp).toHaveBeenCalledOnce()
   })
 
+  // STA-3969: this loop only polls getCliStatus, so an unreachable runtime used to
+  // burn the whole budget and then report a bare timeout — the third symptom in the
+  // report, and the one that reads as "the app never finished starting".
+  it('openOrca reports why the runtime was unreachable instead of a bare timeout', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-client-'))
+    writeMetadata(userDataPath, join(userDataPath, 'never-listened.sock'), 'token', process.pid)
+
+    const client = new RuntimeClient(userDataPath, 100)
+
+    await expect(client.openOrca(100)).rejects.toMatchObject({
+      code: 'runtime_open_timeout',
+      message: expect.stringContaining('never-listened.sock'),
+      data: { unreachableReason: { code: 'endpoint_missing' } }
+    })
+  })
+
   it('openOrca waits for a reachable headless runtime to expose a desktop window', async () => {
     const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-client-'))
     const endpoint = join(userDataPath, 'runtime.sock')
