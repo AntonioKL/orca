@@ -299,6 +299,19 @@ describe('mid-line composition renders the covered row tail after the preedit', 
     expect(remainder!.style.visibility).toBe('hidden')
   })
 
+  it('keeps a wholly dim mid-line tail visible', async () => {
+    const rig = openTerminal()
+    const tail = 'status'
+    await rig.write(`> \x1b[2m${tail}\x1b[22m\x1b[${tail.length}D`)
+
+    expect(rig.terminal.buffer.active.cursorX).toBe(2)
+    rig.compose('아')
+
+    const { remainder } = viewParts(rig.compositionView)
+    expect(remainder!.textContent).toBe(tail)
+    expect(remainder!.style.visibility).toBe('')
+  })
+
   it('keeps a mixed dim and committed tail visible', async () => {
     const rig = openTerminal()
     await rig.write('\x1b[2mghost\x1b[22m!\x1b[6D')

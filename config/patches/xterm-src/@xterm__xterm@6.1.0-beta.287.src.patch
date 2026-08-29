@@ -88,7 +88,7 @@ index 497afcf535f3eaca00889525a77e15eb633ccd96..96d499b34605f860608382114c3fbdc0
  
  export interface IBrowser {
 diff --git a/src/browser/input/CompositionHelper.ts b/src/browser/input/CompositionHelper.ts
-index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..d9883af6ebb1745bfcdd83c4b94e693de600bd5d 100644
+index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..946a95d3b87d68f0f0324b5d74346d3f3ff3710c 100644
 --- a/src/browser/input/CompositionHelper.ts
 +++ b/src/browser/input/CompositionHelper.ts
 @@ -3,8 +3,9 @@
@@ -108,7 +108,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..d9883af6ebb1745bfcdd83c4b94e693d
  
 +interface IRowRemainder {
 +  text: string;
-+  dimOnly: boolean;
++  maskAsGhost: boolean;
 +}
 +
 +interface IPendingComposition {
@@ -216,7 +216,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..d9883af6ebb1745bfcdd83c4b94e693d
 +  private _compositionRemainder?: HTMLElement;
 +
 +  /** Whether the rendered tail is application ghost text that must stay masked. */
-+  private _compositionRemainderDimOnly: boolean;
++  private _compositionRemainderMasked: boolean;
 +
 +  /** The insertion caret painted above the renderer cursor the composition view covers. */
 +  private _compositionCaret?: HTMLElement;
@@ -265,7 +265,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..d9883af6ebb1745bfcdd83c4b94e693d
 +    this._compositionTransactionId = 0;
 +    this._compositionTimers = new Set();
 +    this._imeKeydownAwaitingCommit = false;
-+    this._compositionRemainderDimOnly = false;
++    this._compositionRemainderMasked = false;
    }
  
    /**
@@ -970,7 +970,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..d9883af6ebb1745bfcdd83c4b94e693d
 +      // its trailing glyph cells to the left of where the grid has them.
 +      remainder.style.whiteSpace = 'pre';
 +      // Preserve the ghost text's width so the opaque view masks it without repeating it.
-+      remainder.style.visibility = rowRemainder.dimOnly ? 'hidden' : '';
++      remainder.style.visibility = rowRemainder.maskAsGhost ? 'hidden' : '';
 +      remainder.textContent = rowRemainder.text;
 +      children.push(remainder);
 +    }
@@ -978,19 +978,19 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..d9883af6ebb1745bfcdd83c4b94e693d
 +    this._compositionPreedit = preedit;
 +    this._compositionCaret = caret;
 +    this._compositionRemainder = remainder;
-+    this._compositionRemainderDimOnly = rowRemainder.dimOnly;
++    this._compositionRemainderMasked = rowRemainder.maskAsGhost;
 +    this._styleCompositionCaret();
 +  }
 +
-+  /** The row tail and whether every visible cell in it is dim application ghost text. */
++  /** The row tail and whether its full-row dim geometry identifies application ghost text. */
 +  private _getRowRemainder(): IRowRemainder {
 +    const buffer = this._bufferService.buffer;
 +    if (!buffer.isCursorInViewport) {
-+      return { text: '', dimOnly: false };
++      return { text: '', maskAsGhost: false };
 +    }
 +    const line = buffer.lines.get(buffer.ybase + buffer.y);
 +    if (!line) {
-+      return { text: '', dimOnly: false };
++      return { text: '', maskAsGhost: false };
 +    }
 +    const start = Math.min(buffer.x, this._bufferService.cols - 1);
 +    // The explicit end column keeps this off the line string cache, whose self-renewing
@@ -998,7 +998,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..d9883af6ebb1745bfcdd83c4b94e693d
 +    const end = line.getTrimmedLength();
 +    const text = line.translateToString(false, start, end);
 +    if (!text) {
-+      return { text, dimOnly: false };
++      return { text, maskAsGhost: false };
 +    }
 +    let hasVisibleCell = false;
 +    for (let x = start; x < end; x++) {
@@ -1007,10 +1007,10 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..d9883af6ebb1745bfcdd83c4b94e693d
 +      }
 +      hasVisibleCell = true;
 +      if (!(line.getBg(x) & BgFlags.DIM)) {
-+        return { text, dimOnly: false };
++        return { text, maskAsGhost: false };
 +      }
 +    }
-+    return { text, dimOnly: hasVisibleCell };
++    return { text, maskAsGhost: hasVisibleCell && start === 0 };
 +  }
 +
 +  private _styleCompositionCaret(): void {
@@ -1034,7 +1034,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..d9883af6ebb1745bfcdd83c4b94e693d
 +    this._compositionView.textContent = '';
 +    this._compositionPreedit = undefined;
 +    this._compositionRemainder = undefined;
-+    this._compositionRemainderDimOnly = false;
++    this._compositionRemainderMasked = false;
 +    this._compositionCaret = undefined;
 +    this._compositionViewData = '';
 +    this._compositionView.style.textAlign = '';
@@ -1081,7 +1081,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..d9883af6ebb1745bfcdd83c4b94e693d
 +    const rowRemainder = this._getRowRemainder();
 +    if (this._compositionViewData && (
 +      rowRemainder.text !== (this._compositionRemainder?.textContent ?? '') ||
-+      rowRemainder.dimOnly !== this._compositionRemainderDimOnly
++      rowRemainder.maskAsGhost !== this._compositionRemainderMasked
 +    )) {
 +      this._renderCompositionView(this._compositionViewData, rowRemainder);
 +    }
