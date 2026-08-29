@@ -26,6 +26,7 @@ export async function configureGoldenStubAgent(
   page: Page,
   options: {
     agent?: (typeof GOLDEN_STUB_AGENTS)[number]['id']
+    agentArgs?: string
     /** Windows default shell the launch command must survive; ignored elsewhere. */
     windowsShell?: BuiltInWindowsTerminalShell
   } = {}
@@ -40,11 +41,11 @@ export async function configureGoldenStubAgent(
       await store.getState().updateSettings({
         defaultTuiAgent: agent,
         agentCmdOverrides: { [agent]: 'golden-stub-agent' },
-        agentDefaultArgs: { [agent]: '' },
+        agentDefaultArgs: { [agent]: options.agentArgs ?? '' },
         ...(windowsShell ? { terminalWindowsShell: windowsShell } : {})
       })
     },
-    { agent, windowsShell: options.windowsShell ?? null }
+    { agent, agentArgs: options.agentArgs ?? '', windowsShell: options.windowsShell ?? null }
   )
 }
 
