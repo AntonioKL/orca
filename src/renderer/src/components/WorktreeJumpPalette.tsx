@@ -8,6 +8,7 @@ import React, {
   useRef,
   useState
 } from 'react'
+import { flushSync } from 'react-dom'
 import { useShallow } from 'zustand/react/shallow'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -3265,7 +3266,17 @@ function WorktreeJumpPaletteContent({
                   <CommandItem
                     key={renderKey}
                     value={renderKey}
-                    onSelect={entry.onSeeMore}
+                    onSelect={() => {
+                      const previousIndex = selectionItemIds.indexOf(renderKey)
+                      flushSync(() => entry.onSeeMore?.())
+                      const expandedItemId = Array.from(
+                        listRef.current?.querySelectorAll<HTMLElement>('[cmdk-item]') ?? []
+                      )[previousIndex]?.getAttribute('data-value')
+                      if (expandedItemId) {
+                        setSelectedItemId(expandedItemId)
+                      }
+                      inputRef.current?.focus()
+                    }}
                     className={cn(
                       JUMP_PALETTE_ITEM_CLASSNAME,
                       'mt-1 min-h-0 gap-2 py-1.5 text-[12px] text-muted-foreground'
