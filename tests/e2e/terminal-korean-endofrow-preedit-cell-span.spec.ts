@@ -60,8 +60,8 @@ test.describe('Terminal end-of-row Korean preedit cell span', () => {
     const arena = await openTerminalImePaneArena(orcaPage)
     let completed = false
     try {
-      // CHA clamps past-the-edge columns, keeping this valid when the runner resizes the grid.
-      await writeToActiveTerminal(orcaPage, '\x1b[2J\x1b[H\x1b[999G')
+      // CHA clamps to the last column; write a cell there, then move back onto it.
+      await writeToActiveTerminal(orcaPage, '\x1b[2J\x1b[H\x1b[999Gx\x1b[D')
       await setImeComposition(arena.session, '가')
 
       const sample = await sampleOpenComposition(orcaPage)
@@ -70,6 +70,12 @@ test.describe('Terminal end-of-row Korean preedit cell span', () => {
       expect(sample.cursorColumn, 'the cursor is not in the final column').toBe(
         sample.terminalColumns - 1
       )
+      expect(sample.rowTailFromCursor, 'the final committed cell is not under the cursor').toBe('x')
+      expect(sample.remainderText, 'the overlay lost the final committed cell').toBe('x')
+      expect(sample.remainderDisplay, 'the impossible tail still clips the preedit caret').toBe(
+        'none'
+      )
+      expect(sample.overlayText, 'the hidden tail still appears in the overlay').toBe('가')
       expect(caret, 'the active preedit has no caret element').not.toBeNull()
       expect(caret!.width, 'the preedit caret has zero width').toBeGreaterThan(0)
       expect(caret!.height, 'the preedit caret has zero height').toBeGreaterThan(0)

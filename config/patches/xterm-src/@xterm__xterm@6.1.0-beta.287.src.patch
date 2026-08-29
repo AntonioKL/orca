@@ -88,21 +88,22 @@ index 497afcf535f3eaca00889525a77e15eb633ccd96..96d499b34605f860608382114c3fbdc0
  
  export interface IBrowser {
 diff --git a/src/browser/input/CompositionHelper.ts b/src/browser/input/CompositionHelper.ts
-index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..af918fdac462a77517d9755bea3cb73aed97bfc4 100644
+index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..06c35cac2a9fd20f2dffcf2fed64797dbb613252 100644
 --- a/src/browser/input/CompositionHelper.ts
 +++ b/src/browser/input/CompositionHelper.ts
-@@ -3,8 +3,9 @@
+@@ -3,8 +3,10 @@
   * @license MIT
   */
  
 -import { IRenderService } from '../services/Services';
 +import { IRenderService, IThemeService } from '../services/Services';
  import { IBufferService, ICoreService, IOptionsService } from '../../common/services/Services';
++import { color } from '../../common/Color';
 +import { BgFlags } from '../../common/buffer/Constants';
  import { C0 } from '../../common/data/EscapeSequences';
  
  interface IPosition {
-@@ -12,6 +13,32 @@ interface IPosition {
+@@ -12,6 +14,32 @@ interface IPosition {
    end: number;
  }
  
@@ -135,7 +136,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..af918fdac462a77517d9755bea3cb73a
  /**
   * Encapsulates the logic for handling compositionstart, compositionupdate and compositionend
   * events, displaying the in-progress composition to the UI and forwarding the final composition
-@@ -24,6 +51,15 @@ export class CompositionHelper {
+@@ -24,6 +52,15 @@ export class CompositionHelper {
     */
    private _isComposing: boolean;
    public get isComposing(): boolean { return this._isComposing; }
@@ -151,7 +152,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..af918fdac462a77517d9755bea3cb73a
  
    /**
     * The position within the input textarea's value of the current composition.
-@@ -36,52 +72,152 @@ export class CompositionHelper {
+@@ -36,52 +73,140 @@ export class CompositionHelper {
     */
    private _compositionSuffix: string;
  
@@ -215,15 +216,13 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..af918fdac462a77517d9755bea3cb73a
 +  /** The rendered row tail, set only while the cursor sits mid-line. */
 +  private _compositionRemainder?: HTMLElement;
 +
-+  /** Whether the rendered tail is application ghost text that must stay masked. */
-+  private _compositionRemainderMasked: boolean;
-+
 +  /** The insertion caret painted above the renderer cursor the composition view covers. */
 +  private _compositionCaret?: HTMLElement;
 +
 +  /** The last preedit rendered, so a row repaint can re-render without a composition event. */
 +  private _compositionViewData?: string;
 +
++  // The injector supplies themeService; direct six-argument callers remain compatible.
 +  constructor(
 +    textarea: HTMLTextAreaElement,
 +    compositionView: HTMLElement,
@@ -231,15 +230,6 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..af918fdac462a77517d9755bea3cb73a
 +    optionsService: IOptionsService,
 +    coreService: ICoreService,
 +    renderService: IRenderService
-+  );
-+  constructor(
-+    textarea: HTMLTextAreaElement,
-+    compositionView: HTMLElement,
-+    bufferService: IBufferService,
-+    optionsService: IOptionsService,
-+    coreService: ICoreService,
-+    renderService: IRenderService,
-+    themeService: IThemeService
 +  );
    constructor(
      private readonly _textarea: HTMLTextAreaElement,
@@ -265,7 +255,6 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..af918fdac462a77517d9755bea3cb73a
 +    this._compositionTransactionId = 0;
 +    this._compositionTimers = new Set();
 +    this._imeKeydownAwaitingCommit = false;
-+    this._compositionRemainderMasked = false;
    }
  
    /**
@@ -314,13 +303,16 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..af918fdac462a77517d9755bea3cb73a
    }
  
    /**
-@@ -89,22 +225,92 @@ export class CompositionHelper {
+@@ -89,22 +214,93 @@ export class CompositionHelper {
     * @param ev The event.
     */
    public compositionupdate(ev: Pick<CompositionEvent, 'data'>): void {
 -    // Mark text as LTR, direction=rtl is used in CSS so the end of the text is followed for long
 -    // compositions
 -    this._compositionView.textContent = `\u200E${ev.data}\u200E`;
++    if (ev.data && !this._isComposing) {
++      this.compositionstart();
++    }
 +    this._cancelDeferredTimer(this._compositionEndTimer);
 +    this._compositionEndTimer = undefined;
 +    this._compositionHasObservedProgress ||= this._hasCompositionProgress();
@@ -328,10 +320,8 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..af918fdac462a77517d9755bea3cb73a
 +      this._lastCompositionData = ev.data;
 +    }
 +    this._renderCompositionView(ev.data ?? '');
-+    // Some IMEs resume a composition with an update alone and no second compositionstart, by which
-+    // point compositionend has already hidden the view. Without re-showing it the resumed preedit
-+    // is written into a hidden element and the user composes blind. Empty data is the IME saying
-+    // the preedit is gone, so it hides the view again rather than leaving an orphaned overlay.
++    // Some IMEs resume without compositionstart; keep that inferred transaction visible until
++    // compositionend settles it. An empty update hides the overlay without ending the transaction.
 +    this._compositionView.classList.toggle('active', Boolean(ev.data));
      this.updateCompositionElements();
 -    setTimeout(() => {
@@ -416,7 +406,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..af918fdac462a77517d9755bea3cb73a
    }
  
    /**
-@@ -113,7 +319,19 @@ export class CompositionHelper {
+@@ -113,7 +309,19 @@ export class CompositionHelper {
     * @returns Whether the Terminal should continue processing the keydown event.
     */
    public keydown(ev: KeyboardEvent): boolean {
@@ -437,7 +427,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..af918fdac462a77517d9755bea3cb73a
        if (ev.keyCode === 20 || ev.keyCode === 229) {
          // 20 is CapsLock, 229 is Enter
          // Continue composing if the keyCode is the "composition character"
-@@ -128,6 +346,10 @@ export class CompositionHelper {
+@@ -128,6 +336,10 @@ export class CompositionHelper {
        this._finalizeComposition(false);
      }
  
@@ -448,7 +438,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..af918fdac462a77517d9755bea3cb73a
      if (ev.keyCode === 229) {
        // If the "composition character" is used but gets to this point it means a non-composition
        // character (eg. numbers and punctuation) was pressed when the IME was active.
-@@ -138,6 +360,74 @@ export class CompositionHelper {
+@@ -138,6 +350,74 @@ export class CompositionHelper {
      return true;
    }
  
@@ -523,7 +513,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..af918fdac462a77517d9755bea3cb73a
    /**
     * Finalizes the composition, resuming regular input actions. This is called when a composition
     * is ending.
-@@ -146,23 +436,52 @@ export class CompositionHelper {
+@@ -146,23 +426,52 @@ export class CompositionHelper {
     *   compositionend event is triggered, such as enter, so that the composition is sent before
     *   the command is executed.
     */
@@ -587,7 +577,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..af918fdac462a77517d9755bea3cb73a
  
        // Since composition* events happen before the changes take place in the textarea on most
        // browsers, use a setTimeout with 0ms time to allow the native compositionend event to
-@@ -172,35 +491,308 @@ export class CompositionHelper {
+@@ -172,37 +481,310 @@ export class CompositionHelper {
        // - The last compositionupdate event's data property does not always accurately describe
        //   the character, a counter example being Korean where an ending consonsant can move to
        //   the following character if the following input is a vowel.
@@ -825,9 +815,9 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..af918fdac462a77517d9755bea3cb73a
 +  private _dispatchCompositionSessionEvent(event: CustomEvent): void {
 +    if (typeof this._textarea.dispatchEvent === 'function') {
 +      this._textarea.dispatchEvent(event);
-+    }
-+  }
-+
+     }
+   }
+ 
 +  private _dispatchCompositionTransactionSettled(): void {
 +    this._dispatchCompositionSessionEvent(new CustomEvent(
 +      'xterm-composition-transaction-settled',
@@ -875,7 +865,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..af918fdac462a77517d9755bea3cb73a
 +  private _deferPreeditResync(hadPreedit: boolean): void {
 +    if (!hadPreedit || !this._isComposing) {
 +      return;
-     }
++    }
 +    const transactionId = this._compositionTransactionId;
 +    this._defer(() => {
 +      if (
@@ -920,10 +910,12 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..af918fdac462a77517d9755bea3cb73a
 +    }
 +    clearTimeout(timer);
 +    this._compositionTimers.delete(timer);
-   }
- 
++  }
++
    /**
-@@ -222,6 +814,9 @@ export class CompositionHelper {
+    * Apply any changes made to the textarea after the current event chain is allowed to complete.
+    * This should be called when not currently composing but a keydown event with the "composition
+@@ -222,6 +804,9 @@ export class CompositionHelper {
  
          const diff = newValue.replace(oldValue, '');
  
@@ -933,7 +925,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..af918fdac462a77517d9755bea3cb73a
          this._dataAlreadySent = diff;
  
          if (newValue.length > oldValue.length) {
-@@ -236,6 +831,133 @@ export class CompositionHelper {
+@@ -236,6 +821,120 @@ export class CompositionHelper {
      }, 0);
    }
  
@@ -978,7 +970,6 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..af918fdac462a77517d9755bea3cb73a
 +    this._compositionPreedit = preedit;
 +    this._compositionCaret = caret;
 +    this._compositionRemainder = remainder;
-+    this._compositionRemainderMasked = rowRemainder.maskAsGhost;
 +    this._styleCompositionCaret();
 +  }
 +
@@ -997,7 +988,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..af918fdac462a77517d9755bea3cb73a
 +    // idle-clear timer the composition path must not arm.
 +    const end = line.getTrimmedLength();
 +    const text = line.translateToString(false, start, end);
-+    if (!text) {
++    if (!text || start !== 0) {
 +      return { text, maskAsGhost: false };
 +    }
 +    let hasVisibleCell = false;
@@ -1010,7 +1001,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..af918fdac462a77517d9755bea3cb73a
 +        return { text, maskAsGhost: false };
 +      }
 +    }
-+    return { text, maskAsGhost: hasVisibleCell && start === 0 };
++    return { text, maskAsGhost: hasVisibleCell };
 +  }
 +
 +  private _styleCompositionCaret(): void {
@@ -1020,9 +1011,11 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..af918fdac462a77517d9755bea3cb73a
 +    }
 +    const width = Math.max(1, this._optionsService.rawOptions.cursorWidth);
 +    const cellHeight = this._renderService.dimensions.css.cell.height;
-+    const theme = this._optionsService.rawOptions.theme;
-+    caret.style.backgroundColor =
-+      this._themeService?.colors.cursor.css ?? theme?.cursor ?? theme?.foreground ?? '#FFF';
++    const colors = this._themeService?.colors;
++    const cursor = colors && (
++      color.ensureContrastRatio(colors.background, colors.cursor, 3) ?? colors.cursor
++    );
++    caret.style.backgroundColor = cursor?.css ?? '#FFF';
 +    caret.style.display = 'inline-block';
 +    caret.style.flexShrink = '0';
 +    caret.style.height = cellHeight + 'px';
@@ -1035,12 +1028,10 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..af918fdac462a77517d9755bea3cb73a
 +    this._compositionView.textContent = '';
 +    this._compositionPreedit = undefined;
 +    this._compositionRemainder = undefined;
-+    this._compositionRemainderMasked = false;
 +    this._compositionCaret = undefined;
 +    this._compositionViewData = '';
 +    this._compositionView.style.display = '';
 +    this._compositionView.style.justifyContent = '';
-+    this._compositionView.style.textAlign = '';
 +  }
 +
 +  /**
@@ -1048,32 +1039,19 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..af918fdac462a77517d9755bea3cb73a
 +   * see-through background would re-expose the very characters the rendered tail stands in for.
 +   */
 +  private _opaqueViewBackground(): string {
-+    const value = (
-+      this._themeService?.colors.background.css ??
-+      this._optionsService.rawOptions.theme?.background ??
-+      ''
-+    ).trim();
-+    if (!value) {
-+      return '#000';
-+    }
-+    const channels = /^rgba?\(([^,()]+),([^,()]+),([^,()]+)(?:,[^()]+)?\)$/.exec(value);
-+    if (channels) {
-+      return `rgb(${channels[1]},${channels[2]},${channels[3]})`;
-+    }
-+    const opaqueHex = /^(#(?:[\da-f]{3}|[\da-f]{6}))[\da-f]{1,2}$/i.exec(value);
-+    return opaqueHex ? opaqueHex[1] : value;
++    const background = this._themeService?.colors.background;
++    return background ? color.opaque(background).css : '#000';
 +  }
 +
    /**
     * Positions the composition view on top of the cursor and the textarea just below it (so the
     * IME helper dialog is positioned correctly).
-@@ -243,10 +965,24 @@ export class CompositionHelper {
+@@ -243,10 +942,24 @@ export class CompositionHelper {
     *   necessary as the IME events across browsers are not consistently triggered.
     */
    public updateCompositionElements(dontRecurse?: boolean): void {
 -    if (!this._isComposing) {
-+    // The shown overlay, not `_isComposing`: a composition the IME resumed without a
-+    // compositionstart has to be positioned too. Every other path sets both together.
++    // Empty updates hide the overlay without ending the inferred transaction.
 +    if (!this._compositionView.classList.contains('active')) {
        return;
      }
@@ -1082,9 +1060,10 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..af918fdac462a77517d9755bea3cb73a
 +    // already runs on every render — so keep the rendered tail current with the buffer. A string
 +    // compare adds no layout read.
 +    const rowRemainder = this._getRowRemainder();
++    const remainderMasked = this._compositionRemainder?.style.visibility === 'hidden';
 +    if (this._compositionViewData && (
 +      rowRemainder.text !== (this._compositionRemainder?.textContent ?? '') ||
-+      rowRemainder.maskAsGhost !== this._compositionRemainderMasked
++      rowRemainder.maskAsGhost !== remainderMasked
 +    )) {
 +      this._renderCompositionView(this._compositionViewData, rowRemainder);
 +    }
@@ -1093,7 +1072,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..af918fdac462a77517d9755bea3cb73a
      if (this._bufferService.buffer.isCursorInViewport) {
        const cursorX = Math.min(this._bufferService.buffer.x, this._bufferService.cols - 1);
  
-@@ -265,10 +1001,23 @@ export class CompositionHelper {
+@@ -265,20 +978,37 @@ export class CompositionHelper {
        const maxWidth = this._bufferService.cols * this._renderService.dimensions.css.cell.width - cursorLeft;
        this._compositionView.style.maxWidth = maxWidth + 'px';
        this._compositionView.style.overflow = 'hidden';
@@ -1101,12 +1080,17 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..af918fdac462a77517d9755bea3cb73a
 -      // Sync the textarea to the exact position of the composition view so the IME knows where the
 -      // text is.
 -      const compositionViewBounds = this._compositionView.getBoundingClientRect();
-+      // End-aligned flex keeps an over-wide trailing preedit's caret inside the screen.
-+      const hasRemainder = Boolean(this._compositionRemainder);
++      const anchorBounds =
++        (this._compositionPreedit ?? this._compositionView).getBoundingClientRect();
++      const showsRemainder =
++        Boolean(this._compositionRemainder) && anchorBounds.width < maxWidth;
++      if (this._compositionRemainder) {
++        this._compositionRemainder.style.display = showsRemainder ? '' : 'none';
++      }
++      // End alignment keeps the caret visible when the preedit consumes the remaining width.
 +      this._compositionView.style.direction = 'ltr';
-+      this._compositionView.style.display = hasRemainder ? '' : 'flex';
-+      this._compositionView.style.justifyContent = hasRemainder ? '' : 'flex-end';
-+      this._compositionView.style.textAlign = hasRemainder ? 'left' : '';
++      this._compositionView.style.display = showsRemainder ? '' : 'flex';
++      this._compositionView.style.justifyContent = showsRemainder ? '' : 'flex-end';
 +      // Themed rather than the stock #000/#FFF, so the pushed tail reads as ordinary terminal text
 +      // and light themes keep contrast.
 +      this._compositionView.style.background = this._opaqueViewBackground();
@@ -1116,12 +1100,15 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..af918fdac462a77517d9755bea3cb73a
 +        '#FFF';
 +      // Sync the textarea to the exact position of the preedit so the IME knows where the text is,
 +      // and so candidate dialogs anchor to it rather than to the end of the rendered tail.
-+      const compositionViewBounds =
-+        (this._compositionPreedit ?? this._compositionView).getBoundingClientRect();
        this._textarea.style.left = cursorLeft + 'px';
        this._textarea.style.top = cursorTop + 'px';
        // Ensure the text area is at least 1x1, otherwise certain IMEs may break
-@@ -278,7 +1027,8 @@ export class CompositionHelper {
+-      this._textarea.style.width = Math.max(compositionViewBounds.width, 1) + 'px';
+-      this._textarea.style.height = Math.max(compositionViewBounds.height, 1) + 'px';
+-      this._textarea.style.lineHeight = compositionViewBounds.height + 'px';
++      this._textarea.style.width = Math.max(anchorBounds.width, 1) + 'px';
++      this._textarea.style.height = Math.max(anchorBounds.height, 1) + 'px';
++      this._textarea.style.lineHeight = anchorBounds.height + 'px';
      }
  
      if (!dontRecurse) {
@@ -1132,13 +1119,14 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..af918fdac462a77517d9755bea3cb73a
    }
  }
 diff --git a/src/common/SortedList.ts b/src/common/SortedList.ts
-index 8a10076e3963e33b4a7d1e4602333eb3f4772dc9..df0761c35907ddc48eb102ba181b0dac8e61f00d 100644
+index 8a10076e3963e33b4a7d1e4602333eb3f4772dc9..da6e7691371909f31748b1cb2cb8a261fbd2b279 100644
 --- a/src/common/SortedList.ts
 +++ b/src/common/SortedList.ts
-@@ -87,6 +87,24 @@ export class SortedList<T> {
+@@ -87,7 +87,25 @@ export class SortedList<T> {
      if (key === undefined) {
        return false;
      }
+-    i = this._search(key);
 +    if (this._deleteAtKey(value, key)) {
 +      return true;
 +    }
@@ -1157,6 +1145,7 @@ index 8a10076e3963e33b4a7d1e4602333eb3f4772dc9..df0761c35907ddc48eb102ba181b0dac
 +  }
 +
 +  private _deleteAtKey(value: T, key: number): boolean {
-     i = this._search(key);
++    let i = this._search(key);
      if (i === -1) {
        return false;
+     }

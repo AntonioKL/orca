@@ -20,6 +20,7 @@ export type MidlinePreeditOcclusionSample = {
   /** Overlay text as rendered, LRM marks stripped. */
   overlayText: string
   remainderText: string | null
+  remainderDisplay: string | null
   remainderVisibility: string | null
   caretRect: { left: number; right: number; width: number; height: number } | null
   overlayActive: boolean
@@ -90,13 +91,18 @@ function readMidlinePreeditOcclusion(): MidlinePreeditOcclusionSample {
     hiddenByOverlay: hiddenByOverlay.trimEnd(),
     // Hidden children still contribute to textContent; omit them so this reflects visible text.
     overlayText: Array.from(view.childNodes)
-      .filter(
-        (node) => !(node instanceof HTMLElement) || getComputedStyle(node).visibility !== 'hidden'
-      )
+      .filter((node) => {
+        if (!(node instanceof HTMLElement)) {
+          return true
+        }
+        const style = getComputedStyle(node)
+        return style.display !== 'none' && style.visibility !== 'hidden'
+      })
       .map((node) => node.textContent ?? '')
       .join('')
       .replaceAll('‎', ''),
     remainderText: remainder?.textContent ?? null,
+    remainderDisplay: remainder ? getComputedStyle(remainder).display : null,
     remainderVisibility: remainder ? getComputedStyle(remainder).visibility : null,
     caretRect: caretBounds
       ? {
