@@ -329,6 +329,11 @@ describe('one mounted session screen per worktree', () => {
     const sessions = mountedSessions(app.root, WORKTREE)
     expect(sessions).toHaveLength(1)
     expect(sessions[0].key).toBe('live-session')
+    // Recognising the screen is only half of it: the tap has to land on it. The count
+    // alone still passes when convergence reports a hit and then dispatches nothing,
+    // leaving the user on the Files screen it was supposed to pop back through.
+    const hostStack = app.root.routes[0].state
+    expect(hostStack?.routes[hostStack.index].key).toBe('live-session')
   })
 
   it('does not mount a second session when the tap arrives from Files for the same worktree', () => {
