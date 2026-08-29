@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { ANTI_DETECTION_SCRIPT } from './anti-detection'
 import { runBrowserRouteEgressElectron } from './browser-route-egress-electron-launch'
 
@@ -74,7 +75,7 @@ export async function runAntiDetectionAutomationSurfaceProbe(): Promise<AntiDete
     writeFileSync(guestPath, '<!doctype html><html><body>guest</body></html>')
     writeFileSync(
       hostPath,
-      `<!doctype html><html><body><webview id="guest" src="${pathToFileUrl(guestPath)}" partition="persist:orca-anti-detection-surface" style="width:320px;height:240px"></webview></body></html>`
+      `<!doctype html><html><body><webview id="guest" src="${pathToFileURL(guestPath).href}" partition="persist:orca-anti-detection-surface" style="width:320px;height:240px"></webview></body></html>`
     )
     writeFileSync(mainPath, probeElectronMain())
     writeFileSync(
@@ -91,10 +92,6 @@ export async function runAntiDetectionAutomationSurfaceProbe(): Promise<AntiDete
   } finally {
     rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
   }
-}
-
-function pathToFileUrl(path: string): string {
-  return `file://${path.replace(/\\/g, '/').replace(/^([A-Za-z]:)/, '/$1')}`
 }
 
 function probeElectronMain(): string {
@@ -115,6 +112,17 @@ function waitFor(predicate, label) {
     }
     tick()
   })
+}
+
+// Why the document and not guest.getURL(): a path the URL builder mis-encodes lands the guest on
+// chrome-error://chromewebdata, whose engine readings look exactly like a healthy guest's — and
+// whose requested URL still ends in guest.html. Only the loaded body proves what was measured.
+async function measure(guest, config, label) {
+  const loaded = await guest.executeJavaScript('[location.href, document.body && document.body.textContent]')
+  if (loaded[1] !== 'guest') {
+    throw new Error(label + ' measured ' + loaded[0] + ' instead of the guest document')
+  }
+  return guest.executeJavaScript(config.measureSource)
 }
 
 function reload(guest) {
@@ -164,18 +172,18 @@ async function run() {
   )
 
   const out = {}
-  out.native = await guest.executeJavaScript(config.measureSource)
+  out.native = await measure(guest, config, 'native')
 
   guest.debugger.attach('1.3')
   await guest.debugger.sendCommand('Page.enable', {})
   await reload(guest)
-  out.debuggerAttached = await guest.executeJavaScript(config.measureSource)
+  out.debuggerAttached = await measure(guest, config, 'debuggerAttached')
 
   await guest.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', {
     source: config.script
   })
   await reload(guest)
-  out.scriptInjected = await guest.executeJavaScript(config.measureSource)
+  out.scriptInjected = await measure(guest, config, 'scriptInjected')
 
   writeFileSync(config.resultPath, JSON.stringify(out))
   app.exit(0)
