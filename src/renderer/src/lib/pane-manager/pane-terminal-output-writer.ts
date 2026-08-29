@@ -19,7 +19,7 @@ import {
 } from './pane-terminal-output-scheduler-debug'
 import { flushTerminalOutputImpl } from './pane-terminal-output-flusher'
 import { composeParsedCallback, composeWriteFailureCallback } from './pane-terminal-output-pipeline'
-import { queueCapExceeded, replaceBacklogWithWarning } from './pane-terminal-output-drain'
+import { queueCapExceeded, replaceBacklogWithWarning } from './pane-terminal-output-queue-backlog'
 import {
   FOREGROUND_HOLD_SAFETY_DELAY_MS,
   LATENCY_SENSITIVE_FOREGROUND_COALESCE_DELAY_MS,
@@ -41,7 +41,7 @@ import {
   scheduleDrain,
   type TerminalOutputTarget,
   type WriteTerminalOutputOptions
-} from './pane-terminal-output-scheduler'
+} from './pane-terminal-output-queue-registry'
 
 export function writeTerminalOutputImpl(
   terminal: TerminalOutputTarget,
