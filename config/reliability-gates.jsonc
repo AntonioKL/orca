@@ -1094,6 +1094,7 @@
         {
           "file": "src/main/ssh/ssh-relay-upload-cancel.docker.test.ts",
           "assertions": [
+            "replaces a fresh previous-boot install lock over live ssh2 while preserving promoted payload and leaving no tombstone",
             "aborts a live SFTP upload after remote bytes arrive without creating the shared lock",
             "recovers cancellation with bounded safe reclamation and bounded real version GC"
           ]
