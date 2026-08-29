@@ -60,7 +60,7 @@ function idleInspection(): unknown {
 let root: Root | null = null
 let container: HTMLDivElement | null = null
 let confirmWindowClose: ReturnType<typeof vi.fn>
-let proceed: ((isQuitting: boolean) => void) | null = null
+let proceed: ((isQuitting: boolean, localPtysSurviveQuit: boolean) => void) | null = null
 /** Resolves the in-flight inspection, so a probe can be held past the delay on purpose. */
 let settleInspection: ((value: unknown) => void) | null = null
 
@@ -137,7 +137,7 @@ async function settleWith(value: unknown): Promise<void> {
 
 async function startWindowClose(): Promise<void> {
   await act(async () => {
-    proceed!(false)
+    proceed!(false, false)
     await Promise.resolve()
   })
 }
@@ -272,7 +272,7 @@ describe('window close pending affordance', () => {
 
   it('does not arm the affordance for a quit that never probes', async () => {
     await act(async () => {
-      proceed!(true)
+      proceed!(true, true)
       await Promise.resolve()
     })
 
@@ -297,7 +297,7 @@ describe('window close pending affordance', () => {
     await startWindowClose()
 
     await act(async () => {
-      proceed!(true)
+      proceed!(true, true)
       await Promise.resolve()
     })
     await advancePast(WINDOW_CLOSE_CHECKING_AFFORDANCE_DELAY_MS * 2)
