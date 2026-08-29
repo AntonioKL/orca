@@ -23,21 +23,45 @@ function truncateDetail(detail: string): string {
   return `${detail.slice(0, REMOTE_OPERATION_DETAIL_MAX_LENGTH).trimEnd()}...`
 }
 
+// Why: git's own lines usually end in a period, and the "…. Check your remote access" templates below
+// append their own — without this the toast reads "Permission denied (publickey)..".
+function withoutTrailingPeriod(detail: string): string {
+  return detail.endsWith('.') ? detail.slice(0, -1) : detail
+}
+
+/** Electron wraps every rejected `ipcMain.handle` before the renderer sees it, on the first line only. */
+const IPC_INVOKE_PREFIX = /^Error invoking remote method '[^']*': (?:\w*Error: )?/
+/** Node's execFile rejection preamble names the argv Orca ran, so such a line is never git's own reason. */
+const COMMAND_PREAMBLE_LINE = /Command failed:/
+
 function extractPublishFailureDetail(message: string): string | null {
   let remoteDetail: string | null = null
+  let causeBeforeFatal: string | null = null
 
   for (const rawLine of iterateRemoteErrorLines(message)) {
-    const line = rawLine.trim()
+    const line = rawLine.trim().replace(IPC_INVOKE_PREFIX, '')
     if (!line) {
       continue
     }
     if (line.startsWith('fatal:')) {
-      return truncateDetail(stripCredentialsFromMessage(line.slice('fatal:'.length).trim()))
+      // Why: git states the transport's own reason first, then wraps it in a generic `fatal:`
+      // line ("Could not read from remote repository."). The earlier line is the actionable one.
+      return (
+        causeBeforeFatal ??
+        truncateDetail(stripCredentialsFromMessage(line.slice('fatal:'.length).trim()))
+      )
     }
-    if (remoteDetail === null && line.startsWith('remote:')) {
-      remoteDetail = truncateDetail(
+    if (line.startsWith('remote:')) {
+      remoteDetail ??= truncateDetail(
         stripCredentialsFromMessage(line.slice('remote:'.length).trim())
       )
+      continue
+    }
+    // Why: only git's own local transport lines count as the cause. `remote:` is server chatter
+    // (progress, policy notes) that git's `fatal:` verdict should still outrank, and a wrapper
+    // preamble names Orca's argv rather than anything git reported.
+    if (!COMMAND_PREAMBLE_LINE.test(line)) {
+      causeBeforeFatal ??= truncateDetail(stripCredentialsFromMessage(line))
     }
   }
 
@@ -254,7 +278,7 @@ export function resolveRemoteOperationErrorMessage(
     // keeps the toast human-readable while preserving the actionable fatal reason.
     const detail = extractPublishFailureDetail(error.message)
     if (detail) {
-      return `Publish Branch failed. ${detail}. Check your remote access and try again.`
+      return `Publish Branch failed. ${withoutTrailingPeriod(detail)}. Check your remote access and try again.`
     }
 
     return 'Publish Branch failed. Check your remote access and try again.'
@@ -266,7 +290,7 @@ export function resolveRemoteOperationErrorMessage(
     // auth / protected-branch reasons stay actionable.
     const detail = extractPublishFailureDetail(error.message)
     if (detail) {
-      return `Sync failed. ${detail}. Check your remote access and try again.`
+      return `Sync failed. ${withoutTrailingPeriod(detail)}. Check your remote access and try again.`
     }
     return 'Sync failed. Check your connection and try again.'
   }
@@ -274,7 +298,7 @@ export function resolveRemoteOperationErrorMessage(
   if (options?.isForcePush) {
     const detail = extractPublishFailureDetail(error.message)
     if (detail) {
-      return `Force Push failed. ${detail}. Check your remote access and try again.`
+      return `Force Push failed. ${withoutTrailingPeriod(detail)}. Check your remote access and try again.`
     }
     return 'Force Push failed. Check your connection and try again.'
   }
@@ -284,7 +308,7 @@ export function resolveRemoteOperationErrorMessage(
     // connection message for auth errors, protected branches, etc.
     const detail = extractPublishFailureDetail(error.message)
     if (detail) {
-      return `Push failed. ${detail}. Check your remote access and try again.`
+      return `Push failed. ${withoutTrailingPeriod(detail)}. Check your remote access and try again.`
     }
     return 'Push failed. Check your connection and try again.'
   }
@@ -310,7 +334,12 @@ export function resolveRemoteOperationErrorMessage(
     return `Rebase failed. ${detail}`
   }
 
-  return error.message
+  // Why: unlabeled callers (Pull) share the toast's one-line budget, and git output reaching here is
+  // multi-line, so pick the same actionable line the labeled operations do instead of dumping the blob.
+  return (
+    extractPublishFailureDetail(error.message) ??
+    truncateDetail(stripCredentialsFromMessage(error.message.replace(IPC_INVOKE_PREFIX, '')))
+  )
 }
 
 export { isNonFastForwardRemoteError }

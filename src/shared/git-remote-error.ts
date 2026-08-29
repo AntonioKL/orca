@@ -42,36 +42,30 @@ export function formatSubmodulePushFailureDetail(message: string): string | null
   return `${subject} could not be pushed. Resolve the submodule push error, then try again.`
 }
 
-function extractTailLine(message: string): string {
-  // Why: last non-empty stderr line is the diagnostic; the full blob risks leaking local paths/env to the UI.
-  for (const rawLine of iterateLinesFromEnd(message)) {
-    const line = rawLine.trim()
-    if (line.length > 0) {
-      return line
-    }
+// Why: Node's execFile rejection prefixes `.message` with the argv it ran; `.stderr` is git's own bytes.
+// Mirrors extractExecError in src/main/git/exec-error.ts, which this module cannot import — the renderer
+// and the relay both bundle src/shared.
+const COMMAND_FAILED_PREAMBLE_PATTERN = /^Command failed:[^\n]*\n/
+
+// Why: a server-side hook or a progress-heavy transfer can emit megabytes; keep both ends rather than
+// one line, so the cause (first) and git's verdict (last) both cross IPC. Sliced, never line-split.
+const MAX_GIT_FAILURE_DETAIL_LENGTH = 4_000
+const GIT_FAILURE_DETAIL_HEAD_LENGTH = 3_000
+
+function readGitFailureDetail(error: Error): string {
+  const { stderr } = error as { stderr?: unknown }
+  const text =
+    typeof stderr === 'string' && stderr.trim().length > 0
+      ? stderr
+      : error.message.replace(COMMAND_FAILED_PREAMBLE_PATTERN, '')
+  // No line selection here: git prints the cause first and generic advice last, so keeping only one
+  // line discards whichever half the caller needed. The display layer picks the line it can fit.
+  const detail = stripCredentialsFromMessage(text).trim()
+  if (detail.length <= MAX_GIT_FAILURE_DETAIL_LENGTH) {
+    return detail
   }
-  return message
-}
-
-function* iterateLinesFromEnd(value: string): Generator<string> {
-  let lineEnd = value.length
-  let index = value.length - 1
-
-  while (index >= 0) {
-    const code = value.charCodeAt(index)
-    if (code !== 10 && code !== 13) {
-      index--
-      continue
-    }
-
-    const delimiterStart =
-      code === 10 && index > 0 && value.charCodeAt(index - 1) === 13 ? index - 1 : index
-    yield value.slice(index + 1, lineEnd)
-    lineEnd = delimiterStart
-    index = delimiterStart - 1
-  }
-
-  yield value.slice(0, lineEnd)
+  const tailLength = MAX_GIT_FAILURE_DETAIL_LENGTH - GIT_FAILURE_DETAIL_HEAD_LENGTH
+  return `${detail.slice(0, GIT_FAILURE_DETAIL_HEAD_LENGTH).trimEnd()}\n[…]\n${detail.slice(-tailLength).trimStart()}`
 }
 
 // Why: Git 2.27+ refuses divergent pulls when no pull.rebase/pull.ff policy is set; detected so callers can retry as merge.
@@ -173,8 +167,9 @@ export function normalizeGitErrorMessage(error: unknown, operation?: GitRemoteOp
     return 'Pull would overwrite untracked files. Move, remove, or add them before pulling.'
   }
 
-  // Fallthrough: raw was already credential-scrubbed at top, so just extract the tail stderr line.
-  return extractTailLine(raw)
+  // Fallthrough: nothing above recognized this failure, so hand the whole credential-scrubbed
+  // git output on rather than guessing which line mattered.
+  return readGitFailureDetail(error) || raw.trim()
 }
 
 // Why: require a `fatal:` prefix so wrapped command text or hook/progress output can't spuriously match and mask real failures.

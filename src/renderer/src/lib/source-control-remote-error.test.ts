@@ -69,7 +69,7 @@ describe('source-control remote error formatting', () => {
     )
 
     expect(resolveRemoteOperationErrorMessage(protectedError, { isPush: true })).toBe(
-      'Push failed. error: GH006 protected branch update failed.. Check your remote access and try again.'
+      'Push failed. error: GH006 protected branch update failed. Check your remote access and try again.'
     )
     expect(resolveRemoteOperationErrorMessage(preReceiveError, { isPush: true })).toBe(
       'Push failed. pre-receive hook declined. Check your remote access and try again.'
