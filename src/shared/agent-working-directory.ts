@@ -5,12 +5,20 @@ const AGENT_WORKING_DIRECTORY_MAX_LENGTH = 4096
 /** `\\server\share` at minimum: a bare `\\`, a server with no share, and the device
  *  namespaces `\\.\` / `\\?\` are not directories anything can start in, so a leading
  *  `\\` on its own is not enough to call a value absolute. */
-const UNC_SHARE_PATTERN = /^\\\\[^\\/.?][^\\/]*\\[^\\/]+/
+const WINDOWS_NETWORK_PREFIX_PATTERN = /^[\\/]{2}/
+const WINDOWS_DEVICE_NAMESPACE_PATTERN = /^[\\/]{2}[.?][\\/]/
+const UNC_SHARE_PATTERN = /^[\\/]{2}[^\\/.?][^\\/]*[\\/][^\\/]+(?:[\\/]|$)/
 
 /** POSIX root, Windows drive root, or UNC share. A relative path is meaningless
  *  without the process that emitted it, so it can only read as unknown. */
 function isAbsoluteAgentWorkingDirectory(value: string): boolean {
-  return value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value) || UNC_SHARE_PATTERN.test(value)
+  if (/^[A-Za-z]:[\\/]/.test(value)) {
+    return true
+  }
+  if (WINDOWS_NETWORK_PREFIX_PATTERN.test(value)) {
+    return !WINDOWS_DEVICE_NAMESPACE_PATTERN.test(value) && UNC_SHARE_PATTERN.test(value)
+  }
+  return value.startsWith('/')
 }
 
 /** The directory the agent process itself reports it is rooted in, on the host that

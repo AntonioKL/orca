@@ -1,4 +1,5 @@
 import type { SleepingAgentSessionRecord } from '../../../shared/agent-session-resume'
+import { normalizeAgentWorkingDirectory } from '../../../shared/agent-working-directory'
 
 /** Where a resumed provider session should be rooted.
  *
@@ -12,10 +13,13 @@ export type SleepingAgentResumeDirectory =
   | { kind: 'unknown' }
 
 export function resolveSleepingAgentResumeDirectory(
-  record: Pick<SleepingAgentSessionRecord, 'agentCwd'>
+  record: Pick<SleepingAgentSessionRecord, 'agentCwd' | 'connectionId'>,
+  currentConnectionId: string | null | undefined
 ): SleepingAgentResumeDirectory {
-  const cwd = record.agentCwd?.trim()
+  const cwd = normalizeAgentWorkingDirectory(record.agentCwd)
   // Not resolved against the local filesystem: on an SSH or WSL worktree this path only
   // exists on the execution host, which validates it when the PTY spawns.
-  return cwd ? { kind: 'agent-reported', cwd } : { kind: 'unknown' }
+  return cwd && currentConnectionId !== undefined && record.connectionId === currentConnectionId
+    ? { kind: 'agent-reported', cwd }
+    : { kind: 'unknown' }
 }

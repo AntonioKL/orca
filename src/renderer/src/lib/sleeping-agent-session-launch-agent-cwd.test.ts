@@ -25,6 +25,7 @@ function seedWorktreeWithSleepingRecord(
     state: 'working',
     capturedAt: 1,
     updatedAt: 1,
+    connectionId: null,
     origin: 'worktree-sleep',
     ...overrides
   }
@@ -39,20 +40,26 @@ function seedWorktreeWithSleepingRecord(
     createdAt: 1
   }
   useAppStore.setState({
+    repos: [{ id: WORKTREE_ID, path: '/repo/wt-1', connectionId: null } as never],
     tabsByWorktree: { [WORKTREE_ID]: [tab] },
     sleepingAgentSessionsByPaneKey: { [record.paneKey]: record }
   })
   return record
 }
 
-function resumeAndReadLaunch(): { startupCwd: string | undefined; command: string } {
+function resumeAndReadLaunch(): {
+  startupCwd: string | undefined
+  command: string
+  agentArgsOverride: string | null | undefined
+} {
   expect(resumeSleepingAgentSessionsForWorktree(WORKTREE_ID)).toBe(1)
   const state = useAppStore.getState()
   const resumedTab = state.tabsByWorktree[WORKTREE_ID]?.find((tab) => tab.id !== 'tab-1')
   expect(resumedTab).toBeDefined()
   return {
     startupCwd: resumedTab!.startupCwd,
-    command: state.pendingStartupByTabId[resumedTab!.id]?.command ?? ''
+    command: state.pendingStartupByTabId[resumedTab!.id]?.command ?? '',
+    agentArgsOverride: state.pendingStartupByTabId[resumedTab!.id]?.agentArgsOverride
   }
 }
 
@@ -112,6 +119,76 @@ describe('resuming a sleeping agent session in the directory the agent reported 
 
     expect(launch.command).not.toContain("'--dangerously-skip-permissions'")
     expect(launch.command).toContain("'--resume' 'session-1'")
+    expect(launch.agentArgsOverride).toBe('')
+  })
+
+  it('drops the permission bypass from a configured command override', () => {
+    useAppStore.setState({
+      settings: {
+        ...useAppStore.getState().settings,
+        agentCmdOverrides: { claude: 'claude --dangerously-skip-permissions' }
+      } as never
+    })
+    seedWorktreeWithSleepingRecord({ agent: 'claude' })
+
+    const launch = resumeAndReadLaunch()
+
+    expect(launch.command).not.toContain('--dangerously-skip-permissions')
+    expect(launch.command).toContain("'--resume' 'session-1'")
+  })
+
+  it('drops the permission bypass from a persisted agent command', () => {
+    seedWorktreeWithSleepingRecord({
+      agent: 'claude',
+      launchConfig: {
+        agentCommand: 'claude --dangerously-skip-permissions --model opus',
+        agentArgs: '--model opus',
+        agentEnv: {}
+      }
+    })
+
+    const launch = resumeAndReadLaunch()
+
+    expect(launch.command).not.toContain('--dangerously-skip-permissions')
+    expect(launch.command).toContain('--model opus')
+  })
+
+  it('treats a directory from a different SSH target as unknown', () => {
+    useAppStore.setState({
+      settings: {
+        ...useAppStore.getState().settings,
+        agentDefaultArgs: { claude: '--dangerously-skip-permissions' }
+      } as never
+    })
+    seedWorktreeWithSleepingRecord({
+      agent: 'claude',
+      connectionId: 'old-host',
+      agentCwd: '/srv/old/repo'
+    })
+    useAppStore.setState({
+      repos: [{ id: WORKTREE_ID, path: '/srv/new/repo', connectionId: 'new-host' } as never],
+      remoteWorkspaceHydratedTargetIds: new Set(['new-host'])
+    })
+
+    const launch = resumeAndReadLaunch()
+
+    expect(launch.startupCwd).toBeUndefined()
+    expect(launch.command).not.toContain("'--dangerously-skip-permissions'")
+  })
+
+  it('treats an invalid stored directory as unknown at the launch boundary', () => {
+    useAppStore.setState({
+      settings: {
+        ...useAppStore.getState().settings,
+        agentDefaultArgs: { claude: '--dangerously-skip-permissions' }
+      } as never
+    })
+    seedWorktreeWithSleepingRecord({ agent: 'claude', agentCwd: 'packages/api' })
+
+    const launch = resumeAndReadLaunch()
+
+    expect(launch.startupCwd).toBeUndefined()
+    expect(launch.command).not.toContain("'--dangerously-skip-permissions'")
   })
 
   it('drops the Codex approval bypass when the directory is unknown', () => {

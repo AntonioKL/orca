@@ -197,6 +197,37 @@ describe('agent working directory across the hook boundary (STA-5804)', () => {
     }
   })
 
+  it('keeps the directory when interrupt inference preserves the provider session', async () => {
+    const server = new AgentHookServer()
+    await server.start({ env: 'production', userDataPath })
+    try {
+      await postHookEvent(
+        server,
+        buildBody({
+          hook_event_name: 'UserPromptSubmit',
+          session_id: 'claude-session-1',
+          cwd: AGENT_SUBDIRECTORY,
+          prompt: 'fix the parser'
+        })
+      )
+      const baseline = server.getStatusSnapshotForPane(PANE)[0]!
+
+      expect(
+        server.inferInterrupt({
+          paneKey: PANE,
+          baselineUpdatedAt: baseline.receivedAt,
+          baselineStateStartedAt: baseline.stateStartedAt,
+          baselinePrompt: 'fix the parser',
+          baselineAgentType: 'claude',
+          intent: 'ctrl-c'
+        })
+      ).toBe(true)
+      expect(server.getStatusSnapshotForPane(PANE)[0]?.agentCwd).toBe(AGENT_SUBDIRECTORY)
+    } finally {
+      server.stop()
+    }
+  })
+
   it('carries a remote agent directory across the SSH relay boundary', () => {
     const server = new AgentHookServer()
     const rendererListener = vi.fn()

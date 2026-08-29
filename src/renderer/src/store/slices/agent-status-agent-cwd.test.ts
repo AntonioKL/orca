@@ -183,6 +183,133 @@ describe('agent working directory on status entries and sleeping records (STA-58
     expect(store.getState().agentStatusByPaneKey[PANE_KEY]?.agentCwd).toBe(AGENT_SUBDIRECTORY)
   })
 
+  it('does not carry a directory across execution hosts even when session ids match', () => {
+    const store = createTestStore()
+    store.setState({ tabsByWorktree: { 'wt-1': [makeTab({ id: 'tab-1', worktreeId: 'wt-1' })] } })
+    const providerSession = { key: 'session_id' as const, id: 'claude-session-1' }
+
+    store
+      .getState()
+      .setAgentStatus(
+        PANE_KEY,
+        { state: 'working', prompt: 'host a', agentType: 'claude' },
+        'Claude',
+        { updatedAt: 10, stateStartedAt: 10 },
+        { tabId: 'tab-1', worktreeId: 'wt-1', connectionId: 'host-a', agentCwd: '/srv/a' },
+        { providerSession }
+      )
+    store
+      .getState()
+      .setAgentStatus(
+        PANE_KEY,
+        { state: 'working', prompt: 'host b', agentType: 'claude' },
+        'Claude',
+        { updatedAt: 20, stateStartedAt: 20 },
+        { tabId: 'tab-1', worktreeId: 'wt-1', connectionId: 'host-b' },
+        { providerSession }
+      )
+
+    expect(store.getState().agentStatusByPaneKey[PANE_KEY]).toMatchObject({
+      connectionId: 'host-b'
+    })
+    expect(store.getState().agentStatusByPaneKey[PANE_KEY]?.agentCwd).toBeUndefined()
+    expect(store.getState().sleepingAgentSessionsByPaneKey[PANE_KEY]?.agentCwd).toBeUndefined()
+  })
+
+  it('treats explicit local ownership as a host change from SSH', () => {
+    const store = createTestStore()
+    store.setState({ tabsByWorktree: { 'wt-1': [makeTab({ id: 'tab-1', worktreeId: 'wt-1' })] } })
+    const providerSession = { key: 'session_id' as const, id: 'claude-session-1' }
+
+    store
+      .getState()
+      .recordAgentProviderSession(
+        PANE_KEY,
+        'claude',
+        providerSession,
+        { updatedAt: 10 },
+        { tabId: 'tab-1', worktreeId: 'wt-1', connectionId: 'host-a', agentCwd: '/srv/a' }
+      )
+    store
+      .getState()
+      .recordAgentProviderSession(
+        PANE_KEY,
+        'claude',
+        providerSession,
+        { updatedAt: 20 },
+        { tabId: 'tab-1', worktreeId: 'wt-1', connectionId: null }
+      )
+
+    expect(store.getState().sleepingAgentSessionsByPaneKey[PANE_KEY]).toMatchObject({
+      connectionId: null
+    })
+    expect(store.getState().sleepingAgentSessionsByPaneKey[PANE_KEY]?.agentCwd).toBeUndefined()
+  })
+
+  it('rewrites a recovery record when only its execution host changes', () => {
+    const store = createTestStore()
+    store.setState({ tabsByWorktree: { 'wt-1': [makeTab({ id: 'tab-1', worktreeId: 'wt-1' })] } })
+    const providerSession = { key: 'session_id' as const, id: 'claude-session-1' }
+    const routing = {
+      tabId: 'tab-1',
+      worktreeId: 'wt-1',
+      agentCwd: '/same-looking-path'
+    }
+
+    store
+      .getState()
+      .setAgentStatus(
+        PANE_KEY,
+        { state: 'working', prompt: 'same turn', agentType: 'claude' },
+        'Claude',
+        { updatedAt: 10, stateStartedAt: 10 },
+        { ...routing, connectionId: 'host-a' },
+        { providerSession }
+      )
+    store
+      .getState()
+      .setAgentStatus(
+        PANE_KEY,
+        { state: 'working', prompt: 'same turn', agentType: 'claude' },
+        'Claude',
+        { updatedAt: 20, stateStartedAt: 10 },
+        { ...routing, connectionId: 'host-b' },
+        { providerSession }
+      )
+
+    expect(store.getState().sleepingAgentSessionsByPaneKey[PANE_KEY]?.connectionId).toBe('host-b')
+  })
+
+  it('rewrites a hydrated checkpoint when only its execution host differs', () => {
+    const store = createTestStore()
+    store.setState({ tabsByWorktree: { 'wt-1': [makeTab({ id: 'tab-1', worktreeId: 'wt-1' })] } })
+    const providerSession = { key: 'session_id' as const, id: 'claude-session-1' }
+
+    store.getState().setAgentStatus(
+      PANE_KEY,
+      { state: 'working', prompt: 'same turn', agentType: 'claude' },
+      'Claude',
+      { updatedAt: 10, stateStartedAt: 10 },
+      {
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        connectionId: 'host-b',
+        agentCwd: '/same-looking-path'
+      },
+      { providerSession }
+    )
+    const current = store.getState().sleepingAgentSessionsByPaneKey[PANE_KEY]!
+    store.setState({
+      sleepingAgentSessionsByPaneKey: {
+        [PANE_KEY]: { ...current, connectionId: 'host-a' }
+      }
+    })
+
+    store.getState().captureAllSleepingAgentSessions('periodic')
+
+    expect(store.getState().sleepingAgentSessionsByPaneKey[PANE_KEY]?.connectionId).toBe('host-b')
+  })
+
   it('does not hand a new session the finished session\u2019s directory', () => {
     // A completed pane cannot reuse its provider session, so nothing "changes" when a new one
     // starts — the absent id must not read as continuity and license the old directory.

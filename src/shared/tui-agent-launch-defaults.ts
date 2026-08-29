@@ -1,5 +1,6 @@
 import { isTuiAgent } from './tui-agent-config'
 import { YOLO_TUI_AGENT_ARGS, YOLO_TUI_AGENT_ENV } from './tui-agent-permissions'
+import { tokenizeStartupCommand, type AgentStartupShell } from './tui-agent-startup-shell'
 import type { TuiAgent } from './tui-agent'
 
 const UNSUPPORTED_TUI_AGENT_ARGS: Partial<Record<TuiAgent, readonly string[]>> = {
@@ -13,7 +14,11 @@ export const DEFAULT_TUI_AGENT_ENV: Partial<Record<TuiAgent, Record<string, stri
   YOLO_TUI_AGENT_ENV
 
 function argPattern(arg: string): RegExp {
-  return new RegExp(`(^|\\s)${arg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\s|$)`, 'g')
+  const tokens = arg
+    .trim()
+    .split(/\s+/)
+    .map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  return new RegExp(`(^|\\s)${tokens.join('\\s+')}(?=\\s|$)`, 'g')
 }
 
 export function hasUnsupportedTuiAgentArgs(agent: TuiAgent, value: unknown): boolean {
@@ -74,12 +79,51 @@ export function normalizeTuiAgentEnvRecord(
 /** Drop the agent's permission-bypass flag from a launch argument string.
  *  Why: a resume Orca cannot place in the directory the session actually belongs to must
  *  not also run unattended with prompts disabled — the agent has to ask first (STA-5804). */
-export function stripYoloTuiAgentLaunchArgs(agent: TuiAgent, args: string): string {
+function stripYoloTuiAgentLaunchValue(
+  agent: TuiAgent,
+  value: string,
+  shell: AgentStartupShell = 'posix'
+): string {
   const yoloArgs = YOLO_TUI_AGENT_ARGS[agent]
   if (!yoloArgs) {
-    return args.trim()
+    return value.trim()
   }
-  return args.replace(argPattern(yoloArgs), ' ').replace(/\s+/g, ' ').trim()
+  const parsed = tokenizeStartupCommand(value, shell)
+  if (!parsed.ok || parsed.spans.some((span) => span.divergesFromShell)) {
+    return ''
+  }
+  const yoloTokens = yoloArgs.trim().split(/\s+/)
+  const ranges: { start: number; end: number }[] = []
+  for (let index = 0; index <= parsed.tokens.length - yoloTokens.length; index += 1) {
+    if (yoloTokens.every((token, offset) => parsed.tokens[index + offset] === token)) {
+      ranges.push({
+        start: parsed.spans[index].start,
+        end: parsed.spans[index + yoloTokens.length - 1].end
+      })
+      index += yoloTokens.length - 1
+    }
+  }
+  let stripped = value
+  for (const range of ranges.toReversed()) {
+    stripped = `${stripped.slice(0, range.start)}${stripped.slice(range.end)}`
+  }
+  return stripped.trim()
+}
+
+export function stripYoloTuiAgentLaunchArgs(
+  agent: TuiAgent,
+  args: string,
+  shell: AgentStartupShell = 'posix'
+): string {
+  return stripYoloTuiAgentLaunchValue(agent, args, shell)
+}
+
+export function stripYoloTuiAgentLaunchCommand(
+  agent: TuiAgent,
+  command: string,
+  shell: AgentStartupShell
+): string {
+  return stripYoloTuiAgentLaunchValue(agent, command, shell)
 }
 
 /** Env counterpart of stripYoloTuiAgentLaunchArgs; removes only names the agent's own

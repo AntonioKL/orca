@@ -39,12 +39,16 @@ describe('agent working directory', () => {
     expect(normalizeAgentWorkingDirectory('\\\\host')).toBeUndefined()
     expect(normalizeAgentWorkingDirectory('\\\\host\\')).toBeUndefined()
     expect(normalizeAgentWorkingDirectory('\\\\\\\\')).toBeUndefined()
+    expect(normalizeAgentWorkingDirectory('//host')).toBeUndefined()
+    expect(normalizeAgentWorkingDirectory('//host/')).toBeUndefined()
   })
 
   it('rejects the Windows device namespace, which is not a share', () => {
     expect(normalizeAgentWorkingDirectory('\\\\.\\pipe\\orca')).toBeUndefined()
     expect(normalizeAgentWorkingDirectory('\\\\?\\C:\\repo\\wt')).toBeUndefined()
     expect(normalizeAgentWorkingDirectory('\\\\?\\UNC\\host\\share')).toBeUndefined()
+    expect(normalizeAgentWorkingDirectory('//./pipe/orca')).toBeUndefined()
+    expect(normalizeAgentWorkingDirectory('//?/C:/repo/wt')).toBeUndefined()
   })
 
   it('still accepts a real share, including one on an IPv4 host', () => {
@@ -52,6 +56,15 @@ describe('agent working directory', () => {
     expect(normalizeAgentWorkingDirectory('\\\\10.0.0.4\\share\\wt')).toBe(
       '\\\\10.0.0.4\\share\\wt'
     )
+    expect(normalizeAgentWorkingDirectory('//host/share/wt/')).toBe('//host/share/wt/')
+    expect(normalizeAgentWorkingDirectory('\\\\host/share\\wt')).toBe('\\\\host/share\\wt')
+  })
+
+  it('rejects drive-relative paths but accepts drive roots with either separator', () => {
+    expect(normalizeAgentWorkingDirectory('C:')).toBeUndefined()
+    expect(normalizeAgentWorkingDirectory('C:repo\\wt')).toBeUndefined()
+    expect(normalizeAgentWorkingDirectory('C:\\')).toBe('C:\\')
+    expect(normalizeAgentWorkingDirectory('C:/')).toBe('C:/')
   })
 
   it('reports unknown rather than a value for a payload with no directory', () => {

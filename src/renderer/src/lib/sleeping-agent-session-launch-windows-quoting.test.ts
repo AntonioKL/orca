@@ -74,6 +74,7 @@ const record: SleepingAgentSessionRecord = {
   // An Orca-launched agent reports the worktree as its own cwd. Stated rather than left
   // absent so these stay quoting tests: an unknown directory would strip the bypass flag
   // this file quotes (STA-5804).
+  connectionId: null,
   agentCwd: 'C:\\Users\\neil\\repo\\feature',
   prompt: 'finish the task',
   state: 'done',
@@ -111,6 +112,8 @@ describe('launchSleepingAgentSession Windows shell quoting', () => {
         }
       ]
     }
+    record.connectionId = null
+    record.agentCwd = 'C:\\Users\\neil\\repo\\feature'
     mockCreateTab.mockReturnValue({ id: 'tab-1' })
   })
 
@@ -151,6 +154,8 @@ describe('launchSleepingAgentSession Windows shell quoting', () => {
         }
       ]
     }
+    record.connectionId = 'ssh-1'
+    record.agentCwd = '/home/neil/repo/feature'
 
     await expect(launch()).resolves.toBe(
       `codex '--dangerously-bypass-approvals-and-sandbox' 'resume' '${SESSION_ID}'`

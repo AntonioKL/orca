@@ -13,6 +13,7 @@ import {
   resolveTuiAgentLaunchArgs,
   resolveTuiAgentLaunchEnv,
   stripYoloTuiAgentLaunchArgs,
+  stripYoloTuiAgentLaunchCommand,
   stripYoloTuiAgentLaunchEnv
 } from '../../../shared/tui-agent-launch-defaults'
 import {
@@ -21,6 +22,8 @@ import {
 } from '@/lib/sleeping-agent-resume-directory'
 import type { SleepingAgentSessionRecord } from '../../../shared/agent-session-resume'
 import { translate } from '@/i18n/i18n'
+import { getConnectionIdFromState } from '@/lib/connection-owner-resolution'
+import { resolveStartupShell } from '../../../shared/tui-agent-startup-shell'
 
 export type ResumeSleepingAgentSessionsOptions = {
   suppressNavigation?: boolean
@@ -73,10 +76,11 @@ function appendTabToWorktreeOrder(worktreeId: string, tabId: string): void {
 function withoutBypassWhenDirectoryUnknown(
   agent: SleepingAgentSessionRecord['agent'],
   agentArgs: string,
-  resumeDirectory: SleepingAgentResumeDirectory
+  resumeDirectory: SleepingAgentResumeDirectory,
+  shell: AgentResumeLaunchTarget['shell']
 ): string {
   return resumeDirectory.kind === 'unknown'
-    ? stripYoloTuiAgentLaunchArgs(agent, agentArgs)
+    ? stripYoloTuiAgentLaunchArgs(agent, agentArgs, shell)
     : agentArgs
 }
 
@@ -97,18 +101,41 @@ export function launchSleepingAgentSession(
   const state = useAppStore.getState()
   const launchConfig = record.launchConfig
   const resumeTarget = getResumeLaunchTarget(record.worktreeId)
-  const resumeDirectory = resolveSleepingAgentResumeDirectory(record)
+  const resumeDirectory = resolveSleepingAgentResumeDirectory(
+    record,
+    getConnectionIdFromState(state, record.worktreeId)
+  )
+  const resumeShell = resolveStartupShell(resumeTarget.platform, resumeTarget.shell)
+  const configuredCmdOverrides = state.settings?.agentCmdOverrides ?? {}
+  const configuredCommand = configuredCmdOverrides[record.agent]
+  const cmdOverrides =
+    resumeDirectory.kind === 'unknown' && configuredCommand
+      ? {
+          ...configuredCmdOverrides,
+          [record.agent]: stripYoloTuiAgentLaunchCommand(
+            record.agent,
+            configuredCommand,
+            resumeShell
+          )
+        }
+      : configuredCmdOverrides
+  const configuredAgentCommand = launchConfig?.agentCommand
+  const agentCommand =
+    resumeDirectory.kind === 'unknown' && configuredAgentCommand
+      ? stripYoloTuiAgentLaunchCommand(record.agent, configuredAgentCommand, resumeShell)
+      : configuredAgentCommand
   const agentArgs = withoutBypassWhenDirectoryUnknown(
     record.agent,
     launchConfig !== undefined
       ? launchConfig.agentArgs
       : resolveTuiAgentLaunchArgs(record.agent, state.settings?.agentDefaultArgs),
-    resumeDirectory
+    resumeDirectory,
+    resumeShell
   )
   const startupPlan = buildAgentResumeStartupPlan({
     agent: record.agent,
     providerSession: record.providerSession,
-    cmdOverrides: state.settings?.agentCmdOverrides ?? {},
+    cmdOverrides,
     agentArgs,
     agentEnv: withoutBypassEnvWhenDirectoryUnknown(
       record.agent,
@@ -117,7 +144,7 @@ export function launchSleepingAgentSession(
         : resolveTuiAgentLaunchEnv(record.agent, state.settings?.agentDefaultEnv),
       resumeDirectory
     ),
-    ...(launchConfig?.agentCommand ? { agentCommand: launchConfig.agentCommand } : {}),
+    ...(agentCommand ? { agentCommand } : {}),
     ...(launchConfig?.ompResumeFilePath
       ? { ompResumeFilePath: launchConfig.ompResumeFilePath }
       : {}),
@@ -149,7 +176,9 @@ export function launchSleepingAgentSession(
       // Why: the runtime spawn path re-derives the agent command from this override, so it
       // carries the SAME args the startup plan used — else the unknown-directory strip above
       // is undone the moment the pane respawns through the runtime.
-      ...(launchConfig ? { agentArgsOverride: agentArgs } : {}),
+      ...(launchConfig || resumeDirectory.kind === 'unknown'
+        ? { agentArgsOverride: agentArgs }
+        : {}),
       ...(startupPlan.startupCommandDelivery
         ? { startupCommandDelivery: startupPlan.startupCommandDelivery }
         : {}),

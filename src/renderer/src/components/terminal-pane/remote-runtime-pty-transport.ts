@@ -21,6 +21,7 @@ import type {
 } from '../../../../shared/runtime-types'
 import { TERMINAL_CREATE_IDEMPOTENCY_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
 import { agentResumeHostAuthorityCapability } from '../../runtime/agent-resume-host-authority-capability'
+import { AGENT_SESSION_RESUME_CWD_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
 import {
   isTerminalInputTooLargeWithDeferredMeasurement,
   iterateTerminalInputChunks
@@ -137,6 +138,7 @@ export function createRemoteRuntimePtyTransport(
 ): PtyTransport {
   const {
     command,
+    cwd,
     startupCommandDelivery,
     env,
     envToDelete,
@@ -2016,6 +2018,7 @@ export function createRemoteRuntimePtyTransport(
         }
 
         const commandToSend = options.command ?? command
+        const cwdToSend = options.cwd ?? cwd
         const startupCommandDeliveryToSend =
           options.startupCommandDelivery ?? startupCommandDelivery
         const envToSend = options.env ?? env
@@ -2024,10 +2027,13 @@ export function createRemoteRuntimePtyTransport(
         const resumeProviderSessionToSend = options.resumeProviderSession ?? resumeProviderSession
         const launchTokenToSend = options.launchToken ?? launchToken
         const launchAgentToSend = options.launchAgent ?? launchAgent
+        const agentArgsOverrideToSend =
+          options.agentArgsOverride !== undefined ? options.agentArgsOverride : agentArgsOverride
         const legacyCreateParams = {
           worktree: toRuntimeTerminalWorktreeSelector(worktreeId),
           clientMutationId: terminalCreateMutationId,
           ...(commandToSend !== undefined ? { command: commandToSend } : {}),
+          ...(cwdToSend !== undefined ? { cwd: cwdToSend } : {}),
           ...(startupCommandDeliveryToSend !== undefined
             ? { startupCommandDelivery: startupCommandDeliveryToSend }
             : {}),
@@ -2079,7 +2085,10 @@ export function createRemoteRuntimePtyTransport(
                       ...(launchConfigToSend?.ompResumeFilePath
                         ? { ompResumeFilePath: launchConfigToSend.ompResumeFilePath }
                         : {}),
-                      ...(agentArgsOverride !== undefined ? { agentArgs: agentArgsOverride } : {}),
+                      ...(agentArgsOverrideToSend !== undefined
+                        ? { agentArgs: agentArgsOverrideToSend }
+                        : {}),
+                      ...(cwdToSend ? { startupCwd: cwdToSend } : {}),
                       ...(agentLaunchPreferences
                         ? { launchPreferences: agentLaunchPreferences }
                         : {}),
@@ -2097,8 +2106,8 @@ export function createRemoteRuntimePtyTransport(
                         agent: launchAgentToSend!,
                         ...(agentPrompt ? { prompt: agentPrompt } : {}),
                         ...(agentPromptDelivery ? { promptDelivery: agentPromptDelivery } : {}),
-                        ...(agentArgsOverride !== undefined
-                          ? { agentArgs: agentArgsOverride }
+                        ...(agentArgsOverrideToSend !== undefined
+                          ? { agentArgs: agentArgsOverrideToSend }
                           : {}),
                         ...(agentLaunchPreferences
                           ? { launchPreferences: agentLaunchPreferences }
@@ -2114,7 +2123,9 @@ export function createRemoteRuntimePtyTransport(
             connectLifecycleEpoch
           )
         const resumeHostAuthorityCapability = resumeProviderSessionToSend
-          ? agentResumeHostAuthorityCapability(launchAgentToSend)
+          ? cwdToSend
+            ? AGENT_SESSION_RESUME_CWD_RUNTIME_CAPABILITY
+            : agentResumeHostAuthorityCapability(launchAgentToSend)
           : undefined
         const created = launchAgentToSend
           ? agentSessionRequiresHostAuthorityReplay

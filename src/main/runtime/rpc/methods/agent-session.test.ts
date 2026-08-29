@@ -55,6 +55,7 @@ describe('agent session RPC methods', () => {
         providerSession: { key: 'session_id', id: 'provider-session-1' },
         ompResumeFilePath: '/custom/omp/project/session.jsonl',
         agentArgs: '--profile review',
+        startupCwd: '/repo/worktree-1/packages/api',
         launchPreferences: { model: 'gpt-5', effort: 'high' },
         presentation: 'focused',
         placement: { tabId: 'tab-1', leafId: 'leaf-1' }
@@ -70,6 +71,7 @@ describe('agent session RPC methods', () => {
         providerSession: { key: 'session_id', id: 'provider-session-1' },
         ompResumeFilePath: '/custom/omp/project/session.jsonl',
         agentArgs: '--profile review',
+        startupCwd: '/repo/worktree-1/packages/api',
         launchPreferences: { model: 'gpt-5', effort: 'high' },
         presentation: 'focused',
         placement: { tabId: 'tab-1', leafId: 'leaf-1' }

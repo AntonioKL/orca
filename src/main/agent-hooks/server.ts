@@ -1023,6 +1023,7 @@ export class AgentHookServer {
       worktreeId: existing.worktreeId,
       connectionId: existing.connectionId,
       providerSession: existing.providerSession,
+      agentCwd: existing.agentCwd,
       payload: {
         state: 'done',
         prompt: payload.prompt,
@@ -1082,6 +1083,7 @@ export class AgentHookServer {
       worktreeId: existing.worktreeId,
       connectionId: existing.connectionId,
       providerSession: existing.providerSession,
+      agentCwd: existing.agentCwd,
       payload: {
         state: restored.state,
         ...(restored.workingMode ? { workingMode: restored.workingMode } : {}),

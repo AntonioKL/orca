@@ -20,6 +20,21 @@ describe('stripping permission-bypass launch defaults', () => {
     )
   })
 
+  it('removes a multi-token bypass with shell-equivalent whitespace', () => {
+    expect(
+      stripYoloTuiAgentLaunchArgs('grok', '--permission-mode   bypassPermissions --fast')
+    ).toBe('--fast')
+  })
+
+  it('removes quoted bypass tokens with the same shell meaning', () => {
+    expect(
+      stripYoloTuiAgentLaunchArgs('claude', "'--dangerously-skip-permissions' --model opus")
+    ).toBe('--model opus')
+    expect(
+      stripYoloTuiAgentLaunchArgs('grok', "--permission-mode 'bypassPermissions' --fast")
+    ).toBe('--fast')
+  })
+
   it('leaves a non-bypass argument that merely shares a prefix', () => {
     expect(stripYoloTuiAgentLaunchArgs('claude', '--dangerously-skip-permissions-not-really')).toBe(
       '--dangerously-skip-permissions-not-really'

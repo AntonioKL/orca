@@ -131,6 +131,7 @@ const ExplicitEnsure = z
     providerSession: ProviderSession,
     ompResumeFilePath: OmpResumeFilePath.optional(),
     agentArgs: AgentArgs.optional(),
+    startupCwd: z.string().min(1).max(MAX_WORKTREE_SELECTOR_LENGTH).optional(),
     launchPreferences: LaunchPreferences.optional(),
     presentation: Presentation.optional(),
     placement: Placement.optional()
