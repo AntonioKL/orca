@@ -35,6 +35,13 @@ import {
 } from './update-install-exit-watchdog'
 import { registerAutoUpdaterHandlers } from './updater-events'
 import { recordUpdaterLifecycle } from './updater-lifecycle-diagnostics'
+import {
+  armMacUpdateInstallAttempt,
+  clearMacUpdateInstallAttempt,
+  getMacUpdateInstallAttemptPath,
+  type MacUpdateInstallAttempt,
+  type MacUpdateInstallRecoveryReason
+} from './mac-update-install-attempt'
 import { getLinuxRootPackageType } from './linux-update-package-type'
 import {
   beginLinuxPackageInstallDiagnosticCapture,
@@ -117,6 +124,7 @@ const QUIT_AND_INSTALL_DELAY_MS = 100
 const PRE_QUIT_CLEANUP_TIMEOUT_MS = 2_500
 const UPDATE_CHECK_SILENT_SETTLE_DELAY_MS = 1_000
 const UPDATE_CHECK_STALL_TIMEOUT_MS = 45_000
+const MAC_UPDATE_INSTALL_RECOVERY_FEEDBACK_MS = 10 * 60_000
 
 let mainWindowRef: BrowserWindow | null = null
 let currentStatus: UpdateStatus = { state: 'idle' }
@@ -195,6 +203,10 @@ let pinnedBuildSelectionInProgress = false
 // deliberate downgrade, so newer-only gates must yield to it too.
 let isPinnedBuildActive = false
 let getReleaseChannelOverride: (() => ReleaseChannel | null) | null = null
+let macUpdateInstallAttempt: MacUpdateInstallAttempt | null = null
+let recoveredMacUpdateInstallFailurePending = false
+let recoveredMacUpdateInstallFailureReason: MacUpdateInstallRecoveryReason | null = null
+let macUpdateInstallAutoCheckBlockedUntilMs = 0
 
 function getAutoUpdater(): ElectronAutoUpdater {
   if (!autoUpdater) {
@@ -782,6 +794,20 @@ async function performQuitAndInstall(): Promise<void> {
       if (!quitAndInstallInProgress) {
         return
       }
+      macUpdateInstallAttempt =
+        process.platform === 'darwin' &&
+        app.isPackaged &&
+        typeof app.getPath === 'function' &&
+        typeof process.resourcesPath === 'string'
+          ? armMacUpdateInstallAttempt({
+              appDataPath: app.getPath('appData'),
+              executablePath: process.execPath,
+              isPackaged: true,
+              resourcesPath: process.resourcesPath,
+              sourceVersion: app.getVersion(),
+              targetVersion: pendingVersion
+            })
+          : null
       // Why: mark before the call so a sync 'error' during quitAndInstall can recover; pre-native errors must not look like install failure.
       quitAndInstallNativeInvoked = true
       // Why: invoke before killAllPty/removing close listeners so a sync 'error' (the "no filepath" path) can recover while windows and PTYs are intact.
@@ -880,6 +906,13 @@ async function performQuitAndInstall(): Promise<void> {
 }
 
 function resetQuitForUpdateState(): void {
+  if (macUpdateInstallAttempt) {
+    clearMacUpdateInstallAttempt(
+      getMacUpdateInstallAttemptPath(app.getPath('appData')),
+      macUpdateInstallAttempt.attemptId
+    )
+    macUpdateInstallAttempt = null
+  }
   quitAndInstallInProgress = false
   quittingForUpdate = false
   updateInstallCommitted = false
@@ -1514,6 +1547,9 @@ function retryPrereleaseFallbackAfterMissingManifest(
 function runBackgroundUpdateCheck(
   nudgeId: string | null = getPersistedPendingUpdateNudgeId()
 ): boolean {
+  if (Date.now() < macUpdateInstallAutoCheckBlockedUntilMs) {
+    return false
+  }
   // Why: a pinned dev jump owns the feed until it settles; a background check
   // would repoint it mid-flight and download the wrong build.
   if (
@@ -1591,6 +1627,7 @@ export function checkForUpdatesFromMenu(options?: UpdateCheckOptions): void {
     sendStatus({ state: 'not-available', userInitiated: true })
     return
   }
+  macUpdateInstallAutoCheckBlockedUntilMs = 0
   if (options?.localBuild) {
     void checkForLocalBuildFromMenu()
     return
@@ -1821,6 +1858,21 @@ async function checkForPinnedBuild(channel: ReleaseChannel, tag: string): Promis
 
 export function isQuittingForUpdate(): boolean {
   return quittingForUpdate
+}
+
+export function reportRecoveredMacUpdateInstallFailure(
+  reason: MacUpdateInstallRecoveryReason
+): void {
+  recoveredMacUpdateInstallFailurePending = true
+  recoveredMacUpdateInstallFailureReason = reason
+  macUpdateInstallAutoCheckBlockedUntilMs = Date.now() + MAC_UPDATE_INSTALL_RECOVERY_FEEDBACK_MS
+  currentStatus = {
+    state: 'error',
+    message:
+      'macOS stopped the installer before Orca was replaced. Check for updates and try again, then leave Orca closed until it relaunches.',
+    userInitiated: true,
+    failureKind: 'macos-install'
+  }
 }
 
 function getActiveLinuxPackageRecovery(): LinuxPackageInstallRecovery | null {
@@ -2186,6 +2238,17 @@ export function setupAutoUpdater(
   updateInstallMode = opts?.installMode ?? 'interactive'
   lastInstallDeferralVersion = { download: null, install: null }
 
+  if (recoveredMacUpdateInstallFailurePending) {
+    recoveredMacUpdateInstallFailurePending = false
+    recordUpdaterLifecycle(
+      'macos_install_recovered_after_failure',
+      { reason: recoveredMacUpdateInstallFailureReason },
+      { level: 'warn', message: 'macOS update failed after desktop exit; recovery relaunched' }
+    )
+    recoveredMacUpdateInstallFailureReason = null
+    sendStatus(currentStatus, { force: true })
+  }
+
   const serveHandoffFailure = getServeUpdateHandoffFailure()
   if (serveHandoffFailure) {
     recordUpdaterLifecycle(
@@ -2293,6 +2356,9 @@ export function setupAutoUpdater(
     ) {
       return
     }
+    if (Date.now() < macUpdateInstallAutoCheckBlockedUntilMs) {
+      return
+    }
     const lastCheck = _getLastUpdateCheckAt?.() ?? null
     const msSince = lastCheck === null ? Number.POSITIVE_INFINITY : Date.now() - lastCheck
     if (msSince >= AUTO_UPDATE_CHECK_INTERVAL_MS) {
@@ -2307,8 +2373,14 @@ export function setupAutoUpdater(
   const lastUpdateCheckAt = opts?.getLastUpdateCheckAt?.() ?? null
   const msSinceLastCheck =
     lastUpdateCheckAt === null ? Number.POSITIVE_INFINITY : Date.now() - lastUpdateCheckAt
+  const recoveryFeedbackRemainingMs = Math.max(
+    0,
+    macUpdateInstallAutoCheckBlockedUntilMs - Date.now()
+  )
 
-  if (msSinceLastCheck >= AUTO_UPDATE_CHECK_INTERVAL_MS) {
+  if (recoveryFeedbackRemainingMs > 0) {
+    scheduleAutomaticUpdateCheck(recoveryFeedbackRemainingMs)
+  } else if (msSinceLastCheck >= AUTO_UPDATE_CHECK_INTERVAL_MS) {
     runBackgroundUpdateCheck()
     scheduleAutomaticUpdateCheck(AUTO_UPDATE_CHECK_INTERVAL_MS)
   } else {

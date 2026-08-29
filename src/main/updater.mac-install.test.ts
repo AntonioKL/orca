@@ -7,7 +7,9 @@ const {
   autoUpdaterMock,
   shellMock,
   isMock,
-  killAllPtyMock
+  killAllPtyMock,
+  armMacUpdateInstallAttemptMock,
+  clearMacUpdateInstallAttemptMock
 } = vi.hoisted(() => {
   const appEventHandlers = new Map<string, ((...args: unknown[]) => void)[]>()
   const eventHandlers = new Map<string, ((...args: unknown[]) => void)[]>()
@@ -64,6 +66,7 @@ const {
     appMock: {
       isPackaged: true,
       getVersion: vi.fn(() => '1.0.51'),
+      getPath: vi.fn(() => '/tmp/orca-app-data'),
       on: appOn,
       emit: appEmit,
       quit: vi.fn()
@@ -79,7 +82,9 @@ const {
       openExternal: vi.fn()
     },
     isMock: { dev: false },
-    killAllPtyMock: vi.fn()
+    killAllPtyMock: vi.fn(),
+    armMacUpdateInstallAttemptMock: vi.fn(),
+    clearMacUpdateInstallAttemptMock: vi.fn()
   }
 })
 
@@ -108,6 +113,12 @@ vi.mock('./ipc/pty', () => ({
   killAllPty: killAllPtyMock
 }))
 
+vi.mock('./mac-update-install-attempt', () => ({
+  armMacUpdateInstallAttempt: armMacUpdateInstallAttemptMock,
+  clearMacUpdateInstallAttempt: clearMacUpdateInstallAttemptMock,
+  getMacUpdateInstallAttemptPath: vi.fn(() => '/tmp/orca-update-install-attempt.json')
+}))
+
 vi.mock('./updater-changelog', () => ({
   fetchChangelog: vi.fn().mockResolvedValue(null)
 }))
@@ -131,9 +142,103 @@ describe('updater mac install handoff', () => {
     appMock.isPackaged = true
     isMock.dev = false
     killAllPtyMock.mockReset()
+    armMacUpdateInstallAttemptMock.mockReset().mockReturnValue(null)
+    clearMacUpdateInstallAttemptMock.mockReset()
     vi.unstubAllGlobals()
     vi.useRealTimers()
   })
+
+  it.runIf(process.platform === 'darwin')(
+    'surfaces a post-exit installer failure without automatically retrying install',
+    async () => {
+      const send = vi.fn()
+      const { getUpdateStatus, reportRecoveredMacUpdateInstallFailure, setupAutoUpdater } =
+        await import('./updater')
+
+      reportRecoveredMacUpdateInstallFailure('installer-exited-with-source-version')
+      setupAutoUpdater({ webContents: { send } } as never)
+
+      expect(getUpdateStatus()).toMatchObject({
+        state: 'error',
+        userInitiated: true,
+        failureKind: 'macos-install',
+        message: expect.stringContaining('leave Orca closed until it relaunches')
+      })
+      expect(send).toHaveBeenCalledWith(
+        'updater:status',
+        expect.objectContaining({ state: 'error' })
+      )
+      expect(autoUpdaterMock.quitAndInstall).not.toHaveBeenCalled()
+      expect(autoUpdaterMock.checkForUpdates).not.toHaveBeenCalled()
+    }
+  )
+
+  it.runIf(process.platform === 'darwin')(
+    'arms the durable monitor after cleanup and before the native handoff',
+    async () => {
+      const resourcesPathDescriptor = Object.getOwnPropertyDescriptor(process, 'resourcesPath')
+      Object.defineProperty(process, 'resourcesPath', {
+        value: '/tmp/orca-packaged-resources',
+        configurable: true
+      })
+      const lifecycle: string[] = []
+      const attempt = {
+        schemaVersion: 1,
+        attemptId: 'attempt-1',
+        sourceVersion: '1.0.51',
+        targetVersion: '1.0.61',
+        targetBundlePath: '/Applications/Orca.app',
+        sourcePid: 100,
+        sourceStartedAtMs: 10_000,
+        monitorPid: 101,
+        monitorStartedAtMs: 11_000,
+        phase: 'installing',
+        createdAtMs: 1_000,
+        heartbeatAtMs: 1_000
+      }
+      armMacUpdateInstallAttemptMock.mockImplementation(() => {
+        lifecycle.push('monitor-armed')
+        return attempt
+      })
+      autoUpdaterMock.quitAndInstall.mockImplementation(() => lifecycle.push('native-handoff'))
+
+      try {
+        autoUpdaterMock.checkForUpdates.mockResolvedValue(undefined)
+        const { quitAndInstall, setupAutoUpdater } = await import('./updater')
+        setupAutoUpdater({ webContents: { send: vi.fn() } } as never, {
+          onBeforeQuit: () => {
+            lifecycle.push('cleanup')
+          }
+        })
+        autoUpdaterMock.emit('checking-for-update')
+        autoUpdaterMock.emit('update-available', { version: '1.0.61' })
+        await Promise.resolve()
+        autoUpdaterMock.emit('update-downloaded', { version: '1.0.61' })
+        const nativeDownloadedHandler = nativeUpdaterMock.on.mock.calls.find(
+          ([eventName]) => eventName === 'update-downloaded'
+        )?.[1] as (() => void) | undefined
+        nativeDownloadedHandler?.()
+
+        quitAndInstall()
+        await vi.waitFor(() => expect(autoUpdaterMock.quitAndInstall).toHaveBeenCalledOnce())
+        expect(lifecycle).toEqual(['cleanup', 'monitor-armed', 'native-handoff'])
+        expect(armMacUpdateInstallAttemptMock).toHaveBeenCalledWith(
+          expect.objectContaining({
+            appDataPath: '/tmp/orca-app-data',
+            resourcesPath: '/tmp/orca-packaged-resources',
+            sourceVersion: '1.0.51',
+            targetVersion: '1.0.61'
+          })
+        )
+      } finally {
+        if (resourcesPathDescriptor) {
+          Object.defineProperty(process, 'resourcesPath', resourcesPathDescriptor)
+        } else {
+          Reflect.deleteProperty(process, 'resourcesPath')
+        }
+      }
+    }
+  )
 
   it.runIf(process.platform === 'darwin')(
     'waits for Squirrel.Mac before honoring a manual quit that should install the update',

@@ -3,6 +3,19 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 describe('startup ordering', () => {
+  it('gates a racing old-version launch before the single-instance lock and startup writes', () => {
+    const source = readFileSync(join(process.cwd(), 'src/main/index.ts'), 'utf8')
+    const userDataConfig = source.indexOf('configureOrcaUserDataPathEnv()')
+    const updateGate = source.indexOf('resolveMacUpdateInstallStartup({', userDataConfig)
+    const singleInstanceLock = source.indexOf('acquireSingleInstanceLock(', updateGate)
+    const appEnvironment = source.indexOf('setAppEnvironment(', singleInstanceLock)
+
+    expect(userDataConfig).toBeGreaterThanOrEqual(0)
+    expect(updateGate).toBeGreaterThan(userDataConfig)
+    expect(singleInstanceLock).toBeGreaterThan(updateGate)
+    expect(appEnvironment).toBeGreaterThan(singleInstanceLock)
+  })
+
   it('passes the startup barrier into PTY handlers without blocking window creation', () => {
     const source = readFileSync(join(process.cwd(), 'src/main/index.ts'), 'utf8')
     const attachStart = source.indexOf('attachMainWindowServices(')

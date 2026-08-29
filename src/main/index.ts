@@ -140,11 +140,13 @@ import {
   getRemoteServerUpdaterSnapshot,
   installRemoteServerUpdate,
   isQuittingForUpdate,
+  reportRecoveredMacUpdateInstallFailure,
   resolveUpdateInstallMode
 } from './updater'
 import { configureRemoteServerUpdater } from './runtime/remote-server-updater'
 import type { UpdateCheckOptions } from '../shared/update-status-types'
 import { recordUpdaterLifecycle } from './updater-lifecycle-diagnostics'
+import { resolveMacUpdateInstallStartup } from './mac-update-install-attempt'
 import {
   installServeSupervisorDisconnectQuit,
   notifyServeSupervisorReady
@@ -731,6 +733,18 @@ if (app.isPackaged && process.platform !== 'win32') {
 }
 configureDevUserDataPath(is.dev)
 configureOrcaUserDataPathEnv()
+const macUpdateInstallStartup = resolveMacUpdateInstallStartup({
+  appDataPath: app.getPath('appData'),
+  appVersion: app.getVersion(),
+  executablePath: process.execPath,
+  isPackaged: app.isPackaged
+})
+if (macUpdateInstallStartup.action === 'block') {
+  console.info('[updater] Deferring old-version launch while macOS applies the update')
+  app.exit(0)
+} else if (macUpdateInstallStartup.action === 'allow-with-failure') {
+  reportRecoveredMacUpdateInstallFailure(macUpdateInstallStartup.failureReason)
+}
 installServeSupervisorDisconnectQuit(isServeMode)
 
 // Why: just past createMainWindow's 10s ready-to-show fallback, so a window revealed that way still gets its tray icon.
