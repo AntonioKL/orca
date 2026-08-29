@@ -789,3 +789,52 @@ index 7b286d3d644c26141df516929703aa6e129df4b2..ec6bf3932c65b89c013ff133dc6bf46a
    return exports;
  };
  
+diff --git a/lib/windowsTerminal.js b/lib/windowsTerminal.js
+index 3c38f89d14cece8081782a9600ebc582b7c2a62a..7cdfdf75c7396998cf93d135c5de6ef96668ceba 100644
+--- a/lib/windowsTerminal.js
++++ b/lib/windowsTerminal.js
+@@ -103,6 +103,20 @@ var WindowsTerminal = /** @class */ (function (_super) {
+         _this._name = name;
+         _this._readable = true;
+         _this._writable = true;
++        // A ConPTY input-pipe error must retire only this terminal. Without a listener, Node promotes
++        // errors such as write EAGAIN to uncaughtException and kills every PTY in the daemon.
++        _this._agent.inSocket.on('error', function () {
++            if (!_this._writable) {
++                return;
++            }
++            _this._close();
++            try {
++                _this._agent.kill();
++            }
++            catch (_a) {
++                // The failing pipe may have raced process exit; the terminal is already unwritable.
++            }
++        });
+         _this._forwardEvents();
+         return _this;
+     }
+diff --git a/src/windowsTerminal.ts b/src/windowsTerminal.ts
+index 13f6c6dbb3d7965c4699568f4704be3b6a33d947..0aacd793831ccfc9ff5c85f0117d87a7534b5d34 100644
+--- a/src/windowsTerminal.ts
++++ b/src/windowsTerminal.ts
+@@ -115,5 +115,18 @@ export class WindowsTerminal extends Terminal {
+     this._readable = true;
+     this._writable = true;
+-
++    // A ConPTY input-pipe error must retire only this terminal. Without a listener, Node promotes
++    // errors such as write EAGAIN to uncaughtException and kills every PTY in the daemon.
++    this._agent.inSocket.on('error', () => {
++      if (!this._writable) {
++        return;
++      }
++      this._close();
++      try {
++        this._agent.kill();
++      } catch {
++        // The failing pipe may have raced process exit; the terminal is already unwritable.
++      }
++    });
++
+     this._forwardEvents();
+   }
