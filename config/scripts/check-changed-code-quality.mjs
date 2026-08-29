@@ -263,9 +263,37 @@ function printDiagnostic(diagnostic, root) {
   console.error(`${file}:${line} ${code}: ${diagnostic.message}`)
 }
 
-function runOxlintScan(root, scan, files) {
+// Why: Oxlint takes paths as positional arguments only — no stdin, no @file — so one
+// oversized changed set makes the spawn itself fail with E2BIG and the gate never runs.
+// Stay well under the smallest platform limit (macOS ARG_MAX is 1 MiB, shared with the
+// environment) so a batch cannot overflow it.
+const MAX_BATCH_ARGUMENT_BYTES = 256 * 1024
+
+export function batchFilesByArgumentBytes(files, limit = MAX_BATCH_ARGUMENT_BYTES) {
+  const batches = []
+  let batch = []
+  let bytes = 0
+  for (const file of files) {
+    // A single path over the limit still gets its own batch: an empty argument list
+    // would make Oxlint lint the whole working directory instead.
+    const cost = Buffer.byteLength(file, 'utf8') + 1
+    if (batch.length > 0 && bytes + cost > limit) {
+      batches.push(batch)
+      batch = []
+      bytes = 0
+    }
+    batch.push(file)
+    bytes += cost
+  }
+  if (batch.length > 0) {
+    batches.push(batch)
+  }
+  return batches
+}
+
+function spawnOxlintBatch(root, scan, batch) {
   const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
-  const result = spawnSync(pnpm, ['exec', 'oxlint', ...scan.args, '--format', 'json', ...files], {
+  const result = spawnSync(pnpm, ['exec', 'oxlint', ...scan.args, '--format', 'json', ...batch], {
     cwd: root,
     encoding: 'utf8',
     maxBuffer: 128 * 1024 * 1024
@@ -277,7 +305,17 @@ function runOxlintScan(root, scan, files) {
     process.stderr.write(result.stderr)
     throw new Error(`${scan.label} failed before producing diagnostics.`)
   }
-  return parseOxlintOutput(result.stdout, scan.label).diagnostics ?? []
+  return result.stdout
+}
+
+export function runOxlintScan(root, scan, files, spawnBatch = spawnOxlintBatch) {
+  const diagnostics = []
+  for (const batch of batchFilesByArgumentBytes(files)) {
+    diagnostics.push(
+      ...(parseOxlintOutput(spawnBatch(root, scan, batch), scan.label).diagnostics ?? [])
+    )
+  }
+  return diagnostics
 }
 
 export function main(
