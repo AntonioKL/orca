@@ -4,7 +4,6 @@ import {
   readPtyProcessInspectionEvidence
 } from '../../../../shared/pty-process-inspection-evidence'
 import { withTimeout } from '../../../../shared/promise-timeout-fallback'
-import { getPtyExecutionHost } from '../../../../shared/terminal-execution-host'
 // Why the leaf module and not @/lib/connection-context: that wrapper reads the store
 // singleton, and this module must stay callable with a state it was handed.
 import { getConnectionIdFromState } from '@/lib/connection-owner-resolution'
@@ -86,7 +85,7 @@ async function inspectAllPtys(
   const results = await Promise.allSettled(
     ptyIds.map((ptyId) => inspectRuntimeTerminalProcess(settings, ptyId))
   )
-  return results.some((result, index) => {
+  return results.some((result) => {
     // Why rejected counts as blocking: a raised inspection answered nothing, and
     // the Promise.all this replaced had no catch — a rejection left the window
     // neither closed nor prompting. It is also the steady state of a remote host
@@ -104,12 +103,16 @@ async function inspectAllPtys(
     if (result.value.unavailable === true) {
       return true
     }
-    // Independently updated hosts that omit the verdict field cannot distinguish
-    // an observed idle shell from their legacy degraded collapse.
-    if (
-      getPtyExecutionHost(ptyIds[index]) !== null &&
-      !hasPublishedPtyProcessInspectionEvidence(result.value)
-    ) {
+    // Why absence of the field, not the identity of the host: a host that omits
+    // the verdict has no channel to separate an observed idle shell from its
+    // legacy degraded collapse, and it publishes the same two values for both.
+    // Keying this on the PTY id's execution host read as a proxy for "answered
+    // by an independently updated peer" and got the daemon wrong — a daemon
+    // survives in-place app updates (daemon-init adopts every previous protocol
+    // version) and at 11..26 answers through `composeLegacyPtyProcessInspection`
+    // with no evidence, yet its session ids carry no host at all. The cleanup
+    // path (`probeTerminalLiveness`) fences the same shape with no host filter.
+    if (!hasPublishedPtyProcessInspectionEvidence(result.value)) {
       return true
     }
     return readPtyProcessInspectionEvidence(result.value).children.verdict !== 'exited'

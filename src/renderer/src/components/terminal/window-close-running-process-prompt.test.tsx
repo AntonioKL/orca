@@ -6,8 +6,10 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   buildPtyProcessInspectionWireResult,
+  composeLegacyPtyProcessInspection,
   type PtyProcessInspectionEvidence
 } from '../../../../shared/pty-process-inspection-evidence'
+import { PTY_SESSION_ID_SEPARATOR } from '../../../../shared/pty-session-id-format'
 import type { AppState } from '@/store/types'
 
 /**
@@ -34,6 +36,10 @@ import { RUNNING_CLOSE_PROBE_TIMEOUT_MS } from './running-terminal-close-guard'
 const PTY_ID = 'pty-local-1'
 const SSH_PTY_ID = 'ssh:ssh-1@@pty-remote-1'
 const LOCAL_WORKTREE_ID = 'repo-local::/home/dev/work'
+/** The minted daemon session-id format (`${worktreeId}@@${shortUuid}`) — built from
+ *  the shared separator so the fixture cannot drift from `mintPtySessionId`. Carries
+ *  no execution host, which is the whole point of the daemon case below. */
+const DAEMON_PTY_ID = `${LOCAL_WORKTREE_ID}${PTY_SESSION_ID_SEPARATOR}a1b2c3d4`
 const SSH_WORKTREE_ID = 'repo-ssh::/srv/work'
 const SHELL = 'zsh'
 
@@ -497,6 +503,44 @@ describe('window close with a degraded local process read', () => {
 
     expect(warningIsVisible()).toBe(true)
     expect(confirmWindowClose).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * A daemon survives an in-place app update — `daemon-init` adopts every entry of
+ * PREVIOUS_DAEMON_PROTOCOL_VERSIONS (1..35) — so a retained daemon at 11..26
+ * answers `inspectProcess` through `composeLegacyPtyProcessInspection` and
+ * publishes NO evidence. Its session id names a worktree, not a host, so
+ * `getPtyExecutionHost` returns null for it exactly as it does for an app-owned
+ * local pane. A guard that asked the id where the pane runs skipped these panes
+ * and closed the window over them with no prompt.
+ */
+describe('window close with a daemon-backed terminal older than the evidence contract', () => {
+  beforeEach(() => {
+    getStateMock.mockReturnValue(storeStateWithPtys({ [LOCAL_WORKTREE_ID]: [DAEMON_PTY_ID] }))
+  })
+
+  it('asks when a retained pre-evidence daemon answers with the legacy collapse', async () => {
+    // Composed through the producer the daemon adapter itself calls, so the
+    // fixture is the exact payload a protocol-11..26 daemon returns.
+    const inspectProcess = installInspectProcess(async () =>
+      composeLegacyPtyProcessInspection(SHELL)
+    )
+
+    await runWindowClose()
+
+    expect(inspectProcess).toHaveBeenCalledExactlyOnceWith(DAEMON_PTY_ID)
+    expect(warningIsVisible()).toBe(true)
+    expect(confirmWindowClose).not.toHaveBeenCalled()
+  })
+
+  it('still closes silently once the daemon states it observed an idle shell', async () => {
+    installInspectProcess(async () => observedIdleInspection())
+
+    await runWindowClose()
+
+    expect(warningIsVisible()).toBe(false)
+    expect(confirmWindowClose).toHaveBeenCalledTimes(1)
   })
 })
 
