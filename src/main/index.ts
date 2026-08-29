@@ -3236,9 +3236,8 @@ void app.whenReady().then(async () => {
       })
     ) {
       const crashedAt = performance.now()
-      void (gpuCrashDiagnostics?.record() ?? Promise.resolve())
-        .catch(() => undefined)
-        .then(() => handleGpuChildCrash(details.reason, details.exitCode ?? null, crashedAt))
+      void gpuCrashDiagnostics?.record()
+      void handleGpuChildCrash(details.reason, details.exitCode ?? null, crashedAt)
     }
   })
 
