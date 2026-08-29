@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { installFakeAppEnvironment } from '../../config/scripts/vitest-host-ports-setup'
 import type { PersistedState } from '../shared/persisted-state-types'
+import { makePaneKey } from '../shared/stable-pane-id'
+import { agentHookServer } from './agent-hooks/server'
 import { makeBalancedLegacyPaneLayout } from './persistence-session-fixtures'
 import { Store } from './persistence/loading-store/store'
 
@@ -54,6 +56,9 @@ function readProfile(dataFile: string): PersistedState {
   return JSON.parse(readFileSync(dataFile, 'utf-8')) as PersistedState
 }
 
+const RUNTIME_PANE_KEY = makePaneKey('tab-own', '9f0e1d2c-3b4a-4c5d-8e6f-7a8b9c0d1e2f')
+const RUNTIME_UPDATED_AT = 1_700_000_000_000
+
 describe('Store hook-server listener ownership', () => {
   let dirs: string[] = []
 
@@ -87,12 +92,29 @@ describe('Store hook-server listener ownership', () => {
     expect(earlierAliases).toEqual([])
   })
 
-  it('still persists a store’s own hydrated aliases after it takes ownership', () => {
+  it('persists an alias the hook server registers after the store takes ownership', () => {
     const dataFile = writeProfile(makeDir(), legacySplitLayoutProfile('tab-own', 'pty-own'))
     const store = new Store({ dataFile })
 
+    // Why: hydrated rows reach `state` through normalization alone, so asserting on those watches
+    // nothing. Only the listener the constructor re-installs can carry a post-construction alias to
+    // disk — that is what the detach above must hand over rather than destroy.
+    agentHookServer.registerPaneKeyAlias(
+      'tab-own:7',
+      RUNTIME_PANE_KEY,
+      'pty-runtime',
+      RUNTIME_UPDATED_AT
+    )
+
     store.flush()
     const aliases = readProfile(dataFile).legacyPaneKeyAliasEntries ?? []
+    expect(aliases).toContainEqual({
+      legacyPaneKey: 'tab-own:7',
+      stablePaneKey: RUNTIME_PANE_KEY,
+      ptyId: 'pty-runtime',
+      updatedAt: RUNTIME_UPDATED_AT
+    })
+    // The listener replaces the whole persisted list, so the hydrated rows must survive the replace.
     expect(aliases.some((entry) => entry.legacyPaneKey === 'tab-own:1')).toBe(true)
   })
 })
