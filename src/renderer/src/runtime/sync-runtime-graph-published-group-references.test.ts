@@ -631,4 +631,53 @@ describe('buildMobileSessionTabSnapshots published group references', () => {
     expect(danglingGroupRefs(snapshot)).toEqual([])
     expect(snapshot?.activeGroupId).toBeNull()
   })
+  // Why the groups-empty arm: with no host groups the projection returns the legacy nav order, which
+  // is built from every terminal tab rather than the filtered publishable set, so the per-tab guard
+  // in the order loop is the only thing holding a web mirror back on this path.
+  it('keeps a web-mirrored terminal out of the legacy nav order projection', () => {
+    const mirroredLeafId = '33333333-3333-4333-8333-333333333333'
+    const state = makeState({
+      groupsByWorktree: { 'wt-1': [] } as unknown as AppState['groupsByWorktree'],
+      unifiedTabsByWorktree: {
+        'wt-1': [
+          {
+            id: 'web-terminal-term-host',
+            groupId: null,
+            contentType: 'terminal',
+            entityId: 'web-terminal-term-host',
+            title: 'Mirrored'
+          }
+        ]
+      } as unknown as AppState['unifiedTabsByWorktree'],
+      tabsByWorktree: {
+        'wt-1': [
+          {
+            id: 'web-terminal-term-host',
+            worktreeId: 'wt-1',
+            ptyId: 'remote:pty-host',
+            title: 'Mirrored',
+            defaultTitle: 'Mirrored',
+            customTitle: null,
+            color: null,
+            sortOrder: 0,
+            createdAt: 1
+          }
+        ]
+      } as unknown as AppState['tabsByWorktree'],
+      terminalLayoutsByTabId: {
+        'web-terminal-term-host': {
+          root: { type: 'leaf', leafId: mirroredLeafId },
+          activeLeafId: mirroredLeafId,
+          expandedLeafId: null,
+          ptyIdsByLeafId: { [mirroredLeafId]: 'remote:pty-host' }
+        }
+      } as unknown as AppState['terminalLayoutsByTabId']
+    })
+
+    const snapshot = buildMobileSessionTabSnapshots(state)[0]
+
+    // The persisted layout resolves a leaf, so without the guard this publishes a surface row.
+    expect(snapshot?.tabs).toEqual([])
+    expect(danglingTabRefs(snapshot)).toEqual([])
+  })
 })
