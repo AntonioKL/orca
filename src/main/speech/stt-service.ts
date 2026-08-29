@@ -3,8 +3,7 @@ import { startSttDictation } from './stt-session-start'
 import { createSttSessionState, type SttSessionState } from './stt-session-state'
 import { prepareSttModelForDeletion, stopSttDictation } from './stt-session-stop'
 
-export const START_DICTATION_TIMEOUT_MS = 60_000
-export const IDLE_WORKER_TEARDOWN_MS = 60 * 60 * 1000
+export { IDLE_WORKER_TEARDOWN_MS, START_DICTATION_TIMEOUT_MS } from './stt-session-timeouts'
 
 export type SttEvent =
   | { type: 'ready' }
