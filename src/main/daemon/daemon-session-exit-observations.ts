@@ -10,9 +10,11 @@ import { BoundedMap } from '../../shared/bounded-map'
  *
  * Why every entry is scoped to an incarnation: daemon session ids are derived from the pane
  * and reused on reopen, so the id alone cannot say WHICH run of the pane a certificate speaks
- * for. Without that, the two orderings around a respawn are indistinguishable and each breaks
- * one way — an exit certified while its own spawn was still finalizing looks retirable, and an
- * exit reported late by a superseded generation looks like proof about the live replacement.
+ * for. Without that, the orderings around a respawn are indistinguishable and each breaks one
+ * way — an exit certified while its own spawn was still finalizing looks retirable, an exit
+ * reported late by a superseded generation looks like proof about the live replacement, and an
+ * exit that names no run at all looks like proof about whichever run you ask about. So the rule
+ * is one rule in both directions: once a run is named live, only that run's own exit answers.
  */
 export class DaemonSessionExitObservations {
   private readonly observedExits = new BoundedMap<string, string | null>({ maxEntries: 1_024 })
@@ -22,13 +24,12 @@ export class DaemonSessionExitObservations {
 
   recordExit(sessionId: string, incarnationId?: string): void {
     const liveIncarnationId = this.liveIncarnations.get(sessionId)
-    if (
-      incarnationId !== undefined &&
-      liveIncarnationId !== undefined &&
-      liveIncarnationId !== incarnationId
-    ) {
-      // A later incarnation of this pane is already running: this exit is the previous one's,
-      // and a certificate filed against the shared id would answer for the live pane instead.
+    if (liveIncarnationId !== undefined && liveIncarnationId !== incarnationId) {
+      // A later incarnation of this pane is already running, so this exit is not about it —
+      // either it names an earlier run, or it names none and therefore cannot claim to be the
+      // live one's. Unnamed is refused rather than trusted because the only exits that carry no
+      // incarnation are the ones a daemon synthesises for a session its host no longer has, and
+      // a certificate filed against the shared id would answer for the live pane instead.
       return
     }
     this.observedExits.set(sessionId, incarnationId ?? null)
