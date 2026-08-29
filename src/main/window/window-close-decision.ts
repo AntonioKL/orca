@@ -45,13 +45,19 @@ export function resolveWindowCloseAction(state: WindowCloseState): WindowCloseAc
  * Only a definite yes may skip the warning. A missing getter (window built before the
  * daemon wiring exists) or a throwing one is an undetermined answer, and an
  * undetermined answer is not a yes.
+ *
+ * Why no `=== true` on the getter's result: the answer is read here from a typed
+ * in-process function, and it is read again from an `unknown` on the other side of
+ * the IPC hop by `readWindowCloseRequestPayload`, which is where a shape that is
+ * neither a clean yes nor a clean no can actually arrive. That rule lives once,
+ * there; a second copy here answered nothing any producer could ask it.
  */
 export function resolveLocalPtysSurviveQuit(getLocalPtysSurviveQuit?: () => boolean): boolean {
   if (!getLocalPtysSurviveQuit) {
     return false
   }
   try {
-    return getLocalPtysSurviveQuit() === true
+    return getLocalPtysSurviveQuit()
   } catch {
     return false
   }
