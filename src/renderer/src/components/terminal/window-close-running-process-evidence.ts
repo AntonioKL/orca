@@ -97,6 +97,16 @@ async function inspectAllPtys(
     // (null/false) and no evidence — so reading it would fabricate `exited` out
     // of fields nothing observed. `probeTerminalLiveness` fences the same shape
     // on the cleanup path; this one is strictly more destructive.
+    //
+    // Against every producer that exists today this fence is REDUNDANT, not
+    // independent coverage: all five `unavailable: true` sites publish no
+    // `processEvidence`, so the reader below already answers `unverifiable` (or
+    // `live`) for the same result and blocks anyway. It is kept because both
+    // routes into `result.value` are unvalidated casts of an independently
+    // versioned peer's JSON — the daemon's `client.request<>` and the runtime's
+    // `callRuntimeRpc<>` — and a peer that starts publishing `unavailable`
+    // beside real evidence would otherwise ride an `exited` verdict straight
+    // into a silent close (docs/reference/remote-wire-compatibility.md).
     if (result.value.unavailable === true) {
       return true
     }
