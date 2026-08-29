@@ -106,4 +106,24 @@ describe('RateLimitService with an unreadable Gemini quota read', () => {
     expect(gemini?.buckets).toHaveLength(1)
     expect(gemini?.session?.usedPercent).toBe(60)
   })
+
+  // Why: the mirror is the one place in this class where the blanking is deliberate — see
+  // service-antigravity-usage.test.ts, "never leaves a cached Antigravity snapshot in the error
+  // retry lane". Pinned here so the asymmetry with Gemini's own retention stays visible: Gemini
+  // keeps its last good snapshot through the same failure, Antigravity does not.
+  it('drops the mirrored Antigravity reading when the Gemini read fails, unlike Gemini itself', async () => {
+    const service = new RateLimitService()
+    service.setGeminiCliOAuthEnabledResolver(() => true)
+
+    respondToQuotaWith([READABLE_BUCKET])
+    await service.refresh()
+    expect(service.getState().antigravity?.buckets).toHaveLength(1)
+
+    respondToQuotaWith({ error: { code: 500, message: 'internal' } })
+    await service.refresh()
+
+    expect(service.getState().antigravity?.status).toBe('unavailable')
+    expect(service.getState().antigravity?.session).toBeNull()
+    expect(service.getState().gemini?.session?.usedPercent).toBe(60)
+  })
 })
