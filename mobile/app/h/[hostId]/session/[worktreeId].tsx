@@ -132,11 +132,7 @@ import { useTerminalLiveInputFocus } from '../../../../src/terminal/use-terminal
 import { dismissTerminalKeyboard } from '../../../../src/terminal/terminal-keyboard-dismiss'
 import type { TerminalLiveInputSender } from '../../../../src/terminal/terminal-live-input-sender'
 import { isTerminalSendRpcAccepted } from '../../../../src/terminal/terminal-send-rpc-response'
-import {
-  pruneBufferedTerminalDrafts as pruneBufferedDrafts,
-  restoreRejectedBufferedTerminalDraft,
-  updateBufferedTerminalDraft
-} from '../../../../src/terminal/buffered-terminal-draft-restoration'
+import { useBufferedTerminalDrafts } from '../../../../src/terminal/use-buffered-terminal-drafts'
 import { sendMobileTerminalQueryReply } from '../../../../src/terminal/mobile-terminal-query-reply'
 import { TERMINAL_QUERY_REPLY_INPUT_RUNTIME_CAPABILITY } from '../../../../../src/shared/protocol-version'
 import { useTerminalLiveInputCommit } from '../../../../src/terminal/use-terminal-live-input-commit'
@@ -807,7 +803,6 @@ export default function SessionScreen() {
   // Why: after an optimistic close, suppress the tab (with expiry) until the publisher confirms, so an in-flight snapshot can't flash it back.
   const closedTabTombstonesRef = useRef<Map<string, number>>(new Map())
   const [terminalsLoaded, setTerminalsLoaded] = useWorktreeSessionTabsLoaded(worktreeId)
-  const [bufferedTerminalDrafts, setBufferedTerminalDrafts] = useState<Record<string, string>>({})
   // Why: baseline terminal zoom reloaded on focus so a Settings → Terminal change applies in place (panes stay mounted).
   const [terminalTextScale, setTerminalTextScale] = useState(1)
   // Why: terminal command-bar autocomplete opt-in, reloaded on focus so a Settings → Terminal toggle takes effect on return.
@@ -824,14 +819,6 @@ export default function SessionScreen() {
     toggleTerminalLiveInput
   } = useTerminalLiveInputModePreference({ hostId, worktreeId })
   const [activeHandle, setActiveHandle] = useState<string | null>(null)
-  const input = activeHandle ? (bufferedTerminalDrafts[activeHandle] ?? '') : ''
-  const setInput = useCallback(
-    (value: Parameters<typeof updateBufferedTerminalDraft>[2]) =>
-      setBufferedTerminalDrafts((previous) =>
-        updateBufferedTerminalDraft(previous, activeHandle, value)
-      ),
-    [activeHandle]
-  )
   // Reactive teardown signal for the native-chat covered stream; see unsubscribeTerminal.
   const [coveredStreamRevision, setCoveredStreamRevision] = useState(0)
   const [activeSessionTabId, setActiveSessionTabId] = useState<string | null>(null)
@@ -951,6 +938,7 @@ export default function SessionScreen() {
   // Why: don't subscribe until the WebView fires web-ready — iOS may defer JS in hidden WebViews and init() messages would queue unrendered.
   const webReadyHandlesRef = useRef<Set<string>>(new Set())
   const activeHandleRef = useRef<string | null>(null)
+  const bufferedTerminalDraftState = useBufferedTerminalDrafts({ activeHandle, activeHandleRef })
   const activeSessionTabTypeRef = useRef<MobileSessionTabType | null>(null)
   const pendingActiveSessionTabIdRef = useRef<string | null>(null)
   // Why: survive transient snapshot gaps so the device's own tab pick can re-bind.
@@ -1168,7 +1156,7 @@ export default function SessionScreen() {
         })()
         return
       }
-      setInput((current) => appendBufferedDictation(current, route.text))
+      bufferedTerminalDraftState.setInput((current) => appendBufferedDictation(current, route.text))
       showToast('Dictation inserted')
     },
     onError: (err) => {
@@ -1640,7 +1628,7 @@ export default function SessionScreen() {
           // preference on the same refresh is the erasure this guard exists to stop.
           const retainedHandles = resolveRetainedTerminalHandles(pruneContext)
           pruneTerminalHandlesFromLiveInput(retainedHandles)
-          setBufferedTerminalDrafts((drafts) => pruneBufferedDrafts(drafts, retainedHandles))
+          bufferedTerminalDraftState.pruneDrafts(retainedHandles)
           defaultTerminalHandlesToLiveInput([...liveHandles])
           const shouldPrune = createTerminalPrunePredicate(pruneContext)
           for (const handle of Array.from(terminalUnsubsRef.current.keys())) {
@@ -1695,6 +1683,7 @@ export default function SessionScreen() {
       clearTerminalLiveInputDefault,
       defaultTerminalHandlesToLiveInput,
       nativeChatStream,
+      bufferedTerminalDraftState.pruneDrafts,
       pruneTerminalHandlesFromLiveInput,
       subscribeToTerminal,
       unsubscribeTerminal
@@ -2626,6 +2615,7 @@ export default function SessionScreen() {
     terminalDiagnosticsRef.current.resetRoute()
     appliedSnapshotMarkerRef.current = { epoch: null, version: -1 }
     closedTabTombstonesRef.current.clear()
+    bufferedTerminalDraftState.resetDrafts()
     for (const queued of terminalGestureInputQueuesRef.current.values()) {
       if (queued.timer) {
         clearTimeout(queued.timer)
@@ -2645,14 +2635,17 @@ export default function SessionScreen() {
     return () => {
       sessionTabActionSheetRequestSeqRef.current += 1
       sessionTabActionSheetKeyboardHideSubRef.current?.remove()
+      bufferedTerminalDraftState.clearPendingRestorations()
       clearPendingLiveInputCommit()
       clearDelayedActionTimers()
     }
   }, [
     clearDelayedActionTimers,
+    bufferedTerminalDraftState.clearPendingRestorations,
     clearPendingLiveInputCommit,
     clearTerminalCache,
     hostId,
+    bufferedTerminalDraftState.resetDrafts,
     worktreeId
   ])
 
@@ -3016,18 +3009,19 @@ export default function SessionScreen() {
     }
     sendingRef.current = true
 
-    const draft = input
+    const draft = bufferedTerminalDraftState.input
     const text = normalizeTerminalTextInput(draft)
+    const bufferedDraftSend = bufferedTerminalDraftState.beginBufferedTerminalDraftSend(
+      activeHandle,
+      draft
+    )
     const sendOrigin = {
       handle: activeHandle,
       tab: activeSessionTab,
       generation: getSendCompletionGeneration()
     }
     const restoreRejectedDraft = () =>
-      setBufferedTerminalDrafts((current) =>
-        restoreRejectedBufferedTerminalDraft(current, sendOrigin.handle, draft)
-      )
-    setInput('')
+      bufferedTerminalDraftState.restoreRejectedDraft(bufferedDraftSend)
 
     try {
       // Why: fail now and restore the text — a send parked across a reconnect would execute long after the tap.
@@ -3044,11 +3038,14 @@ export default function SessionScreen() {
       const accepted = isTerminalSendRpcAccepted(response)
       if (!accepted) {
         restoreRejectedDraft()
+      } else {
+        bufferedTerminalDraftState.settleBufferedTerminalDraftSend(bufferedDraftSend)
       }
       dismissKeyboardAfterAgentSend(sendOrigin, accepted)
     } catch {
       restoreRejectedDraft()
     } finally {
+      bufferedTerminalDraftState.settleBufferedTerminalDraftSend(bufferedDraftSend)
       sendingRef.current = false
     }
   }
@@ -5059,9 +5056,9 @@ export default function SessionScreen() {
                           : 'cmd-input'
                       }
                       style={styles.textInput}
-                      value={input}
+                      value={bufferedTerminalDraftState.input}
                       // Why: iOS kills active dictation/IME if JS writes a value differing from native text; store raw, normalize at send.
-                      onChangeText={setInput}
+                      onChangeText={bufferedTerminalDraftState.setInput}
                       placeholder="Type a command…"
                       placeholderTextColor={colors.textMuted}
                       autoCapitalize="none"

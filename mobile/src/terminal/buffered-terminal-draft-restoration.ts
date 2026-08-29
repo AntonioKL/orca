@@ -1,4 +1,5 @@
 export type BufferedTerminalDraftValue = string | ((current: string) => string)
+export type BufferedTerminalDraftRestorationToken = object
 
 export function updateBufferedTerminalDraft(
   currentDrafts: Record<string, string>,
@@ -13,15 +14,44 @@ export function updateBufferedTerminalDraft(
   return next === current ? currentDrafts : { ...currentDrafts, [handle]: next }
 }
 
+export function beginBufferedTerminalDraftRestoration(
+  pendingRestorations: Map<string, BufferedTerminalDraftRestorationToken>,
+  handle: string
+): BufferedTerminalDraftRestorationToken {
+  const token = {}
+  pendingRestorations.set(handle, token)
+  return token
+}
+
+export function invalidateBufferedTerminalDraftRestoration(
+  pendingRestorations: Map<string, BufferedTerminalDraftRestorationToken>,
+  handle: string
+): void {
+  pendingRestorations.delete(handle)
+}
+
+export function settleBufferedTerminalDraftRestoration(
+  pendingRestorations: Map<string, BufferedTerminalDraftRestorationToken>,
+  handle: string,
+  token: BufferedTerminalDraftRestorationToken
+): boolean {
+  if (pendingRestorations.get(handle) !== token) {
+    return false
+  }
+  pendingRestorations.delete(handle)
+  return true
+}
+
 /** Restore a rejected send without overwriting text composed while its RPC was in flight. */
 export function restoreRejectedBufferedTerminalDraft(
   currentDrafts: Record<string, string>,
   originHandle: string,
   rejectedDraft: string
 ): Record<string, string> {
-  return (currentDrafts[originHandle] ?? '').length === 0
-    ? { ...currentDrafts, [originHandle]: rejectedDraft }
-    : currentDrafts
+  if ((currentDrafts[originHandle] ?? '').length > 0) {
+    return currentDrafts
+  }
+  return updateBufferedTerminalDraft(currentDrafts, originHandle, rejectedDraft)
 }
 
 export function pruneBufferedTerminalDrafts(
@@ -39,4 +69,15 @@ export function pruneBufferedTerminalDrafts(
     delete next[handle]
   }
   return next
+}
+
+export function pruneBufferedTerminalDraftRestorations(
+  pendingRestorations: Map<string, BufferedTerminalDraftRestorationToken>,
+  retainedHandles: ReadonlySet<string>
+): void {
+  for (const handle of pendingRestorations.keys()) {
+    if (!retainedHandles.has(handle)) {
+      pendingRestorations.delete(handle)
+    }
+  }
 }

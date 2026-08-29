@@ -5,6 +5,10 @@ const sessionRouteSource = readFileSync(
   new URL('../../app/h/[hostId]/session/[worktreeId].tsx', import.meta.url),
   'utf8'
 )
+const bufferedDraftHookSource = readFileSync(
+  new URL('../terminal/use-buffered-terminal-drafts.ts', import.meta.url),
+  'utf8'
+)
 
 function routeSlice(anchorStart: string, anchorEnd: string): string {
   const start = sessionRouteSource.indexOf(anchorStart)
@@ -77,13 +81,17 @@ describe('terminal send keyboard dismissal wiring', () => {
     )
     const originAt = sendSlice.indexOf('handle: activeHandle')
     const requestAt = sendSlice.indexOf('await client.sendRequest(')
-    const restoreSlice = routeSlice('const restoreRejectedDraft = () =>', "setInput('')")
+    const restoreSlice = routeSlice(
+      'const bufferedDraftSend = bufferedTerminalDraftState.beginBufferedTerminalDraftSend(',
+      'bufferedTerminalDraftState.restoreRejectedDraft(bufferedDraftSend)'
+    )
     expect(originAt).toBeGreaterThan(0)
     expect(originAt).toBeLessThan(requestAt)
-    expect(restoreSlice).toContain(
-      'restoreRejectedBufferedTerminalDraft(current, sendOrigin.handle, draft)'
+    expect(restoreSlice).toContain('activeHandle,\n      draft')
+    expect(bufferedDraftHookSource).not.toContain('getSendCompletionGeneration()')
+    expect(bufferedDraftHookSource).toContain(
+      'restoreRejectedBufferedTerminalDraft(current, send.handle, send.draft)'
     )
-    expect(restoreSlice).not.toContain('getSendCompletionGeneration()')
     expect(sendSlice.match(/restoreRejectedDraft\(\)/g)).toHaveLength(2)
     const dismissalSlice = routeSlice(
       'const dismissKeyboardAfterAgentSend = useCallback(',
@@ -93,16 +101,19 @@ describe('terminal send keyboard dismissal wiring', () => {
   })
 
   it('keeps buffered draft callbacks scoped to the active handle and prunes ended handles', () => {
-    const draftSlice = routeSlice(
-      'const input = activeHandle',
-      '// Reactive teardown signal for the native-chat covered stream'
+    expect(bufferedDraftHookSource).toContain('const handle = activeHandleRef.current')
+    expect(bufferedDraftHookSource).toContain('invalidateBufferedTerminalDraftRestoration(')
+    expect(bufferedDraftHookSource).toContain(
+      'setDrafts((current) => updateBufferedTerminalDraft(current, handle, value))'
     )
-    expect(draftSlice).toContain('const setInput = useCallback(')
-    expect(draftSlice).toContain('updateBufferedTerminalDraft(previous, activeHandle, value)')
-    expect(draftSlice).toContain('[activeHandle]')
-    expect(sessionRouteSource).toContain(
-      'setBufferedTerminalDrafts((drafts) => pruneBufferedDrafts(drafts, retainedHandles))'
+    expect(bufferedDraftHookSource).toContain('pruneBufferedTerminalDraftRestorations(')
+    expect(sessionRouteSource).toContain('bufferedTerminalDraftState.pruneDrafts(retainedHandles)')
+    const routeResetSlice = routeSlice(
+      '// Why: Expo reuses this screen across worktrees;',
+      'clearDelayedActionTimers()\n    }'
     )
+    expect(routeResetSlice).toContain('bufferedTerminalDraftState.resetDrafts()')
+    expect(routeResetSlice).toContain('bufferedTerminalDraftState.clearPendingRestorations()')
   })
 
   it('leaves the accessory shortcut keys alone, Enter included', () => {
