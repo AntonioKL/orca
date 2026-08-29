@@ -11,9 +11,31 @@ import type { AgentHookSource } from '../../shared/agent-hook-relay'
 // Orca's managed extension stamps ORCA_AGENT_LAUNCH_TOKEN into every post body; an unmanaged
 // copy predating that field cannot. That is the only reliable in-band discriminator, because
 // both copies share the process, the pane key, and the endpoint credentials.
+//
+// Why suppression is provisional, never permanent: "a tokened post was seen once" is evidence
+// that a managed poster *existed*, not that one is *live*. A managed poster that posts once and
+// then dies would otherwise gate every later post on that pane forever, and a pane stuck on
+// "working" is invisible and has no user recovery. So a tokenless post is HELD, not dropped:
+// a following tokened post discards it (and is the proof that two posters share the pane —
+// that is the only thing worth warning about), and silence past the confirmation window
+// re-opens the gate and delivers it. Every held post is therefore either superseded by the
+// managed poster or delivered; no sequence of posts can strand a pane.
 
 /** Panes tracked before the oldest owner is evicted; a lost owner only re-opens the gate. */
 const MAX_TRACKED_PANES = 512
+
+/**
+ * How long a held tokenless post waits for the managed poster to contradict it.
+ *
+ * Why this long: both copies run in one process off one hook event, so the managed copy's
+ * superseding post lands in the same millisecond band as the unmanaged one (the measured
+ * ordering was unmanaged-first by a hair). Even the deliberately-withheld `agent_end` is
+ * re-checked every 25–250ms until idle, and an auto-continuation posts `agent_start` as
+ * soon as it is scheduled. 30s is orders of magnitude above that and far below the 30min
+ * AGENT_STATUS_STALE_AFTER_MS at which Orca stops believing a "working" claim anyway, so a
+ * lapse means the managed poster is gone rather than merely quiet.
+ */
+export const UNMANAGED_POST_CONFIRMATION_WINDOW_MS = 30_000
 
 export type UnmanagedStatusExtensionReport = {
   paneKey: string
@@ -23,31 +45,50 @@ export type UnmanagedStatusExtensionReport = {
 export type StatusPostOrigin =
   /** Carries a launch token: this is the process Orca launched, and it now owns the pane. */
   | 'managed'
-  /** No token, and a token-carrying poster is already live on the same pane and source. */
-  | 'unmanaged'
+  /** No token while a token-carrying poster owns the pane: held pending confirmation. */
+  | 'held'
   /** No token and no established owner: indistinguishable from a normal tokenless launch. */
   | 'unattributed'
+
+type HeldPost = {
+  timer: ReturnType<typeof setTimeout>
+  release: () => void
+}
 
 /**
  * Tells Orca's own status extension apart from a second one loaded alongside it.
  *
- * Only ever classifies a *tokenless* post as unmanaged, and only once the same pane and source
- * have proven a token-carrying poster exists. A tokened post is never rejected, so a relaunch
- * always takes the pane back.
+ * Only ever holds a *tokenless* post, and only while a token-carrying poster owns the same pane
+ * and source. A tokened post is never rejected, so a relaunch always takes the pane back, and a
+ * held post is always resolved — superseded by the managed poster, or delivered when it goes
+ * silent for {@link UNMANAGED_POST_CONFIRMATION_WINDOW_MS}.
  */
 export class UnmanagedStatusExtensionFence {
   private ownerHashByPaneKey = new Map<string, Map<AgentHookSource, string>>()
   private reportedSourcesByPaneKey = new Map<string, Set<AgentHookSource>>()
+  private heldPostsByPaneKey = new Map<string, Map<AgentHookSource, HeldPost>>()
   private onDetected: ((report: UnmanagedStatusExtensionReport) => void) | null = null
+
+  constructor(private confirmationWindowMs: number = UNMANAGED_POST_CONFIRMATION_WINDOW_MS) {}
+
+  /** Test seam: the production window is far longer than any suite should wait on. */
+  setConfirmationWindowMsForTests(windowMs: number): void {
+    this.confirmationWindowMs = windowMs
+  }
 
   setDetectionListener(listener: ((report: UnmanagedStatusExtensionReport) => void) | null): void {
     this.onDetected = listener
   }
 
+  /**
+   * @param release re-delivers this post if the managed poster never contradicts it. Omitting it
+   *   makes the hold a plain drop, so callers that cannot replay must not gate on this fence.
+   */
   classify(
     paneKey: string,
     source: AgentHookSource | undefined,
-    launchToken: string | undefined
+    launchToken: string | undefined,
+    release?: () => void
   ): StatusPostOrigin {
     if (!source || paneKey.length === 0) {
       return 'unattributed'
@@ -55,27 +96,105 @@ export class UnmanagedStatusExtensionFence {
     const token = launchToken?.trim() ?? ''
     if (token.length > 0) {
       this.rememberOwner(paneKey, source, createHash('sha256').update(token).digest('hex'))
+      // Why here: a tokened post arriving while a tokenless one is held is the whole proof —
+      // two posters, one Orca launched and one it did not, interleaved on one pane.
+      if (this.discardHeldPost(paneKey, source)) {
+        this.reportOnce(paneKey, source)
+      }
       return 'managed'
     }
     if (!this.ownerHashByPaneKey.get(paneKey)?.has(source)) {
       return 'unattributed'
     }
-    const reported = this.reportedSourcesByPaneKey.get(paneKey)
-    if (!reported?.has(source)) {
-      if (reported) {
-        reported.add(source)
-      } else {
-        this.reportedSourcesByPaneKey.set(paneKey, new Set([source]))
-      }
-      this.onDetected?.({ paneKey, source })
+    if (!release) {
+      return 'unattributed'
     }
-    return 'unmanaged'
+    this.holdPost(paneKey, source, release)
+    return 'held'
   }
 
   /** Pane teardown: drop the owner so a key reused by a tokenless launch starts from an open gate. */
   forgetPane(paneKey: string): void {
     this.ownerHashByPaneKey.delete(paneKey)
     this.reportedSourcesByPaneKey.delete(paneKey)
+    this.discardPaneHolds(paneKey)
+  }
+
+  /** Server shutdown: a held post must not outlive the server that would deliver it. */
+  dispose(): void {
+    for (const held of this.heldPostsByPaneKey.values()) {
+      for (const entry of held.values()) {
+        clearTimeout(entry.timer)
+      }
+    }
+    this.heldPostsByPaneKey.clear()
+    this.ownerHashByPaneKey.clear()
+    this.reportedSourcesByPaneKey.clear()
+  }
+
+  private holdPost(paneKey: string, source: AgentHookSource, release: () => void): void {
+    // Why latest-only: an older held post describes a state the newer one already supersedes.
+    this.discardHeldPost(paneKey, source)
+    const timer = setTimeout(() => {
+      this.discardHeldPost(paneKey, source)
+      // Why before release: the replay re-enters classify, and a still-armed gate would hold it
+      // again forever. Dropping the owner is also the point — the managed poster proved absent.
+      this.forgetOwner(paneKey, source)
+      release()
+    }, this.confirmationWindowMs)
+    timer.unref?.()
+    const held = this.heldPostsByPaneKey.get(paneKey) ?? new Map<AgentHookSource, HeldPost>()
+    held.set(source, { timer, release })
+    this.heldPostsByPaneKey.set(paneKey, held)
+  }
+
+  private discardHeldPost(paneKey: string, source: AgentHookSource): boolean {
+    const held = this.heldPostsByPaneKey.get(paneKey)
+    const entry = held?.get(source)
+    if (!held || !entry) {
+      return false
+    }
+    clearTimeout(entry.timer)
+    held.delete(source)
+    if (held.size === 0) {
+      this.heldPostsByPaneKey.delete(paneKey)
+    }
+    return true
+  }
+
+  private discardPaneHolds(paneKey: string): void {
+    const held = this.heldPostsByPaneKey.get(paneKey)
+    if (!held) {
+      return
+    }
+    for (const entry of held.values()) {
+      clearTimeout(entry.timer)
+    }
+    this.heldPostsByPaneKey.delete(paneKey)
+  }
+
+  private reportOnce(paneKey: string, source: AgentHookSource): void {
+    const reported = this.reportedSourcesByPaneKey.get(paneKey)
+    if (reported?.has(source)) {
+      return
+    }
+    if (reported) {
+      reported.add(source)
+    } else {
+      this.reportedSourcesByPaneKey.set(paneKey, new Set([source]))
+    }
+    this.onDetected?.({ paneKey, source })
+  }
+
+  private forgetOwner(paneKey: string, source: AgentHookSource): void {
+    const sources = this.ownerHashByPaneKey.get(paneKey)
+    if (!sources) {
+      return
+    }
+    sources.delete(source)
+    if (sources.size === 0) {
+      this.ownerHashByPaneKey.delete(paneKey)
+    }
   }
 
   private rememberOwner(paneKey: string, source: AgentHookSource, hash: string): void {
@@ -92,6 +211,7 @@ export class UnmanagedStatusExtensionFence {
       }
       this.ownerHashByPaneKey.delete(oldest)
       this.reportedSourcesByPaneKey.delete(oldest)
+      this.discardPaneHolds(oldest)
     }
   }
 }
