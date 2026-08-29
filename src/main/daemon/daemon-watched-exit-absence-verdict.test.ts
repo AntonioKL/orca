@@ -5,7 +5,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { rmSync } from 'node:fs'
 import type { DaemonPtyAdapter } from './daemon-pty-adapter'
+import type { IPtyProvider } from '../providers/types'
 import { DaemonPtyRouter } from './daemon-pty-router'
+import { DegradedDaemonPtyProvider } from './degraded-daemon-pty-provider'
 import type { DaemonServer } from './daemon-server'
 import {
   createMockSubprocess,
@@ -16,6 +18,17 @@ import { inspectPtyProviderProcessForRenderer } from '../providers/pty-process-i
 import { buildAbsentPtyInspection } from '../../shared/pty-process-inspection-evidence'
 
 const itOnPosix = process.platform === 'win32' ? it.skip : it
+
+/** Degraded mode always carries a local fallback; this one owns nothing, so every answer
+ *  in these cases comes from the daemon route under test. */
+function neverOwningFallback(): IPtyProvider {
+  return {
+    hasPty: () => false,
+    onData: () => () => {},
+    onExit: () => () => {},
+    onReplay: () => () => {}
+  } as unknown as IPtyProvider
+}
 
 describe('a daemon-backed watched exit', () => {
   let dir: string
@@ -118,5 +131,59 @@ describe('a daemon-backed watched exit', () => {
     expect(inspection).toEqual(buildAbsentPtyInspection('exited'))
     expect(inspection).not.toHaveProperty('unavailable')
     router.dispose()
+  })
+})
+
+describe('a degraded-mode exit that beats its own spawn reply', () => {
+  let dir: string
+  let server: DaemonServer
+  let adapter: DaemonPtyAdapter
+
+  beforeEach(async () => {
+    // The daemon writes the startup command after attaching the stream client and before
+    // returning the create reply, so exiting from `write` lands the exit event in that gap.
+    const harness = await startDaemonAdapterHarness(() => {
+      const subprocess = createMockSubprocess()
+      subprocess.write.mockImplementation(() => subprocess._simulateExit(0))
+      return subprocess
+    })
+    ;({ dir, server, adapter } = harness)
+  })
+
+  afterEach(async () => {
+    adapter?.dispose()
+    await server?.shutdown()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  itOnPosix('keeps the certificate that the withheld route left as the only record', async () => {
+    const provider = new DegradedDaemonPtyProvider({
+      current: adapter,
+      legacy: [],
+      fallback: neverOwningFallback(),
+      probeCurrentDaemonSpawn: async () => true
+    })
+    try {
+      await provider.recoverFreshSpawnRouting()
+      const result = await provider.spawn({
+        cols: 80,
+        rows: 24,
+        command: 'exit',
+        env: { SHELL: '/bin/sh' }
+      })
+
+      // The precondition, from the real daemon: it watched the process go, and because the
+      // reply says so the spawn deliberately records no route. The certificate is all there is.
+      expect(result.exitedBeforeSpawnReply).toBe(true)
+      expect(provider.hasPty(result.id)).toBe(false)
+
+      // The bytes the renderer reads: `unavailable` is what raises the running-process dialog
+      // and holds completion monitoring open, so a watched exit must not carry it.
+      const inspection = await inspectPtyProviderProcessForRenderer(provider, result.id)
+      expect(inspection).toEqual(buildAbsentPtyInspection('exited'))
+      expect(inspection).not.toHaveProperty('unavailable')
+    } finally {
+      provider.disposeProviderOnly()
+    }
   })
 })

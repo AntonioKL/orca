@@ -22,10 +22,18 @@ export class DegradedDaemonAbsenceVerdict {
 
   /** A reopened pane reuses the session id, so spawning retires any certificate held for
    *  it — the dead incarnation's owner must not answer for its replacement, the same
-   *  reason LocalPtyProvider drops its own tombstone on spawn. */
+   *  reason LocalPtyProvider drops its own tombstone on spawn.
+   *
+   *  Gated because retiring a certificate and recording a route are the same event: a spawn
+   *  that reports the pty exited before its reply establishes no route (see the matching guard
+   *  in DegradedDaemonFreshSpawnRouter.spawn), so the certificate it just earned is the only
+   *  record of that exit. Retiring it there would replace a watched death with `unverifiable`.
+   *  DaemonPtyRouter.spawn gates its own retirement on the same flag. */
   async observeSpawn(spawn: Promise<PtySpawnResult>): Promise<PtySpawnResult> {
     const spawned = await spawn
-    this.watchedExitOwners.delete(spawned.id)
+    if (!spawned.exitedBeforeSpawnReply) {
+      this.watchedExitOwners.delete(spawned.id)
+    }
     return spawned
   }
 

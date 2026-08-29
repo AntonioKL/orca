@@ -136,4 +136,60 @@ describe('foreground scan answered from another pane s cached snapshot', () => {
     vi.setSystemTime(T0 + 1100)
     expect(childrenVerdict()).toBe('live')
   })
+
+  it('does not let a table captured in the agent s own millisecond retire it', async () => {
+    // Same shape, with the cached scan and the agent stamped at the same millisecond.
+    // Date.now() cannot order two events inside one tick, and both guards read that tie as
+    // "the scan is at least as new as the agent" — the one reading that publishes an exit.
+    handle.observeForegroundProcess?.()
+    await settle()
+    expect(execFileMock).toHaveBeenCalledTimes(1)
+
+    // T0+900: another pane captures an agent-free table, and in that same millisecond the
+    // agent starts and the title fast path stamps it. Neither observed the other.
+    vi.setSystemTime(T0 + 900)
+    await getProcessTableSnapshot()
+    expect(execFileMock).toHaveBeenCalledTimes(2)
+    psOutput = WITH_AGENT_TABLE
+    nodePty.process = 'codex'
+    expect(handle.observeForegroundProcess?.()?.evidence).toEqual({
+      verdict: 'observed',
+      processName: 'codex'
+    })
+
+    // T0+1000: the title read degrades to the shell and the throttle is up, so a scan runs
+    // and is answered from that same-millisecond table. No third fork: the cache answered.
+    vi.setSystemTime(T0 + 1000)
+    nodePty.process = 'zsh'
+    handle.observeForegroundProcess?.()
+    await settle()
+    expect(execFileMock).toHaveBeenCalledTimes(2)
+
+    vi.setSystemTime(T0 + 1100)
+    expect(childrenVerdict()).toBe('live')
+  })
+
+  it('does not corroborate a shell title with a table from the agent s own millisecond', async () => {
+    // Past the identity's 1s TTL the corroboration guard is what answers, and it faces the
+    // same tie: the only settled scan started in the millisecond the agent was stamped.
+    handle.observeForegroundProcess?.()
+    await settle()
+
+    vi.setSystemTime(T0 + 900)
+    await getProcessTableSnapshot()
+    psOutput = WITH_AGENT_TABLE
+    nodePty.process = 'codex'
+    handle.observeForegroundProcess?.()
+
+    vi.setSystemTime(T0 + 1000)
+    nodePty.process = 'zsh'
+    handle.observeForegroundProcess?.()
+    await settle()
+    expect(execFileMock).toHaveBeenCalledTimes(2)
+
+    // T0+2000: the identity is older than its TTL, so the shell title now needs the scan to
+    // corroborate it. That scan cannot: it may never have sampled the agent.
+    vi.setSystemTime(T0 + 2000)
+    expect(childrenVerdict()).toBe('unverifiable')
+  })
 })
