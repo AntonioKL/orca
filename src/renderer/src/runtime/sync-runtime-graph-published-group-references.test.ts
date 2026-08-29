@@ -249,6 +249,185 @@ describe('buildMobileSessionTabSnapshots published group references', () => {
     expect(snapshot?.activeGroupId).toBe('group-right')
   })
 
+  // Why this arm and not just the mounted one above: a terminal occupies its group under the parent
+  // tab id but publishes one row per pane, so a terminal with no live pane and no persisted layout
+  // publishes none at all. `createTerminalTab` seeds exactly that — `emptyLayoutSnapshot()` — until
+  // TerminalPane mounts, so this is the ordinary new-tab window, not a corrupt fixture.
+  it('keeps a terminal that publishes no surface rows out of its published group', () => {
+    const state = makeState({
+      activeGroupIdByWorktree: { 'wt-1': 'group-1' },
+      groupsByWorktree: {
+        'wt-1': [
+          {
+            id: 'group-1',
+            activeTabId: 'term-unmounted',
+            tabOrder: ['term-unmounted', 'term-mounted'],
+            recentTabIds: ['term-unmounted', 'term-mounted']
+          }
+        ]
+      } as unknown as AppState['groupsByWorktree'],
+      layoutByWorktree: {
+        'wt-1': { type: 'leaf', groupId: 'group-1' }
+      } as unknown as AppState['layoutByWorktree'],
+      unifiedTabsByWorktree: {
+        'wt-1': [
+          {
+            id: 'term-unmounted',
+            groupId: 'group-1',
+            contentType: 'terminal',
+            entityId: 'term-unmounted',
+            title: 'Terminal'
+          },
+          {
+            id: 'term-mounted',
+            groupId: 'group-1',
+            contentType: 'terminal',
+            entityId: 'term-mounted',
+            title: 'Terminal'
+          }
+        ]
+      } as unknown as AppState['unifiedTabsByWorktree'],
+      tabsByWorktree: {
+        'wt-1': [
+          {
+            id: 'term-unmounted',
+            worktreeId: 'wt-1',
+            ptyId: null,
+            title: 'Terminal',
+            defaultTitle: 'Terminal',
+            customTitle: null,
+            color: null,
+            sortOrder: 0,
+            createdAt: 1
+          },
+          {
+            id: 'term-mounted',
+            worktreeId: 'wt-1',
+            ptyId: 'pty-mounted',
+            title: 'Terminal',
+            defaultTitle: 'Terminal',
+            customTitle: null,
+            color: null,
+            sortOrder: 1,
+            createdAt: 2
+          }
+        ]
+      } as unknown as AppState['tabsByWorktree'],
+      terminalLayoutsByTabId: {
+        // What `createTerminalTab` writes before the pane mounts: a layout with no leaf at all.
+        'term-unmounted': { root: null, activeLeafId: null, expandedLeafId: null },
+        'term-mounted': {
+          root: { type: 'leaf', leafId: mountedLeafId },
+          activeLeafId: mountedLeafId,
+          expandedLeafId: null,
+          ptyIdsByLeafId: { [mountedLeafId]: 'pty-mounted' }
+        }
+      } as unknown as AppState['terminalLayoutsByTabId']
+    } as unknown as Parameters<typeof makeState>[0])
+
+    const snapshot = buildMobileSessionTabSnapshots(state)[0]
+
+    // The presence half: its neighbour publishes, so a projection that had stopped emitting terminal
+    // rows fails here rather than passing on emptiness.
+    expect(snapshot?.tabs.map((tab) => tab.id)).toEqual([`term-mounted::${mountedLeafId}`])
+    expect(snapshot?.tabGroups).toMatchObject([{ id: 'group-1', tabOrder: ['term-mounted'] }])
+    expect(danglingTabRefs(snapshot)).toEqual([])
+    expect(danglingGroupRefs(snapshot)).toEqual([])
+  })
+
+  // The same terminal alone in its group: holding it back empties the group, so the group and the
+  // pane the layout gave it have to go with it rather than leaving the client an empty split.
+  it('drops a group whose only terminal publishes no surface rows', () => {
+    const state = makeState({
+      activeGroupIdByWorktree: { 'wt-1': 'group-empty' },
+      groupsByWorktree: {
+        'wt-1': [
+          {
+            id: 'group-empty',
+            activeTabId: 'term-unmounted',
+            tabOrder: ['term-unmounted'],
+            recentTabIds: ['term-unmounted']
+          },
+          {
+            id: 'group-right',
+            activeTabId: 'term-mounted',
+            tabOrder: ['term-mounted'],
+            recentTabIds: ['term-mounted']
+          }
+        ]
+      } as unknown as AppState['groupsByWorktree'],
+      layoutByWorktree: {
+        'wt-1': {
+          type: 'split',
+          direction: 'horizontal',
+          first: { type: 'leaf', groupId: 'group-empty' },
+          second: { type: 'leaf', groupId: 'group-right' }
+        }
+      } as unknown as AppState['layoutByWorktree'],
+      unifiedTabsByWorktree: {
+        'wt-1': [
+          {
+            id: 'term-unmounted',
+            groupId: 'group-empty',
+            contentType: 'terminal',
+            entityId: 'term-unmounted',
+            title: 'Terminal'
+          },
+          {
+            id: 'term-mounted',
+            groupId: 'group-right',
+            contentType: 'terminal',
+            entityId: 'term-mounted',
+            title: 'Terminal'
+          }
+        ]
+      } as unknown as AppState['unifiedTabsByWorktree'],
+      tabsByWorktree: {
+        'wt-1': [
+          {
+            id: 'term-unmounted',
+            worktreeId: 'wt-1',
+            ptyId: null,
+            title: 'Terminal',
+            defaultTitle: 'Terminal',
+            customTitle: null,
+            color: null,
+            sortOrder: 0,
+            createdAt: 1
+          },
+          {
+            id: 'term-mounted',
+            worktreeId: 'wt-1',
+            ptyId: 'pty-mounted',
+            title: 'Terminal',
+            defaultTitle: 'Terminal',
+            customTitle: null,
+            color: null,
+            sortOrder: 1,
+            createdAt: 2
+          }
+        ]
+      } as unknown as AppState['tabsByWorktree'],
+      terminalLayoutsByTabId: {
+        'term-unmounted': { root: null, activeLeafId: null, expandedLeafId: null },
+        'term-mounted': {
+          root: { type: 'leaf', leafId: mountedLeafId },
+          activeLeafId: mountedLeafId,
+          expandedLeafId: null,
+          ptyIdsByLeafId: { [mountedLeafId]: 'pty-mounted' }
+        }
+      } as unknown as AppState['terminalLayoutsByTabId']
+    } as unknown as Parameters<typeof makeState>[0])
+
+    const snapshot = buildMobileSessionTabSnapshots(state)[0]
+
+    expect(snapshot?.tabGroups?.map((group) => group.id)).toEqual(['group-right'])
+    expect(collectLayoutGroupIds(snapshot?.tabGroupLayout)).toEqual(['group-right'])
+    expect(snapshot?.activeGroupId).toBe('group-right')
+    expect(danglingTabRefs(snapshot)).toEqual([])
+    expect(danglingGroupRefs(snapshot)).toEqual([])
+  })
+
   // Why this arm: the mirrored-tab guard is applied twice — once choosing which terminals the group
   // projection may name, once emitting rows. Ablating the projection copy alone leaves the emit copy
   // holding the tab list, so without this the projection's copy is unpinned and its removal is
