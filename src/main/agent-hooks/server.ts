@@ -2303,6 +2303,7 @@ export class AgentHookServer {
       teammateName?: string
       toolAgentType?: string
       providerSession?: unknown
+      agentCwd?: unknown
       providerSessionOnly?: unknown
       isReplay?: boolean
       /** Payload fields the relay dropped to fit an oversized frame; validated below. */
@@ -2523,6 +2524,9 @@ export class AgentHookServer {
       teammateName,
       toolAgentType,
       providerSession,
+      // Why: a remote path is meaningful only on the execution host that sent it; revalidate
+      // it at the SSH trust boundary but never resolve it against the local filesystem.
+      agentCwd: normalizeAgentWorkingDirectory(envelope.agentCwd),
       providerSessionOnly: envelope.providerSessionOnly === true ? true : undefined,
       isReplay: envelope.isReplay === true ? true : undefined,
       claudeRunningNonAgentTask:

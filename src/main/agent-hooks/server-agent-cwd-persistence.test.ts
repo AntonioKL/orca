@@ -132,4 +132,49 @@ describe('agent working directory across the hook boundary (STA-5804)', () => {
       server.stop()
     }
   })
+  it('carries a remote agent directory across the SSH relay boundary', () => {
+    const server = new AgentHookServer()
+    const rendererListener = vi.fn()
+    server.setListener(rendererListener)
+
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        source: 'claude',
+        providerSession: { key: 'session_id', id: 'claude-session-1' },
+        agentCwd: '/srv/checkout/packages/api',
+        payload: { state: 'working', prompt: 'fix the parser', agentType: 'claude' }
+      },
+      'conn-1'
+    )
+
+    expect(rendererListener).toHaveBeenCalledWith(
+      expect.objectContaining({ agentCwd: '/srv/checkout/packages/api' })
+    )
+  })
+
+  it('rejects a relative directory arriving over the relay', () => {
+    const server = new AgentHookServer()
+    const rendererListener = vi.fn()
+    server.setListener(rendererListener)
+
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        source: 'claude',
+        providerSession: { key: 'session_id', id: 'claude-session-1' },
+        agentCwd: '../escape',
+        payload: { state: 'working', prompt: 'fix the parser', agentType: 'claude' }
+      },
+      'conn-1'
+    )
+
+    const forwarded = rendererListener.mock.calls[0]?.[0] as Record<string, unknown> | undefined
+    expect(forwarded).toBeDefined()
+    expect(forwarded?.agentCwd).toBeUndefined()
+  })
 })
