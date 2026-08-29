@@ -55,6 +55,10 @@ import {
   readRequestBody
 } from '../../shared/agent-hook-listener/request-body'
 import { resolveHookSource } from '../../shared/agent-hook-listener/source-routing'
+import {
+  UnmanagedStatusExtensionFence,
+  type UnmanagedStatusExtensionReport
+} from './unmanaged-status-extension-fence'
 import type { AgentHookEventPayload } from '../../shared/agent-hook-listener/listener-event'
 import {
   canAcceptClaudeCompactCompletion,
@@ -746,6 +750,7 @@ export class AgentHookServer {
   private closedAgentStatusTabIds = new Set<string>()
   private closedAgentStatusPaneKeys = new Set<string>()
   private restartedStatusLaunchTokenHashByPaneKey = new Map<string, string>()
+  private unmanagedExtensionFence = new UnmanagedStatusExtensionFence()
   private connectionTimestampWatermarkById = new Map<string, number>()
   // Why: skip disk writes when the JSON exactly matches the last write; guards against re-firing trailing timers when nothing changed.
   private lastWrittenJson: string | null = null
@@ -764,6 +769,17 @@ export class AgentHookServer {
     listener: ((report: HookTransportInterferenceReport) => void) | null
   ): void {
     this.onTransportInterference = listener
+  }
+
+  /**
+   * Notified once per pane and source when a status extension Orca did not launch is posting.
+   * Why: the fence silently drops those posts, and the file is a user's own — Orca must never
+   * remove it, so the only honest remedy is telling the user which agent is affected.
+   */
+  setUnmanagedStatusExtensionListener(
+    listener: ((report: UnmanagedStatusExtensionReport) => void) | null
+  ): void {
+    this.unmanagedExtensionFence.setDetectionListener(listener)
   }
 
   setListener(listener: ((payload: EnrichedAgentHookEventPayload) => void) | null): void {
@@ -1184,6 +1200,18 @@ export class AgentHookServer {
     const tabId = parsePaneKey(ownerPaneKey)?.tabId
     if (tabId && this.closedAgentStatusTabIds.has(tabId)) {
       return 'suppress'
+    }
+    // Why: a second status extension loaded alongside Orca's own posts the same pane key from the
+    // same process, so only the launch token separates them. Fails open — the fence stays shut
+    // until a tokened post proves a managed poster is live, so a tokenless launch is never gated.
+    // Replays carry no live process and are fenced by hydratedLaunchTokenHashByPaneKey instead.
+    if (event && event.isReplay !== true) {
+      if (
+        this.unmanagedExtensionFence.classify(ownerPaneKey, event.source, event.launchToken) ===
+        'unmanaged'
+      ) {
+        return 'suppress'
+      }
     }
     if (!paneRetired) {
       const tokenFence = this.restartedStatusLaunchTokenHashByPaneKey.get(ownerPaneKey)
@@ -1961,6 +1989,10 @@ export class AgentHookServer {
 
   retirePaneAuthority(paneKey: string): void {
     const ownerPaneKey = this.resolvePaneKeyAlias(paneKey)
+    // Why: a reused pane key may relaunch without a launch token; keeping the old owner would
+    // gate the new process's own posts and strand the pane on 'working'.
+    this.unmanagedExtensionFence.forgetPane(paneKey)
+    this.unmanagedExtensionFence.forgetPane(ownerPaneKey)
     const paneKeys = new Set([paneKey, ownerPaneKey])
     const retiredAliases: RetiredPaneAlias[] = []
     let aliasChanged = false
