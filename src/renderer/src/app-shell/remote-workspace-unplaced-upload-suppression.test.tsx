@@ -193,7 +193,9 @@ describe('uploads from a client that could not place the host tabs', () => {
 
     // Deliberately not asserting the placement verdict first: the oracle is the upload, and a
     // precondition on the verdict would fail ahead of it and hide whether the upload gate holds.
-    await sync.applyUnsolicitedSnapshot(TARGET_ID, snapshot())
+    const pendingApply = sync.applyUnsolicitedSnapshot(TARGET_ID, snapshot())
+    await vi.advanceTimersByTimeAsync(10_000)
+    await pendingApply
     expect(
       useAppStore.getState().tabsByWorktree[WORKTREE_ID],
       'the host named two terminals and this client placed neither'

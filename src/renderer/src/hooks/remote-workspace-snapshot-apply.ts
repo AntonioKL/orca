@@ -1,11 +1,9 @@
-import type { StoreApi } from 'zustand'
 import type { RemoteWorkspaceSnapshot } from '../../../shared/remote-workspace-types'
 import { importRemoteWorkspaceSession } from '../../../shared/remote-workspace-session-projection'
 import type { DirectSshAuthority } from '../../../shared/ssh-types'
 import { toSshExecutionHostId } from '../../../shared/execution-host'
 import { translate } from '@/i18n/i18n'
 import { buildWorkspaceSessionPayload } from '../lib/workspace-session'
-import { resolveDirectSshTargetScope } from '../lib/direct-ssh-target-scope'
 import type { AppState } from '../store/types'
 import {
   admitDirectSshSnapshotApplyToken,
@@ -17,6 +15,11 @@ import {
   mergeDirectSshRemoteWorkspaceSession,
   uniqueWorktreeIdByPath
 } from './remote-workspace-session-merge'
+import {
+  resolveDirectSshSnapshotWorktreeIds,
+  waitForSnapshotWorktreePlacement,
+  type RemoteWorkspaceSnapshotPlacementStore
+} from './remote-workspace-snapshot-placement'
 
 const REMOTE_WORKSPACE_SNAPSHOT_WRITE_SUPPRESS_MS = 1_000
 const SNAPSHOT_TERMINAL_RECONNECT_TIMEOUT_MS = 30_000
@@ -67,7 +70,7 @@ function scheduleApplyWindowClosedNotice(): void {
 }
 
 type RemoteWorkspaceSnapshotApplyInput = {
-  store: Pick<StoreApi<AppState>, 'getState'>
+  store: RemoteWorkspaceSnapshotPlacementStore
   snapshot: RemoteWorkspaceSnapshot
   token: DirectSshSnapshotApplyToken
   arrival: number
@@ -77,18 +80,7 @@ type RemoteWorkspaceSnapshotApplyInput = {
   finalizeHydratedTerminals: (authority: DirectSshAuthority) => number
 }
 
-function exactTargetWorktreeIds(state: AppState, authority: DirectSshAuthority): Set<string> {
-  return resolveDirectSshTargetScope({
-    targetId: authority.targetId,
-    catalogRevision: 0,
-    repos: state.repos,
-    worktreesByRepo: state.worktreesByRepo,
-    detectedWorktreesByRepo: state.detectedWorktreesByRepo,
-    folderWorkspaces: state.folderWorkspaces,
-    projectGroups: state.projectGroups,
-    restoredRuntimeHostIdByWorkspaceSessionKey: state.restoredRuntimeHostIdByWorkspaceSessionKey
-  }).gitWorktreeIds
-}
+export type RemoteWorkspaceSnapshotApplyResult = 'applied' | 'stale' | 'failed'
 
 function currentRecoveryTabIds(
   state: AppState,
@@ -122,16 +114,16 @@ export async function applyDirectSshRemoteWorkspaceSnapshot({
   isPreparationTokenCurrent,
   waitForWorkspaceSessionReady,
   finalizeHydratedTerminals
-}: RemoteWorkspaceSnapshotApplyInput): Promise<void> {
+}: RemoteWorkspaceSnapshotApplyInput): Promise<RemoteWorkspaceSnapshotApplyResult> {
   const { authority } = token
   if (!isArrivalCurrent(authority.targetId, arrival)) {
-    return
+    return 'stale'
   }
   if (
     !isPreparationTokenCurrent(token) ||
     !admitDirectSshSnapshotApplyToken(token, authority, snapshot.revision)
   ) {
-    return
+    return 'stale'
   }
   if (!(await waitForWorkspaceSessionReady())) {
     if (isArrivalCurrent(authority.targetId, arrival) && isPreparationTokenCurrent(token)) {
@@ -144,16 +136,34 @@ export async function applyDirectSshRemoteWorkspaceSnapshot({
         )
       })
     }
-    return
+    return 'failed'
   }
-  const state = store.getState()
-  const worktreeIds = exactTargetWorktreeIds(state, authority)
-  const unplacedTabWorktreePaths: string[] = []
-  const remoteSession = importRemoteWorkspaceSession(snapshot.session, {
+  let state = store.getState()
+  let worktreeIds = resolveDirectSshSnapshotWorktreeIds(state, authority)
+  let unplacedTabWorktreePaths: string[] = []
+  let remoteSession = importRemoteWorkspaceSession(snapshot.session, {
     resolveWorktreeId: uniqueWorktreeIdByPath(worktreeIds),
     executionHostId: toSshExecutionHostId(authority.targetId),
     onUnplacedTerminalTabs: (worktreePath) => unplacedTabWorktreePaths.push(worktreePath)
   })
+  if (
+    unplacedTabWorktreePaths.length > 0 &&
+    (await waitForSnapshotWorktreePlacement(
+      store,
+      authority,
+      unplacedTabWorktreePaths,
+      () => isArrivalCurrent(authority.targetId, arrival) && isPreparationTokenCurrent(token)
+    ))
+  ) {
+    state = store.getState()
+    worktreeIds = resolveDirectSshSnapshotWorktreeIds(state, authority)
+    unplacedTabWorktreePaths = []
+    remoteSession = importRemoteWorkspaceSession(snapshot.session, {
+      resolveWorktreeId: uniqueWorktreeIdByPath(worktreeIds),
+      executionHostId: toSshExecutionHostId(authority.targetId),
+      onUnplacedTerminalTabs: (worktreePath) => unplacedTabWorktreePaths.push(worktreePath)
+    })
+  }
   const merged = mergeDirectSshRemoteWorkspaceSession(
     buildWorkspaceSessionPayload(state),
     remoteSession,
@@ -164,7 +174,7 @@ export async function applyDirectSshRemoteWorkspaceSnapshot({
     snapshot.revision
   )
   if (!isArrivalCurrent(authority.targetId, arrival) || !isPreparationTokenCurrent(token)) {
-    return
+    return 'stale'
   }
   const hasUnplacedTerminalTabs = unplacedTabWorktreePaths.length > 0
   snapshotApplyDepth += 1
@@ -236,4 +246,5 @@ export async function applyDirectSshRemoteWorkspaceSnapshot({
     snapshotApplyDepth -= 1
     scheduleApplyWindowClosedNotice()
   }
+  return 'applied'
 }

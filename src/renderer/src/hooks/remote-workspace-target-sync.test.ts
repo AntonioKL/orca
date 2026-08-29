@@ -32,10 +32,13 @@ const owner: DirectSshAuthority = {
   connectionGeneration: 1
 }
 
-function token(snapshotRevision: number | null = null): DirectSshPreparationToken {
+function token(
+  snapshotRevision: number | null = null,
+  catalogRevision = 1
+): DirectSshPreparationToken {
   return {
     authority: owner,
-    catalogRevision: 1,
+    catalogRevision,
     repoFingerprint: JSON.stringify([['ssh:target-a', 'repo-a']]),
     authorityRequirement: 'required',
     snapshotRevision,
@@ -139,6 +142,13 @@ function createHarness(
     }
   ])
   let current = true
+  let catalogRevision = 1
+  const stateListeners = new Set<(current: AppState, previous: AppState) => void>()
+  const publishState = (): void => {
+    for (const listener of stateListeners) {
+      listener(state, state)
+    }
+  }
   const capturePreparationInput = vi.fn(
     async (
       authority: DirectSshAuthority,
@@ -146,7 +156,7 @@ function createHarness(
       snapshotRevision: number
     ): Promise<DirectSshPreparationInput> => ({
       ...authority,
-      catalogRevision: 1,
+      catalogRevision,
       repoRefs: [{ repoId: 'repo-a', executionHostId: 'ssh:target-a' }],
       authorityRequirement: 'required',
       reason,
@@ -155,7 +165,7 @@ function createHarness(
   )
   const prepareOnly = vi.fn(async (input: DirectSshPreparationInput) => ({
     status: 'complete' as const,
-    token: token(input.snapshotRevision ?? null),
+    token: token(input.snapshotRevision ?? null, input.catalogRevision),
     repoOutcomes: {
       complete: 1,
       'non-authoritative': 0,
@@ -169,10 +179,17 @@ function createHarness(
   }))
   const finalizeHydratedTerminals = vi.fn(() => 1)
   const sync = createRemoteWorkspaceTargetSync({
-    store: { getState: () => state },
+    store: {
+      getState: () => state,
+      subscribe: (listener) => {
+        stateListeners.add(listener)
+        return () => stateListeners.delete(listener)
+      }
+    },
     remoteWorkspace: { get, setForConnectedTargets },
     getCurrentAuthority: () => (current ? owner : null),
-    isPreparationTokenCurrent: () => current,
+    isPreparationTokenCurrent: (candidate) =>
+      current && candidate.catalogRevision === catalogRevision,
     capturePreparationInput,
     prepareOnly,
     finalizeHydratedTerminals
@@ -180,9 +197,13 @@ function createHarness(
   return {
     sync,
     setForConnectedTargets,
+    publishState,
     capturePreparationInput,
     prepareOnly,
     finalizeHydratedTerminals,
+    advanceCatalog: () => {
+      catalogRevision += 1
+    },
     makeStale: () => {
       current = false
     }
@@ -522,6 +543,57 @@ describe('createRemoteWorkspaceTargetSync', () => {
     await flush()
     expect(harness.finalizeHydratedTerminals).toHaveBeenCalledOnce()
     vi.useRealTimers()
+  })
+
+  it('adopts host tabs when their worktree catalog row lands after the snapshot', async () => {
+    const hydrateTabsSession = vi.fn()
+    const markRemoteWorkspaceHydrated = vi.fn()
+    const clearRemoteWorkspaceHydrated = vi.fn()
+    let catalogProjectionReads = 0
+    const emptyWorktreesByRepo = {}
+    Object.defineProperty(emptyWorktreesByRepo, 'repo-a', {
+      enumerable: true,
+      get: () => {
+        catalogProjectionReads += 1
+        return []
+      }
+    })
+    const state = appState({
+      worktreesByRepo: emptyWorktreesByRepo,
+      hydrateTabsSession,
+      markRemoteWorkspaceHydrated,
+      clearRemoteWorkspaceHydrated
+    })
+    const harness = createHarness(state, async () => null)
+    const incoming = snapshot(12, {
+      '/remote/work': [
+        {
+          id: 'host-tab',
+          worktreePath: '/remote/work',
+          ptyId: 'ssh:target-a@@pty-1'
+        } as RemoteWorkspaceSnapshot['session']['tabsByWorktreePath'][string][number]
+      ]
+    })
+
+    const pending = harness.sync.applyUnsolicitedSnapshot('target-a', incoming)
+    await flush()
+    const readsBeforeUnrelatedWrites = catalogProjectionReads
+    for (let write = 0; write < 100; write += 1) {
+      harness.publishState()
+    }
+    expect(catalogProjectionReads).toBe(readsBeforeUnrelatedWrites)
+    state.worktreesByRepo = appState().worktreesByRepo
+    harness.advanceCatalog()
+    harness.publishState()
+    await pending
+
+    expect(
+      hydrateTabsSession.mock.calls[0][0].tabsByWorktree['repo-a::/remote/work'].map(
+        (tab: { id: string }) => tab.id
+      )
+    ).toEqual(['host-tab'])
+    expect(markRemoteWorkspaceHydrated).toHaveBeenCalledWith('target-a')
+    expect(clearRemoteWorkspaceHydrated).not.toHaveBeenCalled()
   })
 
   it('fails closed on duplicate target paths and keeps folder workspaces out of projection', async () => {

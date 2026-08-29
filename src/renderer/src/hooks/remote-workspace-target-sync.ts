@@ -11,13 +11,15 @@ import type { AppState } from '../store/types'
 import type {
   DirectSshPreparationInput,
   DirectSshPreparationOutcome,
-  DirectSshPreparationToken
+  DirectSshPreparationToken,
+  DirectSshSnapshotApplyToken
 } from './direct-ssh-reconnect-coordinator'
 import { buildDirectSshSnapshotApplyToken } from './direct-ssh-reconnect-coordinator'
 import { resolveDirectSshTargetScope } from '../lib/direct-ssh-target-scope'
 import { applyDirectSshRemoteWorkspaceSnapshot } from './remote-workspace-snapshot-apply'
 
 const WORKSPACE_HYDRATION_TIMEOUT_MS = 10_000
+const MAX_SNAPSHOT_APPLY_ATTEMPTS = 3
 
 type RemoteWorkspaceApi = {
   get: (args: { targetId: string }) => Promise<RemoteWorkspaceSnapshot | null>
@@ -28,7 +30,7 @@ type RemoteWorkspaceApi = {
 }
 
 export type RemoteWorkspaceTargetSyncDeps = {
-  store: Pick<StoreApi<AppState>, 'getState'>
+  store: Pick<StoreApi<AppState>, 'getState'> & Partial<Pick<StoreApi<AppState>, 'subscribe'>>
   remoteWorkspace: RemoteWorkspaceApi
   getCurrentAuthority: (targetId: string) => DirectSshAuthority | null
   isPreparationTokenCurrent: (token: DirectSshPreparationToken) => boolean
@@ -126,6 +128,51 @@ export function createRemoteWorkspaceTargetSync(
     return !stopped && deps.store.getState().workspaceSessionReady
   }
 
+  const applySnapshotWithCurrentPreparation = async (
+    authority: DirectSshAuthority,
+    snapshot: RemoteWorkspaceSnapshot,
+    arrival: number,
+    initialToken: DirectSshSnapshotApplyToken
+  ): Promise<void> => {
+    let applyToken = initialToken
+    for (let attempt = 0; attempt < MAX_SNAPSHOT_APPLY_ATTEMPTS; attempt += 1) {
+      const result = await applyDirectSshRemoteWorkspaceSnapshot({
+        store: deps.store,
+        snapshot,
+        token: applyToken,
+        arrival,
+        isArrivalCurrent,
+        isPreparationTokenCurrent: deps.isPreparationTokenCurrent,
+        waitForWorkspaceSessionReady,
+        finalizeHydratedTerminals: deps.finalizeHydratedTerminals
+      })
+      if (result !== 'stale' || !isArrivalCurrent(authority.targetId, arrival) || stopped) {
+        return
+      }
+      const input = await deps.capturePreparationInput(
+        authority,
+        'workspace-snapshot',
+        snapshot.revision
+      )
+      if (!input || !isArrivalCurrent(authority.targetId, arrival)) {
+        return
+      }
+      const prepared = await deps.prepareOnly(input)
+      if (
+        !prepared.token ||
+        !deps.isPreparationTokenCurrent(prepared.token) ||
+        !isArrivalCurrent(authority.targetId, arrival)
+      ) {
+        return
+      }
+      const refreshedToken = buildDirectSshSnapshotApplyToken(prepared.token, snapshot.revision)
+      if (!refreshedToken) {
+        return
+      }
+      applyToken = refreshedToken
+    }
+  }
+
   const syncAfterConnect = async (token: DirectSshPreparationToken): Promise<void> => {
     const { authority } = token
     const arrival = beginArrival(authority.targetId)
@@ -171,16 +218,7 @@ export function createRemoteWorkspaceTargetSync(
     if (snapshot.revision > 0) {
       const applyToken = buildDirectSshSnapshotApplyToken(token, snapshot.revision)
       if (applyToken) {
-        await applyDirectSshRemoteWorkspaceSnapshot({
-          store: deps.store,
-          snapshot,
-          token: applyToken,
-          arrival,
-          isArrivalCurrent,
-          isPreparationTokenCurrent: deps.isPreparationTokenCurrent,
-          waitForWorkspaceSessionReady,
-          finalizeHydratedTerminals: deps.finalizeHydratedTerminals
-        })
+        await applySnapshotWithCurrentPreparation(authority, snapshot, arrival, applyToken)
       }
       return
     }
@@ -233,16 +271,7 @@ export function createRemoteWorkspaceTargetSync(
     if (!applyToken) {
       return
     }
-    await applyDirectSshRemoteWorkspaceSnapshot({
-      store: deps.store,
-      snapshot,
-      token: applyToken,
-      arrival,
-      isArrivalCurrent,
-      isPreparationTokenCurrent: deps.isPreparationTokenCurrent,
-      waitForWorkspaceSessionReady,
-      finalizeHydratedTerminals: deps.finalizeHydratedTerminals
-    })
+    await applySnapshotWithCurrentPreparation(authority, snapshot, arrival, applyToken)
   }
 
   return {
