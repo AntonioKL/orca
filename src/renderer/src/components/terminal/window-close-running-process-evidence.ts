@@ -73,7 +73,6 @@ async function inspectAllPtys(
     ) {
       return true
     }
-    const evidence = readPtyProcessInspectionEvidence(result.value)
-    return evidence.children.verdict !== 'exited' || result.value.hasChildProcesses
+    return readPtyProcessInspectionEvidence(result.value).children.verdict !== 'exited'
   })
 }
