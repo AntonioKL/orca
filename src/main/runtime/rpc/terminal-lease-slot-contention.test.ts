@@ -58,8 +58,10 @@ describe('terminal input-lease slot contention', () => {
     const runtime = runtimeDouble(registry)
     const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
 
+    // Both dispatches stay pending until their cleanup resolves the stream, so the test
+    // owns settling them: a stream still in flight at exit is a leak into the next file.
     const firstScreen: string[] = []
-    void dispatcher.dispatchStreaming(
+    const firstStream = dispatcher.dispatchStreaming(
       leaseRequest,
       (message) => firstScreen.push(frameType(message)),
       streamOptions('screen-a')
@@ -69,7 +71,7 @@ describe('terminal input-lease slot contention', () => {
     // The duplicate mount: a second live session screen for the same worktree, on the
     // same device token, subscribing to the same terminal handle.
     const secondScreen: string[] = []
-    void dispatcher.dispatchStreaming(
+    const secondStream = dispatcher.dispatchStreaming(
       leaseRequest,
       (message) => secondScreen.push(frameType(message)),
       streamOptions('screen-b')
@@ -81,5 +83,14 @@ describe('terminal input-lease slot contention', () => {
     // dead. Whichever screen resubscribes last owns the lease, so two screens
     // ping-pong it on every session-tabs snapshot.
     await vi.waitFor(() => expect(firstScreen).toEqual(['subscribed', 'end']))
+    // Eviction is one-directional: the successor keeps the slot it just took, which is
+    // why the two screens ping-pong instead of both going dead.
+    expect(secondScreen).toEqual(['subscribed'])
+    await firstStream
+
+    // Only the successor's own connection teardown ends its lease and resolves its stream.
+    registry.cleanupSubscriptionsForConnection('screen-b')
+    await secondStream
+    expect(secondScreen).toEqual(['subscribed', 'end'])
   })
 })

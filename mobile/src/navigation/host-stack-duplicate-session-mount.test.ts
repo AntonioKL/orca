@@ -371,6 +371,44 @@ describe('one mounted session screen per worktree', () => {
     expect(sessions.map((route) => route.params?.hostId)).toEqual([aliased, HOST])
   })
 
+  it('does not converge onto a host stack whose id merely percent-encodes to the one opened', () => {
+    // `host%2Fone` is a DIFFERENT host: expo-router decodes `/h/host%2Fone` to `host/one`
+    // and `/h/host%252Fone` to `host%2Fone`, so the two never share a route param. The
+    // push armed here has not committed yet, so the hydrated stack is not ours to replace.
+    const aliased = 'host%2Fone'
+    const app = drive({ key: 'root', index: 0, routes: [] })
+    const controller = app.open(HOST, TARGET)
+    expect(app.push).toHaveBeenCalledTimes(1)
+
+    app.hydrate(
+      clone(
+        tree({
+          index: 0,
+          routes: [{ key: 'aliased-index', name: '[hostId]/index', params: { hostId: aliased } }]
+        })
+      )
+    )
+
+    expect(app.dispatch).not.toHaveBeenCalled()
+    expect(controller.isActive()).toBe(true)
+
+    app.settle()
+
+    // The other host's screen is still mounted, still its own, and was never the REPLACE
+    // source; our session landed on the `[hostId]/index` our own push committed.
+    expect(app.root.routes[0].state?.routes[0]).toEqual({
+      key: 'aliased-index',
+      name: '[hostId]/index',
+      params: { hostId: aliased }
+    })
+    expect(app.dispatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'REPLACE', source: 'aliased-index' })
+    )
+    const sessions = mountedSessions(app.root, WORKTREE)
+    expect(sessions).toHaveLength(1)
+    expect(sessions[0].params).toEqual({ hostId: HOST, worktreeId: WORKTREE })
+  })
+
   it('converges after a push armed before hydration lands over an already-mounted session', () => {
     // The notification tap can arm before the root navigator has committed any state,
     // so the entry read sees nothing and the `/h/<host>` push goes out regardless.

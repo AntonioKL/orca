@@ -66,21 +66,14 @@ export function hostStackRouteHref(target: HostStackRouteTarget): HostStackRoute
   return { pathname: `/h/${target.name}`, params: target.params }
 }
 
-// Why: pushed host segments may commit encoded, so an id with `/`, `#`, or `%` must
-// still match the host mount its own encoded push created. Deliberately NOT reused for
-// route identity — decoding there would alias a host named `a%2Fb` onto one named `a/b`.
-function pushedHostParamMatches(param: unknown, expectedHostId: string): boolean {
-  if (typeof param !== 'string') {
-    return false
-  }
-  if (param === expectedHostId) {
-    return true
-  }
-  try {
-    return decodeURIComponent(param) === expectedHostId
-  } catch {
-    return false // Lone `%` — not our encoding.
-  }
+// Why: a host id is canonical DECODED. Percent-encoding exists only in the URL segment —
+// applied here by `hostStackHostRoute`, and undone by expo-router's `getStateFromPath`,
+// which runs every dynamic segment through `safelyDecodeURIComponent` before the param
+// reaches navigation state. So `/h/${encodeURIComponent(id)}` commits `id` verbatim and
+// this stays a raw comparison: decoding a hydrated param would let a host literally named
+// `a%2Fb` answer for the host named `a/b` and strand the transition on the wrong stack.
+function hostParamMatches(param: unknown, expectedHostId: string): boolean {
+  return typeof param === 'string' && param === expectedHostId
 }
 
 /** The focused `h` route, however deep the caller's navigator sits above it: a screen
@@ -111,7 +104,7 @@ function mountedHostStack(
     !hostState?.key ||
     hostRoute?.name !== '[hostId]/index' ||
     !hostRoute.key ||
-    !pushedHostParamMatches(hostRoute.params?.hostId, expectedHostId)
+    !hostParamMatches(hostRoute.params?.hostId, expectedHostId)
   ) {
     return null
   }
@@ -198,7 +191,7 @@ export function navigateToHostStackRoute(
       return
     }
     if (!hostStack) {
-      if (hostContainer && pushedHostParamMatches(hostContainer.params?.hostId, hostId)) {
+      if (hostContainer && hostParamMatches(hostContainer.params?.hostId, hostId)) {
         dispose()
         router.replace(hostStackRouteHref(selectedTarget))
       }
