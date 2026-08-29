@@ -5,6 +5,7 @@ import { translate } from '@/i18n/i18n'
 import type { WorktreeRemovalTarget } from '../../../../shared/worktree/removal'
 import { prepareActiveWorktreeFocusAfterDelete } from './active-worktree-focus-after-delete'
 import { showDeleteWorktreeFailureToast } from './delete-worktree-failure-toast'
+import { getDeleteWorktreeToastCopy } from './delete-worktree-toast'
 import type { WorktreeDeleteWithToastOptions } from './worktree-delete-request'
 import { getDeleteStateForWorktreeHost } from './worktree-delete-state-host-match'
 
@@ -91,7 +92,10 @@ export function runWorktreeDeleteWithToast(
                     'Force delete failed'
                   ),
                   {
-                    description: forceResult.error,
+                    // Why (STA-4895): this retry renders its own toast, so without the shared
+                    // funnel the main process's English hint reaches the user verbatim.
+                    description: getDeleteWorktreeToastCopy(worktreeName, null, forceResult.error)
+                      .description,
                     action: {
                       label: translate(
                         'auto.components.sidebar.delete.worktree.flow.7488ed8711',
