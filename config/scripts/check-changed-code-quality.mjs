@@ -265,11 +265,16 @@ function printDiagnostic(diagnostic, root) {
 
 // Why: Oxlint takes paths as positional arguments only — no stdin, no @file — so one
 // oversized changed set makes the spawn itself fail with E2BIG and the gate never runs.
-// Stay well under the smallest platform limit (macOS ARG_MAX is 1 MiB, shared with the
-// environment) so a batch cannot overflow it.
-const MAX_BATCH_ARGUMENT_BYTES = 256 * 1024
+// Windows CreateProcess caps the whole command at 32,767 characters. Leave room for Node,
+// the Oxlint entry point, fixed flags, and libuv quoting without shrinking Unix batches.
+const POSIX_MAX_BATCH_ARGUMENT_BYTES = 256 * 1024
+const WINDOWS_MAX_BATCH_ARGUMENT_BYTES = 24 * 1024
 
-export function batchFilesByArgumentBytes(files, limit = MAX_BATCH_ARGUMENT_BYTES) {
+export function maxBatchArgumentBytes(platform = process.platform) {
+  return platform === 'win32' ? WINDOWS_MAX_BATCH_ARGUMENT_BYTES : POSIX_MAX_BATCH_ARGUMENT_BYTES
+}
+
+export function batchFilesByArgumentBytes(files, limit = maxBatchArgumentBytes()) {
   const batches = []
   let batch = []
   let bytes = 0
@@ -292,12 +297,17 @@ export function batchFilesByArgumentBytes(files, limit = MAX_BATCH_ARGUMENT_BYTE
 }
 
 function spawnOxlintBatch(root, scan, batch) {
-  const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
-  const result = spawnSync(pnpm, ['exec', 'oxlint', ...scan.args, '--format', 'json', ...batch], {
-    cwd: root,
-    encoding: 'utf8',
-    maxBuffer: 128 * 1024 * 1024
-  })
+  // Bypass pnpm.cmd so Windows gets CreateProcess' limit instead of cmd.exe's 8,191 chars.
+  const oxlintCli = path.join(root, 'node_modules', 'oxlint', 'bin', 'oxlint')
+  const result = spawnSync(
+    process.execPath,
+    [oxlintCli, ...scan.args, '--format', 'json', ...batch],
+    {
+      cwd: root,
+      encoding: 'utf8',
+      maxBuffer: 128 * 1024 * 1024
+    }
+  )
   if (result.error) {
     throw result.error
   }

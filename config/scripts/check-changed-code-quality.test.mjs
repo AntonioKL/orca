@@ -4,6 +4,7 @@ import {
   batchFilesByArgumentBytes,
   diagnosticTouchesAddedLines,
   isMovedCode,
+  maxBatchArgumentBytes,
   overlapsAddedLines,
   parseAddedLineRanges,
   runOxlintScan
@@ -119,6 +120,12 @@ describe('argument batching', () => {
     const files = Array.from({ length: 50 }, (_, index) => `src/renderer/src/module-${index}.tsx`)
 
     expect(batchFilesByArgumentBytes(files)).toEqual([files])
+  })
+
+  it('uses a Windows-safe budget without shrinking Unix batches', () => {
+    expect(maxBatchArgumentBytes('win32')).toBe(24 * 1024)
+    expect(maxBatchArgumentBytes('linux')).toBe(256 * 1024)
+    expect(maxBatchArgumentBytes('darwin')).toBe(256 * 1024)
   })
 
   it('splits an oversized set into batches that each fit the limit', () => {
