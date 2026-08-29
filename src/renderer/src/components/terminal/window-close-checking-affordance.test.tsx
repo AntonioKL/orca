@@ -22,6 +22,10 @@ vi.mock('@/lib/shutdown-checkpoint-failure-toast', () => ({
 }))
 
 import {
+  dispatchWindowCloseRequest,
+  setWindowCloseRequestHandler
+} from '../window-close-request-coordinator'
+import {
   useWindowCloseRunningProcessPrompt,
   WINDOW_CLOSE_CHECKING_AFFORDANCE_DELAY_MS
 } from './window-close-running-process-prompt'
@@ -157,6 +161,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  setWindowCloseRequestHandler(null)
   act(() => {
     root?.unmount()
   })
@@ -192,6 +197,40 @@ describe('window close pending affordance', () => {
     // pending state the user cannot back out of is the same complaint.
     expect(cancelButton()?.disabled).toBe(false)
     expect(confirmWindowClose).not.toHaveBeenCalled()
+  })
+
+  it('does not raise the checking state for an attempt a later request superseded', async () => {
+    // The deferral is armed per attempt, and the requests that supersede one need
+    // never reach the hook: Terminal hands a close with dirty editors to the
+    // unsaved-changes dialog and returns, so nothing here can cancel this timer.
+    setWindowCloseRequestHandler(({ isQuitting }) => proceed!(isQuitting))
+    await act(async () => {
+      await dispatchWindowCloseRequest({ isQuitting: false })
+    })
+    setWindowCloseRequestHandler(() => {})
+    await act(async () => {
+      await dispatchWindowCloseRequest({ isQuitting: false })
+    })
+
+    await advancePast(WINDOW_CLOSE_CHECKING_AFFORDANCE_DELAY_MS)
+
+    expect(
+      dialogIsOpen(),
+      'a pending state for a close the user has moved past is a dialog they never asked for'
+    ).toBe(false)
+  })
+
+  it('still raises it for the attempt that is current, driven the same way', async () => {
+    // Polarity control: the fence must not swallow the affordance itself.
+    setWindowCloseRequestHandler(({ isQuitting }) => proceed!(isQuitting))
+    await act(async () => {
+      await dispatchWindowCloseRequest({ isQuitting: false })
+    })
+
+    await advancePast(WINDOW_CLOSE_CHECKING_AFFORDANCE_DELAY_MS)
+
+    expect(dialogIsOpen()).toBe(true)
+    expect(isVisible(CHECKING)).toBe(true)
   })
 
   it('never flashes the checking state for a probe that answers warm', async () => {
