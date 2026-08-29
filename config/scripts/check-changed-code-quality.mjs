@@ -115,10 +115,19 @@ export function collectAddedLineRanges(root, requestedBase) {
 function parseOxlintOutput(stdout, label) {
   const start = stdout.indexOf('{')
   const end = stdout.lastIndexOf('}')
-  if (start === -1 || end === -1) {
-    throw new Error(`${label} did not return Oxlint JSON output.`)
+  if (start !== -1 && end !== -1) {
+    try {
+      return JSON.parse(stdout.slice(start, end + 1))
+    } catch {
+      // Fall through so the caller sees what Oxlint actually printed.
+    }
   }
-  return JSON.parse(stdout.slice(start, end + 1))
+  // Why echo it: Oxlint writes configuration failures to stdout, and a wrapper's own
+  // warning can carry braces that this slice mistakes for the report, so discarding the
+  // output leaves the gate dying with no reason anywhere in the log.
+  throw new Error(
+    `${label} did not return Oxlint JSON output. Oxlint printed:\n${stdout.trim().slice(0, 2000)}`
+  )
 }
 
 function normalizedDiagnosticPath(root, filename) {

@@ -276,6 +276,26 @@ describe('diagnostic collection across batches', () => {
     ])
   })
 
+  // Why: Oxlint writes configuration failures to stdout, so swallowing it leaves the gate
+  // dying with no reason in the log.
+  it('surfaces what Oxlint printed when the output is not a report', () => {
+    const failure = 'Failed to parse oxlint configuration file.\n\n  x Rule not found\n'
+
+    expect(() => runOxlintScan('/repo', scan, ['src/a.ts'], () => failure)).toThrow(
+      /Rule not found/
+    )
+  })
+
+  // Why: the slice from the first brace to the last one takes a wrapper's own warning for
+  // the report, and the raw SyntaxError names neither the scan nor the warning.
+  it('surfaces a wrapper warning whose braces shadow the report', () => {
+    const polluted = ` WARN  Unsupported engine: wanted: {"node":"24"}\n${JSON.stringify({ diagnostics: [] })}`
+
+    expect(() => runOxlintScan('/repo', scan, ['src/a.ts'], () => polluted)).toThrow(
+      /Unsupported engine/
+    )
+  })
+
   // Why: the whole point is that no single invocation carries the full argument list.
   it('never hands the whole oversized set to one invocation', () => {
     const batchSizes = observeBatches().map((batch) => batch.length)
