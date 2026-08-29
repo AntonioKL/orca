@@ -34,7 +34,7 @@ export function buildRuntimeWorktreePsSummaries(args: {
       workspaceKind: 'git',
       worktreeId: worktree.id,
       repoId: worktree.repoId,
-      ...((worktree.hostId ?? meta?.hostId) ? { hostId: worktree.hostId ?? meta?.hostId } : {}),
+      ...((meta?.hostId ?? worktree.hostId) ? { hostId: meta?.hostId ?? worktree.hostId } : {}),
       terminalPlatform: args.platformByRepoId.get(worktree.repoId) ?? process.platform,
       repo: repo?.displayName ?? worktree.repoId,
       path: worktree.path,

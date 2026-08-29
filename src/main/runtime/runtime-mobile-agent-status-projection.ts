@@ -101,6 +101,7 @@ export type RuntimeHookAgentRowLookup = {
   providerSessionAgentType: string | null
   providerSessionReceivedAt: number | null
   agentType: string | null
+  agentIsLive: boolean
   live: HookLiveAgentRow | null
 }
 
@@ -138,6 +139,7 @@ export function selectRuntimeHookAgentRowForPane(
     providerSessionAgentType: session?.agentType ?? null,
     providerSessionReceivedAt: session?.receivedAt ?? null,
     agentType: agent?.agentType ?? null,
+    agentIsLive: agent != null && agent.state !== 'done',
     live: live
       ? {
           payload: pickParsedAgentStatusPayload(live),

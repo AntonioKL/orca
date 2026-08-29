@@ -1,6 +1,7 @@
 import { isShellProcess } from '../../shared/agent-detection'
 import { isExpectedAgentProcess } from '../../shared/agent-process-recognition'
 import { createDraftPasteReadyScanner } from '../../shared/draft-paste-ready-scanner'
+import { resolveDraftPasteReadyTimeoutMs } from '../../shared/draft-paste-ready-timeout'
 import { TUI_AGENT_CONFIG } from '../../shared/tui-agent-config'
 import type { TuiAgent } from '../../shared/tui-agent'
 import type {
@@ -11,7 +12,6 @@ import type {
 const BRACKETED_PASTE_BEGIN = '\x1b[200~'
 const BRACKETED_PASTE_END = '\x1b[201~'
 const BRACKETED_PASTE_QUIET_MS = 1500
-const DRAFT_PASTE_READY_TIMEOUT_MS = 8000
 
 export type WorktreeStartupReadinessHost = {
   getPtyId: (handle: string) => string | null
@@ -134,6 +134,6 @@ export function waitForWorktreeStartupDraft(
     if (replay) {
       observe(replay)
     }
-    hardTimer = setTimeout(() => finish(null), DRAFT_PASTE_READY_TIMEOUT_MS)
+    hardTimer = setTimeout(() => finish(null), resolveDraftPasteReadyTimeoutMs(agent))
   })
 }

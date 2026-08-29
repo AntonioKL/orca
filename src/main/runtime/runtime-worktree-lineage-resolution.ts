@@ -100,11 +100,18 @@ export async function resolveRuntimeWorktreeCreateLineage(
   }
   if (input.parentWorkspace) {
     try {
+      const parent = await deps.resolveParent(input.parentWorkspace)
+      const manuallySelected = input.parentWorkspaceOrigin === 'manual'
       return {
         kind: 'lineage',
-        parent: await deps.resolveParent(input.parentWorkspace),
-        origin: 'cli',
-        capture: { source: 'explicit-cli-flag', confidence: 'explicit' }
+        parent,
+        origin: manuallySelected ? 'manual' : 'cli',
+        capture: manuallySelected
+          ? {
+              source: parent.type === 'worktree' ? 'manual-action' : 'active-workspace',
+              confidence: 'explicit'
+            }
+          : { source: 'explicit-cli-flag', confidence: 'explicit' }
       }
     } catch (error) {
       throw new RuntimeLineageError('LINEAGE_PARENT_NOT_FOUND', notFoundMessage(error), {

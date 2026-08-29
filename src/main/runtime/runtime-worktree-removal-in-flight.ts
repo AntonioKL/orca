@@ -8,8 +8,8 @@ export class RuntimeWorktreeRemovalInFlight {
     { optionsKey: string; promise: Promise<RemovalResult> }
   >()
 
-  get(worktreeId: string, optionsKey: string): Promise<RemovalResult> | null {
-    const removal = this.removals.get(worktreeId)
+  get(scopeKey: string, worktreeId: string, optionsKey: string): Promise<RemovalResult> | null {
+    const removal = this.removals.get(scopeKey)
     if (!removal) {
       return null
     }
@@ -19,13 +19,13 @@ export class RuntimeWorktreeRemovalInFlight {
     throw new Error(`Worktree deletion already in progress: ${worktreeId}`)
   }
 
-  track(worktreeId: string, optionsKey: string, promise: Promise<RemovalResult>): void {
-    this.removals.set(worktreeId, { optionsKey, promise })
+  track(scopeKey: string, optionsKey: string, promise: Promise<RemovalResult>): void {
+    this.removals.set(scopeKey, { optionsKey, promise })
   }
 
-  release(worktreeId: string, promise: Promise<RemovalResult>): void {
-    if (this.removals.get(worktreeId)?.promise === promise) {
-      this.removals.delete(worktreeId)
+  release(scopeKey: string, promise: Promise<RemovalResult>): void {
+    if (this.removals.get(scopeKey)?.promise === promise) {
+      this.removals.delete(scopeKey)
     }
   }
 }

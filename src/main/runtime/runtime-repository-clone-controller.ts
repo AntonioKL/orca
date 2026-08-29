@@ -170,7 +170,6 @@ export class RuntimeRepositoryCloneController {
       ...detected,
       addedAt: Date.now(),
       kind: 'git',
-      externalWorktreeVisibility: 'hide',
       externalWorktreeVisibilityLegacy: false
     }
     store.addRepo(repo)

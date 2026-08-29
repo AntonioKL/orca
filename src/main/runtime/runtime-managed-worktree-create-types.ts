@@ -58,6 +58,7 @@ export type RuntimeManagedWorktreeCreateArgs = {
   startupDraftPaste?: WorktreeStartupDraftPaste
   lineage?: {
     parentWorkspace?: string
+    parentWorkspaceOrigin?: 'manual'
     envParentWorkspace?: string
     parentWorktree?: string
     cwdParentWorktree?: string

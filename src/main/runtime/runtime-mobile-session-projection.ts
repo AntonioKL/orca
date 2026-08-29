@@ -70,6 +70,10 @@ export function projectRuntimeMobileSessionTabs(
       tabs.push(tab)
       continue
     }
+    if (tab.type === 'agent-session') {
+      tabs.push(tab)
+      continue
+    }
     const syncedTab = host.tabs.get(tab.parentTabId)
     const leaf = host.leaves.get(host.getLeafKey(tab.parentTabId, tab.leafId)) ?? null
     const liveLeaf = leaf?.ptyId && leaf.connected ? leaf : null

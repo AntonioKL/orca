@@ -11,7 +11,7 @@ import {
   getLeafWorktreeStatus,
   getSavedTabWorktreeStatus,
   maxTimestamp,
-  mergeWorktreeStatus
+  mergeWorktreeSummaryStatus
 } from './runtime-worktree-status-projection'
 import { runtimeWorktreeIdsEqual } from './runtime-worktree-path-identity'
 
@@ -22,6 +22,12 @@ type SummaryLookup = (
   worktreeId: string
 ) => RuntimeWorktreePsSummary | null
 
+export type RuntimeWorkingTerminalEvidence = {
+  paneKey: string | null
+  ptyId: string | null
+  tabId: string | null
+}
+
 export function applyRuntimeWorktreePsTerminalActivity(args: {
   summaries: Map<string, RuntimeWorktreePsSummary>
   pathIndex: RuntimeWorktreeSummaryPathIndex
@@ -31,8 +37,10 @@ export function applyRuntimeWorktreePsTerminalActivity(args: {
   ptysById: ReadonlyMap<string, RuntimePtyWorktreeRecord>
   tabs: ReadonlyMap<string, RuntimeSyncedTab>
   session: WorkspaceSessionState | null | undefined
+  getPaneKey: (leaf: RuntimeLeafRecord) => string
   getSummary: SummaryLookup
-}): void {
+}): Map<string, RuntimeWorkingTerminalEvidence[]> {
+  const workingEvidence = new Map<string, RuntimeWorkingTerminalEvidence[]>()
   const savedTabOwnerById = new Map<string, { worktreeId: string; title: string }>()
   for (const [worktreeId, tabs] of Object.entries(args.session?.tabsByWorktree ?? {})) {
     for (const tab of tabs) {
@@ -79,10 +87,15 @@ export function applyRuntimeWorktreePsTerminalActivity(args: {
     summary.liveTerminalCount += 1
     summary.hasAttachedPty = true
     summary.lastOutputAt = maxTimestamp(summary.lastOutputAt, leaf.lastOutputAt)
-    summary.status = mergeWorktreeStatus(
-      summary.status,
-      getLeafWorktreeStatus(leaf, args.tabs.get(leaf.tabId)?.title ?? null)
-    )
+    const leafStatus = getLeafWorktreeStatus(leaf, args.tabs.get(leaf.tabId)?.title ?? null)
+    if (leafStatus === 'working') {
+      addWorkingTerminalEvidence(workingEvidence, summary.worktreeId, {
+        paneKey: args.getPaneKey(leaf),
+        ptyId: leaf.ptyId,
+        tabId: leaf.tabId
+      })
+    }
+    mergeWorktreeSummaryStatus(summary, leafStatus)
     if (
       leaf.preview &&
       (summary.preview.length === 0 || (leaf.lastOutputAt ?? -1) >= (previousLastOutputAt ?? -1))
@@ -135,16 +148,35 @@ export function applyRuntimeWorktreePsTerminalActivity(args: {
     summary.hasAttachedPty = true
     summary.hasHostSidebarActivity = true
     summary.lastOutputAt = maxTimestamp(summary.lastOutputAt, pty.lastOutputAt)
-    summary.status = mergeWorktreeStatus(
-      summary.status,
-      getSavedTabWorktreeStatus(owner.title, true)
-    )
+    const ptyStatus = getSavedTabWorktreeStatus(owner.title, true)
+    if (ptyStatus === 'working') {
+      addWorkingTerminalEvidence(workingEvidence, summary.worktreeId, {
+        paneKey: pty.paneKey,
+        ptyId: pty.ptyId,
+        tabId: pty.tabId ?? persistedTabId ?? null
+      })
+    }
+    mergeWorktreeSummaryStatus(summary, ptyStatus)
     if (
       pty.preview &&
       (summary.preview.length === 0 || (pty.lastOutputAt ?? -1) >= (previousLastOutputAt ?? -1))
     ) {
       summary.preview = pty.preview
     }
+  }
+  return workingEvidence
+}
+
+function addWorkingTerminalEvidence(
+  evidenceByWorktreeId: Map<string, RuntimeWorkingTerminalEvidence[]>,
+  worktreeId: string,
+  evidence: RuntimeWorkingTerminalEvidence
+): void {
+  const existing = evidenceByWorktreeId.get(worktreeId)
+  if (existing) {
+    existing.push(evidence)
+  } else {
+    evidenceByWorktreeId.set(worktreeId, [evidence])
   }
 }
 

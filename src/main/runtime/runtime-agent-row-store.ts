@@ -35,11 +35,15 @@ export class RuntimeAgentRowStore {
     return (
       !previous ||
       previous.payload.state !== args.payload.state ||
+      previous.payload.workingMode !== args.payload.workingMode ||
       previous.payload.prompt !== args.payload.prompt ||
       (previous.payload.agentType ?? null) !== (args.payload.agentType ?? null) ||
       (previous.payload.toolName ?? null) !== (args.payload.toolName ?? null) ||
       (previous.payload.interactivePrompt ?? null) !== (args.payload.interactivePrompt ?? null) ||
-      (previous.payload.interrupted ?? false) !== (args.payload.interrupted ?? false)
+      (previous.payload.interrupted ?? false) !== (args.payload.interrupted ?? false) ||
+      (previous.payload.turnCompletedAt ?? null) !== (args.payload.turnCompletedAt ?? null) ||
+      (previous.payload.lastAssistantMessage ?? null) !==
+        (args.payload.lastAssistantMessage ?? null)
     )
   }
 
@@ -79,14 +83,17 @@ export class RuntimeAgentRowStore {
   }): {
     status: NonNullable<RuntimeTerminalAgentStatus['status']>
     updatedAt: number
+    stateStartedAt: number
   } | null {
     const now = Date.now()
     let bestStatus: NonNullable<RuntimeTerminalAgentStatus['status']> | null = null
     let bestUpdatedAt = -1
+    let bestStateStartedAt = -1
     const consider = (
       state: AgentStatusEntry['state'] | undefined,
       updatedAt: number | null | undefined,
-      restoredUnconfirmed = false
+      restoredUnconfirmed = false,
+      stateStartedAt?: number | null
     ): void => {
       if (!state || restoredUnconfirmed || typeof updatedAt !== 'number') {
         return
@@ -98,18 +105,21 @@ export class RuntimeAgentRowStore {
       if (updatedAt > bestUpdatedAt || (updatedAt === bestUpdatedAt && status === 'permission')) {
         bestStatus = status
         bestUpdatedAt = updatedAt
+        bestStateStartedAt = typeof stateStartedAt === 'number' ? stateStartedAt : updatedAt
       }
     }
     if (args.paneKey) {
       const retained = this.byPaneKey.get(args.paneKey)
-      consider(retained?.payload.state, retained?.updatedAt)
+      consider(retained?.payload.state, retained?.updatedAt, false, retained?.stateStartedAt)
     }
     for (const row of args.hookRows) {
       if (row.terminalHandle !== args.handle && (!args.paneKey || row.paneKey !== args.paneKey)) {
         continue
       }
-      consider(row.state, row.receivedAt, row.restoredUnconfirmed)
+      consider(row.state, row.receivedAt, row.restoredUnconfirmed, row.stateStartedAt)
     }
-    return bestStatus ? { status: bestStatus, updatedAt: bestUpdatedAt } : null
+    return bestStatus
+      ? { status: bestStatus, updatedAt: bestUpdatedAt, stateStartedAt: bestStateStartedAt }
+      : null
   }
 }

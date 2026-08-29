@@ -1,5 +1,5 @@
 import type { BrowserScreencastResult, RuntimeBrowserDriverState } from '../../shared/runtime-types'
-import { BrowserError } from '../browser/cdp-bridge'
+import { BrowserError } from '../browser/browser-error'
 import {
   resolveBrowserDriverAfterMobileRelease,
   screencastSubscriberDrivesAsMobile,

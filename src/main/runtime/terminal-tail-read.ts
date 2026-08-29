@@ -139,7 +139,8 @@ export function visibleNonBlankTerminalLines(lines: string[]): string[] {
 export function buildVisibleSnapshotReadFallback(
   read: RuntimeTerminalRead,
   visibleLines: string[],
-  limit: number | undefined
+  limit: number | undefined,
+  draft?: string
 ): RuntimeTerminalRead {
   const lineLimit = terminalReadLimit(limit, DEFAULT_TERMINAL_READ_LIMIT)
   const lineBoundedTail = visibleLines.slice(-lineLimit)
@@ -152,6 +153,12 @@ export function buildVisibleSnapshotReadFallback(
     tail: charBoundedTail.tail,
     limited:
       read.limited || lineBoundedTail.length < visibleLines.length || charBoundedTail.limited,
-    returnedLineCount: charBoundedTail.tail.length
+    returnedLineCount: charBoundedTail.tail.length,
+    source: 'screen',
+    ...(draft ? { draft } : {})
   }
+}
+
+export function labelTerminalReadSource(read: RuntimeTerminalRead): RuntimeTerminalRead {
+  return read.source ? read : { ...read, source: 'stream' }
 }

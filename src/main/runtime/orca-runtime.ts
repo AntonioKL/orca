@@ -6,8 +6,10 @@ import {
   isClaudeManagementTitle,
   isCursorAgentTitle,
   isCursorNativeAgentTitle,
+  isOpenCodeNativeTitle,
   normalizeTerminalTitle
 } from '../../shared/agent-detection'
+import { extractLastOscTitle } from '../../shared/osc-title-extraction'
 import { extractOscTitleScanTail } from '../../shared/osc-title-scan-tail'
 import { extractLastOsc7Uri, extractOscScanTail } from '../daemon/osc7-uri-extraction'
 import { parseFileUriPathParts } from '../daemon/osc7-file-uri'
@@ -41,6 +43,7 @@ import type {
 } from '../../shared/agent-status-types'
 import type { AgentHookAuthorityAttestation } from '../agent-hooks/server'
 import type {
+  AgentSessionOwnerBinding,
   AgentLaunchPreferences,
   RuntimeAgentSessionRpcCaller,
   RuntimeCreateAgentSessionRequest,
@@ -48,6 +51,54 @@ import type {
   RuntimeEnsureAgentSessionRequest,
   RuntimeEnsureAgentSessionResult
 } from '../../shared/agent-session-host-authority'
+import {
+  ensureStructuredAgentSessionHost as installStructuredAgentSessionHost,
+  hasPersistedStructuredAgentSessionStore as hasPersistedStructuredAgentSessionStoreOnDisk
+} from './structured-agent-session-runtime'
+import { getStructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-registry'
+import type { AgentSessionAttachParams } from '../native-chat/agent-session-wire/structured-agent-session-attach'
+import {
+  StructuredTuiLaunchCleanupError,
+  type StructuredAgentSessionHandoffTransport,
+  type StructuredTuiOwner
+} from '../native-chat/agent-session-wire/structured-agent-session-handoff-types'
+import type { AgentSessionRecord } from '../../shared/agent-session-record'
+import {
+  agentSessionProviderHandleRoot,
+  agentSessionProviderHandlesEqual
+} from '../../shared/agent-session-provider-handle'
+import { SESSION_TAB_NOT_FOUND_ERROR } from '../../shared/session-tab-close'
+import {
+  agentSessionOwnerBindingsEqual,
+  cloneAgentSessionOwnerBinding,
+  scopedAgentSessionClaimsEqual
+} from '../../shared/claimed-agent-pty-owner-snapshot'
+import { codexProviderHandleLink } from '../codex/codex-structured-owner-identity'
+import { claudeProviderHandleLink } from '../claude/claude-structured-owner-identity'
+import { readCodexResumeProcessIdentity } from '../codex/codex-resume-process-proof'
+import {
+  proveCodexTuiRollout,
+  resolvePinnedCodexRolloutProof
+} from '../codex/codex-tui-rollout-proof'
+import {
+  PROCESS_START_TIME_TOLERANCE_MS,
+  probeAgentSessionProcessIdentity
+} from './agent-session-process-identity-probe'
+import { waitForStructuredTuiExitProof } from './structured-tui-exit-proof'
+import { readStructuredTuiProcessIdentity } from './structured-tui-process-identity'
+import {
+  readClaudeTranscriptLeafUuid,
+  resolveSessionFilePath
+} from '../native-chat/session-file-resolver'
+import { ClaudeTranscriptTailIncompleteError } from '../claude/claude-transcript-branch-proof'
+import { hasStructuredTuiIdleEvidence } from './structured-tui-idle-evidence'
+import { evaluateStructuredTuiRecoveryClaim } from './structured-tui-recovery-claim-match'
+import { getProfileUserDataPath } from '../orca-profiles/profile-storage-paths'
+import { getSystemCodexHomePath } from '../codex/codex-home-paths'
+import {
+  agentSessionPtyWriteGate,
+  type AgentSessionPtyWriteAdmittance
+} from './agent-session-pty-write-gate'
 import {
   AGENT_SESSION_MAX_NEW_OPERATION_AGE_MS,
   AGENT_SESSION_OPERATION_FUTURE_SKEW_MS,
@@ -74,7 +125,6 @@ import {
   getTerminalPasteIngestMs
 } from '../../shared/agent-prompt-injection'
 import { iterateTerminalInputChunks } from '../../shared/terminal-input'
-import { yieldToEventLoop } from '../../shared/event-loop-yield'
 import type { AutomationsChangedPayload } from '../../shared/runtime-client-events'
 import { configureHostReadableTranscriptPathSources } from '../native-chat/host-readable-transcript-path'
 import { resolveNestedWorkerMaxDepth } from '../../shared/nested-worker-depth'
@@ -86,8 +136,8 @@ import {
   type TerminalExitCause
 } from '../../shared/terminal-exit-cause'
 import { createHash, randomUUID } from 'node:crypto'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { homedir, hostname } from 'node:os'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import { OrchestrationDb } from './orchestration/db'
 import { reconcileRequestedWorkerTerminalReleases } from './orchestration/worker-terminal-release-reconciliation'
 import {
@@ -110,6 +160,8 @@ import type {
 } from '../../shared/artifacts'
 import type { ArtifactCloudService } from '../artifacts/artifact-cloud-service'
 import { shouldForwardHeadlessTerminalQueryReply } from './headless-terminal-query-reply-policy'
+import { structuredAgentSessionTabId } from '../../shared/structured-agent-session-projection'
+import { collectSavedStructuredAgentSessionIds } from './saved-structured-agent-session-restoration'
 import type {
   OrchestrationCompatibilityEvidence,
   OrchestrationCompatibilityHostStamp
@@ -161,6 +213,7 @@ import type {
 import type { TuiAgent } from '../../shared/tui-agent'
 import type { WorkspaceSessionState } from '../../shared/workspace-session-state-types'
 import { assertWorktreeUnlockedForRemoval } from '../../shared/worktree/removal'
+import { preservedBranchCleanupScopeKey } from '../../shared/preserved-branch-cleanup'
 import {
   LOCAL_EXECUTION_HOST_ID,
   getRepoExecutionHostId,
@@ -214,6 +267,7 @@ import {
   type RuntimeSyncWindowGraphResult,
   type RuntimeTerminalWait,
   type RuntimeTerminalInteractiveWait,
+  type RuntimeTerminalWaitBlockedReason,
   type RuntimeTerminalWaitCondition,
   type RuntimeWorktreePsSummary,
   type RuntimeTerminalShow,
@@ -223,6 +277,7 @@ import {
   type RuntimeMarkdownReadTabResult,
   type RuntimeMarkdownSaveTabResult,
   type RuntimeMobileSessionCreateTerminalResult,
+  type RuntimeMobileSessionAgentTab,
   type RuntimeMobileSessionClientTab,
   type RuntimeMobileSessionTabCloseResult,
   type RuntimeMobileSessionMarkdownTab,
@@ -253,16 +308,19 @@ import {
   WORKTREE_ID_SEPARATOR,
   getRepoIdFromWorktreeId,
   splitWorktreeId,
-  splitWorktreeIdForFilesystem
+  splitWorktreeIdForFilesystem,
+  worktreeIdComparisonKey
 } from '../../shared/worktree/id'
 import { isFolderRepo } from '../../shared/repo-kind'
 import { SETUP_AGENT_SEQUENCE_STARTUP_COMMAND_ENV } from '../../shared/setup-agent-sequencing'
 import { FIRST_PANE_ID } from '../../shared/pane-key'
 import { isTerminalLeafId, makePaneKey, parsePaneKey } from '../../shared/stable-pane-id'
 import { parseAppSshPtyId } from '../../shared/ssh-pty-id'
+import { getPtyExecutionHost } from '../../shared/terminal-execution-host'
 import { isValidHostTerminalTabId, isValidTerminalTabId } from '../../shared/terminal-tab-id'
 import type { TerminalQuickCommandMutation } from '../../shared/terminal-quick-commands'
 import type { PtyIncarnationId } from '../../shared/pty-incarnation'
+import { resolvePublishedPaneAgentIdentity } from '../../shared/published-pane-agent-identity'
 import {
   buildAgentDraftLaunchPlan,
   buildAgentResumeStartupPlan,
@@ -275,6 +333,7 @@ import {
   resolveTuiAgentLaunchArgs,
   resolveTuiAgentLaunchEnv
 } from '../../shared/tui-agent-launch-defaults'
+import { resolveCodexStructuredAppServerArgs } from '../codex/codex-structured-app-server-args'
 import { resolveLocalWindowsAgentStartupShell } from '../../shared/windows-terminal-shell'
 import { isTuiAgent } from '../../shared/tui-agent-config'
 import { isWindowsAbsolutePathLike, isPathInsideOrEqual } from '../../shared/cross-platform-path'
@@ -578,11 +637,17 @@ import { collectMemorySnapshot } from '../memory/collector'
 import type { BrowserWindow, IpcMainEvent } from 'electron'
 import { getAppEnvironment } from '../../shared/app-environment'
 import { getRuntimeDesktopSurface } from './runtime-desktop-surface'
-import { renewRuntimeMobileAgentStatusFromPtyTitle } from './runtime-mobile-agent-status-projection'
 import {
+  renewRuntimeMobileAgentStatusFromPtyTitle,
+  selectRuntimeHookAgentRowForPane
+} from './runtime-mobile-agent-status-projection'
+import { runtimeTerminalDegradation } from './native-terminal-availability'
+import {
+  readAgentPromptWaitText,
   resolveAgentPromptEffectTimeoutMs,
   verifyAgentPromptSubmission,
-  type AgentPromptActivity
+  type AgentPromptActivity,
+  type AgentPromptWaitTextCache
 } from './agent-prompt-submission-verification'
 import { RendererPublicationThrottle } from '../window/renderer-publication-throttle'
 import type { AgentBrowserBridge } from '../browser/agent-browser-bridge'
@@ -613,6 +678,7 @@ import { listWorktreesStrict } from '../git/worktree'
 import { invalidateAuthorizedRootsCache } from '../ipc/filesystem-auth'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../shared/constants'
 import { deleteWorktreeHistoryDir } from '../terminal-history-deletion'
+import { deleteRemoteWorktreeHistory } from '../remote-worktree-history-cleanup'
 import { cleanupUnusedWorktreePushTargetRemote } from '../ipc/worktree-remote'
 import type { Store } from '../persistence'
 import type { StatsCollector } from '../stats/collector'
@@ -661,6 +727,7 @@ import type { RuntimeMobileSessionProjectionHost } from './runtime-mobile-sessio
 import { buildRuntimeMobileAgentStatus } from './runtime-mobile-agent-status-builder'
 import { withWorktreeSpan } from '../observability/instrumentation'
 import { HeadlessEmulator } from '../daemon/headless-emulator'
+import { detectTerminalComposerDraft } from '../../shared/terminal-composer-draft'
 import { PtyShellOwnershipMirror } from './pty-shell-ownership-mirror'
 import {
   isNativeWindowsConptyPty,
@@ -776,15 +843,19 @@ import {
 } from './mobile-session-layout-projection'
 import {
   detectExplicitIdleStatusFromTitle,
-  detectTerminalWaitBlockedReason
+  detectTerminalWaitBlockedReason,
+  isKnownReadyPromptPreview
 } from './terminal-wait-detection'
 import {
+  buildTerminalWaitText,
   computeTerminalTailWaitState,
   tailGainedNewerBlockedReason,
   type TerminalTailWaitState
 } from './terminal-wait-tail-state'
 import {
+  buildPtyTerminalWaitBlockedResult,
   buildPtyTerminalWaitResult,
+  buildTerminalWaitBlockedResult,
   buildTerminalWaitResult,
   getTerminalState
 } from './terminal-wait-results'
@@ -808,6 +879,7 @@ import {
 } from './terminal-tail-restore-seed'
 import {
   buildVisibleSnapshotReadFallback,
+  labelTerminalReadSource,
   readTerminalTail,
   shouldFallbackToVisibleTerminalSnapshot,
   terminalReadLimit,
@@ -846,6 +918,7 @@ import {
   compareWorktreePs,
   getLatestLeafTitle,
   getLatestPtyTitle,
+  mapExplicitAgentStateToRuntimeTerminalStatus,
   maxTimestamp,
   terminalTitleBlocksExplicitAgentStatus
 } from './runtime-worktree-status-projection'
@@ -908,6 +981,113 @@ const SSH_PANE_RECOVERY_GRACE_MS = 30_000
 // short enough that a recreated session id regains writability quickly even if
 // its runtime record (which also invalidates the verdict) is late.
 const PROVEN_ABSENT_LEAF_PTY_TTL_MS = 15_000
+const TERMINAL_INTERACTIVE_WAIT_PROBE_TIMEOUT_MS = 2_000
+
+type RuntimeTerminalProjection = { lines: string[]; draft?: string }
+
+function assertAgentPromptRequestActive(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new Error('request_aborted')
+  }
+}
+
+async function waitForAgentPromptPromise<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) {
+    return await promise
+  }
+  assertAgentPromptRequestActive(signal)
+  return await new Promise<T>((resolve, reject) => {
+    let settled = false
+    const finish = (result: { value: T } | { error: unknown }): void => {
+      if (settled) {
+        return
+      }
+      settled = true
+      signal.removeEventListener('abort', onAbort)
+      if ('error' in result) {
+        reject(result.error)
+      } else {
+        resolve(result.value)
+      }
+    }
+    const onAbort = (): void => finish({ error: new Error('request_aborted') })
+    signal.addEventListener('abort', onAbort, { once: true })
+    if (signal.aborted) {
+      onAbort()
+      return
+    }
+    promise.then(
+      (value) => finish({ value }),
+      (error: unknown) => finish({ error })
+    )
+  })
+}
+
+function yieldBetweenTerminalInputChunks(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    setImmediate(resolve)
+  })
+}
+
+async function waitForAgentPromptDelay(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) {
+    await new Promise((resolve) => setTimeout(resolve, delayMs))
+    return
+  }
+  assertAgentPromptRequestActive(signal)
+  await new Promise<void>((resolve, reject) => {
+    const onAbort = (): void => {
+      clearTimeout(timer)
+      reject(new Error('request_aborted'))
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, delayMs)
+    signal.addEventListener('abort', onAbort, { once: true })
+    if (signal.aborted) {
+      onAbort()
+    }
+  })
+}
+
+function findLastCompleteOscTitleRange(data: string): { start: number; end: number } | null {
+  let last: { start: number; end: number } | null = null
+  let searchFrom = 0
+  while (searchFrom < data.length) {
+    const start = data.indexOf('\x1b]', searchFrom)
+    if (start === -1) {
+      break
+    }
+    const command = data[start + 2]
+    if ((command !== '0' && command !== '1' && command !== '2') || data[start + 3] !== ';') {
+      searchFrom = start + 2
+      continue
+    }
+    let cursor = start + 4
+    for (; cursor < data.length; cursor += 1) {
+      if (data[cursor] === '\x07') {
+        last = { start, end: cursor + 1 }
+        searchFrom = cursor + 1
+        break
+      }
+      if (data[cursor] !== '\x1b') {
+        continue
+      }
+      if (data[cursor + 1] === '\\') {
+        last = { start, end: cursor + 2 }
+        searchFrom = cursor + 2
+      } else {
+        searchFrom = cursor
+      }
+      break
+    }
+    if (cursor === data.length) {
+      break
+    }
+  }
+  return last
+}
 
 function isClientDisconnectedError(error: unknown): boolean {
   return error instanceof Error && error.message === 'client_disconnected'
@@ -960,6 +1140,11 @@ function addListenerToMap<T>(map: Map<string, Set<T>>, key: string, listener: T)
       map.delete(key)
     }
   }
+}
+
+function isPathWithinDirectory(directory: string, candidate: string): boolean {
+  const relativePath = relative(resolve(directory), resolve(candidate))
+  return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
 }
 
 const AGENT_HOOK_RUNTIME_ENV_KEYS = [
@@ -1067,6 +1252,11 @@ class OrcaRuntimeService {
   private readonly rendererPublicationThrottle = new RendererPublicationThrottle()
   private tabs = new Map<string, RuntimeSyncedTab>()
   private mobileSessionTabsByWorktree = new Map<string, RuntimeMobileSessionTabsSnapshot>()
+  private structuredAgentSessionTabRestorePromise: Promise<void> | null = null
+  private structuredAgentSessionStartupRestorePromise: Promise<void> | null = null
+  private mobileSessionTabsChangeSequence = 0
+  private sessionTabsInventoryPublicationEpoch: number | null = null
+  private sessionTabsInventoryWaiters = new Set<() => void>()
   private readonly clientHostedPageReconciliation = new ClientHostedPageReconciliationWindow(
     Date.now()
   )
@@ -1131,9 +1321,10 @@ class OrcaRuntimeService {
     }
   >()
   private mobileSessionTabListeners = new Set<{
-    listener: (snapshot: RuntimeMobileSessionTabsResult) => void
+    listener: (snapshot: RuntimeMobileSessionTabsResult, changeSequence: number) => void
     clientNavigationId?: string
   }>()
+  private pendingMobileSessionTabsChangeSequenceByWorktree = new Map<string, number>()
   // Why: one watermark per repo replaces per-closed-pane fences while preserving stale-write safety.
   private terminalTopologyRevisionByRepoId = new Map<string, number>()
   // Why: provider exit can beat surface registration; that exact dead incarnation must never publish.
@@ -1147,7 +1338,7 @@ class OrcaRuntimeService {
   // second. Emit reads the latest snapshot, so only the freshest version ships.
   private readonly mobileSessionTabsNotifyCoalescer: MobileSessionTabsNotifyCoalescer =
     createMobileSessionTabsNotifyCoalescer((worktreeId) =>
-      this.notifyMobileSessionTabsChangedNow(worktreeId)
+      this.flushScheduledMobileSessionTabsChanged(worktreeId)
     )
   private readonly mobileSessionTabsAgentStatusHeartbeat: MobileSessionTabsAgentStatusHeartbeat =
     createMobileSessionTabsAgentStatusHeartbeat(
@@ -1160,7 +1351,8 @@ class OrcaRuntimeService {
   // reconnect-scan bounding for sequential soft freezes.
   private readonly terminalFocusNavigationCoalescer =
     new TerminalFocusNavigationCoalescer<RuntimeTerminalFocus>()
-  private pendingMobileSessionPtyInventoryRefresh: Promise<Set<string> | null> | null = null
+  private pendingMobileSessionPtyAggregateInventoryRefresh: Promise<PtyControllerInventory | null> | null =
+    null
   private leaves = new Map<string, RuntimeLeafRecord>()
   // Why: PTY output is a per-keystroke hot path. Looking up affected leaves by
   // ptyId keeps active TUI redraws independent of the total open terminal count.
@@ -1182,7 +1374,8 @@ class OrcaRuntimeService {
   private graphSyncCallbacks: (() => void)[] = []
   private readonly terminalWaiters = new RuntimeTerminalWaiterRegistry()
   private readonly terminalWriter = new RuntimeTerminalWriter(
-    (ptyId, data) => this.ptyController?.write(ptyId, data) ?? false
+    (ptyId, data) => this.ptyController?.write(ptyId, data) ?? false,
+    (ptyId) => this.getPtyWriteHostPlatform(ptyId)
   )
   private readonly terminalIdlePolls = new RuntimeTerminalIdlePolls({
     intervalMs: TUI_IDLE_POLL_INTERVAL_MS,
@@ -1198,7 +1391,13 @@ class OrcaRuntimeService {
       getLivePty: (handle) => this.getLivePtyForHandle(handle),
       getLiveLeaf: (handle) => this.getLiveLeafForHandle(handle),
       getAdoptedPtyIdleStatus: (pty) => this.getAdoptedPtyExplicitIdleStatus(pty),
-      getTabTitle: (tabId) => this.tabs.get(tabId)?.title ?? null
+      hasAdoptedPtyAgentTitle: (pty) => {
+        const title = this.getAdoptedPtyTitle(pty)
+        return title !== null && detectAgentStatusFromTitle(title) !== null
+      },
+      getTabTitle: (tabId) => this.tabs.get(tabId)?.title ?? null,
+      startVisibleReadProbe: (waiter, waiterTimeoutMs) =>
+        this.startTuiIdleVisibleReadProbe(waiter, waiterTimeoutMs)
     },
     this.terminalWaiters,
     this.terminalIdlePolls
@@ -1230,8 +1429,7 @@ class OrcaRuntimeService {
     listMobileSnapshots: () => this.mobileSessionTabsByWorktree,
     setMobileSnapshot: (worktreeId, snapshot) =>
       this.mobileSessionTabsByWorktree.set(worktreeId, snapshot),
-    scheduleMobileSnapshot: (worktreeId) =>
-      this.mobileSessionTabsNotifyCoalescer.schedule(worktreeId),
+    scheduleMobileSnapshot: (worktreeId) => this.scheduleMobileSessionTabsChanged(worktreeId),
     notifyResolved: (tabId, resolution, event) => {
       this.notifier?.nativeChatLaunchDraftResolved?.(tabId, resolution)
       this.emitClientEvent(event)
@@ -1324,6 +1522,7 @@ class OrcaRuntimeService {
     getPrimaryLeaf: (ptyId) => this.getPrimaryLeafForPty(ptyId),
     getTabTitle: (tabId) => this.tabs.get(tabId)?.title ?? null,
     getExplicitStatus: (handle) => this.getFreshExplicitAgentStatusForHandle(handle),
+    getLifecycleStatus: (ptyId) => this.agentPromptLifecycleByPtyId.get(ptyId),
     isRunning: (handle) => this.isTerminalRunningAgent(handle)
   })
   private _orchestrationDb: OrchestrationDb | null = null
@@ -1798,6 +1997,12 @@ class OrcaRuntimeService {
   private readonly prepareAiVaultSessionResumeFn:
     | ((args: AiVaultPrepareSessionResumeArgs) => Promise<AiVaultPrepareSessionResumeResult>)
     | null
+  private readonly prepareCodexStructuredLaunchFn:
+    | ((input: {
+        workspacePath: string
+        launchEnv: NodeJS.ProcessEnv
+      }) => string | null | Promise<string | null>)
+    | null
   private readonly agentSessionClaimSigner: AgentSessionClaimSigner
   private readonly agentSessionCreateOperations = new Map<string, AgentSessionCreateOperation>()
   private readonly agentPromptSubmissionTailByPtyId = new Map<string, Promise<void>>()
@@ -1968,6 +2173,10 @@ class OrcaRuntimeService {
       prepareAiVaultSessionResume?: (
         args: AiVaultPrepareSessionResumeArgs
       ) => Promise<AiVaultPrepareSessionResumeResult>
+      prepareCodexStructuredLaunch?: (input: {
+        workspacePath: string
+        launchEnv: NodeJS.ProcessEnv
+      }) => string | null | Promise<string | null>
       buildAgentHookPtyEnv?: () => Record<string, string>
       getDesktopWindowStatus?: () => RuntimeDesktopWindowStatus
       agentSessionClaimSigner?: AgentSessionClaimSigner
@@ -2042,7 +2251,9 @@ class OrcaRuntimeService {
     void this.canonicalFetchKeyCache
     void this.fetchLastCompletedAt
     this.store = store
-    this.clientSettings = new RuntimeClientSettingsController(store)
+    this.clientSettings = new RuntimeClientSettingsController(store, () =>
+      this.notifyReposChanged()
+    )
     this.automation = new RuntimeAutomationController(store, {
       showRepo: (selector) => runtime.showRepo(selector),
       showManagedWorktree: (selector) => this.showManagedWorktree(selector)
@@ -2098,6 +2309,7 @@ class OrcaRuntimeService {
     this.buildAgentHookPtyEnv = deps?.buildAgentHookPtyEnv ?? null
     this.getDesktopWindowStatusFn = deps?.getDesktopWindowStatus ?? (() => 'openable')
     this.prepareAiVaultSessionResumeFn = deps?.prepareAiVaultSessionResume ?? null
+    this.prepareCodexStructuredLaunchFn = deps?.prepareCodexStructuredLaunch ?? null
     this.agentSessionClaimSigner =
       deps?.agentSessionClaimSigner ?? createEphemeralAgentSessionClaimSigner(this.runtimeId)
     this.onTerminalSideEffects = deps?.onTerminalSideEffects ?? null
@@ -2686,14 +2898,16 @@ class OrcaRuntimeService {
     method: string,
     params: unknown,
     timeoutMs?: number,
-    envelope?: RuntimeOrchestrationEnvelope
+    envelope?: RuntimeOrchestrationEnvelope,
+    internal?: { contractVerified?: boolean }
   ): Promise<unknown> {
     return this.orchestrationFederation.callWorkerServer(
       selector,
       method,
       params,
       timeoutMs,
-      envelope
+      envelope,
+      internal
     )
   }
 
@@ -2759,7 +2973,10 @@ class OrcaRuntimeService {
     worktrees: Iterable<ResolvedWorktree>,
     queriedHostIds: ReadonlySet<ExecutionHostId>
   ): { hostIds: ExecutionHostId[]; omittedHostIds: ExecutionHostId[] } {
-    const known = this.listKnownExecutionHostIds(queriedHostIds, true)
+    const known = this.listKnownExecutionHostIds(
+      queriedHostIds,
+      targetWorktreeId !== FLOATING_TERMINAL_WORKTREE_ID
+    )
     let targetHost: ExecutionHostId | null = null
     for (const worktree of worktrees) {
       if (worktree.id === targetWorktreeId && worktree.hostId) {
@@ -2888,6 +3105,10 @@ class OrcaRuntimeService {
           }
         ]
       : []
+    const terminalDegradation = runtimeTerminalDegradation()
+    if (terminalDegradation) {
+      degradations.push(terminalDegradation)
+    }
     return {
       runtimeId: this.runtimeId,
       rendererGraphEpoch: this.rendererGraphEpoch,
@@ -2902,6 +3123,7 @@ class OrcaRuntimeService {
       // must not treat browser panes as supported just because runtime RPC is up.
       capabilities,
       ...(degradations.length > 0 ? { degradations } : {}),
+      worktreeCreateIdempotency: { dedupeTtlMs: WORKTREE_CREATE_RESULT_TTL_MS },
       hostPlatform: process.platform,
       terminalWindowsShell: this.store?.getSettings?.().terminalWindowsShell ?? null,
       floatingWorkspaceEnabled: this.store?.getSettings?.().floatingTerminalEnabled !== false,
@@ -3120,7 +3342,7 @@ class OrcaRuntimeService {
       return
     }
     for (const worktreeId of worktreeIds) {
-      this.notifyMobileSessionTabsChangedNow(worktreeId)
+      this.notifyMobileSessionTabsChangedNow(worktreeId, ++this.mobileSessionTabsChangeSequence)
     }
   }
 
@@ -3521,10 +3743,21 @@ class OrcaRuntimeService {
     }
     for (const worktreeId of changedMobileWorktrees) {
       if (this.mobileSessionTabsByWorktree.has(worktreeId)) {
-        this.mobileSessionTabsNotifyCoalescer.schedule(worktreeId)
+        this.scheduleMobileSessionTabsChanged(worktreeId)
       }
     }
+    const isAuthoritativeGraphPublisher = windowId === this.authoritativeWindowId
     this.markGraphReady(windowId)
+    if (
+      isAuthoritativeGraphPublisher &&
+      (windowId === HEADLESS_RUNTIME_WINDOW_ID || graph.mobileSessionTabs !== undefined)
+    ) {
+      if (mobileSessionResyncWorktrees.size === 0) {
+        this.markSessionTabsInventoryPublished()
+      } else {
+        this.sessionTabsInventoryPublicationEpoch = null
+      }
+    }
     if (rendererGeneration !== undefined) {
       this.rendererGeneration = rendererGeneration
     }
@@ -3636,6 +3869,22 @@ class OrcaRuntimeService {
   async listAllMobileSessionTabs(
     clientNavigationId?: string
   ): Promise<RuntimeMobileSessionTabsResult[]> {
+    return (await this.listAllMobileSessionTabsWithChangeSequence(clientNavigationId)).snapshots
+  }
+
+  async listAllMobileSessionTabsWithChangeSequence(clientNavigationId?: string): Promise<{
+    snapshots: RuntimeMobileSessionTabsResult[]
+    changeSequence: number
+  }> {
+    const inventory = await this.collectAllMobileSessionTabs(clientNavigationId)
+    return { snapshots: inventory.snapshots, changeSequence: inventory.changeSequence }
+  }
+
+  private async collectAllMobileSessionTabs(clientNavigationId?: string): Promise<{
+    snapshots: RuntimeMobileSessionTabsResult[]
+    ptyInventory: PtyControllerInventory | null
+    changeSequence: number
+  }> {
     for (const worktreeId of this.getKnownWorkspaceSessionWorktreeIds()) {
       this.hydrateHeadlessMobileSessionTabsFromWorkspaceSession(worktreeId, {
         allowAttachedWindow: true,
@@ -3643,13 +3892,146 @@ class OrcaRuntimeService {
       })
     }
     this.hydrateHeadlessMobileSessionTabsFromWorkspaceSession()
-    await this.refreshMobileSessionPtyRecords()
-    return [...this.mobileSessionTabsByWorktree.values()].map((snapshot) =>
+    const ptyInventory = await this.refreshMobileSessionPtyInventory()
+    this.restoreLivePairedRendererSessionOwnedMobileTerminals(null)
+    const snapshots = [...this.mobileSessionTabsByWorktree.values()].map((snapshot) =>
       this.projectMobileSessionTabsForClient(
         this.toMobileSessionTabsResult(snapshot),
         clientNavigationId
       )
     )
+    return { snapshots, ptyInventory, changeSequence: this.mobileSessionTabsChangeSequence }
+  }
+
+  async listAllMobileSessionTabsInventory(
+    clientNavigationId?: string,
+    signal?: AbortSignal
+  ): Promise<{ snapshots: RuntimeMobileSessionTabsResult[]; authoritative?: true }> {
+    const { snapshots, authoritative } =
+      await this.listAllMobileSessionTabsInventoryWithChangeSequence(clientNavigationId, signal)
+    return { snapshots, ...(authoritative ? { authoritative } : {}) }
+  }
+
+  async listAllMobileSessionTabsInventoryWithChangeSequence(
+    clientNavigationId?: string,
+    signal?: AbortSignal
+  ): Promise<{
+    snapshots: RuntimeMobileSessionTabsResult[]
+    authoritative?: true
+    changeSequence: number
+  }> {
+    this.assertSessionTabsInventoryRequestActive(signal)
+    const primedPublicationEpoch = this.getAuthoritativeSessionTabsInventoryEpoch()
+    const primed = await this.collectAllMobileSessionTabs(clientNavigationId)
+    this.assertSessionTabsInventoryRequestActive(signal)
+    if (
+      primedPublicationEpoch !== null &&
+      this.getAuthoritativeSessionTabsInventoryEpoch() === primedPublicationEpoch
+    ) {
+      return await this.settleSessionTabsInventory(primed, clientNavigationId, signal)
+    }
+    while (true) {
+      const publicationEpoch = this.getAuthoritativeSessionTabsInventoryEpoch()
+      if (publicationEpoch === null) {
+        await this.waitForSessionTabsInventoryPublication(signal)
+        continue
+      }
+      const inventory = await this.collectAllMobileSessionTabs(clientNavigationId)
+      this.assertSessionTabsInventoryRequestActive(signal)
+      if (this.getAuthoritativeSessionTabsInventoryEpoch() === publicationEpoch) {
+        return await this.settleSessionTabsInventory(inventory, clientNavigationId, signal)
+      }
+    }
+  }
+
+  private async settleSessionTabsInventory(
+    inventory: {
+      snapshots: RuntimeMobileSessionTabsResult[]
+      ptyInventory: PtyControllerInventory | null
+      changeSequence: number
+    },
+    clientNavigationId?: string,
+    signal?: AbortSignal
+  ): Promise<{
+    snapshots: RuntimeMobileSessionTabsResult[]
+    authoritative?: true
+    changeSequence: number
+  }> {
+    if (this.isCompleteSessionTabsPtyCensus(inventory.ptyInventory)) {
+      return {
+        snapshots: inventory.snapshots,
+        authoritative: true,
+        changeSequence: inventory.changeSequence
+      }
+    }
+    const retried = await this.collectAllMobileSessionTabs(clientNavigationId)
+    this.assertSessionTabsInventoryRequestActive(signal)
+    return { snapshots: retried.snapshots, changeSequence: retried.changeSequence }
+  }
+
+  supportsAuthoritativeSessionTabsInventory(): boolean {
+    return process.env.ORCA_E2E_DISABLE_AUTHORITATIVE_SESSION_TABS_INVENTORY !== '1'
+  }
+
+  private assertSessionTabsInventoryRequestActive(signal?: AbortSignal): void {
+    if (signal?.aborted) {
+      throw new Error('client_disconnected')
+    }
+  }
+
+  private isCompleteSessionTabsPtyCensus(inventory: PtyControllerInventory | null): boolean {
+    if (!inventory) {
+      return false
+    }
+    const knownHostIds = this.listKnownExecutionHostIds(inventory.queriedHostIds)
+    return ![...knownHostIds].some((hostId) => {
+      const parsed = parseExecutionHostId(hostId)
+      return parsed?.kind !== 'runtime' && !inventory.queriedHostIds.has(hostId)
+    })
+  }
+
+  private waitForSessionTabsInventoryPublication(signal?: AbortSignal): Promise<void> {
+    if (this.getAuthoritativeSessionTabsInventoryEpoch() !== null) {
+      return Promise.resolve()
+    }
+    return new Promise<void>((resolve, reject) => {
+      const cleanup = (): void => {
+        this.sessionTabsInventoryWaiters.delete(onPublished)
+        signal?.removeEventListener('abort', onAbort)
+      }
+      const onPublished = (): void => {
+        cleanup()
+        resolve()
+      }
+      const onAbort = (): void => {
+        cleanup()
+        reject(new Error('client_disconnected'))
+      }
+      this.sessionTabsInventoryWaiters.add(onPublished)
+      signal?.addEventListener('abort', onAbort, { once: true })
+      if (signal?.aborted) {
+        onAbort()
+      } else if (this.getAuthoritativeSessionTabsInventoryEpoch() !== null) {
+        onPublished()
+      }
+    })
+  }
+
+  private getAuthoritativeSessionTabsInventoryEpoch(): number | null {
+    return this.graphStatus === 'ready' &&
+      this.sessionTabsInventoryPublicationEpoch === this.rendererGraphEpoch
+      ? this.rendererGraphEpoch
+      : null
+  }
+
+  private markSessionTabsInventoryPublished(): void {
+    if (this.sessionTabsInventoryPublicationEpoch === this.rendererGraphEpoch) {
+      return
+    }
+    this.sessionTabsInventoryPublicationEpoch = this.rendererGraphEpoch
+    for (const publish of [...this.sessionTabsInventoryWaiters]) {
+      publish()
+    }
   }
 
   private hydrateHeadlessMobileSessionTabsFromWorkspaceSession(
@@ -4296,7 +4678,7 @@ class OrcaRuntimeService {
     }
     // Why: title/status flips several times a second under spinner-in-title
     // agents. Coalesce the emit instead of fanning out every version.
-    this.mobileSessionTabsNotifyCoalescer.schedule(worktreeId)
+    this.scheduleMobileSessionTabsChanged(worktreeId)
   }
 
   /** Republish the workspace snapshot after a pane's hook status changed.
@@ -4332,6 +4714,14 @@ class OrcaRuntimeService {
   ): boolean {
     const session = this.getWorkspaceSessionForWorktree(worktreeId)
     const repoId = getRepoIdFromWorktreeId(worktreeId)
+    const pty = candidatePtyId ? this.ptysById.get(candidatePtyId) : undefined
+    const pane = parsePaneKey(pty?.paneKey ?? '')
+    const hasExactLiveBinding = Boolean(
+      pty?.connected &&
+      pty.worktreeId === worktreeId &&
+      pty.tabId === parentTabId &&
+      pane?.leafId === leafId
+    )
     if (candidatePtyId && this.retiredMobileSessionPtyIds.has(candidatePtyId)) {
       return false
     }
@@ -4349,7 +4739,12 @@ class OrcaRuntimeService {
             ].filter((ptyId): ptyId is string => typeof ptyId === 'string')
           : []
       )
-      if (persistedParent && candidatePtyId && !persistedPtyIds.has(candidatePtyId)) {
+      if (
+        persistedParent &&
+        candidatePtyId &&
+        !persistedPtyIds.has(candidatePtyId) &&
+        !hasExactLiveBinding
+      ) {
         return false
       }
     }
@@ -4365,14 +4760,7 @@ class OrcaRuntimeService {
     if (!candidatePtyId) {
       return false
     }
-    const pty = this.ptysById.get(candidatePtyId)
-    const pane = parsePaneKey(pty?.paneKey ?? '')
-    return Boolean(
-      pty?.connected &&
-      pty.worktreeId === worktreeId &&
-      pty.tabId === parentTabId &&
-      pane?.leafId === leafId
-    )
+    return hasExactLiveBinding
   }
 
   private reconcileMobileSessionRetirementFences(
@@ -4671,9 +5059,11 @@ class OrcaRuntimeService {
       return
     }
     const result = this.toMobileSessionTabsResult(snapshot)
+    const changeSequence = ++this.mobileSessionTabsChangeSequence
     for (const subscription of this.mobileSessionTabListeners) {
       subscription.listener(
-        this.projectMobileSessionTabsForClient(result, subscription.clientNavigationId)
+        this.projectMobileSessionTabsForClient(result, subscription.clientNavigationId),
+        changeSequence
       )
     }
   }
@@ -4705,19 +5095,26 @@ class OrcaRuntimeService {
   private async refreshMobileSessionPtyRecords(
     targetWorktreeId: string | null = null
   ): Promise<Set<string> | null> {
+    const inventory = await this.refreshMobileSessionPtyInventory(targetWorktreeId)
+    return inventory ? new Set(inventory.livePtyIds) : null
+  }
+
+  private async refreshMobileSessionPtyInventory(
+    targetWorktreeId: string | null = null
+  ): Promise<PtyControllerInventory | null> {
     if (targetWorktreeId !== FLOATING_TERMINAL_WORKTREE_ID) {
-      const pending = this.pendingMobileSessionPtyInventoryRefresh
+      const pending = this.pendingMobileSessionPtyAggregateInventoryRefresh
       if (pending) {
         return pending
       }
       // Why: reconnect exit bursts share one authoritative daemon inventory
       // instead of multiplying a full cross-generation list RPC per stale tab.
       const refresh = this.performMobileSessionPtyRecordsRefresh(targetWorktreeId).finally(() => {
-        if (this.pendingMobileSessionPtyInventoryRefresh === refresh) {
-          this.pendingMobileSessionPtyInventoryRefresh = null
+        if (this.pendingMobileSessionPtyAggregateInventoryRefresh === refresh) {
+          this.pendingMobileSessionPtyAggregateInventoryRefresh = null
         }
       })
-      this.pendingMobileSessionPtyInventoryRefresh = refresh
+      this.pendingMobileSessionPtyAggregateInventoryRefresh = refresh
       return refresh
     }
     return await this.performMobileSessionPtyRecordsRefresh(targetWorktreeId)
@@ -4725,14 +5122,14 @@ class OrcaRuntimeService {
 
   private async performMobileSessionPtyRecordsRefresh(
     targetWorktreeId: string | null
-  ): Promise<Set<string> | null> {
+  ): Promise<PtyControllerInventory | null> {
     if (!this.ptyController?.listProcesses && !this.ptyController?.hasPty) {
       return null
     }
     // Why: floating PTY identity is explicit, so polling must not resolve every Git/SSH worktree.
     const isFloatingWorkspace = targetWorktreeId === FLOATING_TERMINAL_WORKTREE_ID
     const resolvedWorktrees = isFloatingWorkspace ? [] : await this.listResolvedWorktrees()
-    return await this.refreshPtyWorktreeRecordsFromController(
+    return await this.refreshPtyWorktreeRecordsWithControllerInventory(
       resolvedWorktrees,
       isFloatingWorkspace ? targetWorktreeId : null
     )
@@ -5347,6 +5744,21 @@ class OrcaRuntimeService {
         }
         await this.notifier.closeSessionTab(tab.id, worktreeId)
       }
+    } else if (tab.type === 'agent-session') {
+      if (this.notifier?.closeSessionTab) {
+        try {
+          await this.notifier.closeSessionTab(
+            structuredAgentSessionTabId(tab.sessionId),
+            worktreeId
+          )
+        } catch (error) {
+          // The renderer already having removed the tab is an idempotent close, not a veto.
+          if (!(error instanceof Error && error.message === SESSION_TAB_NOT_FOUND_ERROR)) {
+            throw error
+          }
+        }
+      }
+      this.closeStructuredAgentSessionTab(worktreeId, snapshot, tab)
     } else {
       if (!this.notifier?.closeSessionTab) {
         throw new Error('runtime_unavailable')
@@ -5354,6 +5766,30 @@ class OrcaRuntimeService {
       await this.notifier.closeSessionTab(tab.id, worktreeId)
     }
     return finishCommittedClose()
+  }
+
+  private closeStructuredAgentSessionTab(
+    worktreeId: string,
+    snapshot: RuntimeMobileSessionTabsSnapshot,
+    tab: RuntimeMobileSessionAgentTab
+  ): void {
+    const nextTabs = snapshot.tabs.filter((candidate) => candidate.id !== tab.id)
+    const active = nextTabs.find((candidate) => candidate.isActive) ?? nextTabs[0] ?? null
+    const nextSnapshot: RuntimeMobileSessionTabsSnapshot = {
+      ...snapshot,
+      snapshotVersion: snapshot.snapshotVersion + 1,
+      activeTabId: active?.id ?? null,
+      activeTabType: active?.type ?? null,
+      tabGroups: (snapshot.tabGroups ?? []).map((group) => ({
+        ...group,
+        tabOrder: group.tabOrder.filter((id) => id !== tab.id),
+        activeTabId: group.activeTabId === tab.id ? null : group.activeTabId,
+        recentTabIds: group.recentTabIds?.filter((id) => id !== tab.id)
+      })),
+      tabs: nextTabs
+    }
+    this.mobileSessionTabsByWorktree.set(worktreeId, nextSnapshot)
+    this.emitMobileSessionTabsSnapshot(nextSnapshot)
   }
 
   // Why: a refused echoed close means the echoing client already pruned its
@@ -6078,6 +6514,25 @@ class OrcaRuntimeService {
       // Why: clients reorder the sanitized session.tabs.list model; raw groups
       // can still contain stale browser ids hidden from paired web clients.
       .filter((tabId) => returnedIds.has(tabId))
+    const structuredIds = expected.filter((tabId) =>
+      snapshot?.tabs.some((tab) => tab.type === 'agent-session' && tab.id === tabId)
+    )
+    if (structuredIds.some((tabId) => !seen.has(tabId))) {
+      if (structuredIds.some((tabId) => seen.has(tabId))) {
+        throw new Error('invalid_tab_order')
+      }
+      const visibleExpected = expected.filter((tabId) => !structuredIds.includes(tabId))
+      if (
+        normalized.length !== visibleExpected.length ||
+        visibleExpected.some((tabId) => !seen.has(tabId))
+      ) {
+        throw new Error('invalid_tab_order')
+      }
+      for (const tabId of structuredIds) {
+        normalized.splice(Math.min(expected.indexOf(tabId), normalized.length), 0, tabId)
+      }
+      return normalized
+    }
     // Why: reorder is a pure permutation of one existing group. Missing or
     // extra ids would let a paired web client silently move/lose host tabs.
     if (normalized.length !== expected.length || expected.some((tabId) => !seen.has(tabId))) {
@@ -6335,7 +6790,7 @@ class OrcaRuntimeService {
   }
 
   onMobileSessionTabsChanged(
-    listener: (snapshot: RuntimeMobileSessionTabsResult) => void,
+    listener: (snapshot: RuntimeMobileSessionTabsResult, changeSequence: number) => void,
     clientNavigationId?: string
   ): () => void {
     // Why: a notify coalesced before this subscriber existed is already folded
@@ -6528,6 +6983,7 @@ class OrcaRuntimeService {
   ): void {
     this.ptyLivenessVerdictByPtyId.delete(ptyId)
     this.stopRequestedPtyIds.delete(ptyId)
+    this.retiredMobileSessionPtyIds.delete(ptyId)
     if (options.awaitsRegistration !== false) {
       // Why: surface absence cannot distinguish an in-flight admission from a completed headless lifecycle.
       this.pendingPtyRegistrationIncarnations.set(ptyId, incarnationId ?? null)
@@ -6557,6 +7013,10 @@ class OrcaRuntimeService {
       leafId: string
       incarnationId?: PtyIncarnationId
       agentLaunchAuthority?: { launchToken: string; launchAgent: TuiAgent }
+      providerReattachLaunchIdentity?: {
+        incarnationId: PtyIncarnationId
+        launchAgent: TuiAgent
+      }
     },
     isWsl?: boolean
   ): void {
@@ -6594,6 +7054,18 @@ class OrcaRuntimeService {
       pty.launchToken = agentLaunchAuthority.launchToken
       pty.launchIncarnationId = binding.incarnationId
       pty.launchAgent = agentLaunchAuthority.launchAgent
+    }
+    const providerReattachLaunchIdentity = binding?.providerReattachLaunchIdentity
+    if (
+      providerReattachLaunchIdentity &&
+      paneKey &&
+      binding.incarnationId === providerReattachLaunchIdentity.incarnationId &&
+      pty.incarnationId === providerReattachLaunchIdentity.incarnationId &&
+      pty.paneKey === paneKey &&
+      isTuiAgent(providerReattachLaunchIdentity.launchAgent)
+    ) {
+      // Why: daemon metadata owns the surviving process; its incarnation fence restores identity without minting renderer launch authority.
+      pty.launchAgent = providerReattachLaunchIdentity.launchAgent
     }
     const pendingIncarnation = this.pendingPtyRegistrationIncarnations.get(ptyId)
     if (
@@ -6986,6 +7458,11 @@ class OrcaRuntimeService {
         // bell — the chunk's agentStatus:set events must reach the renderer
         // before its pty:sideEffect batch.
         retainedAgentStatusChanged = this.emitTerminalAgentStatusEvents(ptyId, agentStatusChunk)
+        const lastPayloadTitleOffset =
+          agentStatusChunk.lastPayloadCleanOffset === null
+            ? null
+            : (previousTitleScanTail?.length ?? 0) + agentStatusChunk.lastPayloadCleanOffset
+        this.restoreAgentPromptLifecycleByteOrder(ptyId, titleInput, lastPayloadTitleOffset)
       } finally {
         // Why: flushed in the finally so a throwing tracker callback cannot
         // strand this chunk's facts to be emitted under the next chunk's seq.
@@ -7069,6 +7546,7 @@ class OrcaRuntimeService {
     }
     if (tailGainedNewerBlockedReason(previousWaitState, nextWaitState, state.appended)) {
       pty.waitBlockedAt = at
+      this.recordAgentPromptPermissionObservation(ptyId)
     }
     state.lastAt = at
     state.lastWaitState = nextWaitState
@@ -7535,6 +8013,7 @@ class OrcaRuntimeService {
     const identityOnlyTitle = this.isLiveCursorNativeTitle(rawTitle, meta)
     const recordedTitle = identityOnlyTitle ? null : normalizedTitle
     const agentStatus = identityOnlyTitle ? null : detectAgentStatusFromTitle(rawTitle)
+    this.recordAgentPromptLifecycleState(ptyId, agentStatus)
     let ptyRecordChanged = false
     const pty = this.ptysById.get(ptyId)
     if (pty) {
@@ -7646,6 +8125,9 @@ class OrcaRuntimeService {
     this.oscTitleScanTailByPtyId.delete(ptyId)
     this.osc7ScanTailByPtyId.delete(ptyId)
     this.agentStatusOscProcessorsByPtyId.delete(ptyId)
+    this.agentPromptLifecycleByPtyId.delete(ptyId)
+    this.agentPromptPermissionSequenceByPtyId.delete(ptyId)
+    this.clearWaitBlockedCheckState(ptyId)
     const pty = this.ptysById.get(ptyId)
     if (pty) {
       pty.lastOscTitle = null
@@ -7659,13 +8141,18 @@ class OrcaRuntimeService {
       pty.lastAgentStatusRichInvalidatedAtEpochMs = Date.now()
       pty.managementTitle = null
       pty.managementTitleAt = null
+      pty.waitBlockedAt = null
+      pty.tailWaitState = undefined
     }
     for (const leaf of this.getLeavesForPty(ptyId)) {
       leaf.lastOscTitle = null
       leaf.lastOscTitleAt = null
       leaf.lastAgentStatus = null
       leaf.lastAgentStatusObservedLive = false
+      leaf.waitBlockedAt = null
+      leaf.tailWaitState = undefined
     }
+    this.primeWaitBlockedBaselineFromSeededTail(ptyId)
     this.clearAgentRowSnapshotsForPty(ptyId)
   }
 
@@ -7804,6 +8291,10 @@ class OrcaRuntimeService {
     }
     let retainedChanged = false
     for (const payload of chunk.payloads) {
+      this.recordAgentPromptLifecycleState(
+        ptyId,
+        mapExplicitAgentStateToRuntimeTerminalStatus(payload.state)
+      )
       for (const target of targets.values()) {
         retainedChanged =
           this.retainAgentRowSnapshot(
@@ -7859,6 +8350,64 @@ class OrcaRuntimeService {
     this.agentRows.clearPty(ptyId)
   }
 
+  private recordAgentPromptLifecycleState(ptyId: string, status: AgentStatus | null): void {
+    if (status === 'permission') {
+      this.recordAgentPromptPermissionObservation(ptyId)
+    }
+    const current = this.agentPromptLifecycleByPtyId.get(ptyId)
+    const updatedAt = Date.now()
+    if (!current) {
+      this.agentPromptLifecycleByPtyId.set(ptyId, {
+        status,
+        workingSequence: status === 'working' ? 1 : 0,
+        updatedAt
+      })
+      return
+    }
+    this.agentPromptLifecycleByPtyId.set(ptyId, {
+      status,
+      workingSequence:
+        current.workingSequence + (status === 'working' && current.status !== 'working' ? 1 : 0),
+      updatedAt
+    })
+  }
+
+  private recordAgentPromptPermissionObservation(ptyId: string): void {
+    this.agentPromptPermissionSequenceByPtyId.set(
+      ptyId,
+      (this.agentPromptPermissionSequenceByPtyId.get(ptyId) ?? 0) + 1
+    )
+  }
+
+  private restoreAgentPromptLifecycleByteOrder(
+    ptyId: string,
+    titleInput: string,
+    lastPayloadTitleOffset: number | null
+  ): void {
+    if (lastPayloadTitleOffset === null) {
+      return
+    }
+    const titleRange = findLastCompleteOscTitleRange(titleInput)
+    if (!titleRange || titleRange.end <= lastPayloadTitleOffset) {
+      return
+    }
+    const title = extractLastOscTitle(titleInput)
+    if (title === null) {
+      return
+    }
+    const status = detectAgentStatusFromTitle(title)
+    const current = this.agentPromptLifecycleByPtyId.get(ptyId)
+    if (!current || current.status === status) {
+      return
+    }
+    this.agentPromptLifecycleByPtyId.set(ptyId, {
+      status,
+      workingSequence:
+        current.workingSequence + (status === 'working' && current.status !== 'working' ? 1 : 0),
+      updatedAt: Date.now()
+    })
+  }
+
   getPtyOutputSequence(ptyId: string): number {
     return this.ptyOutputSequenceById.get(ptyId) ?? 0
   }
@@ -7878,6 +8427,9 @@ class OrcaRuntimeService {
     // A stop intent belongs to one process incarnation; never let it label a
     // replacement process when the provider reports a generation reset.
     this.stopRequestedPtyIds.delete(ptyId)
+    this.agentPromptLifecycleByPtyId.delete(ptyId)
+    this.agentPromptPermissionSequenceByPtyId.delete(ptyId)
+    this.agentPromptExplicitStatusFloorByPtyId.set(ptyId, Date.now())
     this.legacyWorkerRecovery.deleteRecoveredPty(ptyId)
     // Why: a respawn under the same session id needs its own subscriber-driven attach.
     this.terminalViewSubscribers.resetGeneration(ptyId)
@@ -8156,6 +8708,7 @@ class OrcaRuntimeService {
     }
     try {
       await assertTerminalInputWithinLimitWithYield(data)
+      agentSessionPtyWriteGate.assertAdmitted(ptyId)
       await this.writeTerminalInputChunks(ptyId, data, {
         // Why: a phone can claim the floor while a paste yields between chunks.
         beforeWrite: () => {
@@ -8793,6 +9346,9 @@ class OrcaRuntimeService {
     const generation = this.getPtyLifecycleGeneration(ptyId)
     const scrollbackRows = Math.max(0, Math.floor(opts.scrollbackRows ?? 0))
     let acquisition = this.providerBufferAcquisitionsByPtyId.get(ptyId)
+    if (acquisition?.generation === generation && acquisition.timedOut) {
+      return null
+    }
     if (
       !acquisition ||
       acquisition.generation !== generation ||
@@ -8911,9 +9467,14 @@ class OrcaRuntimeService {
       !recoveredWorkerFallback &&
       this.isKnownUnattachedLocalDaemonPty(ptyId)
     if (recoveredWorkerFallback || neverAttachedProviderFallback) {
-      const providerLines = await this.readProviderTerminalTailLines(ptyId, opts.limit)
-      if (providerLines.length > 0) {
-        return buildVisibleSnapshotReadFallback(read, providerLines, opts.limit)
+      const providerProjection = await this.readProviderTerminalTailLines(ptyId, opts.limit)
+      if (providerProjection.lines.length > 0) {
+        return buildVisibleSnapshotReadFallback(
+          read,
+          providerProjection.lines,
+          opts.limit,
+          providerProjection.draft
+        )
       }
     }
     const knownAlternateScreen = this.isTerminalAlternateScreen(ptyId)
@@ -8937,27 +9498,42 @@ class OrcaRuntimeService {
     ) {
       return read
     }
-    let lines = visibleState?.lines ?? []
-    if (lines.length === 0) {
-      lines = await this.readRendererVisibleSnapshotLines(ptyId)
+    let projection: RuntimeTerminalProjection = visibleState ?? { lines: [] }
+    if (projection.lines.length === 0) {
+      projection = await this.readRendererVisibleSnapshotLines(ptyId)
     }
-    if (lines.length === 0) {
+    if (projection.lines.length === 0) {
       return read
     }
-    return buildVisibleSnapshotReadFallback(read, lines, opts.limit)
+    return buildVisibleSnapshotReadFallback(read, projection.lines, opts.limit, projection.draft)
   }
 
   private async readProviderTerminalTailLines(
     ptyId: string,
-    limit: number | undefined
-  ): Promise<string[]> {
+    limit: number | undefined,
+    visibleScreenOnly = false,
+    wait: { timeoutMs?: number; retireOnTimeout?: boolean } = {}
+  ): Promise<RuntimeTerminalProjection> {
+    const generation = this.getPtyLifecycleGeneration(ptyId)
     const lineLimit = terminalReadLimit(limit, DEFAULT_TERMINAL_READ_LIMIT)
-    const snapshot = await this.serializeProviderTerminalBuffer(ptyId, {
-      scrollbackRows: lineLimit
-    })
-    const data = snapshot ? `${snapshot.scrollbackAnsi ?? ''}${snapshot.data}` : ''
-    if (!snapshot || data.length === 0) {
-      return []
+    const snapshot = await this.serializeProviderTerminalBuffer(
+      ptyId,
+      { scrollbackRows: visibleScreenOnly ? 0 : lineLimit },
+      wait
+    )
+    if (!snapshot) {
+      return { lines: [] }
+    }
+    if (visibleScreenOnly) {
+      const projection = await this.parseVisibleSnapshot(snapshot)
+      return this.getPtyLifecycleGeneration(ptyId) === generation &&
+        this.getPtyOutputSequence(ptyId) <= snapshot.seq
+        ? projection
+        : { lines: [] }
+    }
+    const data = `${snapshot.scrollbackAnsi ?? ''}${snapshot.data}`
+    if (data.length === 0) {
+      return { lines: [] }
     }
     const emulator = new HeadlessEmulator({
       cols: snapshot.cols,
@@ -8966,7 +9542,11 @@ class OrcaRuntimeService {
     })
     try {
       await emulator.write(data)
-      return visibleNonBlankTerminalLines(emulator.getBufferTailLines(lineLimit))
+      const projection = projectTerminalTailLines(emulator, lineLimit)
+      return this.getPtyLifecycleGeneration(ptyId) === generation &&
+        this.getPtyOutputSequence(ptyId) <= snapshot.seq
+        ? projection
+        : { lines: [] }
     } finally {
       emulator.dispose()
     }
@@ -8983,11 +9563,11 @@ class OrcaRuntimeService {
     if (!knownAlternateScreen && !visibleState?.isAlternateScreen) {
       return preview
     }
-    let lines = visibleState?.lines ?? []
-    if (lines.length === 0) {
-      lines = await this.readRendererVisibleSnapshotLines(ptyId)
+    let projection: RuntimeTerminalProjection = visibleState ?? { lines: [] }
+    if (projection.lines.length === 0) {
+      projection = await this.readRendererVisibleSnapshotLines(ptyId)
     }
-    return lines.length > 0 ? buildPreview(lines, '') : preview
+    return projection.lines.length > 0 ? buildPreview(projection.lines, '') : preview
   }
 
   private async readVisibleTerminalState(
@@ -9060,19 +9640,20 @@ class OrcaRuntimeService {
         return liveState
       }
     }
-    const lines = await this.parseVisibleSnapshotLines(snapshot)
-    if (this.getPtyLifecycleGeneration(ptyId) !== generation) {
+    const projection = await this.parseVisibleSnapshot(snapshot)
+    if (
+      this.getPtyLifecycleGeneration(ptyId) !== generation ||
+      this.getPtyOutputSequence(ptyId) > snapshot.seq
+    ) {
       return null
     }
     const visibleState: RuntimeVisibleTerminalState = {
-      lines,
+      ...projection,
       isAlternateScreen: snapshot.alternateScreen ?? false,
       sequence: snapshot.seq,
       generation
     }
-    if (this.getPtyOutputSequence(ptyId) <= snapshot.seq) {
-      this.providerVisibleStateByPtyId.set(ptyId, visibleState)
-    }
+    this.providerVisibleStateByPtyId.set(ptyId, visibleState)
     return visibleState
   }
 
@@ -9092,20 +9673,20 @@ class OrcaRuntimeService {
       return null
     }
     return {
-      lines: visibleNonBlankTerminalLines(state.emulator.getVisibleLines()),
+      ...projectTerminalVisibleLines(state.emulator),
       isAlternateScreen: state.emulator.isAlternateScreen,
       sequence: state.outputSequence,
       generation
     }
   }
 
-  private async parseVisibleSnapshotLines(snapshot: {
+  private async parseVisibleSnapshot(snapshot: {
     data: string
     cols: number
     rows: number
-  }): Promise<string[]> {
+  }): Promise<RuntimeTerminalProjection> {
     if (snapshot.data.length === 0) {
-      return []
+      return { lines: [] }
     }
     const emulator = new HeadlessEmulator({
       cols: snapshot.cols,
@@ -9114,19 +9695,21 @@ class OrcaRuntimeService {
     })
     try {
       await emulator.write(`\x1b[2J\x1b[3J\x1b[H${snapshot.data}`)
-      return visibleNonBlankTerminalLines(emulator.getVisibleLines())
+      return projectTerminalVisibleLines(emulator)
     } finally {
       emulator.dispose()
     }
   }
 
-  private async readRendererVisibleSnapshotLines(ptyId: string): Promise<string[]> {
+  private async readRendererVisibleSnapshotLines(
+    ptyId: string
+  ): Promise<RuntimeTerminalProjection> {
     const controller = this.ptyController
     if (!controller?.serializeBuffer) {
-      return []
+      return { lines: [] }
     }
     if (controller.hasRendererSerializer && !controller.hasRendererSerializer(ptyId)) {
-      return []
+      return { lines: [] }
     }
     try {
       // Why: raw PTY tails can be whitespace-only while a full-screen TUI is
@@ -9141,11 +9724,11 @@ class OrcaRuntimeService {
         null
       )
       if (!snapshot || snapshot.data.length === 0) {
-        return []
+        return { lines: [] }
       }
-      return this.parseVisibleSnapshotLines(snapshot)
+      return this.parseVisibleSnapshot(snapshot)
     } catch {
-      return []
+      return { lines: [] }
     }
   }
 
@@ -9502,12 +10085,13 @@ class OrcaRuntimeService {
       return
     }
     const receipt = this.restoredOrchestrationAuthorityByPtyId.get(ptyId)
-    if (!pty.launchToken && !receipt) {
+    if (!pty.launchToken && !receipt && !pty.launchAgent) {
       return
     }
     this.restoredOrchestrationAuthorityByPtyId.delete(ptyId)
     pty.launchToken = null
     pty.launchIncarnationId = null
+    pty.launchAgent = null
     const paneKeys = new Set<string>()
     if (pty.paneKey && parsePaneKey(pty.paneKey)) {
       paneKeys.add(pty.paneKey)
@@ -10034,6 +10618,7 @@ class OrcaRuntimeService {
       pty?.incarnationId ??
       `runtime:${this.runtimeId}:${this.getPtyLifecycleGeneration(ptyId)}`
     this.advancePtyLifecycleGeneration(ptyId)
+    agentSessionPtyWriteGate.unbindPty(ptyId)
     const exactSurfaceByKey = new Map<
       string,
       Pick<RetiredTerminalSurface, 'worktreeId' | 'parentTabId' | 'leafId'>
@@ -10094,6 +10679,7 @@ class OrcaRuntimeService {
       this.intentionalHandlelessPtyStops.has(ptyId) &&
       (intentionalStopIncarnation === null || intentionalStopIncarnation === incarnationId)
     advertisedUrlWatcher.unbindPty(ptyId)
+    agentSessionPtyWriteGate.unbindPty(ptyId)
     // Clean up new mobile state for this PTY
     this.mobileSubscribers.delete(ptyId)
     this.terminalViewSubscribers.clearSubscribers(ptyId)
@@ -10485,6 +11071,9 @@ class OrcaRuntimeService {
     const mode = this.getMobileDisplayMode(ptyId)
     if (mode === 'desktop') {
       // Watching at desktop dims — viewport is informational only.
+      return { updated: true, applied: false }
+    }
+    if (this.getDriver(ptyId).kind === 'desktop') {
       return { updated: true, applied: false }
     }
     // Drive PTY dims by the most-recent-actor (just updated to this client).
@@ -11893,47 +12482,68 @@ class OrcaRuntimeService {
   async getTerminalInteractiveWait(
     handle: string
   ): Promise<RuntimeTerminalInteractiveWait | null | undefined> {
+    let ptyId: string
+    let terminal: RuntimeTerminalAgentStatusSnapshot
     try {
-      const ptyId = this.getTerminalAgentStatusPtyId(handle)
-      const snapshot = this.getTerminalAgentStatusSnapshot(handle, ptyId)
-      const reason = detectTerminalWaitBlockedReason(snapshot.waitText)
-      const liveTitleClearsBlockedText =
-        snapshot.titleStatusIsLive &&
-        snapshot.titleStatus !== null &&
-        snapshot.titleStatus !== 'permission' &&
-        !isCursorAgentTitle(snapshot.title ?? '')
-      if (
-        reason &&
-        (snapshot.waitBlockedAt !== null || reason === 'agent-approval-prompt') &&
-        !liveTitleClearsBlockedText
-      ) {
-        return {
-          source: 'prompt-text',
-          reason,
-          ...(snapshot.waitBlockedAt !== null ? { since: snapshot.waitBlockedAt } : {})
-        }
-      }
-      if (this.ptysById.get(ptyId)?.lastOutputAt === null) {
-        return null
-      }
-      if (snapshot.titleStatus === 'permission' && snapshot.titleStatusIsLive) {
-        return { source: 'title' }
-      }
-      const status = await withTimeoutResult(this.getTerminalAgentStatus(handle), 1_050)
-      if (!status.ok) {
-        return undefined
-      }
-      if (status.value.status !== 'permission') {
-        return null
-      }
-      const explicitStatus = this.getFreshExplicitAgentStatusForHandle(handle)
-      return {
-        source: 'hook',
-        ...(explicitStatus ? { since: explicitStatus.updatedAt } : {})
-      }
+      ptyId = this.getTerminalAgentStatusPtyId(handle)
+      terminal = this.getTerminalAgentStatusSnapshot(handle, ptyId)
     } catch {
       return undefined
     }
+    const explicitStatus = this.getFreshExplicitAgentStatusForHandle(handle)
+    const promptReason = this.resolveAuthoritativeTerminalWaitPermission(
+      terminal,
+      explicitStatus,
+      this.agentPromptLifecycleByPtyId.get(ptyId)
+    )
+    if (promptReason) {
+      return {
+        source: 'prompt-text',
+        reason: promptReason,
+        ...(terminal.waitBlockedAt !== null ? { since: terminal.waitBlockedAt } : {})
+      }
+    }
+    if (terminal.titleStatus === 'permission' && terminal.titleStatusIsLive) {
+      return { source: 'title' }
+    }
+    if (explicitStatus?.status !== 'permission') {
+      return null
+    }
+    const status = await withTimeout(
+      this.probeAgentStatusOncePerPty(handle, ptyId),
+      TERMINAL_INTERACTIVE_WAIT_PROBE_TIMEOUT_MS,
+      undefined
+    )
+    if (!status) {
+      return undefined
+    }
+    return status.isRunningAgent && status.status === 'permission'
+      ? { source: 'hook', since: explicitStatus.updatedAt }
+      : null
+  }
+
+  private readonly interactiveWaitProbesByPtyId = new Map<
+    string,
+    Promise<RuntimeTerminalAgentStatus | undefined>
+  >()
+
+  private probeAgentStatusOncePerPty(
+    handle: string,
+    ptyId: string
+  ): Promise<RuntimeTerminalAgentStatus | undefined> {
+    const inFlight = this.interactiveWaitProbesByPtyId.get(ptyId)
+    if (inFlight) {
+      return inFlight
+    }
+    const probe = this.getTerminalAgentStatus(handle)
+      .catch(() => undefined)
+      .finally(() => {
+        if (this.interactiveWaitProbesByPtyId.get(ptyId) === probe) {
+          this.interactiveWaitProbesByPtyId.delete(ptyId)
+        }
+      })
+    this.interactiveWaitProbesByPtyId.set(ptyId, probe)
+    return probe
   }
 
   getTerminalWorktreeIdForPaneKey(paneKey: string): string | null {
@@ -12107,9 +12717,7 @@ class OrcaRuntimeService {
     const recovery = this.createTerminal(`id:${expectedWorktreeId}`, {
       tabId: parsed.tabId,
       leafId: parsed.leafId,
-      focus: false,
-      // Why: the HUB renderer may publish its exited layout while recovery is in flight; persist the replacement before that stale graph can orphan it.
-      persistHostSessionBinding: true
+      focus: false
     }).then((terminal) => ({
       handle: terminal.handle,
       tabId: parsed.tabId,
@@ -12176,9 +12784,11 @@ class OrcaRuntimeService {
     const pty = this.getLivePtyForHandle(handle)
     if (pty) {
       const read = this.readPtyTerminal(handle, pty.pty, opts)
-      const visibleRead = await this.withVisibleSnapshotFallback(pty.pty.ptyId, read, opts)
+      const visibleRead = opts.screen
+        ? await this.readRenderedScreen(pty.pty.ptyId, read, opts)
+        : await this.withVisibleSnapshotFallback(pty.pty.ptyId, read, opts)
       this.assertLiveTerminalHandleTargetsPty(handle, pty.pty.ptyId)
-      return visibleRead
+      return labelTerminalReadSource(visibleRead)
     }
 
     const { leaf } = this.getLiveLeafForHandle(handle)
@@ -12194,11 +12804,26 @@ class OrcaRuntimeService {
       limit: opts.limit
     })
     if (!leaf.ptyId) {
-      return read
+      return { ...read, source: opts.screen ? 'screen-unavailable' : 'stream' }
     }
-    const visibleRead = await this.withVisibleSnapshotFallback(leaf.ptyId, read, opts)
+    const visibleRead = opts.screen
+      ? await this.readRenderedScreen(leaf.ptyId, read, opts)
+      : await this.withVisibleSnapshotFallback(leaf.ptyId, read, opts)
     this.assertLiveTerminalHandleTargetsPty(handle, leaf.ptyId)
-    return visibleRead
+    return labelTerminalReadSource(visibleRead)
+  }
+
+  private async readRenderedScreen(
+    ptyId: string,
+    read: RuntimeTerminalRead,
+    opts: { limit?: number } = {}
+  ): Promise<RuntimeTerminalRead> {
+    const visibleState = await this.readVisibleTerminalState(ptyId)
+    const projection = visibleState ?? (await this.readProviderTerminalTailLines(ptyId, opts.limit))
+    if (projection.lines.length === 0) {
+      return { ...read, source: 'screen-unavailable' }
+    }
+    return buildVisibleSnapshotReadFallback(read, projection.lines, opts.limit, projection.draft)
   }
 
   // Why a cache: leaf-branch sends may arrive per keystroke; one proven-absent
@@ -12325,16 +12950,12 @@ class OrcaRuntimeService {
     handle: string,
     prompt: string,
     options: {
-      signal?: AbortSignal
       beforeWrite?: (ptyId: string) => void | Promise<void>
       suffixFailureError?: string
+      signal?: AbortSignal
     } = {}
   ): Promise<RuntimeTerminalSend> {
-    if (await this.getTerminalInteractiveWait(handle)) {
-      throw new Error('agent_prompt_blocked')
-    }
     const payload = buildAgentPromptPasteBytes(prompt)
-    const bytesWritten = Buffer.byteLength(`${payload}${AGENT_PROMPT_SUBMIT}`, 'utf8')
     const pty = this.getLivePtyForHandle(handle)
     if (pty) {
       if (!pty.pty.connected) {
@@ -12342,23 +12963,22 @@ class OrcaRuntimeService {
       }
       await assertTerminalInputWithinLimitWithYield(payload)
       const generation = this.getPtyLifecycleGeneration(pty.pty.ptyId)
-      await this.serializeAgentPromptSubmission(pty.pty.ptyId, generation, async () => {
-        await this.writeTerminalAgentPrompt(handle, pty.pty.ptyId, generation, payload, {
-          ...options,
-          beforeWrite: async (id) => {
-            if (options.signal?.aborted) {
-              throw options.signal.reason ?? new Error('terminal_write_aborted')
-            }
-            if (this.getPtyLifecycleGeneration(id) !== generation) {
-              throw new Error('terminal_handle_stale')
-            }
-            if (await this.getTerminalInteractiveWait(handle)) {
-              throw new Error('agent_prompt_blocked')
-            }
-            await options.beforeWrite?.(id)
-          }
-        })
-      })
+      const submits = await this.serializeAgentPromptSubmission(
+        pty.pty.ptyId,
+        generation,
+        async () => {
+          this.assertLiveTerminalHandleTargetsPty(handle, pty.pty.ptyId)
+          this.assertAgentPromptGeneration(pty.pty.ptyId, generation)
+          return await this.writeTerminalAgentPrompt(
+            handle,
+            pty.pty.ptyId,
+            generation,
+            payload,
+            options
+          )
+        }
+      )
+      const bytesWritten = Buffer.byteLength(payload, 'utf8') + submits
       return { handle, accepted: true, bytesWritten }
     }
 
@@ -12373,44 +12993,33 @@ class OrcaRuntimeService {
       throw new Error('terminal_not_writable')
     }
     const generation = this.getPtyLifecycleGeneration(leaf.ptyId)
-    await this.serializeAgentPromptSubmission(leaf.ptyId, generation, async () => {
-      await this.writeTerminalAgentPrompt(handle, leaf.ptyId!, generation, payload, {
-        ...options,
-        beforeWrite: async (id) => {
-          if (options.signal?.aborted) {
-            throw options.signal.reason ?? new Error('terminal_write_aborted')
-          }
-          if (this.getPtyLifecycleGeneration(id) !== generation) {
-            throw new Error('terminal_handle_stale')
-          }
-          if (await this.getTerminalInteractiveWait(handle)) {
-            throw new Error('agent_prompt_blocked')
-          }
-          await options.beforeWrite?.(id)
-        }
-      })
+    const submits = await this.serializeAgentPromptSubmission(leaf.ptyId, generation, async () => {
+      this.assertLiveTerminalHandleTargetsPty(handle, leaf.ptyId!)
+      this.assertAgentPromptGeneration(leaf.ptyId!, generation)
+      return await this.writeTerminalAgentPrompt(handle, leaf.ptyId!, generation, payload, options)
     })
+    const bytesWritten = Buffer.byteLength(payload, 'utf8') + submits
     return { handle, accepted: true, bytesWritten }
   }
 
-  private async serializeAgentPromptSubmission(
+  private async serializeAgentPromptSubmission<T>(
     ptyId: string,
     generation: number,
-    submit: () => Promise<void>
-  ): Promise<void> {
-    const key = `${ptyId}\u0000${generation}`
-    const previous = this.agentPromptSubmissionTailByPtyId.get(key) ?? Promise.resolve()
-    const current = previous.catch(() => undefined).then(submit)
-    const tail = current.then(
+    submit: () => Promise<T>
+  ): Promise<T> {
+    const queueKey = `${ptyId}\u0000${generation}`
+    const previous = this.agentPromptSubmissionTailByPtyId.get(queueKey) ?? Promise.resolve()
+    const submission = previous.catch(() => undefined).then(submit)
+    const tail = submission.then(
       () => undefined,
       () => undefined
     )
-    this.agentPromptSubmissionTailByPtyId.set(key, tail)
+    this.agentPromptSubmissionTailByPtyId.set(queueKey, tail)
     try {
-      await current
+      return await submission
     } finally {
-      if (this.agentPromptSubmissionTailByPtyId.get(key) === tail) {
-        this.agentPromptSubmissionTailByPtyId.delete(key)
+      if (this.agentPromptSubmissionTailByPtyId.get(queueKey) === tail) {
+        this.agentPromptSubmissionTailByPtyId.delete(queueKey)
       }
     }
   }
@@ -12425,9 +13034,11 @@ class OrcaRuntimeService {
 
   private getTerminalAgentStatusSnapshot(
     handle: string,
-    expectedPtyId: string
+    expectedPtyId: string,
+    waitTextOverride?: string
   ): RuntimeTerminalAgentStatusSnapshot {
-    return this.terminalAgentStatus.getSnapshot(handle, expectedPtyId)
+    const snapshot = this.terminalAgentStatus.getSnapshot(handle, expectedPtyId)
+    return waitTextOverride === undefined ? snapshot : { ...snapshot, waitText: waitTextOverride }
   }
 
   private shouldDelayPtyBackedMobileSnapshotForForegroundAgent(
@@ -12512,39 +13123,109 @@ class OrcaRuntimeService {
     this.ptyForegroundAgent.delaySnapshot(ptyId, titleObservedAt, foregroundRefresh)
   }
 
-  private getFreshExplicitAgentStatusForHandle(handle: string): {
+  private getFreshExplicitAgentStatusForHandle(
+    handle: string,
+    paneKeyOverride?: string | null
+  ): {
     status: NonNullable<RuntimeTerminalAgentStatus['status']>
     updatedAt: number
+    stateStartedAt: number
   } | null {
     return this.agentRows.getFreshExplicit({
       handle,
-      paneKey: this.getPaneKeyForTerminalHandle(handle),
+      paneKey: paneKeyOverride ?? this.getPaneKeyForTerminalHandle(handle),
       hookRows: this.getAgentStatusSnapshotFn?.() ?? []
     })
   }
 
-  private getAgentPromptActivity(handle: string, ptyId: string): AgentPromptActivity {
+  private getAgentPromptActivity(
+    handle: string,
+    ptyId: string,
+    waitTextCache?: AgentPromptWaitTextCache
+  ): AgentPromptActivity {
     this.assertLiveTerminalHandleTargetsPty(handle, ptyId)
-    const explicit = this.getFreshExplicitAgentStatusForHandle(handle)
+    const outputSequence = this.getPtyOutputSequence(ptyId)
+    const explicitCandidate = this.getFreshExplicitAgentStatusForHandle(handle)
     const explicitFloor = this.agentPromptExplicitStatusFloorByPtyId.get(ptyId)
-    const pty = this.ptysById.get(ptyId)
-    const lifecycle = this.agentPromptLifecycleByPtyId.get(ptyId)
-    const currentExplicit =
-      explicit && (explicitFloor === undefined || explicit.updatedAt > explicitFloor)
-        ? explicit
+    const explicit =
+      explicitCandidate &&
+      (explicitFloor === undefined || explicitCandidate.updatedAt > explicitFloor)
+        ? explicitCandidate
         : null
-    const status = lifecycle?.status ?? currentExplicit?.status ?? pty?.lastAgentStatus ?? null
-    const terminal = this.getTerminalAgentStatusSnapshot(handle, ptyId)
+    const lifecycle = this.agentPromptLifecycleByPtyId.get(ptyId)
+    const ptyStatus =
+      lifecycle || explicitFloor === undefined
+        ? (this.ptysById.get(ptyId)?.lastAgentStatus ?? null)
+        : null
+    const lifecycleIsNewer =
+      lifecycle &&
+      (!explicit ||
+        lifecycle.updatedAt > explicit.updatedAt ||
+        (lifecycle.updatedAt === explicit.updatedAt && lifecycle.status === 'permission'))
+    const waitText = waitTextCache
+      ? readAgentPromptWaitText(
+          waitTextCache,
+          outputSequence,
+          () => this.getTerminalAgentStatusSnapshot(handle, ptyId).waitText
+        )
+      : undefined
+    const terminal = this.getTerminalAgentStatusSnapshot(handle, ptyId, waitText)
+    const status = this.hasAuthoritativeTerminalWaitPermission(terminal, explicit, lifecycle)
+      ? 'permission'
+      : lifecycleIsNewer
+        ? lifecycle.status
+        : (explicit?.status ?? ptyStatus ?? null)
     return {
       generation: this.getPtyLifecycleGeneration(ptyId),
       permissionSequence: this.agentPromptPermissionSequenceByPtyId.get(ptyId) ?? 0,
       workingSequence: lifecycle?.workingSequence ?? 0,
-      explicitWorkingStartedAt:
-        currentExplicit?.status === 'working' ? currentExplicit.updatedAt : null,
-      outputSequence: this.getPtyOutputSequence(ptyId),
-      status:
-        terminal.titleStatus === 'permission' || status === 'permission' ? 'permission' : status
+      explicitWorkingStartedAt: explicit?.status === 'working' ? explicit.stateStartedAt : null,
+      outputSequence,
+      status
     }
+  }
+
+  private hasAuthoritativeTerminalWaitPermission(
+    terminal: RuntimeTerminalAgentStatusSnapshot,
+    explicitStatus: { status: AgentStatus; updatedAt: number } | null,
+    lifecycle: { status: AgentStatus | null; updatedAt: number } | null | undefined
+  ): boolean {
+    return (
+      this.resolveAuthoritativeTerminalWaitPermission(terminal, explicitStatus, lifecycle) !== null
+    )
+  }
+
+  private resolveAuthoritativeTerminalWaitPermission(
+    terminal: RuntimeTerminalAgentStatusSnapshot,
+    explicitStatus: { status: AgentStatus; updatedAt: number } | null,
+    lifecycle: { status: AgentStatus | null; updatedAt: number } | null | undefined
+  ): RuntimeTerminalWaitBlockedReason | null {
+    const blockedByWaitText = detectTerminalWaitBlockedReason(terminal.waitText)
+    if (!blockedByWaitText) {
+      return null
+    }
+    const liveTitleClearsBlockedText =
+      terminal.titleStatusIsLive &&
+      terminal.titleStatus !== null &&
+      terminal.titleStatus !== 'permission' &&
+      !isOpenCodeNativeTitle(terminal.title) &&
+      blockedByWaitText !== 'agent-approval-prompt'
+    if (liveTitleClearsBlockedText && lifecycle?.status !== terminal.titleStatus) {
+      return null
+    }
+    if (blockedByWaitText === 'agent-approval-prompt') {
+      return blockedByWaitText
+    }
+    const newestPermissionAt = Math.max(
+      explicitStatus?.status === 'permission' ? explicitStatus.updatedAt : -1,
+      lifecycle?.status === 'permission' ? lifecycle.updatedAt : -1,
+      terminal.waitBlockedAt ?? -1
+    )
+    const newestClearAt = Math.max(
+      explicitStatus && explicitStatus.status !== 'permission' ? explicitStatus.updatedAt : -1,
+      lifecycle?.status && lifecycle.status !== 'permission' ? lifecycle.updatedAt : -1
+    )
+    return newestPermissionAt >= 0 && newestPermissionAt >= newestClearAt ? blockedByWaitText : null
   }
 
   renewMobileAgentStatusFromPtyTitle(
@@ -12598,55 +13279,62 @@ class OrcaRuntimeService {
     return pty?.launchAgent ?? pty?.foregroundAgent ?? null
   }
 
+  private assertAgentPromptPermissionSafe(
+    baseline: AgentPromptActivity,
+    current: AgentPromptActivity
+  ): void {
+    if (
+      current.status === 'permission' ||
+      current.permissionSequence > baseline.permissionSequence
+    ) {
+      throw new Error('agent_prompt_blocked')
+    }
+  }
+
+  private assertAgentPromptGeneration(ptyId: string, expected: number): void {
+    if (this.getPtyLifecycleGeneration(ptyId) !== expected) {
+      throw new Error('terminal_handle_stale')
+    }
+  }
+
   private async writeTerminalAgentPrompt(
     handle: string,
     ptyId: string,
     generation: number,
     pastePayload: string,
     options: RuntimeTerminalWriteOptions = {}
-  ): Promise<void> {
-    if (options.signal?.aborted) {
-      throw new Error('request_aborted')
-    }
-    if (this.getPtyLifecycleGeneration(ptyId) !== generation) {
-      throw new Error('terminal_handle_stale')
-    }
+  ): Promise<number> {
+    assertAgentPromptRequestActive(options.signal)
+    this.assertAgentPromptGeneration(ptyId, generation)
     const permissionBaseline = this.getAgentPromptActivity(handle, ptyId)
-    if (permissionBaseline.status === 'permission') {
-      throw new Error('agent_prompt_blocked')
-    }
-    const pasteIngestMs = getTerminalPasteIngestMs(
-      this.getPtyWriteHostPlatform(ptyId),
-      Buffer.byteLength(pastePayload, 'utf8')
-    )
+    this.assertAgentPromptPermissionSafe(permissionBaseline, permissionBaseline)
+    const admitted = agentSessionPtyWriteGate.assertAdmitted(ptyId)
+    const writeHostPlatform = this.getPtyWriteHostPlatform(ptyId)
+    const pasteByteLength = Buffer.byteLength(pastePayload, 'utf8')
+    const pasteIngestMs = getTerminalPasteIngestMs(writeHostPlatform, pasteByteLength)
     const renderGate = this.createAgentPromptRenderGate(ptyId, pasteIngestMs)
     let wrotePasteBytes = false
     let completedPaste = false
     try {
       const chunks = iterateTerminalInputChunks(pastePayload)
       let chunk = chunks.next()
+      let firstChunk = true
       while (!chunk.done) {
         const nextChunk = chunks.next()
-        if (options.signal?.aborted) {
-          throw new Error('request_aborted')
+        assertAgentPromptRequestActive(options.signal)
+        this.assertAgentPromptGeneration(ptyId, generation)
+        if (!firstChunk) {
+          agentSessionPtyWriteGate.assertReadmitted(ptyId, admitted)
         }
-        if (this.getPtyLifecycleGeneration(ptyId) !== generation) {
-          throw new Error('terminal_handle_stale')
-        }
+        firstChunk = false
         await options.beforeWrite?.(ptyId)
-        if (options.signal?.aborted) {
-          throw new Error('request_aborted')
-        }
-        if (this.getPtyLifecycleGeneration(ptyId) !== generation) {
-          throw new Error('terminal_handle_stale')
-        }
-        const activity = this.getAgentPromptActivity(handle, ptyId)
-        if (
-          activity.status === 'permission' ||
-          activity.permissionSequence > permissionBaseline.permissionSequence
-        ) {
-          throw new Error('agent_prompt_blocked')
-        }
+        assertAgentPromptRequestActive(options.signal)
+        this.assertAgentPromptGeneration(ptyId, generation)
+        this.assertAgentPromptPermissionSafe(
+          permissionBaseline,
+          this.getAgentPromptActivity(handle, ptyId)
+        )
+        agentSessionPtyWriteGate.assertReadmitted(ptyId, admitted)
         if (nextChunk.done) {
           renderGate?.arm()
         }
@@ -12656,7 +13344,7 @@ class OrcaRuntimeService {
         wrotePasteBytes = true
         chunk = nextChunk
         if (!chunk.done) {
-          await yieldToEventLoop()
+          await yieldBetweenTerminalInputChunks()
         }
       }
       completedPaste = true
@@ -12666,7 +13354,12 @@ class OrcaRuntimeService {
         !completedPaste &&
         this.getPtyLifecycleGeneration(ptyId) === generation
       ) {
-        this.ptyController?.write(ptyId, AGENT_PROMPT_BRACKETED_PASTE_END)
+        try {
+          agentSessionPtyWriteGate.assertReadmitted(ptyId, admitted)
+          this.ptyController?.write(ptyId, AGENT_PROMPT_BRACKETED_PASTE_END)
+        } catch {
+          // The original refusal is the actionable error.
+        }
       }
       renderGate?.dispose()
       throw error
@@ -12674,34 +13367,19 @@ class OrcaRuntimeService {
 
     if (renderGate) {
       try {
-        await renderGate.wait()
+        await waitForAgentPromptPromise(renderGate.wait(), options.signal)
       } finally {
         renderGate.dispose()
       }
     } else {
-      await new Promise((resolve) =>
-        setTimeout(
-          resolve,
-          getAgentPromptSubmitDelayMs(
-            this.getPtyWriteHostPlatform(ptyId),
-            Buffer.byteLength(pastePayload, 'utf8')
-          )
-        )
+      await waitForAgentPromptDelay(
+        getAgentPromptSubmitDelayMs(writeHostPlatform, pasteByteLength),
+        options.signal
       )
     }
-    if (options.signal?.aborted) {
-      throw new Error('request_aborted')
-    }
-    if (this.getPtyLifecycleGeneration(ptyId) !== generation) {
-      throw new Error('terminal_handle_stale')
-    }
-    const activity = this.getAgentPromptActivity(handle, ptyId)
-    if (
-      activity.status === 'permission' ||
-      activity.permissionSequence > permissionBaseline.permissionSequence
-    ) {
-      throw new Error('agent_prompt_blocked')
-    }
+    assertAgentPromptRequestActive(options.signal)
+    this.assertAgentPromptGeneration(ptyId, generation)
+    agentSessionPtyWriteGate.assertReadmitted(ptyId, admitted)
     try {
       await options.beforeWrite?.(ptyId)
     } catch (error) {
@@ -12710,15 +13388,22 @@ class OrcaRuntimeService {
       }
       throw error
     }
+    assertAgentPromptRequestActive(options.signal)
+    this.assertAgentPromptGeneration(ptyId, generation)
+    const waitTextCache: AgentPromptWaitTextCache = {}
+    const baseline = this.getAgentPromptActivity(handle, ptyId, waitTextCache)
+    this.assertAgentPromptPermissionSafe(permissionBaseline, baseline)
+    agentSessionPtyWriteGate.assertReadmitted(ptyId, admitted)
     if (!this.ptyController?.write(ptyId, AGENT_PROMPT_SUBMIT)) {
       throw new Error(options.suffixFailureError ?? 'terminal_not_writable')
     }
     await verifyAgentPromptSubmission({
-      baseline: activity,
-      readActivity: () => this.getAgentPromptActivity(handle, ptyId),
+      baseline,
+      readActivity: () => this.getAgentPromptActivity(handle, ptyId, waitTextCache),
       timeoutMs: resolveAgentPromptEffectTimeoutMs(this.getPtyAgent(ptyId)),
       signal: options.signal
     })
+    return 1
   }
 
   private createAgentPromptRenderGate(
@@ -12782,6 +13467,15 @@ class OrcaRuntimeService {
       }
       quietTimer = setTimeout(finish, CLAUDE_AGENT_PROMPT_RENDER_QUIET_MS)
     }
+    const armHardTimer = (): void => {
+      if (hardTimer) {
+        clearTimeout(hardTimer)
+      }
+      hardTimer = setTimeout(
+        finish,
+        CLAUDE_AGENT_PROMPT_RENDER_TIMEOUT_MS + Math.max(0, ingestDeadlineAt - Date.now())
+      )
+    }
     const armIngestTimer = (): void => {
       if (ingested || ingestTimer) {
         return
@@ -12808,6 +13502,7 @@ class OrcaRuntimeService {
           return
         }
         observedMarker = true
+        armHardTimer()
       }
       armQuietTimer()
     })
@@ -12816,12 +13511,12 @@ class OrcaRuntimeService {
         armed = true
         markerCarry = ''
         armIngestTimer()
+        armHardTimer()
       },
       wait: async () => {
         if (settled) {
           return
         }
-        hardTimer = setTimeout(finish, CLAUDE_AGENT_PROMPT_RENDER_TIMEOUT_MS)
         await rendered
       },
       dispose: () => {
@@ -12840,6 +13535,82 @@ class OrcaRuntimeService {
     }
   ): Promise<RuntimeTerminalWait> {
     return this.terminalWait.wait(handle, options)
+  }
+
+  private startTuiIdleVisibleReadProbe(waiter: TerminalWaiter, waiterTimeoutMs: number): void {
+    const settleMarginMs = Math.min(
+      TUI_IDLE_VISIBLE_PROBE_SETTLE_MARGIN_MS,
+      Math.max(1, Math.floor(waiterTimeoutMs / 3))
+    )
+    const probeTimeoutMs = Math.min(
+      VISIBLE_TERMINAL_SNAPSHOT_TIMEOUT_MS + settleMarginMs,
+      Math.max(0, waiterTimeoutMs - settleMarginMs)
+    )
+    const providerTimeoutMs = Math.min(
+      VISIBLE_TERMINAL_SNAPSHOT_TIMEOUT_MS,
+      Math.max(0, probeTimeoutMs - settleMarginMs)
+    )
+    if (providerTimeoutMs < 1) {
+      return
+    }
+    const livePty = this.getLivePtyForHandle(waiter.handle)
+    let ptyId = livePty?.pty.ptyId ?? null
+    if (!ptyId) {
+      try {
+        ptyId = this.getLiveLeafForHandle(waiter.handle).leaf.ptyId
+      } catch {
+        return
+      }
+    }
+    if (!ptyId) {
+      return
+    }
+    void withTimeout(
+      (async () => {
+        const provider = await this.readProviderTerminalTailLines(ptyId, undefined, true, {
+          timeoutMs: providerTimeoutMs,
+          retireOnTimeout: true
+        })
+        return provider.lines.length > 0
+          ? provider
+          : await this.readRendererVisibleSnapshotLines(ptyId)
+      })(),
+      probeTimeoutMs,
+      null
+    )
+      .then((projection) => {
+        if (!projection || !this.terminalWaiters.get(waiter.handle)?.has(waiter)) {
+          return
+        }
+        const snapshotText = projection.lines.join('\n')
+        const blockedReason = detectTerminalWaitBlockedReason(snapshotText)
+        if (!blockedReason && !isKnownReadyPromptPreview(snapshotText)) {
+          return
+        }
+        const result = this.buildTuiIdleProbeResult(waiter.handle, blockedReason)
+        if (waiter.pollInterval) {
+          clearInterval(waiter.pollInterval)
+          waiter.pollInterval = null
+        }
+        this.terminalWaiters.resolve(waiter, result)
+      })
+      .catch(() => {})
+  }
+
+  private buildTuiIdleProbeResult(
+    handle: string,
+    blockedReason: RuntimeTerminalWaitBlockedReason | null
+  ): RuntimeTerminalWait {
+    const pty = this.getLivePtyForHandle(handle)
+    if (pty) {
+      return blockedReason
+        ? buildPtyTerminalWaitBlockedResult(handle, 'tui-idle', pty.pty, blockedReason)
+        : buildPtyTerminalWaitResult(handle, 'tui-idle', pty.pty)
+    }
+    const { leaf } = this.getLiveLeafForHandle(handle)
+    return blockedReason
+      ? buildTerminalWaitBlockedResult(handle, 'tui-idle', leaf, blockedReason)
+      : buildTerminalWaitResult(handle, 'tui-idle', leaf)
   }
 
   async waitForSetupTerminalCompletion(handle: string): Promise<{ exitCode: number | null }> {
@@ -12910,15 +13681,18 @@ class OrcaRuntimeService {
       throw new Error('invalid_limit')
     }
     const resolvedWorktreeSnapshot = await this.listResolvedWorktreeSnapshot()
+    const visibilitySettings = this.store?.getSettings()
     const visibilitySourceMatchersByRepoId = this.buildRuntimeVisibilitySourceMatchersByRepoId(
       resolvedWorktreeSnapshot.worktrees,
-      sourceDefaultsSupported
+      sourceDefaultsSupported,
+      visibilitySettings
     )
     const resolvedWorktrees = resolvedWorktreeSnapshot.worktrees.filter((worktree) =>
       this.isRuntimeWorktreeVisible(
         worktree,
         visibilitySourceMatchersByRepoId.get(worktree.repoId),
-        sourceDefaultsSupported
+        sourceDefaultsSupported,
+        visibilitySettings
       )
     )
     // Why: worktree.ps backs the mobile sidebar, so it must use the same
@@ -12939,7 +13713,7 @@ class OrcaRuntimeService {
     )
     const missingRuntimeWorktreeIds = new Set<string>()
     const session = this.store?.getWorkspaceSession?.()
-    applyRuntimeWorktreePsTerminalActivity({
+    const workingTerminalEvidenceByWorktreeId = applyRuntimeWorktreePsTerminalActivity({
       summaries,
       pathIndex: runtimeWorktreeSummaryPathIndex,
       missingIds: missingRuntimeWorktreeIds,
@@ -12948,6 +13722,7 @@ class OrcaRuntimeService {
       ptysById: this.ptysById,
       tabs: this.tabs,
       session,
+      getPaneKey: (leaf) => this.makeRuntimePaneKey(leaf),
       getSummary: (summaryMap, pathIndex, missingIds, worktreeId) =>
         this.getSummaryForRuntimeWorktreeId(summaryMap, pathIndex, missingIds, worktreeId)
     })
@@ -12969,6 +13744,7 @@ class OrcaRuntimeService {
       missingWorktreeIds: missingRuntimeWorktreeIds,
       mirroredWorktreeIdByTabId,
       connectedPtyEvidence,
+      workingTerminalEvidenceByWorktreeId,
       retainedSnapshots: this.agentRows.values(),
       hookSnapshots: this.getAgentStatusSnapshotFn?.() ?? [],
       orchestrationByPaneKey: this.agentOrchestrationProjection.buildByPaneKey(),
@@ -12998,6 +13774,1113 @@ class OrcaRuntimeService {
         this.notifyReposChanged()
       }
     })
+  }
+
+  /**
+   * Installs the structured agent-session host on first use. Lazy for the same
+   * reason the orchestration DB is: the profile's user-data path is not final
+   * until the app is ready, and a runtime nobody drives a chat session on
+   * should never open the record store.
+   */
+  async ensureStructuredAgentSessionHost(): Promise<void> {
+    await installStructuredAgentSessionHost({
+      stateDirectory: getProfileUserDataPath(),
+      hostId: LOCAL_EXECUTION_HOST_ID,
+      claimKeyId: this.agentSessionClaimSigner.keyId,
+      // Resolves folder workspaces as well as git worktrees, so a chat session
+      // in a plain folder lands in the folder rather than failing to resolve.
+      resolveWorkspacePath: async (workspaceId) =>
+        (await this.resolveRuntimeFileTarget(`id:${workspaceId}`)).worktree.path,
+      resolveLaunchArgs: () => this.resolveConfiguredCodexStructuredArgs(),
+      resolveLaunchEnvOverlay: () =>
+        resolveTuiAgentLaunchEnv('codex', this.requireStore().getSettings().agentDefaultEnv),
+      handoffTransport: this.createStructuredAgentSessionHandoffTransport()
+    })
+  }
+
+  private resolveConfiguredCodexStructuredArgs(): string[] {
+    const settings = this.requireStore().getSettings()
+    const shell = resolveLocalWindowsAgentStartupShell({
+      platform: process.platform,
+      isRemote: false,
+      terminalWindowsShell: settings.terminalWindowsShell
+    })
+    return resolveCodexStructuredAppServerArgs(
+      resolveTuiAgentLaunchArgs('codex', settings.agentDefaultArgs),
+      shell ?? 'posix'
+    )
+  }
+
+  private createStructuredAgentSessionHandoffTransport(): StructuredAgentSessionHandoffTransport {
+    return {
+      hostLabel: hostname(),
+      launchTui: async ({ record, fence, spawnToken, onSpawned }) => {
+        const head = record.providerHandleChain.at(-1)
+        if (!head || (head.handle.provider !== 'codex' && head.handle.provider !== 'claude')) {
+          throw new Error('agent_session_identity_required')
+        }
+        const provider = head.handle.provider
+        const providerSessionId =
+          provider === 'claude' ? head.handle.sessionId : head.handle.threadId
+        const launchStartedAt = Date.now()
+        const launched = await this.ensureAgentSession(
+          {
+            kind: 'explicit',
+            worktree: `id:${record.location.workspaceId}`,
+            agent: provider,
+            providerSession: { key: 'session_id', id: providerSessionId },
+            ...(record.options ? { launchPreferences: record.options } : {}),
+            presentation: 'background'
+          },
+          {},
+          { spawnToken, providerRoot: record.accountHome.path, sessionId: record.sessionId }
+        )
+        const terminal = launched.terminal
+        let spawnedOwner: StructuredTuiOwner | null = null
+        let ptyId: string | undefined
+        try {
+          if (!terminal.processId || !terminal.paneKey || !terminal.tabId || !terminal.ptyId) {
+            throw new Error('The resumed terminal did not publish a process identity.')
+          }
+          ptyId = terminal.ptyId
+          spawnedOwner = this.refreshStructuredTuiOwnerBinding({
+            terminal: {
+              handle: terminal.handle,
+              tabId: terminal.tabId,
+              paneKey: terminal.paneKey,
+              ptyId: terminal.ptyId
+            },
+            process:
+              provider === 'codex'
+                ? await readCodexResumeProcessIdentity({
+                    hostId: record.location.executionHostId,
+                    rootPid: terminal.processId,
+                    spawnToken,
+                    threadId: head.handle.threadId
+                  })
+                : await readStructuredTuiProcessIdentity({
+                    hostId: record.location.executionHostId,
+                    rootPid: terminal.processId,
+                    spawnToken,
+                    agent: provider
+                  }),
+            link:
+              provider === 'codex'
+                ? codexProviderHandleLink({
+                    threadId: head.handle.threadId,
+                    resumed: true,
+                    fence,
+                    observedAt: Date.now()
+                  })
+                : claudeProviderHandleLink({
+                    sessionId: head.handle.sessionId,
+                    leafUuid: head.handle.leafUuid,
+                    resumed: true,
+                    fence,
+                    observedAt: Date.now()
+                  })
+          })
+          await onSpawned?.(spawnedOwner)
+          await this.waitForTerminal(terminal.handle, {
+            condition: 'tui-idle',
+            timeoutMs: 30_000
+          })
+          const proof =
+            provider === 'codex'
+              ? await this.waitForAdoptedStructuredTuiProof({
+                  owner: spawnedOwner,
+                  threadId: head.handle.threadId,
+                  codexHome: record.accountHome.path
+                })
+              : await this.waitForStructuredClaudeTuiProof({
+                  handle: terminal.handle,
+                  paneKey: terminal.paneKey,
+                  sessionId: head.handle.sessionId,
+                  previousLeafUuid: head.handle.leafUuid,
+                  projectsDir: join(record.accountHome.path, 'projects'),
+                  spawnToken,
+                  minimumProviderSessionReceivedAt: launchStartedAt
+                })
+          const revealed = await this.focusTerminal(terminal.handle)
+          return this.refreshStructuredTuiOwnerBinding({
+            ...spawnedOwner,
+            link:
+              provider === 'claude'
+                ? claudeProviderHandleLink({
+                    sessionId: head.handle.sessionId,
+                    leafUuid: proof.leafUuid ?? head.handle.leafUuid,
+                    resumed: true,
+                    fence,
+                    observedAt: Date.now()
+                  })
+                : spawnedOwner.link,
+            terminal: {
+              handle: terminal.handle,
+              tabId: revealed.tabId,
+              paneKey: terminal.paneKey,
+              ptyId: terminal.ptyId
+            },
+            process: spawnedOwner.process,
+            ...(proof.transcriptPath ? { transcriptPath: proof.transcriptPath } : {}),
+            historySource: 'provider-resume'
+          })
+        } catch (error) {
+          let closeError: unknown = null
+          try {
+            await this.closeTerminal(terminal.handle)
+          } catch (cleanupFailure) {
+            closeError = cleanupFailure
+          }
+          try {
+            // closeTerminal may retire the renderer handle before the PTY exit is
+            // observed. Prove the provider child (or, before identity publication,
+            // the PTY) through the same exit path used by handoff recovery.
+            if (spawnedOwner) {
+              await this.waitForStructuredTuiOwnerExit(spawnedOwner)
+            } else if (ptyId) {
+              await this.waitForStructuredTuiPtyExit(ptyId)
+            } else {
+              throw new Error('The failed terminal did not publish a PTY identity.')
+            }
+          } catch (exitFailure) {
+            throw new StructuredTuiLaunchCleanupError(
+              error,
+              closeError === null
+                ? exitFailure
+                : new AggregateError(
+                    [closeError, exitFailure],
+                    'Structured TUI cleanup could not prove process exit.'
+                  )
+            )
+          }
+          throw error
+        }
+      },
+      waitForTuiExit: async (owner) => {
+        await this.waitForStructuredTuiOwnerExit(owner)
+        return owner.transcriptPath ? { transcriptPath: owner.transcriptPath } : {}
+      },
+      waitForTuiIdleOrExit: async (owner, signal) => {
+        return this.waitForStructuredTuiIdleOrExit(owner, signal)
+      },
+      reproveTuiOwner: async ({ record, owner }) => {
+        const current = this.refreshStructuredTuiOwnerBinding(owner)
+        const persisted = record.lease.ownerProcess
+        if (
+          !persisted ||
+          persisted.hostId !== current.process.hostId ||
+          persisted.pid !== current.process.pid ||
+          persisted.processStartTimeMs !== current.process.processStartTimeMs ||
+          persisted.spawnToken !== current.process.spawnToken
+        ) {
+          throw new Error('The owning terminal does not match the persisted launch identity.')
+        }
+        const proof = await probeAgentSessionProcessIdentity({ identity: current.process })
+        if (proof.outcome !== 'identity-matched' || proof.matchedOn.length === 0) {
+          throw new Error(
+            `The owning ${current.link.handle.provider} child process could not be re-proved.`
+          )
+        }
+        const head = record.providerHandleChain.at(-1)
+        const sameProviderIdentity =
+          head &&
+          (current.link.handle.provider === 'claude'
+            ? agentSessionProviderHandleRoot(current.link.handle) ===
+              agentSessionProviderHandleRoot(head.handle)
+            : (record.lease.provenHandleLinkId === null ||
+                current.link.linkId === record.lease.provenHandleLinkId) &&
+              agentSessionProviderHandlesEqual(current.link.handle, head.handle))
+        if (!sameProviderIdentity) {
+          throw new Error('agent_session_identity_required')
+        }
+        if (current.link.handle.provider === 'claude' && head.handle.provider === 'claude') {
+          const proof = await this.waitForStructuredClaudeTuiProof({
+            handle: current.terminal.handle,
+            paneKey: current.terminal.paneKey,
+            sessionId: head.handle.sessionId,
+            previousLeafUuid: head.handle.leafUuid,
+            projectsDir: join(record.accountHome.path, 'projects')
+          })
+          return {
+            ...current,
+            link: claudeProviderHandleLink({
+              sessionId: head.handle.sessionId,
+              leafUuid: proof.leafUuid,
+              resumed: true,
+              fence: record.lease.runtimeFence,
+              observedAt: Date.now()
+            }),
+            transcriptPath: proof.transcriptPath
+          }
+        }
+        if (current.transcriptPath || current.link.handle.provider !== 'codex') {
+          return current
+        }
+        if (head.handle.provider !== 'codex') {
+          return current
+        }
+        const threadId = head.handle.threadId
+        const transcriptPath = await resolvePinnedCodexRolloutProof(
+          record.accountHome.path,
+          threadId
+        )
+        return transcriptPath ? { ...current, transcriptPath } : current
+      },
+      recoverTuiOwner: async (record) => {
+        const identity = record.lease.ownerProcess
+        const head = record.providerHandleChain.at(-1)
+        if (
+          !identity ||
+          !head ||
+          (head.handle.provider !== 'codex' && head.handle.provider !== 'claude')
+        ) {
+          throw new Error('agent_session_identity_required')
+        }
+        const provider = head.handle.provider
+        const providerSessionId =
+          provider === 'claude' ? head.handle.sessionId : head.handle.threadId
+        let candidate = [...this.ptysById.values()].find(
+          (pty) =>
+            pty.connected &&
+            pty.launchToken === identity.spawnToken &&
+            pty.launchAgent === provider &&
+            pty.tabId &&
+            pty.paneKey
+        )
+        let handle = candidate ? this.issueStructuredTuiPtyHandle(candidate) : null
+        let durableOwner: { binding: AgentSessionOwnerBinding; incarnationId: string } | undefined
+        if (!candidate) {
+          const workspace = await this.resolveTerminalWorkspaceLaunchScope(
+            `id:${record.location.workspaceId}`
+          )
+          const baseNamespace = this.getAgentSessionExecutionNamespace(workspace, provider)
+          if (
+            !baseNamespace ||
+            !runtimeWorktreeIdsEqual(workspace.id, record.location.workspaceId)
+          ) {
+            throw new Error('agent_session_identity_required')
+          }
+          const claim = this.agentSessionClaimSigner.createClaim({
+            namespace: { ...baseNamespace, providerRoot: record.accountHome.path },
+            identity: canonicalizeAgentSessionIdentity(provider, {
+              key: 'session_id',
+              id: providerSessionId
+            }),
+            canonicalWorktreeId: workspace.id
+          })
+          const candidateEvaluations = [...this.ptysById.values()].flatMap((pty) =>
+            pty.agentSessionOwners.map((owner) => {
+              const session = this.getWorkspaceSessionForWorktree(owner.surface.worktreeId)
+              const sessionWorktreeId = session
+                ? resolveTerminalSessionWorktreeId(session, owner.surface.worktreeId)
+                : null
+              const persistedTab = sessionWorktreeId
+                ? session?.tabsByWorktree[sessionWorktreeId]?.find(
+                    (candidate) => candidate.id === owner.surface.tabId
+                  )
+                : null
+              const paneKey = makePaneKey(owner.surface.tabId, owner.surface.leafId)
+              const persisted = {
+                sessionResolved: Boolean(session && sessionWorktreeId),
+                tabPresent: Boolean(persistedTab),
+                ptyId:
+                  session?.terminalLayoutsByTabId[owner.surface.tabId]?.ptyIdsByLeafId?.[
+                    owner.surface.leafId
+                  ] ?? null,
+                incarnationId: session?.terminalPtyIncarnationsByPaneKey?.[paneKey] ?? null
+              }
+              const evaluation = evaluateStructuredTuiRecoveryClaim(
+                {
+                  expectedWorkspaceId: workspace.id,
+                  claimMatches: scopedAgentSessionClaimsEqual(owner.claim, claim),
+                  pty: {
+                    connected: pty.connected,
+                    ptyId: pty.ptyId,
+                    incarnationId: pty.incarnationId,
+                    worktreeId: pty.worktreeId
+                  },
+                  owner: {
+                    phase: owner.phase,
+                    ptyId: owner.ptyId,
+                    surface: owner.surface
+                  },
+                  persisted
+                },
+                runtimeWorktreeIdsEqual
+              )
+              return { pty, owner, persisted, evaluation }
+            })
+          )
+          const recoveredCandidates = candidateEvaluations
+            .filter(({ evaluation }) => evaluation.matches)
+            .map(({ pty, owner }) => ({ pty, owner }))
+          const recovered = recoveredCandidates.length === 1 ? recoveredCandidates[0] : null
+          if (!recovered) {
+            console.warn('[structured-tui-recovery] claim mismatch', {
+              sessionId: record.sessionId,
+              expectedWorkspaceId: workspace.id,
+              persistedOwnerProcess: {
+                hostId: identity.hostId,
+                pid: identity.pid,
+                processStartTimeMs: identity.processStartTimeMs,
+                spawnTokenPresent: identity.spawnToken.length > 0
+              },
+              candidates: candidateEvaluations.map(({ pty, owner, persisted, evaluation }) => ({
+                ptyId: pty.ptyId,
+                incarnationId: pty.incarnationId,
+                worktreeId: pty.worktreeId,
+                ownerSurface: owner.surface,
+                persisted,
+                mismatchedFields: evaluation.mismatchedFields
+              }))
+            })
+          }
+          if (
+            !recovered ||
+            !(await this.proveRecoveredStructuredTuiPtyProcess(recovered.pty, identity, provider))
+          ) {
+            throw new Error('The owning agent terminal could not be recovered.')
+          }
+          candidate = recovered.pty
+          candidate.tabId = recovered.owner.surface.tabId
+          candidate.paneKey = makePaneKey(
+            recovered.owner.surface.tabId,
+            recovered.owner.surface.leafId
+          )
+          // Runtime handles rotate on packaged relaunch; claim, incarnation, and process proof are durable.
+          handle = this.issuePtyHandle(candidate)
+          const recoveredIncarnationId = candidate.incarnationId
+          if (handle && recoveredIncarnationId) {
+            durableOwner = {
+              binding: cloneAgentSessionOwnerBinding(recovered.owner),
+              incarnationId: recoveredIncarnationId
+            }
+          }
+        }
+        if (!candidate?.tabId || !candidate.paneKey || !handle) {
+          throw new Error('The owning agent terminal could not be recovered.')
+        }
+        agentSessionPtyWriteGate.bindPty(candidate.ptyId, record.sessionId)
+        const proof =
+          provider === 'codex'
+            ? durableOwner
+              ? await this.resolveRecoveredStructuredTuiTranscript({
+                  handle,
+                  paneKey: candidate.paneKey,
+                  threadId: head.handle.threadId,
+                  codexHome: record.accountHome.path,
+                  durableOwner
+                })
+              : await this.waitForStructuredTuiProof({
+                  handle,
+                  paneKey: candidate.paneKey,
+                  threadId: head.handle.threadId,
+                  spawnToken: identity.spawnToken,
+                  codexHome: record.accountHome.path,
+                  sessionId: record.sessionId
+                })
+            : await this.waitForStructuredClaudeTuiProof({
+                handle,
+                paneKey: candidate.paneKey,
+                sessionId: head.handle.sessionId,
+                previousLeafUuid: head.handle.leafUuid,
+                projectsDir: join(record.accountHome.path, 'projects')
+              })
+        return {
+          terminal: {
+            handle,
+            tabId: candidate.tabId,
+            paneKey: candidate.paneKey,
+            ptyId: candidate.ptyId
+          },
+          process: identity,
+          link:
+            provider === 'codex'
+              ? codexProviderHandleLink({
+                  threadId: head.handle.threadId,
+                  resumed: true,
+                  fence: record.lease.runtimeFence,
+                  observedAt: Date.now()
+                })
+              : claudeProviderHandleLink({
+                  sessionId: head.handle.sessionId,
+                  leafUuid: proof.leafUuid ?? head.handle.leafUuid,
+                  resumed: true,
+                  fence: record.lease.runtimeFence,
+                  observedAt: Date.now()
+                }),
+          transcriptPath: proof.transcriptPath
+        }
+      },
+      probeRecoveredOwner: async (record) => {
+        const identity = record.lease.ownerProcess
+        if (!identity) {
+          return 'dead'
+        }
+        const proof = await probeAgentSessionProcessIdentity({ identity })
+        if (proof.outcome === 'identity-matched' && proof.matchedOn.length > 0) {
+          return 'live'
+        }
+        if (proof.outcome === 'pid-absent' || proof.outcome === 'identity-mismatch') {
+          return 'dead'
+        }
+        return 'unknown'
+      },
+      stopRecoveredOwner: (record) => this.stopStructuredSessionProcess(record),
+      tuiStatus: (owner) => this.structuredTuiStatus(owner),
+      closeTuiOwner: (owner) => this.closeStructuredTuiOwner(owner),
+      revealNativeSession: ({ workspaceId, sessionId, agent = 'codex', adoptedTerminal }) => {
+        if (adoptedTerminal || agent !== 'codex') {
+          return
+        }
+        this.publishStructuredAgentSessionTab({
+          workspaceId,
+          sessionId,
+          agent,
+          activate: false
+        })
+        this.notifier?.focusEditorTab?.(structuredAgentSessionTabId(sessionId), workspaceId)
+      },
+      stopFailedTuiLaunch: async (owner) => void (await this.closeStructuredTuiOwner(owner))
+    }
+  }
+
+  private async proveRecoveredStructuredTuiPtyProcess(
+    pty: RuntimePtyWorktreeRecord,
+    identity: NonNullable<AgentSessionRecord['lease']['ownerProcess']>,
+    provider: 'codex' | 'claude' = 'codex'
+  ): Promise<boolean> {
+    const listings = await this.ptyController?.listProcesses?.(pty.connectionId)
+    const listed = listings?.find(
+      (candidate) => candidate.id === pty.ptyId && candidate.incarnationId === pty.incarnationId
+    )
+    if (!listed?.rootProcessId || identity.processStartTimeMs === null) {
+      console.warn('[structured-tui-recovery] claimed PTY process mismatch', {
+        ptyId: pty.ptyId,
+        incarnationId: pty.incarnationId,
+        rootProcessId: listed?.rootProcessId ?? null,
+        mismatchedFields: [
+          ...(!listed?.rootProcessId ? ['root-process-id'] : []),
+          ...(identity.processStartTimeMs === null ? ['persisted-process-start-time'] : [])
+        ]
+      })
+      return false
+    }
+    try {
+      const observed = await readStructuredTuiProcessIdentity({
+        hostId: identity.hostId,
+        rootPid: listed.rootProcessId,
+        spawnToken: identity.spawnToken,
+        agent: provider
+      })
+      const matched = {
+        hostId: observed.hostId === identity.hostId,
+        pid: observed.pid === identity.pid,
+        processStartTime:
+          observed.processStartTimeMs !== null &&
+          Math.abs(observed.processStartTimeMs - identity.processStartTimeMs) <=
+            PROCESS_START_TIME_TOLERANCE_MS
+      }
+      if (!Object.values(matched).every(Boolean)) {
+        console.warn('[structured-tui-recovery] claimed PTY process mismatch', {
+          ptyId: pty.ptyId,
+          incarnationId: pty.incarnationId,
+          rootProcessId: listed.rootProcessId,
+          persisted: {
+            hostId: identity.hostId,
+            pid: identity.pid,
+            processStartTimeMs: identity.processStartTimeMs
+          },
+          observed: {
+            hostId: observed.hostId,
+            pid: observed.pid,
+            processStartTimeMs: observed.processStartTimeMs
+          },
+          mismatchedFields: Object.entries(matched)
+            .filter(([, matches]) => !matches)
+            .map(([field]) => field)
+        })
+      }
+      return Object.values(matched).every(Boolean)
+    } catch (error) {
+      console.warn('[structured-tui-recovery] claimed PTY process mismatch', {
+        ptyId: pty.ptyId,
+        incarnationId: pty.incarnationId,
+        rootProcessId: listed.rootProcessId,
+        mismatchedFields: [`${provider}-child-proof`],
+        error: error instanceof Error ? error.message : String(error)
+      })
+      return false
+    }
+  }
+
+  private async closeStructuredTuiOwner(
+    owner: StructuredTuiOwner
+  ): Promise<{ transcriptPath?: string }> {
+    if (this.ptysById.get(owner.terminal.ptyId)?.connected) {
+      const current = this.refreshStructuredTuiOwnerBinding(owner)
+      try {
+        await this.closeTerminal(current.terminal.handle)
+      } catch (error) {
+        if (this.ptysById.get(owner.terminal.ptyId)?.connected) {
+          throw error
+        }
+      }
+    }
+    await this.waitForStructuredTuiOwnerExit(owner)
+    return owner.transcriptPath ? { transcriptPath: owner.transcriptPath } : {}
+  }
+
+  // The new exact `codex resume <thread>` child proves the resumed owner without
+  // a first turn; the pinned rollout then binds its durable transcript.
+  private async waitForAdoptedStructuredTuiProof(input: {
+    owner: StructuredTuiOwner
+    threadId: string
+    codexHome: string
+  }): Promise<{ transcriptPath: string; leafUuid?: never }> {
+    const assertPaneIdentity = (): void => {
+      const pty = this.ptysById.get(input.owner.terminal.ptyId)
+      if (!pty?.connected || pty.paneKey !== input.owner.terminal.paneKey) {
+        throw new Error('The adopted terminal lost its pane identity.')
+      }
+    }
+    assertPaneIdentity()
+    const transcriptPath = await resolvePinnedCodexRolloutProof(input.codexHome, input.threadId)
+    if (!transcriptPath) {
+      throw new Error('The agent terminal did not prove the expected Codex rollout.')
+    }
+    assertPaneIdentity()
+    const processProof = await probeAgentSessionProcessIdentity({ identity: input.owner.process })
+    if (processProof.outcome !== 'identity-matched' || processProof.matchedOn.length === 0) {
+      throw new Error('The resumed Codex process could not be re-proved.')
+    }
+    return { transcriptPath }
+  }
+
+  private refreshStructuredTuiOwnerBinding(owner: StructuredTuiOwner): StructuredTuiOwner {
+    const pty = this.ptysById.get(owner.terminal.ptyId)
+    if (!pty?.connected) {
+      throw new Error('The owning agent terminal lost its launch identity.')
+    }
+    const handle = this.issueStructuredTuiPtyHandle(pty)
+    if (handle === owner.terminal.handle) {
+      return owner
+    }
+    return { ...owner, terminal: { ...owner.terminal, handle } }
+  }
+
+  private issueStructuredTuiPtyHandle(pty: RuntimePtyWorktreeRecord): string {
+    const existingHandle = this.findHandleForPtyRecord(pty.ptyId)
+    if (existingHandle) {
+      this.handleByPtyId.set(pty.ptyId, existingHandle)
+      return existingHandle
+    }
+    const handle = `term_${randomUUID()}`
+    const syntheticId = `pty:${pty.ptyId}`
+    this.syntheticTerminalHandles.add(handle)
+    this.handles.set(handle, {
+      handle,
+      runtimeId: this.runtimeId,
+      rendererGraphEpoch: this.rendererGraphEpoch,
+      worktreeId: pty.worktreeId,
+      tabId: syntheticId,
+      leafId: syntheticId,
+      ptyId: pty.ptyId,
+      ptyGeneration: 0
+    })
+    this.handleByPtyId.set(pty.ptyId, handle)
+    return handle
+  }
+
+  private async waitForStructuredTuiPtyExit(ptyId: string): Promise<void> {
+    const deadline = Date.now() + 5_000
+    while (this.ptysById.get(ptyId)?.connected === true) {
+      if (Date.now() >= deadline) {
+        throw new Error('terminal_handle_stale')
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+  }
+
+  private async waitForStructuredTuiOwnerExit(owner: StructuredTuiOwner): Promise<void> {
+    await waitForStructuredTuiExitProof({
+      identity: owner.process,
+      waitForExit: () => this.waitForStructuredTuiPtyExit(owner.terminal.ptyId)
+    })
+  }
+
+  private async waitForStructuredTuiIdleOrExit(
+    owner: StructuredTuiOwner,
+    signal: AbortSignal
+  ): Promise<'idle' | 'exited' | null> {
+    const deadline = Date.now() + 250
+    while (!signal.aborted && Date.now() < deadline) {
+      if (!this.ptysById.get(owner.terminal.ptyId)?.connected) {
+        await this.waitForStructuredTuiOwnerExit(owner)
+        return 'exited'
+      }
+      if (this.structuredTuiStatus(owner) === 'idle') {
+        return 'idle'
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    return null
+  }
+
+  private async stopStructuredSessionProcess(record: AgentSessionRecord): Promise<void> {
+    const identity = record.lease.ownerProcess
+    if (!identity) {
+      return
+    }
+    const proof = await probeAgentSessionProcessIdentity({ identity })
+    if (proof.outcome === 'pid-absent' || proof.outcome === 'identity-mismatch') {
+      return
+    }
+    if (proof.outcome !== 'identity-matched' || proof.matchedOn.length === 0) {
+      throw new Error('The recovered owner process could not be stopped safely.')
+    }
+    try {
+      process.kill(identity.pid, 'SIGTERM')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') {
+        throw error
+      }
+      return
+    }
+    const deadline = Date.now() + 15_000
+    while (Date.now() < deadline) {
+      const current = await probeAgentSessionProcessIdentity({ identity })
+      if (current.outcome === 'pid-absent' || current.outcome === 'identity-mismatch') {
+        return
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    // SIGTERM is only a request. Escalate once, then require an independent
+    // absence probe before allowing the lease transition to proceed.
+    try {
+      process.kill(identity.pid, 'SIGKILL')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') {
+        throw error
+      }
+      return
+    }
+    const forcedDeadline = Date.now() + 5_000
+    while (Date.now() < forcedDeadline) {
+      const current = await probeAgentSessionProcessIdentity({ identity })
+      if (current.outcome === 'pid-absent' || current.outcome === 'identity-mismatch') {
+        return
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    throw new Error('The recovered owner process did not exit after forced termination.')
+  }
+
+  private structuredTuiStatus(owner: StructuredTuiOwner): 'idle' | 'busy' {
+    const pty = this.ptysById.get(owner.terminal.ptyId)
+    const paneKey = pty?.paneKey ?? owner.terminal.paneKey
+    const explicit = this.getFreshExplicitAgentStatusForHandle(owner.terminal.handle, paneKey)
+    if (explicit) {
+      return explicit.status === 'idle' ? 'idle' : 'busy'
+    }
+    if (pty?.connected) {
+      const text = buildTerminalWaitText(pty.tailBuffer, pty.tailPartialLine, pty.preview)
+      const blocked = detectTerminalWaitBlockedReason(text) !== null
+      if (!blocked && isKnownReadyPromptPreview(text)) {
+        return 'idle'
+      }
+      return hasStructuredTuiIdleEvidence({
+        blocked,
+        status: pty.lastAgentStatus,
+        statusObservedLive: pty.lastAgentStatusObservedLive
+      })
+        ? 'idle'
+        : 'busy'
+    }
+    return 'busy'
+  }
+
+  private async waitForStructuredTuiProof(input: {
+    handle: string
+    paneKey: string
+    threadId: string
+    spawnToken: string
+    codexHome: string
+    sessionId: string
+  }): Promise<{ transcriptPath?: string; leafUuid?: never }> {
+    const readBoundPty = (): RuntimePtyWorktreeRecord => {
+      const pty = this.getLivePtyForHandle(input.handle)?.pty
+      if (
+        !pty?.connected ||
+        pty.paneKey !== input.paneKey ||
+        pty.launchAgent !== 'codex' ||
+        pty.launchToken !== input.spawnToken
+      ) {
+        throw new Error('The resumed terminal lost its launch identity.')
+      }
+      return pty
+    }
+    const initialPty = readBoundPty()
+    const kittyKeyboardFlags = this.providerModeTrackersByPtyId.get(initialPty.ptyId)?.flags ?? 0
+    return proveCodexTuiRollout({
+      codexHome: input.codexHome,
+      threadId: input.threadId,
+      kittyKeyboardFlags,
+      readOutput: () => {
+        const pty = readBoundPty()
+        return {
+          text: buildTerminalWaitText(pty.tailBuffer, pty.tailPartialLine, pty.preview),
+          lastOutputAt: pty.lastOutputAt
+        }
+      },
+      write: (data) => {
+        const pty = readBoundPty()
+        return (
+          this.ptyController?.writeAgentSessionProof?.(pty.ptyId, data, {
+            sessionId: input.sessionId,
+            spawnToken: input.spawnToken
+          }) ?? false
+        )
+      }
+    })
+  }
+
+  private async waitForStructuredClaudeTuiProof(input: {
+    handle: string
+    paneKey: string
+    sessionId: string
+    previousLeafUuid: string | null
+    projectsDir: string
+    /** Set when this call launched a new Claude process; a cached transcript marker is not enough. */
+    spawnToken?: string
+    minimumProviderSessionReceivedAt?: number
+  }): Promise<{ transcriptPath: string; leafUuid: string }> {
+    const deadline = Date.now() + 15_000
+    let incompleteTail: ClaudeTranscriptTailIncompleteError | null = null
+    while (Date.now() < deadline) {
+      const pty = this.getLivePtyForHandle(input.handle)?.pty
+      if (!pty?.connected || pty.paneKey !== input.paneKey || pty.launchAgent !== 'claude') {
+        throw new Error('The resumed Claude terminal lost its launch identity.')
+      }
+      if (input.spawnToken) {
+        if (!this.hasProviderSessionObservationSource()) {
+          throw new Error('The Claude terminal could not prove its fresh provider session.')
+        }
+        const observedProviderRow = this.findAdoptedProviderSession(
+          input.paneKey,
+          'claude',
+          input.sessionId
+        )
+        if (
+          !observedProviderRow ||
+          observedProviderRow.launchToken !== input.spawnToken ||
+          (input.minimumProviderSessionReceivedAt !== undefined &&
+            observedProviderRow.receivedAt < input.minimumProviderSessionReceivedAt)
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 100))
+          continue
+        }
+      }
+      const transcriptPath = await resolveSessionFilePath('claude', input.sessionId, {
+        claudeProjectsDir: input.projectsDir
+      })
+      if (transcriptPath) {
+        if (!isPathWithinDirectory(input.projectsDir, transcriptPath)) {
+          throw new Error('The Claude terminal reported a transcript outside its account root.')
+        }
+        try {
+          const leafUuid = await readClaudeTranscriptLeafUuid(
+            transcriptPath,
+            input.sessionId,
+            input.previousLeafUuid
+          )
+          return { transcriptPath, leafUuid }
+        } catch (error) {
+          if (!(error instanceof ClaudeTranscriptTailIncompleteError)) {
+            throw error
+          }
+          incompleteTail = error
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    if (incompleteTail) {
+      throw incompleteTail
+    }
+    throw new Error('The agent terminal did not prove the expected Claude session.')
+  }
+
+  private async resolveRecoveredStructuredTuiTranscript(input: {
+    handle: string
+    paneKey: string
+    threadId: string
+    codexHome: string
+    durableOwner: { binding: AgentSessionOwnerBinding; incarnationId: string }
+  }): Promise<{ transcriptPath: string; leafUuid?: never }> {
+    const assertDurableOwner = (): void => {
+      const pty = this.getLivePtyForHandle(input.handle)?.pty
+      if (
+        !pty?.connected ||
+        pty.paneKey !== input.paneKey ||
+        pty.incarnationId !== input.durableOwner.incarnationId ||
+        !pty.agentSessionOwners.some((owner) =>
+          agentSessionOwnerBindingsEqual(owner, input.durableOwner.binding)
+        )
+      ) {
+        throw new Error('The resumed terminal lost its durable owner identity.')
+      }
+    }
+    assertDurableOwner()
+    const transcriptPath = await resolvePinnedCodexRolloutProof(input.codexHome, input.threadId)
+    assertDurableOwner()
+    if (!transcriptPath) {
+      throw new Error('The agent terminal did not prove the expected Codex rollout.')
+    }
+    return { transcriptPath }
+  }
+
+  async getStructuredAgentSessionCreateSupport(
+    worktreeSelector: string,
+    agent: 'codex'
+  ): Promise<{ supported: boolean; reason?: 'agent' | 'remote' | 'wsl' }> {
+    const location = await this.resolveStructuredAgentSessionLocation(worktreeSelector)
+    await this.ensureStructuredAgentSessionHost()
+    if (getStructuredAgentSessionHost()?.supportsCreate(location, agent)) {
+      return { supported: true }
+    }
+    return {
+      supported: false,
+      reason:
+        location.executionHostId !== LOCAL_EXECUTION_HOST_ID
+          ? 'remote'
+          : location.wslDistro
+            ? 'wsl'
+            : 'agent'
+    }
+  }
+
+  private hasProviderSessionObservationSource(): boolean {
+    return (
+      this.getAgentProviderSessionRowsForPaneFn !== null ||
+      this.getAgentProviderSessionSnapshotFn !== null
+    )
+  }
+
+  private findAdoptedProviderSession(
+    paneKey: string,
+    provider: 'claude' | 'codex',
+    providerSessionId: string
+  ): AgentStatusIpcPayload | undefined {
+    const rows =
+      this.getAgentProviderSessionRowsForPaneFn?.(paneKey) ??
+      (this.getAgentProviderSessionSnapshotFn?.() ?? []).filter((row) => row.paneKey === paneKey)
+    return rows
+      .filter((row) => row.agentType === provider && row.providerSession?.id === providerSessionId)
+      .reduce<AgentStatusIpcPayload | undefined>(
+        (latest, row) => (!latest || row.receivedAt > latest.receivedAt ? row : latest),
+        undefined
+      )
+  }
+
+  private async resolveStructuredAgentSessionLocation(worktreeSelector: string) {
+    const target = await this.resolveRuntimeFileTarget(worktreeSelector)
+    const repo = this.store?.getRepo(target.worktree.repoId)
+    const wslDistro =
+      repo && !target.connectionId
+        ? (getLocalProjectWorktreeGitOptions(this.requireStore(), repo).wslDistro ?? null)
+        : null
+    const folderWorkspace = this.store
+      ?.getFolderWorkspaces?.()
+      .some((workspace) => workspace.id === target.worktree.id)
+    return {
+      executionHostId: getRuntimeFileTargetExecutionHostId({
+        worktree: target.worktree,
+        connectionId: target.connectionId
+      }),
+      wslDistro,
+      workspaceId: target.worktree.id,
+      workspaceKind: folderWorkspace ? ('folder' as const) : ('git-worktree' as const)
+    }
+  }
+
+  async resolveStructuredAgentSessionCreateIntent(input: {
+    envelope: { sessionId: string; clientOperationId: string }
+    worktree: string
+    agent: 'codex'
+  }): Promise<AgentSessionAttachParams> {
+    return this.resolveStructuredAgentSessionIntent(input, async ({ workspacePath, launchEnv }) => {
+      // A create has no process yet, so the current selection is what it must follow.
+      const preparedHome = await this.prepareCodexStructuredLaunchFn?.({ workspacePath, launchEnv })
+      const configuredHome = launchEnv.CODEX_HOME
+      return (
+        preparedHome?.trim() ||
+        (this.prepareCodexStructuredLaunchFn ? getSystemCodexHomePath() : configuredHome?.trim()) ||
+        getSystemCodexHomePath()
+      )
+    })
+  }
+
+  private async resolveStructuredAgentSessionIntent(
+    input: {
+      envelope: { sessionId: string; clientOperationId: string }
+      worktree: string
+      agent: 'codex'
+    },
+    resolveAccountHomePath: (context: {
+      workspacePath: string
+      launchEnv: NodeJS.ProcessEnv
+    }) => string | Promise<string>
+  ): Promise<AgentSessionAttachParams> {
+    const support = await this.getStructuredAgentSessionCreateSupport(input.worktree, input.agent)
+    if (!support.supported) {
+      throw new Error('structured_agent_session_unsupported')
+    }
+    const settings = this.requireStore().getSettings()
+    const launchEnv = resolveTuiAgentLaunchEnv(input.agent, settings.agentDefaultEnv)
+    const location = await this.resolveStructuredAgentSessionLocation(input.worktree)
+    const workspacePath = (await this.resolveRuntimeFileTarget(input.worktree)).worktree.path
+    return {
+      envelope: {
+        sessionId: input.envelope.sessionId,
+        clientOperationId: input.envelope.clientOperationId,
+        expectedRuntimeFence: null,
+        payloadFingerprint: ''
+      },
+      location,
+      provider: input.agent,
+      agent: input.agent,
+      accountHome: {
+        variable: 'CODEX_HOME',
+        path: await resolveAccountHomePath({ workspacePath, launchEnv })
+      },
+      runtimeKind: 'native'
+    }
+  }
+
+  restoreStructuredAgentSessionTabs(): Promise<void> {
+    this.structuredAgentSessionTabRestorePromise ??=
+      this.restoreStructuredAgentSessionTabsOnce().catch((error) => {
+        this.structuredAgentSessionTabRestorePromise = null
+        throw error
+      })
+    return this.structuredAgentSessionTabRestorePromise
+  }
+
+  prepareStructuredAgentSessionStartupRestoration(): Promise<void> {
+    this.structuredAgentSessionStartupRestorePromise ??=
+      this.prepareStructuredAgentSessionStartupRestorationOnce().catch((error) => {
+        this.structuredAgentSessionStartupRestorePromise = null
+        throw error
+      })
+    return this.structuredAgentSessionStartupRestorePromise
+  }
+
+  private async prepareStructuredAgentSessionStartupRestorationOnce(): Promise<void> {
+    if (!this.hasPersistedStructuredAgentSessionStore()) {
+      return
+    }
+    // Durable agent records must exist before daemon inventory can be reconciled against them.
+    await this.ensureStructuredAgentSessionHost()
+    await this.refreshMobileSessionPtyRecords()
+    await getStructuredAgentSessionHost()?.reconcileRestartLeases()
+  }
+
+  private hasPersistedStructuredAgentSessionStore(): boolean {
+    return hasPersistedStructuredAgentSessionStoreOnDisk(getProfileUserDataPath())
+  }
+
+  private async restoreStructuredAgentSessionTabsOnce(): Promise<void> {
+    await this.prepareStructuredAgentSessionStartupRestoration()
+    const host = getStructuredAgentSessionHost()
+    await host?.restoreReadableSessions(
+      collectSavedStructuredAgentSessionIds(
+        this.store?.getWorkspaceSession?.(LOCAL_EXECUTION_HOST_ID) ?? null
+      )
+    )
+    for (const worktreeId of this.getKnownWorkspaceSessionWorktreeIds()) {
+      this.hydrateHeadlessMobileSessionTabsFromWorkspaceSession(worktreeId, {
+        allowAttachedWindow: true,
+        onlyRuntimeOwnedTerminals: true
+      })
+    }
+    this.hydrateHeadlessMobileSessionTabsFromWorkspaceSession()
+    for (const session of host?.listSessionTabs() ?? []) {
+      if (session.agent !== 'codex') {
+        continue
+      }
+      let sessionId = session.sessionId
+      while (sessionId.startsWith('agent-session:')) {
+        sessionId = sessionId.slice('agent-session:'.length)
+      }
+      this.publishStructuredAgentSessionTab({
+        ...session,
+        agent: 'codex',
+        sessionId,
+        activate: false,
+        notify: false
+      })
+    }
+  }
+
+  publishStructuredAgentSessionTab(input: {
+    workspaceId: string
+    sessionId: string
+    agent: 'codex'
+    activate: boolean
+    notify?: boolean
+  }): void {
+    const existing = this.mobileSessionTabsByWorktree.get(input.workspaceId)
+    const id = `agent-session:${input.sessionId}`
+    if (existing?.tabs.some((tab) => tab.id === id)) {
+      return
+    }
+    const tab: RuntimeMobileSessionAgentTab = {
+      type: 'agent-session',
+      id,
+      title: 'Codex Chat',
+      sessionId: input.sessionId,
+      agent: input.agent,
+      isActive: input.activate
+    }
+    const tabs = [...(existing?.tabs ?? [])].map((candidate) => ({
+      ...candidate,
+      isActive: input.activate ? false : candidate.isActive
+    }))
+    tabs.push(tab)
+    const priorGroups = existing?.tabGroups ?? [
+      {
+        id: getHeadlessMobileSessionGroupId(input.workspaceId),
+        activeTabId: existing?.activeTabId ?? null,
+        tabOrder: []
+      }
+    ]
+    const groupId = priorGroups.some((group) => group.id === existing?.activeGroupId)
+      ? existing!.activeGroupId!
+      : priorGroups[0]!.id
+    const tabGroups = priorGroups.map((group) =>
+      group.id === groupId
+        ? {
+            ...group,
+            activeTabId: input.activate ? id : group.activeTabId,
+            tabOrder: [...group.tabOrder, id]
+          }
+        : group
+    )
+    const snapshot: RuntimeMobileSessionTabsSnapshot = {
+      worktree: input.workspaceId,
+      publicationEpoch: existing?.publicationEpoch ?? `structured:${Date.now().toString(36)}`,
+      snapshotVersion: (existing?.snapshotVersion ?? 0) + 1,
+      activeGroupId: input.activate ? groupId : (existing?.activeGroupId ?? groupId),
+      activeTabId: input.activate ? id : (existing?.activeTabId ?? null),
+      activeTabType: input.activate ? 'agent-session' : (existing?.activeTabType ?? null),
+      tabGroups,
+      ...(existing?.tabGroupLayout ? { tabGroupLayout: existing.tabGroupLayout } : {}),
+      tabs
+    }
+    this.mobileSessionTabsByWorktree.set(input.workspaceId, snapshot)
+    if (input.notify !== false) {
+      this.emitMobileSessionTabsSnapshot(snapshot)
+    }
   }
 
   async inspectTerminalProcess(
@@ -13203,20 +15086,27 @@ class OrcaRuntimeService {
   private isRuntimeWorktreeVisible(
     worktree: Worktree,
     worktreeVisibilitySourceMatcher?: WorktreeVisibilitySourceMatcher,
-    sourceDefaultsSupported = true
+    sourceDefaultsSupported = true,
+    providedSettings?: ReturnType<RuntimeStore['getSettings']>
   ): boolean {
     return this.managedWorktreeQueries.isVisible(
       worktree,
       worktreeVisibilitySourceMatcher,
-      sourceDefaultsSupported
+      sourceDefaultsSupported,
+      providedSettings
     )
   }
 
   private buildRuntimeVisibilitySourceMatchersByRepoId(
     worktrees: readonly Worktree[],
-    sourceDefaultsSupported = true
+    sourceDefaultsSupported = true,
+    providedSettings?: ReturnType<RuntimeStore['getSettings']>
   ): Map<string, WorktreeVisibilitySourceMatcher> {
-    return this.managedWorktreeQueries.buildVisibilityMatchers(worktrees, sourceDefaultsSupported)
+    return this.managedWorktreeQueries.buildVisibilityMatchers(
+      worktrees,
+      sourceDefaultsSupported,
+      providedSettings
+    )
   }
 
   async showManagedWorktree(worktreeSelector: string) {
@@ -14046,8 +15936,16 @@ class OrcaRuntimeService {
     const store = this.store
     const cleanupHostId = parseExecutionHostId(hostId)?.id
     const removalTarget = await this.resolveWorktreeRemovalTarget(worktreeSelector, cleanupHostId)
+    const cleanupScopeKey = preservedBranchCleanupScopeKey({
+      worktreeId: removalTarget.id,
+      hostId: cleanupHostId
+    })
     const optionsKey = getRuntimeWorktreeRemovalOptionsKey(force, runHooks, allowUnverifiedPtyStop)
-    const inFlightRemoval = this.removeManagedWorktreeInFlight.get(removalTarget.id, optionsKey)
+    const inFlightRemoval = this.removeManagedWorktreeInFlight.get(
+      cleanupScopeKey,
+      removalTarget.id,
+      optionsKey
+    )
     if (inFlightRemoval) {
       return inFlightRemoval
     }
@@ -14072,6 +15970,11 @@ class OrcaRuntimeService {
         const removalHostId = repo ? (cleanupHostId ?? getRepoExecutionHostId(repo)) : cleanupHostId
         if (!repo) {
           const orphanHost = parseExecutionHostId(store.getWorktreeMeta(removalTarget.id)?.hostId)
+          if (cleanupHostId && orphanHost?.id !== cleanupHostId) {
+            throw new Error(
+              `Workspace identity for ${removalTarget.id} no longer belongs to ${cleanupHostId}. Refresh projects and try again.`
+            )
+          }
           const sshPtyProvider =
             orphanHost?.kind === 'ssh' ? this.getSshProviderFn?.(orphanHost.targetId) : undefined
           const ptyProvider = sshPtyProvider ?? this.getLocalProvider()
@@ -14115,6 +16018,7 @@ class OrcaRuntimeService {
               .then((gate) => gate.finish(false))
               .catch(() => {})
           }
+          await deleteRemoteWorktreeHistory(sshPtyProvider, removalTarget.id)
           this.clearOptimisticReconcileToken(removalTarget.id)
           this.removeWorktreeMetadataAndHistory(
             store,
@@ -14163,6 +16067,7 @@ class OrcaRuntimeService {
               console.warn(`[worktree-teardown] failed for ${removalTarget.id}:`, err)
             })
           }
+          await deleteRemoteWorktreeHistory(folderSshPtyProvider, removalTarget.id)
           this.removeWorktreeMetadataAndHistory(store, removalTarget.id, removalHostId)
           this.preservedBranchCleanup.delete(removalTarget.id, cleanupHostId)
           this.invalidateResolvedWorktreeCache()
@@ -14211,6 +16116,11 @@ class OrcaRuntimeService {
                 ...(connectionId ? { connectionId } : {}),
                 allowUnverifiedStop: allowUnverifiedPtyStop
               }),
+            deleteHistory: () =>
+              deleteRemoteWorktreeHistory(
+                repo.connectionId ? this.getSshProviderFn?.(repo.connectionId) : undefined,
+                removalTarget.id
+              ),
             finishRemoval: () => {
               this.clearOptimisticReconcileToken(removalTarget.id)
               this.removeWorktreeMetadataAndHistory(store, removalTarget.id, removalHostId)
@@ -14290,6 +16200,11 @@ class OrcaRuntimeService {
                 connectionId: repo.connectionId!,
                 allowUnverifiedStop: allowUnverifiedPtyStop
               }),
+            deleteHistory: () =>
+              deleteRemoteWorktreeHistory(
+                this.getSshProviderFn?.(repo.connectionId!),
+                removalTarget.id
+              ),
             preserveBranchHead: (result, fallbackHead) =>
               this.preservedBranchCleanup.preserveHead(result, fallbackHead),
             finishRemoval: (result) => {
@@ -14352,7 +16267,7 @@ class OrcaRuntimeService {
         })
       })
     })()
-    this.removeManagedWorktreeInFlight.track(removalTarget.id, optionsKey, removal)
+    this.removeManagedWorktreeInFlight.track(cleanupScopeKey, optionsKey, removal)
     try {
       const result = await removal
       this.emitWorktreeLifecycle({
@@ -14362,7 +16277,7 @@ class OrcaRuntimeService {
       })
       return result
     } finally {
-      this.removeManagedWorktreeInFlight.release(removalTarget.id, removal)
+      this.removeManagedWorktreeInFlight.release(cleanupScopeKey, removal)
     }
   }
 
@@ -14549,7 +16464,8 @@ class OrcaRuntimeService {
 
   async ensureAgentSession(
     request: RuntimeEnsureAgentSessionRequest,
-    _caller: RuntimeAgentSessionRpcCaller = {}
+    _caller: RuntimeAgentSessionRpcCaller = {},
+    handoffAuthority?: { spawnToken: string; providerRoot: string; sessionId: string }
   ): Promise<RuntimeEnsureAgentSessionResult> {
     if (request.kind === 'automatic') {
       // Legacy renderer sleep records are migration evidence, not host authority.
@@ -14559,7 +16475,11 @@ class OrcaRuntimeService {
       throw new Error('runtime_unavailable')
     }
     const workspace = await this.resolveTerminalWorkspaceLaunchScope(request.worktree)
-    const namespace = this.getAgentSessionExecutionNamespace(workspace, request.agent)
+    const resolvedNamespace = this.getAgentSessionExecutionNamespace(workspace, request.agent)
+    const namespace =
+      resolvedNamespace && handoffAuthority
+        ? { ...resolvedNamespace, providerRoot: handoffAuthority.providerRoot }
+        : resolvedNamespace
     if (
       !namespace ||
       !(await this.executionOwnerSupportsAgentSessionOperation(workspace, 'resume', _caller.signal))
@@ -14593,7 +16513,14 @@ class OrcaRuntimeService {
         request.agentArgs !== undefined
           ? request.agentArgs
           : resolveTuiAgentLaunchArgs(request.agent, settings.agentDefaultArgs),
-      agentEnv: resolveTuiAgentLaunchEnv(request.agent, settings.agentDefaultEnv),
+      agentEnv: {
+        ...resolveTuiAgentLaunchEnv(request.agent, settings.agentDefaultEnv),
+        ...(handoffAuthority && request.agent === 'codex'
+          ? { CODEX_HOME: handoffAuthority.providerRoot }
+          : handoffAuthority && request.agent === 'claude'
+            ? { CLAUDE_CONFIG_DIR: handoffAuthority.providerRoot }
+            : {})
+      },
       ompResumeFilePath: request.ompResumeFilePath,
       sessionOptions: this.toAgentSessionOptions(request.launchPreferences),
       platform,
@@ -14611,12 +16538,18 @@ class OrcaRuntimeService {
       command: startup.launchCommand,
       env: startup.env,
       launchConfig: startup.launchConfig,
+      startupCommandDelivery: startup.startupCommandDelivery,
       launchAgent: request.agent,
       presentation: request.presentation ?? 'background',
       tabId: request.placement?.tabId,
       leafId: request.placement?.leafId,
-      persistHostSessionBinding: true,
       agentSessionClaim: claim,
+      ...(handoffAuthority
+        ? {
+            launchToken: handoffAuthority.spawnToken,
+            structuredAgentSessionId: handoffAuthority.sessionId
+          }
+        : {}),
       signal: _caller.signal
     })
     return {
@@ -15109,6 +17042,9 @@ class OrcaRuntimeService {
           leafId,
           ...(result.incarnationId ? { incarnationId: result.incarnationId } : {})
         })
+        if (launchOpts.structuredAgentSessionId) {
+          agentSessionPtyWriteGate.bindPty(result.id, launchOpts.structuredAgentSessionId)
+        }
         const pty = this.getOrCreatePtyWorktreeRecord(result.id)
         if (pty) {
           if (persistHostSessionBinding) {
@@ -15927,9 +17863,11 @@ class OrcaRuntimeService {
     }
     this.mobileSessionTabsByWorktree.set(worktreeId, next)
     const result = this.toMobileSessionTabsResult(next)
+    const changeSequence = ++this.mobileSessionTabsChangeSequence
     for (const subscription of this.mobileSessionTabListeners) {
       subscription.listener(
-        this.projectMobileSessionTabsForClient(result, subscription.clientNavigationId)
+        this.projectMobileSessionTabsForClient(result, subscription.clientNavigationId),
+        changeSequence
       )
     }
     const created = result.tabs.find((candidate) => candidate.id === tab.id)
@@ -16667,11 +18605,7 @@ class OrcaRuntimeService {
         const ptyKilled = await this.stopExplicitlyClosedTabPtys(ptyIdsToKill, pty.pty.ptyId)
         return this.describeTerminalClose(handle, tabId, pty.pty.ptyId, ptyKilled)
       }
-      const ptyIdsToKill =
-        siblingCount <= 1
-          ? this.getPtyIdsForExplicitTabClose(pty.pty.worktreeId, tabId)
-          : [pty.pty.ptyId]
-      const ptyKilled = await this.stopExplicitlyClosedTabPtys(ptyIdsToKill, pty.pty.ptyId)
+      const ptyKilled = await this.stopExplicitlyClosedTabPtys([pty.pty.ptyId], pty.pty.ptyId)
       if (!ptyKilled || siblingCount <= 1) {
         if (surface) {
           // Why: paired viewers keep ended streams mounted until the HUB publishes removal, so explicit close uses the durable host-tab transaction instead of viewer-local exit handling.
@@ -16689,7 +18623,7 @@ class OrcaRuntimeService {
           this.notifier?.closeTerminal(tabId)
         }
       }
-      return { handle, tabId, ptyKilled }
+      return this.describeTerminalClose(handle, tabId, pty.pty.ptyId, ptyKilled)
     }
     this.assertGraphReady()
     const { leaf } = this.getLiveLeafForHandle(handle)
@@ -16941,7 +18875,7 @@ class OrcaRuntimeService {
         }
       }
       try {
-        this.ptyController.retireRejectedPty?.(result.id)
+        this.ptyController.retireRejectedPty?.(result.id, stopped)
       } catch {
         // Best-effort cleanup; preserve the original split authority error.
       }
@@ -17803,18 +19737,12 @@ class OrcaRuntimeService {
   }
 
   private beginGraphReload(windowId: number): number {
-    // Why: a renderer reload tears down the live graph, so live handles must go stale immediately, not be reused against the rebuild.
+    // Why: the rebuilt graph decides whether an incarnation survived; do not stale proven process identities before that comparison.
     this.rendererGraphEpoch += 1
     this.graphStatus = 'reloading'
     const revision = this.graphReloadLifecycle.begin(windowId)
     this.setTerminalSideEffectConsumerAvailable(false)
     this.rememberDetachedPreAllocatedLeaves()
-    for (const leaf of this.leaves.values()) {
-      const handle = this.handleByLeafKey.get(this.getLeafKey(leaf.tabId, leaf.leafId))
-      if (leaf.ptyId && handle) {
-        this.handleByPtyId.set(leaf.ptyId, handle)
-      }
-    }
     const retainedHandles = new Set([
       ...this.handleByPtyId.values(),
       ...[...this.handleByPtyIncarnation.values()].map((record) => record.handle)
@@ -17846,6 +19774,8 @@ class OrcaRuntimeService {
       return false
     }
     if (fence.recovery === 'renderer') {
+      const restoresPublishedInventory =
+        this.sessionTabsInventoryPublicationEpoch === this.rendererGraphEpoch - 1
       this.graphStatus = 'ready'
       this.setTerminalSideEffectConsumerAvailable(true)
       for (const leaf of this.leaves.values()) {
@@ -17853,6 +19783,9 @@ class OrcaRuntimeService {
       }
       this.reconcilePtyIncarnationHandles()
       this.refreshWritableFlags()
+      if (restoresPublishedInventory) {
+        this.markSessionTabsInventoryPublished()
+      }
       return true
     }
     this.graphReloadLifecycle.begin(windowId)
@@ -17969,6 +19902,7 @@ class OrcaRuntimeService {
     this.handleByLeafKey.clear()
     this.rejectAllWaiters('terminal_handle_stale')
     this.refreshWritableFlags()
+    this.markSessionTabsInventoryPublished()
   }
 
   private assertGraphReady(): void {
@@ -18285,9 +20219,18 @@ class OrcaRuntimeService {
       throw new Error('selector_not_found')
     }
 
-    if (selector.startsWith('id:')) {
+    if (selector.startsWith('identity:')) {
+      const identityKey = selector.slice('identity:'.length)
+      candidates = worktrees.filter((worktree) => worktree.identity?.key === identityKey)
+    } else if (selector.startsWith('id:')) {
       const worktreeId = explicitWorktreeId ?? selector.slice(3)
       candidates = worktrees.filter((worktree) => worktree.id === worktreeId)
+      if (candidates.length === 0) {
+        const comparisonKey = worktreeIdComparisonKey(worktreeId)
+        candidates = comparisonKey
+          ? worktrees.filter((worktree) => worktreeIdComparisonKey(worktree.id) === comparisonKey)
+          : candidates
+      }
       if (candidates.length === 0) {
         const parsed = splitWorktreeIdForFilesystem(worktreeId)
         const repo = parsed ? this.store?.getRepo(parsed.repoId) : null
@@ -18528,9 +20471,9 @@ class OrcaRuntimeService {
         async (repo) => await resolveRepoWorktreeRows(deps, repo, metaById, projectRuntimeByRepoId)
       )
     )
-    const worktrees = projectResolvedWorktreeLineage(
-      perRepoWorktrees.flat(),
-      this.store?.getAllWorktreeLineage?.() ?? {}
+    const lineageById = this.store?.getAllWorktreeLineage?.() ?? {}
+    const worktrees = perRepoWorktrees.flatMap((rows) =>
+      projectResolvedWorktreeLineage(rows, lineageById)
     )
     return { worktrees, platformByRepoId }
   }
@@ -18542,7 +20485,8 @@ class OrcaRuntimeService {
       store,
       scanRepo: (repo, projectRuntimeByRepoId) =>
         this.listRepoWorktreesForResolution(repo, projectRuntimeByRepoId),
-      listFolderWorkspaces: (repo) => listRuntimeFolderWorkspaces(store, repo)
+      listFolderWorkspaces: (repo, repoOwnerCount) =>
+        listRuntimeFolderWorkspaces(store, repo, repoOwnerCount)
     }
   }
 
@@ -18573,8 +20517,9 @@ class OrcaRuntimeService {
         ? `ssh:${repo.connectionId}:${getSshGitProviderGeneration(repo.connectionId)}`
         : 'local:default'
     const now = Date.now()
-    const generation = this.worktreeScanGenerations.get(repo.id) ?? 0
-    const cached = this.worktreeScanCache.get(repo.id)
+    const scanScopeKey = `${repo.id}\0${getRepoExecutionHostId(repo)}`
+    const generation = this.worktreeScanGenerations.get(scanScopeKey) ?? 0
+    const cached = this.worktreeScanCache.get(scanScopeKey)
     if (
       cached?.generation === generation &&
       cached.runtimeKey === runtimeKey &&
@@ -18582,10 +20527,10 @@ class OrcaRuntimeService {
     ) {
       return cached.result
     }
-    const inFlight = this.worktreeScanInFlight.get(repo.id)
+    const inFlight = this.worktreeScanInFlight.get(scanScopeKey)
     if (inFlight?.generation === generation && inFlight.runtimeKey === runtimeKey) {
       const refresh = await inFlight.promise
-      if (generation !== (this.worktreeScanGenerations.get(repo.id) ?? 0)) {
+      if (generation !== (this.worktreeScanGenerations.get(scanScopeKey) ?? 0)) {
         return this.listRepoWorktreesForResolution(repo, projectRuntimeByRepoId)
       }
       return refresh.result
@@ -18593,13 +20538,15 @@ class OrcaRuntimeService {
     const reusableCached =
       cached?.generation === generation && cached.runtimeKey === runtimeKey ? cached : null
     const promise = this.refreshRepoWorktreeScan(repo, projectRuntime, reusableCached)
-    this.worktreeScanInFlight.set(repo.id, { generation, runtimeKey, promise })
+    this.worktreeScanInFlight.set(scanScopeKey, { generation, runtimeKey, promise })
     try {
       const refresh = await promise
+      if (generation !== (this.worktreeScanGenerations.get(scanScopeKey) ?? 0)) {
+        return this.listRepoWorktreesForResolution(repo, projectRuntimeByRepoId)
+      }
       if (
         (refresh.result.ok || !repo.connectionId) &&
-        generation === (this.worktreeScanGenerations.get(repo.id) ?? 0) &&
-        this.worktreeScanInFlight.get(repo.id)?.promise === promise
+        this.worktreeScanInFlight.get(scanScopeKey)?.promise === promise
       ) {
         const entry: RuntimeWorktreeScanCache = {
           generation,
@@ -18609,17 +20556,17 @@ class OrcaRuntimeService {
           adminFingerprint: refresh.adminFingerprint,
           scannedAt: refresh.scannedAt
         }
-        this.worktreeScanCache.set(repo.id, entry)
+        this.worktreeScanCache.set(scanScopeKey, entry)
         void refresh.adminFingerprintProbe?.then((fingerprint) => {
-          if (this.worktreeScanCache.get(repo.id) === entry) {
+          if (this.worktreeScanCache.get(scanScopeKey) === entry) {
             entry.adminFingerprint = fingerprint
           }
         })
       }
       return refresh.result
     } finally {
-      if (this.worktreeScanInFlight.get(repo.id)?.promise === promise) {
-        this.worktreeScanInFlight.delete(repo.id)
+      if (this.worktreeScanInFlight.get(scanScopeKey)?.promise === promise) {
+        this.worktreeScanInFlight.delete(scanScopeKey)
       }
     }
   }
@@ -18726,21 +20673,44 @@ class OrcaRuntimeService {
   }
 
   private invalidateWorktreeScanCacheForRepo(repoId: string): void {
-    this.worktreeScanGenerations.set(repoId, (this.worktreeScanGenerations.get(repoId) ?? 0) + 1)
-    this.worktreeScanCache.delete(repoId)
-    this.worktreeScanInFlight.delete(repoId)
+    const prefix = `${repoId}\0`
+    const scopeKeys = new Set(
+      this.store
+        ?.getRepos()
+        .filter((repo) => repo.id === repoId)
+        .map((repo) => `${repoId}\0${getRepoExecutionHostId(repo)}`) ?? []
+    )
+    for (const keys of [
+      this.worktreeScanGenerations.keys(),
+      this.worktreeScanCache.keys(),
+      this.worktreeScanInFlight.keys()
+    ]) {
+      for (const key of keys) {
+        if (key.startsWith(prefix)) {
+          scopeKeys.add(key)
+        }
+      }
+    }
+    for (const key of scopeKeys) {
+      this.worktreeScanGenerations.set(key, (this.worktreeScanGenerations.get(key) ?? 0) + 1)
+      this.worktreeScanCache.delete(key)
+      this.worktreeScanInFlight.delete(key)
+    }
     this.resolvedWorktrees.invalidateScan(repoId)
   }
 
   private invalidateSshWorktreeScanCacheInternal(targetId: string): void {
     const repos = this.store?.getRepos() ?? []
-    const affectedRepoIds = new Set(
-      repos.filter((repo) => repo.connectionId === targetId).map((repo) => repo.id)
+    const affectedRepos = repos.filter((repo) => repo.connectionId === targetId)
+    const affectedScopeKeys = new Set(
+      affectedRepos.map((repo) => `${repo.id}\0${getRepoExecutionHostId(repo)}`)
     )
-    for (const repoId of affectedRepoIds) {
-      this.invalidateWorktreeScanCacheForRepo(repoId)
+    for (const key of affectedScopeKeys) {
+      this.worktreeScanGenerations.set(key, (this.worktreeScanGenerations.get(key) ?? 0) + 1)
+      this.worktreeScanCache.delete(key)
+      this.worktreeScanInFlight.delete(key)
     }
-    if (affectedRepoIds.size > 0) {
+    if (affectedScopeKeys.size > 0) {
       this.resolvedWorktrees.invalidateResolved()
     }
   }
@@ -18784,6 +20754,7 @@ class OrcaRuntimeService {
         | 'isWsl'
         | 'wslDistro'
         | 'incarnationId'
+        | 'agentSessionOwners'
       >
     > = {}
   ): RuntimePtyWorktreeRecord {
@@ -18815,6 +20786,7 @@ class OrcaRuntimeService {
         launchToken: null,
         launchIncarnationId: null,
         launchAgent: null,
+        agentSessionOwners: (state.agentSessionOwners ?? []).map(cloneAgentSessionOwnerBinding),
         foregroundAgent: null,
         connected: state.connected ?? true,
         disconnectedAt: state.connected === false ? Date.now() : null,
@@ -18860,19 +20832,21 @@ class OrcaRuntimeService {
     }
 
     pty.worktreeId = worktreeId
+    if (
+      state.incarnationId !== undefined &&
+      pty.incarnationId !== null &&
+      state.incarnationId !== pty.incarnationId
+    ) {
+      pty.agentSessionOwners = []
+    }
     if (state.incarnationId !== undefined) {
-      const retained = this.handleByPtyIncarnation.get(ptyId)
-      if (
-        retained &&
-        retained.incarnationId &&
-        state.incarnationId &&
-        retained.incarnationId !== state.incarnationId
-      ) {
-        this.invalidateAllHandlesForPty(ptyId)
-      } else if (retained && !retained.incarnationId && state.incarnationId) {
-        retained.incarnationId = state.incarnationId
+      if (pty.incarnationId && state.incarnationId && pty.incarnationId !== state.incarnationId) {
+        this.invalidatePtyIncarnationHandle(ptyId)
       }
       pty.incarnationId = state.incarnationId
+    }
+    if (state.agentSessionOwners !== undefined) {
+      pty.agentSessionOwners = state.agentSessionOwners.map(cloneAgentSessionOwnerBinding)
     }
     if (state.connectionId !== undefined) {
       pty.connectionId = state.connectionId
@@ -19163,6 +21137,7 @@ class OrcaRuntimeService {
         const pty = this.recordPtyWorktree(session.id, worktreeId, {
           connected: true,
           ...(session.incarnationId ? { incarnationId: session.incarnationId } : {}),
+          agentSessionOwners: session.incarnationId ? (session.agentSessionOwners ?? []) : [],
           ...(session.wslDistro !== undefined
             ? { isWsl: Boolean(session.wslDistro), wslDistro: session.wslDistro }
             : {}),
@@ -19413,12 +21388,38 @@ class OrcaRuntimeService {
     this.orchestrationMailboxNotifications.notifyMessageArrived(handle, messageType)
   }
 
+  private readonly orchestrationPointerAdmissionByPtyId = new Map<
+    string,
+    AgentSessionPtyWriteAdmittance
+  >()
+
   private writeOrchestrationPointerPty(ptyId: string, data: string): boolean | Promise<boolean> {
-    return (
-      this.ptyController?.writeWithSettlement?.(ptyId, data) ??
-      this.ptyController?.write(ptyId, data) ??
-      false
-    )
+    try {
+      if (data === '\r') {
+        const admitted = this.orchestrationPointerAdmissionByPtyId.get(ptyId)
+        this.orchestrationPointerAdmissionByPtyId.delete(ptyId)
+        if (admitted) {
+          agentSessionPtyWriteGate.assertReadmitted(ptyId, admitted)
+        }
+      } else {
+        const admission = agentSessionPtyWriteGate.admit(ptyId)
+        if (!admission.admitted) {
+          this.orchestrationPointerAdmissionByPtyId.delete(ptyId)
+          return this.ptyController?.write(ptyId, data) ?? false
+        }
+        this.orchestrationPointerAdmissionByPtyId.set(ptyId, {
+          sessionId: admission.sessionId,
+          runtimeFence: admission.runtimeFence
+        })
+      }
+      return (
+        this.ptyController?.writeWithSettlement?.(ptyId, data).catch(() => false) ??
+        this.ptyController?.write(ptyId, data) ??
+        false
+      )
+    } catch {
+      return false
+    }
   }
 
   private getPrimaryLeafForPty(ptyId: string): RuntimeLeafRecord | null {
@@ -19429,9 +21430,32 @@ class OrcaRuntimeService {
     ptyId: string | null,
     worktreeId: string
   ): { executionHostId?: ExecutionHostId } {
-    const fromPtyId = ptyId ? this.getPtyExecutionHostMetadata(ptyId).executionHostId : undefined
+    const fromPtyId = getPtyExecutionHost(ptyId)
+    if (fromPtyId === 'foreign') {
+      return {}
+    }
     const hostId = fromPtyId ?? this.tryGetWorkspaceSessionHostIdForWorktree(worktreeId)
     return hostId ? { executionHostId: hostId } : {}
+  }
+
+  private resolvePaneAgentIdentityField(
+    launchAgent: TuiAgent | null | undefined,
+    foregroundAgent: TuiAgent | null | undefined,
+    title: string | null,
+    paneKey: string | null
+  ): { agentIdentity?: TuiAgent } {
+    const hookRow = paneKey
+      ? selectRuntimeHookAgentRowForPane(this.getAgentProviderSessionRowsForPaneFn?.(paneKey) ?? [])
+      : null
+    const hookAgent = isTuiAgent(hookRow?.agentType) ? hookRow.agentType : null
+    const agentIdentity = resolvePublishedPaneAgentIdentity({
+      hookAgent,
+      hookIsLive: hookRow?.agentIsLive,
+      launchAgent,
+      foregroundAgent,
+      title
+    })
+    return agentIdentity ? { agentIdentity } : {}
   }
 
   private getSummaryForRuntimeWorktreeId(
@@ -19475,6 +21499,7 @@ class OrcaRuntimeService {
     const tab = this.tabs.get(leaf.tabId) ?? null
 
     const pty = leaf.ptyId ? this.ptysById.get(leaf.ptyId) : undefined
+    const title = getLatestLeafTitle(leaf, tab?.title ?? null)
     // Why: leaf.connected mirrors the renderer graph (`ptyId !== null`), so a
     // restored surface whose PTY died with a prior run still reads connected.
     // Demote only on a controller-proven absence, and only for locally-scoped
@@ -19500,13 +21525,19 @@ class OrcaRuntimeService {
       branch: worktree?.branch ?? '',
       tabId: leaf.tabId,
       leafId: leaf.leafId,
-      title: getLatestLeafTitle(leaf, tab?.title ?? null),
+      title,
       connected: provenAbsent ? false : leaf.connected,
       writable: provenAbsent ? false : leaf.writable,
       lastOutputAt: leaf.lastOutputAt,
       preview: leaf.preview,
       ...(leaf.lastExitCause ? { exitCause: leaf.lastExitCause } : {}),
-      ...this.terminalExecutionHostField(leaf.ptyId, leaf.worktreeId)
+      ...this.terminalExecutionHostField(leaf.ptyId, leaf.worktreeId),
+      ...this.resolvePaneAgentIdentityField(
+        pty?.launchAgent,
+        pty?.foregroundAgent,
+        title,
+        isTerminalLeafId(leaf.leafId) ? makePaneKey(leaf.tabId, leaf.leafId) : null
+      )
     }
   }
 
@@ -19662,7 +21693,7 @@ class OrcaRuntimeService {
           this.mobileSessionTabsAgentStatusHeartbeat.removeWorktree(worktreeId)
           this.acceptedRendererMobileSnapshotByWorktree.delete(worktreeId)
           // Why: drop any pending coalesced notify so a stale snapshot can't land after the removed frame.
-          this.mobileSessionTabsNotifyCoalescer.cancel(worktreeId)
+          this.cancelScheduledMobileSessionTabsChanged(worktreeId)
           this.notifyMobileSessionTabsRemoved(worktreeId)
         }
       }
@@ -19686,22 +21717,35 @@ class OrcaRuntimeService {
     if (preservedTabs.length === 0) {
       return snapshot
     }
+    const preservedActiveTab = preservedTabs.find(
+      (tab) => tab.id === existing.activeTabId && tab.isActive
+    )
     const hasIncomingActiveTab = snapshot.tabs.some((tab) => tab.isActive)
     const normalizedPreservedTabs = preservedTabs.map((tab) =>
-      hasIncomingActiveTab ? { ...tab, isActive: false } : tab
+      hasIncomingActiveTab && !preservedActiveTab ? { ...tab, isActive: false } : tab
     )
-    const tabs = mergeMobileSessionSnapshotTabs(snapshot.tabs, normalizedPreservedTabs)
+    const normalizedIncomingTabs = preservedActiveTab
+      ? snapshot.tabs.map((tab) => (tab.isActive ? { ...tab, isActive: false } : tab))
+      : snapshot.tabs
+    const tabs = mergeMobileSessionSnapshotTabs(normalizedIncomingTabs, normalizedPreservedTabs)
     if (tabs.length === snapshot.tabs.length) {
       return snapshot
     }
     const activeTab =
-      snapshot.tabs.find((tab) => tab.id === snapshot.activeTabId) ??
+      preservedActiveTab ??
+      normalizedIncomingTabs.find((tab) => tab.id === snapshot.activeTabId) ??
       tabs.find((tab) => tab.id === existing.activeTabId) ??
       tabs.find((tab) => tab.isActive) ??
       tabs[0] ??
       null
     const terminalTabs = tabs.filter(
       (tab): tab is RuntimeMobileSessionTerminalTab => tab.type === 'terminal'
+    )
+    const tabGroups = mergeMobileSessionTabGroups(
+      snapshot.worktree,
+      snapshot.tabGroups ?? existing.tabGroups ?? [],
+      terminalTabs,
+      activeTab?.type === 'terminal' ? activeTab : null
     )
     return {
       ...snapshot,
@@ -19713,14 +21757,38 @@ class OrcaRuntimeService {
       activeGroupId: snapshot.activeGroupId ?? existing.activeGroupId,
       activeTabId: activeTab?.id ?? null,
       activeTabType: activeTab?.type ?? null,
-      tabGroups: mergeMobileSessionTabGroups(
-        snapshot.worktree,
-        snapshot.tabGroups ?? existing.tabGroups ?? [],
-        terminalTabs,
-        activeTab?.type === 'terminal' ? activeTab : null
+      tabGroups: this.mergeStructuredAgentSessionTabGroups(
+        tabGroups,
+        existing.tabGroups ?? [],
+        normalizedPreservedTabs,
+        activeTab?.id ?? null
       ),
       tabs
     }
+  }
+
+  private mergeStructuredAgentSessionTabGroups(
+    groups: readonly RuntimeMobileSessionTabGroup[],
+    existingGroups: readonly RuntimeMobileSessionTabGroup[],
+    preservedTabs: readonly RuntimeMobileSessionSnapshotTab[],
+    activeTabId: string | null
+  ): RuntimeMobileSessionTabGroup[] {
+    const structuredTabs = preservedTabs.filter((tab) => tab.type === 'agent-session')
+    if (structuredTabs.length === 0) {
+      return [...groups]
+    }
+    const next = groups.map((group) => ({ ...group, tabOrder: [...group.tabOrder] }))
+    for (const tab of structuredTabs) {
+      const priorGroupId = existingGroups.find((group) => group.tabOrder.includes(tab.id))?.id
+      const target = next.find((group) => group.id === priorGroupId) ?? next[0]
+      if (target && !target.tabOrder.includes(tab.id)) {
+        target.tabOrder.push(tab.id)
+      }
+      if (target && tab.id === activeTabId) {
+        target.activeTabId = tab.id
+      }
+    }
+    return next
   }
 
   private releaseRuntimeSessionOwnershipForRendererRetiredTabs(
@@ -19752,6 +21820,7 @@ class OrcaRuntimeService {
       }
       const persistedParent = persistedTabsById.get(tab.parentTabId)
       if (!persistedParent) {
+        this.clearRuntimeSessionOwnershipForMobileTab(existing.worktree, existing, tab.parentTabId)
         continue
       }
       const layout = session.terminalLayoutsByTabId?.[tab.parentTabId]
@@ -19766,6 +21835,7 @@ class OrcaRuntimeService {
       if (
         layout &&
         !layout.ptyIdsByLeafId?.[tab.leafId] &&
+        !terminalLayoutContainsLeaf(layout.root, tab.leafId) &&
         !boundPtyIds.some((id) => persistedIds.has(id))
       ) {
         for (const ptyId of boundPtyIds) {
@@ -19848,6 +21918,9 @@ class OrcaRuntimeService {
     snapshot: RuntimeMobileSessionTabsSnapshot,
     tab: RuntimeMobileSessionSnapshotTab
   ): boolean {
+    if (tab.type === 'agent-session') {
+      return true
+    }
     if (tab.type === 'browser') {
       const liveClientPage =
         typeof tab.browserPageId === 'string'
@@ -19962,9 +22035,11 @@ class OrcaRuntimeService {
       activeTabType: null,
       tabs: []
     }
+    const changeSequence = ++this.mobileSessionTabsChangeSequence
     for (const subscription of this.mobileSessionTabListeners) {
       subscription.listener(
-        this.clientSessionTabSelections.project(removed, subscription.clientNavigationId)
+        this.clientSessionTabSelections.project(removed, subscription.clientNavigationId),
+        changeSequence
       )
     }
     this.clientSessionTabSelections.forgetWorktree(worktreeId)
@@ -20006,11 +22081,33 @@ class OrcaRuntimeService {
       }
     }
     // Why: structural changes must propagate promptly; cancel any pending coalesced notify since this immediate emit supersedes it.
-    this.mobileSessionTabsNotifyCoalescer.cancel(worktreeId)
-    this.notifyMobileSessionTabsChangedNow(worktreeId)
+    this.cancelScheduledMobileSessionTabsChanged(worktreeId)
+    this.notifyMobileSessionTabsChangedNow(worktreeId, ++this.mobileSessionTabsChangeSequence)
   }
 
-  private notifyMobileSessionTabsChangedNow(worktreeId: string): void {
+  private scheduleMobileSessionTabsChanged(worktreeId: string): void {
+    this.pendingMobileSessionTabsChangeSequenceByWorktree.set(
+      worktreeId,
+      ++this.mobileSessionTabsChangeSequence
+    )
+    this.mobileSessionTabsNotifyCoalescer.schedule(worktreeId)
+  }
+
+  private cancelScheduledMobileSessionTabsChanged(worktreeId: string): void {
+    this.mobileSessionTabsNotifyCoalescer.cancel(worktreeId)
+    this.pendingMobileSessionTabsChangeSequenceByWorktree.delete(worktreeId)
+  }
+
+  private flushScheduledMobileSessionTabsChanged(worktreeId: string): void {
+    const changeSequence = this.pendingMobileSessionTabsChangeSequenceByWorktree.get(worktreeId)
+    if (changeSequence === undefined) {
+      return
+    }
+    this.pendingMobileSessionTabsChangeSequenceByWorktree.delete(worktreeId)
+    this.notifyMobileSessionTabsChangedNow(worktreeId, changeSequence)
+  }
+
+  private notifyMobileSessionTabsChangedNow(worktreeId: string, changeSequence: number): void {
     if (this.mobileSessionTabListeners.size === 0) {
       return
     }
@@ -20022,7 +22119,8 @@ class OrcaRuntimeService {
     const result = this.toMobileSessionTabsResult(snapshot)
     for (const subscription of this.mobileSessionTabListeners) {
       subscription.listener(
-        this.projectMobileSessionTabsForClient(result, subscription.clientNavigationId)
+        this.projectMobileSessionTabsForClient(result, subscription.clientNavigationId),
+        changeSequence
       )
     }
   }
@@ -20033,9 +22131,11 @@ class OrcaRuntimeService {
     }
     for (const snapshot of this.mobileSessionTabsByWorktree.values()) {
       const result = this.toMobileSessionTabsResult(snapshot)
+      const changeSequence = ++this.mobileSessionTabsChangeSequence
       for (const subscription of this.mobileSessionTabListeners) {
         subscription.listener(
-          this.projectMobileSessionTabsForClient(result, subscription.clientNavigationId)
+          this.projectMobileSessionTabsForClient(result, subscription.clientNavigationId),
+          changeSequence
         )
       }
     }
@@ -20071,9 +22171,13 @@ class OrcaRuntimeService {
     clientNavigationId: string,
     follow = false
   ): void {
+    const changeSequence = ++this.mobileSessionTabsChangeSequence
     for (const subscription of this.mobileSessionTabListeners) {
       if (subscription.clientNavigationId === clientNavigationId) {
-        subscription.listener(follow ? { ...projected, navigationIntent: 'follow' } : projected)
+        subscription.listener(
+          follow ? { ...projected, navigationIntent: 'follow' } : projected,
+          changeSequence
+        )
       }
     }
   }
@@ -20441,13 +22545,24 @@ class OrcaRuntimeService {
 
   async isTerminalRunningSettledPromptAgent(handle: string): Promise<boolean> {
     try {
-      const ptyId = this.getTerminalAgentStatusPtyId(handle)
-      const process = await this.ptyController?.getForegroundProcess?.(ptyId)
-      const agent = recognizeAgentProcess(process)?.agent
+      const livePty = this.getLivePtyForHandle(handle)
+      const leaf = livePty ? null : this.getLiveLeafForHandle(handle).leaf
+      const ptyId = livePty?.pty.ptyId ?? leaf?.ptyId ?? null
+      const trackedPty = livePty?.pty ?? (ptyId ? this.ptysById.get(ptyId) : null)
+      if (!ptyId || !trackedPty || !this.ptyController) {
+        return false
+      }
+      const agent = recognizeAgentProcess(
+        await this.ptyController.getForegroundProcess(ptyId)
+      )?.agent
       if (agent !== 'claude' && agent !== 'codex') {
         return false
       }
-      return await this.isTerminalRunningAgent(handle)
+      if (!(await this.isTerminalRunningAgent(handle, { retryForegroundWrappers: false }))) {
+        return false
+      }
+      trackedPty.foregroundAgent = agent
+      return true
     } catch {
       return false
     }
@@ -20506,6 +22621,7 @@ class OrcaRuntimeService {
   ): RuntimeTerminalSummary {
     const worktree = worktreesById.get(pty.worktreeId)
 
+    const title = getLatestPtyTitle(pty)
     const pane = parsePaneKey(pty.paneKey ?? '')
     const orphaned = !pty.tabId || !pane || pane.tabId !== pty.tabId
     return {
@@ -20518,13 +22634,19 @@ class OrcaRuntimeService {
       branch: worktree?.branch ?? '',
       tabId: orphaned ? `pty:${pty.ptyId}` : pty.tabId!,
       leafId: orphaned ? `pty:${pty.ptyId}` : pane.leafId,
-      title: getLatestPtyTitle(pty),
+      title,
       connected: pty.connected,
       writable: pty.connected,
       lastOutputAt: pty.lastOutputAt,
       preview: pty.preview,
       ...(pty.lastExitCause ? { exitCause: pty.lastExitCause } : {}),
-      ...this.terminalExecutionHostField(pty.ptyId, pty.worktreeId)
+      ...this.terminalExecutionHostField(pty.ptyId, pty.worktreeId),
+      ...this.resolvePaneAgentIdentityField(
+        pty.launchAgent,
+        pty.foregroundAgent,
+        title,
+        pty.paneKey ?? null
+      )
     }
   }
 
@@ -20612,18 +22734,6 @@ class OrcaRuntimeService {
   }
 
   private issueHandle(leaf: RuntimeLeafRecord): string {
-    const incarnationId = leaf.ptyId ? (this.ptysById.get(leaf.ptyId)?.incarnationId ?? null) : null
-    const retained = leaf.ptyId ? this.handleByPtyIncarnation.get(leaf.ptyId) : undefined
-    if (
-      retained &&
-      incarnationId &&
-      retained.incarnationId &&
-      retained.incarnationId !== incarnationId
-    ) {
-      this.invalidateAllHandlesForPty(leaf.ptyId!)
-    } else if (retained && !retained.incarnationId && incarnationId) {
-      retained.incarnationId = incarnationId
-    }
     const leafKey = this.getLeafKey(leaf.tabId, leaf.leafId)
     const existingHandle = this.handleByLeafKey.get(leafKey)
     if (existingHandle) {
@@ -20642,10 +22752,13 @@ class OrcaRuntimeService {
     if (preAllocatedHandle) {
       return preAllocatedHandle
     }
-    const refreshedRetained = leaf.ptyId ? this.handleByPtyIncarnation.get(leaf.ptyId) : undefined
-    if (refreshedRetained) {
-      this.bindPtyIncarnationHandle(refreshedRetained, leaf)
-      return refreshedRetained.handle
+    const incarnationId = leaf.ptyId ? (this.ptysById.get(leaf.ptyId)?.incarnationId ?? null) : null
+    const retained = leaf.ptyId ? this.handleByPtyIncarnation.get(leaf.ptyId) : undefined
+    if (retained && leaf.ptyId && retained.incarnationId !== incarnationId) {
+      this.invalidatePtyIncarnationHandle(leaf.ptyId)
+    } else if (retained) {
+      this.bindPtyIncarnationHandle(retained, leaf)
+      return retained.handle
     }
     const handle = `term_${randomUUID()}`
     this.syntheticTerminalHandles.add(handle)
@@ -20660,7 +22773,7 @@ class OrcaRuntimeService {
       ptyGeneration: leaf.ptyGeneration
     })
     this.handleByLeafKey.set(leafKey, handle)
-    if (leaf.ptyId) {
+    if (leaf.ptyId && incarnationId) {
       this.handleByPtyIncarnation.set(leaf.ptyId, { handle, incarnationId, leafKey })
     }
     return handle
@@ -20716,17 +22829,15 @@ class OrcaRuntimeService {
       const pty = this.ptysById.get(ptyId)
       const leaves = this.getLeavesForPty(ptyId)
       if (
-        !pty ||
-        (pty.incarnationId &&
-          retained.incarnationId &&
-          pty.incarnationId !== retained.incarnationId)
+        !pty?.incarnationId ||
+        pty.incarnationId !== retained.incarnationId ||
+        leaves.length !== 1 ||
+        this.handleByPtyId.has(ptyId)
       ) {
         this.invalidatePtyIncarnationHandle(ptyId)
         continue
       }
-      if (leaves.length === 1) {
-        this.bindPtyIncarnationHandle(retained, leaves[0])
-      }
+      this.bindPtyIncarnationHandle(retained, leaves[0])
     }
   }
 
@@ -20810,6 +22921,10 @@ class OrcaRuntimeService {
     const handle = this.handleByLeafKey.get(leafKey)
     if (!handle) {
       return
+    }
+    const record = this.handles.get(handle)
+    if (record?.ptyId && this.handleByPtyIncarnation.get(record.ptyId)?.handle === handle) {
+      this.handleByPtyIncarnation.delete(record.ptyId)
     }
     this.handleByLeafKey.delete(leafKey)
     this.handles.delete(handle)
@@ -20920,6 +23035,11 @@ class OrcaRuntimeService {
 
   // Why: the primary OSC-title signal can't fire for daemon-hosted terminals (no PTY data through the runtime), so this fallback polls the renderer-synced tab title + foreground-process quiescence; self-cancels when the OSC path fires.
   private getAdoptedPtyExplicitIdleStatus(pty: RuntimePtyWorktreeRecord): AgentStatus | null {
+    const title = this.getAdoptedPtyTitle(pty)
+    return title ? detectExplicitIdleStatusFromTitle(title) : null
+  }
+
+  private getAdoptedPtyTitle(pty: RuntimePtyWorktreeRecord): string | null {
     for (const leaf of this.leaves.values()) {
       if (leaf.ptyId !== pty.ptyId) {
         continue
@@ -20928,10 +23048,7 @@ class OrcaRuntimeService {
       if (!title) {
         continue
       }
-      const status = detectExplicitIdleStatusFromTitle(title)
-      if (status !== null) {
-        return status
-      }
+      return title
     }
     return null
   }
@@ -21215,11 +23332,12 @@ installRuntimeLinearCommandSurface(OrcaRuntimeServiceExport.prototype)
 const WAIT_BLOCKED_CHECK_MIN_INTERVAL_MS = 50
 // Why: chunks that could complete an actionable prompt bypass the throttle so blocked stamps stay immediate; scanned over the new chunk + short carry, never the whole window.
 const WAIT_BLOCKED_KEYWORD_PATTERN =
-  /press enter|press t to trust|do you trust|trust this|trusted workspace|update available|choose working directory|codex just got an upgrade|hooks need review/
+  /press enter|press t to trust|do you trust|trust this|trusted workspace|permission required|requires permission|allow once|allow always|update available|choose working directory|codex just got an upgrade|hooks need review/
 const WAIT_BLOCKED_KEYWORD_CARRY_CHARS = 31
 export const AUTHORITATIVE_TERMINAL_SNAPSHOT_TIMEOUT_MS = 8_000
 const VISIBLE_TERMINAL_SNAPSHOT_TIMEOUT_MS = 750
 const VISIBLE_TERMINAL_SNAPSHOT_RETRY_MS = 1_000
+const TUI_IDLE_VISIBLE_PROBE_SETTLE_MARGIN_MS = 10
 const DEFAULT_REPO_SEARCH_REFS_LIMIT = 25
 const DEFAULT_TERMINAL_LIST_LIMIT = 200
 const DEFAULT_WORKTREE_LIST_LIMIT = 200
@@ -21253,6 +23371,43 @@ export function resolveWorktreeScanCacheTtlMs(repo: Pick<Repo, 'path' | 'connect
   return !repo.connectionId && isAgentScratchRepoRootPath(repo.path)
     ? WORKTREE_SCAN_AGENT_SCRATCH_TTL_MS
     : WORKTREE_SCAN_CACHE_TTL_MS
+}
+
+export function projectTerminalTailLines(
+  emulator: HeadlessEmulator,
+  limit: number
+): { lines: string[]; draft?: string } {
+  const tail = emulator.getBufferTailLines(limit)
+  const visible = emulator.getVisibleLines()
+  const visibleRange = emulator.getVisibleBufferRange()
+  const draft = detectTerminalComposerDraft(emulator.getCursorLineContext())
+  if (draft && visibleRange.endExclusive === visibleRange.totalLength) {
+    visible[draft.promptRow] = draft.promptGlyph
+    for (let row = draft.promptRow + 1; row <= draft.endRow; row += 1) {
+      visible[row] = ''
+    }
+    const scrollbackTail = tail.slice(0, Math.max(0, tail.length - visible.length))
+    tail.splice(0, tail.length, ...scrollbackTail, ...visibleNonBlankTerminalLines(visible))
+  }
+  return {
+    lines: visibleNonBlankTerminalLines(tail).slice(-limit),
+    ...(draft ? { draft: draft.text } : {})
+  }
+}
+
+function projectTerminalVisibleLines(emulator: HeadlessEmulator): RuntimeTerminalProjection {
+  const visible = emulator.getVisibleLines()
+  const draft = detectTerminalComposerDraft(emulator.getCursorLineContext())
+  if (draft) {
+    visible[draft.promptRow] = draft.promptGlyph
+    for (let row = draft.promptRow + 1; row <= draft.endRow; row += 1) {
+      visible[row] = ''
+    }
+  }
+  return {
+    lines: visibleNonBlankTerminalLines(visible),
+    ...(draft ? { draft: draft.text } : {})
+  }
 }
 const PTY_CONTROLLER_LIST_TIMEOUT_MS = 3000
 const PTY_CONTROLLER_LIST_PROVIDER_MARGIN_MS = 500

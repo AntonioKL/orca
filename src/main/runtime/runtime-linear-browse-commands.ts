@@ -1,7 +1,7 @@
 import type { LinearCustomViewModel } from '../../shared/linear/project-types'
 import type { LinearWorkspaceSelection } from '../../shared/linear/workspace-types'
 import { clampLinearIssueListLimit } from '../../shared/linear/issue-read-limits'
-import { getIssueComments } from '../linear/issues'
+import { getIssueComments } from '../linear/linear-issue-comments'
 import {
   createProject,
   getCustomView,

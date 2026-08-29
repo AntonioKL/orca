@@ -60,7 +60,7 @@ import { browserNetworkExecutionHostKey } from '../browser/browser-network-execu
 import type { AgentBrowserBridge } from '../browser/agent-browser-bridge'
 import type { BrowserBackend } from '../browser/browser-backend'
 import { browserCertificateTrustController, browserManager } from '../browser/browser-manager'
-import { BrowserError } from '../browser/cdp-bridge'
+import { BrowserError } from '../browser/browser-error'
 import { startBrowserScreencast } from '../browser/browser-screencast-stream'
 import {
   browserScreencastFrameBudgetsEqual,

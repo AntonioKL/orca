@@ -4,8 +4,13 @@ import type {
   RuntimeTerminalWaitBlockedReason,
   RuntimeTerminalWaitCondition
 } from '../../shared/runtime-types'
+import type { TerminalExitCause } from '../../shared/terminal-exit-cause'
 
-type ReadonlyTerminalStateRecord = { connected: boolean; lastExitCode: number | null }
+type ReadonlyTerminalStateRecord = {
+  connected: boolean
+  lastExitCode: number | null
+  lastExitCause?: TerminalExitCause | null
+}
 
 export function getTerminalState(leaf: ReadonlyTerminalStateRecord): RuntimeTerminalState {
   if (leaf.connected) {
@@ -22,7 +27,14 @@ export function buildTerminalWaitResult(
   condition: RuntimeTerminalWaitCondition,
   leaf: ReadonlyTerminalStateRecord
 ): RuntimeTerminalWait {
-  return buildTerminalWait(handle, condition, getTerminalState(leaf), leaf.lastExitCode)
+  return buildTerminalWait(
+    handle,
+    condition,
+    getTerminalState(leaf),
+    leaf.lastExitCode,
+    undefined,
+    leaf.lastExitCause
+  )
 }
 
 export function buildTerminalWaitBlockedResult(
@@ -36,7 +48,8 @@ export function buildTerminalWaitBlockedResult(
     condition,
     getTerminalState(leaf),
     leaf.lastExitCode,
-    blockedReason
+    blockedReason,
+    leaf.lastExitCause
   )
 }
 
@@ -45,7 +58,14 @@ export function buildPtyTerminalWaitResult(
   condition: RuntimeTerminalWaitCondition,
   pty: ReadonlyTerminalStateRecord
 ): RuntimeTerminalWait {
-  return buildTerminalWait(handle, condition, getPtyTerminalState(pty), pty.lastExitCode)
+  return buildTerminalWait(
+    handle,
+    condition,
+    getPtyTerminalState(pty),
+    pty.lastExitCode,
+    undefined,
+    pty.lastExitCause
+  )
 }
 
 export function buildPtyTerminalWaitBlockedResult(
@@ -59,7 +79,8 @@ export function buildPtyTerminalWaitBlockedResult(
     condition,
     getPtyTerminalState(pty),
     pty.lastExitCode,
-    blockedReason
+    blockedReason,
+    pty.lastExitCause
   )
 }
 
@@ -68,7 +89,8 @@ export function buildTerminalWait(
   condition: RuntimeTerminalWaitCondition,
   status: RuntimeTerminalState,
   exitCode: number | null,
-  blockedReason?: RuntimeTerminalWaitBlockedReason
+  blockedReason?: RuntimeTerminalWaitBlockedReason,
+  exitCause?: TerminalExitCause | null
 ): RuntimeTerminalWait {
   return {
     handle,
@@ -76,6 +98,7 @@ export function buildTerminalWait(
     satisfied: blockedReason === undefined,
     status,
     exitCode,
+    ...(exitCause ? { exitCause } : {}),
     ...(blockedReason ? { blockedReason } : {})
   }
 }

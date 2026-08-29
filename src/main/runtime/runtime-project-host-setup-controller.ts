@@ -1,10 +1,21 @@
-import type { Project, ProjectHostSetup, ProjectHostSetupCloneArgs, ProjectHostSetupCreateArgs, ProjectHostSetupCreateResult, ProjectHostSetupDeleteArgs, ProjectHostSetupDeleteResult, ProjectHostSetupExistingFolderArgs, ProjectHostSetupResult, ProjectHostSetupUpdateArgs, ProjectHostSetupUpdateResult, ProjectUpdateArgs } from '../../shared/project-types'
+import type {
+  Project,
+  ProjectHostSetup,
+  ProjectHostSetupCloneArgs,
+  ProjectHostSetupCreateArgs,
+  ProjectHostSetupCreateResult,
+  ProjectHostSetupDeleteArgs,
+  ProjectHostSetupDeleteResult,
+  ProjectHostSetupExistingFolderArgs,
+  ProjectHostSetupResult,
+  ProjectHostSetupUpdateArgs,
+  ProjectHostSetupUpdateResult,
+  ProjectUpdateArgs
+} from '../../shared/project-types'
 import type { Repo } from '../../shared/repo-types'
 import { parseExecutionHostId, type ExecutionHostId } from '../../shared/execution-host'
-import {
-  getProjectIdForProviderIdentity,
-  getProjectHostSetupForRepo
-} from '../../shared/project-host-setup-projection'
+import { getProjectIdForProviderIdentity } from '../../shared/project-host-setup-projection'
+import { getProjectHostSetupForRepo } from '../../shared/project-host-setup-lookup'
 import { invalidateAuthorizedRootsCache } from '../ipc/filesystem-auth'
 import { prepareLocalWorktreeRootForRepo } from '../worktree-root-preparation'
 import type { RuntimeStore } from './runtime-store-contract'

@@ -8,6 +8,7 @@ import type { TuiAgent } from '../../shared/tui-agent'
 import type { WorktreeStartupLaunch } from '../../shared/worktree/launch-types'
 import type { PtyIncarnationId } from '../../shared/pty-incarnation'
 import type { PtyBindingSourceExpectation } from '../persistence'
+import type { ExecutionHostId } from '../../shared/execution-host'
 import type { PtyProviderBufferSnapshot, PtyProcessInfo, PtySpawnResult } from '../providers/types'
 
 export type RuntimePtyController = {
@@ -85,6 +86,11 @@ export type RuntimePtyController = {
     agentSessionEnsure?: AgentSessionClaimedSpawnResult
   }>
   write(ptyId: string, data: string): boolean
+  writeAgentSessionProof?(
+    ptyId: string,
+    data: string,
+    authority: { sessionId: string; spawnToken: string }
+  ): boolean
   writeWithSettlement?(ptyId: string, data: string): Promise<boolean>
   /** Attach-only adoption of a live local daemon session so its output streams
    *  to main without a renderer pane; never creates, resizes, or focuses.
@@ -161,5 +167,5 @@ export type PtyControllerInventory = Readonly<{
   // must consult the unscoped inventory or a misattributed live PTY reads as dead.
   allLivePtyIds: ReadonlySet<string>
   terminalIdentityByPtyId: ReadonlyMap<string, PtyControllerTerminalIdentity>
-  queriedHostIds: ReadonlySet<string>
+  queriedHostIds: ReadonlySet<ExecutionHostId>
 }>

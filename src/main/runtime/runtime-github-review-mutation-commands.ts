@@ -4,6 +4,7 @@ import type { GitHubReactionContent } from '../../shared/github/comment-types'
 import type { Repo } from '../../shared/repo-types'
 import {
   mergePR,
+  markPRReadyForReview,
   removePRReviewers,
   requestPRReviewers,
   rerunPRChecks,
@@ -159,6 +160,21 @@ export class RuntimeGitHubReviewMutationCommands {
       prNumber,
       enabled,
       method,
+      repo.connectionId ?? null,
+      prRepo ?? null,
+      ...this.deps.getLocalGitArgs(repo)
+    )
+  }
+
+  async markRepoPRReadyForReview(
+    repoSelector: string,
+    prNumber: number,
+    prRepo?: GitHubOwnerRepo | null
+  ): Promise<Awaited<ReturnType<typeof markPRReadyForReview>>> {
+    const repo = await this.deps.resolveRepo(repoSelector)
+    return markPRReadyForReview(
+      repo.path,
+      prNumber,
       repo.connectionId ?? null,
       prRepo ?? null,
       ...this.deps.getLocalGitArgs(repo)

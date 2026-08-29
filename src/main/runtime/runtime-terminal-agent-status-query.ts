@@ -1,7 +1,6 @@
 import {
   detectAgentStatusFromTitle,
   isOpenCodeNativeTitle,
-  isCursorAgentTitle,
   isQuarterCircleSpinnerOnlyAgentTitle,
   isShellProcess,
   type AgentStatus
@@ -35,6 +34,9 @@ type Dependencies = {
   getExplicitStatus(
     handle: string
   ): { status: NonNullable<RuntimeTerminalAgentStatus['status']>; updatedAt: number } | null
+  getLifecycleStatus(
+    ptyId: string
+  ): { status: AgentStatus | null; updatedAt: number } | null | undefined
   isRunning(handle: string): Promise<boolean>
 }
 
@@ -63,23 +65,31 @@ export class RuntimeTerminalAgentStatusQuery {
     const ptyId = this.getPtyId(handle)
     const terminal = this.getSnapshot(handle, ptyId)
     const explicitStatus = this.deps.getExplicitStatus(handle)
+    const lifecycle = this.deps.getLifecycleStatus(ptyId)
     const blockedByWaitText = detectTerminalWaitBlockedReason(terminal.waitText)
     const liveTitleClearsBlockedText =
       terminal.titleStatusIsLive &&
       terminal.titleStatus !== null &&
       terminal.titleStatus !== 'permission' &&
       !isOpenCodeNativeTitle(terminal.title) &&
-      !isCursorAgentTitle(terminal.title)
+      blockedByWaitText !== 'agent-approval-prompt'
+    const newestPermissionAt = Math.max(
+      explicitStatus?.status === 'permission' ? explicitStatus.updatedAt : -1,
+      lifecycle?.status === 'permission' ? lifecycle.updatedAt : -1,
+      terminal.waitBlockedAt ?? -1
+    )
+    const newestClearAt = Math.max(
+      explicitStatus && explicitStatus.status !== 'permission' ? explicitStatus.updatedAt : -1,
+      lifecycle?.status && lifecycle.status !== 'permission' ? lifecycle.updatedAt : -1
+    )
     if (terminal.titleStatus === 'permission' && terminal.titleStatusIsLive) {
       return { handle, isRunningAgent: true, status: 'permission' }
     }
     if (
       blockedByWaitText &&
-      !liveTitleClearsBlockedText &&
+      (!liveTitleClearsBlockedText || lifecycle?.status === terminal.titleStatus) &&
       (blockedByWaitText === 'agent-approval-prompt' ||
-        !explicitStatus ||
-        explicitStatus.status === 'permission' ||
-        (terminal.waitBlockedAt !== null && terminal.waitBlockedAt >= explicitStatus.updatedAt))
+        (newestPermissionAt >= 0 && newestPermissionAt >= newestClearAt))
     ) {
       return { handle, isRunningAgent: true, status: 'permission' }
     }

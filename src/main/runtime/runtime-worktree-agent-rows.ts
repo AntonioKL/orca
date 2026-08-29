@@ -1,13 +1,17 @@
 import {
+  AGENT_STATUS_STALE_AFTER_MS,
   isFreshNonDoneAgentStatus,
+  pickParsedAgentStatusPayload,
   type AgentStatusIpcPayload,
   type ParsedAgentStatusPayload
 } from '../../shared/agent-status-types'
+import { terminalStatusPayloadMatchesHook } from '../../shared/agent-terminal-status-equivalence'
 import type { RuntimeWorktreeAgentRow, RuntimeWorktreePsSummary } from '../../shared/runtime-types'
 import { parseLegacyNumericPaneKey, parsePaneKey } from '../../shared/stable-pane-id'
 import { isWslHookRelayConnectionId } from '../../shared/wsl-hook-relay-contract'
-import { mergeWorktreeStatus } from './runtime-worktree-status-projection'
+import { mergeWorktreeSummaryStatus } from './runtime-worktree-status-projection'
 import type { RuntimeWorktreeSummaryPathIndex } from './runtime-worktree-summary-paths'
+import type { RuntimeWorkingTerminalEvidence } from './runtime-worktree-ps-activity'
 
 export type RuntimeAgentRowSnapshot = {
   paneKey: string
@@ -32,12 +36,36 @@ type OrchestrationDisplay = {
   parentPaneKey?: string | null
 }
 
+type RuntimeWorktreeAgentSource = {
+  paneKey: string
+  ptyId?: string
+  tabId?: string
+  worktreeId?: string
+  connectionId: string | null
+  payload: ParsedAgentStatusPayload
+  state: ParsedAgentStatusPayload['state']
+  workingMode?: ParsedAgentStatusPayload['workingMode']
+  agentType: string | null
+  prompt: string
+  lastAssistantMessage: string | null
+  toolName: string | null
+  toolInput: string | null
+  interrupted: boolean
+  stateStartedAt: number
+  updatedAt: number
+  restoredUnconfirmed?: boolean
+}
+
 export function attachRuntimeWorktreeAgentRows(args: {
   summaries: Map<string, RuntimeWorktreePsSummary>
   pathIndex: RuntimeWorktreeSummaryPathIndex
   missingWorktreeIds: Set<string>
   mirroredWorktreeIdByTabId: ReadonlyMap<string, string>
   connectedPtyEvidence: ConnectedPtyEvidence
+  workingTerminalEvidenceByWorktreeId: ReadonlyMap<
+    string,
+    readonly RuntimeWorkingTerminalEvidence[]
+  >
   retainedSnapshots: Iterable<RuntimeAgentRowSnapshot>
   hookSnapshots: readonly AgentStatusIpcPayload[]
   orchestrationByPaneKey: Record<string, OrchestrationDisplay> | null | undefined
@@ -48,26 +76,8 @@ export function attachRuntimeWorktreeAgentRows(args: {
     worktreeId: string
   ) => RuntimeWorktreePsSummary | null
 }): void {
-  const rowSources = new Map<
-    string,
-    {
-      paneKey: string
-      ptyId?: string
-      tabId?: string
-      worktreeId?: string
-      connectionId: string | null
-      state: ParsedAgentStatusPayload['state']
-      agentType: string | null
-      prompt: string
-      lastAssistantMessage: string | null
-      toolName: string | null
-      toolInput: string | null
-      interrupted: boolean
-      stateStartedAt: number
-      updatedAt: number
-      restoredUnconfirmed?: boolean
-    }
-  >()
+  const rowSources = new Map<string, RuntimeWorktreeAgentSource>()
+  const now = Date.now()
   for (const snapshot of args.retainedSnapshots) {
     const { payload } = snapshot
     rowSources.set(snapshot.paneKey, {
@@ -76,7 +86,9 @@ export function attachRuntimeWorktreeAgentRows(args: {
       tabId: snapshot.tabId,
       worktreeId: snapshot.worktreeId,
       connectionId: snapshot.connectionId,
+      payload,
       state: payload.state,
+      ...(payload.workingMode ? { workingMode: payload.workingMode } : {}),
       agentType: payload.agentType ?? null,
       prompt: payload.prompt,
       lastAssistantMessage: payload.lastAssistantMessage ?? null,
@@ -88,8 +100,22 @@ export function attachRuntimeWorktreeAgentRows(args: {
     })
   }
   for (const entry of args.hookSnapshots) {
+    if (entry.restoredUnconfirmed === true) {
+      continue
+    }
     const existing = rowSources.get(entry.paneKey)
+    const hookPayload = pickParsedAgentStatusPayload(entry)
     if (existing && existing.updatedAt > entry.receivedAt) {
+      if (
+        entry.workingMode === 'monitoring' &&
+        now - entry.receivedAt <= AGENT_STATUS_STALE_AFTER_MS &&
+        terminalStatusPayloadMatchesHook(hookPayload, existing.payload)
+      ) {
+        existing.workingMode = 'monitoring'
+        if (existing.payload.workingMode === undefined) {
+          existing.payload = { ...existing.payload, workingMode: 'monitoring' }
+        }
+      }
       continue
     }
     rowSources.set(entry.paneKey, {
@@ -98,7 +124,9 @@ export function attachRuntimeWorktreeAgentRows(args: {
       tabId: entry.tabId,
       worktreeId: entry.worktreeId,
       connectionId: entry.connectionId,
+      payload: hookPayload,
       state: entry.state,
+      ...(entry.workingMode ? { workingMode: entry.workingMode } : {}),
       agentType: entry.agentType ?? null,
       prompt: entry.prompt,
       lastAssistantMessage: entry.lastAssistantMessage ?? null,
@@ -106,15 +134,13 @@ export function attachRuntimeWorktreeAgentRows(args: {
       toolInput: entry.toolInput ?? null,
       interrupted: entry.interrupted ?? false,
       stateStartedAt: entry.stateStartedAt,
-      updatedAt: entry.receivedAt,
-      ...(entry.restoredUnconfirmed ? { restoredUnconfirmed: true } : {})
+      updatedAt: entry.receivedAt
     })
   }
   if (rowSources.size === 0) {
     return
   }
   const rowsByWorktree = new Map<string, RuntimeWorktreeAgentRow[]>()
-  const now = Date.now()
   for (const source of rowSources.values()) {
     const tabId =
       source.tabId ??
@@ -149,6 +175,7 @@ export function attachRuntimeWorktreeAgentRows(args: {
       paneKey: source.paneKey,
       parentPaneKey: orchestration?.parentPaneKey ?? null,
       state: source.state,
+      ...(source.workingMode ? { workingMode: source.workingMode } : {}),
       agentType: source.agentType,
       prompt: source.prompt,
       taskTitle: orchestration?.taskTitle ?? null,
@@ -158,8 +185,7 @@ export function attachRuntimeWorktreeAgentRows(args: {
       toolInput: source.toolInput,
       interrupted: source.interrupted,
       stateStartedAt: source.stateStartedAt,
-      updatedAt: source.updatedAt,
-      ...(source.restoredUnconfirmed ? { restoredUnconfirmed: true } : {})
+      updatedAt: source.updatedAt
     }
     const rows = rowsByWorktree.get(summary.worktreeId)
     if (rows) {
@@ -175,15 +201,53 @@ export function attachRuntimeWorktreeAgentRows(args: {
       continue
     }
     summary.agents = rows
+    let hasForegroundWorkingAgent = false
+    const monitoringSources: RuntimeWorktreeAgentSource[] = []
     for (const row of rows) {
       if (!isFreshNonDoneAgentStatus(row, now)) {
         continue
       }
       summary.hasHostSidebarActivity = true
-      summary.status = mergeWorktreeStatus(
-        summary.status,
-        row.state === 'working' ? 'working' : 'permission'
+      if (row.state === 'working') {
+        if (row.workingMode === 'monitoring') {
+          const source = rowSources.get(row.paneKey)
+          if (source) {
+            monitoringSources.push(source)
+          }
+        } else {
+          hasForegroundWorkingAgent = true
+        }
+      } else {
+        mergeWorktreeSummaryStatus(summary, 'permission')
+      }
+    }
+    if (hasForegroundWorkingAgent || monitoringSources.length > 0) {
+      const hasIndependentWorkingTerminal = (
+        args.workingTerminalEvidenceByWorktreeId.get(worktreeId) ?? []
+      ).some((evidence) =>
+        monitoringSources.every((source) => !workingTerminalEvidenceMatchesSource(evidence, source))
+      )
+      mergeWorktreeSummaryStatus(
+        summary,
+        'working',
+        hasForegroundWorkingAgent || hasIndependentWorkingTerminal ? undefined : 'monitoring'
       )
     }
   }
+}
+
+function workingTerminalEvidenceMatchesSource(
+  evidence: RuntimeWorkingTerminalEvidence,
+  source: RuntimeWorktreeAgentSource
+): boolean {
+  if (evidence.paneKey) {
+    return (
+      evidence.paneKey === source.paneKey ||
+      Boolean(evidence.ptyId && source.ptyId && evidence.ptyId === source.ptyId)
+    )
+  }
+  if (evidence.ptyId && source.ptyId) {
+    return evidence.ptyId === source.ptyId
+  }
+  return Boolean(evidence.tabId && evidence.tabId === source.tabId)
 }

@@ -19,6 +19,7 @@ import type {
   LinearTeamStatesResult
 } from './runtime-linear-command-dependencies'
 import { RuntimeLinearContextCommands } from './runtime-linear-context-commands'
+import { linearPriorityLabel } from '../../shared/linear/priority-label'
 
 export class RuntimeLinearReadCommands extends RuntimeLinearContextCommands {
   async linearTeamListForAgents(params: {
@@ -119,14 +120,16 @@ export class RuntimeLinearReadCommands extends RuntimeLinearContextCommands {
         code: this.linearWorkspaceErrorCode(error.type),
         message: sanitizeLinearErrorMessage(error.message)
       }))
+      const hasMore = result.hasMore === true || result.items.length > limit
       return {
         projects,
+        truncated: hasMore,
         meta: {
           query: params.query,
           workspaceId: params.workspaceId,
           limit,
           returned: projects.length,
-          hasMore: result.hasMore === true || result.items.length > limit,
+          hasMore,
           partial: workspaceErrors.length > 0,
           workspaceErrors
         }
@@ -163,6 +166,7 @@ export class RuntimeLinearReadCommands extends RuntimeLinearContextCommands {
           project: issue.project ?? null,
           assignee: issue.assignee ?? null,
           priority: issue.priority,
+          priorityLabel: linearPriorityLabel(issue.priority),
           estimate: issue.estimate,
           dueDate: issue.dueDate,
           updatedAt: issue.updatedAt,
@@ -171,6 +175,7 @@ export class RuntimeLinearReadCommands extends RuntimeLinearContextCommands {
             name: issue.workspaceName ?? issue.workspaceId ?? workspaceId ?? ''
           }
         })),
+        truncated: result.hasMore === true,
         meta: {
           filter,
           workspaceId,

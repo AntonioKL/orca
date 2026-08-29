@@ -11,6 +11,9 @@ import {
 } from '../local-worktree-filesystem'
 import { getSshFilesystemProvider } from '../providers/ssh-filesystem-dispatch'
 import { isWorktreePathMissing } from '../worktree-removal-safety'
+import { getRepoExecutionHostId } from '../../shared/execution-host'
+import { getRepoOwnedWorktreeMeta } from '../worktree-metadata-ownership'
+import type { WorktreeMeta } from '../../shared/worktree/meta-types'
 import {
   getRuntimeFolderWorkspaceRootId,
   isRuntimeFolderWorkspaceIdForRepo,
@@ -56,13 +59,17 @@ function getRuntimeFolderWorkspaceInstanceIdentity(repo: Repo, worktreeId: strin
 }
 
 export function listRuntimeFolderWorkspaces(
-  store: Pick<RuntimeStore, 'getAllWorktreeMeta' | 'setWorktreeMeta'>,
-  repo: Repo
+  store: Pick<RuntimeStore, 'getAllWorktreeMeta' | 'getRepos' | 'setWorktreeMeta'>,
+  repo: Repo,
+  repoOwnerCount = store.getRepos().filter((candidate) => candidate.id === repo.id).length
 ): Worktree[] {
   const rootId = getRuntimeFolderWorkspaceRootId(repo)
   const allMeta = store.getAllWorktreeMeta()
-  const ids = Object.keys(allMeta).filter((worktreeId) =>
-    isRuntimeFolderWorkspaceIdForRepo(repo, worktreeId)
+  const expectedHostId = getRepoExecutionHostId(repo)
+  const ids = Object.keys(allMeta).filter(
+    (worktreeId) =>
+      isRuntimeFolderWorkspaceIdForRepo(repo, worktreeId) &&
+      (repoOwnerCount === 1 || allMeta[worktreeId]?.hostId === expectedHostId)
   )
   if (!ids.includes(rootId)) {
     ids.unshift(rootId)
@@ -70,14 +77,19 @@ export function listRuntimeFolderWorkspaces(
     ids.sort((left, right) => (left === rootId ? -1 : right === rootId ? 1 : 0))
   }
   return ids.map((worktreeId) => {
-    const existing = allMeta[worktreeId]
-    const meta = existing?.instanceId
+    const existing = getRepoOwnedWorktreeMeta(repo, worktreeId, allMeta, repoOwnerCount)
+    const meta: Partial<WorktreeMeta> = existing?.instanceId
       ? existing
-      : store.setWorktreeMeta(worktreeId, {
-          instanceId: getRuntimeFolderWorkspaceInstanceIdentity(repo, worktreeId),
-          ...(existing ? {} : { displayName: repo.displayName, lastActivityAt: Date.now() })
-        })
-    return mergeRuntimeFolderWorkspace(repo, worktreeId, meta)
+      : existing || repoOwnerCount === 1
+        ? store.setWorktreeMeta(worktreeId, {
+            instanceId: getRuntimeFolderWorkspaceInstanceIdentity(repo, worktreeId),
+            ...(existing ? {} : { displayName: repo.displayName, lastActivityAt: Date.now() })
+          })
+        : {}
+    return {
+      ...mergeRuntimeFolderWorkspace(repo, worktreeId, meta),
+      hostId: repoOwnerCount === 1 ? (meta.hostId ?? expectedHostId) : expectedHostId
+    }
   })
 }
 

@@ -12,6 +12,7 @@ import type { RetainedTailRedrawCursor } from './terminal-tail-redraw-buffer'
 import type { TerminalTailWaitState } from './terminal-wait-tail-state'
 import type { PtyShellOwnershipMirror } from './pty-shell-ownership-mirror'
 import type { TerminalExitCause } from '../../shared/terminal-exit-cause'
+import type { AgentSessionOwnerBinding } from '../../shared/agent-session-host-authority'
 
 type RuntimeTerminalTailState = {
   tailBuffer: string[]
@@ -56,6 +57,7 @@ export type RuntimePtyWorktreeRecord = RuntimeTerminalTailState & {
   launchToken: string | null
   launchIncarnationId: PtyIncarnationId | null
   launchAgent: TuiAgent | null
+  agentSessionOwners: AgentSessionOwnerBinding[]
   foregroundAgent: TuiAgent | null
   connected: boolean
   disconnectedAt: number | null
@@ -94,6 +96,7 @@ export type RuntimeHeadlessTerminal = {
 
 export type RuntimeVisibleTerminalState = {
   lines: string[]
+  draft?: string
   isAlternateScreen: boolean
   sequence: number
   generation: number

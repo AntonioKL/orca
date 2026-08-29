@@ -1,4 +1,7 @@
-import type { ForceDeleteWorktreeBranchResult, RemoveWorktreeResult } from '../../shared/worktree/create-types'
+import type {
+  ForceDeleteWorktreeBranchResult,
+  RemoveWorktreeResult
+} from '../../shared/worktree/create-types'
 import type { GitPushTarget } from '../../shared/worktree/types'
 import { preservedBranchCleanupScopeKey } from '../../shared/preserved-branch-cleanup'
 import { parseExecutionHostId, type ExecutionHostId } from '../../shared/execution-host'
@@ -12,6 +15,7 @@ import {
 import { getLocalProjectWorktreeGitOptions } from '../project-runtime-git-options'
 import { requireSshGitProvider } from '../providers/ssh-git-dispatch'
 import type { Store } from '../persistence'
+import { resolveWorktreeRemovalRepoOwner } from '../worktree-removal-repo-owner'
 import { parseExactWorktreeIdSelector } from './runtime-worktree-selection'
 
 type PreservedBranchCleanupTarget = {
@@ -105,7 +109,13 @@ export class RuntimePreservedBranchCleanup {
     ) {
       throw new Error(`No preserved branch cleanup is pending for "${branchName}".`)
     }
-    const repo = store.getRepo(removalTarget.repoId)
+    const repoOwner = resolveWorktreeRemovalRepoOwner(store, removalTarget.repoId, target.hostId)
+    if (repoOwner.kind === 'ambiguous') {
+      throw new Error(
+        `Workspace identity is ambiguous across hosts: ${removalTarget.id}. Retry with an explicit host.`
+      )
+    }
+    const repo = repoOwner.kind === 'resolved' ? repoOwner.repo : undefined
     if (!repo) {
       throw new Error('repo_not_found')
     }

@@ -51,22 +51,28 @@ export {
 export {
   addIssueComment as addLinearIssueComment,
   addIssueCommentForAgent as addLinearIssueCommentForAgent,
-  createIssueAttachment as createLinearIssueAttachment,
+  createIssueAttachment as createLinearIssueAttachment
+} from '../linear/linear-issue-comments'
+export {
   createIssueForAgent as createLinearIssueForAgent,
   createIssue as createLinearIssue,
+  updateIssueForAgent as updateLinearIssueForAgent,
+  updateIssue as updateLinearIssue
+} from '../linear/linear-issue-mutations'
+export {
   getAttachmentByUuidForAgent as getLinearAttachmentByUuidForAgent,
   getCommentByUuidForAgent as getLinearCommentByUuidForAgent,
   getIssue as getLinearIssue,
   getIssueByUuidForAgent as getLinearIssueByUuidForAgent,
   getIssueCommentThreadRoot as getLinearIssueCommentThreadRoot,
+  searchIssues as searchLinearIssues
+} from '../linear/linear-issue-lookups'
+export {
   listIssues as listLinearIssues,
-  searchIssues as searchLinearIssues,
-  updateIssueForAgent as updateLinearIssueForAgent,
-  updateIssue as updateLinearIssue,
-  LinearWriteFailure,
-  type LinearListFilter,
-  type LinearIssueListOptions
-} from '../linear/issues'
+  type LinearListFilter
+} from '../linear/linear-issue-listing'
+export type { LinearIssueListOptions } from '../linear/linear-issue-query-documents'
+export { LinearWriteFailure } from '../linear/linear-issue-write-support'
 export {
   LinearAgentAccessError,
   getLinearCurrentIssueFromWorktree,

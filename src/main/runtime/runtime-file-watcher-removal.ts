@@ -1,11 +1,4 @@
-import {
-  closeLocalWatcherForWorktreePath,
-  closeRemoteWatcherForWorktreePath,
-  forgetLocalWatcherRemovalSnapshot,
-  forgetRemoteWatcherRemovalSnapshot,
-  restoreLocalWatcherAfterFailedRemoval,
-  restoreRemoteWatcherAfterFailedRemoval
-} from '../ipc/filesystem-watcher'
+import { getWorktreeWatcherRemoval } from '../ipc/worktree-watcher-removal'
 import { acquireWatcherRemovalGate } from '../ipc/watcher-removal-gate'
 import {
   createWatcherRemovalDeadline,
@@ -31,11 +24,11 @@ export function createRuntimeFileWatcherRemoval(fileCommands: FileExplorerWatche
     const results = await Promise.allSettled([
       connectionId
         ? drainBeforeWatcherRemoval(
-            closeRemoteWatcherForWorktreePath(connectionId, worktreePath),
+            getWorktreeWatcherRemoval().closeRemote(connectionId, worktreePath),
             deadline,
             `remote watcher close for ${worktreePath}`
           )
-        : closeLocalWatcherForWorktreePath(worktreePath, deadline),
+        : getWorktreeWatcherRemoval().closeLocal(worktreePath, deadline),
       drainBeforeWatcherRemoval(
         fileCommands.closeFileExplorerWatchersForPath(worktreePath, connectionId),
         deadline,
@@ -54,17 +47,17 @@ export function createRuntimeFileWatcherRemoval(fileCommands: FileExplorerWatche
   const restore = async (worktreePath: string, connectionId?: string): Promise<void> => {
     await Promise.all([
       connectionId
-        ? restoreRemoteWatcherAfterFailedRemoval(connectionId, worktreePath)
-        : restoreLocalWatcherAfterFailedRemoval(worktreePath),
+        ? getWorktreeWatcherRemoval().restoreRemote(connectionId, worktreePath)
+        : getWorktreeWatcherRemoval().restoreLocal(worktreePath),
       fileCommands.restoreFileExplorerWatchersAfterFailedRemoval(worktreePath, connectionId)
     ])
   }
 
   const forget = (worktreePath: string, connectionId?: string): void => {
     if (connectionId) {
-      forgetRemoteWatcherRemovalSnapshot(connectionId, worktreePath)
+      getWorktreeWatcherRemoval().forgetRemote(connectionId, worktreePath)
     } else {
-      forgetLocalWatcherRemovalSnapshot(worktreePath)
+      getWorktreeWatcherRemoval().forgetLocal(worktreePath)
     }
     fileCommands.forgetFileExplorerWatchersAfterRemoval(worktreePath, connectionId)
   }

@@ -50,7 +50,8 @@ export async function prepareRuntimeLocalWorktreeSetup(args: {
           worktreePath,
           hooks.scripts.setup,
           args.runtimeTarget,
-          resolveSetupRunnerShell(settings)
+          resolveSetupRunnerShell(settings),
+          yamlHooks?.setupAgentStartupPolicy
         )
       } catch (error) {
         console.error(`[hooks] Failed to prepare setup runner for ${worktreePath}:`, error)

@@ -193,6 +193,31 @@ export function mergeWorktreeStatus(
   return WORKTREE_STATUS_PRIORITY[next] > WORKTREE_STATUS_PRIORITY[current] ? next : current
 }
 
+export function mergeWorktreeSummaryStatus(
+  summary: RuntimeWorktreePsSummary,
+  next: RuntimeWorktreeStatus,
+  nextWorkingMode?: RuntimeWorktreePsSummary['workingMode']
+): void {
+  const currentPriority = WORKTREE_STATUS_PRIORITY[summary.status]
+  const nextPriority = WORKTREE_STATUS_PRIORITY[next]
+  if (nextPriority > currentPriority) {
+    summary.status = next
+    if (next === 'working' && nextWorkingMode === 'monitoring') {
+      summary.workingMode = 'monitoring'
+    } else {
+      delete summary.workingMode
+    }
+    return
+  }
+  if (nextPriority === currentPriority && next === 'working') {
+    if (nextWorkingMode === 'monitoring') {
+      summary.workingMode = 'monitoring'
+    } else {
+      delete summary.workingMode
+    }
+  }
+}
+
 export function maxTimestamp(left: number | null, right: number | null): number | null {
   if (left === null) {
     return right

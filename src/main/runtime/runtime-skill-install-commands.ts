@@ -21,6 +21,7 @@ import type {
 import type { SkillSshWorkspaceAuthority } from '../../shared/skill-ssh-relay-contract'
 import type { SkillInstallDestinationAuthority } from '../skills/skill-install-destinations'
 import { installSkillBundleOnSshHost } from '../skills/skill-bundle-ssh-relay-service'
+import { normalizeSshRelaySkillDestination } from '../skills/skill-ssh-relay-destination'
 import { installSkillOnSshHost } from '../skills/skill-ssh-relay-service'
 import type {
   SkillInstallRequest,
@@ -172,10 +173,7 @@ export class RuntimeSkillInstallCommands {
         userDataPath: this.userDataPath(),
         request: {
           ...request,
-          destination:
-            request.destination.scope === 'global'
-              ? { scope: 'global', executionTarget: { kind: 'host' } }
-              : request.destination
+          destination: normalizeSshRelaySkillDestination(request.destination)
         },
         workspace: target.workspace,
         requireHttps: this.host.isPackaged(),
@@ -254,7 +252,10 @@ export class RuntimeSkillInstallCommands {
         return await installSkillBundleOnSshHost({
           provider: target.provider,
           userDataPath: this.userDataPath(),
-          request,
+          request: {
+            ...request,
+            destination: normalizeSshRelaySkillDestination(request.destination)
+          },
           workspace: target.workspace,
           requireHttps: this.host.isPackaged(),
           signal: controller.signal,

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { getProjectHostSetupWorktreeMeta } from '../../shared/project-host-setup-projection'
+import { getProjectHostSetupWorktreeMeta } from '../../shared/project-host-setup-lookup'
 import type { RuntimeTerminalCreate } from '../../shared/runtime-types'
 import type { CreateWorktreeResult } from '../../shared/worktree/create-types'
 import type { Repo } from '../../shared/repo-types'

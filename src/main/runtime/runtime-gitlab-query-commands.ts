@@ -73,10 +73,15 @@ export class RuntimeGitLabQueryCommands {
     repoSelector: string,
     state?: GitLabIssueListState,
     assignee?: string,
-    limit?: number
-  ): Promise<{ items: GitLabWorkItem[]; error?: Awaited<ReturnType<typeof listIssues>>['error'] }> {
+    limit?: number,
+    page?: number
+  ): Promise<{
+    items: GitLabWorkItem[]
+    totalPages: number
+    error?: Awaited<ReturnType<typeof listIssues>>['error']
+  }> {
     const repo = await this.deps.resolveRepo(repoSelector)
-    const normalized = normalizeGitLabIssueListArgs({ state, assignee, limit })
+    const normalized = normalizeGitLabIssueListArgs({ state, assignee, limit, page })
     const result = await listIssues(
       repo.path,
       normalized.limit,
@@ -84,7 +89,8 @@ export class RuntimeGitLabQueryCommands {
       normalized.state,
       normalized.assignee,
       repo.connectionId ?? null,
-      ...this.deps.getLocalGitArgs(repo)
+      this.deps.getLocalGitArgs(repo)[0] ?? {},
+      normalized.page
     )
     // Why: web runtime mirrors the desktop preload contract used by TaskPage.
     const items: GitLabWorkItem[] = result.items.map((issue) => ({
@@ -99,7 +105,11 @@ export class RuntimeGitLabQueryCommands {
       author: issue.author ?? null,
       repoId: repo.id
     }))
-    return { items, ...(result.error ? { error: result.error } : {}) }
+    return {
+      items,
+      totalPages: result.totalPages,
+      ...(result.error ? { error: result.error } : {})
+    }
   }
 
   async listGitLabRepoTodos(repoSelector: string): Promise<Awaited<ReturnType<typeof listTodos>>> {

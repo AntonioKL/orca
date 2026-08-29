@@ -18,7 +18,10 @@ import type { RuntimeManagedWorktreeCreateArgs } from './runtime-managed-worktre
 import type { RemoteFetchResult, RemoteTrackingBase } from './runtime-remote-fetch-controller'
 import { hasLocalWorktreeBaseRef } from './runtime-worktree-create-git'
 import { isGeneratedWorktreeCreateName } from '../worktree-create-candidates'
-import { retireGeneratedWorktreeName } from '../worktree-name-retirement'
+import {
+  failedWorktreeCreationNeedsRetirement,
+  retireGeneratedWorktreeName
+} from '../worktree-name-retirement'
 
 export async function createRuntimeLocalGitWorktree(args: {
   request: RuntimeManagedWorktreeCreateArgs
@@ -150,43 +153,68 @@ export async function createRuntimeLocalGitWorktree(args: {
   const addOptions = args.hasLocalWorktreeGitOptions
     ? { ...baseOptions, ...args.localWorktreeGitOptions }
     : baseOptions
-  const addResult: AddWorktreeResult =
-    (await (sparseDirectories.length > 0
-      ? addOptions
-        ? addSparseWorktree(
-            args.repo.path,
-            args.worktreePath,
-            args.branchName,
-            sparseDirectories,
-            args.baseBranch,
-            args.settings.refreshLocalBaseRefOnWorktreeCreate,
-            addOptions
-          )
-        : addSparseWorktree(
-            args.repo.path,
-            args.worktreePath,
-            args.branchName,
-            sparseDirectories,
-            args.baseBranch,
-            args.settings.refreshLocalBaseRefOnWorktreeCreate
-          )
-      : addOptions
-        ? addWorktree(
-            args.repo.path,
-            args.worktreePath,
-            args.branchName,
-            args.baseBranch,
-            args.settings.refreshLocalBaseRefOnWorktreeCreate,
-            false,
-            addOptions
-          )
-        : addWorktree(
-            args.repo.path,
-            args.worktreePath,
-            args.branchName,
-            args.baseBranch,
-            args.settings.refreshLocalBaseRefOnWorktreeCreate
-          ))) ?? {}
+  const shouldRetireGeneratedName =
+    args.request.nameWasGenerated === true &&
+    Boolean(args.effectiveSanitizedName) &&
+    isGeneratedWorktreeCreateName(args.effectiveSanitizedName!)
+  let addResult: AddWorktreeResult
+  try {
+    addResult =
+      (await (sparseDirectories.length > 0
+        ? addOptions
+          ? addSparseWorktree(
+              args.repo.path,
+              args.worktreePath,
+              args.branchName,
+              sparseDirectories,
+              args.baseBranch,
+              args.settings.refreshLocalBaseRefOnWorktreeCreate,
+              addOptions
+            )
+          : addSparseWorktree(
+              args.repo.path,
+              args.worktreePath,
+              args.branchName,
+              sparseDirectories,
+              args.baseBranch,
+              args.settings.refreshLocalBaseRefOnWorktreeCreate
+            )
+        : addOptions
+          ? addWorktree(
+              args.repo.path,
+              args.worktreePath,
+              args.branchName,
+              args.baseBranch,
+              args.settings.refreshLocalBaseRefOnWorktreeCreate,
+              false,
+              addOptions
+            )
+          : addWorktree(
+              args.repo.path,
+              args.worktreePath,
+              args.branchName,
+              args.baseBranch,
+              args.settings.refreshLocalBaseRefOnWorktreeCreate
+            ))) ?? {}
+  } catch (error) {
+    if (shouldRetireGeneratedName && failedWorktreeCreationNeedsRetirement(error)) {
+      await retireGeneratedWorktreeName(
+        args.store as Parameters<typeof retireGeneratedWorktreeName>[0],
+        args.repo,
+        args.settings,
+        args.effectiveSanitizedName!
+      )
+    }
+    throw error
+  }
+  if (shouldRetireGeneratedName) {
+    await retireGeneratedWorktreeName(
+      args.store as Parameters<typeof retireGeneratedWorktreeName>[0],
+      args.repo,
+      args.settings,
+      args.effectiveSanitizedName!
+    )
+  }
   const configuredPushTarget = preparedPushTarget
     ? await configureCreatedWorktreePushTarget(
         args.worktreePath,
@@ -201,19 +229,6 @@ export async function createRuntimeLocalGitWorktree(args: {
   const created = findCreatedWorktree(worktrees, args.worktreePath, args.branchName)
   if (!created) {
     throw new Error('Worktree created but not found in listing')
-  }
-  if (
-    args.request.nameWasGenerated === true &&
-    args.effectiveSanitizedName &&
-    isGeneratedWorktreeCreateName(args.effectiveSanitizedName) &&
-    args.store.addRetiredWorktreeName
-  ) {
-    await retireGeneratedWorktreeName(
-      args.store as Parameters<typeof retireGeneratedWorktreeName>[0],
-      args.repo,
-      args.settings,
-      args.effectiveSanitizedName
-    )
   }
   return {
     remoteTrackingBase,

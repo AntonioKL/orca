@@ -547,7 +547,10 @@ vi.mock('../ipc/worktree-logic', async (importOriginal) => {
 })
 
 vi.mock('../ipc/filesystem-auth', () => ({
-  resolveAuthorizedPath: vi.fn(async (pathValue: string) => pathValue)
+  resolveAuthorizedPath: vi.fn(async (pathValue: string) => pathValue),
+  invalidateAuthorizedRootsCache: invalidateAuthorizedRootsCacheMock,
+  isENOENT: (error: unknown) =>
+    Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')
 }))
 
 vi.mock('../ipc/registered-worktree-roots-cache', () => ({

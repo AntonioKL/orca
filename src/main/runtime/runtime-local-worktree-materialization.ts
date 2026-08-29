@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { getRepoExecutionHostId } from '../../shared/execution-host'
-import { getProjectHostSetupWorktreeMeta } from '../../shared/project-host-setup-projection'
+import { getProjectHostSetupWorktreeMeta } from '../../shared/project-host-setup-lookup'
 import type { GitWorktreeInfo, GitPushTarget, Worktree } from '../../shared/worktree/types'
 import type { Repo } from '../../shared/repo-types'
 import type { TuiAgent } from '../../shared/tui-agent'
