@@ -1521,8 +1521,14 @@ function appendFallbackEditorTabsToGroups(
   const fallbackTabIdSet = new Set(fallbackTabs.map((tab) => tab.tabId))
 
   for (const fallback of fallbackTabs) {
+    // Why the membership test on the tab's own group: a groupId naming no host group is one the host
+    // layout can never place, so minting a published group for it lands the tab in a pane-less group.
+    const strandedGroupId =
+      fallback.groupId !== null &&
+      !groupIndexById.has(fallback.groupId) &&
+      !sourceGroupsById.has(fallback.groupId)
     const targetGroupId =
-      fallback.groupId ??
+      (strandedGroupId ? null : fallback.groupId) ??
       (activeGroupId && (groupIndexById.has(activeGroupId) || sourceGroupsById.has(activeGroupId))
         ? activeGroupId
         : firstTargetGroupId)

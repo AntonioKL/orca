@@ -4,7 +4,8 @@ import { makeState } from './sync-runtime-graph-test-harness'
 import {
   collectLayoutGroupIds,
   danglingGroupRefs,
-  danglingTabRefs
+  danglingTabRefs,
+  unplacedPublishedGroupIds
 } from './sync-runtime-graph-published-reference-invariants'
 import type { AppState } from '../store/types'
 
@@ -424,6 +425,7 @@ describe('buildMobileSessionTabSnapshots published group references', () => {
     expect(snapshot?.tabGroups?.map((group) => group.id)).toEqual(['group-right'])
     expect(collectLayoutGroupIds(snapshot?.tabGroupLayout)).toEqual(['group-right'])
     expect(snapshot?.activeGroupId).toBe('group-right')
+    expect(unplacedPublishedGroupIds(snapshot)).toEqual([])
     expect(danglingTabRefs(snapshot)).toEqual([])
     expect(danglingGroupRefs(snapshot)).toEqual([])
   })
@@ -512,6 +514,72 @@ describe('buildMobileSessionTabSnapshots published group references', () => {
     const snapshot = buildMobileSessionTabSnapshots(state)[0]
 
     expect(snapshot?.tabs.map((tab) => tab.id)).toEqual([`term-mounted::${mountedLeafId}`])
+    expect(danglingTabRefs(snapshot)).toEqual([])
+    expect(danglingGroupRefs(snapshot)).toEqual([])
+  })
+
+  // Why this arm: the fallback that rescues editor tabs the group projection missed takes their
+  // `groupId` on faith and mints a published group for it. A group id that is not one of the host's
+  // is one the host layout cannot place, so the tab would arrive in a group with no pane. Hydration
+  // (`adoptGrouplessTabs`) is what keeps that groupId live today, which is why this is a fixture and
+  // not a report — but the projection must not be the thing that invents the id either.
+  it('does not mint a published group for an editor tab whose group does not exist', () => {
+    const state = makeState({
+      activeGroupIdByWorktree: { 'wt-1': 'group-1' },
+      groupsByWorktree: {
+        'wt-1': [{ id: 'group-1', activeTabId: 'ed-1', tabOrder: ['ed-1'], recentTabIds: [] }]
+      } as unknown as AppState['groupsByWorktree'],
+      layoutByWorktree: {
+        'wt-1': { type: 'leaf', groupId: 'group-1' }
+      } as unknown as AppState['layoutByWorktree'],
+      unifiedTabsByWorktree: {
+        'wt-1': [
+          {
+            id: 'ed-1',
+            groupId: 'group-1',
+            contentType: 'editor',
+            entityId: '/repo/a.ts',
+            title: 'a.ts'
+          },
+          {
+            id: 'ed-stranded',
+            groupId: 'group-never-published',
+            contentType: 'editor',
+            entityId: '/repo/b.ts',
+            title: 'b.ts'
+          }
+        ]
+      } as unknown as AppState['unifiedTabsByWorktree'],
+      openFiles: [
+        {
+          id: '/repo/a.ts',
+          filePath: '/repo/a.ts',
+          relativePath: 'a.ts',
+          worktreeId: 'wt-1',
+          language: 'typescript',
+          mode: 'edit',
+          isDirty: false
+        },
+        {
+          id: '/repo/b.ts',
+          filePath: '/repo/b.ts',
+          relativePath: 'b.ts',
+          worktreeId: 'wt-1',
+          language: 'typescript',
+          mode: 'edit',
+          isDirty: false
+        }
+      ]
+    } as unknown as Parameters<typeof makeState>[0])
+
+    const snapshot = buildMobileSessionTabSnapshots(state)[0]
+
+    // The tab still publishes — the repair is where it lands, not whether it survives.
+    expect(snapshot?.tabs.map((tab) => tab.id)).toEqual(['ed-1', 'ed-stranded'])
+    expect(snapshot?.tabGroups).toMatchObject([
+      { id: 'group-1', tabOrder: ['ed-1', 'ed-stranded'] }
+    ])
+    expect(unplacedPublishedGroupIds(snapshot)).toEqual([])
     expect(danglingTabRefs(snapshot)).toEqual([])
     expect(danglingGroupRefs(snapshot)).toEqual([])
   })

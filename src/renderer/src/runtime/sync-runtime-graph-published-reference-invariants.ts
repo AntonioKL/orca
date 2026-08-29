@@ -50,6 +50,25 @@ export function danglingGroupRefs(
   ].filter((groupId) => groupId !== null && !publishedGroupIds.has(groupId))
 }
 
+/**
+ * Published groups the published layout gives no pane — empty is the invariant.
+ *
+ * Not the mirror of `danglingGroupRefs`: a group is content and the layout is placement, so this
+ * only holds because the host layout spans every group (`layoutSpanningGroups` at hydration). It is
+ * here to catch the publisher minting a group id of its own that no layout could ever place.
+ */
+export function unplacedPublishedGroupIds(
+  snapshot: RuntimeMobileSessionTabsSnapshot | undefined
+): string[] {
+  if (!snapshot?.tabGroupLayout) {
+    return []
+  }
+  const placed = new Set(collectLayoutGroupIds(snapshot.tabGroupLayout))
+  return (snapshot.tabGroups ?? [])
+    .map((group) => group.id)
+    .filter((groupId) => !placed.has(groupId))
+}
+
 /** Published ids that name a tab the client cannot resolve in `tabs` — empty is the invariant. */
 export function danglingTabRefs(
   snapshot: RuntimeMobileSessionTabsSnapshot | undefined
