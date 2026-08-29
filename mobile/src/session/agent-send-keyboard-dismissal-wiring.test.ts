@@ -74,6 +74,11 @@ describe('terminal send keyboard dismissal wiring', () => {
     expect(slice.slice(catchAt)).toContain('restoreRejectedDraft()')
   })
 
+  it('keeps buffered Return focused until accepted-agent dismissal runs', () => {
+    const slice = routeSlice('ref={commandInputRef}', 'onSubmitEditing={() => void handleSend()}')
+    expect(slice).toContain('blurOnSubmit={false}')
+  })
+
   it('restores a rejected buffered draft by origin without generation fencing', () => {
     const sendSlice = routeSlice(
       'async function handleSend() {',
@@ -90,7 +95,7 @@ describe('terminal send keyboard dismissal wiring', () => {
     expect(restoreSlice).toContain('activeHandle,\n      draft')
     expect(bufferedDraftHookSource).not.toContain('getSendCompletionGeneration()')
     expect(bufferedDraftHookSource).toContain(
-      'restoreRejectedBufferedTerminalDraft(current, send.handle, send.draft)'
+      'restoreRejectedBufferedTerminalDraft(current, send.token.handle, send.draft)'
     )
     expect(sendSlice.match(/restoreRejectedDraft\(\)/g)).toHaveLength(2)
     const dismissalSlice = routeSlice(
@@ -100,14 +105,17 @@ describe('terminal send keyboard dismissal wiring', () => {
     expect(dismissalSlice).toContain('origin.generation === getSendCompletionGeneration()')
   })
 
-  it('keeps buffered draft callbacks scoped to the active handle and prunes ended handles', () => {
+  it('keeps buffered draft callbacks scoped to terminal surfaces and prunes ended tabs', () => {
     expect(bufferedDraftHookSource).toContain('const handle = activeHandleRef.current')
     expect(bufferedDraftHookSource).toContain('invalidateBufferedTerminalDraftRestoration(')
     expect(bufferedDraftHookSource).toContain(
       'setDrafts((current) => updateBufferedTerminalDraft(current, handle, value))'
     )
     expect(bufferedDraftHookSource).toContain('pruneBufferedTerminalDraftRestorations(')
-    expect(sessionRouteSource).toContain('bufferedTerminalDraftState.pruneDrafts(retainedHandles)')
+    expect(sessionRouteSource).toContain('useRef(bufferedTerminalDraftState.reconcileTerminalTabs)')
+    expect(sessionRouteSource).toContain(
+      'reconcileBufferedDraftsRef.current(currentSessionTabs, nextTabs)'
+    )
     const routeResetSlice = routeSlice(
       '// Why: Expo reuses this screen across worktrees;',
       'clearDelayedActionTimers()\n    }'

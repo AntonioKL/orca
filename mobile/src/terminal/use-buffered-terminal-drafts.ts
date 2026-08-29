@@ -7,6 +7,8 @@ import {
   invalidateBufferedTerminalDraftRestoration,
   pruneBufferedTerminalDrafts,
   pruneBufferedTerminalDraftRestorations,
+  remapBufferedTerminalDraft,
+  remapBufferedTerminalDraftRestoration,
   restoreRejectedBufferedTerminalDraft,
   settleBufferedTerminalDraftRestoration,
   updateBufferedTerminalDraft
@@ -23,6 +25,17 @@ interface UseBufferedTerminalDraftsOptions {
   readonly activeHandleRef: RefObject<string | null>
 }
 
+type BufferedTerminalDraftTab = {
+  readonly id: string
+  readonly type?: string
+  readonly leafId?: string
+  readonly terminal?: string | null
+}
+
+function getBufferedTerminalDraftSurfaceKey(tab: BufferedTerminalDraftTab): string {
+  return tab.leafId ? `leaf:${tab.leafId}` : `tab:${tab.id}`
+}
+
 export function useBufferedTerminalDrafts({
   activeHandle,
   activeHandleRef
@@ -31,6 +44,7 @@ export function useBufferedTerminalDrafts({
   const pendingRestorationsRef = useRef<Map<string, BufferedTerminalDraftRestorationToken>>(
     new Map()
   )
+  const handlesBySurfaceRef = useRef<Map<string, string>>(new Map())
   const input = activeHandle ? (drafts[activeHandle] ?? '') : ''
 
   const setInput = useCallback(
@@ -64,7 +78,9 @@ export function useBufferedTerminalDrafts({
     ) {
       return
     }
-    setDrafts((current) => restoreRejectedBufferedTerminalDraft(current, send.handle, send.draft))
+    setDrafts((current) =>
+      restoreRejectedBufferedTerminalDraft(current, send.token.handle, send.draft)
+    )
   }, [])
 
   const settleBufferedTerminalDraftSend = useCallback((send: BufferedTerminalDraftSend): void => {
@@ -76,8 +92,72 @@ export function useBufferedTerminalDrafts({
     pruneBufferedTerminalDraftRestorations(pendingRestorationsRef.current, retainedHandles)
   }, [])
 
+  const reconcileTerminalTabs = useCallback(
+    (
+      previousTabs: readonly BufferedTerminalDraftTab[],
+      nextTabs: readonly BufferedTerminalDraftTab[]
+    ): void => {
+      const handlesBySurface = handlesBySurfaceRef.current
+      for (const tab of previousTabs) {
+        if (tab.type && tab.type !== 'terminal') {
+          continue
+        }
+        if (typeof tab.terminal === 'string') {
+          const surfaceKey = getBufferedTerminalDraftSurfaceKey(tab)
+          if (!handlesBySurface.has(surfaceKey)) {
+            handlesBySurface.set(surfaceKey, tab.terminal)
+          }
+        }
+      }
+
+      const retainedHandles = new Set<string>()
+      const retainedSurfaces = new Set<string>()
+      const remaps: Array<{ previousHandle: string; nextHandle: string }> = []
+      for (const tab of nextTabs) {
+        if (tab.type && tab.type !== 'terminal') {
+          continue
+        }
+        const surfaceKey = getBufferedTerminalDraftSurfaceKey(tab)
+        retainedSurfaces.add(surfaceKey)
+        const previousHandle = handlesBySurface.get(surfaceKey)
+        if (typeof tab.terminal === 'string') {
+          retainedHandles.add(tab.terminal)
+          if (previousHandle && previousHandle !== tab.terminal) {
+            remaps.push({ previousHandle, nextHandle: tab.terminal })
+          }
+          handlesBySurface.set(surfaceKey, tab.terminal)
+        } else if (previousHandle) {
+          retainedHandles.add(previousHandle)
+        }
+      }
+      for (const surfaceKey of handlesBySurface.keys()) {
+        if (!retainedSurfaces.has(surfaceKey)) {
+          handlesBySurface.delete(surfaceKey)
+        }
+      }
+
+      for (const { previousHandle, nextHandle } of remaps) {
+        remapBufferedTerminalDraftRestoration(
+          pendingRestorationsRef.current,
+          previousHandle,
+          nextHandle
+        )
+      }
+      pruneBufferedTerminalDraftRestorations(pendingRestorationsRef.current, retainedHandles)
+      setDrafts((current) => {
+        let next = current
+        for (const { previousHandle, nextHandle } of remaps) {
+          next = remapBufferedTerminalDraft(next, previousHandle, nextHandle)
+        }
+        return pruneBufferedTerminalDrafts(next, retainedHandles)
+      })
+    },
+    []
+  )
+
   const resetDrafts = useCallback((): void => {
     pendingRestorationsRef.current.clear()
+    handlesBySurfaceRef.current.clear()
     setDrafts((current) => (Object.keys(current).length === 0 ? current : {}))
   }, [])
 
@@ -90,6 +170,7 @@ export function useBufferedTerminalDrafts({
     clearPendingRestorations,
     input,
     pruneDrafts,
+    reconcileTerminalTabs,
     resetDrafts,
     restoreRejectedDraft,
     setInput,

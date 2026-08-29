@@ -939,6 +939,7 @@ export default function SessionScreen() {
   const webReadyHandlesRef = useRef<Set<string>>(new Set())
   const activeHandleRef = useRef<string | null>(null)
   const bufferedTerminalDraftState = useBufferedTerminalDrafts({ activeHandle, activeHandleRef })
+  const reconcileBufferedDraftsRef = useRef(bufferedTerminalDraftState.reconcileTerminalTabs)
   const activeSessionTabTypeRef = useRef<MobileSessionTabType | null>(null)
   const pendingActiveSessionTabIdRef = useRef<string | null>(null)
   // Why: survive transient snapshot gaps so the device's own tab pick can re-bind.
@@ -1622,13 +1623,9 @@ export default function SessionScreen() {
             showNativeChat: showNativeChatRef.current,
             activeHandle: activeHandleRef.current
           }
-          // Why: terminal.list is the lifetime signal; lagging tab snapshots must not erase a user's buffered-mode opt-out.
-          // Sweep against the retained set, not the raw list: a chat-covered handle
-          // keeps its subscription across a graph reload, so erasing its live-input
-          // preference on the same refresh is the erasure this guard exists to stop.
+          // Why: retain chat-covered preferences across transient graph-reload handle gaps.
           const retainedHandles = resolveRetainedTerminalHandles(pruneContext)
           pruneTerminalHandlesFromLiveInput(retainedHandles)
-          bufferedTerminalDraftState.pruneDrafts(retainedHandles)
           defaultTerminalHandlesToLiveInput([...liveHandles])
           const shouldPrune = createTerminalPrunePredicate(pruneContext)
           for (const handle of Array.from(terminalUnsubsRef.current.keys())) {
@@ -1683,7 +1680,6 @@ export default function SessionScreen() {
       clearTerminalLiveInputDefault,
       defaultTerminalHandlesToLiveInput,
       nativeChatStream,
-      bufferedTerminalDraftState.pruneDrafts,
       pruneTerminalHandlesFromLiveInput,
       subscribeToTerminal,
       unsubscribeTerminal
@@ -1723,6 +1719,7 @@ export default function SessionScreen() {
       if (orphanedDraftTabs.length > 0) {
         nextTabs = [...orphanedDraftTabs, ...nextTabs]
       }
+      reconcileBufferedDraftsRef.current(currentSessionTabs, nextTabs)
       sessionTabsRef.current = nextTabs
       initialSessionAutoCreateRef.current.sawSessionTabs ||= nextTabs.length > 0
       // Why: subscribe snapshots often repeat identical payloads; skip re-set to avoid a subscription teardown/replay loop.
@@ -5072,6 +5069,7 @@ export default function SessionScreen() {
                         autocompleteEnabled
                       )}
                       returnKeyType="send"
+                      blurOnSubmit={false}
                       // Why: composing is local — an outage must not lock the field or discard typed text (#6713).
                       editable={canCompose}
                       onSubmitEditing={() => void handleSend()}

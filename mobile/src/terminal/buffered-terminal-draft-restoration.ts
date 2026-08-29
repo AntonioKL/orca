@@ -1,5 +1,5 @@
 export type BufferedTerminalDraftValue = string | ((current: string) => string)
-export type BufferedTerminalDraftRestorationToken = object
+export type BufferedTerminalDraftRestorationToken = { handle: string }
 
 export function updateBufferedTerminalDraft(
   currentDrafts: Record<string, string>,
@@ -18,7 +18,7 @@ export function beginBufferedTerminalDraftRestoration(
   pendingRestorations: Map<string, BufferedTerminalDraftRestorationToken>,
   handle: string
 ): BufferedTerminalDraftRestorationToken {
-  const token = {}
+  const token = { handle }
   pendingRestorations.set(handle, token)
   return token
 }
@@ -35,11 +35,43 @@ export function settleBufferedTerminalDraftRestoration(
   handle: string,
   token: BufferedTerminalDraftRestorationToken
 ): boolean {
-  if (pendingRestorations.get(handle) !== token) {
+  const currentHandle = pendingRestorations.get(handle) === token ? handle : token.handle
+  if (pendingRestorations.get(currentHandle) !== token) {
     return false
   }
-  pendingRestorations.delete(handle)
+  pendingRestorations.delete(currentHandle)
   return true
+}
+
+export function remapBufferedTerminalDraftRestoration(
+  pendingRestorations: Map<string, BufferedTerminalDraftRestorationToken>,
+  previousHandle: string,
+  nextHandle: string
+): void {
+  const token = pendingRestorations.get(previousHandle)
+  if (!token || pendingRestorations.has(nextHandle)) {
+    pendingRestorations.delete(previousHandle)
+    return
+  }
+  pendingRestorations.delete(previousHandle)
+  token.handle = nextHandle
+  pendingRestorations.set(nextHandle, token)
+}
+
+export function remapBufferedTerminalDraft(
+  currentDrafts: Record<string, string>,
+  previousHandle: string,
+  nextHandle: string
+): Record<string, string> {
+  if (previousHandle === nextHandle || !Object.hasOwn(currentDrafts, previousHandle)) {
+    return currentDrafts
+  }
+  const next = { ...currentDrafts }
+  if (!Object.hasOwn(currentDrafts, nextHandle)) {
+    next[nextHandle] = currentDrafts[previousHandle] ?? ''
+  }
+  delete next[previousHandle]
+  return next
 }
 
 /** Restore a rejected send without overwriting text composed while its RPC was in flight. */

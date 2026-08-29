@@ -100,4 +100,32 @@ describe('shouldDismissKeyboardAfterTerminalSend', () => {
       shouldDismissKeyboardAfterTerminalSend(terminalTab({ title: '✦ Gemini CLI' }), true)
     ).toBe(false)
   })
+
+  it.each(['zsh', 'bash', 'pwsh'])(
+    'keeps the keyboard when identity-only done status is stale under %s',
+    (title) => {
+      expect(
+        shouldDismissKeyboardAfterTerminalSend(
+          terminalTab({
+            title,
+            agentStatus: { agentType: 'claude', state: 'done' },
+            launchAgent: 'claude'
+          }),
+          true
+        )
+      ).toBe(false)
+    }
+  )
+
+  it('still dismisses for a completed agent under a non-shell title', () => {
+    expect(
+      shouldDismissKeyboardAfterTerminalSend(
+        terminalTab({
+          title: 'Terminal',
+          agentStatus: { agentType: 'claude', state: 'done' }
+        }),
+        true
+      )
+    ).toBe(true)
+  })
 })
