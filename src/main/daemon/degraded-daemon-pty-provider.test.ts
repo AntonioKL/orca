@@ -135,6 +135,7 @@ function createDaemonAdapter(
     listSessions: vi.fn(async () => []),
     ackColdRestore: vi.fn(),
     clearTombstone: vi.fn(),
+    retireExitCertificate: vi.fn(),
     reconcileOnStartup: vi.fn(async () => ({ alive: sessions, killed: [] })),
     dispose: vi.fn(),
     disconnectOnly: vi.fn(async () => {}),

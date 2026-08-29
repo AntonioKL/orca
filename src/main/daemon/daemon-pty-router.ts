@@ -12,6 +12,7 @@ import type { PtyProcessInspection } from '../providers/pty-process-inspection'
 import { shouldHandoffDaemonHistory } from './daemon-history-handoff'
 import type { DaemonPtyRouterDataEvent, DaemonPtyRouterExitEvent } from './daemon-pty-router-events'
 import { DaemonSessionOwnerResolver } from './daemon-session-owner-resolution'
+import { retireSpawnedSessionExitCertificates } from './daemon-spawn-exit-certificate-retirement'
 
 export class DaemonPtyRouter implements IPtyProvider {
   private current: DaemonPtyAdapter
@@ -39,18 +40,7 @@ export class DaemonPtyRouter implements IPtyProvider {
 
   async spawn(opts: PtySpawnOptions): Promise<PtySpawnResult> {
     const result = await this.spawnOnOwner(opts)
-    // Reopening a pane reuses the session id, and only the issuing adapter can clear its own
-    // certificate — so a sibling generation that watched the previous incarnation die would
-    // keep answering `exited` for this live one. Retired here, where every spawn passes.
-    // Why the incarnation and not the id alone: this loop is not the last word on either side
-    // of it. An exit watched while this very spawn was finalizing is already certified and
-    // must survive, and a superseded generation's exit may not have landed yet — naming the
-    // run that is now live settles both, where a bare delete answers only for the present.
-    if (!result.exitedBeforeSpawnReply) {
-      for (const adapter of this.allAdapters()) {
-        adapter.retireExitCertificate(result.id, result.incarnationId)
-      }
-    }
+    retireSpawnedSessionExitCertificates(this.allAdapters(), result)
     return result
   }
 
