@@ -30,6 +30,19 @@ describe('readWindowCloseRequestPayload', () => {
     ).toBe(false)
   })
 
+  /** The other half of the same decision. `isQuitting` is not only the survival
+   *  answer's partner in the bypass: it alone drops SSH-backed panes from the
+   *  evidence, so a truthy non-boolean read as a yes closes over remote work the
+   *  warning would have shown. Pinned to the same strictness as its sibling. */
+  it.each([
+    ['a truthy string', 'yes'],
+    ['a truthy number', 1],
+    ['null', null],
+    ['undefined', undefined]
+  ])('reads %s as "not quitting"', (_label, value) => {
+    expect(readWindowCloseRequestPayload({ isQuitting: value }).isQuitting).toBe(false)
+  })
+
   it('survives a payload that is not an object at all', () => {
     expect(readWindowCloseRequestPayload(undefined)).toEqual({
       isQuitting: false,

@@ -77,6 +77,20 @@ describe('window close request subscription', () => {
     expect(payload?.localPtysSurviveQuit).toBe(false)
   })
 
+  /** Same rule, the decision's other input. A truthy non-boolean quit flag read as a
+   *  yes drops SSH-backed panes from the evidence on its own, without any help from the
+   *  survival answer, so this hop must refuse it just as strictly. */
+  it.each([
+    ['a truthy string', 'yes'],
+    ['a truthy number', 1],
+    ['an object', {}],
+    ['null', null]
+  ])('refuses to read %s as a quit', (_label, value) => {
+    const { payload } = deliver({ isQuitting: value, localPtysSurviveQuit: false })
+
+    expect(payload?.isQuitting).toBe(false)
+  })
+
   it('reads a payload with no survival field as "does not survive"', () => {
     const { payload } = deliver({ isQuitting: true })
 

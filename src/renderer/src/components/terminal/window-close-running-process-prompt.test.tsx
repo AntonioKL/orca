@@ -193,7 +193,7 @@ async function runWindowClose(): Promise<void> {
 /** Drives the quit branch through the same reader the preload uses, so the survival
  *  fact reaching the prompt is the one main's payload actually produces. */
 async function runQuit(payload: {
-  isQuitting: boolean
+  isQuitting: unknown
   localPtysSurviveQuit?: unknown
 }): Promise<void> {
   const read = readWindowCloseRequestPayload(payload)
@@ -901,6 +901,20 @@ describe('quit with local terminals', () => {
     expect(inspectProcess).not.toHaveBeenCalled()
     expect(warningIsVisible()).toBe(false)
     expect(confirmWindowClose).toHaveBeenCalledTimes(1)
+  })
+
+  /** The quit flag's own read site, not the survival conjunct: `collectWindowClosePtyIds`
+   *  drops SSH panes on a quit, so a truthy non-boolean coerced to a yes closes over remote
+   *  work with no probe even while the survival answer is a clean no. */
+  it('probes and warns about an SSH pane when the quit flag is malformed rather than a real yes', async () => {
+    getStateMock.mockReturnValue(storeStateWithPtys({ [SSH_WORKTREE_ID]: [SSH_PTY_ID] }))
+    const inspectProcess = installInspectProcess(async () => observedLiveInspection())
+
+    await runQuit({ isQuitting: 'yes', localPtysSurviveQuit: false })
+
+    expect(inspectProcess.mock.calls.map(([ptyId]) => ptyId)).toEqual([SSH_PTY_ID])
+    expect(warningIsVisible()).toBe(true)
+    expect(confirmWindowClose).not.toHaveBeenCalled()
   })
 
   it('warns about the local pane of a mixed window while leaving the SSH pane alone', async () => {
