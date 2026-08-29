@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   importReleaseCheckoutModule,
@@ -123,10 +123,14 @@ async function loadWorkingTreeBuild(): Promise<AgentSessionWireBuild> {
 }
 
 async function loadReleaseBuild(checkout: ReleaseCheckout): Promise<AgentSessionWireBuild> {
-  const [protocol, dispatcher, terminalMethods] = await Promise.all([
+  const structuredMethodsPath = '/src/main/runtime/rpc/methods/structured-agent-session.ts'
+  const [protocol, dispatcher, terminalMethods, structuredMethods] = await Promise.all([
     importReleaseCheckoutModule(checkout, '/src/shared/protocol-version.ts'),
     importReleaseCheckoutModule(checkout, '/src/main/runtime/rpc/dispatcher.ts'),
-    importReleaseCheckoutModule(checkout, '/src/main/runtime/rpc/methods/terminal.ts')
+    importReleaseCheckoutModule(checkout, '/src/main/runtime/rpc/methods/terminal.ts'),
+    existsSync(join(checkout.root, structuredMethodsPath))
+      ? importReleaseCheckoutModule(checkout, structuredMethodsPath)
+      : null
   ])
   const module = dispatcher as unknown as DispatcherModule
   return {
@@ -138,7 +142,10 @@ async function loadReleaseBuild(checkout: ReleaseCheckout): Promise<AgentSession
     createDispatcher: (runtime) =>
       new module.RpcDispatcher({
         runtime,
-        methods: terminalMethods.TERMINAL_METHODS as unknown[]
+        methods: [
+          ...((structuredMethods?.STRUCTURED_AGENT_SESSION_METHODS as unknown[] | undefined) ?? []),
+          ...(terminalMethods.TERMINAL_METHODS as unknown[])
+        ]
       })
   }
 }

@@ -362,9 +362,35 @@ describe('cross-version structured agent sessions', () => {
             ok: false,
             error: { code: 'method_not_found' }
           })
+        } else {
+          expect(replies[0], `${method} is registered on the old host`).not.toMatchObject({
+            ok: false,
+            error: { code: 'method_not_found' }
+          })
         }
       }
     })
+
+    it(
+      'executes methods that a release-shaped checkout actually registers',
+      async () => {
+        const releasedCurrent = await loadAgentSessionWireBuild('HEAD')
+        expect(releasedCurrent.capabilities).toContain(STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY)
+        expect(releasedCurrent.methodNames).toContain('agentSession.createSupport')
+        const replies = await callBuild(
+          releasedCurrent,
+          'agentSession.createSupport',
+          paramsFor('agentSession.createSupport'),
+          { clientKind: 'runtime', clientCapabilities: current.capabilities }
+        )
+        expect(replies).toHaveLength(1)
+        expect(replies[0]).not.toMatchObject({
+          ok: false,
+          error: { code: 'method_not_found' }
+        })
+      },
+      SUITE_TIMEOUT_MS
+    )
   })
 
   describe('an old client against a structured-owned AI Vault row', () => {
