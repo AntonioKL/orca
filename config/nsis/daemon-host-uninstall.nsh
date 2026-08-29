@@ -28,4 +28,5 @@
 ; start with STATUS_BREAKPOINT since their AppContainer cannot read the binaries.
 !macro customInstall
   nsExec::Exec 'icacls "$INSTDIR" /grant *S-1-15-2-2:(OI)(CI)(RX)'
+  Pop $0
 !macroend
