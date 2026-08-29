@@ -143,7 +143,7 @@ export function collectAiVaultTitleRequests(state: AppState): AiVaultTitleReques
   for (const tab of structuredAgentSessionTitleTabs(state)) {
     requests.push({
       agent: tab.agentSessionAgent as AiVaultSessionTitle['agent'],
-      executionHostId: getExecutionHostIdForWorktree(state, tab.worktreeId),
+      executionHostId: tab.executionHostId ?? getExecutionHostIdForWorktree(state, tab.worktreeId),
       providerSession: { key: 'session_id', id: tab.agentSessionProviderSessionId! },
       // Why: a chat the user is holding open is live, so its provider name is re-read on the same
       // cadence a terminal-backed session gets — that is how a later rename reaches the tab.

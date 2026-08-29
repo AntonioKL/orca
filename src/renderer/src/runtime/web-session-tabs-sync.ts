@@ -4,7 +4,7 @@ import type { AppState } from '../store'
 import { useAppStore } from '../store'
 import type { RuntimeRpcResponse } from '../../../shared/runtime-rpc-envelope'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../shared/constants'
-import { toRuntimeExecutionHostId } from '../../../shared/execution-host'
+import { toRuntimeExecutionHostId, type ExecutionHostId } from '../../../shared/execution-host'
 import {
   AGENT_STATUS_STALE_AFTER_MS,
   pickParsedAgentStatusPayload,
@@ -170,6 +170,7 @@ type SessionTabsRemovalFence = {
 
 export type WebSessionTabsSnapshotApplyOptions = {
   contentScope?: 'all' | 'agent-session'
+  executionHostId?: ExecutionHostId
   preserveLocalLayout?: boolean
   terminalPtyMode?: 'local' | 'remote'
 }
@@ -978,6 +979,7 @@ function isAgentSessionTab(
 
 function buildMirroredAgentTabs(
   snapshot: RuntimeMobileSessionTabsResult,
+  executionHostId: ExecutionHostId,
   hostGroupIdByTabId: ReadonlyMap<string, string>,
   fallbackGroupId: string,
   sortOffset: number,
@@ -989,6 +991,12 @@ function buildMirroredAgentTabs(
     const existing = currentUnifiedTabs.find(
       (candidate) => candidate.contentType === 'agent-session' && candidate.id === localId
     )
+    const providerSessionId = tab.providerSessionId?.trim() || null
+    const preservesExistingTitle =
+      providerSessionId !== null &&
+      existing?.agentSessionProviderSessionId === providerSessionId &&
+      existing.aiVaultTitle?.agent === tab.agent &&
+      existing.aiVaultTitle.sessionId === providerSessionId
     return {
       hostTabId: tab.id,
       unifiedTab: {
@@ -996,18 +1004,14 @@ function buildMirroredAgentTabs(
         entityId: tab.sessionId,
         groupId: hostGroupIdByTabId.get(tab.id) ?? fallbackGroupId,
         worktreeId: snapshot.worktree,
+        executionHostId,
         contentType: 'agent-session',
         agentSessionAgent: tab.agent,
         // Why: the host owns identity, the client owns the name. Dropping either on a republish
         // renamed the tab back to the generic label and lost the user's own rename with it.
-        ...((tab.providerSessionId ?? existing?.agentSessionProviderSessionId)
-          ? {
-              agentSessionProviderSessionId:
-                tab.providerSessionId ?? existing?.agentSessionProviderSessionId
-            }
-          : {}),
+        ...(providerSessionId ? { agentSessionProviderSessionId: providerSessionId } : {}),
         label: tab.title.trim() || 'Codex Chat',
-        ...(existing?.aiVaultTitle ? { aiVaultTitle: existing.aiVaultTitle } : {}),
+        ...(preservesExistingTitle ? { aiVaultTitle: existing.aiVaultTitle } : {}),
         customLabel: existing?.customLabel ?? null,
         color: tab.color !== undefined ? tab.color : (existing?.color ?? null),
         sortOrder: sortOffset + index,
@@ -2977,6 +2981,7 @@ function applyWebSessionTabsSnapshotWithContext(
   )
   const mirroredAgentTabs = buildMirroredAgentTabs(
     snapshot,
+    options?.executionHostId ?? toRuntimeExecutionHostId(environmentId),
     hostGroupIdByTabId,
     targetGroupId,
     mirroredTerminalTabEntries.length + mirroredBrowserTabs.length + mirroredEditorTabs.length,

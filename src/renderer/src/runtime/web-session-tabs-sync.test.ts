@@ -10,6 +10,7 @@ import {
 import { recordWebSessionReorderIntent } from './web-session-reorder-intent'
 import type { Tab } from '../../../shared/tab-types'
 import type { TerminalTab } from '../../../shared/terminal-tab-types'
+import { toRuntimeExecutionHostId } from '../../../shared/execution-host'
 import {
   acceptReplayedWebSessionTabsSnapshot,
   applyFreshWebSessionTabsSnapshot,
@@ -73,7 +74,8 @@ describe('applyWebSessionTabsSnapshot', () => {
         id: 'structured-agent-session-session-1',
         entityId: 'session-1',
         contentType: 'agent-session',
-        agentSessionAgent: 'codex'
+        agentSessionAgent: 'codex',
+        executionHostId: toRuntimeExecutionHostId(ENV)
       })
     ])
     expect(patch.activeTabTypeByWorktree?.[WT]).toBe('agent-session')

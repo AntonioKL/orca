@@ -212,6 +212,44 @@ describe('structured Codex chat tab titles', () => {
     stop()
   })
 
+  it('degrades to the generic label when an older host omits provider identity', async () => {
+    const store = makeStore()
+    store.publish(1, [{ sessionId: 'codex-1', providerSessionId: 'thread-1' }])
+    const stop = startAiVaultTabTitleSync({
+      getState: store.getState,
+      subscribe: store.subscribe,
+      resolveSessionTitles: titleResolver({ 'thread-1': 'Rewrite the parser' })
+    })
+    await vi.waitFor(() => expect(labelOf(store.getState(), 'codex-1')).toBe('Rewrite the parser'))
+    stop()
+
+    store.publish(2, [{ sessionId: 'codex-1' }])
+
+    const tab = chatTabs(store.getState())[0]!
+    expect(tab.agentSessionProviderSessionId).toBeUndefined()
+    expect(tab.aiVaultTitle).toBeUndefined()
+    expect(labelOf(store.getState(), 'codex-1')).toBe('Codex Chat')
+  })
+
+  it('does not carry one provider conversation title across a thread replacement', async () => {
+    const store = makeStore()
+    store.publish(1, [{ sessionId: 'codex-1', providerSessionId: 'thread-1' }])
+    const stop = startAiVaultTabTitleSync({
+      getState: store.getState,
+      subscribe: store.subscribe,
+      resolveSessionTitles: titleResolver({ 'thread-1': 'Rewrite the parser' })
+    })
+    await vi.waitFor(() => expect(labelOf(store.getState(), 'codex-1')).toBe('Rewrite the parser'))
+    stop()
+
+    store.publish(2, [{ sessionId: 'codex-1', providerSessionId: 'thread-2' }])
+
+    const tab = chatTabs(store.getState())[0]!
+    expect(tab.agentSessionProviderSessionId).toBe('thread-2')
+    expect(tab.aiVaultTitle).toBeUndefined()
+    expect(labelOf(store.getState(), 'codex-1')).toBe('Codex Chat')
+  })
+
   it('picks up a later provider title without ever falling back to the generic label', async () => {
     const store = makeStore()
     store.publish(1, [{ sessionId: 'codex-1', providerSessionId: 'thread-1' }])

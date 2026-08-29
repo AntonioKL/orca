@@ -101,11 +101,9 @@ describe('structured chat tab provider session identity', () => {
     })
 
     records['session-1'] = codexRecord([codexLink('thread-1', 'link-1')])
-    runtime.publishStructuredAgentSessionTab({
-      workspaceId: 'workspace-1',
-      sessionId: 'session-1',
-      agent: 'codex',
-      activate: false
+    runtime.touchMobileSessionTabsForWorktree('workspace-1', {
+      immediate: true,
+      refreshStructuredProviderSessions: true
     })
 
     expect((await publishedAgentTab(runtime))?.providerSessionId).toBe('thread-1')
