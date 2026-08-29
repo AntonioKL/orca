@@ -160,6 +160,26 @@ describe('useMobileNativeChatDrafts', () => {
     expect(state?.composerText).toBe('newer edit')
   })
 
+  it('preserves an intentional clear after a newer edit while a rejection is pending', async () => {
+    await mount('a')
+    act(() => state?.setComposerText('ping'))
+    const origin = state?.captureSendOrigin('ping')
+    act(() => {
+      if (origin) {
+        state?.clearDraftForSend(origin, 'ping')
+      }
+    })
+    act(() => state?.setComposerText('newer edit'))
+    act(() => state?.setComposerText(''))
+    act(() => {
+      if (origin) {
+        state?.restoreRejectedDraft(origin, 'ping')
+      }
+    })
+
+    expect(state?.composerText).toBe('')
+  })
+
   it('restores a rejected send onto its originating tab only', async () => {
     await mount('a')
     act(() => state?.setComposerText('from a'))
@@ -171,12 +191,13 @@ describe('useMobileNativeChatDrafts', () => {
     })
 
     await switchTo('b')
+    act(() => state?.setComposerText('from b'))
     act(() => {
       if (originA) {
         state?.restoreRejectedDraft(originA, 'from a')
       }
     })
-    expect(state?.composerText).toBe('')
+    expect(state?.composerText).toBe('from b')
 
     await switchTo('a')
     expect(state?.composerText).toBe('from a')

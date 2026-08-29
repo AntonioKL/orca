@@ -1117,9 +1117,10 @@ export default function SessionScreen() {
   })
   const { toggleTabChatView, showNativeChat, showNativeChatRef } = nativeChatController
   nativeChatSendError.bannerMountedRef.current = showNativeChat
+  const routeKey = nativeChatScopeKey ?? `${hostId}\0${worktreeId}`
   const getSendCompletionGeneration = useMobileSendCompletionGeneration({
     onBlur: resetLiveInputFocus,
-    surfaceKey: JSON.stringify([activeSessionTabId, activeHandle, showNativeChat, liveInputEnabled])
+    surfaceKey: JSON.stringify([routeKey, activeHandle, showNativeChat, liveInputEnabled])
   })
 
   const dictation = useMobileDictation({

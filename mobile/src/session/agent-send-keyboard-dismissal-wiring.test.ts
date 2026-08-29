@@ -49,8 +49,11 @@ describe('terminal send keyboard dismissal wiring', () => {
       'const getSendCompletionGeneration = useMobileSendCompletionGeneration({',
       '})'
     )
+    expect(sessionRouteSource).toContain(
+      'const routeKey = nativeChatScopeKey ?? `${hostId}\\0${worktreeId}`'
+    )
     expect(slice).toContain(
-      'surfaceKey: JSON.stringify([activeSessionTabId, activeHandle, showNativeChat, liveInputEnabled])'
+      'surfaceKey: JSON.stringify([routeKey, activeHandle, showNativeChat, liveInputEnabled])'
     )
   })
 
