@@ -18,6 +18,13 @@ export function renewRuntimeMobileAgentStatusFromPtyTitle(
     return status
   }
   if (
+    (status.state === 'waiting' || status.state === 'blocked') &&
+    pty.lastAgentStatus === 'idle' &&
+    Date.now() - status.updatedAt <= AGENT_STATUS_STALE_AFTER_MS
+  ) {
+    return status
+  }
+  if (
     options.preserveQuestionUnderShellTitle &&
     status.interactivePrompt != null &&
     terminalTitleBlocksExplicitAgentStatus(pty.lastOscTitle)

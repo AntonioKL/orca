@@ -25,6 +25,10 @@ export class RuntimeOrchestrationFederation {
   private readonly timers = new Map<string, ReturnType<typeof setInterval>>()
   private readonly syncs = new Map<string, { db: OrchestrationDb; promise: Promise<void> }>()
   private readonly warnings = new Set<string>()
+  private terminalRecoveryTimer: ReturnType<typeof setTimeout> | null = null
+  private terminalRecoveryInFlight: Promise<void> | null = null
+  private terminalRecoveryRowId = 0
+  private relayGeneration = 0
 
   constructor(
     private readonly runtime: OrcaRuntimeService,
@@ -32,6 +36,13 @@ export class RuntimeOrchestrationFederation {
   ) {}
 
   resetForDatabaseChange(): void {
+    this.relayGeneration += 1
+    if (this.terminalRecoveryTimer) {
+      clearTimeout(this.terminalRecoveryTimer)
+    }
+    this.terminalRecoveryTimer = null
+    this.terminalRecoveryInFlight = null
+    this.terminalRecoveryRowId = 0
     clearFederationAckCheckpoints(this.runtime)
     this.syncs.clear()
     this.warnings.clear()
@@ -151,8 +162,8 @@ export class RuntimeOrchestrationFederation {
         continue
       }
       const tick = () => {
-        const worker = this.runtime.getOrchestrationDb().getWorkerDispatch(dispatch.dispatch_id)
-        if (!worker || !['starting', 'ready', 'stopping'].includes(worker.state)) {
+        const db = this.runtime.getOrchestrationDb()
+        if (!db.isFederatedDispatchRelayEligible(dispatch.dispatch_id)) {
           const activeTimer = this.timers.get(dispatch.dispatch_id)
           if (activeTimer) {
             clearInterval(activeTimer)
@@ -168,15 +179,64 @@ export class RuntimeOrchestrationFederation {
       this.timers.set(dispatch.dispatch_id, timer)
       tick()
     }
+    this.ensureTerminalHistoryRecovery()
+  }
+
+  private ensureTerminalHistoryRecovery(): void {
+    if (this.terminalRecoveryTimer || this.terminalRecoveryInFlight) {
+      return
+    }
+    const generation = this.relayGeneration
+    const recovery = this.recoverNextTerminalHistoryAcknowledgment(generation).catch((error) => {
+      console.warn('[orchestration] terminal federation acknowledgment recovery failed', error)
+    })
+    this.terminalRecoveryInFlight = recovery
+    void recovery.finally(() => {
+      if (this.terminalRecoveryInFlight === recovery) {
+        this.terminalRecoveryInFlight = null
+      }
+    })
+  }
+
+  private async recoverNextTerminalHistoryAcknowledgment(generation: number): Promise<void> {
+    const db = this.runtime.getOrchestrationDb()
+    let historical = db.findNextTerminalFederatedDispatchPendingAcknowledgment(
+      this.terminalRecoveryRowId
+    )
+    if (!historical && this.terminalRecoveryRowId > 0) {
+      this.terminalRecoveryRowId = 0
+      historical = db.findNextTerminalFederatedDispatchPendingAcknowledgment(0)
+    }
+    if (!historical) {
+      return
+    }
+    this.terminalRecoveryRowId = historical.rowId
+    await this.runtime
+      .syncOrchestrationFederatedDispatch(historical.dispatchId)
+      .catch(() => undefined)
+    if (generation !== this.relayGeneration) {
+      return
+    }
+    this.terminalRecoveryTimer = setTimeout(() => {
+      this.terminalRecoveryTimer = null
+      this.ensureTerminalHistoryRecovery()
+    }, 1_000)
+    this.terminalRecoveryTimer.unref?.()
   }
 
   stopRelay(): void {
+    this.relayGeneration += 1
     for (const timer of this.timers.values()) {
       clearInterval(timer)
     }
     this.timers.clear()
     this.warnings.clear()
     this.syncs.clear()
+    if (this.terminalRecoveryTimer) {
+      clearTimeout(this.terminalRecoveryTimer)
+    }
+    this.terminalRecoveryTimer = null
+    this.terminalRecoveryInFlight = null
     clearFederationAckCheckpoints(this.runtime)
   }
 }

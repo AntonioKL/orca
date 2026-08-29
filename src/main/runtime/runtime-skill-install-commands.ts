@@ -236,7 +236,11 @@ export class RuntimeSkillInstallCommands {
     }
     const controller = new AbortController()
     const abort = () => controller.abort()
-    signal?.addEventListener('abort', abort, { once: true })
+    if (signal?.aborted) {
+      abort()
+    } else {
+      signal?.addEventListener('abort', abort, { once: true })
+    }
     this.operations.set(request.operationId, controller)
     const report = (value: SkillBundleInstallProgress) => {
       this.progress.set(request.operationId, value)

@@ -1,7 +1,7 @@
 import {
   AGENT_PROMPT_BRACKETED_PASTE_END,
   AGENT_PROMPT_SUBMIT,
-  AGENT_PROMPT_SUBMIT_DELAY_MS
+  getAgentPromptSubmitDelayMs
 } from '../../shared/agent-prompt-injection'
 import { iterateTerminalInputChunks } from '../../shared/terminal-input'
 
@@ -113,7 +113,12 @@ export class RuntimeTerminalWriter {
       }
       throw error
     }
-    await new Promise((resolve) => setTimeout(resolve, AGENT_PROMPT_SUBMIT_DELAY_MS))
+    await new Promise((resolve) =>
+      setTimeout(
+        resolve,
+        getAgentPromptSubmitDelayMs(process.platform, Buffer.byteLength(pastePayload, 'utf8'))
+      )
+    )
     try {
       await options.beforeWrite?.(ptyId)
     } catch (error) {

@@ -9,6 +9,12 @@ import type {
 import type { Repo } from '../../shared/repo-types'
 import type { Worktree } from '../../shared/worktree/types'
 import type { RuntimeStore } from './runtime-store-contract'
+import type { AutomationListParams, AutomationListResult } from '../../shared/automation-list-scope'
+import type {
+  AutomationOwnerPrecondition,
+  AutomationDestination
+} from '../../shared/automation-owner-precondition'
+import { runAutomationNowFenced } from '../automations/refused-manual-run'
 
 export type RuntimeAutomationCreateInput = Omit<
   AutomationCreateInput,
@@ -30,7 +36,7 @@ export type RuntimeAutomationUpdateInput = Omit<
 
 type RuntimeAutomationTargetResolvers = {
   showRepo: (selector: string) => Promise<Repo>
-  showManagedWorktree: (selector: string) => Promise<Pick<Worktree, 'id' | 'repoId'>>
+  showManagedWorktree: (selector: string) => Promise<Pick<Worktree, 'id' | 'repoId' | 'path'>>
 }
 
 export class RuntimeAutomationController {
@@ -59,6 +65,17 @@ export class RuntimeAutomationController {
     return this.store.listAutomationRuns(automationId)
   }
 
+  listForScope(params: AutomationListParams = {}): AutomationListResult {
+    if (!this.store?.listAutomationsForScope) {
+      throw new Error('runtime_unavailable')
+    }
+    return this.store.listAutomationsForScope(params)
+  }
+
+  ownerPrecondition(id: string): AutomationOwnerPrecondition | null {
+    return this.store?.automationOwnerPrecondition?.(id) ?? null
+  }
+
   show(id: string): Automation {
     const automation = this.list().find((entry) => entry.id === id)
     if (!automation) {
@@ -67,36 +84,47 @@ export class RuntimeAutomationController {
     return automation
   }
 
-  async create(input: RuntimeAutomationCreateInput): Promise<Automation> {
+  async create(
+    input: RuntimeAutomationCreateInput,
+    destination?: AutomationDestination
+  ): Promise<Automation> {
     if (!this.store?.createAutomation) {
       throw new Error('runtime_unavailable')
     }
     const target = await this.resolveTarget(input)
+    this.assertRunContextMatchesTarget(input.runContext, target.path)
     if (input.reuseSession && target.workspaceMode !== 'existing') {
       throw new Error('Session reuse requires an existing workspace target.')
     }
-    return this.store.createAutomation({
-      name: input.name,
-      prompt: input.prompt,
-      precheck: input.precheck,
-      agentId: input.agentId,
-      runContext: input.runContext,
-      sourceContext: input.sourceContext,
-      projectId: target.projectId,
-      workspaceMode: target.workspaceMode,
-      workspaceId: target.workspaceId,
-      baseBranch: input.baseBranch,
-      setupDecision: input.setupDecision,
-      reuseSession: input.reuseSession,
-      timezone: input.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
-      rrule: input.rrule,
-      dtstart: input.dtstart,
-      enabled: input.enabled,
-      missedRunGraceMinutes: input.missedRunGraceMinutes
-    })
+    return this.store.createAutomation(
+      {
+        name: input.name,
+        prompt: input.prompt,
+        precheck: input.precheck,
+        agentId: input.agentId,
+        runContext: input.runContext,
+        sourceContext: input.sourceContext,
+        projectId: target.projectId,
+        workspaceMode: target.workspaceMode,
+        workspaceId: target.workspaceId,
+        baseBranch: input.baseBranch,
+        setupDecision: input.setupDecision,
+        reuseSession: input.reuseSession,
+        timezone: input.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+        rrule: input.rrule,
+        dtstart: input.dtstart,
+        enabled: input.enabled,
+        missedRunGraceMinutes: input.missedRunGraceMinutes
+      },
+      destination ? { destination } : undefined
+    )
   }
 
-  async update(id: string, updates: RuntimeAutomationUpdateInput): Promise<Automation> {
+  async update(
+    id: string,
+    updates: RuntimeAutomationUpdateInput,
+    options?: { expectedOwner?: AutomationOwnerPrecondition; destination?: AutomationDestination }
+  ): Promise<Automation> {
     if (!this.store?.updateAutomation) {
       throw new Error('runtime_unavailable')
     }
@@ -109,6 +137,7 @@ export class RuntimeAutomationController {
       hasUpdateValue(updates, 'workspaceMode')
     if (targetChanged) {
       const target = await this.resolveTarget(updates, current)
+      this.assertRunContextMatchesTarget(updates.runContext, target.path)
       if (patch.reuseSession === true && target.workspaceMode !== 'existing') {
         throw new Error('Session reuse requires an existing workspace target.')
       }
@@ -119,26 +148,50 @@ export class RuntimeAutomationController {
         patch.reuseSession = false
       }
     }
+    if (!targetChanged && hasUpdateValue(updates, 'runContext')) {
+      const target = await this.resolveTarget({ repo: current.projectId }, current)
+      this.assertRunContextMatchesTarget(updates.runContext, target.path)
+    }
     if (!targetChanged && patch.reuseSession && current.workspaceMode !== 'existing') {
       throw new Error('Session reuse requires an existing workspace target.')
     }
-    return this.store.updateAutomation(id, patch)
+    return this.store.updateAutomation(id, patch, options)
   }
 
-  delete(id: string): { removed: boolean; id: string } {
+  delete(
+    id: string,
+    expectedOwner?: AutomationOwnerPrecondition
+  ): { removed: boolean; id: string } {
     if (!this.store?.deleteAutomation) {
       throw new Error('runtime_unavailable')
     }
     this.show(id)
-    this.store.deleteAutomation(id)
+    this.store.deleteAutomation(id, expectedOwner ? { expectedOwner } : undefined)
     return { removed: true, id }
   }
 
-  async runNow(id: string): Promise<AutomationRun> {
+  async runNow(id: string, expectedOwner?: AutomationOwnerPrecondition): Promise<AutomationRun> {
     if (!this.service) {
       throw new Error('runtime_unavailable')
     }
-    return await this.service.runNow(id)
+    const service = this.service
+    return await runAutomationNowFenced({
+      automationId: id,
+      service,
+      fence: () => {
+        if (!this.store?.assertAutomationOwnerFence) {
+          if (expectedOwner) {
+            throw new Error('runtime_unavailable')
+          }
+          return
+        }
+        this.store.assertAutomationOwnerFence({
+          id,
+          expectedOwner,
+          operation: 'execute'
+        })
+      }
+    })
   }
 
   private copyPatchValues(
@@ -180,6 +233,7 @@ export class RuntimeAutomationController {
     projectId: string
     workspaceMode: AutomationWorkspaceMode
     workspaceId?: string | null
+    path?: string
   }> {
     const hasRepo = input.repo !== undefined
     const hasWorkspace = input.workspace !== undefined
@@ -213,13 +267,24 @@ export class RuntimeAutomationController {
       if (!workspaceId || !projectId) {
         throw new Error('Existing-workspace automation requires --workspace.')
       }
-      return { projectId, workspaceMode, workspaceId }
+      return { projectId, workspaceMode, workspaceId, path: workspace?.path }
     }
     const projectId = repo?.id ?? workspace?.repoId ?? current?.projectId
     if (!projectId) {
       throw new Error('Automation requires --repo or --workspace.')
     }
-    return { projectId, workspaceMode: 'new_per_run', workspaceId: null }
+    return { projectId, workspaceMode: 'new_per_run', workspaceId: null, path: repo?.path }
+  }
+
+  private assertRunContextMatchesTarget(
+    runContext:
+      | RuntimeAutomationCreateInput['runContext']
+      | RuntimeAutomationUpdateInput['runContext'],
+    targetPath?: string
+  ): void {
+    if (runContext?.path && targetPath && runContext.path !== targetPath) {
+      throw new Error('Automation project does not match its run context.')
+    }
   }
 }
 

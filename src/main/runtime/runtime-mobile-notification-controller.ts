@@ -1,6 +1,6 @@
-import { Notification } from 'electron'
 import { MobileNotificationReplayBuffer } from './mobile-notification-replay'
 import { notifyRuntimeListeners } from './runtime-async-boundaries'
+import { getRuntimeDesktopSurface } from './runtime-desktop-surface'
 
 export type MobileNotificationDispatchEvent = {
   type: 'notification'
@@ -72,10 +72,7 @@ export class RuntimeMobileNotificationController {
     const body = input.body ?? ''
     let delivered = false
     try {
-      if (Notification.isSupported()) {
-        new Notification({ title, body }).show()
-        delivered = true
-      }
+      delivered = getRuntimeDesktopSurface().showNotification({ title, body })
     } catch {
       // Headless runtimes still relay the notification to mobile clients.
     }

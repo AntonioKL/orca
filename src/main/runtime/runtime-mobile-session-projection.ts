@@ -4,7 +4,7 @@ import {
   resolveCompatibleAgentTypeForOwner
 } from '../../shared/agent-title-owner'
 import { resolvePaneAgentOwner } from '../../shared/pane-agent-owner'
-import type { AgentStatusIpcPayload } from '../../shared/agent-status-types'
+import type { AgentStatusEntry, AgentStatusIpcPayload } from '../../shared/agent-status-types'
 import type {
   RuntimeMobileSessionClientTab,
   RuntimeMobileSessionTabsResult,
@@ -99,9 +99,7 @@ export function projectRuntimeMobileSessionTabs(
     const retainedAgentStatus = tab.agentStatus
       ? null
       : host.getRetainedStatus(paneKey, liveLeafPty ?? mobileStatusPty, tab)
-    const hookAgentStatus = tab.agentStatus
-      ? selectRuntimeHookAgentRowForPane(getHookRowsForPane(paneKey))
-      : null
+    const hookAgentStatus = selectRuntimeHookAgentRowForPane(getHookRowsForPane(paneKey))
     // Why not tab.ptyId: findPtyForMobileTerminalTab already rejected it when it returned
     // null, because persisted ids can collide with an unrelated pane after restart — reading
     // that pane's tracker would publish its title here, ahead of every other source.
@@ -216,6 +214,29 @@ export function projectRuntimeMobileSessionTabs(
       : livePty
         ? host.issuePtyHandle(livePty)
         : null
+    const projectedAgentStatus =
+      agentStatus ??
+      host.buildPtyStatus(
+        mobileStatusPty,
+        tab,
+        terminalHandle,
+        retainedAgentStatus,
+        getHookRowsForPane
+      )
+    const projectedStatusEntry = projectedAgentStatus.agentStatus as
+      | (AgentStatusEntry & { turnCompletedAt?: number })
+      | undefined
+    const { turnCompletedAt: projectedTurnCompletedAt, ...clientStatusFields } =
+      projectedStatusEntry ?? {}
+    const rawTurnCompletedAt =
+      hookAgentStatus?.live?.payload.turnCompletedAt ?? projectedTurnCompletedAt
+    const turnCompletedAt =
+      typeof rawTurnCompletedAt === 'number' && Number.isFinite(rawTurnCompletedAt)
+        ? rawTurnCompletedAt
+        : undefined
+    const clientAgentStatus: { agentStatus?: AgentStatusEntry } = projectedStatusEntry
+      ? { agentStatus: clientStatusFields as AgentStatusEntry }
+      : {}
     tabs.push({
       type: 'terminal',
       id: tab.id,
@@ -225,14 +246,8 @@ export function projectRuntimeMobileSessionTabs(
       ...(tab.ptyId ? { ptyId: tab.ptyId } : {}),
       ...(tab.terminalTheme ? { terminalTheme: tab.terminalTheme } : {}),
       ...(launchAgent ? { launchAgent } : {}),
-      ...(agentStatus ??
-        host.buildPtyStatus(
-          mobileStatusPty,
-          tab,
-          terminalHandle,
-          retainedAgentStatus,
-          getHookRowsForPane
-        )),
+      ...clientAgentStatus,
+      ...(turnCompletedAt !== undefined ? { turnCompletedAt } : {}),
       ...(tab.parentLayout ? { parentLayout: tab.parentLayout } : {}),
       ...(tab.startupCwd ? { startupCwd: tab.startupCwd } : {}),
       ...(tab.color != null ? { color: tab.color } : {}),

@@ -10,6 +10,7 @@ import type { HeadlessEmulator } from '../daemon/headless-emulator'
 import type { PtyProviderBufferSnapshot } from '../providers/types'
 import type { RetainedTailRedrawCursor } from './terminal-tail-redraw-buffer'
 import type { TerminalTailWaitState } from './terminal-wait-tail-state'
+import type { PtyShellOwnershipMirror } from './pty-shell-ownership-mirror'
 import type { TerminalExitCause } from '../../shared/terminal-exit-cause'
 
 type RuntimeTerminalTailState = {
@@ -88,6 +89,7 @@ export type RuntimeHeadlessTerminal = {
   emulator: HeadlessEmulator
   outputSequence: number
   writeChain: Promise<void>
+  ownership: PtyShellOwnershipMirror
 }
 
 export type RuntimeVisibleTerminalState = {
@@ -125,4 +127,5 @@ export type HeadlessSeedMetadata = {
   oscLinks?: TerminalOscLinkRange[]
   preferProviderIfExisting?: boolean
   kittyKeyboardFlags?: number
+  terminalOwner?: 'shell'
 }

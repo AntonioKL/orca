@@ -59,6 +59,7 @@ export async function requestRuntimeRemoteWorktree(
       ...(args.manualOrder !== undefined ? { manualOrder: args.manualOrder } : {}),
       ...(args.createdWithAgent ? { createdWithAgent: args.createdWithAgent } : {}),
       ...(args.pendingFirstAgentMessageRename ? { pendingFirstAgentMessageRename: true } : {}),
+      ...(args.nameWasGenerated === true ? { nameWasGenerated: true } : {}),
       ...(args.automationProvenance ? { automationProvenance: args.automationProvenance } : {}),
       ...(args.cliProvenance ? { cliProvenance: args.cliProvenance } : {})
     },

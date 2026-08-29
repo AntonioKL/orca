@@ -21,6 +21,10 @@ import type {
 type DriverState = RuntimeTerminalDriverState
 
 export type RuntimeNotifier = {
+  automationsChanged?(payload: {
+    selector?: { kind: 'self' } | { kind: 'ssh'; targetId: string } | { kind: 'orphan' }
+    reason?: 'definition' | 'run' | 'usage'
+  }): void
   worktreesChanged(repoId: string, renamed?: { oldWorktreeId: string; newWorktreeId: string }): void
   worktreeBaseStatus?(event: WorktreeBaseStatusEvent): void
   worktreeRemoteBranchConflict?(event: WorktreeRemoteBranchConflictEvent): void

@@ -74,6 +74,10 @@ import {
   getTerminalPasteIngestMs
 } from '../../shared/agent-prompt-injection'
 import { iterateTerminalInputChunks } from '../../shared/terminal-input'
+import { yieldToEventLoop } from '../../shared/event-loop-yield'
+import type { AutomationsChangedPayload } from '../../shared/runtime-client-events'
+import { configureHostReadableTranscriptPathSources } from '../native-chat/host-readable-transcript-path'
+import { resolveNestedWorkerMaxDepth } from '../../shared/nested-worker-depth'
 import {
   OPERATOR_CLOSE_EXIT_CAUSE,
   describeTerminalExitCause,
@@ -118,6 +122,11 @@ import { formatMessagePointer } from './orchestration/formatter'
 import { MailPointerRepointScheduler } from './orchestration/mail-pointer-repoint-scheduler'
 import { selectExactWorkerProviderSession } from './orchestration/worker-provider-session'
 import type { Automation, AutomationRun } from '../../shared/automations-types'
+import type { AutomationListResult } from '../../shared/automation-list-scope'
+import type {
+  AutomationOwnerFenceOperation,
+  AutomationOwnerPrecondition
+} from '../../shared/automation-owner-precondition'
 import type {
   CreateWorktreeResult,
   ForceDeleteWorktreeBranchResult,
@@ -160,8 +169,7 @@ import {
   toSshExecutionHostId,
   type ExecutionHostId
 } from '../../shared/execution-host'
-import { getRegisteredSshState } from '../ipc/ssh'
-import { getPtyExecutionHost } from '../../shared/terminal-execution-host'
+import { getRegisteredSshState } from '../ssh/ssh-target-registry'
 import type { SleepingAgentLaunchConfig } from '../../shared/agent-session-resume'
 import type { ExactWorkerProviderSession } from '../../shared/orchestration-worker-output'
 import { applyBrowserSessionTabSelection } from './browser-session-tab-selection-snapshot'
@@ -567,7 +575,15 @@ import {
   addClaudeTeammateModeInProcess
 } from '../../shared/claude-agent-teams-tmux-compat'
 import { collectMemorySnapshot } from '../memory/collector'
-import { app, BrowserWindow, ipcMain } from 'electron'
+import type { BrowserWindow, IpcMainEvent } from 'electron'
+import { getAppEnvironment } from '../../shared/app-environment'
+import { getRuntimeDesktopSurface } from './runtime-desktop-surface'
+import { renewRuntimeMobileAgentStatusFromPtyTitle } from './runtime-mobile-agent-status-projection'
+import {
+  resolveAgentPromptEffectTimeoutMs,
+  verifyAgentPromptSubmission,
+  type AgentPromptActivity
+} from './agent-prompt-submission-verification'
 import { RendererPublicationThrottle } from '../window/renderer-publication-throttle'
 import type { AgentBrowserBridge } from '../browser/agent-browser-bridge'
 import type { BrowserBackend } from '../browser/browser-backend'
@@ -1149,6 +1165,7 @@ class OrcaRuntimeService {
   // Why: PTY output is a per-keystroke hot path. Looking up affected leaves by
   // ptyId keeps active TUI redraws independent of the total open terminal count.
   private leavesByPtyId = new Map<string, RuntimeLeafRecord[]>()
+  private readonly retiredMobileSessionPtyIds = new Set<string>()
   private handles = new Map<string, TerminalHandleRecord>()
   private handleByLeafKey = new Map<string, string>()
   private handleByPtyId = new Map<string, string>()
@@ -1342,7 +1359,7 @@ class OrcaRuntimeService {
     isLeafPtyProvenAbsent: (ptyId) => this.isLeafPtyProvenAbsent(ptyId),
     redriveMailbox: (mailboxHandle, reservedTypes) =>
       this.deliverPendingMessagesForHandle(mailboxHandle, reservedTypes),
-    writePty: (ptyId, data) => this.ptyController?.write(ptyId, data) ?? false
+    writePty: (ptyId, data) => this.writeOrchestrationPointerPty(ptyId, data)
   })
   private readonly orchestrationMailboxNotifications =
     new OrchestrationMailboxNotificationCoordinator<RuntimeMessageWaiter>({
@@ -1784,6 +1801,12 @@ class OrcaRuntimeService {
   private readonly agentSessionClaimSigner: AgentSessionClaimSigner
   private readonly agentSessionCreateOperations = new Map<string, AgentSessionCreateOperation>()
   private readonly agentPromptSubmissionTailByPtyId = new Map<string, Promise<void>>()
+  private readonly agentPromptLifecycleByPtyId = new Map<
+    string,
+    { status: AgentStatus | null; workingSequence: number; updatedAt: number }
+  >()
+  private readonly agentPromptPermissionSequenceByPtyId = new Map<string, number>()
+  private readonly agentPromptExplicitStatusFloorByPtyId = new Map<string, number>()
   private readonly orchestrationCompatibilitySshAttachments = new Map<
     string,
     OrchestrationCompatibilitySshAttachmentAuthority
@@ -1992,8 +2015,8 @@ class OrcaRuntimeService {
     })
     this.skillCommands = new RuntimeSkillCommands({
       getRuntimeId: () => this.runtimeId,
-      getUserDataPath: () => app.getPath('userData'),
-      isPackaged: () => app.isPackaged,
+      getUserDataPath: () => getAppEnvironment().getPath('userData'),
+      isPackaged: () => getAppEnvironment().isPackaged(),
       getSettings: () => this.store?.getSettings?.() ?? {},
       listRepos: () => this.listRepos(),
       listFolderWorkspaces: () =>
@@ -2264,28 +2287,91 @@ class OrcaRuntimeService {
     return this.automation.list()
   }
 
-  listAutomationRuns(automationId?: string): AutomationRun[] {
+  private fenceAutomationOwner(
+    id: string,
+    expectedOwner: AutomationOwnerPrecondition | undefined,
+    operation: AutomationOwnerFenceOperation
+  ): void {
+    if (!this.store?.assertAutomationOwnerFence) {
+      if (expectedOwner) {
+        throw new Error('runtime_unavailable')
+      }
+      return
+    }
+    this.store.assertAutomationOwnerFence({ id, expectedOwner, operation })
+  }
+
+  listAutomationRuns(
+    automationId?: string,
+    expectedOwner?: AutomationOwnerPrecondition
+  ): AutomationRun[] {
+    if (expectedOwner && !automationId) {
+      throw new Error('An expected owner requires an automation id.')
+    }
+    if (automationId) {
+      this.fenceAutomationOwner(automationId, expectedOwner, 'read')
+    }
     return this.automation.listRuns(automationId)
   }
 
-  showAutomation(id: string): Automation {
-    return this.automation.show(id)
+  showAutomation(id: string, expectedOwner?: AutomationOwnerPrecondition): Automation {
+    const automation = this.automation.show(id)
+    this.fenceAutomationOwner(id, expectedOwner, 'read')
+    return automation
   }
 
-  createAutomation(input: RuntimeAutomationCreateInput): Promise<Automation> {
-    return this.automation.create(input)
+  createAutomation(
+    input: RuntimeAutomationCreateInput,
+    destination?: unknown
+  ): Promise<Automation> {
+    return this.automation.create(input, destination as never).then((automation) => {
+      this.notifyAutomationsChanged({
+        reason: 'definition',
+        selector: this.store?.automationChangeSelector?.(automation.id) ?? undefined
+      })
+      return automation
+    })
   }
 
-  updateAutomation(id: string, updates: RuntimeAutomationUpdateInput): Promise<Automation> {
-    return this.automation.update(id, updates)
+  updateAutomation(
+    id: string,
+    updates: RuntimeAutomationUpdateInput,
+    options?: unknown
+  ): Promise<Automation> {
+    const source = this.store?.automationChangeSelector?.(id) ?? undefined
+    return this.automation.update(id, updates, options as never).then((automation) => {
+      const destination = this.store?.automationChangeSelector?.(automation.id) ?? undefined
+      this.notifyAutomationsChanged({ reason: 'definition', selector: source })
+      if (destination && JSON.stringify(destination) !== JSON.stringify(source)) {
+        this.notifyAutomationsChanged({ reason: 'definition', selector: destination })
+      }
+      return automation
+    })
   }
 
-  deleteAutomation(id: string): { removed: boolean; id: string } {
-    return this.automation.delete(id)
+  deleteAutomation(
+    id: string,
+    expectedOwner?: AutomationOwnerPrecondition
+  ): { removed: boolean; id: string } {
+    const selector = this.store?.automationChangeSelector?.(id) ?? undefined
+    const result = this.automation.delete(id, expectedOwner as never)
+    this.notifyAutomationsChanged({ reason: 'definition', selector })
+    return result
   }
 
-  runAutomationNow(id: string): Promise<AutomationRun> {
-    return this.automation.runNow(id)
+  runAutomationNow(
+    id: string,
+    expectedOwner?: AutomationOwnerPrecondition
+  ): Promise<AutomationRun> {
+    return this.automation.runNow(id, expectedOwner as never)
+  }
+
+  listAutomationsForScope(params = {}): AutomationListResult {
+    return this.automation.listForScope(params)
+  }
+
+  automationOwnerPrecondition(id: string): AutomationOwnerPrecondition | null {
+    return this.automation.ownerPrecondition(id)
   }
 
   // Why: lazy initialization — the DB path depends on Electron's userData
@@ -2293,8 +2379,7 @@ class OrcaRuntimeService {
   // to inject an in-memory DB without touching the filesystem.
   getOrchestrationDb(): OrchestrationDb {
     if (!this._orchestrationDb) {
-      const { app } = require('electron')
-      const dbPath = join(app.getPath('userData'), 'orchestration.db')
+      const dbPath = join(getAppEnvironment().getPath('userData'), 'orchestration.db')
       this._orchestrationDb = new OrchestrationDb(dbPath)
       this.ensureOrchestrationFederationRelay()
       this.scheduleRestoredMessageRepoints()
@@ -2304,6 +2389,7 @@ class OrcaRuntimeService {
 
   setOrchestrationDb(db: OrchestrationDb): void {
     this.orchestrationFederation.resetForDatabaseChange()
+    this.mailPointerRepointScheduler.clear()
     this._orchestrationDb = db
     this.ensureOrchestrationFederationRelay()
     this.scheduleRestoredMessageRepoints()
@@ -4246,6 +4332,9 @@ class OrcaRuntimeService {
   ): boolean {
     const session = this.getWorkspaceSessionForWorktree(worktreeId)
     const repoId = getRepoIdFromWorktreeId(worktreeId)
+    if (candidatePtyId && this.retiredMobileSessionPtyIds.has(candidatePtyId)) {
+      return false
+    }
     if (session && this.pendingMobileTerminalCreatesByKey.has(`${worktreeId}::${parentTabId}`)) {
       return true
     }
@@ -4260,7 +4349,7 @@ class OrcaRuntimeService {
             ].filter((ptyId): ptyId is string => typeof ptyId === 'string')
           : []
       )
-      if (!persistedParent || (candidatePtyId && !persistedPtyIds.has(candidatePtyId))) {
+      if (persistedParent && candidatePtyId && !persistedPtyIds.has(candidatePtyId)) {
         return false
       }
     }
@@ -4408,7 +4497,8 @@ class OrcaRuntimeService {
       const retired = retireTerminalSurfacesFromSnapshot({
         snapshot,
         ptyId,
-        exactSurfaces: exactSurfaces.filter((surface) => surface.worktreeId === worktreeId)
+        exactSurfaces: exactSurfaces.filter((surface) => surface.worktreeId === worktreeId),
+        exactOnly: exactSurfaces.length > 0
       })
       if (!retired) {
         continue
@@ -4439,6 +4529,9 @@ class OrcaRuntimeService {
     const publishableRetiredSurfaces = [...persisted.accepted, ...persisted.unpersisted]
     if (publishableRetiredSurfaces.length === 0) {
       return
+    }
+    for (const surface of publishableRetiredSurfaces) {
+      this.retiredMobileSessionPtyIds.add(surface.ptyId)
     }
     for (const [worktreeId, snapshot] of this.mobileSessionTabsByWorktree) {
       const retired = retireTerminalSurfacesFromSnapshot({
@@ -9919,7 +10012,10 @@ class OrcaRuntimeService {
       pty?.connectionId != null &&
       exitCode < 0 &&
       options.hostExitConfirmed !== true
-    const exitPaneKeys = this.getLeavesForPty(ptyId).map((leaf) => `${leaf.tabId}:${leaf.leafId}`)
+    const exitPaneKeys = [
+      ...this.getLeavesForPty(ptyId).map((leaf) => `${leaf.tabId}:${leaf.leafId}`),
+      ...(pty?.paneKey ? [pty.paneKey] : [])
+    ]
     if (
       (exitCode >= 0 ||
         options.hostExitConfirmed === true ||
@@ -9942,6 +10038,17 @@ class OrcaRuntimeService {
       string,
       Pick<RetiredTerminalSurface, 'worktreeId' | 'parentTabId' | 'leafId'>
     >()
+    for (const [worktreeId, snapshot] of this.mobileSessionTabsByWorktree) {
+      for (const tab of snapshot.tabs) {
+        if (tab.type === 'terminal' && tab.ptyId === ptyId) {
+          exactSurfaceByKey.set(`${worktreeId}\0${tab.parentTabId}\0${tab.leafId}`, {
+            worktreeId,
+            parentTabId: tab.parentTabId,
+            leafId: tab.leafId
+          })
+        }
+      }
+    }
     for (const leaf of this.getLeavesForPty(ptyId)) {
       exactSurfaceByKey.set(`${leaf.worktreeId}\0${leaf.tabId}\0${leaf.leafId}`, {
         worktreeId: leaf.worktreeId,
@@ -10034,7 +10141,7 @@ class OrcaRuntimeService {
     // Why: a cold restore can respawn under the same session id within the
     // delayed-Enter window; the armed Enter would inject \r into the
     // replacement and stamp rows it never received.
-    this.retirePendingMessageDeliveryForPty(ptyId)
+    this.orchestrationMailboxNotifications.retirePty(ptyId)
 
     if (this.terminalFitOverrides.has(ptyId)) {
       this.terminalFitOverrides.delete(ptyId)
@@ -12168,9 +12275,6 @@ class OrcaRuntimeService {
       reserveWrite?: (ptyId: string) => void
       afterWrite?: (ptyId: string) => void | Promise<void>
       suffixFailureError?: string
-      // Why: the pre-Enter wait now scales with the payload, so an abandoned request must be
-      // able to stop it instead of writing Enter minutes after the caller gave up.
-      signal?: AbortSignal
     } = {}
   ): Promise<RuntimeTerminalSend> {
     const pty = this.getLivePtyForHandle(handle)
@@ -12239,7 +12343,7 @@ class OrcaRuntimeService {
       await assertTerminalInputWithinLimitWithYield(payload)
       const generation = this.getPtyLifecycleGeneration(pty.pty.ptyId)
       await this.serializeAgentPromptSubmission(pty.pty.ptyId, generation, async () => {
-        await this.writeTerminalAgentPrompt(pty.pty.ptyId, payload, {
+        await this.writeTerminalAgentPrompt(handle, pty.pty.ptyId, generation, payload, {
           ...options,
           beforeWrite: async (id) => {
             if (options.signal?.aborted) {
@@ -12270,7 +12374,7 @@ class OrcaRuntimeService {
     }
     const generation = this.getPtyLifecycleGeneration(leaf.ptyId)
     await this.serializeAgentPromptSubmission(leaf.ptyId, generation, async () => {
-      await this.writeTerminalAgentPrompt(leaf.ptyId!, payload, {
+      await this.writeTerminalAgentPrompt(handle, leaf.ptyId!, generation, payload, {
         ...options,
         beforeWrite: async (id) => {
           if (options.signal?.aborted) {
@@ -12411,14 +12515,44 @@ class OrcaRuntimeService {
   private getFreshExplicitAgentStatusForHandle(handle: string): {
     status: NonNullable<RuntimeTerminalAgentStatus['status']>
     updatedAt: number
-    /** When this state was entered. Pinned across same-state pings, so it identifies the turn. */
-    stateStartedAt: number
   } | null {
     return this.agentRows.getFreshExplicit({
       handle,
       paneKey: this.getPaneKeyForTerminalHandle(handle),
       hookRows: this.getAgentStatusSnapshotFn?.() ?? []
     })
+  }
+
+  private getAgentPromptActivity(handle: string, ptyId: string): AgentPromptActivity {
+    this.assertLiveTerminalHandleTargetsPty(handle, ptyId)
+    const explicit = this.getFreshExplicitAgentStatusForHandle(handle)
+    const explicitFloor = this.agentPromptExplicitStatusFloorByPtyId.get(ptyId)
+    const pty = this.ptysById.get(ptyId)
+    const lifecycle = this.agentPromptLifecycleByPtyId.get(ptyId)
+    const currentExplicit =
+      explicit && (explicitFloor === undefined || explicit.updatedAt > explicitFloor)
+        ? explicit
+        : null
+    const status = lifecycle?.status ?? currentExplicit?.status ?? pty?.lastAgentStatus ?? null
+    const terminal = this.getTerminalAgentStatusSnapshot(handle, ptyId)
+    return {
+      generation: this.getPtyLifecycleGeneration(ptyId),
+      permissionSequence: this.agentPromptPermissionSequenceByPtyId.get(ptyId) ?? 0,
+      workingSequence: lifecycle?.workingSequence ?? 0,
+      explicitWorkingStartedAt:
+        currentExplicit?.status === 'working' ? currentExplicit.updatedAt : null,
+      outputSequence: this.getPtyOutputSequence(ptyId),
+      status:
+        terminal.titleStatus === 'permission' || status === 'permission' ? 'permission' : status
+    }
+  }
+
+  renewMobileAgentStatusFromPtyTitle(
+    status: AgentStatusEntry | null,
+    pty: RuntimePtyWorktreeRecord | null,
+    options: { preserveQuestionUnderShellTitle?: boolean } = {}
+  ): AgentStatusEntry | null {
+    return renewRuntimeMobileAgentStatusFromPtyTitle(status, pty, options)
   }
 
   private writeTerminalAction(
@@ -12459,12 +12593,33 @@ class OrcaRuntimeService {
     return worktreePath && isWindowsAbsolutePathLike(worktreePath) ? 'win32' : 'linux'
   }
 
+  private getPtyAgent(ptyId: string): TuiAgent | null {
+    const pty = this.ptysById.get(ptyId)
+    return pty?.launchAgent ?? pty?.foregroundAgent ?? null
+  }
+
   private async writeTerminalAgentPrompt(
+    handle: string,
     ptyId: string,
+    generation: number,
     pastePayload: string,
     options: RuntimeTerminalWriteOptions = {}
   ): Promise<void> {
-    const renderGate = this.createClaudeAgentPromptRenderGate(ptyId)
+    if (options.signal?.aborted) {
+      throw new Error('request_aborted')
+    }
+    if (this.getPtyLifecycleGeneration(ptyId) !== generation) {
+      throw new Error('terminal_handle_stale')
+    }
+    const permissionBaseline = this.getAgentPromptActivity(handle, ptyId)
+    if (permissionBaseline.status === 'permission') {
+      throw new Error('agent_prompt_blocked')
+    }
+    const pasteIngestMs = getTerminalPasteIngestMs(
+      this.getPtyWriteHostPlatform(ptyId),
+      Buffer.byteLength(pastePayload, 'utf8')
+    )
+    const renderGate = this.createAgentPromptRenderGate(ptyId, pasteIngestMs)
     let wrotePasteBytes = false
     let completedPaste = false
     try {
@@ -12472,7 +12627,26 @@ class OrcaRuntimeService {
       let chunk = chunks.next()
       while (!chunk.done) {
         const nextChunk = chunks.next()
+        if (options.signal?.aborted) {
+          throw new Error('request_aborted')
+        }
+        if (this.getPtyLifecycleGeneration(ptyId) !== generation) {
+          throw new Error('terminal_handle_stale')
+        }
         await options.beforeWrite?.(ptyId)
+        if (options.signal?.aborted) {
+          throw new Error('request_aborted')
+        }
+        if (this.getPtyLifecycleGeneration(ptyId) !== generation) {
+          throw new Error('terminal_handle_stale')
+        }
+        const activity = this.getAgentPromptActivity(handle, ptyId)
+        if (
+          activity.status === 'permission' ||
+          activity.permissionSequence > permissionBaseline.permissionSequence
+        ) {
+          throw new Error('agent_prompt_blocked')
+        }
         if (nextChunk.done) {
           renderGate?.arm()
         }
@@ -12482,12 +12656,16 @@ class OrcaRuntimeService {
         wrotePasteBytes = true
         chunk = nextChunk
         if (!chunk.done) {
-          await yieldBetweenTerminalInputChunks()
+          await yieldToEventLoop()
         }
       }
       completedPaste = true
     } catch (error) {
-      if (wrotePasteBytes && !completedPaste) {
+      if (
+        wrotePasteBytes &&
+        !completedPaste &&
+        this.getPtyLifecycleGeneration(ptyId) === generation
+      ) {
         this.ptyController?.write(ptyId, AGENT_PROMPT_BRACKETED_PASTE_END)
       }
       renderGate?.dispose()
@@ -12495,10 +12673,34 @@ class OrcaRuntimeService {
     }
 
     if (renderGate) {
-      await renderGate.wait()
-      renderGate.dispose()
+      try {
+        await renderGate.wait()
+      } finally {
+        renderGate.dispose()
+      }
     } else {
-      await new Promise((resolve) => setTimeout(resolve, AGENT_PROMPT_SUBMIT_DELAY_MS))
+      await new Promise((resolve) =>
+        setTimeout(
+          resolve,
+          getAgentPromptSubmitDelayMs(
+            this.getPtyWriteHostPlatform(ptyId),
+            Buffer.byteLength(pastePayload, 'utf8')
+          )
+        )
+      )
+    }
+    if (options.signal?.aborted) {
+      throw new Error('request_aborted')
+    }
+    if (this.getPtyLifecycleGeneration(ptyId) !== generation) {
+      throw new Error('terminal_handle_stale')
+    }
+    const activity = this.getAgentPromptActivity(handle, ptyId)
+    if (
+      activity.status === 'permission' ||
+      activity.permissionSequence > permissionBaseline.permissionSequence
+    ) {
+      throw new Error('agent_prompt_blocked')
     }
     try {
       await options.beforeWrite?.(ptyId)
@@ -12511,15 +12713,24 @@ class OrcaRuntimeService {
     if (!this.ptyController?.write(ptyId, AGENT_PROMPT_SUBMIT)) {
       throw new Error(options.suffixFailureError ?? 'terminal_not_writable')
     }
+    await verifyAgentPromptSubmission({
+      baseline: activity,
+      readActivity: () => this.getAgentPromptActivity(handle, ptyId),
+      timeoutMs: resolveAgentPromptEffectTimeoutMs(this.getPtyAgent(ptyId)),
+      signal: options.signal
+    })
   }
 
-  private createClaudeAgentPromptRenderGate(ptyId: string): {
+  private createAgentPromptRenderGate(
+    ptyId: string,
+    pasteIngestMs: number
+  ): {
     arm: () => void
     wait: () => Promise<void>
     dispose: () => void
   } | null {
     const pty = this.ptysById.get(ptyId)
-    if ((pty?.launchAgent ?? pty?.foregroundAgent) !== 'claude') {
+    if (!['claude', 'codex'].includes(pty?.launchAgent ?? pty?.foregroundAgent ?? '')) {
       return null
     }
     let armed = false
@@ -12571,6 +12782,21 @@ class OrcaRuntimeService {
       }
       quietTimer = setTimeout(finish, CLAUDE_AGENT_PROMPT_RENDER_QUIET_MS)
     }
+    const armIngestTimer = (): void => {
+      if (ingested || ingestTimer) {
+        return
+      }
+      ingestTimer = setTimeout(
+        () => {
+          ingestTimer = null
+          ingested = true
+          if (observedMarker) {
+            armQuietTimer()
+          }
+        },
+        Math.max(0, ingestDeadlineAt - Date.now())
+      )
+    }
     const unsubscribe = this.subscribeToTerminalData(ptyId, (data) => {
       if (!armed || settled) {
         return
@@ -12589,6 +12815,7 @@ class OrcaRuntimeService {
       arm: () => {
         armed = true
         markerCarry = ''
+        armIngestTimer()
       },
       wait: async () => {
         if (settled) {
@@ -13165,6 +13392,18 @@ class OrcaRuntimeService {
 
   private markLocalWorkspaceTrustedForAgent(agent: TuiAgent, workspacePath: string): void {
     markLocalWorktreeTrusted(agent, workspacePath)
+  }
+
+  private async markWorkspaceTrustedForAgent(
+    agent: TuiAgent,
+    connectionId: string | null | undefined,
+    workspacePath: string
+  ): Promise<void> {
+    if (connectionId) {
+      await this.markRemoteWorkspaceTrustedForAgent(agent, connectionId, workspacePath)
+      return
+    }
+    this.markLocalWorkspaceTrustedForAgent(agent, workspacePath)
   }
 
   private async markRemoteWorkspaceTrustedForAgent(
@@ -14980,26 +15219,26 @@ class OrcaRuntimeService {
     // creates the tab and replies with the tabId so we can resolve the handle.
     const reply = await new Promise<{ tabId: string; title: string }>((resolve, reject) => {
       const timer = setTimeout(() => {
-        ipcMain.removeListener('terminal:tabCreateReply', handler)
+        getRuntimeDesktopSurface().removeIpcListener('terminal:tabCreateReply', handler)
         reject(new Error('Terminal creation timed out'))
       }, 10_000)
 
       const handler = (
-        event: Electron.IpcMainEvent,
+        event: IpcMainEvent,
         r: { requestId: string; tabId?: string; title?: string; error?: string }
       ): void => {
         if (event.sender !== win.webContents || r.requestId !== requestId) {
           return
         }
         clearTimeout(timer)
-        ipcMain.removeListener('terminal:tabCreateReply', handler)
+        getRuntimeDesktopSurface().removeIpcListener('terminal:tabCreateReply', handler)
         if (r.error) {
           reject(new Error(r.error))
         } else {
           resolve({ tabId: r.tabId!, title: r.title ?? launchOpts.title ?? '' })
         }
       }
-      ipcMain.on('terminal:tabCreateReply', handler)
+      getRuntimeDesktopSurface().onIpc('terminal:tabCreateReply', handler)
       win.webContents.send('terminal:requestTabCreate', {
         requestId,
         worktreeId,
@@ -15347,7 +15586,7 @@ class OrcaRuntimeService {
       const requestId = randomUUID()
       const reply = await new Promise<{ tabId: string; title: string }>((resolve, reject) => {
         const timer = setTimeout(() => {
-          ipcMain.removeListener('terminal:tabCreateReply', handler)
+          getRuntimeDesktopSurface().removeIpcListener('terminal:tabCreateReply', handler)
           opts.signal?.removeEventListener('abort', onAbort)
           reject(new Error('Terminal creation timed out'))
         }, 10_000)
@@ -15355,19 +15594,19 @@ class OrcaRuntimeService {
         // its shell) stays alive for the host and mirrors on reconnect (#7718).
         const onAbort = (): void => {
           clearTimeout(timer)
-          ipcMain.removeListener('terminal:tabCreateReply', handler)
+          getRuntimeDesktopSurface().removeIpcListener('terminal:tabCreateReply', handler)
           reject(new Error('client_disconnected'))
         }
 
         const handler = (
-          event: Electron.IpcMainEvent,
+          event: IpcMainEvent,
           r: { requestId: string; tabId?: string; title?: string; error?: string }
         ): void => {
           if (event.sender !== win.webContents || r.requestId !== requestId) {
             return
           }
           clearTimeout(timer)
-          ipcMain.removeListener('terminal:tabCreateReply', handler)
+          getRuntimeDesktopSurface().removeIpcListener('terminal:tabCreateReply', handler)
           opts.signal?.removeEventListener('abort', onAbort)
           if (r.error) {
             reject(new Error(r.error))
@@ -15376,7 +15615,7 @@ class OrcaRuntimeService {
           }
         }
         opts.signal?.addEventListener('abort', onAbort, { once: true })
-        ipcMain.on('terminal:tabCreateReply', handler)
+        getRuntimeDesktopSurface().onIpc('terminal:tabCreateReply', handler)
         win.webContents.send('terminal:requestTabCreate', {
           requestId,
           worktreeId,
@@ -18120,6 +18359,14 @@ class OrcaRuntimeService {
     }
   }
 
+  getNestedWorkerMaxDepth(): number {
+    return resolveNestedWorkerMaxDepth({
+      nestedWorkerMaxDepth: (
+        this.store?.getSettings?.() as { nestedWorkerMaxDepth?: number } | undefined
+      )?.nestedWorkerMaxDepth
+    })
+  }
+
   hydrateInferredWorktreeLineage(): Promise<void> {
     return this.worktreeLineage.hydrate()
   }
@@ -18338,7 +18585,7 @@ class OrcaRuntimeService {
     const inFlight = this.worktreeScanInFlight.get(repo.id)
     if (inFlight?.generation === generation && inFlight.runtimeKey === runtimeKey) {
       const refresh = await inFlight.promise
-      if (generation !== (this.worktreeScanGenerations.get(scanScopeKey) ?? 0)) {
+      if (generation !== (this.worktreeScanGenerations.get(repo.id) ?? 0)) {
         return this.listRepoWorktreesForResolution(repo, projectRuntimeByRepoId)
       }
       return refresh.result
@@ -18540,6 +18787,7 @@ class OrcaRuntimeService {
       >
     > = {}
   ): RuntimePtyWorktreeRecord {
+    this.retiredMobileSessionPtyIds.delete(ptyId)
     let pty = this.ptysById.get(ptyId)
     if (!pty) {
       const titleObservedAt = state.title ? this.nextTitleObservationSequence() : null
@@ -19159,7 +19407,18 @@ class OrcaRuntimeService {
   // Keep the notification hook on the runtime as well as on the installed
   // command surface: exit escalation can wake an in-flight --wait directly.
   notifyMessageArrived(handle: string, messageType?: string): void {
+    if (!handle.startsWith('dispatch:')) {
+      this.mailPointerRepointScheduler.schedule(handle)
+    }
     this.orchestrationMailboxNotifications.notifyMessageArrived(handle, messageType)
+  }
+
+  private writeOrchestrationPointerPty(ptyId: string, data: string): boolean | Promise<boolean> {
+    return (
+      this.ptyController?.writeWithSettlement?.(ptyId, data) ??
+      this.ptyController?.write(ptyId, data) ??
+      false
+    )
   }
 
   private getPrimaryLeafForPty(ptyId: string): RuntimeLeafRecord | null {
@@ -19170,10 +19429,7 @@ class OrcaRuntimeService {
     ptyId: string | null,
     worktreeId: string
   ): { executionHostId?: ExecutionHostId } {
-    const fromPtyId = getPtyExecutionHost(ptyId)
-    if (fromPtyId === 'foreign') {
-      return {}
-    }
+    const fromPtyId = ptyId ? this.getPtyExecutionHostMetadata(ptyId).executionHostId : undefined
     const hostId = fromPtyId ?? this.tryGetWorkspaceSessionHostIdForWorktree(worktreeId)
     return hostId ? { executionHostId: hostId } : {}
   }
@@ -19358,6 +19614,7 @@ class OrcaRuntimeService {
       this.nativeChatDraftResolutions.reconcile(snapshot)
       const launchDraftFencedSnapshot = this.nativeChatDraftResolutions.applyFence(snapshot)
       const fencedSnapshot = this.applyMobileSessionRetirementFences(launchDraftFencedSnapshot)
+      this.releaseRuntimeSessionOwnershipForRendererRetiredTabs(fencedSnapshot, existing)
       const nextSnapshot = this.mergePreservedHeadlessMobileSessionTabs(fencedSnapshot, existing)
       // Why: clients drop same-epoch frames whose version isn't strictly newer,
       // and main-local touches may already have emitted a higher version than
@@ -19466,6 +19723,62 @@ class OrcaRuntimeService {
     }
   }
 
+  private releaseRuntimeSessionOwnershipForRendererRetiredTabs(
+    incoming: RuntimeMobileSessionTabsSnapshot,
+    existing: RuntimeMobileSessionTabsSnapshot | undefined
+  ): void {
+    if (!existing || this.isHeadlessBuiltMobileSessionPublicationBase(existing.publicationEpoch)) {
+      return
+    }
+    const session = this.getWorkspaceSessionForWorktree(existing.worktree)
+    const persistedTabs = session?.tabsByWorktree?.[existing.worktree]
+    if (!session || !persistedTabs) {
+      return
+    }
+    const persistedTabsById = new Map(persistedTabs.map((tab) => [tab.id, tab]))
+    const incomingIds = new Set(
+      incoming.tabs.flatMap((tab) => getMobileSessionSnapshotTabIdentityKeys(tab))
+    )
+    for (const tab of existing.tabs) {
+      if (
+        tab.type !== 'terminal' ||
+        this.pendingMobileTerminalCreatesByKey.has(`${existing.worktree}::${tab.parentTabId}`) ||
+        getMobileSessionSnapshotTabIdentityKeys(tab).some((id) => incomingIds.has(id))
+      ) {
+        continue
+      }
+      if (!this.hasLiveRuntimeSessionOwnedPtyBinding(existing.worktree, tab)) {
+        continue
+      }
+      const persistedParent = persistedTabsById.get(tab.parentTabId)
+      if (!persistedParent) {
+        continue
+      }
+      const layout = session.terminalLayoutsByTabId?.[tab.parentTabId]
+      const boundPtyIds = [tab.ptyId, tab.parentLayout?.ptyIdsByLeafId?.[tab.leafId]].filter(
+        (id): id is string => typeof id === 'string'
+      )
+      const persistedIds = new Set(
+        [persistedParent.ptyId, ...Object.values(layout?.ptyIdsByLeafId ?? {})].filter(
+          (id): id is string => typeof id === 'string'
+        )
+      )
+      if (
+        layout &&
+        !layout.ptyIdsByLeafId?.[tab.leafId] &&
+        !boundPtyIds.some((id) => persistedIds.has(id))
+      ) {
+        for (const ptyId of boundPtyIds) {
+          const pty = this.ptysById.get(ptyId)
+          if (pty?.worktreeId === existing.worktree && pty.tabId === tab.parentTabId) {
+            pty.runtimeSessionOwned = false
+            this.setPairedRendererSessionOwnership(ptyId, false)
+          }
+        }
+      }
+    }
+  }
+
   private buildPreservedHeadlessMobileSessionSnapshot(
     existing: RuntimeMobileSessionTabsSnapshot
   ): RuntimeMobileSessionTabsSnapshot | null {
@@ -19566,39 +19879,6 @@ class OrcaRuntimeService {
     }
     if (this.pendingMobileTerminalCreatesByKey.has(`${snapshot.worktree}::${tab.parentTabId}`)) {
       return true
-    }
-    const persistedSession = this.store?.getWorkspaceSession?.(
-      this.getWorkspaceSessionHostIdForWorktree(snapshot.worktree)
-    )
-    if (persistedSession) {
-      const persistedParent = (persistedSession.tabsByWorktree?.[snapshot.worktree] ?? []).find(
-        (candidate) => candidate.id === tab.parentTabId
-      )
-      const candidatePtyIds = [tab.ptyId, tab.parentLayout?.ptyIdsByLeafId?.[tab.leafId]].filter(
-        (ptyId): ptyId is string => typeof ptyId === 'string'
-      )
-      const persistedPtyIds = new Set(
-        persistedParent
-          ? [
-              persistedParent.ptyId,
-              ...Object.values(
-                persistedSession.terminalLayoutsByTabId?.[tab.parentTabId]?.ptyIdsByLeafId ?? {}
-              )
-            ].filter((ptyId): ptyId is string => typeof ptyId === 'string')
-          : []
-      )
-      if (!persistedParent || candidatePtyIds.some((ptyId) => !persistedPtyIds.has(ptyId))) {
-        for (const ptyId of candidatePtyIds) {
-          if (!persistedPtyIds.has(ptyId)) {
-            const pty = this.ptysById.get(ptyId)
-            if (pty) {
-              pty.runtimeSessionOwned = false
-              this.setPairedRendererSessionOwnership(ptyId, false)
-            }
-          }
-        }
-        return false
-      }
     }
     // Why: a merged renderer snapshot carries BOTH renderer-owned and
     // runtime-owned tabs, so the epoch alone must not preserve every terminal —
@@ -20046,7 +20326,7 @@ class OrcaRuntimeService {
     return copySleepingAgentLaunchConfig(pty.launchConfig)
   }
 
-  private getTerminalHandleForPaneKey(paneKey: string): string | null {
+  getTerminalHandleForPaneKey(paneKey: string): string | null {
     const parsed = parsePaneKey(paneKey)
     const leaf = parsed ? this.leaves.get(this.getLeafKey(parsed.tabId, parsed.leafId)) : undefined
     if (leaf?.ptyId && leaf.connected) {
@@ -20178,9 +20458,31 @@ class OrcaRuntimeService {
   }
 
   private scheduleRestoredMessageRepoints(): void {
-    const handles = this._orchestrationDb?.getUndeliveredUnreadMailboxHandles?.() ?? []
+    let handles: string[]
+    try {
+      handles = this._orchestrationDb?.getUndeliveredUnreadMailboxHandles?.() ?? []
+    } catch (error) {
+      console.warn('[orchestration] failed to scan restored mailboxes', error)
+      return
+    }
     for (const handle of handles) {
-      if (!handle.startsWith('dispatch:')) {
+      try {
+        if (handle.startsWith('dispatch:')) {
+          continue
+        }
+        if (handle.startsWith('run:')) {
+          this.mailPointerRepointScheduler.schedule(handle)
+          continue
+        }
+        const routed = this.orchestrationMailboxOwner.routeDetachedDirectMessages(handle)
+        for (const mailbox of routed.mailboxes) {
+          this.mailPointerRepointScheduler.schedule(mailbox.mailboxHandle)
+        }
+        if (!routed.hasMore) {
+          this.mailPointerRepointScheduler.schedule(handle)
+        }
+      } catch (error) {
+        console.warn(`[orchestration] failed to restore mailbox ${handle}`, error)
         this.mailPointerRepointScheduler.schedule(handle)
       }
     }
@@ -20669,30 +20971,6 @@ class OrcaRuntimeService {
     }
   }
 
-  // Why: a dead session's Enter or watermark must not affect a same-id cold restore.
-  private retirePendingMessageDeliveryForPty(ptyId: string): void {
-    const flight = this.messageDeliveryFlightsByPtyId.get(ptyId)
-    if (flight?.enterTimer != null) {
-      clearTimeout(flight.enterTimer)
-    }
-    this.messageDeliveryFlightsByPtyId.delete(ptyId)
-    this.parkedMessageRedeliveriesByPtyId.delete(ptyId)
-    for (const leaf of this.getLeavesForPty(ptyId)) {
-      const handle = this.handleByLeafKey.get(this.getLeafKey(leaf.tabId, leaf.leafId))
-      if (handle) {
-        this.lastPointedMessageSequenceByHandle.delete(handle)
-        this.pointedMessageIdsByHandle.delete(handle)
-        this.mailPointerRepointScheduler.schedule(handle)
-      }
-      const run = this._orchestrationDb?.getCurrentRunForPane?.(`${leaf.tabId}:${leaf.leafId}`)
-      if (run) {
-        this.lastPointedMessageSequenceByHandle.delete(`run:${run.id}`)
-        this.pointedMessageIdsByHandle.delete(`run:${run.id}`)
-        this.mailPointerRepointScheduler.schedule(`run:${run.id}`)
-      }
-    }
-  }
-
   // Why: normal delivery stays event-driven; the bounded mailbox retry only repairs missed liveness edges.
   private deliverPendingMessages(
     leaf: RuntimeLeafRecord,
@@ -20918,10 +21196,7 @@ class OrcaRuntimeService {
     if (this.authoritativeWindowId === null) {
       return null
     }
-    if (!BrowserWindow?.fromId) {
-      return null
-    }
-    const win = BrowserWindow.fromId(this.authoritativeWindowId)
+    const win = getRuntimeDesktopSurface().findWindowById(this.authoritativeWindowId)
     return win && !win.isDestroyed() ? win : null
   }
 }
