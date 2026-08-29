@@ -83,7 +83,7 @@ function describe(
     case 'endpoint_missing':
       return `Orca published the ${noun} ${endpoint}, but it does not exist for this process. Either the runtime shut its endpoint down, or this process cannot see it — a sandbox, container, or different user session each hide it this way. Run the CLI as the same user and outside any sandbox, or restart Orca.`
     case 'endpoint_permission_denied':
-      return `The ${noun} ${endpoint} exists but this process is not permitted to open it. Run the CLI as the same user that runs Orca, outside any sandbox that restricts ${noun} access.`
+      return `The OS denied this process access to the ${noun} ${endpoint}. Run the CLI as the same user that runs Orca, outside any sandbox that restricts ${noun} access.`
     case 'connection_refused':
       return `The ${noun} ${endpoint} refused the connection. Orca's runtime is most likely shutting down; restart Orca.`
     case 'connection_closed':

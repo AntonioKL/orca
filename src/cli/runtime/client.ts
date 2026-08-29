@@ -272,7 +272,7 @@ export class RuntimeClient {
       if (status.result.app.desktopWindowStatus === 'available') {
         return status
       }
-      lastReason = status.result.runtime.unreachableReason
+      lastReason = status.result.runtime.unreachableReason ?? lastReason
       await delay(250)
     }
 

@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer, type Socket } from 'node:net'
@@ -322,6 +322,22 @@ describe.skipIf(process.platform === 'win32')('RuntimeClient', () => {
   it('openOrca reports why the runtime was unreachable instead of a bare timeout', async () => {
     const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-client-'))
     writeMetadata(userDataPath, join(userDataPath, 'never-listened.sock'), 'token', process.pid)
+
+    const client = new RuntimeClient(userDataPath, 100)
+
+    await expect(client.openOrca(100)).rejects.toMatchObject({
+      code: 'runtime_open_timeout',
+      message: expect.stringContaining('never-listened.sock'),
+      data: { unreachableReason: { code: 'endpoint_missing' } }
+    })
+  })
+
+  it('openOrca keeps the last unreachable reason when later polls have no metadata', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-client-'))
+    writeMetadata(userDataPath, join(userDataPath, 'never-listened.sock'), 'token', process.pid)
+    vi.mocked(launchOrcaApp).mockImplementationOnce(() => {
+      rmSync(join(userDataPath, 'orca-runtime.json'))
+    })
 
     const client = new RuntimeClient(userDataPath, 100)
 

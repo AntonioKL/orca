@@ -92,6 +92,13 @@ describe('classifyLocalRuntimeUnreachable', () => {
     )
   })
 
+  it('does not claim a permission-denied endpoint exists', () => {
+    const reason = classifyLocalRuntimeUnreachable(connectError('EACCES'), PIPE, 1000)
+
+    expect(reason.message).not.toMatch(/\bexists\b/i)
+    expect(reason.message).toContain('OS denied')
+  })
+
   // The reported Windows 10 incident: the app process is alive, the pipe is not
   // openable from this process. The guidance must name the isolation possibilities
   // rather than telling the user to keep waiting.
