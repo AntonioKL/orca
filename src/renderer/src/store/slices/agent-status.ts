@@ -597,13 +597,16 @@ function normalizePaneKeySet(
 /** Carry the agent's reported directory forward only while the pane is still running the
  *  SAME provider session. A pane that starts a new session may have been started somewhere
  *  else, and inheriting the old directory would be a guess wearing an observation's clothes.
- *  Returning undefined means unknown — callers must never read that as "the worktree". */
+ *  This takes positive proof of continuity, not the absence of a detected change: a new
+ *  session opened in a finished pane has no comparable id to change, so "not changed" is
+ *  silence, not sameness. Returning undefined means unknown — callers must never read that
+ *  as "the worktree". */
 function carryForwardAgentCwd(args: {
   reported: string | undefined
-  providerSessionChanged: boolean
+  sameProviderSession: boolean
   previous: string | undefined
 }): string | undefined {
-  return args.reported ?? (args.providerSessionChanged ? undefined : args.previous)
+  return args.reported ?? (args.sameProviderSession ? args.previous : undefined)
 }
 
 function sleepingRecordFromEntry(args: {
@@ -909,6 +912,7 @@ function sleepingRecordsEquivalentIgnoringCaptureTime(
     existing.terminalTitle === next.terminalTitle &&
     existing.lastAssistantMessage === next.lastAssistantMessage &&
     existing.interrupted === next.interrupted &&
+    existing.agentCwd === next.agentCwd &&
     existing.origin === next.origin &&
     launchConfigsEqual(existing.launchConfig, next.launchConfig)
   )
@@ -929,6 +933,9 @@ function recoveryRecordMatches(
     existing.tabId === next.tabId &&
     existing.state === next.state &&
     existing.interrupted === next.interrupted &&
+    // Why: a session that only names its directory on a later event must still reach the
+    // record. Treating that as "already matched" keeps a record whose resume has no directory.
+    existing.agentCwd === next.agentCwd &&
     agentProviderSessionsEqual(existing.agent, existing.providerSession, next.providerSession) &&
     launchConfigsEqual(existing.launchConfig, next.launchConfig)
   )
@@ -2359,11 +2366,19 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
           )
             ? existingSleepingRecord.agentCwd
             : undefined
-        const agentCwd = carryForwardAgentCwd({
-          reported: routing?.agentCwd,
-          providerSessionChanged,
-          previous: existing?.agentCwd ?? matchedSleepingAgentCwd
-        })
+        // Why: `providerSessionChanged` cannot see a session swap in a completed pane — the
+        // finished session is not reusable, so there is nothing to compare the new id against.
+        // Only an id that matches the row we are carrying from proves the pane never moved.
+        const existingStatusMatchesProviderSession =
+          existing?.agentType === identity.agentType &&
+          providerSession !== undefined &&
+          agentProviderSessionsEqual(identity.agentType, providerSession, existing.providerSession)
+        const agentCwd =
+          carryForwardAgentCwd({
+            reported: routing?.agentCwd,
+            sameProviderSession: existingStatusMatchesProviderSession,
+            previous: existing?.agentCwd
+          }) ?? matchedSleepingAgentCwd
         const entry: AgentStatusEntry = {
           state: payload.state,
           workingMode: payload.workingMode,

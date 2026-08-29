@@ -2,10 +2,15 @@ import { hasUnsafeProviderSessionIdChars } from './agent-session-resume'
 
 const AGENT_WORKING_DIRECTORY_MAX_LENGTH = 4096
 
+/** `\\server\share` at minimum: a bare `\\`, a server with no share, and the device
+ *  namespaces `\\.\` / `\\?\` are not directories anything can start in, so a leading
+ *  `\\` on its own is not enough to call a value absolute. */
+const UNC_SHARE_PATTERN = /^\\\\[^\\/.?][^\\/]*\\[^\\/]+/
+
 /** POSIX root, Windows drive root, or UNC share. A relative path is meaningless
  *  without the process that emitted it, so it can only read as unknown. */
 function isAbsoluteAgentWorkingDirectory(value: string): boolean {
-  return value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\')
+  return value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value) || UNC_SHARE_PATTERN.test(value)
 }
 
 /** The directory the agent process itself reports it is rooted in, on the host that

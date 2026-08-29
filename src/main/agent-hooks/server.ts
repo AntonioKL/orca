@@ -2268,6 +2268,10 @@ export class AgentHookServer {
       (previous.payload.state !== 'done' || event.payload.state === 'done')
         ? previous.providerSession
         : undefined
+    // Why: the directory belongs to the session, and OSC carries neither — so it is no evidence
+    // the agent moved. Keep it exactly while the session is kept; a row that starts a new session
+    // gets no directory at all, because unknown is the only honest answer there (STA-5804).
+    const preservedAgentCwd = preservedProviderSession ? previous?.agentCwd : undefined
     // Why: OSC status is a runtime observation, not a prompt boundary; keep prompt-sent telemetry tied to native hooks.
     this.applyNormalizedStatus(
       {
@@ -2276,6 +2280,7 @@ export class AgentHookServer {
         worktreeId,
         connectionId,
         ...(preservedProviderSession ? { providerSession: preservedProviderSession } : {}),
+        ...(preservedAgentCwd ? { agentCwd: preservedAgentCwd } : {}),
         payload: event.payload
       },
       undefined,

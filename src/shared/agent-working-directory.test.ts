@@ -33,6 +33,27 @@ describe('agent working directory', () => {
     expect(normalizeAgentWorkingDirectory('/repo/wt\u0007')).toBeUndefined()
   })
 
+  it('rejects a UNC prefix with no server or no share', () => {
+    // `\\\\host` names a machine, not a directory on it; nothing can start there.
+    expect(normalizeAgentWorkingDirectory('\\\\')).toBeUndefined()
+    expect(normalizeAgentWorkingDirectory('\\\\host')).toBeUndefined()
+    expect(normalizeAgentWorkingDirectory('\\\\host\\')).toBeUndefined()
+    expect(normalizeAgentWorkingDirectory('\\\\\\\\')).toBeUndefined()
+  })
+
+  it('rejects the Windows device namespace, which is not a share', () => {
+    expect(normalizeAgentWorkingDirectory('\\\\.\\pipe\\orca')).toBeUndefined()
+    expect(normalizeAgentWorkingDirectory('\\\\?\\C:\\repo\\wt')).toBeUndefined()
+    expect(normalizeAgentWorkingDirectory('\\\\?\\UNC\\host\\share')).toBeUndefined()
+  })
+
+  it('still accepts a real share, including one on an IPv4 host', () => {
+    expect(normalizeAgentWorkingDirectory('\\\\host\\share')).toBe('\\\\host\\share')
+    expect(normalizeAgentWorkingDirectory('\\\\10.0.0.4\\share\\wt')).toBe(
+      '\\\\10.0.0.4\\share\\wt'
+    )
+  })
+
   it('reports unknown rather than a value for a payload with no directory', () => {
     expect(extractAgentWorkingDirectory({ session_id: 'abc' })).toBeUndefined()
     expect(normalizeAgentWorkingDirectory(undefined)).toBeUndefined()
