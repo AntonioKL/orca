@@ -21,6 +21,7 @@ import {
   WORKSPACE_CLEANUP_ENRICHMENT_CONCURRENCY
 } from './workspace-cleanup-candidate-enrichment'
 import { scanWorkspaceCleanup } from './workspace-cleanup-scan-lifecycle'
+import type { WorkspaceCleanupRowReads } from './workspace-cleanup-row-recency'
 import {
   removeWorkspaceCleanupCandidates,
   type WorkspaceCleanupFailure,
@@ -45,6 +46,8 @@ export type WorkspaceCleanupSlice = {
   workspaceCleanupError: string | null
   workspaceCleanupDismissals: Record<string, WorkspaceCleanupDismissal>
   workspaceCleanupViewedCandidates: Record<string, WorkspaceCleanupViewedCandidate>
+  /** When each listed row was read. See workspace-cleanup-row-recency.ts. */
+  workspaceCleanupRowReadAt: WorkspaceCleanupRowReads
   scanWorkspaceCleanup: (args?: WorkspaceCleanupScanArgs) => Promise<WorkspaceCleanupScanResult>
   hydrateWorkspaceCleanupFromCache: () => Promise<boolean>
   markWorkspaceCleanupCandidateViewed: (candidate: WorkspaceCleanupCandidate) => void
@@ -71,6 +74,7 @@ export const createWorkspaceCleanupSlice: StateCreator<AppState, [], [], Workspa
   workspaceCleanupError: null,
   workspaceCleanupDismissals: {},
   workspaceCleanupViewedCandidates: {},
+  workspaceCleanupRowReadAt: {},
   scanWorkspaceCleanup: (args) => scanWorkspaceCleanup(get, set, args),
   hydrateWorkspaceCleanupFromCache: () =>
     hydrateWorkspaceCleanupScanFromCache({

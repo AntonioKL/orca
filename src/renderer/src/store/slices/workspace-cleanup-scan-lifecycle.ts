@@ -22,6 +22,10 @@ import {
   finalizeWorkspaceCleanupScan,
   isLatestWorkspaceCleanupScan
 } from './workspace-cleanup-scan-progress'
+import {
+  preserveNewerWorkspaceCleanupRows,
+  pruneWorkspaceCleanupRowReads
+} from './workspace-cleanup-row-recency'
 
 type SetState = (
   partial: Partial<AppState> | ((state: AppState) => Partial<AppState>),
@@ -97,10 +101,24 @@ export async function scanWorkspaceCleanup(
         scanToken
       )
       throwIfWorkspaceCleanupScanSuperseded(scanArgs.scanId)
-      const result = { ...scan, candidates: enriched }
+      let result = { ...scan, candidates: enriched }
       if (isLatestWorkspaceCleanupScan(scanToken)) {
         finalizeWorkspaceCleanupScan(scanToken)
+        // A whole-list replacement must still lose to a row read after this scan
+        // started -- a refusal published mid-flight is newer than everything here.
+        const state = get()
+        const candidates = preserveNewerWorkspaceCleanupRows(
+          result.candidates,
+          result.scannedAt,
+          state.workspaceCleanupScan?.candidates ?? [],
+          state.workspaceCleanupRowReadAt
+        )
+        result = { ...result, candidates }
         set({
+          workspaceCleanupRowReadAt: pruneWorkspaceCleanupRowReads(
+            state.workspaceCleanupRowReadAt,
+            candidates
+          ),
           workspaceCleanupScan: result,
           workspaceCleanupProgress: {
             scanId: get().workspaceCleanupProgress?.scanId ?? scanArgs.scanId,

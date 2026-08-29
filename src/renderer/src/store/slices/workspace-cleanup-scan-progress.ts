@@ -10,6 +10,7 @@ import {
   enrichWorkspaceCleanupCandidatesWithCache,
   type WorkspaceCleanupEnrichmentCacheEntry
 } from './workspace-cleanup-candidate-enrichment'
+import { preserveNewerWorkspaceCleanupRows } from './workspace-cleanup-row-recency'
 
 let latestWorkspaceCleanupScanToken = 0
 let finalizedWorkspaceCleanupScanToken = 0
@@ -158,16 +159,23 @@ async function applyWorkspaceCleanupProgress(
         : candidates.map((candidate) =>
             applyWorkspaceCleanupDismissal(candidate, state.workspaceCleanupDismissals)
           )
+    // Same rule as the settle: a streamed row must not bury a read taken after it.
+    const recentCandidates = preserveNewerWorkspaceCleanupRows(
+      finalCandidates,
+      progress.scannedAt,
+      state.workspaceCleanupScan?.candidates ?? [],
+      state.workspaceCleanupRowReadAt
+    )
     return {
       workspaceCleanupScan: {
         // Why: mid-refresh the list still mixes in rows from the previous
         // snapshot; the honest "as of" time stays the snapshot's until the new
         // scan settles and removes vanished rows.
         scannedAt: state.workspaceCleanupScan?.scannedAt ?? progress.scannedAt,
-        candidates: finalCandidates,
+        candidates: recentCandidates,
         errors: progress.errors
       },
-      workspaceCleanupProgress: { ...progress, candidates: finalCandidates }
+      workspaceCleanupProgress: { ...progress, candidates: recentCandidates }
     }
   })
 }

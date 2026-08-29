@@ -20,6 +20,10 @@ import {
   applyWorkspaceCleanupDismissal,
   enrichWorkspaceCleanupCandidates
 } from './workspace-cleanup-candidate-enrichment'
+import {
+  pruneWorkspaceCleanupRowReads,
+  recordWorkspaceCleanupRowReads
+} from './workspace-cleanup-row-recency'
 import { invalidateWorkspaceCleanupScanProgress } from './workspace-cleanup-scan-progress'
 
 export type WorkspaceCleanupFailure = {
@@ -238,23 +242,23 @@ export async function removeWorkspaceCleanupCandidates(
  * read of that workspace, and consent is only ever spent on a verdict the user
  * has actually seen.**
  *
- * The two halves are enforced in different places, and keeping them apart is
- * what stops this from growing another special case:
+ * *Recency* is a property of a ROW, not of the list it sits in. Four rounds of
+ * this bug were spent trying to decide it from `scannedAt`, and it cannot be:
+ * `scannedAt` dates a whole scan, so the moment a republish puts a newer row
+ * into an older list the two disagree — the list keeps reporting the older read
+ * while showing the newer row. A targeted rescan is dated by its stalest chunk
+ * on top of that, so it is not even measured on the same basis as a broad scan's
+ * single stamp. So the read time travels with the row, in
+ * `workspaceCleanupRowReadAt`, and every writer that replaces rows honours it:
+ * this republish, the broad scan's settle, and each of its progress ticks. That
+ * last pair is why the rule could not live here alone — a refresh issued before
+ * the confirmation used to land after the refusal and erase the blocker, and no
+ * comparison made in this function could have stopped it.
  *
- * - *Recency* is decided here, and only here. A stopped removal read its verdict
- *   off a rescan the list never saw; leaving it unpublished means the row still
- *   shows the picture that was already refused, so the obvious next move —
- *   confirm it again — re-runs the identical stop. Publishing it over a read
- *   that is genuinely newer is the same mistake pointed the other way. So the
- *   newer read wins, measured by `scannedAt`, the time the scan itself reports.
- *   Which object happens to be sitting in the list says nothing about this: a
- *   refresh issued after the rescan and a broad refresh that started minutes
- *   before the confirmation both replace the row, and only one of them is newer.
- *
- * - *Consent* is not decided here at all. The delete is authorized against
- *   `approvedCandidate`, captured when the user confirmed and never read from
- *   the list, so publishing can only ever disclose — it cannot re-authorize a
- *   stale confirmation no matter which row it writes.
+ * *Consent* is not decided here at all. The delete is authorized against
+ * `approvedCandidate`, captured when the user confirmed and never read from
+ * the list, so publishing can only ever disclose — it cannot re-authorize a
+ * stale confirmation no matter which row it writes.
  *
  * The one limit publishing does carry is provenance, and it is structural: this
  * walks the rows the list already holds, so it can neither resurrect a workspace
@@ -300,7 +304,23 @@ function publishRefreshedWorkspaceCleanupCandidates(
       // removable; the published row must not lose the mark that hides it.
       return [applyWorkspaceCleanupDismissal(next, state.workspaceCleanupDismissals)]
     })
-    return changed ? { workspaceCleanupScan: { ...scan, candidates } } : {}
+    if (!changed) {
+      return {}
+    }
+    // Stamp what was just published with the read it came from: the scan's own
+    // `scannedAt` describes the older read these rows now sit beside.
+    return {
+      workspaceCleanupScan: { ...scan, candidates },
+      workspaceCleanupRowReadAt: pruneWorkspaceCleanupRowReads(
+        recordWorkspaceCleanupRowReads(
+          state.workspaceCleanupRowReadAt,
+          refreshed,
+          rescannedAt,
+          retiredIdentities
+        ),
+        candidates
+      )
+    }
   })
 }
 
