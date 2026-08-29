@@ -13,6 +13,11 @@ import {
 
 export const WORKING_TREE = 'working-tree' as const
 
+/** Each build owns its own copy of the module-level host slot, so a host installed
+ *  in current source is invisible to a release checkout's dispatcher. */
+const STRUCTURED_HOST_REGISTRY =
+  '/src/main/native-chat/agent-session-wire/structured-agent-session-registry.ts'
+
 export type RpcReply = {
   id: string
   ok: boolean
@@ -50,6 +55,10 @@ export type AgentSessionWireBuild = {
   /** A dispatcher carrying a method set this build really ships, so an
    *  unknown-method answer is about the method and not an empty registry. */
   createDispatcher: (runtime: unknown) => AgentSessionDispatcher
+  /** Put a host in *this* build's slot. Loaded on call so a release that predates
+   *  the surface stays loadable, and throws rather than no-opping so a build with
+   *  no slot cannot read as a surface that answered. */
+  installStructuredHost: (host: unknown) => Promise<void>
 }
 
 type DispatcherModule = {
@@ -66,6 +75,14 @@ function registeredMethodNames(methods: readonly unknown[]): string[] {
       return typeof name === 'string' ? [name] : []
     })
     .sort()
+}
+
+function applyStructuredHost(module: Record<string, unknown>, label: string, host: unknown): void {
+  const install = module.setStructuredAgentSessionHost
+  if (typeof install !== 'function') {
+    throw new Error(`Build ${label} publishes no structured agent-session host registry`)
+  }
+  ;(install as (next: unknown) => void)(host)
 }
 
 function capabilityStrings(module: Record<string, unknown>): readonly string[] {
@@ -94,7 +111,12 @@ async function loadWorkingTreeBuild(): Promise<AgentSessionWireBuild> {
       new module.RpcDispatcher({
         runtime,
         methods
-      })
+      }),
+    installStructuredHost: async (host) => {
+      const registry =
+        await import('../../../src/main/native-chat/agent-session-wire/structured-agent-session-registry')
+      applyStructuredHost(registry as unknown as Record<string, unknown>, WORKING_TREE, host)
+    }
   }
 }
 
@@ -116,7 +138,14 @@ async function loadReleaseBuild(checkout: ReleaseCheckout): Promise<AgentSession
       new module.RpcDispatcher({
         runtime,
         methods
-      })
+      }),
+    installStructuredHost: async (host) => {
+      applyStructuredHost(
+        await importReleaseCheckoutModule(checkout, STRUCTURED_HOST_REGISTRY),
+        checkout.ref,
+        host
+      )
+    }
   }
 }
 

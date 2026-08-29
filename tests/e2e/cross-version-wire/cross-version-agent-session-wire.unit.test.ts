@@ -36,27 +36,69 @@ const WORKSPACE = 'workspace-1'
 const THREAD = '019fd532-7c11-7a90-b6de-4e1a2c3d5f60'
 const NOW = 1_800_000_000_000
 
-/** Every method the structured surface publishes, paired with the host method it
- *  must reach — a gate that hides one method and leaks another is the bug. */
-const STRUCTURED_CALLS: { method: string; hostMethod: string | null }[] = [
-  { method: 'agentSession.createSupport', hostMethod: null },
-  { method: 'agentSession.create', hostMethod: 'attach' },
-  { method: 'agentSession.ensure', hostMethod: 'attach' },
-  { method: 'agentSession.send', hostMethod: 'send' },
-  { method: 'agentSession.cancel', hostMethod: 'cancel' },
-  { method: 'agentSession.close', hostMethod: 'close' },
-  { method: 'agentSession.respondToApproval', hostMethod: 'respondToPrompt' },
-  { method: 'agentSession.respondToQuestion', hostMethod: 'respondToPrompt' },
-  { method: 'agentSession.setOption', hostMethod: 'setOption' },
-  { method: 'agentSession.handoffStatus', hostMethod: 'handoffStatus' },
-  { method: 'agentSession.options', hostMethod: 'readOptions' },
-  { method: 'agentSession.hold', hostMethod: 'hold' },
-  { method: 'agentSession.release', hostMethod: 'release' },
-  { method: 'agentSession.history', hostMethod: 'history' },
+/** Every method the structured surface publishes: the host method it must reach,
+ *  and the result it must hand back. A gate that hides one method and leaks
+ *  another is the bug; so is a method that is registered and answers with an
+ *  error, which is why `result` is declared per method rather than inferred from
+ *  "did not say method_not_found". `result` is omitted only where the method
+ *  legitimately answers with no reply at all. */
+const STRUCTURED_CALLS: {
+  method: string
+  hostMethod: string | null
+  result?: Record<string, unknown>
+}[] = [
+  { method: 'agentSession.createSupport', hostMethod: null, result: { supported: true } },
+  {
+    method: 'agentSession.create',
+    hostMethod: 'attach',
+    result: { ok: true, replayed: false, value: { sessionId: SESSION } }
+  },
+  {
+    method: 'agentSession.ensure',
+    hostMethod: 'attach',
+    result: { ok: true, replayed: false, value: { sessionId: SESSION } }
+  },
+  { method: 'agentSession.send', hostMethod: 'send', result: { ok: true, replayed: false } },
+  { method: 'agentSession.cancel', hostMethod: 'cancel', result: { ok: true, replayed: false } },
+  { method: 'agentSession.close', hostMethod: 'close', result: { ok: true } },
+  {
+    method: 'agentSession.respondToApproval',
+    hostMethod: 'respondToPrompt',
+    result: { ok: true, replayed: false }
+  },
+  {
+    method: 'agentSession.respondToQuestion',
+    hostMethod: 'respondToPrompt',
+    result: { ok: true, replayed: false }
+  },
+  {
+    method: 'agentSession.setOption',
+    hostMethod: 'setOption',
+    result: { ok: true, replayed: false }
+  },
+  {
+    method: 'agentSession.handoffStatus',
+    hostMethod: 'handoffStatus',
+    result: { owner: 'native' }
+  },
+  {
+    method: 'agentSession.options',
+    hostMethod: 'readOptions',
+    result: { current: { model: 'gpt-live' } }
+  },
+  { method: 'agentSession.hold', hostMethod: 'hold', result: { held: true } },
+  { method: 'agentSession.release', hostMethod: 'release', result: { released: true } },
+  {
+    method: 'agentSession.history',
+    hostMethod: 'history',
+    result: { ok: true, page: { items: [] } }
+  },
+  // A subscription that opens with nothing to say answers with no reply at all,
+  // so reaching the host is the only signal that the gate opened.
   { method: 'agentSession.subscribe', hostMethod: 'subscribe' },
   // Teardown runs through the runtime's subscription registry rather than the
   // host, so its reply is the only signal that the gate opened.
-  { method: 'agentSession.unsubscribe', hostMethod: null }
+  { method: 'agentSession.unsubscribe', hostMethod: null, result: { unsubscribed: true } }
 ]
 
 let baselineRef: string
@@ -237,6 +279,75 @@ async function callBuild(
   return replies
 }
 
+/** The host every skew installs to drive the surface: enough of the real host's
+ *  shape for each handler to run, and a spy per method so "which call reached the
+ *  host" is answerable per call rather than per suite. */
+function structuredHostStub(): Record<string, ReturnType<typeof vi.fn>> {
+  return {
+    attach: vi.fn(async () => ({ ok: true, replayed: false, value: { sessionId: SESSION } })),
+    send: vi.fn(async () => ({ ok: true, replayed: false })),
+    cancel: vi.fn(async () => ({ ok: true, replayed: false })),
+    close: vi.fn(async () => undefined),
+    hold: vi.fn(async () => undefined),
+    release: vi.fn(() => undefined),
+    respondToPrompt: vi.fn(async () => ({ ok: true, replayed: false })),
+    setOption: vi.fn(async () => ({ ok: true, replayed: false })),
+    requestHandoff: vi.fn(async () => ({ status: { owner: 'native' } })),
+    handoffStatus: vi.fn(async () => ({ owner: 'native' })),
+    readOptions: vi.fn(async () => ({ models: [], current: { model: 'gpt-live' } })),
+    history: vi.fn(() => ({ ok: true, page: { items: [] } })),
+    subscribe: vi.fn(() => () => undefined),
+    unsubscribe: vi.fn()
+  }
+}
+
+/**
+ * The one thing this suite exists to guarantee, written once and applied per
+ * build: every method the manifest declares is not merely registered but reaches
+ * its host method on this call, answers, and answers with its declared result.
+ *
+ * Written as a helper rather than inline because a build passing it is the claim,
+ * and each skew that registers the surface owes the same claim — a check that
+ * covers one method leaves the rest registered-but-unusable behind a green suite.
+ */
+async function expectDeclaredSurfaceExecutes(
+  build: AgentSessionWireBuild,
+  hostCalls: Record<string, ReturnType<typeof vi.fn>>,
+  clientCapabilities: readonly string[]
+): Promise<void> {
+  for (const { method, hostMethod, result } of STRUCTURED_CALLS) {
+    // Two methods share one host method, so "has been called" would already be
+    // true from the earlier one: only this call's own delta pins the pairing.
+    const before = hostMethod ? hostCalls[hostMethod].mock.calls.length : 0
+    const replies = await callBuild(build, method, paramsFor(method), {
+      clientKind: 'runtime',
+      clientCapabilities
+    })
+    if (hostMethod) {
+      expect(
+        hostCalls[hostMethod].mock.calls.length - before,
+        `${build.label}: ${method} did not reach the host`
+      ).toBe(1)
+    }
+    for (const reply of replies) {
+      expect(
+        reply,
+        `${build.label}: ${method} was refused: ${JSON.stringify(reply)}`
+      ).toMatchObject({ ok: true })
+    }
+    if (result) {
+      // The declared answer, not merely a non-refusal: a handler that is
+      // registered and returns an execution error, or hands back someone else's
+      // envelope, fails here rather than passing as "reached the host".
+      expect(replies, `${build.label}: ${method} must answer exactly once`).toHaveLength(1)
+      expect(replies[0], `${build.label}: ${method} answered off-contract`).toMatchObject({
+        ok: true,
+        result
+      })
+    }
+  }
+}
+
 describe('cross-version structured agent sessions', () => {
   it(
     'skews current code against a real published release',
@@ -257,22 +368,7 @@ describe('cross-version structured agent sessions', () => {
 
     beforeEach(() => {
       operations = 0
-      hostCalls = {
-        attach: vi.fn(async () => ({ ok: true, replayed: false, value: { sessionId: SESSION } })),
-        send: vi.fn(async () => ({ ok: true, replayed: false })),
-        cancel: vi.fn(async () => ({ ok: true, replayed: false })),
-        close: vi.fn(async () => undefined),
-        hold: vi.fn(async () => undefined),
-        release: vi.fn(() => undefined),
-        respondToPrompt: vi.fn(async () => ({ ok: true, replayed: false })),
-        setOption: vi.fn(async () => ({ ok: true, replayed: false })),
-        requestHandoff: vi.fn(async () => ({ status: { owner: 'native' } })),
-        handoffStatus: vi.fn(async () => ({ owner: 'native' })),
-        readOptions: vi.fn(async () => ({ models: [], current: { model: 'gpt-live' } })),
-        history: vi.fn(() => ({ ok: true, page: { items: [] } })),
-        subscribe: vi.fn(() => () => undefined),
-        unsubscribe: vi.fn()
-      }
+      hostCalls = structuredHostStub()
       setStructuredAgentSessionHost(hostCalls as unknown as StructuredAgentSessionHost)
     })
 
@@ -301,33 +397,10 @@ describe('cross-version structured agent sessions', () => {
     })
 
     it('is served the same calls once it advertises the capability', async () => {
-      for (const { method, hostMethod } of STRUCTURED_CALLS) {
-        // Two methods share one host method, so "has been called" would already be
-        // true from the earlier one: only this call's own delta pins the pairing.
-        const before = hostMethod ? hostCalls[hostMethod].mock.calls.length : 0
-        const replies = await callBuild(current, method, paramsFor(method), {
-          clientKind: 'runtime',
-          clientCapabilities: [
-            ...legacyClientCapabilities(),
-            STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY
-          ]
-        })
-        // A subscription that opens with nothing to say answers with no reply at
-        // all, so reaching the host is the signal that the gate opened.
-        if (hostMethod) {
-          expect(
-            hostCalls[hostMethod].mock.calls.length - before,
-            `${method} did not reach the host`
-          ).toBe(1)
-        } else {
-          expect(replies[0], `${method} was refused`).toMatchObject({ ok: true })
-        }
-        for (const reply of replies) {
-          expect(reply, `${method} was refused: ${JSON.stringify(reply)}`).toMatchObject({
-            ok: true
-          })
-        }
-      }
+      await expectDeclaredSurfaceExecutes(current, hostCalls, [
+        ...legacyClientCapabilities(),
+        STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY
+      ])
     })
   })
 
@@ -378,22 +451,34 @@ describe('cross-version structured agent sessions', () => {
     })
 
     it(
-      'executes methods that a release-shaped checkout actually registers',
+      'executes every method a release-shaped checkout registers',
       async () => {
+        // The stand-in for the release that ships this surface: the same source,
+        // read the way a release checkout reads it rather than through the test
+        // runner's module graph. It is the only place the "registered means
+        // usable" claim is executable today, because the baseline registers none
+        // of these methods — so it has to carry the whole manifest, not a sample.
         const releasedCurrent = await loadAgentSessionWireBuild('HEAD')
         expect(releasedCurrent.capabilities).toContain(STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY)
-        expect(releasedCurrent.methodNames).toContain('agentSession.createSupport')
-        const replies = await callBuild(
-          releasedCurrent,
-          'agentSession.createSupport',
-          paramsFor('agentSession.createSupport'),
-          { clientKind: 'runtime', clientCapabilities: current.capabilities }
-        )
-        expect(replies).toHaveLength(1)
-        // Anything weaker than the runtime's own answer passes a handler that is
-        // registered but unusable, which is the gap this test exists to close:
-        // any refusal other than `method_not_found` would satisfy it.
-        expect(replies[0]).toMatchObject({ ok: true, result: { supported: true } })
+        expect(
+          releasedCurrent.methodNames.filter((name) => name.startsWith('agentSession.'))
+        ).toHaveLength(STRUCTURED_CALLS.length)
+        // Each build owns its own host slot, so the one the suite installed in
+        // current source is not this dispatcher's. Installing here is also the
+        // anti-vacuous guard: without it every host-backed method answers
+        // `structured_agent_session_unsupported`, the same words the capability
+        // gate uses, and the run would read as a refusal rather than a miss.
+        const hostCalls = structuredHostStub()
+        await releasedCurrent.installStructuredHost(hostCalls)
+        try {
+          await expectDeclaredSurfaceExecutes(
+            releasedCurrent,
+            hostCalls,
+            releasedCurrent.capabilities
+          )
+        } finally {
+          await releasedCurrent.installStructuredHost(null)
+        }
       },
       SUITE_TIMEOUT_MS
     )
@@ -566,6 +651,23 @@ describe('cross-version structured agent sessions', () => {
         )[0]
       ).toMatchObject({ ok: false, error: { code: 'agent_session_conflict' } })
       expect(createMobileSessionTerminal).not.toHaveBeenCalled()
+
+      // The positive control for the three refusals above: the same client, the
+      // same method, a command that is not this thread's resume, and it lands.
+      // Without it, a stub whose shape drifted from the runtime would satisfy
+      // "was never called" by never being reachable at all.
+      expect(
+        (
+          await callBuild(
+            current,
+            'session.tabs.createTerminal',
+            { worktree: `id:${WORKSPACE}`, command: 'echo unrelated' },
+            { clientKind: 'runtime', clientCapabilities: legacyClientCapabilities() },
+            runtime
+          )
+        )[0]
+      ).toMatchObject({ ok: true })
+      expect(createMobileSessionTerminal).toHaveBeenCalledTimes(1)
     })
   })
 
