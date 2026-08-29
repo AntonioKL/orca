@@ -88,7 +88,7 @@ index 497afcf535f3eaca00889525a77e15eb633ccd96..96d499b34605f860608382114c3fbdc0
  
  export interface IBrowser {
 diff --git a/src/browser/input/CompositionHelper.ts b/src/browser/input/CompositionHelper.ts
-index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..946a95d3b87d68f0f0324b5d74346d3f3ff3710c 100644
+index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..af918fdac462a77517d9755bea3cb73aed97bfc4 100644
 --- a/src/browser/input/CompositionHelper.ts
 +++ b/src/browser/input/CompositionHelper.ts
 @@ -3,8 +3,9 @@
@@ -933,7 +933,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..946a95d3b87d68f0f0324b5d74346d3f
          this._dataAlreadySent = diff;
  
          if (newValue.length > oldValue.length) {
-@@ -236,6 +831,130 @@ export class CompositionHelper {
+@@ -236,6 +831,133 @@ export class CompositionHelper {
      }, 0);
    }
  
@@ -948,14 +948,14 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..946a95d3b87d68f0f0324b5d74346d3f
 +      this._resetCompositionView();
 +      return;
 +    }
-+    // Keep DOM order LTR; right alignment follows the insertion end for long compositions while
-+    // retaining the caret after the preedit.
++    // Keep DOM order LTR so the insertion caret follows the preedit.
 +    const preeditText = `‎${data}‎`;
 +    this._compositionViewData = data;
 +    const doc = this._compositionView.ownerDocument;
 +    const preedit = doc.createElement('span');
 +    preedit.className = 'xterm-composition-preedit';
 +    // Underlined so the composing text stays distinguishable from the tail it pushed right.
++    preedit.style.flexShrink = '0';
 +    preedit.style.textDecoration = 'underline';
 +    preedit.textContent = preeditText;
 +    const caret = doc.createElement('span');
@@ -1024,6 +1024,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..946a95d3b87d68f0f0324b5d74346d3f
 +    caret.style.backgroundColor =
 +      this._themeService?.colors.cursor.css ?? theme?.cursor ?? theme?.foreground ?? '#FFF';
 +    caret.style.display = 'inline-block';
++    caret.style.flexShrink = '0';
 +    caret.style.height = cellHeight + 'px';
 +    caret.style.marginLeft = -width + 'px';
 +    caret.style.verticalAlign = 'top';
@@ -1037,6 +1038,8 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..946a95d3b87d68f0f0324b5d74346d3f
 +    this._compositionRemainderMasked = false;
 +    this._compositionCaret = undefined;
 +    this._compositionViewData = '';
++    this._compositionView.style.display = '';
++    this._compositionView.style.justifyContent = '';
 +    this._compositionView.style.textAlign = '';
 +  }
 +
@@ -1064,7 +1067,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..946a95d3b87d68f0f0324b5d74346d3f
    /**
     * Positions the composition view on top of the cursor and the textarea just below it (so the
     * IME helper dialog is positioned correctly).
-@@ -243,10 +962,24 @@ export class CompositionHelper {
+@@ -243,10 +965,24 @@ export class CompositionHelper {
     *   necessary as the IME events across browsers are not consistently triggered.
     */
    public updateCompositionElements(dontRecurse?: boolean): void {
@@ -1090,7 +1093,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..946a95d3b87d68f0f0324b5d74346d3f
      if (this._bufferService.buffer.isCursorInViewport) {
        const cursorX = Math.min(this._bufferService.buffer.x, this._bufferService.cols - 1);
  
-@@ -265,10 +998,21 @@ export class CompositionHelper {
+@@ -265,10 +1001,23 @@ export class CompositionHelper {
        const maxWidth = this._bufferService.cols * this._renderService.dimensions.css.cell.width - cursorLeft;
        this._compositionView.style.maxWidth = maxWidth + 'px';
        this._compositionView.style.overflow = 'hidden';
@@ -1098,10 +1101,12 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..946a95d3b87d68f0f0324b5d74346d3f
 -      // Sync the textarea to the exact position of the composition view so the IME knows where the
 -      // text is.
 -      const compositionViewBounds = this._compositionView.getBoundingClientRect();
-+      // Keep DOM order as preedit, caret, tail. At the right edge, right alignment clips the start
-+      // of a long preedit while retaining its insertion caret, matching xterm's former rtl trick.
++      // End-aligned flex keeps an over-wide trailing preedit's caret inside the screen.
++      const hasRemainder = Boolean(this._compositionRemainder);
 +      this._compositionView.style.direction = 'ltr';
-+      this._compositionView.style.textAlign = this._compositionRemainder ? 'left' : 'right';
++      this._compositionView.style.display = hasRemainder ? '' : 'flex';
++      this._compositionView.style.justifyContent = hasRemainder ? '' : 'flex-end';
++      this._compositionView.style.textAlign = hasRemainder ? 'left' : '';
 +      // Themed rather than the stock #000/#FFF, so the pushed tail reads as ordinary terminal text
 +      // and light themes keep contrast.
 +      this._compositionView.style.background = this._opaqueViewBackground();
@@ -1116,7 +1121,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..946a95d3b87d68f0f0324b5d74346d3f
        this._textarea.style.left = cursorLeft + 'px';
        this._textarea.style.top = cursorTop + 'px';
        // Ensure the text area is at least 1x1, otherwise certain IMEs may break
-@@ -278,7 +1022,8 @@ export class CompositionHelper {
+@@ -278,7 +1027,8 @@ export class CompositionHelper {
      }
  
      if (!dontRecurse) {

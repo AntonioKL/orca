@@ -60,13 +60,16 @@ test.describe('Terminal end-of-row Korean preedit cell span', () => {
     const arena = await openTerminalImePaneArena(orcaPage)
     let completed = false
     try {
-      await writeToActiveTerminal(orcaPage, '\x1b[2J\x1b[H\x1b[80G')
+      // CHA clamps past-the-edge columns, keeping this valid when the runner resizes the grid.
+      await writeToActiveTerminal(orcaPage, '\x1b[2J\x1b[H\x1b[999G')
       await setImeComposition(arena.session, '가')
 
       const sample = await sampleOpenComposition(orcaPage)
       const caret = sample.caretRect
       const screenRight = sample.screenRect.left + sample.screenRect.width
-      expect(sample.cursorColumn, 'the cursor is not in the final column').toBe(79)
+      expect(sample.cursorColumn, 'the cursor is not in the final column').toBe(
+        sample.terminalColumns - 1
+      )
       expect(caret, 'the active preedit has no caret element').not.toBeNull()
       expect(caret!.width, 'the preedit caret has zero width').toBeGreaterThan(0)
       expect(caret!.height, 'the preedit caret has zero height').toBeGreaterThan(0)

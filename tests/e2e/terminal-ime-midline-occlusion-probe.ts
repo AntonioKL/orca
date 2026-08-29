@@ -24,6 +24,7 @@ export type MidlinePreeditOcclusionSample = {
   caretRect: { left: number; right: number; width: number; height: number } | null
   overlayActive: boolean
   cursorColumn: number
+  terminalColumns: number
   /** Columns covered by the overlay, as `[first, last]`; null when it covers none. */
   coveredColumns: [number, number] | null
   cellWidth: number
@@ -107,6 +108,7 @@ function readMidlinePreeditOcclusion(): MidlinePreeditOcclusionSample {
       : null,
     overlayActive: view.classList.contains('active'),
     cursorColumn,
+    terminalColumns: terminal.cols,
     coveredColumns: first === null ? null : [first, last],
     cellWidth,
     overlayRect: {

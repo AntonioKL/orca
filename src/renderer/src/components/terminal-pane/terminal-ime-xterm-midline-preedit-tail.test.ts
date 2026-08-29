@@ -183,6 +183,9 @@ describe('mid-line composition renders the covered row tail after the preedit', 
     expect(remainder!.textContent).toBe('하세요')
     // Start-anchored so the preedit stays put and the pushed tail clips at the right edge.
     expect(rig.compositionView.style.direction).toBe('ltr')
+    expect(rig.compositionView.style.display).toBe('')
+    expect(rig.compositionView.style.justifyContent).toBe('')
+    expect(rig.compositionView.style.textAlign).toBe('left')
   })
 
   it('keeps the tail current as the preedit grows through the composition', async () => {
@@ -231,7 +234,9 @@ describe('mid-line composition renders the covered row tail after the preedit', 
     expect(Array.from(rig.compositionView.children)).toEqual([preedit, caret])
     expect(remainder).toBeNull()
     expect(stripMarks(rig.compositionView.textContent)).toBe('가')
-    expect(rig.compositionView.style.textAlign).toBe('right')
+    expect(rig.compositionView.style.display).toBe('flex')
+    expect(rig.compositionView.style.justifyContent).toBe('flex-end')
+    expect(rig.compositionView.style.textAlign).toBe('')
   })
 
   it('keeps the themed insertion caret visible inside the final cell', async () => {
@@ -244,7 +249,10 @@ describe('mid-line composition renders the covered row tail after the preedit', 
     expect(rig.terminal.buffer.active.cursorX).toBe(79)
     expect(Array.from(rig.compositionView.children)).toEqual([preedit, caret])
     expect(rig.compositionView.style.maxWidth).toBe(`${CELL_WIDTH_PX}px`)
-    expect(rig.compositionView.style.textAlign).toBe('right')
+    expect(rig.compositionView.style.display).toBe('flex')
+    expect(rig.compositionView.style.justifyContent).toBe('flex-end')
+    expect(preedit!.style.flexShrink).toBe('0')
+    expect(caret!.style.flexShrink).toBe('0')
     expect(caret!.style.width).toBe('2px')
     expect(caret!.style.marginLeft).toBe('-2px')
     expect([THEME.cursor, 'rgb(68, 85, 102)']).toContain(caret!.style.backgroundColor)
@@ -276,6 +284,8 @@ describe('mid-line composition renders the covered row tail after the preedit', 
     )
     expect(rig.compositionView.classList.contains('active')).toBe(false)
     expect(rig.compositionView.children).toHaveLength(0)
+    expect(rig.compositionView.style.display).toBe('')
+    expect(rig.compositionView.style.justifyContent).toBe('')
 
     rig.composeUpdate('글')
     expect(rig.compositionView.classList.contains('active')).toBe(true)
@@ -283,6 +293,8 @@ describe('mid-line composition renders the covered row tail after the preedit', 
     rig.composeUpdate('')
     expect(rig.compositionView.classList.contains('active')).toBe(false)
     expect(rig.compositionView.children).toHaveLength(0)
+    expect(rig.compositionView.style.display).toBe('')
+    expect(rig.compositionView.style.justifyContent).toBe('')
   })
 
   it('masks a dim Codex placeholder instead of repeating it after the preedit', async () => {
