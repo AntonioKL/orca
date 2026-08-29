@@ -61,7 +61,7 @@ export const ssh2Mock = {
   presentedHostKey: undefined as Buffer | undefined,
   /** What the verifier decided about the presented key on the most recent connect. */
   lastHostKeyAccepted: undefined as boolean | undefined,
-  connectBehavior: 'ready' as 'ready' | 'error',
+  connectBehavior: 'ready' as 'ready' | 'error' | 'pending',
   connectErrorMessage: '',
   connectErrorCode: '',
   destroyErrorMessage: '',
@@ -178,6 +178,23 @@ export function createSsh2Module(): Ssh2ModuleMock {
           emitSshEvent('ready')
           return
         }
+        if (ssh2Mock.connectBehavior === 'pending') {
+          const configValue = this.lastConnectConfig
+          const readyTimeout =
+            configValue &&
+            typeof configValue === 'object' &&
+            'readyTimeout' in configValue &&
+            typeof configValue.readyTimeout === 'number'
+              ? configValue.readyTimeout
+              : undefined
+          if (readyTimeout && readyTimeout > 0) {
+            setTimeout(
+              () => emitSshEvent('error', new Error('Timed out while waiting for handshake')),
+              readyTimeout
+            )
+          }
+          return
+        }
         if (ssh2Mock.connectBehavior === 'error') {
           const err = new Error(ssh2Mock.connectErrorMessage) as NodeJS.ErrnoException
           if (ssh2Mock.connectErrorCode) {
@@ -192,6 +209,7 @@ export function createSsh2Module(): Ssh2ModuleMock {
     end() {}
     destroy() {
       if (!ssh2Mock.destroyErrorMessage) {
+        emitSshEvent('close')
         return
       }
       if (eventHandlers?.has('error')) {

@@ -26,7 +26,7 @@ export type RemoteWorkspaceSyncStatus = {
 export type SshCredentialRequest = {
   requestId: string
   targetId: string
-  kind: 'passphrase' | 'password'
+  kind: 'passphrase' | 'password' | 'keyboard-interactive'
   detail: string
 }
 

@@ -200,7 +200,7 @@ describe('SshConnection', () => {
     )
   })
 
-  it('keeps disconnected state when ssh2 reports a late startup error', async () => {
+  it('keeps the cancellation outcome when ssh2 reports a late startup error', async () => {
     ssh2Mock.connectBehavior = 'error'
     ssh2Mock.connectErrorMessage = 'Connection lost before handshake'
     const callbacks = createCallbacks()
@@ -215,7 +215,7 @@ describe('SshConnection', () => {
     await conn.disconnect()
 
     await expect(connectResult).resolves.toMatchObject({
-      message: 'Connection lost before handshake'
+      message: 'SSH connection attempt was cancelled'
     })
     expect(conn.getState()).toMatchObject({ status: 'disconnected', error: null })
     expect(callbacks.onStateChange).not.toHaveBeenCalledWith(
