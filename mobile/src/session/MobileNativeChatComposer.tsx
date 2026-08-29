@@ -151,6 +151,7 @@ export function MobileNativeChatComposer({
   }, [])
 
   const handleChange = (next: string): void => {
+    sendSurfaceGenerationRef.current += 1
     onChangeText(next)
   }
 

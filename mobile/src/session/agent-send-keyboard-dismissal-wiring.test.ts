@@ -9,6 +9,10 @@ const bufferedDraftHookSource = readFileSync(
   new URL('../terminal/use-buffered-terminal-drafts.ts', import.meta.url),
   'utf8'
 )
+const keyboardDismissalHookSource = readFileSync(
+  new URL('./use-agent-send-keyboard-dismissal.ts', import.meta.url),
+  'utf8'
+)
 
 function routeSlice(anchorStart: string, anchorEnd: string): string {
   const start = sessionRouteSource.indexOf(anchorStart)
@@ -23,14 +27,20 @@ function routeSlice(anchorStart: string, anchorEnd: string): string {
 describe('terminal send keyboard dismissal wiring', () => {
   it('gates the dismissal on the agent-session predicate', () => {
     const slice = routeSlice(
-      'const dismissKeyboardAfterAgentSend = useCallback(',
-      '[dismissSoftwareKeyboard, getSendCompletionGeneration]\n  )'
+      'const dismissKeyboardAfterAgentSend = useAgentSendKeyboardDismissal(',
+      'getSendCompletionGeneration\n  )'
     )
-    expect(slice).toContain('shouldDismissKeyboardAfterTerminalSend(origin.tab, accepted)')
-    expect(slice).toContain('origin.generation === getSendCompletionGeneration()')
-    expect(slice).toContain('dismissSoftwareKeyboard()')
+    expect(slice).toContain('dismissSoftwareKeyboard')
+    expect(keyboardDismissalHookSource).toContain(
+      'shouldDismissKeyboardAfterTerminalSend(origin.tab, accepted)'
+    )
+    expect(keyboardDismissalHookSource).toContain(
+      'origin.generation === getSendCompletionGeneration()'
+    )
+    expect(keyboardDismissalHookSource).toContain('dismissSoftwareKeyboard()')
+    expect(keyboardDismissalHookSource).toContain('return useCallback(')
     expect(sessionRouteSource).toContain(
-      "import { shouldDismissKeyboardAfterTerminalSend } from '../../../../src/session/agent-send-keyboard-dismissal'"
+      "import { useAgentSendKeyboardDismissal } from '../../../../src/session/use-agent-send-keyboard-dismissal'"
     )
   })
 
@@ -49,7 +59,9 @@ describe('terminal send keyboard dismissal wiring', () => {
     // onSubmitEditing is the single send seam for the live field.
     const slice = routeSlice('ref={liveInputRef}', 'importantForAutofill="no"')
     expect(slice).toContain('generation: getSendCompletionGeneration()')
-    expect(slice).toContain('dismissKeyboardAfterAgentSend(sendOrigin, accepted)')
+    expect(slice).toContain('editGeneration: getLiveInputEditGeneration()')
+    expect(slice).toContain('sendOrigin.editGeneration === getLiveInputEditGeneration()')
+    expect(slice).toContain('dismissKeyboardAfterAgentSend(')
     // Explicit dismissal replaces RN's blur, which stays off so a shell send
     // does not drop focus.
     expect(slice).toContain('blurOnSubmit={false}')
@@ -59,7 +71,7 @@ describe('terminal send keyboard dismissal wiring', () => {
     const slice = routeSlice('async function handleSend() {', 'async function handleAccessoryKey(')
     const acceptedAt = slice.indexOf('const accepted = isTerminalSendRpcAccepted(response)')
     const restoreAt = slice.indexOf('restoreRejectedDraft()', acceptedAt)
-    const dismissAt = slice.indexOf('dismissKeyboardAfterAgentSend(sendOrigin, accepted)')
+    const dismissAt = slice.indexOf('dismissKeyboardAfterAgentSend(')
     const responseAt = slice.indexOf('const response = await client.sendRequest(')
     const catchAt = slice.indexOf('} catch {')
     expect(dismissAt).toBeGreaterThan(0)
@@ -67,6 +79,10 @@ describe('terminal send keyboard dismissal wiring', () => {
     expect(acceptedAt).toBeGreaterThan(responseAt)
     expect(restoreAt).toBeGreaterThan(acceptedAt)
     expect(dismissAt).toBeGreaterThan(responseAt)
+    expect(slice).toContain(
+      'const draftUnchanged =\n        accepted && bufferedTerminalDraftState.settleBufferedTerminalDraftSend(bufferedDraftSend)'
+    )
+    expect(slice).toContain('dismissKeyboardAfterAgentSend(sendOrigin, accepted && draftUnchanged)')
     expect(catchAt).toBeGreaterThan(0)
     // Both resolved rejections and transport failures restore the raw draft.
     expect(dismissAt).toBeLessThan(catchAt)
@@ -98,11 +114,9 @@ describe('terminal send keyboard dismissal wiring', () => {
       'restoreRejectedBufferedTerminalDraft(current, send.token.handle, send.draft)'
     )
     expect(sendSlice.match(/restoreRejectedDraft\(\)/g)).toHaveLength(2)
-    const dismissalSlice = routeSlice(
-      'const dismissKeyboardAfterAgentSend = useCallback(',
-      '[dismissSoftwareKeyboard, getSendCompletionGeneration]\n  )'
+    expect(keyboardDismissalHookSource).toContain(
+      'origin.generation === getSendCompletionGeneration()'
     )
-    expect(dismissalSlice).toContain('origin.generation === getSendCompletionGeneration()')
   })
 
   it('keeps buffered draft callbacks scoped to terminal surfaces and prunes ended tabs', () => {
@@ -114,7 +128,7 @@ describe('terminal send keyboard dismissal wiring', () => {
     expect(bufferedDraftHookSource).toContain('pruneBufferedTerminalDraftRestorations(')
     expect(sessionRouteSource).toContain('useRef(bufferedTerminalDraftState.reconcileTerminalTabs)')
     expect(sessionRouteSource).toContain(
-      'reconcileBufferedDraftsRef.current(currentSessionTabs, nextTabs)'
+      'reconcileBufferedDraftsRef.current(currentSessionTabs, nextTabs, {'
     )
     const routeResetSlice = routeSlice(
       '// Why: Expo reuses this screen across worktrees;',

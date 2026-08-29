@@ -47,6 +47,24 @@ describe('useBufferedTerminalDrafts', () => {
     expect(probeRenderCount).toBe(initialRenderCount)
   })
 
+  it('does not re-render when terminal-list pruning retains every mapped draft', () => {
+    act(() => {
+      renderer = create(createElement(Probe, { activeHandle: 'terminal' }))
+    })
+    act(() => hook().setInput('draft'))
+    act(() => {
+      hook().reconcileTerminalTabs(
+        [{ id: 'tab-1', leafId: 'leaf-1', terminal: 'terminal' }],
+        [{ id: 'tab-1', leafId: 'leaf-1', terminal: 'terminal' }]
+      )
+    })
+    const renderCountBeforePrune = probeRenderCount
+
+    act(() => hook().pruneDrafts(new Set()))
+
+    expect(probeRenderCount).toBe(renderCountBeforePrune)
+  })
+
   it('carries an unsent draft through a pending-handle remint', () => {
     act(() => {
       renderer = create(createElement(Probe, { activeHandle: 'terminal-old' }))
@@ -70,6 +88,30 @@ describe('useBufferedTerminalDrafts', () => {
     expect(hook().input).toBe('keep across reload')
   })
 
+  it('carries an unsent draft through a transient empty snapshot and handle remint', () => {
+    act(() => {
+      renderer = create(createElement(Probe, { activeHandle: 'terminal-old' }))
+    })
+    act(() => hook().setInput('keep through empty snapshot'))
+    act(() => {
+      hook().reconcileTerminalTabs(
+        [{ id: 'tab-old', leafId: 'leaf-1', terminal: 'terminal-old' }],
+        [],
+        { retainMissingSurfaces: true }
+      )
+      renderer?.update(createElement(Probe, { activeHandle: null }))
+    })
+    act(() => {
+      hook().reconcileTerminalTabs(
+        [],
+        [{ id: 'tab-reminted', leafId: 'leaf-1', terminal: 'terminal-new' }]
+      )
+      renderer?.update(createElement(Probe, { activeHandle: 'terminal-new' }))
+    })
+
+    expect(hook().input).toBe('keep through empty snapshot')
+  })
+
   it('restores a rejected send to its reminted terminal surface', () => {
     act(() => {
       renderer = create(createElement(Probe, { activeHandle: 'terminal-old' }))
@@ -89,6 +131,51 @@ describe('useBufferedTerminalDrafts', () => {
     expect(hook().input).toBe('rejected command')
   })
 
+  it('restores a rejected send after a transient empty snapshot remints its surface', () => {
+    act(() => {
+      renderer = create(createElement(Probe, { activeHandle: 'terminal-old' }))
+    })
+    act(() => hook().setInput('rejected command'))
+    let send: ReturnType<BufferedDraftHook['beginBufferedTerminalDraftSend']>
+    act(() => {
+      send = hook().beginBufferedTerminalDraftSend('terminal-old', hook().input)
+      hook().reconcileTerminalTabs(
+        [{ id: 'tab-old', leafId: 'leaf-1', terminal: 'terminal-old' }],
+        [],
+        { retainMissingSurfaces: true }
+      )
+      hook().reconcileTerminalTabs(
+        [],
+        [{ id: 'tab-reminted', leafId: 'leaf-1', terminal: 'terminal-new' }]
+      )
+      renderer?.update(createElement(Probe, { activeHandle: 'terminal-new' }))
+    })
+    act(() => hook().restoreRejectedDraft(send))
+
+    expect(hook().input).toBe('rejected command')
+  })
+
+  it('keeps mapped drafts during terminal-list gaps but prunes them after confirmed close', () => {
+    act(() => {
+      renderer = create(createElement(Probe, { activeHandle: 'terminal' }))
+    })
+    act(() => hook().setInput('bounded draft'))
+    act(() => {
+      hook().reconcileTerminalTabs(
+        [{ id: 'tab-1', leafId: 'leaf-1', terminal: 'terminal' }],
+        [{ id: 'tab-1', leafId: 'leaf-1', terminal: null }]
+      )
+      hook().pruneDrafts(new Set())
+    })
+    expect(hook().input).toBe('bounded draft')
+
+    act(() => {
+      hook().reconcileTerminalTabs([{ id: 'tab-1', leafId: 'leaf-1', terminal: null }], [])
+      hook().pruneDrafts(new Set())
+    })
+    expect(hook().input).toBe('')
+  })
+
   it('preserves an intentional clear after the optimistic send clear', () => {
     act(() => {
       renderer = create(createElement(Probe, { activeHandle: 'terminal' }))
@@ -100,6 +187,7 @@ describe('useBufferedTerminalDrafts', () => {
     })
     act(() => hook().setInput('new command'))
     act(() => hook().setInput(''))
+    expect(hook().settleBufferedTerminalDraftSend(send)).toBe(false)
     act(() => hook().restoreRejectedDraft(send))
 
     expect(hook().input).toBe('')

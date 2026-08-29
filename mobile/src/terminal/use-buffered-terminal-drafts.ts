@@ -32,6 +32,10 @@ type BufferedTerminalDraftTab = {
   readonly terminal?: string | null
 }
 
+type ReconcileBufferedTerminalDraftTabsOptions = {
+  readonly retainMissingSurfaces?: boolean
+}
+
 function getBufferedTerminalDraftSurfaceKey(tab: BufferedTerminalDraftTab): string {
   return tab.leafId ? `leaf:${tab.leafId}` : `tab:${tab.id}`
 }
@@ -83,19 +87,30 @@ export function useBufferedTerminalDrafts({
     )
   }, [])
 
-  const settleBufferedTerminalDraftSend = useCallback((send: BufferedTerminalDraftSend): void => {
-    settleBufferedTerminalDraftRestoration(pendingRestorationsRef.current, send.handle, send.token)
-  }, [])
+  const settleBufferedTerminalDraftSend = useCallback(
+    (send: BufferedTerminalDraftSend): boolean =>
+      settleBufferedTerminalDraftRestoration(
+        pendingRestorationsRef.current,
+        send.handle,
+        send.token
+      ),
+    []
+  )
 
   const pruneDrafts = useCallback((retainedHandles: ReadonlySet<string>): void => {
-    setDrafts((current) => pruneBufferedTerminalDrafts(current, retainedHandles))
-    pruneBufferedTerminalDraftRestorations(pendingRestorationsRef.current, retainedHandles)
+    const retainedMappedHandles = new Set(retainedHandles)
+    for (const handle of handlesBySurfaceRef.current.values()) {
+      retainedMappedHandles.add(handle)
+    }
+    setDrafts((current) => pruneBufferedTerminalDrafts(current, retainedMappedHandles))
+    pruneBufferedTerminalDraftRestorations(pendingRestorationsRef.current, retainedMappedHandles)
   }, [])
 
   const reconcileTerminalTabs = useCallback(
     (
       previousTabs: readonly BufferedTerminalDraftTab[],
-      nextTabs: readonly BufferedTerminalDraftTab[]
+      nextTabs: readonly BufferedTerminalDraftTab[],
+      { retainMissingSurfaces = false }: ReconcileBufferedTerminalDraftTabsOptions = {}
     ): void => {
       const handlesBySurface = handlesBySurfaceRef.current
       for (const tab of previousTabs) {
@@ -110,8 +125,10 @@ export function useBufferedTerminalDrafts({
         }
       }
 
-      const retainedHandles = new Set<string>()
-      const retainedSurfaces = new Set<string>()
+      const retainedHandles = new Set<string>(
+        retainMissingSurfaces ? handlesBySurface.values() : []
+      )
+      const retainedSurfaces = new Set<string>(retainMissingSurfaces ? handlesBySurface.keys() : [])
       const remaps: Array<{ previousHandle: string; nextHandle: string }> = []
       for (const tab of nextTabs) {
         if (tab.type && tab.type !== 'terminal') {

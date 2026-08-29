@@ -19,6 +19,7 @@ function changeLiveInput(
 
 type TerminalLiveInputCommitHarness = {
   readonly captures: readonly string[]
+  readonly getHandlers: () => TerminalLiveInputCommitHandlers
   readonly handlers: TerminalLiveInputCommitHandlers
   readonly sent: readonly string[]
   readonly setActiveSessionTabType: (next: string | undefined) => void
@@ -85,6 +86,12 @@ function createTerminalLiveInputCommitHarness({
 
   return {
     captures,
+    getHandlers: () => {
+      if (!handlers) {
+        throw new Error('terminal live input hook is not mounted')
+      }
+      return handlers
+    },
     handlers,
     sent,
     setActiveSessionTabType: (next: string | undefined): void => {
@@ -256,6 +263,19 @@ describe('terminal live input commit hook', () => {
     // Then
     expect(accepted).toBe(true)
     await vi.waitFor(() => expect(sent).toEqual(['\r']))
+  })
+
+  it('increments a stable edit generation when the live field changes', () => {
+    const { getHandlers, handlers, setActiveSessionTabType } =
+      createTerminalLiveInputCommitHarness()
+    const getter = handlers.getLiveInputEditGeneration
+    const initialGeneration = getter()
+
+    changeLiveInput(handlers, 'newer text')
+    setActiveSessionTabType(undefined)
+
+    expect(getHandlers().getLiveInputEditGeneration).toBe(getter)
+    expect(getter()).toBe(initialGeneration + 1)
   })
 
   it('Given a rejected held-text send When submit is requested Then suppresses the carriage return', async () => {

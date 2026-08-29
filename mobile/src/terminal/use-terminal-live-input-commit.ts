@@ -1,4 +1,4 @@
-import { useCallback, useEffect, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, type RefObject } from 'react'
 import type { TextInput } from 'react-native'
 import { getTerminalLiveSpecialKeyDecision } from './terminal-live-text-commit'
 import { sendTerminalLiveControlAfterPendingFlush } from './terminal-live-control-send-order'
@@ -43,6 +43,7 @@ type TerminalLiveInputCommitOptions<TTabType extends string> = {
 type TerminalLiveInputCommitHandlers = {
   readonly clearPendingLiveInputCommit: () => void
   readonly flushPendingLiveInputBeforeExternalSend: (handle: string) => Promise<boolean>
+  readonly getLiveInputEditGeneration: () => number
   readonly handleLiveInputAccessoryBytes: (
     input: TerminalLiveAccessoryInput
   ) => Promise<TerminalLiveAccessoryInputCommitResult>
@@ -63,6 +64,7 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
   sendLiveTerminalInputRef,
   setLiveInputCapture
 }: TerminalLiveInputCommitOptions<TTabType>): TerminalLiveInputCommitHandlers {
+  const liveInputEditGenerationRef = useRef(0)
   const {
     applyLiveInputMirror,
     clearPendingLiveInputCommit,
@@ -132,6 +134,7 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
       // Why: iOS kills an active dictation/IME session when JS writes a value
       // that differs from the native field text, so the controlled capture must
       // echo the field verbatim; only the PTY mirror sees normalized text.
+      liveInputEditGenerationRef.current += 1
       setLiveInputCapture(nativeEvent.text)
       void applyLiveInputMirror(
         activeHandle,
@@ -147,6 +150,8 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
       setLiveInputCapture
     ]
   )
+
+  const getLiveInputEditGeneration = useCallback(() => liveInputEditGenerationRef.current, [])
 
   const handleLiveInputKeyPress = useCallback(
     (event: TerminalLiveInputKeyPressEvent) => {
@@ -220,6 +225,7 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
   return {
     clearPendingLiveInputCommit,
     flushPendingLiveInputBeforeExternalSend,
+    getLiveInputEditGeneration,
     handleLiveInputAccessoryBytes,
     handleLiveInputChange,
     handleLiveInputKeyPress,

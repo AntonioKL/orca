@@ -514,6 +514,34 @@ describe('MobileNativeChatComposer', () => {
     expect(Keyboard.dismiss).not.toHaveBeenCalled()
   })
 
+  it('does not dismiss after a newer edit on the same surface', async () => {
+    vi.mocked(Keyboard.dismiss).mockClear()
+    let resolveSend: ((accepted: boolean) => void) | null = null
+    const onSend = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSend = resolve
+        })
+    )
+    await render(onSend, vi.fn())
+
+    let pendingSend!: Promise<void>
+    await act(async () => {
+      pendingSend = sendButton().props.onPress()
+      await Promise.resolve()
+    })
+    const input = renderer!.root.find((node) => node.type === 'TextInput') as {
+      props: { onChangeText: (text: string) => void }
+    }
+    await act(async () => input.props.onChangeText('newer draft'))
+    await act(async () => {
+      resolveSend?.(true)
+      await pendingSend
+    })
+
+    expect(Keyboard.dismiss).not.toHaveBeenCalled()
+  })
+
   it('does not dismiss after its retained route loses focus', async () => {
     vi.mocked(Keyboard.dismiss).mockClear()
     let generation = 0

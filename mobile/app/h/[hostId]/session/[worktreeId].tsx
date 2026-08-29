@@ -82,7 +82,7 @@ import {
 } from '../../../../src/session/mobile-bulk-close-sheet-actions'
 import { useMobilePrBranchContext } from '../../../../src/session/use-mobile-pr-branch-context'
 import { isFloatingWorkspaceWorktreeId } from '../../../../src/session/floating-workspace'
-import { shouldDismissKeyboardAfterTerminalSend } from '../../../../src/session/agent-send-keyboard-dismissal'
+import { useAgentSendKeyboardDismissal } from '../../../../src/session/use-agent-send-keyboard-dismissal'
 import { useMobileSendCompletionGeneration } from '../../../../src/session/use-mobile-send-completion-generation'
 import { SessionDockColumn } from '../../../../src/session/SessionDockColumn'
 import { MobileSessionHeaderIconButton } from '../../../../src/session/MobileSessionHeaderIconButton'
@@ -972,6 +972,7 @@ export default function SessionScreen() {
   const {
     clearPendingLiveInputCommit,
     flushPendingLiveInputBeforeExternalSend,
+    getLiveInputEditGeneration,
     handleLiveInputAccessoryBytes,
     handleLiveInputChange,
     handleLiveInputKeyPress,
@@ -1626,6 +1627,7 @@ export default function SessionScreen() {
           // Why: retain chat-covered preferences across transient graph-reload handle gaps.
           const retainedHandles = resolveRetainedTerminalHandles(pruneContext)
           pruneTerminalHandlesFromLiveInput(retainedHandles)
+          bufferedTerminalDraftState.pruneDrafts(retainedHandles)
           defaultTerminalHandlesToLiveInput([...liveHandles])
           const shouldPrune = createTerminalPrunePredicate(pruneContext)
           for (const handle of Array.from(terminalUnsubsRef.current.keys())) {
@@ -1680,6 +1682,7 @@ export default function SessionScreen() {
       clearTerminalLiveInputDefault,
       defaultTerminalHandlesToLiveInput,
       nativeChatStream,
+      bufferedTerminalDraftState.pruneDrafts,
       pruneTerminalHandlesFromLiveInput,
       subscribeToTerminal,
       unsubscribeTerminal
@@ -1719,7 +1722,9 @@ export default function SessionScreen() {
       if (orphanedDraftTabs.length > 0) {
         nextTabs = [...orphanedDraftTabs, ...nextTabs]
       }
-      reconcileBufferedDraftsRef.current(currentSessionTabs, nextTabs)
+      reconcileBufferedDraftsRef.current(currentSessionTabs, nextTabs, {
+        retainMissingSurfaces: nextTabs.length === 0
+      })
       sessionTabsRef.current = nextTabs
       initialSessionAutoCreateRef.current.sawSessionTabs ||= nextTabs.length > 0
       // Why: subscribe snapshots often repeat identical payloads; skip re-set to avoid a subscription teardown/replay loop.
@@ -2982,21 +2987,9 @@ export default function SessionScreen() {
     })
   }, [])
 
-  // Sending to an agent hands the turn over, so the keyboard gets out of the way
-  // of the reply. A plain shell keeps it — commands come in bursts.
-  const dismissKeyboardAfterAgentSend = useCallback(
-    (
-      origin: { readonly tab: MobileSessionTab | null; readonly generation: number },
-      accepted: boolean
-    ) => {
-      if (
-        origin.generation === getSendCompletionGeneration() &&
-        shouldDismissKeyboardAfterTerminalSend(origin.tab, accepted)
-      ) {
-        dismissSoftwareKeyboard()
-      }
-    },
-    [dismissSoftwareKeyboard, getSendCompletionGeneration]
+  const dismissKeyboardAfterAgentSend = useAgentSendKeyboardDismissal(
+    dismissSoftwareKeyboard,
+    getSendCompletionGeneration
   )
 
   async function handleSend() {
@@ -3035,10 +3028,10 @@ export default function SessionScreen() {
       const accepted = isTerminalSendRpcAccepted(response)
       if (!accepted) {
         restoreRejectedDraft()
-      } else {
-        bufferedTerminalDraftState.settleBufferedTerminalDraftSend(bufferedDraftSend)
       }
-      dismissKeyboardAfterAgentSend(sendOrigin, accepted)
+      const draftUnchanged =
+        accepted && bufferedTerminalDraftState.settleBufferedTerminalDraftSend(bufferedDraftSend)
+      dismissKeyboardAfterAgentSend(sendOrigin, accepted && draftUnchanged)
     } catch {
       restoreRejectedDraft()
     } finally {
@@ -4114,6 +4107,7 @@ export default function SessionScreen() {
       })
       if (response.ok) {
         const remainingTabs = sessionTabsRef.current.filter((candidate) => candidate.id !== tab.id)
+        reconcileBufferedDraftsRef.current(sessionTabsRef.current, remainingTabs)
         if (tab.type === 'browser' && tab.browserPageId === pendingBrowserFocusPageIdRef.current) {
           pendingBrowserFocusPageIdRef.current = null
         }
@@ -5019,10 +5013,14 @@ export default function SessionScreen() {
                       onSubmitEditing={() => {
                         const sendOrigin = {
                           tab: activeSessionTab,
-                          generation: getSendCompletionGeneration()
+                          generation: getSendCompletionGeneration(),
+                          editGeneration: getLiveInputEditGeneration()
                         }
                         void handleLiveInputSubmit().then((accepted) =>
-                          dismissKeyboardAfterAgentSend(sendOrigin, accepted)
+                          dismissKeyboardAfterAgentSend(
+                            sendOrigin,
+                            accepted && sendOrigin.editGeneration === getLiveInputEditGeneration()
+                          )
                         )
                       }}
                       placeholder=""
