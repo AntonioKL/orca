@@ -994,6 +994,7 @@ function buildMirroredAgentTabs(
     const providerSessionId = tab.providerSessionId?.trim() || null
     const preservesExistingTitle =
       providerSessionId !== null &&
+      existing?.executionHostId === executionHostId &&
       existing?.agentSessionProviderSessionId === providerSessionId &&
       existing.aiVaultTitle?.agent === tab.agent &&
       existing.aiVaultTitle.sessionId === providerSessionId

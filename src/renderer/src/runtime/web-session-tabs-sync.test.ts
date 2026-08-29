@@ -87,6 +87,57 @@ describe('applyWebSessionTabsSnapshot', () => {
     ).toBe(agentTab.id)
   })
 
+  it('does not preserve a provider title from another execution host', () => {
+    const existing: Tab = {
+      id: 'structured-agent-session-session-1',
+      entityId: 'session-1',
+      groupId: 'host-group-1',
+      worktreeId: WT,
+      executionHostId: 'runtime:old-server',
+      contentType: 'agent-session',
+      agentSessionAgent: 'codex',
+      agentSessionProviderSessionId: 'thread-1',
+      aiVaultTitle: { agent: 'codex', sessionId: 'thread-1', title: 'Old host title' },
+      label: 'Codex Chat',
+      customLabel: null,
+      color: null,
+      sortOrder: 0,
+      createdAt: NOW
+    }
+    const agentTab = {
+      type: 'agent-session' as const,
+      id: 'agent-session:session-1',
+      title: 'Codex Chat',
+      sessionId: 'session-1',
+      providerSessionId: 'thread-1',
+      agent: 'codex' as const,
+      isActive: true
+    }
+    const patch = applyWebSessionTabsSnapshot(
+      makeState({ unifiedTabsByWorktree: { [WT]: [existing] } }),
+      makeSnapshot([agentTab], {
+        activeTabId: agentTab.id,
+        activeTabType: 'agent-session',
+        tabGroups: [
+          {
+            id: 'host-group-1',
+            activeTabId: agentTab.id,
+            tabOrder: [agentTab.id]
+          }
+        ]
+      }),
+      ENV,
+      NOW,
+      { executionHostId: 'runtime:new-server' }
+    )
+
+    expect(patch.unifiedTabsByWorktree?.[WT]?.[0]).toMatchObject({
+      executionHostId: 'runtime:new-server',
+      agentSessionProviderSessionId: 'thread-1'
+    })
+    expect(patch.unifiedTabsByWorktree?.[WT]?.[0]?.aiVaultTitle).toBeUndefined()
+  })
+
   it('removes a restored structured tab when the host publishes no structured sessions', () => {
     const structuredTab: Tab = {
       id: 'structured-agent-session-session-1',

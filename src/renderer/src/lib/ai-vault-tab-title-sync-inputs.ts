@@ -144,6 +144,7 @@ function structuredChatTabsEqual(current: AppState, previous: AppState): boolean
     return (
       tab.id === other.id &&
       tab.worktreeId === other.worktreeId &&
+      tab.executionHostId === other.executionHostId &&
       tab.agentSessionAgent === other.agentSessionAgent &&
       tab.agentSessionProviderSessionId === other.agentSessionProviderSessionId &&
       titleEqual(tab.aiVaultTitle, other.aiVaultTitle)
