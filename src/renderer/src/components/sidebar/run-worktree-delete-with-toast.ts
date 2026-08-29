@@ -3,6 +3,7 @@ import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 import type { WorktreeRemovalTarget } from '../../../../shared/worktree/removal'
 import { prepareActiveWorktreeFocusAfterDelete } from './active-worktree-focus-after-delete'
 import { showDeleteWorktreeFailureToast } from './delete-worktree-failure-toast'
+import { settleForceDeleteRetry } from './force-delete-retry-toast'
 import { showDeleteWorktreeErrorToast } from './show-delete-worktree-error-toast'
 import type { WorktreeDeleteWithToastOptions } from './worktree-delete-request'
 import { getDeleteStateForWorktreeHost } from './worktree-delete-state-host-match'
@@ -81,28 +82,14 @@ export function runWorktreeDeleteWithToast(
           const forceRemoval = useAppStore
             .getState()
             .removeWorktree(target, true, { allowUnverifiedPtyStop: true })
-          forceRemoval
-            .then((forceResult) => {
-              if (!forceResult.ok) {
-                showDeleteWorktreeErrorToast({
-                  error: forceResult.error,
-                  kind: 'force-delete',
-                  onViewChanges: () => viewWorktreeDiff(worktreeId, target.executionHostId),
-                  worktreeName
-                })
-                return
-              }
+          void settleForceDeleteRetry(forceRemoval, {
+            worktreeName,
+            onViewChanges: () => viewWorktreeDiff(worktreeId, target.executionHostId),
+            onDeleted: () => {
               commitForceFocus()
               options.onForceDeleted?.(target)
-            })
-            .catch((err: unknown) => {
-              showDeleteWorktreeErrorToast({
-                error: err,
-                kind: 'delete',
-                onViewChanges: () => viewWorktreeDiff(worktreeId, target.executionHostId),
-                worktreeName
-              })
-            })
+            }
+          })
         },
         worktreeId,
         worktreeName

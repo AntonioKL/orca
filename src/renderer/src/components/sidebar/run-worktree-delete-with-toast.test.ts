@@ -58,7 +58,10 @@ describe('runWorktreeDeleteWithToast force-delete retry', () => {
     capturedForceHandlers[0]?.()
     await vi.waitFor(() => expect(toastError).toHaveBeenCalled())
 
-    const description = (toastError.mock.calls[0]?.[1] as { description?: string })?.description
+    // The initial `dirty` failure renders through showDeleteWorktreeFailureToast, mocked above,
+    // so every sonner call here is the retry's — pinned rather than assumed.
+    expect(toastError).toHaveBeenCalledTimes(1)
+    const description = (toastError.mock.calls.at(-1)?.[1] as { description?: string })?.description
     expect(description).toBe(
       translate('auto.components.sidebar.delete.worktree.toast.workspaceDirectoryHeld', 'MISSING')
     )
@@ -76,11 +79,16 @@ describe('runWorktreeDeleteWithToast force-delete retry', () => {
     capturedForceHandlers[0]?.()
     await vi.waitFor(() => expect(toastError).toHaveBeenCalled())
 
-    const description = (toastError.mock.calls[0]?.[1] as { description?: string })?.description
+    expect(toastError).toHaveBeenCalledTimes(1)
+    const description = (toastError.mock.calls.at(-1)?.[1] as { description?: string })?.description
     expect(description).toBe(
       translate('auto.components.sidebar.delete.worktree.toast.workspaceDirectoryHeld', 'MISSING')
     )
     expect(description).not.toContain('EBUSY')
+    // A rejected Force Delete is still a force delete, not an ordinary one.
+    expect(toastError.mock.calls.at(-1)?.[0]).toBe(
+      translate('auto.components.sidebar.delete.worktree.flow.4f3876c0f5', 'MISSING')
+    )
   })
 
   it('funnels a rejected initial delete before rendering its error', async () => {
@@ -91,7 +99,8 @@ describe('runWorktreeDeleteWithToast force-delete retry', () => {
       'feature'
     )
 
-    const description = (toastError.mock.calls[0]?.[1] as { description?: string })?.description
+    expect(toastError).toHaveBeenCalledTimes(1)
+    const description = (toastError.mock.calls.at(-1)?.[1] as { description?: string })?.description
     expect(description).toBe(
       translate('auto.components.sidebar.delete.worktree.toast.workspaceDirectoryHeld', 'MISSING')
     )
@@ -109,7 +118,8 @@ describe('runWorktreeDeleteWithToast force-delete retry', () => {
     capturedForceHandlers[0]?.()
     await vi.waitFor(() => expect(toastError).toHaveBeenCalled())
 
-    expect((toastError.mock.calls[0]?.[1] as { description?: string })?.description).toBe(
+    expect(toastError).toHaveBeenCalledTimes(1)
+    expect((toastError.mock.calls.at(-1)?.[1] as { description?: string })?.description).toBe(
       'fatal: some other git failure'
     )
   })
