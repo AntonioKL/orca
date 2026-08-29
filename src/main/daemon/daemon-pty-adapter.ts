@@ -134,6 +134,13 @@ export class DaemonPtyAdapter extends DaemonPtyDaemonRecovery implements IPtyPro
     return this.sessionExitObservations.verdict(id)
   }
 
+  // Why the router calls this and `markSessionActive` is not enough: a certificate can only be
+  // cleared by the adapter that issued it, so the generation now holding a reused session id
+  // cannot retire the one a sibling generation still holds for it.
+  retireExitCertificate(id: string): void {
+    this.sessionExitObservations.clearForLiveSession(id)
+  }
+
   async closeStartupQueryAuthority(id: string): Promise<number> {
     if (!this.supportsStartupIngress) {
       return 0

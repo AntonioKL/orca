@@ -38,6 +38,19 @@ export class DaemonPtyRouter implements IPtyProvider {
   }
 
   async spawn(opts: PtySpawnOptions): Promise<PtySpawnResult> {
+    const result = await this.spawnOnOwner(opts)
+    // Reopening a pane reuses the session id, and only the issuing adapter can clear its own
+    // certificate — so a sibling generation that watched the previous incarnation die would
+    // keep answering `exited` for this live one. Retired here, where every spawn passes.
+    if (!result.exitedBeforeSpawnReply) {
+      for (const adapter of this.allAdapters()) {
+        adapter.retireExitCertificate(result.id)
+      }
+    }
+    return result
+  }
+
+  private async spawnOnOwner(opts: PtySpawnOptions): Promise<PtySpawnResult> {
     if (opts.attachOnly && opts.sessionId) {
       return await this.ownerResolver.spawnAttachOnly({ ...opts, sessionId: opts.sessionId })
     }
