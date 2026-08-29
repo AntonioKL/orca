@@ -244,10 +244,12 @@ describe('mid-line composition renders the covered row tail after the preedit', 
     const rig = openTerminal({ cursorWidth: 2 })
     await rig.write('x'.repeat(80))
     let preeditWidth = CELL_WIDTH_PX * 2
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
-      const width = this.classList.contains('xterm-composition-preedit') ? preeditWidth : 0
-      return DOMRect.fromRect({ height: CELL_HEIGHT_PX, width })
-    })
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        const width = this.classList.contains('xterm-composition-preedit') ? preeditWidth : 0
+        return DOMRect.fromRect({ height: CELL_HEIGHT_PX, width })
+      }
+    )
 
     rig.compose('가')
 
