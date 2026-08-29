@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { IPtyProvider, PtySpawnOptions, PtySpawnResult } from '../../../providers/types'
 import { toAppSshPtyId } from '../../../providers/ssh-pty-id'
+import { rememberRetiredRelayEpochOwner } from './relay-pty-mint-epoch'
 import { spawnForStablePane, type StablePaneOwner } from './stable-owner'
 
 type EpochAwareSpawnOptions = PtySpawnOptions & { resumeProviderSession?: unknown }
@@ -149,6 +150,74 @@ describe('spawnForStablePane relay epoch gate', () => {
 
     await Promise.all([spawn(), spawn()])
     expect(harness.requestHostRpc).toHaveBeenCalledOnce()
+  })
+
+  it('gates a resume after relay recovery retired the stable pane owner', async () => {
+    const harness = createProvider({ ptyIdMintEpoch: 'current' })
+    const paneKey = 'tab-retired-owner:22222222-2222-4222-8222-222222222222'
+    rememberRetiredRelayEpochOwner({
+      connectionId: 'remote',
+      paneKey,
+      ownerPtyId: toAppSshPtyId('remote', 'pty2:previous:1')
+    })
+
+    const spawned = await spawnForStablePane({
+      runtime: undefined,
+      provider: harness.provider,
+      spawnOptions: agentSpawnOptions(),
+      owner: null,
+      connectionId: 'remote',
+      paneKey
+    })
+
+    expect(harness.requestHostRpc).toHaveBeenCalledOnce()
+    expect(harness.spawns[0]).not.toHaveProperty('resumeProviderSession')
+    expect(spawned.result.agentResumeUnavailable).toBe(true)
+  })
+
+  it('preserves a resume after same-relay recovery retired the stable pane owner', async () => {
+    const harness = createProvider({ ptyIdMintEpoch: 'current' })
+    const paneKey = 'tab-current-owner:33333333-3333-4333-8333-333333333333'
+    rememberRetiredRelayEpochOwner({
+      connectionId: 'remote',
+      paneKey,
+      ownerPtyId: toAppSshPtyId('remote', 'pty2:current:1')
+    })
+    const spawnOptions = agentSpawnOptions()
+
+    await spawnForStablePane({
+      runtime: undefined,
+      provider: harness.provider,
+      spawnOptions,
+      owner: null,
+      connectionId: 'remote',
+      paneKey
+    })
+
+    expect(harness.spawns[0]).toEqual(spawnOptions)
+  })
+
+  it('does not treat a new agent launch as a retired-owner resume', async () => {
+    const harness = createProvider({ ptyIdMintEpoch: 'current' })
+    const paneKey = 'tab-new-agent:44444444-4444-4444-8444-444444444444'
+    rememberRetiredRelayEpochOwner({
+      connectionId: 'remote',
+      paneKey,
+      ownerPtyId: toAppSshPtyId('remote', 'pty2:previous:1')
+    })
+    const spawnOptions: PtySpawnOptions = { cols: 80, rows: 24, launchAgent: 'claude' }
+
+    await spawnForStablePane({
+      runtime: undefined,
+      provider: harness.provider,
+      spawnOptions,
+      owner: null,
+      connectionId: 'remote',
+      paneKey
+    })
+
+    expect(harness.requestHostRpc).not.toHaveBeenCalled()
+    expect(harness.spawns[0]).toEqual(spawnOptions)
   })
 
   it('does not label a plain replacement shell as an unavailable agent resume', async () => {
