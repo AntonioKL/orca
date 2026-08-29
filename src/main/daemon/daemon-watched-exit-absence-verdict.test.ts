@@ -87,6 +87,35 @@ describe('a daemon-backed watched exit', () => {
     expect(adapter.ptyAbsenceVerdict(id)).toBe('unverifiable')
   })
 
+  itOnPosix('is exited when only a preserved legacy generation watched it die', async () => {
+    // The only shape that builds a router at all: daemon-init wraps in one when
+    // `legacyAdapters.length > 0`, and that preserved generation still owns the panes it
+    // spawned before the upgrade — the current adapter has never seen this session id.
+    const replacement = await startDaemonAdapterHarness(() => createMockSubprocess())
+    const router = new DaemonPtyRouter({ current: replacement.adapter, legacy: [adapter] })
+    try {
+      const { id } = await adapter.spawn({ cols: 80, rows: 24 })
+      await router.discoverLegacySessions()
+      expect(router.hasPty(id)).toBe(true)
+
+      lastSubprocess._simulateExit(0)
+      await waitFor(() => router.hasPty(id) === false)
+
+      // Both narrower lookups are dead here: the exit fan-out has already dropped the route,
+      // and the current adapter never watched this id. Only the legacy adapter holds proof.
+      expect(replacement.adapter.ptyAbsenceVerdict(id)).toBe('unverifiable')
+
+      const inspection = await inspectPtyProviderProcessForRenderer(router, id)
+      expect(inspection).toEqual(buildAbsentPtyInspection('exited'))
+      expect(inspection).not.toHaveProperty('unavailable')
+    } finally {
+      router.disposeRouterOnly()
+      replacement.adapter.dispose()
+      await replacement.server.shutdown()
+      rmSync(replacement.dir, { recursive: true, force: true })
+    }
+  })
+
   itOnPosix('does not let a legacy generation certify the id its replacement reuses', async () => {
     // Two real daemons, as in an upgrade: the legacy one watches the exit, and reopening the
     // pane reuses that session id on the current one. `markSessionActive` clears only the
