@@ -290,6 +290,9 @@ function publishRefreshedWorkspaceCleanupCandidates(
     const scan = state.workspaceCleanupScan
     // `null` means the rescan never ran, which also means it found nothing to
     // report and this returned above — kept as the safe arm of its type.
+    // The `scannedAt` arm restates the row rule rather than adding to it: the
+    // settle and the cache hydrate stamp every row they publish with exactly the
+    // `scannedAt` they publish, so it only decides rows no read has dated yet.
     if (!scan || rescannedAt === null || rescannedAt < scan.scannedAt) {
       return {}
     }
