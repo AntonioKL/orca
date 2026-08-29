@@ -537,6 +537,30 @@ describe('Terminal.tsx routes the native window-close request through the guard'
       'Terminal.tsx may only close the window unprobed for an intentional app restart'
     ).toBe(1)
   })
+
+  /**
+   * The dirty-editor branch defers the close instead of taking it, so the survival
+   * fact has a second call site: it is stashed on the pending record and spent when
+   * the save/discard flow finishes. Only the direct call above was pinned, which
+   * left this one free to drop the fact and silently restore the unconditional quit
+   * bypass for every window that happened to have unsaved work.
+   */
+  it('carries the survival fact through the deferred dirty-editor close as well', () => {
+    const start = source.indexOf(
+      '    setWindowCloseRequestHandler(({ isQuitting, localPtysSurviveQuit }) => {'
+    )
+    const end = source.indexOf('    return () => setWindowCloseRequestHandler(null)', start)
+    expect(start).toBeGreaterThanOrEqual(0)
+    // Stashed with the request. Anchored on the queue call itself, not the bare
+    // object literal: the handler's own destructuring pattern is the same text, so
+    // a looser match is satisfied by the signature and pins nothing.
+    expect(source.slice(start, end)).toContain(
+      'dirtyFiles.map((file) => file.id),\n          { isQuitting, localPtysSurviveQuit }'
+    )
+    // Spent on the replay: both fields off the pending record, not a re-derived default.
+    expect(source).toContain('pendingWindowClose.isQuitting')
+    expect(source).toContain('pendingWindowClose.localPtysSurviveQuit')
+  })
 })
 
 /**
