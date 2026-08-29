@@ -14,11 +14,15 @@ import type { ExecutionHostId } from '../../../../shared/execution-host'
 import {
   canQueueWorkspaceCleanupCandidate,
   shouldForceWorkspaceCleanupRemoval,
-  WORKSPACE_CLEANUP_TARGET_BATCH_LIMIT,
   type WorkspaceCleanupCandidate,
   type WorkspaceCleanupScanError,
   type WorkspaceCleanupUnverifiedRemovalConsent
 } from '../../../../shared/workspace-cleanup'
+import {
+  resolveWorkspaceCleanupOmissionVerdict,
+  type WorkspaceCleanupRepoListing
+} from '../../../../shared/workspace-cleanup-omission-verdict'
+import { getRepoIdFromWorktreeId } from '../../../../shared/worktree/id'
 import {
   getWorkspaceCleanupCandidateIdentity,
   getWorkspaceCleanupHostIdentity,
@@ -35,6 +39,12 @@ import {
   getWorkspaceCleanupRepoScanFailure,
   hasValidWorkspaceCleanupUnverifiedConsent
 } from './workspace-cleanup-preflight-failures'
+
+/** Everything the preflight's rescan reported besides the candidate rows. */
+export type WorkspaceCleanupPreflightScanReport = {
+  errors?: readonly WorkspaceCleanupScanError[]
+  repoListings?: readonly WorkspaceCleanupRepoListing[]
+}
 
 /** Distinct from every ExecutionHostId, so a hostless row cannot alias one. */
 const UNQUALIFIED_HOST_BUCKET = Symbol('unqualified-cleanup-host')
@@ -186,52 +196,6 @@ export function resolveWorkspaceCleanupRemovalTargets(
   })
 }
 
-export async function preflightWorkspaceCleanupCandidates(
-  targets: readonly WorkspaceCleanupRemovalTarget[],
-  getState: () => AppState,
-  enrich: (
-    candidates: readonly WorkspaceCleanupCandidate[],
-    state: AppState
-  ) => Promise<WorkspaceCleanupCandidate[]>,
-  options: {
-    unverifiedRemovalConsent?: WorkspaceCleanupUnverifiedRemovalConsent
-    getConsentAttemptId?: (identity: string) => string | undefined
-  } = {}
-): Promise<WorkspaceCleanupPreflightResult[]> {
-  // Why: one batched scan per chunk replaces a git worktree-list + activity
-  // read per row; chunks stay under main's silent target truncation limit.
-  const candidatesByIdentity = new Map<string, WorkspaceCleanupCandidate>()
-  const identitiesByWorktreeId = new Map<string, Set<string>>()
-  const scanErrors: WorkspaceCleanupScanError[] = []
-  const worktreeIds = targets.map((target) => target.worktreeId)
-  for (let start = 0; start < worktreeIds.length; start += WORKSPACE_CLEANUP_TARGET_BATCH_LIMIT) {
-    const chunk = worktreeIds.slice(start, start + WORKSPACE_CLEANUP_TARGET_BATCH_LIMIT)
-    const scan = await window.api.workspaceCleanup.scan({
-      worktreeIds: [...chunk],
-      scanId: crypto.randomUUID(),
-      refreshActivity: true
-    })
-    const enriched = await enrich(scan.candidates, getState())
-    scanErrors.push(...scan.errors)
-    for (const candidate of enriched) {
-      const identity = getWorkspaceCleanupCandidateIdentity(candidate)
-      candidatesByIdentity.set(identity, candidate)
-      const identities = identitiesByWorktreeId.get(candidate.worktreeId) ?? new Set<string>()
-      identities.add(identity)
-      identitiesByWorktreeId.set(candidate.worktreeId, identities)
-    }
-  }
-  return targets.map((target) =>
-    evaluateWorkspaceCleanupPreflight(
-      target,
-      candidatesByIdentity,
-      identitiesByWorktreeId,
-      scanErrors,
-      options
-    )
-  )
-}
-
 function resolvePreflightCandidate(
   target: WorkspaceCleanupRemovalTarget,
   candidatesByIdentity: ReadonlyMap<string, WorkspaceCleanupCandidate>,
@@ -263,7 +227,7 @@ export function evaluateWorkspaceCleanupPreflight(
   target: WorkspaceCleanupRemovalTarget,
   candidatesByIdentity: ReadonlyMap<string, WorkspaceCleanupCandidate>,
   identitiesByWorktreeId: ReadonlyMap<string, ReadonlySet<string>>,
-  scanErrors: readonly WorkspaceCleanupScanError[] = [],
+  scanReport: WorkspaceCleanupPreflightScanReport = {},
   options: {
     unverifiedRemovalConsent?: WorkspaceCleanupUnverifiedRemovalConsent
     getConsentAttemptId?: (identity: string) => string | undefined
@@ -276,7 +240,7 @@ export function evaluateWorkspaceCleanupPreflight(
       failure: ambiguousHostFailure(target.worktreeId, target.displayName).failure
     }
   }
-  const repoScanFailure = getWorkspaceCleanupRepoScanFailure(target, scanErrors)
+  const repoScanFailure = getWorkspaceCleanupRepoScanFailure(target, scanReport.errors ?? [])
   const consentReference = resolved.candidate ?? target.approvedCandidate
   const hasUnverifiedRemovalConsent = hasValidWorkspaceCleanupUnverifiedConsent(
     consentReference ? getWorkspaceCleanupCandidateIdentity(consentReference) : '',
@@ -294,7 +258,19 @@ export function evaluateWorkspaceCleanupPreflight(
     resolved.candidate ??
     (repoScanFailure && hasUnverifiedRemovalConsent ? target.approvedCandidate : undefined)
   if (!candidate) {
-    return getWorkspaceCleanupMissingResult(target)
+    // Why a verdict and not just "absent": the same empty answer arrives from a
+    // host that listed its workspaces without this one and from a host nobody
+    // reached. Only the first is grounds to retire the user's row.
+    return getWorkspaceCleanupMissingResult(
+      target,
+      resolveWorkspaceCleanupOmissionVerdict(
+        {
+          repoId: getRepoIdFromWorktreeId(target.worktreeId),
+          executionHostId: target.executionHostId
+        },
+        scanReport.repoListings
+      )
+    )
   }
   const stop = (failure: WorkspaceCleanupFailure): WorkspaceCleanupPreflightResult => ({
     ok: false,

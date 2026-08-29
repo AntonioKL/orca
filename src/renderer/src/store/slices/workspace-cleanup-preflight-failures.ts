@@ -8,6 +8,7 @@ import type {
 import { shouldForceWorkspaceCleanupRemoval } from '../../../../shared/workspace-cleanup'
 import { getRepoIdFromWorktreeId } from '../../../../shared/worktree/id'
 import { getWorkspaceCleanupCandidateIdentity } from '../../../../shared/workspace-cleanup-host-identity'
+import type { WorkspaceCleanupOmissionVerdict } from '../../../../shared/workspace-cleanup-omission-verdict'
 import { translate } from '@/i18n/i18n'
 import type { WorkspaceCleanupFailure } from './workspace-cleanup'
 
@@ -23,13 +24,21 @@ type PreflightFailureTarget = {
  * user confirmed against, so confirming again re-runs this identical stop —
  * naming the row lets the caller reconcile it away instead.
  *
+ * Only an `exited` omission can name one. `unverifiable` means nobody reached the
+ * host, and a row retired on that vanishes from the user's list because their
+ * connection was down — so it keeps its row and says only what is true.
+ *
  * Only a confirmed row can be named. Without one there is no row this stop
  * speaks for, and retiring on the target's id alone would drop a row on evidence
  * gathered about a different host's workspace.
  */
 export function getWorkspaceCleanupMissingResult(
-  target: PreflightFailureTarget & { approvedCandidate?: WorkspaceCleanupCandidate }
+  target: PreflightFailureTarget & { approvedCandidate?: WorkspaceCleanupCandidate },
+  omissionVerdict: WorkspaceCleanupOmissionVerdict
 ): { ok: false; failure: WorkspaceCleanupFailure; retiredCandidateIdentity?: string } {
+  if (omissionVerdict === 'unverifiable') {
+    return { ok: false, failure: getWorkspaceCleanupUnverifiableFailure(target) }
+  }
   return {
     ok: false,
     failure: getWorkspaceCleanupMissingFailure(target),
@@ -38,6 +47,21 @@ export function getWorkspaceCleanupMissingResult(
           retiredCandidateIdentity: getWorkspaceCleanupCandidateIdentity(target.approvedCandidate)
         }
       : {})
+  }
+}
+
+/** Says only what happened: contact was lost, so nothing was established. */
+function getWorkspaceCleanupUnverifiableFailure(
+  target: PreflightFailureTarget
+): WorkspaceCleanupFailure {
+  return {
+    worktreeId: target.worktreeId,
+    ...(target.executionHostId ? { executionHostId: target.executionHostId } : {}),
+    displayName: target.displayName,
+    message: translate(
+      'auto.store.slices.workspace.cleanup.listingUnverifiable',
+      "Orca couldn't reach this workspace's host to check whether it still exists. Reconnect and try again."
+    )
   }
 }
 

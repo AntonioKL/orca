@@ -12,10 +12,10 @@ import {
 } from '../../../../shared/workspace-cleanup-host-identity'
 import type { PreservedBranchCleanup } from '@/lib/preserved-branch-cleanup'
 import {
-  preflightWorkspaceCleanupCandidates,
   resolveWorkspaceCleanupRemovalTargets,
   type WorkspaceCleanupRemovalTarget
 } from './workspace-cleanup-removal-targets'
+import { preflightWorkspaceCleanupCandidates } from './workspace-cleanup-preflight-scan'
 import {
   applyWorkspaceCleanupDismissal,
   enrichWorkspaceCleanupCandidates

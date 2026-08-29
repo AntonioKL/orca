@@ -405,6 +405,7 @@
         "workspace": {
           "cleanup": {
             "9d6e531da6": "Workspace no longer exists.",
+            "listingUnverifiable": "Orca couldn't reach this workspace's host to check whether it still exists. Reconnect and try again.",
             "changedSinceConfirmation": "Workspace changed after confirmation. Refresh to review it before removing.",
             "unsavedEditorSinceConfirmation": "This workspace has unsaved editor changes that deleting it would discard permanently. Review it before removing.",
             "liveWorkSinceConfirmation": "A terminal or agent in this workspace is running. Review it before removing.",

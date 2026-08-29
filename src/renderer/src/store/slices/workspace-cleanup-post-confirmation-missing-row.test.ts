@@ -45,7 +45,18 @@ function installStoreWithScan(
   return { store, removeWorktree, listedRows }
 }
 
-const EMPTY_SCAN: WorkspaceCleanupScanResult = { scannedAt: NOW, candidates: [], errors: [] }
+/**
+ * An omission from a host that answered. The listing verdict is what makes this
+ * absence an answer at all: without it the same empty result is indistinguishable
+ * from a host nobody reached, and retiring the row on that would drop a workspace
+ * that still exists (see workspace-cleanup-unverifiable-omission.test.ts).
+ */
+const EMPTY_SCAN: WorkspaceCleanupScanResult = {
+  scannedAt: NOW,
+  candidates: [],
+  errors: [],
+  repoListings: [{ repoId: 'repo1', executionHostId: 'local', verdict: 'exited' }]
+}
 
 describe('workspace cleanup list after the rescan stops listing a confirmed workspace', () => {
   it('refuses the removal', async () => {
