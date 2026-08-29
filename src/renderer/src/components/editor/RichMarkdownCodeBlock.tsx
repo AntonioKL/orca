@@ -115,7 +115,9 @@ export function RichMarkdownCodeBlock({
         )}
         {/* If the document has a language not in our list, show it as-is */}
         {languageListMounted && language && !isKnownCodeBlockLanguage(language) ? (
-          <option value={language}>{language}</option>
+          <option key={language} value={language}>
+            {language}
+          </option>
         ) : null}
       </select>
       <button
