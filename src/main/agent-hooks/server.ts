@@ -1210,8 +1210,8 @@ export class AgentHookServer {
     // Why: a second status extension loaded alongside Orca's own posts the same pane key from the
     // same process, so only the launch token separates them. The hold is provisional in both
     // directions — a tokenless launch is never gated until a tokened post owns the pane, and a
-    // held post is delivered anyway once the tokened poster goes silent, so no sequence of posts
-    // can strand a pane on 'working'.
+    // held post is delivered anyway once the tokened poster goes silent or its owner is evicted,
+    // so no sequence of posts can strand a pane on 'working'.
     // Replays carry no live process and are fenced by hydratedLaunchTokenHashByPaneKey instead.
     if (event && event.isReplay !== true) {
       if (

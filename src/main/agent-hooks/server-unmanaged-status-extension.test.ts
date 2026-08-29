@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentHookServer, _internals } from './server'
+import { MAX_TRACKED_PANES } from './unmanaged-status-extension-fence'
 import { makePaneKey } from '../../shared/stable-pane-id'
 import { buildBody, PANE } from './server.test-fixtures'
 
@@ -27,10 +28,48 @@ type Post = { hookEventName: string; launchToken?: string }
 
 // Why structural: the server's enriched payload type is module-private; the assertions only
 // read the route and the projected state.
-type StatusEvent = { source?: string; payload: { state?: string } }
+type StatusEvent = { source?: string; paneKey?: string; payload: { state?: string } }
 
 function states(events: StatusEvent[]): (string | undefined)[] {
   return events.map((event) => event.payload.state)
+}
+
+function statesOn(events: StatusEvent[], paneKey: string): (string | undefined)[] {
+  return states(events.filter((event) => event.paneKey === paneKey))
+}
+
+// Distinct panes that only exist to age PANE out of the fence's owner LRU.
+function fillerPaneKey(index: number): string {
+  return makePaneKey(
+    `tab-${index}`,
+    `${index.toString(16).padStart(8, '0')}-1111-4111-8111-111111111111`
+  )
+}
+
+async function postPane(
+  server: AgentHookServer,
+  paneKey: string,
+  hookEventName: string,
+  launchToken?: string
+): Promise<void> {
+  const env = server.buildPtyEnv()
+  await fetch(`http://127.0.0.1:${env.ORCA_AGENT_HOOK_PORT}/hook/omp`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Orca-Agent-Hook-Token': env.ORCA_AGENT_HOOK_TOKEN
+    },
+    body: JSON.stringify(
+      buildBody(
+        { hook_event_name: hookEventName },
+        {
+          paneKey,
+          tabId: paneKey.split(':')[0],
+          ...(launchToken === undefined ? {} : { launchToken })
+        }
+      )
+    )
+  })
 }
 
 async function postOmp(server: AgentHookServer, posts: Post[]): Promise<void> {
@@ -237,43 +276,44 @@ describe('unmanaged OMP status extension', () => {
     server.setUnmanagedStatusExtensionListener((report) => {
       reports.push(`${report.source}:${report.paneKey}`)
     })
-    const env = server.buildPtyEnv()
-    const paneKeys = Array.from({ length: 13 }, (_, index) =>
-      makePaneKey(
-        `tab-${index}`,
-        `${index.toString(16).padStart(8, '0')}-1111-4111-8111-111111111111`
-      )
-    )
-    const post = async (paneKey: string, hookEventName: string, launchToken?: string) => {
-      await fetch(`http://127.0.0.1:${env.ORCA_AGENT_HOOK_PORT}/hook/omp`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Orca-Agent-Hook-Token': env.ORCA_AGENT_HOOK_TOKEN
-        },
-        body: JSON.stringify(
-          buildBody(
-            { hook_event_name: hookEventName },
-            {
-              paneKey,
-              tabId: paneKey.split(':')[0],
-              ...(launchToken === undefined ? {} : { launchToken })
-            }
-          )
-        )
-      })
-    }
+    const paneKeys = Array.from({ length: 13 }, (_, index) => fillerPaneKey(index))
     try {
       for (const paneKey of paneKeys) {
-        await post(paneKey, 'agent_start', LAUNCH_TOKEN)
-        await post(paneKey, 'agent_end')
-        await post(paneKey, 'agent_end', LAUNCH_TOKEN)
+        await postPane(server, paneKey, 'agent_start', LAUNCH_TOKEN)
+        await postPane(server, paneKey, 'agent_end')
+        await postPane(server, paneKey, 'agent_end', LAUNCH_TOKEN)
       }
       expect(reports).toEqual(paneKeys.map((paneKey) => `omp:${paneKey}`))
     } finally {
       await server.stop()
     }
   })
+
+  it('releases a held post when the owner LRU evicts its pane, rather than destroying it', async () => {
+    // Why this is a third way to strand a pane: eviction is not a delivery event, so a held post
+    // dropped with the owner has nothing left to resolve it. Measured against a control — the
+    // same sequence behind MAX_TRACKED_PANES filler panes stranded on ['working'] where ten
+    // filler panes delivered ['working', 'done'].
+    // Why no window seam here: at the shipped 30s the lapse cannot fire inside this test, so the
+    // delivery below can only have come from the eviction itself.
+    const server = new AgentHookServer()
+    await server.start({ env: 'production' })
+    try {
+      const seen = await runOmpPosts(server, [
+        { hookEventName: 'agent_start', launchToken: LAUNCH_TOKEN },
+        { hookEventName: 'agent_end' }
+      ])
+      expect(statesOn(seen, PANE)).toEqual(['working'])
+      for (let index = 0; index < MAX_TRACKED_PANES; index += 1) {
+        await postPane(server, fillerPaneKey(index), 'agent_start', LAUNCH_TOKEN)
+      }
+      await vi.waitFor(() => {
+        expect(statesOn(seen, PANE)).toEqual(['working', 'done'])
+      })
+    } finally {
+      await server.stop()
+    }
+  }, 30_000)
 
   it('drops a held post when the pane is retired, so a reused key cannot settle on it', async () => {
     // Why the revive matters: retirement alone hides the released post behind the retired-pane

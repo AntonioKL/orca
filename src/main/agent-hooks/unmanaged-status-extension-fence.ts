@@ -18,11 +18,13 @@ import type { AgentHookSource } from '../../shared/agent-hook-relay'
 // "working" is invisible and has no user recovery. So a tokenless post is HELD, not dropped:
 // a following tokened post discards it (and is the proof that two posters share the pane —
 // that is the only thing worth warning about), and silence past the confirmation window
-// re-opens the gate and delivers it. Every held post is therefore either superseded by the
-// managed poster or delivered; no sequence of posts can strand a pane.
+// re-opens the gate and delivers it. Anything else that removes an owner — including the LRU
+// eviction below — releases the hold with it, because eviction is not a delivery event.
+// A held post is therefore superseded, delivered, or dropped with the turn it described when
+// the pane itself is retired; only that last case ends a hold without a post reaching the pane.
 
-/** Panes tracked before the oldest owner is evicted; a lost owner only re-opens the gate. */
-const MAX_TRACKED_PANES = 512
+/** Panes tracked before the oldest owner is evicted; eviction re-opens that pane's gate. */
+export const MAX_TRACKED_PANES = 512
 
 /**
  * How long a held tokenless post waits for the managed poster to contradict it.
@@ -60,8 +62,10 @@ type HeldPost = {
  *
  * Only ever holds a *tokenless* post, and only while a token-carrying poster owns the same pane
  * and source. A tokened post is never rejected, so a relaunch always takes the pane back, and a
- * held post is always resolved — superseded by the managed poster, or delivered when it goes
- * silent for {@link UNMANAGED_POST_CONFIRMATION_WINDOW_MS}.
+ * held post is always resolved — superseded by the managed poster, delivered when it goes silent
+ * for {@link UNMANAGED_POST_CONFIRMATION_WINDOW_MS}, or delivered when the owner is evicted by
+ * {@link MAX_TRACKED_PANES}. Only pane retirement ends a hold without delivering it, and that
+ * closes the pane's row along with it.
  */
 export class UnmanagedStatusExtensionFence {
   private ownerHashByPaneKey = new Map<string, Map<AgentHookSource, string>>()
@@ -162,15 +166,24 @@ export class UnmanagedStatusExtensionFence {
     return true
   }
 
-  private discardPaneHolds(paneKey: string): void {
+  /** Removes every hold on a pane and hands back their releases, so a caller can resolve them. */
+  private takePaneHolds(paneKey: string): (() => void)[] {
     const held = this.heldPostsByPaneKey.get(paneKey)
     if (!held) {
-      return
+      return []
     }
+    const releases: (() => void)[] = []
     for (const entry of held.values()) {
       clearTimeout(entry.timer)
+      releases.push(entry.release)
     }
     this.heldPostsByPaneKey.delete(paneKey)
+    return releases
+  }
+
+  /** Retirement only: the held post describes the turn that just ended, so it must not be replayed. */
+  private discardPaneHolds(paneKey: string): void {
+    this.takePaneHolds(paneKey)
   }
 
   private reportOnce(paneKey: string, source: AgentHookSource): void {
@@ -204,6 +217,7 @@ export class UnmanagedStatusExtensionFence {
     const sources = existing ?? new Map<AgentHookSource, string>()
     sources.set(source, hash)
     this.ownerHashByPaneKey.set(paneKey, sources)
+    const stranded: (() => void)[] = []
     while (this.ownerHashByPaneKey.size > MAX_TRACKED_PANES) {
       const oldest = this.ownerHashByPaneKey.keys().next().value
       if (oldest === undefined) {
@@ -211,7 +225,13 @@ export class UnmanagedStatusExtensionFence {
       }
       this.ownerHashByPaneKey.delete(oldest)
       this.reportedSourcesByPaneKey.delete(oldest)
-      this.discardPaneHolds(oldest)
+      // Why release, not discard: eviction is not a delivery event, so a post destroyed with it
+      // has nothing left to resolve it. Losing the owner is the lapse case — the gate re-opens.
+      stranded.push(...this.takePaneHolds(oldest))
+    }
+    // Why after the loop: a release re-enters classify, which must not run mid-eviction.
+    for (const release of stranded) {
+      release()
     }
   }
 }
