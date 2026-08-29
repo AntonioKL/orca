@@ -199,6 +199,68 @@ describe('a daemon-backed watched exit', () => {
     }
   })
 
+  /** The third ordering of the same reopen, and the one no incarnation names. A daemon reports
+   *  a session its host no longer has as gone WITHOUT an incarnation — `sendExitEvent`, the
+   *  answer to a write still addressed to a retired generation. The retirement fan-out has
+   *  already told that generation which run of the pane is live, so an exit that cannot say
+   *  which run it speaks for cannot be speaking for that one. It is the same superseded death
+   *  as the case above, arriving through the one door an incarnation comparison does not cover.
+   */
+  itOnPosix('does not let an unidentified late exit certify the live replacement', async () => {
+    const replacement = await startDaemonAdapterHarness(() => createMockSubprocess())
+    const router = new DaemonPtyRouter({ current: replacement.adapter, legacy: [adapter] })
+    try {
+      const legacySpawn = await adapter.spawn({ cols: 80, rows: 24 })
+      const id = legacySpawn.id
+      const legacySubprocess = lastSubprocess
+
+      const replacementSpawn = await router.spawn({ cols: 80, rows: 24, sessionId: id })
+      expect(replacement.adapter.hasPty(id), 'the reopen must land on the current daemon').toBe(
+        true
+      )
+      // One pane id, two runs of it — the precondition the whole case rests on.
+      expect(replacementSpawn.incarnationId).not.toBe(legacySpawn.incarnationId)
+
+      // The superseded run dies and is correctly refused: it names itself, and this generation
+      // has already been told the live run is a different one.
+      legacySubprocess._simulateExit(0)
+      await waitFor(() => adapter.hasPty(id) === false)
+      expect(
+        adapter.ptyAbsenceVerdict(id),
+        'the identified half of this death is already refused'
+      ).toBe('unverifiable')
+
+      // A write still addressed to the retired generation is exactly what `sendExitEvent`
+      // answers, and its exit for the shared id carries no incarnation at all.
+      const unidentifiedExits: number[] = []
+      const stopWatching = adapter.onExit((payload) => {
+        if (payload.id === id && payload.incarnationId === undefined) {
+          unidentifiedExits.push(payload.code)
+        }
+      })
+      adapter.write(id, 'x')
+      await waitFor(() => unidentifiedExits.length > 0)
+      stopWatching()
+
+      // The replacement's daemon then goes away without reporting anything, so its own fate is
+      // unknown and only the retired generation is left holding an answer.
+      replacement.adapter.fanoutSyntheticExits(1)
+      expect(router.hasPty(id)).toBe(false)
+
+      const inspection = await inspectPtyProviderProcessForRenderer(router, id)
+      expect(
+        inspection,
+        'an exit that cannot name an incarnation must not answer for the one that is live'
+      ).toEqual(buildAbsentPtyInspection('unverifiable'))
+      expect(inspection).toHaveProperty('unavailable')
+    } finally {
+      router.disposeRouterOnly()
+      replacement.adapter.dispose()
+      await replacement.server.shutdown()
+      rmSync(replacement.dir, { recursive: true, force: true })
+    }
+  })
+
   itOnPosix('publishes the payload the close prompt treats as silent', async () => {
     const router = new DaemonPtyRouter({ current: adapter, legacy: [] })
     const ptyId = await watchedExitOf(router)
