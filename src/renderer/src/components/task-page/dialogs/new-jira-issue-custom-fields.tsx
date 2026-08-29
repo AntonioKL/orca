@@ -8,20 +8,26 @@ import {
   SelectTrigger,
   SelectValue
 } from '@/components/ui/select'
-import { getJiraCreateAllowedValueLabel } from '@/components/task-page-jira-create-fields'
+import {
+  getJiraCreateAllowedValueLabel,
+  isJiraUserCreateField
+} from '@/components/task-page-jira-create-fields'
+import { JiraUserFieldPicker } from './jira-user-field-picker'
 import { translate } from '@/i18n/i18n'
-import type { JiraCreateField } from '../../../../../shared/jira-types'
+import type { JiraCreateField, JiraUserSearchResult } from '../../../../../shared/jira-types'
 
 export function NewJiraIssueCustomFields({
   visibleJiraCreateFields,
   newJiraIssueCustomFieldValues,
   setNewJiraIssueCustomFieldValues,
-  newJiraIssueSubmitting
+  newJiraIssueSubmitting,
+  searchJiraCreateUsers
 }: {
   visibleJiraCreateFields: JiraCreateField[]
   newJiraIssueCustomFieldValues: Record<string, string>
   setNewJiraIssueCustomFieldValues: React.Dispatch<React.SetStateAction<Record<string, string>>>
   newJiraIssueSubmitting: boolean
+  searchJiraCreateUsers: (query: string) => Promise<JiraUserSearchResult>
 }): React.JSX.Element | null {
   if (visibleJiraCreateFields.length === 0) {
     return null
@@ -33,7 +39,20 @@ export function NewJiraIssueCustomFields({
         return (
           <div key={field.key} className="flex min-w-0 flex-col gap-1">
             <label className="text-[11px] font-medium text-muted-foreground">{field.name}</label>
-            {field.allowedValues?.length && field.schema?.type !== 'array' ? (
+            {isJiraUserCreateField(field) ? (
+              <JiraUserFieldPicker
+                label={field.name}
+                value={fieldValue}
+                onValueChange={(value) =>
+                  setNewJiraIssueCustomFieldValues((prev) => ({
+                    ...prev,
+                    [field.key]: value
+                  }))
+                }
+                searchUsers={searchJiraCreateUsers}
+                disabled={newJiraIssueSubmitting}
+              />
+            ) : field.allowedValues?.length && field.schema?.type !== 'array' ? (
               <Select
                 value={fieldValue}
                 onValueChange={(value) =>

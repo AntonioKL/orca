@@ -13,6 +13,8 @@ import type {
   JiraSiteSelection,
   JiraTransition,
   JiraUser,
+  JiraUserSearchArgs,
+  JiraUserSearchResult,
   JiraViewer
 } from '../../shared/jira-types'
 
@@ -76,6 +78,7 @@ export type JiraApi = {
     query?: string
     siteId?: string
   }) => Promise<JiraUser[]>
+  searchUsers: (args: JiraUserSearchArgs) => Promise<JiraUserSearchResult>
   listTransitions: (args: { key: string; siteId?: string }) => Promise<JiraTransition[]>
   getProjectStatusOrder: (args: {
     projectKey: string

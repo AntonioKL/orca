@@ -217,4 +217,43 @@ describe('jira RPC methods', () => {
     expect(runtime.jiraListTransitions).toHaveBeenCalledWith('ABC-3', 'site-1')
     expect(runtime.jiraGetProjectStatusOrder).toHaveBeenCalledWith('ALP', 'site-1')
   })
+
+  it('accepts a project-scoped user search, which create needs before an issue exists', async () => {
+    const runtime = {
+      getRuntimeId: () => 'test-runtime',
+      jiraSearchUsers: vi.fn().mockResolvedValue({ ok: true, users: [] })
+    } as unknown as OrcaRuntimeService
+    const dispatcher = new RpcDispatcher({ runtime, methods: JIRA_METHODS })
+
+    const response = await dispatcher.dispatch(
+      makeRequest('jira.searchUsers', {
+        projectIdOrKey: 'ALP',
+        query: 'Ada',
+        siteId: 'site-1'
+      })
+    )
+
+    expect(response.ok).toBe(true)
+    expect(runtime.jiraSearchUsers).toHaveBeenCalledWith(
+      { projectIdOrKey: 'ALP', issueKey: undefined },
+      'Ada',
+      'site-1'
+    )
+  })
+
+  it('accepts an issue-scoped user search on the same method', async () => {
+    const runtime = {
+      getRuntimeId: () => 'test-runtime',
+      jiraSearchUsers: vi.fn().mockResolvedValue({ ok: true, users: [] })
+    } as unknown as OrcaRuntimeService
+    const dispatcher = new RpcDispatcher({ runtime, methods: JIRA_METHODS })
+
+    await dispatcher.dispatch(makeRequest('jira.searchUsers', { issueKey: 'ABC-3' }))
+
+    expect(runtime.jiraSearchUsers).toHaveBeenCalledWith(
+      { projectIdOrKey: undefined, issueKey: 'ABC-3' },
+      undefined,
+      undefined
+    )
+  })
 })

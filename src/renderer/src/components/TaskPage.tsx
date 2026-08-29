@@ -1388,6 +1388,8 @@ export default function TaskPage(): React.JSX.Element {
     newJiraIssueTargetType,
     visibleJiraCreateFields,
     hasMissingJiraCreateField,
+    missingJiraCreateFieldNames,
+    searchJiraCreateUsers,
     handleNewJiraIssueProjectComboboxOpenChange,
     handleNewJiraIssueProjectSelect,
     handleNewJiraIssueProjectTriggerKeyDown
@@ -3078,7 +3080,9 @@ export default function TaskPage(): React.JSX.Element {
     newJiraIssueCustomFieldValues,
     setNewJiraIssueCustomFieldValues,
     submitShortcutLabel,
-    hasMissingJiraCreateField
+    hasMissingJiraCreateField,
+    missingJiraCreateFieldNames,
+    searchJiraCreateUsers
   }
   const connectDialogs: TaskPageConnectDialogsProps = {
     gitlabDialogItem,

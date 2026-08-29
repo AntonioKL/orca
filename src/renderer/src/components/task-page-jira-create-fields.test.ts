@@ -6,8 +6,10 @@ import {
   findJiraCreateAllowedValue,
   getJiraCreateAllowedValueLabel,
   getJiraCreateOptionPayload,
+  isJiraUserCreateField,
   isVisibleJiraCreateField
 } from './task-page-jira-create-fields'
+import { isJiraUserFieldValue } from '../../../shared/jira-user-field-value'
 import type { JiraCreateField } from '../../../shared/jira-types'
 
 function field(overrides: Partial<JiraCreateField> = {}): JiraCreateField {
@@ -169,5 +171,65 @@ describe('buildJiraCreateCustomFields', () => {
 
   it('treats a missing draft entry as blank', () => {
     expect(buildJiraCreateCustomFields([field({ key: 'a' })], { other: 'x' })).toBeUndefined()
+  })
+})
+
+describe('isJiraUserCreateField', () => {
+  const cases: [string, JiraCreateField['schema'], boolean][] = [
+    ['a single user field', { type: 'user' }, true],
+    ['a multi-user field', { type: 'array', items: 'user' }, true],
+    ['a user picker custom field', { type: 'user', custom: 'com.atlassian:userpicker' }, true],
+    ['an option field', { type: 'option' }, false],
+    ['a label array', { type: 'array', items: 'string' }, false],
+    ['an untyped field', undefined, false]
+  ]
+
+  for (const [label, schema, expected] of cases) {
+    it(`returns ${expected} for ${label}`, () => {
+      expect(isJiraUserCreateField(field({ schema }))).toBe(expected)
+    })
+  }
+})
+
+describe('buildJiraCreateFieldValue for user fields', () => {
+  // Jira Cloud rejects a bare string reporter with "Reporter is required." — the
+  // value has to leave the renderer as a user marker for the host to resolve.
+  it('wraps a picked account id instead of sending it as text', () => {
+    const reporter = field({ key: 'reporter', name: 'Reporter', schema: { type: 'user' } })
+    expect(buildJiraCreateFieldValue(reporter, '5abc')).toEqual({ accountId: '5abc' })
+  })
+
+  it('wraps every entry of a multi-user field', () => {
+    const participants = field({
+      key: 'customfield_100',
+      schema: { type: 'array', items: 'user' }
+    })
+    expect(buildJiraCreateFieldValue(participants, '5abc, 5def')).toEqual([
+      { accountId: '5abc' },
+      { accountId: '5def' }
+    ])
+  })
+
+  it('drops a blank user field so create never sends an empty reporter', () => {
+    const reporter = field({ key: 'reporter', schema: { type: 'user' } })
+    expect(buildJiraCreateFieldValue(reporter, '   ')).toBeUndefined()
+    expect(
+      buildJiraCreateFieldValue(field({ schema: { type: 'array', items: 'user' } }), ' , ')
+    ).toBeUndefined()
+  })
+
+  // The host recognizes the marker with this same predicate before rewriting it
+  // to Jira's per-deployment user shape.
+  it('produces a value the host recognizes as a user field', () => {
+    const reporter = field({ key: 'reporter', schema: { type: 'user' } })
+    expect(isJiraUserFieldValue(buildJiraCreateFieldValue(reporter, '5abc'))).toBe(true)
+    expect(isJiraUserFieldValue(buildJiraCreateFieldValue(field({}), 'plain'))).toBe(false)
+  })
+
+  it('carries the reporter through the create payload builder', () => {
+    const reporter = field({ key: 'reporter', schema: { type: 'user' } })
+    expect(buildJiraCreateCustomFields([reporter], { reporter: '5abc' })).toEqual({
+      reporter: { accountId: '5abc' }
+    })
   })
 })

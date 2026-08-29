@@ -33,7 +33,12 @@ import { getJiraProjectSelectionKey } from '@/components/task-page-jira-project-
 import { isScreenSubmitShortcut } from '@/lib/screen-submit-shortcut'
 import { translate } from '@/i18n/i18n'
 import { cn } from '@/lib/utils'
-import type { JiraCreateField, JiraIssueType, JiraProject } from '../../../../../shared/jira-types'
+import type {
+  JiraCreateField,
+  JiraIssueType,
+  JiraProject,
+  JiraUserSearchResult
+} from '../../../../../shared/jira-types'
 
 export type NewJiraIssueDialogProps = {
   newJiraIssueOpen: boolean
@@ -69,6 +74,8 @@ export type NewJiraIssueDialogProps = {
   newJiraIssueCustomFieldValues: Record<string, string>
   setNewJiraIssueCustomFieldValues: React.Dispatch<React.SetStateAction<Record<string, string>>>
   hasMissingJiraCreateField: boolean
+  missingJiraCreateFieldNames: string[]
+  searchJiraCreateUsers: (query: string) => Promise<JiraUserSearchResult>
   submitShortcutLabel: string
 }
 
@@ -107,6 +114,8 @@ export function NewJiraIssueDialog(props: NewJiraIssueDialogProps): React.JSX.El
     newJiraIssueCustomFieldValues,
     setNewJiraIssueCustomFieldValues,
     hasMissingJiraCreateField,
+    missingJiraCreateFieldNames,
+    searchJiraCreateUsers,
     submitShortcutLabel
   } = props
   return (
@@ -308,10 +317,20 @@ export function NewJiraIssueDialog(props: NewJiraIssueDialogProps): React.JSX.El
           ) : null}
           <NewJiraIssueCustomFields
             visibleJiraCreateFields={visibleJiraCreateFields}
+            searchJiraCreateUsers={searchJiraCreateUsers}
             newJiraIssueCustomFieldValues={newJiraIssueCustomFieldValues}
             setNewJiraIssueCustomFieldValues={setNewJiraIssueCustomFieldValues}
             newJiraIssueSubmitting={newJiraIssueSubmitting}
           />
+          {!jiraCreateFieldsLoading && missingJiraCreateFieldNames.length > 0 ? (
+            <p className="text-[11px] text-muted-foreground">
+              {translate(
+                'auto.components.task.page.dialogs.new.jira.issue.dialog.missingRequiredFields',
+                'Jira needs a value for {{value0}} before it will accept this issue.',
+                { value0: missingJiraCreateFieldNames.join(', ') }
+              )}
+            </p>
+          ) : null}
           <p className="text-[10px] text-muted-foreground">
             {submitShortcutLabel} {translate('auto.components.TaskPage.fc0d8a1fa4', 'to submit.')}
           </p>

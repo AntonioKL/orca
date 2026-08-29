@@ -7,6 +7,7 @@ import type {
 import { acquire, release } from './request-queue'
 import { apiBasePath, jiraRequest } from './authenticated-request'
 import { clearToken, getClients, isAuthError } from './client'
+import { resolveJiraUserFieldValues } from '../../shared/jira-user-field-value'
 import { issueUrl, toBodyText } from './jira-issue-mapping'
 import type { JiraRecord } from './jira-record-pages'
 
@@ -34,7 +35,9 @@ export async function createIssue(args: JiraCreateIssueArgs): Promise<JiraCreate
       if (!fieldKey || value === undefined || value === null || value === '') {
         continue
       }
-      fields[fieldKey] = value
+      // User fields arrive as the provider-neutral {accountId} marker; only the
+      // host knows whether this site wants Cloud {id} or Server/DC {name}.
+      fields[fieldKey] = resolveJiraUserFieldValues(value, entry.site.authType)
     }
     const created = await jiraRequest<{ id: string; key: string; self: string }>(
       entry,

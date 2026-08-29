@@ -73,6 +73,20 @@ export type JiraUser = {
   avatarUrl?: string
 }
 
+// A user search is scoped to an existing issue (edit) or to a project (create,
+// where no issue key exists yet). Both scopes are optional on the wire so a
+// newer client can ask for either without breaking an older host's decoder.
+export type JiraUserSearchArgs = {
+  projectIdOrKey?: string
+  issueKey?: string
+  query?: string
+  siteId?: string
+}
+
+// Result-shaped rather than a bare array: an empty dropdown must be
+// distinguishable from a search that failed.
+export type JiraUserSearchResult = { ok: true; users: JiraUser[] } | { ok: false; error: string }
+
 export type JiraPriority = {
   id: string
   name: string

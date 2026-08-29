@@ -1,9 +1,4 @@
-import type {
-  JiraCreateField,
-  JiraIssueType,
-  JiraPriority,
-  JiraUser
-} from '../../shared/jira-types'
+import type { JiraCreateField, JiraIssueType, JiraPriority } from '../../shared/jira-types'
 import { acquire, release } from './request-queue'
 import { apiBasePath, jiraRequest } from './authenticated-request'
 import { clearToken, getClients, isAuthError } from './client'
@@ -11,8 +6,7 @@ import {
   getCreateFieldRecords,
   mapCreateField,
   mapIssueType,
-  mapPriority,
-  mapUser
+  mapPriority
 } from './jira-issue-mapping'
 import {
   asFiniteNumber,
@@ -119,40 +113,6 @@ export async function listPriorities(siteId?: string | null): Promise<JiraPriori
       throw error
     }
     console.warn('[jira] listPriorities failed:', error)
-    return []
-  } finally {
-    release()
-  }
-}
-
-export async function listAssignableUsers(
-  key: string,
-  query?: string,
-  siteId?: string | null
-): Promise<JiraUser[]> {
-  const entry = getClients(siteId)[0]
-  if (!entry) {
-    return []
-  }
-  const isServer = entry.site.authType === 'server'
-  const params = new URLSearchParams({ issueKey: key, maxResults: '50' })
-  if (query?.trim()) {
-    // Server/DC filters assignable users by `username`; `query` is Cloud-only.
-    params.set(isServer ? 'username' : 'query', query.trim())
-  }
-  await acquire()
-  try {
-    const response = await jiraRequest<JiraRecord[]>(
-      entry,
-      `${apiBasePath(entry.site)}/user/assignable/search?${params.toString()}`
-    )
-    return response.map(mapUser).filter((user): user is JiraUser => !!user)
-  } catch (error) {
-    if (isAuthError(error)) {
-      clearToken(entry.site.id)
-      throw error
-    }
-    console.warn('[jira] listAssignableUsers failed:', error)
     return []
   } finally {
     release()
