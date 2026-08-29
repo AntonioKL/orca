@@ -7,7 +7,10 @@ import { classifyTitleActivity, isExplicitAgentStatusFresh } from '@/lib/pane-ag
 import type { WorkspaceCleanupCandidate } from '../../../../shared/workspace-cleanup'
 import { getWorktreeVisitTimestamp } from '@/lib/worktree-visit-recency'
 import { inspectRuntimeTerminalProcess } from '@/runtime/runtime-terminal-process-inspection'
-import { readPtyProcessInspectionEvidence } from '../../../../shared/pty-process-inspection-evidence'
+import {
+  hasPublishedPtyProcessInspectionEvidence,
+  readPtyProcessInspectionEvidence
+} from '../../../../shared/pty-process-inspection-evidence'
 
 const RECENT_VISIBLE_CONTEXT_MS = 24 * 60 * 60 * 1000
 const VIEWED_FROM_CLEANUP_MS = 2 * 60 * 60 * 1000
@@ -189,6 +192,20 @@ export async function probeTerminalLiveness(
       if (
         evidence.foreground.verdict === 'unverifiable' ||
         evidence.children.verdict === 'unverifiable'
+      ) {
+        unverifiable = true
+        continue
+      }
+      // Why: a host that published no evidence at all was read back through the
+      // reader's LEGACY fallback, which restates its two values as an observation.
+      // A retained pre-v27 daemon publishes `zsh` + `false` both when the pane
+      // really sits at an idle shell and when its foreground read fell back to the
+      // shell title, and it has no field to tell the two apart. Believe such a host
+      // when it reports live work — that can only add a blocker — but never let its
+      // silence stand as proof of idle on the path that deletes the workspace.
+      if (
+        !hasPublishedPtyProcessInspectionEvidence(inspection) &&
+        evidence.children.verdict !== 'live'
       ) {
         unverifiable = true
         continue
