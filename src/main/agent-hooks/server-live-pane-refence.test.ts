@@ -215,6 +215,22 @@ describe("relay spool replay is fenced on the pane's current generation", () => 
     expect(promptOf(server)).toBe('offline agent finished')
   })
 
+  it('keeps the spool of a pane whose later launch minted no token', () => {
+    // Why this is the reachable shape and not a contrivance: `orca-runtime.ts` mints a launch
+    // token only when a `launchConfig` is present, so an ordinary relaunch into an
+    // already-tokened pane is untokened. Its posts are tokenless, its spool is tokenless, and
+    // the expectation the first launch armed is deliberately never cleared by a tokenless one.
+    const server = new AgentHookServer()
+    server.noteAgentPaneLaunchToken(PANE, 'token-a')
+    server.noteAgentPaneLaunchToken(PANE, undefined)
+
+    post(server, 'claude', 'UserPromptSubmit', '', 'untokened relaunch finished', {
+      isReplay: true
+    })
+
+    expect(promptOf(server)).toBe('untokened relaunch finished')
+  })
+
   it('does not clear the expectation when a tokenless shell respawns into the pane', () => {
     // Why: the expectation is only ever RAISED. A shell launched with no agent token is not
     // evidence about any generation, so it must not open the pane to the generation the last
