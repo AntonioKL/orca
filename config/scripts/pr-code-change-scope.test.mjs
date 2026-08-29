@@ -17,6 +17,7 @@ const expensiveJobs = [
   'static_analysis',
   'typecheck',
   'git_compatibility',
+  'codex_index_heal_contract',
   'xterm_patch_sync',
   'shell_contracts',
   'test',
@@ -115,6 +116,27 @@ describe('per-job path classification', () => {
     })
     expectClassification(['src/shared/git-binary-compatibility.test.ts'], {
       git_compatibility: true
+    })
+  })
+
+  it('runs the Codex index-heal contract only when the heal or its transport changes', () => {
+    expectClassification(['src/main/codex/codex-session-index-heal.ts'], {
+      codex_index_heal_contract: true,
+      package: true,
+      package_windows: true
+    })
+    expectClassification(['src/main/codex/codex-app-server-session.ts'], {
+      codex_index_heal_contract: true,
+      package: true,
+      package_windows: true
+    })
+    expectClassification(['src/main/codex/codex-index-heal-binary-contract.test.ts'], {
+      codex_index_heal_contract: true
+    })
+    // A neighbouring Codex module must not drag the real-binary job in.
+    expectClassification(['src/main/codex/codex-home-paths.ts'], {
+      package: true,
+      package_windows: true
     })
   })
 

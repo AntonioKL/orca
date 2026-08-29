@@ -20,6 +20,7 @@ export const PR_CHECK_JOBS = [
   'static_analysis',
   'typecheck',
   'git_compatibility',
+  'codex_index_heal_contract',
   'xterm_patch_sync',
   'shell_contracts',
   'test',
@@ -46,6 +47,15 @@ const GIT_COMPAT_PREFIXES = [
   'src/main/git/',
   'src/relay/git-',
   'config/scripts/git-binary-compatibility'
+]
+
+// Why narrow: the contract pins Codex's read-repair, so it runs when the heal that
+// depends on it, its app-server transport, or the contract itself changes.
+const CODEX_INDEX_HEAL_CONTRACT_PREFIXES = [
+  'src/main/codex/codex-index-heal-binary-contract',
+  'src/main/codex/codex-session-index-heal',
+  'src/main/codex/codex-app-server-session',
+  'src/main/codex/codex-state-db'
 ]
 
 const XTERM_PREFIXES = [
@@ -256,6 +266,9 @@ function jobDetector(job) {
   switch (job) {
     case 'git_compatibility':
       return (files) => files.some((file) => matchesPrefix(file, GIT_COMPAT_PREFIXES))
+    case 'codex_index_heal_contract':
+      return (files) =>
+        files.some((file) => matchesPrefix(file, CODEX_INDEX_HEAL_CONTRACT_PREFIXES))
     case 'xterm_patch_sync':
       return (files) => files.some((file) => matchesPrefix(file, XTERM_PREFIXES))
     case 'shell_contracts':
