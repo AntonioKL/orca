@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto'
 import type { Store } from '../persistence'
 import type { GlobalSettings } from '../../shared/global-settings-types'
 import type { Repo } from '../../shared/repo-types'
+import type { SetupAgentStartupPolicy } from '../../shared/orca-yaml-hook-types'
 import type {
   LocalBaseRefRefreshResult,
   LocalBaseRefUpdateSuggestion
@@ -33,6 +34,7 @@ import {
   resolveDefaultBaseRefViaExec,
   resolveDefaultBaseRefWithLocalGit
 } from '../git/repo'
+import { getBranchConflictKindViaExec } from '../git/repo-branch-conflict'
 import { resolveLocalGitUsername, getSshGitUsername } from '../git/git-username'
 import { hasCommitObjectViaGitExec } from '../git/commit-object-ref'
 import { probeWorktreeBaseRefPresence } from '../git/worktree-base-ref-probe'
@@ -838,98 +840,19 @@ async function canCheckoutExistingLocalBranchSsh(
   return !worktrees.some((worktree) => normalizeLocalBranchName(worktree.branch) === branchName)
 }
 
-async function listSshRemoteNames(provider: SshGitProvider, repoPath: string): Promise<string[]> {
-  try {
-    const { stdout } = await provider.exec(['remote'], repoPath)
-    return stdout
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .sort((a, b) => b.length - a.length)
-  } catch {
-    return []
-  }
-}
+type SshGitExecutor = Pick<SshGitProvider, 'exec'>
 
-function isAllowedSshRemoteBaseRef(refName: string, allowedBaseRef: string): boolean {
-  if (!allowedBaseRef) {
-    return false
-  }
-  const normalizedAllowedRef = allowedBaseRef.startsWith('refs/remotes/')
-    ? allowedBaseRef
-    : `refs/remotes/${allowedBaseRef}`
-  return refName === normalizedAllowedRef
-}
-
-function resolveSshRemoteBranchName(refName: string, remoteNames: string[]): string {
-  const remotePrefix = 'refs/remotes/'
-  if (!refName.startsWith(remotePrefix)) {
-    return refName
-  }
-  const remoteAndBranch = refName.slice(remotePrefix.length)
-  const remote = remoteNames.find((candidate) => remoteAndBranch.startsWith(`${candidate}/`))
-  if (remote) {
-    return remoteAndBranch.slice(remote.length + 1)
-  }
-  return remoteAndBranch.split('/').slice(1).join('/') || remoteAndBranch
-}
-
-async function hasSshRemoteBranchConflict(
-  provider: SshGitProvider,
-  repoPath: string,
-  branchName: string,
-  allowedBaseRef: string
-): Promise<boolean> {
-  const remoteNames = await listSshRemoteNames(provider, repoPath)
-  try {
-    const { stdout } = await provider.exec(
-      ['for-each-ref', '--format=%(refname)', 'refs/remotes'],
-      repoPath
-    )
-    return stdout.split(/\r?\n/).some((line) => {
-      const refName = line.trim()
-      if (!refName || /^refs\/remotes\/.+\/HEAD$/.test(refName)) {
-        return false
-      }
-      if (isAllowedSshRemoteBaseRef(refName, allowedBaseRef)) {
-        return false
-      }
-      // Why: `git branch --all --list feature/x` doesn't match `remotes/origin/feature/x`; parse remote refs directly.
-      return resolveSshRemoteBranchName(refName, remoteNames) === branchName
-    })
-  } catch {
-    return false
-  }
-}
-
-async function hasSshLocalBranchConflict(
-  provider: SshGitProvider,
-  repoPath: string,
-  branchName: string
-): Promise<boolean> {
-  try {
-    const { stdout } = await provider.exec(
-      ['rev-parse', '--verify', '--quiet', `refs/heads/${branchName}^{commit}`],
-      repoPath
-    )
-    return stdout.trim().length > 0
-  } catch {
-    return false
-  }
-}
-
-async function getSshBranchConflictKind(
-  provider: SshGitProvider,
+export function getSshBranchConflictKind(
+  provider: SshGitExecutor,
   repoPath: string,
   branchName: string,
   allowedBaseRef: string
 ): Promise<'local' | 'remote' | null> {
-  if (await hasSshLocalBranchConflict(provider, repoPath, branchName)) {
-    return 'local'
-  }
-  return (await hasSshRemoteBranchConflict(provider, repoPath, branchName, allowedBaseRef))
-    ? 'remote'
-    : null
+  return getBranchConflictKindViaExec(
+    (argv) => provider.exec(argv, repoPath),
+    branchName,
+    allowedBaseRef
+  )
 }
 
 type SelectedReviewBranchInput = Pick<
@@ -1259,7 +1182,8 @@ async function createRemoteSetupRunnerScript(
   worktreePath: string,
   script: string,
   gitProvider: SshGitProvider,
-  fsProvider: IFilesystemProvider
+  fsProvider: IFilesystemProvider,
+  projectStartupPolicy?: SetupAgentStartupPolicy
 ): Promise<CreateWorktreeResult['setup']> {
   const useWindowsFormat = isWindowsAbsolutePathLike(worktreePath)
   // Why: SSH terminals choose their shell on the remote host; local Windows
@@ -1281,7 +1205,10 @@ async function createRemoteSetupRunnerScript(
   return {
     runnerScriptPath,
     envVars: getSetupRunnerEnvVars(repo, worktreePath),
-    ...(shouldWaitForSetupBeforeAgentStartup(repo.hookSettings?.setupAgentStartupPolicy)
+    ...(shouldWaitForSetupBeforeAgentStartup(
+      repo.hookSettings?.setupAgentStartupPolicy,
+      projectStartupPolicy
+    )
       ? { waitForAgentStartup: true }
       : {})
   }
@@ -2030,7 +1957,8 @@ export async function createRemoteWorktree(
             created.path,
             setupScript,
             provider,
-            fsProvider
+            fsProvider,
+            yamlHooks?.setupAgentStartupPolicy
           )
         } catch (error) {
           console.error(`[hooks] Failed to prepare setup runner for ${created.path}:`, error)
@@ -2721,13 +2649,13 @@ export async function createLocalWorktree(
       try {
         // Why: main only writes the runner script and must not execute setup itself, or we reintroduce the old hidden background-hook behavior.
         // Why: worktree already exists, so a runner-gen failure degrades to "created without setup launch" rather than failing creation.
-        // Why: both trailing args are optional — the shell is undefined off Windows.
         setup = createSetupRunnerScript(
           repo,
           worktreePath,
           setupScript,
           localWorktreeGitOptionArgs[0],
-          resolveSetupRunnerShell(settings)
+          resolveSetupRunnerShell(settings),
+          createdYamlHooks?.setupAgentStartupPolicy
         )
       } catch (error) {
         console.error(`[hooks] Failed to prepare setup runner for ${worktreePath}:`, error)
