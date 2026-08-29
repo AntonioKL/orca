@@ -5,6 +5,7 @@ import type { SourceControlAiSettings } from '../../../../shared/source-control-
 import { normalizeSourceControlAiSettings } from '../../../../shared/source-control-ai'
 import { getDefaultVoiceSettings } from '../../../../shared/constants'
 import type { SettingsNavSection, SettingsNavTarget } from '@/lib/settings-navigation-types'
+import type { SettingsDeepLinkTargetWatch } from './settings-deep-link-target-watcher'
 
 export const SETTINGS_NAV_GROUPS = [
   {
@@ -146,6 +147,13 @@ export function cancelPendingSettingsSubsectionScrollFrame(
     cancelAnimationFrame(frameRef.current)
     frameRef.current = null
   }
+}
+
+export function cancelPendingSettingsDeepLinkTargetWatch(
+  watchRef: MutableRefObject<SettingsDeepLinkTargetWatch | null>
+): void {
+  watchRef.current?.cancel()
+  watchRef.current = null
 }
 
 export function isEditableTarget(target: EventTarget | null): boolean {
