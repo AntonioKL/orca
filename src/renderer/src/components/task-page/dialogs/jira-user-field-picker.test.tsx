@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { JiraUserFieldPicker } from './jira-user-field-picker'
 import type { JiraUserSearchResult } from '../../../../../shared/jira-types'
@@ -8,6 +9,7 @@ import type { JiraUserSearchResult } from '../../../../../shared/jira-types'
 afterEach(cleanup)
 
 const ALEX = { accountId: '5b10a2844c20165700ede21g', displayName: 'Alex Rivera' }
+const BLAIR = { accountId: '5c20b3955d31276811fef32h', displayName: 'Blair Chen' }
 
 function renderPicker(
   searchUsers: (query: string) => Promise<JiraUserSearchResult>,
@@ -131,5 +133,38 @@ describe('JiraUserFieldPicker', () => {
     )
     // Closed and never searched: the raw id is all it can honestly show.
     expect(screen.getByRole('combobox', { name: 'Reporter' }).textContent).toContain(ALEX.accountId)
+  })
+
+  it('retains multiple picked users for an array user field', async () => {
+    const searchUsers = vi.fn(async () => ({ ok: true as const, users: [ALEX, BLAIR] }))
+
+    function Harness(): React.JSX.Element {
+      const [value, setValue] = useState('')
+      return (
+        <>
+          <JiraUserFieldPicker
+            label="Participants"
+            value={value}
+            onValueChange={setValue}
+            searchUsers={searchUsers}
+            multiple
+          />
+          <output aria-label="picked users">{value}</output>
+        </>
+      )
+    }
+
+    render(<Harness />)
+    fireEvent.click(screen.getByRole('combobox', { name: 'Participants' }))
+    await waitFor(() => expect(screen.getByText(ALEX.displayName)).toBeTruthy())
+    fireEvent.click(screen.getByText(ALEX.displayName))
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'Participants' }))
+    await waitFor(() => expect(screen.getByText(BLAIR.displayName)).toBeTruthy())
+    fireEvent.click(screen.getByText(BLAIR.displayName))
+
+    expect(screen.getByLabelText('picked users').textContent).toBe(
+      `${ALEX.accountId}, ${BLAIR.accountId}`
+    )
   })
 })

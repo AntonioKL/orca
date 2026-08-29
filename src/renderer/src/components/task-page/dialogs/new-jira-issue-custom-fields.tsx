@@ -51,6 +51,7 @@ export function NewJiraIssueCustomFields({
                 }
                 searchUsers={searchJiraCreateUsers}
                 disabled={newJiraIssueSubmitting}
+                multiple={field.schema?.type === 'array'}
               />
             ) : field.allowedValues?.length && field.schema?.type !== 'array' ? (
               <Select

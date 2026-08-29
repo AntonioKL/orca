@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { NewJiraIssueCustomFields } from './new-jira-issue-custom-fields'
 import type { JiraCreateField } from '../../../../../shared/jira-types'
@@ -19,6 +20,13 @@ const NOTES: JiraCreateField = {
   name: 'Notes',
   required: true,
   schema: { type: 'string' }
+}
+
+const PARTICIPANTS: JiraCreateField = {
+  key: 'customfield_10',
+  name: 'Participants',
+  required: true,
+  schema: { type: 'array', items: 'user' }
 }
 
 function renderFields(
@@ -55,6 +63,38 @@ describe('NewJiraIssueCustomFields', () => {
     renderFields([NOTES])
 
     expect(screen.getByRole('textbox', { name: 'Notes' })).toBeTruthy()
+  })
+
+  it('keeps every selection for a multi-user field', async () => {
+    const alex = { accountId: 'account-1', displayName: 'Alex Rivera' }
+    const blair = { accountId: 'account-2', displayName: 'Blair Chen' }
+    const searchUsers = vi.fn(async () => ({ ok: true as const, users: [alex, blair] }))
+
+    function Harness(): React.JSX.Element {
+      const [values, setValues] = useState<Record<string, string>>({})
+      return (
+        <>
+          <NewJiraIssueCustomFields
+            visibleJiraCreateFields={[PARTICIPANTS]}
+            newJiraIssueCustomFieldValues={values}
+            setNewJiraIssueCustomFieldValues={setValues}
+            newJiraIssueSubmitting={false}
+            searchJiraCreateUsers={searchUsers}
+          />
+          <output aria-label="participant ids">{values[PARTICIPANTS.key]}</output>
+        </>
+      )
+    }
+
+    render(<Harness />)
+    fireEvent.click(screen.getByRole('combobox', { name: 'Participants' }))
+    await waitFor(() => expect(screen.getByText(alex.displayName)).toBeTruthy())
+    fireEvent.click(screen.getByText(alex.displayName))
+    fireEvent.click(screen.getByRole('combobox', { name: 'Participants' }))
+    await waitFor(() => expect(screen.getByText(blair.displayName)).toBeTruthy())
+    fireEvent.click(screen.getByText(blair.displayName))
+
+    expect(screen.getByLabelText('participant ids').textContent).toBe('account-1, account-2')
   })
 
   it('renders nothing when there are no required fields', () => {

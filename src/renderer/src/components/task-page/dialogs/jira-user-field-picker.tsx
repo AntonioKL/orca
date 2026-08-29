@@ -26,7 +26,8 @@ export function JiraUserFieldPicker({
   value,
   onValueChange,
   searchUsers,
-  disabled
+  disabled,
+  multiple = false
 }: {
   label: string
   value: string
@@ -34,6 +35,7 @@ export function JiraUserFieldPicker({
   // Must be referentially stable: it re-triggers the search when it changes.
   searchUsers: (query: string) => Promise<JiraUserSearchResult>
   disabled?: boolean
+  multiple?: boolean
 }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -68,6 +70,18 @@ export function JiraUserFieldPicker({
   }, [open, query, searchUsers])
 
   const users = useMemo(() => (search.status === 'ready' ? search.users : []), [search])
+  const selectedAccountIds = useMemo(
+    () =>
+      multiple
+        ? value
+            .split(',')
+            .map((accountId) => accountId.trim())
+            .filter(Boolean)
+        : value.trim()
+          ? [value.trim()]
+          : [],
+    [multiple, value]
+  )
   const trimmedQuery = query.trim()
   // Jira accepts an accountId the search never surfaced (restricted directory,
   // a value pasted from Jira itself), so a typed identifier stays selectable.
@@ -77,24 +91,34 @@ export function JiraUserFieldPicker({
     !users.some((user) => user.accountId === trimmedQuery)
 
   const selectedLabel = useMemo(() => {
-    if (!value) {
+    if (selectedAccountIds.length === 0) {
       return ''
     }
-    return (
-      users.find((user) => user.accountId === value)?.displayName ?? pickedNames[value] ?? value
-    )
-  }, [pickedNames, users, value])
+    return selectedAccountIds
+      .map(
+        (accountId) =>
+          users.find((user) => user.accountId === accountId)?.displayName ??
+          pickedNames[accountId] ??
+          accountId
+      )
+      .join(', ')
+  }, [pickedNames, selectedAccountIds, users])
 
   const handleSelect = useCallback(
     (accountId: string, displayName?: string) => {
-      onValueChange(accountId)
+      const nextAccountIds = multiple
+        ? selectedAccountIds.includes(accountId)
+          ? selectedAccountIds.filter((selected) => selected !== accountId)
+          : [...selectedAccountIds, accountId]
+        : [accountId]
+      onValueChange(nextAccountIds.join(', '))
       if (displayName) {
         setPickedNames((prev) => ({ ...prev, [accountId]: displayName }))
       }
       setOpen(false)
       setQuery('')
     },
-    [onValueChange]
+    [multiple, onValueChange, selectedAccountIds]
   )
 
   return (
@@ -180,7 +204,7 @@ export function JiraUserFieldPicker({
                 <Check
                   className={cn(
                     'size-3.5 text-foreground',
-                    user.accountId === value ? 'opacity-100' : 'opacity-0'
+                    selectedAccountIds.includes(user.accountId) ? 'opacity-100' : 'opacity-0'
                   )}
                 />
                 <span className="min-w-0 flex-1 truncate">{user.displayName}</span>
@@ -200,7 +224,7 @@ export function JiraUserFieldPicker({
                 <Check
                   className={cn(
                     'size-3.5 text-foreground',
-                    trimmedQuery === value ? 'opacity-100' : 'opacity-0'
+                    selectedAccountIds.includes(trimmedQuery) ? 'opacity-100' : 'opacity-0'
                   )}
                 />
                 <span className="min-w-0 flex-1 truncate">
