@@ -9,6 +9,7 @@ import { parsePairingCode, type PairingOffer } from '../../shared/pairing'
 import { launchOrcaApp } from './launch'
 import { getDefaultUserDataPath, readMetadata } from './metadata'
 import { getCliStatus, projectRemoteAppStatus } from './status'
+import { describeOpenTimeout } from './runtime-open-timeout-reason'
 import { sendRequest } from './transport'
 import { RuntimeClientError, RuntimeRpcFailureError, type RuntimeRpcSuccess } from './types'
 import { attachMutationRecovery } from './client-error-recovery'
@@ -263,8 +264,13 @@ export class RuntimeClient {
     }
 
     const startedAt = Date.now()
-    let lastReason = initial.result.runtime.unreachableReason
-    let runtimeAnswered = initial.result.runtime.reachable
+    // Why (STA-3969): the timeout must describe the NEWEST observation. A reason accumulated
+    // across polls outlives the poll that saw it and then gets reported as the current
+    // diagnosis -- first when the runtime recovered, and again when its process exited. So the
+    // loop keeps the latest status and the reason is read off that; the earlier one survives
+    // only as history, never as the live verdict.
+    let latest = initial.result
+    let lastObservedReason = initial.result.runtime.unreachableReason
     while (Date.now() - startedAt < timeoutMs) {
       const status = await this.getCliStatus()
       if (status.result.app.desktopWindowStatus === 'blocked') {
@@ -273,31 +279,24 @@ export class RuntimeClient {
       if (status.result.app.desktopWindowStatus === 'available') {
         return status
       }
-      // Why (STA-3969): a runtime that answered is reachable NOW, so carrying the earlier
-      // reason forward would report a stale negative -- naming an endpoint it no longer
-      // uses -- as the current diagnosis.
-      runtimeAnswered = status.result.runtime.reachable
-      lastReason = runtimeAnswered
+      latest = status.result
+      // A poll that ANSWERED resolves the earlier failure outright, so it is not even history
+      // any more; only an unresolved failure we can no longer diagnose is worth carrying.
+      lastObservedReason = latest.runtime.reachable
         ? undefined
-        : (status.result.runtime.unreachableReason ?? lastReason)
+        : (latest.runtime.unreachableReason ?? lastObservedReason)
       await delay(250)
     }
 
-    // Why: STA-3969 — this loop polls getCliStatus, so when the runtime is
-    // unreachable it burns the whole timeout and then reported only that it timed
-    // out. Carry the reachability failure the poll already diagnosed.
-    // Why: the two timeouts are different failures. One never got an answer from the
-    // runtime; the other got answers the whole time and no window with them -- telling that
-    // user the runtime "may" be running headlessly understates what the poll already proved.
-    const timeoutDetail = lastReason
-      ? `: the Orca app process is running but its runtime is unreachable. ${lastReason.message}`
-      : runtimeAnswered
-        ? '. The Orca runtime is responding and still running headlessly; it did not open a window in time.'
-        : '. The runtime may still be running headlessly.'
+    const currentReason = latest.runtime.unreachableReason
     throw new RuntimeClientError(
       'runtime_open_timeout',
-      `Timed out waiting for an Orca desktop window${timeoutDetail}`,
-      lastReason ? { unreachableReason: lastReason } : undefined
+      `Timed out waiting for an Orca desktop window${describeOpenTimeout(latest, lastObservedReason)}`,
+      currentReason
+        ? { unreachableReason: currentReason }
+        : lastObservedReason
+          ? { lastObservedUnreachableReason: lastObservedReason }
+          : undefined
     )
   }
 }

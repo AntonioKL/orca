@@ -332,7 +332,10 @@ describe.skipIf(process.platform === 'win32')('RuntimeClient', () => {
     })
   })
 
-  it('openOrca keeps the last unreachable reason when later polls have no metadata', async () => {
+  // STA-3969: the diagnosis is still worth surfacing once metadata disappears, but the newest
+  // poll no longer observes it -- so it is reported as the last failure seen, not as the live
+  // one. Presenting it under `unreachableReason` would be the same stale negative in machine form.
+  it('reports the last unreachable reason as history when later polls have no metadata', async () => {
     const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-client-'))
     writeMetadata(userDataPath, join(userDataPath, 'never-listened.sock'), 'token', process.pid)
     vi.mocked(launchOrcaApp).mockImplementationOnce(() => {
@@ -341,11 +344,83 @@ describe.skipIf(process.platform === 'win32')('RuntimeClient', () => {
 
     const client = new RuntimeClient(userDataPath, 100)
 
-    await expect(client.openOrca(100)).rejects.toMatchObject({
-      code: 'runtime_open_timeout',
-      message: expect.stringContaining('never-listened.sock'),
-      data: { unreachableReason: { code: 'endpoint_missing' } }
+    const failure = await client.openOrca(100).then(
+      () => null,
+      (error: unknown) => error as { code: string; message: string; data?: unknown }
+    )
+    expect(failure?.code).toBe('runtime_open_timeout')
+    expect(failure?.message).toContain('never-listened.sock')
+    expect(failure?.message).toContain('The last failure it reported was')
+    expect(failure?.message).not.toContain('the Orca app process is running')
+    const data = failure?.data as {
+      unreachableReason?: unknown
+      lastObservedUnreachableReason?: { code?: string }
+    }
+    expect(data.unreachableReason).toBeUndefined()
+    expect(data.lastObservedUnreachableReason?.code).toBe('endpoint_missing')
+  })
+
+  // STA-3969: same stale negative one state further along -- the runtime was unreachable, then
+  // its PROCESS exited. The newest poll reports a dead process and no reason, so quoting the old
+  // endpoint failure claims a running process the latest status denies.
+  it('openOrca stops claiming the process is running once it exits mid-wait', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-client-'))
+    const endpoint = join(userDataPath, 'never-listened.sock')
+    writeMetadata(userDataPath, endpoint, 'token', process.pid)
+    vi.mocked(launchOrcaApp).mockImplementationOnce(() => {
+      writeMetadata(userDataPath, endpoint, 'token', findUnusedPid())
     })
+
+    const client = new RuntimeClient(userDataPath, 100)
+
+    const failure = await client.openOrca(100).then(
+      () => null,
+      (error: unknown) => error as { code: string; message: string; data?: unknown }
+    )
+    expect(failure?.code).toBe('runtime_open_timeout')
+    expect(failure?.message).not.toContain('the Orca app process is running')
+    expect(failure?.message).toContain('no longer running')
+    expect(
+      (failure?.data as { unreachableReason?: unknown } | undefined)?.unreachableReason
+    ).toBeUndefined()
+  })
+
+  // STA-3969: `request_rejected` means the runtime ANSWERED and refused. Calling that
+  // "unreachable" contradicts the very reason being quoted alongside it.
+  it('openOrca says the runtime refused the request instead of calling it unreachable', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-client-'))
+    const endpoint = join(userDataPath, 'runtime.sock')
+    const server = createServer((socket) => {
+      sockets.add(socket)
+      socket.once('close', () => sockets.delete(socket))
+      socket.on('data', (data) => {
+        const request = JSON.parse(String(data).trim()) as { id: string }
+        socket.write(
+          `${JSON.stringify({
+            id: request.id,
+            ok: false,
+            error: { code: 'status_refused', message: 'status.get is disabled' }
+          })}\n`
+        )
+      })
+    })
+    servers.add(server)
+    await new Promise<void>((resolve) => server.listen(endpoint, resolve))
+    writeMetadata(userDataPath, endpoint, 'token', process.pid)
+
+    const client = new RuntimeClient(userDataPath, 100)
+
+    const failure = await client.openOrca(100).then(
+      () => null,
+      (error: unknown) => error as { code: string; message: string; data?: unknown }
+    )
+    expect(failure?.code).toBe('runtime_open_timeout')
+    expect(
+      (failure?.data as { unreachableReason?: { code?: string } } | undefined)?.unreachableReason
+        ?.code
+    ).toBe('request_rejected')
+    expect(failure?.message).toContain('refused the status request')
+    expect(failure?.message).not.toContain('its runtime is unreachable')
   })
 
   // STA-3969: the poll carried the earlier reason forward with `?? lastReason`, so a runtime
