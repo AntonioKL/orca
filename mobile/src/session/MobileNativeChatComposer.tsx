@@ -143,6 +143,7 @@ export function MobileNativeChatComposer({
   }, [onNeedFiles, trigger?.kind, trigger?.query])
 
   useEffect(() => {
+    mountedRef.current = true
     return () => {
       mountedRef.current = false
       sendSurfaceGenerationRef.current += 1

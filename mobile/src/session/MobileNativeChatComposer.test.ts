@@ -1,4 +1,4 @@
-import { createElement } from 'react'
+import { createElement, StrictMode } from 'react'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { Keyboard } from 'react-native'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -439,6 +439,29 @@ describe('MobileNativeChatComposer', () => {
     // Why: the reply the user is now waiting on sits behind the keyboard.
     vi.mocked(Keyboard.dismiss).mockClear()
     await render(vi.fn().mockResolvedValue(true), vi.fn())
+
+    await act(async () => sendButton().props.onPress())
+
+    expect(Keyboard.dismiss).toHaveBeenCalledTimes(1)
+  })
+
+  it('dismisses an accepted send after Strict Mode replays mount effects', async () => {
+    vi.mocked(Keyboard.dismiss).mockClear()
+    await act(async () => {
+      renderer = create(
+        createElement(
+          StrictMode,
+          null,
+          createElement(MobileNativeChatComposer, {
+            value: 'hello',
+            onChangeText: vi.fn(),
+            onSend: vi.fn().mockResolvedValue(true),
+            sendSurfaceId: 'tab-a',
+            getSendCompletionGeneration: getCurrentSendCompletionGeneration
+          })
+        )
+      )
+    })
 
     await act(async () => sendButton().props.onPress())
 
