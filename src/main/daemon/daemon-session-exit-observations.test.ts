@@ -60,11 +60,25 @@ describe('a watched-exit certificate', () => {
     expect(observations.verdict(SESSION)).toBe('unverifiable')
   })
 
-  it('still records an unidentified exit after an identified session went live', () => {
-    // Degrading must not invent proof, but it must not silently drop it either: with no
-    // incarnation on the event there is nothing to contradict, so the exit stands.
+  it('refuses an unidentified exit once a named run is known to be live', () => {
+    // The third ordering, and the one no comparison of two incarnations reaches. An exit that
+    // names nothing is compatible with either run of the pane, and the certificate's only
+    // consumer reads it about the live one — so `unverifiable` is the honest answer, not a
+    // dropped proof. Only exits a daemon synthesises for a session its host no longer has
+    // arrive unnamed; a daemon that watched a process go names the run it was.
     const observations = new DaemonSessionExitObservations()
     observations.clearForLiveSession(SESSION, 'inc-2')
+
+    observations.recordExit(SESSION)
+
+    expect(observations.verdict(SESSION)).toBe('unverifiable')
+  })
+
+  it('still records an unidentified exit when the live run is unidentified too', () => {
+    // The population the rule above must not move: a daemon too old to report incarnations
+    // names neither side, so its exits remain the only evidence it can offer.
+    const observations = new DaemonSessionExitObservations()
+    observations.clearForLiveSession(SESSION)
 
     observations.recordExit(SESSION)
 
