@@ -132,7 +132,11 @@ import { useTerminalLiveInputFocus } from '../../../../src/terminal/use-terminal
 import { dismissTerminalKeyboard } from '../../../../src/terminal/terminal-keyboard-dismiss'
 import type { TerminalLiveInputSender } from '../../../../src/terminal/terminal-live-input-sender'
 import { isTerminalSendRpcAccepted } from '../../../../src/terminal/terminal-send-rpc-response'
-import { restoreRejectedBufferedTerminalDraft } from '../../../../src/terminal/buffered-terminal-draft-restoration'
+import {
+  pruneBufferedTerminalDrafts as pruneBufferedDrafts,
+  restoreRejectedBufferedTerminalDraft,
+  updateBufferedTerminalDraft
+} from '../../../../src/terminal/buffered-terminal-draft-restoration'
 import { sendMobileTerminalQueryReply } from '../../../../src/terminal/mobile-terminal-query-reply'
 import { TERMINAL_QUERY_REPLY_INPUT_RUNTIME_CAPABILITY } from '../../../../../src/shared/protocol-version'
 import { useTerminalLiveInputCommit } from '../../../../src/terminal/use-terminal-live-input-commit'
@@ -803,7 +807,7 @@ export default function SessionScreen() {
   // Why: after an optimistic close, suppress the tab (with expiry) until the publisher confirms, so an in-flight snapshot can't flash it back.
   const closedTabTombstonesRef = useRef<Map<string, number>>(new Map())
   const [terminalsLoaded, setTerminalsLoaded] = useWorktreeSessionTabsLoaded(worktreeId)
-  const [input, setInput] = useState('')
+  const [bufferedTerminalDrafts, setBufferedTerminalDrafts] = useState<Record<string, string>>({})
   // Why: baseline terminal zoom reloaded on focus so a Settings → Terminal change applies in place (panes stay mounted).
   const [terminalTextScale, setTerminalTextScale] = useState(1)
   // Why: terminal command-bar autocomplete opt-in, reloaded on focus so a Settings → Terminal toggle takes effect on return.
@@ -820,6 +824,14 @@ export default function SessionScreen() {
     toggleTerminalLiveInput
   } = useTerminalLiveInputModePreference({ hostId, worktreeId })
   const [activeHandle, setActiveHandle] = useState<string | null>(null)
+  const input = activeHandle ? (bufferedTerminalDrafts[activeHandle] ?? '') : ''
+  const setInput = useCallback(
+    (value: Parameters<typeof updateBufferedTerminalDraft>[2]) =>
+      setBufferedTerminalDrafts((previous) =>
+        updateBufferedTerminalDraft(previous, activeHandle, value)
+      ),
+    [activeHandle]
+  )
   // Reactive teardown signal for the native-chat covered stream; see unsubscribeTerminal.
   const [coveredStreamRevision, setCoveredStreamRevision] = useState(0)
   const [activeSessionTabId, setActiveSessionTabId] = useState<string | null>(null)
@@ -1626,7 +1638,9 @@ export default function SessionScreen() {
           // Sweep against the retained set, not the raw list: a chat-covered handle
           // keeps its subscription across a graph reload, so erasing its live-input
           // preference on the same refresh is the erasure this guard exists to stop.
-          pruneTerminalHandlesFromLiveInput(resolveRetainedTerminalHandles(pruneContext))
+          const retainedHandles = resolveRetainedTerminalHandles(pruneContext)
+          pruneTerminalHandlesFromLiveInput(retainedHandles)
+          setBufferedTerminalDrafts((drafts) => pruneBufferedDrafts(drafts, retainedHandles))
           defaultTerminalHandlesToLiveInput([...liveHandles])
           const shouldPrune = createTerminalPrunePredicate(pruneContext)
           for (const handle of Array.from(terminalUnsubsRef.current.keys())) {
@@ -3005,16 +3019,13 @@ export default function SessionScreen() {
     const draft = input
     const text = normalizeTerminalTextInput(draft)
     const sendOrigin = {
+      handle: activeHandle,
       tab: activeSessionTab,
       generation: getSendCompletionGeneration()
     }
     const restoreRejectedDraft = () =>
-      setInput((current) =>
-        restoreRejectedBufferedTerminalDraft(
-          current,
-          draft,
-          sendOrigin.generation === getSendCompletionGeneration()
-        )
+      setBufferedTerminalDrafts((current) =>
+        restoreRejectedBufferedTerminalDraft(current, sendOrigin.handle, draft)
       )
     setInput('')
 

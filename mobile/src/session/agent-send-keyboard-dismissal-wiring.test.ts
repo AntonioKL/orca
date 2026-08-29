@@ -70,13 +70,39 @@ describe('terminal send keyboard dismissal wiring', () => {
     expect(slice.slice(catchAt)).toContain('restoreRejectedDraft()')
   })
 
-  it('only restores a rejected buffered draft on its originating surface', () => {
-    const slice = routeSlice('async function handleSend() {', 'async function handleAccessoryKey(')
-    expect(slice.match(/restoreRejectedBufferedTerminalDraft\(/g)).toHaveLength(1)
-    expect(slice.match(/sendOrigin\.generation === getSendCompletionGeneration\(\)/g)).toHaveLength(
-      1
+  it('restores a rejected buffered draft by origin without generation fencing', () => {
+    const sendSlice = routeSlice(
+      'async function handleSend() {',
+      'async function handleAccessoryKey('
     )
-    expect(slice.match(/restoreRejectedDraft\(\)/g)).toHaveLength(2)
+    const originAt = sendSlice.indexOf('handle: activeHandle')
+    const requestAt = sendSlice.indexOf('await client.sendRequest(')
+    const restoreSlice = routeSlice('const restoreRejectedDraft = () =>', "setInput('')")
+    expect(originAt).toBeGreaterThan(0)
+    expect(originAt).toBeLessThan(requestAt)
+    expect(restoreSlice).toContain(
+      'restoreRejectedBufferedTerminalDraft(current, sendOrigin.handle, draft)'
+    )
+    expect(restoreSlice).not.toContain('getSendCompletionGeneration()')
+    expect(sendSlice.match(/restoreRejectedDraft\(\)/g)).toHaveLength(2)
+    const dismissalSlice = routeSlice(
+      'const dismissKeyboardAfterAgentSend = useCallback(',
+      '[dismissSoftwareKeyboard, getSendCompletionGeneration]\n  )'
+    )
+    expect(dismissalSlice).toContain('origin.generation === getSendCompletionGeneration()')
+  })
+
+  it('keeps buffered draft callbacks scoped to the active handle and prunes ended handles', () => {
+    const draftSlice = routeSlice(
+      'const input = activeHandle',
+      '// Reactive teardown signal for the native-chat covered stream'
+    )
+    expect(draftSlice).toContain('const setInput = useCallback(')
+    expect(draftSlice).toContain('updateBufferedTerminalDraft(previous, activeHandle, value)')
+    expect(draftSlice).toContain('[activeHandle]')
+    expect(sessionRouteSource).toContain(
+      'setBufferedTerminalDrafts((drafts) => pruneBufferedDrafts(drafts, retainedHandles))'
+    )
   })
 
   it('leaves the accessory shortcut keys alone, Enter included', () => {
