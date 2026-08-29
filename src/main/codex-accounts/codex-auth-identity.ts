@@ -167,14 +167,18 @@ export function readCodexAuthIdentity(contents: string): CodexAuthIdentity | nul
   const payload = idToken ? parseJwtPayload(idToken) : null
   const authClaims = readRecordClaim(payload, 'https://api.openai.com/auth')
   const profileClaims = readRecordClaim(payload, 'https://api.openai.com/profile')
+  // Why: normalize before the fallback chains, not after — a blank tokens.account_id
+  // must fall through to the JWT claims rather than ending the chain on an empty string.
+  const tokenAccountId = normalizeField(
+    readStringClaim(tokens, 'account_id') ?? readStringClaim(tokens, 'accountId')
+  )
 
   return {
     email: normalizeField(
       readStringClaim(payload, 'email') ?? readStringClaim(profileClaims, 'email')
     ),
     providerAccountId: normalizeField(
-      readStringClaim(tokens, 'account_id') ??
-        readStringClaim(tokens, 'accountId') ??
+      tokenAccountId ??
         readStringClaim(authClaims, 'chatgpt_account_id') ??
         readStringClaim(payload, 'chatgpt_account_id')
     ),
@@ -184,8 +188,7 @@ export function readCodexAuthIdentity(contents: string): CodexAuthIdentity | nul
     ),
     workspaceAccountId: normalizeField(
       readStringClaim(authClaims, 'workspace_account_id') ??
-        readStringClaim(tokens, 'account_id') ??
-        readStringClaim(tokens, 'accountId') ??
+        tokenAccountId ??
         readStringClaim(payload, 'chatgpt_account_id')
     )
   }

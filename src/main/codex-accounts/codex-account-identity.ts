@@ -8,6 +8,15 @@ import { ManagedCodexHomeTemporarilyUnavailableError } from './host-codex-manage
 
 export type ResolvedCodexIdentity = CodexAuthIdentity
 
+/** API-key logins carry no OAuth identity even when a stale `tokens` blob is still present. */
+function declaresApiKeyCredential(parsed: unknown): boolean {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return false
+  }
+  const apiKey = (parsed as Record<string, unknown>).OPENAI_API_KEY
+  return typeof apiKey === 'string' && apiKey.trim() !== ''
+}
+
 export class CodexAccountIdentity {
   constructor(
     private readonly assertManagedHomePath: (
@@ -33,8 +42,9 @@ export class CodexAccountIdentity {
       }
       throw new ManagedCodexHomeTemporarilyUnavailableError(undefined, { cause: error })
     }
+    let parsed: unknown
     try {
-      JSON.parse(contents)
+      parsed = JSON.parse(contents)
     } catch {
       // Why: a raw SyntaxError echoes credential bytes into logs/error UI; a
       // corrupt auth.json must fail loudly but without them (same sanitization
@@ -45,6 +55,14 @@ export class CodexAccountIdentity {
     // claims. Returning nulls causes the caller to fail with a clear
     // "could not resolve the account email" error rather than crashing
     // on missing nested token fields.
+    if (declaresApiKeyCredential(parsed)) {
+      return {
+        email: null,
+        providerAccountId: null,
+        workspaceLabel: null,
+        workspaceAccountId: null
+      }
+    }
     const identity = readCodexAuthIdentity(contents)
     if (!identity) {
       return {
@@ -96,8 +114,7 @@ export class CodexAccountIdentity {
       console.warn('[codex-accounts] System-default Codex auth has an unexpected format')
       return this.systemDefaultIdentity(true, 'none')
     }
-    const raw = parsed as Record<string, unknown>
-    if (typeof raw.OPENAI_API_KEY === 'string' && raw.OPENAI_API_KEY.trim() !== '') {
+    if (declaresApiKeyCredential(parsed)) {
       // Why: API-key/custom-provider logins carry no OAuth identity or ChatGPT
       // usage. Surface them as a custom provider, not a blank/broken row.
       return this.systemDefaultIdentity(true, 'api-key')
