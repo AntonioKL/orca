@@ -29,7 +29,10 @@ const BOUNDARIES: Record<
   { newTurn: string; sessionStart: string | null; followUp?: string; armable?: false }
 > = {
   claude: { newTurn: 'UserPromptSubmit', sessionStart: 'SessionStart' },
-  kimi: { newTurn: 'UserPromptSubmit', sessionStart: 'SessionStart' },
+  // Why null: Kimi's names are Claude-compatible, but `normalizeKimiEvent` has no SessionStart
+  // case and `KIMI_HOOK_EVENTS` does not subscribe to one, so no kimi session boundary can reach
+  // the fence. The spawn path is the only thing that re-fences a kimi pane.
+  kimi: { newTurn: 'UserPromptSubmit', sessionStart: null },
   codex: { newTurn: 'UserPromptSubmit', sessionStart: 'SessionStart' },
   gemini: { newTurn: 'BeforeAgent', sessionStart: null },
   antigravity: { newTurn: 'PreInvocation', sessionStart: null },
@@ -95,12 +98,11 @@ const SOURCES = (Object.keys(BOUNDARIES) as AgentHookSource[]).filter(
   (source) => BOUNDARIES[source].armable !== false
 )
 const WITH_SESSION_START = SOURCES.filter((source) => BOUNDARIES[source].sessionStart !== null)
-const WITHOUT_SESSION_START = SOURCES.filter((source) => BOUNDARIES[source].sessionStart === null)
 
 describe("a fenced live pane re-fences on each provider's own session boundary", () => {
-  // Why the whole matrix: the branch matched the literal `SessionStart`, which only claude,
-  // codex and opencode send. Every other source's replacement process was suppressed forever,
-  // with no user-reachable way to bring the pane's row back.
+  // Why the whole matrix: the branch matched the literal `SessionStart`, which only 5 of the 18
+  // sources send. Every other source's replacement process was suppressed forever, with no
+  // user-reachable way to bring the pane's row back.
   it.each(WITH_SESSION_START)('%s', (source) => {
     const server = new AgentHookServer()
     armFence(server, source, 'token-1')
@@ -134,9 +136,12 @@ describe("a fenced live pane re-fences on each provider's own session boundary",
 })
 
 describe('a fenced live pane re-fences on the spawn that replaced its process', () => {
-  // Why these sources need it: they emit no session boundary at all, so no event can ever tell
-  // the gate a new process owns the pane. Main's own spawn is the only proof available.
-  it.each(WITHOUT_SESSION_START)('%s', (source) => {
+  // Why every armable source and not only the ones with no session boundary: the spawn
+  // notification is provider-independent by construction, and it is what actually rescues the
+  // sources whose session boundary Orca never installs (cursor) or never normalizes (kimi).
+  // Scoping this to the no-boundary bucket left those two covered only by an event production
+  // never sends.
+  it.each(SOURCES)('%s', (source) => {
     const server = new AgentHookServer()
     armFence(server, source, 'token-1')
 
@@ -193,5 +198,47 @@ describe("relay spool replay is fenced on the pane's current generation", () => 
     post(server, 'claude', 'UserPromptSubmit', 'token-a', 'agent a late spool', { isReplay: true })
 
     expect(promptOf(server)).toBe('agent b offline')
+  })
+
+  it('keeps the spool of a poster whose process never received the token', () => {
+    // Why: every shell-side poster emits `${ORCA_AGENT_LAUNCH_TOKEN:-}`, so a process that never
+    // got the variable reports an EMPTY token, not an absent one. On the WSL and SSH launch paths
+    // the variable can be lost in transit (WSLENV passthrough, sshd's accepted env), so this is a
+    // real remote population — and before the spawn notification existed such a pane had no
+    // expectation at all and its spool landed. Rejecting it here would recreate, for that
+    // population, the exact silent frozen row this fence is supposed to prevent.
+    const server = new AgentHookServer()
+    server.noteAgentPaneLaunchToken(PANE, 'token-b')
+
+    post(server, 'claude', 'UserPromptSubmit', '', 'offline agent finished', { isReplay: true })
+
+    expect(promptOf(server)).toBe('offline agent finished')
+  })
+
+  it('does not clear the expectation when a tokenless shell respawns into the pane', () => {
+    // Why: the expectation is only ever RAISED. A shell launched with no agent token is not
+    // evidence about any generation, so it must not open the pane to the generation the last
+    // real launch replaced.
+    const server = new AgentHookServer()
+    post(server, 'claude', 'UserPromptSubmit', 'token-a', 'agent a')
+    server.noteAgentPaneLaunchToken(PANE, undefined)
+
+    post(server, 'claude', 'UserPromptSubmit', 'token-old', 'older generation spool', {
+      isReplay: true
+    })
+
+    expect(promptOf(server)).toBe('agent a')
+  })
+
+  it('admits the generation the standing expectation names after a tokenless respawn', () => {
+    // Positive control for the test above: the expectation survives, it does not reject
+    // everything. Same setup, a replay that names the generation the expectation stands for.
+    const server = new AgentHookServer()
+    post(server, 'claude', 'UserPromptSubmit', 'token-a', 'agent a')
+    server.noteAgentPaneLaunchToken(PANE, undefined)
+
+    post(server, 'claude', 'UserPromptSubmit', 'token-a', 'agent a offline', { isReplay: true })
+
+    expect(promptOf(server)).toBe('agent a offline')
   })
 })

@@ -1232,7 +1232,7 @@ export class AgentHookServer {
       const tokenFence = this.restartedStatusLaunchTokenHashByPaneKey.get(ownerPaneKey)
       // Why: deferred retirement lets a new process start in a still-authorized pane, so
       // its tokened session boundary re-fences; prompts recur, so a stale process would win.
-      // Why the classifier, not a literal: `SessionStart` is how 3 of 18 sources spell it, so
+      // Why the classifier, not a literal: `SessionStart` is how 5 of 18 sources spell it, so
       // the rest could never re-fence and a pane Orca respawned stayed suppressed for the life
       // of the process. Same defect the retired branch below already fixed.
       // Why the literal survives as the fallback: an older relay omits `source` entirely.
@@ -2465,7 +2465,17 @@ export class AgentHookServer {
     if (envelope.isReplay === true) {
       const expectedLaunchTokenHash = this.hydratedLaunchTokenHashByPaneKey.get(paneKey)
       const actualLaunchTokenHash = launchTokenHash(envelope.launchToken)
-      if (expectedLaunchTokenHash && actualLaunchTokenHash !== expectedLaunchTokenHash) {
+      // Why a tokenless replay is admitted rather than rejected: this is the read-side of the
+      // same rule the spawn notification applies on the write side. A record carrying no token
+      // is not evidence about ANY generation, so treating it as evidence of the WRONG one would
+      // discard the whole spool of any agent whose process never received the token: the
+      // `${ORCA_AGENT_LAUNCH_TOKEN:-}` posters, and every WSL/SSH host where the env is lost in
+      // transit. That is the same silent, unrecoverable frozen row this fence exists to prevent.
+      if (
+        expectedLaunchTokenHash &&
+        actualLaunchTokenHash &&
+        actualLaunchTokenHash !== expectedLaunchTokenHash
+      ) {
         return
       }
     }
