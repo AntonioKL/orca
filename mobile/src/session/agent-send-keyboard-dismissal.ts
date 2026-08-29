@@ -1,8 +1,13 @@
+import type { AgentStatusEntry } from '../../../src/shared/agent-status-types'
+import type { TuiAgent } from '../../../src/shared/tui-agent'
+import { resolveMobileTerminalTabAgentId } from './mobile-terminal-tab-agent'
+
 /** Minimal session-tab shape needed to tell an agent session from a plain shell. */
 export type AgentSendKeyboardDismissalTab = {
   readonly type: string
-  readonly agentStatus?: { readonly agentType?: string | null } | null
-  readonly launchAgent?: string | null
+  readonly title: string
+  readonly agentStatus?: { readonly agentType?: AgentStatusEntry['agentType'] | null } | null
+  readonly launchAgent?: TuiAgent | null
 }
 
 /** Whether a send from this tab should drop the software keyboard.
@@ -19,6 +24,5 @@ export function shouldDismissKeyboardAfterTerminalSend(
   if (!accepted || !tab || tab.type !== 'terminal') {
     return false
   }
-  const agent = tab.agentStatus?.agentType ?? tab.launchAgent ?? null
-  return typeof agent === 'string' && agent.trim().length > 0
+  return resolveMobileTerminalTabAgentId(tab) !== null
 }

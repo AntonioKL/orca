@@ -51,6 +51,7 @@ function overlayElement(tick: Tick): ReturnType<typeof createElement> {
     inputLockReason: null,
     sendErrorMessage: null,
     onClearSendError: vi.fn(),
+    sendSurfaceId: tick.identity ?? 'tab-a',
     keyboardInset: 0
   })
 }

@@ -55,7 +55,8 @@ describe('MobileNativeChatComposer', () => {
   async function render(
     onSend: (text: string) => Promise<boolean>,
     onChangeText: () => void,
-    isAttaching = false
+    isAttaching = false,
+    sendSurfaceId = 'tab-a'
   ) {
     await act(async () => {
       renderer = create(
@@ -63,6 +64,7 @@ describe('MobileNativeChatComposer', () => {
           value: ' hello ',
           onChangeText,
           onSend,
+          sendSurfaceId,
           isAttaching
         })
       )
@@ -118,7 +120,8 @@ describe('MobileNativeChatComposer', () => {
         createElement(MobileNativeChatComposer, {
           value: ' /clear is prose ',
           onChangeText: vi.fn(),
-          onSend
+          onSend,
+          sendSurfaceId: 'tab-a'
         })
       )
     })
@@ -165,6 +168,7 @@ describe('MobileNativeChatComposer', () => {
           value: 'run the tests',
           onChangeText: vi.fn(),
           onSend,
+          sendSurfaceId: 'tab-a',
           sessionOptions: { isWorking: false, controller }
         })
       )
@@ -197,6 +201,7 @@ describe('MobileNativeChatComposer', () => {
           value: 'hello',
           onChangeText: vi.fn(),
           onSend,
+          sendSurfaceId: 'tab-a',
           sessionOptions: {
             isWorking: false,
             controller: {
@@ -242,6 +247,7 @@ describe('MobileNativeChatComposer', () => {
           value: 'half-typed',
           onChangeText: vi.fn(),
           onSend: vi.fn().mockResolvedValue(true),
+          sendSurfaceId: 'tab-a',
           disabled: true
         })
       )
@@ -263,6 +269,7 @@ describe('MobileNativeChatComposer', () => {
           value: '',
           onChangeText: vi.fn(),
           onSend: vi.fn().mockResolvedValue(true),
+          sendSurfaceId: 'tab-a',
           attachments: [
             { id: 'img-1', path: '/tmp/a.png', previewUri: 'file:///a.png' },
             { id: 'img-2', path: '/tmp/b.png', previewUri: 'file:///b.png' }
@@ -291,6 +298,7 @@ describe('MobileNativeChatComposer', () => {
           value: '',
           onChangeText: vi.fn(),
           onSend,
+          sendSurfaceId: 'tab-a',
           attachments: [{ id: 'img-1', path: '/tmp/a.png', previewUri: 'file:///a.png' }]
         })
       )
@@ -308,6 +316,7 @@ describe('MobileNativeChatComposer', () => {
           value: '/c',
           onChangeText,
           onSend: vi.fn().mockResolvedValue(true),
+          sendSurfaceId: 'tab-a',
           agent: 'claude'
         })
       )
@@ -346,6 +355,7 @@ describe('MobileNativeChatComposer', () => {
           value: '/',
           onChangeText: vi.fn(),
           onSend: vi.fn().mockResolvedValue(true),
+          sendSurfaceId: 'tab-a',
           agent: 'codex'
         })
       )
@@ -379,6 +389,7 @@ describe('MobileNativeChatComposer', () => {
           value: '',
           onChangeText: vi.fn(),
           onSend: vi.fn().mockResolvedValue(true),
+          sendSurfaceId: 'tab-a',
           onMicPress,
           dictationMode: 'hold',
           onMicPressIn,
@@ -397,6 +408,7 @@ describe('MobileNativeChatComposer', () => {
           value: '',
           onChangeText: vi.fn(),
           onSend: vi.fn().mockResolvedValue(true),
+          sendSurfaceId: 'tab-a',
           onMicPress,
           dictationMode: 'toggle',
           onMicPressIn,
@@ -427,6 +439,40 @@ describe('MobileNativeChatComposer', () => {
     await render(vi.fn().mockResolvedValue(false), vi.fn())
 
     await act(async () => sendButton().props.onPress())
+
+    expect(Keyboard.dismiss).not.toHaveBeenCalled()
+  })
+
+  it('does not dismiss a newly focused composer when an old accepted send settles', async () => {
+    vi.mocked(Keyboard.dismiss).mockClear()
+    let resolveSend: ((accepted: boolean) => void) | null = null
+    const onSend = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSend = resolve
+        })
+    )
+    await render(onSend, vi.fn())
+
+    let pendingSend!: Promise<void>
+    await act(async () => {
+      pendingSend = sendButton().props.onPress()
+      await Promise.resolve()
+    })
+    await act(async () => {
+      renderer!.update(
+        createElement(MobileNativeChatComposer, {
+          value: 'new surface draft',
+          onChangeText: vi.fn(),
+          onSend: vi.fn().mockResolvedValue(true),
+          sendSurfaceId: 'tab-b'
+        })
+      )
+    })
+    await act(async () => {
+      resolveSend?.(true)
+      await pendingSend
+    })
 
     expect(Keyboard.dismiss).not.toHaveBeenCalled()
   })

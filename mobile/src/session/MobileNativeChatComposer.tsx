@@ -37,6 +37,8 @@ type Props = {
   value: string
   onChangeText: (text: string) => void
   onSend: (text: string) => Promise<boolean>
+  /** Changes whenever the route focuses a different chat composer surface. */
+  sendSurfaceId: string
   /** Active tab's agent — the slash autocomplete serves its command catalog. */
   agent?: string | null
   /** Model/session-option pickers shown in the composer action row; null when
@@ -64,6 +66,7 @@ export function MobileNativeChatComposer({
   value,
   onChangeText,
   onSend,
+  sendSurfaceId,
   agent,
   sessionOptions,
   onAttachImage,
@@ -88,6 +91,13 @@ export function MobileNativeChatComposer({
     null
   )
   const sendingRef = useRef(false)
+  const mountedRef = useRef(false)
+  const sendSurfaceIdRef = useRef(sendSurfaceId)
+  const sendSurfaceGenerationRef = useRef(0)
+  if (sendSurfaceIdRef.current !== sendSurfaceId) {
+    sendSurfaceIdRef.current = sendSurfaceId
+    sendSurfaceGenerationRef.current += 1
+  }
   const [sending, setSending] = useState(false)
   const trimmed = value.trim()
   const sessionOptionDispatching = sessionOptions?.controller.pendingId != null
@@ -127,6 +137,14 @@ export function MobileNativeChatComposer({
     }
   }, [onNeedFiles, trigger?.kind, trigger?.query])
 
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      sendSurfaceGenerationRef.current += 1
+    }
+  }, [])
+
   const handleChange = (next: string): void => {
     onChangeText(next)
   }
@@ -151,11 +169,16 @@ export function MobileNativeChatComposer({
     }
     sendingRef.current = true
     setSending(true)
+    const sendSurfaceGeneration = sendSurfaceGenerationRef.current
     try {
       // Raw, not trimmed: the send seam owns the wire trim, and a rejection has
       // to hand the user back exactly what they typed (#14819).
       const accepted = await onSend(value)
-      if (accepted) {
+      if (
+        accepted &&
+        mountedRef.current &&
+        sendSurfaceGeneration === sendSurfaceGenerationRef.current
+      ) {
         setCursor(0)
         // Why: the turn is now the agent's — the keyboard would cover the reply.
         // A rejected send keeps it up so the handed-back draft stays editable.

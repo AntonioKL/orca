@@ -17,8 +17,8 @@ import type { MobileSessionTab } from './mobile-session-route-types'
  */
 export function resolveMobileTerminalTabAgentId(tab: {
   title: string
-  agentStatus?: AgentStatusEntry | null
-  launchAgent?: TuiAgent
+  agentStatus?: { agentType?: AgentStatusEntry['agentType'] | null } | null
+  launchAgent?: TuiAgent | null
 }): string | null {
   const hookAgentType = tab.agentStatus?.agentType?.trim()
   if (hookAgentType && hookAgentType !== 'unknown') {
