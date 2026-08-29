@@ -59,6 +59,9 @@ describe('PR workflow parallelism', () => {
     const primerInstall = workflow.jobs.test_native_cache.steps.find(
       (step) => step.uses === './.github/actions/install-node-dependencies'
     )
+    const nodeNextPrimerInstall = nodeNextWorkflow.jobs.test_native_cache.steps.find(
+      (step) => step.uses === './.github/actions/install-node-dependencies'
+    )
 
     expect(workflow.jobs.test.uses).toBe('./.github/workflows/unit-tests.yml')
     expect(JSON.parse(workflow.jobs.test.with.node_versions)).toEqual(['24'])
@@ -80,6 +83,9 @@ describe('PR workflow parallelism', () => {
     expect(primerInstall.with['native-runtime']).toBe('node')
     expect(primerInstall.with['node-version']).toBe('24')
     expect(workflow.jobs.test.needs).toContain('test_native_cache')
+    expect(nodeNextPrimerInstall.with['native-runtime']).toBe('node')
+    expect(nodeNextPrimerInstall.with['node-version']).toBe('26')
+    expect(nodeNextWorkflow.jobs.test.needs).toEqual(['test_native_cache'])
   })
 
   it('runs real-shell coverage once outside the general shards', () => {
