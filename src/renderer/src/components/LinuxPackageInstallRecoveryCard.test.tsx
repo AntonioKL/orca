@@ -271,6 +271,41 @@ describe('LinuxPackageInstallRecoveryCard copy action', () => {
     expect(writeClipboardText).not.toHaveBeenCalled()
   })
 
+  // Why: this envelope has no `Error: ` after the channel, and it is not anchored at the start
+  // of the message — both shapes used to reach the user with the wrapper still on screen.
+  it('strips an unprefixed and a mid-string envelope', async () => {
+    getInstructions.mockRejectedValue(
+      new Error(
+        "Update failed: Error invoking remote method 'updater:getLinuxPackageInstallInstructions': disk full"
+      )
+    )
+    renderCard()
+
+    fireEvent.click(button('Copy Install Command'))
+    await flushActions()
+
+    expect(footnoteText()).toBe('Update failed: disk full')
+  })
+
+  // Why: a message-less handler failure used to render the bare word "Error" as the footnote.
+  it('falls back to a sentence, and logs the cause, when the envelope carried no reason', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const rejection = new Error(
+      "Error invoking remote method 'updater:getLinuxPackageInstallInstructions': Error"
+    )
+    getInstructions.mockRejectedValue(rejection)
+    renderCard()
+
+    fireEvent.click(button('Copy Install Command'))
+    await flushActions()
+
+    expect(footnoteText()).toBe(
+      'That step failed, and the failure did not include a readable reason.'
+    )
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('unreadable'), rejection)
+    warn.mockRestore()
+  })
+
   it('keeps the copy path when the artifact fails revalidation', async () => {
     getInstructions.mockRejectedValue(
       new Error('Error: The downloaded package no longer matches the verified release.')
