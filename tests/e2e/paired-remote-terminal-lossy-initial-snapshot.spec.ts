@@ -131,7 +131,6 @@ test('paints a nonempty lossy initial snapshot on a paired Electron client @head
       throw new Error('Paired host did not publish the fixture terminal')
     }
     const webTabId = toWebTerminalSurfaceTabId(created.tab.parentTabId)
-    let hostEvidence: RuntimeTerminalRead | null = null
     await expect
       .poll(
         async () => {
@@ -140,12 +139,16 @@ test('paints a nonempty lossy initial snapshot on a paired Electron client @head
             'terminal.read',
             { terminal, screen: true }
           )
-          hostEvidence = result.terminal
           return result.terminal.tail.join('\n').includes(marker)
         },
         { timeout: 30_000 }
       )
       .toBe(true)
+    const { terminal: hostEvidence } = await callLocalRuntime<{ terminal: RuntimeTerminalRead }>(
+      orcaPage,
+      'terminal.read',
+      { terminal, screen: true }
+    )
     console.log(
       `[lossy-initial] ${JSON.stringify({ hostLatestCursor: hostEvidence?.latestCursor, hostNextCursor: hostEvidence?.nextCursor, marker })}`
     )

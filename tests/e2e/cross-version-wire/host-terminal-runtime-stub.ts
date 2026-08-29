@@ -99,9 +99,9 @@ export function createHostTerminalRuntimeStub(
       cols,
       rows,
       seq: outputSequence,
-      source: 'headless',
-      alternateScreen: false,
-      terminalOwner: 'shell'
+      source: 'headless' as const,
+      alternateScreen: false as const,
+      terminalOwner: 'shell' as const
     }
     if (options.overflowInitialSnapshots && stub.serializeCount <= 2) {
       const data = 'x'.repeat(300 * 1024)

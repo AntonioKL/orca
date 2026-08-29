@@ -15962,13 +15962,13 @@
       "providers": ["paired-runtime"],
       "coveredPlatforms": ["macos"],
       "coveredProviders": ["paired-runtime"],
-      "coverageNotes": "Loads the real host RPC methods, real RpcDispatcher, real renderer terminal multiplexer, and codecs from the current working tree, newest release tag, and the pinned reported 1.4.192-client/1.4.191-host commits. In-process transport reproduces production frame routing, including decoder-rejected opcodes. Covers the terminal stream only; session tabs, agent publications, file/Git RPCs, mobile E2EE framing, and relay transport are uncovered.",
+      "coverageNotes": "Loads the real host RPC methods, real RpcDispatcher, real renderer terminal multiplexer, and codecs from the current working tree, exact pre-fix main, newest release tag, and the pinned reported 1.4.192-client/1.4.191-host commits. In-process transport reproduces production frame routing, including decoder-rejected opcodes. Covers the terminal stream only; session tabs, agent publications, file/Git RPCs, mobile E2EE framing, and relay transport are uncovered.",
       "motivatingLinks": [
         "https://github.com/stablyai/orca/pull/12641",
         "https://github.com/stablyai/orca/pull/12655"
       ],
       "invariant": "A client and a server built from different releases must complete subscribe, input delivery to the process, hide/reveal buffer snapshot, transport drop, and resubscribe with no frame refused by the receiving build's decoder, the same negotiated capabilities, and the same published snapshot content — so a new optional field stays safe, a new opcode is only sent after negotiation, and a change in what the host publishes is visible before release.",
-      "oracle": "Run one fixed journey per general pairing (old client/new server, new client/old server, and current/current) plus the pinned reported pair and candidate controls. Assert exact frames, subscriptions, input, rendered snapshot/live content, and zero decoder rejects or missing host methods. The reported baseline must discard its nonempty lossy initial image; candidate pairings must paint it once, recover the first post-snapshot sequence gap, and resume contiguous live output once.",
+      "oracle": "Run one fixed journey per general pairing (old client/new server, new client/old server, and current/current) plus the pinned reported pair, exact pre-fix main control, and candidate controls. Assert exact frames, subscriptions, input, rendered snapshot/live content, and zero decoder rejects or missing host methods. The reported and pre-fix-main clients must render blank after discarding the nonempty lossy initial image; candidate pairings must paint it once, recover the first post-snapshot sequence gap, and resume contiguous live output once.",
       "commands": [
         "pnpm exec vitest run --config config/vitest.config.ts tests/e2e/cross-version-wire/cross-version-terminal-wire.unit.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts tests/e2e/cross-version-wire/reported-lossy-initial-snapshot.unit.test.ts"
@@ -15992,6 +15992,7 @@
           "file": "tests/e2e/cross-version-wire/reported-lossy-initial-snapshot.unit.test.ts",
           "assertions": [
             "the reported 1.4.192 client discards the reported 1.4.191 host's nonempty lossy snapshot",
+            "the exact pre-fix main client reproduces the same blank rendered terminal",
             "the candidate client paints that old-host image exactly once and resumes live output",
             "the candidate client paints the candidate-host image exactly once and resumes live output",
             "both candidate pairings report zero decoder rejects and missing runtime methods"
@@ -16011,7 +16012,7 @@
       ],
       "runtimeBudget": {
         "p95Seconds": 180,
-        "scope": "three historical checkout extractions plus six in-process pairings"
+        "scope": "four historical checkout extractions plus seven in-process pairings"
       },
       "flakeHistory": {
         "status": "not-started",
