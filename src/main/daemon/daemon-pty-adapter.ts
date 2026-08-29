@@ -89,7 +89,7 @@ export class DaemonPtyAdapter extends DaemonPtyDaemonRecovery implements IPtyPro
         }
         // Why here and not on any other absence: this is the one place the daemon
         // reports a process it watched go, so it is the only absence that proves an exit.
-        this.sessionExitObservations.recordExit(event.sessionId)
+        this.sessionExitObservations.recordExit(event.sessionId, event.payload.incarnationId)
         this.activeSessionIds.delete(event.sessionId)
         this.clearSessionAwaitingDaemonRecovery(event.sessionId)
         this.dirtySessionVersions.delete(event.sessionId)
@@ -136,9 +136,10 @@ export class DaemonPtyAdapter extends DaemonPtyDaemonRecovery implements IPtyPro
 
   // Why the router calls this and `markSessionActive` is not enough: a certificate can only be
   // cleared by the adapter that issued it, so the generation now holding a reused session id
-  // cannot retire the one a sibling generation still holds for it.
-  retireExitCertificate(id: string): void {
-    this.sessionExitObservations.clearForLiveSession(id)
+  // cannot retire the one a sibling generation still holds for it. `incarnationId` names the
+  // run that is now live, which is also what lets a sibling refuse a late exit for an older one.
+  retireExitCertificate(id: string, incarnationId?: string): void {
+    this.sessionExitObservations.clearForLiveSession(id, incarnationId)
   }
 
   async closeStartupQueryAuthority(id: string): Promise<number> {

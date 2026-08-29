@@ -42,9 +42,13 @@ export class DaemonPtyRouter implements IPtyProvider {
     // Reopening a pane reuses the session id, and only the issuing adapter can clear its own
     // certificate — so a sibling generation that watched the previous incarnation die would
     // keep answering `exited` for this live one. Retired here, where every spawn passes.
+    // Why the incarnation and not the id alone: this loop is not the last word on either side
+    // of it. An exit watched while this very spawn was finalizing is already certified and
+    // must survive, and a superseded generation's exit may not have landed yet — naming the
+    // run that is now live settles both, where a bare delete answers only for the present.
     if (!result.exitedBeforeSpawnReply) {
       for (const adapter of this.allAdapters()) {
-        adapter.retireExitCertificate(result.id)
+        adapter.retireExitCertificate(result.id, result.incarnationId)
       }
     }
     return result

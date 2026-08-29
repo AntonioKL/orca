@@ -125,10 +125,12 @@ export abstract class DaemonPtyRuntimeState {
   protected readonly sessionExitObservations = new DaemonSessionExitObservations()
 
   /** The one way a session becomes live again: tracking and its exit certificate move together,
-   *  so a reused session id can never answer for the incarnation that already died. */
-  protected markSessionActive(sessionId: string): void {
+   *  so a reused session id can never answer for the incarnation that already died. Pass the
+   *  incarnation this id is now live as, so a certificate is only ever retired on behalf of a
+   *  different run of the pane. */
+  protected markSessionActive(sessionId: string, incarnationId?: string): void {
     this.activeSessionIds.add(sessionId)
-    this.sessionExitObservations.clearForLiveSession(sessionId)
+    this.sessionExitObservations.clearForLiveSession(sessionId, incarnationId)
   }
   protected getSizeUnsupported = false
   protected sessionsAwaitingDaemonRecovery = new Set<string>()

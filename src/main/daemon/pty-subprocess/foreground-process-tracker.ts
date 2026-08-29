@@ -19,6 +19,7 @@ import type { ForegroundProcessObservation } from '../session-subprocess-handle'
 import {
   createForegroundIdentityRefresh,
   FOREGROUND_AGENT_CACHE_TTL_MS,
+  agentEvidenceOutdatesScan,
   getActiveStartupAgent,
   isShellTitleCorroborated,
   type ForegroundIdentityState
@@ -175,6 +176,10 @@ export function createPtyForegroundProcessTracker(args: {
         ) {
           return fallbackProcess
         }
+        // Why stamped before the call: the POSIX table is a process-wide cache, so this answer
+        // can come from a scan another pane started. Replaced by the measured scan start when
+        // the resolver reports one; this is only the floor for the Windows path, which has none.
+        const scanRequestedAt = Date.now()
         const resolution = await resolveAgentForegroundProcessWithAvailability(
           proc.pid,
           fallbackProcess,
@@ -203,8 +208,18 @@ export function createPtyForegroundProcessTracker(args: {
           state.startupAgentForeground = null
           return recognized.processName
         }
-        state.cachedAgentForeground = null
-        state.startupAgentForeground = null
+        // An agent recognized while this scan was in flight is evidence the scan's table could
+        // not have held, so this answer may not retire it — and retiring it would also strip the
+        // shell-title corroboration gate of the very evidence that holds it closed.
+        if (
+          !agentEvidenceOutdatesScan(
+            state.cachedAgentForeground,
+            resolution.tableScanStartedAtMs ?? scanRequestedAt
+          )
+        ) {
+          state.cachedAgentForeground = null
+          state.startupAgentForeground = null
+        }
         return resolution.processName
       } catch {
         return null

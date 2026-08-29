@@ -2,9 +2,10 @@
  * daemon one (`setLocalPtyProvider` in daemon-init), so a verdict only the local provider
  * declares never reaches a shipping terminal — these cases drive the daemon route itself,
  * from the daemon's own exit event to the bytes the renderer reads. */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { rmSync } from 'node:fs'
-import type { DaemonPtyAdapter } from './daemon-pty-adapter'
+import { join } from 'node:path'
+import { DaemonPtyAdapter } from './daemon-pty-adapter'
 import type { IPtyProvider } from '../providers/types'
 import { DaemonPtyRouter } from './daemon-pty-router'
 import { DegradedDaemonPtyProvider } from './degraded-daemon-pty-provider'
@@ -87,6 +88,35 @@ describe('a daemon-backed watched exit', () => {
     expect(adapter.ptyAbsenceVerdict(id)).toBe('unverifiable')
   })
 
+  itOnPosix('is exited when only a preserved legacy generation watched it die', async () => {
+    // The only shape that builds a router at all: daemon-init wraps in one when
+    // `legacyAdapters.length > 0`, and that preserved generation still owns the panes it
+    // spawned before the upgrade — the current adapter has never seen this session id.
+    const replacement = await startDaemonAdapterHarness(() => createMockSubprocess())
+    const router = new DaemonPtyRouter({ current: replacement.adapter, legacy: [adapter] })
+    try {
+      const { id } = await adapter.spawn({ cols: 80, rows: 24 })
+      await router.discoverLegacySessions()
+      expect(router.hasPty(id)).toBe(true)
+
+      lastSubprocess._simulateExit(0)
+      await waitFor(() => router.hasPty(id) === false)
+
+      // Both narrower lookups are dead here: the exit fan-out has already dropped the route,
+      // and the current adapter never watched this id. Only the legacy adapter holds proof.
+      expect(replacement.adapter.ptyAbsenceVerdict(id)).toBe('unverifiable')
+
+      const inspection = await inspectPtyProviderProcessForRenderer(router, id)
+      expect(inspection).toEqual(buildAbsentPtyInspection('exited'))
+      expect(inspection).not.toHaveProperty('unavailable')
+    } finally {
+      router.disposeRouterOnly()
+      replacement.adapter.dispose()
+      await replacement.server.shutdown()
+      rmSync(replacement.dir, { recursive: true, force: true })
+    }
+  })
+
   itOnPosix('does not let a legacy generation certify the id its replacement reuses', async () => {
     // Two real daemons, as in an upgrade: the legacy one watches the exit, and reopening the
     // pane reuses that session id on the current one. `markSessionActive` clears only the
@@ -110,6 +140,56 @@ describe('a daemon-backed watched exit', () => {
       // dialog, and a previous generation's certificate must not be able to strip it.
       const inspection = await inspectPtyProviderProcessForRenderer(router, id)
       expect(inspection).toEqual(buildAbsentPtyInspection('unverifiable'))
+      expect(inspection).toHaveProperty('unavailable')
+    } finally {
+      router.disposeRouterOnly()
+      replacement.adapter.dispose()
+      await replacement.server.shutdown()
+      rmSync(replacement.dir, { recursive: true, force: true })
+    }
+  })
+
+  /** The mirror of the case above: there, the old generation's exit is already recorded when
+   *  the pane reopens, so the respawn retires it. Here the same event is still in flight, and
+   *  a retirement that is only a point-in-time delete cannot reach an exit that has not landed
+   *  yet — so the preserved generation certifies the incarnation that replaced it.
+   *
+   *  Why no `discoverLegacySessions` here: a learned route is exactly what sends a reopen back
+   *  to the generation that owns the session. This is the case where the router holds no route
+   *  for the id — never learned, or dropped by the synthetic fan-out a daemon socket blip
+   *  triggers — so the reopen creates a genuinely new incarnation on the current daemon while
+   *  the old one still tracks its own. */
+  itOnPosix('does not let an old generation certify a replacement it reports on late', async () => {
+    const replacement = await startDaemonAdapterHarness(() => createMockSubprocess())
+    const router = new DaemonPtyRouter({ current: replacement.adapter, legacy: [adapter] })
+    try {
+      const legacySpawn = await adapter.spawn({ cols: 80, rows: 24 })
+      const id = legacySpawn.id
+      const legacySubprocess = lastSubprocess
+
+      // The pane is reopened, and daemon session ids are derived from the pane, so the live
+      // replacement on the current daemon carries the id the old generation still tracks.
+      const replacementSpawn = await router.spawn({ cols: 80, rows: 24, sessionId: id })
+      expect(replacement.adapter.hasPty(id), 'the reopen must land on the current daemon').toBe(
+        true
+      )
+      // The precondition the whole case rests on: one pane id, two live runs of it.
+      expect(replacementSpawn.incarnationId).not.toBe(legacySpawn.incarnationId)
+
+      // Only now does the old generation report the death of the incarnation IT owned.
+      legacySubprocess._simulateExit(0)
+      await waitFor(() => adapter.hasPty(id) === false)
+
+      // The replacement's daemon then goes away without reporting anything, exactly as in the
+      // case above. Its fate is unknown — the certificate below is for a different incarnation.
+      replacement.adapter.fanoutSyntheticExits(1)
+      expect(router.hasPty(id)).toBe(false)
+
+      const inspection = await inspectPtyProviderProcessForRenderer(router, id)
+      expect(
+        inspection,
+        'a live replacement must not inherit the exit of the incarnation it replaced'
+      ).toEqual(buildAbsentPtyInspection('unverifiable'))
       expect(inspection).toHaveProperty('unavailable')
     } finally {
       router.disposeRouterOnly()
@@ -186,4 +266,81 @@ describe('a degraded-mode exit that beats its own spawn reply', () => {
       provider.disposeProviderOnly()
     }
   })
+})
+
+/**
+ * `resultForExitBeforeSpawnReply` is consulted twice, and `finishSpawn` then continues through
+ * several more awaits. A PTY that dies in one of those windows has its exit watched and
+ * certified by the real daemon while the spawn result already in hand still says it came up
+ * live — so the retirement that follows is working from a stale answer.
+ *
+ * Hooked on `historyManager.openSession` because it is the first awaited step AFTER
+ * `markSessionActive`, which isolates the router's retirement loop as the only thing that can
+ * discard the certificate. The exit itself is real: the mock shell's exit travels the daemon's
+ * socket and is only allowed to proceed once the adapter has actually issued the certificate.
+ */
+describe('a daemon-backed exit that lands inside spawn finalization', () => {
+  let dir: string
+  let server: DaemonServer
+  let adapter: DaemonPtyAdapter
+  let lastSubprocess: ReturnType<typeof createMockSubprocess>
+
+  beforeEach(async () => {
+    const harness = await startDaemonAdapterHarness(() => {
+      lastSubprocess = createMockSubprocess()
+      return lastSubprocess
+    })
+    ;({ dir, server } = harness)
+    harness.adapter.dispose()
+    // A history path is what gives the adapter a HistoryManager, and with it the awaited
+    // `openSession` step that production spawns really do run.
+    adapter = new DaemonPtyAdapter({
+      socketPath: harness.socketPath,
+      tokenPath: harness.tokenPath,
+      historyPath: join(dir, 'history')
+    })
+  })
+
+  afterEach(async () => {
+    adapter?.dispose()
+    await server?.shutdown()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  itOnPosix(
+    'keeps the certificate the exit issued while the spawn was still finishing',
+    async () => {
+      const historyManager = adapter.getHistoryManager()
+      expect(
+        historyManager,
+        'the finalization window only exists with a history manager'
+      ).not.toBeNull()
+      const router = new DaemonPtyRouter({ current: adapter, legacy: [] })
+      let certifiedDuringSpawn = false
+      const openSession = historyManager!.openSession.bind(historyManager!)
+      vi.spyOn(historyManager!, 'openSession').mockImplementation(async (sessionId, opts) => {
+        lastSubprocess._simulateExit(0)
+        // Proves the evidence exists BEFORE the layer under test gets to discard it.
+        await waitFor(() => adapter.ptyAbsenceVerdict(sessionId) === 'exited')
+        certifiedDuringSpawn = true
+        return await openSession(sessionId, opts)
+      })
+      try {
+        const result = await router.spawn({ cols: 80, rows: 24 })
+
+        expect(certifiedDuringSpawn).toBe(true)
+        // The gate the previous round added does not fire here: the reply was already formed.
+        expect(result.exitedBeforeSpawnReply).toBeFalsy()
+
+        const inspection = await inspectPtyProviderProcessForRenderer(router, result.id)
+        expect(
+          inspection,
+          'an exit the daemon watched must not be erased by the spawn that raced it'
+        ).toEqual(buildAbsentPtyInspection('exited'))
+        expect(inspection).not.toHaveProperty('unavailable')
+      } finally {
+        router.disposeRouterOnly()
+      }
+    }
+  )
 })
