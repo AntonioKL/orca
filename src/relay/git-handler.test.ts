@@ -50,9 +50,7 @@ describe('GitHandler', () => {
     expect(methods).toContain('git.bulkUnstage')
     expect(methods).toContain('git.abortMerge')
     expect(methods).toContain('git.abortRebase')
-    expect(methods).toContain('git.continueMerge')
-    expect(methods).toContain('git.continueRebase')
-    expect(methods).toContain('git.continueCherryPick')
+    expect(methods).toContain('git.continueSequencer')
     expect(methods).toContain('git.checkout')
     expect(methods).toContain('git.localBranches')
     expect(methods).toContain('git.discard')
@@ -209,7 +207,10 @@ describe('GitHandler', () => {
       ).toThrow()
       resolveConflict()
 
-      await dispatcher.callRequest('git.continueRebase', { worktreePath: tmpDir })
+      await dispatcher.callRequest('git.continueSequencer', {
+        worktreePath: tmpDir,
+        operation: 'rebase'
+      })
 
       await expect(fs.access(path.join(tmpDir, '.git', 'rebase-merge'))).rejects.toThrow()
       await expect(fs.access(path.join(tmpDir, '.git', 'rebase-apply'))).rejects.toThrow()
@@ -228,7 +229,10 @@ describe('GitHandler', () => {
 
       // Git exits nonzero here (it committed step 1, then stopped on step 2's
       // conflict) — the moved HEAD must read as success, exactly like the local path.
-      await dispatcher.callRequest('git.continueRebase', { worktreePath: tmpDir })
+      await dispatcher.callRequest('git.continueSequencer', {
+        worktreePath: tmpDir,
+        operation: 'rebase'
+      })
 
       await expect(fs.access(path.join(tmpDir, '.git', 'rebase-merge'))).resolves.toBeUndefined()
     })
@@ -242,7 +246,10 @@ describe('GitHandler', () => {
 
       // Conflict left unresolved: git refuses, HEAD does not move, the error surfaces.
       await expect(
-        dispatcher.callRequest('git.continueRebase', { worktreePath: tmpDir })
+        dispatcher.callRequest('git.continueSequencer', {
+          worktreePath: tmpDir,
+          operation: 'rebase'
+        })
       ).rejects.toThrow()
 
       await expect(fs.access(path.join(tmpDir, '.git', 'rebase-merge'))).resolves.toBeUndefined()
@@ -255,7 +262,10 @@ describe('GitHandler', () => {
       ).toThrow()
       resolveConflict()
 
-      await dispatcher.callRequest('git.continueMerge', { worktreePath: tmpDir })
+      await dispatcher.callRequest('git.continueSequencer', {
+        worktreePath: tmpDir,
+        operation: 'merge'
+      })
 
       await expect(fs.access(path.join(tmpDir, '.git', 'MERGE_HEAD'))).rejects.toThrow()
       await expect(readFileText()).resolves.toBe('resolved\n')
@@ -268,7 +278,10 @@ describe('GitHandler', () => {
       ).toThrow()
       resolveConflict()
 
-      await dispatcher.callRequest('git.continueCherryPick', { worktreePath: tmpDir })
+      await dispatcher.callRequest('git.continueSequencer', {
+        worktreePath: tmpDir,
+        operation: 'cherry-pick'
+      })
 
       await expect(fs.access(path.join(tmpDir, '.git', 'CHERRY_PICK_HEAD'))).rejects.toThrow()
       await expect(readFileText()).resolves.toBe('resolved\n')

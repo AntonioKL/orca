@@ -6,19 +6,13 @@ import {
 import {
   abortRuntimeGitMerge,
   abortRuntimeGitRebase,
-  continueRuntimeGitCherryPick,
-  continueRuntimeGitMerge,
-  continueRuntimeGitRebase
+  continueRuntimeGitSequencer
 } from './runtime-git-client'
 import { clearRuntimeCompatibilityCacheForTests } from './runtime-rpc-client'
 
 const gitAbortMerge = vi.fn()
 const gitAbortRebase = vi.fn()
-const gitSequencer = {
-  continueMerge: vi.fn(),
-  continueRebase: vi.fn(),
-  continueCherryPick: vi.fn()
-}
+const gitContinueSequencer = vi.fn()
 const runtimeEnvironmentCall = vi.fn()
 const runtimeEnvironmentTransportCall = vi.fn()
 const runtimeCall = vi.fn()
@@ -27,10 +21,8 @@ beforeEach(() => {
   clearRuntimeCompatibilityCacheForTests()
   gitAbortMerge.mockReset()
   gitAbortRebase.mockReset()
-  for (const mock of Object.values(gitSequencer)) {
-    mock.mockReset()
-    mock.mockResolvedValue(undefined)
-  }
+  gitContinueSequencer.mockReset()
+  gitContinueSequencer.mockResolvedValue(undefined)
   runtimeEnvironmentCall.mockReset()
   runtimeEnvironmentTransportCall.mockReset()
   runtimeCall.mockReset()
@@ -39,7 +31,11 @@ beforeEach(() => {
   })
   vi.stubGlobal('window', {
     api: {
-      git: { abortMerge: gitAbortMerge, abortRebase: gitAbortRebase, ...gitSequencer },
+      git: {
+        abortMerge: gitAbortMerge,
+        abortRebase: gitAbortRebase,
+        continueSequencer: gitContinueSequencer
+      },
       runtime: { call: runtimeCall },
       runtimeEnvironments: { call: runtimeEnvironmentTransportCall }
     }
@@ -97,30 +93,30 @@ describe('runtime git client merge operations', () => {
     expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
   })
 
-  const SEQUENCER_CASES = [
-    [continueRuntimeGitMerge, 'continueMerge', 'git.continueMerge'],
-    [continueRuntimeGitRebase, 'continueRebase', 'git.continueRebase'],
-    [continueRuntimeGitCherryPick, 'continueCherryPick', 'git.continueCherryPick']
-  ] as const
+  const SEQUENCER_OPERATIONS = ['merge', 'rebase', 'cherry-pick'] as const
 
-  it.each(SEQUENCER_CASES)('uses local git IPC for %#: %s', async (run, apiMethod) => {
-    await run({
-      settings: { activeRuntimeEnvironmentId: null },
-      worktreeId: 'wt-1',
-      worktreePath: '/repo',
-      connectionId: 'ssh-1'
-    })
+  it.each(SEQUENCER_OPERATIONS)('uses local git IPC to continue a %s', async (operation) => {
+    await continueRuntimeGitSequencer(
+      {
+        settings: { activeRuntimeEnvironmentId: null },
+        worktreeId: 'wt-1',
+        worktreePath: '/repo',
+        connectionId: 'ssh-1'
+      },
+      operation
+    )
 
-    expect(gitSequencer[apiMethod]).toHaveBeenCalledWith({
+    expect(gitContinueSequencer).toHaveBeenCalledWith({
       connectionId: 'ssh-1',
+      operation,
       worktreePath: '/repo'
     })
     expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
   })
 
-  it.each(SEQUENCER_CASES)(
-    'routes %# through the active runtime as %s',
-    async (run, apiMethod, rpcMethod) => {
+  it.each(SEQUENCER_OPERATIONS)(
+    'routes a %s continue through the active runtime',
+    async (operation) => {
       runtimeEnvironmentCall.mockResolvedValue({
         id: 'rpc-1',
         ok: true,
@@ -128,19 +124,22 @@ describe('runtime git client merge operations', () => {
         _meta: { runtimeId: 'remote-runtime' }
       })
 
-      await run({
-        settings: { activeRuntimeEnvironmentId: 'env-1' },
-        worktreeId: 'wt-1',
-        worktreePath: '/repo'
-      })
+      await continueRuntimeGitSequencer(
+        {
+          settings: { activeRuntimeEnvironmentId: 'env-1' },
+          worktreeId: 'wt-1',
+          worktreePath: '/repo'
+        },
+        operation
+      )
 
       expect(runtimeEnvironmentCall).toHaveBeenCalledWith({
         selector: 'env-1',
-        method: rpcMethod,
-        params: { worktree: 'id:wt-1' },
+        method: 'git.continueSequencer',
+        params: { worktree: 'id:wt-1', operation },
         timeoutMs: 30_000
       })
-      expect(gitSequencer[apiMethod]).not.toHaveBeenCalled()
+      expect(gitContinueSequencer).not.toHaveBeenCalled()
     }
   )
 

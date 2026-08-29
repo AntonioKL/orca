@@ -306,9 +306,7 @@ describe('git RPC methods', () => {
       cancelRuntimeGenerateCommitMessage: vi.fn().mockResolvedValue({ ok: true }),
       abortRuntimeGitMerge: vi.fn().mockResolvedValue({ ok: true }),
       abortRuntimeGitRebase: vi.fn().mockResolvedValue({ ok: true }),
-      continueRuntimeGitMerge: vi.fn().mockResolvedValue({ ok: true }),
-      continueRuntimeGitRebase: vi.fn().mockResolvedValue({ ok: true }),
-      continueRuntimeGitCherryPick: vi.fn().mockResolvedValue({ ok: true }),
+      continueRuntimeGitSequencer: vi.fn().mockResolvedValue({ ok: true }),
       pushRuntimeGit: vi.fn().mockResolvedValue({ ok: true }),
       getRuntimeGitRemoteFileUrl: vi.fn().mockResolvedValue('https://example.com/file#L3'),
       getRuntimeGitRemoteCommitUrl: vi.fn().mockResolvedValue('https://example.com/commit/abc')
@@ -332,8 +330,10 @@ describe('git RPC methods', () => {
     )
     await dispatcher.dispatch(makeRequest('git.abortMerge', { worktree: 'id:wt-1' }))
     await dispatcher.dispatch(makeRequest('git.abortRebase', { worktree: 'id:wt-1' }))
-    for (const method of ['git.continueMerge', 'git.continueRebase', 'git.continueCherryPick']) {
-      await dispatcher.dispatch(makeRequest(method, { worktree: 'id:wt-1' }))
+    for (const operation of ['merge', 'rebase', 'cherry-pick']) {
+      await dispatcher.dispatch(
+        makeRequest('git.continueSequencer', { worktree: 'id:wt-1', operation })
+      )
     }
     await dispatcher.dispatch(
       makeRequest('git.push', {
@@ -364,9 +364,9 @@ describe('git RPC methods', () => {
     expect(runtime.cancelRuntimeGenerateCommitMessage).toHaveBeenCalledWith('id:wt-1')
     expect(runtime.abortRuntimeGitMerge).toHaveBeenCalledWith('id:wt-1')
     expect(runtime.abortRuntimeGitRebase).toHaveBeenCalledWith('id:wt-1')
-    expect(runtime.continueRuntimeGitMerge).toHaveBeenCalledWith('id:wt-1')
-    expect(runtime.continueRuntimeGitRebase).toHaveBeenCalledWith('id:wt-1')
-    expect(runtime.continueRuntimeGitCherryPick).toHaveBeenCalledWith('id:wt-1')
+    expect(runtime.continueRuntimeGitSequencer).toHaveBeenCalledWith('id:wt-1', 'merge')
+    expect(runtime.continueRuntimeGitSequencer).toHaveBeenCalledWith('id:wt-1', 'rebase')
+    expect(runtime.continueRuntimeGitSequencer).toHaveBeenCalledWith('id:wt-1', 'cherry-pick')
     expect(runtime.pushRuntimeGit).toHaveBeenCalledWith(
       'id:wt-1',
       true,

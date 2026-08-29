@@ -3,16 +3,12 @@ import type { GlobalSettings } from '../../shared/global-settings-types'
 import { RuntimeGitCommands, type ResolvedRuntimeGitWorktree } from './orca-runtime-git'
 
 const mocks = vi.hoisted(() => ({
-  continueMerge: vi.fn(),
-  continueRebase: vi.fn(),
-  continueCherryPick: vi.fn(),
+  continueSequencer: vi.fn(),
   getSshGitProvider: vi.fn()
 }))
 
 vi.mock('../git/sequencer-actions', () => ({
-  continueMerge: mocks.continueMerge,
-  continueRebase: mocks.continueRebase,
-  continueCherryPick: mocks.continueCherryPick
+  continueSequencer: mocks.continueSequencer
 }))
 
 vi.mock('../providers/ssh-git-dispatch', () => ({
@@ -20,11 +16,7 @@ vi.mock('../providers/ssh-git-dispatch', () => ({
   SSH_GIT_PROVIDER_UNAVAILABLE_MESSAGE: 'unavailable'
 }))
 
-const CASES = [
-  ['continueRuntimeGitMerge', 'continueMerge'],
-  ['continueRuntimeGitRebase', 'continueRebase'],
-  ['continueRuntimeGitCherryPick', 'continueCherryPick']
-] as const
+const OPERATIONS = ['merge', 'rebase', 'cherry-pick'] as const
 
 function makeCommands(connectionId?: string): RuntimeGitCommands {
   const worktree = { id: 'wt-1', repoId: 'repo-1', path: '/repo' } as ResolvedRuntimeGitWorktree
@@ -44,28 +36,34 @@ describe('RuntimeGitCommands sequencer continue', () => {
     }
   })
 
-  it.each(CASES)('%s runs %s against the resolved worktree', async (command, gitFn) => {
-    mocks[gitFn].mockResolvedValue(undefined)
+  it.each(OPERATIONS)('continues a %s against the resolved worktree', async (operation) => {
+    mocks.continueSequencer.mockResolvedValue(undefined)
 
-    await expect(makeCommands()[command]('id:wt-1')).resolves.toEqual({ ok: true })
+    await expect(makeCommands().continueRuntimeGitSequencer('id:wt-1', operation)).resolves.toEqual(
+      { ok: true }
+    )
 
-    expect(mocks[gitFn]).toHaveBeenCalledWith('/repo', {})
+    expect(mocks.continueSequencer).toHaveBeenCalledWith(operation, '/repo', {})
   })
 
-  it.each(CASES)('%s routes through the SSH git provider', async (command, gitFn) => {
-    const provider = { [gitFn]: vi.fn().mockResolvedValue(undefined) }
+  it.each(OPERATIONS)('routes a %s through the SSH git provider', async (operation) => {
+    const provider = { continueSequencer: vi.fn().mockResolvedValue(undefined) }
     mocks.getSshGitProvider.mockReturnValue(provider)
 
-    await expect(makeCommands('conn-1')[command]('id:wt-1')).resolves.toEqual({ ok: true })
+    await expect(
+      makeCommands('conn-1').continueRuntimeGitSequencer('id:wt-1', operation)
+    ).resolves.toEqual({ ok: true })
 
-    expect(provider[gitFn]).toHaveBeenCalledWith('/repo')
-    expect(mocks[gitFn]).not.toHaveBeenCalled()
+    expect(provider.continueSequencer).toHaveBeenCalledWith('/repo', operation)
+    expect(mocks.continueSequencer).not.toHaveBeenCalled()
   })
 
-  it.each(CASES)('%s fails when the SSH git provider is missing', async (command, gitFn) => {
+  it('fails when the SSH git provider is missing', async () => {
     mocks.getSshGitProvider.mockReturnValue(null)
 
-    await expect(makeCommands('conn-1')[command]('id:wt-1')).rejects.toThrow()
-    expect(mocks[gitFn]).not.toHaveBeenCalled()
+    await expect(
+      makeCommands('conn-1').continueRuntimeGitSequencer('id:wt-1', 'rebase')
+    ).rejects.toThrow()
+    expect(mocks.continueSequencer).not.toHaveBeenCalled()
   })
 })

@@ -25,9 +25,7 @@ import {
   abortRuntimeGitMerge as abortRuntimeGitMergeImplementation,
   abortRuntimeGitRebase as abortRuntimeGitRebaseImplementation,
   commitRuntimeGit as commitRuntimeGitImplementation,
-  continueRuntimeGitCherryPick as continueRuntimeGitCherryPickImplementation,
-  continueRuntimeGitMerge as continueRuntimeGitMergeImplementation,
-  continueRuntimeGitRebase as continueRuntimeGitRebaseImplementation,
+  continueRuntimeGitSequencer as continueRuntimeGitSequencerImplementation,
   fastForwardRuntimeGit as fastForwardRuntimeGitImplementation,
   fetchRuntimeGit as fetchRuntimeGitImplementation,
   getRuntimeGitUpstreamStatus as getRuntimeGitUpstreamStatusImplementation,
@@ -65,9 +63,7 @@ export const getRuntimeGitHistory = getRuntimeGitHistoryImplementation
 export const getRuntimeGitConflictOperation = getRuntimeGitConflictOperationImplementation
 export const abortRuntimeGitMerge = abortRuntimeGitMergeImplementation
 export const abortRuntimeGitRebase = abortRuntimeGitRebaseImplementation
-export const continueRuntimeGitMerge = continueRuntimeGitMergeImplementation
-export const continueRuntimeGitRebase = continueRuntimeGitRebaseImplementation
-export const continueRuntimeGitCherryPick = continueRuntimeGitCherryPickImplementation
+export const continueRuntimeGitSequencer = continueRuntimeGitSequencerImplementation
 export const getRuntimeGitDiff = getRuntimeGitDiffImplementation
 export const getRuntimeGitBranchCompare = getRuntimeGitBranchCompareImplementation
 export const getRuntimeGitCommitCompare = getRuntimeGitCommitCompareImplementation

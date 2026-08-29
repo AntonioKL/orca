@@ -1,5 +1,6 @@
 import type { CommitMessageDraftContext } from '../../shared/commit-message-generation'
 import { gitExecMutatesRepository } from '../../shared/git-exec-mutation'
+import type { GitSequencerOperation } from '../../shared/git-sequencer-step'
 import { buildHostedRemoteCommitUrl, buildHostedRemoteFileUrl } from '../git/hosted-remote-url'
 import {
   describeMaxBufferOverflowError,
@@ -61,31 +62,15 @@ export class SshGitProvider extends SshGitWorktreeProvider implements IGitProvid
     return result as { stdout: string; stderr: string }
   }
 
-  async continueMerge(worktreePath: string): Promise<void> {
-    await this.sequencerRequest('git.continueMerge', worktreePath, 'continue a merge')
-  }
-
-  async continueRebase(worktreePath: string): Promise<void> {
-    await this.sequencerRequest('git.continueRebase', worktreePath, 'continue a rebase')
-  }
-
-  async continueCherryPick(worktreePath: string): Promise<void> {
-    await this.sequencerRequest('git.continueCherryPick', worktreePath, 'continue a cherry-pick')
-  }
-
-  private async sequencerRequest(
-    method: string,
-    worktreePath: string,
-    action: string
-  ): Promise<void> {
+  async continueSequencer(worktreePath: string, operation: GitSequencerOperation): Promise<void> {
     try {
       await this.runWithGitReadInvalidation(async () => {
-        await this.mux.request(method, { worktreePath })
+        await this.mux.request('git.continueSequencer', { worktreePath, operation })
       })
     } catch (error) {
       if (isJsonRpcMethodNotFoundError(error)) {
         throw new Error(
-          `This SSH host is running an older Orca relay that cannot ${action}. Reconnect to deploy the latest relay, then try again.`
+          `This SSH host is running an older Orca relay that cannot continue a ${operation}. Reconnect to deploy the latest relay, then try again.`
         )
       }
       throw error

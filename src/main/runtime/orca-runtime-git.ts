@@ -27,9 +27,7 @@ export class RuntimeGitCommands {
   readonly getRuntimeGitRemoteCommitUrl: RuntimeGitDiffCommands['getRuntimeGitRemoteCommitUrl']
   readonly abortRuntimeGitMerge: RuntimeGitSyncCommands['abortRuntimeGitMerge']
   readonly abortRuntimeGitRebase: RuntimeGitSyncCommands['abortRuntimeGitRebase']
-  readonly continueRuntimeGitMerge: RuntimeGitSyncCommands['continueRuntimeGitMerge']
-  readonly continueRuntimeGitRebase: RuntimeGitSyncCommands['continueRuntimeGitRebase']
-  readonly continueRuntimeGitCherryPick: RuntimeGitSyncCommands['continueRuntimeGitCherryPick']
+  readonly continueRuntimeGitSequencer: RuntimeGitSyncCommands['continueRuntimeGitSequencer']
   readonly getRuntimeGitUpstreamStatus: RuntimeGitSyncCommands['getRuntimeGitUpstreamStatus']
   readonly fetchRuntimeGit: RuntimeGitSyncCommands['fetchRuntimeGit']
   readonly syncRuntimeGitForkDefaultBranch: RuntimeGitSyncCommands['syncRuntimeGitForkDefaultBranch']
@@ -73,9 +71,7 @@ export class RuntimeGitCommands {
     this.getRuntimeGitRemoteCommitUrl = diff.getRuntimeGitRemoteCommitUrl.bind(diff)
     this.abortRuntimeGitMerge = sync.abortRuntimeGitMerge.bind(sync)
     this.abortRuntimeGitRebase = sync.abortRuntimeGitRebase.bind(sync)
-    this.continueRuntimeGitMerge = sync.continueRuntimeGitMerge.bind(sync)
-    this.continueRuntimeGitRebase = sync.continueRuntimeGitRebase.bind(sync)
-    this.continueRuntimeGitCherryPick = sync.continueRuntimeGitCherryPick.bind(sync)
+    this.continueRuntimeGitSequencer = sync.continueRuntimeGitSequencer.bind(sync)
     this.getRuntimeGitUpstreamStatus = sync.getRuntimeGitUpstreamStatus.bind(sync)
     this.fetchRuntimeGit = sync.fetchRuntimeGit.bind(sync)
     this.syncRuntimeGitForkDefaultBranch = sync.syncRuntimeGitForkDefaultBranch.bind(sync)

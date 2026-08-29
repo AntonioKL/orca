@@ -6,12 +6,6 @@ const ABORT_METHODS: Record<string, string | undefined> = {
   rebase: 'git.abortRebase'
 }
 
-const CONTINUE_METHODS: Record<string, string | undefined> = {
-  merge: 'git.continueMerge',
-  rebase: 'git.continueRebase',
-  'cherry-pick': 'git.continueCherryPick'
-}
-
 type RunGitAction = (
   actionId: string,
   method: string,
@@ -37,8 +31,13 @@ export function useMobileConflictSequencerRunners(runGitAction: RunGitAction) {
       [runForOperation]
     ),
     continueConflictOperation: useCallback(
-      (operation: string) => runForOperation('continue', CONTINUE_METHODS, operation),
-      [runForOperation]
+      async (operation: string) => {
+        if (operation !== 'merge' && operation !== 'rebase' && operation !== 'cherry-pick') {
+          return
+        }
+        await runGitAction(`continue-${operation}`, 'git.continueSequencer', { operation })
+      },
+      [runGitAction]
     )
   }
 }

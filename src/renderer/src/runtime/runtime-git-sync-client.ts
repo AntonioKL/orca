@@ -1,4 +1,5 @@
 import type { GitForkSyncExpectedUpstream, GitForkSyncResult } from '../../../shared/git-fork-sync'
+import type { GitSequencerOperation } from '../../../shared/git-sequencer-step'
 import type { GitUpstreamStatus } from '../../../shared/git-status-types'
 import { REBASE_FROM_BASE_RPC_TIMEOUT_MS } from '../../../shared/git-rebase-source'
 import type { GitPushTarget } from '../../../shared/worktree/types'
@@ -41,76 +42,32 @@ export async function abortRuntimeGitRebase(context: RuntimeGitContext): Promise
   )
 }
 
-export async function continueRuntimeGitMerge(context: RuntimeGitContext): Promise<void> {
-  const target = getActiveRuntimeTarget(context.settings)
-  if (target.kind === 'local' || !context.worktreeId) {
-    await window.api.git.continueMerge({
-      worktreePath: resolveLocalWorktreePath(context),
-      connectionId: context.connectionId
-    })
-    return
-  }
-  await callSequencerContinueRpc(
-    target,
-    'git.continueMerge',
-    context.worktreeId,
-    'continue a merge'
-  )
-}
-
-export async function continueRuntimeGitRebase(context: RuntimeGitContext): Promise<void> {
-  const target = getActiveRuntimeTarget(context.settings)
-  if (target.kind === 'local' || !context.worktreeId) {
-    await window.api.git.continueRebase({
-      worktreePath: resolveLocalWorktreePath(context),
-      connectionId: context.connectionId
-    })
-    return
-  }
-  await callSequencerContinueRpc(
-    target,
-    'git.continueRebase',
-    context.worktreeId,
-    'continue a rebase'
-  )
-}
-
-export async function continueRuntimeGitCherryPick(context: RuntimeGitContext): Promise<void> {
-  const target = getActiveRuntimeTarget(context.settings)
-  if (target.kind === 'local' || !context.worktreeId) {
-    await window.api.git.continueCherryPick({
-      worktreePath: resolveLocalWorktreePath(context),
-      connectionId: context.connectionId
-    })
-    return
-  }
-  await callSequencerContinueRpc(
-    target,
-    'git.continueCherryPick',
-    context.worktreeId,
-    'continue a cherry-pick'
-  )
-}
-
-// Why: mixed client/host versions are the normal state; the raw method-not-found
-// text would otherwise surface verbatim in the failure toast.
-async function callSequencerContinueRpc(
-  target: Parameters<typeof callRuntimeRpc>[0],
-  method: string,
-  worktreeId: string,
-  action: string
+export async function continueRuntimeGitSequencer(
+  context: RuntimeGitContext,
+  operation: GitSequencerOperation
 ): Promise<void> {
+  const target = getActiveRuntimeTarget(context.settings)
+  if (target.kind === 'local' || !context.worktreeId) {
+    await window.api.git.continueSequencer({
+      worktreePath: resolveLocalWorktreePath(context),
+      operation,
+      connectionId: context.connectionId
+    })
+    return
+  }
   try {
     await callRuntimeRpc(
       target,
-      method,
-      { worktree: toRuntimeWorktreeSelector(worktreeId) },
+      'git.continueSequencer',
+      { worktree: toRuntimeWorktreeSelector(context.worktreeId), operation },
       { timeoutMs: 30_000 }
     )
   } catch (error) {
+    // Why: mixed client/host versions are the normal state; the raw method-not-found
+    // text would otherwise surface verbatim in the failure toast.
     if (isRuntimeMethodNotFoundError(error)) {
       throw new Error(
-        `This remote Orca host is running an older version that cannot ${action}. Update Orca on the host, then try again.`
+        `This remote Orca host is running an older version that cannot continue a ${operation}. Update Orca on the host, then try again.`
       )
     }
     throw error

@@ -9,9 +9,7 @@ import {
   getStatusMock,
   abortMergeMock,
   abortRebaseMock,
-  continueMergeMock,
-  continueRebaseMock,
-  continueCherryPickMock,
+  continueSequencerMock,
   stageFileMock,
   bulkStageFilesMock,
   bulkUnstageFilesMock,
@@ -427,27 +425,30 @@ describe('registerFilesystemHandlers', () => {
     expect(sshProvider.abortRebase).toHaveBeenCalledWith('/remote/repo')
   })
 
-  it.each([
-    ['git:continueMerge', 'continueMerge', continueMergeMock],
-    ['git:continueRebase', 'continueRebase', continueRebaseMock],
-    ['git:continueCherryPick', 'continueCherryPick', continueCherryPickMock]
-  ])('routes %s through local and SSH git providers', async (channel, method, localMock) => {
-    registerWorktreeRootsForRepo(store as never, 'repo-1', [REPO_PATH, WORKTREE_FEATURE_PATH])
-    localMock.mockResolvedValue(undefined)
-    const sshProvider = { [method]: vi.fn().mockResolvedValue(undefined) }
-    getSshGitProviderMock.mockReturnValue(sshProvider)
+  it.each(['merge', 'rebase', 'cherry-pick'] as const)(
+    'routes a %s continue through local and SSH git providers',
+    async (operation) => {
+      registerWorktreeRootsForRepo(store as never, 'repo-1', [REPO_PATH, WORKTREE_FEATURE_PATH])
+      continueSequencerMock.mockResolvedValue(undefined)
+      const sshProvider = { continueSequencer: vi.fn().mockResolvedValue(undefined) }
+      getSshGitProviderMock.mockReturnValue(sshProvider)
 
-    registerFilesystemHandlers(store as never)
+      registerFilesystemHandlers(store as never)
 
-    await handlers.get(channel)!(null, { worktreePath: WORKTREE_FEATURE_PATH })
-    await handlers.get(channel)!(null, {
-      worktreePath: '/remote/repo',
-      connectionId: 'ssh-1'
-    })
+      await handlers.get('git:continueSequencer')!(null, {
+        worktreePath: WORKTREE_FEATURE_PATH,
+        operation
+      })
+      await handlers.get('git:continueSequencer')!(null, {
+        worktreePath: '/remote/repo',
+        operation,
+        connectionId: 'ssh-1'
+      })
 
-    expect(localMock).toHaveBeenCalledWith(WORKTREE_FEATURE_PATH, {})
-    expect(sshProvider[method]).toHaveBeenCalledWith('/remote/repo')
-  })
+      expect(continueSequencerMock).toHaveBeenCalledWith(operation, WORKTREE_FEATURE_PATH, {})
+      expect(sshProvider.continueSequencer).toHaveBeenCalledWith('/remote/repo', operation)
+    }
+  )
 
   it('rejects git file paths that escape the selected worktree', async () => {
     registerFilesystemHandlers(store as never)

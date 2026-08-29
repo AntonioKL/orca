@@ -33,9 +33,7 @@ export function createMobileRpcSurfaceRuntime() {
   const rebaseRuntimeGitFromBase: MobileRpcMock = vi.fn().mockResolvedValue({ ok: true })
   const abortRuntimeGitMerge: MobileRpcMock = vi.fn().mockResolvedValue({ ok: true })
   const abortRuntimeGitRebase: MobileRpcMock = vi.fn().mockResolvedValue({ ok: true })
-  const continueRuntimeGitMerge: MobileRpcMock = vi.fn().mockResolvedValue({ ok: true })
-  const continueRuntimeGitRebase: MobileRpcMock = vi.fn().mockResolvedValue({ ok: true })
-  const continueRuntimeGitCherryPick: MobileRpcMock = vi.fn().mockResolvedValue({ ok: true })
+  const continueRuntimeGitSequencer: MobileRpcMock = vi.fn().mockResolvedValue({ ok: true })
   const bulkStageRuntimeGitPaths: MobileRpcMock = vi.fn().mockResolvedValue({ ok: true })
   const bulkUnstageRuntimeGitPaths: MobileRpcMock = vi.fn().mockResolvedValue({ ok: true })
   const getRuntimeGitDiff: MobileRpcMock = vi.fn().mockResolvedValue({
@@ -133,9 +131,7 @@ export function createMobileRpcSurfaceRuntime() {
     rebaseRuntimeGitFromBase,
     abortRuntimeGitMerge,
     abortRuntimeGitRebase,
-    continueRuntimeGitMerge,
-    continueRuntimeGitRebase,
-    continueRuntimeGitCherryPick,
+    continueRuntimeGitSequencer,
     bulkStageRuntimeGitPaths,
     bulkUnstageRuntimeGitPaths,
     getRuntimeGitDiff,
@@ -187,29 +183,24 @@ export function createMobileRpcSurfaceRuntime() {
   }
 }
 
-// Sequencer RPCs share one shape (worktree in, { ok: true } out), so the
-// allowlist suite drives and asserts them as a set instead of line by line.
-export const MOBILE_SEQUENCER_RPC_CASES = [
-  ['git.continueMerge', 'continueRuntimeGitMerge'],
-  ['git.continueRebase', 'continueRuntimeGitRebase'],
-  ['git.continueCherryPick', 'continueRuntimeGitCherryPick']
-] as const
-
 export async function dispatchMobileSequencerRpcs(
   dispatch: (request: Record<string, unknown>) => Promise<void>,
   deviceToken: string
 ): Promise<void> {
-  for (const [method] of MOBILE_SEQUENCER_RPC_CASES) {
-    await dispatch({ id: `req_${method}`, method, deviceToken, params: { worktree: 'id:wt-1' } })
-  }
+  await dispatch({
+    id: 'req_git.continueSequencer',
+    method: 'git.continueSequencer',
+    deviceToken,
+    params: { worktree: 'id:wt-1', operation: 'rebase' }
+  })
 }
 
 export function expectMobileSequencerRpcsDispatched(
   replies: Record<string, unknown>[],
   mocks: ReturnType<typeof createMobileRpcSurfaceRuntime>['mocks']
 ): void {
-  for (const [method, runtimeMethod] of MOBILE_SEQUENCER_RPC_CASES) {
-    expect(replies).toContainEqual(expect.objectContaining({ id: `req_${method}`, ok: true }))
-    expect(mocks[runtimeMethod]).toHaveBeenCalledWith('id:wt-1')
-  }
+  expect(replies).toContainEqual(
+    expect.objectContaining({ id: 'req_git.continueSequencer', ok: true })
+  )
+  expect(mocks.continueRuntimeGitSequencer).toHaveBeenCalledWith('id:wt-1', 'rebase')
 }

@@ -1,21 +1,12 @@
 import { useCallback } from 'react'
 import { translate } from '@/i18n/i18n'
-import {
-  continueRuntimeGitCherryPick,
-  continueRuntimeGitMerge,
-  continueRuntimeGitRebase
-} from '@/runtime/runtime-git-client'
+import { continueRuntimeGitSequencer } from '@/runtime/runtime-git-client'
+import { isGitSequencerOperation } from '../../../../../../shared/git-sequencer-step'
 import type { GitConflictOperation } from '../../../../../../shared/git-status-types'
 import type { SourceControlWorktreeContext } from '../listing/use-worktree-context'
 import type { SourceControlWorktreeOperationState } from '../panel/use-worktree-operation-state'
 import { useSourceControlConflictOperationRunner } from './use-conflict-operation-runner'
 import type { SourceControlStatusRefresh } from './use-status-refresh'
-
-const CONTINUE_RUNNERS = {
-  merge: continueRuntimeGitMerge,
-  rebase: continueRuntimeGitRebase,
-  'cherry-pick': continueRuntimeGitCherryPick
-} as const
 
 /** Continue for an in-progress merge/rebase/cherry-pick: moves the sequencer forward. */
 export function useSourceControlConflictAdvance({
@@ -58,8 +49,7 @@ export function useSourceControlConflictAdvance({
 
   const handleContinueOperation = useCallback(
     (operation: GitConflictOperation): void => {
-      const runner = CONTINUE_RUNNERS[operation as keyof typeof CONTINUE_RUNNERS]
-      if (!runner) {
+      if (!isGitSequencerOperation(operation)) {
         return
       }
       void runConflictOperation({
@@ -70,7 +60,7 @@ export function useSourceControlConflictAdvance({
           'Continue {{value0}} failed',
           { value0: operation }
         ),
-        run: (context) => runner(context)
+        run: (context) => continueRuntimeGitSequencer(context, operation)
       })
     },
     [runConflictOperation]

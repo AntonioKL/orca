@@ -113,10 +113,13 @@ export function createGitApi(): NonNullable<Partial<PreloadApi>['git']> {
         worktree: toRuntimeWorktreeSelector(worktree.id)
       })
     },
-    continueMerge: ({ worktreePath }) => continueGitOperation('git.continueMerge', worktreePath),
-    continueRebase: ({ worktreePath }) => continueGitOperation('git.continueRebase', worktreePath),
-    continueCherryPick: ({ worktreePath }) =>
-      continueGitOperation('git.continueCherryPick', worktreePath),
+    continueSequencer: async ({ worktreePath, operation }) => {
+      const worktree = await resolveRuntimeWorktreeByPath(worktreePath)
+      await callRuntimeResult('git.continueSequencer', {
+        worktree: toRuntimeWorktreeSelector(worktree.id),
+        operation
+      })
+    },
     diff: async ({ worktreePath, filePath, staged, compareAgainstHead }) => {
       const file = await resolveRuntimeFilePath(filePath, worktreePath)
       return callRuntimeResult('git.diff', {
@@ -274,11 +277,6 @@ export function createGitApi(): NonNullable<Partial<PreloadApi>['git']> {
       })
     }
   }
-}
-
-async function continueGitOperation(method: string, worktreePath: string): Promise<void> {
-  const worktree = await resolveRuntimeWorktreeByPath(worktreePath)
-  await callRuntimeResult(method, { worktree: toRuntimeWorktreeSelector(worktree.id) })
 }
 
 export async function mutateGitPath(

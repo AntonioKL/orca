@@ -17,14 +17,13 @@ vi.mock('./runner', () =>
   })
 )
 
-import { continueCherryPick, continueMerge, continueRebase } from './sequencer-actions'
+import type { GitSequencerOperation } from '../../shared/git-sequencer-step'
+import { continueSequencer } from './sequencer-actions'
 
-type SequencerAction = (worktreePath: string, options?: { wslDistro?: string }) => Promise<void>
-
-const CASES: readonly [string, SequencerAction, string[]][] = [
-  ['continueMerge', continueMerge, ['merge', '--continue']],
-  ['continueRebase', continueRebase, ['rebase', '--continue']],
-  ['continueCherryPick', continueCherryPick, ['cherry-pick', '--continue']]
+const CASES: readonly [GitSequencerOperation, string[]][] = [
+  ['merge', ['merge', '--continue']],
+  ['rebase', ['rebase', '--continue']],
+  ['cherry-pick', ['cherry-pick', '--continue']]
 ]
 
 // The marker probe runs before the sequencer step, so calls are matched by argv, not index.
@@ -48,8 +47,8 @@ describe('git sequencer actions', () => {
     gitExecFileAsyncMock.mockImplementation(markerProbe('abc123'))
   })
 
-  it.each(CASES)('%s runs the matching git command in the worktree', async (_name, run, args) => {
-    await run('/repo')
+  it.each(CASES)('continues a %s with the matching git command', async (operation, args) => {
+    await continueSequencer(operation, '/repo')
 
     expect(gitExecFileAsyncMock).toHaveBeenCalledWith(
       args,
@@ -58,14 +57,14 @@ describe('git sequencer actions', () => {
   })
 
   // Regression guard: without GIT_EDITOR the `--continue` child waits forever on the commit editor.
-  it.each(CASES)('%s suppresses the commit-message editor', async (_name, run, args) => {
-    await run('/repo')
+  it.each(CASES)('suppresses the commit-message editor for a %s', async (operation, args) => {
+    await continueSequencer(operation, '/repo')
 
     expect(optionsFor(args)?.env?.GIT_EDITOR).toBe('true')
   })
 
   it('forwards runtime options such as the WSL distro', async () => {
-    await continueRebase('/repo', { wslDistro: 'Ubuntu' })
+    await continueSequencer('rebase', '/repo', { wslDistro: 'Ubuntu' })
 
     expect(gitExecFileAsyncMock).toHaveBeenCalledWith(
       ['rebase', '--continue'],
@@ -86,10 +85,12 @@ describe('git sequencer actions', () => {
       return Promise.reject(new Error('error: could not apply ec9b3362... feat: add thing'))
     })
 
-    await expect(continueRebase('/repo')).resolves.toBeUndefined()
+    await expect(continueSequencer('rebase', '/repo')).resolves.toBeUndefined()
   })
 
-  it('treats a marker that cleared as the operation completing', async () => {
+  // Git exits 0 once it finishes the sequence, so a cleared marker with a nonzero exit means
+  // a hook or post-commit step failed — calling that success would hide it from the user.
+  it('surfaces a nonzero exit that cleared the marker instead of reporting completion', async () => {
     let mergeHead: string | null = 'aaa111'
     gitExecFileAsyncMock.mockImplementation((args: string[]) => {
       if (args[0] === 'rev-parse') {
@@ -98,10 +99,10 @@ describe('git sequencer actions', () => {
           : Promise.reject(new Error('fatal: needed a single revision'))
       }
       mergeHead = null
-      return Promise.reject(new Error('warning: post-commit cleanup failed'))
+      return Promise.reject(new Error('post-commit cleanup failed'))
     })
 
-    await expect(continueMerge('/repo')).resolves.toBeUndefined()
+    await expect(continueSequencer('merge', '/repo')).rejects.toThrow('post-commit cleanup failed')
   })
 
   it('still fails a step that refused to run, leaving the marker where it was', async () => {
@@ -111,7 +112,7 @@ describe('git sequencer actions', () => {
         : Promise.reject(new Error('f.txt: needs merge'))
     )
 
-    await expect(continueRebase('/repo')).rejects.toThrow('needs merge')
+    await expect(continueSequencer('rebase', '/repo')).rejects.toThrow('needs merge')
   })
 
   // The whole point of probing the marker instead of HEAD: another actor committing in
@@ -123,7 +124,7 @@ describe('git sequencer actions', () => {
         : Promise.reject(new Error('f.txt: needs merge'))
     )
 
-    await expect(continueRebase('/repo')).rejects.toThrow('needs merge')
+    await expect(continueSequencer('rebase', '/repo')).rejects.toThrow('needs merge')
     expect(gitExecFileAsyncMock).not.toHaveBeenCalledWith(
       ['rev-parse', '--verify', 'HEAD'],
       expect.anything()
@@ -138,6 +139,6 @@ describe('git sequencer actions', () => {
         : Promise.reject(new Error('cherry-pick failed'))
     )
 
-    await expect(continueCherryPick('/repo')).rejects.toThrow('cherry-pick failed')
+    await expect(continueSequencer('cherry-pick', '/repo')).rejects.toThrow('cherry-pick failed')
   })
 })

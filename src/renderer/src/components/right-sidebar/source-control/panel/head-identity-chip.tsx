@@ -42,6 +42,42 @@ export function resolveHeadFlowLabel(
   return null
 }
 
+/**
+ * Truncated branch chip with the full text in a tooltip. `block` is load-bearing:
+ * `truncate` clips nothing on an inline box, so an inline span would let long names
+ * run under the line-total chip. Native title omitted — Radix already shows the text.
+ */
+function TruncatedIdentityChip({
+  ariaLabel,
+  tooltip,
+  operation,
+  children
+}: {
+  ariaLabel: string
+  tooltip: string
+  operation?: OperationIdentity['operation']
+  children: React.ReactNode
+}): React.JSX.Element {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className="block min-w-0 max-w-full truncate rounded-sm font-mono text-[10.5px] font-medium text-foreground/90 outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          tabIndex={0}
+          aria-label={ariaLabel}
+          data-testid="source-control-head-identity"
+          data-operation={operation}
+        >
+          {children}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" sideOffset={6} className="max-w-72 break-all font-mono">
+        {tooltip}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
 function OperationIdentityChip({ display }: { display: OperationIdentity }): React.JSX.Element {
   const qualifier = operationIdentityQualifier(display.operation)
   const ariaLabel = translate(
@@ -60,23 +96,10 @@ function OperationIdentityChip({ display }: { display: OperationIdentity }): Rea
     : display.branchName
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          className="block min-w-0 max-w-full truncate rounded-sm font-mono text-[10.5px] font-medium text-foreground/90 outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          tabIndex={0}
-          aria-label={ariaLabel}
-          data-testid="source-control-head-identity"
-          data-operation={display.operation}
-        >
-          {display.branchName}
-          <span className="text-amber-600 dark:text-amber-400">{` · ${qualifier}`}</span>
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="bottom" sideOffset={6} className="max-w-72 break-all font-mono">
-        {tooltip}
-      </TooltipContent>
-    </Tooltip>
+    <TruncatedIdentityChip ariaLabel={ariaLabel} tooltip={tooltip} operation={display.operation}>
+      {display.branchName}
+      <span className="text-amber-600 dark:text-amber-400">{` · ${qualifier}`}</span>
+    </TruncatedIdentityChip>
   )
 }
 
@@ -108,24 +131,9 @@ export function HeadIdentity({
   )
 
   // Why: focusable + tooltip so truncated long branch names stay discoverable.
-  // Native title omitted — Radix Tooltip already surfaces the full name on hover.
-  // `block` is load-bearing: `truncate` clips nothing on an inline box, so an
-  // inline span here let long names run under the line-total chip.
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          className="block min-w-0 max-w-full truncate rounded-sm font-mono text-[10.5px] font-medium text-foreground/90 outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          tabIndex={0}
-          aria-label={branchAriaLabel}
-          data-testid="source-control-head-identity"
-        >
-          {display.branchName}
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="bottom" sideOffset={6} className="max-w-72 break-all font-mono">
-        {display.branchName}
-      </TooltipContent>
-    </Tooltip>
+    <TruncatedIdentityChip ariaLabel={branchAriaLabel} tooltip={display.branchName}>
+      {display.branchName}
+    </TruncatedIdentityChip>
   )
 }

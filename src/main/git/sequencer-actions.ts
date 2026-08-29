@@ -1,4 +1,9 @@
 import { editorSuppressedGitEnv } from '../../shared/git-sequencer-editor-env'
+import {
+  gitSequencerAdvanced,
+  gitSequencerContinueStep,
+  type GitSequencerOperation
+} from '../../shared/git-sequencer-step'
 import type { GitRuntimeOptions } from './git-runtime-options'
 import { gitOptionsForWorktree } from './git-runtime-options'
 import { gitExecFileAsync } from './runner'
@@ -20,14 +25,13 @@ async function readSequencerMarkerOid(
   }
 }
 
-// Why: everything here predates the Git 2.25 baseline (`merge --continue` 2.12,
-// REBASE_HEAD 2.17), so no capability probe or fallback is needed.
-async function runSequencerAction(
-  args: readonly [string, string],
-  marker: string,
+/** Advances an in-progress merge/rebase/cherry-pick by one step. */
+export async function continueSequencer(
+  operation: GitSequencerOperation,
   worktreePath: string,
-  options: GitRuntimeOptions
+  options: GitRuntimeOptions = {}
 ): Promise<void> {
+  const { args, marker } = gitSequencerContinueStep(operation)
   const markerBefore = await readSequencerMarkerOid(marker, worktreePath, options)
   try {
     await runWithGitReadCacheInvalidation(() =>
@@ -38,34 +42,14 @@ async function runSequencerAction(
       })
     )
   } catch (error) {
-    // Why: `--continue` also exits nonzero when it DID commit the resolution and the
-    // sequencer then stopped on the next commit. The operation's own marker ref moving
-    // (or clearing) is the proof it advanced — unlike HEAD, no concurrent commit in the
-    // worktree can touch it, so a refused step can never masquerade as progress.
     const markerAfter = await readSequencerMarkerOid(marker, worktreePath, options)
-    if (!markerBefore || markerAfter === markerBefore) {
+    if (!gitSequencerAdvanced(markerBefore, markerAfter)) {
       throw error
     }
+    // The sequencer advanced, but git still said something; losing it entirely hides hook failures.
+    console.warn(
+      `[git/sequencer] \`git ${args.join(' ')}\` advanced ${marker} to ${markerAfter} but exited nonzero:`,
+      error
+    )
   }
-}
-
-export async function continueMerge(
-  worktreePath: string,
-  options: GitRuntimeOptions = {}
-): Promise<void> {
-  await runSequencerAction(['merge', '--continue'], 'MERGE_HEAD', worktreePath, options)
-}
-
-export async function continueRebase(
-  worktreePath: string,
-  options: GitRuntimeOptions = {}
-): Promise<void> {
-  await runSequencerAction(['rebase', '--continue'], 'REBASE_HEAD', worktreePath, options)
-}
-
-export async function continueCherryPick(
-  worktreePath: string,
-  options: GitRuntimeOptions = {}
-): Promise<void> {
-  await runSequencerAction(['cherry-pick', '--continue'], 'CHERRY_PICK_HEAD', worktreePath, options)
 }

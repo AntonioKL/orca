@@ -4,21 +4,15 @@ import { act, renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSourceControlConflictAdvance } from './use-conflict-advance'
 
-const { runners, toastErrorMock } = vi.hoisted(() => ({
+const { continueSequencerMock, toastErrorMock } = vi.hoisted(() => ({
   toastErrorMock: vi.fn(),
-  runners: {
-    continueMerge: vi.fn(),
-    continueRebase: vi.fn(),
-    continueCherryPick: vi.fn()
-  }
+  continueSequencerMock: vi.fn()
 }))
 
 vi.mock('sonner', () => ({ toast: { error: toastErrorMock } }))
 vi.mock('@/lib/connection-context', () => ({ getConnectionId: () => null }))
 vi.mock('@/runtime/runtime-git-client', () => ({
-  continueRuntimeGitMerge: (...a: unknown[]) => runners.continueMerge(...a),
-  continueRuntimeGitRebase: (...a: unknown[]) => runners.continueRebase(...a),
-  continueRuntimeGitCherryPick: (...a: unknown[]) => runners.continueCherryPick(...a)
+  continueRuntimeGitSequencer: (...a: unknown[]) => continueSequencerMock(...a)
 }))
 vi.mock('./remote-refresh', () => ({ refreshSourceControlAfterRemoteAction: vi.fn() }))
 
@@ -58,10 +52,10 @@ describe('useSourceControlConflictAdvance', () => {
       result.current.handleContinueOperation('rebase')
     })
 
-    expect(runners.continueRebase).toHaveBeenCalledTimes(1)
+    expect(continueSequencerMock).toHaveBeenCalledWith(expect.anything(), 'rebase')
   })
 
-  it('routes each operation to its own runner', async () => {
+  it('passes each operation through to the sequencer runner', async () => {
     const merge = setup({ conflictOperation: 'merge' })
     await act(async () => {
       merge.result.current.handleContinueOperation('merge')
@@ -71,9 +65,9 @@ describe('useSourceControlConflictAdvance', () => {
       cherry.result.current.handleContinueOperation('cherry-pick')
     })
 
-    expect(runners.continueMerge).toHaveBeenCalledTimes(1)
-    expect(runners.continueCherryPick).toHaveBeenCalledTimes(1)
-    expect(runners.continueRebase).not.toHaveBeenCalled()
+    expect(continueSequencerMock).toHaveBeenCalledWith(expect.anything(), 'merge')
+    expect(continueSequencerMock).toHaveBeenCalledWith(expect.anything(), 'cherry-pick')
+    expect(continueSequencerMock).not.toHaveBeenCalledWith(expect.anything(), 'rebase')
   })
 
   it('ignores a request for an operation that is no longer the one running', async () => {
@@ -83,7 +77,7 @@ describe('useSourceControlConflictAdvance', () => {
       result.current.handleContinueOperation('rebase')
     })
 
-    expect(runners.continueRebase).not.toHaveBeenCalled()
+    expect(continueSequencerMock).not.toHaveBeenCalled()
   })
 
   it('refuses to advance while an abort is already in flight', async () => {
@@ -93,11 +87,11 @@ describe('useSourceControlConflictAdvance', () => {
       result.current.handleContinueOperation('rebase')
     })
 
-    expect(runners.continueRebase).not.toHaveBeenCalled()
+    expect(continueSequencerMock).not.toHaveBeenCalled()
   })
 
   it('surfaces a failure and clears the in-flight flag', async () => {
-    runners.continueRebase.mockRejectedValueOnce(new Error('needs merge'))
+    continueSequencerMock.mockRejectedValueOnce(new Error('needs merge'))
     const { result } = setup()
 
     await act(async () => {
