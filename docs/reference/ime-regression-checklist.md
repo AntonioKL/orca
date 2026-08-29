@@ -23,9 +23,12 @@ not exercise the operating system's input method. Changes must also cover:
 | Windows     | Microsoft Korean IME over an untouched Codex placeholder; the preedit is the only visible text, the placeholder returns after cancel, and ordinary mid-line content remains visible. |
 | Linux / SSH | IBus Hangul with an SSH-hosted PTY; an empty-data `compositionend` still produces one diagnostic sample and one committed syllable.                                                  |
 
-Loss of contact with a remote execution host makes the native result
-`unverifiable`; it is never evidence that the composition or PTY process
-exited.
+For remote evidence, `live` means the owning host reported the current
+verification session or process identity. `exited` requires positive
+host-owned evidence that the same identity terminated or is absent. Any
+transport failure, stale identity, timeout, or inability to ask the owning host
+makes the result `unverifiable`; it is never evidence that the composition or
+PTY process exited.
 
 ## Code elegance gate
 
