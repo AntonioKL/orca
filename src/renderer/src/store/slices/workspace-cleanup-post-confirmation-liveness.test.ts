@@ -17,6 +17,10 @@ import type {
   WorkspaceCleanupScanResult
 } from '../../../../shared/workspace-cleanup'
 import {
+  buildPtyProcessInspectionWireResult,
+  type PtyProcessInspectionEvidence
+} from '../../../../shared/pty-process-inspection-evidence'
+import {
   NOW,
   WORKTREE_ID,
   createCleanupTestStore,
@@ -24,7 +28,11 @@ import {
   makeCandidate
 } from './workspace-cleanup-slice-test-harness'
 
-type PtyInspection = { foregroundProcess: string | null; hasChildProcesses: boolean }
+type PtyInspection = {
+  foregroundProcess: string | null
+  hasChildProcesses: boolean
+  processEvidence?: PtyProcessInspectionEvidence
+}
 
 type LivenessArm = {
   blocker: WorkspaceCleanupBlocker
@@ -35,7 +43,16 @@ type LivenessArm = {
   tabTitle: string
 }
 
-const IDLE_SHELL: PtyInspection = { foregroundProcess: 'zsh', hasChildProcesses: false }
+/**
+ * The host OBSERVED an idle shell and said so, so the live-agent arms isolate the
+ * agent signal. The same two legacy values with no `processEvidence` are what a
+ * pre-v27 daemon publishes for a degraded read, and that is `terminal-liveness-\
+ * unknown` — a second blocker, which would make these arms test the wrong thing.
+ */
+const IDLE_SHELL: PtyInspection = buildPtyProcessInspectionWireResult(
+  { verdict: 'observed', processName: 'zsh' },
+  { verdict: 'exited' }
+)
 
 const LIVENESS_ARMS: LivenessArm[] = [
   {
