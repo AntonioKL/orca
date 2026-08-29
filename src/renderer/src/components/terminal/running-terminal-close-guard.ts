@@ -85,11 +85,14 @@ function shouldConfirmForProbe(
     return tracked
   }
   const children = readPtyProcessInspectionEvidence(probe.value).children
-  // Why `hasChildProcesses` still votes: it is `children.verdict === 'live'` collapsed, so only
-  // its `false` pole is lossy. A `true` beside evidence this client cannot vouch for — a
-  // malformed or foreign `processEvidence`, which reads as `unverifiable` — is still a positive
-  // observation, and the #16900/#16908 polarity rule keeps a positive observation's vote.
-  if (children.verdict === 'live' || probe.value.hasChildProcesses) {
+  // Why the verdict alone decides, with no vote from `hasChildProcesses`: the boolean is
+  // `children.verdict === 'live'` collapsed, so it says nothing new on the positive pole and
+  // nothing trustworthy on the others. The one producer that publishes `true` beside a
+  // non-`live` verdict is a daemon pane whose handle has no evidence channel, and that host
+  // states outright that such a read proves neither life nor exit — so voting on it would ask
+  // for a non-shell title and close silently for a shell one, off the very same degraded read.
+  // The window-close guard reads this same single signal (#17077).
+  if (children.verdict === 'live') {
     return true
   }
   return children.verdict === 'unverifiable' && tracked
