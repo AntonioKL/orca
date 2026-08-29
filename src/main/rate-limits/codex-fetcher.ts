@@ -176,7 +176,10 @@ async function fetchWslBackend(
     if (options.signal?.aborted) {
       return abortedCodexRateLimitResult()
     }
-    return result
+    // Why (STA-3445): this is the one path that publishes the backend reading as-is, so the
+    // no-window rule the RPC and PTY probes apply has to hold here too. Falling through to
+    // those probes beats overwriting the account's last real usage with two nulls.
+    return result && (result.session || result.weekly)
       ? supplementCodexRateLimitResetCredits(result, fetchCodexResetCredits, options)
       : null
   } catch {

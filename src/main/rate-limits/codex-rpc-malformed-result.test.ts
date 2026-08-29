@@ -81,10 +81,16 @@ describe('readCodexRateLimitsViaRpc with an unreadable result', () => {
     })
   })
 
+  // STA-3445: the shape gate rejects a window Orca cannot read, but a response that claims
+  // no window at all reaches the same settle with the same two nulls -- and the stale policy
+  // cannot tell them apart, so it writes both over the account's last real usage. Apply the
+  // rule the PTY probe already uses: a reading with no window is not a successful reading.
   it.each([
     ['an empty object', {}],
-    ['an explicit null rateLimits', { rateLimits: null }]
-  ])('still accepts %s as a real answer with no windows', async (_label, result) => {
+    ['an explicit null rateLimits', { rateLimits: null }],
+    ['an empty rateLimits object', { rateLimits: {} }],
+    ['windows that are all null', { rateLimits: { primary: null, secondary: null } }]
+  ])('does not settle %s as a successful empty reading', async (_label, result) => {
     const pending = readRateLimits(result)
     await vi.advanceTimersByTimeAsync(1)
     await vi.advanceTimersByTimeAsync(1)
@@ -93,8 +99,22 @@ describe('readCodexRateLimitsViaRpc with an unreadable result', () => {
       provider: 'codex',
       session: null,
       weekly: null,
+      status: 'error'
+    })
+  })
+
+  it('still settles ok when at least one window reads', async () => {
+    const pending = readRateLimits({
+      rateLimits: { primary: { usedPercent: 42, windowDurationMins: 300 } }
+    })
+    await vi.advanceTimersByTimeAsync(1)
+    await vi.advanceTimersByTimeAsync(1)
+
+    await expect(pending).resolves.toMatchObject({
+      provider: 'codex',
       status: 'ok',
-      error: null
+      error: null,
+      session: { usedPercent: 42 }
     })
   })
 })

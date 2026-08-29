@@ -14,7 +14,10 @@ import {
   type CodexRateLimitWindowsSnapshot
 } from './codex-rate-limit-window-classification'
 import type { CodexRateLimitFetchOptions } from './codex-rate-limit-fetch-options'
-import { abortedCodexRateLimitResult } from './codex-rate-limit-fetch-result'
+import {
+  abortedCodexRateLimitResult,
+  failedCodexRateLimitReading
+} from './codex-rate-limit-fetch-result'
 import { mapCodexRateLimitWindow } from './codex-rate-limit-window-mapper'
 import {
   mapRpcRateLimitResetCredits,
@@ -142,17 +145,7 @@ export function readCodexRateLimitsViaRpc(
         clearTimeout(timeout)
       }
       timeout = setTimeout(() => {
-        settle(
-          {
-            provider: 'codex',
-            session: null,
-            weekly: null,
-            updatedAt: Date.now(),
-            error: 'RPC timeout',
-            status: 'error'
-          },
-          { kill: true }
-        )
+        settle(failedCodexRateLimitReading('RPC timeout'), { kill: true })
       }, deadlineMs)
     }
     armRpcDeadline(options.initTimeoutMs)
@@ -178,18 +171,14 @@ export function readCodexRateLimitsViaRpc(
       const isEnoent = (error as NodeJS.ErrnoException).code === 'ENOENT'
       const isBareCommand = codexCommand === 'codex'
       settle(
-        {
-          provider: 'codex',
-          session: null,
-          weekly: null,
-          updatedAt: Date.now(),
-          error: isEnoent
+        failedCodexRateLimitReading(
+          isEnoent
             ? isBareCommand
               ? 'Codex CLI not found'
               : 'Codex CLI found but could not run — Node.js may not be in your PATH'
             : withMacTailscaleDnsHint(error.message, stderr),
-          status: isEnoent && isBareCommand ? 'unavailable' : 'error'
-        },
+          isEnoent && isBareCommand ? 'unavailable' : 'error'
+        ),
         { kill: true }
       )
     }
@@ -203,14 +192,7 @@ export function readCodexRateLimitsViaRpc(
     }
 
     function onClose(code: number | null, signal: NodeJS.Signals | null): void {
-      settle({
-        provider: 'codex',
-        session: null,
-        weekly: null,
-        updatedAt: Date.now(),
-        error: describeCodexRpcExit(code, signal, stderr),
-        status: 'error'
-      })
+      settle(failedCodexRateLimitReading(describeCodexRpcExit(code, signal, stderr)))
     }
 
     let rateLimitsId: number | null = null
@@ -245,14 +227,7 @@ export function readCodexRateLimitsViaRpc(
           }
           if (message.error) {
             settle(
-              {
-                provider: 'codex',
-                session: null,
-                weekly: null,
-                updatedAt: Date.now(),
-                error: withMacTailscaleDnsHint(message.error.message, stderr),
-                status: 'error'
-              },
+              failedCodexRateLimitReading(withMacTailscaleDnsHint(message.error.message, stderr)),
               { kill: true }
             )
             return
@@ -263,20 +238,22 @@ export function readCodexRateLimitsViaRpc(
             // one Orca could not understand. Classifying it anyway would settle
             // two null windows as a successful reading, and the stale policy
             // would write that over the account's last real usage (STA-3445).
-            settle(
-              {
-                provider: 'codex',
-                session: null,
-                weekly: null,
-                updatedAt: Date.now(),
-                error: 'Codex returned an unreadable usage response',
-                status: 'error'
-              },
-              { kill: true }
-            )
+            settle(failedCodexRateLimitReading('Codex returned an unreadable usage response'), {
+              kill: true
+            })
             return
           }
           const classified = classifyCodexRateLimitWindows(wrapper.rateLimits)
+          if (!classified.session && !classified.weekly) {
+            // Why (STA-3445): the gate above rejects a window Orca cannot read, but a response
+            // claiming no window at all lands on the same two nulls -- and the stale policy
+            // cannot tell those apart, so it writes both over the last real usage. Apply the
+            // rule the PTY probe already uses: no window is not a successful reading.
+            settle(failedCodexRateLimitReading('Codex returned no readable usage windows'), {
+              kill: true
+            })
+            return
+          }
           const credits = mapRpcRateLimitResetCredits(wrapper.rateLimitResetCredits)
           settle(
             {
