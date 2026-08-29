@@ -45,7 +45,12 @@ __orca_omp_should_skip_extension() {
   return 1
 }
 __orca_omp_cwd_is_usable() {
-  [[ -n "${PWD:-}" && -x . && -d "${PWD}" && "${PWD}" -ef . ]]
+  [[ -x . ]] || return 1
+  if [[ -n "${PWD:-}" ]]; then
+    [[ -d "${PWD}" && "${PWD}" -ef . ]]
+  else
+    builtin pwd -P >/dev/null 2>&1
+  fi
 }
 __orca_omp_invoke() {
   local __orca_use_extension="$1"
