@@ -88,16 +88,44 @@ describe('the local inspection route carries host process evidence', () => {
     )
   })
 
-  it('names the cost of losing the field: the same read becomes a deletable idle shell', async () => {
-    // Strip only `processEvidence`, exactly as the bad merge resolution would.
-    const { processEvidence: _dropped, ...withoutEvidence } = DEGRADED_LOCAL_READ
-    installPtyApi(async () => withoutEvidence)
+  it('names the cost of losing the field: no host can vouch for a workspace again', async () => {
+    // The cleanup gate now fails CLOSED on a host that published nothing at all
+    // (a retained pre-v27 daemon publishes an idle-looking pair for a degraded
+    // read too), so dropping the field no longer opens a silent delete. What it
+    // destroys instead is the only way to say "safe": strip the field and even a
+    // host that positively observed an idle shell reads as unverifiable, so
+    // cleanup can never sweep anything again.
+    const OBSERVED_IDLE = buildPtyProcessInspectionWireResult(
+      { verdict: 'observed', processName: 'zsh' },
+      { verdict: 'exited' }
+    )
+    installPtyApi(async () => OBSERVED_IDLE)
 
     await expect(
       probeTerminalLiveness(stateWithOnePty(), [{ id: TAB_ID, title: 'zsh' }])
     ).resolves.toBe('idle')
 
+    // Strip only `processEvidence`, exactly as the bad merge resolution would.
+    const { processEvidence: _dropped, ...withoutEvidence } = OBSERVED_IDLE
+    installPtyApi(async () => withoutEvidence)
+
+    await expect(
+      probeTerminalLiveness(stateWithOnePty(), [{ id: TAB_ID, title: 'zsh' }])
+    ).resolves.toBe('unverifiable')
+  })
+
+  it('keeps a degraded read unverifiable whether or not the field survives', async () => {
+    // Defense in depth: the stated-degrade path and the published-nothing path
+    // reach the same verdict, so a lost field cannot turn a failed probe into a
+    // deletable idle shell.
     installPtyApi(async () => DEGRADED_LOCAL_READ)
+
+    await expect(
+      probeTerminalLiveness(stateWithOnePty(), [{ id: TAB_ID, title: 'zsh' }])
+    ).resolves.toBe('unverifiable')
+
+    const { processEvidence: _dropped, ...withoutEvidence } = DEGRADED_LOCAL_READ
+    installPtyApi(async () => withoutEvidence)
 
     await expect(
       probeTerminalLiveness(stateWithOnePty(), [{ id: TAB_ID, title: 'zsh' }])
