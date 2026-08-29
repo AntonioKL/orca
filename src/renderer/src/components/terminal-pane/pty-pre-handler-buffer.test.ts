@@ -24,6 +24,9 @@ const RECYCLED_PTY_ID = 'ssh:target@@pty-2'
 // and the one the fresh spawn just got handed.
 const PRIOR_INCARNATION_ID = 'incarnation-before-the-relay-restarted'
 const FRESH_INCARNATION_ID = 'incarnation-of-the-shell-now-attaching'
+const WARN_PTY_ID = 'pty-pre-handler-lost-handler-warn'
+// One more than the buffered-data pty cap, so admitting them all evicts `WARN_PTY_ID`'s buffer.
+const WARN_EVICTION_PTY_IDS = Array.from({ length: 64 }, (_, index) => `pty-warn-evict-${index}`)
 
 describe('pre-handler PTY buffer', () => {
   afterEach(() => {
@@ -34,6 +37,10 @@ describe('pre-handler PTY buffer', () => {
       clearPreHandlerPtyState(ptyId)
     }
     clearPreHandlerPtyState(RECYCLED_PTY_ID)
+    clearPreHandlerPtyState(WARN_PTY_ID)
+    for (const ptyId of WARN_EVICTION_PTY_IDS) {
+      clearPreHandlerPtyState(ptyId)
+    }
   })
 
   it('does not rescan historical chunks while buffering small startup output', () => {
@@ -362,6 +369,62 @@ describe('pre-handler PTY buffer', () => {
     bufferPreHandlerPtyExit(RECYCLED_PTY_ID, 5, PRIOR_INCARNATION_ID)
     discardPreHandlerPtyExitFromForeignIncarnation(RECYCLED_PTY_ID, 42)
     expect(hasPreHandlerPtyExit(RECYCLED_PTY_ID)).toBe(true)
+  })
+
+  // Why these three: the lost-handler diagnostic is latched so a buffer already over the threshold
+  // does not warn on every chunk. The latch describes ONE buffering episode, but a pty id is reused
+  // over time and its byte count falls as well as rises, so every way the count comes back down has
+  // to re-arm it or the replacement PTY's own accumulation goes unreported.
+  it('warns again once the spawn fence drops the prior owner below the threshold', () => {
+    const warn = vi.fn()
+    const originalWarn = console.warn
+    console.warn = warn
+
+    try {
+      bufferPreHandlerPtyData(WARN_PTY_ID, 'a'.repeat(70 * 1_024))
+      const fence = currentPreHandlerPtySequence()
+      bufferPreHandlerPtyData(WARN_PTY_ID, 'b'.repeat(1_024))
+      discardPreHandlerPtyStateFromPriorIncarnation(WARN_PTY_ID, fence)
+      bufferPreHandlerPtyData(WARN_PTY_ID, 'c'.repeat(70 * 1_024))
+    } finally {
+      console.warn = originalWarn
+    }
+
+    expect(warn).toHaveBeenCalledTimes(2)
+  })
+
+  it('warns again after the byte cap trims the buffer back under the threshold', () => {
+    const warn = vi.fn()
+    const originalWarn = console.warn
+    console.warn = warn
+
+    try {
+      bufferPreHandlerPtyData(WARN_PTY_ID, 'a'.repeat(500 * 1_024))
+      bufferPreHandlerPtyData(WARN_PTY_ID, 'b'.repeat(20 * 1_024))
+      bufferPreHandlerPtyData(WARN_PTY_ID, 'c'.repeat(70 * 1_024))
+    } finally {
+      console.warn = originalWarn
+    }
+
+    expect(warn).toHaveBeenCalledTimes(2)
+  })
+
+  it('warns again for an id whose buffer was evicted at the pty cap', () => {
+    const warn = vi.fn()
+    const originalWarn = console.warn
+    console.warn = warn
+
+    try {
+      bufferPreHandlerPtyData(WARN_PTY_ID, 'a'.repeat(70 * 1_024))
+      for (const ptyId of WARN_EVICTION_PTY_IDS) {
+        bufferPreHandlerPtyData(ptyId, 'x')
+      }
+      bufferPreHandlerPtyData(WARN_PTY_ID, 'c'.repeat(70 * 1_024))
+    } finally {
+      console.warn = originalWarn
+    }
+
+    expect(warn).toHaveBeenCalledTimes(2)
   })
 
   it('re-admits exits for a recycled id whose prior incarnation was consumed', () => {

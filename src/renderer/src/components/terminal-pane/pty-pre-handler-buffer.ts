@@ -14,6 +14,8 @@ type BufferedPreHandlerPtyState = {
   chunks: BufferedPreHandlerPtyData[]
   head: number
   bytes: number
+  /** Whether the lost-handler diagnostic has already fired for this buffer's current climb. */
+  warnedLostHandler: boolean
 }
 
 type BufferedPreHandlerPtyExit = {
@@ -46,7 +48,6 @@ const PRE_HANDLER_PTY_EXIT_MAX_INCARNATIONS_PER_PTY = 4
 // data. Sustained accumulation means a pane lost its data handler (the
 // frozen-pane detach/attach race) — leave a breadcrumb for trace capture.
 const PRE_HANDLER_PTY_DATA_WARN_BYTES = 64 * 1024
-const warnedLostHandlerPtyIds = new Set<string>()
 
 // Why: pty ids are NOT unique over time — a redeployed SSH relay renumbers from pty-1, so a fresh
 // spawn can be handed an id whose previous incarnation left buffered state here. A monotonic
@@ -61,6 +62,20 @@ function nextPreHandlerPtySequence(): number {
 
 export function currentPreHandlerPtySequence(): number {
   return preHandlerPtySequence
+}
+
+/** The only writer of `state.bytes`, so the warn latch can never describe a count it no longer has.
+ *
+ *  Why one place: the latch exists to keep one climb past the threshold from warning on every chunk,
+ *  and it is scoped to a buffer, not to a pty id — ids are recycled, and the count comes back down
+ *  three different ways (the spawn fence dropping a prior owner's chunks, the byte cap trimming the
+ *  head, the buffer being dropped outright). Re-arming at each of those separately is how the
+ *  replacement PTY ends up accumulating in silence, so the descent re-arms here instead. */
+function setPreHandlerPtyBytes(state: BufferedPreHandlerPtyState, bytes: number): void {
+  state.bytes = bytes
+  if (bytes <= PRE_HANDLER_PTY_DATA_WARN_BYTES) {
+    state.warnedLostHandler = false
+  }
 }
 
 /** Map preserves insertion order, so the first key is the least recently admitted id. */
@@ -136,12 +151,14 @@ function retainPreHandlerPtyChunks(
   }
   if (kept.length === 0) {
     preHandlerPtyData.delete(ptyId)
-    warnedLostHandlerPtyIds.delete(ptyId)
     return
   }
   state.chunks = kept
   state.head = 0
-  state.bytes = kept.reduce((total, chunk) => total + chunk.bytes, 0)
+  setPreHandlerPtyBytes(
+    state,
+    kept.reduce((total, chunk) => total + chunk.bytes, 0)
+  )
 }
 
 export function bufferPreHandlerPtyData(ptyId: string, data: string, meta?: PtyDataMeta): void {
@@ -159,7 +176,7 @@ export function bufferPreHandlerPtyData(ptyId: string, data: string, meta?: PtyD
       : meta
   let state = preHandlerPtyData.get(ptyId)
   if (!state) {
-    state = { chunks: [], head: 0, bytes: 0 }
+    state = { chunks: [], head: 0, bytes: 0, warnedLostHandler: false }
     preHandlerPtyData.set(ptyId, state)
   }
   state.chunks.push({
@@ -168,11 +185,11 @@ export function bufferPreHandlerPtyData(ptyId: string, data: string, meta?: PtyD
     sequence: nextPreHandlerPtySequence(),
     ...(bufferedMeta ? { meta: bufferedMeta } : {})
   })
-  state.bytes += chunk.bytes
+  setPreHandlerPtyBytes(state, state.bytes + chunk.bytes)
   // Why: a missing handler can accumulate many small chunks; a stored total
   // and head index keep that failure path linear instead of rescanning/shifting.
   while (state.bytes > PRE_HANDLER_PTY_DATA_MAX_BYTES && state.head < state.chunks.length - 1) {
-    state.bytes -= state.chunks[state.head].bytes
+    setPreHandlerPtyBytes(state, state.bytes - state.chunks[state.head].bytes)
     state.chunks[state.head] = { ...state.chunks[state.head], data: '', bytes: 0 }
     state.head += 1
   }
@@ -180,8 +197,8 @@ export function bufferPreHandlerPtyData(ptyId: string, data: string, meta?: PtyD
     state.chunks.splice(0, state.head)
     state.head = 0
   }
-  if (state.bytes > PRE_HANDLER_PTY_DATA_WARN_BYTES && !warnedLostHandlerPtyIds.has(ptyId)) {
-    warnedLostHandlerPtyIds.add(ptyId)
+  if (state.bytes > PRE_HANDLER_PTY_DATA_WARN_BYTES && !state.warnedLostHandler) {
+    state.warnedLostHandler = true
     console.warn(
       `[pty] ${ptyId}: ${state.bytes} bytes buffered with no registered data handler; ` +
         'the owning pane may have lost its handler to a detach/attach race'
@@ -194,7 +211,6 @@ export function drainPreHandlerPtyData(
   handler: (data: string, meta?: PtyDataMeta) => void
 ): void {
   const state = preHandlerPtyData.get(ptyId)
-  warnedLostHandlerPtyIds.delete(ptyId)
   if (!state) {
     return
   }
@@ -380,5 +396,4 @@ export function clearPreHandlerPtyState(ptyId: string): void {
     clearTimeout(discardTimer)
   }
   discardedPreHandlerPtyStates.delete(ptyId)
-  warnedLostHandlerPtyIds.delete(ptyId)
 }
