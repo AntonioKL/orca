@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   summarizeLatencySamples,
   summarizeTypingScaleCensus,
-  summarizeWorktreeNesting
-} from './typing-latency-diagnostic-summary'
+  summarizeWorktreeNesting,
+  typingSampleDurationMs
+} from './diagnostic-summary'
 
 describe('summarizeLatencySamples', () => {
   it('reports null percentiles with no samples', () => {
@@ -27,6 +28,14 @@ describe('summarizeLatencySamples', () => {
 
   it('handles a single sample', () => {
     expect(summarizeLatencySamples([42])).toEqual({ count: 1, p50: 42, p95: 42, max: 42 })
+  })
+})
+
+describe('typingSampleDurationMs', () => {
+  it('keeps a stopped sampling window fixed as wall time advances', () => {
+    expect(typingSampleDurationMs(100, null, 350)).toBe(250)
+    expect(typingSampleDurationMs(100, 300, 10_000)).toBe(200)
+    expect(typingSampleDurationMs(null, null, 350)).toBeNull()
   })
 })
 

@@ -3,7 +3,7 @@
  * per-keystroke samples, plus the scale census (agent rows, tabs, panes,
  * worktree nesting, suspect settings) that explains WHY a renderer is slow.
  *
- * Kept separate from the DOM/store wiring in typing-latency-diagnostic.ts so
+ * Kept separate from the DOM/store wiring in diagnostic.ts so
  * the arithmetic is unit-testable without an xterm or a live store.
  */
 
@@ -37,6 +37,14 @@ export function summarizeLatencySamples(values: readonly number[]): LatencyPerce
     p95: round(percentile(sorted, 0.95)),
     max: round(sorted.at(-1) ?? null)
   }
+}
+
+export function typingSampleDurationMs(
+  startedAt: number | null,
+  stoppedAt: number | null,
+  now: number
+): number | null {
+  return startedAt === null ? null : Math.max(0, Math.round((stoppedAt ?? now) - startedAt))
 }
 
 export type WorktreeNestingCensus = {
