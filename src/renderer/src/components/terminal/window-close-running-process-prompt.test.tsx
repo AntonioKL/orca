@@ -25,6 +25,7 @@ vi.mock('@/lib/shutdown-checkpoint-failure-toast', () => ({
   showShutdownCheckpointFailureToast: vi.fn()
 }))
 
+import { showShutdownCheckpointFailureToast } from '@/lib/shutdown-checkpoint-failure-toast'
 import { readWindowCloseRequestPayload } from '../../../../shared/window-close-request'
 import { useWindowCloseRunningProcessPrompt } from './window-close-running-process-prompt'
 import { anyPtyBlocksWindowClose } from './window-close-running-process-evidence'
@@ -174,6 +175,7 @@ function warningIsVisible(): boolean {
 }
 
 beforeEach(() => {
+  vi.mocked(showShutdownCheckpointFailureToast).mockClear()
   confirmWindowClose = vi.fn()
   getStateMock.mockReturnValue(storeStateWithPtys({ [LOCAL_WORKTREE_ID]: [PTY_ID] }))
   container = document.createElement('div')
@@ -395,6 +397,89 @@ describe('window close with a degraded local process read', () => {
 
     expect(confirmWindowClose).not.toHaveBeenCalled()
     expect(warningIsVisible(), 'the warning must stay up until the user answers it').toBe(true)
+  })
+
+  /** The close paths that never probe end an attempt just as surely as the ones that do.
+   *  A quit arrives on the same re-sent `window:close-requested` and skips the probe
+   *  entirely, and its shutdown checkpoint can veto it — which leaves the window open
+   *  with the earlier attempt's probe still outstanding. `vetoNextCloses` is the real
+   *  producer: `confirmNativeWindowClose` reads `window.dispatchEvent`'s own return. */
+  function vetoNextCloses(): () => void {
+    const veto = (event: Event): void => event.preventDefault()
+    window.addEventListener('beforeunload', veto)
+    return () => window.removeEventListener('beforeunload', veto)
+  }
+
+  it('does not reopen the warning on a probe left over from before a vetoed direct close', async () => {
+    const settle = installDeferredInspections()
+
+    act(() => proceed!(false))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(settle).toHaveLength(1)
+
+    // The user hits Cmd+Q while the first probe is still out. A quit never probes,
+    // and the dirty-file checkpoint vetoes it, so the window simply stays open.
+    const stopVetoing = vetoNextCloses()
+    try {
+      act(() => proceed!(true))
+      expect(confirmWindowClose).not.toHaveBeenCalled()
+      expect(vi.mocked(showShutdownCheckpointFailureToast)).toHaveBeenCalledTimes(1)
+
+      // The abandoned probe answers, for a close request that has already returned.
+      await act(async () => {
+        settle[0]!(observedLiveInspection())
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+    } finally {
+      stopVetoing()
+    }
+
+    expect(warningIsVisible(), 'a settled close attempt must not raise a dialog').toBe(false)
+  })
+
+  it('does not re-run a vetoed direct close from a probe that answers idle behind it', async () => {
+    const settle = installDeferredInspections()
+
+    act(() => proceed!(false))
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    const stopVetoing = vetoNextCloses()
+    try {
+      act(() => proceed!(true))
+      expect(vi.mocked(showShutdownCheckpointFailureToast)).toHaveBeenCalledTimes(1)
+
+      // Why the toast count and not `confirmWindowClose`: the veto is a standing
+      // dirty-file guard, so a re-run is refused too and the close call alone cannot
+      // tell a fenced probe from a re-vetoed one. The duplicate failure toast is the
+      // observable — a second shutdown report for a close the user never asked for.
+      await act(async () => {
+        settle[0]!(observedIdleInspection())
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+    } finally {
+      stopVetoing()
+    }
+
+    expect(
+      vi.mocked(showShutdownCheckpointFailureToast),
+      'the stale probe must not drive the close sequence a second time'
+    ).toHaveBeenCalledTimes(1)
+    expect(confirmWindowClose).not.toHaveBeenCalled()
+  })
+
+  it('still closes the window directly on a quit that no checkpoint vetoes', async () => {
+    installInspectProcess(async () => observedLiveInspection())
+
+    act(() => proceed!(true))
+
+    expect(confirmWindowClose).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(showShutdownCheckpointFailureToast)).not.toHaveBeenCalled()
   })
 
   it('reads a malformed foreign evidence payload as unverifiable, not as idle', async () => {

@@ -94,8 +94,24 @@ export function isShellTitleCorroborated(
     settlement.available &&
     !settlement.sawAgent &&
     now - settlement.at <= SHELL_TITLE_SCAN_CORROBORATION_MAX_AGE_MS &&
-    (agentEvidence === null || settlement.startedAt > agentEvidence.refreshedAt)
+    !agentEvidenceOutdatesScan(agentEvidence, settlement.startedAt)
   )
+}
+
+/**
+ * Whether the pane's agent identity postdates the process table a scan read. Such a scan cannot
+ * speak for that agent's absence: the table it sampled at `scanStartedAt` may never have had the
+ * chance to contain it, so its silence is not an observation.
+ *
+ * Strictly newer, because equal stamps are unordered rather than simultaneous: Date.now() cannot
+ * separate two events inside one millisecond, so a table captured in the agent's own millisecond
+ * may or may not have seen it. An unknown order is not proof of an exit; the tie keeps the agent.
+ */
+export function agentEvidenceOutdatesScan(
+  agentEvidence: CachedAgentForeground | null,
+  scanStartedAt: number
+): boolean {
+  return agentEvidence !== null && agentEvidence.refreshedAt >= scanStartedAt
 }
 
 /**
@@ -156,10 +172,7 @@ export function createForegroundIdentityRefresh(args: {
       // after that is evidence it may never have had a chance to see, so it cannot be retired
       // on this answer. Equal stamps are unordered, not simultaneous — Date.now() cannot say
       // which came first inside a millisecond — and an unknown order is not proof of an exit.
-      if (
-        state.cachedAgentForeground !== null &&
-        state.cachedAgentForeground.refreshedAt >= scanStartedAt
-      ) {
+      if (agentEvidenceOutdatesScan(state.cachedAgentForeground, scanStartedAt)) {
         return
       }
       const currentFallbackProcess = args.getFallbackProcess()
