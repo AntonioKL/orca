@@ -24,7 +24,7 @@ import {
   type TrustedSystemHookSignatureState
 } from './codex-hook-system-trust'
 
-export type MirroredRuntimeUserHookTrustEntry = {
+type MirroredRuntimeUserHookTrustEntry = {
   entry: CodexTrustEntry
   enabled: boolean
 }
