@@ -35,6 +35,7 @@ function createEditor(): { editor: Editor; emitUpdate: () => void } {
 
 describe('useRichMarkdownSearch', () => {
   it('rerenders for editor updates only while search is open', () => {
+    const closedUpdateCount = 100
     const { editor, emitUpdate } = createEditor()
     const rootRef = { current: document.createElement('div') }
     const scrollContainerRef = { current: document.createElement('div') }
@@ -45,9 +46,11 @@ describe('useRichMarkdownSearch', () => {
     })
 
     const closedRenderCount = renderCount
-    act(emitUpdate)
+    for (let index = 0; index < closedUpdateCount; index += 1) {
+      act(emitUpdate)
+    }
 
-    expect(renderCount).toBe(closedRenderCount)
+    expect(renderCount - closedRenderCount).toBe(0)
     expect(editor.on).not.toHaveBeenCalledWith('update', expect.any(Function))
 
     act(() => hook.result.current.openSearch())
@@ -55,13 +58,15 @@ describe('useRichMarkdownSearch', () => {
     const openRenderCount = renderCount
     expect(editor.on).toHaveBeenCalledWith('update', expect.any(Function))
     act(emitUpdate)
-    expect(renderCount).toBe(openRenderCount + 1)
+    expect(renderCount - openRenderCount).toBe(1)
 
     act(() => hook.result.current.searchActions.closeSearch())
 
     const reclosedRenderCount = renderCount
-    act(emitUpdate)
-    expect(renderCount).toBe(reclosedRenderCount)
+    for (let index = 0; index < closedUpdateCount; index += 1) {
+      act(emitUpdate)
+    }
+    expect(renderCount - reclosedRenderCount).toBe(0)
     expect(editor.off).toHaveBeenCalledWith('update', expect.any(Function))
   })
 })
