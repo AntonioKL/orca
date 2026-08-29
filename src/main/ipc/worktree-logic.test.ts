@@ -21,7 +21,11 @@ import {
   isOrphanedWorktreeError,
   areWorktreePathsEqual
 } from './worktree-logic'
-import { WORKSPACE_DIRECTORY_HELD_HINT } from '../../shared/worktree/removal'
+import {
+  isUnprovenOrphanedWorktreeDirectoryError,
+  WORKSPACE_DIRECTORY_HELD_HINT
+} from '../../shared/worktree/removal'
+import { UNPROVEN_ORPHANED_WORKTREE_DIRECTORY_MESSAGE } from '../worktree-removal-safety'
 
 describe('sanitizeWorktreeName', () => {
   it('replaces spaces with hyphens', () => {
@@ -704,6 +708,24 @@ describe('formatWorktreeRemovalError', () => {
       )
       const reformatted = formatWorktreeRemovalError(new Error(formatted), windowsPath, false)
       expect(reformatted.split(WORKSPACE_DIRECTORY_HELD_HINT)).toHaveLength(2)
+    })
+
+    // Why (STA-4895): the toast picks this failure out of the raw-error branch by matching a
+    // clause of the message. Reword either side alone and the toast silently goes back to
+    // rendering this English sentence verbatim, so the two are pinned together here.
+    it('keeps the refused-orphan message matchable after the removal funnel formats it', () => {
+      expect(
+        isUnprovenOrphanedWorktreeDirectoryError(UNPROVEN_ORPHANED_WORKTREE_DIRECTORY_MESSAGE)
+      ).toBe(true)
+      expect(
+        isUnprovenOrphanedWorktreeDirectoryError(
+          formatWorktreeRemovalError(
+            new Error(UNPROVEN_ORPHANED_WORKTREE_DIRECTORY_MESSAGE),
+            windowsPath,
+            false
+          )
+        )
+      ).toBe(true)
     })
   })
 })

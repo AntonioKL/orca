@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { getDeleteWorktreeToastCopy } from './delete-worktree-toast'
 import {
   classifyWorktreeForceDeleteReason,
+  isUnprovenOrphanedWorktreeDirectoryError,
   WORKSPACE_DIRECTORY_HELD_HINT
 } from '../../../../shared/worktree/removal'
 import { translate } from '@/i18n/i18n'
@@ -161,5 +162,32 @@ describe('getDeleteWorktreeToastCopy', () => {
     )
     expect(copy.description).not.toContain('EBUSY')
     expect(copy.description).not.toContain('C:\\ws\\feature')
+  })
+
+  // Why (STA-4895): the refused-orphan failure matches no force-delete reason either, so it lands
+  // on the same raw-error branch and would render the main process's English sentence verbatim.
+  it('renders localized copy when Orca refused to delete an unproven orphan directory', () => {
+    const error =
+      'Failed to delete worktree at C:\\ws\\feature. Worktree is no longer registered with Git, but Orca could not prove that its directory is safe to delete. The directory remains; verify the path and remove it manually.'
+    expect(classifyWorktreeForceDeleteReason(error)).toBeNull()
+    const copy = getDeleteWorktreeToastCopy('feature/foo', null, error) as {
+      description?: string
+    }
+    expect(copy.description).toBe(
+      translate('auto.components.sidebar.delete.worktree.toast.unprovenOrphanDirectory', 'MISSING')
+    )
+    expect(copy.description).not.toContain('could not prove')
+    expect(copy.description).not.toContain('C:\\ws\\feature')
+  })
+
+  // The other half: an over-broad anchor would swallow the two orphan messages that DO have a
+  // classifier, replacing their Force Delete copy with a dead end.
+  it('leaves the classified orphan messages to their own force-delete copy', () => {
+    for (const sibling of [
+      'Worktree is no longer registered with Git but its directory remains.',
+      'Worktree is no longer registered with Git and its directory is already gone.'
+    ]) {
+      expect(isUnprovenOrphanedWorktreeDirectoryError(sibling)).toBe(false)
+    }
   })
 })

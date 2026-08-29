@@ -62,6 +62,17 @@ export function isHeldWorkspaceDirectoryRemovalError(error: string): boolean {
   return error.includes(WORKSPACE_DIRECTORY_HELD_HINT)
 }
 
+// Why (STA-4895): a refused orphan cleanup matches no force-delete reason, so the toast falls to
+// its raw-error branch and renders the main process's English sentence. The clause is the wire
+// anchor -- distinctive enough not to collide with the sibling "directory remains" message that
+// classifyWorktreeForceDeleteReason already matches -- and the copy the user reads is localized.
+const UNPROVEN_ORPHANED_DIRECTORY_ANCHOR =
+  'Orca could not prove that its directory is safe to delete'
+
+export function isUnprovenOrphanedWorktreeDirectoryError(error: string): boolean {
+  return error.includes(UNPROVEN_ORPHANED_DIRECTORY_ANCHOR)
+}
+
 // EPERM/EACCES join EBUSY because libuv maps Windows sharing and access violations onto all three.
 const HELD_DIRECTORY_ERROR_CODES = new Set(['EBUSY', 'EPERM', 'EACCES'])
 

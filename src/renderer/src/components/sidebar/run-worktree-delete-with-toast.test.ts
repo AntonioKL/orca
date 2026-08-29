@@ -50,7 +50,10 @@ describe('runWorktreeDeleteWithToast force-delete retry', () => {
 
   it('does not put the main process hint in front of the user when the retry fails', async () => {
     removeWorktree.mockResolvedValueOnce({ ok: false, error: 'dirty' })
-    await runWorktreeDeleteWithToast({ id: 'repo-1::/ws/feature' }, 'feature')
+    await runWorktreeDeleteWithToast(
+      { id: 'repo-1::/ws/feature', executionHostId: null },
+      'feature'
+    )
 
     removeWorktree.mockResolvedValueOnce({ ok: false, error: HELD_ERROR })
     capturedForceHandlers[0]?.()
@@ -65,7 +68,10 @@ describe('runWorktreeDeleteWithToast force-delete retry', () => {
 
   it('still shows the raw failure for errors with no dedicated copy', async () => {
     removeWorktree.mockResolvedValueOnce({ ok: false, error: 'dirty' })
-    await runWorktreeDeleteWithToast({ id: 'repo-1::/ws/feature' }, 'feature')
+    await runWorktreeDeleteWithToast(
+      { id: 'repo-1::/ws/feature', executionHostId: null },
+      'feature'
+    )
 
     removeWorktree.mockResolvedValueOnce({ ok: false, error: 'fatal: some other git failure' })
     capturedForceHandlers[0]?.()
