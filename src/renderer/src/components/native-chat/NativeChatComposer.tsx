@@ -37,6 +37,7 @@ import type {
 } from './native-chat-composer-types'
 import { dispatchNativeChatStructuredComposerText } from './native-chat-structured-composer-dispatch'
 import { useNativeChatPtyComposerSend } from './use-native-chat-pty-composer-send'
+import { useNativeChatComposerAppMenuSelection } from './use-native-chat-composer-app-menu-selection'
 
 export type {
   NativeChatComposerHandle,
@@ -98,8 +99,7 @@ export const NativeChatComposer = forwardRef<NativeChatComposerHandle, NativeCha
     const [activeSuggestion, setActiveSuggestion] = useState(0)
     const [notice, setNotice] = useState<string | null>(null)
     const [dictationPressed, setDictationPressed] = useState(false)
-    const textareaRef = useRef<HTMLTextAreaElement>(null)
-    const isComposingRef = useRef(false)
+    const { textareaRef, isComposingRef, isComposing } = useNativeChatComposerAppMenuSelection()
     const { cancelPendingSends, trackPendingSend } = useNativeChatSendLifecycle(
       terminalTabId,
       targetPtyId,
@@ -355,7 +355,7 @@ export const NativeChatComposer = forwardRef<NativeChatComposerHandle, NativeCha
       activeSuggestion,
       draft,
       history,
-      isComposing: () => isComposingRef.current,
+      isComposing,
       completePickerItem: completeItem,
       dispatchPickerCommand,
       dismissPicker: dismiss,
