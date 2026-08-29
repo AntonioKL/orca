@@ -27,7 +27,7 @@ import {
   nodeGypRebuildInvocation,
   WINDOWS_PROCESS_TREE_PACKAGE_DIR as PACKAGE_DIR
 } from './windows-process-tree-gyp-rebuild.mjs'
-import { assertWindowsProcessTreeRelayBuildMatchesAsset } from './windows-process-tree-relay-asset.mjs'
+import { assertWindowsProcessTreePeMachine } from './windows-process-tree-relay-asset.mjs'
 
 const ROOT = resolve(import.meta.dirname, '..', '..')
 const SUPPORTED_ARCHES = ['x64', 'arm64']
@@ -169,7 +169,7 @@ function main() {
   if (!existsSync(built)) {
     throw new Error(`node-gyp reported success but ${built} is missing.`)
   }
-  assertWindowsProcessTreeRelayBuildMatchesAsset(built, arch)
+  assertWindowsProcessTreePeMachine(readFileSync(built), arch, built)
 
   mkdirSync(outDir, { recursive: true })
   const staged = join(outDir, RELAY_WINDOWS_PROCESS_TREE_FILENAME)

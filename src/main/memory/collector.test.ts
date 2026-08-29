@@ -134,7 +134,7 @@ describe('collectSubtree', () => {
         childrenOf.set(r.ppid, [r.pid])
       }
     }
-    return { byPid, childrenOf, hasPrivateMemory: false }
+    return { byPid, childrenOf, hasAnyPrivateMemory: false }
   }
 
   it('walks every descendant of the root inclusive', async () => {
@@ -175,7 +175,7 @@ describe('collectSubtree', () => {
     const index = {
       byPid: new Map([[1, { pid: 1, ppid: 0, cpu: 0, memory: 0 }]]),
       childrenOf: new Map([[1, [2]]]),
-      hasPrivateMemory: false
+      hasAnyPrivateMemory: false
     }
 
     expect(collectSubtree(index, 1)).toEqual([1])

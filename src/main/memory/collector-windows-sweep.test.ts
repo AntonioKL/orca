@@ -249,6 +249,28 @@ describe('collectMemorySnapshot on Windows', () => {
     expect(snapshot.totalPrivateMemory).toBe(3_840)
   })
 
+  it('omits partial private-byte aggregates when an owned process is unreadable', async () => {
+    vi.spyOn(os, 'platform').mockReturnValue('win32')
+    registerPty(10)
+    appMetricsMock.mockReturnValue([
+      { pid: 900, type: 'Browser', cpu: { percentCPUUsage: 0 }, memory: { workingSetSize: 0 } }
+    ])
+    readWindowsProcessTableMock.mockResolvedValue([
+      row(10, 1, { memoryBytes: 50, privateMemoryBytes: 1_024 }),
+      row(11, 10, { memoryBytes: 100 }),
+      row(900, 1, { memoryBytes: 20, privateMemoryBytes: 256 })
+    ])
+    const { collectMemorySnapshot } = await loadCollector()
+
+    const snapshot = await collectMemorySnapshot(emptyStore)
+
+    expect(snapshot.processCommitMetric).toBe('private-bytes')
+    expect(snapshot.app.privateMemory).toBe(256)
+    expect(snapshot.worktrees[0].sessions[0].privateMemory).toBeUndefined()
+    expect(snapshot.worktrees[0].privateMemory).toBeUndefined()
+    expect(snapshot.totalPrivateMemory).toBeUndefined()
+  })
+
   it("attributes a shared ancestor's private bytes to one PTY only", async () => {
     vi.spyOn(os, 'platform').mockReturnValue('win32')
     listRegisteredPtysMock.mockReturnValue([

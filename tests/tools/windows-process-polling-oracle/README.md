@@ -6,12 +6,13 @@ asynchronous or synchronous child-process spawn call with executable, argv, retu
 timestamp, and stack. A source audit excludes native `CreateProcess` launchers from these roots. The
 harness never launches PowerShell or WMI itself.
 
-Each run has two non-overlapping stable windows. The first is the authoritative cadence and event-loop
-evidence window. The second runs the 25ms native Toolhelp observer while exercising the same foreground
-and Resource Manager paths, so the observer's host-wide scan load cannot perturb event-loop evidence.
-Every OS-visible direct child in that second window must correlate with an exact preload spawn record;
-exact records without an observer match remain valid because polling can miss short-lived children.
-The report is written before a failed cross-check makes the command exit nonzero.
+Each run has three non-overlapping stable windows. The first measures event-loop delay before spawn
+instrumentation is installed. The second records every attempted child-process call, including failed
+starts, as the authoritative cadence evidence. The third runs the 25ms native Toolhelp observer while
+exercising the same foreground and Resource Manager paths. Every OS-visible direct child in that third
+window must correlate with an exact preload spawn record; exact records without an observer match
+remain valid because polling can miss short-lived children. All foreground probes must return a
+nonempty identity. The report is written before a failed cross-check makes the command exit nonzero.
 
 Build the native observer once, then keep the entire oracle byte-identical for all four runs:
 

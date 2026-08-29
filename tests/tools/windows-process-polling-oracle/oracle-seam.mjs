@@ -15,7 +15,11 @@ import {
   waitForObserverReady,
   waitForSuccessfulChildExit
 } from './oracle-lifecycle.mjs'
-import { correlateObserverStarts, exactStartsForWindow } from './observer-spawn-cross-check.mjs'
+import {
+  attemptedStartsForWindow,
+  correlateObserverStarts,
+  exactStartsForWindow
+} from './observer-spawn-cross-check.mjs'
 import { collectRendererWindowMetrics } from './renderer-window-probe.mjs'
 
 const encoded = Buffer.from(
@@ -115,6 +119,24 @@ try {
     crossCheck.unobservedExactStarts.map((row) => row.returnedPid),
     [21]
   )
+  const attempts = attemptedStartsForWindow(
+    [
+      ...exact,
+      {
+        type: 'spawn-error',
+        timestamp: '2026-01-01T00:00:02.500Z',
+        parentPid: 10,
+        returnedPid: null,
+        executable: 'powershell.exe',
+        argv: ['powershell.exe', '-NoProfile']
+      }
+    ],
+    roots,
+    Date.parse('2026-01-01T00:00:00.000Z'),
+    Date.parse('2026-01-01T00:00:03.000Z')
+  )
+  assert.equal(attempts.length, 3)
+  assert.equal(attempts.at(-1).consumer, 'unknown-powershell')
 
   const previousWindow = globalThis.window
   try {

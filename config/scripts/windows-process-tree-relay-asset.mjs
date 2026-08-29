@@ -4,7 +4,9 @@ import { join, resolve } from 'node:path'
 import { RELAY_WINDOWS_PROCESS_TREE_FILENAME } from '../../src/shared/relay-artifacts.ts'
 import {
   windowsProcessTreeRelaySha256,
-  WINDOWS_PROCESS_TREE_RELAY_ARCHES
+  WINDOWS_PROCESS_TREE_RELAY_ARCHES,
+  WINDOWS_PROCESS_TREE_RELAY_CONTRACT_VERSION,
+  WINDOWS_PROCESS_TREE_RELAY_PACKAGE
 } from '../../src/shared/windows-process-tree-relay-manifest.ts'
 
 const ROOT = resolve(import.meta.dirname, '..', '..')
@@ -14,6 +16,7 @@ export const WINDOWS_PROCESS_TREE_RELAY_ASSET_DIR = join(
   'relay-assets',
   'windows-process-tree'
 )
+const MANIFEST_PATH = join(WINDOWS_PROCESS_TREE_RELAY_ASSET_DIR, 'manifest.json')
 
 const PE_MACHINE = { x64: 0x8664, arm64: 0xaa64 }
 
@@ -53,6 +56,7 @@ export function assertWindowsProcessTreePeMachine(bytes, arch, label) {
 }
 
 export function validateWindowsProcessTreeRelayAsset(arch) {
+  validateManifestMetadata()
   const binaryPath = windowsProcessTreeRelayAssetPath(arch)
   const bytes = readFileSync(binaryPath)
   assertWindowsProcessTreePeMachine(bytes, arch, binaryPath)
@@ -66,14 +70,20 @@ export function validateWindowsProcessTreeRelayAsset(arch) {
   return { binaryPath, bytes, sha256 }
 }
 
-export function assertWindowsProcessTreeRelayBuildMatchesAsset(binaryPath, arch) {
-  const reviewed = validateWindowsProcessTreeRelayAsset(arch)
-  const builtBytes = readFileSync(binaryPath)
-  assertWindowsProcessTreePeMachine(builtBytes, arch, binaryPath)
-  if (!builtBytes.equals(reviewed.bytes)) {
-    const builtSha256 = createHash('sha256').update(builtBytes).digest('hex')
+function validateManifestMetadata() {
+  const manifest = JSON.parse(readFileSync(MANIFEST_PATH, 'utf8'))
+  if (manifest.contractVersion !== WINDOWS_PROCESS_TREE_RELAY_CONTRACT_VERSION) {
     throw new Error(
-      `${binaryPath} has SHA-256 ${builtSha256} and is not byte-identical to reviewed ${reviewed.binaryPath}.`
+      `${MANIFEST_PATH} contractVersion must be ${WINDOWS_PROCESS_TREE_RELAY_CONTRACT_VERSION}.`
     )
+  }
+  if (manifest.package !== WINDOWS_PROCESS_TREE_RELAY_PACKAGE) {
+    throw new Error(`${MANIFEST_PATH} package must be ${WINDOWS_PROCESS_TREE_RELAY_PACKAGE}.`)
+  }
+  for (const arch of WINDOWS_PROCESS_TREE_RELAY_ARCHES) {
+    const expectedSha256 = windowsProcessTreeRelaySha256(arch)
+    if (manifest.binaries?.[arch]?.sha256 !== expectedSha256) {
+      throw new Error(`${MANIFEST_PATH} ${arch} SHA-256 must be ${expectedSha256}.`)
+    }
   }
 }

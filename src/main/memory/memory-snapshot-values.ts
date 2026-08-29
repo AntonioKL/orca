@@ -22,13 +22,12 @@ export function optionalCommitField(
 
 /** The snapshot-level pair, which names the unit alongside the total. */
 export function snapshotCommitFields(
-  hasPrivateMemory: boolean,
+  hasAnyPrivateMemory: boolean,
+  hasCompleteTotal: boolean,
   totalPrivateMemory: number
 ): Pick<MemorySnapshot, 'processCommitMetric' | 'totalPrivateMemory'> {
-  return hasPrivateMemory
-    ? {
-        processCommitMetric: PROCESS_COMMIT_METRIC,
-        totalPrivateMemory: clampMemoryMetric(totalPrivateMemory)
-      }
-    : {}
+  return {
+    ...(hasAnyPrivateMemory ? { processCommitMetric: PROCESS_COMMIT_METRIC } : {}),
+    ...(hasCompleteTotal ? { totalPrivateMemory: clampMemoryMetric(totalPrivateMemory) } : {})
+  }
 }

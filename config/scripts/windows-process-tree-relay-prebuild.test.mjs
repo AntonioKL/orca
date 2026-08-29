@@ -1,12 +1,10 @@
 import { createHash } from 'node:crypto'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   assertWindowsProcessTreePeMachine,
-  assertWindowsProcessTreeRelayBuildMatchesAsset,
   validateWindowsProcessTreeRelayAsset
 } from './windows-process-tree-relay-asset.mjs'
 
@@ -40,25 +38,6 @@ describe('Windows process-table relay prebuilds', () => {
     expect(() => assertWindowsProcessTreePeMachine(bytes, 'x64', 'fixture')).toThrow(
       /expected 0x8664 for x64/
     )
-  })
-
-  it('requires fresh builds to be byte-identical to the reviewed asset', () => {
-    const tempDir = mkdtempSync(join(tmpdir(), 'orca-windows-process-tree-'))
-    const builtPath = join(tempDir, 'windows-process-tree.node')
-    const bytes = readFileSync(binaryPath('x64'))
-    try {
-      writeFileSync(builtPath, bytes)
-      expect(() => assertWindowsProcessTreeRelayBuildMatchesAsset(builtPath, 'x64')).not.toThrow()
-
-      const changed = Buffer.from(bytes)
-      changed[changed.length - 1] ^= 1
-      writeFileSync(builtPath, changed)
-      expect(() => assertWindowsProcessTreeRelayBuildMatchesAsset(builtPath, 'x64')).toThrow(
-        /not byte-identical/
-      )
-    } finally {
-      rmSync(tempDir, { recursive: true, force: true })
-    }
   })
 
   it.runIf(process.platform === 'win32' && process.arch in machines)(

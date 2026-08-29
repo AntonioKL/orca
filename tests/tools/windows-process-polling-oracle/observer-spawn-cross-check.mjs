@@ -4,12 +4,17 @@ import { classifyProcessStart } from './consumer-classifier.mjs'
 const OBSERVER_DISCOVERY_MAX_DELAY_MS = 5_000
 
 export function exactStartsForWindow(rows, rootPids, startMs, endMs) {
+  return attemptedStartsForWindow(rows, rootPids, startMs, endMs).filter((row) =>
+    Number.isInteger(row.returnedPid)
+  )
+}
+
+export function attemptedStartsForWindow(rows, rootPids, startMs, endMs) {
   return rows
     .filter(
       (row) =>
-        (row.type === 'spawn' || row.type === 'spawn-sync') &&
+        String(row.type).startsWith('spawn') &&
         rootPids.has(row.parentPid) &&
-        Number.isInteger(row.returnedPid) &&
         Date.parse(row.timestamp) >= startMs &&
         Date.parse(row.timestamp) <= endMs
     )
