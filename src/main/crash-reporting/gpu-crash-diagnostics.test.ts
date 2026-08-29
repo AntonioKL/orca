@@ -97,7 +97,7 @@ describe('buildGpuCrashDiagnostics', () => {
 })
 
 describe('GpuCrashDiagnosticsRecorder', () => {
-  it('warms complete info and records one breadcrumb across a crash burst', async () => {
+  it('warms only complete info and records one breadcrumb across a crash burst', async () => {
     const recordBreadcrumb = vi.fn()
     const provider = {
       getGPUInfo: vi.fn(async (level: 'basic' | 'complete') => ({
@@ -113,11 +113,14 @@ describe('GpuCrashDiagnosticsRecorder', () => {
 
     recorder.warm()
     await vi.waitFor(() => {
-      expect(provider.getGPUInfo).toHaveBeenCalledTimes(2)
+      expect(provider.getGPUInfo).toHaveBeenCalledTimes(1)
     })
     await Promise.resolve()
     await recorder.record()
     await recorder.record()
+
+    expect(provider.getGPUInfo).toHaveBeenCalledOnce()
+    expect(provider.getGPUInfo).toHaveBeenCalledWith('complete')
 
     expect(recordBreadcrumb).toHaveBeenCalledTimes(1)
     expect(recordBreadcrumb).toHaveBeenCalledWith(
@@ -142,6 +145,8 @@ describe('GpuCrashDiagnosticsRecorder', () => {
     const recorder = new GpuCrashDiagnosticsRecorder({ provider, recordBreadcrumb })
 
     recorder.warm()
+    expect(provider.getGPUInfo).toHaveBeenCalledOnce()
+    expect(provider.getGPUInfo).toHaveBeenCalledWith('complete')
     await recorder.record()
 
     expect(recordBreadcrumb).toHaveBeenCalledWith(
@@ -154,10 +159,56 @@ describe('GpuCrashDiagnosticsRecorder', () => {
     complete.resolve(BASIC_INFO)
   })
 
-  it('still records collection status when Electron rejects both GPU info calls', async () => {
+  it('shares pending capture work and releases it when complete info arrives first', async () => {
+    const complete = deferred<unknown>()
+    const basic = deferred<unknown>()
     const recordBreadcrumb = vi.fn()
     const provider = {
-      getGPUInfo: vi.fn(async () => {
+      getGPUInfo: vi.fn((level: 'basic' | 'complete') =>
+        level === 'basic' ? basic.promise : complete.promise
+      ),
+      getGPUFeatureStatus: vi.fn(() => FEATURE_STATUS)
+    }
+    const recorder = new GpuCrashDiagnosticsRecorder({ provider, recordBreadcrumb })
+
+    recorder.warm()
+    const first = recorder.record()
+    const second = recorder.record()
+
+    expect(second).toBe(first)
+    expect(recordBreadcrumb).not.toHaveBeenCalled()
+    complete.resolve(BASIC_INFO)
+    await first
+    expect(recordBreadcrumb).toHaveBeenCalledOnce()
+    expect(recordBreadcrumb).toHaveBeenCalledWith(
+      expect.objectContaining({ gpuInfoLevel: 'complete' })
+    )
+  })
+
+  it('does not let stalled GPU info block crash recovery', async () => {
+    const never = Promise.withResolvers<unknown>().promise
+    const recordBreadcrumb = vi.fn()
+    const provider = {
+      getGPUInfo: vi.fn(() => never),
+      getGPUFeatureStatus: vi.fn(() => FEATURE_STATUS)
+    }
+    const recorder = new GpuCrashDiagnosticsRecorder({
+      provider,
+      recordBreadcrumb,
+      recordTimeoutMs: 0
+    })
+
+    await recorder.record()
+
+    expect(recordBreadcrumb).toHaveBeenCalledWith(
+      expect.objectContaining({ gpuInfoLevel: 'unavailable' })
+    )
+  })
+
+  it('still records collection status when Electron throws during both GPU info calls', async () => {
+    const recordBreadcrumb = vi.fn()
+    const provider = {
+      getGPUInfo: vi.fn(() => {
         throw new Error('GPU access disabled')
       }),
       getGPUFeatureStatus: vi.fn(() => {
@@ -183,7 +234,7 @@ describe('GPU crash diagnostics production wiring', () => {
       /recordBreadcrumb: \(data\) =>\s*recordDurableCrashBreadcrumb\('gpu_crash_hardware', data\)/
     )
     expect(listener).toMatch(
-      /isGpuFallbackCrashCandidate\([\s\S]*?gpuCrashDiagnostics\?\.record\(\)[\s\S]*?handleGpuChildCrash\(/
+      /isGpuFallbackCrashCandidate\([\s\S]*?const crashedAt = performance\.now\(\)[\s\S]*?gpuCrashDiagnostics\?\.record\(\)[\s\S]*?\.then\(\(\) =>\s*handleGpuChildCrash\(details\.reason, details\.exitCode \?\? null, crashedAt\)/
     )
   })
 })

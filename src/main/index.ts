@@ -1957,12 +1957,16 @@ async function presentGpuFallbackRecoveredLaunchPrompt(window: BrowserWindow): P
 }
 
 // Why: a burst of GPU child crashes means HW acceleration is unusable — persist a build-scoped marker and offer software rendering.
-async function handleGpuChildCrash(reason: string, exitCode: number | null): Promise<void> {
+async function handleGpuChildCrash(
+  reason: string,
+  exitCode: number | null,
+  crashedAt: number
+): Promise<void> {
   // Software rendering already active or shutting down: nothing more to do.
   if (gpuFallbackActiveThisLaunch || isQuitting || isServeMode) {
     return
   }
-  const result = gpuCrashFallbackTracker.recordGpuCrash(performance.now())
+  const result = gpuCrashFallbackTracker.recordGpuCrash(crashedAt)
   if (!result.shouldEngageFallback) {
     return
   }
@@ -3231,8 +3235,10 @@ void app.whenReady().then(async () => {
         reason: details.reason
       })
     ) {
-      void gpuCrashDiagnostics?.record()
-      void handleGpuChildCrash(details.reason, details.exitCode ?? null)
+      const crashedAt = performance.now()
+      void (gpuCrashDiagnostics?.record() ?? Promise.resolve())
+        .catch(() => undefined)
+        .then(() => handleGpuChildCrash(details.reason, details.exitCode ?? null, crashedAt))
     }
   })
 
