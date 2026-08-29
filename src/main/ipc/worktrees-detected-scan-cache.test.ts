@@ -4,6 +4,7 @@ import type { Repo } from '../../shared/repo-types'
 import type { GitWorktreeInfo, Worktree } from '../../shared/worktree/types'
 import { notifyWorktreesChanged } from './worktree-remote'
 import {
+  invalidateAuthorizedRootsCache,
   isRegisteredWorktreePath,
   resolveRegisteredWorktreePath
 } from './registered-worktree-roots-cache'
@@ -164,6 +165,35 @@ describe('registerWorktreeHandlers', () => {
     const second = await handlers['worktrees:listDetected'](null, { repoId: 'repo-1' })
 
     expect(first).toEqual(second)
+    expect(listWorktreesMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('re-registers roots when authorization is invalidated before a cached listing', async () => {
+    listWorktreesMock.mockResolvedValue([
+      {
+        path: '/workspace/repo',
+        head: 'main-head',
+        branch: 'refs/heads/main',
+        isBare: false,
+        isMainWorktree: true
+      },
+      {
+        path: '/workspace/new-worktree',
+        head: 'feature-head',
+        branch: 'refs/heads/feature',
+        isBare: false,
+        isMainWorktree: false
+      }
+    ])
+
+    await handlers['worktrees:listDetected'](null, { repoId: 'repo-1' })
+    expect(isRegisteredWorktreePath(resolve('/workspace/new-worktree'))).toBe(true)
+    invalidateAuthorizedRootsCache()
+    expect(isRegisteredWorktreePath(resolve('/workspace/new-worktree'))).toBe(false)
+
+    await handlers['worktrees:listDetected'](null, { repoId: 'repo-1' })
+
+    expect(isRegisteredWorktreePath(resolve('/workspace/new-worktree'))).toBe(true)
     expect(listWorktreesMock).toHaveBeenCalledTimes(1)
   })
 
@@ -495,6 +525,7 @@ describe('registerWorktreeHandlers', () => {
     await pendingList
 
     expect(store.removeWorktreeLineage).not.toHaveBeenCalled()
+    expect(isRegisteredWorktreePath(resolve('/workspace/repo'))).toBe(false)
     expect(listWorktreesMock).toHaveBeenCalledTimes(1)
   })
 

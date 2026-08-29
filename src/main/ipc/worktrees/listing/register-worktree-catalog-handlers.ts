@@ -88,6 +88,7 @@ export function registerWorktreeCatalogHandlers(context: WorktreeIpcContext): vo
       try {
         let gitWorktrees
         let freshScan = true
+        let safeToAuthorize = true
         if (isFolderRepo(repo)) {
           return listVisibleFolderWorkspaces(store, repo)
         } else if (repo.connectionId) {
@@ -116,9 +117,12 @@ export function registerWorktreeCatalogHandlers(context: WorktreeIpcContext): vo
           const scan = await listDetectedGitWorktrees(store, repo)
           gitWorktrees = scan.gitWorktrees
           freshScan = scan.fresh
+          safeToAuthorize = scan.safeToAuthorize
+        }
+        if (safeToAuthorize) {
+          rememberLocalWorktreeRoots(store, repo, gitWorktrees)
         }
         if (freshScan) {
-          rememberLocalWorktreeRoots(store, repo, gitWorktrees)
           pruneLineageForMissingRepoWorktrees(store, repo, gitWorktrees)
         }
         loggedWorktreeListFailures.delete(`${repo.id}:${repo.path}`)
@@ -164,6 +168,7 @@ export function registerWorktreeCatalogHandlers(context: WorktreeIpcContext): vo
     try {
       let gitWorktrees
       let freshScan = true
+      let safeToAuthorize = true
       if (isFolderRepo(repo)) {
         return listVisibleFolderWorkspaces(store, repo)
       } else if (repo.connectionId) {
@@ -192,9 +197,12 @@ export function registerWorktreeCatalogHandlers(context: WorktreeIpcContext): vo
         const scan = await listDetectedGitWorktrees(store, repo)
         gitWorktrees = scan.gitWorktrees
         freshScan = scan.fresh
+        safeToAuthorize = scan.safeToAuthorize
+      }
+      if (safeToAuthorize) {
+        rememberLocalWorktreeRoots(store, repo, gitWorktrees)
       }
       if (freshScan) {
-        rememberLocalWorktreeRoots(store, repo, gitWorktrees)
         pruneLineageForMissingRepoWorktrees(store, repo, gitWorktrees)
       }
       loggedWorktreeListFailures.delete(`${repo.id}:${repo.path}`)
