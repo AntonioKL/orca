@@ -10,7 +10,7 @@ import {
   enrichWorkspaceCleanupCandidatesWithCache,
   type WorkspaceCleanupEnrichmentCacheEntry
 } from './workspace-cleanup-candidate-enrichment'
-import { preserveNewerWorkspaceCleanupRows } from './workspace-cleanup-row-recency'
+import { applyWorkspaceCleanupRowRead } from './workspace-cleanup-row-recency'
 
 let latestWorkspaceCleanupScanToken = 0
 let finalizedWorkspaceCleanupScanToken = 0
@@ -159,14 +159,19 @@ async function applyWorkspaceCleanupProgress(
         : candidates.map((candidate) =>
             applyWorkspaceCleanupDismissal(candidate, state.workspaceCleanupDismissals)
           )
-    // Same rule as the settle: a streamed row must not bury a read taken after it.
-    const recentCandidates = preserveNewerWorkspaceCleanupRows(
-      finalCandidates,
-      progress.scannedAt,
-      state.workspaceCleanupScan?.candidates ?? [],
-      state.workspaceCleanupRowReadAt
-    )
+    // Same rule as the settle: a streamed row must not bury a read taken after
+    // it, and this tick may only vouch for the rows it actually reported --
+    // `finalCandidates` also carries rows merged forward from earlier reads.
+    const read = applyWorkspaceCleanupRowRead({
+      rows: enrichedProgressCandidates,
+      readAt: progress.scannedAt,
+      published: finalCandidates,
+      listed: state.workspaceCleanupScan?.candidates ?? [],
+      rowReads: state.workspaceCleanupRowReadAt
+    })
+    const recentCandidates = read.candidates
     return {
+      workspaceCleanupRowReadAt: read.rowReads,
       workspaceCleanupScan: {
         // Why: mid-refresh the list still mixes in rows from the previous
         // snapshot; the honest "as of" time stays the snapshot's until the new

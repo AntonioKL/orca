@@ -21,7 +21,10 @@ import {
   WORKSPACE_CLEANUP_ENRICHMENT_CONCURRENCY
 } from './workspace-cleanup-candidate-enrichment'
 import { scanWorkspaceCleanup } from './workspace-cleanup-scan-lifecycle'
-import type { WorkspaceCleanupRowReads } from './workspace-cleanup-row-recency'
+import {
+  applyWorkspaceCleanupRowRead,
+  type WorkspaceCleanupRowReads
+} from './workspace-cleanup-row-recency'
 import {
   removeWorkspaceCleanupCandidates,
   type WorkspaceCleanupFailure,
@@ -80,7 +83,20 @@ export const createWorkspaceCleanupSlice: StateCreator<AppState, [], [], Workspa
     hydrateWorkspaceCleanupScanFromCache({
       hasLiveScanState: () => get().workspaceCleanupScan !== null || get().workspaceCleanupLoading,
       enrich: (candidates) => enrichWorkspaceCleanupCandidates(candidates, get()),
-      apply: (scan) => set({ workspaceCleanupScan: scan })
+      // The cache is a read like any other. It only ever fills an EMPTY slice, so
+      // it has nothing to lose to and nothing to preserve — but it still dates the
+      // rows it seeds, because a writer left outside this rule is what this whole
+      // module exists to stop.
+      apply: (scan) => {
+        const { rowReads } = applyWorkspaceCleanupRowRead({
+          rows: scan.candidates,
+          readAt: scan.scannedAt,
+          published: scan.candidates,
+          listed: [],
+          rowReads: {}
+        })
+        set({ workspaceCleanupScan: scan, workspaceCleanupRowReadAt: rowReads })
+      }
     }),
   markWorkspaceCleanupCandidateViewed: (candidate) => {
     const now = Date.now()

@@ -7,57 +7,158 @@ import { getWorkspaceCleanupCandidateIdentity } from '../../../../shared/workspa
  * Why this exists rather than another comparison against `scannedAt`: recency is a
  * property of a ROW, and `scannedAt` is a property of a SCAN. The two stop agreeing
  * the moment the list holds rows from more than one read — which is exactly what a
- * post-confirmation republish does, and it leaves the scan still reporting the older
- * read's time while showing the newer read's row. A targeted rescan is also dated by
- * its stalest chunk, so it is not even measured on the same basis as a broad scan's
- * single stamp. Stamping the row is what lets "the most recent read wins" hold for
- * every writer instead of only the one that happens to compare.
+ * post-confirmation republish does, and what a streamed progress tick does on
+ * purpose, since it pins `scannedAt` to the snapshot's while writing newer rows. A
+ * targeted rescan is also dated by its stalest chunk, so it is not even measured on
+ * the same basis as a broad scan's single stamp.
+ *
+ * Every writer that replaces rows goes through one of the two functions below, and
+ * both return the rows AND the reads together. That is deliberate: the round-five
+ * regression was a writer that consulted this map without ever writing to it, and a
+ * read time only one writer records is not a read time — it is a log of refusals.
  */
 export type WorkspaceCleanupRowReads = Record<string, number>
 
-export function recordWorkspaceCleanupRowReads(
-  previous: WorkspaceCleanupRowReads,
-  rows: readonly WorkspaceCleanupCandidate[],
+/**
+ * The single comparison the rule turns on: this read is stale FOR THIS ROW.
+ *
+ * Strictly newer, never equal: a scan's settle carries the same `scannedAt` as its
+ * own progress ticks, so treating equal stamps as newer would make every settle
+ * preserve its ticks and never publish its final rows.
+ */
+function hasNewerWorkspaceCleanupRowRead(
+  identity: string,
   readAt: number,
-  retiredIdentities: ReadonlySet<string> = new Set()
+  rowReads: WorkspaceCleanupRowReads
+): boolean {
+  const recorded = rowReads[identity]
+  return recorded !== undefined && recorded > readAt
+}
+
+function pruneAndStamp(
+  rowReads: WorkspaceCleanupRowReads,
+  candidates: readonly WorkspaceCleanupCandidate[],
+  stamp: (identity: string) => number | undefined
 ): WorkspaceCleanupRowReads {
-  const next = { ...previous }
-  for (const identity of retiredIdentities) {
-    delete next[identity]
+  const next: WorkspaceCleanupRowReads = {}
+  for (const candidate of candidates) {
+    const identity = getWorkspaceCleanupCandidateIdentity(candidate)
+    const readAt = stamp(identity)
+    if (readAt !== undefined) {
+      next[identity] = readAt
+    }
   }
-  for (const row of rows) {
-    next[getWorkspaceCleanupCandidateIdentity(row)] = readAt
-  }
-  return next
+  const keys = Object.keys(next)
+  return keys.length === Object.keys(rowReads).length &&
+    keys.every((identity) => rowReads[identity] === next[identity])
+    ? rowReads
+    : next
 }
 
 /**
- * Keep any listed row whose recorded read is newer than the incoming one.
+ * A whole-list replacement under the rule. Rows the list read later than this one
+ * keep their picture and their read time; every row this read actually reported is
+ * taken from it and stamped with it.
  *
- * The incoming rows are a whole-list replacement, so without this a refresh issued
- * before a confirmation lands after the refusal and erases the blocker the user has
- * not seen yet — leaving them to reconfirm against the picture already refused.
+ * `published` and `rows` differ for a streamed tick: the published list also carries
+ * rows merged forward from earlier reads, and this read cannot vouch for those, so
+ * they keep whatever stamp they already had.
  */
-export function preserveNewerWorkspaceCleanupRows(
-  incoming: readonly WorkspaceCleanupCandidate[],
-  incomingReadAt: number,
-  listed: readonly WorkspaceCleanupCandidate[],
+export function applyWorkspaceCleanupRowRead({
+  rows,
+  readAt,
+  published,
+  listed,
+  rowReads
+}: {
+  rows: readonly WorkspaceCleanupCandidate[]
+  readAt: number
+  published: readonly WorkspaceCleanupCandidate[]
+  listed: readonly WorkspaceCleanupCandidate[]
   rowReads: WorkspaceCleanupRowReads
-): WorkspaceCleanupCandidate[] {
+}): { candidates: WorkspaceCleanupCandidate[]; rowReads: WorkspaceCleanupRowReads } {
   const newerListedRows = new Map<string, WorkspaceCleanupCandidate>()
   for (const row of listed) {
     const identity = getWorkspaceCleanupCandidateIdentity(row)
-    const readAt = rowReads[identity]
-    if (readAt !== undefined && readAt > incomingReadAt) {
+    if (hasNewerWorkspaceCleanupRowRead(identity, readAt, rowReads)) {
       newerListedRows.set(identity, row)
     }
   }
-  if (newerListedRows.size === 0) {
-    return incoming as WorkspaceCleanupCandidate[]
+  // Identity-stable when nothing is preserved: a count-only tick must not hand
+  // the list a new array and re-render every row.
+  const candidates =
+    newerListedRows.size === 0
+      ? (published as WorkspaceCleanupCandidate[])
+      : published.map(
+          (row) => newerListedRows.get(getWorkspaceCleanupCandidateIdentity(row)) ?? row
+        )
+  const readIdentities = new Set(rows.map(getWorkspaceCleanupCandidateIdentity))
+  return {
+    candidates,
+    rowReads: pruneAndStamp(rowReads, candidates, (identity) =>
+      !newerListedRows.has(identity) && readIdentities.has(identity) ? readAt : rowReads[identity]
+    )
   }
-  return incoming.map(
-    (row) => newerListedRows.get(getWorkspaceCleanupCandidateIdentity(row)) ?? row
+}
+
+/**
+ * A read that may rewrite or retire rows the list already holds, and may add none.
+ *
+ * The second half of the rule, and the one "most recent read wins" does not state
+ * on its own: recency decides a row's EXISTENCE as well as its contents. Retiring
+ * is a verdict read at a moment like any other, so a row whose newest read says it
+ * is there — and busy — outranks an older read that did not list it. Without this
+ * a live workspace disappears from the list, which is strictly worse than a stale
+ * row: the user cannot even see the thing they are being asked about.
+ */
+export function rewriteWorkspaceCleanupRowsFromRead({
+  listed,
+  readAt,
+  refreshed,
+  retiredIdentities,
+  rowReads
+}: {
+  listed: readonly WorkspaceCleanupCandidate[]
+  readAt: number
+  refreshed: readonly WorkspaceCleanupCandidate[]
+  retiredIdentities: ReadonlySet<string>
+  rowReads: WorkspaceCleanupRowReads
+}): {
+  candidates: WorkspaceCleanupCandidate[]
+  rowReads: WorkspaceCleanupRowReads
+  changed: boolean
+} {
+  const refreshedByIdentity = new Map(
+    refreshed.map((candidate) => [getWorkspaceCleanupCandidateIdentity(candidate), candidate])
   )
+  const rewrittenIdentities = new Set<string>()
+  let changed = false
+  const candidates = listed.flatMap((row) => {
+    const identity = getWorkspaceCleanupCandidateIdentity(row)
+    const next = refreshedByIdentity.get(identity)
+    const retired = retiredIdentities.has(identity)
+    if (!next && !retired) {
+      return [row]
+    }
+    if (hasNewerWorkspaceCleanupRowRead(identity, readAt, rowReads)) {
+      return [row]
+    }
+    changed = true
+    // A row this read no longer lists has no refreshed picture to show, so
+    // showing it again is the dead end; dropping it is the reconciliation.
+    if (!next) {
+      return []
+    }
+    rewrittenIdentities.add(identity)
+    return [next]
+  })
+  return {
+    candidates,
+    changed,
+    rowReads: pruneAndStamp(rowReads, candidates, (identity) =>
+      rewrittenIdentities.has(identity) ? readAt : rowReads[identity]
+    )
+  }
 }
 
 /** Reads for rows no longer listed are dead weight, and a later row could inherit one. */
@@ -65,7 +166,5 @@ export function pruneWorkspaceCleanupRowReads(
   rowReads: WorkspaceCleanupRowReads,
   rows: readonly WorkspaceCleanupCandidate[]
 ): WorkspaceCleanupRowReads {
-  const listedIdentities = new Set(rows.map(getWorkspaceCleanupCandidateIdentity))
-  const entries = Object.entries(rowReads).filter(([identity]) => listedIdentities.has(identity))
-  return entries.length === Object.keys(rowReads).length ? rowReads : Object.fromEntries(entries)
+  return pruneAndStamp(rowReads, rows, (identity) => rowReads[identity])
 }

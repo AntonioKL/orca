@@ -22,7 +22,7 @@ import {
 } from './workspace-cleanup-candidate-enrichment'
 import {
   pruneWorkspaceCleanupRowReads,
-  recordWorkspaceCleanupRowReads
+  rewriteWorkspaceCleanupRowsFromRead
 } from './workspace-cleanup-row-recency'
 import { invalidateWorkspaceCleanupScanProgress } from './workspace-cleanup-scan-progress'
 
@@ -208,6 +208,12 @@ export async function removeWorkspaceCleanupCandidates(
           state.workspaceCleanupScan && remainingCandidates
             ? { ...state.workspaceCleanupScan, candidates: remainingCandidates }
             : state.workspaceCleanupScan,
+        // Why: a read left behind for a deleted row is dead weight a later row
+        // with the same identity would inherit as its own.
+        workspaceCleanupRowReadAt: pruneWorkspaceCleanupRowReads(
+          state.workspaceCleanupRowReadAt,
+          remainingCandidates ?? []
+        ),
         // Why: dismissals and viewed marks for removed worktrees are dead
         // weight in the store and in every persisted-dismissals write.
         workspaceCleanupDismissals: pruneWorkspaceCleanupDismissals(
@@ -242,18 +248,22 @@ export async function removeWorkspaceCleanupCandidates(
  * read of that workspace, and consent is only ever spent on a verdict the user
  * has actually seen.**
  *
- * *Recency* is a property of a ROW, not of the list it sits in. Four rounds of
- * this bug were spent trying to decide it from `scannedAt`, and it cannot be:
- * `scannedAt` dates a whole scan, so the moment a republish puts a newer row
- * into an older list the two disagree — the list keeps reporting the older read
- * while showing the newer row. A targeted rescan is dated by its stalest chunk
- * on top of that, so it is not even measured on the same basis as a broad scan's
- * single stamp. So the read time travels with the row, in
- * `workspaceCleanupRowReadAt`, and every writer that replaces rows honours it:
- * this republish, the broad scan's settle, and each of its progress ticks. That
- * last pair is why the rule could not live here alone — a refresh issued before
- * the confirmation used to land after the refusal and erase the blocker, and no
- * comparison made in this function could have stopped it.
+ * *Recency* is a property of a ROW, not of the list it sits in. `scannedAt` dates
+ * a whole scan, so the moment a republish puts a newer row into an older list the
+ * two disagree, and a streamed progress tick creates that disagreement on purpose:
+ * it pins `scannedAt` to the snapshot's while writing rows read minutes later. A
+ * comparison against `scan.scannedAt` therefore cannot decide anything here, and
+ * this function used to make no other. The read time travels with the row instead,
+ * in `workspaceCleanupRowReadAt`, and `rewriteWorkspaceCleanupRowsFromRead` both
+ * consults it and stamps what it writes — the two are one operation because
+ * splitting them is what failed: a map only the refusals wrote to had no entry for
+ * the tick's row, so honouring it changed nothing.
+ *
+ * *Recency also decides existence*, which "the most recent read wins" does not say
+ * on its own. Retiring a row is a verdict read at a moment like any other, so a row
+ * whose newest read says it is there — and busy — outranks an older read that did
+ * not list it. Dropping it anyway is worse than showing it stale: the user cannot
+ * see the thing they are being asked about.
  *
  * *Consent* is not decided here at all. The delete is authorized against
  * `approvedCandidate`, captured when the user confirmed and never read from
@@ -262,7 +272,7 @@ export async function removeWorkspaceCleanupCandidates(
  *
  * The one limit publishing does carry is provenance, and it is structural: this
  * walks the rows the list already holds, so it can neither resurrect a workspace
- * that is gone nor invent one the list never showed. A workspace the rescan no
+ * that is gone nor invent one the list never showed. A workspace this read no
  * longer lists has no refreshed picture to put in its place — repeating
  * "Workspace no longer exists" forever is not something the user can act on — so
  * that row is dropped rather than rewritten, under the same recency rule.
@@ -283,43 +293,25 @@ function publishRefreshedWorkspaceCleanupCandidates(
     if (!scan || rescannedAt === null || rescannedAt < scan.scannedAt) {
       return {}
     }
-    const refreshedByIdentity = new Map(
-      refreshed.map((candidate) => [getWorkspaceCleanupCandidateIdentity(candidate), candidate])
-    )
-    let changed = false
-    const candidates = scan.candidates.flatMap((candidate) => {
-      const identity = getWorkspaceCleanupCandidateIdentity(candidate)
-      const next = refreshedByIdentity.get(identity)
-      const retired = retiredIdentities.has(identity)
-      if (!next && !retired) {
-        return [candidate]
-      }
-      changed = true
-      // A row the rescan no longer lists has no refreshed picture to show, so
-      // showing it again is the dead end; dropping it is the reconciliation.
-      if (!next) {
-        return []
-      }
+    const { candidates, rowReads, changed } = rewriteWorkspaceCleanupRowsFromRead({
+      listed: scan.candidates,
+      readAt: rescannedAt,
       // Preflight enrichment skips dismissals so a dismissed row stays
       // removable; the published row must not lose the mark that hides it.
-      return [applyWorkspaceCleanupDismissal(next, state.workspaceCleanupDismissals)]
+      refreshed: refreshed.map((candidate) =>
+        applyWorkspaceCleanupDismissal(candidate, state.workspaceCleanupDismissals)
+      ),
+      retiredIdentities,
+      rowReads: state.workspaceCleanupRowReadAt
     })
     if (!changed) {
       return {}
     }
-    // Stamp what was just published with the read it came from: the scan's own
-    // `scannedAt` describes the older read these rows now sit beside.
+    // `scannedAt` still describes the older read these rows now sit beside; the
+    // rows this republish wrote carry their own time in `workspaceCleanupRowReadAt`.
     return {
       workspaceCleanupScan: { ...scan, candidates },
-      workspaceCleanupRowReadAt: pruneWorkspaceCleanupRowReads(
-        recordWorkspaceCleanupRowReads(
-          state.workspaceCleanupRowReadAt,
-          refreshed,
-          rescannedAt,
-          retiredIdentities
-        ),
-        candidates
-      )
+      workspaceCleanupRowReadAt: rowReads
     }
   })
 }
