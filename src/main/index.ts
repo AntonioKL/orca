@@ -2886,8 +2886,7 @@ void app.whenReady().then(async () => {
             if (wait.satisfied) {
               return {
                 status: 'completed' as const,
-                outputSnapshot: snapshotBuffer.snapshot(),
-                error: null
+                outputSnapshot: snapshotBuffer.snapshot()
               }
             }
             return {

@@ -1,10 +1,11 @@
 export type GitHubPrFileDiffLine = {
   key: string
-  kind: 'context' | 'added' | 'removed'
-  oldLineNumber?: number
-  newLineNumber?: number
   text: string
-}
+} & (
+  | { kind: 'context'; oldLineNumber: number; newLineNumber: number }
+  | { kind: 'added'; oldLineNumber?: never; newLineNumber: number }
+  | { kind: 'removed'; oldLineNumber: number; newLineNumber?: never }
+)
 
 export type GitHubPrFileDiffPreview = {
   lines: GitHubPrFileDiffLine[]

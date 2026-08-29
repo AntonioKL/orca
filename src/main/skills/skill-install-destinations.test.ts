@@ -1,9 +1,12 @@
 import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, expectTypeOf, it } from 'vitest'
 import type { SkillInstallRequest } from '../../shared/skill-install-contract'
-import { resolveSkillInstallDestination } from './skill-install-destinations'
+import {
+  resolveSkillInstallDestination,
+  type ResolvedSkillInstallDestination
+} from './skill-install-destinations'
 
 const roots: string[] = []
 
@@ -34,6 +37,15 @@ async function fixture() {
 }
 
 describe('resolveSkillInstallDestination', () => {
+  it('requires a workspace directory only for workspace destinations', () => {
+    expectTypeOf<
+      Extract<ResolvedSkillInstallDestination, { scope: 'workspace' }>['workspaceDirectory']
+    >().toEqualTypeOf<string>()
+    expectTypeOf<
+      Extract<ResolvedSkillInstallDestination, { scope: 'global' }>['workspaceDirectory']
+    >().toEqualTypeOf<undefined>()
+  })
+
   it('derives global paths from host-owned home and environment identity', async () => {
     const { authority } = await fixture()
     await expect(

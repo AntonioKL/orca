@@ -46,10 +46,10 @@ export type ProjectGroupImportMode = 'group' | 'separate'
 
 export type ProjectGroupImportProjectResult = {
   path: string
-  projectId?: string
-  status: 'imported' | 'already-known' | 'failed'
-  error?: string
-}
+} & (
+  | { status: 'imported' | 'already-known'; projectId: string; error?: never }
+  | { status: 'failed'; projectId?: never; error: string }
+)
 
 export type ProjectGroupImportResult = {
   group?: ProjectGroup

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, expectTypeOf, it } from 'vitest'
 import {
   clearMissingProjectGroupMemberships,
   createProjectGroup,
@@ -9,6 +9,7 @@ import {
   normalizeProjectGroups
 } from './project-groups'
 import type { Repo } from './repo-types'
+import type { ProjectGroupImportProjectResult } from './project-group-types'
 
 function repo(overrides: Partial<Repo>): Repo {
   return {
@@ -23,6 +24,21 @@ function repo(overrides: Partial<Repo>): Repo {
 }
 
 describe('project-groups', () => {
+  it('ties project ids and errors to import outcomes', () => {
+    expectTypeOf<
+      Extract<
+        ProjectGroupImportProjectResult,
+        { status: 'imported' | 'already-known' }
+      >['projectId']
+    >().toEqualTypeOf<string>()
+    expectTypeOf<
+      Extract<ProjectGroupImportProjectResult, { status: 'failed' }>['error']
+    >().toEqualTypeOf<string>()
+    expectTypeOf<
+      Extract<ProjectGroupImportProjectResult, { status: 'failed' }>['projectId']
+    >().toEqualTypeOf<undefined>()
+  })
+
   it('creates a durable project group with normalized defaults', () => {
     const group = createProjectGroup({
       name: '  Platform  ',

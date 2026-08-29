@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 
 const { callMock, remoteMock } = vi.hoisted(() => ({
   callMock: vi.fn(),
@@ -27,8 +27,18 @@ vi.mock('../runtime-client', async () => {
 
 import { main } from '../index'
 import { okFixture, queueFixtures } from '../test-fixtures'
+import type { EmulatorPermissionRequest } from '../emulator-permissions-args'
 
 describe('orca emulator CLI handlers', () => {
+  it('ties permission arguments to grant and revoke operations', () => {
+    expectTypeOf<
+      Extract<EmulatorPermissionRequest, { op: 'grant' | 'revoke' }>['packageName']
+    >().toEqualTypeOf<string>()
+    expectTypeOf<
+      Extract<EmulatorPermissionRequest, { op: 'reset' }>['packageName']
+    >().toEqualTypeOf<undefined>()
+  })
+
   const originalWorkspaceId = process.env.ORCA_WORKSPACE_ID
   const originalWorktreeId = process.env.ORCA_WORKTREE_ID
 

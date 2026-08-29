@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 import {
   syncForkDefaultBranch,
   validateGitForkSyncExpectedUpstream,
+  type GitForkSyncResult,
   type GitForkSyncRunner
 } from './git-fork-sync'
 
@@ -60,6 +61,15 @@ function flattenedCommands(calls: string[][]): string {
 }
 
 describe('syncForkDefaultBranch', () => {
+  it('requires a reason only when synchronization is blocked', () => {
+    expectTypeOf<
+      Extract<GitForkSyncResult, { status: 'blocked' }>['reason']
+    >().toMatchTypeOf<string>()
+    expectTypeOf<
+      Extract<GitForkSyncResult, { status: 'up-to-date' | 'synced' }>['reason']
+    >().toEqualTypeOf<undefined>()
+  })
+
   it('pushes the upstream default branch when the fork is only behind', async () => {
     const { runGit, calls } = createRunner({ aheadBehind: '0\t3\n' })
 

@@ -20,8 +20,8 @@ import type { SourceControlRowOpenEvent } from '../listing/split-open'
 import { translate } from '@/i18n/i18n'
 
 export type GitHistoryPanelState =
-  | { status: 'idle' | 'loading'; result?: GitHistoryResult; error?: string }
-  | { status: 'refreshing' | 'ready'; result: GitHistoryResult; error?: string }
+  | { status: 'idle' | 'loading'; result?: never; error?: never }
+  | { status: 'refreshing' | 'ready'; result: GitHistoryResult; error?: never }
   | { status: 'error'; result?: GitHistoryResult; error: string }
 
 const DEFAULT_GIT_HISTORY_PANEL_HEIGHT = 256

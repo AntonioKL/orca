@@ -1,12 +1,23 @@
 import { AlertCircle, CheckCircle2 } from 'lucide-react'
-import type { McpConfigInspection } from '../../../../shared/mcp-config'
+import type {
+  McpConfigCandidate,
+  McpConfigInspection,
+  McpServerSummary
+} from '../../../../shared/mcp-config'
 import { Button } from '../ui/button'
 import { translate } from '@/i18n/i18n'
 
-export type LoadedMcpConfigInspection = McpConfigInspection & {
-  absolutePath: string
-  readError?: string
-}
+export type LoadedMcpConfigInspection =
+  | (McpConfigInspection & { absolutePath: string; readError?: never })
+  | {
+      candidate: McpConfigCandidate
+      servers: McpServerSummary[]
+      status: 'invalid'
+      exists: false
+      error?: never
+      absolutePath: string
+      readError: string
+    }
 
 type McpConfigFileRowProps = {
   config: LoadedMcpConfigInspection

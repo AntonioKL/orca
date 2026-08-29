@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 import {
   canInspectLocalMcpConfigRoot,
   getMcpConfigCandidateParentDir,
@@ -7,7 +7,8 @@ import {
   maskMcpEnv,
   MCP_CONFIG_CANDIDATES,
   MCP_STARTER_CONFIG,
-  selectExistingMcpConfigCandidates
+  selectExistingMcpConfigCandidates,
+  type McpConfigInspection
 } from './mcp-config'
 import {
   MCP_CONFIG_INSPECTION_MAX_BYTES,
@@ -22,6 +23,18 @@ afterEach(() => {
 })
 
 describe('mcp-config', () => {
+  it('ties existence and errors to inspection status', () => {
+    expectTypeOf<
+      Extract<McpConfigInspection, { status: 'invalid' }>['error']
+    >().toEqualTypeOf<string>()
+    expectTypeOf<
+      Extract<McpConfigInspection, { status: 'valid' }>['error']
+    >().toEqualTypeOf<undefined>()
+    expectTypeOf<
+      Extract<McpConfigInspection, { status: 'missing' }>['exists']
+    >().toEqualTypeOf<false>()
+  })
+
   const workspaceCandidate = MCP_CONFIG_CANDIDATES[0]
 
   it('reports missing configs', () => {

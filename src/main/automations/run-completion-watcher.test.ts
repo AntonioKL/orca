@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -92,6 +92,15 @@ function createObserver(
 }
 
 describe('authority-owned automation run completion', () => {
+  it('requires errors only for failed observations', () => {
+    expectTypeOf<
+      Extract<AutomationRunCompletionObservation, { status: 'dispatch_failed' }>['error']
+    >().toEqualTypeOf<string>()
+    expectTypeOf<
+      Extract<AutomationRunCompletionObservation, { status: 'completed' }>['error']
+    >().toEqualTypeOf<undefined>()
+  })
+
   beforeEach(() => {
     testState.dir = mkdtempSync(join(tmpdir(), 'orca-automation-completion-'))
     ipcHandlers.clear()
@@ -108,7 +117,7 @@ describe('authority-owned automation run completion', () => {
       // Why: a dispatcher without a completion promise is exactly the case that
       // used to strand a run at 'dispatched' for the process lifetime.
       headlessDispatcher: async () => ({ ...LAUNCH_TARGET }),
-      terminalObserver: createObserver(async () => ({ status: 'completed', error: null }))
+      terminalObserver: createObserver(async () => ({ status: 'completed' }))
     })
 
     const run = await service.runNow(automation.id)
@@ -227,7 +236,7 @@ describe('authority-owned automation run completion', () => {
 
     await vi.waitFor(() => expect(resolveObservation).not.toBeNull())
     expect(readRun(store, automation.id, run.id).status).toBe('dispatched')
-    resolveObservation!({ status: 'completed', error: null })
+    resolveObservation!({ status: 'completed' })
     await vi.waitFor(() => {
       expect(readRun(store, automation.id, run.id).status).toBe('completed')
     })

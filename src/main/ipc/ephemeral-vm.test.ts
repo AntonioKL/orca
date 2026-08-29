@@ -1,10 +1,11 @@
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { encodePairingOffer, PAIRING_OFFER_VERSION } from '../../shared/pairing'
 import { listEnvironments } from '../../shared/runtime-environment-store'
 import { upsertEphemeralVmRuntime } from '../../shared/ephemeral-vm-runtime-store'
+import type { EphemeralVmRecipeListResult } from './ephemeral-vm-recipe-context'
 
 const handlers = new Map<string, (_event: unknown, args: never) => unknown>()
 const {
@@ -103,6 +104,15 @@ function pluginServiceWithRecipes(
 }
 
 describe('registerEphemeralVmHandlers', () => {
+  it('requires recipe errors only for failed listings', () => {
+    expectTypeOf<
+      Extract<EphemeralVmRecipeListResult, { status: 'error' }>['message']
+    >().toEqualTypeOf<string>()
+    expectTypeOf<
+      Extract<EphemeralVmRecipeListResult, { status: 'ok' }>['message']
+    >().toEqualTypeOf<undefined>()
+  })
+
   const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')
 
   beforeEach(() => {

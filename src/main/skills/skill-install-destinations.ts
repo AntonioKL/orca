@@ -17,12 +17,13 @@ export type SkillInstallDestinationAuthority = {
 }
 
 export type ResolvedSkillInstallDestination = {
-  scope: 'global' | 'workspace'
   homeDirectory: string
-  workspaceDirectory?: string
   destinationIdentity: string
   wslDistro?: string
-}
+} & (
+  | { scope: 'global'; workspaceDirectory?: never }
+  | { scope: 'workspace'; workspaceDirectory: string }
+)
 
 async function requireDirectory(path: string, category: string): Promise<string> {
   const stat = await lstat(path).catch(() => null)

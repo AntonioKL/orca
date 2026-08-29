@@ -7,10 +7,8 @@ import {
 import { RetainedRunReconciler } from './retained-run-reconciliation'
 
 export type AutomationRunCompletionObservation = {
-  status: 'completed' | 'dispatch_failed'
   outputSnapshot?: AutomationRunOutputSnapshot | null
-  error?: string | null
-}
+} & ({ status: 'completed'; error?: never } | { status: 'dispatch_failed'; error: string })
 
 /** The owning authority's view of a dispatched run's own terminal session. */
 export type AutomationRunTerminalObserver = {

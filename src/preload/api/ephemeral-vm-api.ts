@@ -5,13 +5,13 @@ import type { EphemeralVmRecipeResultWarning } from '../../shared/ephemeral-vm-r
 import type { EphemeralVmRuntimeRecord } from '../../shared/ephemeral-vm-runtimes'
 
 export type EphemeralVmApi = {
-  listRecipes: (args: { repoId: string }) => Promise<{
-    status: 'ok' | 'error'
-    repoPath: string | null
-    recipes: OrcaHooks['environmentRecipes']
-    diagnostics: NonNullable<OrcaHooks['environmentRecipeDiagnostics']>
-    message?: string
-  }>
+  listRecipes: (args: { repoId: string }) => Promise<
+    {
+      repoPath: string | null
+      recipes: OrcaHooks['environmentRecipes']
+      diagnostics: NonNullable<OrcaHooks['environmentRecipeDiagnostics']>
+    } & ({ status: 'ok'; message?: never } | { status: 'error'; message: string })
+  >
   listRecipeCatalog: () => Promise<
     {
       repoId: string

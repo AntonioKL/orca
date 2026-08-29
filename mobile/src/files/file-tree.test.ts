@@ -1,10 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, expectTypeOf, it } from 'vitest'
 import {
   flattenDirectoryCache,
   getMobileFileKind,
   isMarkdownPath,
   shouldIncludeMobileFileExplorerEntry,
   type DirectoryCache,
+  type DirectoryState,
+  type InlineStatusNode,
   type MobileDirEntry
 } from './file-tree'
 
@@ -13,6 +15,14 @@ function entry(name: string, isDirectory = false, isSymlink = false): MobileDirE
 }
 
 describe('file-tree', () => {
+  it('ties directory and inline payloads to their states', () => {
+    expectTypeOf<Extract<DirectoryState, { loading: true }>['error']>().toEqualTypeOf<undefined>()
+    expectTypeOf<Extract<DirectoryState, { error: string }>['loading']>().toEqualTypeOf<
+      false | undefined
+    >()
+    expectTypeOf<Extract<InlineStatusNode, { kind: 'error' }>['message']>().toEqualTypeOf<string>()
+  })
+
   it('flattens cached directories lazily with directories before files', () => {
     const cache: DirectoryCache = {
       '': { entries: [entry('zeta.txt'), entry('src', true), entry('readme.md')] },

@@ -36,11 +36,12 @@ export type McpServerSummary = {
 
 export type McpConfigInspection = {
   candidate: McpConfigCandidate
-  exists: boolean
-  status: 'missing' | 'valid' | 'invalid'
   servers: McpServerSummary[]
-  error?: string
-}
+} & (
+  | { status: 'missing'; exists: false; error?: never }
+  | { status: 'valid'; exists: true; error?: never }
+  | { status: 'invalid'; exists: true; error: string }
+)
 
 export const MCP_CONFIG_CANDIDATES: McpConfigCandidate[] = [
   {

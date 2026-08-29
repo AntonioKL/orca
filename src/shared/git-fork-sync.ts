@@ -11,14 +11,15 @@ export type GitForkSyncBlockedReason =
   | 'diverged'
 
 export type GitForkSyncResult = {
-  status: 'up-to-date' | 'synced' | 'blocked'
-  reason?: GitForkSyncBlockedReason
   originRemote: string
   upstreamRemote: string
   branchName?: string
   ahead: number
   behind: number
-}
+} & (
+  | { status: 'up-to-date' | 'synced'; reason?: never }
+  | { status: 'blocked'; reason: GitForkSyncBlockedReason }
+)
 
 export type GitForkSyncExpectedUpstream = {
   owner: string

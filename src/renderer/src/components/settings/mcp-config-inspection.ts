@@ -61,7 +61,8 @@ export async function loadMcpConfigInspections(
       )
       if (parentDirReadError) {
         return {
-          ...inspectMcpConfigContent(candidate, null),
+          candidate,
+          servers: [],
           exists: false,
           status: 'invalid',
           absolutePath,
@@ -82,7 +83,8 @@ export async function loadMcpConfigInspections(
           return { ...inspectMcpConfigContent(candidate, null), absolutePath }
         }
         return {
-          ...inspectMcpConfigContent(candidate, null),
+          candidate,
+          servers: [],
           exists: false,
           status: 'invalid',
           absolutePath,

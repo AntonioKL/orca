@@ -1,5 +1,8 @@
-import { describe, expect, it, vi } from 'vitest'
-import type { PluginPanelActionOutcome } from '../../../../shared/plugins/plugin-panel-bridge'
+import { describe, expect, expectTypeOf, it, vi } from 'vitest'
+import type {
+  PluginPanelActionOutcome,
+  PluginPanelActionResultMessage
+} from '../../../../shared/plugins/plugin-panel-bridge'
 import {
   createPanelMessageBudget,
   type PanelMessageBudget
@@ -42,6 +45,15 @@ function createHandler(
 }
 
 describe('createPanelBridgeMessageHandler', () => {
+  it('ties result payloads to success and failure', () => {
+    expectTypeOf<
+      Extract<PluginPanelActionResultMessage, { ok: false }>['error']
+    >().toEqualTypeOf<string>()
+    expectTypeOf<
+      Extract<PluginPanelActionResultMessage, { ok: true }>['error']
+    >().toEqualTypeOf<undefined>()
+  })
+
   it('relays a valid request and posts the success result back into the panel', async () => {
     const panelWindow = createFakePanelWindow()
     const { handler, callPanelAction } = createHandler(panelWindow)

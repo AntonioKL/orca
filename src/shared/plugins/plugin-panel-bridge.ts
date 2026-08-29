@@ -65,11 +65,10 @@ export type PluginPanelActionErrorCode =
 export type PluginPanelActionResultMessage = {
   type: typeof PANEL_ACTION_RESULT_TYPE
   requestId: string
-  ok: boolean
-  value?: unknown
-  errorCode?: PluginPanelActionErrorCode
-  error?: string
-}
+} & (
+  | { ok: true; value: unknown; errorCode?: never; error?: never }
+  | { ok: false; value?: never; errorCode: PluginPanelActionErrorCode; error: string }
+)
 
 /** Outcome of executing a panel action in main (wire shape of
  *  `plugins:panelAction` / `plugins.panelAction`). */

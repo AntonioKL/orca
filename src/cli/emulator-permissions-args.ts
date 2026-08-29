@@ -1,11 +1,9 @@
 import { getOptionalStringFlag, getRequiredStringFlag } from './flags'
 import { RuntimeClientError } from './runtime-client'
 
-export type EmulatorPermissionRequest = {
-  op: 'grant' | 'revoke' | 'reset'
-  packageName?: string
-  permission?: string
-}
+export type EmulatorPermissionRequest =
+  | { op: 'grant' | 'revoke'; packageName: string; permission: string }
+  | { op: 'reset'; packageName?: never; permission?: never }
 
 export function parseEmulatorPermissionRequest(
   flags: Map<string, string | boolean>

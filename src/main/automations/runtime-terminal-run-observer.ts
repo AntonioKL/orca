@@ -121,7 +121,7 @@ async function buildObservation(
 ): Promise<AutomationRunCompletionObservation> {
   const outputSnapshot = await readTerminalSnapshot(runtime, handle)
   if (wait.satisfied) {
-    return { status: 'completed', outputSnapshot, error: null }
+    return { status: 'completed', outputSnapshot }
   }
   return {
     status: 'dispatch_failed',

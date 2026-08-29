@@ -1,11 +1,27 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, expectTypeOf, it } from 'vitest'
 import {
   highlightMobileDiffLines,
   resolveMobileSyntaxLanguage
 } from '../session/mobile-file-syntax'
-import { buildGitHubPrFileDiffLines, buildGitHubPrFileDiffPreview } from './github-pr-file-diff'
+import {
+  buildGitHubPrFileDiffLines,
+  buildGitHubPrFileDiffPreview,
+  type GitHubPrFileDiffLine
+} from './github-pr-file-diff'
 
 describe('buildGitHubPrFileDiffLines', () => {
+  it('ties line numbers to each diff side', () => {
+    expectTypeOf<
+      Extract<GitHubPrFileDiffLine, { kind: 'context' }>['oldLineNumber']
+    >().toEqualTypeOf<number>()
+    expectTypeOf<
+      Extract<GitHubPrFileDiffLine, { kind: 'added' }>['oldLineNumber']
+    >().toEqualTypeOf<undefined>()
+    expectTypeOf<
+      Extract<GitHubPrFileDiffLine, { kind: 'removed' }>['newLineNumber']
+    >().toEqualTypeOf<undefined>()
+  })
+
   it('preserves context and marks added and removed lines', () => {
     expect(buildGitHubPrFileDiffLines('one\ntwo\nthree\n', 'one\ntoo\nthree\n')).toEqual([
       {

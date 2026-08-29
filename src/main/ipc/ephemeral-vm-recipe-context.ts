@@ -4,22 +4,20 @@ import type { EphemeralVmRecipeDoctorResult } from '../../shared/ephemeral-vm-re
 import { listEphemeralVmRuntimes } from '../../shared/ephemeral-vm-runtime-store'
 import type { EphemeralVmRuntimeRecord } from '../../shared/ephemeral-vm-runtimes'
 import { isFolderRepo, isGitRepoKind } from '../../shared/repo-kind'
-import type { OrcaVmRecipe } from '../../shared/orca-yaml-hook-types'
+import type { OrcaHooks, OrcaVmRecipe } from '../../shared/orca-yaml-hook-types'
 
 export type EphemeralVmRecipeListResult = {
-  status: 'ok' | 'error'
   repoPath: string | null
   recipes: OrcaVmRecipe[]
-  diagnostics: NonNullable<ReturnType<typeof loadHooks>>['environmentRecipeDiagnostics']
-  message?: string
-}
+  diagnostics: NonNullable<OrcaHooks['environmentRecipeDiagnostics']>
+} & ({ status: 'ok'; message?: never } | { status: 'error'; message: string })
 
 export type EphemeralVmRecipeCatalogEntry = {
   repoId: string
   repoName: string
   repoPath: string
   recipes: OrcaVmRecipe[]
-  diagnostics: NonNullable<ReturnType<typeof loadHooks>>['environmentRecipeDiagnostics']
+  diagnostics: NonNullable<OrcaHooks['environmentRecipeDiagnostics']>
 }
 
 export type RecipeRepoResult =

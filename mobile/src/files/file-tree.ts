@@ -21,9 +21,11 @@ export type TreeNode = {
 
 export type DirectoryState = {
   entries: MobileDirEntry[]
-  loading?: boolean
-  error?: string
-}
+} & (
+  | { loading: true; error?: never }
+  | { loading?: false; error: string }
+  | { loading?: false; error?: never }
+)
 
 export type DirectoryCache = Record<string, DirectoryState | undefined>
 
@@ -31,9 +33,7 @@ export type InlineStatusNode = {
   id: string
   relativePath: string
   depth: number
-  kind: 'loading' | 'error'
-  message?: string
-}
+} & ({ kind: 'loading'; message?: never } | { kind: 'error'; message: string })
 
 export type FileExplorerRow = TreeNode | InlineStatusNode
 
