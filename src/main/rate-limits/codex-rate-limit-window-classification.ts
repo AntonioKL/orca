@@ -15,6 +15,28 @@ export type CodexRateLimitWindowsSnapshot = {
   secondary?: CodexRateWindowSnapshot | null
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isReadableRateLimitWindow(value: unknown): boolean {
+  return (
+    value == null ||
+    (isRecord(value) && typeof value.usedPercent === 'number' && Number.isFinite(value.usedPercent))
+  )
+}
+
+export function isReadableCodexRateLimitWindowsSnapshot(
+  value: unknown
+): value is CodexRateLimitWindowsSnapshot | null | undefined {
+  return (
+    value == null ||
+    (isRecord(value) &&
+      isReadableRateLimitWindow(value.primary) &&
+      isReadableRateLimitWindow(value.secondary))
+  )
+}
+
 type MappableCodexRateWindowSnapshot = CodexRateWindowSnapshot & { usedPercent: number }
 type CodexRateLimitWindowKind = 'session' | 'weekly' | null
 

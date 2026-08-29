@@ -61,7 +61,12 @@ describe('readCodexRateLimitsViaRpc with an unreadable result', () => {
     ['no result and no error', undefined],
     ['a null result', null],
     ['a scalar result', 42],
-    ['an array result', []]
+    ['an array result', []],
+    ['a scalar rateLimits field', { rateLimits: 42 }],
+    ['an array rateLimits field', { rateLimits: [] }],
+    ['a scalar primary window', { rateLimits: { primary: 42 } }],
+    ['a primary window without usage', { rateLimits: { primary: {} } }],
+    ['a primary window with non-numeric usage', { rateLimits: { primary: { usedPercent: '5' } } }]
   ])('does not report %s as a successful empty reading', async (_label, result) => {
     const pending = readRateLimits(result)
     await vi.advanceTimersByTimeAsync(1)

@@ -10,6 +10,7 @@ import {
   classifyCodexRateLimitWindows,
   CODEX_SESSION_WINDOW_MINUTES,
   CODEX_WEEKLY_WINDOW_MINUTES,
+  isReadableCodexRateLimitWindowsSnapshot,
   type CodexRateLimitWindowsSnapshot
 } from './codex-rate-limit-window-classification'
 import type { CodexRateLimitFetchOptions } from './codex-rate-limit-fetch-options'
@@ -37,9 +38,15 @@ type RpcRateLimitsResponse = {
 // a claim, not a fact. Only a plain object can carry the wrapper's fields; each
 // field inside is validated separately by its own mapper.
 function readRpcRateLimitsResult(result: unknown): RpcRateLimitsResponse | null {
-  return result && typeof result === 'object' && !Array.isArray(result)
-    ? (result as RpcRateLimitsResponse)
-    : null
+  if (
+    !result ||
+    typeof result !== 'object' ||
+    Array.isArray(result) ||
+    !isReadableCodexRateLimitWindowsSnapshot((result as RpcRateLimitsResponse).rateLimits)
+  ) {
+    return null
+  }
+  return result as RpcRateLimitsResponse
 }
 
 type RpcDataStream = {
