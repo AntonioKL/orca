@@ -4,7 +4,7 @@ import type { BrowserSessionProfile } from '../../shared/browser-workspace-types
 import { browserManager } from './browser-manager'
 import { hasSystemMediaAccess, requestSystemMediaAccess } from './browser-media-access'
 import { isAutoGrantedBrowserSessionPermission } from './browser-session-permission-policy'
-import { cleanElectronUserAgent, setupClientHintsOverride } from './browser-session-ua'
+import { setupClientHintsOverride } from './browser-session-ua'
 import { setBrowserSessionUserAgentMode } from './browser-session-user-agent-mode'
 import {
   allowsBrowserWebAuthnPermission,
@@ -75,9 +75,9 @@ export function installBrowserSessionPartitionPolicies(
 
   browserManager.installCertificateRequestGuard(sess)
   if (profile.userAgentMode !== 'native' && typeof sess.getUserAgent === 'function') {
-    const cleanUA = cleanElectronUserAgent(sess.getUserAgent())
-    sess.setUserAgent(cleanUA)
-    setupClientHintsOverride(sess, cleanUA)
+    // Why the engine UA stands as-is: see setupClientHintsOverride's header. The switch still
+    // installs here because it owns the Google auth-host Firefox identity, which is unrelated.
+    setupClientHintsOverride(sess, sess.getUserAgent())
   }
   if (options?.permissions === 'deny') {
     sess.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
@@ -172,10 +172,7 @@ export function applyBrowserSessionUserAgentModes(profiles: BrowserSessionProfil
         continue
       }
 
-      // Why: the default Electron UA leaks "Electron/X.X.X" + app name, which trips Cloudflare Turnstile.
-      const cleanUA = cleanElectronUserAgent(sess.getUserAgent())
-      sess.setUserAgent(cleanUA)
-      setupClientHintsOverride(sess, cleanUA)
+      setupClientHintsOverride(sess, sess.getUserAgent())
     } catch {
       /* session not available yet (e.g. unit tests or pre-ready) */
     }
