@@ -243,7 +243,7 @@ function tree(hostStack: { index: number; routes: MutableRoute[] }): MutableStat
 }
 
 describe('one mounted session screen per worktree', () => {
-  it('converges the review screen onto the live session instead of replacing into a second one', () => {
+  it('converges before a review screen can contend for the terminal input lease', () => {
     // Source Control stacked over a live session, then a changed file opened for review.
     // `Open in session` used to router.replace() here, and REPLACE mints a fresh key.
     const app = drive(
