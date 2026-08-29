@@ -86,8 +86,8 @@ export async function releaseOwnedSkillInstallLock(input: {
     return
   }
   await unlinkIfPresent(ownerPath)
-  // Why: rmdir is the only take-away that carries its own ownership proof. It succeeds solely on an
-  // empty directory, and a published lock directory always holds an owner record, so a directory
-  // this release no longer owns survives it untouched.
+  // Why: rmdir is the only take-away that carries its own ownership proof. Another active owner
+  // publishes its owner record before the directory, while an ownerless published directory is
+  // either unowned or kept nonempty by pollution, so a directory this release no longer owns stays.
   await removeDirectoryIfPresent(input.path, input.removeDirectory ?? rmdir)
 }
