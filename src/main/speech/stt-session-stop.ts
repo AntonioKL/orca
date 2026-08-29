@@ -1,9 +1,9 @@
 import type { Worker } from 'node:worker_threads'
 import type { SttSessionState } from './stt-session-state'
 import { waitForSttWorkerStop, type SttWorkerStopOutcome } from './stt-worker-stop'
+import { IDLE_WORKER_TEARDOWN_MS } from './stt-session-timeouts'
 
 const STOP_DICTATION_TIMEOUT_MS = 60_000
-export const IDLE_WORKER_TEARDOWN_MS = 60 * 60 * 1000
 
 export async function stopSttDictation(
   state: SttSessionState,

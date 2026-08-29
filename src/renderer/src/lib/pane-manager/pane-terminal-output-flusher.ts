@@ -18,20 +18,17 @@ import {
   composeWriteFailureCallback,
   writeBackgroundTerminalChunk
 } from './pane-terminal-output-pipeline'
-import {
-  discardDetachedQueueEntry,
-  fireQueuedAckCredits,
-  hasQueuedChunks
-} from './pane-terminal-output-drain'
+import { discardDetachedQueueEntry, hasQueuedChunks } from './pane-terminal-output-queue-backlog'
 import { clearForegroundRelease, isEntryDrainable } from './pane-terminal-foreground-queue-state'
 import {
   BACKGROUND_CHUNK_CHARS,
   discardTerminalOutput,
+  fireQueuedAckCredits,
   queuedByTerminal,
   requestRegisteredTerminalBacklogRecovery,
   scheduleDrain,
   type TerminalOutputTarget
-} from './pane-terminal-output-scheduler'
+} from './pane-terminal-output-queue-registry'
 
 export function flushTerminalOutputImpl(
   terminal: TerminalOutputTarget,

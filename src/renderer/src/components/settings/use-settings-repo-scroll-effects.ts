@@ -8,7 +8,9 @@ import type { SettingsStoreModel } from './use-settings-store-model'
 import type { SettingsInteractionController } from './use-settings-interaction-controller'
 import type { SettingsNavigationModel } from './use-settings-navigation-model'
 import type { SettingsTerminalModel } from './use-settings-terminal-model'
+import { watchForSettingsDeepLinkTarget } from './settings-deep-link-target-watcher'
 import {
+  cancelPendingSettingsDeepLinkTargetWatch,
   cancelPendingSettingsSubsectionScrollFrame,
   getFallbackVisibleSection,
   getSettingsScrollTarget,
@@ -26,6 +28,7 @@ export function useSettingsRepoScrollEffects(
     pendingNavRequestTick,
     repos,
     setActiveSectionId,
+    setPendingNavRequestTick,
     setRepoHooksMap,
     setSettingsSearchQuery,
     settingsSearchQuery
@@ -34,6 +37,7 @@ export function useSettingsRepoScrollEffects(
     contentScrollRef,
     pendingNavSectionRef,
     pendingScrollTargetRef,
+    pendingScrollTargetWatchRef,
     pendingSubsectionScrollFrameRef,
     repoHooksRequestSeqRef
   } = interactions
@@ -123,6 +127,8 @@ export function useSettingsRepoScrollEffects(
   useEffect(() => {
     const scrollTargetId = pendingScrollTargetRef.current
     const pendingNavSectionId = pendingNavSectionRef.current
+    // Why: this pass re-decides whether to wait for the target, so drop any watch armed by the previous one.
+    cancelPendingSettingsDeepLinkTargetWatch(pendingScrollTargetWatchRef)
 
     // Why: subsection deep links clear a stale filter that could hide the target row; pane-level links keep it to force-open the matching section.
     if (
@@ -149,6 +155,13 @@ export function useSettingsRepoScrollEffects(
       if (scrollTargetId !== pendingNavSectionId) {
         // Why: target can arrive before the lazy section mounts; keep pending refs until it does.
         if (!getSettingsScrollTarget(scrollTargetId, container)) {
+          // Why: async panes (the server list, say) mount rows after this pass, and nothing else re-runs the effect.
+          pendingScrollTargetWatchRef.current = watchForSettingsDeepLinkTarget({
+            root: container,
+            isTargetPresent: () =>
+              getSettingsScrollTarget(scrollTargetId, contentScrollRef.current) !== null,
+            onTargetPresent: () => setPendingNavRequestTick((tick) => tick + 1)
+          })
           return
         }
         const scrollToSubsection = (): void => {
@@ -184,8 +197,10 @@ export function useSettingsRepoScrollEffects(
     pendingNavRequestTick,
     pendingNavSectionRef,
     pendingScrollTargetRef,
+    pendingScrollTargetWatchRef,
     pendingSubsectionScrollFrameRef,
     setActiveSectionId,
+    setPendingNavRequestTick,
     setSettingsSearchQuery,
     settingsSearchQuery,
     visibleSectionIds,
