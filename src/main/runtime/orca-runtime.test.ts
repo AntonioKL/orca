@@ -50052,6 +50052,34 @@ describe('OrcaRuntimeService', () => {
     }
   })
 
+  // The mirror of the guard above: nothing is left on disk, so forgetting the row IS the
+  // honest outcome. Without this, a guard that refused unconditionally would read as correct.
+  it('forgets the runtime workspace when a refused orphan cleanup left nothing on disk', async () => {
+    const removeWorktreeMeta = vi.fn()
+    const runtime = createWorktreeRemovalRuntime({ ...store, removeWorktreeMeta })
+    vi.mocked(getEffectiveHooks).mockReturnValue(null)
+    vi.mocked(removeWorktree).mockRejectedValue(
+      Object.assign(new Error('git worktree remove failed'), {
+        stderr: `fatal: '${TEST_WORKTREE_PATH}' is not a working tree`
+      })
+    )
+    const gitSpy = vi.spyOn(gitRunner, 'gitExecFileAsync').mockResolvedValue({
+      stdout: '',
+      stderr: ''
+    })
+    await rm(TEST_WORKTREE_PATH, { recursive: true, force: true })
+    const removePathSpy = vi.spyOn(localWorktreeFilesystem, 'removeLocalWorktreePath')
+
+    try {
+      await expect(runtime.removeManagedWorktree(TEST_WORKTREE_ID)).resolves.toEqual({})
+      expect(removePathSpy).not.toHaveBeenCalled()
+      expect(removeWorktreeMeta).toHaveBeenCalled()
+    } finally {
+      removePathSpy.mockRestore()
+      gitSpy.mockRestore()
+    }
+  })
+
   it('refuses runtime Windows recovery while Git still reports the row and keeps metadata', async () => {
     setPlatform('win32')
     const removeWorktreeMeta = vi.fn()

@@ -348,10 +348,7 @@ export function formatWorktreeRemovalError(
           .find(Boolean)
 
   const message = details ? `${fallback} ${details}` : fallback
-  if (
-    isHeldWorkspaceDirectoryRemovalError(message) ||
-    message.includes(WORKSPACE_DIRECTORY_HELD_HINT)
-  ) {
+  if (isHeldWorkspaceDirectoryRemovalError(message)) {
     return message
   }
   // Why here and not at the delete: this is the one funnel every removal throw site already

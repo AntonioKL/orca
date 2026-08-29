@@ -369,6 +369,44 @@ describe('registerWorktreeHandlers', () => {
     }
   })
 
+  // The mirror of the guard above: nothing is left on disk, so forgetting the row IS the
+  // honest outcome. Without this, a guard that refused unconditionally would read as correct.
+  it('forgets the workspace when a refused orphan cleanup has no directory left to delete', async () => {
+    const parentDir = await mkdtemp(join(tmpdir(), 'orca-ipc-orphan-gone-'))
+    const repoPath = join(parentDir, 'repo')
+    const worktreePath = join(parentDir, 'feature-wt')
+    await mkdir(join(repoPath, '.git', 'worktrees', 'feature-wt'), { recursive: true })
+    const repo = {
+      id: 'repo-1',
+      path: repoPath,
+      displayName: 'repo',
+      badgeColor: '#000',
+      addedAt: 0
+    }
+    store.getRepos.mockReturnValue([repo])
+    store.getRepo.mockReturnValue({ ...repo, worktreeBaseRef: null })
+    mockKnownFeatureWorktree(worktreePath, repoPath)
+    getEffectiveHooksMock.mockReturnValue(null)
+    gitExecFileAsyncMock.mockResolvedValue({ stdout: '', stderr: '' })
+    removeWorktreeMock.mockRejectedValue(
+      Object.assign(new Error('git worktree remove failed'), {
+        stderr: `fatal: '${worktreePath}' is not a working tree`
+      })
+    )
+    const removePathSpy = vi.spyOn(localWorktreeFilesystem, 'removeLocalWorktreePath')
+    const worktreeId = `repo-1::${worktreePath}`
+
+    try {
+      await expect(handlers['worktrees:remove'](null, { worktreeId })).resolves.toEqual({})
+
+      expect(removePathSpy).not.toHaveBeenCalled()
+      expect(store.removeWorktreeMeta).toHaveBeenCalled()
+    } finally {
+      removePathSpy.mockRestore()
+      await rm(parentDir, { recursive: true, force: true })
+    }
+  })
+
   it('recovers forced Windows long-path worktree removal through local deletion and prune', async () => {
     setPlatform('win32')
     const parentDir = await mkdtemp(join(tmpdir(), 'orca-ipc-long-path-'))

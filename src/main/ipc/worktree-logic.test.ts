@@ -674,6 +674,14 @@ describe('formatWorktreeRemovalError', () => {
       )
     })
 
+    // The negative half of the raw-string arm: reported, but not misdiagnosed.
+    it('reports a raw string failure for a child path without claiming the folder is held', () => {
+      const message = `EBUSY: resource busy or locked, rmdir '${nativePath}\\node_modules'`
+      expect(formatWorktreeRemovalError(message, windowsPath, false)).toBe(
+        `Failed to delete worktree at ${windowsPath}. ${message}`
+      )
+    })
+
     it('stays silent when a file inside the workspace is what failed', () => {
       const child = `${nativePath}\\node_modules\\.vite\\deps`
       expect(
