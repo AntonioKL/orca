@@ -66,7 +66,16 @@ export type WorkspaceCleanupPreflightResult =
       candidate: WorkspaceCleanupCandidate
       sameIdSurvivingHostId?: ExecutionHostId
     }
-  | { ok: false; failure: WorkspaceCleanupFailure }
+  | {
+      ok: false
+      failure: WorkspaceCleanupFailure
+      /**
+       * The rescanned row the verdict was read off. The preflight is the only
+       * place it exists, so a caller that stops here must publish it or the
+       * user keeps confirming against the picture that was already refused.
+       */
+      refreshedCandidate?: WorkspaceCleanupCandidate
+    }
 
 type WorkspaceCleanupRemovalTargetState = Pick<
   AppState,
@@ -266,7 +275,11 @@ export function evaluateWorkspaceCleanupPreflight(
     options.getConsentAttemptId
   )
   if (repoScanFailure && !hasUnverifiedRemovalConsent) {
-    return { ok: false, failure: repoScanFailure }
+    return {
+      ok: false,
+      failure: repoScanFailure,
+      ...(resolved.candidate ? { refreshedCandidate: resolved.candidate } : {})
+    }
   }
   const candidate =
     resolved.candidate ??
@@ -274,15 +287,18 @@ export function evaluateWorkspaceCleanupPreflight(
   if (!candidate) {
     return { ok: false, failure: getWorkspaceCleanupMissingFailure(target) }
   }
-  const failure = (message: string): WorkspaceCleanupPreflightResult => ({
+  const stop = (failure: WorkspaceCleanupFailure): WorkspaceCleanupPreflightResult => ({
     ok: false,
-    failure: {
+    refreshedCandidate: candidate,
+    failure
+  })
+  const failure = (message: string): WorkspaceCleanupPreflightResult =>
+    stop({
       worktreeId: target.worktreeId,
       ...(target.executionHostId ? { executionHostId: target.executionHostId } : {}),
       displayName: candidate.displayName,
       message
-    }
-  })
+    })
   if (!canQueueWorkspaceCleanupCandidate(candidate)) {
     return failure(
       candidate.blockers.length
@@ -295,13 +311,10 @@ export function evaluateWorkspaceCleanupPreflight(
     target.approvedCandidate &&
     candidateIdentity !== getWorkspaceCleanupCandidateIdentity(target.approvedCandidate)
   ) {
-    return { ok: false, failure: getWorkspaceCleanupMissingFailure(target) }
+    return stop(getWorkspaceCleanupMissingFailure(target))
   }
   if (candidate.blockers.includes('git-status-error') && !hasUnverifiedRemovalConsent) {
-    return {
-      ok: false,
-      failure: getWorkspaceCleanupGitUnavailableFailure(target, candidate)
-    }
+    return stop(getWorkspaceCleanupGitUnavailableFailure(target, candidate))
   }
   if (!target.approvedCandidate && shouldForceWorkspaceCleanupRemoval(candidate)) {
     return failure(

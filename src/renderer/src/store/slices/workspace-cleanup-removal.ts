@@ -16,7 +16,10 @@ import {
   resolveWorkspaceCleanupRemovalTargets,
   type WorkspaceCleanupRemovalTarget
 } from './workspace-cleanup-removal-targets'
-import { enrichWorkspaceCleanupCandidates } from './workspace-cleanup-candidate-enrichment'
+import {
+  applyWorkspaceCleanupDismissal,
+  enrichWorkspaceCleanupCandidates
+} from './workspace-cleanup-candidate-enrichment'
 import { invalidateWorkspaceCleanupScanProgress } from './workspace-cleanup-scan-progress'
 
 export type WorkspaceCleanupFailure = {
@@ -87,9 +90,13 @@ export async function removeWorkspaceCleanupCandidates(
     ignoreWorkspaceCleanupScanSurvivors?: boolean
   }[] = []
 
+  const refreshedCandidates: WorkspaceCleanupCandidate[] = []
   for (const preflight of preflights) {
     if (!preflight.ok) {
       failures.push(preflight.failure)
+      if (preflight.refreshedCandidate) {
+        refreshedCandidates.push(preflight.refreshedCandidate)
+      }
       continue
     }
     targetsToRemove.push({
@@ -100,6 +107,7 @@ export async function removeWorkspaceCleanupCandidates(
         : {})
     })
   }
+  publishRefreshedWorkspaceCleanupCandidates(set, refreshedCandidates)
   const scheduledRemovalIdentities = new Set(
     targetsToRemove.map(({ candidate }) => getWorkspaceCleanupCandidateIdentity(candidate))
   )
@@ -214,6 +222,45 @@ export async function removeWorkspaceCleanupCandidates(
     failures,
     ...(preservedBranches.length > 0 ? { preservedBranches } : {})
   }
+}
+
+/**
+ * Why: a stopped removal read its verdict off a rescan the list never saw. Left
+ * unpublished, the row still shows the picture the user confirmed against, so
+ * the obvious next move — confirm it again — re-runs the identical stop.
+ *
+ * Publishing is disclosure, never consent: it only rewrites rows the list
+ * already holds, and the delete still needs a fresh confirmation against the
+ * republished row.
+ */
+function publishRefreshedWorkspaceCleanupCandidates(
+  set: (partial: (state: AppState) => Partial<AppState>) => void,
+  refreshed: readonly WorkspaceCleanupCandidate[]
+): void {
+  if (refreshed.length === 0) {
+    return
+  }
+  set((state) => {
+    const scan = state.workspaceCleanupScan
+    if (!scan) {
+      return {}
+    }
+    const refreshedByIdentity = new Map(
+      refreshed.map((candidate) => [getWorkspaceCleanupCandidateIdentity(candidate), candidate])
+    )
+    let changed = false
+    const candidates = scan.candidates.map((candidate) => {
+      const next = refreshedByIdentity.get(getWorkspaceCleanupCandidateIdentity(candidate))
+      if (!next) {
+        return candidate
+      }
+      changed = true
+      // Preflight enrichment skips dismissals so a dismissed row stays
+      // removable; the published row must not lose the mark that hides it.
+      return applyWorkspaceCleanupDismissal(next, state.workspaceCleanupDismissals)
+    })
+    return changed ? { workspaceCleanupScan: { ...scan, candidates } } : {}
+  })
 }
 
 function pruneWorkspaceCleanupDismissals(
