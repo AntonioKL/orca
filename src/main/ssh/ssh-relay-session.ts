@@ -139,6 +139,7 @@ export type RelaySessionState = 'idle' | 'deploying' | 'ready' | 'reconnecting' 
 type SshPtyExitPayload = Parameters<SshPtyExitCallback>[0]
 type SshPtyDataPayload = Parameters<SshPtyDataCallback>[0]
 type SshPtyLease = ReturnType<Store['getSshRemotePtyLeases']>[number]
+type ReattachedPtyRuntimeRestore = 'restored' | 'missing-surface'
 const SSH_PTY_REATTACH_MAX_CONCURRENCY = 8
 const SSH_PTY_REATTACH_ATTEMPT_TIMEOUT_MS = 10_000
 const SSH_PTY_REATTACH_RETRY_MIN_DELAY_MS = 50
@@ -2482,14 +2483,29 @@ export class SshRelaySession {
       if (!shouldContinue() || !this.ownsPtyRecoveryAttempt(appPtyId, pendingReattach)) {
         return
       }
+      const activeLease = activeLeaseByPtyId.get(ptyId)
+      if (this.isRetiredReattachedPtySurface(activeLease)) {
+        await this.suppressRetiredReattachedPty(
+          ptyProvider,
+          ptyId,
+          appPtyId,
+          attachResult.incarnationId
+        )
+        return
+      }
       setPtyOwnership(appPtyId, this.targetId)
       if (attachResult.incarnationId) {
         restorePtyIncarnation(appPtyId, attachResult.incarnationId)
-        this.restoreReattachedPtyRuntime(
+        const restoreResult = this.restoreReattachedPtyRuntime(
           appPtyId,
           attachResult.incarnationId,
-          activeLeaseByPtyId.get(ptyId)
+          activeLease
         )
+        if (restoreResult !== 'restored') {
+          clearProviderPtyState(appPtyId)
+          deletePtyOwnership(appPtyId)
+          return
+        }
       }
       attachedLeaseIds.add(ptyId)
       pendingReattach.activated = true
@@ -2562,11 +2578,68 @@ export class SshRelaySession {
     this.runtime?.acceptPtyIncarnationForExit(appPtyId, ptyIncarnation)
   }
 
+  private isRetiredReattachedPtySurface(lease: SshPtyLease | undefined): boolean {
+    if (!lease?.worktreeId || !lease.tabId || !lease.leafId || !isTerminalLeafId(lease.leafId)) {
+      return false
+    }
+    const leafId = lease.leafId
+    const session = this.store.getWorkspaceSession?.()
+    const hostSession = this.store.getWorkspaceSession?.(toSshExecutionHostId(this.targetId))
+    const tabIds = [
+      lease.tabId,
+      findTerminalTabIdForLeaf(session, leafId),
+      findTerminalTabIdForLeaf(hostSession, leafId)
+    ].filter((tabId): tabId is string => Boolean(tabId && isValidTerminalTabId(tabId)))
+    return [session, hostSession].some((candidate) =>
+      tabIds.some(
+        (tabId) =>
+          candidate?.terminalSurfaceTombstonesByPaneKey?.[makePaneKey(tabId, leafId)] !== undefined
+      )
+    )
+  }
+
+  private async suppressRetiredReattachedPty(
+    ptyProvider: SshPtyProvider,
+    relayPtyId: string,
+    appPtyId: string,
+    incarnationId: string | undefined
+  ): Promise<void> {
+    try {
+      this.store.markSshRemotePtyLease(this.targetId, appPtyId, 'expired')
+    } catch (error) {
+      console.error('[ssh-relay-session] Failed to expire retired PTY lease:', error)
+    }
+    if (incarnationId) {
+      try {
+        this.store.recordSshRemotePtyKillIntent(this.targetId, relayPtyId, {
+          requestedAt: Date.now(),
+          incarnationId,
+          attempts: 0
+        })
+      } catch (error) {
+        console.error('[ssh-relay-session] Failed to persist retired PTY stop:', error)
+      }
+      try {
+        await ptyProvider.shutdown(appPtyId, {
+          immediate: true,
+          expectedIncarnationId: incarnationId
+        })
+      } catch (error) {
+        console.warn(
+          '[ssh-relay-session] Retired PTY stop is unverifiable and remains pending:',
+          error
+        )
+      }
+    }
+    clearProviderPtyState(appPtyId)
+    deletePtyOwnership(appPtyId)
+  }
+
   private restoreReattachedPtyRuntime(
     appPtyId: string,
     incarnationId: string,
     lease: SshPtyLease | undefined
-  ): void {
+  ): ReattachedPtyRuntimeRestore {
     if (lease?.worktreeId && lease.tabId && lease.leafId) {
       const session = this.store.getWorkspaceSession?.()
       // The lease froze its tabId at write time; `detachTerminalPaneToTab` moves a live pane, so
@@ -2579,11 +2652,6 @@ export class SshRelaySession {
         findTerminalTabIdForLeaf(session, lease.leafId) ??
         findTerminalTabIdForLeaf(hostSession, lease.leafId) ??
         lease.tabId
-      this.runtime?.registerPty(appPtyId, lease.worktreeId, this.targetId, {
-        tabId,
-        leafId: lease.leafId,
-        incarnationId
-      })
       try {
         // Absence of the pane only means "the user closed it" once the persisted membership
         // speaks for this worktree. Before that it means the renderer has not published its
@@ -2603,21 +2671,27 @@ export class SshRelaySession {
           leafId: lease.leafId,
           ptyId: appPtyId,
           incarnationId,
-          ...(mayCreate ? {} : { mayCreate: false })
+          ...(mayCreate ? {} : { mayCreate: false }),
+          mayReviveRetiredSurface: false
         })
         if (bound === false) {
-          // The pane is gone for good, so this shell has no surface to reach it through. Expire
-          // the lease so later reconnects stop fanning out over it — deliberately not
-          // `terminated`, which would assert an exit nothing here observed, and deliberately
-          // without killing the remote process.
+          // Topology absence alone is not authority to kill a process, but neither refusal may
+          // publish or replay into a missing pane.
           this.store.markSshRemotePtyLease(this.targetId, appPtyId, 'expired')
+          return 'missing-surface'
         }
       } catch (error) {
         console.error('[ssh-relay-session] Failed to persist reconnect incarnation:', error)
       }
-      return
+      this.runtime?.registerPty(appPtyId, lease.worktreeId, this.targetId, {
+        tabId,
+        leafId: lease.leafId,
+        incarnationId
+      })
+      return 'restored'
     }
     this.runtime?.onPtySpawned(appPtyId, incarnationId, { awaitsRegistration: false })
+    return 'restored'
   }
 
   private async attachPtyWithRetry(
