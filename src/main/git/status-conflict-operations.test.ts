@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as BoundedFileReader from '../../shared/node-bounded-file-reader'
 import {
   createBoundedFileReaderModuleMock,
@@ -55,6 +55,18 @@ vi.mock('../../shared/node-bounded-file-reader', async (importOriginal) =>
 )
 
 import { abortMerge, abortRebase, detectConflictOperation } from './status'
+
+const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')
+
+afterEach(() => {
+  if (originalPlatform) {
+    Object.defineProperty(process, 'platform', originalPlatform)
+  }
+})
+
+function useWindowsPlatform(): void {
+  Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+}
 
 describe('abortMerge', () => {
   beforeEach(() => {
@@ -139,6 +151,44 @@ describe('detectConflictOperation', () => {
 
     expect(accessMock).toHaveBeenCalledTimes(4)
     expect(peakConcurrent).toBe(4)
+  })
+
+  it.each([
+    {
+      name: 'native drive',
+      worktreePath: String.raw`C:\worktrees\feature`,
+      gitDir: '/mnt/c/repo/.git/worktrees/feature',
+      options: {},
+      expectedGitDir: String.raw`C:\repo\.git\worktrees\feature`
+    },
+    {
+      name: 'WSL UNC',
+      worktreePath: String.raw`C:\worktrees\feature`,
+      gitDir: '/home/me/repo/.git/worktrees/feature',
+      options: { wslDistro: 'Ubuntu' },
+      expectedGitDir: String.raw`\\wsl.localhost\Ubuntu\home\me\repo\.git\worktrees\feature`
+    }
+  ])('targets all conflict probes at the resolved $name gitdir', async (fixture) => {
+    useWindowsPlatform()
+    readFileMock.mockResolvedValue(`gitdir: ${fixture.gitDir}\n`)
+    accessMock.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }))
+
+    await detectConflictOperation(fixture.worktreePath, fixture.options)
+
+    expect(accessMock.mock.calls.map(([target]) => target)).toEqual([
+      `${fixture.expectedGitDir}\\MERGE_HEAD`,
+      `${fixture.expectedGitDir}\\CHERRY_PICK_HEAD`,
+      `${fixture.expectedGitDir}\\rebase-merge`,
+      `${fixture.expectedGitDir}\\rebase-apply`
+    ])
+  })
+
+  it('skips probes when a Windows gitdir cannot be translated', async () => {
+    useWindowsPlatform()
+    readFileMock.mockResolvedValue('gitdir: /home/me/repo/.git/worktrees/feature\n')
+
+    await expect(detectConflictOperation(String.raw`C:\worktrees\feature`)).resolves.toBe('unknown')
+    expect(accessMock).not.toHaveBeenCalled()
   })
 
   it('reads as unknown when the git dir cannot be reached at all', async () => {

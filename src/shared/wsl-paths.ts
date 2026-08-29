@@ -47,14 +47,22 @@ export function toLinuxPath(windowsPath: string): string {
   return `/mnt/${driveLetter}/${rest}`
 }
 
-/** Convert an absolute Linux path in a known WSL distro to its Windows form. */
-export function toWindowsWslPath(linuxPath: string, distro: string): string {
+/** Convert a WSL drvfs mount to its native Windows drive path. */
+export function toWindowsWslDrivePath(linuxPath: string): string | null {
   const mntMatch = linuxPath.match(/^\/mnt\/([a-z])(\/.*)?$/)
   if (mntMatch) {
     const rest = (mntMatch[2] || '').replace(/\//g, '\\')
     return `${mntMatch[1].toUpperCase()}:${rest || '\\'}`
   }
+  return null
+}
 
+/** Convert an absolute Linux path in a known WSL distro to its Windows form. */
+export function toWindowsWslPath(linuxPath: string, distro: string): string {
+  const drivePath = toWindowsWslDrivePath(linuxPath)
+  if (drivePath) {
+    return drivePath
+  }
   return `\\\\wsl.localhost\\${distro}${linuxPath.replace(/\//g, '\\')}`
 }
 

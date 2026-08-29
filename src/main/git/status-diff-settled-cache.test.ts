@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import * as path from 'node:path'
 import type * as BoundedFileReader from '../../shared/node-bounded-file-reader'
 import { createBoundedFileReaderModuleMock, createGitRunnerModuleMock } from './status-test-harness'
 
@@ -147,6 +148,35 @@ describe('settled diff cache', () => {
     expect(blobReadCount()).toBe(spawnsAfterFirst)
     expect(second).toEqual(first)
     expect(settledDiffCache.stats().hits).toBe(1)
+  })
+
+  it('caches a WSL diff through distro-required gitdir and absolute commondir paths', async () => {
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+    try {
+      const worktreePath = String.raw`C:\workspace\feature`
+      const gitDir = String.raw`\\wsl.localhost\Ubuntu\home\me\repo\.git\worktrees\feature`
+      const commonGitDir = String.raw`\\wsl.localhost\Ubuntu\home\me\repo\.git`
+      files.clear()
+      writeFile(path.join(worktreePath, '.git'), 'gitdir: /home/me/repo/.git/worktrees/feature\n')
+      writeFile(path.join(gitDir, 'HEAD'), 'ref: refs/heads/main\n')
+      writeFile(path.join(gitDir, 'commondir'), '/home/me/repo/.git\n')
+      writeFile(path.join(commonGitDir, 'refs/heads/main'), `${'a'.repeat(40)}\n`)
+      writeFile(path.join(gitDir, 'index'), 'index-bytes')
+      writeFile(path.join(worktreePath, FILE), 'working-tree-content')
+
+      await getDiff(worktreePath, FILE, false, false, { wslDistro: 'Ubuntu' })
+      const spawnsAfterFirst = blobReadCount()
+      await getDiff(worktreePath, FILE, false, false, { wslDistro: 'Ubuntu' })
+
+      expect(blobReadCount()).toBe(spawnsAfterFirst)
+      expect(settledDiffCache.stats().hits).toBe(1)
+      expect(readFileMock).toHaveBeenCalledWith(path.join(commonGitDir, 'refs/heads/main'), 'utf-8')
+    } finally {
+      if (originalPlatform) {
+        Object.defineProperty(process, 'platform', originalPlatform)
+      }
+    }
   })
 
   // The four invalidation axes, one per diff input. Each proves the stale result is

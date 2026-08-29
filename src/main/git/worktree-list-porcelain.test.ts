@@ -116,7 +116,7 @@ describe('listWorktrees', () => {
     gitExecFileAsyncMock.mockResolvedValueOnce({
       stdout:
         'worktree /mnt/c/Users/me/repo\nHEAD abc123\nbranch refs/heads/main\nsparse\n\n' +
-        'worktree /mnt/c/Users/me/repo-feature\nHEAD def456\nbranch refs/heads/feature/test\nsparse\n\n'
+        'worktree /mnt/c/Users/me/repo-feature\nHEAD def456\nbranch refs/heads/feature/test\n\n'
     })
     translateWslOutputPathsMock.mockImplementation((output: string) =>
       output
@@ -138,7 +138,6 @@ describe('listWorktrees', () => {
         head: 'def456',
         branch: 'refs/heads/feature/test',
         isBare: false,
-        isSparse: true,
         isMainWorktree: false
       }
     ])
@@ -152,6 +151,9 @@ describe('listWorktrees', () => {
       'C:\\Users\\me\\repo',
       { wslDistro: 'Ubuntu' }
     )
+    expect(resolveGitDirMock).toHaveBeenCalledWith('C:\\Users\\me\\repo-feature', {
+      wslDistro: 'Ubuntu'
+    })
   })
 
   it('returns no worktrees when the repo path is gone', async () => {
@@ -243,11 +245,61 @@ describe('listWorktrees', () => {
         isMainWorktree: false
       }
     ])
-    expect(resolveGitDirMock).toHaveBeenCalledWith(featureWorktreePath)
+    expect(resolveGitDirMock).toHaveBeenCalledWith(featureWorktreePath, {})
     // Why: the detection path must not spawn a git subprocess per worktree —
     // the perf regression in #1131 came from `git sparse-checkout list` firing
     // on every poll.
     expect(getGitCalls()).toEqual(['git worktree list --porcelain -z'])
+  })
+
+  it('translates an absolute WSL commondir before reading sparse config', async () => {
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+    try {
+      const worktreePath = String.raw`C:\Users\me\repo-feature`
+      const gitDir = String.raw`C:\repo\.git\worktrees\feature`
+      gitExecFileAsyncMock.mockResolvedValueOnce({
+        stdout:
+          'worktree /mnt/c/Users/me/repo-feature\n' +
+          'HEAD def456\nbranch refs/heads/feature/test\n\n'
+      })
+      translateWslOutputPathsMock.mockImplementation((output: string) =>
+        output.replace('/mnt/c/Users/me/repo-feature', worktreePath)
+      )
+      resolveGitDirMock.mockResolvedValue(gitDir)
+      statMock.mockResolvedValue({ isFile: () => true, size: 32 })
+      readFileMock.mockImplementation(async (filePath: string) => {
+        const normalized = String(filePath).replaceAll('\\', '/')
+        if (normalized.endsWith('/commondir')) {
+          return '/mnt/c/repo/.git\n'
+        }
+        if (normalized === 'C:/repo/.git/config') {
+          return '[core]\nsparseCheckout = true\n'
+        }
+        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' })
+      })
+
+      const worktrees = await listWorktrees(String.raw`C:\Users\me\repo`, {
+        wslDistro: 'Ubuntu'
+      })
+
+      expect(worktrees).toEqual([
+        {
+          path: worktreePath,
+          head: 'def456',
+          branch: 'refs/heads/feature/test',
+          isBare: false,
+          isSparse: true,
+          isMainWorktree: true
+        }
+      ])
+      expect(readFileMock).toHaveBeenCalledWith(String.raw`C:\repo\.git/config`, 'utf-8')
+      expect(readFileMock).not.toHaveBeenCalledWith('/mnt/c/repo/.git/config', 'utf-8')
+    } finally {
+      if (originalPlatform) {
+        Object.defineProperty(process, 'platform', originalPlatform)
+      }
+    }
   })
 
   it('bounds concurrent sparse-checkout filesystem probes', async () => {

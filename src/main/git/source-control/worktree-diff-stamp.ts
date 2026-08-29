@@ -1,5 +1,7 @@
 import { readFile, stat } from 'node:fs/promises'
 import * as path from 'node:path'
+import type { GitRuntimeOptions } from '../git-runtime-options'
+import { resolveGitMetadataPath } from '../git-metadata-path'
 import { resolveGitDir } from './resolve-git-dir'
 
 /**
@@ -68,13 +70,17 @@ export function isDiffStampClockSkewed(stamp: WorktreeDiffStamp): boolean {
 export async function readWorktreeDiffStamp(
   worktreePath: string,
   filePath: string,
-  includeWorkingTree: boolean
+  includeWorkingTree: boolean,
+  options: Pick<GitRuntimeOptions, 'wslDistro'> = {}
 ): Promise<WorktreeDiffStamp | null> {
   const capturedAtMs = Date.now()
   try {
-    const gitDir = await resolveGitDir(worktreePath)
+    const gitDir = await resolveGitDir(worktreePath, options)
+    if (!gitDir) {
+      return null
+    }
     const [head, index, gitmodules, workingTree] = await Promise.all([
-      readHeadComponent(gitDir),
+      readHeadComponent(gitDir, options),
       // Over-invalidates on purpose: git run outside Orca (a terminal `git status`/`git add`)
       // can refresh a stat-dirty index and rewrite this file without changing a single blob,
       // which costs one re-read. That is the safe direction — do not "fix" it by dropping the
@@ -115,7 +121,10 @@ export async function readWorktreeDiffStamp(
  * branch — does this fall back to the coarser stamps of the files a packed tip
  * moves, and the recorded "no loose ref" marker still catches the ref appearing.
  */
-async function readHeadComponent(gitDir: string): Promise<StampComponent | null> {
+async function readHeadComponent(
+  gitDir: string,
+  options: Pick<GitRuntimeOptions, 'wslDistro'>
+): Promise<StampComponent | null> {
   const [head, commonDirEntry] = await Promise.all([
     readTrimmedFile(path.join(gitDir, 'HEAD')),
     readTrimmedFile(path.join(gitDir, 'commondir'))
@@ -123,7 +132,12 @@ async function readHeadComponent(gitDir: string): Promise<StampComponent | null>
   if (!head) {
     return null
   }
-  const commonDir = commonDirEntry ? path.resolve(gitDir, commonDirEntry) : gitDir
+  const commonDir = commonDirEntry
+    ? resolveGitMetadataPath(gitDir, commonDirEntry, options)
+    : gitDir
+  if (!commonDir) {
+    return null
+  }
   const refName = head.match(/^ref:\s*(.+?)\s*$/)?.[1]
   if (!refName || !isSafeRefName(refName)) {
     // Detached HEAD already holds the object id; an unrecognized HEAD is covered by its own text.

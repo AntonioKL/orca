@@ -1,6 +1,6 @@
 /* eslint-disable max-lines -- Why: this file keeps git worktree create/remove behavior together so local cleanup and creation invariants stay in one place. */
 import { readFile, stat } from 'node:fs/promises'
-import { isAbsolute, join, posix, resolve, win32 } from 'node:path'
+import { join, posix, win32 } from 'node:path'
 import {
   branchHasNoUnmergedChangesWithLazyTargetRefresh,
   getBranchCleanupTargetRefs
@@ -32,6 +32,7 @@ import {
   isUnsupportedWorktreeListZError
 } from '../../shared/git-worktree-command-capabilities'
 import { withLocalGitCapabilityCacheForExecution } from './git-capability-state'
+import { resolveGitMetadataPath } from './git-metadata-path'
 import { gitExecFileAsync, translateWslOutputPaths } from './runner'
 import { resolveGitDir, runWithGitReadCacheInvalidation } from './status'
 import { hasWorktreeBaseCommitRef, probeWorktreeBaseRefPresence } from './worktree-base-ref-probe'
@@ -815,7 +816,7 @@ async function listWorktreesUnshared(
 ): Promise<GitWorktreeInfo[]> {
   try {
     const worktrees = await readTranslatedWorktreeGraph(repoPath, options)
-    return annotateSparseCheckoutStatus(worktrees)
+    return annotateSparseCheckoutStatus(worktrees, options)
   } catch (err) {
     if (getErrorCode(err) === 'ENOENT') {
       try {
@@ -844,11 +845,12 @@ export async function listWorktreesStrict(
     const translatedPath = translateWorktreePath(worktree.path, repoPath, options)
     return translatedPath === worktree.path ? worktree : { ...worktree, path: translatedPath }
   })
-  return annotateSparseCheckoutStatus(worktrees)
+  return annotateSparseCheckoutStatus(worktrees, options)
 }
 
 async function annotateSparseCheckoutStatus(
-  worktrees: GitWorktreeInfo[]
+  worktrees: GitWorktreeInfo[],
+  options: GitWorktreeExecOptions
 ): Promise<GitWorktreeInfo[]> {
   const annotated = [...worktrees]
   let nextIndex = 0
@@ -861,7 +863,7 @@ async function annotateSparseCheckoutStatus(
       if (!worktree || worktree.isBare || worktree.isSparse) {
         continue
       }
-      const isSparse = await detectSparseCheckout(worktree.path)
+      const isSparse = await detectSparseCheckout(worktree.path, options)
       if (isSparse) {
         annotated[index] = { ...worktree, isSparse }
       }
@@ -1558,11 +1560,17 @@ function translateWorktreePath(
   return translated.startsWith(prefix) ? translated.slice(prefix.length) : worktreePath
 }
 
-async function detectSparseCheckout(worktreePath: string): Promise<boolean> {
+async function detectSparseCheckout(
+  worktreePath: string,
+  options: GitWorktreeExecOptions
+): Promise<boolean> {
   // Why: fs.stat the per-worktree gitdir's sparse-checkout pattern file instead of a per-poll `git sparse-checkout list` subprocess that regressed responsiveness (PR #1290);
   // this is the cheap fast-path gate before the enabled check below.
   try {
-    const gitDir = await resolveGitDir(worktreePath)
+    const gitDir = await resolveGitDir(worktreePath, options)
+    if (!gitDir) {
+      return false
+    }
     const stats = await stat(join(gitDir, 'info', 'sparse-checkout'))
     if (!stats.isFile() || stats.size === 0) {
       return false
@@ -1575,8 +1583,8 @@ async function detectSparseCheckout(worktreePath: string): Promise<boolean> {
     // sparse and show a misleading "files are not on disk" badge. This runs only for the rare
     // worktree that still has a non-empty pattern file, so it does not reintroduce the per-poll
     // subprocess fan-out PR #1290 removed, and it reads git's config files directly (no
-    // subprocess) so it stays cheap and needs no exec options.
-    return await isSparseCheckoutEnabled(gitDir)
+    // subprocess) so it stays cheap.
+    return await isSparseCheckoutEnabled(gitDir, options)
   } catch {
     return false
   }
@@ -1585,11 +1593,14 @@ async function detectSparseCheckout(worktreePath: string): Promise<boolean> {
 // Resolve the shared common gitdir for a (possibly linked) worktree gitdir. A linked worktree's
 // gitdir holds a `commondir` file pointing at the repo's main `.git`; the main worktree's gitdir
 // is itself the common dir.
-async function resolveGitCommonDir(gitDir: string): Promise<string> {
+async function resolveGitCommonDir(
+  gitDir: string,
+  options: GitWorktreeExecOptions
+): Promise<string | null> {
   try {
     const raw = (await readFile(join(gitDir, 'commondir'), 'utf-8')).trim()
     if (raw.length > 0) {
-      return isAbsolute(raw) ? raw : resolve(gitDir, raw)
+      return resolveGitMetadataPath(gitDir, raw, options)
     }
   } catch {
     // No `commondir` file: this gitdir is already the common dir.
@@ -1600,8 +1611,14 @@ async function resolveGitCommonDir(gitDir: string): Promise<string> {
 // Whether core.sparseCheckout is actually enabled for this worktree. The value can live in the
 // shared repo config or, when extensions.worktreeConfig is on, in the worktree-local
 // `config.worktree`; later files override earlier ones, matching git's config precedence.
-async function isSparseCheckoutEnabled(gitDir: string): Promise<boolean> {
-  const commonDir = await resolveGitCommonDir(gitDir)
+async function isSparseCheckoutEnabled(
+  gitDir: string,
+  options: GitWorktreeExecOptions
+): Promise<boolean> {
+  const commonDir = await resolveGitCommonDir(gitDir, options)
+  if (!commonDir) {
+    return false
+  }
   const sharedConfig = await readGitConfigText(join(commonDir, 'config'))
   const sharedFlag = parseCoreSparseCheckoutFlag(sharedConfig)
   // Git reads `config.worktree` only while extensions.worktreeConfig is on; without that gate a

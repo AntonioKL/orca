@@ -76,7 +76,7 @@ async function loadDiffThroughSettledCache(
   // lands entirely inside that window would otherwise leave the fence covering only the git read.
   const readGeneration = settledDiffCache.beginRead()
   // A staged diff compares HEAD to the index, so the working tree is not one of its inputs.
-  const stamp = await readWorktreeDiffStamp(worktreePath, filePath, !staged)
+  const stamp = await readWorktreeDiffStamp(worktreePath, filePath, !staged, options)
   const cached = settledDiffCache.get(readKey, stamp)
   if (cached) {
     return cached

@@ -4,6 +4,7 @@ import {
   isWslUncPath,
   parseWslUncPath,
   resolveWslRepoWorktreeBasePath,
+  toWindowsWslDrivePath,
   toWindowsWslPath
 } from './wsl-paths'
 
@@ -32,6 +33,15 @@ describe('wsl path helpers', () => {
     ['/mnt/C/Repo', '\\\\wsl.localhost\\Ubuntu\\mnt\\C\\Repo']
   ])('converts %s without folding case-sensitive Linux paths', (linuxPath, expected) => {
     expect(toWindowsWslPath(linuxPath, 'Ubuntu')).toBe(expected)
+  })
+
+  it('converts a drvfs path without requiring a distro', () => {
+    expect(toWindowsWslDrivePath('/mnt/c/Users/me/repo')).toBe('C:\\Users\\me\\repo')
+  })
+
+  it('rejects paths outside a lowercase drvfs mount', () => {
+    expect(toWindowsWslDrivePath('/home/me/repo')).toBeNull()
+    expect(toWindowsWslDrivePath('/mnt/C/Users/me/repo')).toBeNull()
   })
 })
 

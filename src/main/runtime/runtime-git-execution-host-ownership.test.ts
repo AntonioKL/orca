@@ -10,6 +10,7 @@ import { SSH_GIT_PROVIDER_UNAVAILABLE_MESSAGE } from '../providers/ssh-git-dispa
 const mocks = vi.hoisted(() => ({
   getSshGitProvider: vi.fn(),
   getStatus: vi.fn(),
+  detectConflictOperation: vi.fn(),
   gitFetch: vi.fn(),
   stageFile: vi.fn()
 }))
@@ -22,6 +23,7 @@ vi.mock('../providers/ssh-git-dispatch', async () => ({
 vi.mock('../git/status', async () => ({
   ...(await vi.importActual<typeof GitStatusModule>('../git/status')),
   getStatus: mocks.getStatus,
+  detectConflictOperation: mocks.detectConflictOperation,
   stageFile: mocks.stageFile
 }))
 
@@ -47,6 +49,7 @@ describe('runtime Git execution-host ownership', () => {
   beforeEach(() => {
     mocks.getSshGitProvider.mockReset().mockReturnValue(undefined)
     mocks.getStatus.mockReset()
+    mocks.detectConflictOperation.mockReset()
     mocks.gitFetch.mockReset()
     mocks.stageFile.mockReset()
   })
@@ -66,5 +69,27 @@ describe('runtime Git execution-host ownership', () => {
     expect(mocks.getStatus).not.toHaveBeenCalled()
     expect(mocks.gitFetch).not.toHaveBeenCalled()
     expect(mocks.stageFile).not.toHaveBeenCalled()
+  })
+
+  it('passes the local WSL runtime through conflict detection', async () => {
+    mocks.detectConflictOperation.mockResolvedValue('unknown')
+    const worktree = {
+      id: 'wt-1',
+      repoId: 'repo-1',
+      path: String.raw`C:\workspace\feature`
+    } as unknown as ResolvedRuntimeGitWorktree
+    const commands = new RuntimeGitCommands({
+      resolveRuntimeGitTarget: async () => ({
+        worktree,
+        localGitOptions: { wslDistro: 'Ubuntu' }
+      }),
+      getRuntimeSettings: () => ({}) as GlobalSettings
+    })
+
+    await commands.getRuntimeGitConflictOperation('id:wt-1')
+
+    expect(mocks.detectConflictOperation).toHaveBeenCalledWith(worktree.path, {
+      wslDistro: 'Ubuntu'
+    })
   })
 })

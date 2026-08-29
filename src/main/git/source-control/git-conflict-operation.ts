@@ -1,5 +1,5 @@
 import { access } from 'node:fs/promises'
-import * as path from 'node:path'
+import { posix, win32 } from 'node:path'
 import type { GitConflictOperation } from '../../../shared/git-status-types'
 import type { GitRuntimeOptions } from '../git-runtime-options'
 import { gitOptionsForWorktree } from '../git-runtime-options'
@@ -9,12 +9,19 @@ import { resolveGitDir } from './resolve-git-dir'
 
 // Why: the git-status → existsSync race can miss a transient HEAD; fall back to 'unknown' for one poll cycle.
 // Why: detect rebase from rebase-merge/ or rebase-apply/ dirs (persist all steps), not REBASE_HEAD (partial, lingers → stale badge).
-export async function detectConflictOperation(worktreePath: string): Promise<GitConflictOperation> {
-  const gitDir = await resolveGitDir(worktreePath)
-  const mergeHead = path.join(gitDir, 'MERGE_HEAD')
-  const cherryPickHead = path.join(gitDir, 'CHERRY_PICK_HEAD')
-  const rebaseMergeDir = path.join(gitDir, 'rebase-merge')
-  const rebaseApplyDir = path.join(gitDir, 'rebase-apply')
+export async function detectConflictOperation(
+  worktreePath: string,
+  options: Pick<GitRuntimeOptions, 'wslDistro'> = {}
+): Promise<GitConflictOperation> {
+  const gitDir = await resolveGitDir(worktreePath, options)
+  if (!gitDir) {
+    return 'unknown'
+  }
+  const pathOperations = process.platform === 'win32' ? win32 : posix
+  const mergeHead = pathOperations.join(gitDir, 'MERGE_HEAD')
+  const cherryPickHead = pathOperations.join(gitDir, 'CHERRY_PICK_HEAD')
+  const rebaseMergeDir = pathOperations.join(gitDir, 'rebase-merge')
+  const rebaseApplyDir = pathOperations.join(gitDir, 'rebase-apply')
 
   // Why async and concurrent: this runs on every status poll, and on a WSL/UNC git dir each
   // probe is a 9p round trip — four of them synchronously blocked the Electron main thread.

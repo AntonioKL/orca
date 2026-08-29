@@ -109,7 +109,7 @@ async function runGetStatus(
   const limit = resolveGitStatusLimit(options.limit)
 
   // Why: detectConflictOperation and git status are independent, so run them concurrently to save I/O latency.
-  const conflictPromise = detectConflictOperation(worktreePath)
+  const conflictPromise = detectConflictOperation(worktreePath, options)
   // Why: core.quotePath=false keeps non-ASCII paths as raw UTF-8, not octal escapes, so entry.path is readable and lookups match.
   const statusArgs = [
     '-c',
