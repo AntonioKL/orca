@@ -90,7 +90,7 @@ describe('NewJiraIssueCustomFields', () => {
     fireEvent.click(screen.getByRole('combobox', { name: 'Participants' }))
     await waitFor(() => expect(screen.getByText(alex.displayName)).toBeTruthy())
     fireEvent.click(screen.getByText(alex.displayName))
-    fireEvent.click(screen.getByRole('combobox', { name: 'Participants' }))
+    expect(screen.getByPlaceholderText('Search users or paste an account ID...')).toBeTruthy()
     await waitFor(() => expect(screen.getByText(blair.displayName)).toBeTruthy())
     fireEvent.click(screen.getByText(blair.displayName))
 
