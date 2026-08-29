@@ -28,7 +28,8 @@ export async function publishMultiplexInitialSnapshot(
   if (state.closed || streams.get(request.streamId) !== stream) {
     return null
   }
-  let initialOutputOverflowed = false
+  let initialOutputOverflowed =
+    process.env.ORCA_E2E_FORCE_REMOTE_TERMINAL_INITIAL_SNAPSHOT_TRUNCATED === '1'
   if (stream.pendingOutputOverflowed) {
     stream.pendingOutput.splice(0)
     stream.pendingOutputBytes = 0

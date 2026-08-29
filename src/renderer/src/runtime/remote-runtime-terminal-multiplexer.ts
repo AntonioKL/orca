@@ -913,7 +913,9 @@ class RemoteRuntimeTerminalMultiplexer {
       const target = stream.snapshotTarget
       const info = stream.snapshotInfo
       const pendingRequest = stream.pendingSnapshotRequest
-      const snapshotApplied = !stream.snapshotOverflowed && info?.truncated !== true
+      // Why: initial truncation drops retained history, but its latest-screen image is authoritative.
+      const snapshotApplied =
+        !stream.snapshotOverflowed && (target === 'initial' || info?.truncated !== true)
       const matchesPendingRequest =
         target === 'request' &&
         pendingRequest &&
