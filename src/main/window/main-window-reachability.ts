@@ -1,24 +1,39 @@
 import { screen, type BrowserWindow, type Rectangle } from 'electron'
 import { deferAppKitSceneMutation } from '../appkit-scene-mutation'
-import { MIN_WIDTH, TITLEBAR_CSS_CENTER } from './main-window-visual-lifecycle'
+import { TITLEBAR_CSS_CENTER } from './main-window-visual-lifecycle'
 
 const pendingRecoveries = new WeakSet<BrowserWindow>()
+const MIN_REACHABLE_TITLEBAR_WIDTH = 60
+const MIN_REACHABLE_TITLEBAR_HEIGHT = 16
+
+export function mainWindowBoundsHaveReachableTitlebar(bounds: Rectangle): boolean {
+  if (bounds.width <= 0 || bounds.height <= 0) {
+    return false
+  }
+  const titlebarHeight = Math.min(bounds.height, TITLEBAR_CSS_CENTER * 2)
+  try {
+    return screen.getAllDisplays().some((display) => {
+      const area = display.workArea
+      const visibleWidth = Math.max(
+        0,
+        Math.min(bounds.x + bounds.width, area.x + area.width) - Math.max(bounds.x, area.x)
+      )
+      const visibleTitlebarHeight = Math.max(
+        0,
+        Math.min(bounds.y + titlebarHeight, area.y + area.height) - Math.max(bounds.y, area.y)
+      )
+      return (
+        visibleWidth >= Math.min(MIN_REACHABLE_TITLEBAR_WIDTH, bounds.width) &&
+        visibleTitlebarHeight >= Math.min(MIN_REACHABLE_TITLEBAR_HEIGHT, titlebarHeight)
+      )
+    })
+  } catch {
+    return false
+  }
+}
 
 function hasReachableTitlebar(window: BrowserWindow): boolean {
-  const bounds = window.getBounds()
-  return screen.getAllDisplays().some((display) => {
-    const area = display.workArea
-    const visibleWidth = Math.max(
-      0,
-      Math.min(bounds.x + bounds.width, area.x + area.width) - Math.max(bounds.x, area.x)
-    )
-    const visibleTitlebarHeight = Math.max(
-      0,
-      Math.min(bounds.y + TITLEBAR_CSS_CENTER * 2, area.y + area.height) -
-        Math.max(bounds.y, area.y)
-    )
-    return visibleWidth >= MIN_WIDTH / 2 && visibleTitlebarHeight >= TITLEBAR_CSS_CENTER
-  })
+  return mainWindowBoundsHaveReachableTitlebar(window.getBounds())
 }
 
 function getRecoveryWorkArea(bounds: Rectangle): Rectangle {
@@ -95,5 +110,9 @@ export function installMainWindowReachabilityLifecycle(window: BrowserWindow): (
     screen.removeListener('display-added', recover)
     screen.removeListener('display-removed', recover)
     screen.removeListener('display-metrics-changed', recover)
+    window.removeListener('show', recover)
+    window.removeListener('restore', recover)
+    window.removeListener('unmaximize', recover)
+    window.removeListener('leave-full-screen', recover)
   }
 }

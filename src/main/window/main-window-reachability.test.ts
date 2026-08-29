@@ -63,6 +63,9 @@ function makeWindow(bounds: Rectangle): BrowserWindow & {
       eventListeners.add(listener)
       listeners.set(event, eventListeners)
     }),
+    removeListener: vi.fn((event: string, listener: () => void) =>
+      listeners.get(event)?.delete(listener)
+    ),
     setBounds
   } as unknown as BrowserWindow & {
     emitWindow: (event: string) => void
@@ -89,9 +92,21 @@ describe('main window reachability', () => {
     vi.useRealTimers()
   })
 
-  it('recognizes a main window with a reachable titlebar area', () => {
-    expect(isMainWindowReachable(makeWindow({ x: -900, y: 0, width: 1200, height: 800 }))).toBe(
-      true
+  it('preserves a side-parked window with a grabbable titlebar slice', () => {
+    const window = makeWindow({ x: -1110, y: 0, width: 1200, height: 800 })
+
+    expect(isMainWindowReachable(window)).toBe(true)
+    expect(recoverMainWindowBounds(window)).toBe(false)
+    expect(window.setBounds).not.toHaveBeenCalled()
+  })
+
+  it('preserves a top-parked window with a grabbable titlebar slice', () => {
+    expect(isMainWindowReachable(makeWindow({ x: 0, y: -20, width: 1200, height: 800 }))).toBe(true)
+  })
+
+  it('rejects a barely peeking titlebar that cannot be grabbed', () => {
+    expect(isMainWindowReachable(makeWindow({ x: -1180, y: 0, width: 1200, height: 800 }))).toBe(
+      false
     )
   })
 
@@ -146,6 +161,7 @@ describe('main window reachability', () => {
 
       dispose()
       electronMock.screen.emit(event)
+      window.emitWindow('show')
       vi.runAllTimers()
       expect(window.setBounds).toHaveBeenCalledTimes(1)
     }
