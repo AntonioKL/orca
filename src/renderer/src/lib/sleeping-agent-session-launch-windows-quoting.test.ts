@@ -71,6 +71,10 @@ const record: SleepingAgentSessionRecord = {
   worktreeId: 'wt-1',
   agent: 'codex',
   providerSession: { key: 'session_id', id: SESSION_ID },
+  // An Orca-launched agent reports the worktree as its own cwd. Stated rather than left
+  // absent so these stay quoting tests: an unknown directory would strip the bypass flag
+  // this file quotes (STA-5804).
+  agentCwd: 'C:\\Users\\neil\\repo\\feature',
   prompt: 'finish the task',
   state: 'done',
   origin: 'worktree-sleep',

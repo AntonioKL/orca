@@ -6,7 +6,8 @@ const AGENT_SUBDIRECTORY = '/repo/wt-1/packages/api'
 
 describe('agent working directory on status entries and sleeping records (STA-5804)', () => {
   it('stamps the directory the hook reported onto the sleeping record', () => {
-    const store = createTestStore({ tabs: [makeTab('tab-1')] })
+    const store = createTestStore()
+    store.setState({ tabsByWorktree: { 'wt-1': [makeTab({ id: 'tab-1', worktreeId: 'wt-1' })] } })
     const providerSession = { key: 'session_id' as const, id: 'claude-session-1' }
 
     store
@@ -26,7 +27,8 @@ describe('agent working directory on status entries and sleeping records (STA-58
   })
 
   it('leaves the directory unknown when the hook reported none', () => {
-    const store = createTestStore({ tabs: [makeTab('tab-1')] })
+    const store = createTestStore()
+    store.setState({ tabsByWorktree: { 'wt-1': [makeTab({ id: 'tab-1', worktreeId: 'wt-1' })] } })
 
     store
       .getState()
@@ -44,7 +46,8 @@ describe('agent working directory on status entries and sleeping records (STA-58
   })
 
   it('keeps the directory across later events for the same session that omit it', () => {
-    const store = createTestStore({ tabs: [makeTab('tab-1')] })
+    const store = createTestStore()
+    store.setState({ tabsByWorktree: { 'wt-1': [makeTab({ id: 'tab-1', worktreeId: 'wt-1' })] } })
     const providerSession = { key: 'session_id' as const, id: 'claude-session-1' }
 
     store
@@ -73,7 +76,8 @@ describe('agent working directory on status entries and sleeping records (STA-58
   })
 
   it('drops the directory when the pane starts a different provider session', () => {
-    const store = createTestStore({ tabs: [makeTab('tab-1')] })
+    const store = createTestStore()
+    store.setState({ tabsByWorktree: { 'wt-1': [makeTab({ id: 'tab-1', worktreeId: 'wt-1' })] } })
 
     store
       .getState()
@@ -100,7 +104,8 @@ describe('agent working directory on status entries and sleeping records (STA-58
   })
 
   it('carries a live status row directory into the record the status write derives', () => {
-    const store = createTestStore({ tabs: [makeTab('tab-1')] })
+    const store = createTestStore()
+    store.setState({ tabsByWorktree: { 'wt-1': [makeTab({ id: 'tab-1', worktreeId: 'wt-1' })] } })
     const providerSession = { key: 'session_id' as const, id: 'claude-session-1' }
 
     store
@@ -120,7 +125,8 @@ describe('agent working directory on status entries and sleeping records (STA-58
     )
   })
   it('drops the directory when a live pane switches to a different provider session', () => {
-    const store = createTestStore({ tabs: [makeTab('tab-1')] })
+    const store = createTestStore()
+    store.setState({ tabsByWorktree: { 'wt-1': [makeTab({ id: 'tab-1', worktreeId: 'wt-1' })] } })
 
     store
       .getState()
@@ -149,7 +155,8 @@ describe('agent working directory on status entries and sleeping records (STA-58
   })
 
   it('keeps the directory across a same-session status update that omits it', () => {
-    const store = createTestStore({ tabs: [makeTab('tab-1')] })
+    const store = createTestStore()
+    store.setState({ tabsByWorktree: { 'wt-1': [makeTab({ id: 'tab-1', worktreeId: 'wt-1' })] } })
     const providerSession = { key: 'session_id' as const, id: 'claude-session-1' }
 
     store

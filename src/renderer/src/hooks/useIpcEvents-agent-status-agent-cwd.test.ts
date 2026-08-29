@@ -3,6 +3,7 @@ import {
   buildStoreState,
   TAB_1_LEAF_ID,
   TAB_1_PANE_KEY,
+  type AgentStatusSetData,
   type StoreLike
 } from './ipc-events-agent-status-store-test-fixtures'
 import {
@@ -32,7 +33,7 @@ function buildTabStore(setAgentStatus: ReturnType<typeof vi.fn>): StoreLike {
   })
 }
 
-function stubSnapshotEnvironment(row: Record<string, unknown>): ReturnType<typeof vi.fn> {
+function stubSnapshotEnvironment(row: AgentStatusSetData): ReturnType<typeof vi.fn> {
   const setAgentStatus = vi.fn()
   const getSnapshot = vi.fn(() => Promise.resolve([row]))
   const storeState = buildTabStore(setAgentStatus)
