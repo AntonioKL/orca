@@ -26,6 +26,11 @@ vi.mock('@/lib/shutdown-checkpoint-failure-toast', () => ({
 }))
 
 import { showShutdownCheckpointFailureToast } from '@/lib/shutdown-checkpoint-failure-toast'
+import {
+  dispatchWindowCloseRequest,
+  registerWindowCloseGuard,
+  setWindowCloseRequestHandler
+} from '../window-close-request-coordinator'
 import { useWindowCloseRunningProcessPrompt } from './window-close-running-process-prompt'
 import { anyLocalPtyBlocksWindowClose } from './window-close-running-process-evidence'
 import { RUNNING_CLOSE_PROBE_TIMEOUT_MS } from './running-terminal-close-guard'
@@ -108,12 +113,35 @@ function installInspectProcess(inspectProcess: () => Promise<InspectionShape>): 
   }
 }
 
+/**
+ * Drives the real entry point. Why not call `proceedToNativeWindowClose` directly:
+ * the request id that fences a stale probe is advanced by the coordinator, above
+ * every branch, so a test that skips the coordinator cannot tell two requests apart
+ * and would pass on code that closes a cancelled window.
+ */
+async function requestWindowClose(isQuitting = false): Promise<void> {
+  await act(async () => {
+    await dispatchWindowCloseRequest({ isQuitting })
+    await Promise.resolve()
+  })
+}
+
 async function runWindowClose(): Promise<void> {
   await act(async () => {
-    proceed!(false)
+    await dispatchWindowCloseRequest({ isQuitting: false })
     await Promise.resolve()
     await Promise.resolve()
   })
+}
+
+/** Two overlapping close attempts: main re-sends `window:close-requested` on every one
+ *  (main-window-close-lifecycle.ts), the coordinator's `closeInFlight` is released before
+ *  the handler runs, and Terminal's re-entrancy ref only trips on dirty editors — so both
+ *  probes are live at once and the older one must not get to decide. */
+function installDeferredInspections(): ((value: InspectionShape) => void)[] {
+  const settle: ((value: InspectionShape) => void)[] = []
+  installInspectProcess(() => new Promise<InspectionShape>((resolve) => settle.push(resolve)))
+  return settle
 }
 
 function warningIsVisible(): boolean {
@@ -134,9 +162,12 @@ beforeEach(() => {
   act(() => {
     root!.render(<Harness />)
   })
+  // Terminal's registered handler, minus the branches each test installs itself.
+  setWindowCloseRequestHandler(({ isQuitting }) => proceed!(isQuitting))
 })
 
 afterEach(() => {
+  setWindowCloseRequestHandler(null)
   act(() => {
     root?.unmount()
   })
@@ -204,16 +235,6 @@ describe('window close with a degraded local process read', () => {
     expect(confirmWindowClose).not.toHaveBeenCalled()
   })
 
-  /** Two overlapping close attempts: main re-sends `window:close-requested` on every one
-   *  (main-window-close-lifecycle.ts), the coordinator's `closeInFlight` is released before
-   *  the handler runs, and Terminal's re-entrancy ref only trips on dirty editors — so both
-   *  probes are live at once and the older one must not get to decide. */
-  function installDeferredInspections(): ((value: InspectionShape) => void)[] {
-    const settle: ((value: InspectionShape) => void)[] = []
-    installInspectProcess(() => new Promise<InspectionShape>((resolve) => settle.push(resolve)))
-    return settle
-  }
-
   function clickCancel(): void {
     const cancel = [...document.querySelectorAll('button')].find(
       (button) => button.textContent?.trim() === 'Cancel'
@@ -227,11 +248,8 @@ describe('window close with a degraded local process read', () => {
   it('does not close the window on a stale probe after the user cancelled a newer one', async () => {
     const settle = installDeferredInspections()
 
-    act(() => proceed!(false))
-    act(() => proceed!(false))
-    await act(async () => {
-      await Promise.resolve()
-    })
+    await requestWindowClose()
+    await requestWindowClose()
     expect(settle).toHaveLength(2)
 
     // The newer attempt answers first and finds live work, so the warning goes up.
@@ -260,11 +278,8 @@ describe('window close with a degraded local process read', () => {
   it('does not reopen a dismissed warning when a stale probe reports live work', async () => {
     const settle = installDeferredInspections()
 
-    act(() => proceed!(false))
-    act(() => proceed!(false))
-    await act(async () => {
-      await Promise.resolve()
-    })
+    await requestWindowClose()
+    await requestWindowClose()
 
     await act(async () => {
       settle[1]!(observedLiveInspection())
@@ -290,10 +305,7 @@ describe('window close with a degraded local process read', () => {
   it('does not close the window on a probe the user cancelled out from under', async () => {
     const settle = installDeferredInspections()
 
-    act(() => proceed!(false))
-    await act(async () => {
-      await Promise.resolve()
-    })
+    await requestWindowClose()
     await act(async () => {
       settle[0]!(observedLiveInspection())
       await Promise.resolve()
@@ -303,10 +315,7 @@ describe('window close with a degraded local process read', () => {
 
     // A second attempt lands while the warning is still asking — the traffic
     // lights stay clickable under it — so its probe is the newest one.
-    act(() => proceed!(false))
-    await act(async () => {
-      await Promise.resolve()
-    })
+    await requestWindowClose()
 
     clickCancel()
     expect(warningIsVisible()).toBe(false)
@@ -326,11 +335,8 @@ describe('window close with a degraded local process read', () => {
   it('does not let an older idle probe close the window while the newer one is still asking', async () => {
     const settle = installDeferredInspections()
 
-    act(() => proceed!(false))
-    act(() => proceed!(false))
-    await act(async () => {
-      await Promise.resolve()
-    })
+    await requestWindowClose()
+    await requestWindowClose()
 
     await act(async () => {
       settle[1]!(observedLiveInspection())
@@ -363,17 +369,14 @@ describe('window close with a degraded local process read', () => {
   it('does not reopen the warning on a probe left over from before a vetoed direct close', async () => {
     const settle = installDeferredInspections()
 
-    act(() => proceed!(false))
-    await act(async () => {
-      await Promise.resolve()
-    })
+    await requestWindowClose()
     expect(settle).toHaveLength(1)
 
     // The user hits Cmd+Q while the first probe is still out. A quit never probes,
     // and the dirty-file checkpoint vetoes it, so the window simply stays open.
     const stopVetoing = vetoNextCloses()
     try {
-      act(() => proceed!(true))
+      await requestWindowClose(true)
       expect(confirmWindowClose).not.toHaveBeenCalled()
       expect(vi.mocked(showShutdownCheckpointFailureToast)).toHaveBeenCalledTimes(1)
 
@@ -393,14 +396,11 @@ describe('window close with a degraded local process read', () => {
   it('does not re-run a vetoed direct close from a probe that answers idle behind it', async () => {
     const settle = installDeferredInspections()
 
-    act(() => proceed!(false))
-    await act(async () => {
-      await Promise.resolve()
-    })
+    await requestWindowClose()
 
     const stopVetoing = vetoNextCloses()
     try {
-      act(() => proceed!(true))
+      await requestWindowClose(true)
       expect(vi.mocked(showShutdownCheckpointFailureToast)).toHaveBeenCalledTimes(1)
 
       // Why the toast count and not `confirmWindowClose`: the veto is a standing
@@ -426,7 +426,7 @@ describe('window close with a degraded local process read', () => {
   it('still closes the window directly on a quit that no checkpoint vetoes', async () => {
     installInspectProcess(async () => observedLiveInspection())
 
-    act(() => proceed!(true))
+    await requestWindowClose(true)
 
     expect(confirmWindowClose).toHaveBeenCalledTimes(1)
     expect(vi.mocked(showShutdownCheckpointFailureToast)).not.toHaveBeenCalled()
@@ -471,6 +471,24 @@ describe('Terminal.tsx routes the native window-close request through the guard'
     expect(source.slice(start, end)).toContain('proceedToNativeWindowClose(isQuitting)')
   })
 
+  it('still defers a dirty-editor close instead of probing, as the stand-in handler does', () => {
+    // Why pin the branch: the fenced-probe cases above drive a hand-written copy of
+    // this handler, and the branch that produced the bug is the one that returns
+    // WITHOUT calling proceedToNativeWindowClose. If Terminal ever probed here
+    // instead, the copy would be testing a shape Terminal no longer has.
+    const start = source.indexOf('    setWindowCloseRequestHandler(({ isQuitting }) => {')
+    const end = source.indexOf('    return () => setWindowCloseRequestHandler(null)', start)
+    const handler = source.slice(start, end)
+    const dirtyBranch = handler.slice(
+      handler.indexOf('const dirtyFiles'),
+      handler.indexOf('proceedToNativeWindowClose(isQuitting)')
+    )
+    expect(dirtyBranch).toContain('queueEditorCloseRequests(')
+    expect(dirtyBranch).toContain('return')
+    // The duplicate-quit drop is the other non-probing exit the copy reproduces.
+    expect(handler).toContain('if (windowCloseAfterDirtyRef.current) {')
+  })
+
   it('keeps the intentional-restart bypass the only unprobed close', () => {
     // Why a count: swapping the handler's call for a direct confirmWindowClose()
     // restores the silent close this file exists to prevent, and nothing else in
@@ -510,10 +528,7 @@ describe('a probe that never answers cannot hang the window close', () => {
     vi.useFakeTimers()
     try {
       installInspectProcess(() => new Promise(() => {}))
-      await act(async () => {
-        proceed!(false)
-        await Promise.resolve()
-      })
+      await requestWindowClose()
       // Why assert the not-yet state first: without it a bound of 0 would pass.
       expect(warningIsVisible()).toBe(false)
       await act(async () => {
@@ -524,5 +539,142 @@ describe('a probe that never answers cannot hang the window close', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+/**
+ * A window-close request can leave the renderer without ever reaching
+ * `proceedToNativeWindowClose` — a pre-close guard can veto it in the coordinator,
+ * and Terminal defers it behind the unsaved-changes dialog. Both end the previous
+ * attempt just as surely as a probe-taking one does, so both must be driven through
+ * the real entry point rather than through the hook's own function.
+ */
+describe('a request that never reaches the probe still ends the previous attempt', () => {
+  const unregisterGuards: (() => void)[] = []
+
+  afterEach(() => {
+    setWindowCloseRequestHandler(null)
+    unregisterGuards.splice(0).forEach((unregister) => unregister())
+  })
+
+  it('does not close the window on a probe outstanding when a guard vetoed the next request', async () => {
+    // The Settings unsaved-author-prompt guard is the real producer: it returns false
+    // when the user picks Cancel, and the coordinator then returns with the window open.
+    setWindowCloseRequestHandler(({ isQuitting }) => proceed!(isQuitting))
+    const settle = installDeferredInspections()
+
+    await requestWindowClose()
+    expect(settle).toHaveLength(1)
+
+    unregisterGuards.push(registerWindowCloseGuard(() => false))
+    await requestWindowClose()
+    // The vetoed request never reached the handler, so no second probe exists.
+    expect(settle).toHaveLength(1)
+
+    await act(async () => {
+      settle[0]!(observedIdleInspection())
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(
+      confirmWindowClose,
+      'a probe from a request the user has since vetoed must not close the window'
+    ).not.toHaveBeenCalled()
+  })
+
+  /**
+   * Terminal's registered handler in miniature: the three branches it takes before
+   * the probe, plus the unsaved-changes Cancel that abandons the deferred close.
+   * Pinned against the real source below so it cannot drift into a shape Terminal
+   * does not have.
+   */
+  function installTerminalShapedHandler(): {
+    setDirty: (dirty: boolean) => void
+    cancelUnsavedChangesDialog: () => void
+  } {
+    let dirty = false
+    let windowCloseAfterDirty: { isQuitting: boolean } | null = null
+    setWindowCloseRequestHandler(({ isQuitting }) => {
+      if (windowCloseAfterDirty) {
+        return
+      }
+      if (dirty) {
+        windowCloseAfterDirty = { isQuitting }
+        return
+      }
+      proceed!(isQuitting)
+    })
+    return {
+      setDirty: (next) => {
+        dirty = next
+      },
+      cancelUnsavedChangesDialog: () => {
+        windowCloseAfterDirty = null
+      }
+    }
+  }
+
+  it('does not close the window on a probe outstanding when the user cancelled a deferred close', async () => {
+    const terminal = installTerminalShapedHandler()
+    const settle = installDeferredInspections()
+
+    await requestWindowClose()
+    expect(settle).toHaveLength(1)
+
+    // The user edits a file while the probe is still out, then closes again: the
+    // unsaved-changes dialog takes the request, so it never reaches the probe.
+    terminal.setDirty(true)
+    await requestWindowClose()
+    expect(settle).toHaveLength(1)
+
+    terminal.cancelUnsavedChangesDialog()
+
+    await act(async () => {
+      settle[0]!(observedIdleInspection())
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(
+      confirmWindowClose,
+      'a probe from a close the user cancelled at the unsaved-changes dialog must not close the window'
+    ).not.toHaveBeenCalled()
+  })
+
+  it('does not close the window on a probe outstanding when a duplicate request was ignored', async () => {
+    const terminal = installTerminalShapedHandler()
+    const settle = installDeferredInspections()
+
+    await requestWindowClose()
+    terminal.setDirty(true)
+    await requestWindowClose()
+    // Terminal drops a third request while a deferred one is pending; the user has
+    // still asked again, and the first attempt's probe is still stale.
+    await requestWindowClose()
+    terminal.cancelUnsavedChangesDialog()
+
+    await act(async () => {
+      settle[0]!(observedIdleInspection())
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(confirmWindowClose).not.toHaveBeenCalled()
+  })
+
+  it('still closes the window when nothing superseded the request', async () => {
+    // Polarity control: the fence must not swallow the ordinary close.
+    setWindowCloseRequestHandler(({ isQuitting }) => proceed!(isQuitting))
+    const settle = installDeferredInspections()
+
+    await requestWindowClose()
+    await act(async () => {
+      settle[0]!(observedIdleInspection())
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(confirmWindowClose).toHaveBeenCalledTimes(1)
   })
 })

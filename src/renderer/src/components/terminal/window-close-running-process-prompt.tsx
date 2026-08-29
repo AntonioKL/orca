@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type ReactElement } from 'react'
+import { useCallback, useState, type ReactElement } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -13,7 +13,11 @@ import { getConnectionId } from '@/lib/connection-context'
 import { showShutdownCheckpointFailureToast } from '@/lib/shutdown-checkpoint-failure-toast'
 import { isRemoteRuntimePtyId } from '@/runtime/runtime-terminal-inspection'
 import { useAppStore } from '@/store'
-import { runWithWindowCloseCheckpointScope } from '../window-close-request-coordinator'
+import {
+  abandonWindowCloseRequest,
+  getWindowCloseRequestSeq,
+  runWithWindowCloseCheckpointScope
+} from '../window-close-request-coordinator'
 import { anyLocalPtyBlocksWindowClose } from './window-close-running-process-evidence'
 import { RUNNING_CLOSE_PROBE_TIMEOUT_MS } from './running-terminal-close-guard'
 
@@ -31,14 +35,13 @@ export type WindowCloseRunningProcessPrompt = {
  */
 export function useWindowCloseRunningProcessPrompt(): WindowCloseRunningProcessPrompt {
   const [windowCloseDialogOpen, setWindowCloseDialogOpen] = useState(false)
-  const closeRequestSeqRef = useRef(0)
 
-  /** Ends the current attempt. Why the bump and not just the state: the newest
+  /** Ends the current attempt. Why abandon and not just close the dialog: the newest
    *  attempt is not the newest intent — a probe still outstanding when the user
    *  dismisses belongs to a close they have since called off, and letting it
    *  decide closes the window they just chose to keep. */
   const dismissWindowCloseDialog = useCallback(() => {
-    closeRequestSeqRef.current += 1
+    abandonWindowCloseRequest()
     setWindowCloseDialogOpen(false)
   }, [])
 
@@ -60,16 +63,12 @@ export function useWindowCloseRunningProcessPrompt(): WindowCloseRunningProcessP
 
   const proceedToNativeWindowClose = useCallback(
     (isQuitting: boolean) => {
-      // Why a generation and not an in-flight flag: main re-sends
-      // window:close-requested on every attempt (main-window-close-lifecycle.ts) and
-      // nothing upstream fences the probe, so two can be outstanding at once. Only the
-      // newest may decide — an older answer would reopen a dialog the user dismissed,
-      // or close the window they just chose to keep.
-      // Why at the entry and not inside the probe branch: the paths that never probe
-      // end the previous attempt just as surely. A quit whose shutdown checkpoint
-      // vetoes it returns with the window still open, and an earlier probe left
-      // current would then decide for a request that has already been answered.
-      const requestSeq = (closeRequestSeqRef.current += 1)
+      // Why read the coordinator's id rather than count attempts here: most close
+      // requests never reach this function — a pre-close guard can veto one, and
+      // Terminal defers one behind the unsaved-changes dialog — yet each of those
+      // still supersedes the attempt before it. Counting only the probing calls left
+      // an older probe current across every one of those exits.
+      const requestSeq = getWindowCloseRequestSeq()
       if (!isQuitting) {
         const state = useAppStore.getState()
         const localPtyIds = Object.entries(state.tabsByWorktree).flatMap(
@@ -91,7 +90,7 @@ export function useWindowCloseRunningProcessPrompt(): WindowCloseRunningProcessP
             localPtyIds,
             RUNNING_CLOSE_PROBE_TIMEOUT_MS
           ).then((blocked) => {
-            if (requestSeq !== closeRequestSeqRef.current) {
+            if (requestSeq !== getWindowCloseRequestSeq()) {
               return
             }
             if (blocked) {
