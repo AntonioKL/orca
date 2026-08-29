@@ -82,8 +82,16 @@ vi.mock('@/components/ui/command', async () => {
     CommandEmpty: ({ children }: { children: React.ReactNode }) => (
       <div data-command-empty="true">{children}</div>
     ),
-    CommandItem: ({ children, value }: { children: React.ReactNode; value?: string }) => (
-      <button data-command-item={value ?? ''} type="button">
+    CommandItem: ({
+      children,
+      value,
+      onSelect
+    }: {
+      children: React.ReactNode
+      value?: string
+      onSelect?: () => void
+    }) => (
+      <button data-command-item={value ?? ''} type="button" onClick={onSelect}>
         {children}
       </button>
     )
@@ -540,7 +548,7 @@ describe('WorktreeJumpPalette interleaved primary sections', () => {
     await flushEffects()
 
     // After expanding by 20: 30 worktrees are rendered, 5 more
-    const renderedItems = testContainer.querySelectorAll('[data-command-item]')
+    const renderedItems = testContainer.querySelectorAll('[data-command-item^="worktree:"]')
     expect(renderedItems).toHaveLength(30)
     expect(testContainer.textContent).toContain('5 more')
 
@@ -553,7 +561,7 @@ describe('WorktreeJumpPalette interleaved primary sections', () => {
     })
     await flushEffects()
 
-    const renderedItemsAll = testContainer.querySelectorAll('[data-command-item]')
+    const renderedItemsAll = testContainer.querySelectorAll('[data-command-item^="worktree:"]')
     expect(renderedItemsAll).toHaveLength(35)
     expect(testContainer.textContent).not.toContain('more')
   })
