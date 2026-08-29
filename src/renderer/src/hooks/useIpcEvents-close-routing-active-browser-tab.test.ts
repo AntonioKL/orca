@@ -209,6 +209,22 @@ describe('useIpcEvents Close Tab on the active browser tab', () => {
     expect(destroyWorkspaceWebviews).toHaveBeenCalled()
   })
 
+  // Why: an open-but-empty floating panel is the ambient close fallback only; a guest-forwarded
+  // source id names a main-workspace target and must not be swallowed by the panel toggle.
+  it('closes the source workspace even while an empty floating panel is visible', async () => {
+    vi.stubGlobal('document', { querySelector: () => ({}) })
+    const listenerRef: { current: CloseActiveTabListener | null } = { current: null }
+    await useIpcEventsForCloseRouting({
+      closeActiveTabListenerRef: listenerRef,
+      getState: () => activeBrowserWorkspace({})
+    })
+
+    requireListener(listenerRef)({ sourceId: 'page-1' })
+
+    expect(closeBrowserTab).toHaveBeenCalledWith('workspace-1', undefined)
+    expect(destroyWorkspaceWebviews).toHaveBeenCalled()
+  })
+
   it('no-ops on a stale source id instead of closing the ambient active tab', async () => {
     const listenerRef: { current: CloseActiveTabListener | null } = { current: null }
     await useIpcEventsForCloseRouting({

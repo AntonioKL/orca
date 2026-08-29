@@ -88,7 +88,9 @@ export function registerTabLifecycleIpcBridge(unsubs: (() => void)[]): void {
 
   unsubs.push(
     window.api.ui.onCloseActiveTab((payload) => {
-      if (isEmptyFloatingWorkspacePanelVisible()) {
+      // Why: the empty-panel toggle is the ambient fallback only. A guest-originated close names a
+      // main-workspace target, so an open-but-empty floating panel must not swallow it.
+      if (!payload?.sourceId && isEmptyFloatingWorkspacePanelVisible()) {
         window.dispatchEvent(new Event(TOGGLE_FLOATING_TERMINAL_EVENT))
         return
       }
