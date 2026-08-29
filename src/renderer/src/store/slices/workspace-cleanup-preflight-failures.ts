@@ -38,11 +38,6 @@ export function getWorkspaceCleanupMissingFailure(
  * Each message states the verdict the preflight holds now. A verdict absent from
  * the approved snapshot need not have *arisen* after the confirmation — that
  * snapshot may simply never have observed it — so no message claims it did.
- *
- * The liveness messages stay distinct from each other because the verdicts are:
- * `running-terminal` and `live-agent` are positive evidence of live work, while
- * `terminal-liveness-unknown` is loss of contact, which is never evidence that
- * anything is running.
  */
 export function getWorkspaceCleanupPostConfirmationMessage(
   candidate: WorkspaceCleanupCandidate,
@@ -60,21 +55,10 @@ export function getWorkspaceCleanupPostConfirmationMessage(
       'Workspace changed after confirmation. Refresh to review it before removing.'
     )
   }
-  if (WORKSPACE_CLEANUP_LIVE_WORK_BLOCKERS.some(added)) {
-    return translate(
-      'auto.store.slices.workspace.cleanup.liveWorkSinceConfirmation',
-      'A terminal or agent in this workspace is running. Review it before removing.'
-    )
-  }
-  // Blocks without proving risk: the confirm screen names this verdict, so a row
-  // confirmed while its terminal read idle was authorized on evidence the
-  // preflight no longer has. Deleting anyway spends consent the user never gave.
-  if (!added('terminal-liveness-unknown')) {
-    return null
-  }
-  return translate(
-    'auto.store.slices.workspace.cleanup.livenessUnverifiableSinceConfirmation',
-    "Orca cannot verify this workspace's terminals. Review it before removing."
+  return (
+    WORKSPACE_CLEANUP_POST_CONFIRMATION_VERDICTS.find(({ blockers }) =>
+      blockers.some(added)
+    )?.getMessage() ?? null
   )
 }
 
@@ -140,8 +124,47 @@ export function getWorkspaceCleanupGitUnavailableFailure(
 // Unlike unknown-base and git-status-error, these facts prove known work is at risk.
 const WORKSPACE_CLEANUP_CONCRETE_RISK_BLOCKERS = ['dirty-files', 'unpushed-commits'] as const
 
-// Kept apart from the risk blockers above on purpose: these two are positive
-// evidence that work is live, while `terminal-liveness-unknown` is the loss of
-// contact that proves nothing either way. Both invalidate a confirmation, but
-// only these may be reported to the user as running.
-const WORKSPACE_CLEANUP_LIVE_WORK_BLOCKERS = ['running-terminal', 'live-agent'] as const
+/**
+ * Verdicts that invalidate a confirmation, kept apart from the risk blockers
+ * above and from each other because each claims something different:
+ * `dirty-editor-buffer` is positive evidence of work that deleting would
+ * destroy, `running-terminal` and `live-agent` are positive evidence that work
+ * is live, and `terminal-liveness-unknown` is the loss of contact that proves
+ * nothing either way — so only the middle entry may be reported as running.
+ *
+ * Ordered by what the user would most regret: unsaved editor text is the only
+ * one of these that cannot be recreated once the worktree is deleted. A
+ * terminal can be restarted; a buffer that was never written to disk cannot.
+ */
+const WORKSPACE_CLEANUP_POST_CONFIRMATION_VERDICTS: readonly {
+  blockers: readonly WorkspaceCleanupBlocker[]
+  getMessage: () => string
+}[] = [
+  {
+    blockers: ['dirty-editor-buffer'],
+    getMessage: () =>
+      translate(
+        'auto.store.slices.workspace.cleanup.unsavedEditorSinceConfirmation',
+        'This workspace has unsaved editor changes that deleting it would discard permanently. Review it before removing.'
+      )
+  },
+  {
+    blockers: ['running-terminal', 'live-agent'],
+    getMessage: () =>
+      translate(
+        'auto.store.slices.workspace.cleanup.liveWorkSinceConfirmation',
+        'A terminal or agent in this workspace is running. Review it before removing.'
+      )
+  },
+  {
+    // Blocks without proving risk: the confirm screen names this verdict, so a
+    // row confirmed while its terminal read idle was authorized on evidence the
+    // preflight no longer has. Deleting anyway spends consent never given.
+    blockers: ['terminal-liveness-unknown'],
+    getMessage: () =>
+      translate(
+        'auto.store.slices.workspace.cleanup.livenessUnverifiableSinceConfirmation',
+        "Orca cannot verify this workspace's terminals. Review it before removing."
+      )
+  }
+]

@@ -406,6 +406,7 @@
           "cleanup": {
             "9d6e531da6": "Workspace no longer exists.",
             "changedSinceConfirmation": "Workspace changed after confirmation. Refresh to review it before removing.",
+            "unsavedEditorSinceConfirmation": "This workspace has unsaved editor changes that deleting it would discard permanently. Review it before removing.",
             "liveWorkSinceConfirmation": "A terminal or agent in this workspace is running. Review it before removing.",
             "livenessUnverifiableSinceConfirmation": "Orca cannot verify this workspace's terminals. Review it before removing.",
             "hostCollision": "Error: this workspace exists on multiple hosts at the same path",
