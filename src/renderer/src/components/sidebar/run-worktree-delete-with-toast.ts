@@ -1,11 +1,9 @@
-import { toast } from 'sonner'
 import { useAppStore } from '@/store'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
-import { translate } from '@/i18n/i18n'
 import type { WorktreeRemovalTarget } from '../../../../shared/worktree/removal'
 import { prepareActiveWorktreeFocusAfterDelete } from './active-worktree-focus-after-delete'
 import { showDeleteWorktreeFailureToast } from './delete-worktree-failure-toast'
-import { getDeleteWorktreeToastCopy } from './delete-worktree-toast'
+import { showDeleteWorktreeErrorToast } from './show-delete-worktree-error-toast'
 import type { WorktreeDeleteWithToastOptions } from './worktree-delete-request'
 import { getDeleteStateForWorktreeHost } from './worktree-delete-state-host-match'
 
@@ -86,47 +84,24 @@ export function runWorktreeDeleteWithToast(
           forceRemoval
             .then((forceResult) => {
               if (!forceResult.ok) {
-                toast.error(
-                  translate(
-                    'auto.components.sidebar.delete.worktree.flow.4f3876c0f5',
-                    'Force delete failed'
-                  ),
-                  {
-                    // Why (STA-4895): this retry renders its own toast, so without the shared
-                    // funnel the main process's English hint reaches the user verbatim.
-                    description: getDeleteWorktreeToastCopy(worktreeName, null, forceResult.error)
-                      .description,
-                    action: {
-                      label: translate(
-                        'auto.components.sidebar.delete.worktree.flow.7488ed8711',
-                        'View'
-                      ),
-                      onClick: () => viewWorktreeDiff(worktreeId, target.executionHostId)
-                    }
-                  }
-                )
+                showDeleteWorktreeErrorToast({
+                  error: forceResult.error,
+                  kind: 'force-delete',
+                  onViewChanges: () => viewWorktreeDiff(worktreeId, target.executionHostId),
+                  worktreeName
+                })
                 return
               }
               commitForceFocus()
               options.onForceDeleted?.(target)
             })
             .catch((err: unknown) => {
-              toast.error(
-                translate(
-                  'auto.components.sidebar.delete.worktree.flow.ae57cbf6e4',
-                  'Failed to delete workspace'
-                ),
-                {
-                  description: err instanceof Error ? err.message : String(err),
-                  action: {
-                    label: translate(
-                      'auto.components.sidebar.delete.worktree.flow.7488ed8711',
-                      'View'
-                    ),
-                    onClick: () => viewWorktreeDiff(worktreeId, target.executionHostId)
-                  }
-                }
-              )
+              showDeleteWorktreeErrorToast({
+                error: err,
+                kind: 'delete',
+                onViewChanges: () => viewWorktreeDiff(worktreeId, target.executionHostId),
+                worktreeName
+              })
             })
         },
         worktreeId,
@@ -135,13 +110,7 @@ export function runWorktreeDeleteWithToast(
       return false
     })
     .catch((err: unknown) => {
-      toast.error(
-        translate(
-          'auto.components.sidebar.delete.worktree.flow.ae57cbf6e4',
-          'Failed to delete workspace'
-        ),
-        { description: err instanceof Error ? err.message : String(err) }
-      )
+      showDeleteWorktreeErrorToast({ error: err, kind: 'delete', worktreeName })
       return false
     })
 }

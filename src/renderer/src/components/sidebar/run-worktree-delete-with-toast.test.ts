@@ -66,6 +66,39 @@ describe('runWorktreeDeleteWithToast force-delete retry', () => {
     expect(description).not.toContain('EBUSY')
   })
 
+  it('funnels a rejected force-delete retry before rendering its error', async () => {
+    removeWorktree.mockResolvedValueOnce({ ok: false, error: 'dirty' })
+    await runWorktreeDeleteWithToast(
+      { id: 'repo-1::/ws/feature', executionHostId: null },
+      'feature'
+    )
+
+    removeWorktree.mockRejectedValueOnce(new Error(HELD_ERROR))
+    capturedForceHandlers[0]?.()
+    await vi.waitFor(() => expect(toastError).toHaveBeenCalled())
+
+    const description = (toastError.mock.calls[0]?.[1] as { description?: string })?.description
+    expect(description).toBe(
+      translate('auto.components.sidebar.delete.worktree.toast.workspaceDirectoryHeld', 'MISSING')
+    )
+    expect(description).not.toContain('EBUSY')
+  })
+
+  it('funnels a rejected initial delete before rendering its error', async () => {
+    removeWorktree.mockRejectedValueOnce(new Error(HELD_ERROR))
+
+    await runWorktreeDeleteWithToast(
+      { id: 'repo-1::/ws/feature', executionHostId: null },
+      'feature'
+    )
+
+    const description = (toastError.mock.calls[0]?.[1] as { description?: string })?.description
+    expect(description).toBe(
+      translate('auto.components.sidebar.delete.worktree.toast.workspaceDirectoryHeld', 'MISSING')
+    )
+    expect(description).not.toContain('EBUSY')
+  })
+
   it('still shows the raw failure for errors with no dedicated copy', async () => {
     removeWorktree.mockResolvedValueOnce({ ok: false, error: 'dirty' })
     await runWorktreeDeleteWithToast(
