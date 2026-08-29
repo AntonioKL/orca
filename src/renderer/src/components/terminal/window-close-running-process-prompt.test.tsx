@@ -10,6 +10,7 @@ import {
   type PtyProcessInspectionEvidence
 } from '../../../../shared/pty-process-inspection-evidence'
 import { PTY_SESSION_ID_SEPARATOR } from '../../../../shared/pty-session-id-format'
+import { toRemoteRuntimePtyId } from '../../../../shared/remote-runtime-pty-id'
 import type { AppState } from '@/store/types'
 
 /**
@@ -41,6 +42,15 @@ const LOCAL_WORKTREE_ID = 'repo-local::/home/dev/work'
  *  no execution host, which is the whole point of the daemon case below. */
 const DAEMON_PTY_ID = `${LOCAL_WORKTREE_ID}${PTY_SESSION_ID_SEPARATOR}a1b2c3d4`
 const SSH_WORKTREE_ID = 'repo-ssh::/srv/work'
+/** Minted by the real encoder rather than spelled `remote:…` here, so the fixture
+ *  tracks `isRemoteRuntimePtyId` instead of a copy of its prefix. Bound to the LOCAL
+ *  worktree on purpose: its repo resolves to no connection, so the SSH skip cannot be
+ *  what keeps this pane out and the runtime exclusion is the only thing under test. */
+const RUNTIME_PTY_ID = toRemoteRuntimePtyId('terminal-1', 'runtime-env-1')
+/** The owner-less encoding the same minter produces for a legacy binding, which
+ *  `updateTabPtyId` still writes as `legacyRemotePtyId`. Both forms must be excluded:
+ *  a filter that only recognised the owner-bearing one would let this pane through. */
+const LEGACY_RUNTIME_PTY_ID = toRemoteRuntimePtyId('terminal-legacy')
 const SHELL = 'zsh'
 
 /**
@@ -910,5 +920,60 @@ describe('quit with local terminals', () => {
     expect(inspectProcess).toHaveBeenCalledWith(PTY_ID)
     expect(warningIsVisible()).toBe(true)
     expect(confirmWindowClose).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * Runtime-environment panes run on a host this window is only a viewer of and outlive
+ * it by design, so the close must neither probe nor warn about them. The exclusion was
+ * carried through three refactors with nothing asserting it: every case above binds
+ * only local, SSH or daemon ids, so removing the filter outright changed no result.
+ */
+describe('window close with a runtime-environment pane', () => {
+  it('closes silently without probing a window whose only pane runs on a runtime host', async () => {
+    getStateMock.mockReturnValue(storeStateWithPtys({ [LOCAL_WORKTREE_ID]: [RUNTIME_PTY_ID] }))
+    const inspectProcess = installInspectProcess(async () => observedLiveInspection())
+
+    await runWindowClose()
+
+    expect(inspectProcess).not.toHaveBeenCalled()
+    expect(warningIsVisible()).toBe(false)
+    expect(confirmWindowClose).toHaveBeenCalledTimes(1)
+  })
+
+  /** The single-pane case alone passes for a guard that drops every pane. This one
+   *  fails unless the local pane is still probed and the runtime pane still is not. */
+  it('probes only the local pane of a window that also holds a runtime pane', async () => {
+    getStateMock.mockReturnValue(
+      storeStateWithPtys({
+        [LOCAL_WORKTREE_ID]: [PTY_ID, RUNTIME_PTY_ID, LEGACY_RUNTIME_PTY_ID]
+      })
+    )
+    const inspectProcess = installInspectProcess(async () => observedIdleInspection())
+
+    await runWindowClose()
+
+    expect(inspectProcess.mock.calls.map(([ptyId]) => ptyId)).toEqual([PTY_ID])
+    expect(confirmWindowClose).toHaveBeenCalledTimes(1)
+  })
+
+  /** Live work on the runtime host must not raise the warning: it is not work this
+   *  window ends. Without the exclusion this is the case that prompts on every close. */
+  it('does not warn about live work on the runtime host', async () => {
+    getStateMock.mockReturnValue(
+      storeStateWithPtys({
+        [LOCAL_WORKTREE_ID]: [PTY_ID, RUNTIME_PTY_ID, LEGACY_RUNTIME_PTY_ID]
+      })
+    )
+    installInspectProcess(async (ptyId) =>
+      ptyId === RUNTIME_PTY_ID || ptyId === LEGACY_RUNTIME_PTY_ID
+        ? observedLiveInspection()
+        : observedIdleInspection()
+    )
+
+    await runWindowClose()
+
+    expect(warningIsVisible()).toBe(false)
+    expect(confirmWindowClose).toHaveBeenCalledTimes(1)
   })
 })
