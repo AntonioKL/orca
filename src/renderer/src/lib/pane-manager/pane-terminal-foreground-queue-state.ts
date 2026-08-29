@@ -4,7 +4,7 @@ import {
   type QueueEntry,
   type TerminalOutputTarget,
   type WriteTerminalOutputOptions
-} from './pane-terminal-output-scheduler'
+} from './pane-terminal-output-queue-registry'
 
 const DEFAULT_FOREGROUND_COALESCE_DELAY_MS = 1000
 export const FOREGROUND_HOLD_SAFETY_DELAY_MS = 250
