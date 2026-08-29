@@ -156,7 +156,12 @@ async function run() {
     guest = attached
   })
   await host.loadFile(config.hostPath)
-  await waitFor(() => guest !== null && !guest.isLoading(), 'the guest webview to settle')
+  // Why the URL and not just isLoading(): an attached guest reads as idle in the gap before its
+  // src starts loading, and measuring there would read an empty document instead of the guest.
+  await waitFor(
+    () => guest !== null && !guest.isLoading() && guest.getURL().endsWith('guest.html'),
+    'the guest webview to load its document'
+  )
 
   const out = {}
   out.native = await guest.executeJavaScript(config.measureSource)
