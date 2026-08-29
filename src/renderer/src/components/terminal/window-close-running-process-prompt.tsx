@@ -60,6 +60,16 @@ export function useWindowCloseRunningProcessPrompt(): WindowCloseRunningProcessP
 
   const proceedToNativeWindowClose = useCallback(
     (isQuitting: boolean) => {
+      // Why a generation and not an in-flight flag: main re-sends
+      // window:close-requested on every attempt (main-window-close-lifecycle.ts) and
+      // nothing upstream fences the probe, so two can be outstanding at once. Only the
+      // newest may decide — an older answer would reopen a dialog the user dismissed,
+      // or close the window they just chose to keep.
+      // Why at the entry and not inside the probe branch: the paths that never probe
+      // end the previous attempt just as surely. A quit whose shutdown checkpoint
+      // vetoes it returns with the window still open, and an earlier probe left
+      // current would then decide for a request that has already been answered.
+      const requestSeq = (closeRequestSeqRef.current += 1)
       if (!isQuitting) {
         const state = useAppStore.getState()
         const localPtyIds = Object.entries(state.tabsByWorktree).flatMap(
@@ -76,12 +86,6 @@ export function useWindowCloseRunningProcessPrompt(): WindowCloseRunningProcessP
         if (localPtyIds.length > 0) {
           // Why the same bound as the tab and pane close paths: an unanswered probe
           // must not leave the window silently stuck (#10142).
-          // Why a generation and not an in-flight flag: main re-sends
-          // window:close-requested on every attempt (main-window-close-lifecycle.ts) and
-          // nothing upstream fences the probe, so two can be outstanding at once. Only the
-          // newest may decide — an older answer would reopen a dialog the user dismissed,
-          // or close the window they just chose to keep.
-          const requestSeq = (closeRequestSeqRef.current += 1)
           void anyLocalPtyBlocksWindowClose(
             state.settings,
             localPtyIds,
