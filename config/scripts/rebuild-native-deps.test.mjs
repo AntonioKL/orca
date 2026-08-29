@@ -46,7 +46,7 @@ describe('rebuild-native-deps Electron install fallback', () => {
         'download attempted\n'
       )
     } finally {
-      rmSync(projectDir, { recursive: true, force: true })
+      removeTempProject(projectDir)
     }
   })
 
@@ -70,7 +70,7 @@ describe('rebuild-native-deps Electron install fallback', () => {
         'Continuing postinstall because Electron binary installation failed'
       )
     } finally {
-      rmSync(projectDir, { recursive: true, force: true })
+      removeTempProject(projectDir)
     }
   })
 
@@ -91,7 +91,7 @@ describe('rebuild-native-deps Electron install fallback', () => {
         'Continuing postinstall because Electron binary installation failed'
       )
     } finally {
-      rmSync(projectDir, { recursive: true, force: true })
+      removeTempProject(projectDir)
     }
   })
 
@@ -121,7 +121,7 @@ describe('rebuild-native-deps Electron install fallback', () => {
         'partial cleared\ndownload attempted\n'
       )
     } finally {
-      rmSync(projectDir, { recursive: true, force: true })
+      removeTempProject(projectDir)
     }
   })
 })
@@ -154,7 +154,7 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
         )
         expect(existsSync(rebuildLogPath)).toBe(false)
       } finally {
-        rmSync(projectDir, { recursive: true, force: true })
+        removeTempProject(projectDir)
       }
     }
   )
@@ -179,7 +179,7 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
       expect(readFileSync(join(runtimeDir, 'conpty.dll'), 'utf8')).toBe('conpty.dll x64')
       expect(readFileSync(join(runtimeDir, 'OpenConsole.exe'), 'utf8')).toBe('OpenConsole.exe x64')
     } finally {
-      rmSync(projectDir, { recursive: true, force: true })
+      removeTempProject(projectDir)
     }
   })
 
@@ -207,7 +207,7 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
         const rebuildCall = JSON.parse(readFileSync(rebuildLogPath, 'utf8').trim())
         expect(rebuildCall.onlyModules).toEqual(['windows-native-registry'])
       } finally {
-        rmSync(projectDir, { recursive: true, force: true })
+        removeTempProject(projectDir)
       }
     }
   )
@@ -237,7 +237,7 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
         const rebuildCall = JSON.parse(readFileSync(rebuildLogPath, 'utf8').trim())
         expect(rebuildCall.onlyModules).toEqual(['node-pty'])
       } finally {
-        rmSync(projectDir, { recursive: true, force: true })
+        removeTempProject(projectDir)
       }
     }
   )
@@ -268,7 +268,7 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
         expect(rebuildCall.ignoreModules).toEqual(['cpu-features'])
         expect(rebuildCall.force).toBe(true)
       } finally {
-        rmSync(projectDir, { recursive: true, force: true })
+        removeTempProject(projectDir)
       }
     }
   )
@@ -296,7 +296,7 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
         )
         expect(existsSync(rebuildLogPath)).toBe(false)
       } finally {
-        rmSync(projectDir, { recursive: true, force: true })
+        removeTempProject(projectDir)
       }
     }
   )
@@ -326,11 +326,30 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
         expect(rebuildCall.onlyModules).toEqual(['node-pty'])
         expect(rebuildCall.force).toBe(true)
       } finally {
-        rmSync(projectDir, { recursive: true, force: true })
+        removeTempProject(projectDir)
       }
     }
   )
 })
+
+// Why: Windows can still hold handles on a tree a just-exited child wrote, so these are the codes
+// `rm` surfaces while the release is pending rather than real teardown bugs.
+const TRANSIENT_WINDOWS_REMOVAL_CODES = new Set(['EBUSY', 'EMFILE', 'ENFILE', 'ENOTEMPTY', 'EPERM'])
+
+/** Removes a fixture tree without letting Windows teardown flakiness fail a test that already passed. */
+function removeTempProject(projectDir) {
+  try {
+    rmSync(projectDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  } catch (error) {
+    // Why: anything the retries cannot explain away is still a real failure worth surfacing.
+    if (process.platform !== 'win32' || !TRANSIENT_WINDOWS_REMOVAL_CODES.has(error?.code)) {
+      throw error
+    }
+    console.warn(
+      `rebuild-native-deps test left ${projectDir} behind after retries (${error.code}); remove it manually.`
+    )
+  }
+}
 
 function mkTempProject() {
   const projectDir = mkdtempSync(join(tmpdir(), 'orca-rebuild-native-deps-'))
