@@ -1,7 +1,7 @@
 import { net, session } from 'electron'
 import type { ProviderRateLimits, RateLimitWindow } from '../../shared/rate-limit-types'
 import { ensureElectronProxyFromEnvironment } from '../network/proxy-settings'
-import { createOAuthUsageError } from './claude-oauth-usage-error'
+import { createOAuthUsageError, OAuthUsageUnreadableError } from './claude-oauth-usage-error'
 import { mapClaudeUsageWindow, type ClaudeUsageWindowInput } from './claude-usage-window'
 import { abortedClaudeRateLimitResult } from './claude-usage-result'
 
@@ -52,6 +52,28 @@ function mapFableWeeklyWindow(data: OAuthUsageResponse): RateLimitWindow | null 
   )
 }
 
+const USAGE_RESPONSE_KEYS = [
+  'five_hour',
+  'seven_day',
+  'fable_weekly',
+  'fable_seven_day',
+  'seven_day_fable',
+  'limits'
+] as const
+
+// Why: an unreadable 200 maps to the same nulls a genuinely empty account would, and the stale
+// policy writes an `ok` straight over the last real usage — so no-window is never a success here.
+// The first two shapes are provably unreadable; the third is the case Orca cannot tell apart from
+// an account that truly has no window, and a failed read is the only non-destructive reading of it.
+function describeUnreadableUsageResponse(data: unknown): string {
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+    return 'Claude usage response was not a usage reading'
+  }
+  return USAGE_RESPONSE_KEYS.some((key) => key in data)
+    ? 'Claude usage response had a usage field Orca could not read'
+    : 'Claude usage response contained no usage window'
+}
+
 export async function fetchClaudeOAuthUsage(
   token: string,
   signal?: AbortSignal
@@ -85,11 +107,17 @@ export async function fetchClaudeOAuthUsage(
     if (signal?.aborted) {
       return abortedClaudeRateLimitResult()
     }
+    const session = mapClaudeUsageWindow(data.five_hour, 300)
+    const weekly = mapClaudeUsageWindow(data.seven_day, 10080)
+    const fableWeekly = mapFableWeeklyWindow(data)
+    if (!session && !weekly && !fableWeekly) {
+      throw new OAuthUsageUnreadableError(describeUnreadableUsageResponse(data))
+    }
     return {
       provider: 'claude',
-      session: mapClaudeUsageWindow(data.five_hour, 300),
-      weekly: mapClaudeUsageWindow(data.seven_day, 10080),
-      fableWeekly: mapFableWeeklyWindow(data),
+      session,
+      weekly,
+      fableWeekly,
       updatedAt: Date.now(),
       error: null,
       status: 'ok'

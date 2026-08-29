@@ -212,10 +212,12 @@ async function fetchBillingData(
     }
   }
   const data: unknown = await res.json()
-  return {
-    kind: 'data',
-    data: typeof data === 'object' && data !== null ? (data as GrokBillingResponse) : {}
+  // Why: coercing an unreadable body to {} sent it down the "this plan has no credits" road, and
+  // that answer is 'unavailable' — which discards the last good snapshot and hides the chip.
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+    return { kind: 'result', result: result('error', 'Grok billing response could not be read') }
   }
+  return { kind: 'data', data: data as GrokBillingResponse }
 }
 
 type GrokMonthlyFallbackOutcome =
