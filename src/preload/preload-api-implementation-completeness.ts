@@ -20,12 +20,28 @@ type AssertNoMissingMembers<Missing extends never> = Missing
 
 type UnimplementedGroups = Exclude<keyof PreloadApi, keyof PreloadApiImplementation>
 
-type UnimplementedMembers = {
-  [Group in keyof PreloadApi & keyof PreloadApiImplementation]: Exclude<
-    keyof PreloadApi[Group],
-    keyof PreloadApiImplementation[Group]
-  >
-}[keyof PreloadApi & keyof PreloadApiImplementation]
+type ObjectMembers<T> = T extends object
+  ? T extends (...args: never[]) => unknown
+    ? never
+    : T
+  : never
+
+/** Recurses through nested API records while treating callable leaves as terminals. */
+type UnimplementedMembers<Expected, Actual, Prefix extends string = ''> =
+  | `${Prefix}${Extract<Exclude<keyof Expected, keyof Actual>, string>}`
+  | {
+      [Key in keyof Expected & keyof Actual]: ObjectMembers<Expected[Key]> extends never
+        ? never
+        : ObjectMembers<Actual[Key]> extends never
+          ? `${Prefix}${Extract<Key, string>}`
+          : UnimplementedMembers<
+              ObjectMembers<Expected[Key]>,
+              ObjectMembers<Actual[Key]>,
+              `${Prefix}${Extract<Key, string>}.`
+            >
+    }[keyof Expected & keyof Actual]
 
 export type PreloadApiGroupsAreImplemented = AssertNoMissingMembers<UnimplementedGroups>
-export type PreloadApiMembersAreImplemented = AssertNoMissingMembers<UnimplementedMembers>
+export type PreloadApiMembersAreImplemented = AssertNoMissingMembers<
+  UnimplementedMembers<PreloadApi, PreloadApiImplementation>
+>
