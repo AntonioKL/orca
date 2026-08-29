@@ -233,6 +233,22 @@ describe('pre-handler PTY buffer', () => {
     expect(data).toHaveBeenCalledWith('startup bytes', undefined)
   })
 
+  // A buffer can hold both owners' bytes: the dead shell's output is still queued when our own
+  // first chunk arrives while the spawn reply is in flight. Dating the buffer by its newest chunk
+  // makes that one chunk of ours vouch for all of them, and the new terminal opens showing the
+  // dead PTY's output above its own.
+  it("keeps only our own bytes when a recycled id's buffer holds both owners' output", () => {
+    bufferPreHandlerPtyData(RECYCLED_PTY_ID, 'output from the dead shell')
+    const fence = currentPreHandlerPtySequence()
+    bufferPreHandlerPtyData(RECYCLED_PTY_ID, 'our startup bytes')
+
+    discardPreHandlerPtyStateFromPriorIncarnation(RECYCLED_PTY_ID, fence)
+
+    const seen: string[] = []
+    drainPreHandlerPtyData(RECYCLED_PTY_ID, (data) => seen.push(data))
+    expect(seen).toEqual(['our startup bytes'])
+  })
+
   // The case the sequence fence structurally cannot reach: the stale exit is recorded AFTER the
   // renderer asked for a fresh PTY, so it is newer than the fence and passes it. Only the
   // incarnation says the exit describes a lifetime of the id that ended before this one began.

@@ -5,6 +5,8 @@ import type { PtyDataMeta } from './pty-dispatcher'
 type BufferedPreHandlerPtyData = {
   data: string
   bytes: number
+  /** Dates this chunk, so the fence can drop a prior incarnation's bytes without taking ours. */
+  sequence: number
   meta?: PtyDataMeta
 }
 
@@ -12,8 +14,6 @@ type BufferedPreHandlerPtyState = {
   chunks: BufferedPreHandlerPtyData[]
   head: number
   bytes: number
-  /** Sequence of the newest chunk, used to fence state left by a prior incarnation of a reused id. */
-  sequence: number
 }
 
 type BufferedPreHandlerPtyExit = {
@@ -121,6 +121,29 @@ function retainPreHandlerPtyExits(
   preHandlerPtyExit.set(ptyId, kept)
 }
 
+function retainPreHandlerPtyChunks(
+  ptyId: string,
+  keep: (chunk: BufferedPreHandlerPtyData) => boolean
+): void {
+  const state = preHandlerPtyData.get(ptyId)
+  if (!state) {
+    return
+  }
+  // Slots below `head` are already-released placeholders, so they are dropped either way.
+  const kept = state.chunks.slice(state.head).filter(keep)
+  if (kept.length === state.chunks.length - state.head) {
+    return
+  }
+  if (kept.length === 0) {
+    preHandlerPtyData.delete(ptyId)
+    warnedLostHandlerPtyIds.delete(ptyId)
+    return
+  }
+  state.chunks = kept
+  state.head = 0
+  state.bytes = kept.reduce((total, chunk) => total + chunk.bytes, 0)
+}
+
 export function bufferPreHandlerPtyData(ptyId: string, data: string, meta?: PtyDataMeta): void {
   if (discardedPreHandlerPtyStates.has(ptyId)) {
     return
@@ -136,13 +159,13 @@ export function bufferPreHandlerPtyData(ptyId: string, data: string, meta?: PtyD
       : meta
   let state = preHandlerPtyData.get(ptyId)
   if (!state) {
-    state = { chunks: [], head: 0, bytes: 0, sequence: 0 }
+    state = { chunks: [], head: 0, bytes: 0 }
     preHandlerPtyData.set(ptyId, state)
   }
-  state.sequence = nextPreHandlerPtySequence()
   state.chunks.push({
     data: chunk.data,
     bytes: chunk.bytes,
+    sequence: nextPreHandlerPtySequence(),
     ...(bufferedMeta ? { meta: bufferedMeta } : {})
   })
   state.bytes += chunk.bytes
@@ -150,7 +173,7 @@ export function bufferPreHandlerPtyData(ptyId: string, data: string, meta?: PtyD
   // and head index keep that failure path linear instead of rescanning/shifting.
   while (state.bytes > PRE_HANDLER_PTY_DATA_MAX_BYTES && state.head < state.chunks.length - 1) {
     state.bytes -= state.chunks[state.head].bytes
-    state.chunks[state.head] = { data: '', bytes: 0 }
+    state.chunks[state.head] = { ...state.chunks[state.head], data: '', bytes: 0 }
     state.head += 1
   }
   if (state.head > 0 && state.head * 2 >= state.chunks.length) {
@@ -232,6 +255,8 @@ export function bufferPreHandlerPtyExit(
  *  was recorded when this PTY did not yet exist and cannot describe it. Bytes and exits recorded
  *  after the fence are kept: that is the real pre-attach race (a shell that dies instantly, or
  *  writes before the pane registers its handler) and losing it would blank a legitimate pane.
+ *  Bytes are judged one chunk at a time, because a buffer can hold both owners' output: our first
+ *  chunk arriving while the spawn reply is still in flight must not carry the dead PTY's along.
  *
  *  Still needed alongside `discardPreHandlerPtyExitFromForeignIncarnation`, which supersedes it
  *  wherever both sides name an incarnation. Two cases have none to compare and rest on the fence
@@ -243,11 +268,7 @@ export function discardPreHandlerPtyStateFromPriorIncarnation(
   fenceSequence: number
 ): void {
   retainPreHandlerPtyExits(ptyId, (exit) => exit.sequence > fenceSequence)
-  const data = preHandlerPtyData.get(ptyId)
-  if (data && data.sequence <= fenceSequence) {
-    preHandlerPtyData.delete(ptyId)
-    warnedLostHandlerPtyIds.delete(ptyId)
-  }
+  retainPreHandlerPtyChunks(ptyId, (chunk) => chunk.sequence > fenceSequence)
   // Why: the id now names a different, live PTY, so a prior incarnation's consumed/discarded marks
   // must not suppress this one's own exit — the same admission boundary a same-id reattach gets.
   clearConsumedPreHandlerPtyExit(ptyId)
