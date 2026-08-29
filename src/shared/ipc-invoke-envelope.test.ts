@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { stripIpcInvokeEnvelope, stripIpcInvokeEnvelopeFrom } from './ipc-invoke-envelope'
+import {
+  stripErrorClassPrefix,
+  stripIpcInvokeEnvelope,
+  stripIpcInvokeEnvelopeFrom
+} from './ipc-invoke-envelope'
 
 describe('stripIpcInvokeEnvelope', () => {
   it('returns the reason behind the invoke envelope', () => {
@@ -78,5 +82,35 @@ describe('stripIpcInvokeEnvelopeFrom', () => {
   it('returns null for a nullish rejection rather than printing "undefined"', () => {
     expect(stripIpcInvokeEnvelopeFrom(undefined)).toBeNull()
     expect(stripIpcInvokeEnvelopeFrom(null)).toBeNull()
+  })
+})
+
+describe('stripErrorClassPrefix', () => {
+  it('removes the class prefix Error.prototype.toString() writes', () => {
+    expect(stripErrorClassPrefix('Error: updater is not initialized')).toBe(
+      'updater is not initialized'
+    )
+  })
+
+  /**
+   * Why case-sensitive: the only thing this trims is `Error.prototype.toString()` output, and V8
+   * writes the constructor name, so the prefix is always exactly `Error: `. A lowercase `error: `
+   * is never that — it is the severity marker git, rpm, dpkg and pip put in front of a real
+   * reason, and eating it drops the word the user is reading the line for.
+   */
+  it('keeps a lowercase severity marker, which is a reason and not a class name', () => {
+    expect(
+      stripErrorClassPrefix("error: pathspec 'v2' did not match any file(s) known to git")
+    ).toBe("error: pathspec 'v2' did not match any file(s) known to git")
+    expect(stripErrorClassPrefix('ERROR: Could not install packages due to an OSError')).toBe(
+      'ERROR: Could not install packages due to an OSError'
+    )
+  })
+
+  it('leaves a message that carries no class prefix alone', () => {
+    expect(stripErrorClassPrefix('Access denied')).toBe('Access denied')
+    expect(stripErrorClassPrefix('Error 500: upstream unavailable')).toBe(
+      'Error 500: upstream unavailable'
+    )
   })
 })

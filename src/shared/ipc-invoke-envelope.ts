@@ -33,9 +33,14 @@ export function stripIpcInvokeEnvelope(message: string): string | null {
  * `Error.prototype.toString()` renders "Error: <message>", so a rejection that was stringified
  * rather than read through `.message` arrives with a class prefix that is not part of the reason.
  * Separate from the envelope: a message can carry this prefix without ever crossing IPC.
+ *
+ * Case-sensitive, like the class name inside `IPC_ENVELOPE` above: V8 writes the constructor
+ * name, so the prefix is always exactly `Error: `. A lowercase `error: ` is git's, rpm's and
+ * pip's severity marker in front of a real reason, and trimming it would drop the word the line
+ * is being read for.
  */
 export function stripErrorClassPrefix(text: string): string {
-  return text.replace(/^Error:[ \t]*/i, '')
+  return text.replace(/^Error:[ \t]*/, '')
 }
 
 /**

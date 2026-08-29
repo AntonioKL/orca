@@ -613,6 +613,27 @@ describe('LinuxPackageInstallRecoveryCard reveal', () => {
     // Why: a reveal failure is not a command-build failure, so the copy path must survive it.
     expect(button('Copy Install Command')).toBeTruthy()
   })
+
+  /**
+   * Why: package tooling writes its severity marker in lowercase — `error: Failed dependencies:`
+   * is rpm's own wording, not a stringified Error. Trimming it would leave the line reading as if
+   * the install had merely reported dependencies. This is the sensitivity this card had before the
+   * canonical stripper took the job over.
+   */
+  it('keeps a lowercase severity marker in the reason it shows', async () => {
+    showLinuxPackage.mockRejectedValue(
+      new Error(
+        "Error invoking remote method 'updater:showLinuxPackage': " +
+          'error: Failed dependencies: libc.so.6 is needed by orca-1.4.200'
+      )
+    )
+    renderCard()
+
+    fireEvent.click(button('Show Package'))
+    await flushActions()
+
+    expect(footnoteText()).toBe('error: Failed dependencies: libc.so.6 is needed by orca-1.4.200')
+  })
 })
 
 describe('LinuxPackageInstallRecoveryCard without a usable command', () => {
