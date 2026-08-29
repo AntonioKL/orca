@@ -14,6 +14,7 @@ const shellContractFiles = [
   'src/main/daemon/shell-ready.test.ts',
   'src/main/providers/local-pty-shell-ready-zsh-launch-environment.test.ts',
   'src/main/providers/__tests__/shell-ready-framework-example.test.ts',
+  'src/main/pty/omp-shell-wrapper.node-pty.test.ts',
   'src/main/shell-startup-feature-channel.test.ts',
   'src/main/zsh-scoped-histfile.live-shell.test.ts',
   'src/main/zsh-startup-hook-user-config-equivalence.live-shell.test.ts',
@@ -22,7 +23,6 @@ const shellContractFiles = [
 ]
 const patchedNodePtyContractFiles = [
   'src/main/daemon/node-pty-fd-leak.test.ts',
-  'src/main/pty/omp-shell-wrapper.node-pty.test.ts',
   'src/shared/fish-query-reply-child-stdin.node-pty.test.ts'
 ]
 const nativeShellContractFiles = [...shellContractFiles, ...patchedNodePtyContractFiles]
@@ -230,6 +230,23 @@ describe('PR workflow parallelism', () => {
     expect(steps[requestedNodeIndex].if).toBe("inputs.node-version != ''")
     expect(steps[requestedNodeIndex].with['node-version']).toBe('${{ inputs.node-version }}')
     expect(steps[requestedNodeIndex].with.cache).toBe('pnpm')
+  })
+
+  it('pins every direct pnpm setup to the repository package-manager version', () => {
+    const packageManagerVersion = /^pnpm@([^+]+)/.exec(packageJson.packageManager)?.[1]
+    const directSetups = globSync('.github/workflows/*.yml').flatMap((workflowPath) => {
+      const parsed = parse(readFileSync(workflowPath, 'utf8'))
+      return Object.values(parsed.jobs ?? {}).flatMap((job) =>
+        (job.steps ?? [])
+          .filter((step) => step.uses === 'pnpm/action-setup@v6')
+          .map((step) => ({ workflowPath, step }))
+      )
+    })
+
+    expect(directSetups.length).toBeGreaterThan(0)
+    for (const { workflowPath, step } of directSetups) {
+      expect(step.with?.version, workflowPath).toBe(packageManagerVersion)
+    }
   })
 
   it('restores Electron downloads before preparing the package runtime', () => {
