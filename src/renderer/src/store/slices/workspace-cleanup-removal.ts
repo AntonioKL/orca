@@ -100,11 +100,15 @@ export async function removeWorkspaceCleanupCandidates(
   }[] = []
 
   const refreshedCandidates: WorkspaceCleanupCandidate[] = []
+  const retiredIdentities = new Set<string>()
   for (const preflight of preflights) {
     if (!preflight.ok) {
       failures.push(preflight.failure)
       if (preflight.refreshedCandidate) {
         refreshedCandidates.push(preflight.refreshedCandidate)
+      }
+      if (preflight.retiredCandidateIdentity) {
+        retiredIdentities.add(preflight.retiredCandidateIdentity)
       }
       continue
     }
@@ -116,7 +120,12 @@ export async function removeWorkspaceCleanupCandidates(
         : {})
     })
   }
-  publishRefreshedWorkspaceCleanupCandidates(set, refreshedCandidates, listedRowsBeforePreflight)
+  publishRefreshedWorkspaceCleanupCandidates(
+    set,
+    refreshedCandidates,
+    retiredIdentities,
+    listedRowsBeforePreflight
+  )
   const scheduledRemovalIdentities = new Set(
     targetsToRemove.map(({ candidate }) => getWorkspaceCleanupCandidateIdentity(candidate))
   )
@@ -242,6 +251,12 @@ export async function removeWorkspaceCleanupCandidates(
  * already holds, and the delete still needs a fresh confirmation against the
  * republished row.
  *
+ * A workspace the rescan no longer lists is the same dead end with no row to
+ * republish — repeating "Workspace no longer exists" forever is not a picture
+ * the user can act on — so it is dropped instead. Both directions obey the same
+ * limit: only a row the list already holds is touched, so this can neither
+ * resurrect a workspace that is genuinely gone nor invent one it never showed.
+ *
  * `listedBeforePreflight` is what makes it disclosure rather than a regression:
  * a rescan may only replace the very row it was newer than, so a refresh the
  * user completed while the preflight ran keeps the row it published.
@@ -249,9 +264,10 @@ export async function removeWorkspaceCleanupCandidates(
 function publishRefreshedWorkspaceCleanupCandidates(
   set: (partial: (state: AppState) => Partial<AppState>) => void,
   refreshed: readonly WorkspaceCleanupCandidate[],
+  retiredIdentities: ReadonlySet<string>,
   listedBeforePreflight: ReadonlyMap<string, WorkspaceCleanupCandidate>
 ): void {
-  if (refreshed.length === 0) {
+  if (refreshed.length === 0 && retiredIdentities.size === 0) {
     return
   }
   set((state) => {
@@ -263,21 +279,27 @@ function publishRefreshedWorkspaceCleanupCandidates(
       refreshed.map((candidate) => [getWorkspaceCleanupCandidateIdentity(candidate), candidate])
     )
     let changed = false
-    const candidates = scan.candidates.map((candidate) => {
+    const candidates = scan.candidates.flatMap((candidate) => {
       const identity = getWorkspaceCleanupCandidateIdentity(candidate)
       const next = refreshedByIdentity.get(identity)
-      if (!next) {
-        return candidate
+      const retired = retiredIdentities.has(identity)
+      if (!next && !retired) {
+        return [candidate]
       }
       // Identity alone also matches a row a settled refresh swapped in behind
       // the preflight; that row is the newer read, so leave it standing.
       if (listedBeforePreflight.get(identity) !== candidate) {
-        return candidate
+        return [candidate]
       }
       changed = true
+      // A row the rescan no longer lists has no refreshed picture to show, so
+      // showing it again is the dead end; dropping it is the reconciliation.
+      if (!next) {
+        return []
+      }
       // Preflight enrichment skips dismissals so a dismissed row stays
       // removable; the published row must not lose the mark that hides it.
-      return applyWorkspaceCleanupDismissal(next, state.workspaceCleanupDismissals)
+      return [applyWorkspaceCleanupDismissal(next, state.workspaceCleanupDismissals)]
     })
     return changed ? { workspaceCleanupScan: { ...scan, candidates } } : {}
   })

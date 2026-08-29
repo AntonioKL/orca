@@ -7,6 +7,7 @@ import type {
 } from '../../../../shared/workspace-cleanup'
 import { shouldForceWorkspaceCleanupRemoval } from '../../../../shared/workspace-cleanup'
 import { getRepoIdFromWorktreeId } from '../../../../shared/worktree/id'
+import { getWorkspaceCleanupCandidateIdentity } from '../../../../shared/workspace-cleanup-host-identity'
 import { translate } from '@/i18n/i18n'
 import type { WorkspaceCleanupFailure } from './workspace-cleanup'
 
@@ -14,6 +15,30 @@ type PreflightFailureTarget = {
   worktreeId: string
   executionHostId: ExecutionHostId | null
   displayName: string
+}
+
+/**
+ * The stop for a workspace the rescan did not list, and the row that stop leaves
+ * behind. Refusing alone is a dead end: the list keeps showing the picture the
+ * user confirmed against, so confirming again re-runs this identical stop —
+ * naming the row lets the caller reconcile it away instead.
+ *
+ * Only a confirmed row can be named. Without one there is no row this stop
+ * speaks for, and retiring on the target's id alone would drop a row on evidence
+ * gathered about a different host's workspace.
+ */
+export function getWorkspaceCleanupMissingResult(
+  target: PreflightFailureTarget & { approvedCandidate?: WorkspaceCleanupCandidate }
+): { ok: false; failure: WorkspaceCleanupFailure; retiredCandidateIdentity?: string } {
+  return {
+    ok: false,
+    failure: getWorkspaceCleanupMissingFailure(target),
+    ...(target.approvedCandidate
+      ? {
+          retiredCandidateIdentity: getWorkspaceCleanupCandidateIdentity(target.approvedCandidate)
+        }
+      : {})
+  }
 }
 
 export function getWorkspaceCleanupMissingFailure(

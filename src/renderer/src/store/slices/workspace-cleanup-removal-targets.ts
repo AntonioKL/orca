@@ -30,6 +30,7 @@ import type { WorkspaceCleanupFailure } from './workspace-cleanup'
 import {
   getWorkspaceCleanupGitUnavailableFailure,
   getWorkspaceCleanupMissingFailure,
+  getWorkspaceCleanupMissingResult,
   getWorkspaceCleanupPostConfirmationMessage,
   getWorkspaceCleanupRepoScanFailure,
   hasValidWorkspaceCleanupUnverifiedConsent
@@ -75,6 +76,14 @@ export type WorkspaceCleanupPreflightResult =
        * user keeps confirming against the picture that was already refused.
        */
       refreshedCandidate?: WorkspaceCleanupCandidate
+      /**
+       * The confirmed row the rescan no longer lists at all, so there is no
+       * refreshed row to publish in its place — the reconciliation is to drop
+       * it. Only set when the scan actually answered for this workspace: a scan
+       * that failed already returns above, and a host that is merely out of
+       * contact still publishes its rows as blocked rather than omitting them.
+       */
+      retiredCandidateIdentity?: string
     }
 
 type WorkspaceCleanupRemovalTargetState = Pick<
@@ -285,7 +294,7 @@ export function evaluateWorkspaceCleanupPreflight(
     resolved.candidate ??
     (repoScanFailure && hasUnverifiedRemovalConsent ? target.approvedCandidate : undefined)
   if (!candidate) {
-    return { ok: false, failure: getWorkspaceCleanupMissingFailure(target) }
+    return getWorkspaceCleanupMissingResult(target)
   }
   const stop = (failure: WorkspaceCleanupFailure): WorkspaceCleanupPreflightResult => ({
     ok: false,
