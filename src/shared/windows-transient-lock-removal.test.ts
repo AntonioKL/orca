@@ -1,6 +1,6 @@
-import { readFileSync, readdirSync, statSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { scanSourceTree, stripComments } from './source-scan/source-tree-scan'
 import {
   WINDOWS_RM_MAX_RETRIES,
   WINDOWS_RM_RETRY_DELAY_MS,
@@ -12,33 +12,19 @@ function withPlatform(platform: NodeJS.Platform): void {
 }
 
 const SOURCE_ROOT = join(__dirname, '..')
-const OWNING_MODULE = join('shared', 'windows-transient-lock-removal.ts')
-const IGNORED_DIRECTORIES = new Set(['node_modules', 'dist', 'out', 'build', '.git'])
+const OWNING_MODULE = 'shared/windows-transient-lock-removal.ts'
 /** A `const WINDOWS_RM_… =` line, i.e. a file stating the policy rather than importing it. */
 const POLICY_DECLARATION =
   /^\s*(?:export\s+)?const\s+WINDOWS_RM_(?:MAX_RETRIES|RETRY_DELAY_MS)\s*=/m
 
-function collectSourceFiles(root: string): string[] {
-  const found: string[] = []
-  for (const entry of readdirSync(root)) {
-    if (IGNORED_DIRECTORIES.has(entry)) {
-      continue
-    }
-    const path = join(root, entry)
-    if (statSync(path).isDirectory()) {
-      found.push(...collectSourceFiles(path))
-    } else if (/\.tsx?$/.test(entry)) {
-      found.push(path)
-    }
-  }
-  return found
-}
-
 /** Every file that declares the retry policy instead of importing it. */
 function findPolicyDeclarations(): string[] {
-  return collectSourceFiles(SOURCE_ROOT)
-    .filter((path) => POLICY_DECLARATION.test(readFileSync(path, 'utf8')))
-    .map((path) => relative(SOURCE_ROOT, path))
+  return scanSourceTree(SOURCE_ROOT, { includeTests: true })
+    .filter(
+      (file) =>
+        POLICY_DECLARATION.test(file.source) && POLICY_DECLARATION.test(stripComments(file.source))
+    )
+    .map((file) => file.relativePath)
     .sort()
 }
 
