@@ -70,7 +70,9 @@ describe('createMainWindow', () => {
       isDestroyed: vi.fn(() => false),
       isMaximized: vi.fn(() => true),
       isFullScreen: vi.fn(() => false),
+      getBounds: vi.fn(() => ({ x: 0, y: 0, width: 1200, height: 800 })),
       getSize: vi.fn(() => [1200, 800]),
+      setBounds: vi.fn(),
       setSize: vi.fn(),
       maximize: vi.fn(),
       show: vi.fn(),
@@ -116,7 +118,9 @@ describe('createMainWindow', () => {
       isDestroyed: vi.fn(() => false),
       isMaximized: vi.fn(() => true),
       isFullScreen: vi.fn(() => false),
+      getBounds: vi.fn(() => ({ x: 0, y: 0, width: 1200, height: 800 })),
       getSize: vi.fn(() => [1200, 800]),
+      setBounds: vi.fn(),
       setSize: vi.fn(),
       maximize: vi.fn(),
       show: vi.fn(),
@@ -370,7 +374,9 @@ describe('createMainWindow', () => {
       isDestroyed: vi.fn(() => false),
       isMaximized: vi.fn(() => true),
       isFullScreen: vi.fn(() => false),
+      getBounds: vi.fn(() => ({ x: 0, y: 0, width: 1200, height: 800 })),
       getSize: vi.fn(() => [1200, 800]),
+      setBounds: vi.fn(),
       setSize: vi.fn(),
       maximize: vi.fn(),
       show: vi.fn(),
@@ -406,6 +412,38 @@ describe('createMainWindow', () => {
     expect(browserWindowInstance.loadFile).toHaveBeenCalledTimes(2)
     expect(browserWindowInstance.loadURL).not.toHaveBeenCalled()
 
+    consoleError.mockRestore()
+  })
+
+  it('recovers offscreen bounds before reloading after renderer loss', () => {
+    vi.useFakeTimers()
+
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { browserWindowInstance, windowHandlers } = createRendererRecoveryWindowHarness()
+    browserWindowInstance.isMaximized.mockReturnValue(false)
+    browserWindowInstance.getBounds.mockReturnValue({
+      x: 5000,
+      y: -3000,
+      width: 1200,
+      height: 800
+    })
+
+    createMainWindow(null)
+    windowHandlers['render-process-gone']?.(
+      {} as never,
+      { reason: 'crashed', exitCode: 5 } as Electron.RenderProcessGoneDetails
+    )
+    vi.advanceTimersByTime(250)
+
+    expect(browserWindowInstance.setBounds).toHaveBeenCalledWith({
+      x: 240,
+      y: 0,
+      width: 1200,
+      height: 800
+    })
+    expect(browserWindowInstance.setBounds.mock.invocationCallOrder[0]).toBeLessThan(
+      browserWindowInstance.loadFile.mock.invocationCallOrder.at(-1) ?? 0
+    )
     consoleError.mockRestore()
   })
 

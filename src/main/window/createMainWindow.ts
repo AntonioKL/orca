@@ -16,6 +16,7 @@ import {
 } from './main-window-close-lifecycle'
 import type { CreateMainWindowOptions } from './main-window-contracts'
 import { installMainWindowFocusLifecycle } from './main-window-focus-lifecycle'
+import { installMainWindowReachabilityLifecycle } from './main-window-reachability'
 import { installMainWindowShortcutRouting } from './main-window-shortcut-routing'
 import { installMainWindowStateLifecycle } from './main-window-state-lifecycle'
 import {
@@ -167,6 +168,7 @@ export function createMainWindow(
     savedMaximized,
     store
   })
+  const disposeReachability = installMainWindowReachabilityLifecycle(mainWindow)
   installMainWindowWebviewSecurity(mainWindow)
   const focus = installMainWindowFocusLifecycle({
     isWindowClosing: state.isWindowClosing,
@@ -192,6 +194,7 @@ export function createMainWindow(
     focus.dispose()
     browserManager.setDictationShortcutForwardingPredicate(null)
     powerMonitor.removeListener('resume', onSystemResume)
+    disposeReachability()
     clearTrustedUIRendererWebContentsId(rendererWebContentsId)
     state.dispose()
   })
