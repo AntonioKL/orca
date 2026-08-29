@@ -85,7 +85,9 @@ export async function listDetectedGitWorktrees(
 
   const inFlight = detectedWorktreeScanInFlight.get(cacheKey)
   if (inFlight) {
-    return { gitWorktrees: await inFlight.promise, fresh: false }
+    const gitWorktrees = await inFlight.promise
+    // A current follower must register roots when the caller that started the live scan went stale.
+    return { gitWorktrees, fresh: !inFlight.invalidated }
   }
 
   const scan: DetectedWorktreeScan = {
