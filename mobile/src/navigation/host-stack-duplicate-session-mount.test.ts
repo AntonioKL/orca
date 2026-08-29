@@ -300,6 +300,37 @@ describe('one mounted session screen per worktree', () => {
     expect(mountedSessions(app.root, WORKTREE)).toHaveLength(0)
   })
 
+  // Why the extra params: every real entry point puts presentation state in the query
+  // (`?name=…`, `created=1`, `warning=…`), so the mounted route carries params the
+  // convergence target does not. Identity is the host and worktree alone; comparing the
+  // whole param set would miss the live screen and mount a second one beside it.
+  it('converges onto a session mounted with presentation params the target omits', () => {
+    const app = drive(
+      tree({
+        index: 1,
+        routes: [
+          {
+            key: 'live-session',
+            name: '[hostId]/session/[worktreeId]',
+            params: { hostId: HOST, worktreeId: WORKTREE, name: 'Repo one', created: '1' }
+          },
+          {
+            key: 'files',
+            name: '[hostId]/files/[worktreeId]',
+            params: { hostId: HOST, worktreeId: WORKTREE }
+          }
+        ]
+      })
+    )
+
+    app.open(HOST, TARGET)
+    app.settle()
+
+    const sessions = mountedSessions(app.root, WORKTREE)
+    expect(sessions).toHaveLength(1)
+    expect(sessions[0].key).toBe('live-session')
+  })
+
   it('does not mount a second session when the tap arrives from Files for the same worktree', () => {
     const app = drive(
       tree({

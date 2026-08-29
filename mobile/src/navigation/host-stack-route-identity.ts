@@ -23,8 +23,8 @@ type MountedRouteStep = Readonly<{
 }>
 
 // Why: identity decides which mounted screen a target *is*, so it never decodes —
-// a host literally named `a%2Fb` must not alias the host named `a/b`. Only the
-// "did my own encoded push commit?" check may decode (pushedHostParamMatches).
+// expo-router already decoded the segment on the way into navigation state, so
+// decoding again would let a host literally named `a%2Fb` alias the one named `a/b`.
 function routeIsTarget(route: HostStackNavigationRoute, target: HostStackRouteTarget): boolean {
   if (route.name !== target.name || !route.params) {
     return false
