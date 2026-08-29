@@ -23,6 +23,8 @@ export type MidlinePreeditOcclusionSample = {
   remainderDisplay: string | null
   remainderVisibility: string | null
   caretRect: { left: number; right: number; width: number; height: number } | null
+  preeditRect: { left: number; right: number; width: number; height: number } | null
+  textareaRect: { left: number; right: number; width: number; height: number }
   overlayActive: boolean
   cursorColumn: number
   terminalColumns: number
@@ -51,21 +53,25 @@ function readMidlinePreeditOcclusion(): MidlinePreeditOcclusionSample {
   const terminal = pane.terminal
   const screen = pane.container.querySelector<HTMLElement>('.xterm-screen')
   const view = pane.container.querySelector<HTMLElement>('.composition-view')
-  if (!screen || !view) {
-    throw new Error('Active terminal has no screen element or composition view')
+  const textarea = terminal.textarea
+  if (!screen || !view || !textarea) {
+    throw new Error('Active terminal has no screen, composition view, or helper textarea')
   }
 
   const buffer = terminal.buffer.active
   const line = buffer.getLine(buffer.baseY + buffer.cursorY)
-  const cursorColumn = buffer.cursorX
+  const cursorColumn = Math.min(buffer.cursorX, terminal.cols - 1)
   const rowTailFromCursor = (line?.translateToString(true, cursorColumn) ?? '').trimEnd()
 
   const screenRect = screen.getBoundingClientRect()
   const overlayRect = view.getBoundingClientRect()
   const cellWidth = terminal.cols > 0 ? screenRect.width / terminal.cols : 0
   const caret = view.querySelector<HTMLElement>('.xterm-composition-caret')
+  const preedit = view.querySelector<HTMLElement>('.xterm-composition-preedit')
   const remainder = view.querySelector<HTMLElement>('.xterm-composition-remainder')
   const caretBounds = caret?.getBoundingClientRect()
+  const preeditBounds = preedit?.getBoundingClientRect()
+  const textareaBounds = textarea.getBoundingClientRect()
 
   // A column counts as hidden when the overlay covers most of its cell, which keeps the sample
   // stable against the sub-pixel width a proportional text node lands on.
@@ -112,6 +118,20 @@ function readMidlinePreeditOcclusion(): MidlinePreeditOcclusionSample {
           height: caretBounds.height
         }
       : null,
+    preeditRect: preeditBounds
+      ? {
+          left: preeditBounds.left,
+          right: preeditBounds.right,
+          width: preeditBounds.width,
+          height: preeditBounds.height
+        }
+      : null,
+    textareaRect: {
+      left: textareaBounds.left,
+      right: textareaBounds.right,
+      width: textareaBounds.width,
+      height: textareaBounds.height
+    },
     overlayActive: view.classList.contains('active'),
     cursorColumn,
     terminalColumns: terminal.cols,

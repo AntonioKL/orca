@@ -88,7 +88,7 @@ index 497afcf535f3eaca00889525a77e15eb633ccd96..96d499b34605f860608382114c3fbdc0
  
  export interface IBrowser {
 diff --git a/src/browser/input/CompositionHelper.ts b/src/browser/input/CompositionHelper.ts
-index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..06c35cac2a9fd20f2dffcf2fed64797dbb613252 100644
+index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..b91682d6c17d81e9ad527b22dfcbc05393bc52a5 100644
 --- a/src/browser/input/CompositionHelper.ts
 +++ b/src/browser/input/CompositionHelper.ts
 @@ -3,8 +3,10 @@
@@ -1072,7 +1072,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..06c35cac2a9fd20f2dffcf2fed64797d
      if (this._bufferService.buffer.isCursorInViewport) {
        const cursorX = Math.min(this._bufferService.buffer.x, this._bufferService.cols - 1);
  
-@@ -265,20 +978,37 @@ export class CompositionHelper {
+@@ -265,20 +978,38 @@ export class CompositionHelper {
        const maxWidth = this._bufferService.cols * this._renderService.dimensions.css.cell.width - cursorLeft;
        this._compositionView.style.maxWidth = maxWidth + 'px';
        this._compositionView.style.overflow = 'hidden';
@@ -1080,8 +1080,10 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..06c35cac2a9fd20f2dffcf2fed64797d
 -      // Sync the textarea to the exact position of the composition view so the IME knows where the
 -      // text is.
 -      const compositionViewBounds = this._compositionView.getBoundingClientRect();
+-      this._textarea.style.left = cursorLeft + 'px';
 +      const anchorBounds =
 +        (this._compositionPreedit ?? this._compositionView).getBoundingClientRect();
++      const anchorLeft = cursorLeft + Math.min(0, maxWidth - anchorBounds.width);
 +      const showsRemainder =
 +        Boolean(this._compositionRemainder) && anchorBounds.width < maxWidth;
 +      if (this._compositionRemainder) {
@@ -1100,7 +1102,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..06c35cac2a9fd20f2dffcf2fed64797d
 +        '#FFF';
 +      // Sync the textarea to the exact position of the preedit so the IME knows where the text is,
 +      // and so candidate dialogs anchor to it rather than to the end of the rendered tail.
-       this._textarea.style.left = cursorLeft + 'px';
++      this._textarea.style.left = anchorLeft + 'px';
        this._textarea.style.top = cursorTop + 'px';
        // Ensure the text area is at least 1x1, otherwise certain IMEs may break
 -      this._textarea.style.width = Math.max(compositionViewBounds.width, 1) + 'px';
@@ -1119,14 +1121,13 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..06c35cac2a9fd20f2dffcf2fed64797d
    }
  }
 diff --git a/src/common/SortedList.ts b/src/common/SortedList.ts
-index 8a10076e3963e33b4a7d1e4602333eb3f4772dc9..da6e7691371909f31748b1cb2cb8a261fbd2b279 100644
+index 8a10076e3963e33b4a7d1e4602333eb3f4772dc9..df0761c35907ddc48eb102ba181b0dac8e61f00d 100644
 --- a/src/common/SortedList.ts
 +++ b/src/common/SortedList.ts
-@@ -87,7 +87,25 @@ export class SortedList<T> {
+@@ -87,6 +87,24 @@ export class SortedList<T> {
      if (key === undefined) {
        return false;
      }
--    i = this._search(key);
 +    if (this._deleteAtKey(value, key)) {
 +      return true;
 +    }
@@ -1145,7 +1146,6 @@ index 8a10076e3963e33b4a7d1e4602333eb3f4772dc9..da6e7691371909f31748b1cb2cb8a261
 +  }
 +
 +  private _deleteAtKey(value: T, key: number): boolean {
-+    let i = this._search(key);
+     i = this._search(key);
      if (i === -1) {
        return false;
-     }

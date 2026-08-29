@@ -42,7 +42,7 @@ async function sampleOpenComposition(page: Page): Promise<MidlinePreeditOcclusio
     .poll(
       async () => {
         const overlay = await samplePreeditOverlay(page)
-        return overlay.active && overlay.rect.width > 0 && overlay.text === '가'
+        return overlay.active && overlay.rect.width > 0 && overlay.text.startsWith('가')
       },
       { message: 'the preedit never reached the overlay at a non-zero size' }
     )
@@ -60,12 +60,15 @@ test.describe('Terminal end-of-row Korean preedit cell span', () => {
     const arena = await openTerminalImePaneArena(orcaPage)
     let completed = false
     try {
-      // CHA clamps to the last column; write a cell there, then move back onto it.
-      await writeToActiveTerminal(orcaPage, '\x1b[2J\x1b[H\x1b[999Gx\x1b[D')
+      // CHA clamps to the last column; xterm's wrap-pending cursor is the final-cell shape the
+      // composition helper itself clamps onto.
+      await writeToActiveTerminal(orcaPage, '\x1b[2J\x1b[H\x1b[999Gx')
       await setImeComposition(arena.session, '가')
 
       const sample = await sampleOpenComposition(orcaPage)
       const caret = sample.caretRect
+      const preedit = sample.preeditRect
+      const textarea = sample.textareaRect
       const screenRight = sample.screenRect.left + sample.screenRect.width
       expect(sample.cursorColumn, 'the cursor is not in the final column').toBe(
         sample.terminalColumns - 1
@@ -87,6 +90,28 @@ test.describe('Terminal end-of-row Korean preedit cell span', () => {
         caret!.right,
         'the preedit caret overflows the terminal at the right edge'
       ).toBeLessThanOrEqual(screenRight + 0.5)
+      expect(preedit, 'the active composition has no preedit element').not.toBeNull()
+      expect(textarea.width, 'the IME candidate anchor has zero width').toBeGreaterThan(0)
+      expect(
+        textarea.left,
+        'the IME candidate anchor overflows the terminal at the left edge'
+      ).toBeGreaterThanOrEqual(sample.screenRect.left - 0.5)
+      expect(
+        textarea.right,
+        'the IME candidate anchor overflows the terminal at the right edge'
+      ).toBeLessThanOrEqual(screenRight + 0.5)
+      expect(
+        textarea.right,
+        'the IME candidate anchor is not aligned with the preedit right edge'
+      ).toBeCloseTo(preedit!.right, 0)
+      expect(
+        textarea.right,
+        'the IME candidate anchor is not aligned with the caret right edge'
+      ).toBeCloseTo(caret!.right, 0)
+      expect(
+        textarea.right,
+        'the IME candidate anchor is not aligned with the terminal right edge'
+      ).toBeCloseTo(screenRight, 0)
       completed = true
     } finally {
       await closeTerminalImePaneArena(

@@ -240,7 +240,7 @@ describe('mid-line composition renders the covered row tail after the preedit', 
     expect([THEME.cursor, 'rgb(221, 238, 255)']).toContain(caret!.style.backgroundColor)
   })
 
-  it('keeps the caret visible over committed text in the final cell', async () => {
+  it('keeps the caret and IME candidate anchor visible over committed text in the final cell', async () => {
     const rig = openTerminal({ cursorWidth: 2 })
     await rig.write('x'.repeat(80))
     let preeditWidth = CELL_WIDTH_PX * 2
@@ -261,12 +261,16 @@ describe('mid-line composition renders the covered row tail after the preedit', 
     expect(rig.compositionView.style.display).toBe('flex')
     expect(rig.compositionView.style.justifyContent).toBe('flex-end')
     expect(caret!.style.width).toBe('2px')
+    expect(rig.textarea.style.left).toBe(`${rig.terminal.cols * CELL_WIDTH_PX - preeditWidth}px`)
+    expect(rig.textarea.style.width).toBe(`${preeditWidth}px`)
 
     preeditWidth = CELL_WIDTH_PX / 2
     await rig.writeAwaitingRender('\x1b[0m')
     expect(remainder!.style.display).toBe('')
     expect(rig.compositionView.style.display).toBe('')
     expect(rig.compositionView.style.justifyContent).toBe('')
+    expect(rig.textarea.style.left).toBe(`${(rig.terminal.cols - 1) * CELL_WIDTH_PX}px`)
+    expect(rig.textarea.style.width).toBe(`${preeditWidth}px`)
   })
 
   it('keeps the default cursor visible on a light background', async () => {
