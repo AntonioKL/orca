@@ -40,6 +40,24 @@ describe('updater scheduling teardown', () => {
     resetUpdaterMocks()
   })
 
+  it('arms a retry off the stall guard while the updater is still running', async () => {
+    // Why this sits ahead of the stop tests: every one of them asserts that nothing happened, and
+    // nothing happens just as reliably in an updater that never schedules at all. Without this,
+    // the whole file passes on a build where scheduling is stopped from the first line — so it
+    // would stop reporting the loss of the behaviour it is named for.
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-03T12:00:00Z'))
+
+    await launchStalledCheck()
+
+    await vi.advanceTimersByTimeAsync(PAST_STALL_AND_RETRY_MS)
+
+    expect(
+      autoUpdaterMock.checkForUpdates,
+      'a running updater never retried the check its stall guard gave up on'
+    ).toHaveBeenCalled()
+  })
+
   it('stops the stall guard from arming a retry once scheduling is stopped', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-03T12:00:00Z'))
