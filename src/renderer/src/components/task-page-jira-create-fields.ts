@@ -14,6 +14,12 @@ export function isJiraUserCreateField(field: JiraCreateField): boolean {
   return field.schema?.type === 'user' || field.schema?.items === 'user'
 }
 
+// The host's {accountId} rewrite is shape-based, so it needs Jira's verdict on
+// which keys are user fields rather than inferring it from the value.
+export function getJiraUserCreateFieldKeys(fields: readonly JiraCreateField[]): string[] {
+  return fields.filter(isJiraUserCreateField).map((field) => field.key)
+}
+
 export function getJiraCreateAllowedValueLabel(
   value: NonNullable<JiraCreateField['allowedValues']>[number]
 ): string {

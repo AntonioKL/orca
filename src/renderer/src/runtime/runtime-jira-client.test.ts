@@ -230,11 +230,14 @@ describe('runtime Jira client search bounds', () => {
 
 describe('jiraSearchUsers', () => {
   it('passes the project scope straight through on a local host', async () => {
-    jiraSearchUsersLocal.mockResolvedValue({ ok: true, users: [{ accountId: '5abc' }] })
+    jiraSearchUsersLocal.mockResolvedValue({
+      ok: true,
+      users: [{ accountId: '5abc', displayName: 'Alex Doe' }]
+    })
 
     await expect(jiraSearchUsers(null, { projectIdOrKey: 'ENG', query: 'Alex' })).resolves.toEqual({
       ok: true,
-      users: [{ accountId: '5abc' }]
+      users: [{ accountId: '5abc', displayName: 'Alex Doe' }]
     })
     expect(jiraSearchUsersLocal).toHaveBeenCalledWith({ projectIdOrKey: 'ENG', query: 'Alex' })
   })
@@ -267,6 +270,71 @@ describe('jiraSearchUsers', () => {
         error: 'Jira user search returned an unexpected response.'
       })
     }
+  })
+
+  // Thread 2: every entry is cast, not checked. The picker keys rows by accountId
+  // and labels them by displayName, so an entry missing either is an unusable row.
+  const malformedEntries: [string, unknown][] = [
+    ['no accountId', { displayName: 'Alex Doe' }],
+    ['a blank accountId', { accountId: '  ', displayName: 'Alex Doe' }],
+    ['a non-string accountId', { accountId: 7, displayName: 'Alex Doe' }],
+    ['no displayName', { accountId: '5abc' }],
+    ['a blank displayName', { accountId: '5abc', displayName: '   ' }],
+    ['a non-string displayName', { accountId: '5abc', displayName: 7 }],
+    ['a non-string email', { accountId: '5abc', displayName: 'Alex Doe', email: 7 }],
+    ['a non-string avatarUrl', { accountId: '5abc', displayName: 'Alex Doe', avatarUrl: 7 }],
+    ['a non-object entry', 'Alex Doe'],
+    ['a null entry', null]
+  ]
+  for (const [label, entry] of malformedEntries) {
+    it(`fails the search when an entry has ${label}`, async () => {
+      jiraSearchUsersLocal.mockResolvedValue({
+        ok: true,
+        users: [{ accountId: '5abc', displayName: 'Alex Doe' }, entry]
+      })
+
+      await expect(jiraSearchUsers(null, { projectIdOrKey: 'ENG' })).resolves.toEqual({
+        ok: false,
+        error: 'Jira user search returned an unexpected response.'
+      })
+    })
+  }
+
+  it('keeps a fully-formed list, including the optional fields Jira may omit or null out', async () => {
+    jiraSearchUsersLocal.mockResolvedValue({
+      ok: true,
+      users: [
+        { accountId: '5abc', displayName: 'Alex Doe', email: null },
+        {
+          accountId: 'ada',
+          displayName: 'Ada L',
+          email: 'ada@x.test',
+          avatarUrl: 'https://a/x.png'
+        }
+      ]
+    })
+
+    await expect(jiraSearchUsers(null, { projectIdOrKey: 'ENG' })).resolves.toEqual({
+      ok: true,
+      users: [
+        { accountId: '5abc', displayName: 'Alex Doe', email: null },
+        {
+          accountId: 'ada',
+          displayName: 'Ada L',
+          email: 'ada@x.test',
+          avatarUrl: 'https://a/x.png'
+        }
+      ]
+    })
+  })
+
+  it('keeps an empty list reading as a successful empty search', async () => {
+    jiraSearchUsersLocal.mockResolvedValue({ ok: true, users: [] })
+
+    await expect(jiraSearchUsers(null, { projectIdOrKey: 'ENG' })).resolves.toEqual({
+      ok: true,
+      users: []
+    })
   })
 
   it('rejects an oversized query before it reaches the host', async () => {

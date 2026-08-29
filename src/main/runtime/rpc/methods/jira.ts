@@ -56,7 +56,10 @@ const CreateIssue = z.object({
   issueTypeId: requiredString('Issue type is required'),
   title: requiredString('Title is required'),
   description: OptionalPlainString,
-  customFields: z.record(z.string(), z.unknown()).optional()
+  customFields: z.record(z.string(), z.unknown()).optional(),
+  // Optional so an older client that never sends it still decodes; the host then
+  // declares nothing a user field and rewrites nothing.
+  userFieldKeys: z.array(z.string()).optional()
 })
 
 const IssueUpdate = z.object({
@@ -202,7 +205,8 @@ export const JIRA_METHODS: RpcAnyMethod[] = [
         issueTypeId: params.issueTypeId.trim(),
         title: params.title.trim(),
         description: params.description?.trim() || undefined,
-        customFields: params.customFields
+        customFields: params.customFields,
+        userFieldKeys: params.userFieldKeys
       })
   }),
   defineMethod({

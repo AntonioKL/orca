@@ -31,6 +31,19 @@ export function resolveJiraUserFieldValue(
   return authType === 'server' ? { name: accountId } : { id: accountId }
 }
 
+// Only a field Jira declared as a user field is rewritten. The marker is a shape,
+// not a type, so a lookalike object on an undeclared key would otherwise be
+// silently retyped on its way to Jira; undeclared means unknown, and unknown is
+// left exactly as it arrived.
+export function resolveJiraCreateFieldValue(
+  fieldKey: string,
+  value: unknown,
+  userFieldKeys: ReadonlySet<string>,
+  authType: JiraAuthType | undefined
+): unknown {
+  return userFieldKeys.has(fieldKey) ? resolveJiraUserFieldValues(value, authType) : value
+}
+
 // Leaves every non-user value untouched so other providers' and Jira's own
 // option/number/text fields keep flowing through unchanged.
 export function resolveJiraUserFieldValues(

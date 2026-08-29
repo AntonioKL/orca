@@ -6,6 +6,7 @@ import {
   findJiraCreateAllowedValue,
   getJiraCreateAllowedValueLabel,
   getJiraCreateOptionPayload,
+  getJiraUserCreateFieldKeys,
   isJiraUserCreateField,
   isVisibleJiraCreateField
 } from './task-page-jira-create-fields'
@@ -231,5 +232,25 @@ describe('buildJiraCreateFieldValue for user fields', () => {
     expect(buildJiraCreateCustomFields([reporter], { reporter: '5abc' })).toEqual({
       reporter: { accountId: '5abc' }
     })
+  })
+})
+
+// The host rewrites the {accountId} marker only for the keys named here, so this
+// list is the whole reason a lookalike value on another field survives untouched.
+describe('getJiraUserCreateFieldKeys', () => {
+  it('names only the fields Jira declares as users, single and array alike', () => {
+    expect(
+      getJiraUserCreateFieldKeys([
+        field({ key: 'reporter', schema: { type: 'user' } }),
+        field({ key: 'customfield_watchers', schema: { type: 'array', items: 'user' } }),
+        field({ key: 'customfield_opt', schema: { type: 'option' } }),
+        field({ key: 'customfield_text', schema: { type: 'string' } }),
+        field({ key: 'customfield_untyped' })
+      ])
+    ).toEqual(['reporter', 'customfield_watchers'])
+  })
+
+  it('names nothing when the issue type has no user field', () => {
+    expect(getJiraUserCreateFieldKeys([field({ key: 'customfield_opt' })])).toEqual([])
   })
 })

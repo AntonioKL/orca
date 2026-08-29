@@ -164,6 +164,10 @@ export type JiraCreateIssueArgs = {
   title: string
   description?: string
   customFields?: Record<string, unknown>
+  // Keys Jira's own create metadata declares as user fields (schema.type 'user',
+  // or an array of them). The {accountId} marker is only a shape, so the host
+  // rewrites these keys and nothing else; an undeclared key is left as it arrived.
+  userFieldKeys?: string[]
 }
 
 export type JiraCreateIssueResult =

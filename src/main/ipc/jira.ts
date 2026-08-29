@@ -2,6 +2,7 @@ import { ipcMain } from 'electron'
 import { connect, disconnect, getStatus, selectSite, testConnection } from '../jira/client'
 import { _resetPreflightCache } from './preflight'
 import { JiraCancellableRequests } from './jira-cancellable-requests'
+import { normalizeJiraCreateIssueArgs, normalizeTrimmedArg } from './jira-ipc-arguments'
 import {
   addIssueComment,
   createIssue,
@@ -31,10 +32,6 @@ import type {
 const VALID_FILTERS = new Set<JiraIssueFilter>(['assigned', 'reported', 'all', 'done'])
 const issueSummaryRequests = new JiraCancellableRequests()
 const searchRequests = new JiraCancellableRequests()
-
-function normalizeTrimmedArg(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined
-}
 
 function normalizeSiteSelection(value: unknown): JiraSiteSelection | undefined {
   const siteId = normalizeTrimmedArg(value)
@@ -191,24 +188,8 @@ export function registerJiraHandlers(): void {
   })
 
   ipcMain.handle('jira:createIssue', async (_event, args: JiraCreateIssueArgs) => {
-    if (typeof args?.projectId !== 'string' || !args.projectId.trim()) {
-      return { ok: false, error: 'Project is required.' }
-    }
-    if (typeof args?.issueTypeId !== 'string' || !args.issueTypeId.trim()) {
-      return { ok: false, error: 'Issue type is required.' }
-    }
-    if (typeof args?.title !== 'string' || !args.title.trim()) {
-      return { ok: false, error: 'Title is required.' }
-    }
-    return createIssue({
-      siteId: normalizeTrimmedArg(args.siteId),
-      projectId: args.projectId.trim(),
-      issueTypeId: args.issueTypeId.trim(),
-      title: args.title.trim(),
-      description: args.description?.trim() || undefined,
-      customFields:
-        args.customFields && typeof args.customFields === 'object' ? args.customFields : undefined
-    })
+    const normalized = normalizeJiraCreateIssueArgs(args)
+    return normalized.ok ? createIssue(normalized.args) : normalized
   })
 
   ipcMain.handle(
