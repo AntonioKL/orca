@@ -59,6 +59,10 @@ function readDirectoryLimitsFromParams(
       : {})
   }
 }
+import {
+  readAuthorizedDocPreviewFile,
+  type DocPreviewFileAccessRequest
+} from '../shared/doc-preview-file-access'
 
 export class FsHandler {
   private dispatcher: RelayDispatcher
@@ -93,6 +97,9 @@ export class FsHandler {
     this.dispatcher.onRequest('fs.readFileChunk', (p) => this.readFileChunk(p))
     this.dispatcher.onRequest('fs.readFileStream', (p, c) => this.readFileStream(p, c))
     this.dispatcher.onRequest('fs.readFileRange', (p) => this.readFileRange(p))
+    this.dispatcher.onRequest('fs.readDocPreview', (p) =>
+      readAuthorizedDocPreviewFile(p as DocPreviewFileAccessRequest)
+    )
     this.dispatcher.onRequest('fs.readTerminalArtifact', (p) => this.readTerminalArtifact(p))
     this.dispatcher.onRequest('fs.readTerminalArtifactChunk', (p) =>
       this.readTerminalArtifactChunk(p)

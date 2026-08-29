@@ -25,7 +25,7 @@ const {
 vi.mock('./host-store', () => ({
   removeHost: (hostId: string) => removeHostMock(hostId)
 }))
-vi.mock('./connection-log-buffer', () => ({
+vi.mock('./persisted-connection-log-store', () => ({
   connectionLogStore: { delete: deleteConnectionLogMock }
 }))
 vi.mock('../mobile-web/mobile-web-native-stager', () => ({

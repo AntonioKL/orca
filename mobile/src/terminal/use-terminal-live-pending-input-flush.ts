@@ -31,10 +31,15 @@ type RunTerminalLiveMirrorStep = (
 ) => Promise<boolean>
 
 type TerminalLivePendingInputFlush = {
-  readonly applyLiveInputMirror: (handle: string, fieldText: string, composing?: boolean) => void
+  readonly applyLiveInputMirror: (
+    handle: string,
+    fieldText: string,
+    composing?: boolean
+  ) => Promise<boolean>
   readonly clearPendingLiveInputCommit: () => void
   readonly flushPendingLiveInputText: (expectedHandle: string | null) => Promise<boolean>
   readonly heldLiveInputTextRef: RefObject<string>
+  readonly liveInputComposingRef: RefObject<boolean | undefined>
   readonly pendingLiveInputHandleRef: RefObject<string | null>
   readonly sentLiveInputTextRef: RefObject<string>
   readonly waitForPendingLiveInputFlush: () => Promise<boolean>
@@ -51,6 +56,7 @@ export function useTerminalLivePendingInputFlush<TTabType extends string>({
   const heldCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingLiveInputFlushRef = useRef(createTerminalLivePendingFlushState())
   const heldLiveInputTextRef = useRef('')
+  const liveInputComposingRef = useRef<boolean | undefined>(undefined)
   const sentLiveInputTextRef = useRef('')
   const pendingLiveInputHandleRef = useRef<string | null>(null)
   const runMirrorStepRef = useRef<RunTerminalLiveMirrorStep>(async () => false)
@@ -66,6 +72,7 @@ export function useTerminalLivePendingInputFlush<TTabType extends string>({
     clearHeldCommitTimer()
     cancelTerminalLivePendingFlush(pendingLiveInputFlushRef.current)
     heldLiveInputTextRef.current = ''
+    liveInputComposingRef.current = undefined
     sentLiveInputTextRef.current = ''
     pendingLiveInputHandleRef.current = null
   }, [clearHeldCommitTimer])
@@ -107,6 +114,7 @@ export function useTerminalLivePendingInputFlush<TTabType extends string>({
       })
       sentLiveInputTextRef.current = step.nextSentText
       heldLiveInputTextRef.current = step.heldText
+      liveInputComposingRef.current = composing
       pendingLiveInputHandleRef.current =
         step.heldText.length > 0 || step.nextSentText.length > 0 ? handle : null
 
@@ -150,9 +158,8 @@ export function useTerminalLivePendingInputFlush<TTabType extends string>({
   }, [runMirrorStep])
 
   const applyLiveInputMirror = useCallback(
-    (handle: string, fieldText: string, composing?: boolean): void => {
-      void runMirrorStep(handle, fieldText, false, composing)
-    },
+    (handle: string, fieldText: string, composing?: boolean): Promise<boolean> =>
+      runMirrorStep(handle, fieldText, false, composing),
     [runMirrorStep]
   )
 
@@ -188,6 +195,7 @@ export function useTerminalLivePendingInputFlush<TTabType extends string>({
         heldCommitTimerRef.current = null
       }
       heldLiveInputTextRef.current = ''
+      liveInputComposingRef.current = undefined
       sentLiveInputTextRef.current = ''
       pendingLiveInputHandleRef.current = null
       cancelTerminalLivePendingFlush(pendingLiveInputFlushRef.current)
@@ -199,6 +207,7 @@ export function useTerminalLivePendingInputFlush<TTabType extends string>({
     clearPendingLiveInputCommit,
     flushPendingLiveInputText,
     heldLiveInputTextRef,
+    liveInputComposingRef,
     pendingLiveInputHandleRef,
     sentLiveInputTextRef,
     waitForPendingLiveInputFlush

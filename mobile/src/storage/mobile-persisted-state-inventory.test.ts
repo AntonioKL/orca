@@ -22,12 +22,14 @@ const EXPECTED_PERSISTED_STATE_SOURCES = [
   'mobile/src/storage/session-view-preferences.ts',
   'mobile/src/storage/terminal-custom-key-storage.ts',
   'mobile/src/terminal/terminal-accessory-layout.ts',
+  'mobile/src/transport/host-app-version-store.ts',
   'mobile/src/transport/host-credential-cleanup.ts',
   'mobile/src/transport/host-device-token-store.ts',
   'mobile/src/transport/host-metadata-store.ts',
   'mobile/src/transport/mobile-relay-host-overlay-store.ts',
   'mobile/src/transport/mobile-relay-pairing-journal-store.ts',
   'mobile/src/transport/pairing-keychain.ts',
+  'mobile/src/transport/persisted-connection-log-store.ts',
   'mobile/src/worktree/use-last-visited-worktree-repo.ts'
 ]
 

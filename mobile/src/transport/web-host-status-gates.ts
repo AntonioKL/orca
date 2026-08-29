@@ -32,6 +32,7 @@ export function useWebHostStatusGates(args: {
             client: requestClient,
             hostCapabilities: result.hostCapabilities,
             floatingWorkspaceEnabled: result.floatingWorkspaceEnabled,
+            desktopAppVersion: null,
             compatVerdict: { kind: 'ok' }
           })
           setUnverified(false)
@@ -46,6 +47,7 @@ export function useWebHostStatusGates(args: {
                   client: requestClient,
                   hostCapabilities: [],
                   floatingWorkspaceEnabled: false,
+                  desktopAppVersion: null,
                   compatVerdict: { kind: 'ok' }
                 }
           )
@@ -62,6 +64,7 @@ export function useWebHostStatusGates(args: {
     return {
       hostCapabilities: EMPTY_HOST_CAPABILITIES,
       floatingWorkspaceEnabled: false,
+      desktopAppVersion: null,
       compatVerdict: { kind: 'ok' },
       statusPending: connection === 'connected' && client !== null
     }
@@ -69,6 +72,7 @@ export function useWebHostStatusGates(args: {
   return {
     hostCapabilities: proven.hostCapabilities,
     floatingWorkspaceEnabled: proven.floatingWorkspaceEnabled,
+    desktopAppVersion: proven.desktopAppVersion,
     compatVerdict: proven.compatVerdict,
     statusPending: connection === 'connected' && unverified
   }

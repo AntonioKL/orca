@@ -63,7 +63,7 @@ describe('web host workspace creation operations', () => {
           directories: ['src/renderer'],
           presetId: 'renderer'
         },
-        supportsIdempotentCutoverRetry: false
+        worktreeCreateIdempotency: false
       })
     ).resolves.toEqual({
       worktreeId: 'workspace-page-1',
@@ -117,7 +117,7 @@ describe('web host workspace creation operations', () => {
         agentChoice: 'blank',
         comment: undefined,
         setupDecision: 'skip',
-        supportsIdempotentCutoverRetry: true
+        worktreeCreateIdempotency: { dedupeTtlMs: 30_000 }
       })
     ).resolves.toEqual({ error: 'Unable to create workspace. Try again.' })
   })

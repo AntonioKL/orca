@@ -3,7 +3,7 @@ import {
   forgetHostNotificationSession
 } from '../notifications/notification-reconnect-catchup'
 import { removeHost } from './host-store'
-import { connectionLogStore } from './connection-log-buffer'
+import { connectionLogStore } from './persisted-connection-log-store'
 import { removeMobileWebHostCache } from '../mobile-web/mobile-web-native-stager'
 import { clearMobileWebColdResumeRouteForHost } from '../mobile-web/mobile-web-cold-resume-route'
 

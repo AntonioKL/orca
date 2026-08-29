@@ -155,6 +155,10 @@ export const MobileWebCreationRuntimeCapabilitiesResultSchema = z
   .object({
     tasksSupported: z.boolean(),
     idempotentWorktreeCreateSupported: z.boolean(),
+    worktreeCreateIdempotency: z
+      .object({ dedupeTtlMs: z.number().int().nonnegative() })
+      .strict()
+      .or(z.literal(false)),
     hostPlatform: z
       .enum([
         'aix',

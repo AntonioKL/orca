@@ -5409,9 +5409,9 @@ export default function MobileTasksScreen({
           workspaceName: workspaceNameOverride,
           note: comment,
           sparseCheckout: sparseCheckoutOverride,
-          supportsIdempotentCutoverRetry: taskWorkspaceCreationOperations
+          worktreeCreateIdempotency: taskWorkspaceCreationOperations
             .readRuntimeCapabilities()
-            .then((capabilities) => capabilities.idempotentWorktreeCreateSupported)
+            .then((capabilities) => capabilities.worktreeCreateIdempotency)
         })
         if ('error' in result) {
           throw new Error(result.error)

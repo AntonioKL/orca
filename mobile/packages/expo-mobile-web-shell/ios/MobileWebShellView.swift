@@ -8,7 +8,7 @@ private let mobileWebMessageByteLimit = 640 * 1024
 private let mobileWebPendingMessageLimit = 32
 private let mobileWebCsp = [
   "default-src 'none'",
-  "script-src 'self' 'sha256-0v6dNxOHhaCHjn+NSTwrDLZhYZUfwaG9gFVsUEG6MWI='",
+  "script-src 'self' 'sha256-9WQo6QEeDR1Qf5aOmvWdM6FJv6hDF22Gbk7IKakIW4A='",
   // Why: React Native Web emits runtime style elements and attributes for the existing mobile UI.
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",

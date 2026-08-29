@@ -101,9 +101,11 @@ export async function executeMobileWebWorkspaceCreationReadOperation(args: {
   }
   if (args.operation === 'creationRuntimeCapabilities') {
     MobileWebCreationRuntimeCapabilitiesPayloadSchema.parse(args.payload)
-    return MobileWebCreationRuntimeCapabilitiesResultSchema.parse(
-      await operations.readRuntimeCapabilities()
-    )
+    const capabilities = await operations.readRuntimeCapabilities()
+    return MobileWebCreationRuntimeCapabilitiesResultSchema.parse({
+      ...capabilities,
+      idempotentWorktreeCreateSupported: capabilities.worktreeCreateIdempotency !== false
+    })
   }
   if (args.operation === 'creationSparsePresets') {
     const payload = MobileWebCreationRepoPayloadSchema.parse(args.payload)

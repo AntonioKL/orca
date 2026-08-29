@@ -1,4 +1,8 @@
 import type { SearchOptions, SearchResult } from '../../shared/code-search-types'
+import type {
+  DocPreviewFileAccessRequest,
+  DocPreviewFileAccessResult
+} from '../../shared/doc-preview-file-access'
 import type { DirEntry, FsChangeEvent } from '../../shared/filesystem-entry-types'
 import type { WorkspaceSpaceDirectoryScanResult } from '../../shared/workspace-space-types'
 
@@ -60,6 +64,7 @@ export type IFilesystemProvider = {
   readDir(dirPath: string, options?: FilesystemDirectoryReadOptions): Promise<DirEntry[]>
   readFile(filePath: string, limits?: FileReadLimits): Promise<FileReadResult>
   readFileChunk?(filePath: string, offset: number, length: number): Promise<FileChunkReadResult>
+  readDocPreviewFile?(request: DocPreviewFileAccessRequest): Promise<DocPreviewFileAccessResult>
   /** Positional read. Optional because an older remote host cannot serve one.
    *  Strict by design: it throws `FileRangeReadUnsupportedError` rather than
    *  silently degrading, so a caller cannot accidentally pay a whole-file

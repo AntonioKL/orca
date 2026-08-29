@@ -9,6 +9,7 @@ import type { GitHubPrStartPoint } from '../../../src/shared/worktree/types'
 import type { RepoSlug } from '../../../src/shared/new-workspace/github-links'
 import type { SshConnectionState } from '../../../src/shared/ssh-types'
 import type { WorktreeCreateResult } from '../tasks/worktree-create-retry'
+import type { WorktreeCreateIdempotencyProbe } from '../tasks/worktree-create-idempotency-policy'
 import type { NewWorktreeRuntimeCapabilities } from '../tasks/worktree-create-capability'
 import type {
   MrStateFilter,
@@ -62,7 +63,7 @@ export type CreateBlankWorkspaceOperationArgs = {
   nameWasGenerated: boolean
   comment: string | undefined
   setupDecision: WorkspaceCreateSetupDecision
-  supportsIdempotentCutoverRetry: boolean | Promise<boolean>
+  worktreeCreateIdempotency: WorktreeCreateIdempotencyProbe
 }
 
 export type CreateWorkspaceFromSourceOperationArgs = {
@@ -74,7 +75,7 @@ export type CreateWorkspaceFromSourceOperationArgs = {
   note: string | undefined
   sparseCheckout?: { directories: string[]; presetId?: string }
   nameIsAutoManaged?: boolean
-  supportsIdempotentCutoverRetry: boolean | Promise<boolean>
+  worktreeCreateIdempotency: WorktreeCreateIdempotencyProbe
 }
 
 export type HostWorkspaceCreationOperations = {

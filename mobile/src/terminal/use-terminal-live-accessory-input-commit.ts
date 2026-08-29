@@ -22,10 +22,15 @@ export async function getTerminalLiveAccessoryInactiveInputCommitResult(
 
 type TerminalLiveAccessoryInputCommitOptions = {
   readonly activeHandle: string | null
-  readonly applyLiveInputMirror: (handle: string, fieldText: string) => void
+  readonly applyLiveInputMirror: (
+    handle: string,
+    fieldText: string,
+    composing?: boolean
+  ) => Promise<boolean>
   readonly clearPendingLiveInputCommit: () => void
   readonly flushPendingLiveInputText: (expectedHandle: string | null) => Promise<boolean>
   readonly heldLiveInputTextRef: RefObject<string>
+  readonly liveInputComposingRef: RefObject<boolean | undefined>
   readonly liveInputRef: RefObject<TextInput | null>
   readonly liveInputTerminalHandles: ReadonlySet<string>
   readonly pendingLiveInputHandleRef: RefObject<string | null>
@@ -41,6 +46,7 @@ export function useTerminalLiveAccessoryInputCommit({
   clearPendingLiveInputCommit,
   flushPendingLiveInputText,
   heldLiveInputTextRef,
+  liveInputComposingRef,
   liveInputRef,
   liveInputTerminalHandles,
   pendingLiveInputHandleRef,
@@ -82,15 +88,21 @@ export function useTerminalLiveAccessoryInputCommit({
           // field is edited here and the mirror diff syncs the PTY echo.
           setLiveInputCapture(editedText)
           setTerminalLiveInputNativeText(liveInputRef.current, editedText)
-          applyLiveInputMirror(activeHandle, editedText)
-          return { kind: 'handled' }
+          // Preserve undefined so Android's heuristic hold still settles on its timer.
+          const sent = await applyLiveInputMirror(
+            activeHandle,
+            editedText,
+            liveInputComposingRef.current
+          )
+          return sent ? { kind: 'handled' } : { kind: 'suppress-raw' }
         }
-        case 'commit-held-then-send':
-          await sendTerminalLiveControlAfterPendingFlush(
+        case 'commit-held-then-send': {
+          const sent = await sendTerminalLiveControlAfterPendingFlush(
             () => flushPendingLiveInputText(activeHandle),
             () => sendLiveTerminalInputRef.current(activeHandle, decision.bytes)
           )
-          return { kind: 'handled' }
+          return sent ? { kind: 'handled' } : { kind: 'suppress-raw' }
+        }
         default:
           decision satisfies never
           return { kind: 'handled' }
@@ -102,6 +114,7 @@ export function useTerminalLiveAccessoryInputCommit({
       clearPendingLiveInputCommit,
       flushPendingLiveInputText,
       heldLiveInputTextRef,
+      liveInputComposingRef,
       liveInputRef,
       liveInputTerminalHandles,
       pendingLiveInputHandleRef,

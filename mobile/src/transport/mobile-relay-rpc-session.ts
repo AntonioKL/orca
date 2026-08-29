@@ -10,18 +10,14 @@ import { markRpcDeliveryUnknown } from './rpc-delivery-ambiguity'
 import { openRpcRequestBudget, resolvePostConnectRequestTimeout } from './rpc-request-budget'
 import { stringifyMobileOutboundJson } from './mobile-outbound-json'
 import { isRpcResponse } from './rpc-response-shape'
-import { RpcSessionLivenessWatchdog } from './rpc-session-liveness-watchdog'
 import type { RpcClient } from './rpc-client'
-import type { ConnectionState, RpcResponse } from './types'
+import type { ConnectionLogSink, ConnectionState, RpcResponse } from './types'
 import {
   isMobileJsonStructureCapacityError,
   parseMobileJsonTextWithinLimits
 } from './mobile-json-text-admission'
 import { encodeTerminalStreamFrame } from './terminal-stream-protocol'
-
-const RELAY_PROBE_TIMEOUT_MS = 4_000
-const RELAY_MISSED_PROBE_LIMIT = 2
-const RELAY_FOREGROUND_PROBE_MIN_INTERVAL_MS = 10_000
+import { createMobileRelayLivenessWatchdog } from './mobile-relay-liveness-watchdog'
 
 type PendingRequest = {
   resolve: (response: RpcResponse) => void
@@ -47,6 +43,7 @@ export function connectMobileRelayRpcSession(args: {
   desktopPublicKeyB64: string
   requestTimeoutMs?: number
   createSocket?: (url: string) => WebSocket
+  onLog?: ConnectionLogSink
 }): MobileRelayRpcSession {
   const requestTimeoutMs = args.requestTimeoutMs ?? 30_000
   const pending = new Map<string, PendingRequest>()
@@ -146,12 +143,8 @@ export function connectMobileRelayRpcSession(args: {
     getResumeConfirmation: () => resumeConfirmation,
     getFailure: () => failure
   }
-  const livenessWatchdog = new RpcSessionLivenessWatchdog({
-    transport: 'relay',
-    idleProbeMs: null,
-    probeTimeoutMs: RELAY_PROBE_TIMEOUT_MS,
-    missedProbeLimit: RELAY_MISSED_PROBE_LIMIT,
-    voluntaryProbeMinIntervalMs: RELAY_FOREGROUND_PROBE_MIN_INTERVAL_MS,
+  const livenessWatchdog = createMobileRelayLivenessWatchdog({
+    onLog: args.onLog,
     sendProbe: () =>
       state === 'connected' && sendFrame({ id: nextId(), method: 'status.get', params: undefined }),
     terminate: () => fail(new Error('relay session liveness timeout'))

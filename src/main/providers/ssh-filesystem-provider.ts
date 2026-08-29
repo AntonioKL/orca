@@ -1,5 +1,5 @@
 import type { SshChannelMultiplexer } from '../ssh/ssh-channel-multiplexer'
-import { isMethodNotFoundError, readFileViaStream } from '../ssh/ssh-filesystem-stream-reader'
+import { isMethodNotFoundError } from '../ssh/ssh-filesystem-stream-reader'
 import { lstatViaSftp } from './ssh-filesystem-provider-sftp'
 import {
   downloadFileViaSftp,
@@ -16,7 +16,6 @@ import {
 import type {
   IFilesystemProvider,
   FileRangeReadResult,
-  FileReadLimits,
   FileStat,
   FileReadResult,
   FileUploadSession,
@@ -43,6 +42,8 @@ import {
 import { SshFilesystemDirectoryReader } from './ssh-filesystem-directory-reader'
 import { requestSshMarkdownDocumentPaths } from './ssh-markdown-document-listing'
 import { writeSshFileBase64Chunk } from './ssh-filesystem-binary-write'
+import { readSshDocPreviewFile } from './ssh-filesystem-doc-preview'
+import { SshFilesystemFileReader } from './ssh-filesystem-file-reader'
 const WORKSPACE_SPACE_SCAN_TIMEOUT_MS = 130_000
 export class SshFilesystemProvider implements IFilesystemProvider {
   private connectionId: string
@@ -51,8 +52,8 @@ export class SshFilesystemProvider implements IFilesystemProvider {
   private unsubscribeNotifications: (() => void) | null = null
   private tempDirPromise: Promise<string> | null = null
   private disposed = false
-  private loggedStreamFallback = false
   private readonly directoryReader: SshFilesystemDirectoryReader
+  private readonly fileReader: SshFilesystemFileReader
   readonly downloadFolder?: IFilesystemProvider['downloadFolder']
 
   constructor(
@@ -65,6 +66,7 @@ export class SshFilesystemProvider implements IFilesystemProvider {
     this.connectionId = connectionId
     this.mux = mux
     this.directoryReader = new SshFilesystemDirectoryReader(mux)
+    this.fileReader = new SshFilesystemFileReader(mux)
 
     if (createSftp) {
       // Why: system SSH has raw single-file transfer but no ssh2 SFTP channel;
@@ -109,30 +111,18 @@ export class SshFilesystemProvider implements IFilesystemProvider {
     return this.directoryReader.readDir(dirPath, options)
   }
 
-  async readFile(filePath: string, limits?: FileReadLimits): Promise<FileReadResult> {
-    // Why: streaming is the default path so previews above the legacy single-
-    // frame budget (~12 MB after base64) don't hit MAX_MESSAGE_SIZE. Old relays
-    // that don't implement fs.readFileStream surface as MethodNotFound; we fall
-    // back to the legacy single-shot fs.readFile (which retains the old 10 MB
-    // cap on those hosts).
-    try {
-      return await readFileViaStream(this.mux, filePath, limits)
-    } catch (err) {
-      if (isMethodNotFoundError(err)) {
-        if (!this.loggedStreamFallback) {
-          this.loggedStreamFallback = true
-          console.warn(
-            '[ssh-fs] Relay does not implement fs.readFileStream; falling back to fs.readFile (10 MB cap)'
-          )
-        }
-        return (await this.mux.request('fs.readFile', { filePath })) as FileReadResult
-      }
-      throw err
-    }
+  readFile(...args: Parameters<IFilesystemProvider['readFile']>): Promise<FileReadResult> {
+    return this.fileReader.readFile(...args)
   }
 
   readFileChunk(filePath: string, offset: number, length: number) {
     return readSshFileChunk(this.mux, filePath, offset, length)
+  }
+
+  readDocPreviewFile(
+    request: Parameters<NonNullable<IFilesystemProvider['readDocPreviewFile']>>[0]
+  ): ReturnType<NonNullable<IFilesystemProvider['readDocPreviewFile']>> {
+    return readSshDocPreviewFile(this.mux, request)
   }
 
   readFileRange(
@@ -212,13 +202,13 @@ export class SshFilesystemProvider implements IFilesystemProvider {
     contentBase64: string,
     append: boolean
   ): Promise<void> {
-    await writeSshFileBase64Chunk({
-      createSftp: this.createSftp,
-      rawTransfer: this.rawTransfer,
+    await writeSshFileBase64Chunk(
+      this.createSftp,
+      this.rawTransfer,
       filePath,
       contentBase64,
       append
-    })
+    )
   }
 
   async stat(filePath: string): Promise<FileStat> {

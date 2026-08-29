@@ -17,6 +17,13 @@ type DockerSshRelayConnectionOptions = {
   relayGracePeriodSeconds?: number
   remotePath?: string
   viaProxyJump?: boolean
+  /**
+   * Seed a terminal tab when the worktree has none. Default true.
+   *
+   * Why it is optional: a spec asking whether the PRODUCT adds a tab cannot tell this helper's
+   * tab from the one under test, so it must be able to leave the worktree empty.
+   */
+  seedInitialTab?: boolean
 }
 
 type DockerSshRelayReconnectOptions = {
@@ -29,7 +36,14 @@ export async function connectDockerSshRelayTarget(
   options: DockerSshRelayConnectionOptions = {}
 ): Promise<ConnectedDockerSshRelayTarget> {
   return page.evaluate(
-    async ({ connectTimeoutMs, target, remotePath, relayGracePeriodSeconds, viaProxyJump }) => {
+    async ({
+      connectTimeoutMs,
+      target,
+      remotePath,
+      relayGracePeriodSeconds,
+      viaProxyJump,
+      seedInitialTab
+    }) => {
       const store = window.__store
       if (!store) {
         throw new Error('Store unavailable')
@@ -172,7 +186,7 @@ export async function connectDockerSshRelayTarget(
           throw new Error(`No remote worktree found for ${result.repo.path}`)
         }
         store.getState().setActiveWorktree(worktree.id)
-        if ((store.getState().tabsByWorktree[worktree.id] ?? []).length === 0) {
+        if (seedInitialTab && (store.getState().tabsByWorktree[worktree.id] ?? []).length === 0) {
           store.getState().createTab(worktree.id)
         }
         store.getState().setActiveTabType('terminal')
@@ -202,6 +216,7 @@ export async function connectDockerSshRelayTarget(
           ? DOCKER_SSH_PROXY_JUMP_REMOTE_REPO_PATH
           : DOCKER_SSH_RELAY_REMOTE_REPO_PATH),
       viaProxyJump: options.viaProxyJump ?? false,
+      seedInitialTab: options.seedInitialTab ?? true,
       relayGracePeriodSeconds: options.relayGracePeriodSeconds ?? 1
     }
   )

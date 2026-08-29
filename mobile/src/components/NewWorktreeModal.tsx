@@ -130,26 +130,19 @@ export function NewWorktreeModal({
   onCreated,
   onClose
 }: Props) {
-  const openEpochRef = useRef(0)
-  const wasVisibleRef = useRef(false)
-  const [operationsEpoch, setOperationsEpoch] = useState({ operations, epoch: 0 })
-
   // Why: each drawer opening is a fresh form session; remounting resets local
   // form state before paint instead of clearing it in a visible-prop Effect.
-  if (visible && !wasVisibleRef.current) {
-    openEpochRef.current += 1
-  }
-  wasVisibleRef.current = visible
-  if (operationsEpoch.operations !== operations) {
-    setOperationsEpoch({
-      operations,
-      epoch: operationsEpoch.epoch + 1
+  const [session, setSession] = useState({ openEpoch: 0, visible })
+  if (session.visible !== visible) {
+    setSession({
+      openEpoch: visible ? session.openEpoch + 1 : session.openEpoch,
+      visible
     })
   }
 
   return (
     <NewWorktreeModalContent
-      key={`${openEpochRef.current}:${operationsEpoch.epoch}`}
+      key={`${session.openEpoch}:${hostId}`}
       visible={visible}
       operations={operations}
       hostId={hostId}
@@ -597,7 +590,7 @@ function NewWorktreeModalContent({
             workspaceName: trimmedName || undefined,
             note: trimmedNote,
             nameIsAutoManaged: composer.isNameAutoManaged,
-            supportsIdempotentCutoverRetry: getWorktreeCreateCutoverSupport()
+            worktreeCreateIdempotency: getWorktreeCreateCutoverSupport()
           })
         : await operations.createBlankWorkspace({
             repoId: selectedRepo.id,
@@ -608,7 +601,7 @@ function NewWorktreeModalContent({
             nameWasGenerated: !trimmedName,
             comment: trimmedNote,
             setupDecision,
-            supportsIdempotentCutoverRetry: getWorktreeCreateCutoverSupport()
+            worktreeCreateIdempotency: getWorktreeCreateCutoverSupport()
           })
       if ('error' in result) {
         setError(result.error)

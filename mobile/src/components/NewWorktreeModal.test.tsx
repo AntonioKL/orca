@@ -86,7 +86,7 @@ describe('NewWorktreeModal project targets', () => {
         listRepositories,
         readRuntimeCapabilities: vi.fn().mockResolvedValue({
           tasksSupported: false,
-          idempotentWorktreeCreateSupported: false,
+          worktreeCreateIdempotency: false,
           hostPlatform: 'darwin'
         }),
         readRuntimeSettings: vi.fn().mockResolvedValue({}),
@@ -147,7 +147,7 @@ describe('NewWorktreeModal project targets', () => {
         listRepositories: vi.fn().mockResolvedValue(listedRepos),
         readRuntimeCapabilities: vi.fn().mockResolvedValue({
           tasksSupported: false,
-          idempotentWorktreeCreateSupported: false,
+          worktreeCreateIdempotency: false,
           hostPlatform: 'darwin'
         }),
         readRuntimeSettings: vi.fn().mockResolvedValue({}),

@@ -32,7 +32,7 @@ export async function executeMobileWebWorkspaceCreationCreateOperation(args: {
       repoId: hostRepoId,
       agentChoice: requiredAgentChoice(payload.agentChoice),
       comment: payload.comment,
-      supportsIdempotentCutoverRetry: capabilities.idempotentWorktreeCreateSupported
+      worktreeCreateIdempotency: capabilities.worktreeCreateIdempotency
     })
     return presentCreatedWorkspace(result, hostRepoId, args.authority)
   }
@@ -52,7 +52,7 @@ export async function executeMobileWebWorkspaceCreationCreateOperation(args: {
       workspaceName: payload.workspaceName,
       note: payload.note,
       sparseCheckout: payload.sparseCheckout,
-      supportsIdempotentCutoverRetry: capabilities.idempotentWorktreeCreateSupported
+      worktreeCreateIdempotency: capabilities.worktreeCreateIdempotency
     })
     return presentCreatedWorkspace(result, hostRepoId, args.authority)
   }

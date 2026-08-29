@@ -992,6 +992,8 @@ export default function HomeScreen() {
           onDismiss: () => setActionTarget(null),
           onReconnect: (hostId) => void forceReconnectHost(hostId),
           onDisconnect: disconnectHostClient,
+          onDiagnostics: (hostId) =>
+            router.push({ pathname: '/connection-log', params: { hostId } }),
           onEdit: openMobileHostEdit,
           onRemove: (host) => setConfirmRemove(host)
         })}
