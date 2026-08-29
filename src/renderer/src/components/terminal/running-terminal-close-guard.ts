@@ -85,7 +85,14 @@ function shouldConfirmForProbe(
     return tracked
   }
   const children = readPtyProcessInspectionEvidence(probe.value).children
-  return children.verdict === 'live' || (children.verdict === 'unverifiable' && tracked)
+  // Why `hasChildProcesses` still votes: it is `children.verdict === 'live'` collapsed, so only
+  // its `false` pole is lossy. A `true` beside evidence this client cannot vouch for — a
+  // malformed or foreign `processEvidence`, which reads as `unverifiable` — is still a positive
+  // observation, and the #16900/#16908 polarity rule keeps a positive observation's vote.
+  if (children.verdict === 'live' || probe.value.hasChildProcesses) {
+    return true
+  }
+  return children.verdict === 'unverifiable' && tracked
 }
 
 /**
