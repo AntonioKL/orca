@@ -1,3 +1,5 @@
+import { hostStackConvergenceActions, type HostStackPopToAction } from './host-stack-route-identity'
+
 export type HostStackNavigationState = Readonly<{
   key?: string
   index: number
@@ -7,7 +9,7 @@ export type HostStackNavigationState = Readonly<{
 export type HostStackNavigationRoute = Readonly<{
   key?: string
   name: string
-  params?: Readonly<{ hostId?: unknown }>
+  params?: Readonly<Record<string, unknown>>
   state?: HostStackNavigationState
 }>
 
@@ -27,7 +29,7 @@ export type HostStackReplaceAction = Readonly<{
 
 export type HostStackRootNavigation = {
   addListener: (event: 'state', listener: () => void) => () => void
-  dispatch: (action: HostStackReplaceAction) => void
+  dispatch: (action: HostStackReplaceAction | HostStackPopToAction) => void
   // Why: the root layout's navigator has no committed state until it hydrates, and a
   // notification tap can arm the transition before that first commit.
   getState: () => HostStackNavigationState | undefined
@@ -64,9 +66,10 @@ export function hostStackRouteHref(target: HostStackRouteTarget): HostStackRoute
   return { pathname: `/h/${target.name}`, params: target.params }
 }
 
-// Why: the host is pushed as an encoded segment, so the committed route may hold
-// either form — an id with `/`, `#`, or `%` must still match its own push.
-function hostParamMatches(param: unknown, expectedHostId: string): boolean {
+// Why: pushed host segments may commit encoded, so an id with `/`, `#`, or `%` must
+// still match the host mount its own encoded push created. Deliberately NOT reused for
+// route identity — decoding there would alias a host named `a%2Fb` onto one named `a/b`.
+function pushedHostParamMatches(param: unknown, expectedHostId: string): boolean {
   if (typeof param !== 'string') {
     return false
   }
@@ -108,11 +111,34 @@ function mountedHostStack(
     !hostState?.key ||
     hostRoute?.name !== '[hostId]/index' ||
     !hostRoute.key ||
-    !hostParamMatches(hostRoute.params?.hostId, expectedHostId)
+    !pushedHostParamMatches(hostRoute.params?.hostId, expectedHostId)
   ) {
     return null
   }
   return { key: hostState.key, routeKey: hostRoute.key }
+}
+
+function completedHostStackNavigation(): HostStackNavigationController {
+  return { cancel: () => {}, isActive: () => false, retarget: () => {} }
+}
+
+/** The invariant: one live screen per target. If the target is already mounted
+ *  anywhere in the tree, focus THAT one — pushing and replacing would mount a second
+ *  copy for the same worktree, and the two then contend for the one input lease the
+ *  host keeps per (terminal, client). */
+function convergeOnMountedRoute(
+  navigation: HostStackRootNavigation,
+  target: HostStackRouteTarget
+): 'absent' | 'converging' | 'settled' {
+  const state = navigation.getState()
+  const actions = state && hostStackConvergenceActions(state, target)
+  if (!actions) {
+    return 'absent'
+  }
+  for (const action of actions) {
+    navigation.dispatch(action)
+  }
+  return actions.length > 0 ? 'converging' : 'settled'
 }
 
 /** Opens a deep host route by mounting `/h/[hostId]` first and replacing it once
@@ -124,8 +150,14 @@ export function navigateToHostStackRoute(
   hostId: string,
   target: HostStackRouteTarget
 ): HostStackNavigationController {
+  // Nothing else is in flight yet, so a hit here settles the whole request.
+  if (convergeOnMountedRoute(navigation, target) !== 'absent') {
+    return completedHostStackNavigation()
+  }
+
   let active = true
   let hostRouteSeen = false
+  let hostIndexSeen = false
   let selectedTarget = target
   let unsubscribeState = () => {}
   const dispose = () => {
@@ -153,8 +185,20 @@ export function navigateToHostStackRoute(
       return
     }
     const hostStack = hostContainer && mountedHostStack(hostContainer, hostId)
+    hostIndexSeen ||= hostStack !== null
+    // Why: the target can already be mounted under the route this transition pushed —
+    // completing the REPLACE then mounts the second copy this owner exists to prevent.
+    const converged = convergeOnMountedRoute(navigation, selectedTarget)
+    if (converged !== 'absent') {
+      // Why: stay armed until the `[hostId]/index` we pushed lands, or it settles on
+      // top of the very screen we just converged on.
+      if (converged === 'settled' && hostIndexSeen) {
+        dispose()
+      }
+      return
+    }
     if (!hostStack) {
-      if (hostContainer && hostParamMatches(hostContainer.params?.hostId, hostId)) {
+      if (hostContainer && pushedHostParamMatches(hostContainer.params?.hostId, hostId)) {
         dispose()
         router.replace(hostStackRouteHref(selectedTarget))
       }
