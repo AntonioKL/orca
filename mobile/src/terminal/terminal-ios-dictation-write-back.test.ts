@@ -20,6 +20,6 @@ describe('terminal iOS dictation write-back', () => {
   })
 
   it('still normalizes the buffered command text at send time', () => {
-    expect(sessionRouteSource).toContain('normalizeTerminalTextInput(input)')
+    expect(sessionRouteSource).toContain('normalizeTerminalTextInput(draft)')
   })
 })
