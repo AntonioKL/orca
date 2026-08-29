@@ -63,13 +63,13 @@ import {
   ManagedCodexHomeTemporarilyUnavailableError
 } from './host-codex-managed-home-ownership'
 import { isDefinitiveAbsence } from '../../shared/definitive-filesystem-absence'
+import {
+  WINDOWS_RM_MAX_RETRIES,
+  WINDOWS_RM_RETRY_DELAY_MS
+} from '../../shared/windows-transient-lock-removal'
 
 const LOGIN_TIMEOUT_MS = 120_000
 const MAX_LOGIN_OUTPUT_CHARS = 4_000
-// Why: mirrors the Windows rm retry policy in local-worktree-filesystem — a
-// just-terminated codex login can briefly keep handles inside a managed home.
-const WINDOWS_RM_MAX_RETRIES = 8
-const WINDOWS_RM_RETRY_DELAY_MS = 150
 const WINDOWS_LOGIN_AUTH_POLL_INTERVAL_MS = 500
 const WINDOWS_LOGIN_POST_AUTH_EXIT_GRACE_MS = 5_000
 const WINDOWS_LOGIN_TREE_KILL_TIMEOUT_MS = 5_000
@@ -205,6 +205,8 @@ function removeManagedHomeTreeSync(targetPath: string): void {
   // Why: codex login descendants can briefly keep Windows handles on files in
   // the managed home (e.g. log/codex-login.log); bounded retries absorb the
   // transient lock instead of failing with ENOTEMPTY and orphaning the home.
+  // Why unconditional, unlike transientLockRemovalOptions(): a WSL-hosted managed home is removed
+  // by this host process, so the lock this absorbs is not gated on the host being Windows.
   rmSync(targetPath, {
     recursive: true,
     force: true,
