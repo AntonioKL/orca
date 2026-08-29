@@ -10,23 +10,29 @@ import {
 } from '@/components/ui/dialog'
 import { translate } from '@/i18n/i18n'
 import { showShutdownCheckpointFailureToast } from '@/lib/shutdown-checkpoint-failure-toast'
-import { isRemoteRuntimePtyId } from '@/runtime/runtime-terminal-inspection'
 import { useAppStore } from '@/store'
 import { runWithWindowCloseCheckpointScope } from '../window-close-request-coordinator'
-import { anyPtyBlocksWindowClose } from './window-close-running-process-evidence'
+import {
+  anyPtyBlocksWindowClose,
+  collectWindowClosePtyIds
+} from './window-close-running-process-evidence'
 import { RUNNING_CLOSE_PROBE_TIMEOUT_MS } from './running-terminal-close-guard'
 
 export type WindowCloseRunningProcessPrompt = {
-  /** Probes the window's PTYs on their execution hosts, then raises the confirmation or closes. */
-  proceedToNativeWindowClose: (isQuitting: boolean) => void
+  /** Probes the window's PTYs on their execution hosts, then raises the confirmation or closes.
+   *  `localPtysSurviveQuit` comes from main (window:close-requested) — the renderer cannot see
+   *  whether the daemon will keep this window's local shells past a quit. */
+  proceedToNativeWindowClose: (isQuitting: boolean, localPtysSurviveQuit: boolean) => void
   windowCloseDialog: ReactElement
 }
 
 /**
- * The window-close confirmation, shown for any terminal with running children.
- * Direct-SSH panes are probed on their execution host rather than skipped: their
- * shell does not survive the window, so treating "runs elsewhere" as "not ours to
- * warn about" closed over live remote work. Owns the probe, the decision and the
+ * The window-close confirmation, shown for any terminal with running children whose
+ * work this close would end. Direct-SSH panes are probed on their execution host
+ * rather than skipped: their shell does not survive the window, so treating "runs
+ * elsewhere" as "not ours to warn about" closed over live remote work. A quit skips
+ * the confirmation only while main reports the daemon will keep the local shells;
+ * without it the same quit is what kills them. Owns the probe, the decision and the
  * dialog together so the decision is only ever reachable through the surface the
  * user actually sees.
  */
@@ -60,20 +66,15 @@ export function useWindowCloseRunningProcessPrompt(): WindowCloseRunningProcessP
   }, [])
 
   const proceedToNativeWindowClose = useCallback(
-    (isQuitting: boolean) => {
-      if (!isQuitting) {
+    (isQuitting: boolean, localPtysSurviveQuit: boolean) => {
+      // Why a quit can still ask: quit's killAllPty() is a no-op only while the daemon
+      // adapter owns the shells, and that state is not guaranteed — a daemon that threw,
+      // failed open, or was replaced by the degraded provider leaves the children
+      // parented to this process, so the same silent quit takes live work with it.
+      // Only main can tell the two apart, and only its explicit yes skips the warning.
+      if (!isQuitting || !localPtysSurviveQuit) {
         const state = useAppStore.getState()
-        // Why no owning-host filter: `inspectProcess` dispatches on the PTY id, so
-        // each pane is answered by whichever host runs it. Selecting local worktrees
-        // here discarded every direct-SSH pane unprobed, and discarded a worktree
-        // whose repo had not hydrated yet as though it were remote.
-        const ptyIds = Object.values(state.tabsByWorktree).flatMap((worktreeTabs) =>
-          worktreeTabs
-            .flatMap((tab) => state.ptyIdsByTabId[tab.id] ?? [])
-            // Runtime-environment panes stay out: they are owned by a host this
-            // window is only a viewer of, and outlive it by design.
-            .filter((ptyId) => !isRemoteRuntimePtyId(ptyId))
-        )
+        const ptyIds = collectWindowClosePtyIds(state, isQuitting)
         if (ptyIds.length > 0) {
           // Why the same bound as the tab and pane close paths: an unanswered probe
           // must not leave the window silently stuck (#10142).

@@ -32,3 +32,29 @@ export function resolveWindowCloseAction(state: WindowCloseState): WindowCloseAc
   }
   return 'request-confirmation'
 }
+
+/**
+ * Whether the local PTYs this window owns keep running after the quit closing it.
+ *
+ * Why this gates the quit bypass: quit calls `killAllPty()` then `disconnectDaemon()`,
+ * and `killAllPty` is a no-op once the daemon adapter is installed — the shells are
+ * the daemon's children and it declines to retire while a session is live. With no
+ * daemon adapter the same quit takes the foreground children down with the process,
+ * which is the state the bypass was never conditional on.
+ *
+ * Only a definite yes may skip the warning. A missing getter (window built before the
+ * daemon wiring exists) or a throwing one is an undetermined answer, and an
+ * undetermined answer is not a yes.
+ */
+export function resolveLocalPtysSurviveQuit(
+  getDaemonOwnsFreshPersistentPtys?: () => boolean
+): boolean {
+  if (!getDaemonOwnsFreshPersistentPtys) {
+    return false
+  }
+  try {
+    return getDaemonOwnsFreshPersistentPtys() === true
+  } catch {
+    return false
+  }
+}
