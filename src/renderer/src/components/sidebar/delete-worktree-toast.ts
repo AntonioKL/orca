@@ -1,5 +1,6 @@
 import { translate } from '@/i18n/i18n'
 import {
+  isHeldWorkspaceDirectoryRemovalError,
   isLockedWorktreeRemovalError,
   isProvenLivePtyRemovalError,
   type WorktreeForceDeleteReason
@@ -34,6 +35,24 @@ export function getDeleteWorktreeToastCopy(
             'This workspace is locked by Git. Run git worktree unlock <worktree-path> from its repository, then retry deletion.'
           ),
       isDestructive: false
+    }
+  }
+
+  // Why (STA-4895): this failure matches no force-delete reason, so it would otherwise fall to
+  // the raw-error branch and render the main process's English hint verbatim. That hint stays
+  // put as the wire anchor the classifier matches on; the copy the user reads comes from here.
+  if (isHeldWorkspaceDirectoryRemovalError(error)) {
+    return {
+      title: translate(
+        'auto.components.sidebar.delete.worktree.toast.1d0fa5c0a5',
+        'Failed to delete workspace {{value0}}',
+        { value0: worktreeName }
+      ),
+      description: translate(
+        'auto.components.sidebar.delete.worktree.toast.workspaceDirectoryHeld',
+        'Windows would not delete the workspace folder because a program may still have it open or access was denied. Close any terminal, editor, or dev server whose current folder is the workspace, then delete it again; if nothing is using it, check the folder permissions.'
+      ),
+      isDestructive: true
     }
   }
 
