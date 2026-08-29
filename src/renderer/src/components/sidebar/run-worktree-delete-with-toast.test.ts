@@ -1,8 +1,7 @@
 /**
- * STA-4895: the Force Delete retry renders its own toast, bypassing
- * `getDeleteWorktreeToastCopy`. The held-workspace-directory hint is English text the
- * main process appends as a wire anchor, so that bypass puts it in front of the user
- * verbatim — the exact leak the first delete toast was fixed to close.
+ * STA-4895: every non-interactive delete error must enter the shared copy funnel. The held-
+ * workspace-directory hint is English text the main process appends as a wire anchor, so either
+ * a resolved failure or a rejected promise that bypasses the funnel puts it in front of the user.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { WORKSPACE_DIRECTORY_HELD_HINT } from '../../../../shared/worktree/removal'
