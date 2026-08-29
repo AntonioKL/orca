@@ -15,17 +15,17 @@ import { clearForegroundRelease } from './pane-terminal-foreground-queue-state'
 import {
   BACKGROUND_CHUNK_CHARS,
   discardTerminalOutput,
+  fireQueuedAckCredits,
   queuedByTerminal,
   scheduleDrain,
   type QueueEntry,
   type TerminalOutputParsedCallback,
   type TerminalOutputTarget
-} from './pane-terminal-output-scheduler'
+} from './pane-terminal-output-queue-registry'
 import {
   discardDetachedQueueEntry,
-  fireQueuedAckCredits,
   hasHighPriorityBacklog
-} from './pane-terminal-output-drain'
+} from './pane-terminal-output-queue-backlog'
 
 // Why no per-write scroll enforcement: xterm's BufferService.isUserScrolling owns live follow/pin; app-side enforcement is limited to structural ops xterm can't identify, like replay.
 export function writeBackgroundTerminalChunk(
