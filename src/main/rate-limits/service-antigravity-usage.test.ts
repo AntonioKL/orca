@@ -116,5 +116,10 @@ describe('RateLimitService Antigravity usage', () => {
     const antigravity = service.getState().antigravity
     expect(antigravity?.error).not.toContain('Token refresh failed')
     expect(antigravity?.error).toContain('shared Google Code Assist quota')
+    // Why: retention is what makes this lane new — the tooltip prints this reason under
+    // "Refresh failed — showing cached data" and directly above the retained meter, so a reason
+    // that calls the usage unavailable contradicts the numbers rendered next to it.
+    expect(antigravity?.session?.usedPercent).toBe(42)
+    expect(antigravity?.error).not.toContain('not available')
   })
 })

@@ -40,7 +40,11 @@ describe('deriveAntigravityRateLimits', () => {
     // read, not an absent one — `unavailable` would discard the last good snapshot downstream.
     expect(antigravity.status).toBe('error')
     expect(antigravity.error).not.toContain('Gemini project ID not found')
-    expect(antigravity.error).toContain('Antigravity usage is not available')
+    // Why: still Orca's own Antigravity wording — but this lane retains a reading, so it may not
+    // say the usage is unavailable. The no-sign-in lane below keeps that phrasing.
+    expect(antigravity.error).toContain('Antigravity usage')
+    expect(antigravity.error).toContain('shared Google Code Assist quota')
+    expect(antigravity.error).not.toContain('not available')
     expect(antigravity.session).toBeNull()
     expect(antigravity.weekly).toBeNull()
   })
