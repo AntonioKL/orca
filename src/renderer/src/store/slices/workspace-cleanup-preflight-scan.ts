@@ -18,8 +18,16 @@ import {
  * the preflight's picture of the workspaces comes from. It carries forward what
  * the scan reported *about the scan* as well as the rows it found, because an
  * omission means one thing from a host that answered and nothing at all from one
- * that did not.
+ * that did not — and when it read, so a caller can tell this picture apart from
+ * one the list acquired some other way.
  */
+export type WorkspaceCleanupPreflight = {
+  results: WorkspaceCleanupPreflightResult[]
+  /** When this picture was read, as the oldest chunk that contributed to it:
+   *  the rescan is no fresher than its stalest answer. `null` only when nothing
+   *  was scanned at all, which also means there is nothing to report. */
+  scannedAt: number | null
+}
 export async function preflightWorkspaceCleanupCandidates(
   targets: readonly WorkspaceCleanupRemovalTarget[],
   getState: () => AppState,
@@ -31,13 +39,14 @@ export async function preflightWorkspaceCleanupCandidates(
     unverifiedRemovalConsent?: WorkspaceCleanupUnverifiedRemovalConsent
     getConsentAttemptId?: (identity: string) => string | undefined
   } = {}
-): Promise<WorkspaceCleanupPreflightResult[]> {
+): Promise<WorkspaceCleanupPreflight> {
   // Why: one batched scan per chunk replaces a git worktree-list + activity
   // read per row; chunks stay under main's silent target truncation limit.
   const candidatesByIdentity = new Map<string, WorkspaceCleanupCandidate>()
   const identitiesByWorktreeId = new Map<string, Set<string>>()
   const errors: WorkspaceCleanupScanError[] = []
   const repoListings: WorkspaceCleanupRepoListing[] = []
+  let scannedAt: number | null = null
   const worktreeIds = targets.map((target) => target.worktreeId)
   for (let start = 0; start < worktreeIds.length; start += WORKSPACE_CLEANUP_TARGET_BATCH_LIMIT) {
     const chunk = worktreeIds.slice(start, start + WORKSPACE_CLEANUP_TARGET_BATCH_LIMIT)
@@ -47,6 +56,7 @@ export async function preflightWorkspaceCleanupCandidates(
       refreshActivity: true
     })
     const enriched = await enrich(scan.candidates, getState())
+    scannedAt = scannedAt === null ? scan.scannedAt : Math.min(scannedAt, scan.scannedAt)
     errors.push(...scan.errors)
     repoListings.push(...(scan.repoListings ?? []))
     for (const candidate of enriched) {
@@ -57,13 +67,16 @@ export async function preflightWorkspaceCleanupCandidates(
       identitiesByWorktreeId.set(candidate.worktreeId, identities)
     }
   }
-  return targets.map((target) =>
-    evaluateWorkspaceCleanupPreflight(
-      target,
-      candidatesByIdentity,
-      identitiesByWorktreeId,
-      { errors, repoListings },
-      options
+  return {
+    scannedAt,
+    results: targets.map((target) =>
+      evaluateWorkspaceCleanupPreflight(
+        target,
+        candidatesByIdentity,
+        identitiesByWorktreeId,
+        { errors, repoListings },
+        options
+      )
     )
-  )
+  }
 }

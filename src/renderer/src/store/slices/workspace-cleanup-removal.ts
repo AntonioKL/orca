@@ -73,16 +73,7 @@ export async function removeWorkspaceCleanupCandidates(
     removableTargets.push(target)
   }
 
-  // Why: the preflight's rescan is newer than the list the user confirmed
-  // against, but not newer than a refresh that settles while it runs. Hold the
-  // rows it was newer than so the republish below can tell the two apart.
-  const listedRowsBeforePreflight = new Map(
-    (get().workspaceCleanupScan?.candidates ?? []).map((candidate) => [
-      getWorkspaceCleanupCandidateIdentity(candidate),
-      candidate
-    ])
-  )
-  const preflights = await preflightWorkspaceCleanupCandidates(
+  const preflight = await preflightWorkspaceCleanupCandidates(
     removableTargets,
     get,
     (candidates, state) =>
@@ -101,22 +92,22 @@ export async function removeWorkspaceCleanupCandidates(
 
   const refreshedCandidates: WorkspaceCleanupCandidate[] = []
   const retiredIdentities = new Set<string>()
-  for (const preflight of preflights) {
-    if (!preflight.ok) {
-      failures.push(preflight.failure)
-      if (preflight.refreshedCandidate) {
-        refreshedCandidates.push(preflight.refreshedCandidate)
+  for (const result of preflight.results) {
+    if (!result.ok) {
+      failures.push(result.failure)
+      if (result.refreshedCandidate) {
+        refreshedCandidates.push(result.refreshedCandidate)
       }
-      if (preflight.retiredCandidateIdentity) {
-        retiredIdentities.add(preflight.retiredCandidateIdentity)
+      if (result.retiredCandidateIdentity) {
+        retiredIdentities.add(result.retiredCandidateIdentity)
       }
       continue
     }
     targetsToRemove.push({
-      target: preflight.target,
-      candidate: preflight.candidate,
-      ...(preflight.sameIdSurvivingHostId
-        ? { sameIdSurvivingHostId: preflight.sameIdSurvivingHostId }
+      target: result.target,
+      candidate: result.candidate,
+      ...(result.sameIdSurvivingHostId
+        ? { sameIdSurvivingHostId: result.sameIdSurvivingHostId }
         : {})
     })
   }
@@ -124,7 +115,7 @@ export async function removeWorkspaceCleanupCandidates(
     set,
     refreshedCandidates,
     retiredIdentities,
-    listedRowsBeforePreflight
+    preflight.scannedAt
   )
   const scheduledRemovalIdentities = new Set(
     targetsToRemove.map(({ candidate }) => getWorkspaceCleanupCandidateIdentity(candidate))
@@ -243,36 +234,49 @@ export async function removeWorkspaceCleanupCandidates(
 }
 
 /**
- * Why: a stopped removal read its verdict off a rescan the list never saw. Left
- * unpublished, the row still shows the picture the user confirmed against, so
- * the obvious next move — confirm it again — re-runs the identical stop.
+ * The rule this whole surface turns on: **a cleanup row shows the most recent
+ * read of that workspace, and consent is only ever spent on a verdict the user
+ * has actually seen.**
  *
- * Publishing is disclosure, never consent: it only rewrites rows the list
- * already holds, and the delete still needs a fresh confirmation against the
- * republished row.
+ * The two halves are enforced in different places, and keeping them apart is
+ * what stops this from growing another special case:
  *
- * A workspace the rescan no longer lists is the same dead end with no row to
- * republish — repeating "Workspace no longer exists" forever is not a picture
- * the user can act on — so it is dropped instead. Both directions obey the same
- * limit: only a row the list already holds is touched, so this can neither
- * resurrect a workspace that is genuinely gone nor invent one it never showed.
+ * - *Recency* is decided here, and only here. A stopped removal read its verdict
+ *   off a rescan the list never saw; leaving it unpublished means the row still
+ *   shows the picture that was already refused, so the obvious next move —
+ *   confirm it again — re-runs the identical stop. Publishing it over a read
+ *   that is genuinely newer is the same mistake pointed the other way. So the
+ *   newer read wins, measured by `scannedAt`, the time the scan itself reports.
+ *   Which object happens to be sitting in the list says nothing about this: a
+ *   refresh issued after the rescan and a broad refresh that started minutes
+ *   before the confirmation both replace the row, and only one of them is newer.
  *
- * `listedBeforePreflight` is what makes it disclosure rather than a regression:
- * a rescan may only replace the very row it was newer than, so a refresh the
- * user completed while the preflight ran keeps the row it published.
+ * - *Consent* is not decided here at all. The delete is authorized against
+ *   `approvedCandidate`, captured when the user confirmed and never read from
+ *   the list, so publishing can only ever disclose — it cannot re-authorize a
+ *   stale confirmation no matter which row it writes.
+ *
+ * The one limit publishing does carry is provenance, and it is structural: this
+ * walks the rows the list already holds, so it can neither resurrect a workspace
+ * that is gone nor invent one the list never showed. A workspace the rescan no
+ * longer lists has no refreshed picture to put in its place — repeating
+ * "Workspace no longer exists" forever is not something the user can act on — so
+ * that row is dropped rather than rewritten, under the same recency rule.
  */
 function publishRefreshedWorkspaceCleanupCandidates(
   set: (partial: (state: AppState) => Partial<AppState>) => void,
   refreshed: readonly WorkspaceCleanupCandidate[],
   retiredIdentities: ReadonlySet<string>,
-  listedBeforePreflight: ReadonlyMap<string, WorkspaceCleanupCandidate>
+  rescannedAt: number | null
 ): void {
   if (refreshed.length === 0 && retiredIdentities.size === 0) {
     return
   }
   set((state) => {
     const scan = state.workspaceCleanupScan
-    if (!scan) {
+    // `null` means the rescan never ran, which also means it found nothing to
+    // report and this returned above — kept as the safe arm of its type.
+    if (!scan || rescannedAt === null || rescannedAt < scan.scannedAt) {
       return {}
     }
     const refreshedByIdentity = new Map(
@@ -284,11 +288,6 @@ function publishRefreshedWorkspaceCleanupCandidates(
       const next = refreshedByIdentity.get(identity)
       const retired = retiredIdentities.has(identity)
       if (!next && !retired) {
-        return [candidate]
-      }
-      // Identity alone also matches a row a settled refresh swapped in behind
-      // the preflight; that row is the newer read, so leave it standing.
-      if (listedBeforePreflight.get(identity) !== candidate) {
         return [candidate]
       }
       changed = true
