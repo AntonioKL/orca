@@ -400,10 +400,11 @@ describe('window close with a degraded local process read', () => {
   })
 
   /** The close paths that never probe end an attempt just as surely as the ones that do.
-   *  A quit arrives on the same re-sent `window:close-requested` and skips the probe
-   *  entirely, and its shutdown checkpoint can veto it — which leaves the window open
-   *  with the earlier attempt's probe still outstanding. `vetoNextCloses` is the real
-   *  producer: `confirmNativeWindowClose` reads `window.dispatchEvent`'s own return. */
+   *  A quit whose local shells main reports will survive arrives on the same re-sent
+   *  `window:close-requested` and skips the probe entirely, and its shutdown checkpoint
+   *  can veto it — which leaves the window open with the earlier attempt's probe still
+   *  outstanding. `vetoNextCloses` is the real producer: `confirmNativeWindowClose`
+   *  reads `window.dispatchEvent`'s own return. */
   function vetoNextCloses(): () => void {
     const veto = (event: Event): void => event.preventDefault()
     window.addEventListener('beforeunload', veto)
@@ -413,17 +414,17 @@ describe('window close with a degraded local process read', () => {
   it('does not reopen the warning on a probe left over from before a vetoed direct close', async () => {
     const settle = installDeferredInspections()
 
-    act(() => proceed!(false))
+    act(() => proceed!(false, false))
     await act(async () => {
       await Promise.resolve()
     })
     expect(settle).toHaveLength(1)
 
-    // The user hits Cmd+Q while the first probe is still out. A quit never probes,
-    // and the dirty-file checkpoint vetoes it, so the window simply stays open.
+    // The user hits Cmd+Q while the first probe is still out. A quit main vouches
+    // for never probes, and the dirty-file checkpoint vetoes it, so the window stays open.
     const stopVetoing = vetoNextCloses()
     try {
-      act(() => proceed!(true))
+      act(() => proceed!(true, true))
       expect(confirmWindowClose).not.toHaveBeenCalled()
       expect(vi.mocked(showShutdownCheckpointFailureToast)).toHaveBeenCalledTimes(1)
 
@@ -443,14 +444,14 @@ describe('window close with a degraded local process read', () => {
   it('does not re-run a vetoed direct close from a probe that answers idle behind it', async () => {
     const settle = installDeferredInspections()
 
-    act(() => proceed!(false))
+    act(() => proceed!(false, false))
     await act(async () => {
       await Promise.resolve()
     })
 
     const stopVetoing = vetoNextCloses()
     try {
-      act(() => proceed!(true))
+      act(() => proceed!(true, true))
       expect(vi.mocked(showShutdownCheckpointFailureToast)).toHaveBeenCalledTimes(1)
 
       // Why the toast count and not `confirmWindowClose`: the veto is a standing
@@ -476,7 +477,7 @@ describe('window close with a degraded local process read', () => {
   it('still closes the window directly on a quit that no checkpoint vetoes', async () => {
     installInspectProcess(async () => observedLiveInspection())
 
-    act(() => proceed!(true))
+    act(() => proceed!(true, true))
 
     expect(confirmWindowClose).toHaveBeenCalledTimes(1)
     expect(vi.mocked(showShutdownCheckpointFailureToast)).not.toHaveBeenCalled()
