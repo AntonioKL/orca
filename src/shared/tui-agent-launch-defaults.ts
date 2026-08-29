@@ -71,6 +71,37 @@ export function normalizeTuiAgentEnvRecord(
   return normalized
 }
 
+/** Drop the agent's permission-bypass flag from a launch argument string.
+ *  Why: a resume Orca cannot place in the directory the session actually belongs to must
+ *  not also run unattended with prompts disabled — the agent has to ask first (STA-5804). */
+export function stripYoloTuiAgentLaunchArgs(agent: TuiAgent, args: string): string {
+  const yoloArgs = YOLO_TUI_AGENT_ARGS[agent]
+  if (!yoloArgs) {
+    return args.trim()
+  }
+  return args.replace(argPattern(yoloArgs), ' ').replace(/\s+/g, ' ').trim()
+}
+
+/** Env counterpart of stripYoloTuiAgentLaunchArgs; removes only names the agent's own
+ *  yolo profile sets, and only when the value still equals that profile's value. */
+export function stripYoloTuiAgentLaunchEnv(
+  agent: TuiAgent,
+  env: Record<string, string>
+): Record<string, string> {
+  const yoloEnv = YOLO_TUI_AGENT_ENV[agent]
+  if (!yoloEnv) {
+    return { ...env }
+  }
+  const next: Record<string, string> = {}
+  for (const [name, value] of Object.entries(env)) {
+    if (yoloEnv[name] === value) {
+      continue
+    }
+    next[name] = value
+  }
+  return next
+}
+
 export function getTuiAgentDefaultArgs(agent: TuiAgent): string {
   return DEFAULT_TUI_AGENT_ARGS[agent] ?? ''
 }

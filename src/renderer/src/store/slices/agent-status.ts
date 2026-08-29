@@ -127,6 +127,8 @@ export type AgentStatusRouting = {
   worktreeId?: string
   terminalHandle?: string
   connectionId?: string | null
+  /** The agent's own working directory, when its hook reported one. */
+  agentCwd?: string
 }
 
 export type AgentStatusMetadata = {
@@ -152,6 +154,8 @@ export type AgentProviderSessionRouting = {
   tabId?: string
   worktreeId?: string
   connectionId?: string | null
+  /** The agent's own working directory, when its hook reported one. */
+  agentCwd?: string
 }
 
 export type AgentProviderSessionRecordMetadata = { launchToken?: string }
@@ -590,6 +594,18 @@ function normalizePaneKeySet(
   return paneKeys instanceof Set ? paneKeys : new Set(paneKeys)
 }
 
+/** Carry the agent's reported directory forward only while the pane is still running the
+ *  SAME provider session. A pane that starts a new session may have been started somewhere
+ *  else, and inheriting the old directory would be a guess wearing an observation's clothes.
+ *  Returning undefined means unknown — callers must never read that as "the worktree". */
+function carryForwardAgentCwd(args: {
+  reported: string | undefined
+  providerSessionChanged: boolean
+  previous: string | undefined
+}): string | undefined {
+  return args.reported ?? (args.providerSessionChanged ? undefined : args.previous)
+}
+
 function sleepingRecordFromEntry(args: {
   state: AppState
   entry: AgentStatusEntry
@@ -618,6 +634,7 @@ function sleepingRecordFromEntry(args: {
     agent,
     providerSession: args.entry.providerSession,
     ...(args.entry.connectionId !== undefined ? { connectionId: args.entry.connectionId } : {}),
+    ...(args.entry.agentCwd ? { agentCwd: args.entry.agentCwd } : {}),
     prompt: args.entry.prompt,
     state: args.entry.state,
     capturedAt: args.capturedAt,
@@ -2037,6 +2054,16 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
         const launchConfig =
           (registryMatches ? registryEntry?.launchConfig : undefined) ??
           (existingRecordMatchesProviderSession ? existingRecord.launchConfig : undefined)
+        const existingStatusMatchesProviderSession =
+          existingStatus?.agentType === agent &&
+          agentProviderSessionsEqual(agent, existingStatus.providerSession, providerSession)
+        const agentCwd = carryForwardAgentCwd({
+          reported: routing?.agentCwd,
+          providerSessionChanged: false,
+          previous:
+            (existingStatusMatchesProviderSession ? existingStatus?.agentCwd : undefined) ??
+            (existingRecordMatchesProviderSession ? existingRecord.agentCwd : undefined)
+        })
         const record: SleepingAgentSessionRecord = {
           paneKey,
           ...(tabId ? { tabId } : {}),
@@ -2058,6 +2085,7 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
             : existingRecord?.connectionId !== undefined
               ? { connectionId: existingRecord.connectionId }
               : {}),
+          ...(agentCwd ? { agentCwd } : {}),
           ...(launchConfig ? { launchConfig: copyLaunchConfig(launchConfig) } : {}),
           ...(existingRecordMatchesProviderSession &&
           existingRecord.automaticResumeBlockedBy === 'legacy-orchestration-worker'
@@ -2322,6 +2350,21 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
             : undefined) ??
           matchedRegistryLaunchConfig ??
           matchedSleepingLaunchConfig
+        const matchedSleepingAgentCwd =
+          existingSleepingRecord?.agent === identity.agentType &&
+          providerSession &&
+          agentProviderSessionsEqual(
+            identity.agentType,
+            existingSleepingRecord.providerSession,
+            providerSession
+          )
+            ? existingSleepingRecord.agentCwd
+            : undefined
+        const agentCwd = carryForwardAgentCwd({
+          reported: routing?.agentCwd,
+          providerSessionChanged,
+          previous: existing?.agentCwd ?? matchedSleepingAgentCwd
+        })
         const entry: AgentStatusEntry = {
           state: payload.state,
           workingMode: payload.workingMode,
@@ -2346,6 +2389,7 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
               : s.sleepingAgentSessionsByPaneKey[paneKey]?.connectionId !== undefined
                 ? { connectionId: s.sleepingAgentSessionsByPaneKey[paneKey].connectionId }
                 : {}),
+          ...(agentCwd ? { agentCwd } : {}),
           tabId: statusTabId,
           terminalTitle: effectiveTitle,
           stateHistory: history,

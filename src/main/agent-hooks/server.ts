@@ -49,6 +49,7 @@ import {
 } from '../../shared/agent-hook-listener/listener-limits'
 import { isNewTurnEvent } from '../../shared/agent-hook-listener/provider-event-routing'
 import { normalizeHookPayload } from '../../shared/agent-hook-listener'
+import { normalizeAgentWorkingDirectory } from '../../shared/agent-working-directory'
 import { mergeAgentHookRequestHeaders } from '../../shared/agent-hook-listener/hook-envelope'
 import {
   parseFormEncodedBody,
@@ -393,6 +394,7 @@ function sanitizeHydratedEntry(
     toolAgentType: typeof record.toolAgentType === 'string' ? record.toolAgentType : undefined,
     claudeLeadBoundaryChildOnly: record.claudeLeadBoundaryChildOnly === true ? true : undefined,
     providerSession,
+    agentCwd: normalizeAgentWorkingDirectory(record.agentCwd),
     providerSessionOnly: providerSessionOnly ? true : undefined,
     retainedForLiveness: retainedForLiveness ? true : undefined,
     payload,
@@ -468,6 +470,7 @@ function toAgentStatusIpcPayload(entry: EnrichedAgentHookEventPayload): AgentSta
     receivedAt: entry.receivedAt,
     stateStartedAt: entry.stateStartedAt,
     ...(entry.providerSession ? { providerSession: entry.providerSession } : {}),
+    ...(entry.agentCwd ? { agentCwd: entry.agentCwd } : {}),
     ...(entry.providerSessionOnly ? { providerSessionOnly: true } : {}),
     ...(entry.promptInteractionKey ? { promptInteractionKey: entry.promptInteractionKey } : {}),
     ...(entry.restoredUnconfirmed ? { restoredUnconfirmed: true } : {}),
