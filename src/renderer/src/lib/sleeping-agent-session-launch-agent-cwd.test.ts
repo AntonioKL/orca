@@ -145,7 +145,6 @@ describe('resuming a sleeping agent session in the directory the agent reported 
     expect(startup?.command).not.toContain("'--dangerously-skip-permissions'")
     expect(startup?.command).toContain("'--model' 'opus'")
     // The runtime spawn path re-derives the command from this override; it must agree.
-    expect(startup?.agentArgsOverride).not.toContain("'--dangerously-skip-permissions'")
-    expect(startup?.agentArgsOverride).toContain('--model opus')
+    expect(startup?.agentArgsOverride).toBe('--model opus')
   })
 })

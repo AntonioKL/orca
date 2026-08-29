@@ -119,4 +119,60 @@ describe('agent working directory on status entries and sleeping records (STA-58
       AGENT_SUBDIRECTORY
     )
   })
+  it('drops the directory when a live pane switches to a different provider session', () => {
+    const store = createTestStore({ tabs: [makeTab('tab-1')] })
+
+    store
+      .getState()
+      .setAgentStatus(
+        PANE_KEY,
+        { state: 'working', prompt: 'refactor the parser', agentType: 'claude' },
+        'Claude',
+        { updatedAt: 10, stateStartedAt: 10 },
+        { tabId: 'tab-1', worktreeId: 'wt-1', agentCwd: AGENT_SUBDIRECTORY },
+        { providerSession: { key: 'session_id', id: 'claude-session-1' } }
+      )
+    store
+      .getState()
+      .setAgentStatus(
+        PANE_KEY,
+        { state: 'working', prompt: 'a different job', agentType: 'claude' },
+        'Claude',
+        { updatedAt: 20, stateStartedAt: 20 },
+        { tabId: 'tab-1', worktreeId: 'wt-1' },
+        { providerSession: { key: 'session_id', id: 'claude-session-2' } }
+      )
+
+    const entry = store.getState().agentStatusByPaneKey[PANE_KEY]
+    expect(entry?.providerSession?.id).toBe('claude-session-2')
+    expect(entry?.agentCwd).toBeUndefined()
+  })
+
+  it('keeps the directory across a same-session status update that omits it', () => {
+    const store = createTestStore({ tabs: [makeTab('tab-1')] })
+    const providerSession = { key: 'session_id' as const, id: 'claude-session-1' }
+
+    store
+      .getState()
+      .setAgentStatus(
+        PANE_KEY,
+        { state: 'working', prompt: 'refactor the parser', agentType: 'claude' },
+        'Claude',
+        { updatedAt: 10, stateStartedAt: 10 },
+        { tabId: 'tab-1', worktreeId: 'wt-1', agentCwd: AGENT_SUBDIRECTORY },
+        { providerSession }
+      )
+    store
+      .getState()
+      .setAgentStatus(
+        PANE_KEY,
+        { state: 'working', prompt: 'refactor the parser', agentType: 'claude' },
+        'Claude',
+        { updatedAt: 20, stateStartedAt: 20 },
+        { tabId: 'tab-1', worktreeId: 'wt-1' },
+        { providerSession }
+      )
+
+    expect(store.getState().agentStatusByPaneKey[PANE_KEY]?.agentCwd).toBe(AGENT_SUBDIRECTORY)
+  })
 })

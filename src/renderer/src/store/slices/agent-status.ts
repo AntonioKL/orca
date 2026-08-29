@@ -2057,13 +2057,12 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
         const existingStatusMatchesProviderSession =
           existingStatus?.agentType === agent &&
           agentProviderSessionsEqual(agent, existingStatus.providerSession, providerSession)
-        const agentCwd = carryForwardAgentCwd({
-          reported: routing?.agentCwd,
-          providerSessionChanged: false,
-          previous:
-            (existingStatusMatchesProviderSession ? existingStatus?.agentCwd : undefined) ??
-            (existingRecordMatchesProviderSession ? existingRecord.agentCwd : undefined)
-        })
+        // Why: only carry a directory forward from state describing THIS provider session.
+        // A pane that switched sessions may have been started somewhere else entirely.
+        const agentCwd =
+          routing?.agentCwd ??
+          (existingStatusMatchesProviderSession ? existingStatus?.agentCwd : undefined) ??
+          (existingRecordMatchesProviderSession ? existingRecord.agentCwd : undefined)
         const record: SleepingAgentSessionRecord = {
           paneKey,
           ...(tabId ? { tabId } : {}),
