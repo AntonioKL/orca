@@ -159,6 +159,7 @@ export async function removeRegisteredLocalWorktree(
         console.warn(
           `[worktrees] Orphaned worktree detected at ${canonicalWorktreePath}, cleaning up`
         )
+        let directoryRemovalError: unknown
         const access = getLocalWorktreePathAccess(localWorktreeGitOptions)
         if (
           await canSafelyRemoveOrphanedWorktreeDirectory(
@@ -169,8 +170,12 @@ export async function removeRegisteredLocalWorktree(
           )
         ) {
           await runtime.closeFileWatchersForRemoval(canonicalWorktreePath)
-          await removeLocalWorktreePath(canonicalWorktreePath, localWorktreeGitOptions).catch(
-            () => {}
+          directoryRemovalError = await removeLocalWorktreePath(
+            canonicalWorktreePath,
+            localWorktreeGitOptions
+          ).then(
+            () => undefined,
+            (error: unknown) => error ?? new Error('Recursive worktree directory removal failed.')
           )
         } else {
           console.warn(
@@ -182,6 +187,17 @@ export async function removeRegisteredLocalWorktree(
           cwd: repo.path,
           ...localWorktreeGitOptions
         }).catch(() => {})
+        // Why (STA-4895): the files are still on disk, so dropping Orca's row here would report a
+        // delete that did not happen and leave the workspace with no UI left to retry from.
+        if (directoryRemovalError) {
+          throw new Error(
+            formatWorktreeRemovalError(
+              directoryRemovalError,
+              canonicalWorktreePath,
+              args.force ?? false
+            )
+          )
+        }
         await cleanupUnusedWorktreePushTargetRemote(
           repo.path,
           args.worktreeId,

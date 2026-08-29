@@ -21,6 +21,7 @@ import {
   isOrphanedWorktreeError,
   areWorktreePathsEqual
 } from './worktree-logic'
+import { WORKSPACE_DIRECTORY_HELD_HINT } from '../../shared/worktree/removal'
 
 describe('sanitizeWorktreeName', () => {
   it('replaces spaces with hyphens', () => {
@@ -628,6 +629,67 @@ describe('formatWorktreeRemovalError', () => {
     expect(formatWorktreeRemovalError(error, path, false)).toBe(
       `Failed to delete worktree at ${path}.`
     )
+  })
+
+  // STA-4895: the reported toast was a bare `EBUSY ... rmdir '<workspace>'` with nothing the
+  // user could act on. These pin the diagnosis onto exactly the root-held shape and no other.
+  describe('Windows workspace directory still held open', () => {
+    const windowsPath = 'C:/_Data/Projects/worktrees/WowApps-clientadmin-compact-sidebar'
+    const nativePath = 'C:\\_Data\\Projects\\worktrees\\WowApps-clientadmin-compact-sidebar'
+
+    function heldRootError(code: string, removalPath: string): Error {
+      return Object.assign(new Error(`${code}: resource busy or locked, rmdir '${removalPath}'`), {
+        code,
+        syscall: 'rmdir',
+        path: removalPath
+      })
+    }
+
+    it('explains an EBUSY rmdir that failed on the workspace directory itself', () => {
+      expect(
+        formatWorktreeRemovalError(heldRootError('EBUSY', nativePath), windowsPath, false)
+      ).toBe(
+        `Failed to delete worktree at ${windowsPath}. EBUSY: resource busy or locked, rmdir '${nativePath}' ${WORKSPACE_DIRECTORY_HELD_HINT}`
+      )
+    })
+
+    it('matches the extended-length path Orca actually passes to the delete', () => {
+      const namespaced = `\\\\?\\${nativePath}`
+      expect(
+        formatWorktreeRemovalError(heldRootError('EPERM', namespaced), windowsPath, true)
+      ).toContain(WORKSPACE_DIRECTORY_HELD_HINT)
+    })
+
+    it('explains the failure when it arrives as prose with no error code', () => {
+      const message = `EBUSY: resource busy or locked, rmdir '${nativePath}'`
+      expect(formatWorktreeRemovalError(new Error(message), windowsPath, false)).toBe(
+        `Failed to delete worktree at ${windowsPath}. ${message} ${WORKSPACE_DIRECTORY_HELD_HINT}`
+      )
+    })
+
+    it('stays silent when a file inside the workspace is what failed', () => {
+      const child = `${nativePath}\\node_modules\\.vite\\deps`
+      expect(
+        formatWorktreeRemovalError(heldRootError('EBUSY', child), windowsPath, false)
+      ).not.toContain(WORKSPACE_DIRECTORY_HELD_HINT)
+    })
+
+    it('stays silent for a POSIX workspace root that reports the same code', () => {
+      const posixRoot = '/workspaces/feature'
+      expect(
+        formatWorktreeRemovalError(heldRootError('EBUSY', posixRoot), posixRoot, false)
+      ).not.toContain(WORKSPACE_DIRECTORY_HELD_HINT)
+    })
+
+    it('does not repeat the hint when an already-formatted message is reformatted', () => {
+      const formatted = formatWorktreeRemovalError(
+        heldRootError('EBUSY', nativePath),
+        windowsPath,
+        false
+      )
+      const reformatted = formatWorktreeRemovalError(new Error(formatted), windowsPath, false)
+      expect(reformatted.split(WORKSPACE_DIRECTORY_HELD_HINT)).toHaveLength(2)
+    })
   })
 })
 

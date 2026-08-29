@@ -4,6 +4,11 @@ import type { Repo } from '../../shared/repo-types'
 import { isWindowsAbsolutePathLike, resolveRuntimePath } from '../../shared/cross-platform-path'
 import { isWslUncPath, resolveWslRepoWorktreeBasePath } from '../../shared/wsl-paths'
 import { splitWorktreeId } from '../../shared/worktree/id'
+import {
+  isHeldWorkspaceDirectoryRemovalError,
+  isHeldWorkspaceDirectoryRemovalFailure,
+  WORKSPACE_DIRECTORY_HELD_HINT
+} from '../../shared/worktree/removal'
 import { replaceKnownEmojiWithShortcodes } from '../../shared/emoji-shortcode-catalog'
 import { getWslHome, getWslHomeAsync, parseWslPath } from '../wsl'
 
@@ -339,5 +344,14 @@ export function formatWorktreeRemovalError(
     .map((value) => value?.trim())
     .find(Boolean)
 
-  return details ? `${fallback} ${details}` : fallback
+  const message = details ? `${fallback} ${details}` : fallback
+  if (isHeldWorkspaceDirectoryRemovalError(message)) {
+    return message
+  }
+  // Why here and not at the delete: this is the one funnel every removal throw site already
+  // uses, so the diagnosis reaches the toast no matter which of them raised the failure.
+  return isHeldWorkspaceDirectoryRemovalFailure(error, worktreePath) ||
+    (details !== undefined && isHeldWorkspaceDirectoryRemovalFailure(details, worktreePath))
+    ? `${message} ${WORKSPACE_DIRECTORY_HELD_HINT}`
+    : message
 }
