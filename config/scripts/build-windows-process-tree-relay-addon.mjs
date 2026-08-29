@@ -83,9 +83,24 @@ function assertPatchApplied() {
     throw new Error('binding.gyp does not use the staged node-addon-api headers.')
   }
   const processCc = readFileSync(join(PACKAGE_DIR, 'src', 'process.cc'), 'utf8')
+  const addonCc = readFileSync(join(PACKAGE_DIR, 'src', 'addon.cc'), 'utf8')
   if (processCc.includes('process_count < 1024')) {
     throw new Error(
       'src/process.cc still caps enumeration at 1024 processes. pnpm did not apply ' +
+        'config/patches/@vscode__windows-process-tree@0.8.0.patch; run pnpm install.'
+    )
+  }
+  const processHeader = readFileSync(join(PACKAGE_DIR, 'src', 'process.h'), 'utf8')
+  const processWorker = readFileSync(join(PACKAGE_DIR, 'src', 'process_worker.cc'), 'utf8')
+  if (
+    !processHeader.includes('uint64_t privateMemory') ||
+    !processHeader.includes('bool hasMemory') ||
+    !processHeader.includes('std::string startTimeId') ||
+    !processWorker.includes('pinfo.cpuTimeTicks') ||
+    !addonCc.includes('processTableContractVersion')
+  ) {
+    throw new Error(
+      'Native resource and PID-reuse fields are missing. pnpm did not apply ' +
         'config/patches/@vscode__windows-process-tree@0.8.0.patch; run pnpm install.'
     )
   }
@@ -162,8 +177,8 @@ function main() {
   const { arch, outDir } = parseArgs(process.argv.slice(2))
   if (process.platform !== 'win32') {
     throw new Error(
-      `This addon only builds on Windows; running on ${process.platform}. ` +
-        'Relay builds elsewhere simply omit it and fall back to the CIM scan.'
+      `This addon only builds on Windows; running on ${process.platform}. Use the checked-in ` +
+        'x64 and arm64 relay prebuilds when packaging from another platform.'
     )
   }
   if (!existsSync(PACKAGE_DIR)) {
