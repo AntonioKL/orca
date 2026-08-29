@@ -36,7 +36,7 @@ import { setSpeechServiceFactories } from './speech/speech-runtime-service'
 import { setWorktreeWatcherRemoval } from './ipc/worktree-watcher-removal'
 import { setSecretStore } from '../shared/secret-store'
 import { ElectronSecretStore } from './host/electron-secret-store'
-import { reportSecretProtectionGap } from './host/secret-protection-report'
+import { scheduleSecretProtectionGapReport } from './host/deferred-secret-protection-report'
 import { initSessionParseCachePersistence } from './ai-vault/session-parse-cache-persistence'
 import { ensureActiveOrcaProfile, initOrcaProfilePaths } from './orca-profiles/profile-index-store'
 import { getOrcaCloudAuthConfig } from './orca-profiles/profile-cloud-auth-config'
@@ -335,6 +335,7 @@ import { AgentAwakeService } from './agent-awake-service'
 import { normalizeComputerAwakeMode } from '../shared/computer-awake-mode'
 import { registerSystemResumeBroadcast } from './system-resume-broadcast'
 import { settleTeardownWithinDeadline, settleWithinMs } from './quit-teardown-deadline'
+import { stopStructuredAgentSessionRuntime } from './runtime/structured-agent-session-runtime'
 import { quitTeardownStartGate } from './quit-teardown-start-gate'
 import { beginSshShutdown } from './ipc/ssh-shutdown-drain'
 import { PluginService } from './plugins/plugin-service'
@@ -993,6 +994,11 @@ if (hasSingleInstanceLock) {
 
 ipcMain.handle('app:awaitFirstWindowStartupServices', async () => {
   await Promise.all([firstWindowStartupServicesReady, managedWslCliStartupBarrierReady])
+})
+
+ipcMain.handle('app:prepareTerminalStartupRestoration', async () => {
+  await Promise.all([firstWindowStartupServicesReady, managedWslCliStartupBarrierReady])
+  await runtime?.prepareStructuredAgentSessionStartupRestoration()
 })
 
 ipcMain.handle('app:recoverLegacyWorkerTerminalsForRendererStartup', () =>
@@ -2347,11 +2353,14 @@ void app.whenReady().then(async () => {
     dataFile: activeOrcaProfile.dataFile,
     storageAuthority: isServeMode ? 'runtime' : 'desktop'
   })
-  // Why here and not at install time: the report remembers what it last said, and that
-  // state lives beside the profile data file, which does not exist until now.
-  reportSecretProtectionGap({
+  // Why armed here and not at install time: the report remembers what it last said, and
+  // that state lives beside the profile data file, which does not exist until now.
+  // Why scheduled and not called: the report probes the OS keyring, which blocks on Linux
+  // and must not gate the first window (STA-5765).
+  scheduleSecretProtectionGapReport({
     dataFile: activeOrcaProfile.dataFile,
-    force: process.env.ORCA_ALWAYS_REPORT_SECRET_PROTECTION === '1'
+    force: process.env.ORCA_ALWAYS_REPORT_SECRET_PROTECTION === '1',
+    deferUntilFirstWindow: !isServeMode
   })
   // Why here: the host key store is a sidecar of the same profile, and every SSH connect consults
   // it. Left unbound it reports nothing trusted, which is safe but silently discards our own
@@ -2787,6 +2796,11 @@ void app.whenReady().then(async () => {
       prepareCodexAiVaultSessionResume(args, {
         runtimeHome: codexRuntimeHome,
         systemCodexHomePath: resolveHostCodexSessionSourceHome(store!.getSettings())
+      }),
+    prepareCodexStructuredLaunch: ({ workspacePath, launchEnv }) =>
+      prepareCodexRuntimeHomeForLaunch(undefined, launchEnv, {
+        launchAgent: 'codex',
+        workspacePath
       }),
     buildAgentHookPtyEnv: () =>
       isAgentStatusHooksEnabled(store?.getSettings()) ? agentHookServer.buildPtyEnv() : {},
@@ -3524,6 +3538,7 @@ app.on('will-quit', (e) => {
   pluginMarketplaceInstaller = null
   const pluginHostShutdown = pluginService?.dispose() ?? Promise.resolve()
   const codexBackfillRecoveryShutdown = stopCodexStateDbBackfillRecoveries()
+  const structuredAgentSessionShutdown = stopStructuredAgentSessionRuntime()
   pluginService = null
   setUnreadDockBadgeCount(0)
   agentHookServer.stop()
@@ -3625,6 +3640,7 @@ app.on('will-quit', (e) => {
     { name: 'skill-uploads', promise: skillUploadShutdown },
     { name: 'grok-hooks', promise: grokHookCleanup },
     { name: 'codex-backfill-recovery', promise: codexBackfillRecoveryShutdown },
+    { name: 'structured-agent-session', promise: structuredAgentSessionShutdown },
     { name: 'usage-cache', promise: usageCacheFlush },
     { name: 'stats', promise: statsFlush },
     { name: 'state', promise: storeFlush }
