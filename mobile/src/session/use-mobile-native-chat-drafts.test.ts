@@ -478,6 +478,20 @@ describe('useMobileNativeChatDrafts', () => {
     expect(state?.composerText).toBe('new edit')
   })
 
+  it('does not erase a whitespace-only newer edit when an older send clears', async () => {
+    await mount('a')
+    act(() => state?.setComposerText('/clear'))
+    const origin = state?.captureSendOrigin('/clear')
+    act(() => state?.setComposerText(' /clear'))
+    act(() => {
+      if (origin) {
+        state?.clearDraftForSend(origin, '/clear')
+      }
+    })
+
+    expect(state?.composerText).toBe(' /clear')
+  })
+
   it('stays quiet when an unconfirmed send lands in the transcript', async () => {
     vi.useFakeTimers()
     try {

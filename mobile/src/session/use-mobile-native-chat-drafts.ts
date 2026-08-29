@@ -162,7 +162,8 @@ export function useMobileNativeChatDrafts(args: {
   // send". Clear at send time; a definite rejection restores the text below.
   const clearDraftForSend = useCallback((origin: MobileNativeChatSendOrigin, text: string) => {
     setDrafts((previous) =>
-      (previous[origin.draftKey] ?? '').trim() === text.trim()
+      draftEditGenerationsRef.current.isCurrent(origin.draftKey, origin.draftEditGeneration) &&
+      (previous[origin.draftKey] ?? '') === text
         ? { ...previous, [origin.draftKey]: '' }
         : previous
     )
@@ -276,9 +277,7 @@ export function useMobileNativeChatDrafts(args: {
       return
     }
     const movedIds = new Set(waitingForSession.map((item) => item.id))
-    setPendingBySession((previous) =>
-      mergeWaitingSessionPending(previous, pendingKey, waitingForSession)
-    )
+    setPendingBySession((state) => mergeWaitingSessionPending(state, pendingKey, waitingForSession))
     setPendingWaitingForSession((previous) =>
       removeWaitingSessionPending(previous, draftKey, movedIds)
     )
