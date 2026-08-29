@@ -31,5 +31,8 @@
   Pop $0
   ${If} $0 != "0"
     DetailPrint "Failed to grant restricted AppContainer read access: $0"
+    ${IfNot} ${Silent}
+      MessageBox MB_OK|MB_ICONEXCLAMATION "Orca was installed, but Windows could not finish configuring access to its files (error $0). Orca may not start; retry the installer or contact support."
+    ${EndIf}
   ${EndIf}
 !macroend
