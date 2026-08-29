@@ -1,8 +1,5 @@
 import type { GlobalSettings } from '../../../../shared/global-settings-types'
-import {
-  hasPublishedPtyProcessInspectionEvidence,
-  readPtyProcessInspectionEvidence
-} from '../../../../shared/pty-process-inspection-evidence'
+import { readPtyProcessInspectionEvidenceForAbsenceAction } from '../../../../shared/pty-process-inspection-evidence'
 import { withTimeout } from '../../../../shared/promise-timeout-fallback'
 import { inspectRuntimeTerminalProcess } from '@/runtime/runtime-terminal-inspection'
 
@@ -64,18 +61,18 @@ async function inspectAllPtys(
     if (result.value.unavailable === true) {
       return true
     }
-    // Why absence of the field, not the identity of the host: a host that omits
-    // the verdict has no channel to separate an observed idle shell from its
-    // legacy degraded collapse, and it publishes the same two values for both.
-    // Keying this on the PTY id's execution host read as a proxy for "answered
-    // by an independently updated peer" and got the daemon wrong — a daemon
-    // survives in-place app updates (daemon-init adopts every previous protocol
-    // version) and at 11..26 answers through `composeLegacyPtyProcessInspection`
-    // with no evidence, yet its session ids carry no host at all. The cleanup
-    // path (`probeTerminalLiveness`) fences the same shape with no host filter.
-    if (!hasPublishedPtyProcessInspectionEvidence(result.value)) {
-      return true
-    }
-    return readPtyProcessInspectionEvidence(result.value).children.verdict !== 'exited'
+    // Why the absence-action reader and no fence of its own here: a host that omits
+    // the verdict has no channel to separate an observed idle shell from its legacy
+    // degraded collapse, and it publishes the same two values for both — so the plain
+    // reader restates that collapse as `exited`. Keying a fence on the PTY id's
+    // execution host read as a proxy for "answered by an independently updated peer"
+    // and got the daemon wrong; keying it on the absent field got it right but put a
+    // second copy of one rule in this file. The rule now lives once, in the reader, and
+    // the terminal-tab close guard reads the verdict through the same call — the shape
+    // below reached that guard as `exited` and closed a tab silently for as long as the
+    // two were expressed separately.
+    return (
+      readPtyProcessInspectionEvidenceForAbsenceAction(result.value).children.verdict !== 'exited'
+    )
   })
 }
