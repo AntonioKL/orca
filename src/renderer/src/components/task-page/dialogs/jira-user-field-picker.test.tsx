@@ -159,7 +159,7 @@ describe('JiraUserFieldPicker', () => {
     await waitFor(() => expect(screen.getByText(ALEX.displayName)).toBeTruthy())
     fireEvent.click(screen.getByText(ALEX.displayName))
 
-    fireEvent.click(screen.getByRole('combobox', { name: 'Participants' }))
+    expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDER)).toBeTruthy()
     await waitFor(() => expect(screen.getByText(BLAIR.displayName)).toBeTruthy())
     fireEvent.click(screen.getByText(BLAIR.displayName))
 

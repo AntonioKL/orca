@@ -115,8 +115,10 @@ export function JiraUserFieldPicker({
       if (displayName) {
         setPickedNames((prev) => ({ ...prev, [accountId]: displayName }))
       }
-      setOpen(false)
-      setQuery('')
+      if (!multiple) {
+        setOpen(false)
+        setQuery('')
+      }
     },
     [multiple, onValueChange, selectedAccountIds]
   )
