@@ -9,12 +9,13 @@ import {
 } from './source-scan/source-tree-scan'
 import { PANE_IDENTITY_ENV_KEYS } from './pane-identity-env'
 
-// Why this ratchet exists: 52 files name ORCA_AGENT_LAUNCH_TOKEN, but nothing stated the rule that
-// produces it. A spawn that reuses a pane key a previous launch already owned must stamp a launch
-// token, because the token is Orca's only in-band proof of authorship and the status fences read a
-// tokenless post as foreign. Two paths shipped without it — the detached-pane restart (#17243) and
-// the relay's revive — each found by accident. Adding a pane-identity env site now forces a
-// deliberate classification here instead of silently joining the broken half.
+// Why this ratchet exists: 34 non-test source files name ORCA_AGENT_LAUNCH_TOKEN and 10 of them
+// actually author it, but nothing stated the rule that produces it. A spawn that reuses a pane
+// key a previous launch already owned must stamp a launch token, because the token is Orca's only
+// in-band proof of authorship and the status fences read a tokenless post as foreign. Two paths
+// shipped without it — the detached-pane restart (#17243) and the relay's revive — each found by
+// accident. Adding a pane-identity env site now forces a deliberate classification here instead
+// of silently joining the broken half.
 type TokenBehavior =
   /** Mints a fresh token: this spawn reuses or claims a pane key, so it must prove authorship. */
   | 'mints-token'
