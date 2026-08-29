@@ -621,6 +621,18 @@ describe('window close with a direct-SSH terminal', () => {
     expect(confirmWindowClose).not.toHaveBeenCalled()
   })
 
+  it('asks when a legacy relay answers without explicit process evidence', async () => {
+    installInspectProcess(async () => ({
+      foregroundProcess: SHELL,
+      hasChildProcesses: false
+    }))
+
+    await runWindowClose()
+
+    expect(warningIsVisible()).toBe(true)
+    expect(confirmWindowClose).not.toHaveBeenCalled()
+  })
+
   it('asks after losing contact with the execution host', async () => {
     installInspectProcess(async () => {
       throw Object.assign(new Error('SSH connection lost, reconnecting...'), {

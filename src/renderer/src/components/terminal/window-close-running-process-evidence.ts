@@ -1,6 +1,10 @@
 import type { GlobalSettings } from '../../../../shared/global-settings-types'
-import { readPtyProcessInspectionEvidence } from '../../../../shared/pty-process-inspection-evidence'
+import {
+  hasPublishedPtyProcessInspectionEvidence,
+  readPtyProcessInspectionEvidence
+} from '../../../../shared/pty-process-inspection-evidence'
 import { withTimeout } from '../../../../shared/promise-timeout-fallback'
+import { getPtyExecutionHost } from '../../../../shared/terminal-execution-host'
 import { inspectRuntimeTerminalProcess } from '@/runtime/runtime-terminal-inspection'
 
 /**
@@ -43,7 +47,7 @@ async function inspectAllPtys(
   const results = await Promise.allSettled(
     ptyIds.map((ptyId) => inspectRuntimeTerminalProcess(settings, ptyId))
   )
-  return results.some((result) => {
+  return results.some((result, index) => {
     // Why rejected counts as blocking: a raised inspection answered nothing, and
     // the Promise.all this replaced had no catch — a rejection left the window
     // neither closed nor prompting. It is also the steady state of a remote host
@@ -61,6 +65,15 @@ async function inspectAllPtys(
     if (result.value.unavailable === true) {
       return true
     }
-    return readPtyProcessInspectionEvidence(result.value).children.verdict !== 'exited'
+    // Independently updated hosts that omit the verdict field cannot distinguish
+    // an observed idle shell from their legacy degraded collapse.
+    if (
+      getPtyExecutionHost(ptyIds[index]) !== null &&
+      !hasPublishedPtyProcessInspectionEvidence(result.value)
+    ) {
+      return true
+    }
+    const evidence = readPtyProcessInspectionEvidence(result.value)
+    return evidence.children.verdict !== 'exited' || result.value.hasChildProcesses
   })
 }
