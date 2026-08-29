@@ -1,9 +1,6 @@
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
-import { join } from 'node:path'
 import {
   importReleaseCheckoutModule,
   materializeReleaseCheckout,
-  REPO_ROOT,
   type ReleaseCheckout
 } from './release-checkout'
 
@@ -59,30 +56,16 @@ type DispatcherModule = {
   RpcDispatcher: new (options: { runtime: unknown; methods: unknown[] }) => AgentSessionDispatcher
 }
 
-// A dotted literal in a `name:` position. Deliberately loose: over-matching only
-// makes "this build registers no agentSession method" a stronger claim.
-const METHOD_NAME = /\bname:\s*'([A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z0-9]+)+)'/g
-
-/**
- * Method names declared under `runtime/rpc/methods`, scanned rather than imported:
- * a released build's method manifest reaches Electron, which cannot load here.
- */
-function scanMethodNames(root: string): string[] {
-  const names = new Set<string>()
-  const walk = (directory: string): void => {
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      const full = join(directory, entry.name)
-      if (entry.isDirectory()) {
-        walk(full)
-      } else if (entry.isFile() && entry.name.endsWith('.ts')) {
-        for (const match of readFileSync(full, 'utf8').matchAll(METHOD_NAME)) {
-          names.add(match[1]!)
-        }
+function registeredMethodNames(methods: readonly unknown[]): string[] {
+  return methods
+    .flatMap((method) => {
+      if (!method || typeof method !== 'object') {
+        return []
       }
-    }
-  }
-  walk(join(root, 'src', 'main', 'runtime', 'rpc', 'methods'))
-  return [...names].sort()
+      const name = Reflect.get(method, 'name')
+      return typeof name === 'string' ? [name] : []
+    })
+    .sort()
 }
 
 function capabilityStrings(module: Record<string, unknown>): readonly string[] {
@@ -94,58 +77,45 @@ function capabilityStrings(module: Record<string, unknown>): readonly string[] {
 }
 
 async function loadWorkingTreeBuild(): Promise<AgentSessionWireBuild> {
-  const [protocol, dispatcher, structured, aiVault, sessionTabs, terminal] = await Promise.all([
+  const [protocol, dispatcher, methodRegistry] = await Promise.all([
     import('../../../src/shared/protocol-version'),
     import('../../../src/main/runtime/rpc/dispatcher'),
-    import('../../../src/main/runtime/rpc/methods/structured-agent-session'),
-    import('../../../src/main/runtime/rpc/methods/ai-vault'),
-    import('../../../src/main/runtime/rpc/methods/session-tabs'),
-    import('../../../src/main/runtime/rpc/methods/terminal')
+    import('../../../src/main/runtime/rpc/methods')
   ])
   const module = dispatcher as unknown as DispatcherModule
+  const methods = methodRegistry.ALL_RPC_METHODS as unknown[]
   return {
     label: WORKING_TREE,
     revision: WORKING_TREE,
     capabilities: capabilityStrings(protocol as unknown as Record<string, unknown>),
     protocolVersion: protocol.RUNTIME_PROTOCOL_VERSION,
-    methodNames: scanMethodNames(REPO_ROOT),
+    methodNames: registeredMethodNames(methods),
     createDispatcher: (runtime) =>
       new module.RpcDispatcher({
         runtime,
-        methods: [
-          ...(structured.STRUCTURED_AGENT_SESSION_METHODS as unknown[]),
-          ...(aiVault.AI_VAULT_METHODS as unknown[]),
-          ...(sessionTabs.SESSION_TAB_METHODS as unknown[]),
-          ...(terminal.TERMINAL_METHODS as unknown[])
-        ]
+        methods
       })
   }
 }
 
 async function loadReleaseBuild(checkout: ReleaseCheckout): Promise<AgentSessionWireBuild> {
-  const structuredMethodsPath = '/src/main/runtime/rpc/methods/structured-agent-session.ts'
-  const [protocol, dispatcher, terminalMethods, structuredMethods] = await Promise.all([
+  const [protocol, dispatcher, methodRegistry] = await Promise.all([
     importReleaseCheckoutModule(checkout, '/src/shared/protocol-version.ts'),
     importReleaseCheckoutModule(checkout, '/src/main/runtime/rpc/dispatcher.ts'),
-    importReleaseCheckoutModule(checkout, '/src/main/runtime/rpc/methods/terminal.ts'),
-    existsSync(join(checkout.root, structuredMethodsPath))
-      ? importReleaseCheckoutModule(checkout, structuredMethodsPath)
-      : null
+    importReleaseCheckoutModule(checkout, '/src/main/runtime/rpc/methods/index.ts')
   ])
   const module = dispatcher as unknown as DispatcherModule
+  const methods = methodRegistry.ALL_RPC_METHODS as unknown[]
   return {
     label: checkout.ref,
     revision: checkout.commit,
     capabilities: capabilityStrings(protocol),
     protocolVersion: protocol.RUNTIME_PROTOCOL_VERSION as number,
-    methodNames: scanMethodNames(checkout.root),
+    methodNames: registeredMethodNames(methods),
     createDispatcher: (runtime) =>
       new module.RpcDispatcher({
         runtime,
-        methods: [
-          ...((structuredMethods?.STRUCTURED_AGENT_SESSION_METHODS as unknown[] | undefined) ?? []),
-          ...(terminalMethods.TERMINAL_METHODS as unknown[])
-        ]
+        methods
       })
   }
 }
