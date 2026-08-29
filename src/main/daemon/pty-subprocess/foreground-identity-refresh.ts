@@ -78,6 +78,11 @@ export function getActiveStartupAgent(
  * inside the window while an agent that started after it is live. Compared against
  * `startedAt`, not `at` — a scan that settles after the agent appeared still read a
  * process table from before it.
+ *
+ * Strictly newer, because equal stamps are unordered rather than simultaneous: Date.now()
+ * cannot separate two events inside one millisecond, so a table captured in the agent's own
+ * millisecond may or may not have seen it. Only a scan that demonstrably started after the
+ * agent was stamped can speak for its absence; the tie keeps the agent.
  */
 export function isShellTitleCorroborated(
   settlement: ForegroundScanSettlement | null,
@@ -89,7 +94,7 @@ export function isShellTitleCorroborated(
     settlement.available &&
     !settlement.sawAgent &&
     now - settlement.at <= SHELL_TITLE_SCAN_CORROBORATION_MAX_AGE_MS &&
-    (agentEvidence === null || settlement.startedAt >= agentEvidence.refreshedAt)
+    (agentEvidence === null || settlement.startedAt > agentEvidence.refreshedAt)
   )
 }
 
@@ -147,11 +152,13 @@ export function createForegroundIdentityRefresh(args: {
       state.cachedAgentForeground !== null &&
       Date.now() - state.cachedAgentForeground.refreshedAt > ms
     const retireStaleForegroundIdentity = ({ onlyWhenAged = false } = {}): void => {
-      // This scan sampled the process table at `scanStartedAt`; an identity stamped after
-      // that is evidence it never had a chance to see, so it cannot be retired on this answer.
+      // This scan sampled the process table at `scanStartedAt`; an identity stamped at or
+      // after that is evidence it may never have had a chance to see, so it cannot be retired
+      // on this answer. Equal stamps are unordered, not simultaneous — Date.now() cannot say
+      // which came first inside a millisecond — and an unknown order is not proof of an exit.
       if (
         state.cachedAgentForeground !== null &&
-        state.cachedAgentForeground.refreshedAt > scanStartedAt
+        state.cachedAgentForeground.refreshedAt >= scanStartedAt
       ) {
         return
       }
