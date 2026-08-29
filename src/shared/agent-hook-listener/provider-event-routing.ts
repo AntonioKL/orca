@@ -81,6 +81,58 @@ export function isNewTurnEvent(source: AgentHookSource, eventName: unknown): boo
   }
 }
 
+/**
+ * The per-provider answer to "did a NEW agent process just start in this pane?".
+ *
+ * Deliberately not {@link isNewTurnEvent}: a turn boundary recurs inside one process, so it can
+ * never order two processes that share a pane. A session boundary is emitted once per process,
+ * which is what a launch-token fence needs before it hands the pane to a different token.
+ *
+ * Exported so the fence reuses this instead of matching a raw `SessionStart` literal — only
+ * claude, codex and opencode spell it that way, and the other 15 sources were stranded by it.
+ */
+export function isSessionStartEvent(source: AgentHookSource, eventName: unknown): boolean {
+  // Why: exhaustive switch so a new AgentHookSource fails typecheck here instead of silently
+  // joining the half that can never re-fence.
+  switch (source) {
+    // Why kimi rides with claude: Kimi Code emits Claude-compatible hook events, SessionStart
+    // included.
+    case 'claude':
+    case 'kimi':
+    case 'codex':
+    case 'opencode':
+    case 'droid':
+    case 'devin':
+      return eventName === 'SessionStart'
+    case 'copilot':
+      return normalizeCopilotEventName(eventName) === 'SessionStart'
+    case 'cursor':
+      return eventName === 'sessionStart'
+    case 'amp':
+      return eventName === 'session.start'
+    case 'pi':
+    case 'prime-agent':
+      return eventName === 'session_start'
+    case 'grok':
+      return isGrokEvent(eventName, 'session_start')
+    case 'hermes':
+      return eventName === 'on_session_start'
+    // Why false rather than a guess: these sources emit no session boundary this codebase has
+    // ever seen — Gemini CLI sends only BeforeAgent/AfterAgent/BeforeTool/AfterTool, Antigravity
+    // only PreInvocation/PostInvocation, mimo-code has no SessionStart (the OpenCode-family
+    // normalizer accepts it for `opencode` alone), omp is excluded from Pi's session_start
+    // handling, and Command Code names no lifecycle event at all. Naming an event they do not
+    // send would be a fence that never opens; their panes are re-fenced by the spawn path
+    // instead, which needs no provider event.
+    case 'gemini':
+    case 'antigravity':
+    case 'mimo-code':
+    case 'omp':
+    case 'command-code':
+      return false
+  }
+}
+
 export function hasExplicitUserPrompt(
   source: AgentHookSource,
   eventName: unknown,
