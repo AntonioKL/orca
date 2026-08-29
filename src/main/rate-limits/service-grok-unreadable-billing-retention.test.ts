@@ -94,7 +94,9 @@ describe('RateLimitService with an unreadable Grok billing read', () => {
     await service.refresh()
     expect(service.getState().grok?.weekly?.usedPercent).toBe(41)
 
-    respondToBillingWith({})
+    // A billing view Orca recognises, carrying no credit field — not `{}`, which names no billing
+    // field at all and is therefore a failed read rather than a plan without credits.
+    respondToBillingWith({ subscriptionTier: 'Enterprise' })
     await service.refresh()
 
     const grok = service.getState().grok

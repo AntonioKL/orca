@@ -3,7 +3,7 @@ import type { ProviderRateLimits, RateLimitWindow } from '../../shared/rate-limi
 import { ensureElectronProxyFromEnvironment } from '../network/proxy-settings'
 import { createOAuthUsageError, OAuthUsageUnreadableError } from './claude-oauth-usage-error'
 import { mapClaudeUsageWindow, type ClaudeUsageWindowInput } from './claude-usage-window'
-import { isReadableUsageBody } from './unreadable-usage-response'
+import { isReadableUsageBody, namesReadableUsageField } from './unreadable-usage-response'
 import { abortedClaudeRateLimitResult } from './claude-usage-result'
 
 const OAUTH_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
@@ -70,7 +70,7 @@ function describeUnreadableUsageResponse(data: unknown): string {
   if (typeof data !== 'object' || data === null || Array.isArray(data)) {
     return 'Claude usage response was not a usage reading'
   }
-  return USAGE_RESPONSE_KEYS.some((key) => key in data)
+  return namesReadableUsageField(data, USAGE_RESPONSE_KEYS)
     ? 'Claude usage response had a usage field Orca could not read'
     : 'Claude usage response contained no usage window'
 }

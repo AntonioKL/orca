@@ -131,6 +131,34 @@ describe('Claude OAuth usage readings that carry no window', () => {
     })
   }
 
+  // Why: both bodies settle the same verdict, so only the words tell them apart — and the words
+  // are what reaches the tooltip. Without this, the clause that separates "a field I could not
+  // read" from "no window here" is unpinned: neutering it leaves every test in this file green.
+  const namedReadings: [string, string, string][] = [
+    [
+      'an object with no usage key',
+      '{"detail":"Not Found"}',
+      'Claude usage response contained no usage window'
+    ],
+    [
+      'a malformed five_hour field',
+      '{"five_hour":"eighty percent"}',
+      'Claude usage response had a usage field Orca could not read'
+    ]
+  ]
+
+  for (const [label, body, message] of namedReadings) {
+    it(`says which failed read ${label} was`, async () => {
+      primeOAuthToken()
+      netFetchMock.mockResolvedValueOnce(new Response(body, { status: 200 }))
+      vi.mocked(fetchViaPty).mockRejectedValueOnce(new Error('CLI unavailable'))
+
+      const limits = await fetchClaudeRateLimits({ authPreparation })
+
+      expect(limits.error).toContain(message)
+    })
+  }
+
   it('still reports a readable window as a successful reading', async () => {
     primeOAuthToken()
     netFetchMock.mockResolvedValueOnce(

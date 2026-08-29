@@ -97,12 +97,53 @@ describe('Grok billing responses Orca cannot read', () => {
     expect(isProviderConfigured(result)).toBe(true)
   })
 
+  // Why: a 200 that carries none of the fields a billing view is made of — an error envelope, a
+  // renamed schema — is a read Orca failed, not an account with nothing to report. Settling it as
+  // absent publishes `unavailable`, the one verdict that discards the last good snapshot *and*
+  // hides the chip. Claude's usage reader already draws this line; this provider did not.
+  const unrecognisedBodies: [string, unknown][] = [
+    ['an HTTP-200 error envelope', { error: 'rate limited' }],
+    ['an HTTP-200 error code envelope', { code: 429, msg: 'too many requests' }],
+    ['a drifted billing schema', { credits: { weekly: { usedPercent: 41 } } }],
+    ['a body that says nothing at all', {}]
+  ]
+
+  for (const [label, body] of unrecognisedBodies) {
+    it(`reports ${label} as a failed reading that keeps the chip visible`, async () => {
+      netFetchMock.mockResolvedValue(jsonResponse(body))
+
+      const result = await fetchGrokRateLimits()
+
+      expect(result.status).toBe('error')
+      expect(isProviderConfigured(result)).toBe(true)
+    })
+  }
+
+  // Why: the monthly fallback reads the second billing view through the same resolver, so the
+  // clause has to hold there too — the first view answering readably must not launder the second.
+  it('reports an unrecognised body in the monthly fallback view as a failed reading', async () => {
+    netFetchMock.mockImplementation((url: string) =>
+      Promise.resolve(
+        jsonResponse(
+          url.includes('format=credits')
+            ? { config: { isUnifiedBillingUser: true } }
+            : { error: 'rate limited' }
+        )
+      )
+    )
+
+    const result = await fetchGrokRateLimits()
+
+    expect(result.status).toBe('error')
+    expect(isProviderConfigured(result)).toBe(true)
+  })
+
   // Why: an object with no credit fields is the documented "this plan has no weekly credits"
   // answer — a genuine empty reading, and it must keep behaving like one. An explicit `null`
   // carrier is an absent field, not a wrong-typed one, so it stays on that same road.
   const genuinelyEmptyBodies: [string, unknown][] = [
-    ['no credit fields', {}],
-    ['an explicitly null config', { config: null }]
+    ['an explicitly null config', { config: null }],
+    ['a tier with no credit fields', { subscriptionTier: 'Enterprise' }]
   ]
 
   for (const [label, body] of genuinelyEmptyBodies) {

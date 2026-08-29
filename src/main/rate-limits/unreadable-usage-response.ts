@@ -10,7 +10,16 @@
  *    last good snapshot (`applyStalePolicy` returns fresh verbatim) and `unavailable` discards it
  *    *and* hides the chip (`isProviderConfigured`), which is the surface that would have shown
  *    the user something was wrong.
+ * 4. A body naming none of the fields the reading is made of is a failed read, not an empty one.
+ *    An HTTP-200 error envelope and a renamed schema both parse; neither is evidence that the
+ *    account has nothing to report, and clause 3 says the verdict Orca cannot support is the
+ *    destructive one. Clauses 1-3 were prose every provider re-expressed by hand, and this is the
+ *    clause that got dropped each time — so it ships as the check itself.
  */
 export function isReadableUsageBody(data: unknown): data is Record<string, unknown> {
   return typeof data === 'object' && data !== null && !Array.isArray(data)
+}
+
+export function namesReadableUsageField(body: object, fields: readonly string[]): boolean {
+  return fields.some((field) => field in body)
 }

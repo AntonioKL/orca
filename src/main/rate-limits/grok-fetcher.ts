@@ -10,7 +10,7 @@ import {
   type GrokAuthReadResult,
   type GrokAuthSession
 } from './grok-auth'
-import { isReadableUsageBody } from './unreadable-usage-response'
+import { isReadableUsageBody, namesReadableUsageField } from './unreadable-usage-response'
 
 // Why: billing URL and headers must match Grok CLI or xAI rejects the request.
 const GROK_CLI_PROXY_BASE =
@@ -151,9 +151,27 @@ function grokRequestHeaders(session: GrokAuthSession): Record<string, string> {
   return headers
 }
 
+// Why: the fields a billing view is made of. A 200 naming none of them is a read that failed,
+// not a plan without credits — see clause 4 in unreadable-usage-response.ts.
+const BILLING_RESPONSE_KEYS = [
+  'config',
+  'creditUsagePercent',
+  'currentPeriod',
+  'billingPeriodStart',
+  'billingPeriodEnd',
+  'subscriptionTier',
+  'monthlyLimit',
+  'used',
+  'onDemandCap',
+  'onDemandUsed',
+  'prepaidBalance',
+  'isUnifiedBillingUser'
+] as const
+
 type GrokBillingConfigResolution =
   | { kind: 'config'; config: GrokBillingConfig }
-  // Why: no config carrier at all is the documented "this plan has no weekly credits" answer.
+  // Why: a recognisable billing view with no credit carrier is the documented "this plan has no
+  // weekly credits" answer. A body that names no billing field at all is not that — it is clause 4.
   | { kind: 'absent' }
   | { kind: 'unreadable'; reason: string }
 
@@ -170,6 +188,12 @@ function resolveBillingConfig(data: GrokBillingResponse): GrokBillingConfigResol
     return typeof data.creditUsagePercent === 'number'
       ? { kind: 'config', config: data }
       : { kind: 'unreadable', reason: 'Grok credit usage was not a number' }
+  }
+  // Both billing views resolve here, so the clause is stated once rather than at each fetch: an
+  // error envelope and a drifted schema reach this line as readable objects, and calling either
+  // absent publishes `unavailable`, which discards the last good snapshot and hides the chip.
+  if (!namesReadableUsageField(data, BILLING_RESPONSE_KEYS)) {
+    return { kind: 'unreadable', reason: 'Grok billing response was not a billing reading' }
   }
   return { kind: 'absent' }
 }
