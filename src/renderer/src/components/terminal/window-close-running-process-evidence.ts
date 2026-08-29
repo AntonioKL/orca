@@ -4,7 +4,13 @@ import { withTimeout } from '../../../../shared/promise-timeout-fallback'
 import { inspectRuntimeTerminalProcess } from '@/runtime/runtime-terminal-inspection'
 
 /**
- * Whether any local PTY must stop the window from closing silently.
+ * Whether any PTY the window owns must stop it from closing silently.
+ *
+ * Every pane is probed on the host that actually runs it: `inspectProcess` is
+ * dispatched by PTY id, so a direct-SSH pane's shell is inspected on the remote
+ * box (ssh-pty-provider's `pty.inspectProcess` request). Panes were previously
+ * filtered down to local ones, which closed the window over remote work nobody
+ * had looked at.
  *
  * `exited` is the only verdict that closes with no prompt. A probe that could
  * not answer is `unverifiable` (docs/reference/ssh-execution-boundary.md) and
@@ -14,22 +20,23 @@ import { inspectRuntimeTerminalProcess } from '@/runtime/runtime-terminal-inspec
  * Unlike every other consumer of this evidence, closing here acts for the user
  * and destroys the work the warning would have let them save, so unknown asks.
  *
- * `timeoutMs` bounds the whole probe. A local inspect is an IPC round trip into a
- * process-table scan and can stall indefinitely, and this path has no backstop:
- * main only arms its ack timer when `isQuitting`, which is exactly the branch that
- * never probes. An unbounded wait leaves the window neither closed nor prompting —
- * the silent-death shape this guard exists to remove. Unanswered blocks, matching
- * the tab and pane close paths (#10142).
+ * `timeoutMs` bounds the whole probe. An inspect is an IPC round trip into a
+ * process-table scan — over SSH, a round trip to another machine on top — and
+ * can stall indefinitely, and this path has no backstop: main only arms its ack
+ * timer when `isQuitting`, which is exactly the branch that never probes. An
+ * unbounded wait leaves the window neither closed nor prompting — the silent-death
+ * shape this guard exists to remove. Unanswered blocks, matching the tab and pane
+ * close paths (#10142).
  */
-export async function anyLocalPtyBlocksWindowClose(
+export async function anyPtyBlocksWindowClose(
   settings: Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> | null | undefined,
   ptyIds: readonly string[],
   timeoutMs: number
 ): Promise<boolean> {
-  return withTimeout(inspectAllLocalPtys(settings, ptyIds), timeoutMs, true)
+  return withTimeout(inspectAllPtys(settings, ptyIds), timeoutMs, true)
 }
 
-async function inspectAllLocalPtys(
+async function inspectAllPtys(
   settings: Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> | null | undefined,
   ptyIds: readonly string[]
 ): Promise<boolean> {
@@ -39,7 +46,10 @@ async function inspectAllLocalPtys(
   return results.some((result) => {
     // Why rejected counts as blocking: a raised inspection answered nothing, and
     // the Promise.all this replaced had no catch — a rejection left the window
-    // neither closed nor prompting.
+    // neither closed nor prompting. It is also the steady state of a remote host
+    // this client cannot vouch for: a relay predating `pty.inspectProcess` raises
+    // method-not-found, and a dropped SSH connection raises too. Neither observed
+    // an absence, so neither may be spent as one.
     if (result.status === 'rejected') {
       return true
     }

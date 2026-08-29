@@ -8,6 +8,7 @@ import {
   buildPtyProcessInspectionWireResult,
   type PtyProcessInspectionEvidence
 } from '../../../../shared/pty-process-inspection-evidence'
+import type { AppState } from '@/store/types'
 
 /**
  * The window-close guard is the one consumer of this evidence that acts FOR the
@@ -20,18 +21,50 @@ import {
 const { getStateMock } = vi.hoisted(() => ({ getStateMock: vi.fn() }))
 
 vi.mock('@/store', () => ({ useAppStore: { getState: getStateMock } }))
-vi.mock('@/lib/connection-context', () => ({ getConnectionId: () => null }))
 vi.mock('@/lib/shutdown-checkpoint-failure-toast', () => ({
   showShutdownCheckpointFailureToast: vi.fn()
 }))
 
 import { useWindowCloseRunningProcessPrompt } from './window-close-running-process-prompt'
-import { anyLocalPtyBlocksWindowClose } from './window-close-running-process-evidence'
+import { anyPtyBlocksWindowClose } from './window-close-running-process-evidence'
 import { RUNNING_CLOSE_PROBE_TIMEOUT_MS } from './running-terminal-close-guard'
 
 const PTY_ID = 'pty-local-1'
+const SSH_PTY_ID = 'ssh:ssh-1@@pty-remote-1'
+const LOCAL_WORKTREE_ID = 'repo-local::/home/dev/work'
+const SSH_WORKTREE_ID = 'repo-ssh::/srv/work'
 const SHELL = 'zsh'
-const WARNING = 'There are local terminals with running processes.'
+
+/**
+ * Owner resolution runs for real (`getConnectionIdFromState`: repo of the worktree,
+ * then its `connectionId`). Stubbing `getConnectionId` would decide the very thing
+ * the SSH cases are about, and would keep passing if the guard started asking the
+ * store a different question.
+ */
+const REPOS = [
+  { id: 'repo-local', connectionId: null },
+  { id: 'repo-ssh', connectionId: 'ssh-1' }
+] as unknown as AppState['repos']
+
+function storeStateWithPtys(ptysByWorktreeId: Record<string, readonly string[]>): unknown {
+  const tabsByWorktree: Record<string, { id: string }[]> = {}
+  const ptyIdsByTabId: Record<string, readonly string[]> = {}
+  for (const [worktreeId, ptyIds] of Object.entries(ptysByWorktreeId)) {
+    const tabId = `tab-${worktreeId}`
+    tabsByWorktree[worktreeId] = [{ id: tabId }]
+    ptyIdsByTabId[tabId] = ptyIds
+  }
+  return {
+    settings: { activeRuntimeEnvironmentId: null },
+    tabsByWorktree,
+    ptyIdsByTabId,
+    repos: REPOS,
+    worktreesByRepo: {},
+    folderWorkspaces: [],
+    projectGroups: []
+  }
+}
+const WARNING = 'There are terminals with running processes.'
 
 /**
  * What `LocalPtyProvider.inspectProcess` really publishes when the foreground
@@ -93,18 +126,24 @@ function Harness(): React.ReactNode {
  * bug actually has. A throwing controller would be a different boundary; the
  * local host answers, its probes just could not see.
  */
-function installInspectProcess(inspectProcess: () => Promise<InspectionShape>): void {
+function installInspectProcess(
+  inspectProcess: (ptyId: string) => Promise<InspectionShape>
+): ReturnType<typeof vi.fn> {
+  const inspectProcessMock = vi.fn(inspectProcess)
   ;(window as unknown as { api: unknown }).api = {
     pty: {
-      inspectProcess: vi.fn(inspectProcess),
+      inspectProcess: inspectProcessMock,
       // Why the double publishes both: `pty:hasChildProcesses` is the legacy
       // boolean route this guard used to take, and it is derived from the SAME
       // host answer. A double that omitted it would let the pre-fix predicate
       // look untestable instead of wrong.
-      hasChildProcesses: vi.fn(async () => (await inspectProcess()).hasChildProcesses === true)
+      hasChildProcesses: vi.fn(
+        async (ptyId: string) => (await inspectProcess(ptyId)).hasChildProcesses === true
+      )
     },
     ui: { confirmWindowClose }
   }
+  return inspectProcessMock
 }
 
 async function runWindowClose(): Promise<void> {
@@ -121,11 +160,7 @@ function warningIsVisible(): boolean {
 
 beforeEach(() => {
   confirmWindowClose = vi.fn()
-  getStateMock.mockReturnValue({
-    settings: { activeRuntimeEnvironmentId: null },
-    tabsByWorktree: { 'wt-1': [{ id: 'tab-1' }] },
-    ptyIdsByTabId: { 'tab-1': [PTY_ID] }
-  })
+  getStateMock.mockReturnValue(storeStateWithPtys({ [LOCAL_WORKTREE_ID]: [PTY_ID] }))
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -409,7 +444,7 @@ describe('a probe that never answers cannot hang the window close', () => {
     installInspectProcess(() => new Promise(() => {}))
 
     await expect(
-      anyLocalPtyBlocksWindowClose({ activeRuntimeEnvironmentId: null }, [PTY_ID], 20)
+      anyPtyBlocksWindowClose({ activeRuntimeEnvironmentId: null }, [PTY_ID], 20)
     ).resolves.toBe(true)
   })
 
@@ -417,7 +452,7 @@ describe('a probe that never answers cannot hang the window close', () => {
     installInspectProcess(async () => observedIdleInspection())
 
     await expect(
-      anyLocalPtyBlocksWindowClose({ activeRuntimeEnvironmentId: null }, [PTY_ID], 20_000)
+      anyPtyBlocksWindowClose({ activeRuntimeEnvironmentId: null }, [PTY_ID], 20_000)
     ).resolves.toBe(false)
   })
 
@@ -439,5 +474,132 @@ describe('a probe that never answers cannot hang the window close', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+/**
+ * A direct-SSH pane's shell runs on the remote box but dies with the window, and
+ * the guard used to select local worktrees before probing — so every SSH pane was
+ * dropped unprobed and the window closed over live remote work with no warning.
+ * `inspectProcess` dispatches on the PTY id, so the SSH provider answers these
+ * (`pty.inspectProcess` over the mux); the verdict vocabulary is unchanged.
+ */
+describe('window close with a direct-SSH terminal', () => {
+  beforeEach(() => {
+    getStateMock.mockReturnValue(storeStateWithPtys({ [SSH_WORKTREE_ID]: [SSH_PTY_ID] }))
+  })
+
+  it('asks the execution host and shows the warning for live remote work', async () => {
+    const inspectProcess = installInspectProcess(async () => observedLiveInspection())
+
+    await runWindowClose()
+
+    expect(inspectProcess).toHaveBeenCalledExactlyOnceWith(SSH_PTY_ID)
+    expect(warningIsVisible()).toBe(true)
+    expect(confirmWindowClose).not.toHaveBeenCalled()
+  })
+
+  it('closes only after the execution host positively observed the shell exited', async () => {
+    const inspectProcess = installInspectProcess(async () => observedIdleInspection())
+
+    await runWindowClose()
+
+    expect(inspectProcess).toHaveBeenCalledExactlyOnceWith(SSH_PTY_ID)
+    expect(warningIsVisible()).toBe(false)
+    expect(confirmWindowClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('asks when the owning host could not route the pane', async () => {
+    installInspectProcess(async () => ({
+      foregroundProcess: null,
+      hasChildProcesses: false,
+      unavailable: true as const
+    }))
+
+    await runWindowClose()
+
+    expect(warningIsVisible()).toBe(true)
+    expect(confirmWindowClose).not.toHaveBeenCalled()
+  })
+
+  /** The compatibility floor: this reuses the existing `pty.inspectProcess` request
+   *  rather than adding a field or an opcode, so a relay that predates it answers
+   *  method-not-found. That is `unverifiable`, never an observed absence. */
+  it('asks when a relay too old to answer the request rejects it', async () => {
+    installInspectProcess(async () => {
+      throw new Error('Method not found: pty.inspectProcess')
+    })
+
+    await runWindowClose()
+
+    expect(warningIsVisible()).toBe(true)
+    expect(confirmWindowClose).not.toHaveBeenCalled()
+  })
+
+  it('asks after losing contact with the execution host', async () => {
+    installInspectProcess(async () => {
+      throw Object.assign(new Error('SSH connection lost, reconnecting...'), {
+        code: 'CONNECTION_LOST'
+      })
+    })
+
+    await runWindowClose()
+
+    expect(warningIsVisible()).toBe(true)
+    expect(confirmWindowClose).not.toHaveBeenCalled()
+  })
+
+  it('asks once the deadline passes when the execution host never answers', async () => {
+    vi.useFakeTimers()
+    try {
+      installInspectProcess(() => new Promise<InspectionShape>(() => {}))
+      await act(async () => {
+        proceed!(false)
+        await Promise.resolve()
+      })
+      // Why assert the not-yet state first: without it a bound of 0 would pass.
+      expect(warningIsVisible()).toBe(false)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(RUNNING_CLOSE_PROBE_TIMEOUT_MS)
+      })
+      expect(warningIsVisible()).toBe(true)
+      expect(confirmWindowClose).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  /** Both hosts in one window. Without this, a guard that swapped one owner filter
+   *  for its complement — probing only SSH panes — passes every case above. */
+  it('probes local and SSH panes alike and warns on whichever is busy', async () => {
+    getStateMock.mockReturnValue(
+      storeStateWithPtys({
+        [LOCAL_WORKTREE_ID]: [PTY_ID],
+        [SSH_WORKTREE_ID]: [SSH_PTY_ID]
+      })
+    )
+    const inspectProcess = installInspectProcess(async (ptyId) =>
+      ptyId === SSH_PTY_ID ? observedLiveInspection() : observedIdleInspection()
+    )
+
+    await runWindowClose()
+
+    expect(inspectProcess.mock.calls.map(([ptyId]) => ptyId).sort()).toEqual(
+      [PTY_ID, SSH_PTY_ID].sort()
+    )
+    expect(warningIsVisible()).toBe(true)
+    expect(confirmWindowClose).not.toHaveBeenCalled()
+  })
+
+  /** The warning now speaks for remote panes too, so copy that still scoped itself
+   *  to local terminals would be wrong about what it is protecting. */
+  it('does not scope the warning to local terminals', async () => {
+    installInspectProcess(async () => observedLiveInspection())
+
+    await runWindowClose()
+
+    const dialogText = document.body.textContent ?? ''
+    expect(dialogText).toContain(WARNING)
+    expect(dialogText).not.toContain('local terminal')
   })
 })
