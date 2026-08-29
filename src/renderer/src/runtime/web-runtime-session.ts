@@ -19,9 +19,11 @@ import type {
   SleepingAgentLaunchConfig,
   AgentProviderSessionMetadata
 } from '../../../shared/agent-session-resume'
-import { BROWSER_TAB_CREATE_KNOWN_ID_RUNTIME_CAPABILITY } from '../../../shared/protocol-version'
+import {
+  AGENT_SESSION_RESUME_CWD_RUNTIME_CAPABILITY,
+  BROWSER_TAB_CREATE_KNOWN_ID_RUNTIME_CAPABILITY
+} from '../../../shared/protocol-version'
 import { agentResumeHostAuthorityCapability } from './agent-resume-host-authority-capability'
-import { AGENT_SESSION_RESUME_CWD_RUNTIME_CAPABILITY } from '../../../shared/protocol-version'
 import { expectsBrowserClientHosting } from '../../../shared/browser-client-hosting-eligibility'
 import type {
   BrowserClientHostPlacementPreference,
