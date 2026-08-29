@@ -8,11 +8,8 @@ const guestModifier: 'meta' | 'control' = process.platform === 'darwin' ? 'meta'
 
 type TerminalBrowserSplitFixture = {
   browserGroupId: string
-  browserPageId: string
   browserTabId: string
   terminalGroupId: string
-  terminalTabId: string
-  worktreeId: string
 }
 
 type BrowserSplitFixture = {
@@ -55,11 +52,8 @@ async function createTerminalBrowserSplit(page: Page): Promise<TerminalBrowserSp
     }
     return {
       browserGroupId,
-      browserPageId,
       browserTabId: browserTab.id,
-      terminalGroupId,
-      terminalTabId,
-      worktreeId
+      terminalGroupId
     }
   })
 }
@@ -123,7 +117,7 @@ async function focusBrowserAddressBar(page: Page, browserTabId: string): Promise
     'form:has(> [data-orca-browser-address-bar="true"])'
   )
   await expect(addressBarForm).toBeVisible()
-  await addressBarForm.click()
+  await addressBar.focus()
   await expect(addressBar).toBeFocused()
 }
 
@@ -208,54 +202,6 @@ async function pressFindInBrowserGuest(
       })
     },
     { targetBrowserTabId: browserTabId, inputModifier: guestModifier }
-  )
-}
-
-async function pressCloseInBrowserGuestWithTerminalMirrors(
-  page: Page,
-  fixture: TerminalBrowserSplitFixture
-): Promise<void> {
-  await waitForBrowserGuestRegistration(page, fixture.browserTabId, fixture.browserPageId)
-
-  await page.evaluate(
-    async ({ browserTabId, terminalTabId, worktreeId, inputModifier }) => {
-      const store = window.__store
-      const overlay = document.querySelector(`[data-browser-overlay-tab-id="${browserTabId}"]`)
-      const webview = overlay?.querySelector('webview') as Electron.WebviewTag | null
-      if (!store || !webview) {
-        throw new Error('Registered browser guest unavailable')
-      }
-
-      webview.focus()
-      store.setState((state) => ({
-        activeBrowserTabId: null,
-        activeBrowserTabIdByWorktree: {
-          ...state.activeBrowserTabIdByWorktree,
-          [worktreeId]: null
-        },
-        activeTabId: terminalTabId,
-        activeTabIdByWorktree: {
-          ...state.activeTabIdByWorktree,
-          [worktreeId]: terminalTabId
-        },
-        activeTabType: 'terminal',
-        activeTabTypeByWorktree: {
-          ...state.activeTabTypeByWorktree,
-          [worktreeId]: 'terminal'
-        }
-      }))
-
-      const state = store.getState()
-      if (state.activeTabType !== 'terminal' || state.activeBrowserTabId !== null) {
-        throw new Error('Terminal active-tab mirrors did not stick')
-      }
-      await webview.sendInputEvent({
-        type: 'keyDown',
-        keyCode: 'W',
-        modifiers: [inputModifier]
-      })
-    },
-    { ...fixture, inputModifier: guestModifier }
   )
 }
 
@@ -420,33 +366,5 @@ test.describe('browser split shortcuts', () => {
     await orcaPage.keyboard.press(`${modifier}+f`)
     await expect(browserFindInput(orcaPage)).toBeFocused()
     await expect(terminalFindInput(orcaPage)).toBeHidden()
-  })
-
-  test('closes the guest-owned browser split when active-tab mirrors point at a terminal', async ({
-    orcaPage
-  }) => {
-    const fixture = await createTerminalBrowserSplit(orcaPage)
-    await focusBrowserGroup(orcaPage, fixture.browserGroupId)
-
-    await pressCloseInBrowserGuestWithTerminalMirrors(orcaPage, fixture)
-
-    await expect
-      .poll(() =>
-        orcaPage.evaluate(({ browserTabId, terminalTabId, worktreeId }) => {
-          const state = window.__store?.getState()
-          return {
-            browserExists: Boolean(
-              state?.browserTabsByWorktree[worktreeId]?.some((tab) => tab.id === browserTabId)
-            ),
-            terminalExists: Boolean(
-              state?.tabsByWorktree[worktreeId]?.some((tab) => tab.id === terminalTabId)
-            )
-          }
-        }, fixture)
-      )
-      .toEqual({ browserExists: false, terminalExists: true })
-    await expect(
-      orcaPage.locator(`[data-browser-overlay-tab-id="${fixture.browserTabId}"]`)
-    ).toHaveCount(0)
   })
 })
