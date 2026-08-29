@@ -13,6 +13,8 @@ export type GpuFallbackEngagementHandlers = {
   isQuitting: () => boolean
   /** Writes the build-scoped safe-graphics marker; false when it could not be persisted. */
   persistMarker: (engagement: GpuFallbackEngagement) => boolean
+  /** Marks that the user explicitly accepted safe graphics before relaunching. */
+  confirmMarker: (engagement: GpuFallbackEngagement) => void
   clearMarker: () => void
   promptForRestart: () => Promise<GpuFallbackRestartDecision>
   onPromptFailed: (error: unknown) => void
@@ -59,5 +61,6 @@ export async function engageGpuFallbackAfterCrashBurst(
   if (!persisted) {
     return
   }
+  handlers.confirmMarker(engagement)
   handlers.restartIntoSafeGraphics(engagement)
 }

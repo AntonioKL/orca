@@ -173,6 +173,7 @@ import {
   clearGpuFallbackMarker,
   readActiveGpuFallbackMarker,
   writeGpuFallbackMarker,
+  type GpuFallbackMarker,
   type GpuFallbackEnvironment,
   type WindowsGpuFallbackEnvironment
 } from './startup/gpu-fallback-marker'
@@ -185,6 +186,10 @@ import {
 } from './crash-reporting/gpu-crash-fallback-decision'
 import { promptForGpuFallbackRestart } from './crash-reporting/gpu-fallback-restart-prompt'
 import { engageGpuFallbackAfterCrashBurst } from './crash-reporting/gpu-fallback-engagement'
+import {
+  handleGpuFallbackRecoveredLaunch,
+  promptForGpuFallbackRecoveredLaunch
+} from './crash-reporting/gpu-fallback-recovered-launch'
 import {
   shouldSuppressDevEducation,
   suppressDevEducationForStore
@@ -460,6 +465,7 @@ const gpuCrashFallbackTracker = new GpuCrashFallbackTracker({
   windowMs: DEFAULT_GPU_CRASH_FALLBACK_WINDOW_MS,
   threshold: DEFAULT_GPU_CRASH_FALLBACK_THRESHOLD
 })
+let activeGpuFallbackMarker: GpuFallbackMarker | null = null
 let gpuFallbackActiveThisLaunch = false
 let gpuFeatureStatus: Electron.GPUFeatureStatus | null = null
 let localPtyStartupReady: Promise<void> = Promise.resolve()
@@ -1568,6 +1574,7 @@ function openMainWindow(options: { revealOnDidFinishLoad?: boolean } = {}): Brow
   })
   window.once('show', () => {
     logStartupMilestone('window-shown')
+    void presentGpuFallbackRecoveredLaunchPrompt(window)
   })
   const trayCreateFallback = setTimeout(createSystemTrayDeferred, TRAY_CREATE_FALLBACK_MS)
   trayCreateFallback.unref?.()
@@ -1854,7 +1861,25 @@ function getWindowsGpuFallbackEnvironment(): WindowsGpuFallbackEnvironment | nul
   return { ...environment, platform: 'win32' }
 }
 
-// Why: read the GPU-fallback marker before app.whenReady() so app.disableHardwareAcceleration() takes effect. Windows desktop only.
+// Writes both crash-time and post-recovery consent states through one build-scoped path.
+function persistGpuFallbackMarker(
+  userDataPath: string,
+  info: { engagedAt: number; crashesInWindow: number; userConfirmed: boolean }
+): boolean {
+  const environment = getWindowsGpuFallbackEnvironment()
+  if (!environment) {
+    return false
+  }
+  try {
+    writeGpuFallbackMarker(userDataPath, info, environment)
+    return true
+  } catch (error) {
+    console.warn('[gpu-fallback] failed to persist marker:', error)
+    return false
+  }
+}
+
+// Read before app.whenReady() so app.disableHardwareAcceleration() takes effect. Windows desktop only.
 function maybeApplyGpuFallbackForThisLaunch(): void {
   if (isServeMode || process.platform !== 'win32') {
     return
@@ -1863,6 +1888,7 @@ function maybeApplyGpuFallbackForThisLaunch(): void {
   if (!marker) {
     return
   }
+  activeGpuFallbackMarker = marker
   app.disableHardwareAcceleration()
   const appliedSwitches = applyGpuFallbackCommandLineSwitches(app.commandLine, process.platform)
   gpuFallbackActiveThisLaunch = true
@@ -1871,6 +1897,43 @@ function maybeApplyGpuFallbackForThisLaunch(): void {
   recordCrashBreadcrumb('gpu_fallback_applied', {
     crashesInWindow: marker.crashesInWindow,
     switches: appliedSwitches.join(',')
+  })
+}
+
+async function presentGpuFallbackRecoveredLaunchPrompt(window: BrowserWindow): Promise<void> {
+  const marker = activeGpuFallbackMarker
+  if (!marker || marker.userConfirmed || window.isDestroyed() || isQuitting) {
+    return
+  }
+  // One prompt per process. A failure leaves the on-disk marker unconfirmed so the next launch retries.
+  activeGpuFallbackMarker = null
+  const userDataPath = app.getPath('userData')
+  await handleGpuFallbackRecoveredLaunch({
+    isQuitting: () => isQuitting,
+    prompt: () => promptForGpuFallbackRecoveredLaunch(window),
+    confirmSafeGraphics: () => {
+      persistGpuFallbackMarker(userDataPath, {
+        engagedAt: marker.engagedAt,
+        crashesInWindow: marker.crashesInWindow,
+        userConfirmed: true
+      })
+    },
+    clearSafeGraphics: () => clearGpuFallbackMarker(userDataPath),
+    onPromptFailed: (error) =>
+      console.warn('[gpu-fallback] failed to show recovered-launch prompt:', error),
+    onSafeGraphicsKept: () =>
+      recordDurableCrashBreadcrumb('gpu_fallback_safe_graphics_kept', {
+        crashesInWindow: marker.crashesInWindow
+      }),
+    restartWithHardware: () => {
+      isQuitting = true
+      relaunchApp('gpu-fallback', {
+        mode: 'hardware-retry',
+        crashesInWindow: marker.crashesInWindow
+      })
+      destroySystemTray()
+      app.exit(0)
+    }
   })
 }
 
@@ -1900,22 +1963,18 @@ async function handleGpuChildCrash(reason: string, exitCode: number | null): Pro
           exitCode: engagement.exitCode,
           crashesInWindow: engagement.crashesInWindow
         }),
-      persistMarker: (engagement) => {
-        const environment = getWindowsGpuFallbackEnvironment()
-        if (!environment) {
-          return false
-        }
-        try {
-          writeGpuFallbackMarker(
-            userDataPath,
-            { engagedAt: engagement.engagedAt, crashesInWindow: engagement.crashesInWindow },
-            environment
-          )
-          return true
-        } catch (error) {
-          console.warn('[gpu-fallback] failed to persist marker:', error)
-          return false
-        }
+      persistMarker: (engagement) =>
+        persistGpuFallbackMarker(userDataPath, {
+          engagedAt: engagement.engagedAt,
+          crashesInWindow: engagement.crashesInWindow,
+          userConfirmed: false
+        }),
+      confirmMarker: (engagement) => {
+        persistGpuFallbackMarker(userDataPath, {
+          engagedAt: engagement.engagedAt,
+          crashesInWindow: engagement.crashesInWindow,
+          userConfirmed: true
+        })
       },
       clearMarker: () => clearGpuFallbackMarker(userDataPath),
       promptForRestart: () =>

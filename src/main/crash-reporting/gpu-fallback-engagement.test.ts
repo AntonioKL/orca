@@ -25,6 +25,7 @@ function createHandlers(overrides: Partial<GpuFallbackEngagementHandlers> = {}):
       order.push('persistMarker')
       return true
     }),
+    confirmMarker: vi.fn(() => order.push('confirmMarker')),
     clearMarker: vi.fn(() => order.push('clearMarker')),
     promptForRestart: vi.fn(async () => {
       order.push('prompt')
@@ -70,7 +71,7 @@ describe('engageGpuFallbackAfterCrashBurst', () => {
   it('relaunches into safe graphics when the user accepts', async () => {
     const { handlers, order } = createHandlers()
     await engageGpuFallbackAfterCrashBurst(ENGAGEMENT, handlers)
-    expect(order).toEqual(['persistMarker', 'prompt', 'restart'])
+    expect(order).toEqual(['persistMarker', 'prompt', 'confirmMarker', 'restart'])
     expect(handlers.clearMarker).not.toHaveBeenCalled()
   })
 
