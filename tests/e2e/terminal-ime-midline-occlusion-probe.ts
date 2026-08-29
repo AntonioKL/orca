@@ -19,6 +19,9 @@ export type MidlinePreeditOcclusionSample = {
   hiddenByOverlay: string
   /** Overlay text as rendered, LRM marks stripped. */
   overlayText: string
+  remainderText: string | null
+  remainderVisibility: string | null
+  caretRect: { left: number; right: number; width: number; height: number } | null
   overlayActive: boolean
   cursorColumn: number
   /** Columns covered by the overlay, as `[first, last]`; null when it covers none. */
@@ -58,6 +61,9 @@ function readMidlinePreeditOcclusion(): MidlinePreeditOcclusionSample {
   const screenRect = screen.getBoundingClientRect()
   const overlayRect = view.getBoundingClientRect()
   const cellWidth = terminal.cols > 0 ? screenRect.width / terminal.cols : 0
+  const caret = view.querySelector<HTMLElement>('.xterm-composition-caret')
+  const remainder = view.querySelector<HTMLElement>('.xterm-composition-remainder')
+  const caretBounds = caret?.getBoundingClientRect()
 
   // A column counts as hidden when the overlay covers most of its cell, which keeps the sample
   // stable against the sub-pixel width a proportional text node lands on.
@@ -81,8 +87,24 @@ function readMidlinePreeditOcclusion(): MidlinePreeditOcclusionSample {
   return {
     rowTailFromCursor,
     hiddenByOverlay: hiddenByOverlay.trimEnd(),
-    // The overlay wraps its text in LRM marks; strip them so assertions read as the user sees it.
-    overlayText: (view.textContent ?? '').replaceAll('‎', ''),
+    // Hidden children still contribute to textContent; omit them so this reflects visible text.
+    overlayText: Array.from(view.childNodes)
+      .filter(
+        (node) => !(node instanceof HTMLElement) || getComputedStyle(node).visibility !== 'hidden'
+      )
+      .map((node) => node.textContent ?? '')
+      .join('')
+      .replaceAll('‎', ''),
+    remainderText: remainder?.textContent ?? null,
+    remainderVisibility: remainder ? getComputedStyle(remainder).visibility : null,
+    caretRect: caretBounds
+      ? {
+          left: caretBounds.left,
+          right: caretBounds.right,
+          width: caretBounds.width,
+          height: caretBounds.height
+        }
+      : null,
     overlayActive: view.classList.contains('active'),
     cursorColumn,
     coveredColumns: first === null ? null : [first, last],

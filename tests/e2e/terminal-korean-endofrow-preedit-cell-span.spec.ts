@@ -56,6 +56,39 @@ function describeSpan(sample: MidlinePreeditOcclusionSample): string {
 }
 
 test.describe('Terminal end-of-row Korean preedit cell span', () => {
+  test('keeps the preedit caret inside the final terminal cell', async ({ orcaPage }, testInfo) => {
+    const arena = await openTerminalImePaneArena(orcaPage)
+    let completed = false
+    try {
+      await writeToActiveTerminal(orcaPage, '\x1b[2J\x1b[H\x1b[80G')
+      await setImeComposition(arena.session, '가')
+
+      const sample = await sampleOpenComposition(orcaPage)
+      const caret = sample.caretRect
+      const screenRight = sample.screenRect.left + sample.screenRect.width
+      expect(sample.cursorColumn, 'the cursor is not in the final column').toBe(79)
+      expect(caret, 'the active preedit has no caret element').not.toBeNull()
+      expect(caret!.width, 'the preedit caret has zero width').toBeGreaterThan(0)
+      expect(caret!.height, 'the preedit caret has zero height').toBeGreaterThan(0)
+      expect(
+        caret!.left,
+        'the preedit caret is clipped left of its overlay'
+      ).toBeGreaterThanOrEqual(sample.overlayRect.left - 0.5)
+      expect(
+        caret!.right,
+        'the preedit caret overflows the terminal at the right edge'
+      ).toBeLessThanOrEqual(screenRight + 0.5)
+      completed = true
+    } finally {
+      await closeTerminalImePaneArena(
+        arena,
+        testInfo,
+        'korean-right-edge-preedit-caret',
+        !completed
+      )
+    }
+  })
+
   test('renders a composing syllable wider than the one cell #12729 measured', async ({
     orcaPage
   }, testInfo) => {
