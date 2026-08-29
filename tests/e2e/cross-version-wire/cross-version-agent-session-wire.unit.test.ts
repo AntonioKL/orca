@@ -199,6 +199,24 @@ function runtimeStub(): unknown {
   }
 }
 
+/**
+ * What a client too old to know the structured surface advertises: the baseline's
+ * own list, minus the capability. Derived rather than assumed to be the baseline's
+ * list as-is — the baseline is the newest release tag, so the day a release ships
+ * this capability the list would contain it and the gate below would stop being
+ * exercised at all, on a pull request that changed nothing.
+ */
+function legacyClientCapabilities(): string[] {
+  return baseline.capabilities.filter(
+    (capability) => capability !== STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY
+  )
+}
+
+/** The structured methods the baseline release actually registers, read from it. */
+function baselineStructuredMethods(): string[] {
+  return baseline.methodNames.filter((name) => name.startsWith('agentSession.'))
+}
+
 /** Every reply one call produced. Streaming methods answer more than once, and a
  *  refusal has to arrive as a reply rather than as silence. */
 async function callBuild(
@@ -263,12 +281,13 @@ describe('cross-version structured agent sessions', () => {
     })
 
     it('is told the whole surface does not exist, and reaches no host method', async () => {
-      // The old build cannot name the capability, so its clients never send it.
-      expect(baseline.capabilities).not.toContain(STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY)
+      // Anti-vacuous: the old client still advertises a real list, so the refusal
+      // below is the capability gate answering, not an empty negotiation.
+      expect(legacyClientCapabilities().length).toBeGreaterThan(0)
       for (const { method } of STRUCTURED_CALLS) {
         const replies = await callBuild(current, method, paramsFor(method), {
           clientKind: 'runtime',
-          clientCapabilities: baseline.capabilities
+          clientCapabilities: legacyClientCapabilities()
         })
         expect(replies, `${method} must answer exactly once`).toHaveLength(1)
         expect(replies[0]).toMatchObject({
@@ -286,7 +305,7 @@ describe('cross-version structured agent sessions', () => {
         const replies = await callBuild(current, method, paramsFor(method), {
           clientKind: 'runtime',
           clientCapabilities: [
-            ...baseline.capabilities,
+            ...legacyClientCapabilities(),
             STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY
           ]
         })
@@ -307,32 +326,43 @@ describe('cross-version structured agent sessions', () => {
   })
 
   describe('a new client against an old host', () => {
-    it('finds no structured method registered on the old build', () => {
-      expect(baseline.methodNames.filter((name) => name.startsWith('agentSession.'))).toEqual([])
+    it('registers the whole surface on the new build', () => {
+      expect(current.capabilities).toContain(STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY)
       expect(current.methodNames.filter((name) => name.startsWith('agentSession.'))).toHaveLength(
         STRUCTURED_CALLS.length
       )
     })
 
     it('can detect the absence during negotiation instead of by calling', () => {
-      expect(current.capabilities).toContain(STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY)
-      expect(baseline.capabilities).not.toContain(STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY)
+      // The invariant that survives a release cut: each build's advertised list and
+      // its registered methods agree. "The old build has neither" is only true
+      // until a release ships the surface, and pinning it turns this red on the cut
+      // rather than on a change.
+      expect(baseline.capabilities.includes(STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY)).toBe(
+        baselineStructuredMethods().length > 0
+      )
       // Additive surface: bumping the protocol number would strand every paired
       // device on this release rather than degrade one feature.
       expect(current.protocolVersion).toBe(baseline.protocolVersion)
     })
 
-    it('gets a clean method_not_found from the old dispatcher rather than silence', async () => {
+    it('gets a clean answer from the old dispatcher rather than silence', async () => {
+      const registered = new Set(baselineStructuredMethods())
       for (const { method } of STRUCTURED_CALLS) {
         const replies = await callBuild(baseline, method, paramsFor(method), {
           clientKind: 'runtime',
           clientCapabilities: current.capabilities
         })
+        // Silence is the failure mode a new client cannot recover from, whatever
+        // the old build knows; the refusal code is only asserted for the methods
+        // that release genuinely does not have.
         expect(replies, `${method} must answer exactly once`).toHaveLength(1)
-        expect(replies[0], `${method} on the old host`).toMatchObject({
-          ok: false,
-          error: { code: 'method_not_found' }
-        })
+        if (!registered.has(method)) {
+          expect(replies[0], `${method} on the old host`).toMatchObject({
+            ok: false,
+            error: { code: 'method_not_found' }
+          })
+        }
       }
     })
   })
@@ -429,7 +459,7 @@ describe('cross-version structured agent sessions', () => {
           {},
           {
             clientKind: 'runtime',
-            clientCapabilities: baseline.capabilities
+            clientCapabilities: legacyClientCapabilities()
           },
           runtime
         )
@@ -474,7 +504,7 @@ describe('cross-version structured agent sessions', () => {
             params,
             {
               clientKind: 'runtime',
-              clientCapabilities: baseline.capabilities
+              clientCapabilities: legacyClientCapabilities()
             },
             runtime
           )
@@ -487,7 +517,7 @@ describe('cross-version structured agent sessions', () => {
             current,
             'session.tabs.createTerminal',
             { worktree: `id:${WORKSPACE}`, command: `codex resume '${THREAD}'` },
-            { clientKind: 'runtime', clientCapabilities: baseline.capabilities },
+            { clientKind: 'runtime', clientCapabilities: legacyClientCapabilities() },
             runtime
           )
         )[0]
@@ -498,7 +528,7 @@ describe('cross-version structured agent sessions', () => {
             current,
             'terminal.send',
             { terminal: 'terminal-1', text: `codex resume '${THREAD}'`, enter: true },
-            { clientKind: 'runtime', clientCapabilities: baseline.capabilities },
+            { clientKind: 'runtime', clientCapabilities: legacyClientCapabilities() },
             runtime
           )
         )[0]
