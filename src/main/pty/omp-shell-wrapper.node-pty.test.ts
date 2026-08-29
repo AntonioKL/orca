@@ -1,5 +1,13 @@
 import { spawnSync } from 'node:child_process'
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as pty from 'node-pty'
@@ -31,6 +39,7 @@ fi
 {
   printf 'PI=%s\\n' "$PI_CODING_AGENT_DIR"
   printf 'EFFECTIVE=%s\\n' "$agent_dir"
+  printf 'CWD=%s\\n' "$(pwd -P)"
   i=0
   for arg in "$@"; do
     i=$((i + 1))
@@ -308,4 +317,49 @@ exit 0
       )
     }
   )
+
+  itWithBash('rebinds a stale shell cwd before launching OMP', async () => {
+    const tempDir = makeTempDir()
+    const projectDir = join(tempDir, 'project')
+    const homeDir = join(tempDir, 'home')
+    const binDir = join(tempDir, 'bin')
+    const extensionDir = join(tempDir, 'extensions')
+    mkdirSync(projectDir)
+    mkdirSync(homeDir)
+    mkdirSync(binDir)
+    mkdirSync(extensionDir)
+    const statusExtension = join(extensionDir, 'orca-agent-status.ts')
+    writeFileSync(statusExtension, 'export default {}')
+    writeFakeOmp(binDir)
+
+    const captureFile = join(tempDir, 'stale-cwd-capture')
+    await runInteractiveBashPty({
+      cwd: projectDir,
+      rcfileContent: `cd() { return 97; }
+${getPosixOmpShellWrapper()}`,
+      env: {
+        INPUTRC: '/dev/null',
+        PROMPT_COMMAND: '',
+        ORCA_STALE_PROJECT_DIR: projectDir,
+        HOME: homeDir,
+        PATH: `${binDir}:/usr/bin:/bin:/usr/sbin:/sbin`,
+        ORCA_OMP_STATUS_EXTENSION: statusExtension,
+        ORCA_CAPTURE_FILE: captureFile,
+        TERM: 'xterm-256color'
+      },
+      input: `/bin/rm -rf -- "$ORCA_STALE_PROJECT_DIR"
+/bin/mkdir -p -- "$ORCA_STALE_PROJECT_DIR"
+omp
+exit 0
+`
+    })
+
+    const capture = readFileSync(captureFile, 'utf8')
+    expect(capture).toContain(`CWD=${realpathSync(projectDir)}`)
+    expect(capture.split('\n').filter((line) => line.startsWith('ARG'))).toEqual([
+      'ARG1=--extension',
+      `ARG2=${statusExtension}`
+    ])
+    expect(capture).not.toContain('--cwd')
+  })
 })
