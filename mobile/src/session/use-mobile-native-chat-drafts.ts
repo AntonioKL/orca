@@ -54,6 +54,7 @@ export function useMobileNativeChatDrafts(args: {
 }): {
   composerText: string
   setComposerText: Dispatch<SetStateAction<string>>
+  getComposerEditGeneration: () => number
   pending: MobileNativeChatPendingMessage[]
   /** Phone-local previews rebound to the transcript message that replaced the
    *  optimistic echo, keyed by authoritative message id. */
@@ -100,6 +101,7 @@ export function useMobileNativeChatDrafts(args: {
     Record<string, Record<string, string[]>>
   >({})
   const pendingCounterRef = useRef(0)
+  const composerEditGenerationRef = useRef(0)
   const messagesRef = useRef(messages)
   messagesRef.current = messages
   const activeDraftKeyRef = useRef(draftKey)
@@ -123,6 +125,7 @@ export function useMobileNativeChatDrafts(args: {
       if (!draftKey) {
         return
       }
+      composerEditGenerationRef.current += 1
       setDrafts((previous) => {
         const current = previous[draftKey] ?? ''
         const next = typeof value === 'function' ? value(current) : value
@@ -131,6 +134,7 @@ export function useMobileNativeChatDrafts(args: {
     },
     [draftKey]
   )
+  const getComposerEditGeneration = useCallback(() => composerEditGenerationRef.current, [])
 
   const captureSendOrigin = useCallback(
     (text: string) => {
@@ -330,6 +334,7 @@ export function useMobileNativeChatDrafts(args: {
   return {
     composerText: draftKey ? (drafts[draftKey] ?? '') : '',
     setComposerText,
+    getComposerEditGeneration,
     pending,
     imagePreviewsByMessageId: pendingKey
       ? (imagePreviewsBySession[pendingKey] ?? NO_IMAGE_PREVIEWS)

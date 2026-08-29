@@ -59,8 +59,9 @@ describe('terminal send keyboard dismissal wiring', () => {
     // onSubmitEditing is the single send seam for the live field.
     const slice = routeSlice('ref={liveInputRef}', 'importantForAutofill="no"')
     expect(slice).toContain('generation: getSendCompletionGeneration()')
-    expect(slice).toContain('editGeneration: getLiveInputEditGeneration()')
-    expect(slice).toContain('sendOrigin.editGeneration === getLiveInputEditGeneration()')
+    expect(slice).toContain('const submit = handleLiveInputSubmit()')
+    expect(slice).toContain('interaction: getLiveInteractionGeneration()')
+    expect(slice).toContain('sendOrigin.interaction === getLiveInteractionGeneration()')
     expect(slice).toContain('dismissKeyboardAfterAgentSend(')
     // Explicit dismissal replaces RN's blur, which stays off so a shell send
     // does not drop focus.

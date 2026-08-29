@@ -41,6 +41,8 @@ type Props = {
   sendSurfaceId: string
   /** Reads the retained route's focus generation without forcing a screen render. */
   getSendCompletionGeneration: () => number
+  /** Reads user draft mutations owned above this renderable composer. */
+  getComposerEditGeneration: () => number
   /** Active tab's agent — the slash autocomplete serves its command catalog. */
   agent?: string | null
   /** Model/session-option pickers shown in the composer action row; null when
@@ -70,6 +72,7 @@ export function MobileNativeChatComposer({
   onSend,
   sendSurfaceId,
   getSendCompletionGeneration,
+  getComposerEditGeneration,
   agent,
   sessionOptions,
   onAttachImage,
@@ -151,7 +154,6 @@ export function MobileNativeChatComposer({
   }, [])
 
   const handleChange = (next: string): void => {
-    sendSurfaceGenerationRef.current += 1
     onChangeText(next)
   }
 
@@ -177,6 +179,7 @@ export function MobileNativeChatComposer({
     setSending(true)
     const sendSurfaceGeneration = sendSurfaceGenerationRef.current
     const sendCompletionGeneration = getSendCompletionGeneration()
+    const composerEditGeneration = getComposerEditGeneration()
     try {
       // Raw, not trimmed: the send seam owns the wire trim, and a rejection has
       // to hand the user back exactly what they typed (#14819).
@@ -185,7 +188,8 @@ export function MobileNativeChatComposer({
         accepted &&
         mountedRef.current &&
         sendSurfaceGeneration === sendSurfaceGenerationRef.current &&
-        sendCompletionGeneration === getSendCompletionGeneration()
+        sendCompletionGeneration === getSendCompletionGeneration() &&
+        composerEditGeneration === getComposerEditGeneration()
       ) {
         setCursor(0)
         // Why: the turn is now the agent's — the keyboard would cover the reply.

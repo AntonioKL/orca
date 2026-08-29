@@ -115,6 +115,20 @@ describe('useMobileNativeChatDrafts', () => {
     expect(state?.composerText).toBe('')
   })
 
+  it('tracks every composer mutation with a stable route-owned generation', async () => {
+    await mount('a')
+    const getter = state!.getComposerEditGeneration
+    const initialGeneration = getter()
+
+    act(() => state?.setComposerText('typed'))
+    expect(getter()).toBe(initialGeneration + 1)
+
+    await switchTo('b')
+    expect(state?.getComposerEditGeneration).toBe(getter)
+    act(() => state?.setComposerText((current) => `${current} dictated`))
+    expect(getter()).toBe(initialGeneration + 2)
+  })
+
   it('restores the text on a definite rejection', async () => {
     await mount('a')
     act(() => state?.setComposerText('ping'))

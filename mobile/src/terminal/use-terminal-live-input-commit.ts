@@ -43,7 +43,7 @@ type TerminalLiveInputCommitOptions<TTabType extends string> = {
 type TerminalLiveInputCommitHandlers = {
   readonly clearPendingLiveInputCommit: () => void
   readonly flushPendingLiveInputBeforeExternalSend: (handle: string) => Promise<boolean>
-  readonly getLiveInputEditGeneration: () => number
+  readonly getLiveInputInteractionGeneration: () => number
   readonly handleLiveInputAccessoryBytes: (
     input: TerminalLiveAccessoryInput
   ) => Promise<TerminalLiveAccessoryInputCommitResult>
@@ -64,7 +64,10 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
   sendLiveTerminalInputRef,
   setLiveInputCapture
 }: TerminalLiveInputCommitOptions<TTabType>): TerminalLiveInputCommitHandlers {
-  const liveInputEditGenerationRef = useRef(0)
+  const liveInputInteractionGenerationRef = useRef(0)
+  const advanceLiveInputInteractionGeneration = useCallback(() => {
+    liveInputInteractionGenerationRef.current += 1
+  }, [])
   const {
     applyLiveInputMirror,
     clearPendingLiveInputCommit,
@@ -110,6 +113,7 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
 
   const flushPendingLiveInputBeforeExternalSend = useCallback(
     async (handle: string): Promise<boolean> => {
+      advanceLiveInputInteractionGeneration()
       const pendingHandle = pendingLiveInputHandleRef.current
       if (pendingHandle && pendingHandle !== handle) {
         clearPendingLiveInputCommit()
@@ -122,7 +126,12 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
       }
       return waitForPendingLiveInputFlush()
     },
-    [clearPendingLiveInputCommit, flushPendingLiveInputText, waitForPendingLiveInputFlush]
+    [
+      advanceLiveInputInteractionGeneration,
+      clearPendingLiveInputCommit,
+      flushPendingLiveInputText,
+      waitForPendingLiveInputFlush
+    ]
   )
 
   const handleLiveInputChange = useCallback(
@@ -134,7 +143,7 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
       // Why: iOS kills an active dictation/IME session when JS writes a value
       // that differs from the native field text, so the controlled capture must
       // echo the field verbatim; only the PTY mirror sees normalized text.
-      liveInputEditGenerationRef.current += 1
+      advanceLiveInputInteractionGeneration()
       setLiveInputCapture(nativeEvent.text)
       void applyLiveInputMirror(
         activeHandle,
@@ -144,6 +153,7 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
     },
     [
       activeHandle,
+      advanceLiveInputInteractionGeneration,
       applyLiveInputMirror,
       clearPendingLiveInputCommit,
       liveInputTerminalHandles,
@@ -151,13 +161,17 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
     ]
   )
 
-  const getLiveInputEditGeneration = useCallback(() => liveInputEditGenerationRef.current, [])
+  const getLiveInputInteractionGeneration = useCallback(
+    () => liveInputInteractionGenerationRef.current,
+    []
+  )
 
   const handleLiveInputKeyPress = useCallback(
     (event: TerminalLiveInputKeyPressEvent) => {
       if (!activeHandle || !liveInputTerminalHandles.has(activeHandle)) {
         return
       }
+      advanceLiveInputInteractionGeneration()
       const ownsPendingState = pendingLiveInputHandleRef.current === activeHandle
       if (pendingLiveInputHandleRef.current && !ownsPendingState) {
         clearPendingLiveInputCommit()
@@ -188,6 +202,7 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
     },
     [
       activeHandle,
+      advanceLiveInputInteractionGeneration,
       clearPendingLiveInputCommit,
       flushPendingLiveInputText,
       liveInputTerminalHandles,
@@ -205,6 +220,7 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
     liveInputComposingRef,
     liveInputRef,
     liveInputTerminalHandles,
+    onInteraction: advanceLiveInputInteractionGeneration,
     pendingLiveInputHandleRef,
     sentLiveInputTextRef,
     sendLiveTerminalInputRef,
@@ -216,16 +232,23 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
     if (!activeHandle || !liveInputTerminalHandles.has(activeHandle)) {
       return Promise.resolve(false)
     }
+    advanceLiveInputInteractionGeneration()
     return sendTerminalLiveControlAfterPendingFlush(
       () => flushPendingLiveInputText(activeHandle),
       () => sendLiveTerminalInputRef.current(activeHandle, '\r')
     )
-  }, [activeHandle, flushPendingLiveInputText, liveInputTerminalHandles, sendLiveTerminalInputRef])
+  }, [
+    activeHandle,
+    advanceLiveInputInteractionGeneration,
+    flushPendingLiveInputText,
+    liveInputTerminalHandles,
+    sendLiveTerminalInputRef
+  ])
 
   return {
     clearPendingLiveInputCommit,
     flushPendingLiveInputBeforeExternalSend,
-    getLiveInputEditGeneration,
+    getLiveInputInteractionGeneration,
     handleLiveInputAccessoryBytes,
     handleLiveInputChange,
     handleLiveInputKeyPress,

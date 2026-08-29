@@ -89,6 +89,7 @@ export function MobileNativeChatOverlay({
         onSend={images.sendNativeChat}
         sendSurfaceId={sendSurfaceId}
         getSendCompletionGeneration={getSendCompletionGeneration}
+        getComposerEditGeneration={controller.getChatComposerEditGeneration}
         pending={controller.chatPending}
         imagePreviewsByMessageId={controller.chatImagePreviewsByMessageId}
         composerText={controller.chatComposerText}

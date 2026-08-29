@@ -1,9 +1,20 @@
-import { createElement, StrictMode } from 'react'
+import { createElement, StrictMode, type ComponentProps } from 'react'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { Keyboard } from 'react-native'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { radii, spacing } from '../theme/mobile-theme'
-import { MobileNativeChatComposer } from './MobileNativeChatComposer'
+import { MobileNativeChatComposer as NativeChatComposer } from './MobileNativeChatComposer'
+
+const getNoComposerEditGeneration = () => 0
+
+function MobileNativeChatComposer({
+  getComposerEditGeneration = getNoComposerEditGeneration,
+  ...props
+}: Omit<ComponentProps<typeof NativeChatComposer>, 'getComposerEditGeneration'> & {
+  getComposerEditGeneration?: () => number
+}): React.JSX.Element {
+  return createElement(NativeChatComposer, { ...props, getComposerEditGeneration })
+}
 
 vi.mock('react-native', async () => {
   const React = await import('react')
@@ -55,19 +66,24 @@ describe('MobileNativeChatComposer', () => {
 
   async function render(
     onSend: (text: string) => Promise<boolean>,
-    onChangeText: () => void,
+    onChangeText: (text: string) => void,
     isAttaching = false,
     sendSurfaceId = 'tab-a',
     getSendCompletionGeneration = () => 0
   ) {
+    let composerEditGeneration = 0
     await act(async () => {
       renderer = create(
         createElement(MobileNativeChatComposer, {
           value: ' hello ',
-          onChangeText,
+          onChangeText: (text) => {
+            composerEditGeneration += 1
+            onChangeText(text)
+          },
           onSend,
           sendSurfaceId,
           getSendCompletionGeneration,
+          getComposerEditGeneration: () => composerEditGeneration,
           isAttaching
         })
       )
@@ -534,6 +550,94 @@ describe('MobileNativeChatComposer', () => {
       props: { onChangeText: (text: string) => void }
     }
     await act(async () => input.props.onChangeText('newer draft'))
+    await act(async () => {
+      resolveSend?.(true)
+      await pendingSend
+    })
+
+    expect(Keyboard.dismiss).not.toHaveBeenCalled()
+  })
+
+  it('does not dismiss after autocomplete mutates the same surface', async () => {
+    vi.mocked(Keyboard.dismiss).mockClear()
+    let editGeneration = 0
+    let resolveSend: ((accepted: boolean) => void) | null = null
+    const onSend = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSend = resolve
+        })
+    )
+    await act(async () => {
+      renderer = create(
+        createElement(MobileNativeChatComposer, {
+          value: '/c',
+          onChangeText: () => {
+            editGeneration += 1
+          },
+          onSend,
+          sendSurfaceId: 'tab-a',
+          getSendCompletionGeneration: getCurrentSendCompletionGeneration,
+          getComposerEditGeneration: () => editGeneration,
+          agent: 'claude'
+        })
+      )
+    })
+    const input = renderer!.root.find((node) => node.type === 'TextInput') as {
+      props: { onSelectionChange: (event: { nativeEvent: { selection: { end: number } } }) => void }
+    }
+    await act(async () => input.props.onSelectionChange({ nativeEvent: { selection: { end: 2 } } }))
+
+    let pendingSend!: Promise<void>
+    await act(async () => {
+      pendingSend = sendButton().props.onPress()
+      await Promise.resolve()
+    })
+    const suggestion = renderer!.root.findAll(
+      (node) => node.type === 'Pressable' && !node.props.accessibilityLabel
+    )[0] as { props: { onPress: () => void } }
+    await act(async () => suggestion.props.onPress())
+    await act(async () => {
+      resolveSend?.(true)
+      await pendingSend
+    })
+
+    expect(Keyboard.dismiss).not.toHaveBeenCalled()
+  })
+
+  it('does not dismiss after dictation mutates the controlled draft', async () => {
+    vi.mocked(Keyboard.dismiss).mockClear()
+    let editGeneration = 0
+    let resolveSend: ((accepted: boolean) => void) | null = null
+    const onSend = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSend = resolve
+        })
+    )
+    const props = {
+      value: 'hello',
+      onChangeText: vi.fn(),
+      onSend,
+      sendSurfaceId: 'tab-a',
+      getSendCompletionGeneration: getCurrentSendCompletionGeneration,
+      getComposerEditGeneration: () => editGeneration
+    }
+    await act(async () => {
+      renderer = create(createElement(MobileNativeChatComposer, props))
+    })
+
+    let pendingSend!: Promise<void>
+    await act(async () => {
+      pendingSend = sendButton().props.onPress()
+      await Promise.resolve()
+    })
+    editGeneration += 1
+    await act(async () => {
+      renderer!.update(
+        createElement(MobileNativeChatComposer, { ...props, value: 'hello dictated text' })
+      )
+    })
     await act(async () => {
       resolveSend?.(true)
       await pendingSend

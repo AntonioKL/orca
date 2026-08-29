@@ -62,6 +62,8 @@ type Props = {
   sendSurfaceId: string
   /** Reads the retained route's focus generation for accepted-send fencing. */
   getSendCompletionGeneration: () => number
+  /** Reads user draft mutations from the route-owned controller. */
+  getComposerEditGeneration: () => number
   /** Accepted user echoes awaiting transcript replacement, including image previews. */
   pending: MobileNativeChatPendingItem[]
   /** Local photo URIs retained when the authoritative transcript replaces an
@@ -132,6 +134,7 @@ export function MobileNativeChatView({
   onSend,
   sendSurfaceId,
   getSendCompletionGeneration,
+  getComposerEditGeneration,
   pending,
   imagePreviewsByMessageId,
   composerText,
@@ -438,7 +441,7 @@ export function MobileNativeChatView({
         onChangeText={onComposerTextChange}
         onSend={handleSend}
         sendSurfaceId={sendSurfaceId}
-        getSendCompletionGeneration={getSendCompletionGeneration}
+        {...{ getSendCompletionGeneration, getComposerEditGeneration }}
         agent={agent}
         sessionOptions={sessionOptions}
         onAttachImage={onAttachImage}

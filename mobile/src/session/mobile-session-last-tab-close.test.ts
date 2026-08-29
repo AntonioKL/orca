@@ -13,7 +13,7 @@ describe('mobile session last-tab close', () => {
     const block = sessionRouteSource.slice(start, end)
 
     expect(block).toContain('} else if (active) {')
-    expect(block).toContain('retainMissingSurfaces: nextTabs.length === 0')
+    expect(block).toContain('retainMissingSurfaces: result.tabs.length === 0')
   })
 
   it('clears stale active identity when closing leaves no tabs', () => {

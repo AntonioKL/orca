@@ -972,7 +972,7 @@ export default function SessionScreen() {
   const {
     clearPendingLiveInputCommit,
     flushPendingLiveInputBeforeExternalSend,
-    getLiveInputEditGeneration,
+    getLiveInputInteractionGeneration: getLiveInteractionGeneration,
     handleLiveInputAccessoryBytes,
     handleLiveInputChange,
     handleLiveInputKeyPress,
@@ -1723,7 +1723,7 @@ export default function SessionScreen() {
         nextTabs = [...orphanedDraftTabs, ...nextTabs]
       }
       reconcileBufferedDraftsRef.current(currentSessionTabs, nextTabs, {
-        retainMissingSurfaces: nextTabs.length === 0
+        retainMissingSurfaces: result.tabs.length === 0
       })
       sessionTabsRef.current = nextTabs
       initialSessionAutoCreateRef.current.sawSessionTabs ||= nextTabs.length > 0
@@ -5011,15 +5011,16 @@ export default function SessionScreen() {
                       onChange={handleLiveInputChange}
                       onKeyPress={handleLiveInputKeyPress}
                       onSubmitEditing={() => {
+                        const submit = handleLiveInputSubmit()
                         const sendOrigin = {
                           tab: activeSessionTab,
                           generation: getSendCompletionGeneration(),
-                          editGeneration: getLiveInputEditGeneration()
+                          interaction: getLiveInteractionGeneration()
                         }
-                        void handleLiveInputSubmit().then((accepted) =>
+                        void submit.then((accepted) =>
                           dismissKeyboardAfterAgentSend(
                             sendOrigin,
-                            accepted && sendOrigin.editGeneration === getLiveInputEditGeneration()
+                            accepted && sendOrigin.interaction === getLiveInteractionGeneration()
                           )
                         )
                       }}

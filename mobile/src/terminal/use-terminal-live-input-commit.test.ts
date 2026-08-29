@@ -265,17 +265,23 @@ describe('terminal live input commit hook', () => {
     await vi.waitFor(() => expect(sent).toEqual(['\r']))
   })
 
-  it('increments a stable edit generation when the live field changes', () => {
+  it('increments a stable interaction generation for typing, submit, and accessory Enter', async () => {
     const { getHandlers, handlers, setActiveSessionTabType } =
       createTerminalLiveInputCommitHarness()
-    const getter = handlers.getLiveInputEditGeneration
+    const getter = handlers.getLiveInputInteractionGeneration
     const initialGeneration = getter()
 
     changeLiveInput(handlers, 'newer text')
+    const typedGeneration = getter()
+    await handlers.handleLiveInputSubmit()
+    const submitGeneration = getter()
+    await handlers.handleLiveInputAccessoryBytes({ bytes: '\r' })
     setActiveSessionTabType(undefined)
 
-    expect(getHandlers().getLiveInputEditGeneration).toBe(getter)
-    expect(getter()).toBe(initialGeneration + 1)
+    expect(getHandlers().getLiveInputInteractionGeneration).toBe(getter)
+    expect(typedGeneration).toBe(initialGeneration + 1)
+    expect(submitGeneration).toBeGreaterThan(typedGeneration)
+    expect(getter()).toBeGreaterThan(submitGeneration)
   })
 
   it('Given a rejected held-text send When submit is requested Then suppresses the carriage return', async () => {
