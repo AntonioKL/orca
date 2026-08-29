@@ -40,6 +40,8 @@ type ResultActions = {
 }
 
 const resolved = Promise.resolve()
+const RECONCILIATION_INTERVAL_MS = 2000
+const CERTIFIED_TERMINAL_SWEEP_MS = 60_000
 
 export function useMobileSessionTabsReconciliation<Result, Tab>({
   client,
@@ -151,18 +153,24 @@ export function useMobileSessionTabsReconciliation<Result, Tab>({
       if (!controller || connState !== 'connected') {
         return
       }
+      let lastTerminalRefreshAt = Number.NEGATIVE_INFINITY
       const refresh = (forceTabs: boolean): void => {
         if (AppState.currentState !== 'active') {
           controller.setReconciliationActive(false)
           return
         }
         controller.setReconciliationActive(true)
-        if (forceTabs) {
-          void controller.requestReconciliation()
-        } else {
-          void controller.poll()
+        const tabsRequest = forceTabs ? controller.requestReconciliation() : controller.poll()
+        const now = Date.now()
+        // Why: healthy tab streams own liveness; retain only a slow inventory sweep for stale handles and metadata.
+        if (
+          forceTabs ||
+          tabsRequest !== null ||
+          now - lastTerminalRefreshAt >= CERTIFIED_TERMINAL_SWEEP_MS
+        ) {
+          lastTerminalRefreshAt = now
+          void fetchTerminals()
         }
-        void fetchTerminals()
       }
       const appStateSubscription = AppState.addEventListener('change', (state) => {
         if (state === 'active') {
@@ -172,7 +180,7 @@ export function useMobileSessionTabsReconciliation<Result, Tab>({
           controller.setReconciliationActive(false)
         }
       })
-      const interval = setInterval(() => refresh(false), 2000)
+      const interval = setInterval(() => refresh(false), RECONCILIATION_INTERVAL_MS)
       resetPendingTerminalRecovery()
       refresh(true)
       return () => {

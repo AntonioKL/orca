@@ -148,7 +148,7 @@ describe('useMobileSessionTabsReconciliation', () => {
     vi.useRealTimers()
   })
 
-  it('does zero tab lists and thirty terminal lists in a certified warm minute', async () => {
+  it('runs one terminal health sweep and zero tab lists in a certified warm minute', async () => {
     await mount()
     await emitStream({ type: 'updated', snapshotVersion: 1, tabs: ['tab-1'] })
     sendRequest.mockClear()
@@ -159,7 +159,7 @@ describe('useMobileSessionTabsReconciliation', () => {
     })
 
     expect(sendRequest).not.toHaveBeenCalled()
-    expect(fetchTerminals).toHaveBeenCalledTimes(30)
+    expect(fetchTerminals).toHaveBeenCalledTimes(1)
   })
 
   it('runs an immediate list plus five fallback lists over ten probing seconds', async () => {
@@ -260,7 +260,7 @@ describe('useMobileSessionTabsReconciliation', () => {
     })
 
     expect(sendRequest).toHaveBeenCalledTimes(5)
-    expect(fetchTerminals).toHaveBeenCalledTimes(6)
+    expect(fetchTerminals).toHaveBeenCalledTimes(5)
     expect(recoveryNeeded).toBe(false)
   })
 
