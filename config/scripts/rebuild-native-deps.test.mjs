@@ -6,13 +6,13 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  rmSync,
   writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { removeTreeSync } from '../../src/shared/windows-transient-lock-removal.ts'
 
 const sourceScriptPath = fileURLToPath(new URL('./rebuild-native-deps.mjs', import.meta.url))
 const sourceInstallScriptPath = fileURLToPath(
@@ -46,7 +46,7 @@ describe('rebuild-native-deps Electron install fallback', () => {
         'download attempted\n'
       )
     } finally {
-      rmSync(projectDir, { recursive: true, force: true })
+      removeTreeSync(projectDir)
     }
   })
 
@@ -70,7 +70,7 @@ describe('rebuild-native-deps Electron install fallback', () => {
         'Continuing postinstall because Electron binary installation failed'
       )
     } finally {
-      rmSync(projectDir, { recursive: true, force: true })
+      removeTreeSync(projectDir)
     }
   })
 
@@ -91,7 +91,7 @@ describe('rebuild-native-deps Electron install fallback', () => {
         'Continuing postinstall because Electron binary installation failed'
       )
     } finally {
-      rmSync(projectDir, { recursive: true, force: true })
+      removeTreeSync(projectDir)
     }
   })
 
@@ -121,7 +121,7 @@ describe('rebuild-native-deps Electron install fallback', () => {
         'partial cleared\ndownload attempted\n'
       )
     } finally {
-      rmSync(projectDir, { recursive: true, force: true })
+      removeTreeSync(projectDir)
     }
   })
 })
@@ -154,7 +154,7 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
         )
         expect(existsSync(rebuildLogPath)).toBe(false)
       } finally {
-        rmSync(projectDir, { recursive: true, force: true })
+        removeTreeSync(projectDir)
       }
     }
   )
@@ -179,7 +179,7 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
       expect(readFileSync(join(runtimeDir, 'conpty.dll'), 'utf8')).toBe('conpty.dll x64')
       expect(readFileSync(join(runtimeDir, 'OpenConsole.exe'), 'utf8')).toBe('OpenConsole.exe x64')
     } finally {
-      rmSync(projectDir, { recursive: true, force: true })
+      removeTreeSync(projectDir)
     }
   })
 
@@ -207,7 +207,7 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
         const rebuildCall = JSON.parse(readFileSync(rebuildLogPath, 'utf8').trim())
         expect(rebuildCall.onlyModules).toEqual(['windows-native-registry'])
       } finally {
-        rmSync(projectDir, { recursive: true, force: true })
+        removeTreeSync(projectDir)
       }
     }
   )
@@ -237,7 +237,7 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
         const rebuildCall = JSON.parse(readFileSync(rebuildLogPath, 'utf8').trim())
         expect(rebuildCall.onlyModules).toEqual(['node-pty'])
       } finally {
-        rmSync(projectDir, { recursive: true, force: true })
+        removeTreeSync(projectDir)
       }
     }
   )
@@ -268,7 +268,7 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
         expect(rebuildCall.ignoreModules).toEqual(['cpu-features'])
         expect(rebuildCall.force).toBe(true)
       } finally {
-        rmSync(projectDir, { recursive: true, force: true })
+        removeTreeSync(projectDir)
       }
     }
   )
@@ -296,7 +296,7 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
         )
         expect(existsSync(rebuildLogPath)).toBe(false)
       } finally {
-        rmSync(projectDir, { recursive: true, force: true })
+        removeTreeSync(projectDir)
       }
     }
   )
@@ -326,7 +326,7 @@ describe('rebuild-native-deps patched node-pty rebuild', () => {
         expect(rebuildCall.onlyModules).toEqual(['node-pty'])
         expect(rebuildCall.force).toBe(true)
       } finally {
-        rmSync(projectDir, { recursive: true, force: true })
+        removeTreeSync(projectDir)
       }
     }
   )

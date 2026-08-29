@@ -7,7 +7,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { spawn } from 'node:child_process'
 import { createServer, type Server } from 'node:http'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type * as osModule from 'node:os'
@@ -33,6 +33,7 @@ vi.mock('os', async (importOriginal) => {
 import { ClaudeHookService } from '../claude/hook-service'
 import { getConfigPath, getWindowsManagedLifecycleHook } from '../claude/hook-settings'
 import { findGitBash } from './windows-git-bash-path.test-fixture'
+import { removeTreeSync } from '../../shared/windows-transient-lock-removal'
 
 const PANE_KEY = 'tab-1:leaf-1'
 const HOOK_TOKEN = 'payload-delivery-token'
@@ -149,7 +150,7 @@ describe.skipIf(process.platform !== 'win32')('Windows managed hook payload deli
     server = null
     homedirMock.mockImplementation(() => process.env.HOME ?? tmpdir())
     if (home) {
-      rmSync(home, { recursive: true, force: true })
+      removeTreeSync(home)
       home = ''
     }
   })

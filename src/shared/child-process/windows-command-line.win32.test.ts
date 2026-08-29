@@ -7,6 +7,7 @@ import {
   WINDOWS_ARGUMENT_CORPUS,
   WINDOWS_ARGUMENT_CORPUS_ENV
 } from './__fixtures__/windows-argument-corpus'
+import { removeTreeSync } from '../windows-transient-lock-removal'
 
 /**
  * The other half of the encoding proof: the unit test checks the bytes against
@@ -37,7 +38,7 @@ describeOnWindows('Windows .cmd argument round-trip', () => {
   })
 
   afterAll(() => {
-    rmSync(dir, { recursive: true, force: true })
+    removeTreeSync(dir)
   })
 
   function decode(stdout: string): string[] {

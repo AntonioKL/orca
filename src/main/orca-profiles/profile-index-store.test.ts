@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { installFakeAppEnvironment } from '../../../config/scripts/vitest-host-ports-setup'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -10,6 +10,7 @@ import {
   ORCA_PROFILE_INDEX_SCHEMA_VERSION,
   type OrcaProfileIndex
 } from '../../shared/orca-profiles'
+import { removeTreeSync } from '../../shared/windows-transient-lock-removal'
 
 const testState = { dir: '' }
 
@@ -35,7 +36,7 @@ describe('profile index store', () => {
   })
 
   afterEach(() => {
-    rmSync(testState.dir, { recursive: true, force: true })
+    removeTreeSync(testState.dir)
   })
 
   it('creates the default local profile and copies legacy state without deleting it', async () => {
