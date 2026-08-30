@@ -200,28 +200,51 @@ export function RuntimeHostStatusRow({
   const actionButton = busy ? (
     <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" />
   ) : actionLabel && action ? (
-    <button
-      type="button"
-      tabIndex={detail ? -1 : undefined}
-      onPointerEnter={() => {
-        actionPointerActiveRef.current = true
-        setSubmenuOpen(false)
-      }}
-      onPointerLeave={() => {
-        actionPointerActiveRef.current = false
-      }}
-      onPointerMove={(event) => event.stopPropagation()}
-      onPointerDown={(event) => {
-        event.stopPropagation()
-      }}
-      onClick={(event) => {
-        event.stopPropagation()
-        void handleAction()
-      }}
-      className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-accent/70 hover:text-foreground"
-    >
-      {actionLabel}
-    </button>
+    detail ? (
+      <span
+        aria-hidden="true"
+        onPointerEnter={() => {
+          actionPointerActiveRef.current = true
+          setSubmenuOpen(false)
+        }}
+        onPointerLeave={() => {
+          actionPointerActiveRef.current = false
+        }}
+        onPointerMove={(event) => event.stopPropagation()}
+        onPointerDown={(event) => {
+          event.stopPropagation()
+        }}
+        onClick={(event) => {
+          event.stopPropagation()
+          void handleAction()
+        }}
+        className="shrink-0 cursor-pointer rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+      >
+        {actionLabel}
+      </span>
+    ) : (
+      <button
+        type="button"
+        onPointerEnter={() => {
+          actionPointerActiveRef.current = true
+          setSubmenuOpen(false)
+        }}
+        onPointerLeave={() => {
+          actionPointerActiveRef.current = false
+        }}
+        onPointerMove={(event) => event.stopPropagation()}
+        onPointerDown={(event) => {
+          event.stopPropagation()
+        }}
+        onClick={(event) => {
+          event.stopPropagation()
+          void handleAction()
+        }}
+        className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+      >
+        {actionLabel}
+      </button>
+    )
   ) : null
 
   if (!detail) {
@@ -242,12 +265,10 @@ export function RuntimeHostStatusRow({
         }
       }}
     >
-      <div className="flex items-center gap-2.5 px-2 py-1.5">
-        <DropdownMenuSubTrigger className="min-w-0 flex-1 px-0 py-0">
-          {rowDetails}
-        </DropdownMenuSubTrigger>
+      <DropdownMenuSubTrigger className="gap-2.5 px-2 py-1.5">
+        {rowDetails}
         {actionButton}
-      </div>
+      </DropdownMenuSubTrigger>
       <DropdownMenuSubContent className="w-[min(18rem,calc(100vw-1rem))] p-1.5">
         <div className="px-1.5 pt-0.5 pb-1.5">
           <div className="text-[11px] font-semibold">{runtimeFailureSummary(state)}</div>
