@@ -105,8 +105,7 @@ beforeEach(() => {
   mocks.resolveAppImageRuntimeIdentity.mockReset().mockImplementation(() =>
     process.platform === 'linux'
       ? {
-          appImagePath: '/opt/Orca.AppImage',
-          appDirPath: '/tmp/.mount_Orca123'
+          appImagePath: '/opt/Orca.AppImage'
         }
       : null
   )

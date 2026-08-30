@@ -89,14 +89,11 @@ describe('ensureLinuxTerminalOrcaCliShimDir', () => {
     const liveLauncherPath = join(resourcesPath, 'bin', 'orca-ide')
     writeFileSync(liveLauncherPath, '#!/usr/bin/env bash\nprintf live', 'utf8')
     chmodSync(liveLauncherPath, 0o755)
-    const extract = vi.fn()
-
     const shimDir = ensureLinuxTerminalOrcaCliShimDir({
       userDataPath,
       resourcesPath,
       appImagePath,
-      appImageCacheRootPath: cacheRootPath,
-      appImageExtractRunner: extract
+      appImageCacheRootPath: cacheRootPath
     })
 
     const shimPath = join(shimDir!, 'orca')
@@ -108,7 +105,6 @@ describe('ensureLinuxTerminalOrcaCliShimDir', () => {
     await expect(
       runProcess({ program: shimPath, args: [], timeoutMs: 3_000 })
     ).resolves.toMatchObject({ code: 0, stdout: 'live' })
-    expect(extract).not.toHaveBeenCalled()
   })
 
   it('updates restored terminals to the current AppImage mount without rewriting the shim', async () => {
@@ -120,13 +116,11 @@ describe('ensureLinuxTerminalOrcaCliShimDir', () => {
     const firstLauncher = join(resourcesPath, 'bin', 'orca-ide')
     writeFileSync(firstLauncher, '#!/usr/bin/env bash\nprintf first', 'utf8')
     chmodSync(firstLauncher, 0o755)
-    const extract = vi.fn()
     const options = {
       userDataPath,
       resourcesPath,
       appImagePath,
-      appImageCacheRootPath: cacheRootPath,
-      appImageExtractRunner: extract
+      appImageCacheRootPath: cacheRootPath
     }
     const shimDir = ensureLinuxTerminalOrcaCliShimDir(options)
     const shimPath = join(shimDir!, 'orca')
@@ -148,7 +142,6 @@ describe('ensureLinuxTerminalOrcaCliShimDir', () => {
     await expect(
       runProcess({ program: shimPath, args: [], timeoutMs: 3_000 })
     ).resolves.toMatchObject({ code: 0, stdout: 'next' })
-    expect(extract).not.toHaveBeenCalled()
   })
 
   it('waits briefly for a temporarily unavailable live endpoint', async () => {
@@ -159,14 +152,11 @@ describe('ensureLinuxTerminalOrcaCliShimDir', () => {
     await writeFile(appImagePath, '#!/usr/bin/env bash\n', { mode: 0o755 })
     const liveLauncher = join(resourcesPath, 'bin', 'orca-ide')
     chmodSync(liveLauncher, 0o755)
-    const extract = vi.fn()
-
     const shimDir = ensureLinuxTerminalOrcaCliShimDir({
       userDataPath,
       resourcesPath,
       appImagePath,
-      appImageCacheRootPath: cacheRootPath,
-      appImageExtractRunner: extract
+      appImageCacheRootPath: cacheRootPath
     })
     const shimPath = join(shimDir!, 'orca')
     await rm(liveLauncher)
@@ -176,7 +166,6 @@ describe('ensureLinuxTerminalOrcaCliShimDir', () => {
     }, 100)
 
     await expect(invocation).resolves.toMatchObject({ code: 0, stdout: 'recovered' })
-    expect(extract).not.toHaveBeenCalled()
   })
 
   it('returns null (and does not memoize) when the bundled launcher is missing', async () => {
