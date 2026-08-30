@@ -71,7 +71,11 @@ describe('PTY provider process inspection', () => {
 
     await expect(inspectPtyProviderProcess(provider, 'pty-1')).resolves.toEqual({
       foregroundProcess: 'codex',
-      hasChildProcesses: true
+      hasChildProcesses: true,
+      processEvidence: {
+        foreground: { verdict: 'live', processName: 'codex' },
+        children: { verdict: 'live' }
+      }
     })
   })
 })

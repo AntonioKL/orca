@@ -1,9 +1,15 @@
 import type { IPtyProvider } from './types'
+import {
+  buildPtyProcessInspectionWireResult,
+  type PtyProcessInspectionEvidence
+} from '../../shared/pty-process-inspection-evidence'
+import { isShellProcess } from '../../shared/shell-process-detection'
 
 export type PtyProcessInspection = {
   foregroundProcess: string | null
   hasChildProcesses: boolean
   unavailable?: true
+  processEvidence?: PtyProcessInspectionEvidence
 }
 
 type CompletionSensitivePtyProvider = IPtyProvider & {
@@ -22,8 +28,19 @@ export async function inspectPtyProviderProcess(
     return inspectProcess.call(provider, ptyId)
   }
   const foregroundProcess = await provider.getForegroundProcess(ptyId)
+  // A local exit can land after the initial hasPty check but before the
+  // foreground probe resolves. Keep that half explicitly unverifiable rather
+  // than letting its null collapse look like an observed idle shell.
+  const foregroundStillPresent = provider.hasPty?.(ptyId) !== false
   const hasChildProcesses = await provider.hasChildProcesses(ptyId)
-  return { foregroundProcess, hasChildProcesses }
+  return buildPtyProcessInspectionWireResult(
+    foregroundStillPresent
+      ? foregroundProcess && !isShellProcess(foregroundProcess)
+        ? { verdict: 'live', processName: foregroundProcess }
+        : { verdict: 'exited', processName: foregroundProcess }
+      : { verdict: 'unverifiable', reason: 'pty exited during foreground inspection' },
+    hasChildProcesses ? { verdict: 'live' } : { verdict: 'exited' }
+  )
 }
 
 export async function inspectPtyProviderProcessForRenderer(

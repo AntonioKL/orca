@@ -1,5 +1,9 @@
 import { useAppStore } from '@/store'
 import { inspectRuntimeTerminalProcess } from '@/runtime/runtime-terminal-inspection'
+import {
+  combinePtyProcessInspectionVerdict,
+  readPtyProcessInspectionEvidence
+} from '../../../../shared/pty-process-inspection-evidence'
 import { useRunningTerminalCloseConfirmStore } from '@/store/running-terminal-close-confirm'
 import type { TerminalTabCloseReason } from '@/store/slices/terminal-tab-retirement'
 import type { AppState } from '@/store/types'
@@ -134,8 +138,9 @@ export function guardRunningTerminalClose(params: {
         const result = results[index]
         return (
           result?.status === 'fulfilled' &&
-          result.value.hasChildProcesses &&
-          result.value.unavailable !== true
+          (result.value.unavailable === true ||
+            combinePtyProcessInspectionVerdict(readPtyProcessInspectionEvidence(result.value)) !==
+              'exited')
         )
       })
       if (busyPtyIds.length === 0) {
