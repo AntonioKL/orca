@@ -152,6 +152,24 @@ describe('worktree create preparation registry', () => {
     expect(mocks.discard).not.toHaveBeenCalledWith(repo.path, '/workspace/final', {})
   })
 
+  it('does not classify a user branch worktree under the preparation directory as stale', async () => {
+    mocks.listWorktreeGraph.mockResolvedValueOnce([
+      {
+        path: '/workspace/.orca-preparing/999999999-user-worktree',
+        branch: 'refs/heads/user-worktree',
+        lockReason: undefined,
+        head: 'deadbeef',
+        isBare: false,
+        isMainWorktree: false
+      }
+    ])
+
+    await prepareWorktreeCreateForRepo(store, repo, 'origin/main')
+
+    expect(mocks.unlock).not.toHaveBeenCalled()
+    expect(mocks.discard).not.toHaveBeenCalled()
+  })
+
   it('cleans up and returns null so normal add can run when finalization fails', async () => {
     await prepareWorktreeCreateForRepo(store, repo, 'origin/main')
     mocks.finalize.mockRejectedValueOnce(new Error('submodules prevent worktree move'))

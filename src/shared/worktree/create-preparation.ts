@@ -26,9 +26,15 @@ export function parseWorktreePreparationPathOwnerPid(path: string): number | nul
 export function isWorktreeCreatePreparation(worktree: {
   path: string
   lockReason?: string
+  branch?: string
 }): boolean {
   if (worktree.lockReason?.startsWith(WORKTREE_CREATE_PREPARATION_LOCK_PREFIX)) {
     return true
+  }
+  // A real branch worktree under a user-chosen `.orca-preparing` directory
+  // must stay visible and must never be eligible for destructive stale cleanup.
+  if (worktree.branch) {
+    return false
   }
   const pathParts = worktree.path.split(/[\\/]+/)
   return pathParts.includes(WORKTREE_CREATE_PREPARATION_DIRECTORY)
