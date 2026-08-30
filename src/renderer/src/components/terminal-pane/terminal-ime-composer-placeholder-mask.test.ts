@@ -3,7 +3,6 @@ import { Terminal } from '@xterm/xterm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   installTerminalImeComposerPlaceholderMask,
-  MAX_ACTIVE_COMPOSITION_SESSIONS,
   TERMINAL_IME_COMPOSER_PLACEHOLDER_CLASS
 } from './terminal-ime-composer-placeholder-mask'
 import {
@@ -200,7 +199,7 @@ describe('terminal IME composer placeholder mask', () => {
     expect(rig.element.classList.contains(TERMINAL_IME_COMPOSER_PLACEHOLDER_CLASS)).toBe(false)
   })
 
-  it('resets stale ownership at the session bound while keeping the newest session active', async () => {
+  it('keeps the newest session owner when an older session ends first', async () => {
     const rig = openTerminal()
     await rig.write(codexPlaceholderFrame())
 
@@ -213,17 +212,60 @@ describe('terminal IME composer placeholder mask', () => {
       )
     }
 
-    for (let id = 1; id <= MAX_ACTIVE_COMPOSITION_SESSIONS + 1; id += 1) {
-      dispatchSession(XTERM_COMPOSITION_SESSION_START_EVENT, id)
-    }
+    dispatchSession(XTERM_COMPOSITION_SESSION_START_EVENT, 1)
+    dispatchSession(XTERM_COMPOSITION_SESSION_START_EVENT, 2)
+    dispatchSession(XTERM_COMPOSITION_SESSION_END_EVENT, 1)
     expect(rig.element.classList.contains(TERMINAL_IME_COMPOSER_PLACEHOLDER_CLASS)).toBe(true)
 
-    for (let id = 1; id <= MAX_ACTIVE_COMPOSITION_SESSIONS; id += 1) {
+    dispatchSession(XTERM_COMPOSITION_SESSION_END_EVENT, 2)
+    expect(rig.element.classList.contains(TERMINAL_IME_COMPOSER_PLACEHOLDER_CLASS)).toBe(false)
+  })
+
+  it('clears the visible owner on a current end and ignores a late older end', async () => {
+    const rig = openTerminal()
+    await rig.write(codexPlaceholderFrame())
+
+    const dispatchSession = (type: string, id: number): void => {
+      rig.element.dispatchEvent(
+        new CustomEvent(type, {
+          bubbles: true,
+          detail: { id }
+        })
+      )
+    }
+
+    dispatchSession(XTERM_COMPOSITION_SESSION_START_EVENT, 11)
+    dispatchSession(XTERM_COMPOSITION_SESSION_START_EVENT, 12)
+    dispatchSession(XTERM_COMPOSITION_SESSION_END_EVENT, 12)
+    expect(rig.element.classList.contains(TERMINAL_IME_COMPOSER_PLACEHOLDER_CLASS)).toBe(false)
+
+    dispatchSession(XTERM_COMPOSITION_SESSION_END_EVENT, 11)
+    expect(rig.element.classList.contains(TERMINAL_IME_COMPOSER_PLACEHOLDER_CLASS)).toBe(false)
+  })
+
+  it('keeps ownership bounded across repeated starts and recovers on the newest end', async () => {
+    const rig = openTerminal()
+    await rig.write(codexPlaceholderFrame())
+
+    const dispatchSession = (type: string, id: number): void => {
+      rig.element.dispatchEvent(
+        new CustomEvent(type, {
+          bubbles: true,
+          detail: { id }
+        })
+      )
+    }
+
+    const newestId = 2048
+    for (let id = 1; id <= newestId; id += 1) {
+      dispatchSession(XTERM_COMPOSITION_SESSION_START_EVENT, id)
+    }
+    for (let id = 1; id < newestId; id += 1) {
       dispatchSession(XTERM_COMPOSITION_SESSION_END_EVENT, id)
     }
     expect(rig.element.classList.contains(TERMINAL_IME_COMPOSER_PLACEHOLDER_CLASS)).toBe(true)
 
-    dispatchSession(XTERM_COMPOSITION_SESSION_END_EVENT, MAX_ACTIVE_COMPOSITION_SESSIONS + 1)
+    dispatchSession(XTERM_COMPOSITION_SESSION_END_EVENT, newestId)
     expect(rig.element.classList.contains(TERMINAL_IME_COMPOSER_PLACEHOLDER_CLASS)).toBe(false)
   })
 })
