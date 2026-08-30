@@ -220,6 +220,9 @@ describe('capLinearMetadataIdsAcrossGroups over-subscribed rows', () => {
     expect(isLinearMetadataTruncated(record, ids.slice(0, 99))).toBe(false)
     expect(isLinearMetadataTruncated(record, [])).toBe(false)
     expect(isLinearMetadataTruncated(null, ids.slice(0, 100))).toBe(false)
+    // Why: a facet that grew past its record has refetched underneath it — matching by subset
+    // would keep warning about a trim that no longer describes the filter (the STA-5996 bug).
+    expect(isLinearMetadataTruncated(record, [...(record ?? []), 'later-id'])).toBe(false)
   })
 
   // Why: `recordLinearMetadataTruncation(['a','b'], [])` is non-null-but-empty, and an empty
