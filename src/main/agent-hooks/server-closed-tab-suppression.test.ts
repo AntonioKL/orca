@@ -225,6 +225,7 @@ describe('AgentHookServer listener replay', () => {
       await expect(postHook('late local')).resolves.toMatchObject({ status: 204 })
 
       expect(server.getStatusSnapshot()).toEqual([])
+      expect(debug).toHaveBeenCalledTimes(1)
       expect(debug).toHaveBeenCalledWith('[agent-hooks] agent-status-suppressed', {
         reason: 'closed-tab',
         paneKey: PANE,
@@ -255,6 +256,7 @@ describe('AgentHookServer listener replay', () => {
         'conn-1'
       )
 
+      expect(debug).toHaveBeenCalledTimes(1)
       expect(debug).toHaveBeenCalledWith('[agent-hooks] agent-status-suppressed', {
         reason: 'closed-tab',
         paneKey: PANE,
