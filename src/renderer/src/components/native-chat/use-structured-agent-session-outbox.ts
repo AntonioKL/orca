@@ -8,7 +8,6 @@ import { createStructuredAgentSessionOperationId } from '../../../../shared/stru
 import {
   classifyStructuredAgentSessionSendFailure,
   createStructuredAgentSessionOutboxEntry,
-  parseStructuredAgentSessionOutboxEntry,
   reconcileStructuredAgentSessionOutbox,
   requeueStructuredAgentSessionSendRefusal,
   structuredAgentSessionSendRequest,
@@ -16,49 +15,16 @@ import {
 } from '../../../../shared/structured-agent-session-outbox'
 import type { RuntimeClientTarget } from '@/runtime/runtime-rpc-client'
 import { callStructuredAgentSession } from '@/runtime/structured-agent-session-client'
-
-const OUTBOX_PREFIX = 'orca:desktopStructuredAgentSessionOutbox:v1:'
+import { readOutbox, writeOutbox } from './structured-agent-session-outbox-storage'
 
 export function structuredSessionOperationId(): string {
   return createStructuredAgentSessionOperationId(() => crypto.randomUUID())
 }
 
-function storageKey(sessionId: string): string {
-  return `${OUTBOX_PREFIX}${encodeURIComponent(sessionId)}`
-}
-
-function readOutbox(sessionId: string): StructuredAgentSessionOutboxEntry[] {
-  try {
-    const value = JSON.parse(localStorage.getItem(storageKey(sessionId)) ?? '[]')
-    return Array.isArray(value)
-      ? value
-          .map((entry) => parseStructuredAgentSessionOutboxEntry(entry, sessionId))
-          .filter((entry): entry is StructuredAgentSessionOutboxEntry => entry !== null)
-          .map((entry) =>
-            entry.state === 'dispatching' ? { ...entry, state: 'unconfirmed' as const } : entry
-          )
-          .sort((left, right) => left.queuedAt - right.queuedAt)
-      : []
-  } catch {
-    return []
-  }
-}
-
-function writeOutbox(
-  sessionId: string,
-  entries: readonly StructuredAgentSessionOutboxEntry[]
-): boolean {
-  try {
-    if (entries.length === 0) {
-      localStorage.removeItem(storageKey(sessionId))
-    } else {
-      localStorage.setItem(storageKey(sessionId), JSON.stringify(entries))
-    }
-    return true
-  } catch {
-    return false
-  }
-}
+/** Bounded so a host that keeps answering `unknown` cannot spin forever. */
+const UNCONFIRMED_PROBE_MAX_ATTEMPTS = 5
+const UNCONFIRMED_PROBE_BASE_DELAY_MS = 1_000
+const UNCONFIRMED_PROBE_MAX_DELAY_MS = 16_000
 
 function isDesktopDeliveryUnknown(error: unknown): boolean {
   const text = error instanceof Error ? `${error.name}:${error.message}` : String(error)
@@ -80,6 +46,7 @@ export function useStructuredAgentSessionOutbox(args: {
   const dispatchingRef = useRef(false)
   const dispatchGenerationRef = useRef(0)
   const blockedIdRef = useRef<string | null>(null)
+  const probeAttemptsRef = useRef(new Map<string, number>())
   const [error, setError] = useState<string | null>(null)
   const [errorSession, setErrorSession] = useState(sessionId)
   // Render-time reset (react.dev: adjusting state when a prop changes), so the
@@ -97,6 +64,7 @@ export function useStructuredAgentSessionOutbox(args: {
     dispatchGenerationRef.current += 1
     dispatchingRef.current = false
     blockedIdRef.current = null
+    probeAttemptsRef.current = new Map()
   }, [fence, sessionId, target])
 
   useEffect(() => {
@@ -236,6 +204,44 @@ export function useStructuredAgentSessionOutbox(args: {
         }
       })
   }, [fence, outbox, sessionId, target])
+
+  // A transport-side unknown may never have reached the host, and nothing else
+  // moves it out of `unconfirmed`, so one wedges the whole FIFO queue. Re-issuing
+  // the same envelope without `retryUnknown` is idempotent: the operation ledger
+  // replays a recorded outcome, or the host performs a genuine first delivery.
+  // A host-confirmed unknown stays parked — forcing past that redispatches, which
+  // is the user's call via Retry.
+  const head = outbox[0]
+  // Depend on primitives: `submissions` is rebuilt on every streaming batch, so an
+  // array-identity dep would reset the backoff forever while the agent is working.
+  const probeId =
+    head && head.sessionId === sessionId && head.state === 'unconfirmed'
+      ? head.clientMessageId
+      : null
+  const probeSettled =
+    probeId !== null && submissions.some((submission) => submission.clientMessageId === probeId)
+  useEffect(() => {
+    if (probeId === null || probeSettled || fence === null) {
+      return
+    }
+    const attempts = probeAttemptsRef.current.get(probeId) ?? 0
+    if (attempts >= UNCONFIRMED_PROBE_MAX_ATTEMPTS) {
+      return
+    }
+    const timer = setTimeout(
+      () => {
+        probeAttemptsRef.current.set(probeId, attempts + 1)
+        const next = outboxRef.current.map((entry) =>
+          entry.clientMessageId === probeId ? { ...entry, state: 'queued' as const } : entry
+        )
+        outboxRef.current = next
+        setOutbox(next)
+        writeOutbox(sessionId, next)
+      },
+      Math.min(UNCONFIRMED_PROBE_BASE_DELAY_MS * 2 ** attempts, UNCONFIRMED_PROBE_MAX_DELAY_MS)
+    )
+    return () => clearTimeout(timer)
+  }, [fence, probeId, probeSettled, sessionId])
 
   const send = useCallback(
     (text: string, attachments: readonly { path: string; previewUri: string }[] = []): boolean => {
