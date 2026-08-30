@@ -137,7 +137,14 @@ async function readRepoCommonDirFromDisk(
     const dotGit = join(repoPath, '.git')
     // A bare repo has no `.git`, and resolveGitDir would fabricate one; offer no candidate instead.
     await withDeadline(stat(dotGit), timeoutMs)
-    return await withDeadline(resolveGitDir(repoPath).then(resolveGitCommonDir), timeoutMs)
+    const commonDir = await withDeadline(
+      resolveGitDir(repoPath).then(resolveGitCommonDir),
+      timeoutMs
+    )
+    // Node answers in the caller's space, Git in the distro's. Without this the WSL candidate is a UNC
+    // path that can never equal Git's `/home/...`, leaving this witness inert on exactly the fallback
+    // path that needs it (realpath cannot bridge the two: a Linux path has no local inode).
+    return toWslExecutionSpace(commonDir)
   } catch {
     return undefined
   }
