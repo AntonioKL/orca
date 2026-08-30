@@ -75,13 +75,21 @@ chmod 755 "$gui_root/AppRun" "$gui_root/unshare" "$gui_root/orca-ide"
 
 for mode in unset empty; do
   if [[ "$mode" == unset ]]; then
-    gui_capture=$(runuser -u orca -- env -u ELECTRON_RUN_AS_NODE APPDIR="$gui_root" \
+    if ! gui_capture=$(runuser -u orca -- env -u ELECTRON_RUN_AS_NODE APPDIR="$gui_root" \
       "$gui_root/AppRun" alpha '' 'two words' 'dollar$sign' 'snowman-☃' --flag=value omega | \
-      base64 -w0)
+      base64 -w0); then
+      printf 'FAIL gui-capture mode=%s actual=command-failed\n' "$mode" >&2
+      failures=$((failures + 1))
+      continue
+    fi
   else
-    gui_capture=$(runuser -u orca -- env ELECTRON_RUN_AS_NODE= APPDIR="$gui_root" \
+    if ! gui_capture=$(runuser -u orca -- env ELECTRON_RUN_AS_NODE= APPDIR="$gui_root" \
       "$gui_root/AppRun" alpha '' 'two words' 'dollar$sign' 'snowman-☃' --flag=value omega | \
-      base64 -w0)
+      base64 -w0); then
+      printf 'FAIL gui-capture mode=%s actual=command-failed\n' "$mode" >&2
+      failures=$((failures + 1))
+      continue
+    fi
   fi
   gui_expected=$(printf '%s\0' --no-sandbox alpha '' 'two words' 'dollar$sign' 'snowman-☃' \
     --flag=value omega | base64 -w0)
@@ -94,7 +102,10 @@ for mode in unset empty; do
   fi
 done
 
-probe_count=$(wc -l </tmp/orca-appimage-unshare.log)
+probe_count=0
+if [[ -f /tmp/orca-appimage-unshare.log ]]; then
+  probe_count=$(wc -l </tmp/orca-appimage-unshare.log)
+fi
 if [[ "$probe_count" -ne 2 ]]; then
   printf 'FAIL unshare-probe expected=2 actual=%s\n' "$probe_count" >&2
   failures=$((failures + 1))

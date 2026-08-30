@@ -100,8 +100,10 @@ function valueAfter(flag) {
 
 function assertExpectedNodeSandboxFailure(output) {
   for (const value of ['0', '1', '1-ish']) {
-    const signal = `FAIL node-capture value=${value} output=/artifacts/root/orca-ide: bad option: --no-sandbox`
-    if (!output.includes(signal)) {
+    const failureLine = output
+      .split(/\r?\n/)
+      .find((line) => line.includes(`FAIL node-capture value=${value}`))
+    if (!failureLine || !failureLine.includes('bad option: --no-sandbox')) {
       fail(`Expected Node sandbox rejection was absent for ELECTRON_RUN_AS_NODE=${value}`)
     }
   }
@@ -110,6 +112,7 @@ function assertExpectedNodeSandboxFailure(output) {
       fail(`GUI fallback did not pass for ELECTRON_RUN_AS_NODE ${mode}`)
     }
   }
+  // Three failed Node launches plus two GUI launches should produce five probes.
   if (!output.includes('FAIL unshare-probe expected=2 actual=5')) {
     fail('Expected five affected AppRun sandbox probes were not observed')
   }
