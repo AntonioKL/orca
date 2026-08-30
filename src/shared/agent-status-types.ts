@@ -421,3 +421,17 @@ export function parseAgentStatusPayload(json: string): ParsedAgentStatusPayload 
     return null
   }
 }
+
+export type LegacyWorkerTerminalRecoveryResolutionKind =
+  | 'adopted'
+  | 'exited'
+  | 'rolled_back'
+  | 'fenced'
+  | 'unfenced'
+
+export type LegacyWorkerTerminalRecoveryEvent = {
+  paneKey: string
+  resolution: LegacyWorkerTerminalRecoveryResolutionKind
+  ptyId?: string
+  worktreeId?: string
+}

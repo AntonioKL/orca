@@ -55,7 +55,8 @@ import {
   type AgentStatusIpcPayload,
   type ParsedAgentStatusPayload,
   type AgentStatusOrchestrationContext,
-  type AgentStatusEntry
+  type AgentStatusEntry,
+  type LegacyWorkerTerminalRecoveryResolutionKind
 } from '../../shared/agent-status-types'
 import { terminalStatusPayloadMatchesHook } from '../../shared/agent-terminal-status-equivalence'
 import { indexAgentStatusRowsByPaneKey } from '../agent-hooks/agent-status-pane-index'
@@ -598,7 +599,8 @@ import {
   getRepoIdFromWorktreeId,
   splitWorktreeId,
   splitWorktreeIdForFilesystem,
-  worktreeIdComparisonKey
+  worktreeIdComparisonKey,
+  worktreeIdsEqual
 } from '../../shared/worktree/id'
 import { getProjectIdForProviderIdentity } from '../../shared/project-host-setup-projection'
 import {
@@ -2410,8 +2412,8 @@ type RuntimeNotifier = {
     | void
   resolveLegacyWorkerTerminalRecovery?(
     paneKey: string,
-    resolution: 'adopted' | 'exited' | 'rolled_back',
-    ptyId?: string
+    resolution: LegacyWorkerTerminalRecoveryResolutionKind,
+    identity?: { ptyId?: string; worktreeId?: string }
   ): void
   splitTerminal(
     tabId: string,
@@ -4717,19 +4719,29 @@ export class OrcaRuntimeService {
     this.scheduleRestoredMessageRepoints()
   }
 
-  private getLegacyWorkerTerminalRecoveryPlan(): LegacyWorkerTerminalRecoveryPlan {
+  private getLegacyWorkerTerminalRecoveryPlan(): LegacyWorkerTerminalRecoveryPlan | null {
     try {
       return planLegacyWorkerTerminalRecovery(
         this.getOrchestrationDb().listLegacyWorkerTerminalRecoveryRows()
       )
     } catch (error) {
       console.warn('[orchestration] failed to plan legacy worker terminal recovery', error)
-      return { blockedPanes: [], candidates: [], ambiguousDispatchIds: [] }
+      return null
     }
   }
 
   prepareLegacyWorkerTerminalRecovery(): LegacyWorkerTerminalRecoveryPlan {
     const plan = this.getLegacyWorkerTerminalRecoveryPlan()
+    if (!plan) {
+      return { blockedPanes: [], candidates: [], ambiguousDispatchIds: [] }
+    }
+    for (const blocked of plan.blockedPanes) {
+      if (blocked.settled) {
+        this.notifier?.resolveLegacyWorkerTerminalRecovery?.(blocked.paneKey, 'fenced', {
+          worktreeId: blocked.worktreeId
+        })
+      }
+    }
     const store = this.store
     if (
       !store?.getWorkspaceSession ||
@@ -4767,7 +4779,7 @@ export class OrcaRuntimeService {
         const record = state.next.sleepingAgentSessionsByPaneKey?.[blocked.paneKey]
         if (
           !record ||
-          !runtimeWorktreeIdsEqual(record.worktreeId, blocked.worktreeId) ||
+          !worktreeIdsEqual(record.worktreeId, blocked.worktreeId) ||
           record.automaticResumeBlockedBy === 'legacy-orchestration-worker'
         ) {
           continue
@@ -4782,6 +4794,7 @@ export class OrcaRuntimeService {
         changedHostIds.add(hostId)
       }
     }
+    this.liftRetiredLegacyWorkerResumeFences(plan, sessions, changedHostIds)
     const changed = [...sessions].filter(([hostId]) => changedHostIds.has(hostId))
     if (changed.length === 0) {
       return plan
@@ -4794,6 +4807,49 @@ export class OrcaRuntimeService {
       console.warn('[orchestration] failed to stage legacy worker resume fence', error)
     }
     return plan
+  }
+
+  private liftRetiredLegacyWorkerResumeFences(
+    plan: LegacyWorkerTerminalRecoveryPlan,
+    sessions: Map<ExecutionHostId, { current: WorkspaceSessionState; next: WorkspaceSessionState }>,
+    changedHostIds: Set<ExecutionHostId>
+  ): void {
+    const store = this.store
+    if (!store?.getWorkspaceSession) {
+      return
+    }
+    const blockedPaneKeys = new Set(plan.blockedPanes.map((blocked) => blocked.paneKey))
+    for (const hostId of store.getWorkspaceSessionHostIds?.() ?? [LOCAL_EXECUTION_HOST_ID]) {
+      const staged = sessions.get(hostId)
+      const session = staged?.next ?? store.getWorkspaceSession(hostId)
+      const retired = Object.entries(session?.sleepingAgentSessionsByPaneKey ?? {}).filter(
+        ([paneKey, record]) =>
+          record.automaticResumeBlockedBy === 'legacy-orchestration-worker' &&
+          !blockedPaneKeys.has(paneKey)
+      )
+      if (retired.length === 0) {
+        continue
+      }
+      let state = staged
+      if (!state) {
+        const current = store.getWorkspaceSession(hostId)
+        if (!current) {
+          continue
+        }
+        state = { current, next: structuredClone(current) }
+        sessions.set(hostId, state)
+      }
+      const next = { ...state.next.sleepingAgentSessionsByPaneKey }
+      for (const [paneKey, record] of retired) {
+        const { automaticResumeBlockedBy: _retiredFence, ...unfenced } = record
+        next[paneKey] = unfenced
+        this.notifier?.resolveLegacyWorkerTerminalRecovery?.(paneKey, 'unfenced', {
+          worktreeId: record.worktreeId
+        })
+      }
+      state.next.sleepingAgentSessionsByPaneKey = next
+      changedHostIds.add(hostId)
+    }
   }
 
   private async flushWorkspaceSessionOrThrowAsync(): Promise<void> {
@@ -5042,11 +5098,9 @@ export class OrcaRuntimeService {
       pty.tabId = null
       pty.paneKey = null
     }
-    this.notifier?.resolveLegacyWorkerTerminalRecovery?.(
-      candidate.paneKey,
-      'rolled_back',
-      candidate.ptyId
-    )
+    this.notifier?.resolveLegacyWorkerTerminalRecovery?.(candidate.paneKey, 'rolled_back', {
+      ptyId: candidate.ptyId
+    })
   }
 
   private updateLegacyWorkerTerminalRecoveryRetry(

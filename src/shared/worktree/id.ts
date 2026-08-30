@@ -43,6 +43,12 @@ export function worktreeIdComparisonKey(worktreeId: string): string | null {
   )}`
 }
 
+/** Compare workspace identity while normalizing only runtime path spelling. */
+export function worktreeIdsEqual(left: string, right: string): boolean {
+  const leftKey = worktreeIdComparisonKey(left)
+  return leftKey === null ? left === right : leftKey === worktreeIdComparisonKey(right)
+}
+
 export function splitWorktreeId(worktreeId: string): ParsedWorktreeId | null {
   const separatorIdx = worktreeId.indexOf(WORKTREE_ID_SEPARATOR)
   if (separatorIdx === -1) {
