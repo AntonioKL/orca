@@ -33823,6 +33823,8 @@ export class OrcaRuntimeService {
         }
       }
     } else if (selector.startsWith('path:')) {
+      // Why exact-spelling-only (#16628): a Linux path names a directory in *some* WSL distro, and
+      // only the CLI sits in one and can prove which. Guessing here would delete a stranger's.
       candidates = worktrees.filter((worktree) =>
         runtimePathsEqual(worktree.path, selector.slice(5))
       )
