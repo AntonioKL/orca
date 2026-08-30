@@ -110,9 +110,9 @@ function benchmark(options) {
         time(() => {
           const targetHead = git(repo, ['rev-parse', '--verify', `${base}^{commit}`])
           git(preparedPath, ['rev-parse', '--verify', 'HEAD'])
-          git(repo, ['worktree', 'unlock', preparedPath])
-          git(repo, ['worktree', 'move', preparedPath, finalPath])
+          git(repo, ['worktree', 'move', '-f', '-f', preparedPath, finalPath])
           git(finalPath, ['checkout', '--no-track', '-b', finalBranch, targetHead])
+          git(repo, ['worktree', 'unlock', finalPath])
         })
       )
       removeWorktree(repo, finalPath, finalBranch)

@@ -94,7 +94,7 @@ export function listWorktrees(
 }
 
 /**
- * `listWorktreeGraph` through the same in-flight map, so callers that must see a Git failure
+ * `listWorktreesStrict` through the same in-flight map, so callers that must see a Git failure
  * (worktree-create verification) still coalesce with a concurrent refresh (#16520).
  */
 export function listWorktreesSharedStrict(
