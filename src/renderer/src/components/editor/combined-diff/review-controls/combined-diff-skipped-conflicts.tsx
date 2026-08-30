@@ -79,12 +79,13 @@ export function CombinedDiffSkippedConflictNotice({
         )}
       </div>
       <div className="mt-1 text-muted-foreground">
-        {skippedConflicts.length}{' '}
-        {translate('auto.components.editor.CombinedDiffViewer.689b99f8ad', 'unresolved conflict')}
-        {skippedConflicts.length === 1 ? '' : 's'}{' '}
         {translate(
-          'auto.components.editor.CombinedDiffViewer.39e73e7181',
-          'were excluded from this diff view.'
+          'auto.components.editor.CombinedDiffViewer.skippedConflictsExcluded',
+          '{{count}} unresolved conflicts were excluded from this diff view.',
+          {
+            count: skippedConflicts.length,
+            defaultValue_one: '{{count}} unresolved conflict was excluded from this diff view.'
+          }
         )}
       </div>
       <div className="mt-2 flex items-center gap-2">

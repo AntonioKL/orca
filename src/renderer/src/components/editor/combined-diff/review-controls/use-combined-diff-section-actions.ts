@@ -163,6 +163,7 @@ export function useCombinedDiffSectionActions({
         return
       }
 
+      const sectionKey = section.key
       const content = modifiedEditor?.getValue() ?? section.modifiedContent
       const absolutePath = joinPath(file.filePath, section.path)
       try {
@@ -183,10 +184,16 @@ export function useCombinedDiffSectionActions({
           absolutePath,
           content
         )
-        setSectionHeights((prev) => removeDiffSectionMeasuredHeight(prev, index))
+        // Why: the section list can be rebuilt while the write is pending, so re-resolve
+        // by key — the captured index may now point at a different file.
+        const savedIndex = sectionsRef.current.findIndex((s) => s.key === sectionKey)
+        if (savedIndex === -1) {
+          return
+        }
+        setSectionHeights((prev) => removeDiffSectionMeasuredHeight(prev, savedIndex))
         setSections((prev) =>
-          prev.map((s, i) => {
-            if (i !== index) {
+          prev.map((s) => {
+            if (s.key !== sectionKey) {
               return s
             }
 
@@ -226,6 +233,7 @@ export function useCombinedDiffSectionActions({
       file.runtimeEnvironmentId,
       file.worktreeId,
       sections,
+      sectionsRef,
       setSectionHeights,
       setSections
     ]

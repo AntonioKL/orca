@@ -10,6 +10,7 @@ export function buildCombinedGitStatusSignature(
   return JSON.stringify(
     matching.map((entry) => ({
       path: entry.path,
+      oldPath: entry.oldPath ?? null,
       area: entry.area,
       status: entry.status,
       added: entry.added ?? null,
