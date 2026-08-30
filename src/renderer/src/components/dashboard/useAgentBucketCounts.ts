@@ -2,11 +2,9 @@ import { useMemo } from 'react'
 import { useAppStore } from '@/store'
 import { useShallow } from 'zustand/react/shallow'
 import type { DashboardBucket } from '../../../../shared/dashboard-snapshot'
-import { buildDashboardSnapshot } from './build-dashboard-snapshot'
+import { buildDashboardBucketCounts } from './build-dashboard-bucket-counts'
 
 export type AgentBucketCounts = Record<DashboardBucket, number>
-
-const EMPTY_COUNTS: AgentBucketCounts = { attention: 0, working: 0, done: 0, idle: 0 }
 
 /**
  * Per-state agent counts for the sidebar dashboard entry, derived from the same
@@ -47,7 +45,7 @@ export function useAgentBucketCounts(): AgentBucketCounts {
   )
 
   return useMemo(() => {
-    const snapshot = buildDashboardSnapshot(
+    return buildDashboardBucketCounts(
       {
         repos,
         worktreesByRepo,
@@ -65,17 +63,8 @@ export function useAgentBucketCounts(): AgentBucketCounts {
         // generated-title gate is moot and the sidebar stays off settings.
         settings: null
       },
-      Date.now(),
-      { includeCardDetails: false, includeFilterOptions: false }
+      Date.now()
     )
-    if (snapshot.cards.length === 0) {
-      return EMPTY_COUNTS
-    }
-    const counts: AgentBucketCounts = { attention: 0, working: 0, done: 0, idle: 0 }
-    for (const card of snapshot.cards) {
-      counts[card.bucket] += 1
-    }
-    return counts
     // Why: Date.now() is read inside the memo (not a dep) so idle-decay tracks
     // agentStatusEpoch ticks, matching useDashboardData.
     // eslint-disable-next-line react-hooks/exhaustive-deps

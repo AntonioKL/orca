@@ -6,6 +6,7 @@ import type { ProjectGroup } from '../../../../shared/project-group-types'
 import type { TerminalTab } from '../../../../shared/terminal-tab-types'
 import type { AgentStatusEntry } from '../../../../shared/agent-status-types'
 import { buildDashboardSnapshot, type DashboardSnapshotState } from './build-dashboard-snapshot'
+import { buildDashboardBucketCounts } from './build-dashboard-bucket-counts'
 
 const NOW = 2_000_000_000
 const WORKSPACE_ID = folderWorkspaceKey('folder-1')
@@ -90,6 +91,7 @@ function state(): DashboardSnapshotState {
       [TAB_ID]: {
         root: { type: 'leaf', leafId: LEAF_ID },
         activeLeafId: LEAF_ID,
+        expandedLeafId: null,
         ptyIdsByLeafId: { [LEAF_ID]: 'pty-folder' }
       }
     },
@@ -101,6 +103,108 @@ function state(): DashboardSnapshotState {
 }
 
 describe('buildDashboardSnapshot folder workspaces', () => {
+  it('keeps count-only projection aligned across local and remote workspaces', () => {
+    const mixedState = state()
+    const localTabId = 'local-tab'
+    const localLeafId = '22222222-2222-4222-8222-222222222222'
+    const localPaneKey = makePaneKey(localTabId, localLeafId)
+    mixedState.repos = [
+      {
+        id: 'repo-1',
+        path: '/repo-1',
+        displayName: 'Local repo',
+        badgeColor: '#000'
+      }
+    ] as unknown as DashboardSnapshotState['repos']
+    mixedState.worktreesByRepo = {
+      'repo-1': [
+        {
+          id: 'local-worktree',
+          repoId: 'repo-1',
+          path: '/repo-1/worktree',
+          head: 'abc123',
+          branch: 'main',
+          isBare: false,
+          isMainWorktree: false,
+          displayName: 'Local worktree',
+          comment: '',
+          linkedIssue: null,
+          linkedPR: null,
+          linkedLinearIssue: null,
+          isArchived: false,
+          isUnread: false,
+          isPinned: false,
+          sortOrder: 0,
+          lastActivityAt: NOW
+        }
+      ]
+    } as unknown as DashboardSnapshotState['worktreesByRepo']
+    mixedState.tabsByWorktree['local-worktree'] = [
+      {
+        id: localTabId,
+        ptyId: 'pty-local',
+        worktreeId: 'local-worktree',
+        title: 'claude',
+        customTitle: null,
+        color: null,
+        sortOrder: 0,
+        createdAt: NOW
+      },
+      {
+        id: 'title-tab',
+        ptyId: 'pty-title',
+        worktreeId: 'local-worktree',
+        title: '✦ Claude Code',
+        customTitle: null,
+        color: null,
+        sortOrder: 1,
+        createdAt: NOW
+      }
+    ]
+    mixedState.terminalLayoutsByTabId[localTabId] = {
+      root: { type: 'leaf', leafId: localLeafId },
+      activeLeafId: localLeafId,
+      expandedLeafId: null,
+      ptyIdsByLeafId: { [localLeafId]: 'pty-local' }
+    }
+    mixedState.terminalLayoutsByTabId['title-tab'] = {
+      root: { type: 'leaf', leafId: LEAF_ID },
+      activeLeafId: LEAF_ID,
+      expandedLeafId: null,
+      ptyIdsByLeafId: { [LEAF_ID]: 'pty-title' }
+    }
+    mixedState.ptyIdsByTabId[localTabId] = ['pty-local']
+    mixedState.ptyIdsByTabId['title-tab'] = ['pty-title']
+    mixedState.runtimePaneTitlesByTabId['title-tab'] = { 1: '✦ Claude Code' }
+    mixedState.agentStatusByPaneKey[localPaneKey] = {
+      paneKey: localPaneKey,
+      state: 'done',
+      prompt: 'Review complete',
+      updatedAt: NOW,
+      stateStartedAt: NOW - 60_000,
+      stateHistory: [],
+      agentType: 'claude',
+      tabId: localTabId,
+      worktreeId: 'local-worktree'
+    }
+    mixedState.acknowledgedAgentsByPaneKey[localPaneKey] = NOW
+
+    const snapshot = buildDashboardSnapshot(mixedState, NOW)
+    const expected = { attention: 0, working: 0, done: 0, idle: 0 }
+    for (const card of snapshot.cards) {
+      expected[card.bucket] += 1
+    }
+    expect(
+      snapshot.cards.find((card) => card.paneKey === makePaneKey('title-tab', LEAF_ID))
+    ).toMatchObject({
+      bucket: 'working',
+      unseen: false,
+      startedAt: 0
+    })
+
+    expect(buildDashboardBucketCounts(mixedState, NOW)).toEqual(expected)
+  })
+
   it('places folder-workspace agents in their real project group without git assumptions', () => {
     const sshState = state()
     sshState.sshTargetLabels = new Map([['ssh-1', 'openclaw']])
