@@ -54,6 +54,7 @@ import type {
   BrowserSessionUserAgentMode
 } from '../../shared/browser-workspace-types'
 import type { BrowserNetworkExecutionHost } from '../../shared/browser-client-host-protocol'
+import { BROWSER_CLIENT_AUTOMATION_HOST_CAPABILITY } from '../../shared/browser-client-automation-protocol'
 import type { BrowserPageCreationPlacement } from '../../shared/browser-client-host-placement'
 import type { ExecutionHostId } from '../../shared/execution-host'
 import { browserNetworkExecutionHostKey } from '../browser/browser-network-execution-route'
@@ -1738,7 +1739,10 @@ export class RuntimeBrowserCommands {
     }
     const lease = this.host
       .getBrowserHostLeaseRegistry()
-      .select(undefined, [BROWSER_HOST_WEBVIEW_CAPABILITY])
+      .select(undefined, [
+        BROWSER_HOST_WEBVIEW_CAPABILITY,
+        BROWSER_CLIENT_AUTOMATION_HOST_CAPABILITY
+      ])
     return this.browserTabCreate(
       {
         url: params.url,
