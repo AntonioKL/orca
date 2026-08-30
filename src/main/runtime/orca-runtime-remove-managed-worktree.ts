@@ -25,6 +25,7 @@ import { cleanupUnusedWorktreePushTargetRemote } from '../ipc/worktree-remote'
 import { removeRuntimeRegisteredRemoteWorktree } from './runtime-registered-remote-worktree-removal'
 import { removeRuntimeRegisteredLocalWorktree } from './runtime-registered-local-worktree-removal'
 import { removeOrphanOrFolderWorktree } from './orca-runtime-remove-orphan-or-folder-worktree'
+import { deleteRemoteWorktreeHistory } from '../remote-worktree-history-cleanup'
 
 export class OrcaRuntimeWithRemoveManagedWorktree extends OrcaRuntimeWithCreateManagedRemoteWorktree {
   async removeManagedWorktree(

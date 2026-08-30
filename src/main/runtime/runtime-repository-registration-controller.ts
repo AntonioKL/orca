@@ -26,7 +26,8 @@ export class RuntimeRepositoryRegistrationController {
   async add(
     path: string,
     kind: 'git' | 'folder' = 'git',
-    executionHostId?: ExecutionHostId | null
+    executionHostId?: ExecutionHostId | null,
+    displayName?: string
   ): Promise<Repo> {
     const store = this.requireStore()
     if (!isAbsolute(path)) {
@@ -60,7 +61,7 @@ export class RuntimeRepositoryRegistrationController {
     const repo: Repo = {
       id: randomUUID(),
       path,
-      displayName: getRepoName(path),
+      displayName: displayName?.trim() || getRepoName(path),
       badgeColor: DEFAULT_REPO_BADGE_COLOR,
       ...(executionHostId != null ? { executionHostId } : {}),
       ...detected,
