@@ -20,6 +20,28 @@ export function mockBrowserManager(
   for (const [tabId, webContentsId] of tabs) {
     tabIdByWebContentsId.set(webContentsId, tabId)
   }
+  const setTab = tabs.set.bind(tabs)
+  tabs.set = ((tabId: string, webContentsId: number) => {
+    const previousWebContentsId = tabs.get(tabId)
+    if (previousWebContentsId !== undefined && previousWebContentsId !== webContentsId) {
+      tabIdByWebContentsId.delete(previousWebContentsId)
+    }
+    tabIdByWebContentsId.set(webContentsId, tabId)
+    return setTab(tabId, webContentsId)
+  }) as typeof tabs.set
+  const deleteTab = tabs.delete.bind(tabs)
+  tabs.delete = ((tabId: string) => {
+    const webContentsId = tabs.get(tabId)
+    if (webContentsId !== undefined) {
+      tabIdByWebContentsId.delete(webContentsId)
+    }
+    return deleteTab(tabId)
+  }) as typeof tabs.delete
+  const clearTabs = tabs.clear.bind(tabs)
+  tabs.clear = (() => {
+    tabIdByWebContentsId.clear()
+    clearTabs()
+  }) as typeof tabs.clear
   return {
     getWebContentsIdByTabId: () => tabs,
     getTabIdForWebContentsId: (webContentsId: number) =>
