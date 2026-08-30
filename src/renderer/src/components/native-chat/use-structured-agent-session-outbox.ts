@@ -49,10 +49,7 @@ export function useStructuredAgentSessionOutbox(args: {
   const dispatchingRef = useRef(false)
   const dispatchGenerationRef = useRef(0)
   const blockedIdRef = useRef<string | null>(null)
-  const probeAttemptsRef = useRef<{ id: string | null; attempts: number }>({
-    id: null,
-    attempts: 0
-  })
+  const probeAttemptsRef = useRef({ id: null as string | null, attempts: 0 })
   const [error, setError] = useState<string | null>(null)
   const [errorSession, setErrorSession] = useState(sessionId)
   // Render-time reset (react.dev: adjusting state when a prop changes), so the
