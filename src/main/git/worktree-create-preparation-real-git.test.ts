@@ -33,6 +33,7 @@ async function createRepo(): Promise<{ repoPath: string; root: string }> {
   git(repoPath, ['symbolic-ref', 'HEAD', 'refs/heads/main'])
   git(repoPath, ['config', 'user.email', 'test@example.com'])
   git(repoPath, ['config', 'user.name', 'Test User'])
+  git(repoPath, ['config', 'core.autocrlf', 'false'])
   await writeFile(join(repoPath, 'version.txt'), 'one\n')
   git(repoPath, ['add', 'version.txt'])
   git(repoPath, ['commit', '--quiet', '-m', 'initial'])
