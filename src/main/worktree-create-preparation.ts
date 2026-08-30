@@ -22,6 +22,7 @@ import {
 } from './git/worktree-create-preparation'
 import { getLocalProjectWorktreeGitOptions } from './project-runtime-git-options'
 import { computeWorkspaceRoot, getWorktreePathSettings } from './ipc/worktree-logic'
+import { toHostFilesystemPath } from './host-tree-removal'
 
 export const WORKTREE_CREATE_PREPARATION_TTL_MS = 5 * 60_000
 export const WORKTREE_CREATE_PREPARATION_LIMIT = 3
@@ -195,7 +196,9 @@ export function prepareWorktreeCreateForRepo(
     ready: (async () => {
       await cleanupStalePreparations(repo.path, options)
       await mkdir(
-        pathOps(workspaceRoot).join(workspaceRoot, WORKTREE_CREATE_PREPARATION_DIRECTORY),
+        toHostFilesystemPath(
+          pathOps(workspaceRoot).join(workspaceRoot, WORKTREE_CREATE_PREPARATION_DIRECTORY)
+        ),
         { recursive: true }
       )
       await prepareWorktreeCreateCheckout(repo.path, preparedPath, baseBranch, lockReason, options)
@@ -246,7 +249,9 @@ export async function consumePreparedWorktreeCreate(
     return null
   }
   try {
-    await mkdir(pathOps(args.worktreePath).dirname(args.worktreePath), { recursive: true })
+    await mkdir(toHostFilesystemPath(pathOps(args.worktreePath).dirname(args.worktreePath)), {
+      recursive: true
+    })
     return await finalizePreparedWorktree(
       args.repoPath,
       entry.preparedPath,

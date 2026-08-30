@@ -22,6 +22,7 @@ vi.mock('node:fs/promises', () => ({
 import {
   getLocalWorktreePathAccess,
   removeLocalWorktreePath,
+  toHostFilesystemPath,
   toHostRemovalPath
 } from './local-worktree-filesystem'
 
@@ -100,6 +101,20 @@ describe('local worktree filesystem runtime access', () => {
           retryDelay: expect.any(Number)
         })
       )
+    })
+  })
+
+  it('uses the same Win32 namespace for host directory creation on Windows', async () => {
+    await withPlatform('win32', async () => {
+      const longPath = `C:\\repo\\${'nested\\'.repeat(40)}feature`
+
+      expect(toHostFilesystemPath(longPath)).toBe(`\\\\?\\${longPath}`)
+    })
+  })
+
+  it('leaves POSIX WSL paths unchanged on a Windows host', async () => {
+    await withPlatform('win32', async () => {
+      expect(toHostFilesystemPath('/home/me/worktrees')).toBe('/home/me/worktrees')
     })
   })
 

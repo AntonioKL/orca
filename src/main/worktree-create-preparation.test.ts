@@ -24,8 +24,11 @@ vi.mock('./project-runtime-git-options', () => ({
   getLocalProjectWorktreeGitOptions: mocks.getWorktreeOptions
 }))
 vi.mock('./ipc/worktree-logic', () => ({
-  computeWorkspaceRoot: () => '/workspace',
-  getWorktreePathSettings: () => ({ workspaceDir: '/workspace', nestWorkspaces: false })
+  computeWorkspaceRoot: () => (process.platform === 'win32' ? 'C:\\workspace' : '/workspace'),
+  getWorktreePathSettings: () => ({
+    workspaceDir: process.platform === 'win32' ? 'C:\\workspace' : '/workspace',
+    nestWorkspaces: false
+  })
 }))
 
 import {
@@ -52,6 +55,21 @@ afterEach(async () => {
 })
 
 describe('worktree create preparation registry', () => {
+  it('namespaces native Windows preparation directories for long paths', async () => {
+    const originalPlatform = process.platform
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+    try {
+      await prepareWorktreeCreateForRepo(store, { ...repo, path: 'C:\\repo' }, 'origin/main')
+
+      expect(mocks.mkdir).toHaveBeenCalledWith(
+        expect.stringMatching(/^\\\\\?\\C:\\workspace\\\.orca-preparing/),
+        { recursive: true }
+      )
+    } finally {
+      Object.defineProperty(process, 'platform', { configurable: true, value: originalPlatform })
+    }
+  })
+
   it('deduplicates preparation for the same repo, base, runtime, and workspace root', async () => {
     await Promise.all([
       prepareWorktreeCreateForRepo(store, repo, 'origin/main'),
