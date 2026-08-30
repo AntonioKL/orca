@@ -25,13 +25,21 @@ function gitExecOptions(
   }
 }
 
+function gitCleanupOptions(
+  cwd: string,
+  options: GitWorktreeExecOptions
+): { cwd: string; wslDistro?: string; timeout?: number } {
+  // Why: cancellation must not strand a partially moved worktree; cleanup is bounded separately.
+  return gitExecOptions(cwd, { ...options, signal: undefined })
+}
+
 async function performDiscardPreparedWorktree(
   repoPath: string,
   worktreePath: string,
   options: GitWorktreeExecOptions
 ): Promise<void> {
   const cleanupGitOptions = {
-    ...gitExecOptions(repoPath, options),
+    ...gitCleanupOptions(repoPath, options),
     timeout: options.timeout ?? WORKTREE_REMOVAL_REGISTRATION_TIMEOUT_MS
   }
   try {
@@ -125,7 +133,7 @@ async function removeFailedFinalization(
     try {
       const { stdout } = await gitExecFileAsync(
         ['symbolic-ref', '--short', 'HEAD'],
-        gitExecOptions(cleanupPath, options)
+        gitCleanupOptions(cleanupPath, options)
       )
       branchAttached = stdout.trim() === branch
     } catch {
@@ -134,9 +142,10 @@ async function removeFailedFinalization(
   }
   await performDiscardPreparedWorktree(repoPath, cleanupPath, options).catch(() => {})
   if (branchAttached) {
-    await gitExecFileAsync(['branch', '-D', '--', branch], gitExecOptions(repoPath, options)).catch(
-      () => {}
-    )
+    await gitExecFileAsync(
+      ['branch', '-D', '--', branch],
+      gitCleanupOptions(repoPath, options)
+    ).catch(() => {})
   }
 }
 

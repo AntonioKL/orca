@@ -10,6 +10,7 @@ import {
 } from '../../shared/worktree/create-preparation'
 import { listWorktrees } from './worktree'
 import {
+  discardPreparedWorktree,
   finalizePreparedWorktree,
   prepareWorktreeCreateCheckout
 } from './worktree-create-preparation'
@@ -43,6 +44,28 @@ afterEach(async () => {
 })
 
 describe('prepared worktree creation with real Git', () => {
+  it('cleans up when the create signal is canceled', async () => {
+    const { repoPath, root } = await createRepo()
+    const preparationRoot = join(root, WORKTREE_CREATE_PREPARATION_DIRECTORY)
+    const preparedPath = join(preparationRoot, `${process.pid}-canceled`)
+    await mkdir(preparationRoot, { recursive: true })
+
+    await prepareWorktreeCreateCheckout(
+      repoPath,
+      preparedPath,
+      'main',
+      createWorktreePreparationLockReason('canceled-test')
+    )
+
+    const controller = new AbortController()
+    controller.abort()
+    await expect(
+      discardPreparedWorktree(repoPath, preparedPath, { signal: controller.signal })
+    ).resolves.toBeUndefined()
+
+    expect(await listWorktrees(repoPath, { includeCreatePreparations: true })).toHaveLength(1)
+  })
+
   it('hides the preparation, retargets an advanced base, and attaches the final branch', async () => {
     const { repoPath, root } = await createRepo()
     const preparationRoot = join(root, WORKTREE_CREATE_PREPARATION_DIRECTORY)
