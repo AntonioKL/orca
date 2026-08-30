@@ -89,6 +89,15 @@ function codexPlaceholderFrame(): string {
   ].join('')
 }
 
+function dispatchSession(rig: Rig, type: string, id: number): void {
+  rig.element.dispatchEvent(
+    new CustomEvent(type, {
+      bubbles: true,
+      detail: { id }
+    })
+  )
+}
+
 describe('terminal IME composer placeholder mask', () => {
   beforeEach(() => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
@@ -203,21 +212,12 @@ describe('terminal IME composer placeholder mask', () => {
     const rig = openTerminal()
     await rig.write(codexPlaceholderFrame())
 
-    const dispatchSession = (type: string, id: number): void => {
-      rig.element.dispatchEvent(
-        new CustomEvent(type, {
-          bubbles: true,
-          detail: { id }
-        })
-      )
-    }
-
-    dispatchSession(XTERM_COMPOSITION_SESSION_START_EVENT, 1)
-    dispatchSession(XTERM_COMPOSITION_SESSION_START_EVENT, 2)
-    dispatchSession(XTERM_COMPOSITION_SESSION_END_EVENT, 1)
+    dispatchSession(rig, XTERM_COMPOSITION_SESSION_START_EVENT, 1)
+    dispatchSession(rig, XTERM_COMPOSITION_SESSION_START_EVENT, 2)
+    dispatchSession(rig, XTERM_COMPOSITION_SESSION_END_EVENT, 1)
     expect(rig.element.classList.contains(TERMINAL_IME_COMPOSER_PLACEHOLDER_CLASS)).toBe(true)
 
-    dispatchSession(XTERM_COMPOSITION_SESSION_END_EVENT, 2)
+    dispatchSession(rig, XTERM_COMPOSITION_SESSION_END_EVENT, 2)
     expect(rig.element.classList.contains(TERMINAL_IME_COMPOSER_PLACEHOLDER_CLASS)).toBe(false)
   })
 
@@ -225,21 +225,12 @@ describe('terminal IME composer placeholder mask', () => {
     const rig = openTerminal()
     await rig.write(codexPlaceholderFrame())
 
-    const dispatchSession = (type: string, id: number): void => {
-      rig.element.dispatchEvent(
-        new CustomEvent(type, {
-          bubbles: true,
-          detail: { id }
-        })
-      )
-    }
-
-    dispatchSession(XTERM_COMPOSITION_SESSION_START_EVENT, 11)
-    dispatchSession(XTERM_COMPOSITION_SESSION_START_EVENT, 12)
-    dispatchSession(XTERM_COMPOSITION_SESSION_END_EVENT, 12)
+    dispatchSession(rig, XTERM_COMPOSITION_SESSION_START_EVENT, 11)
+    dispatchSession(rig, XTERM_COMPOSITION_SESSION_START_EVENT, 12)
+    dispatchSession(rig, XTERM_COMPOSITION_SESSION_END_EVENT, 12)
     expect(rig.element.classList.contains(TERMINAL_IME_COMPOSER_PLACEHOLDER_CLASS)).toBe(false)
 
-    dispatchSession(XTERM_COMPOSITION_SESSION_END_EVENT, 11)
+    dispatchSession(rig, XTERM_COMPOSITION_SESSION_END_EVENT, 11)
     expect(rig.element.classList.contains(TERMINAL_IME_COMPOSER_PLACEHOLDER_CLASS)).toBe(false)
   })
 
@@ -247,25 +238,16 @@ describe('terminal IME composer placeholder mask', () => {
     const rig = openTerminal()
     await rig.write(codexPlaceholderFrame())
 
-    const dispatchSession = (type: string, id: number): void => {
-      rig.element.dispatchEvent(
-        new CustomEvent(type, {
-          bubbles: true,
-          detail: { id }
-        })
-      )
-    }
-
     const newestId = 2048
     for (let id = 1; id <= newestId; id += 1) {
-      dispatchSession(XTERM_COMPOSITION_SESSION_START_EVENT, id)
+      dispatchSession(rig, XTERM_COMPOSITION_SESSION_START_EVENT, id)
     }
     for (let id = 1; id < newestId; id += 1) {
-      dispatchSession(XTERM_COMPOSITION_SESSION_END_EVENT, id)
+      dispatchSession(rig, XTERM_COMPOSITION_SESSION_END_EVENT, id)
     }
     expect(rig.element.classList.contains(TERMINAL_IME_COMPOSER_PLACEHOLDER_CLASS)).toBe(true)
 
-    dispatchSession(XTERM_COMPOSITION_SESSION_END_EVENT, newestId)
+    dispatchSession(rig, XTERM_COMPOSITION_SESSION_END_EVENT, newestId)
     expect(rig.element.classList.contains(TERMINAL_IME_COMPOSER_PLACEHOLDER_CLASS)).toBe(false)
   })
 })
