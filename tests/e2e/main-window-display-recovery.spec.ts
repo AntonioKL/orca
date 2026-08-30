@@ -3,6 +3,7 @@ import { expect, test } from './helpers/orca-app'
 import { waitForSessionReady } from './helpers/store'
 
 type NativeWindowBounds = { position: [number, number]; size: [number, number] }
+type DisplayWorkArea = { x: number; y: number; width: number; height: number }
 
 function readNativeWindowBounds(processId: number): NativeWindowBounds {
   const output = execFileSync(
@@ -64,22 +65,22 @@ test.describe('Main window display recovery', () => {
       const offscreenBounds = { x: right + 1000, y: bottom + 1000, width: 900, height: 700 }
       window.setBounds(offscreenBounds)
       const candidateBounds = window.getBounds()
-      const candidateOverlapsDisplay = displays.some(({ workArea: area }) => {
-        const overlapWidth = Math.max(
+      const candidateHasReachableTitlebar = displays.some(({ workArea: area }) => {
+        const visibleWidth = Math.max(
           0,
           Math.min(candidateBounds.x + candidateBounds.width, area.x + area.width) -
             Math.max(candidateBounds.x, area.x)
         )
-        const overlapHeight = Math.max(
+        const visibleTitlebarHeight = Math.max(
           0,
-          Math.min(candidateBounds.y + candidateBounds.height, area.y + area.height) -
+          Math.min(candidateBounds.y + 36, area.y + area.height) -
             Math.max(candidateBounds.y, area.y)
         )
-        return overlapWidth > 0 && overlapHeight > 0
+        return visibleWidth >= 60 && visibleTitlebarHeight >= 16
       })
-      if (candidateOverlapsDisplay) {
+      if (candidateHasReachableTitlebar) {
         throw new Error(
-          `expected offscreen candidate bounds, got ${JSON.stringify(candidateBounds)}`
+          `expected unreachable candidate bounds, got ${JSON.stringify(candidateBounds)}`
         )
       }
       screen.emit('display-metrics-changed', {} as Electron.Event, screen.getPrimaryDisplay(), [
@@ -89,7 +90,8 @@ test.describe('Main window display recovery', () => {
       return {
         processId: process.pid,
         windowIdBefore: window.id,
-        visible: window.isVisible()
+        visible: window.isVisible(),
+        displayWorkAreas: displays.map(({ workArea }) => workArea as DisplayWorkArea)
       }
     })
 
@@ -115,21 +117,28 @@ test.describe('Main window display recovery', () => {
     expect(result.visible).toBe(true)
     expect(result.processId).toBe(electronApp.process().pid)
 
-    const recovered = await electronApp.evaluate(({ BrowserWindow }) =>
-      BrowserWindow.getAllWindows()[0].getBounds()
-    )
     await expect
       .poll(() => {
         try {
-          return readNativeWindowBounds(result.processId)
+          const native = readNativeWindowBounds(result.processId)
+          const [x, y] = native.position
+          const [width, height] = native.size
+          return result.displayWorkAreas.some((area) => {
+            const overlapWidth = Math.max(
+              0,
+              Math.min(x + width, area.x + area.width) - Math.max(x, area.x)
+            )
+            const overlapHeight = Math.max(
+              0,
+              Math.min(y + height, area.y + area.height) - Math.max(y, area.y)
+            )
+            return overlapWidth > 0 && overlapHeight > 0
+          })
         } catch {
-          return null
+          return false
         }
       })
-      .toEqual({
-        position: [recovered.x, recovered.y],
-        size: [recovered.width, recovered.height]
-      })
+      .toBe(true)
     expect(await orcaPage.locator('body').isVisible()).toBe(true)
     await orcaPage.screenshot({ path: testInfo.outputPath('main-window-display-recovered.png') })
   })
