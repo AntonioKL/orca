@@ -101,6 +101,21 @@ describe('#10142 close confirmation policy is the same for keyboard and mouse', 
     )
   })
 
+  it('uses the shared three-state close table in every destructive desktop guard', () => {
+    const terminalSource = readFileSync(join(__dirname, '../Terminal.tsx'), 'utf8')
+    const tabSource = readFileSync(join(__dirname, './running-terminal-close-guard.ts'), 'utf8')
+    const paneSource = readFileSync(join(__dirname, '../terminal-pane/TerminalPane.tsx'), 'utf8')
+
+    for (const source of [terminalSource, tabSource, paneSource]) {
+      expect(source).toContain('terminalCloseDecision')
+      expect(source).toContain('terminalCloseLivenessFromInspection')
+    }
+    expect(terminalSource).toContain('collectTabPtyIds(state, tab.id)')
+    expect(terminalSource).not.toContain('window.api.pty.hasChildProcesses')
+    expect(paneSource).not.toContain('!process.hasChildProcesses')
+    expect(tabSource).not.toContain('result.value.hasChildProcesses')
+  })
+
   // Control: the harness does observe a guard when one exists — pinning blocks the same mouse close.
   it('mouse close routes a pinned tab through its confirmation guard', () => {
     const state = stateWithBusyTerminalTab(closeTab)

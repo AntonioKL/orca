@@ -181,18 +181,18 @@ describe('guardRunningTerminalClose', () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 
-  it('fails open and closes when the probe rejects (wedged relay / legacy provider)', async () => {
+  it('prompts when the probe rejects because its liveness is unverifiable', async () => {
     inspectRuntimeTerminalProcessMock.mockRejectedValue(new Error('rpc_timeout'))
     const onClose = vi.fn()
 
     guard(onClose)
     await settleProbe()
 
-    expect(onClose).toHaveBeenCalledTimes(1)
-    expect(visibleRequest()).toBeNull()
+    expect(onClose).not.toHaveBeenCalled()
+    expect(visibleRequest()).toMatchObject({ terminalTabId: 'tab-1' })
   })
 
-  it('fails open when a remote handle reports the inspection as unavailable', async () => {
+  it('prompts when a remote handle reports the inspection as unavailable', async () => {
     inspectRuntimeTerminalProcessMock.mockResolvedValue({
       foregroundProcess: null,
       hasChildProcesses: true,
@@ -203,8 +203,8 @@ describe('guardRunningTerminalClose', () => {
     guard(onClose)
     await settleProbe()
 
-    expect(onClose).toHaveBeenCalledTimes(1)
-    expect(visibleRequest()).toBeNull()
+    expect(onClose).not.toHaveBeenCalled()
+    expect(visibleRequest()).toMatchObject({ terminalTabId: 'tab-1' })
   })
 
   it('prompts once for a split tab where only the second pane is busy', async () => {
@@ -392,10 +392,8 @@ describe('guardRunningTerminalClose', () => {
   })
 
   // Why: an SSH drop zeroes ptyIdsByTabId while the layout still names the pane. The stale
-  // binding is probed, that probe fails on the dead link, and the close falls open — so a
-  // reconnecting tab stays closable instead of being blocked behind a prompt for a pty
-  // nobody can reach. Documented so the behavior is a decision, not an accident.
-  it('closes a reconnecting ssh tab whose pty ids were already zeroed', async () => {
+  // binding is probed, but a dead link is unverifiable rather than evidence of an exited PTY.
+  it('prompts for a reconnecting ssh tab whose pty ids were already zeroed', async () => {
     setState({ ptyIdsByTabId: { 'tab-1': [] } })
     inspectRuntimeTerminalProcessMock.mockRejectedValue(new Error('ssh_disconnected'))
     const onClose = vi.fn()
@@ -403,7 +401,7 @@ describe('guardRunningTerminalClose', () => {
     guard(onClose)
     await settleProbe()
 
-    expect(onClose).toHaveBeenCalledTimes(1)
-    expect(visibleRequest()).toBeNull()
+    expect(onClose).not.toHaveBeenCalled()
+    expect(visibleRequest()).toMatchObject({ terminalTabId: 'tab-1' })
   })
 })
