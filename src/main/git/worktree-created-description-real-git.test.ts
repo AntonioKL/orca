@@ -79,6 +79,15 @@ describe('describeCreatedWorktree against the real Git binary', () => {
     ).resolves.toBeUndefined()
   })
 
+  it('rejects a worktree whose HEAD Git cannot resolve', async () => {
+    // Deleting the branch ref leaves HEAD symbolic but unborn: the ref check still passes.
+    await rm(join(repoPath, '.git', 'refs', 'heads', 'feature'))
+
+    await expect(
+      describeCreatedWorktree(repoPath, worktreePath, 'feature')
+    ).resolves.toBeUndefined()
+  })
+
   it('rejects a path that is not a worktree', async () => {
     const plainDir = join(scratchDir, 'not-a-worktree')
     await mkdir(plainDir, { recursive: true })
@@ -86,16 +95,20 @@ describe('describeCreatedWorktree against the real Git binary', () => {
     await expect(describeCreatedWorktree(repoPath, plainDir, 'feature')).resolves.toBeUndefined()
   })
 
-  it('still recovers when the repo root reaches Git through a symlink', async () => {
-    const linkedRepo = join(scratchDir, 'repo-link')
-    await execFileAsync('ln', ['-s', repoPath, linkedRepo])
+  // `ln` is absent from the Windows test PATH.
+  it.skipIf(process.platform === 'win32')(
+    'still recovers when the repo root reaches Git through a symlink',
+    async () => {
+      const linkedRepo = join(scratchDir, 'repo-link')
+      await execFileAsync('ln', ['-s', repoPath, linkedRepo])
 
-    // Why this case: comparing a single common-dir reading rejected every symlinked root, leaving
-    // the recovery inert exactly where the listing is most likely to have been the only witness.
-    await expect(
-      describeCreatedWorktree(linkedRepo, worktreePath, 'feature')
-    ).resolves.toMatchObject({ branch: 'refs/heads/feature' })
-  })
+      // Why this case: comparing a single common-dir reading rejected every symlinked root, leaving
+      // the recovery inert exactly where the listing is most likely to have been the only witness.
+      await expect(
+        describeCreatedWorktree(linkedRepo, worktreePath, 'feature')
+      ).resolves.toMatchObject({ branch: 'refs/heads/feature' })
+    }
+  )
 
   it('recovers a worktree created from a bare repo', async () => {
     const bareRepo = join(scratchDir, 'bare.git')
@@ -123,16 +136,20 @@ describe('describeCreatedWorktree against the real Git binary', () => {
     )
   })
 
-  it('recovers a symlinked root on the Git 2.25 baseline', async () => {
-    const linkedRepo = join(scratchDir, 'repo-link')
-    await execFileAsync('ln', ['-s', repoPath, linkedRepo])
-    getLocalGitCapabilityCache({ cwd: linkedRepo }).rememberUnsupported('rev-parse-path-format')
+  // `ln` is absent from the Windows test PATH.
+  it.skipIf(process.platform === 'win32')(
+    'recovers a symlinked root on the Git 2.25 baseline',
+    async () => {
+      const linkedRepo = join(scratchDir, 'repo-link')
+      await execFileAsync('ln', ['-s', repoPath, linkedRepo])
+      getLocalGitCapabilityCache({ cwd: linkedRepo }).rememberUnsupported('rev-parse-path-format')
 
-    // Why this pair: without `--path-format=absolute` Git answers `.git`, which resolves against the
-    // symlink spelling the caller passed, while the worktree answers with the real root. Only
-    // canonicalizing both makes them the same object store.
-    await expect(
-      describeCreatedWorktree(linkedRepo, worktreePath, 'feature')
-    ).resolves.toMatchObject({ branch: 'refs/heads/feature' })
-  })
+      // Why this pair: without `--path-format=absolute` Git answers `.git`, which resolves against the
+      // symlink spelling the caller passed, while the worktree answers with the real root. Only
+      // canonicalizing both makes them the same object store.
+      await expect(
+        describeCreatedWorktree(linkedRepo, worktreePath, 'feature')
+      ).resolves.toMatchObject({ branch: 'refs/heads/feature' })
+    }
+  )
 })

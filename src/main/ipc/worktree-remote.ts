@@ -107,7 +107,10 @@ import {
   prepareWorktreePushTargetWithExec
 } from './worktree-push-target-setup'
 import { isENOENT } from './filesystem-path-containment'
-import { registerWorktreeRootsForRepo } from './registered-worktree-roots-cache'
+import {
+  registerCreatedWorktreeRoot,
+  registerWorktreeRootsForRepo
+} from './registered-worktree-roots-cache'
 import {
   createWorktreeCopiedPaths,
   createWorktreeLinkedPaths,
@@ -2585,6 +2588,10 @@ export async function createLocalWorktree(
       repo.path,
       ...gitWorktrees.map((worktree) => worktree.path)
     ])
+  } else {
+    // Recovered without a listing: authorize just the new root, or the create the user just made
+    // is rejected by filesystem/git-status IPC until a full scan repopulates the cache.
+    registerCreatedWorktreeRoot(store, repo.id, created.path)
   }
 
   // Why: link user-configured shared paths (e.g. `node_modules`, `.env`) before setup runs so setup scripts see them in place.

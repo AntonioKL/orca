@@ -169,13 +169,15 @@ export async function describeCreatedWorktree(
     ...options,
     timeout: options.timeout ?? WORKTREE_LIST_TIMEOUT_MS
   }
-  const [created, repoGitCommonDir, repoDiskCommonDir, checkedOutRef] = await Promise.all([
+  const [created, repoGitCommonDir, repoDiskCommonDir, checkedOutRef, head] = await Promise.all([
     readRepoLocation(worktreePath, toGitOutputSpace(worktreePath), deadlined),
     readRepoCommonDirFromGit(repoPath, deadlined),
     readRepoCommonDirFromDisk(repoPath),
-    readCheckedOutBranchRef(worktreePath, deadlined)
+    readCheckedOutBranchRef(worktreePath, deadlined),
+    readWorktreeHeadOid(worktreePath, deadlined)
   ])
-  if (!created || checkedOutRef !== expectedRef) {
+  // An unreadable HEAD means Git could not confirm the worktree, so report nothing rather than a blank OID.
+  if (!created || checkedOutRef !== expectedRef || !head) {
     return undefined
   }
   if (!(await isSameRepoCommonDir(created.commonDir, [repoGitCommonDir, repoDiskCommonDir]))) {
@@ -184,7 +186,7 @@ export async function describeCreatedWorktree(
   const [described] = await annotateSparseCheckoutStatus([
     {
       path: translateWorktreePath(created.topLevel, repoPath, options),
-      head: await readWorktreeHeadOid(worktreePath, deadlined),
+      head,
       branch: expectedRef,
       isBare: false,
       // `git worktree add` only ever produces a linked worktree.

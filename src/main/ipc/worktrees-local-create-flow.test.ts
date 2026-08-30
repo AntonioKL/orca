@@ -451,6 +451,10 @@ describe('registerWorktreeHandlers', () => {
     await expect(
       resolveRegisteredWorktreePath('/workspace/existing-sibling', store as never)
     ).resolves.toBe(resolve('/workspace/existing-sibling'))
+    // Why: the recovered create is still a real worktree, so its own path must be usable at once.
+    await expect(
+      resolveRegisteredWorktreePath('/workspace/improve-dashboard', store as never)
+    ).resolves.toBe(resolve('/workspace/improve-dashboard'))
   })
 
   it('uses branchNameOverride for the git branch while keeping the sanitized worktree path', async () => {

@@ -114,6 +114,30 @@ export function registerWorktreeRootsForRepo(
   registeredWorktreeRootsDirty = !allLocalRepoRootsRegistered(localRepoIds)
 }
 
+/**
+ * Authorize one worktree root without claiming the repo's set is complete.
+ *
+ * Why: `registerWorktreeRootsForRepo` replaces the set, so a create recovered without a listing has
+ * no full set to register. Adding just the new root keeps siblings authorized, and leaving the cache
+ * dirty makes the next `ensureAuthorizedRootsCache` rebuild the real set (#16520).
+ */
+export function registerCreatedWorktreeRoot(
+  store: Store,
+  repoId: string,
+  worktreeRoot: string
+): void {
+  const localRepoIds = new Set(getLocalRepos(store).map((repo) => repo.id))
+  if (!localRepoIds.has(repoId)) {
+    return
+  }
+  const roots = registeredWorktreeRootsByRepo.get(repoId) ?? new Set<string>()
+  roots.add(resolve(worktreeRoot))
+  registeredWorktreeRootsByRepo.set(repoId, roots)
+  registeredWorktreeRootsRevisionByRepo.set(repoId, ++registeredWorktreeRootsRevisionSequence)
+  refreshRegisteredWorktreeRoots()
+  registeredWorktreeRootsDirty = true
+}
+
 export function getRegisteredWorktreeRootsRevision(repoId: string): number {
   return registeredWorktreeRootsRevisionByRepo.get(repoId) ?? registeredWorktreeRootsBaseRevision
 }

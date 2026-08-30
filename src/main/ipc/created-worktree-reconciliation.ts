@@ -61,15 +61,27 @@ export async function resolveCreatedWorktree(
   }
 
   let described: GitWorktreeInfo | undefined
+  let describeError: unknown
   try {
     described = options
       ? await describeCreatedWorktree(repoPath, worktreePath, branchName, options)
       : await describeCreatedWorktree(repoPath, worktreePath, branchName)
-  } catch {
-    // Why swallow: the recovery must not replace the listing's own, more informative failure.
+  } catch (err) {
+    // Why keep, not rethrow: the recovery must not replace the listing's own, more informative failure.
+    describeError = err
   }
   if (described) {
     return { created: described, worktrees: [], listingComplete: false }
   }
-  throw listingError ?? createdWorktreeNotFoundError(worktreePath, branchName)
+  if (listingError) {
+    throw listingError
+  }
+  const notFound = createdWorktreeNotFoundError(worktreePath, branchName)
+  if (describeError) {
+    // The listing simply omitted the row, so the direct read holds the only actionable failure.
+    throw new Error(
+      `${notFound.message}: ${describeError instanceof Error ? describeError.message : String(describeError)}`
+    )
+  }
+  throw notFound
 }

@@ -157,6 +157,15 @@ describe('resolveCreatedWorktree', () => {
     )
   })
 
+  it("adds the direct read's failure when the listing merely omitted the row", async () => {
+    vi.mocked(listWorktreesSharedStrict).mockResolvedValue([MAIN])
+    vi.mocked(describeCreatedWorktree).mockRejectedValue(new Error('rev-parse exploded'))
+
+    await expect(resolveCreatedWorktree('/repo', '/workspaces/feature', 'feature')).rejects.toThrow(
+      'Worktree created but not found in listing: /workspaces/feature (branch feature): rev-parse exploded'
+    )
+  })
+
   it('forwards exec options only when the caller supplied them', async () => {
     vi.mocked(listWorktreesSharedStrict).mockResolvedValue([CREATED])
     await resolveCreatedWorktree('/repo', '/workspaces/feature', 'feature')

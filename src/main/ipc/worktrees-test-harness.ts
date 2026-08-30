@@ -158,7 +158,8 @@ export function setupWorktreeHandlers(): WorktreeRuntimeStub {
     pruneSpaceAnalysisSnapshotsMock,
     recordRemovalSnapshotPruneMock,
     findExistingWorktreeSymlinkPathsMock,
-    removeWorktreeLinkedPathsMock
+    removeWorktreeLinkedPathsMock,
+    describeCreatedWorktreeMock
   ]) {
     m.mockReset()
   }
