@@ -86,4 +86,22 @@ describe('OMP agent_end contract', () => {
       vi.useRealTimers()
     }
   })
+
+  it('preserves non-terminal agent_end handling for Pi and Prime', async () => {
+    vi.useFakeTimers()
+    try {
+      for (const kind of ['pi', 'prime-agent'] as const) {
+        const harness = createAgentStatusExtensionHarness({ kind })
+        const context = { isIdle: vi.fn(() => true) }
+
+        await harness.callHook('agent_end', { willContinue: true }, context)
+        await vi.advanceTimersByTimeAsync(1_000)
+
+        expect(postedHookNames(harness.fetchMock)).toEqual([])
+        expect(context.isIdle).not.toHaveBeenCalled()
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
