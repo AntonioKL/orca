@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getDeleteWorktreeToastCopy } from './delete-worktree-toast'
+import { getDeleteWorktreeToastCopy, type DeleteWorktreeToastCopy } from './delete-worktree-toast'
 import {
   classifyWorktreeForceDeleteReason,
   isUnprovenOrphanedWorktreeDirectoryError,
@@ -10,7 +10,7 @@ import { translate } from '@/i18n/i18n'
 // Why: production never hands this function a literal reason — the store derives it from
 // classifyWorktreeForceDeleteReason (store/slices/worktrees.ts). Passing one in would let a
 // message the classifier rejects still render the force copy, testing a UI that never runs.
-function toastCopyForRemovalError(worktreeName: string, error: string): unknown {
+function toastCopyForRemovalError(worktreeName: string, error: string): DeleteWorktreeToastCopy {
   return getDeleteWorktreeToastCopy(worktreeName, classifyWorktreeForceDeleteReason(error), error)
 }
 
@@ -113,6 +113,30 @@ describe('getDeleteWorktreeToastCopy', () => {
       title: 'Failed to delete workspace feature/foo',
       description: 'Git already removed this workspace. Use Force Delete to clear it from Orca.',
       isDestructive: false
+    })
+  })
+
+  // Why: Electron wraps rejected IPC calls; users should see the underlying reason, not plumbing.
+  it('never shows the Electron IPC envelope when the failure carries a reason', () => {
+    const description = toastCopyForRemovalError(
+      'feature/foo',
+      "Error invoking remote method 'worktrees:remove': Error: EPERM: operation not permitted, unlink '/w/.git'"
+    ).description
+    expect(description).not.toContain('invoking remote method')
+    expect(description).toBe("EPERM: operation not permitted, unlink '/w/.git'")
+  })
+
+  it('falls back to human copy when the IPC envelope carries no readable reason', () => {
+    expect(
+      toastCopyForRemovalError(
+        'feature/foo',
+        "Error invoking remote method 'worktrees:remove': Error"
+      )
+    ).toEqual({
+      title: 'Failed to delete workspace feature/foo',
+      description:
+        'Orca could not delete this workspace, and the failure did not include a readable reason. Retry, and send app diagnostics to support if it keeps failing.',
+      isDestructive: true
     })
   })
 
