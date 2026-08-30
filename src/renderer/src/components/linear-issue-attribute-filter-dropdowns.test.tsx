@@ -664,6 +664,77 @@ describe('LinearIssueAttributeFilterDropdowns coverage at exactly the transport 
     expect(document.body.textContent).not.toContain('partial')
   })
 
+  // Why: every facet change re-caps every facet, and re-capping an already-capped status is a
+  // no-op — recomputing the record there would see requested === applied and erase the warning.
+  // The scenario has to sit where intended === applied, or the value-derived shortfall covers
+  // for the record and the guard goes untested.
+  it('keeps the status truncation when an unrelated facet is picked', () => {
+    const states = Array.from({ length: cap + 1 }, (_unused, index) => ({
+      id: `s-${String(index).padStart(3, '0')}`,
+      name: rowNamed(index)
+    }))
+    metadataMocks.useTeamsStates.mockImplementation(() => ({
+      data: states,
+      loading: false,
+      error: null
+    }))
+
+    const { rerender, onChange } = renderDropdowns({
+      ...emptyFilter,
+      stateIds: states.slice(0, cap).map((state) => state.id)
+    })
+    openSectionNamed('Status')
+    clickRow(rowNamed(cap))
+    rerender(onChange.mock.calls[0]?.[0] as LinearIssueAttributeFilter)
+    expect(document.body.textContent).toContain('Filtering the most this can carry')
+
+    openSectionNamed('Back')
+    openSectionNamed('Priority')
+    clickRow('Urgent')
+    const withPriority = onChange.mock.calls[1]?.[0] as LinearIssueAttributeFilter
+    rerender(withPriority)
+
+    expect(withPriority.priorities).toEqual([1])
+    expect(withPriority.stateIds).toHaveLength(cap)
+    openSectionNamed('Back')
+    expect(document.body.textContent).toContain('· partial')
+    openSectionNamed('Status')
+    expect(document.body.textContent).toContain('Filtering the most this can carry')
+  })
+
+  it('keeps the labels truncation when an unrelated facet is picked', () => {
+    const labelCap = LINEAR_ISSUE_ATTRIBUTE_FILTER_MAX_LABEL_IDS
+    const labels = Array.from({ length: labelCap + 1 }, (_unused, index) => ({
+      id: `l-${String(index).padStart(3, '0')}`,
+      name: rowNamed(index)
+    }))
+    metadataMocks.useTeamsLabels.mockImplementation(() => ({
+      data: labels,
+      loading: false,
+      error: null
+    }))
+
+    const { rerender, onChange } = renderDropdowns({
+      ...emptyFilter,
+      labelIds: labels.slice(0, labelCap).map((label) => label.id)
+    })
+    openSectionNamed('Labels')
+    clickRow(rowNamed(labelCap))
+    rerender(onChange.mock.calls[0]?.[0] as LinearIssueAttributeFilter)
+    expect(document.body.textContent).toContain('Filtering the most this can carry')
+
+    openSectionNamed('Back')
+    openSectionNamed('Priority')
+    clickRow('Urgent')
+    const withPriority = onChange.mock.calls[1]?.[0] as LinearIssueAttributeFilter
+    rerender(withPriority)
+
+    expect(withPriority.labelIds).toHaveLength(labelCap)
+    openSectionNamed('Back')
+    openSectionNamed('Labels')
+    expect(document.body.textContent).toContain('Filtering the most this can carry')
+  })
+
   // Why: clearing a facet must clear its recorded trim too, or the next selection inherits
   // a warning it never earned.
   it('drops the recorded truncation when the facet is cleared', () => {

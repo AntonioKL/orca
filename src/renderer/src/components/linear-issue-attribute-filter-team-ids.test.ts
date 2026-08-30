@@ -222,6 +222,22 @@ describe('capLinearMetadataIdsAcrossGroups over-subscribed rows', () => {
     expect(isLinearMetadataTruncated(null, ids.slice(0, 100))).toBe(false)
   })
 
+  // Why: `recordLinearMetadataTruncation(['a','b'], [])` is non-null-but-empty, and an empty
+  // record matches an empty facet vacuously — a filter carrying nothing is never truncated.
+  it('never reports truncation for an empty record', () => {
+    expect(isLinearMetadataTruncated([], [])).toBe(false)
+    expect(isLinearMetadataTruncated(recordLinearMetadataTruncation(['a', 'b'], []), [])).toBe(
+      false
+    )
+    // The genuine case is untouched: a real trim still records and still reports.
+    const groups = singleIdGroups(101)
+    const ids = groups.flatMap((group) => group.ids)
+    const capped = capLinearMetadataIdsAcrossGroups(groups, ids, 100)
+    expect(isLinearMetadataTruncated(recordLinearMetadataTruncation(ids, capped), capped)).toBe(
+      true
+    )
+  })
+
   // Why: click order reaches the cap, so the record has to match by set, not by position.
   it('matches a recorded trim whatever order the ids arrive in', () => {
     const groups = singleIdGroups(101)

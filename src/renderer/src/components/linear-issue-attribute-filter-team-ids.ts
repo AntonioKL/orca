@@ -129,7 +129,9 @@ export function isLinearMetadataTruncated(
   record: LinearMetadataTruncationRecord,
   appliedIds: readonly string[]
 ): boolean {
-  if (record === null) {
+  // Why: an empty record matches an empty facet vacuously, and a facet filtering nothing
+  // cannot be under-covering — so no empty record ever reports truncation.
+  if (record === null || record.length === 0) {
     return false
   }
   const applied = new Set(appliedIds)
