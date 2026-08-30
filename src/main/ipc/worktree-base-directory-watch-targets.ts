@@ -17,6 +17,7 @@ import {
 import { isWslUncPath } from '../../shared/wsl-paths'
 import { mapWithConcurrency } from '../../shared/map-with-concurrency'
 import { getSshFilesystemProvider } from '../providers/ssh-filesystem-dispatch'
+import { getWorktreeMirrorDistro } from '../project-runtime-git-options'
 import {
   computeWorkspaceRoot,
   getWorktreePathSettings,
@@ -129,9 +130,10 @@ async function maybeAddBaseTarget(
   targets: Map<string, WorktreeBaseWatchTarget>,
   repo: Repo,
   settings: GlobalSettings,
+  mirrorDistro: string | undefined,
   connectionId?: string
 ): Promise<void> {
-  const pathSettings = getWorktreePathSettings(repo, settings)
+  const pathSettings = getWorktreePathSettings(repo, settings, mirrorDistro)
   const { workspaceRoot, nestWorkspaces } = getBaseWatchLayout(repo, pathSettings, connectionId)
   // Why: WSL UNC roots are unreliable for native watching; avoid project-level polling.
   if (isWslUncPath(workspaceRoot) || isWslUncPath(repo.path)) {
@@ -183,7 +185,8 @@ async function maybeAddBaseTarget(
 
 async function resolveRepoTargets(
   repo: Repo,
-  settings: GlobalSettings
+  settings: GlobalSettings,
+  mirrorDistro: string | undefined
 ): Promise<Map<string, WorktreeBaseWatchTarget>> {
   const targets = new Map<string, WorktreeBaseWatchTarget>()
   if (isFolderRepo(repo)) {
@@ -191,9 +194,9 @@ async function resolveRepoTargets(
   }
   const executionHostId = getRepoExecutionHostId(repo)
   if (executionHostId === LOCAL_EXECUTION_HOST_ID) {
-    await maybeAddBaseTarget(targets, repo, settings)
+    await maybeAddBaseTarget(targets, repo, settings, mirrorDistro)
   } else if (repo.connectionId) {
-    await maybeAddBaseTarget(targets, repo, settings, repo.connectionId)
+    await maybeAddBaseTarget(targets, repo, settings, mirrorDistro, repo.connectionId)
   }
   return targets
 }
@@ -221,7 +224,7 @@ export async function buildWorktreeBaseDirectoryWatchTargets(
   const resolvedRepoTargets = await mapWithConcurrency(
     store.getRepos(),
     WORKTREE_BASE_TARGET_RESOLUTION_CONCURRENCY,
-    (repo) => resolveRepoTargets(repo, settings)
+    (repo) => resolveRepoTargets(repo, settings, getWorktreeMirrorDistro(store, repo))
   )
   const targets = new Map<string, WorktreeBaseWatchTarget>()
   for (const repoTargets of resolvedRepoTargets) {
