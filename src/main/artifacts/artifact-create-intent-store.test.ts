@@ -310,6 +310,26 @@ describe('artifact create intent store', () => {
     ).toThrow(/5 MiB limit/)
   })
 
+  it('rejects a recovery body whose escaped request exceeds the transport budget', async () => {
+    const userDataPath = await createUserDataPath()
+    const content = '\u0000'.repeat(Math.ceil(ARTIFACT_MAX_REQUEST_BYTES / 6))
+    expect(content.length).toBeLessThan(ARTIFACT_MAX_CONTENT_BYTES)
+    expect(
+      artifactWriteRequestByteLength({ sourceKey: '/repo/report.html', ...body, content })
+    ).toBeGreaterThan(ARTIFACT_MAX_REQUEST_BYTES)
+
+    expect(() =>
+      getOrCreateArtifactCreateIntent(
+        'local-profile',
+        userDataPath,
+        '/repo/report.html',
+        scope,
+        'key-a',
+        { ...body, content }
+      )
+    ).toThrow(/supported size/)
+  })
+
   it('rejects an oversized recovery record before reading it', async () => {
     const userDataPath = await createUserDataPath()
     const directory = join(userDataPath, 'profiles', 'local-profile', 'artifact-create-intents')

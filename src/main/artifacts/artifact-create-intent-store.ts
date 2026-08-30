@@ -13,7 +13,8 @@ import { join } from 'node:path'
 import {
   ARTIFACT_MAX_CONTENT_BYTES,
   ARTIFACT_MAX_REQUEST_BYTES,
-  artifactContentByteLength
+  artifactContentByteLength,
+  artifactWriteRequestByteLength
 } from '../../shared/artifacts'
 import {
   bestEffortFsyncDirectorySync,
@@ -127,6 +128,10 @@ function isWriteBody(value: unknown): value is ArtifactWriteBody {
   )
 }
 
+function artifactIntentRequestByteLength(sourceKey: string, body: ArtifactWriteBody): number {
+  return artifactWriteRequestByteLength({ sourceKey, ...body })
+}
+
 function isScope(value: unknown): value is ArtifactShareScope {
   if (!value || typeof value !== 'object') {
     return false
@@ -170,6 +175,9 @@ function readIntent(path: string): ArtifactCreateIntent {
   ) {
     throw new Error('Artifact create recovery record has an unsupported format.')
   }
+  if (artifactIntentRequestByteLength(intent.sourceKey, intent.body) > ARTIFACT_MAX_REQUEST_BYTES) {
+    throw new Error('Artifact create recovery record exceeds the supported size.')
+  }
   return intent as ArtifactCreateIntent
 }
 
@@ -200,6 +208,9 @@ export function getOrCreateArtifactCreateIntent(
 ): ArtifactCreateIntent {
   if (artifactContentByteLength(body.content) > ARTIFACT_MAX_CONTENT_BYTES) {
     throw new Error('Artifact content exceeds the 5 MiB limit.')
+  }
+  if (artifactIntentRequestByteLength(sourceKey, body) > ARTIFACT_MAX_REQUEST_BYTES) {
+    throw new Error('Artifact create recovery record exceeds the supported size.')
   }
   const existing = getArtifactCreateIntent(profileId, userDataPath, sourceKey, scope)
   if (existing) {
