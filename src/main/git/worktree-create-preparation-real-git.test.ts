@@ -14,6 +14,7 @@ import {
   finalizePreparedWorktree,
   prepareWorktreeCreateCheckout
 } from './worktree-create-preparation'
+import { areWorktreePathsEqual } from './worktree-path-comparison'
 
 const tempRoots: string[] = []
 
@@ -98,13 +99,17 @@ describe('prepared worktree creation with real Git', () => {
 
     expect(git(finalPath, ['rev-parse', 'HEAD'])).toBe(latestHead)
     expect(git(finalPath, ['branch', '--show-current'])).toBe('feature/prepared')
-    expect(await readFile(join(finalPath, 'version.txt'), 'utf8')).toBe('two\n')
+    expect((await readFile(join(finalPath, 'version.txt'), 'utf8')).replaceAll('\r\n', '\n')).toBe(
+      'two\n'
+    )
     expect(git(finalPath, ['config', '--get', 'branch.feature/prepared.base'])).toBe(
       'refs/heads/main'
     )
     expect(git(finalPath, ['config', '--get', 'push.autoSetupRemote'])).toBe('true')
-    expect((await listWorktrees(repoPath)).map((worktree) => worktree.path)).toContain(
-      await realpath(finalPath)
-    )
+    const listedWorktrees = await listWorktrees(repoPath)
+    const resolvedFinalPath = await realpath(finalPath)
+    expect(
+      listedWorktrees.some((worktree) => areWorktreePathsEqual(worktree.path, resolvedFinalPath))
+    ).toBe(true)
   })
 })
