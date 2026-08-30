@@ -10,7 +10,11 @@ import {
   writeFileSync
 } from 'node:fs'
 import { join } from 'node:path'
-import { ARTIFACT_MAX_REQUEST_BYTES } from '../../shared/artifacts'
+import {
+  ARTIFACT_MAX_CONTENT_BYTES,
+  ARTIFACT_MAX_REQUEST_BYTES,
+  artifactContentByteLength
+} from '../../shared/artifacts'
 import {
   bestEffortFsyncDirectorySync,
   fsyncFileSync,
@@ -116,6 +120,7 @@ function isWriteBody(value: unknown): value is ArtifactWriteBody {
   const body = value as Partial<ArtifactWriteBody>
   return (
     typeof body.content === 'string' &&
+    artifactContentByteLength(body.content) <= ARTIFACT_MAX_CONTENT_BYTES &&
     (body.contentType === 'text/html' || body.contentType === 'text/markdown') &&
     typeof body.fileName === 'string' &&
     (body.title === undefined || typeof body.title === 'string')
@@ -193,6 +198,9 @@ export function getOrCreateArtifactCreateIntent(
   idempotencyKey: string,
   body: ArtifactWriteBody
 ): ArtifactCreateIntent {
+  if (artifactContentByteLength(body.content) > ARTIFACT_MAX_CONTENT_BYTES) {
+    throw new Error('Artifact content exceeds the 5 MiB limit.')
+  }
   const existing = getArtifactCreateIntent(profileId, userDataPath, sourceKey, scope)
   if (existing) {
     return existing
