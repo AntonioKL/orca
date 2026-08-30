@@ -66,6 +66,7 @@ import {
   appendNormalizedToTailBuffer,
   buildPreview,
   OrcaRuntimeService,
+  RESOLVED_WORKTREE_REPO_CONCURRENCY,
   resolveWorktreeScanCacheTtlMs,
   type RuntimeTerminalAgentStatusEvent
 } from './orca-runtime'
@@ -43122,6 +43123,56 @@ describe('OrcaRuntimeService', () => {
       repos.map((repo) => `${repo.path}/main`)
     )
     expect(listWorktrees).toHaveBeenCalledTimes(15)
+  })
+
+  it('bounds concurrent fleet worktree resolution across repositories', async () => {
+    const repoCount = RESOLVED_WORKTREE_REPO_CONCURRENCY + 4
+    const baseRepo = store.getRepos()[0]
+    const repos = Array.from({ length: repoCount }, (_, index) => ({
+      ...baseRepo,
+      id: `fleet-repo-${index + 1}`,
+      path: `/tmp/fleet-repo-${index + 1}`,
+      displayName: `fleet-repo-${index + 1}`
+    }))
+    let activeScans = 0
+    let maxActiveScans = 0
+    let startedScanCount = 0
+    const releaseScans = deferred<void>()
+    vi.mocked(scanLocalRepoWorktreesForResolutionMock).mockReset()
+    vi.mocked(scanLocalRepoWorktreesForResolutionMock).mockImplementation(
+      async (repoPath: string) => {
+        activeScans += 1
+        maxActiveScans = Math.max(maxActiveScans, activeScans)
+        startedScanCount += 1
+        await releaseScans.promise
+        activeScans -= 1
+        return { ok: true, worktrees: [makeWorktreeInfo(`${repoPath}/main`)] }
+      }
+    )
+    const runtime = new OrcaRuntimeService({
+      ...store,
+      getRepos: () => repos,
+      getRepo: (id: string) => repos.find((repo) => repo.id === id),
+      getAllWorktreeMeta: () => ({}),
+      getWorktreeMeta: () => undefined
+    } as never)
+    const listing = runtime.listManagedWorktrees()
+
+    try {
+      await vi.waitFor(() => expect(startedScanCount).toBe(RESOLVED_WORKTREE_REPO_CONCURRENCY), {
+        timeout: 1000
+      })
+      expect(activeScans).toBe(RESOLVED_WORKTREE_REPO_CONCURRENCY)
+      expect(startedScanCount).toBe(RESOLVED_WORKTREE_REPO_CONCURRENCY)
+    } finally {
+      releaseScans.resolve()
+    }
+
+    const result = await listing
+    expect(maxActiveScans).toBe(RESOLVED_WORKTREE_REPO_CONCURRENCY)
+    expect(result.worktrees.map((worktree) => worktree.path)).toEqual(
+      repos.map((repo) => `${repo.path}/main`)
+    )
   })
 
   it('worktree scan cache: shares one in-flight repo scan across concurrent consumers', async () => {

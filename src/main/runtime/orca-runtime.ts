@@ -985,6 +985,7 @@ import {
 import { getRepoOwnedWorktreeMeta } from '../worktree-metadata-ownership'
 import { readWorktreeMetaForHost } from '../persistence/host-qualified-worktree-meta'
 import { withTimeout } from '../../shared/promise-timeout-fallback'
+import { mapWithConcurrency } from '../../shared/map-with-concurrency'
 import {
   getLocalWorktreePathAccess,
   removeLocalWorktreePath,
@@ -34487,17 +34488,17 @@ export class OrcaRuntimeService {
       ])
     )
     const deps = this.repoWorktreeRowDeps()
-    const perRepoWorktrees = await Promise.all(
-      repos.map(
-        async (repo) =>
-          await resolveRepoWorktreeRows(
-            deps,
-            repo,
-            metaById,
-            projectRuntimeByRepoId,
-            repoOwnerCounts.get(repo.id) ?? 1
-          )
-      )
+    const perRepoWorktrees = await mapWithConcurrency(
+      repos,
+      RESOLVED_WORKTREE_REPO_CONCURRENCY,
+      async (repo) =>
+        await resolveRepoWorktreeRows(
+          deps,
+          repo,
+          metaById,
+          projectRuntimeByRepoId,
+          repoOwnerCounts.get(repo.id) ?? 1
+        )
     )
     const lineageById = this.store?.getAllWorktreeLineage?.() ?? {}
     const worktrees = perRepoWorktrees.flatMap((rows) =>
@@ -41391,6 +41392,9 @@ const DEFAULT_WORKTREE_LIST_LIMIT = 200
 const DEFAULT_WORKTREE_PS_LIMIT = 200
 const DISCONNECTED_PTY_RECORD_MAX = 128
 const RESOLVED_WORKTREE_CACHE_TTL_MS = 1000
+// Why: a resolved fleet snapshot can touch every local, WSL, and SSH repo; keep
+// Git/provider subprocesses bounded so a large workspace does not starve the UI.
+export const RESOLVED_WORKTREE_REPO_CONCURRENCY = 8
 const WORKTREE_SCAN_CACHE_TTL_MS = 30_000
 // Why: agent-scratch repos don't need 30s freshness — the steady-state scan
 // fan-out was measured at ~128 git execs/min on real installs, mostly against
