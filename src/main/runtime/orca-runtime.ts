@@ -374,7 +374,10 @@ import type {
   ClaudeRateLimitAccountsState,
   CodexRateLimitAccountsState
 } from '../../shared/managed-account-types'
-import type { PersistedUIState } from '../../shared/persisted-ui-state-types'
+import type {
+  PersistedUIState,
+  PersistedUIStateUpdate
+} from '../../shared/persisted-ui-state-types'
 import type { MemorySnapshot, StatsSummary } from '../../shared/process-stats-types'
 import type {
   NestedRepoScanResult,
@@ -4192,7 +4195,7 @@ export class OrcaRuntimeService {
     return this.store.getUI()
   }
 
-  updateUIState(updates: Partial<PersistedUIState>): PersistedUIState {
+  updateUIState(updates: PersistedUIStateUpdate): PersistedUIState {
     if (!this.store?.getUI || !this.store.updateUI) {
       throw new Error('runtime_unavailable')
     }

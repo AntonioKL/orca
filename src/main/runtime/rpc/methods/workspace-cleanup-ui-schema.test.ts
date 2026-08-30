@@ -23,6 +23,12 @@ describe('workspaceCleanup client-ui schema', () => {
     expect(WorkspaceCleanup.parse({ dismissals: {} })).toEqual({ dismissals: {} })
   })
 
+  it('accepts a browse-only update so its writer does not replace dismissals', () => {
+    const browse = createDefaultWorkspaceCleanupBrowseState()
+
+    expect(WorkspaceCleanup.parse({ browse })).toEqual({ browse })
+  })
+
   it('preserves the optional host qualifier on a dismissal', () => {
     const qualified = { ...DISMISSAL, executionHostId: 'ssh:ssh-1' }
     const parsed = WorkspaceCleanup.parse({ dismissals: { 'ssh:ssh-1\0wt-1': qualified } })
