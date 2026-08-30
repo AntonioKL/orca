@@ -486,11 +486,19 @@ describe('splitWebRuntimeTerminal', () => {
       splitWebRuntimeTerminal('remote:web-env-1@@terminal-1', 'vertical', 'keyboard', SPLIT_SOURCE)
     expect(split()).toBe(true)
     await vi.waitFor(() => expect(splitResolvers).toHaveLength(1))
-    mocks.getState.mockReturnValue({
-      ...makeSplitSourceState('tab-1'),
-      terminalLayoutsByTabId: {}
-    })
-    expect(split()).toBe(true)
+    const staleSource = {
+      worktreeId: SPLIT_WORKTREE_ID,
+      tabId: toWebTerminalSurfaceTabId('tab-missing'),
+      leafId: 'leaf-missing'
+    }
+    expect(
+      splitWebRuntimeTerminal(
+        'remote:web-env-1@@terminal-missing',
+        'vertical',
+        'keyboard',
+        staleSource
+      )
+    ).toBe(true)
     await vi.waitFor(() => expect(splitResolvers).toHaveLength(2))
     splitResolvers[0]?.(makeSplitResult('leaf-a'))
     await vi.waitFor(() =>

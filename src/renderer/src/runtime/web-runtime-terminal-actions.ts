@@ -50,8 +50,9 @@ export function splitWebRuntimeTerminal(
   )
   const intentOwner = captureWebSessionIntentOwner(environmentId)
   const focusTarget = source ? captureWebRuntimeSplitFocusTarget(ptyId, source) : null
-  const focusRequest = focusTarget
-    ? beginWebRuntimeSplitFocusRequest(intentOwner, focusTarget.worktreeId)
+  // Advance the fence for every source-bearing gesture, even when its pane metadata is stale.
+  const focusRequest = source
+    ? beginWebRuntimeSplitFocusRequest(intentOwner, source.worktreeId)
     : null
   void captureRuntimeEnvironmentCall(
     environmentId,
