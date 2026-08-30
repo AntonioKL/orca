@@ -26793,38 +26793,32 @@ export class OrcaRuntimeService {
     let effectiveSanitizedName = sanitizedName
     // Username and base resolution are independent read-only probes. Starting
     // both before awaiting removes one serial git/config round trip from create.
-    const [username, baseBranch] = await Promise.all([
+    const usernamePromise =
       !args.branchNameOverride && settings.branchPrefix === 'git-username'
         ? resolveLocalGitUsername(repo.path)
-        : Promise.resolve(''),
-      resolveWorktreeCreateBase({
-        requestedBaseBranch: args.baseBranch,
-        repoWorktreeBaseRef: repo.worktreeBaseRef,
-        resolveDefaultBaseRef: () =>
-          hasLocalWorktreeGitOptions
-            ? resolveDefaultBaseRefWithLocalGit(localGitExecOptions)
-            : getBaseRefDefault(repo.path),
-        isBaseUsable: async (baseBranchCandidate) => {
-          const remoteTrackingBase = await this.resolveRemoteTrackingBase(
-            repo.path,
-            baseBranchCandidate,
-            ...localWorktreeGitOptionArgs
-          )
-          if (remoteTrackingBase) {
-            if (
-              await this.hasRemoteTrackingRef(
-                repo.path,
-                remoteTrackingBase,
-                ...localWorktreeGitOptionArgs
-              )
-            ) {
-              return true
-            }
-            return hasLocalWorktreeBaseRef(
+        : Promise.resolve('')
+    const baseBranchPromise = resolveWorktreeCreateBase({
+      requestedBaseBranch: args.baseBranch,
+      repoWorktreeBaseRef: repo.worktreeBaseRef,
+      resolveDefaultBaseRef: () =>
+        hasLocalWorktreeGitOptions
+          ? resolveDefaultBaseRefWithLocalGit(localGitExecOptions)
+          : getBaseRefDefault(repo.path),
+      isBaseUsable: async (baseBranchCandidate) => {
+        const remoteTrackingBase = await this.resolveRemoteTrackingBase(
+          repo.path,
+          baseBranchCandidate,
+          ...localWorktreeGitOptionArgs
+        )
+        if (remoteTrackingBase) {
+          if (
+            await this.hasRemoteTrackingRef(
               repo.path,
-              baseBranchCandidate,
-              hasLocalWorktreeGitOptions ? localWorktreeGitOptions : {}
+              remoteTrackingBase,
+              ...localWorktreeGitOptionArgs
             )
+          ) {
+            return true
           }
           return hasLocalWorktreeBaseRef(
             repo.path,
@@ -26832,8 +26826,14 @@ export class OrcaRuntimeService {
             hasLocalWorktreeGitOptions ? localWorktreeGitOptions : {}
           )
         }
-      })
-    ])
+        return hasLocalWorktreeBaseRef(
+          repo.path,
+          baseBranchCandidate,
+          hasLocalWorktreeGitOptions ? localWorktreeGitOptions : {}
+        )
+      }
+    })
+    const [username, baseBranch] = await Promise.all([usernamePromise, baseBranchPromise])
     if (!baseBranch) {
       // Why: a null default means no suitable ref exists; fail clearly instead
       // of handing Git a fabricated origin/main ref.

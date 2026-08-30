@@ -2018,42 +2018,42 @@ export async function createLocalWorktree(
   // Why: explicit branches and non-username prefix modes never consume this; skipping the probe preserves the exact generated branch name.
   // Username and base resolution are independent read-only probes. Starting
   // both before awaiting removes one serial git/config round trip from create.
-  const [username, resolvedBaseBranch] = await Promise.all([
+  const usernamePromise =
     !args.branchNameOverride && settings.branchPrefix === 'git-username'
       ? resolveLocalGitUsername(repo.path)
-      : Promise.resolve(''),
-    resolveWorktreeCreateBase({
-      requestedBaseBranch: args.baseBranch,
-      repoWorktreeBaseRef: repo.worktreeBaseRef,
-      resolveDefaultBaseRef: () => resolveDefaultBaseRefWithLocalGit(localGitExecOptions),
-      isBaseUsable: async (baseBranchCandidate) => {
-        if (runtime) {
-          const remoteTrackingBase = await runtime.resolveRemoteTrackingBase(
+      : Promise.resolve('')
+  const baseBranchPromise = resolveWorktreeCreateBase({
+    requestedBaseBranch: args.baseBranch,
+    repoWorktreeBaseRef: repo.worktreeBaseRef,
+    resolveDefaultBaseRef: () => resolveDefaultBaseRefWithLocalGit(localGitExecOptions),
+    isBaseUsable: async (baseBranchCandidate) => {
+      if (runtime) {
+        const remoteTrackingBase = await runtime.resolveRemoteTrackingBase(
+          repo.path,
+          baseBranchCandidate,
+          ...localWorktreeGitOptionArgs
+        )
+        if (remoteTrackingBase) {
+          if (
+            await runtime.hasRemoteTrackingRef(
+              repo.path,
+              remoteTrackingBase,
+              ...localWorktreeGitOptionArgs
+            )
+          ) {
+            return true
+          }
+          return hasLocalWorktreeBaseRefWithOptions(
             repo.path,
             baseBranchCandidate,
-            ...localWorktreeGitOptionArgs
+            localGitExecOptions
           )
-          if (remoteTrackingBase) {
-            if (
-              await runtime.hasRemoteTrackingRef(
-                repo.path,
-                remoteTrackingBase,
-                ...localWorktreeGitOptionArgs
-              )
-            ) {
-              return true
-            }
-            return hasLocalWorktreeBaseRefWithOptions(
-              repo.path,
-              baseBranchCandidate,
-              localGitExecOptions
-            )
-          }
         }
-        return hasLocalWorktreeBaseRefWithOptions(repo.path, baseBranchCandidate, localGitExecOptions)
       }
-    })
-  ])
+      return hasLocalWorktreeBaseRefWithOptions(repo.path, baseBranchCandidate, localGitExecOptions)
+    }
+  })
+  const [username, resolvedBaseBranch] = await Promise.all([usernamePromise, baseBranchPromise])
   let baseBranch = resolvedBaseBranch
   if (!baseBranch) {
     // Why: no default base resolved; fail clearly rather than pass a hardcoded non-existent ref to git worktree add (opaque error) so the UI can prompt.
@@ -2079,11 +2079,7 @@ export async function createLocalWorktree(
     )
     if (remoteTrackingBase) {
       const [hasRemoteTrackingBaseRef, hasNamedLocalBaseRef] = await Promise.all([
-        runtime.hasRemoteTrackingRef(
-          repo.path,
-          remoteTrackingBase,
-          ...localWorktreeGitOptionArgs
-        ),
+        runtime.hasRemoteTrackingRef(repo.path, remoteTrackingBase, ...localWorktreeGitOptionArgs),
         hasLocalWorktreeBaseRefWithOptions(repo.path, baseBranch, localGitExecOptions)
       ])
       const hasFallbackLocalBaseRef =
