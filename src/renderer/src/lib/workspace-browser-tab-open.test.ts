@@ -8,6 +8,7 @@ import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../shared/constants'
 import { BROWSER_SCREENCAST_RUNTIME_CAPABILITY } from '../../../shared/protocol-version'
 import {
   canOpenWorkspaceBrowserTabOnRuntime,
+  canOpenWorkspaceBrowserTabOnSsh,
   openWorkspaceBrowserTab
 } from './workspace-browser-tab-open'
 
@@ -76,11 +77,16 @@ describe('openWorkspaceBrowserTab', () => {
       defaultBrowserSessionProfileIdByHostId: { [sshHost]: 'ssh-profile' }
     }
 
+    expect(canOpenWorkspaceBrowserTabOnSsh(mocks.state as never, WORKSPACE_ID, 'ssh-target')).toBe(
+      true
+    )
+
     await openWorkspaceBrowserTab({
       workspaceId: WORKSPACE_ID,
       targetGroupId: 'group-1',
       url: 'https://www.google.com/search?q=private%20query',
-      intent: { kind: 'search', engine: 'google' }
+      intent: { kind: 'search', engine: 'google' },
+      expectedSshConnectionId: 'ssh-target'
     })
 
     expect(createBrowserTab).toHaveBeenCalledWith(
@@ -96,6 +102,58 @@ describe('openWorkspaceBrowserTab', () => {
       }
     )
     expect(mocks.createRemote).not.toHaveBeenCalled()
+  })
+
+  it('creates a client tab without activating it when requested', async () => {
+    const createBrowserTab = vi.fn()
+    const sshHost = toSshExecutionHostId('ssh-target')
+    mocks.state = {
+      ...ownerState(sshHost),
+      createBrowserTab,
+      defaultBrowserSessionProfileId: 'focused-profile',
+      defaultBrowserSessionProfileIdByHostId: { [sshHost]: 'ssh-profile' }
+    }
+
+    await openWorkspaceBrowserTab({
+      workspaceId: WORKSPACE_ID,
+      url: 'https://github.com/acme/orca/pull/456',
+      intent: { kind: 'url' },
+      focusOnCreate: false,
+      selectWorktree: false
+    })
+
+    expect(createBrowserTab).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      'https://github.com/acme/orca/pull/456',
+      expect.objectContaining({ activate: false })
+    )
+  })
+
+  it('fails closed when the asserted SSH browser route is opted out or belongs to another host', async () => {
+    const sshHost = toSshExecutionHostId('ssh-target')
+    mocks.state = {
+      ...ownerState(sshHost),
+      settings: { browserSshWorkspaceRoutingDisabledTargetIds: ['ssh-target'] },
+      createBrowserTab: vi.fn(),
+      defaultBrowserSessionProfileId: 'focused-profile',
+      defaultBrowserSessionProfileIdByHostId: { [sshHost]: 'ssh-profile' }
+    }
+
+    expect(canOpenWorkspaceBrowserTabOnSsh(mocks.state as never, WORKSPACE_ID, 'ssh-target')).toBe(
+      false
+    )
+    expect(canOpenWorkspaceBrowserTabOnSsh(mocks.state as never, WORKSPACE_ID, 'ssh-other')).toBe(
+      false
+    )
+    await expect(
+      openWorkspaceBrowserTab({
+        workspaceId: WORKSPACE_ID,
+        url: 'http://0.0.0.0:8000/',
+        intent: { kind: 'url' },
+        expectedSshConnectionId: 'ssh-target'
+      })
+    ).rejects.toThrow('Unable to open URL.')
+    expect(mocks.state.createBrowserTab).not.toHaveBeenCalled()
   })
 
   it('surfaces the opening workspace and titles runtime-owned URL tabs by target', async () => {
@@ -129,6 +187,32 @@ describe('openWorkspaceBrowserTab', () => {
       failureLogMode: 'operation-only'
     })
     expect(createBrowserTab).not.toHaveBeenCalled()
+  })
+
+  it('stages a runtime tab without selecting the worktree or focusing the browser', async () => {
+    mocks.state = {
+      ...ownerState(toRuntimeExecutionHostId('hub-a')),
+      ...browserCapableRuntime('hub-a'),
+      createBrowserTab: vi.fn(),
+      defaultBrowserSessionProfileId: 'client-profile',
+      defaultBrowserSessionProfileIdByHostId: {}
+    }
+
+    await openWorkspaceBrowserTab({
+      workspaceId: WORKSPACE_ID,
+      url: 'https://gitlab.com/acme/orca/-/merge_requests/77',
+      intent: { kind: 'url' },
+      focusOnCreate: false,
+      selectWorktree: false
+    })
+
+    expect(mocks.createRemote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        focusOnCreate: false,
+        selectWorktree: false,
+        url: 'https://gitlab.com/acme/orca/-/merge_requests/77'
+      })
+    )
   })
 
   it('waits for host registration before reconciling an asserted runtime link', async () => {

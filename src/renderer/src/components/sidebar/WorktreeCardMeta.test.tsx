@@ -130,6 +130,7 @@ describe('WorktreeCardDetailsHover', () => {
         onEditIssue={vi.fn()}
         onEditComment={vi.fn()}
         onOpenReviewInOrca={vi.fn()}
+        onOpenReviewInBrowser={vi.fn()}
         onUnlinkReview={vi.fn()}
       >
         <span>Linked PR</span>
@@ -147,10 +148,12 @@ describe('WorktreeCardDetailsHover', () => {
     expect(markup).toContain(
       'Orca will hide PR #456 details for this workspace. The PR and branch on GitHub won’t be changed.'
     )
+    expect(markup).toContain('Open in Orca browser')
     expect(moreActionsIndex).toBeLessThan(openInOrcaIndex)
     expect(openInOrcaIndex).toBeLessThan(viewOnGitHubIndex)
-    expect(markup).not.toContain('aria-label="Unlink PR from workspace"')
+    expect(markup.indexOf('Open in Orca browser')).toBeLessThan(markup.indexOf('Copy link'))
     expect(markup.indexOf('Copy link')).toBeLessThan(markup.indexOf('Unlink PR from workspace'))
+    expect(markup).not.toContain('aria-label="Unlink PR from workspace"')
   })
 
   it('puts issue copy menu before edit and open actions and keeps GitHub last', () => {
@@ -169,6 +172,7 @@ describe('WorktreeCardDetailsHover', () => {
         onEditIssue={vi.fn()}
         onEditComment={vi.fn()}
         onOpenGitHubIssueInOrca={vi.fn()}
+        onOpenIssueInBrowser={vi.fn()}
       >
         <span>Linked issue</span>
       </WorktreeCardDetailsHover>
@@ -182,6 +186,8 @@ describe('WorktreeCardDetailsHover', () => {
 
     expect(moreActionsIndex).toBeGreaterThan(-1)
     expect(copyLinkIndex).toBeGreaterThan(-1)
+    expect(markup).toContain('Open in Orca browser')
+    expect(markup.indexOf('Open in Orca browser')).toBeLessThan(copyLinkIndex)
     expect(editIssueIndex).toBeGreaterThan(-1)
     expect(moreActionsIndex).toBeLessThan(editIssueIndex)
     expect(copyLinkIndex).toBeLessThan(editIssueIndex)
@@ -206,6 +212,7 @@ describe('WorktreeCardDetailsHover', () => {
         onEditIssue={vi.fn()}
         onEditComment={vi.fn()}
         onUnlinkReview={vi.fn()}
+        onOpenReviewInBrowser={vi.fn()}
       >
         <span>Linked MR</span>
       </WorktreeCardDetailsHover>
@@ -217,6 +224,53 @@ describe('WorktreeCardDetailsHover', () => {
       'Orca will hide MR !77 details for this workspace. The MR and branch on GitLab won’t be changed.'
     )
     expect(markup).toContain('View on GitLab')
+    expect(markup).toContain('Open in Orca browser')
+  })
+
+  it('hides the embedded-browser action when a linked review has no URL', () => {
+    const markup = renderToStaticMarkup(
+      <WorktreeCardDetailsHover
+        issue={null}
+        linearIssue={null}
+        review={{
+          provider: 'github',
+          number: 456,
+          title: 'Loading PR...',
+          state: 'open'
+        }}
+        comment={null}
+        onOpenReviewInBrowser={vi.fn()}
+      >
+        <span>Linked PR</span>
+      </WorktreeCardDetailsHover>
+    )
+
+    expect(markup).not.toContain('Open in Orca browser')
+  })
+
+  it('keeps the embedded-browser action provider-neutral for unsupported review URLs', () => {
+    const markup = renderToStaticMarkup(
+      <WorktreeCardDetailsHover
+        issue={null}
+        linearIssue={null}
+        review={{
+          provider: 'unsupported',
+          number: 12,
+          title: 'Review from an unsupported provider',
+          state: 'open',
+          url: 'https://code.example.test/reviews/12',
+          status: 'neutral',
+          updatedAt: '2026-05-17T00:00:00.000Z',
+          mergeable: 'UNKNOWN'
+        }}
+        comment={null}
+        onOpenReviewInBrowser={vi.fn()}
+      >
+        <span>Linked review</span>
+      </WorktreeCardDetailsHover>
+    )
+
+    expect(markup).toContain('Open in Orca browser')
   })
 
   it('displays Linear issue details with link', () => {
