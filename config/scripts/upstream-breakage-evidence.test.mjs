@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -9,10 +10,20 @@ import {
   classifyChecks,
   compareVerdict,
   evidenceSpanHours,
+  isWitnessingCheck,
   mainHealthVerdict,
   normalizeChecks,
   selectWitnessesInWindow
 } from './upstream-breakage-evidence.mjs'
+
+// Verbatim GitHub check-run payloads, not hand-written shapes: the bug these pin
+// is that real path-filtered PRs post three green meta jobs and nothing else.
+const FIXTURE = JSON.parse(
+  readFileSync(new URL('./upstream-breakage-check-runs.fixture.json', import.meta.url), 'utf8')
+)
+const DOCS_ONLY = FIXTURE.prs['17002']
+const MOBILE_ONLY = FIXTURE.prs['16917']
+const FULL_CI = FIXTURE.prs['17358']
 
 const HOUR = 3600 * 1000
 const T0 = Date.parse('2026-08-30T03:00:00Z')
@@ -26,6 +37,23 @@ function check(name, conclusion, extra = {}) {
     completedAt: new Date(T0).toISOString(),
     ...extra
   }
+}
+
+// Witnesses built from the captured payloads, stacked the way the probe stacks
+// them, so the verdict path under test is the one the CLI runs.
+function realWitnesses(entries) {
+  const stacks = buildStacks(entries.map((entry) => entry.pr))
+  const stackOf = new Map()
+  for (const [index, members] of stacks.entries()) {
+    for (const number of members) {
+      stackOf.set(number, `stack-${index + 1}`)
+    }
+  }
+  return entries.map((entry) => ({
+    ref: `#${entry.pr.number}`,
+    stackId: stackOf.get(entry.pr.number),
+    ...normalizeChecks(entry.runs)
+  }))
 }
 
 // A usable witness with the given failures, all other named checks green.
@@ -117,6 +145,47 @@ describe('normalizeChecks', () => {
     expect(result.failures).toEqual(['typecheck'])
   })
 
+  // The bug: `#17002` is a docs-only PR and `#16917` a mobile-only one. Both
+  // path-filter every lane in pr.yml away, and both still post three green
+  // meta jobs — the path classifier, the root-directory guard and the LoC
+  // counter. Counting those as a witness is how the probe reported `clean` for a
+  // window in which no test, typecheck or static-analysis lane had run at all.
+  it('is not a witness when only the always-on meta jobs ran (docs-only PR #17002)', () => {
+    const result = normalizeChecks(DOCS_ONLY.runs)
+    expect(result.incomplete).toBe(0)
+    expect(result.ran).toEqual([
+      'detect code-relevant changes',
+      'root directory guard',
+      'test vs non-test LoC'
+    ])
+    expect(result.witnessing).toEqual([])
+    expect(result.usable).toBe(false)
+  })
+
+  it('is not a witness when only the always-on meta jobs ran (mobile-only PR #16917)', () => {
+    const result = normalizeChecks(MOBILE_ONLY.runs)
+    expect(result.witnessing).toEqual([])
+    expect(result.usable).toBe(false)
+  })
+
+  it('names the checks it refused to treat as witnesses rather than dropping them', () => {
+    expect(normalizeChecks(DOCS_ONLY.runs).excluded.nonWitnessing).toEqual([
+      'detect code-relevant changes',
+      'root directory guard',
+      'test vs non-test LoC'
+    ])
+  })
+
+  // Positive control for the two above: the same gate on a PR whose lanes really
+  // ran leaves it usable, so `usable: false` is the meta jobs, not the gate.
+  it('is a witness when the real lanes ran (full-CI PR #17358)', () => {
+    const result = normalizeChecks(FULL_CI.runs)
+    expect(result.usable).toBe(true)
+    expect(result.witnessing).toContain('typecheck')
+    expect(result.witnessing).toContain('static analysis')
+    expect(result.witnessing).toContain('test / tests node 24 2/8')
+  })
+
   it('reports the latest completion time it saw', () => {
     const later = new Date(T0 + HOUR).toISOString()
     const result = normalizeChecks([
@@ -124,6 +193,46 @@ describe('normalizeChecks', () => {
       check('static analysis', 'success', { completedAt: later })
     ])
     expect(result.completedAt).toBe(later)
+  })
+})
+
+describe('isWitnessingCheck', () => {
+  it('counts the lanes that build, type-check or run the suite', () => {
+    for (const name of [
+      'typecheck',
+      'static analysis',
+      'test',
+      'test / tests node 24 2/8',
+      'package',
+      'package (windows)',
+      'e2e',
+      'e2e / e2e 3-of-14',
+      'shell contracts',
+      'Git compatibility',
+      'cross-version wire compatibility',
+      'managed hooks on Node 18'
+    ]) {
+      expect(isWitnessingCheck(name)).toBe(true)
+    }
+  })
+
+  it('does not count a job that stays green on a broken main', () => {
+    for (const name of [
+      'detect code-relevant changes',
+      'root directory guard',
+      'test vs non-test LoC',
+      'track-community-pr',
+      'detect changed e2e specs',
+      'e2e / changed e2e specs'
+    ]) {
+      expect(isWitnessingCheck(name)).toBe(false)
+    }
+  })
+
+  // An unrecognised name costs a witness (verdict degrades to `unknown`) instead
+  // of buying one, which is the whole reason this is an allowlist.
+  it('does not count a name it has never seen', () => {
+    expect(isWitnessingCheck('some future bot check')).toBe(false)
   })
 })
 
@@ -152,6 +261,33 @@ describe('buildStacks', () => {
       { number: 1, headRefName: 'a', baseRefName: 'main' }
     ])
     expect(stacks).toEqual([[1, 2, 3]])
+  })
+
+  // The bug: grouping only by *listed* parents counted these as two independent
+  // stacks, so the corroboration `broken` and `upstream` rest on was one witness
+  // counted twice. Both are real open PRs on a base branch that has no PR here.
+  it('counts two PRs on one unlisted parent branch as a single stack', () => {
+    const siblings = FIXTURE.siblings.filter(
+      (pr) => pr.baseRefName === 'brennanb2025/claude-structured-mobile'
+    )
+    expect(siblings.map((pr) => pr.number).sort((a, b) => a - b)).toEqual([15356, 15657])
+    expect(siblings.some((pr) => pr.headRefName === siblings[0].baseRefName)).toBe(false)
+    expect(buildStacks(siblings)).toEqual([[15356, 15657]])
+  })
+
+  it('counts three PRs on one unlisted parent branch as a single stack', () => {
+    const siblings = FIXTURE.siblings.filter(
+      (pr) => pr.baseRefName === 'brennanb2025/probe-liveness-coercion-r1'
+    )
+    expect(buildStacks(siblings)).toEqual([[17044, 17058, 17074]])
+  })
+
+  it('still separates two PRs on different unlisted parent branches', () => {
+    const stacks = buildStacks([
+      { number: 1, headRefName: 'a', baseRefName: 'parent-one' },
+      { number: 2, headRefName: 'b', baseRefName: 'parent-two' }
+    ])
+    expect(stacks).toEqual([[1], [2]])
   })
 
   it('keeps two separate chains separate', () => {
@@ -359,6 +495,20 @@ describe('mainHealthVerdict', () => {
       witness('#2', 's2', 10, [], ['typecheck'])
     ])
     expect(mainHealthVerdict(classification, T0 + 5 * 60 * 1000).verdict).toBe(VERDICT.clean)
+  })
+
+  // End-to-end on the payload that reproduced this: two real merged PRs, 2.2h
+  // apart, in two independent stacks, on each of which nothing but the three
+  // always-on meta jobs ran. Before the witnessing-lane gate this returned
+  // `clean` — a green verdict for a window in which nothing was tested.
+  it('answers unknown, not clean, when no witness ran a lane that exercises the tree', () => {
+    const witnesses = realWitnesses([DOCS_ONLY, MOBILE_ONLY])
+    const classification = classifyChecks(witnesses)
+    expect(classification.independentStacks).toBe(0)
+    const verdict = mainHealthVerdict(classification, Date.parse(DOCS_ONLY.runs[0].completedAt))
+    expect(verdict.verdict).not.toBe(VERDICT.clean)
+    expect(verdict.verdict).toBe(VERDICT.unknown)
+    expect(verdict.why).toContain('exercises the tree')
   })
 
   it('needs at least the documented number of witnesses', () => {

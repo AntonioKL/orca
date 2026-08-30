@@ -116,9 +116,12 @@ function attachStacks(witnesses) {
 
 function describeWitness(w) {
   if (!w.usable) {
-    return w.incomplete > 0
-      ? `no verdict (${w.incomplete} check(s) not completed)`
-      : 'no verdict (nothing ran; path filters skipped every job)'
+    if (w.incomplete > 0) {
+      return `no verdict (${w.incomplete} check(s) not completed)`
+    }
+    return w.ran.length === 0
+      ? 'no verdict (nothing ran; path filters skipped every job)'
+      : `no verdict (no lane exercised the tree; only ${w.ran.join(', ')} ran)`
   }
   return w.failures.length === 0
     ? `green (${w.ran.length} checks ran)`
@@ -140,7 +143,10 @@ function printWitnesses(witnesses) {
       ...new Set([
         ...w.excluded.rollup.map((n) => `${n} (roll-up)`),
         ...w.excluded.knownFalse.map((n) => `${n} (known-false red)`),
-        ...w.excluded.foreignApp.map((n) => `${n} (third-party app)`)
+        ...w.excluded.foreignApp.map((n) => `${n} (third-party app)`),
+        // Printed so a renamed lane that dropped out of the witnessing list is
+        // visible rather than quietly costing the run its evidence.
+        ...(w.excluded.nonWitnessing ?? []).map((n) => `${n} (does not exercise the tree)`)
       ])
     ]
     if (dropped.length > 0) {

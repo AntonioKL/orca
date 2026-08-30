@@ -58,8 +58,17 @@ a list of PRs you name.
 
 ## How it decides
 
-Every PR whose CI ran in the window is a **witness**. For each check name the
-probe looks at when it was red and when it was green:
+Every PR on which **a lane that actually executes the tree** ran in the window is
+a **witness**. That qualification is the whole load-bearing part: a path-filtered
+PR — docs-only, mobile-only — skips every lane in `pr.yml` and still posts three
+green jobs (the path classifier, the root-directory guard and the LoC counter).
+Those stay green on a `main` that is entirely broken, so a PR carrying only them
+witnessed nothing and the probe refuses to count it. The list of qualifying lanes
+is an allowlist in `upstream-breakage-evidence.mjs`: a name it does not recognise
+costs a witness and pushes the verdict toward `unknown`, rather than buying one
+and pushing it toward `clean`. Every unrecognised name is printed on each run.
+
+For each check name the probe then looks at when it was red and when it was green:
 
 | Shape                                                     | Meaning                                                                              |
 | --------------------------------------------------------- | ------------------------------------------------------------------------------------ |
@@ -70,7 +79,10 @@ probe looks at when it was red and when it was green:
 
 Two PRs in the same stack share a diff, so they count as one witness, not two.
 The probe reconstructs stacks from branch parentage: a PR whose base branch is
-another PR's head branch is stacked on it.
+another PR's head branch is stacked on it, **and PRs that share one non-trunk base
+branch are one stack even when that branch has no PR of its own** — otherwise two
+children of an unlisted parent corroborate each other, which is one witness
+counted twice.
 
 The output for the real incident looks like this — the exact window, named:
 
@@ -83,7 +95,8 @@ test / tests node 24 2/8  — red 04:09Z..04:23Z (broke after 04:05Z; fixed by 0
 The probe answers `broken`, `clean`, or `unknown`, and it will not say `clean`
 without positive evidence. It answers `unknown` when:
 
-- fewer than two witnesses have a usable check set;
+- fewer than two PRs ran a lane that exercises the tree — including the case where
+  every PR in the window was path-filtered down to its meta jobs;
 - the witnesses are all in one stack, so they corroborate nothing;
 - the witness checks are spread over more than a day, so they ran against
   different `main`s and their agreement means nothing;
@@ -106,8 +119,14 @@ Printed on every run, never dropped silently:
   commit. Counting them makes every window look broken. `--include-known-false`
   overrides this.
 - **Third-party app checks** (review bots) say nothing about the tree.
-- **Skipped checks** are not passes. A PR whose jobs were all path-filtered away
-  is not a witness.
+- **Skipped checks** are not passes, and neither are the always-on jobs that never
+  execute the tree — `detect code-relevant changes`, `root directory guard`,
+  `test vs non-test LoC`, `track-community-pr`, and the e2e spec-list classifiers.
+  A PR left with only those is not a witness at all, so a window made up of
+  path-filtered PRs reads `unknown`, not `clean`.
+- **`verify`** is also the job name of the mobile workflow's only lane, so a
+  mobile-only PR loses that check to the roll-up exclusion as well. It is not a
+  witness for `main`'s desktop health either way.
 
 ## Traps to keep in mind
 

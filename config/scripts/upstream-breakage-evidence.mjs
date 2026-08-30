@@ -39,6 +39,55 @@ export const KNOWN_FALSE_REDS = new Set([
 // about the tree, so only first-party Actions checks count by default.
 export const DEFAULT_APP_SLUGS = new Set(['github-actions'])
 
+// Lanes that actually execute the tree, so a green one is evidence `main` built,
+// type-checked or ran. Everything else on a PR — the path classifier, the
+// root-directory guard, the LoC counter, the community-PR labeller — stays green
+// on a `main` that is entirely broken, so a witness carrying only those witnessed
+// nothing.
+//
+// An allowlist, and deliberately so: an unrecognised name here costs a witness
+// and the verdict degrades to `unknown`, whereas an unrecognised name in a
+// denylist would count as a full witness and hand back `clean` — the failure this
+// list exists to close. `normalizeChecks` reports every name it did not
+// recognise so a renamed lane is loud rather than silently dropped.
+export const WITNESSING_CHECK_PATTERNS = [
+  // pr.yml: the lanes that build, type-check, lint or run the suite.
+  /^typecheck$/,
+  /^static analysis$/,
+  /^test$/,
+  /^test \/ tests\b/,
+  /^prepare test native cache\b/,
+  /^package$/,
+  /^package \(/,
+  /^managed hooks on Node \d+$/,
+  /^shell contracts$/,
+  /^Git compatibility$/,
+  /^xterm patch sync$/,
+  /^cross-version wire compatibility$/,
+  /^orcad browser provider$/,
+  // e2e.yml: the shards and the app build. `changed e2e specs` only reads the
+  // diff, so it is not one of these.
+  /^e2e$/,
+  /^e2e \d+-of-\d+$/,
+  /^e2e \/ (?!changed e2e specs$)/,
+  /^build e2e app$/,
+  /^prepare Electron native cache$/,
+  /^ssh docker watcher isolation$/,
+  // Platform smoke and IME lanes.
+  /^real IME/,
+  /^native-smoke \(/,
+  /^mac-native-owner-smoke$/
+]
+
+// Would this check have gone red if `main` were broken?
+export function isWitnessingCheck(name, patterns = WITNESSING_CHECK_PATTERNS) {
+  return patterns.some((pattern) => pattern.test(name))
+}
+
+// Branches everything else forks from. Two PRs based on trunk are independent;
+// two based on the same feature branch share that branch's diff.
+export const TRUNK_REFS = new Set(['main', 'master'])
+
 const FAILING_CONCLUSIONS = new Set(['failure', 'timed_out', 'action_required'])
 const NON_RUN_CONCLUSIONS = new Set(['skipped', 'neutral'])
 
@@ -56,9 +105,10 @@ export const MAX_EVIDENCE_SPAN_HOURS = 24
 export function normalizeChecks(checkRuns, options = {}) {
   const includeKnownFalse = options.includeKnownFalse === true
   const appSlugs = options.appSlugs ?? DEFAULT_APP_SLUGS
+  const witnessPatterns = options.witnessingCheckPatterns ?? WITNESSING_CHECK_PATTERNS
   const failures = []
   const ran = []
-  const excluded = { rollup: [], knownFalse: [], foreignApp: [] }
+  const excluded = { rollup: [], knownFalse: [], foreignApp: [], nonWitnessing: [] }
   let incomplete = 0
   let completedAt = null
 
@@ -105,22 +155,30 @@ export function normalizeChecks(checkRuns, options = {}) {
 
   // Dedupe: a re-run posts the same check name twice, and a repeated name would
   // make two identical failure sets compare as different multisets.
+  const uniqueRan = [...new Set(ran)].sort()
+  const witnessing = uniqueRan.filter((name) => isWitnessingCheck(name, witnessPatterns))
+  excluded.nonWitnessing = uniqueRan.filter((name) => !isWitnessingCheck(name, witnessPatterns))
   return {
     failures: [...new Set(failures)].sort(),
-    ran: [...new Set(ran)].sort(),
+    ran: uniqueRan,
+    // The subset of `ran` that would have gone red had `main` been broken.
+    witnessing,
     excluded,
     incomplete,
     completedAt,
-    // A witness with nothing completed (all skipped, still running, or a
-    // docs-only PR) proves nothing either way.
-    usable: incomplete === 0 && ran.length > 0
+    // Only a PR on which some lane actually executed the tree witnessed anything.
+    // A path-filtered PR still posts its path classifier, root-directory guard and
+    // LoC counter green; counting those as a witness is how `clean` gets returned
+    // for a window nothing was tested in.
+    usable: incomplete === 0 && witnessing.length > 0
   }
 }
 
 // Groups PRs into stacks by branch parentage: a PR whose base branch is another
 // PR's head branch is stacked on it. Two refs in the same stack share a diff, so
 // they are one witness, not two.
-export function buildStacks(prs) {
+export function buildStacks(prs, options = {}) {
+  const trunkRefs = options.trunkRefs ?? TRUNK_REFS
   const headToNumber = new Map()
   for (const pr of prs) {
     headToNumber.set(pr.headRefName, pr.number)
@@ -133,15 +191,35 @@ export function buildStacks(prs) {
     }
     return root
   }
-  for (const pr of prs) {
-    const base = headToNumber.get(pr.baseRefName)
-    if (base === undefined || base === pr.number) {
-      continue
-    }
-    const left = find(pr.number)
-    const right = find(base)
+  const union = (a, b) => {
+    const left = find(a)
+    const right = find(b)
     if (left !== right) {
       parent.set(left, right)
+    }
+  }
+  // Siblings on one non-trunk base share that base's diff whether or not the base
+  // itself is in this list. Grouping only by listed parents counts two children of
+  // an unlisted parent as two independent stacks, so the corroboration the
+  // `broken` and `upstream` verdicts rest on is one witness counted twice.
+  const firstOnBase = new Map()
+  for (const pr of prs) {
+    const baseRef = pr.baseRefName
+    if (baseRef === null || baseRef === undefined || trunkRefs.has(baseRef)) {
+      continue
+    }
+    if (baseRef === pr.headRefName) {
+      continue
+    }
+    const listedParent = headToNumber.get(baseRef)
+    if (listedParent !== undefined && listedParent !== pr.number) {
+      union(pr.number, listedParent)
+    }
+    const sibling = firstOnBase.get(baseRef)
+    if (sibling === undefined) {
+      firstOnBase.set(baseRef, pr.number)
+    } else {
+      union(pr.number, sibling)
     }
   }
   const groups = new Map()
@@ -330,7 +408,7 @@ export function compareVerdict(classification, options = {}) {
   if (classification.usableWitnesses < minWitnesses) {
     return {
       verdict: VERDICT.unknown,
-      why: `only ${classification.usableWitnesses} of ${classification.totalWitnesses} refs had a usable check set (need ${minWitnesses})`
+      why: `only ${classification.usableWitnesses} of ${classification.totalWitnesses} refs ran a lane that exercises the tree (need ${minWitnesses})`
     }
   }
   if (classification.failingWitnesses === 0) {
@@ -383,7 +461,7 @@ export function mainHealthVerdict(classification, at, options = {}) {
   if (classification.usableWitnesses < minWitnesses) {
     return {
       verdict: VERDICT.unknown,
-      why: `only ${classification.usableWitnesses} of ${classification.totalWitnesses} witness PRs had a usable check set (need ${minWitnesses})`,
+      why: `only ${classification.usableWitnesses} of ${classification.totalWitnesses} witness PRs ran a lane that exercises the tree (need ${minWitnesses})`,
       brokenChecks: []
     }
   }
