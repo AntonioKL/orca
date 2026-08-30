@@ -6,7 +6,8 @@ import {
   notifyPreparedWorktreeMutation,
   persistWorktreeCreationBase,
   resolveWorktreeAddBaseContext,
-  resolveWorktreeAddTimeoutMs
+  resolveWorktreeAddTimeoutMs,
+  WORKTREE_REMOVAL_REGISTRATION_TIMEOUT_MS
 } from './worktree'
 import { hasWorktreeBaseCommitRef } from './worktree-base-ref-probe'
 import { gitExecFileAsync } from './runner'
@@ -29,14 +30,21 @@ async function performDiscardPreparedWorktree(
   worktreePath: string,
   options: GitWorktreeExecOptions
 ): Promise<void> {
+  const cleanupGitOptions = {
+    ...gitExecOptions(repoPath, options),
+    timeout: options.timeout ?? WORKTREE_REMOVAL_REGISTRATION_TIMEOUT_MS
+  }
   try {
-    await gitExecFileAsync(['worktree', 'unlock', worktreePath], gitExecOptions(repoPath, options))
+    await gitExecFileAsync(
+      [...windowsLongPathGitArgs(repoPath), 'worktree', 'unlock', worktreePath],
+      cleanupGitOptions
+    )
   } catch {
     // It may be unlocked already or only partially registered.
   }
   await gitExecFileAsync(
-    ['worktree', 'remove', '--force', worktreePath],
-    gitExecOptions(repoPath, options)
+    [...windowsLongPathGitArgs(repoPath), 'worktree', 'remove', '--force', worktreePath],
+    cleanupGitOptions
   )
 }
 
@@ -71,8 +79,15 @@ export async function prepareWorktreeCreateCheckout(
           { ...gitExecOptions(worktreePath, options), timeout: resolveWorktreeAddTimeoutMs() }
         )
         await gitExecFileAsync(
-          ['worktree', 'lock', '--reason', lockReason, worktreePath],
-          gitExecOptions(repoPath, options)
+          [
+            ...windowsLongPathGitArgs(repoPath),
+            'worktree',
+            'lock',
+            '--reason',
+            lockReason,
+            worktreePath
+          ],
+          { ...gitExecOptions(repoPath, options), timeout: resolveWorktreeAddTimeoutMs() }
         )
       } catch (error) {
         await performDiscardPreparedWorktree(repoPath, worktreePath, options).catch(() => {})
@@ -134,39 +149,43 @@ export async function finalizePreparedWorktree(
   refreshLocalBaseRef = false,
   options: AddWorktreeOptions = {}
 ): Promise<AddWorktreeResult> {
+  const finalizeGitOptions: AddWorktreeOptions = {
+    ...options,
+    timeout: options.timeout ?? resolveWorktreeAddTimeoutMs()
+  }
   try {
     return await runWithGitReadCacheInvalidation(async () => {
       const baseContext = await resolveWorktreeAddBaseContext(
         repoPath,
         baseBranch,
         refreshLocalBaseRef,
-        options
+        finalizeGitOptions
       )
       const { stdout: targetHeadOutput } = await gitExecFileAsync(
         ['rev-parse', '--verify', `${baseContext.effectiveBase}^{commit}`],
-        gitExecOptions(repoPath, options)
+        gitExecOptions(repoPath, finalizeGitOptions)
       )
       const targetHead = targetHeadOutput.trim()
       const { stdout: preparedHeadOutput } = await gitExecFileAsync(
         ['rev-parse', '--verify', 'HEAD'],
-        gitExecOptions(preparedPath, options)
+        gitExecOptions(preparedPath, finalizeGitOptions)
       )
       if (preparedHeadOutput.trim() !== targetHead) {
         await gitExecFileAsync(
           [...windowsLongPathGitArgs(preparedPath), 'reset', '--hard', targetHead],
-          { ...gitExecOptions(preparedPath, options), timeout: resolveWorktreeAddTimeoutMs() }
+          gitExecOptions(preparedPath, finalizeGitOptions)
         )
       }
 
       let moved = false
       try {
         await gitExecFileAsync(
-          ['worktree', 'unlock', preparedPath],
-          gitExecOptions(repoPath, options)
+          [...windowsLongPathGitArgs(repoPath), 'worktree', 'unlock', preparedPath],
+          gitExecOptions(repoPath, finalizeGitOptions)
         )
         await gitExecFileAsync(
-          ['worktree', 'move', preparedPath, worktreePath],
-          gitExecOptions(repoPath, options)
+          [...windowsLongPathGitArgs(repoPath), 'worktree', 'move', preparedPath, worktreePath],
+          gitExecOptions(repoPath, finalizeGitOptions)
         )
         moved = true
         await gitExecFileAsync(
@@ -178,7 +197,7 @@ export async function finalizePreparedWorktree(
             branch,
             targetHead
           ],
-          gitExecOptions(worktreePath, options)
+          gitExecOptions(worktreePath, finalizeGitOptions)
         )
       } catch (error) {
         await removeFailedFinalization(
@@ -186,13 +205,18 @@ export async function finalizePreparedWorktree(
           moved ? worktreePath : preparedPath,
           branch,
           moved,
-          options
+          finalizeGitOptions
         )
         throw error
       }
 
-      await persistWorktreeCreationBase(worktreePath, branch, baseContext.effectiveBase, options)
-      await configurePushAutoSetupRemote(worktreePath, options)
+      await persistWorktreeCreationBase(
+        worktreePath,
+        branch,
+        baseContext.effectiveBase,
+        finalizeGitOptions
+      )
+      await configurePushAutoSetupRemote(worktreePath, finalizeGitOptions)
       return {
         ...(baseContext.localBaseRefRefresh
           ? { localBaseRefRefresh: baseContext.localBaseRefRefresh }
