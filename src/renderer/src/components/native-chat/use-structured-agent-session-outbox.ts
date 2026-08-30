@@ -22,8 +22,10 @@ export function structuredSessionOperationId(): string {
 }
 
 const UNCONFIRMED_PROBE_BASE_DELAY_MS = 1_000
-/** Probing never stops: a transport outage outlives any fixed budget, and giving up
- *  restores the wedge this fixes. Growth caps the rate at one status query per 16s. */
+/** No attempt ceiling: a transport outage outlives any fixed budget, and giving up
+ *  restores the wedge this fixes. Growth caps the rate at one status query per 16s.
+ *  A refusal that blocks the head still ends probing until a fence change or a manual
+ *  Retry, because the entry leaves `unconfirmed` -- pre-existing, not closed here. */
 const UNCONFIRMED_PROBE_MAX_DELAY_MS = 16_000
 
 function isDesktopDeliveryUnknown(error: unknown): boolean {
