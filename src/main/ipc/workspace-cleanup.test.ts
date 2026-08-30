@@ -349,7 +349,8 @@ describe('workspace cleanup scan', () => {
           executionHostId: 'local',
           message: 'Timed out listing worktrees.'
         }
-      ]
+      ],
+      repoListings: [{ repoId: 'repo-1', executionHostId: 'local', verdict: 'unverifiable' }]
     })
     expect(signal?.aborted).toBe(true)
   })
@@ -673,7 +674,9 @@ describe('workspace cleanup scan', () => {
     expect(result).toEqual({
       scannedAt: NOW,
       candidates: [],
-      errors: []
+      errors: [],
+      // No repo was visited, so nothing here says this workspace is gone.
+      repoListings: []
     })
   })
 
