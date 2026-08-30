@@ -67,7 +67,14 @@ const WINDOWS_TAIL = unquotedPathTail('\\\\')
 // rejects. Matching from the scheme removes it with the path, so no root is left beside the marker,
 // and the scheme is proof enough of a path that no plain first segment is needed. The web transports
 // are excluded: their path names a remote resource, not this machine's disk.
-const LOCAL_URL_ROOT = '(?<![A-Za-z0-9+.-])(?!(?:https?|wss?):)[A-Za-z][A-Za-z0-9+.-]*:/'
+// A scheme can also be stacked on another, as a database URL stacks one on its driver. The stack is
+// matched with the path, because starting inside it left `jdbc:` standing beside the marker. The
+// lookbehind still admits a ':' before the scheme, so a path behind one that is no scheme at all --
+// 'at line 12:file:///...' -- is not left whole.
+const MAX_STACKED_SCHEMES = 3
+const LOCAL_URL_ROOT =
+  `(?<![A-Za-z0-9+.-])(?:[A-Za-z][A-Za-z0-9+.-]*:){0,${MAX_STACKED_SCHEMES}}?` +
+  '(?!(?:https?|wss?):)[A-Za-z][A-Za-z0-9+.-]*:/'
 
 const PATH_PATTERNS = [
   /(["'`])\/[A-Za-z0-9._-]+\/(?:(?!\1)[^<>\n\r])+\1/g,

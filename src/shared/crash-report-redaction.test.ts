@@ -161,6 +161,25 @@ const LEAKED_PATH_FORMS: readonly (readonly [string, string, readonly string[]])
     'mount smb://fileserver/Private Share/alice/creds.txt failed',
     ['fileserver', 'Private Share', 'alice', 'creds.txt']
   ],
+  // A scheme stacked on another: matching from the inner one left the driver beside the marker,
+  // 'jdbc:[redacted-path]', which the invariant below reads as a root still standing.
+  [
+    'database URL behind a driver scheme',
+    'connect jdbc:postgresql://db.internal:5432/orca failed',
+    ['db.internal', '5432', 'orca']
+  ],
+  [
+    'database URL behind a driver scheme, uppercased',
+    'connect JDBC:MySQL://db.internal:3306/appdb failed',
+    ['db.internal', '3306', 'appdb']
+  ],
+  // The ':' before a scheme is not always another scheme. Refusing to start after one would leave
+  // this path whole.
+  [
+    'file URL behind a colon that is no scheme',
+    'at line 12:file:///Users/alice/Documents/secret.js here',
+    ['alice', 'Documents', 'secret.js']
+  ],
   // Roots the bare patterns cannot start from: a tilde home, and a drive spelled with forward slashes.
   [
     'tilde home',
@@ -197,10 +216,13 @@ describe('sanitizeCrashReportString path redaction is all-or-nothing', () => {
     // survives there is a bare filename, 'My Notes.txt' cut to 'Notes.txt' -- so a name carrying an
     // extension beside the marker is forbidden too. Leading covers a root left standing where the
     // marker begins -- 'file:///C:[redacted-path]', 'C:[redacted-path]', '~[redacted-path]',
-    // 'jdbc:[redacted-path]' -- which still names where the file lived.
+    // 'jdbc:[redacted-path]' -- which still names where the file lived. A root is a separator, a
+    // tilde or a scheme; a bare ':' is not one, or a frame's 'line 12:' would read as a root.
     expect(sanitized).not.toMatch(/\[redacted-path\][^\n]*[\\/]/)
     expect(sanitized).not.toMatch(/\[redacted-path\] ?\S*\.[A-Za-z0-9]/)
-    expect(sanitized).not.toMatch(/[\\/:~][^\s]*\[redacted-path\]/)
+    expect(sanitized).not.toMatch(
+      /[\\/~][^\s]*\[redacted-path\]|[A-Za-z][A-Za-z0-9+.-]*:\[redacted-path\]/
+    )
   })
 
   // Control for the space-crossing rule specifically: it must not swallow the prose that follows a
