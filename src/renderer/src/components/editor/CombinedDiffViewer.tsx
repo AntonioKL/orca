@@ -83,6 +83,7 @@ import {
   shouldRequestCombinedDiffSectionLoad
 } from './combined-diff-section-load-state'
 import { translate } from '@/i18n/i18n'
+import { shouldLoadCombinedDiffOnDemand } from './combined-diff-on-demand-load'
 
 type CachedCombinedDiffViewState = {
   entrySignature: string
@@ -306,6 +307,7 @@ export default function CombinedDiffViewer({
   const activeScrollbarDragCleanupRef = useRef<CombinedDiffScrollbarDragCleanup | null>(null)
   const loadedIndicesRef = useRef<Set<number>>(new Set())
   const loadingIndicesRef = useRef<Set<number>>(new Set())
+  const deferredLoadRequestsRef = useRef<Set<number>>(new Set())
   const sectionsRef = useRef<DiffSection[]>([])
   const generationRef = useRef(0)
   // Why: per-section reload token, so a sibling's reload can't discard this section's in-flight load.
@@ -518,6 +520,7 @@ export default function CombinedDiffViewer({
 
   // Why: tab/worktree switches unmount this viewer; cache by pane key so remount restores sections+scroll before repaint.
   useLayoutEffect(() => {
+    deferredLoadRequestsRef.current.clear()
     const cached = combinedDiffViewStateCache.get(viewStateKey)
     const canRestoreSnapshotSectionsByKey =
       hasUncommittedEntriesSnapshot &&
@@ -560,23 +563,30 @@ export default function CombinedDiffViewer({
     scrollAnchorRef.current = combinedDiffScrollAnchorCache.get(viewStateKey) ?? null
     latestDomScrollAnchorRef.current = scrollAnchorRef.current
     setSections(
-      entries.map((entry) => ({
-        key: getCombinedDiffFileTreeSectionKey(treeMode, entry),
-        path: entry.path,
-        status: entry.status,
-        area: 'area' in entry ? entry.area : undefined,
-        oldPath: entry.oldPath,
-        added: 'added' in entry ? entry.added : undefined,
-        removed: 'removed' in entry ? entry.removed : undefined,
-        originalContent: '',
-        modifiedContent: '',
-        collapsed: combinedDiffCollapsedPreference ?? false,
-        loading: true,
-        error: undefined,
-        dirty: false,
-        diffResult: null,
-        largeDiffRenderLimit: null
-      }))
+      entries.map((entry) => {
+        const loadOnDemand = shouldLoadCombinedDiffOnDemand({
+          added: 'added' in entry ? entry.added : undefined,
+          removed: 'removed' in entry ? entry.removed : undefined
+        })
+        return {
+          key: getCombinedDiffFileTreeSectionKey(treeMode, entry),
+          path: entry.path,
+          status: entry.status,
+          area: 'area' in entry ? entry.area : undefined,
+          oldPath: entry.oldPath,
+          added: 'added' in entry ? entry.added : undefined,
+          removed: 'removed' in entry ? entry.removed : undefined,
+          originalContent: '',
+          modifiedContent: '',
+          collapsed: combinedDiffCollapsedPreference ?? false,
+          loading: !loadOnDemand,
+          loadOnDemand,
+          error: undefined,
+          dirty: false,
+          diffResult: null,
+          largeDiffRenderLimit: null
+        }
+      })
     )
     setSectionHeights({})
     loadedIndicesRef.current.clear()
@@ -598,6 +608,10 @@ export default function CombinedDiffViewer({
 
   const loadSectionNow = useCallback(
     async (index: number) => {
+      if (sectionsRef.current[index]?.loadOnDemand && !deferredLoadRequestsRef.current.has(index)) {
+        return
+      }
+      deferredLoadRequestsRef.current.delete(index)
       if (loadedIndicesRef.current.has(index) || loadingIndicesRef.current.has(index)) {
         return
       }
@@ -790,7 +804,7 @@ export default function CombinedDiffViewer({
 
   // Progressive loading: queue diff content when a section becomes visible.
   const loadSection = useCallback((index: number) => {
-    if (sectionsRef.current[index]?.collapsed) {
+    if (sectionsRef.current[index]?.collapsed || sectionsRef.current[index]?.loadOnDemand) {
       return
     }
     loadSchedulerRef.current.request(index)
@@ -861,6 +875,20 @@ export default function CombinedDiffViewer({
   )
   retrySectionRef.current = retrySection
 
+  const loadDeferredSection = useCallback((index: number): void => {
+    const section = sectionsRef.current[index]
+    if (!section?.loadOnDemand) {
+      return
+    }
+    deferredLoadRequestsRef.current.add(index)
+    setSections((prev) =>
+      prev.map((item, itemIndex) =>
+        itemIndex === index ? { ...item, loadOnDemand: false, loading: true } : item
+      )
+    )
+    loadSchedulerRef.current.request(index)
+  }, [])
+
   const modifiedEditorsRef = useRef<Map<number, monacoEditor.IStandaloneCodeEditor>>(new Map())
 
   const virtualizer = useVirtualizer({
@@ -883,6 +911,7 @@ export default function CombinedDiffViewer({
             : (section.added ?? 0) + (section.removed ?? 0),
         useIntrinsicImageHeight: isIntrinsicHeightImageDiff(section.diffResult),
         isLargeDiffLimited: section.largeDiffRenderLimit?.limited === true,
+        isLoadOnDemand: section.loadOnDemand === true,
         lineCounts: section.largeDiffRenderLimit?.lineCounts ?? undefined
       })
     },
@@ -2058,6 +2087,7 @@ export default function CombinedDiffViewer({
                         sectionHeight={sectionHeights[virtualItem.index]}
                         worktreeId={file.worktreeId}
                         loadSection={loadSection}
+                        loadDeferredSection={loadDeferredSection}
                         retrySection={retrySection}
                         toggleSection={toggleSection}
                         openSection={openSection}

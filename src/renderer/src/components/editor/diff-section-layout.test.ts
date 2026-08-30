@@ -23,6 +23,20 @@ describe('diff section layout', () => {
     expect(getLargeDiffFallbackBodyHeight()).toBe(160)
   })
 
+  it('uses the bounded fallback height for an on-demand diff', () => {
+    expect(
+      getDiffSectionEstimatedHeight({
+        collapsed: false,
+        measuredContentHeight: undefined,
+        originalContent: '',
+        modifiedContent: '',
+        changedLineCount: 60_000,
+        useIntrinsicImageHeight: false,
+        isLoadOnDemand: true
+      })
+    ).toBe(188)
+  })
+
   it('falls back to line-count height before Monaco has mounted', () => {
     expect(
       getDiffSectionBodyHeight({

@@ -72,13 +72,18 @@ export function getDiffSectionEstimatedHeight({
   changedLineCount,
   useIntrinsicImageHeight,
   lineCounts,
-  isLargeDiffLimited = false
-}: DiffSectionBodyHeightInput & { collapsed: boolean; isLargeDiffLimited?: boolean }): number {
+  isLargeDiffLimited = false,
+  isLoadOnDemand = false
+}: DiffSectionBodyHeightInput & {
+  collapsed: boolean
+  isLargeDiffLimited?: boolean
+  isLoadOnDemand?: boolean
+}): number {
   if (collapsed) {
     return DIFF_SECTION_HEADER_HEIGHT
   }
 
-  if (isLargeDiffLimited) {
+  if (isLargeDiffLimited || isLoadOnDemand) {
     return DIFF_SECTION_HEADER_HEIGHT + getLargeDiffFallbackBodyHeight()
   }
 

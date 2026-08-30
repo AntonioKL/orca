@@ -20,7 +20,7 @@ export function useDiffSectionLayoutMetrics({
   isLargeDiffLimited: boolean
 } {
   const renderLimit = section.largeDiffRenderLimit
-  const isLargeDiffLimited = renderLimit?.limited === true
+  const isLargeDiffLimited = renderLimit?.limited === true || section.loadOnDemand === true
   const lineStats = useMemo(
     () =>
       section.loading || section.error || isLargeDiffLimited
