@@ -32,7 +32,6 @@ type PreparationEntry = {
   repoPath: string
   workspaceRoot: string
   preparedPath: string
-  lockReason: string
   options: AddWorktreeOptions
   createdAt: number
   ready: Promise<void>
@@ -190,7 +189,6 @@ export function prepareWorktreeCreateForRepo(
     repoPath: repo.path,
     workspaceRoot,
     preparedPath,
-    lockReason,
     options,
     createdAt: Date.now(),
     expiration,
@@ -255,7 +253,6 @@ export async function consumePreparedWorktreeCreate(
       args.worktreePath,
       args.branch,
       args.baseBranch,
-      entry.lockReason,
       args.refreshLocalBaseRef,
       options
     )

@@ -103,7 +103,6 @@ describe('worktree create preparation registry', () => {
       '/workspace/final',
       'feature/test',
       'origin/main',
-      expect.stringMatching(/^orca-create-preparation:v1:/),
       undefined,
       options
     )

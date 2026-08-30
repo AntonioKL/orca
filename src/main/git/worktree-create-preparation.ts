@@ -176,7 +176,6 @@ export async function finalizePreparedWorktree(
   worktreePath: string,
   branch: string,
   baseBranch: string,
-  lockReason: string,
   refreshLocalBaseRef = false,
   options: AddWorktreeOptions = {}
 ): Promise<AddWorktreeResult> {
@@ -211,26 +210,19 @@ export async function finalizePreparedWorktree(
       let moved = false
       try {
         await gitExecFileAsync(
-          [...windowsLongPathGitArgs(repoPath), 'worktree', 'unlock', preparedPath],
-          gitExecOptions(repoPath, finalizeGitOptions)
-        )
-        await gitExecFileAsync(
-          [...windowsLongPathGitArgs(repoPath), 'worktree', 'move', preparedPath, worktreePath],
-          gitExecOptions(repoPath, finalizeGitOptions)
-        )
-        moved = true
-        // Why: keep a moved checkout hidden and recoverable if the host crashes before submit completes.
-        await gitExecFileAsync(
           [
             ...windowsLongPathGitArgs(repoPath),
             'worktree',
-            'lock',
-            '--reason',
-            lockReason,
+            'move',
+            '-f',
+            '-f',
+            preparedPath,
             worktreePath
           ],
           gitExecOptions(repoPath, finalizeGitOptions)
         )
+        moved = true
+        // Why: `-f -f` moves the locked preparation while preserving its lock reason (Git >=2.25).
         await gitExecFileAsync(
           [
             ...windowsLongPathGitArgs(worktreePath),

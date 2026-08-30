@@ -101,7 +101,7 @@ describe('prepared worktree creation with real Git', () => {
       finalPath,
       'feature/prepared',
       'main',
-      createWorktreePreparationLockReason('real-git-test')
+      false
     )
 
     expect(git(finalPath, ['rev-parse', 'HEAD'])).toBe(latestHead)
