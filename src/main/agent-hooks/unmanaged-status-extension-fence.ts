@@ -64,8 +64,9 @@ type HeldPost = {
  * and source. A tokened post is never rejected, so a relaunch always takes the pane back, and a
  * held post is always resolved — superseded by the managed poster, delivered when it goes silent
  * for {@link UNMANAGED_POST_CONFIRMATION_WINDOW_MS}, or delivered when the owner is evicted by
- * {@link MAX_TRACKED_PANES}. Only pane retirement ends a hold without delivering it, and that
- * closes the pane's row along with it.
+ * {@link MAX_TRACKED_PANES}. Two paths end a hold without delivering it, and neither can leave a
+ * pane claiming finished work: pane retirement closes the pane's row in the same step, and server
+ * teardown is app quit, after which the row comes back explicitly unconfirmed — see {@link dispose}.
  */
 export class UnmanagedStatusExtensionFence {
   private ownerHashByPaneKey = new Map<string, Map<AgentHookSource, string>>()
@@ -124,7 +125,13 @@ export class UnmanagedStatusExtensionFence {
     this.discardPaneHolds(paneKey)
   }
 
-  /** Server shutdown: a held post must not outlive the server that would deliver it. */
+  /**
+   * Server shutdown: a held post must not outlive the server that would deliver it. Dropping it
+   * cannot strand the pane, because nothing held here is what the next launch reads. What survives is
+   * the pane's persisted status row, and hydrate re-stamps every non-`done` row `restoredUnconfirmed`
+   * (`server.ts`), which `isFreshNonDoneAgentStatus` refuses to read as live work until a live post
+   * replaces it.
+   */
   dispose(): void {
     for (const held of this.heldPostsByPaneKey.values()) {
       for (const entry of held.values()) {
