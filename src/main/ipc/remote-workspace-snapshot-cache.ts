@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import type {
   RemoteWorkspaceObservedSnapshot,
   RemoteWorkspaceSnapshot
 } from '../../shared/remote-workspace-types'
+import { normalizeSnapshot } from './remote-workspace-snapshot-normalization'
 
 export const REMOTE_WORKSPACE_SNAPSHOT_CACHE_MAX_ENTRIES = 64
 
@@ -14,6 +16,19 @@ type RemoteWorkspaceSnapshotCacheEntry = {
 }
 
 const latestSnapshotByTargetId = new Map<string, RemoteWorkspaceSnapshotCacheEntry>()
+
+function snapshotsAreIdentical(
+  previous: RemoteWorkspaceObservedSnapshot,
+  next: RemoteWorkspaceSnapshot
+): boolean {
+  return (
+    previous.namespace === next.namespace &&
+    previous.revision === next.revision &&
+    previous.updatedAt === next.updatedAt &&
+    previous.schemaVersion === next.schemaVersion &&
+    isDeepStrictEqual(previous.session, next.session)
+  )
+}
 
 function rememberRemoteWorkspaceSnapshotEntry(
   targetId: string,
@@ -36,11 +51,30 @@ export function rememberRemoteWorkspaceSnapshot(
   targetId: string,
   snapshot: RemoteWorkspaceSnapshot
 ): RemoteWorkspaceObservedSnapshot {
-  const observedSnapshot = { ...snapshot, hostObservationToken: randomUUID() }
+  // Relay responses can carry legacy empty optional fields that normalization
+  // removes on reads. Keep one canonical shape in the cache so equivalent
+  // observations do not revoke an in-flight upload authority.
+  const normalizedSnapshot = normalizeSnapshot(snapshot, snapshot.namespace)
+  const current = latestSnapshotByTargetId.get(targetId)
+  if (current && snapshotsAreIdentical(current.snapshot, normalizedSnapshot)) {
+    // Re-reading an unchanged revision is not a new host observation. Keep the
+    // token (and the contiguous local-patch authorization window) stable so a
+    // polling read cannot invalidate an upload that is already in flight.
+    const observedSnapshot = {
+      ...normalizedSnapshot,
+      hostObservationToken: current.snapshot.hostObservationToken
+    }
+    rememberRemoteWorkspaceSnapshotEntry(targetId, {
+      ...current,
+      snapshot: observedSnapshot
+    })
+    return observedSnapshot
+  }
+  const observedSnapshot = { ...normalizedSnapshot, hostObservationToken: randomUUID() }
   rememberRemoteWorkspaceSnapshotEntry(targetId, {
     snapshot: observedSnapshot,
-    minimumAuthorizedRevision: snapshot.revision,
-    maximumAuthorizedRevision: snapshot.revision
+    minimumAuthorizedRevision: normalizedSnapshot.revision,
+    maximumAuthorizedRevision: normalizedSnapshot.revision
   })
   return observedSnapshot
 }
@@ -49,22 +83,26 @@ export function rememberLocallyPatchedRemoteWorkspaceSnapshot(
   targetId: string,
   snapshot: RemoteWorkspaceSnapshot
 ): RemoteWorkspaceObservedSnapshot {
+  const normalizedSnapshot = normalizeSnapshot(snapshot, snapshot.namespace)
   const current = latestSnapshotByTargetId.get(targetId)
-  if (!current || snapshot.revision > current.maximumAuthorizedRevision + 1) {
-    return rememberRemoteWorkspaceSnapshot(targetId, snapshot)
+  if (!current || normalizedSnapshot.revision > current.maximumAuthorizedRevision + 1) {
+    return rememberRemoteWorkspaceSnapshot(targetId, normalizedSnapshot)
   }
-  if (snapshot.revision < current.snapshot.revision) {
+  if (normalizedSnapshot.revision < current.snapshot.revision) {
     rememberRemoteWorkspaceSnapshotEntry(targetId, current)
     return current.snapshot
   }
   const observedSnapshot = {
-    ...snapshot,
+    ...normalizedSnapshot,
     hostObservationToken: current.snapshot.hostObservationToken
   }
   rememberRemoteWorkspaceSnapshotEntry(targetId, {
     snapshot: observedSnapshot,
     minimumAuthorizedRevision: current.minimumAuthorizedRevision,
-    maximumAuthorizedRevision: Math.max(current.maximumAuthorizedRevision, snapshot.revision)
+    maximumAuthorizedRevision: Math.max(
+      current.maximumAuthorizedRevision,
+      normalizedSnapshot.revision
+    )
   })
   return observedSnapshot
 }

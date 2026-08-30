@@ -335,4 +335,21 @@ describe('remoteWorkspace:setForConnectedTargets', () => {
       })
     )
   })
+
+  it('does not invalidate an upload authority when an unchanged snapshot is polled', async () => {
+    const first = await observeTarget('target-1')
+    const second = await observeTarget('target-1')
+    expect(second.hostObservationToken).toBe(first.hostObservationToken)
+
+    const result = await callSetForConnectedTargets({
+      session: baseSession,
+      hydratedTargetIds: ['target-1'],
+      expectedRevisionsByTargetId: { 'target-1': first.revision },
+      expectedHostObservationTokensByTargetId: {
+        'target-1': first.hostObservationToken
+      }
+    })
+
+    expect(result).toMatchObject([{ targetId: 'target-1', result: { ok: true } }])
+  })
 })

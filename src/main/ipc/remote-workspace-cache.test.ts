@@ -98,4 +98,65 @@ describe('remote workspace snapshot cache', () => {
     expect(cachedRemoteWorkspaceSnapshotAuthorizesRevision('target-1', 9)).toBe(false)
     expect(cachedRemoteWorkspaceSnapshotAuthorizesRevision('target-1', 10)).toBe(true)
   })
+
+  it('keeps the observation token stable when an unchanged revision is re-read', () => {
+    const first = rememberRemoteWorkspaceSnapshot(
+      'target-1',
+      snapshot(emptyRemoteWorkspaceSession(), 7)
+    )
+    const second = rememberRemoteWorkspaceSnapshot(
+      'target-1',
+      snapshot(emptyRemoteWorkspaceSession(), 7)
+    )
+
+    expect(second.hostObservationToken).toBe(first.hostObservationToken)
+    expect(cachedRemoteWorkspaceSnapshotAuthorizesRevision('target-1', 7)).toBe(true)
+  })
+
+  it('rotates the observation token when same-revision content changes', () => {
+    const first = rememberRemoteWorkspaceSnapshot(
+      'target-1',
+      snapshot(emptyRemoteWorkspaceSession(), 7)
+    )
+    const second = rememberRemoteWorkspaceSnapshot(
+      'target-1',
+      snapshot(
+        {
+          ...emptyRemoteWorkspaceSession(),
+          activeTabId: 'changed'
+        },
+        7
+      )
+    )
+
+    expect(second.hostObservationToken).not.toBe(first.hostObservationToken)
+  })
+
+  it('keeps local patch authority across equivalent normalized relay reads', () => {
+    const base = rememberRemoteWorkspaceSnapshot(
+      'target-1',
+      snapshot(emptyRemoteWorkspaceSession(), 7)
+    )
+    const locallyPatched = rememberLocallyPatchedRemoteWorkspaceSnapshot(
+      'target-1',
+      snapshot(
+        {
+          ...emptyRemoteWorkspaceSession(),
+          activeWorktreePathsOnShutdown: [],
+          activeTabIdByWorktreePath: {},
+          remoteSessionIdsByTabId: {},
+          lastVisitedAtByWorktreePath: {},
+          defaultTerminalTabsAppliedByWorktreePath: {}
+        },
+        8
+      )
+    )
+    const relayRead = rememberRemoteWorkspaceSnapshot(
+      'target-1',
+      snapshot(emptyRemoteWorkspaceSession(), 8)
+    )
+
+    expect(locallyPatched.hostObservationToken).toBe(base.hostObservationToken)
+    expect(relayRead.hostObservationToken).toBe(locallyPatched.hostObservationToken)
+  })
 })

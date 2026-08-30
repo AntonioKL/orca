@@ -789,11 +789,87 @@ index 7b286d3d644c26141df516929703aa6e129df4b2..ec6bf3932c65b89c013ff133dc6bf46a
    return exports;
  };
  
+diff --git a/lib/windowsPtyAgent.js b/lib/windowsPtyAgent.js
+index a358ffb..fb3a96f 100644
+--- a/lib/windowsPtyAgent.js
++++ b/lib/windowsPtyAgent.js
+@@ -136,6 +136,9 @@ var WindowsPtyAgent = /** @class */ (function () {
+         if (this._useConpty) {
+             if (!this._useConptyDll) {
+                 this._inSocket.readable = false;
++                // The non-DLL path previously only flipped `readable`, leaving the
++                // conin PipeWrap alive until the host exited (#947).
++                this._inSocket.destroy();
+                 this._outSocket.readable = false;
+                 this._getConsoleProcessList().then(function (consoleProcessList) {
+                     consoleProcessList.forEach(function (pid) {
+@@ -241,6 +244,7 @@ var WindowsPtyAgent = /** @class */ (function () {
+             return;
+         }
+         this._inSocket.readable = false;
++        this._inSocket.destroy();
+         this._outSocket.readable = false;
+         this._outSocket.destroy();
+     };
 diff --git a/lib/windowsTerminal.js b/lib/windowsTerminal.js
-index 3c38f89d14cece8081782a9600ebc582b7c2a62a..7cdfdf75c7396998cf93d135c5de6ef96668ceba 100644
+index 3c38f89..e20b3e6 100644
 --- a/lib/windowsTerminal.js
 +++ b/lib/windowsTerminal.js
-@@ -103,6 +103,20 @@ var WindowsTerminal = /** @class */ (function (_super) {
+@@ -50,6 +50,29 @@ var WindowsTerminal = /** @class */ (function (_super) {
+         // Create new termal.
+         _this._agent = new windowsPtyAgent_1.WindowsPtyAgent(file, args, parsedEnv, cwd, _this._cols, _this._rows, false, opt.useConpty, opt.useConptyDll, opt.conptyInheritCursor);
+         _this._socket = _this._agent.outSocket;
++        // Attach before readiness so a broken ConPTY output pipe cannot be unhandled.
++        _this._socket.on('error', function (err) {
++            var code = err.code;
++            var wasClosing = !_this._writable;
++            // Node can report these duplicate stream errors after teardown; active
++            // sockets still surface every other failure to the caller.
++            _this._close();
++            if (wasClosing && (code === 'ERR_STREAM_PUSH_AFTER_EOF' || code === 'ERR_STREAM_DESTROYED')) {
++                return;
++            }
++            // EIO, happens when someone closes our child process: the only process
++            // in the terminal.
++            // node < 0.6.14: errno 5
++            // node >= 0.6.14: read EIO
++            if (typeof code === 'string') {
++                if (~code.indexOf('errno 5') || ~code.indexOf('EIO'))
++                    return;
++            }
++            // Throw anything else.
++            if (_this.listeners('error').length < 2) {
++                throw err;
++            }
++        });
+         // Not available until `ready` event emitted.
+         _this._pid = _this._agent.innerPid;
+         _this._fd = _this._agent.fd;
+@@ -76,23 +99,6 @@ var WindowsTerminal = /** @class */ (function (_super) {
+                     _this._deferreds = [];
+                 }
+             });
+-            // Shutdown if `error` event is emitted.
+-            _this._socket.on('error', function (err) {
+-                // Close terminal session.
+-                _this._close();
+-                // EIO, happens when someone closes our child process: the only process
+-                // in the terminal.
+-                // node < 0.6.14: errno 5
+-                // node >= 0.6.14: read EIO
+-                if (err.code) {
+-                    if (~err.code.indexOf('errno 5') || ~err.code.indexOf('EIO'))
+-                        return;
+-                }
+-                // Throw anything else.
+-                if (_this.listeners('error').length < 2) {
+-                    throw err;
+-                }
+-            });
+             // Cleanup after the socket is closed.
+             _this._socket.on('close', function () {
+                 _this.emit('exit', _this._agent.exitCode);
+@@ -103,6 +109,20 @@ var WindowsTerminal = /** @class */ (function (_super) {
          _this._name = name;
          _this._readable = true;
          _this._writable = true;
@@ -814,14 +890,105 @@ index 3c38f89d14cece8081782a9600ebc582b7c2a62a..7cdfdf75c7396998cf93d135c5de6ef9
          _this._forwardEvents();
          return _this;
      }
+@@ -196,4 +216,4 @@ var WindowsTerminal = /** @class */ (function (_super) {
+     return WindowsTerminal;
+ }(terminal_1.Terminal));
+ exports.WindowsTerminal = WindowsTerminal;
+-//# sourceMappingURL=windowsTerminal.js.map
+\ No newline at end of file
++//# sourceMappingURL=windowsTerminal.js.map
+diff --git a/src/windowsPtyAgent.ts b/src/windowsPtyAgent.ts
+index d705444..ce611b8 100644
+--- a/src/windowsPtyAgent.ts
++++ b/src/windowsPtyAgent.ts
+@@ -143,6 +143,9 @@ export class WindowsPtyAgent {
+     if (this._useConpty) {
+       if (!this._useConptyDll) {
+         this._inSocket.readable = false;
++        // The non-DLL path previously only flipped `readable`, leaving the
++        // conin PipeWrap alive until the host exited (#947).
++        this._inSocket.destroy();
+         this._outSocket.readable = false;
+         this._getConsoleProcessList().then(consoleProcessList => {
+           consoleProcessList.forEach((pid: number) => {
+@@ -244,6 +247,7 @@ export class WindowsPtyAgent {
+       return;
+     }
+     this._inSocket.readable = false;
++    this._inSocket.destroy();
+     this._outSocket.readable = false;
+     this._outSocket.destroy();
+   }
 diff --git a/src/windowsTerminal.ts b/src/windowsTerminal.ts
-index 13f6c6dbb3d7965c4699568f4704be3b6a33d947..0aacd793831ccfc9ff5c85f0117d87a7534b5d34 100644
+index 13f6c6d..eda63c8 100644
 --- a/src/windowsTerminal.ts
 +++ b/src/windowsTerminal.ts
-@@ -115,5 +115,18 @@ export class WindowsTerminal extends Terminal {
+@@ -51,6 +51,32 @@ export class WindowsTerminal extends Terminal {
+     this._agent = new WindowsPtyAgent(file, args, parsedEnv, cwd, this._cols, this._rows, false, opt.useConpty, opt.useConptyDll, opt.conptyInheritCursor);
+     this._socket = this._agent.outSocket;
+-
++
++    // Attach before readiness so a broken ConPTY output pipe cannot be unhandled.
++    this._socket.on('error', err => {
++      const code = (<any>err).code;
++      const wasClosing = !this._writable;
++
++      // Node can report these duplicate stream errors after teardown; active
++      // sockets still surface every other failure to the caller.
++      this._close();
++      if (wasClosing && (code === 'ERR_STREAM_PUSH_AFTER_EOF' || code === 'ERR_STREAM_DESTROYED')) {
++        return;
++      }
++
++      // EIO, happens when someone closes our child process: the only process
++      // in the terminal.
++      // node < 0.6.14: errno 5
++      // node >= 0.6.14: read EIO
++      if (typeof code === 'string') {
++        if (~code.indexOf('errno 5') || ~code.indexOf('EIO')) return;
++      }
++
++      // Throw anything else.
++      if (this.listeners('error').length < 2) {
++        throw err;
++      }
++    });
++
+     // Not available until `ready` event emitted.
+     this._pid = this._agent.innerPid;
+     this._fd = this._agent.fd;
+@@ -82,25 +108,6 @@ export class WindowsTerminal extends Terminal {
+         }
+       });
+-
++
+-      // Shutdown if `error` event is emitted.
+-      this._socket.on('error', err => {
+-        // Close terminal session.
+-        this._close();
+-
+-        // EIO, happens when someone closes our child process: the only process
+-        // in the terminal.
+-        // node < 0.6.14: errno 5
+-        // node >= 0.6.14: read EIO
+-        if ((<any>err).code) {
+-          if (~(<any>err).code.indexOf('errno 5') || ~(<any>err).code.indexOf('EIO')) return;
+-        }
+-
+-        // Throw anything else.
+-        if (this.listeners('error').length < 2) {
+-          throw err;
+-        }
+-      });
+-
+       // Cleanup after the socket is closed.
+       this._socket.on('close', () => {
+         this.emit('exit', this._agent.exitCode);
+@@ -114,6 +121,19 @@ export class WindowsTerminal extends Terminal {
+-
++
      this._readable = true;
      this._writable = true;
--
 +    // A ConPTY input-pipe error must retire only this terminal. Without a listener, Node promotes
 +    // errors such as write EAGAIN to uncaughtException and kills every PTY in the daemon.
 +    this._agent.inSocket.on('error', () => {
@@ -835,6 +1002,7 @@ index 13f6c6dbb3d7965c4699568f4704be3b6a33d947..0aacd793831ccfc9ff5c85f0117d87a7
 +        // The failing pipe may have raced process exit; the terminal is already unwritable.
 +      }
 +    });
+-
 +
      this._forwardEvents();
    }
