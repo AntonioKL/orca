@@ -34,6 +34,14 @@ function withoutTrailingPeriod(detail: string): string {
 const IPC_INVOKE_PREFIX = /^Error invoking remote method '[^']*': (?:\w*Error: )?/
 /** Node's execFile rejection preamble names the argv Orca ran, so such a line is never git's own reason. */
 const COMMAND_PREAMBLE_LINE = /Command failed:/
+/**
+ * The one `fatal:` that diagnoses nothing: it says git never got to talk to the remote, and hands the
+ * question upstream to whatever did the talking. Every other `fatal:` is git's own finding, reached
+ * over a transport that worked, so nothing ssh printed before it can outrank it. Kept to this single
+ * verdict deliberately: it is the only one where ssh is guaranteed to have stated its own reason last
+ * (a denial, a refused connection, a host-key failure), so deferring cannot surface a bare advisory.
+ */
+const GIT_DEFERS_TO_TRANSPORT = /^Could not read from remote repository/i
 
 // Why: a detail is either something to show or nothing at all. An empty string is neither — it
 // survives every `??` below and reaches the user as a blank toast, which says less than a generic one.
@@ -51,11 +59,14 @@ function extractPublishFailureDetail(message: string): string | null {
       continue
     }
     if (line.startsWith('fatal:')) {
-      // Why: git states the transport's own reason first, then wraps it in a generic `fatal:`
-      // line ("Could not read from remote repository."). The earlier line is the actionable one.
+      // Why: whose finding this is, not where it sits. git defers to the transport only when its own
+      // verdict is the "never delivered" wrapper; then the reason is the transport's last word above.
+      // Otherwise git reached the remote and diagnosed the failure itself, and ssh's preamble is noise
+      // that carries identity-file and known_hosts paths out of the user's home.
+      const verdict = line.slice('fatal:'.length).trim()
       return (
-        causeBeforeFatal ??
-        emptyToNull(truncateDetail(stripCredentialsFromMessage(line.slice('fatal:'.length).trim())))
+        (GIT_DEFERS_TO_TRANSPORT.test(verdict) ? causeBeforeFatal : null) ??
+        emptyToNull(truncateDetail(stripCredentialsFromMessage(verdict)))
       )
     }
     if (line.startsWith('remote:')) {
@@ -71,10 +82,9 @@ function extractPublishFailureDetail(message: string): string | null {
     // names Orca's argv rather than anything git reported, and the elision marker is our own
     // truncation bookkeeping — showing it as the reason tells the user nothing at all.
     if (!COMMAND_PREAMBLE_LINE.test(line) && line !== GIT_FAILURE_DETAIL_ELISION_MARKER) {
-      // Why: the *last* such line, not the first. Real ssh prints its own preamble ahead of the
-      // denial — `Warning: Identity file <home path> not accessible`, `Warning: Permanently
-      // added …` — so keeping the first hides `Permission denied (publickey)` behind noise and
-      // puts a home-directory path in the toast. The line nearest git's verdict is the cause.
+      // Why: the *last* such line, not the first — within the transport's own output. ssh states its
+      // verdict as it gives up, after every advisory it had to offer (`no such identity: <home
+      // path>`, `Load key "<home path>": bad permissions`, the changed-host-key banner).
       causeBeforeFatal = truncateDetail(stripCredentialsFromMessage(line))
     }
   }
@@ -103,12 +113,20 @@ function* iterateRemoteErrorLines(message: string): Generator<string> {
   }
 }
 
-// Why: the last resort when no line stood out. Electron's `Error invoking remote method …` wrapper is
-// Orca's own framing, never git's, so it is stripped here the same way the line scan strips it.
+// Why: the last resort when no line stood out — and still a line, never the blob. git's closing
+// diagnostic is last; everything above it can be ssh's preamble, which names files under the user's
+// home. Electron's `Error invoking remote method …` wrapper is Orca's own framing, never git's, so it
+// is stripped here the same way the line scan strips it.
 function rawMessageDetail(message: string): string | null {
-  return emptyToNull(
-    truncateDetail(stripCredentialsFromMessage(message.replace(IPC_INVOKE_PREFIX, '')).trim())
-  )
+  const scrubbed = stripCredentialsFromMessage(message.replace(IPC_INVOKE_PREFIX, ''))
+  let lastDiagnostic = ''
+  for (const rawLine of iterateRemoteErrorLines(scrubbed)) {
+    const line = rawLine.trim()
+    if (line && line !== GIT_FAILURE_DETAIL_ELISION_MARKER) {
+      lastDiagnostic = line
+    }
+  }
+  return emptyToNull(truncateDetail(lastDiagnostic))
 }
 
 function resolveSubmodulePushFailureMessage(
