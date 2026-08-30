@@ -225,10 +225,9 @@ export async function describeCreatedWorktree(
     ...options,
     timeout: options.timeout ?? WORKTREE_LIST_TIMEOUT_MS
   }
-  const [created, repoGitCommonDir, repoDiskCommonDir, checkedOutRef, head] = await Promise.all([
+  const [created, repoGitCommonDir, checkedOutRef, head] = await Promise.all([
     readRepoLocation(worktreePath, toWslExecutionSpace(worktreePath), deadlined),
     readRepoCommonDirFromGit(repoPath, deadlined),
-    readRepoCommonDirFromDisk(repoPath, deadlined.timeout ?? WORKTREE_LIST_TIMEOUT_MS),
     readCheckedOutBranchRef(worktreePath, deadlined),
     readWorktreeHeadOid(worktreePath, deadlined)
   ])
@@ -236,8 +235,16 @@ export async function describeCreatedWorktree(
   if (!created || checkedOutRef !== expectedRef || !head) {
     return undefined
   }
-  if (!(await isSameRepoCommonDir(created.commonDir, [repoGitCommonDir, repoDiskCommonDir]))) {
-    return undefined
+  if (!(await isSameRepoCommonDir(created.commonDir, [repoGitCommonDir]))) {
+    // Only now read the second opinion from disk: a `.git` on a hung mount pins a threadpool thread
+    // that no deadline can reclaim, so never pay that on the path where Git already agreed.
+    const repoDiskCommonDir = await readRepoCommonDirFromDisk(
+      repoPath,
+      deadlined.timeout ?? WORKTREE_LIST_TIMEOUT_MS
+    )
+    if (!(await isSameRepoCommonDir(created.commonDir, [repoDiskCommonDir]))) {
+      return undefined
+    }
   }
   const [described] = await annotateSparseCheckoutStatus([
     {
