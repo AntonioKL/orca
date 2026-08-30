@@ -450,7 +450,12 @@
               "meta": {
                 "persist": {
                   "877e3638d8": "Update the remote runtime to change this workspace’s linked issue",
-                  "4367540861": "Update the remote runtime to link Linear issues"
+                  "4367540861": "Update the remote runtime to link Linear issues",
+                  "github": {
+                    "pr": {
+                      "suppression": "Update the remote runtime to unlink GitHub pull requests"
+                    }
+                  }
                 }
               }
             }
@@ -5415,6 +5420,7 @@
           "eace1d2cf6": "neutral",
           "dbe2d18972": "More {{value0}} actions",
           "ae76907ca6": "Unlink {{value0}}",
+          "openInOrcaBrowser": "Open in Orca browser",
           "ad25c3ff05": "View on {{value0}}",
           "2c67730e07": "Open in Orca",
           "e42941631a": "View on Linear",
@@ -14866,7 +14872,8 @@
           "allowDirectory": "Allow folder",
           "directoryAccessRequestOverflow": "{{folders}}, and {{count}} more",
           "directoryAccessRequestMultiple": "This preview wants to read files in {{folders}}.",
-          "allowDirectories": "Allow {{count}} folders"
+          "allowDirectories": "Allow {{count}} folders",
+          "editAddressControl": "Edit address"
         }
       },
       "diff": {
@@ -16184,7 +16191,15 @@
         "allWorkspacesTitle": "Select one workspace",
         "allWorkspacesBody": "Status, assignee, and label filters use ids from a single Linear workspace. Choose one workspace to filter by those attributes.",
         "optionsFromTeam": "Options from {{team}}",
-        "clearAll": "Clear all filters"
+        "clearAll": "Clear all filters",
+        "partialCoverage": "partial",
+        "partialCoverageTitle": "Some teams may be left out of this filter. Open Filters for details."
+      },
+      "linear-issue-attribute-filter-coverage-notice": {
+        "statusPartialTeamCoverage": "Filtering {{value0}} of {{value1}} team statuses — issues from the remaining teams are not included.",
+        "labelsPartialTeamCoverage": "Filtering {{value0}} of {{value1}} team labels — issues from the remaining teams are not included.",
+        "statusAtIdLimit": "Filtering the most this can carry: {{value0}} team statuses. Rows picked past that are left out.",
+        "labelsAtIdLimit": "Filtering the most this can carry: {{value0}} team labels. Rows picked past that are left out."
       },
       "linear-issue-attribute-filter-sections": {
         "status": "Status",
@@ -16193,6 +16208,7 @@
         "unassigned": "Unassigned",
         "labels": "Labels",
         "countSelected": "{{count}} selected",
+        "partialCoverageMarker": "· partial",
         "selected": "selected",
         "searchPriority": "Filter priority…",
         "searchStatus": "Filter status…",
@@ -16426,6 +16442,10 @@
           "externalLinkConfirm": "Open link",
           "externalLinkCancel": "Cancel"
         }
+      },
+      "HostedReviewUnlinkMenuItem": {
+        "label": "Unlink {{value0}} from workspace",
+        "description": "Orca will hide {{value0}} {{value1}} details for this workspace. The {{value0}} and branch on {{value2}} won’t be changed."
       }
     },
     "i18n": {
@@ -16551,7 +16571,8 @@
           "ultra": "Ultra",
           "on": "On",
           "off": "Off"
-        }
+        },
+        "pendingAttachmentLimit": "Too many attachments are waiting. Finish composing before attaching more."
       },
       "tool": {
         "running": "Running…",
@@ -17106,5 +17127,17 @@
   },
   "quickOpen": {
     "moreMatchesAvailable": "More matches may be available. Refine your search to narrow the results."
+  },
+  "checksPanel": {
+    "unlinked": {
+      "title": "Pull request unlinked",
+      "description": "PR #{{number}} is hidden for this workspace. Link it again to restore checks and review details.",
+      "relink": "Link PR #{{number}}"
+    }
+  },
+  "sourceControl": {
+    "unlinkedPr": {
+      "status": "PR #{{number}} unlinked"
+    }
   }
 }
