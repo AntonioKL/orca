@@ -43,9 +43,9 @@ describe.runIf(process.env.ORCA_CODEX_CONTRACT_REQUIRED === '1' && !binary)(
 // Why fixed: `thread/read` never reaches the network, and a whole session is
 // spawn + initialize + one RPC. A generous ceiling still fails fast on a wedged child.
 const SESSION_TIMEOUT_MS = 60_000
-// Why: each contract case can use two bounded app-server sessions; keep Vitest's
+// Why: each contract case can use three bounded app-server sessions; keep Vitest's
 // watchdog longer than both child deadlines so cleanup cannot race a test timeout.
-const CONTRACT_TEST_TIMEOUT_MS = SESSION_TIMEOUT_MS * 2 + 10_000
+const CONTRACT_TEST_TIMEOUT_MS = SESSION_TIMEOUT_MS * 3 + 10_000
 
 type ThreadRow = { id: string; archived: number }
 
