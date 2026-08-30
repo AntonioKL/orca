@@ -4,6 +4,10 @@ import { useRunningTerminalCloseConfirmStore } from '@/store/running-terminal-cl
 import type { TerminalTabCloseReason } from '@/store/slices/terminal-tab-retirement'
 import type { AppState } from '@/store/types'
 import { resolveBusyPtyCloseCopyKind } from './terminal-close-copy-kind'
+import {
+  terminalCloseDecision,
+  terminalCloseLivenessFromInspection
+} from '../../../../shared/terminal-close-liveness'
 
 export type RunningTerminalCloseGuardOptions = {
   force?: boolean
@@ -41,9 +45,9 @@ export function shouldConfirmRunningTerminalClose(
 /** Every PTY the tab could still own. `ptyIdsByTabId` is the liveness map the rest of the
  *  app reads, but a mounting pane is bound into the layout before the map catches up, and
  *  the store's own teardown collector unions both for exactly that reason — reading only
- *  the map would let a close slip through the window with no prompt. A stale id costs
- *  nothing: its probe fails and the guard falls open. */
-function collectTabPtyIds(
+ *  the map would let a close slip through the window with no prompt. A stale id is retained
+ *  as an unverifiable candidate so a lost host cannot look exited. */
+export function collectTabPtyIds(
   state: Pick<AppState, 'ptyIdsByTabId' | 'terminalLayoutsByTabId'>,
   terminalTabId: string
 ): string[] {
@@ -127,16 +131,15 @@ export function guardRunningTerminalClose(params: {
       if (decided) {
         return
       }
-      // Why: fail open on an *answered* probe, matching the Cmd+W pane path — a rejection
-      // (wedged relay, legacy provider) or a stale remote handle is not evidence of a live
-      // child, and a close button that silently does nothing is worse than closing a busy tab.
+      // Rejections are unverifiable, not evidence of an exited PTY; the shared table keeps
+      // tab, pane, and window closes conservative when their execution host cannot answer.
       const busyPtyIds = ptyIds.filter((_, index) => {
         const result = results[index]
-        return (
-          result?.status === 'fulfilled' &&
-          result.value.hasChildProcesses &&
-          result.value.unavailable !== true
-        )
+        const liveness =
+          result?.status === 'fulfilled'
+            ? terminalCloseLivenessFromInspection(result.value)
+            : 'unverifiable'
+        return terminalCloseDecision(liveness) === 'prompt'
       })
       if (busyPtyIds.length === 0) {
         closeNow()

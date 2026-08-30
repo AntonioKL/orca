@@ -149,7 +149,15 @@ import {
   useActivityTerminalPortals,
   type ActivityTerminalPortalTarget
 } from './activity/activity-terminal-portal'
-import { isRemoteRuntimePtyId } from '@/runtime/runtime-terminal-inspection'
+import {
+  inspectRuntimeTerminalProcess,
+  isRemoteRuntimePtyId
+} from '@/runtime/runtime-terminal-inspection'
+import { collectTabPtyIds } from './terminal/running-terminal-close-guard'
+import {
+  terminalCloseDecision,
+  terminalCloseLivenessFromInspection
+} from '../../../shared/terminal-close-liveness'
 import {
   activateWebRuntimeSessionTab,
   createWebRuntimeSessionBrowserTab,
@@ -555,20 +563,27 @@ function Terminal(): React.JSX.Element | null {
               return []
             }
             return worktreeTabs
-              .flatMap((tab) => state.ptyIdsByTabId[tab.id] ?? [])
+              .flatMap((tab) => collectTabPtyIds(state, tab.id))
               .filter((ptyId) => !isRemoteRuntimePtyId(ptyId))
           }
         )
         if (localPtyIds.length > 0) {
-          void Promise.all(localPtyIds.map((id) => window.api.pty.hasChildProcesses(id))).then(
-            (results) => {
-              if (results.some(Boolean)) {
-                setWindowCloseDialogOpen(true)
-              } else {
-                confirmNativeWindowClose()
-              }
+          void Promise.allSettled(
+            localPtyIds.map((id) => inspectRuntimeTerminalProcess(state.settings, id))
+          ).then((results) => {
+            const hasBusyPty = results.some((result) => {
+              const liveness =
+                result.status === 'fulfilled'
+                  ? terminalCloseLivenessFromInspection(result.value)
+                  : 'unverifiable'
+              return terminalCloseDecision(liveness) === 'prompt'
+            })
+            if (hasBusyPty) {
+              setWindowCloseDialogOpen(true)
+            } else {
+              confirmNativeWindowClose()
             }
-          )
+          })
           return
         }
       }

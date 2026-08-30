@@ -58,6 +58,10 @@ import { useTerminalFontZoom } from './useTerminalFontZoom'
 import CloseTerminalDialog, { type CloseTerminalDialogCopyKind } from './CloseTerminalDialog'
 import { resolveLeafCloseCopyKind } from '../terminal/terminal-close-copy-kind'
 import { RUNNING_CLOSE_PROBE_TIMEOUT_MS } from '../terminal/running-terminal-close-guard'
+import {
+  terminalCloseDecision,
+  terminalCloseLivenessFromInspection
+} from '../../../../shared/terminal-close-liveness'
 import CodexRestartChip from '../CodexRestartChip'
 import { MobileDriverOverlay } from './MobileDriverOverlay'
 import { stripSshReconnectOwnedErrorLines, TerminalErrorToast } from './TerminalErrorToast'
@@ -1249,8 +1253,9 @@ function TerminalPane(
         .then((process) => {
           clearTimeout(probeTimeout)
           decide(() => {
+            const liveness = terminalCloseLivenessFromInspection(process)
             if (
-              !process.hasChildProcesses ||
+              terminalCloseDecision(liveness) === 'close' ||
               settings?.skipCloseTerminalWithRunningProcessConfirm
             ) {
               executeClosePane(paneId)
@@ -1259,10 +1264,17 @@ function TerminalPane(
             }
           })
         })
-        // Why: if the child-process probe rejects (wedged IPC, legacy provider), close anyway — Cmd+W doing nothing is worse than closing a pane with a child.
+        // A rejected probe is unverifiable, not evidence of an exited pane.
         .catch(() => {
           clearTimeout(probeTimeout)
-          decide(() => executeClosePane(paneId))
+          // A rejected probe is unverifiable, not evidence of an idle pane.
+          decide(() => {
+            if (settings?.skipCloseTerminalWithRunningProcessConfirm) {
+              executeClosePane(paneId)
+            } else {
+              confirmClose()
+            }
+          })
         })
     },
     [executeClosePane, getCloseDialogCopyKind]
