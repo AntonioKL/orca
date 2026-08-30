@@ -5,6 +5,25 @@ export type EchoCandidate = {
   source: TypingInputSource
   text: string
   dispatchedAt: number | null
+  status:
+    | 'undispatched'
+    | 'dispatched'
+    | 'unmatched-undispatched'
+    | 'unmatched-dispatched'
+    | 'prevented'
+}
+
+export type RecordedKeystroke = {
+  candidate: EchoCandidate
+  unmatched: number
+}
+
+export function createEchoCandidate(
+  t0: number,
+  source: TypingInputSource,
+  text: string
+): EchoCandidate {
+  return { t0, source, text, dispatchedAt: null, status: 'undispatched' }
 }
 
 export type EchoBatch = {

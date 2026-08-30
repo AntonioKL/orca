@@ -244,12 +244,13 @@ function startProbe(): string {
       return undefined
     }
     const recordedAt = performance.now()
-    state.unmatchedKeystrokes += recordKeystroke(target, recordedAt, signal.source, signal.text)
+    const recorded = recordKeystroke(target, recordedAt, signal.source, signal.text)
+    state.unmatchedKeystrokes += recorded.unmatched
     if (signal.source === 'ime') {
       return {
         settleAfterPropagation: (defaultPrevented) => {
           const discardResult = defaultPrevented
-            ? discardUndispatchedKeystroke(target, recordedAt, signal.source)
+            ? discardUndispatchedKeystroke(target, recorded.candidate)
             : null
           if (discardResult === null) {
             state.byInputSource.recordInput(signal.source, signal.text)

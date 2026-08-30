@@ -2,6 +2,24 @@ import type { InstrumentedPane } from './echo-instrumentation'
 import type { EchoCandidate } from './echo-observation'
 
 const ECHO_TIMEOUT_MS = 2000
+export const MAX_PENDING_ECHO_CANDIDATES = 64
+
+export function trackIgnoredEchoDispatch(
+  entry: InstrumentedPane,
+  candidate: EchoCandidate,
+  now: number
+): void {
+  if (entry.ignoredDispatches.length === 0) {
+    entry.deferredNextDispatch = entry.nextDispatch
+  }
+  entry.nextDispatch = null
+  candidate.status = 'unmatched-undispatched'
+  entry.ignoredDispatches.push(candidate)
+  if (entry.ignoredDispatches.length > MAX_PENDING_ECHO_CANDIDATES) {
+    entry.ignoredDispatches.shift()
+    entry.ignoredDispatchOverflowedAt = now
+  }
+}
 
 export function clearEchoDispatchSelection(
   entry: InstrumentedPane,
@@ -12,6 +30,14 @@ export function clearEchoDispatchSelection(
   }
   if (entry.deferredNextDispatch === candidate) {
     entry.deferredNextDispatch = null
+  }
+}
+
+export function restoreDeferredEchoDispatch(entry: InstrumentedPane): void {
+  const deferred = entry.deferredNextDispatch
+  entry.deferredNextDispatch = null
+  if (deferred && entry.undispatched.includes(deferred)) {
+    entry.nextDispatch = deferred
   }
 }
 
@@ -37,23 +63,49 @@ function drainTimedOutCandidates(
 
 /** Removes inputs whose echo window elapsed and returns the unmatched count. */
 export function drainTimedOutEchoCandidates(entry: InstrumentedPane, now: number): number {
-  let dropped = drainTimedOutCandidates(entry.undispatched, now, (candidate) =>
+  const hadIgnoredDispatches = entry.ignoredDispatches.length > 0
+  drainTimedOutCandidates(entry.ignoredDispatches, now)
+  const overflowExpired =
+    entry.ignoredDispatchOverflowedAt !== null &&
+    now - entry.ignoredDispatchOverflowedAt > ECHO_TIMEOUT_MS
+  if (overflowExpired) {
+    entry.ignoredDispatchOverflowedAt = null
+  }
+  if (
+    (hadIgnoredDispatches || overflowExpired) &&
+    entry.ignoredDispatches.length === 0 &&
+    entry.ignoredDispatchOverflowedAt === null
+  ) {
+    restoreDeferredEchoDispatch(entry)
+  }
+  let dropped = drainTimedOutCandidates(entry.undispatched, now, (candidate) => {
+    candidate.status = 'unmatched-undispatched'
     clearEchoDispatchSelection(entry, candidate)
-  )
-  const awaitingEchoDropped = drainTimedOutCandidates(entry.awaitingEcho, now)
+  })
+  const awaitingEchoDropped = drainTimedOutCandidates(entry.awaitingEcho, now, (candidate) => {
+    candidate.status = 'unmatched-dispatched'
+  })
   if (awaitingEchoDropped > 0) {
     entry.attributionGap = true
     dropped += awaitingEchoDropped
   }
   if (entry.parsingBatch) {
-    const parsingDropped = drainTimedOutCandidates(entry.parsingBatch.candidates, now)
+    const parsingDropped = drainTimedOutCandidates(
+      entry.parsingBatch.candidates,
+      now,
+      (candidate) => {
+        candidate.status = 'unmatched-dispatched'
+      }
+    )
     if (parsingDropped > 0) {
       entry.parsingBatch.hasAttributionGap = true
       dropped += parsingDropped
     }
   }
   for (const batch of entry.parsedBatches) {
-    const parsedDropped = drainTimedOutCandidates(batch.candidates, now)
+    const parsedDropped = drainTimedOutCandidates(batch.candidates, now, (candidate) => {
+      candidate.status = 'unmatched-dispatched'
+    })
     if (parsedDropped > 0) {
       batch.hasAttributionGap = true
       dropped += parsedDropped

@@ -9,12 +9,20 @@
 import { getUtf8ByteLength } from '../../../../shared/utf8-byte-limits'
 import { subscribeToTerminalUserInput } from '@/components/terminal-pane/terminal-user-input-signal'
 import type { Terminal } from '@xterm/xterm'
-import { clearEchoDispatchSelection, drainTimedOutEchoCandidates } from './echo-candidate-timeout'
 import {
+  clearEchoDispatchSelection,
+  drainTimedOutEchoCandidates,
+  MAX_PENDING_ECHO_CANDIDATES,
+  restoreDeferredEchoDispatch,
+  trackIgnoredEchoDispatch
+} from './echo-candidate-timeout'
+import {
+  createEchoCandidate,
   createEchoObservation,
   type EchoBatch,
   type EchoCandidate,
-  type EchoObservation as EchoObservationValue
+  type EchoObservation as EchoObservationValue,
+  type RecordedKeystroke
 } from './echo-observation'
 import type { TypingInputSource } from './input-events'
 import type { ProbePane } from './pane-target'
@@ -23,7 +31,8 @@ export type {
   AmbiguousEchoBurst,
   EchoObservation,
   EchoSourceCounts,
-  ExactEchoSample
+  ExactEchoSample,
+  RecordedKeystroke
 } from './echo-observation'
 export {
   findPaneOwningFocus,
@@ -42,18 +51,13 @@ export type PreventedKeystrokeDiscard = 'pending' | 'counted-unmatched' | null
 
 type PendingKeystroke = EchoCandidate
 
-type IgnoredDispatch = {
-  t0: number
-  source: KeystrokeSource
-}
-
 export type InstrumentedPane = {
   pane: ProbePane | null
   undispatched: PendingKeystroke[]
   nextDispatch: PendingKeystroke | null
   deferredNextDispatch: PendingKeystroke | null
-  ignoredDispatches: number
-  ignoredDispatchIdentities: IgnoredDispatch[]
+  ignoredDispatches: PendingKeystroke[]
+  ignoredDispatchOverflowedAt: number | null
   awaitingEcho: PendingKeystroke[]
   attributionGap: boolean
   parsingBatch: EchoBatch | null
@@ -63,73 +67,54 @@ export type InstrumentedPane = {
   restoreWrite: (() => void) | null
 }
 
-const MAX_PENDING = 64
-
-function restoreDeferredDispatch(entry: InstrumentedPane): void {
-  const deferred = entry.deferredNextDispatch
-  entry.deferredNextDispatch = null
-  if (deferred && entry.undispatched.includes(deferred)) {
-    entry.nextDispatch = deferred
-  }
-}
-
 /** Returns how many inputs were dropped without a painted output observation. */
 export function recordKeystroke(
   entry: InstrumentedPane,
   now: number,
   source: KeystrokeSource,
   text: string = ''
-): number {
+): RecordedKeystroke {
   const dropped = drainTimedOutEchoCandidates(entry, now)
-  if (entry.pendingCount >= MAX_PENDING) {
-    if (entry.ignoredDispatches === 0) {
-      entry.deferredNextDispatch = entry.nextDispatch
-    }
-    entry.nextDispatch = null
-    entry.ignoredDispatches += 1
-    entry.ignoredDispatchIdentities.push({ t0: now, source })
-    if (entry.ignoredDispatchIdentities.length > MAX_PENDING) {
-      entry.ignoredDispatchIdentities.shift()
-    }
-    return dropped + 1
+  const candidate = createEchoCandidate(now, source, text)
+  if (entry.pendingCount >= MAX_PENDING_ECHO_CANDIDATES) {
+    trackIgnoredEchoDispatch(entry, candidate, now)
+    return { candidate, unmatched: dropped + 1 }
   }
-  const pending = { t0: now, source, text, dispatchedAt: null }
-  entry.undispatched.push(pending)
-  entry.nextDispatch = pending
+  entry.undispatched.push(candidate)
+  entry.nextDispatch = candidate
   entry.pendingCount += 1
-  return dropped
+  return { candidate, unmatched: dropped }
 }
 
 /** Removes a prevented routed commit only if it never reached terminal.onData. */
 export function discardUndispatchedKeystroke(
   entry: InstrumentedPane,
-  recordedAt: number,
-  source: KeystrokeSource
+  candidate: PendingKeystroke
 ): PreventedKeystrokeDiscard {
-  for (let index = entry.ignoredDispatchIdentities.length - 1; index >= 0; index -= 1) {
-    const ignored = entry.ignoredDispatchIdentities[index]
-    if (!ignored || ignored.t0 !== recordedAt || ignored.source !== source) {
-      continue
+  if (candidate.status === 'unmatched-undispatched') {
+    const index = entry.ignoredDispatches.lastIndexOf(candidate)
+    if (index !== -1) {
+      entry.ignoredDispatches.splice(index, 1)
     }
-    entry.ignoredDispatchIdentities.splice(index, 1)
-    entry.ignoredDispatches -= 1
-    if (entry.ignoredDispatches === 0) {
-      restoreDeferredDispatch(entry)
+    candidate.status = 'prevented'
+    if (entry.ignoredDispatches.length === 0 && entry.ignoredDispatchOverflowedAt === null) {
+      restoreDeferredEchoDispatch(entry)
     }
     return 'counted-unmatched'
   }
-  for (let index = entry.undispatched.length - 1; index >= 0; index -= 1) {
-    const pending = entry.undispatched[index]
-    if (!pending || pending.t0 !== recordedAt || pending.source !== source) {
-      continue
-    }
-    entry.undispatched.splice(index, 1)
-    clearEchoDispatchSelection(entry, pending)
-    entry.nextDispatch ??= entry.undispatched.at(-1) ?? null
-    entry.pendingCount -= 1
-    return 'pending'
+  if (candidate.status !== 'undispatched') {
+    return null
   }
-  return null
+  const index = entry.undispatched.lastIndexOf(candidate)
+  if (index === -1) {
+    return null
+  }
+  entry.undispatched.splice(index, 1)
+  clearEchoDispatchSelection(entry, candidate)
+  entry.nextDispatch ??= entry.undispatched.at(-1) ?? null
+  entry.pendingCount -= 1
+  candidate.status = 'prevented'
+  return 'pending'
 }
 
 function updateEchoBatch(entry: InstrumentedPane): EchoBatch | null {
@@ -164,8 +149,8 @@ export function instrumentPaneEcho(
     undispatched: [],
     nextDispatch: null,
     deferredNextDispatch: null,
-    ignoredDispatches: 0,
-    ignoredDispatchIdentities: [],
+    ignoredDispatches: [],
+    ignoredDispatchOverflowedAt: null,
     awaitingEcho: [],
     attributionGap: false,
     parsingBatch: null,
@@ -199,7 +184,7 @@ export function instrumentPaneEcho(
 
   let pendingUserInputSignals = 0
   const userInputDisposable = subscribeToTerminalUserInput(terminal as Terminal, () => {
-    pendingUserInputSignals = Math.min(MAX_PENDING, pendingUserInputSignals + 1)
+    pendingUserInputSignals = Math.min(MAX_PENDING_ECHO_CANDIDATES, pendingUserInputSignals + 1)
   })
   if (userInputDisposable) {
     entry.disposables.push(userInputDisposable)
@@ -214,16 +199,26 @@ export function instrumentPaneEcho(
           }
           pendingUserInputSignals -= 1
         }
+        if (entry.ignoredDispatchOverflowedAt !== null) {
+          const ignored = entry.ignoredDispatches.pop()
+          if (ignored) {
+            ignored.status = 'unmatched-dispatched'
+          }
+          entry.attributionGap = true
+          return
+        }
         let pending = entry.nextDispatch
         if (pending && entry.undispatched.at(-1) === pending) {
           entry.undispatched.pop()
           entry.nextDispatch = null
-        } else if (!pending && entry.ignoredDispatches > 0) {
-          entry.ignoredDispatches -= 1
-          entry.ignoredDispatchIdentities.pop()
+        } else if (!pending && entry.ignoredDispatches.length > 0) {
+          const ignored = entry.ignoredDispatches.pop()
+          if (ignored) {
+            ignored.status = 'unmatched-dispatched'
+          }
           entry.attributionGap = true
-          if (entry.ignoredDispatches === 0) {
-            restoreDeferredDispatch(entry)
+          if (entry.ignoredDispatches.length === 0) {
+            restoreDeferredEchoDispatch(entry)
           }
           return
         } else {
@@ -233,6 +228,7 @@ export function instrumentPaneEcho(
         if (!pending) {
           return
         }
+        pending.status = 'dispatched'
         pending.dispatchedAt = performance.now()
         entry.awaitingEcho.push(pending)
       })
@@ -288,8 +284,8 @@ export function detachPaneEcho(entry: InstrumentedPane): number {
   entry.undispatched = []
   entry.nextDispatch = null
   entry.deferredNextDispatch = null
-  entry.ignoredDispatches = 0
-  entry.ignoredDispatchIdentities = []
+  entry.ignoredDispatches = []
+  entry.ignoredDispatchOverflowedAt = null
   entry.awaitingEcho = []
   entry.attributionGap = false
   entry.parsingBatch = null

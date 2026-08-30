@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => {
     findPaneOwningNode: vi.fn<() => object | null>(() => null),
     inputListener: null as ((signal: TypingInputSignal) => TypingInputRegistration | void) | null,
     panes,
-    recordKeystroke: vi.fn(() => 0)
+    recordKeystroke: vi.fn(() => ({ candidate: {}, unmatched: 0 }))
   }
 })
 
@@ -98,6 +98,33 @@ describe('typing latency diagnostic lifecycle', () => {
     bridge.stop()
   })
 
+  it('reverses a timeout count when the IME commit later settles prevented', () => {
+    vi.spyOn(console, 'log').mockImplementation(() => undefined)
+    mocks.findPaneOwningNode.mockReturnValueOnce({ pane: mocks.panes[0] })
+    mocks.drainTimedOutEchoCandidates.mockReturnValueOnce(1)
+    mocks.discardUndispatchedKeystroke.mockReturnValueOnce('counted-unmatched')
+    installTypingLatencyDiagnostic()
+    const bridge = (window as DiagnosticWindow).__orcaTypingDiagnostic
+    if (!bridge || !mocks.inputListener) {
+      throw new Error('Typing latency diagnostic did not start')
+    }
+    bridge.start()
+
+    const registration = mocks.inputListener({
+      event: new CustomEvent('xterm-composition-session-end'),
+      source: 'ime',
+      text: '한'
+    })
+    expect(bridge.report().sampling.unmatchedKeystrokes).toBe(1)
+    registration?.settleAfterPropagation(true)
+
+    expect(bridge.report()).toMatchObject({
+      sampling: { unmatchedKeystrokes: 0 },
+      byInputSource: { ime: { observedInputs: 0 } }
+    })
+    bridge.stop()
+  })
+
   it('does not count a stale prevented IME commit', () => {
     vi.spyOn(console, 'log').mockImplementation(() => undefined)
     mocks.findPaneOwningNode.mockReturnValueOnce({ pane: mocks.panes[0] })
@@ -154,7 +181,7 @@ describe('typing latency diagnostic lifecycle', () => {
   it('removes queue-cap accounting when a prevented IME commit was not retained', () => {
     vi.spyOn(console, 'log').mockImplementation(() => undefined)
     mocks.findPaneOwningNode.mockReturnValueOnce({ pane: mocks.panes[0] })
-    mocks.recordKeystroke.mockReturnValueOnce(1)
+    mocks.recordKeystroke.mockReturnValueOnce({ candidate: {}, unmatched: 1 })
     mocks.discardUndispatchedKeystroke.mockReturnValueOnce('counted-unmatched')
     installTypingLatencyDiagnostic()
     const bridge = (window as DiagnosticWindow).__orcaTypingDiagnostic

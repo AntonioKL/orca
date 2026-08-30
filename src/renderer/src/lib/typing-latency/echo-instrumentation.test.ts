@@ -16,8 +16,8 @@ function emptyEntry(): InstrumentedPane {
     undispatched: [],
     nextDispatch: null,
     deferredNextDispatch: null,
-    ignoredDispatches: 0,
-    ignoredDispatchIdentities: [],
+    ignoredDispatches: [],
+    ignoredDispatchOverflowedAt: null,
     awaitingEcho: [],
     attributionGap: false,
     parsingBatch: null,
@@ -99,8 +99,8 @@ afterEach(() => {
 describe('recordKeystroke', () => {
   it('queues inputs rather than overwriting a single slot', () => {
     const entry = emptyEntry()
-    expect(recordKeystroke(entry, 0, 'direct')).toBe(0)
-    expect(recordKeystroke(entry, 5, 'ime')).toBe(0)
+    expect(recordKeystroke(entry, 0, 'direct').unmatched).toBe(0)
+    expect(recordKeystroke(entry, 5, 'ime').unmatched).toBe(0)
     expect(entry.undispatched.map((pending) => pending.t0)).toEqual([0, 5])
     expect(entry.pendingCount).toBe(2)
   })
@@ -109,40 +109,69 @@ describe('recordKeystroke', () => {
     const entry = emptyEntry()
     recordKeystroke(entry, 0, 'direct')
     recordKeystroke(entry, 1, 'direct')
-    expect(recordKeystroke(entry, 5000, 'direct')).toBe(2)
+    expect(recordKeystroke(entry, 5000, 'direct').unmatched).toBe(2)
     expect(entry.pendingCount).toBe(1)
     expect(entry.attributionGap).toBe(false)
   })
 
   it('drains a final timed-out input without waiting for another keystroke', () => {
     const entry = emptyEntry()
-    recordKeystroke(entry, 0, 'direct')
+    const recorded = recordKeystroke(entry, 0, 'direct')
 
     expect(drainTimedOutEchoCandidates(entry, 2_001)).toBe(1)
     expect(drainTimedOutEchoCandidates(entry, 2_002)).toBe(0)
+    expect(recorded.candidate.status).toBe('unmatched-undispatched')
+    expect(entry.pendingCount).toBe(0)
+  })
+
+  it('reverses timeout accounting when an undispatched IME commit settles prevented', () => {
+    const entry = emptyEntry()
+    const recorded = recordKeystroke(entry, 0, 'ime', '한')
+
+    expect(drainTimedOutEchoCandidates(entry, 2_001)).toBe(1)
+    expect(discardUndispatchedKeystroke(entry, recorded.candidate)).toBe('counted-unmatched')
+    expect(discardUndispatchedKeystroke(entry, recorded.candidate)).toBeNull()
+    expect(entry).toMatchObject({ pendingCount: 0, ignoredDispatches: [] })
+  })
+
+  it('keeps timeout accounting when the IME commit reached terminal input', () => {
+    const fake = fakeTerminal()
+    const entry = instrumentPaneEcho({ terminal: fake.terminal }, () => undefined)
+    const recorded = recordKeystroke(entry, 0, 'ime', '한')
+    fake.emitData('한')
+
+    expect(drainTimedOutEchoCandidates(entry, 2_001)).toBe(1)
+    expect(recorded.candidate.status).toBe('unmatched-dispatched')
+    expect(discardUndispatchedKeystroke(entry, recorded.candidate)).toBeNull()
     expect(entry.pendingCount).toBe(0)
   })
 
   it('bounds pending input state during sustained typing', () => {
     const entry = emptyEntry()
     let dropped = 0
+    const records: ReturnType<typeof recordKeystroke>[] = []
     for (let index = 0; index < 200; index += 1) {
-      dropped += recordKeystroke(entry, index, 'direct')
+      const recorded = recordKeystroke(entry, index, 'direct')
+      dropped += recorded.unmatched
+      records.push(recorded)
     }
     expect(entry.pendingCount).toBe(64)
     expect(entry.undispatched).toHaveLength(64)
+    expect(entry.ignoredDispatches).toHaveLength(64)
     expect(dropped).toBe(136)
+    expect(discardUndispatchedKeystroke(entry, records[64]!.candidate)).toBe('counted-unmatched')
+    expect(entry.ignoredDispatches).toHaveLength(64)
   })
 
   it('drops a prevented commit only when it never dispatched', () => {
     const fake = fakeTerminal()
     const entry = instrumentPaneEcho({ terminal: fake.terminal }, () => undefined)
-    recordKeystroke(entry, 10, 'ime', '한')
-    expect(discardUndispatchedKeystroke(entry, 10, 'ime')).toBe('pending')
+    const prevented = recordKeystroke(entry, 10, 'ime', '한')
+    expect(discardUndispatchedKeystroke(entry, prevented.candidate)).toBe('pending')
 
-    recordKeystroke(entry, 20, 'ime', '글')
+    const dispatched = recordKeystroke(entry, 20, 'ime', '글')
     fake.emitData('글')
-    expect(discardUndispatchedKeystroke(entry, 20, 'ime')).toBeNull()
+    expect(discardUndispatchedKeystroke(entry, dispatched.candidate)).toBeNull()
     expect(entry.awaitingEcho).toHaveLength(1)
   })
 
@@ -165,7 +194,7 @@ describe('recordKeystroke', () => {
       recordKeystroke(entry, index, 'direct')
     }
 
-    expect(recordKeystroke(entry, 64, 'direct')).toBe(1)
+    expect(recordKeystroke(entry, 64, 'direct').unmatched).toBe(1)
     fake.emitData('rejected')
 
     expect(entry.undispatched).toHaveLength(64)
@@ -174,16 +203,51 @@ describe('recordKeystroke', () => {
     expect(entry.attributionGap).toBe(true)
   })
 
+  it('fences overflow dispatches without consuming retained inputs', () => {
+    const fake = fakeTerminal()
+    const entry = instrumentPaneEcho({ terminal: fake.terminal }, () => undefined)
+    for (let index = 0; index < 64; index += 1) {
+      recordKeystroke(entry, index, 'direct')
+    }
+    for (let index = 64; index < 129; index += 1) {
+      recordKeystroke(entry, index, 'direct')
+    }
+
+    expect(entry.ignoredDispatches).toHaveLength(64)
+    expect(entry.ignoredDispatchOverflowedAt).toBe(128)
+    for (let index = 0; index < 65; index += 1) {
+      fake.emitData('rejected')
+    }
+
+    expect(entry.undispatched).toHaveLength(64)
+    expect(entry).toMatchObject({
+      awaitingEcho: [],
+      pendingCount: 64,
+      ignoredDispatches: [],
+      ignoredDispatchOverflowedAt: 128
+    })
+    expect(drainTimedOutEchoCandidates(entry, 2_129)).toBe(64)
+    expect(entry).toMatchObject({
+      undispatched: [],
+      pendingCount: 0,
+      ignoredDispatchOverflowedAt: null
+    })
+    const recovered = recordKeystroke(entry, 2_130, 'direct')
+    fake.emitData('recovered')
+    expect(entry.awaitingEcho).toEqual([recovered.candidate])
+  })
+
   it('settles a prevented cap-rejected commit without touching retained inputs', () => {
     const entry = emptyEntry()
     for (let index = 0; index < 64; index += 1) {
       recordKeystroke(entry, index, 'direct')
     }
 
-    expect(recordKeystroke(entry, 64, 'ime', '한')).toBe(1)
-    expect(discardUndispatchedKeystroke(entry, 64, 'ime')).toBe('counted-unmatched')
+    const rejected = recordKeystroke(entry, 64, 'ime', '한')
+    expect(rejected.unmatched).toBe(1)
+    expect(discardUndispatchedKeystroke(entry, rejected.candidate)).toBe('counted-unmatched')
     expect(entry.undispatched).toHaveLength(64)
-    expect(entry.ignoredDispatches).toBe(0)
+    expect(entry.ignoredDispatches).toEqual([])
     expect(entry.attributionGap).toBe(false)
   })
 
@@ -193,12 +257,14 @@ describe('recordKeystroke', () => {
       recordKeystroke(entry, index, 'direct')
     }
 
-    expect(recordKeystroke(entry, 64, 'ime', '한')).toBe(1)
-    expect(recordKeystroke(entry, 65, 'ime', '글')).toBe(1)
-    expect(discardUndispatchedKeystroke(entry, 64, 'ime')).toBe('counted-unmatched')
-    expect(discardUndispatchedKeystroke(entry, 65, 'ime')).toBe('counted-unmatched')
+    const first = recordKeystroke(entry, 64, 'ime', '한')
+    const second = recordKeystroke(entry, 65, 'ime', '글')
+    expect(first.unmatched).toBe(1)
+    expect(second.unmatched).toBe(1)
+    expect(discardUndispatchedKeystroke(entry, first.candidate)).toBe('counted-unmatched')
+    expect(discardUndispatchedKeystroke(entry, second.candidate)).toBe('counted-unmatched')
     expect(entry.undispatched).toHaveLength(64)
-    expect(entry.ignoredDispatches).toBe(0)
+    expect(entry.ignoredDispatches).toEqual([])
     expect(entry.attributionGap).toBe(false)
   })
 
@@ -208,12 +274,12 @@ describe('recordKeystroke', () => {
       recordKeystroke(entry, index, 'direct')
     }
 
-    recordKeystroke(entry, 64, 'ime', '한')
-    recordKeystroke(entry, 64, 'ime', '글')
+    const first = recordKeystroke(entry, 64, 'ime', '한')
+    const second = recordKeystroke(entry, 64, 'ime', '글')
 
-    expect(discardUndispatchedKeystroke(entry, 64, 'ime')).toBe('counted-unmatched')
-    expect(discardUndispatchedKeystroke(entry, 64, 'ime')).toBe('counted-unmatched')
-    expect(entry.ignoredDispatches).toBe(0)
+    expect(discardUndispatchedKeystroke(entry, first.candidate)).toBe('counted-unmatched')
+    expect(discardUndispatchedKeystroke(entry, second.candidate)).toBe('counted-unmatched')
+    expect(entry.ignoredDispatches).toEqual([])
   })
 })
 
@@ -431,7 +497,7 @@ describe('instrumentPaneEcho', () => {
     recordKeystroke(entry, 0, 'direct', 'A')
     now.mockReturnValueOnce(1)
     fake.emitData('A')
-    expect(recordKeystroke(entry, 5_000, 'direct', 'B')).toBe(1)
+    expect(recordKeystroke(entry, 5_000, 'direct', 'B').unmatched).toBe(1)
     now.mockReturnValueOnce(5_001)
     fake.emitData('B')
     fake.terminal.write('late A')
@@ -472,7 +538,7 @@ describe('instrumentPaneEcho', () => {
     recordKeystroke(entry, 0, 'direct', 'A')
     now.mockReturnValueOnce(1)
     fake.emitData('A')
-    expect(recordKeystroke(entry, 5_000, 'direct', 'B')).toBe(1)
+    expect(recordKeystroke(entry, 5_000, 'direct', 'B').unmatched).toBe(1)
     fake.terminal.write('late A')
     now.mockReturnValueOnce(5_001)
     fake.emitParsed()
