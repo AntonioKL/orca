@@ -69,7 +69,8 @@ describe('worktree remote runtime mutations', () => {
       worktreeId: wt.id,
       linkedPRNumber: null,
       fallbackPRNumber: null,
-      fallbackPRSource: 'explicit'
+      fallbackPRSource: 'explicit',
+      reason: 'active'
     })
     for (let i = 0; i < 6; i++) {
       await Promise.resolve()
@@ -116,7 +117,8 @@ describe('worktree remote runtime mutations', () => {
       worktreeId: wt.id,
       linkedPRNumber: null,
       fallbackPRNumber: null,
-      fallbackPRSource: 'explicit'
+      fallbackPRSource: 'explicit',
+      reason: 'active'
     })
     for (let i = 0; i < 6; i++) {
       await Promise.resolve()
@@ -307,7 +309,8 @@ describe('worktree remote runtime mutations', () => {
       worktreeId: wt.id,
       linkedPRNumber: null,
       fallbackPRNumber: null,
-      fallbackPRSource: 'explicit'
+      fallbackPRSource: 'explicit',
+      reason: 'active'
     })
 
     for (let i = 0; i < 6; i++) {

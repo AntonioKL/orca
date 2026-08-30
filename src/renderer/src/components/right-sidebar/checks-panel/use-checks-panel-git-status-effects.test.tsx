@@ -173,7 +173,8 @@ describe('useChecksPanelGitStatusEffects poll runner', () => {
 
     expect(mocks.getRuntimeGitStatus).toHaveBeenCalledTimes(2)
     expect(mocks.getRuntimeGitStatus).toHaveBeenLastCalledWith(
-      expect.objectContaining({ worktreeId: 'worktree-B', worktreePath: '/repo-b' })
+      expect.objectContaining({ worktreeId: 'worktree-B', worktreePath: '/repo-b' }),
+      { admissionTier: 'status' }
     )
   })
 
