@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { detectTerminalComposerDraft } from './terminal-composer-draft'
+import {
+  detectTerminalComposerDraft,
+  hasTerminalComposerPlaceholder
+} from './terminal-composer-draft'
 
 describe('detectTerminalComposerDraft', () => {
   it('separates a cursor-right suggestion from the composer line', () => {
@@ -26,20 +29,21 @@ describe('detectTerminalComposerDraft', () => {
   })
 
   it('keeps stock dim placeholders out of draft metadata', () => {
-    expect(
-      detectTerminalComposerDraft({
-        rows: ['› Ask Codex to do anything'],
-        typedRows: ['›'],
-        promptGlyphBoldRows: [true],
-        rowsBelow: [],
-        typedRowsBelow: [],
-        beforeCursor: '› ',
-        afterCursor: '',
-        rawAfterCursor: 'Ask Codex to do anything',
-        cursorHidden: false,
-        cursorViewportRow: 4
-      })
-    ).toBeNull()
+    const context = {
+      rows: ['› Ask Codex to do anything'],
+      typedRows: ['›'],
+      promptGlyphBoldRows: [true],
+      rowsBelow: ['', 'gpt-5.6 · ~/repo'],
+      typedRowsBelow: ['', 'gpt-5.6 · ~/repo'],
+      beforeCursor: '› ',
+      afterCursor: '',
+      rawAfterCursor: 'Ask Codex to do anything',
+      cursorHidden: false,
+      cursorViewportRow: 4
+    }
+
+    expect(detectTerminalComposerDraft(context)).toBeNull()
+    expect(hasTerminalComposerPlaceholder(context)).toBe(true)
   })
 
   it('does not duplicate real typed text left of the cursor', () => {
@@ -187,20 +191,21 @@ describe('detectTerminalComposerDraft', () => {
   })
 
   it('preserves an ordinary shell prompt that uses the Codex glyph', () => {
-    expect(
-      detectTerminalComposerDraft({
-        rows: ['last command output', '› git status'],
-        typedRows: ['last command output', '› git status'],
-        promptGlyphBoldRows: [false, true],
-        rowsBelow: [],
-        typedRowsBelow: [],
-        beforeCursor: '› git status',
-        afterCursor: '',
-        rawAfterCursor: '',
-        cursorHidden: false,
-        cursorViewportRow: 7
-      })
-    ).toBeNull()
+    const context = {
+      rows: ['last command output', '› git status'],
+      typedRows: ['last command output', '› git status'],
+      promptGlyphBoldRows: [false, true],
+      rowsBelow: [],
+      typedRowsBelow: [],
+      beforeCursor: '› git status',
+      afterCursor: '',
+      rawAfterCursor: '',
+      cursorHidden: false,
+      cursorViewportRow: 7
+    }
+
+    expect(detectTerminalComposerDraft(context)).toBeNull()
+    expect(hasTerminalComposerPlaceholder(context)).toBe(false)
   })
 
   it('keeps the side-thread placeholder out of draft metadata', () => {

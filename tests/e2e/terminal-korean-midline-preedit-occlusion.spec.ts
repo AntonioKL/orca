@@ -68,35 +68,41 @@ function rendersEverythingItCovers(sample: MidlinePreeditOcclusionSample): boole
 }
 
 test.describe('Terminal mid-line Korean preedit occlusion', () => {
-  test('masks a fully dimmed row during its first Korean preedit', async ({
+  test('masks a semantically owned Codex placeholder during its first Korean preedit', async ({
     orcaPage
   }, testInfo) => {
     const arena = await openTerminalImePaneArena(orcaPage)
     let completed = false
     try {
-      const dimmedRow = 'Waiting for input'
+      const placeholder = 'Ask Codex to do anything'
       await writeToActiveTerminal(
         orcaPage,
-        `\x1b[2J\x1b[H\x1b[2m${dimmedRow}\x1b[22m\x1b[${dimmedRow.length}D`
+        [
+          '\x1b[2J\x1b[H\x1b[1m›\x1b[22m \x1b7',
+          `\x1b[2m${placeholder}\x1b[22m`,
+          '\r\n\r\n\x1b[2mgpt-5.6 · ~/repo\x1b[22m\x1b8'
+        ].join('')
       )
       await setImeComposition(arena.session, '아')
 
       const sample = await sampleOpenComposition(orcaPage, '아')
-      expect(sample.cursorColumn, 'the cursor is not at the dimmed row start').toBe(0)
-      expect(sample.rowTailFromCursor, 'the dimmed row is not under the cursor').toBe(dimmedRow)
+      expect(sample.cursorColumn, 'the cursor is not after the Codex prompt').toBe(2)
+      expect(sample.rowTailFromCursor, 'the Codex placeholder is not under the cursor').toBe(
+        placeholder
+      )
       expect(
         sample.hiddenByOverlay,
-        `the opaque overlay does not mask the full dimmed row — ${describeOcclusion(sample)}`
-      ).toBe(dimmedRow)
-      expect(sample.overlayText, 'the dimmed row is repeated after the Korean preedit').toBe('아')
-      expect(sample.remainderText, 'the hidden span lost the dimmed row width').toBe(dimmedRow)
-      expect(sample.remainderVisibility, 'the dimmed row is still painted').toBe('hidden')
+        `the opaque overlay does not mask the full placeholder — ${describeOcclusion(sample)}`
+      ).toBe(placeholder)
+      expect(sample.overlayText, 'the Codex placeholder is repeated after the preedit').toBe('아')
+      expect(sample.remainderText, 'the hidden span lost the placeholder width').toBe(placeholder)
+      expect(sample.remainderVisibility, 'the Codex placeholder is still painted').toBe('hidden')
       completed = true
     } finally {
       await closeTerminalImePaneArena(
         arena,
         testInfo,
-        'korean-fully-dimmed-row-preedit',
+        'korean-codex-placeholder-preedit',
         !completed
       )
     }

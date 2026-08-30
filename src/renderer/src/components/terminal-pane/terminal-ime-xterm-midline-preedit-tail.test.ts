@@ -311,7 +311,7 @@ describe('mid-line composition renders the covered row tail after the preedit', 
     expect(rig.compositionView.style.justifyContent).toBe('')
   })
 
-  it('masks a fully dimmed row instead of repeating it after the preedit', async () => {
+  it('keeps arbitrary fully dimmed output visible at column zero', async () => {
     const rig = openTerminal()
     const dimmedRow = 'Waiting for input'
     await rig.write(`\x1b[2m${dimmedRow}\x1b[22m\x1b[${dimmedRow.length}D`)
@@ -322,7 +322,7 @@ describe('mid-line composition renders the covered row tail after the preedit', 
     expect(Array.from(rig.compositionView.children)).toEqual([preedit, caret, remainder])
     expect(stripMarks(preedit!.textContent)).toBe('아')
     expect(remainder!.textContent).toBe(dimmedRow)
-    expect(remainder!.style.visibility).toBe('hidden')
+    expect(remainder!.style.visibility).toBe('')
   })
 
   it('keeps a wholly dim mid-line tail visible', async () => {
@@ -347,20 +347,6 @@ describe('mid-line composition renders the covered row tail after the preedit', 
     const { remainder } = viewParts(rig.compositionView)
     expect(remainder!.textContent).toBe('ghost!')
     expect(remainder!.style.visibility).toBe('')
-  })
-
-  it('re-evaluates dim masking when a repaint changes only cell style', async () => {
-    const rig = openTerminal()
-    const dimmedRow = 'Waiting for input'
-    await rig.write(`\x1b[2m${dimmedRow}\x1b[22m\x1b[${dimmedRow.length}D`)
-    rig.compose('아')
-    expect(viewParts(rig.compositionView).remainder!.style.visibility).toBe('hidden')
-
-    await rig.writeAwaitingRender(`\x1b[22m${dimmedRow}\x1b[${dimmedRow.length}D`)
-    expect(viewParts(rig.compositionView).remainder!.style.visibility).toBe('')
-
-    await rig.writeAwaitingRender(`\x1b[2m${dimmedRow}\x1b[22m\x1b[${dimmedRow.length}D`)
-    expect(viewParts(rig.compositionView).remainder!.style.visibility).toBe('hidden')
   })
 
   it('themes the overlay from options.theme instead of the stock #000/#FFF', async () => {
