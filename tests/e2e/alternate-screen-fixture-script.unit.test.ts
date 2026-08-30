@@ -72,7 +72,11 @@ describe('spec alternate-screen fixtures', () => {
   function topLevelFunctionBody(source: string, name: string): string {
     const start = source.indexOf(`function ${name}(`)
     expect(start, `${name} was renamed or removed; re-point this ratchet`).toBeGreaterThan(-1)
-    return source.slice(start, source.indexOf('\n}\n', start))
+    // Why '\n}' and a bound: '\n}\n' misses CRLF checkouts, and an unresolved indexOf slices to EOF,
+    // letting a later builder call in the same file satisfy the assertion vacuously.
+    const end = source.indexOf('\n}', start)
+    expect(end, `${name} has no closing brace; re-point this ratchet`).toBeGreaterThan(start)
+    return source.slice(start, end)
   }
 
   it.each(SPEC_FIXTURE_BUILDERS)('%s writes %s through the shared builder', (spec, builder) => {
