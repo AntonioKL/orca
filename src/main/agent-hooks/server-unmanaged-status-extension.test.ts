@@ -337,4 +337,21 @@ describe('unmanaged OMP status extension', () => {
       await server.stop()
     }
   })
+
+  it('stops holding when the server stops, so a hold cannot land on a torn-down server', async () => {
+    // Why the pane snapshot rather than the listener: stop() nulls the status listener before it
+    // reaches the fence and clears the pane's row, so a hold that outlives teardown does not call
+    // back — it re-enters the routing path and writes a fresh row onto a server that is gone.
+    const server = new AgentHookServer()
+    await server.start({ env: 'production' })
+    server._setUnmanagedExtensionConfirmationWindowMsForTests(40)
+    const seen = await runOmpPosts(server, [
+      { hookEventName: 'agent_start', launchToken: LAUNCH_TOKEN },
+      { hookEventName: 'agent_end' }
+    ])
+    expect(states(seen)).toEqual(['working'])
+    server.stop()
+    await new Promise((resolve) => setTimeout(resolve, 120))
+    expect(server.getStatusSnapshotForPane(PANE)).toEqual([])
+  })
 })
