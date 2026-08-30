@@ -257,8 +257,8 @@ function getRepoWorktreeBasePath(repo: Pick<Repo, 'worktreeBasePath'>): string |
  * A repo already inside WSL names its own distro. A repo on a Windows drive
  * names none — but if this project's git runs in WSL, its worktrees still
  * belong on the Linux side: `git status` stats every working-tree file, and
- * doing that across the 9p mount costs ~46s on a real repo versus ~0.2s with
- * the tree native and only the gitdir left on the Windows drive.
+ * doing that across the 9p mount is ~20x slower than the same clean tree on
+ * ext4 (`git worktree add` ~26x), with only the gitdir left on the Windows drive.
  */
 function resolveMirrorDistro(
   repoPath: string,
