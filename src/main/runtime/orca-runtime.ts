@@ -7017,21 +7017,13 @@ export class OrcaRuntimeService {
   }
 
   private collectMobileSessionWorktreeIdsForSshTarget(targetId: string): Set<string> {
-    const repoIds = new Set(
-      (this.store?.getRepos() ?? [])
-        .filter((repo) => repo.connectionId === targetId)
-        .map((repo) => repo.id)
-    )
-    if (repoIds.size === 0) {
-      return new Set()
-    }
     const worktreeIds = new Set<string>()
+    const executionHostId = toSshExecutionHostId(targetId)
     for (const worktreeId of [
       ...this.getKnownWorkspaceSessionWorktreeIds(),
       ...this.mobileSessionTabsByWorktree.keys()
     ]) {
-      const parsed = splitWorktreeId(worktreeId)
-      if (parsed && repoIds.has(parsed.repoId)) {
+      if (this.tryGetWorkspaceSessionHostIdForWorktree(worktreeId) === executionHostId) {
         worktreeIds.add(worktreeId)
       }
     }
@@ -7042,21 +7034,13 @@ export class OrcaRuntimeService {
     targetId: string,
     generation: number
   ): Promise<void> {
-    const repoIds = new Set(
-      (this.store?.getRepos() ?? [])
-        .filter((repo) => repo.connectionId === targetId)
-        .map((repo) => repo.id)
-    )
-    if (repoIds.size === 0) {
-      return
-    }
     const worktreeIds = new Set<string>()
+    const executionHostId = toSshExecutionHostId(targetId)
     for (const worktreeId of [
       ...this.getKnownWorkspaceSessionWorktreeIds(),
       ...this.mobileSessionTabsByWorktree.keys()
     ]) {
-      const parsed = splitWorktreeId(worktreeId)
-      if (parsed && repoIds.has(parsed.repoId)) {
+      if (this.tryGetWorkspaceSessionHostIdForWorktree(worktreeId) === executionHostId) {
         worktreeIds.add(worktreeId)
       }
     }

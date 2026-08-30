@@ -31,6 +31,7 @@ export function registerLegacyBinaryControlFrames(
     clientId,
     isMobile,
     supportsDesktopViewportClaims,
+    supportsQueryReply,
     supportsWriteUnavailable
   } = args
   if (!registerBinaryStreamHandler) {
@@ -40,7 +41,10 @@ export function registerLegacyBinaryControlFrames(
     if (controls.isClosed()) {
       return
     }
-    if (frame.opcode === TerminalStreamOpcode.Input) {
+    if (
+      frame.opcode === TerminalStreamOpcode.Input ||
+      (frame.opcode === TerminalStreamOpcode.QueryReply && supportsQueryReply)
+    ) {
       const text = decodeTerminalStreamText(frame.payload)
       if (!text) {
         return
@@ -56,7 +60,8 @@ export function registerLegacyBinaryControlFrames(
           terminal: params.terminal,
           text,
           client: params.client,
-          isMobile
+          isMobile,
+          inputKind: frame.opcode === TerminalStreamOpcode.QueryReply ? 'query-reply' : 'input'
         })
         if (!controls.isClosed() && outcome === 'rejected' && supportsWriteUnavailable) {
           controls.sendFrame(TerminalStreamOpcode.WriteUnavailable)

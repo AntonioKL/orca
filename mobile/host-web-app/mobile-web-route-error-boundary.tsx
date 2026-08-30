@@ -41,6 +41,7 @@ export class MobileWebRouteErrorBoundary extends Component<
   }
 
   componentDidCatch(error: unknown, info: ErrorInfo): void {
+    window.dispatchEvent(new Event('orca-mobile-web-route-failure'))
     console.error('[mobile-web] hosted route stopped', {
       code: mobileWebRouteFailureCode(error),
       componentDepth: info.componentStack?.split('\n').length ?? 0

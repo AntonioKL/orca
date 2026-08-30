@@ -72,6 +72,7 @@ export const TERMINAL_SUBSCRIBE_METHODS: RpcAnyMethod[] = [
         clientId,
         isMobile,
         supportsDesktopViewportClaims: params.capabilities?.desktopViewportClaims === 1,
+        supportsQueryReply: params.capabilities?.queryReply === 1,
         supportsWriteUnavailable: params.capabilities?.writeUnavailable === 1,
         rendererMountRequestedBeforePty,
         missingHeadlessStateBeforeMobileFit,

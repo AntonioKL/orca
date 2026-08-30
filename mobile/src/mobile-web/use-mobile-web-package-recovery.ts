@@ -179,7 +179,10 @@ export function useMobileWebPackageRecovery({
   }, [ownedSessionRef, recoverSession, setPackageWarning])
 
   const clearCache = useCallback(async () => {
-    const hostEpoch = hostEpochRef.current
+    // Invalidate refresh/open continuations before any await so a clear cannot race a
+    // download that publishes a session into the cache being removed.
+    const hostEpoch = hostEpochRef.current + 1
+    hostEpochRef.current = hostEpoch
     const current = ownedSessionRef.current
     if (!host || !activeHostIdRef.current) {
       return

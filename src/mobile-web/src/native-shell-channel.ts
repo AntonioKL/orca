@@ -219,8 +219,14 @@ function useMobileWebNativeShellChannel(): MobileWebNativeShellState {
       })
     }
     const unsubscribe = subscribeToMobileWebShellMessages(window, receive)
+    const onRouteFailure = (): void => {
+      cancelAnimationFrame(healthFrame)
+      cancelAnimationFrame(interactiveFrame)
+    }
+    window.addEventListener('orca-mobile-web-route-failure', onRouteFailure)
     return () => {
       unsubscribe()
+      window.removeEventListener('orca-mobile-web-route-failure', onRouteFailure)
       client?.dispose()
       cancelAnimationFrame(healthFrame)
       cancelAnimationFrame(interactiveFrame)

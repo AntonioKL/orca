@@ -215,6 +215,18 @@ const DESKTOP_IRRELEVANT_PREFIXES = [
   '.github/workflows/mobile-android-release.yml'
 ]
 
+// The hosted mobile UI is packaged and served by the desktop runtime; changes
+// here must keep desktop typecheck/package jobs enabled even though most RN
+// sources remain mobile-only.
+const DESKTOP_RELEVANT_MOBILE_PREFIXES = [
+  'mobile/host-web-app/',
+  'mobile/packages/expo-mobile-web-shell/',
+  'src/mobile-web/',
+  'src/shared/mobile-web/',
+  'config/scripts/package-mobile-web-rnw.mjs',
+  'config/scripts/verify-mobile-web-rnw-build.mjs'
+]
+
 export function isDocsOnlyPath(file) {
   if (DOCS_ONLY_FILES.has(file)) {
     return true
@@ -297,7 +309,10 @@ function isTestFile(file) {
 }
 
 function isDesktopIrrelevantPath(file) {
-  return matchesPrefix(file, DESKTOP_IRRELEVANT_PREFIXES)
+  return (
+    matchesPrefix(file, DESKTOP_IRRELEVANT_PREFIXES) &&
+    !matchesPrefix(file, DESKTOP_RELEVANT_MOBILE_PREFIXES)
+  )
 }
 
 function isNativeCacheInputPath(file) {

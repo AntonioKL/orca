@@ -642,7 +642,7 @@ internal class MobileWebPackageStore internal constructor(
   private fun sessionResponse(sessionId: String, buildId: String): Map<String, String> = mapOf(
     "sessionId" to sessionId,
     "buildId" to buildId,
-    "url" to "$MOBILE_WEB_ORIGIN/#$sessionId"
+    "url" to "${mobileWebOriginForSession(sessionId)}/#$sessionId"
   )
 
   private fun randomIdentifier(): String {

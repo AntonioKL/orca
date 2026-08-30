@@ -60,7 +60,10 @@ export function installMultiplexSlotFrames(
       }
       return
     }
-    if (frame.opcode === TerminalStreamOpcode.Input) {
+    if (
+      frame.opcode === TerminalStreamOpcode.Input ||
+      (frame.opcode === TerminalStreamOpcode.QueryReply && stream.supportsQueryReply)
+    ) {
       const text = decodeTerminalStreamText(frame.payload)
       if (!text) {
         return
@@ -78,7 +81,8 @@ export function installMultiplexSlotFrames(
           terminal: stream.terminal,
           text,
           client: stream.client,
-          isMobile: stream.isMobile
+          isMobile: stream.isMobile,
+          inputKind: frame.opcode === TerminalStreamOpcode.QueryReply ? 'query-reply' : 'input'
         })
         state.notifyStreamWriteUnavailable(stream, outcome)
       })

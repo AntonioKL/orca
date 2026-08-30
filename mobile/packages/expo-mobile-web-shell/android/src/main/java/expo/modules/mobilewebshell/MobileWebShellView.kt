@@ -119,15 +119,15 @@ internal class MobileWebShellView(
       return
     }
     if (sessionId == activeSessionId) return
-    removeBridgeMessageListener()
-    addBridgeMessageListener()
     activeSessionId = sessionId
+    removeBridgeMessageListener()
+    addBridgeMessageListener(sessionId)
     webView.stopLoading()
     attachWebView()
     visibility = View.VISIBLE
     webView.visibility = View.VISIBLE
     onLoadState(mapOf("state" to "loading"))
-    webView.loadUrl("$MOBILE_WEB_ORIGIN/#$sessionId")
+    webView.loadUrl("${mobileWebOriginForSession(sessionId)}/#$sessionId")
   }
 
   fun activateSessionView(sessionId: String) {
@@ -180,12 +180,12 @@ internal class MobileWebShellView(
     }
   }
 
-  private fun addBridgeMessageListener() {
+  private fun addBridgeMessageListener(sessionId: String) {
     if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
       WebViewCompat.addWebMessageListener(
         webView,
         MOBILE_WEB_BRIDGE_NAME,
-        setOf(MOBILE_WEB_ORIGIN),
+        setOf(mobileWebOriginForSession(sessionId)),
         OriginLockedMessageListener()
       )
     } else {
@@ -206,7 +206,7 @@ internal class MobileWebShellView(
       val documentUrl = view.url?.let(Uri::parse) ?: return
       if (
         !isMainFrame ||
-        !isMobileWebOrigin(sourceOrigin) ||
+        !isMobileWebOriginForSession(sourceOrigin, sessionId) ||
         !isAllowedMobileWebBridgeDocumentUrl(documentUrl.toString(), sessionId) ||
         body.toByteArray(Charsets.UTF_8).size > MOBILE_WEB_MESSAGE_BYTE_LIMIT
       ) return
@@ -259,7 +259,7 @@ internal class MobileWebShellView(
       request.method == "GET" &&
         request.requestHeaders.keys.none { it.equals("Range", ignoreCase = true) } &&
         sessionId != null &&
-        isMobileWebOrigin(url) &&
+        isMobileWebOriginForSession(url, sessionId) &&
         (url.fragment == null || (request.isForMainFrame && url.fragment == sessionId)) &&
         url.query == null &&
         !url.encodedPath.orEmpty().contains('%') &&
@@ -290,7 +290,7 @@ internal class MobileWebShellView(
 
   private fun isAllowedDocumentUrl(url: Uri): Boolean =
       activeSessionId != null &&
-      isMobileWebOrigin(url) &&
+    isMobileWebOriginForSession(url, activeSessionId ?: return false) &&
       url.path == "/" &&
       url.encodedPath == "/" &&
       url.query == null &&
@@ -299,7 +299,7 @@ internal class MobileWebShellView(
 
   private fun isAllowedEmbeddedDocumentUrl(url: Uri): Boolean =
     activeSessionId != null &&
-      isMobileWebOrigin(url) &&
+    isMobileWebOriginForSession(url, activeSessionId ?: return false) &&
       url.path == "/$MOBILE_WEB_MERMAID_FRAME_PATH" &&
       url.encodedPath == "/$MOBILE_WEB_MERMAID_FRAME_PATH" &&
       url.query == null &&
@@ -315,12 +315,6 @@ internal class MobileWebShellView(
     ByteArrayInputStream(ByteArray(0))
   )
 }
-
-private fun isMobileWebOrigin(url: Uri): Boolean =
-  url.scheme == MOBILE_WEB_ORIGIN_SCHEME &&
-    url.host == MOBILE_WEB_ORIGIN_HOST &&
-    url.port == -1 &&
-    url.userInfo == null
 
 private object JSONObjectQuote {
   fun quote(value: String): String = org.json.JSONObject.quote(value)

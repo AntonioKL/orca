@@ -22,6 +22,7 @@ export type TerminalSubscriptionArgs = {
   clientId: string | undefined
   isMobile: boolean
   supportsDesktopViewportClaims: boolean
+  supportsQueryReply: boolean
   supportsWriteUnavailable: boolean
   missingHeadlessStateBeforeMobileFit: boolean
   rendererMountRequestedBeforePty: boolean

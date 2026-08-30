@@ -170,8 +170,7 @@ export class MobileE2EEV2PhysicalChannel {
     if (this.state !== 'ready') {
       return false
     }
-    this.outboundQueue.enqueue(item)
-    return true
+    return this.outboundQueue.enqueue(item)
   }
 }
 
