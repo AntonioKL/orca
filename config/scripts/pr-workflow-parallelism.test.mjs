@@ -412,6 +412,7 @@ describe('PR workflow parallelism', () => {
       'root_directory_guard',
       'typecheck',
       'git_compatibility',
+      'codex_index_heal_contract',
       'xterm_patch_sync',
       'shell_contracts',
       'test',

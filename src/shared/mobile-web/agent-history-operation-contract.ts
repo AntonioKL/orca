@@ -22,6 +22,7 @@ export const MOBILE_WEB_AGENT_HISTORY_AGENTS = [
   'openclaw',
   'devin',
   'droid',
+  'cline',
   'kimi'
 ] as const
 

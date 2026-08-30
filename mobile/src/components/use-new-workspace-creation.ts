@@ -10,9 +10,9 @@ import { isMobileTuiAgentEnabled } from '../tasks/mobile-tui-agents'
 import { normalizeWorkspaceAgent } from '../tasks/workspace-agent-selection'
 import type {
   HostWorkspaceCreationOperations,
-  NewWorkspaceRepository
+  NewWorkspaceRepository,
+  NewWorkspaceRuntimeSettings
 } from '../worktree/host-workspace-creation-operations'
-import type { NewWorkspaceRuntimeSettings } from '../worktree/host-workspace-creation-operations'
 import type { RetiredNameRegistry } from '../../../src/shared/worktree/retired-name-registry'
 import type { useMobileComposerSource } from '../tasks/use-mobile-composer-source'
 import type { WorkspaceCreateSetupDecision } from '../tasks/workspace-create-params'

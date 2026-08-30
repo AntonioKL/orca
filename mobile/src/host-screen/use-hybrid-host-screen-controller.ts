@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useHostProtocolGates } from '../components/host-protocol-gates-context'
 import { useHostClient } from '../transport/client-context'
@@ -13,7 +13,6 @@ import { applyWorktreeRowDisplayState } from '../worktree/worktree-host-row-iden
 import { useWorkspaceSections } from '../worktree/use-workspace-sections'
 import { resolveHostRouteActionState } from '../host-route-action-state'
 import { visibleHostRouteNotice } from '../host-route-notice'
-import { useState } from 'react'
 import { useActiveWorktreeScroll } from '../hooks/use-active-worktree-scroll'
 import { useNow } from '../hooks/use-now'
 import type { HostWorkspaceOperations } from '../worktree/host-workspace-operations'

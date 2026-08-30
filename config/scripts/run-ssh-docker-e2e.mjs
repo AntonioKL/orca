@@ -42,6 +42,8 @@ if (runtime.status !== 0) {
 //         gained a direction, so it cannot compile, let alone pass. Repairing it needs two
 //         semantic decisions (which ptyId to capture, which split direction) that change
 //         what the repro measures. Tracked in stablyai/orca#16764.
+//   hosted-mobile-webview-ssh.spec.ts — requires a macOS iOS simulator and cannot run on the
+//     Linux Docker runner. Run test:e2e:hosted-mobile-webview:ssh on macOS before release.
 //
 // Why both projects: ssh-port-forward-lifecycle is @headful, which the headless project
 // grep-inverts away.
@@ -80,6 +82,7 @@ const result = spawnSync(
     'tests/e2e/ssh-restart-tab-accumulation.spec.ts',
     'tests/e2e/ssh-skill-installation.spec.ts',
     'tests/e2e/ssh-terminal-window-wake-stale-grid-repro.spec.ts',
+    'tests/e2e/ssh-docker-native-chat-transcript.spec.ts',
     '--config',
     'tests/playwright.config.ts',
     '--project',
