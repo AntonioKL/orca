@@ -1,6 +1,7 @@
 import { createElement, useRef } from 'react'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, describe, expect, it } from 'vitest'
+import { resolveRetainedTerminalHandles } from '../session/mobile-terminal-prune-decision'
 import { useBufferedTerminalDrafts } from './use-buffered-terminal-drafts'
 
 type BufferedDraftHook = ReturnType<typeof useBufferedTerminalDrafts>
@@ -224,6 +225,56 @@ describe('useBufferedTerminalDrafts', () => {
     expect(hook().restoreRejectedDraft).toBe(callbacks.restore)
     expect(hook().setInput).toBe(callbacks.setInput)
     expect(hook().settleBufferedTerminalDraftSend).toBe(callbacks.settle)
+  })
+
+  // Why the handle set the session sweep passes matters: terminal.list omits a
+  // chat-covered handle while the desktop graph reloads, so the raw list and the
+  // retained set disagree exactly there, and only the retained set keeps the draft.
+  it('keeps a chat-covered draft against the retained set and drops it against the raw list', () => {
+    const listedHandles = new Set(['other-terminal'])
+    const retainedHandles = resolveRetainedTerminalHandles({
+      liveHandles: listedHandles,
+      showNativeChat: true,
+      activeHandle: 'covered-terminal'
+    })
+    act(() => {
+      renderer = create(createElement(Probe, { activeHandle: 'covered-terminal' }))
+    })
+    act(() => hook().setInput('half-typed command'))
+
+    act(() => hook().pruneDrafts(retainedHandles))
+    expect(hook().input).toBe('half-typed command')
+
+    act(() => hook().pruneDrafts(listedHandles))
+    expect(hook().input).toBe('')
+  })
+
+  it('keeps a chat-covered pending restoration against the retained set only', () => {
+    const listedHandles = new Set(['other-terminal'])
+    const retainedHandles = resolveRetainedTerminalHandles({
+      liveHandles: listedHandles,
+      showNativeChat: true,
+      activeHandle: 'covered-terminal'
+    })
+    act(() => {
+      renderer = create(createElement(Probe, { activeHandle: 'covered-terminal' }))
+    })
+    act(() => hook().setInput('rejected command'))
+    let retainedSend: ReturnType<BufferedDraftHook['beginBufferedTerminalDraftSend']>
+    act(() => {
+      retainedSend = hook().beginBufferedTerminalDraftSend('covered-terminal', hook().input)
+    })
+    act(() => hook().pruneDrafts(retainedHandles))
+    act(() => hook().restoreRejectedDraft(retainedSend))
+    expect(hook().input).toBe('rejected command')
+
+    let droppedSend: ReturnType<BufferedDraftHook['beginBufferedTerminalDraftSend']>
+    act(() => {
+      droppedSend = hook().beginBufferedTerminalDraftSend('covered-terminal', hook().input)
+    })
+    act(() => hook().pruneDrafts(listedHandles))
+    act(() => hook().restoreRejectedDraft(droppedSend))
+    expect(hook().input).toBe('')
   })
 
   it('drops ended-handle and route-reset restoration metadata', () => {

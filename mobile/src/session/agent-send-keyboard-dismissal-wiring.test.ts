@@ -142,6 +142,27 @@ describe('terminal send keyboard dismissal wiring', () => {
     expect(routeResetSlice).toContain('bufferedTerminalDraftState.clearPendingRestorations()')
   })
 
+  it('bounds buffered drafts on the terminal.list sweep, against the retained set', () => {
+    // The drafts record and the pending-restoration map both live as long as the
+    // session screen does; this one call is the only thing that bounds either.
+    const slice = routeSlice(
+      'const liveHandles = new Set(result.terminals.map((terminal) => terminal.handle))',
+      'setTerminalKeyboardMetrics((prev) => pruneTerminalKeyboardMetrics(prev, shouldPrune))'
+    )
+    expect(slice).toContain('const retainedHandles = resolveRetainedTerminalHandles(pruneContext)')
+    expect(slice).toContain('bufferedTerminalDraftState.pruneDrafts(retainedHandles)')
+    // Not the raw list: terminal.list omits a chat-covered handle while the desktop
+    // graph reloads, so sweeping drafts against it erases text the user still holds.
+    expect(slice).not.toContain('pruneDrafts(liveHandles)')
+    expect(slice.match(/pruneDrafts\(/g)).toHaveLength(1)
+    expect(bufferedDraftHookSource).toContain(
+      'setDrafts((current) => pruneBufferedTerminalDrafts(current, retainedMappedHandles))'
+    )
+    expect(bufferedDraftHookSource).toContain(
+      'pruneBufferedTerminalDraftRestorations(pendingRestorationsRef.current, retainedMappedHandles)'
+    )
+  })
+
   it('leaves the accessory shortcut keys alone, Enter included', () => {
     // Why: the accessory bar sits on top of the keyboard — dismissing would
     // pull away the very row the user is tapping.
