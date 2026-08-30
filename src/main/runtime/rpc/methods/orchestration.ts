@@ -15,7 +15,10 @@ import { MESSAGE_TYPES } from '../../orchestration/types'
 import { buildDispatchPreamble } from '../../orchestration/preamble'
 import { formatMessageBanner } from '../../orchestration/formatter'
 import { isGroupAddress, resolveGroupAddress } from '../../orchestration/groups'
-import { reconcileLifecycleMessage } from '../../orchestration/lifecycle-reconciliation'
+import {
+  reconcileLifecycleMessage,
+  type LifecycleReconciliationResult
+} from '../../orchestration/lifecycle-reconciliation'
 import { waitForFederatedLifecycleSettlement } from '../../orchestration/federation-lifecycle-settlement'
 import { abbreviateOrchestrationTasks } from '../../../../shared/orchestration-task-summary'
 import {
@@ -318,6 +321,18 @@ function parseMessageTypes(rawTypes: string | undefined): MessageType[] | undefi
     throw new OrchestrationError('invalid_argument', `Invalid --types: ${invalidTypes.join(',')}`)
   }
   return types && types.length > 0 ? types : undefined
+}
+
+// Why: settlement is the moment a worker's pane stops being resumable work. Stamping the resume
+// fence here — not at release — is what lets it win the race with a workspace return. One sweep
+// covers every settled pane, so a batch of reconciled messages needs at most one.
+function fenceSettledWorkerPanes(
+  runtime: OrcaRuntimeService,
+  reconciled: readonly LifecycleReconciliationResult[]
+): void {
+  if (reconciled.some((result) => result.action === 'completed' || result.action === 'failed')) {
+    runtime.prepareLegacyWorkerTerminalRecovery()
+  }
 }
 
 function resolveMessageRun(
@@ -795,6 +810,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
             runtime.notifyMessageArrived(rejection.to_handle, rejection.type)
             return withSendWarnings({ message: rejection, lifecycle: reconciled })
           }
+          fenceSettledWorkerPanes(runtime, [reconciled])
           runtime.notifyMessageArrived(msg.to_handle, msg.type)
           return withSendWarnings(
             msg.type === 'worker_done' ? { message: msg, lifecycle: reconciled } : { message: msg }
@@ -1328,12 +1344,15 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
         let visibleMessages = messages
         if (consumeUnread && messages.length > 0) {
           // Why: unread check is an authoritative read path for worker_done/heartbeat, so reconcile lifecycle messages here too.
+          const reconciledMessages: LifecycleReconciliationResult[] = []
           visibleMessages = messages.map((message) => {
             const reconciled = reconcileLifecycleMessage(db, message)
+            reconciledMessages.push(reconciled)
             return reconciled.action === 'rejected'
               ? (db.getMessageById(message.id) ?? message)
               : message
           })
+          fenceSettledWorkerPanes(runtime, reconciledMessages)
           db.markAsRead(messages.map((m) => m.id))
         }
 

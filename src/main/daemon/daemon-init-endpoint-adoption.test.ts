@@ -220,6 +220,7 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     daemonClientMock.mockImplementation(function MockDaemonClient() {
       return {
         ensureConnected: vi.fn(async () => {}),
+        ensureConnectedWithin: vi.fn(async () => {}),
         request: vi.fn(async () => ({ sessions: [{ sessionId: 's1', isAlive: true }] })),
         disconnect: vi.fn()
       }
@@ -241,6 +242,9 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     daemonClientMock.mockImplementationOnce(function MockAdoptionClient() {
       return {
         ensureConnected: vi.fn(async () => {
+          events.push('full-pair')
+        }),
+        ensureConnectedWithin: vi.fn(async () => {
           events.push('full-pair')
         }),
         request: vi.fn(),
@@ -279,6 +283,7 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     daemonClientMock.mockImplementationOnce(function MockAdoptionClient() {
       return {
         ensureConnected: vi.fn(async () => {}),
+        ensureConnectedWithin: vi.fn(async () => {}),
         getDaemonIdentity: vi.fn(() => endpointIdentity),
         request: vi.fn(),
         disconnect: vi.fn()
@@ -337,6 +342,7 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     daemonClientMock.mockImplementationOnce(function MockAdoptionClient() {
       return {
         ensureConnected: vi.fn(async () => {}),
+        ensureConnectedWithin: vi.fn(async () => {}),
         getDaemonIdentity: vi.fn(() => endpointIdentity),
         request: vi.fn(),
         disconnect: vi.fn()
@@ -385,6 +391,7 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     daemonClientMock.mockImplementationOnce(function MockAdoptionClient() {
       return {
         ensureConnected: vi.fn(async () => {}),
+        ensureConnectedWithin: vi.fn(async () => {}),
         getDaemonIdentity: vi.fn(() => endpointIdentity),
         request: vi.fn(),
         disconnect: vi.fn()
@@ -467,6 +474,9 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
           ensureConnected: vi.fn(async () => {
             throw new Error('initial adoption failed')
           }),
+          ensureConnectedWithin: vi.fn(async () => {
+            throw new Error('initial adoption failed')
+          }),
           request: vi.fn(),
           disconnect: initialDisconnect
         }
@@ -474,6 +484,9 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
       .mockImplementationOnce(function MockReplacementAdoptionClient() {
         return {
           ensureConnected: vi.fn(async () => {
+            throw new Error('replacement adoption failed')
+          }),
+          ensureConnectedWithin: vi.fn(async () => {
             throw new Error('replacement adoption failed')
           }),
           request: vi.fn(),

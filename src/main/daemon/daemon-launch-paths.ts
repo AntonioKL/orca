@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { getAppEnvironment } from '../../shared/app-environment'
 import { getDaemonLogFilePath } from '../observability/logs-directory'
 import { DaemonClient } from './client'
+import { daemonRecoveryProbeTimeoutMs } from './daemon-recovery-budget'
+import { remainingDaemonRequestTimeoutMs } from './daemon-request-deadline'
 import { PROTOCOL_VERSION, type ListSessionsResult } from './types'
 
 export function getDaemonRuntimeDir(): string {
@@ -75,15 +77,25 @@ export function probeDaemonSocket(socketPath: string): Promise<boolean> {
   return promise
 }
 
+// Why recoveryDeadlineMs is required: this probe only ever runs on a startup path that has a
+// budget, and the client's own defaults are far larger than any of them.
 export async function getAliveDaemonSessionCount(
   socketPath: string,
   tokenPath: string,
+  recoveryDeadlineMs: number,
   protocolVersion = PROTOCOL_VERSION
 ): Promise<number | null> {
   const client = new DaemonClient({ socketPath, tokenPath, protocolVersion })
+  // Why one slice for both: a wedged handshake must not leave the request its own fresh 30s.
+  const probeTimeoutMs = daemonRecoveryProbeTimeoutMs(recoveryDeadlineMs)
+  const probeDeadlineMs = Date.now() + probeTimeoutMs
   try {
-    await client.ensureConnected()
-    const result = await client.request<ListSessionsResult>('listSessions', undefined)
+    await client.ensureConnectedWithin(probeTimeoutMs)
+    const result = await client.request<ListSessionsResult>(
+      'listSessions',
+      undefined,
+      remainingDaemonRequestTimeoutMs(probeDeadlineMs)
+    )
     return result.sessions.filter((session) => session.isAlive).length
   } catch {
     return null
