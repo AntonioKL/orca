@@ -29,6 +29,36 @@ Latest recorded package:
 52 assets, 9,310,634 raw bytes, 2,691,771 gzip bytes. This summary is not a
 production-readiness claim.
 
+## 2026-08-30 Complexity Audit Follow-up
+
+The focused audit removed accidental duplication introduced while adapting the
+native presentation to hosted operation adapters:
+
+- The host route is now a 27-line wrapper around the shared presentation and an
+  adapter-aware controller; its temporary max-lines exception was removed.
+- `NewWorktreeModal` is now 378 lines. Repository/runtime/SSH/setup/create
+  behavior lives in operation-based hooks, and its max-lines exception was
+  removed without changing the existing form or drawer components.
+- `src/main/git/runner.ts` is restored to the modular command-runner entrypoint
+  (44 lines), removing a 2,176-line duplicate implementation.
+- The React Doctor browser warning caused by render-phase address/zoom state
+  synchronization was removed; changed-code quality, typechecks, focused
+  lint, 40 focused mobile tests, and 35 Git command-runner tests pass.
+- The GitHub stdin regression exposed by the focused suite is fixed by
+  forwarding `stdin` through `ghExecFileAsync`.
+
+The browser complexity item is closed. `MobileBrowserPane` now delegates
+rendering, streaming, interactions, layers, and request translation to focused
+modules through an adapter-aware `HostSessionBrowserOperations` bridge. Browser
+source, adapter, stream, frame, and interaction tests pass, and the pane is
+below the normal TSX max-lines cap with no file-specific exception.
+
+The adapter-heavy Tasks route remains intentionally unchanged for now. The
+latest `main` Tasks extraction does not expose the operation props required by
+the hosted WebView route; adopting it would either break hosted behavior or
+require a separate operation-context migration. It remains the only new
+mobile-config max-lines baseline entry in this candidate.
+
 ## Packaged Desktop and Signed App Matrix
 
 - [ ] Build, install, and run package delivery from the final supported macOS

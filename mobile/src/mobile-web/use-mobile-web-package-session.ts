@@ -30,6 +30,7 @@ export function useMobileWebPackageSession({
   beforeSessionReplacement?: () => Promise<void>
 }): MobileWebPackageSession {
   const hostEpochRef = useRef(0)
+  const sessionGenerationRef = useRef(0)
   const activeHostIdRef = useRef<string | null>(null)
   const ownedSessionRef = useRef<MobileWebShellSession | null>(null)
   const cachedBuildProbeRef = useRef<MobileWebCachedBuildProbe | null>(null)
@@ -80,6 +81,7 @@ export function useMobileWebPackageSession({
         }
       }
       ownedSessionRef.current = next
+      sessionGenerationRef.current += 1
       setSession(next)
       setViewEpoch(0)
       setPackageLoading(false)
@@ -101,6 +103,7 @@ export function useMobileWebPackageSession({
   useEffect(() => {
     const hostEpoch = hostEpochRef.current + 1
     hostEpochRef.current = hostEpoch
+    sessionGenerationRef.current += 1
     cachedBuildProbeRef.current?.resolve(null)
     const cachedBuildProbe = createMobileWebCachedBuildProbe(hostEpoch)
     cachedBuildProbeRef.current = cachedBuildProbe
@@ -158,6 +161,7 @@ export function useMobileWebPackageSession({
         return
       }
       hostEpochRef.current += 1
+      sessionGenerationRef.current += 1
       activeHostIdRef.current = null
       const closing = ownedSessionRef.current
       ownedSessionRef.current = null
@@ -203,6 +207,7 @@ export function useMobileWebPackageSession({
   } = useMobileWebPackageRecovery({
     host,
     hostEpochRef,
+    sessionGenerationRef,
     activeHostIdRef,
     ownedSessionRef,
     processFailuresRef,

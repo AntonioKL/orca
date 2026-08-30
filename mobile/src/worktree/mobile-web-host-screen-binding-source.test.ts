@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 const hostScreenSource = readFileSync(
-  new URL('../../app/h/[hostId]/index.tsx', import.meta.url),
+  new URL('../host-screen/use-hybrid-host-screen-controller.ts', import.meta.url),
   'utf8'
 )
 const hostedRouteSource = readFileSync(
@@ -12,25 +12,17 @@ const hostedRouteSource = readFileSync(
 
 describe('mobile web host screen bindings', () => {
   it('keeps the shared presentation behind platform-safe default adapters', () => {
+    expect(hostScreenSource).toContain("from '../worktree/default-host-screen-host-state'")
+    expect(hostScreenSource).toContain("from '../worktree/default-host-workspace-operations'")
     expect(hostScreenSource).toContain(
-      "from '../../../src/worktree/default-host-screen-host-state'"
+      "from '../worktree/default-host-workspace-creation-operations'"
     )
-    expect(hostScreenSource).toContain(
-      "from '../../../src/worktree/default-host-workspace-operations'"
-    )
-    expect(hostScreenSource).toContain(
-      "from '../../../src/worktree/default-host-workspace-creation-operations'"
-    )
+    expect(hostScreenSource).not.toContain("from '../worktree/native-host-screen-host-state'")
+    expect(hostScreenSource).not.toContain("from '../worktree/native-host-workspace-operations'")
     expect(hostScreenSource).not.toContain(
-      "from '../../../src/worktree/native-host-screen-host-state'"
+      "from '../worktree/native-host-workspace-creation-operations'"
     )
-    expect(hostScreenSource).not.toContain(
-      "from '../../../src/worktree/native-host-workspace-operations'"
-    )
-    expect(hostScreenSource).not.toContain(
-      "from '../../../src/worktree/native-host-workspace-creation-operations'"
-    )
-    expect(hostScreenSource).not.toContain("from '../../../src/transport/host-removal-lifecycle'")
+    expect(hostScreenSource).not.toContain("from '../transport/host-removal-lifecycle'")
     expect(hostScreenSource).not.toContain('useForceReconnect')
     expect(hostScreenSource).not.toContain('useCloseHost')
     expect(hostScreenSource).not.toContain('useRouter')

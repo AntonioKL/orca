@@ -8,6 +8,7 @@ import type { MobileWebProcessFailureTracker } from './mobile-web-process-failur
 type PackageRecoveryState = {
   host: HostProfile | undefined
   hostEpochRef: RefObject<number>
+  sessionGenerationRef: RefObject<number>
   activeHostIdRef: RefObject<string | null>
   ownedSessionRef: RefObject<MobileWebShellSession | null>
   processFailuresRef: RefObject<MobileWebProcessFailureTracker>
@@ -31,6 +32,7 @@ export type MobileWebPackageRecoveryActions = {
 export function useMobileWebPackageRecovery({
   host,
   hostEpochRef,
+  sessionGenerationRef,
   activeHostIdRef,
   ownedSessionRef,
   processFailuresRef,
@@ -60,6 +62,7 @@ export function useMobileWebPackageRecovery({
           return
         }
         ownedSessionRef.current = recovered
+        sessionGenerationRef.current += 1
         setSession(recovered)
         setViewEpoch(0)
         setPackageWarning(warning)
@@ -81,6 +84,7 @@ export function useMobileWebPackageRecovery({
       activeHostIdRef,
       hostEpochRef,
       ownedSessionRef,
+      sessionGenerationRef,
       rejectedBuildIdsRef,
       setPackageWarning,
       setSession,
@@ -90,19 +94,31 @@ export function useMobileWebPackageRecovery({
 
   const markHealthy = useCallback(
     async (sessionId: string) => {
-      if (ownedSessionRef.current?.sessionId !== sessionId) {
+      const owned = ownedSessionRef.current
+      const sessionGeneration = sessionGenerationRef.current
+      if (!owned || owned.sessionId !== sessionId) {
         return
       }
       try {
         await ExpoMobileWebShell.markSessionHealthy(sessionId)
-        if (ownedSessionRef.current?.sessionId === sessionId) {
+        const current = ownedSessionRef.current
+        if (
+          sessionGenerationRef.current === sessionGeneration &&
+          current?.sessionId === sessionId &&
+          current.buildId === owned.buildId
+        ) {
           const hostId = activeHostIdRef.current
           if (hostId) {
-            mobileWebDiagnosticsStore.healthy(hostId, ownedSessionRef.current.buildId)
+            mobileWebDiagnosticsStore.healthy(hostId, current.buildId)
           }
         }
       } catch {
-        if (ownedSessionRef.current?.sessionId === sessionId) {
+        const current = ownedSessionRef.current
+        if (
+          sessionGenerationRef.current === sessionGeneration &&
+          current?.sessionId === sessionId &&
+          current.buildId === owned.buildId
+        ) {
           setPackageWarning('The workspace interface is running but could not be marked healthy.')
           const hostId = activeHostIdRef.current
           if (hostId) {
@@ -111,7 +127,7 @@ export function useMobileWebPackageRecovery({
         }
       }
     },
-    [activeHostIdRef, ownedSessionRef, setPackageWarning]
+    [activeHostIdRef, ownedSessionRef, sessionGenerationRef, setPackageWarning]
   )
 
   const handleHealthTimeout = useCallback(
@@ -188,6 +204,7 @@ export function useMobileWebPackageRecovery({
       return
     }
     ownedSessionRef.current = null
+    sessionGenerationRef.current += 1
     setSession(null)
     setViewEpoch(0)
     setPackageLoading(true)

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, type Dispatch, type SetStateAction } from 'react'
 import { PixelRatio, type Image, type View } from 'react-native'
-import type { RpcClient } from '../transport/rpc-client'
+import type { MobileBrowserRpcClient } from './mobile-browser-rpc-client'
 import type {
   BrowserScreencastFrame,
   BrowserScreencastFrameMetadata
@@ -40,7 +40,7 @@ type MobileBrowserStreamArgs = {
   browserViewMode: MobileBrowserViewMode
   busyRef: { current: boolean }
   cacheKey: string | null
-  client: RpcClient | null
+  client: MobileBrowserRpcClient | null
   frameMetadata: BrowserScreencastFrameMetadata | null
   frameMetadataRef: { current: BrowserScreencastFrameMetadata | null }
   frameMountedRef: { current: boolean }
@@ -60,6 +60,7 @@ type MobileBrowserStreamArgs = {
   setError: Dispatch<SetStateAction<string | null>>
   setFrameMetadata: Dispatch<SetStateAction<BrowserScreencastFrameMetadata | null>>
   setFrameUri: Dispatch<SetStateAction<string | null>>
+  setNavigationState?: Dispatch<SetStateAction<{ canGoBack: boolean; canGoForward: boolean }>>
   setZoom: Dispatch<SetStateAction<BrowserZoomState>>
   streamGenerationRef: { current: number }
   tab: MobileBrowserTab
@@ -96,6 +97,7 @@ export function useMobileBrowserStream(args: MobileBrowserStreamArgs) {
     setError,
     setFrameMetadata,
     setFrameUri,
+    setNavigationState,
     setZoom,
     streamGenerationRef,
     tab,
@@ -237,10 +239,17 @@ export function useMobileBrowserStream(args: MobileBrowserStreamArgs) {
         if (streamGenerationRef.current !== generation) {
           return
         }
+        const event = payload as ScreencastEvent
+        if ((event.type === 'ready' || event.type === 'navigation') && event.tab) {
+          setNavigationState?.({
+            canGoBack: event.tab.canGoBack === true,
+            canGoForward: event.tab.canGoForward === true
+          })
+        }
         handleBrowserScreencastEvent({
           busyRef,
           clearStartupTimer,
-          event: payload as ScreencastEvent,
+          event,
           lastZoomResetUrlRef,
           resetBrowserZoomState,
           setAddressValue,

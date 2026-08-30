@@ -14,7 +14,7 @@ function sliceBetween(startPattern: string, endPattern: string): string {
 describe('MobileBrowserPane source invariants', () => {
   it('uses the named browser operations boundary instead of raw desktop RPC', () => {
     expect(source).toContain('operations: HostSessionBrowserOperations | null')
-    expect(source).toContain('operations.subscribe(')
+    expect(source).toContain('createMobileBrowserRpcClient(operations)')
     expect(source).not.toContain("client.sendRequest('browser.")
     expect(source).not.toContain("client.subscribe(\n      'browser.screencast'")
   })

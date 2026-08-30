@@ -32,13 +32,16 @@ export function HostScreenOverlays({ controller }: { controller: HostScreenContr
     showNewWorktree,
     state
   } = controller
-  const shellOperations = useDefaultHostScreenShellOperations({
+  const defaultShellOperations = useDefaultHostScreenShellOperations({
     hostId,
     embedded: controller.embedded
   })
+  const shellOperations = controller.shellOperations ?? defaultShellOperations
   const workspaceCreationOperations = useMemo(
-    () => (client ? defaultHostWorkspaceCreationOperations(client) : null),
-    [client]
+    () =>
+      controller.creationOperations ??
+      (client ? defaultHostWorkspaceCreationOperations(client) : null),
+    [client, controller.creationOperations]
   )
   const actionTarget = state.actionTarget
 
@@ -176,15 +179,15 @@ export function HostScreenOverlays({ controller }: { controller: HostScreenContr
                       label: 'Sleep',
                       icon: Moon,
                       onPress: () => {
-                        if (client) {
+                        if (actions.sleepWorktree) {
                           state.setSleptIds((prev) =>
                             new Set(prev).add(getWorktreeRowIdentity(actionTarget))
                           )
-                          void client
-                            .sendRequest('worktree.sleep', {
-                              worktree: `id:${actionTarget.worktreeId}`
-                            })
-                            .catch(() => null)
+                          void actions.sleepWorktree(actionTarget.worktreeId)
+                        } else if (client) {
+                          void client.sendRequest('worktree.sleep', {
+                            worktree: `id:${actionTarget.worktreeId}`
+                          })
                         }
                         state.setActionTarget(null)
                       }

@@ -40,6 +40,7 @@ const HOST: HostProfile = {
   publicKeyB64: 'paired-public-key',
   lastConnected: 1
 }
+const HOST_B: HostProfile = { ...HOST, id: 'host-2', publicKeyB64: 'paired-public-key-2' }
 const sendRequest = vi.fn<RpcClient['sendRequest']>()
 const CLIENT = { sendRequest } as unknown as RpcClient
 const SESSION_A = {
@@ -275,6 +276,28 @@ describe('useMobileWebPackageSession', () => {
 
     expect(packageSession?.session).toEqual(SESSION_B)
     expect(native.closeSession).toHaveBeenCalledWith(SESSION_A.sessionId)
+  })
+
+  it('ignores a late health result after the owned session generation changes', async () => {
+    native.openSession.mockResolvedValue(SESSION_A)
+    await mount('disconnected')
+    const delayedHealth = deferred<{ buildId: string }>()
+    native.markSessionHealthy.mockReturnValue(delayedHealth.promise)
+    const health = packageSession?.markHealthy(SESSION_A.sessionId)
+
+    native.openSession.mockResolvedValue(SESSION_B)
+    await act(async () => {
+      renderer?.update(createElement(Harness, { state: 'disconnected', host: HOST_B }))
+      await flushPromises()
+    })
+    expect(packageSession?.session).toEqual(SESSION_B)
+
+    await act(async () => {
+      delayedHealth.resolve({ buildId: SESSION_A.buildId })
+      await health
+    })
+
+    expect(mobileWebDiagnosticsStore.get(HOST.id)).not.toMatchObject({ healthStatus: 'healthy' })
   })
 
   it('skips staging and replacement activation when cache verification finishes first', async () => {

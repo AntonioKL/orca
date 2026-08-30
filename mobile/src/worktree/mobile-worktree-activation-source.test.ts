@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 const screenSource = readFileSync(
-  new URL('../../app/h/[hostId]/index.tsx', import.meta.url),
+  new URL('../host-screen/use-hybrid-host-worktree-actions.ts', import.meta.url),
   'utf8'
 )
 const adapterSource = readFileSync(
@@ -23,7 +23,7 @@ describe('mobile worktree activation', () => {
     const openSession = sliceBetween(
       screenSource,
       'const openWorktreeSession = useCallback(',
-      'const openFloatingWorkspace = useCallback'
+      'return {'
     )
     const nativeActivation = sliceBetween(
       adapterSource,
@@ -31,7 +31,7 @@ describe('mobile worktree activation', () => {
       'async sleepWorkspace'
     )
 
-    expect(openSession).toContain('workspaceOperations.activateWorkspace')
+    expect(openSession).toContain('operations.activateWorkspace')
     expect(nativeActivation).toContain("sendRequest('worktree.activate'")
     expect(nativeActivation).toContain('notifyClients: false')
     expect(nativeActivation).toContain("navigation: 'caller'")

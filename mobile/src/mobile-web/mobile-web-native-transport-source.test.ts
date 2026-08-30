@@ -51,7 +51,10 @@ describe('mobile web native bridge transport', () => {
 
   it('retains origin, main-frame, and navigation enforcement on both platforms', () => {
     expect(iosSource).toContain('message.frameInfo.isMainFrame')
-    expect(iosSource).toContain('source.host == activeSessionId')
+    expect(iosSource).toContain('isAllowedMobileWebOriginForSession(source, sessionId: sessionId)')
+    expect(iosSource).toContain(
+      'isAllowedMobileWebBridgeDocumentUrl(message.frameInfo.request.url, sessionId: sessionId)'
+    )
     expect(iosSource).toContain('navigationAction.targetFrame?.isMainFrame == true')
     expect(iosSource).toContain('decisionHandler(.cancel)')
     expect(androidSource).toContain('!isMainFrame')
@@ -65,6 +68,14 @@ describe('mobile web native bridge transport', () => {
     expect(androidBridgeUrlSource).toContain('url.userInfo == null')
     expect(androidSource).toContain('request.isForMainFrame && isAllowedDocumentUrl(url)')
     expect(androidSource).toContain('return !allowed')
+  })
+
+  it('binds iOS custom-scheme requests to the active session origin', () => {
+    expect(iosSource).toContain('sessionId == activeSessionId')
+    expect(iosSource).toContain('url.port == nil')
+    expect(iosSource).toContain('url.user == nil')
+    expect(iosSource).toContain('url.fragment == nil')
+    expect(iosSource).toContain('schemeHandler.activeSessionId = nil')
   })
 
   it('disables network loads, downloads, browser gestures, script windows, and popups', () => {

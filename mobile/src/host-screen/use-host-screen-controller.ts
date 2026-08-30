@@ -21,6 +21,8 @@ import { useHostScreenState } from './use-host-screen-state'
 import { useHostViewSettings } from './use-host-view-settings'
 import { useHostWorktreeActions } from './use-host-worktree-actions'
 import { useHostWorktreeCatalog } from './use-host-worktree-catalog'
+import type { HostWorkspaceCreationOperations } from '../worktree/host-workspace-creation-operations'
+import type { HostScreenShellOperations } from '../worktree/host-screen-shell-operations'
 
 export type HostScreenProps = {
   // When true, rendered as the persistent tablet sidebar by the host layout, not as its own routed screen.
@@ -155,4 +157,10 @@ export function useHostScreenController({
   }
 }
 
-export type HostScreenController = ReturnType<typeof useHostScreenController>
+export type HostScreenController = ReturnType<typeof useHostScreenController> & {
+  creationOperations?: HostWorkspaceCreationOperations | null
+  shellOperations?: HostScreenShellOperations
+  actions: ReturnType<typeof useHostScreenController>['actions'] & {
+    sleepWorktree?: (worktreeId: string) => Promise<void>
+  }
+}

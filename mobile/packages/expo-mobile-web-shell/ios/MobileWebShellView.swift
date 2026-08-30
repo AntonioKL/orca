@@ -2,6 +2,7 @@ import ExpoModulesCore
 import WebKit
 
 private let mobileWebScheme = "orca-mobile-web"
+private let mobileWebDocumentUrlLimit = 8 * 1024
 private let mobileWebBridgeHandler = "orcaBridge"
 private let mobileWebMermaidFramePath = "mermaid-frame.html"
 private let mobileWebMessageByteLimit = 640 * 1024
@@ -135,6 +136,20 @@ private let mobileWebNetworkApiBlocker = """
   },true);
   })();
   """
+
+private func isAllowedMobileWebOriginForSession(_ url: URL, sessionId: String) -> Bool {
+  url.scheme == mobileWebScheme &&
+    url.host == sessionId &&
+    url.port == nil &&
+    url.user == nil
+}
+
+private func isAllowedMobileWebBridgeDocumentUrl(_ url: URL?, sessionId: String) -> Bool {
+  guard let url else { return false }
+  return url.absoluteString.utf8.count <= mobileWebDocumentUrlLimit &&
+    isAllowedMobileWebOriginForSession(url, sessionId: sessionId) &&
+    url.fragment == nil
+}
 
 #if DEBUG
 private func mobileWebNetworkIsolationProbeUserScript() -> WKUserScript? {
@@ -282,6 +297,8 @@ private final class WeakScriptMessageHandler: NSObject, WKScriptMessageHandler {
 }
 
 private final class MobileWebSchemeHandler: NSObject, WKURLSchemeHandler {
+  var activeSessionId: String?
+
   func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
     do {
       let request = urlSchemeTask.request
@@ -290,8 +307,9 @@ private final class MobileWebSchemeHandler: NSObject, WKURLSchemeHandler {
         request.value(forHTTPHeaderField: "Range") == nil,
         let url = request.url,
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-        url.scheme == mobileWebScheme,
+        isAllowedMobileWebOriginForSession(url, sessionId: url.host ?? ""),
         let sessionId = url.host,
+        sessionId == activeSessionId,
         url.query == nil,
         url.fragment == nil,
         !components.percentEncodedPath.contains("%")
@@ -425,6 +443,7 @@ final class MobileWebShellView: ExpoView, WKNavigationDelegate, WKUIDelegate,
     }
     guard sessionId != activeSessionId else { return }
     activeSessionId = sessionId
+    schemeHandler.activeSessionId = sessionId
     webView.stopLoading()
     attachWebView()
     isHidden = false
@@ -443,6 +462,7 @@ final class MobileWebShellView: ExpoView, WKNavigationDelegate, WKUIDelegate,
 
   func deactivateSessionView() {
     activeSessionId = nil
+    schemeHandler.activeSessionId = nil
     webView.stopLoading()
     isHidden = true
     webView.isHidden = true
@@ -481,8 +501,9 @@ final class MobileWebShellView: ExpoView, WKNavigationDelegate, WKUIDelegate,
       message.name == mobileWebBridgeHandler,
       message.frameInfo.isMainFrame,
       let source = message.frameInfo.request.url,
-      source.scheme == mobileWebScheme,
-      source.host == activeSessionId,
+      let sessionId = activeSessionId,
+      isAllowedMobileWebOriginForSession(source, sessionId: sessionId),
+      isAllowedMobileWebBridgeDocumentUrl(message.frameInfo.request.url, sessionId: sessionId),
       let body = message.body as? String,
       body.utf8.count <= mobileWebMessageByteLimit
     else { return }
@@ -577,11 +598,9 @@ final class MobileWebShellView: ExpoView, WKNavigationDelegate, WKUIDelegate,
       let url,
       let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
     else { return false }
-    return url.scheme == mobileWebScheme
-      && url.host == activeSessionId
+    guard let activeSessionId else { return false }
+    return isAllowedMobileWebBridgeDocumentUrl(url, sessionId: activeSessionId)
       && url.path == "/"
-      && url.query == nil
-      && url.fragment == nil
       && !components.percentEncodedPath.contains("%")
   }
 
@@ -590,8 +609,8 @@ final class MobileWebShellView: ExpoView, WKNavigationDelegate, WKUIDelegate,
       let url,
       let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
     else { return false }
-    return url.scheme == mobileWebScheme
-      && url.host == activeSessionId
+    guard let activeSessionId else { return false }
+    return isAllowedMobileWebOriginForSession(url, sessionId: activeSessionId)
       && url.path == "/\(mobileWebMermaidFramePath)"
       && url.query == nil
       && url.fragment == nil
