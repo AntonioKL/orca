@@ -149,9 +149,7 @@ export function useWorktreeCardSecondaryDetails({
       void openWorkspaceBrowserTab({
         workspaceId: worktree.id,
         url,
-        intent: { kind: 'url' },
-        focusOnCreate: false,
-        selectWorktree: false
+        intent: { kind: 'url' }
       }).catch((error: unknown) => {
         toast.error(
           error instanceof Error
