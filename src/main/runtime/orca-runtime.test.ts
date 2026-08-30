@@ -2279,6 +2279,7 @@ describe('OrcaRuntimeService', () => {
 
       expect(result).not.toBeNull()
       expect(listWorktrees).not.toHaveBeenCalled()
+      expect(listProcesses).toHaveBeenCalledOnce()
       expect(listProcesses).toHaveBeenCalledWith(
         'ssh-target',
         expect.objectContaining({ deadlineMs: expect.any(Number) })
