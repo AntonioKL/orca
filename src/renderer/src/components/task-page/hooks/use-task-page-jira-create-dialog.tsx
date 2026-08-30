@@ -4,19 +4,27 @@ import { toast } from 'sonner'
 import { filterJiraProjectPickerProjects } from '@/components/jira-project-picker-filter'
 import { useTaskCreationDraftRetention } from '@/components/use-task-creation-draft-retention'
 import { translate } from '@/i18n/i18n'
-import { jiraListCreateFields, jiraListIssueTypes } from '@/runtime/runtime-jira-client'
+import {
+  jiraListCreateFields,
+  jiraListIssueTypes,
+  jiraSearchUsers
+} from '@/runtime/runtime-jira-client'
 import {
   compareJiraProjectsByDisplayLabel,
   getJiraProjectSelectionKey
 } from '@/components/task-page-jira-project-selection'
-import { isVisibleJiraCreateField } from '@/components/task-page-jira-create-fields'
+import {
+  getMissingJiraCreateFieldNames,
+  isVisibleJiraCreateField
+} from '@/components/task-page-jira-create-fields'
 import { writeNewJiraIssueDraft } from '@/components/task-page/dialogs/task-creation-draft-writers'
 import type { GlobalSettings } from '../../../../../shared/global-settings-types'
 import type {
   JiraCreateField,
   JiraIssueType,
   JiraProject,
-  JiraSiteSelection
+  JiraSiteSelection,
+  JiraUserSearchResult
 } from '../../../../../shared/jira-types'
 import type { TaskSourceContext } from '../../../../../shared/task-source-context'
 
@@ -102,12 +110,32 @@ export function useTaskPageJiraCreateDialog({
     [jiraCreateFields]
   )
 
-  const hasMissingJiraCreateField = useMemo(
-    () =>
-      visibleJiraCreateFields.some(
-        (field) => !(newJiraIssueCustomFieldValues[field.key] ?? '').trim()
-      ),
+  const missingJiraCreateFieldNames = useMemo(
+    () => getMissingJiraCreateFieldNames(visibleJiraCreateFields, newJiraIssueCustomFieldValues),
     [newJiraIssueCustomFieldValues, visibleJiraCreateFields]
+  )
+
+  const hasMissingJiraCreateField = missingJiraCreateFieldNames.length > 0
+
+  // Create has no issue key yet, so user search is scoped to the target project.
+  const searchJiraCreateUsers = useCallback(
+    async (query: string): Promise<JiraUserSearchResult> => {
+      if (!newJiraIssueTargetProject) {
+        return {
+          ok: false,
+          error: translate(
+            'auto.components.task.page.hooks.use.task.page.jira.create.dialog.jiraUserSearchNeedsProject',
+            'Choose a Jira project before picking a user.'
+          )
+        }
+      }
+      return jiraSearchUsers(jiraTaskSourceContext ?? settings, {
+        projectIdOrKey: newJiraIssueTargetProject.key || newJiraIssueTargetProject.id,
+        query,
+        siteId: newJiraIssueTargetProject.siteId ?? undefined
+      })
+    },
+    [jiraTaskSourceContext, newJiraIssueTargetProject, settings]
   )
 
   useEffect(() => {
@@ -306,6 +334,8 @@ export function useTaskPageJiraCreateDialog({
     newJiraIssueTargetType,
     visibleJiraCreateFields,
     hasMissingJiraCreateField,
+    missingJiraCreateFieldNames,
+    searchJiraCreateUsers,
     handleNewJiraIssueProjectComboboxOpenChange,
     handleNewJiraIssueProjectSelect,
     handleNewJiraIssueProjectTriggerKeyDown

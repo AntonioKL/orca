@@ -2,6 +2,7 @@ import { ipcMain } from 'electron'
 import { connect, disconnect, getStatus, selectSite, testConnection } from '../jira/client'
 import { _resetPreflightCache } from './preflight'
 import { JiraCancellableRequests } from './jira-cancellable-requests'
+import { normalizeJiraCreateIssueArgs, normalizeTrimmedArg } from './jira-ipc-arguments'
 import {
   addIssueComment,
   createIssue,
@@ -16,6 +17,7 @@ import {
   listPriorities,
   listProjects,
   listTransitions,
+  searchAssignableUsers,
   searchIssues,
   updateIssue
 } from '../jira/issues'
@@ -31,12 +33,8 @@ const VALID_FILTERS = new Set<JiraIssueFilter>(['assigned', 'reported', 'all', '
 const issueSummaryRequests = new JiraCancellableRequests()
 const searchRequests = new JiraCancellableRequests()
 
-function normalizeSiteId(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined
-}
-
 function normalizeSiteSelection(value: unknown): JiraSiteSelection | undefined {
-  const siteId = normalizeSiteId(value)
+  const siteId = normalizeTrimmedArg(value)
   return siteId as JiraSiteSelection | undefined
 }
 
@@ -105,7 +103,7 @@ export function registerJiraHandlers(): void {
   })
 
   ipcMain.handle('jira:disconnect', async (_event, args?: { siteId?: string }) => {
-    disconnect(normalizeSiteId(args?.siteId))
+    disconnect(normalizeTrimmedArg(args?.siteId))
     _resetPreflightCache()
   })
 
@@ -126,7 +124,7 @@ export function registerJiraHandlers(): void {
   })
 
   ipcMain.handle('jira:testConnection', async (_event, args?: { siteId?: string }) => {
-    return testConnection(normalizeSiteId(args?.siteId))
+    return testConnection(normalizeTrimmedArg(args?.siteId))
   })
 
   ipcMain.handle(
@@ -165,7 +163,7 @@ export function registerJiraHandlers(): void {
     if (typeof args?.key !== 'string' || !args.key.trim()) {
       return null
     }
-    return getIssue(args.key.trim(), normalizeSiteId(args.siteId))
+    return getIssue(args.key.trim(), normalizeTrimmedArg(args.siteId))
   })
 
   ipcMain.handle(
@@ -190,24 +188,8 @@ export function registerJiraHandlers(): void {
   })
 
   ipcMain.handle('jira:createIssue', async (_event, args: JiraCreateIssueArgs) => {
-    if (typeof args?.projectId !== 'string' || !args.projectId.trim()) {
-      return { ok: false, error: 'Project is required.' }
-    }
-    if (typeof args?.issueTypeId !== 'string' || !args.issueTypeId.trim()) {
-      return { ok: false, error: 'Issue type is required.' }
-    }
-    if (typeof args?.title !== 'string' || !args.title.trim()) {
-      return { ok: false, error: 'Title is required.' }
-    }
-    return createIssue({
-      siteId: normalizeSiteId(args.siteId),
-      projectId: args.projectId.trim(),
-      issueTypeId: args.issueTypeId.trim(),
-      title: args.title.trim(),
-      description: args.description?.trim() || undefined,
-      customFields:
-        args.customFields && typeof args.customFields === 'object' ? args.customFields : undefined
-    })
+    const normalized = normalizeJiraCreateIssueArgs(args)
+    return normalized.ok ? createIssue(normalized.args) : normalized
   })
 
   ipcMain.handle(
@@ -220,7 +202,7 @@ export function registerJiraHandlers(): void {
       if (!updates) {
         return { ok: false, error: 'Updates object is required.' }
       }
-      return updateIssue(args.key.trim(), updates, normalizeSiteId(args.siteId))
+      return updateIssue(args.key.trim(), updates, normalizeTrimmedArg(args.siteId))
     }
   )
 
@@ -233,7 +215,7 @@ export function registerJiraHandlers(): void {
       if (typeof args?.body !== 'string' || !args.body.trim()) {
         return { ok: false, error: 'Comment body is required.' }
       }
-      return addIssueComment(args.key.trim(), args.body.trim(), normalizeSiteId(args.siteId))
+      return addIssueComment(args.key.trim(), args.body.trim(), normalizeTrimmedArg(args.siteId))
     }
   )
 
@@ -241,7 +223,7 @@ export function registerJiraHandlers(): void {
     if (typeof args?.key !== 'string' || !args.key.trim()) {
       return []
     }
-    return getIssueComments(args.key.trim(), normalizeSiteId(args.siteId))
+    return getIssueComments(args.key.trim(), normalizeTrimmedArg(args.siteId))
   })
 
   ipcMain.handle('jira:listProjects', async (_event, args?: { siteId?: JiraSiteSelection }) => {
@@ -254,7 +236,7 @@ export function registerJiraHandlers(): void {
       if (typeof args?.projectIdOrKey !== 'string' || !args.projectIdOrKey.trim()) {
         return []
       }
-      return listIssueTypes(args.projectIdOrKey.trim(), normalizeSiteId(args.siteId))
+      return listIssueTypes(args.projectIdOrKey.trim(), normalizeTrimmedArg(args.siteId))
     }
   )
 
@@ -270,13 +252,13 @@ export function registerJiraHandlers(): void {
       return listCreateFields(
         args.projectIdOrKey.trim(),
         args.issueTypeId.trim(),
-        normalizeSiteId(args.siteId)
+        normalizeTrimmedArg(args.siteId)
       )
     }
   )
 
   ipcMain.handle('jira:listPriorities', async (_event, args?: { siteId?: string }) => {
-    return listPriorities(normalizeSiteId(args?.siteId))
+    return listPriorities(normalizeTrimmedArg(args?.siteId))
   })
 
   ipcMain.handle(
@@ -288,7 +270,24 @@ export function registerJiraHandlers(): void {
       return listAssignableUsers(
         args.key.trim(),
         typeof args.query === 'string' ? args.query : undefined,
-        normalizeSiteId(args.siteId)
+        normalizeTrimmedArg(args.siteId)
+      )
+    }
+  )
+
+  ipcMain.handle(
+    'jira:searchUsers',
+    async (
+      _event,
+      args: { projectIdOrKey?: string; issueKey?: string; query?: string; siteId?: string }
+    ) => {
+      return searchAssignableUsers(
+        {
+          projectIdOrKey: normalizeTrimmedArg(args?.projectIdOrKey),
+          issueKey: normalizeTrimmedArg(args?.issueKey)
+        },
+        typeof args?.query === 'string' ? args.query : undefined,
+        normalizeTrimmedArg(args?.siteId)
       )
     }
   )
@@ -297,7 +296,7 @@ export function registerJiraHandlers(): void {
     if (typeof args?.key !== 'string' || !args.key.trim()) {
       return []
     }
-    return listTransitions(args.key.trim(), normalizeSiteId(args.siteId))
+    return listTransitions(args.key.trim(), normalizeTrimmedArg(args.siteId))
   })
 
   ipcMain.handle(
@@ -306,7 +305,7 @@ export function registerJiraHandlers(): void {
       if (typeof args?.projectKey !== 'string' || !args.projectKey.trim()) {
         return { statusIdsByColumn: [] }
       }
-      return getProjectStatusOrder(args.projectKey.trim(), normalizeSiteId(args.siteId))
+      return getProjectStatusOrder(args.projectKey.trim(), normalizeTrimmedArg(args.siteId))
     }
   )
 }

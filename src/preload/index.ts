@@ -2078,6 +2078,7 @@ const api = {
       title: string
       description?: string
       customFields?: Record<string, unknown>
+      userFieldKeys?: string[]
     }): Promise<
       { ok: true; id: string; key: string; url: string } | { ok: false; error: string }
     > => ipcRenderer.invoke('jira:createIssue', args),
@@ -2119,6 +2120,13 @@ const api = {
       query?: string
       siteId?: string
     }): Promise<unknown[]> => ipcRenderer.invoke('jira:listAssignableUsers', args),
+
+    searchUsers: (args: {
+      projectIdOrKey?: string
+      issueKey?: string
+      query?: string
+      siteId?: string
+    }): Promise<unknown> => ipcRenderer.invoke('jira:searchUsers', args),
 
     listTransitions: (args: { key: string; siteId?: string }): Promise<unknown[]> =>
       ipcRenderer.invoke('jira:listTransitions', args),

@@ -16056,6 +16056,13 @@
                     "dialogDescription": "Create a Linear issue for the selected team."
                   }
                 }
+              },
+              "jira": {
+                "issue": {
+                  "dialog": {
+                    "missingRequiredFields": "Jira needs a value for {{value0}} before it will accept this issue."
+                  }
+                }
               }
             },
             "task": {
@@ -16063,6 +16070,20 @@
                 "connect": {
                   "dialogs": {
                     "353c7dc71d": "Update access"
+                  }
+                }
+              }
+            },
+            "jira": {
+              "user": {
+                "field": {
+                  "picker": {
+                    "selectUser": "Select {{value0}}",
+                    "searchPlaceholder": "Search users or paste an account ID...",
+                    "searching": "Searching users...",
+                    "searchFailed": "Couldn't search Jira users: {{value0}}",
+                    "noUsers": "No matching users.",
+                    "useTypedId": "Use account ID \"{{value0}}\""
                   }
                 }
               }
@@ -16101,7 +16122,8 @@
                   "jira": {
                     "create": {
                       "dialog": {
-                        "jiraRequiredFieldsLoadFailed": "Failed to load required Jira fields."
+                        "jiraRequiredFieldsLoadFailed": "Failed to load required Jira fields.",
+                        "jiraUserSearchNeedsProject": "Choose a Jira project before picking a user."
                       }
                     }
                   },
@@ -16492,6 +16514,17 @@
       },
       "gitlabIpcTimeout": {
         "timedOut": "Timed out talking to GitLab."
+      },
+      "runtime": {
+        "jira": {
+          "user": {
+            "search": {
+              "unexpectedResponse": "Jira user search returned an unexpected response.",
+              "queryTooLong": "Search text is too long.",
+              "failed": "Failed to search Jira users."
+            }
+          }
+        }
       }
     },
     "ssh": {

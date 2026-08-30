@@ -4,10 +4,6 @@ export { getIssue, getIssueSummary } from './jira-issue-read'
 export { addIssueComment, createIssue, updateIssue } from './jira-issue-mutations'
 export { getIssueComments } from './jira-issue-comments'
 export { listProjects } from './jira-project-queries'
-export {
-  listAssignableUsers,
-  listCreateFields,
-  listIssueTypes,
-  listPriorities
-} from './jira-issue-create-metadata'
+export { listCreateFields, listIssueTypes, listPriorities } from './jira-issue-create-metadata'
+export { listAssignableUsers, searchAssignableUsers } from './jira-user-search'
 export { getProjectStatusOrder, listTransitions } from './jira-transition-queries'

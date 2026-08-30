@@ -25,6 +25,7 @@ import { readRuntimeJiraPayload } from './runtime-jira-payload-stream'
 import { getJiraRuntimeTarget, type RuntimeJiraSettings } from './runtime-jira-target'
 
 export { jiraLookupIssueSummary, jiraReadStatus } from './runtime-jira-summary-client'
+export { jiraSearchUsers } from './runtime-jira-user-search'
 export type { RuntimeJiraSettings } from './runtime-jira-target'
 
 export type JiraConnectResult = { ok: true; viewer: JiraViewer } | { ok: false; error: string }

@@ -56,7 +56,10 @@ const CreateIssue = z.object({
   issueTypeId: requiredString('Issue type is required'),
   title: requiredString('Title is required'),
   description: OptionalPlainString,
-  customFields: z.record(z.string(), z.unknown()).optional()
+  customFields: z.record(z.string(), z.unknown()).optional(),
+  // Optional so an older client that never sends it still decodes; the host then
+  // declares nothing a user field and rewrites nothing.
+  userFieldKeys: z.array(z.string()).optional()
 })
 
 const IssueUpdate = z.object({
@@ -90,6 +93,15 @@ const ProjectIssueTypeFields = z.object({
 
 const AssignableUsers = z.object({
   key: requiredString('Issue key is required'),
+  query: OptionalPlainString,
+  siteId: OptionalString
+})
+
+// Both scopes optional: create has a project and no issue key, the issue view
+// has a key and no project.
+const UserSearch = z.object({
+  projectIdOrKey: OptionalPlainString,
+  issueKey: OptionalPlainString,
   query: OptionalPlainString,
   siteId: OptionalString
 })
@@ -193,7 +205,8 @@ export const JIRA_METHODS: RpcAnyMethod[] = [
         issueTypeId: params.issueTypeId.trim(),
         title: params.title.trim(),
         description: params.description?.trim() || undefined,
-        customFields: params.customFields
+        customFields: params.customFields,
+        userFieldKeys: params.userFieldKeys
       })
   }),
   defineMethod({
@@ -252,6 +265,16 @@ export const JIRA_METHODS: RpcAnyMethod[] = [
     params: AssignableUsers,
     handler: async (params, { runtime }) =>
       runtime.jiraListAssignableUsers(params.key.trim(), params.query, params.siteId)
+  }),
+  defineMethod({
+    name: 'jira.searchUsers',
+    params: UserSearch,
+    handler: async (params, { runtime }) =>
+      runtime.jiraSearchUsers(
+        { projectIdOrKey: params.projectIdOrKey, issueKey: params.issueKey },
+        params.query,
+        params.siteId
+      )
   }),
   defineMethod({
     name: 'jira.listTransitions',

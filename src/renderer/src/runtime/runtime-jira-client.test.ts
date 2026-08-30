@@ -7,7 +7,8 @@ import {
   jiraListAssignableUsers,
   jiraLookupIssueSummary,
   jiraReadStatus,
-  jiraSearchIssues
+  jiraSearchIssues,
+  jiraSearchUsers
 } from './runtime-jira-client'
 import { clearRuntimeCompatibilityCacheForTests } from './runtime-rpc-client'
 import { createCompatibleRuntimeStatusResponse } from './runtime-compatibility-test-fixture'
@@ -17,6 +18,7 @@ type RuntimeSubscribeCallbacks = Parameters<typeof window.api.runtimeEnvironment
 
 const jiraSearchIssuesLocal = vi.fn()
 const jiraListAssignableUsersLocal = vi.fn()
+const jiraSearchUsersLocal = vi.fn()
 const jiraReadStatusLocal = vi.fn()
 const jiraLookupIssueSummaryLocal = vi.fn()
 const jiraCancelIssueSummaryLocal = vi.fn()
@@ -27,6 +29,7 @@ beforeEach(() => {
   clearRuntimeCompatibilityCacheForTests()
   jiraSearchIssuesLocal.mockReset()
   jiraListAssignableUsersLocal.mockReset()
+  jiraSearchUsersLocal.mockReset()
   jiraReadStatusLocal.mockReset()
   jiraLookupIssueSummaryLocal.mockReset()
   jiraCancelIssueSummaryLocal.mockReset()
@@ -39,7 +42,8 @@ beforeEach(() => {
         lookupIssueSummary: jiraLookupIssueSummaryLocal,
         cancelIssueSummary: jiraCancelIssueSummaryLocal,
         searchIssues: jiraSearchIssuesLocal,
-        listAssignableUsers: jiraListAssignableUsersLocal
+        listAssignableUsers: jiraListAssignableUsersLocal,
+        searchUsers: jiraSearchUsersLocal
       },
       runtimeEnvironments: {
         call: runtimeCall,
@@ -220,6 +224,131 @@ describe('runtime Jira client search bounds', () => {
       },
       expect.anything()
     )
+    expect(runtimeCall).not.toHaveBeenCalled()
+  })
+})
+
+describe('jiraSearchUsers', () => {
+  it('passes the project scope straight through on a local host', async () => {
+    jiraSearchUsersLocal.mockResolvedValue({
+      ok: true,
+      users: [{ accountId: '5abc', displayName: 'Alex Doe' }]
+    })
+
+    await expect(jiraSearchUsers(null, { projectIdOrKey: 'ENG', query: 'Alex' })).resolves.toEqual({
+      ok: true,
+      users: [{ accountId: '5abc', displayName: 'Alex Doe' }]
+    })
+    expect(jiraSearchUsersLocal).toHaveBeenCalledWith({ projectIdOrKey: 'ENG', query: 'Alex' })
+  })
+
+  it('surfaces the host error instead of an empty user list', async () => {
+    jiraSearchUsersLocal.mockResolvedValue({ ok: false, error: 'Browse users is not permitted.' })
+
+    await expect(jiraSearchUsers(null, { projectIdOrKey: 'ENG' })).resolves.toEqual({
+      ok: false,
+      error: 'Browse users is not permitted.'
+    })
+  })
+
+  it('turns a thrown transport failure into a reported failure', async () => {
+    jiraSearchUsersLocal.mockRejectedValue(new Error('Unknown method: jira.searchUsers'))
+
+    await expect(jiraSearchUsers(null, { projectIdOrKey: 'ENG' })).resolves.toEqual({
+      ok: false,
+      error: 'Unknown method: jira.searchUsers'
+    })
+  })
+
+  // Runtime RPC results are cast, never decoded, so an older or drifted host can
+  // return any shape; it must not read as "this project has no users".
+  it('treats an unrecognized host payload as a failed search, not an empty one', async () => {
+    for (const payload of [undefined, null, [], { ok: true }, { ok: false }]) {
+      jiraSearchUsersLocal.mockResolvedValue(payload)
+      await expect(jiraSearchUsers(null, { projectIdOrKey: 'ENG' })).resolves.toEqual({
+        ok: false,
+        error: 'Jira user search returned an unexpected response.'
+      })
+    }
+  })
+
+  // Thread 2: every entry is cast, not checked. The picker keys rows by accountId
+  // and labels them by displayName, so an entry missing either is an unusable row.
+  const malformedEntries: [string, unknown][] = [
+    ['no accountId', { displayName: 'Alex Doe' }],
+    ['a blank accountId', { accountId: '  ', displayName: 'Alex Doe' }],
+    ['a non-string accountId', { accountId: 7, displayName: 'Alex Doe' }],
+    ['no displayName', { accountId: '5abc' }],
+    ['a blank displayName', { accountId: '5abc', displayName: '   ' }],
+    ['a non-string displayName', { accountId: '5abc', displayName: 7 }],
+    ['a non-string email', { accountId: '5abc', displayName: 'Alex Doe', email: 7 }],
+    ['a non-string avatarUrl', { accountId: '5abc', displayName: 'Alex Doe', avatarUrl: 7 }],
+    ['a non-object entry', 'Alex Doe'],
+    ['a null entry', null]
+  ]
+  for (const [label, entry] of malformedEntries) {
+    it(`fails the search when an entry has ${label}`, async () => {
+      jiraSearchUsersLocal.mockResolvedValue({
+        ok: true,
+        users: [{ accountId: '5abc', displayName: 'Alex Doe' }, entry]
+      })
+
+      await expect(jiraSearchUsers(null, { projectIdOrKey: 'ENG' })).resolves.toEqual({
+        ok: false,
+        error: 'Jira user search returned an unexpected response.'
+      })
+    })
+  }
+
+  it('keeps a fully-formed list, including the optional fields Jira may omit or null out', async () => {
+    jiraSearchUsersLocal.mockResolvedValue({
+      ok: true,
+      users: [
+        { accountId: '5abc', displayName: 'Alex Doe', email: null },
+        {
+          accountId: 'ada',
+          displayName: 'Ada L',
+          email: 'ada@x.test',
+          avatarUrl: 'https://a/x.png'
+        }
+      ]
+    })
+
+    await expect(jiraSearchUsers(null, { projectIdOrKey: 'ENG' })).resolves.toEqual({
+      ok: true,
+      users: [
+        { accountId: '5abc', displayName: 'Alex Doe', email: null },
+        {
+          accountId: 'ada',
+          displayName: 'Ada L',
+          email: 'ada@x.test',
+          avatarUrl: 'https://a/x.png'
+        }
+      ]
+    })
+  })
+
+  it('keeps an empty list reading as a successful empty search', async () => {
+    jiraSearchUsersLocal.mockResolvedValue({ ok: true, users: [] })
+
+    await expect(jiraSearchUsers(null, { projectIdOrKey: 'ENG' })).resolves.toEqual({
+      ok: true,
+      users: []
+    })
+  })
+
+  it('rejects an oversized query before it reaches the host', async () => {
+    await expect(
+      jiraSearchUsers(
+        { activeRuntimeEnvironmentId: 'env-1' },
+        {
+          projectIdOrKey: 'ENG',
+          query: 'x'.repeat(9 * 1024)
+        }
+      )
+    ).resolves.toEqual({ ok: false, error: 'Search text is too long.' })
+
+    expect(jiraSearchUsersLocal).not.toHaveBeenCalled()
     expect(runtimeCall).not.toHaveBeenCalled()
   })
 })
