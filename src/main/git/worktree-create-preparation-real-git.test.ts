@@ -95,7 +95,14 @@ describe('prepared worktree creation with real Git', () => {
     git(repoPath, ['commit', '--quiet', '-m', 'advance base'])
     const latestHead = git(repoPath, ['rev-parse', 'HEAD'])
 
-    await finalizePreparedWorktree(repoPath, preparedPath, finalPath, 'feature/prepared', 'main')
+    await finalizePreparedWorktree(
+      repoPath,
+      preparedPath,
+      finalPath,
+      'feature/prepared',
+      'main',
+      createWorktreePreparationLockReason('real-git-test')
+    )
 
     expect(git(finalPath, ['rev-parse', 'HEAD'])).toBe(latestHead)
     expect(git(finalPath, ['branch', '--show-current'])).toBe('feature/prepared')
@@ -111,5 +118,9 @@ describe('prepared worktree creation with real Git', () => {
     expect(
       listedWorktrees.some((worktree) => areWorktreePathsEqual(worktree.path, resolvedFinalPath))
     ).toBe(true)
+    expect(
+      listedWorktrees.find((worktree) => areWorktreePathsEqual(worktree.path, resolvedFinalPath))
+        ?.locked
+    ).not.toBe(true)
   })
 })

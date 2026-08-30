@@ -121,6 +121,23 @@ export async function discardPreparedWorktree(
   }
 }
 
+export async function unlockPreparedWorktree(
+  repoPath: string,
+  worktreePath: string,
+  options: GitWorktreeExecOptions = {}
+): Promise<void> {
+  try {
+    await runWithGitReadCacheInvalidation(() =>
+      gitExecFileAsync(
+        [...windowsLongPathGitArgs(repoPath), 'worktree', 'unlock', worktreePath],
+        gitCleanupOptions(repoPath, options)
+      )
+    )
+  } finally {
+    notifyPreparedWorktreeMutation(repoPath)
+  }
+}
+
 async function removeFailedFinalization(
   repoPath: string,
   cleanupPath: string,
@@ -155,6 +172,7 @@ export async function finalizePreparedWorktree(
   worktreePath: string,
   branch: string,
   baseBranch: string,
+  lockReason: string,
   refreshLocalBaseRef = false,
   options: AddWorktreeOptions = {}
 ): Promise<AddWorktreeResult> {
@@ -197,6 +215,18 @@ export async function finalizePreparedWorktree(
           gitExecOptions(repoPath, finalizeGitOptions)
         )
         moved = true
+        // Why: keep a moved checkout hidden and recoverable if the host crashes before submit completes.
+        await gitExecFileAsync(
+          [
+            ...windowsLongPathGitArgs(repoPath),
+            'worktree',
+            'lock',
+            '--reason',
+            lockReason,
+            worktreePath
+          ],
+          gitExecOptions(repoPath, finalizeGitOptions)
+        )
         await gitExecFileAsync(
           [
             ...windowsLongPathGitArgs(worktreePath),
@@ -208,6 +238,17 @@ export async function finalizePreparedWorktree(
           ],
           gitExecOptions(worktreePath, finalizeGitOptions)
         )
+        await persistWorktreeCreationBase(
+          worktreePath,
+          branch,
+          baseContext.effectiveBase,
+          finalizeGitOptions
+        )
+        await configurePushAutoSetupRemote(worktreePath, finalizeGitOptions)
+        await gitExecFileAsync(
+          [...windowsLongPathGitArgs(repoPath), 'worktree', 'unlock', worktreePath],
+          gitExecOptions(repoPath, finalizeGitOptions)
+        )
       } catch (error) {
         await removeFailedFinalization(
           repoPath,
@@ -218,14 +259,6 @@ export async function finalizePreparedWorktree(
         )
         throw error
       }
-
-      await persistWorktreeCreationBase(
-        worktreePath,
-        branch,
-        baseContext.effectiveBase,
-        finalizeGitOptions
-      )
-      await configurePushAutoSetupRemote(worktreePath, finalizeGitOptions)
       return {
         ...(baseContext.localBaseRefRefresh
           ? { localBaseRefRefresh: baseContext.localBaseRefRefresh }

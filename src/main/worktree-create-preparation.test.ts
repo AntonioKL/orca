@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   prepareCheckout: vi.fn(),
   finalize: vi.fn(),
   discard: vi.fn(),
+  unlock: vi.fn(),
   getWorktreeOptions: vi.fn()
 }))
 
@@ -16,7 +17,8 @@ vi.mock('./git/worktree', () => ({ listWorktreeGraph: mocks.listWorktreeGraph })
 vi.mock('./git/worktree-create-preparation', () => ({
   prepareWorktreeCreateCheckout: mocks.prepareCheckout,
   finalizePreparedWorktree: mocks.finalize,
-  discardPreparedWorktree: mocks.discard
+  discardPreparedWorktree: mocks.discard,
+  unlockPreparedWorktree: mocks.unlock
 }))
 vi.mock('./project-runtime-git-options', () => ({
   getLocalProjectWorktreeGitOptions: mocks.getWorktreeOptions
@@ -41,6 +43,7 @@ beforeEach(() => {
   mocks.prepareCheckout.mockReset().mockResolvedValue(undefined)
   mocks.finalize.mockReset().mockResolvedValue({})
   mocks.discard.mockReset().mockResolvedValue(undefined)
+  mocks.unlock.mockReset().mockResolvedValue(undefined)
   mocks.getWorktreeOptions.mockReset().mockReturnValue({})
 })
 
@@ -100,6 +103,7 @@ describe('worktree create preparation registry', () => {
       '/workspace/final',
       'feature/test',
       'origin/main',
+      expect.stringMatching(/^orca-create-preparation:v1:/),
       undefined,
       options
     )
@@ -111,6 +115,24 @@ describe('worktree create preparation registry', () => {
     await prepareWorktreeCreateForRepo(store, repo, 'origin/release')
 
     expect(mocks.listWorktreeGraph).toHaveBeenCalledTimes(2)
+  })
+
+  it('unlocks a stale branch-attached final path instead of deleting user work', async () => {
+    mocks.listWorktreeGraph.mockResolvedValueOnce([
+      {
+        path: '/workspace/final',
+        branch: 'refs/heads/feature/test',
+        lockReason: 'orca-create-preparation:v1:999999999:stale',
+        head: 'deadbeef',
+        isBare: false,
+        isMainWorktree: false
+      }
+    ])
+
+    await prepareWorktreeCreateForRepo(store, repo, 'origin/main')
+
+    expect(mocks.unlock).toHaveBeenCalledWith(repo.path, '/workspace/final', {})
+    expect(mocks.discard).not.toHaveBeenCalledWith(repo.path, '/workspace/final', {})
   })
 
   it('cleans up and returns null so normal add can run when finalization fails', async () => {

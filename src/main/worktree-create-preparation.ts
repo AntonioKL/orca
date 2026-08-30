@@ -17,6 +17,7 @@ import { listWorktreeGraph } from './git/worktree'
 import {
   discardPreparedWorktree,
   finalizePreparedWorktree,
+  unlockPreparedWorktree,
   prepareWorktreeCreateCheckout
 } from './git/worktree-create-preparation'
 import { getLocalProjectWorktreeGitOptions } from './project-runtime-git-options'
@@ -31,6 +32,7 @@ type PreparationEntry = {
   repoPath: string
   workspaceRoot: string
   preparedPath: string
+  lockReason: string
   options: AddWorktreeOptions
   createdAt: number
   ready: Promise<void>
@@ -131,7 +133,13 @@ async function cleanupStalePreparations(
         if (!ownerPid || isProcessAlive(ownerPid)) {
           continue
         }
-        await discardPreparedWorktree(repoPath, worktree.path, options).catch(() => {})
+        // Preserve a branch-attached final path after a crash; only detached or
+        // still-hidden preparations are safe to discard automatically.
+        await (
+          worktree.branch && parseWorktreePreparationPathOwnerPid(worktree.path) === null
+            ? unlockPreparedWorktree(repoPath, worktree.path, options)
+            : discardPreparedWorktree(repoPath, worktree.path, options)
+        ).catch(() => {})
       }
     }
     const workerCount = Math.min(STALE_PREPARATION_CLEANUP_CONCURRENCY, staleWorktrees.length)
@@ -168,6 +176,7 @@ export function prepareWorktreeCreateForRepo(
 
   enforcePreparationLimit()
   const preparationId = `${process.pid}-${randomUUID()}`
+  const lockReason = createWorktreePreparationLockReason(preparationId)
   const preparedPath = pathOps(workspaceRoot).join(
     workspaceRoot,
     WORKTREE_CREATE_PREPARATION_DIRECTORY,
@@ -181,6 +190,7 @@ export function prepareWorktreeCreateForRepo(
     repoPath: repo.path,
     workspaceRoot,
     preparedPath,
+    lockReason,
     options,
     createdAt: Date.now(),
     expiration,
@@ -190,13 +200,7 @@ export function prepareWorktreeCreateForRepo(
         pathOps(workspaceRoot).join(workspaceRoot, WORKTREE_CREATE_PREPARATION_DIRECTORY),
         { recursive: true }
       )
-      await prepareWorktreeCreateCheckout(
-        repo.path,
-        preparedPath,
-        baseBranch,
-        createWorktreePreparationLockReason(preparationId),
-        options
-      )
+      await prepareWorktreeCreateCheckout(repo.path, preparedPath, baseBranch, lockReason, options)
     })()
   } satisfies PreparationEntry)
   preparations.set(key, entry)
@@ -251,6 +255,7 @@ export async function consumePreparedWorktreeCreate(
       args.worktreePath,
       args.branch,
       args.baseBranch,
+      entry.lockReason,
       args.refreshLocalBaseRef,
       options
     )
