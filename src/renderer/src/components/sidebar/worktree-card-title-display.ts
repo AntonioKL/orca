@@ -1,6 +1,8 @@
 type WorktreeCardTitleDisplayInput = {
   storedDisplayName: string | null | undefined
   branchName: string | null | undefined
+  /** Rebase identity is transient; never substitute branch-scoped work for the stored title. */
+  isRebasing?: boolean
   linearIssueTitle?: string | null
   jiraIssueTitle?: string | null
   issueTitle?: string | null
@@ -39,6 +41,7 @@ export function coerceWorktreeCardVisibleTitle(value: string | null | undefined)
 export function getWorktreeCardTitleDisplay({
   storedDisplayName,
   branchName,
+  isRebasing = false,
   linearIssueTitle,
   jiraIssueTitle,
   issueTitle,
@@ -47,6 +50,12 @@ export function getWorktreeCardTitleDisplay({
   const normalizedStoredDisplayName = normalizeComparableTitle(storedDisplayName)
   const normalizedBranchName = normalizeComparableTitle(branchName)
   const visibleStoredDisplayName = coerceWorktreeCardVisibleTitle(storedDisplayName)
+
+  // Why: during rebase the recovered branch is Git identity only; linked review/issue titles and
+  // the transient badge must not replace the workspace name the user chose.
+  if (isRebasing) {
+    return visibleStoredDisplayName
+  }
 
   if (!normalizedBranchName) {
     return normalizedStoredDisplayName ? visibleStoredDisplayName : ''

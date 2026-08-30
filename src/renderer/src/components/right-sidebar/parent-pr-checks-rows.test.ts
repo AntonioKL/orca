@@ -187,6 +187,7 @@ describe('buildParentPrChecksProjection', () => {
     // 'feature' branch would — the misleading "no PR" state during a rebase is the bug fixed here.
     const worktree = makeWorktree({
       id: 'repo-1::/feature',
+      displayName: 'My workspace',
       branch: '',
       rebasing: true,
       rebaseBranch: 'refs/heads/feature'
@@ -205,7 +206,12 @@ describe('buildParentPrChecksProjection', () => {
           }
         }
       }).rows[0]
-    ).toMatchObject({ branch: 'feature', status: 'failing', reviewLabel: '#12' })
+    ).toMatchObject({
+      branch: 'feature',
+      status: 'failing',
+      reviewLabel: '#12',
+      worktree: { displayName: 'My workspace' }
+    })
   })
 
   it('only counts a visible successful unlinked no-review outcome as No PR', () => {

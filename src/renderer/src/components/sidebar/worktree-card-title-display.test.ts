@@ -52,6 +52,27 @@ describe('worktree card title display', () => {
     ).toBe('feature/local-branch')
   })
 
+  it('keeps the stored title verbatim during rebase', () => {
+    expect(
+      getWorktreeCardTitleDisplay({
+        storedDisplayName: 'My workspace',
+        branchName: 'feature/local-branch',
+        isRebasing: true,
+        reviewTitle: 'Fix stale PR',
+        issueTitle: 'Fix stale issue'
+      })
+    ).toBe('My workspace')
+
+    expect(
+      getWorktreeCardTitleDisplay({
+        storedDisplayName: '  My workspace  ',
+        branchName: 'feature/local-branch',
+        isRebasing: true,
+        reviewTitle: 'Fix stale PR'
+      })
+    ).toBe('  My workspace  ')
+  })
+
   it('does not replace a branch-like workspace name with the repository name', () => {
     expect(
       getWorktreeCardTitleDisplay({

@@ -25,7 +25,7 @@ function headIdentitySignature(identity: {
   head: string
   branch: string | null
   rebasing?: boolean
-  rebaseBranch?: string
+  rebaseBranch?: string | null
 }): string {
   // Why: `git rebase --quit` flips only the rebase fields (HEAD stays put); omitting them
   // would swallow the change and leave a stale "(rebasing)" badge until the next poll.

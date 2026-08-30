@@ -35,7 +35,7 @@ export type GitWorktreeInfo = {
   /** True while a detached worktree is mid-rebase. */
   rebasing?: boolean
   /** Original branch recovered from Git's rebase head-name state. */
-  rebaseBranch?: string
+  rebaseBranch?: string | null
   /** True for the repo's main working tree (the first entry from `git worktree list`).
    *  Linked worktrees created via `git worktree add` have this set to false. */
   isMainWorktree: boolean
@@ -50,6 +50,8 @@ export type WorktreeHeadIdentity = {
   head: string
   /** Full ref (e.g. `refs/heads/main`), or null for a detached HEAD. */
   branch: string | null
+  rebasing?: boolean
+  rebaseBranch?: string | null
 }
 
 // ─── Worktree (app-level, enriched) ──────────────────────────────────

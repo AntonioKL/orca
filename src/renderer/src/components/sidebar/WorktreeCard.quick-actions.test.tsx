@@ -360,6 +360,28 @@ describe('WorktreeCard quick actions', () => {
     expect(markup).not.toContain('Detached HEAD @ abc123')
   })
 
+  it('keeps a custom workspace title separate from the rebasing badge', () => {
+    worktreeCardProperties = []
+
+    const markup = renderToStaticMarkup(
+      <WorktreeCard
+        worktree={makeWorktree({
+          displayName: 'My workspace',
+          branch: '',
+          rebasing: true,
+          rebaseBranch: 'feature/x'
+        })}
+        repo={makeRepo()}
+        isActive={false}
+        hideRepoBadge
+      />
+    )
+
+    expect(markup).toContain('My workspace')
+    expect(markup).toContain('feature/x (rebasing)')
+    expect(markup).not.toContain('My workspace (rebasing)')
+  })
+
   it('omits the repeated branch metadata row when compact cards are enabled', () => {
     worktreeCardProperties = []
     settings = { compactWorktreeCards: true }

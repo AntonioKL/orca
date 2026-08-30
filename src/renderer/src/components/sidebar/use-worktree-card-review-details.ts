@@ -26,8 +26,14 @@ export function useWorktreeCardReviewDetails({
 }: Pick<WorktreeCardProps, 'worktree' | 'repo'> &
   Pick<Foundation, 'settings' | 'projectGroups' | 'cardProps' | 'newCardStyle'>) {
   const gitIdentityDisplay = getWorktreeGitIdentityDisplay(worktree)
-  const detachedHeadDisplay = gitIdentityDisplay?.kind === 'detached' ? gitIdentityDisplay : null
-  const branch = gitIdentityDisplay?.kind === 'branch' ? gitIdentityDisplay.branchName : ''
+  const detachedHeadDisplay =
+    gitIdentityDisplay?.kind === 'detached' || gitIdentityDisplay?.kind === 'rebasing'
+      ? gitIdentityDisplay
+      : null
+  const branch =
+    gitIdentityDisplay?.kind === 'branch' || gitIdentityDisplay?.kind === 'rebasing'
+      ? (gitIdentityDisplay.branchName ?? '')
+      : ''
   const workspaceScope = parseWorkspaceKey(worktree.id)
   const folderWorkspaceId =
     workspaceScope?.type === 'folder' ? workspaceScope.folderWorkspaceId : null

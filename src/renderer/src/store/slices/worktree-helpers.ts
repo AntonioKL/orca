@@ -88,6 +88,13 @@ export type ActiveWorktreeStateTransition = (state: AppState) => {
   preferredActiveUnifiedTabId?: string
 }
 
+export type WorktreeGitIdentityUpdate = {
+  head?: string
+  branch?: string | null
+  rebasing?: boolean
+  rebaseBranch?: string | null
+}
+
 export type WorktreeSlice = {
   worktreesByRepo: Record<string, Worktree[]>
   detectedWorktreesByRepo: Record<string, DetectedWorktreeListResult>
@@ -341,10 +348,7 @@ export type WorktreeSlice = {
    * keeps its tabs, terminals, and selections. No-op when the ids match.
    */
   migrateWorktreeIdentity: (oldWorktreeId: string, newWorktreeId: string) => void
-  updateWorktreeGitIdentity: (
-    worktreeId: string,
-    identity: { head?: string; branch?: string | null }
-  ) => void
+  updateWorktreeGitIdentity: (worktreeId: string, identity: WorktreeGitIdentityUpdate) => void
   updateWorktreeBaseStatus: (event: WorktreeBaseStatusEvent) => void
   updateWorktreeRemoteBranchConflict: (event: WorktreeRemoteBranchConflictEvent) => void
 }

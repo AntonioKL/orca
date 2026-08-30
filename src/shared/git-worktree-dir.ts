@@ -7,7 +7,8 @@ import { parseWslUncPath, toWindowsWslPath, windowsPathFromWslMntPath } from './
 export function resolveGitDirPointerTarget(worktreePath: string, pointer: string): string {
   if (pointer.startsWith('/')) {
     // Why: a WSL checkout's pointer holds a Linux path; resolving it against the UNC
-    // checkout would land on the local Windows drive. Map it through the checkout's distro.
+    // checkout would land on the local Windows drive. Map it through the checkout's distro
+    // (toWindowsWslPath still resolves a /mnt/<drive> pointer to its Windows drive first).
     const wsl = parseWslUncPath(worktreePath)
     if (wsl) {
       return toWindowsWslPath(pointer, wsl.distro)

@@ -35,7 +35,15 @@ export function createUpdateWorktreeGitIdentity(
     }
     const expectedHead = identity.head ?? existing.head
     const expectedBranch = identity.branch === null ? '' : (identity.branch ?? existing.branch)
-    if (expectedHead === existing.head && expectedBranch === existing.branch) {
+    const expectedRebasing = identity.rebasing ?? existing.rebasing
+    const expectedRebaseBranch =
+      identity.rebaseBranch !== undefined ? identity.rebaseBranch : existing.rebaseBranch
+    if (
+      expectedHead === existing.head &&
+      expectedBranch === existing.branch &&
+      expectedRebasing === existing.rebasing &&
+      expectedRebaseBranch === existing.rebaseBranch
+    ) {
       return
     }
 
@@ -52,7 +60,15 @@ export function createUpdateWorktreeGitIdentity(
         }
         const nextHead = identity.head ?? worktree.head
         const nextBranch = identity.branch === null ? '' : (identity.branch ?? worktree.branch)
-        if (nextHead === worktree.head && nextBranch === worktree.branch) {
+        const nextRebasing = identity.rebasing ?? worktree.rebasing
+        const nextRebaseBranch =
+          identity.rebaseBranch !== undefined ? identity.rebaseBranch : worktree.rebaseBranch
+        if (
+          nextHead === worktree.head &&
+          nextBranch === worktree.branch &&
+          nextRebasing === worktree.rebasing &&
+          nextRebaseBranch === worktree.rebaseBranch
+        ) {
           return worktree
         }
         changed = true
@@ -103,6 +119,8 @@ export function createUpdateWorktreeGitIdentity(
           ...worktree,
           head: nextHead,
           branch: nextBranch,
+          ...(nextRebasing !== undefined ? { rebasing: nextRebasing } : {}),
+          ...(nextRebaseBranch !== undefined ? { rebaseBranch: nextRebaseBranch } : {}),
           displayName: nextDisplayName,
           // Why: linked reviews are branch-scoped; keeping the old link on a branch switch would refresh the old PR.
           ...(shouldClearHostedReviewContext ? CLEARED_HOSTED_REVIEW_LINK_UPDATES : {})

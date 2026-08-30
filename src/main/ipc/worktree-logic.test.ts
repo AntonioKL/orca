@@ -555,6 +555,37 @@ describe('mergeWorktree', () => {
     expect(result.workspaceStatus).toBe('in-progress')
   })
 
+  it('keeps the stored workspace name when Git reports a rebase', () => {
+    const result = mergeWorktree(
+      'repo1',
+      {
+        ...baseGit,
+        branch: '',
+        rebasing: true,
+        rebaseBranch: 'feature-x'
+      },
+      {
+        displayName: 'My workspace',
+        comment: '',
+        linkedIssue: null,
+        linkedPR: null,
+        linkedLinearIssue: null,
+        isArchived: false,
+        isUnread: false,
+        isPinned: false,
+        sortOrder: 0,
+        lastActivityAt: 0
+      }
+    )
+
+    expect(result).toMatchObject({
+      displayName: 'My workspace',
+      branch: '',
+      rebasing: true,
+      rebaseBranch: 'feature-x'
+    })
+  })
+
   it('strips refs/heads/ prefix from branch for display name', () => {
     const result = mergeWorktree('repo1', baseGit, undefined)
     expect(result.displayName).toBe('feature-x')

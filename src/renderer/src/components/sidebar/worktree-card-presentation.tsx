@@ -81,6 +81,7 @@ export function buildWorktreeCardPresentation(card: WorktreeCardController) {
   const showDetachedHeadInMetaRow = !compactCards && !isFolder && detachedHeadDisplay !== null
   const showBranch =
     !isFolder &&
+    worktree.rebasing !== true &&
     branch.length > 0 &&
     !newCardStyle &&
     (!compactCards || branch !== worktree.displayName)

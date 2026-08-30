@@ -10,7 +10,7 @@ import {
   worktreeIsCleanOp
 } from './git-handler-worktree-ops'
 import { annotatePrunableWorktreesByExistence } from './git-handler-worktree-list'
-import { readWorktreeRebaseState } from './git-handler-status-ops'
+import { readWorktreeRebaseState } from '../shared/git-rebase-worktree-state'
 import { refreshLocalBaseRefForWorktreeCreateOp } from './git-handler-local-base-ref-refresh'
 import {
   hasUnsupportedRevParsePathFormatEcho,
@@ -56,7 +56,9 @@ export class GitHandlerWorktreeOperations extends GitHandlerOperationContext {
   ): Promise<Record<string, unknown>[]> {
     return Promise.all(
       worktrees.map(async (worktree) => {
-        if (worktree.detached !== true || typeof worktree.path !== 'string') return worktree
+        if (worktree.detached !== true || typeof worktree.path !== 'string') {
+          return worktree
+        }
         try {
           const { rebasing, rebaseBranch } = await readWorktreeRebaseState(worktree.path)
           return {

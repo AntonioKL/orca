@@ -208,8 +208,14 @@ export function useChecksPanelControllerState() {
   const gitStatusSnapshotRerunContextRef = useRef<string | null>(null)
   const gitStatusSnapshotRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const gitIdentityDisplay = activeWorktree ? getWorktreeGitIdentityDisplay(activeWorktree) : null
-  const detachedHeadDisplay = gitIdentityDisplay?.kind === 'detached' ? gitIdentityDisplay : null
-  const branch = gitIdentityDisplay?.kind === 'branch' ? gitIdentityDisplay.branchName : ''
+  const detachedHeadDisplay =
+    gitIdentityDisplay?.kind === 'detached' || gitIdentityDisplay?.kind === 'rebasing'
+      ? gitIdentityDisplay
+      : null
+  const branch =
+    gitIdentityDisplay?.kind === 'branch' || gitIdentityDisplay?.kind === 'rebasing'
+      ? (gitIdentityDisplay.branchName ?? '')
+      : ''
   const activeWorktreePath = activeWorktree?.path ?? null
   const activeWorktreePushTarget = activeWorktree?.pushTarget ?? null
   const activeSourceControlLaunchPlatform = resolveSourceControlLaunchPlatform({

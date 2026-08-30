@@ -1,7 +1,7 @@
 import React from 'react'
 import { Check, LoaderCircle, Pencil, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { DetachedHeadBadge } from '@/components/DetachedHeadBadge'
+import { WorktreeIdentityBadge } from '@/components/WorktreeIdentityBadge'
 import HostedReviewActions from '../HostedReviewActions'
 import { GitHubPRStackMap } from '../GitHubPRStackMap'
 import { SourceControlAgentActionDialog } from '../SourceControlAgentActionDialog'
@@ -142,7 +142,9 @@ export function ChecksPanelActiveContent({
           onLinkAnotherReview={handleLinkAnotherReview}
         />
 
-        {detachedHeadDisplay && <DetachedHeadBadge display={detachedHeadDisplay} side="bottom" />}
+        {detachedHeadDisplay && (
+          <WorktreeIdentityBadge display={detachedHeadDisplay} side="bottom" />
+        )}
 
         {activeReview.provider === 'github' && pr?.stack ? (
           <GitHubPRStackMap

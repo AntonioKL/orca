@@ -1,6 +1,6 @@
 import type { BrowserWindow } from 'electron'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { WorktreeHeadIdentity } from '../../shared/types'
+import type { WorktreeHeadIdentity } from '../../shared/worktree/types'
 import {
   createWorktreeHeadIdentityRefreshState,
   refreshWorktreeHeadIdentities

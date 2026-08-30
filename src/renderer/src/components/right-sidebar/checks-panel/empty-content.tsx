@@ -1,6 +1,6 @@
 import React from 'react'
 import { Button } from '@/components/ui/button'
-import { DetachedHeadBadge } from '@/components/DetachedHeadBadge'
+import { WorktreeIdentityBadge } from '@/components/WorktreeIdentityBadge'
 import { CreateHostedReviewComposer } from '../CreateHostedReviewComposer'
 import {
   getChecksPanelReviewState,
@@ -215,7 +215,7 @@ export function ChecksPanelEmptyContent({
       <div className="px-4 py-6">
         {detachedHeadDisplay && (
           <div className="mb-3">
-            <DetachedHeadBadge display={detachedHeadDisplay} side="bottom" />
+            <WorktreeIdentityBadge display={detachedHeadDisplay} side="bottom" />
           </div>
         )}
         <div className="text-sm font-medium text-foreground">{emptyStateCopy.title}</div>

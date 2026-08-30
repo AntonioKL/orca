@@ -1,6 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join } from 'node:path'
 import type { WorktreeHeadIdentity } from '../../shared/worktree/types'
+import { readRebaseStateFromGitDir } from '../../shared/git-rebase-worktree-state'
 
 // Why: the whole point of this reader is replacing `git worktree list` fanout
 // with bounded metadata-file reads, so head freshness never re-creates the
@@ -82,7 +83,8 @@ async function readHeadIdentity(
   commonDirPath: string,
   headFilePath: string,
   worktreePath: string,
-  packedRefs: () => Promise<Map<string, string>>
+  packedRefs: () => Promise<Map<string, string>>,
+  rebaseStatePath = worktreePath
 ): Promise<WorktreeHeadIdentity | null> {
   const head = await readTrimmedFile(headFilePath)
   if (!head) {
@@ -98,7 +100,20 @@ async function readHeadIdentity(
     return { worktreePath, head: oid, branch: ref }
   }
   const detachedOid = asObjectId(head)
-  return detachedOid ? { worktreePath, head: detachedOid, branch: null } : null
+  if (!detachedOid) {
+    return null
+  }
+  const rebaseState = await readRebaseStateFromGitDir(rebaseStatePath).catch(() => ({
+    rebasing: false,
+    rebaseBranch: null
+  }))
+  return {
+    worktreePath,
+    head: detachedOid,
+    branch: null,
+    ...(rebaseState.rebasing ? { rebasing: true } : {}),
+    ...(rebaseState.rebaseBranch ? { rebaseBranch: rebaseState.rebaseBranch } : {})
+  }
 }
 
 /** Reads head/branch for the primary checkout and every linked worktree of a
@@ -120,7 +135,8 @@ export async function readGitCommonHeadIdentities(
       commonDirPath,
       join(commonDirPath, 'HEAD'),
       dirname(commonDirPath),
-      packedRefs
+      packedRefs,
+      commonDirPath
     )
     if (primary) {
       identities.push(primary)
@@ -151,7 +167,8 @@ export async function readGitCommonHeadIdentities(
       commonDirPath,
       join(entryPath, 'HEAD'),
       dirname(gitdirAbsolute),
-      packedRefs
+      packedRefs,
+      entryPath
     )
     if (identity) {
       identities.push(identity)

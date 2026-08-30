@@ -5,7 +5,7 @@ import type { GitBranchLineTotal } from '../../../../../../shared/git-status-typ
 import { cn } from '@/lib/utils'
 import { translate } from '@/i18n/i18n'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { DetachedHeadBadge } from '@/components/DetachedHeadBadge'
+import { WorktreeIdentityBadge } from '@/components/WorktreeIdentityBadge'
 import type { WorktreeGitIdentityDisplay } from '@/lib/worktree-git-identity-display'
 import { SourceControlHeaderIconButton } from './header-icon-button'
 import { SourceControlBranchLineTotalChip } from './branch-line-total-chip'
@@ -95,16 +95,16 @@ function resolveHeadFlowLabel(
   if (display?.kind === 'branch') {
     return display.branchName
   }
-  if (display?.kind === 'detached') {
+  if (display?.kind === 'detached' || display?.kind === 'rebasing') {
     return display.sourceControlLabel
   }
   return null
 }
 
 function HeadIdentity({ display }: { display: WorktreeGitIdentityDisplay }): React.JSX.Element {
-  if (display.kind === 'detached') {
+  if (display.kind === 'detached' || display.kind === 'rebasing') {
     return (
-      <DetachedHeadBadge
+      <WorktreeIdentityBadge
         display={display}
         side="bottom"
         // Why: tooltip carries the full detached explanation; keep it keyboard-reachable.

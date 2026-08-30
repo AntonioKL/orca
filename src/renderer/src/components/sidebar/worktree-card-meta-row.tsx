@@ -1,7 +1,7 @@
 import React from 'react'
 import { GitMerge } from 'lucide-react'
 
-import { DetachedHeadBadge } from '@/components/DetachedHeadBadge'
+import { WorktreeIdentityBadge } from '@/components/WorktreeIdentityBadge'
 import { RepoBadgeMark } from '@/components/repo/RepoBadgeLabel'
 import { Badge } from '@/components/ui/badge'
 import CacheTimer from './CacheTimer'
@@ -85,7 +85,7 @@ export function WorktreeCardMetaRow({
             tooltipEnabled={!hasHoverDetails}
           />
         ) : showDetachedHeadInMetaRow && detachedHeadDisplay ? (
-          <DetachedHeadBadge
+          <WorktreeIdentityBadge
             display={detachedHeadDisplay}
             label="sidebar"
             side="right"
