@@ -66,7 +66,7 @@ function hydrateUnifiedFormat(
   const groupsByWorktree: Record<string, TabGroup[]> = {}
   const activeGroupIdByWorktree: Record<string, string> = {}
   const layoutByWorktree: Record<string, TabGroupLayoutNode> = {}
-  const tabIdAliasesByWorktree: Record<string, Map<string, string>> = {}
+  const tabIdAliasesByWorktree: Record<string, Map<string, Map<string, string>>> = {}
   const persistedEditFileIdsByWorktree = getPersistedEditFileIdsByWorktree(session)
 
   for (const [worktreeId, tabs] of Object.entries(session.unifiedTabs!)) {
@@ -140,7 +140,7 @@ function hydrateUnifiedFormat(
     // Why after the sort: the surviving record is the one the strip renders first.
     const deduped = dedupeEditorTabsWithinGroups(hydratedTabs)
     tabsByWorktree[worktreeId] = deduped.tabs
-    tabIdAliasesByWorktree[worktreeId] = deduped.tabIdAliases
+    tabIdAliasesByWorktree[worktreeId] = deduped.tabIdAliasesByGroup
   }
 
   for (const [worktreeId, groups] of Object.entries(session.tabGroups!)) {
@@ -152,9 +152,10 @@ function hydrateUnifiedFormat(
     }
 
     const validTabIds = new Set((tabsByWorktree[worktreeId] ?? []).map((t) => t.id))
-    const tabIdAliases = tabIdAliasesByWorktree[worktreeId]
-    const canonicalTabId = (tabId: string): string => tabIdAliases?.get(tabId) ?? tabId
+    const tabIdAliasesByGroup = tabIdAliasesByWorktree[worktreeId]
     const validatedGroups = groups.map((g) => {
+      const tabIdAliases = tabIdAliasesByGroup?.get(g.id)
+      const canonicalTabId = (tabId: string): string => tabIdAliases?.get(tabId) ?? tabId
       // Why: persisted tabOrder can contain duplicates from older buggy
       // writes. Deduping during hydration restores the store invariant before
       // later group operations branch on tab counts or neighbors.

@@ -175,6 +175,46 @@ describe('corrupt editor session restore', () => {
     )
   })
 
+  it('does not redirect a stale alias reference into another group', () => {
+    const store = prepareStore()
+    const session = corruptSession()
+    const [left, right] = session.unifiedTabs![WORKTREE_ID]!
+    session.unifiedTabs![WORKTREE_ID] = [
+      { ...left, id: 'editor-group-a-left', groupId: 'group-a' },
+      { ...right, id: 'editor-group-a-duplicate', groupId: 'group-a' },
+      {
+        ...right,
+        id: 'editor-group-b',
+        entityId: '/workspace/.scratch/other.png',
+        groupId: 'group-b',
+        label: 'other.png',
+        sortOrder: 2
+      }
+    ]
+    session.tabGroups![WORKTREE_ID] = [
+      {
+        id: 'group-a',
+        worktreeId: WORKTREE_ID,
+        activeTabId: 'editor-group-a-duplicate',
+        tabOrder: ['editor-group-a-left', 'editor-group-a-duplicate']
+      },
+      {
+        id: 'group-b',
+        worktreeId: WORKTREE_ID,
+        activeTabId: 'editor-group-b',
+        // This stale reference must not be rewritten with group-a's alias.
+        tabOrder: ['editor-group-a-duplicate', 'editor-group-b']
+      }
+    ]
+
+    store.getState().hydrateTabsSession(session)
+
+    expect(store.getState().groupsByWorktree[WORKTREE_ID]).toEqual([
+      expect.objectContaining({ id: 'group-a', tabOrder: ['editor-group-a-left'] }),
+      expect.objectContaining({ id: 'group-b', tabOrder: ['editor-group-b'] })
+    ])
+  })
+
   it('preserves shared editor entities in separate split groups', () => {
     const store = prepareStore()
     const session = corruptSession()
