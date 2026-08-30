@@ -4,7 +4,7 @@ import type { Repo } from '../shared/repo-types'
 
 const mocks = vi.hoisted(() => ({
   mkdir: vi.fn(),
-  listWorktreesStrict: vi.fn(),
+  listWorktreeGraph: vi.fn(),
   prepareCheckout: vi.fn(),
   finalize: vi.fn(),
   discard: vi.fn(),
@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('node:fs/promises', () => ({ mkdir: mocks.mkdir }))
-vi.mock('./git/worktree', () => ({ listWorktreesStrict: mocks.listWorktreesStrict }))
+vi.mock('./git/worktree', () => ({ listWorktreeGraph: mocks.listWorktreeGraph }))
 vi.mock('./git/worktree-create-preparation', () => ({
   prepareWorktreeCreateCheckout: mocks.prepareCheckout,
   finalizePreparedWorktree: mocks.finalize,
@@ -37,7 +37,7 @@ const store = { getSettings: () => ({}) } as unknown as Store
 
 beforeEach(() => {
   mocks.mkdir.mockReset().mockResolvedValue(undefined)
-  mocks.listWorktreesStrict.mockReset().mockResolvedValue([])
+  mocks.listWorktreeGraph.mockReset().mockResolvedValue([])
   mocks.prepareCheckout.mockReset().mockResolvedValue(undefined)
   mocks.finalize.mockReset().mockResolvedValue({})
   mocks.discard.mockReset().mockResolvedValue(undefined)
@@ -106,11 +106,11 @@ describe('worktree create preparation registry', () => {
   })
 
   it('retries stale cleanup after a transient listing failure', async () => {
-    mocks.listWorktreesStrict.mockRejectedValueOnce(new Error('temporary listing failure'))
+    mocks.listWorktreeGraph.mockRejectedValueOnce(new Error('temporary listing failure'))
     await prepareWorktreeCreateForRepo(store, repo, 'origin/main')
     await prepareWorktreeCreateForRepo(store, repo, 'origin/release')
 
-    expect(mocks.listWorktreesStrict).toHaveBeenCalledTimes(2)
+    expect(mocks.listWorktreeGraph).toHaveBeenCalledTimes(2)
   })
 
   it('cleans up and returns null so normal add can run when finalization fails', async () => {

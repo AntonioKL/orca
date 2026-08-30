@@ -13,7 +13,7 @@ import {
   parseWorktreePreparationPathOwnerPid
 } from '../shared/worktree/create-preparation'
 import type { AddWorktreeOptions, AddWorktreeResult } from './git/worktree'
-import { listWorktreesStrict } from './git/worktree'
+import { listWorktreeGraph } from './git/worktree'
 import {
   discardPreparedWorktree,
   finalizePreparedWorktree,
@@ -47,7 +47,7 @@ type ConsumePreparedWorktreeArgs = {
 }
 
 const preparations = new Map<string, PreparationEntry>()
-const staleCleanupStarted = new Set<string>()
+const staleCleanupInFlight = new Map<string, Promise<void>>()
 
 function pathOps(path: string): Pick<typeof posix, 'dirname' | 'join' | 'normalize'> {
   return isWindowsAbsolutePathLike(path) ? win32 : posix
@@ -108,12 +108,13 @@ async function cleanupStalePreparations(
   options: AddWorktreeOptions
 ): Promise<void> {
   const cleanupKey = `${pathKey(repoPath)}\0${options.wslDistro ?? ''}`
-  if (staleCleanupStarted.has(cleanupKey)) {
+  const existing = staleCleanupInFlight.get(cleanupKey)
+  if (existing) {
+    await existing.catch(() => {})
     return
   }
-  staleCleanupStarted.add(cleanupKey)
-  try {
-    const worktrees = await listWorktreesStrict(repoPath, {
+  const cleanup = (async () => {
+    const worktrees = await listWorktreeGraph(repoPath, {
       ...options,
       includeCreatePreparations: true
     })
@@ -128,8 +129,14 @@ async function cleanupStalePreparations(
         await discardPreparedWorktree(repoPath, worktree.path, options).catch(() => {})
       })
     )
-  } catch {
-    staleCleanupStarted.delete(cleanupKey)
+  })()
+  staleCleanupInFlight.set(cleanupKey, cleanup)
+  try {
+    await cleanup.catch(() => {})
+  } finally {
+    if (staleCleanupInFlight.get(cleanupKey) === cleanup) {
+      staleCleanupInFlight.delete(cleanupKey)
+    }
   }
 }
 
@@ -253,7 +260,7 @@ export async function consumePreparedWorktreeCreate(
 export async function _resetWorktreeCreatePreparationsForTests(): Promise<void> {
   const entries = [...preparations.values()]
   preparations.clear()
-  staleCleanupStarted.clear()
+  staleCleanupInFlight.clear()
   await Promise.all(
     entries.map(async (entry) => {
       clearTimeout(entry.expiration)
