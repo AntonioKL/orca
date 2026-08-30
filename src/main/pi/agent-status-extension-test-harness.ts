@@ -60,7 +60,7 @@ export function createAgentStatusExtensionHarness(args: {
   env?: Record<string, string | undefined>
   pid?: number
   title?: string
-  argv?: string[]
+  argv?: readonly string[]
   existsSync?: (path: string) => boolean
   readFileSync?: (path: string, encoding: string) => string
   statSync?: (path: string) => { mtimeMs: number; size: number; ino: number }

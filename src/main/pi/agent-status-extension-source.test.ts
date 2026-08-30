@@ -154,7 +154,7 @@ describe('getPiAgentStatusExtensionSource', () => {
 
       await vi.waitFor(() => expect(harness.fetchMock).toHaveBeenCalledTimes(2))
       const payloads = harness.fetchMock.mock.calls.map(
-        ([_, init]) => JSON.parse(String(init?.body)).payload
+        ([_event, init]) => JSON.parse(String(init?.body)).payload
       )
       expect(payloads).toEqual([
         { hook_event_name: 'session_start' },
@@ -207,7 +207,7 @@ describe('getPiAgentStatusExtensionSource', () => {
 
     await vi.waitFor(() => expect(harness.fetchMock).toHaveBeenCalledTimes(3))
     expect(
-      harness.fetchMock.mock.calls.map(([_, init]) => JSON.parse(String(init?.body)).payload)
+      harness.fetchMock.mock.calls.map(([_event, init]) => JSON.parse(String(init?.body)).payload)
     ).toEqual([
       { hook_event_name: 'agent_start', session_id: 'omp-session-8' },
       {
@@ -642,10 +642,10 @@ describe('getPiAgentStatusExtensionSource', () => {
     }
   })
 
-  it('keeps reporting Pi-compatible agents once their agent_end handlers settle', async () => {
+  it('keeps polling Pi and Prime until their agent_end handlers settle', async () => {
     vi.useFakeTimers()
     try {
-      for (const kind of ['pi', 'omp', 'prime-agent'] as const) {
+      for (const kind of ['pi', 'prime-agent'] as const) {
         const harness = createHarness({ kind })
         let idle = false
         const context = { isIdle: vi.fn(() => idle) }
@@ -666,6 +666,16 @@ describe('getPiAgentStatusExtensionSource', () => {
 
   it('keeps immediate agent_end fallback for runtimes without an idle context', async () => {
     const harness = createHarness({ kind: 'omp' })
+
+    await harness.callHook('agent_end')
+    await vi.waitFor(() => expect(harness.fetchMock).toHaveBeenCalledTimes(1))
+  })
+
+  it('does not report a non-terminal OMP agent_end without an idle context', async () => {
+    const harness = createHarness({ kind: 'omp' })
+
+    await harness.callHook('agent_end', { willContinue: true })
+    expect(harness.fetchMock).not.toHaveBeenCalled()
 
     await harness.callHook('agent_end')
     await vi.waitFor(() => expect(harness.fetchMock).toHaveBeenCalledTimes(1))

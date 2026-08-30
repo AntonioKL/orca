@@ -8,17 +8,15 @@ import {
 import { isLegacyPiCompatibleTitle } from './pi-compatible-synthetic-title'
 import { getWrapperTitleSegments } from './terminal-title-wrapper-segments'
 
+/** The π brand a Pi/OMP title leads with; the owner's label replaces it in place. */
+const LEGACY_PI_BRAND = 'π'
+
 type TitleProfileMatch = {
   profile: SyntheticAgentTitleProfile
   sourceTitle: string
 }
 
 type TitleLabelProfileMatch = Pick<TitleProfileMatch, 'profile'>
-
-export type CompatibleAgentOwnerOptions = {
-  /** User-selected launch identity. Same-group incoming frames collapse to the owner. */
-  ownerIsLaunch?: boolean
-}
 
 const COMPATIBLE_IDLE_TITLE_RE = /(?<![\w./\\-])(?:ready|idle|done)(?![\w-])/i
 
@@ -111,47 +109,12 @@ function hasIdleSuffix(title: string, sourceProfile: SyntheticAgentTitleProfile)
 }
 
 /**
- * True when both agents are the same, or members of one title-identity group
- * (OMP wraps Pi). Same-group titles are not reuse evidence.
- */
-export function shareCompatibleTitleIdentityGroup(
-  left: AgentType | null | undefined,
-  right: AgentType | null | undefined
-): boolean {
-  if (!left || !right) {
-    return false
-  }
-  if (left === right) {
-    return true
-  }
-  const leftGroup = getSyntheticAgentTitleProfile(left)?.titleIdentityGroup
-  const rightGroup = getSyntheticAgentTitleProfile(right)?.titleIdentityGroup
-  return Boolean(leftGroup && leftGroup === rightGroup)
-}
-
-function specificSiblingOutranksGenericOwner(
-  ownerProfile: SyntheticAgentTitleProfile,
-  incomingProfile: SyntheticAgentTitleProfile,
-  ownerIsLaunch: boolean
-): boolean {
-  // Launch ownership is identity. Only an inferred generic owner (a status frame
-  // that reported Pi) yields to a specific sibling so the label cannot oscillate.
-  return (
-    !ownerIsLaunch &&
-    Boolean(ownerProfile.titleIdentityFallback) &&
-    !incomingProfile.titleIdentityFallback
-  )
-}
-
-/**
  * Why: remote OMP surfaces may report Pi as the live status identity, while
- * launch ownership still identifies the user-selected agent. The owner wins.
- * An inferred generic owner yields to a specific sibling; explicit launch never does.
+ * launch ownership still identifies the user-selected agent.
  */
 export function resolveCompatibleAgentTypeForOwner(
   incomingAgentType: AgentType | null | undefined,
-  ownerAgentType: AgentType | null | undefined,
-  options?: CompatibleAgentOwnerOptions
+  ownerAgentType: AgentType | null | undefined
 ): AgentType | undefined {
   if (!incomingAgentType) {
     return undefined
@@ -165,15 +128,6 @@ export function resolveCompatibleAgentTypeForOwner(
   ) {
     return incomingAgentType
   }
-  if (
-    specificSiblingOutranksGenericOwner(
-      ownerProfile,
-      incomingProfile,
-      options?.ownerIsLaunch === true
-    )
-  ) {
-    return incomingAgentType
-  }
   return ownerAgentType as AgentType
 }
 
@@ -183,8 +137,7 @@ export function resolveCompatibleAgentTypeForOwner(
  */
 export function normalizeCompatibleAgentTitleForOwner(
   title: string,
-  ownerAgentType: AgentType | null | undefined,
-  options?: CompatibleAgentOwnerOptions
+  ownerAgentType: AgentType | null | undefined
 ): string {
   const ownerProfile = getSyntheticAgentTitleProfile(ownerAgentType)
   if (!ownerProfile?.titleIdentityGroup) {
@@ -197,15 +150,18 @@ export function normalizeCompatibleAgentTitleForOwner(
   ) {
     return title
   }
-  // Why: a specific sibling title (OMP) must not be rewritten through an inferred Pi owner.
-  if (
-    specificSiblingOutranksGenericOwner(
-      ownerProfile,
-      source.profile,
-      options?.ownerIsLaunch === true
-    )
-  ) {
-    return title
+  // Why: a π-branded title is the agent's own semantic session title (`π > <session> - <cwd>`;
+  // Orca's injected extension writes the same shape). Swap only the BRAND for the owner's label
+  // so the pane still reads as its launch owner (#6689, #7633, #9077) without discarding the
+  // session name and cwd, which collapsing to a bare profile label threw away (#16093).
+  if (isLegacyPiCompatibleTitle(source.sourceTitle)) {
+    // Why scoped to the matched segment: a multiplexer prefix could itself contain the brand,
+    // and a whole-string replace would rewrite that instead of the pane's own identity. Note the
+    // scoping is only as good as the segment match — a prefix that itself parses as a π title
+    // makes the whole string the match, and then the prefix's brand is what gets swapped.
+    const ownedSegment = source.sourceTitle.replace(LEGACY_PI_BRAND, ownerProfile.workingLabel)
+    const segmentAt = title.lastIndexOf(source.sourceTitle)
+    return segmentAt === -1 ? ownedSegment : title.slice(0, segmentAt) + ownedSegment
   }
   const sourceStatus = getSourceTitleStatus(source.sourceTitle)
   if (sourceStatus === 'working') {
@@ -232,16 +188,11 @@ export function normalizeCompatibleAgentTitleForOwner(
  */
 export function normalizeCompatibleAgentStatusEntryForOwner(
   entry: AgentStatusEntry,
-  ownerAgentType: AgentType | null | undefined,
-  options?: CompatibleAgentOwnerOptions
+  ownerAgentType: AgentType | null | undefined
 ): AgentStatusEntry {
-  const agentType = resolveCompatibleAgentTypeForOwner(entry.agentType, ownerAgentType, options)
+  const agentType = resolveCompatibleAgentTypeForOwner(entry.agentType, ownerAgentType)
   const terminalTitle = entry.terminalTitle
-    ? normalizeCompatibleAgentTitleForOwner(
-        entry.terminalTitle,
-        agentType ?? ownerAgentType,
-        options
-      )
+    ? normalizeCompatibleAgentTitleForOwner(entry.terminalTitle, agentType ?? ownerAgentType)
     : entry.terminalTitle
   if (agentType === entry.agentType && terminalTitle === entry.terminalTitle) {
     return entry
