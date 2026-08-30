@@ -6,6 +6,11 @@ import {
 import { classifyTitleActivity, isExplicitAgentStatusFresh } from '@/lib/pane-agent-evidence'
 import type { WorkspaceCleanupCandidate } from '../../../../shared/workspace-cleanup'
 import { getWorktreeVisitTimestamp } from '@/lib/worktree-visit-recency'
+import {
+  terminalCloseDecision,
+  terminalCloseLivenessFromInspection,
+  type TerminalCloseLiveness
+} from '../../../../shared/terminal-close-liveness'
 
 const RECENT_VISIBLE_CONTEXT_MS = 24 * 60 * 60 * 1000
 const VIEWED_FROM_CLEANUP_MS = 2 * 60 * 60 * 1000
@@ -158,23 +163,30 @@ export function hasWorkingTitleAgent(
 export async function probeTerminalLiveness(
   state: AppState,
   tabs: { id: string; title: string }[]
-): Promise<'idle' | 'running' | 'unknown'> {
+): Promise<TerminalCloseLiveness> {
   const ptyChecks = tabs.flatMap((tab) =>
     (state.ptyIdsByTabId[tab.id] ?? []).map((ptyId) => ({ tab, ptyId }))
   )
   if (ptyChecks.length === 0) {
-    return 'idle'
+    return 'exited'
   }
 
-  let unknown = false
+  let unverifiable = false
   for (const { tab, ptyId } of ptyChecks) {
     try {
       const [hasChildProcesses, foregroundProcess] = await Promise.all([
         window.api.pty.hasChildProcesses(ptyId),
         window.api.pty.getForegroundProcess(ptyId)
       ])
+      const liveness = terminalCloseLivenessFromInspection({ hasChildProcesses })
+      if (terminalCloseDecision(liveness) === 'prompt') {
+        if (liveness === 'unverifiable') {
+          unverifiable = true
+          continue
+        }
+      }
       const processName = normalizeProcessName(foregroundProcess)
-      if (!hasChildProcesses && (!processName || SHELL_PROCESS_NAMES.has(processName))) {
+      if (liveness === 'exited' && (!processName || SHELL_PROCESS_NAMES.has(processName))) {
         continue
       }
       if (
@@ -184,13 +196,13 @@ export async function probeTerminalLiveness(
       ) {
         continue
       }
-      return 'running'
+      return 'live'
     } catch {
-      unknown = true
+      unverifiable = true
     }
   }
 
-  return unknown ? 'unknown' : 'idle'
+  return unverifiable ? 'unverifiable' : 'exited'
 }
 
 function hasIdleAgentTitleForPty(

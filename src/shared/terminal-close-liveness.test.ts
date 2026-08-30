@@ -26,16 +26,4 @@ describe('terminal close liveness policy', () => {
     expect(terminalCloseLivenessFromInspection({ hasChildProcesses: true })).toBe('live')
     expect(terminalCloseLivenessFromInspection({ hasChildProcesses: false })).toBe('exited')
   })
-
-  it('lets composite host evidence poison the close even when the legacy scalar is false', () => {
-    expect(
-      terminalCloseLivenessFromInspection({
-        hasChildProcesses: false,
-        processEvidence: {
-          foreground: { verdict: 'unverifiable' },
-          children: { verdict: 'exited' }
-        }
-      })
-    ).toBe('unverifiable')
-  })
 })

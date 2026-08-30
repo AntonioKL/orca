@@ -1,3 +1,5 @@
+import type { PtyLivenessVerdict } from './pty-liveness-verdict'
+
 /**
  * The only liveness states a destructive terminal close may consume.
  *
@@ -20,11 +22,6 @@ export const TERMINAL_CLOSE_DECISION_BY_LIVENESS: Readonly<
 export type TerminalCloseInspection = {
   hasChildProcesses: boolean
   unavailable?: true
-  /** Optional composite evidence published by newer paired hosts (#17444). */
-  processEvidence?: {
-    foreground?: { verdict: TerminalCloseLiveness }
-    children?: { verdict: TerminalCloseLiveness }
-  }
 }
 
 /** Normalize one inspection response before any close guard makes a decision. */
@@ -34,20 +31,6 @@ export function terminalCloseLivenessFromInspection(
   if (!inspection || inspection.unavailable === true) {
     return 'unverifiable'
   }
-  const evidence = inspection.processEvidence
-  if (evidence) {
-    const verdicts = [evidence.foreground?.verdict, evidence.children?.verdict]
-    if (verdicts.includes('unverifiable')) {
-      return 'unverifiable'
-    }
-    if (verdicts.includes('live')) {
-      return 'live'
-    }
-    if (verdicts.every((verdict) => verdict === 'exited')) {
-      return 'exited'
-    }
-    return 'unverifiable'
-  }
   return inspection.hasChildProcesses ? 'live' : 'exited'
 }
 
@@ -55,4 +38,3 @@ export function terminalCloseLivenessFromInspection(
 export function terminalCloseDecision(liveness: TerminalCloseLiveness): TerminalCloseDecision {
   return TERMINAL_CLOSE_DECISION_BY_LIVENESS[liveness]
 }
-import type { PtyLivenessVerdict } from './pty-liveness-verdict'

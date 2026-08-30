@@ -567,7 +567,10 @@ function Terminal(): React.JSX.Element | null {
               .filter((ptyId) => !isRemoteRuntimePtyId(ptyId))
           }
         )
-        if (localPtyIds.length > 0) {
+        if (
+          localPtyIds.length > 0 &&
+          state.settings?.skipCloseTerminalWithRunningProcessConfirm !== true
+        ) {
           void Promise.allSettled(
             localPtyIds.map((id) => inspectRuntimeTerminalProcess(state.settings, id))
           ).then((results) => {
