@@ -27,21 +27,27 @@ describe('sanitizeCrashReportString', () => {
     expect(sanitized).toContain('[redacted-path]')
   })
 
-  // Positive control: prose that resembles neither must survive, so the assertions above
-  // cannot pass by redacting everything.
-  it('leaves text carrying no secret and no path untouched', () => {
-    const prose = 'Renderer crashed while restoring 3 tabs after a sk- prefixed heading'
-
+  // Positive control: text that resembles neither must survive, so the assertions above cannot pass
+  // by redacting everything. The later rows are the near-misses -- a tilde that roots no path, and a
+  // URL whose path names a server rather than this disk.
+  it.each([
+    'Renderer crashed while restoring 3 tabs after a sk- prefixed heading',
+    'throughput was ~5s/op after the retry',
+    'cache~v2/entries/cold was empty',
+    'POST https://api.example.com/v1/messages returned 500',
+    'require node:fs and npm:left-pad'
+  ])('leaves text carrying no secret and no path untouched: %s', (prose) => {
     expect(sanitizeCrashReportString(prose)).toBe(prose)
   })
 })
 
 /**
- * Why: the unquoted patterns used to stop at the first space, emitting [redacted-path] with the
- * rest of the path still beside it -- a report that looks scrubbed but still carries a share name,
- * a directory chain and a filename. Each form below is pinned to go whole.
+ * Why: a path reaches a report in more shapes than the bare patterns can see. The unquoted patterns
+ * used to stop at the first space, emitting [redacted-path] with the rest of the path still beside
+ * it; the URL and tilde forms below were missed outright, so a username left the machine untouched.
+ * Each form is pinned to go whole -- marker emitted and content removed in one operation.
  */
-const PARTIAL_LEAK_FORMS: readonly (readonly [string, string, readonly string[]])[] = [
+const LEAKED_PATH_FORMS: readonly (readonly [string, string, readonly string[]])[] = [
   [
     'unquoted UNC, one space',
     'open \\\\fileserver\\Private Share\\brennan\\creds.txt failed',
@@ -110,11 +116,76 @@ const PARTIAL_LEAK_FORMS: readonly (readonly [string, string, readonly string[]]
     'drive-letter path inside a stack frame',
     '    at load (C:\\Users\\brennan\\My Documents\\app.js:12:9)',
     ['brennan', 'My Documents', 'app.js']
+  ],
+  // URL-shaped roots. A renderer stack is file:// throughout, so this is the form a crash report is
+  // most likely to carry -- and the one that used to survive redaction entirely.
+  [
+    'file URL',
+    'load file:///Users/alice/Documents/app.js failed',
+    ['alice', 'Documents', 'app.js']
+  ],
+  [
+    'file URL inside a stack frame',
+    '    at load (file:///Users/alice/My Documents/app.js:12:9)',
+    ['alice', 'My Documents', 'app.js']
+  ],
+  [
+    'quoted file URL',
+    'load "file:///Users/alice/My Documents/app.js" failed',
+    ['alice', 'My Documents', 'app.js']
+  ],
+  [
+    'file URL rooted at a drive',
+    'load file:///C:/Users/alice/Documents/app.js failed',
+    ['Users', 'alice', 'Documents']
+  ],
+  [
+    'file URL naming a host',
+    'load file://fileserver/Private Share/alice/creds.txt failed',
+    ['fileserver', 'Private Share', 'alice', 'creds.txt']
+  ],
+  ['file URL without an authority', 'load file:/Users/alice/app.js failed', ['alice', 'app.js']],
+  [
+    'file URL with an uppercase scheme',
+    'load FILE:///Users/alice/Documents/app.js failed',
+    ['alice', 'Documents', 'app.js']
+  ],
+  [
+    'editor deep link',
+    'open vscode://file/Users/alice/Documents/app.ts:3 failed',
+    ['alice', 'Documents', 'app.ts']
+  ],
+  ['app scheme URL', 'load app:///Users/alice/dist/index.js failed', ['alice', 'dist']],
+  [
+    'share URL',
+    'mount smb://fileserver/Private Share/alice/creds.txt failed',
+    ['fileserver', 'Private Share', 'alice', 'creds.txt']
+  ],
+  // Roots the bare patterns cannot start from: a tilde home, and a drive spelled with forward slashes.
+  [
+    'tilde home',
+    'read ~/Documents/My Notes/creds.txt failed',
+    ['Documents', 'My Notes', 'creds.txt']
+  ],
+  [
+    'tilde home of a named user',
+    'read ~alice/Documents/creds.txt failed',
+    ['alice', 'Documents', 'creds.txt']
+  ],
+  [
+    'drive letter with forward slashes',
+    'open C:/Users/alice/My Documents/creds.txt failed',
+    ['Users', 'alice', 'My Documents', 'creds.txt']
+  ],
+  [
+    'quoted drive letter with forward slashes',
+    'open "C:/Users/alice/My Documents/creds.txt" failed',
+    ['Users', 'alice', 'My Documents', 'creds.txt']
   ]
 ]
 
 describe('sanitizeCrashReportString path redaction is all-or-nothing', () => {
-  it.each(PARTIAL_LEAK_FORMS)('redacts %s whole', (_name, input, fragments) => {
+  it.each(LEAKED_PATH_FORMS)('redacts %s whole', (_name, input, fragments) => {
     const sanitized = sanitizeCrashReportString(input)
 
     expect(sanitized).toContain('[redacted-path]')
@@ -124,9 +195,12 @@ describe('sanitizeCrashReportString path redaction is all-or-nothing', () => {
     // The defect shape: a marker sitting next to surviving path content. A separator after the
     // marker catches a path cut mid-chain. It cannot see a cut inside the last segment -- what
     // survives there is a bare filename, 'My Notes.txt' cut to 'Notes.txt' -- so a name carrying an
-    // extension beside the marker is forbidden too.
+    // extension beside the marker is forbidden too. Leading covers a root left standing where the
+    // marker begins -- 'file:///C:[redacted-path]', 'C:[redacted-path]', '~[redacted-path]',
+    // 'jdbc:[redacted-path]' -- which still names where the file lived.
     expect(sanitized).not.toMatch(/\[redacted-path\][^\n]*[\\/]/)
     expect(sanitized).not.toMatch(/\[redacted-path\] ?\S*\.[A-Za-z0-9]/)
+    expect(sanitized).not.toMatch(/[\\/:~][^\s]*\[redacted-path\]/)
   })
 
   // Control for the space-crossing rule specifically: it must not swallow the prose that follows a
@@ -183,6 +257,38 @@ describe('sanitizeCrashReportString path redaction is all-or-nothing', () => {
       'path-shaped words after a filename',
       'read /Users/brennan/Documents/creds.txt then check b/c/d.txt now',
       'then check b/c/d.txt now'
+    ],
+    // The URL rule must not reach a remote resource: a web-transport path names a server's route,
+    // not this machine's disk, and redacting it would cost the report its failing endpoint.
+    [
+      'remote https URL carrying a path',
+      'read /etc/hosts then POST https://api.example.com/v1/messages',
+      'then POST https://api.example.com/v1/messages'
+    ],
+    [
+      'websocket URL carrying a path',
+      'read /etc/hosts then ws://127.0.0.1:9229/devtools/page/ABC',
+      'then ws://127.0.0.1:9229/devtools/page/ABC'
+    ],
+    [
+      'dev server URL carrying a path',
+      'read /etc/hosts then GET http://localhost:5173/src/main.tsx',
+      'then GET http://localhost:5173/src/main.tsx'
+    ],
+    [
+      'scheme that names no path',
+      'read /etc/hosts then require node:fs and npm:left-pad',
+      'then require node:fs and npm:left-pad'
+    ],
+    [
+      'git remote over ssh',
+      'read /etc/hosts then push git@github.com:orgname/reponame.git',
+      'then push git@github.com:orgname/reponame.git'
+    ],
+    [
+      'remote URL whose scheme is uppercased',
+      'read /etc/hosts then POST HTTPS://api.example.com/v1/messages',
+      'then POST HTTPS://api.example.com/v1/messages'
     ]
   ])('keeps the prose after a redacted path (%s)', (_name, input, survives) => {
     expect(sanitizeCrashReportString(input)).toBe(`read [redacted-path] ${survives}`)

@@ -61,10 +61,20 @@ const unquotedPathTail = (separator: string): string =>
 const POSIX_TAIL = unquotedPathTail('/')
 const WINDOWS_TAIL = unquotedPathTail('\\\\')
 
+// A local path also reaches a report wearing a URL: renderer stacks are `file://` throughout, and a
+// deep link (`vscode://file/...`), a share URL, or a drive spelled `C:/...` carries one too. The bare
+// patterns cannot see any of them -- the root `/` sits behind a scheme, which their lookbehind
+// rejects. Matching from the scheme removes it with the path, so no root is left beside the marker,
+// and the scheme is proof enough of a path that no plain first segment is needed. The web transports
+// are excluded: their path names a remote resource, not this machine's disk.
+const LOCAL_URL_ROOT = '(?<![A-Za-z0-9+.-])(?!(?:https?|wss?):)[A-Za-z][A-Za-z0-9+.-]*:/'
+
 const PATH_PATTERNS = [
   /(["'`])\/[A-Za-z0-9._-]+\/(?:(?!\1)[^<>\n\r])+\1/g,
   /(["'`])[A-Za-z]:\\(?:(?!\1)[^<>\n\r])+\1/gi,
   /(["'`])\\\\[^\\\s"'`<>\n\r)]+\\(?:(?!\1)[^<>\n\r])+\1/gi,
+  new RegExp(`${LOCAL_URL_ROOT}${POSIX_TAIL}`, 'gi'),
+  new RegExp(`(?<![A-Za-z0-9./~])~[A-Za-z0-9._-]*/[A-Za-z0-9._-]+/${POSIX_TAIL}`, 'g'),
   new RegExp(`(?<![A-Za-z0-9./])/[A-Za-z0-9._-]+/${POSIX_TAIL}`, 'g'),
   new RegExp(`(?<![A-Za-z0-9])[A-Za-z]:\\\\${WINDOWS_TAIL}`, 'gi'),
   new RegExp(`\\\\\\\\[^\\\\${PATH_STOP}]+\\\\${WINDOWS_TAIL}`, 'gi'),
