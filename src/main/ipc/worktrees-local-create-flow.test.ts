@@ -7,6 +7,7 @@ import {
   addWorktreeMock,
   resolveLocalGitUsernameMock,
   getBaseRefDefaultMock,
+  resolveDefaultBaseRefWithLocalGitMock,
   getBranchConflictKindMock,
   getEffectiveHooksMock,
   createSetupRunnerScriptMock,
@@ -106,6 +107,50 @@ describe('registerWorktreeHandlers', () => {
 
   beforeEach(() => {
     runtimeStub = setupWorktreeHandlers()
+  })
+
+  it('starts username and base-ref probes concurrently', async () => {
+    const events: string[] = []
+    let resolveUsername!: (value: string) => void
+    let resolveBase!: (value: string | null) => void
+    const usernamePromise = new Promise<string>((resolve) => {
+      events.push('username-start')
+      resolveUsername = resolve
+    })
+    const basePromise = new Promise<string | null>((resolve) => {
+      events.push('base-start')
+      resolveBase = resolve
+    })
+    store.getSettings.mockReturnValue({
+      branchPrefix: 'git-username',
+      nestWorkspaces: false,
+      refreshLocalBaseRefOnWorktreeCreate: false,
+      workspaceDir: '/workspace'
+    })
+    resolveLocalGitUsernameMock.mockReturnValue(usernamePromise)
+    resolveDefaultBaseRefWithLocalGitMock.mockReturnValue(basePromise)
+    listWorktreesMock.mockResolvedValue([
+      {
+        path: '/workspace/concurrent-probe',
+        head: 'created-sha',
+        branch: 'jdoe/concurrent-probe',
+        isBare: false,
+        isMainWorktree: false
+      }
+    ])
+
+    const creation = handlers['worktrees:create'](null, {
+      repoId: 'repo-1',
+      name: 'concurrent-probe'
+    })
+    await Promise.resolve()
+
+    expect(events).toEqual(['username-start', 'base-start'])
+    resolveUsername('jdoe')
+    resolveBase('origin/main')
+    await expect(creation).resolves.toMatchObject({
+      worktree: expect.objectContaining({ branch: 'jdoe/concurrent-probe' })
+    })
   })
 
   it('prefetches the local default create base through the runtime refresh cache', async () => {
