@@ -166,6 +166,29 @@ describe('resolveCreatedWorktree', () => {
     )
   })
 
+  it('charges the recovery what the listing left of the budget, not a fresh one', async () => {
+    vi.mocked(listWorktreesSharedStrict).mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 60))
+      throw new Error('git worktree list timed out.')
+    })
+    vi.mocked(describeCreatedWorktree).mockResolvedValue(CREATED)
+
+    await resolveCreatedWorktree('/repo', '/workspaces/feature', 'feature')
+
+    const options = vi.mocked(describeCreatedWorktree).mock.lastCall?.[3]
+    expect(options?.timeout).toBeGreaterThanOrEqual(5_000)
+    expect(options?.timeout).toBeLessThan(30_000)
+  })
+
+  it("keeps the caller's own deadline instead of the shared budget", async () => {
+    vi.mocked(listWorktreesSharedStrict).mockRejectedValue(new Error('git worktree list failed.'))
+    vi.mocked(describeCreatedWorktree).mockResolvedValue(CREATED)
+
+    await resolveCreatedWorktree('/repo', '/workspaces/feature', 'feature', { timeout: 1_234 })
+
+    expect(vi.mocked(describeCreatedWorktree).mock.lastCall?.[3]).toMatchObject({ timeout: 1_234 })
+  })
+
   it('forwards exec options only when the caller supplied them', async () => {
     vi.mocked(listWorktreesSharedStrict).mockResolvedValue([CREATED])
     await resolveCreatedWorktree('/repo', '/workspaces/feature', 'feature')

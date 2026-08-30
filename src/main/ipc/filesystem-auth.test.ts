@@ -20,6 +20,7 @@ import { isDescendantOrEqual, validateGitRelativeFilePath } from './filesystem-p
 import {
   invalidateAuthorizedRootsCache,
   rebuildAuthorizedRootsCache,
+  registerCreatedWorktreeRoot,
   resolveRegisteredWorktreePath
 } from './registered-worktree-roots-cache'
 
@@ -119,6 +120,20 @@ describe('filesystem auth worktree roots', () => {
       resolve(lastWorktreePath)
     )
     expect(listRepoWorktrees).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps a repo's roots when its listing fails mid-rebuild", async () => {
+    // Why: the rebuild runs while Git is still broken, and dropping the roots would revoke
+    // a worktree a create just recovered without a listing (#16520).
+    const store = makeStore()
+    registerCreatedWorktreeRoot(store, repo.id, '/linked/recovered')
+    vi.mocked(listRepoWorktrees).mockRejectedValue(new Error('git worktree list failed.'))
+
+    await rebuildAuthorizedRootsCache(store)
+
+    await expect(resolveRegisteredWorktreePath('/linked/recovered', store)).resolves.toBe(
+      resolve('/linked/recovered')
+    )
   })
 
   it('bounds concurrent repo probes while rebuilding authorized roots', async () => {

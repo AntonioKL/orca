@@ -42,6 +42,11 @@ export async function rebuildAuthorizedRootsCache(store: Store): Promise<void> {
       } catch (error) {
         // Why: one inaccessible repo (EACCES/EIO) must not break the whole rebuild and disable File Explorer/Quick Open for the rest; skip it.
         console.warn(`[filesystem-auth] skipping repo ${repo.path} during cache rebuild:`, error)
+        // Why keep the old roots: dropping them would revoke a worktree we already authorized —
+        // including one a create recovered while this same listing was failing.
+        for (const root of registeredWorktreeRootsByRepo.get(repo.id) ?? []) {
+          roots.push(root)
+        }
       }
       return { repoId: repo.id, roots }
     }
