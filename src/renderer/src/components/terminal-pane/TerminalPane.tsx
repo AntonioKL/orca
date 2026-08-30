@@ -116,6 +116,7 @@ import { shouldChatTakeOverMobileSurface } from '../native-chat/native-chat-send
 import { canToggleNativeChat } from '../native-chat/native-chat-availability'
 import {
   nativeChatLaunchAgentForLeaf,
+  nativeChatLeafOwnsTabWideEvidence,
   resolveNativeChatLeafRoute,
   type NativeChatLeafRoute
 } from '../native-chat/native-chat-leaf-routing'
@@ -2867,6 +2868,8 @@ function TerminalPane(
         return
       }
       splitTerminalPaneWithInheritedCwd({
+        worktreeId,
+        tabId,
         manager,
         getManager: () => managerRef.current,
         paneTransports: paneTransportsRef.current,
@@ -2877,7 +2880,7 @@ function TerminalPane(
         source: 'context_menu'
       })
     },
-    [cwd]
+    [cwd, tabId, worktreeId]
   )
 
   const beginPaneDragFromHeader = useCallback(
@@ -2983,6 +2986,13 @@ function TerminalPane(
   })
   const structuredChatAgent = structuredSessionAgent ?? chatPaneResolvedAgent ?? chatPaneLaunchAgent
   const structuredChatTarget = useMemo(() => ({ kind: 'local' as const }), [])
+  // The launch draft is keyed by tab, so gate it on the same pane ownership the
+  // launch agent uses: a split sibling must not inherit the seeded text.
+  const chatPaneOwnsTabWideLaunchDraft = nativeChatLeafOwnsTabWideEvidence({
+    ownerLeafId: getTabWideAgentHintLeafId(),
+    leafId: chatPane?.leafId ?? null,
+    leafIds: getNativeChatLeafIds()
+  })
   // A split can host different agents, so continuation resolves the specific leaf before using tab-wide hints.
   const resolveAgentForLeaf = (leafId: string | null): string | null => {
     const detectedAgent = leafId ? (tabAgentTypeByLeaf[leafId] ?? null) : null
@@ -3155,6 +3165,7 @@ function TerminalPane(
                   targetPtyId={chatPanePtyId}
                   launchAgent={chatPaneLaunchAgent}
                   resolvedAgent={chatPaneResolvedAgent}
+                  ownsTabWideLaunchDraft={chatPaneOwnsTabWideLaunchDraft}
                   onSwitchToTerminal={switchNativeChatToTerminal}
                   readTerminalScreen={readNativeChatTerminalScreen}
                   contextMenuActions={{

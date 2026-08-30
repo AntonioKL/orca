@@ -9,6 +9,7 @@ import { BROWSER_SCREENCAST_RUNTIME_CAPABILITY } from '../../../shared/protocol-
 import * as clientCreationActionPolicy from './client-creation-action-policy'
 import {
   canOpenWorkspaceBrowserTabOnRuntime,
+  canOpenWorkspaceBrowserTabOnSsh,
   openWorkspaceBrowserTab
 } from './workspace-browser-tab-open'
 
@@ -77,11 +78,16 @@ describe('openWorkspaceBrowserTab', () => {
       defaultBrowserSessionProfileIdByHostId: { [sshHost]: 'ssh-profile' }
     }
 
+    expect(canOpenWorkspaceBrowserTabOnSsh(mocks.state as never, WORKSPACE_ID, 'ssh-target')).toBe(
+      true
+    )
+
     await openWorkspaceBrowserTab({
       workspaceId: WORKSPACE_ID,
       targetGroupId: 'group-1',
       url: 'https://www.google.com/search?q=private%20query',
-      intent: { kind: 'search', engine: 'google' }
+      intent: { kind: 'search', engine: 'google' },
+      expectedSshConnectionId: 'ssh-target'
     })
 
     expect(createBrowserTab).toHaveBeenCalledWith(
@@ -97,6 +103,33 @@ describe('openWorkspaceBrowserTab', () => {
       }
     )
     expect(mocks.createRemote).not.toHaveBeenCalled()
+  })
+
+  it('fails closed when the asserted SSH browser route is opted out or belongs to another host', async () => {
+    const sshHost = toSshExecutionHostId('ssh-target')
+    mocks.state = {
+      ...ownerState(sshHost),
+      settings: { browserSshWorkspaceRoutingDisabledTargetIds: ['ssh-target'] },
+      createBrowserTab: vi.fn(),
+      defaultBrowserSessionProfileId: 'focused-profile',
+      defaultBrowserSessionProfileIdByHostId: { [sshHost]: 'ssh-profile' }
+    }
+
+    expect(canOpenWorkspaceBrowserTabOnSsh(mocks.state as never, WORKSPACE_ID, 'ssh-target')).toBe(
+      false
+    )
+    expect(canOpenWorkspaceBrowserTabOnSsh(mocks.state as never, WORKSPACE_ID, 'ssh-other')).toBe(
+      false
+    )
+    await expect(
+      openWorkspaceBrowserTab({
+        workspaceId: WORKSPACE_ID,
+        url: 'http://0.0.0.0:8000/',
+        intent: { kind: 'url' },
+        expectedSshConnectionId: 'ssh-target'
+      })
+    ).rejects.toThrow('Unable to open URL.')
+    expect(mocks.state.createBrowserTab).not.toHaveBeenCalled()
   })
 
   it('surfaces the opening workspace and titles runtime-owned URL tabs by target', async () => {

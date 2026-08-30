@@ -260,7 +260,8 @@ import {
   type SystemTrayOptions
 } from './tray/system-tray'
 import { createMacAppActivationHandler } from './window/macos-app-activation'
-import { focusExistingMainWindow } from './window/focus-existing-window'
+import { focusExistingMainWindow, safelyRevealWindow } from './window/focus-existing-window'
+import { applyBackgroundActivationPolicy } from './window/foreground-activation-policy'
 import { notifyMainWindowBecameVisible } from './window/main-window-visibility'
 import { CodexAccountService } from './codex-accounts/service'
 import { CodexRuntimeHomeService } from './codex-accounts/runtime-home-service'
@@ -1390,11 +1391,7 @@ async function prepareCodexSessionResumeForLaunch(args: {
 // Why: restore the window the close handler may have hidden to tray, or reopen it (dock-reactivation style) if fully torn down.
 function showMainWindowFromTray(): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
-    if (mainWindow.isMinimized()) {
-      mainWindow.restore()
-    }
-    mainWindow.show()
-    mainWindow.focus()
+    safelyRevealWindow(mainWindow)
     return
   }
   if (!isQuittingForUpdate()) {
@@ -2362,6 +2359,8 @@ function shouldSuppressCodexAutoApprovalSyntheticTitleFromHook(args: {
 
 void app.whenReady().then(async () => {
   logStartupMilestone('app-ready')
+  // Why: a headless automated run must not claim a macOS Dock tile or the menu bar.
+  applyBackgroundActivationPolicy({ warn: console.warn })
   installMainThreadHangWatchdog({ userDataPath: getCanonicalUserDataPath() })
   const hangDetection = consumeHangDetectionMarker(
     hangDetectionMarkerPath(getCanonicalUserDataPath())
@@ -3389,12 +3388,12 @@ void app.whenReady().then(async () => {
   let desktopWindow: BrowserWindow | null = null
   if (process.platform === 'win32' && app.isPackaged && !serveOptions) {
     const desktopStartup = startWindowsDesktopBeforeShellPathReady({
+      bindServices: bindTerminalRuntimeStartupServices,
       openWindow: () => openMainWindow({ revealOnDidFinishLoad: true }),
       shellPathReady,
       startServices: startTerminalRuntimeStartupServices
     })
     desktopWindow = desktopStartup.window
-    bindTerminalRuntimeStartupServices(desktopStartup.services)
   } else {
     await shellPathReady
     bindTerminalRuntimeStartupServices(Promise.resolve(startTerminalRuntimeStartupServices()))
@@ -3410,7 +3409,8 @@ void app.whenReady().then(async () => {
     })
     // Why: headless PTYs must not start on the fallback provider, then get swept when an activated renderer registers desktop lifecycle handlers.
     await localPtyStartupReady
-    registerHeadlessPtyRuntime(
+    await localPtyProviderStartupReady
+    await registerHeadlessPtyRuntime(
       runtime,
       prepareCodexRuntimeHomeForLaunch,
       () => store!.getSettings(),
