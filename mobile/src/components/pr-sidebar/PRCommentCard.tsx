@@ -67,11 +67,13 @@ function Reactions({ reactions }: { reactions?: GitHubReaction[] }) {
 export const PRCommentCard = memo(function PRCommentCard({
   comment,
   isReply = false,
-  actions
+  actions,
+  now
 }: {
   comment: PRComment
   isReply?: boolean
   actions?: PRCommentCardActions
+  now: number
 }) {
   const shell = useMobilePrShellOperations()
   const [replyOpen, setReplyOpen] = useState(false)
@@ -126,9 +128,7 @@ export const PRCommentCard = memo(function PRCommentCard({
         >
           {comment.author}
         </Text>
-        <Text style={styles.time}>
-          · {formatPrCommentRelativeTime(comment.createdAt, Date.now())}
-        </Text>
+        <Text style={styles.time}>· {formatPrCommentRelativeTime(comment.createdAt, now)}</Text>
         {fileLabel ? (
           <Text style={styles.path} numberOfLines={1}>
             {fileLabel}

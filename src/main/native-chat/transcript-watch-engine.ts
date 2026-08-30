@@ -1,59 +1,42 @@
 import type { NativeChatMessage, NativeChatTurnLifecycle } from '../../shared/native-chat-types'
-import { transcriptFileVersionChanged, type TranscriptFileVersion } from './transcript-file-version'
+import {
+  boundaryFingerprint,
+  readTranscriptFileVersion,
+  transcriptFileVersionChanged,
+  type TranscriptFileVersion
+} from './transcript-file-version'
 import {
   createIncrementalTranscriptState,
   readIncrementalTranscriptMessages,
   resetIncrementalTranscriptState
 } from './transcript-incremental-reader'
-import { withNativeChatTranscriptWatchDrainAdmission } from './transcript-read-admission'
 import { readNativeChatTranscriptTailFile } from './transcript-tail-reader'
+import { emitTranscriptUnavailableSnapshot } from './transcript-unavailable-snapshot'
+import { transcriptWatcherPathIsInstallable } from './transcript-watcher-install-probe'
 import { nativeChatTurnLifecycleDecoderForAgent } from './transcript-turn-lifecycle'
 import type {
   NativeChatTranscriptSubscription,
   SubscribeNativeChatTranscriptArgs
 } from './transcript-watch-contract'
 import { createTranscriptWatchScheduler } from './transcript-watch-scheduler'
-import { createTranscriptWatchDrainController } from './transcript-watch-drain-controller'
-import {
-  createSourceAwareTranscriptNativeWatcher,
-  probeTranscriptWatchFile,
-  readTranscriptWatchBoundary,
-  readTranscriptWatchFileVersion
-} from './transcript-watch-source-access'
 import { WslTranscriptFsError } from './wsl-transcript-fs-gate'
+import {
+  createRunningGuardedTranscriptNativeWatcher,
+  isWslTranscriptWatcherPath,
+  transcriptWatcherPathIsRunning
+} from './wsl-transcript-watcher-running-guard'
+import { observeWslTranscriptRunningState } from './wsl-transcript-running-observer'
+import { trackActiveNativeChatWatcher } from './transcript-watcher-count'
 
-const ROTATION_RETRY_MS = 25
-const MAX_ROTATION_RETRY_MS = 2_000
-let activeWatcherCount = 0
-
-export function getActiveNativeChatWatcherCount(): number {
-  return activeWatcherCount
-}
-
-/**
- * Install the live-tail engine on an already-resolved file path. Returns null
- * when the file doesn't exist yet, so the caller falls back to resolve-polling.
- * A failed native watch still installs a reconciliation-only subscription: some
- * remote filesystems allow stat/read while rejecting fs.watch entirely.
- */
+/** Install a live tail, or return null when the resolved file is not readable yet. */
 export async function installTranscriptWatcher(
   filePath: string,
   decode: (line: string, fallbackId: string) => NativeChatMessage | null,
   args: SubscribeNativeChatTranscriptArgs,
-  /** Cancels the install probe so an unsubscribe during it detaches the gate
-   *  waiter immediately instead of at the 30s deadline. */
   signal?: AbortSignal
 ): Promise<NativeChatTranscriptSubscription | null> {
-  const fileSource = args.fileSource
-  try {
-    await probeTranscriptWatchFile(filePath, fileSource, signal)
-  } catch (error) {
-    // Why: "not flushed yet" degrades to resolve-polling, but a stalled distro
-    // must reach the caller so it can surface a retryable message instead of
-    // stranding the client at `loading`.
-    if (error instanceof WslTranscriptFsError) {
-      throw error
-    }
+  const isWslPath = isWslTranscriptWatcherPath(filePath)
+  if (!(await transcriptWatcherPathIsInstallable(filePath, signal))) {
     return null
   }
   const { onAppend, onInitialSnapshot, onReplace, initialLimit } = args
@@ -62,26 +45,23 @@ export async function installTranscriptWatcher(
   const state = createIncrementalTranscriptState()
   let watchedVersion: TranscriptFileVersion | null = null
   let watchedBoundary = ''
-  let initialDrain = true
-  // Guards the one-time error snapshot emitted when the initial drain throws, so
-  // a persistently-failing retry loop can't spam the subscriber with error frames.
-  let initialErrorEmitted = false
+  let initialDrain = true,
+    initialErrorEmitted = false
   let closed = false
   // Why: every gated call on the drain path must detach the moment we
   // unsubscribe, instead of holding a waiter until its 30s deadline, and an
   // aborted signal also makes the gate refuse admission for anything the
   // in-flight drain would start after teardown.
   const gateAbort = new AbortController()
+  let reading = false
+  let pendingReadRequested = false
   let rotationRetryCount = 0
 
   function scheduleRotationRetry(): void {
     if (closed) {
       return
     }
-    const retryDelay = Math.min(
-      ROTATION_RETRY_MS * 2 ** Math.min(rotationRetryCount, 7),
-      MAX_ROTATION_RETRY_MS
-    )
+    const retryDelay = Math.min(25 * 2 ** Math.min(rotationRetryCount, 7), 2_000)
     if (scheduler.scheduleRetry(retryDelay)) {
       rotationRetryCount += 1
     }
@@ -102,7 +82,7 @@ export async function installTranscriptWatcher(
       (nextLifecycle) => {
         lifecycle = nextLifecycle
       },
-      { fileSource, signal: gateAbort.signal }
+      gateAbort.signal
     )
     if (!closed && (remaining.length > 0 || lifecycle)) {
       onAppend(remaining, lifecycle)
@@ -110,22 +90,13 @@ export async function installTranscriptWatcher(
   }
 
   async function finishSuccessfulDrain(startVersion: TranscriptFileVersion): Promise<void> {
-    watchedBoundary = await readTranscriptWatchBoundary(
-      filePath,
-      state.offset,
-      fileSource,
-      gateAbort.signal
-    )
-    const completedVersion = await readTranscriptWatchFileVersion(
-      filePath,
-      fileSource,
-      gateAbort.signal
-    )
+    watchedBoundary = await boundaryFingerprint(filePath, state.offset, gateAbort.signal)
+    const completedVersion = await readTranscriptFileVersion(filePath, gateAbort.signal)
     if (transcriptFileVersionChanged(completedVersion, startVersion)) {
       // Why: a write racing this drain needs another pass even when the reader
       // happened to reach its new EOF; timestamp-only rewrites may need replace.
       watchedVersion = startVersion
-      drainController.requestAnotherPass()
+      pendingReadRequested = true
     } else {
       watchedVersion = completedVersion
     }
@@ -136,17 +107,14 @@ export async function installTranscriptWatcher(
       rotationRetryCount = 0
       return
     }
-    scheduleRotationRetry()
+    if (!isWslPath) {
+      scheduleRotationRetry()
+    }
   }
 
-  async function drainOnceAdmitted(): Promise<void> {
-    const current = await readTranscriptWatchFileVersion(filePath, fileSource, gateAbort.signal)
-    const currentBoundary = await readTranscriptWatchBoundary(
-      filePath,
-      state.offset,
-      fileSource,
-      gateAbort.signal
-    )
+  async function drainOnce(): Promise<void> {
+    const current = await readTranscriptFileVersion(filePath, gateAbort.signal)
+    const currentBoundary = await boundaryFingerprint(filePath, state.offset, gateAbort.signal)
     if (closed) {
       return
     }
@@ -181,8 +149,7 @@ export async function installTranscriptWatcher(
             false,
             undefined,
             decodeLifecycle,
-            fileSource ?? gateAbort.signal,
-            fileSource ? gateAbort.signal : undefined
+            gateAbort.signal
           )
         : null
     if (closed) {
@@ -211,8 +178,7 @@ export async function installTranscriptWatcher(
             false,
             undefined,
             decodeLifecycle,
-            fileSource ?? gateAbort.signal,
-            fileSource ? gateAbort.signal : undefined
+            gateAbort.signal
           )
         : null
     if (closed) {
@@ -242,7 +208,7 @@ export async function installTranscriptWatcher(
           (nextLifecycle) => {
             lifecycle = nextLifecycle
           },
-          { fileSource, signal: gateAbort.signal }
+          gateAbort.signal
         )
         if (closed) {
           return
@@ -256,69 +222,94 @@ export async function installTranscriptWatcher(
     await finishSuccessfulDrain(current)
   }
 
-  async function drainOnce(): Promise<void> {
-    await withNativeChatTranscriptWatchDrainAdmission(gateAbort.signal, async () => {
-      if (!closed) {
-        await drainOnceAdmitted()
-      }
-    })
+  async function drain(runningChecked = false): Promise<void> {
+    if (closed) {
+      return
+    }
+    if (isWslPath && !runningChecked && !(await transcriptWatcherPathIsRunning(filePath))) {
+      nativeWatcher.invalidate()
+      initialErrorEmitted ||=
+        !closed && initialDrain && emitTranscriptUnavailableSnapshot(onInitialSnapshot)
+      return
+    }
+    if (reading) {
+      pendingReadRequested = true
+      return
+    }
+    reading = true
+    try {
+      do {
+        pendingReadRequested = false
+        try {
+          await drainOnce()
+        } catch (error) {
+          // Why: unlink/recreate can detach fs.watch from the pathname. Keep one
+          // capped-backoff retry alive until a successor appears or we unsubscribe.
+          // A still-pending initial drain also surfaces one error snapshot so a
+          // watching client isn't stranded at 'loading' when the read keeps
+          // throwing; initialDrain stays true so a recovered read can still win.
+          initialErrorEmitted ||=
+            !closed &&
+            initialDrain &&
+            emitTranscriptUnavailableSnapshot(
+              onInitialSnapshot,
+              error instanceof WslTranscriptFsError ? error.message : 'Transcript unavailable'
+            )
+          if (!isWslPath) {
+            scheduleRotationRetry()
+          }
+          break
+        }
+      } while (pendingReadRequested && !closed)
+    } finally {
+      reading = false
+    }
   }
 
-  const drainController = createTranscriptWatchDrainController({
-    isClosed: () => closed,
-    drainOnce,
-    onError: (error) => {
-      // Why: a still-pending initial drain reports once while retries continue.
-      if (!closed && initialDrain && onInitialSnapshot && !initialErrorEmitted) {
-        initialErrorEmitted = true
-        onInitialSnapshot(
-          [],
-          false,
-          0,
-          error instanceof WslTranscriptFsError ? error.message : 'Transcript unavailable'
-        )
-      }
-      scheduleRotationRetry()
-    }
-  })
-
-  async function reconcile(): Promise<void> {
+  async function reconcileKnownRunning(): Promise<void> {
     if (closed) {
       return
     }
     try {
-      const current = await readTranscriptWatchFileVersion(filePath, fileSource, gateAbort.signal)
+      const current = await readTranscriptFileVersion(filePath, gateAbort.signal)
       if (closed) {
         return
       }
       const versionChanged =
         watchedVersion === null || transcriptFileVersionChanged(current, watchedVersion)
       if (versionChanged || current.size !== state.offset || nativeWatcher.needsRebind()) {
-        await drainController.drain()
+        await drain(true)
       }
     } catch {
-      // Why: a missing/replaced path needs the existing capped rotation retry,
-      // even when fs.watch stayed silent about the transition.
-      await drainController.drain()
+      // WSL retries wait for the next shared running-state observation.
+      await (isWslPath ? undefined : drain())
     }
   }
 
   const scheduler = createTranscriptWatchScheduler({
     debounceMs: args.debounceMs,
     reconciliationIntervalMs: args.reconciliationIntervalMs,
-    drain: () => void drainController.drain(),
-    reconcile
+    drain: () => void drain(),
+    reconcile: reconcileKnownRunning
   })
-  const nativeWatcher = createSourceAwareTranscriptNativeWatcher(
+  const nativeWatcher = createRunningGuardedTranscriptNativeWatcher(
     filePath,
-    fileSource,
     () => scheduler.scheduleEventDrain(),
     scheduleRotationRetry
   )
 
   nativeWatcher.bind()
-  activeWatcherCount++
-  scheduler.startReconciliation()
+  const stopWslObservation = isWslPath
+    ? observeWslTranscriptRunningState(
+        filePath,
+        () => reconcileKnownRunning(),
+        () => nativeWatcher.invalidate()
+      )
+    : () => {}
+  trackActiveNativeChatWatcher(1)
+  if (!isWslPath) {
+    scheduler.startReconciliation()
+  }
   scheduler.scheduleEventDrain()
 
   return {
@@ -330,8 +321,9 @@ export async function installTranscriptWatcher(
       closed = true
       gateAbort.abort(new Error('Native Chat transcript watcher unsubscribed'))
       scheduler.dispose()
+      stopWslObservation()
       nativeWatcher.dispose()
-      activeWatcherCount--
+      trackActiveNativeChatWatcher(-1)
     }
   }
 }
