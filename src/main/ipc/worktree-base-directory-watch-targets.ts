@@ -126,6 +126,12 @@ function getBaseWatchLayout(
   }
 }
 
+function warnSkippedWslRoot(repoId: string, workspaceRoot: string): void {
+  if (shouldEmitBoundedWarning(skippedWslWarnings, `${repoId}:${workspaceRoot}`)) {
+    console.warn(`[worktree-base-watcher] skipping WSL worktree root watcher for ${workspaceRoot}`)
+  }
+}
+
 async function maybeAddBaseTarget(
   targets: Map<string, WorktreeBaseWatchTarget>,
   repo: Repo,
@@ -135,17 +141,6 @@ async function maybeAddBaseTarget(
 ): Promise<void> {
   const pathSettings = getWorktreePathSettings(repo, settings, mirrorDistro)
   const { workspaceRoot, nestWorkspaces } = getBaseWatchLayout(repo, pathSettings, connectionId)
-  // Why: WSL UNC roots are unreliable for native watching; avoid project-level polling.
-  if (isWslUncPath(workspaceRoot) || isWslUncPath(repo.path)) {
-    const key = `${repo.id}:${workspaceRoot}`
-    if (shouldEmitBoundedWarning(skippedWslWarnings, key)) {
-      console.warn(
-        `[worktree-base-watcher] skipping WSL worktree root watcher for ${workspaceRoot}`
-      )
-    }
-    return
-  }
-
   const config = {
     repoId: repo.id,
     repoName: getRuntimePathBasename(repo.path).replace(/\.git$/, ''),
@@ -155,17 +150,28 @@ async function maybeAddBaseTarget(
   if (connectionId && !remoteProvider) {
     return
   }
-  try {
-    const rootStat = remoteProvider
-      ? await remoteProvider.stat(workspaceRoot)
-      : await stat(workspaceRoot)
-    if (isDirectoryStat(rootStat)) {
-      await addTarget(targets, 'base', workspaceRoot, config, connectionId)
-    }
-  } catch {
-    const key = normalizeWatchKey(workspaceRoot)
-    if (shouldEmitBoundedWarning(missingRootWarnings, key)) {
-      console.warn(`[worktree-base-watcher] worktree root unavailable: ${workspaceRoot}`)
+  // Why: WSL UNC paths are unreliable for native watching. A repo inside the
+  // distro has nothing watchable at all; a Windows-drive repo whose worktrees
+  // are mirrored into the distro still has its gitdir on the Windows side.
+  if (isWslUncPath(repo.path)) {
+    warnSkippedWslRoot(repo.id, workspaceRoot)
+    return
+  }
+  if (isWslUncPath(workspaceRoot)) {
+    warnSkippedWslRoot(repo.id, workspaceRoot)
+  } else {
+    try {
+      const rootStat = remoteProvider
+        ? await remoteProvider.stat(workspaceRoot)
+        : await stat(workspaceRoot)
+      if (isDirectoryStat(rootStat)) {
+        await addTarget(targets, 'base', workspaceRoot, config, connectionId)
+      }
+    } catch {
+      const key = normalizeWatchKey(workspaceRoot)
+      if (shouldEmitBoundedWarning(missingRootWarnings, key)) {
+        console.warn(`[worktree-base-watcher] worktree root unavailable: ${workspaceRoot}`)
+      }
     }
   }
 
@@ -178,7 +184,7 @@ async function maybeAddBaseTarget(
         }
       : undefined
   )
-  if (commonDir) {
+  if (commonDir && !isWslUncPath(commonDir)) {
     await addTarget(targets, 'git-common', commonDir, config, connectionId)
   }
 }
