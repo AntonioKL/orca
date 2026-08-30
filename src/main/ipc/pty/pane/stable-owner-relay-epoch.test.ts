@@ -1,11 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { IPtyProvider, PtySpawnOptions, PtySpawnResult } from '../../../providers/types'
 import { toAppSshPtyId } from '../../../providers/ssh-pty-id'
-import { rememberRetiredRelayEpochOwner } from './relay-pty-mint-epoch'
+import {
+  clearRetiredRelayEpochOwnersForPane,
+  rememberRetiredRelayEpochOwner,
+  takeRetiredRelayEpochOwner
+} from './relay-pty-mint-epoch'
 import { spawnForStablePane, type StablePaneOwner } from './stable-owner'
 
-type EpochAwareSpawnOptions = PtySpawnOptions & { resumeProviderSession?: unknown }
-type EpochAwareSpawnResult = PtySpawnResult & { agentResumeUnavailable?: true }
+type EpochAwareSpawnOptions = PtySpawnOptions
+type EpochAwareSpawnResult = PtySpawnResult
 
 const owner = (relayPtyId: string): StablePaneOwner => ({
   tabId: 'tab-epoch-gate',
@@ -229,5 +233,19 @@ describe('spawnForStablePane relay epoch gate', () => {
 
     expect(freshOptions).toEqual({ cols: 80, rows: 24 })
     expect(result.agentResumeUnavailable).toBeUndefined()
+  })
+
+  it('drops retired owners when a pane tears down', () => {
+    const paneKey = 'tab-closed-pane:66666666-6666-4666-8666-666666666666'
+    const ownerPtyId = toAppSshPtyId('remote', 'pty2:previous:1')
+    rememberRetiredRelayEpochOwner({
+      connectionId: 'remote',
+      paneKey,
+      ownerPtyId
+    })
+
+    clearRetiredRelayEpochOwnersForPane(paneKey)
+
+    expect(takeRetiredRelayEpochOwner('remote', paneKey)).toBeUndefined()
   })
 })

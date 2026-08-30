@@ -2732,13 +2732,15 @@ export class SshRelaySession {
         error instanceof Error ? error.message : String(error)
       }`
     )
+    clearProviderPtyState(appPtyId)
+    deletePtyOwnership(appPtyId)
+    // Record after PTY teardown listeners run so this one-shot owner survives
+    // the stale reattach cleanup without retaining closed-pane entries.
     rememberRetiredRelayEpochOwner({
       connectionId: this.targetId,
       paneKey: pending.paneKey,
       ownerPtyId: appPtyId
     })
-    clearProviderPtyState(appPtyId)
-    deletePtyOwnership(appPtyId)
     this.store.markSshRemotePtyLease(this.targetId, ptyId, 'expired')
     const win = this.getMainWindow()
     if (win && !win.isDestroyed()) {

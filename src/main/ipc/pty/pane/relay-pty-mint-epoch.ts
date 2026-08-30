@@ -1,9 +1,25 @@
 import type { IPtyProvider, PtySpawnOptions } from '../../../providers/types'
 import { parseAppSshPtyId } from '../../../providers/ssh-pty-id'
+import { registerPaneKeyTeardownListener } from './key-state'
 
 const RELAY_STATUS_TIMEOUT_MS = 2_000
 const relayMintEpochByProvider = new WeakMap<IPtyProvider, Promise<string | undefined>>()
 const retiredRelayOwnerByPane = new Map<string, string>()
+const retiredRelayOwnerKeysByPane = new Map<string, Set<string>>()
+
+export function clearRetiredRelayEpochOwnersForPane(paneKey: string): void {
+  const keys = retiredRelayOwnerKeysByPane.get(paneKey)
+  if (!keys) {
+    return
+  }
+  for (const key of keys) {
+    retiredRelayOwnerByPane.delete(key)
+  }
+  retiredRelayOwnerKeysByPane.delete(paneKey)
+}
+
+// Retired owners are only useful while their pane remains alive; drop them when teardown closes it.
+registerPaneKeyTeardownListener(clearRetiredRelayEpochOwnersForPane)
 
 function retiredRelayOwnerKey(connectionId: string, paneKey: string): string {
   return `${connectionId}\0${paneKey}`
@@ -54,10 +70,14 @@ export function rememberRetiredRelayEpochOwner(args: {
   if (parsed?.connectionId !== args.connectionId || !parseRelayPtyMintEpoch(parsed.relayPtyId)) {
     return
   }
-  retiredRelayOwnerByPane.set(
-    retiredRelayOwnerKey(args.connectionId, args.paneKey),
-    args.ownerPtyId
-  )
+  const key = retiredRelayOwnerKey(args.connectionId, args.paneKey)
+  retiredRelayOwnerByPane.set(key, args.ownerPtyId)
+  let keys = retiredRelayOwnerKeysByPane.get(args.paneKey)
+  if (!keys) {
+    keys = new Set()
+    retiredRelayOwnerKeysByPane.set(args.paneKey, keys)
+  }
+  keys.add(key)
 }
 
 export function takeRetiredRelayEpochOwner(
@@ -70,6 +90,11 @@ export function takeRetiredRelayEpochOwner(
   const key = retiredRelayOwnerKey(connectionId, paneKey)
   const ownerPtyId = retiredRelayOwnerByPane.get(key)
   retiredRelayOwnerByPane.delete(key)
+  const keys = retiredRelayOwnerKeysByPane.get(paneKey)
+  keys?.delete(key)
+  if (keys?.size === 0) {
+    retiredRelayOwnerKeysByPane.delete(paneKey)
+  }
   return ownerPtyId
 }
 
