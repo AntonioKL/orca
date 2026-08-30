@@ -134,6 +134,66 @@ describe('writeStartupCommandWhenShellReady', () => {
     expect(proc._writes).toEqual(['codex\n'])
   })
 
+  it('submits only after the POSIX line editor is active', async () => {
+    Object.defineProperty(process, 'platform', { value: 'darwin' })
+    const proc = createMockProc()
+    const lineEditorProbe = vi
+      .fn()
+      .mockResolvedValueOnce('other')
+      .mockResolvedValueOnce('line-editor')
+    const ready = Promise.resolve()
+    writeStartupCommandWhenShellReady(ready, proc, 'codex', () => {}, { lineEditorProbe })
+
+    await ready
+    proc._emitData('\x1b[?2004h')
+    await vi.advanceTimersByTimeAsync(9)
+    expect(proc._writes).toEqual([])
+
+    await vi.advanceTimersByTimeAsync(11)
+    expect(lineEditorProbe).toHaveBeenCalledTimes(2)
+    expect(proc._writes).toEqual(['codex\n'])
+  })
+
+  it('does not replace line-editor readiness with a longer timeout', async () => {
+    Object.defineProperty(process, 'platform', { value: 'darwin' })
+    const proc = createMockProc()
+    const cleanup: { run?: () => void } = {}
+    const lineEditorProbe = vi.fn().mockResolvedValue('other')
+    const ready = Promise.resolve()
+    writeStartupCommandWhenShellReady(
+      ready,
+      proc,
+      'codex',
+      (run) => {
+        cleanup.run = run
+      },
+      { lineEditorProbe }
+    )
+
+    await ready
+    proc._emitData('\x1b[?2004h')
+    await vi.advanceTimersByTimeAsync(2000)
+
+    expect(proc._writes).toEqual([])
+    cleanup.run?.()
+  })
+
+  it('falls back to legacy readiness when the line-editor probe is unavailable', async () => {
+    Object.defineProperty(process, 'platform', { value: 'darwin' })
+    const proc = createMockProc()
+    const lineEditorProbe = vi.fn().mockResolvedValue('unavailable')
+    const ready = Promise.resolve()
+    writeStartupCommandWhenShellReady(ready, proc, 'codex', () => {}, { lineEditorProbe })
+
+    await ready
+    proc._emitData('\x1b[?2004h')
+    await vi.advanceTimersByTimeAsync(199)
+    expect(proc._writes).toEqual([])
+
+    await vi.advanceTimersByTimeAsync(1)
+    expect(proc._writes).toEqual(['codex\n'])
+  })
+
   // Why: multiline startup commands must be bracketed-paste wrapped (ESC[200~ … ESC[201~) so shells insert them literally instead of treating each LF as Enter.
   it('wraps a multiline startup command in bracketed paste when the shell supports it', async () => {
     Object.defineProperty(process, 'platform', { value: 'darwin' })

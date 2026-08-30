@@ -1,7 +1,12 @@
 import type * as pty from 'node-pty'
+import {
+  createPtySlaveLineEditorProbe,
+  readPtySlavePath
+} from '../../shared/pty-slave-line-discipline-echo'
 import { isBracketedPasteSafeShell } from '../../shared/startup-command-submission'
 import { PtyStartupIngress, type PtyIngressEmission } from '../../shared/pty-startup-ingress'
 import { resolvePtyOwnerBackend } from '../../shared/pty-owner-backend'
+import { SHELL_STARTUP_FEATURE_ENV } from '../shell-startup-features'
 import { resolveProcessExitCause } from '../../shared/terminal-exit-cause'
 import { getAgentForegroundContextPaths } from './agent-foreground-context-paths'
 import { getSpawnedShellName } from './local-pty-launch-helpers'
@@ -163,6 +168,14 @@ export function activateLocalPtySession(args: {
         shellName: spawnedShellName,
         waitsForShellReady: plan.shellReadyLaunch?.supportsReadyMarker === true
       })
+    const wrappedShellReadyLaunch =
+      plan.shellReadyLaunch?.args &&
+      (plan.shellReadyLaunch.supportsReadyMarker ||
+        plan.shellReadyLaunch.env[SHELL_STARTUP_FEATURE_ENV] !== undefined)
+    const lineEditorProbe =
+      bracketedPasteSafe && wrappedShellReadyLaunch
+        ? createPtySlaveLineEditorProbe(readPtySlavePath(proc))
+        : undefined
     writeStartupCommandWhenShellReady(
       readiness.shellReadyPromise,
       proc,
@@ -170,7 +183,10 @@ export function activateLocalPtySession(args: {
       (cleanup) => {
         readiness.setStartupCommandCleanup(cleanup)
       },
-      { bracketedPasteSafe }
+      {
+        bracketedPasteSafe,
+        ...(lineEditorProbe ? { lineEditorProbe } : {})
+      }
     )
   }
 
