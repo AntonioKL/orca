@@ -126,11 +126,15 @@ export async function unlockPreparedWorktree(
   worktreePath: string,
   options: GitWorktreeExecOptions = {}
 ): Promise<void> {
+  const cleanupGitOptions = {
+    ...gitCleanupOptions(repoPath, options),
+    timeout: options.timeout ?? WORKTREE_REMOVAL_REGISTRATION_TIMEOUT_MS
+  }
   try {
     await runWithGitReadCacheInvalidation(() =>
       gitExecFileAsync(
         [...windowsLongPathGitArgs(repoPath), 'worktree', 'unlock', worktreePath],
-        gitCleanupOptions(repoPath, options)
+        cleanupGitOptions
       )
     )
   } finally {
