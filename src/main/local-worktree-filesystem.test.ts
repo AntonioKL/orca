@@ -118,6 +118,13 @@ describe('local worktree filesystem runtime access', () => {
     })
   })
 
+  it('leaves WSL UNC paths unchanged on a Windows host', async () => {
+    await withPlatform('win32', async () => {
+      const wslPath = String.raw`\\wsl.localhost\Ubuntu\home\me\worktrees`
+      expect(toHostFilesystemPath(wslPath)).toBe(wslPath)
+    })
+  })
+
   it('retries transient host removal failures on Windows', async () => {
     vi.useFakeTimers()
     await withPlatform('win32', async () => {

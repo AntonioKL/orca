@@ -7,6 +7,7 @@ import { rm } from 'node:fs/promises'
 import { win32 } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { isWindowsAbsolutePathLike } from '../shared/cross-platform-path'
+import { isWslUncPath } from '../shared/wsl-paths'
 
 const WINDOWS_REMOVE_RETRY_DELAYS_MS = [250, 500, 1_000, 2_000]
 const WINDOWS_RM_MAX_RETRIES = 8
@@ -16,7 +17,9 @@ const WINDOWS_RM_RETRY_DELAY_MS = 150
 export function toHostFilesystemPath(targetPath: string): string {
   // POSIX paths are used by WSL callers even while the Electron process runs
   // on Windows; do not reinterpret those as drive-relative Win32 paths.
-  return process.platform === 'win32' && isWindowsAbsolutePathLike(targetPath)
+  return process.platform === 'win32' &&
+    isWindowsAbsolutePathLike(targetPath) &&
+    !isWslUncPath(targetPath)
     ? win32.toNamespacedPath(targetPath)
     : targetPath
 }
