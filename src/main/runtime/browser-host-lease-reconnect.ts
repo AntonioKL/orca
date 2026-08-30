@@ -6,7 +6,6 @@ import type {
 } from './browser-host-lease-records'
 import type { BrowserHostFenceReason } from './browser-host-lease-fence'
 import { createBrowserHostFence } from './browser-host-lease-fence'
-import { createBrowserHostCommandLedgerForLease } from './browser-host-lease-attachment'
 
 type BrowserHostReconnectAttach = {
   connectionId: string
@@ -58,6 +57,12 @@ export class BrowserHostLeaseReconnectController {
     ) {
       return undefined
     }
+    // A replay refusal fences the ledger because command outcomes are no longer recoverable.
+    // Keep that closed ledger attached to the old generation so attach() creates a fresh
+    // generation and inventory recovery can safely bootstrap surviving pages.
+    if (state.commandLedger?.isClosed()) {
+      return undefined
+    }
     if (state.status === 'active') {
       for (const route of state.routes) {
         this.options.fenceRoute(route, 'lease_released')
@@ -80,9 +85,6 @@ export class BrowserHostLeaseReconnectController {
       ...(input.fileChannelProtocolVersion ? { fileChannelProtocolVersion: 1 as const } : {})
     })
     state.status = 'active'
-    if (state.commandLedger?.isClosed()) {
-      state.commandLedger = createBrowserHostCommandLedgerForLease(state)
-    }
     return this.createHandle(state)
   }
 

@@ -290,6 +290,9 @@ export class BrowserHostCommandLedger {
       finalize: () => {
         if (existing) {
           this.resultCache.releasePage(existing)
+          // Releasing the old page may evict its final record and remove the page id from the
+          // ledger; restore the newly admitted generation after that callback runs.
+          this.pages.set(input.browserPageId, page)
         }
       }
     }
