@@ -105,8 +105,12 @@ describe('#10142 close confirmation policy is the same for keyboard and mouse', 
     const terminalSource = readFileSync(join(__dirname, '../Terminal.tsx'), 'utf8')
     const tabSource = readFileSync(join(__dirname, './running-terminal-close-guard.ts'), 'utf8')
     const paneSource = readFileSync(join(__dirname, '../terminal-pane/TerminalPane.tsx'), 'utf8')
+    const workspaceCleanupSource = readFileSync(
+      join(__dirname, '../../store/slices/workspace-cleanup-local-evidence.ts'),
+      'utf8'
+    )
 
-    for (const source of [terminalSource, tabSource, paneSource]) {
+    for (const source of [terminalSource, tabSource, paneSource, workspaceCleanupSource]) {
       expect(source).toContain('terminalCloseDecision')
       expect(source).toContain('terminalCloseLivenessFromInspection')
     }
@@ -114,6 +118,8 @@ describe('#10142 close confirmation policy is the same for keyboard and mouse', 
     expect(terminalSource).not.toContain('window.api.pty.hasChildProcesses')
     expect(paneSource).not.toContain('!process.hasChildProcesses')
     expect(tabSource).not.toContain('result.value.hasChildProcesses')
+    expect(workspaceCleanupSource).not.toContain("terminalProbe === 'running'")
+    expect(workspaceCleanupSource).not.toContain("terminalProbe === 'unknown'")
   })
 
   // Control: the harness does observe a guard when one exists — pinning blocks the same mouse close.
