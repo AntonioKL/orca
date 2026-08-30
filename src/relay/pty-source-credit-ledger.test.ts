@@ -7,6 +7,57 @@ import {
 import { RelayPtySourceCreditLedger } from './pty-source-credit-ledger'
 import { CLOSED_DELIVERY_TOMBSTONE_LIMIT, type DeliveryRecord } from './pty-source-credit-record'
 
+type BoundaryRecord = { sentBoundaries: Set<number> }
+
+function getBoundaryRecord(
+  ledger: RelayPtySourceCreditLedger,
+  owner: PtySourceDeliveryIdentity
+): BoundaryRecord {
+  const internals = ledger as unknown as { deliveries: Map<string, BoundaryRecord> }
+  const record = internals.deliveries.get(ptySourceDeliveryKey(owner))
+  if (!record) {
+    throw new Error('test delivery record missing')
+  }
+  return record
+}
+
+type CountingBoundarySet = Set<number> & { readonly visits: number }
+
+function createCountingBoundarySet(boundaries: readonly number[]): CountingBoundarySet {
+  const pending = new Set(boundaries)
+  let visits = 0
+  return {
+    get visits() {
+      return visits
+    },
+    has: (boundary: number) => pending.has(boundary),
+    delete: (boundary: number) => pending.delete(boundary),
+    *[Symbol.iterator](): IterableIterator<number> {
+      for (const boundary of pending) {
+        visits += 1
+        yield boundary
+      }
+    }
+  } as unknown as CountingBoundarySet
+}
+
+function countLegacyBoundaryVisits(
+  boundaries: readonly number[],
+  credits: readonly number[]
+): number {
+  const pending = new Set(boundaries)
+  let visits = 0
+  for (const creditedEndSu of credits) {
+    for (const boundary of pending) {
+      visits += 1
+      if (boundary < creditedEndSu) {
+        pending.delete(boundary)
+      }
+    }
+  }
+  return visits
+}
+
 function identity(
   deliveryToken = 'token-1',
   overrides: Partial<PtySourceDeliveryIdentity> = {}
@@ -237,6 +288,52 @@ describe('RelayPtySourceCreditLedger', () => {
     expect(record.spans.map((span) => span.data)).toEqual(['ef'])
     expect(record.sendSpanIndex).toBe(0)
     expect(ledger.reserveNextSend(owner, 2)!.span.data).toBe('ef')
+  })
+
+  it('stops ACK boundary cleanup at the first uncredited boundary', () => {
+    const boundaryCount = 1_024
+    const spanCount = boundaryCount - 1
+    const ledger = new RelayPtySourceCreditLedger({
+      maxRetainedSpans: boundaryCount,
+      maxAggregateRetainedSpans: boundaryCount
+    })
+    const owner = identity()
+    ledger.open(owner, boundaryCount)
+    for (let index = 0; index < spanCount; index += 1) {
+      append(ledger, owner, 'x', `span-${index}`)
+      const reservation = ledger.reserveNextSend(owner, 1)
+      expect(reservation).not.toBeNull()
+      ledger.commitSend(reservation!)
+    }
+
+    const record = getBoundaryRecord(ledger, owner)
+    const insertionOrder = [...record.sentBoundaries]
+    expect(insertionOrder).toEqual(Array.from({ length: boundaryCount }, (_, index) => index))
+    const countedBoundaries = createCountingBoundarySet(insertionOrder)
+    record.sentBoundaries = countedBoundaries
+    const credits = Array.from({ length: spanCount }, (_, index) => index + 1)
+    const legacyVisits = countLegacyBoundaryVisits(insertionOrder, credits)
+
+    for (const creditedEndSu of credits) {
+      expect(
+        ledger.acknowledge(owner, {
+          id: owner.id,
+          clientGeneration: owner.clientGeneration,
+          ownerGeneration: owner.ownerGeneration,
+          deliveryToken: owner.deliveryToken,
+          creditedEndSu
+        })
+      ).toBe('advanced')
+    }
+
+    expect(legacyVisits).toBe(524_799)
+    expect(countedBoundaries.visits).toBe(2_046)
+    expect(legacyVisits - countedBoundaries.visits).toBe(522_753)
+    console.log(
+      `[bench] ${boundaryCount} sent boundaries: ACK iterator visits ${legacyVisits} -> ${countedBoundaries.visits} ` +
+        `(-${(((legacyVisits - countedBoundaries.visits) / legacyVisits) * 100).toFixed(2)}%)`
+    )
+    expect(ledger.retentionSnapshot()).toEqual({ sourceSu: 0, dataBytes: 0, spans: 0 })
   })
 
   it('never exceeds a token source window across generated send/ACK sequences', () => {

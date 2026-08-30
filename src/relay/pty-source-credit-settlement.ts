@@ -31,9 +31,11 @@ function reclaimCreditedSpans(record: DeliveryRecord): void {
 function advanceCredit(record: DeliveryRecord, creditedEndSu: number): void {
   record.creditedEndSu = creditedEndSu
   for (const boundary of record.sentBoundaries) {
-    if (boundary < creditedEndSu) {
-      record.sentBoundaries.delete(boundary)
+    // Boundaries are inserted in increasing sentEndSu order, so later values cannot be eligible.
+    if (boundary >= creditedEndSu) {
+      break
     }
+    record.sentBoundaries.delete(boundary)
   }
   reclaimCreditedSpans(record)
 }
