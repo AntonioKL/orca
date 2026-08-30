@@ -157,7 +157,7 @@ export async function prepareDaemonReplacement(
       health !== 'rejected' &&
       graceRetry < WEDGED_DAEMON_GRACE_RETRIES &&
       Date.now() < recoveryDeadlineMs &&
-      (await probeSocket(socketPath))
+      (await probeSocket(socketPath, Math.max(1, Math.min(1000, recoveryDeadlineMs - Date.now()))))
     ) {
       liveSessionCount = await getAliveDaemonSessionCount(socketPath, tokenPath, recoveryDeadlineMs)
       graceRetry++

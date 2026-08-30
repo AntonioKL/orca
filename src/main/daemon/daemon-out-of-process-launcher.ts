@@ -200,7 +200,9 @@ export function createOutOfProcessLauncher(
       // giving up here costs the user every persistent session for the whole run. Something
       // answering the endpoint now is a daemon worth adopting, not a reason to fall back to
       // local PTYs.
-      if (await probeSocket(socketPath)) {
+      if (
+        await probeSocket(socketPath, Math.max(1, Math.min(1000, recoveryDeadlineMs - Date.now())))
+      ) {
         console.warn(
           '[daemon] DEGRADED MODE: adopting the daemon that owns the endpoint after a replacement could not publish onto it. Existing sessions keep working; fresh terminals run on the local provider WITHOUT daemon persistence until you restart the daemon (Manage Sessions → Restart).'
         )

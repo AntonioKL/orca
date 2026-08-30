@@ -47,7 +47,7 @@ export function daemonLogArgs(): string[] {
 }
 
 // Why: a socket that accepts a connection proves a daemon survived a previous app session and can be reused.
-export function probeDaemonSocket(socketPath: string): Promise<boolean> {
+export function probeDaemonSocket(socketPath: string, timeoutMs = 1000): Promise<boolean> {
   const { promise, resolve } = Promise.withResolvers<boolean>()
   if (process.platform !== 'win32' && !existsSync(socketPath)) {
     resolve(false)
@@ -71,7 +71,7 @@ export function probeDaemonSocket(socketPath: string): Promise<boolean> {
   }
   const onConnect = (): void => finish(true, true)
   const onError = (): void => finish(false)
-  timer = setTimeout(() => finish(false, true), 1000)
+  timer = setTimeout(() => finish(false, true), timeoutMs)
   socket.on('connect', onConnect)
   socket.on('error', onError)
   return promise
