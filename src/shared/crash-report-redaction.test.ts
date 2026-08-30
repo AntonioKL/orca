@@ -387,8 +387,8 @@ describe('sanitizeCrashReportString path redaction is all-or-nothing', () => {
 
   // A crash report carries minified frames, serialised state and base64 blobs, all on one line. The
   // crossing looks ahead over a bounded window for that reason: scanning to the end of the line at
-  // every space made a 100KB line cost over a second. The budget is ~250x the measured cost, so it
-  // fails on a return to quadratic rather than on a slow machine.
+  // every space made a 100KB line cost over a second. The budget is ~150x the measured cost (1.3ms
+  // against 250ms), so it fails on a return to quadratic rather than on a slow machine.
   it.each([
     ['a line of many paths', '/opt/orca/logs/frame.js '.repeat(4_260)],
     ['a few runs carrying many separators', `/opt/o/a ${`${'x/'.repeat(6_000)} `.repeat(8)}`]
@@ -458,8 +458,9 @@ describe('sanitizeCrashReportString pins each element of the space-crossing rule
   })
 
   // Parked, awaiting a decision: sentence punctuation inside a folder name. The path stops there and
-  // the segments after it ship. Crossing it collapses two stack frames into one, so the guard stays
-  // until that is settled -- pinned so that deleting a character class cannot settle it by accident.
+  // the segments after it ship. Crossing it eats the prose that follows a path instead -- 'failed:
+  // /Users/alice/a.js; retry with lib/x/y.js' loses its second half -- so the guard stays until that
+  // is settled, pinned so that deleting a character class cannot settle it by accident.
   it.each([
     [
       'a comma',
@@ -483,8 +484,14 @@ describe('sanitizeCrashReportString pins each element of the space-crossing rule
     }
   )
 
-  // The other side of the same trade-off as the row above: a filename with anything after its
-  // extension is not a name to this rule, and relaxing that is what eats the prose. Known limit.
+  // KNOWN LEAK, accepted and awaiting the same decision. A spaced final segment whose extension is
+  // followed by something that is not itself an extension ('.txt-bak', '.txt~') is not a name to
+  // this rule, so the path ends before it and the filename ships beside the marker. These rows are
+  // the leak, not the fix: they hold the measured output so it cannot change unnoticed.
+  // It is the trailing lookahead on the name that leaks here, and the same lookahead is the only
+  // thing keeping 'see docs/api.md#anchor for detail' out of the redaction -- one element, two
+  // directions, which is why this waits on replacing the pattern with per-token classification
+  // rather than on a wider character class. Ablating that lookahead reddens all three rows at once.
   it.each([
     [
       'a suffix after the extension',
@@ -497,9 +504,18 @@ describe('sanitizeCrashReportString pins each element of the space-crossing rule
       'read [redacted-path] Notes.txt~ failed'
     ]
   ])(
-    'stops a path at a filename carrying a suffix after its extension (%s)',
+    'leaks a filename carrying a non-extension suffix (known limit) (%s)',
     (_name, input, expected) => {
       expect(sanitizeCrashReportString(input)).toBe(expected)
     }
   )
+
+  // The leak's boundary: a further dot is itself an extension, so a double-extension filename is a
+  // name and goes whole. Without this the limit above reads wider than it is.
+  it.each([
+    ['a double extension', 'read /Users/brennan/My Notes.tar.gz failed'],
+    ['a dotted backup suffix', 'read /Users/brennan/My Notes.txt.bak failed']
+  ])('redacts a spaced filename carrying a second extension whole (%s)', (_name, input) => {
+    expect(sanitizeCrashReportString(input)).toBe('read [redacted-path] failed')
+  })
 })
