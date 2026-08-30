@@ -113,6 +113,8 @@ describe('#10142 close confirmation policy is the same for keyboard and mouse', 
     for (const source of [terminalSource, tabSource, paneSource, workspaceCleanupSource]) {
       expect(source).toContain('terminalCloseDecision')
       expect(source).toContain('terminalCloseLivenessFromInspection')
+      expect(source.match(/terminalCloseDecision/g)?.length ?? 0).toBeGreaterThan(1)
+      expect(source.match(/terminalCloseLivenessFromInspection/g)?.length ?? 0).toBeGreaterThan(1)
     }
     expect(terminalSource).toContain('collectTabPtyIds(state, tab.id)')
     expect(terminalSource).not.toContain('window.api.pty.hasChildProcesses')
