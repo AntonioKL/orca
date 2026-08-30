@@ -414,6 +414,7 @@ import type {
   WorktreeRemoteBranchConflictEvent
 } from '../../shared/worktree/base-ref-drift-types'
 import type {
+  CreateWorktreeArgs,
   CreateWorktreeResult,
   ForceDeleteWorktreeBranchResult,
   RemoveWorktreeResult
@@ -1245,7 +1246,8 @@ import {
   isOrphanedWorktreeError,
   mergeWorktree,
   sanitizeWorktreeName,
-  shouldSetDisplayName,
+  resolveWorktreeCreateDisplayName,
+  resolveWorktreeCreateDisplayNameMeta,
   areWorktreePathsEqual
 } from '../ipc/worktree-logic'
 import { resolveCreatedWorktree } from '../ipc/created-worktree-reconciliation'
@@ -26974,6 +26976,7 @@ export class OrcaRuntimeService {
     linkedTaskSourceContext?: TaskSourceContext | null
     comment?: string
     displayName?: string
+    displayNameKind?: CreateWorktreeArgs['displayNameKind']
     telemetrySource?: WorkspaceCreateTelemetrySource
     workspaceStatus?: string
     manualOrder?: number
@@ -27050,7 +27053,11 @@ export class OrcaRuntimeService {
       const meta = this.store.setWorktreeMeta(worktreeId, {
         instanceId,
         ...getProjectHostSetupWorktreeMeta(this.store.getProjectHostSetups?.() ?? [], repo),
-        displayName: args.displayName?.trim() || args.name,
+        displayName:
+          resolveWorktreeCreateDisplayName(args.displayName, args.displayNameKind) ?? args.name,
+        ...(args.displayNameKind === 'user' && args.displayName?.trim()
+          ? { displayNameIsPinned: true }
+          : {}),
         lastActivityAt: now,
         createdAt: now,
         orcaCreatedAt: now,
@@ -27242,7 +27249,10 @@ export class OrcaRuntimeService {
     }
     const hostedReviewExecutionContext = this.getHostedReviewExecutionOptions(repo)
     let effectiveRequestedName = args.name
-    const requestedDisplayName = args.displayName?.trim() || undefined
+    const requestedDisplayName = resolveWorktreeCreateDisplayName(
+      args.displayName,
+      args.displayNameKind
+    )
     const sanitizedName = sanitizeWorktreeName(args.name)
     let effectiveSanitizedName = sanitizedName
     // Username and base resolution are independent read-only probes. Starting
@@ -27685,11 +27695,12 @@ export class OrcaRuntimeService {
     // Why: PR/MR-created worktrees can start from a head ref/SHA while Source
     // Control must compare against the review target branch.
     const metadataBaseRef = args.compareBaseRef ?? remoteTrackingBase?.ref ?? baseBranch
-    const displayNameMeta = requestedDisplayName
-      ? { displayName: requestedDisplayName }
-      : shouldSetDisplayName(effectiveRequestedName, branchName, effectiveSanitizedName)
-        ? { displayName: effectiveRequestedName }
-        : {}
+    const displayNameMeta = resolveWorktreeCreateDisplayNameMeta(
+      requestedDisplayName,
+      branchName,
+      args.displayNameKind,
+      { requestedName: effectiveRequestedName, sanitizedName: effectiveSanitizedName }
+    )
     const meta = this.store.setWorktreeMeta(worktreeId, {
       // Why: worktree IDs are path-derived. If a path is deleted outside Orca
       // and later recreated, creation must mint a fresh instance identity so

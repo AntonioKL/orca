@@ -211,6 +211,25 @@ describe('updateWorktreeGitIdentity', () => {
     expect(store.getState().worktreesByRepo.repo1[0].displayName).toBe('My Cool Work')
   })
 
+  it('preserves a pinned user title even when it equals the old branch', () => {
+    const store = createTestStore()
+    const existing = makeWorktree({
+      id: 'repo1::/path/wt1',
+      repoId: 'repo1',
+      path: '/path/wt1',
+      branch: 'refs/heads/feature',
+      displayName: 'feature',
+      displayNameMode: 'fixed'
+    })
+
+    store.setState({ worktreesByRepo: { repo1: [existing] } } as Partial<AppState>)
+    store.getState().updateWorktreeGitIdentity('repo1::/path/wt1', {
+      branch: 'refs/heads/main'
+    })
+
+    expect(store.getState().worktreesByRepo.repo1[0].displayName).toBe('feature')
+  })
+
   it('clears stale branch identity for detached HEAD updates', () => {
     const store = createTestStore()
     const existing = makeWorktree({

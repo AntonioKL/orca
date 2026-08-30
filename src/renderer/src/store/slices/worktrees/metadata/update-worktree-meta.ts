@@ -122,11 +122,15 @@ export function createUpdateWorktreeMeta(
     const reviewBranch = worktreeForUpdate?.branch.replace(/^refs\/heads\//, '')
 
     // Why: bump lastActivityAt on comment edits so the time-decay sort doesn't drop a just-touched worktree.
+    const displayNameProvenance =
+      'displayName' in normalizedUpdates
+        ? { displayNameIsPinned: Boolean(normalizedUpdates.displayName?.trim()) }
+        : {}
     const targetEnriched = resolvedPushTarget
-      ? { ...normalizedUpdates, pushTarget: resolvedPushTarget }
+      ? { ...normalizedUpdates, ...displayNameProvenance, pushTarget: resolvedPushTarget }
       : shouldClearStaleHostedReviewPushTarget
-        ? { ...normalizedUpdates, pushTarget: undefined }
-        : normalizedUpdates
+        ? { ...normalizedUpdates, ...displayNameProvenance, pushTarget: undefined }
+        : { ...normalizedUpdates, ...displayNameProvenance }
     const renameCleared =
       'displayName' in targetEnriched
         ? {

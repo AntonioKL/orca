@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 import {
   sanitizeWorktreeName,
   sanitizeWorktreeDisplayName,
+  resolveWorktreeCreateDisplayName,
+  resolveWorktreeCreateDisplayNameMeta,
   ensurePathWithinWorkspace,
   computeBranchName,
   getConfiguredBranchPrefix,
@@ -127,6 +129,30 @@ describe('sanitizeWorktreeDisplayName', () => {
 
   it('returns undefined when nothing displayable remains', () => {
     expect(sanitizeWorktreeDisplayName('\u0000\n\t')).toBeUndefined()
+  })
+})
+
+describe('worktree create display-name provenance', () => {
+  it('preserves exact user text apart from edge whitespace and controls', () => {
+    expect(resolveWorktreeCreateDisplayName('  My  Label\n', 'user')).toBe('My  Label')
+  })
+
+  it('pins user labels without adding collision suffixes to visible text', () => {
+    expect(
+      resolveWorktreeCreateDisplayNameMeta('My Label', 'my-label-2', 'user', {
+        requestedName: 'My Label',
+        sanitizedName: 'my-label-2'
+      })
+    ).toEqual({ displayName: 'My Label', displayNameIsPinned: true })
+  })
+
+  it('keeps a slashy branch label automatic when only its folder is sanitized', () => {
+    expect(
+      resolveWorktreeCreateDisplayNameMeta(undefined, 'feature/login', undefined, {
+        requestedName: 'feature/login',
+        sanitizedName: 'feature-login'
+      })
+    ).toEqual({ displayName: 'feature/login', displayNameIsPinned: false })
   })
 })
 
@@ -459,6 +485,7 @@ describe('mergeWorktree', () => {
   it('merges with full metadata', () => {
     const meta = {
       displayName: 'My Feature',
+      displayNameIsPinned: true,
       comment: 'WIP',
       linkedIssue: 42,
       linkedPR: 10,
@@ -500,6 +527,7 @@ describe('mergeWorktree', () => {
       isBare: false,
       isMainWorktree: false,
       displayName: 'My Feature',
+      displayNameMode: 'fixed',
       comment: 'WIP',
       linkedIssue: 42,
       linkedPR: 10,

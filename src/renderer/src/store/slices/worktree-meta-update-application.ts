@@ -59,7 +59,11 @@ export function applyWorktreeUpdates(
     }
 
     changed = true
-    return { ...worktree, ...updates }
+    const next = { ...worktree, ...updates }
+    if (updates.displayNameIsPinned !== undefined) {
+      next.displayNameMode = updates.displayNameIsPinned ? 'fixed' : 'automatic'
+    }
+    return next
   })
   if (!changed) {
     return worktreesByRepo

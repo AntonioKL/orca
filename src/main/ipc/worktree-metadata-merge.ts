@@ -47,6 +47,14 @@ export function mergeWorktree(
     ...(git.isSparse === true ? { isSparse: true } : {}),
     isMainWorktree: git.isMainWorktree,
     displayName: meta?.displayName || branchShort || defaultDisplayName || basename(git.path),
+    displayNameMode:
+      meta?.displayNameIsPinned === true
+        ? 'fixed'
+        : meta?.displayNameIsPinned === false
+          ? 'automatic'
+          : meta?.displayName && meta.displayName.trim() !== branchShort
+            ? 'fixed'
+            : 'automatic',
     comment: meta?.comment || '',
     linkedIssue: meta?.linkedIssue ?? null,
     linkedPR: meta?.linkedPR ?? null,
