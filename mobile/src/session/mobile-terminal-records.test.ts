@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   getTerminalRecordsFromSessionTabs,
+  hasConnectedTerminalAbsentFromSessionTabs,
   mergeTerminalListWithKnownRecords,
   mergeTerminalRecordsByCurrentOrder,
   mobileSessionTabsEqual,

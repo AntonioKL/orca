@@ -6079,22 +6079,18 @@ export class OrcaRuntimeService {
     )
     const worktrees = (await this.listResolvedWorktrees())
       .filter((worktree) => repos.has(getRepoIdFromWorktreeId(worktree.id)))
-      .map(
-        (worktree): SkillSshWorkspaceAuthority => ({
-          kind: 'worktree',
-          id: worktree.id,
-          path: worktree.path
-        })
-      )
+      .map((worktree): SkillSshWorkspaceAuthority => ({
+        kind: 'worktree',
+        id: worktree.id,
+        path: worktree.path
+      }))
     const folders = this.listFolderWorkspaces()
       .filter((folder) => folder.connectionId === connectionId)
-      .map(
-        (folder): SkillSshWorkspaceAuthority => ({
-          kind: 'folder',
-          id: folder.id,
-          path: folder.folderPath
-        })
-      )
+      .map((folder): SkillSshWorkspaceAuthority => ({
+        kind: 'folder',
+        id: folder.id,
+        path: folder.folderPath
+      }))
     return [...worktrees, ...folders]
   }
 
@@ -23373,7 +23369,8 @@ export class OrcaRuntimeService {
   async addRepo(
     path: string,
     kind: 'git' | 'folder' = 'git',
-    executionHostId?: ExecutionHostId | null
+    executionHostId?: ExecutionHostId | null,
+    displayName?: string
   ): Promise<Repo> {
     if (!this.store) {
       throw new Error('runtime_unavailable')
@@ -23421,7 +23418,7 @@ export class OrcaRuntimeService {
     const repo: Repo = {
       id: randomUUID(),
       path,
-      displayName: getRepoName(path),
+      displayName: displayName?.trim() || getRepoName(path),
       badgeColor: DEFAULT_REPO_BADGE_COLOR,
       ...(executionHostId != null ? { executionHostId } : {}),
       ...detected,
@@ -27429,13 +27426,13 @@ export class OrcaRuntimeService {
           // a renderer window, so the startup shell can wait on setup completion
           // and windowless creates resolve the same Windows setup shell.
           const runtimeTarget = this.getLocalGitExecutionOptionArgs(repo)[0]
-          // Why: both trailing args are optional — the shell is undefined off Windows.
           setup = createSetupRunnerScript(
             repo,
             worktreePath,
             hooks.scripts.setup,
             runtimeTarget,
-            resolveSetupRunnerShell(settings)
+            resolveSetupRunnerShell(settings),
+            yamlHooks?.setupAgentStartupPolicy
           )
         } catch (error) {
           // Why: the git worktree is already real at this point. If runner

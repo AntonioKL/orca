@@ -23,7 +23,7 @@ describe('mobile worktree activation', () => {
     const openSession = sliceBetween(
       screenSource,
       'const openWorktreeSession = useCallback(',
-      'const handleSortChange = useCallback'
+      'const openFloatingWorkspace = useCallback'
     )
     const nativeActivation = sliceBetween(
       adapterSource,

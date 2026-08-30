@@ -1397,7 +1397,3 @@ export default function HostWorktreeRoute() {
   }
   return <HostScreen />
 }
-
-function ListSeparator() {
-  return <View style={styles.separator} />
-}
