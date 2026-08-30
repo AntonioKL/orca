@@ -53,8 +53,8 @@ describeCodexContract('codex binary index-heal contract', () => {
     // Why assert the version: the whole point of a real-binary check is that the
     // binary drifts. A job that quietly ran some other Codex would report a
     // contract this repo never verified.
-    const { stdout } = await execFileAsync(binary!, ['--version'])
-    expect(stdout).toContain(`codex-cli ${expectedVersion}`)
+    const { stdout } = await execFileAsync(binary!, ['--version'], { timeout: SESSION_TIMEOUT_MS })
+    expect(stdout.trim()).toBe(`codex-cli ${expectedVersion}`)
   })
 
   afterEach(() => {
