@@ -10132,7 +10132,7 @@ export class OrcaRuntimeService {
           }
         }
       }
-      this.closeStructuredAgentSessionTab(worktreeId, snapshot, tab)
+      await this.closeStructuredAgentSessionTab(worktreeId, snapshot, tab)
     } else {
       if (!this.notifier?.closeSessionTab) {
         throw new Error('runtime_unavailable')
@@ -10238,11 +10238,15 @@ export class OrcaRuntimeService {
     return true
   }
 
-  private closeStructuredAgentSessionTab(
+  private async closeStructuredAgentSessionTab(
     worktreeId: string,
     snapshot: RuntimeMobileSessionTabsSnapshot,
     tab: RuntimeMobileSessionAgentTab
-  ): void {
+  ): Promise<void> {
+    const host = getStructuredAgentSessionHost()
+    if (typeof host?.setSessionTabVisibility === 'function') {
+      await host.setSessionTabVisibility(tab.sessionId, false)
+    }
     const nextTabs = snapshot.tabs.filter((candidate) => candidate.id !== tab.id)
     const active = nextTabs.find((candidate) => candidate.isActive) ?? nextTabs[0] ?? null
     const nextSnapshot: RuntimeMobileSessionTabsSnapshot = {
@@ -11754,11 +11758,11 @@ export class OrcaRuntimeService {
       stopRecoveredOwner: (record) => this.stopStructuredSessionProcess(record),
       tuiStatus: (owner) => this.structuredTuiStatus(owner),
       closeTuiOwner: (owner) => this.closeStructuredTuiOwner(owner),
-      revealNativeSession: ({ workspaceId, sessionId, agent = 'codex', adoptedTerminal }) => {
+      revealNativeSession: async ({ workspaceId, sessionId, agent = 'codex', adoptedTerminal }) => {
         if (adoptedTerminal || agent !== 'codex') {
           return
         }
-        this.publishStructuredAgentSessionTab({
+        await this.publishStructuredAgentSessionTab({
           workspaceId,
           sessionId,
           agent,
@@ -12317,10 +12321,15 @@ export class OrcaRuntimeService {
   private async restoreStructuredAgentSessionTabsOnce(): Promise<void> {
     await this.prepareStructuredAgentSessionStartupRestoration()
     const host = getStructuredAgentSessionHost()
+    const persistedVisibleIds =
+      typeof host?.listPersistedVisibleSessionIds === 'function'
+        ? host.listPersistedVisibleSessionIds()
+        : []
+    const profileIds = collectSavedStructuredAgentSessionIds(
+      this.store?.getWorkspaceSession?.(LOCAL_EXECUTION_HOST_ID) ?? null
+    )
     await host?.restoreReadableSessions(
-      collectSavedStructuredAgentSessionIds(
-        this.store?.getWorkspaceSession?.(LOCAL_EXECUTION_HOST_ID) ?? null
-      )
+      persistedVisibleIds.length > 0 ? persistedVisibleIds : profileIds
     )
     for (const worktreeId of this.getKnownWorkspaceSessionWorktreeIds()) {
       this.hydrateHeadlessMobileSessionTabsFromWorkspaceSession(worktreeId, {
@@ -12337,7 +12346,7 @@ export class OrcaRuntimeService {
       while (sessionId.startsWith('agent-session:')) {
         sessionId = sessionId.slice('agent-session:'.length)
       }
-      this.publishStructuredAgentSessionTab({
+      await this.publishStructuredAgentSessionTab({
         ...session,
         agent: 'codex',
         sessionId,
@@ -12347,13 +12356,17 @@ export class OrcaRuntimeService {
     }
   }
 
-  publishStructuredAgentSessionTab(input: {
+  async publishStructuredAgentSessionTab(input: {
     workspaceId: string
     sessionId: string
     agent: 'codex'
     activate: boolean
     notify?: boolean
-  }): void {
+  }): Promise<void> {
+    const host = getStructuredAgentSessionHost()
+    if (typeof host?.setSessionTabVisibility === 'function') {
+      await host.setSessionTabVisibility(input.sessionId, true)
+    }
     const existing = this.mobileSessionTabsByWorktree.get(input.workspaceId)
     const id = `agent-session:${input.sessionId}`
     if (existing?.tabs.some((tab) => tab.id === id)) {

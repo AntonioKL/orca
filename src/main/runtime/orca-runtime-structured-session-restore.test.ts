@@ -107,6 +107,44 @@ describe('structured session cold restoration', () => {
     )
   })
 
+  it('prefers the durable visible-session index after a legacy profile drops agent tabs', async () => {
+    const runtime = new OrcaRuntimeService()
+    const restoreReadableSessions = vi.fn(async () => undefined)
+    const internal = runtime as unknown as {
+      store: { getWorkspaceSession: () => unknown }
+      hasPersistedStructuredAgentSessionStore(): boolean
+      getKnownWorkspaceSessionWorktreeIds(): Set<string>
+      hydrateHeadlessMobileSessionTabsFromWorkspaceSession(): Set<string>
+      refreshMobileSessionPtyRecords(): Promise<Set<string> | null>
+      ensureStructuredAgentSessionHost(): Promise<void>
+    }
+    internal.store = {
+      getWorkspaceSession: () => ({
+        activeRepoId: null,
+        activeWorktreeId: 'workspace-1',
+        activeTabId: null,
+        tabsByWorktree: {},
+        terminalLayoutsByTabId: {},
+        unifiedTabs: { 'workspace-1': [] }
+      })
+    }
+    internal.hasPersistedStructuredAgentSessionStore = () => true
+    internal.getKnownWorkspaceSessionWorktreeIds = () => new Set()
+    internal.hydrateHeadlessMobileSessionTabsFromWorkspaceSession = () => new Set()
+    internal.refreshMobileSessionPtyRecords = async () => new Set()
+    internal.ensureStructuredAgentSessionHost = async () => undefined
+    setStructuredAgentSessionHost({
+      reconcileRestartLeases: async () => undefined,
+      listPersistedVisibleSessionIds: () => ['session-survives-rollback'],
+      restoreReadableSessions,
+      listSessionTabs: () => []
+    } as never)
+
+    await runtime.restoreStructuredAgentSessionTabs()
+
+    expect(restoreReadableSessions).toHaveBeenCalledWith(['session-survives-rollback'])
+  })
+
   it('normalizes a restored tab id and removes it when closed', async () => {
     const runtime = new OrcaRuntimeService()
     const closeSessionTab = vi.fn(async () => undefined)

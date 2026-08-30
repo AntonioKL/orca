@@ -37,12 +37,15 @@ function agentSessionStoreStateChanged(
   records: ReadonlyMap<string, AgentSessionRecord>,
   operations: ReadonlyMap<string, AgentSessionOperationRow>,
   retiredClaimKeys: AgentSessionStoreState['retiredClaimKeys'],
-  unreadableRecords: AgentSessionStoreState['unreadableRecords']
+  unreadableRecords: AgentSessionStoreState['unreadableRecords'],
+  visibleSessionIds: AgentSessionStoreState['visibleSessionIds']
 ): boolean {
   return (
     !mapEntriesMatch(state.records, records) ||
     !mapEntriesMatch(state.operations, operations) ||
     !mapEntriesMatch(state.unreadableRecords, unreadableRecords) ||
+    state.visibleSessionIds.size !== visibleSessionIds.size ||
+    [...state.visibleSessionIds].some((id) => !visibleSessionIds.has(id)) ||
     state.retiredClaimKeys.length !== retiredClaimKeys.length ||
     state.retiredClaimKeys.some((entry, index) => entry !== retiredClaimKeys[index])
   )
@@ -94,6 +97,7 @@ export class AgentSessionStoreTransactionQueue {
         const operations = new Map(this.state.operations)
         const retiredClaimKeys = [...this.state.retiredClaimKeys]
         const unreadableRecords = new Map(this.state.unreadableRecords)
+        const visibleSessionIds = new Set(this.state.visibleSessionIds)
         try {
           // The lost commit may have granted a higher fence than the backup records show. Rather
           // than refuse forever, raise every recovered fence clear of anything that commit could
@@ -111,7 +115,8 @@ export class AgentSessionStoreTransactionQueue {
               records,
               operations,
               retiredClaimKeys,
-              unreadableRecords
+              unreadableRecords,
+              visibleSessionIds
             )
           ) {
             return result
@@ -130,6 +135,7 @@ export class AgentSessionStoreTransactionQueue {
           this.state.operations = operations
           this.state.retiredClaimKeys = retiredClaimKeys
           this.state.unreadableRecords = unreadableRecords
+          this.state.visibleSessionIds = visibleSessionIds
           throw error
         }
       })
