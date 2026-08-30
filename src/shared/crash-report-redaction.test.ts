@@ -100,6 +100,30 @@ const LEAKED_PATH_FORMS: readonly (readonly [string, string, readonly string[]])
     'read /Users/brennan/My Documents/My Notes.txt failed',
     ['brennan', 'My Documents', 'My Notes', 'Notes.txt']
   ],
+  // A dot is not only a filename's. It sits inside folder names too -- a version, a date -- and
+  // reading one as the path's end shipped every segment after it.
+  [
+    'unquoted POSIX, a dot inside a spaced folder name',
+    'read /Users/brennan/Release 1.0 Notes/creds.txt failed',
+    ['brennan', 'Release 1.0 Notes', 'creds.txt']
+  ],
+  [
+    'unquoted drive letter, a dot inside a spaced folder name',
+    'load C:\\Users\\brennan\\Orca v1.2 beta\\creds.txt failed',
+    ['brennan', 'Orca v1.2 beta', 'creds.txt']
+  ],
+  // An extension is as long as its format made it. The eight-character bound that used to end the
+  // path here is shorter than the ones macOS, iOS and Java hand out every day.
+  [
+    'unquoted POSIX, an extension longer than eight characters',
+    'read /Users/brennan/My App.entitlements failed',
+    ['brennan', 'My App', 'App.entitlements']
+  ],
+  [
+    'unquoted drive letter, an extension longer than eight characters',
+    'load C:\\Users\\brennan\\Work Files\\App.xcodeproj failed',
+    ['brennan', 'Work Files', 'App.xcodeproj']
+  ],
   // A directory chain ending in no filename at all: the run that continues it carries separators
   // and nothing else, so a chain has to count as path evidence on its own.
   [

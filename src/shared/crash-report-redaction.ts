@@ -30,6 +30,9 @@ const PATH_STOP = '\\s"\'`<>)'
 // segment; without it a single long run carrying many separators costs as much on its own.
 const MAX_CROSSED_RUNS = 2
 const MAX_RUN_LENGTH = 255
+// An extension is as long as its format made it -- '.entitlements', '.mobileprovision' -- so a
+// length bound here ends a path at the last name it still recognised. The run bound caps the reach.
+const EXTENSION = '\\.[A-Za-z0-9]+'
 
 // What may follow a space and still be the same path. No run in the window starts with the separator
 // (so a second path on the same line stays a second path) and none carries ':' (so two stack frames
@@ -40,12 +43,12 @@ const MAX_RUN_LENGTH = 255
 //     read/write failed' reaches neither and is left alone.
 //   'My Notes.txt' -- a spaced last segment is only a name, so every run before it has to carry a
 //     separator. 'then push git@github.com' does not, which stops a host from reading as a file.
-const pathContinuation = (separator: string): string => {
+const pathContinuation = (separator: string, crossableRuns: number): string => {
   const body = `[^${PATH_STOP}:]{0,${MAX_RUN_LENGTH}}`
   const run = `[^${PATH_STOP}:${separator}]${body}`
   const chainRun = `${run}${separator}${body}`
-  const name = `\\.[A-Za-z0-9]{1,8}(?![^${PATH_STOP}:])`
-  const crossed = (crossable: string): string => `(?:${crossable}[ \\t]){0,${MAX_CROSSED_RUNS}}`
+  const name = `${EXTENSION}(?![^${PATH_STOP}:])`
+  const crossed = (crossable: string): string => `(?:${crossable}[ \\t]){0,${crossableRuns}}`
   return (
     `(?:${crossed(run)}(?:${chainRun}${name}|${chainRun}${separator}${body})` +
     `|${crossed(chainRun)}${run}${name})`
@@ -56,8 +59,13 @@ const pathContinuation = (separator: string): string => {
 // continues it, which keeps emitting the marker and removing the path a single operation rather
 // than two. A run ending in a name ends the path -- a filename is the last thing in one -- and
 // sentence punctuation ends it too, so the prose after a path survives.
+// A name only ends a path where the path does not visibly resume. A dot sits inside folder names
+// too -- 'Release 1.0 Notes/spec.md' -- and there it is no filename, so after a name the crossing
+// still reaches the very next run. It reaches no further: a path has no filler words between its
+// segments, which is what 'creds.txt then check b/c/d.txt' has and what leaves that prose alone.
 const unquotedPathTail = (separator: string): string =>
-  `(?:[^${PATH_STOP}]|(?<![.,;:!?])(?<!\\.[A-Za-z0-9]{1,8})[ \\t](?=${pathContinuation(separator)}))*`
+  `(?:[^${PATH_STOP}]|(?<![.,;:!?])(?:(?<!${EXTENSION})[ \\t](?=${pathContinuation(separator, MAX_CROSSED_RUNS)})` +
+  `|[ \\t](?=${pathContinuation(separator, 0)})))*`
 const POSIX_TAIL = unquotedPathTail('/')
 const WINDOWS_TAIL = unquotedPathTail('\\\\')
 
