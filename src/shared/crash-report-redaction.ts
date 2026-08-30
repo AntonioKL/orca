@@ -69,11 +69,12 @@ const WINDOWS_TAIL = unquotedPathTail('\\\\')
 // are excluded: their path names a remote resource, not this machine's disk.
 // A scheme can also be stacked on another, as a database URL stacks one on its driver. The stack is
 // matched with the path, because starting inside it left `jdbc:` standing beside the marker. The
-// lookbehind still admits a ':' before the scheme, so a path behind one that is no scheme at all --
-// 'at line 12:file:///...' -- is not left whole.
+// lookbehind still admits what is no scheme at all before it -- 'at line 12:file:///...',
+// '1.2.3-file:///...' -- so a path behind punctuation is not left whole. It keeps rejecting a word
+// character, which is what stops the tail of an excluded scheme ('ttps:/') from matching on its own.
 const MAX_STACKED_SCHEMES = 3
 const LOCAL_URL_ROOT =
-  `(?<![A-Za-z0-9+.-])(?:[A-Za-z][A-Za-z0-9+.-]*:){0,${MAX_STACKED_SCHEMES}}?` +
+  `(?<![A-Za-z0-9])(?:[A-Za-z][A-Za-z0-9+.-]*:){0,${MAX_STACKED_SCHEMES}}?` +
   '(?!(?:https?|wss?):)[A-Za-z][A-Za-z0-9+.-]*:/'
 
 const PATH_PATTERNS = [

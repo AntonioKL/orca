@@ -173,11 +173,16 @@ const LEAKED_PATH_FORMS: readonly (readonly [string, string, readonly string[]])
     'connect JDBC:MySQL://db.internal:3306/appdb failed',
     ['db.internal', '3306', 'appdb']
   ],
-  // The ':' before a scheme is not always another scheme. Refusing to start after one would leave
-  // this path whole.
+  // What precedes a scheme is not always another scheme. Refusing to start after punctuation would
+  // leave these paths whole.
   [
     'file URL behind a colon that is no scheme',
     'at line 12:file:///Users/alice/Documents/secret.js here',
+    ['alice', 'Documents', 'secret.js']
+  ],
+  [
+    'file URL behind a version that is no scheme',
+    'orca 1.2.3-file:///Users/alice/Documents/secret.js here',
     ['alice', 'Documents', 'secret.js']
   ],
   // Roots the bare patterns cannot start from: a tilde home, and a drive spelled with forward slashes.
