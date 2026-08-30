@@ -1,6 +1,9 @@
 import type { WorkspaceKey } from '../../../shared/folder-workspace-types'
 import type { PersistedState } from '../../../shared/persisted-state-types'
-import type { PersistedUIStateUpdate } from '../../../shared/persisted-ui-state-types'
+import type {
+  PersistedUIState,
+  PersistedUIStateUpdate
+} from '../../../shared/persisted-ui-state-types'
 import type { WorkspaceLineage } from '../../../shared/worktree/lineage-types'
 import { normalizeFeatureInteractions } from '../../../shared/feature-interactions'
 import { normalizeContextualTourIds } from '../../../shared/contextual-tours'
@@ -43,8 +46,14 @@ export function mergeContextualTourSeenIds(
 }
 
 export function stripMainOwnedTelemetryMarkerFromUI(
+  value: PersistedUIState | undefined
+): Partial<PersistedUIState>
+export function stripMainOwnedTelemetryMarkerFromUI(
   value: PersistedUIStateUpdate | undefined
-): PersistedUIStateUpdate {
+): PersistedUIStateUpdate
+export function stripMainOwnedTelemetryMarkerFromUI(
+  value: PersistedUIState | PersistedUIStateUpdate | undefined
+): Partial<PersistedUIState> | PersistedUIStateUpdate {
   if (!value || typeof value !== 'object') {
     return {}
   }
