@@ -113,22 +113,26 @@ describe('registerWorktreeHandlers', () => {
     const events: string[] = []
     let resolveUsername!: (value: string) => void
     let resolveBase!: (value: string | null) => void
-    const usernamePromise = new Promise<string>((resolve) => {
-      events.push('username-start')
-      resolveUsername = resolve
-    })
-    const basePromise = new Promise<string | null>((resolve) => {
-      events.push('base-start')
-      resolveBase = resolve
-    })
     store.getSettings.mockReturnValue({
       branchPrefix: 'git-username',
       nestWorkspaces: false,
       refreshLocalBaseRefOnWorktreeCreate: false,
       workspaceDir: '/workspace'
     })
-    resolveLocalGitUsernameMock.mockReturnValue(usernamePromise)
-    resolveDefaultBaseRefWithLocalGitMock.mockReturnValue(basePromise)
+    resolveLocalGitUsernameMock.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          events.push('username-start')
+          resolveUsername = resolve
+        })
+    )
+    resolveDefaultBaseRefWithLocalGitMock.mockImplementation(
+      () =>
+        new Promise<string | null>((resolve) => {
+          events.push('base-start')
+          resolveBase = resolve
+        })
+    )
     listWorktreesMock.mockResolvedValue([
       {
         path: '/workspace/concurrent-probe',
