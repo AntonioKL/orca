@@ -9484,10 +9484,13 @@ export class OrcaRuntimeService {
   private async refreshMobileSessionPtyInventory(
     targetWorktreeId: string | null = null
   ): Promise<PtyControllerInventory | null> {
+    // Targeted mobile polls must not queue behind an aggregate census that may
+    // be waiting on an unrelated SSH provider.
+    if (targetWorktreeId !== null && targetWorktreeId !== FLOATING_TERMINAL_WORKTREE_ID) {
+      return this.performMobileSessionPtyRecordsRefresh(targetWorktreeId)
+    }
     if (targetWorktreeId !== FLOATING_TERMINAL_WORKTREE_ID) {
-      // Non-floating refreshes all query the aggregate controller inventory;
-      // coalesce targeted and all-worktree callers so they cannot invalidate
-      // one another through the shared aggregate generation fence.
+      // Fleet-wide refreshes share one aggregate controller inventory.
       const pending = this.pendingMobileSessionPtyAggregateInventoryRefresh
       if (pending) {
         return pending
@@ -9513,11 +9516,61 @@ export class OrcaRuntimeService {
     }
     // Why: floating PTY identity is explicit, so polling must not resolve every Git/SSH worktree.
     const isFloatingWorkspace = targetWorktreeId === FLOATING_TERMINAL_WORKTREE_ID
-    const resolvedWorktrees = isFloatingWorkspace ? [] : await this.listResolvedWorktrees()
+    const resolvedWorktrees = isFloatingWorkspace
+      ? []
+      : targetWorktreeId
+        ? this.listResolvedWorktreesForExplicitTarget(targetWorktreeId)
+        : await this.listResolvedWorktrees()
+    // An explicit mobile worktree belongs to one execution host. Query only
+    // that provider; aggregate inventory would wait on unrelated SSH hosts.
+    const targetExecutionHost = targetWorktreeId
+      ? (resolvedWorktrees.find((worktree) => worktree.id === targetWorktreeId)?.hostId ??
+        this.tryGetWorkspaceSessionHostIdForWorktree(targetWorktreeId))
+      : null
+    const parsedTargetHost = targetExecutionHost ? parseExecutionHostId(targetExecutionHost) : null
+    // Paired/runtime-owned workspaces have a separate controller; this runtime
+    // cannot inspect them and must not silently query its local PTY provider.
+    if (parsedTargetHost?.kind === 'runtime') {
+      return null
+    }
+    const targetConnectionId =
+      parsedTargetHost?.kind === 'ssh'
+        ? parsedTargetHost.targetId
+        : targetWorktreeId
+          ? null
+          : undefined
     return await this.refreshPtyWorktreeRecordsWithControllerInventory(
       resolvedWorktrees,
-      isFloatingWorkspace ? targetWorktreeId : null
+      targetWorktreeId,
+      undefined,
+      targetConnectionId
     )
+  }
+
+  /** Targeted mobile opens must not wait for an unrelated SSH/Git worktree scan. */
+  private listResolvedWorktreesForExplicitTarget(targetWorktreeId: string): ResolvedWorktree[] {
+    const cached =
+      this.resolvedWorktreeCache && this.resolvedWorktreeCache.expiresAt > Date.now()
+        ? this.resolvedWorktreeCache.worktrees
+        : null
+    const targetWorktree =
+      cached?.find((worktree) => worktree.id === targetWorktreeId) ??
+      (() => {
+        const scope = parseWorkspaceKey(targetWorktreeId)
+        if (scope?.type === 'folder') {
+          const folder = this.store
+            ?.getFolderWorkspaces?.()
+            .find((workspace) => workspace.id === scope.folderWorkspaceId)
+          return folder ? this.folderWorkspaceToResolvedWorktree(folder) : null
+        }
+        return this.buildResolvedWorktreeFromId(targetWorktreeId)
+      })()
+    if (!targetWorktree) {
+      return []
+    }
+    return cached
+      ? includeTargetResolvedWorktree(cached, targetWorktree)
+      : this.listKnownResolvedWorktreesForExplicitTarget(targetWorktreeId, targetWorktree)
   }
 
   async activateMobileSessionTab(
@@ -34938,7 +34991,8 @@ export class OrcaRuntimeService {
     resolvedWorktrees: ResolvedWorktree[],
     targetWorktreeId: string | null = null,
     deadline?: number,
-    connectionId?: string | null
+    connectionId?: string | null,
+    retryStale = false
   ): Promise<PtyControllerInventory | null> {
     if (targetWorktreeId === FLOATING_TERMINAL_WORKTREE_ID) {
       const targetedLiveness = this.refreshFloatingWorkspacePtyLiveness()
@@ -35012,6 +35066,18 @@ export class OrcaRuntimeService {
             inventoryGeneration &&
           this.ptyControllerAggregateInventoryGeneration <= inventoryGeneration
     if (!isCurrentInventory) {
+      // A fleet census that began after this targeted poll must not turn a
+      // user-driven open into an empty result. Re-query the owning provider;
+      // the second generation is then fenced against both operations.
+      if (targetWorktreeId !== null && !retryStale) {
+        return this.refreshPtyWorktreeRecordsWithControllerInventory(
+          resolvedWorktrees,
+          targetWorktreeId,
+          deadline,
+          connectionId,
+          true
+        )
+      }
       return null
     }
     const sessions = sessionsResult.value.processes
