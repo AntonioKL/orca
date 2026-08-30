@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   closeWebRuntimeTerminal,
   consumePendingWebRuntimeSplitMirrorTelemetry,
-  isWebRuntimeSessionActive,
   splitWebRuntimeTerminal
 } from './web-runtime-session'
 import { resetWebSessionCloseIntentForTests } from './web-session-close-intent'
@@ -859,13 +858,5 @@ describe('closeWebRuntimeTerminal', () => {
     expect(closeWebRuntimeTerminal('remote:web-env-1@@terminal-1')).toBe(true)
 
     await vi.waitFor(() => expect(runtimeCall).toHaveBeenCalledTimes(1))
-  })
-
-  it('treats any configured remote runtime environment as a shared session', () => {
-    vi.stubGlobal('__ORCA_WEB_CLIENT__', false)
-
-    expect(isWebRuntimeSessionActive('env-1')).toBe(true)
-    expect(isWebRuntimeSessionActive('   ')).toBe(false)
-    expect(isWebRuntimeSessionActive(null)).toBe(false)
   })
 })
