@@ -1,4 +1,6 @@
 import { realpath, stat } from 'node:fs/promises'
+import { join, posix } from 'node:path'
+import { toWslExecutionSpace } from '../../shared/wsl-paths'
 import type { GitWorktreeInfo } from '../../shared/worktree/types'
 import {
   readCheckedOutBranchRef,
@@ -6,8 +8,7 @@ import {
   readRepoLocation,
   readTranslatedWorktreeGraph,
   readWorktreeHeadOid,
-  readWorktreeList,
-  toGitOutputSpace
+  readWorktreeList
 } from './worktree-list-reader'
 import type { GitWorktreeExecOptions } from './worktree-operation-options'
 import {
@@ -112,12 +113,37 @@ async function annotateSparseCheckoutStatus(
   return annotated
 }
 
-/** The repo's common dir from the filesystem; wrong for a bare repo, so only a secondary signal. */
-async function readRepoCommonDirFromDisk(repoPath: string): Promise<string | undefined> {
+/**
+ * The repo's common dir from the filesystem, as a second opinion on Git's own reading.
+ *
+ * Deadlined because a `.git` on a hung mount (dead NFS/SSHFS, stalled WSL 9p) never rejects, and an
+ * unbounded read here would leave the whole create IPC pending instead of failing like it used to.
+ */
+async function readRepoCommonDirFromDisk(
+  repoPath: string,
+  timeoutMs: number
+): Promise<string | undefined> {
   try {
-    return await resolveGitCommonDir(await resolveGitDir(repoPath))
+    const dotGit = join(repoPath, '.git')
+    // A bare repo has no `.git`, and resolveGitDir would fabricate one; offer no candidate instead.
+    await withDeadline(stat(dotGit), timeoutMs)
+    return await withDeadline(resolveGitDir(repoPath).then(resolveGitCommonDir), timeoutMs)
   } catch {
     return undefined
+  }
+}
+
+async function withDeadline<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('deadline exceeded')), timeoutMs)
+      })
+    ])
+  } finally {
+    clearTimeout(timer)
   }
 }
 
@@ -142,13 +168,33 @@ async function isSameRepoCommonDir(
   candidates: readonly (string | undefined)[]
 ): Promise<boolean> {
   const present = candidates.filter((candidate): candidate is string => Boolean(candidate))
-  if (present.some((candidate) => areWorktreePathsEqual(createdCommonDir, candidate))) {
+  if (present.some((candidate) => isSameCommonDirPath(createdCommonDir, candidate))) {
     return true
   }
   const [canonicalCreated, ...canonicalCandidates] = await Promise.all(
     [createdCommonDir, ...present].map(canonicalizeLocalPath)
   )
-  return canonicalCandidates.some((candidate) => areWorktreePathsEqual(canonicalCreated, candidate))
+  return canonicalCandidates.some((candidate) => isSameCommonDirPath(canonicalCreated, candidate))
+}
+
+/**
+ * Why not areWorktreePathsEqual alone: it folds case for every path once the host is Windows, so on
+ * a Windows desktop two WSL repos differing only in case would be accepted as the same object store.
+ */
+export function isSameCommonDirPath(
+  left: string,
+  right: string,
+  platform = process.platform
+): boolean {
+  const leftIsPosix = isPosixAbsolutePath(left)
+  if (leftIsPosix || isPosixAbsolutePath(right)) {
+    return leftIsPosix && isPosixAbsolutePath(right) && posix.resolve(left) === posix.resolve(right)
+  }
+  return areWorktreePathsEqual(left, right, platform)
+}
+
+function isPosixAbsolutePath(pathValue: string): boolean {
+  return pathValue.startsWith('/') && !pathValue.startsWith('//')
 }
 
 /**
@@ -170,9 +216,9 @@ export async function describeCreatedWorktree(
     timeout: options.timeout ?? WORKTREE_LIST_TIMEOUT_MS
   }
   const [created, repoGitCommonDir, repoDiskCommonDir, checkedOutRef, head] = await Promise.all([
-    readRepoLocation(worktreePath, toGitOutputSpace(worktreePath), deadlined),
+    readRepoLocation(worktreePath, toWslExecutionSpace(worktreePath), deadlined),
     readRepoCommonDirFromGit(repoPath, deadlined),
-    readRepoCommonDirFromDisk(repoPath),
+    readRepoCommonDirFromDisk(repoPath, deadlined.timeout ?? WORKTREE_LIST_TIMEOUT_MS),
     readCheckedOutBranchRef(worktreePath, deadlined),
     readWorktreeHeadOid(worktreePath, deadlined)
   ])

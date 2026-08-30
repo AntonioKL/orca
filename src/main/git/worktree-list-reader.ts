@@ -1,6 +1,6 @@
 import { stat } from 'node:fs/promises'
 import type { GitWorktreeInfo } from '../../shared/worktree/types'
-import { parseWslUncPath } from '../../shared/wsl-paths'
+import { toWslExecutionSpace } from '../../shared/wsl-paths'
 import {
   hasUnsupportedRevParsePathFormatEcho,
   isUnsupportedRevParsePathFormatError,
@@ -24,15 +24,6 @@ import { gitExecFileAsync } from './runner'
 const PRUNABLE_EXISTENCE_PROBE_CONCURRENCY = 8
 
 type RepoLocation = { topLevel: string; commonDir: string }
-
-/**
- * The spelling Git itself answers in for `path`. Under WSL, git-in-the-distro resolves relative
- * rev-parse output against the Linux path, not the caller's UNC spelling, and realpath cannot
- * bridge the two spaces afterwards.
- */
-export function toGitOutputSpace(path: string): string {
-  return parseWslUncPath(path)?.linuxPath ?? path
-}
 
 function parseRepoLocation(repoPath: string, output: string): RepoLocation | undefined {
   // Old git echoes the unrecognized `--path-format` flag and exits 0, so drop `-`-prefixed lines and
@@ -100,7 +91,7 @@ export async function readRepoCommonDirFromGit(
   repoPath: string,
   options: GitWorktreeExecOptions = {}
 ): Promise<string | undefined> {
-  const resolveBasePath = toGitOutputSpace(repoPath)
+  const resolveBasePath = toWslExecutionSpace(repoPath)
   const readCommonDir = (stdout: string): string | undefined => {
     const commonDir = stdout
       .split('\n')
@@ -179,7 +170,7 @@ async function normalizeMainWorktreePath(
   const mainWorktree = worktrees[mainIndex]
   // Why: under WSL, porcelain/rev-parse paths are Linux but repoPath is UNC; compare in Git-output
   // space so the early-return matches and we skip a needless rev-parse per poll (runner still gets repoPath).
-  const comparablePath = toGitOutputSpace(repoPath)
+  const comparablePath = toWslExecutionSpace(repoPath)
   if (!mainWorktree || areWorktreePathsEqual(mainWorktree.path, comparablePath)) {
     return worktrees
   }

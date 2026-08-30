@@ -110,6 +110,25 @@ describe('describeCreatedWorktree against the real Git binary', () => {
     }
   )
 
+  // `mkfifo` stands in for a `.git` on a hung mount: the read never rejects on its own.
+  it.skipIf(process.platform === 'win32')(
+    "still settles when the repo's .git blocks forever",
+    async () => {
+      const stalledRepo = join(scratchDir, 'stalled')
+      await mkdir(stalledRepo, { recursive: true })
+      const stalledDotGit = join(stalledRepo, '.git')
+      await execFileAsync('mkfifo', [stalledDotGit])
+      try {
+        await expect(
+          describeCreatedWorktree(stalledRepo, worktreePath, 'feature', { timeout: 250 })
+        ).resolves.toBeUndefined()
+      } finally {
+        // Release the pending read so the fifo does not pin a threadpool thread for the whole run.
+        await writeFile(stalledDotGit, '')
+      }
+    }
+  )
+
   it('recovers a worktree created from a bare repo', async () => {
     const bareRepo = join(scratchDir, 'bare.git')
     await execFileAsync('git', ['clone', '-q', '--bare', repoPath, bareRepo])
