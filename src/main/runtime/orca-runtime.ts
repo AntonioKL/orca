@@ -12321,15 +12321,15 @@ export class OrcaRuntimeService {
   private async restoreStructuredAgentSessionTabsOnce(): Promise<void> {
     await this.prepareStructuredAgentSessionStartupRestoration()
     const host = getStructuredAgentSessionHost()
-    const persistedVisibleIds =
-      typeof host?.listPersistedVisibleSessionIds === 'function'
-        ? host.listPersistedVisibleSessionIds()
-        : []
+    const persistedVisibleIndex =
+      typeof host?.getPersistedVisibleSessionTabIndex === 'function'
+        ? host.getPersistedVisibleSessionTabIndex()
+        : { present: false, sessionIds: [] }
     const profileIds = collectSavedStructuredAgentSessionIds(
       this.store?.getWorkspaceSession?.(LOCAL_EXECUTION_HOST_ID) ?? null
     )
     await host?.restoreReadableSessions(
-      persistedVisibleIds.length > 0 ? persistedVisibleIds : profileIds
+      persistedVisibleIndex.present ? persistedVisibleIndex.sessionIds : profileIds
     )
     for (const worktreeId of this.getKnownWorkspaceSessionWorktreeIds()) {
       this.hydrateHeadlessMobileSessionTabsFromWorkspaceSession(worktreeId, {

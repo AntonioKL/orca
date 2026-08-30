@@ -118,6 +118,11 @@ export class AgentSessionRecordStore {
   listVisibleSessionIds = (): string[] =>
     [...this.state.visibleSessionIds].filter((sessionId) => this.state.records.has(sessionId))
 
+  getVisibleSessionTabIndex = (): { present: boolean; sessionIds: string[] } => ({
+    present: this.state.visibleSessionIdsIndexPresent,
+    sessionIds: this.listVisibleSessionIds()
+  })
+
   /** Persist the user-visible tab reference separately from the rollback-sensitive profile tabs. */
   setSessionTabVisibility(sessionId: string, visible: boolean): Promise<void> {
     return this.transact(() => {
@@ -129,6 +134,7 @@ export class AgentSessionRecordStore {
       } else {
         this.state.visibleSessionIds.delete(sessionId)
       }
+      this.state.visibleSessionIdsIndexPresent = true
     })
   }
 

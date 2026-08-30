@@ -100,7 +100,9 @@ describe('structured session rollback compatibility', () => {
     await writeFile(join(journalDir, 'journal.log'), 'durable-journal-fixture\n')
 
     const target = await AgentSessionRecordStore.open({ directory: storeDir, hostId: 'local' })
+    expect(target.getVisibleSessionTabIndex()).toEqual({ present: false, sessionIds: [] })
     await target.setSessionTabVisibility(SESSION, true)
+    expect(target.getVisibleSessionTabIndex()).toEqual({ present: true, sessionIds: [SESSION] })
 
     const targetProfile = profileWithStructuredTab()
     const targetParsed = safeParseWorkspaceSession(targetProfile)
@@ -136,6 +138,7 @@ describe('structured session rollback compatibility', () => {
 
     await reloaded.setSessionTabVisibility(SESSION, false)
     const afterClose = await AgentSessionRecordStore.open({ directory: storeDir, hostId: 'local' })
+    expect(afterClose.getVisibleSessionTabIndex()).toEqual({ present: true, sessionIds: [] })
     expect(afterClose.listVisibleSessionIds()).toEqual([])
     expect(afterClose.getRecord(SESSION)?.providerHandleChain).toHaveLength(1)
   })

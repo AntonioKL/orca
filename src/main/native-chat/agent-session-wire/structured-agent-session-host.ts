@@ -184,8 +184,8 @@ export class StructuredAgentSessionHost {
     return listStructuredAgentSessionTabs(this.sessions)
   }
 
-  listPersistedVisibleSessionIds(): string[] {
-    return this.deps.store.listVisibleSessionIds()
+  getPersistedVisibleSessionTabIndex(): { present: boolean; sessionIds: string[] } {
+    return this.deps.store.getVisibleSessionTabIndex()
   }
 
   setSessionTabVisibility(sessionId: string, visible: boolean): Promise<void> {

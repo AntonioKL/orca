@@ -38,12 +38,14 @@ function agentSessionStoreStateChanged(
   operations: ReadonlyMap<string, AgentSessionOperationRow>,
   retiredClaimKeys: AgentSessionStoreState['retiredClaimKeys'],
   unreadableRecords: AgentSessionStoreState['unreadableRecords'],
-  visibleSessionIds: AgentSessionStoreState['visibleSessionIds']
+  visibleSessionIds: AgentSessionStoreState['visibleSessionIds'],
+  visibleSessionIdsIndexPresent: AgentSessionStoreState['visibleSessionIdsIndexPresent']
 ): boolean {
   return (
     !mapEntriesMatch(state.records, records) ||
     !mapEntriesMatch(state.operations, operations) ||
     !mapEntriesMatch(state.unreadableRecords, unreadableRecords) ||
+    state.visibleSessionIdsIndexPresent !== visibleSessionIdsIndexPresent ||
     state.visibleSessionIds.size !== visibleSessionIds.size ||
     [...state.visibleSessionIds].some((id) => !visibleSessionIds.has(id)) ||
     state.retiredClaimKeys.length !== retiredClaimKeys.length ||
@@ -98,6 +100,7 @@ export class AgentSessionStoreTransactionQueue {
         const retiredClaimKeys = [...this.state.retiredClaimKeys]
         const unreadableRecords = new Map(this.state.unreadableRecords)
         const visibleSessionIds = new Set(this.state.visibleSessionIds)
+        const visibleSessionIdsIndexPresent = this.state.visibleSessionIdsIndexPresent
         try {
           // The lost commit may have granted a higher fence than the backup records show. Rather
           // than refuse forever, raise every recovered fence clear of anything that commit could
@@ -116,7 +119,8 @@ export class AgentSessionStoreTransactionQueue {
               operations,
               retiredClaimKeys,
               unreadableRecords,
-              visibleSessionIds
+              visibleSessionIds,
+              visibleSessionIdsIndexPresent
             )
           ) {
             return result
@@ -136,6 +140,7 @@ export class AgentSessionStoreTransactionQueue {
           this.state.retiredClaimKeys = retiredClaimKeys
           this.state.unreadableRecords = unreadableRecords
           this.state.visibleSessionIds = visibleSessionIds
+          this.state.visibleSessionIdsIndexPresent = visibleSessionIdsIndexPresent
           throw error
         }
       })

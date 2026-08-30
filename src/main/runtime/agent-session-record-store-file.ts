@@ -45,6 +45,8 @@ export type AgentSessionStoreState = {
   unreadableRecords: Map<string, { reason: string; raw: unknown }>
   /** Structured sessions that currently have a visible chat tab. */
   visibleSessionIds: Set<string>
+  /** True once this store has committed the visibility index field. */
+  visibleSessionIdsIndexPresent: boolean
 }
 
 export type LoadedAgentSessionStore = {
@@ -72,7 +74,8 @@ function emptyState(hostId: string): AgentSessionStoreState {
     operations: new Map(),
     retiredClaimKeys: [],
     unreadableRecords: new Map(),
-    visibleSessionIds: new Set()
+    visibleSessionIds: new Set(),
+    visibleSessionIdsIndexPresent: false
   }
 }
 
@@ -220,9 +223,8 @@ function parseState(
   if (!visibleSessionIds.valid) {
     return null
   }
-  for (const sessionId of visibleSessionIds.ids) {
-    state.visibleSessionIds.add(sessionId)
-  }
+  state.visibleSessionIdsIndexPresent = visibleSessionIds.present
+  visibleSessionIds.ids.forEach((sessionId) => state.visibleSessionIds.add(sessionId))
   return { state, needsRewrite }
 }
 
