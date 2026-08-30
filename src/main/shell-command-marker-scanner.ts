@@ -109,9 +109,15 @@ export class ShellCommandMarkerScanner {
     return items
   }
 
-  drain(): string {
+  drain(): { data: string; rawLength: number; transformed: boolean } {
     const held = this.held
     this.held = ''
-    return held
+    // A full private prefix is Orca-owned and may contain the nonce; only partial-prefix bytes are safe to release.
+    const privateCandidate = held.startsWith(COMMAND_MARKER_PREFIX)
+    return {
+      data: privateCandidate ? '' : held,
+      rawLength: held.length,
+      transformed: privateCandidate
+    }
   }
 }

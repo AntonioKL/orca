@@ -48,12 +48,17 @@ export class SessionCommandMarkerIntake {
   }
 
   drain(): void {
-    const held = this.scanner?.drain() ?? ''
-    if (!held) {
+    const drained = this.scanner?.drain()
+    if (!drained || drained.rawLength === 0) {
       return
     }
     const rawStartSeq = this.rawCursor
-    this.rawCursor += held.length
-    this.release({ data: held, rawStartSeq, rawEndSeq: this.rawCursor, transformed: false })
+    this.rawCursor += drained.rawLength
+    this.release({
+      data: drained.data,
+      rawStartSeq,
+      rawEndSeq: this.rawCursor,
+      transformed: drained.transformed
+    })
   }
 }

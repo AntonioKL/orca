@@ -75,4 +75,17 @@ describe('command identity tab-agent precedence', () => {
       })
     ).toBe('codex')
   })
+
+  it('ranks a conflicting live focused hook above trusted command identity', () => {
+    expect(
+      resolveTabAgentFromSignals({
+        hasObservedAgentSignal: true,
+        isRemote: false,
+        title: 'Terminal 1',
+        hookAgent: 'claude',
+        commandAgent: 'codex',
+        commandTrusted: true
+      })
+    ).toBe('claude')
+  })
 })

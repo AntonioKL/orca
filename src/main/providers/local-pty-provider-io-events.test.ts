@@ -242,6 +242,35 @@ describe('LocalPtyProvider', () => {
       })
     })
 
+    it('drops a truncated private marker when the PTY exits', async () => {
+      const runtimeData = vi.fn()
+      const dataHandler = vi.fn()
+      provider.configure({ onData: runtimeData })
+      provider.onData(dataHandler)
+      const { id } = await provider.spawn({ cols: 80, rows: 24 })
+      const spawnEnv = spawnMock.mock.calls.at(-1)?.[2]?.env as Record<string, string>
+      const truncated = `\x1b]777;orca-cmd;${spawnEnv.ORCA_SHELL_COMMAND_NONCE};Y29k`
+
+      const onDataCb = mockProc.onData.mock.calls[0][0]
+      onDataCb(`before${truncated}`)
+      exitCb?.({ exitCode: 0 })
+
+      expect(runtimeData.mock.calls.map((call) => call.slice(1))).toEqual([
+        ['before', expect.any(Number)],
+        ['', expect.any(Number), truncated.length, true]
+      ])
+      expect(dataHandler.mock.calls.map(([payload]) => payload)).toEqual([
+        { id, data: 'before' },
+        {
+          id,
+          data: '',
+          sequenceChars: truncated.length,
+          seq: 'before'.length + truncated.length,
+          transformed: true
+        }
+      ])
+    })
+
     it('notifies data listeners when PTY produces output', async () => {
       const dataHandler = vi.fn()
       provider.onData(dataHandler)

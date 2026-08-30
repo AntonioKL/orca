@@ -58,12 +58,18 @@ describe('ShellCommandMarkerScanner', () => {
     expect(items.length).toBe(1)
   })
 
-  it('keeps scanning after an over-cap unterminated candidate', () => {
+  it('releases an over-cap candidate but drops a later truncated private marker', () => {
     const scanner = new ShellCommandMarkerScanner('nonce')
     const unterminated = `\x1b]777;orca-cmd;nonce;${'A'.repeat(60_000)}`
-    const items = scanner.accept(unterminated)
+    const truncatedPrivate = '\x1b]777;orca-cmd;private-nonce;Y29k'
+    const items = scanner.accept(unterminated + truncatedPrivate)
     const data = items.map((item) => (item.kind === 'data' ? item.data : '')).join('')
-    expect(data + scanner.drain()).toBe(unterminated)
+    expect(data).toBe(unterminated)
+    expect(scanner.drain()).toEqual({
+      data: '',
+      rawLength: truncatedPrivate.length,
+      transformed: true
+    })
   })
 
   it('reassembles byte-for-byte across every chunk split', () => {
@@ -76,12 +82,19 @@ describe('ShellCommandMarkerScanner', () => {
         ...scanner.accept(stream.slice(split))
       ]
       const data = items.map((item) => (item.kind === 'data' ? item.data : '')).join('')
-      expect({ split, text: data + scanner.drain() }).toEqual({ split, text: 'beforeafter' })
+      expect({ split, text: data + scanner.drain().data }).toEqual({
+        split,
+        text: 'beforeafter'
+      })
       expect({ split, facts: items.filter((item) => item.kind !== 'data').length }).toEqual({
         split,
         facts: 1
       })
     }
+
+    const truncatedScanner = new ShellCommandMarkerScanner('nonce')
+    truncatedScanner.accept('\x1b]777;orca-cmd;nonce;Y29k')
+    expect(truncatedScanner.drain().data).toBe('')
   })
 
   it('emits null for a valid non-agent command', () => {

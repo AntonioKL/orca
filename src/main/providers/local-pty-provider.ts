@@ -1113,9 +1113,14 @@ export class LocalPtyProvider implements IPtyProvider {
     }
 
     const onExitDisposable = proc.onExit(({ exitCode, signal }) => {
-      const heldCommandMarkerBytes = commandMarkerScanner?.drain() ?? ''
-      if (heldCommandMarkerBytes) {
-        emitProviderData(heldCommandMarkerBytes, heldCommandMarkerBytes.length, false)
+      const drainedCommandMarker = commandMarkerScanner?.drain()
+      if (drainedCommandMarker && drainedCommandMarker.rawLength > 0) {
+        emitProviderData(
+          drainedCommandMarker.data,
+          drainedCommandMarker.rawLength,
+          drainedCommandMarker.transformed,
+          startupIngress.acceptedRawSequence
+        )
       }
       // Why: node-pty reports a signalled death as {exitCode: 0, signal: N}; the
       // cause is built here, where the signal and the spawn's trustworthiness
