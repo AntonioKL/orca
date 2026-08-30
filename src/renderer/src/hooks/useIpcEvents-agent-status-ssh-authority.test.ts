@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { LegacyWorkerTerminalRecoveryEvent } from '../../../shared/agent-status-types'
 import { buildStoreState } from './ipc-events-agent-status-store-test-fixtures'
 import {
   buildWindowApi,
@@ -21,13 +22,7 @@ describe('useIpcEvents agent status snapshot integration', () => {
     const clearSleepingAgentSession = vi.fn()
     const setSleepingAgentAutomaticResumeBlocked = vi.fn()
     const settledWorkerPaneKey = 'tab-settled:leaf-settled'
-    let listener:
-      | ((data: {
-          paneKey: string
-          resolution: 'adopted' | 'exited' | 'fenced' | 'unfenced'
-          worktreeId?: string
-        }) => void)
-      | undefined
+    let listener: ((data: LegacyWorkerTerminalRecoveryEvent) => void) | undefined
     const storeState = buildStoreState({
       clearSleepingAgentSession,
       setSleepingAgentAutomaticResumeBlocked,

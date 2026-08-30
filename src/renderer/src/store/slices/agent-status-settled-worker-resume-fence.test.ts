@@ -14,7 +14,7 @@ function seedWorkingWorker(): ReturnType<typeof createTestStore> {
     .getState()
     .setAgentStatus(
       PANE_KEY,
-      { state: 'working', prompt: 'review the diff', agentType: 'codex', worktreeId: 'wt-1' },
+      { state: 'working', prompt: 'review the diff', agentType: 'codex' },
       'Codex',
       { updatedAt: 10, stateStartedAt: 10 },
       undefined,
@@ -38,7 +38,7 @@ describe('settled orchestration worker automatic-resume fence', () => {
       .getState()
       .setAgentStatus(
         PANE_KEY,
-        { state: 'done', prompt: 'review the diff', agentType: 'codex', worktreeId: 'wt-1' },
+        { state: 'done', prompt: 'review the diff', agentType: 'codex' },
         'Codex',
         { updatedAt: 20, stateStartedAt: 20 },
         undefined,
@@ -60,7 +60,7 @@ describe('settled orchestration worker automatic-resume fence', () => {
       .getState()
       .setAgentStatus(
         PANE_KEY,
-        { state: 'working', prompt: 'review the diff', agentType: 'codex', worktreeId: 'wt-1' },
+        { state: 'working', prompt: 'review the diff', agentType: 'codex' },
         'Codex',
         { updatedAt: 15, stateStartedAt: 10 },
         undefined,
@@ -99,7 +99,7 @@ describe('settled orchestration worker automatic-resume fence', () => {
       .getState()
       .setAgentStatus(
         PANE_KEY,
-        { state: 'done', prompt: 'a new user turn', agentType: 'codex', worktreeId: 'wt-1' },
+        { state: 'done', prompt: 'a new user turn', agentType: 'codex' },
         'Codex',
         { updatedAt: 20, stateStartedAt: 20 },
         undefined,

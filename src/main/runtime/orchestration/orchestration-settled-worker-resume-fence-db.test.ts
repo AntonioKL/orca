@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { OrchestrationDb } from './db'
+import type { WorkerTerminalResourceRow } from './worker-terminal-ownership'
 
 const PANE_KEY = 'tab_worker:33333333-3333-4333-8333-333333333333'
 
@@ -34,6 +35,15 @@ describe('settled worker terminal resume fence rows', () => {
     return { db: d, taskId: task.id, dispatchId: started.dispatch.id }
   }
 
+  /** Asserts the `requested` arm so the resource row is non-null for the caller. */
+  function requestRelease(d: OrchestrationDb, dispatchId: string): WorkerTerminalResourceRow {
+    const requested = d.requestWorkerTerminalRelease(dispatchId)
+    if (requested.disposition !== 'requested') {
+      throw new Error(`expected a release request, got ${requested.disposition}`)
+    }
+    return requested.resource
+  }
+
   function settle(d: OrchestrationDb, taskId: string, dispatchId: string): void {
     expect(
       d.settleWorkerReport({
@@ -64,11 +74,9 @@ describe('settled worker terminal resume fence rows', () => {
   it('keeps a settled worker terminal whose release could not be proven', () => {
     const { db: d, taskId, dispatchId } = createReadyWorker()
     settle(d, taskId, dispatchId)
-    const requested = d.requestWorkerTerminalRelease(dispatchId)
-    expect(requested.disposition).toBe('requested')
+    const resource = requestRelease(d, dispatchId)
     expect(
-      d.markWorkerTerminalReleaseUnknown(requested.resource.id, 'terminal no longer resolves')
-        .release_state
+      d.markWorkerTerminalReleaseUnknown(resource.id, 'terminal no longer resolves').release_state
     ).toBe('unknown')
 
     expect(d.listLegacyWorkerTerminalRecoveryRows()).toEqual([
@@ -79,9 +87,8 @@ describe('settled worker terminal resume fence rows', () => {
   it('drops a settled worker terminal once its resource is released', () => {
     const { db: d, taskId, dispatchId } = createReadyWorker()
     settle(d, taskId, dispatchId)
-    const requested = d.requestWorkerTerminalRelease(dispatchId)
-    expect(requested.disposition).toBe('requested')
-    expect(d.settleWorkerTerminalRelease(requested.resource.id).release_state).toBe('released')
+    const resource = requestRelease(d, dispatchId)
+    expect(d.settleWorkerTerminalRelease(resource.id).release_state).toBe('released')
 
     expect(d.listLegacyWorkerTerminalRecoveryRows()).toEqual([])
   })
