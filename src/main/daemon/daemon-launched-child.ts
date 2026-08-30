@@ -24,7 +24,8 @@ export class DaemonEndpointUnavailableError extends Error {
   }
 }
 
-export type LaunchedDaemonChild = UtilityLaunchedDaemonChild & {
+export type LaunchedDaemonChild = {
+  child: UtilityLaunchedDaemonChild
   identity: DaemonEndpointIdentity
 }
 
