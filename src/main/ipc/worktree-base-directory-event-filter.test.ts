@@ -177,6 +177,31 @@ describe('matchingWorktreeBaseRepoIds (git-common)', () => {
         path: join(COMMON_DIR, 'worktrees', 'wt-a', 'rebase-merge', 'head-name')
       })
     ).toEqual(headIdentityOnly)
+    // Per-pick rebase bookkeeping (msgnum/done/patch) churns on every commit of an
+    // interactive rebase and must stay ignored — only the dir and its sentinel signal.
+    const noChange = {
+      structureRepoIds: [],
+      gitStatusRepoIds: [],
+      headIdentityRepoIds: []
+    }
+    expect(
+      classifyWorktreeBaseChange(target, {
+        type: 'update',
+        path: join(COMMON_DIR, 'worktrees', 'wt-a', 'rebase-merge', 'msgnum')
+      })
+    ).toEqual(noChange)
+    expect(
+      classifyWorktreeBaseChange(target, {
+        type: 'create',
+        path: join(COMMON_DIR, 'worktrees', 'wt-a', 'rebase-apply', '0001')
+      })
+    ).toEqual(noChange)
+    expect(
+      classifyWorktreeBaseChange(target, {
+        type: 'update',
+        path: join(COMMON_DIR, 'rebase-merge', 'done')
+      })
+    ).toEqual(noChange)
   })
 
   it('classifies worktree-scoped config as structural for sparse-flag freshness', () => {
