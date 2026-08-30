@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { Terminal } from '@xterm/xterm'
 import {
   detachPaneEcho,
   discardUndispatchedKeystroke,
+  drainTimedOutEchoCandidates,
   instrumentPaneEcho,
   recordKeystroke,
   type EchoObservation,
@@ -15,7 +17,7 @@ function emptyEntry(): InstrumentedPane {
     nextDispatch: null,
     deferredNextDispatch: null,
     ignoredDispatches: 0,
-    lastIgnoredDispatch: null,
+    ignoredDispatchIdentities: [],
     awaitingEcho: [],
     attributionGap: false,
     parsingBatch: null,
@@ -31,6 +33,14 @@ type FakeTerminal = {
   onData: (listener: (data: string) => void) => { dispose: () => void }
   onWriteParsed: (listener: () => void) => { dispose: () => void }
   onRender: (listener: () => void) => { dispose: () => void }
+}
+
+type CoreServiceAccess = {
+  _core: {
+    coreService: {
+      triggerDataEvent: (data: string, wasUserInput?: boolean) => void
+    }
+  }
 }
 
 function fakeTerminal(): {
@@ -104,6 +114,15 @@ describe('recordKeystroke', () => {
     expect(entry.attributionGap).toBe(false)
   })
 
+  it('drains a final timed-out input without waiting for another keystroke', () => {
+    const entry = emptyEntry()
+    recordKeystroke(entry, 0, 'direct')
+
+    expect(drainTimedOutEchoCandidates(entry, 2_001)).toBe(1)
+    expect(drainTimedOutEchoCandidates(entry, 2_002)).toBe(0)
+    expect(entry.pendingCount).toBe(0)
+  })
+
   it('bounds pending input state during sustained typing', () => {
     const entry = emptyEntry()
     let dropped = 0
@@ -167,9 +186,56 @@ describe('recordKeystroke', () => {
     expect(entry.ignoredDispatches).toBe(0)
     expect(entry.attributionGap).toBe(false)
   })
+
+  it('settles overlapping cap-rejected commits by identity', () => {
+    const entry = emptyEntry()
+    for (let index = 0; index < 64; index += 1) {
+      recordKeystroke(entry, index, 'direct')
+    }
+
+    expect(recordKeystroke(entry, 64, 'ime', '한')).toBe(1)
+    expect(recordKeystroke(entry, 65, 'ime', '글')).toBe(1)
+    expect(discardUndispatchedKeystroke(entry, 64, 'ime')).toBe('counted-unmatched')
+    expect(discardUndispatchedKeystroke(entry, 65, 'ime')).toBe('counted-unmatched')
+    expect(entry.undispatched).toHaveLength(64)
+    expect(entry.ignoredDispatches).toBe(0)
+    expect(entry.attributionGap).toBe(false)
+  })
+
+  it('settles same-timestamp cap rejections independently', () => {
+    const entry = emptyEntry()
+    for (let index = 0; index < 64; index += 1) {
+      recordKeystroke(entry, index, 'direct')
+    }
+
+    recordKeystroke(entry, 64, 'ime', '한')
+    recordKeystroke(entry, 64, 'ime', '글')
+
+    expect(discardUndispatchedKeystroke(entry, 64, 'ime')).toBe('counted-unmatched')
+    expect(discardUndispatchedKeystroke(entry, 64, 'ime')).toBe('counted-unmatched')
+    expect(entry.ignoredDispatches).toBe(0)
+  })
 })
 
 describe('instrumentPaneEcho', () => {
+  it('does not attribute parser replies as user dispatches', () => {
+    const terminal = new Terminal({ allowProposedApi: true })
+    const entry = instrumentPaneEcho({ terminal }, () => undefined)
+    const coreService = (terminal as unknown as CoreServiceAccess)._core.coreService
+
+    recordKeystroke(entry, 10, 'direct', 'a')
+    coreService.triggerDataEvent('\x1b[?1;2c', false)
+    expect(entry.undispatched).toHaveLength(1)
+    expect(entry.awaitingEcho).toEqual([])
+
+    coreService.triggerDataEvent('a', true)
+    expect(entry.undispatched).toEqual([])
+    expect(entry.awaitingEcho).toHaveLength(1)
+
+    detachPaneEcho(entry)
+    terminal.dispose()
+  })
+
   it('measures input, dispatch, parse, and paint stages separately', () => {
     const fake = fakeTerminal()
     const observations: EchoObservation[] = []
@@ -439,6 +505,56 @@ describe('instrumentPaneEcho', () => {
     fake.emitParsed()
     fake.emitRender()
     expect(observations).toHaveLength(1)
+  })
+
+  it('drains parsed output that never paints exactly once', () => {
+    const fake = fakeTerminal()
+    const observations: EchoObservation[] = []
+    const entry = instrumentPaneEcho({ terminal: fake.terminal }, (value) =>
+      observations.push(value)
+    )
+
+    recordAndDispatch(entry, fake, 'direct', 0, 'A')
+    fake.terminal.write('A')
+    fake.emitParsed()
+
+    expect(drainTimedOutEchoCandidates(entry, 2_001)).toBe(1)
+    expect(drainTimedOutEchoCandidates(entry, 2_002)).toBe(0)
+    expect(entry).toMatchObject({ parsedBatches: [], pendingCount: 0 })
+
+    recordAndDispatch(entry, fake, 'direct', 2_003, 'B')
+    fake.terminal.write('B')
+    fake.emitParsed()
+    fake.emitRender()
+
+    expect(observations).toHaveLength(1)
+    expect(observations[0]).toMatchObject({ attribution: 'single-input', text: 'B' })
+    expect(entry.pendingCount).toBe(0)
+  })
+
+  it('keeps a shared unparsed batch ambiguous after draining its stale input', () => {
+    const fake = fakeTerminal()
+    const observations: EchoObservation[] = []
+    const entry = instrumentPaneEcho({ terminal: fake.terminal }, (value) =>
+      observations.push(value)
+    )
+
+    recordAndDispatch(entry, fake, 'direct', 0, 'A')
+    fake.terminal.write('late A')
+    expect(drainTimedOutEchoCandidates(entry, 2_001)).toBe(1)
+
+    recordAndDispatch(entry, fake, 'direct', 2_002, 'B')
+    fake.terminal.write('B')
+    fake.emitParsed()
+    fake.emitRender()
+
+    expect(observations).toHaveLength(1)
+    expect(observations[0]).toMatchObject({
+      attribution: 'ambiguous-burst',
+      reason: 'attribution-gap',
+      inputCount: 1
+    })
+    expect(entry.pendingCount).toBe(0)
   })
 
   it('returns trailing unmatched inputs and releases pane and listener closures', () => {

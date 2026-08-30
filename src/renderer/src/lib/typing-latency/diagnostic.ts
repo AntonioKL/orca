@@ -21,6 +21,7 @@ import {
 import {
   detachPaneEcho,
   discardUndispatchedKeystroke,
+  drainTimedOutEchoCandidates,
   findPaneOwningFocus,
   findPaneOwningNode,
   instrumentPaneEcho,
@@ -285,6 +286,12 @@ function stopProbe(): string {
 }
 
 function reportProbe(): TypingLatencyReport {
+  if (active) {
+    const now = performance.now()
+    for (const entry of active.panes) {
+      active.unmatchedKeystrokes += drainTimedOutEchoCandidates(entry, now)
+    }
+  }
   const report = buildReport(active ?? lastState, active !== null)
   console.log('[orca] typing latency diagnostic', report)
   return report

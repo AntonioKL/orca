@@ -40,8 +40,11 @@ describe('typingSampleDurationMs', () => {
 })
 
 describe('summarizeWorktreeNesting', () => {
+  const worktreesAtPaths = (...paths: string[]): { path: string }[] =>
+    paths.map((path) => ({ path }))
+
   it('returns zero depth for flat sibling worktrees', () => {
-    expect(summarizeWorktreeNesting(['/a/one', '/a/two'])).toEqual({
+    expect(summarizeWorktreeNesting(worktreesAtPaths('/a/one', '/a/two'))).toEqual({
       maxDepth: 0,
       nestedWorktrees: 0
     })
@@ -49,26 +52,62 @@ describe('summarizeWorktreeNesting', () => {
 
   it('counts nesting depth for worktrees inside worktrees', () => {
     expect(
-      summarizeWorktreeNesting(['/repo', '/repo/wt-a', '/repo/wt-a/wt-b', '/repo/wt-a/wt-b/wt-c'])
+      summarizeWorktreeNesting(
+        worktreesAtPaths('/repo', '/repo/wt-a', '/repo/wt-a/wt-b', '/repo/wt-a/wt-b/wt-c')
+      )
     ).toEqual({ maxDepth: 3, nestedWorktrees: 3 })
   })
 
   it('normalizes windows separators, case, and trailing slashes', () => {
-    expect(summarizeWorktreeNesting(['C:\\Repo\\', 'c:/repo/Nested'])).toEqual({
+    expect(summarizeWorktreeNesting(worktreesAtPaths('C:\\Repo\\', 'c:/repo/Nested'))).toEqual({
       maxDepth: 1,
       nestedWorktrees: 1
     })
   })
 
+  it('preserves case-distinct POSIX and SSH worktree paths', () => {
+    expect(
+      summarizeWorktreeNesting(
+        worktreesAtPaths('/srv/Repo', '/srv/repo/nested').map((worktree) => ({
+          ...worktree,
+          hostId: 'ssh:openclaw'
+        }))
+      )
+    ).toEqual({ maxDepth: 0, nestedWorktrees: 0 })
+  })
+
+  it('does not infer nesting across execution hosts', () => {
+    expect(
+      summarizeWorktreeNesting([
+        { path: '/srv/repo', hostId: 'local' },
+        { path: '/srv/repo/nested', hostId: 'ssh:openclaw' }
+      ])
+    ).toEqual({ maxDepth: 0, nestedWorktrees: 0 })
+  })
+
+  it('recognizes worktrees nested under filesystem roots', () => {
+    expect(
+      summarizeWorktreeNesting([
+        { path: '/', hostId: 'ssh:openclaw' },
+        { path: '/repo', hostId: 'ssh:openclaw' },
+        { path: 'C:\\', hostId: 'windows' },
+        { path: 'C:\\repo', hostId: 'windows' }
+      ])
+    ).toEqual({ maxDepth: 1, nestedWorktrees: 2 })
+  })
+
   it('ignores prefix matches that are not path boundaries', () => {
-    expect(summarizeWorktreeNesting(['/repo', '/repo-two'])).toEqual({
+    expect(summarizeWorktreeNesting(worktreesAtPaths('/repo', '/repo-two'))).toEqual({
       maxDepth: 0,
       nestedWorktrees: 0
     })
   })
 
   it('tolerates empty and duplicate entries', () => {
-    expect(summarizeWorktreeNesting(['', '/a', '/a'])).toEqual({ maxDepth: 0, nestedWorktrees: 0 })
+    expect(summarizeWorktreeNesting(worktreesAtPaths('', '/a', '/a'))).toEqual({
+      maxDepth: 0,
+      nestedWorktrees: 0
+    })
   })
 })
 

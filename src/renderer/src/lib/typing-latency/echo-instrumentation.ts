@@ -7,6 +7,9 @@
  * opaque; the probe never apportions one output batch across those inputs.
  */
 import { getUtf8ByteLength } from '../../../../shared/utf8-byte-limits'
+import { subscribeToTerminalUserInput } from '@/components/terminal-pane/terminal-user-input-signal'
+import type { Terminal } from '@xterm/xterm'
+import { clearEchoDispatchSelection, drainTimedOutEchoCandidates } from './echo-candidate-timeout'
 import {
   createEchoObservation,
   type EchoBatch,
@@ -29,6 +32,7 @@ export {
   paneRootElement
 } from './pane-target'
 export type { ProbePane } from './pane-target'
+export { drainTimedOutEchoCandidates }
 
 type Disposable = { dispose: () => void }
 
@@ -49,7 +53,7 @@ export type InstrumentedPane = {
   nextDispatch: PendingKeystroke | null
   deferredNextDispatch: PendingKeystroke | null
   ignoredDispatches: number
-  lastIgnoredDispatch: IgnoredDispatch | null
+  ignoredDispatchIdentities: IgnoredDispatch[]
   awaitingEcho: PendingKeystroke[]
   attributionGap: boolean
   parsingBatch: EchoBatch | null
@@ -59,18 +63,7 @@ export type InstrumentedPane = {
   restoreWrite: (() => void) | null
 }
 
-/** An input with no output write in this window is unmatched, never an exact sample. */
-const ECHO_TIMEOUT_MS = 2000
 const MAX_PENDING = 64
-
-function clearDispatchSelection(entry: InstrumentedPane, pending: PendingKeystroke): void {
-  if (entry.nextDispatch === pending) {
-    entry.nextDispatch = null
-  }
-  if (entry.deferredNextDispatch === pending) {
-    entry.deferredNextDispatch = null
-  }
-}
 
 function restoreDeferredDispatch(entry: InstrumentedPane): void {
   const deferred = entry.deferredNextDispatch
@@ -80,27 +73,6 @@ function restoreDeferredDispatch(entry: InstrumentedPane): void {
   }
 }
 
-function removeOldestTimedOut(entry: InstrumentedPane, now: number): boolean {
-  const undispatched = entry.undispatched[0]
-  const awaitingEcho = entry.awaitingEcho[0]
-  const oldest =
-    !undispatched || (awaitingEcho && awaitingEcho.t0 < undispatched.t0)
-      ? awaitingEcho
-      : undispatched
-  if (!oldest || now - oldest.t0 <= ECHO_TIMEOUT_MS) {
-    return false
-  }
-  if (oldest === awaitingEcho) {
-    entry.awaitingEcho.shift()
-    entry.attributionGap = true
-  } else {
-    entry.undispatched.shift()
-    clearDispatchSelection(entry, oldest)
-  }
-  entry.pendingCount -= 1
-  return true
-}
-
 /** Returns how many inputs were dropped without a painted output observation. */
 export function recordKeystroke(
   entry: InstrumentedPane,
@@ -108,17 +80,17 @@ export function recordKeystroke(
   source: KeystrokeSource,
   text: string = ''
 ): number {
-  let dropped = 0
-  while (removeOldestTimedOut(entry, now)) {
-    dropped += 1
-  }
+  const dropped = drainTimedOutEchoCandidates(entry, now)
   if (entry.pendingCount >= MAX_PENDING) {
     if (entry.ignoredDispatches === 0) {
       entry.deferredNextDispatch = entry.nextDispatch
     }
     entry.nextDispatch = null
     entry.ignoredDispatches += 1
-    entry.lastIgnoredDispatch = { t0: now, source }
+    entry.ignoredDispatchIdentities.push({ t0: now, source })
+    if (entry.ignoredDispatchIdentities.length > MAX_PENDING) {
+      entry.ignoredDispatchIdentities.shift()
+    }
     return dropped + 1
   }
   const pending = { t0: now, source, text, dispatchedAt: null }
@@ -134,10 +106,13 @@ export function discardUndispatchedKeystroke(
   recordedAt: number,
   source: KeystrokeSource
 ): PreventedKeystrokeDiscard {
-  const ignored = entry.lastIgnoredDispatch
-  if (ignored?.t0 === recordedAt && ignored.source === source) {
-    entry.ignoredDispatches = Math.max(0, entry.ignoredDispatches - 1)
-    entry.lastIgnoredDispatch = null
+  for (let index = entry.ignoredDispatchIdentities.length - 1; index >= 0; index -= 1) {
+    const ignored = entry.ignoredDispatchIdentities[index]
+    if (!ignored || ignored.t0 !== recordedAt || ignored.source !== source) {
+      continue
+    }
+    entry.ignoredDispatchIdentities.splice(index, 1)
+    entry.ignoredDispatches -= 1
     if (entry.ignoredDispatches === 0) {
       restoreDeferredDispatch(entry)
     }
@@ -149,7 +124,7 @@ export function discardUndispatchedKeystroke(
       continue
     }
     entry.undispatched.splice(index, 1)
-    clearDispatchSelection(entry, pending)
+    clearEchoDispatchSelection(entry, pending)
     entry.nextDispatch ??= entry.undispatched.at(-1) ?? null
     entry.pendingCount -= 1
     return 'pending'
@@ -190,7 +165,7 @@ export function instrumentPaneEcho(
     nextDispatch: null,
     deferredNextDispatch: null,
     ignoredDispatches: 0,
-    lastIgnoredDispatch: null,
+    ignoredDispatchIdentities: [],
     awaitingEcho: [],
     attributionGap: false,
     parsingBatch: null,
@@ -222,16 +197,30 @@ export function instrumentPaneEcho(
     }
   }
 
+  let pendingUserInputSignals = 0
+  const userInputDisposable = subscribeToTerminalUserInput(terminal as Terminal, () => {
+    pendingUserInputSignals = Math.min(MAX_PENDING, pendingUserInputSignals + 1)
+  })
+  if (userInputDisposable) {
+    entry.disposables.push(userInputDisposable)
+  }
+
   if (typeof terminal.onData === 'function') {
     entry.disposables.push(
       terminal.onData(() => {
+        if (userInputDisposable) {
+          if (pendingUserInputSignals === 0) {
+            return
+          }
+          pendingUserInputSignals -= 1
+        }
         let pending = entry.nextDispatch
         if (pending && entry.undispatched.at(-1) === pending) {
           entry.undispatched.pop()
           entry.nextDispatch = null
         } else if (!pending && entry.ignoredDispatches > 0) {
           entry.ignoredDispatches -= 1
-          entry.lastIgnoredDispatch = null
+          entry.ignoredDispatchIdentities.pop()
           entry.attributionGap = true
           if (entry.ignoredDispatches === 0) {
             restoreDeferredDispatch(entry)
@@ -300,7 +289,7 @@ export function detachPaneEcho(entry: InstrumentedPane): number {
   entry.nextDispatch = null
   entry.deferredNextDispatch = null
   entry.ignoredDispatches = 0
-  entry.lastIgnoredDispatch = null
+  entry.ignoredDispatchIdentities = []
   entry.awaitingEcho = []
   entry.attributionGap = false
   entry.parsingBatch = null

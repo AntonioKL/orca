@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => {
     discardUndispatchedKeystroke: vi.fn<() => PreventedKeystrokeDiscard>(() => null),
     detachInputEvents: vi.fn(),
     detachPaneEcho: vi.fn(() => 1),
+    drainTimedOutEchoCandidates: vi.fn(() => 0),
     findPaneOwningFocus: vi.fn<() => object | null>(() => null),
     findPaneOwningNode: vi.fn<() => object | null>(() => null),
     inputListener: null as ((signal: TypingInputSignal) => TypingInputRegistration | void) | null,
@@ -28,6 +29,7 @@ vi.mock('./census-probe', () => ({
 vi.mock('./echo-instrumentation', () => ({
   detachPaneEcho: mocks.detachPaneEcho,
   discardUndispatchedKeystroke: mocks.discardUndispatchedKeystroke,
+  drainTimedOutEchoCandidates: mocks.drainTimedOutEchoCandidates,
   findPaneOwningFocus: mocks.findPaneOwningFocus,
   findPaneOwningNode: mocks.findPaneOwningNode,
   instrumentPaneEcho: vi.fn((pane) => ({ pane })),
@@ -79,6 +81,21 @@ describe('typing latency diagnostic lifecycle', () => {
 
     expect(mocks.findPaneOwningNode).toHaveBeenLastCalledWith([], document.body)
     expect(mocks.findPaneOwningFocus).toHaveBeenLastCalledWith([])
+  })
+
+  it('counts timed-out trailing inputs in a live report exactly once', () => {
+    vi.spyOn(console, 'log').mockImplementation(() => undefined)
+    mocks.drainTimedOutEchoCandidates.mockReturnValueOnce(1)
+    installTypingLatencyDiagnostic()
+    const bridge = (window as DiagnosticWindow).__orcaTypingDiagnostic
+    if (!bridge) {
+      throw new Error('Typing latency diagnostic bridge was not installed')
+    }
+
+    bridge.start()
+    expect(bridge.report().sampling.unmatchedKeystrokes).toBe(1)
+    expect(bridge.report().sampling.unmatchedKeystrokes).toBe(1)
+    bridge.stop()
   })
 
   it('does not count a stale prevented IME commit', () => {
