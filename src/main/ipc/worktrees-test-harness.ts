@@ -1,5 +1,8 @@
 import { __resetSshWorktreeCreateFetchCacheForTests } from './worktree-remote'
-import { invalidateAuthorizedRootsCache } from './registered-worktree-roots-cache'
+import {
+  __resetCreatedWorktreeRootsForTests,
+  invalidateAuthorizedRootsCache
+} from './registered-worktree-roots-cache'
 import { registerWorktreeHandlers } from './worktrees'
 import { __resetDetectedWorktreeScanCacheForTests } from './worktrees/listing/detected-worktree-scan-cache'
 import { clearConfiguredWorktreeSharedDirectoriesCacheForTests } from '../git/worktree-shared-directories'
@@ -83,6 +86,7 @@ export function setupWorktreeHandlers(): WorktreeRuntimeStub {
   __resetDetectedWorktreeScanCacheForTests()
   resetSshProviderAuthorities()
   invalidateAuthorizedRootsCache()
+  __resetCreatedWorktreeRootsForTests()
   for (const m of [
     handleMock,
     removeHandlerMock,

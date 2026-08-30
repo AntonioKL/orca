@@ -1,3 +1,4 @@
+import { stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import type { Store } from '../persistence'
 import { isRepoRoot, listRepoWorktrees } from '../repo-worktrees'
@@ -6,6 +7,16 @@ import { isDescendantOrEqual, normalizeExistingPath } from './filesystem-path-co
 
 const registeredWorktreeRoots = new Set<string>()
 const registeredWorktreeRootsByRepo = new Map<string, Set<string>>()
+/**
+ * Roots Git confirmed by direct read while `git worktree list` could not see them.
+ *
+ * Why a layer of its own: everything in `registeredWorktreeRootsByRepo` is derived from the listing,
+ * so a rebuild recomputes it from the very listing that failed and would re-deny a worktree the
+ * create just recovered. This layer survives rebuilds and is pruned only on evidence (#16520).
+ */
+const createdWorktreeRootsByRepo = new Map<string, Set<string>>()
+/** A recovered create is rare (Git's listing must be broken); cap the layer so it can never grow unbounded. */
+const CREATED_WORKTREE_ROOTS_MAX = 64
 const registeredWorktreeRootRepoIds = new Set<string>()
 const registeredWorktreeRootsRevisionByRepo = new Map<string, number>()
 let registeredWorktreeRootsRevisionSequence = 0
@@ -20,6 +31,9 @@ export function invalidateAuthorizedRootsCache(): void {
   registeredWorktreeRoots.clear()
   registeredWorktreeRootsByRepo.clear()
   registeredWorktreeRootRepoIds.clear()
+  // The recovered layer is deliberately not cleared: repo mutations are frequent, and dropping it here
+  // would re-deny a recovered worktree every time an unrelated repo is added or removed.
+  refreshRegisteredWorktreeRoots()
   registeredWorktreeRootsBaseRevision = ++registeredWorktreeRootsRevisionSequence
   registeredWorktreeRootsRevisionByRepo.clear()
 }
@@ -42,15 +56,12 @@ export async function rebuildAuthorizedRootsCache(store: Store): Promise<void> {
       } catch (error) {
         // Why: one inaccessible repo (EACCES/EIO) must not break the whole rebuild and disable File Explorer/Quick Open for the rest; skip it.
         console.warn(`[filesystem-auth] skipping repo ${repo.path} during cache rebuild:`, error)
-        // Why keep the old roots: dropping them would revoke a worktree we already authorized —
-        // including one a create recovered while this same listing was failing.
-        for (const root of registeredWorktreeRootsByRepo.get(repo.id) ?? []) {
-          roots.push(root)
-        }
+        return { repoId: repo.id, roots, listingFailed: true }
       }
-      return { repoId: repo.id, roots }
+      return { repoId: repo.id, roots, listingFailed: false }
     }
   )
+  await pruneCreatedWorktreeRoots(perProjectResults, new Set(repos.map((repo) => repo.id)))
 
   registeredWorktreeRoots.clear()
   registeredWorktreeRootsByRepo.clear()
@@ -64,9 +75,56 @@ export async function rebuildAuthorizedRootsCache(store: Store): Promise<void> {
     registeredWorktreeRootsByRepo.set(repoId, normalizedRoots)
     registeredWorktreeRootRepoIds.add(repoId)
   }
+  for (const roots of createdWorktreeRootsByRepo.values()) {
+    for (const root of roots) {
+      registeredWorktreeRoots.add(root)
+    }
+  }
   registeredWorktreeRootsDirty = false
   registeredWorktreeRootsBaseRevision = ++registeredWorktreeRootsRevisionSequence
   registeredWorktreeRootsRevisionByRepo.clear()
+}
+
+/**
+ * Retire recovered roots on evidence: the listing can see the worktree again, or it is gone from disk.
+ *
+ * A repo whose listing threw is left untouched — a dead mount fails both the listing and the stat, and
+ * treating that as "removed" would revoke the worktree in exactly the outage this layer exists for.
+ */
+async function pruneCreatedWorktreeRoots(
+  results: readonly { repoId: string; roots: string[]; listingFailed: boolean }[],
+  localRepoIds: Set<string>
+): Promise<void> {
+  const listedByRepo = new Map(
+    results.filter((result) => !result.listingFailed).map((r) => [r.repoId, new Set(r.roots)])
+  )
+  for (const [repoId, roots] of createdWorktreeRootsByRepo) {
+    if (!localRepoIds.has(repoId)) {
+      createdWorktreeRootsByRepo.delete(repoId)
+      continue
+    }
+    const listed = listedByRepo.get(repoId)
+    if (!listed) {
+      continue
+    }
+    for (const root of roots) {
+      if (listed.has(root) || !(await pathStillExists(root))) {
+        roots.delete(root)
+      }
+    }
+    if (roots.size === 0) {
+      createdWorktreeRootsByRepo.delete(repoId)
+    }
+  }
+}
+
+async function pathStillExists(targetPath: string): Promise<boolean> {
+  try {
+    await stat(targetPath)
+    return true
+  } catch {
+    return false
+  }
 }
 
 async function mapWithConcurrency<T, R>(
@@ -120,11 +178,11 @@ export function registerWorktreeRootsForRepo(
 }
 
 /**
- * Authorize one worktree root without claiming the repo's set is complete.
+ * Authorize one worktree root that Git confirmed by direct read but could not list.
  *
- * Why: `registerWorktreeRootsForRepo` replaces the set, so a create recovered without a listing has
- * no full set to register. Adding just the new root keeps siblings authorized, and leaving the cache
- * dirty makes the next `ensureAuthorizedRootsCache` rebuild the real set (#16520).
+ * Why not `registerWorktreeRootsForRepo`: that replaces the repo's set, and a create recovered without
+ * a listing has no full set to put there. The root goes in the recovered layer instead, so the next
+ * rebuild cannot drop it while Git's listing is still broken (#16520).
  */
 export function registerCreatedWorktreeRoot(
   store: Store,
@@ -135,12 +193,24 @@ export function registerCreatedWorktreeRoot(
   if (!localRepoIds.has(repoId)) {
     return
   }
-  const roots = registeredWorktreeRootsByRepo.get(repoId) ?? new Set<string>()
+  const roots = createdWorktreeRootsByRepo.get(repoId) ?? new Set<string>()
   roots.add(resolve(worktreeRoot))
-  registeredWorktreeRootsByRepo.set(repoId, roots)
+  for (const stale of roots) {
+    if (roots.size <= CREATED_WORKTREE_ROOTS_MAX) {
+      break
+    }
+    roots.delete(stale)
+  }
+  createdWorktreeRootsByRepo.set(repoId, roots)
   registeredWorktreeRootsRevisionByRepo.set(repoId, ++registeredWorktreeRootsRevisionSequence)
   refreshRegisteredWorktreeRoots()
   registeredWorktreeRootsDirty = true
+}
+
+/** The recovered layer outlives cache invalidation by design, so suites need an explicit reset. */
+export function __resetCreatedWorktreeRootsForTests(): void {
+  createdWorktreeRootsByRepo.clear()
+  refreshRegisteredWorktreeRoots()
 }
 
 export function getRegisteredWorktreeRootsRevision(repoId: string): number {
@@ -197,9 +267,11 @@ export async function resolveRegisteredWorktreePath(
 
 function refreshRegisteredWorktreeRoots(): void {
   registeredWorktreeRoots.clear()
-  for (const roots of registeredWorktreeRootsByRepo.values()) {
-    for (const root of roots) {
-      registeredWorktreeRoots.add(root)
+  for (const byRepo of [registeredWorktreeRootsByRepo, createdWorktreeRootsByRepo]) {
+    for (const roots of byRepo.values()) {
+      for (const root of roots) {
+        registeredWorktreeRoots.add(root)
+      }
     }
   }
 }
