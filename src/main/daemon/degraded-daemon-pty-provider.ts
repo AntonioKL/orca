@@ -1,5 +1,6 @@
 import type { DaemonPtyAdapter } from './daemon-pty-adapter'
 import { DegradedDaemonAbsenceVerdict } from './degraded-daemon-absence-verdict'
+import { addRemovableListener } from './add-removable-listener'
 import { combineUnsubscribes } from './combine-unsubscribes'
 import { shutdownDegradedFallbackSessions } from './degraded-daemon-fallback-shutdown'
 import { PtyGoneError, inspectPtyProviderProcess } from '../providers/pty-process-inspection'
@@ -231,13 +232,7 @@ export class DegradedDaemonPtyProvider implements IPtyProvider {
   }
 
   onData(callback: (payload: PtyDataEvent) => void): () => void {
-    this.dataListeners.push(callback)
-    return () => {
-      const idx = this.dataListeners.indexOf(callback)
-      if (idx !== -1) {
-        this.dataListeners.splice(idx, 1)
-      }
-    }
+    return addRemovableListener(this.dataListeners, callback)
   }
 
   onBackgroundStreamEvent(callback: (payload: PtyBackgroundStreamEvent) => void): () => void {
@@ -255,6 +250,9 @@ export class DegradedDaemonPtyProvider implements IPtyProvider {
     )
   }
 
+  // Why not addRemovableListener: this disposer also runs a downstream fan-out, so it needs a
+  // once-only latch. The shared helper's indexOf guard makes the removal idempotent but would
+  // still re-run `unsubscribes` after disposeProviderOnly() has already drained the array.
   onReplay(callback: (payload: { id: string; data: string }) => void): () => void {
     const unsubscribes = this.allProviders().map((provider) => provider.onReplay(callback))
     let active = true
@@ -274,13 +272,7 @@ export class DegradedDaemonPtyProvider implements IPtyProvider {
   }
 
   onExit(callback: (payload: { id: string; code: number }) => void): () => void {
-    this.exitListeners.push(callback)
-    return () => {
-      const idx = this.exitListeners.indexOf(callback)
-      if (idx !== -1) {
-        this.exitListeners.splice(idx, 1)
-      }
-    }
+    return addRemovableListener(this.exitListeners, callback)
   }
 
   ackColdRestore(sessionId: string): void {
