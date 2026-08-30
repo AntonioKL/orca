@@ -28,7 +28,6 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
-  rmSync,
   writeFileSync
 } from 'node:fs'
 import { platform as osPlatform } from 'node:os'
@@ -208,6 +207,7 @@ function restoreNodePtyWindowsConptyRuntime() {
 }
 
 function ensureElectronPackageInstalled() {
+  repairElectronPathFile()
   if (electronPackageIsUsable()) {
     return
   }
@@ -216,7 +216,6 @@ function ensureElectronPackageInstalled() {
   // writing path.txt. Electron 42's lazy require() would run install.js here,
   // so inspect dist/ directly and keep using our strict partial-extract checks.
   console.log('[rebuild] Electron package binary is missing; installing Electron package binary.')
-  resetPartialElectronInstall()
   try {
     runElectronPackageBinaryInstall()
   } catch (/** @type {any} */ err) {
@@ -228,37 +227,46 @@ function ensureElectronPackageInstalled() {
     process.exit(1)
   }
 
+  repairElectronPathFile()
   if (!electronPackageIsUsable()) {
-    const repaired = repairElectronPathFile()
-    if (!repaired || !electronPackageIsUsable()) {
-      logElectronInstallDiagnostics()
-      if (continuePostinstallWithoutElectron()) {
-        process.exit(0)
-      }
-      console.error('[rebuild] Electron package is still unavailable after retry.')
-      process.exit(1)
+    logElectronInstallDiagnostics()
+    if (continuePostinstallWithoutElectron()) {
+      process.exit(0)
     }
+    console.error('[rebuild] Electron package is still unavailable after retry.')
+    process.exit(1)
   }
 }
 
 function electronPackageIsUsable() {
   try {
-    const installedVersion = readFileSync(resolve(electronPackageDir, 'dist', 'version'), 'utf8')
-      .trim()
-      .replace(/^v/, '')
     const installedPlatformPath = readFileSync(resolve(electronPackageDir, 'path.txt'), 'utf8')
     return (
-      installedVersion === electronVersion &&
-      installedPlatformPath === getElectronPlatformPath() &&
-      existsSync(getElectronExecutablePath())
+      electronDistMatchesPackage(getElectronExecutablePath()) &&
+      installedPlatformPath === getElectronPlatformPath()
     )
   } catch {
     return false
   }
 }
 
+function electronDistMatchesPackage(electronExecutable) {
+  try {
+    const installedVersion = readFileSync(resolve(electronPackageDir, 'dist', 'version'), 'utf8')
+      .trim()
+      .replace(/^v/, '')
+    return installedVersion === electronVersion && existsSync(electronExecutable)
+  } catch {
+    return false
+  }
+}
+
 function runElectronPackageBinaryInstall() {
-  const env = { ...process.env }
+  const env = {
+    ...process.env,
+    ELECTRON_INSTALL_PLATFORM: rebuildPlatform,
+    ELECTRON_INSTALL_ARCH: rebuildArch
+  }
   delete env.ELECTRON_SKIP_BINARY_DOWNLOAD
   delete env.npm_config_electron_skip_binary_download
 
@@ -282,13 +290,6 @@ function runElectronPackageBinaryInstall() {
   }
 }
 
-function resetPartialElectronInstall() {
-  // Why: Electron's installer can leave a partial dist/ tree behind after
-  // skipped or interrupted postinstall runs; retry from a clean target.
-  rmSync(resolve(electronPackageDir, 'dist'), { recursive: true, force: true })
-  rmSync(resolve(electronPackageDir, 'path.txt'), { force: true })
-}
-
 function continuePostinstallWithoutElectron() {
   if (!isPostinstall() || process.env.ORCA_STRICT_ELECTRON_INSTALL === '1') {
     return false
@@ -303,16 +304,22 @@ function continuePostinstallWithoutElectron() {
 
 function repairElectronPathFile() {
   const platformPath = getElectronPlatformPath()
-  if (!existsSync(getElectronExecutablePath())) {
-    return false
+  const electronExecutable = resolve(electronPackageDir, 'dist', platformPath)
+  if (!electronDistMatchesPackage(electronExecutable)) {
+    return
   }
 
-  // Why: Electron's install script has exited successfully in CI after
-  // extraction without leaving path.txt. The package main only needs this file
-  // to point at the already-extracted executable.
-  writeFileSync(resolve(electronPackageDir, 'path.txt'), platformPath)
-  console.log(`[rebuild] Repaired Electron path.txt -> ${platformPath}`)
-  return true
+  const pathFile = resolve(electronPackageDir, 'path.txt')
+  let currentPath = ''
+  try {
+    currentPath = readFileSync(pathFile, 'utf8')
+  } catch {
+    // Missing path.txt is the common CI failure this script repairs.
+  }
+  if (currentPath !== platformPath) {
+    writeFileSync(pathFile, platformPath)
+    console.log(`[rebuild] Repaired Electron path.txt -> ${platformPath}`)
+  }
 }
 
 function logElectronInstallDiagnostics() {

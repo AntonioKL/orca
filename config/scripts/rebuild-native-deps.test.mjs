@@ -32,7 +32,7 @@ describe('rebuild-native-deps Electron install fallback', () => {
     try {
       writeFakeElectronPackage(projectDir)
       writeFakeElectronGet(projectDir, { downloadRejects: true })
-      writeFakeExtractZip(projectDir, { createExecutable: false })
+      writeFakeElectronExtractor(projectDir, { createExecutable: false })
       writeFakeElectronRebuild(projectDir)
 
       const result = runRebuildScript(projectDir, {
@@ -59,7 +59,7 @@ describe('rebuild-native-deps Electron install fallback', () => {
     try {
       writeFakeElectronPackage(projectDir)
       writeFakeElectronGet(projectDir, { downloadRejects: true })
-      writeFakeExtractZip(projectDir, { createExecutable: false })
+      writeFakeElectronExtractor(projectDir, { createExecutable: false })
       writeFakeElectronRebuild(projectDir)
 
       const result = runRebuildScript(projectDir, {
@@ -83,7 +83,7 @@ describe('rebuild-native-deps Electron install fallback', () => {
     try {
       writeFakeElectronPackage(projectDir)
       writeFakeElectronGet(projectDir, { downloadRejects: true })
-      writeFakeExtractZip(projectDir, { createExecutable: false })
+      writeFakeElectronExtractor(projectDir, { createExecutable: false })
       writeFakeElectronRebuild(projectDir)
 
       const result = runRebuildScript(projectDir)
@@ -98,13 +98,13 @@ describe('rebuild-native-deps Electron install fallback', () => {
     }
   })
 
-  it('clears partial Electron package contents before retrying install', () => {
+  it('preserves partial Electron package contents while retrying install', () => {
     const projectDir = mkTempProject()
 
     try {
       writeFakeElectronPackage(projectDir)
       writeFakeElectronGet(projectDir, { logPartialStateBeforeInstall: true })
-      writeFakeExtractZip(projectDir, { createExecutable: false })
+      writeFakeElectronExtractor(projectDir, { createExecutable: false })
       writeFakeElectronRebuild(projectDir)
       mkdirSync(join(projectDir, 'node_modules', 'electron', 'dist', 'locales'), {
         recursive: true
@@ -121,8 +121,59 @@ describe('rebuild-native-deps Electron install fallback', () => {
 
       expect(result.status).toBe(1)
       expect(readFileSync(join(projectDir, 'electron-get.log'), 'utf8')).toBe(
-        'partial cleared\ndownload attempted\n'
+        'partial still present\ndownload attempted\n'
       )
+      expect(existsSync(join(projectDir, 'node_modules/electron/dist/locales/stale.pak'))).toBe(
+        true
+      )
+      expect(readFileSync(join(projectDir, 'node_modules/electron/path.txt'), 'utf8')).toBe(
+        'stale-path'
+      )
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true })
+    }
+  })
+
+  it('passes the rebuild target to the Electron binary installer', () => {
+    const projectDir = mkTempProject()
+
+    try {
+      writeFakeElectronPackage(projectDir)
+      writeFakeElectronGet(projectDir, { logTargetBeforeInstall: true })
+      writeFakeElectronExtractor(projectDir, { createExecutable: true })
+      writeFakeElectronRebuild(projectDir)
+
+      const result = runRebuildScript(
+        projectDir,
+        { npm_config_platform: '', npm_config_arch: '' },
+        ['--platform=linux', '--arch=arm64', '--force']
+      )
+
+      expect(result.status, result.stderr).toBe(0)
+      expect(readFileSync(join(projectDir, 'electron-get.log'), 'utf8')).toBe(
+        'platform=linux arch=arm64\ndownload attempted\n'
+      )
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true })
+    }
+  })
+
+  it('repairs existing Electron path metadata without invoking the installer', () => {
+    const projectDir = mkTempProject()
+
+    try {
+      writeFakeUsableElectronPackage(projectDir)
+      writeFakeElectronRebuild(projectDir)
+      rmSync(join(projectDir, 'node_modules/electron/path.txt'))
+
+      const result = runRebuildScript(projectDir, {}, ['--platform=linux', '--force'])
+
+      expect(result.status, result.stderr).toBe(0)
+      expect(readFileSync(join(projectDir, 'node_modules/electron/path.txt'), 'utf8')).toBe(
+        'electron'
+      )
+      expect(result.stdout).toContain('Repaired Electron path.txt -> electron')
+      expect(existsSync(join(projectDir, 'electron-get.log'))).toBe(false)
     } finally {
       rmSync(projectDir, { recursive: true, force: true })
     }
@@ -393,7 +444,8 @@ function runRebuildScript(projectDir, extraEnv = {}, args = []) {
   const env = {
     ...process.env,
     npm_config_platform: 'linux',
-    npm_config_arch: 'x64'
+    npm_config_arch: 'x64',
+    ORCA_ELECTRON_PACKAGE_EXTRACTOR: join(projectDir, 'fake-extractor.cjs')
   }
   for (const key of Object.keys(env)) {
     if (
@@ -441,7 +493,11 @@ module.exports = electronPath
 
 function writeFakeElectronGet(
   projectDir,
-  { downloadRejects = false, logPartialStateBeforeInstall = false } = {}
+  {
+    downloadRejects = false,
+    logPartialStateBeforeInstall = false,
+    logTargetBeforeInstall = false
+  } = {}
 ) {
   const getDir = join(projectDir, 'node_modules', 'electron', 'node_modules', '@electron', 'get')
   mkdirSync(getDir, { recursive: true })
@@ -451,6 +507,12 @@ function writeFakeElectronGet(
 const { appendFileSync, existsSync, mkdirSync, writeFileSync } = require('node:fs')
 const { join } = require('node:path')
 exports.downloadArtifact = async function downloadArtifact(details) {
+  if (${JSON.stringify(logTargetBeforeInstall)}) {
+    appendFileSync(
+      'electron-get.log',
+      'platform=' + details.platform + ' arch=' + details.arch + '\\n'
+    )
+  }
   if (${JSON.stringify(logPartialStateBeforeInstall)}) {
     appendFileSync(
       'electron-get.log',
@@ -472,24 +534,21 @@ exports.downloadArtifact = async function downloadArtifact(details) {
   )
 }
 
-function writeFakeExtractZip(projectDir, { createExecutable }) {
-  const extractDir = join(projectDir, 'node_modules', 'electron', 'node_modules', 'extract-zip')
-  mkdirSync(extractDir, { recursive: true })
+function writeFakeElectronExtractor(projectDir, { createExecutable }) {
   writeFileSync(
-    join(extractDir, 'index.js'),
+    join(projectDir, 'fake-extractor.cjs'),
     `
 const { mkdirSync, writeFileSync } = require('node:fs')
 const { join } = require('node:path')
-module.exports = async function extract(_zipPath, options) {
-  mkdirSync(join(options.dir, 'locales'), { recursive: true })
-  if (${JSON.stringify(createExecutable)}) {
-    writeFileSync(join(options.dir, 'electron'), '')
-    writeFileSync(join(options.dir, 'version'), 'v41.5.0')
-  }
+const extractDir = process.argv[3]
+mkdirSync(join(extractDir, 'locales'), { recursive: true })
+if (${JSON.stringify(createExecutable)}) {
+  writeFileSync(join(extractDir, 'electron'), '')
+  writeFileSync(join(extractDir, 'electron.exe'), '')
+  writeFileSync(join(extractDir, 'version'), 'v41.5.0')
 }
 `
   )
-  chmodSync(join(extractDir, 'index.js'), 0o755)
 }
 
 function writeFakeElectronRebuild(projectDir, { logPathEnv = null } = {}) {
