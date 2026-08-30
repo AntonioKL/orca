@@ -63,6 +63,25 @@ test.describe('Main window display recovery', () => {
       )
       const offscreenBounds = { x: right + 1000, y: bottom + 1000, width: 900, height: 700 }
       window.setBounds(offscreenBounds)
+      const candidateBounds = window.getBounds()
+      const candidateOverlapsDisplay = displays.some(({ workArea: area }) => {
+        const overlapWidth = Math.max(
+          0,
+          Math.min(candidateBounds.x + candidateBounds.width, area.x + area.width) -
+            Math.max(candidateBounds.x, area.x)
+        )
+        const overlapHeight = Math.max(
+          0,
+          Math.min(candidateBounds.y + candidateBounds.height, area.y + area.height) -
+            Math.max(candidateBounds.y, area.y)
+        )
+        return overlapWidth > 0 && overlapHeight > 0
+      })
+      if (candidateOverlapsDisplay) {
+        throw new Error(
+          `expected offscreen candidate bounds, got ${JSON.stringify(candidateBounds)}`
+        )
+      }
       screen.emit('display-metrics-changed', {} as Electron.Event, screen.getPrimaryDisplay(), [
         'workArea'
       ])
