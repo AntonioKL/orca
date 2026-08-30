@@ -1,5 +1,8 @@
 import { z } from 'zod'
-import { ORCHESTRATION_FEDERATION_CONTROL_MAIL_PROTOCOL_VERSION } from '../../../../shared/protocol-version'
+import {
+  ORCHESTRATION_FEDERATION_CONTROL_MAIL_PROTOCOL_VERSION,
+  ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_RUNTIME_CAPABILITY
+} from '../../../../shared/protocol-version'
 import { importFederatedControlMessage } from '../../orchestration/federation-control-message'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
 import {
@@ -81,7 +84,11 @@ export const ORCHESTRATION_FEDERATION_RELAY_METHODS: RpcMethod[] = [
     name: 'orchestration.federationAck',
     params: FederationAckParams,
     handler: (params, { runtime, authenticatedCallerFingerprint }) => {
-      requireHomeAttachment(runtime, params.dispatchId, authenticatedCallerFingerprint)
+      const attachment = requireHomeAttachment(
+        runtime,
+        params.dispatchId,
+        authenticatedCallerFingerprint
+      )
       const receivedSettlements = (params.settlements ?? []).filter(
         (settlement) => settlement.sequence <= params.throughSequence
       )
@@ -117,6 +124,13 @@ export const ORCHESTRATION_FEDERATION_RELAY_METHODS: RpcMethod[] = [
         dispatchId: params.dispatchId,
         direction: 'to_home',
         throughSequence: params.throughSequence,
+        supportsLifecycleSettlement:
+          attachment.protocol_version >= 3 &&
+          runtime
+            .getStatus()
+            .capabilities?.includes(
+              ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_RUNTIME_CAPABILITY
+            ) === true,
         ...(settlements.length === 0
           ? {}
           : {

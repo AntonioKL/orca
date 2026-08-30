@@ -51,6 +51,8 @@ export class OrchestrationPeerCapabilityCache {
     expectedRuntimeEpoch: string | null
     capability: RuntimeCapability
     probe: () => Promise<RuntimeStatus>
+    /** Require a status probe even when the expected epoch has a cached answer. */
+    forceProbe?: boolean
   }): Promise<PeerCapabilityDecision> {
     return this.resolveAttempt(args, 1)
   }
@@ -61,14 +63,16 @@ export class OrchestrationPeerCapabilityCache {
       expectedRuntimeEpoch: string | null
       capability: RuntimeCapability
       probe: () => Promise<RuntimeStatus>
+      forceProbe?: boolean
     },
     staleRetriesRemaining: number
   ): Promise<PeerCapabilityDecision> {
     const generation = this.touchPeer(args.peerFingerprint)
     const knownEpoch = this.latestEpochs.get(args.peerFingerprint) ?? args.expectedRuntimeEpoch
-    const cached = knownEpoch
-      ? this.cached(args.peerFingerprint, knownEpoch, args.capability)
-      : null
+    const cached =
+      !args.forceProbe && knownEpoch
+        ? this.cached(args.peerFingerprint, knownEpoch, args.capability)
+        : null
     if (cached) {
       return cached
     }

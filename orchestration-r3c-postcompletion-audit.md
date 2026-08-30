@@ -1,0 +1,101 @@
+# R3c post-completion audit: local fleet projection
+
+## Scope and verdict
+
+Audited every changed source/test file in the post-completion R3c change set,
+with emphasis on the bounded read-only worker-list contract, identity joins,
+liveness vocabulary, pagination, redaction, and old/new client behavior. Focused
+tests passed (see below), but the slice is **NOT ACCEPTED** as contract-complete:
+two high-confidence defects can produce false fleet facts or break a mixed-version
+CLI, and pagination is not snapshot-stable as required by the R3c acceptance
+criteria. No source files were modified.
+
+## Findings
+
+### F1 — High: status join can assign one terminal's live status to another Dispatch
+
+`src/shared/orchestration-fleet-projection.ts:98-143` indexes the freshest status
+globally by `paneKey` and by `terminalHandle`, then chooses whichever matching
+entry has the newer `receivedAt`. It does not require
+`status.orchestration.dispatchId`, endpoint/process incarnation, or any other
+Attempt identity to agree with the durable worker row. A pane/terminal is an
+address and can be reused after an older Dispatch completes; the old retained
+row and the new row then share the same handle/key. A fresh status from the new
+Attempt marks the old row `liveness.verdict: live`, copies provider/model,
+workspace, host, and activity into that old row, even though the status belongs
+to a different Attempt. Matching by handle also lets a newer status win over an
+exact pane match. This violates the identity boundary and can create a false
+live worker (and wrong host/workspace/provider) in the read-only projection.
+
+**Required correction:** prefer an explicit dispatch/attempt identity when
+present and fence status joins on endpoint/process incarnation; when proof is
+absent or conflicting, return `unverifiable` rather than promoting the freshest
+address match to live.
+
+### F2 — High: upgraded CLI crashes against an older runtime response
+
+`src/cli/handlers/orchestration/worker-terminal-handlers.ts:100-143` types and
+dereferences `worker.projection.*` and `value.page.*` unconditionally in the
+human formatter. An older running Orca runtime still returns the pre-R3c
+`worker-list` shape (`workers` + `counts`, with no `projection` or `page`), and
+there is no capability/version negotiation or fallback in this handler. A
+newer CLI connected to that runtime therefore throws while formatting
+(`worker.projection` is undefined) instead of preserving the old list output.
+JSON mode happens to bypass the formatter, but normal text mode is a supported
+CLI path. This violates the mixed-version compatibility requirement.
+
+**Required correction:** treat projection/page as optional at the CLI boundary;
+format legacy rows using the old fields and only append projection/pagination
+details when present (or gate the new fields with an explicit capability).
+
+### F3 — Medium: cursor pagination is not stable under concurrent updates
+
+The durable query in `src/main/runtime/orchestration/db/worker-terminal/worker-terminal-listing.ts:102-117`
+orders only by `COALESCE(w.created_at, d.created_at)` (SQLite timestamps are
+second-granularity) with no deterministic Dispatch-id tie-breaker or snapshot
+token. The RPC then slices that mutable result and requires the cursor row to
+still exist in the current filtered set (`src/main/runtime/rpc/methods/orchestration-worker-release.ts:155-170`).
+If rows are inserted/removed or change terminal state between calls, a next-page
+request can reorder rows (duplicate/omit entries) or fail with
+`invalid_argument` because the prior cursor disappeared from the filter. The
+R3c acceptance contract calls for stable pagination with no duplicate/omitted
+rows for a snapshot cursor; this implementation has neither a snapshot nor a
+stable total-order key.
+
+**Required correction:** establish a deterministic `(created_at, dispatch_id)`
+order and issue a snapshot/epoch-bound cursor (or explicitly document and test a
+weaker consistency model); do not reject a valid prior cursor solely because
+the row changed state while paging.
+
+### F4 — Low/Medium: freshness arithmetic is not clock-domain safe
+
+`projectLiveness` (`src/shared/orchestration-fleet-projection.ts:145-169`) treats
+any status with `now - receivedAt <= staleAfter` as fresh. A future timestamp
+(remote host clock ahead, or malformed input) is therefore immediately
+`live` and remains live until the local clock catches up. Agent status payloads
+can carry remote-ingest timestamps (`connectionId`), while the projection has
+no clock-domain/host offset proof. The SSH contract requires host-computed age
+and loss of contact to remain `unverifiable`; an unbounded future timestamp can
+thus create false liveness.
+
+**Required correction:** reject/mark `unverifiable` for future observations
+beyond a small tolerance and carry the execution-host clock domain/age, or limit
+this projection to timestamps generated by the local host.
+
+## Positive checks
+
+- `pnpm test src/shared/orchestration-fleet-projection.test.ts src/main/runtime/rpc/methods/orchestration-worker-release.test.ts` — **2 files, 43 tests passed**.
+- `pnpm test src/main/runtime/orchestration/r1-identity-migration.test.ts src/main/runtime/orchestration/orchestration-worker-dispatch-db.test.ts src/main/runtime/orchestration/db/dispatch-depth.test.ts` — **3 files, 36 tests passed**.
+- `git diff --check` passed.
+- Projection output excludes prompt/assistant/transcript bodies in the added
+  tests, uses `live`/`unverifiable`/`exited`, performs no terminal observation
+  calls, and caps page size at 100.
+- The added receipt-before-nudge paths in `orchestration.ts` replay correctly
+  under injected notification failure (`orchestration-commit-notify-characterization.test.ts`
+  is covered by the existing focused suite).
+
+## Acceptance verdict
+
+**Fail pending F1 and F2; F3 must be resolved or explicitly re-scoped with a
+tested consistency contract, and F4 should be addressed before remote/SSH rows
+are treated as liveness evidence.**

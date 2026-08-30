@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Orca orchestration vNext — PR decision brief</title>
+  <style>
+    :root { color-scheme: light; --ink:#17202a; --muted:#5d6873; --line:#dfe5ea; --bg:#f6f8fa; --card:#fff; --good:#087443; --warn:#9a5b00; --bad:#a12a2a; }
+    * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    main { max-width:1000px; margin:0 auto; padding:34px 22px 64px; } h1 { margin:0 0 5px; font-size:30px; letter-spacing:-.02em; }
+    h2 { margin:30px 0 9px; font-size:20px; } p { margin:8px 0; }
+    .sub,.small { color:var(--muted); } .small { font-size:13px; }
+    .decision { background:var(--card); border:1px solid #e7c98b; border-left:5px solid var(--warn); border-radius:10px; padding:15px 18px; margin:20px 0; }
+    .decision strong { color:var(--warn); } .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:10px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:9px; padding:12px 14px; } .label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.06em; }
+    .value { font-size:20px; font-weight:650; margin-top:3px; } .good { color:var(--good); } .warn { color:var(--warn); } .bad { color:var(--bad); }
+    table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--line); border-radius:9px; overflow:hidden; }
+    th,td { padding:9px 11px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; } th { background:#eef2f5; font-size:13px; } tr:last-child td { border-bottom:0; }
+    code { background:#edf1f4; padding:1px 4px; border-radius:4px; font-size:.91em; } ul { margin:7px 0 7px 20px; padding:0; }
+    .flow { display:flex; flex-wrap:wrap; gap:7px; align-items:center; margin:12px 0; } .node { background:var(--card); border:1px solid #cbd5dc; border-radius:7px; padding:8px 11px; } .arrow { color:var(--muted); }
+    .evidence { border-left:3px solid var(--line); padding-left:13px; } footer { margin-top:30px; color:var(--muted); font-size:13px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Orchestration vNext: whole-PR decision brief</h1>
+  <p class="sub">PR <a href="https://github.com/stablyai/orca/pull/16904">#16904</a> · reviewed head <code>4a32d073fa</code> · 30 Aug 2026</p>
+
+  <div class="decision">
+    <strong>Recommendation: technically ready for final CI / human sign-off.</strong>
+    All evidence-backed blockers from the complexity audit and final review now have focused fixes and regressions.
+    The local orchestration matrix is green; the remaining merge gate is the repository's normal CI and a
+    human review of the intentionally accepted mailbox tradeoffs. No broad refactor is warranted.
+  </div>
+
+  <div class="grid">
+    <div class="card"><div class="label">GitHub state</div><div class="value good">MERGEABLE / CLEAN</div></div>
+    <div class="card"><div class="label">CI</div><div class="value good">36 passed</div><div class="small">0 failed · 0 pending · 11 conditional skips</div></div>
+    <div class="card"><div class="label">PR size</div><div class="value">289 files</div><div class="small">23,272 additions / 4,162 deletions</div></div>
+    <div class="card"><div class="label">Review coverage</div><div class="value">7 areas</div><div class="small">lifecycle, mailbox, terminal, transcript, federation, cleanup, ergonomics</div></div>
+  </div>
+
+  <h2>Why this PR exists</h2>
+  <p>Orca’s original orchestration made it possible to coordinate agents, but delivery and lifecycle evidence
+    were too easy to lose, duplicate, or misinterpret. A coordinator could see a transport failure even when
+    text was queued, wake a busy agent twice, read the wrong transcript, or infer that a remote process had
+    exited when the host was simply unreachable.</p>
+  <p>This PR makes those outcomes durable and explicit while keeping agents responsible for decomposition,
+    placement, parallelism, and recovery choices.</p>
+
+  <h2>The model an agent actually uses</h2>
+  <div class="flow">
+    <span class="node"><b>Run</b><br><span class="small">coordination namespace</span></span><span class="arrow">→</span>
+    <span class="node"><b>Task</b><br><span class="small">piece of work + dependencies</span></span><span class="arrow">→</span>
+    <span class="node"><b>Dispatch</b><br><span class="small">one owned attempt</span></span><span class="arrow">→</span>
+    <span class="node"><b>Worker / terminal</b><br><span class="small">execution surface</span></span><span class="arrow">→</span>
+    <span class="node"><b>Delivery</b><br><span class="small">durable coordinator inbox</span></span>
+  </div>
+  <p class="small">These are storage and responsibility boundaries, not a new scheduler or workflow language. Existing low-level terminal/worktree commands remain available.</p>
+
+  <h2>What changed, grouped by responsibility</h2>
+  <table>
+    <thead><tr><th>Area</th><th>What the PR does</th><th>Benefit / boundary</th></tr></thead>
+    <tbody>
+      <tr><td><b>Mailbox durability</b></td><td>Persists message state before a disposable PTY pointer; replays the same Delivery until acknowledged; acknowledgments are generation-bound and idempotent.</td><td>No lost coordinator mail or duplicate processing after restart.</td></tr>
+      <tr><td><b>Prompt receipts</b></td><td>Reports distinct evidence for <code>input_accepted</code>, queued, submitted, and turn-started. FIFO claims use PTY/process generation and request baselines.</td><td>Agents can stop resending based on an ambiguous transport error.</td></tr>
+      <tr><td><b>Lifecycle ledger</b></td><td>Central guarded transitions, compare-and-set semantics, mutation request IDs, and durable lifecycle receipts.</td><td>Concurrent writers and retries cannot silently overwrite state.</td></tr>
+      <tr><td><b>Worker composition</b></td><td><code>worker-start/show/read/stop/abandon/release</code> compose existing worktree, setup, terminal, and dispatch primitives with explicit effects and residual resources.</td><td>One understandable supervised path without a hidden scheduler.</td></tr>
+      <tr><td><b>Crash/recovery</b></td><td>Unknown outcomes stay unknown; restart recovery is identity- and incarnation-fenced; completed output is archived before release.</td><td>Orca never “fixes” uncertainty by killing or duplicating work.</td></tr>
+      <tr><td><b>Transcripts</b></td><td>Reads are routed to the execution host and carry source identity, cursor, and completeness metadata; archived output remains readable after release.</td><td>Coordinator can tell “missing” from “not visible on this provider.”</td></tr>
+      <tr><td><b>Federation</b></td><td>Remote attachment authority, stale-generation fencing, capability caching, and host-owned liveness/release decisions.</td><td>Disconnect is <code>unverifiable</code>, not falsely <code>exited</code>.</td></tr>
+      <tr><td><b>Skill / CLI</b></td><td>Compact generated guidance teaches batch Delivery handling, exact handles, setup policy, wait semantics, recovery, and cleanup.</td><td>Less agent guesswork without introducing commands that are not implemented.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Review findings and decisions</h2>
+  <table>
+    <thead><tr><th>Finding</th><th>Disposition</th><th>Evidence</th></tr></thead>
+    <tbody>
+      <tr><td>Duplicate pointer text / naked Enter after a crash</td><td><span class="good"><b>Fixed.</b></span> Attempt phases are persisted before each external write; ambiguous restart recovery never emits pointer text or standalone <code>\r</code>.</td><td><code>mailbox-pointer-stage.ts</code>, <code>mailbox-pointer-submit.ts</code>, <code>mailbox-pointer-resume.ts</code>; focused pointer/DB tests pass 18/18.</td></tr>
+      <tr><td>Two prompts consumed before receipt observation could claim the same turn</td><td><span class="good"><b>Fixed.</b></span> Historical lifecycle edges are allocated earliest-first and remain bounded by PTY generation.</td><td><code>orca-runtime.ts:22031</code>; dedicated out-of-order observation regression; focused correlation suites pass 60/60.</td></tr>
+      <tr><td>Hook-only provider has no historical turn ring</td><td><span class="warn"><b>Accepted limitation.</b></span> Closing it needs a new provider/wire contract or durable hook history. Current behavior is conservative and does not auto-resend.</td><td><code>agent-prompt-submission-verification.ts:136</code>; plan does not promise turn-start proof for every provider.</td></tr>
+      <tr><td>Crash after <code>WRITE_ATTEMPTED</code> but before pointer bytes</td><td><span class="warn"><b>Accepted fail-closed tradeoff.</b></span> A rare crash can suppress the automatic wakeup; the message remains available to explicit <code>orchestration check</code>. Blind replay is intentionally avoided.</td><td><code>mailbox-pointer-stage.ts:63-78</code> → <code>mailbox-pointer-resume.ts:64-72</code>. A true at-least-once solution needs a new uncertain-state contract or agent idempotency.</td></tr>
+      <tr><td>Activation after a worker terminal is retired</td><td><span class="good"><b>Fixed.</b></span> The async “empty workspace” gate now re-seeds a shell when explicit activation follows a persisted empty-terminal tombstone.</td><td><code>worktree-activation.ts</code>; new seam regression test and both retirement Electron cases pass.</td></tr>
+      <tr><td>Mailbox consistency test fixture</td><td><span class="good"><b>Fixed.</b></span> The helper now awaits bounded PTY admission completion for both lifecycle writes, removing the microtask race without changing runtime behavior.</td><td><code>orchestration-mailbox-notification-test-harness.ts</code> and <code>orchestration-message-delivery-identity.test.ts</code>; mailbox matrix passes 66/66.</td></tr>
+      <tr><td>Completed-worker retirement E2E expectation</td><td><span class="good"><b>Fixed.</b></span> The fixture now expects recovery state <code>done</code>, matching the intentional contract and unit tests.</td><td><code>completed-worker-retirement-resume.spec.ts</code>; both parameterized Electron cases pass.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Evidence that the design works</h2>
+  <div class="evidence">
+    <ul>
+      <li>Typecheck, lint, changed-code quality, packaging, Windows native smoke, cross-version wire checks, and skill round trips passed.</li>
+      <li>Full local suite previously passed 65,904 tests; broad orchestration matrix passed 1,451 tests.</li>
+      <li>Independent focused prompt/mailbox state tests passed 66/66; structured-chat lease passed 8/8; activation seam passed 5/5.</li>
+      <li>Final blocker matrix passed 116/116 across lifecycle, mailbox, federation sync, transport safety, output, and lifecycle-settlement suites.</li>
+      <li>Activation/recovery regression matrix passed 170/170 across 25 files; full project typecheck passed.</li>
+      <li>Completed-worker retirement Electron E2E passed both close modes (2/2) after the activation fix.</li>
+      <li>Real Electron flow proved dispatch, durable follow-up, correlated completion, replay-before-ack, release, archived transcript access, and exactly-once terminal submission.</li>
+      <li>Remote/SSH/WSL deterministic fixtures and compatibility checks passed. Physical certification of every remote topology remains separate operational work.</li>
+    </ul>
+  </div>
+
+  <h2>Complexity and architectural-boundary audit</h2>
+  <p class="small">Supervised Orca Run <code>run_06e99b77fceb</code> · four independent Codex lanes · read-only
+    review against <code>origin/main</code> at <code>4a32d073fa</code>. Workers ran focused checks and made no
+    tracked source edits. Findings below distinguish correctness blockers from maintainability opportunities;
+    a larger diff is not treated as a defect by itself.</p>
+  <table>
+    <thead><tr><th>Disposition</th><th>Finding and evidence</th><th>Decision</th></tr></thead>
+    <tbody>
+      <tr><td><span class="good"><b>FIXED</b></span></td><td><b>Delayed exit after <code>stop_unknown</code>.</b>
+        <code>worker-dispatch-stop.ts:234-263</code> leaves the worker uncertain; the PTY exit path then calls
+        <code>failDispatch(...workerProcessExited)</code> (<code>orca-runtime.ts:19147-19175</code>), which asks
+        the lifecycle graph for <code>stop_unknown → failed</code>. That edge is absent in
+        <code>lifecycle-transition.ts:89-99</code>, so a real exit can throw and leave the Task/Dispatch stuck.
+        This was a direct call-chain mismatch and regression from the permissive old update path.</td><td>Added the canonical positive-exit transition and tested state, authority revocation, Task status, and receipts.</td></tr>
+      <tr><td><span class="good"><b>FIXED</b></span></td><td><b>Structured-session write gate bypass.</b>
+        <code>orca-runtime.ts:37947-37961</code> falls back to <code>ptyController.write</code> when
+        <code>agentSessionPtyWriteGate.admit</code> refuses. For a bound structured session this can inject a
+        mailbox pointer despite an ownership/reconciliation refusal.</td><td>Bound structured sessions now fail closed while unbound legacy terminals retain raw PTY behavior; a denied-write regression asserts zero PTY bytes.</td></tr>
+      <tr><td><span class="good"><b>FIXED</b></span></td><td><b>Persisted federation protocol can outlive a remote downgrade.</b>
+        <code>federation-sync.ts:75-86</code> and <code>db/federation/federation-relay-ack.ts:80-99</code> choose
+        lifecycle-settlement fields from the attachment's persisted protocol version, while the peer capability
+        cache only observes the new runtime epoch. After a remote restart on an older build, zod can strip
+        <code>replayUnacknowledged</code>/<code>settlements</code> and the home may interpret an ACK under the wrong
+        mode. Existing tests covered protocol versions at attach time, not a protocol-3 attachment followed by a
+        capability downgrade.</td><td>Current-epoch capability probing, capability-aware ACK handling, and a two-runtime downgrade regression now fail closed safely.</td></tr>
+      <tr><td><span class="good"><b>FIXED</b></span></td><td><b>Epoch-mismatch ACK could orphan a queued <code>worker_done</code>.</b>
+        A capability probe can observe one runtime epoch while the following pull observes a restarted peer. If
+        settlement is suppressed but the home still ACKs through the report, the downgraded peer can delete its
+        only retryable completion.</td><td>Protocol-3 pulls now replay imported-but-unacknowledged state, hold ACKs at the first unsettled worker report,
+        and stop paging until a supported epoch can settle it. Added restart/downgrade retention and later replay coverage.</td></tr>
+      <tr><td><span class="warn"><b>SIMPLIFY / TEST</b></span></td><td><b>Mailbox pointer state has intentional async complexity.</b>
+        The staged pointer, write-attempt, Enter-attempt, incarnation checks, and fail-closed restart recovery
+        protect observed duplicate/lost-mail races (<code>mailbox-pointer-stage.ts:75-180</code>;
+        <code>mailbox-pointer-submit.ts:62-153</code>). The mutable outcome matrix is hard to read, and broad
+        <code>markAsUndelivered</code> calls could clear a newer reservation if a stale flight survives.</td><td>Keep the state machine and rechecks. Add target+phase-guarded release tests; consider a discriminated
+        outcome type and a single reservation helper later. Do not replace this with blind retry.</td></tr>
+      <tr><td><span class="warn"><b>SIMPLIFY / TEST</b></span></td><td><b>Unbounded timing promises.</b> Fleet capability retry can exceed its advertised 5-second total
+        (<code>orchestration-federated-fleet-snapshot.ts:14-17</code> plus capability-cache retry); relay paging can
+        spend roughly six independent 15-second page budgets (<code>federation-sync.ts:21-24,154-208</code>).</td><td>Carry one deadline or explicitly measure/rename the budget. Add fake-timer tests. This is latency hygiene,
+        not a reason to duplicate retries throughout the code.</td></tr>
+      <tr><td><span class="warn"><b>SIMPLIFY / DEFER</b></span></td><td><b>Duplicated composition and parsing.</b> Local/federated worker start each normalize dependencies and
+        implement similar materialize → ready → attach → deliver → settle stages. The duplication increases the
+        number of files changed for every new receipt field, but host-specific authority must remain separate.</td><td>Extract a pure normalized start plan first; defer a shared driver until behavior is stable and covered by
+        parity tests. Do not merge local and remote liveness policy.</td></tr>
+      <tr><td><span class="warn"><b>TEST / FOLLOW-UP</b></span></td><td><b>Concurrent start and release recovery are under-specified.</b> Identical concurrent
+        <code>workerStart</code> calls perform asynchronous topology checks before the durable acceptance claim,
+        so one caller can receive an ambiguous result even when the other succeeds. A crash after terminal close
+        but before release settlement can likewise leave a durable <code>releasing</code> row despite a positive
+        later exit verdict.</td><td>Add Promise.all and crash-seam regressions. Preserve the existing receipt/identity fences; do not
+        introduce polling or duplicate worker creation to make retries appear successful.</td></tr>
+      <tr><td><span class="good"><b>KEEP</b></span></td><td><b>Execution-host authority, lifecycle receipts, transcript source fencing, and cursor identity.</b>
+        Independent lanes found these branches match documented SSH/mixed-version boundaries and focused tests;
+        simplifying them would reintroduce wrong-host, stale-process, or false-exit failures.</td><td>Preserve. Add only the missing downgrade/old-peer harness and clipping metadata tests before removing fallbacks.</td></tr>
+    </tbody>
+  </table>
+  <p class="small"><b>Audit test evidence:</b> lifecycle lane reported 39 focused checks and a static F1 call-chain
+    proof; federation/SSH lane passed 4 files / 35 tests; transcript lane passed 4 files / 34 tests; CLI/skill
+    lane verified generation, focused CLI tests, and typecheck. The blockers now have focused regressions;
+    the local matrix below is green.</p>
+
+  <h2>What was intentionally not added</h2>
+  <p>No scheduler, automatic placement, silence-based replacement, generalized ACL system, replicated Run database,
+    universal provider transcript abstraction, retention TTL/bulk cleanup, or speculative command aliases were added.
+    Those would expand the contract without evidence from the current issues.</p>
+
+  <h2>Composer notification limitation</h2>
+  <p>The screenshot showing “You have 1 orchestration message…” left in a Codex/Claude composer is not fully
+    eliminated by this PR. The new mailbox stages, receipts, write gate, and fail-closed recovery prevent blind
+    duplicate retries and naked Enter writes, but they cannot atomically force-submit text already owned by a TUI
+    after a park, restart, or ambiguous PTY write. The message remains recoverable through explicit
+    <code>orchestration check</code>. Treat automatic composer submission as a separate, provider-aware follow-up;
+    do not weaken the current safety boundary to hide the symptom.</p>
+
+  <h2>Final merge checklist</h2>
+  <table>
+    <thead><tr><th>Action</th><th>Decision</th></tr></thead>
+    <tbody>
+      <tr><td>Update mailbox helpers to await bounded PTY ingestion completion.</td><td><span class="good">Done</span>; test-only.</td></tr>
+      <tr><td>Change retirement E2E expected recovery state from <code>working</code> to <code>done</code>.</td><td><span class="good">Done</span>; test-only.</td></tr>
+      <tr><td>Re-seed an explicitly activated empty workspace after the agent-inventory gate.</td><td><span class="good">Done</span>; production fix with a focused regression.</td></tr>
+      <tr><td>Keep fail-closed ambiguous mailbox recovery.</td><td>Recommended. Safer and simpler than blind replay.</td></tr>
+      <tr><td>Document/measure the at-most-once wakeup tradeoff and hook-only limitation.</td><td>Follow-up if product requires stronger guarantees; no speculative patch here.</td></tr>
+      <tr><td>Fix and test the <code>stop_unknown</code> positive-exit transition.</td><td><span class="good">Done</span>; canonical transition + lifecycle regression.</td></tr>
+      <tr><td>Close the structured-session mailbox write-gate bypass.</td><td><span class="good">Done</span>; fail-closed gate + zero-byte regression.</td></tr>
+      <tr><td>Probe federation capabilities after runtime downgrade.</td><td><span class="good">Done</span>; epoch-aware probe/cache + downgrade regression.</td></tr>
+      <tr><td>Prevent ACK from deleting an unsettled worker report after an epoch mismatch.</td><td><span class="good">Done</span>; replay/ACK barrier + restart/downgrade regression.</td></tr>
+      <tr><td>Rerun focused tests and CI on the final diff.</td><td><span class="good">Local done</span>: 116/116 blocker-matrix tests, node/web typecheck, changed-code quality, max-lines ratchet, and diff check pass. Require repository CI before merge.</td></tr>
+    </tbody>
+  </table>
+
+  <p class="small">Detailed implementation audit: <a href="orchestration-vnext-implementation-audit.html">orchestration-vnext-implementation-audit.html</a>. This brief distinguishes proven defects, accepted boundaries, and unperformed physical certification. No merge or push was performed.</p>
+  <footer>Prepared from the PR diff, GitHub checks, source inspection, focused test runs, Electron validation, and supervised independent Codex audits. The remaining decision is ordinary CI plus human sign-off on the documented fail-closed mailbox tradeoffs.</footer>
+</main>
+</body>
+</html>

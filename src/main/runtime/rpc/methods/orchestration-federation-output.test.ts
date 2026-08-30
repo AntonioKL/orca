@@ -377,7 +377,9 @@ describe('orchestration federated worker output', () => {
         data: { reason: 'remote_capability_unavailable' }
       }
     })
-    expect(remoteCalls.filter((method) => method === 'status.get')).toHaveLength(1)
+    // The worker-start capability negotiation already populated this epoch's
+    // cache; mixed-version fallback must not issue a redundant status probe.
+    expect(remoteCalls.filter((method) => method === 'status.get')).toHaveLength(0)
     expect(
       remoteCalls.filter((method) => method === 'orchestration.federationReadOutput')
     ).toHaveLength(1)
@@ -799,7 +801,9 @@ describe('orchestration federated worker output', () => {
     expect(read).toMatchObject({ ok: true, result: { source: 'terminal' } })
     expect(fleet).toMatchObject({ ok: true })
     expect(release).toMatchObject({ ok: true, result: { state: 'released' } })
-    expect(remoteCalls.filter((method) => method === 'status.get')).toHaveLength(2)
+    // One forced probe after the restart seeds all capability decisions for the
+    // new epoch; read, fleet, and release reuse that result.
+    expect(remoteCalls.filter((method) => method === 'status.get')).toHaveLength(1)
     expect(remoteCalls).toContain('orchestration.federationReadOutput')
     expect(remoteCalls).toContain('orchestration.federationFleetSnapshot')
     expect(remoteCalls).toContain('orchestration.federationRelease')

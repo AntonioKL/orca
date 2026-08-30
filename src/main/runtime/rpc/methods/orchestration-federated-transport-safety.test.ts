@@ -229,6 +229,9 @@ describe('federated transport safety', () => {
       acknowledgeFederationRelay: vi.fn()
     }
     const callOrchestrationWorkerServer = vi.fn(async (_selector, method: string) => {
+      if (method === 'status.get') {
+        return runtimeStatus([])
+      }
       if (method === 'orchestration.federationPull') {
         return {
           runtimeEpoch: 'epoch-worker',
@@ -256,6 +259,7 @@ describe('federated transport safety', () => {
     await syncFederatedDispatch(runtime, federated.dispatch_id)
 
     expect(callOrchestrationWorkerServer.mock.calls.map((call) => call[1])).toEqual([
+      'status.get',
       'orchestration.federationPull',
       'orchestration.federationAck',
       'orchestration.federationImport'

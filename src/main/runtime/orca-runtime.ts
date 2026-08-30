@@ -38615,11 +38615,21 @@ export class OrcaRuntimeService {
         if (admitted) {
           // Throws when the lease moved under the in-flight pointer, withholding the submit.
           agentSessionPtyWriteGate.assertReadmitted(ptyId, admitted)
+        } else {
+          // A denied bound lease must not receive a raw Enter, even when it did not follow a
+          // pointer write. Keep unbound legacy terminals on the existing controller path.
+          const admission = agentSessionPtyWriteGate.admit(ptyId)
+          if (!admission.admitted && agentSessionPtyWriteGate.boundSessionId(ptyId) !== null) {
+            return false
+          }
         }
       } else {
         const admission = agentSessionPtyWriteGate.admit(ptyId)
         if (!admission.admitted) {
           this.orchestrationPointerAdmissionByPtyId.delete(ptyId)
+          if (agentSessionPtyWriteGate.boundSessionId(ptyId) !== null) {
+            return false
+          }
           // Preserve the controller's own refusal reporting for internal deliveries.
           return this.ptyController?.write(ptyId, data) ?? false
         }

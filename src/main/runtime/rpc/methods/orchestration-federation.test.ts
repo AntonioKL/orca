@@ -10,6 +10,7 @@ import type { OrchestrationEnvironmentTransport } from '../../orchestration/envi
 import { RpcDispatcher } from '../dispatcher'
 import { ORCHESTRATION_METHODS } from './orchestration'
 import { createFederationWorkerStartRequest as startRequest } from './orchestration-federation-test-request'
+import { configureFederationWorkerRuntime } from './orchestration-federation-test-runtime'
 
 describe('orchestration federation', () => {
   const databases: OrchestrationDb[] = []
@@ -79,7 +80,7 @@ describe('orchestration federation', () => {
     vi.spyOn(homeRuntime, 'getTerminalPaneKey').mockImplementation((handle) =>
       handle === 'term_coord' ? 'tab_coord:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' : null
     )
-    configureWorkerRuntime(workerRuntime)
+    configureFederationWorkerRuntime(workerRuntime)
   })
 
   afterEach(() => {
@@ -98,75 +99,10 @@ describe('orchestration federation', () => {
     return homeDb.createTask({ spec: 'Audit Windows behavior', runId: run.id })
   }
 
-  function configureWorkerRuntime(runtime: OrcaRuntimeService): void {
-    vi.spyOn(runtime, 'validateOrchestrationAgentLauncher').mockImplementation(() => {})
-    vi.spyOn(runtime, 'showRepo').mockResolvedValue({
-      id: 'windows-repo',
-      kind: 'git'
-    } as never)
-    vi.spyOn(runtime, 'createManagedWorktree').mockResolvedValue({
-      worktree: { id: 'repo::windows-worktree', repoId: 'repo' },
-      startupTerminal: { spawned: true, handle: 'term_windows_worker' },
-      setupReceipt: {
-        requested: 'run',
-        hookFound: true,
-        startupPolicy: 'start-immediately',
-        state: 'running'
-      }
-    } as never)
-    vi.spyOn(runtime, 'listTerminals').mockResolvedValue({
-      terminals: [
-        { handle: 'term_windows_worker', title: 'Codex' },
-        { handle: 'term_windows_setup', title: 'Setup' }
-      ],
-      totalCount: 2,
-      truncated: false
-    } as never)
-    vi.spyOn(runtime, 'waitForTerminal').mockResolvedValue({
-      handle: 'term_windows_worker',
-      condition: 'tui-idle',
-      satisfied: true,
-      status: 'running',
-      exitCode: null
-    })
-    vi.spyOn(runtime, 'getTerminalPaneKey').mockReturnValue(
-      'tab_worker:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
-    )
-    vi.spyOn(runtime, 'getTerminalProcessIncarnation').mockReturnValue('windows_runtime:pty:1')
-    vi.spyOn(runtime, 'getTerminalOrchestrationCliCommand').mockReturnValue('orca')
-    vi.spyOn(runtime, 'sendTerminalAgentPrompt').mockResolvedValue({
-      handle: 'term_windows_worker',
-      accepted: true,
-      bytesWritten: 1
-    })
-    vi.spyOn(runtime, 'showTerminal').mockResolvedValue({
-      handle: 'term_windows_worker',
-      worktreeId: 'repo::windows-worktree',
-      status: 'running'
-    } as never)
-    // Absent execution-host verdicts remain unverifiable for mixed-version peers.
-    vi.spyOn(runtime, 'getTerminalLivenessVerdict').mockReturnValue({
-      status: 'live',
-      ptyIds: ['term_windows_worker']
-    })
-    vi.spyOn(runtime, 'readTerminal').mockResolvedValue({
-      handle: 'term_windows_worker',
-      status: 'running',
-      entries: [{ cursor: 1, text: 'remote output' }],
-      nextCursor: '1',
-      limited: false
-    } as never)
-    vi.spyOn(runtime, 'closeTerminal').mockResolvedValue({
-      handle: 'term_windows_worker',
-      tabId: 'tab-windows-worker',
-      ptyKilled: true
-    } as never)
-  }
-
   function restartWorkerRuntime(): void {
     workerRuntime = new OrcaRuntimeService()
     workerRuntime.setOrchestrationDb(workerDb)
-    configureWorkerRuntime(workerRuntime)
+    configureFederationWorkerRuntime(workerRuntime)
     workerDispatcher = new RpcDispatcher({
       runtime: workerRuntime,
       methods: ORCHESTRATION_METHODS
@@ -663,8 +599,11 @@ describe('orchestration federation', () => {
   it('treats a worker runtime ID change as an epoch, not a new server', async () => {
     const task = createHomeTask()
     await homeDispatcher.dispatch(startRequest(task.id))
+    await homeRuntime.syncOrchestrationFederation()
+    vi.spyOn(homeRuntime, 'ensureOrchestrationFederationRelay').mockImplementation(() => {})
     const dispatch = homeDb.getDispatchContext(task.id)!
     const oldEpoch = homeDb.getFederatedDispatch(dispatch.id)?.remote_runtime_epoch
+    homeRuntime.stopOrchestrationFederationRelay()
     restartWorkerRuntime()
 
     const shown = await homeDispatcher.dispatch({
@@ -673,7 +612,6 @@ describe('orchestration federation', () => {
       method: 'orchestration.workerShow',
       params: { dispatch: dispatch.id }
     })
-
     expect(shown).toMatchObject({
       ok: true,
       result: { observation: { status: 'live', exactWorker: true } }
@@ -765,6 +703,9 @@ describe('orchestration federation', () => {
     let pullCount = 0
     vi.spyOn(homeRuntime, 'callOrchestrationWorkerServer').mockImplementation(
       async (_selector, method) => {
+        if (method === 'status.get') {
+          return { runtimeId: workerRuntime.getRuntimeId(), capabilities: workerCapabilities }
+        }
         if (method !== 'orchestration.federationPull') {
           throw new Error(`Unexpected relay method ${method}`)
         }
@@ -808,8 +749,16 @@ describe('orchestration federation', () => {
     const task = createHomeTask()
     await homeDispatcher.dispatch(startRequest(task.id))
     const dispatch = homeDb.getDispatchContext(task.id)!
-    vi.spyOn(homeRuntime, 'callOrchestrationWorkerServer').mockRejectedValueOnce(
-      new Error('connection lost')
+    vi.spyOn(homeRuntime, 'callOrchestrationWorkerServer').mockImplementation(
+      async (_selector, method) => {
+        if (method === 'status.get') {
+          return { runtimeId: workerRuntime.getRuntimeId(), capabilities: workerCapabilities }
+        }
+        if (method === 'orchestration.federationStop') {
+          throw new Error('connection lost')
+        }
+        throw new Error(`Unexpected relay method ${method}`)
+      }
     )
 
     const stopped = await homeDispatcher.dispatch({

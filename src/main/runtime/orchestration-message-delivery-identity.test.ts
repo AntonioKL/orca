@@ -104,9 +104,9 @@ function createRuntime(
 
 async function driveToLiveIdle(runtime: OrcaRuntimeService): Promise<void> {
   await runtime.listTerminals()
-  runtime.onPtyData(PTY_ID, '\x1b]0;Codex working\x07', 1)
-  runtime.onPtyData(PTY_ID, '\x1b]0;Codex done\x07', 2)
-  await Promise.resolve()
+  const working = runtime.acceptPtyDataBounded(PTY_ID, '\x1b]0;Codex working\x07', 1)
+  const done = runtime.acceptPtyDataBounded(PTY_ID, '\x1b]0;Codex done\x07', 2)
+  await Promise.all([working.completion, done.completion])
 }
 
 async function check(

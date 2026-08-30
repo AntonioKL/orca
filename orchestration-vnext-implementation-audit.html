@@ -1,0 +1,1545 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Orca orchestration vNext — implementation audit</title>
+    <style>
+      :root {
+        --bg: #f5f7fb;
+        --panel: #ffffff;
+        --ink: #172033;
+        --muted: #5f6b80;
+        --line: #d9e0ec;
+        --blue: #2563eb;
+        --blue-soft: #eaf1ff;
+        --green: #16845b;
+        --green-soft: #e7f7ef;
+        --amber: #a15c00;
+        --amber-soft: #fff4df;
+        --red: #b4233c;
+        --red-soft: #ffebef;
+        --purple: #7048b8;
+        --purple-soft: #f1ebff;
+        --shadow: 0 8px 24px rgba(26, 42, 71, 0.08);
+        --radius: 14px;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font:
+          15px/1.55 -apple-system,
+          BlinkMacSystemFont,
+          'Segoe UI',
+          sans-serif;
+      }
+      .wrap {
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: 34px 24px 72px;
+      }
+      .hero {
+        background: linear-gradient(125deg, #102247 0%, #1b428f 64%, #2563eb 100%);
+        color: white;
+        border-radius: 20px;
+        padding: 38px 42px;
+        box-shadow: var(--shadow);
+      }
+      .eyebrow {
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        font-size: 12px;
+        opacity: 0.78;
+        font-weight: 700;
+      }
+      h1 {
+        margin: 8px 0 10px;
+        font-size: clamp(29px, 4vw, 48px);
+        line-height: 1.08;
+        letter-spacing: -0.03em;
+      }
+      .hero p {
+        max-width: 900px;
+        margin: 0;
+        color: #dce8ff;
+        font-size: 17px;
+      }
+      .pill-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 9px;
+        margin-top: 22px;
+      }
+      .pill {
+        padding: 5px 11px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.15);
+        color: #f8fbff;
+        font-size: 13px;
+      }
+      h2 {
+        margin: 46px 0 14px;
+        font-size: 27px;
+        letter-spacing: -0.02em;
+      }
+      h3 {
+        margin: 0 0 8px;
+        font-size: 19px;
+      }
+      h4 {
+        margin: 17px 0 6px;
+        font-size: 14px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+      }
+      p {
+        margin: 7px 0 12px;
+      }
+      .lead {
+        color: var(--muted);
+        max-width: 930px;
+        font-size: 16px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 15px;
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 20px;
+        box-shadow: 0 3px 12px rgba(26, 42, 71, 0.04);
+      }
+      .metric {
+        min-height: 142px;
+      }
+      .metric .number {
+        font-size: 34px;
+        font-weight: 750;
+        color: var(--blue);
+        line-height: 1;
+        margin-bottom: 10px;
+      }
+      .metric strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .callout {
+        border-left: 4px solid var(--blue);
+        background: var(--blue-soft);
+        padding: 15px 18px;
+        border-radius: 9px;
+        margin: 18px 0;
+      }
+      .callout.warn {
+        border-color: var(--amber);
+        background: var(--amber-soft);
+      }
+      .callout.good {
+        border-color: var(--green);
+        background: var(--green-soft);
+      }
+      .callout.danger {
+        border-color: var(--red);
+        background: var(--red-soft);
+      }
+      code {
+        background: #eef1f6;
+        padding: 2px 5px;
+        border-radius: 5px;
+        font:
+          0.9em ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+      }
+      pre {
+        background: #101827;
+        color: #d8e5ff;
+        padding: 17px 19px;
+        border-radius: 11px;
+        overflow: auto;
+        font:
+          13px/1.5 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+      }
+      .stage {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        flex-wrap: wrap;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .stage span {
+        background: var(--blue-soft);
+        color: #1d4ed8;
+        border-radius: 999px;
+        padding: 5px 9px;
+        white-space: nowrap;
+      }
+      .stage b {
+        color: #91a0b7;
+      }
+      .dag {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 20px;
+        overflow-x: auto;
+      }
+      .dag svg {
+        display: block;
+        width: 100%;
+        min-width: 790px;
+        height: 300px;
+      }
+      .dag text {
+        font:
+          600 13px -apple-system,
+          BlinkMacSystemFont,
+          'Segoe UI',
+          sans-serif;
+        fill: var(--ink);
+      }
+      .dag .small {
+        font-size: 11px;
+        font-weight: 500;
+        fill: var(--muted);
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        overflow: hidden;
+        display: table;
+      }
+      th,
+      td {
+        border-bottom: 1px solid var(--line);
+        padding: 13px 14px;
+        vertical-align: top;
+        text-align: left;
+      }
+      th {
+        background: #f0f4fa;
+        color: #354158;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      tr:last-child td {
+        border-bottom: 0;
+      }
+      td:first-child {
+        min-width: 170px;
+        font-weight: 700;
+      }
+      .workstream {
+        border-top: 5px solid var(--blue);
+      }
+      .workstream.p1 {
+        border-color: var(--purple);
+      }
+      .workstream.p2 {
+        border-color: var(--green);
+      }
+      .workstream.p3 {
+        border-color: var(--amber);
+      }
+      .workstream.p4 {
+        border-color: var(--red);
+      }
+      .workstream.p5 {
+        border-color: #0891b2;
+      }
+      .workstream.p6 {
+        border-color: #db2777;
+      }
+      .workstream.p7 {
+        border-color: #475569;
+      }
+      .tag {
+        display: inline-block;
+        border-radius: 999px;
+        padding: 3px 8px;
+        margin: 2px 3px 2px 0;
+        font-size: 12px;
+        background: #eef1f6;
+        color: #43516a;
+      }
+      .tag.now {
+        background: var(--green-soft);
+        color: var(--green);
+      }
+      .tag.dep {
+        background: var(--amber-soft);
+        color: var(--amber);
+      }
+      .tag.defer {
+        background: var(--red-soft);
+        color: var(--red);
+      }
+      .two-col {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+      }
+      ul {
+        margin: 7px 0 10px 21px;
+        padding: 0;
+      }
+      li {
+        margin: 4px 0;
+      }
+      details {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        margin: 9px 0;
+        padding: 0 15px;
+      }
+      summary {
+        cursor: pointer;
+        font-weight: 700;
+        padding: 13px 0;
+      }
+      details > div {
+        border-top: 1px solid var(--line);
+        padding: 12px 0 15px;
+      }
+      .small-note {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .footer {
+        margin-top: 48px;
+        color: var(--muted);
+        font-size: 13px;
+        border-top: 1px solid var(--line);
+        padding-top: 18px;
+      }
+      @media (max-width: 900px) {
+        .grid,
+        .two-col {
+          grid-template-columns: 1fr;
+        }
+        .hero {
+          padding: 29px 25px;
+        }
+        .wrap {
+          padding-left: 14px;
+          padding-right: 14px;
+        }
+        table {
+          font-size: 13px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="wrap">
+      <section class="hero">
+        <div class="eyebrow">Orca · implementation audit · vNext</div>
+        <h1>Make orchestration honest, durable, and easy to operate</h1>
+        <p>
+          This is the concrete implementation plan derived from current main, GitHub issue evidence,
+          the Windows queued-input report, and the Overstory, Paperclip, Herdr, and Gas Town
+          reference checkouts.
+        </p>
+        <div class="pill-row">
+          <span class="pill">7 systemic workstreams</span><span class="pill">parallel DAG</span
+          ><span class="pill">provider + SSH + WSL aware</span
+          ><span class="pill">independent verification gates</span>
+        </div>
+      </section>
+
+      <h2>Read this first</h2>
+      <p class="lead">
+        The issue list is not dozens of unrelated projects. Most failures are different symptoms of
+        seven implicit boundaries: identity, delivery, lifecycle truth, mutation atomicity,
+        recovery, fleet observability, and provider/host execution. Orca already has strong SQLite
+        dispatch records, capability fencing, worker settlement, and transcript archives. The plan
+        below adds durable facts and projections around those foundations; it does not replace the
+        orchestration kernel.
+      </p>
+      <div class="callout good">
+        <strong>Decision:</strong> vNext introduces no fundamentally new orchestration paradigm. It
+        combines proven patterns—durable mail and receipts, provider adapters, server-owned
+        execution, leases, append-only evidence, explicit unknown states, and fleet projections—into
+        one consistent Orca contract.
+      </div>
+
+      <div class="callout warn">
+        <strong>Evidence status:</strong> “Work / Worker / Message / Attention” is a design
+        hypothesis from the ergonomics review, not a concept already established by Orca, GitHub
+        users, or another orchestrator. The evidence supports reducing cognitive load and making the
+        next action obvious; it does <em>not</em> yet prove those exact four labels are optimal.
+        Keep the labels provisional until the validation protocol below is run.
+      </div>
+
+      <h2>What the evidence actually supports</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Primary evidence</th>
+            <th>Observed user problem</th>
+            <th>Supported conclusion</th>
+            <th>Not proven</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>GitHub #4397</td>
+            <td>
+              A beginner could make agents work, but could not discover orchestration, rendezvous,
+              worktree visibility, or provider instruction-file boundaries.
+            </td>
+            <td>
+              Onboarding and the normal path need one concrete mental model and a visible
+              rendezvous/placement rule.
+            </td>
+            <td>That the model must use exactly four nouns.</td>
+          </tr>
+          <tr>
+            <td>GitHub #16075</td>
+            <td>
+              An explicit orchestration request was replaced by native subagents, with no
+              Run/Task/Dispatch provenance.
+            </td>
+            <td>
+              Role classification and “use Orca when explicitly requested” must be unambiguous and
+              tested.
+            </td>
+            <td>That a new top-level command namespace alone will prevent substitution.</td>
+          </tr>
+          <tr>
+            <td>GitHub #13360</td>
+            <td>
+              Task creation followed by dispatch requires ID plumbing and can leave an orphan Task.
+            </td>
+            <td>Common work creation should be atomic and require fewer intermediate decisions.</td>
+            <td>
+              Whether <code>work start</code> or a <code>--spec</code> flag is the clearest syntax.
+            </td>
+          </tr>
+          <tr>
+            <td>GitHub #16522</td>
+            <td>Unacked deliveries replay and hide newer messages; bare ack is easy to misuse.</td>
+            <td>
+              Mailbox state needs explicit replay/ack semantics and a clear “what needs action”
+              view.
+            </td>
+            <td>That the word <code>attention</code> is understandable without a definition.</td>
+          </tr>
+          <tr>
+            <td>GitHub #15180 / #16660</td>
+            <td>
+              PTY acceptance, provider submission, and turn start are conflated; false stalls
+              trigger bad retries.
+            </td>
+            <td>Receipts must expose evidence stages and safe next actions.</td>
+            <td>That agents want to see every underlying stage in normal output.</td>
+          </tr>
+          <tr>
+            <td>GitHub #15148</td>
+            <td>
+              Multi-worker waves produce noisy child-completion notifications while real input needs
+              can be silent.
+            </td>
+            <td>Attention should be a projection ordered by actionability and role.</td>
+            <td>One universal notification policy for every user or workflow.</td>
+          </tr>
+          <tr>
+            <td>Reference products</td>
+            <td>
+              Each exposes work, workers, communication, and status/attention, but with different
+              names and depth.
+            </td>
+            <td>The four areas are a useful common denominator for comparison.</td>
+            <td>That Orca should copy any one product’s command grammar.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="card">
+        <h3>Validation protocol before locking labels or commands</h3>
+        <ol>
+          <li>
+            <strong>Task benchmark:</strong> give agents five workflows—one worker, parallel
+            fan-out/join, ask/resume, queued prompt during a busy turn, and uncertain remote
+            recovery.
+          </li>
+          <li>
+            <strong>Compare variants:</strong> current CLI, current CLI plus improved wording, and
+            any proposed aliases such as <code>wait</code> or <code>work start</code>.
+          </li>
+          <li>
+            <strong>Measure:</strong> time to first correct command, number of commands,
+            retries/duplicate sends, wrong-target mutations, help lookups, and successful completion
+            without coordinator intervention.
+          </li>
+          <li>
+            <strong>Human comprehension:</strong> ask operators what each command will do before
+            execution; record misinterpretations of flags such as <code>--attention</code>.
+          </li>
+          <li>
+            <strong>Decision rule:</strong> keep a new noun/alias only if it improves task success
+            and reduces errors without hiding necessary recovery information. Otherwise keep the
+            existing command and improve its output/help.
+          </li>
+        </ol>
+      </div>
+
+      <div class="grid">
+        <div class="card metric">
+          <div class="number">P0</div>
+          <strong>Contract first</strong
+          ><span class="muted">Freeze vocabulary and invariants before changing behavior.</span>
+        </div>
+        <div class="card metric">
+          <div class="number">5</div>
+          <strong>Parallel foundation tracks</strong
+          ><span class="muted"
+            >Identity, mailbox, recovery, transcripts, and fixtures can run concurrently after
+            P0.</span
+          >
+        </div>
+        <div class="card metric">
+          <div class="number">1</div>
+          <strong>Small promotion PR</strong
+          ><span class="muted"
+            >Additive slices merge independently; promote defaults only after the matrix is
+            green.</span
+          >
+        </div>
+      </div>
+
+      <h2>The user-visible contract</h2>
+      <div class="two-col">
+        <div class="card">
+          <h3>When an agent sends a message</h3>
+          <p>
+            Today, the SQLite message is durable and replayable, but the wakeup is mostly an
+            in-memory waiter or an advisory PTY pointer. A process restart can lose the immediate
+            nudge even though the message remains safe; Orca must redrive only after a fresh
+            live-idle observation or explicit check. A sender normally sees only
+            <code>Sent &lt;message-id&gt;</code> or relay <code>Queued</code>.
+          </p>
+          <p>
+            During a busy Claude/Codex turn, <code>terminal send --enter</code> may report
+            <code>agent_prompt_stalled</code> even when the text is queued in the TUI and later
+            consumed. Retrying then duplicates the prompt.
+          </p>
+          <div class="stage">
+            <span>mail: recorded → routed → acked</span
+            ><span>nudge: pointer written → submit ambiguous/confirmed</span
+            ><span>prompt: bytes written → submitted → turn started</span
+            ><span>worker: report persisted → settled</span>
+          </div>
+          <p class="small-note">
+            These are separate receipt domains, not one total order. Not every provider can prove
+            every stage; the receipt names the furthest proven fact and an idempotent wait/recovery
+            operation.
+          </p>
+        </div>
+        <div class="card">
+          <h3>When a coordinator reads a worker</h3>
+          <p>
+            <code>worker-read --source auto</code> prefers a bounded decoded projection from the
+            currently selected provider session and falls back to redacted PTY output with a reason.
+            Attach-time binding is not yet guaranteed; cursors are scoped to dispatch, process
+            incarnation, source identity, and position.
+          </p>
+          <p>
+            <code>terminal.read</code> is provider-neutral PTY output. Claude Code may expose only
+            the visible ~50-line screen while Codex exposes a much longer buffer. Therefore a raw
+            screen cannot be the confirmation or full-scrollback contract.
+          </p>
+          <div class="callout warn">
+            <strong>Rule:</strong> provider transcript and submitted-prompt history are evidence;
+            screen text is advisory. Remote/SSH relay loss is <code>unverifiable</code>, never
+            <code>exited</code>.
+          </div>
+        </div>
+      </div>
+
+      <h2>Implementation DAG</h2>
+      <p class="lead">
+        Each node is a bounded agent-sized workstream. A worker owns its tests and contract; it
+        should not silently change another node’s projection or invent a second state store.
+      </p>
+      <div class="dag">
+        <svg viewBox="0 0 1120 300" role="img" aria-label="Orchestration vNext dependency DAG">
+          <defs>
+            <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 z" fill="#8291a8" />
+            </marker>
+          </defs>
+          <g stroke="#8291a8" stroke-width="2" fill="none" marker-end="url(#arrow)">
+            <path d="M560 52 L170 112" />
+            <path d="M560 52 L330 112" />
+            <path d="M560 52 L490 112" />
+            <path d="M560 52 L650 112" />
+            <path d="M560 52 L810 112" />
+            <path d="M170 160 L460 216" />
+            <path d="M330 160 L460 216" />
+            <path d="M490 160 L460 216" />
+            <path d="M650 160 L460 216" />
+            <path d="M810 160 L460 216" />
+            <path d="M460 260 L460 281" />
+          </g>
+          <g>
+            <rect x="465" y="18" width="190" height="48" rx="10" fill="#eaf1ff" stroke="#2563eb" />
+            <text x="560" y="39" text-anchor="middle">P0 Contract fixtures</text>
+            <text class="small" x="560" y="55" text-anchor="middle">
+              vocabulary · invariants · fakes
+            </text>
+            <rect x="75" y="112" width="190" height="48" rx="10" fill="#f1ebff" stroke="#7048b8" />
+            <text x="170" y="133" text-anchor="middle">P1 Identity</text>
+            <text class="small" x="170" y="149" text-anchor="middle">
+              Attempt · Endpoint · authority
+            </text>
+            <rect x="235" y="112" width="190" height="48" rx="10" fill="#e7f7ef" stroke="#16845b" />
+            <text x="330" y="133" text-anchor="middle">P2 Mailbox</text>
+            <text class="small" x="330" y="149" text-anchor="middle">
+              wakeups · receipts · acks
+            </text>
+            <rect x="395" y="112" width="190" height="48" rx="10" fill="#fff4df" stroke="#a15c00" />
+            <text x="490" y="133" text-anchor="middle">P4 Recovery</text>
+            <text class="small" x="490" y="149" text-anchor="middle">leases · stop · retry</text>
+            <rect x="555" y="112" width="190" height="48" rx="10" fill="#e5f7fa" stroke="#0891b2" />
+            <text x="650" y="133" text-anchor="middle">P5 Transcript</text>
+            <text class="small" x="650" y="149" text-anchor="middle">
+              provider reads · telemetry
+            </text>
+            <rect x="715" y="112" width="190" height="48" rx="10" fill="#eef1f6" stroke="#475569" />
+            <text x="810" y="133" text-anchor="middle">P7 Conformance</text>
+            <text class="small" x="810" y="149" text-anchor="middle">SSH · WSL · old peers</text>
+            <rect x="365" y="216" width="190" height="48" rx="10" fill="#ffebef" stroke="#db2777" />
+            <text x="460" y="237" text-anchor="middle">P3 Lifecycle truth</text>
+            <text class="small" x="460" y="253" text-anchor="middle">
+              Attempt events · outcomes
+            </text>
+            <rect x="365" y="268" width="190" height="28" rx="10" fill="#f1ebff" stroke="#7048b8" />
+            <text x="460" y="287" text-anchor="middle">P6 Fleet + attention</text>
+          </g>
+        </svg>
+      </div>
+      <p class="small-note">
+        P4 schema work may start early, but recovery behavior should consume the P1/P3 authority and
+        outcome contracts. P6 is deliberately last: it projects facts instead of creating another
+        source of truth.
+      </p>
+
+      <h2>Workstreams: exactly what each implementation agent owns</h2>
+      <div class="grid">
+        <article class="card workstream">
+          <h3>P0 · Contract vocabulary</h3>
+          <p><strong>Benefit:</strong> everyone sees the same honest states.</p>
+          <p>
+            <strong>Do:</strong> publish the state/authority matrix; define receipt stages; define
+            <code>live</code>/<code>unverifiable</code>/<code>exited</code>; add
+            duplicate/late/reordered event fixtures.
+          </p>
+          <p><strong>Do not:</strong> migrate behavior, rewrite the scheduler, or add AI policy.</p>
+          <p><strong>Touch:</strong> shared status types, docs, orchestration test fixtures.</p>
+          <p>
+            <strong>Verify:</strong> legal-transition, idempotency, replay, and old-client omission
+            tests.
+          </p>
+          <span class="tag now">unblocks all</span>
+        </article>
+        <article class="card workstream p1">
+          <h3>P1 · Stable identity + authority</h3>
+          <p><strong>Benefit:</strong> a retry or nested worker cannot complete the wrong lane.</p>
+          <p>
+            <strong>Current gap:</strong> capabilities and pane/process checks are strong. The main
+            risk is duplicating identities that already exist.
+          </p>
+          <p>
+            <strong>Do:</strong> formally treat immutable <code>dispatch_contexts.id</code> as the
+            Attempt ID and retain the existing terminal Resource ID; add only retry-of,
+            creator/role, and endpoint-incarnation facts; expose parent/depth and unsupervised
+            state.
+          </p>
+          <p>
+            <strong>Do not:</strong> add parallel Attempt/Resource tables, infer identity from
+            titles/model text, or remove legacy handles.
+          </p>
+          <p>
+            <strong>Touch:</strong> <code>db/dispatch-context/*</code>,
+            <code>db/worker-dispatch/*</code>, lifecycle reconciliation, migrations, RPC caller
+            identity.
+          </p>
+          <p>
+            <strong>Verify:</strong> stale retry, pane remint, process mismatch, nested completion,
+            legacy backfill, and identity spoof tests.
+          </p>
+          <span class="tag dep">depends on P0</span><span class="tag now">parallel</span>
+        </article>
+        <article class="card workstream p2">
+          <h3>P2 · Durable mailbox + wakeups</h3>
+          <p>
+            <strong>Benefit:</strong> messages are not lost or falsely failed, and agents do not
+            resend duplicates.
+          </p>
+          <p>
+            <strong>Current gap:</strong> mail rows/replay are durable, but notification is
+            fallible. The proven duplicate hole is commit-versus-notify; a read/register race is not
+            established on the current synchronous path.
+          </p>
+          <p>
+            <strong>Do:</strong> complete the mutation receipt and durable nudge outbox before
+            notification; keep separate mail, pointer, and prompt receipt domains; return
+            <code>queued_pending_turn</code> for accepted TUI input; make pointer injection advisory
+            and redrive only after a fresh live-idle observation.
+          </p>
+          <p>
+            <strong>Do not:</strong> collapse all stages into one total order, auto-resend ambiguous
+            prompts, or add an unnegotiated stream opcode.
+          </p>
+          <p>
+            <strong>Touch:</strong> <code>db/messages/*</code>, <code>run-delivery.ts</code>,
+            mailbox pointer/notification modules, mutation executor, runtime waiters, orchestration
+            CLI/RPC.
+          </p>
+          <p>
+            <strong>Verify:</strong> crash-after-commit/notify for send and reply,
+            pointer-before-Enter crash, queued-mid-turn no-duplicate, restart/live-idle redrive,
+            ack/replay races, and cross-run authorization.
+          </p>
+          <span class="tag dep">depends on P0</span><span class="tag now">parallel</span>
+        </article>
+        <article class="card workstream p3">
+          <h3>P3 · Attempt lifecycle + completion truth</h3>
+          <p>
+            <strong>Benefit:</strong> the coordinator can distinguish running, finished, and
+            unknown.
+          </p>
+          <p>
+            <strong>Current gap:</strong> <code>worker_done</code> settlement is transactional, but
+            several writers can update worker/context state independently; closed SQLite status
+            checks constrain additive enum changes.
+          </p>
+          <p>
+            <strong>Do:</strong> first route every lifecycle writer through guarded transition
+            primitives that update legacy projections and append receipts atomically; then add
+            richer observation/outcome projections and clock-domain-safe freshness.
+          </p>
+          <p>
+            <strong>Do not:</strong> widen legacy enums in the first slice, infer success from quiet
+            PTY/Git cleanliness/prose, or collapse SSH loss into exit.
+          </p>
+          <p>
+            <strong>Touch:</strong> dispatch context DB, worker stage/start/federated writers, Task
+            writers, lifecycle coordinator, heartbeat and receipt RPCs.
+          </p>
+          <p>
+            <strong>Verify:</strong> direct-update ratchet, rollback injection, event
+            ordering/replay, active-sibling races, report-after-reconnect, missing report, clock
+            skew, and SSH verdicts.
+          </p>
+          <span class="tag dep">P0 + P1 + P2</span>
+        </article>
+        <article class="card workstream p4">
+          <h3>P4 · Recovery + resource leases</h3>
+          <p>
+            <strong>Benefit:</strong> restart, stop, retry, and explicit release/recovery converge
+            without killing the wrong process.
+          </p>
+          <p>
+            <strong>Current gap:</strong> ownership/release fencing is strong, but stop, abandon,
+            local release, and federated release have different archive/liveness semantics.
+          </p>
+          <p>
+            <strong>Do:</strong> preserve the existing resource accounting, ownership/release
+            fencing, archive-before-close/liveness truth, explicit retain/release, and remote
+            release/archive behavior. Specify stop versus abandon versus release separately and add
+            recovery receipts only for observed operations.
+          </p>
+          <p>
+            <strong>Validate first (deferred follow-up):</strong> retention-expiry metadata, TTL
+            policy, and paginated/bulk cleanup. Instrument retention reason/age and run the existing
+            dry-run protocol against external, user-owned, transferred, federated, and unverifiable
+            resources; promote only with explicit policy/fencing acceptance tests. Until then, reuse
+            single-resource release/recovery and do not release automatically.
+          </p>
+          <p>
+            <strong>Do not:</strong> create a second lease table, close broad panes, auto-release
+            external/user-owned resources, duplicate ownership on retry, or let a recovery heuristic
+            override takeover/identity conflict.
+          </p>
+          <p>
+            <strong>Touch:</strong> worker dispatch/terminal DB, ownership/release reconciliation,
+            federation control, archive reader.
+          </p>
+          <p>
+            <strong>Verify:</strong> false-exited archive reads, stop output-loss receipt, abandon
+            retention, release identity conflict, reconnect, and remote release. The deferred
+            follow-up uses retention reason/age measurements, dry-run cleanup, and policy/fencing
+            acceptance tests; this is not a committed TTL/cleanup implementation.
+          </p>
+          <span class="tag dep">P0 + P1 + P3</span>
+          <span class="tag defer">Retention/TTL/cleanup: validate first</span>
+        </article>
+        <article class="card workstream p5">
+          <h3>P5 · Provider transcript/read contract</h3>
+          <p>
+            <strong>Benefit:</strong> coordinator evidence is consistent across Claude, Codex,
+            folders, SSH, and WSL.
+          </p>
+          <p>
+            <strong>Current gap:</strong> provider maps and watchers already exist, but direct SSH
+            transcript selection can resolve in the client process and attach-time exactness is
+            overstated.
+          </p>
+          <p>
+            <strong>Do:</strong> consolidate existing provider profiles; carry host/connection
+            identity into session resolution; route direct SSH through a negotiated remote read, WSL
+            through guarded UNC on the Windows host, and federation through the peer; expose source
+            exactness/completeness/fallback metadata.
+          </p>
+          <p>
+            <strong>Do not:</strong> invent a universal transcript format, read remote files from
+            the desktop, claim attach-time binding without persisted evidence, or replace PTY UX
+            with JSONL. Gate any in-flight mirror on P1/P4 and a demonstrated failure case.
+          </p>
+          <p>
+            <strong>Touch:</strong> <code>native-chat/*</code>, worker transcript/output readers,
+            terminal query RPC/CLI, provider profiles, archive/relay.
+          </p>
+          <p>
+            <strong>Verify:</strong> SSH local-sentinel isolation, WSL UNC routing, cursor/process
+            replacement, archive fallback provenance, Claude short-screen behavior, subscription
+            gaps, redaction, and size limits.
+          </p>
+          <span class="tag dep">depends on P0</span><span class="tag now">parallel</span>
+        </article>
+        <article class="card workstream p6">
+          <h3>P6 · Fleet query + attention projection</h3>
+          <p>
+            <strong>Benefit:</strong> one query answers what is running, what needs attention, and
+            the next safe action.
+          </p>
+          <p>
+            <strong>Current gap:</strong> workerList already provides a local projection and
+            renderer status is push-fed; the missing work is bounded composition and negotiated
+            remote batching, not a greenfield fleet store.
+          </p>
+          <p>
+            <strong>Do:</strong> first extend/combine the existing read-only worker projection
+            locally; then add a per-host batched remote snapshot with budgets, partial-host errors,
+            stable pagination, and no transcript bodies. Project root completion, input, approval,
+            failure, and interruption separately.
+          </p>
+          <p>
+            <strong>Do not:</strong> create a second UI state store, add merge/cost policy to the
+            kernel, blanket-suppress notifications, or assume the renderer is polling every lane.
+          </p>
+          <p>
+            <strong>Touch:</strong> worker listing/coordinator projection, RPC/CLI list/show,
+            renderer notifications, federation query.
+          </p>
+          <p>
+            <strong>Verify:</strong> local projection parity, bounded 100-worker/two-host calls,
+            stale/unknown display, pagination, partial-host budgets, notification coalescing, and
+            redaction.
+          </p>
+          <span class="tag dep">after P2–P5</span>
+        </article>
+        <article class="card workstream p7">
+          <h3>P7 · Cross-host/provider conformance</h3>
+          <p>
+            <strong>Benefit:</strong> the same contract survives mixed versions and remote loss.
+          </p>
+          <p>
+            <strong>Current gap:</strong> protocol and relay capabilities already exist, but skew
+            tests and capability caching must begin before the first wire-changing slice.
+          </p>
+          <p>
+            <strong>Do:</strong> make old/new DB, RPC, relay, provider, SSH, WSL, and federated
+            fixtures continuous infrastructure; cache unsupported capabilities by peer
+            fingerprint/runtime epoch; add batched host snapshot negotiation.
+          </p>
+          <p>
+            <strong>Do not:</strong> defer compatibility to the end, add unnegotiated stream
+            opcodes, or infer process death from client/relay absence.
+          </p>
+          <p>
+            <strong>Touch:</strong> federation RPC, SSH/WSL adapters, protocol/capability cache,
+            remote compatibility tests, provider fixtures.
+          </p>
+          <p>
+            <strong>Verify:</strong> CI matrix asserting execution-host reads, safe old-peer
+            downgrade, bounded partial-host behavior, and <code>unverifiable</code> on contact loss.
+          </p>
+          <span class="tag dep">starts with P0/P1</span><span class="tag now">continuous</span>
+        </article>
+      </div>
+
+      <h2>Terminal read: what to copy from the references</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th>Default read source</th>
+            <th>Provider-specific?</th>
+            <th>Fallback / remote behavior</th>
+            <th>Orca takeaway</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Overstory</td>
+            <td>
+              Runtime adapters and structured headless stdout/EventStore; tmux visibility fallback.
+            </td>
+            <td>Adapter API is agent-agnostic; parsers are provider-specific.</td>
+            <td>Mostly local; no comparable SSH/federation contract.</td>
+            <td>Keep a narrow provider adapter boundary and prefer structured events.</td>
+          </tr>
+          <tr>
+            <td>Paperclip</td>
+            <td>
+              Adapter stdout/stderr/system chunks in a durable NDJSON RunLogStore; optional
+              object-storage mirror.
+            </td>
+            <td>Provider-neutral log chunks behind provider adapters.</td>
+            <td>Live tail plus durable archive survives pod loss.</td>
+            <td>
+              Measure Orca output loss first; consider bounded in-flight mirroring only if a
+              concrete gap remains.
+            </td>
+          </tr>
+          <tr>
+            <td>Herdr</td>
+            <td>
+              Execution-host terminal history: <code>visible</code>, <code>recent</code>, and
+              <code>detection</code>; passive subscriptions.
+            </td>
+            <td>Read API is agent-agnostic; lifecycle/session hooks are provider-aware.</td>
+            <td>
+              Server owns panes; remote attach reads on the target host; explicit
+              <code>unknown</code>.
+            </td>
+            <td>
+              Keep screen/recent/detection intent distinct; instrument existing subscriptions before
+              adding a passive watch.
+            </td>
+          </tr>
+          <tr>
+            <td>Gas Town</td>
+            <td>tmux by default; Claude JSONL watcher and OTel events are opt-in.</td>
+            <td>Lifecycle protocol is generic; transcript watcher is Claude-specific.</td>
+            <td>
+              Restart-first sessions and append-only feed/audit events; no general SSH transcript
+              reader.
+            </td>
+            <td>Use tmux as bounded evidence, correlate output with run/attempt IDs.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="callout">
+        <strong>Answer to the key design question:</strong> transcript reading should be
+        agent-agnostic at the RPC/CLI contract and transport layer, but provider-specific at session
+        discovery and decoding. The default should be “best exact source available”: provider
+        transcript first, bounded PTY fallback with an explicit warning. Raw screen reads remain a
+        separate terminal product.
+      </div>
+
+      <h2>Current-main behavior worth preserving</h2>
+      <div class="two-col">
+        <div class="card">
+          <h3>Already strong</h3>
+          <ul>
+            <li>Stable Run, Task, Dispatch, worker, and terminal-resource records.</li>
+            <li>Capability hashes, pane identity, and process-incarnation fencing.</li>
+            <li>Transactional worker start and idempotent <code>worker_done</code> settlement.</li>
+            <li>
+              Heartbeat suppression, retry circuit breaker, and conservative stop/abandon behavior.
+            </li>
+            <li>Archive-before-close and exact terminal identity re-proofing.</li>
+            <li>
+              Execution-host routing for SSH/federation/WSL and
+              <code>live</code>/<code>unverifiable</code>/<code>exited</code> semantics.
+            </li>
+            <li>Transcript-first worker reads with bounded, redacted PTY fallback.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Do not regress</h3>
+          <ul>
+            <li>Do not make pane handles or terminal titles durable identity.</li>
+            <li>
+              Do not interpret a PTY write, timeout, quiet screen, or missing client as process
+              death.
+            </li>
+            <li>
+              Do not auto-release external, user-owned, transferred, or identity-conflicted
+              resources.
+            </li>
+            <li>Do not trust completion prose over host evidence.</li>
+            <li>Do not read SSH/WSL transcript files from the desktop process.</li>
+            <li>Do not add a remote stream opcode without capability negotiation.</li>
+            <li>Do not require a Git worktree for folder workspaces.</li>
+          </ul>
+        </div>
+      </div>
+
+      <h2>Phased delivery and review gates</h2>
+      <div class="card">
+        <ol>
+          <li>
+            <strong>Contracts PR:</strong> P0, characterization fixtures, shared states, and fake
+            provider/host harness.
+          </li>
+          <li>
+            <strong>Foundation PRs:</strong> P1 identity and P2 mailbox in parallel, additive and
+            dual-read where needed.
+          </li>
+          <li>
+            <strong>Truth PRs:</strong> P3 lifecycle and P4 leases/recovery after identity and
+            receipt tests pass.
+          </li>
+          <li>
+            <strong>Evidence PRs:</strong> P5 transcript/provider capability and P7
+            federation/SSH/WSL matrix.
+          </li>
+          <li>
+            <strong>Projection PR:</strong> P6 fleet query and attention UX, consuming only durable
+            facts from prior slices.
+          </li>
+          <li>
+            <strong>Promotion:</strong> after independently merged slices pass the full matrix,
+            change defaults in a small promotion PR; remove shims only when mixed-version telemetry
+            proves they are unused.
+          </li>
+        </ol>
+      </div>
+      <div class="grid" style="margin-top: 15px">
+        <div class="card">
+          <h3>Must pass before merge</h3>
+          <ul>
+            <li>
+              Busy-turn prompt returns
+              <code>terminal_queued</code>/<code>queued_pending_turn</code>, never a hard failure.
+            </li>
+            <li>Retry by operation/message ID cannot duplicate a prompt.</li>
+            <li>
+              Mail survives restart and is redriven only after a fresh live-idle observation or
+              explicit check; replay is labeled and ack is idempotent.
+            </li>
+            <li>
+              Every residual resource has typed ownership/absence, retention reason, and safe next
+              action.
+            </li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Must pass in the matrix</h3>
+          <ul>
+            <li>No false <code>ready</code> or <code>exited</code> from weak observation.</li>
+            <li>Claude/Codex/unsupported transcript behavior is explicit and fixture-tested.</li>
+            <li>Local, folder, SSH, WSL, and old/new federation paths preserve host ownership.</li>
+            <li>
+              Screen, tail, transcript, and archive cursors cannot cross process/source boundaries.
+            </li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Must pass for operators</h3>
+          <ul>
+            <li>One fleet query replaces per-lane polling.</li>
+            <li>A five-worker wave emits at most one default root completion alert.</li>
+            <li>Input, approval, failure, and interruption remain distinct.</li>
+            <li>Incoming orchestration mail never overwrites or submits a human draft.</li>
+          </ul>
+        </div>
+      </div>
+
+      <h2>Implementation checklist for every worker</h2>
+      <div class="card">
+        <p>Before coding, answer these six questions in the PR description:</p>
+        <ol>
+          <li>Which durable entity owns this state?</li>
+          <li>What proves delivery, progress, completion, and cleanup?</li>
+          <li>What happens after restart, duplicate delivery, timeout, or lost remote contact?</li>
+          <li>Which actor is authorized, and how is a stale Attempt fenced?</li>
+          <li>What exact safe next action does failure expose?</li>
+          <li>Can the behavior be tested without reading a screen buffer?</li>
+        </ol>
+        <p class="small-note">
+          If a proposed feature cannot answer these questions, it is probably adding another
+          projection or heuristic and should wait until the kernel contracts are in place.
+        </p>
+      </div>
+
+      <h2>Review pass: make the plan ergonomic for agents</h2>
+      <div class="callout good">
+        <strong>Ergonomics hypothesis:</strong> keep Run, Task, Attempt, Dispatch, Endpoint,
+        Resource, lease, receipt, and evidence as durable/internal facts. Test whether the everyday
+        agent surface is clearer when it centers on only <strong>Work</strong>,
+        <strong>Worker</strong>, <strong>Message</strong>, and <strong>Attention</strong>. Stable
+        IDs still appear in JSON and exact recovery commands, but agents should not manually shuttle
+        ten IDs through the happy path.
+      </div>
+      <div class="two-col">
+        <div class="card">
+          <h3>One primary status, evidence on demand</h3>
+          <p>
+            Do not expose nine receipt stages as peer statuses in the default list. Use one
+            scan-friendly status and show the furthest evidence stage only when expanded.
+          </p>
+          <table>
+            <thead>
+              <tr>
+                <th>Agent-facing status</th>
+                <th>Meaning</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Starting</td>
+                <td>Orca owns a start request; no execution turn is proven yet.</td>
+              </tr>
+              <tr>
+                <td>Working</td>
+                <td>A provider turn or execution activity is observed.</td>
+              </tr>
+              <tr>
+                <td>Waiting for input</td>
+                <td>A durable question or approval blocks progress.</td>
+              </tr>
+              <tr>
+                <td>Finished</td>
+                <td>A valid result report was persisted and settled.</td>
+              </tr>
+              <tr>
+                <td>Needs review</td>
+                <td>Execution appears finished but evidence is missing or contradictory.</td>
+              </tr>
+              <tr>
+                <td>Failed</td>
+                <td>A terminal failure is proven.</td>
+              </tr>
+              <tr>
+                <td>Connection lost</td>
+                <td>Process verdict is <code>unverifiable</code>; no death inference.</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="small-note">
+            <code>live</code>, <code>unverifiable</code>, and <code>exited</code> remain the exact
+            machine verdicts. Avoid using <code>ready</code> as a human lifecycle label because
+            today it means input accepted.
+          </p>
+        </div>
+        <div class="card">
+          <h3>Shorter happy-path commands</h3>
+          <p>
+            The low-level API remains available, but common actions should require less ID plumbing:
+          </p>
+          <pre>
+orca orchestration worker-start \
+  --spec "Review authentication error handling" \
+  --worktree current --agent codex --json
+
+orca orchestration status                 # current Run, attention first
+orca orchestration status --tree          # dependencies and nested workers
+orca orchestration check --wait --attention --timeout-ms 900000 --json</pre
+          >
+          <p>
+            Run-scoped task names and <code>--after api,ui</code> should make small DAGs readable.
+            JSON still returns authoritative IDs and exact next actions.
+          </p>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Recommended user-facing wording</h3>
+        <div class="grid">
+          <div>
+            <span class="tag now">Prompt queued</span>
+            <p>“Queued for the agent’s next turn. No resend is needed.”</p>
+          </div>
+          <div>
+            <span class="tag now">Mail saved</span>
+            <p>“Message saved. The agent has not been notified yet; Orca will retry the wakeup.”</p>
+          </div>
+          <div>
+            <span class="tag dep">Replay</span>
+            <p>“Replayed after reconnect; you may have seen this before.”</p>
+          </div>
+          <div>
+            <span class="tag dep">Ask timeout</span>
+            <p>“Question is still pending. Resume waiting; do not ask again.”</p>
+          </div>
+        </div>
+      </div>
+
+      <h2>Technical review corrections</h2>
+      <div class="callout danger">
+        <strong>Important:</strong> the first audit was directionally right but too broad in a few
+        places. The corrections below are now part of the plan and should be treated as
+        implementation gates.
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Original direction</th>
+            <th>Correction before implementation</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Add new Attempt and Resource identities</td>
+            <td>
+              Reuse immutable <code>dispatch_contexts.id</code> as Attempt ID and the existing
+              terminal-resource ID. Add retry-of, creator/role, and endpoint-incarnation facts only.
+            </td>
+          </tr>
+          <tr>
+            <td>One monotonic receipt chain</td>
+            <td>
+              Keep separate domains: mail (<code>recorded → routed → acked</code>), pointer nudge,
+              terminal prompt, and worker lifecycle. Correlate them by IDs; never infer provider
+              submission from <code>delivered_at</code>.
+            </td>
+          </tr>
+          <tr>
+            <td>Durable wake epoch first</td>
+            <td>
+              First fix the proven commit-versus-notify gap using the existing mutation ledger and a
+              durable nudge outbox. Characterize the proposed waiter race before adding an epoch.
+            </td>
+          </tr>
+          <tr>
+            <td>Archive is proof of exit</td>
+            <td>
+              Archive provenance and liveness are orthogonal. <code>unknown</code>/<code
+                >releasing</code
+              >
+              remains <code>unverifiable</code>; only host-confirmed close projects
+              <code>exited</code>.
+            </td>
+          </tr>
+          <tr>
+            <td>Widen lifecycle enums immediately</td>
+            <td>
+              Use additive observation/receipt tables or nullable fields first. Closed SQLite checks
+              require explicit compatibility migrations and rollback fixtures.
+            </td>
+          </tr>
+          <tr>
+            <td>Every active Attempt has a local lease</td>
+            <td>
+              Only post-attach supervised local dispatches require one execution-host resource.
+              Pre-attach, context-only, unsupervised, and federated-home rows have typed
+              absence/remote attachment.
+            </td>
+          </tr>
+          <tr>
+            <td>One final consolidation PR</td>
+            <td>
+              Merge additive slices independently behind capabilities. Finish with a small promotion
+              PR that changes defaults after telemetry and mixed-version tests pass.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="card">
+        <h3>Revised technical order</h3>
+        <pre>
+R0 characterize current contracts + old/new fixtures
+ ├─ fix false-exited archive projection
+ ├─ fix commit → notify recovery
+ └─ establish migration/skew/provider fixtures
+R1 identity decision (Dispatch == Attempt; retain Resource ID)
+R2 guarded lifecycle transition primitives (all writers dual-write)
+ ├─ R3a mailbox/outbox atomicity
+ ├─ R3b provider/topology-safe reads
+ ├─ R3c early local read-only fleet projection
+ └─ R3d atomic Task-create + worker-start
+R4 prompt-specific idempotency (after endpoint/provider capability)
+R5 lifecycle reducer + clock-domain-safe freshness
+R6 existing-resource release/archive accounting
+   └─ validate first: retention-expiry metadata, TTL policy, bulk cleanup
+R7 negotiated remote transcript/release/batched fleet
+R8 fleet/attention UI promotion</pre
+        >
+        <p class="small-note">
+          Compatibility and skew testing is continuous infrastructure beginning at R0, not a final
+          phase.
+        </p>
+      </div>
+
+      <h2>Evidence gate: what is actually justified</h2>
+      <p class="lead">
+        A second audit checked every remaining proposal against a direct Orca report, a reproducible
+        current-main failure, or a required safety/compatibility boundary. The detailed register is
+        in <code>orchestration-plan-evidence-audit.md</code>; this is the decision summary.
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Decision</th>
+            <th>Build / validate / defer</th>
+            <th>Evidence-backed scope</th>
+            <th>Do not over-commit</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="tag now">Build now</span></td>
+            <td>
+              Prompt receipts; commit→notify recovery; rejected/late <code>worker_done</code>;
+              atomic <code>worker-start --spec</code>.
+            </td>
+            <td>
+              Windows queued-prompt report; #15180/#16095/#16660/#15274; #13364/#13298; #13360.
+            </td>
+            <td>
+              Keep prompt, mail, nudge, and lifecycle receipts separate. No automatic resend or
+              silent task deletion.
+            </td>
+          </tr>
+          <tr>
+            <td><span class="tag now">Build now</span></td>
+            <td>
+              Archive liveness/provenance; SSH execution-host routing; guarded lifecycle writers;
+              identity reuse; clock-safe liveness; skew fixtures.
+            </td>
+            <td>
+              Current-main code review found false <code>exited</code>, client-local SSH path risk,
+              unfenced writers, mixed clocks, and migration/remote-wire hazards.
+            </td>
+            <td>
+              Reuse Dispatch/Resource IDs and current ownership tables. Do not add parallel stores,
+              leases, or an all-purpose event chain.
+            </td>
+          </tr>
+          <tr>
+            <td><span class="tag dep">Validate first</span></td>
+            <td>
+              Four agent-facing labels; <code>status</code>/<code>--attention</code>/<code
+                >work start</code
+              >; durable wait epoch; partial acks; draft detection; passive watch.
+            </td>
+            <td>
+              #4397 and #16075 support discoverability/role clarity; #16522 supports replay/ack
+              clarity; #15148 supports attention problems. They do not prove exact nouns or
+              defaults.
+            </td>
+            <td>
+              Run task-success and comprehension benchmarks. Preserve current grammar, whole-batch
+              ack, and no-auto-Enter behavior until measured.
+            </td>
+          </tr>
+          <tr>
+            <td><span class="tag dep">Validate first</span></td>
+            <td>
+              Fleet query, notification coalescing, cancel/supersede/takeover nouns, TTLs, and
+              in-flight archive mirroring.
+            </td>
+            <td>
+              Reports and references support the direction, but existing <code>workerList</code>,
+              push projections, release archives, and conservative recovery already cover much of
+              the mechanism.
+            </td>
+            <td>
+              Extend existing projections; measure polling/output loss/retention first. Do not make
+              “one root alert” or automatic expiry universal.
+            </td>
+          </tr>
+          <tr>
+            <td><span class="tag defer">Defer</span></td>
+            <td>
+              Universal transcript format; duplicate Attempt/Resource/lease/UI stores; automatic
+              ambiguous prompt resend; heuristic exit; mandatory local lease; broad governance/role
+              hierarchy.
+            </td>
+            <td>
+              No demonstrated Orca need, or directly conflicts with current safety/authority
+              contracts.
+            </td>
+            <td>Re-open only with a focused failure case and an owner/compatibility plan.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="callout warn">
+        <strong>Nuance:</strong> “reference-backed” means a pattern is worth testing, not that Orca
+        should copy it. A proposal moves from validate-first to build-now only when the experiment
+        shows fewer retries, wrong-target actions, missed inputs, or confirmation failures without
+        hiding uncertainty.
+      </div>
+
+      <h2>Skill rewrite: concise, phase-loaded guidance</h2>
+      <p class="lead">
+        The current served guide is functionally careful but too flat: it delays the normal loop,
+        repeats ownership/placement rules, and ends with a low-level fallback example that is more
+        memorable than the preferred path. We are borrowing only the reference project’s
+        skill-writing style—compact kernel, progressive disclosure, one owner per reference, and
+        executable recipes—not adopting its product or process methodology. The rewrite should
+        preserve Orca’s safety contracts while changing how information is loaded.
+      </p>
+      <div class="two-col">
+        <div class="card">
+          <h3>Always-loaded kernel (target 140–190 lines)</h3>
+          <ol>
+            <li>
+              <strong>Outcome:</strong> what “done” means, who consumes the result, and the
+              safe-failure rule.
+            </li>
+            <li>
+              <strong>Role classifier:</strong> coordinator, dispatched worker, full handoff, legacy
+              operator, or ordinary terminal agent.
+            </li>
+            <li>
+              <strong>Authority floor:</strong> Dispatch owns lifecycle; execution host owns remote
+              facts; contact loss is not exit.
+            </li>
+            <li>
+              <strong>Canonical loop:</strong> create/bind Run → create Tasks → start ready wave →
+              wait → process all mail → reuse/retain/release.
+            </li>
+            <li>
+              <strong>Completion:</strong> worker_done exactly once, then idle; coordinator accounts
+              for every settled terminal.
+            </li>
+            <li>
+              <strong>Reference router:</strong> load conditional guidance only at the action
+              boundary.
+            </li>
+          </ol>
+          <p class="small-note">
+            The injected worker preamble should be treated as a separately versioned mini-kernel
+            because it carries the exact capability, handle, Task ID, Dispatch ID, and completion
+            command.
+          </p>
+        </div>
+        <div class="card">
+          <h3>Owned references (progressive disclosure)</h3>
+          <ul>
+            <li><code>coordinator-loop.md</code> — DAG waves, names, follow-up reuse.</li>
+            <li>
+              <code>worker-contract.md</code> — heartbeat, ask/resume, worker_done, post-completion.
+            </li>
+            <li><code>placement-and-remote.md</code> — current/folder/worktree/SSH/WSL rules.</li>
+            <li><code>messaging-and-gates.md</code> — delivery replay, acks, groups, gates.</li>
+            <li><code>recovery-and-cleanup.md</code> — stop/retry/unknown/retain/release.</li>
+            <li>
+              <code>low-level-topology.md</code> — only when worker-start cannot express
+              argv/topology.
+            </li>
+            <li>
+              <code>legacy-contract-migration.md</code> — only when an authority label or adopted
+              Run is present.
+            </li>
+          </ul>
+          <p class="small-note">
+            Each reference owns one concern and must not restate the whole kernel. If the CLI cannot
+            deliver references atomically, ship a compact single-file fallback rather than dead
+            relative links.
+          </p>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Skill rules that prevent predictable agent mistakes</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Anti-pattern</th>
+              <th>Teach instead</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Generic subagent described as Orca orchestration</td>
+              <td>Use Run + Task + worker-start when coordination state matters.</td>
+            </tr>
+            <tr>
+              <td>Low-level terminal create + dispatch as the default</td>
+              <td>Use worker-start; load low-level topology only for an expressiveness gap.</td>
+            </tr>
+            <tr>
+              <td>Retry after timeout, idle TUI, or remote disappearance</td>
+              <td>Treat as checkpoint/unknown; preserve authority and inspect/reconnect.</td>
+            </tr>
+            <tr>
+              <td>Re-ask after timeout</td>
+              <td>Resume the original question message ID.</td>
+            </tr>
+            <tr>
+              <td>Release on heartbeat, timeout, or stale report</td>
+              <td>Release only after accepted settlement, and archive first.</td>
+            </tr>
+            <tr>
+              <td>Raw JSON heartbeat payload in recipes</td>
+              <td>
+                Use typed <code>--task-id</code>, <code>--dispatch-id</code>, and
+                <code>--phase</code> flags.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout warn">
+        <strong>Packaging gate:</strong> <code>orca skills get orchestration</code> currently serves
+        one version-matched document while the installed stub contains only <code>SKILL.md</code>.
+        Before adding reference paths, either make the skill package (kernel + references)
+        materialize atomically for the exact runtime build, or deliberately ship the compact
+        single-file guide and use command <code>--help</code> for late-loaded detail. Never publish
+        references that the receiving harness cannot resolve.
+      </div>
+
+      <h2>Review artifacts</h2>
+      <div class="card">
+        <p>
+          Independent review reports were produced in the same workspace and are reflected on this
+          page:
+        </p>
+        <ul>
+          <li>
+            <code>orchestration-plan-review-technical.md</code> — adversarial main-code correctness,
+            sequencing, and migration review.
+          </li>
+          <li>
+            <code>orchestration-plan-review-ergonomics.md</code> — coordinator/worker/nested-agent
+            usability review with concrete CLI flows.
+          </li>
+          <li>
+            <code>orchestration-plan-review-skill.md</code> — reference-inspired skill packaging,
+            phase loading, command ownership, and eval design.
+          </li>
+          <li>
+            <code>orchestration-plan-evidence-audit.md</code> — evidence gate classifying each
+            remaining proposal as build now, validate first, or defer.
+          </li>
+        </ul>
+        <p class="small-note">
+          Any unresolved finding must become a plan correction, a regression test, or an explicitly
+          accepted limitation.
+        </p>
+      </div>
+
+      <div class="footer">
+        Generated from the parallel Orca audits in this workspace. Source code and
+        <code>orchestration-issues.md</code> were not modified by this artifact conversion. The HTML
+        is standalone: save or open it directly in a browser.
+      </div>
+    </main>
+  </body>
+</html>

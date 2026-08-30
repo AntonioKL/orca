@@ -146,6 +146,63 @@ describe('Task/Dispatch lifecycle guards', () => {
     expectCapability(database, worker, false)
   })
 
+  it('settles a stop-unknown worker when a positive PTY exit arrives', () => {
+    const database = createDatabase()
+    const task = database.createTask({ spec: 'stop-unknown exited worker' })
+    const worker = startWorker(database, task.id, 'stop_unknown_exited')
+
+    expect(database.beginWorkerStop(worker.dispatchId, 'runtime_test').disposition).toBe('stopping')
+    expect(database.markWorkerStopUnknown(worker.dispatchId, 'stop response lost').state).toBe(
+      'stop_unknown'
+    )
+
+    expect(() =>
+      database.failDispatch(worker.dispatchId, 'process exited', {
+        workerProcessExited: true,
+        terminationReason: 'exited'
+      })
+    ).not.toThrow()
+    expect(database.getTask(task.id)?.status).toBe('blocked')
+    expect(database.getDispatchContextById(worker.dispatchId)).toMatchObject({
+      status: 'failed',
+      termination_reason: 'exited',
+      capability_revoked_at: expect.any(String)
+    })
+    expect(database.getWorkerDispatch(worker.dispatchId)).toMatchObject({
+      state: 'failed',
+      stage: 'process_exited',
+      last_error: 'process exited'
+    })
+    expectCapability(database, worker, false)
+    expect(database.getLifecycleTransitionReceipts('worker', worker.dispatchId)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          from_state: 'stop_unknown',
+          to_state: 'failed',
+          kind: 'worker_process_exited'
+        })
+      ])
+    )
+    expect(database.getLifecycleTransitionReceipts('dispatch', worker.dispatchId)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          from_state: 'dispatched',
+          to_state: 'failed',
+          kind: 'dispatch_failed'
+        })
+      ])
+    )
+    expect(database.getLifecycleTransitionReceipts('task', task.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          from_state: 'dispatched',
+          to_state: 'blocked',
+          kind: 'task_dispatch_interrupted'
+        })
+      ])
+    )
+  })
+
   it('keeps a Task dispatched when missing-terminal recovery leaves another worker active', () => {
     const database = createDatabase()
     const task = database.createTask({ spec: 'legacy missing-terminal split' })
