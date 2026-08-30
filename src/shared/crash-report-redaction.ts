@@ -23,15 +23,26 @@ const CREDENTIAL_URL_PATTERN = /\b[A-Za-z0-9._%+-]+:[A-Za-z0-9._%+-]+@(?=[^/\s]+
 const SECRET_ASSIGNMENT_PATTERN =
   /\b(token|access[_-]?token|refresh[_-]?token|api[_-]?key|client[_-]?secret|secret|password|account[_-]?key)\s*[:=]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^&\s,;]+)/gi
 
-// Quoted paths retain spaces; unquoted paths stop at whitespace to preserve prose.
+// Characters that end an unquoted path token.
+const PATH_STOP = '\\s"\'`<>)'
+
+// Quoted paths keep their spaces. An unquoted path crosses a space only to reach a run that
+// continues it -- one carrying a separator but not starting one, so a second path stays separate --
+// which keeps emitting the marker and removing the path a single operation rather than two.
+// Sentence punctuation and ':' (URL schemes, line:col) end the crossing, so prose after a path survives.
+const unquotedPathTail = (separator: string): string =>
+  `(?:[^${PATH_STOP}]|(?<![.,;:!?])[ \\t](?=(?:[^${PATH_STOP}:]*[ \\t])*?[^${PATH_STOP}:${separator}][^${PATH_STOP}:]*${separator}))*`
+const POSIX_TAIL = unquotedPathTail('/')
+const WINDOWS_TAIL = unquotedPathTail('\\\\')
+
 const PATH_PATTERNS = [
   /(["'`])\/[A-Za-z0-9._-]+\/(?:(?!\1)[^<>\n\r])+\1/g,
   /(["'`])[A-Za-z]:\\(?:(?!\1)[^<>\n\r])+\1/gi,
   /(["'`])\\\\[^\\\s"'`<>\n\r)]+\\(?:(?!\1)[^<>\n\r])+\1/gi,
-  /(?<![A-Za-z0-9./])\/[A-Za-z0-9._-]+\/(?:\\ |[^\s"'`<>)]*)/g,
-  /(?<![A-Za-z0-9])[A-Za-z]:\\(?:\\ |[^\s"'`<>\n\r)]*)/gi,
-  /\\\\[^\\\s"'`<>\n\r)]+\\(?:\\ |[^\s"'`<>\n\r)]*)/gi,
-  /%(?:USERPROFILE|APPDATA|LOCALAPPDATA|HOMEDRIVE|HOMEPATH)%[^\s"'`<>)]*/gi
+  new RegExp(`(?<![A-Za-z0-9./])/[A-Za-z0-9._-]+/${POSIX_TAIL}`, 'g'),
+  new RegExp(`(?<![A-Za-z0-9])[A-Za-z]:\\\\${WINDOWS_TAIL}`, 'gi'),
+  new RegExp(`\\\\\\\\[^\\\\${PATH_STOP}]+\\\\${WINDOWS_TAIL}`, 'gi'),
+  new RegExp(`%(?:USERPROFILE|APPDATA|LOCALAPPDATA|HOMEDRIVE|HOMEPATH)%${WINDOWS_TAIL}`, 'gi')
 ]
 
 export function sanitizeCrashReportString(
