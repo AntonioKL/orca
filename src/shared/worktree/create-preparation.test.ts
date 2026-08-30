@@ -35,4 +35,14 @@ describe('worktree create preparation classification', () => {
       })
     ).toBe(true)
   })
+
+  it('does not classify an arbitrary detached user path by directory name alone', () => {
+    expect(
+      isWorktreeCreatePreparation({
+        path: `/workspace/${WORKTREE_CREATE_PREPARATION_DIRECTORY}/user-worktree`,
+        branch: undefined,
+        lockReason: undefined
+      })
+    ).toBe(false)
+  })
 })

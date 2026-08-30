@@ -36,6 +36,8 @@ export function isWorktreeCreatePreparation(worktree: {
   if (worktree.branch) {
     return false
   }
-  const pathParts = worktree.path.split(/[\\/]+/)
-  return pathParts.includes(WORKTREE_CREATE_PREPARATION_DIRECTORY)
+  // Unlocked leftovers are only recoverable when the generated `<pid>-...`
+  // segment is present; an arbitrary user directory named `.orca-preparing`
+  // is not enough evidence to hide or remove a worktree.
+  return parseWorktreePreparationPathOwnerPid(worktree.path) !== null
 }
