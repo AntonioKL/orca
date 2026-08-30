@@ -233,6 +233,7 @@ export const WORKTREE_HANDLERS: Record<string, CommandHandler> = {
     const result = await client.call<RuntimeWorktreeCreateResult>('worktree.create', {
       repo: await getCreateRepoSelector(flags, cwdParentWorktree, client),
       name: requestedName,
+      // The CLI name is typed by a person, so keep it verbatim and pinned.
       displayName: requestedName,
       displayNameKind: 'user',
       baseBranch: getOptionalStringFlag(flags, 'base-branch'),

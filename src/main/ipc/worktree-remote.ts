@@ -75,7 +75,7 @@ type CreateWorktreeArgsWithSystemProvenance = CreateWorktreeArgs & {
 import {
   sanitizeWorktreeName,
   resolveWorktreeCreateDisplayName,
-  shouldPersistRequestedWorktreeDisplayName,
+  resolveWorktreeCreateDisplayNameMeta,
   computeValidatedBranchName,
   computeWorktreePath,
   computeRemoteWorktreePath,
@@ -84,7 +84,6 @@ import {
   getWorktreeCreationLayout,
   getWorktreePathSettings,
   hasRepoWorktreeBasePath,
-  shouldSetDisplayName,
   mergeWorktree
 } from './worktree-logic'
 import { findCreatedWorktree } from './created-worktree-reconciliation'
@@ -1792,17 +1791,12 @@ export async function createRemoteWorktree(
     baseRef: metadataBaseRef,
     ...(checkoutExistingBranch ? { preserveBranchOnDelete: true } : {}),
     ...(configuredPushTarget ? { pushTarget: configuredPushTarget } : {}),
-    ...(requestedDisplayName !== undefined
-      ? shouldPersistRequestedWorktreeDisplayName(
-          requestedDisplayName,
-          branchName,
-          args.displayNameKind
-        )
-        ? { displayName: requestedDisplayName }
-        : {}
-      : shouldSetDisplayName(effectiveRequestedName, branchName, effectiveSanitizedName)
-        ? { displayName: effectiveRequestedName }
-        : {}),
+    ...resolveWorktreeCreateDisplayNameMeta(
+      requestedDisplayName,
+      branchName,
+      args.displayNameKind,
+      { requestedName: effectiveRequestedName, sanitizedName: effectiveSanitizedName }
+    ),
     ...(isTuiAgent(args.createdWithAgent) ? { createdWithAgent: args.createdWithAgent } : {}),
     ...(args.pendingFirstAgentMessageRename === true && isTuiAgent(args.createdWithAgent)
       ? { pendingFirstAgentMessageRename: true }
@@ -2407,17 +2401,12 @@ export async function createLocalWorktree(
     baseRef: metadataBaseRef,
     ...(checkoutExistingBranch ? { preserveBranchOnDelete: true } : {}),
     ...(configuredPushTarget ? { pushTarget: configuredPushTarget } : {}),
-    ...(requestedDisplayName !== undefined
-      ? shouldPersistRequestedWorktreeDisplayName(
-          requestedDisplayName,
-          branchName,
-          args.displayNameKind
-        )
-        ? { displayName: requestedDisplayName }
-        : {}
-      : shouldSetDisplayName(effectiveRequestedName, branchName, effectiveSanitizedName)
-        ? { displayName: effectiveRequestedName }
-        : {}),
+    ...resolveWorktreeCreateDisplayNameMeta(
+      requestedDisplayName,
+      branchName,
+      args.displayNameKind,
+      { requestedName: effectiveRequestedName, sanitizedName: effectiveSanitizedName }
+    ),
     ...(sparseDirectories.length > 0
       ? {
           sparseDirectories,

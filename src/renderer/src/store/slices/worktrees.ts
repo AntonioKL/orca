@@ -21,6 +21,7 @@ import {
   findWorktreeById,
   applyWorktreeUpdates,
   projectWorktreeMetaUpdates,
+  withWorktreeDisplayNamePinning,
   getRepoIdFromWorktreeId,
   type DirectSshWorktreeFetchOptions,
   type WorktreeFetchOptions,
@@ -4666,8 +4667,10 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
             firstAgentMessageRenameError: null
           }
         : targetEnriched
-    const enriched =
+    // Stamp pinning before persisting: the backend stores `enriched`, not the projection.
+    const enriched = withWorktreeDisplayNamePinning(
       'comment' in renameCleared ? { ...renameCleared, lastActivityAt: Date.now() } : renameCleared
+    )
     const projectedEnriched = projectWorktreeMetaUpdates(enriched)
     const attemptedDisplayName = Object.prototype.hasOwnProperty.call(
       projectedEnriched,

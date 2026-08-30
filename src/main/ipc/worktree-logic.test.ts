@@ -4,7 +4,7 @@ import {
   sanitizeWorktreeName,
   sanitizeWorktreeDisplayName,
   resolveWorktreeCreateDisplayName,
-  shouldPersistRequestedWorktreeDisplayName,
+  resolveWorktreeCreateDisplayNameMeta,
   ensurePathWithinWorkspace,
   computeBranchName,
   getConfiguredBranchPrefix,
@@ -144,10 +144,33 @@ describe('sanitizeWorktreeDisplayName', () => {
     expect(resolveWorktreeCreateDisplayName('  two  spaces  ', undefined)).toBe('two spaces')
   })
 
-  it('only fixes a branch-matching display name when it was user-authored', () => {
-    expect(shouldPersistRequestedWorktreeDisplayName('release', 'release', 'user')).toBe(true)
-    expect(shouldPersistRequestedWorktreeDisplayName('release', 'release', 'generated')).toBe(false)
-    expect(shouldPersistRequestedWorktreeDisplayName('Release', 'release', 'generated')).toBe(true)
+  it('records pinning at create time instead of leaving it to be re-derived', () => {
+    const fallback = { requestedName: 'release', sanitizedName: 'release' }
+    expect(resolveWorktreeCreateDisplayNameMeta('release', 'release', 'user', fallback)).toEqual({
+      displayName: 'release',
+      displayNameIsPinned: true
+    })
+    expect(
+      resolveWorktreeCreateDisplayNameMeta('release', 'release', 'generated', fallback)
+    ).toEqual({})
+    expect(
+      resolveWorktreeCreateDisplayNameMeta('Release', 'release', 'generated', fallback)
+    ).toEqual({ displayName: 'Release', displayNameIsPinned: true })
+  })
+
+  it('falls back to the sanitized-name comparison when no display name was requested', () => {
+    expect(
+      resolveWorktreeCreateDisplayNameMeta(undefined, 'fix-login', 'generated', {
+        requestedName: 'Fix login',
+        sanitizedName: 'fix-login'
+      })
+    ).toEqual({ displayName: 'Fix login', displayNameIsPinned: true })
+    expect(
+      resolveWorktreeCreateDisplayNameMeta(undefined, 'release', 'generated', {
+        requestedName: 'release',
+        sanitizedName: 'release'
+      })
+    ).toEqual({})
   })
 })
 

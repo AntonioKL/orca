@@ -6114,6 +6114,7 @@ describe('worktree remote runtime mutations', () => {
       worktreeId: wt.id,
       updates: {
         displayName: 'Fix auth',
+        displayNameIsPinned: true,
         pendingFirstAgentMessageRename: false,
         firstAgentMessageRenameError: null
       }

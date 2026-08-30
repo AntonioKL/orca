@@ -35,6 +35,7 @@ import type {
   WorktreeCreationPhase
 } from '@/lib/pending-worktree-creation'
 import { getRepoIdFromWorktreeId } from '../../../../shared/worktree-id'
+import { resolveWorktreeDisplayNameMode } from '../../../../shared/worktree-display-name-mode'
 import type { AppState } from '../types'
 export { getRepoIdFromWorktreeId } from '../../../../shared/worktree-id'
 
@@ -393,17 +394,28 @@ function withoutErasedRequiredWorktreeFields(
   return next
 }
 
+/**
+ * Record naming provenance on a rename so the mode is a stored fact rather than
+ * something later readers re-derive. Clearing the name reverts to branch-derived.
+ * Must run before persisting, not only before applying to local state.
+ */
+export function withWorktreeDisplayNamePinning(
+  rawUpdates: Partial<WorktreeMeta>
+): Partial<WorktreeMeta> {
+  if (!Object.prototype.hasOwnProperty.call(rawUpdates, 'displayName')) {
+    return rawUpdates
+  }
+  return { ...rawUpdates, displayNameIsPinned: Boolean(rawUpdates.displayName?.trim()) }
+}
+
 export function projectWorktreeMetaUpdates(
   rawUpdates: Partial<WorktreeMeta>
 ): Partial<WorktreeMeta> & Partial<Pick<Worktree, 'displayNameMode'>> {
-  const updates = withoutErasedRequiredWorktreeFields(rawUpdates)
+  const updates = withWorktreeDisplayNamePinning(withoutErasedRequiredWorktreeFields(rawUpdates))
   if (!Object.prototype.hasOwnProperty.call(updates, 'displayName')) {
     return updates
   }
-  return {
-    ...updates,
-    displayNameMode: updates.displayName?.trim() ? 'fixed' : 'automatic'
-  }
+  return { ...updates, displayNameMode: resolveWorktreeDisplayNameMode(updates) }
 }
 
 export function applyWorktreeUpdates(

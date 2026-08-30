@@ -623,6 +623,9 @@ export type WorktreeMeta = {
   /** See Worktree.projectHostSetupId. Persisted for project-first workspace ownership. */
   projectHostSetupId?: string
   displayName: string
+  /** Persisted source of Worktree.displayNameMode: true means branch renames must not
+   *  replace displayName. Absent on rows written before provenance was recorded. */
+  displayNameIsPinned?: boolean
   comment: string
   linkedIssue: number | null
   linkedPR: number | null

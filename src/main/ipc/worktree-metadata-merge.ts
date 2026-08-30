@@ -1,6 +1,7 @@
 import { basename } from 'node:path'
 import type { GitWorktreeInfo, Worktree, WorktreeMeta } from '../../shared/types'
 import { DEFAULT_WORKSPACE_STATUS_ID } from '../../shared/workspace-statuses'
+import { resolveWorktreeDisplayNameMode } from '../../shared/worktree-display-name-mode'
 import { getLinkedWorkItemMetadata } from './worktree-linked-work-item-metadata'
 
 /**
@@ -31,7 +32,7 @@ export function mergeWorktree(
     displayName: meta?.displayName || branchShort || defaultDisplayName || basename(git.path),
     // Why trim: a blank-but-present name renders as the branch anyway, and the
     // renderer's optimistic projection trims — untrimmed here they disagree.
-    displayNameMode: meta?.displayName?.trim() ? 'fixed' : 'automatic',
+    displayNameMode: resolveWorktreeDisplayNameMode(meta),
     comment: meta?.comment || '',
     linkedIssue: meta?.linkedIssue ?? null,
     linkedPR: meta?.linkedPR ?? null,

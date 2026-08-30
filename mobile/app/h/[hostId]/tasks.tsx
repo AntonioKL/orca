@@ -11084,7 +11084,9 @@ export default function MobileTasksScreen() {
                     undefined,
                     resolvedWorkspaceAgent,
                     workspaceNameDraft.trim(),
-                    workspaceLastAutoName !== '' && workspaceNameDraft === workspaceLastAutoName,
+                    !workspaceNameDraft.trim() ||
+                      (workspaceLastAutoName !== '' &&
+                        workspaceNameDraft === workspaceLastAutoName),
                     undefined,
                     workspaceBaseBranch?.refName,
                     workspaceBranchNameOverride &&

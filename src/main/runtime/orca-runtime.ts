@@ -10,6 +10,7 @@ import {
   normalizeTerminalTitle
 } from '../../shared/agent-detection'
 import { extractOscTitleScanTail } from '../../shared/osc-title-scan-tail'
+import { resolveWorktreeDisplayNameMode } from '../../shared/worktree-display-name-mode'
 import { isServerDriveListRequest, listWindowsDrives } from './windows-drive-listing'
 import { extractLastOsc7Uri, extractOscScanTail } from '../daemon/osc7-uri-extraction'
 import { parseFileUriPathParts } from '../daemon/osc7-file-uri'
@@ -898,9 +899,8 @@ import {
   isOrphanedWorktreeError,
   mergeWorktree,
   resolveWorktreeCreateDisplayName,
-  shouldPersistRequestedWorktreeDisplayName,
+  resolveWorktreeCreateDisplayNameMeta,
   sanitizeWorktreeName,
-  shouldSetDisplayName,
   areWorktreePathsEqual
 } from '../ipc/worktree-logic'
 import { findCreatedWorktree } from '../ipc/created-worktree-reconciliation'
@@ -2113,7 +2113,7 @@ function mergeRuntimeFolderWorkspace(repo: Repo, worktreeId: string, meta: Workt
     isBare: false,
     isMainWorktree: worktreeId === getRuntimeFolderWorkspaceRootId(repo),
     displayName: meta.displayName || repo.displayName,
-    displayNameMode: meta.displayName?.trim() ? 'fixed' : 'automatic',
+    displayNameMode: resolveWorktreeDisplayNameMode(meta),
     comment: meta.comment || '',
     linkedIssue: meta.linkedIssue ?? null,
     linkedPR: meta.linkedPR ?? null,
@@ -21873,17 +21873,12 @@ export class OrcaRuntimeService {
     // Why: PR/MR-created worktrees can start from a head ref/SHA while Source
     // Control must compare against the review target branch.
     const metadataBaseRef = args.compareBaseRef ?? remoteTrackingBase?.ref ?? baseBranch
-    const displayNameMeta = requestedDisplayName
-      ? shouldPersistRequestedWorktreeDisplayName(
-          requestedDisplayName,
-          branchName,
-          args.displayNameKind
-        )
-        ? { displayName: requestedDisplayName }
-        : {}
-      : shouldSetDisplayName(effectiveRequestedName, branchName, effectiveSanitizedName)
-        ? { displayName: effectiveRequestedName }
-        : {}
+    const displayNameMeta = resolveWorktreeCreateDisplayNameMeta(
+      requestedDisplayName,
+      branchName,
+      args.displayNameKind,
+      { requestedName: effectiveRequestedName, sanitizedName: effectiveSanitizedName }
+    )
     const meta = this.store.setWorktreeMeta(worktreeId, {
       // Why: worktree IDs are path-derived. If a path is deleted outside Orca
       // and later recreated, creation must mint a fresh instance identity so

@@ -3,7 +3,8 @@ import type {
   CreateWorktreeArgs,
   GlobalSettings,
   OrcaWorkspaceLayout,
-  Repo
+  Repo,
+  WorktreeMeta
 } from '../../shared/types'
 import { isWindowsAbsolutePathLike, resolveRuntimePath } from '../../shared/cross-platform-path'
 import { isWslUncPath } from '../../shared/wsl-paths'
@@ -237,12 +238,27 @@ export function shouldSetDisplayName(
   return !(branchName === requestedName && sanitizedName === requestedName)
 }
 
-export function shouldPersistRequestedWorktreeDisplayName(
-  displayName: string,
+/**
+ * Build create-time display-name metadata, deciding pinning once while `kind` is
+ * still in hand so branch renames read a stored fact instead of re-deriving it.
+ * A generated label equal to the branch is dropped as redundant, leaving the
+ * worktree automatic.
+ */
+export function resolveWorktreeCreateDisplayNameMeta(
+  requestedDisplayName: string | undefined,
   branchName: string,
-  kind: CreateWorktreeArgs['displayNameKind']
-): boolean {
-  return kind === 'user' || displayName !== branchName
+  kind: CreateWorktreeArgs['displayNameKind'],
+  fallback: { requestedName: string; sanitizedName: string }
+): Partial<Pick<WorktreeMeta, 'displayName' | 'displayNameIsPinned'>> {
+  if (requestedDisplayName !== undefined) {
+    if (kind !== 'user' && requestedDisplayName === branchName) {
+      return {}
+    }
+    return { displayName: requestedDisplayName, displayNameIsPinned: true }
+  }
+  return shouldSetDisplayName(fallback.requestedName, branchName, fallback.sanitizedName)
+    ? { displayName: fallback.requestedName, displayNameIsPinned: true }
+    : {}
 }
 
 /**

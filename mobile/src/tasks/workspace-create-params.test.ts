@@ -108,6 +108,31 @@ describe('task workspace create params', () => {
     })
   })
 
+  it('falls back to the generated title when the name field was cleared', () => {
+    // Guards the compact task flow: a blank field must not strip the issue title.
+    expect(
+      buildTaskWorkspaceCreateParams({
+        item: {
+          provider: 'github',
+          source: {
+            type: 'issue',
+            repoId: 'repo-1',
+            number: 90,
+            title: 'Fix mobile tasks',
+            url: 'https://github.com/acme/app/issues/90'
+          }
+        },
+        targetRepoId: 'ignored-for-github',
+        setupDecision: 'inherit',
+        workspaceName: '',
+        nameIsAutoManaged: true
+      })
+    ).toMatchObject({
+      displayName: 'Fix mobile tasks',
+      displayNameKind: 'generated'
+    })
+  })
+
   it('keeps the startup draft when no agent was provided so the host can auto-pick', () => {
     const params = buildTaskWorkspaceCreateParams({
       item: {

@@ -200,6 +200,7 @@ export const WORKTREE_METHODS: RpcMethod[] = [
     handler: async (params, { runtime }) => ({
       worktree: await runtime.updateManagedWorktreeMeta(params.worktree, {
         displayName: params.displayName,
+        displayNameIsPinned: params.displayNameIsPinned,
         linkedIssue: params.linkedIssue,
         linkedPR: params.linkedPR,
         linkedLinearIssue: params.linkedLinearIssue,

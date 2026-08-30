@@ -3,6 +3,7 @@ import { ipcMain, type BrowserWindow } from 'electron'
 import { readFile, stat } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import type { Store } from '../persistence'
+import { resolveWorktreeDisplayNameMode } from '../../shared/worktree-display-name-mode'
 import { isFolderRepo } from '../../shared/repo-kind'
 import { readBranchRenameFailureOutputForDisplay } from '../agent-hooks/branch-rename-failure-output'
 import {
@@ -947,7 +948,7 @@ function mergeFolderWorkspace(repo: Repo, worktreeId: string, meta: WorktreeMeta
     isBare: false,
     isMainWorktree: worktreeId === getFolderWorkspaceRootId(repo),
     displayName: meta.displayName || repo.displayName,
-    displayNameMode: meta.displayName?.trim() ? 'fixed' : 'automatic',
+    displayNameMode: resolveWorktreeDisplayNameMode(meta),
     comment: meta.comment || '',
     linkedIssue: meta.linkedIssue ?? null,
     linkedPR: meta.linkedPR ?? null,
