@@ -79,12 +79,11 @@ export function useCombinedDiffViewPreferences({
   )
 
   const toggleSideBySide = useCallback(() => {
-    setSideBySide((prev) => {
-      const next = !prev
-      combinedDiffViewPreferences.sideBySide = next
-      return next
-    })
-  }, [])
+    // Why: React may replay a state updater, so the module preference is written here rather than inside it.
+    const next = !sideBySide
+    combinedDiffViewPreferences.sideBySide = next
+    setSideBySide(next)
+  }, [sideBySide])
 
   const toggleDiffWordWrap = useCallback(() => {
     void updateSettings({ diffWordWrap: diffWordWrap !== true })
