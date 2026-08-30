@@ -40,7 +40,7 @@ function createDaemonInitMockState(): DaemonInitMockState {
 
   const probeSocketExistsMock = vi.fn((_path?: string) => false)
   const writeFileSyncMock = vi.fn()
-  // Why: readFileSync throws by default so legacyDaemonProcessMayBeAlive treats every legacy pid file as unreadable (pre-fix cleanup behavior).
+  // Why: readFileSync throws by default so legacyDaemonProcessLiveness treats every legacy pid file as unreadable (pre-fix cleanup behavior).
   const readFileSyncMock = vi.fn((): string => {
     throw new Error('ENOENT')
   })
