@@ -265,7 +265,7 @@ export function RuntimeHostStatusRow({
         }
       }}
     >
-      <DropdownMenuSubTrigger className="gap-2.5 px-2 py-1.5">
+      <DropdownMenuSubTrigger className="gap-2.5 px-2 py-1.5" hideChevron>
         {rowDetails}
         {actionButton}
       </DropdownMenuSubTrigger>
