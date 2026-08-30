@@ -24,7 +24,10 @@ vi.mock('./project-runtime-git-options', () => ({
   getLocalProjectWorktreeGitOptions: mocks.getWorktreeOptions
 }))
 vi.mock('./ipc/worktree-logic', () => ({
-  computeWorkspaceRoot: () => (process.platform === 'win32' ? 'C:\\workspace' : '/workspace'),
+  computeWorkspaceRoot: (repoPath: string) =>
+    process.platform === 'win32' && /^[A-Za-z]:[\\/]/.test(repoPath)
+      ? 'C:\\workspace'
+      : '/workspace',
   getWorktreePathSettings: () => ({
     workspaceDir: process.platform === 'win32' ? 'C:\\workspace' : '/workspace',
     nestWorkspaces: false
