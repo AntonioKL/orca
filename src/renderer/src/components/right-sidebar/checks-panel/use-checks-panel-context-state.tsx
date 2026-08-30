@@ -138,7 +138,6 @@ export function useChecksPanelContextState(model: ChecksPanelContextStateInput) 
     setIsRefreshing(false)
     setEmptyRefreshing(false)
     setConflictDetailsRefreshing(false)
-    setPrRefreshStateNow(Date.now())
     createPrInFlightRef.current = null
     setIsCreatingPr(false)
     setCreatePrError(null)
@@ -280,6 +279,7 @@ export function useChecksPanelContextState(model: ChecksPanelContextStateInput) 
     prCacheKey,
     prNumber,
     rawPRRefreshState,
+    panelContextKey,
     repo?.id
   ])
 

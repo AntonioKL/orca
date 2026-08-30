@@ -1,0 +1,17 @@
+import { useEffect, useState } from 'react'
+
+// A small shared pattern for UI labels that need a current wall-clock value.
+// Callers should keep the interval at the coarsest useful granularity.
+export function useNow(intervalMs = 30_000, enabled = true): number {
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (!enabled) {
+      return
+    }
+    const timer = window.setInterval(() => setNow(Date.now()), intervalMs)
+    return () => window.clearInterval(timer)
+  }, [enabled, intervalMs])
+
+  return now
+}
