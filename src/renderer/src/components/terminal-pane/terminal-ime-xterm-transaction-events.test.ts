@@ -15,7 +15,11 @@ const { Terminal: CjsTerminal } = requireFromHere('@xterm/xterm') as {
   Terminal: typeof EsmTerminal
 }
 const xtermPackageRoot = dirname(requireFromHere.resolve('@xterm/xterm/package.json'))
-const EXPECTED_XTERM_VERSION = '6.1.0-beta.287'
+// Read from the installed package rather than hard-coding: the point of the assertions
+// below is that the bundle, its sourcemap and the declared version agree, which a literal
+// would only restate. A stale literal fails every bump for no reason.
+const EXPECTED_XTERM_VERSION = (requireFromHere('@xterm/xterm/package.json') as { version: string })
+  .version
 
 function nextEventLoop(): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, 0))

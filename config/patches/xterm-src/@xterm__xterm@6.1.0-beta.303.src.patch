@@ -1,5 +1,5 @@
 diff --git a/src/browser/CoreBrowserTerminal.ts b/src/browser/CoreBrowserTerminal.ts
-index 4557e1652c34737fdf853436bd9328d9918eee2b..aff6ba624523849c2a39878a2181cbd1e931791d 100644
+index 67893b7966eb095db4459b8837de9766921f36c5..0abf7ecac1aa108f7caf711d0a5c610a688d34fd 100644
 --- a/src/browser/CoreBrowserTerminal.ts
 +++ b/src/browser/CoreBrowserTerminal.ts
 @@ -325,6 +325,9 @@ export class CoreBrowserTerminal extends CoreTerminal implements ITerminal {
@@ -32,7 +32,7 @@ index 4557e1652c34737fdf853436bd9328d9918eee2b..aff6ba624523849c2a39878a2181cbd1
      this._register(addDisposableListener(this.textarea!, 'input', (ev: InputEvent) => this._inputEvent(ev), true));
      this._register(this.onRender(() => this._compositionHelper!.updateCompositionElements()));
    }
-@@ -551,6 +565,11 @@ export class CoreBrowserTerminal extends CoreTerminal implements ITerminal {
+@@ -552,6 +566,11 @@ export class CoreBrowserTerminal extends CoreTerminal implements ITerminal {
      this._compositionView = this._document.createElement('div');
      this._compositionView.classList.add('composition-view');
      this._compositionHelper = this._instantiationService.createInstance(CompositionHelper, this.textarea, this._compositionView);
@@ -44,7 +44,7 @@ index 4557e1652c34737fdf853436bd9328d9918eee2b..aff6ba624523849c2a39878a2181cbd1
      this._helperContainer.appendChild(this._compositionView);
  
      this._mouseCoordsService = this._instantiationService.createInstance(MouseCoordsService);
-@@ -1008,7 +1027,9 @@ export class CoreBrowserTerminal extends CoreTerminal implements ITerminal {
+@@ -1009,7 +1028,9 @@ export class CoreBrowserTerminal extends CoreTerminal implements ITerminal {
  
      this._onKey.fire({ key, domEvent: ev });
      this._showCursor();
@@ -55,7 +55,7 @@ index 4557e1652c34737fdf853436bd9328d9918eee2b..aff6ba624523849c2a39878a2181cbd1
  
      this._keyPressHandled = true;
  
-@@ -1026,6 +1047,15 @@ export class CoreBrowserTerminal extends CoreTerminal implements ITerminal {
+@@ -1027,6 +1048,15 @@ export class CoreBrowserTerminal extends CoreTerminal implements ITerminal {
     * @param ev The input event to be handled.
     */
    protected _inputEvent(ev: InputEvent): boolean {
