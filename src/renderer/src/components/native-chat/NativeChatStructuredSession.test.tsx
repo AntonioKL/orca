@@ -125,6 +125,7 @@ describe('NativeChatStructuredSession', () => {
     mocks.mode = 'static'
     mocks.messageListProps = null
     mocks.composerProps = null
+    mocks.submissions = []
   })
 
   it('wires local structured file links through the native chat opener', () => {
@@ -369,6 +370,44 @@ describe('NativeChatStructuredSession', () => {
 
     // Asserted with no trailing grace period: the probe must have fired *during*
     // the stream, not after it went quiet.
+    expect(mocks.call).toHaveBeenCalledTimes(2)
+  }, 20000)
+
+  it('never auto-probes an entry the user already force-retried', async () => {
+    mocks.mode = 'outbox'
+    mocks.submissions = []
+    // Both the original send and the user's explicit Retry fail at the transport.
+    mocks.call.mockRejectedValue(new Error('socket closed'))
+
+    render(
+      <NativeChatStructuredSession
+        isVisible
+        tabId="structured-tab-forced"
+        sessionId="session-forced"
+        target={{ kind: 'local' }}
+        agent="codex"
+        allowFileUriLinks
+      />
+    )
+
+    const send = mocks.composerProps?.structuredTransport?.send as
+      | ((text: string, attachments: readonly { id: string; path: string }[]) => boolean)
+      | undefined
+    expect(send?.('first', [])).toBe(true)
+    await waitFor(() => expect(mocks.call).toHaveBeenCalledOnce())
+    await waitFor(() => expect(screen.getByText('Message delivery is unconfirmed.')).toBeTruthy())
+
+    // User force-retries: this request legitimately carries retryUnknown.
+    fireEvent.click(screen.getByRole('button', { name: /Retry/ }))
+    await waitFor(() => expect(mocks.call).toHaveBeenCalledTimes(2))
+    const forcedRequest = mocks.call.mock.calls[1]?.[2] as Record<string, unknown> | undefined
+    expect(forcedRequest?.retryUnknown).toBe(true)
+
+    // That retry also failed at the transport. The probe must NOT pick it up, or it
+    // would re-send retryUnknown automatically and redispatch to the agent.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 3000))
+    })
     expect(mocks.call).toHaveBeenCalledTimes(2)
   }, 20000)
 })

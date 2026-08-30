@@ -214,8 +214,14 @@ export function useStructuredAgentSessionOutbox(args: {
   const head = outbox[0]
   // Depend on primitives: `submissions` is rebuilt on every streaming batch, so an
   // array-identity dep would reset the backoff forever while the agent is working.
+  // A non-null `retryAfterUnknownSubmittedAt` means the user already force-retried,
+  // so the request would carry `retryUnknown` and redispatch host-side. Only entries
+  // that have never been force-retried are safe to re-issue automatically.
   const probeId =
-    head && head.sessionId === sessionId && head.state === 'unconfirmed'
+    head &&
+    head.sessionId === sessionId &&
+    head.state === 'unconfirmed' &&
+    head.retryAfterUnknownSubmittedAt === null
       ? head.clientMessageId
       : null
   const probeSettled =
