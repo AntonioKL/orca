@@ -98,8 +98,15 @@ const storeState = vi.hoisted(() => ({
   hostedReviewCache: {} as Record<string, { data: unknown }>
 }))
 
+const identityState = vi.hoisted(() => ({
+  display: { kind: 'branch', branchName: 'feature' } as {
+    kind: string
+    branchName: string | null
+  } | null
+}))
+
 vi.mock('@/lib/worktree-git-identity-display', () => ({
-  getWorktreeGitIdentityDisplay: () => ({ kind: 'branch', branchName: 'feature' }),
+  getWorktreeGitIdentityDisplay: () => identityState.display,
   getWorktreeIdentityBranchName: (identity: { kind: string; branchName: string | null } | null) =>
     identity?.kind === 'branch' || identity?.kind === 'rebasing' ? identity.branchName : null
 }))
@@ -133,6 +140,7 @@ beforeEach(() => {
     [fixtures.prCacheKey]: { data: fixtures.pr, fetchedAt: 1 }
   }
   storeState.hostedReviewCache = {}
+  identityState.display = { kind: 'branch', branchName: 'feature' }
 })
 
 describe('check-run-details-fix-with-ai', () => {
@@ -179,6 +187,20 @@ describe('check-run-details-fix-with-ai', () => {
   it('requires a hosted review before launching an AI fix', () => {
     storeState.prCache = {}
     expect(getCheckRunDetailsFixDisabledReason(fixtures.worktree.id)).toContain('PR or MR')
+  })
+
+  it('blocks the AI fix while the workspace is mid-rebase', async () => {
+    identityState.display = { kind: 'rebasing', branchName: 'feature' }
+
+    expect(getCheckRunDetailsFixDisabledReason(fixtures.worktree.id)).toContain('rebase')
+    await expect(
+      startCheckRunDetailsFixWithAI({
+        worktreeId: fixtures.worktree.id,
+        check: fixtures.failingCheck,
+        details: fixtures.checkDetails
+      })
+    ).resolves.toBe(false)
+    expect(startFixChecksAgent).not.toHaveBeenCalled()
   })
 
   it('starts a single-check AI fix prompt for the owning worktree', async () => {

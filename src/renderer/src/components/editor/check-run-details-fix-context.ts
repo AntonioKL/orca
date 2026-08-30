@@ -142,6 +142,14 @@ export function getCheckRunDetailsFixDisabledReason(worktreeId: string | null): 
       'Open a PR or MR before launching an AI fix.'
     )
   }
+  // Why: the recovered branch resolves the review mid-rebase, but an agent editing or
+  // committing here would land on the detached rebase HEAD and corrupt the rebase.
+  if (getWorktreeGitIdentityDisplay(worktree)?.kind === 'rebasing') {
+    return translate(
+      'auto.components.editor.check.run.details.fix.with.ai.5d1c7a3e64',
+      'Finish or abort the rebase before launching an AI fix.'
+    )
+  }
   return undefined
 }
 

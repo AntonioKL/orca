@@ -191,6 +191,32 @@ describe('startFixChecksAgent', () => {
     expect(mocks.launchAgentInNewTab).not.toHaveBeenCalled()
   })
 
+  it('refuses to launch into a workspace that is mid-rebase', async () => {
+    const rebasingWorktree = {
+      id: 'wt-1',
+      repoId: 'repo-1',
+      path: '/repo/wt-1',
+      head: 'abc1234def',
+      branch: '',
+      rebasing: true,
+      rebaseBranch: 'feature'
+    }
+    mocks.store.worktrees = [rebasingWorktree] as typeof mocks.store.worktrees
+    const { startFixChecksAgent } = await import('./fix-checks-agent-launch')
+
+    await expect(
+      startFixChecksAgent({
+        repoId: 'repo-1',
+        worktreeId: 'wt-1',
+        basePrompt: 'Fix checks',
+        launchSource: 'task_page'
+      })
+    ).resolves.toBe(false)
+
+    expect(mocks.store.ensureDetectedAgents).not.toHaveBeenCalled()
+    expect(mocks.launchAgentInNewTab).not.toHaveBeenCalled()
+  })
+
   it('fails without launching when agent detection finds no enabled agent', async () => {
     mocks.store.ensureDetectedAgents.mockResolvedValue([])
     const { startFixChecksAgent } = await import('./fix-checks-agent-launch')

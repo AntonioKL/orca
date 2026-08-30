@@ -13,6 +13,7 @@ import {
 } from '@/lib/source-control-launch-agent-selection'
 import { resolveSourceControlLaunchPlatform } from '@/lib/source-control-launch-platform'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
+import { getWorktreeGitIdentityDisplay } from '@/lib/worktree-git-identity-display'
 import { useAppStore } from '@/store'
 import { resolveSourceControlActionRecipe } from '../../../shared/source-control-ai'
 import {
@@ -149,6 +150,17 @@ export async function startFixChecksAgent(args: StartFixChecksAgentArgs): Promis
         translate(
           'auto.lib.fix.checks.agent.launch.dfb4dd7c00',
           'Unable to find the workspace attached to these checks.'
+        )
+      )
+      return false
+    }
+    // Why: a fix-checks agent editing or committing in a mid-rebase workspace lands on the
+    // detached rebase HEAD and corrupts the rebase, so refuse until it is finished or aborted.
+    if (getWorktreeGitIdentityDisplay(targetWorktree)?.kind === 'rebasing') {
+      toast.message(
+        translate(
+          'auto.lib.fix.checks.agent.launch.6a4b0f92d7',
+          'Finish or abort the rebase in this workspace before launching an AI fix.'
         )
       )
       return false
