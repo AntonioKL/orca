@@ -28174,9 +28174,7 @@ export class OrcaRuntimeService {
     } else if (
       !setupProvisioned &&
       this.ptyController?.spawn &&
-      !didSpawnStartup &&
-      !setup &&
-      !defaultTabs
+      (setup || defaultTabs || didSpawnStartup)
     ) {
       // Why: inactive terminal materialization matches normal worktree creation,
       // but setup/default tab failures must not gate automation dispatch.
@@ -28247,13 +28245,9 @@ export class OrcaRuntimeService {
                   ? ('skipped' as const)
                   : // Why: the in-process hook is already executing, so reporting
                     // spawn_failed would strand callers that retry on it.
-                    setupMustGateStartup && setupProvisioned
-                    ? setupWaitSucceeded
-                      ? ('succeeded' as const)
-                      : ('failed' as const)
-                    : didSpawnSetup || didStartInProcessSetupHook
-                      ? ('running' as const)
-                      : ('spawn_failed' as const),
+                    didSpawnSetup || didStartInProcessSetupHook
+                    ? ('running' as const)
+                    : ('spawn_failed' as const),
               ...(setupTerminalHandle ? { terminalHandle: setupTerminalHandle } : {})
             }
           }
@@ -28530,9 +28524,7 @@ export class OrcaRuntimeService {
       !shouldActivate &&
       this.ptyController?.spawn &&
       !setupProvisioned &&
-      !didSpawnStartup &&
-      !result.setup &&
-      !result.defaultTabs
+      (result.setup || result.defaultTabs || didSpawnStartup)
     ) {
       // Why: inactive terminal materialization matches normal worktree creation,
       // but setup/default tab failures must not gate automation dispatch.
@@ -28611,13 +28603,9 @@ export class OrcaRuntimeService {
           ? ('skipped' as const)
           : !result.setup
             ? ('not_configured' as const)
-            : setupMustGateStartup && setupProvisioned
-              ? setupWaitSucceeded
-                ? ('succeeded' as const)
-                : ('failed' as const)
-              : didSpawnSetup
-                ? ('running' as const)
-                : ('spawn_failed' as const),
+            : didSpawnSetup
+              ? ('running' as const)
+              : ('spawn_failed' as const),
       ...(setupTerminalHandle ? { terminalHandle: setupTerminalHandle } : {})
     }
     const resultWithSetupReceipt = args.awaitTerminalProvisioning

@@ -142,7 +142,7 @@ export type CreateWorktreeResult = {
     requested: 'run' | 'skip' | 'inherit'
     hookFound: boolean
     startupPolicy: 'start-immediately' | 'wait-for-setup'
-    state: 'running' | 'succeeded' | 'failed' | 'skipped' | 'not_configured' | 'spawn_failed'
+    state: 'running' | 'skipped' | 'not_configured' | 'spawn_failed'
     terminalHandle?: string
   }
   defaultTabs?: WorktreeDefaultTabsLaunch

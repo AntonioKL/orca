@@ -45992,7 +45992,7 @@ describe('OrcaRuntimeService', () => {
     expect(startup.command).toContain('claude')
     expect(result.setup).toBeUndefined()
     expect(result.setupReceipt).toMatchObject({
-      state: 'succeeded',
+      state: 'running',
       terminalHandle: expect.stringMatching(/^term_/)
     })
   })
@@ -47370,7 +47370,7 @@ describe('OrcaRuntimeService', () => {
     const startupCall = spawn.mock.calls[1]![0] as { command?: string }
     expect(result.setup).toBeUndefined()
     expect(result.setupReceipt).toMatchObject({
-      state: 'succeeded',
+      state: 'running',
       terminalHandle: expect.stringMatching(/^term_/)
     })
     expect(setupCall.env).not.toHaveProperty(SETUP_AGENT_SEQUENCE_STARTUP_COMMAND_ENV)
