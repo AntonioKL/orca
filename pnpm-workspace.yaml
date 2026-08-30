@@ -5,6 +5,10 @@
 packages: []
 
 minimumReleaseAge: 4320
+# Temporary exceptions for releases younger than the 3-day age gate.
+minimumReleaseAgeExclude:
+  - pdfjs-dist
+  - zod@4.5.0
 shamefullyHoist: true
 
 supportedArchitectures:
