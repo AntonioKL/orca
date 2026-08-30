@@ -49,6 +49,7 @@ import { toast } from 'sonner'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 import { getRuntimeGitStatus } from '@/runtime/runtime-git-client'
 import { useAppStore } from '../../store'
+import { getAgentStatusEpochNow } from '@/lib/agent-status-epoch-clock'
 import {
   getRepoMapFromState,
   getWorktreeMapFromState,
@@ -1315,6 +1316,7 @@ export function WorkspaceSpaceManagerPanel(): React.JSX.Element {
   const migrationUnsupportedByPtyId = useAppStore((state) => state.migrationUnsupportedByPtyId)
   const runtimePaneTitlesByTabId = useAppStore((state) => state.runtimePaneTitlesByTabId)
   const agentStatusEpoch = useAppStore((state) => state.agentStatusEpoch)
+  const agentStatusNow = getAgentStatusEpochNow(agentStatusEpoch)
   const retainedAgentsByPaneKey = useAppStore((state) => state.retainedAgentsByPaneKey)
   const openFiles = useAppStore((state) => state.openFiles)
   const editorDrafts = useAppStore((state) => state.editorDrafts)
@@ -1373,9 +1375,11 @@ export function WorkspaceSpaceManagerPanel(): React.JSX.Element {
   const decisionDetailsByWorktreeIdentity = useMemo(() => {
     // Why: active-agent freshness is time-based. The epoch bumps when fresh
     // hook entries cross the stale boundary so delete readiness recomputes.
+    // Keyed on the epoch, not `agentStatusNow`: two bumps in one millisecond
+    // share a sample, so the timestamp alone would not re-key this memo.
     void agentStatusEpoch
     const details = new Map<string, WorkspaceDecisionDetails>()
-    const now = Date.now()
+    const now = agentStatusNow
     for (const worktree of sourceRows) {
       details.set(
         getWorkspaceSpaceWorktreeIdentity(worktree),
@@ -1408,6 +1412,7 @@ export function WorkspaceSpaceManagerPanel(): React.JSX.Element {
   }, [
     activeWorktreeId,
     activeWorkspaceExecutionHostId,
+    agentStatusNow,
     agentStatusEpoch,
     agentStatusByPaneKey,
     browserTabsByWorktree,
@@ -2236,7 +2241,7 @@ export function WorkspaceSpaceManagerPanel(): React.JSX.Element {
                         settings,
                         activeWorktreeId,
                         activeWorkspaceExecutionHostId,
-                        now: Date.now()
+                        now: agentStatusNow
                       })
                     }
                     gitRefreshState={

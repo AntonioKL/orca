@@ -3,6 +3,8 @@ import { contextBridge, ipcRenderer, webFrame, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import { preloadE2EConfig } from './e2e-config'
 import { glApi } from './gitlab'
+import { admitCloseActiveTabPayload } from './close-active-tab-payload-admission'
+import type { CloseActiveTabPayload } from './api/ui-command-event-api'
 import type {
   SkillDeletePlan,
   SkillDeleteRequest,
@@ -4050,8 +4052,15 @@ const api = {
       ipcRenderer.on('ui:hardReloadBrowserPage', listener)
       return () => ipcRenderer.removeListener('ui:hardReloadBrowserPage', listener)
     },
-    onCloseActiveTab: (callback: () => void): (() => void) => {
-      const listener = (_event: Electron.IpcRendererEvent) => callback()
+    onCloseActiveTab: (callback: (payload?: CloseActiveTabPayload) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload?: unknown): void => {
+        const admitted = admitCloseActiveTabPayload(payload)
+        if (admitted.kind === 'legacy') {
+          callback()
+        } else if (admitted.kind === 'source') {
+          callback(admitted.payload)
+        }
+      }
       ipcRenderer.on('ui:closeActiveTab', listener)
       return () => ipcRenderer.removeListener('ui:closeActiveTab', listener)
     },
@@ -4240,6 +4249,7 @@ const api = {
         direction: 'horizontal' | 'vertical'
         command?: string
         telemetrySource?: TerminalPaneSplitSource
+        newLeafId?: string
       }) => void
     ): (() => void) => {
       const listener = (
@@ -4250,6 +4260,7 @@ const api = {
           direction: 'horizontal' | 'vertical'
           command?: string
           telemetrySource?: TerminalPaneSplitSource
+          newLeafId?: string
         }
       ) => callback(data)
       ipcRenderer.on('ui:splitTerminal', listener)

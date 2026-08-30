@@ -4,10 +4,15 @@ import {
   type AppMenuSelectionAction
 } from '@/lib/app-menu-selection-actions'
 
-export function useNativeChatComposerAppMenuSelection() {
+export function useNativeChatComposerAppMenuSelection(
+  isComposingOverride?: () => boolean
+) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const isComposingRef = useRef(false)
-  const isComposing = useCallback(() => isComposingRef.current, [])
+  const isComposing = useCallback(
+    () => isComposingOverride?.() ?? isComposingRef.current,
+    [isComposingOverride]
+  )
 
   useEffect(() => {
     const onSelectionAction = (event: Event): void => {
