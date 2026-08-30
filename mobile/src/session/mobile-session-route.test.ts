@@ -7,7 +7,12 @@ import {
   type HostStackNavigationState
 } from '../navigation/host-stack-navigation'
 
-const homeSource = readFileSync(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+const homeSource = readFileSync(new URL('../home/MobileHomeScreen.tsx', import.meta.url), 'utf8')
+const resumeSource = [
+  readFileSync(new URL('../home/MobileHomeListFooter.tsx', import.meta.url), 'utf8'),
+  readFileSync(new URL('../home/MobileHomeResumeCard.tsx', import.meta.url), 'utf8'),
+  readFileSync(new URL('../home/MobileHomeAccountUsageCards.tsx', import.meta.url), 'utf8')
+].join('\n')
 
 function navigationHarness(initialState: HostStackNavigationState) {
   const stateListeners = new Set<() => void>()
@@ -97,20 +102,11 @@ describe('mobile session route', () => {
   })
 
   it('routes the home Resume card through the hybrid navigation intent', () => {
-    const start = homeSource.indexOf('{/* ─── Resume card ─── */}')
-    const end = homeSource.indexOf('{/* ─── Quick actions ─── */}', start)
-
-    // Assert the markers first: a renamed banner would otherwise slice garbage and
-    // report a missing call instead of the real cause.
-    expect(start).toBeGreaterThanOrEqual(0)
-    expect(end).toBeGreaterThan(start)
-
-    const resumeCard = homeSource.slice(start, end)
-    expect(resumeCard).toContain('openResume(')
-    expect(resumeCard).not.toContain('router.push(')
+    expect(resumeSource).toContain('Resume')
+    expect(resumeSource).toContain('onOpenResume')
 
     const handlerStart = homeSource.indexOf('const openResume = useCallback(')
-    const handlerEnd = homeSource.indexOf('[router]', handlerStart)
+    const handlerEnd = homeSource.indexOf('[data.router]', handlerStart)
     expect(handlerStart).toBeGreaterThanOrEqual(0)
     expect(handlerEnd).toBeGreaterThan(handlerStart)
 

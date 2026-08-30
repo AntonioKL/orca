@@ -5,6 +5,7 @@ import { floatingWorkspaceSessionPath } from '../session/floating-workspace'
 import { savePinnedIds } from '../storage/preferences'
 import type { useForgetHostClient } from '../transport/client-context'
 import { removeHostAndCloseClient } from '../transport/host-removal-lifecycle'
+import { loadHosts } from '../transport/host-store'
 import type { RpcClient } from '../transport/rpc-client'
 import type { ConnectionState } from '../transport/types'
 import { setHostRouteNewWorktreeVisible } from '../host-route-action-state'
@@ -145,7 +146,11 @@ export function useHostWorktreeActions(args: {
       return
     }
     try {
-      await removeHostAndCloseClient(hostId, forgetHostClient)
+      const host = (await loadHosts()).find((candidate) => candidate.id === hostId)
+      if (!host) {
+        throw new Error('Host identity unavailable')
+      }
+      await removeHostAndCloseClient(hostId, host.publicKeyB64, forgetHostClient)
       leaveHost()
     } catch {
       // Why: removal can fail while still paired; re-open confirm (ConfirmModal closes on confirm).

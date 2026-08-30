@@ -55,12 +55,12 @@ describe('mobile web native bridge transport', () => {
     expect(iosSource).toContain('navigationAction.targetFrame?.isMainFrame == true')
     expect(iosSource).toContain('decisionHandler(.cancel)')
     expect(androidSource).toContain('!isMainFrame')
-    expect(androidSource).toContain('setOf(MOBILE_WEB_ORIGIN)')
-    expect(androidSource).toContain('!isMobileWebOrigin(sourceOrigin)')
+    expect(androidSource).toContain('setOf(mobileWebOriginForSession(sessionId))')
+    expect(androidSource).toContain('!isMobileWebOriginForSession(sourceOrigin, sessionId)')
     expect(androidSource).toContain(
       '!isAllowedMobileWebBridgeDocumentUrl(documentUrl.toString(), sessionId)'
     )
-    expect(androidBridgeUrlSource).toContain('url.host == MOBILE_WEB_ORIGIN_HOST')
+    expect(androidBridgeUrlSource).toContain('isMobileWebOriginForSession(url, sessionId)')
     expect(androidBridgeUrlSource).toContain('url.fragment == sessionId')
     expect(androidBridgeUrlSource).toContain('url.userInfo == null')
     expect(androidSource).toContain('request.isForMainFrame && isAllowedDocumentUrl(url)')

@@ -27,7 +27,7 @@ export function MermaidDiagram({ source, base }: Props) {
 
 function MermaidDiagramFrame({ source, base }: Props) {
   const frameRef = useRef<HTMLIFrameElement | null>(null)
-  const frameToken = useMemo(createFrameToken, [])
+  const frameToken = useMemo(() => createFrameToken(), [])
   const [height, setHeight] = useState(0)
   const [failed, setFailed] = useState(source.length > MERMAID_DIAGRAM_MAX_SOURCE_CHARACTERS)
   const [frameStatus, setFrameStatus] = useState('loading')

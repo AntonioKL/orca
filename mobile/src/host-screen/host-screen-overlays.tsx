@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { Pressable, Text, View } from 'react-native'
 import { Check, Moon } from 'lucide-react-native'
 import { buildWorktreeNavigationActions } from '../agent-history/worktree-navigation-actions'
@@ -5,6 +6,8 @@ import { ActionSheetContent } from '../components/ActionSheetModal'
 import { BottomDrawer } from '../components/BottomDrawer'
 import { ConfirmModal } from '../components/ConfirmModal'
 import { NewWorktreeModalController } from '../components/NewWorktreeModalController'
+import { defaultHostWorkspaceCreationOperations } from '../worktree/default-host-workspace-creation-operations'
+import { useDefaultHostScreenShellOperations } from '../worktree/default-host-screen-shell-operations'
 import { PickerModal } from '../components/PickerModal'
 import { colors } from '../theme/mobile-theme'
 import { hostNewWorktreeSessionRoute } from '../host-route-action-state'
@@ -29,6 +32,14 @@ export function HostScreenOverlays({ controller }: { controller: HostScreenContr
     showNewWorktree,
     state
   } = controller
+  const shellOperations = useDefaultHostScreenShellOperations({
+    hostId,
+    embedded: controller.embedded
+  })
+  const workspaceCreationOperations = useMemo(
+    () => (client ? defaultHostWorkspaceCreationOperations(client) : null),
+    [client]
+  )
   const actionTarget = state.actionTarget
 
   return (
@@ -211,10 +222,11 @@ export function HostScreenOverlays({ controller }: { controller: HostScreenContr
       <NewWorktreeModalController
         ref={state.newWorktreeModalRef}
         routeVisible={showNewWorktree}
-        client={client}
+        operations={workspaceCreationOperations}
         hostId={hostId}
         existingWorktreePaths={existingWorktreePaths}
         existingWorktrees={state.worktrees}
+        openExternalUrl={shellOperations.openExternalUrl}
         onVisibleChange={(visible) => {
           state.newWorktreeModalVisibleRef.current = visible
         }}

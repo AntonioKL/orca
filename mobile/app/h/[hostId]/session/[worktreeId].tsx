@@ -268,6 +268,11 @@ import { mobileMarkdownSaveErrorCopy } from '../../../../src/session/mobile-mark
 import { useMobileSessionMarkdownDrafts } from '../../../../src/session/use-mobile-session-markdown-drafts'
 import { resolveTabStripScrollOffset } from '../../../../src/session/tab-strip-scroll'
 import { activateOpenedSourceControlDiffTab } from '../../../../src/session/opened-mobile-session-tab'
+import { MobileTerminalInventoryRequest } from '../../../../src/session/mobile-terminal-inventory-request'
+import {
+  useMobileTerminalInventoryRecoveryBridge,
+  type MobileTerminalInventoryRefreshOptions
+} from '../../../../src/session/use-mobile-terminal-inventory-recovery'
 import {
   createMobileSessionCreateWarningState,
   dismissMobileSessionCreateWarningState,

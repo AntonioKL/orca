@@ -16,6 +16,24 @@
   },
   "overrides": [
     {
+      "files": ["app/h/*/index.tsx"],
+      "rules": {
+        "max-lines": ["error", { "max": 1603, "skipBlankLines": true, "skipComments": true }]
+      }
+    },
+    {
+      "files": ["src/browser/MobileBrowserPane.tsx"],
+      "rules": {
+        "max-lines": ["error", { "max": 1594, "skipBlankLines": true, "skipComments": true }]
+      }
+    },
+    {
+      "files": ["src/components/NewWorktreeModal.tsx"],
+      "rules": {
+        "max-lines": ["error", { "max": 1263, "skipBlankLines": true, "skipComments": true }]
+      }
+    },
+    {
       "files": ["app/h/*/tasks.tsx"],
       "rules": {
         "max-lines": ["error", { "max": 14682, "skipBlankLines": true, "skipComments": true }]

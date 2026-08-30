@@ -39,7 +39,6 @@ import {
   getInitialMobileBrowserViewMode,
   saveMobileBrowserViewMode
 } from './mobile-browser-view-mode-state'
-import type { BrowserTouchLayout, BrowserZoomState } from './browser-touch-geometry'
 import {
   clampBrowserZoomState,
   computeBrowserFrameGeometry,
@@ -52,6 +51,7 @@ import {
   type BrowserZoomState
 } from './browser-touch-geometry'
 import { displayBrowserUrl, normalizeBrowserUrl } from './browser-url'
+import { MobileBrowserAddressField } from './MobileBrowserAddressField'
 import { resolveMobileBrowserAddressSync } from './mobile-browser-address-sync'
 import type {
   HostSessionBrowserOperations,
@@ -183,12 +183,17 @@ export function MobileBrowserPane({
   const frameThrottleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dialogRef = useRef<BrowserDialogState | null>(null)
   const lastStreamCacheKeyRef = useRef<string | null>(cacheKey)
-  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const startPointRef = useRef<{ x: number; y: number; t: number } | null>(null)
-  const scrollingRef = useRef(false)
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const rightClickSentRef = useRef(false)
+  const lastWheelRef = useRef<{ dx: number; dy: number; at: number }>({ dx: 0, dy: 0, at: 0 })
+  const wheelGestureIdRef = useRef(0)
+  const pendingWheelCommandRef = useRef<PendingWheelCommand | null>(null)
+  const wheelCommandInFlightRef = useRef(false)
   const zoomRef = useRef<BrowserZoomState>(DEFAULT_ZOOM)
   const pinchRef = useRef<PinchGesture | null>(null)
   const panRef = useRef<PanGesture | null>(null)
+  const scrollingRef = useRef(false)
   const lastZoomResetUrlRef = useRef(tab.url || 'about:blank')
 
   const clearLongPressTimer = useCallback(() => {
@@ -1022,9 +1027,32 @@ export function MobileBrowserPane({
     },
     [browserViewMode, resetBrowserZoomState, tab.browserPageId, worktreeId]
   )
-
   const renderedFrameSource =
     frameUriRef.current || frameUri ? { uri: frameUriRef.current ?? frameUri! } : null
+  const frameLayerStyle = useCallback((layer: FrameLayer) => {
+    return [
+      styles.browserImageLayer,
+      visibleFrameLayerRef.current !== layer && styles.browserImageLayerHidden
+    ]
+  }, [])
+  const browserLayerRef = useCallback(
+    (layer: FrameLayer) => (layer === 0 ? setBrowserLayer0Ref : setBrowserLayer1Ref),
+    [setBrowserLayer0Ref, setBrowserLayer1Ref]
+  )
+  const frameLayerRef = useCallback(
+    (layer: FrameLayer) => (layer === 0 ? setBrowserImageLayer0Ref : setBrowserImageLayer1Ref),
+    [setBrowserImageLayer0Ref, setBrowserImageLayer1Ref]
+  )
+  const frameLayerLoadHandler = useCallback(
+    (layer: FrameLayer) =>
+      layer === 0 ? handleBrowserImageLayer0Load : handleBrowserImageLayer1Load,
+    [handleBrowserImageLayer0Load, handleBrowserImageLayer1Load]
+  )
+  const frameLayerErrorHandler = useCallback(
+    (layer: FrameLayer) =>
+      layer === 0 ? handleBrowserImageLayer0Error : handleBrowserImageLayer1Error,
+    [handleBrowserImageLayer0Error, handleBrowserImageLayer1Error]
+  )
 
   return (
     <View ref={setRootViewRef} style={styles.root}>

@@ -8,7 +8,6 @@ const storageImportPattern =
   /from ['"](?:@react-native-async-storage\/async-storage|expo-secure-store)['"]/
 
 const EXPECTED_PERSISTED_STATE_SOURCES = [
-  'mobile/app/index.tsx',
   'mobile/src/cache/home-snapshot-cache.ts',
   'mobile/src/home/use-mobile-home-data.ts',
   'mobile/src/mobile-web/mobile-web-cold-resume-route.ts',

@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 
 const nativeLayout = readFileSync(new URL('../../app/_layout.tsx', import.meta.url), 'utf8')
 const nativeSettings = readFileSync(new URL('../../app/settings.tsx', import.meta.url), 'utf8')
-const nativeHome = readFileSync(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+const nativeHome = readFileSync(new URL('../home/MobileHomeHostList.tsx', import.meta.url), 'utf8')
 const hybridShell = readFileSync(new URL('../../app/hybrid.tsx', import.meta.url), 'utf8')
 const hybridPresentation = readFileSync(
   new URL('./MobileWebHybridShellPresentation.tsx', import.meta.url),

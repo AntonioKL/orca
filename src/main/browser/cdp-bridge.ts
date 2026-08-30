@@ -27,15 +27,15 @@ import type {
   BrowserSelectResult,
   BrowserSnapshotResult,
   BrowserTabListResult,
+  BrowserTabInfo,
   BrowserTabSwitchResult,
   BrowserTypeResult,
   BrowserUploadResult,
   BrowserViewportResult,
   BrowserWaitResult
 } from '../../shared/runtime-types'
-import { buildSnapshot, type CdpCommandSender, type RefEntry } from './snapshot-engine'
-import { insertTextThroughCdp } from './browser-text-insertion'
 import { readGuestNavigationState } from './browser-guest-navigation-state'
+import { webContents } from 'electron'
 import type { BrowserManager } from './browser-manager'
 import type { CdpAuxiliaryCommands, CdpTabState } from './cdp-auxiliary-commands'
 import { CdpBridgeCommandSet } from './cdp-bridge-command-set'

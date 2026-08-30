@@ -7,7 +7,11 @@ import {
   type HostStackNavigationState
 } from '../navigation/host-stack-navigation'
 
-const homeSource = readFileSync(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+const homeSource = [
+  readFileSync(new URL('../home/MobileHomeScreen.tsx', import.meta.url), 'utf8'),
+  readFileSync(new URL('../home/MobileHomeListFooter.tsx', import.meta.url), 'utf8'),
+  readFileSync(new URL('../home/MobileHomeAccountUsageCards.tsx', import.meta.url), 'utf8')
+].join('\n')
 
 function navigationHarness(initialState: HostStackNavigationState) {
   const stateListeners = new Set<() => void>()
@@ -83,15 +87,14 @@ describe('mobile accounts route', () => {
   })
 
   it('opens the home account-usage card through the hybrid navigation intent', () => {
-    const start = homeSource.indexOf('{/* ─── Account usage ─── */}')
+    const start = homeSource.indexOf('Account usage')
 
     // Assert the marker first: a renamed banner would otherwise slice garbage and report a
     // missing call instead of the real cause.
     expect(start).toBeGreaterThanOrEqual(0)
 
-    const accountsSection = homeSource.slice(start)
-    expect(accountsSection).toContain('navigateFromMobileHome({')
-    expect(accountsSection).toContain("target: { kind: 'accounts' }")
-    expect(accountsSection).not.toContain('/accounts`')
+    expect(homeSource).toContain('navigateFromMobileHome({')
+    expect(homeSource).toContain("target: { kind: 'accounts' }")
+    expect(homeSource).not.toContain('/accounts`')
   })
 })

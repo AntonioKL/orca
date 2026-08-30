@@ -251,9 +251,8 @@ describe('mobile web package downloader', () => {
 
   it('maps host protocol failures to stable diagnostic categories', async () => {
     const stager = createStager()
-    const request = vi.fn(
-      async (): Promise<RpcResponse> =>
-        failure('Unknown method with host details', 'method_not_found')
+    const request = vi.fn(async (): Promise<RpcResponse> =>
+      failure('Unknown method with host details', 'method_not_found')
     )
 
     await expect(

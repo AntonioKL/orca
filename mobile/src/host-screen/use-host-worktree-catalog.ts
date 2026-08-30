@@ -5,6 +5,7 @@ import type { RpcClient } from '../transport/rpc-client'
 import type { ConnectionState } from '../transport/types'
 import { useWorktreeResync } from '../transport/use-worktree-resync'
 import { startHostWorktreeRefresh } from '../worktree/host-worktree-refresh'
+import { defaultHostWorkspaceOperations } from '../worktree/default-host-workspace-operations'
 import { areWorktreeListsEqual } from '../worktree/worktree-list-snapshot'
 import {
   clearConfirmedActiveWorktreeIdentity,
@@ -141,7 +142,11 @@ export function useHostWorktreeCatalog(args: {
       return
     }
     void syncViewSettingsFromDesktop()
-    return startHostWorktreeRefresh({ client, fetchWorktrees, fetchRepoMetadata })
+    return startHostWorktreeRefresh({
+      operations: defaultHostWorkspaceOperations(client),
+      fetchWorktrees,
+      fetchRepoMetadata
+    })
   }, [client, connState, fetchWorktrees, fetchRepoMetadata, syncViewSettingsFromDesktop])
 
   useFocusEffect(
@@ -162,7 +167,7 @@ export function useHostWorktreeCatalog(args: {
 
   // Why (#8498): steady-state polls miss the transition INTO 'connected' after background/sleep, when the cache is stalest.
   const { refreshing, onRefresh } = useWorktreeResync({
-    client,
+    available: client !== null,
     connState,
     fetchWorktrees,
     fetchRepoMetadata

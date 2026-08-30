@@ -19,7 +19,7 @@ function createFrameToken(): string {
 
 export function MobileHtmlPreview({ html, onOpenLink, renderSource }: Props) {
   const frameRef = useRef<HTMLIFrameElement | null>(null)
-  const frameToken = useMemo(createFrameToken, [])
+  const frameToken = useMemo(() => createFrameToken(), [])
   const documentUrl = useMemo(
     () =>
       `data:text/html;charset=utf-8,${encodeURIComponent(buildMobileHtmlPreviewDocument(html))}`,

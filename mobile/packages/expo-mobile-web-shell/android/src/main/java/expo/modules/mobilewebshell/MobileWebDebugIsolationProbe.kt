@@ -28,7 +28,7 @@ internal fun installMobileWebDebugIsolationProbe(
     WebViewCompat.addDocumentStartJavaScript(
       webView,
       script,
-      setOf("*")
+      setOf(MOBILE_WEB_ORIGIN)
     )
   } else {
     throw IllegalStateException("mobile_web_debug_isolation_probe_unavailable")

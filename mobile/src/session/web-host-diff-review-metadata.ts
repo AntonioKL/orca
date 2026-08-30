@@ -25,25 +25,23 @@ export async function readWebHostDiffReviewMetadata(args: {
   })
   args.cache.revision = result.revision
   return {
-    diffComments: result.comments.map(
-      (comment): DiffComment => ({
-        id: comment.id,
-        worktreeId: args.workspaceId,
-        filePath: comment.relativePath,
-        ...(comment.oldRelativePath ? { oldPath: comment.oldRelativePath } : {}),
-        ...(comment.source ? { source: comment.source } : {}),
-        ...(comment.selectedText === undefined ? {} : { selectedText: comment.selectedText }),
-        ...(comment.startLine === undefined ? {} : { startLine: comment.startLine }),
-        lineNumber: comment.lineNumber,
-        body: comment.body,
-        createdAt: comment.createdAt,
-        ...(comment.updatedAt === undefined ? {} : { updatedAt: comment.updatedAt }),
-        ...(comment.sentAt === undefined ? {} : { sentAt: comment.sentAt }),
-        ...(comment.scope ? { scope: comment.scope } : {}),
-        ...(comment.diffIdentity ? { diffIdentity: comment.diffIdentity } : {}),
-        side: 'modified'
-      })
-    ),
+    diffComments: result.comments.map((comment): DiffComment => ({
+      id: comment.id,
+      worktreeId: args.workspaceId,
+      filePath: comment.relativePath,
+      ...(comment.oldRelativePath ? { oldPath: comment.oldRelativePath } : {}),
+      ...(comment.source ? { source: comment.source } : {}),
+      ...(comment.selectedText === undefined ? {} : { selectedText: comment.selectedText }),
+      ...(comment.startLine === undefined ? {} : { startLine: comment.startLine }),
+      lineNumber: comment.lineNumber,
+      body: comment.body,
+      createdAt: comment.createdAt,
+      ...(comment.updatedAt === undefined ? {} : { updatedAt: comment.updatedAt }),
+      ...(comment.sentAt === undefined ? {} : { sentAt: comment.sentAt }),
+      ...(comment.scope ? { scope: comment.scope } : {}),
+      ...(comment.diffIdentity ? { diffIdentity: comment.diffIdentity } : {}),
+      side: 'modified'
+    })),
     mobileDiffReview: reviewStateFromWire(result)
   }
 }

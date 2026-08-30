@@ -13,6 +13,10 @@ const terminalInventoryRecoverySource = readFileSync(
   new URL('./use-mobile-terminal-inventory-recovery.ts', import.meta.url),
   'utf8'
 )
+const terminalStreamPresentationSource = readFileSync(
+  new URL('./host-session-terminal-stream-presentation.ts', import.meta.url),
+  'utf8'
+)
 const autoCreateHookSource = readFileSync(
   new URL('./use-initial-session-terminal-autocreate.ts', import.meta.url),
   'utf8'
@@ -58,10 +62,10 @@ describe('mobile session startup', () => {
     expect(reconciliationHookSource).toContain('sessionTabOperations.snapshot(worktreeId)')
     expect(reconciliationHookSource).toContain('sessionTabOperations.subscribe(')
     expect(reconciliationHookSource).toContain(
-      "if (AppState.currentState !== 'active') {\n          controller.setReconciliationActive(false)"
+      "if (AppState.currentState !== 'active') {\n          suspendTerminalInventoryRecovery(true)"
     )
-    expect(reconciliationHookSource).toContain('void controller.poll()')
-    expect(reconciliationHookSource).toContain('void fetchTerminals()')
+    expect(reconciliationHookSource).toContain('controller.poll()')
+    expect(reconciliationHookSource).toContain('refreshTerminalInventory()')
     expect(reconciliationHookSource).toContain("AppState.addEventListener('change'")
     expect(reconciliationHookSource).toContain('const interval = setInterval(')
     expect(reconciliationHookSource).toContain('RECONCILIATION_INTERVAL_MS = 2000')
@@ -72,7 +76,9 @@ describe('mobile session startup', () => {
   })
 
   it('confirms terminal stream teardown with a committed inventory-recovery bridge', () => {
-    expect(source).toContain("if (data.type === 'end' || data.type === 'error')")
+    expect(terminalStreamPresentationSource).toContain(
+      "if (data.type === 'end' || data.type === 'error')"
+    )
     expect(source).toContain('signalTerminalInventoryRecovery()')
     expect(terminalInventoryRecoverySource).toContain('actionRef.current = recoveryAction')
     expect(terminalInventoryRecoverySource).toContain('pendingSignalScopeRef.current = scopeKey')

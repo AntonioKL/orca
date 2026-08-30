@@ -130,6 +130,10 @@ type HostScreenProps = {
   shellOperations?: HostScreenShellOperations
 }
 
+function ListSeparator() {
+  return <View style={styles.separator} />
+}
+
 export function HostScreen({
   embedded = false,
   hostId: hostIdProp,

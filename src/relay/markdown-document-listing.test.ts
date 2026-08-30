@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import type { ChildProcess } from 'node:child_process'
+import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -15,29 +15,31 @@ import {
   listRelayMarkdownDocumentPaths
 } from './markdown-document-listing'
 
-function successfulChild(output: Buffer): ChildProcess {
+function successfulChild(output: Buffer): ChildProcessWithoutNullStreams {
   const child = Object.assign(new EventEmitter(), {
     exitCode: null,
     signalCode: null,
+    stdin: new PassThrough(),
     stdout: new PassThrough(),
     stderr: new PassThrough(),
     kill: vi.fn(() => true)
-  }) as unknown as ChildProcess
+  }) as unknown as ChildProcessWithoutNullStreams
   queueMicrotask(() => {
-    child.stdout!.emit('data', output)
+    child.stdout.emit('data', output)
     child.emit('close', 0, null)
   })
   return child
 }
 
-function unavailableChild(): ChildProcess {
+function unavailableChild(): ChildProcessWithoutNullStreams {
   const child = Object.assign(new EventEmitter(), {
     exitCode: null,
     signalCode: null,
+    stdin: new PassThrough(),
     stdout: new PassThrough(),
     stderr: new PassThrough(),
     kill: vi.fn(() => true)
-  }) as unknown as ChildProcess
+  }) as unknown as ChildProcessWithoutNullStreams
   queueMicrotask(() => {
     const error = Object.assign(new Error('spawn rg ENOENT'), { code: 'ENOENT' })
     child.emit('error', error)

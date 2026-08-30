@@ -41,7 +41,9 @@ export class MobileWebRouteErrorBoundary extends Component<
   }
 
   componentDidCatch(error: unknown, info: ErrorInfo): void {
-    window.dispatchEvent(new Event('orca-mobile-web-route-failure'))
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(new Event('orca-mobile-web-route-failure'))
+    }
     console.error('[mobile-web] hosted route stopped', {
       code: mobileWebRouteFailureCode(error),
       componentDepth: info.componentStack?.split('\n').length ?? 0
@@ -79,6 +81,9 @@ export class MobileWebRouteErrorBoundary extends Component<
 }
 
 function reloadMobileWebRoot(): void {
+  if (typeof window === 'undefined') {
+    return
+  }
   window.history.replaceState(window.history.state, '', '/')
   window.location.reload()
 }
