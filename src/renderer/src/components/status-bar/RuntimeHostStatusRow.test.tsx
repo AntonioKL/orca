@@ -115,7 +115,9 @@ describe('RuntimeHostStatusRow', () => {
       <RuntimeHostStatusRow label="Dev Box" state="disconnected" detail="Connection refused" />
     )
 
-    expect(container.querySelector('[data-slot="dropdown-menu-sub-trigger"]')).not.toBeNull()
+    const trigger = container.querySelector('[data-slot="dropdown-menu-sub-trigger"]')
+    expect(trigger).not.toBeNull()
+    expect(trigger?.querySelector('button')).toBeNull()
   })
 
   it('keeps the row action invokable for failing hosts', async () => {

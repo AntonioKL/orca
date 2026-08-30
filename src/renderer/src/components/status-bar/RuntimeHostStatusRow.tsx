@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { translate } from '@/i18n/i18n'
-import { formatUiRelativeTime } from '@/i18n/relative-time-format'
+import { formatUiRelativeTimeFromDate } from '@/i18n/relative-time-format'
 import { useMountedRef } from '@/hooks/useMountedRef'
 import {
   DropdownMenuItem,
@@ -153,7 +153,9 @@ export function RuntimeHostStatusRow({
     ? translate(
         'auto.components.status.bar.RuntimeHostStatusRow.last_connected',
         'Last connected {{value0}}',
-        { value0: formatUiRelativeTime(diagnostics.lastConnectedAt - Date.now()) }
+        {
+          value0: formatUiRelativeTimeFromDate(new Date(diagnostics.lastConnectedAt).toISOString())
+        }
       )
     : null
   const reconnectAttemptLabel =
@@ -168,7 +170,7 @@ export function RuntimeHostStatusRow({
   const rawDetail = diagnostics?.lastError ?? diagnostics?.lastClose?.reason ?? detail
   const failureExplanation = runtimeFailureExplanation(state)
 
-  const rowContent = (
+  const rowDetails = (
     <>
       <span
         aria-hidden="true"
@@ -192,37 +194,43 @@ export function RuntimeHostStatusRow({
           </span>
         </div>
       </div>
-      {busy ? (
-        <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" />
-      ) : actionLabel && action ? (
-        <button
-          type="button"
-          tabIndex={detail ? -1 : undefined}
-          onPointerEnter={() => {
-            actionPointerActiveRef.current = true
-            setSubmenuOpen(false)
-          }}
-          onPointerLeave={() => {
-            actionPointerActiveRef.current = false
-          }}
-          onPointerMove={(event) => event.stopPropagation()}
-          onPointerDown={(event) => {
-            event.stopPropagation()
-          }}
-          onClick={(event) => {
-            event.stopPropagation()
-            void handleAction()
-          }}
-          className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-accent/70 hover:text-foreground"
-        >
-          {actionLabel}
-        </button>
-      ) : null}
     </>
   )
 
+  const actionButton = busy ? (
+    <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" />
+  ) : actionLabel && action ? (
+    <button
+      type="button"
+      tabIndex={detail ? -1 : undefined}
+      onPointerEnter={() => {
+        actionPointerActiveRef.current = true
+        setSubmenuOpen(false)
+      }}
+      onPointerLeave={() => {
+        actionPointerActiveRef.current = false
+      }}
+      onPointerMove={(event) => event.stopPropagation()}
+      onPointerDown={(event) => {
+        event.stopPropagation()
+      }}
+      onClick={(event) => {
+        event.stopPropagation()
+        void handleAction()
+      }}
+      className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+    >
+      {actionLabel}
+    </button>
+  ) : null
+
   if (!detail) {
-    return <div className="flex items-center gap-2.5 px-2 py-1.5">{rowContent}</div>
+    return (
+      <div className="flex items-center gap-2.5 px-2 py-1.5">
+        {rowDetails}
+        {actionButton}
+      </div>
+    )
   }
 
   return (
@@ -234,7 +242,12 @@ export function RuntimeHostStatusRow({
         }
       }}
     >
-      <DropdownMenuSubTrigger className="gap-2.5 px-2 py-1.5">{rowContent}</DropdownMenuSubTrigger>
+      <div className="flex items-center gap-2.5 px-2 py-1.5">
+        <DropdownMenuSubTrigger className="min-w-0 flex-1 px-0 py-0">
+          {rowDetails}
+        </DropdownMenuSubTrigger>
+        {actionButton}
+      </div>
       <DropdownMenuSubContent className="w-[min(18rem,calc(100vw-1rem))] p-1.5">
         <div className="px-1.5 pt-0.5 pb-1.5">
           <div className="text-[11px] font-semibold">{runtimeFailureSummary(state)}</div>
