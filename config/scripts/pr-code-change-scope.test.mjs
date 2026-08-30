@@ -125,6 +125,11 @@ describe('per-job path classification', () => {
       package: true,
       package_windows: true
     })
+    expectClassification(['src/main/sqlite/sync-database.ts'], {
+      codex_index_heal_contract: true,
+      package: true,
+      package_windows: true
+    })
     expectClassification(['src/main/codex/codex-app-server-session.ts'], {
       codex_index_heal_contract: true,
       package: true,
