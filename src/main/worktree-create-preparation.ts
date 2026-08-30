@@ -127,19 +127,18 @@ async function cleanupStalePreparations(
       while (nextIndex < staleWorktrees.length) {
         const worktree = staleWorktrees[nextIndex]
         nextIndex += 1
-        const ownerPid =
-          parseWorktreePreparationOwnerPid(worktree.lockReason) ??
-          parseWorktreePreparationPathOwnerPid(worktree.path)
-        if (!ownerPid || isProcessAlive(ownerPid)) {
+        const lockOwnerPid = parseWorktreePreparationOwnerPid(worktree.lockReason)
+        const pathOwnerPid = parseWorktreePreparationPathOwnerPid(worktree.path)
+        if (!lockOwnerPid || isProcessAlive(lockOwnerPid)) {
           continue
         }
         // Preserve a branch-attached final path after a crash; only detached or
         // still-hidden preparations are safe to discard automatically.
-        await (
-          worktree.branch && parseWorktreePreparationPathOwnerPid(worktree.path) === null
-            ? unlockPreparedWorktree(repoPath, worktree.path, options)
-            : discardPreparedWorktree(repoPath, worktree.path, options)
-        ).catch(() => {})
+        if (worktree.branch && pathOwnerPid === null) {
+          await unlockPreparedWorktree(repoPath, worktree.path, options).catch(() => {})
+        } else if (pathOwnerPid === lockOwnerPid) {
+          await discardPreparedWorktree(repoPath, worktree.path, options).catch(() => {})
+        }
       }
     }
     const workerCount = Math.min(STALE_PREPARATION_CLEANUP_CONCURRENCY, staleWorktrees.length)

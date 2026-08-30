@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   createWorktreePreparationLockReason,
   isWorktreeCreatePreparation,
+  parseWorktreePreparationPathOwnerPid,
   WORKTREE_CREATE_PREPARATION_DIRECTORY
 } from './create-preparation'
 
@@ -34,6 +35,14 @@ describe('worktree create preparation classification', () => {
         lockReason: undefined
       })
     ).toBe(false)
+  })
+
+  it('does not parse an arbitrary preparation path with a numeric prefix', () => {
+    expect(
+      parseWorktreePreparationPathOwnerPid(
+        `/workspace/${WORKTREE_CREATE_PREPARATION_DIRECTORY}/123-checkout`
+      )
+    ).toBeNull()
   })
 
   it('does not classify an arbitrary detached user path by directory name alone', () => {

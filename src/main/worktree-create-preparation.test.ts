@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Store } from './persistence'
 import type { Repo } from '../shared/repo-types'
+import { WORKTREE_CREATE_PREPARATION_DIRECTORY } from '../shared/worktree/create-preparation'
 
 const mocks = vi.hoisted(() => ({
   mkdir: vi.fn(),
@@ -171,6 +172,27 @@ describe('worktree create preparation registry', () => {
 
     expect(mocks.unlock).not.toHaveBeenCalled()
     expect(mocks.discard).not.toHaveBeenCalled()
+  })
+
+  it('does not discard a detached worktree with caller-controlled preparation metadata', async () => {
+    mocks.listWorktreeGraph.mockResolvedValueOnce([
+      {
+        path: `/workspace/${WORKTREE_CREATE_PREPARATION_DIRECTORY}/999-checkout`,
+        branch: undefined,
+        lockReason: 'orca-create-preparation:v1:999999999:spoofed',
+        head: 'deadbeef',
+        isBare: false,
+        isMainWorktree: false
+      }
+    ])
+
+    await prepareWorktreeCreateForRepo(store, repo, 'origin/main')
+
+    expect(mocks.discard).not.toHaveBeenCalledWith(
+      repo.path,
+      `/workspace/${WORKTREE_CREATE_PREPARATION_DIRECTORY}/999-checkout`,
+      {}
+    )
   })
 
   it('cleans up and returns null so normal add can run when finalization fails', async () => {
