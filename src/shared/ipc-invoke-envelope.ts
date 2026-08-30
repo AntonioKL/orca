@@ -22,8 +22,19 @@ const BARE_ERROR_CLASS_RESIDUE = /^\w*Error:?$/
  * wrapper text — which is what `extractIpcErrorMessage` does.
  */
 export function stripIpcInvokeEnvelope(message: string): string | null {
-  const stripped = message.replace(IPC_ENVELOPE, '').trim()
-  if (stripped === '' || BARE_ERROR_CLASS_RESIDUE.test(stripped)) {
+  let hasUnreadableTerminalEnvelope = false
+  const stripped = message
+    .replace(IPC_ENVELOPE, (match, offset: number, whole: string) => {
+      // A caller may have prefixed the wrapper. Inspect the text after each match so a terminal
+      // `: Error`/empty tail is still recognized even when that prefix remains after stripping.
+      const remainder = whole.slice(offset + match.length).trim()
+      if (remainder === '' || BARE_ERROR_CLASS_RESIDUE.test(remainder)) {
+        hasUnreadableTerminalEnvelope = true
+      }
+      return ''
+    })
+    .trim()
+  if (stripped === '' || BARE_ERROR_CLASS_RESIDUE.test(stripped) || hasUnreadableTerminalEnvelope) {
     return null
   }
   return stripped

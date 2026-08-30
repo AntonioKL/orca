@@ -33,6 +33,24 @@ describe('stripIpcInvokeEnvelope', () => {
     expect(stripIpcInvokeEnvelope("Error invoking remote method 'fs:readFile':")).toBeNull()
   })
 
+  // Why: callers may prefix an envelope with their own context. A message-less rejection must
+  // still take the fallback branch after that wrapper is removed, not leave "context: Error".
+  it('returns null for a message-less envelope with caller context', () => {
+    expect(
+      stripIpcInvokeEnvelope(
+        "SSH connection failed: Error invoking remote method 'ssh:connect': Error"
+      )
+    ).toBeNull()
+    expect(
+      stripIpcInvokeEnvelope("SSH connection failed: Error invoking remote method 'ssh:connect': ")
+    ).toBeNull()
+    expect(
+      stripIpcInvokeEnvelope(
+        "SSH connection failed Error invoking remote method 'ssh:connect': Error"
+      )
+    ).toBeNull()
+  })
+
   // Why: callers prefix the envelope with their own context, so anchoring at ^ would leave
   // the whole wrapper on screen. The caller's prefix is kept; only the wrapper goes.
   it('strips an envelope a caller has prefixed, keeping the prefix', () => {
