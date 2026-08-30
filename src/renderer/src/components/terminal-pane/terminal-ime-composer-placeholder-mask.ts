@@ -7,6 +7,9 @@ import {
 } from './terminal-ime-composition-route'
 
 export const TERMINAL_IME_COMPOSER_PLACEHOLDER_CLASS = 'orca-ime-composer-placeholder'
+// One live composition and a few delayed turnovers are enough for xterm's lifecycle; a missing
+// session-end event must not retain ownership forever.
+export const MAX_ACTIVE_COMPOSITION_SESSIONS = 8
 
 function compositionSessionId(event: Event): number | null {
   if (!(event instanceof CustomEvent)) {
@@ -33,6 +36,10 @@ export function installTerminalImeComposerPlaceholderMask(terminal: Terminal): I
     const id = compositionSessionId(event)
     if (id === null) {
       return
+    }
+    if (!activeSessions.has(id) && activeSessions.size >= MAX_ACTIVE_COMPOSITION_SESSIONS) {
+      // Drop stale ownership before adopting the newest transaction.
+      activeSessions.clear()
     }
     activeSessions.add(id)
     syncPlaceholderOwnership()
