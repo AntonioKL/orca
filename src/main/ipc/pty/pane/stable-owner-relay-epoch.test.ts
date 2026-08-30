@@ -29,7 +29,7 @@ const agentSpawnOptions = (): EpochAwareSpawnOptions => ({
   agentSessionCreateOperationId: 'create-operation'
 })
 
-function createProvider(status: unknown | Error) {
+function createProvider(status: unknown) {
   const spawns: EpochAwareSpawnOptions[] = []
   const requestHostRpc = vi.fn(async () => {
     if (status instanceof Error) {
@@ -52,7 +52,7 @@ function createProvider(status: unknown | Error) {
 
 async function runSpawn(
   relayPtyId: string,
-  status: unknown | Error,
+  status: unknown,
   spawnOptions: EpochAwareSpawnOptions = agentSpawnOptions()
 ) {
   const harness = createProvider(status)
