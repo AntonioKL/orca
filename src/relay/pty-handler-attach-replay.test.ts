@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import * as ptyShellUtils from './pty-shell-utils'
+import * as ptyProcessProbes from './pty-process-probes'
 
 const { mockPtySpawn, mockPtyInstance, mockCreateShellPromptReadinessProbe } = vi.hoisted(() => ({
   mockPtySpawn: vi.fn(),
@@ -83,7 +83,7 @@ describe('PtyHandler', () => {
     expect(handler.activePtyCount).toBe(1)
     expect(onExitCb).toBeDefined()
 
-    const aliveSpy = vi.spyOn(ptyShellUtils, 'isProcessAlive').mockReturnValue(false)
+    const aliveSpy = vi.spyOn(ptyProcessProbes, 'isProcessAlive').mockReturnValue(false)
     try {
       await expect(
         dispatcher.callRequest('pty.attach', { id: PTY_1, suppressReplayNotification: true })
@@ -112,7 +112,7 @@ describe('PtyHandler', () => {
     await dispatcher.callRequest('pty.spawn', {})
 
     let shutdown: Promise<unknown> | undefined
-    const aliveSpy = vi.spyOn(ptyShellUtils, 'isProcessAlive').mockImplementation(() => {
+    const aliveSpy = vi.spyOn(ptyProcessProbes, 'isProcessAlive').mockImplementation(() => {
       shutdown = dispatcher.callRequest('pty.shutdown', { id: PTY_1, immediate: true })
       return false
     })
@@ -144,7 +144,7 @@ describe('PtyHandler', () => {
     const spawn = await spawnPty()
     dataCallback?.('prompt$ ')
 
-    const aliveSpy = vi.spyOn(ptyShellUtils, 'isProcessAlive').mockReturnValue(true)
+    const aliveSpy = vi.spyOn(ptyProcessProbes, 'isProcessAlive').mockReturnValue(true)
     try {
       const result = await attachPty({
         id: PTY_1,
