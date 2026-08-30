@@ -21,9 +21,9 @@ export function structuredSessionOperationId(): string {
   return createStructuredAgentSessionOperationId(() => crypto.randomUUID())
 }
 
-/** Bounded so a host that keeps answering `unknown` cannot spin forever. */
-const UNCONFIRMED_PROBE_MAX_ATTEMPTS = 5
 const UNCONFIRMED_PROBE_BASE_DELAY_MS = 1_000
+/** Probing never stops: a transport outage outlives any fixed budget, and giving up
+ *  restores the wedge this fixes. Growth caps the rate at one status query per 16s. */
 const UNCONFIRMED_PROBE_MAX_DELAY_MS = 16_000
 
 function isDesktopDeliveryUnknown(error: unknown): boolean {
@@ -164,7 +164,8 @@ export function useStructuredAgentSessionOutbox(args: {
                   ? {
                       ...entry,
                       state:
-                        submission.dispatchState === 'unknown'
+                        submission.dispatchState === 'unknown' ||
+                        submission.dispatchState === 'pending'
                           ? ('unconfirmed' as const)
                           : ('queued' as const)
                     }
@@ -231,9 +232,6 @@ export function useStructuredAgentSessionOutbox(args: {
       return
     }
     const attempts = probeAttemptsRef.current.get(probeId) ?? 0
-    if (attempts >= UNCONFIRMED_PROBE_MAX_ATTEMPTS) {
-      return
-    }
     const timer = setTimeout(
       () => {
         probeAttemptsRef.current.set(probeId, attempts + 1)

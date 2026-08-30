@@ -410,4 +410,70 @@ describe('NativeChatStructuredSession', () => {
     })
     expect(mocks.call).toHaveBeenCalledTimes(2)
   }, 20000)
+
+  it('does not hot-loop when the host answers pending', async () => {
+    mocks.mode = 'outbox'
+    mocks.call.mockResolvedValue({
+      ok: true,
+      value: { submission: { clientMessageId: 'client-1', dispatchState: 'pending' } }
+    })
+
+    render(
+      <NativeChatStructuredSession
+        isVisible
+        tabId="structured-tab-pending"
+        sessionId="session-pending"
+        target={{ kind: 'local' }}
+        agent="codex"
+        allowFileUriLinks
+      />
+    )
+
+    const send = mocks.composerProps?.structuredTransport?.send as
+      | ((text: string, attachments: readonly { id: string; path: string }[]) => boolean)
+      | undefined
+    expect(send?.('first', [])).toBe(true)
+    await waitFor(() => expect(mocks.call).toHaveBeenCalledOnce())
+
+    // A pending row parks the entry under the backoff instead of re-dispatching
+    // immediately. Without that, this window is an unbounded back-to-back RPC flood.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2500))
+    })
+    expect(mocks.call.mock.calls.length).toBeLessThanOrEqual(3)
+  }, 20000)
+
+  it('keeps probing past the old five-attempt budget', async () => {
+    mocks.mode = 'outbox'
+    mocks.call.mockRejectedValue(new Error('socket closed'))
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      render(
+        <NativeChatStructuredSession
+          isVisible
+          tabId="structured-tab-budget"
+          sessionId="session-budget"
+          target={{ kind: 'local' }}
+          agent="codex"
+          allowFileUriLinks
+        />
+      )
+
+      const send = mocks.composerProps?.structuredTransport?.send as
+        | ((text: string, attachments: readonly { id: string; path: string }[]) => boolean)
+        | undefined
+      expect(send?.('first', [])).toBe(true)
+
+      // Backoff is 1+2+4+8+16 = 31s for five probes, which was the old hard budget.
+      // Step past it; a seventh call proves the probe re-arms instead of giving up.
+      for (let step = 0; step < 12; step += 1) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(8_000)
+        })
+      }
+      expect(mocks.call.mock.calls.length).toBeGreaterThanOrEqual(7)
+    } finally {
+      vi.useRealTimers()
+    }
+  }, 30000)
 })
