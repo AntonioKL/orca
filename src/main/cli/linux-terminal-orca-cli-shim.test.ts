@@ -26,10 +26,24 @@ async function makeFixture(): Promise<{ userDataPath: string; resourcesPath: str
 }
 
 afterEach(async () => {
+  vi.unstubAllEnvs()
   await Promise.all(created.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
 describe('ensureLinuxTerminalOrcaCliShimDir', () => {
+  it('uses the mounted bundled launcher when only APPDIR is inherited', async () => {
+    const { userDataPath, resourcesPath } = await makeFixture()
+    vi.stubEnv('APPIMAGE', '')
+    vi.stubEnv('APPDIR', resourcesPath)
+
+    const shimDir = ensureLinuxTerminalOrcaCliShimDir({ userDataPath, resourcesPath })
+
+    expect(shimDir).toBe(join(userDataPath, 'linux-orca-cli-shim'))
+    expect(readFileSync(join(shimDir!, 'orca'), 'utf8')).toContain(
+      `exec '${join(resourcesPath, 'bin', 'orca-ide')}' "$@"`
+    )
+  })
+
   it('writes an executable bare-orca shim that execs the bundled orca-ide launcher', async () => {
     const { userDataPath, resourcesPath } = await makeFixture()
 
