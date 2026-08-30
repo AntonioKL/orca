@@ -90,6 +90,7 @@ export async function configurePushAutoSetupRemote(
   options: GitWorktreeExecOptions
 ): Promise<void> {
   try {
+    // Why: `--get` (not `--local --get`) treats a value at any scope as an explicit user choice.
     let alreadySet = false
     try {
       await gitExecFileAsync(['config', '--get', 'push.autoSetupRemote'], {
@@ -97,6 +98,7 @@ export async function configurePushAutoSetupRemote(
       })
       alreadySet = true
     } catch (readError) {
+      // Why: exit 1 means unset; other codes are real read failures and must not overwrite config.
       const code = (readError as { code?: unknown })?.code
       if (code !== 1) {
         throw readError

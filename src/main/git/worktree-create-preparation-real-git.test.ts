@@ -87,7 +87,8 @@ describe('prepared worktree creation with real Git', () => {
     expect(visibleBeforeSubmit).toHaveLength(1)
     expect(allBeforeSubmit).toHaveLength(2)
     expect(allBeforeSubmit.find(isWorktreeCreatePreparation)).toMatchObject({
-      locked: true
+      locked: true,
+      lockReason: expect.stringContaining('orca-create-preparation:v1:')
     })
 
     await writeFile(join(repoPath, 'version.txt'), 'two\n')

@@ -26504,7 +26504,11 @@ export class OrcaRuntimeService {
       runtime: this
     })
     if (baseBranch) {
-      await prepareWorktreeCreateForRepo(this.requireStore(), repo, baseBranch)
+      try {
+        await prepareWorktreeCreateForRepo(this.requireStore(), repo, baseBranch)
+      } catch {
+        // Why: speculative preparation is an optimistic warm-up; the real create path reports failures.
+      }
     }
   }
 
