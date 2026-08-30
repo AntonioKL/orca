@@ -169,6 +169,31 @@ describe('listTerminals execution-host identity', () => {
 })
 
 describe('listTerminals scope declaration', () => {
+  it('does not judge a local PTY exited from an SSH-only aggregate inventory', async () => {
+    const runtime = new OrcaRuntimeService(makeStore() as never)
+    runtime.registerPty('pty-local-retained', LOCAL_WORKTREE_ID)
+    runtime.setPtyController({
+      write: () => true,
+      kill: () => true,
+      listProcesses: vi.fn(async () => []),
+      listProcessesWithHostScope: vi.fn(async () => ({
+        processes: [],
+        hostIds: ['ssh:box-1']
+      }))
+    } as never)
+    const internal = runtime as unknown as {
+      ptysById: Map<string, { connected: boolean }>
+      refreshPtyWorktreeRecordsWithControllerInventory(
+        worktrees: [],
+        targetWorktreeId?: null
+      ): Promise<unknown>
+    }
+
+    await internal.refreshPtyWorktreeRecordsWithControllerInventory([], null)
+
+    expect(internal.ptysById.get('pty-local-retained')?.connected).toBe(true)
+  })
+
   it('declares every host an unscoped listing covers', async () => {
     const runtime = makeRuntime([
       { worktreeId: LOCAL_WORKTREE_ID, leafId: LOCAL_LEAF_ID, ptyId: 'pty-local-1' },

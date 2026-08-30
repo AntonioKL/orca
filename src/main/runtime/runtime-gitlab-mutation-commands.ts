@@ -1,4 +1,9 @@
-import type { GitLabIssueUpdate, GitLabMRInlineCommentInput, GitLabProjectRef } from '../../shared/gitlab-types'
+import type {
+  GitLabIssueUpdate,
+  GitLabMRInlineCommentInput,
+  GitLabMRUpdate,
+  GitLabProjectRef
+} from '../../shared/gitlab-types'
 import type { Repo } from '../../shared/repo-types'
 import {
   addIssueComment,
@@ -201,7 +206,7 @@ export class RuntimeGitLabMutationCommands {
   async updateGitLabRepoMR(
     repoSelector: string,
     iid: number,
-    updates: { title?: string; body?: string; addLabels?: string[]; removeLabels?: string[] },
+    updates: GitLabMRUpdate,
     projectRef?: GitLabProjectRef | null
   ) {
     const repo = await this.deps.resolveRepo(repoSelector)

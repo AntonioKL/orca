@@ -4,8 +4,7 @@ import type { getWorktreePathSettings } from '../ipc/worktree-logic'
 import {
   computeWorktreePath,
   ensurePathWithinWorkspace,
-  sanitizeWorktreeName,
-  sanitizeWorktreeDisplayName
+  sanitizeWorktreeName
 } from '../ipc/worktree-logic'
 import { getBranchConflictKind } from '../git/repo'
 import {
@@ -195,9 +194,7 @@ export async function resolveRuntimeLocalWorktreeCreateCandidate(args: {
   }
   return {
     effectiveRequestedName,
-    requestedDisplayName: args.request.displayName
-      ? sanitizeWorktreeDisplayName(args.request.displayName)
-      : undefined,
+    requestedDisplayName: args.request.displayName?.trim() || undefined,
     effectiveSanitizedName,
     branchName,
     checkoutExistingBranch,

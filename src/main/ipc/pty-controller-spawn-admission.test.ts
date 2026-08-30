@@ -118,12 +118,13 @@ describe('registerPtyHandlers', () => {
   it('adopts a live controller-owned local fallback when listings cannot serialize claims', async () => {
     const sessions: {
       id: string
+      pid: number
       incarnationId: string
       cwd: string
       title: string
     }[] = []
     const physicalSpawn = vi.fn(async () => {
-      const result = { id: 'pty-local-claim', incarnationId: 'incarnation-local-claim' }
+      const result = { id: 'pty-local-claim', pid: 4242, incarnationId: 'incarnation-local-claim' }
       sessions.push({ ...result, cwd: '/tmp/worktree', title: 'Codex' })
       return result
     })
@@ -146,6 +147,7 @@ describe('registerPtyHandlers', () => {
     }
 
     await expect(controller.spawn(request)).resolves.toMatchObject({
+      pid: 4242,
       agentSessionEnsure: { disposition: 'created' }
     })
     await expect(controller.spawn(request)).resolves.toMatchObject({

@@ -1,4 +1,5 @@
 import type { Repo } from '../../shared/repo-types'
+import type { Worktree } from '../../shared/worktree/types'
 import type { Store } from '../persistence'
 import {
   getLocalProjectGitExecOptions,
@@ -19,7 +20,7 @@ import { materializeRuntimeLocalWorktree } from './runtime-local-worktree-materi
 type LocalGitOptions = { wslDistro?: string }
 type LocalGitArgs = [] | [LocalGitOptions]
 
-export async function createRuntimeLocalManagedWorktree(args: {
+export async function createRuntimeLocalManagedWorktree<T>(args: {
   request: RuntimeManagedWorktreeCreateArgs
   repo: Repo
   store: Store
@@ -41,6 +42,7 @@ export async function createRuntimeLocalManagedWorktree(args: {
     ...options: LocalGitArgs
   ) => Promise<RemoteFetchResult>
   fetchRemote: (path: string, remote: string, ...options: LocalGitArgs) => Promise<void>
+  onWorktreeMetadataPersisted: (worktree: Worktree) => T
 }) {
   const { request, repo, store } = args
   const settings = store.getSettings()
@@ -131,7 +133,8 @@ export async function createRuntimeLocalManagedWorktree(args: {
     requestedDisplayName: candidate.requestedDisplayName,
     effectiveSanitizedName: candidate.effectiveSanitizedName,
     effectiveCreatedWithAgent: args.createdWithAgent,
-    localWorktreeGitOptions: worktreeGitOptions
+    localWorktreeGitOptions: worktreeGitOptions,
+    onMetadataPersisted: args.onWorktreeMetadataPersisted
   })
   return {
     ...materialized,

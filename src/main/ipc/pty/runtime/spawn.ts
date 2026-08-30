@@ -19,6 +19,7 @@ import { createRuntimePtySpawnState, type RuntimePtySpawnArgs } from './spawn-st
 
 function toRuntimeSpawnReply(result: {
   id: string
+  pid?: number | null
   incarnationId?: string
   wslDistro?: string | null
   stablePaneOwner?: { handle: string; tabId: string; leafId: string }
@@ -26,6 +27,7 @@ function toRuntimeSpawnReply(result: {
 }) {
   return {
     id: result.id,
+    ...(typeof result.pid === 'number' ? { pid: result.pid } : {}),
     ...(result.incarnationId ? { incarnationId: result.incarnationId } : {}),
     ...(typeof result.wslDistro === 'string' ? { wslDistro: result.wslDistro } : {}),
     ...(result.stablePaneOwner ? { stablePaneOwner: result.stablePaneOwner } : {}),

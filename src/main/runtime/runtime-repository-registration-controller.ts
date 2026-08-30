@@ -66,9 +66,7 @@ export class RuntimeRepositoryRegistrationController {
       ...detected,
       addedAt: Date.now(),
       kind,
-      ...(kind === 'git'
-        ? { externalWorktreeVisibility: 'hide' as const, externalWorktreeVisibilityLegacy: false }
-        : {})
+      ...(kind === 'git' ? { externalWorktreeVisibilityLegacy: false } : {})
     }
     store.addRepo(repo)
     await prepareLocalWorktreeRootForRepo(store, repo)
@@ -147,9 +145,7 @@ export class RuntimeRepositoryRegistrationController {
       ...detected,
       addedAt: Date.now(),
       kind: repoKind,
-      ...(repoKind === 'git'
-        ? { externalWorktreeVisibility: 'hide' as const, externalWorktreeVisibilityLegacy: false }
-        : {})
+      ...(repoKind === 'git' ? { externalWorktreeVisibilityLegacy: false } : {})
     }
     store.addRepo(repo)
     await prepareLocalWorktreeRootForRepo(store, repo)

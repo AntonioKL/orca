@@ -56,7 +56,7 @@ export type RuntimeServiceCommandSurface = {
   cancelMobileDictationForConnection: RuntimeMobileDictationController['cancelForConnection']
   getAllBrowserDrivers: RuntimeBrowserDriverController['getAll']
   reclaimBrowserForDesktop: RuntimeBrowserDriverController['reclaimForDesktop']
-  notifyMessageArrived: RuntimeMessageWaiters['notify']
+  notifyMessageArrived(handle: string, messageType?: string): void
   waitForMessage: RuntimeMessageWaiters['wait']
   cancelMessageWaiters: RuntimeMessageWaiters['cancel']
 }

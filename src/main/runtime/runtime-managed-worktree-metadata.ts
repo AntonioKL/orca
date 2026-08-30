@@ -89,7 +89,14 @@ export async function updateRuntimeManagedWorktreeMetadata(args: {
       createdAt
     })
   }
-  args.store.setWorktreeMeta(worktree.id, stripOrcaProvenanceMetaUpdates(persisted))
+  const metadataUpdates = stripOrcaProvenanceMetaUpdates(persisted)
+  const executionHostId = worktree.identity?.executionHostId ?? worktree.hostId
+  if (executionHostId && args.store.setWorktreeMetaForHost) {
+    args.store.setWorktreeMetaForHost(worktree.id, executionHostId, metadataUpdates)
+  } else {
+    args.store.setWorktreeMeta(worktree.id, metadataUpdates)
+  }
+  // Why: CLI callers need an explicit push for metadata changed outside the renderer's optimistic update path.
   args.ports.invalidateResolved()
   args.ports.notifyChanged(worktree.repoId)
   return args.ports.showWorktree(`id:${worktree.id}`)

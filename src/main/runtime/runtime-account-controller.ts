@@ -5,10 +5,14 @@ import type {
 } from '../codex-accounts/service'
 import type { CodexAccountSelectionTarget } from '../codex-accounts/runtime-selection'
 import type { RateLimitService } from '../rate-limits/service'
-import type { ClaudeRateLimitAccountsState, CodexRateLimitAccountsState } from '../../shared/managed-account-types'
+import type {
+  ClaudeRateLimitAccountsState,
+  CodexRateLimitAccountsState
+} from '../../shared/managed-account-types'
 import type { CodexRateLimitResetOutcome, RateLimitState } from '../../shared/rate-limit-types'
 import type { CodexResetCreditExpectedScope } from '../../shared/codex-reset-credit-scope'
 import type { CommitMessageAgentEnvironmentResolvers } from '../text-generation/commit-message-agent-environment'
+import type { ClaudeAccountSelectionTarget } from '../claude-accounts/runtime-selection'
 
 export type RuntimeAccountServices = {
   claudeAccounts: ClaudeAccountService
@@ -48,6 +52,10 @@ export class RuntimeAccountController {
 
   getCommitMessageAgentEnvironment(): CommitMessageAgentEnvironmentResolvers | undefined {
     return this.commitMessageAgentEnvironment ?? undefined
+  }
+
+  getClaudeConfigDirectory(target: ClaudeAccountSelectionTarget): string | null {
+    return this.services?.claudeAccounts.getRuntimeConfigDir(target) ?? null
   }
 
   getSnapshot(): AccountsSnapshot {

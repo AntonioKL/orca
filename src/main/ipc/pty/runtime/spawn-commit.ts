@@ -35,7 +35,6 @@ import { clearProviderPtyState } from '../provider/state-cleanup'
 import { resolvePaneSpawnReservation } from '../pane/spawn-reservation'
 import { admitProviderReattachLaunchIdentity } from '../pane/launch-authority'
 import type { RuntimePtySpawnState } from './spawn-state'
-
 export async function commitRuntimePtySpawn(ctx: RuntimePtySpawnState) {
   const args = ctx.args
   const providerReattachLaunchIdentity = admitProviderReattachLaunchIdentity(ctx.result)
@@ -86,9 +85,6 @@ export async function commitRuntimePtySpawn(ctx: RuntimePtySpawnState) {
         ...(ctx.env ? { launchEnv: ctx.env } : {})
       })
     }
-    // Why: the adopted branch returns before the normal settle site, so the
-    // reservation must be resolved here or every later spawn for this pane
-    // awaits a promise that never settles.
     resolvePaneSpawnReservation(ctx.paneSpawnReservationKey, ctx.paneSpawnReservation, {
       ...ctx.result,
       isReattach: true
@@ -103,7 +99,6 @@ export async function commitRuntimePtySpawn(ctx: RuntimePtySpawnState) {
   if (ctx.result.incarnationId) {
     ptyIncarnationById.set(ctx.result.id, ctx.result.incarnationId)
   }
-  // Why: record the native-Windows-local-PTY determination before any byte reaches the emulator, so its ConPTY DA1 override exists from byte zero.
   if (
     isNativeWindowsLocalPtySpawn({
       connectionId: args.connectionId,
@@ -113,15 +108,13 @@ export async function commitRuntimePtySpawn(ctx: RuntimePtySpawnState) {
   ) {
     markNativeWindowsConptyPty(ctx.result.id)
   }
-  const relayResultId = getRelayPtyId(args.connectionId, ctx.result.id)
   const persistSshLease = (): void => {
     if (!ctx.deps.store || !args.connectionId) {
       return
     }
-    // Why: SSH leases keep relay ids for remote reconciliation, while session bindings keep app-facing ids for hydration.
     ctx.deps.store.upsertSshRemotePtyLease({
       targetId: args.connectionId,
-      ptyId: relayResultId,
+      ptyId: getRelayPtyId(args.connectionId, ctx.result.id),
       ...(typeof args.worktreeId === 'string' ? { worktreeId: args.worktreeId } : {}),
       ...(typeof args.tabId === 'string' ? { tabId: args.tabId } : {}),
       ...(typeof args.leafId === 'string' && isTerminalLeafId(args.leafId)
@@ -199,7 +192,6 @@ export async function commitRuntimePtySpawn(ctx: RuntimePtySpawnState) {
       ctx.result.id,
       args.worktreeId,
       args.connectionId ?? null,
-      // Why: thread validated pane identity so main can back a pending mobile create even if graph-sync stalls (#7587).
       typeof args.tabId === 'string' &&
         isValidTerminalTabId(args.tabId) &&
         args.tabId.length <= 512 &&
@@ -216,12 +208,9 @@ export async function commitRuntimePtySpawn(ctx: RuntimePtySpawnState) {
         : undefined
     )
   } else {
-    // Why: non-worktree PTYs have no later surface-registration phase to clear admission intent.
     ctx.deps.runtime?.cancelPendingPtyRegistration?.(ctx.result.id, ctx.result.incarnationId)
   }
-  // Why: runtime-controller creates (headless serve, CLI, splits) adopt surviving daemon sessions too; without this seed their records stay blank.
   seedTerminalRestoreRecordsFromSpawnResult(ctx.deps.runtime, ctx.result)
-  // Why: arms main's per-PTY Command Code output detector from the launch command (renderer startupCommand parity).
   if (!ctx.stablePaneOwner) {
     ctx.deps.runtime?.noteTerminalSpawnCommand?.(ctx.result.id, ctx.launchCommand ?? null)
   }
@@ -241,7 +230,6 @@ export async function commitRuntimePtySpawn(ctx: RuntimePtySpawnState) {
       })
     }
   }
-  // Why: runtime-owned CLI PTYs bypass the renderer pty:spawn handler; record paneKey here too since hook titles and cache cleanup need this reverse lookup.
   const paneKey = rememberPaneKeyForPty(ctx.result.id, ctx.env?.ORCA_PANE_KEY)
   const pendingSerializer = paneKey ? pendingByPaneKey.get(paneKey) : undefined
   const inheritRendererReadiness =
@@ -264,7 +252,6 @@ export async function commitRuntimePtySpawn(ctx: RuntimePtySpawnState) {
           : null
     })
   }
-  // Why: runtime-owned/background spawns bypass mounted-pane state, so inventory consumers need an explicit signal.
   ctx.deps.sendPtySpawnedToRenderer(ctx.result.id)
   if (!args.connectionId) {
     ctx.deps.options?.onCodexHomePtySpawned?.({
@@ -284,8 +271,20 @@ export async function commitRuntimePtySpawn(ctx: RuntimePtySpawnState) {
           : {})
     })
   }
-  const response = {
+  resolvePaneSpawnReservation(ctx.paneSpawnReservationKey, ctx.paneSpawnReservation, {
+    ...ctx.result,
+    ...(typeof ctx.result.snapshotKittyKeyboardFlags === 'number' &&
+    ctx.reconciledSnapshotSeq !== null &&
+    ctx.snapshotKittyFlagsCoverReconciledSeq
+      ? { snapshotSeq: ctx.reconciledSnapshotSeq }
+      : { snapshotKittyKeyboardFlags: undefined }),
+    isReattach: true
+  })
+  return {
     id: ctx.result.id,
+    ...(typeof ctx.result.pid === 'number' && Number.isFinite(ctx.result.pid) && ctx.result.pid > 0
+      ? { pid: ctx.result.pid }
+      : {}),
     ...(ctx.result.incarnationId ? { incarnationId: ctx.result.incarnationId } : {}),
     ...(ctx.stablePaneOwner && (ctx.stablePaneOwner.handle || args.preAllocatedHandle)
       ? {
@@ -298,14 +297,4 @@ export async function commitRuntimePtySpawn(ctx: RuntimePtySpawnState) {
       : {}),
     ...(ctx.result.agentSessionEnsure ? { agentSessionEnsure: ctx.result.agentSessionEnsure } : {})
   }
-  resolvePaneSpawnReservation(ctx.paneSpawnReservationKey, ctx.paneSpawnReservation, {
-    ...ctx.result,
-    ...(typeof ctx.result.snapshotKittyKeyboardFlags === 'number' &&
-    ctx.reconciledSnapshotSeq !== null &&
-    ctx.snapshotKittyFlagsCoverReconciledSeq
-      ? { snapshotSeq: ctx.reconciledSnapshotSeq }
-      : { snapshotKittyKeyboardFlags: undefined }),
-    isReattach: true
-  })
-  return response
 }

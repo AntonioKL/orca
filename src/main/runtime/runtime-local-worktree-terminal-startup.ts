@@ -19,7 +19,7 @@ import type {
 
 type Ports = {
   canSpawn: boolean
-  markTrusted: (agent: TuiAgent, path: string) => void
+  markTrusted: (agent: TuiAgent, path: string) => Promise<void>
   createTerminal: (
     selector: string,
     options: TerminalCreateOptions
@@ -95,7 +95,7 @@ export async function startRuntimeLocalWorktreeTerminals(args: {
     try {
       const trustAgent = args.draftPaste?.agent ?? args.createdWithAgent
       if (trustAgent) {
-        ports.markTrusted(trustAgent, worktree.path)
+        await ports.markTrusted(trustAgent, worktree.path)
       }
       const terminal = await ports.createTerminal(`id:${worktree.id}`, {
         command: sequencedStartup.command,

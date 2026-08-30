@@ -54,11 +54,12 @@ describe('structured handoff PTY binding', () => {
       sessionId === SESSION_ID ? record : null
     )
 
-    await runtime.createTerminal('id:worktree-1', {
+    const terminal = await runtime.createTerminal('id:worktree-1', {
       command: 'codex resume thread-1',
       structuredAgentSessionId: SESSION_ID
     })
 
+    expect(terminal.processId).toBe(4200)
     expect(agentSessionPtyWriteGate.boundSessionId('pty-structured')).toBe(SESSION_ID)
     await expect(runtime.writeTerminalPreviewInput('pty-structured', 'unsafe')).resolves.toBe(false)
     expect(write).not.toHaveBeenCalled()

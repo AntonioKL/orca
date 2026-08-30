@@ -16871,61 +16871,53 @@ describe('OrcaRuntimeService', () => {
     })
   })
 
-  it('does not treat a Codex launch title as tui-idle readiness', async () => {
-    vi.useFakeTimers()
-    try {
-      const runtime = new OrcaRuntimeService(store)
-      const serializeProviderBuffer = vi.fn().mockResolvedValue({
-        data: 'OpenAI Codex\r\nmodel: gpt-5.5\r\ndirectory: /repo\r\n',
-        cols: 80,
-        rows: 24,
-        seq: 1
-      })
-      runtime.setPtyController({
-        spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
-        write: () => true,
-        kill: () => true,
-        getForegroundProcess: async () => null,
-        serializeProviderBuffer
-      })
-      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
+  it('probes a classifiable adopted PTY title for visible tui-idle readiness', async () => {
+    const runtime = new OrcaRuntimeService(store)
+    const serializeProviderBuffer = vi.fn().mockResolvedValue({
+      data: 'OpenAI Codex\r\nmodel: gpt-5.5\r\ndirectory: /repo\r\n',
+      cols: 80,
+      rows: 24,
+      seq: 1
+    })
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null,
+      serializeProviderBuffer
+    })
+    const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
 
-      runtime.attachWindow(1)
-      runtime.syncWindowGraph(1, {
-        tabs: [
-          {
-            tabId: 'tab-bg',
-            worktreeId: TEST_WORKTREE_ID,
-            title: 'Codex YOLO',
-            activeLeafId: 'pane-bg',
-            layout: null
-          }
-        ],
-        leaves: [
-          {
-            tabId: 'tab-bg',
-            worktreeId: TEST_WORKTREE_ID,
-            leafId: 'pane-bg',
-            paneRuntimeId: 1,
-            ptyId: 'pty-bg',
-            paneTitle: null
-          }
-        ]
-      })
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, {
+      tabs: [
+        {
+          tabId: 'tab-bg',
+          worktreeId: TEST_WORKTREE_ID,
+          title: 'Codex YOLO',
+          activeLeafId: 'pane-bg',
+          layout: null
+        }
+      ],
+      leaves: [
+        {
+          tabId: 'tab-bg',
+          worktreeId: TEST_WORKTREE_ID,
+          leafId: 'pane-bg',
+          paneRuntimeId: 1,
+          ptyId: 'pty-bg',
+          paneTitle: null
+        }
+      ]
+    })
 
-      const waitPromise = runtime.waitForTerminal(handle, {
+    await expect(
+      runtime.waitForTerminal(handle, {
         condition: 'tui-idle',
         timeoutMs: 1_000
       })
-      const timeoutAssertion = expect(waitPromise).rejects.toThrow('timeout')
-
-      await vi.advanceTimersByTimeAsync(2_000)
-
-      await timeoutAssertion
-      expect(serializeProviderBuffer).not.toHaveBeenCalled()
-    } finally {
-      vi.useRealTimers()
-    }
+    ).resolves.toMatchObject({ condition: 'tui-idle', status: 'running' })
+    expect(serializeProviderBuffer).toHaveBeenCalledOnce()
   })
 
   it('resolves tui-idle from a Codex ready prompt preview', async () => {
@@ -37855,7 +37847,7 @@ describe('OrcaRuntimeService', () => {
     expect(summary?.linkedPR).toEqual({ number: 42, state: 'merged' })
   })
 
-  it('carries persisted worktree host ownership in mobile summaries', async () => {
+  it('prefers live worktree host ownership over stale persisted metadata', async () => {
     const metaById = {
       [TEST_WORKTREE_ID]: {
         ...store.getAllWorktreeMeta()[TEST_WORKTREE_ID],
@@ -37873,7 +37865,7 @@ describe('OrcaRuntimeService', () => {
 
     expect(worktrees.find((worktree) => worktree.worktreeId === TEST_WORKTREE_ID)).toMatchObject({
       repoId: TEST_REPO_ID,
-      hostId: 'runtime:owner-runtime'
+      hostId: 'local'
     })
   })
 

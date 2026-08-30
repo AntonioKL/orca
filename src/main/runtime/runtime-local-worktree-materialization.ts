@@ -21,7 +21,7 @@ import type { RuntimeManagedWorktreeCreateArgs } from './runtime-managed-worktre
 import type { RemoteTrackingBase } from './runtime-remote-fetch-controller'
 import type { RuntimeStore } from './runtime-store-contract'
 
-export async function materializeRuntimeLocalWorktree(args: {
+export async function materializeRuntimeLocalWorktree<T>(args: {
   request: RuntimeManagedWorktreeCreateArgs
   repo: Repo
   store: RuntimeStore
@@ -38,7 +38,8 @@ export async function materializeRuntimeLocalWorktree(args: {
   effectiveSanitizedName: string
   effectiveCreatedWithAgent?: TuiAgent
   localWorktreeGitOptions: { wslDistro?: string }
-}): Promise<{ worktree: Worktree; includeCopyWarning?: string }> {
+  onMetadataPersisted: (worktree: Worktree) => T
+}): Promise<{ worktree: Worktree; metadataResult: T; includeCopyWarning?: string }> {
   const {
     request,
     repo,
@@ -125,6 +126,7 @@ export async function materializeRuntimeLocalWorktree(args: {
     ...mergeWorktree(repo.id, created, meta),
     hostId: meta.hostId ?? getRepoExecutionHostId(repo)
   }
+  const metadataResult = args.onMetadataPersisted(worktree)
 
   if ((repo.symlinkPaths ?? []).length > 0) {
     await createWorktreeLinkedPaths(repo.path, created.path, repo.symlinkPaths ?? [])
@@ -138,7 +140,7 @@ export async function materializeRuntimeLocalWorktree(args: {
   }
   const worktreeIncludePaths = await resolveWorktreeIncludePaths(repo.path, localWorktreeGitOptions)
   if (worktreeIncludePaths.length === 0) {
-    return { worktree }
+    return { worktree, metadataResult }
   }
   const skippedIncludePaths = await createWorktreeCopiedPaths(
     repo.path,
@@ -149,5 +151,5 @@ export async function materializeRuntimeLocalWorktree(args: {
   if (includeCopyWarning) {
     console.warn(`[worktree-include] ${includeCopyWarning}`)
   }
-  return { worktree, ...(includeCopyWarning ? { includeCopyWarning } : {}) }
+  return { worktree, metadataResult, ...(includeCopyWarning ? { includeCopyWarning } : {}) }
 }

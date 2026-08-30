@@ -20,7 +20,7 @@ import {
 
 type RuntimeWorktreeLineageDependencies = {
   getStore(): RuntimeStore | null
-  getCachedWorktrees(): readonly ResolvedWorktree[]
+  getCachedWorktrees(): readonly ResolvedWorktree[] | null
   getDb(): OrchestrationDb | null
   resolveWorktree(selector: string): Promise<ResolvedWorktree>
   listResolvedWorktrees(): Promise<ResolvedWorktree[]>
@@ -94,10 +94,11 @@ export class RuntimeWorktreeLineageController {
       )
     }
     const instanceById = new Map(
-      this.deps.getCachedWorktrees().map((worktree) => [worktree.id, worktree.instanceId])
+      this.deps.getCachedWorktrees()?.map((worktree) => [worktree.id, worktree.instanceId]) ?? [
+        [child.id, child.instanceId],
+        [parent.id, parent.instanceId]
+      ]
     )
-    instanceById.set(child.id, child.instanceId)
-    instanceById.set(parent.id, parent.instanceId)
     let cursor: string | undefined = parent.id
     const visited = new Set<string>([child.id])
     while (cursor) {

@@ -17,7 +17,7 @@ import {
 import { buildTerminalWaitText } from './terminal-wait-tail-state'
 import type { TerminalWaiter } from './runtime-terminal-contracts'
 import type { RuntimeLeafRecord, RuntimePtyWorktreeRecord } from './runtime-terminal-state-records'
-import { detectAgentStatusFromTitle, type AgentStatus } from '../../shared/agent-detection'
+import type { AgentStatus } from '../../shared/agent-detection'
 import type { RuntimeTerminalIdlePolls } from './runtime-terminal-idle-polls'
 import type { RuntimeTerminalWaiterRegistry } from './runtime-terminal-waiter-registry'
 
@@ -26,7 +26,6 @@ type RuntimeTerminalWaitDependencies = {
   getLivePty(handle: string): { pty: RuntimePtyWorktreeRecord } | null
   getLiveLeaf(handle: string): { leaf: RuntimeLeafRecord }
   getAdoptedPtyIdleStatus(pty: RuntimePtyWorktreeRecord): AgentStatus | null
-  hasAdoptedPtyAgentTitle(pty: RuntimePtyWorktreeRecord): boolean
   getTabTitle(tabId: string): string | null
   startVisibleReadProbe(waiter: TerminalWaiter, waiterTimeoutMs: number): void
 }
@@ -125,11 +124,7 @@ export class RuntimeTerminalWait {
             this.waiters.resolve(waiter, buildPtyTerminalWaitResult(handle, condition, live.pty))
           } else {
             this.polls.startPty(waiter, live.pty)
-            if (
-              live.pty.lastAgentStatus === null &&
-              livePtyWaitText.length === 0 &&
-              !this.deps.hasAdoptedPtyAgentTitle(live.pty)
-            ) {
+            if (live.pty.lastAgentStatus === null && livePtyWaitText.length === 0) {
               this.deps.startVisibleReadProbe(waiter, effectiveTimeoutMs)
             }
           }
@@ -238,11 +233,7 @@ export class RuntimeTerminalWait {
               this.waiters.resolve(waiter, buildTerminalWaitResult(handle, condition, live.leaf))
             } else {
               this.polls.startLeaf(waiter, live.leaf)
-              if (
-                live.leaf.lastAgentStatus === null &&
-                liveLeafWaitText.length === 0 &&
-                (!fastPathTitle || detectAgentStatusFromTitle(fastPathTitle) === null)
-              ) {
+              if (live.leaf.lastAgentStatus === null && liveLeafWaitText.length === 0) {
                 this.deps.startVisibleReadProbe(waiter, effectiveTimeoutMs)
               }
             }

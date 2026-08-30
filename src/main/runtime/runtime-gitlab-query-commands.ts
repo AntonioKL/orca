@@ -82,6 +82,7 @@ export class RuntimeGitLabQueryCommands {
   }> {
     const repo = await this.deps.resolveRepo(repoSelector)
     const normalized = normalizeGitLabIssueListArgs({ state, assignee, limit, page })
+    // Why: page is after localGitOptions; never spread optional args before it (#13538).
     const result = await listIssues(
       repo.path,
       normalized.limit,

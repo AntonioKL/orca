@@ -17,6 +17,8 @@ export function renewRuntimeMobileAgentStatusFromPtyTitle(
   if (!status || !pty) {
     return status
   }
+  // Same-class Claude title repaints can postdate a fresh permission hook without
+  // contradicting it; only a working or released-pane title retires the question (#11761).
   if (
     (status.state === 'waiting' || status.state === 'blocked') &&
     pty.lastAgentStatus === 'idle' &&
@@ -81,6 +83,7 @@ export function renewRuntimeMobileAgentStatusFromPtyTitle(
   }
   const richStatusOwnsCurrentState =
     Date.now() - status.updatedAt <= AGENT_STATUS_STALE_AFTER_MS && richStatusCanOwnTitleInterval
+  // Fresh explicit evidence from this title interval owns acknowledgement identity.
   const stateStartedAt = richStatusOwnsCurrentState
     ? status.stateStartedAt
     : (pty.lastAgentStatusStartedAtEpochMs ?? status.stateStartedAt)
@@ -105,6 +108,7 @@ export type RuntimeHookAgentRowLookup = {
   live: HookLiveAgentRow | null
 }
 
+/** Resume identity stays valid until relaunch; ownership and live status remain freshness-bounded. */
 export function selectRuntimeHookAgentRowForPane(
   rows: readonly AgentStatusIpcPayload[]
 ): RuntimeHookAgentRowLookup {
@@ -127,6 +131,7 @@ export function selectRuntimeHookAgentRowForPane(
     }
     if (
       entry.providerSessionOnly !== true &&
+      // Restored rows cannot prove liveness because the turn may have ended while offline (#12346).
       entry.restoredUnconfirmed !== true &&
       entry.receivedAt >= freshAfter &&
       (!live || entry.receivedAt > live.receivedAt)
@@ -162,5 +167,6 @@ export function resolveRuntimeHookLiveAgentRow(
   if (live.payload.interactivePrompt != null) {
     return live
   }
+  // This is the pane's only wall-clock title timestamp comparable to hook `receivedAt`.
   return !nonAgentTitle && live.updatedAt >= (pty?.lastOscTitleEpochMs ?? 0) ? live : null
 }

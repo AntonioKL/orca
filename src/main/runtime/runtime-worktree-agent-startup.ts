@@ -179,7 +179,10 @@ export function buildWorktreeStartupForAgent(
   }
 }
 
-export function markLocalWorktreeTrusted(agent: TuiAgent, workspacePath: string): void {
+export async function markLocalWorktreeTrusted(
+  agent: TuiAgent,
+  workspacePath: string
+): Promise<void> {
   const preset = TUI_AGENT_CONFIG[agent].preflightTrust
   if (!preset) {
     return
@@ -190,7 +193,8 @@ export function markLocalWorktreeTrusted(agent: TuiAgent, workspacePath: string)
     } else if (preset === 'copilot') {
       markCopilotFolderTrusted(workspacePath)
     } else if (preset === 'codex') {
-      markCodexProjectTrusted(workspacePath)
+      // Why: the Codex write queues behind any in-flight hook grant, so the agent must not launch until it lands.
+      await markCodexProjectTrusted(workspacePath)
     }
   } catch {
     // Best-effort: the user can still accept the agent trust prompt manually.

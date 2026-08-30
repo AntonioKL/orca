@@ -3,6 +3,7 @@ import type {
   AgentSkillShareRequest
 } from '../../shared/agent-skill-sharing-contract'
 import type { DiscoveredSkill } from '../../shared/skills'
+import type { ExecutionHostId } from '../../shared/execution-host'
 import type {
   SkillBundleInstallPreview,
   SkillBundleInstallPreviewRequest,
@@ -134,9 +135,19 @@ export type RuntimeSkillCommandHost = {
   getUserDataPath(): string
   isPackaged(): boolean
   getSettings(): { agentSkillSharingEnabled?: boolean }
-  listRepos(): { id: string; path: string; connectionId?: string | null }[]
-  listFolderWorkspaces(): { id: string; folderPath: string; connectionId?: string | null }[]
-  listResolvedWorktrees(): Promise<{ id: string; path: string }[]>
+  listRepos(): {
+    id: string
+    path: string
+    connectionId?: string | null
+    executionHostId?: ExecutionHostId | null
+  }[]
+  listFolderWorkspaces(): {
+    id: string
+    folderPath: string
+    connectionId?: string | null
+    executionHostId?: ExecutionHostId | null
+  }[]
+  listResolvedWorktrees(): Promise<{ id: string; path: string; hostId?: ExecutionHostId }[]>
   showManagedWorktree(selector: string): Promise<{ id: string; path: string }>
   resolveProjectRuntimeForWorktree?(
     worktreeId: string

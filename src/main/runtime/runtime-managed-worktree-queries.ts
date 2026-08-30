@@ -26,10 +26,7 @@ import type { RuntimeWorktreeScanResult } from './repo-worktree-resolution-scan'
 import { listRuntimeFolderWorkspaces } from './runtime-worktree-filesystem'
 import type { ResolvedWorktree } from './runtime-worktree-path-identity'
 import { resolveConfiguredWorktreeBasePaths } from '../../shared/worktree/configured-worktree-base-path'
-import {
-  ensureRetiredWorktreeNamesBackfilled,
-  getRetiredNameRegistryForRepo
-} from '../worktree-name-retirement'
+import { getRetiredNameRegistryForRepo } from '../worktree-name-retirement'
 
 type Dependencies = {
   getStore(): RuntimeStore | null
@@ -103,15 +100,28 @@ export class RuntimeManagedWorktreeQueries {
     if (!store) {
       throw new Error('runtime_unavailable')
     }
+    const settings = store.getSettings()
     const visibilityDefaults = this.visibilityDefaults(sourceDefaultsSupported)
+    const visibilitySettings = { ...settings, worktreeVisibilityDefaults: visibilityDefaults }
     if (isFolderRepo(repo)) {
       const worktrees = listRuntimeFolderWorkspaces(store, repo)
+      const metaById = store.getAllWorktreeMeta()
+      const repoOwnerCount = store.getRepos().filter((candidate) => candidate.id === repo.id).length
       const matcher = createWorktreeVisibilitySourceMatcher(
         [repo.path, ...worktrees.map((worktree) => worktree.path)],
         resolveCustomWorktreeVisibilitySources(repo, visibilityDefaults),
         resolveConfiguredWorktreeBasePaths(repo)
       )
-      const detected = worktrees.map((worktree) => this.toDetected(repo, worktree, matcher))
+      const detected = worktrees.map((worktree) =>
+        this.toDetected(
+          repo,
+          worktree,
+          matcher,
+          sourceDefaultsSupported,
+          visibilitySettings,
+          getRepoOwnedWorktreeMeta(repo, worktree.id, metaById, repoOwnerCount) ?? null
+        )
+      )
       return {
         repoId: repo.id,
         authoritative: true,
@@ -145,7 +155,14 @@ export class RuntimeManagedWorktreeQueries {
         ...mergeWorktree(repo.id, gitWorktree, meta, repo.displayName),
         hostId: repoOwnerCount === 1 ? (meta?.hostId ?? expectedHostId) : expectedHostId
       }
-      const result = this.toDetected(repo, worktree, matcher, true, undefined, meta ?? null)
+      const result = this.toDetected(
+        repo,
+        worktree,
+        matcher,
+        sourceDefaultsSupported,
+        visibilitySettings,
+        meta ?? null
+      )
       return scan.ok ? result : applyMetadataFallbackVisibility(result)
     })
     return {
@@ -237,11 +254,6 @@ export class RuntimeManagedWorktreeQueries {
     }
     const repo = await this.deps.resolveRepo(repoSelector)
     const settings = store.getSettings()
-    try {
-      await ensureRetiredWorktreeNamesBackfilled(store as never, repo, settings)
-    } catch (error) {
-      console.warn(`[runtime] retirement backfill failed for repo ${repo.id}:`, error)
-    }
     const registry = await getRetiredNameRegistryForRepo(
       store as never,
       repo,

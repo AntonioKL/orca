@@ -80,6 +80,7 @@ export type RuntimePtyController = {
     }
   }): Promise<{
     id: string
+    pid?: number | null
     incarnationId?: PtyIncarnationId
     wslDistro?: string
     stablePaneOwner?: { handle: string; tabId: string; leafId: string }
@@ -121,7 +122,7 @@ export type RuntimePtyController = {
   ): Promise<PtyProcessInfo[]>
   listProcessesWithHostScope?(opts?: { deadlineMs?: number }): Promise<{
     processes: PtyProcessInfo[]
-    hostIds: string[]
+    hostIds: ExecutionHostId[]
   }>
   serializeBuffer?(
     ptyId: string,

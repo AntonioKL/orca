@@ -2,7 +2,11 @@ import { randomUUID } from 'node:crypto'
 import { isAbsolute } from 'node:path'
 import { DEFAULT_REPO_BADGE_COLOR } from '../../shared/constants'
 import { normalizeRuntimePathForComparison } from '../../shared/cross-platform-path'
-import type { NestedRepoScanResult, ProjectGroupImportMode, ProjectGroupImportResult } from '../../shared/project-group-types'
+import type {
+  NestedRepoScanResult,
+  ProjectGroupImportMode,
+  ProjectGroupImportResult
+} from '../../shared/project-group-types'
 import type { Repo } from '../../shared/repo-types'
 import { awaitWindowsHostGitEnvironmentReady } from '../git/runner'
 import { getRepoName, isGitRepo } from '../git/repo'
@@ -107,7 +111,6 @@ export class RuntimeNestedRepoImport {
           badgeColor: DEFAULT_REPO_BADGE_COLOR,
           addedAt: Date.now(),
           kind: 'git',
-          externalWorktreeVisibility: 'hide',
           externalWorktreeVisibilityLegacy: false,
           ...(group ? { projectGroupId: group.id, projectGroupOrder } : {})
         }

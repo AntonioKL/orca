@@ -13,31 +13,6 @@ export type RuntimeMessageWaiter = {
 export class RuntimeMessageWaiters {
   private readonly waitersByHandle = new Map<string, Set<RuntimeMessageWaiter>>()
 
-  constructor(
-    private readonly deliverPending: (handle: string, reservedTypes: ReadonlySet<string>) => void,
-    private readonly scheduleRepoint?: (handle: string) => void
-  ) {}
-
-  notify(handle: string, messageType?: string): void {
-    if (this.scheduleRepoint && !handle.startsWith('dispatch:')) {
-      this.scheduleRepoint(handle)
-    }
-    const waiters = this.waitersByHandle.get(handle)
-    const consumers = waiters
-      ? [...waiters].filter(
-          (waiter) => !messageType || !waiter.typeFilter || waiter.typeFilter.includes(messageType)
-        )
-      : []
-    if (consumers.length === 0) {
-      const reservedTypes = new Set(waiters ? [...waiters].flatMap((w) => w.typeFilter ?? []) : [])
-      queueMicrotask(() => this.deliverPending(handle, reservedTypes))
-      return
-    }
-    for (const waiter of consumers) {
-      this.resolve(waiter, 'notified')
-    }
-  }
-
   notifyRouted(handle: string, types: readonly string[]): void {
     if (types.length === 0) {
       return
