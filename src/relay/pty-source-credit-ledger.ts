@@ -25,6 +25,7 @@ import {
   createDeliveryCancellation,
   createDeliveryRecord,
   createReplacementDeliveryRecord,
+  findPtySourceSpanForSend,
   matchingDeliverySnapshot,
   MAX_SOURCE_SPAN_DATA_BYTES,
   ptyOwnerKey,
@@ -134,10 +135,8 @@ export class RelayPtySourceCreditLedger {
     if (remainingWindowSu <= 0 || record.sentEndSu >= record.receivedEndSu) {
       return null
     }
-    const containing = record.spans.find(
-      (span) => span.sourceStartSu <= record.sentEndSu && span.sourceEndSu > record.sentEndSu
-    )
-    if (!containing) {
+    const containing = findPtySourceSpanForSend(record)
+    if (!containing || containing.sourceStartSu > record.sentEndSu) {
       throw new Error('PTY source delivery cursor is not covered by the retained ledger')
     }
     const reservedLengthSu = reservedPtySourceSendLength(record, remainingWindowSu, maxSourceSu)

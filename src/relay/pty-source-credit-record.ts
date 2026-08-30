@@ -42,6 +42,8 @@ export type DeliveryRecord = {
   creditedEndSu: number
   retainedDataBytes: number
   spans: PtySourceSpan[]
+  /** First retained span that may contain the next unsent source unit. */
+  sendSpanIndex: number
   sentBoundaries: Set<number>
   pendingSend: PtySourceSendReservation | null
   reservedAckEndSu: number | null
@@ -68,6 +70,7 @@ export function createDeliveryRecord(
     creditedEndSu: checkpointSourceEndSu,
     retainedDataBytes: 0,
     spans: [],
+    sendSpanIndex: 0,
     sentBoundaries: new Set([checkpointSourceEndSu]),
     pendingSend: null,
     reservedAckEndSu: null,
@@ -158,6 +161,15 @@ export function sliceForSend(
     data: remaining.data.slice(0, endOffset),
     transform: Object.freeze({ ...remaining.transform, rawLengthSu: endOffset })
   })
+}
+
+export function findPtySourceSpanForSend(record: DeliveryRecord): PtySourceSpan | undefined {
+  let span = record.spans[record.sendSpanIndex]
+  while (span && span.sourceEndSu <= record.sentEndSu) {
+    record.sendSpanIndex += 1
+    span = record.spans[record.sendSpanIndex]
+  }
+  return span
 }
 
 export function snapshotDeliveryRecord(record: DeliveryRecord): PtySourceDeliverySnapshot {
