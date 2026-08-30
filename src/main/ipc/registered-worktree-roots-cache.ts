@@ -1,5 +1,7 @@
 import { stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { withTimeout } from '../../shared/promise-timeout-fallback'
+import { getErrorCode } from '../git/worktree-operation-options'
 import type { Store } from '../persistence'
 import { isRepoRoot, listRepoWorktrees } from '../repo-worktrees'
 import { getLocalRepos } from './filesystem-allowed-roots'
@@ -17,6 +19,8 @@ const registeredWorktreeRootsByRepo = new Map<string, Set<string>>()
 const createdWorktreeRootsByRepo = new Map<string, Set<string>>()
 /** A recovered create is rare (Git's listing must be broken); cap the layer so it can never grow unbounded. */
 const CREATED_WORKTREE_ROOTS_MAX = 64
+/** The prune runs inside filesystem-auth resolution, so a hung mount must not stall it. */
+const CREATED_WORKTREE_ROOT_PROBE_TIMEOUT_MS = 1_000
 const registeredWorktreeRootRepoIds = new Set<string>()
 const registeredWorktreeRootsRevisionByRepo = new Map<string, number>()
 let registeredWorktreeRootsRevisionSequence = 0
@@ -88,8 +92,9 @@ export async function rebuildAuthorizedRootsCache(store: Store): Promise<void> {
 /**
  * Retire recovered roots on evidence: the listing can see the worktree again, or it is gone from disk.
  *
- * A repo whose listing threw is left untouched — a dead mount fails both the listing and the stat, and
- * treating that as "removed" would revoke the worktree in exactly the outage this layer exists for.
+ * Nothing is retired for want of evidence. A repo whose listing threw is left untouched, and so is a
+ * root whose probe hangs or errors for any reason but ENOENT — a dead mount fails the listing and the
+ * probe alike, and pruning on that would revoke the worktree in the very outage this layer exists for.
  */
 async function pruneCreatedWorktreeRoots(
   results: readonly { repoId: string; roots: string[]; listingFailed: boolean }[],
@@ -98,6 +103,7 @@ async function pruneCreatedWorktreeRoots(
   const listedByRepo = new Map(
     results.filter((result) => !result.listingFailed).map((r) => [r.repoId, new Set(r.roots)])
   )
+  const probes: Promise<void>[] = []
   for (const [repoId, roots] of createdWorktreeRootsByRepo) {
     if (!localRepoIds.has(repoId)) {
       createdWorktreeRootsByRepo.delete(repoId)
@@ -108,23 +114,36 @@ async function pruneCreatedWorktreeRoots(
       continue
     }
     for (const root of roots) {
-      if (listed.has(root) || !(await pathStillExists(root))) {
+      if (listed.has(root)) {
         roots.delete(root)
+        continue
       }
+      // Probe in parallel: a repo may hold up to CREATED_WORKTREE_ROOTS_MAX roots, and serial
+      // timeouts would multiply into a rebuild stall of their own.
+      probes.push(
+        isRootGoneFromDisk(root).then((gone) => {
+          if (gone) {
+            roots.delete(root)
+          }
+        })
+      )
     }
+  }
+  await Promise.all(probes)
+  for (const [repoId, roots] of createdWorktreeRootsByRepo) {
     if (roots.size === 0) {
       createdWorktreeRootsByRepo.delete(repoId)
     }
   }
 }
 
-async function pathStillExists(targetPath: string): Promise<boolean> {
-  try {
-    await stat(targetPath)
-    return true
-  } catch {
-    return false
-  }
+/** Only a definitive ENOENT counts as removal; the timeout unblocks the rebuild but cannot cancel the syscall. */
+async function isRootGoneFromDisk(targetPath: string): Promise<boolean> {
+  const probe = stat(targetPath).then(
+    () => false,
+    (error: unknown) => getErrorCode(error) === 'ENOENT'
+  )
+  return withTimeout(probe, CREATED_WORKTREE_ROOT_PROBE_TIMEOUT_MS, false)
 }
 
 async function mapWithConcurrency<T, R>(
@@ -194,13 +213,16 @@ export function registerCreatedWorktreeRoot(
     return
   }
   const roots = createdWorktreeRootsByRepo.get(repoId) ?? new Set<string>()
-  roots.add(resolve(worktreeRoot))
-  for (const stale of roots) {
-    if (roots.size <= CREATED_WORKTREE_ROOTS_MAX) {
-      break
-    }
-    roots.delete(stale)
+  const root = resolve(worktreeRoot)
+  if (!roots.has(root) && roots.size >= CREATED_WORKTREE_ROOTS_MAX) {
+    // Refuse rather than evict: dropping an already-authorized root denies a worktree the user is
+    // using, while declining this one only leaves the new create as unauthorized as it is today.
+    console.warn(
+      `[filesystem-auth] recovered-root layer full for repo ${repoId}; not authorizing ${root}`
+    )
+    return
   }
+  roots.add(root)
   createdWorktreeRootsByRepo.set(repoId, roots)
   registeredWorktreeRootsRevisionByRepo.set(repoId, ++registeredWorktreeRootsRevisionSequence)
   refreshRegisteredWorktreeRoots()
