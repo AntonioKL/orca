@@ -25,6 +25,15 @@ const PRUNABLE_EXISTENCE_PROBE_CONCURRENCY = 8
 
 type RepoLocation = { topLevel: string; commonDir: string }
 
+/**
+ * The spelling Git itself answers in for `path`. Under WSL, git-in-the-distro resolves relative
+ * rev-parse output against the Linux path, not the caller's UNC spelling, and realpath cannot
+ * bridge the two spaces afterwards.
+ */
+export function toGitOutputSpace(path: string): string {
+  return parseWslUncPath(path)?.linuxPath ?? path
+}
+
 function parseRepoLocation(repoPath: string, output: string): RepoLocation | undefined {
   // Old git echoes the unrecognized `--path-format` flag and exits 0, so drop `-`-prefixed lines and
   // read the last two path lines (toplevel, git-common-dir); strip only trailing CR — paths may have edge spaces.
@@ -42,7 +51,7 @@ function parseRepoLocation(repoPath: string, output: string): RepoLocation | und
   }
 }
 
-async function readRepoLocation(
+export async function readRepoLocation(
   repoPath: string,
   resolveBasePath: string,
   options: GitWorktreeExecOptions = {}
@@ -79,6 +88,88 @@ async function readRepoLocation(
   }
 }
 
+/**
+ * The repo's common dir as Git reports it.
+ *
+ * Why `--git-common-dir` alone: adding `--show-toplevel` makes rev-parse fail outright on a bare repo.
+ * Why the Git-space base: Git < 2.31 (the 2.25 baseline) ignores `--path-format=absolute` and prints a
+ * relative `.git` at a main worktree root; resolving that against a UNC repoPath would compare a
+ * Windows path against the worktree-side Linux answer, leaving the create's recovery inert (#16520).
+ */
+export async function readRepoCommonDirFromGit(
+  repoPath: string,
+  options: GitWorktreeExecOptions = {}
+): Promise<string | undefined> {
+  const resolveBasePath = toGitOutputSpace(repoPath)
+  const readCommonDir = (stdout: string): string | undefined => {
+    const commonDir = stdout
+      .split('\n')
+      .map((line) => (line.endsWith('\r') ? line.slice(0, -1) : line))
+      .findLast((line) => line.length > 0 && !line.startsWith('-'))
+    return commonDir ? resolveRevParsePath(resolveBasePath, commonDir) : undefined
+  }
+  try {
+    return await withLocalGitCapabilityCacheForExecution(
+      { cwd: repoPath, wslDistro: options.wslDistro, signal: options.signal },
+      (capabilities) =>
+        capabilities.runWithFallback(
+          'rev-parse-path-format',
+          async () => {
+            const { stdout } = await gitExecFileAsync(
+              ['rev-parse', '--path-format=absolute', '--git-common-dir'],
+              gitExecOptions(repoPath, options)
+            )
+            if (hasUnsupportedRevParsePathFormatEcho(stdout)) {
+              capabilities.rememberUnsupported('rev-parse-path-format')
+            }
+            return readCommonDir(stdout)
+          },
+          async () => {
+            const { stdout } = await gitExecFileAsync(
+              ['rev-parse', '--git-common-dir'],
+              gitExecOptions(repoPath, options)
+            )
+            return readCommonDir(stdout)
+          },
+          isUnsupportedRevParsePathFormatError
+        )
+    )
+  } catch {
+    return undefined
+  }
+}
+
+/** The branch ref checked out in `worktreePath`, or undefined when HEAD is detached. */
+export async function readCheckedOutBranchRef(
+  worktreePath: string,
+  options: GitWorktreeExecOptions = {}
+): Promise<string | undefined> {
+  try {
+    const { stdout } = await gitExecFileAsync(
+      ['symbolic-ref', '--quiet', 'HEAD'],
+      gitExecOptions(worktreePath, options)
+    )
+    return stdout.trim() || undefined
+  } catch {
+    return undefined
+  }
+}
+
+export async function readWorktreeHeadOid(
+  worktreePath: string,
+  options: GitWorktreeExecOptions = {}
+): Promise<string> {
+  try {
+    const { stdout } = await gitExecFileAsync(
+      ['rev-parse', 'HEAD'],
+      gitExecOptions(worktreePath, options)
+    )
+    return stdout.trim()
+  } catch {
+    return ''
+  }
+}
+
 async function normalizeMainWorktreePath(
   repoPath: string,
   worktrees: GitWorktreeInfo[],
@@ -88,8 +179,7 @@ async function normalizeMainWorktreePath(
   const mainWorktree = worktrees[mainIndex]
   // Why: under WSL, porcelain/rev-parse paths are Linux but repoPath is UNC; compare in Git-output
   // space so the early-return matches and we skip a needless rev-parse per poll (runner still gets repoPath).
-  const wslRepo = parseWslUncPath(repoPath)
-  const comparablePath = wslRepo ? wslRepo.linuxPath : repoPath
+  const comparablePath = toGitOutputSpace(repoPath)
   if (!mainWorktree || areWorktreePathsEqual(mainWorktree.path, comparablePath)) {
     return worktrees
   }

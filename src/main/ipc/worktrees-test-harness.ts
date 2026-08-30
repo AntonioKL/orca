@@ -16,6 +16,7 @@ import {
   handleMock,
   removeHandlerMock,
   listWorktreesMock,
+  describeCreatedWorktreeMock,
   assertWorktreeCleanForRemovalMock,
   addWorktreeMock,
   addSparseWorktreeMock,
@@ -293,6 +294,8 @@ export function setupWorktreeHandlers(): WorktreeRuntimeStub {
   )
   ensurePathWithinWorkspaceMock.mockImplementation((targetPath: string) => targetPath)
   listWorktreesMock.mockResolvedValue([])
+  // Default: no direct-read recovery, so a listing that omits the row still fails the create.
+  describeCreatedWorktreeMock.mockResolvedValue(undefined)
   forceDeleteLocalBranchMock.mockResolvedValue(undefined)
   const runtimeStub = createWorktreeRuntimeStub()
   registerWorktreeHandlers(mainWindow as never, store as never, runtimeStub as never)

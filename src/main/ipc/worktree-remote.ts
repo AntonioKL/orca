@@ -89,7 +89,7 @@ import {
   shouldSetDisplayName,
   mergeWorktree
 } from './worktree-logic'
-import { findCreatedWorktree } from './created-worktree-reconciliation'
+import { resolveCreatedWorktree } from './created-worktree-reconciliation'
 import type { BranchPrefixSettings } from '../../shared/branch-prefix'
 import { getRepoIdFromWorktreeId } from '../../shared/worktree/id'
 import { parseWorkspaceKey, worktreeWorkspaceKey } from '../../shared/workspace-scope'
@@ -2492,16 +2492,18 @@ export async function createLocalWorktree(
   }
 
   // Re-list to get the freshly created worktree info
-  const gitWorktrees = await timing.time('list_created_worktree', async () =>
-    hasLocalWorktreeGitOptions
-      ? listWorktrees(repo.path, localWorktreeGitOptions)
-      : listWorktrees(repo.path)
+  const {
+    created,
+    worktrees: gitWorktrees,
+    listingComplete
+  } = await timing.time('list_created_worktree', async () =>
+    resolveCreatedWorktree(
+      repo.path,
+      worktreePath,
+      branchName,
+      hasLocalWorktreeGitOptions ? localWorktreeGitOptions : undefined
+    )
   )
-  // Why: Git may canonicalize a symlinked create path; its exact branch identifies the listed row.
-  const created = findCreatedWorktree(gitWorktrees, worktreePath, branchName)
-  if (!created) {
-    throw new Error('Worktree created but not found in listing')
-  }
 
   const worktreeId = `${repo.id}::${created.path}`
   const now = Date.now()
@@ -2576,10 +2578,14 @@ export async function createLocalWorktree(
     now
   )
   // Why: reuse the roots creation already paid for via `git worktree list` so later IPC doesn't lazily rescan and trip macOS privacy prompts.
-  registerWorktreeRootsForRepo(store, repo.id, [
-    repo.path,
-    ...gitWorktrees.map((worktree) => worktree.path)
-  ])
+  // Why gated: registration replaces the repo's root set, so registering a create recovered without
+  // a listing would revoke filesystem access to every worktree that listing would have named.
+  if (listingComplete) {
+    registerWorktreeRootsForRepo(store, repo.id, [
+      repo.path,
+      ...gitWorktrees.map((worktree) => worktree.path)
+    ])
+  }
 
   // Why: link user-configured shared paths (e.g. `node_modules`, `.env`) before setup runs so setup scripts see them in place.
   const symlinkPaths = repo.symlinkPaths ?? []
