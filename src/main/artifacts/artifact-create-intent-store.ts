@@ -10,7 +10,7 @@ import {
   writeFileSync
 } from 'node:fs'
 import { join } from 'node:path'
-import { ARTIFACT_CLI_MAX_RPC_BYTES } from '../../shared/artifacts'
+import { ARTIFACT_MAX_REQUEST_BYTES } from '../../shared/artifacts'
 import {
   bestEffortFsyncDirectorySync,
   fsyncFileSync,
@@ -21,7 +21,7 @@ import type { ArtifactWriteBody } from './artifact-cloud-request'
 import type { ArtifactShareScope } from './artifact-share-record-store'
 
 export const MAX_PENDING_ARTIFACT_CREATES = 32
-export const MAX_ARTIFACT_CREATE_INTENT_BYTES = ARTIFACT_CLI_MAX_RPC_BYTES + 128 * 1024
+export const MAX_ARTIFACT_CREATE_INTENT_BYTES = ARTIFACT_MAX_REQUEST_BYTES + 128 * 1024
 
 const MAX_HARDENED_INTENT_DIRECTORIES = 64
 const hardenedIntentDirectories = new Set<string>()
