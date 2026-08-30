@@ -180,6 +180,36 @@ describe.each([
     terminal.dispose()
   })
 
+  it('cancels an empty composition end so later input is not swallowed', async () => {
+    const terminal = new TerminalType()
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    terminal.open(container)
+    if (!terminal.element || !terminal.textarea) {
+      throw new Error('xterm input elements were not created')
+    }
+    const output: string[] = []
+    terminal.onData((data) => output.push(data))
+    const textarea = terminal.textarea
+
+    textarea.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }))
+    textarea.dispatchEvent(new CompositionEvent('compositionend', { data: '', bubbles: true }))
+    await nextEventLoop()
+
+    expect(terminal.element.querySelector('.composition-view')?.classList.contains('active')).toBe(
+      false
+    )
+
+    textarea.value = 'a'
+    textarea.setSelectionRange(1, 1)
+    textarea.dispatchEvent(
+      new InputEvent('input', { data: 'a', inputType: 'insertText', bubbles: true })
+    )
+
+    expect(output).toEqual(['a'])
+    terminal.dispose()
+  })
+
   it('rejects stale composition ends after settlement', async () => {
     const { terminal, textarea, events, output } = await openComposedTerminal(TerminalType)
     const forwarder = installTerminalImeNativeTextForwarder({
