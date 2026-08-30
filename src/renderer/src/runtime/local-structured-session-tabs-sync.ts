@@ -132,11 +132,11 @@ async function startLocalStructuredSessionTabsSync(args: {
     return
   }
   const supported = status.capabilities?.includes(STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY)
-  await restoreLocalStructuredSessionTabsOnce()
-  if (args.isDisposed()) {
+  if (!supported) {
     return
   }
-  if (!supported) {
+  await restoreLocalStructuredSessionTabsOnce()
+  if (args.isDisposed()) {
     return
   }
   const handle = await window.api.runtime.subscribe(
@@ -162,7 +162,10 @@ async function startLocalStructuredSessionTabsSync(args: {
 
 export function useLocalStructuredSessionTabsSync(): void {
   const ready = useAppStore(
-    (state) => state.workspaceSessionReady && state.terminalStartupRestorationReady
+    (state) =>
+      state.workspaceSessionReady &&
+      state.terminalStartupRestorationReady &&
+      state.settings?.experimentalStructuredNativeChat === true
   )
   useEffect(() => {
     if (!ready) {

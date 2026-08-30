@@ -233,9 +233,14 @@ import { TerminalPaneView } from '../../../../src/session/TerminalPaneView'
 import { MobileNativeChatOverlay } from '../../../../src/session/MobileNativeChatOverlay'
 import { MobileBrowserTabActionSheet } from '../../../../src/session/MobileBrowserTabActionSheet'
 import { useMobileNativeChatController } from '../../../../src/session/use-mobile-native-chat-controller'
+import { resolveMobileNativeChatFileSessionId } from '../../../../src/session/mobile-native-chat-eligibility'
 import { useMobileNativeChatReadability } from '../../../../src/session/use-mobile-native-chat-readability'
 import { useMobileNativeChatInputLease } from '../../../../src/session/use-mobile-native-chat-input-lease'
 import { useMobileNativeChatSendError } from '../../../../src/session/use-mobile-native-chat-send-error'
+import {
+  useMobileSessionTabActionSheetOpener,
+  useMobileSessionTabActionTargets
+} from '../../../../src/session/use-mobile-session-tab-action-targets'
 import { getMobileTerminalActionSheetActions } from '../../../../src/session/mobile-terminal-action-sheet-actions'
 import * as nativeChatTerminalStream from '../../../../src/session/mobile-native-chat-terminal-stream'
 import { mobileNativeChatScopeKey } from '../../../../src/session/mobile-native-chat-scope-key'
@@ -866,19 +871,7 @@ export default function SessionScreen() {
   const [createTabAgentOptions, setCreateTabAgentOptions] = useState<MobileNewTabAgentOption[]>([])
   const [showCreateBrowserModal, setShowCreateBrowserModal] = useState(false)
   const [showHeaderMoreActions, setShowHeaderMoreActions] = useState(false)
-  const [actionTarget, setActionTarget] = useState<Terminal | null>(null)
-  const [markdownActionTarget, setMarkdownActionTarget] = useState<Extract<
-    MobileSessionTab,
-    { type: 'markdown' }
-  > | null>(null)
-  const [fileActionTarget, setFileActionTarget] = useState<Extract<
-    MobileSessionTab,
-    { type: 'file' }
-  > | null>(null)
-  const [browserActionTarget, setBrowserActionTarget] = useState<Extract<
-    MobileSessionTab,
-    { type: 'browser' }
-  > | null>(null)
+  const sessionTabActionTargets = useMobileSessionTabActionTargets()
   const [discardMarkdownTarget, setDiscardMarkdownTarget] = useState<Extract<
     MobileSessionTab,
     { type: 'markdown' }
@@ -1133,6 +1126,12 @@ export default function SessionScreen() {
   })
   const { toggleTabChatView, showNativeChat, showNativeChatRef } = nativeChatController
   nativeChatSendError.bannerMountedRef.current = showNativeChat
+  const nativeChatOverlayInputLockReason =
+    activeSessionTab?.type === 'agent-session'
+      ? connState === 'connected'
+        ? null
+        : 'disconnected'
+      : nativeChatInputLockReason
 
   const dictation = useMobileDictation({
     client,
@@ -2936,6 +2935,9 @@ export default function SessionScreen() {
         void readFileTab(tab)
         return
       }
+      if (tab.type === 'agent-session') {
+        return
+      }
       const cached = markdownDocs.get(tab.id)
       if (cached?.status === 'ready' && cached.isDirty) {
         return
@@ -3120,24 +3122,14 @@ export default function SessionScreen() {
     sessionTabActionSheetKeyboardHideSubRef.current = null
   }, [])
 
-  const openSessionTabActionSheet = useCallback((tab: MobileSessionTab) => {
-    if (tab.type === 'terminal') {
-      if (typeof tab.terminal !== 'string') {
-        return
-      }
-      setActionTarget({
-        handle: tab.terminal,
-        title: tab.title,
-        isActive: tab.terminal === activeHandleRef.current
-      })
-    } else if (tab.type === 'markdown') {
-      setMarkdownActionTarget(tab)
-    } else if (tab.type === 'file') {
-      setFileActionTarget(tab)
-    } else {
-      setBrowserActionTarget(tab)
-    }
-  }, [])
+  const openSessionTabActionSheet = useMobileSessionTabActionSheetOpener({
+    activeHandleRef,
+    setActionTarget: sessionTabActionTargets.setActionTarget,
+    setMarkdownActionTarget: sessionTabActionTargets.setMarkdownActionTarget,
+    setFileActionTarget: sessionTabActionTargets.setFileActionTarget,
+    setBrowserActionTarget: sessionTabActionTargets.setBrowserActionTarget,
+    setAgentSessionActionTarget: sessionTabActionTargets.setAgentSessionActionTarget
+  })
 
   const openSessionTabActionSheetAfterKeyboardDismiss = useCallback(
     (tab: MobileSessionTab) => {
@@ -3195,10 +3187,7 @@ export default function SessionScreen() {
     hostId,
     worktreeId,
     worktreeName: routeWorktreeName,
-    nativeChatSessionId:
-      activeSessionTab?.type === 'terminal'
-        ? (activeSessionTab.agentStatus?.providerSession?.id ?? null)
-        : null,
+    nativeChatSessionId: resolveMobileNativeChatFileSessionId(activeSessionTab),
     activeHandleRef,
     terminalCwdRef,
     openBrowser: (url) => void handleCreateBrowserRef.current?.(url),
@@ -4526,6 +4515,9 @@ export default function SessionScreen() {
                       {t.type === 'file' && (
                         <File size={13} color={colors.textSecondary} strokeWidth={2.1} />
                       )}
+                      {t.type === 'agent-session' && (
+                        <MobileAgentIcon agentId={t.agent} size={13} />
+                      )}
                       {t.type === 'terminal' &&
                         (() => {
                           const agentId = resolveMobileTerminalTabAgentId(t)
@@ -4765,7 +4757,7 @@ export default function SessionScreen() {
                   dictationMode={dictationMode}
                   onMicPressIn={handleDictationPressIn}
                   onMicPressOut={handleDictationPressOut}
-                  inputLockReason={nativeChatInputLockReason}
+                  inputLockReason={nativeChatOverlayInputLockReason}
                   sendErrorMessage={nativeChatSendError.message}
                   onClearSendError={nativeChatSendError.clear}
                   keyboardInset={keyboardLift}
@@ -5212,14 +5204,14 @@ export default function SessionScreen() {
       />
 
       <ActionSheetModal
-        visible={actionTarget != null}
-        title={actionTarget?.title || 'Terminal'}
+        visible={sessionTabActionTargets.actionTarget != null}
+        title={sessionTabActionTargets.actionTarget?.title || 'Terminal'}
         actions={getMobileTerminalActionSheetActions({
-          target: actionTarget,
+          target: sessionTabActionTargets.actionTarget,
           tabs: sessionTabs.filter((tab) => tab.type === 'terminal'),
           isTabChatView: nativeChatController.isTabChatView,
           nativeChatTranscriptIsLocalReadable,
-          onDismiss: () => setActionTarget(null),
+          onDismiss: () => sessionTabActionTargets.setActionTarget(null),
           onToggleChat: toggleTabChatView,
           isPhoneMode: (handle) => isTerminalPhoneDisplayMode(handle, terminalModes),
           onToggleDisplayMode: (handle) => void toggleDisplayMode(handle),
@@ -5229,11 +5221,11 @@ export default function SessionScreen() {
           onCloseSessionTab: (tab) => void handleCloseSessionTab(tab),
           bulkCloseActions
         })}
-        onClose={() => setActionTarget(null)}
+        onClose={() => sessionTabActionTargets.setActionTarget(null)}
       />
       <ActionSheetModal
-        visible={markdownActionTarget != null}
-        title={markdownActionTarget?.title || 'Markdown'}
+        visible={sessionTabActionTargets.markdownActionTarget != null}
+        title={sessionTabActionTargets.markdownActionTarget?.title || 'Markdown'}
         actions={[
           {
             label: 'Refresh',
@@ -5242,7 +5234,7 @@ export default function SessionScreen() {
             // Modal to unmount first (same dual-Modal race as tab Rename, #10331).
             closeBeforePress: true,
             onPress: () => {
-              const target = markdownActionTarget
+              const target = sessionTabActionTargets.markdownActionTarget
               if (target) {
                 discardMarkdownLocalContent(target)
               }
@@ -5252,43 +5244,55 @@ export default function SessionScreen() {
             label: 'Copy Path',
             icon: FileText,
             onPress: () => {
-              const target = markdownActionTarget
-              setMarkdownActionTarget(null)
+              const target = sessionTabActionTargets.markdownActionTarget
+              sessionTabActionTargets.setMarkdownActionTarget(null)
               if (target) {
                 void Clipboard.setStringAsync(target.relativePath || target.filePath)
                 showToast('Path copied')
               }
             }
           },
-          ...closeWithBulkActions(markdownActionTarget, () => setMarkdownActionTarget(null))
+          ...closeWithBulkActions(sessionTabActionTargets.markdownActionTarget, () =>
+            sessionTabActionTargets.setMarkdownActionTarget(null)
+          )
         ]}
-        onClose={() => setMarkdownActionTarget(null)}
+        onClose={() => sessionTabActionTargets.setMarkdownActionTarget(null)}
       />
       <ActionSheetModal
-        visible={fileActionTarget != null}
-        title={fileActionTarget?.title || 'File'}
+        visible={sessionTabActionTargets.fileActionTarget != null}
+        title={sessionTabActionTargets.fileActionTarget?.title || 'File'}
         actions={[
           {
             label: 'Refresh',
             icon: RefreshCw,
             onPress: () => {
-              const target = fileActionTarget
-              setFileActionTarget(null)
+              const target = sessionTabActionTargets.fileActionTarget
+              sessionTabActionTargets.setFileActionTarget(null)
               if (target) {
                 void readFileTab(target)
               }
             }
           },
-          ...closeWithBulkActions(fileActionTarget, () => setFileActionTarget(null))
+          ...closeWithBulkActions(sessionTabActionTargets.fileActionTarget, () =>
+            sessionTabActionTargets.setFileActionTarget(null)
+          )
         ]}
-        onClose={() => setFileActionTarget(null)}
+        onClose={() => sessionTabActionTargets.setFileActionTarget(null)}
       />
       <MobileBrowserTabActionSheet
-        target={browserActionTarget}
-        onClose={() => setBrowserActionTarget(null)}
+        target={sessionTabActionTargets.browserActionTarget}
+        onClose={() => sessionTabActionTargets.setBrowserActionTarget(null)}
         onNavigate={handleBrowserNavigationCommand}
         onCloseTab={handleCloseSessionTab}
         bulkCloseActions={bulkCloseActions}
+      />
+      <ActionSheetModal
+        visible={sessionTabActionTargets.agentSessionActionTarget != null}
+        title={sessionTabActionTargets.agentSessionActionTarget?.title || 'Chat'}
+        actions={closeWithBulkActions(sessionTabActionTargets.agentSessionActionTarget, () =>
+          sessionTabActionTargets.setAgentSessionActionTarget(null)
+        )}
+        onClose={() => sessionTabActionTargets.setAgentSessionActionTarget(null)}
       />
       <ActionSheetModal
         visible={leaveDrafts != null}

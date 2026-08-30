@@ -14,6 +14,17 @@ const holdUnconfirmedSend = vi.fn()
 // and transcript state; defaults keep the send-seam tests unchanged.
 const viewMode = { isTabChatView: (_tabId: string) => true }
 const sessionState = { messages: [] as unknown[], status: 'ready', transcriptLoading: false }
+const structuredSendWithOutcome = vi.fn()
+const structuredCancel = vi.fn()
+const structuredSessionState = {
+  messages: [] as unknown[],
+  status: 'ready',
+  transcriptLoading: false,
+  error: undefined,
+  hasMore: false,
+  loadingEarlier: false,
+  loadEarlier: vi.fn()
+}
 const draftsArgs: Record<string, unknown>[] = []
 const promptsState = {
   permission: null as unknown,
@@ -32,6 +43,15 @@ vi.mock('./use-mobile-session-view-mode', () => ({
 }))
 vi.mock('./use-mobile-native-chat-session', () => ({
   useMobileNativeChatSession: () => sessionState
+}))
+vi.mock('./use-mobile-structured-agent-session', () => ({
+  useMobileStructuredAgentSession: () => ({
+    session: structuredSessionState,
+    isWorking: false,
+    turnId: null,
+    sendWithOutcome: structuredSendWithOutcome,
+    cancel: structuredCancel
+  })
 }))
 vi.mock('./use-mobile-native-chat-drafts', () => ({
   useMobileNativeChatDrafts: (args: Record<string, unknown>) => {
@@ -109,18 +129,28 @@ describe('useMobileNativeChatController handleNativeChatSend', () => {
   // itself is mocked above).
   const clientStub = { sendRequest: vi.fn() }
 
-  function Harness({ connState = 'connected' }: { connState?: ConnectionState }): null {
+  function Harness({
+    connState = 'connected',
+    tab = null,
+    activeHandle = 'term-1',
+    inputLeaseReady = true
+  }: {
+    connState?: ConnectionState
+    tab?: unknown
+    activeHandle?: string | null
+    inputLeaseReady?: boolean
+  }): null {
     controller = useMobileNativeChatController({
       client: clientStub as unknown as RpcClient,
       connState,
       hostId: 'h',
       worktreeId: 'w',
-      activeSessionTab: null,
-      activeSessionTabId: 'tab-1',
-      activeHandleRef: { current: 'term-1' },
+      activeSessionTab: tab as never,
+      activeSessionTabId: (tab as { id?: string } | null)?.id ?? 'tab-1',
+      activeHandleRef: { current: activeHandle },
       deviceTokenRef: { current: null },
       nativeChatTranscriptIsLocalReadable: true,
-      nativeChatInputLeaseReady: true,
+      nativeChatInputLeaseReady: inputLeaseReady,
       onSendError,
       onSendResolved
     })
@@ -137,6 +167,7 @@ describe('useMobileNativeChatController handleNativeChatSend', () => {
     })
     resetMobileNativeChatStaleInputForTests()
     captureSendOrigin.mockReturnValue(ORIGIN)
+    structuredSendWithOutcome.mockResolvedValue('accepted')
     act(() => {
       renderer = create(createElement(Harness))
     })
@@ -230,6 +261,35 @@ describe('useMobileNativeChatController handleNativeChatSend', () => {
     // Optimistic clear happens at send time, never a restore on success.
     expect(clearDraftForSend).toHaveBeenCalledWith(ORIGIN, 'look')
     expect(restoreRejectedDraft).not.toHaveBeenCalled()
+  })
+
+  it('routes structured agent-session sends away from terminal/nativeChat transports', async () => {
+    await act(async () => {
+      renderer?.update(
+        createElement(Harness, {
+          tab: {
+            type: 'agent-session',
+            id: 'agent-tab-1',
+            title: 'Codex Chat',
+            sessionId: 'session-structured',
+            agent: 'codex',
+            isActive: true
+          },
+          activeHandle: null,
+          inputLeaseReady: false
+        })
+      )
+    })
+
+    let accepted = false
+    await act(async () => {
+      accepted = await controller!.handleNativeChatSend('look')
+    })
+
+    expect(accepted).toBe(true)
+    expect(structuredSendWithOutcome).toHaveBeenCalledWith('look', undefined)
+    expect(sendWithOutcome).not.toHaveBeenCalled()
+    expect(clientStub.sendRequest).not.toHaveBeenCalled()
   })
 
   it('pre-clears separately for a text-only send but never for an image send', async () => {

@@ -93,8 +93,15 @@ async function authenticateSession() {
     })
   )
   await vi.waitFor(() => expect(session.getState()).toBe('connected'))
+  await vi.waitFor(() => expect(fakes.sendText).toHaveBeenCalledTimes(2))
+  const capabilityRequest = JSON.parse(fakes.sendText.mock.calls[1]![0] as string) as {
+    id: string
+    method: string
+    deviceToken: string
+    params: { clientCapabilities?: string[] }
+  }
   fakes.sendText.mockClear()
-  return { session, confirmationRequest: request }
+  return { session, confirmationRequest: request, capabilityRequest }
 }
 
 describe('mobile relay RPC session', () => {
@@ -106,7 +113,7 @@ describe('mobile relay RPC session', () => {
   afterEach(() => vi.useRealTimers())
 
   it('requires exact resume observations and confirms by request ID before becoming connected', async () => {
-    const { session, confirmationRequest } = await authenticateSession()
+    const { session, confirmationRequest, capabilityRequest } = await authenticateSession()
 
     expect(fakes.linkOptions).toMatchObject({
       endpoint: relay,
@@ -120,6 +127,13 @@ describe('mobile relay RPC session', () => {
     })
     expect(confirmationRequest.params).not.toHaveProperty('relayDeviceId')
     expect(confirmationRequest.params).not.toHaveProperty('acceptedCredentialVersion')
+    expect(capabilityRequest).toMatchObject({
+      method: 'runtime.clientCapabilities.update',
+      params: {
+        clientCapabilities: expect.arrayContaining(['agent-session.structured.v1'])
+      },
+      deviceToken: 'device-token'
+    })
     expect(session.getAttachDeadlineAt()).toEqual(expect.any(Number))
   })
 

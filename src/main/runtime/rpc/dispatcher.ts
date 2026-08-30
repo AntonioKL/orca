@@ -2,7 +2,6 @@ import {
   buildRegistry,
   isStreamingMethod,
   type RpcAnyMethod,
-  type RpcEnvelopeMeta,
   type RpcRegistry,
   type RpcRequest,
   type RpcResponse
@@ -29,8 +28,7 @@ import { createDispatcherStreamingFeatureEmitter } from './dispatcher-streaming-
 
 export type DispatcherOptions = { runtime: OrcaRuntimeService; methods?: readonly RpcAnyMethod[] }
 
-// oxfmt-ignore
-type DispatchCallOptions = Pick<RpcDispatchStreamingOptions, 'signal' | 'connectionId' | 'clientId' | 'clientKind' | 'clientCapabilities' | 'authenticatedCallerFingerprint'>
+type DispatchCallOptions = RpcDispatchStreamingOptions
 
 export class RpcDispatcher {
   private readonly runtime: OrcaRuntimeService
@@ -123,6 +121,7 @@ export class RpcDispatcher {
           clientId: options?.clientId,
           clientKind: options?.clientKind,
           clientCapabilities: options?.clientCapabilities,
+          updateClientCapabilities: options?.updateClientCapabilities,
           orchestrationCapability: request.orchestrationCapability,
           authenticatedCallerFingerprint:
             mutation?.identity.callerFingerprint ?? authenticatedCallerFingerprint,
@@ -237,6 +236,7 @@ export class RpcDispatcher {
             pairedDeviceId: options?.pairedDeviceId,
             clientKind: options?.clientKind,
             clientCapabilities: options?.clientCapabilities,
+            updateClientCapabilities: options?.updateClientCapabilities,
             orchestrationCapability: request.orchestrationCapability,
             authenticatedCallerFingerprint:
               mutation?.identity.callerFingerprint ?? authenticatedCallerFingerprint,
@@ -293,6 +293,7 @@ export class RpcDispatcher {
           pairedDeviceId: options?.pairedDeviceId,
           clientKind: options?.clientKind,
           clientCapabilities: options?.clientCapabilities,
+          updateClientCapabilities: options?.updateClientCapabilities,
           orchestrationCapability: request.orchestrationCapability,
           pairing: options?.pairing,
           sendBinary: options?.sendBinary,
@@ -313,7 +314,7 @@ export class RpcDispatcher {
     }
   }
 
-  private meta(): RpcEnvelopeMeta {
+  private meta() {
     return { runtimeId: this.runtime.getRuntimeId() }
   }
 }

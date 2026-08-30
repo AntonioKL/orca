@@ -110,4 +110,17 @@ describe('getMobileSessionTabTitle', () => {
 
     expect(getMobileSessionTabTitle(blankBrowserTab)).toBe('New Browser')
   })
+
+  it('labels structured agent-session tabs without terminal decoration rules', () => {
+    expect(
+      getMobileSessionTabTitle({
+        type: 'agent-session',
+        id: 'agent-tab-1',
+        title: 'Codex Chat',
+        sessionId: 'session-1',
+        agent: 'codex',
+        isActive: true
+      })
+    ).toBe('Codex Chat')
+  })
 })

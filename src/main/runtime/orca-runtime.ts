@@ -1473,6 +1473,7 @@ type RuntimeStore = {
     terminalWindowsShell?: GlobalSettings['terminalWindowsShell']
     floatingTerminalEnabled?: GlobalSettings['floatingTerminalEnabled']
     agentStatusHooksEnabled?: GlobalSettings['agentStatusHooksEnabled']
+    experimentalStructuredNativeChat?: GlobalSettings['experimentalStructuredNativeChat']
     defaultTaskSource?: GlobalSettings['defaultTaskSource']
     defaultTaskViewPreset?: GlobalSettings['defaultTaskViewPreset']
     visibleTaskProviders?: GlobalSettings['visibleTaskProviders']
@@ -1507,6 +1508,7 @@ type RuntimeStore = {
     updates: Partial<GlobalSettings>,
     options?: { notifyListeners?: boolean; originWebContentsId?: number }
   ) => unknown
+  onSettingsChanged?: Store['onSettingsChanged']
 }
 
 export type RuntimeAutomationCreateInput = Omit<
@@ -3978,6 +3980,11 @@ export class OrcaRuntimeService {
     }
   ) {
     this.store = store
+    store?.onSettingsChanged?.((updates) => {
+      if ('experimentalStructuredNativeChat' in updates) {
+        this.notifyMobileSessionTabsChanged()
+      }
+    })
     // Why: per-device tab selections must survive host restarts, or every phone snaps back to the first tab on return.
     const persistedClientTabSelections = store?.getMobileClientTabSelections?.()
     if (persistedClientTabSelections) {
@@ -4210,6 +4217,7 @@ export class OrcaRuntimeService {
     | 'defaultLinearTeamSelection'
     | 'githubProjects'
     | 'experimentalNewWorktreeCardStyle'
+    | 'experimentalStructuredNativeChat'
     | 'compactWorktreeCards'
     | 'minimaxGroupId'
     | 'minimaxUsageModels'
@@ -4238,6 +4246,7 @@ export class OrcaRuntimeService {
       defaultLinearTeamSelection: settings.defaultLinearTeamSelection ?? null,
       githubProjects: settings.githubProjects,
       experimentalNewWorktreeCardStyle: settings.experimentalNewWorktreeCardStyle === true,
+      experimentalStructuredNativeChat: settings.experimentalStructuredNativeChat === true,
       compactWorktreeCards: settings.compactWorktreeCards === true,
       minimaxGroupId: settings.minimaxGroupId ?? '',
       minimaxUsageModels: settings.minimaxUsageModels ?? 'general',
