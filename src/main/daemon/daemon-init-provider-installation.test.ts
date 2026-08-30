@@ -388,7 +388,7 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
   })
 
   it('preserves ownership files for any verdict that is not positively exited', async () => {
-    const mod = await importFresh()
+    await importFresh()
     const legacy = await import('./daemon-legacy-adapters')
     readFileSyncMock.mockReturnValue('{"pid":123}')
     // Why: deliberate out-of-contract cast — deletion must require a positive 'exited'
@@ -420,7 +420,7 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     // record and republish in the probe→unlink window. Once the name holds any
     // record other than the one proved dead, a new owner claimed it — deleting
     // its pid/token would make a live legacy daemon's sessions unadoptable.
-    const mod = await importFresh()
+    await importFresh()
     const legacy = await import('./daemon-legacy-adapters')
     readFileSyncMock.mockReturnValue('{"pid":456}')
     legacy.reclaimLegacyDaemonOwnershipFiles(
@@ -435,7 +435,7 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
   it('preserves the token when the proven-dead record is already gone', async () => {
     // A missing record means another actor settled the name; the token's owner
     // is now ambiguous, and ambiguity must preserve.
-    const mod = await importFresh()
+    await importFresh()
     const legacy = await import('./daemon-legacy-adapters')
     readFileSyncMock.mockImplementation(() => {
       throw Object.assign(new Error('missing'), { code: 'ENOENT' })
@@ -451,7 +451,7 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
 
   it('leaves the token in place when the proven-dead record cannot be unlinked', async () => {
     // Why: a token outliving its record is unattributable — a later reader cannot tell whose it is.
-    const mod = await importFresh()
+    await importFresh()
     const legacy = await import('./daemon-legacy-adapters')
     readFileSyncMock.mockReturnValue('{"pid":123}')
     // Why: mockImplementationOnce, not mockImplementation — afterEach runs clearAllMocks, which
@@ -503,7 +503,7 @@ describe('daemon-legacy-adapters: legacyDaemonProcessLiveness verdict mapping', 
   })
 
   it('reports unverifiable and no proven record when the pid record cannot be read', async () => {
-    const mod = await importFresh()
+    await importFresh()
     const legacy = await import('./daemon-legacy-adapters')
     readFileSyncMock.mockImplementation(() => {
       throw Object.assign(new Error('permission denied'), { code: 'EACCES' })
@@ -516,7 +516,7 @@ describe('daemon-legacy-adapters: legacyDaemonProcessLiveness verdict mapping', 
   })
 
   it('reports unverifiable and no proven record when the pid record does not parse', async () => {
-    const mod = await importFresh()
+    await importFresh()
     const legacy = await import('./daemon-legacy-adapters')
     readFileSyncMock.mockReturnValue('not a daemon pid record')
     parseDaemonPidFileMock.mockReturnValue(null)
@@ -530,7 +530,7 @@ describe('daemon-legacy-adapters: legacyDaemonProcessLiveness verdict mapping', 
   it('reports unverifiable when the record names no process', async () => {
     // An empty record parses to pid 0 via the legacy bare-integer fallback, and process.kill(0, 0)
     // probes the caller's own process group — it would answer 'occupied' and publish a false live.
-    const mod = await importFresh()
+    await importFresh()
     const legacy = await import('./daemon-legacy-adapters')
     readFileSyncMock.mockReturnValue('')
     parseDaemonPidFileMock.mockReturnValue({ pid: 0, startedAtMs: null })
@@ -542,7 +542,7 @@ describe('daemon-legacy-adapters: legacyDaemonProcessLiveness verdict mapping', 
   })
 
   it('reports live when the pid probe is denied with EPERM', async () => {
-    const mod = await importFresh()
+    await importFresh()
     const legacy = await import('./daemon-legacy-adapters')
     readFileSyncMock.mockReturnValue('{"pid":123}')
     parseDaemonPidFileMock.mockReturnValue({ pid: 999_999, startedAtMs: null })
@@ -559,7 +559,7 @@ describe('daemon-legacy-adapters: legacyDaemonProcessLiveness verdict mapping', 
   })
 
   it('reports unverifiable when the pid probe fails with neither ESRCH nor EPERM', async () => {
-    const mod = await importFresh()
+    await importFresh()
     const legacy = await import('./daemon-legacy-adapters')
     readFileSyncMock.mockReturnValue('{"pid":123}')
     parseDaemonPidFileMock.mockReturnValue({ pid: 999_999, startedAtMs: null })
@@ -576,7 +576,7 @@ describe('daemon-legacy-adapters: legacyDaemonProcessLiveness verdict mapping', 
   })
 
   it('reports exited carrying the exact record bytes proved dead', async () => {
-    const mod = await importFresh()
+    await importFresh()
     const legacy = await import('./daemon-legacy-adapters')
     readFileSyncMock.mockReturnValue('{"pid":123}')
     parseDaemonPidFileMock.mockReturnValue({ pid: 999_999, startedAtMs: null })
