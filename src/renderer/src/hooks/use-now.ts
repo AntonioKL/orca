@@ -9,6 +9,9 @@ export function useNow(intervalMs = 30_000, enabled = true): number {
     if (!enabled) {
       return
     }
+    // Refresh on activation so a remounted or re-enabled surface never waits
+    // for the first interval tick to catch up with wall time.
+    setNow(Date.now())
     const timer = window.setInterval(() => setNow(Date.now()), intervalMs)
     return () => window.clearInterval(timer)
   }, [enabled, intervalMs])
