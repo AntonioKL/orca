@@ -344,7 +344,9 @@ function safeReaddir(targetPath) {
 
 function getElectronPlatformPath() {
   const targetPlatform =
-    process.env.ELECTRON_INSTALL_PLATFORM || process.env.npm_config_platform || rebuildPlatform
+    (cliOptions.platform ?? process.env.ELECTRON_INSTALL_PLATFORM) ||
+    process.env.npm_config_platform ||
+    rebuildPlatform
   switch (targetPlatform) {
     case 'mas':
     case 'darwin':
