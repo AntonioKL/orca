@@ -24,6 +24,7 @@ import { computeWorkspaceRoot, getWorktreePathSettings } from './ipc/worktree-lo
 
 export const WORKTREE_CREATE_PREPARATION_TTL_MS = 5 * 60_000
 export const WORKTREE_CREATE_PREPARATION_LIMIT = 3
+const STALE_PREPARATION_CLEANUP_CONCURRENCY = 4
 
 type PreparationEntry = {
   key: string
@@ -118,17 +119,23 @@ async function cleanupStalePreparations(
       ...options,
       includeCreatePreparations: true
     })
-    await Promise.all(
-      worktrees.filter(isWorktreeCreatePreparation).map(async (worktree) => {
+    const staleWorktrees = worktrees.filter(isWorktreeCreatePreparation)
+    let nextIndex = 0
+    async function discardNextStalePreparation(): Promise<void> {
+      while (nextIndex < staleWorktrees.length) {
+        const worktree = staleWorktrees[nextIndex]
+        nextIndex += 1
         const ownerPid =
           parseWorktreePreparationOwnerPid(worktree.lockReason) ??
           parseWorktreePreparationPathOwnerPid(worktree.path)
         if (!ownerPid || isProcessAlive(ownerPid)) {
-          return
+          continue
         }
         await discardPreparedWorktree(repoPath, worktree.path, options).catch(() => {})
-      })
-    )
+      }
+    }
+    const workerCount = Math.min(STALE_PREPARATION_CLEANUP_CONCURRENCY, staleWorktrees.length)
+    await Promise.all(Array.from({ length: workerCount }, () => discardNextStalePreparation()))
   })()
   staleCleanupInFlight.set(cleanupKey, cleanup)
   try {
