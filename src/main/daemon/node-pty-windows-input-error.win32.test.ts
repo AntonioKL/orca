@@ -88,16 +88,20 @@ describe.skipIf(process.platform !== 'win32')('node-pty Windows input errors', (
     process.on('uncaughtException', uncaughtListener)
 
     let terminal: IPty | undefined
+    let exited = false
     try {
       terminal = spawn(process.env.ComSpec ?? 'cmd.exe', ['/d', '/q'], {
         cwd: process.cwd(),
         env: process.env,
         useConptyDll: false
       })
-      terminal.kill()
-      await waitForExit(terminal)
-
       const output = (terminal as WindowsPtyInternals)._socket
+      const exit = waitForExit(terminal).then(() => {
+        exited = true
+      })
+      terminal.kill()
+      await exit
+
       expect(() => {
         output.emit(
           'error',
@@ -108,9 +112,11 @@ describe.skipIf(process.platform !== 'win32')('node-pty Windows input errors', (
       }).not.toThrow()
       expect(uncaught).toEqual([])
     } finally {
-      try {
-        terminal?.kill()
-      } catch {}
+      if (!exited) {
+        try {
+          terminal?.kill()
+        } catch {}
+      }
       await new Promise((resolve) => setTimeout(resolve, 1_500))
       process.off('uncaughtException', uncaughtListener)
     }
