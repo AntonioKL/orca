@@ -161,8 +161,8 @@ describeBinaryCompatibility('real Git binary compatibility', () => {
       'orca-create-preparation:v1:compat',
       'compat-prepared'
     ])
-    await runGit(['worktree', 'unlock', 'compat-prepared'])
-    await runGit(['worktree', 'move', 'compat-prepared', 'compat-final'])
+    // Why: `-f -f` moves a locked preparation while preserving its lock reason (Git >=2.25).
+    await runGit(['worktree', 'move', '-f', '-f', 'compat-prepared', 'compat-final'])
     await runGit([
       '-C',
       'compat-final',
@@ -176,6 +176,7 @@ describeBinaryCompatibility('real Git binary compatibility', () => {
     await expect(runGit(['-C', 'compat-final', 'branch', '--show-current'])).resolves.toMatchObject(
       { stdout: 'compat-prepared-final\n' }
     )
+    await runGit(['worktree', 'unlock', 'compat-final'])
     await runGit(['worktree', 'remove', '--force', 'compat-final'])
     await runGit(['branch', '-D', 'compat-prepared-final'])
   })
