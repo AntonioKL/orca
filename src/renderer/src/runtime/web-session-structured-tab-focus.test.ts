@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RuntimeMobileSessionTabsResult } from '../../../shared/runtime-types'
-import type { Tab } from '../../../shared/types'
+import type { Tab } from '../../../shared/tab-types'
 import { applyWebSessionTabsSnapshot, type WebSessionTabsSyncState } from './web-session-tabs-sync'
 
 const WORKTREE_ID = 'repo-1::/worktree'
@@ -18,7 +18,8 @@ function structuredTab(sessionId: string, sortOrder: number): Tab {
     customLabel: null,
     color: null,
     sortOrder,
-    createdAt: sortOrder + 1
+    createdAt: sortOrder + 1,
+    isPinned: false
   }
 }
 
@@ -99,6 +100,11 @@ describe('web session structured tab focus', () => {
 
     const patch = applyWebSessionTabsSnapshot(state, snapshot, 'environment-1', 10)
 
-    expect(patch.groupsByWorktree?.[WORKTREE_ID]?.[0]?.activeTabId).toBe(second.id)
+    const applied = patch === state ? state : ({ ...state, ...patch } as WebSessionTabsSyncState)
+
+    expect(applied.groupsByWorktree[WORKTREE_ID]?.[0]?.activeTabId).toBe(second.id)
+    expect(applied.unifiedTabsByWorktree[WORKTREE_ID]).toBe(
+      state.unifiedTabsByWorktree[WORKTREE_ID]
+    )
   })
 })

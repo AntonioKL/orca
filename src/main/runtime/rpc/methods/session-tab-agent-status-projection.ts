@@ -1,6 +1,5 @@
 import {
   AGENT_SESSION_BOUNDARY_RUNTIME_CAPABILITY,
-  CLAUDE_STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY,
   STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY,
   type RuntimeCapability
 } from '../../../../shared/protocol-version'
@@ -9,7 +8,7 @@ import type {
   RuntimeMobileSessionTabsResult,
   RuntimeMobileSessionTabsSnapshot
 } from '../../../../shared/runtime-types'
-import type { TabGroupLayoutNode } from '../../../../shared/types'
+import type { TabGroupLayoutNode } from '../../../../shared/tab-types'
 
 type SessionTabsPayload = RuntimeMobileSessionTabsResult | RuntimeMobileSessionTabsSnapshot
 
@@ -19,15 +18,12 @@ export function projectSessionTabAgentStatus<TPayload extends SessionTabsPayload
   clientCapabilities: readonly RuntimeCapability[] | undefined
 ): TPayload {
   const structuredVisible =
-    clientKind === undefined ||
-    (clientCapabilities?.includes(STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY) ?? false)
+    clientKind !== 'mobile' &&
+    (clientKind === undefined ||
+      (clientCapabilities?.includes(STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY) ?? false))
   let projected = structuredVisible ? payload : projectAgentSessionTabsOut(payload, () => true)
-  if (
-    structuredVisible &&
-    clientKind !== undefined &&
-    !clientCapabilities?.includes(CLAUDE_STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY)
-  ) {
-    projected = projectAgentSessionTabsOut(projected, (tab) => tab.agent === 'claude')
+  if (structuredVisible && clientKind !== undefined) {
+    projected = projectAgentSessionTabsOut(projected, (tab) => tab.agent !== 'codex')
   }
   // Why: only paired runtimes have legacy `done` completion side effects; mobile must keep its row without changing the exact v2 auth shape.
   if (

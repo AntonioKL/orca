@@ -2,18 +2,19 @@ import { z } from 'zod'
 import { resolveRuntimeNavigationTarget } from '../../../../shared/runtime-navigation'
 import { defineMethod, defineStreamingMethod, type RpcAnyMethod } from '../core'
 import {
-  ActivateTab,
   CreateTerminalTab,
-  MoveTab,
   SessionTabsUnsubscribe,
-  SetTabProps,
-  UpdatePaneLayout,
   WorktreeTabSelector
 } from './session-tabs-schemas'
 import { SESSION_TAB_CLOSE_METHODS } from './session-tab-close-methods'
-import { projectSessionTabAgentStatus } from './session-tab-agent-status-projection'
+import {
+  listSessionTabsInventory,
+  projectSessionTabsForClient,
+  subscribeSessionTabsInventory
+} from './session-tabs-inventory'
+import { SESSION_TAB_MARKDOWN_METHODS } from './session-tab-markdown-methods'
+import { SESSION_TAB_MUTATION_METHODS } from './session-tab-mutation-methods'
 import { restoreStructuredTabsIfSupported } from './structured-session-tab-restore'
-import { MOBILE_MARKDOWN_TAB_METHODS } from './mobile-markdown-tab-methods'
 import { assertLegacyAiVaultResumeCommandAllowed } from '../../../ai-vault/structured-session-ownership'
 
 export const SESSION_TAB_METHODS: RpcAnyMethod[] = [
@@ -22,7 +23,7 @@ export const SESSION_TAB_METHODS: RpcAnyMethod[] = [
     params: WorktreeTabSelector,
     handler: async (params, { runtime, pairedDeviceId, clientKind, clientCapabilities }) => {
       await restoreStructuredTabsIfSupported(runtime, clientCapabilities)
-      return projectSessionTabAgentStatus(
+      return projectSessionTabsForClient(
         await runtime.listMobileSessionTabs(params.worktree, pairedDeviceId),
         clientKind,
         clientCapabilities
@@ -32,30 +33,12 @@ export const SESSION_TAB_METHODS: RpcAnyMethod[] = [
   defineMethod({
     name: 'session.tabs.listAll',
     params: null,
-    handler: async (_params, { runtime, pairedDeviceId, clientKind, clientCapabilities }) => {
-      await restoreStructuredTabsIfSupported(runtime, clientCapabilities)
-      return {
-        snapshots: (await runtime.listAllMobileSessionTabs(pairedDeviceId)).map((snapshot) =>
-          projectSessionTabAgentStatus(snapshot, clientKind, clientCapabilities)
-        )
-      }
+    handler: async (_params, context) => {
+      await restoreStructuredTabsIfSupported(context.runtime, context.clientCapabilities)
+      return listSessionTabsInventory(context)
     }
   }),
-  defineMethod({
-    name: 'session.tabs.activate',
-    params: ActivateTab,
-    handler: async (params, { runtime, clientKind, pairedDeviceId }) =>
-      runtime.activateMobileSessionTab(params.worktree, params.tabId, params.leafId, {
-        notifyClients: params.notifyClients !== false,
-        clientNavigationId: pairedDeviceId,
-        ...(params.intent ? { intent: params.intent } : {}),
-        navigation: resolveRuntimeNavigationTarget({
-          navigation: params.navigation,
-          notifyClients: params.notifyClients,
-          clientKind
-        })
-      })
-  }),
+  ...SESSION_TAB_MUTATION_METHODS,
   ...SESSION_TAB_CLOSE_METHODS,
   defineMethod({
     name: 'session.tabs.createTerminal',
@@ -93,57 +76,6 @@ export const SESSION_TAB_METHODS: RpcAnyMethod[] = [
         signal
       })
     }
-  }),
-  defineMethod({
-    name: 'session.tabs.move',
-    params: MoveTab,
-    handler: async (params, { runtime }) => {
-      const base = {
-        tabId: params.tabId,
-        targetGroupId: params.targetGroupId
-      }
-      if (params.kind === 'reorder') {
-        return runtime.moveMobileSessionTab(params.worktree, {
-          ...base,
-          kind: 'reorder',
-          tabOrder: params.tabOrder
-        })
-      }
-      if (params.kind === 'split') {
-        return runtime.moveMobileSessionTab(params.worktree, {
-          ...base,
-          kind: 'split',
-          splitDirection: params.splitDirection
-        })
-      }
-      return runtime.moveMobileSessionTab(params.worktree, {
-        ...base,
-        kind: 'move-to-group',
-        index: params.index
-      })
-    }
-  }),
-  defineMethod({
-    name: 'session.tabs.updatePaneLayout',
-    params: UpdatePaneLayout,
-    handler: async (params, { runtime }) =>
-      runtime.updateMobileSessionPaneLayout(params.worktree, {
-        tabId: params.tabId,
-        root: params.root,
-        expandedLeafId: params.expandedLeafId ?? null,
-        titlesByLeafId: params.titlesByLeafId
-      })
-  }),
-  defineMethod({
-    name: 'session.tabs.setTabProps',
-    params: SetTabProps,
-    handler: async (params, { runtime }) =>
-      runtime.setMobileSessionTabProps(params.worktree, {
-        tabId: params.tabId,
-        ...(params.color !== undefined ? { color: params.color } : {}),
-        ...(params.isPinned !== undefined ? { isPinned: params.isPinned } : {}),
-        ...(params.viewMode !== undefined ? { viewMode: params.viewMode } : {})
-      })
   }),
   defineStreamingMethod({
     name: 'session.tabs.subscribe',
@@ -183,7 +115,7 @@ export const SESSION_TAB_METHODS: RpcAnyMethod[] = [
       }
       emit({
         type: 'snapshot',
-        ...projectSessionTabAgentStatus(initial, clientKind, clientCapabilities)
+        ...projectSessionTabsForClient(initial, clientKind, clientCapabilities)
       })
       initialized = true
       if (closed) {
@@ -194,7 +126,7 @@ export const SESSION_TAB_METHODS: RpcAnyMethod[] = [
         if (snapshot.worktree === subscribedWorktree) {
           emit({
             type: 'updated',
-            ...projectSessionTabAgentStatus(snapshot, clientKind, clientCapabilities)
+            ...projectSessionTabsForClient(snapshot, clientKind, clientCapabilities)
           })
         }
       }, pairedDeviceId)
@@ -224,61 +156,9 @@ export const SESSION_TAB_METHODS: RpcAnyMethod[] = [
   defineStreamingMethod({
     name: 'session.tabs.subscribeAll',
     params: null,
-    handler: async (
-      _params,
-      { runtime, connectionId, requestId, pairedDeviceId, clientKind, clientCapabilities },
-      emit
-    ) => {
-      let unsubscribe = (): void => {}
-      let closed = false
-      // Why: initial listAll errors should return one RPC error, not a leaked
-      // subscription cleanup that later emits a stray end frame.
-      let initialized = false
-      const cleanupPrefix = `session.tabs:${connectionId ?? 'local'}:*`
-      const subscriptionId = requestId ? `${cleanupPrefix}:${requestId}` : cleanupPrefix
-      // Why: include the RPC id so one shared-control stream cannot evict siblings.
-      runtime.registerSubscriptionCleanup(
-        subscriptionId,
-        () => {
-          closed = true
-          unsubscribe()
-          if (initialized) {
-            emit({ type: 'end' })
-          }
-        },
-        connectionId
-      )
-
-      if (closed) {
-        return
-      }
-      await restoreStructuredTabsIfSupported(runtime, clientCapabilities)
-      const snapshots = await Promise.resolve(
-        runtime.listAllMobileSessionTabs(pairedDeviceId)
-      ).catch((error) => {
-        runtime.cleanupSubscription(subscriptionId)
-        throw error
-      })
-      if (closed) {
-        return
-      }
-      emit({
-        type: 'snapshots',
-        snapshots: snapshots.map((snapshot) =>
-          projectSessionTabAgentStatus(snapshot, clientKind, clientCapabilities)
-        )
-      })
-      initialized = true
-
-      if (closed) {
-        return
-      }
-      unsubscribe = runtime.onMobileSessionTabsChanged((snapshot) => {
-        emit({
-          type: 'updated',
-          ...projectSessionTabAgentStatus(snapshot, clientKind, clientCapabilities)
-        })
-      }, pairedDeviceId)
+    handler: async (_params, context, emit) => {
+      await restoreStructuredTabsIfSupported(context.runtime, context.clientCapabilities)
+      return subscribeSessionTabsInventory(context, emit)
     }
   }),
   defineMethod({
@@ -299,5 +179,5 @@ export const SESSION_TAB_METHODS: RpcAnyMethod[] = [
       return { unsubscribed: true }
     }
   }),
-  ...MOBILE_MARKDOWN_TAB_METHODS
+  ...SESSION_TAB_MARKDOWN_METHODS
 ]

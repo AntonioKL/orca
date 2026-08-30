@@ -3,26 +3,16 @@ import type { AgentType } from './agent-status-types'
 import type { SessionOptionDescriptor, SessionOptionValue } from './native-chat-session-options'
 import type { SlashCommandSuggestion } from './native-chat-slash-commands'
 
-const MODEL_COMMAND: SlashCommandSuggestion = {
-  name: 'model',
-  description: 'Choose the model'
-}
 const EFFORT_COMMAND: SlashCommandSuggestion = {
   name: 'effort',
   description: 'Choose reasoning effort'
 }
 
-function commandsFor(agent: AgentType): readonly SlashCommandSuggestion[] {
-  return [
-    MODEL_COMMAND,
-    EFFORT_COMMAND,
-    ...getVerifiedNativeChatCommands(agent).filter(
-      (command) => command.name !== 'model' && command.name !== 'effort'
-    )
-  ]
-}
-
-export const STRUCTURED_AGENT_SESSION_SLASH_COMMANDS = commandsFor('codex')
+export const STRUCTURED_AGENT_SESSION_SLASH_COMMANDS: readonly SlashCommandSuggestion[] = [
+  ...getVerifiedNativeChatCommands('codex').slice(0, 1),
+  EFFORT_COMMAND,
+  ...getVerifiedNativeChatCommands('codex').slice(1)
+]
 
 export type StructuredAgentSessionComposerOptions = {
   agent?: AgentType
@@ -45,13 +35,11 @@ function commandParts(text: string): { name: string; argument: string } | null {
   return match ? { name: match[1]!.toLowerCase(), argument: match[2]?.trim() ?? '' } : null
 }
 
-export function structuredAgentSessionSlashCommands(
-  agent: AgentType
-): readonly SlashCommandSuggestion[] {
+function structuredSlashCommands(agent: AgentType): readonly SlashCommandSuggestion[] {
   if (agent === 'codex') {
     return STRUCTURED_AGENT_SESSION_SLASH_COMMANDS
   }
-  return commandsFor(agent)
+  return [...getVerifiedNativeChatCommands(agent), EFFORT_COMMAND]
 }
 
 export function isStructuredAgentSessionComposerCommand(
@@ -60,8 +48,7 @@ export function isStructuredAgentSessionComposerCommand(
 ): boolean {
   const command = commandParts(text)
   return Boolean(
-    command &&
-    structuredAgentSessionSlashCommands(agent).some((entry) => entry.name === command.name)
+    command && structuredSlashCommands(agent).some((entry) => entry.name === command.name)
   )
 }
 

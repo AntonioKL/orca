@@ -4,7 +4,7 @@ import {
   agentSessionRecordFixture
 } from '../../shared/agent-session-record.test-fixture'
 import { recoverDeadTuiOwnerForHandoff } from './agent-session-handoff-lease-transitions'
-import { applyAgentSessionRestartAdjudication } from './agent-session-lease-transitions'
+import { applyAgentSessionRestartAdjudication } from './agent-session-restart-lease-transitions'
 
 describe('agent session handoff restart transitions', () => {
   it('turns a proven dead TUI owner into one durable retry owner', () => {

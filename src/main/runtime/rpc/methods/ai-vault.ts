@@ -6,10 +6,8 @@ import { AI_VAULT_AGENTS, AI_VAULT_SCOPE_PATHS_MAX_COUNT } from '../../../../sha
 import { AI_VAULT_SESSION_TITLE_REQUEST_MAX_COUNT } from '../../../../shared/ai-vault-session-title'
 import type { AiVaultPrepareSessionResumeArgs } from '../../../../shared/ai-vault-resume-preparation'
 import { LOCAL_EXECUTION_HOST_ID, parseExecutionHostId } from '../../../../shared/execution-host'
-import {
-  CLAUDE_STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY,
-  STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY
-} from '../../../../shared/protocol-version'
+import { describeAiVaultScanError } from '../../../../shared/ai-vault-scan-error-message'
+import { STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
 import {
   assertLegacyAiVaultResumeAllowed,
   projectStructuredAiVaultSessions
@@ -94,12 +92,21 @@ export const AI_VAULT_METHODS: RpcMethod[] = [
     params: AiVaultListSessionsParams,
     handler: async (params, { runtime, clientKind, clientCapabilities }) => {
       await runtime.ensureStructuredAgentSessionHost()
-      const result = await runtime.listAiVaultSessions({
-        limit: params.unlimited ? undefined : params.limit,
-        unlimited: params.unlimited,
-        force: params.force,
-        scopePaths: params.scopePaths
-      })
+      let result
+      try {
+        result = await runtime.listAiVaultSessions({
+          limit: params.unlimited ? undefined : params.limit,
+          unlimited: params.unlimited,
+          force: params.force,
+          scopePaths: params.scopePaths
+        })
+      } catch (error) {
+        if (error instanceof Error) {
+          error.message = describeAiVaultScanError(error.message)
+          throw error
+        }
+        throw new Error(describeAiVaultScanError(String(error)))
+      }
       // Why: web clients consume this response directly (no parent-side retag),
       // so sessions must come back stamped as the runtime host they addressed.
       const stamped = params.executionHostId
@@ -108,12 +115,7 @@ export const AI_VAULT_METHODS: RpcMethod[] = [
       return projectStructuredAiVaultSessions(
         stamped,
         clientKind === undefined ||
-          (clientCapabilities?.includes(STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY) ?? false),
-        (provider) =>
-          provider !== 'claude' ||
-          clientKind === undefined ||
-          (clientCapabilities?.includes(CLAUDE_STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY) ??
-            false)
+          (clientCapabilities?.includes(STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY) ?? false)
       )
     }
   }),

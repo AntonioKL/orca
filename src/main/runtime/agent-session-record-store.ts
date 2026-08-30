@@ -2,7 +2,6 @@
 
 import {
   agentSessionOperationKey,
-  pruneAgentSessionOperationRows,
   settleAgentSessionOperation,
   type AgentSessionOperationDecision,
   type AgentSessionOperationOutcome,
@@ -13,6 +12,7 @@ import {
   type AgentSessionOperationAdmission
 } from './agent-session-operation-admission'
 import type { AgentSessionOwnerProbe } from '../../shared/agent-session-lease-adjudication'
+import { classifyObservedAgentSessionSpawnToken } from '../../shared/agent-session-lease-adjudication'
 import type { AgentSessionProviderHandleLink } from '../../shared/agent-session-provider-handle'
 import {
   agentSessionScopeKey,
@@ -22,22 +22,34 @@ import {
   type AgentSessionRecord
 } from '../../shared/agent-session-record'
 import {
-  applyAgentSessionRestartAdjudication,
   commitAgentSessionProcessIdentity,
   evictAgentSessionOwner,
   proveAgentSessionOwner,
-  renewAgentSessionLease,
   setAgentSessionJournalCheckpoint,
   type AgentSessionProcessIdentityCommit
 } from './agent-session-lease-transitions'
-import { recordAgentSessionProviderHandle } from './agent-session-provider-handle-transition'
-import { agentSessionReconciliationTargetMatches } from './agent-session-reconciliation-target'
+import {
+  settleFailedAgentSessionAcquisition,
+  settleFailedAgentSessionPostAcquisitionAttachment,
+  type AgentSessionFailedAcquisitionSettlement,
+  type AgentSessionFailedPostAcquisitionAttachmentSettlement
+} from './agent-session-acquisition-failure-settlement'
+import {
+  renewAgentSessionLeases,
+  type AgentSessionLeaseRenewal
+} from './agent-session-lease-renewal'
+import {
+  applyAgentSessionRestartProbes,
+  collectAgentSessionRestartProbes,
+  type AgentSessionRestartProbeArgs
+} from './agent-session-restart-reconciliation'
 import { replaceAgentSessionRecordOptions } from './agent-session-record-options'
 import {
   setAgentSessionReservationProcesslessProof,
   type AgentSessionReservationProcesslessProof
 } from './agent-session-processless-reservation'
 import {
+  admitPendingAgentSessionReservationReplay,
   applyAgentSessionReservation,
   evaluateAgentSessionReserveOperation,
   requireAgentSessionRecordForReplay,
@@ -47,14 +59,13 @@ import {
 import {
   agentSessionStoreRevision,
   agentSessionStorePath,
-  loadAgentSessionStore,
   type AgentSessionStoreState
 } from './agent-session-record-store-file'
+import { loadProtectedAgentSessionStore } from './agent-session-record-store-security'
 import {
   AgentSessionStoreTransactionQueue,
   markAgentSessionStoreLeasesUnreconciled
 } from './agent-session-store-transaction-queue'
-import * as claimKeyState from './agent-session-claim-key-state'
 
 export const AGENT_SESSION_LEASE_TTL_MS = 30_000,
   AGENT_SESSION_LEASE_RENEW_INTERVAL_MS = 10_000
@@ -66,22 +77,21 @@ export class AgentSessionRecordStore {
 
   static async open(args: { directory: string; hostId: string }): Promise<AgentSessionRecordStore> {
     const filePath = agentSessionStorePath(args.directory)
-    const loaded = await loadAgentSessionStore(filePath, args.hostId)
+    const loaded = await loadProtectedAgentSessionStore(filePath, args.hostId)
     // Why: every persisted lease is unreconciled until this host adjudicates it, so a restart
     // grants no writer on the strength of what the previous process wrote.
     const diskRevision = agentSessionStoreRevision(loaded.state)
     markAgentSessionStoreLeasesUnreconciled(loaded.state)
-    return new AgentSessionRecordStore(
-      new AgentSessionStoreTransactionQueue(
-        filePath,
-        args.hostId,
-        loaded.readOnly,
-        loaded.recoveredFromBackup,
-        loaded.storeFound,
-        loaded.state,
-        diskRevision
-      )
+    const transactions = AgentSessionStoreTransactionQueue.fromLoadedStore(
+      filePath,
+      args.hostId,
+      loaded,
+      diskRevision
     )
+    if (loaded.needsRewrite && !loaded.readOnly && !loaded.recoveredFromBackup) {
+      await transactions.persistLoadedRewrite()
+    }
+    return new AgentSessionRecordStore(transactions)
   }
 
   private get state(): AgentSessionStoreState {
@@ -100,13 +110,10 @@ export class AgentSessionRecordStore {
     return this.state.hostId
   }
 
-  getRecord(sessionId: string): AgentSessionRecord | null {
-    return this.state.records.get(sessionId) ?? null
-  }
+  getRecord = (sessionId: string): AgentSessionRecord | null =>
+    this.state.records.get(sessionId) ?? null
 
-  listRecords(): AgentSessionRecord[] {
-    return [...this.state.records.values()]
-  }
+  listRecords = (): AgentSessionRecord[] => [...this.state.records.values()]
 
   listByScope(location: AgentSessionExecutionLocation): AgentSessionRecord[] {
     const scope = agentSessionScopeKey(location)
@@ -118,17 +125,19 @@ export class AgentSessionRecordStore {
     return this.state.unreadableRecords.has(sessionId)
   }
 
-  listOperationRows(): AgentSessionOperationRow[] {
-    return [...this.state.operations.values()]
-  }
+  listOperationRows = (): AgentSessionOperationRow[] => [...this.state.operations.values()]
 
   isClaimKeyVerifiable(keyId: string, now: number): boolean {
-    return claimKeyState.isVerifiable(this.state, keyId, now, AGENT_SESSION_CLAIM_KEY_RETENTION_MS)
+    const retired = this.state.retiredClaimKeys.find((entry) => entry.keyId === keyId)
+    return !retired || now - retired.retiredAt <= AGENT_SESSION_CLAIM_KEY_RETENTION_MS
   }
 
   /** Spawn tokens observed on the host with no matching lease. Stop them; never adopt them. */
   listOrphanSpawnTokens(observedTokens: readonly string[]): string[] {
-    return claimKeyState.listOrphanSpawnTokens(this.listRecords(), observedTokens)
+    const leases = this.listRecords().map((record) => record.lease)
+    return observedTokens.filter(
+      (spawnToken) => classifyObservedAgentSessionSpawnToken({ spawnToken, leases }) === 'orphan'
+    )
   }
 
   /**
@@ -142,11 +151,10 @@ export class AgentSessionRecordStore {
         throw new Error(decision.code)
       }
       if (decision.decision === 'replay') {
-        const record = requireAgentSessionRecordForReplay(
-          this.state,
-          decision.row,
-          request.sessionId
-        )
+        let record = requireAgentSessionRecordForReplay(this.state, decision.row, request.sessionId)
+        if (decision.row.outcome.status === 'pending' && request.handoffOperationId !== null) {
+          record = admitPendingAgentSessionReservationReplay(record, request)
+        }
         return { record, disposition: 'replayed' as const, operationRow: decision.row }
       }
       const result = applyAgentSessionReservation(this.state, request, AGENT_SESSION_LEASE_TTL_MS)
@@ -196,32 +204,22 @@ export class AgentSessionRecordStore {
     })
   }
 
-  async recordProviderHandle(args: {
-    sessionId: string
-    fence: number
-    link: AgentSessionProviderHandleLink
-    now: number
-  }): Promise<AgentSessionRecord> {
-    return this.mutate(args.sessionId, (record) =>
-      recordAgentSessionProviderHandle({ ...args, record })
-    )
+  /** Settle the failed attach and its reservation in one durable transaction. */
+  settleFailedAcquisition = (args: AgentSessionFailedAcquisitionSettlement) =>
+    this.transact(() => settleFailedAgentSessionAcquisition(this.state, args))
+
+  settleFailedPostAcquisitionAttachment = (
+    args: AgentSessionFailedPostAcquisitionAttachmentSettlement
+  ) => this.transact(() => settleFailedAgentSessionPostAcquisitionAttachment(this.state, args))
+
+  async renewLease(args: AgentSessionLeaseRenewal): Promise<AgentSessionRecord> {
+    const [renewed] = await this.renewLeases([args])
+    return renewed
   }
 
-  async renewLease(args: {
-    sessionId: string
-    fence: number
-    childProbe: AgentSessionOwnerProbe
-    now: number
-    leaseTtlMs?: number
-  }): Promise<AgentSessionRecord> {
-    return this.mutate(args.sessionId, (record) =>
-      renewAgentSessionLease({
-        record,
-        fence: args.fence,
-        childProbe: args.childProbe,
-        now: args.now,
-        leaseTtlMs: args.leaseTtlMs ?? AGENT_SESSION_LEASE_TTL_MS
-      })
+  async renewLeases(renewals: readonly AgentSessionLeaseRenewal[]): Promise<AgentSessionRecord[]> {
+    return this.transact(() =>
+      renewAgentSessionLeases(this.state, renewals, AGENT_SESSION_LEASE_TTL_MS)
     )
   }
 
@@ -253,36 +251,12 @@ export class AgentSessionRecordStore {
   }
 
   /** Adjudicate every lease this host loaded. No lease grants a writer until it appears here. */
-  async reconcileOnRestart(args: {
-    probe: (record: AgentSessionRecord) => Promise<AgentSessionOwnerProbe>
-    now: number
-  }): Promise<Map<string, AgentSessionRecord>> {
+  async reconcileOnRestart(
+    args: AgentSessionRestartProbeArgs
+  ): Promise<Map<string, AgentSessionRecord>> {
     const pending = this.listRecords().filter((record) => record.lease.unreconciled)
-    const probes = new Map<string, { record: AgentSessionRecord; probe: AgentSessionOwnerProbe }>()
-    for (const record of pending) {
-      probes.set(record.sessionId, { record, probe: await args.probe(record) })
-    }
-    return this.transact(() => {
-      const reconciled = new Map<string, AgentSessionRecord>()
-      for (const [sessionId, probed] of probes) {
-        const record = this.state.records.get(sessionId)
-        if (
-          !record?.lease.unreconciled ||
-          !agentSessionReconciliationTargetMatches(record, probed.record)
-        ) {
-          continue
-        }
-        const next = applyAgentSessionRestartAdjudication({
-          record,
-          probe: probed.probe,
-          now: args.now
-        })
-        this.state.records.set(sessionId, next)
-        reconciled.set(sessionId, next)
-      }
-      this.state.operations = pruneAgentSessionOperationRows(this.state.operations, args.now)
-      return reconciled
-    })
+    const probes = await collectAgentSessionRestartProbes(pending, args)
+    return this.transact(() => applyAgentSessionRestartProbes(this.state, probes, args.now))
   }
 
   /** Admits one non-reservation mutation through the durable ledger. */
@@ -307,16 +281,27 @@ export class AgentSessionRecordStore {
   }
 
   async markClaimConflicted(sessionId: string, now: number): Promise<AgentSessionRecord> {
-    return this.mutate(sessionId, (record) => claimKeyState.markConflicted(record, now))
+    return this.mutate(sessionId, (record) => ({
+      ...record,
+      updatedAt: now,
+      // Why: a conflicted key must stay conflicted across a restart; it cannot resolve to free
+      // merely because the process that observed the conflict is gone.
+      lease: { ...record.lease, claimStatus: 'conflicted', handoffStage: 'manual-recovery' }
+    }))
   }
 
   replaceSessionOptions = (args: AgentSessionOptionsReplacement): Promise<AgentSessionRecord> =>
     this.mutate(args.sessionId, (record) => replaceAgentSessionRecordOptions(record, args))
 
   async retireClaimKey(keyId: string, now: number): Promise<void> {
-    await this.transact(() =>
-      claimKeyState.retire(this.state, keyId, now, AGENT_SESSION_CLAIM_KEY_RETENTION_MS)
-    )
+    await this.transact(() => {
+      if (!this.state.retiredClaimKeys.some((entry) => entry.keyId === keyId)) {
+        this.state.retiredClaimKeys.push({ keyId, retiredAt: now })
+      }
+      this.state.retiredClaimKeys = this.state.retiredClaimKeys.filter(
+        (entry) => now - entry.retiredAt <= AGENT_SESSION_CLAIM_KEY_RETENTION_MS
+      )
+    })
   }
 
   private async mutate(

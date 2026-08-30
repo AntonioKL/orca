@@ -6,12 +6,13 @@
 // workspace that is not a repository at all. Keying by id rather than by path
 // makes a worktree, a folder workspace, a WSL distro, and an SSH host identical.
 //
-// `app` is imported lazily so the store stays usable from tests and from the
-// headless/SSH runtime, which have no Electron app object.
+// The host environment port supplies the root so desktop Electron and the
+// headless/SSH runtime resolve their own durable state directories.
 
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import type { AgentSessionJournalIdentity } from '../../../shared/agent-session-journal-types'
+import { getAppEnvironment } from '../../../shared/app-environment'
 
 const JOURNAL_DIR_NAME = 'agent-session-journal'
 
@@ -35,9 +36,7 @@ export function journalDirectoryFor(
   )
 }
 
-/** Default host state root. Electron is required lazily so importing this
- *  module from a non-Electron runtime does not pull the whole app in. */
-export async function defaultJournalRoot(): Promise<string> {
-  const { app } = await import('electron')
-  return app.getPath('userData')
+/** Default host state root. */
+export function defaultJournalRoot(): Promise<string> {
+  return Promise.resolve(getAppEnvironment().getPath('userData'))
 }

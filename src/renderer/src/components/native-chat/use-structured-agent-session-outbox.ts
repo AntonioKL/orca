@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { AgentJournalSubmission } from '../../../../shared/agent-session-journal-types'
 import type {
   AgentSessionMutationResult,
@@ -76,24 +76,41 @@ export function useStructuredAgentSessionOutbox(args: {
     readOutbox(sessionId)
   )
   const outboxRef = useRef(outbox)
+  const outboxSessionRef = useRef(sessionId)
   const dispatchingRef = useRef(false)
   const dispatchGenerationRef = useRef(0)
   const blockedIdRef = useRef<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [errorSession, setErrorSession] = useState(sessionId)
+  // Render-time reset (react.dev: adjusting state when a prop changes), so the
+  // old session's banner neither flashes for a frame nor resurrects on return.
+  if (errorSession !== sessionId) {
+    setErrorSession(sessionId)
+    setError(null)
+  }
 
   useEffect(() => {
     outboxRef.current = outbox
   }, [outbox])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     dispatchGenerationRef.current += 1
     dispatchingRef.current = false
     blockedIdRef.current = null
-    const current = outboxRef.current
+  }, [fence, sessionId, target])
+
+  useEffect(() => {
+    const sessionChanged = outboxSessionRef.current !== sessionId
+    outboxSessionRef.current = sessionId
+    const current = sessionChanged ? readOutbox(sessionId) : outboxRef.current
     const next = current.map((entry) =>
       entry.state === 'dispatching' ? { ...entry, state: 'queued' as const } : entry
     )
-    if (next.some((entry, index) => entry !== current[index])) {
+    if (
+      sessionChanged ||
+      next.some((entry, index) => entry !== current[index]) ||
+      next.length !== current.length
+    ) {
       outboxRef.current = next
       setOutbox(next)
       writeOutbox(sessionId, next)
@@ -116,6 +133,7 @@ export function useStructuredAgentSessionOutbox(args: {
     const next = outbox[0]
     if (
       !next ||
+      next.sessionId !== sessionId ||
       next.state !== 'queued' ||
       fence === null ||
       dispatchingRef.current ||
@@ -220,15 +238,15 @@ export function useStructuredAgentSessionOutbox(args: {
   }, [fence, outbox, sessionId, target])
 
   const send = useCallback(
-    (text: string): boolean => {
-      if (!text.trim()) {
+    (text: string, attachments: readonly { path: string; previewUri: string }[] = []): boolean => {
+      if (!text.trim() && attachments.length === 0) {
         return false
       }
       const entry = createStructuredAgentSessionOutboxEntry({
         clientMessageId: structuredSessionOperationId(),
         sessionId,
         text,
-        attachments: [],
+        attachments,
         queuedAt: Date.now()
       })
       const next = [...outboxRef.current, entry]
@@ -247,13 +265,38 @@ export function useStructuredAgentSessionOutbox(args: {
   const retry = (clientMessageId: string): void => {
     blockedIdRef.current = null
     setError(null)
-    const unknown = submissions.find(
-      (submission) =>
-        submission.clientMessageId === clientMessageId && submission.dispatchState === 'unknown'
+    const submission = submissions.find(
+      (candidate) => candidate.clientMessageId === clientMessageId
     )
     const current = outboxRef.current.find((entry) => entry.clientMessageId === clientMessageId)
+    // A provider-history reconciliation can settle an earlier unknown as
+    // rejected before the user presses Retry. Reusing that operation id only
+    // replays the settled rejection forever, so rotate the id for a safe resend.
+    if (current && submission?.dispatchState === 'rejected') {
+      const rotated = outboxRef.current.map((entry) =>
+        entry.clientMessageId === clientMessageId
+          ? {
+              ...entry,
+              clientMessageId: structuredSessionOperationId(),
+              state: 'queued' as const,
+              retryAfterUnknownSubmittedAt: null
+            }
+          : entry
+      )
+      if (!writeOutbox(sessionId, rotated)) {
+        setError('Message could not be saved to the outbox')
+        return
+      }
+      outboxRef.current = rotated
+      setOutbox(rotated)
+      return
+    }
     const retryAfterUnknownSubmittedAt =
-      unknown?.submittedAt ?? (current?.state === 'unconfirmed' ? -1 : null)
+      submission?.dispatchState === 'unknown'
+        ? submission.submittedAt
+        : current?.state === 'unconfirmed'
+          ? -1
+          : null
     const next = outboxRef.current.map((entry) =>
       entry.clientMessageId === clientMessageId
         ? {
@@ -270,30 +313,5 @@ export function useStructuredAgentSessionOutbox(args: {
     outboxRef.current = next
     setOutbox(next)
   }
-  const discard = (clientMessageId: string): void => {
-    const discarded = outboxRef.current.find((entry) => entry.clientMessageId === clientMessageId)
-    const next = outboxRef.current.filter((entry) => entry.clientMessageId !== clientMessageId)
-    if (!writeOutbox(sessionId, next)) {
-      setError('Message could not be removed from the outbox')
-      return
-    }
-    const clearsError =
-      discarded?.state === 'unconfirmed' || blockedIdRef.current === clientMessageId
-    if (blockedIdRef.current === clientMessageId) {
-      blockedIdRef.current = null
-    }
-    if (clearsError) {
-      setError(null)
-    }
-    outboxRef.current = next
-    setOutbox(next)
-  }
-  return {
-    outbox,
-    error,
-    blockedClientMessageId: blockedIdRef.current,
-    send,
-    retry,
-    discard
-  }
+  return { outbox, error, blockedClientMessageId: blockedIdRef.current, send, retry }
 }

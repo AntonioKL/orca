@@ -1,3 +1,4 @@
+import { nextAgentSessionFence } from '../../shared/agent-session-next-fence'
 import type { AgentSessionOwnerProbe } from '../../shared/agent-session-lease-adjudication'
 import type {
   AgentSessionOwnerRuntimeKind,
@@ -52,7 +53,7 @@ export function stopAgentSessionOwnerForHandoff(args: {
   }
   return withLease(record, {
     ...record.lease,
-    runtimeFence: record.lease.runtimeFence + 1,
+    runtimeFence: nextAgentSessionFence(record.lease),
     handoffStage: 'old-owner-stopped',
     ownerProcess: null,
     reservedSpawnToken: null,
@@ -111,7 +112,7 @@ export function stopRecoveringTuiOwnerForHandoff(args: {
   }
   return withLease(record, {
     ...record.lease,
-    runtimeFence: record.lease.runtimeFence + 1,
+    runtimeFence: nextAgentSessionFence(record.lease),
     handoffStage: 'old-owner-stopped',
     handoffOperationId: args.operationId,
     ownerProcess: null,
@@ -170,7 +171,7 @@ export function abandonAgentSessionHandoffAttempt(args: {
   return withLease(record, {
     ...record.lease,
     runtimeKind: args.recoverableRuntimeKind,
-    runtimeFence: record.lease.runtimeFence + 1,
+    runtimeFence: nextAgentSessionFence(record.lease),
     handoffStage: 'old-owner-stopped',
     ownerProcess: null,
     reservedSpawnToken: null,

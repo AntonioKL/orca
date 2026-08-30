@@ -1,10 +1,12 @@
 import type { AgentSessionJournalIdentity } from '../../shared/agent-session-journal-types'
+import { cancelProcessAcquisition } from '../../shared/child-process/cancel-process-acquisition'
 import type {
   CodexAppServerConnection,
   openCodexAppServerConnection
 } from './codex-app-server-connection'
 import { CodexAcquisitionWindow } from './codex-structured-acquisition-window'
 import type { CodexJournalTranslator } from './codex-structured-journal-translation'
+import type { CodexTurnProcessSnapshot } from './codex-structured-turn-processes'
 
 export type CodexStructuredLaunch = {
   command: string
@@ -12,6 +14,8 @@ export type CodexStructuredLaunch = {
   cwd: string
   codexHome: string | null
   resumeThreadId: string | null
+  resumePath?: string | null
+  env?: Record<string, string>
 }
 
 export type CodexStructuredSessionEvent =
@@ -39,10 +43,16 @@ export type CodexStructuredSessionAdapterDeps = {
   mintLinkId?: () => string
   now?: () => number
   requestTimeoutMs?: number
+  captureTurnProcesses?: (rootPid: number) => Promise<CodexTurnProcessSnapshot | null>
+  terminateTurnProcesses?: (
+    rootPid: number,
+    baseline: CodexTurnProcessSnapshot | null
+  ) => Promise<boolean>
 }
 
 export type CodexSession = {
   connection: CodexAppServerConnection
+  ended: boolean
   threadId: string
   historyPath: string | null
   prompts: CodexAcquisitionWindow['prompts']
@@ -55,6 +65,7 @@ export type CodexSession = {
 export type CodexAcquisitionAttempt = {
   window: CodexAcquisitionWindow
   cancelled: boolean
+  exitProven: boolean
   finished: Promise<void>
   finish: () => void
 }
@@ -64,7 +75,13 @@ export function createCodexAcquisitionAttempt(): CodexAcquisitionAttempt {
   const finished = new Promise<void>((resolve) => {
     finish = resolve
   })
-  return { window: new CodexAcquisitionWindow(), cancelled: false, finished, finish }
+  return {
+    window: new CodexAcquisitionWindow(),
+    cancelled: false,
+    exitProven: false,
+    finished,
+    finish
+  }
 }
 
 export class CodexAcquisitionRegistry {
@@ -104,6 +121,25 @@ export class CodexAcquisitionRegistry {
     }
   }
 
+  restoreIfCurrent(
+    sessionId: string,
+    replacement: CodexAcquisitionAttempt,
+    previous: CodexAcquisitionAttempt
+  ): void {
+    if (this.attempts.get(sessionId) === replacement) {
+      this.attempts.set(sessionId, previous)
+    }
+  }
+
+  async closeFailedAttempt(sessionId: string, attempt: CodexAcquisitionAttempt): Promise<boolean> {
+    const stopped = (await attempt.window.connection?.close()) ?? true
+    if (stopped) {
+      attempt.exitProven = true
+      this.deleteIfCurrent(sessionId, attempt)
+    }
+    return stopped
+  }
+
   sessionIds(): IterableIterator<string> {
     return this.attempts.keys()
   }
@@ -115,11 +151,16 @@ export class CodexAcquisitionRegistry {
 
 export async function cancelCodexAcquisitionAttempt(
   attempt: CodexAcquisitionAttempt | undefined
-): Promise<void> {
+): Promise<boolean> {
   if (!attempt) {
-    return
+    return true
   }
-  attempt.cancelled = true
-  await attempt.window.connection?.close()
-  await attempt.finished
+  return cancelProcessAcquisition({
+    cancel: () => {
+      attempt.cancelled = true
+    },
+    connection: () => attempt.window.connection,
+    exitProven: () => attempt.exitProven,
+    finished: attempt.finished
+  })
 }

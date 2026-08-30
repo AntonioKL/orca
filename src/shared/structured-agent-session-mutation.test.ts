@@ -1,48 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import {
-  showStructuredAgentSessionChoice,
-  structuredAgentSessionPayloadFingerprint
-} from './structured-agent-session-mutation'
+import { structuredAgentSessionPayloadFingerprint } from './structured-agent-session-mutation'
+import { computeAgentSessionPayloadFingerprint } from './agent-session-mutation-envelope'
 
 describe('structured agent session client mutations', () => {
-  it('keeps the chat choice invisible without both capability and workspace support', () => {
-    expect(
-      showStructuredAgentSessionChoice({
-        hostCapability: false,
-        workspaceSupport: true,
-        agent: 'codex'
-      })
-    ).toBe(false)
-    expect(
-      showStructuredAgentSessionChoice({
-        hostCapability: true,
-        workspaceSupport: false,
-        agent: 'codex'
-      })
-    ).toBe(false)
-    expect(
-      showStructuredAgentSessionChoice({
-        hostCapability: true,
-        workspaceSupport: true,
-        agent: 'claude'
-      })
-    ).toBe(true)
-    expect(
-      showStructuredAgentSessionChoice({
-        hostCapability: true,
-        workspaceSupport: true,
-        agent: 'codex'
-      })
-    ).toBe(true)
-    expect(
-      showStructuredAgentSessionChoice({
-        hostCapability: true,
-        workspaceSupport: true,
-        agent: 'openclaude'
-      })
-    ).toBe(false)
-  })
-
   it('canonicalizes payload fields before hashing', () => {
     const first = structuredAgentSessionPayloadFingerprint({
       method: 'agentSession.send',
@@ -57,5 +17,17 @@ describe('structured agent session client mutations', () => {
 
     expect(first).toBe(second)
     expect(first).toMatch(/^[a-f0-9]{64}$/)
+  })
+
+  it('matches host code-unit ordering for mixed-case and non-ASCII keys', () => {
+    const input = {
+      method: 'agentSession.send',
+      sessionId: 'session-1',
+      fields: { a: 1, A: 2, é: 3, 中: 4 }
+    }
+
+    expect(structuredAgentSessionPayloadFingerprint(input)).toBe(
+      computeAgentSessionPayloadFingerprint(input)
+    )
   })
 })

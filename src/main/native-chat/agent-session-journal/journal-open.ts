@@ -9,8 +9,9 @@
 import type { AgentJournalSubmission } from '../../../shared/agent-session-journal-types'
 import { findSequenceGap } from './journal-cursor'
 import {
+  quarantineInvalidJournalSnapshot,
   readJournalLog,
-  readJournalSnapshotFile,
+  readJournalSnapshot,
   type JournalSnapshotFile
 } from './journal-log-file'
 import {
@@ -30,7 +31,12 @@ export type JournalLoad = {
   readOnly: boolean
   /** Set when the surviving prefix is unusable and the caller must roll the epoch. */
   corrupt: boolean
+  /** Log lines skipped because they failed to parse (schema-version rows are
+   *  `readOnly`, never counted here). The store discloses these in the timeline. */
+  malformedRows: number
   sizeBytes: number
+  /** Raw unreadable suffix retained for quarantine instead of deletion. */
+  quarantineRemainder?: string
 }
 
 /** Returns null when no journal exists yet for this session. */
@@ -38,17 +44,28 @@ export async function loadJournal(
   journalDir: string,
   sessionId: string
 ): Promise<JournalLoad | null> {
-  const snapshot = await readJournalSnapshotFile(journalDir)
+  const snapshotRead = await readJournalSnapshot(journalDir)
+  if (snapshotRead.status === 'unreadable') {
+    // Written by a newer schema: not corrupt, so never quarantined. The file
+    // stays authoritative in place, and this build must not write, compact,
+    // delete, or render a partial timeline from rows it cannot anchor to the
+    // snapshot it cannot read.
+    return emptyReadOnlyLoad(sessionId)
+  }
+  if (snapshotRead.status === 'invalid') {
+    await quarantineInvalidJournalSnapshot(journalDir)
+  }
+  const snapshot = snapshotRead.status === 'valid' ? snapshotRead.snapshot : null
   const log = await readJournalLog(journalDir)
   const epoch = resolveEpoch(snapshot, log.rows)
   if (!epoch) {
-    return log.unreadable ? emptyReadOnlyLoad(sessionId) : null
+    return snapshotRead.status === 'invalid' || log.hasBytes ? emptyReadOnlyLoad(sessionId) : null
   }
 
   const compactedThrough = snapshot?.epoch === epoch ? snapshot.compactedThrough : 0
   const state = seedState(sessionId, epoch, snapshot?.epoch === epoch ? snapshot : null)
   const liveRows = log.rows.filter((row) => row.epoch === epoch)
-  const tailRows = unionBySequence(snapshot?.epoch === epoch ? snapshot.tail : [], liveRows, epoch)
+  let tailRows = unionBySequence(snapshot?.epoch === epoch ? snapshot.tail : [], liveRows, epoch)
 
   const oldest = tailRows[0]?.seq ?? compactedThrough + 1
   const gap = findSequenceGap(
@@ -57,9 +74,21 @@ export async function loadJournal(
   )
   // A hole below the snapshot boundary is unrecoverable too: the snapshot only
   // covers `compactedThrough`, so a tail that starts above it lost rows.
-  const corrupt = Boolean(gap) || oldest > compactedThrough + 1
+  let corrupt = Boolean(gap) || oldest > compactedThrough + 1 || log.malformed > 0
+  let quarantineRemainder = log.remainder
+  if (gap) {
+    const firstBad = tailRows.findIndex((row, index) => {
+      const expected = (tailRows[0]?.seq ?? compactedThrough + 1) + index
+      return row.seq !== expected
+    })
+    if (firstBad !== -1) {
+      const suffix = tailRows.slice(firstBad)
+      tailRows = tailRows.slice(0, firstBad)
+      quarantineRemainder ??= `${suffix.map((row) => JSON.stringify(row)).join('\n')}\n`
+    }
+  }
 
-  for (const row of liveRows) {
+  for (const row of tailRows) {
     if (row.seq > compactedThrough) {
       applyJournalRow(state, row)
     }
@@ -71,9 +100,13 @@ export async function loadJournal(
     state,
     tailRows,
     compactedThrough,
+    // A future-version snapshot never reaches here: it is classified
+    // unreadable above, so `valid` implies a version this build can write.
     readOnly: log.unreadable,
     corrupt,
-    sizeBytes: tailRows.reduce((total, row) => total + journalRowByteLength(row), 0)
+    malformedRows: log.malformed,
+    sizeBytes: tailRows.reduce((total, row) => total + journalRowByteLength(row), 0),
+    quarantineRemainder
   }
 }
 
@@ -85,22 +118,17 @@ function emptyReadOnlyLoad(sessionId: string): JournalLoad {
     compactedThrough: 0,
     readOnly: true,
     corrupt: false,
+    malformedRows: 0,
     sizeBytes: 0
   }
 }
 
-/** The snapshot names the live epoch; without one, the newest epoch row does. */
+/** The snapshot names the live epoch; without one, the newest valid row does. */
 function resolveEpoch(snapshot: JournalSnapshotFile | null, rows: JournalRow[]): string | null {
   if (snapshot?.epoch) {
     return snapshot.epoch
   }
-  for (let index = rows.length - 1; index >= 0; index -= 1) {
-    const row = rows[index]
-    if (row?.kind === 'epoch') {
-      return row.epoch
-    }
-  }
-  return null
+  return rows.at(-1)?.epoch ?? null
 }
 
 function seedState(
@@ -129,6 +157,10 @@ function seedState(
   for (const alias of snapshot.aliases) {
     state.aliases.set(alias.providerItemId, alias.itemId)
   }
+  for (const tombstone of snapshot.tombstones ?? []) {
+    state.tombstones.set(tombstone.itemId, tombstone.revision)
+  }
+  state.highestFence = snapshot.highestFence ?? 0
   state.lastSequence = snapshot.compactedThrough
   state.oldestSequence = snapshot.compactedThrough + 1
   return state

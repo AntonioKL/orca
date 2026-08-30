@@ -2,12 +2,14 @@
  * Single-writer lease adjudication.
  *
  * Every decision here fails closed: expiry alone never grants a second owner, an unverifiable
- * process counts as possibly alive, and a stage that cannot prove an owner ends in manual
- * recovery rather than handing the session to the other runtime. This is the opposite polarity
+ * process counts as possibly alive, and a stage that cannot prove an owner keeps re-asking —
+ * or, when it names no process at all, ends in manual recovery — rather than handing the
+ * session to the other runtime. This is the opposite polarity
  * from daemon adoption checks, which fail open on a missing start time — a wrong answer there
  * refuses an adoption, a wrong answer here creates two writers on one provider session.
  */
 
+import { nextAgentSessionFence } from './agent-session-next-fence'
 import type {
   AgentSessionDeathEvidence,
   AgentSessionHandoffStage,
@@ -45,6 +47,8 @@ export type AgentSessionAcquisitionDecision =
 
 export type AgentSessionRestartAdjudication =
   | { disposition: 'readopt' }
+  /** Nothing is outstanding — no owner, no reservation. Clear any latched stage; the fence stays. */
+  | { disposition: 'free'; reason: string }
   | { disposition: 'evicted'; nextFence: number; evidence: AgentSessionDeathEvidence }
   | { disposition: 'recovering'; stage: AgentSessionHandoffStage; reason: string }
   | { disposition: 'conflicted'; reason: string }
@@ -139,7 +143,7 @@ export function evaluateAgentSessionAcquisition(args: {
     }
     if (
       lease.ownerProcess === null &&
-      lease.handoffStage === 'old-owner-stopped' &&
+      STAGES_ADMITTING_NEW_OWNER.has(lease.handoffStage) &&
       lease.claimStatus === 'reserved' &&
       lease.reservedSpawnToken !== null
     ) {
@@ -158,14 +162,14 @@ export function evaluateAgentSessionAcquisition(args: {
           : 'agent_session_ownership_unknown'
       }
     }
-    return { decision: 'granted', nextFence: lease.runtimeFence + 1 }
+    return { decision: 'granted', nextFence: nextAgentSessionFence(lease) }
   }
   if (lease.claimStatus === 'reserved' && probe.outcome !== 'reservation-unused') {
     // Why: a reservation with no proven process is not a free lease — the crash may have lost
     // the race with the spawn rather than beaten it.
     return { decision: 'refused', code: 'agent_session_ownership_unknown' }
   }
-  return { decision: 'granted', nextFence: lease.runtimeFence + 1 }
+  return { decision: 'granted', nextFence: nextAgentSessionFence(lease) }
 }
 
 /**
@@ -179,33 +183,60 @@ export function adjudicateAgentSessionRestart(args: {
 }): AgentSessionRestartAdjudication {
   const { lease, probe, observedAt } = args
   if (lease.claimStatus === 'conflicted') {
-    // Why: the conflict outlives the process that observed it; resolving to free would hand the
-    // provider session to whichever side restarted first.
+    const conflictedOwnerDeath =
+      lease.ownerProcess === null ? null : deathEvidenceFor(probe, observedAt)
+    if (conflictedOwnerDeath) {
+      // Why: the conflict names one specific process. Present-time proof that THAT process is gone
+      // leaves no claimant to protect, and a conflict with no exit is a session the user can never
+      // open again. Without such proof the conflict still outlives the process that observed it.
+      return {
+        disposition: 'evicted',
+        nextFence: nextAgentSessionFence(lease),
+        evidence: conflictedOwnerDeath
+      }
+    }
     return { disposition: 'conflicted', reason: 'claim conflicted before restart' }
   }
   if (lease.ownerProcess === null) {
+    if (lease.reservedSpawnToken === null && lease.claimStatus !== 'reserved') {
+      // Why: the spawn token is minted before the child and is the only thing a child could be
+      // carrying. With no owner and no token nothing can hold this lease, so it is already free —
+      // treating it as an unproven reservation is what re-latches every released record on restart.
+      return { disposition: 'free', reason: 'lease has no owner and no reservation' }
+    }
     if (probe.outcome === 'reservation-unused') {
       return {
         disposition: 'evicted',
-        nextFence: lease.runtimeFence + 1,
+        nextFence: nextAgentSessionFence(lease),
         evidence: { kind: 'pid-absent', detail: 'reservation never spawned', observedAt }
       }
     }
     return {
       disposition: 'recovering',
-      stage: 'recovering',
+      stage: 'manual-recovery',
       reason: 'reservation with no proven process'
     }
   }
   if (isProvenAliveProbe(probe)) {
+    if (lease.runtimeKind === 'native') {
+      // Why: the surviving child's stdio died with the previous runtime, so readoption
+      // would renew a lease no host can drive. Recovery stops it and respawns at fence + 1.
+      return {
+        disposition: 'recovering',
+        stage: 'recovering',
+        reason: 'native owner outlived the runtime that held its transport'
+      }
+    }
     // Why: re-adoption is not a new generation, so the fence does not move.
     return { disposition: 'readopt' }
   }
   const evidence = deathEvidenceFor(probe, observedAt)
   if (evidence) {
-    return { disposition: 'evicted', nextFence: lease.runtimeFence + 1, evidence }
+    return { disposition: 'evicted', nextFence: nextAgentSessionFence(lease), evidence }
   }
   return {
+    // Why: an exact recorded identity can still be probed later, so the system keeps
+    // re-asking; only a record naming nobody (above) needs the user to decide.
     disposition: 'recovering',
     stage: 'recovering',
     reason:

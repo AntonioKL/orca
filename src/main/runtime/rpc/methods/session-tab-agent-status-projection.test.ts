@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   AGENT_SESSION_BOUNDARY_RUNTIME_CAPABILITY,
-  CLAUDE_STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY,
   STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY
 } from '../../../../shared/protocol-version'
 import type { RuntimeMobileSessionTabsSnapshot } from '../../../../shared/runtime-types'
@@ -92,20 +91,20 @@ describe('projectSessionTabAgentStatus', () => {
     expect(oldClient.tabGroups).toHaveLength(1)
     expect(oldClient.tabGroupLayout).toEqual({ type: 'leaf', groupId: 'group-a' })
 
-    const capable = projectSessionTabAgentStatus(snapshot, 'mobile', [
+    expect(
+      projectSessionTabAgentStatus(snapshot, 'mobile', [
+        STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY
+      ])
+    ).toEqual(oldClient)
+
+    const capable = projectSessionTabAgentStatus(snapshot, 'runtime', [
       STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY
     ])
     expect(capable).toBe(snapshot)
   })
 
-  it('withholds session boundaries from legacy paired clients', () => {
-    const projected = projectSessionTabAgentStatus(makeSnapshot(true), 'runtime', [])
-
-    expect(projected.tabs[0]).not.toHaveProperty('agentStatus')
-  })
-
-  it('withholds Claude tabs from the first Codex-only structured clients', () => {
-    const snapshot: RuntimeMobileSessionTabsSnapshot = {
+  it('withholds legacy Claude rows from paired structured clients', () => {
+    const snapshot = {
       ...makeSnapshot(false),
       tabs: [
         {
@@ -127,19 +126,19 @@ describe('projectSessionTabAgentStatus', () => {
       ],
       activeTabId: 'agent-session:codex',
       activeTabType: 'agent-session'
-    }
+    } as unknown as RuntimeMobileSessionTabsSnapshot
 
     expect(
-      projectSessionTabAgentStatus(snapshot, 'mobile', [
+      projectSessionTabAgentStatus(snapshot, 'runtime', [
         STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY
       ]).tabs.map((tab) => tab.id)
     ).toEqual(['agent-session:codex'])
-    expect(
-      projectSessionTabAgentStatus(snapshot, 'mobile', [
-        STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY,
-        CLAUDE_STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY
-      ])
-    ).toBe(snapshot)
+  })
+
+  it('withholds session boundaries from legacy paired clients', () => {
+    const projected = projectSessionTabAgentStatus(makeSnapshot(true), 'runtime', [])
+
+    expect(projected.tabs[0]).not.toHaveProperty('agentStatus')
   })
 
   it('publishes session boundaries to clients that negotiated them', () => {

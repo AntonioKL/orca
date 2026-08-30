@@ -19,14 +19,14 @@ import { resolveGroupTabFromVisibleId } from './tab-group-visible-id'
 import { getTabPaneBodyDroppableId, type HoveredTabInsertion } from './useTabDragSplit'
 import { tabGroupBodyAnchorName } from './tab-group-body-anchor'
 import { translate } from '@/i18n/i18n'
-import NativeChatView from '../native-chat/NativeChatView'
-import {
-  getExecutionHostIdForWorktree,
-  getRuntimeEnvironmentIdForWorktree
-} from '@/lib/worktree-runtime-owner'
-import { getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
+import type { TabGroup } from '../../../../shared/tab-types'
+import type { ClientHostedBrowserRow } from '../../../../shared/client-hosted-browser-rows'
+import { useClientHostedBrowserRows } from '@/lib/pane-manager/client-hosted-browser-row-state'
+import { resolveClientHostedBrowserRowStripGroupId } from '../tab-bar/client-hosted-browser-row-strip-placement'
 
 const EditorPanel = lazy(() => import('../editor/EditorPanel'))
+const EMPTY_GROUPS: readonly TabGroup[] = []
+const EMPTY_CLIENT_HOSTED_ROWS: readonly ClientHostedBrowserRow[] = []
 
 export default function TabGroupPanel({
   groupId,
@@ -63,17 +63,6 @@ export default function TabGroupPanel({
 }): React.JSX.Element {
   const rightSidebarOpen = useAppStore((state) => state.rightSidebarOpen)
   const sidebarOpen = useAppStore((state) => state.sidebarOpen)
-  const structuredRuntimeEnvironmentId = useAppStore((state) =>
-    getRuntimeEnvironmentIdForWorktree(state, worktreeId)
-  )
-  const structuredFileLinksEnabled = useAppStore(
-    (state) => getExecutionHostIdForWorktree(state, worktreeId) === 'local'
-  )
-  const structuredRuntimeTarget = useMemo(
-    () => getActiveRuntimeTarget({ activeRuntimeEnvironmentId: structuredRuntimeEnvironmentId }),
-    [structuredRuntimeEnvironmentId]
-  )
-
   const model = useTabGroupWorkspaceModel({ groupId, worktreeId })
   const {
     activeTab,
@@ -84,6 +73,17 @@ export default function TabGroupPanel({
     tabBarOrder,
     terminalTabs
   } = model
+  // Why: one strip owns the worktree's client-hosted rows, or every split repeats them.
+  const ownsClientHostedRows = useAppStore(
+    (state) =>
+      resolveClientHostedBrowserRowStripGroupId(
+        state.groupsByWorktree[worktreeId] ?? EMPTY_GROUPS
+      ) === groupId
+  )
+  const worktreeClientHostedRows = useClientHostedBrowserRows(worktreeId)
+  const clientHostedRows = ownsClientHostedRows
+    ? worktreeClientHostedRows
+    : EMPTY_CLIENT_HOSTED_ROWS
   const { setNodeRef: setBodyDropRef } = useDroppable({
     id: getTabPaneBodyDroppableId(groupId),
     data: {
@@ -154,6 +154,8 @@ export default function TabGroupPanel({
       onTogglePaneExpand={commands.toggleTerminalPaneExpand}
       editorFiles={editorItems}
       browserTabs={browserItems}
+      clientHostedBrowserRows={clientHostedRows}
+      groupActiveTabId={activeTab?.id ?? null}
       agentSessionTabs={agentSessionItems}
       activeFileId={
         activeTab?.contentType === 'terminal' ||
@@ -372,21 +374,7 @@ export default function TabGroupPanel({
             </div>
           )}
 
-        {activeTab?.contentType === 'agent-session' ? (
-          <div className="absolute inset-0 flex min-h-0 min-w-0">
-            <NativeChatView
-              key={activeTab.entityId}
-              mode="structured"
-              tabId={activeTab.id}
-              sessionId={activeTab.entityId}
-              agent={activeTab.agentSessionAgent ?? 'codex'}
-              target={structuredRuntimeTarget}
-              allowFileUriLinks={structuredFileLinksEnabled}
-            />
-          </div>
-        ) : null}
-
-        {/* Why: terminal/browser/simulator panes render at the worktree level (overlay layers); per-group rendering remounted xterm/webview/simulator on split moves. */}
+        {/* Why: terminal/browser/simulator/structured-chat panes render at the worktree level; tab activation only changes overlay visibility and never remounts a live surface. */}
       </div>
     </div>
   )

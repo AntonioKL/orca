@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it } from 'vitest'
-import { readNativeHandoffSessionOptions } from '../native-chat/agent-session-wire/structured-agent-session-handoff-options'
+import { readNativeSessionOptions } from '../native-chat/agent-session-wire/structured-agent-session-option-restoration'
 import { AgentSessionRecordStore } from './agent-session-record-store'
 
 const NOW = 1_800_000_000_000
@@ -19,7 +19,7 @@ afterEach(async () => {
 
 it('fails option hydration before ownership can be proved', async () => {
   await expect(
-    readNativeHandoffSessionOptions({
+    readNativeSessionOptions({
       adapter: {
         readOptions: async () => {
           throw new Error('model list unavailable')
@@ -68,7 +68,7 @@ it('persists resumed provider options atomically with owner proof', async () => 
     },
     now: NOW
   })
-  const options = await readNativeHandoffSessionOptions({
+  const options = await readNativeSessionOptions({
     adapter: {
       readOptions: async () => ({
         models: [],

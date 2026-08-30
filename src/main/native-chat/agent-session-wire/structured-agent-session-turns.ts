@@ -11,10 +11,6 @@ import type {
   AgentJournalMessageItem,
   AgentJournalResolution
 } from '../../../shared/agent-session-journal-types'
-import {
-  decodeAgentSessionQuestionAnswers,
-  isValidAgentSessionQuestionAnswers
-} from '../../../shared/agent-session-question-answer'
 import { parseAgentJournalItemKey } from '../../../shared/agent-session-journal-item-key'
 import { decodeCodexQuestionOptionId } from '../../codex/codex-structured-prompt-replies'
 import type {
@@ -96,6 +92,15 @@ export async function performSend(
   const existing = ctx.journal
     .submissions()
     .find((entry) => entry.clientMessageId === input.clientMessageId)
+  if (existing && existing.payloadFingerprint !== input.payloadFingerprint) {
+    return invalid(`Message id ${input.clientMessageId} was already used for another send.`)
+  }
+  if (existing && !(input.retryUnknown && existing.dispatchState === 'unknown')) {
+    return {
+      ok: true,
+      value: { clientMessageId: input.clientMessageId, submission: existing }
+    }
+  }
   if (!(input.retryUnknown && existing?.dispatchState === 'unknown')) {
     await ctx.journal.appendSubmission({ ...input, fence: ctx.fence })
     ctx.publish()
@@ -133,7 +138,7 @@ export async function performCancel(
   input: { clientOperationId: string; turnId: string }
 ): Promise<TurnOutcome<AgentSessionCancelResult>> {
   let cancelled = false
-  let note = `Cancelled turn ${input.turnId}.`
+  let note = 'Turn cancelled.'
   try {
     cancelled = (
       await ctx.adapter.cancelTurn({
@@ -143,10 +148,10 @@ export async function performCancel(
       })
     ).cancelled
     if (!cancelled) {
-      note = `The provider had already finished turn ${input.turnId}.`
+      note = 'The provider had already finished this turn.'
     }
   } catch (error) {
-    note = `Cancellation of turn ${input.turnId} was not confirmed: ${
+    note = `Cancellation was not confirmed: ${
       error instanceof Error ? error.message : String(error)
     }`
   }
@@ -209,25 +214,12 @@ export async function performPrompt(
     }
   }
   const freeText = decodeCodexQuestionOptionId(input.optionId)
-  const groupedAnswers =
-    item.body.kind === 'question' && item.body.questions
-      ? decodeAgentSessionQuestionAnswers(input.optionId)
-      : null
-  const acceptsGroupedAnswers =
-    item.body.kind === 'question' &&
-    item.body.questions !== undefined &&
-    groupedAnswers !== null &&
-    isValidAgentSessionQuestionAnswers(item.body.questions, groupedAnswers)
   const acceptsFreeText =
     item.body.kind === 'question' &&
     prompt.freeTextQuestionId !== undefined &&
     freeText?.questionId === prompt.freeTextQuestionId &&
     freeText.answer.trim().length > 0
-  if (
-    !acceptsGroupedAnswers &&
-    !acceptsFreeText &&
-    !prompt.options.some((option) => option.id === input.optionId)
-  ) {
+  if (!acceptsFreeText && !prompt.options.some((option) => option.id === input.optionId)) {
     return invalid(`Option ${input.optionId} is not offered by item ${input.itemId}.`)
   }
   const identity = parseAgentJournalItemKey(input.itemId)

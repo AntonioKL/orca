@@ -2,15 +2,19 @@
  * Durable provider handle chain for an agent session.
  *
  * Handles are keyed per provider because the two structured lanes disagree about what
- * identifies a conversation: a Claude session id alone can name two sibling branches inside one
- * transcript, so the leaf uuid is part of the key; a Codex thread id is the whole key. Resumes
- * extend the chain, forks start a new identity root, and the chain records which is which so a
- * fork is never presented as a resume.
+ * identifies a conversation. Claude's session id is the identity root and its leaf uuid is a
+ * branch cursor; Codex's thread id is the whole key. Resumes extend the chain, forks start a new
+ * identity root, and the chain records which is which so a fork is never presented as a resume.
  */
 
 export const AGENT_SESSION_PROVIDER_HANDLE_PROVIDERS = ['claude', 'codex'] as const
 
 export type AgentSessionHandleProvider = (typeof AGENT_SESSION_PROVIDER_HANDLE_PROVIDERS)[number]
+
+/** Runtime guard for persisted/remote provider metadata. Unknown values must not impersonate Codex. */
+export function isAgentSessionHandleProvider(value: unknown): value is AgentSessionHandleProvider {
+  return value === 'claude' || value === 'codex'
+}
 
 export type AgentSessionProviderHandle =
   | { provider: 'claude'; sessionId: string; leafUuid: string | null }

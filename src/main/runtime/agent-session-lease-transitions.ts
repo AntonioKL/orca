@@ -23,7 +23,6 @@ import type {
   AgentSessionProcessIdentity,
   AgentSessionRecord
 } from '../../shared/agent-session-record'
-import { adjudicateRestartedAgentSessionHandoff } from './agent-session-restart-handoff-adjudication'
 
 export type AgentSessionReservation = {
   runtimeKind: AgentSessionOwnerRuntimeKind
@@ -214,6 +213,17 @@ export function evictAgentSessionOwner(args: {
     probe: args.probe,
     observedAt: args.now
   })
+  if (adjudication.disposition === 'free') {
+    // Nothing outstanding to evict; clearing the latched stage IS the resolution, and no new
+    // generation was granted, so the fence and the recorded evidence both stay put.
+    return withLease(record, {
+      ...record.lease,
+      handoffStage: null,
+      handoffOperationId: null,
+      processlessAt: null,
+      lastRenewedAt: args.now
+    })
+  }
   if (adjudication.disposition !== 'evicted') {
     throw new Error('agent_session_ownership_unknown')
   }
@@ -228,66 +238,6 @@ export function evictAgentSessionOwner(args: {
     lastRenewedAt: args.now,
     handoffOperationId: null,
     deathEvidence: adjudication.evidence
-  })
-}
-
-/** Apply one restart adjudication. Never consults deadlines — only proof moves a lease. */
-export function applyAgentSessionRestartAdjudication(args: {
-  record: AgentSessionRecord
-  probe: AgentSessionOwnerProbe
-  now: number
-}): AgentSessionRecord {
-  const { record } = args
-  if (
-    record.lease.handoffStage === 'old-owner-stopped' &&
-    record.lease.claimStatus === 'released' &&
-    record.lease.ownerProcess === null
-  ) {
-    return withLease(record, {
-      ...record.lease,
-      unreconciled: false,
-      lastRenewedAt: args.now
-    })
-  }
-  if (
-    record.lease.handoffStage === 'preparing' ||
-    record.lease.handoffStage === 'new-owner-proving'
-  ) {
-    return adjudicateRestartedAgentSessionHandoff(record, args.probe, args.now)
-  }
-  const adjudication = adjudicateAgentSessionRestart({
-    lease: record.lease,
-    probe: args.probe,
-    observedAt: args.now
-  })
-  if (adjudication.disposition === 'readopt') {
-    // Why: re-adoption is not a new generation, so the fence does not move.
-    return withLease(record, { ...record.lease, unreconciled: false, lastRenewedAt: args.now })
-  }
-  if (adjudication.disposition === 'evicted') {
-    return withLease(record, {
-      ...record.lease,
-      runtimeFence: adjudication.nextFence,
-      handoffStage: null,
-      ownerProcess: null,
-      reservedSpawnToken: null,
-      processlessAt: null,
-      claimStatus: 'released',
-      unreconciled: false,
-      lastRenewedAt: args.now,
-      handoffOperationId: null,
-      deathEvidence: adjudication.evidence
-    })
-  }
-  const stage: AgentSessionHandoffStage =
-    adjudication.disposition === 'conflicted' ? 'manual-recovery' : adjudication.stage
-  return withLease(record, {
-    ...record.lease,
-    handoffStage: stage,
-    claimStatus:
-      adjudication.disposition === 'conflicted' ? 'conflicted' : record.lease.claimStatus,
-    unreconciled: false,
-    lastRenewedAt: args.now
   })
 }
 

@@ -15,7 +15,6 @@ const MAX_ID_LENGTH = 512
 const MAX_PROMPT_BYTES = 256 * 1024
 const MAX_BLOCKS = 64
 const MAX_OPTION_LABEL = 512
-const MAX_QUESTION_ANSWER_BYTES = 16 * 1024
 
 export const SessionId = z
   .string()
@@ -99,7 +98,7 @@ export const CreateIntentParams = z
   .object({
     envelope: MutationEnvelope,
     worktree: Identifier('Invalid worktree selector'),
-    agent: z.enum(['claude', 'codex'])
+    agent: z.literal('codex')
   })
   .strict()
 
@@ -108,7 +107,7 @@ export const CreateParams = z.union([AttachParams, CreateIntentParams])
 export const CreateSupportParams = z
   .object({
     worktree: Identifier('Invalid worktree selector'),
-    agent: z.enum(['claude', 'codex'])
+    agent: z.literal('codex')
   })
   .strict()
 
@@ -159,11 +158,7 @@ export const RespondParams = z
     itemId: Identifier('Invalid item id'),
     /** Compare-and-set: the revision the client had on screen. */
     expectedRevision: z.number().int().positive(),
-    optionId: z
-      .string()
-      .min(1, 'Invalid option id')
-      .max(MAX_QUESTION_ANSWER_BYTES, 'Invalid option id')
-      .refine((value) => value === value.trim(), 'Invalid option id')
+    optionId: Identifier('Invalid option id')
   })
   .strict()
 
@@ -176,6 +171,13 @@ export const SetOptionParams = z
   .strict()
 
 export const OptionsParams = z.object({ sessionId: SessionId }).strict()
+
+/** One surface's claim on one session. The id names the surface, not the client: two chat views
+ *  looking at the same session are two holders, and either leaving must not release
+ *  the other's. */
+export const HoldParams = z
+  .object({ sessionId: SessionId, holderId: Identifier('Invalid holder id') })
+  .strict()
 
 export const HistoryParams = z
   .object({
@@ -197,13 +199,5 @@ export const UnsubscribeParams = z
   })
   .strict()
 
-export const HandoffParams = z
-  .object({
-    envelope: MutationEnvelope,
-    direction: z.enum(['to-tui', 'to-native']),
-    mode: z.enum(['now', 'after-turn', 'stop-turn']),
-    action: z.enum(['start', 'cancel-queued', 'retry', 'recover']).optional()
-  })
-  .strict()
-
+/** Read-only owner classification retained for restart safety; mutation handoff is separate. */
 export const HandoffStatusParams = z.object({ sessionId: SessionId }).strict()

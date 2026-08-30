@@ -11,12 +11,12 @@ import type {
   openCodexAppServerConnection
 } from './codex-app-server-connection'
 import type { StructuredAgentSessionEventSink } from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
-import { CodexAppServerUnsupportedError } from './codex-app-server-session'
 import { CODEX_SPAWN_TOKEN_ENV } from './codex-structured-owner-identity'
 import { encodeCodexQuestionOptionId } from './codex-structured-prompt-replies'
 import {
   CodexStructuredSessionAdapter,
   type CodexStructuredLaunch,
+  type CodexStructuredSessionAdapterDeps,
   type CodexStructuredSessionEvent
 } from './codex-structured-session-adapter'
 
@@ -79,6 +79,7 @@ function fakeCodex(routes: Record<string, Route> = {}): {
       close: async () => {
         connection.closeCount += 1
         connection.closed = true
+        return true
       }
     }
     connections.push(connection)
@@ -100,7 +101,10 @@ function fakeCodex(routes: Record<string, Route> = {}): {
 function adapterFor(
   codex: ReturnType<typeof fakeCodex>,
   launch: Partial<CodexStructuredLaunch> = {},
-  events: CodexStructuredSessionEvent[] = []
+  events: CodexStructuredSessionEvent[] = [],
+  processControl: Partial<
+    Pick<CodexStructuredSessionAdapterDeps, 'captureTurnProcesses' | 'terminateTurnProcesses'>
+  > = {}
 ): CodexStructuredSessionAdapter {
   return new CodexStructuredSessionAdapter({
     resolveLaunch: async () => ({
@@ -114,7 +118,10 @@ function adapterFor(
     onEvent: (event) => events.push(event),
     openConnection: codex.openConnection,
     readProcessStartTime: async () => 1_700_000_000_000,
-    now: () => 1_700_000_000_500
+    captureTurnProcesses: async () => ({ platform: 'win32', identities: new Map() }),
+    terminateTurnProcesses: async () => true,
+    now: () => 1_700_000_000_500,
+    ...processControl
   })
 }
 
@@ -143,6 +150,7 @@ describe('CodexStructuredSessionAdapter.acquire', () => {
       [CODEX_SPAWN_TOKEN_ENV]: 'spawn-9',
       CODEX_HOME: '/codex/home'
     })
+    expect(codex.connections[0].launch.cwd).toBe('/work/repo')
     expect(codex.connections[0].calls[0]).toEqual({
       method: 'thread/start',
       params: { cwd: '/work/repo' }
@@ -164,7 +172,10 @@ describe('CodexStructuredSessionAdapter.acquire', () => {
 
   it('resumes the thread the durable handle chain names, not the client one', async () => {
     const codex = fakeCodex()
-    const adapter = adapterFor(codex, { resumeThreadId: 'thread-proven' })
+    const adapter = adapterFor(codex, {
+      resumeThreadId: 'thread-proven',
+      resumePath: '/rollouts/thread-proven.jsonl'
+    })
 
     const acquisition = await adapter.acquire({
       identity: identityFor('session-1'),
@@ -174,7 +185,11 @@ describe('CodexStructuredSessionAdapter.acquire', () => {
 
     expect(codex.connections[0].calls[0]).toEqual({
       method: 'thread/resume',
-      params: { threadId: 'thread-proven', cwd: '/work/repo' }
+      params: {
+        threadId: 'thread-proven',
+        cwd: '/work/repo',
+        path: '/rollouts/thread-proven.jsonl'
+      }
     })
     expect(acquisition.link.origin).toBe('resumed')
     expect(acquisition.link.handle).toEqual({ provider: 'codex', threadId: 'thread-proven' })
@@ -564,58 +579,6 @@ describe('CodexStructuredSessionAdapter.dispatch', () => {
   })
 })
 
-describe('CodexStructuredSessionAdapter.cancelTurn', () => {
-  it('confirms an interrupt Codex acknowledged', async () => {
-    const codex = fakeCodex()
-    const adapter = await acquired(codex)
-
-    expect(
-      await adapter.cancelTurn({ sessionId: 'session-1', turnId: 'turn-1', fence: 7 })
-    ).toEqual({ cancelled: true })
-    expect(codex.connections[0].calls[1]).toEqual({
-      method: 'turn/interrupt',
-      params: { threadId: THREAD_ID, turnId: 'turn-1' }
-    })
-  })
-
-  it('reports not-cancelled when Codex declines or lacks the method', async () => {
-    const declined = fakeCodex({
-      'turn/interrupt': () => {
-        throw new CodexAppServerRequestError('turn/interrupt', -32602, 'no such turn')
-      }
-    })
-    const absent = fakeCodex({
-      'turn/interrupt': () => {
-        throw new CodexAppServerUnsupportedError('no turn/interrupt')
-      }
-    })
-
-    expect(
-      await (
-        await acquired(declined)
-      ).cancelTurn({ sessionId: 'session-1', turnId: 'turn-1', fence: 7 })
-    ).toEqual({ cancelled: false })
-    expect(
-      await (
-        await acquired(absent)
-      ).cancelTurn({ sessionId: 'session-1', turnId: 'turn-1', fence: 7 })
-    ).toEqual({ cancelled: false })
-  })
-
-  it('rethrows an unsettled interrupt so the turn is not shown as cancelled', async () => {
-    const codex = fakeCodex({
-      'turn/interrupt': () => {
-        throw new Error('codex app-server turn/interrupt exceeded 30000ms')
-      }
-    })
-    const adapter = await acquired(codex)
-
-    await expect(
-      adapter.cancelTurn({ sessionId: 'session-1', turnId: 'turn-1', fence: 7 })
-    ).rejects.toThrow('exceeded 30000ms')
-  })
-})
-
 describe('CodexStructuredSessionAdapter prompts', () => {
   function askApproval(codex: ReturnType<typeof fakeCodex>): void {
     codex.connections[0].handlers.onServerRequest?.({
@@ -812,12 +775,17 @@ describe('CodexStructuredSessionAdapter lifecycle', () => {
     ).rejects.toThrow('no live codex app-server for session session-1')
   })
 
-  it('drops a session whose child died and reports it once', async () => {
+  it('retains ownership until a child exit is proven and reports it once', async () => {
     const codex = fakeCodex()
     const events: CodexStructuredSessionEvent[] = []
     const adapter = await acquired(codex, {}, events)
 
-    codex.connections[0].handlers.onExit?.(new Error('codex app-server connection ended'))
+    const connection = codex.connections[0]
+    connection.close = async () => {
+      connection.closeCount += 1
+      return false
+    }
+    connection.handlers.onExit?.(new Error('codex app-server connection ended'))
 
     expect(events.at(-1)).toEqual({
       type: 'ended',
@@ -832,7 +800,11 @@ describe('CodexStructuredSessionAdapter lifecycle', () => {
         fence: 7
       })
     ).rejects.toThrow('no live codex app-server')
-    expect(await adapter.historyFilePath({ identity: identityFor('session-1') })).toBeNull()
+    expect(await adapter.historyFilePath({ identity: identityFor('session-1') })).toBe(
+      '/rollouts/abc.jsonl'
+    )
+    await expect(adapter.closeSession('session-1')).resolves.toBe(false)
+    expect(events.filter((event) => event.type === 'ended')).toHaveLength(1)
   })
 
   it('keeps the live session when a child it already replaced dies', async () => {

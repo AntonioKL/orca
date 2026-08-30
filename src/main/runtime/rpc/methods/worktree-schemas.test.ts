@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { WorktreeActivate, WorktreeCreate, WorktreeSet } from './worktree-schemas'
+import { WorktreeCreate } from './worktree-create-schemas'
+import { WorktreeActivate, WorktreeSet } from './worktree-schemas'
 
 describe('worktree RPC schemas', () => {
   it('validates additive navigation intent', () => {
@@ -109,19 +110,32 @@ describe('worktree RPC schemas', () => {
     const parsed = WorktreeSet.parse({ worktree: 'id:r1::/repos/wt', displayName: '' })
 
     expect(parsed.displayName).toBe('')
-    expect(Object.prototype.hasOwnProperty.call(parsed, 'displayName')).toBe(true)
+    expect(Object.hasOwn(parsed, 'displayName')).toBe(true)
   })
 
   it('still omits a display name that was never sent', () => {
     const parsed = WorktreeSet.parse({ worktree: 'id:r1::/repos/wt', comment: 'note' })
 
     expect(parsed.displayName).toBeUndefined()
-    expect(Object.prototype.hasOwnProperty.call(parsed, 'displayName')).toBe(false)
+    expect(Object.hasOwn(parsed, 'displayName')).toBe(false)
   })
 
   it('ignores a non-string display name rather than persisting it', () => {
     const parsed = WorktreeSet.parse({ worktree: 'id:r1::/repos/wt', displayName: 42 })
 
     expect(parsed.displayName).toBeUndefined()
+  })
+
+  it('parses optional GitHub PR suppression writes and clears', () => {
+    expect(
+      WorktreeSet.parse({ worktree: 'id:r1::/repos/wt', suppressedGitHubPR: 42 }).suppressedGitHubPR
+    ).toBe(42)
+    expect(
+      WorktreeSet.parse({ worktree: 'id:r1::/repos/wt', suppressedGitHubPR: null })
+        .suppressedGitHubPR
+    ).toBeNull()
+    expect(
+      WorktreeSet.safeParse({ worktree: 'id:r1::/repos/wt', suppressedGitHubPR: 0 }).success
+    ).toBe(false)
   })
 })

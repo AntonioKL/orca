@@ -3,9 +3,6 @@ import type { AgentJournalRenderItem } from '../../../../shared/agent-session-jo
 import type { AgentType } from '../../../../shared/agent-status-types'
 import type {
   AgentSessionMutationResult,
-  AgentSessionHandoffDirection,
-  AgentSessionHandoffMode,
-  AgentSessionHandoffResult,
   AgentSessionOptionResult,
   AgentSessionOptionsResult,
   AgentSessionPromptResult
@@ -21,17 +18,16 @@ import {
   createStructuredAgentSessionOptionState,
   structuredAgentSessionOptionSnapshot
 } from '../../../../shared/structured-agent-session-options'
-import {
-  activeStructuredAgentSessionTurnId,
-  projectStructuredItemsToNativeChat
-} from '../../../../shared/structured-agent-session-projection'
+import { activeStructuredAgentSessionTurnId } from '../../../../shared/structured-agent-session-projection'
 import type { RuntimeClientTarget } from '@/runtime/runtime-rpc-client'
 import { callStructuredAgentSession } from '@/runtime/structured-agent-session-client'
 import {
   structuredSessionOperationId,
   useStructuredAgentSessionOutbox
 } from './use-structured-agent-session-outbox'
+import { useStructuredAgentSessionHold } from './use-structured-agent-session-hold'
 import { useStructuredAgentSessionRead } from './use-structured-agent-session-read'
+import { projectStructuredAgentSessionMessages } from './structured-agent-session-message-projection'
 
 export type StructuredPromptItem = AgentJournalRenderItem & {
   body: Extract<AgentJournalRenderItem['body'], { kind: 'approval' | 'question' }>
@@ -41,9 +37,22 @@ export function useStructuredAgentSession(args: {
   sessionId: string
   target: RuntimeClientTarget
   agent: AgentType
+  isVisible: boolean
 }) {
-  const { agent, sessionId, target } = args
-  const { state, loadingOlder, loadOlder } = useStructuredAgentSessionRead({ sessionId, target })
+  const { agent, isVisible, sessionId, target } = args
+  // Declared first: the hold is what gives a restored session its provider child back, and the
+  // read below is useless for sending until it lands.
+  useStructuredAgentSessionHold({
+    sessionId,
+    target,
+    surface: 'desktop-chat',
+    enabled: isVisible
+  })
+  const { state, loadingOlder, loadOlder } = useStructuredAgentSessionRead({
+    sessionId,
+    target,
+    isVisible
+  })
   const stateRef = useRef(state)
   const [writeError, setWriteError] = useState<string | null>(null)
   const operationIds = useRef(new Map<string, string>())
@@ -128,7 +137,7 @@ export function useStructuredAgentSession(args: {
   )
 
   useEffect(() => {
-    if (!optionCatalog) {
+    if (!isVisible || !optionCatalog) {
       return
     }
     let stale = false
@@ -148,7 +157,7 @@ export function useStructuredAgentSession(args: {
     return () => {
       stale = true
     }
-  }, [optionCatalog, sessionId, state.fence, target])
+  }, [isVisible, optionCatalog, sessionId, state.fence, target])
 
   const optionSnapshot = useMemo(
     () => structuredAgentSessionOptionSnapshot(optionState),
@@ -212,16 +221,11 @@ export function useStructuredAgentSession(args: {
   )
   const turnId = activeStructuredAgentSessionTurnId(state.items)
   return {
-    messages: [
-      ...projectStructuredItemsToNativeChat(state.items),
-      ...outboxController.outbox.map((entry) => ({
-        id: entry.clientMessageId,
-        role: 'user' as const,
-        source: 'transcript' as const,
-        timestamp: entry.queuedAt,
-        blocks: entry.body.blocks
-      }))
-    ],
+    messages: projectStructuredAgentSessionMessages(
+      state.items,
+      outboxController.outbox,
+      state.submissions
+    ),
     status: state.status,
     error: state.error ?? writeError ?? outboxController.error,
     hasOlder: state.hasOlder,
@@ -232,7 +236,6 @@ export function useStructuredAgentSession(args: {
     blockedClientMessageId: outboxController.blockedClientMessageId,
     send: outboxController.send,
     retry: outboxController.retry,
-    discard: outboxController.discard,
     isWorking: turnId !== null,
     turnId,
     cancel: (turnId: string) => mutate('agentSession.cancel', 'agentSession.cancel', { turnId }),
@@ -246,18 +249,6 @@ export function useStructuredAgentSession(args: {
       ),
     optionSnapshot,
     optionSurface,
-    setStructuredOption,
-    requestHandoff: (
-      direction: AgentSessionHandoffDirection,
-      mode: AgentSessionHandoffMode,
-      action: 'start' | 'cancel-queued' | 'retry' | 'recover' = 'start'
-    ) =>
-      mutate<AgentSessionHandoffResult>(
-        'agentSession.requestHandoff',
-        'agentSession.requestHandoff',
-        { direction, mode, action },
-        action === 'retry' ? stateRef.current.handoff?.operationId : null
-      ),
-    handoff: state.handoff
+    setStructuredOption
   }
 }

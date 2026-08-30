@@ -9,7 +9,7 @@ import { recordAgentSessionProviderHandle } from './agent-session-provider-handl
 function resumedLink(fence: number): AgentSessionProviderHandleLink {
   return {
     linkId: 'link-2',
-    handle: { provider: 'claude', sessionId: 'session-alpha-1', leafUuid: 'leaf-2' },
+    handle: { provider: 'claude', sessionId: 'provider-session-alpha-1', leafUuid: 'leaf-2' },
     origin: 'resumed',
     mintedAtFence: fence,
     observedAt: 4_000

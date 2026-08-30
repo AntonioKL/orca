@@ -1,16 +1,33 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { RuntimeMobileSessionTabsResult } from '../../../shared/runtime-types'
-import type { Tab, WorkspaceSessionState } from '../../../shared/types'
+import type { Tab } from '../../../shared/tab-types'
+import type { WorkspaceSessionState } from '../../../shared/workspace-session-state-types'
 import { buildPersistedUnifiedTabSessionData } from '../lib/workspace-session-unified-tabs'
 import { buildHydratedTabState } from '../store/slices/tabs-hydration'
-import { projectLocalStructuredSessionTabs } from './local-structured-session-tabs-sync'
-import { applyWebSessionTabsSnapshot, type WebSessionTabsSyncState } from './web-session-tabs-sync'
+import {
+  applyLocalStructuredSessionTabSnapshots,
+  projectLocalStructuredSessionTabs
+} from './local-structured-session-tabs-sync'
+import {
+  applyWebSessionTabsSnapshot,
+  resetWebSessionTabsSnapshotFreshnessForTests,
+  type WebSessionTabsSyncState
+} from './web-session-tabs-sync'
+import {
+  recordWebSessionFocusIntent,
+  resetWebSessionFocusIntentForTests
+} from './web-session-focus-intent'
 
 const WORKTREE_ID = 'repo-1::worktree-1'
 const TERMINAL_ID = 'terminal-1'
 const STRUCTURED_ID = 'structured-agent-session-codex-1'
 const PRIMARY_GROUP = 'primary-group'
 const SECONDARY_GROUP = 'secondary-group'
+
+afterEach(() => {
+  resetWebSessionFocusIntentForTests()
+  resetWebSessionTabsSnapshotFreshnessForTests()
+})
 
 function createSnapshot(): WebSessionTabsSyncState {
   const tabs: Tab[] = [
@@ -258,4 +275,184 @@ describe('local structured session tab projection', () => {
 
     expectExactSplit(hydrated)
   })
+
+  it('repairs stale legacy active pointers when restart republishes the native tab', () => {
+    const state = createSnapshot()
+    const restartedState: WebSessionTabsSyncState = {
+      ...state,
+      activeTabId: TERMINAL_ID,
+      activeTabIdByWorktree: { [WORKTREE_ID]: TERMINAL_ID },
+      activeTabType: 'terminal',
+      activeTabTypeByWorktree: { [WORKTREE_ID]: 'terminal' },
+      activeGroupIdByWorktree: { [WORKTREE_ID]: SECONDARY_GROUP }
+    }
+    const snapshot = {
+      worktree: WORKTREE_ID,
+      publicationEpoch: 'structured:restart-1',
+      snapshotVersion: 1,
+      activeGroupId: SECONDARY_GROUP,
+      activeTabId: 'agent-session:codex-1',
+      activeTabType: 'agent-session' as const,
+      tabGroups: [
+        {
+          id: SECONDARY_GROUP,
+          activeTabId: 'agent-session:codex-1',
+          tabOrder: ['agent-session:codex-1']
+        }
+      ],
+      tabs: [
+        {
+          type: 'agent-session' as const,
+          id: 'agent-session:codex-1',
+          title: 'Codex Chat',
+          sessionId: 'codex-1',
+          agent: 'codex' as const,
+          isActive: true
+        }
+      ]
+    } satisfies RuntimeMobileSessionTabsResult
+
+    const projected = projectLocalStructuredSessionTabs(snapshot)
+    const patch = applyWebSessionTabsSnapshot(
+      restartedState,
+      projected,
+      'local-structured-session',
+      1_700_000_000_000,
+      { preserveLocalLayout: true }
+    )
+    const applied = { ...restartedState, ...patch } as WebSessionTabsSyncState
+
+    expect(applied.activeTabTypeByWorktree[WORKTREE_ID]).toBe('agent-session')
+    expect(applied.activeTabIdByWorktree[WORKTREE_ID]).toBe(STRUCTURED_ID)
+  })
+
+  it('honors the focus intent for a newly published local structured tab', () => {
+    const initial = createSnapshot()
+    const state: WebSessionTabsSyncState = {
+      ...initial,
+      activeGroupIdByWorktree: { [WORKTREE_ID]: PRIMARY_GROUP },
+      activeTabId: TERMINAL_ID,
+      activeTabIdByWorktree: { [WORKTREE_ID]: TERMINAL_ID },
+      activeTabType: 'terminal',
+      activeTabTypeByWorktree: { [WORKTREE_ID]: 'terminal' },
+      groupsByWorktree: {
+        [WORKTREE_ID]: initial.groupsByWorktree[WORKTREE_ID]!.map((group) =>
+          group.id === PRIMARY_GROUP ? { ...group, activeTabId: TERMINAL_ID } : group
+        )
+      }
+    }
+    const snapshot = {
+      worktree: WORKTREE_ID,
+      publicationEpoch: 'structured:epoch-1',
+      snapshotVersion: 1,
+      activeGroupId: SECONDARY_GROUP,
+      activeTabId: 'agent-session:codex-1',
+      activeTabType: 'agent-session' as const,
+      tabGroups: [
+        { id: PRIMARY_GROUP, activeTabId: TERMINAL_ID, tabOrder: [TERMINAL_ID] },
+        {
+          id: SECONDARY_GROUP,
+          activeTabId: 'agent-session:codex-1',
+          tabOrder: ['agent-session:codex-1']
+        }
+      ],
+      tabs: [
+        {
+          type: 'agent-session' as const,
+          id: 'agent-session:codex-1',
+          title: 'Codex Chat',
+          sessionId: 'codex-1',
+          agent: 'codex' as const,
+          isActive: true
+        }
+      ]
+    } satisfies RuntimeMobileSessionTabsResult
+
+    recordWebSessionFocusIntent(
+      { environmentId: 'local-structured-session' },
+      WORKTREE_ID,
+      'agent-session:codex-1',
+      undefined,
+      TERMINAL_ID
+    )
+    const patch = applyWebSessionTabsSnapshot(
+      state,
+      snapshot,
+      'local-structured-session',
+      1_700_000_000_000,
+      { preserveLocalLayout: true }
+    )
+    const applied = { ...state, ...patch } as WebSessionTabsSyncState
+
+    expect(applied.activeTabIdByWorktree[WORKTREE_ID]).toBe(STRUCTURED_ID)
+    expect(applied.activeTabTypeByWorktree[WORKTREE_ID]).toBe('agent-session')
+    expect(applied.groupsByWorktree[WORKTREE_ID]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: SECONDARY_GROUP, activeTabId: STRUCTURED_ID })
+      ])
+    )
+  })
+
+  it('rejects a reordered list reply after a newer subscription frame', () => {
+    const stale = structuredInventory('epoch-a', 7, 'stale-session')
+    const fresh = structuredInventory('epoch-a', 8, 'fresh-session')
+    const afterStale = applyLocalStructuredSessionTabSnapshots(createSnapshot(), [stale])
+    const afterFresh = applyLocalStructuredSessionTabSnapshots(afterStale, [fresh])
+    const afterReorderedList = applyLocalStructuredSessionTabSnapshots(afterFresh, [stale])
+
+    expect(afterReorderedList).toBe(afterFresh)
+    expect(afterReorderedList.unifiedTabsByWorktree[WORKTREE_ID]).toEqual(
+      expect.arrayContaining([expect.objectContaining({ entityId: 'fresh-session' })])
+    )
+    expect(afterReorderedList.unifiedTabsByWorktree[WORKTREE_ID]).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ entityId: 'stale-session' })])
+    )
+  })
+
+  it('rejects same-version replay but accepts a new owner epoch', () => {
+    const first = structuredInventory('epoch-a', 8, 'session-a')
+    const afterFirst = applyLocalStructuredSessionTabSnapshots(createSnapshot(), [first])
+    const replayed = applyLocalStructuredSessionTabSnapshots(afterFirst, [first])
+    const restarted = applyLocalStructuredSessionTabSnapshots(replayed, [
+      structuredInventory('epoch-b', 1, 'session-b')
+    ])
+
+    expect(replayed).toBe(afterFirst)
+    expect(restarted).not.toBe(replayed)
+    expect(restarted.unifiedTabsByWorktree[WORKTREE_ID]).toEqual(
+      expect.arrayContaining([expect.objectContaining({ entityId: 'session-b' })])
+    )
+  })
 })
+
+function structuredInventory(
+  publicationEpoch: string,
+  snapshotVersion: number,
+  sessionId: string
+): RuntimeMobileSessionTabsResult {
+  return {
+    worktree: WORKTREE_ID,
+    publicationEpoch,
+    snapshotVersion,
+    activeGroupId: SECONDARY_GROUP,
+    activeTabId: `agent-session:${sessionId}`,
+    activeTabType: 'agent-session',
+    tabGroups: [
+      {
+        id: SECONDARY_GROUP,
+        activeTabId: `agent-session:${sessionId}`,
+        tabOrder: [`agent-session:${sessionId}`]
+      }
+    ],
+    tabs: [
+      {
+        type: 'agent-session',
+        id: `agent-session:${sessionId}`,
+        title: 'Codex Chat',
+        sessionId,
+        agent: 'codex',
+        isActive: true
+      }
+    ]
+  }
+}

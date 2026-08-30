@@ -15,6 +15,7 @@ import type { AgentSessionHandleProvider } from '../../../shared/agent-session-p
 import type {
   AgentSessionAccountHome,
   AgentSessionExecutionLocation,
+  AgentSessionLaunchArgs,
   AgentSessionLaunchEnv,
   AgentSessionOwnerRuntimeKind,
   AgentSessionRecord
@@ -38,6 +39,7 @@ import {
   type AgentSessionJournalRecovery
 } from './agent-session-journal-recovery'
 import type { StructuredAgentSessionAdapter } from './structured-agent-session-adapter'
+import { structuredAgentSessionRefusalMessage } from './structured-agent-session-refusal-message'
 
 /**
  * Everything a client may declare about the session it wants. Deliberately no
@@ -58,10 +60,11 @@ export type AgentSessionAttachParams = {
 
 /** Host-supplied half of the reservation. */
 export type AgentSessionAttachAuthority = {
-  spawnToken: string
+  spawnToken: string | (() => string)
   claimKeyId: string
   handoffOperationId: string | null
   probe: AgentSessionOwnerProbe
+  launchArgs?: AgentSessionLaunchArgs
   launchEnv?: AgentSessionLaunchEnv
 }
 
@@ -179,6 +182,7 @@ export function reserveRequestFor(input: {
     location: params.location,
     provider: params.provider,
     accountHome: params.accountHome,
+    ...(authority.launchArgs ? { launchArgs: authority.launchArgs } : {}),
     ...(authority.launchEnv ? { launchEnv: authority.launchEnv } : {}),
     runtimeKind: params.runtimeKind,
     expectedFence: params.envelope.expectedRuntimeFence,
@@ -199,15 +203,20 @@ export function reserveRequestFor(input: {
  *  known set is a defect, not a client error, and is rethrown. */
 export function classifyStoreFailure(
   error: unknown,
-  currentFence: number | null
+  currentFence: number | null,
+  record: AgentSessionRecord | null = null
 ): AgentSessionWireRefusal {
-  const code = error instanceof Error ? error.message : String(error)
-  if (!(AGENT_SESSION_WIRE_REFUSAL_CODES as readonly string[]).includes(code)) {
+  const rawCode = error instanceof Error ? error.message : String(error)
+  if (!(AGENT_SESSION_WIRE_REFUSAL_CODES as readonly string[]).includes(rawCode)) {
     throw error
   }
+  const code = rawCode as AgentSessionWireRefusalCode
   return {
-    code: code as AgentSessionWireRefusalCode,
-    message: `The session store refused this call: ${code}.`,
+    code,
+    // Why: a latched session is exactly where a bare store code strands the user.
+    message:
+      structuredAgentSessionRefusalMessage(code, record) ??
+      `The session store refused this call: ${code}.`,
     ...(code === 'agent_session_checkpoint_stale' && currentFence !== null ? { currentFence } : {})
   }
 }

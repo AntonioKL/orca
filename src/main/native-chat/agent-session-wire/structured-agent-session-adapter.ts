@@ -32,6 +32,13 @@ export class AgentSessionAcquisitionRefusal extends Error {
   }
 }
 
+export class AgentSessionAcquisitionExitUnprovenError extends Error {
+  constructor(cause: unknown) {
+    super('agent_session_acquisition_exit_unproven', { cause })
+    this.name = 'AgentSessionAcquisitionExitUnprovenError'
+  }
+}
+
 /** What a reservation turns into once something is actually running under it:
  *  the process the host can probe, and the provider handle it was minted with. */
 export type AgentSessionAcquisition = {
@@ -83,8 +90,9 @@ export type StructuredAgentSessionAdapter = {
    *  token the lease was reserved under and the fence the handle must be minted
    *  at — the store rejects a link minted at any other fence. */
   acquire(input: StructuredAgentSessionAcquireInput): Promise<AgentSessionAcquisition>
-  /** Reaps an acquired provider when the host cannot commit or prove its lease. */
-  releaseAcquisition?(input: { sessionId: string }): Promise<void>
+  /** Reaps an acquired provider when the host cannot commit or prove its lease.
+   *  Returns true only after provider child exit is proven. */
+  releaseAcquisition?(input: { sessionId: string }): Promise<boolean>
   dispatch(input: {
     sessionId: string
     clientMessageId: string
@@ -115,5 +123,27 @@ export type StructuredAgentSessionAdapter = {
    *  resolver discover it from the provider session id. */
   historyFilePath?(input: { identity: AgentSessionJournalIdentity }): Promise<string | null>
   /** Gracefully stops the structured owner after its event stream is drained. */
-  closeSession?(sessionId: string): Promise<void>
+  /** Returns true only after the provider child exit is proven. */
+  closeSession?(sessionId: string): Promise<boolean>
+  /** Stops a provider child for teardown without requiring a future-resume cursor. */
+  disposeSession?(sessionId: string): Promise<boolean>
+}
+
+export async function rethrowAfterAgentSessionAcquisitionCleanup(
+  adapter: Pick<StructuredAgentSessionAdapter, 'releaseAcquisition'>,
+  sessionId: string,
+  cause: unknown
+): Promise<never> {
+  let released: boolean
+  try {
+    released = (await adapter.releaseAcquisition?.({ sessionId })) === true
+  } catch (cleanupError) {
+    throw new AgentSessionAcquisitionExitUnprovenError(
+      new AggregateError([cause, cleanupError], 'agent session acquisition cleanup failed')
+    )
+  }
+  if (released) {
+    throw cause
+  }
+  throw new AgentSessionAcquisitionExitUnprovenError(cause)
 }

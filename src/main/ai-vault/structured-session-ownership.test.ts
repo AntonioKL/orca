@@ -27,22 +27,6 @@ describe('structured AI Vault ownership', () => {
     })
   })
 
-  it('keeps Claude rows hidden until provider support is negotiated', () => {
-    installOwnership({ provider: 'claude', providerSessionId: 'claude-owned-session' })
-    const result = listResult({
-      agent: 'claude',
-      sessionId: 'claude-owned-session',
-      filePath: '/sessions/claude-owned-session.jsonl',
-      resumeCommand: 'claude --resume claude-owned-session'
-    })
-
-    expect(
-      projectStructuredAiVaultSessions(result, true, (provider) => provider === 'codex').sessions
-    ).toEqual([])
-    expect(projectStructuredAiVaultSessions(result, true, () => true).sessions[0]).toMatchObject({
-      structuredSession: { sessionId: 'session-alpha', workspaceId: 'workspace-1' }
-    })
-  })
   it('derives typed refusals from the single writer predicate for live and proving leases', async () => {
     installOwnership()
     expect(() =>
@@ -68,6 +52,35 @@ describe('structured AI Vault ownership', () => {
       )
     ).rejects.toThrow('agent_session_ownership_unknown')
   })
+
+  it.each([
+    `codex resume --last`,
+    `claude --resume`,
+    `claude -r`,
+    `claude --continue`,
+    `claude -c`,
+    // `--continue` takes no session id, so the trailing token is a prompt —
+    // reading it as a target would admit a writer onto the owned session.
+    `claude --continue "keep going"`,
+    `claude -c 019fd532-7c11-7a90-b6de-4e1a2c3d5f61`
+  ])('refuses resume commands without a provably different target: %s', async (command) => {
+    installOwnership(command.startsWith('claude') ? { provider: 'claude' } : {})
+
+    await expect(
+      assertLegacyAiVaultResumeCommandAllowed(command, async () => undefined)
+    ).rejects.toThrow('agent_session_conflict')
+  })
+
+  it('allows a resume command that names a different provider session', async () => {
+    installOwnership()
+
+    await expect(
+      assertLegacyAiVaultResumeCommandAllowed(
+        'codex resume 019fd532-7c11-7a90-b6de-4e1a2c3d5f61',
+        async () => undefined
+      )
+    ).resolves.toBeUndefined()
+  })
 })
 
 function installOwnership(overrides: Partial<StructuredProviderSessionOwnership> = {}): void {
@@ -92,10 +105,7 @@ function installOwnership(overrides: Partial<StructuredProviderSessionOwnership>
             providerHandleChain: [
               {
                 ...record.providerHandleChain[0]!,
-                handle:
-                  ownership.provider === 'codex'
-                    ? { provider: 'codex', threadId: ownership.providerSessionId }
-                    : { provider: 'claude', sessionId: ownership.providerSessionId }
+                handle: { provider: ownership.provider, threadId: ownership.providerSessionId }
               }
             ],
             lease: { ...ownership.lease, sessionId: ownership.sessionId }
@@ -106,7 +116,7 @@ function installOwnership(overrides: Partial<StructuredProviderSessionOwnership>
   } as never)
 }
 
-function listResult(overrides: Partial<AiVaultSession> = {}): AiVaultListResult {
+function listResult(): AiVaultListResult {
   const session: AiVaultSession = {
     id: `local:codex:${PROVIDER_SESSION}`,
     executionHostId: 'local',
@@ -127,8 +137,7 @@ function listResult(overrides: Partial<AiVaultSession> = {}): AiVaultListResult 
     queuedMessageCount: 0,
     subagentTranscriptCount: 0,
     resumeCommand: `codex resume '${PROVIDER_SESSION}'`,
-    subagent: null,
-    ...overrides
+    subagent: null
   }
   return { sessions: [session], issues: [], scannedAt: '2026-08-11T00:00:00.000Z' }
 }

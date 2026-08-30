@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto'
-import type { AgentSessionProviderHandleLink } from '../../../shared/agent-session-provider-handle'
 import type { AgentSessionHandoffRequest } from '../../../shared/agent-session-wire'
 import {
   abandonStoredAgentSessionHandoffAttempt,
@@ -7,6 +6,8 @@ import {
   rollbackStoredAgentSessionHandoffPreparation,
   stopStoredAgentSessionOwnerForHandoff
 } from '../../runtime/agent-session-handoff-record-transitions'
+import { AgentSessionAcquisitionExitUnprovenError } from './structured-agent-session-adapter'
+import { markStructuredHandoffManualRecovery } from './structured-agent-session-handoff-flow-context'
 import type { StructuredAgentSessionHandoffFlowContext } from './structured-agent-session-handoff-types'
 
 export async function handoffStructuredSessionToNative(
@@ -33,8 +34,16 @@ export async function handoffStructuredSessionToNative(
       if (!tuiAlreadyExited) {
         owner = await deps.transport!.reproveTuiOwner({ record, owner })
         context.retainOwner(sessionId, owner)
+        if (owner.link.origin === 'resumed') {
+          await deps.persistTuiProviderHandle?.({ sessionId, link: owner.link, now: deps.now() })
+        }
       }
       transcriptPath = owner.transcriptPath ?? transcriptPath
+      if (owner.link.handle.provider === 'codex' && !transcriptPath) {
+        throw new Error(
+          'The Codex terminal has not written a durable rollout yet. Send a prompt before switching to structured chat.'
+        )
+      }
       context.setStatus(sessionId, {
         owner: 'tui',
         direction: 'to-native',
@@ -44,17 +53,9 @@ export async function handoffStructuredSessionToNative(
         terminal: owner.terminal,
         hostLabel: deps.transport?.hostLabel
       })
-      const persistHandle = async (link: AgentSessionProviderHandleLink) => {
-        await deps.store.recordProviderHandle({
-          sessionId,
-          fence: record.lease.runtimeFence,
-          link,
-          now: deps.now()
-        })
-      }
       const exited = deps.transport!.closeTuiOwner
-        ? await deps.transport!.closeTuiOwner(owner, persistHandle)
-        : await deps.transport!.waitForTuiExit(owner, persistHandle)
+        ? await deps.transport!.closeTuiOwner(owner)
+        : await deps.transport!.waitForTuiExit(owner)
       transcriptPath = exited.transcriptPath ?? owner.transcriptPath
     } catch (error) {
       const current = context.requireRecord(sessionId)
@@ -87,11 +88,13 @@ export async function handoffStructuredSessionToNative(
     throw new Error('agent_session_operation_conflict')
   }
   deps.stopTuiHistoryCatchup?.(sessionId)
-  await deps.importTuiHistory({
-    sessionId,
-    fence: record.lease.runtimeFence,
-    ...(transcriptPath ? { transcriptPath } : {})
-  })
+  if (owner?.historySource !== 'provider-resume') {
+    await deps.importTuiHistory({
+      sessionId,
+      fence: record.lease.runtimeFence,
+      ...(transcriptPath ? { transcriptPath } : {})
+    })
+  }
   const spawnToken = randomUUID()
   record = await reserveStoredAgentSessionHandoffOwner(deps.store, {
     sessionId,
@@ -110,6 +113,10 @@ export async function handoffStructuredSessionToNative(
       spawnToken
     })
   } catch (error) {
+    if (error instanceof AgentSessionAcquisitionExitUnprovenError) {
+      await markStructuredHandoffManualRecovery(context, sessionId, operationId)
+      throw error
+    }
     const current = context.requireRecord(sessionId)
     if (current.lease.handoffStage === 'new-owner-proving') {
       await abandonStoredAgentSessionHandoffAttempt(deps.store, {
@@ -123,6 +130,12 @@ export async function handoffStructuredSessionToNative(
     throw error
   }
   context.releaseOwner(sessionId)
+  deps.transport?.revealNativeSession?.({
+    workspaceId: record.location.workspaceId,
+    sessionId,
+    agent: record.provider,
+    ...(owner?.adoptedTerminal ? { adoptedTerminal: true } : {})
+  })
   context.setStatus(sessionId, {
     owner: 'native',
     direction: null,

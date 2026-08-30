@@ -8,12 +8,11 @@
 import { AGENT_SESSION_JOURNAL_SCHEMA_VERSION } from '../../../shared/agent-session-journal-types'
 import type { AgentSessionProviderHandle } from '../../../shared/agent-session-journal-types'
 import { compactJournal } from './journal-compaction'
-import {
-  applyJournalRow,
-  createJournalReducerState,
-  type JournalReducerState
-} from './journal-reducer'
+import { applyJournalRow, createJournalReducerState } from './journal-reducer'
 import type { AgentJournalEpochReason, JournalRow } from './journal-row-schema'
+import { journalRowByteLength } from './journal-row-schema'
+import type { JournalLoad } from './journal-open'
+import { DEFAULT_JOURNAL_PAYLOAD_LIMITS } from './journal-payload-bounds'
 
 export async function publishNewEpoch(input: {
   journalDir: string
@@ -23,7 +22,7 @@ export async function publishNewEpoch(input: {
   reason: AgentJournalEpochReason
   fence: number
   now: number
-}): Promise<{ state: JournalReducerState; row: JournalRow }> {
+}): Promise<JournalLoad> {
   const row: JournalRow = {
     kind: 'epoch',
     reason: input.reason,
@@ -40,9 +39,18 @@ export async function publishNewEpoch(input: {
     state,
     tailRows: [row],
     policy: { minTailRows: 1, retainTailMs: Number.POSITIVE_INFINITY },
-    now: input.now
+    now: input.now,
+    maxSessionBytes: DEFAULT_JOURNAL_PAYLOAD_LIMITS.maxSessionBytes
   })
   applyJournalRow(state, row)
   state.oldestSequence = 1
-  return { state, row }
+  return {
+    state,
+    tailRows: [row],
+    compactedThrough: 0,
+    readOnly: false,
+    corrupt: false,
+    malformedRows: 0,
+    sizeBytes: journalRowByteLength(row)
+  }
 }

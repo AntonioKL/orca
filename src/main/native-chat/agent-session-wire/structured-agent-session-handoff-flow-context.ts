@@ -52,6 +52,26 @@ export function requireStructuredHandoffRecord(
   return record
 }
 
+export async function markStructuredHandoffManualRecovery(
+  context: StructuredAgentSessionHandoffFlowContext,
+  sessionId: string,
+  _operationId: string
+): Promise<void> {
+  const record = context.requireRecord(sessionId)
+  await setStoredAgentSessionHandoffStage(context.deps.store, {
+    sessionId,
+    fence: record.lease.runtimeFence,
+    stage: 'manual-recovery',
+    // A live TUI is still recoverable without an active operation; other records retain the
+    // failed operation so native/manual proof retries remain idempotent.
+    handoffOperationId:
+      record.lease.runtimeKind === 'tui' && record.lease.claimStatus === 'live'
+        ? null
+        : _operationId,
+    now: context.deps.now()
+  })
+}
+
 export async function stopStructuredNativeTurn(
   deps: StructuredAgentSessionHandoffDeps,
   sessionId: string,

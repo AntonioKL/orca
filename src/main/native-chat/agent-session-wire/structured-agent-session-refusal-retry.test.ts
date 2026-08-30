@@ -8,7 +8,6 @@ import { computeAgentSessionPayloadFingerprint } from '../../../shared/agent-ses
 import type { AgentSessionRecord } from '../../../shared/agent-session-record'
 import {
   AGENT_SESSION_WIRE_REFUSAL_CODES,
-  type AgentSessionHandoffRequest,
   type AgentSessionMutationEnvelope,
   type AgentSessionMutationResult,
   type AgentSessionWireRefusalCode
@@ -31,11 +30,7 @@ import {
 import type { StructuredAgentSessionHandoffTransport } from './structured-agent-session-handoff-types'
 
 const CALLER = { callerKey: 'client-1' }
-const METHODS = [
-  'agentSession.requestHandoff',
-  'agentSession.setOption',
-  'agentSession.send'
-] as const
+const METHODS = ['agentSession.setOption', 'agentSession.send'] as const
 type Method = (typeof METHODS)[number]
 type Pair = `${Method}:${AgentSessionWireRefusalCode}`
 
@@ -44,8 +39,6 @@ type CallSpec = {
   operationId: string
   expectedRuntimeFence?: number
   payloadFingerprint?: string
-  handoffAction?: 'start' | 'cancel-queued'
-  handoffDirection?: 'to-tui' | 'to-native'
 }
 
 type Harness = {
@@ -137,14 +130,7 @@ function callFields(spec: CallSpec): Record<string, unknown> {
   if (spec.method === 'agentSession.send') {
     return { body: hostTestMessage('host oracle') }
   }
-  if (spec.method === 'agentSession.setOption') {
-    return { key: 'model', value: 'gpt-5' }
-  }
-  return {
-    direction: spec.handoffDirection ?? 'to-tui',
-    mode: 'now',
-    action: spec.handoffAction ?? 'start'
-  }
+  return { key: 'model', value: 'gpt-5' }
 }
 
 function envelope(harness: Harness, spec: CallSpec): AgentSessionMutationEnvelope {
@@ -169,19 +155,11 @@ function invoke(harness: Harness, spec: CallSpec): Promise<AgentSessionMutationR
       body: fields.body as ReturnType<typeof hostTestMessage>
     })
   }
-  if (spec.method === 'agentSession.setOption') {
-    return harness.host.setOption(CALLER, {
-      envelope: mutationEnvelope,
-      key: fields.key as string,
-      value: fields.value as string
-    })
-  }
-  return harness.host.requestHandoff(CALLER, {
+  return harness.host.setOption(CALLER, {
     envelope: mutationEnvelope,
-    direction: fields.direction,
-    mode: fields.mode,
-    action: fields.action
-  } as AgentSessionHandoffRequest)
+    key: fields.key as string,
+    value: fields.value as string
+  })
 }
 
 function operationState(harness: Harness, operation: string) {
@@ -244,48 +222,29 @@ async function fillOperationLedger(harness: Harness): Promise<void> {
   }
 }
 
-// sendPlan and setOptionPlan have no unsupported branch; only handoff checks transport.
+// sendPlan and setOptionPlan have no unsupported branch; only handoff checked transport.
 const UNREACHABLE = new Set<Pair>([
   'agentSession.send:structured_agent_session_unsupported',
   'agentSession.setOption:structured_agent_session_unsupported',
-  // replayedStructuredHandoffRefusal maps failed wire codes; other replay outcomes are successes.
-  'agentSession.requestHandoff:agent_session_operation_unknown',
   // performPrompt is the sole producer of prompt revision and resolution refusals.
-  'agentSession.requestHandoff:agent_session_item_revision_stale',
   'agentSession.setOption:agent_session_item_revision_stale',
   'agentSession.send:agent_session_item_revision_stale',
-  'agentSession.requestHandoff:agent_session_already_resolved',
   'agentSession.setOption:agent_session_already_resolved',
   'agentSession.send:agent_session_already_resolved',
   // StructuredAgentSessionHost.mutate maps an absent record to AGENT_SESSION_NOT_ATTACHED.
-  'agentSession.requestHandoff:agent_session_identity_required',
   'agentSession.setOption:agent_session_identity_required',
   'agentSession.send:agent_session_identity_required',
   // No structured-agent-session host branch emits agent_session_journal_unreadable.
-  'agentSession.requestHandoff:agent_session_journal_unreadable',
   'agentSession.setOption:agent_session_journal_unreadable',
-  'agentSession.send:agent_session_journal_unreadable',
-  // admitStructuredHandoffRequest does not consult lease.unreconciled.
-  'agentSession.requestHandoff:execution_owner_reconciling'
+  'agentSession.send:agent_session_journal_unreadable'
 ])
 
 describe('agentSessionRefusalOperationState host oracle', () => {
-  // 26 real host round trips; the default 5s budget sits at the edge on CI.
-  it('agrees with every refusal the real host path can produce', { timeout: 30_000 }, async () => {
+  // 26 real host round trips, each committing the store — and every commit now also rotates a
+  // durable backup, so this does substantially more fsync work than the budget was set for.
+  it('agrees with every refusal the real host path can produce', { timeout: 90_000 }, async () => {
     const produced = new Set<Pair>()
     const record = (pair: Pair) => produced.add(pair)
-
-    const unsupported = await createHarness()
-    record(
-      await assertHostAgreement(
-        unsupported,
-        {
-          method: 'agentSession.requestHandoff',
-          operationId: operationId()
-        },
-        'structured_agent_session_unsupported'
-      )
-    )
 
     const stale = await createHarness()
     for (const method of METHODS) {
@@ -303,17 +262,6 @@ describe('agentSessionRefusalOperationState host oracle', () => {
     }
 
     const conflict = await createHarness({ transport: true })
-    record(
-      await assertHostAgreement(
-        conflict,
-        {
-          method: 'agentSession.requestHandoff',
-          operationId: operationId(),
-          handoffDirection: 'to-native'
-        },
-        'agent_session_conflict'
-      )
-    )
     await setLease(conflict, (current) => ({
       ...current,
       lease: { ...current.lease, runtimeKind: 'tui' }
@@ -354,18 +302,6 @@ describe('agentSessionRefusalOperationState host oracle', () => {
         )
       )
     }
-    record(
-      await assertHostAgreement(
-        operationConflict,
-        {
-          method: 'agentSession.requestHandoff',
-          operationId: operationId(),
-          handoffAction: 'cancel-queued'
-        },
-        'agent_session_operation_conflict'
-      )
-    )
-
     const ledgerRefusals = await createHarness()
     for (const [code, timestamp] of [
       ['agent_session_operation_expired', NOW - AGENT_SESSION_MAX_NEW_OPERATION_AGE_MS - 1],

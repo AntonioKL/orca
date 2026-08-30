@@ -30,6 +30,9 @@ export function resolveAgentSessionReplayOutcome<TValue>(input: {
     }
   }
   if (outcome.status === 'unknown') {
+    if (input.rerunWhenReplayMissing) {
+      return { decision: 'rerun' }
+    }
     return {
       decision: 'refuse',
       refusal: {

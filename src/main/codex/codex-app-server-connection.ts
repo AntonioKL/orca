@@ -1,12 +1,18 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { spawnProcess } from '../../shared/child-process/run-process'
+import { RetryableProcessExitProof } from '../../shared/child-process/retryable-process-exit-proof'
+import { createProviderSpawnSpec } from './codex-app-server-posix-supervisor'
 import { buildCodexAppServerExitError } from './codex-app-server-exit-error'
+import { initializeCodexAppServerConnection } from './codex-app-server-handshake'
+import { CodexAppServerHandshakeExitUnprovenError } from './codex-app-server-handshake-exit-proof'
 import { isAppServerRecord, parseCodexAppServerJsonLine } from './codex-app-server-jsonl'
+import { terminateCodexAppServerProcessTree } from './codex-app-server-process-teardown'
+import { CodexAppServerRequestError } from './codex-app-server-request-error'
+import { CODEX_SPAWN_TOKEN_ENV } from './codex-structured-owner-identity'
 import { waitForProcessExitUntil } from './codex-process-exit-deadline'
 import {
   CodexAppServerTimeoutError,
   CodexAppServerUnsupportedError,
-  isCodexMethodNotFoundError,
-  killCodexAppServerProcessTree
+  isCodexMethodNotFoundError
 } from './codex-app-server-session'
 import type {
   CodexAppServerConnection,
@@ -18,30 +24,19 @@ export type {
   CodexAppServerConnectionHandlers,
   CodexAppServerServerRequest
 } from './codex-app-server-connection-types'
+export {
+  CodexAppServerRequestError,
+  isCodexAppServerRequestError
+} from './codex-app-server-request-error'
 
 // Structured chat needs a persistent bidirectional child and per-request deadlines;
 // the request-scoped app-server runner cannot carry approvals or streamed turns.
 
-/** Codex answered the call and refused it. Distinct from a timeout or a dead
- *  child, which leave the call unsettled rather than declined. */
-export class CodexAppServerRequestError extends Error {
-  constructor(
-    readonly method: string,
-    readonly code: number | null,
-    message: string
-  ) {
-    super(message)
-    this.name = 'CodexAppServerRequestError'
-  }
-}
-
-export function isCodexAppServerRequestError(error: unknown): error is CodexAppServerRequestError {
-  return error instanceof Error && error.name === 'CodexAppServerRequestError'
-}
-
 export type CodexAppServerLaunch = {
   command: string
   args: string[]
+  /** Workspace directory used by the provider process itself. */
+  cwd?: string
   /** Overlay on the inherited environment — the pinned CODEX_HOME lives here. */
   env?: Record<string, string>
   /** Keys stripped after the overlay, matching `CodexAppServerInvocation`. */
@@ -49,7 +44,6 @@ export type CodexAppServerLaunch = {
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
-const HANDSHAKE_TIMEOUT_MS = 15_000
 const GRACEFUL_EXIT_MS = 1_500
 const FORCED_EXIT_MS = 1_000
 const STDERR_TAIL_MAX_BYTES = 8192
@@ -70,34 +64,46 @@ type PendingRequest = {
 export async function openCodexAppServerConnection(
   launch: CodexAppServerLaunch,
   handlers: CodexAppServerConnectionHandlers = {},
-  spawnImpl: typeof spawn = spawn
+  spawnImpl: typeof spawnProcess = spawnProcess
 ): Promise<CodexAppServerConnection> {
   const childEnv: NodeJS.ProcessEnv = { ...process.env, ...launch.env }
   for (const key of launch.envToDelete ?? []) {
     delete childEnv[key]
   }
-  const child = spawnImpl(launch.command, launch.args, {
-    env: childEnv,
-    stdio: ['pipe', 'pipe', 'pipe'],
-    windowsHide: true
-  }) as ChildProcessWithoutNullStreams
+  const spawnSpec = createProviderSpawnSpec(launch, childEnv, process.platform)
+  const child = spawnImpl(spawnSpec)
+  const spawnToken = launch.env?.[CODEX_SPAWN_TOKEN_ENV]
+
+  function terminateProcessTree(): Promise<boolean> {
+    // The supervisor and provider own separate POSIX groups so the supervisor can prove the
+    // provider group empty before relaying its exit. Forced wrapper teardown uses descendant proof.
+    return terminateCodexAppServerProcessTree(child, spawnToken)
+  }
 
   const pending = new Map<number, PendingRequest>()
   let stderrTail = ''
   let nextRequestId = 1
   let exited = false
+  let exitObserved = false
   let closing = false
+  const exitProof = new RetryableProcessExitProof()
   /** First terminal cause, or null while the transport is still usable. Set once:
    *  a child that dies reaches us through several listeners, and the specific
    *  first cause is the one worth reporting. */
   let terminalError: Error | null = null
 
+  let resolveExit = (): void => undefined
   const exitPromise = new Promise<void>((resolve) => {
-    child.on('exit', () => {
-      exited = true
-      resolve()
-    })
+    resolveExit = resolve
   })
+
+  function observeExit(): void {
+    exited = true
+    exitObserved = true
+    resolveExit()
+  }
+
+  child.on('exit', observeExit)
 
   function buildExitError(cause?: Error): Error {
     return buildCodexAppServerExitError(stderrTail, cause)
@@ -127,12 +133,10 @@ export async function openCodexAppServerConnection(
   }
 
   child.on('error', (error) => {
-    exited = true
     handleUnexpectedEnd(error)
   })
-  // Why: 'close' rather than 'exit' guarantees the stderr tail is complete, so
-  // an early death classifies as missing-subcommand instead of transient.
   child.on('close', () => {
+    observeExit()
     handleUnexpectedEnd()
   })
   child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
@@ -148,7 +152,7 @@ export async function openCodexAppServerConnection(
       failPending(error)
       return
     }
-    killCodexAppServerProcessTree(child)
+    void terminateProcessTree()
     handleUnexpectedEnd(error)
   })
 
@@ -198,13 +202,11 @@ export async function openCodexAppServerConnection(
   }
 
   let stdoutBuffer = ''
-  // Why: stream decoding must retain a multibyte character split across pipe
-  // chunks, or a non-ASCII turn becomes invalid JSON.
   child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
     stdoutBuffer += chunk
     if (Buffer.byteLength(stdoutBuffer) > STDOUT_LINE_MAX_BYTES) {
       child.stdout.destroy()
-      killCodexAppServerProcessTree(child)
+      void terminateProcessTree()
       handleUnexpectedEnd(new Error('codex app-server emitted an oversized JSONL line'))
       return
     }
@@ -224,7 +226,7 @@ export async function openCodexAppServerConnection(
         dispatchMessage(parsed)
       } catch (error) {
         child.stdout.destroy()
-        killCodexAppServerProcessTree(child)
+        void terminateProcessTree()
         handleUnexpectedEnd(error instanceof Error ? error : new Error(String(error)))
         return
       }
@@ -291,25 +293,31 @@ export async function openCodexAppServerConnection(
     }
   }
 
-  async function close(): Promise<void> {
-    if (closing) {
-      await exitPromise
-      return
+  function close(): Promise<boolean> {
+    if (exitObserved) {
+      return Promise.resolve(true)
     }
     closing = true
-    try {
-      child.stdin.end()
-    } catch {
-      // Already destroyed; the reap below still runs.
-    }
-    if (!exited) {
-      await waitForProcessExitUntil(exitPromise, GRACEFUL_EXIT_MS)
-      if (!exited) {
-        killCodexAppServerProcessTree(child)
-        await waitForProcessExitUntil(exitPromise, FORCED_EXIT_MS)
+    return exitProof.run(async () => {
+      try {
+        child.stdin.end()
+      } catch {
+        // Already destroyed; the reap below still runs.
       }
-    }
-    failPending(new Error('codex app-server connection closed'))
+      if (!exited) {
+        await waitForProcessExitUntil(exitPromise, GRACEFUL_EXIT_MS)
+        if (!exited) {
+          const treeExited = await terminateProcessTree()
+          if (!treeExited) {
+            failPending(new Error('codex app-server process-tree exit was not proven'))
+            return false
+          }
+          await waitForProcessExitUntil(exitPromise, FORCED_EXIT_MS)
+        }
+      }
+      failPending(new Error('codex app-server connection closed'))
+      return exitObserved
+    })
   }
 
   const connection: CodexAppServerConnection = {
@@ -327,22 +335,11 @@ export async function openCodexAppServerConnection(
   }
 
   try {
-    await request(
-      'initialize',
-      {
-        clientInfo: { name: 'orca_desktop', title: 'Orca', version: '0.0.0' },
-        capabilities: {
-          experimentalApi: false,
-          requestAttestation: false,
-          mcpServerOpenaiFormElicitation: false,
-          extensions: {}
-        }
-      },
-      { timeoutMs: HANDSHAKE_TIMEOUT_MS }
-    )
-    notify('initialized')
+    await initializeCodexAppServerConnection(connection)
   } catch (error) {
-    await close()
+    if ((await close()) !== true) {
+      throw new CodexAppServerHandshakeExitUnprovenError(connection, error)
+    }
     throw error instanceof CodexAppServerUnsupportedError ||
       error instanceof CodexAppServerTimeoutError
       ? error

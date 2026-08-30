@@ -7,6 +7,7 @@ import {
   appendAgentSessionProviderHandleLink,
   findAgentSessionProviderHandleLink,
   isAgentSessionProviderHandle,
+  isAgentSessionHandleProvider,
   isAgentSessionProviderHandleChain,
   MAX_AGENT_SESSION_PROVIDER_HANDLE_LINKS,
   type AgentSessionProviderHandle,
@@ -31,6 +32,13 @@ function link(overrides: Partial<AgentSessionProviderHandleLink> = {}) {
 }
 
 describe('handle identity', () => {
+  it('rejects unknown persisted provider names instead of defaulting to Codex', () => {
+    expect(isAgentSessionHandleProvider('codex')).toBe(true)
+    expect(isAgentSessionHandleProvider('claude')).toBe(true)
+    expect(isAgentSessionHandleProvider('gemini')).toBe(false)
+    expect(isAgentSessionHandleProvider(undefined)).toBe(false)
+  })
+
   it('keys a Claude handle by session id AND leaf, so two branches are two handles', () => {
     // Concurrent resumes branch one transcript silently; the session id alone cannot name a writer.
     const branchA = agentSessionProviderHandleKey(CLAUDE)

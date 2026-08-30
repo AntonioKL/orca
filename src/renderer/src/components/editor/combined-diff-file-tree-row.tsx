@@ -1,4 +1,4 @@
-import type React from 'react'
+import { createElement } from 'react'
 import { ChevronDown, Folder, FolderOpen } from 'lucide-react'
 import { STATUS_COLORS, STATUS_LABELS } from '@/components/right-sidebar/status-display'
 import type { SourceControlTreeNode } from '@/components/right-sidebar/source-control-tree'
@@ -6,12 +6,12 @@ import { getFileTypeIcon } from '@/lib/file-type-icons'
 import { basename, dirname, joinPath } from '@/lib/path'
 import { cn } from '@/lib/utils'
 import { WORKSPACE_FILE_PATH_MIME } from '@/lib/workspace-file-drag'
+import type { GitBranchChangeEntry } from '../../../../shared/git-diff-compare-types'
 import type {
-  GitBranchChangeEntry,
   GitFileStatus,
   GitStagingArea,
   GitStatusEntry
-} from '../../../../shared/types'
+} from '../../../../shared/git-status-types'
 import {
   getCombinedDiffFileTreeSectionKey,
   type CombinedDiffBranchTreeArea,
@@ -116,7 +116,10 @@ export function CombinedDiffFileTreeRow({
       }}
       onClick={() => onNavigate(node.entry)}
     >
-      <FileIcon className="size-3.5 shrink-0" style={{ color: STATUS_COLORS[status] }} />
+      {createElement(FileIcon, {
+        className: 'size-3.5 shrink-0',
+        style: { color: STATUS_COLORS[status] }
+      })}
       <span className="min-w-0 flex-1 truncate">
         <span className="text-foreground">{fileName}</span>
         {dirPath && <span className="ml-1.5 text-[11px] text-muted-foreground">{dirPath}</span>}

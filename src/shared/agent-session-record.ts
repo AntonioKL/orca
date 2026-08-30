@@ -13,7 +13,7 @@ import {
   type AgentSessionProviderHandleLink
 } from './agent-session-provider-handle'
 
-export const AGENT_SESSION_RECORD_SCHEMA_VERSION = 1 as const
+export const AGENT_SESSION_RECORD_SCHEMA_VERSION = 2 as const
 
 export type AgentSessionWorkspaceKind = 'git-worktree' | 'folder'
 
@@ -40,6 +40,9 @@ export type AgentSessionAccountHome = {
 /** Provider launch environment captured by the host when the session is created. */
 export type AgentSessionLaunchEnv = Record<string, string>
 
+/** Provider CLI arguments captured by the host when the session is created. */
+export type AgentSessionLaunchArgs = string[]
+
 export type AgentSessionOwnerRuntimeKind = 'native' | 'tui'
 
 export type AgentSessionHandoffStage =
@@ -51,8 +54,8 @@ export type AgentSessionHandoffStage =
 
 /**
  * PID-reuse-safe process identity. `spawnToken` is the only element available on every platform:
- * process start time costs a CIM query on Windows and is absent in some containers, so a runtime
- * that cannot echo the token back qualifies for manual recovery only.
+ * process start time costs a CIM query on Windows and is absent in some containers. An exact
+ * identity stays in `recovering`; an ownerless, unattributable reservation uses `manual-recovery`.
  */
 export type AgentSessionProcessIdentity = {
   hostId: string
@@ -99,6 +102,13 @@ export type AgentSessionLease = {
   claimStatus: AgentSessionClaimStatus
   /** True from load until the host adjudicates it; no writer is granted while set. */
   unreconciled: boolean
+  /**
+   * Lowest fence a future grant may use. Set only after the store recovers from its backup, where
+   * the commit that never landed may already have granted a fence the backup cannot show. The
+   * CURRENT fence is deliberately left alone: `live` means a handle proven at exactly that number,
+   * so rewriting it would invalidate the record it is trying to save.
+   */
+  minimumNextFence?: number
   deathEvidence: AgentSessionDeathEvidence | null
 }
 
@@ -109,9 +119,9 @@ export type AgentSessionRecord = {
   provider: AgentSessionHandleProvider
   providerHandleChain: AgentSessionProviderHandleLink[]
   accountHome: AgentSessionAccountHome
-  launchEnv?: AgentSessionLaunchEnv
   /** Provider options acknowledged for the next turn, restored across owner replacement. */
   options?: Record<string, string>
+  launchArgs?: AgentSessionLaunchArgs
   lease: AgentSessionLease
   createdAt: number
   updatedAt: number
@@ -128,6 +138,8 @@ const MAX_ID_LENGTH = 512
 const MAX_PATH_LENGTH = 4096
 const MAX_LAUNCH_ENV_ENTRIES = 256
 const MAX_LAUNCH_ENV_VALUE_LENGTH = 65_536
+const MAX_LAUNCH_ARGS = 256
+const MAX_LAUNCH_ARGS_BYTES = 16 * 1024
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/
 
 function isBoundedString(value: unknown, max: number): value is string {
@@ -205,6 +217,20 @@ function isAgentSessionAccountHome(value: unknown): value is AgentSessionAccount
   )
 }
 
+function isAgentSessionOptions(value: unknown): value is Record<string, string> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false
+  }
+  const entries = Object.entries(value)
+  return (
+    entries.length <= 32 &&
+    entries.every(
+      ([key, option]) =>
+        isBoundedString(key, MAX_ID_LENGTH) && isBoundedString(option, MAX_ID_LENGTH)
+    )
+  )
+}
+
 export function isAgentSessionLaunchEnv(value: unknown): value is AgentSessionLaunchEnv {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return false
@@ -217,20 +243,6 @@ export function isAgentSessionLaunchEnv(value: unknown): value is AgentSessionLa
         isBoundedString(key, MAX_ID_LENGTH) &&
         typeof entry === 'string' &&
         entry.length <= MAX_LAUNCH_ENV_VALUE_LENGTH
-    )
-  )
-}
-
-function isAgentSessionOptions(value: unknown): value is Record<string, string> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return false
-  }
-  const entries = Object.entries(value)
-  return (
-    entries.length <= 32 &&
-    entries.every(
-      ([key, option]) =>
-        isBoundedString(key, MAX_ID_LENGTH) && isBoundedString(option, MAX_ID_LENGTH)
     )
   )
 }
@@ -314,8 +326,9 @@ export function isAgentSessionRecord(value: unknown): value is AgentSessionRecor
     (record.provider === 'claude' || record.provider === 'codex') &&
     isAgentSessionProviderHandleChain(record.providerHandleChain) &&
     isAgentSessionAccountHome(record.accountHome) &&
-    (record.launchEnv === undefined || isAgentSessionLaunchEnv(record.launchEnv)) &&
     (record.options === undefined || isAgentSessionOptions(record.options)) &&
+    (record.launchArgs === undefined || isAgentSessionLaunchArgs(record.launchArgs)) &&
+    !Object.hasOwn(record, 'launchEnv') &&
     isAgentSessionLease(record.lease) &&
     record.lease.sessionId === record.sessionId &&
     Number.isSafeInteger(record.createdAt) &&
@@ -331,5 +344,14 @@ export function isAgentSessionRecord(value: unknown): value is AgentSessionRecor
       (validated.lease.ownerProcess !== null &&
         head?.linkId === validated.lease.provenHandleLinkId &&
         head.mintedAtFence === validated.lease.runtimeFence))
+  )
+}
+
+export function isAgentSessionLaunchArgs(value: unknown): value is AgentSessionLaunchArgs {
+  return (
+    Array.isArray(value) &&
+    value.length <= MAX_LAUNCH_ARGS &&
+    value.every((arg) => typeof arg === 'string' && !arg.includes('\0')) &&
+    Buffer.byteLength(JSON.stringify(value), 'utf8') <= MAX_LAUNCH_ARGS_BYTES
   )
 }

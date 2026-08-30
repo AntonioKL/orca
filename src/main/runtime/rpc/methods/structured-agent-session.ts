@@ -6,22 +6,25 @@
 // is the whole visibility rule, because nothing else on the runtime publishes a
 // structured session.
 
-import { STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
 import {
   agentSessionFingerprintConflict,
   computeAgentSessionPayloadFingerprint
 } from '../../../../shared/agent-session-mutation-envelope'
-import { getStructuredAgentSessionHost } from '../../../native-chat/agent-session-wire/structured-agent-session-registry'
-import type { StructuredAgentSessionHost } from '../../../native-chat/agent-session-wire/structured-agent-session-host'
-import type { StructuredAgentSessionCaller } from '../../../native-chat/agent-session-wire/structured-agent-session-host-types'
 import { defineMethod, defineStreamingMethod, type RpcAnyMethod, type RpcContext } from '../core'
+import {
+  ensureStructuredHostInstalled as ensureHostInstalled,
+  requireStructuredCapability,
+  requireStructuredHost as requireHost,
+  structuredCallerFor as callerFor,
+  supportsStructuredSessions
+} from './structured-agent-session-gate'
+import { STRUCTURED_AGENT_SESSION_HOLD_METHODS } from './structured-agent-session-hold'
 import {
   AttachParams,
   CancelParams,
   CreateParams,
   CreateSupportParams,
   HistoryParams,
-  HandoffParams,
   HandoffStatusParams,
   OptionsParams,
   RespondParams,
@@ -30,72 +33,8 @@ import {
   SubscribeParams,
   UnsubscribeParams
 } from './structured-agent-session-schemas'
-import { hasMobileClipboardImagePath } from '../mobile-clipboard-image-provenance'
 
 const SUBSCRIPTION_PREFIX = 'agentSession'
-
-/**
- * In-process callers are the same build as the host, so they carry no negotiated
- * capability list; every remote client must say it can read structured sessions.
- */
-function supportsStructuredSessions(ctx: RpcContext): boolean {
-  return (
-    ctx.clientKind === undefined ||
-    (ctx.clientCapabilities?.includes(STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY) ?? false)
-  )
-}
-
-function requireStructuredCapability(ctx: RpcContext): void {
-  if (!supportsStructuredSessions(ctx)) {
-    throw new Error('structured_agent_session_unsupported')
-  }
-}
-
-function requireHost(ctx: RpcContext): StructuredAgentSessionHost {
-  requireStructuredCapability(ctx)
-  const host = getStructuredAgentSessionHost()
-  if (!host) {
-    throw new Error('structured_agent_session_unsupported')
-  }
-  return host
-}
-
-function assertMobileImageProvenance(
-  ctx: RpcContext,
-  body: { blocks: { type: string; path?: string; url?: string }[] }
-): void {
-  if (ctx.clientKind !== 'mobile') {
-    return
-  }
-  for (const block of body.blocks) {
-    if (block.type !== 'image-ref') {
-      continue
-    }
-    if (block.url || !block.path || !hasMobileClipboardImagePath(ctx.clientId, block.path)) {
-      throw new Error('agent_session_image_untrusted')
-    }
-  }
-}
-
-/** Attach is the only way a session comes into being, so it is the only call
- *  that builds the host. Every other method addresses a session that must
- *  already be attached, and correctly reports absent when none is. */
-async function ensureHostInstalled(ctx: RpcContext): Promise<void> {
-  // Gated first: a client that cannot read structured sessions must not be able
-  // to make the host exist, which is an observable side effect of the surface.
-  if (!supportsStructuredSessions(ctx) || getStructuredAgentSessionHost()) {
-    return
-  }
-  await ctx.runtime.ensureStructuredAgentSessionHost()
-}
-
-/** Mirrors the existing agent-session host-authority derivation so one client
- *  gets one operation namespace across both surfaces. */
-function callerFor(ctx: RpcContext): StructuredAgentSessionCaller {
-  return {
-    callerKey: ctx.clientId?.trim() || `trusted-local:${ctx.clientKind ?? 'runtime'}`
-  }
-}
 
 function subscriptionIdFor(ctx: RpcContext, sessionId: string): string {
   const base = `${SUBSCRIPTION_PREFIX}:${ctx.connectionId ?? 'local'}:${sessionId}`
@@ -151,18 +90,15 @@ export const STRUCTURED_AGENT_SESSION_METHODS: RpcAnyMethod[] = [
           ...resolved,
           envelope: { ...params.envelope, payloadFingerprint: hostFingerprint }
         })
-        if (result.ok) {
+        if (result.ok && resolved.agent === 'codex') {
           ctx.runtime.publishStructuredAgentSessionTab({
             workspaceId: resolved.location.workspaceId,
             sessionId: result.value.sessionId,
-            agent: resolved.agent === 'claude' ? 'claude' : 'codex',
+            agent: 'codex',
             activate: true
           })
         }
         return result
-      }
-      if (ctx.clientKind === 'mobile') {
-        throw new Error('agent_session_create_intent_required')
       }
       await ensureHostInstalled(ctx)
       return requireHost(ctx).attach(callerFor(ctx), params)
@@ -179,18 +115,22 @@ export const STRUCTURED_AGENT_SESSION_METHODS: RpcAnyMethod[] = [
   defineMethod({
     name: 'agentSession.send',
     params: SendParams,
-    handler: async (params, ctx) => {
-      const host = requireHost(ctx)
-      return host.send(callerFor(ctx), {
-        ...params,
-        beforeRun: () => assertMobileImageProvenance(ctx, params.body)
-      })
-    }
+    handler: async (params, ctx) => requireHost(ctx).send(callerFor(ctx), params)
   }),
   defineMethod({
     name: 'agentSession.cancel',
     params: CancelParams,
     handler: async (params, ctx) => requireHost(ctx).cancel(callerFor(ctx), params)
+  }),
+  defineMethod({
+    // Releasing a chat view, not ending a conversation: the record and journal stay on disk so the
+    // same session can be attached again. Only the provider child and the in-memory entry go.
+    name: 'agentSession.close',
+    params: OptionsParams,
+    handler: async (params, ctx) => {
+      await requireHost(ctx).close(params.sessionId)
+      return { ok: true as const }
+    }
   }),
   defineMethod({
     name: 'agentSession.respondToApproval',
@@ -208,11 +148,6 @@ export const STRUCTURED_AGENT_SESSION_METHODS: RpcAnyMethod[] = [
     name: 'agentSession.setOption',
     params: SetOptionParams,
     handler: async (params, ctx) => requireHost(ctx).setOption(callerFor(ctx), params)
-  }),
-  defineMethod({
-    name: 'agentSession.requestHandoff',
-    params: HandoffParams,
-    handler: async (params, ctx) => requireHost(ctx).requestHandoff(callerFor(ctx), params)
   }),
   defineMethod({
     name: 'agentSession.handoffStatus',
@@ -235,16 +170,38 @@ export const STRUCTURED_AGENT_SESSION_METHODS: RpcAnyMethod[] = [
     handler: async (params, ctx, emit) => {
       const host = requireHost(ctx)
       const subscriptionId = subscriptionIdFor(ctx, params.sessionId)
+      // A live stream is a surface too: it keeps a session from being evicted while it is read and
+      // releases that retention when the transport dies without a word.
+      //
+      // Retain-only: reading history must never be what starts a provider process. Current clients
+      // explicitly hold every open surface before subscribing.
+      const streamHolder = `subscription:${subscriptionId}`
       let closed = false
       let dispose = (): void => {}
-      ctx.runtime.registerSubscriptionCleanup(
-        subscriptionId,
-        () => {
-          closed = true
-          dispose()
-        },
-        ctx.connectionId
-      )
+      let releaseTransportSubscription = (): void => {}
+      const onTransportAbort = (): void => releaseTransportSubscription()
+      const cleanup = () => {
+        closed = true
+        ctx.signal?.removeEventListener('abort', onTransportAbort)
+        dispose()
+        host.release(params.sessionId, streamHolder)
+      }
+      let registration: { releaseIfCurrent: () => void }
+      if (typeof ctx.runtime.registerOwnedSubscriptionCleanup === 'function') {
+        registration = ctx.runtime.registerOwnedSubscriptionCleanup(
+          subscriptionId,
+          cleanup,
+          ctx.connectionId
+        )
+      } else {
+        ctx.runtime.registerSubscriptionCleanup(subscriptionId, cleanup, ctx.connectionId)
+        registration = { releaseIfCurrent: () => ctx.runtime.cleanupSubscription(subscriptionId) }
+      }
+      releaseTransportSubscription = registration.releaseIfCurrent
+      ctx.signal?.addEventListener('abort', onTransportAbort, { once: true })
+      if (ctx.signal?.aborted) {
+        onTransportAbort()
+      }
       if (closed) {
         return
       }
@@ -258,6 +215,14 @@ export const STRUCTURED_AGENT_SESSION_METHODS: RpcAnyMethod[] = [
       })
       if (closed) {
         dispose()
+      } else {
+        // Fire-and-forget, but never unhandled: a resume that refuses leaves the stream holding a
+        // readable session, which is exactly what the client sees anyway.
+        void host
+          .hold(params.sessionId, streamHolder, { resume: false })
+          .catch((error: unknown) =>
+            console.warn('[agent-session] stream hold failed', params.sessionId, error)
+          )
       }
     }
   }),
@@ -276,5 +241,6 @@ export const STRUCTURED_AGENT_SESSION_METHODS: RpcAnyMethod[] = [
       ctx.runtime.cleanupSubscriptionsByPrefix(`${base}:`)
       return { unsubscribed: true }
     }
-  })
+  }),
+  ...STRUCTURED_AGENT_SESSION_HOLD_METHODS
 ]

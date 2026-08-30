@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react'
-import { RotateCcw, Trash2 } from 'lucide-react'
-import type { AgentType } from '../../../../shared/agent-status-types'
+import { RotateCcw } from 'lucide-react'
+import type {
+  AgentStatusOrchestrationContext,
+  AgentType
+} from '../../../../shared/agent-status-types'
 import { dispatchStructuredAgentSessionComposerCommand } from '../../../../shared/structured-agent-session-composer'
 import { structuredAgentSessionPaneKey } from '../../../../shared/structured-agent-session-projection'
-import { encodeAgentSessionQuestionAnswers } from '../../../../shared/agent-session-question-answer'
 import type { NativeChatLiveSession } from './use-native-chat-live-session'
 import type { RuntimeClientTarget } from '@/runtime/runtime-rpc-client'
 import { Button } from '@/components/ui/button'
@@ -18,7 +20,7 @@ import { useNativeChatFileLinkClick } from './use-native-chat-file-link-click'
 import { useNativeChatFileLinkContext } from './use-native-chat-file-link-context'
 import { useStructuredAgentSession } from './use-structured-agent-session'
 import { translate } from '@/i18n/i18n'
-import { StructuredAgentSessionHandoffChrome } from './StructuredAgentSessionHandoffChrome'
+import { NativeChatOrchestrationPausedNotice } from './NativeChatOrchestrationPausedNotice'
 
 function encodeQuestionAnswer(questionId: string, answer: string): string {
   return `${encodeURIComponent(questionId)}:${encodeURIComponent(answer)}`
@@ -29,10 +31,16 @@ export function NativeChatStructuredSession(props: {
   sessionId: string
   target: RuntimeClientTarget
   agent: AgentType
+  isVisible: boolean
   allowFileUriLinks: boolean
+  orchestrationDispatchStatus?: AgentStatusOrchestrationContext['dispatchStatus']
 }): React.JSX.Element {
   const controller = useStructuredAgentSession(props)
   const [composerError, setComposerError] = useState<string | null>(null)
+  const [optionPickerRequest, setOptionPickerRequest] = useState<{
+    id: string
+    sequence: number
+  } | null>(null)
   const paneKey = useMemo(
     () => structuredAgentSessionPaneKey(props.tabId, props.sessionId),
     [props.sessionId, props.tabId]
@@ -71,21 +79,6 @@ export function NativeChatStructuredSession(props: {
   const fileLinkClick = useNativeChatFileLinkClick(props.allowFileUriLinks ? fileLinkContext : null)
   const prompt = controller.prompts[0] ?? null
   const questionBody = prompt?.body.kind === 'question' ? prompt.body : null
-  const questions =
-    questionBody?.questions ??
-    (questionBody
-      ? [
-          {
-            id: questionBody.freeTextQuestionId ?? 'q1',
-            question: questionBody.question,
-            options: questionBody.options,
-            multiSelect: false,
-            ...(questionBody.freeTextQuestionId
-              ? { freeTextQuestionId: questionBody.freeTextQuestionId }
-              : {})
-          }
-        ]
-      : [])
   const retryableOutboxEntry =
     controller.outbox.find((entry) => entry.state === 'unconfirmed') ??
     controller.outbox.find(
@@ -94,35 +87,42 @@ export function NativeChatStructuredSession(props: {
     null
   const structuredTransport = useMemo(
     () => ({
-      send: controller.send,
+      send: (text: string, attachments: readonly { id: string; path: string }[]): boolean =>
+        controller.send(
+          text,
+          attachments.map((attachment) => ({
+            path: attachment.path,
+            previewUri: attachment.path
+          }))
+        ),
       dispatchCommand: (text: string) =>
         dispatchStructuredAgentSessionComposerCommand(text, {
           agent: props.agent,
           snapshot: controller.optionSnapshot,
-          invokeAction: async () => false,
+          invokeAction: async (id) => {
+            setOptionPickerRequest((current) => ({ id, sequence: (current?.sequence ?? 0) + 1 }))
+            return true
+          },
           setOption: controller.setStructuredOption
         }),
       optionsSurface: controller.optionSurface,
       optionSnapshot: controller.optionSnapshot,
+      optionPickerRequest,
+      worktreeId: fileLinkContext?.worktreeId,
       onError: setComposerError,
       runtime: (props.target.kind === 'local' ? 'local' : 'remote') as 'local' | 'remote'
     }),
-    [controller, props.agent, props.target.kind]
+    [controller, fileLinkContext?.worktreeId, optionPickerRequest, props.agent, props.target.kind]
   )
 
   return (
     <div
       data-native-chat-root="true"
+      data-native-chat-working={controller.isWorking ? 'true' : 'false'}
       tabIndex={-1}
       className="flex h-full min-h-0 w-full flex-col bg-background focus:outline-none"
     >
-      <StructuredAgentSessionHandoffChrome
-        status={controller.handoff}
-        isWorking={controller.isWorking}
-        onRequest={(direction, mode, action) => {
-          void controller.requestHandoff(direction, mode, action)
-        }}
-      />
+      <NativeChatOrchestrationPausedNotice dispatchStatus={props.orchestrationDispatchStatus} />
       <div className="flex min-h-0 flex-1 flex-col">
         {viewState.kind === 'loading' ? (
           <NativeChatEmptyState kind="loading" />
@@ -156,39 +156,17 @@ export function NativeChatStructuredSession(props: {
       ) : null}
       {prompt && questionBody ? (
         <NativeChatQuestionCard
-          key={`${prompt.itemId}:${prompt.revision}`}
           prompt={{
-            questions: questions.map((question) => ({
-              question: question.question,
-              ...(question.header ? { header: question.header } : {}),
-              multiSelect: question.multiSelect,
-              options: question.options.map((option) => ({
-                label: option.label,
-                ...(option.description ? { description: option.description } : {})
-              }))
-            }))
-          }}
-          allowOther={questions.map((question) => Boolean(question.freeTextQuestionId))}
-          onAnswer={(answers) => {
-            if (questionBody.questions) {
-              const grouped = questions.map((question, questionIndex) => {
-                const answer = answers[questionIndex]
-                const other = answer?.other?.trim()
-                const optionIds = (answer?.indices ?? []).flatMap((optionIndex) => {
-                  const optionId = question.options[optionIndex]?.id
-                  return optionId ? [optionId] : []
-                })
-                return {
-                  questionId: question.id,
-                  optionIds: question.multiSelect || !other ? optionIds : [],
-                  ...(other ? { other } : {})
-                }
-              })
-              if (grouped.every((answer) => answer.optionIds.length > 0 || answer.other)) {
-                void controller.respond(prompt, encodeAgentSessionQuestionAnswers(grouped))
+            questions: [
+              {
+                question: questionBody.question,
+                multiSelect: false,
+                options: questionBody.options.map((option) => ({ label: option.label }))
               }
-              return
-            }
+            ]
+          }}
+          allowOther={Boolean(questionBody.freeTextQuestionId)}
+          onAnswer={(answers) => {
             const index = answers[0]?.indices[0]
             const other = answers[0]?.other?.trim()
             const optionId =
@@ -221,29 +199,18 @@ export function NativeChatStructuredSession(props: {
                   'Message was not sent.'
                 )}
           </span>
-          <div className="flex items-center gap-1">
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              onClick={() => controller.discard(retryableOutboxEntry.clientMessageId)}
-            >
-              <Trash2 className="size-3" />
-              {translate('components.native-chat.structuredSession.discardOutboxEntry', 'Discard')}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              onClick={() => controller.retry(retryableOutboxEntry.clientMessageId)}
-            >
-              <RotateCcw className="size-3" />
-              {translate(
-                'auto.components.native.chat.NativeChatStructuredSession.a5e7f14068',
-                'Retry'
-              )}
-            </Button>
-          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            onClick={() => controller.retry(retryableOutboxEntry.clientMessageId)}
+          >
+            <RotateCcw className="size-3" />
+            {translate(
+              'auto.components.native.chat.NativeChatStructuredSession.a5e7f14068',
+              'Retry'
+            )}
+          </Button>
         </div>
       ) : null}
       {controller.error || composerError ? (
@@ -251,9 +218,7 @@ export function NativeChatStructuredSession(props: {
           {controller.error ?? composerError}
         </p>
       ) : null}
-      {prompt ||
-      controller.handoff?.owner === 'tui' ||
-      controller.handoff?.phase === 'switching' ? null : (
+      {prompt ? null : (
         <NativeChatComposer
           terminalTabId={props.tabId}
           paneKey={paneKey}

@@ -8,12 +8,16 @@ import type {
   AgentJournalCursor,
   AgentJournalResetReason
 } from '../../../shared/agent-session-journal-types'
-import type {
-  AgentSessionHandoffStatus,
-  AgentSessionSubscribeEvent
+import {
+  AGENT_SESSION_HISTORY_MAX_LIMIT,
+  type AgentSessionHandoffStatus,
+  type AgentSessionSubscribeEvent
 } from '../../../shared/agent-session-wire'
 import type { AgentSessionJournal } from '../agent-session-journal/journal-store'
-import { projectJournalBatch } from './agent-session-journal-batch'
+import {
+  readAgentSessionHistory,
+  readAgentSessionHydrationPage
+} from './agent-session-history-page'
 
 export type AgentSessionSubscriberEmit = (event: AgentSessionSubscribeEvent) => void
 export type AgentSessionSubscribeInput = {
@@ -34,8 +38,8 @@ type Subscriber = {
 export class AgentSessionSubscribers {
   private readonly bySession = new Map<string, Map<string, Subscriber>>()
 
-  /** Opens the stream with a snapshot or, when the client's cursor still
-   *  resolves, with the rows it missed. Returns the disposer. */
+  /** Opens the stream with a bounded tail page or, when the client's cursor
+   *  still resolves, with the rows it missed. Returns the disposer. */
   open(input: {
     id: string
     sessionId: string
@@ -45,12 +49,12 @@ export class AgentSessionSubscribers {
     cursor?: AgentJournalCursor
     handoff?: AgentSessionHandoffStatus
   }): () => void {
-    const snapshot = input.journal.snapshot()
+    const liveCursor = input.journal.cursor()
     const subscriber: Subscriber = {
       id: input.id,
       sessionId: input.sessionId,
       emit: input.emit,
-      cursor: input.cursor ?? { epoch: snapshot.cursor.epoch, sequence: 0 },
+      cursor: input.cursor ?? { epoch: liveCursor.epoch, sequence: 0 },
       fence: input.fence
     }
     const session = this.bySession.get(input.sessionId) ?? new Map<string, Subscriber>()
@@ -58,16 +62,17 @@ export class AgentSessionSubscribers {
     this.bySession.set(input.sessionId, session)
 
     if (input.cursor) {
-      this.deliver(subscriber, input.journal, input.handoff)
+      this.deliver(subscriber, input.journal, input.handoff, true)
     } else {
+      const page = readAgentSessionHydrationPage(input.journal, input.fence)
       this.emit(subscriber, {
         type: 'snapshot',
         sessionId: input.sessionId,
-        snapshot,
+        page,
         fence: input.fence,
         ...(input.handoff ? { handoff: input.handoff } : {})
       })
-      subscriber.cursor = snapshot.cursor
+      subscriber.cursor = page.liveCursor ?? page.window.nextCursor
     }
     return () => this.close(input.sessionId, input.id)
   }
@@ -93,7 +98,7 @@ export class AgentSessionSubscribers {
     }
   }
 
-  /** Force every subscriber back to a clean snapshot — recovery, epoch
+  /** Force every subscriber back to a bounded tail page — recovery, epoch
    *  rollover, an unreadable schema. */
   reset(
     sessionId: string,
@@ -101,19 +106,19 @@ export class AgentSessionSubscribers {
     reason: AgentJournalResetReason,
     fence: number
   ): void {
-    const snapshot = journal.snapshot()
+    const page = readAgentSessionHydrationPage(journal, fence)
     for (const subscriber of this.subscribers(sessionId)) {
-      this.emit(subscriber, { type: 'reset', sessionId, reset: reason, snapshot, fence })
-      subscriber.cursor = snapshot.cursor
+      this.emit(subscriber, { type: 'reset', sessionId, reset: reason, page, fence })
+      subscriber.cursor = page.liveCursor ?? page.window.nextCursor
       subscriber.fence = fence
     }
   }
 
   snapshot(sessionId: string, journal: AgentSessionJournal, fence: number): void {
-    const snapshot = journal.snapshot()
+    const page = readAgentSessionHydrationPage(journal, fence)
     for (const subscriber of this.subscribers(sessionId)) {
-      this.emit(subscriber, { type: 'snapshot', sessionId, snapshot, fence })
-      subscriber.cursor = snapshot.cursor
+      this.emit(subscriber, { type: 'snapshot', sessionId, page, fence })
+      subscriber.cursor = page.liveCursor ?? page.window.nextCursor
       subscriber.fence = fence
     }
   }
@@ -143,64 +148,69 @@ export class AgentSessionSubscribers {
   private deliver(
     subscriber: Subscriber,
     journal: AgentSessionJournal,
-    handoff?: AgentSessionHandoffStatus
+    handoff?: AgentSessionHandoffStatus,
+    emitCheckpoint = false
   ): void {
-    const since = journal.readSince(subscriber.cursor)
-    const snapshot = journal.snapshot()
-    if (!since.ok) {
-      this.emit(subscriber, {
-        type: 'reset',
+    while (true) {
+      const result = readAgentSessionHistory(journal, {
         sessionId: subscriber.sessionId,
-        reset: since.reset,
-        snapshot,
-        fence: subscriber.fence,
-        ...(handoff ? { handoff } : {})
+        direction: 'after',
+        cursor: subscriber.cursor,
+        limit: AGENT_SESSION_HISTORY_MAX_LIMIT
       })
-      subscriber.cursor = snapshot.cursor
-      return
-    }
-    if (since.rows.length === 0) {
-      if (handoff) {
+      if (!result.ok) {
+        const page = { ...result.page, fence: subscriber.fence }
         this.emit(subscriber, {
-          type: 'batch',
+          type: 'reset',
           sessionId: subscriber.sessionId,
-          batch: {
-            cursor: snapshot.cursor,
-            items: [],
-            removedItemIds: [],
-            submissions: []
-          },
+          reset: result.reset,
+          page,
           fence: subscriber.fence,
-          handoff
+          ...(handoff ? { handoff } : {})
         })
+        subscriber.cursor = page.liveCursor ?? page.window.nextCursor
+        return
       }
-      return
-    }
-    const projected = projectJournalBatch({
-      rows: since.rows,
-      snapshot,
-      afterSequence: subscriber.cursor.sequence
-    })
-    if (!projected.ok) {
+      const page = result.page
+      const advanced = page.window.nextCursor.sequence > subscriber.cursor.sequence
+      if (!advanced) {
+        if (handoff || emitCheckpoint) {
+          this.emit(subscriber, {
+            type: 'batch',
+            sessionId: subscriber.sessionId,
+            batch: {
+              cursor: page.window.nextCursor,
+              items: [],
+              removedItemIds: [],
+              submissions: []
+            },
+            fence: subscriber.fence,
+            ...(handoff ? { handoff } : {})
+          })
+        }
+        return
+      }
       this.emit(subscriber, {
-        type: 'reset',
+        type: 'batch',
         sessionId: subscriber.sessionId,
-        reset: projected.reset,
-        snapshot,
+        batch: {
+          cursor: page.window.nextCursor,
+          items: page.items,
+          removedItemIds: page.removedItemIds,
+          submissions: page.submissions
+        },
         fence: subscriber.fence,
         ...(handoff ? { handoff } : {})
       })
-      subscriber.cursor = snapshot.cursor
-      return
+      subscriber.cursor = page.window.nextCursor
+      if (!page.hasNewer || !this.isActive(subscriber)) {
+        return
+      }
     }
-    this.emit(subscriber, {
-      type: 'batch',
-      sessionId: subscriber.sessionId,
-      batch: projected.batch,
-      ...(handoff ? { fence: subscriber.fence } : {}),
-      ...(handoff ? { handoff } : {})
-    })
-    subscriber.cursor = projected.batch.cursor
+  }
+
+  private isActive(subscriber: Subscriber): boolean {
+    return this.bySession.get(subscriber.sessionId)?.get(subscriber.id) === subscriber
   }
 
   /** A dead transport cannot be allowed to turn a durable mutation into an

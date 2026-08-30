@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { registerHttpLinkStoreAccessor } from '@/lib/http-link-routing'
+import {
+  registerHttpLinkStoreAccessor,
+  registerWorkspaceHttpLinkBrowserOpener
+} from '@/lib/http-link-routing'
 import {
   closeTerminalLinkActionRequest,
   requestTerminalLinkAction,
@@ -12,6 +15,7 @@ import { handleTerminalHttpLink } from './terminal-url-link-hit-testing'
 const openUrl = vi.fn()
 const createBrowserTab = vi.fn()
 const setActiveWorktree = vi.fn()
+const openRuntimeBrowserTab = vi.fn(() => Promise.resolve())
 
 function plainEvent(): MouseEvent {
   return {
@@ -44,9 +48,11 @@ beforeEach(() => {
     setActiveWorktree,
     createBrowserTab
   }))
+  registerWorkspaceHttpLinkBrowserOpener(openRuntimeBrowserTab)
 })
 
 afterEach(() => {
+  registerWorkspaceHttpLinkBrowserOpener(null)
   vi.clearAllMocks()
   vi.unstubAllGlobals()
 })
@@ -181,6 +187,50 @@ describe('terminal link action routing', () => {
     expect(request.mock.calls[0][0].alternate).toBeUndefined()
   })
 
+  it('routes an explicit Orca Browser action to the owning runtime', () => {
+    const request = vi.fn()
+
+    handleTerminalHttpLink('https://example.com/path', plainEvent(), {
+      worktreeId: 'wt-1',
+      sourceOwner: { kind: 'runtime', runtimeEnvironmentId: 'env-1' },
+      linkActionContext: actionContext(request),
+      actionDestinations: { primary: 'system', alternate: 'orca' }
+    })
+
+    request.mock.calls[0][0].primary.run()
+    expect(openUrl).toHaveBeenCalledWith('https://example.com/path')
+    request.mock.calls[0][0].alternate.run()
+    expect(openRuntimeBrowserTab).toHaveBeenCalledWith({
+      workspaceId: 'wt-1',
+      url: 'https://example.com/path',
+      intent: { kind: 'url' },
+      expectedRuntimeEnvironmentId: 'env-1'
+    })
+    expect(createBrowserTab).not.toHaveBeenCalled()
+  })
+
+  it('routes an explicit Orca Browser action through the owning SSH workspace', () => {
+    const request = vi.fn()
+    const url = 'http://0.0.0.0:8000/'
+
+    handleTerminalHttpLink(url, plainEvent(), {
+      worktreeId: 'wt-1',
+      sourceOwner: { kind: 'ssh', connectionId: 'ssh-1' },
+      linkActionContext: actionContext(request),
+      actionDestinations: { primary: 'system', alternate: 'orca' }
+    })
+
+    request.mock.calls[0][0].alternate.run()
+    expect(openRuntimeBrowserTab).toHaveBeenCalledWith({
+      workspaceId: 'wt-1',
+      url,
+      intent: { kind: 'url' },
+      expectedSshConnectionId: 'ssh-1'
+    })
+    expect(createBrowserTab).not.toHaveBeenCalled()
+    expect(openUrl).not.toHaveBeenCalled()
+  })
+
   it('uses Shift+modifier for the alternate local destination', () => {
     const event = { ...plainEvent(), metaKey: true, shiftKey: true }
 
@@ -193,6 +243,19 @@ describe('terminal link action routing', () => {
       activate: true
     })
     expect(openUrl).not.toHaveBeenCalled()
+  })
+
+  it('keeps Shift+modifier on the only capability-backed destination', () => {
+    const event = { ...plainEvent(), metaKey: true, shiftKey: true }
+
+    handleTerminalHttpLink('https://example.com/path', event, {
+      worktreeId: 'wt-1',
+      sourceOwner: { kind: 'runtime', runtimeEnvironmentId: 'env-1' },
+      actionDestinations: { primary: 'system' }
+    })
+
+    expect(openUrl).toHaveBeenCalledWith('https://example.com/path')
+    expect(openRuntimeBrowserTab).not.toHaveBeenCalled()
   })
 
   it('exposes the actual hidden OSC 8 destination', () => {

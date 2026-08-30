@@ -4,7 +4,6 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { computeAgentSessionPayloadFingerprint } from '../../../shared/agent-session-mutation-envelope'
 import { AgentSessionRecordStore } from '../../runtime/agent-session-record-store'
-import { createStructuredAgentSessionOwnerProbe } from '../../runtime/structured-agent-session-runtime'
 import {
   AgentSessionPreSpawnError,
   type StructuredAgentSessionAdapter
@@ -18,6 +17,7 @@ import { performAttach } from './structured-agent-session-attach-flow'
 const NOW = 1_800_000_000_000
 const SESSION = 'session-alpha'
 const OPERATION = `${NOW}-${'1'.padStart(32, '0')}`
+const NEXT_OPERATION = `${NOW}-${'2'.padStart(32, '0')}`
 let root: string | null = null
 
 afterEach(async () => {
@@ -27,12 +27,15 @@ afterEach(async () => {
   root = null
 })
 
-function attachParams(): AgentSessionAttachParams {
+function attachParams(
+  operationId = OPERATION,
+  expectedRuntimeFence: number | null = null
+): AgentSessionAttachParams {
   const params: AgentSessionAttachParams = {
     envelope: {
       sessionId: SESSION,
-      clientOperationId: OPERATION,
-      expectedRuntimeFence: null,
+      clientOperationId: operationId,
+      expectedRuntimeFence,
       payloadFingerprint: ''
     },
     location: {
@@ -61,7 +64,7 @@ function attachParams(): AgentSessionAttachParams {
 }
 
 describe('processless structured session reservation', () => {
-  it('persists pre-spawn proof so restart can release only the proven reservation', async () => {
+  it('settles a pre-spawn failure and its processless evidence in one durable transaction', async () => {
     root = await mkdtemp(join(tmpdir(), 'orca-processless-reservation-'))
     const storeDir = join(root, 'store')
     const store = await AgentSessionRecordStore.open({ directory: storeDir, hostId: 'local' })
@@ -70,6 +73,8 @@ describe('processless structured session reservation', () => {
         throw new AgentSessionPreSpawnError(new Error('workspace no longer exists'))
       })
     } as unknown as StructuredAgentSessionAdapter
+    const processlessProof = vi.spyOn(store, 'setReservationProcesslessProof')
+    const settlement = vi.spyOn(store, 'settleFailedAcquisition')
 
     await expect(
       performAttach({
@@ -88,14 +93,27 @@ describe('processless structured session reservation', () => {
         onAttached: () => {}
       })
     ).rejects.toThrow('workspace no longer exists')
-    expect(store.getRecord(SESSION)?.lease.processlessAt).toBe(NOW)
+    expect(settlement).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ exitProof: 'processless', spawnToken: 'spawn-a' })
+    )
+    // No separate durable proof write: the only proof call is acquisition's single-use clear.
+    expect(processlessProof).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ processlessAt: null })
+    )
+    expect(store.getRecord(SESSION)?.lease).toMatchObject({
+      claimStatus: 'released',
+      handoffStage: null,
+      handoffOperationId: null,
+      runtimeFence: 2,
+      processlessAt: null,
+      reservedSpawnToken: null,
+      deathEvidence: { kind: 'pid-absent', detail: 'reservation failed before spawn' }
+    })
+    expect(store.listOperationRows()[0]?.outcome).toMatchObject({ status: 'failed' })
 
     const reopened = await AgentSessionRecordStore.open({ directory: storeDir, hostId: 'local' })
     await reopened.reconcileOnRestart({
-      probe: async (record) =>
-        record.lease.processlessAt === NOW
-          ? { outcome: 'reservation-unused' }
-          : { outcome: 'indeterminate', reason: 'missing pre-spawn proof' },
+      probe: async () => ({ outcome: 'indeterminate', reason: 'no owner to probe' }),
       now: NOW + 1
     })
     expect(reopened.getRecord(SESSION)?.lease).toMatchObject({
@@ -105,7 +123,7 @@ describe('processless structured session reservation', () => {
     })
   })
 
-  it('consumes stale pre-spawn proof before a retry can spawn', async () => {
+  it('does not rerun a settled pre-spawn failure and admits a fresh operation', async () => {
     root = await mkdtemp(join(tmpdir(), 'orca-processless-retry-'))
     const storeDir = join(root, 'store')
     const store = await AgentSessionRecordStore.open({ directory: storeDir, hostId: 'local' })
@@ -113,21 +131,22 @@ describe('processless structured session reservation', () => {
       acquire: vi
         .fn<StructuredAgentSessionAdapter['acquire']>()
         .mockRejectedValueOnce(new AgentSessionPreSpawnError(new Error('launch not ready')))
-        .mockResolvedValueOnce({
+        .mockImplementationOnce(async ({ fence, spawnToken }) => ({
           process: {
             hostId: 'local',
             pid: 4242,
             processStartTimeMs: NOW,
-            spawnToken: 'spawn-a'
+            spawnToken
           },
           link: {
             linkId: 'link-1',
             handle: { provider: 'codex', threadId: 'thread-1' },
             origin: 'created',
-            mintedAtFence: 1,
+            mintedAtFence: fence,
             observedAt: NOW
           }
-        })
+        })),
+      releaseAcquisition: vi.fn(async () => true)
     } as unknown as StructuredAgentSessionAdapter
     const input = {
       store,
@@ -146,22 +165,28 @@ describe('processless structured session reservation', () => {
     }
 
     await expect(performAttach(input)).rejects.toThrow('launch not ready')
-    expect(store.getRecord(SESSION)?.lease.processlessAt).toBe(NOW)
-    vi.spyOn(store, 'commitProcessIdentity').mockRejectedValueOnce(new Error('simulated crash'))
-
-    await expect(performAttach(input)).rejects.toThrow('simulated crash')
-
-    const reopened = await AgentSessionRecordStore.open({ directory: storeDir, hostId: 'local' })
-    expect(reopened.getRecord(SESSION)?.lease.processlessAt).toBeNull()
-    await reopened.reconcileOnRestart({
-      probe: createStructuredAgentSessionOwnerProbe('local'),
-      now: NOW + 1
+    await expect(performAttach(input)).resolves.toMatchObject({
+      ok: false,
+      refusal: { code: 'agent_session_operation_invalid' }
     })
-    expect(reopened.getRecord(SESSION)?.lease).toMatchObject({
-      claimStatus: 'reserved',
-      handoffStage: 'recovering',
-      runtimeFence: 1,
-      processlessAt: null
+    expect(adapter.acquire).toHaveBeenCalledOnce()
+
+    await expect(
+      performAttach({
+        ...input,
+        authority: {
+          ...input.authority,
+          spawnToken: 'spawn-b',
+          handoffOperationId: NEXT_OPERATION
+        },
+        params: attachParams(NEXT_OPERATION, 2)
+      })
+    ).resolves.toMatchObject({ ok: true })
+    expect(store.getRecord(SESSION)?.lease).toMatchObject({
+      claimStatus: 'live',
+      handoffStage: null,
+      runtimeFence: 3,
+      ownerProcess: { spawnToken: 'spawn-b' }
     })
   })
 })

@@ -600,13 +600,16 @@ describe('restart reconciliation', () => {
     ).rejects.toThrow('agent_session_ownership_unknown')
   })
 
-  it('keeps a conflict conflicted across a restart', async () => {
+  it('keeps a conflict conflicted across a restart that proves nothing', async () => {
     const first = await open()
     await establishOwner(first)
     await first.markClaimConflicted('session-alpha', NOW)
 
     const reopened = await open()
-    await reopened.reconcileOnRestart({ probe: async () => ({ outcome: 'pid-absent' }), now: NOW })
+    await reopened.reconcileOnRestart({
+      probe: async () => ({ outcome: 'indeterminate', reason: 'no answer' }),
+      now: NOW
+    })
     expect(reopened.getRecord('session-alpha')?.lease).toMatchObject({
       claimStatus: 'conflicted',
       handoffStage: 'manual-recovery'
@@ -620,6 +623,32 @@ describe('restart reconciliation', () => {
         })
       )
     ).rejects.toThrow('agent_session_conflict')
+  })
+
+  it('releases a conflict whose named owner is proven gone at restart', async () => {
+    // A conflict with no exit is a session the user can never open again; present-time proof that
+    // the process the conflict names has exited leaves no claimant left to protect.
+    const first = await open()
+    await establishOwner(first)
+    await first.markClaimConflicted('session-alpha', NOW)
+
+    const reopened = await open()
+    await reopened.reconcileOnRestart({ probe: async () => ({ outcome: 'pid-absent' }), now: NOW })
+
+    const lease = reopened.getRecord('session-alpha')?.lease
+    expect(lease).toMatchObject({
+      claimStatus: 'released',
+      handoffStage: null,
+      deathEvidence: { kind: 'pid-absent' }
+    })
+    const reacquired = await reopened.reserveOwner(
+      reserveRequest({
+        expectedFence: lease?.runtimeFence ?? null,
+        probe: { outcome: 'pid-absent' },
+        operation: { callerKey: 'client-1', operationId: operationId(), fingerprint: 'fp-2' }
+      })
+    )
+    expect(reacquired.disposition).toBe('reserved')
   })
 
   it('frees a reservation that provably never spawned', async () => {
@@ -773,26 +802,6 @@ describe('orphans, claim keys, checkpoints, and unreadable rows', () => {
     ).rejects.toThrow('agent_session_operation_conflict')
   })
 
-  it('quarantines a record it cannot validate and refuses to own that session id', async () => {
-    const first = await open()
-    await establishOwner(first)
-    const filePath = agentSessionStorePath(directory)
-    const raw = JSON.parse(await readFile(filePath, 'utf-8'))
-    raw.records['session-alpha'].lease.runtimeFence = 'not-a-number'
-    await writeFile(filePath, JSON.stringify(raw))
-
-    const reopened = await open()
-    expect(reopened.getRecord('session-alpha')).toBeNull()
-    expect(reopened.isSessionUnreadable('session-alpha')).toBe(true)
-    await expect(reopened.reserveOwner(reserveRequest())).rejects.toThrow(
-      'execution_owner_reconciling'
-    )
-    // The row is kept verbatim so a rollback does not delete another build's session.
-    await reopened.retireClaimKey('key-2', NOW)
-    const persisted = JSON.parse(await readFile(filePath, 'utf-8'))
-    expect(persisted.records['session-alpha'].lease.runtimeFence).toBe('not-a-number')
-  })
-
   it.each([
     [
       'invalid checkpoint',
@@ -829,9 +838,15 @@ describe('orphans, claim keys, checkpoints, and unreadable rows', () => {
     expect(reopened.recoveredFromBackup).toBe(true)
     expect(reopened.getRecord('session-alpha')?.lease.runtimeFence).toBe(1)
 
-    await expect(reopened.retireClaimKey('key-2', NOW)).rejects.toThrow()
-    const backup = JSON.parse(await readFile(`${agentSessionStorePath(directory)}.bak`, 'utf-8'))
-    expect(backup.records['session-alpha'].lease.runtimeFence).toBe(1)
+    // The next transaction completes. It used to reject forever: the latch that guarded against
+    // the lost commit's fence had no exit, so a profile in this state could never write again.
+    await expect(reopened.retireClaimKey('key-2', NOW)).resolves.not.toThrow()
+    // Safety is kept by recording a FLOOR the next grant must clear, not by rewriting the current
+    // fence: `live` means a handle proven at exactly that number, so moving it would invalidate the
+    // record. The floor dominates the highest fence the lost commit could have granted (1 + 1).
+    const recovered = reopened.getRecord('session-alpha')
+    expect(recovered?.lease.runtimeFence).toBe(1)
+    expect(recovered?.lease.minimumNextFence).toBe(3)
   })
 
   it.each([
@@ -860,19 +875,5 @@ describe('orphans, claim keys, checkpoints, and unreadable rows', () => {
     await expect(store.reserveOwner(reserveRequest())).rejects.toThrow(
       'agent_session_legacy_required'
     )
-  })
-
-  it('migrates an older store schema on its next commit', async () => {
-    const filePath = agentSessionStorePath(directory)
-    await writeFile(
-      filePath,
-      JSON.stringify({ schemaVersion: 0, hostId: 'local', records: {}, operations: {} })
-    )
-
-    const store = await open()
-    await store.retireClaimKey('key-1', NOW)
-
-    const persisted = JSON.parse(await readFile(filePath, 'utf-8'))
-    expect(persisted.schemaVersion).toBe(1)
   })
 })

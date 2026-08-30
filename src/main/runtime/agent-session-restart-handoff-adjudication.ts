@@ -17,24 +17,48 @@ export function adjudicateRestartedAgentSessionHandoff(
   if (adjudication.disposition === 'readopt') {
     return updateLease(record, { ...record.lease, unreconciled: false, lastRenewedAt: now })
   }
+  if (adjudication.disposition === 'free') {
+    return updateLease(record, {
+      ...record.lease,
+      handoffStage: null,
+      handoffOperationId: null,
+      processlessAt: null,
+      unreconciled: false,
+      lastRenewedAt: now
+    })
+  }
   if (adjudication.disposition !== 'evicted') {
     return updateLease(record, {
       ...record.lease,
-      handoffStage: 'recovering',
+      handoffStage:
+        adjudication.disposition === 'conflicted' ? 'manual-recovery' : adjudication.stage,
       claimStatus:
         adjudication.disposition === 'conflicted' ? 'conflicted' : record.lease.claimStatus,
       unreconciled: false,
       lastRenewedAt: now
     })
   }
-  const provingTarget = record.lease.handoffStage === 'new-owner-proving'
+  if (record.lease.handoffStage === 'new-owner-proving' && record.lease.runtimeKind === 'native') {
+    // The attempted new owner is proven absent; no writer remains to roll back or readopt.
+    return updateLease(record, {
+      ...record.lease,
+      runtimeFence: adjudication.nextFence,
+      handoffStage: null,
+      handoffOperationId: null,
+      ownerProcess: null,
+      reservedSpawnToken: null,
+      processlessAt: null,
+      claimStatus: 'released',
+      unreconciled: false,
+      lastRenewedAt: now,
+      deathEvidence: adjudication.evidence
+    })
+  }
+  const provingTuiTarget =
+    record.lease.handoffStage === 'new-owner-proving' && record.lease.runtimeKind === 'tui'
   return updateLease(record, {
     ...record.lease,
-    runtimeKind: provingTarget
-      ? record.lease.runtimeKind === 'native'
-        ? 'tui'
-        : 'native'
-      : record.lease.runtimeKind,
+    runtimeKind: provingTuiTarget ? 'native' : record.lease.runtimeKind,
     runtimeFence: adjudication.nextFence,
     handoffStage: 'old-owner-stopped',
     ownerProcess: null,

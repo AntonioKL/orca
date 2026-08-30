@@ -41,7 +41,7 @@ describe('CodexStructuredSessionAdapter shutdown', () => {
         notify: () => {},
         respond: () => {},
         respondWithError: () => {},
-        close: async () => {}
+        close: async () => true
       } satisfies CodexAppServerConnection
       connections.push(connection)
       return connection
@@ -72,5 +72,31 @@ describe('CodexStructuredSessionAdapter shutdown', () => {
       reason: expect.objectContaining({ message: 'codex structured session adapter is closing' })
     })
     expect(connections).toHaveLength(0)
+  })
+
+  it('bounds shutdown when a provider child never proves exit', async () => {
+    const close = vi.fn(async () => false)
+    const openConnection = (async () =>
+      ({
+        pid: 4321,
+        closed: false,
+        request: async (method: string) =>
+          method === 'thread/start' ? { thread: { id: THREAD_ID } } : {},
+        notify: () => {},
+        respond: () => {},
+        respondWithError: () => {},
+        close
+      }) satisfies CodexAppServerConnection) as typeof openCodexAppServerConnection
+    const adapter = new CodexStructuredSessionAdapter({
+      resolveLaunch: async () => LAUNCH,
+      openConnection,
+      readProcessStartTime: async () => 1_700_000_000_000
+    })
+
+    await adapter.acquire({ identity: identity(), fence: 7, spawnToken: 'spawn-1' })
+    await expect(adapter.closeAll()).rejects.toThrow(
+      'codex structured session shutdown could not prove every child stopped'
+    )
+    expect(close).toHaveBeenCalledTimes(3)
   })
 })

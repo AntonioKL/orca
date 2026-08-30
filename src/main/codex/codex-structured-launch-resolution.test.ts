@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { AgentSessionRecord } from '../../shared/agent-session-record'
 import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import type { AgentSessionRecordStore } from '../runtime/agent-session-record-store'
@@ -8,6 +8,16 @@ const SESSION_ID = 'session-1'
 const IDENTITY = { sessionId: SESSION_ID } as Parameters<
   ReturnType<typeof createCodexStructuredLaunchResolver>
 >[0]['identity']
+
+async function withPlatform<T>(platform: NodeJS.Platform, run: () => Promise<T>): Promise<T> {
+  const original = process.platform
+  Object.defineProperty(process, 'platform', { configurable: true, value: platform })
+  try {
+    return await run()
+  } finally {
+    Object.defineProperty(process, 'platform', { configurable: true, value: original })
+  }
+}
 
 function record(overrides: Partial<AgentSessionRecord> = {}): AgentSessionRecord {
   return {
@@ -27,12 +37,14 @@ function record(overrides: Partial<AgentSessionRecord> = {}): AgentSessionRecord
 
 function resolverFor(
   value: AgentSessionRecord | null,
-  resolveWorkspacePath: (workspaceId: string) => Promise<string> = async (id) => `/repos/${id}`
+  resolveWorkspacePath: (workspaceId: string) => Promise<string> = async (id) => `/repos/${id}`,
+  resolveRollout: () => Promise<string | null> = async () => null
 ) {
   return createCodexStructuredLaunchResolver({
     store: { getRecord: () => value } as unknown as AgentSessionRecordStore,
     resolveWorkspacePath,
-    resolveCommand: () => '/usr/local/bin/codex'
+    resolveCommand: () => '/usr/local/bin/codex',
+    resolveRollout
   })
 }
 
@@ -49,6 +61,23 @@ describe('codex structured launch resolution', () => {
     })
   })
 
+  it('passes a Windows .cmd path containing cmd syntax directly to the safe spawn layer', async () => {
+    const command = String.raw`C:\Users\r&d\npm-prefix\codex.cmd`
+
+    await withPlatform('win32', async () => {
+      const resolveLaunch = createCodexStructuredLaunchResolver({
+        store: { getRecord: () => record() } as unknown as AgentSessionRecordStore,
+        resolveWorkspacePath: async () => String.raw`C:\workspaces\orca`,
+        resolveCommand: () => command
+      })
+
+      await expect(resolveLaunch({ identity: IDENTITY })).resolves.toMatchObject({
+        command,
+        args: ['app-server']
+      })
+    })
+  })
+
   it('resumes the last thread this session actually proved, not one a caller names', async () => {
     const launch = await resolverFor(
       record({
@@ -60,6 +89,36 @@ describe('codex structured launch resolution', () => {
     )({ identity: IDENTITY })
 
     expect(launch.resumeThreadId).toBe('thread-current')
+  })
+
+  it('places the durable user configuration before the app-server subcommand', async () => {
+    const launch = await resolverFor(
+      record({ launchArgs: ['--profile', 'review', '-c', 'model_reasoning_effort=high'] })
+    )({ identity: IDENTITY })
+
+    expect(launch.args).toEqual([
+      '--profile',
+      'review',
+      '-c',
+      'model_reasoning_effort=high',
+      'app-server'
+    ])
+  })
+
+  it('pins resume to the rollout file that proved the durable thread', async () => {
+    const resolveRollout = vi.fn(async () => '/home/work/.codex/sessions/rollout.jsonl')
+    const launch = await resolverFor(
+      record({
+        providerHandleChain: [
+          { handle: { provider: 'codex', threadId: 'thread-current' } }
+        ] as AgentSessionRecord['providerHandleChain']
+      }),
+      async (id) => `/repos/${id}`,
+      resolveRollout
+    )({ identity: IDENTITY })
+
+    expect(resolveRollout).toHaveBeenCalledWith('/home/work/.codex', 'thread-current')
+    expect(launch.resumePath).toBe('/home/work/.codex/sessions/rollout.jsonl')
   })
 
   it('refuses a session pinned to another host rather than starting a second writer here', async () => {

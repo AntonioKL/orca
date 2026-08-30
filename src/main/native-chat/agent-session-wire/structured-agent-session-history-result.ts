@@ -1,6 +1,6 @@
 import type { AgentSessionRecord } from '../../../shared/agent-session-record'
-import type { AgentProviderSessionMetadata } from '../../../shared/agent-session-resume'
 import { agentSessionProviderHandleChainHead } from '../../../shared/agent-session-provider-handle'
+import type { AgentProviderSessionMetadata } from '../../../shared/agent-session-resume'
 import type {
   AgentSessionHistoryRequest,
   AgentSessionHistoryResult
@@ -31,11 +31,10 @@ export function readStructuredAgentSessionHistoryResult(input: {
   if (fence === undefined) {
     return providerSession ? { ...result, providerSession } : result
   }
-  return result.ok
-    ? {
-        ...result,
-        page: { ...result.page, fence },
-        ...(providerSession ? { providerSession } : {})
-      }
-    : { ...result, fence, ...(providerSession ? { providerSession } : {}) }
+  return {
+    ...result,
+    page: { ...result.page, fence },
+    ...(result.ok ? {} : { fence }),
+    ...(providerSession ? { providerSession } : {})
+  }
 }

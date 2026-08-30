@@ -25,11 +25,7 @@ export function idleStructuredHandoffStatus(record: AgentSessionRecord): AgentSe
     return persistedFailedStructuredHandoffStatus(record)
   }
   if (record.lease.handoffStage === 'manual-recovery') {
-    const canRetryProof =
-      record.lease.runtimeKind === 'tui' &&
-      record.lease.ownerProcess !== null &&
-      ((record.lease.claimStatus === 'reserved' && record.lease.handoffOperationId !== null) ||
-        (record.lease.claimStatus === 'live' && record.lease.handoffOperationId === null))
+    const canRetryProof = structuredTuiRecoveryProofIsAdmissible(record)
     return {
       owner: 'none',
       direction: record.lease.runtimeKind === 'tui' ? 'to-tui' : 'to-native',
@@ -134,12 +130,7 @@ export function failedStructuredHandoffStatus(
           : params.direction === 'to-tui' && record.lease.runtimeKind === 'native'
             ? 'native'
             : 'none'
-  const canRetryProof =
-    record.lease.handoffStage === 'manual-recovery' &&
-    record.lease.runtimeKind === 'tui' &&
-    record.lease.ownerProcess !== null &&
-    ((record.lease.claimStatus === 'reserved' && record.lease.handoffOperationId !== null) ||
-      (record.lease.claimStatus === 'live' && record.lease.handoffOperationId === null))
+  const canRetryProof = structuredTuiRecoveryProofIsAdmissible(record)
   return {
     owner: recoverableOwner,
     direction: params.direction,
@@ -159,4 +150,17 @@ export function failedStructuredHandoffStatus(
       ...(canRetryProof ? { canRetryProof: true } : {})
     }
   }
+}
+
+/** A latched TUI with a recorded process can be re-proved, regardless of which acquisition
+ * phase was interrupted. The operation ledger, not the lease, records the failed attempt. */
+export function structuredTuiRecoveryProofIsAdmissible(record: AgentSessionRecord): boolean {
+  return (
+    (record.lease.handoffStage === 'recovering' ||
+      record.lease.handoffStage === 'manual-recovery') &&
+    record.lease.runtimeKind === 'tui' &&
+    record.lease.ownerProcess !== null &&
+    ((record.lease.claimStatus === 'reserved' && record.lease.handoffOperationId !== null) ||
+      (record.lease.claimStatus === 'live' && record.lease.handoffOperationId === null))
+  )
 }

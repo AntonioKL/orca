@@ -12,6 +12,10 @@ import {
   type AgentJournalMessageItem,
   type AgentSessionProviderHandle
 } from '../../../shared/agent-session-journal-types'
+import {
+  isAdmissibleAgentJournalItemBody,
+  isAdmissibleAgentJournalMessageBody
+} from '../../../shared/agent-session-journal-schemas'
 
 type JournalRowBase = {
   /** Schema version of THIS row. */
@@ -134,6 +138,16 @@ function upcastRow(record: Record<string, unknown>, version: number): Record<str
   return current
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** Open field values are type-checked, never enum-checked: a future build
+ *  adding a dispatch state or handle kind must bump the row version, but this
+ *  build should not misread a same-version row as malformed over a wider enum.
+ *  Render BODIES are the exception and validate against the canonical deep
+ *  schema — their nested shapes are dereferenced unguarded all the way to the
+ *  rendered surface, so a JSON-valid corruption must fail here, not there. */
 function isJournalRow(record: Record<string, unknown>): record is JournalRow {
   if (typeof record.kind !== 'string' || !ROW_KINDS.has(record.kind)) {
     return false
@@ -148,13 +162,36 @@ function isJournalRow(record: Record<string, unknown>): record is JournalRow {
   ) {
     return false
   }
-  if (record.kind === 'item' || record.kind === 'tombstone') {
+  if (record.kind === 'item') {
+    return (
+      typeof record.itemId === 'string' &&
+      Number.isInteger(record.revision) &&
+      isAdmissibleAgentJournalItemBody(record.body)
+    )
+  }
+  if (record.kind === 'tombstone') {
     return typeof record.itemId === 'string' && Number.isInteger(record.revision)
   }
-  if (record.kind === 'submission' || record.kind === 'dispatch') {
-    return typeof record.clientMessageId === 'string' && record.clientMessageId.length > 0
+  if (record.kind === 'submission') {
+    return (
+      typeof record.clientMessageId === 'string' &&
+      record.clientMessageId.length > 0 &&
+      typeof record.payloadFingerprint === 'string' &&
+      isPlainObject(record.providerHandle) &&
+      isAdmissibleAgentJournalMessageBody(record.body)
+    )
   }
-  return typeof record.reason === 'string'
+  if (record.kind === 'dispatch') {
+    return (
+      typeof record.clientMessageId === 'string' &&
+      record.clientMessageId.length > 0 &&
+      typeof record.state === 'string' &&
+      record.state.length > 0 &&
+      (record.providerItemId === null || typeof record.providerItemId === 'string') &&
+      (record.reason === null || typeof record.reason === 'string')
+    )
+  }
+  return typeof record.reason === 'string' && isPlainObject(record.providerHandle)
 }
 
 /** Approximate on-disk cost of a row, used for the per-session size bound. */

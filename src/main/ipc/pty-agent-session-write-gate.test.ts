@@ -67,6 +67,7 @@ import {
 import { TERMINAL_INPUT_CHUNK_MAX_BYTES } from '../../shared/terminal-input'
 import type { AgentSessionLease, AgentSessionRecord } from '../../shared/agent-session-record'
 import type { IPtyProvider } from '../providers/types'
+import { setPtyHostBindings } from './pty-host-bindings'
 
 // The renderer IPC path and the runtime controller are the two byte entry points this module owns;
 // both are proved to consult the lease, and both are proved to leave an unbound PTY alone.
@@ -159,6 +160,14 @@ beforeEach(() => {
   onMock.mockImplementation((channel: string, handler: (...a: unknown[]) => unknown) => {
     handlers.set(channel, handler)
   })
+  setPtyHostBindings({
+    ipc: {
+      handle: handleMock,
+      on: onMock,
+      removeHandler: removeHandlerMock,
+      removeAllListeners: removeAllListenersMock
+    } as never
+  })
   const runtime = {
     setPtyController: (controller: { write: (ptyId: string, data: string) => boolean }) => {
       ptyController = controller
@@ -172,6 +181,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  setPtyHostBindings({})
   agentSessionPtyWriteGate.detachRecordLookup()
   deletePtyOwnership(PTY_ID)
   unregisterSshPtyProvider(CONNECTION_ID)

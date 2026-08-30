@@ -12,13 +12,18 @@ import {
   type AgentSessionOperationDecision,
   type AgentSessionOperationRow
 } from '../../shared/agent-session-operation-ledger'
-import type { AgentSessionOwnerProbe } from '../../shared/agent-session-lease-adjudication'
+import {
+  evaluateAgentSessionAcquisition,
+  type AgentSessionOwnerProbe
+} from '../../shared/agent-session-lease-adjudication'
 import {
   AGENT_SESSION_RECORD_SCHEMA_VERSION,
   agentSessionExecutionLocationsEqual,
+  isAgentSessionLaunchArgs,
   isAgentSessionLaunchEnv,
   type AgentSessionAccountHome,
   type AgentSessionExecutionLocation,
+  type AgentSessionLaunchArgs,
   type AgentSessionLaunchEnv,
   type AgentSessionRecord
 } from '../../shared/agent-session-record'
@@ -34,11 +39,15 @@ export type AgentSessionReserveRequest = {
   location: AgentSessionExecutionLocation
   provider: AgentSessionHandleProvider
   accountHome: AgentSessionAccountHome
+  /** Arguments pinned on first reservation so owner replacement repeats the same launch. */
+  launchArgs?: AgentSessionLaunchArgs
+  /** Current launch input validated here but never written to the durable record. */
   launchEnv?: AgentSessionLaunchEnv
   runtimeKind: AgentSessionReservation['runtimeKind']
   /** Null when the session does not exist yet; otherwise the fence the caller last observed. */
   expectedFence: number | null
-  spawnToken: string
+  /** A supplier is invoked only when this operation wins a new reservation. */
+  spawnToken: string | (() => string)
   claimKeyId: string
   handoffOperationId: string | null
   probe: AgentSessionOwnerProbe
@@ -88,6 +97,26 @@ export function requireAgentSessionRecordForReplay(
   return record
 }
 
+export function admitPendingAgentSessionReservationReplay(
+  record: AgentSessionRecord,
+  request: AgentSessionReserveRequest
+): AgentSessionRecord {
+  const decision = evaluateAgentSessionAcquisition({
+    lease: record.lease,
+    expectedFence: record.lease.runtimeFence,
+    handoffOperationId: request.handoffOperationId,
+    probe: request.probe
+  })
+  if (decision.decision === 'refused') {
+    throw new Error(decision.code)
+  }
+  if (decision.decision !== 'retry-reservation') {
+    // A replay may continue only its still-present reservation; recovery requires a fresh intent.
+    throw new Error('agent_session_ownership_unknown')
+  }
+  return record
+}
+
 export function applyAgentSessionReservation(
   state: AgentSessionStoreState,
   request: AgentSessionReserveRequest,
@@ -99,9 +128,13 @@ export function applyAgentSessionReservation(
   if (request.launchEnv && !isAgentSessionLaunchEnv(request.launchEnv)) {
     throw new Error('agent_session_launch_env_invalid')
   }
+  if (request.launchArgs && !isAgentSessionLaunchArgs(request.launchArgs)) {
+    throw new Error('agent_session_launch_args_invalid')
+  }
   const reservation: AgentSessionReservation = {
     runtimeKind: request.runtimeKind,
-    spawnToken: request.spawnToken,
+    spawnToken:
+      typeof request.spawnToken === 'function' ? request.spawnToken() : request.spawnToken,
     claimKeyId: request.claimKeyId,
     handoffOperationId: request.handoffOperationId,
     leaseTtlMs: request.leaseTtlMs ?? leaseTtlMs,
@@ -129,10 +162,11 @@ export function applyAgentSessionReservation(
   if (request.expectedFence === null) {
     throw new Error('agent_session_conflict')
   }
-  const pinned =
-    existing.launchEnv || !request.launchEnv
-      ? existing
-      : { ...existing, launchEnv: { ...request.launchEnv }, updatedAt: request.now }
+  const pinned = {
+    ...existing,
+    ...(!existing.launchArgs && request.launchArgs ? { launchArgs: [...request.launchArgs] } : {}),
+    ...(!existing.launchArgs && request.launchArgs ? { updatedAt: request.now } : {})
+  }
   return reserveAgentSessionOwner({
     record: pinned,
     expectedFence: request.expectedFence,
@@ -152,7 +186,7 @@ function createAgentSessionRecord(
     provider: request.provider,
     providerHandleChain: [],
     accountHome: request.accountHome,
-    ...(request.launchEnv ? { launchEnv: { ...request.launchEnv } } : {}),
+    ...(request.launchArgs ? { launchArgs: [...request.launchArgs] } : {}),
     createdAt: request.now,
     updatedAt: request.now,
     lease: {

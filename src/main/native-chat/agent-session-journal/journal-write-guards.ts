@@ -52,8 +52,20 @@ export class JournalAppendBudget {
     private readonly limits: JournalPayloadLimits
   ) {}
 
+  fork(): JournalAppendBudget {
+    return new JournalAppendBudget(this.sessionId, this.limits)
+  }
+
+  get maxSessionBytes(): number {
+    return this.limits.maxSessionBytes
+  }
+
+  wouldExceedSize(row: JournalRow, sizeBytes: number): boolean {
+    return sizeBytes + journalRowByteLength(row) > this.limits.maxSessionBytes
+  }
+
   assert(row: JournalRow, ts: number, sizeBytes: number): void {
-    if (sizeBytes + journalRowByteLength(row) > this.limits.maxSessionBytes) {
+    if (this.wouldExceedSize(row, sizeBytes)) {
       throw new AgentSessionJournalError(
         'journal_bound_exceeded',
         `agent-session journal for ${this.sessionId} reached its ${this.limits.maxSessionBytes}-byte bound`

@@ -1,15 +1,11 @@
+import { runKeyedSerializedOperation } from '../../cli/keyed-promise-queue'
+
 export class StructuredAgentSessionTaskQueue {
-  private readonly chains = new Map<string, Promise<unknown>>()
+  private readonly chains = new Map<string, Promise<void>>()
   private readonly attaching = new Set<Promise<unknown>>()
 
   serialize<T>(sessionId: string, task: () => Promise<T>): Promise<T> {
-    const prior = this.chains.get(sessionId) ?? Promise.resolve()
-    const next = prior.then(task, task)
-    this.chains.set(
-      sessionId,
-      next.catch(() => undefined)
-    )
-    return next
+    return runKeyedSerializedOperation(this.chains, sessionId, task)
   }
 
   trackAttach<T>(operation: Promise<T>): Promise<T> {

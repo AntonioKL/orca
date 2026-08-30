@@ -18,8 +18,9 @@ function optionSession(request: CodexAppServerConnection['request']): CodexSessi
       notify: () => {},
       respond: () => {},
       respondWithError: () => {},
-      close: async () => {}
+      close: async () => true
     },
+    ended: false,
     threadId: 'thread-1',
     historyPath: null,
     prompts: new CodexAcquisitionWindow().prompts,

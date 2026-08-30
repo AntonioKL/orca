@@ -4,8 +4,12 @@ import {
   type ProcessTableRow
 } from '../../shared/process-table-snapshot'
 import type { AgentSessionProcessIdentity } from '../../shared/agent-session-record'
+import type { AgentSessionHandleProvider } from '../../shared/agent-session-provider-handle'
 import { queryWindowsProcessRowsFresh } from '../providers/windows-foreground-process-rows'
-import { readProcessStartTimeMs } from './agent-session-process-identity-probe'
+import {
+  PROCESS_START_TIME_TOLERANCE_MS,
+  readProcessStartTimeMs
+} from './agent-session-process-identity-probe'
 
 type ProcessRow = { pid: number; ppid: number; command: string; foreground: boolean }
 
@@ -37,13 +41,72 @@ function descendants(rows: ProcessRow[], rootPid: number): (ProcessRow & { depth
   return found
 }
 
+function excludedProcessTreePids(
+  rows: ProcessRow[],
+  rootPids: ReadonlySet<number> | undefined
+): ReadonlySet<number> {
+  if (!rootPids || rootPids.size === 0) {
+    return new Set()
+  }
+  const excluded = new Set(rootPids)
+  const children = new Map<number, number[]>()
+  for (const row of rows) {
+    children.set(row.ppid, [...(children.get(row.ppid) ?? []), row.pid])
+  }
+  const pending = [...rootPids]
+  while (pending.length > 0) {
+    for (const childPid of children.get(pending.pop()!) ?? []) {
+      if (!excluded.has(childPid)) {
+        excluded.add(childPid)
+        pending.push(childPid)
+      }
+    }
+  }
+  return excluded
+}
+
+async function resolveExcludedProcessTreePids(
+  rows: ProcessRow[],
+  identities: readonly { pid: number; processStartTimeMs: number | null }[] | undefined,
+  platform: NodeJS.Platform,
+  readStartTime: (pid: number, platform?: NodeJS.Platform) => Promise<number | null>
+): Promise<ReadonlySet<number>> {
+  if (!identities || identities.length === 0) {
+    return new Set()
+  }
+  const roots = new Set<number>()
+  for (const identity of identities) {
+    if (!rows.some((row) => row.pid === identity.pid)) {
+      continue
+    }
+    // Unavailable start time cannot prove PID reuse, so retain the conservative exclusion.
+    if (identity.processStartTimeMs === null) {
+      roots.add(identity.pid)
+      continue
+    }
+    const observed = await readStartTime(identity.pid, platform)
+    if (
+      observed === null ||
+      Math.abs(observed - identity.processStartTimeMs) <= PROCESS_START_TIME_TOLERANCE_MS
+    ) {
+      roots.add(identity.pid)
+    }
+  }
+  return excludedProcessTreePids(rows, roots)
+}
+
 export function resolveStructuredTuiChildPid(
   rows: ProcessRow[],
   rootPid: number,
-  agent: 'claude' | 'codex'
+  agent: AgentSessionHandleProvider,
+  processCommandMatches?: (command: string) => boolean,
+  excludedPids?: ReadonlySet<number>
 ): number | null {
   const candidates = descendants(rows, rootPid).filter(
-    (row) => recognizeAgentProcessFromCommandLine(row.command)?.agent === agent
+    (row) =>
+      !excludedPids?.has(row.pid) &&
+      recognizeAgentProcessFromCommandLine(row.command)?.agent === agent &&
+      (processCommandMatches?.(row.command) ?? true)
   )
   const foreground = candidates.filter((row) => row.foreground)
   const eligible = foreground.length > 0 ? foreground : candidates
@@ -67,7 +130,7 @@ export async function readStructuredTuiProcessIdentity(input: {
   hostId: string
   rootPid: number
   spawnToken: string
-  agent: 'claude' | 'codex'
+  agent: AgentSessionHandleProvider
   platform?: NodeJS.Platform
   readPosixRows?: () => Promise<ProcessTableRow[]>
   readWindowsRows?: typeof queryWindowsProcessRowsFresh
@@ -76,12 +139,16 @@ export async function readStructuredTuiProcessIdentity(input: {
   pollIntervalMs?: number
   now?: () => number
   sleep?: (delayMs: number) => Promise<void>
+  processCommandMatches?: (command: string) => boolean
+  excludedProcessTreeRootIdentities?: readonly {
+    pid: number
+    processStartTimeMs: number | null
+  }[]
 }): Promise<AgentSessionProcessIdentity> {
   const platform = input.platform ?? process.platform
   const now = input.now ?? Date.now
   const sleep = input.sleep ?? ((delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)))
   const deadline = now() + (input.timeoutMs ?? STRUCTURED_TUI_PROCESS_WAIT_MS)
-  const agentName = input.agent === 'claude' ? 'Claude' : 'Codex'
 
   while (true) {
     const rows: ProcessRow[] =
@@ -96,7 +163,19 @@ export async function readStructuredTuiProcessIdentity(input: {
     if (!rows.some((row) => row.pid === input.rootPid)) {
       throw new Error('The terminal root process was not present in the process snapshot.')
     }
-    const pid = resolveStructuredTuiChildPid(rows, input.rootPid, input.agent)
+    const excludedPids = await resolveExcludedProcessTreePids(
+      rows,
+      input.excludedProcessTreeRootIdentities,
+      platform,
+      input.readStartTime ?? readProcessStartTimeMs
+    )
+    const pid = resolveStructuredTuiChildPid(
+      rows,
+      input.rootPid,
+      input.agent,
+      input.processCommandMatches,
+      excludedPids
+    )
     if (pid !== null) {
       return {
         hostId: input.hostId,
@@ -107,7 +186,8 @@ export async function readStructuredTuiProcessIdentity(input: {
     }
     const remainingMs = deadline - now()
     if (remainingMs <= 0) {
-      throw new Error(`The resumed terminal did not expose one exact ${agentName} child process.`)
+      const label = input.agent === 'codex' ? 'Codex' : 'Claude'
+      throw new Error(`The resumed terminal did not expose one exact ${label} child process.`)
     }
     await sleep(Math.min(input.pollIntervalMs ?? STRUCTURED_TUI_PROCESS_POLL_MS, remainingMs))
   }

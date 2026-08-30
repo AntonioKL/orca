@@ -152,22 +152,25 @@ describe('acquisition compare-and-swap', () => {
     })
   })
 
-  it('refuses a different handoff operation and replays the matching one', () => {
-    const mid = lease({
-      handoffStage: 'old-owner-stopped',
-      handoffOperationId: 'op-1',
-      ownerProcess: null,
-      claimStatus: 'reserved'
-    })
-    expect(acquire(mid, { outcome: 'reservation-unused' }, 'op-2')).toEqual({
-      decision: 'refused',
-      code: 'agent_session_operation_conflict'
-    })
-    expect(acquire(mid, { outcome: 'reservation-unused' }, 'op-1')).toEqual({
-      decision: 'retry-reservation',
-      fence: 7
-    })
-  })
+  it.each(['old-owner-stopped', 'new-owner-proving'] as const)(
+    'refuses a different handoff operation and replays the matching one at %s',
+    (handoffStage) => {
+      const mid = lease({
+        handoffStage,
+        handoffOperationId: 'op-1',
+        ownerProcess: null,
+        claimStatus: 'reserved'
+      })
+      expect(acquire(mid, { outcome: 'reservation-unused' }, 'op-2')).toEqual({
+        decision: 'refused',
+        code: 'agent_session_operation_conflict'
+      })
+      expect(acquire(mid, { outcome: 'reservation-unused' }, 'op-1')).toEqual({
+        decision: 'retry-reservation',
+        fence: 7
+      })
+    }
+  )
 
   it('refuses a reservation whose spawn may have won the race with the crash', () => {
     const reserved = lease({ ownerProcess: null, claimStatus: 'reserved', handoffStage: null })
@@ -183,10 +186,22 @@ describe('acquisition compare-and-swap', () => {
 })
 
 describe('restart reconciliation', () => {
-  it('re-adopts a proven-live owner without moving the fence', () => {
+  it('re-adopts a proven-live TUI owner without moving the fence', () => {
+    expect(
+      adjudicateAgentSessionRestart({
+        lease: lease({ runtimeKind: 'tui' }),
+        probe: MATCHED,
+        observedAt: 9_000
+      })
+    ).toEqual({ disposition: 'readopt' })
+  })
+
+  it('routes a surviving native owner to recovery instead of readopting a dead transport', () => {
+    // The native child's stdio belonged to the runtime that died; readoption would extend
+    // a lease no process can drive. Recovery stops the orphan and respawns at fence + 1.
     expect(
       adjudicateAgentSessionRestart({ lease: lease(), probe: MATCHED, observedAt: 9_000 })
-    ).toEqual({ disposition: 'readopt' })
+    ).toMatchObject({ disposition: 'recovering', stage: 'recovering' })
   })
 
   it('bumps the fence exactly once for a proven-dead owner and records the evidence', () => {
@@ -206,7 +221,9 @@ describe('restart reconciliation', () => {
     })
   })
 
-  it('sends an unverifiable owner to recovery instead of evicting it', () => {
+  it('keeps re-asking about an unverifiable owner instead of evicting it', () => {
+    // A recorded exact identity can still be probed later; manual recovery is reserved
+    // for leases that name no process at all.
     expect(
       adjudicateAgentSessionRestart({
         lease: lease({ leaseDeadlineAt: 1 }),
@@ -216,18 +233,73 @@ describe('restart reconciliation', () => {
     ).toEqual({ disposition: 'recovering', stage: 'recovering', reason: 'no answer' })
   })
 
-  it('keeps a pre-restart conflict conflicted', () => {
+  it('keeps a pre-restart conflict conflicted while its owner cannot be proven gone', () => {
     expect(
       adjudicateAgentSessionRestart({
         lease: lease({ claimStatus: 'conflicted' }),
+        probe: INDETERMINATE,
+        observedAt: 9_000
+      })
+    ).toEqual({ disposition: 'conflicted', reason: 'claim conflicted before restart' })
+  })
+
+  it('keeps a conflict conflicted when it names no process to prove anything about', () => {
+    expect(
+      adjudicateAgentSessionRestart({
+        lease: lease({ claimStatus: 'conflicted', ownerProcess: null }),
         probe: { outcome: 'pid-absent' },
         observedAt: 9_000
       })
     ).toEqual({ disposition: 'conflicted', reason: 'claim conflicted before restart' })
   })
 
-  it('frees a reservation only when nothing ever spawned', () => {
+  it('frees a conflict whose named owner is proven gone', () => {
+    // Why: the conflict protects one specific process. Once that process is proven gone there is
+    // no claimant left, and a conflict with no exit is a session nobody can ever open again.
+    expect(
+      adjudicateAgentSessionRestart({
+        lease: lease({ claimStatus: 'conflicted' }),
+        probe: { outcome: 'pid-absent' },
+        observedAt: 9_000
+      })
+    ).toEqual({
+      disposition: 'evicted',
+      nextFence: 8,
+      evidence: { kind: 'pid-absent', detail: 'recorded pid absent on host', observedAt: 9_000 }
+    })
+  })
+
+  it('frees a lease that names neither an owner nor a reservation, without moving the fence', () => {
+    // Why: an evicted lease has no owner and no token, so a restart has nothing to probe.
+    // Calling that an unproven reservation re-latched every released record on every boot.
+    expect(
+      adjudicateAgentSessionRestart({
+        lease: lease({
+          ownerProcess: null,
+          reservedSpawnToken: null,
+          claimStatus: 'released',
+          handoffStage: 'recovering'
+        }),
+        probe: INDETERMINATE,
+        observedAt: 9_000
+      })
+    ).toEqual({ disposition: 'free', reason: 'lease has no owner and no reservation' })
+  })
+
+  it('does not infer an ownerless native reservation is unused from restart alone', () => {
     const reserved = lease({ ownerProcess: null, claimStatus: 'reserved' })
+    expect(
+      adjudicateAgentSessionRestart({ lease: reserved, probe: INDETERMINATE, observedAt: 9_000 })
+    ).toEqual({
+      disposition: 'recovering',
+      stage: 'manual-recovery',
+      reason: 'reservation with no proven process'
+    })
+  })
+
+  it('frees a TUI reservation only when a probe proves nothing ever spawned', () => {
+    // A TUI child lives in a terminal that outlives the runtime, so absence needs proof.
+    const reserved = lease({ ownerProcess: null, claimStatus: 'reserved', runtimeKind: 'tui' })
     expect(
       adjudicateAgentSessionRestart({
         lease: reserved,
@@ -237,7 +309,7 @@ describe('restart reconciliation', () => {
     ).toMatchObject({ disposition: 'evicted', nextFence: 8 })
     expect(
       adjudicateAgentSessionRestart({ lease: reserved, probe: INDETERMINATE, observedAt: 9_000 })
-    ).toMatchObject({ disposition: 'recovering' })
+    ).toMatchObject({ disposition: 'recovering', stage: 'manual-recovery' })
   })
 })
 

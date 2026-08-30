@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DashboardAgentRow as DashboardAgentRowData } from '@/components/dashboard/useDashboardData'
+import { TooltipProvider } from '@/components/ui/tooltip'
 import type * as ActivateTabAndFocusPaneModule from '@/lib/activate-tab-and-focus-pane'
 import { makePaneKey } from '../../../../shared/stable-pane-id'
 
@@ -134,7 +135,7 @@ vi.mock('./useWorktreeAgentRows', () => ({
   useWorktreeAgentRows: vi.fn(() => mockAgents)
 }))
 
-vi.mock('@/components/dashboard/useNow', () => ({
+vi.mock('@/hooks/use-now', () => ({
   useNow: vi.fn(() => 2000)
 }))
 
@@ -437,7 +438,11 @@ describe('WorktreeCardAgents activation', () => {
     const { default: WorktreeCardAgents } = await import('./WorktreeCardAgents')
 
     await act(async () => {
-      root.render(<WorktreeCardAgents worktreeId="wt-1" />)
+      root.render(
+        <TooltipProvider>
+          <WorktreeCardAgents worktreeId="wt-1" />
+        </TooltipProvider>
+      )
     })
     const row = host.querySelector('.compact-agent-row')
     expect(row).toBeInstanceOf(HTMLElement)

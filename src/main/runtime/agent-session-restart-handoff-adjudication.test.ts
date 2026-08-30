@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import type { AgentSessionRecord } from '../../shared/agent-session-record'
+import {
+  AGENT_SESSION_RECORD_SCHEMA_VERSION,
+  type AgentSessionRecord
+} from '../../shared/agent-session-record'
 import { adjudicateRestartedAgentSessionHandoff } from './agent-session-restart-handoff-adjudication'
 
 const NOW = 1_800_000_000_000
 
 function record(stage: 'preparing' | 'new-owner-proving'): AgentSessionRecord {
   return {
-    schemaVersion: 1,
+    schemaVersion: AGENT_SESSION_RECORD_SCHEMA_VERSION,
     sessionId: 'session-restart',
     location: {
       executionHostId: 'local',
@@ -62,7 +65,71 @@ describe('restarted handoff adjudication', () => {
     })
   })
 
-  it('rolls a dead proving target back to the source kind before retry', () => {
+  it('routes an ownerless indeterminate reservation to manual recovery at the same fence', () => {
+    const abandoned = record('new-owner-proving')
+    abandoned.lease.runtimeKind = 'native'
+    abandoned.lease.ownerProcess = null
+    expect(
+      adjudicateRestartedAgentSessionHandoff(
+        abandoned,
+        { outcome: 'indeterminate', reason: 'no spawn-token scan' },
+        NOW + 1_000
+      ).lease
+    ).toMatchObject({
+      runtimeKind: 'native',
+      runtimeFence: 4,
+      handoffStage: 'manual-recovery',
+      handoffOperationId: 'handoff-op-1',
+      claimStatus: 'reserved',
+      ownerProcess: null,
+      reservedSpawnToken: 'spawn-restart'
+    })
+  })
+
+  it('releases a proving reservation only with durable processless proof', () => {
+    const processless = record('new-owner-proving')
+    processless.lease.runtimeKind = 'native'
+    processless.lease.ownerProcess = null
+    processless.lease.processlessAt = NOW
+    expect(
+      adjudicateRestartedAgentSessionHandoff(
+        processless,
+        { outcome: 'reservation-unused' },
+        NOW + 1_000
+      ).lease
+    ).toMatchObject({
+      runtimeKind: 'native',
+      runtimeFence: 5,
+      handoffStage: null,
+      handoffOperationId: null,
+      claimStatus: 'released',
+      reservedSpawnToken: null
+    })
+  })
+
+  it.each([
+    ['dead pid', { outcome: 'pid-absent' } as const],
+    [
+      'reused pid with a different start time',
+      { outcome: 'identity-mismatch', field: 'process-start-time' } as const
+    ]
+  ])('releases a proving owner with exact %s proof', (_name, probe) => {
+    const proving = record('new-owner-proving')
+    proving.lease.runtimeKind = 'native'
+    expect(adjudicateRestartedAgentSessionHandoff(proving, probe, NOW + 1_000).lease).toMatchObject(
+      {
+        runtimeKind: 'native',
+        runtimeFence: 5,
+        handoffStage: null,
+        handoffOperationId: null,
+        claimStatus: 'released',
+        ownerProcess: null,
+        reservedSpawnToken: null
+      }
+    )
+  })
+
+  it('preserves the existing TUI handoff rollback after proving its target dead', () => {
     expect(
       adjudicateRestartedAgentSessionHandoff(
         record('new-owner-proving'),
@@ -75,5 +142,31 @@ describe('restarted handoff adjudication', () => {
       handoffStage: 'old-owner-stopped',
       handoffOperationId: 'handoff-op-1'
     })
+  })
+
+  it.each([
+    [
+      'live exact identity',
+      { outcome: 'identity-matched', matchedOn: ['process-start-time'] } as const,
+      'recovering'
+    ],
+    [
+      'indeterminate identity',
+      { outcome: 'indeterminate', reason: 'start time unavailable' } as const,
+      'recovering'
+    ]
+  ] as const)('keeps the fence and token for a %s', (_name, probe, expectedStage) => {
+    const proving = record('new-owner-proving')
+    proving.lease.runtimeKind = 'native'
+    expect(adjudicateRestartedAgentSessionHandoff(proving, probe, NOW + 1_000).lease).toMatchObject(
+      {
+        runtimeFence: 4,
+        handoffStage: expectedStage,
+        handoffOperationId: 'handoff-op-1',
+        claimStatus: 'reserved',
+        ownerProcess: { pid: 4242, processStartTimeMs: NOW - 1_000 },
+        reservedSpawnToken: 'spawn-restart'
+      }
+    )
   })
 })

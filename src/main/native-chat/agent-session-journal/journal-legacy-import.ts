@@ -29,6 +29,7 @@ import {
 import { decodeTranscriptStream } from '../transcript-stream-lines'
 import { putJournalBlob } from './journal-blob-store'
 import { createLegacyIdentityTracker } from './journal-legacy-identity'
+import type { JournalReplacementItem } from './journal-epoch-replacement'
 import {
   boundInlineText,
   boundPayload,
@@ -108,8 +109,7 @@ export async function importLegacyTranscriptIntoJournal(input: {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
 
-  await input.journal.rollEpoch('legacy_import', input.fence)
-  let cursor = input.journal.cursor()
+  const replacement: JournalReplacementItem[] = []
   for (const [index, message] of decoded.messages.entries()) {
     const identity = decoded.identities[index]
     if (!identity) {
@@ -119,13 +119,14 @@ export async function importLegacyTranscriptIntoJournal(input: {
     for (const blob of mapped.blobs) {
       await putJournalBlob(input.journal.directory, blob.digest, blob.payload)
     }
-    const appended = await input.journal.appendItem(identity, mapped.body, {
-      fence: input.fence,
+    replacement.push({
+      identity,
+      body: mapped.body,
       observedAt: message.timestamp ?? undefined
     })
-    cursor = appended.cursor
   }
-  return { ok: true, epoch: input.journal.epoch, cursor, imported: decoded.messages.length }
+  const cursor = await input.journal.replaceEpochItems('legacy_import', input.fence, replacement)
+  return { ok: true, epoch: cursor.epoch, cursor, imported: decoded.messages.length }
 }
 
 const TRANSCRIPT_DECODERS = {

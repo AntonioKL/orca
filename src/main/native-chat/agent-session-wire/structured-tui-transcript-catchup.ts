@@ -1,6 +1,7 @@
 import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { NativeChatMessage } from '../../../shared/native-chat-types'
+import type { AgentSessionHandleProvider } from '../../../shared/agent-session-provider-handle'
 import type { AgentSessionRecordStore } from '../../runtime/agent-session-record-store'
 import {
   appendLegacyTranscriptMessages,
@@ -25,6 +26,7 @@ import {
 type CatchupState = {
   active: boolean
   fence: number
+  agent: AgentSessionHandleProvider
   providerSessionId: string
   pending: NativeChatMessage[]
   seen: Set<string>
@@ -57,17 +59,25 @@ export class StructuredTuiTranscriptCatchup {
     this.stop(sessionId)
     const record = this.input.store.getRecord(sessionId)
     const head = record?.providerHandleChain.at(-1)
-    if (!record || head?.handle.provider !== 'codex') {
+    if (
+      !record ||
+      !head ||
+      (head.handle.provider !== 'codex' && head.handle.provider !== 'claude')
+    ) {
       return
     }
-    const providerSessionId = head.handle.threadId
+    const agent = head.handle.provider
+    const providerSessionId = agent === 'claude' ? head.handle.sessionId : head.handle.threadId
     const journal = this.input.session(sessionId).journal
-    const codexSessionsDirs = [join(record.accountHome.path, 'sessions')]
+    const transcriptOptions =
+      agent === 'claude'
+        ? { claudeProjectsDir: join(record.accountHome.path, 'projects') }
+        : { codexSessionsDirs: [join(record.accountHome.path, 'sessions')] }
     const boundary = recovering
       ? await readStructuredTuiTranscriptBoundary(journal.directory)
       : null
-    const filePath = await resolveSessionFilePath('codex', providerSessionId, {
-      codexSessionsDirs,
+    const filePath = await resolveSessionFilePath(agent, providerSessionId, {
+      ...transcriptOptions,
       ...(boundary?.filePath ? { transcriptPath: boundary.filePath } : {})
     })
     let initialReady: (() => void) | null = null
@@ -76,6 +86,7 @@ export class StructuredTuiTranscriptCatchup {
     const state: CatchupState = {
       active: false,
       fence,
+      agent,
       providerSessionId,
       pending: [],
       seen: new Set(),
@@ -85,9 +96,9 @@ export class StructuredTuiTranscriptCatchup {
     this.states.set(sessionId, state)
     try {
       state.subscription = await subscribeNativeChatTranscript({
-        agent: 'codex',
+        agent,
         sessionId: providerSessionId,
-        codexSessionsDirs,
+        ...transcriptOptions,
         ...(filePath ? { filePath, initialLimit: 0 } : {}),
         onInitialSnapshot: (messages, _hasMore, beforeOffset) => {
           baselineOffset = beforeOffset
@@ -115,7 +126,7 @@ export class StructuredTuiTranscriptCatchup {
       } else if (filePath) {
         const imported = await importLegacyTranscriptIntoJournal({
           journal,
-          agent: 'codex',
+          agent,
           sessionId: providerSessionId,
           fence,
           options: { filePath, decodedMessageIdentities: true }
@@ -157,7 +168,7 @@ export class StructuredTuiTranscriptCatchup {
       pendingBytes: 0,
       droppingOversizedRecord: false
     }
-    const decode = nativeChatLineDecoderForAgent('codex')
+    const decode = nativeChatLineDecoderForAgent(state.agent)
     if (!decode) {
       throw new Error('Transcript unavailable')
     }
@@ -239,7 +250,7 @@ export class StructuredTuiTranscriptCatchup {
     try {
       await appendLegacyTranscriptMessages({
         journal: this.input.session(sessionId).journal,
-        agent: 'codex',
+        agent: state.agent,
         sessionId: state.providerSessionId,
         fence: state.fence,
         messages: fresh

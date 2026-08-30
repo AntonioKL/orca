@@ -11,18 +11,19 @@ import { agentSessionProviderHandleChainHead } from '../../shared/agent-session-
 import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import { resolveCodexCommand } from '../codex-cli/command'
 import type { AgentSessionRecordStore } from '../runtime/agent-session-record-store'
-import { getSpawnArgsForWindows } from '../win32-utils'
 import type { CodexStructuredLaunch } from './codex-structured-session-adapter'
-
-const CODEX_APP_SERVER_ARGS = ['app-server']
+import { resolvePinnedCodexRolloutProof } from './codex-tui-rollout-proof'
 
 export type CodexStructuredLaunchResolverDeps = {
   store: AgentSessionRecordStore
   /** Absolute path of a workspace on this host. Rejects when the workspace no
    *  longer resolves, which is the case a stale mobile client hits. */
   resolveWorkspacePath: (workspaceId: string) => Promise<string>
-  /** Overridden in tests; production scans PATH and version-manager dirs. */
-  resolveCommand?: () => string
+  /** Overridden in tests; production scans the boot-cached PATH and version-manager dirs. */
+  resolveCommand?: (options?: { pathEnv?: string | null; homePath?: string }) => string
+  /** Fresh shell/configured environment for this spawn; never written to the session record. */
+  resolveEnvironment?: () => Promise<NodeJS.ProcessEnv>
+  resolveRollout?: typeof resolvePinnedCodexRolloutProof
 }
 
 export function createCodexStructuredLaunchResolver(
@@ -48,17 +49,33 @@ export function createCodexStructuredLaunchResolver(
     if (accountHome.variable !== 'CODEX_HOME') {
       throw new Error(`codex sessions pin CODEX_HOME, not ${accountHome.variable}`)
     }
-    const command = (deps.resolveCommand ?? resolveCodexCommand)()
-    const { spawnCmd, spawnArgs } = getSpawnArgsForWindows(command, CODEX_APP_SERVER_ARGS)
+    const environment = await deps.resolveEnvironment?.()
+    const pathEnv = environment?.PATH ?? environment?.Path ?? null
+    const homePath = environment?.HOME ?? environment?.USERPROFILE
+    const command = (deps.resolveCommand ?? resolveCodexCommand)({
+      pathEnv,
+      ...(homePath ? { homePath } : {})
+    })
+    const args = [...(record.launchArgs ?? []), 'app-server']
     const head = agentSessionProviderHandleChainHead(record.providerHandleChain)
+    const resumeThreadId = head?.handle.provider === 'codex' ? head.handle.threadId : null
     return {
-      command: spawnCmd,
-      args: spawnArgs,
+      command,
+      args,
       cwd: await deps.resolveWorkspacePath(location.workspaceId),
       codexHome: accountHome.path,
+      ...(environment ? { env: { ...environment } as Record<string, string> } : {}),
       // An empty chain is a session that has never proved a thread, so it
       // starts one; anything else resumes the last link this session proved.
-      resumeThreadId: head?.handle.provider === 'codex' ? head.handle.threadId : null
+      resumeThreadId,
+      ...(resumeThreadId
+        ? {
+            resumePath: await (deps.resolveRollout ?? resolvePinnedCodexRolloutProof)(
+              accountHome.path,
+              resumeThreadId
+            )
+          }
+        : {})
     }
   }
 }

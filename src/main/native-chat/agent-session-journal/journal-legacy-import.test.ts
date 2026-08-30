@@ -2,7 +2,7 @@
 // results by identity read off the same raw lines. Fixtures are shaped like the
 // files the providers actually write.
 
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -41,12 +41,17 @@ function identity(agent: 'claude' | 'codex', sessionId: string): AgentSessionJou
   }
 }
 
-async function open(agent: 'claude' | 'codex', sessionId: string): Promise<AgentSessionJournal> {
+async function open(
+  agent: 'claude' | 'codex',
+  sessionId: string,
+  overrides: Partial<Parameters<typeof openAgentSessionJournal>[0]> = {}
+): Promise<AgentSessionJournal> {
   return openAgentSessionJournal({
     identity: identity(agent, sessionId),
     journalDir: root,
     now: tick,
-    mintEpoch: () => `epoch-${clock}`
+    mintEpoch: () => `epoch-${clock}`,
+    ...overrides
   })
 }
 
@@ -420,6 +425,60 @@ describe('payload bounds on import', () => {
 })
 
 describe('import failures', () => {
+  it('keeps the live epoch intact when a staged rebuild runs out of budget', async () => {
+    const limits = { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 2_000 }
+    const journal = await open('codex', CODEX_SESSION, { limits })
+    await appendLegacyTranscriptMessages({
+      journal,
+      agent: 'codex',
+      sessionId: CODEX_SESSION,
+      fence: 1,
+      messages: [
+        {
+          id: 'durable-prefix',
+          role: 'assistant',
+          blocks: [{ type: 'text', text: 'keep me' }],
+          timestamp: 1_800_000_000_000,
+          source: 'transcript'
+        }
+      ]
+    })
+    const filePath = await writeFixture('oversized-rollout.jsonl', [
+      CODEX_LINES[0],
+      CODEX_LINES[1],
+      CODEX_LINES[2],
+      {
+        type: 'event_msg',
+        timestamp: '2026-08-05T10:00:03.000Z',
+        payload: { type: 'agent_message', message: 'x'.repeat(2_000) }
+      }
+    ])
+    const epoch = journal.epoch
+    const snapshotPath = join(root, 'snapshot.json')
+    const logPath = join(root, 'log.jsonl')
+    const before = {
+      snapshot: await readFile(snapshotPath, 'utf-8'),
+      log: await readFile(logPath, 'utf-8')
+    }
+
+    await expect(
+      importLegacyTranscriptIntoJournal({
+        journal,
+        agent: 'codex',
+        sessionId: CODEX_SESSION,
+        fence: 1,
+        options: { filePath, limits }
+      })
+    ).rejects.toMatchObject({ code: 'journal_bound_exceeded' })
+    expect(journal.epoch).toBe(epoch)
+    expect(await readFile(snapshotPath, 'utf-8')).toBe(before.snapshot)
+    expect(await readFile(logPath, 'utf-8')).toBe(before.log)
+    expect(journal.snapshot().items[0]?.body).toMatchObject({
+      kind: 'message',
+      blocks: [{ type: 'text', text: 'keep me' }]
+    })
+  })
+
   it('reports a missing transcript without touching the journal', async () => {
     const journal = await open('claude', CLAUDE_SESSION)
     const before = journal.epoch

@@ -4,20 +4,18 @@
  * Pids are reused within minutes on a busy host, and reuse happens precisely in the recovery
  * case, so a bare pid match is never proof. Every element of the identity tuple is unavailable
  * somewhere — start time costs a CIM query on Windows and is missing in some containers, /proc
- * does not exist on macOS — so an unanswerable probe reports `indeterminate` and the lease fails
- * closed to manual recovery rather than minting a second writer.
+ * does not exist on macOS — so an exact but unanswerable identity stays fenced in `recovering`;
+ * an ownerless, unattributable reservation enters `manual-recovery`.
  */
 
-import { execFile } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
-import { promisify } from 'node:util'
 import type {
   AgentSessionIdentityMatchField,
   AgentSessionOwnerProbe
 } from '../../shared/agent-session-lease-adjudication'
 import type { AgentSessionProcessIdentity } from '../../shared/agent-session-record'
-
-const execFileAsync = promisify(execFile)
+import { runProcess } from '../../shared/child-process/run-process'
+import { readWindowsProcessTableFresh } from '../windows/windows-process-table'
 
 /** Start times drift by scheduler granularity and clock reads; compare with a tolerance. */
 export const PROCESS_START_TIME_TOLERANCE_MS = 2_000
@@ -64,28 +62,58 @@ async function readLinuxProcessStartTimeMs(pid: number): Promise<number | null> 
 
 async function readDarwinProcessStartTimeMs(pid: number): Promise<number | null> {
   try {
-    const { stdout } = await execFileAsync('ps', ['-o', 'lstart=', '-p', String(pid)], {
-      timeout: PROCESS_START_TIME_TIMEOUT_MS
+    const result = await runProcess({
+      program: 'ps',
+      args: ['-o', 'lstart=', '-p', String(pid)],
+      timeoutMs: PROCESS_START_TIME_TIMEOUT_MS
     })
-    const parsed = Date.parse(stdout.trim())
+    if (result.timedOut || result.code !== 0) {
+      return null
+    }
+    const parsed = Date.parse(result.stdout.trim())
     return Number.isFinite(parsed) ? parsed : null
   } catch {
     return null
   }
 }
 
+async function readDarwinProcessStartTimesMs(
+  pids: readonly number[]
+): Promise<Map<number, number | null>> {
+  const observed = new Map<number, number | null>()
+  if (pids.length === 0) {
+    return observed
+  }
+  try {
+    const result = await runProcess({
+      program: 'ps',
+      args: ['-o', 'pid=,lstart=', '-p', pids.join(',')],
+      timeoutMs: PROCESS_START_TIME_TIMEOUT_MS
+    })
+    if (result.timedOut || result.code !== 0) {
+      return observed
+    }
+    for (const line of result.stdout.split('\n')) {
+      const match = /^\s*(\d+)\s+(.+?)\s*$/.exec(line)
+      if (!match) {
+        continue
+      }
+      const pid = Number(match[1])
+      const parsed = Date.parse(match[2])
+      if (Number.isSafeInteger(pid) && Number.isFinite(parsed)) {
+        observed.set(pid, parsed)
+      }
+    }
+  } catch {
+    // A missing process table is unknown, never evidence that every owner exited.
+  }
+  return observed
+}
+
 async function readWindowsProcessStartTimeMs(pid: number): Promise<number | null> {
   try {
-    const script =
-      `$p = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"; ` +
-      'if ($p) { $p.CreationDate.ToUniversalTime().ToString("o") }'
-    const { stdout } = await execFileAsync(
-      'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-Command', script],
-      { timeout: PROCESS_START_TIME_TIMEOUT_MS, windowsHide: true }
-    )
-    const parsed = Date.parse(stdout.trim())
-    return Number.isFinite(parsed) ? parsed : null
+    const row = (await readWindowsProcessTableFresh()).find((candidate) => candidate.pid === pid)
+    return row?.creationTimeMs ?? null
   } catch {
     return null
   }
@@ -109,6 +137,57 @@ export async function readProcessStartTimeMs(
     return readWindowsProcessStartTimeMs(pid)
   }
   return null
+}
+
+export async function readProcessStartTimesMs(
+  pids: readonly number[],
+  platform: NodeJS.Platform = process.platform
+): Promise<Map<number, number | null>> {
+  const uniquePids = [...new Set(pids)]
+  if (platform === 'darwin') {
+    const table = await readDarwinProcessStartTimesMs(uniquePids)
+    return new Map(uniquePids.map((pid) => [pid, table.get(pid) ?? null]))
+  }
+  return new Map(
+    await Promise.all(
+      uniquePids.map(async (pid) => [pid, await readProcessStartTimeMs(pid, platform)] as const)
+    )
+  )
+}
+
+export type AgentSessionProcessBatchProbeDeps = Omit<
+  AgentSessionProcessProbeDeps,
+  'readProcessStartTimeMs'
+> & {
+  readProcessStartTimesMs?: (
+    pids: readonly number[],
+    platform?: NodeJS.Platform
+  ) => Promise<Map<number, number | null>>
+}
+
+export async function probeAgentSessionProcessIdentities(args: {
+  identities: readonly AgentSessionProcessIdentity[]
+  deps?: AgentSessionProcessBatchProbeDeps
+}): Promise<AgentSessionOwnerProbe[]> {
+  const deps = args.deps ?? {}
+  const platform = deps.platform ?? process.platform
+  const pids = args.identities
+    .filter((identity) => identity.processStartTimeMs !== null)
+    .map((identity) => identity.pid)
+  const readStartTimes = deps.readProcessStartTimesMs ?? readProcessStartTimesMs
+  const startTimes = await readStartTimes(pids, platform).catch(() => new Map())
+  return Promise.all(
+    args.identities.map((identity) =>
+      probeAgentSessionProcessIdentity({
+        identity,
+        deps: {
+          ...deps,
+          platform,
+          readProcessStartTimeMs: async (pid) => startTimes.get(pid) ?? null
+        }
+      })
+    )
+  )
 }
 
 /**

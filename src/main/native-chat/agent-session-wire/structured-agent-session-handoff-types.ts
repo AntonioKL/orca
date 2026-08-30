@@ -12,6 +12,10 @@ export type StructuredTuiOwner = {
   process: AgentSessionProcessIdentity
   link: AgentSessionProviderHandleLink
   transcriptPath?: string
+  /** Codex app-server resume, not row-by-row legacy import, restores this owner's history. */
+  historySource?: 'provider-resume'
+  /** This owner came from an existing terminal view rather than a structured-session tab. */
+  adoptedTerminal?: true
 }
 
 export class StructuredTuiLaunchCleanupError extends Error {
@@ -37,15 +41,16 @@ export type StructuredAgentSessionHandoffTransport = {
     owner: StructuredTuiOwner
   }): Promise<StructuredTuiOwner>
   recoverTuiOwner(record: AgentSessionRecord): Promise<StructuredTuiOwner>
+  probeRecoveredOwner?(record: AgentSessionRecord): Promise<'live' | 'dead' | 'unknown'>
   stopRecoveredOwner(record: AgentSessionRecord): Promise<void>
-  closeTuiOwner?(
-    owner: StructuredTuiOwner,
-    persistHandle?: (link: AgentSessionProviderHandleLink) => Promise<void>
-  ): Promise<{ transcriptPath?: string }>
-  waitForTuiExit(
-    owner: StructuredTuiOwner,
-    persistHandle: (link: AgentSessionProviderHandleLink) => Promise<void>
-  ): Promise<{ transcriptPath?: string }>
+  closeTuiOwner?(owner: StructuredTuiOwner): Promise<{ transcriptPath?: string }>
+  revealNativeSession?(input: {
+    workspaceId: string
+    sessionId: string
+    agent?: 'claude' | 'codex'
+    adoptedTerminal?: true
+  }): void
+  waitForTuiExit(owner: StructuredTuiOwner): Promise<{ transcriptPath?: string }>
   waitForTuiIdleOrExit(
     owner: StructuredTuiOwner,
     signal: AbortSignal
@@ -54,12 +59,17 @@ export type StructuredAgentSessionHandoffTransport = {
   stopFailedTuiLaunch?(owner: StructuredTuiOwner): Promise<void>
 }
 
+export type StructuredNativeSuspendResult =
+  | { state: 'live' }
+  | { state: 'stopped' }
+  | { state: 'stopped-cleanup-failed'; error: unknown }
+
 export type StructuredAgentSessionHandoffDeps = {
   store: AgentSessionRecordStore
   claimKeyId: string
   transport?: StructuredAgentSessionHandoffTransport
   session: (sessionId: string) => { journal: AgentSessionJournal; fence: number }
-  suspendNative: (sessionId: string) => Promise<void>
+  suspendNative: (sessionId: string) => Promise<StructuredNativeSuspendResult>
   acquireNative: (input: {
     sessionId: string
     fence: number
@@ -78,6 +88,12 @@ export type StructuredAgentSessionHandoffDeps = {
   publish: (sessionId: string, status: AgentSessionHandoffStatus) => void
   schedule: (sessionId: string, task: () => Promise<void>) => Promise<void>
   now: () => number
+  /** Persist a provider handle observed while re-proving a TUI owner. */
+  persistTuiProviderHandle?: (input: {
+    sessionId: string
+    link: AgentSessionProviderHandleLink
+    now: number
+  }) => Promise<void>
 }
 
 export type StructuredAgentSessionHandoffFlowContext = {

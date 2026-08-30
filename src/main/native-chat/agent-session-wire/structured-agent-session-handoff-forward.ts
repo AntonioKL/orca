@@ -2,10 +2,12 @@ import { randomUUID } from 'node:crypto'
 import type { AgentSessionHandoffRequest } from '../../../shared/agent-session-wire'
 import {
   abandonStoredAgentSessionHandoffAttempt,
+  rollbackStoredAgentSessionHandoffPreparation,
   reserveStoredAgentSessionHandoffOwner,
-  setStoredAgentSessionHandoffStage,
   stopStoredAgentSessionOwnerForHandoff
 } from '../../runtime/agent-session-handoff-record-transitions'
+import { AgentSessionAcquisitionExitUnprovenError } from './structured-agent-session-adapter'
+import { markStructuredHandoffManualRecovery } from './structured-agent-session-handoff-flow-context'
 import type {
   StructuredAgentSessionHandoffFlowContext,
   StructuredTuiOwner
@@ -33,7 +35,20 @@ export async function handoffStructuredSessionToTui(
     throw new Error('agent_session_operation_conflict')
   }
   record = context.requireRecord(sessionId)
-  await deps.suspendNative(sessionId)
+  // A kill is a request. Everything below advances the fence and hands the
+  // provider session to a TUI, so an unproven exit must stop here rather than
+  // create a second live writer on the same thread.
+  let nativeSuspend
+  try {
+    nativeSuspend = await deps.suspendNative(sessionId)
+  } catch (error) {
+    await rollbackPreparingNativeOwner(context, sessionId, operationId)
+    throw error
+  }
+  if (nativeSuspend.state === 'live') {
+    await rollbackPreparingNativeOwner(context, sessionId, operationId)
+    throw new Error('agent_session_owner_exit_unproven')
+  }
   record = await stopStoredAgentSessionOwnerForHandoff(deps.store, {
     sessionId,
     expectedFence: record.lease.runtimeFence,
@@ -41,6 +56,10 @@ export async function handoffStructuredSessionToTui(
     now: deps.now()
   })
   context.publishStage(record, 'to-tui')
+  if (nativeSuspend.state === 'stopped-cleanup-failed') {
+    await markStructuredHandoffManualRecovery(context, sessionId, operationId)
+    throw nativeSuspend.error
+  }
   const spawnToken = randomUUID()
   record = await reserveStoredAgentSessionHandoffOwner(deps.store, {
     sessionId,
@@ -88,20 +107,20 @@ export async function handoffStructuredSessionToTui(
   } catch (error) {
     deps.stopTuiHistoryCatchup?.(sessionId)
     if (!owner && error instanceof StructuredTuiLaunchCleanupError) {
-      await markManualRecovery(context, sessionId, operationId)
+      await markStructuredHandoffManualRecovery(context, sessionId, operationId)
       throw error
     }
     if (owner) {
       if (!deps.transport?.stopFailedTuiLaunch) {
         context.retainOwner(sessionId, owner)
-        await markManualRecovery(context, sessionId, operationId)
+        await markStructuredHandoffManualRecovery(context, sessionId, operationId)
         throw error
       }
       try {
         await deps.transport.stopFailedTuiLaunch(owner)
       } catch (stopError) {
         context.retainOwner(sessionId, owner)
-        await markManualRecovery(context, sessionId, operationId)
+        await markStructuredHandoffManualRecovery(context, sessionId, operationId)
         throw new AggregateError(
           [error, stopError],
           'The failed terminal launch could not be proven stopped.'
@@ -124,20 +143,25 @@ export async function handoffStructuredSessionToTui(
   })
 }
 
-async function markManualRecovery(
+async function rollbackPreparingNativeOwner(
   context: StructuredAgentSessionHandoffFlowContext,
   sessionId: string,
   operationId: string
 ): Promise<void> {
   const { deps } = context
-  const record = context.requireRecord(sessionId)
-  await setStoredAgentSessionHandoffStage(deps.store, {
-    sessionId,
-    fence: record.lease.runtimeFence,
-    stage: 'manual-recovery',
-    handoffOperationId: operationId,
-    now: deps.now()
-  })
+  const current = context.requireRecord(sessionId)
+  if (
+    current.lease.handoffStage === 'preparing' &&
+    current.lease.handoffOperationId === operationId &&
+    current.lease.claimStatus === 'live'
+  ) {
+    await rollbackStoredAgentSessionHandoffPreparation(deps.store, {
+      sessionId,
+      expectedFence: current.lease.runtimeFence,
+      operationId,
+      now: deps.now()
+    })
+  }
 }
 
 async function recoverNativeAfterTuiFailure(
@@ -173,6 +197,10 @@ async function recoverNativeAfterTuiFailure(
       spawnToken
     })
   } catch (error) {
+    if (error instanceof AgentSessionAcquisitionExitUnprovenError) {
+      await markStructuredHandoffManualRecovery(context, sessionId, operationId)
+      throw error
+    }
     const current = context.requireRecord(sessionId)
     if (current.lease.handoffStage === 'new-owner-proving') {
       await abandonStoredAgentSessionHandoffAttempt(deps.store, {

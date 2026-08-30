@@ -4,13 +4,14 @@ import type { AgentSessionRecord } from '../../../shared/agent-session-record'
 import type { LegacyImportOptions } from '../agent-session-journal/journal-legacy-import'
 import { importLegacyTranscriptIntoJournal } from '../agent-session-journal/journal-legacy-import'
 import { journalIdentityFor } from './structured-agent-session-attach'
+import { rethrowAfterAgentSessionAcquisitionCleanup } from './structured-agent-session-adapter'
 import { canRestoreLiveTuiOwner } from './structured-agent-session-handoff-restart'
 import type { DeferredStructuredAgentSessionEventSink } from './structured-agent-session-event-sink'
 import type { StructuredAgentSessionHostDeps } from './structured-agent-session-host'
 import type { StructuredAgentSessionHostSession } from './structured-agent-session-host-types'
 import { StructuredAgentSessionHandoffCoordinator } from './structured-agent-session-handoff'
 import { recoverDeadTuiHandoffStatus } from './structured-agent-session-dead-tui-recovery'
-import { readNativeHandoffSessionOptions } from './structured-agent-session-handoff-options'
+import { readNativeSessionOptions } from './structured-agent-session-option-restoration'
 import type { AgentSessionSubscribers } from './structured-agent-session-subscribers'
 import { StructuredTuiTranscriptCatchup } from './structured-tui-transcript-catchup'
 
@@ -68,9 +69,22 @@ export function createStructuredAgentSessionHostHandoff(
     ...(deps.handoffTransport ? { transport: deps.handoffTransport } : {}),
     session: host.session,
     suspendNative: async (sessionId) => {
-      await deps.adapter.closeSession?.(sessionId)
-      await host.flush(sessionId)
-      host.eventSink(sessionId).unbind()
+      if (!deps.adapter.closeSession) {
+        return { state: 'live' }
+      }
+      const exited = await deps.adapter.closeSession(sessionId)
+      if (exited !== true) {
+        // Report the unproven exit; the forward handoff refuses on it.
+        return { state: 'live' }
+      }
+      host.session(sessionId).hasProviderChild = false
+      try {
+        await host.flush(sessionId)
+        host.eventSink(sessionId).unbind()
+        return { state: 'stopped' }
+      } catch (error) {
+        return { state: 'stopped-cleanup-failed', error }
+      }
     },
     acquireNative: (input) => acquireNativeHandoffOwner(deps, host, input),
     acquireNativeStop: async (sessionId, turnId, fence) =>
@@ -86,7 +100,10 @@ export function createStructuredAgentSessionHostHandoff(
       host.subscribers.handoff(sessionId, fence, status)
     },
     schedule: host.serialize,
-    now: host.now
+    now: host.now,
+    ...(deps.persistTuiProviderHandle
+      ? { persistTuiProviderHandle: deps.persistTuiProviderHandle }
+      : {})
   })
   return Object.assign(coordinator, {
     stopTuiHistoryCatchup: () => tuiHistoryCatchup.stopAll(),
@@ -124,9 +141,9 @@ async function importTuiHistory(
   if (!record || !head) {
     throw new Error('agent_session_identity_required')
   }
+  const options = structuredTuiTranscriptImportOptions(record, input.transcriptPath)
   const providerSessionId =
     head.handle.provider === 'claude' ? head.handle.sessionId : head.handle.threadId
-  const options = structuredTuiTranscriptImportOptions(record, input.transcriptPath)
   const imported = await importLegacyTranscriptIntoJournal({
     journal: session.journal,
     agent: head.handle.provider,
@@ -174,7 +191,7 @@ async function acquireNativeHandoffOwner(
   })
   let proved: AgentSessionRecord
   try {
-    const options = await readNativeHandoffSessionOptions({
+    const options = await readNativeSessionOptions({
       adapter: deps.adapter,
       sessionId: input.sessionId,
       fence: input.fence,
@@ -194,9 +211,9 @@ async function acquireNativeHandoffOwner(
       ...(options ? { options } : {})
     })
   } catch (error) {
-    await deps.adapter.releaseAcquisition?.({ sessionId: input.sessionId })
-    throw error
+    return rethrowAfterAgentSessionAcquisitionCleanup(deps.adapter, input.sessionId, error)
   }
+  session.hasProviderChild = true
   session.fence = proved.lease.runtimeFence
   eventSink.bind({
     journal: session.journal,
