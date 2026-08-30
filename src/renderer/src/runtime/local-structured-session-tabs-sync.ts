@@ -86,6 +86,7 @@ export function applyLocalStructuredSessionTabSnapshots<
       now,
       {
         contentScope: 'agent-session',
+        executionHostId: 'local',
         preserveLocalLayout: true,
         terminalPtyMode: 'local'
       }
