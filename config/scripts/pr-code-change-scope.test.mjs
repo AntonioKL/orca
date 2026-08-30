@@ -133,6 +133,23 @@ describe('per-job path classification', () => {
     expectClassification(['src/main/codex/codex-index-heal-binary-contract.test.ts'], {
       codex_index_heal_contract: true
     })
+    // Keep the real-binary gate live when a transport or launch dependency changes.
+    for (const file of [
+      'src/main/codex/codex-app-server-capability-signal.ts',
+      'src/main/codex/codex-process-exit-deadline.ts',
+      'src/main/codex/codex-session-backfill.ts',
+      'src/main/codex/codex-session-index-heal-state.ts',
+      'src/main/codex-cli/command.ts',
+      'src/main/win32-utils.ts',
+      'src/shared/node-cli-command-resolution.ts',
+      'src/shared/windows-batch-spawn.ts'
+    ]) {
+      expectClassification([file], {
+        codex_index_heal_contract: true,
+        package: true,
+        package_windows: true
+      })
+    }
     // A neighbouring Codex module must not drag the real-binary job in.
     expectClassification(['src/main/codex/codex-home-paths.ts'], {
       package: true,
