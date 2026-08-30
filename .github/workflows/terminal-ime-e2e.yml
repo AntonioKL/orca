@@ -68,6 +68,10 @@ jobs:
           --workers=1
 
       - name: Run native IBus Hangul exact-byte tests
+        # Why not the default success(): the synthetic step above runs first, so its failure used
+        # to skip this one entirely — the real-IME half reported nothing on exactly the PRs that
+        # broke IME code. The two signals are independent and both belong in the log.
+        if: '!cancelled()'
         env:
           SKIP_BUILD: '1'
         run: pnpm run test:e2e:terminal-ime-native

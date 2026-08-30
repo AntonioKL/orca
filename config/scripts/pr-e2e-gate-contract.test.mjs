@@ -613,6 +613,14 @@ describe('PR E2E gate contract', () => {
     expect(nativeImeRunner).toContain(`[IME_ENGAGEMENT_RECEIPT_ENV]: receiptPath`)
     expect(nativeImeSpec).toContain('appendImeEngagementReceipt(testInfo.title, trace)')
 
+    // Why: the synthetic CDP step runs first in the same job. Under the default success()
+    // condition its failure skipped the real-IME step, so the half that needs an input method
+    // reported nothing on exactly the changes that broke IME code.
+    const nativeStep = nativeImeWorkflow.jobs['linux-x11'].steps.find(
+      (step) => step.name === 'Run native IBus Hangul exact-byte tests'
+    )
+    expect(nativeStep.if).toBe('!cancelled()')
+
     // Why a literal comparison: the spec cannot import the .mjs module, so the env var name is
     // written twice and would otherwise drift into a receipt nobody reads.
     const specSideReceipt = readFileSync(
