@@ -10,8 +10,8 @@ export type RuntimeEnvironmentCapabilityEvidence = {
 }
 
 export type RuntimeEnvironmentCapabilityOutcome =
-  | { kind: 'supported'; evidence: RuntimeEnvironmentCapabilityEvidence }
-  | { kind: 'unsupported'; evidence: RuntimeEnvironmentCapabilityEvidence }
+  | { kind: 'supported'; evidence: RuntimeEnvironmentCapabilityEvidence; runtimeId: string }
+  | { kind: 'unsupported'; evidence: RuntimeEnvironmentCapabilityEvidence; runtimeId: string }
   | { kind: 'stale_incarnation' }
 
 type AcceptedEvidence = {
@@ -89,11 +89,13 @@ export function applyRuntimeEnvironmentCapabilityVerdict(args: {
 
 export function runtimeEnvironmentCapabilityOutcome(
   evidence: RuntimeEnvironmentCapabilityEvidence,
-  verdict: RuntimeEnvironmentCapabilityVerdict
+  verdict: RuntimeEnvironmentCapabilityVerdict,
+  runtimeId: string
 ): RuntimeEnvironmentCapabilityOutcome {
   return {
     kind: verdict === 'capable' ? 'supported' : 'unsupported',
-    evidence
+    evidence,
+    runtimeId
   }
 }
 
@@ -110,7 +112,11 @@ export function getAcceptedRuntimeEnvironmentCapabilityOutcome(
   ) {
     return null
   }
-  return runtimeEnvironmentCapabilityOutcome(accepted.evidence, accepted.verdict)
+  return runtimeEnvironmentCapabilityOutcome(
+    accepted.evidence,
+    accepted.verdict,
+    accepted.runtimeId
+  )
 }
 
 export function isRuntimeEnvironmentCapabilityOutcomeCurrent(
@@ -128,8 +134,9 @@ export function isRuntimeEnvironmentCapabilityOutcomeCurrent(
     return true
   }
   return (
-    (outcome.kind === 'supported' && accepted.verdict === 'capable') ||
-    (outcome.kind === 'unsupported' && accepted.verdict === 'absent')
+    ((outcome.kind === 'supported' && accepted.verdict === 'capable') ||
+      (outcome.kind === 'unsupported' && accepted.verdict === 'absent')) &&
+    accepted.runtimeId === outcome.runtimeId
   )
 }
 

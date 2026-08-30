@@ -141,7 +141,7 @@ function acceptedOutcome(verdict: 'capable' | 'absent') {
   }
   const evidence = captureRuntimeEnvironmentCapabilityEvidence(environmentId, pairing)
   applyRuntimeEnvironmentCapabilityVerdict({ evidence, verdict, runtimeId: 'runtime' })
-  return runtimeEnvironmentCapabilityOutcome(evidence, verdict)
+  return runtimeEnvironmentCapabilityOutcome(evidence, verdict, 'runtime')
 }
 
 function environment(overrides: Partial<KnownRuntimeEnvironment> = {}): KnownRuntimeEnvironment {

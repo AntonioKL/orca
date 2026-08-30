@@ -93,9 +93,13 @@ export async function supportsSharedControl(
         pairing,
         response._meta.runtimeId
       )
-      return runtimeEnvironmentCapabilityOutcome(evidence, verdict)
+      return runtimeEnvironmentCapabilityOutcome(evidence, verdict, response._meta.runtimeId)
     }
-    return runtimeEnvironmentCapabilityOutcome(evidence, 'absent')
+    return runtimeEnvironmentCapabilityOutcome(
+      evidence,
+      'absent',
+      environment.runtimeId ?? 'unknown-runtime'
+    )
   })()
   // Why: support belongs to the saved pairing/runtime identity, not its mutable display name.
   sharedControlSupport.set(environment.id, { cacheKey, check })

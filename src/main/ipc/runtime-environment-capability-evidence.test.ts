@@ -39,6 +39,22 @@ describe('runtime environment capability evidence', () => {
     expect(isRuntimeEnvironmentCapabilityPaused('env')).toBe(false)
   })
 
+  it('rejects an older same-verdict outcome from a different runtime identity', () => {
+    const older = captureRuntimeEnvironmentCapabilityEvidence('env', pairing())
+    const newer = captureRuntimeEnvironmentCapabilityEvidence('env', pairing())
+    applyRuntimeEnvironmentCapabilityVerdict({
+      evidence: newer,
+      verdict: 'capable',
+      runtimeId: 'runtime-new'
+    })
+
+    expect(
+      isRuntimeEnvironmentCapabilityOutcomeCurrent(
+        runtimeEnvironmentCapabilityOutcome(older, 'capable', 'runtime-old')
+      )
+    ).toBe(false)
+  })
+
   it('rejects every pre-invalidation completion, including a same-pairing cycle', () => {
     const evidence = captureRuntimeEnvironmentCapabilityEvidence('env', pairing())
     advanceRuntimeEnvironmentCapabilityIncarnation('env')
@@ -52,7 +68,7 @@ describe('runtime environment capability evidence', () => {
     ).toBe(false)
     expect(
       isRuntimeEnvironmentCapabilityOutcomeCurrent(
-        runtimeEnvironmentCapabilityOutcome(evidence, 'capable')
+        runtimeEnvironmentCapabilityOutcome(evidence, 'capable', 'runtime-old')
       )
     ).toBe(false)
   })
@@ -64,7 +80,7 @@ describe('runtime environment capability evidence', () => {
       verdict: 'capable',
       runtimeId: 'runtime'
     })
-    const supported = runtimeEnvironmentCapabilityOutcome(supportedEvidence, 'capable')
+    const supported = runtimeEnvironmentCapabilityOutcome(supportedEvidence, 'capable', 'runtime')
     const absentEvidence = captureRuntimeEnvironmentCapabilityEvidence('env', pairing())
     applyRuntimeEnvironmentCapabilityVerdict({
       evidence: absentEvidence,
@@ -88,7 +104,7 @@ describe('runtime environment capability evidence', () => {
     })
     expect(
       isRuntimeEnvironmentCapabilityOutcomeCurrent(
-        runtimeEnvironmentCapabilityOutcome(absentEvidence, 'absent')
+        runtimeEnvironmentCapabilityOutcome(absentEvidence, 'absent', 'runtime')
       )
     ).toBe(false)
     expect(
