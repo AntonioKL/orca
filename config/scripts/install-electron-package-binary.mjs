@@ -317,7 +317,17 @@ function moveExtractedElectronDist(extractDir, electronDistDir) {
     }
   } finally {
     if (cleanupTransaction) {
-      rmSync(transactionDir, { recursive: true, force: true })
+      // Why: the discarded tree can hold an executable another process still has
+      // open on Windows. Never fail a published install, or mask a publish error,
+      // on leftover-temp cleanup.
+      try {
+        rmSync(transactionDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+      } catch (cleanupError) {
+        console.warn(
+          `[electron-package] Could not remove install transaction dir ${transactionDir}: ` +
+            `${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`
+        )
+      }
     }
   }
 }
