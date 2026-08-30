@@ -4,6 +4,7 @@ import { DEGRADED_DAEMON_RECOVERY_RETRY_MS } from './degraded-daemon-fresh-spawn
 import type { DaemonPtyAdapter } from './daemon-pty-adapter'
 import type { IPtyProvider, PtySpawnOptions, PtySpawnResult } from '../providers/types'
 import {
+  PtyGoneError,
   inspectPtyProviderProcessForRenderer,
   type PtyProcessInspection
 } from '../providers/pty-process-inspection'
@@ -407,6 +408,65 @@ describe('DegradedDaemonPtyProvider.ptyAbsenceVerdict', () => {
     fallbackSessions.splice(0)
 
     expect(provider.ptyAbsenceVerdict(fresh.id)).toBe('unverifiable')
+  })
+})
+
+/** The verdict a rejected inspection published, named rather than counted, so a failure reads as
+ *  the wrong verdict instead of as one more red test. */
+async function absencePublishedByInspectProcess(
+  provider: DegradedDaemonPtyProvider,
+  id: string
+): Promise<string> {
+  return await provider.inspectProcess(id).then(
+    () => 'resolved: the id was routed, so no absence verdict was published',
+    (error: unknown) =>
+      error instanceof PtyGoneError ? error.absence : `non-absence rejection: ${String(error)}`
+  )
+}
+
+/**
+ * This method's own absence branch is dominated today, and these cases pin the value anyway.
+ * Every production route in runs through `inspectPtyProviderProcess`, whose gate throws first
+ * with the identical verdict; the two `hasPty` reads sit in one synchronous turn and cannot
+ * disagree, because the route lookup only ever adopts a provider that already answered true.
+ * So the branch is one caller away from being live, `PtyGoneError.absence` is the field
+ * `inspectPtyProviderProcessForRenderer` turns into the renderer's `children.verdict`, and
+ * until now nothing in the tree said which verdict it must carry — the one test that reaches
+ * it asserts only the `terminal_gone` message, which both verdicts satisfy.
+ */
+describe('DegradedDaemonPtyProvider.inspectProcess absence', () => {
+  it('publishes a lost route as unverifiable, never as a watched exit', async () => {
+    // A fallback that CAN vouch, because `providerFor` resolves an unknown id to it: the failure
+    // this pins is borrowing someone else's certificate for an id this router never routed.
+    const provider = new DegradedDaemonPtyProvider({
+      current: createDaemonAdapter('daemon'),
+      legacy: [],
+      fallback: withAbsenceVerdict(createProvider('fallback'), 'exited')
+    })
+
+    expect(provider.hasPty('never-inspected-here')).toBe(false)
+    expect(
+      await absencePublishedByInspectProcess(provider, 'never-inspected-here'),
+      'nothing here watched this id die, so its absence is a lost route; `exited` would close a live terminal without asking'
+    ).toBe('unverifiable')
+  })
+
+  it('still publishes a watched exit as exited', async () => {
+    // The control arm: without it, answering `unverifiable` for everything would pass.
+    const fallbackSessions: string[] = []
+    const provider = new DegradedDaemonPtyProvider({
+      current: createDaemonAdapter('daemon'),
+      legacy: [],
+      fallback: withAbsenceVerdict(createProvider('fallback', fallbackSessions), 'exited')
+    })
+    const fresh = await provider.spawn({ cols: 80, rows: 24 })
+    fallbackSessions.splice(0)
+
+    expect(provider.hasPty(fresh.id)).toBe(false)
+    expect(
+      await absencePublishedByInspectProcess(provider, fresh.id),
+      'the owner watched this one go, so `unverifiable` would leave a dead pane prompting forever'
+    ).toBe('exited')
   })
 })
 
