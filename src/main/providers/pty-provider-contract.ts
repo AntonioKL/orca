@@ -42,9 +42,25 @@ export type PtyProviderBufferSnapshot = {
   terminalOwner?: TerminalOwner
 }
 
+/** Provider-owned proof that a PTY incarnation ended. Numeric codes alone are
+ * ambiguous on older hosts, so sequencing consumers must inspect `cause`. */
+export type PtyExitPayload = {
+  id: string
+  code: number
+  incarnationId?: PtyIncarnationId
+  /** Absent when the provider predates exit causes; never infer one from code. */
+  cause?: TerminalExitCause
+}
+
 export type PtySpawnOptions = {
   cols: number
   rows: number
+  /** Spawn an executable directly instead of starting an interactive shell.
+   *  The provider owns argv construction and reports the executable's exit. */
+  directExec?: {
+    executable: string
+    argv: string[]
+  }
   cwd?: string
   /** Exact per-spawn cwd already proven by main; providers validate any other resolved path. */
   prevalidatedCwd?: string
@@ -228,12 +244,6 @@ export type IPtyProvider = {
   onData(callback: (payload: PtyDataEvent) => void): () => void
   onReplay(callback: (payload: { id: string; data: string }) => void): () => void
   onExit(
-    callback: (payload: {
-      id: string
-      code: number
-      incarnationId?: PtyIncarnationId
-      /** Absent when the provider predates exit causes; readers must not infer one from `code`. */
-      cause?: TerminalExitCause
-    }) => void
+    callback: (payload: PtyExitPayload) => void
   ): () => void
 }
