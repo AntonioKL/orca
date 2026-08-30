@@ -630,7 +630,11 @@ import {
   type TerminalQuickCommandMutation
 } from '../../shared/terminal-quick-commands'
 import type { PtyIncarnationId } from '../../shared/pty-incarnation'
-import type { PtyProcessInspectionEvidence } from '../../shared/pty-process-inspection-evidence'
+import {
+  buildPtyProcessInspectionWireResult,
+  ensurePtyProcessInspectionEvidence,
+  type PtyProcessInspectionEvidence
+} from '../../shared/pty-process-inspection-evidence'
 import {
   buildAgentDraftLaunchPlan,
   buildAgentResumeStartupPlan,
@@ -23806,11 +23810,16 @@ export class OrcaRuntimeService {
       throw new Error('terminal_gone')
     }
     if (this.ptyController.inspectProcess) {
-      return this.ptyController.inspectProcess(leaf.ptyId)
+      return ensurePtyProcessInspectionEvidence(await this.ptyController.inspectProcess(leaf.ptyId))
     }
     const foregroundProcess = await this.ptyController.getForegroundProcess(leaf.ptyId)
     const hasChildProcesses = (await this.ptyController.hasChildProcesses?.(leaf.ptyId)) ?? false
-    return { foregroundProcess, hasChildProcesses }
+    return buildPtyProcessInspectionWireResult(
+      foregroundProcess !== null && !isShellProcess(foregroundProcess)
+        ? { verdict: 'live', processName: foregroundProcess }
+        : { verdict: 'exited', processName: foregroundProcess },
+      hasChildProcesses ? { verdict: 'live' } : { verdict: 'exited' }
+    )
   }
 
   reorderRepos(orderedIds: string[]): { status: 'applied' | 'rejected' } {

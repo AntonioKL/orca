@@ -51,7 +51,15 @@ export async function inspectPtyProviderProcessForRenderer(
     return await inspectPtyProviderProcess(provider, ptyId)
   } catch (error) {
     if (error instanceof Error && error.message === 'terminal_gone') {
-      return { foregroundProcess: null, hasChildProcesses: false, unavailable: true }
+      return {
+        foregroundProcess: null,
+        hasChildProcesses: false,
+        unavailable: true,
+        processEvidence: {
+          foreground: { verdict: 'unverifiable', reason: 'pty no longer exists' },
+          children: { verdict: 'unverifiable', reason: 'pty no longer exists' }
+        }
+      }
     }
     throw error
   }

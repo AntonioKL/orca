@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { combinePtyProcessInspectionVerdict } from './pty-process-inspection-evidence'
+import {
+  combinePtyProcessInspectionVerdict,
+  readPtyProcessInspectionEvidence
+} from './pty-process-inspection-evidence'
 
 describe('PTY inspection evidence combination', () => {
+  it('treats an omitted wire evidence field as unverifiable', () => {
+    expect(
+      combinePtyProcessInspectionVerdict(
+        readPtyProcessInspectionEvidence({ foregroundProcess: 'zsh', hasChildProcesses: false })
+      )
+    ).toBe('unverifiable')
+  })
+
   it('lets any unverifiable component poison the combined verdict', () => {
     expect(
       combinePtyProcessInspectionVerdict({

@@ -43,7 +43,15 @@ export async function inspectRuntimeTerminalProcess(
     return result.process
   } catch (error) {
     if (isTerminalGoneError(error)) {
-      return { foregroundProcess: null, hasChildProcesses: false, unavailable: true }
+      return {
+        foregroundProcess: null,
+        hasChildProcesses: false,
+        unavailable: true,
+        processEvidence: {
+          foreground: { verdict: 'unverifiable', reason: 'remote terminal route unavailable' },
+          children: { verdict: 'unverifiable', reason: 'remote terminal route unavailable' }
+        }
+      }
     }
     throw error
   }

@@ -32,6 +32,7 @@ export function combinePtyProcessInspectionVerdict(
   ) {
     return 'unverifiable'
   }
+  // A live sample wins conservatively: prompting is safer than closing if it ended between probes.
   if (evidence.foreground.verdict === 'live' || evidence.children.verdict === 'live') {
     return 'live'
   }
@@ -70,17 +71,30 @@ export function readPtyProcessInspectionEvidence(result: {
 }): PtyProcessInspectionEvidence {
   const evidence = result.processEvidence
   if (evidence === undefined) {
-    // Legacy peers only publish these two fields. Preserve compatibility for
-    // ordinary readers; absence-action callers apply their stricter fence.
+    // Legacy peers omit this field; an updated client cannot call that absence idle.
     return {
-      foreground: classifyLegacyForegroundProcess(result.foregroundProcess),
-      children: result.hasChildProcesses ? { verdict: 'live' } : { verdict: 'exited' }
+      foreground: { verdict: 'unverifiable', reason: 'peer omitted process inspection evidence' },
+      children: { verdict: 'unverifiable', reason: 'peer omitted process inspection evidence' }
     }
   }
   return {
     foreground: normalizeForegroundEvidence(evidence.foreground),
     children: normalizeChildrenEvidence(evidence.children)
   }
+}
+
+/** Add an explicit unknown verdict when a mixed-version peer omitted the optional field. */
+export function ensurePtyProcessInspectionEvidence<
+  T extends {
+    foregroundProcess: string | null
+    hasChildProcesses: boolean
+    processEvidence?: PtyProcessInspectionEvidence
+  }
+>(result: T): T & { processEvidence: PtyProcessInspectionEvidence } {
+  if (result.processEvidence !== undefined) {
+    return result as T & { processEvidence: PtyProcessInspectionEvidence }
+  }
+  return { ...result, processEvidence: readPtyProcessInspectionEvidence(result) }
 }
 
 function normalizeReason(reason: unknown): string {
@@ -105,20 +119,6 @@ function normalizeForegroundEvidence(
     return { verdict: 'unverifiable', reason: normalizeReason(evidence.reason) }
   }
   return { verdict: 'unverifiable', reason: 'malformed foreground inspection evidence' }
-}
-
-function classifyLegacyForegroundProcess(processName: string | null): PtyForegroundProcessEvidence {
-  if (!processName) {
-    return { verdict: 'exited', processName: null }
-  }
-  const basename = processName
-    .trim()
-    .replace(/^.*[\\/]/, '')
-    .replace(/\.exe$/i, '')
-  const shells = new Set(['bash', 'cmd', 'fish', 'nu', 'powershell', 'pwsh', 'sh', 'zsh'])
-  return shells.has(basename.toLowerCase())
-    ? { verdict: 'exited', processName }
-    : { verdict: 'live', processName }
 }
 
 function normalizeChildrenEvidence(

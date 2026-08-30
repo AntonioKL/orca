@@ -241,7 +241,11 @@ describe('SshPtyProvider', () => {
     const inspection = {
       foregroundProcess: null,
       hasChildProcesses: true,
-      unavailable: true as const
+      unavailable: true as const,
+      processEvidence: {
+        foreground: { verdict: 'unverifiable' as const, reason: 'relay unavailable' },
+        children: { verdict: 'unverifiable' as const, reason: 'relay unavailable' }
+      }
     }
     mux.request.mockResolvedValue(inspection)
 
