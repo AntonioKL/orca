@@ -243,7 +243,5 @@ export type IPtyProvider = {
   getProfiles(): Promise<{ name: string; path: string }[]>
   onData(callback: (payload: PtyDataEvent) => void): () => void
   onReplay(callback: (payload: { id: string; data: string }) => void): () => void
-  onExit(
-    callback: (payload: PtyExitPayload) => void
-  ): () => void
+  onExit(callback: (payload: PtyExitPayload) => void): () => void
 }

@@ -168,16 +168,7 @@ export function spawnDirectPty(params: {
   env: Record<string, string>
   ptySpawn: typeof pty.spawn
 }): ShellSpawnResult {
-  const {
-    executable,
-    argv,
-    termName = 'xterm-256color',
-    cols,
-    rows,
-    cwd,
-    env,
-    ptySpawn
-  } = params
+  const { executable, argv, termName = 'xterm-256color', cols, rows, cwd, env, ptySpawn } = params
   const process_ = ptySpawn(executable, [...argv], {
     name: termName,
     cols,
