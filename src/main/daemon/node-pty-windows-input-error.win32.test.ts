@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 type WindowsPtyInternals = IPty & {
   _agent: { inSocket: Socket }
+  _socket: Socket
 }
 
 function waitForOutput(terminal: IPty, marker: string): Promise<void> {
@@ -74,6 +75,42 @@ describe.skipIf(process.platform !== 'win32')('node-pty Windows input errors', (
       } catch {}
       // ConPTY's worker drains asynchronously; keep the guard installed through
       // the delayed close so cleanup cannot reintroduce an unhandled error.
+      await new Promise((resolve) => setTimeout(resolve, 1_500))
+      process.off('uncaughtException', uncaughtListener)
+    }
+  }, 20_000)
+
+  it('ignores a late output EPIPE after the PTY has closed', async () => {
+    const uncaught: unknown[] = []
+    const uncaughtListener = (error: unknown): void => {
+      uncaught.push(error)
+    }
+    process.on('uncaughtException', uncaughtListener)
+
+    let terminal: IPty | undefined
+    try {
+      terminal = spawn(process.env.ComSpec ?? 'cmd.exe', ['/d', '/q'], {
+        cwd: process.cwd(),
+        env: process.env,
+        useConptyDll: false
+      })
+      terminal.kill()
+      await waitForExit(terminal)
+
+      const output = (terminal as WindowsPtyInternals)._socket
+      expect(() => {
+        output.emit(
+          'error',
+          Object.assign(new Error('This socket has been ended by the other party'), {
+            code: 'EPIPE'
+          })
+        )
+      }).not.toThrow()
+      expect(uncaught).toEqual([])
+    } finally {
+      try {
+        terminal?.kill()
+      } catch {}
       await new Promise((resolve) => setTimeout(resolve, 1_500))
       process.off('uncaughtException', uncaughtListener)
     }

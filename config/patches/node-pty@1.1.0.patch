@@ -826,7 +826,7 @@ index 3c38f89..e20b3e6 100644
 +            // Node can report these duplicate stream errors after teardown; active
 +            // sockets still surface every other failure to the caller.
 +            _this._close();
-+            if (wasClosing && (code === 'ERR_STREAM_PUSH_AFTER_EOF' || code === 'ERR_STREAM_DESTROYED')) {
++            if (wasClosing && (code === 'EPIPE' || code === 'ERR_STREAM_PUSH_AFTER_EOF' || code === 'ERR_STREAM_DESTROYED')) {
 +                return;
 +            }
 +            // EIO, happens when someone closes our child process: the only process
@@ -936,7 +936,7 @@ index 13f6c6d..eda63c8 100644
 +      // Node can report these duplicate stream errors after teardown; active
 +      // sockets still surface every other failure to the caller.
 +      this._close();
-+      if (wasClosing && (code === 'ERR_STREAM_PUSH_AFTER_EOF' || code === 'ERR_STREAM_DESTROYED')) {
++      if (wasClosing && (code === 'EPIPE' || code === 'ERR_STREAM_PUSH_AFTER_EOF' || code === 'ERR_STREAM_DESTROYED')) {
 +        return;
 +      }
 +
