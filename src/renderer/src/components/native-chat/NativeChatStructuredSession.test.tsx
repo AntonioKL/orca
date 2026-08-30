@@ -23,7 +23,10 @@ vi.mock('@/runtime/structured-agent-session-client', () => ({
 vi.mock('./use-structured-agent-session', async () => {
   const { useStructuredAgentSessionOutbox } = await import('./use-structured-agent-session-outbox')
   return {
-    useStructuredAgentSession: (props: { sessionId: string; target: { kind: 'local' } }) => {
+    useStructuredAgentSession: (props: {
+      sessionId: string
+      target: { kind: 'local' } | { kind: 'environment'; environmentId: string }
+    }) => {
       const outbox = useStructuredAgentSessionOutbox({
         sessionId: props.sessionId,
         target: props.target,
@@ -372,6 +375,44 @@ describe('NativeChatStructuredSession', () => {
     // the stream, not after it went quiet.
     expect(mocks.call).toHaveBeenCalledTimes(2)
   }, 20000)
+
+  it('restarts probe delay when the runtime target changes', async () => {
+    mocks.mode = 'outbox'
+    mocks.call.mockRejectedValueOnce(new Error('socket closed')).mockResolvedValue({
+      ok: true,
+      value: { submission: { clientMessageId: 'client-1', dispatchState: 'accepted' } }
+    })
+
+    const makeView = (
+      target: { kind: 'local' } | { kind: 'environment'; environmentId: string }
+    ) => (
+      <NativeChatStructuredSession
+        isVisible
+        tabId="structured-tab-target-switch"
+        sessionId="session-target-switch"
+        target={target}
+        agent="codex"
+        allowFileUriLinks
+      />
+    )
+    const { rerender } = render(makeView({ kind: 'local' }))
+    const send = mocks.composerProps?.structuredTransport?.send as
+      | ((text: string, attachments: readonly { id: string; path: string }[]) => boolean)
+      | undefined
+    expect(send?.('first', [])).toBe(true)
+    await waitFor(() => expect(mocks.call).toHaveBeenCalledOnce())
+    await waitFor(() => expect(screen.getByText('Message delivery is unconfirmed.')).toBeTruthy())
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300))
+    })
+    rerender(makeView({ kind: 'environment', environmentId: 'env-1' }))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 600))
+    })
+    expect(mocks.call).toHaveBeenCalledOnce()
+    await waitFor(() => expect(mocks.call).toHaveBeenCalledTimes(2), { timeout: 1500 })
+  }, 10000)
 
   it('never auto-probes an entry the user already force-retried', async () => {
     mocks.mode = 'outbox'

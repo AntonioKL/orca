@@ -40,6 +40,7 @@ export function useStructuredAgentSessionOutbox(args: {
   submissions: readonly AgentJournalSubmission[]
 }) {
   const { fence, sessionId, submissions, target } = args
+  const targetKey = target.kind === 'local' ? 'local' : `environment:${target.environmentId}`
   const [outbox, setOutbox] = useState<StructuredAgentSessionOutboxEntry[]>(() =>
     readOutbox(sessionId)
   )
@@ -48,7 +49,10 @@ export function useStructuredAgentSessionOutbox(args: {
   const dispatchingRef = useRef(false)
   const dispatchGenerationRef = useRef(0)
   const blockedIdRef = useRef<string | null>(null)
-  const probeAttemptsRef = useRef(new Map<string, number>())
+  const probeAttemptsRef = useRef<{ id: string | null; attempts: number }>({
+    id: null,
+    attempts: 0
+  })
   const [error, setError] = useState<string | null>(null)
   const [errorSession, setErrorSession] = useState(sessionId)
   // Render-time reset (react.dev: adjusting state when a prop changes), so the
@@ -66,8 +70,8 @@ export function useStructuredAgentSessionOutbox(args: {
     dispatchGenerationRef.current += 1
     dispatchingRef.current = false
     blockedIdRef.current = null
-    probeAttemptsRef.current = new Map()
-  }, [fence, sessionId, target])
+    probeAttemptsRef.current = { id: null, attempts: 0 }
+  }, [fence, sessionId, targetKey])
 
   useEffect(() => {
     const sessionChanged = outboxSessionRef.current !== sessionId
@@ -233,10 +237,10 @@ export function useStructuredAgentSessionOutbox(args: {
     if (probeId === null || probeSettled || fence === null) {
       return
     }
-    const attempts = probeAttemptsRef.current.get(probeId) ?? 0
+    const attempts = probeAttemptsRef.current.id === probeId ? probeAttemptsRef.current.attempts : 0
     const timer = setTimeout(
       () => {
-        probeAttemptsRef.current.set(probeId, attempts + 1)
+        probeAttemptsRef.current = { id: probeId, attempts: attempts + 1 }
         const next = outboxRef.current.map((entry) =>
           entry.clientMessageId === probeId ? { ...entry, state: 'queued' as const } : entry
         )
@@ -247,7 +251,7 @@ export function useStructuredAgentSessionOutbox(args: {
       Math.min(UNCONFIRMED_PROBE_BASE_DELAY_MS * 2 ** attempts, UNCONFIRMED_PROBE_MAX_DELAY_MS)
     )
     return () => clearTimeout(timer)
-  }, [fence, probeId, probeSettled, sessionId])
+  }, [fence, probeId, probeSettled, sessionId, targetKey])
 
   const send = useCallback(
     (text: string, attachments: readonly { path: string; previewUri: string }[] = []): boolean => {
