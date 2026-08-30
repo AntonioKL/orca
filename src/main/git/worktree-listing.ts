@@ -1,5 +1,6 @@
 import { realpath, stat } from 'node:fs/promises'
 import { join, posix } from 'node:path'
+import { isWorktreeCreatePreparation } from '../../shared/worktree/create-preparation'
 import { toWslExecutionSpace } from '../../shared/wsl-paths'
 import type { GitWorktreeInfo } from '../../shared/worktree/types'
 import {
@@ -28,7 +29,10 @@ export async function listWorktreeGraph(
   options: GitWorktreeExecOptions = {}
 ): Promise<GitWorktreeInfo[]> {
   try {
-    return await readTranslatedWorktreeGraph(repoPath, options)
+    const worktrees = await readTranslatedWorktreeGraph(repoPath, options)
+    return options.includeCreatePreparations
+      ? worktrees
+      : worktrees.filter((worktree) => !isWorktreeCreatePreparation(worktree))
   } catch (err) {
     if (getErrorCode(err) === 'ENOENT') {
       try {
@@ -54,7 +58,10 @@ export async function listWorktreesUnshared(
 ): Promise<GitWorktreeInfo[]> {
   try {
     const worktrees = await readTranslatedWorktreeGraph(repoPath, options)
-    return annotateSparseCheckoutStatus(worktrees)
+    const visibleWorktrees = options.includeCreatePreparations
+      ? worktrees
+      : worktrees.filter((worktree) => !isWorktreeCreatePreparation(worktree))
+    return annotateSparseCheckoutStatus(visibleWorktrees)
   } catch (err) {
     if (getErrorCode(err) === 'ENOENT') {
       try {
@@ -83,7 +90,10 @@ export async function listWorktreesStrict(
     const translatedPath = translateWorktreePath(worktree.path, repoPath, options)
     return translatedPath === worktree.path ? worktree : { ...worktree, path: translatedPath }
   })
-  return annotateSparseCheckoutStatus(worktrees)
+  const visibleWorktrees = options.includeCreatePreparations
+    ? worktrees
+    : worktrees.filter((worktree) => !isWorktreeCreatePreparation(worktree))
+  return annotateSparseCheckoutStatus(visibleWorktrees)
 }
 
 async function annotateSparseCheckoutStatus(

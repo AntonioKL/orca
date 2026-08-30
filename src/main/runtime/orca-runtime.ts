@@ -957,6 +957,7 @@ import { createStackedHostedReview as createStackedHostedReviewFromRepo } from '
 import {
   getLocalProjectGitExecOptions,
   getLocalProjectWorktreeGitOptions,
+  getWorktreeMirrorDistro,
   getLocalProjectWorktreeGitOptionsForRuntime,
   resolveLocalProjectRuntimeForRepo,
   resolveLocalProjectRuntimesForRepos
@@ -1257,6 +1258,10 @@ import {
   resolveWorktreeRemovalRepoOwner
 } from '../worktree-removal-repo-owner'
 import { prefetchWorktreeCreateBase } from '../worktree-create-base-prefetch'
+import {
+  consumePreparedWorktreeCreate,
+  prepareWorktreeCreateForRepo
+} from '../worktree-create-preparation'
 import { prepareLocalWorktreeRootForRepo } from '../worktree-root-preparation'
 import { getWorktreeWatcherRemoval } from '../ipc/worktree-watcher-removal'
 import { acquireWatcherRemovalGate } from '../ipc/watcher-removal-gate'
@@ -1460,6 +1465,9 @@ type RuntimeStore = {
   getSettings(): {
     workspaceDir: string
     nestWorkspaces: boolean
+    // Read by worktree placement: decides whether this project's worktrees
+    // mirror into a WSL distro instead of the Windows drive.
+    localWindowsRuntimeDefault?: GlobalSettings['localWindowsRuntimeDefault']
     refreshLocalBaseRefOnWorktreeCreate: boolean
     localBaseRefSuggestionDismissed?: boolean
     branchPrefix: string
@@ -26494,11 +26502,18 @@ export class OrcaRuntimeService {
     }
 
     const repo = await this.resolveRepoSelector(args.repoSelector)
-    await prefetchWorktreeCreateBase({
+    const baseBranch = await prefetchWorktreeCreateBase({
       repo,
       baseBranch: args.baseBranch,
       runtime: this
     })
+    if (baseBranch) {
+      try {
+        await prepareWorktreeCreateForRepo(this.requireStore(), repo, baseBranch)
+      } catch {
+        // Why: speculative preparation is an optimistic warm-up; the real create path reports failures.
+      }
+    }
   }
 
   async createManagedWorktree(args: {
@@ -26773,7 +26788,11 @@ export class OrcaRuntimeService {
       }
     }
     const settings = createSettings
-    const worktreePathSettings = getWorktreePathSettings(repo, settings)
+    const worktreePathSettings = getWorktreePathSettings(
+      repo,
+      settings,
+      getWorktreeMirrorDistro(this.requireStore(), repo)
+    )
     const localGitExecOptions = getLocalProjectGitExecOptions(this.requireStore(), repo)
     const localWorktreeGitOptions = getLocalProjectWorktreeGitOptions(this.requireStore(), repo)
     const hasLocalWorktreeGitOptions = hasLocalGitOptions(localWorktreeGitOptions)
@@ -26791,14 +26810,13 @@ export class OrcaRuntimeService {
     const requestedDisplayName = args.displayName?.trim() || undefined
     const sanitizedName = sanitizeWorktreeName(args.name)
     let effectiveSanitizedName = sanitizedName
-    // Why: explicit branches and non-username prefix modes never consume this
-    // value; skipping the probes preserves the exact generated branch name.
-    const username =
+    // Username and base resolution are independent read-only probes. Starting
+    // both before awaiting removes one serial git/config round trip from create.
+    const usernamePromise =
       !args.branchNameOverride && settings.branchPrefix === 'git-username'
-        ? await resolveLocalGitUsername(repo.path)
-        : ''
-
-    const baseBranch = await resolveWorktreeCreateBase({
+        ? resolveLocalGitUsername(repo.path)
+        : Promise.resolve('')
+    const baseBranchPromise = resolveWorktreeCreateBase({
       requestedBaseBranch: args.baseBranch,
       repoWorktreeBaseRef: repo.worktreeBaseRef,
       resolveDefaultBaseRef: () =>
@@ -26834,6 +26852,7 @@ export class OrcaRuntimeService {
         )
       }
     })
+    const [username, baseBranch] = await Promise.all([usernamePromise, baseBranchPromise])
     if (!baseBranch) {
       // Why: a null default means no suitable ref exists; fail clearly instead
       // of handing Git a fabricated origin/main ref.
@@ -26990,18 +27009,15 @@ export class OrcaRuntimeService {
       ...localWorktreeGitOptionArgs
     )
     if (remoteTrackingBase) {
-      const hadRemoteTrackingBaseRef = await this.hasRemoteTrackingRef(
-        repo.path,
-        remoteTrackingBase,
-        ...localWorktreeGitOptionArgs
-      )
-      const hasLocalBaseRef =
-        hadRemoteTrackingBaseRef ||
-        (await hasLocalWorktreeBaseRef(
+      const [hadRemoteTrackingBaseRef, hasNamedLocalBaseRef] = await Promise.all([
+        this.hasRemoteTrackingRef(repo.path, remoteTrackingBase, ...localWorktreeGitOptionArgs),
+        hasLocalWorktreeBaseRef(
           repo.path,
           baseBranch,
           hasLocalWorktreeGitOptions ? localWorktreeGitOptions : {}
-        ))
+        )
+      ])
+      const hasLocalBaseRef = hadRemoteTrackingBaseRef || hasNamedLocalBaseRef
       if (!hadRemoteTrackingBaseRef && hasLocalBaseRef) {
         remoteTrackingBase = null
       } else {
@@ -27082,9 +27098,27 @@ export class OrcaRuntimeService {
       ...(suggestLocalBaseRefUpdate ? { suggestLocalBaseRefUpdate } : {})
     }
     const defaultAddWorktreeOption = addProjectGitOptions()
+    const preparedWorktreeOptions = suggestLocalBaseRefUpdate
+      ? addProjectGitOptions({ ...remoteTrackingBaseOption, suggestLocalBaseRefUpdate })
+      : remoteTrackingBaseOption
+        ? addProjectGitOptions(remoteTrackingBaseOption)
+        : defaultAddWorktreeOption
     let addResult: AddWorktreeResult
     try {
+      const preparedResult =
+        sparseDirectories.length === 0 && !checkoutExistingBranch
+          ? await consumePreparedWorktreeCreate({
+              repoPath: repo.path,
+              workspaceRoot,
+              worktreePath,
+              branch: branchName,
+              baseBranch,
+              refreshLocalBaseRef: settings.refreshLocalBaseRefOnWorktreeCreate,
+              ...(preparedWorktreeOptions ? { options: preparedWorktreeOptions } : {})
+            })
+          : null
       addResult =
+        preparedResult ??
         (await (sparseDirectories.length > 0
           ? checkoutExistingBranch
             ? addSparseWorktree(
@@ -27180,7 +27214,8 @@ export class OrcaRuntimeService {
                       branchName,
                       baseBranch,
                       settings.refreshLocalBaseRefOnWorktreeCreate
-                    ))) ?? {}
+                    ))) ??
+        {}
     } catch (error) {
       if (shouldRetireGeneratedName && failedWorktreeCreationNeedsRetirement(error)) {
         await retireGeneratedWorktreeName(this.store, repo, settings, effectiveSanitizedName)
@@ -27298,22 +27333,18 @@ export class OrcaRuntimeService {
       await createWorktreeLinkedPaths(repo.path, created.path, symlinkPaths)
     }
 
-    // Why: project-level `orca.yaml` shared directories add to (never replace) the
-    // per-user setting, so a repo's shared dirs reach every teammate (issue #10451).
-    const sharedDirectories = await resolveWorktreeSharedDirectories(
-      repo.path,
-      localWorktreeGitOptions
-    )
+    // Why: these discoveries are read-only; overlap them, but keep the
+    // shared-path mutation ahead of include copies below.
+    const [sharedDirectories, worktreeIncludePaths] = await Promise.all([
+      resolveWorktreeSharedDirectories(repo.path, localWorktreeGitOptions),
+      resolveWorktreeIncludePaths(repo.path, localWorktreeGitOptions)
+    ])
     if (sharedDirectories.length > 0) {
       await createWorktreeSharedPaths(repo.path, created.path, sharedDirectories)
     }
 
     // Why: project-level `.worktreeinclude` travels with the repo (issue #7549); copy semantics
     // (never symlink) so each worktree owns its files. Paths already linked above are skipped.
-    const worktreeIncludePaths = await resolveWorktreeIncludePaths(
-      repo.path,
-      localWorktreeGitOptions
-    )
     let includeCopyWarning: string | undefined
     if (worktreeIncludePaths.length > 0) {
       const skippedIncludePaths = await createWorktreeCopiedPaths(
