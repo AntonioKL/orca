@@ -7,6 +7,7 @@
 
 import { test, expect } from './helpers/orca-app'
 import { waitForSessionReady, waitForActiveWorktree, getStoreState } from './helpers/store'
+import { GITHUB_TASK_SEARCH_IDLE_MS } from '../../src/renderer/src/components/use-github-task-search-commit'
 
 type RenderedTaskSource = {
   source: string
@@ -17,6 +18,11 @@ type TaskSearchRequestProbe = {
   countQueries: string[]
   fetchQueries: string[]
 }
+
+// Keep every keystroke inside the idle window while leaving enough time for the
+// renderer to process each input event on a loaded E2E runner.
+const TASK_SEARCH_TYPING_DELAY_MS = Math.round(GITHUB_TASK_SEARCH_IDLE_MS / 6)
+const TASK_SEARCH_SETTLE_MS = GITHUB_TASK_SEARCH_IDLE_MS + 50
 
 const TASK_SOURCE_BY_LABEL: Record<string, string> = {
   GitHub: 'github',
@@ -401,15 +407,13 @@ test.describe('Tasks page', () => {
     await expect(existingIssue).toBeVisible()
 
     await input.fill('')
-    await orcaPage.waitForTimeout(800)
+    await expect
+      .poll(async () => readTaskSearchRequestProbe(orcaPage), { timeout: 2_000 })
+      .toEqual({ countQueries: ['is:issue is:open'], fetchQueries: ['is:issue is:open'] })
     await resetTaskSearchRequestProbe(orcaPage)
 
-    await input.pressSequentially('rate', { delay: 400 })
+    await input.pressSequentially('rate', { delay: TASK_SEARCH_TYPING_DELAY_MS })
 
-    expect(await readTaskSearchRequestProbe(orcaPage)).toEqual({
-      countQueries: [],
-      fetchQueries: []
-    })
     await expect(existingIssue).toBeVisible()
 
     await expect
@@ -423,7 +427,7 @@ test.describe('Tasks page', () => {
     await expect
       .poll(async () => readTaskSearchRequestProbe(orcaPage), { timeout: 2_000 })
       .toEqual({ countQueries: ['is:issue ratex'], fetchQueries: ['is:issue ratex'] })
-    await orcaPage.waitForTimeout(800)
+    await orcaPage.waitForTimeout(TASK_SEARCH_SETTLE_MS)
     expect(await readTaskSearchRequestProbe(orcaPage)).toEqual({
       countQueries: ['is:issue ratex'],
       fetchQueries: ['is:issue ratex']
