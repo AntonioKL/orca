@@ -391,7 +391,7 @@ describe('sanitizeCrashReportString path redaction is all-or-nothing', () => {
   // fails on a return to quadratic rather than on a slow machine.
   it.each([
     ['a line of many paths', '/opt/orca/logs/frame.js '.repeat(4_260)],
-    ['a few runs carrying many separators', `/opt/o/a ${`${'x/'.repeat(3_000)} `.repeat(8)}`]
+    ['a few runs carrying many separators', `/opt/o/a ${`${'x/'.repeat(6_000)} `.repeat(8)}`]
   ])('sanitises a very long single line in bounded time (%s)', (_name, line) => {
     expect(line.length).toBeGreaterThan(45_000)
 
@@ -400,4 +400,106 @@ describe('sanitizeCrashReportString path redaction is all-or-nothing', () => {
 
     expect(performance.now() - startedAt).toBeLessThan(250)
   })
+})
+
+/**
+ * Why: every rule holding a path's spaces to that path is one character class or one bound, and any
+ * of them that no row watches can be deleted or tightened with the suite still green -- which is how
+ * a bound whose tight side drops long paths, and a guard holding an undecided question open, both
+ * went unpinned. Each row is the measured output of ablating exactly one element.
+ */
+describe('sanitizeCrashReportString pins each element of the space-crossing rule', () => {
+  it.each([
+    // A quote ends an unquoted path, so a quoted path beside one keeps its closing delimiter.
+    [
+      'a quote ends the unquoted path',
+      'read /Users/brennan/a.txt "quoted /Users/alice/c.txt" tail',
+      'read [redacted-path] "quoted [redacted-path]" tail'
+    ],
+    // The window is two runs wide. Tightened, a four-word folder name ships from its second word.
+    [
+      'a folder name of four words',
+      'read /Users/brennan/A B C D/creds.txt failed',
+      'read [redacted-path] failed'
+    ],
+    // The scheme stack is matched with the path, three deep, or a driver is left naming the host.
+    [
+      'a path behind three stacked schemes',
+      'connect a:jdbc:postgresql://db.internal:5432/orca failed',
+      'connect [redacted-path] failed'
+    ],
+    // A name has to end its token. Without that, a dotted suffix on a word in the prose reads as a
+    // filename and the sentence carrying it is redacted along with the path.
+    [
+      'prose carrying a separator and a dotted suffix',
+      'read /etc/hosts see docs/api.md#anchor for detail',
+      'read [redacted-path] see docs/api.md#anchor for detail'
+    ]
+  ])('%s', (_name, input, expected) => {
+    expect(sanitizeCrashReportString(input)).toBe(expected)
+  })
+
+  // The run bound is the longest segment a filesystem hands back: 255 on APFS, NTFS and ext4. Both
+  // sides are pinned -- tightening it drops a legal path, widening it returns the quadratic.
+  it('crosses a space into a segment as long as a filesystem allows', () => {
+    const segment = 'n'.repeat(255)
+
+    expect(
+      sanitizeCrashReportString(`read /Users/brennan/Team ${segment}/creds.txt failed`, 4_000)
+    ).toBe('read [redacted-path] failed')
+  })
+
+  it('gives up on a segment longer than a filesystem allows', () => {
+    const segment = 'n'.repeat(300)
+
+    expect(
+      sanitizeCrashReportString(`read /Users/brennan/Team ${segment}/creds.txt failed`, 4_000)
+    ).toBe(`read [redacted-path] ${segment}/creds.txt failed`)
+  })
+
+  // Parked, awaiting a decision: sentence punctuation inside a folder name. The path stops there and
+  // the segments after it ship. Crossing it collapses two stack frames into one, so the guard stays
+  // until that is settled -- pinned so that deleting a character class cannot settle it by accident.
+  it.each([
+    [
+      'a comma',
+      'read /Users/brennan/Notes, Drafts/creds.txt failed',
+      'read [redacted-path] Drafts/creds.txt failed'
+    ],
+    [
+      'a semicolon',
+      'read /Users/brennan/A; B/creds.txt failed',
+      'read [redacted-path] B/creds.txt failed'
+    ],
+    [
+      'an exclamation mark',
+      'read /Users/brennan/Wow! Notes/creds.txt failed',
+      'read [redacted-path] Notes/creds.txt failed'
+    ]
+  ])(
+    'stops a path where a folder name carries sentence punctuation (%s)',
+    (_name, input, expected) => {
+      expect(sanitizeCrashReportString(input)).toBe(expected)
+    }
+  )
+
+  // The other side of the same trade-off as the row above: a filename with anything after its
+  // extension is not a name to this rule, and relaxing that is what eats the prose. Known limit.
+  it.each([
+    [
+      'a suffix after the extension',
+      'read /Users/brennan/My Notes.txt-bak failed',
+      'read [redacted-path] Notes.txt-bak failed'
+    ],
+    [
+      'an editor backup marker',
+      'read /Users/brennan/My Notes.txt~ failed',
+      'read [redacted-path] Notes.txt~ failed'
+    ]
+  ])(
+    'stops a path at a filename carrying a suffix after its extension (%s)',
+    (_name, input, expected) => {
+      expect(sanitizeCrashReportString(input)).toBe(expected)
+    }
+  )
 })
