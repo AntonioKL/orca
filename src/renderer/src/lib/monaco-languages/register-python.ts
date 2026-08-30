@@ -19,7 +19,9 @@ const tripleDoubleQuotedFStringRules: MonarchRule[] = [
   [/\{[^}':!=]+/, 'identifier', '@fStringDetail'],
   [/\\./, 'string'],
   [/[^\\"{}]+/, 'string'],
-  [/["{}]/, 'string']
+  [/["{}]/, 'string'],
+  // Matches the stock string states: a backslash-continuation at end of line.
+  [/\\$/, 'string']
 ]
 
 const tripleSingleQuotedFStringRules: MonarchRule[] = [
@@ -27,7 +29,9 @@ const tripleSingleQuotedFStringRules: MonarchRule[] = [
   [/\{[^}':!=]+/, 'identifier', '@fStringDetail'],
   [/\\./, 'string'],
   [/[^\\'{}]+/, 'string'],
-  [/['{}]/, 'string']
+  [/['{}]/, 'string'],
+  // Matches the stock string states: a backslash-continuation at end of line.
+  [/\\$/, 'string']
 ]
 
 /**

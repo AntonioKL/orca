@@ -157,6 +157,18 @@ describe('python triple-quoted f-strings', () => {
     expect(interpolated.stateAtLineStart[3]).toBe('root')
   })
 
+  it('keeps a backslash line-continuation inside the f-string a string token', () => {
+    const source = ['x = f"""', 'SELECT 1 \\', 'FROM t', '"""', 'class Runner:'].join('\n')
+    const { stateAtLineStart, tokens } = walk(patchedPython, source)
+
+    // The trailing backslash must not fall through to the default token.
+    const continuation = tokens.filter((entry) => entry.line === 2)
+    expect(continuation.at(-1)?.text).toBe('\\')
+    expect(continuation.at(-1)?.token).toBe('string')
+    expect(stateAtLineStart[2]).toBe(TRIPLE_DOUBLE_QUOTED_F_STRING_STATE)
+    expect(stateAtLineStart[4]).toBe('root')
+  })
+
   it('does not mutate the stock grammar it patches', () => {
     const stockStrings = (stockPythonLanguage.tokenizer as Tokenizer).strings
     expect(stockStrings.some((rule) => isRuleEntry(rule) && rule[0].source === 'f"""')).toBe(false)
