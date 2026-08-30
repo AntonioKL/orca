@@ -7,6 +7,7 @@ import {
   addWorktreeMock,
   resolveLocalGitUsernameMock,
   getBaseRefDefaultMock,
+  resolveDefaultBaseRefWithLocalGitMock,
   getBranchConflictKindMock,
   getEffectiveHooksMock,
   createSetupRunnerScriptMock,
@@ -106,6 +107,54 @@ describe('registerWorktreeHandlers', () => {
 
   beforeEach(() => {
     runtimeStub = setupWorktreeHandlers()
+  })
+
+  it('starts username and base-ref probes concurrently', async () => {
+    const events: string[] = []
+    let resolveUsername!: (value: string) => void
+    let resolveBase!: (value: string | null) => void
+    store.getSettings.mockReturnValue({
+      branchPrefix: 'git-username',
+      nestWorkspaces: false,
+      refreshLocalBaseRefOnWorktreeCreate: false,
+      workspaceDir: '/workspace'
+    })
+    resolveLocalGitUsernameMock.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          events.push('username-start')
+          resolveUsername = resolve
+        })
+    )
+    resolveDefaultBaseRefWithLocalGitMock.mockImplementation(
+      () =>
+        new Promise<string | null>((resolve) => {
+          events.push('base-start')
+          resolveBase = resolve
+        })
+    )
+    listWorktreesMock.mockResolvedValue([
+      {
+        path: '/workspace/concurrent-probe',
+        head: 'created-sha',
+        branch: 'jdoe/concurrent-probe',
+        isBare: false,
+        isMainWorktree: false
+      }
+    ])
+
+    const creation = handlers['worktrees:create'](null, {
+      repoId: 'repo-1',
+      name: 'concurrent-probe'
+    })
+    await Promise.resolve()
+
+    expect(events).toEqual(['username-start', 'base-start'])
+    resolveUsername('jdoe')
+    resolveBase('origin/main')
+    await expect(creation).resolves.toMatchObject({
+      worktree: expect.objectContaining({ branch: 'jdoe/concurrent-probe' })
+    })
   })
 
   it('prefetches the local default create base through the runtime refresh cache', async () => {
@@ -514,10 +563,14 @@ describe('registerWorktreeHandlers', () => {
         isMainWorktree: false
       }
     ])
-    loadHooksMock.mockReturnValue({ scripts: { setup: 'pnpm install' } })
+    loadHooksMock.mockReturnValue({
+      scripts: { setup: 'pnpm install' },
+      setupAgentStartupPolicy: 'wait-for-setup'
+    })
     getEffectiveHooksMock.mockReturnValue({ scripts: { setup: 'pnpm install' } })
     getEffectiveHooksFromConfigMock.mockReturnValue({ scripts: { setup: 'pnpm install' } })
     shouldRunSetupForCreateMock.mockReturnValue(true)
+    expect(createSetupRunnerScriptMock).not.toHaveBeenCalled()
 
     const result = (await handlers['worktrees:create'](null, {
       repoId: 'repo-1',
@@ -538,6 +591,14 @@ describe('registerWorktreeHandlers', () => {
       startupTerminal?: { spawned: boolean; surface?: string }
       timing?: { phases: { phase: string }[] }
     }
+    expect(createSetupRunnerScriptMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'repo-1' }),
+      '/workspace/improve-dashboard',
+      'pnpm install',
+      undefined,
+      undefined,
+      'wait-for-setup'
+    )
 
     expect(runtimeStub.createTerminal).toHaveBeenNthCalledWith(
       1,

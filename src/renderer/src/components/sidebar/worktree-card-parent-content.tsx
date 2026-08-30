@@ -44,9 +44,11 @@ export function WorktreeCardParentContent({
     handleEditIssue,
     handleEditComment,
     handleOpenGitHubIssueInOrca,
+    handleOpenIssueInBrowser,
     linearIssue,
     handleOpenLinearIssueInOrca,
     handleOpenReviewInOrca,
+    handleOpenReviewInBrowser,
     handleOpenAutomation,
     handleOpenAutomationRun,
     hasExplicitLinkedReview,
@@ -98,10 +100,14 @@ export function WorktreeCardParentContent({
             ? handleOpenGitHubIssueInOrca
             : undefined
         }
+        onOpenIssueInBrowser={
+          hoverIssue && 'url' in hoverIssue && hoverIssue.url ? handleOpenIssueInBrowser : undefined
+        }
         onOpenLinearIssueInOrca={linearIssue?.url ? handleOpenLinearIssueInOrca : undefined}
         onOpenReviewInOrca={
           hoverReview?.url && hoverReview.provider === 'github' ? handleOpenReviewInOrca : undefined
         }
+        onOpenReviewInBrowser={hoverReview?.url ? handleOpenReviewInBrowser : undefined}
         onOpenAutomation={affiliateListMode ? undefined : handleOpenAutomation}
         onOpenAutomationRun={affiliateListMode ? undefined : handleOpenAutomationRun}
         onUnlinkReview={
