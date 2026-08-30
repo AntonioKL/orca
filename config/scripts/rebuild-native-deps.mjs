@@ -43,6 +43,15 @@ try {
 }
 const rebuildPlatform = cliOptions.platform ?? osPlatform()
 const rebuildArch = cliOptions.arch ?? process.arch
+// Why: resolve the Electron download target once so the child installer and the
+// usability check can never disagree about which binary should be on disk.
+const electronInstallPlatform =
+  cliOptions.platform ||
+  process.env.ELECTRON_INSTALL_PLATFORM ||
+  process.env.npm_config_platform ||
+  rebuildPlatform
+const electronInstallArch =
+  cliOptions.arch || process.env.ELECTRON_INSTALL_ARCH || process.env.npm_config_arch || rebuildArch
 const electronPackageDir = resolve(projectDir, 'node_modules/electron')
 const electronVersion = JSON.parse(
   readFileSync(resolve(electronPackageDir, 'package.json'), 'utf8')
@@ -264,8 +273,8 @@ function electronDistMatchesPackage(electronExecutable) {
 function runElectronPackageBinaryInstall() {
   const env = {
     ...process.env,
-    ELECTRON_INSTALL_PLATFORM: rebuildPlatform,
-    ELECTRON_INSTALL_ARCH: rebuildArch
+    ELECTRON_INSTALL_PLATFORM: electronInstallPlatform,
+    ELECTRON_INSTALL_ARCH: electronInstallArch
   }
   delete env.ELECTRON_SKIP_BINARY_DOWNLOAD
   delete env.npm_config_electron_skip_binary_download
@@ -343,11 +352,7 @@ function safeReaddir(targetPath) {
 }
 
 function getElectronPlatformPath() {
-  const targetPlatform =
-    (cliOptions.platform ?? process.env.ELECTRON_INSTALL_PLATFORM) ||
-    process.env.npm_config_platform ||
-    rebuildPlatform
-  switch (targetPlatform) {
+  switch (electronInstallPlatform) {
     case 'mas':
     case 'darwin':
       return 'Electron.app/Contents/MacOS/Electron'
@@ -358,7 +363,7 @@ function getElectronPlatformPath() {
     case 'win32':
       return 'electron.exe'
     default:
-      throw new Error(`Electron builds are not available on platform: ${targetPlatform}`)
+      throw new Error(`Electron builds are not available on platform: ${electronInstallPlatform}`)
   }
 }
 

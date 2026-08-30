@@ -166,6 +166,53 @@ describe('rebuild-native-deps Electron install fallback', () => {
     }
   })
 
+  it('installs the inherited installer target when no rebuild target is passed', () => {
+    const projectDir = mkTempProject()
+
+    try {
+      writeFakeElectronPackage(projectDir)
+      writeFakeElectronGet(projectDir, { logTargetBeforeInstall: true })
+      writeFakeElectronExtractor(projectDir, { createExecutable: true })
+      writeFakeElectronRebuild(projectDir)
+
+      const result = runRebuildScript(projectDir, {
+        ELECTRON_INSTALL_PLATFORM: 'win32',
+        ELECTRON_INSTALL_ARCH: 'arm64'
+      })
+
+      expect(result.status, result.stderr).toBe(0)
+      expect(readFileSync(join(projectDir, 'electron-get.log'), 'utf8')).toContain(
+        'platform=win32 arch=arm64'
+      )
+      expect(readFileSync(join(projectDir, 'node_modules/electron/path.txt'), 'utf8')).toBe(
+        'electron.exe'
+      )
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true })
+    }
+  })
+
+  it('falls back to npm config when no rebuild or installer target is set', () => {
+    const projectDir = mkTempProject()
+
+    try {
+      writeFakeElectronPackage(projectDir)
+      writeFakeElectronGet(projectDir, { logTargetBeforeInstall: true })
+      writeFakeElectronExtractor(projectDir, { createExecutable: true })
+      writeFakeElectronRebuild(projectDir)
+
+      // runRebuildScript defaults npm_config_platform=linux / npm_config_arch=x64.
+      const result = runRebuildScript(projectDir)
+
+      expect(result.status, result.stderr).toBe(0)
+      expect(readFileSync(join(projectDir, 'electron-get.log'), 'utf8')).toContain(
+        'platform=linux arch=x64'
+      )
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true })
+    }
+  })
+
   it('repairs existing Electron path metadata without invoking the installer', () => {
     const projectDir = mkTempProject()
 
