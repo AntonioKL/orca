@@ -6,6 +6,7 @@ import type {
 } from './browser-host-lease-records'
 import type { BrowserHostFenceReason } from './browser-host-lease-fence'
 import { createBrowserHostFence } from './browser-host-lease-fence'
+import { createBrowserHostCommandLedgerForLease } from './browser-host-lease-attachment'
 
 type BrowserHostReconnectAttach = {
   connectionId: string
@@ -79,6 +80,9 @@ export class BrowserHostLeaseReconnectController {
       ...(input.fileChannelProtocolVersion ? { fileChannelProtocolVersion: 1 as const } : {})
     })
     state.status = 'active'
+    if (state.commandLedger?.isClosed()) {
+      state.commandLedger = createBrowserHostCommandLedgerForLease(state)
+    }
     return this.createHandle(state)
   }
 

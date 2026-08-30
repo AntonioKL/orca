@@ -101,3 +101,20 @@ export function createBrowserHostLeaseState(options: {
   }
   return state
 }
+
+export function createBrowserHostCommandLedgerForLease(
+  state: BrowserHostLeaseState
+): BrowserHostCommandLedger {
+  return new BrowserHostCommandLedger({
+    authority: {
+      authorityRuntimeId: state.lease.authorityRuntimeId,
+      authorityEpoch: state.lease.authorityEpoch,
+      browserHostClientId: state.lease.browserHostClientId,
+      browserHostGeneration: state.lease.browserHostGeneration,
+      pageCommandProtocolVersion: 1,
+      ...(state.lease.pageReconciliationProtocolVersion
+        ? { pageReconciliationProtocolVersion: 1 as const }
+        : {})
+    }
+  })
+}

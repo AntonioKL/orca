@@ -130,6 +130,51 @@ describe('runtime browser client automation routing', () => {
     expect(fixture.pages.listPages()).toHaveLength(1)
   })
 
+  it('allows a retry when the transport refuses the command before dispatch', async () => {
+    const fixture = await createFixture()
+    fixture.rejectDelivery()
+
+    await expect(
+      routeRuntimeBrowserClientAutomation({
+        method: 'browser.click',
+        params: { page: 'page-a', x: 10 },
+        pages: fixture.pages,
+        leases: fixture.leases,
+        resolveWorkspace: fixture.resolveWorkspace
+      })
+    ).rejects.toMatchObject({
+      code: 'browser_host_unavailable',
+      data: { retryable: true, browserPageId: 'page-a' }
+    } satisfies Partial<BrowserError>)
+    expect(fixture.command).toBeUndefined()
+  })
+
+  it('preserves the ledger for a reconnect after transport refusal', async () => {
+    const fixture = await createFixture()
+    fixture.rejectDelivery()
+    await expect(
+      routeRuntimeBrowserClientAutomation({
+        method: 'browser.click',
+        params: { page: 'page-a', x: 10 },
+        pages: fixture.pages,
+        leases: fixture.leases,
+        resolveWorkspace: fixture.resolveWorkspace
+      })
+    ).rejects.toMatchObject({ code: 'browser_host_unavailable' })
+
+    fixture.reconnect()
+    const routing = routeRuntimeBrowserClientAutomation({
+      method: 'browser.click',
+      params: { page: 'page-a', x: 10 },
+      pages: fixture.pages,
+      leases: fixture.leases,
+      resolveWorkspace: fixture.resolveWorkspace
+    })
+    await fixture.waitForCommand()
+    fixture.settle({ status: 'completed', value: { clicked: true } })
+    await expect(routing).resolves.toEqual({ handled: true, result: { clicked: true } })
+  })
+
   it('routes a safe retry after the same desktop reconnects', async () => {
     const fixture = await createFixture()
     fixture.disconnect()
@@ -205,6 +250,7 @@ async function createFixture(options: { automation?: boolean } = {}) {
   let lease = host.lease
   let command: BrowserClientHostCommandEvent | undefined
   let commandWaiter: ((event: BrowserClientHostCommandEvent) => void) | undefined
+  let deliveryAccepted = true
   let detachDelivery = attachDelivery()
   const creation = leases.createClientPage({
     browserPageId: 'page-a',
@@ -240,9 +286,13 @@ async function createFixture(options: { automation?: boolean } = {}) {
         pairedDeviceId: lease.pairedDeviceId
       },
       (event) => {
+        if (!deliveryAccepted) {
+          return false
+        }
         command = event
         commandWaiter?.(event)
         commandWaiter = undefined
+        return true
       }
     )
   }
@@ -296,12 +346,17 @@ async function createFixture(options: { automation?: boolean } = {}) {
       }
       settleCommand(command, result)
     },
+    rejectDelivery() {
+      deliveryAccepted = false
+      command = undefined
+    },
     disconnect() {
       detachDelivery()
       host.disconnect()
       command = undefined
     },
     reconnect() {
+      deliveryAccepted = true
       host = leases.attach({
         browserHostClientId: 'host-a',
         connectionId: 'connection-b',

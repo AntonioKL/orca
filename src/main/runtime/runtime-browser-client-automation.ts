@@ -72,7 +72,8 @@ const BROWSER_HOST_UNAVAILABLE_BEFORE_DISPATCH = new Set([
   'browser_host_lease_required',
   'browser_client_page_placement_required',
   'browser_host_command_delivery_required',
-  'browser_host_command_ledger_closed'
+  'browser_host_command_ledger_closed',
+  'browser_host_command_not_dispatched'
 ])
 
 function isBrowserHostUnavailableBeforeDispatch(error: unknown): boolean {
