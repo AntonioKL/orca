@@ -32,6 +32,10 @@ export function resetRuntimeEnvironmentCapabilityEvidence(): void {
   evidenceByEnvironment.clear()
 }
 
+export function clearRuntimeEnvironmentCapabilityEvidence(environmentId: string): void {
+  evidenceByEnvironment.delete(environmentId)
+}
+
 function stateFor(environmentId: string): EvidenceState {
   let state = evidenceByEnvironment.get(environmentId)
   if (!state) {
