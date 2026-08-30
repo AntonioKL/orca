@@ -31,7 +31,9 @@ describe('vendored xterm WebGL runtime contract', () => {
 
     // Both shipped bundles have to carry it, not just the source beside them.
     for (const bundle of ['lib/addon-webgl.js', 'lib/addon-webgl.mjs']) {
-      expect(readInstalled('@xterm/addon-webgl', bundle), bundle).toContain('pageLayoutVersion')
+      const contents = readInstalled('@xterm/addon-webgl', bundle)
+      expect(contents, bundle).toContain('pageLayoutVersion')
+      expect(contents, bundle).toContain('_lastSeenPageLayoutVersion')
     }
   })
 

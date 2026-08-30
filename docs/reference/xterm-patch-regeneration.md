@@ -53,8 +53,10 @@ three. `@xterm/addon-ligatures` is the one patch still written by hand — see
    patch hash in two places — `patchedDependencies` and every resolution key that
    depends on the patched package — and on a warm store it will leave the
    resolution keys at their previous value while reporting success. That installs
-   locally and drifts on CI's cold store. Always finish on step 4, and if it
-   reports a stale hash after an install, rerun `--write`.
+   locally and drifts on CI's cold store. For a version bump, follow the **Version
+   Bumps** workflow through step 5 (the final `--check`); if it reports a stale hash
+   after an install, rerun `--write`. For a source-only edit, the four-step workflow
+   above ends at `--check`.
 
 ## Workflow
 
