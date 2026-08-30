@@ -1,17 +1,28 @@
-import type { RemoteWorkspaceSnapshot } from '../../shared/remote-workspace-types'
+import { randomUUID } from 'node:crypto'
+import type {
+  RemoteWorkspaceObservedSnapshot,
+  RemoteWorkspaceSnapshot
+} from '../../shared/remote-workspace-types'
 
 export const REMOTE_WORKSPACE_SNAPSHOT_CACHE_MAX_ENTRIES = 64
 
-const latestSnapshotByTargetId = new Map<string, RemoteWorkspaceSnapshot>()
+type RemoteWorkspaceSnapshotCacheEntry = {
+  snapshot: RemoteWorkspaceObservedSnapshot
+  // Why: overlapping renderer writes retain their applied base until earlier same-client patches acknowledge.
+  minimumAuthorizedRevision: number
+  maximumAuthorizedRevision: number
+}
 
-export function rememberRemoteWorkspaceSnapshot(
+const latestSnapshotByTargetId = new Map<string, RemoteWorkspaceSnapshotCacheEntry>()
+
+function rememberRemoteWorkspaceSnapshotEntry(
   targetId: string,
-  snapshot: RemoteWorkspaceSnapshot
+  entry: RemoteWorkspaceSnapshotCacheEntry
 ): void {
   if (latestSnapshotByTargetId.has(targetId)) {
     latestSnapshotByTargetId.delete(targetId)
   }
-  latestSnapshotByTargetId.set(targetId, snapshot)
+  latestSnapshotByTargetId.set(targetId, entry)
   while (latestSnapshotByTargetId.size > REMOTE_WORKSPACE_SNAPSHOT_CACHE_MAX_ENTRIES) {
     const oldest = latestSnapshotByTargetId.keys().next()
     if (oldest.done) {
@@ -21,17 +32,66 @@ export function rememberRemoteWorkspaceSnapshot(
   }
 }
 
+export function rememberRemoteWorkspaceSnapshot(
+  targetId: string,
+  snapshot: RemoteWorkspaceSnapshot
+): RemoteWorkspaceObservedSnapshot {
+  const observedSnapshot = { ...snapshot, hostObservationToken: randomUUID() }
+  rememberRemoteWorkspaceSnapshotEntry(targetId, {
+    snapshot: observedSnapshot,
+    minimumAuthorizedRevision: snapshot.revision,
+    maximumAuthorizedRevision: snapshot.revision
+  })
+  return observedSnapshot
+}
+
+export function rememberLocallyPatchedRemoteWorkspaceSnapshot(
+  targetId: string,
+  snapshot: RemoteWorkspaceSnapshot
+): RemoteWorkspaceObservedSnapshot {
+  const current = latestSnapshotByTargetId.get(targetId)
+  if (!current || snapshot.revision > current.maximumAuthorizedRevision + 1) {
+    return rememberRemoteWorkspaceSnapshot(targetId, snapshot)
+  }
+  if (snapshot.revision < current.snapshot.revision) {
+    rememberRemoteWorkspaceSnapshotEntry(targetId, current)
+    return current.snapshot
+  }
+  const observedSnapshot = {
+    ...snapshot,
+    hostObservationToken: current.snapshot.hostObservationToken
+  }
+  rememberRemoteWorkspaceSnapshotEntry(targetId, {
+    snapshot: observedSnapshot,
+    minimumAuthorizedRevision: current.minimumAuthorizedRevision,
+    maximumAuthorizedRevision: Math.max(current.maximumAuthorizedRevision, snapshot.revision)
+  })
+  return observedSnapshot
+}
+
 export function getCachedRemoteWorkspaceSnapshot(
   targetId: string
-): RemoteWorkspaceSnapshot | undefined {
-  const snapshot = latestSnapshotByTargetId.get(targetId)
-  if (!snapshot) {
+): RemoteWorkspaceObservedSnapshot | undefined {
+  const entry = latestSnapshotByTargetId.get(targetId)
+  if (!entry) {
     return undefined
   }
   // Why: remote workspace snapshots can contain the whole tab/layout session
   // for a target. Touch cache hits so deleted or rarely used targets age out.
-  rememberRemoteWorkspaceSnapshot(targetId, snapshot)
-  return snapshot
+  rememberRemoteWorkspaceSnapshotEntry(targetId, entry)
+  return entry.snapshot
+}
+
+export function cachedRemoteWorkspaceSnapshotAuthorizesRevision(
+  targetId: string,
+  revision: number
+): boolean {
+  const entry = latestSnapshotByTargetId.get(targetId)
+  return (
+    entry !== undefined &&
+    revision >= entry.minimumAuthorizedRevision &&
+    revision <= entry.maximumAuthorizedRevision
+  )
 }
 
 export function clearRemoteWorkspaceSnapshotCache(): void {
@@ -53,6 +113,6 @@ export function _rememberRemoteWorkspaceSnapshotForTests(
 /** @internal - exposed for cache-bound tests only. */
 export function _getRemoteWorkspaceSnapshotForTests(
   targetId: string
-): RemoteWorkspaceSnapshot | undefined {
+): RemoteWorkspaceObservedSnapshot | undefined {
   return getCachedRemoteWorkspaceSnapshot(targetId)
 }

@@ -84,8 +84,12 @@ export async function waitForSnapshotWorktreePlacement(
   store: RemoteWorkspaceSnapshotPlacementStore,
   authority: DirectSshAuthority,
   worktreePaths: readonly string[],
-  isCurrent: () => boolean
+  isCurrent: () => boolean,
+  signal?: AbortSignal
 ): Promise<boolean> {
+  if (signal?.aborted || !isCurrent()) {
+    return false
+  }
   if (
     worktreePaths.length === 0 ||
     snapshotPathsArePlaceable(store.getState(), authority, worktreePaths)
@@ -98,18 +102,24 @@ export async function waitForSnapshotWorktreePlacement(
   const { promise, resolve } = Promise.withResolvers<boolean>()
   let observedCatalog = captureSnapshotPlacementCatalog(store.getState())
   let unsubscribe = (): void => {}
+  let timer: ReturnType<typeof setTimeout> | null = null
   let settled = false
   const finish = (placed: boolean): void => {
     if (settled) {
       return
     }
     settled = true
-    clearTimeout(timer)
+    if (timer !== null) {
+      clearTimeout(timer)
+    }
+    signal?.removeEventListener('abort', onAbort)
     unsubscribe()
     resolve(placed)
   }
-  const timer = setTimeout(() => finish(false), SNAPSHOT_WORKTREE_PLACEMENT_TIMEOUT_MS)
-  unsubscribe = store.subscribe((state) => {
+  const onAbort = (): void => finish(false)
+  timer = setTimeout(() => finish(false), SNAPSHOT_WORKTREE_PLACEMENT_TIMEOUT_MS)
+  signal?.addEventListener('abort', onAbort, { once: true })
+  const subscribedUnsubscribe = store.subscribe((state) => {
     if (!isCurrent()) {
       finish(false)
       return
@@ -123,6 +133,13 @@ export async function waitForSnapshotWorktreePlacement(
       finish(true)
     }
   })
+  unsubscribe = subscribedUnsubscribe
+  if (settled) {
+    subscribedUnsubscribe()
+  }
+  if (signal?.aborted || !isCurrent()) {
+    finish(false)
+  }
   if (snapshotPathsArePlaceable(store.getState(), authority, worktreePaths)) {
     finish(true)
   }

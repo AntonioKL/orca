@@ -8,6 +8,7 @@ import {
   isCurrentDirectSshAuthority,
   isRemoteRuntimePtyId
 } from './terminal-pty-identities'
+import { omitUnverifiedPtyLossTabIds } from './terminal-unverified-pty-loss'
 
 export function createTerminalPtyBindingActions(
   set: TerminalStoreSet,
@@ -112,6 +113,9 @@ export function createTerminalPtyBindingActions(
           // Why: handle rotation keeps the same terminal lifecycle; an intentional exit racing the rotation must stay suppressed once.
           nextSuppressedPtyExitIds[ptyId] = true
         }
+        const nextUnverifiedPtyLossTabIds = s.unverifiedPtyLossTabIds[tabId]
+          ? omitUnverifiedPtyLossTabIds(s.unverifiedPtyLossTabIds, [tabId])
+          : s.unverifiedPtyLossTabIds
         const hasReplacementPendingRestart = replacementPtyId
           ? replacementPtyId in s.pendingCodexPaneRestartIds
           : false
@@ -222,6 +226,9 @@ export function createTerminalPtyBindingActions(
             ...s.lastKnownRelayPtyIdByTabId,
             [tabId]: ptyId
           },
+          ...(nextUnverifiedPtyLossTabIds !== s.unverifiedPtyLossTabIds
+            ? { unverifiedPtyLossTabIds: nextUnverifiedPtyLossTabIds }
+            : {}),
           suppressedPtyExitIds: nextSuppressedPtyExitIds,
           pendingCodexPaneRestartIds: nextPendingCodexPaneRestartIds,
           codexRestartNoticeByPtyId: nextCodexRestartNoticeByPtyId,

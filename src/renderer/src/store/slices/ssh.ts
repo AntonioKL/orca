@@ -19,6 +19,7 @@ export type RemoteWorkspaceSyncStatus = {
   direction?: 'pull' | 'push'
   revision?: number
   updatedAt?: number
+  hostObservationToken?: string
   lastSyncedAt?: number
   message?: string
 }

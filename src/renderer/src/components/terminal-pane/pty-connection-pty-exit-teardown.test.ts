@@ -188,7 +188,9 @@ describe('connectPanePty', () => {
     })
 
     connectPanePty(createPane(2) as never, manager as never, deps as never)
-    const onPtyExit = createdTransportOptions[0]?.onPtyExit as ((ptyId: string) => void) | undefined
+    const onPtyExit = createdTransportOptions[0]?.onPtyExit as
+      | ((ptyId: string, exitCode?: number) => void)
+      | undefined
     expect(onPtyExit).toBeTypeOf('function')
 
     onPtyExit?.('pty-pane-2')
@@ -397,6 +399,53 @@ describe('connectPanePty', () => {
     expect(manager.closePane).not.toHaveBeenCalled()
   })
 
+  it('forwards a synthetic host-loss exit code to the tab-level handler', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const transport = createMockTransport('tab-pty')
+    transportFactoryQueue.push(transport)
+    const manager = createManager(1)
+    const deps = createDeps()
+
+    connectPanePty(createPane(1) as never, manager as never, deps as never)
+    const onPtyExit = createdTransportOptions[0]?.onPtyExit as
+      | ((ptyId: string, exitCode?: number) => void)
+      | undefined
+    expect(onPtyExit).toBeTypeOf('function')
+
+    onPtyExit?.('tab-pty', -1)
+
+    // A synthetic exit is not proof that the remote process ended. Keep the
+    // persisted binding and let the tab-level handler mark it unverifiable.
+    expect(deps.clearExitedPanePtyLayoutBinding).not.toHaveBeenCalled()
+    expect(deps.clearTabPtyId).not.toHaveBeenCalled()
+    expect(deps.onPtyExitRef.current).toHaveBeenCalledWith('tab-pty', -1)
+    expect(manager.closePane).not.toHaveBeenCalled()
+  })
+
+  it('keeps a mounted split pane binding across a synthetic host-loss exit', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const transport = createMockTransport('pty-pane-2')
+    transportFactoryQueue.push(transport)
+    const manager = createManager(2)
+    const deps = createDeps({
+      restoredLeafId: LEAF_2,
+      paneTransportsRef: { current: new Map([[1, createMockTransport('pty-pane-1')]]) }
+    })
+
+    connectPanePty(createPane(2) as never, manager as never, deps as never)
+    const onPtyExit = createdTransportOptions[0]?.onPtyExit as
+      | ((ptyId: string, exitCode?: number) => void)
+      | undefined
+    expect(onPtyExit).toBeTypeOf('function')
+
+    onPtyExit?.('pty-pane-2', -1)
+
+    expect(deps.clearExitedPanePtyLayoutBinding).not.toHaveBeenCalled()
+    expect(deps.clearTabPtyId).not.toHaveBeenCalled()
+    expect(deps.onPtyExitRef.current).toHaveBeenCalledWith('pty-pane-2', -1)
+    expect(manager.closePane).not.toHaveBeenCalled()
+  })
+
   it('tears down the sole terminal when a freshly-spawned PTY exits after the user typed input', async () => {
     // Why: an explicit `exit` (or any typed input) is a deliberate close, not a failed-startup shell, so the worktree should deactivate as before.
     const { connectPanePty } = await import('./pty-connection')
@@ -418,7 +467,7 @@ describe('connectPanePty', () => {
     sendTerminalInputThroughPane(pane, 'exit\r')
     onPtyExit?.('tab-pty')
 
-    expect(deps.onPtyExitRef.current).toHaveBeenCalledWith('tab-pty')
+    expect(deps.onPtyExitRef.current).toHaveBeenCalledWith('tab-pty', 0)
     expect(manager.closePane).not.toHaveBeenCalled()
   })
 
@@ -598,7 +647,7 @@ describe('connectPanePty', () => {
     onPtyExit?.('tab-pty', 1)
 
     expect(deps.onPaneProcessDied).not.toHaveBeenCalled()
-    expect(deps.onPtyExitRef.current).toHaveBeenCalledWith('tab-pty')
+    expect(deps.onPtyExitRef.current).toHaveBeenCalledWith('tab-pty', 1)
   })
 
   it('tears down the sole terminal when a reattached (not freshly spawned) PTY exits', async () => {
@@ -610,13 +659,15 @@ describe('connectPanePty', () => {
     const deps = createDeps()
 
     connectPanePty(createPane(1) as never, manager as never, deps as never)
-    const onPtyExit = createdTransportOptions[0]?.onPtyExit as ((ptyId: string) => void) | undefined
+    const onPtyExit = createdTransportOptions[0]?.onPtyExit as
+      | ((ptyId: string, exitCode?: number) => void)
+      | undefined
     expect(onPtyExit).toBeTypeOf('function')
 
     // No onPtySpawn call: simulates a reattach to a persisted session.
     onPtyExit?.('tab-pty')
 
-    expect(deps.onPtyExitRef.current).toHaveBeenCalledWith('tab-pty')
+    expect(deps.onPtyExitRef.current).toHaveBeenCalledWith('tab-pty', 0)
     expect(manager.closePane).not.toHaveBeenCalled()
   })
 
@@ -634,7 +685,9 @@ describe('connectPanePty', () => {
     const onPtyRebind = createdTransportOptions[0]?.onPtyRebind as
       | ((ptyId: string, replacedPtyId: string) => void)
       | undefined
-    const onPtyExit = createdTransportOptions[0]?.onPtyExit as ((ptyId: string) => void) | undefined
+    const onPtyExit = createdTransportOptions[0]?.onPtyExit as
+      | ((ptyId: string, exitCode?: number) => void)
+      | undefined
     expect(onPtyRebind).toBeTypeOf('function')
     expect(onPtyExit).toBeTypeOf('function')
 
@@ -651,7 +704,7 @@ describe('connectPanePty', () => {
       'terminal-reconnected',
       'terminal-old'
     )
-    expect(deps.onPtyExitRef.current).toHaveBeenCalledWith('terminal-reconnected')
+    expect(deps.onPtyExitRef.current).toHaveBeenCalledWith('terminal-reconnected', 0)
     expect(manager.closePane).not.toHaveBeenCalled()
   })
 

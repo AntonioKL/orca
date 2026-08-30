@@ -224,7 +224,13 @@ import {
   type TerminalPasteSource,
   type TerminalPasteTextOptions
 } from './terminal-paste-coordinator'
-import { appendTerminalErrorMessage } from './terminal-error-accumulation'
+import {
+  appendPaneTerminalError,
+  clearPaneTerminalError,
+  mapPaneTerminalErrors,
+  terminalErrorForPane,
+  type TerminalErrorsByPaneId
+} from './terminal-error-accumulation'
 import { formatTerminalPasteExecutionError } from './terminal-paste-errors'
 import { resolveTerminalPasteRuntime } from './terminal-paste-runtime'
 import { getTerminalPasteSshRemotePlatform } from './terminal-paste-ssh-platform'
@@ -265,7 +271,7 @@ type TerminalPaneProps = {
   isolatedPaneKey?: string | null
   // Why: ephemeral one-off command terminals don't need the header's prominent split affordance (split shortcuts still work).
   showSplitButton?: boolean
-  onPtyExit: (ptyId: string) => void
+  onPtyExit: (ptyId: string, exitCode?: number) => void
   onCloseTab: () => void
 }
 
@@ -359,6 +365,11 @@ function TerminalPane(
     sshReconnectTargetLabel,
     sshReconnectTargetRemoved
   } = useAppStore(useShallow((store) => selectTerminalPaneHostState(store, worktreeId)))
+  const sshReconnectOwnsTerminalErrors = Boolean(
+    sshReconnectTargetId && sshReconnectStatus && sshReconnectStatus !== 'connected'
+  )
+  const sshReconnectOwnsTerminalErrorsRef = useRef(sshReconnectOwnsTerminalErrors)
+  sshReconnectOwnsTerminalErrorsRef.current = sshReconnectOwnsTerminalErrors
   useEffect(() => {
     if (!sshReconnectEnvironmentId) {
       return
@@ -404,6 +415,7 @@ function TerminalPane(
   const [agentSessionContinuation, setAgentSessionContinuation] =
     useState<AgentSessionContinuationRequest | null>(null)
   const [terminalError, setTerminalError] = useState<string | null>(null)
+  const [terminalErrorsByPaneId, setTerminalErrorsByPaneId] = useState<TerminalErrorsByPaneId>({})
   const [paneProcessExitsByPaneId, setPaneProcessExitsByPaneId] = useState<
     Record<number, PaneProcessExit>
   >({})
@@ -488,19 +500,31 @@ function TerminalPane(
     },
     [cancelPendingRenameFrames]
   )
-  const onPtyErrorRef = useRef((_paneId: number, message: string) => {
+  const onPtyErrorRef = useRef((paneId: number, message: string) => {
     if (isTerminalSessionStateSaveFailure(message)) {
       setTerminalError(null)
+      setTerminalErrorsByPaneId({})
       setSessionStateSaveFailureOpen(true)
       return
     }
-    setTerminalError((prev) => appendTerminalErrorMessage(prev, message))
+    const visibleMessage = sshReconnectOwnsTerminalErrorsRef.current
+      ? stripSshReconnectOwnedErrorLines(message)
+      : message
+    if (visibleMessage !== null) {
+      setTerminalErrorsByPaneId((current) =>
+        appendPaneTerminalError(current, paneId, visibleMessage)
+      )
+    }
   })
-  /** Dismissal is the only signal that the user has seen the surface, so it must also release the transports' repeat-suppression memory. */
+  const onPtyErrorClearedRef = useRef((paneId: number, message?: string) => {
+    setTerminalErrorsByPaneId((current) => clearPaneTerminalError(current, paneId, message))
+  })
   const dismissTerminalError = useCallback(() => {
+    const paneId = managerRef.current?.getActivePane()?.id ?? null
     setTerminalError(null)
-    for (const transport of paneTransportsRef.current.values()) {
-      transport.notifyErrorSurfaceDismissed?.()
+    if (paneId !== null) {
+      setTerminalErrorsByPaneId((current) => clearPaneTerminalError(current, paneId))
+      paneTransportsRef.current.get(paneId)?.notifyErrorSurfaceDismissed?.()
     }
   }, [])
   const onPtyRecoveryStateRef = useRef(
@@ -765,6 +789,11 @@ function TerminalPane(
     if (isVisible) {
       // Why: a hidden 0×0 pane self-heals once shown; clear only the stale zero-dims diagnostic so real errors survive.
       setTerminalError((prev) => (prev && isTerminalZeroDimensionsDiagnostic(prev) ? null : prev))
+      setTerminalErrorsByPaneId((current) =>
+        mapPaneTerminalErrors(current, (message) =>
+          isTerminalZeroDimensionsDiagnostic(message) ? null : message
+        )
+      )
     }
   }, [isVisible, shouldMeasureHiddenStartup])
 
@@ -1201,6 +1230,7 @@ function TerminalPane(
           useAppStore.getState().setCacheTimerStartedAt(makePaneKey(tabId, leafId), null)
           useAppStore.getState().dropAgentStatus(makePaneKey(tabId, leafId))
         }
+        setTerminalErrorsByPaneId((current) => clearPaneTerminalError(current, paneId))
         syncPanePtyLayoutBinding(paneId, null)
         manager.closePane(paneId)
       }
@@ -1388,6 +1418,7 @@ function TerminalPane(
     onPtyExitRef,
     onAgentExitedRef,
     onPtyErrorRef,
+    onPtyErrorClearedRef,
     onPaneProcessDied: handlePaneProcessDied,
     onPtyRecoveryStateRef,
     clearTabPtyId,
@@ -1585,6 +1616,7 @@ function TerminalPane(
       paneTransportsRef.current.delete(paneId)
       setCacheTimerStartedAt(makePaneKey(tabId, pane.leafId), null)
       setTerminalError(null)
+      setTerminalErrorsByPaneId((current) => clearPaneTerminalError(current, paneId))
 
       const newPaneBinding = connectPanePty(pane, manager, {
         tabId,
@@ -1602,6 +1634,7 @@ function TerminalPane(
         onPtyExitRef,
         onAgentExitedRef,
         onPtyErrorRef,
+        onPtyErrorClearedRef,
         onPaneProcessDied: handlePaneProcessDied,
         onPtyRecoveryStateRef,
         clearTabPtyId,
@@ -2926,25 +2959,25 @@ function TerminalPane(
 
   const activePane = managerRef.current?.getActivePane()
   const managedPanes = managerRef.current?.getPanes() ?? []
-  const showSshReconnectOverlay = Boolean(
-    isActive &&
-    isVisible &&
-    sshReconnectTargetId &&
-    sshReconnectStatus &&
-    sshReconnectStatus !== 'connected'
-  )
-  // Why: while the reconnect banner owns recovery, strip only the SSH-owned lines from the
-  // (possibly aggregated) error, so a later successful connect can't flash the raw ssh:connect
-  // failure and any unrelated error still surfaces after reconnect.
+  const showSshReconnectOverlay = isActive && isVisible && sshReconnectOwnsTerminalErrors
+  // Why: SSH reconnect owns its failures even while this tab is hidden; clear only those lines so
+  // unrelated pane errors survive and no stale connect failure flashes after recovery.
   useEffect(() => {
-    if (!showSshReconnectOverlay || terminalError == null) {
+    if (!sshReconnectOwnsTerminalErrors) {
       return
     }
-    const kept = stripSshReconnectOwnedErrorLines(terminalError)
-    if (kept !== terminalError) {
-      setTerminalError(kept)
-    }
-  }, [showSshReconnectOverlay, terminalError])
+    setTerminalError((current) =>
+      current === null ? null : stripSshReconnectOwnedErrorLines(current)
+    )
+    setTerminalErrorsByPaneId((current) =>
+      mapPaneTerminalErrors(current, stripSshReconnectOwnedErrorLines)
+    )
+  }, [sshReconnectOwnsTerminalErrors])
+  const visibleTerminalError = terminalErrorForPane(
+    terminalError,
+    terminalErrorsByPaneId,
+    activePane?.id ?? null
+  )
   const menuPaneHasCustomTitle =
     contextMenu.menuPaneId !== null && Boolean(paneTitles[contextMenu.menuPaneId])
   const chatLeafStillMounted = chatLeafId
@@ -3080,13 +3113,17 @@ function TerminalPane(
       })}
       {/* Why: the reconnect banner already owns SSH recovery UX; the z-50 error
           toast was painting over it (same bottom strip) with the raw ssh:connect failure. */}
-      {terminalError && isActive && !showSshReconnectOverlay ? (
-        <TerminalErrorToast
-          error={terminalError}
-          onDismiss={dismissTerminalError}
-          onRestartDaemon={() => daemonActions.setPending('restart')}
-        />
-      ) : null}
+      {visibleTerminalError && isActive && !showSshReconnectOverlay && activePane
+        ? createPortal(
+            <TerminalErrorToast
+              error={visibleTerminalError}
+              onDismiss={dismissTerminalError}
+              onRestartDaemon={() => daemonActions.setPending('restart')}
+            />,
+            activePane.container,
+            `terminal-error-${activePane.id}`
+          )
+        : null}
       {isActive
         ? managedPanes.map((pane) => {
             const processExit = paneProcessExitsByPaneId[pane.id]

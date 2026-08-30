@@ -559,6 +559,108 @@ describe('SshRelaySession reconnect incarnation ordering', () => {
     }
   )
 
+  it.each([
+    {
+      case: 'stale PTY id',
+      tombstonePtyId: 'ssh:target-1@@pty-old',
+      tombstoneIncarnationId: 'incarnation-old'
+    },
+    {
+      case: 'stale incarnation of the reused PTY id',
+      tombstonePtyId: APP_PTY_ID,
+      tombstoneIncarnationId: 'incarnation-old'
+    },
+    {
+      case: 'same identity at the pane lease old location',
+      tombstonePtyId: APP_PTY_ID,
+      tombstoneIncarnationId: 'incarnation-live'
+    }
+  ])('reattaches a moved pane despite a $case tombstone', async (tombstone) => {
+    const { mockConn, mockStore, mockPortForward, getMainWindow, mockWindow } = createMockDeps()
+    const worktreeId = 'repo-1::/worktree'
+    const oldTabId = 'tab-old'
+    const movedTabId = 'tab-moved'
+    const incarnationId = 'incarnation-live'
+    const shutdown = vi.fn()
+    vi.mocked(getSshPtyProvider).mockReturnValue({
+      attachForReconnect: vi.fn().mockResolvedValue({ incarnationId, replay: 'live-output' }),
+      shutdown,
+      dispose: vi.fn()
+    } as unknown as ReturnType<typeof getSshPtyProvider>)
+    vi.mocked(mockStore.getSshRemotePtyLeases).mockReturnValue([
+      {
+        targetId: 'target-1',
+        ptyId: 'pty-live',
+        state: 'detached',
+        worktreeId,
+        tabId: oldTabId,
+        leafId: INCARNATION_LEAF_ID,
+        createdAt: 1,
+        updatedAt: 1
+      }
+    ])
+    const movedSession: ReturnType<typeof getDefaultWorkspaceSession> = {
+      ...getDefaultWorkspaceSession(),
+      terminalLayoutsByTabId: {
+        [movedTabId]: {
+          root: { type: 'leaf', leafId: INCARNATION_LEAF_ID },
+          activeLeafId: INCARNATION_LEAF_ID,
+          expandedLeafId: null,
+          ptyIdsByLeafId: { [INCARNATION_LEAF_ID]: APP_PTY_ID }
+        }
+      },
+      terminalPtyIncarnationsByPaneKey: {
+        [`${movedTabId}:${INCARNATION_LEAF_ID}`]: incarnationId
+      },
+      terminalSurfaceTombstonesByPaneKey: {
+        [`${oldTabId}:${INCARNATION_LEAF_ID}`]: {
+          worktreeId,
+          parentTabId: oldTabId,
+          leafId: INCARNATION_LEAF_ID,
+          ptyId: tombstone.tombstonePtyId,
+          incarnationId: tombstone.tombstoneIncarnationId,
+          retiredAt: 1
+        }
+      }
+    }
+    vi.mocked(mockStore.getWorkspaceSession).mockImplementation((hostId) =>
+      hostId ? getDefaultWorkspaceSession() : movedSession
+    )
+    const runtime = { registerPty: vi.fn(), onPtySpawned: vi.fn() }
+    const session = new SshRelaySession(
+      'target-1',
+      getMainWindow,
+      mockStore,
+      mockPortForward,
+      runtime as never
+    )
+
+    await session.establish(mockConn)
+
+    expect(runtime.registerPty).toHaveBeenCalledWith(APP_PTY_ID, worktreeId, 'target-1', {
+      tabId: movedTabId,
+      leafId: INCARNATION_LEAF_ID,
+      incarnationId
+    })
+    expect(mockStore.persistPtyBinding).toHaveBeenCalledWith(
+      expect.objectContaining({ tabId: movedTabId, ptyId: APP_PTY_ID, incarnationId })
+    )
+    expect(mockStore.markSshRemotePtyLease).not.toHaveBeenCalledWith(
+      'target-1',
+      APP_PTY_ID,
+      'expired'
+    )
+    expect(mockStore.recordSshRemotePtyKillIntent).not.toHaveBeenCalled()
+    expect(shutdown).not.toHaveBeenCalled()
+    expect(mockStore.markSshRemotePtyLeasesAttachedAsync).toHaveBeenCalledWith('target-1', [
+      'pty-live'
+    ])
+    expect(mockWindow.webContents.send).toHaveBeenCalledWith('pty:replay', {
+      id: APP_PTY_ID,
+      data: 'live-output'
+    })
+  })
+
   it('does not restore a PTY whose matching exit shares the attach reply batch', async () => {
     const { mockConn, mockStore, mockPortForward, getMainWindow, mockWindow } = createMockDeps()
     const incarnationId = 'incarnation-exited-during-attach'
@@ -669,8 +771,8 @@ describe('SshRelaySession reconnect incarnation ordering', () => {
     })
   })
 
-  it('keeps the attached PTY when incarnation backfill persistence fails', async () => {
-    const { mockConn, mockStore, mockPortForward, getMainWindow } = createMockDeps()
+  it('keeps the PTY detached when incarnation backfill persistence fails', async () => {
+    const { mockConn, mockStore, mockPortForward, getMainWindow, mockWindow } = createMockDeps()
     const incarnationId = 'incarnation-reconnect'
     vi.mocked(getSshPtyProvider).mockReturnValue({
       attachForReconnect: vi.fn().mockResolvedValue({ incarnationId }),
@@ -683,7 +785,7 @@ describe('SshRelaySession reconnect incarnation ordering', () => {
       throw new Error('disk full')
     })
     const runtime = { onPtySpawned: vi.fn(), registerPty: vi.fn() }
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const session = new SshRelaySession(
       'target-1',
       getMainWindow,
@@ -694,18 +796,14 @@ describe('SshRelaySession reconnect incarnation ordering', () => {
 
     await expect(session.establish(mockConn)).resolves.toBeUndefined()
 
-    expect(runtime.registerPty).toHaveBeenCalledWith(APP_PTY_ID, 'worktree-1', 'target-1', {
-      tabId: 'tab-1',
-      leafId: INCARNATION_LEAF_ID,
-      incarnationId
-    })
-    expect(mockStore.markSshRemotePtyLeasesAttachedAsync).toHaveBeenCalledWith('target-1', [
-      'pty-live'
-    ])
-    expect(consoleError).toHaveBeenCalledWith(
-      '[ssh-relay-session] Failed to persist reconnect incarnation:',
-      expect.any(Error)
+    expect(runtime.registerPty).not.toHaveBeenCalled()
+    expect(setPtyOwnership).not.toHaveBeenCalled()
+    expect(restorePtyIncarnation).not.toHaveBeenCalled()
+    expect(mockStore.markSshRemotePtyLeasesAttachedAsync).not.toHaveBeenCalled()
+    expect(mockWindow.webContents.send).not.toHaveBeenCalledWith('pty:replay', expect.anything())
+    expect(consoleWarn).toHaveBeenCalledWith(
+      expect.stringContaining('Leaving PTY pty-live detached for target-1')
     )
-    consoleError.mockRestore()
+    consoleWarn.mockRestore()
   })
 })

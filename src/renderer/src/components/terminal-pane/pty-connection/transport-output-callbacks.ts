@@ -58,6 +58,11 @@ export function bindCaptureTransportOutputCallbacks(session: ConnectPanePtySessi
             onError(message)
           }
         },
+        onErrorCleared: (message: string): void => {
+          if (isCurrent()) {
+            session.deps.onPtyErrorClearedRef?.current?.(session.pane.id, message)
+          }
+        },
         onWriteUnavailable: (): void => {
           if (isCurrent()) {
             session.requestRecoveryForUndeliverableInput(true)

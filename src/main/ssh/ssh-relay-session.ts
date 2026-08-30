@@ -2484,7 +2484,7 @@ export class SshRelaySession {
         return
       }
       const activeLease = activeLeaseByPtyId.get(ptyId)
-      if (this.isRetiredReattachedPtySurface(activeLease)) {
+      if (this.isRetiredReattachedPtySurface(activeLease, appPtyId, attachResult.incarnationId)) {
         await this.suppressRetiredReattachedPty(
           ptyProvider,
           ptyId,
@@ -2493,9 +2493,7 @@ export class SshRelaySession {
         )
         return
       }
-      setPtyOwnership(appPtyId, this.targetId)
       if (attachResult.incarnationId) {
-        restorePtyIncarnation(appPtyId, attachResult.incarnationId)
         const restoreResult = this.restoreReattachedPtyRuntime(
           appPtyId,
           attachResult.incarnationId,
@@ -2506,6 +2504,8 @@ export class SshRelaySession {
           deletePtyOwnership(appPtyId)
           return
         }
+      } else {
+        setPtyOwnership(appPtyId, this.targetId)
       }
       attachedLeaseIds.add(ptyId)
       pendingReattach.activated = true
@@ -2578,24 +2578,50 @@ export class SshRelaySession {
     this.runtime?.acceptPtyIncarnationForExit(appPtyId, ptyIncarnation)
   }
 
-  private isRetiredReattachedPtySurface(lease: SshPtyLease | undefined): boolean {
+  private isRetiredReattachedPtySurface(
+    lease: SshPtyLease | undefined,
+    appPtyId: string,
+    incarnationId: string | undefined
+  ): boolean {
     if (!lease?.worktreeId || !lease.tabId || !lease.leafId || !isTerminalLeafId(lease.leafId)) {
       return false
     }
     const leafId = lease.leafId
     const session = this.store.getWorkspaceSession?.()
     const hostSession = this.store.getWorkspaceSession?.(toSshExecutionHostId(this.targetId))
-    const tabIds = [
-      lease.tabId,
-      findTerminalTabIdForLeaf(session, leafId),
-      findTerminalTabIdForLeaf(hostSession, leafId)
-    ].filter((tabId): tabId is string => Boolean(tabId && isValidTerminalTabId(tabId)))
-    return [session, hostSession].some((candidate) =>
-      tabIds.some(
-        (tabId) =>
-          candidate?.terminalSurfaceTombstonesByPaneKey?.[makePaneKey(tabId, leafId)] !== undefined
+    const candidates = [session, hostSession]
+    const currentTabIds = candidates
+      .map((candidate) => findTerminalTabIdForLeaf(candidate, leafId))
+      .filter((tabId): tabId is string => Boolean(tabId && isValidTerminalTabId(tabId)))
+    const tombstoneMatches = (tabId: string): boolean => {
+      const paneKey = makePaneKey(tabId, leafId)
+      return candidates.some((candidate) => {
+        const tombstone = candidate?.terminalSurfaceTombstonesByPaneKey?.[paneKey]
+        return Boolean(
+          tombstone?.ptyId === appPtyId &&
+          (!incarnationId || tombstone.incarnationId === incarnationId)
+        )
+      })
+    }
+    const hasLiveCurrentBinding = currentTabIds.some((tabId) => {
+      const paneKey = makePaneKey(tabId, leafId)
+      return (
+        !tombstoneMatches(tabId) &&
+        candidates.some(
+          (candidate) =>
+            candidate?.terminalLayoutsByTabId?.[tabId]?.ptyIdsByLeafId?.[leafId] === appPtyId &&
+            (!incarnationId ||
+              !candidate.terminalPtyIncarnationsByPaneKey?.[paneKey] ||
+              candidate.terminalPtyIncarnationsByPaneKey[paneKey] === incarnationId)
+        )
       )
-    )
+    })
+    if (hasLiveCurrentBinding) {
+      return false
+    }
+    return [lease.tabId, ...currentTabIds]
+      .filter((tabId) => isValidTerminalTabId(tabId))
+      .some(tombstoneMatches)
   }
 
   private async suppressRetiredReattachedPty(
@@ -2652,37 +2678,35 @@ export class SshRelaySession {
         findTerminalTabIdForLeaf(session, lease.leafId) ??
         findTerminalTabIdForLeaf(hostSession, lease.leafId) ??
         lease.tabId
-      try {
-        // Absence of the pane only means "the user closed it" once the persisted membership
-        // speaks for this worktree. Before that it means the renderer has not published its
-        // layout yet, and refusing there drops a tab the user still has — the regression that
-        // reverted this fix twice. Losing a tab is worse than keeping a duplicate, so an
-        // unauthoritative session still gets the creating write.
-        // Authority is read from `local` because that is the partition this write lands in — it
-        // is local's absence we would be interpreting. But a pane the other partition still holds
-        // is not gone, so it keeps its creating write: refusing there would strand a live pane
-        // behind a binding reattach can no longer reach.
-        const mayCreate =
-          !hasHostAuthoritativeTerminalMembership(session, lease.worktreeId) ||
-          findTerminalTabIdForLeaf(hostSession, lease.leafId) !== undefined
-        const bound = this.store.persistPtyBinding({
-          worktreeId: lease.worktreeId,
-          tabId,
-          leafId: lease.leafId,
-          ptyId: appPtyId,
-          incarnationId,
-          ...(mayCreate ? {} : { mayCreate: false }),
-          mayReviveRetiredSurface: false
-        })
-        if (bound === false) {
-          // Topology absence alone is not authority to kill a process, but neither refusal may
-          // publish or replay into a missing pane.
-          this.store.markSshRemotePtyLease(this.targetId, appPtyId, 'expired')
-          return 'missing-surface'
-        }
-      } catch (error) {
-        console.error('[ssh-relay-session] Failed to persist reconnect incarnation:', error)
+      // Absence of the pane only means "the user closed it" once the persisted membership
+      // speaks for this worktree. Before that it means the renderer has not published its
+      // layout yet, and refusing there drops a tab the user still has — the regression that
+      // reverted this fix twice. Losing a tab is worse than keeping a duplicate, so an
+      // unauthoritative session still gets the creating write.
+      // Authority is read from `local` because that is the partition this write lands in — it
+      // is local's absence we would be interpreting. But a pane the other partition still holds
+      // is not gone, so it keeps its creating write: refusing there would strand a live pane
+      // behind a binding reattach can no longer reach.
+      const mayCreate =
+        !hasHostAuthoritativeTerminalMembership(session, lease.worktreeId) ||
+        findTerminalTabIdForLeaf(hostSession, lease.leafId) !== undefined
+      const bound = this.store.persistPtyBinding({
+        worktreeId: lease.worktreeId,
+        tabId,
+        leafId: lease.leafId,
+        ptyId: appPtyId,
+        incarnationId,
+        ...(mayCreate ? {} : { mayCreate: false }),
+        mayReviveRetiredSurface: false
+      })
+      if (bound === false) {
+        // Topology absence alone is not authority to kill a process, but neither refusal may
+        // publish or replay into a missing pane.
+        this.store.markSshRemotePtyLease(this.targetId, appPtyId, 'expired')
+        return 'missing-surface'
       }
+      setPtyOwnership(appPtyId, this.targetId)
+      restorePtyIncarnation(appPtyId, incarnationId)
       this.runtime?.registerPty(appPtyId, lease.worktreeId, this.targetId, {
         tabId,
         leafId: lease.leafId,
@@ -2690,6 +2714,8 @@ export class SshRelaySession {
       })
       return 'restored'
     }
+    setPtyOwnership(appPtyId, this.targetId)
+    restorePtyIncarnation(appPtyId, incarnationId)
     this.runtime?.onPtySpawned(appPtyId, incarnationId, { awaitsRegistration: false })
     return 'restored'
   }

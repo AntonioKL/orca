@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import {
   clientInstances,
+  createSsh2Module,
   eventHandlers,
   resetSshConnectionMocks,
   VALID_ED25519_HOST_KEY,
@@ -105,6 +106,34 @@ describe('SshConnection', () => {
     expect(eventHandlers.has('ready')).toBe(false)
     // The remaining error listener is the steady-state disconnect handler.
     expect(eventHandlers.has('error')).toBe(true)
+  })
+
+  it('scopes lifecycle events and pending handshake timers to one mock client', async () => {
+    vi.useFakeTimers()
+    try {
+      const { Client } = createSsh2Module()
+      const first = new Client()
+      const second = new Client()
+      const firstClose = vi.fn()
+      const secondClose = vi.fn()
+      const firstError = vi.fn()
+      first.on('close', firstClose)
+      first.on('error', firstError)
+      second.on('close', secondClose)
+
+      first.emit('close')
+      expect(firstClose).toHaveBeenCalledOnce()
+      expect(secondClose).not.toHaveBeenCalled()
+
+      ssh2Mock.connectBehavior = 'pending'
+      first.connect({ readyTimeout: 1_000 })
+      await vi.advanceTimersByTimeAsync(0)
+      first.destroy()
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(firstError).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('enables TCP_NODELAY on the new ssh2 client after a reconnect cycle', async () => {

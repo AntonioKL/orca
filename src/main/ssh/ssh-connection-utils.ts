@@ -45,6 +45,10 @@ const TRANSIENT_ERROR_CODES = new Set([
   'EAI_AGAIN'
 ])
 
+function sshErrorLevel(err: Error): unknown {
+  return 'level' in err ? err.level : undefined
+}
+
 export function isAuthError(err: Error): boolean {
   const msg = err.message.toLowerCase()
   return (
@@ -54,16 +58,22 @@ export function isAuthError(err: Error): boolean {
     /permission denied(?:, please try again\.?| \([^)]*(?:publickey|password|keyboard-interactive|gssapi|hostbased)[^)]*\))/.test(
       msg
     ) ||
-    (err as { level?: string }).level === 'client-authentication'
+    sshErrorLevel(err) === 'client-authentication'
   )
 }
 
 export function isAgentFallbackError(err: Error): boolean {
-  return isAuthError(err) || (err as { level?: string }).level === 'agent'
+  return isAuthError(err) || sshErrorLevel(err) === 'agent'
 }
 
 export function isTransientError(err: Error): boolean {
-  const code = (err as NodeJS.ErrnoException).code
+  if (
+    sshErrorLevel(err) === 'client-timeout' ||
+    err.message === 'Timed out while waiting for SSH authentication'
+  ) {
+    return true
+  }
+  const code = 'code' in err && typeof err.code === 'string' ? err.code : undefined
   if (code && TRANSIENT_ERROR_CODES.has(code)) {
     return true
   }

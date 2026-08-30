@@ -1,4 +1,4 @@
-import { globSync, readFileSync } from 'node:fs'
+import { existsSync, globSync, readFileSync } from 'node:fs'
 import { parse } from 'yaml'
 import { describe, expect, it } from 'vitest'
 
@@ -183,6 +183,15 @@ describe('PR workflow parallelism', () => {
       // Why this file is excluded: it carries the detector pattern as a literal
       // and would otherwise match itself.
       .filter((testFile) => testFile !== 'config/scripts/pr-workflow-parallelism.test.mjs')
+      // TypeScript builds can leave an ignored JavaScript companion beside a source
+      // test. Inspect the source file once so generated output cannot duplicate it.
+      .filter(
+        (testFile) =>
+          !testFile.endsWith('.js') ||
+          !['.ts', '.tsx', '.mjs', '.cjs'].some((extension) =>
+            existsSync(testFile.replace(/\.js$/, extension))
+          )
+      )
       .filter((testFile) => realZshUsage.test(readFileSync(testFile, 'utf8')))
       .sort()
 

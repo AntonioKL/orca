@@ -176,7 +176,7 @@ describe.skipIf(!RUN_REVIEW_ORACLE)('SSH relay upload cancellation recovery', ()
         [
           `cat ${shellQuote(`${remoteRelayDir}/.install-lock/.boot-id`)}`,
           `cat ${shellQuote(`${remoteRelayDir}/relay.js`)}`,
-          `find ${shellQuote('/root/.orca-remote')} -maxdepth 1 -name 'relay-reboot-lock-oracle.tombstone.*' -print | wc -l | tr -d ' '`
+          `find ${shellQuote(remoteRelayDir)} -maxdepth 1 -name '.install-lock.tombstone.*' -print | wc -l | tr -d ' '`
         ].join('; ')
       ).split(/\r?\n/u)
 

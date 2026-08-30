@@ -147,10 +147,8 @@ import {
   setPrimarySelectionText
 } from '@/lib/primary-selection'
 import {
-  SPLIT_TERMINAL_PANE_EVENT,
   CLOSE_TERMINAL_PANE_EVENT,
   WAKE_HIBERNATED_AGENTS_WORKTREE_EVENT,
-  type SplitTerminalPaneDetail,
   type CloseTerminalPaneDetail,
   type WakeHibernatedAgentsWorktreeDetail
 } from '@/constants/terminal'
@@ -165,6 +163,11 @@ import {
   resolveTabTitleAfterPaneClose,
   shouldClearLaunchAgentForClosedPane
 } from './terminal-pane-close-identity'
+import {
+  cancelQueuedTerminalPaneSplitRequests,
+  registerTerminalPaneSplitRequestHandler,
+  resolveTerminalPaneSplitSourceId
+} from './terminal-pane-split-request-routing'
 
 export function resetTerminalKeyboardProtocolAfterInterrupt(terminal: Terminal): void {
   // Guarded output path so a throwing xterm can't escape the key handler.
@@ -297,9 +300,10 @@ type UseTerminalPaneLifecycleDeps = {
   replayingPanesRef: ReplayingPanesRef
   isActiveRef: React.RefObject<boolean>
   isVisibleRef: React.RefObject<boolean>
-  onPtyExitRef: React.RefObject<(ptyId: string) => void>
+  onPtyExitRef: React.RefObject<(ptyId: string, exitCode?: number) => void>
   onAgentExitedRef: React.RefObject<(leafId: string) => void>
   onPtyErrorRef?: React.RefObject<(paneId: number, message: string) => void>
+  onPtyErrorClearedRef?: React.RefObject<(paneId: number, message?: string) => void>
   onPaneProcessDied?: (processExit: PaneProcessExit) => void
   onPtyRecoveryStateRef?: React.RefObject<
     (paneId: number, state: PtyTransportRecoveryState | null) => void
@@ -708,6 +712,7 @@ export function useTerminalPaneLifecycle({
   onPtyExitRef,
   onAgentExitedRef,
   onPtyErrorRef,
+  onPtyErrorClearedRef,
   onPaneProcessDied,
   onPtyRecoveryStateRef,
   clearTabPtyId,
@@ -959,6 +964,7 @@ export function useTerminalPaneLifecycle({
       onPtyExitRef,
       onAgentExitedRef,
       onPtyErrorRef,
+      onPtyErrorClearedRef,
       onPaneProcessDied,
       onPtyRecoveryStateRef,
       clearTabPtyId,
@@ -1844,49 +1850,50 @@ export function useTerminalPaneLifecycle({
     scheduleRuntimeGraphSync()
 
     // Why: deliver the startup command via the PTY connection path (waits for shell readiness), not terminal.paste() which can lose input before the shell reads stdin.
-    function onCliSplitPane(event: Event): void {
-      const detail = (event as CustomEvent<SplitTerminalPaneDetail>).detail
-      if (!detail?.tabId || detail.tabId !== tabId) {
-        return
-      }
-      const mgr = managerRef.current
-      if (!mgr) {
-        return
-      }
-      if (detail.newLeafId && mgr.getNumericIdForLeaf(detail.newLeafId) !== null) {
-        return
-      }
-      const sourcePaneId = detail.sourceLeafId
-        ? (mgr.getNumericIdForLeaf(detail.sourceLeafId) ?? detail.paneRuntimeId)
-        : detail.paneRuntimeId
-      if (sourcePaneId < 0) {
-        return
-      }
-      const splitOptions = {
-        ...(detail.newLeafId ? { leafId: detail.newLeafId } : {}),
-        ...(detail.ptyId ? { ptyId: detail.ptyId } : {})
-      }
-      if (detail.command) {
-        const createdPane = splitPaneWithOneShotStartup(ptyDeps, { command: detail.command }, () =>
-          mgr.splitPane(sourcePaneId, detail.direction, splitOptions)
+    const unregisterTerminalPaneSplitRequestHandler = registerTerminalPaneSplitRequestHandler(
+      tabId,
+      worktreeId,
+      (detail) => {
+        const mgr = managerRef.current
+        if (!mgr) {
+          return
+        }
+        if (detail.newLeafId && mgr.getNumericIdForLeaf(detail.newLeafId) !== null) {
+          return
+        }
+        const sourcePaneId = resolveTerminalPaneSplitSourceId(detail, (leafId) =>
+          mgr.getNumericIdForLeaf(leafId)
         )
-        recordRuntimeCreatedTerminalPaneSplit(createdPane, {
-          source: detail.telemetrySource ?? 'command',
-          direction: detail.direction
-        })
-      } else {
-        const createdPane = mgr.splitPane(sourcePaneId, detail.direction, splitOptions)
-        const telemetrySuppressed = createdPane
-          ? consumePendingWebRuntimeSplitMirrorTelemetry(detail.sourcePtyId, detail.direction)
-          : false
-        recordRuntimeCreatedTerminalPaneSplit(createdPane, {
-          source: detail.telemetrySource ?? 'command',
-          direction: detail.direction,
-          telemetrySuppressed
-        })
+        if (sourcePaneId < 0) {
+          return
+        }
+        const splitOptions = {
+          ...(detail.newLeafId ? { leafId: detail.newLeafId } : {}),
+          ...(detail.ptyId ? { ptyId: detail.ptyId } : {})
+        }
+        if (detail.command) {
+          const createdPane = splitPaneWithOneShotStartup(
+            ptyDeps,
+            { command: detail.command },
+            () => mgr.splitPane(sourcePaneId, detail.direction, splitOptions)
+          )
+          recordRuntimeCreatedTerminalPaneSplit(createdPane, {
+            source: detail.telemetrySource ?? 'command',
+            direction: detail.direction
+          })
+        } else {
+          const createdPane = mgr.splitPane(sourcePaneId, detail.direction, splitOptions)
+          const telemetrySuppressed = createdPane
+            ? consumePendingWebRuntimeSplitMirrorTelemetry(detail.sourcePtyId, detail.direction)
+            : false
+          recordRuntimeCreatedTerminalPaneSplit(createdPane, {
+            source: detail.telemetrySource ?? 'command',
+            direction: detail.direction,
+            telemetrySuppressed
+          })
+        }
       }
-    }
-    window.addEventListener(SPLIT_TERMINAL_PANE_EVENT, onCliSplitPane)
+    )
 
     // Why: CLI-driven pane close goes via CustomEvent so PaneManager promotes a sibling; the last pane falls back to closing the tab.
     function onCliClosePane(event: Event): void {
@@ -1929,12 +1936,15 @@ export function useTerminalPaneLifecycle({
     window.addEventListener(CLOSE_TERMINAL_PANE_EVENT, onCliClosePane)
 
     return () => {
-      window.removeEventListener(SPLIT_TERMINAL_PANE_EVENT, onCliSplitPane)
+      unregisterTerminalPaneSplitRequestHandler()
       window.removeEventListener(CLOSE_TERMINAL_PANE_EVENT, onCliClosePane)
       const currentWorktreeTabs = useAppStore.getState().tabsByWorktree[worktreeId]
       const tabStillExists = Boolean(
         currentWorktreeTabs?.some((candidate) => candidate.id === tabId)
       )
+      if (!tabStillExists) {
+        cancelQueuedTerminalPaneSplitRequests(tabId, worktreeId)
+      }
       unregisterRuntimeTab()
       if (resizeRaf !== null) {
         cancelAnimationFrame(resizeRaf)

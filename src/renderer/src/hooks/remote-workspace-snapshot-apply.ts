@@ -1,4 +1,4 @@
-import type { RemoteWorkspaceSnapshot } from '../../../shared/remote-workspace-types'
+import type { RemoteWorkspaceObservedSnapshot } from '../../../shared/remote-workspace-types'
 import { importRemoteWorkspaceSession } from '../../../shared/remote-workspace-session-projection'
 import type { DirectSshAuthority } from '../../../shared/ssh-types'
 import { toSshExecutionHostId } from '../../../shared/execution-host'
@@ -71,12 +71,13 @@ function scheduleApplyWindowClosedNotice(): void {
 
 type RemoteWorkspaceSnapshotApplyInput = {
   store: RemoteWorkspaceSnapshotPlacementStore
-  snapshot: RemoteWorkspaceSnapshot
+  snapshot: RemoteWorkspaceObservedSnapshot
   token: DirectSshSnapshotApplyToken
   arrival: number
+  arrivalSignal?: AbortSignal
   isArrivalCurrent: (targetId: string, arrival: number) => boolean
   isPreparationTokenCurrent: (token: DirectSshPreparationToken) => boolean
-  waitForWorkspaceSessionReady: () => Promise<boolean>
+  waitForWorkspaceSessionReady: (signal?: AbortSignal) => Promise<boolean>
   finalizeHydratedTerminals: (authority: DirectSshAuthority) => number
 }
 
@@ -110,6 +111,7 @@ export async function applyDirectSshRemoteWorkspaceSnapshot({
   snapshot,
   token,
   arrival,
+  arrivalSignal,
   isArrivalCurrent,
   isPreparationTokenCurrent,
   waitForWorkspaceSessionReady,
@@ -125,7 +127,7 @@ export async function applyDirectSshRemoteWorkspaceSnapshot({
   ) {
     return 'stale'
   }
-  if (!(await waitForWorkspaceSessionReady())) {
+  if (!(await waitForWorkspaceSessionReady(arrivalSignal))) {
     if (isArrivalCurrent(authority.targetId, arrival) && isPreparationTokenCurrent(token)) {
       store.getState().setRemoteWorkspaceSyncStatus(authority.targetId, {
         phase: 'error',
@@ -146,15 +148,17 @@ export async function applyDirectSshRemoteWorkspaceSnapshot({
     executionHostId: toSshExecutionHostId(authority.targetId),
     onUnplacedTerminalTabs: (worktreePath) => unplacedTabWorktreePaths.push(worktreePath)
   })
-  if (
-    unplacedTabWorktreePaths.length > 0 &&
-    (await waitForSnapshotWorktreePlacement(
+  if (unplacedTabWorktreePaths.length > 0) {
+    await waitForSnapshotWorktreePlacement(
       store,
       authority,
       unplacedTabWorktreePaths,
-      () => isArrivalCurrent(authority.targetId, arrival) && isPreparationTokenCurrent(token)
-    ))
-  ) {
+      () => isArrivalCurrent(authority.targetId, arrival) && isPreparationTokenCurrent(token),
+      arrivalSignal
+    )
+    // The placement wait can last ten seconds; merge against the state that exists when it ends,
+    // even when the path never became placeable. Otherwise a tab created while waiting is omitted
+    // from the stale session payload and can be replaced by this snapshot.
     state = store.getState()
     worktreeIds = resolveDirectSshSnapshotWorktreeIds(state, authority)
     unplacedTabWorktreePaths = []
@@ -194,6 +198,7 @@ export async function applyDirectSshRemoteWorkspaceSnapshot({
         direction: 'pull',
         revision: snapshot.revision,
         updatedAt: snapshot.updatedAt,
+        hostObservationToken: snapshot.hostObservationToken,
         message: translate('auto.hooks.useIpcEvents.4f78ba5885', 'Workspace synced'),
         lastSyncedAt: Date.now()
       })
@@ -214,7 +219,8 @@ export async function applyDirectSshRemoteWorkspaceSnapshot({
         phase: 'conflict',
         direction: 'pull',
         revision: snapshot.revision,
-        updatedAt: snapshot.updatedAt
+        updatedAt: snapshot.updatedAt,
+        hostObservationToken: snapshot.hostObservationToken
       })
     }
     const reconnectAbort = new AbortController()
