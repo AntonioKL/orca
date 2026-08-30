@@ -26,14 +26,14 @@ describe('worktree create preparation classification', () => {
     ).toBe(false)
   })
 
-  it('classifies an unlocked detached preparation by its hidden path', () => {
+  it('does not classify an unlocked detached path without durable ownership', () => {
     expect(
       isWorktreeCreatePreparation({
         path: `/workspace/${WORKTREE_CREATE_PREPARATION_DIRECTORY}/123-checkout`,
         branch: undefined,
         lockReason: undefined
       })
-    ).toBe(true)
+    ).toBe(false)
   })
 
   it('does not classify an arbitrary detached user path by directory name alone', () => {

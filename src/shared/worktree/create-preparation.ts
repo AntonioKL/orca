@@ -28,16 +28,9 @@ export function isWorktreeCreatePreparation(worktree: {
   lockReason?: string
   branch?: string
 }): boolean {
-  if (worktree.lockReason?.startsWith(WORKTREE_CREATE_PREPARATION_LOCK_PREFIX)) {
-    return true
-  }
-  // A real branch worktree under a user-chosen `.orca-preparing` directory
-  // must stay visible and must never be eligible for destructive stale cleanup.
-  if (worktree.branch) {
-    return false
-  }
-  // Unlocked leftovers are only recoverable when the generated `<pid>-...`
-  // segment is present; an arbitrary user directory named `.orca-preparing`
-  // is not enough evidence to hide or remove a worktree.
-  return parseWorktreePreparationPathOwnerPid(worktree.path) !== null
+  // The Git lock reason is the durable ownership proof. A path can be chosen
+  // by a user (including for an uncommitted detached worktree), so path shape
+  // alone must never hide or force-remove it. A crash before locking may leave
+  // an unlocked detached entry for manual cleanup, but cannot delete user data.
+  return worktree.lockReason?.startsWith(WORKTREE_CREATE_PREPARATION_LOCK_PREFIX) ?? false
 }
