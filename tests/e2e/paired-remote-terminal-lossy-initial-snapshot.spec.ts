@@ -210,6 +210,20 @@ test('paints a nonempty lossy initial snapshot on a paired Electron client @head
     )
     expect(sent.send.accepted).toBe(true)
     await expect
+      .poll(() =>
+        client.page.evaluate(
+          () =>
+            (
+              window as Window & {
+                __remoteTerminalMultiplexAckGate?: {
+                  snapshot: () => { initialSnapshotTruncatedCount?: number }
+                }
+              }
+            ).__remoteTerminalMultiplexAckGate?.snapshot().initialSnapshotTruncatedCount
+        )
+      )
+      .toBeGreaterThanOrEqual(1)
+    await expect
       .poll(
         () =>
           client.page.evaluate(
