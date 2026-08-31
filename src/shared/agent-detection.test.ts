@@ -170,10 +170,10 @@ describe('Pi-compatible title detection', () => {
   // Why: OMP 17.2.12+ writes static state markers on WSL/ConPTY (#13890). The label after
   // the marker is cwd/session text, so glyphs another agent uses for status must not win.
   it.each([
-    ['π : my-project', 'working', '⠋ Pi'],
-    ['π > my-project', 'idle', 'Pi'],
+    ['π : my-project', 'working', 'π : my-project'],
+    ['π > my-project', 'idle', 'π > my-project'],
     ['π ! my-project', 'permission', 'π ! my-project'],
-    ['π > gemini ✦ ⏲ ◇ ✋', 'idle', 'Pi'],
+    ['π > gemini ✦ ⏲ ◇ ✋', 'idle', 'π > gemini ✦ ⏲ ◇ ✋'],
     ['zsh | π : my-project', 'working', 'zsh | π : my-project'],
     ['zsh | π > gemini ✦ ⏲ ◇ ✋', 'idle', 'zsh | π > gemini ✦ ⏲ ◇ ✋']
   ] as const)('classifies native OMP title %j as %s', (title, expectedStatus, expectedDisplay) => {
