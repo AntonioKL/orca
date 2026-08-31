@@ -49,12 +49,20 @@ export function installPanePtyVisibilityBind(session: ConnectPanePtySession): vo
       const tabPtyId = Object.values(state.tabsByWorktree)
         .flat()
         .find((tab) => tab.id === session.deps.tabId)?.ptyId
+      const activePtyId = session.activePanePtyBinding
+      const isCurrentPaneTransport =
+        session.deps.paneTransportsRef.current.get(session.pane.id) === session.transport
+      const isStaleTransportBinding =
+        !isCurrentPaneTransport || (activePtyId !== null && session.transport.getPtyId() !== ptyId)
+      const isInitialCurrentTransportBinding = isCurrentPaneTransport && activePtyId === null
       if (
-        shouldIgnoreStalePanePtyLayoutBinding({
+        isStaleTransportBinding ||
+        (shouldIgnoreStalePanePtyLayoutBinding({
           existingPtyId,
           nextPtyId: ptyId,
           tabPtyId
-        })
+        }) &&
+          !isInitialCurrentTransportBinding)
       ) {
         return
       }

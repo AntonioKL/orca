@@ -23,6 +23,8 @@ type ReattachResultSession = ReattachPayloadSession &
   Pick<
     ConnectPanePtySession,
     | 'agentCompletionCoordinator'
+    | 'activePanePtyBinding'
+    | 'activePanePtyBindingBoundAt'
     | 'authoritativeReattachGeneration'
     | 'capturedDirectSshRetryPtyAccepted'
     | 'cacheKey'
@@ -168,6 +170,10 @@ export function bindHandleReattachResult(sessionBag: ConnectPanePtySession): voi
       return false
     }
     session.setPanePtyFitBinding(ptyId)
+    // Keep the session-local identity in step with the transport before any
+    // queued spawn callback can arrive during replay.
+    session.activePanePtyBinding = ptyId
+    session.activePanePtyBindingBoundAt = performance.now()
     session.reportPanePtyVisibility(ptyId, session.deps.isVisibleRef.current)
     session.registerSideEffectFactConsumerForPty(ptyId)
     session.syncHiddenRendererPtyDelivery()
