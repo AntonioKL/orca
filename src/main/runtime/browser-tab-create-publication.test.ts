@@ -91,7 +91,14 @@ function createPublicationHost(registeredTabs: readonly [string, number][] = [['
 }
 
 function browserCommandsSource(): string {
-  return readFileSync(join(__dirname, 'orca-runtime-browser.ts'), 'utf8')
+  // The command adapter is split by browser-tab operation; keep the census over
+  // both owners instead of the thin compatibility facade.
+  return [
+    'runtime-browser-commands-browser-tab-create.ts',
+    'runtime-browser-commands-browser-tab-list.ts'
+  ]
+    .map((fileName) => readFileSync(join(__dirname, fileName), 'utf8'))
+    .join('\n')
 }
 
 describe('publishCreatedBrowserSessionTab', () => {
