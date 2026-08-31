@@ -218,6 +218,7 @@ export function mergeSnapshotAndSessions(
         const verdict = verdictBySessionId.get(s.sessionId)
         return {
           sessionId: s.sessionId,
+          ...(verdict?.incarnationId ? { incarnationId: verdict.incarnationId } : {}),
           ...(verdict ? killVerdictFields(verdict) : {}),
           paneKey: s.paneKey,
           pid: s.pid,

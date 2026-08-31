@@ -159,7 +159,7 @@ export class TerminalHost {
     this.sessions.get(sessionId)?.resumeProducer()
   }
 
-  kill(
+  async kill(
     sessionId: string,
     opts: { immediate?: boolean; intent?: PtyKillIntent; incarnationId?: string } = {}
   ): Promise<PtyShutdownResult | void> {
@@ -170,21 +170,21 @@ export class TerminalHost {
         opts.incarnationId &&
         (!currentSession || opts.incarnationId !== currentSession.incarnationId)
       ) {
-        return Promise.resolve({ fenceUnavailable: true })
+        return { fenceUnavailable: true }
       }
-      return Promise.resolve(
-        opts.immediate ? this.sessionTeardown.requestImmediate(sessionId) : pending
-      )
+      return opts.immediate ? this.sessionTeardown.requestImmediate(sessionId) : pending
     }
     const session = this.getAliveSession(sessionId)
-    const killed = this.sessionTeardown.killSession(
+    const killed = await this.sessionTeardown.killSession(
       sessionId,
       session,
       opts.immediate === true,
       opts
     )
-    this.killedTombstones.record(sessionId)
-    return Promise.resolve(killed)
+    if (killed?.fenceUnavailable !== true) {
+      this.killedTombstones.record(sessionId)
+    }
+    return killed
   }
 
   // Why: dispose a dead session's emulator so exited terminals don't pin their scrollback window for the daemon's life.

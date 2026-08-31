@@ -133,7 +133,11 @@ export function useResourceSessionInventory(ready: boolean): ResourceSessionInve
     for (const sessionId of sessionIds) {
       removedAtRevisionRef.current.set(sessionId, lifecycleRevision)
       knownSessionIdsRef.current.delete(sessionId)
-      verdictsRef.current.delete(sessionId)
+      for (const key of verdictsRef.current.keys()) {
+        if (key.startsWith(`${sessionId}\0`)) {
+          verdictsRef.current.delete(key)
+        }
+      }
     }
     setStoredState((current) => ({
       ...current,
@@ -157,7 +161,9 @@ export function useResourceSessionInventory(ready: boolean): ResourceSessionInve
         sessionInventory: {
           ...current.sessionInventory,
           sessions: current.sessionInventory.sessions.map((session) =>
-            session.id === id ? { ...session, killVerdict: verdict, killReason: reason } : session
+            session.id === id && (!incarnationId || session.incarnationId === incarnationId)
+              ? { ...session, killVerdict: verdict, killReason: reason }
+              : session
           )
         }
       }))
