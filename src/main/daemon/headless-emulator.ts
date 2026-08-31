@@ -151,7 +151,9 @@ export class HeadlessEmulator {
     return this.write(`\x1b[=${flags};1u`)
   }
 
-  /** Invalidates the snapshot cache; called by every state mutation. */
+  /** Invalidates the snapshot cache; called by every mutation of a MEMOIZED
+   *  part (buffer, dimensions, modes, OSC links). Fields the snapshot re-reads
+   *  per build — cwd, lastTitle, the escape tail — deliberately do not. */
   private markMutated(): void {
     this.snapshotCache.markMutated()
   }
@@ -186,11 +188,13 @@ export class HeadlessEmulator {
       return Promise.resolve()
     }
 
-    this.markWritten(data)
     const forwardQueryReplies = opts.forwardQueryReplies === true
+    // Why after the sync attempt: tryWriteSync bumps for the path it handles,
+    // so bumping first would double-count it and blur which bump owns which path.
     if (this.tryWriteSync(data, { forwardQueryReplies })) {
       return Promise.resolve()
     }
+    this.markWritten(data)
     this.oscText.scan(data)
     // Why the sentinel: xterm parses writes async, so its zero-byte callback fires in FIFO order to open the window at exactly this chunk.
     if (forwardQueryReplies) {
@@ -334,13 +338,15 @@ export class HeadlessEmulator {
     return this.oscText.cwd
   }
 
+  // Why no invalidation: the snapshot reads cwd/lastTitle fresh on every build,
+  // so they are never memoized. Bumping here would discard a whole serialize —
+  // and OSC 7 cwd updates land on every `cd`.
   setCwd(cwd: string | null): void {
-    this.markMutated()
     this.oscText.cwd = cwd
   }
 
+  /** See setCwd: lastTitle is read fresh per build, never memoized. */
   setLastTitle(title: string): void {
-    this.markMutated()
     this.oscText.lastTitle = title
   }
 
@@ -355,9 +361,11 @@ export class HeadlessEmulator {
     this.terminal.clear()
   }
 
+  // Why no invalidation: a post-dispose getSnapshot re-serializes the disposed
+  // terminal to byte-identical content, so bumping bought nothing and only
+  // reached into a disposed xterm. Serving the retained entry is equivalent
+  // and touches nothing.
   dispose(): void {
-    // Why: a post-dispose read must not be served a pre-dispose cache entry.
-    this.markMutated()
     this.disposed = true
     this.terminal.dispose()
   }

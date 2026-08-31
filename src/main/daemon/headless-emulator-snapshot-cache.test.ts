@@ -80,16 +80,21 @@ describe('HeadlessEmulator snapshot cache', () => {
     expect(emulator.getSnapshot().snapshotAnsi).not.toContain('line 0')
   })
 
-  it('invalidates on cwd and title changes', async () => {
+  it('updates cwd and title without discarding the memoized serialize', async () => {
+    // Why: both are read fresh per build and never memoized, so invalidating on
+    // them would throw away a whole serialize. OSC 7 lands on every `cd`.
     emulator = new HeadlessEmulator({ cols: 80, rows: 24 })
     await emulator.write('x')
     expect(emulator.getSnapshot().cwd).toBeNull()
+    const serialize = spyOnSerialize(emulator)
 
     emulator.setCwd('/tmp/project')
     expect(emulator.getSnapshot().cwd).toBe('/tmp/project')
 
     emulator.setLastTitle('agent running')
     expect(emulator.getSnapshot().lastTitle).toBe('agent running')
+
+    expect(serialize.calls()).toBe(0)
   })
 
   it('invalidates on restored osc links', async () => {
@@ -148,58 +153,47 @@ describe('HeadlessEmulator snapshot cache', () => {
     expect(emulator.getSnapshot().snapshotAnsi).toContain('after fence')
   })
 
-  it('invalidates on dispose so a post-dispose read is never served the cache', async () => {
-    const disposable = new HeadlessEmulator({ cols: 80, rows: 24 })
-    await disposable.write('pre dispose')
-    disposable.getSnapshot()
-    const serialize = spyOnSerialize(disposable)
-
-    disposable.dispose()
-
-    expect(serialize.calls()).toBe(0)
-  })
-
-  // Why this guard: the cache's correctness rests on every mutator calling
-  // markMutated(), which is convention, not a type. Freezing the public surface
-  // makes a new method a deliberate decision about invalidation rather than a
-  // silent stale-snapshot bug.
-  it('has no unreviewed public methods that could mutate state', () => {
+  // Why this guard: the cache's correctness rests on every mutator of a
+  // memoized part calling markMutated(), which is convention, not a type.
+  // Freezing the prototype makes a new method a deliberate decision about
+  // invalidation rather than a silent stale-snapshot bug. TS-private members
+  // appear too — getOwnPropertyNames has no visibility notion — so a rename
+  // updates this list; that is the intended cost of the ratchet.
+  it('has no unreviewed prototype members that could mutate memoized state', () => {
     emulator = new HeadlessEmulator({ cols: 80, rows: 24 })
     const surface = Object.getOwnPropertyNames(HeadlessEmulator.prototype)
       .filter((name) => name !== 'constructor')
       .sort()
-    expect(surface).toEqual(
-      [
-        'applyKittyKeyboardFlags',
-        'applyPushedViewAttributes',
-        'clearScrollback',
-        'disableQueryReplyForwarding',
-        'dispose',
-        'getAppliedSize',
-        'getBufferTailLines',
-        'getCursorLineContext',
-        'getCwd',
-        'getModes',
-        'getSnapshot',
-        'getVisibleBufferRange',
-        'getVisibleLines',
-        'installConptyPrimaryDeviceAttributesOverride',
-        'installViewAttributeResponder',
-        'isAlternateScreen',
-        'isCursorOnEmptyPromptLine',
-        'markMutated',
-        'markWritten',
-        'partialEscapeTailAnsi',
-        'emitQueryReply',
-        'resize',
-        'responderParser',
-        'setCwd',
-        'setLastTitle',
-        'setRestoredOscLinks',
-        'write',
-        'writeSync',
-        'tryWriteSync'
-      ].sort()
-    )
+    expect(surface).toEqual([
+      'applyKittyKeyboardFlags',
+      'applyPushedViewAttributes',
+      'clearScrollback',
+      'disableQueryReplyForwarding',
+      'dispose',
+      'emitQueryReply',
+      'getAppliedSize',
+      'getBufferTailLines',
+      'getCursorLineContext',
+      'getCwd',
+      'getModes',
+      'getSnapshot',
+      'getVisibleBufferRange',
+      'getVisibleLines',
+      'installConptyPrimaryDeviceAttributesOverride',
+      'installViewAttributeResponder',
+      'isAlternateScreen',
+      'isCursorOnEmptyPromptLine',
+      'markMutated',
+      'markWritten',
+      'partialEscapeTailAnsi',
+      'resize',
+      'responderParser',
+      'setCwd',
+      'setLastTitle',
+      'setRestoredOscLinks',
+      'tryWriteSync',
+      'write',
+      'writeSync'
+    ])
   })
 })

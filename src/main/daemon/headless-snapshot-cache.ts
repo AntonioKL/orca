@@ -24,8 +24,9 @@ type CachedParts = {
   snapshotAnsi: string
   scrollbackAnsi: string
   oscLinks: TerminalOscLinkRange[]
-  frameRestore: { frameRestoreAnsi?: string }
+  frameRestore: ReturnType<typeof buildFrameRestoreSnapshotFields>
   modes: TerminalModes
+  rehydrateSequences: ReturnType<typeof buildRehydrateSequences>
 }
 
 // Why a cap: an entry is retained for the session's lifetime once the session
@@ -58,30 +59,28 @@ export class HeadlessSnapshotCache {
   private retained: (CachedParts & { epoch: number; scrollbackRows: number | undefined }) | null =
     null
 
-  /** Invalidates the cache. Every emulator state mutation must call this. */
+  /** Invalidates the cache. Called for every mutation of a memoized part;
+   *  fields build() re-reads per call (cwd, lastTitle, escape tail) do not. */
   markMutated(): void {
     this.epoch += 1
     this.retained = null
   }
 
-  private resolve(source: HeadlessSnapshotSource, scrollbackRows: number | undefined): CachedParts {
-    const retained = this.retained
-    if (retained && retained.epoch === this.epoch && retained.scrollbackRows === scrollbackRows) {
-      return retained
-    }
-    const computed = computeCachedParts(source, scrollbackRows)
-    // Why size-gated: see MAX_CACHED_SNAPSHOT_BYTES. Declining to retain costs
-    // the pre-existing serialize, never correctness.
-    this.retained =
-      retainedSnapshotBytes(computed) <= MAX_CACHED_SNAPSHOT_BYTES
-        ? { ...computed, epoch: this.epoch, scrollbackRows }
-        : null
-    return computed
-  }
-
   /** Builds a caller-owned snapshot, reusing the memoized serialize on a hit. */
   build(source: HeadlessSnapshotSource, scrollbackRows: number | undefined): TerminalSnapshot {
-    const parts = this.resolve(source, scrollbackRows)
+    const retained = this.retained
+    let parts: CachedParts
+    if (retained && retained.epoch === this.epoch && retained.scrollbackRows === scrollbackRows) {
+      parts = retained
+    } else {
+      parts = computeCachedParts(source, scrollbackRows)
+      // Why size-gated: see MAX_CACHED_SNAPSHOT_BYTES. Declining to retain costs
+      // the pre-existing serialize, never correctness.
+      this.retained =
+        retainedSnapshotBytes(parts) <= MAX_CACHED_SNAPSHOT_BYTES
+          ? { ...parts, epoch: this.epoch, scrollbackRows }
+          : null
+    }
     // Why cloned: a hit hands back the retained entry, so a caller mutating
     // its snapshot would otherwise corrupt every later one.
     const modes = { ...parts.modes }
@@ -89,7 +88,7 @@ export class HeadlessSnapshotCache {
       snapshotAnsi: parts.snapshotAnsi,
       scrollbackAnsi: parts.scrollbackAnsi,
       oscLinks: parts.oscLinks.map((link) => ({ ...link })),
-      rehydrateSequences: buildRehydrateSequences(modes),
+      rehydrateSequences: parts.rehydrateSequences,
       ...parts.frameRestore,
       cwd: source.cwd,
       modes,
@@ -125,6 +124,7 @@ function computeCachedParts(
       source.restoredOscLinks
     ),
     frameRestore: buildFrameRestoreSnapshotFields(source.serializer, source.terminal, modes),
-    modes
+    modes,
+    rehydrateSequences: buildRehydrateSequences(modes)
   }
 }
