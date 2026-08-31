@@ -678,5 +678,6 @@ describe('RemoteRuntimeSharedControlConnection', () => {
       pendingRequestCount: 0,
       lastClose: { code: 4001, reason: 'test close' }
     })
+    connection.close()
   })
 })
