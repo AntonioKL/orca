@@ -1649,6 +1649,10 @@ export function useTerminalPaneLifecycle({
           // whole-tab remount is allowed to retain this record.
           discardDeferredSplitPaneHandoff(deferredSplitHandoff)
           deferredSplitHandoffs.delete(paneId)
+        } else if (leafId) {
+          // A close callback can outlive its mount-local numeric handle; the
+          // durable leaf key still identifies the deferred split to discard.
+          discardDeferredSplitPaneHandoffForKey(makePaneKey(tabId, leafId))
         }
         if (leafId && isRetiredSurface) {
           retireMountedTerminalPaneSurface({

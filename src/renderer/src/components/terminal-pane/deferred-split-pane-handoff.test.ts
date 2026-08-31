@@ -86,6 +86,18 @@ describe('deferred split pane handoff', () => {
     ])
   })
 
+  it('lets a late close discard a released handoff by its stable pane key', () => {
+    const key = makePaneKey('tab-1', LEAF_1)
+    const owner = beginDeferredSplitPaneHandoff(key, Promise.resolve('/source/cwd'))
+    appendDeferredSplitPaneInput(owner, { data: 'must-not-replay', kind: 'ordinary' })
+
+    // Whole-tab cleanup releases the mount-local handle before a stale close callback can run.
+    releaseDeferredSplitPaneHandoff(owner)
+    discardDeferredSplitPaneHandoffForKey(key)
+
+    expect(claimDeferredSplitPaneHandoff(key)).toBeNull()
+  })
+
   it('clears or discards only the current owner', () => {
     const clearedKey = makePaneKey('tab-clear', LEAF_1)
     const cleared = beginDeferredSplitPaneHandoff(clearedKey, Promise.resolve('/clear'))
