@@ -203,6 +203,10 @@ export function bindStartFreshSpawn(session: ConnectPanePtySession): void {
           } else if (typeof gen === 'number') {
             void window.api.pty.clearPendingPaneSerializer(session.cacheKey, gen).catch(() => {})
           }
+          if (!accepted) {
+            // A rejected reattach ends this spawn; nothing later clears the fence.
+            releaseDeferredCwdFence()
+          }
           return accepted ? resolvedPtyId : null
         }
         if (spawnedPtyId && typeof spawnedPtyId === 'object' && 'id' in spawnedPtyId) {
