@@ -96,7 +96,10 @@ deployment needs `basePath`, first move the route tree to an unprefixed
    - `VERCEL_TOKEN`
    - `VERCEL_ORG_ID`
    - `VERCEL_PROJECT_ID` (docs project, not the marketing site)
-4. Protect the `docs-production` GitHub environment with required reviewers.
+4. Protect the `docs-production` GitHub environment with required reviewers and
+   custom deployment branch policies for `main` and `v*` tags. The release-cut
+   dispatch runs from `main`; the direct published-release fallback runs from a
+   stable tag, while the workflow still authorizes only exact stable tags.
 5. Add the three rewrites above to the `www.onorca.dev` marketing project. A
    Vercel custom domain cannot delegate only `/docs` by itself; the default zone
    must proxy both page/API/media requests and `/docs-static` assets. Remove the
