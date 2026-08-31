@@ -229,7 +229,11 @@ export function RepositoryHostSetupsSection({
           const runtimeOwnerState = runtimeOwnerEnvironmentId
             ? runtimeHostConnectionState({
                 hasStatusEntry: Boolean(runtimeOwnerStatusEntry),
-                status: runtimeOwnerStatusEntry?.status
+                status: runtimeOwnerStatusEntry?.status,
+                remoteControl:
+                  runtimeOwnerStatusEntry?.remoteControl ??
+                  runtimeOwnerStatusEntry?.status?.remoteControl ??
+                  null
               })
             : null
           const runtimeOwnerReachable =
