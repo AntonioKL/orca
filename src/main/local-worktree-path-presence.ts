@@ -31,6 +31,7 @@ async function probeLocalWorktreePath(pathValue: string, signal: AbortSignal): P
     }
   )
   return new Promise((resolve) => {
+    // stat() cannot be aborted, so release the caller's lease when it gives up.
     let settled = false
     const finish = (value: boolean): void => {
       if (settled) {
