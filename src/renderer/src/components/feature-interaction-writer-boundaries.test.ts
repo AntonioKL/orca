@@ -43,14 +43,14 @@ describe('feature interaction writer boundaries', () => {
 
     const passiveSections = [
       sourceBetween(refreshSource, 'const handleRefreshGithubTasks', 'const nextModel'),
-      sourceBetween(
-        paginationSource,
-        'const handleLoadNextPage',
-        'const commitTaskSearch'
-      ),
+      sourceBetween(paginationSource, 'const handleLoadNextPage', 'const commitTaskSearch'),
       sourceBetween(searchSource, 'const applyPRFilterChange', 'const handleApplyTaskSearch'),
       sourceBetween(searchSource, 'const handleApplyTaskSearch', 'const handleTaskSearchChange'),
-      sourceBetween(searchSource, 'const handleTaskSearchChange', 'const handleSetDefaultTaskPreset'),
+      sourceBetween(
+        searchSource,
+        'const handleTaskSearchChange',
+        'const handleSetDefaultTaskPreset'
+      ),
       sourceBetween(
         searchSource,
         'const handleSelectGithubTaskKind',

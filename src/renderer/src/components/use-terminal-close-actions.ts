@@ -89,13 +89,7 @@ export function useTerminalCloseActions(controller: TerminalCreateController) {
       // closeBrowserTab announces the MRU target before guest teardown can trigger bridge fallback.
       destroyWorkspaceWebviews(state.browserPagesByWorkspace, tabId)
     },
-    [
-      closeBrowserTab,
-      setActiveFile,
-      setActiveTab,
-      setActiveTabType,
-      setActiveWorktree
-    ]
+    [closeBrowserTab, setActiveFile, setActiveTab, setActiveTabType, setActiveWorktree]
   )
 
   const handlePtyExit = useCallback(

@@ -226,7 +226,9 @@ describe('renderer startup runtime routing', () => {
   })
 
   it('keeps the persisted Automations view from starting its own bootstrap worktree scan', () => {
-    const source = readSource('src/renderer/src/components/automations/use-automations-page-refresh.ts')
+    const source = readSource(
+      'src/renderer/src/components/automations/use-automations-page-refresh.ts'
+    )
     const fullRefreshStart = source.indexOf('const mountedBeforeStartupWorktreeRefreshRef')
     const fullRefreshEffect = source.slice(
       fullRefreshStart,
