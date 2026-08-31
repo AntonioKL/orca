@@ -22,6 +22,8 @@ export function listLegacyWorkerTerminalRecoveryRows(
        FROM dispatch_contexts dc
        INNER JOIN worker_dispatches wd ON wd.dispatch_id = dc.id
        WHERE wd.state IN ('starting', 'ready', 'start_unknown', 'stopping', 'stop_unknown')
+          -- Why: a settled worker whose terminal Orca still owns keeps a resumable agent
+          -- session, so it needs the resume fence until release actually retires the pane.
           OR (wd.state IN (${WORKER_SETTLED_STATES.map(() => '?').join(', ')})
               AND EXISTS (
                 SELECT 1 FROM worker_terminal_resources wtr

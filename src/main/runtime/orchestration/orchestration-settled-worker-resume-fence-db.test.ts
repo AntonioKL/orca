@@ -7,7 +7,9 @@ const PANE_KEY = 'tab_worker:33333333-3333-4333-8333-333333333333'
 describe('settled worker terminal resume fence rows', () => {
   let db: OrchestrationDb | undefined
 
-  afterEach(() => db?.close())
+  afterEach(() => {
+    db?.close()
+  })
 
   function createReadyWorker(): { db: OrchestrationDb; taskId: string; dispatchId: string } {
     const d = new OrchestrationDb(':memory:')
@@ -33,6 +35,7 @@ describe('settled worker terminal resume fence rows', () => {
     return { db: d, taskId: task.id, dispatchId: started.dispatch.id }
   }
 
+  /** Asserts the `requested` arm so the resource row is non-null for the caller. */
   function requestRelease(d: OrchestrationDb, dispatchId: string): WorkerTerminalResourceRow {
     const requested = d.requestWorkerTerminalRelease(dispatchId)
     if (requested.disposition !== 'requested') {
@@ -52,9 +55,11 @@ describe('settled worker terminal resume fence rows', () => {
     ).not.toBe('rejected')
   }
 
-  it('keeps a settled-but-unreleased worker terminal in recovery rows', () => {
+  it('keeps a settled-but-unreleased worker terminal in the recovery rows', () => {
     const { db: d, taskId, dispatchId } = createReadyWorker()
     settle(d, taskId, dispatchId)
+
+    expect(d.getWorkerDispatch(dispatchId)?.state).toBe('succeeded')
     expect(d.listLegacyWorkerTerminalRecoveryRows()).toEqual([
       expect.objectContaining({
         dispatch_id: dispatchId,
@@ -64,28 +69,35 @@ describe('settled worker terminal resume fence rows', () => {
     ])
   })
 
-  it('keeps a settled worker whose release is unknown', () => {
+  // Why (STA-4577): `release_unknown` is the ticket's own repro — release could not be proven, the
+  // pane keeps a resumable provider session, and dropping it here would re-open the auto-resume.
+  it('keeps a settled worker terminal whose release could not be proven', () => {
     const { db: d, taskId, dispatchId } = createReadyWorker()
     settle(d, taskId, dispatchId)
     const resource = requestRelease(d, dispatchId)
-    d.markWorkerTerminalReleaseUnknown(resource.id, 'terminal no longer resolves')
+    expect(
+      d.markWorkerTerminalReleaseUnknown(resource.id, 'terminal no longer resolves').release_state
+    ).toBe('unknown')
+
     expect(d.listLegacyWorkerTerminalRecoveryRows()).toEqual([
-      expect.objectContaining({ dispatch_id: dispatchId })
+      expect.objectContaining({ dispatch_id: dispatchId, assignee_pane_key: PANE_KEY })
     ])
   })
 
-  it('drops a settled worker once its resource is released', () => {
+  it('drops a settled worker terminal once its resource is released', () => {
     const { db: d, taskId, dispatchId } = createReadyWorker()
     settle(d, taskId, dispatchId)
     const resource = requestRelease(d, dispatchId)
-    d.settleWorkerTerminalRelease(resource.id)
+    expect(d.settleWorkerTerminalRelease(resource.id).release_state).toBe('released')
+
     expect(d.listLegacyWorkerTerminalRecoveryRows()).toEqual([])
   })
 
-  it('drops a settled worker the user chose to retain', () => {
+  it('drops a settled worker terminal the user chose to retain', () => {
     const { db: d, taskId, dispatchId } = createReadyWorker()
     d.retainWorkerTerminalResource(dispatchId)
     settle(d, taskId, dispatchId)
+
     expect(d.listLegacyWorkerTerminalRecoveryRows()).toEqual([])
   })
 })

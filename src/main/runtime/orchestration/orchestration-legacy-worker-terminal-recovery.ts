@@ -22,6 +22,7 @@ export type LegacyWorkerTerminalRecoveryBlockedPane = {
   worktreeId: string
   paneKey: string
   contractVersion: number
+  /** The dispatch reported an outcome; its pane needs the fence but owns no process to recover. */
   settled: boolean
 }
 
@@ -72,9 +73,13 @@ export function planLegacyWorkerTerminalRecovery(
         worktreeId,
         paneKey,
         contractVersion: row.contract_version,
+        // Why: a pane reused across dispatches is only settled once every dispatch holding it is,
+        // so the first row seeds and any live row demotes it.
         settled: (alreadySettled ?? true) && settled
       })
     }
+    // Why: a settled worker owns no live process to adopt or roll back — it only needs
+    // the resume fence, so its identity must not compete with a running worker's.
     if (settled) {
       continue
     }

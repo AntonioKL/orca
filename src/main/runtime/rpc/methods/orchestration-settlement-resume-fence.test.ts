@@ -8,6 +8,8 @@ const COORDINATOR_PANE_KEY = 'tab_coord:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const WORKER_PANE_KEY = 'tab_worker:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
 const WORKTREE_ID = 'repo::worktree'
 
+// Why (STA-4577): the fence only wins the race with a workspace return if settlement itself stamps
+// it. These pin the two lifecycle-reconcile call sites that make a settled dispatch observable.
 describe('settled worker automatic-resume fence trigger', () => {
   let db: OrchestrationDb | undefined
 
@@ -22,7 +24,7 @@ describe('settled worker automatic-resume fence trigger', () => {
     runId: string
     taskId: string
     dispatchId: string
-    fence: ReturnType<typeof vi.fn>
+    resolveLegacyWorkerTerminalRecovery: ReturnType<typeof vi.fn>
   } {
     const orchestrationDb = new OrchestrationDb(':memory:')
     db = orchestrationDb
@@ -39,8 +41,9 @@ describe('settled worker automatic-resume fence trigger', () => {
       handle === 'term_worker' ? 'runtime_test:term_worker:1' : null
     )
     vi.spyOn(runtime, 'notifyMessageArrived').mockImplementation(() => {})
-    const fence = vi.fn()
-    runtime.setNotifier({ resolveLegacyWorkerTerminalRecovery: fence } as never)
+    const resolveLegacyWorkerTerminalRecovery = vi.fn()
+    runtime.setNotifier({ resolveLegacyWorkerTerminalRecovery } as never)
+
     const run = orchestrationDb.createRun({
       objective: 'Settlement fence run',
       coordinatorHandle: 'term_coord',
@@ -69,7 +72,7 @@ describe('settled worker automatic-resume fence trigger', () => {
       runId: run.id,
       taskId: task.id,
       dispatchId: started.dispatch.id,
-      fence
+      resolveLegacyWorkerTerminalRecovery
     }
   }
 
@@ -85,11 +88,13 @@ describe('settled worker automatic-resume fence trigger', () => {
     return method.handler(method.params ? method.params.parse(params) : undefined, ctx)
   }
 
-  const workerDonePayload = (taskId: string, dispatchId: string) =>
-    JSON.stringify({ taskId, dispatchId, outcome: 'succeeded' })
+  function workerDonePayload(taskId: string, dispatchId: string): string {
+    return JSON.stringify({ taskId, dispatchId, outcome: 'succeeded' })
+  }
 
-  it('fences the pane when orchestration.send settles worker_done', async () => {
+  it('fences the pane when orchestration.send settles the worker_done', async () => {
     const fixture = setup()
+
     const sent = (await call(
       'orchestration.send',
       {
@@ -102,14 +107,18 @@ describe('settled worker automatic-resume fence trigger', () => {
       },
       fixture.ctx
     )) as { lifecycle?: { action: string } }
+
     expect(sent.lifecycle?.action).toBe('completed')
-    expect(fixture.fence).toHaveBeenCalledWith(WORKER_PANE_KEY, 'fenced', {
-      worktreeId: WORKTREE_ID
-    })
+    expect(fixture.resolveLegacyWorkerTerminalRecovery).toHaveBeenCalledWith(
+      WORKER_PANE_KEY,
+      'fenced',
+      { worktreeId: WORKTREE_ID }
+    )
   })
 
-  it('fences when an unread check is first to settle worker_done', async () => {
+  it('fences the pane when an unread check is the first to settle the worker_done', async () => {
     const fixture = setup()
+    // A direct-handle mailbox: `check` is the authoritative read that reconciles this worker_done.
     db?.insertMessage({
       from: 'term_worker',
       to: 'term_watcher',
@@ -119,14 +128,19 @@ describe('settled worker automatic-resume fence trigger', () => {
       senderPaneKey: WORKER_PANE_KEY,
       runId: fixture.runId
     })
+
     await call('orchestration.check', { terminal: 'term_watcher' }, fixture.ctx)
-    expect(fixture.fence).toHaveBeenCalledWith(WORKER_PANE_KEY, 'fenced', {
-      worktreeId: WORKTREE_ID
-    })
+
+    expect(fixture.resolveLegacyWorkerTerminalRecovery).toHaveBeenCalledWith(
+      WORKER_PANE_KEY,
+      'fenced',
+      { worktreeId: WORKTREE_ID }
+    )
   })
 
-  it('does not fence a heartbeat', async () => {
+  it('does not fence anything for a heartbeat that settles nothing', async () => {
     const fixture = setup()
+
     await call(
       'orchestration.send',
       {
@@ -139,6 +153,7 @@ describe('settled worker automatic-resume fence trigger', () => {
       },
       fixture.ctx
     )
-    expect(fixture.fence).not.toHaveBeenCalled()
+
+    expect(fixture.resolveLegacyWorkerTerminalRecovery).not.toHaveBeenCalled()
   })
 })

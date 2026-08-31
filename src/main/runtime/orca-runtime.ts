@@ -4733,8 +4733,15 @@ export class OrcaRuntimeService {
   prepareLegacyWorkerTerminalRecovery(): LegacyWorkerTerminalRecoveryPlan {
     const plan = this.getLegacyWorkerTerminalRecoveryPlan()
     if (!plan) {
+      // Why: an unreadable plan is not evidence that any pane stopped needing its fence, so fail
+      // closed — stamp nothing, lift nothing, and retry on the next reconcile pass.
       return { blockedPanes: [], candidates: [], ambiguousDispatchIds: [] }
     }
+    // Why: the live store, not the persisted session, is what the pane's cold restore reads,
+    // so a settled worker's fence has to reach the renderer even when persistence is unavailable.
+    // Live dispatches stay persistence-only — fencing them would block their own restart.
+    // Note: both stamps address the dispatch's exact `assignee_pane_key`; a record still filed under
+    // a legacy numeric pane alias is not reached, same as the pre-existing persisted stamp.
     for (const blocked of plan.blockedPanes) {
       if (blocked.settled) {
         this.notifier?.resolveLegacyWorkerTerminalRecovery?.(blocked.paneKey, 'fenced', {
@@ -4809,6 +4816,11 @@ export class OrcaRuntimeService {
     return plan
   }
 
+  /**
+   * Why: `startFreshSpawn` refuses any fenced pane, so a fence that outlives its dispatch leaves a
+   * terminal that can never spawn again. Release, user retain, and dispatch pruning all drop the
+   * row from the recovery plan — that is the signal to retire the fence.
+   */
   private liftRetiredLegacyWorkerResumeFences(
     plan: LegacyWorkerTerminalRecoveryPlan,
     sessions: Map<ExecutionHostId, { current: WorkspaceSessionState; next: WorkspaceSessionState }>,
