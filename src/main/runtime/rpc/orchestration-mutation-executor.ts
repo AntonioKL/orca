@@ -36,8 +36,14 @@ export type DurableMutationInvocation = {
   replayedReceipt?: unknown
 }
 
+type InFlightMutation = {
+  method: string
+  payloadHash: string
+  promise: Promise<unknown>
+}
+
 export class OrchestrationMutationExecutor {
-  private readonly inFlight = new Map<string, Promise<unknown>>()
+  private readonly inFlight = new Map<string, InFlightMutation>()
 
   constructor(private readonly runtime: OrcaRuntimeService) {}
 
@@ -82,6 +88,20 @@ export class OrchestrationMutationExecutor {
     const atomicWorkerAcceptance =
       request.method === 'orchestration.workerStart' ||
       request.method === 'orchestration.federationAttachStart'
+    // Worker starts perform asynchronous topology validation before their durable
+    // acceptance claim. Join an identical in-process attempt before that boundary.
+    if (atomicWorkerAcceptance) {
+      const active = this.inFlight.get(key)
+      if (active) {
+        if (active.method !== request.method || active.payloadHash !== payloadHash) {
+          throw new OrchestrationError(
+            'request_mismatch',
+            `Mutation request ${requestId} was already used with different input.`
+          )
+        }
+        return attachMutationReceipt(await active.promise, requestId, true)
+      }
+    }
     const begun = existingPromptReceipt
       ? { disposition: existingPromptReceipt.state, row: existingPromptReceipt }
       : atomicWorkerAcceptance
@@ -109,7 +129,7 @@ export class OrchestrationMutationExecutor {
     if (begun.disposition === 'completed') {
       const active = this.inFlight.get(key)
       if (active) {
-        return attachMutationReceipt(await active, requestId, true)
+        return attachMutationReceipt(await active.promise, requestId, true)
       }
       const receipt = JSON.parse(begun.row.receipt ?? 'null')
       if (!shouldObserveCompletedMutation(request.method, params, receipt)) {
@@ -129,7 +149,7 @@ export class OrchestrationMutationExecutor {
           replayedReceipt: receipt
         })
       )
-      this.inFlight.set(key, replayObservation)
+      this.inFlight.set(key, { method: request.method, payloadHash, promise: replayObservation })
       try {
         const observed = await replayObservation
         const replayed = attachMutationReceipt(observed, requestId, true)
@@ -146,7 +166,7 @@ export class OrchestrationMutationExecutor {
     if (begun.disposition === 'pending') {
       const active = this.inFlight.get(key)
       if (active) {
-        return attachMutationReceipt(await active, requestId, true)
+        return attachMutationReceipt(await active.promise, requestId, true)
       }
       if (isTerminalPromptMutation(request.method, params)) {
         throw new OrchestrationError(
@@ -197,7 +217,7 @@ export class OrchestrationMutationExecutor {
         }
       })
     )
-    this.inFlight.set(key, active)
+    this.inFlight.set(key, { method: request.method, payloadHash, promise: active })
     try {
       const result = await active
       const receipted = attachMutationReceipt(result, requestId, resumedPendingMutation)

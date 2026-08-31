@@ -14,7 +14,11 @@ import {
   findGrokChatHistoryBySessionId,
   resolveGrokSessionsDir
 } from '../../shared/grok-session-paths'
-import { toHostReadableTranscriptPath, wslCodexSessionsDirs } from './host-readable-transcript-path'
+import {
+  needsWslHostResolution,
+  toHostReadableTranscriptPath,
+  wslCodexSessionsDirs
+} from './host-readable-transcript-path'
 import { findWslCodexSessionPath } from './wsl-codex-session-path-scan'
 import { wslTranscriptFsRefusal, type WslTranscriptFsError } from './wsl-transcript-fs-gate'
 import { proveClaudeTranscriptBranch } from '../claude/claude-transcript-branch-proof'
@@ -120,6 +124,16 @@ export async function resolveSessionFilePath(
       // it does not, so a stalled distro reads as unavailable, never "missing".
       unavailable = wslTranscriptFsRefusal(error)
     }
+  }
+
+  // A guest/UNC hook path is authoritative even when the provider did not
+  // attest a distro. Never let its session id resolve to a host or other guest
+  // transcript after that exact path misses.
+  if (hookPath && needsWslHostResolution(hookPath)) {
+    if (unavailable) {
+      throw unavailable
+    }
+    return null
   }
 
   // A WSL worker may fall back to terminal evidence, but never to an id match on

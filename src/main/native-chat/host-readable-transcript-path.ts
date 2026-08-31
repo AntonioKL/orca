@@ -187,6 +187,17 @@ export async function toHostReadableTranscriptPath(
     const candidate = needsWslHostTranslation(path, platform)
       ? toWindowsWslPath(path, exactWslDistro)
       : path
+    // Keep the running-distro guard for attested paths as well. An exact
+    // provider claim does not imply that the guest share is still available.
+    if (
+      isWslUncPath(candidate) &&
+      (deps.wslSnapshot
+        ? filterPathsToWslDistros([candidate], deps.wslSnapshot.runningDistros)
+        : await filterPathsToRunningWslDistrosAsync([candidate])
+      ).length === 0
+    ) {
+      return null
+    }
     return (await pathExists(candidate)) ? candidate : null
   }
   // Why: classify BEFORE probing — Win32 resolves a bare `/home/…` against the

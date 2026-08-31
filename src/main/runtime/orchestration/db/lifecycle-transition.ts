@@ -251,12 +251,29 @@ export function getLifecycleTransitionReceipts(
   entity: LifecycleEntity,
   entityId: string
 ): LifecycleTransitionReceipt[] {
-  return this.db
+  const receipts = this.db
     .prepare(
       `SELECT * FROM lifecycle_transition_receipts
        WHERE entity = ? AND entity_id = ? ORDER BY rowid`
     )
     .all(entity, entityId) as LifecycleTransitionReceipt[]
+  if (receipts.length > 0 || entity !== 'worker') {
+    return receipts
+  }
+  // Recovery receipts are keyed by owning Dispatch. Accept the historical Resource-ID query
+  // shape so callers inspecting older releases continue to see the same ledger entries.
+  const owner = this.db
+    .prepare('SELECT owner_dispatch_id FROM worker_terminal_resources WHERE id = ?')
+    .get(entityId) as { owner_dispatch_id: string } | undefined
+  if (!owner) {
+    return receipts
+  }
+  return this.db
+    .prepare(
+      `SELECT * FROM lifecycle_transition_receipts
+       WHERE entity = ? AND entity_id = ? AND kind = 'worker_terminal_recovery' ORDER BY rowid`
+    )
+    .all(entity, owner.owner_dispatch_id) as LifecycleTransitionReceipt[]
 }
 
 export type LifecycleTransitionMethods = {

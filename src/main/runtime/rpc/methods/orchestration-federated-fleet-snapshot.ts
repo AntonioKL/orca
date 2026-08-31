@@ -75,15 +75,22 @@ export async function readFederatedFleetSnapshots(args: {
         peerFingerprint: first.peer_fingerprint,
         expectedRuntimeEpoch: first.remote_runtime_epoch,
         capability: ORCHESTRATION_FEDERATION_FLEET_SNAPSHOT_RUNTIME_CAPABILITY,
-        probe: () =>
-          args.runtime.callOrchestrationWorkerServer(
+        // Capability negotiation may retry after a peer restart; each probe
+        // must consume the same fleet deadline instead of restarting its budget.
+        probe: async () => {
+          const probeTimeoutMs = Math.min(FLEET_HOST_TIMEOUT_MS, deadline - Date.now())
+          if (probeTimeoutMs <= 0) {
+            throw new Error('Federated fleet deadline exceeded during capability negotiation')
+          }
+          return args.runtime.callOrchestrationWorkerServer(
             server.environmentId,
             'status.get',
             undefined,
-            timeoutMs,
+            probeTimeoutMs,
             undefined,
             { expectedEnvironmentPairingRevision: server.pairingRevision }
           ) as Promise<RuntimeStatus>
+        }
       })
       observedCapabilityEpoch = capability.runtimeEpoch
       if (!capability.supported) {
@@ -92,11 +99,15 @@ export async function readFederatedFleetSnapshots(args: {
         }
         return { observations: [], error: error('capability_unsupported') }
       }
+      const snapshotRemainingMs = deadline - Date.now()
+      if (snapshotRemainingMs <= 0) {
+        return { observations: [], error: error('host_unavailable') }
+      }
       const snapshot = (await args.runtime.callOrchestrationWorkerServer(
         server.environmentId,
         'orchestration.federationFleetSnapshot',
         { dispatchIds },
-        Math.min(timeoutMs, Math.max(1, deadline - Date.now())),
+        Math.min(timeoutMs, snapshotRemainingMs),
         undefined,
         { expectedEnvironmentPairingRevision: server.pairingRevision }
       )) as {

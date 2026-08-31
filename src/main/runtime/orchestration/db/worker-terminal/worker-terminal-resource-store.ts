@@ -139,7 +139,8 @@ export function recordWorkerTerminalRecoveryAttempt(
     .run(resourceId)
   const resource = this.getWorkerTerminalResource(resourceId)
   if (resource) {
-    // Keep a bounded, inspectable receipt in the existing lifecycle ledger; details are compact.
+    // Keep the receipt in the worker lifecycle ledger keyed by its owning Dispatch, not the
+    // terminal Resource ID. Resource-ID lookups remain compatible in getLifecycleTransitionReceipts.
     this.db
       .prepare(
         `INSERT INTO lifecycle_transition_receipts
@@ -148,7 +149,7 @@ export function recordWorkerTerminalRecoveryAttempt(
       )
       .run(
         generateId('wrr'),
-        resourceId,
+        resource.owner_dispatch_id,
         resource.release_state,
         outcome,
         JSON.stringify({ attempt: resource.recovery_attempt_count })
@@ -163,7 +164,7 @@ export function recordWorkerTerminalRecoveryAttempt(
                ORDER BY created_at DESC LIMIT 32
             )`
       )
-      .run(resourceId, resourceId)
+      .run(resource.owner_dispatch_id, resource.owner_dispatch_id)
   }
   return resource
 }

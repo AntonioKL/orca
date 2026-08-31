@@ -108,6 +108,7 @@ export function settleDeadWorkerTerminalRelease(
     requestingDispatchId: string
     resourceId: string
     processIncarnation: string
+    requireArchive?: boolean
   }
 ):
   | { disposition: 'released'; resource: WorkerTerminalResourceRow }
@@ -129,14 +130,22 @@ export function settleDeadWorkerTerminalRelease(
     const owner = this.getWorkerDispatch(resource.owner_dispatch_id)
     const requesterSettled = Boolean(requester && WORKER_SETTLED_STATES.includes(requester.state))
     const ownerSettled = Boolean(owner && WORKER_SETTLED_STATES.includes(owner.state))
+    // A positive process-exit verdict only proves the exact process is gone; release is
+    // terminal cleanup and must also have a durable output archive to preserve worker evidence.
+    const archive = params.requireArchive
+      ? this.getWorkerTerminalArchive(resource.owner_dispatch_id)
+      : undefined
     if (
       !priorOwners ||
       !requesterRelated ||
       !requesterSettled ||
       !ownerSettled ||
       resource.process_incarnation !== params.processIncarnation ||
+      (params.requireArchive && (!archive || archive.resource_id !== resource.id)) ||
       resource.ownership_state === 'released' ||
-      !['not_requested', 'retained', 'unknown'].includes(resource.release_state)
+      !['not_requested', 'retained', 'requested', 'releasing', 'unknown'].includes(
+        resource.release_state
+      )
     ) {
       this.db.exec('COMMIT')
       return { disposition: 'retained', resource }
@@ -149,7 +158,7 @@ export function settleDeadWorkerTerminalRelease(
              release_completed_at = datetime('now'), release_error = NULL,
              updated_at = datetime('now')
          WHERE id = ? AND process_incarnation = ? AND ownership_state != 'released'
-           AND release_state IN ('not_requested', 'retained', 'unknown')`
+           AND release_state IN ('not_requested', 'retained', 'requested', 'releasing', 'unknown')`
       )
       .run(params.resourceId, params.processIncarnation)
     const released = this.getWorkerTerminalResource(params.resourceId) as WorkerTerminalResourceRow

@@ -130,6 +130,32 @@ async function completeWorkerTerminalReleaseOnce(
   }
   if (observation.status === 'missing' || observation.status === 'unattached') {
     if (args.mode === 'recovery') {
+      // A close can succeed before the process crashes, leaving `releasing` durable state while
+      // terminal inventory no longer resolves the handle. Only a positive host liveness verdict
+      // may settle that exact incarnation; contact loss remains pending/unverifiable.
+      if (resource.process_incarnation) {
+        const processLiveness = await runtime.inspectTerminalProcessIncarnationLiveness(
+          resource.process_incarnation,
+          resource.host_scope
+        )
+        if (processLiveness === 'exited') {
+          const reconciled = db.settleDeadWorkerTerminalRelease({
+            requestingDispatchId: dispatchId,
+            resourceId: resource.id,
+            processIncarnation: resource.process_incarnation,
+            requireArchive: true
+          })
+          if (reconciled.disposition === 'released') {
+            runtime.notifyMessageArrived(`dispatch:${dispatchId}`, 'status')
+            return {
+              dispatchId,
+              state: 'released',
+              processAction: 'closed_exited_terminal',
+              archive: archiveSummary(reconciled.resource)
+            }
+          }
+        }
+      }
       // Inventory may still be incomplete during startup/reconnect discovery; defer.
       return {
         dispatchId,

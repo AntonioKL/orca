@@ -23,6 +23,16 @@ function promptRequest(requestId: string): RpcRequest {
   }
 }
 
+function workerStartRequest(method: string, requestId: string, params: unknown): RpcRequest {
+  return {
+    id: `rpc-${requestId}`,
+    authToken: 'token',
+    method,
+    orchestrationRequestId: requestId,
+    params
+  }
+}
+
 function createHarness() {
   const db = new OrchestrationDb(':memory:')
   const runtime = new OrcaRuntimeService()
@@ -139,5 +149,92 @@ describe('terminal prompt mutation receipt retry boundary', () => {
       code: 'operation_unknown'
     })
     expect(invoke).not.toHaveBeenCalled()
+  })
+})
+
+describe('worker start mutation coalescing', () => {
+  const databases: OrchestrationDb[] = []
+
+  afterEach(() => {
+    for (const db of databases.splice(0)) {
+      db.close()
+    }
+    vi.restoreAllMocks()
+  })
+
+  it.each(['orchestration.workerStart', 'orchestration.federationAttachStart'])(
+    'joins concurrent identical %s calls before durable acceptance',
+    async (method) => {
+      const harness = createHarness()
+      databases.push(harness.db)
+      const requestId = `concurrent-${method}`
+      const params = { taskId: 'task-1', taskSpec: 'specification' }
+      let release!: () => void
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const invoke = vi.fn(
+        async (mutation?: { identity: Parameters<OrchestrationDb['beginMutationReceipt']>[0] }) => {
+          if (mutation) {
+            harness.db.beginMutationReceipt(mutation.identity)
+          }
+          await gate
+          return { accepted: { dispatchId: 'dispatch-1' } }
+        }
+      )
+
+      const calls = Promise.all([
+        harness.executor.run(workerStartRequest(method, requestId, params), params, invoke),
+        harness.executor.run(workerStartRequest(method, requestId, params), params, invoke)
+      ])
+      release()
+      const [first, replay] = await calls
+
+      expect(invoke).toHaveBeenCalledOnce()
+      expect(first).toMatchObject({
+        accepted: { dispatchId: 'dispatch-1' },
+        mutation: { requestId, replayed: false }
+      })
+      expect(replay).toMatchObject({
+        accepted: { dispatchId: 'dispatch-1' },
+        mutation: { requestId, replayed: true }
+      })
+    }
+  )
+
+  it('fences a concurrent worker start with a different payload', async () => {
+    const harness = createHarness()
+    databases.push(harness.db)
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const invoke = vi.fn(
+      async (mutation?: { identity: Parameters<OrchestrationDb['beginMutationReceipt']>[0] }) => {
+        if (mutation) {
+          harness.db.beginMutationReceipt(mutation.identity)
+        }
+        await gate
+        return { accepted: true }
+      }
+    )
+    const firstParams = { taskId: 'task-1', taskSpec: 'first' }
+    const secondParams = { taskId: 'task-1', taskSpec: 'second' }
+    const first = harness.executor.run(
+      workerStartRequest('orchestration.workerStart', 'payload-mismatch', firstParams),
+      firstParams,
+      invoke
+    )
+
+    await expect(
+      harness.executor.run(
+        workerStartRequest('orchestration.workerStart', 'payload-mismatch', secondParams),
+        secondParams,
+        invoke
+      )
+    ).rejects.toMatchObject({ code: 'request_mismatch' })
+    release()
+    await first
+    expect(invoke).toHaveBeenCalledOnce()
   })
 })

@@ -122,6 +122,31 @@ describe('resolveSessionFilePath on a Windows host with WSL', () => {
     expect(resolved).toBeNull()
   })
 
+  it('does not fall back by id from an unattested guest hook path', async () => {
+    READABLE_WSL_UNC_PATHS.delete(ROLLOUT_UNC)
+    scanned.hostRootHasRollout = true
+
+    await expect(
+      resolveSessionFilePath('codex', 'wsl-sess', {
+        transcriptPath: ROLLOUT_LINUX,
+        codexSessionsDirs: ['C:\\host\\sessions']
+      })
+    ).resolves.toBeNull()
+    expect(scanned.dirs).toEqual([])
+  })
+
+  it('does not fall back to a host id match for an unattested guest hook path', async () => {
+    scanned.hostRootHasRollout = true
+
+    const resolved = await resolveSessionFilePath('codex', 'wsl-sess', {
+      transcriptPath: '/home/ada/.codex/sessions/2026/07/24/rollout-wsl-sess.jsonl',
+      codexSessionsDirs: [HOST_ROLLOUT]
+    })
+
+    expect(resolved).toBeNull()
+    expect(scanned.dirs).toEqual([])
+  })
+
   it('searches the WSL managed Codex sessions root when no hook path is known', async () => {
     await resolveSessionFilePath('codex', 'wsl-sess')
     expect(scanned.dirs).toContain(WSL_MANAGED_SESSIONS_DIR)

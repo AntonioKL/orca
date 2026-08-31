@@ -147,7 +147,11 @@ export function activateAndRevealFolderWorkspace(
   if (shouldGateAgentActivation) {
     void gateWorktreeAgentActivation(workspaceKey).then((outcome) => {
       if (outcome === 'empty' && useAppStore.getState().activeWorktreeId === workspaceKey) {
-        ensureFolderWorkspaceInitialTerminal(folderWorkspace)
+        ensureFolderWorkspaceInitialTerminal(
+          folderWorkspace,
+          undefined,
+          opts?.providesInitialSurface
+        )
       }
     })
   }
@@ -265,7 +269,7 @@ export function activateAndRevealWorktree(
           undefined,
           undefined,
           undefined,
-          { reseedEmptiedWorkspace: true }
+          { reseedEmptiedWorkspace: opts?.providesInitialSurface !== true }
         )
       }
     })

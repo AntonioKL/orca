@@ -151,6 +151,67 @@ describe('orchestration worker release recovery', () => {
     expect(runtime.closeTerminal).toHaveBeenCalledTimes(2)
   })
 
+  it('settles a closed terminal after restart when exact process liveness is exited', async () => {
+    setup()
+    const { dispatchId } = await startSettledWorker()
+    const resource = db.getWorkerTerminalResourceByOwner(dispatchId)
+    expect(resource).toBeDefined()
+
+    // Simulate a crash seam after closeTerminal succeeded but before its durable settlement.
+    vi.spyOn(db, 'settleWorkerTerminalRelease').mockImplementationOnce(() => {
+      throw new Error('SQLite interrupted after terminal close')
+    })
+    await expect(call('orchestration.workerRelease', { dispatch: dispatchId })).rejects.toThrow(
+      'SQLite interrupted after terminal close'
+    )
+    expect(db.getWorkerTerminalResourceByOwner(dispatchId)?.release_state).toBe('releasing')
+    expect(runtime.closeTerminal).toHaveBeenCalledTimes(1)
+
+    vi.mocked(runtime.showTerminal).mockRejectedValue(new Error('terminal_handle_stale'))
+    vi.spyOn(runtime, 'inspectTerminalProcessIncarnationLiveness').mockResolvedValue('exited')
+
+    await expect(reconcileRequestedWorkerTerminalReleases(runtime)).resolves.toMatchObject({
+      attempted: 1,
+      released: 1,
+      pending: 0
+    })
+    expect(db.getWorkerTerminalResourceByOwner(dispatchId)?.release_state).toBe('released')
+    expect(runtime.closeTerminal).toHaveBeenCalledTimes(1)
+    expect(runtime.inspectTerminalProcessIncarnationLiveness).toHaveBeenCalledWith(
+      resource?.process_incarnation,
+      resource?.host_scope
+    )
+
+    // A replay sees no backlog and cannot issue another close.
+    await expect(reconcileRequestedWorkerTerminalReleases(runtime)).resolves.toMatchObject({
+      attempted: 0
+    })
+    expect(runtime.closeTerminal).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a requested release pending after positive exit when no archive was committed', async () => {
+    setup()
+    const { dispatchId } = await startSettledWorker()
+    const requested = db.requestWorkerTerminalRelease(dispatchId)
+    expect(requested.disposition).toBe('requested')
+    expect(db.getWorkerTerminalArchive(dispatchId)).toBeUndefined()
+
+    vi.mocked(runtime.showTerminal).mockRejectedValue(new Error('terminal_handle_stale'))
+    vi.spyOn(runtime, 'inspectTerminalProcessIncarnationLiveness').mockResolvedValue('exited')
+
+    await expect(reconcileRequestedWorkerTerminalReleases(runtime)).resolves.toMatchObject({
+      attempted: 1,
+      released: 0,
+      pending: 1,
+      unknown: 0
+    })
+    expect(db.getWorkerTerminalResourceByOwner(dispatchId)).toMatchObject({
+      release_state: 'requested',
+      ownership_state: 'owned'
+    })
+    expect(runtime.closeTerminal).not.toHaveBeenCalled()
+  })
+
   it('defers instead of settling unknown while inventory is incomplete', async () => {
     setup()
     const { dispatchId } = await startSettledWorker()
@@ -249,6 +310,16 @@ describe('orchestration worker release recovery', () => {
     })
     expect(db.getLifecycleTransitionReceipts('worker', resourceId!)).toEqual([
       expect.objectContaining({ kind: 'worker_terminal_recovery' })
+    ])
+    expect(
+      db
+        .getLifecycleTransitionReceipts('worker', dispatchId)
+        .filter((receipt) => receipt.kind === 'worker_terminal_recovery')
+    ).toEqual([
+      expect.objectContaining({
+        kind: 'worker_terminal_recovery',
+        entity_id: dispatchId
+      })
     ])
 
     await expect(reconcileRequestedWorkerTerminalReleases(runtime)).resolves.toMatchObject({
