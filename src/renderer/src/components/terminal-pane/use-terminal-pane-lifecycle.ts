@@ -153,10 +153,8 @@ import {
   setPrimarySelectionText
 } from '@/lib/primary-selection'
 import {
-  SPLIT_TERMINAL_PANE_EVENT,
   CLOSE_TERMINAL_PANE_EVENT,
   WAKE_HIBERNATED_AGENTS_WORKTREE_EVENT,
-  type SplitTerminalPaneDetail,
   type CloseTerminalPaneDetail,
   type WakeHibernatedAgentsWorktreeDetail
 } from '@/constants/terminal'
@@ -181,6 +179,11 @@ import {
   resolveTabTitleAfterPaneClose,
   shouldClearLaunchAgentForClosedPane
 } from './terminal-pane-close-identity'
+import {
+  cancelQueuedTerminalPaneSplitRequests,
+  registerTerminalPaneSplitRequestHandler,
+  resolveTerminalPaneSplitSourceId
+} from './terminal-pane-split-request-routing'
 
 export function resetTerminalKeyboardProtocolAfterInterrupt(terminal: Terminal): void {
   // Guarded output path so a throwing xterm can't escape the key handler.
@@ -313,9 +316,10 @@ type UseTerminalPaneLifecycleDeps = {
   replayingPanesRef: ReplayingPanesRef
   isActiveRef: React.RefObject<boolean>
   isVisibleRef: React.RefObject<boolean>
-  onPtyExitRef: React.RefObject<(ptyId: string) => void>
+  onPtyExitRef: React.RefObject<(ptyId: string, exitCode?: number) => void>
   onAgentExitedRef: React.RefObject<(leafId: string) => void>
   onPtyErrorRef?: React.RefObject<(paneId: number, message: string) => void>
+  onPtyErrorClearedRef?: React.RefObject<(paneId: number, message?: string) => void>
   onPaneProcessDied?: (processExit: PaneProcessExit) => void
   onPtyRecoveryStateRef?: React.RefObject<
     (paneId: number, state: PtyTransportRecoveryState | null) => void
@@ -348,7 +352,13 @@ type UseTerminalPaneLifecycleDeps = {
   }) => void
   setCacheTimerStartedAt: (key: string, ts: number | null) => void
   syncPanePtyLayoutBinding: (paneId: number, ptyId: string | null) => void
+  syncPanePtyLayoutBindingForLeaf?: (
+    leafId: string,
+    ptyId: string | null,
+    sourcePaneId: number
+  ) => void
   clearExitedPanePtyLayoutBinding: (paneId: number, exitedPtyId: string) => void
+  clearExitedPanePtyLayoutBindingForLeaf?: (leafId: string, exitedPtyId: string) => void
   /** Settles the captured one-shot startup only after a pane owns a concrete PTY. */
   onStartupBound?: () => void
   setTabPaneExpanded: (tabId: string, expanded: boolean) => void
@@ -662,6 +672,7 @@ export function applyTerminalPaneCloseRequest(args: {
 
 export function retireMountedTerminalPaneSurface(args: {
   paneKey: string
+  leafId: string
   paneId: number
   tabId: string
   ptyId: string | null
@@ -670,6 +681,12 @@ export function retireMountedTerminalPaneSurface(args: {
     options?: { preserveSleepingAgentSession?: boolean }
   ) => void
   syncPanePtyLayoutBinding: (paneId: number, ptyId: string | null) => void
+  syncPanePtyLayoutBindingForLeaf?: (
+    leafId: string,
+    ptyId: string | null,
+    sourcePaneId: number
+  ) => void
+  clearExitedPanePtyLayoutBindingForLeaf?: (leafId: string, exitedPtyId: string) => void
   clearTabPtyId: (tabId: string, ptyId: string) => void
   transport?: {
     detach?: (options?: { preserveExitObserver?: boolean }) => void
@@ -680,7 +697,14 @@ export function retireMountedTerminalPaneSurface(args: {
     preserveSleepingAgentSession: true
   })
   if (args.ptyId) {
-    args.syncPanePtyLayoutBinding(args.paneId, null)
+    if (args.clearExitedPanePtyLayoutBindingForLeaf) {
+      // Match the old PTY before clearing so an overlapping successor cannot lose its binding.
+      args.clearExitedPanePtyLayoutBindingForLeaf(args.leafId, args.ptyId)
+    } else if (args.syncPanePtyLayoutBindingForLeaf) {
+      args.syncPanePtyLayoutBindingForLeaf(args.leafId, null, args.paneId)
+    } else {
+      args.syncPanePtyLayoutBinding(args.paneId, null)
+    }
     args.clearTabPtyId(args.tabId, args.ptyId)
   }
   // preserveExitObserver:false — a retired surface keeps its PTY alive but starts no parked
@@ -724,6 +748,7 @@ export function useTerminalPaneLifecycle({
   onPtyExitRef,
   onAgentExitedRef,
   onPtyErrorRef,
+  onPtyErrorClearedRef,
   onPaneProcessDied,
   onPtyRecoveryStateRef,
   clearTabPtyId,
@@ -743,7 +768,9 @@ export function useTerminalPaneLifecycle({
   dispatchNotification,
   setCacheTimerStartedAt,
   syncPanePtyLayoutBinding,
+  syncPanePtyLayoutBindingForLeaf,
   clearExitedPanePtyLayoutBinding,
+  clearExitedPanePtyLayoutBindingForLeaf,
   onStartupBound,
   setTabPaneExpanded,
   setTabCanExpandPane,
@@ -828,6 +855,20 @@ export function useTerminalPaneLifecycle({
     // Numeric pane ids are mount-local; the handle itself is keyed by the
     // durable tab/leaf identity so a whole-tab remount can reclaim it.
     const deferredSplitHandoffs = new Map<number, DeferredSplitPaneHandoffHandle>()
+    // A concrete PTY owns the input queue and settles the split admission fence,
+    // so the deferred lookup stops being reusable. Both layout-binding variants
+    // must run this: main routes live binds through the leaf-keyed one.
+    const settleDeferredSplitOnBind = (paneId: number, ptyId: string | null): void => {
+      if (!ptyId) {
+        return
+      }
+      const deferredSplitHandoff = deferredSplitHandoffs.get(paneId)
+      if (deferredSplitHandoff) {
+        clearDeferredSplitPaneHandoff(deferredSplitHandoff)
+        deferredSplitHandoffs.delete(paneId)
+      }
+      settlePaneCwdDeferredSpawn(paneCwdRef.current, paneId)
+    }
     const worktreePath =
       useAppStore
         .getState()
@@ -978,6 +1019,7 @@ export function useTerminalPaneLifecycle({
       onPtyExitRef,
       onAgentExitedRef,
       onPtyErrorRef,
+      onPtyErrorClearedRef,
       onPaneProcessDied,
       onPtyRecoveryStateRef,
       clearTabPtyId,
@@ -997,21 +1039,23 @@ export function useTerminalPaneLifecycle({
       dispatchNotification,
       setCacheTimerStartedAt,
       syncPanePtyLayoutBinding: (paneId: number, ptyId: string | null) => {
-        if (ptyId) {
-          const deferredSplitHandoff = deferredSplitHandoffs.get(paneId)
-          if (deferredSplitHandoff) {
-            // A concrete PTY owns the input queue now; do not replay it into a
-            // later layout mount.
-            clearDeferredSplitPaneHandoff(deferredSplitHandoff)
-            deferredSplitHandoffs.delete(paneId)
-          }
-          // A concrete PTY settles the split admission fence; the lookup is no
-          // longer reusable once this pane owns a shell.
-          settlePaneCwdDeferredSpawn(paneCwdRef.current, paneId)
-        }
+        settleDeferredSplitOnBind(paneId, ptyId)
         syncPanePtyLayoutBinding(paneId, ptyId)
       },
+      ...(syncPanePtyLayoutBindingForLeaf
+        ? {
+            syncPanePtyLayoutBindingForLeaf: (
+              leafId: string,
+              ptyId: string | null,
+              sourcePaneId: number
+            ) => {
+              settleDeferredSplitOnBind(sourcePaneId, ptyId)
+              syncPanePtyLayoutBindingForLeaf(leafId, ptyId, sourcePaneId)
+            }
+          }
+        : {}),
       clearExitedPanePtyLayoutBinding,
+      clearExitedPanePtyLayoutBindingForLeaf,
       onStartupBound,
       deferPtyInput: (paneId, data, forward) => {
         const suppression = httpLinkClickFallbackDisposables.get(paneId)?.ptyMouseSuppression
@@ -1641,11 +1685,14 @@ export function useTerminalPaneLifecycle({
         if (leafId && isRetiredSurface) {
           retireMountedTerminalPaneSurface({
             paneKey: makePaneKey(tabId, leafId),
+            leafId,
             paneId,
             tabId,
             ptyId: closedPtyId,
             retireAgentPaneAuthority: useAppStore.getState().retireAgentPaneAuthority,
             syncPanePtyLayoutBinding,
+            syncPanePtyLayoutBindingForLeaf,
+            clearExitedPanePtyLayoutBindingForLeaf,
             clearTabPtyId,
             ...(transport ? { transport } : {})
           })
@@ -1668,7 +1715,13 @@ export function useTerminalPaneLifecycle({
             )
             if (ptyId) {
               // Why: PaneManager already promoted the sibling; suppress this exit so the survivor isn't mistaken for an exited tab.
-              syncPanePtyLayoutBinding(paneId, null)
+              if (leafId && clearExitedPanePtyLayoutBindingForLeaf) {
+                clearExitedPanePtyLayoutBindingForLeaf(leafId, ptyId)
+              } else if (leafId) {
+                syncPanePtyLayoutBindingForLeaf?.(leafId, null, paneId)
+              } else {
+                syncPanePtyLayoutBinding(paneId, null)
+              }
               clearTabPtyId(tabId, ptyId)
             }
             transport.destroy?.()
@@ -1973,49 +2026,50 @@ export function useTerminalPaneLifecycle({
     scheduleRuntimeGraphSync()
 
     // Why: deliver the startup command via the PTY connection path (waits for shell readiness), not terminal.paste() which can lose input before the shell reads stdin.
-    function onCliSplitPane(event: Event): void {
-      const detail = (event as CustomEvent<SplitTerminalPaneDetail>).detail
-      if (!detail?.tabId || detail.tabId !== tabId) {
-        return
-      }
-      const mgr = managerRef.current
-      if (!mgr) {
-        return
-      }
-      if (detail.newLeafId && mgr.getNumericIdForLeaf(detail.newLeafId) !== null) {
-        return
-      }
-      const sourcePaneId = detail.sourceLeafId
-        ? (mgr.getNumericIdForLeaf(detail.sourceLeafId) ?? detail.paneRuntimeId)
-        : detail.paneRuntimeId
-      if (sourcePaneId < 0) {
-        return
-      }
-      const splitOptions = {
-        ...(detail.newLeafId ? { leafId: detail.newLeafId } : {}),
-        ...(detail.ptyId ? { ptyId: detail.ptyId } : {})
-      }
-      if (detail.command) {
-        const createdPane = splitPaneWithOneShotStartup(ptyDeps, { command: detail.command }, () =>
-          mgr.splitPane(sourcePaneId, detail.direction, splitOptions)
+    const unregisterTerminalPaneSplitRequestHandler = registerTerminalPaneSplitRequestHandler(
+      tabId,
+      worktreeId,
+      (detail) => {
+        const mgr = managerRef.current
+        if (!mgr) {
+          return
+        }
+        if (detail.newLeafId && mgr.getNumericIdForLeaf(detail.newLeafId) !== null) {
+          return
+        }
+        const sourcePaneId = resolveTerminalPaneSplitSourceId(detail, (leafId) =>
+          mgr.getNumericIdForLeaf(leafId)
         )
-        recordRuntimeCreatedTerminalPaneSplit(createdPane, {
-          source: detail.telemetrySource ?? 'command',
-          direction: detail.direction
-        })
-      } else {
-        const createdPane = mgr.splitPane(sourcePaneId, detail.direction, splitOptions)
-        const telemetrySuppressed = createdPane
-          ? consumePendingWebRuntimeSplitMirrorTelemetry(detail.sourcePtyId, detail.direction)
-          : false
-        recordRuntimeCreatedTerminalPaneSplit(createdPane, {
-          source: detail.telemetrySource ?? 'command',
-          direction: detail.direction,
-          telemetrySuppressed
-        })
+        if (sourcePaneId < 0) {
+          return
+        }
+        const splitOptions = {
+          ...(detail.newLeafId ? { leafId: detail.newLeafId } : {}),
+          ...(detail.ptyId ? { ptyId: detail.ptyId } : {})
+        }
+        if (detail.command) {
+          const createdPane = splitPaneWithOneShotStartup(
+            ptyDeps,
+            { command: detail.command },
+            () => mgr.splitPane(sourcePaneId, detail.direction, splitOptions)
+          )
+          recordRuntimeCreatedTerminalPaneSplit(createdPane, {
+            source: detail.telemetrySource ?? 'command',
+            direction: detail.direction
+          })
+        } else {
+          const createdPane = mgr.splitPane(sourcePaneId, detail.direction, splitOptions)
+          const telemetrySuppressed = createdPane
+            ? consumePendingWebRuntimeSplitMirrorTelemetry(detail.sourcePtyId, detail.direction)
+            : false
+          recordRuntimeCreatedTerminalPaneSplit(createdPane, {
+            source: detail.telemetrySource ?? 'command',
+            direction: detail.direction,
+            telemetrySuppressed
+          })
+        }
       }
-    }
-    window.addEventListener(SPLIT_TERMINAL_PANE_EVENT, onCliSplitPane)
+    )
 
     // Why: CLI-driven pane close goes via CustomEvent so PaneManager promotes a sibling; the last pane falls back to closing the tab.
     function onCliClosePane(event: Event): void {
@@ -2058,14 +2112,21 @@ export function useTerminalPaneLifecycle({
     window.addEventListener(CLOSE_TERMINAL_PANE_EVENT, onCliClosePane)
 
     return () => {
-      window.removeEventListener(SPLIT_TERMINAL_PANE_EVENT, onCliSplitPane)
+      unregisterTerminalPaneSplitRequestHandler()
       window.removeEventListener(CLOSE_TERMINAL_PANE_EVENT, onCliClosePane)
       const currentStore = useAppStore.getState()
       const currentWorktreeTabs = currentStore.tabsByWorktree[worktreeId]
-      // A tab move removes the old worktree bucket before the replacement
-      // surface mounts. Use the shared global terminal-tab ownership check so
-      // an ID-less deferred split survives that rehome (including duplicate
-      // host/worktree rows, which intentionally share the durable tab id).
+      // Queued split cancellation stays worktree-scoped: a tab that merely moved
+      // buckets must still cancel this worktree's queue.
+      const tabRemainsInWorktree = Boolean(
+        currentWorktreeTabs?.some((candidate) => candidate.id === tabId)
+      )
+      if (!tabRemainsInWorktree) {
+        cancelQueuedTerminalPaneSplitRequests(tabId, worktreeId)
+      }
+      // Handoff retention is deliberately broader: a tab move removes the old
+      // worktree bucket before the replacement surface mounts, so use the shared
+      // global ownership check to let an ID-less deferred split survive a rehome.
       const tabStillExists = isTerminalTabPresent(currentStore, tabId)
       unregisterRuntimeTab()
       if (resizeRaf !== null) {

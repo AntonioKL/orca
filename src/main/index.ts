@@ -69,6 +69,7 @@ import {
 import {
   type CodexPaneHomeRoute,
   getCodexPaneAccount,
+  hasAnyRecordedLegacyWslCodexPane,
   hasRecordedManagedHostCodexPane,
   isCodexPaneHomeRouteProvenAwayFromSharedHome,
   reconcileCodexPaneAccountsWithLivePtys
@@ -386,6 +387,7 @@ import { startPreGoneProcessMetricsSampling } from './crash-reporting/process-go
 import { resolveExpectedTeardownScope } from './crash-reporting/expected-teardown-state'
 import {
   advanceSyntheticTitleSpinnerEntries,
+  getSyntheticTitleSpinnerPaneKeyToStop,
   type SyntheticTitleSpinnerEntry
 } from './synthetic-title-spinner'
 import { shouldSendSyntheticTitleFrame } from './synthetic-title-visibility'
@@ -666,6 +668,9 @@ function maybeAutoRenameBranchOnFirstWorkFromHook(event: {
         }
         currentStore.setWorktreeMeta(worktreeId, {
           displayName,
+          // The first-agent title is an intentional user-facing label; keep it stable after the
+          // generated branch is renamed and across subsequent catalog refreshes.
+          displayNameIsPinned: true,
           pendingFirstAgentMessageRename: false,
           // Success clears the failure badge (redundant with the explicit setRenameError(null)).
           firstAgentMessageRenameError: null
@@ -757,7 +762,6 @@ if (app.isPackaged && process.platform !== 'win32') {
 }
 configureDevUserDataPath(is.dev)
 configureOrcaUserDataPathEnv()
-installServeSupervisorDisconnectQuit(isServeMode)
 
 // Why: just past createMainWindow's 10s ready-to-show fallback, so a window revealed that way still gets its tray icon.
 const TRAY_CREATE_FALLBACK_MS = 12_000
@@ -972,6 +976,13 @@ if (hasSingleInstanceLock) {
   installDevParentSignalQuit(shouldCoupleToDevParent)
   // Why: run after configureDevUserDataPath but before app.setName('Orca') (whenReady), which changes the resolved path on case-sensitive filesystems.
   initDataPath()
+  // Why not at module scope with the other lifetime couplings (#16761): this resolves the handoff
+  // path, so it throws until setAppEnvironment() above installs the accessor — which killed every
+  // `orca serve` process before it could listen. After initDataPath() specifically, so the
+  // path-equality check against the CLI's env var uses the dir captured before app.setName().
+  // Safe to defer, and must stay synchronous: no 'disconnect' can be delivered until this module
+  // finishes evaluating, so moving this behind an await would open a real orphan window.
+  installServeSupervisorDisconnectQuit(isServeMode)
   // Why here: initDataPath above gives the canonical userData path for the record file; the write
   // itself lands for the next launch (see macos-press-and-hold-default.ts).
   applyMacPressAndHoldDefaultAtStartup(getCanonicalUserDataPath())
@@ -1115,7 +1126,8 @@ function startTerminalRuntimeStartupServices(): WindowsDesktopStartupServices {
         macosLoginSessionWatch: process.platform === 'darwin' && !isServeMode
       })
       // Why: a retained shell keeps its launch-time Codex home even when the current routing lane changes.
-      if (codexRuntimeHome && hasRecordedManagedHostCodexPane()) {
+      const hasRetainedManagedHostPane = hasRecordedManagedHostCodexPane()
+      if (codexRuntimeHome && (hasRetainedManagedHostPane || hasAnyRecordedLegacyWslCodexPane())) {
         const livePtyIds = await listLiveDaemonPtyIds()
         if (livePtyIds) {
           reconcileCodexPaneAccountsWithLivePtys(livePtyIds)
@@ -1123,15 +1135,17 @@ function startTerminalRuntimeStartupServices(): WindowsDesktopStartupServices {
           // Why (#16441): each retained home can run a codex app-server grant
           // session. Awaiting them here delayed the first window by N sessions;
           // a retained shell cannot invoke Codex before this provider serves.
-          void reconcileRetainedCodexHookHomes({
-            hookService: codexHookService,
-            hooksEnabled:
-              isAgentStatusHooksEnabled(settings) &&
-              settings?.disabledTuiAgents.includes('codex') !== true,
-            runtimeHomePaths: codexRuntimeHome.getRetainedHostCodexHookHomePaths(livePtyIds)
-          }).catch((error: unknown) => {
-            console.warn('[codex-hook-service] retained Codex home reconcile failed:', error)
-          })
+          if (hasRetainedManagedHostPane) {
+            void reconcileRetainedCodexHookHomes({
+              hookService: codexHookService,
+              hooksEnabled:
+                isAgentStatusHooksEnabled(settings) &&
+                settings?.disabledTuiAgents.includes('codex') !== true,
+              runtimeHomePaths: codexRuntimeHome.getRetainedHostCodexHookHomePaths(livePtyIds)
+            }).catch((error: unknown) => {
+              console.warn('[codex-hook-service] retained Codex home reconcile failed:', error)
+            })
+          }
         }
       }
       // Why: retained shells can invoke Codex immediately after the startup gate.
@@ -1229,7 +1243,7 @@ async function prepareCodexRuntimeHomeForLaunch(
   // Why: a ManagedCodexHomeTemporarilyUnavailableError must escape uncaught —
   // the fallbacks below all key off `null`, which means "system default", so
   // swallowing the refusal would launch the wrong account (#STA-4422).
-  let runtimeHomePath = codexRuntimeHome!.prepareForCodexLaunch(target, launchEnv, {
+  let runtimeHomePath = await codexRuntimeHome!.prepareForCodexLaunchAsync(target, launchEnv, {
     unavailableManagedHomePath: launchContext?.unavailableManagedHomePath
   })
   if (runtimeHomePath === null && !realHomeHooksPrepared) {
@@ -1238,7 +1252,7 @@ async function prepareCodexRuntimeHomeForLaunch(
     // re-resolve if the capability gate rejects it.
     realHomeHooksPrepared = await ensureRealHomeHooksIfSelected()
     if (realHomeHooksPrepared) {
-      runtimeHomePath = codexRuntimeHome!.prepareForCodexLaunch(target, launchEnv, {
+      runtimeHomePath = await codexRuntimeHome!.prepareForCodexLaunchAsync(target, launchEnv, {
         unavailableManagedHomePath: launchContext?.unavailableManagedHomePath
       })
     }
@@ -1258,13 +1272,11 @@ async function prepareCodexRuntimeHomeForLaunch(
   const hooksEnabled = isAgentStatusHooksEnabled(store?.getSettings())
   try {
     // Why: honor the persisted off switch so post-startup launches can't reinstall removed hooks.
-    const status = hooksEnabled
-      ? ((await codexHookService.installForRuntimeHome(runtimeHomePath, hookTarget)) ??
-        // Why: a managed account's launch home is its own self-contained
-        // CODEX_HOME, so hooks/trust must install there, not the shared mirror.
-        (await codexHookService.install(runtimeHomePath ?? undefined)))
-      : (codexHookService.refreshRuntimeUserHooksForRuntimeHome(runtimeHomePath, hookTarget) ??
-        (await codexHookService.refreshRuntimeUserHooks(runtimeHomePath ?? undefined)))
+    const status = await codexHookService.prepareRuntimeHomeForLaunch(
+      runtimeHomePath,
+      hookTarget,
+      hooksEnabled
+    )
     if (status.state === 'error') {
       console.warn(
         `[codex-hook-service] failed to ${
@@ -1374,9 +1386,9 @@ async function prepareCodexSessionResumeForLaunch(args: {
             userDataPath: app.getPath('userData')
           })
         } else if (hooksEnabled) {
-          await codexHookService.install(resumeHome)
+          await codexHookService.installForLaunchPrep(resumeHome)
         } else {
-          await codexHookService.refreshRuntimeUserHooks(resumeHome)
+          await codexHookService.refreshRuntimeUserHooksForLaunchPrep(resumeHome)
         }
       } catch (error) {
         // Why: hook repair is best-effort; session provenance must still win over the currently selected home.
@@ -2207,6 +2219,18 @@ async function printServeReady(options: ServeOptions): Promise<void> {
 registerPaneKeyTeardownListener((paneKey) => {
   stopSyntheticTitleSpinner(paneKey)
 })
+
+// Why: the spinner is a stand-in for a live hook status, so it must retire with the row it
+// stands in for — otherwise a pane whose status was cleared or dismissed keeps rotating a
+// working title long after the agent finished (#13890). Both paths are covered: the
+// pane-scoped clear fan-out, and user dismissal, which never routes through it.
+agentHookServer.subscribePaneStatusClear((clear) => {
+  const paneKey = getSyntheticTitleSpinnerPaneKeyToStop(clear)
+  if (paneKey) {
+    stopSyntheticTitleSpinner(paneKey)
+  }
+})
+agentHookServer.subscribeStatusDrop(stopSyntheticTitleSpinner)
 
 function sendSyntheticTitle(ptyId: string, data: string, options: { force?: boolean } = {}): void {
   if (!mainWindow || mainWindow.isDestroyed()) {
