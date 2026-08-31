@@ -4,6 +4,7 @@ import { Button } from '../ui/button'
 import { Label } from '../ui/label'
 import {
   getAgentAwakeDescription,
+  getAgentAwakeModeLabel,
   getAmphetamineIntegrationDescription,
   getAmphetamineIntegrationSearchKeywords,
   getAmphetamineIntegrationTitle,
