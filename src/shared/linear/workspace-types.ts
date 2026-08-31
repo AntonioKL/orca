@@ -41,6 +41,21 @@ export type LinearConnectionStatus = {
   credentialError?: string
 }
 
+/** Stable dependency key for Linear reads; excludes volatile workspace metadata. */
+export function linearWorkspaceScopeSignature(
+  status: Pick<
+    LinearConnectionStatus,
+    'connected' | 'credentialError' | 'activeWorkspaceId' | 'selectedWorkspaceId' | 'workspaces'
+  >
+): string {
+  return JSON.stringify({
+    connected: status.connected === true,
+    credentialError: status.credentialError ?? null,
+    workspaceId: status.selectedWorkspaceId ?? status.activeWorkspaceId ?? null,
+    workspaceIds: (status.workspaces ?? []).map((workspace) => workspace.id).sort()
+  })
+}
+
 export type LinearWorkflowState = {
   id: string
   name: string
