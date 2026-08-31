@@ -305,7 +305,7 @@ export const createRuntimeStatusSlice: StateCreator<AppState, [], [], RuntimeSta
     runtimeStatusDiagnosticsPublish.createRuntimeEnvironmentDiagnosticsPublisher({
       getCurrent: (environmentId) => get().runtimeStatusByEnvironmentId.get(environmentId),
       setState: (updater) =>
-        set((s) => ({ runtimeStatusByEnvironmentId: updater(s.runtimeStatusByEnvironmentId) })),
+        set((s) => runtimeStatusDiagnosticsPublish.updateRuntimeStatusStore(s, updater)),
       afterPublish: (environmentId, status) =>
         runtimeStatusRecheck.reconcileRuntimeStatusForSlice(environmentId, status.status, get, () =>
           getRuntimeEnvironmentConnectionGeneration(environmentId)

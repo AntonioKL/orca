@@ -1,6 +1,17 @@
 import type { RemoteRuntimeSharedConnectionDiagnostics } from '../../../../shared/remote-runtime-shared-control-types'
+import type { AppState } from '../types'
 import type { RuntimeEnvironmentStatus } from './runtime-status'
 import * as diagnosticsGeneration from './runtime-status-diagnostics-generation'
+
+export function updateRuntimeStatusStore(
+  state: AppState,
+  updater: (state: Map<string, RuntimeEnvironmentStatus>) => Map<string, RuntimeEnvironmentStatus>
+): AppState | Pick<AppState, 'runtimeStatusByEnvironmentId'> {
+  const next = updater(state.runtimeStatusByEnvironmentId)
+  return next === state.runtimeStatusByEnvironmentId
+    ? state
+    : { runtimeStatusByEnvironmentId: next }
+}
 
 export function publishRuntimeEnvironmentDiagnostics(args: {
   environmentId: string
