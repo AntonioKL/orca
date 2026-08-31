@@ -172,6 +172,10 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
       }
     },
 
+    abandonPreconnectInput() {
+      preconnectInputBuffer?.clear()
+    },
+
     disconnect() {
       advancePtyLifecycle()
       preconnectInputBuffer?.clear()

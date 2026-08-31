@@ -174,4 +174,22 @@ describe('createPtyPreconnectInputBuffer', () => {
     })
     expect(codeUnitWrites).toEqual([PTY_PRECONNECT_INPUT_MAX_CODE_UNITS])
   })
+
+  it('settles retained acknowledged input when the spawn is abandoned before connect', async () => {
+    // Regression: an abandoned deferred spawn never reaches connect(), so nothing
+    // drained the buffer and a paste awaiting sendInputAccepted hung forever.
+    const buffer = createPtyPreconnectInputBuffer()
+    const pastePending = buffer.enqueueAccepted('pasted text')
+    let settled = false
+    void pastePending.then(() => {
+      settled = true
+    })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+
+    buffer.clear()
+
+    await expect(pastePending).resolves.toBe(false)
+    expect(buffer.isBuffering()).toBe(false)
+  })
 })

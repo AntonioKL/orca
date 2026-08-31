@@ -23,6 +23,9 @@ export function bindStartFreshSpawn(session: ConnectPanePtySession): void {
   ): Promise<string | null> => {
     const releaseDeferredCwdFence = (): void => {
       if (!session.transport.getPtyId()) {
+        // An abandoned spawn never reaches connect(), so nothing else would ever
+        // drain the pre-connect buffer or settle its acknowledged-write promises.
+        session.transport.abandonPreconnectInput?.()
         try {
           session.deps.onDeferredCwdSpawnFailed?.()
         } catch {

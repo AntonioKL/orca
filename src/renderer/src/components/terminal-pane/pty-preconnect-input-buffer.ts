@@ -1,8 +1,10 @@
-import { TERMINAL_INPUT_MAX_BYTES } from '../../../../shared/terminal-input'
+import { CLIPBOARD_TEXT_MEASURE_YIELD_CODE_UNITS } from '../../../../shared/clipboard-text'
 
 export const PTY_PRECONNECT_INPUT_MAX_ENTRIES = 1024
-// One UTF-16 code unit encodes to at most three UTF-8 bytes.
-export const PTY_PRECONNECT_INPUT_MAX_CODE_UNITS = Math.floor(TERMINAL_INPUT_MAX_BYTES / 3)
+// Why: a retention budget, not the 16MB single-write ceiling. The deferral lasts
+// under a second and this is held twice (transport buffer + handoff record) across
+// up to 64 deferred splits, so size it at a few clipboard-sized pastes.
+export const PTY_PRECONNECT_INPUT_MAX_CODE_UNITS = 4 * CLIPBOARD_TEXT_MEASURE_YIELD_CODE_UNITS
 
 export type PtyPreconnectInputKind = 'ordinary' | 'immediate' | 'accepted'
 

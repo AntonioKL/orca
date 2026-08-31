@@ -180,6 +180,8 @@ export type PtyTransport = {
   // (preserving order) and sends the reply immediately.
   sendInputImmediate: (data: string) => boolean
   sendInputAccepted?: (data: string) => Promise<boolean>
+  /** Settles retained pre-connect input when a deferred spawn is abandoned before connect. */
+  abandonPreconnectInput?: () => void
   claimViewport?: (cols: number, rows: number) => boolean
   /** Capability-negotiated paired-runtime delivery gate; false preserves legacy delivery. */
   setOutputPaused?: (paused: boolean) => boolean

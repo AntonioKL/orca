@@ -745,7 +745,7 @@ describe('pty input write queue', () => {
 
   it('does not retain a reaction record per acknowledged write', async () => {
     // Regression: racing every accepted write against one queue-lifetime promise
-    // retained a reaction until that promise settled — ~88MB per 200k writes.
+    // retained a reaction until that promise settled — ~440 bytes per write.
     const queue = createPtyInputWriteQueue({
       isWritable: () => true,
       write: () => undefined,
@@ -754,12 +754,12 @@ describe('pty input write queue', () => {
     })
     globalThis.gc?.()
     const heapBefore = process.memoryUsage().heapUsed
-    for (let index = 0; index < 200_000; index += 1) {
+    for (let index = 0; index < 20_000; index += 1) {
       await queue.enqueueAccepted('pty-1', 'x')
     }
     await queue.waitForDrain()
     globalThis.gc?.()
     const growthMb = (process.memoryUsage().heapUsed - heapBefore) / 1024 / 1024
-    expect(growthMb).toBeLessThan(20)
+    expect(growthMb).toBeLessThan(2)
   })
 })
