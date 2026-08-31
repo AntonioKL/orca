@@ -5,11 +5,11 @@ import {
 } from './runtime-file-commands-active-runtime-text-searches'
 import type { RuntimeFileCommandHost } from './runtime-file-commands-host'
 import {
-  basenameFromRelativePath,
   isMobileBinaryPath,
   isMobileMarkdownPath,
   isSafeMobileRelativePath
 } from './runtime-file-commands-host'
+import { basenameFromRelativePath } from './runtime-file-path-names'
 import type { RuntimeFileListResult, RuntimeFileOpenResult } from '../../shared/runtime-types'
 import { listQuickOpenFiles } from '../ipc/filesystem-list-files'
 import {
