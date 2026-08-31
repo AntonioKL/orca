@@ -1277,6 +1277,7 @@ import {
   alreadyARepositoryError,
   LEFTOVER_GIT_DIR_RETRY_HINT
 } from '../ipc/repos/repository-creation-messages'
+import { isProvenAbsent } from '../ipc/repos/existing-repository-probe'
 import { getWorktreeWatcherRemoval } from '../ipc/worktree-watcher-removal'
 import { acquireWatcherRemovalGate } from '../ipc/watcher-removal-gate'
 import {
@@ -23915,7 +23916,7 @@ export class OrcaRuntimeService {
         // reinitialize it. A `.git` FILE counts — that is how linked worktrees and submodules point.
         const gitPath = join(targetPath, '.git')
         const gitStat = await stat(gitPath).catch((error: unknown) => {
-          if (isENOENT(error)) {
+          if (isProvenAbsent(error)) {
             return null
           }
           throw error
@@ -23947,12 +23948,16 @@ export class OrcaRuntimeService {
       } catch (error) {
         // Why: only the exclusive mkdir proves we made this; `git init` is idempotent and never
         // reports whether it created or reinitialized, so a .git here may not be ours to delete.
+        let targetRemoved = false
         if (createdDir) {
-          await rm(targetPath, { recursive: true, force: true }).catch(() => {})
+          targetRemoved = await rm(targetPath, { recursive: true, force: true })
+            .then(() => true)
+            .catch(() => false)
         }
         // Why: the .git we leave makes the folder non-empty, so a silent retry would hit the
         // "not empty" guard with no clue why.
-        const leftover = !createdDir && step === 'commit' ? ` ${LEFTOVER_GIT_DIR_RETRY_HINT}` : ''
+        const leftover =
+          !targetRemoved && step === 'commit' ? ` ${LEFTOVER_GIT_DIR_RETRY_HINT}` : ''
         const message = error instanceof Error ? error.message : String(error)
         if (
           step === 'commit' &&

@@ -16,7 +16,7 @@ import {
   repositoryCheckUnavailableError
 } from './repository-creation-messages'
 import { resolveRemoteHomePath } from './remote-home-path'
-import { isENOENT } from '../filesystem-path-containment'
+import { isProvenAbsent } from './existing-repository-probe'
 
 export async function createRemoteRepo(
   store: Store,
@@ -76,7 +76,7 @@ export async function createRemoteRepo(
   } catch (err) {
     // Why: only a proven ENOENT means absent. EACCES, ELOOP, a relay timeout or a disconnect say
     // nothing about the target, and must not become permission to create into it.
-    if (!isENOENT(err)) {
+    if (!isProvenAbsent(err)) {
       const message = err instanceof Error ? err.message : String(err)
       return { error: repositoryCheckUnavailableError(name, message) }
     }
@@ -92,7 +92,7 @@ export async function createRemoteRepo(
       return { error: alreadyARepositoryError(name) }
     } catch (err) {
       // Why: same rule as above — an indeterminate probe is not evidence that `.git` is absent.
-      if (!isENOENT(err)) {
+      if (!isProvenAbsent(err)) {
         const message = err instanceof Error ? err.message : String(err)
         return { error: repositoryCheckUnavailableError(name, message) }
       }
@@ -134,12 +134,16 @@ export async function createRemoteRepo(
     } catch (err) {
       // Why: only the exclusive createDirNoClobber proves we made this; `git init` is idempotent and
       // never reports whether it created or reinitialized, so a .git here may not be ours to delete.
+      let targetRemoved = false
       if (createdDir) {
-        await fsProvider.deletePath(targetPath, true).catch(() => undefined)
+        targetRemoved = await fsProvider
+          .deletePath(targetPath, true)
+          .then(() => true)
+          .catch(() => false)
       }
       // Why: the .git we leave makes the folder non-empty, so a silent retry would hit the
       // "not empty" guard with no clue why.
-      const leftover = !createdDir && step === 'commit' ? ` ${LEFTOVER_GIT_DIR_RETRY_HINT}` : ''
+      const leftover = !targetRemoved && step === 'commit' ? ` ${LEFTOVER_GIT_DIR_RETRY_HINT}` : ''
       const message = err instanceof Error ? err.message : String(err)
       if (step === 'commit' && /Please tell me who you are|user\.name|user\.email/i.test(message)) {
         const identityHint =

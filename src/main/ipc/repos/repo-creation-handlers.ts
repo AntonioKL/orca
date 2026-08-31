@@ -15,7 +15,7 @@ import {
   LEFTOVER_GIT_DIR_RETRY_HINT,
   repositoryCheckUnavailableError
 } from './repository-creation-messages'
-import { isENOENT } from '../filesystem-path-containment'
+import { isProvenAbsent } from './existing-repository-probe'
 import { gitExecFileAsync } from '../../git/runner'
 import { detectRepoIconAndUpstream } from '../../repo-icon-autodetect'
 import { prepareLocalWorktreeRootForRepo } from '../../worktree-root-preparation'
@@ -200,7 +200,7 @@ export function registerRepoCreationHandlers(mainWindow: BrowserWindow, store: S
           await access(join(targetPath, '.git'))
           return { error: alreadyARepositoryError(name) }
         } catch (err) {
-          if (!isENOENT(err)) {
+          if (!isProvenAbsent(err)) {
             const message = err instanceof Error ? err.message : String(err)
             return { error: repositoryCheckUnavailableError(name, message) }
           }
@@ -251,12 +251,16 @@ export function registerRepoCreationHandlers(mainWindow: BrowserWindow, store: S
         } catch (err) {
           // Why: only the exclusive mkdir proves we made this; `git init` is idempotent and never
           // reports whether it created or reinitialized, so a .git here may not be ours to delete.
+          let targetRemoved = false
           if (createdDir) {
-            await rm(targetPath, { recursive: true, force: true }).catch(() => {})
+            targetRemoved = await rm(targetPath, { recursive: true, force: true })
+              .then(() => true)
+              .catch(() => false)
           }
           // Why: the .git we leave makes the folder non-empty, so a silent retry would hit the
           // "not empty" guard with no clue why.
-          const leftover = !createdDir && step === 'commit' ? ` ${LEFTOVER_GIT_DIR_RETRY_HINT}` : ''
+          const leftover =
+            !targetRemoved && step === 'commit' ? ` ${LEFTOVER_GIT_DIR_RETRY_HINT}` : ''
           const message = err instanceof Error ? err.message : String(err)
           if (
             step === 'commit' &&

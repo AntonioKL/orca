@@ -460,6 +460,41 @@ describe('repos:create', () => {
     expect(result).not.toMatchObject({ error: expect.stringContaining('before retrying') })
   })
 
+  it('warns about the leftover when cleanup of a directory we created fails', async () => {
+    // `createdDir` proves ownership, not that the removal succeeded. If cleanup fails the
+    // directory and its .git remain, and the retry hits "not empty" with no explanation.
+    rmMock.mockRejectedValueOnce(new Error('EBUSY: resource busy or locked'))
+    gitExecFileAsyncMock
+      .mockReset()
+      .mockResolvedValueOnce({ stdout: '', stderr: '' })
+      .mockRejectedValueOnce(new Error('commit broke'))
+
+    const result = await callCreate({ parentPath: '/tmp', name: 'locked', kind: 'git' })
+
+    expect(result).toMatchObject({ error: expect.stringContaining('before retrying') })
+  })
+
+  it('does not read a non-ENOENT errno as absence even if its message quotes ENOENT', async () => {
+    // The shared isENOENT message fallback is unanchored, so a path containing the canonical
+    // phrase would otherwise read as "absent". A string errno settles it on its own.
+    accessMock.mockResolvedValueOnce(undefined) // target exists
+    accessMock.mockRejectedValueOnce(
+      Object.assign(
+        new Error(
+          "EACCES: permission denied, access '/tmp/ENOENT: no such file or directory/.git'"
+        ),
+        { code: 'EACCES' }
+      )
+    )
+    gitExecFileAsyncMock.mockReset()
+
+    const result = await callCreate({ parentPath: '/tmp', name: 'tricky', kind: 'git' })
+
+    expect(result).toMatchObject({ error: expect.stringContaining('Could not check') })
+    expect(gitExecFileAsyncMock).not.toHaveBeenCalled()
+    expect(rmMock).not.toHaveBeenCalled()
+  })
+
   it('refuses a target that is already a git repository, before running git', async () => {
     // Positive evidence: we saw a .git. Refusing here is what stops `git init` from silently
     // reinitializing someone's repository.
