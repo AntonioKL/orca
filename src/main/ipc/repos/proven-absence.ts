@@ -15,9 +15,30 @@ import { isENOENT } from '../filesystem-path-containment'
  * "simplify" this to a code-only check — it would refuse every legitimate remote creation.
  */
 export function isProvenAbsent(error: unknown): boolean {
-  const code = (error as { code?: unknown } | null | undefined)?.code
+  const code = readErrnoCode(error)
   if (typeof code === 'string') {
     return code === 'ENOENT'
   }
   return isENOENT(error)
+}
+
+/**
+ * Whether the probe proved the *parent* is not a directory — a definite answer about the target,
+ * not an indeterminate probe, so callers should say so rather than "could not check".
+ */
+export function isNotADirectory(error: unknown): boolean {
+  return readErrnoCode(error) === 'ENOTDIR'
+}
+
+// Why: `?.` only guards a nullish base — it still invokes an accessor, so an error-like rejection
+// with a throwing `code` getter would escape a fail-closed path as an unhandled rejection.
+function readErrnoCode(error: unknown): unknown {
+  if (typeof error !== 'object' || error === null) {
+    return undefined
+  }
+  try {
+    return (error as { code?: unknown }).code
+  } catch {
+    return undefined
+  }
 }

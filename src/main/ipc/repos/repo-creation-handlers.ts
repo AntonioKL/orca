@@ -15,7 +15,7 @@ import {
   LEFTOVER_GIT_DIR_RETRY_HINT,
   repositoryCheckUnavailableError
 } from './repository-creation-messages'
-import { isProvenAbsent } from './proven-absence'
+import { isNotADirectory, isProvenAbsent } from './proven-absence'
 import { gitExecFileAsync } from '../../git/runner'
 import { detectRepoIconAndUpstream } from '../../repo-icon-autodetect'
 import { prepareLocalWorktreeRootForRepo } from '../../worktree-root-preparation'
@@ -202,7 +202,7 @@ export function registerRepoCreationHandlers(mainWindow: BrowserWindow, store: S
         } catch (err) {
           // Why: probing `<file>/.git` yields ENOTDIR, which is a definite answer about the target
           // — it is a file — not an indeterminate probe.
-          if ((err as NodeJS.ErrnoException).code === 'ENOTDIR') {
+          if (isNotADirectory(err)) {
             return { error: `"${name}" already exists at this location and is not a folder.` }
           }
           if (!isProvenAbsent(err)) {

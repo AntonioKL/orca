@@ -16,7 +16,7 @@ import {
   repositoryCheckUnavailableError
 } from './repository-creation-messages'
 import { resolveRemoteHomePath } from './remote-home-path'
-import { isProvenAbsent } from './proven-absence'
+import { isNotADirectory, isProvenAbsent } from './proven-absence'
 
 export async function createRemoteRepo(
   store: Store,
@@ -91,6 +91,11 @@ export async function createRemoteRepo(
       await fsProvider.stat(joinRemotePath(host, targetPath, '.git'))
       return { error: alreadyARepositoryError(name) }
     } catch (err) {
+      // Why: a file at the target is a definite answer, and the local lane already words it this
+      // way — don't report a deterministic collision as an unavailable probe.
+      if (isNotADirectory(err)) {
+        return { error: `"${name}" already exists at this location and is not a folder.` }
+      }
       // Why: same rule as above — an indeterminate probe is not evidence that `.git` is absent.
       if (!isProvenAbsent(err)) {
         const message = err instanceof Error ? err.message : String(err)
