@@ -61,9 +61,34 @@ function findReadySetupOnHost(
   if (!host) {
     return candidates[0]
   }
-  return (
-    candidates.find((candidate) => normalizeExecutionHostId(candidate.hostId) === host.id) ??
-    candidates.find((candidate) => hostFilterMatchesHostId(host, candidate.hostId))
+  const exact = candidates.filter(
+    (candidate) => normalizeExecutionHostId(candidate.hostId) === host.id
+  )
+  if (exact.length > 0) {
+    return pickSingleSetup(exact, projectId, host)
+  }
+  // Why: `local` means "the box that answered", which is the same machine as `runtime:<id>` only
+  // when the command already runs there. Picking one of several silently aimed repo creation at an
+  // unrelated checkout (STA-6080), so an ambiguous fallback must be refused, not guessed.
+  const fallback = candidates.filter((candidate) => hostFilterMatchesHostId(host, candidate.hostId))
+  if (fallback.length > 0) {
+    return pickSingleSetup(fallback, projectId, host)
+  }
+  return undefined
+}
+
+function pickSingleSetup(
+  matches: readonly ProjectHostSetup[],
+  projectId: string | undefined,
+  host: ParsedExecutionHost
+): ProjectHostSetup {
+  if (matches.length === 1) {
+    return matches[0]
+  }
+  const listed = matches.map((candidate) => `  ${candidate.path}`).join('\n')
+  throw new RuntimeClientError(
+    'invalid_argument',
+    `"${projectId}" has ${matches.length} ready setups on ${host.id}; pass --project-host-setup <id> to choose one:\n${listed}`
   )
 }
 
