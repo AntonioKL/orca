@@ -5735,12 +5735,14 @@
       "providers": ["local", "local-daemon", "ssh", "wsl", "remote-runtime"],
       "coveredPlatforms": ["macos"],
       "coveredProviders": ["local", "remote-runtime"],
-      "coverageNotes": "Deterministic renderer contracts hold CWD resolution behind an explicit promise, require the new pane to be created synchronously, and prove that close cancels the pending connection. Detach contracts reject cwd-pending and cwd-resolved deferred splits before PTY bind without mutation, carry resolved cwd for other unbound panes, and preserve persisted or live PTY handoff. Local transport contracts exercise the real bounded pre-connect buffer and one live input FIFO across ordinary, acknowledged, and immediate writes, concurrent flushes, in-flight teardown, late spawn success or failure, attach failure, failed spawn, same-id reuse, stale-spawn retirement ownership, destroy, and mutable recovery metadata. A mocked direct-SSH authority-rotation contract proves a rejected stale spawn releases its deferred-CWD fence. Remote-runtime coverage proves delegation remains host-owned; physical daemon, SSH, WSL, Linux, and Windows journeys remain gaps.",
+      "coverageNotes": "Deterministic renderer contracts hold CWD resolution behind an explicit promise, require the new pane to be created synchronously, and prove that close cancels the pending connection. Detach contracts reject cwd-pending and cwd-resolved deferred splits before PTY bind without mutation, carry resolved cwd for other unbound panes, and preserve persisted or live PTY handoff. Local transport contracts exercise the real bounded pre-connect buffer and one live input FIFO across ordinary, acknowledged, and immediate writes, concurrent flushes, in-flight teardown, late spawn success or failure, attach failure, failed spawn, same-id reuse, stale-spawn retirement ownership, destroy, and mutable recovery metadata. A mocked direct-SSH authority-rotation contract proves a rejected stale spawn releases its deferred-CWD fence. The committed headful Electron benchmark drives the real platform shortcut in a visible BrowserWindow and document for 3 warmups followed by 20 measured cold-CWD cycles, requiring a distinct child PTY, first echo, and observed child pty:exit before the next cycle. Remote-runtime coverage proves delegation remains host-owned; physical local-daemon, SSH, WSL, Linux, Windows, and folder-workspace latency journeys remain gaps.",
       "motivatingLinks": ["https://github.com/stablyai/orca/commit/572ed1a8882"],
       "invariant": "A terminal split creates and activates its renderer pane before an inherited-CWD lookup settles, starts its PTY only after the resolved directory is available, and cannot be externally detached while that deferred spawn remains unbound. Other unbound panes preserve resolved cwd as startupCwd when detached. Bounded pre-connect input and later live local input share byte order, and teardown settles acknowledged writes without creating or rebinding a stale PTY. A disconnected or detached pending connect cannot bind its late fresh spawn, report its late failure through current callbacks, or ID-retire a newer same-ID owner; rejecting a stale direct-SSH spawn also releases the matching deferred-CWD fence. Natural exit cannot deliver queued work into a reused PTY id. Bound and remote-runtime splits remain owned by their execution host.",
-      "oracle": "Hold CWD resolution behind a controllable promise, invoke the production split path, and require manager.splitPane plus split telemetry before resolving it. Before PTY bind, require both cwd-pending and cwd-resolved deferred detach attempts to return null without layout, pane, tab, ownership, or focus mutation; separately require resolved cwd on an allowed unbound detach and unchanged persisted/live PTY adoption. Rotate a mocked direct-SSH authority while its delayed spawn is in flight, reject and disconnect the stale PTY claim, then require exactly one deferred-CWD cleanup when the delayed connect settles. At the PTY boundary, require zero connect calls while pending, the resolved CWD in spawn and local recovery metadata, one shared FIFO across pre-connect and live ordinary/acknowledged/immediate input, prompt acknowledged-promise settlement on teardown, retirement of an unowned late fresh spawn, preservation of a newer same-ID owner, and zero stale delivery after failure, close, destroy, detach, natural exit, or same-id reuse.",
+      "oracle": "Hold CWD resolution behind a controllable promise, invoke the production split path, and require manager.splitPane plus split telemetry before resolving it. Before PTY bind, require both cwd-pending and cwd-resolved deferred detach attempts to return null without layout, pane, tab, ownership, or focus mutation; separately require resolved cwd on an allowed unbound detach and unchanged persisted/live PTY adoption. Rotate a mocked direct-SSH authority while its delayed spawn is in flight, reject and disconnect the stale PTY claim, then require exactly one deferred-CWD cleanup when the delayed connect settles. At the PTY boundary, require zero connect calls while pending, the resolved CWD in spawn and local recovery metadata, one shared FIFO across pre-connect and live ordinary/acknowledged/immediate input, prompt acknowledged-promise settlement on teardown, retirement of an unowned late fresh spawn, preservation of a newer same-ID owner, and zero stale delivery after failure, close, destroy, detach, natural exit, or same-id reuse. In visible Electron, press the real split shortcut after each warmup and each cold inherited-CWD measured interval, and require complete focus, distinct-PTY bind, immediate-input echo, pane-count, and child-exit observations for every cycle; a timed-out, missing-event, or cleanup-aborted run must publish no headline latency and fail.",
       "commands": [
-        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/terminal-pane-split-with-inherited-cwd.test.ts src/renderer/src/lib/pane-manager/pane-split-close.test.ts src/renderer/src/components/terminal-pane/resolve-split-cwd.test.ts src/renderer/src/components/terminal-pane/pty-connection-split-cwd-resolution.test.ts src/renderer/src/components/terminal-pane/terminal-pane-tab-detach.test.ts src/renderer/src/components/terminal-pane/pty-preconnect-input-buffer.test.ts src/renderer/src/components/terminal-pane/pty-transport-input-write.test.ts --reporter=dot"
+        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/terminal-pane-split-with-inherited-cwd.test.ts src/renderer/src/lib/pane-manager/pane-split-close.test.ts src/renderer/src/components/terminal-pane/resolve-split-cwd.test.ts src/renderer/src/components/terminal-pane/pty-connection-split-cwd-resolution.test.ts src/renderer/src/components/terminal-pane/terminal-pane-tab-detach.test.ts src/renderer/src/components/terminal-pane/pty-preconnect-input-buffer.test.ts src/renderer/src/components/terminal-pane/pty-transport-input-write.test.ts --reporter=dot",
+        "ORCA_TERMINAL_SPLIT_LATENCY_BENCH=1 ORCA_TERMINAL_SPLIT_LATENCY_LABEL=baseline-df14d1a2983d8339e788d0e521f1c4affd9c6d5f-headful-run1 ORCA_TERMINAL_SPLIT_LATENCY_OUTPUT=/private/tmp/orca-terminal-split-activation-baseline-df14d1a2983d8339e788d0e521f1c4affd9c6d5f-headful-run1.json pnpm exec playwright test tests/e2e/terminal-split-activation-latency.spec.ts --config tests/playwright.config.ts --project electron-headful --workers=1",
+        "ORCA_TERMINAL_SPLIT_LATENCY_BENCH=1 ORCA_TERMINAL_SPLIT_LATENCY_LABEL=candidate-d453ffcdb704764daced1b2917fddee7224389f0-headful-run2 ORCA_TERMINAL_SPLIT_LATENCY_OUTPUT=/private/tmp/orca-terminal-split-activation-candidate-d453ffcdb704764daced1b2917fddee7224389f0-headful-run2.json pnpm exec playwright test tests/e2e/terminal-split-activation-latency.spec.ts --config tests/playwright.config.ts --project electron-headful --workers=1"
       ],
       "testFiles": [
         "src/renderer/src/components/terminal-pane/terminal-pane-split-with-inherited-cwd.test.ts",
@@ -5749,7 +5751,8 @@
         "src/renderer/src/components/terminal-pane/pty-connection-split-cwd-resolution.test.ts",
         "src/renderer/src/components/terminal-pane/terminal-pane-tab-detach.test.ts",
         "src/renderer/src/components/terminal-pane/pty-preconnect-input-buffer.test.ts",
-        "src/renderer/src/components/terminal-pane/pty-transport-input-write.test.ts"
+        "src/renderer/src/components/terminal-pane/pty-transport-input-write.test.ts",
+        "tests/e2e/terminal-split-activation-latency.spec.ts"
       ],
       "assertionRefs": [
         {
@@ -5815,6 +5818,16 @@
             "local recovery metadata observes the resolved split CWD",
             "a stale fresh-spawn completion cannot retire a newer same-ID owner"
           ]
+        },
+        {
+          "file": "tests/e2e/terminal-split-activation-latency.spec.ts",
+          "assertions": [
+            "requires a visible BrowserWindow and visible document before sampling",
+            "records 3 warmups followed by 20 measured real-shortcut cycles, each after a cold inherited-CWD interval",
+            "requires every split to focus, bind a PTY distinct from its source, and echo immediate input",
+            "observes each closed child PTY exit before starting the next cycle",
+            "marks timed-out, missing-event, or cleanup-aborted runs invalid and publishes no headline latency"
+          ]
         }
       ],
       "evidenceRuns": [
@@ -5826,15 +5839,34 @@
           "command": "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/terminal-pane-split-with-inherited-cwd.test.ts src/renderer/src/lib/pane-manager/pane-split-close.test.ts src/renderer/src/components/terminal-pane/resolve-split-cwd.test.ts src/renderer/src/components/terminal-pane/pty-connection-split-cwd-resolution.test.ts src/renderer/src/components/terminal-pane/terminal-pane-tab-detach.test.ts src/renderer/src/components/terminal-pane/pty-preconnect-input-buffer.test.ts src/renderer/src/components/terminal-pane/pty-transport-input-write.test.ts --reporter=dot",
           "durationSeconds": 56.59,
           "summary": "Seven focused files and 78 tests passed. Vitest reported 49.92 seconds and the measured wall time was 56.59 seconds; coverage includes split creation and focus ordering, nested CWD lineage, promise-identity and SSH authority-rotation cleanup fencing, full pre-bind detach fencing, resolved-CWD detach handoff, close-cancellation, single-FIFO ordering, late-spawn retirement and error suppression, preservation of a newer same-ID owner, generation fencing, in-flight settlement across explicit teardown and natural exit, attach cleanup, bounded retention, and existing input-write contracts."
+        },
+        {
+          "date": "2026-08-30",
+          "runner": "local",
+          "platform": "macos",
+          "result": "passed",
+          "command": "ORCA_TERMINAL_SPLIT_LATENCY_BENCH=1 ORCA_TERMINAL_SPLIT_LATENCY_LABEL=baseline-df14d1a2983d8339e788d0e521f1c4affd9c6d5f-headful-run1 ORCA_TERMINAL_SPLIT_LATENCY_OUTPUT=/private/tmp/orca-terminal-split-activation-baseline-df14d1a2983d8339e788d0e521f1c4affd9c6d5f-headful-run1.json pnpm exec playwright test tests/e2e/terminal-split-activation-latency.spec.ts --config tests/playwright.config.ts --project electron-headful --workers=1",
+          "durationSeconds": 72,
+          "summary": "At baseline df14d1a2983d8339e788d0e521f1c4affd9c6d5f, the visible BrowserWindow and document completed 3/3 warmups followed by 20/20 measured cold-CWD cycles with every event present, distinct child PTYs, and observed child exits. Shortcut-to-focus p50/p95/max was 65.7/88.7/102.6 ms, PTY bind was 122.8/154.0/159.7 ms, and first echo was 203.8/264.2/332.7 ms. Artifact SHA-256: 6d860cd0cd210f55f2349a197318248af488042117b20c08b6831160950c3277."
+        },
+        {
+          "date": "2026-08-30",
+          "runner": "local",
+          "platform": "macos",
+          "result": "passed",
+          "command": "ORCA_TERMINAL_SPLIT_LATENCY_BENCH=1 ORCA_TERMINAL_SPLIT_LATENCY_LABEL=candidate-d453ffcdb704764daced1b2917fddee7224389f0-headful-run2 ORCA_TERMINAL_SPLIT_LATENCY_OUTPUT=/private/tmp/orca-terminal-split-activation-candidate-d453ffcdb704764daced1b2917fddee7224389f0-headful-run2.json pnpm exec playwright test tests/e2e/terminal-split-activation-latency.spec.ts --config tests/playwright.config.ts --project electron-headful --workers=1",
+          "durationSeconds": 72,
+          "summary": "At candidate d453ffcdb704764daced1b2917fddee7224389f0, the visible BrowserWindow and document completed 3/3 warmups followed by 20/20 measured cold-CWD cycles with every event present, distinct child PTYs, and observed child exits. Shortcut-to-focus p50/p95/max was 12.8/14.4/16.5 ms, PTY bind was 177.0/316.1/333.3 ms, and first echo was 268.6/627.4/710.7 ms. Artifact SHA-256: 9aef7fa842c732eb74f0066a77b2a0336e8f956a06ca61387f9999d6e76213cc."
         }
       ],
+      "evidenceProcedure": "Historical artifact procedure: run the benchmark spec in a visible macOS Electron project from the primary worktree, complete 3 warmups followed by 20 measured cycles, save the JSON report, and record its SHA-256. Labels carry the product commit SHA; the stored pair predates the committed failure-report and exit-generation hardening, so rerun both product revisions with one committed harness before promotion.",
       "runtimeBudget": {
-        "p95Seconds": 60,
-        "scope": "seven deterministic renderer and local-transport unit files"
+        "p95Seconds": 240,
+        "scope": "the full listed gate command set: seven deterministic renderer/local-transport unit files plus two opt-in 3-warmup/20-measured visible Electron benchmark invocations"
       },
       "flakeHistory": {
         "status": "not-started",
-        "evidence": "The focused promise-barrier suite passes locally; routed CI and soak history have not started."
+        "evidence": "The focused promise-barrier suite and one visible baseline/candidate benchmark pair pass locally; routed CI and soak history have not started. The benchmark commands are recorded invocations from the primary worktree, with product SHAs encoded in their labels; they are evidence records rather than checkout scripts, and the stored pair predates the final harness hardening."
       },
       "redGreenEvidence": {
         "status": "partial",
@@ -5842,18 +5874,20 @@
       },
       "performanceBudget": {
         "required": true,
-        "evidence": "Pane creation and focus add no timer, polling, provider inventory, or subprocess work. CWD resolution remains one existing bounded request off the visible activation path, and detach admission adds only bounded map and record lookups. Pre-connect input, including an in-flight acknowledged write, is capped at 1,024 entries and a conservative UTF-16 ceiling derived from the existing terminal-input byte limit, drains through one worker in order, and clears on teardown or failed connect. Across 20 fresh-source dev cycles, click-to-focused-first-frame changed from baseline p50/p95/max 63.8/72.1/78.3 ms to 56.0/60.5/63.1 ms; all 20 focused. Cold PTY binding changed from 194.2/255.2/303.1 ms to 231.4/337.2/371.9 ms, so the interaction budget is tracked separately from shell readiness. A second 20-cycle steady-source run measured focus 51.1/88.1/109.1 ms and PTY binding 186.6/285.7/1158.6 ms; the 1.16 s readiness outlier still focused in 85.6 ms."
+        "evidence": "Pane creation and focus add no timer, polling, provider inventory, or subprocess work. CWD resolution remains one existing bounded request off the visible activation path, and detach admission adds only bounded map and record lookups. Pre-connect input, including an in-flight acknowledged write, is capped at 1,024 entries and a conservative UTF-16 ceiling derived from the existing terminal-input byte limit, drains through one worker in order, and clears on teardown or failed connect. In same-mode visible BrowserWindow runs with 3 warmups and n=20 measured cold-CWD cycles, baseline df14d1a2983d8339e788d0e521f1c4affd9c6d5f versus candidate d453ffcdb704764daced1b2917fddee7224389f0 changed shortcut-to-focus p50/p95/max from 65.7/88.7/102.6 ms to 12.8/14.4/16.5 ms. PTY bind changed from 122.8/154.0/159.7 ms to 177.0/316.1/333.3 ms, and first echo changed from 203.8/264.2/332.7 ms to 268.6/627.4/710.7 ms, so shell readiness regressed in this pair and remains diagnostic rather than part of the activation claim. The n=20 empirical p95 values are descriptive, are not a distribution guarantee, and are not CI-enforced."
       },
       "promotionCriteria": [
         "Record complete red/green evidence for close, mixed-input ordering, metadata, and failure cleanup.",
         "Collect 100 consecutive focused CI passes or 14 days without an unexplained flake.",
-        "Add a real-shortcut Electron sentinel with shortcut-to-focus, first-render, PTY-ready, and immediate typed-marker artifacts.",
-        "Collect physical SSH or WSL plus Linux and Windows evidence before claiming provider-complete coverage."
+        "Run the committed real-shortcut Electron benchmark in routed CI or soak before enforcing a latency budget.",
+        "Collect physical local-daemon, SSH or WSL plus Linux, Windows, and folder-workspace evidence before claiming provider-complete coverage."
       ],
       "knownGaps": [
-        "Ad-hoc macOS Electron CDP proves real-control focus, pre-bind physical input, inherited cwd, close-before-bind cleanup, and rapid nested splits, but no committed Electron sentinel is registered yet.",
-        "Live daemon, SSH, WSL, Linux, and Windows split journeys have not run.",
-        "Local dev measurements establish a numeric first-focused-frame budget, but CI does not enforce it and PTY-ready latency remains diagnostic rather than blocking."
+        "The visible benchmark pair ran on one Apple-silicon macOS host with a synthetic POSIX echo shell and a git-backed workspace; its n=20 empirical p95 is descriptive and not CI-enforced.",
+        "No physical local-daemon, SSH, WSL, Linux, Windows, or folder-workspace latency journey has run; the synthetic fixture is currently skipped on Windows because it requires a POSIX shell.",
+        "The stored artifact pair predates the final harness cleanup/reporting and exit-generation hardening; labels and immutable hashes preserve product provenance, but both product revisions should be rerun with one committed harness before promotion.",
+        "No forced-failure visible benchmark artifact has been recorded; the invalid-report path is exercised by the harness catch/cleanup logic but remains unsoaked.",
+        "PTY-bind and first-echo readiness regressed in the recorded candidate pair and remain diagnostic rather than blocking the activation-ordering claim."
       ],
       "demotionRule": "Keep experimental or demote if pane activation waits on CWD, a deferred split can detach before PTY bind, detached cwd is lost, input reorders or remains pending after cleanup, a closed pane can spawn, stale retirement kills a newer same-ID owner, remote-runtime delegation creates a competing local pane, or the focused suite flakes without an identified product or harness cause."
     },
