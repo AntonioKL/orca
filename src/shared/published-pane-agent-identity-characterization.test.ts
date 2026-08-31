@@ -159,6 +159,26 @@ describe('comparison wrapper output-neutrality', () => {
     expect(recorder.snapshot()).toMatchObject({ comparisons: 1, reclaimShapes: 1 })
   })
 
+  it('does not classify a foreground-only compatibility answer as title-only', () => {
+    const recorder = new PaneAgentIdentityComparisonRecorder()
+    const published = comparePublishedPaneAgentIdentity(
+      {
+        foregroundAgent: 'codex',
+        surface: 'terminal-summary',
+        paneId: 'pane:foreground-only',
+        hostScope: 'local'
+      },
+      recorder
+    )
+    expect(published).toBe('codex')
+    expect(recorder.snapshot()).toMatchObject({
+      comparisons: 1,
+      disagreements: 0,
+      titleOnly: 0,
+      uncovered: 1
+    })
+  })
+
   it('skips recomputation for consecutive identical pane inputs but still returns the frozen value', () => {
     const recorder = new PaneAgentIdentityComparisonRecorder()
     const args = {
