@@ -152,10 +152,10 @@ describe('canUseStructuredNativeChat', () => {
     expect(canUseStructuredNativeChat(stateFor({ windowsRuntime: 'wsl' }), 'wt-1')).toBe(false)
   })
 
-  it('keeps Windows-host projects on the terminal path until native start-time proof is advertised', () => {
+  it('allows Windows-host projects when structured chat is enabled', () => {
     mockGetRendererAppPlatform.mockReturnValue('win32')
     expect(canUseStructuredNativeChat(stateFor({ windowsRuntime: 'windows-host' }), 'wt-1')).toBe(
-      false
+      true
     )
   })
 
@@ -166,7 +166,7 @@ describe('canUseStructuredNativeChat', () => {
       activeRepoId: null,
       activeWorktreeId: null
     } as unknown as AppState
-    expect(canUseStructuredNativeChat(state, 'folder:folder-1')).toBe(false)
+    expect(canUseStructuredNativeChat(state, 'folder:folder-1')).toBe(true)
   })
 
   it('allows a folder workspace on a non-Windows platform', () => {

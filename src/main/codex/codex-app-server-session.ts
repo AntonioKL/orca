@@ -1,4 +1,6 @@
-import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { spawnProcess } from '../../shared/child-process/run-process'
+import type { ChildProcessHandle, ProcessSpec } from '../../shared/child-process/process-spec'
+import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { waitForProcessExitUntil } from './codex-process-exit-deadline'
 import { stderrIndicatesMissingAppServer } from './codex-app-server-capability-signal'
 import { withCliRuntimeOnPath } from '../../shared/node-cli-command-resolution'
@@ -68,11 +70,21 @@ const STDERR_TAIL_MAX_BYTES = 8192
 const STDOUT_LINE_MAX_BYTES = 1024 * 1024
 
 export function killCodexAppServerProcessTree(
-  child: Pick<ChildProcess, 'pid' | 'kill'>,
-  options: { platform?: NodeJS.Platform; spawnImpl?: typeof spawn } = {}
+  child: Pick<ChildProcessHandle, 'pid' | 'kill'>,
+  options: {
+    platform?: NodeJS.Platform
+    spawnImpl?: (
+      program: string,
+      args: string[],
+      options: Record<string, unknown>
+    ) => ChildProcessHandle
+  } = {}
 ): void {
   const platform = options.platform ?? process.platform
-  const spawnImpl = options.spawnImpl ?? spawn
+  const spawnImpl =
+    options.spawnImpl ??
+    ((program: string, args: string[], spawnOptions: Record<string, unknown>) =>
+      spawnProcess({ program, args, ...spawnOptions } as ProcessSpec))
   if (platform === 'win32' && child.pid) {
     try {
       // Why: npm-installed Codex runs behind cmd.exe; killing only that wrapper
@@ -139,7 +151,12 @@ export function isCodexMethodNotFoundError(error: unknown): boolean {
 export async function runCodexAppServerSession<T>(
   invocation: CodexAppServerInvocation,
   body: (rpc: CodexAppServerRpc) => Promise<T>,
-  spawnImpl: typeof spawn = spawn
+  spawnImpl: (
+    program: string,
+    args: string[],
+    options: Record<string, unknown>
+  ) => ChildProcessHandle = (program, args, options) =>
+    spawnProcess({ program, args, ...options } as ProcessSpec)
 ): Promise<T> {
   // Why: a default-home grant must run against the real ~/.codex, so strip an
   // inherited CODEX_HOME (envToDelete) after applying the overlay, not before.

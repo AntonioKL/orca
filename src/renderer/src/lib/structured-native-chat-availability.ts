@@ -4,7 +4,6 @@ import {
   getExecutionHostIdForWorktree,
   getRuntimeEnvironmentIdForWorktree
 } from '@/lib/worktree-runtime-owner'
-import { getRendererAppPlatform } from '@/lib/renderer-app-platform'
 import { STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY } from '../../../shared/protocol-version'
 
 export function canUseStructuredNativeChat(state: AppState, worktreeId: string): boolean {
@@ -31,15 +30,8 @@ export function canUseStructuredNativeChat(state: AppState, worktreeId: string):
       : undefined
     return status?.capabilities?.includes(STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY) === true
   }
-  // The shipped Windows process-tree addon may not expose creation time. Until
-  // the host advertises that proof, refuse every local Windows execution path —
-  // windows-host, WSL, and keys that resolve no project runtime (folder
-  // workspaces, floating terminal) — so create cannot fail after the click.
-  if (getRendererAppPlatform() === 'win32') {
-    return false
-  }
-  // Refuse WSL and repair-required runtimes even if resolution ever runs
-  // off-win32; the gate must not depend on the resolver's platform guard.
+  // Refuse WSL and repair-required runtimes; Windows native execution is
+  // supported when the host advertises the process identity capability.
   const projectRuntime = getLocalProjectExecutionRuntimeContext(state, worktreeId)
   return !(projectRuntime?.status === 'repair-required' || projectRuntime?.runtime.kind === 'wsl')
 }

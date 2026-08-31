@@ -731,6 +731,7 @@ import {
   RUNTIME_CAPABILITIES,
   RUNTIME_PROTOCOL_VERSION,
   SESSION_TABS_AUTHORITATIVE_INVENTORY_RUNTIME_CAPABILITY,
+  STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY,
   TERMINAL_PAIRED_PARKING_RUNTIME_CAPABILITY,
   type RuntimeCapability
 } from '../../shared/protocol-version'
@@ -739,6 +740,7 @@ import {
   listAiVaultSessions
 } from '../ai-vault/cached-session-list'
 import { configureHostReadableTranscriptPathSources } from '../native-chat/host-readable-transcript-path'
+import { isWindowsProcessStartTimeAvailable } from '../windows/windows-process-table'
 import { resolveLocalAiVaultSessionTitles } from '../ai-vault/session-title-resolver'
 import type { AiVaultListArgs, AiVaultListResult } from '../../shared/ai-vault-types'
 import type {
@@ -6629,7 +6631,13 @@ export class OrcaRuntimeService {
         (process.env.ORCA_E2E_DISABLE_PAIRED_TERMINAL_PARKING !== '1' ||
           capability !== TERMINAL_PAIRED_PARKING_RUNTIME_CAPABILITY) &&
         (process.env.ORCA_E2E_DISABLE_AUTHORITATIVE_SESSION_TABS_INVENTORY !== '1' ||
-          capability !== SESSION_TABS_AUTHORITATIVE_INVENTORY_RUNTIME_CAPABILITY)
+          capability !== SESSION_TABS_AUTHORITATIVE_INVENTORY_RUNTIME_CAPABILITY) &&
+        // Structured ownership on Windows requires the native process-table
+        // creation-time field; an older host must honestly fall back to the
+        // terminal bridge rather than advertise an unsafe capability.
+        (capability !== STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY ||
+          process.platform !== 'win32' ||
+          isWindowsProcessStartTimeAvailable())
     )
     if (hasOffscreen || hasHeadlessCommands) {
       capabilities.push(BROWSER_HEADLESS_RUNTIME_CAPABILITY)
