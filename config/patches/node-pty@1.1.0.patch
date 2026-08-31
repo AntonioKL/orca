@@ -803,14 +803,6 @@ index a358ffb..fb3a96f 100644
                  this._outSocket.readable = false;
                  this._getConsoleProcessList().then(function (consoleProcessList) {
                      consoleProcessList.forEach(function (pid) {
-@@ -241,6 +244,7 @@ var WindowsPtyAgent = /** @class */ (function () {
-             return;
-         }
-         this._inSocket.readable = false;
-+        this._inSocket.destroy();
-         this._outSocket.readable = false;
-         this._outSocket.destroy();
-     };
 diff --git a/lib/windowsTerminal.js b/lib/windowsTerminal.js
 index 3c38f89..e20b3e6 100644
 --- a/lib/windowsTerminal.js
@@ -909,14 +901,6 @@ index d705444..ce611b8 100644
          this._outSocket.readable = false;
          this._getConsoleProcessList().then(consoleProcessList => {
            consoleProcessList.forEach((pid: number) => {
-@@ -244,6 +247,7 @@ export class WindowsPtyAgent {
-       return;
-     }
-     this._inSocket.readable = false;
-+    this._inSocket.destroy();
-     this._outSocket.readable = false;
-     this._outSocket.destroy();
-   }
 diff --git a/src/windowsTerminal.ts b/src/windowsTerminal.ts
 index 13f6c6d..eda63c8 100644
 --- a/src/windowsTerminal.ts
