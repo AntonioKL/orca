@@ -313,6 +313,10 @@ describe('spawnShellWithFallback macOS TCC login wrapping', () => {
 })
 
 describe('spawnDirectPty', () => {
+  beforeEach(() => {
+    wrapSpawnMock.mockReset()
+  })
+
   it('passes the executable and argv through without shell or login wrapping', () => {
     const ptySpawn = vi.fn().mockReturnValue({ pid: 42 })
 
