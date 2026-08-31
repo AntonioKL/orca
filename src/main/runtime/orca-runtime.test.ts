@@ -41,6 +41,7 @@ import {
   addWorktree,
   assertWorktreeCleanForRemoval,
   listWorktrees,
+  listWorktreesSharedStrict,
   listWorktreesStrict,
   removeWorktree
 } from '../git/worktree'
@@ -441,6 +442,8 @@ const {
 vi.mock('../git/worktree', () => ({
   listWorktrees: vi.fn().mockResolvedValue(MOCK_GIT_WORKTREES),
   listWorktreesStrict: vi.fn().mockResolvedValue(MOCK_GIT_WORKTREES),
+  listWorktreesSharedStrict: vi.fn().mockResolvedValue(MOCK_GIT_WORKTREES),
+  describeCreatedWorktree: vi.fn().mockResolvedValue(undefined),
   assertWorktreeCleanForRemoval: vi.fn().mockResolvedValue(undefined),
   addSparseWorktree: addSparseWorktreeMock,
   addWorktree: addWorktreeMock,
@@ -736,6 +739,11 @@ function resetRuntimeTestMocks(): void {
   forgetRemoteWatcherRemovalSnapshotMock.mockReset()
   vi.mocked(listWorktrees).mockResolvedValue(MOCK_GIT_WORKTREES)
   vi.mocked(listWorktreesStrict).mockResolvedValue(MOCK_GIT_WORKTREES)
+  // Why delegate: production reads both from one repo state, so a test that stubs the listing must
+  // see the same rows through the create path's strict read.
+  vi.mocked(listWorktreesSharedStrict).mockImplementation((repoPath, options) =>
+    options ? listWorktrees(repoPath, options) : listWorktrees(repoPath)
+  )
   scanLocalRepoWorktreesForResolutionMock
     .mockReset()
     .mockImplementation(async (repoPath: string, options: { wslDistro?: string }) => {
@@ -3125,6 +3133,21 @@ describe('OrcaRuntimeService', () => {
       graphStatus: 'reloading',
       rendererGraphEpoch: 1
     })
+  })
+
+  it('relays terminal browser launches only while headless owns the graph', () => {
+    const runtime = createRuntime()
+    electronMocks.BrowserWindow.fromId.mockImplementation((windowId: number) =>
+      windowId === TEST_WINDOW_ID ? ({ isDestroyed: () => false } as never) : null
+    )
+
+    expect(runtime.shouldRelayTerminalBrowserOpens()).toBe(false)
+
+    runtime.syncWindowGraph(HEADLESS_RUNTIME_WINDOW_ID, { tabs: [], leaves: [] })
+    expect(runtime.shouldRelayTerminalBrowserOpens()).toBe(true)
+
+    runtime.attachWindow(TEST_WINDOW_ID)
+    expect(runtime.shouldRelayTerminalBrowserOpens()).toBe(false)
   })
 
   it('marks live headless PTYs for renderer reattach before desktop promotion', () => {
@@ -7839,6 +7862,24 @@ describe('OrcaRuntimeService', () => {
     const checkDetailsSignal = new AbortController().signal
 
     await runtime.getRepoPRForBranch('id:repo-1', 'feature/wsl', 42, 43)
+    await runtime.getRepoPRForBranch(
+      'id:repo-1',
+      'feature/wsl-manual',
+      42,
+      43,
+      undefined,
+      undefined,
+      'manual'
+    )
+    await runtime.getRepoPRForBranch(
+      'id:repo-1',
+      'feature/wsl-active',
+      42,
+      43,
+      undefined,
+      undefined,
+      'active'
+    )
     await runtime.getRepoWorkItem('id:repo-1', 42, 'pr')
     await runtime.getRepoWorkItemByOwnerRepo('id:repo-1', prRepo, 42, 'pr')
     await runtime.getRepoWorkItemDetails('id:repo-1', 42, 'pr')
@@ -7909,6 +7950,22 @@ describe('OrcaRuntimeService', () => {
       {
         localGitExecOptions: localGitOptions
       }
+    )
+    expect(getPRForBranchOutcomeMock).toHaveBeenCalledWith(
+      TEST_REPO_PATH,
+      'feature/wsl-manual',
+      42,
+      null,
+      null,
+      { localGitExecOptions: { ...localGitOptions, admissionTier: 'interactive' } }
+    )
+    expect(getPRForBranchOutcomeMock).toHaveBeenCalledWith(
+      TEST_REPO_PATH,
+      'feature/wsl-active',
+      42,
+      null,
+      null,
+      { localGitExecOptions: { ...localGitOptions, admissionTier: 'background' } }
     )
     expect(getGitHubWorkItemMock).toHaveBeenCalledWith(
       TEST_REPO_PATH,
@@ -8188,7 +8245,8 @@ describe('OrcaRuntimeService', () => {
         head: 'feature/ssh',
         title: 'Feature SSH'
       }),
-      'ssh-1'
+      'ssh-1',
+      { localGitExecOptions: { admissionTier: 'interactive' } }
     )
     expect(createStackedHostedReviewMock).toHaveBeenCalledWith(
       '/remote/repo',
@@ -8198,7 +8256,7 @@ describe('OrcaRuntimeService', () => {
         head: 'feature/ssh'
       }),
       'ssh-1',
-      {}
+      { localGitExecOptions: { admissionTier: 'interactive' } }
     )
   })
 
@@ -8277,7 +8335,7 @@ describe('OrcaRuntimeService', () => {
         repoPath: TEST_REPO_PATH,
         connectionId: null,
         branch: 'feature/wsl',
-        localGitExecOptions: { wslDistro: 'Ubuntu' }
+        localGitExecOptions: { wslDistro: 'Ubuntu', admissionTier: 'interactive' }
       })
     )
     expect(getHostedReviewForBranchMock).toHaveBeenCalledWith(
@@ -8286,7 +8344,7 @@ describe('OrcaRuntimeService', () => {
         connectionId: null,
         branch: 'feature/wsl',
         linkedGitHubPR: 76,
-        localGitExecOptions: { wslDistro: 'Ubuntu' }
+        localGitExecOptions: { wslDistro: 'Ubuntu', admissionTier: 'background' }
       })
     )
     expect(createHostedReviewMock).toHaveBeenCalledWith(
@@ -8297,7 +8355,7 @@ describe('OrcaRuntimeService', () => {
         title: 'Feature WSL'
       }),
       null,
-      { localGitExecOptions: { wslDistro: 'Ubuntu' } }
+      { localGitExecOptions: { wslDistro: 'Ubuntu', admissionTier: 'interactive' } }
     )
     expect(createStackedHostedReviewMock).toHaveBeenCalledWith(
       TEST_REPO_PATH,
@@ -8307,7 +8365,7 @@ describe('OrcaRuntimeService', () => {
         head: 'feature/wsl'
       }),
       null,
-      { localGitExecOptions: { wslDistro: 'Ubuntu' } }
+      { localGitExecOptions: { wslDistro: 'Ubuntu', admissionTier: 'interactive' } }
     )
   })
 
@@ -9345,6 +9403,10 @@ describe('OrcaRuntimeService', () => {
 
     try {
       const repo = await runtime.cloneRepo('https://example.com/repo-badge-color.git', '/tmp')
+      expect(spawnSpy).toHaveBeenCalledWith(
+        expect.arrayContaining(['clone']),
+        expect.objectContaining({ admissionTier: 'interactive' })
+      )
       expect(repo.badgeColor).toBe(DEFAULT_REPO_BADGE_COLOR)
       expect(added).toEqual([
         expect.objectContaining({

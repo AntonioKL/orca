@@ -27,7 +27,6 @@ inline src/renderer/src/components/TaskPage.tsx
 inline src/renderer/src/components/Terminal.tsx
 inline src/renderer/src/components/WorktreeJumpPalette.tsx
 inline src/renderer/src/components/automations/AutomationsPage.tsx
-inline src/renderer/src/components/editor/CombinedDiffViewer.tsx
 inline src/renderer/src/components/editor/MarkdownPreview.tsx
 inline src/renderer/src/components/floating-terminal/FloatingTerminalPanel.tsx
 inline src/renderer/src/components/new-workspace/SmartWorkspaceNameField.tsx
@@ -47,7 +46,6 @@ inline src/shared/keybindings.ts
 mobile-config app/h/*/files/*.tsx
 mobile-config app/h/*/session/*.tsx
 mobile-config app/h/*/source-control/*.tsx
-mobile-config app/h/*/tasks.tsx
 mobile-config app/index.tsx
 mobile-config scripts/mock-server.ts
 mobile-config src/terminal/terminal-webview-html.ts

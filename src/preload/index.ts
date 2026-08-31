@@ -34,7 +34,6 @@ import type {
 } from '../shared/terminal-preview'
 import type { AgentSessionPtyWriteRefusal } from '../shared/agent-session-pty-write-admission'
 import type { CliInstallStatus } from '../shared/cli-install-types'
-import type { AgentHookInstallStatus } from '../shared/agent-hook-types'
 import type { CodexConfigSyncStatus } from '../shared/codex-config-sync-types'
 import type { TerminalPaneSplitSource } from '../shared/feature-education-telemetry'
 import type { TerminalTabCreateReply } from '../shared/terminal-reveal-identity'
@@ -1466,8 +1465,10 @@ const api = {
       currentHeadOid?: string | null
     }): Promise<unknown> => ipcRenderer.invoke('gh:prForBranch', args),
 
-    refreshPRNow: (args: { candidate: GitHubPRRefreshCandidate }): Promise<unknown> =>
-      ipcRenderer.invoke('gh:refreshPRNow', args),
+    refreshPRNow: (args: {
+      candidate: GitHubPRRefreshCandidate
+      reason?: GitHubPRRefreshReason
+    }): Promise<unknown> => ipcRenderer.invoke('gh:refreshPRNow', args),
 
     enqueuePRRefresh: (args: {
       candidate: GitHubPRRefreshCandidate
@@ -2113,6 +2114,8 @@ const api = {
       query?: string
       siteId?: string
     }): Promise<unknown[]> => ipcRenderer.invoke('jira:listAssignableUsers', args),
+    searchUsers: (args?: { query?: string; siteId?: string }): Promise<unknown[]> =>
+      ipcRenderer.invoke('jira:searchUsers', args),
 
     listTransitions: (args: { key: string; siteId?: string }): Promise<unknown[]> =>
       ipcRenderer.invoke('jira:listTransitions', args),
@@ -2310,34 +2313,6 @@ const api = {
   codexConfigSync: {
     status: (): Promise<CodexConfigSyncStatus> => ipcRenderer.invoke('codexConfigSync:status')
   },
-  agentHooks: {
-    claudeStatus: (): Promise<AgentHookInstallStatus> =>
-      ipcRenderer.invoke('agentHooks:claudeStatus'),
-    openClaudeStatus: (): Promise<AgentHookInstallStatus> =>
-      ipcRenderer.invoke('agentHooks:openClaudeStatus'),
-    codexStatus: (): Promise<AgentHookInstallStatus> =>
-      ipcRenderer.invoke('agentHooks:codexStatus'),
-    geminiStatus: (): Promise<AgentHookInstallStatus> =>
-      ipcRenderer.invoke('agentHooks:geminiStatus'),
-    antigravityStatus: (): Promise<AgentHookInstallStatus> =>
-      ipcRenderer.invoke('agentHooks:antigravityStatus'),
-    ampStatus: (): Promise<AgentHookInstallStatus> => ipcRenderer.invoke('agentHooks:ampStatus'),
-    cursorStatus: (): Promise<AgentHookInstallStatus> =>
-      ipcRenderer.invoke('agentHooks:cursorStatus'),
-    droidStatus: (): Promise<AgentHookInstallStatus> =>
-      ipcRenderer.invoke('agentHooks:droidStatus'),
-    commandCodeStatus: (): Promise<AgentHookInstallStatus> =>
-      ipcRenderer.invoke('agentHooks:commandCodeStatus'),
-    grokStatus: (): Promise<AgentHookInstallStatus> => ipcRenderer.invoke('agentHooks:grokStatus'),
-    devinStatus: (): Promise<AgentHookInstallStatus> =>
-      ipcRenderer.invoke('agentHooks:devinStatus'),
-    copilotStatus: (): Promise<AgentHookInstallStatus> =>
-      ipcRenderer.invoke('agentHooks:copilotStatus'),
-    hermesStatus: (): Promise<AgentHookInstallStatus> =>
-      ipcRenderer.invoke('agentHooks:hermesStatus'),
-    kimiStatus: (): Promise<AgentHookInstallStatus> => ipcRenderer.invoke('agentHooks:kimiStatus')
-  },
-
   agentTrust: {
     markTrusted: (args: {
       preset: 'cursor' | 'copilot' | 'codex'
@@ -3612,7 +3587,9 @@ const api = {
     status: (args: {
       worktreePath: string
       connectionId?: string
+      admissionTier?: 'interactive' | 'status' | 'background'
       includeIgnored?: boolean
+      includeLineStats?: boolean
       bypassEffectiveUpstreamNegativeCache?: boolean
       reuseLineStats?: boolean
       branchLineTotalMergeBase?: string
@@ -3663,6 +3640,7 @@ const api = {
       worktreePath: string
       baseRef: string
       connectionId?: string
+      admissionTier?: 'interactive' | 'status' | 'background'
     }): Promise<unknown> => ipcRenderer.invoke('git:branchCompare', args),
     commitCompare: (args: {
       worktreePath: string
