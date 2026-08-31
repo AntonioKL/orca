@@ -9,7 +9,7 @@ import {
   type HangWatchdogWorkerData,
   type MainToHangWatchdogWorkerMessage
 } from './hang-watchdog-worker-protocol'
-import { captureFreezeCensus } from '../crash-reporting/freeze-census'
+import type { HangWatchdogWorkerEvent } from './hang-watchdog-worker-protocol'
 
 export type MainThreadHangWatchdogHandle = {
   stop: () => void
@@ -45,6 +45,7 @@ function positiveTiming(value: string | undefined, fallback: number): number {
 
 export function installMainThreadHangWatchdog(options: {
   userDataPath: string
+  onHangResolved?: (event: WatchdogLaneEvent) => void
 }): MainThreadHangWatchdogHandle | null {
   // Why: dev main threads pause in debuggers routinely; watch packaged builds only unless forced.
   if (!app.isPackaged && process.env.ORCA_HANG_WATCHDOG_FORCE !== '1') {
@@ -86,7 +87,9 @@ export function installMainThreadHangWatchdog(options: {
     }
   }
   const heartbeatTimer = setInterval(() => {
-    postMessage({ type: 'heartbeat', census: captureFreezeCensus() })
+    // Keep the heartbeat path bounded: the worker carries forward the last
+    // census, while app metrics are captured only at episode edges.
+    postMessage({ type: 'heartbeat', census: {} })
   }, HANG_WATCHDOG_HEARTBEAT_INTERVAL_MS)
   const stop = (): void => {
     if (stopped) {
@@ -99,6 +102,23 @@ export function installMainThreadHangWatchdog(options: {
   worker.once('exit', () => {
     stopped = true
     clearInterval(heartbeatTimer)
+  })
+  worker.on('message', (message: HangWatchdogWorkerEvent) => {
+    if (message?.type !== 'hang_resolved' || !message.marker) {
+      return
+    }
+    const event: WatchdogLaneEvent = {
+      unresponsiveMs: message.marker.unresponsiveMs,
+      ...(message.marker.detectedAtMs !== undefined
+        ? { episodeId: message.marker.detectedAtMs }
+        : {}),
+      ...(message.marker.census ? { census: message.marker.census } : {})
+    }
+    if (options.onHangResolved) {
+      options.onHangResolved(event)
+    } else {
+      queueWatchdogLaneEvent(event)
+    }
   })
   worker.unref()
   app.on('will-quit', stop)

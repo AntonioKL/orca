@@ -1,7 +1,7 @@
 import { isMainThread, parentPort, workerData } from 'node:worker_threads'
 import { readFileSync, rmSync } from 'node:fs'
 import { createHangWatchdogDetectionLoop } from './hang-watchdog-detection-loop'
-import { writeHangDetectionMarker } from './hang-detection-marker'
+import { claimHangDetectionMarker, writeHangDetectionMarker } from './hang-detection-marker'
 import { subscribeSystemPowerLifecycle } from '../system-power-lifecycle'
 import type {
   HangWatchdogWorkerData,
@@ -11,6 +11,7 @@ import type {
 type HangWatchdogPort = {
   on: (event: 'message', listener: (message: MainToHangWatchdogWorkerMessage) => void) => unknown
   close: () => void
+  postMessage?: (message: unknown) => void
 }
 
 // Observation only: a false positive must never kill a live main thread mid-write.
@@ -70,14 +71,28 @@ export function runWatchdog(
         census: lastCensus
       }),
     // Why: rewriting the marker keeps one observation per stall rather than two rows to reconcile.
-    onHangResolved: (unresponsiveMs) =>
+    onHangResolved: (unresponsiveMs) => {
       recordHangObservation({
         parentPid: config.parentPid,
         markerPath: config.markerPath,
         unresponsiveMs,
         selfRecovered: true,
         census: lastCensus
-      }),
+      })
+      const marker = claimHangDetectionMarker(config.markerPath)
+      if (!marker) {
+        return
+      }
+      port.postMessage?.({
+        type: 'hang_resolved',
+        marker: {
+          ...marker,
+          unresponsiveMs,
+          selfRecovered: true,
+          census: lastCensus ?? marker.census
+        }
+      })
+    },
     onHangSuspended: () => {
       // A suspend edge closes the episode without emitting a hang marker; any
       // marker already written belongs to the sleep false-positive.

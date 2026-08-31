@@ -42,6 +42,25 @@ describe('renderer unresponsive episode machine', () => {
     expect(sessionBudget.count).toBe(5)
   })
 
+  it('closes an open episode as process_gone or abandoned exactly once', () => {
+    const gone = createRendererUnresponsiveEpisodeMachine({ isSuppressed: () => false })
+    expect(gone.onUnresponsive(10)).not.toBeNull()
+    expect(gone.onProcessGone(25)).toEqual({
+      episodeId: 10,
+      outcome: 'process_gone',
+      durationMs: 15
+    })
+    expect(gone.onAbandoned(30)).toBeNull()
+
+    const abandoned = createRendererUnresponsiveEpisodeMachine({ isSuppressed: () => false })
+    expect(abandoned.onUnresponsive(40)).not.toBeNull()
+    expect(abandoned.onAbandoned(55)).toEqual({
+      episodeId: 40,
+      outcome: 'abandoned',
+      durationMs: 15
+    })
+  })
+
   it('suppresses development and debugger/devtools observations', () => {
     expect(
       shouldSuppressRendererUnresponsive({

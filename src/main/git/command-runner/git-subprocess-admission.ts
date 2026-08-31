@@ -2,6 +2,7 @@ import { uncRouteKey } from '../../providers/working-directory-validation'
 import { classifyGitCommand } from '../wsl-direct-git-read-commands'
 import { createAbortError } from './abort-error'
 import { GitAdmissionWaiterQueue } from './git-admission-waiter-queue'
+import { setGitAdmissionCountsProvider } from './git-admission-census'
 import {
   ADMISSION_TIER_VALUE,
   AdmissionEventPublisher,
@@ -308,12 +309,18 @@ export class GitAdmissionScheduler {
 }
 
 let scheduler = new GitAdmissionScheduler()
+setGitAdmissionCountsProvider(() => ({
+  inflight: [...scheduler['budgets'].values()].reduce(
+    (sum, budget) => sum + budget.baseUsed + budget.headroomUsed,
+    0
+  ),
+  queued: scheduler['waiters'].count
+}))
 
 export function acquireGitAdmission(request: GitAdmissionRequest): Promise<GitAdmissionGrant> {
-  if (process.env.ORCA_GIT_ADMISSION_DISABLED === '1') {
-    return Promise.resolve({ queueWaitMs: 0, release: () => {} })
-  }
-  return scheduler.acquire(request)
+  return process.env.ORCA_GIT_ADMISSION_DISABLED === '1'
+    ? Promise.resolve({ queueWaitMs: 0, release: () => {} })
+    : scheduler.acquire(request)
 }
 
 export function _resetGitAdmissionForTests(replacement = new GitAdmissionScheduler()): void {

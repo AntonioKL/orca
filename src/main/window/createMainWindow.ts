@@ -131,9 +131,9 @@ export function createMainWindow(
     opts?.onRendererUnresponsive?.(rendererWebContentsId)
   )
   mainWindow.webContents.on('responsive', () => opts?.onRendererResponsive?.(rendererWebContentsId))
-  mainWindow.webContents.on('render-process-gone', () =>
-    opts?.onRendererClosed?.(rendererWebContentsId)
-  )
+  // A window close is the abandonment edge; render-process-gone owns the
+  // process_gone edge in the focus lifecycle and must win this race.
+  mainWindow.on('closed', () => opts?.onRendererClosed?.(rendererWebContentsId))
   installWindowsPathRegistryChangeListener(mainWindow)
   // Why: native paste fallback is privileged IPC; only the top-level renderer may request it.
   setTrustedUIRendererWebContentsId(rendererWebContentsId)

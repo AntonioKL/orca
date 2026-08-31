@@ -18,6 +18,38 @@ export type FreezeCensus = {
   sysmem_free_mb?: number
 }
 
+const FREEZE_CENSUS_KEYS = [
+  'census_window_count',
+  'census_pane_count_local',
+  'census_agent_count',
+  'census_git_inflight',
+  'census_git_queued',
+  'metrics_browser_mb',
+  'metrics_renderer_mb',
+  'metrics_gpu_mb',
+  'metrics_other_mb',
+  'metrics_renderer_private_mb',
+  'metrics_commit_total_mb',
+  'sysmem_total_mb',
+  'sysmem_free_mb'
+] as const
+
+export function sanitizeFreezeCensus(value: unknown): FreezeCensus {
+  if (!value || typeof value !== 'object') {
+    return {}
+  }
+  const source = value as Record<string, unknown>
+  const result: FreezeCensus = {}
+  const writable = result as Record<string, number>
+  for (const key of FREEZE_CENSUS_KEYS) {
+    const candidate = source[key]
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+      writable[key] = Math.max(0, Math.round(candidate))
+    }
+  }
+  return result
+}
+
 function mb(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value)
     ? Math.round(Math.max(0, value) / 1024)
