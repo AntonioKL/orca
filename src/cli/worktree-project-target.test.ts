@@ -78,4 +78,29 @@ describe('resolveProjectCreateTarget host selection', () => {
       expect.objectContaining({ repoSelector: 'id:repo-exact' })
     )
   })
+
+  it('refuses an ambiguous project even with no --host, and names the setup ids', async () => {
+    // Without --host the old code returned candidates[0]; ordering is persistence order, not a
+    // user choice. On the affected host this project has six ready setups.
+    const client = clientReturning([
+      readySetup({ id: 'setup-a', repoId: 'repo-a', path: 'C:\\Users\\neil\\orca\\orca' }),
+      readySetup({ id: 'setup-b', repoId: 'repo-b', path: 'C:\\orca\\orca' })
+    ])
+    const flags = new Map<string, string | boolean>([['project', 'github:stablyai/orca']])
+
+    const failure = resolveProjectCreateTarget(flags, client)
+
+    await expect(failure).rejects.toThrow(/2 ready setups/)
+    // The remedy names --project-host-setup <id>, so the id has to be shown.
+    await expect(failure).rejects.toThrow(/setup-a/)
+  })
+
+  it('still resolves a single setup when no --host is given', async () => {
+    const client = clientReturning([readySetup({ id: 'only', repoId: 'repo-only' })])
+    const flags = new Map<string, string | boolean>([['project', 'github:stablyai/orca']])
+
+    await expect(resolveProjectCreateTarget(flags, client)).resolves.toEqual(
+      expect.objectContaining({ repoSelector: 'id:repo-only' })
+    )
+  })
 })

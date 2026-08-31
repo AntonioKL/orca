@@ -59,7 +59,9 @@ function findReadySetupOnHost(
 ): ProjectHostSetup | undefined {
   const candidates = setups.filter((candidate) => candidate.projectId === projectId)
   if (!host) {
-    return candidates[0]
+    // Why: ordering here is persistence order, not a user choice, so "first" is arbitrary — the
+    // same silent pick that aimed creation at an unrelated checkout, just without a --host to blame.
+    return candidates.length > 0 ? pickSingleSetup(candidates, projectId, undefined) : undefined
   }
   const exact = candidates.filter(
     (candidate) => normalizeExecutionHostId(candidate.hostId) === host.id
@@ -80,15 +82,18 @@ function findReadySetupOnHost(
 function pickSingleSetup(
   matches: readonly ProjectHostSetup[],
   projectId: string | undefined,
-  host: ParsedExecutionHost
+  host: ParsedExecutionHost | undefined
 ): ProjectHostSetup {
   if (matches.length === 1) {
     return matches[0]
   }
-  const listed = matches.map((candidate) => `  ${candidate.path}`).join('\n')
+  // Why: list the id alongside the path — the remedy we name is `--project-host-setup <id>`, so an
+  // error that prints only paths asks for something it never showed.
+  const listed = matches.map((candidate) => `  ${candidate.id}  ${candidate.path}`).join('\n')
+  const where = host ? ` on ${host.id}` : ''
   throw new RuntimeClientError(
     'invalid_argument',
-    `"${projectId}" has ${matches.length} ready setups on ${host.id}; pass --project-host-setup <id> to choose one:\n${listed}`
+    `"${projectId}" has ${matches.length} ready setups${where}; pass --project-host-setup <id> to choose one:\n${listed}`
   )
 }
 
