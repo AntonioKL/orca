@@ -172,7 +172,14 @@ export class HeadlessEmulator {
       return Promise.resolve()
     }
 
-    this.markMutated()
+    // Why length-gated: flushParsedWrites() is a zero-byte write used purely as
+    // a parse fence (session-output-plane.ts), and every getSettledSnapshot runs
+    // one. Zero bytes cannot mutate the buffer — scans are no-ops and the escape
+    // tail is idempotent — so bumping here would evict the cache on every
+    // checkpoint read. Real writes still bracket themselves.
+    if (data.length > 0) {
+      this.markMutated()
+    }
     const forwardQueryReplies = opts.forwardQueryReplies === true
     if (this.tryWriteSync(data, { forwardQueryReplies })) {
       return Promise.resolve()
@@ -194,8 +201,12 @@ export class HeadlessEmulator {
         this.partialEscapeTail = advancePartialEscapeTail(this.partialEscapeTail, data)
         // Why again: xterm parses asynchronously, so the buffer only reaches
         // its post-write state here; the entry bump alone would let a
-        // snapshot taken mid-parse cache a half-applied buffer.
-        this.markMutated()
+        // snapshot taken mid-parse cache a half-applied buffer. Zero-byte
+        // fences are exempt for the reason given at the entry bump — any
+        // writes they fence have already bumped on their own completion.
+        if (data.length > 0) {
+          this.markMutated()
+        }
         resolve()
       })
     })
@@ -214,7 +225,9 @@ export class HeadlessEmulator {
     if (typeof writeSync !== 'function') {
       return false
     }
-    this.markMutated()
+    if (data.length > 0) {
+      this.markMutated()
+    }
     this.oscText.scan(data)
     const forwardQueryReplies = opts.forwardQueryReplies === true
     if (forwardQueryReplies) {
@@ -342,6 +355,8 @@ export class HeadlessEmulator {
   }
 
   dispose(): void {
+    // Why: a post-dispose read must not be served a pre-dispose cache entry.
+    this.markMutated()
     this.disposed = true
     this.terminal.dispose()
   }
