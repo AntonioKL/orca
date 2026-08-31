@@ -874,13 +874,7 @@ export class PtyHandler {
   private wireAndStore(managed: ManagedPty): void {
     managed.physicalExit = new PhysicalExitTracker()
     this.ptys.set(managed.id, managed)
-    if (this.identityEvidenceBackstopTimer === null) {
-      this.identityEvidenceBackstopTimer = setInterval(
-        () => this.reconcileVisibleIdentityEvidence(),
-        IDENTITY_EVIDENCE_BACKSTOP_MS
-      )
-      this.identityEvidenceBackstopTimer.unref?.()
-    }
+    this.ensureIdentityEvidenceBackstopTimer()
     if (this.dispatcher.hasConnectedClients?.()) {
       this.scheduleIdentityEvidenceRead()
     }
@@ -1047,11 +1041,16 @@ export class PtyHandler {
       }
       const visible = new Set(ids as string[])
       this.identityEvidenceVisibleByClient.set(context.clientId, visible)
+      this.ensureIdentityEvidenceBackstopTimer()
       this.publishHeldIdentityEvidenceToClient(context.clientId, visible)
       return { ok: true }
     })
     this.dispatcher.onClientDetached?.((clientId) => {
       this.identityEvidenceVisibleByClient.delete(clientId)
+      if (this.identityEvidenceVisibleByClient.size === 0 && this.identityEvidenceBackstopTimer) {
+        clearInterval(this.identityEvidenceBackstopTimer)
+        this.identityEvidenceBackstopTimer = null
+      }
     })
     this.dispatcher.onRequest('pty.getDefaultShell', async () => resolveDefaultShell())
     this.dispatcher.onRequest('pty.serialize', (p) => this.serialize(p))
@@ -2551,6 +2550,21 @@ export class PtyHandler {
     for (const id of stale) {
       this.scheduleIdentityEvidenceRead(id)
     }
+  }
+
+  private ensureIdentityEvidenceBackstopTimer(): void {
+    if (
+      this.identityEvidenceBackstopTimer !== null ||
+      this.identityEvidenceVisibleByClient.size === 0 ||
+      this.ptys.size === 0
+    ) {
+      return
+    }
+    this.identityEvidenceBackstopTimer = setInterval(
+      () => this.reconcileVisibleIdentityEvidence(),
+      IDENTITY_EVIDENCE_BACKSTOP_MS
+    )
+    this.identityEvidenceBackstopTimer.unref?.()
   }
 
   private scheduleIdentityEvidenceRead(id?: string): void {
