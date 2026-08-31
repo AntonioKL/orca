@@ -20,7 +20,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: docs-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('release-{0}', github.event.release.tag_name || inputs.tag) }}
+  # Serialize production runs so a delayed older release cannot overwrite a
+  # newer deployment. PR checks may still run concurrently by pull request.
+  group: ${{ github.event_name == 'pull_request' && format('docs-pr-{0}', github.event.pull_request.number) || 'docs-production' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
@@ -30,8 +32,8 @@ defaults:
     working-directory: docs/site
 
 jobs:
-  # This job deliberately has no deployment credentials and runs for fork PRs
-  # as well as same-repository PRs.
+  # This job deliberately has no deployment credentials and runs for every PR,
+  # including forks.
   check:
     name: Build and test
     if: github.event_name == 'pull_request'
@@ -80,6 +82,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       deploy: ${{ steps.validate.outputs.deploy }}
+      commit_sha: ${{ steps.validate.outputs.commit_sha }}
     steps:
       - name: Validate stable desktop tag
         id: validate
@@ -121,7 +124,17 @@ jobs:
             authorized_ref=false
             [[ "$WORKFLOW_REF" == "refs/heads/$DEFAULT_BRANCH" ]] && authorized_ref=true
 
-            release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag")"
+            release_json=''
+            for attempt in 1 2 3; do
+              if release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" 2>/dev/null)"; then
+                break
+              fi
+              if [[ "$attempt" -eq 3 ]]; then
+                echo "::error::Release metadata for $tag was not available after 3 attempts."
+                exit 1
+              fi
+              sleep "$((attempt * 5))"
+            done
             authorized_author=false
             [[ "$(jq -r '.author.login' <<<"$release_json")" == "github-actions[bot]" ]] && authorized_author=true
             release_state_ok=false
@@ -132,6 +145,32 @@ jobs:
             fi
           fi
 
+          # Resolve the tag to an immutable commit before handing it to the
+          # deployment job. This prevents a force-moved tag from changing the
+          # source between authorization and checkout.
+          tag_ref_json=''
+          for attempt in 1 2 3; do
+            if tag_ref_json="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" 2>/dev/null)"; then
+              break
+            fi
+            if [[ "$attempt" -eq 3 ]]; then
+              echo "::error::Git ref for $tag was not available after 3 attempts."
+              exit 1
+            fi
+            sleep "$((attempt * 5))"
+          done
+          tag_object_sha="$(jq -er '.object.sha' <<<"$tag_ref_json")"
+          tag_object_type="$(jq -er '.object.type' <<<"$tag_ref_json")"
+          commit_sha="$tag_object_sha"
+          if [[ "$tag_object_type" == 'tag' ]]; then
+            commit_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object_sha" | jq -er '.object.sha')"
+          fi
+          if [[ ! "$commit_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Could not resolve $tag to a commit SHA."
+            exit 1
+          fi
+          echo "commit_sha=$commit_sha" >> "$GITHUB_OUTPUT"
+
           deploy=false
           if [[ "$authorized_ref" == "true" && "$authorized_author" == "true" && "$release_state_ok" == "true" ]]; then
             deploy=true
@@ -139,119 +178,6 @@ jobs:
             echo "Release $tag is not an authorized stable desktop release; skipping docs deployment."
           fi
           echo "deploy=$deploy" >> "$GITHUB_OUTPUT"
-
-  preview:
-    name: Preview
-    # Only trusted branches can access the Vercel preview environment. Forks
-    # still receive the credential-free check job above.
-    needs: check
-    if: >-
-      github.event_name == 'pull_request' &&
-      needs.check.result == 'success' &&
-      github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      issues: write
-      pull-requests: write
-    environment:
-      name: docs-preview
-    env:
-      VERCEL_TELEMETRY_DISABLED: '1'
-    steps:
-      - name: Checkout pull request
-        uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          version: 10.24.0
-          run_install: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: docs/site/pnpm-lock.yaml
-
-      - name: Install site dependencies
-        run: pnpm --ignore-workspace install --frozen-lockfile
-
-      - name: Verify Vercel credentials
-        env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: |
-          set -euo pipefail
-          test -n "${VERCEL_TOKEN:-}" || { echo '::error::VERCEL_TOKEN is not configured for docs-preview.'; exit 1; }
-          test -n "${VERCEL_ORG_ID:-}" || { echo '::error::VERCEL_ORG_ID is not configured for docs-preview.'; exit 1; }
-          test -n "${VERCEL_PROJECT_ID:-}" || { echo '::error::VERCEL_PROJECT_ID is not configured for docs-preview.'; exit 1; }
-
-      - name: Pull Vercel preview settings
-        env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: pnpm --ignore-workspace exec vercel pull --yes --non-interactive --environment=preview
-
-      - name: Build preview
-        run: pnpm --ignore-workspace exec vercel build --non-interactive
-
-      - name: Deploy preview
-        id: deploy
-        shell: bash
-        env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: |
-          set -euo pipefail
-          # `--non-interactive` returns a JSON status envelope, not a bare URL.
-          deployment_json="$(pnpm --ignore-workspace exec vercel deploy --prebuilt --yes --non-interactive --format json)"
-          printf '%s\n' "$deployment_json"
-          url="$(jq -er '.deployment.url // .url // empty' <<<"$deployment_json")"
-          [[ "$url" =~ ^https://[^[:space:]]+$ ]]
-          printf '%s\n' "$url"
-          echo "url=$url" >> "$GITHUB_OUTPUT"
-          echo "Preview deployed to $url" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Link preview in pull request
-        uses: actions/github-script@v8
-        env:
-          PREVIEW_URL: ${{ steps.deploy.outputs.url }}
-        with:
-          script: |
-            const marker = '<!-- docs-preview -->'
-            const url = process.env.PREVIEW_URL
-            if (!url) throw new Error('Preview URL was not produced')
-            const body = `${marker}\nDocs preview: [${url}](${url})`
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              per_page: 100
-            })
-            const existing = comments.find((comment) => comment.body?.includes(marker))
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body
-              })
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body
-              })
-            }
 
   production:
     name: Production
@@ -271,7 +197,7 @@ jobs:
       - name: Checkout released tag
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          ref: ${{ needs.release_gate.outputs.commit_sha }}
           persist-credentials: false
 
       - name: Setup pnpm

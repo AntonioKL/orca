@@ -6,11 +6,6 @@ import { parse } from 'yaml'
 const RELEASE_WORKFLOW = '.github/workflows/release-cut.yml'
 const EXPECTED_MATRIX = {
   '.github/workflows/docs.yml#check': { contents: 'read' },
-  '.github/workflows/docs.yml#preview': {
-    contents: 'read',
-    issues: 'write',
-    'pull-requests': 'write'
-  },
   '.github/workflows/docs.yml#production': { contents: 'read' },
   '.github/workflows/docs.yml#release_gate': { contents: 'read' },
   '.github/workflows/e2e.yml#build': { contents: 'read' },

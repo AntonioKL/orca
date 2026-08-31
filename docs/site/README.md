@@ -88,19 +88,19 @@ deployment needs `basePath`, first move the route tree to an unprefixed
    root; setting it again would resolve `docs/site/docs/site`. Leave automatic
    Git deployments disabled so this workflow remains the only deployment path.
 2. Framework preset: Next.js. Use `pnpm --ignore-workspace install --frozen-lockfile` for install and `pnpm --ignore-workspace build` for build; this package has its own lockfile beside the root workspace.
-3. Set GitHub Actions secrets (required when the preview or production deploy jobs are enabled):
+3. Set GitHub Actions secrets (required by the production deploy job):
    - `VERCEL_TOKEN`
    - `VERCEL_ORG_ID`
    - `VERCEL_PROJECT_ID` (docs project, not the marketing site)
 4. Protect the `docs-production` GitHub environment with required reviewers.
-   Same-repository branches that receive automatic previews must be trusted;
-   otherwise protect `docs-preview` with reviewers too.
 5. Add the three rewrites above to the `www.onorca.dev` marketing project. A
    Vercel custom domain cannot delegate only `/docs` by itself; the default zone
    must proxy both page/API/media requests and `/docs-static` assets.
 
-`.github/workflows/docs.yml` deploys a preview for same-repository pull requests.
-Production deploys only from an authorized stable desktop release: an exact
+`.github/workflows/docs.yml` runs credential-free checks for every pull request.
+It intentionally does not deploy PR previews: a PR-controlled build must not
+receive Vercel credentials. A maintainer can add a separate trusted preview
+workflow later. Production deploys only from an authorized stable desktop release: an exact
 `vX.Y.Z` tag, a published non-prerelease release, and the
 `github-actions[bot]` release author. Manual dispatch must run from the default
 branch and name an existing release that meets the same checks. Mobile,
