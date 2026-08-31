@@ -80,6 +80,7 @@ import type { TaskPageJiraFiltersProps } from '@/components/task-page/chrome/tas
 import type { TaskPageGitlabFiltersProps } from '@/components/task-page/chrome/task-page-gitlab-filters'
 import type { GithubDetailHostProps } from '@/components/task-page/github/github-detail-host'
 import type { GithubWorkItemTableProps } from '@/components/task-page/github/github-work-item-table'
+import { startGitHubListScrollRestore } from '@/components/task-page/github/github-list-scroll-restore'
 import type { GitlabWorkItemListProps } from '@/components/task-page/gitlab/gitlab-work-item-list'
 import type { JiraIssueListHostProps } from '@/components/task-page/jira/jira-issue-list-host'
 import type { NewGithubIssueDialogProps } from '@/components/task-page/dialogs/new-github-issue-dialog'
@@ -407,6 +408,7 @@ export default function TaskPage(): React.JSX.Element {
     githubListScrollRef,
     githubListScrollTopRef,
     pendingGithubScrollRestoreRef,
+    githubRestoreScrollWriteRef,
     paginationLoading,
     setPaginationLoading,
     loadingTargetPage,
@@ -440,9 +442,6 @@ export default function TaskPage(): React.JSX.Element {
     page: number
     scrollTop: number
   } | null>(null)
-  // Invalidates queued restore callbacks when opening a detail page reuses the same scroll offset.
-  const githubScrollRestoreGenerationRef = useRef(0)
-
   useLayoutEffect(() => {
     if (
       taskSource !== 'github' ||
@@ -537,74 +536,24 @@ export default function TaskPage(): React.JSX.Element {
     : null
 
   useLayoutEffect(() => {
-    const scrollTop = pendingGithubScrollRestoreRef.current
-    const scrollElement = githubListScrollRef.current
-    const restoreGeneration = githubScrollRestoreGenerationRef.current
-    if (
-      pageData.openGitHubWorkItem ||
-      scrollTop === null ||
-      !scrollElement ||
-      !pages[currentPage]
-    ) {
+    const target = pendingGithubScrollRestoreRef.current
+    if (pageData.openGitHubWorkItem || target === null || !pages[currentPage]) {
       return
     }
-    let frame: number | null = null
-    let timeout: number | null = null
-    let observer: ResizeObserver | null = null
-    const clearScheduledRestore = (): void => {
-      if (frame !== null) {
-        window.cancelAnimationFrame(frame)
-        frame = null
-      }
-      if (timeout !== null) {
-        window.clearTimeout(timeout)
-        timeout = null
-      }
-      observer?.disconnect()
-    }
-    const restore = (): void => {
-      const committedScrollElement = githubListScrollRef.current
-      if (
-        !committedScrollElement ||
-        pendingGithubScrollRestoreRef.current !== scrollTop ||
-        githubScrollRestoreGenerationRef.current !== restoreGeneration
-      ) {
-        return
-      }
-      committedScrollElement.scrollTop = scrollTop
-      githubListScrollTopRef.current = scrollTop
-      taskListPositionRef.current = {
-        contextKey: githubResumeContextKey,
-        page: currentPage,
-        scrollTop
-      }
-      if (Math.abs(committedScrollElement.scrollTop - scrollTop) < 1) {
-        pendingGithubScrollRestoreRef.current = null
-        clearScheduledRestore()
-      }
-    }
-    observer = new ResizeObserver(restore)
-    for (const child of scrollElement.children) {
-      observer.observe(child)
-    }
-    restore()
-    if (pendingGithubScrollRestoreRef.current === scrollTop) {
-      frame = window.requestAnimationFrame(restore)
-      timeout = window.setTimeout(() => {
-        if (pendingGithubScrollRestoreRef.current === scrollTop) {
-          const committedScrollTop = githubListScrollRef.current?.scrollTop ?? 0
-          githubListScrollTopRef.current = committedScrollTop
-          taskListPositionRef.current = {
-            contextKey: githubResumeContextKey,
-            page: currentPage,
-            scrollTop: committedScrollTop
-          }
-          pendingGithubScrollRestoreRef.current = null
+    return startGitHubListScrollRestore({
+      target,
+      scrollElementRef: githubListScrollRef,
+      pendingRestoreRef: pendingGithubScrollRestoreRef,
+      restoreWriteRef: githubRestoreScrollWriteRef,
+      onScrollTopApplied: (scrollTop) => {
+        githubListScrollTopRef.current = scrollTop
+        taskListPositionRef.current = {
+          contextKey: githubResumeContextKey,
+          page: currentPage,
+          scrollTop
         }
-        clearScheduledRestore()
-      }, 5_000)
-    }
-    return clearScheduledRestore
+      }
+    })
   }, [
     currentPage,
     dialogWorkItem,
@@ -613,6 +562,7 @@ export default function TaskPage(): React.JSX.Element {
     pageData.openGitHubWorkItem,
     githubListScrollTopRef,
     pendingGithubScrollRestoreRef,
+    githubRestoreScrollWriteRef,
     githubListScrollRef.current?.scrollTop,
     githubListScrollRef
   ])
@@ -682,7 +632,6 @@ export default function TaskPage(): React.JSX.Element {
     (item: GitHubWorkItem, initialTab: ItemDialogTab = 'conversation') => {
       const scrollTop = githubListScrollRef.current?.scrollTop ?? githubListScrollTopRef.current
       githubListScrollTopRef.current = scrollTop
-      githubScrollRestoreGenerationRef.current += 1
       pendingGithubScrollRestoreRef.current = scrollTop
       taskListPositionRef.current = {
         contextKey: githubResumeContextKey,
@@ -2776,6 +2725,7 @@ export default function TaskPage(): React.JSX.Element {
     githubResumeContextKey,
     currentPageRef,
     pendingGithubScrollRestoreRef,
+    githubRestoreScrollWriteRef,
     githubListScrollTopRef,
     taskListPositionRef,
     githubTaskGridClass,

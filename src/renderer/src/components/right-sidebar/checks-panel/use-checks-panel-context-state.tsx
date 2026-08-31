@@ -126,9 +126,10 @@ export function useChecksPanelContextState(model: ChecksPanelContextStateInput) 
   // Why: no key={worktreeId} remount (caused an IPC storm on Windows); reset branch-specific state during render (not useEffect) so it lands on the same paint.
   const [prevPanelContextKey, setPrevPanelContextKey] = useState(panelContextKey)
   const [prRefreshStateNow, setPrRefreshStateNow] = useState(() => Date.now())
-  // Eligibility expires independently of PR refresh-state timers, so keep the
-  // freshness gate moving while the visible panel is mounted.
-  const panelClockNow = useNow(30_000, isPanelVisible)
+  // Why: eligibility expires on wall time, independently of the PR refresh-state
+  // timers, so the freshness gate needs its own tick. ChecksPanel is unmounted
+  // (not hidden) when the panel closes, so the clock needs no visibility gate.
+  const panelClockNow = useNow(30_000)
   if (panelContextKey !== prevPanelContextKey) {
     setPrevPanelContextKey(panelContextKey)
     setEditingTitle(false)
@@ -215,6 +216,7 @@ export function useChecksPanelContextState(model: ChecksPanelContextStateInput) 
     null
   // Why: branch lookup is lossy for fork/deleted-head PRs; reuse a known PR number from metadata or cache whenever we have one.
   const linkedPR = activeWorktree?.linkedPR ?? null
+  const suppressedGitHubPR = activeWorktree?.suppressedGitHubPR ?? null
   const fallbackGitHubPRNumber = linkedPR == null ? (pr?.number ?? null) : null
   const linkedGitLabMR = activeWorktree?.linkedGitLabMR ?? null
   const linkedBitbucketPR = activeWorktree?.linkedBitbucketPR ?? null
@@ -223,6 +225,8 @@ export function useChecksPanelContextState(model: ChecksPanelContextStateInput) 
   const activeReview: ChecksPanelReview | null = selectChecksPanelReview({
     hostedReview,
     pr,
+    linkedPR,
+    suppressedGitHubPR,
     linkedGitLabMR,
     linkedBitbucketPR,
     linkedAzureDevOpsPR,
@@ -285,7 +289,6 @@ export function useChecksPanelContextState(model: ChecksPanelContextStateInput) 
     prCacheKey,
     prNumber,
     rawPRRefreshState,
-    panelContextKey,
     repo?.id
   ])
 
@@ -331,7 +334,6 @@ export function useChecksPanelContextState(model: ChecksPanelContextStateInput) 
     setChecksPanelContentRef,
     prevPanelContextKey,
     prRefreshStateNow: Math.max(prRefreshStateNow, panelClockNow),
-    setPrRefreshStateNow,
     isFolder,
     prCacheKey,
     hostedReviewCacheKey,
@@ -342,6 +344,7 @@ export function useChecksPanelContextState(model: ChecksPanelContextStateInput) 
     hostedReview,
     linkedReviewNumber,
     linkedPR,
+    suppressedGitHubPR,
     fallbackGitHubPRNumber,
     linkedGitLabMR,
     linkedBitbucketPR,

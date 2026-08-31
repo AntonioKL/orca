@@ -6,6 +6,7 @@ import {
 } from '../../../shared/execution-host'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../shared/constants'
 import { BROWSER_SCREENCAST_RUNTIME_CAPABILITY } from '../../../shared/protocol-version'
+import * as clientCreationActionPolicy from './client-creation-action-policy'
 import {
   canOpenWorkspaceBrowserTabOnRuntime,
   canOpenWorkspaceBrowserTabOnSsh,
@@ -104,6 +105,31 @@ describe('openWorkspaceBrowserTab', () => {
     expect(mocks.createRemote).not.toHaveBeenCalled()
   })
 
+  it('creates a client tab without activating it when requested', async () => {
+    const createBrowserTab = vi.fn()
+    const sshHost = toSshExecutionHostId('ssh-target')
+    mocks.state = {
+      ...ownerState(sshHost),
+      createBrowserTab,
+      defaultBrowserSessionProfileId: 'focused-profile',
+      defaultBrowserSessionProfileIdByHostId: { [sshHost]: 'ssh-profile' }
+    }
+
+    await openWorkspaceBrowserTab({
+      workspaceId: WORKSPACE_ID,
+      url: 'https://github.com/acme/orca/pull/456',
+      intent: { kind: 'url' },
+      focusOnCreate: false,
+      selectWorktree: false
+    })
+
+    expect(createBrowserTab).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      'https://github.com/acme/orca/pull/456',
+      expect.objectContaining({ activate: false })
+    )
+  })
+
   it('fails closed when the asserted SSH browser route is opted out or belongs to another host', async () => {
     const sshHost = toSshExecutionHostId('ssh-target')
     mocks.state = {
@@ -164,6 +190,32 @@ describe('openWorkspaceBrowserTab', () => {
     expect(createBrowserTab).not.toHaveBeenCalled()
   })
 
+  it('stages a runtime tab without selecting the worktree or focusing the browser', async () => {
+    mocks.state = {
+      ...ownerState(toRuntimeExecutionHostId('hub-a')),
+      ...browserCapableRuntime('hub-a'),
+      createBrowserTab: vi.fn(),
+      defaultBrowserSessionProfileId: 'client-profile',
+      defaultBrowserSessionProfileIdByHostId: {}
+    }
+
+    await openWorkspaceBrowserTab({
+      workspaceId: WORKSPACE_ID,
+      url: 'https://gitlab.com/acme/orca/-/merge_requests/77',
+      intent: { kind: 'url' },
+      focusOnCreate: false,
+      selectWorktree: false
+    })
+
+    expect(mocks.createRemote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        focusOnCreate: false,
+        selectWorktree: false,
+        url: 'https://gitlab.com/acme/orca/-/merge_requests/77'
+      })
+    )
+  })
+
   it('waits for host registration before reconciling an asserted runtime link', async () => {
     const createBrowserTab = vi.fn()
     mocks.state = {
@@ -188,6 +240,65 @@ describe('openWorkspaceBrowserTab', () => {
       })
     )
     expect(createBrowserTab).not.toHaveBeenCalled()
+  })
+
+  it('keeps an asserted runtime link on its owner when policy selects the local client', async () => {
+    const createBrowserTab = vi.fn()
+    mocks.state = {
+      ...ownerState(toRuntimeExecutionHostId('hub-a')),
+      ...browserCapableRuntime('hub-a'),
+      createBrowserTab,
+      defaultBrowserSessionProfileId: 'client-profile',
+      defaultBrowserSessionProfileIdByHostId: {}
+    }
+    const policySpy = vi
+      .spyOn(clientCreationActionPolicy, 'getClientCreationActionPolicy')
+      .mockReturnValue({
+        'managed-browser': { state: 'enabled', provider: 'local-client' },
+        'mobile-emulator': { state: 'enabled', provider: 'local-client' }
+      })
+
+    try {
+      await openWorkspaceBrowserTab({
+        workspaceId: WORKSPACE_ID,
+        url: 'https://example.com/pinned',
+        intent: { kind: 'url' },
+        expectedRuntimeEnvironmentId: 'hub-a'
+      })
+
+      expect(mocks.createRemote).toHaveBeenCalledWith(
+        expect.objectContaining({
+          environmentId: 'hub-a',
+          waitForRegistration: true,
+          worktreeId: WORKSPACE_ID
+        })
+      )
+      expect(createBrowserTab).not.toHaveBeenCalled()
+    } finally {
+      policySpy.mockRestore()
+    }
+  })
+
+  it('forwards an explicit server placement for owner-pinned remote panes', async () => {
+    mocks.state = {
+      ...ownerState(toRuntimeExecutionHostId('hub-a')),
+      ...browserCapableRuntime('hub-a'),
+      createBrowserTab: vi.fn(),
+      defaultBrowserSessionProfileId: 'client-profile',
+      defaultBrowserSessionProfileIdByHostId: {}
+    }
+
+    await openWorkspaceBrowserTab({
+      workspaceId: WORKSPACE_ID,
+      url: 'https://example.com/pinned',
+      intent: { kind: 'url' },
+      expectedRuntimeEnvironmentId: 'hub-a',
+      placementPreference: 'server'
+    })
+
+    expect(mocks.createRemote).toHaveBeenCalledWith(
+      expect.objectContaining({ placementPreference: 'server' })
+    )
   })
 
   it('fails closed when the workspace route swaps away from the pane runtime before opening', async () => {
