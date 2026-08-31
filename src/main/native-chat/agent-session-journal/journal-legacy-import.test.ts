@@ -15,7 +15,8 @@ import {
   importLegacyTranscriptIntoJournal
 } from './journal-legacy-import'
 import { boundPayload, DEFAULT_JOURNAL_PAYLOAD_LIMITS } from './journal-payload-bounds'
-import { openAgentSessionJournal, type AgentSessionJournal } from './journal-store'
+import { openAgentSessionJournal } from './journal-store-factory'
+import type { AgentSessionJournal } from './journal-store'
 
 const CLAUDE_SESSION = '29eb22a4-6a5f-4f21-9b0c-1d7f3a2e5c88'
 const CODEX_SESSION = '019fd532-7c11-7a90-b6de-4e1a2c3d5f60'

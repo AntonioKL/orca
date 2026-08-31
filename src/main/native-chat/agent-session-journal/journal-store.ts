@@ -362,11 +362,3 @@ export class AgentSessionJournal {
     return run
   }
 }
-
-export const openAgentSessionJournal = async (
-  options: AgentSessionJournalOptions
-): Promise<AgentSessionJournal> => {
-  const journal = new AgentSessionJournal(options)
-  await journal.open()
-  return journal
-}

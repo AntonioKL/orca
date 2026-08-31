@@ -5,10 +5,8 @@ import type {
 import type { AgentSessionRecordStore } from '../../runtime/agent-session-record-store'
 import { loadJournal } from '../agent-session-journal/journal-open'
 import { journalDirectoryFor } from '../agent-session-journal/journal-paths'
-import {
-  openAgentSessionJournal,
-  type AgentSessionJournal
-} from '../agent-session-journal/journal-store'
+import type { AgentSessionJournal } from '../agent-session-journal/journal-store'
+import { openAgentSessionJournal } from '../agent-session-journal/journal-store-factory'
 import {
   attachFingerprintFields,
   journalIdentityFor,

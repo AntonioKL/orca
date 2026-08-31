@@ -21,7 +21,7 @@ import { STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY } from '../../shared/protoc
 import type { AgentJournalRenderItem } from '../../shared/agent-session-journal-types'
 import { attachFingerprintFields } from '../native-chat/agent-session-wire/structured-agent-session-attach'
 import { journalDirectoryFor } from '../native-chat/agent-session-journal/journal-paths'
-import { openAgentSessionJournal } from '../native-chat/agent-session-journal/journal-store'
+import { openAgentSessionJournal } from '../native-chat/agent-session-journal/journal-store-factory'
 import type { OrcaRuntimeService } from './orca-runtime'
 import type { RpcRequest, RpcResponse } from './rpc/core'
 import { RpcDispatcher } from './rpc/dispatcher'

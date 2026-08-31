@@ -12,7 +12,7 @@ import { putJournalBlob, readJournalBlob } from './journal-blob-store'
 import { boundPayload, DEFAULT_JOURNAL_PAYLOAD_LIMITS } from './journal-payload-bounds'
 import { journalDirectoryBytes } from './journal-physical-quota'
 import { JournalAppendBudget } from './journal-write-guards'
-import { openAgentSessionJournal } from './journal-store'
+import { openAgentSessionJournal } from './journal-store-factory'
 
 const IDENTITY: AgentSessionJournalIdentity = {
   sessionId: 'session-1',

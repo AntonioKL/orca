@@ -8,7 +8,7 @@ import type {
   AgentSessionJournalIdentity
 } from '../../../shared/agent-session-journal-types'
 import { JOURNAL_LOG_FILE, JOURNAL_SNAPSHOT_FILE } from './journal-log-file'
-import { openAgentSessionJournal } from './journal-store'
+import { openAgentSessionJournal } from './journal-store-factory'
 
 const IDENTITY: AgentSessionJournalIdentity = {
   sessionId: 'session-1',

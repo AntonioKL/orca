@@ -8,7 +8,7 @@ import type {
 } from '../../../shared/agent-session-record'
 import { LOCAL_EXECUTION_HOST_ID } from '../../../shared/execution-host'
 import { AgentSessionRecordStore } from '../../runtime/agent-session-record-store'
-import { openAgentSessionJournal } from '../agent-session-journal/journal-store'
+import { openAgentSessionJournal } from '../agent-session-journal/journal-store-factory'
 import { createDeferredStructuredAgentSessionEventSink } from './structured-agent-session-event-sink'
 import {
   acquireNativeHandoffOwner,

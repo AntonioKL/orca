@@ -22,11 +22,8 @@ import {
 import { journalDirectoryFor, journalPathSegment } from './journal-paths'
 import { journalDirectoryBytes } from './journal-physical-quota'
 import type { JournalLifecycleMutationInput } from './journal-row-builders'
-import {
-  AgentSessionJournalError,
-  openAgentSessionJournal,
-  type AgentSessionJournal
-} from './journal-store'
+import { AgentSessionJournalError, type AgentSessionJournal } from './journal-store'
+import { openAgentSessionJournal } from './journal-store-factory'
 import {
   JOURNAL_DISPATCH_RESERVATION_BYTES,
   JOURNAL_ITEM_TERMINAL_RESERVATION_BYTES,

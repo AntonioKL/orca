@@ -12,7 +12,7 @@ import {
   setStoredAgentSessionHandoffStage,
   stopStoredAgentSessionOwnerForHandoff
 } from '../../runtime/agent-session-handoff-record-transitions'
-import { openAgentSessionJournal } from '../agent-session-journal/journal-store'
+import { openAgentSessionJournal } from '../agent-session-journal/journal-store-factory'
 import { StructuredAgentSessionHandoffCoordinator } from './structured-agent-session-handoff'
 import { createStructuredHandoffFlowContext } from './structured-agent-session-handoff-flow-context'
 import { handoffStructuredSessionToTui } from './structured-agent-session-handoff-forward'

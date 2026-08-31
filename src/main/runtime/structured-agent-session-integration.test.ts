@@ -27,10 +27,8 @@ import { getStructuredAgentSessionHost } from '../native-chat/agent-session-wire
 import { journalDirectoryFor } from '../native-chat/agent-session-journal/journal-paths'
 import { readJournalBlob } from '../native-chat/agent-session-journal/journal-blob-store'
 import { appendLegacyTranscriptMessages } from '../native-chat/agent-session-journal/journal-legacy-import'
-import {
-  openAgentSessionJournal,
-  type AgentSessionJournal
-} from '../native-chat/agent-session-journal/journal-store'
+import type { AgentSessionJournal } from '../native-chat/agent-session-journal/journal-store'
+import { openAgentSessionJournal } from '../native-chat/agent-session-journal/journal-store-factory'
 import type { OrcaRuntimeService } from './orca-runtime'
 import type { RpcRequest, RpcResponse } from './rpc/core'
 import { RpcDispatcher } from './rpc/dispatcher'
