@@ -74,19 +74,28 @@ function assertBoundedAcquisitionResult(method: string, opened: unknown): void {
 
 export async function openCodexThread(
   connection: Pick<CodexAppServerConnection, 'request'>,
-  launch: { cwd: string; resumeThreadId: string | null; resumePath?: string | null },
+  launch: {
+    cwd: string
+    providerCwd?: string
+    resumeThreadId: string | null
+    resumePath?: string | null
+  },
   timeoutMs: number | undefined
 ): Promise<CodexOpenedThread> {
   const resumeParams = launch.resumeThreadId
     ? {
         threadId: launch.resumeThreadId,
-        cwd: launch.cwd,
+        cwd: launch.providerCwd ?? launch.cwd,
         ...(launch.resumePath ? { path: launch.resumePath } : {})
       }
     : null
   const opened = resumeParams
     ? await resumeCodexThread(connection, resumeParams, timeoutMs)
-    : await connection.request('thread/start', { cwd: launch.cwd }, { timeoutMs })
+    : await connection.request(
+        'thread/start',
+        { cwd: launch.providerCwd ?? launch.cwd },
+        { timeoutMs }
+      )
   assertBoundedAcquisitionResult(resumeParams ? 'thread/resume' : 'thread/start', opened)
   const threadId = readCodexThreadId(opened)
   if (!threadId) {

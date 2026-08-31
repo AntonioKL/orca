@@ -18,6 +18,8 @@ export type CodexStructuredLaunch = {
   resumeThreadId: string | null
   resumePath?: string | null
   env?: Record<string, string>
+  /** Guest-visible workspace cwd (the process cwd may be a Windows path). */
+  providerCwd?: string
 }
 
 export type CodexStructuredSessionEvent =

@@ -49,7 +49,8 @@ export function buildWslCodexIdentityProbe(distro: string): WslCodexIdentityProb
 export function buildWslCodexAppServerArgs(
   distro: string,
   linuxHomePath: string,
-  appServerArgs: readonly string[] = ['app-server']
+  appServerArgs: readonly string[] = ['app-server'],
+  linuxCwd?: string
 ): string[] {
   const command = [
     buildCodexPathLookup(),
@@ -57,6 +58,7 @@ export function buildWslCodexAppServerArgs(
     `  printf '%s\\n' '${WSL_CODEX_NOT_FOUND_MESSAGE}' >&2`,
     '  exit 127',
     'fi',
+    ...(linuxCwd ? [`cd -- ${quotePosixShell(linuxCwd)}`] : []),
     `export CODEX_HOME=${quotePosixShell(linuxHomePath)}`,
     `exec "$resolved" ${appServerArgs.map(quotePosixShell).join(' ')}`
   ].join('\n')

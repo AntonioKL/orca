@@ -139,6 +139,60 @@ describe('codex structured launch resolution', () => {
     ).rejects.toThrow(/local host/)
   })
 
+  it('launches Codex through the selected WSL distro with guest cwd and account home', async () => {
+    await withPlatform('win32', async () => {
+      const launch = await resolverFor(
+        record({
+          location: { ...record().location, wslDistro: 'Ubuntu' },
+          accountHome: {
+            variable: 'CODEX_HOME',
+            path: '\\\\wsl.localhost\\Ubuntu\\home\\alice\\.codex'
+          }
+        }),
+        async () => '\\\\wsl.localhost\\Ubuntu\\work\\repo'
+      )({ identity: IDENTITY })
+
+      expect(launch.command.toLowerCase()).toContain('wsl')
+      expect(launch.cwd).toBe(process.cwd())
+      expect(launch.providerCwd).toBe('/work/repo')
+      expect(launch.args).toContain('-d')
+      expect(launch.args).toContain('Ubuntu')
+      expect(launch.args.join(' ')).toContain('CODEX_HOME')
+    })
+  })
+
+  it('converts a host-readable WSL rollout path back to the guest path for resume', async () => {
+    await withPlatform('win32', async () => {
+      const launch = await resolverFor(
+        record({
+          location: { ...record().location, wslDistro: 'Ubuntu' },
+          accountHome: {
+            variable: 'CODEX_HOME',
+            path: '\\\\wsl.localhost\\Ubuntu\\home\\alice\\.codex'
+          },
+          providerHandleChain: [
+            { handle: { provider: 'codex', threadId: 'thread-current' } }
+          ] as AgentSessionRecord['providerHandleChain']
+        }),
+        async () => '\\\\wsl.localhost\\Ubuntu\\work\\repo',
+        async () => '\\\\wsl.localhost\\Ubuntu\\home\\alice\\.codex\\sessions\\rollout.jsonl'
+      )({ identity: IDENTITY })
+
+      expect(launch.resumePath).toBe('/home/alice/.codex/sessions/rollout.jsonl')
+    })
+  })
+
+  it('refuses a workspace UNC path owned by another selected distro', async () => {
+    await withPlatform('win32', async () => {
+      await expect(
+        resolverFor(
+          record({ location: { ...record().location, wslDistro: 'Ubuntu' } }),
+          async () => '\\\\wsl.localhost\\Debian\\work\\repo'
+        )({ identity: IDENTITY })
+      ).rejects.toThrow(/different WSL distro/)
+    })
+  })
+
   it('refuses a record this adapter does not speak for', async () => {
     await expect(
       resolverFor(record({ provider: 'claude' } as Partial<AgentSessionRecord>))({

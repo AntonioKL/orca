@@ -5,7 +5,8 @@ import { isWindowsProcessStartTimeAvailable } from '../windows/windows-process-t
 export function supportsCodexStructuredLocation(location: AgentSessionExecutionLocation): boolean {
   return (
     location.executionHostId === LOCAL_EXECUTION_HOST_ID &&
-    location.wslDistro === null &&
+    (location.wslDistro === null ||
+      (process.platform === 'win32' && location.wslDistro.trim().length > 0)) &&
     (process.platform !== 'win32' || isWindowsProcessStartTimeAvailable())
   )
 }

@@ -32,6 +32,7 @@ import {
 import type { CodexStructuredTurnCancellation } from './codex-structured-turn-cancellation'
 import type { CodexStructuredNotificationRetry } from './codex-structured-notification-retry'
 import type { deliverCodexServerRequest } from './codex-structured-provider-events'
+import { toWindowsWslUncPath } from '../../shared/wsl-paths'
 
 export async function acquireCodexStructuredSession(input: {
   input: StructuredAgentSessionAcquireInput
@@ -187,11 +188,21 @@ export async function acquireCodexStructuredSession(input: {
     }
     acquisitions.assertCurrent(sessionId, attempt)
     acquisitions.deleteIfCurrent(sessionId, attempt)
+    const historyPath =
+      opened.historyPath && /^wsl(?:\.exe)?$/i.test(launch.command)
+        ? (() => {
+            const distroIndex = launch.args.indexOf('-d')
+            const distro = distroIndex !== -1 ? launch.args[distroIndex + 1] : undefined
+            return distro && opened.historyPath?.startsWith('/')
+              ? toWindowsWslUncPath(opened.historyPath, distro)
+              : opened.historyPath
+          })()
+        : opened.historyPath
     const session: CodexSession = {
       connection,
       ...codexSessionLifecycle(acquireInput.fence, acquired.acquisitionGeneration as string),
       threadId: opened.threadId,
-      historyPath: opened.historyPath,
+      historyPath,
       prompts: acquisition.prompts,
       options: restoredCodexSessionOptions(acquireInput.options),
       reportedOptions: reportedCodexThreadOptions(opened),

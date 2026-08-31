@@ -14,6 +14,20 @@ function connectionFor(
 }
 
 describe('openCodexThread', () => {
+  it('uses the guest provider cwd when spawning through a host wrapper', async () => {
+    const request = vi.fn(async () => ({ thread: { id: 'thread-1' } }))
+    await openCodexThread(
+      connectionFor(request),
+      { cwd: 'C:\\workspace', providerCwd: '/workspace', resumeThreadId: null },
+      2_000
+    )
+    expect(request).toHaveBeenCalledWith(
+      'thread/start',
+      { cwd: '/workspace' },
+      { timeoutMs: 2_000 }
+    )
+  })
+
   it('requests metadata-only state when resuming an existing thread', async () => {
     const request = vi.fn(async () => ({
       thread: { id: 'thread-1', path: '/history/thread-1.jsonl' },

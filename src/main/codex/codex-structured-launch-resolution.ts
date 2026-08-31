@@ -10,6 +10,10 @@ import type { AgentSessionJournalIdentity } from '../../shared/agent-session-jou
 import { agentSessionProviderHandleChainHead } from '../../shared/agent-session-provider-handle'
 import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import { resolveCodexCommand } from '../codex-cli/command'
+import { resolveWslExecutablePath } from '../wsl/wsl-executable-path'
+import { buildWslCodexAppServerArgs } from '../codex-accounts/wsl-codex-command'
+import { addWslEnvKeys } from '../../shared/wsl-env'
+import { parseWslUncPath, toLinuxPath } from '../../shared/wsl-paths'
 import type { AgentSessionRecordStore } from '../runtime/agent-session-record-store'
 import type { CodexStructuredLaunch } from './codex-structured-session-adapter'
 import { resolvePinnedCodexRolloutProof } from './codex-tui-rollout-proof'
@@ -41,7 +45,10 @@ export function createCodexStructuredLaunchResolver(
     // This adapter spawns a child on the machine the runtime itself runs on.
     // A session pinned elsewhere belongs to that host's runtime, and quietly
     // starting it here would put a second writer on the same thread.
-    if (location.executionHostId !== LOCAL_EXECUTION_HOST_ID || location.wslDistro !== null) {
+    if (
+      location.executionHostId !== LOCAL_EXECUTION_HOST_ID ||
+      (location.wslDistro !== null && process.platform !== 'win32')
+    ) {
       throw new Error(
         `codex structured sessions run on the local host, not ${location.executionHostId}`
       )
@@ -52,30 +59,73 @@ export function createCodexStructuredLaunchResolver(
     const environment = await deps.resolveEnvironment?.()
     const pathEnv = environment?.PATH ?? environment?.Path ?? null
     const homePath = environment?.HOME ?? environment?.USERPROFILE
-    const command = (deps.resolveCommand ?? resolveCodexCommand)({
-      pathEnv,
-      ...(homePath ? { homePath } : {})
-    })
-    const args = [...(record.launchArgs ?? []), 'app-server']
+    const workspacePath = await deps.resolveWorkspacePath(location.workspaceId)
+    const workspaceUnc = location.wslDistro ? parseWslUncPath(workspacePath) : null
+    if (
+      location.wslDistro &&
+      workspaceUnc &&
+      workspaceUnc.distro.toLowerCase() !== location.wslDistro.toLowerCase()
+    ) {
+      throw new Error('workspace is owned by a different WSL distro')
+    }
+    const accountHomeUnc = location.wslDistro ? parseWslUncPath(accountHome.path) : null
+    if (
+      location.wslDistro &&
+      accountHomeUnc &&
+      accountHomeUnc.distro.toLowerCase() !== location.wslDistro.toLowerCase()
+    ) {
+      throw new Error('Codex account home is owned by a different WSL distro')
+    }
+    const guestWorkspacePath = location.wslDistro
+      ? (workspaceUnc?.linuxPath ?? toLinuxPath(workspacePath))
+      : workspacePath
+    const guestHomePath = location.wslDistro
+      ? (accountHomeUnc?.linuxPath ?? toLinuxPath(accountHome.path))
+      : accountHome.path
+    const command = location.wslDistro
+      ? resolveWslExecutablePath()
+      : (deps.resolveCommand ?? resolveCodexCommand)({
+          pathEnv,
+          ...(homePath ? { homePath } : {})
+        })
+    const args = location.wslDistro
+      ? buildWslCodexAppServerArgs(
+          location.wslDistro,
+          guestHomePath,
+          [...(record.launchArgs ?? []), 'app-server'],
+          guestWorkspacePath
+        )
+      : [...(record.launchArgs ?? []), 'app-server']
+    const launchEnv = environment ? { ...environment } : undefined
+    if (location.wslDistro && launchEnv) {
+      // The token is minted on Windows but ownership is proved against the
+      // wsl.exe process. WSLENV carries it into the guest without allowing the
+      // guest to silently select another distro or account root.
+      addWslEnvKeys(launchEnv, ['ORCA_AGENT_SESSION_SPAWN_TOKEN'])
+    }
     const head = agentSessionProviderHandleChainHead(record.providerHandleChain)
     const resumeThreadId = head?.handle.provider === 'codex' ? head.handle.threadId : null
+    const resumePath = resumeThreadId
+      ? await (deps.resolveRollout ?? resolvePinnedCodexRolloutProof)(
+          accountHome.path,
+          resumeThreadId
+        )
+      : null
+    const guestResumePath =
+      location.wslDistro && resumePath
+        ? (parseWslUncPath(resumePath)?.linuxPath ?? toLinuxPath(resumePath))
+        : resumePath
     return {
       command,
       args,
-      cwd: await deps.resolveWorkspacePath(location.workspaceId),
+      cwd: location.wslDistro ? process.cwd() : workspacePath,
+      ...(location.wslDistro ? { providerCwd: guestWorkspacePath } : {}),
       codexHome: accountHome.path,
-      ...(environment ? { env: { ...environment } as Record<string, string> } : {}),
+      ...(launchEnv ? { env: launchEnv as Record<string, string> } : {}),
       // An empty chain is a session that has never proved a thread, so it
       // starts one; anything else resumes the last link this session proved.
       resumeThreadId,
-      ...(resumeThreadId
-        ? {
-            resumePath: await (deps.resolveRollout ?? resolvePinnedCodexRolloutProof)(
-              accountHome.path,
-              resumeThreadId
-            )
-          }
-        : {})
+      ...(resumeThreadId ? { resumePath: guestResumePath } : {})
     }
   }
 }

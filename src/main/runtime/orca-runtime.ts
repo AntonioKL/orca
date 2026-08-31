@@ -12585,10 +12585,12 @@ export class OrcaRuntimeService {
   private async resolveStructuredAgentSessionLocation(worktreeSelector: string) {
     const target = await this.resolveRuntimeFileTarget(worktreeSelector)
     const repo = this.store?.getRepo(target.worktree.repoId)
-    const wslDistro =
-      repo && !target.connectionId
-        ? (getLocalProjectWorktreeGitOptions(this.requireStore(), repo).wslDistro ?? null)
-        : null
+    const pathDistro = !target.connectionId ? parseWslUncPath(target.worktree.path)?.distro : null
+    const wslDistro = !target.connectionId
+      ? (repo && getLocalProjectWorktreeGitOptions(this.requireStore(), repo).wslDistro) ||
+        pathDistro ||
+        null
+      : null
     const folderWorkspace = this.store
       ?.getFolderWorkspaces?.()
       .some((workspace) => workspace.id === target.worktree.id)
