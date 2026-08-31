@@ -22688,15 +22688,28 @@ export class OrcaRuntimeService {
     return await new Promise<RuntimePtyExitEvent>((resolve, reject) => {
       let settled = false
       let unsubscribe: (() => void) | null = null
+      // Why: a setup script can legitimately be slow, but a lost exit event must not keep a
+      // worktree-create RPC pending forever. Match the shell gate's 30-minute backstop and fail
+      // closed when the host still cannot prove completion.
+      const timeout = setTimeout(
+        () => fail(new Error('setup_exit_evidence_timeout')),
+        30 * 60 * 1000
+      )
       const finish = (event: RuntimePtyExitEvent): void => {
-        if (settled) return
+        if (settled) {
+          return
+        }
         settled = true
+        clearTimeout(timeout)
         unsubscribe?.()
         resolve(event)
       }
       const fail = (error: unknown): void => {
-        if (settled) return
+        if (settled) {
+          return
+        }
         settled = true
+        clearTimeout(timeout)
         unsubscribe?.()
         reject(error)
       }
