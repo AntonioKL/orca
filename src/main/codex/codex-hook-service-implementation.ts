@@ -2,6 +2,7 @@ import { win32 as pathWin32 } from 'node:path'
 import type { SFTPWrapper } from 'ssh2'
 import type { AgentHookInstallStatus } from '../../shared/agent-hook-types'
 import { normalizeRuntimePathForComparison } from '../../shared/cross-platform-path'
+import { dedupeInFlightRun } from '../in-flight-run-dedupe'
 import { refreshManagedScriptIfPresent } from '../agent-hooks/managed-hook-script-refresh'
 import { getOrcaManagedCodexHomePath } from './codex-home-paths'
 import { getManagedScriptPath } from './codex-hook-definition'
@@ -145,7 +146,7 @@ export class CodexHookService {
       return Promise.resolve(null)
     }
     const targetKey = target?.runtime === 'wsl' ? target.wslDistro?.trim().toLowerCase() : ''
-    return this.shareInFlight(
+    return dedupeInFlightRun(
       this.wslInstallsInFlight,
       `${getWslReconciliationKey(runtimeHomePath)}\0${targetKey ?? ''}`,
       () => this.installForRuntimeHome(runtimeHomePath, target)
@@ -211,50 +212,23 @@ export class CodexHookService {
    * the same on-disk outcome, so they share one run — the same reason the WSL
    * lane above shares `installForRuntimeHome`.
    *
-   * Invalidation: `shareInFlight` drops the run the moment it settles, so the
+   * Invalidation: `dedupeInFlightRun` drops the run the moment it settles, so the
    * next launch re-reads hooks.json and the user's trust state. Never widen this
    * into a time-based cache — the hooks setting, ~/.codex approvals and the
    * managed script can all change between spawns, and only a fresh run sees them.
    */
   installForLaunchPrep(runtimeHomePath?: string): Promise<AgentHookInstallStatus> {
     const homePath = runtimeHomePath ?? getOrcaManagedCodexHomePath()
-    return this.shareInFlight(this.launchPrepInFlight, launchPrepKey('install', homePath), () =>
+    return dedupeInFlightRun(this.launchPrepInFlight, launchPrepKey('install', homePath), () =>
       this.install(homePath)
     )
   }
 
   refreshRuntimeUserHooksForLaunchPrep(runtimeHomePath?: string): Promise<AgentHookInstallStatus> {
     const homePath = runtimeHomePath ?? getOrcaManagedCodexHomePath()
-    return this.shareInFlight(this.launchPrepInFlight, launchPrepKey('refresh', homePath), () =>
+    return dedupeInFlightRun(this.launchPrepInFlight, launchPrepKey('refresh', homePath), () =>
       this.refreshRuntimeUserHooks(homePath)
     )
-  }
-
-  /**
-   * Shares one in-flight run per key. Generic over the run's result so the WSL
-   * lane (nullable) and the launch-prep lane keep their own maps and exact
-   * types; a single map would need a cast at every read.
-   */
-  private shareInFlight<T>(
-    runs: Map<string, Promise<T>>,
-    key: string,
-    start: () => Promise<T>
-  ): Promise<T> {
-    const active = runs.get(key)
-    if (active) {
-      return active
-    }
-    const run = start()
-    runs.set(key, run)
-    // Why: clear on rejection too, or one failed install would wedge every
-    // later launch onto the same rejected promise.
-    const clear = (): void => {
-      if (runs.get(key) === run) {
-        runs.delete(key)
-      }
-    }
-    void run.then(clear, clear)
-    return run
   }
 
   private installExclusively(runtimeHomePath: string): Promise<AgentHookInstallStatus> {
