@@ -2096,6 +2096,7 @@ export class PtyHandler {
       (expectedIncarnationId !== undefined && expectedIncarnationId !== managed.incarnationId) ||
       (incarnationId !== undefined && incarnationId !== managed.incarnationId)
     ) {
+      // Preserve the live replacement; callers must classify this as a fence refusal.
       return { fenceUnavailable: true }
     }
     }
