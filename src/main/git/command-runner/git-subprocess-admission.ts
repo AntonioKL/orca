@@ -15,7 +15,6 @@ import {
   type GitAdmissionGrant,
   type GitAdmissionRequest
 } from './git-admission-state'
-
 export type {
   GitAdmissionEvent,
   GitAdmissionGrant,
@@ -31,16 +30,13 @@ export {
   ROUTE_CAP,
   ROUTE_HEADROOM
 } from './git-admission-state'
-
 function commandClass(args: readonly string[]): AdmissionClass {
   return classifyGitCommand(args) === 'network' ? 'network' : 'general'
 }
-
 function routeKey(request: GitAdmissionRequest): string | null {
   const distro = request.wslDistro?.trim().toLowerCase()
   return distro ? `wsl:${distro}` : uncRouteKey(request.cwd)
 }
-
 export class GitAdmissionScheduler {
   private readonly config: AdmissionSchedulerConfig
   private readonly budgets = new Map<string, AdmissionBudget>()
@@ -108,6 +104,14 @@ export class GitAdmissionScheduler {
       )
     }
   }
+  censusCounts(): { inflight: number; queued: number } {
+    return {
+      inflight: [...this.budgets]
+        .filter(([key]) => key === 'general' || key === 'network')
+        .reduce((sum, [, budget]) => sum + budget.baseUsed + budget.headroomUsed, 0),
+      queued: this.waiters.count
+    }
+  }
 
   private resolveBudgets(request: GitAdmissionRequest): {
     admissionClass: AdmissionClass
@@ -149,16 +153,6 @@ export class GitAdmissionScheduler {
     }
     this.budgets.set(key, budget)
     return budget
-  }
-
-  censusCounts(): { inflight: number; queued: number } {
-    return {
-      inflight: [...this.budgets.values()].reduce(
-        (sum, budget) => sum + budget.baseUsed + budget.headroomUsed,
-        0
-      ),
-      queued: this.waiters.count
-    }
   }
 
   private effectiveTier(waiter: AdmissionWaiter, now: number): number {
@@ -317,17 +311,13 @@ export class GitAdmissionScheduler {
     )
   }
 }
-
 const admissionRuntime = createGitAdmissionRuntime(() => new GitAdmissionScheduler())
-
 export function acquireGitAdmission(request: GitAdmissionRequest): Promise<GitAdmissionGrant> {
   return admissionRuntime.acquire(request)
 }
-
 export function _resetGitAdmissionForTests(replacement = new GitAdmissionScheduler()): void {
   admissionRuntime.reset(replacement)
 }
-
 export function _gitAdmissionSnapshotForTests(): ReturnType<GitAdmissionScheduler['snapshot']> {
   return admissionRuntime.snapshot()
 }

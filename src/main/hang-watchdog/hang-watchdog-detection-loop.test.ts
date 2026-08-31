@@ -134,6 +134,26 @@ describe('createHangWatchdogDetectionLoop', () => {
     expect(detected).toHaveBeenCalledTimes(1)
   })
 
+  it('closes an open episode as system sleep when the suspend signal is missed', () => {
+    const onHangSuspended = vi.fn()
+    let now = 0
+    const loop = createHangWatchdogDetectionLoop({
+      timeoutMs: TIMEOUT_MS,
+      checkIntervalMs: CHECK_INTERVAL_MS,
+      now: () => now,
+      onHangDetected: vi.fn(),
+      onHangResolved: vi.fn(),
+      onHangSuspended
+    })
+    for (let i = 0; i < 10; i++) {
+      now += CHECK_INTERVAL_MS
+      loop.tick()
+    }
+    now += CHECK_INTERVAL_MS * 4
+    loop.tick()
+    expect(onHangSuspended).toHaveBeenCalledWith(50_000)
+  })
+
   it('does not report resolution when no hang was ever detected', () => {
     const { loop, onHangResolved, advance } = loopWithClock()
     for (let i = 0; i < 5; i++) {
