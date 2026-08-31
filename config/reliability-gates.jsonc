@@ -5740,10 +5740,11 @@
       "invariant": "A terminal split creates and activates its renderer pane before an inherited-CWD lookup settles, starts its PTY only after the resolved directory is available, and cannot be externally detached while that deferred spawn remains unbound. Other unbound panes preserve resolved cwd as startupCwd when detached. Bounded pre-connect input and later live local input share byte order, and teardown settles acknowledged writes without creating or rebinding a stale PTY. A disconnected or detached pending connect cannot bind its late fresh spawn, report its late failure through current callbacks, or ID-retire a newer same-ID owner; natural exit cannot deliver queued work into a reused PTY id. Bound and remote-runtime splits remain owned by their execution host.",
       "oracle": "Hold CWD resolution behind a controllable promise, invoke the production split path, and require manager.splitPane plus split telemetry before resolving it. Before PTY bind, require both cwd-pending and cwd-resolved deferred detach attempts to return null without layout, pane, tab, ownership, or focus mutation; separately require resolved cwd on an allowed unbound detach and unchanged persisted/live PTY adoption. At the PTY boundary, require zero connect calls while pending, the resolved CWD in spawn and local recovery metadata, one shared FIFO across pre-connect and live ordinary/acknowledged/immediate input, prompt acknowledged-promise settlement on teardown, retirement of an unowned late fresh spawn, preservation of a newer same-ID owner, and zero stale delivery after failure, close, destroy, detach, natural exit, or same-id reuse.",
       "commands": [
-        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/terminal-pane-split-with-inherited-cwd.test.ts src/renderer/src/components/terminal-pane/resolve-split-cwd.test.ts src/renderer/src/components/terminal-pane/pty-connection-split-cwd-resolution.test.ts src/renderer/src/components/terminal-pane/terminal-pane-tab-detach.test.ts src/renderer/src/components/terminal-pane/pty-preconnect-input-buffer.test.ts src/renderer/src/components/terminal-pane/pty-transport-input-write.test.ts --reporter=dot"
+        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/terminal-pane-split-with-inherited-cwd.test.ts src/renderer/src/lib/pane-manager/pane-split-close.test.ts src/renderer/src/components/terminal-pane/resolve-split-cwd.test.ts src/renderer/src/components/terminal-pane/pty-connection-split-cwd-resolution.test.ts src/renderer/src/components/terminal-pane/terminal-pane-tab-detach.test.ts src/renderer/src/components/terminal-pane/pty-preconnect-input-buffer.test.ts src/renderer/src/components/terminal-pane/pty-transport-input-write.test.ts --reporter=dot"
       ],
       "testFiles": [
         "src/renderer/src/components/terminal-pane/terminal-pane-split-with-inherited-cwd.test.ts",
+        "src/renderer/src/lib/pane-manager/pane-split-close.test.ts",
         "src/renderer/src/components/terminal-pane/resolve-split-cwd.test.ts",
         "src/renderer/src/components/terminal-pane/pty-connection-split-cwd-resolution.test.ts",
         "src/renderer/src/components/terminal-pane/terminal-pane-tab-detach.test.ts",
@@ -5754,10 +5755,16 @@
         {
           "file": "src/renderer/src/components/terminal-pane/terminal-pane-split-with-inherited-cwd.test.ts",
           "assertions": [
-            "creates and focuses the split before pending CWD resolution",
+            "creates and records the split before pending CWD resolution",
             "passes the resolved CWD promise without reviving a stale manager",
             "rapid nested splits reuse one pending CWD lookup",
             "keeps remote-runtime split ownership on its execution host"
+          ]
+        },
+        {
+          "file": "src/renderer/src/lib/pane-manager/pane-split-close.test.ts",
+          "assertions": [
+            "focuses the new pane before publishing an unresolved CWD spawn hint"
           ]
         },
         {
@@ -5817,14 +5824,14 @@
           "runner": "local",
           "platform": "macos",
           "result": "passed",
-          "command": "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/terminal-pane-split-with-inherited-cwd.test.ts src/renderer/src/components/terminal-pane/resolve-split-cwd.test.ts src/renderer/src/components/terminal-pane/pty-connection-split-cwd-resolution.test.ts src/renderer/src/components/terminal-pane/terminal-pane-tab-detach.test.ts src/renderer/src/components/terminal-pane/pty-preconnect-input-buffer.test.ts src/renderer/src/components/terminal-pane/pty-transport-input-write.test.ts --reporter=dot",
-          "durationSeconds": 53,
-          "summary": "Six focused files and 75 tests passed. Vitest reported 48.18 seconds and the wall time was 53.29 seconds while the cooked-reply unit gate also ran; coverage includes split ordering, nested CWD lineage, promise-identity cleanup fencing, full pre-bind detach fencing, resolved-CWD detach handoff, close-cancellation, single-FIFO ordering, late-spawn retirement and error suppression, preservation of a newer same-ID owner, generation fencing, in-flight settlement across explicit teardown and natural exit, attach cleanup, bounded retention, and existing input-write contracts."
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/terminal-pane-split-with-inherited-cwd.test.ts src/renderer/src/lib/pane-manager/pane-split-close.test.ts src/renderer/src/components/terminal-pane/resolve-split-cwd.test.ts src/renderer/src/components/terminal-pane/pty-connection-split-cwd-resolution.test.ts src/renderer/src/components/terminal-pane/terminal-pane-tab-detach.test.ts src/renderer/src/components/terminal-pane/pty-preconnect-input-buffer.test.ts src/renderer/src/components/terminal-pane/pty-transport-input-write.test.ts --reporter=dot",
+          "durationSeconds": 31.47,
+          "summary": "Seven focused files and 77 tests passed. Vitest reported 26.56 seconds and the measured wall time was 31.47 seconds; coverage includes split creation and focus ordering, nested CWD lineage, promise-identity cleanup fencing, full pre-bind detach fencing, resolved-CWD detach handoff, close-cancellation, single-FIFO ordering, late-spawn retirement and error suppression, preservation of a newer same-ID owner, generation fencing, in-flight settlement across explicit teardown and natural exit, attach cleanup, bounded retention, and existing input-write contracts."
         }
       ],
       "runtimeBudget": {
-        "p95Seconds": 45,
-        "scope": "six deterministic renderer and local-transport unit files"
+        "p95Seconds": 60,
+        "scope": "seven deterministic renderer and local-transport unit files"
       },
       "flakeHistory": {
         "status": "not-started",

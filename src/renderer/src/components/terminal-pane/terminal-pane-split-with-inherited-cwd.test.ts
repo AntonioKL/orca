@@ -87,7 +87,7 @@ describe('splitTerminalPaneWithInheritedCwd', () => {
     })
   })
 
-  it('creates and focuses the split before asynchronous cwd resolution settles', async () => {
+  it('creates and records the split before asynchronous cwd resolution settles', async () => {
     const cwd = createDeferred<string>()
     const createdPane = { id: 2 }
     const staleSplitPane = vi.fn()
