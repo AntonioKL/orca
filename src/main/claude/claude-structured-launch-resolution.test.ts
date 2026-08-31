@@ -34,14 +34,14 @@ function record(overrides: Partial<AgentSessionRecord> = {}): AgentSessionRecord
 function resolverFor(
   value: AgentSessionRecord | null,
   resolveEnv?: () => Record<string, string>,
-  platform?: NodeJS.Platform
+  platform: NodeJS.Platform = 'linux'
 ) {
   return createClaudeStructuredLaunchResolver({
     store: { getRecord: () => value } as unknown as AgentSessionRecordStore,
     resolveWorkspacePath: async (id) => `/repos/${id}`,
     resolveCommand: () => '/usr/local/bin/claude',
     ...(resolveEnv ? { resolveEnvironment: async () => resolveEnv() } : {}),
-    ...(platform ? { platform } : {})
+    platform
   })
 }
 
