@@ -33,6 +33,10 @@ describe('combined diff on-demand loading', () => {
     expect(shouldLoadCombinedDiffOnDemand({ area: 'untracked', path: 'data/dump.json' })).toBe(true)
   })
 
+  it('defers uncounted untracked svgs, which render as text rather than a preview', () => {
+    expect(shouldLoadCombinedDiffOnDemand({ area: 'untracked', path: 'assets/map.svg' })).toBe(true)
+  })
+
   it('automatically loads untracked images that report no line counts', () => {
     expect(shouldLoadCombinedDiffOnDemand({ area: 'untracked', path: 'docs/Shot.PNG' })).toBe(false)
   })
