@@ -148,7 +148,6 @@ import {
   iterateTerminalInputChunks
 } from '../../shared/terminal-input'
 import {
-  AGENT_PROMPT_BRACKETED_PASTE_END,
   AGENT_PROMPT_SUBMIT,
   buildAgentPromptPasteBytes,
   getAgentPromptSubmitDelayMs,
@@ -22000,8 +21999,6 @@ export class OrcaRuntimeService {
     const pasteByteLength = Buffer.byteLength(pastePayload, 'utf8')
     const pasteIngestMs = getTerminalPasteIngestMs(writeHostPlatform, pasteByteLength)
     const renderGate = this.createAgentPromptRenderGate(ptyId, pasteIngestMs)
-    let wrotePasteBytes = false
-    let completedPaste = false
     try {
       assertAgentPromptRequestActive(options.signal)
       this.assertAgentPromptGeneration(ptyId, generation)
@@ -22020,24 +22017,7 @@ export class OrcaRuntimeService {
       if (!wrote) {
         throw new Error('terminal_not_writable')
       }
-      wrotePasteBytes = true
-      completedPaste = true
     } catch (error) {
-      if (
-        wrotePasteBytes &&
-        !completedPaste &&
-        this.getPtyLifecycleGeneration(ptyId) === generation
-      ) {
-        // Why: a lease that moved mid-paste also refuses this terminator, leaving the TUI in paste
-        // mode — the incoming owner re-establishes the mode, and feeding a session we no longer own
-        // is the worse outcome.
-        try {
-          agentSessionPtyWriteGate.assertReadmitted(ptyId, admitted)
-          this.ptyController?.write(ptyId, AGENT_PROMPT_BRACKETED_PASTE_END)
-        } catch {
-          // The original refusal is the actionable error.
-        }
-      }
       renderGate?.dispose()
       throw error
     }
