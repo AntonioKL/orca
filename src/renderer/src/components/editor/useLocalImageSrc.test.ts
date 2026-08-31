@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { act, createElement } from 'react'
+import { act, createElement, Fragment } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -59,15 +59,19 @@ function HookProbe({
   return null
 }
 
-function HookList({ count }: { count: number }): null {
-  return Array.from({ length: count }, (_value, index) =>
-    createElement(HookProbe, {
-      key: index,
-      filePath: `/repo/image-${index}.png`,
-      onRender: () => {},
-      src: `/repo/image-${index}.png`
-    })
-  ) as unknown as null
+function HookList({ count }: { count: number }): React.JSX.Element {
+  return createElement(
+    Fragment,
+    null,
+    Array.from({ length: count }, (_value, index) =>
+      createElement(HookProbe, {
+        key: index,
+        filePath: `/repo/image-${index}.png`,
+        onRender: () => {},
+        src: `/repo/image-${index}.png`
+      })
+    )
+  )
 }
 
 beforeEach(() => {

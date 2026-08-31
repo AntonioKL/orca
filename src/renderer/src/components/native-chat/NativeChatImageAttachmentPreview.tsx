@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Image as ImageIcon, X } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { translate } from '@/i18n/i18n'
@@ -18,14 +18,41 @@ export function NativeChatImageAttachmentPreview({
   onRemove
 }: Props): React.JSX.Element {
   const [isOpen, setIsOpen] = useState(false)
-  const previewSrc = useLocalImageSrc(attachment.path, attachment.path, attachment.connectionId)
+  const [isNearViewport, setIsNearViewport] = useState(false)
+  const thumbnailRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const element = thumbnailRef.current
+    if (!element) {
+      return
+    }
+    if (typeof IntersectionObserver === 'undefined') {
+      setIsNearViewport(true)
+      return
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) {
+          setIsNearViewport(true)
+          observer.disconnect()
+        }
+      },
+      { rootMargin: '128px' }
+    )
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+  const previewSrc = useLocalImageSrc(
+    isNearViewport || isOpen ? attachment.path : undefined,
+    attachment.path,
+    attachment.connectionId
+  )
   const filename = isNativeChatPastedImagePath(attachment.path)
     ? translate('components.native-chat.composer.pastedImageLabel', 'Pasted image')
     : basename(attachment.path)
 
   return (
     <>
-      <div className="relative size-14 shrink-0">
+      <div ref={thumbnailRef} className="relative size-14 shrink-0">
         <button
           type="button"
           aria-label={`${translate('components.native-chat.composer.viewAttachment', 'View image')}: ${filename}`}

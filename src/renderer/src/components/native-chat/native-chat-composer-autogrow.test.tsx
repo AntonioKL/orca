@@ -23,13 +23,16 @@ vi.mock('./NativeChatAutocompleteMenus', () => ({
 }))
 
 vi.mock('@/components/editor/useLocalImageSrc', () => ({
-  useLocalImageSrc: () => 'blob:attachment-preview'
+  useLocalImageSrc: (src?: string) => (src ? 'blob:attachment-preview' : undefined)
 }))
 
 import { NativeChatComposerField } from './NativeChatComposerField'
 import { useImeEnterGestureOwnership } from '@/lib/ime-composition-keyboard-event'
 
-afterEach(() => cleanup())
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 const EMPTY_IMAGE_ATTACHMENTS: { id: string; path: string }[] = []
 
@@ -116,10 +119,11 @@ describe('native chat composer autogrow', () => {
 })
 
 describe('native chat composer image attachments', () => {
-  it('renders a thumbnail and opens a full-size preview when clicked', () => {
+  it('renders a thumbnail and opens a full-size preview when clicked', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined)
     render(<TestField draft="" imageAttachments={[{ id: 'image-1', path: '/tmp/example.png' }]} />)
 
-    expect(screen.getByRole('img', { name: 'example.png' })).toBeTruthy()
+    expect(await screen.findByRole('img', { name: 'example.png' })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'View image: example.png' }))
     expect(screen.getByRole('dialog')).toBeTruthy()
     expect(screen.getByRole('dialog').textContent).toContain('example.png')
