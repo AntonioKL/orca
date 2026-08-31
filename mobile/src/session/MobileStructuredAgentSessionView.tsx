@@ -100,6 +100,7 @@ export function MobileStructuredAgentSessionView(props: Props): React.JSX.Elemen
     props.handoff === null ||
     props.handoff === undefined ||
     (props.handoff.owner === 'native' && props.handoff.phase === 'idle')
+  const isWorking = turnId !== null
   const composerEnabled = props.status === 'ready' && (stableNativeOwner || stableTuiOwner)
   const rows = useMemo(
     () => buildMobileStructuredTimeline(props.items, props.outbox),
@@ -131,7 +132,7 @@ export function MobileStructuredAgentSessionView(props: Props): React.JSX.Elemen
     <View style={styles.root}>
       <MobileStructuredHandoffBanner
         status={props.handoff}
-        isWorking={turnId !== null}
+        isWorking={isWorking}
         onRequest={props.onRequestHandoff}
       />
       <FlatList
@@ -276,7 +277,7 @@ export function MobileStructuredAgentSessionView(props: Props): React.JSX.Elemen
         }}
         agent={props.agent}
         slashCommands={slashCommands}
-        sessionOptions={{ controller: props.sessionOptions, isWorking: false }}
+        sessionOptions={{ controller: props.sessionOptions, isWorking }}
         onAttachImage={props.onAttachImage}
         attachments={allAttachments}
         onRemoveAttachment={(id) => {

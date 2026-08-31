@@ -1,6 +1,7 @@
 import { createElement, type ComponentProps } from 'react'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { AgentJournalRenderItem } from '../../../src/shared/agent-session-journal-types'
 import type { MobileNativeChatSessionOptionsController } from './use-mobile-native-chat-session-options'
 import { MobileStructuredAgentSessionView } from './MobileStructuredAgentSessionView'
 
@@ -45,6 +46,18 @@ function options(): MobileNativeChatSessionOptionsController {
     invokeAction: vi.fn(async () => true),
     recordCommand: vi.fn()
   }
+}
+
+const ACTIVE_TURN_ITEM: AgentJournalRenderItem = {
+  itemId: 'status-1',
+  revision: 1,
+  body: {
+    kind: 'status',
+    text: 'working',
+    turnLifecycle: { turnId: 'turn-1', state: 'running' }
+  },
+  sequence: 1,
+  observedAt: 1
 }
 
 describe('MobileStructuredAgentSessionView command seam', () => {
@@ -142,6 +155,18 @@ describe('MobileStructuredAgentSessionView command seam', () => {
     ])
     const empty = renderer!.root.findByType('FlatList').props.ListEmptyComponent
     expect(empty.props.children[0].props.children).toBe('New Claude chat')
+  })
+
+  it('marks session options working while a turn is active', () => {
+    act(() => {
+      renderer!.update(
+        createElement(MobileStructuredAgentSessionView, props({ items: [ACTIVE_TURN_ITEM] }))
+      )
+    })
+
+    expect(
+      renderer!.root.findByType('MobileNativeChatComposer').props.sessionOptions
+    ).toMatchObject({ isWorking: true })
   })
 
   it('keeps the composer enabled and routes stable TUI ownership through its bridge', async () => {
