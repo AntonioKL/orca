@@ -46,7 +46,7 @@ export class RpcDispatcher {
   }
 
   async dispatch(request: RpcRequest, options?: DispatchCallOptions): Promise<RpcResponse> {
-    const meta = this.meta()
+    const meta: RpcEnvelopeMeta = { runtimeId: this.runtime.getRuntimeId() }
     const method = this.registry.get(request.method)
     if (!method) {
       return errorResponse(
@@ -166,7 +166,7 @@ export class RpcDispatcher {
     reply: (response: string) => void,
     options?: RpcDispatchStreamingOptions
   ): Promise<void> {
-    const meta = this.meta()
+    const meta: RpcEnvelopeMeta = { runtimeId: this.runtime.getRuntimeId() }
     const method = this.registry.get(request.method)
     if (!method) {
       reply(
@@ -311,9 +311,5 @@ export class RpcDispatcher {
     } catch (error) {
       reply(JSON.stringify(mapDispatcherError(request, meta, error)))
     }
-  }
-
-  private meta(): RpcEnvelopeMeta {
-    return { runtimeId: this.runtime.getRuntimeId() }
   }
 }
