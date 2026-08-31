@@ -169,10 +169,10 @@ describe('orchestration mailbox pointer submit', () => {
   })
 
   it.each([
-    ['working', { lastAgentStatus: 'working' as const }],
-    ['permission', { lastAgentStatus: 'permission' as const }],
-    ['stale', null]
-  ])('does not submit after the parked target becomes %s', async (_name, targetOverride) => {
+    ['working', { lastAgentStatus: 'working' as const }, true],
+    ['permission', { lastAgentStatus: 'permission' as const }, false],
+    ['stale', null, false]
+  ])('handles a parked target that becomes %s', async (_name, targetOverride, shouldSubmit) => {
     const ptyId = 'pty-parked'
     const mailboxHandle = 'run:run-1'
     const leaf = {
@@ -199,12 +199,20 @@ describe('orchestration mailbox pointer submit', () => {
     const writePty = vi.fn(async () => true)
     const settle = vi.fn(() => state.settleFlight(ptyId, flight))
     const redrive = vi.fn()
+    const markMailboxPointerEnterAttempted = vi.fn(() => true)
+    const settleMailboxPointerEnter = vi.fn()
 
     submitOrchestrationMailboxPointer(
       {
         mailboxOwner: { resolve: () => mailboxHandle } as never,
         state,
-        getDb: () => ({ areUnreadMessages: () => true, releaseMailboxPointerEnter }) as never,
+        getDb: () =>
+          ({
+            areUnreadMessages: () => true,
+            markMailboxPointerEnterAttempted,
+            releaseMailboxPointerEnter,
+            settleMailboxPointerEnter
+          }) as never,
         resolveSubmitTarget: () => currentTarget,
         getMessageWaiters: () => undefined,
         isLeafPtyProvenAbsent: async () => false,
@@ -224,13 +232,32 @@ describe('orchestration mailbox pointer submit', () => {
     )
 
     await vi.waitFor(() => expect(settle).toHaveBeenCalledOnce())
-    expect(writePty).not.toHaveBeenCalled()
-    expect(releaseMailboxPointerEnter).toHaveBeenCalledWith(
-      ['msg-1'],
-      { ptyId, processIncarnation: expectedTarget.processIncarnation },
-      [MAILBOX_POINTER_WRITE_ATTEMPTED]
-    )
-    expect(redrive).toHaveBeenCalledWith(mailboxHandle, true)
+    if (shouldSubmit) {
+      expect(markMailboxPointerEnterAttempted).toHaveBeenCalledWith(['msg-1'], {
+        ptyId,
+        processIncarnation: expectedTarget.processIncarnation
+      })
+      expect(writePty).toHaveBeenCalledWith(ptyId, '\r')
+      expect(releaseMailboxPointerEnter).not.toHaveBeenCalled()
+    } else {
+      expect(writePty).not.toHaveBeenCalled()
+      if (targetOverride) {
+        expect(settleMailboxPointerEnter).toHaveBeenCalledWith(
+          ['msg-1'],
+          { ptyId, processIncarnation: expectedTarget.processIncarnation },
+          [MAILBOX_POINTER_WRITE_ATTEMPTED]
+        )
+        expect(releaseMailboxPointerEnter).not.toHaveBeenCalled()
+        expect(redrive).not.toHaveBeenCalled()
+      } else {
+        expect(releaseMailboxPointerEnter).toHaveBeenCalledWith(
+          ['msg-1'],
+          { ptyId, processIncarnation: expectedTarget.processIncarnation },
+          [MAILBOX_POINTER_WRITE_ATTEMPTED]
+        )
+        expect(redrive).toHaveBeenCalledWith(mailboxHandle, true)
+      }
+    }
   })
 
   it('releases every reservation when a pending batch targets multiple PTYs', () => {
