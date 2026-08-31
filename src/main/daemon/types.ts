@@ -167,6 +167,8 @@ export type KillRequest = {
   payload: {
     sessionId: string
     immediate?: boolean
+    intent?: 'orphan-cleanup' | 'owner-close'
+    incarnationId?: string
   }
 }
 
