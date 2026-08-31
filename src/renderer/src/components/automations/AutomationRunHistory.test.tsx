@@ -130,3 +130,69 @@ describe('AutomationRunHistory unanswered history', () => {
     expect(onRecoverHistory).toHaveBeenCalledWith('reconnect')
   })
 })
+
+describe('AutomationRunHistory keyboard navigation', () => {
+  it('navigates runs with ArrowDown and ArrowUp and opens on Enter', async () => {
+    const onOpenRun = vi.fn()
+    const run1 = makeRun({ id: 'run-1', scheduledFor: FIRST })
+    const run2 = makeRun({ id: 'run-2', scheduledFor: LATEST })
+
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    roots.push(root)
+
+    await act(async () => {
+      root.render(
+        <AutomationRunHistory
+          runs={[run1, run2]}
+          automationId="a-1"
+          worktreeMap={new Map()}
+          onOpenRun={onOpenRun}
+        />
+      )
+    })
+
+    const buttons = container.querySelectorAll<HTMLButtonElement>('button[data-automation-run-id]')
+    expect(buttons[0].getAttribute('data-current')).toBe('true')
+    expect(buttons[1].getAttribute('data-current')).toBe('false')
+
+    // Press ArrowDown
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })
+      )
+    })
+
+    expect(buttons[0].getAttribute('data-current')).toBe('false')
+    expect(buttons[1].getAttribute('data-current')).toBe('true')
+
+    // Press Enter to open selected run
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      )
+    })
+
+    expect(onOpenRun).toHaveBeenCalledWith(run2)
+
+    // Press ArrowUp
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })
+      )
+    })
+
+    expect(buttons[0].getAttribute('data-current')).toBe('true')
+    expect(buttons[1].getAttribute('data-current')).toBe('false')
+
+    // Press Enter to open first run
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      )
+    })
+
+    expect(onOpenRun).toHaveBeenCalledWith(run1)
+  })
+})

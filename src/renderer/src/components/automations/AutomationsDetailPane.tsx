@@ -40,6 +40,10 @@ import type { AutomationTargetAvailability } from './automation-target-availabil
 import type { AutomationRunViewState } from './automation-run-view-state'
 import type { AutomationRunWorkspaceDisplay } from './automation-run-workspace-display'
 import type { AutomationPaneTab, SelectedExternalRunPage } from './automation-page-state'
+import {
+  getAutomationDetailNextTab,
+  shouldHandleAutomationDetailTabArrowKey
+} from './automation-detail-tab-navigation'
 import { translate } from '@/i18n/i18n'
 
 type AutomationsDetailPaneProps = {
@@ -131,6 +135,30 @@ export function AutomationsDetailPane({
   onBackToList,
   recoverSelectedRuns
 }: AutomationsDetailPaneProps): React.JSX.Element {
+  React.useEffect(() => {
+    if (selectedExternal || !selected) {
+      return
+    }
+
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (!shouldHandleAutomationDetailTabArrowKey(event)) {
+        return
+      }
+      const nextTab = getAutomationDetailNextTab({
+        currentTab: activePaneTab,
+        key: event.key as 'ArrowLeft' | 'ArrowRight',
+        canAccessRuns: Boolean(selected)
+      })
+      if (nextTab && nextTab !== activePaneTab) {
+        event.preventDefault()
+        onActivePaneTabChange(nextTab)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [activePaneTab, onActivePaneTabChange, selected, selectedExternal])
+
   return (
     <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
       {selectedExternal ? (
