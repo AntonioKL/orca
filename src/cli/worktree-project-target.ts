@@ -142,13 +142,14 @@ export async function resolveProjectCreateTarget(
 }
 
 // Why: setup ids and paths are persisted metadata printed straight to a terminal, so anything that
-// can move the cursor, change colour, or reorder text could forge a setup line. Covers C0 and DEL,
-// C1 (U+009B is an 8-bit CSI, equivalent to `ESC [`), the Unicode line/paragraph separators, and
-// the bidi overrides. Escaped rather than dropped so two distinct values never render alike.
+// can move the cursor, change colour, reorder text, or hide characters could forge a setup line.
+// Backslash is escaped FIRST — otherwise an id containing the literal text "\u000a" renders
+// identically to one containing a real newline, and the printed id could not be copied back into
+// --project-host-setup unambiguously.
 function terminalSafe(value: string): string {
-  return value.replace(
+  return value.replace(/\\/g, '\\\\').replace(
     // eslint-disable-next-line no-control-regex
-    /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g,
+    /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2069\ufeff]/g,
     (ch) => `\\u${ch.codePointAt(0)!.toString(16).padStart(4, '0')}`
   )
 }

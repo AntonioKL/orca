@@ -54,7 +54,8 @@ describe('resolveProjectCreateTarget host selection', () => {
 
     await expect(failure).rejects.toThrow(/2 ready setups/)
     // The whole point: the user is shown which checkouts were in play.
-    await expect(failure).rejects.toThrow(/C:\\Users\\neil\\orca\\orca/)
+    // Backslashes are doubled by the escaping — the cost of an injective rendering.
+    await expect(failure).rejects.toThrow(/C:\\\\Users\\\\neil\\\\orca/)
   })
 
   it('resolves when exactly one setup could match', async () => {
@@ -128,5 +129,31 @@ describe('resolveProjectCreateTarget host selection', () => {
     await expect(failure).rejects.toThrow(/one\\u2028forged/)
     // Distinct ids must not collapse onto the same rendering.
     await expect(failure).rejects.toThrow(/a\\u202e31m/)
+  })
+
+  it('escapes backslashes so the rendering is injective and ids copy back', async () => {
+    // Without escaping backslash first, a literal "\\u000a" and a real newline render the same,
+    // and the id the error tells the user to pass becomes ambiguous.
+    const client = clientReturning([
+      readySetup({ id: 'lit\\u000a', repoId: 'repo-a', path: '/one' }),
+      readySetup({ id: 'real\n', repoId: 'repo-b', path: '/two' })
+    ])
+    const flags = new Map<string, string | boolean>([['project', 'github:stablyai/orca']])
+    const failure = resolveProjectCreateTarget(flags, client)
+
+    await expect(failure).rejects.toThrow(/lit\\\\u000a/)
+    await expect(failure).rejects.toThrow(/real\\u000a/)
+  })
+
+  it('escapes zero-width and directionality characters', async () => {
+    const client = clientReturning([
+      readySetup({ id: 'a\u200b', repoId: 'repo-a', path: '/one\ufeff' }),
+      readySetup({ id: 'b', repoId: 'repo-b', path: '/two' })
+    ])
+    const flags = new Map<string, string | boolean>([['project', 'github:stablyai/orca']])
+    const failure = resolveProjectCreateTarget(flags, client)
+
+    await expect(failure).rejects.toThrow(/a\\u200b/)
+    await expect(failure).rejects.toThrow(/one\\ufeff/)
   })
 })
