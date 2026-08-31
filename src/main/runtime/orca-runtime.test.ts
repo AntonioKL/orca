@@ -9379,7 +9379,7 @@ describe('OrcaRuntimeService', () => {
   // prove that.
   it('refuses a runtime create into an existing repository and leaves its .git intact', async () => {
     const runtime = new OrcaRuntimeService(store as never)
-    const parentDir = await mkdtemp('/tmp/orca-runtime-existing-repo-')
+    const parentDir = await mkdtemp(join(tmpdir(), 'orca-runtime-existing-repo-'))
     try {
       const target = join(parentDir, 'existing')
       await mkdir(join(target, '.git'), { recursive: true })
@@ -9401,7 +9401,7 @@ describe('OrcaRuntimeService', () => {
   it('refuses a runtime create when the target holds a .git pointer file', async () => {
     // Linked worktrees and submodules point with a `.git` FILE, not a directory.
     const runtime = new OrcaRuntimeService(store as never)
-    const parentDir = await mkdtemp('/tmp/orca-runtime-gitfile-')
+    const parentDir = await mkdtemp(join(tmpdir(), 'orca-runtime-gitfile-'))
     try {
       const target = join(parentDir, 'linked')
       await mkdir(target, { recursive: true })
