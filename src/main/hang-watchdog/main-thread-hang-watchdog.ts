@@ -1,7 +1,7 @@
 import { Worker } from 'node:worker_threads'
 import { app } from 'electron'
 import { subscribeSystemPowerLifecycle } from '../system-power-lifecycle'
-import { hangDetectionMarkerPath } from './hang-detection-marker'
+import { hangDetectionMarkerPath, removeClaimedHangDetectionMarker } from './hang-detection-marker'
 import { resolveHangWatchdogWorkerPath } from './hang-watchdog-worker-path'
 import {
   HANG_WATCHDOG_CHECK_INTERVAL_MS,
@@ -137,7 +137,13 @@ export function installMainThreadHangWatchdog(options: {
       ...(message.marker.census ? { census: message.marker.census } : {})
     }
     if (options.onHangResolved) {
-      options.onHangResolved(event)
+      try {
+        options.onHangResolved(event)
+      } finally {
+        if (event.episodeId !== undefined) {
+          removeClaimedHangDetectionMarker(workerData.markerPath, event.episodeId)
+        }
+      }
     } else {
       queueWatchdogLaneEvent(event)
     }

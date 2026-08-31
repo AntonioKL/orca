@@ -40,6 +40,15 @@ export function claimHangDetectionMarker(markerPath: string): HangDetectionMarke
   }
 }
 
+/** Removes a claim after the live process has delivered its observation. */
+export function removeClaimedHangDetectionMarker(markerPath: string, episodeId: number): void {
+  try {
+    rmSync(`${markerPath.replace(/\.json$/, '')}.claimed.${episodeId}.json`, { force: true })
+  } catch {
+    // Best effort; startup cleanup handles claims left by an interrupted delivery.
+  }
+}
+
 export function consumeHangDetectionMarker(markerPath: string): HangDetectionMarker | null {
   // Recovery claims use unique names; prefer the claimed episode and then the legacy marker.
   try {
