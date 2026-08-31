@@ -28,8 +28,8 @@ export type CreateWorkspaceFromComposerArgs = {
   setupDecision: WorkspaceCreateSetupDecision
   agent: WorkspaceCreateAgentBundle
   workspaceName: string | undefined
-  note: string | undefined
   nameIsAutoManaged?: boolean
+  note: string | undefined
   worktreeCreateIdempotency: WorktreeCreateIdempotencyProbe
 }
 
@@ -91,8 +91,8 @@ async function createWorkItemWorkspace(args: {
   setupDecision: WorkspaceCreateSetupDecision
   agent: WorkspaceCreateAgentBundle
   workspaceName: string | undefined
-  note: string | undefined
   nameIsAutoManaged?: boolean
+  note: string | undefined
   worktreeCreateIdempotency: WorktreeCreateIdempotencyProbe
 }): Promise<WorktreeCreateResult> {
   const { client, selection, targetRepoId, setupDecision, agent, workspaceName, note } = args
@@ -150,13 +150,23 @@ async function createBranchWorkspace(args: {
   setupDecision: WorkspaceCreateSetupDecision
   agent: WorkspaceCreateAgentBundle
   workspaceName: string | undefined
+  nameIsAutoManaged?: boolean
   note: string | undefined
   worktreeCreateIdempotency: WorktreeCreateIdempotencyProbe
 }): Promise<WorktreeCreateResult> {
-  const { client, selection, targetRepoId, setupDecision, agent, workspaceName, note } = args
+  const {
+    client,
+    selection,
+    targetRepoId,
+    setupDecision,
+    agent,
+    workspaceName,
+    nameIsAutoManaged,
+    note
+  } = args
   const createdWithAgentId = agent.choice === 'blank' ? undefined : agent.choice
   const comment = note?.trim()
-  const manualDisplayName = workspaceName?.trim()
+  const manualDisplayName = nameIsAutoManaged === true ? undefined : workspaceName?.trim()
   const applyCommon = (params: Record<string, unknown>): Record<string, unknown> => {
     Object.assign(params, agentLaunchCreateFields(createdWithAgentId))
     if (comment) {
@@ -227,12 +237,22 @@ async function createNewBranchWorkspace(args: {
   setupDecision: WorkspaceCreateSetupDecision
   agent: WorkspaceCreateAgentBundle
   workspaceName: string | undefined
+  nameIsAutoManaged?: boolean
   note: string | undefined
   worktreeCreateIdempotency: WorktreeCreateIdempotencyProbe
 }): Promise<WorktreeCreateResult> {
-  const { client, selection, targetRepoId, setupDecision, agent, workspaceName, note } = args
+  const {
+    client,
+    selection,
+    targetRepoId,
+    setupDecision,
+    agent,
+    workspaceName,
+    nameIsAutoManaged,
+    note
+  } = args
   const createdWithAgentId = agent.choice === 'blank' ? undefined : agent.choice
-  const manualDisplayName = workspaceName?.trim()
+  const manualDisplayName = nameIsAutoManaged === true ? undefined : workspaceName?.trim()
   const comment = note?.trim()
   // A brand-new branch off the repo's default base. The typed name is kept as the
   // git branch (via branchNameOverride) so a slash like `feature/login` survives;

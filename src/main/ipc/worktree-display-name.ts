@@ -1,6 +1,8 @@
 import type { CreateWorktreeArgs } from '../../shared/worktree/create-types'
 import type { WorktreeMeta } from '../../shared/worktree/meta-types'
 
+type DisplayNameKind = CreateWorktreeArgs['displayNameKind']
+
 export function sanitizeWorktreeDisplayName(input: string): string | undefined {
   const withoutControls = Array.from(input, (char) => {
     const code = char.charCodeAt(0)
@@ -19,7 +21,7 @@ export function sanitizeWorktreeDisplayName(input: string): string | undefined {
 
 export function resolveWorktreeCreateDisplayName(
   input: string | undefined,
-  kind: CreateWorktreeArgs['displayNameKind']
+  kind: DisplayNameKind
 ): string | undefined {
   if (!input) {
     return undefined
@@ -37,10 +39,27 @@ export function resolveWorktreeCreateDisplayName(
   return safe || undefined
 }
 
+/** Resolve the create label, including the pre-provenance CLI contract. */
+export function resolveWorktreeCreateDisplayNameRequest(
+  input: string | undefined,
+  kind: DisplayNameKind,
+  fallbackName: string,
+  cliCreated: boolean
+): { value: string | undefined; kind: DisplayNameKind } {
+  // The CLI name is always an explicit command argument; its marker wins over a
+  // missing or malformed kind so a future client cannot make it auto-managed.
+  const effectiveKind = cliCreated ? 'user' : kind
+  const effectiveInput = input ?? (cliCreated ? fallbackName : undefined)
+  return {
+    value: resolveWorktreeCreateDisplayName(effectiveInput, effectiveKind),
+    kind: effectiveKind
+  }
+}
+
 export function resolveWorktreeCreateDisplayNameMeta(
   requestedDisplayName: string | undefined,
   branchName: string,
-  kind: CreateWorktreeArgs['displayNameKind'],
+  kind: DisplayNameKind,
   fallback: { requestedName: string; sanitizedName: string }
 ): Partial<Pick<WorktreeMeta, 'displayName' | 'displayNameIsPinned'>> {
   if (requestedDisplayName !== undefined) {

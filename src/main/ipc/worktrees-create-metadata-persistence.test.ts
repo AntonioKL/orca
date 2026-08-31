@@ -253,6 +253,20 @@ describe('registerWorktreeHandlers', () => {
     expect(runtimeStub.notifyWorktreesChangedForRemoteClients).toHaveBeenCalledWith('repo-1')
   })
 
+  it('persists display-name provenance at the host boundary', () => {
+    store.setWorktreeMeta.mockImplementation((_worktreeId, meta) => meta)
+
+    handlers['worktrees:updateMeta'](null, {
+      worktreeId: 'repo-1::/workspace/feature-wt',
+      updates: { displayName: 'Agent label' }
+    })
+
+    expect(store.setWorktreeMeta).toHaveBeenCalledWith(
+      'repo-1::/workspace/feature-wt',
+      expect.objectContaining({ displayName: 'Agent label', displayNameIsPinned: true })
+    )
+  })
+
   it('does not trust renderer-authored automation provenance during local create', async () => {
     store.setWorktreeMeta.mockImplementation((_worktreeId, meta) => meta)
     listWorktreesMock.mockResolvedValue([

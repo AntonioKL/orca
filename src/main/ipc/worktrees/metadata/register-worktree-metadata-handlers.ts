@@ -39,6 +39,8 @@ export function registerWorktreeMetadataHandlers(context: WorktreeIpcContext): v
         validatedUpdates.displayName !== undefined
           ? {
               ...validatedUpdates,
+              // The host persists provenance; do not rely on renderer-authored metadata.
+              displayNameIsPinned: Boolean(validatedUpdates.displayName.trim()),
               pendingFirstAgentMessageRename: false,
               firstAgentMessageRenameError: null
             }

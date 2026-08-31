@@ -63,6 +63,7 @@ function containsEmoji(input: string): boolean {
 
 export {
   resolveWorktreeCreateDisplayName,
+  resolveWorktreeCreateDisplayNameRequest,
   resolveWorktreeCreateDisplayNameMeta,
   sanitizeWorktreeDisplayName,
   shouldSetDisplayName

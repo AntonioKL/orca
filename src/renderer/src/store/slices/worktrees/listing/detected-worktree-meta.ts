@@ -43,9 +43,7 @@ export function applyDetectedWorktreeUpdates(
         next.displayNameMode = updates.displayNameIsPinned ? 'fixed' : 'automatic'
         if (updates.displayNameIsPinned === false && !updates.displayName?.trim()) {
           const automaticName = branchName(next.branch)
-          if (automaticName) {
-            next.displayName = automaticName
-          }
+          next.displayName = automaticName || worktree.displayName
         }
       }
       return next

@@ -65,9 +65,9 @@ export function applyWorktreeUpdates(
       next.displayNameMode = updates.displayNameIsPinned ? 'fixed' : 'automatic'
       if (updates.displayNameIsPinned === false && !updates.displayName?.trim()) {
         const automaticName = branchName(next.branch)
-        if (automaticName) {
-          next.displayName = automaticName
-        }
+        // A detached worktree has no branch-derived label; keep the old text until the host
+        // projection supplies its repo/path fallback instead of flashing an empty sidebar row.
+        next.displayName = automaticName || worktree.displayName
       }
     }
     return next

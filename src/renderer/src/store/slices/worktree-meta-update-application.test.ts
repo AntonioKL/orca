@@ -21,4 +21,24 @@ describe('applyWorktreeUpdates display-name provenance', () => {
       displayNameMode: 'automatic'
     })
   })
+
+  it('keeps text until the host resolves a detached fallback', () => {
+    const worktree = {
+      id: 'repo-1::/workspace/feature',
+      repoId: 'repo-1',
+      path: '/workspace/feature',
+      branch: '',
+      displayName: 'Agent workspace'
+    }
+
+    const next = applyWorktreeUpdates({ 'repo-1': [worktree as never] }, worktree.id, {
+      displayName: '',
+      displayNameIsPinned: false
+    })
+
+    expect(next['repo-1']?.[0]).toMatchObject({
+      displayName: 'Agent workspace',
+      displayNameMode: 'automatic'
+    })
+  })
 })

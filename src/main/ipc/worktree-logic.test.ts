@@ -4,6 +4,7 @@ import {
   sanitizeWorktreeName,
   sanitizeWorktreeDisplayName,
   resolveWorktreeCreateDisplayName,
+  resolveWorktreeCreateDisplayNameRequest,
   resolveWorktreeCreateDisplayNameMeta,
   ensurePathWithinWorkspace,
   computeBranchName,
@@ -137,6 +138,19 @@ describe('sanitizeWorktreeDisplayName', () => {
 })
 
 describe('worktree create display-name provenance', () => {
+  it('recovers the name-only contract from an older CLI request', () => {
+    expect(resolveWorktreeCreateDisplayNameRequest(undefined, undefined, 'feature', true)).toEqual({
+      value: 'feature',
+      kind: 'user'
+    })
+  })
+
+  it('treats a CLI name as intentional even if a caller supplies generated provenance', () => {
+    expect(
+      resolveWorktreeCreateDisplayNameRequest('Agent label', 'generated', 'feature', true)
+    ).toEqual({ value: 'Agent label', kind: 'user' })
+  })
+
   it('preserves exact user text apart from edge whitespace and controls', () => {
     expect(resolveWorktreeCreateDisplayName('  My  Label\n', 'user')).toBe('My  Label')
   })
@@ -148,6 +162,21 @@ describe('worktree create display-name provenance', () => {
         sanitizedName: 'my-label-2'
       })
     ).toEqual({ displayName: 'My Label', displayNameIsPinned: true })
+  })
+
+  it('keeps generated labels automatic only when they equal the branch', () => {
+    expect(
+      resolveWorktreeCreateDisplayNameMeta('Issue title', 'feature-2', 'generated', {
+        requestedName: 'feature-2',
+        sanitizedName: 'feature-2'
+      })
+    ).toEqual({ displayName: 'Issue title', displayNameIsPinned: true })
+    expect(
+      resolveWorktreeCreateDisplayNameMeta('feature-2', 'feature-2', 'generated', {
+        requestedName: 'feature-2',
+        sanitizedName: 'feature-2'
+      })
+    ).toEqual({})
   })
 
   it('keeps a slashy branch label automatic when only its folder is sanitized', () => {

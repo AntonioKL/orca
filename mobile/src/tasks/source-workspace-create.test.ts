@@ -190,6 +190,26 @@ describe('createWorkspaceFromComposerSource', () => {
     expect(calls[0]!.params).not.toHaveProperty('displayNameKind')
   })
 
+  it('does not pin an auto-derived branch label even when the draft is populated', async () => {
+    const calls: Call[] = []
+    const client = fakeClient(() => ({ worktree: { id: 'wt-auto-branch-draft' } }), calls)
+    const selection: MobileComposerCreateSelection = {
+      kind: 'new-branch',
+      branchName: 'topic'
+    }
+
+    await createWorkspaceFromComposerSource({
+      client,
+      selection,
+      ...baseArgs,
+      workspaceName: 'topic',
+      nameIsAutoManaged: true
+    })
+
+    expect(calls[0]!.params).not.toHaveProperty('displayName')
+    expect(calls[0]!.params).not.toHaveProperty('displayNameKind')
+  })
+
   it('pins a custom label for a new branch selection', async () => {
     const calls: Call[] = []
     const client = fakeClient(() => ({ worktree: { id: 'wt-labeled-branch' } }), calls)

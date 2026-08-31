@@ -78,7 +78,7 @@ type CreateWorktreeArgsWithSystemProvenance = CreateWorktreeArgs & {
 }
 import {
   sanitizeWorktreeName,
-  resolveWorktreeCreateDisplayName,
+  resolveWorktreeCreateDisplayNameRequest,
   resolveWorktreeCreateDisplayNameMeta,
   computeValidatedBranchName,
   computeWorktreePath,
@@ -1546,10 +1546,13 @@ export async function createRemoteWorktree(
   let effectiveRequestedName = args.name
   const sanitizedName = sanitizeWorktreeName(args.name)
   let effectiveSanitizedName = sanitizedName
-  const requestedDisplayName = resolveWorktreeCreateDisplayName(
+  const displayNameRequest = resolveWorktreeCreateDisplayNameRequest(
     args.displayName,
-    args.displayNameKind
+    args.displayNameKind,
+    args.name,
+    args.cliProvenance?.kind === 'created-by-cli'
   )
+  const requestedDisplayName = displayNameRequest.value
 
   // Why: base resolution probes refs via generic git.exec; register the repo root first so relays don't report a valid base as stale.
   await registerRequiredSshWorktreeCreateRoots(repo.connectionId!, [repo.path])
@@ -1882,7 +1885,7 @@ export async function createRemoteWorktree(
     ...resolveWorktreeCreateDisplayNameMeta(
       requestedDisplayName,
       branchName,
-      args.displayNameKind,
+      displayNameRequest.kind,
       { requestedName: effectiveRequestedName, sanitizedName: effectiveSanitizedName }
     ),
     ...(isTuiAgent(args.createdWithAgent) ? { createdWithAgent: args.createdWithAgent } : {}),
@@ -2023,10 +2026,13 @@ export async function createLocalWorktree(
 
   const requestedName = args.name
   const sanitizedName = sanitizeWorktreeName(args.name)
-  const requestedDisplayName = resolveWorktreeCreateDisplayName(
+  const displayNameRequest = resolveWorktreeCreateDisplayNameRequest(
     args.displayName,
-    args.displayNameKind
+    args.displayNameKind,
+    args.name,
+    args.cliProvenance?.kind === 'created-by-cli'
   )
+  const requestedDisplayName = displayNameRequest.value
   // Why: explicit branches and non-username prefix modes never consume this; skipping the probe preserves the exact generated branch name.
   // Username and base resolution are independent read-only probes. Starting
   // both before awaiting removes one serial git/config round trip from create.
@@ -2557,7 +2563,7 @@ export async function createLocalWorktree(
     ...resolveWorktreeCreateDisplayNameMeta(
       requestedDisplayName,
       branchName,
-      args.displayNameKind,
+      displayNameRequest.kind,
       { requestedName: effectiveRequestedName, sanitizedName: effectiveSanitizedName }
     ),
     ...(sparseDirectories.length > 0

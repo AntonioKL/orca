@@ -1246,7 +1246,7 @@ import {
   isOrphanedWorktreeError,
   mergeWorktree,
   sanitizeWorktreeName,
-  resolveWorktreeCreateDisplayName,
+  resolveWorktreeCreateDisplayNameRequest,
   resolveWorktreeCreateDisplayNameMeta,
   areWorktreePathsEqual
 } from '../ipc/worktree-logic'
@@ -27050,15 +27050,18 @@ export class OrcaRuntimeService {
       const settings = createSettings
       const instanceId = randomUUID()
       const worktreeId = getRuntimeFolderWorkspaceInstanceId(repo, instanceId)
-      const resolvedFolderDisplayName = resolveWorktreeCreateDisplayName(
+      const displayNameRequest = resolveWorktreeCreateDisplayNameRequest(
         args.displayName,
-        args.displayNameKind
+        args.displayNameKind,
+        args.name,
+        args.cliProvenance?.kind === 'created-by-cli'
       )
+      const resolvedFolderDisplayName = displayNameRequest.value
       const meta = this.store.setWorktreeMeta(worktreeId, {
         instanceId,
         ...getProjectHostSetupWorktreeMeta(this.store.getProjectHostSetups?.() ?? [], repo),
         displayName: resolvedFolderDisplayName ?? args.name,
-        ...(args.displayNameKind === 'user' && resolvedFolderDisplayName
+        ...(displayNameRequest.kind === 'user' && resolvedFolderDisplayName
           ? { displayNameIsPinned: true }
           : {}),
         lastActivityAt: now,
@@ -27252,10 +27255,13 @@ export class OrcaRuntimeService {
     }
     const hostedReviewExecutionContext = this.getHostedReviewExecutionOptions(repo)
     let effectiveRequestedName = args.name
-    const requestedDisplayName = resolveWorktreeCreateDisplayName(
+    const displayNameRequest = resolveWorktreeCreateDisplayNameRequest(
       args.displayName,
-      args.displayNameKind
+      args.displayNameKind,
+      args.name,
+      args.cliProvenance?.kind === 'created-by-cli'
     )
+    const requestedDisplayName = displayNameRequest.value
     const sanitizedName = sanitizeWorktreeName(args.name)
     let effectiveSanitizedName = sanitizedName
     // Username and base resolution are independent read-only probes. Starting
@@ -27701,7 +27707,7 @@ export class OrcaRuntimeService {
     const displayNameMeta = resolveWorktreeCreateDisplayNameMeta(
       requestedDisplayName,
       branchName,
-      args.displayNameKind,
+      displayNameRequest.kind,
       { requestedName: effectiveRequestedName, sanitizedName: effectiveSanitizedName }
     )
     const meta = this.store.setWorktreeMeta(worktreeId, {
