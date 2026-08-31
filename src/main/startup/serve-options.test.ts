@@ -33,6 +33,66 @@ describe('getServeOptions', () => {
     })
   })
 
+  it('uses the final occurrence of each value flag', () => {
+    expect(
+      getServeOptions([
+        '/AppRun',
+        '--serve',
+        '--serve-port',
+        '6768',
+        '--serve-port=6769',
+        '--serve-pairing-address',
+        'first.example',
+        '--serve-pairing-address=last.example',
+        '--serve-project-root',
+        '/first',
+        '--serve-project-root=/last'
+      ])
+    ).toMatchObject({
+      wsPort: 6769,
+      pairingAddress: 'last.example',
+      projectRoot: '/last'
+    })
+  })
+
+  it('applies missing or invalid values only to the final occurrence', () => {
+    expect(
+      getServeOptions(['/AppRun', '--serve', '--serve-port', '--serve-port', '6768']).wsPort
+    ).toBe(6768)
+    expect(() =>
+      getServeOptions(['/AppRun', '--serve', '--serve-port', '6768', '--serve-port'])
+    ).toThrow('Missing value for --serve-port.')
+    expect(() =>
+      getServeOptions(['/AppRun', '--serve', '--serve-port', '6768', '--serve-port=bad'])
+    ).toThrow('Invalid --serve-port value: bad')
+  })
+
+  it('uses the final value of mixed boolean aliases', () => {
+    expect(
+      getServeOptions(['/AppRun', '--serve', '--serve-no-pairing', '--no-pairing=false']).noPairing
+    ).toBe(false)
+    expect(
+      getServeOptions(['/AppRun', '--serve', '--no-pairing=false', '--serve-no-pairing']).noPairing
+    ).toBe(true)
+    expect(
+      getServeOptions(['/AppRun', '--serve', '--serve-mobile-pairing', '--mobile-pairing=0'])
+        .mobilePairing
+    ).toBe(false)
+    expect(
+      getServeOptions(['/AppRun', '--serve', '--serve-recipe-json', '--recipe-json=false'])
+        .recipeJson
+    ).toBe(false)
+  })
+
+  it('keeps JSON enabled for an equals-form global flag', () => {
+    expect(getServeOptions(['/AppRun', '--serve', '--json=false']).json).toBe(true)
+  })
+
+  it('accepts an equals-form value that resembles a pairing flag', () => {
+    const argv = normalizeServeModeArgv(['/AppRun', 'serve', '--pairing-address=--no-pairng'])
+    expect(getServeOptions(argv).pairingAddress).toBe('--no-pairng')
+  })
+
   it('shares cross-flag validation with the CLI-form launch', () => {
     const argv = normalizeServeModeArgv([
       '/opt/orca/orca-ide',
@@ -66,6 +126,12 @@ describe('getServeOptions', () => {
       getServeOptions(['/AppRun', '--serve', '--disable-gpu', '--disable-features=Vulkan'])
         .noPairing
     ).toBe(false)
+  })
+
+  it('still rejects a flag-shaped space value, as the CLI does', () => {
+    expect(() =>
+      getServeOptions(['/AppRun', '--serve', '--serve-pairing-address', '--no-pairng'])
+    ).toThrow(/Unknown flag --no-pairng.*--no-pairing/i)
   })
 
   it('ignores serve-looking arguments after the terminator', () => {

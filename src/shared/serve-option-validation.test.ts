@@ -56,4 +56,16 @@ describe('getServeFlagTypoError', () => {
   it('does not reinterpret tokens after --', () => {
     expect(getServeFlagTypoError(['/opt/orca/orca-ide', '--serve', '--', '--no-pairng'])).toBeNull()
   })
+
+  it('does not inspect an equals-form value as a flag', () => {
+    expect(
+      getServeFlagTypoError(['/opt/orca/orca-ide', '--serve-pairing-address=--no-pairng'])
+    ).toBeNull()
+  })
+
+  it('keeps flag-shaped space values subject to typo validation', () => {
+    expect(
+      getServeFlagTypoError(['/opt/orca/orca-ide', '--serve-pairing-address', '--no-pairng'])
+    ).toMatch(/Unknown flag --no-pairng.*--no-pairing/i)
+  })
 })

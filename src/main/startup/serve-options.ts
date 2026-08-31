@@ -18,30 +18,75 @@ function optionsBeforeTerminator(argv: readonly string[]): readonly string[] {
   return terminatorIndex === -1 ? argv : argv.slice(0, terminatorIndex)
 }
 
-function valueAfter(argv: readonly string[], flag: string, required: boolean): string | null {
-  const assignmentPrefix = `${flag}=`
+function optionName(token: string): string {
+  const equalsIndex = token.indexOf('=')
+  return equalsIndex === -1 ? token : token.slice(0, equalsIndex)
+}
+
+function lastValueOccurrence(
+  argv: readonly string[],
+  flags: readonly string[]
+): string | null | undefined {
+  const flagNames = new Set(flags)
+  let value: string | null | undefined
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index]!
-    if (token.startsWith(assignmentPrefix)) {
-      const value = token.slice(assignmentPrefix.length)
-      if (value || !required) {
-        return value || null
-      }
-      throw new Error(`Missing value for ${flag}.`)
-    }
-    if (token !== flag) {
+    const name = optionName(token)
+    if (!flagNames.has(name)) {
       continue
     }
-    const value = argv[index + 1]
-    if (value && !value.startsWith('--')) {
-      return value
+
+    const equalsIndex = token.indexOf('=')
+    if (equalsIndex !== -1) {
+      const assigned = token.slice(equalsIndex + 1)
+      value = assigned || null
+      continue
     }
-    if (required) {
-      throw new Error(`Missing value for ${flag}.`)
+
+    const next = argv[index + 1]
+    if (next !== undefined && !next.startsWith('--')) {
+      value = next || null
+      index += 1
+    } else {
+      value = null
+    }
+  }
+  return value
+}
+
+function valueAfter(
+  argv: readonly string[],
+  flags: readonly string[],
+  required: boolean,
+  displayFlag: string
+): string | null {
+  const value = lastValueOccurrence(argv, flags)
+  if (value === undefined || value === null) {
+    if (required && value !== undefined) {
+      throw new Error(`Missing value for ${displayFlag}.`)
     }
     return null
   }
-  return null
+  return value
+}
+
+function lastBooleanValue(argv: readonly string[], flags: readonly string[]): boolean {
+  const flagNames = new Set(flags)
+  let value = false
+  for (const token of argv) {
+    const name = optionName(token)
+    if (!flagNames.has(name)) {
+      continue
+    }
+    // CLI boolean flags are true only in bare form; `--flag=...` is a string value.
+    value = !token.includes('=')
+  }
+  return value
+}
+
+function hasFlag(argv: readonly string[], flags: readonly string[]): boolean {
+  const flagNames = new Set(flags)
+  return argv.some((token) => flagNames.has(optionName(token)))
 }
 
 export function getServeOptions(argv: readonly string[]): ServeOptions {
@@ -51,7 +96,7 @@ export function getServeOptions(argv: readonly string[]): ServeOptions {
     throw new Error(typoError)
   }
 
-  const rawPort = valueAfter(optionsArgv, '--serve-port', true)
+  const rawPort = valueAfter(optionsArgv, ['--serve-port', '--port'], true, '--serve-port')
   let wsPort: number | undefined
   if (rawPort) {
     const parsedPort = Number(rawPort)
@@ -62,13 +107,24 @@ export function getServeOptions(argv: readonly string[]): ServeOptions {
   }
 
   const options: ServeOptions = {
-    json: optionsArgv.includes('--serve-json'),
+    // The CLI uses `flags.has('json')`, so even `--json=false` enables JSON output.
+    json: hasFlag(optionsArgv, ['--serve-json', '--json']),
     ...(wsPort !== undefined ? { wsPort } : {}),
-    pairingAddress: valueAfter(optionsArgv, '--serve-pairing-address', false),
-    noPairing: optionsArgv.includes('--serve-no-pairing'),
-    mobilePairing: optionsArgv.includes('--serve-mobile-pairing'),
-    recipeJson: optionsArgv.includes('--serve-recipe-json'),
-    projectRoot: valueAfter(optionsArgv, '--serve-project-root', false)
+    pairingAddress: valueAfter(
+      optionsArgv,
+      ['--serve-pairing-address', '--pairing-address'],
+      false,
+      '--serve-pairing-address'
+    ),
+    noPairing: lastBooleanValue(optionsArgv, ['--serve-no-pairing', '--no-pairing']),
+    mobilePairing: lastBooleanValue(optionsArgv, ['--serve-mobile-pairing', '--mobile-pairing']),
+    recipeJson: lastBooleanValue(optionsArgv, ['--serve-recipe-json', '--recipe-json']),
+    projectRoot: valueAfter(
+      optionsArgv,
+      ['--serve-project-root', '--project-root'],
+      false,
+      '--serve-project-root'
+    )
   }
   const validationError = getServeOptionValidationError(options)
   if (validationError) {
