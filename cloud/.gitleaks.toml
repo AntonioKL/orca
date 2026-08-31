@@ -1,0 +1,7 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Explicit Relay test signing key"
+regexTarget = "secret"
+regexes = ['''^test-assignment-key-with-at-least-32-bytes$''']
