@@ -22692,7 +22692,14 @@ export class OrcaRuntimeService {
       // worktree-create RPC pending forever. Match the shell gate's 30-minute backstop and fail
       // closed when the host still cannot prove completion.
       const timeout = setTimeout(
-        () => fail(new Error('setup_exit_evidence_timeout')),
+        () => {
+          fail(new Error('setup_exit_evidence_timeout'))
+          // A timed-out setup is no longer useful and must not leave a host PTY running after the
+          // create request has failed closed.
+          void this.closeTerminal(handle).catch((error) => {
+            console.warn('[worktree-create] failed to close timed-out setup terminal:', error)
+          })
+        },
         30 * 60 * 1000
       )
       const finish = (event: RuntimePtyExitEvent): void => {
@@ -26899,7 +26906,7 @@ export class OrcaRuntimeService {
     return handles
   }
 
-  private async provisionManagedWorktreeTerminals(args: {
+  async provisionManagedWorktreeTerminals(args: {
     worktreeSelector: string
     worktreeId: string
     worktreePath: string
@@ -28052,6 +28059,7 @@ export class OrcaRuntimeService {
     // time. Mirrors the wait-for-agent setup contract from #6298.
     let didSpawnSetup = false
     let setupTerminalHandle: string | null = null
+    let setupExitCode: number | undefined
     let startupTerminalHandle: string | null = null
     let startupTerminalTabId: string | null = null
     let startupTerminalPaneKey: string | null = null
@@ -28071,7 +28079,6 @@ export class OrcaRuntimeService {
           worktreeId: worktree.id,
           worktreePath,
           setup,
-          ...(defaultTabs ? { defaultTabs } : {}),
           hasStartupTerminal: false,
           reservePrimaryTerminal: false,
           setupCommandPlatform: getSetupRunnerCommandPlatformForLaunch(setup, 'posix'),
@@ -28085,6 +28092,7 @@ export class OrcaRuntimeService {
           throw new Error('setup_spawn_failed')
         }
         const evidence = await this.waitForSetupTerminalEvidence(setupTerminalHandle)
+        setupExitCode = evidence.exitCode
         setupWaitSucceeded = isSuccessfulSetupExitEvidence(evidence)
         if (!setupWaitSucceeded) {
           warning = `Setup did not complete successfully for ${worktreePath}; the agent was not started.`
@@ -28139,6 +28147,29 @@ export class OrcaRuntimeService {
         console.warn(`[worktree-create] ${warning}`)
       }
     }
+
+    // Gated setup must finish before default-tab commands run; the initial setup provisioning
+    // intentionally omitted them so a failed environment cannot execute user tabs.
+    if (setupMustGateStartup && setupWaitSucceeded && defaultTabs?.tabs.length) {
+      try {
+        await this.provisionManagedWorktreeTerminals({
+          worktreeSelector: `id:${worktree.id}`,
+          worktreeId: worktree.id,
+          worktreePath,
+          defaultTabs,
+          primaryTerminalHandle: startupTerminalHandle,
+          hasStartupTerminal: didSpawnStartup,
+          setupCommandPlatform: 'posix',
+          ...(shouldActivate ? {} : { surfaceOwner: false })
+        })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        warning = warning
+          ? `${warning} Also failed to create default terminals for ${worktreePath}: ${message}`
+          : `Failed to create default terminals for ${worktreePath}: ${message}`
+      }
+    }
+
     if (shouldActivate) {
       // Why: plain CLI creates should not steal the user's current workspace.
       // Explicit activation and hook-running still use renderer activation so
@@ -28146,11 +28177,8 @@ export class OrcaRuntimeService {
       const runtimeWillProvisionTerminals =
         !setupProvisioned && didSpawnStartup && Boolean(setup || defaultTabs)
       if (runtimeWillProvisionTerminals) {
-        // Why: once runtime spawned the startup PTY, renderer activation may see
-        // an existing terminal and skip setup/default tabs. Await provisioning so
-        // a failed setup spawn falls back to renderer activation (which still
-        // carries the wrapped command for retry); #6298's wait-for-setup
-        // guarantee is enforced by the shell marker, not by spawn timing.
+        // Why: once runtime spawned the startup PTY, renderer activation may see an existing
+        // terminal and skip non-gated setup/default tabs. Await so plain setup can retry there.
         const provisioned = await this.provisionManagedWorktreeTerminals({
           worktreeSelector: `id:${worktree.id}`,
           worktreeId: worktree.id,
@@ -28165,9 +28193,7 @@ export class OrcaRuntimeService {
         didSpawnSetup = provisioned.setupSpawned
         setupTerminalHandle = provisioned.setupTerminalHandle
       }
-      // Why: when runtime spawned setup, omit it from activation. When setup
-      // spawn failed, fall through with the wrapped command so renderer
-      // activation retries it.
+      // Why: when runtime spawned setup, omit it from activation; otherwise renderer retries it.
       const activationSetup = didSpawnSetup ? undefined : setup
       const activationDefaultTabs = runtimeWillProvisionTerminals ? undefined : defaultTabs
       if (effectiveStartup && !didSpawnStartup && !setupMustGateStartup) {
@@ -28256,12 +28282,18 @@ export class OrcaRuntimeService {
                 ? ('not_configured' as const)
                 : effectiveDecision === 'skip' || !shouldRunSetup
                   ? ('skipped' as const)
-                  : // Why: the in-process hook is already executing, so reporting
-                    // spawn_failed would strand callers that retry on it.
-                    didSpawnSetup || didStartInProcessSetupHook
-                    ? ('running' as const)
-                    : ('spawn_failed' as const),
-              ...(setupTerminalHandle ? { terminalHandle: setupTerminalHandle } : {})
+                  : setupExitCode !== undefined
+                    ? setupExitCode === 0
+                      ? ('succeeded' as const)
+                      : ('failed' as const)
+                    : // Why: the in-process hook is already executing, so reporting
+                      // spawn_failed would strand callers that retry on it.
+                      didSpawnSetup || didStartInProcessSetupHook
+                      ? ('running' as const)
+                      : ('spawn_failed' as const),
+              ...(setupTerminalHandle ? { terminalHandle: setupTerminalHandle } : {}),
+              ...(setupExitCode !== undefined ? { exitCode: setupExitCode } : {}),
+              ...(setupMustGateStartup ? { operation: 'host-owned-setup' as const } : {})
             }
           }
         : {}),
@@ -28404,6 +28436,7 @@ export class OrcaRuntimeService {
     // provisions setup, omit it from activation and the RPC result.
     let didSpawnSetup = false
     let setupTerminalHandle: string | null = null
+    let setupExitCode: number | undefined
     let startupTerminalHandle: string | null = null
     let startupTerminalTabId: string | null = null
     let startupTerminalPaneKey: string | null = null
@@ -28423,7 +28456,6 @@ export class OrcaRuntimeService {
           worktreeId: result.worktree.id,
           worktreePath: result.worktree.path,
           setup: result.setup,
-          ...(result.defaultTabs ? { defaultTabs: result.defaultTabs } : {}),
           hasStartupTerminal: false,
           reservePrimaryTerminal: false,
           setupCommandPlatform: getSetupRunnerCommandPlatformForLaunch(result.setup, 'posix'),
@@ -28437,6 +28469,7 @@ export class OrcaRuntimeService {
           throw new Error('setup_spawn_failed')
         }
         const evidence = await this.waitForSetupTerminalEvidence(setupTerminalHandle)
+        setupExitCode = evidence.exitCode
         setupWaitSucceeded = isSuccessfulSetupExitEvidence(evidence)
         if (!setupWaitSucceeded) {
           warning = `Setup did not complete successfully for ${result.worktree.path}; the agent was not started.`
@@ -28492,13 +28525,34 @@ export class OrcaRuntimeService {
       }
     }
 
+    // Gated setup must finish before default-tab commands run; the initial setup provisioning
+    // intentionally omitted them so a failed environment cannot execute user tabs.
+    if (setupMustGateStartup && setupWaitSucceeded && result.defaultTabs?.tabs.length) {
+      try {
+        await this.provisionManagedWorktreeTerminals({
+          worktreeSelector: `path:${result.worktree.path}`,
+          worktreeId: result.worktree.id,
+          worktreePath: result.worktree.path,
+          defaultTabs: result.defaultTabs,
+          primaryTerminalHandle: startupTerminalHandle,
+          hasStartupTerminal: didSpawnStartup,
+          setupCommandPlatform: 'posix',
+          ...(shouldActivate ? {} : { surfaceOwner: false })
+        })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        warning = warning
+          ? `${warning} Also failed to create default terminals for ${result.worktree.path}: ${message}`
+          : `Failed to create default terminals for ${result.worktree.path}: ${message}`
+      }
+    }
+
     if (shouldActivate) {
       const runtimeWillProvisionTerminals =
         !setupProvisioned && didSpawnStartup && Boolean(result.setup || result.defaultTabs)
       if (runtimeWillProvisionTerminals) {
-        // Why: remote/mobile task creates spawn the agent terminal in runtime,
-        // so renderer activation may not materialize setup/default tabs. Await so
-        // a failed setup spawn falls back to renderer activation for retry.
+        // Why: remote/mobile task creates spawn the agent terminal in runtime, so renderer
+        // activation may not materialize non-gated setup/default tabs. Await for retry safety.
         const provisioned = await this.provisionManagedWorktreeTerminals({
           worktreeSelector: `path:${result.worktree.path}`,
           worktreeId: result.worktree.id,
@@ -28513,8 +28567,7 @@ export class OrcaRuntimeService {
         didSpawnSetup = provisioned.setupSpawned
         setupTerminalHandle = provisioned.setupTerminalHandle
       }
-      // Why: omit setup from activation when runtime spawned it; on spawn
-      // failure fall through with the wrapped command so renderer retries.
+      // Why: omit setup from activation when runtime spawned it; otherwise renderer retries it.
       const activationSetup = didSpawnSetup ? undefined : result.setup
       const activationDefaultTabs = runtimeWillProvisionTerminals ? undefined : result.defaultTabs
       if (args.startup && !didSpawnStartup && !setupMustGateStartup) {
@@ -28616,10 +28669,16 @@ export class OrcaRuntimeService {
           ? ('skipped' as const)
           : !result.setup
             ? ('not_configured' as const)
-            : didSpawnSetup
-              ? ('running' as const)
-              : ('spawn_failed' as const),
-      ...(setupTerminalHandle ? { terminalHandle: setupTerminalHandle } : {})
+            : setupExitCode !== undefined
+              ? setupExitCode === 0
+                ? ('succeeded' as const)
+                : ('failed' as const)
+              : didSpawnSetup
+                ? ('running' as const)
+                : ('spawn_failed' as const),
+      ...(setupTerminalHandle ? { terminalHandle: setupTerminalHandle } : {}),
+      ...(setupExitCode !== undefined ? { exitCode: setupExitCode } : {}),
+      ...(setupMustGateStartup ? { operation: 'host-owned-setup' as const } : {})
     }
     const resultWithSetupReceipt = args.awaitTerminalProvisioning
       ? { ...resultWithStartupTerminal, setupReceipt }

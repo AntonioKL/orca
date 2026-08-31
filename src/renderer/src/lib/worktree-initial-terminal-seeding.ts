@@ -3,11 +3,6 @@ import type {
   WorktreeSetupLaunch
 } from '../../../shared/worktree/launch-types'
 import { shouldAutoCreateInitialTerminal } from '@/components/terminal/initial-terminal'
-import {
-  applySequencedSetupLaunch,
-  createSequencedSetupAgentCommands
-} from '../../../shared/setup-agent-sequencing'
-import { getSetupRunnerCommandPlatformForPath } from '../../../shared/setup-runner-command'
 import { agentKindToTuiAgent } from '../../../shared/agent-kind'
 import { useAppStore } from '@/store'
 import { queueHookCommandsForFirstWorktreeTab } from '@/lib/hook-command-delayed-delivery'
@@ -31,13 +26,6 @@ import {
 } from '@/lib/worktree-setup-issue-command-queue'
 import { applyDefaultTerminalTabs } from '@/lib/worktree-default-terminal-tabs'
 
-function getSetupRunnerCommandPlatformForLaunch(setup: WorktreeSetupLaunch): 'windows' | 'posix' {
-  return getSetupRunnerCommandPlatformForPath(
-    setup.runnerScriptPath,
-    navigator.userAgent.includes('Windows') ? 'windows' : 'posix'
-  )
-}
-
 export function ensureWorktreeHasInitialTerminal(
   store: WorktreeActivationStore,
   worktreeId: string,
@@ -53,27 +41,9 @@ export function ensureWorktreeHasInitialTerminal(
     store.settings !== undefined || store.repos !== undefined || store.worktreesByRepo !== undefined
       ? store
       : useAppStore.getState()
-  let sequencedStartup = startup
-  // Why: sequencing rewrites both halves at once — the gate the agent pane waits on and the
-  // gated setup launch that records the outcome — so the setup record itself carries the pairing
-  // from here on instead of a second argument every caller has to remember to thread.
-  let sequencedSetup = setup
-
-  if (startup && setup?.waitForAgentStartup === true) {
-    const platform = getSetupRunnerCommandPlatformForLaunch(setup)
-    const sequenced = createSequencedSetupAgentCommands({
-      runnerScriptPath: setup.runnerScriptPath,
-      startupCommand: startup.command,
-      platform,
-      shell: setup.shell
-    })
-    sequencedStartup = {
-      ...startup,
-      command: sequenced.startupCommand,
-      ...(sequenced.startupEnv ? { env: { ...startup.env, ...sequenced.startupEnv } } : {})
-    }
-    sequencedSetup = applySequencedSetupLaunch(setup, sequenced)
-  }
+  // Setup sequencing is host-owned; renderer activation only materializes the plain setup runner.
+  const sequencedStartup = startup
+  const sequencedSetup = setup
 
   const backendStartupTerminalSpawned = opts?.backendStartupTerminalSpawned === true
   const hostAuthority = resolveWorkspaceTerminalHostAuthority(ownerState, worktreeId)

@@ -45928,6 +45928,7 @@ describe('OrcaRuntimeService', () => {
       .fn()
       .mockResolvedValueOnce({ id: 'pty-headless-setup' })
       .mockResolvedValueOnce({ id: 'pty-headless-startup' })
+      .mockResolvedValueOnce({ id: 'pty-headless-default' })
     runtime.setPtyController({
       spawn,
       write: () => true,
@@ -45966,6 +45967,10 @@ describe('OrcaRuntimeService', () => {
       },
       waitForAgentStartup: true
     })
+    vi.mocked(getDefaultTabsLaunch).mockReturnValue({
+      runCommands: true,
+      tabs: [{ title: 'Dev', command: 'pnpm dev' }]
+    })
     vi.mocked(listWorktrees).mockResolvedValue([
       {
         path: '/tmp/workspaces/runtime-headless-startup-setup',
@@ -45991,7 +45996,7 @@ describe('OrcaRuntimeService', () => {
       expect.objectContaining({ viewMode: 'chat' })
     )
     expect(waitForSetupTerminalEvidence).toHaveBeenCalledWith(expect.any(String))
-    await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(3))
     const setupSpawn = spawn.mock.calls[0]![0] as {
       command: string
       env: Record<string, string>
@@ -46000,11 +46005,13 @@ describe('OrcaRuntimeService', () => {
       command: string
       env: Record<string, string>
     }
+    const defaultTab = spawn.mock.calls[2]![0] as { command: string }
     expect(setupSpawn.command).toContain('bash /mnt/c/tmp/repo/.git/orca/setup-runner.sh')
     expect(startup.command).toContain('claude')
+    expect(defaultTab.command).toBe('pnpm dev')
     expect(result.setup).toBeUndefined()
     expect(result.setupReceipt).toMatchObject({
-      state: 'running',
+      state: 'succeeded',
       terminalHandle: expect.stringMatching(/^term_/)
     })
   })
@@ -47382,7 +47389,7 @@ describe('OrcaRuntimeService', () => {
     const startupCall = spawn.mock.calls[1]![0] as { command?: string }
     expect(result.setup).toBeUndefined()
     expect(result.setupReceipt).toMatchObject({
-      state: 'running',
+      state: 'succeeded',
       terminalHandle: expect.stringMatching(/^term_/)
     })
     expect(setupCall.env).not.toHaveProperty(SETUP_AGENT_SEQUENCE_STARTUP_COMMAND_ENV)

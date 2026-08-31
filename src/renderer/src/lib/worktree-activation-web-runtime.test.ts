@@ -1,4 +1,3 @@
-import { SETUP_AGENT_SEQUENCE_SETUP_SCRIPT_ENV } from '../../../shared/setup-agent-sequencing'
 import { describe, expect, it, vi } from 'vitest'
 import { ensureWorktreeHasInitialTerminal } from './worktree-initial-terminal-seeding'
 import type { AppStoreState } from './worktree-activation-test-harness'
@@ -86,14 +85,10 @@ describe('ensureWorktreeHasInitialTerminal', () => {
         command: expect.stringContaining('bash /tmp/repo/.git/orca/setup-runner.sh')
       })
     )
-    expect(store.queueTabStartupCommand).toHaveBeenCalledWith(
-      'tab-2',
-      expect.objectContaining({
-        env: expect.objectContaining({
-          [SETUP_AGENT_SEQUENCE_SETUP_SCRIPT_ENV]: expect.stringContaining('printf')
-        })
-      })
-    )
+    expect(store.queueTabStartupCommand).toHaveBeenCalledWith('tab-2', {
+      command: 'bash /tmp/repo/.git/orca/setup-runner.sh',
+      env: { ORCA_ROOT_PATH: '/tmp/repo' }
+    })
   })
 
   it('holds the issue command for the first mirrored web runtime tab when none exists yet', () => {
