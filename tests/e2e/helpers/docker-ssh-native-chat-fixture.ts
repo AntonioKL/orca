@@ -13,11 +13,43 @@ export const DOCKER_SSH_NATIVE_CHAT_TRANSCRIPT_PATH = '/tmp/orca-native-chat-ssh
 export const DOCKER_SSH_NATIVE_CHAT_SESSION_ID = 'orca-native-chat-ssh-e2e'
 const DOCKER_SSH_NATIVE_CHAT_PUBLISHER_PATH = '/tmp/orca-native-chat-ssh-e2e-publish.sh'
 const DOCKER_SSH_NATIVE_CHAT_PUBLISHER_DIAGNOSTIC_PATH = '/tmp/orca-native-chat-ssh-e2e-publish.log'
+const DOCKER_SSH_NATIVE_CHAT_CLAUDE_HOOK_PATH = '/root/.orca/agent-hooks/claude-hook.sh'
 
 type DockerSshNativeChatMessage = {
   id: string
   role: 'user' | 'assistant'
   text: string
+}
+
+/** Seed the smallest realistic Claude installation so SSH startup exercises Orca's remote hook installer. */
+export function seedDockerSshNativeChatAgent(target: DockerSshRelayTarget): void {
+  execDockerSshRelayTargetCommand(
+    target,
+    [
+      'mkdir -p /root/.claude /usr/local/bin',
+      "printf '%s\\n' '{}' > /root/.claude/settings.json",
+      "printf '%s\\n' '#!/bin/sh' 'exit 0' > /usr/local/bin/claude",
+      'chmod 755 /usr/local/bin/claude'
+    ].join(' && ')
+  )
+}
+
+export function waitForDockerSshNativeChatAgentHook(
+  target: DockerSshRelayTarget,
+  timeoutMs = 30_000
+): void {
+  const deadline = Date.now() + timeoutMs
+  let lastDiagnostic = ''
+  while (Date.now() < deadline) {
+    try {
+      execDockerSshRelayTargetCommand(target, `test -x ${DOCKER_SSH_NATIVE_CHAT_CLAUDE_HOOK_PATH}`)
+      return
+    } catch (error) {
+      lastDiagnostic = error instanceof Error ? error.message : String(error)
+    }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250)
+  }
+  throw new Error(`Timed out waiting for remote Claude hook installation: ${lastDiagnostic}`)
 }
 
 export function writeDockerSshNativeChatTranscript(

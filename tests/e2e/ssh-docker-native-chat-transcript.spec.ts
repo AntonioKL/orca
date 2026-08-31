@@ -12,10 +12,8 @@ import type {
   RuntimeWorktreePsResult
 } from '../../src/shared/runtime-types'
 import type { RpcClient } from '../../mobile/src/transport/rpc-client'
-import {
-  MOBILE_WEB_PRODUCTION_GRANTS,
-  MobileWebCapabilityBroker
-} from '../../mobile/src/mobile-web/mobile-web-capability-broker'
+import { MobileWebCapabilityBroker } from '../../mobile/src/mobile-web/mobile-web-capability-broker'
+import { MOBILE_WEB_PRODUCTION_GRANTS } from '../../mobile/src/mobile-web/mobile-web-production-grants'
 import {
   cleanupDockerSshRelayTarget,
   startDockerSshRelayTarget,
@@ -30,6 +28,8 @@ import {
   DOCKER_SSH_NATIVE_CHAT_SESSION_ID,
   DOCKER_SSH_NATIVE_CHAT_TRANSCRIPT_PATH,
   publishDockerSshNativeChatSession,
+  seedDockerSshNativeChatAgent,
+  waitForDockerSshNativeChatAgentHook,
   writeDockerSshNativeChatTranscript
 } from './helpers/docker-ssh-native-chat-fixture'
 import { test, expect } from './helpers/orca-app'
@@ -55,11 +55,13 @@ test.describe('Docker SSH native-chat transcripts', () => {
     let hostedBridge: HostedMobileWebBridge | null = null
     try {
       target = startDockerSshRelayTarget(testInfo)
+      seedDockerSshNativeChatAgent(target)
       await waitForSessionReady(orcaPage)
       await waitForActiveWorktree(orcaPage)
       const remote = await connectDockerSshRelayTarget(orcaPage, target)
       await waitForActiveTerminalManager(orcaPage, 60_000)
       const ptyId = await waitForActivePanePtyId(orcaPage, 60_000)
+      waitForDockerSshNativeChatAgentHook(target)
       writeDockerSshNativeChatTranscript(target, [
         { id: 'u-1', role: 'user', text: 'remote hello' }
       ])
