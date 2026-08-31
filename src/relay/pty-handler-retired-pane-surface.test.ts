@@ -132,6 +132,17 @@ describe('PtyHandler retires a closed pane surface', () => {
     expect((await listProcesses()).map((session) => session.id)).toEqual([id])
   })
 
+  it('rejects malformed incarnation fences without killing the PTY', async () => {
+    const { id, term } = await spawnAgentPane()
+
+    await expect(dispatcher.callRequest('pty.shutdown', { id, incarnationId: 42 })).rejects.toThrow(
+      'Invalid incarnationId'
+    )
+
+    expect(term.kill).not.toHaveBeenCalled()
+    expect((await listProcesses()).map((session) => session.id)).toEqual([id])
+  })
+
   it('shuts down when the expected PTY incarnation matches', async () => {
     const { id, incarnationId, term } = await spawnAgentPane()
 

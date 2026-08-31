@@ -42,6 +42,19 @@ export async function shutdownSinglePty(
   const provider =
     args.provider ?? (connectionId ? sshProviders.get(connectionId) : tryGetProviderForPty(id))
   if (!provider && connectionId) {
+    if (args.intent === 'orphan-cleanup') {
+      // Losing the provider is not evidence that a remote PTY exited; preserve the
+      // lease and let the next handshake replay the fenced stop.
+      recordUndeliveredSshPtyKill({
+        store: deps.store,
+        ptyId: id,
+        connectionId,
+        reversible
+      })
+      deps.runtime?.clearPtyStopRequested?.(id)
+      deps.runtime?.markPtyLivenessUnverifiable?.(id, SSH_PROVIDER_UNREGISTERED_REASON)
+      return
+    }
     const incarnationId = finishPtyShutdown(id, connectionId, deps.store)
     recordUndeliveredSshPtyKill({
       store: deps.store,

@@ -2088,6 +2088,12 @@ export class PtyHandler {
     }
     const incarnationId =
       typeof params.incarnationId === 'string' ? params.incarnationId : undefined
+    if (
+      params.incarnationId !== undefined &&
+      (typeof params.incarnationId !== 'string' || params.incarnationId.length === 0)
+    ) {
+      throw new Error('Invalid incarnationId')
+    }
     const managed = this.ptys.get(id)
     if (!managed) {
       return
