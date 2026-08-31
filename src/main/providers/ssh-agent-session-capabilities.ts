@@ -39,7 +39,13 @@ export class SshAgentSessionCapabilities {
         })
         .catch(() => false)
     this.incarnationFenceProbe = probe
-    return await probe
+    const supported = await probe
+    // Capability probes can fail transiently while an SSH relay is reconnecting;
+    // never let one negative result disable incarnation fencing for this provider's lifetime.
+    if (!supported && this.incarnationFenceProbe === probe) {
+      this.incarnationFenceProbe = null
+    }
+    return supported
   }
 
   providesOwnerListings(): boolean {
