@@ -159,12 +159,16 @@ export class HeadlessEmulator {
   }
 
   /**
-   * Bumps only for real bytes. Why: flushParsedWrites() is a zero-byte write
-   * used purely as a parse fence (session-output-plane.ts), and every
-   * getSettledSnapshot runs one. Zero bytes cannot mutate the buffer — the OSC
-   * and mouse-mode scans are no-ops and the escape tail is idempotent — so
-   * bumping would evict the cache on every checkpoint read. Any write a fence
-   * orders behind has already bumped on its own completion.
+   * Bumps only for real bytes. Why this is safe even though a zero-byte write
+   * is NOT inert — `_core.writeSync('')` drains xterm's pending queue and
+   * applies it (verified) — is that a fence can never introduce an
+   * unattributed mutation. Any bytes it drains belong to a queued async write,
+   * and xterm runs that write's completion callback first, which bumps. The
+   * two write regimes are exhaustive: with writeSync present every write takes
+   * the sync path and nothing can queue; without it every write is async and
+   * self-bumps. Fences are exempt because flushParsedWrites() is one, and
+   * every getSettledSnapshot runs it — bumping would evict the cache on each
+   * checkpoint read.
    */
   private markWritten(data: string): void {
     if (data.length > 0) {

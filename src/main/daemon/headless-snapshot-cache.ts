@@ -38,6 +38,9 @@ type CachedParts = {
 // (MAX_COLD_RESTORE_CACHE_BYTES) so the two budgets read in one unit.
 const MAX_CACHED_SNAPSHOT_BYTES = 4 * 1024 * 1024
 
+/** Distinct scrollback windows retained per emulator. */
+const MAX_CACHED_SNAPSHOT_WINDOWS = 2
+
 // Why code units: bounds V8 string storage without rescanning or flattening
 // multi-MB ropes — same sizing rule as getColdRestorePayloadBytes.
 function retainedSnapshotBytes(parts: CachedParts): number {
@@ -55,31 +58,35 @@ export type HeadlessSnapshotSource = {
 }
 
 export class HeadlessSnapshotCache {
-  private epoch = 0
-  private retained: (CachedParts & { epoch: number; scrollbackRows: number | undefined }) | null =
-    null
+  // Why keyed and not a single slot: consumers ask for different scrollback
+  // windows against the same emulator — attach passes the full window while
+  // agent/text reads pass 0 — and one slot thrashes to a 0% hit rate when they
+  // alternate. Two covers every caller pair in the tree; a third evicts the
+  // oldest rather than growing per emulator.
+  private readonly entries = new Map<number | undefined, CachedParts>()
 
   /** Invalidates the cache. Called for every mutation of a memoized part;
    *  fields build() re-reads per call (cwd, lastTitle, escape tail) do not. */
   markMutated(): void {
-    this.epoch += 1
-    this.retained = null
+    this.entries.clear()
   }
 
   /** Builds a caller-owned snapshot, reusing the memoized serialize on a hit. */
   build(source: HeadlessSnapshotSource, scrollbackRows: number | undefined): TerminalSnapshot {
-    const retained = this.retained
-    let parts: CachedParts
-    if (retained && retained.epoch === this.epoch && retained.scrollbackRows === scrollbackRows) {
-      parts = retained
-    } else {
+    let parts = this.entries.get(scrollbackRows)
+    if (!parts) {
       parts = computeCachedParts(source, scrollbackRows)
       // Why size-gated: see MAX_CACHED_SNAPSHOT_BYTES. Declining to retain costs
       // the pre-existing serialize, never correctness.
-      this.retained =
-        retainedSnapshotBytes(parts) <= MAX_CACHED_SNAPSHOT_BYTES
-          ? { ...parts, epoch: this.epoch, scrollbackRows }
-          : null
+      if (retainedSnapshotBytes(parts) <= MAX_CACHED_SNAPSHOT_BYTES) {
+        if (this.entries.size >= MAX_CACHED_SNAPSHOT_WINDOWS) {
+          const oldest = this.entries.keys().next()
+          if (!oldest.done) {
+            this.entries.delete(oldest.value)
+          }
+        }
+        this.entries.set(scrollbackRows, parts)
+      }
     }
     // Why cloned: a hit hands back the retained entry, so a caller mutating
     // its snapshot would otherwise corrupt every later one.

@@ -34,7 +34,7 @@ describe('HeadlessEmulator snapshot cache', () => {
     expect(second.scrollbackAnsi).toBe(first.scrollbackAnsi)
   })
 
-  it('re-serializes for a different scrollbackRows window', async () => {
+  it('re-serializes the first time a different scrollbackRows window is asked for', async () => {
     emulator = new HeadlessEmulator({ cols: 80, rows: 24 })
     await emulator.write('hello world')
     emulator.getSnapshot({ scrollbackRows: 100 })
@@ -43,6 +43,22 @@ describe('HeadlessEmulator snapshot cache', () => {
     emulator.getSnapshot({ scrollbackRows: 500 })
 
     expect(serialize.calls()).toBeGreaterThan(0)
+  })
+
+  it('keeps two alternating scrollback windows warm', async () => {
+    // Why: attach asks for the full window while agent/text reads ask for 0,
+    // and a single-slot cache thrashes to a 0% hit rate when they alternate.
+    emulator = new HeadlessEmulator({ cols: 80, rows: 24 })
+    await emulator.write('alternating windows')
+    emulator.getSnapshot({ scrollbackRows: 0 })
+    emulator.getSnapshot()
+    const serialize = spyOnSerialize(emulator)
+
+    emulator.getSnapshot({ scrollbackRows: 0 })
+    emulator.getSnapshot()
+    emulator.getSnapshot({ scrollbackRows: 0 })
+
+    expect(serialize.calls()).toBe(0)
   })
 
   it('reflects an async write that lands after a cached snapshot', async () => {
