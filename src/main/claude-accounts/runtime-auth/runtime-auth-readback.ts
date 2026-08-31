@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { writeActiveClaudeKeychainCredentialsForRuntime } from '../keychain'
+import { startSpan } from '../../observability/tracer'
 import { ClaudeRuntimeAuthCredentialMatching } from './runtime-auth-credential-matching'
 import type {
   ClaudeReadBackMatch,
@@ -12,10 +13,15 @@ export class ClaudeRuntimeAuthReadback extends ClaudeRuntimeAuthCredentialMatchi
     baselineCredentialsJson: string,
     options: { updateLastWrittenCredentialsJson: boolean }
   ): Promise<ClaudeReadBackResult> {
+    const decisionSpan = startSpan('claude.credentials.readback', {
+      attributes: { baseline_present: Boolean(baselineCredentialsJson) }
+    })
     try {
       const candidates =
         await this.readRuntimeCredentialCandidatesForReadBack(baselineCredentialsJson)
       if (candidates.length === 0) {
+        decisionSpan.setAttribute('decision', 'unchanged')
+        decisionSpan.end()
         return { status: 'unchanged' }
       }
       const changedCandidates =
@@ -25,6 +31,8 @@ export class ClaudeRuntimeAuthReadback extends ClaudeRuntimeAuthCredentialMatchi
               (candidate) => candidate.credentialsJson !== this.lastWrittenCredentialsJson
             )
       if (changedCandidates.length === 0) {
+        decisionSpan.setAttribute('decision', 'unchanged')
+        decisionSpan.end()
         return { status: 'unchanged' }
       }
 
@@ -84,6 +92,11 @@ export class ClaudeRuntimeAuthReadback extends ClaudeRuntimeAuthCredentialMatchi
         if (sawAmbiguousCandidate) {
           console.warn('[claude-runtime-auth] Refusing ambiguous Claude auth read-back')
         }
+        decisionSpan.setAttribute(
+          'decision',
+          sawAmbiguousCandidate ? 'refused-ambiguous' : 'refused'
+        )
+        decisionSpan.end()
         return {
           status: 'rejected',
           runtimeCredentialsChanged: true,
@@ -94,6 +107,8 @@ export class ClaudeRuntimeAuthReadback extends ClaudeRuntimeAuthCredentialMatchi
       }
       const { credentialsJson: runtimeContents, match } =
         this.chooseFreshestReadBackCandidate(acceptedCandidates)
+      decisionSpan.setAttribute('decision', 'persisted')
+      decisionSpan.setAttribute('account_id', match.account.id)
 
       await this.writeManagedCredentials(match.account, runtimeContents)
       if (options.updateLastWrittenCredentialsJson) {
@@ -104,10 +119,13 @@ export class ClaudeRuntimeAuthReadback extends ClaudeRuntimeAuthCredentialMatchi
           await writeActiveClaudeKeychainCredentialsForRuntime(runtimeContents, paths.configDir)
         }
       }
+      decisionSpan.end()
       return { status: 'persisted' }
     } catch (error) {
       // Why: read-back is best-effort; a transient fs error must not block forward sync (worst case: one more stale-token cycle).
       console.warn('[claude-runtime-auth] Failed to read back refreshed tokens:', error)
+      decisionSpan.setAttribute('decision', 'error')
+      decisionSpan.end()
       return {
         status: 'rejected',
         runtimeCredentialsChanged:

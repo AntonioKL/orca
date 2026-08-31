@@ -42,9 +42,6 @@ export async function writeActiveClaudeKeychainCredentialsForRuntime(
   const user = getKeychainUser()
   const scopedService = getActiveClaudeService(configDir)
   await writeKeychainPassword(scopedService, user, contents)
-  if (scopedService !== ACTIVE_CLAUDE_SERVICE) {
-    await writeKeychainPassword(ACTIVE_CLAUDE_SERVICE, user, contents)
-  }
 }
 
 export async function deleteActiveClaudeKeychainCredentials(configDir?: string): Promise<void> {

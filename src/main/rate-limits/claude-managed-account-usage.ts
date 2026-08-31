@@ -1,12 +1,7 @@
 import type { ProviderRateLimits } from '../../shared/rate-limit-types'
 import {
-  isOauthTokenExpiring,
-  refreshClaudeOauthCredentials
-} from '../claude-accounts/oauth-refresh'
-import {
   readClaudeManagedCredentialsJson,
   resolveClaudeManagedCredentialsLocation,
-  writeClaudeManagedCredentialsJson,
   type InactiveClaudeAccount
 } from './claude-managed-account-credentials'
 import { fetchClaudeManagedUsagePanelSupplement } from './claude-managed-usage-panel'
@@ -47,22 +42,7 @@ export async function fetchInactiveClaudeAccountUsage(
     return noClaudeManagedCredentialsResult()
   }
 
-  let token = parseClaudeOAuthCredentialsJson(credentialsJson, 'credentials-file').token
-  if (isOauthTokenExpiring(credentialsJson)) {
-    const refreshed = await refreshClaudeOauthCredentials(credentialsJson)
-    if (options.signal?.aborted) {
-      return abortedClaudeRateLimitResult()
-    }
-    if (refreshed) {
-      try {
-        await writeClaudeManagedCredentialsJson(location, refreshed)
-      } catch {
-        // Keep the refreshed token for this fetch; a later poll can persist it.
-      }
-      credentialsJson = refreshed
-      token = parseClaudeOAuthCredentialsJson(refreshed, 'credentials-file').token
-    }
-  }
+  const token = parseClaudeOAuthCredentialsJson(credentialsJson, 'credentials-file').token
 
   if (!token) {
     return noClaudeManagedCredentialsResult()

@@ -20,6 +20,7 @@ export type UsageRateLimitSource = 'oauth' | 'cli' | 'web' | 'live-session'
 export type UsageRateLimitFailureKind =
   | 'missing-credentials'
   | 'stale-token'
+  | 'token_expired'
   | 'refreshable-credentials-without-token'
   | 'delegated-refresh-required'
   | 'deferred-by-live-session'

@@ -27,7 +27,7 @@ export class ClaudeRuntimeAuthService extends ClaudeRuntimeAuthSync {
     target?: ClaudeAccountSelectionTarget
   ): Promise<ClaudeRuntimeAuthPreparation> {
     const effectiveTarget = target ?? this.getDefaultAccountSelectionTarget()
-    await this.syncForCurrentSelection(effectiveTarget)
+    // Rate-limit reads must never materialize or refresh credentials.
     return this.getPreparation(effectiveTarget)
   }
 

@@ -129,10 +129,15 @@ export async function prepareRuntimePtySpawn(
   // Why: the drop still applies here, but this controller's result has no field for
   // notifyResumeUnavailable — runtime/relay panes start fresh without the notice.
   ctx.launchCommand = codexResumeLaunch.command
-  ctx.claudeAuth =
-    ctx.isClaudeLaunch && ctx.deps.prepareClaudeAuth
-      ? await ctx.deps.prepareClaudeAuth(ctx.codexSelectionTarget)
-      : null
+  try {
+    ctx.claudeAuth =
+      ctx.isClaudeLaunch && ctx.deps.prepareClaudeAuth
+        ? await ctx.deps.prepareClaudeAuth(ctx.codexSelectionTarget)
+        : null
+  } catch (error) {
+    console.warn('[claude-runtime-auth] Failed to prepare Claude auth; continuing launch', error)
+    ctx.claudeAuth = null
+  }
   if (ctx.isClaudeLaunch && isClaudeAuthSwitchInProgress()) {
     throw new Error('A Claude account switch is in progress. Try again after it finishes.')
   }

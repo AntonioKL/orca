@@ -221,9 +221,14 @@ export async function preparePtyIpcSpawnPreflight(ctx: PtyIpcSpawnState): Promis
     ctx.cwd,
     ctx.expectedWslDistro
   )
-  ctx.claudeAuth =
-    ctx.isClaudeLaunch && ctx.deps.prepareClaudeAuth
-      ? await ctx.deps.prepareClaudeAuth(initialSelectionTarget)
-      : null
+  try {
+    ctx.claudeAuth =
+      ctx.isClaudeLaunch && ctx.deps.prepareClaudeAuth
+        ? await ctx.deps.prepareClaudeAuth(initialSelectionTarget)
+        : null
+  } catch (error) {
+    console.warn('[claude-runtime-auth] Failed to prepare Claude auth; continuing launch', error)
+    ctx.claudeAuth = null
+  }
   ctx.spawnTiming.mark('auth')
 }

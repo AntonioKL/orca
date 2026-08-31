@@ -121,7 +121,7 @@ describe('Claude Keychain credentials', () => {
     ])
   })
 
-  it('writes runtime credentials to scoped and legacy services for old Claude Code compatibility', async () => {
+  it('writes runtime credentials only to the scoped service', async () => {
     const configDir = '/tmp/orca-claude-login-test'
     const scopedService = serviceForConfigDir(configDir)
     execFileMock.mockImplementation((_file, _args, _options, callback) => {
@@ -137,16 +137,6 @@ describe('Claude Keychain credentials', () => {
         '-U',
         '-s',
         scopedService,
-        '-a',
-        process.env.USER || process.env.USERNAME || 'user',
-        '-w',
-        'credentials-json'
-      ],
-      [
-        'add-generic-password',
-        '-U',
-        '-s',
-        'Claude Code-credentials',
         '-a',
         process.env.USER || process.env.USERNAME || 'user',
         '-w',
