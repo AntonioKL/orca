@@ -58,8 +58,6 @@ import { JournalLifecycleBatchAppender } from './journal-lifecycle-batch-appende
 
 export { AgentSessionJournalError } from './journal-write-guards'
 
-export { openAgentSessionJournal } from './journal-store-factory'
-
 export class AgentSessionJournal {
   private readonly identity: AgentSessionJournalIdentity
   private readonly journalDir: string
@@ -363,4 +361,12 @@ export class AgentSessionJournal {
     this.writes = run.catch(() => undefined)
     return run
   }
+}
+
+export const openAgentSessionJournal = async (
+  options: AgentSessionJournalOptions
+): Promise<AgentSessionJournal> => {
+  const journal = new AgentSessionJournal(options)
+  await journal.open()
+  return journal
 }
