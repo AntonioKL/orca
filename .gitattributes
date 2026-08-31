@@ -14,6 +14,7 @@
 /resources/plugins/** text eol=lf
 # pnpm hashes every patch byte-for-byte, so a CRLF checkout breaks the install.
 /config/patches/*.patch -text
+/mobile/patches/*.patch -text
 # The xterm bundle hunks also make a diff nobody can read; review the hand-written
 # source patch under xterm-src/ instead. The sibling patches stay diffable.
 /config/patches/@xterm__xterm@*.patch -diff
