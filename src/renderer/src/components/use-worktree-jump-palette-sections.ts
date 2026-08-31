@@ -52,7 +52,9 @@ export function useWorktreeJumpPaletteSections({
   setExpandedSectionCaps
 }: WorktreeJumpPaletteSectionsInput) {
   const openTabsLeadSections = useMemo(() => {
-    if (!hasQuery) return true
+    if (!hasQuery) {
+      return true
+    }
     return shouldOpenTabsLeadPaletteSections({
       bestWorktreeQualityRank: worktreeItems[0]
         ? bestPaletteQualityRank([worktreeItems[0].match.qualityClass])
@@ -64,7 +66,9 @@ export function useWorktreeJumpPaletteSections({
   }, [hasQuery, openTabItems, worktreeItems])
 
   const middleLeadsSections = useMemo(() => {
-    if (!hasQuery) return false
+    if (!hasQuery) {
+      return false
+    }
     const bestEntityQualityRank = Math.min(
       worktreeItems[0]
         ? bestPaletteQualityRank([worktreeItems[0].match.qualityClass])
