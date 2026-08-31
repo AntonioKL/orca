@@ -145,9 +145,24 @@ export function resolveCanonicalPaneAgentIdentity(
   input: CanonicalPaneAgentIdentityInput
 ): CanonicalPaneAgentIdentity {
   const processEvidence = processEvidenceFromProof(input)
-  // Coverage comes from authority-bearing sources only: hook, proven process, launch, sleeping
-  // session. A bare foreground name, a sibling, and a title never cover a pane.
+  // Coverage comes from authority-bearing sources that are still eligible for this run. A stale
+  // hook/launch row can remain in the input after a pane is replaced; it must not make a title-only
+  // answer look covered to a future action consumer.
+  const runIsEligible = (run: PaneAgentRunKey | undefined): boolean =>
+    run === undefined ||
+    input.currentRun === undefined ||
+    run.authorityId !== input.currentRun.authorityId ||
+    run.incarnation === input.currentRun.incarnation
   const covered = Boolean(
+    (input.hookAgent && runIsEligible(input.hookRun)) ||
+    (input.completedHookAgent && runIsEligible(input.completedHookRun)) ||
+    processEvidence ||
+    (input.launchAgent && runIsEligible(input.launchRun)) ||
+    (input.sleepingSessionAgent && runIsEligible(input.sleepingRun))
+  )
+  // Keep stale evidence in the resolver so diagnostics still report which source was superseded,
+  // even when it no longer qualifies the pane as covered.
+  const hasAuthorityEvidence = Boolean(
     input.hookAgent ||
     input.completedHookAgent ||
     processEvidence ||
@@ -156,7 +171,7 @@ export function resolveCanonicalPaneAgentIdentity(
   )
   const titleAgent = input.title ? collectAgentTitleEvidence(input.title).agent : null
 
-  if (!covered) {
+  if (!hasAuthorityEvidence) {
     if (input.uncoveredFallback) {
       const agent = input.uncoveredFallback.agent
       const titleOnly =
@@ -227,7 +242,7 @@ export function resolveCanonicalPaneAgentIdentity(
   return {
     agent: resolved.agent,
     source: resolved.source,
-    coverage: 'covered',
+    coverage: covered ? 'covered' : 'uncovered',
     titleOnly: resolved.source === 'title',
     ...(resolved.ambiguousAt ? { ambiguousAt: resolved.ambiguousAt } : {}),
     supersededSources: resolved.supersededSources

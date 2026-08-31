@@ -120,6 +120,19 @@ describe('uncovered compatibility lane', () => {
     })
     expect(identity).toMatchObject({ agent: null, source: null, coverage: 'uncovered' })
   })
+
+  it('does not label a foreground-only compatibility answer as title-only', () => {
+    const identity = resolveCanonicalPaneAgentIdentity({
+      foregroundAgent: 'codex',
+      uncoveredFallback: { agent: 'codex' }
+    })
+    expect(identity).toMatchObject({
+      agent: 'codex',
+      source: null,
+      coverage: 'uncovered',
+      titleOnly: false
+    })
+  })
 })
 
 describe('canonical ladder inside the covered lane', () => {
@@ -178,7 +191,12 @@ describe('reclaim-versus-stale-hook discriminator (run keys, not title text)', (
       currentRun: run2,
       title: 'STA-4011 Linux Antigravity Commit Messages - grok'
     })
-    expect(identity).toMatchObject({ agent: 'grok', source: 'title' })
+    expect(identity).toMatchObject({
+      agent: 'grok',
+      source: 'title',
+      coverage: 'uncovered',
+      titleOnly: true
+    })
     expect(identity.supersededSources).toEqual(['completed-hook'])
   })
 
