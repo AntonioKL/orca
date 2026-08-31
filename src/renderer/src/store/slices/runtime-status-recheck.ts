@@ -21,7 +21,7 @@ type RuntimeStatusStore = {
   runtimeEnvironments: readonly { id: string }[]
   setRuntimeEnvironmentStatus: (
     environmentId: string,
-    status: { status: RuntimeStatus | null; checkedAt: number }
+    status: RuntimeEnvironmentStatus
   ) => void
 }
 
@@ -78,11 +78,7 @@ export function reconcileRuntimeStatusForSlice(
     environmentExists: () =>
       get().runtimeEnvironments.some((environment) => environment.id === environmentId),
     getConnectionGeneration,
-    publish: (nextStatus) =>
-      get().setRuntimeEnvironmentStatus(environmentId, {
-        status: nextStatus,
-        checkedAt: Date.now()
-      })
+    publish: (nextStatus) => get().setRuntimeEnvironmentStatus(environmentId, nextStatus)
   })
 }
 

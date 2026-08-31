@@ -2,6 +2,7 @@ import type { StateCreator } from 'zustand'
 import type { AppState } from '../types'
 import type { PublicKnownRuntimeEnvironment } from '../../../../shared/runtime-environments'
 import type { RuntimeStatus } from '../../../../shared/runtime-types'
+import type { RemoteRuntimeSharedConnectionDiagnostics } from '../../../../shared/remote-runtime-shared-control-types'
 import { runtimeEnvironmentStatusesEqual } from './runtime-environment-status-equality'
 import {
   clearRecentRuntimeCompatibilityFailure,
@@ -22,6 +23,7 @@ import {
   ensureBrowserClientHostsForRestoredPages
 } from '@/runtime/restored-client-hosted-browser-host-attach'
 import * as runtimeStatusRecheck from './runtime-status-recheck'
+import * as runtimeStatusDiagnosticsPublish from './runtime-status-diagnostics-publish'
 
 /** Live status for one saved runtime environment, as last observed by the
  * renderer. `status === null` records a probe that failed or timed out so the
@@ -76,6 +78,12 @@ export type RuntimeStatusSlice = {
     status: RuntimeEnvironmentStatus,
     options?: { suppressDisconnectToast?: boolean }
   ) => void
+  /** Merges main-owned transport diagnostics into a complete runtime status snapshot. */
+  publishRuntimeEnvironmentDiagnostics: (args: {
+    environmentId: string
+    transportGeneration: number
+    diagnostics: RemoteRuntimeSharedConnectionDiagnostics
+  }) => void
   /** Drops a removed environment so stale hosts don't linger in the registry. */
   clearRuntimeEnvironmentStatus: (environmentId: string) => void
   /** Drops every entry whose id is not in the saved-environments set. */
@@ -308,6 +316,17 @@ export const createRuntimeStatusSlice: StateCreator<AppState, [], [], RuntimeSta
       showRuntimeDisconnectedToast(environmentId, get)
     }
   },
+
+  publishRuntimeEnvironmentDiagnostics:
+    runtimeStatusDiagnosticsPublish.createRuntimeEnvironmentDiagnosticsPublisher({
+      getCurrent: (environmentId) => get().runtimeStatusByEnvironmentId.get(environmentId),
+      setState: (updater) =>
+        set((s) => runtimeStatusDiagnosticsPublish.updateRuntimeStatusStore(s, updater)),
+      afterPublish: (environmentId, status) =>
+        runtimeStatusRecheck.reconcileRuntimeStatusForSlice(environmentId, status.status, get, () =>
+          getRuntimeEnvironmentConnectionGeneration(environmentId)
+        )
+    }),
 
   clearRuntimeEnvironmentStatus: (environmentId) => {
     runtimeStatusRecheck.cancelRuntimeStatusRecheck(environmentId)
