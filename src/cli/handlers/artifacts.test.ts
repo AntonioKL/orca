@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ArtifactListItem } from '../../shared/artifacts'
 import { ARTIFACT_HANDLERS } from './artifacts'
 import { ARTIFACT_CLI_MAX_RPC_BYTES } from '../../shared/artifacts'
+import { sanitizeArtifactTerminalContent } from '../artifact-format'
 import {
   ARTIFACT_SHARING_DISABLED_CODE,
   ARTIFACT_SHARING_DISABLED_MESSAGE,
@@ -98,6 +99,16 @@ describe('artifact CLI handlers', () => {
 
     expect(log).toHaveBeenCalledWith(`Artifact written to ${JSON.stringify(resolve(cwd, output))}`)
     expect(String(log.mock.calls[0]?.[0])).not.toContain('\u001b]52;')
+  })
+
+  it('preserves text between separate OSC terminal sequences', () => {
+    const escape = String.fromCharCode(27)
+    const bell = String.fromCharCode(7)
+    expect(
+      sanitizeArtifactTerminalContent(
+        `${escape}]8;;https://example.com${bell}visible${escape}]0;title${bell}`
+      )
+    ).toBe('visible')
   })
   it('reads a relative HTML file and sends sanitized content to the runtime', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'orca-artifact-cli-'))

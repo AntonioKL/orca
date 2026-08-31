@@ -28,7 +28,7 @@ export function formatArtifactRead(result: ArtifactReadResult): string {
 export function sanitizeArtifactTerminalContent(content: string): string {
   const escape = String.fromCharCode(27)
   const osc = new RegExp(
-    `${escape}\\][^${String.fromCharCode(7)}]*(?:${String.fromCharCode(7)}|${escape}\\\\)`,
+    `${escape}\\][^${String.fromCharCode(7)}]*?(?:${String.fromCharCode(7)}|${escape}\\\\)`,
     'g'
   )
   const csi = new RegExp(`${escape}(?:\\[[0-9;?]*[ -/]*[@-~])`, 'g')
