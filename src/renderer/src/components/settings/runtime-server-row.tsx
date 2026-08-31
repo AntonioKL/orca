@@ -114,13 +114,13 @@ export function RuntimeServerRow({
                   'auto.components.settings.RuntimeEnvironmentsPane.activeServerRowHelp',
                   'Active server for server-routed projects, terminals, and provider checks.'
                 )
-              : getHostDetailsSummary(details)}
+              : getHostDetailsSummary(effectiveDetails)}
         </p>
         {detailsDescription ? (
           <p
             className={cn(
               'mt-0.5 truncate text-xs',
-              details?.compatibility?.kind === 'blocked'
+              effectiveDetails?.compatibility?.kind === 'blocked'
                 ? 'text-destructive'
                 : 'text-muted-foreground'
             )}
