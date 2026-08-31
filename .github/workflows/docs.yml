@@ -46,7 +46,8 @@ jobs:
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        # v5 avoids the v6 bootstrap/shim regression when pinning pnpm 10.
+        uses: pnpm/action-setup@v5
         with:
           version: 10.24.0
           package_json_file: docs/site/package.json
@@ -202,7 +203,8 @@ jobs:
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        # v5 avoids the v6 bootstrap/shim regression when pinning pnpm 10.
+        uses: pnpm/action-setup@v5
         with:
           version: 10.24.0
           package_json_file: docs/site/package.json
