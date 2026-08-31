@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { ORCHESTRATION_FEDERATION_FLEET_SNAPSHOT_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
 import type { OrcaRuntimeService } from '../../orca-runtime'
 import type { OrchestrationDb } from '../../orchestration/db'
+import { OrchestrationError } from '../../orchestration/orchestration-error'
 import type { FederatedDispatchRow } from '../../orchestration/types'
 import { projectOrchestrationFleet } from '../../../../shared/orchestration-fleet-projection'
 import {
@@ -212,6 +213,42 @@ describe('federated fleet snapshots', () => {
     expect(result.observations.has(dispatch.dispatch_id)).toBe(false)
     expect(projectFederatedDispatchObservation).toHaveBeenCalledOnce()
     expect(updateFederatedDispatchRuntimeEpoch).not.toHaveBeenCalled()
+  })
+
+  it('records a method-not-found result at the probed runtime epoch', async () => {
+    const dispatch = federatedDispatch('dispatch-unsupported', 'peer-a', 'epoch-old')
+    const updateFederatedDispatchRuntimeEpoch = vi.fn()
+    const db = {
+      getFederatedDispatch: () => dispatch,
+      updateFederatedDispatchRuntimeEpoch,
+      ...observationFenceMethods()
+    } as unknown as OrchestrationDb
+    const runtime = {
+      resolveOrchestrationWorkerServer: () => ({
+        environmentId: dispatch.environment_id,
+        name: dispatch.environment_name,
+        peerFingerprint: dispatch.peer_fingerprint,
+        pairingRevision: 1
+      }),
+      callOrchestrationWorkerServer: vi.fn(async (_environmentId: string, method: string) => {
+        if (method === 'status.get') {
+          return runtimeStatus('epoch-new')
+        }
+        throw new OrchestrationError('method_not_found', 'fleet snapshot unavailable')
+      })
+    } as unknown as OrcaRuntimeService
+
+    const result = await readFederatedFleetSnapshots({
+      runtime,
+      db,
+      dispatchIds: [dispatch.dispatch_id]
+    })
+
+    expect(result.errors).toEqual([expect.objectContaining({ code: 'capability_unsupported' })])
+    expect(updateFederatedDispatchRuntimeEpoch).toHaveBeenCalledWith(
+      dispatch.dispatch_id,
+      'epoch-new'
+    )
   })
 })
 

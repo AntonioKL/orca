@@ -55,6 +55,7 @@ export async function invokeDispatcherUnaryMethod({
   )
   const authenticatedCallerFingerprint =
     context.authenticatedCallerFingerprint ??
+    legacyCoordinator?.mutationCallerFingerprint ??
     (needsLocalCallerFingerprint(request, effectiveParams)
       ? orchestrationMutations.getLocalAuthenticatedCallerFingerprint()
       : undefined)

@@ -135,7 +135,7 @@ export async function readFederatedFleetSnapshots(args: {
       if (caught instanceof OrchestrationError && caught.code === 'method_not_found') {
         cache.remember(
           first.peer_fingerprint,
-          first.remote_runtime_epoch ?? 'unknown',
+          observedCapabilityEpoch ?? first.remote_runtime_epoch ?? 'unknown',
           ORCHESTRATION_FEDERATION_FLEET_SNAPSHOT_RUNTIME_CAPABILITY,
           false
         )
