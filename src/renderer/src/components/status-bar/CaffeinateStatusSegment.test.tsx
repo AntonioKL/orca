@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { DropdownMenuLabel, DropdownMenuRadioGroup } from '@/components/ui/dropdown-menu'
+import {
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuSubTrigger
+} from '@/components/ui/dropdown-menu'
 import { AwakeEnginePicker } from './AwakeEnginePicker'
 import { CaffeinateStatusSegment } from './CaffeinateStatusSegment'
 import type { ComputerAwakeStatus } from '../../../../shared/computer-awake-mode'
@@ -113,8 +117,9 @@ describe('CaffeinateStatusSegment effective identity', () => {
     const picker = findElement(tree, (element) => element.type === AwakeEnginePicker)
 
     expect(trigger.props['aria-label']).toBe('Caffeinate, Agent · Inactive')
-    expect(textContent(menuLabel)).toContain('Caffeinate')
-    expect(textContent(menuLabel)).not.toContain('Caffeinate + Amphetamine')
+    expect(textContent(menuLabel)).toContain('Agent · Inactive')
+    const engineTrigger = findElement(tree, (element) => element.type === DropdownMenuSubTrigger)
+    expect(textContent(engineTrigger)).toContain('Amphetamine')
     expect(picker.props.engine).toBe('amphetamine')
   })
 
@@ -126,19 +131,17 @@ describe('CaffeinateStatusSegment effective identity', () => {
     const menuLabel = findElement(tree, (element) => element.type === DropdownMenuLabel)
 
     expect(trigger.props['aria-label']).toBe('Caffeinate + Amphetamine, Agent · Active')
-    expect(textContent(menuLabel)).toContain('Caffeinate + Amphetamine')
+    expect(textContent(menuLabel)).toContain('Agent · Active')
   })
 
-  it('names the primary mode group and places it before the optional integration', () => {
+  it('names the primary mode group and exposes the engine submenu', () => {
     const tree = CaffeinateStatusSegment({ iconOnly: false })
     const elements: ReactElementLike[] = []
     visit(tree, (element) => elements.push(element))
     const modeGroup = findElement(tree, (element) => element.type === DropdownMenuRadioGroup)
 
     expect(modeGroup.props['aria-label']).toBe('Keep awake')
-    expect(elements.indexOf(modeGroup)).toBeLessThan(
-      elements.findIndex((element) => element.type === AwakeEnginePicker)
-    )
+    expect(elements.some((element) => element.type === DropdownMenuSubTrigger)).toBe(true)
   })
 
   it('treats an omitted mixed-version activity field as Caffeinate', () => {

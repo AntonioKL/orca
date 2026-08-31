@@ -113,7 +113,7 @@ test.describe('macOS Amphetamine status-bar integration', () => {
     await orcaPage.getByRole('button', { name: 'Caffeinate, Off · Inactive' }).click()
 
     const menu = orcaPage.getByRole('menu')
-    const engineMenu = menu.getByRole('menuitem', { name: /Engine/ })
+    const engineMenu = menu.getByRole('menuitem', { name: /Caffeinate/ })
     const beforeProofPath = process.env.ORCA_AMPHETAMINE_MENU_BEFORE_PROOF_PATH
     if (beforeProofPath) {
       await orcaPage.screenshot({ path: beforeProofPath, animations: 'disabled' })
@@ -189,7 +189,7 @@ test.describe('macOS Amphetamine status-bar integration', () => {
       .locator('[data-slot="dropdown-menu-label"]')
       .filter({ hasText: 'Keep awake' })
     await expect(effectiveStatus).toContainText('Caffeinate')
-    await menu.getByRole('menuitem', { name: /Engine/ }).hover()
+    await menu.getByRole('menuitem', { name: /Caffeinate/ }).hover()
     const enginePicker = orcaPage.getByRole('menu').filter({ hasText: 'Amphetamine integration' })
     await expect(
       enginePicker.getByRole('menuitemradio', { name: 'Add Amphetamine' })

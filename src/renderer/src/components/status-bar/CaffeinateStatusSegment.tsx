@@ -1,11 +1,10 @@
-import { Coffee, Pill } from 'lucide-react'
+import { Coffee, Pill, Settings2 } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -52,6 +51,12 @@ function effectiveEngineLabel(amphetamineActive: boolean): string {
         'Caffeinate + Amphetamine'
       )
     : translate('auto.components.status.bar.CaffeinateStatusSegment.title', 'Caffeinate')
+}
+
+function configuredEngineLabel(engine: MacosAwakeEngine): string {
+  return engine === 'amphetamine'
+    ? translate('auto.components.status.bar.CaffeinateStatusSegment.amphetamine', 'Amphetamine')
+    : translate('auto.components.status.bar.CaffeinateStatusSegment.caffeinate', 'Caffeinate')
 }
 
 export function CaffeinateStatusSegment({
@@ -135,11 +140,23 @@ export function CaffeinateStatusSegment({
         <DropdownMenuLabel className="flex items-center justify-between gap-3">
           <span className="flex flex-col">
             <span>{keepAwakeLabel}</span>
-            <span className="font-normal text-muted-foreground">
-              {effectiveEngineLabel(effectiveAmphetamineActive)}
-            </span>
+            <span className="font-normal text-muted-foreground">{statusText}</span>
           </span>
-          <span className="font-normal text-muted-foreground">{statusText}</span>
+          {isMac ? (
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger className="h-7 gap-1.5 px-1.5 text-[11px]" hideChevron>
+                <Settings2 className="size-3" />
+                <span className="font-normal">{configuredEngineLabel(configuredEngine)}</span>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-72">
+                <AwakeEnginePicker
+                  engine={configuredEngine}
+                  status={serviceStatus}
+                  onChange={setEngine}
+                />
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+          ) : null}
         </DropdownMenuLabel>
         <DropdownMenuRadioGroup value={mode} onValueChange={setMode} aria-label={keepAwakeLabel}>
           <DropdownMenuRadioItem value="on" className="py-1.5">
@@ -176,36 +193,6 @@ export function CaffeinateStatusSegment({
             </span>
           </DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
-        {isMac ? (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger>
-                {configuredEngine === 'amphetamine' ? (
-                  <Pill className="size-3.5" />
-                ) : (
-                  <Coffee className="size-3.5" />
-                )}
-                <span>
-                  {translate(
-                    'auto.components.status.bar.CaffeinateStatusSegment.engineMenu',
-                    'Engine'
-                  )}
-                </span>
-                <span className="ml-auto text-[11px] font-normal text-muted-foreground">
-                  {configuredEngine === 'amphetamine' ? 'Orca + Amphetamine' : 'Orca'}
-                </span>
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="w-72">
-                <AwakeEnginePicker
-                  engine={configuredEngine}
-                  status={serviceStatus}
-                  onChange={setEngine}
-                />
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-          </>
-        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   )
