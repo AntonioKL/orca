@@ -165,4 +165,63 @@ describe('AutomationsDetailPane tab keyboard navigation', () => {
 
     expect(onActivePaneTabChange).not.toHaveBeenCalled()
   })
+
+  it('calls onBackToList on Escape key press from detail view', () => {
+    const onBackToList = vi.fn()
+    const selected = makeAutomation({ id: 'auto-1' })
+
+    act(() => {
+      root.render(
+        <TooltipProvider>
+          <AutomationsDetailPane
+            selected={selected}
+            selectedExternal={null}
+            selectedExternalRunPage={null}
+            selectedAutomationRunPage={null}
+            selectedRuns={[]}
+            selectedRunsNotice={null}
+            activePaneTab="overview"
+            relativeNow={1000}
+            externalActionKey={null}
+            selectedRepoDisplayName="orca"
+            selectedRepoDefaultBaseRef="main"
+            selectedWorkspaceName="default"
+            hostLabelById={new Map()}
+            selectedRunNowAvailability={null}
+            selectedAutomationRunPageWorkspaceDisplay={null}
+            selectedAutomationRunPageViewState={null}
+            canRerunSelectedAutomationRunPage={false}
+            isSelectedAutomationRunPageRerunPending={false}
+            worktreeMap={new Map()}
+            fetchExternalAutomationRuns={async () => []}
+            onActivePaneTabChange={() => undefined}
+            onClearExternalRunPage={() => undefined}
+            onClearAutomationRunPage={() => undefined}
+            requestExternalAction={() => undefined}
+            openExternalRunPage={() => undefined}
+            openEditExternalDialog={() => undefined}
+            runNow={() => undefined}
+            openEditDialog={() => undefined}
+            toggleAutomation={() => undefined}
+            requestDeleteAutomation={() => undefined}
+            rerunAutomationRun={() => undefined}
+            openRunWorkspace={() => undefined}
+            openAutomationRunPage={() => undefined}
+            onBackToList={onBackToList}
+            recoverSelectedRuns={() => undefined}
+          />
+        </TooltipProvider>
+      )
+    })
+
+    const escapeEvent = new KeyboardEvent('keydown', {
+      key: 'Escape',
+      bubbles: true,
+      cancelable: true
+    })
+    window.dispatchEvent(escapeEvent)
+
+    expect(escapeEvent.defaultPrevented).toBe(true)
+    expect(onBackToList).toHaveBeenCalledTimes(1)
+  })
 })

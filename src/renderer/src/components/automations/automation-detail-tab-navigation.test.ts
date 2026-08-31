@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import {
   getAutomationDetailNextTab,
   isAutomationDetailTabArrowKey,
+  shouldHandleAutomationDetailEscapeKey,
   shouldHandleAutomationDetailTabArrowKey
 } from './automation-detail-tab-navigation'
 
@@ -126,5 +127,81 @@ describe('getAutomationDetailNextTab', () => {
         canAccessRuns: false
       })
     ).toBeNull()
+  })
+})
+
+describe('shouldHandleAutomationDetailEscapeKey', () => {
+  function makeEvent(
+    overrides: Partial<{
+      key: string
+      altKey: boolean
+      ctrlKey: boolean
+      metaKey: boolean
+      shiftKey: boolean
+      isComposing: boolean
+      target: EventTarget | null
+    }> = {}
+  ) {
+    return {
+      key: 'Escape',
+      altKey: false,
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: false,
+      nativeEvent: { isComposing: overrides.isComposing ?? false },
+      target: overrides.target ?? document.body,
+      ...overrides
+    }
+  }
+
+  it('allows unmodified Escape on neutral targets', () => {
+    expect(shouldHandleAutomationDetailEscapeKey(makeEvent())).toBe(true)
+  })
+
+  it('allows Escape on SVGElement and document targets', () => {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+    expect(shouldHandleAutomationDetailEscapeKey(makeEvent({ target: svg }))).toBe(true)
+    expect(shouldHandleAutomationDetailEscapeKey(makeEvent({ target: document }))).toBe(true)
+  })
+
+  it('ignores non-Escape keys', () => {
+    expect(shouldHandleAutomationDetailEscapeKey(makeEvent({ key: 'Enter' }))).toBe(false)
+    expect(shouldHandleAutomationDetailEscapeKey(makeEvent({ key: 'ArrowLeft' }))).toBe(false)
+  })
+
+  it('ignores modified or composing Escape keys', () => {
+    expect(shouldHandleAutomationDetailEscapeKey(makeEvent({ metaKey: true }))).toBe(false)
+    expect(shouldHandleAutomationDetailEscapeKey(makeEvent({ ctrlKey: true }))).toBe(false)
+    expect(shouldHandleAutomationDetailEscapeKey(makeEvent({ altKey: true }))).toBe(false)
+    expect(shouldHandleAutomationDetailEscapeKey(makeEvent({ shiftKey: true }))).toBe(false)
+    expect(shouldHandleAutomationDetailEscapeKey(makeEvent({ isComposing: true }))).toBe(false)
+  })
+
+  it('ignores Escape when focus is inside text input, textarea, contentEditable, or escapeClearsValue', () => {
+    const input = document.createElement('input')
+    const textarea = document.createElement('textarea')
+    const select = document.createElement('select')
+    const editable = document.createElement('div')
+    editable.contentEditable = 'true'
+    const clearsValue = document.createElement('div')
+    clearsValue.setAttribute('data-escape-clears-value', 'true')
+
+    expect(shouldHandleAutomationDetailEscapeKey(makeEvent({ target: input }))).toBe(false)
+    expect(shouldHandleAutomationDetailEscapeKey(makeEvent({ target: textarea }))).toBe(false)
+    expect(shouldHandleAutomationDetailEscapeKey(makeEvent({ target: select }))).toBe(false)
+    expect(shouldHandleAutomationDetailEscapeKey(makeEvent({ target: editable }))).toBe(false)
+    expect(shouldHandleAutomationDetailEscapeKey(makeEvent({ target: clearsValue }))).toBe(false)
+  })
+
+  it('ignores Escape when target is inside a modal dialog, menu, or listbox', () => {
+    const dialog = document.createElement('div')
+    dialog.setAttribute('role', 'dialog')
+    const childButton = document.createElement('button')
+    dialog.appendChild(childButton)
+    document.body.appendChild(dialog)
+
+    expect(shouldHandleAutomationDetailEscapeKey(makeEvent({ target: childButton }))).toBe(false)
+
+    dialog.remove()
   })
 })
