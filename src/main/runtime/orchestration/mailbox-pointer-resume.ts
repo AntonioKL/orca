@@ -50,14 +50,34 @@ export function resumePendingOrchestrationMailboxPointer<
         message.pointer_process_incarnation !== staged.pointer_process_incarnation
     )
   ) {
-    if (persistedTarget) {
-      args.deps
-        .getDb()
-        ?.releaseMailboxPointerEnter(messageIds, persistedTarget, [
+    const db = args.deps.getDb()
+    if (db) {
+      const byTarget = new Map<
+        string,
+        { target: { ptyId: string; processIncarnation: string }; ids: string[] }
+      >()
+      for (const message of args.messages) {
+        if (!message.pointer_pty_id || !message.pointer_process_incarnation) {
+          continue
+        }
+        const key = `${message.pointer_pty_id}\u0000${message.pointer_process_incarnation}`
+        const group = byTarget.get(key) ?? {
+          target: {
+            ptyId: message.pointer_pty_id,
+            processIncarnation: message.pointer_process_incarnation
+          },
+          ids: []
+        }
+        group.ids.push(message.id)
+        byTarget.set(key, group)
+      }
+      for (const group of byTarget.values()) {
+        db.releaseMailboxPointerEnter(group.ids, group.target, [
           MAILBOX_POINTER_RESERVED,
           MAILBOX_POINTER_WRITE_ATTEMPTED,
           MAILBOX_POINTER_ENTER_ATTEMPTED
         ])
+      }
     }
     return false
   }

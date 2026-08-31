@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   MAILBOX_POINTER_ENTER_ATTEMPTED,
+  MAILBOX_POINTER_RESERVED,
   MAILBOX_POINTER_WRITE_ATTEMPTED
 } from './db/messages/mailbox-pointer-enter-state'
 import { OrchestrationDb } from './db'
@@ -75,6 +76,28 @@ describe('orchestration mailbox pointer submit', () => {
       pointer_enter_pending: MAILBOX_POINTER_WRITE_ATTEMPTED,
       pointer_pty_id: ptyId,
       pointer_process_incarnation: replacementReservation.processIncarnation
+    })
+    db.close()
+  })
+
+  it('does not overwrite a message already reserved by another pointer flight', () => {
+    const db = new OrchestrationDb(':memory:')
+    const first = db.insertMessage({ from: 'a', to: 'run:run-1', subject: 'first' })
+    const second = db.insertMessage({ from: 'a', to: 'run:run-1', subject: 'second' })
+    const original = { ptyId: 'pty-a', processIncarnation: 'inc-a' }
+    const replacement = { ptyId: 'pty-b', processIncarnation: 'inc-b' }
+
+    expect(db.stageMailboxPointerEnter([first.id], original)).toBe(true)
+    expect(db.stageMailboxPointerEnter([first.id, second.id], replacement)).toBe(false)
+    expect(db.getMessageById(first.id)).toMatchObject({
+      pointer_enter_pending: 1,
+      pointer_pty_id: original.ptyId,
+      pointer_process_incarnation: original.processIncarnation
+    })
+    expect(db.getMessageById(second.id)).toMatchObject({
+      pointer_enter_pending: 0,
+      pointer_pty_id: null,
+      pointer_process_incarnation: null
     })
     db.close()
   })
@@ -208,6 +231,60 @@ describe('orchestration mailbox pointer submit', () => {
       [MAILBOX_POINTER_WRITE_ATTEMPTED]
     )
     expect(redrive).toHaveBeenCalledWith(mailboxHandle, true)
+  })
+
+  it('releases every reservation when a pending batch targets multiple PTYs', () => {
+    const releaseMailboxPointerEnter = vi.fn()
+    const messages = [
+      {
+        id: 'msg-a',
+        type: 'status',
+        sequence: 1,
+        pointer_enter_pending: MAILBOX_POINTER_RESERVED,
+        pointer_pty_id: 'pty-a',
+        pointer_process_incarnation: 'inc-a'
+      },
+      {
+        id: 'msg-b',
+        type: 'status',
+        sequence: 2,
+        pointer_enter_pending: MAILBOX_POINTER_WRITE_ATTEMPTED,
+        pointer_pty_id: 'pty-b',
+        pointer_process_incarnation: 'inc-b'
+      }
+    ]
+
+    const resumed = resumePendingOrchestrationMailboxPointer({
+      deps: {
+        getDb: () => ({ releaseMailboxPointerEnter }) as never,
+        resolveSubmitTarget: () => ({
+          leaf: {} as never,
+          terminalHandle: 'term-current',
+          processIncarnation: 'inc-current'
+        })
+      } as never,
+      state: new OrchestrationMailboxPointerState(),
+      leaf: { ptyId: 'pty-current' } as never,
+      mailboxHandle: 'run:run-1',
+      messages,
+      enterDelayMs: 0,
+      leafKey: 'tab:leaf',
+      settle: vi.fn(),
+      redrive: vi.fn()
+    })
+
+    expect(resumed).toBe(false)
+    expect(releaseMailboxPointerEnter).toHaveBeenCalledTimes(2)
+    expect(releaseMailboxPointerEnter).toHaveBeenCalledWith(
+      ['msg-a'],
+      { ptyId: 'pty-a', processIncarnation: 'inc-a' },
+      [MAILBOX_POINTER_RESERVED, MAILBOX_POINTER_WRITE_ATTEMPTED, MAILBOX_POINTER_ENTER_ATTEMPTED]
+    )
+    expect(releaseMailboxPointerEnter).toHaveBeenCalledWith(
+      ['msg-b'],
+      { ptyId: 'pty-b', processIncarnation: 'inc-b' },
+      [MAILBOX_POINTER_RESERVED, MAILBOX_POINTER_WRITE_ATTEMPTED, MAILBOX_POINTER_ENTER_ATTEMPTED]
+    )
   })
 
   it('does not submit after the parked PTY incarnation is replaced', async () => {

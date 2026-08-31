@@ -65,6 +65,16 @@ function preRangeProvider(
 }
 
 describe('remote worker transcript reads', () => {
+  it('reports a missing attested path separately from remote capability loss', async () => {
+    const result = await readWorkerTranscript({
+      agent: 'codex',
+      sessionId: 'missing-path-session',
+      filesystemProvider: preRangeProvider(() => Buffer.from(''))
+    })
+
+    expect(result).toEqual({ ok: false, reason: 'transcript_missing', warnings: [] })
+  })
+
   it.each([
     ['ranged', (readContents: () => Buffer) => rangedProvider(readContents).provider],
     ['pre-range', preRangeProvider]

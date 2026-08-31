@@ -44,7 +44,7 @@ export function buildWorkerAttentionContext(args: {
   const facts = args.db.getWorkerAttentionFacts(args.dispatch.id, now)
   return projectWorkerAttentionContext({
     facts,
-    isRoot: args.task?.parent_id == null,
+    isRoot: facts.isRoot,
     status: args.status,
     now
   })

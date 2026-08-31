@@ -108,6 +108,26 @@ describe('Task/Dispatch lifecycle guards', () => {
     expect(database.getActiveDispatchForTerminal('term_reversed_context')).toBeUndefined()
   })
 
+  it.each(['failed', 'stopped'] as const)(
+    'treats abandon of an already %s worker as stale without a lifecycle conflict',
+    (state) => {
+      const database = createDatabase()
+      const task = database.createTask({ spec: `already ${state}` })
+      const worker = startWorker(database, task.id, `already_${state}`)
+      if (state === 'failed') {
+        database.failDispatch(worker.dispatchId, 'process exited', { workerProcessExited: true })
+      } else {
+        database.beginWorkerStop(worker.dispatchId, 'runtime-test')
+        database.settleWorkerStop(worker.dispatchId)
+      }
+
+      expect(database.abandonWorkerDispatch(worker.dispatchId)).toMatchObject({
+        disposition: 'stale',
+        worker: { state }
+      })
+    }
+  )
+
   it('rejects generic failure while a supervised worker remains active', () => {
     const database = createDatabase()
     const task = database.createTask({ spec: 'supervised failure guard' })

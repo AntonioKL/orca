@@ -111,6 +111,23 @@ describe('durable Attempt observation and outcome projection', () => {
     expect(db!.getDispatchContextById(dispatchId)?.status).toBe('dispatched')
   })
 
+  it('stores valid JSON when an optional payload field is explicitly undefined', () => {
+    const { dispatchId } = createAttempt()
+    const observation = fact(dispatchId, {
+      id: 'undefined-quiet',
+      sequence: 1,
+      facet: 'process_turn',
+      payload: { process: 'running', turn: 'waiting', quiet: undefined }
+    })
+
+    expect(db!.recordAttemptObservation(observation).fact.payload).toEqual({
+      process: 'running',
+      turn: 'waiting',
+      quiet: null
+    })
+    expect(() => db!.getAttemptObservationFacts(dispatchId)).not.toThrow()
+  })
+
   it('retains facts and the same projection after a database reopen', () => {
     const dir = mkdtempSync(join(tmpdir(), 'orca-attempt-observation-'))
     const path = join(dir, 'orchestration.sqlite')

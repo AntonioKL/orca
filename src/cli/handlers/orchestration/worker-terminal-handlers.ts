@@ -162,9 +162,10 @@ export const ORCHESTRATION_WORKER_TERMINAL_HANDLERS: Record<string, CommandHandl
       const counts = Object.entries(value.counts)
         .map(([state, count]) => `${state}=${count}`)
         .join(' ')
-      const pagination = value.page?.hasMore
-        ? `\nMore: --cursor ${value.page.nextCursor ?? ''}`
-        : ''
+      const pagination =
+        value.page?.hasMore && value.page.nextCursor
+          ? `\nMore: --cursor ${value.page.nextCursor}`
+          : ''
       const warnings = (value.partialHostErrors ?? []).map(
         (error) =>
           `Warning: worker observations from ${error.name} (${error.environmentId}) are incomplete: ${error.code}; dispatches=${error.dispatchIds.join(',') || 'none'}`

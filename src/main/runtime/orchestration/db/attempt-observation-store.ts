@@ -34,7 +34,8 @@ function canonicalPayload(value: unknown): string {
       .map((key) => `${JSON.stringify(key)}:${canonicalPayload(record[key])}`)
       .join(',')}}`
   }
-  return JSON.stringify(value)
+  // JSON has no representation for undefined; preserve valid replayable JSON.
+  return value === undefined ? 'null' : JSON.stringify(value)
 }
 
 export function exposeAttemptObservationFact(

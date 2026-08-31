@@ -135,6 +135,10 @@ export class OrchestrationMutationExecutor {
         const replayed = attachMutationReceipt(observed, requestId, true)
         db.completeMutationReceipt({ ...identity, receipt: JSON.stringify(replayed) })
         return replayed
+      } catch {
+        // The original mutation is already durable; an observation-only replay
+        // must not turn a completed request into a retry or resend opportunity.
+        return attachMutationReceipt(receipt, requestId, true)
       } finally {
         this.inFlight.delete(key)
       }

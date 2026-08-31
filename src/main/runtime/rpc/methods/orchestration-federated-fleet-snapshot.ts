@@ -116,9 +116,19 @@ export async function readFederatedFleetSnapshots(args: {
       )
       const expected = new Set(dispatchIds)
       return {
-        observations: snapshot.items.filter(
-          (item) => expected.has(item.dispatchId) && projectedDispatches.has(item.dispatchId)
-        ),
+        observations: snapshot.items
+          .filter(
+            (item) => expected.has(item.dispatchId) && projectedDispatches.has(item.dispatchId)
+          )
+          .map((item) =>
+            item.observation.exactWorker
+              ? item
+              : {
+                  ...item,
+                  // A non-exact identity can never prove either liveness or exit.
+                  observation: { ...item.observation, status: 'unverifiable' as const }
+                }
+          ),
         error: null
       }
     } catch (caught) {

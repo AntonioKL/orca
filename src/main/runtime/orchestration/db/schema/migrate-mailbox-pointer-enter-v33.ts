@@ -17,6 +17,6 @@ export function migrateMailboxPointerEnterV33(this: OrchestrationDb, current: nu
   this.db.exec(`
     CREATE INDEX IF NOT EXISTS idx_messages_pending_pointer_enter
       ON messages(to_handle, sequence)
-      WHERE read = 0 AND pointer_enter_pending = 1;
+      WHERE read = 0 AND pointer_enter_pending > 0;
   `)
 }

@@ -44,13 +44,19 @@ export function stageMailboxPointerEnter(
   target: MailboxPointerReservationTarget
 ): boolean {
   return (
-    mutatePointerMessages(this, ids, (placeholders) => ({
-      sql: `UPDATE messages
+    mutatePointerMessages(
+      this,
+      ids,
+      (placeholders) => ({
+        sql: `UPDATE messages
           SET pointer_enter_pending = ?,
               pointer_pty_id = ?, pointer_process_incarnation = ?
-          WHERE read = 0 AND id IN (${placeholders})`,
-      leadingParams: [MAILBOX_POINTER_RESERVED, target.ptyId, target.processIncarnation]
-    })) === ids.length
+          WHERE read = 0 AND pointer_enter_pending = 0
+            AND id IN (${placeholders})`,
+        leadingParams: [MAILBOX_POINTER_RESERVED, target.ptyId, target.processIncarnation]
+      }),
+      { requireAll: true }
+    ) === ids.length
   )
 }
 
@@ -60,19 +66,24 @@ export function markMailboxPointerWriteAttempted(
   target: MailboxPointerReservationTarget
 ): boolean {
   return (
-    mutatePointerMessages(this, ids, (placeholders) => ({
-      sql: `UPDATE messages
+    mutatePointerMessages(
+      this,
+      ids,
+      (placeholders) => ({
+        sql: `UPDATE messages
           SET pointer_enter_pending = ?
           WHERE read = 0 AND pointer_enter_pending = ?
             AND pointer_pty_id = ? AND pointer_process_incarnation = ?
             AND id IN (${placeholders})`,
-      leadingParams: [
-        MAILBOX_POINTER_WRITE_ATTEMPTED,
-        MAILBOX_POINTER_RESERVED,
-        target.ptyId,
-        target.processIncarnation
-      ]
-    })) === ids.length
+        leadingParams: [
+          MAILBOX_POINTER_WRITE_ATTEMPTED,
+          MAILBOX_POINTER_RESERVED,
+          target.ptyId,
+          target.processIncarnation
+        ]
+      }),
+      { requireAll: true }
+    ) === ids.length
   )
 }
 
@@ -82,19 +93,24 @@ export function markMailboxPointerEnterAttempted(
   target: MailboxPointerReservationTarget
 ): boolean {
   return (
-    mutatePointerMessages(this, ids, (placeholders) => ({
-      sql: `UPDATE messages
+    mutatePointerMessages(
+      this,
+      ids,
+      (placeholders) => ({
+        sql: `UPDATE messages
           SET pointer_enter_pending = ?
           WHERE read = 0 AND pointer_enter_pending = ?
             AND pointer_pty_id = ? AND pointer_process_incarnation = ?
             AND id IN (${placeholders})`,
-      leadingParams: [
-        MAILBOX_POINTER_ENTER_ATTEMPTED,
-        MAILBOX_POINTER_WRITE_ATTEMPTED,
-        target.ptyId,
-        target.processIncarnation
-      ]
-    })) === ids.length
+        leadingParams: [
+          MAILBOX_POINTER_ENTER_ATTEMPTED,
+          MAILBOX_POINTER_WRITE_ATTEMPTED,
+          target.ptyId,
+          target.processIncarnation
+        ]
+      }),
+      { requireAll: true }
+    ) === ids.length
   )
 }
 
@@ -158,7 +174,8 @@ export function releasePendingMailboxPointerForPty(this: OrchestrationDb, ptyId:
 function mutatePointerMessages(
   db: OrchestrationDb,
   ids: string[],
-  build: (placeholders: string) => { sql: string; leadingParams: (string | number)[] }
+  build: (placeholders: string) => { sql: string; leadingParams: (string | number)[] },
+  options?: { requireAll?: boolean }
 ): number {
   if (ids.length === 0) {
     return 0
@@ -172,6 +189,11 @@ function mutatePointerMessages(
       changed += Number(
         db.db.prepare(mutation.sql).run(...mutation.leadingParams, ...batch).changes
       )
+    }
+    if (options?.requireAll && changed !== ids.length) {
+      db.db.exec('ROLLBACK TO mailbox_pointer_enter_mutation')
+      db.db.exec('RELEASE mailbox_pointer_enter_mutation')
+      return 0
     }
     db.db.exec('RELEASE mailbox_pointer_enter_mutation')
     return changed

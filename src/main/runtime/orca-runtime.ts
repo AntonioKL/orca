@@ -38664,6 +38664,7 @@ export class OrcaRuntimeService {
     const leaf = parked
       ? pty?.connected &&
         pty.tabId === stagedLeaf.tabId &&
+        isTerminalLeafId(stagedLeaf.leafId) &&
         pty.paneKey === makePaneKey(stagedLeaf.tabId, stagedLeaf.leafId)
         ? {
             ...stagedLeaf,

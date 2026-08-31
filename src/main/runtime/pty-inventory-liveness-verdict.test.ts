@@ -205,8 +205,8 @@ describe('inventory sweep liveness verdicts', () => {
       reason: 'provider disconnected'
     })
     const internals = getLivenessCacheInternals(runtime)
-    expect(internals.activePtyLivenessVerdictByPtyId).toHaveLength(LIVE_PTY_COUNT)
-    expect(internals.historicalPtyLivenessVerdictByPtyId).toHaveLength(0)
+    expect(internals.activePtyLivenessVerdictByPtyId.size).toBe(LIVE_PTY_COUNT)
+    expect(internals.historicalPtyLivenessVerdictByPtyId.size).toBe(0)
   })
 
   it('observes more than 256 live PTYs with linear cache work and no retained history', async () => {

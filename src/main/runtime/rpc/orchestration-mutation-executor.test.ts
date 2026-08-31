@@ -90,6 +90,30 @@ describe('terminal prompt mutation receipt retry boundary', () => {
     expect(invoke).toHaveBeenCalledOnce()
   })
 
+  it('returns the durable receipt when a replay-only observation cannot run', async () => {
+    const harness = createHarness()
+    databases.push(harness.db)
+    const requestId = 'observe-replay-rejected'
+    const params = { ...promptParams, waitSubmitMs: 100 }
+    const request = { ...promptRequest(requestId), params }
+    const invoke = vi
+      .fn()
+      .mockResolvedValueOnce({
+        send: { prompt: { stages: ['input_accepted', 'queued_pending_turn'] } }
+      })
+      .mockRejectedValueOnce(new Error('terminal was parked'))
+
+    await expect(harness.executor.run(request, params, invoke)).resolves.toMatchObject({
+      send: { prompt: { stages: ['input_accepted', 'queued_pending_turn'] } },
+      mutation: { replayed: false }
+    })
+    await expect(harness.executor.run(request, params, invoke)).resolves.toMatchObject({
+      send: { prompt: { stages: ['input_accepted', 'queued_pending_turn'] } },
+      mutation: { replayed: true }
+    })
+    expect(invoke).toHaveBeenCalledTimes(2)
+  })
+
   it('keeps an uncheckpointed pending worker_done fenced after restart', async () => {
     const harness = createHarness()
     databases.push(harness.db)

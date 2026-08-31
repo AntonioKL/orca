@@ -75,7 +75,10 @@ export function resolveCreatorDepth(this: OrchestrationDb, creator: DispatchCrea
   return depths.length > 0 ? Math.max(...depths) : ROOT_DISPATCH_DEPTH
 }
 
-/** Proven creator Attempt identity; null when system-owned, absent, or ambiguous. */
+/**
+ * Proven creator Attempt identity; null when system-owned, absent, or ambiguous.
+ * Throws when multiple live remote attachments match the same terminal identity.
+ */
 export function resolveCreatorDispatchId(
   this: OrchestrationDb,
   creator: DispatchCreator

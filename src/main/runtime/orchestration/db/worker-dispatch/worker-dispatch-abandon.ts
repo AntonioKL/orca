@@ -46,6 +46,10 @@ export function abandonWorkerDispatch(
         `Dispatch ${dispatchId} is stopping; wait for worker-stop to settle before abandoning.`
       )
     }
+    if (worker.state === 'failed' || worker.state === 'stopped') {
+      this.db.exec('COMMIT')
+      return { disposition: 'stale', worker }
+    }
     if (worker.state === 'succeeded') {
       throw new OrchestrationError(
         'dispatch_inactive',

@@ -62,7 +62,6 @@ export function stageOrchestrationMailboxPointer<TWaiter extends OrchestrationMe
       !db.stageMailboxPointerEnter(flight.stagedMessageIds, reservationTarget) ||
       !db.markMailboxPointerWriteAttempted(flight.stagedMessageIds, reservationTarget)
     ) {
-      db.markAsUndelivered(flight.stagedMessageIds)
       args.settle(ptyId, flight)
       args.redrive(args.mailboxHandle, true)
       return

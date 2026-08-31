@@ -68,6 +68,7 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
     if (leaf.ptyId) {
       const deferredEnter = this.state.takeDeferredEnter(leaf.ptyId)
       if (deferredEnter) {
+        this.state.parkDelivery(leaf.ptyId, mailboxHandle, leaf, options.reservedTypes)
         deferredEnter()
         return
       }

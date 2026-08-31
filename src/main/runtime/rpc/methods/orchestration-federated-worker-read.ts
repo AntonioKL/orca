@@ -90,6 +90,9 @@ export async function readFederatedWorkerOutput(args: {
     )
     const legacy = await readLegacy(args)
     projectRemoteRuntimeEpoch(args.db, observationFence, legacy.remoteRuntimeEpoch)
+    if (legacy.remoteRuntimeEpoch !== capability.runtimeEpoch) {
+      capabilities.observeEpoch(args.federated.peer_fingerprint, legacy.remoteRuntimeEpoch)
+    }
     return legacy
   }
 }

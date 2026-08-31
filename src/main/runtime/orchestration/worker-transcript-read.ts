@@ -65,7 +65,7 @@ export async function readWorkerTranscript(args: {
     // real authority boundary, not merely a portability concern).
     filePath = args.transcriptPath?.trim() || null
     if (!filePath) {
-      return { ok: false, reason: 'remote_capability_unavailable', warnings: [] }
+      return { ok: false, reason: 'transcript_missing', warnings: [] }
     }
     const page = await readRemoteWorkerTranscript(args, filePath, decode)
     if (
