@@ -13453,6 +13453,34 @@ export class OrcaRuntimeService {
       })
   }
 
+  /** Whether a headless emulator already backs this PTY. */
+  hasHeadlessTerminal(ptyId: string): boolean {
+    return this.headlessTerminals.has(ptyId)
+  }
+
+  /** Append an SSH reattach tail only while the model ingest fence is unchanged. */
+  appendHeadlessTerminalCatchUp(
+    ptyId: string,
+    data: string,
+    ingestedSequenceFence: number
+  ): boolean {
+    if (!data || this.getPtyOutputSequence(ptyId) !== ingestedSequenceFence) {
+      return false
+    }
+    const state = this.headlessTerminals.get(ptyId)
+    if (!state) {
+      return false
+    }
+    this.recordOsc7MetadataForPty(ptyId, data)
+    this.recordRecentPtyOutputForPathProvenance(ptyId, data)
+    state.writeChain = state.writeChain
+      .then(async () => {
+        await state.emulator.write(data)
+      })
+      .catch(() => {})
+    return true
+  }
+
   // Why: reattach/cold-restore/replay payloads arrive as spawn RPC results and
   // never pass through onPtyData, so after a relaunch the records backing
   // `terminal list`/`terminal read` stayed blank while the session was alive.

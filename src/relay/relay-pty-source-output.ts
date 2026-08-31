@@ -22,6 +22,20 @@ export function ptySourceDeliveryClosed(
   return !state || state === 'closed' || state === 'closing'
 }
 
+/** True only when this consumer has acknowledged every unit received by the delivery. */
+export function ptySourceDeliveryFullyAcknowledged(
+  session: SshPtyConsumerSessionAdapter,
+  record:
+    | Pick<RelayPtySourceDeliveryRecord, 'identity' | 'restoreRequired' | 'rotationPending'>
+    | undefined
+): boolean {
+  if (!record || record.restoreRequired || record.rotationPending) {
+    return false
+  }
+  const snapshot = session.sourceDeliverySnapshotIfKnown(record.identity)
+  return snapshot?.state === 'active' && snapshot.creditedEndSu === snapshot.receivedEndSu
+}
+
 export function appendPtySourceOutput(
   session: SshPtyConsumerSessionAdapter,
   record: RelayPtySourceDeliveryRecord,

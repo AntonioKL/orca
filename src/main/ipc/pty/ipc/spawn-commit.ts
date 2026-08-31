@@ -21,6 +21,7 @@ import { seedTerminalRestoreRecordsFromSpawnResult } from '../pane/agent-session
 import { admitRendererAgentLaunchAuthority } from '../pane/launch-authority'
 import type { PtyIpcSpawnState } from './spawn-state'
 import { persistPtyIpcSpawnCommit } from './spawn-commit-persist'
+import { applySshReattachReplayModelCatchUp } from '../../ssh-reattach-replay-model-catchup'
 
 export async function commitPtyIpcSpawn(ctx: PtyIpcSpawnState): Promise<PtySpawnResult> {
   const args = ctx.args
@@ -28,6 +29,7 @@ export async function commitPtyIpcSpawn(ctx: PtyIpcSpawnState): Promise<PtySpawn
 
   // Why: seed the headless emulator before registerPty so concurrent live PTY data lands on top of the seed, not replacing it (mobile keeps the daemon-restored scrollback).
   // Skip when the renderer will be authoritative — its xterm buffer is richer than the daemon snapshot.
+  let seededFromReplay = false
   if (ctx.deps.runtime && !rendererPreSignaled && !rendererAlreadyRegistered) {
     const snapshotSeedSize =
       typeof ctx.result.snapshotCols === 'number' && typeof ctx.result.snapshotRows === 'number'
@@ -64,10 +66,19 @@ export async function commitPtyIpcSpawn(ctx: PtyIpcSpawnState): Promise<PtySpawn
         }
       )
     } else if (typeof ctx.result.replay === 'string' && ctx.result.replay.length > 0) {
-      // Why: relay reattach replay is the only restore main never ingests; skip this seed and park-reveal would replace it with a suffix fragment.
+      seededFromReplay = !ctx.deps.runtime.hasHeadlessTerminal(ctx.result.id)
       ctx.deps.runtime.seedHeadlessTerminal(ctx.result.id, ctx.result.replay)
     }
   }
+  applySshReattachReplayModelCatchUp({
+    runtime: ctx.deps.runtime,
+    ptyId: ctx.result.id,
+    isReattach: ctx.result.isReattach === true,
+    replay: ctx.result.replay,
+    replayUnseenChars: ctx.result.replayUnseenChars,
+    seededFromReplay,
+    modelIngestFence: ctx.modelIngestFence
+  })
   if (
     typeof args.worktreeId === 'string' &&
     args.worktreeId.length > 0 &&
@@ -183,8 +194,10 @@ export async function commitPtyIpcSpawn(ctx: PtyIpcSpawnState): Promise<PtySpawn
       })
     }
   }
+  // replayUnseenChars is main-internal coverage metadata; never expose it to renderer clients.
+  const { replayUnseenChars: _replayUnseenChars, ...publicResult } = ctx.result
   const response = {
-    ...ctx.result,
+    ...publicResult,
     // Why both or neither: a pane can only adopt proven kitty flags together
     // with the sequence boundary they describe.
     ...(typeof ctx.result.snapshotKittyKeyboardFlags === 'number' &&

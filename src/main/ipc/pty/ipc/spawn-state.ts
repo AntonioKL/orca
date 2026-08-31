@@ -10,6 +10,7 @@ import type { StablePaneOwner } from '../pane/stable-owner'
 import type { PaneSpawnReservation } from '../pane/spawn-reservation'
 import { localProvider } from '../provider/registry'
 import type { AdoptStablePaneResult, PtySpawnIpcArgs, PtySpawnIpcDeps } from './spawn-types'
+import type { PtyModelIngestFence } from '../../ssh-reattach-replay-model-catchup'
 
 export type PtyIpcSpawnState = {
   deps: PtySpawnIpcDeps
@@ -82,6 +83,7 @@ export type PtyIpcSpawnState = {
   sessionSizeBeforeAttach: { cols: number; rows: number } | undefined
   initiallyHidden: boolean
   preSpawnHiddenMarkId: string | null
+  modelIngestFence: PtyModelIngestFence | null
 }
 
 export function createPtyIpcSpawnState(
@@ -154,6 +156,7 @@ export function createPtyIpcSpawnState(
     hadSessionSizeBeforeAttach: false,
     sessionSizeBeforeAttach: undefined,
     initiallyHidden: false,
-    preSpawnHiddenMarkId: null
+    preSpawnHiddenMarkId: null,
+    modelIngestFence: null
   }
 }

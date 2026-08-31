@@ -1766,6 +1766,7 @@ export class PtyHandler {
   ): Promise<{
     incarnationId: string
     replay?: string
+    replayUnseenChars?: number
     sourceRecovery?: PtySourceRecoveryResult
     sourceActivation?: PtySourceReceivingActivation
   }> {
@@ -1852,6 +1853,16 @@ export class PtyHandler {
     // Why: retain replay buffers so later restarts receive full history.
     const replay = managed.buffered.read()
     if (replay) {
+      const replayUnseenChars =
+        activation === 'existing' && this.sourcePublication?.deliveryFullyAcknowledged(id)
+          ? (() => {
+              const pendingChars = (this.pendingOutputByPty.get(id) ?? []).reduce(
+                (total, pending) => total + pending.data.length,
+                0
+              )
+              return pendingChars <= replay.length ? pendingChars : undefined
+            })()
+          : undefined
       // Why: drop pending batched bytes already in the replay buffer so attach doesn't render them twice.
       this.pendingOutputByPty.delete(id)
       this.clearOutputFlushTimerIfIdle()
@@ -1860,6 +1871,7 @@ export class PtyHandler {
         return {
           incarnationId: managed.incarnationId,
           replay,
+          ...(replayUnseenChars === undefined ? {} : { replayUnseenChars }),
           ...(sourceActivation ? { sourceActivation } : {})
         }
       }

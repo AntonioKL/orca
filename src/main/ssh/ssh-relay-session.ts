@@ -9,6 +9,10 @@ import { isRelayVersionMismatchError } from './ssh-relay-version-mismatch-error'
 import { SshChannelMultiplexer } from './ssh-channel-multiplexer'
 import { SshPtyProvider } from '../providers/ssh-pty-provider'
 import type { SshPtyAttachResult } from '../providers/ssh-pty-session-reattach'
+import {
+  applySshReattachReplayModelCatchUp,
+  capturePtyModelIngestFence
+} from '../ipc/ssh-reattach-replay-model-catchup'
 import type { SshPtyDataCallback, SshPtyExitCallback } from '../providers/ssh-pty-provider-contract'
 import type { SshPtyRecoveryActivationLease } from '../providers/ssh-pty-notification-routing'
 import { isSshPtyIdentityMismatchError, isSshPtyNotFoundError } from '../providers/ssh-pty-errors'
@@ -2361,6 +2365,8 @@ export class SshRelaySession {
         targetedDeliveryRecovery === 'fresh-activation'
           ? undefined
           : await this.sourceRecoveryRequest(appPtyId)
+      // Capture immediately before attach: live bytes may advance the model while the RPC is in flight.
+      const modelIngestFence = capturePtyModelIngestFence(this.runtime, appPtyId)
       const attachResult = await this.attachPtyWithRetry(
         ptyProvider,
         ptyId,
@@ -2501,6 +2507,15 @@ export class SshRelaySession {
         return
       }
       if (!recoveryRequest && !targetedDeliveryRecovery) {
+        applySshReattachReplayModelCatchUp({
+          runtime: this.runtime,
+          ptyId: appPtyId,
+          isReattach: true,
+          replay: attachResult.replay,
+          replayUnseenChars: attachResult.replayUnseenChars,
+          seededFromReplay: false,
+          modelIngestFence
+        })
         this.forwardReattachReplay(appPtyId, attachResult.replay ?? '')
       }
       sourceActivationLease?.commit()

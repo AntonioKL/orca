@@ -14,6 +14,7 @@ import { deletePtyOwnership } from '../provider/ownership-state'
 import { ptySizes } from '../delivery/visibility-state'
 import { clearProviderPtyState } from '../provider/state-cleanup'
 import type { PtyIpcSpawnState } from './spawn-state'
+import { capturePtyModelIngestFence } from '../../ssh-reattach-replay-model-catchup'
 
 export async function executePtyIpcSpawn(ctx: PtyIpcSpawnState): Promise<void> {
   const args = ctx.args
@@ -45,6 +46,9 @@ export async function executePtyIpcSpawn(ctx: PtyIpcSpawnState): Promise<void> {
     const sequenceBeforeProviderSpawn = expectedPtyId
       ? (ctx.deps.runtime?.getPtyOutputSequence?.(expectedPtyId) ?? 0)
       : 0
+    ctx.modelIngestFence = expectedPtyId
+      ? capturePtyModelIngestFence(ctx.deps.runtime, expectedPtyId)
+      : null
     const stablePaneSpawn = ctx.preAdoptedStablePane
       ? ctx.preAdoptedStablePane
       : await spawnForStablePane({

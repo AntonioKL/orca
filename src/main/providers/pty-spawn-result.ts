@@ -67,6 +67,8 @@ export type PtySpawnResult = {
   /** Buffered output returned by relay pty.attach. Unlike snapshot, this is
    *  incremental scrollback and must not clear the terminal before replay. */
   replay?: string
+  /** Trailing code units of replay withheld from the modeled stream during SSH reattach. */
+  replayUnseenChars?: number
   /** True when the caller requested reattach (sessionId was provided) but the
    *  relay PTY was gone (grace window elapsed). The renderer uses this to show
    *  a brief "Session expired — new shell started" message. */
