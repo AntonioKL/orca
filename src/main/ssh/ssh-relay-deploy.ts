@@ -77,6 +77,8 @@ import {
 import { detectRemoteHostPlatform } from './ssh-remote-platform-detection'
 import { powerShellCommand, powerShellLiteral, powerShellNativeArg } from './ssh-remote-powershell'
 import { relaySocketNameForInstanceId } from './ssh-relay-instance-id'
+import { isRelaySocketRefusedError } from './ssh-relay-socket-refused-error'
+import { isRelayVersionMismatchError } from './ssh-relay-version-mismatch-error'
 import { isSshSessionLimitError } from './ssh-session-limit-error'
 import {
   isWindowsRelayPipePath,
@@ -1419,46 +1421,50 @@ async function launchRelay(
   }
 
   // Why: after a restart the relay may still be alive in its grace period; --connect to its socket preserves PTY state and scrollback.
+  let probeOutput: string
   try {
-    const probeOutput = await execCommand(
+    probeOutput = await execCommand(
       conn,
       `test -S ${shellEscape(sockFile)} && echo ALIVE || echo DEAD`,
       { signal }
     )
-    console.warn(`[ssh-relay] Socket probe result: "${probeOutput.trim()}"`)
-    if (probeOutput.trim() === 'ALIVE') {
-      console.log('[ssh-relay] Existing relay socket found, attempting reconnect...')
-      try {
-        const channel = await conn.exec(
-          `cd ${escapedDir} && ${escapedNode} relay.js --connect --sock-path ${shellEscape(sockFile)} --credential-file ${shellEscape(credentialFile)}`,
-          { signal }
-        )
-        const transport = await waitForSentinel(channel, signal)
-        console.log('[ssh-relay] Reconnected to existing relay via socket')
-        return { transport, nodePath, sockPath: sockFile, credentialFile }
-      } catch (err) {
-        signal?.throwIfAborted()
-        console.warn(
-          '[ssh-relay] Socket reconnect failed, launching fresh relay:',
-          err instanceof Error ? err.message : String(err)
-        )
-        // Why: stale socket from a crashed relay — remove it so the fresh launch can bind at the same path.
-        await execCommand(conn, `rm -f ${shellEscape(sockFile)}`, { signal }).catch(
-          (cleanupErr) => {
-            if (isUnconfirmedSshCommandTermination(cleanupErr)) {
-              throw cleanupErr
-            }
-          }
-        )
-        signal?.throwIfAborted()
-      }
-    }
   } catch (err) {
     if (isUnconfirmedSshCommandTermination(err)) {
       throw err
     }
     signal?.throwIfAborted()
     // Probe failed — fall through to fresh launch
+    probeOutput = 'DEAD'
+  }
+  console.warn(`[ssh-relay] Socket probe result: "${probeOutput.trim()}"`)
+  if (probeOutput.trim() === 'ALIVE') {
+    console.log('[ssh-relay] Existing relay socket found, attempting reconnect...')
+    try {
+      const channel = await conn.exec(
+        `cd ${escapedDir} && ${escapedNode} relay.js --connect --sock-path ${shellEscape(sockFile)} --credential-file ${shellEscape(credentialFile)}`,
+        { signal }
+      )
+      const transport = await waitForSentinel(channel, signal)
+      console.log('[ssh-relay] Reconnected to existing relay via socket')
+      return { transport, nodePath, sockPath: sockFile, credentialFile }
+    } catch (err) {
+      signal?.throwIfAborted()
+      if (isRelayVersionMismatchError(err)) {
+        // Exit 42 means the existing relay answered with a different version; preserve its
+        // terminal error instead of treating the socket as stale.
+        throw err
+      }
+      if (!isRelaySocketRefusedError(err)) {
+        // Any non-refusal is inconclusive or proof of life; do not unlink or launch over it.
+        throw err
+      }
+      console.warn(
+        '[ssh-relay] Socket reconnect refused, launching fresh relay:',
+        err instanceof Error ? err.message : String(err)
+      )
+      // Why: the fresh relay's bind-time RelaySocketOwnership probe reclaims a refused stale
+      // inode through unlinkIfStillStale, keeping identity checking and bind atomic on the host.
+    }
   }
 
   // Why: relay must outlive the SSH connection so PTY sessions survive app restarts — nohup + </dev/null + & detach it from the exec channel.

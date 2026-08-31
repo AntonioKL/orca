@@ -16,6 +16,10 @@ import { relayLogLine } from './relay-diagnostic-log'
 // Why: clients treat this exit code as non-retryable; other non-zero exits are transient.
 export const EXIT_CODE_VERSION_MISMATCH = 42
 
+// Why: the client needs to distinguish a refused relay endpoint from timeout and protocol failures
+// without parsing stderr. The bridge and client are shipped from the same relay build.
+export const EXIT_CODE_SOCKET_REFUSED = 43
+
 // Why: read .version beside the resolved script path, not the arbitrary launch cwd.
 export function readLaunchVersion(): string {
   try {

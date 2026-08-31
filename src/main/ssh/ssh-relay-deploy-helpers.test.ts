@@ -8,6 +8,7 @@ import {
   RelayVersionMismatchError,
   RELAY_EXIT_CODE_VERSION_MISMATCH
 } from './ssh-relay-version-mismatch-error'
+import { RELAY_EXIT_CODE_SOCKET_REFUSED } from './ssh-relay-socket-refused-error'
 
 type MockChannel = ClientChannel & {
   stdin: EventEmitter & { write: ReturnType<typeof vi.fn> }
@@ -149,6 +150,16 @@ describe('waitForSentinel', () => {
     channel.emit('close')
 
     await expect(transportPromise).rejects.toBeInstanceOf(RelayVersionMismatchError)
+  })
+
+  it('translates a pre-sentinel exit-43 refusal into a typed socket-refused error', async () => {
+    const channel = createMockChannel()
+    const transportPromise = waitForSentinel(channel)
+
+    channel.emit('exit', RELAY_EXIT_CODE_SOCKET_REFUSED)
+    channel.emit('close')
+
+    await expect(transportPromise).rejects.toMatchObject({ name: 'RelaySocketRefusedError' })
   })
 
   it('rejects with a generic error (not RelayVersionMismatchError) on a non-42 exit code', async () => {

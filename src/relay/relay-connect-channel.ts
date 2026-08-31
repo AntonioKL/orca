@@ -1,7 +1,7 @@
 import { createConnection } from 'node:net'
 import { DispatcherClientWriter } from './dispatcher-client-writer'
 import { RELAY_SENTINEL } from './protocol'
-import { readLaunchVersion, runConnectHandshake } from './relay-handshake'
+import { EXIT_CODE_SOCKET_REFUSED, readLaunchVersion, runConnectHandshake } from './relay-handshake'
 
 const CONNECT_TIMEOUT_MS = 5_000
 
@@ -94,11 +94,15 @@ export function runRelayConnectChannel(sockPath: string, endpointCredential?: st
   sock.on('error', (error) => {
     clearTimeout(connectTimeout)
     process.stderr.write(`[relay-connect] Socket error: ${error.message}\n`)
-    process.exit(1)
+    process.exit(relayConnectExitCodeForSocketError(error))
   })
 
   sock.on('close', async () => {
     await stdoutWriter.waitForIdle()
     process.exit(0)
   })
+}
+
+export function relayConnectExitCodeForSocketError(error: NodeJS.ErrnoException): number {
+  return error.code === 'ECONNREFUSED' || error.code === 'ENOENT' ? EXIT_CODE_SOCKET_REFUSED : 1
 }

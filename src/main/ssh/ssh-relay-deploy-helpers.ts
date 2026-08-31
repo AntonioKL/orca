@@ -3,6 +3,10 @@ import { createSshOperationAbortError } from './ssh-connection-utils'
 import { RELAY_SENTINEL, RELAY_SENTINEL_TIMEOUT_MS } from './relay-protocol'
 import type { MultiplexerTransport } from './ssh-channel-multiplexer'
 import { buildRelayVersionMismatchError } from './ssh-relay-handshake-mismatch'
+import {
+  RELAY_EXIT_CODE_SOCKET_REFUSED,
+  RelaySocketRefusedError
+} from './ssh-relay-socket-refused-error'
 
 export { uploadFile, uploadDirectory, mkdirSftp } from './sftp-upload'
 export { execCommand, isUnconfirmedSshCommandTermination } from './ssh-relay-exec-command'
@@ -146,6 +150,10 @@ export function waitForSentinel(
           const versionMismatchError = buildRelayVersionMismatchError(lastExitCode, stderrOutput)
           if (versionMismatchError) {
             rejectStartup(versionMismatchError)
+            return
+          }
+          if (lastExitCode === RELAY_EXIT_CODE_SOCKET_REFUSED) {
+            rejectStartup(new RelaySocketRefusedError())
             return
           }
           const timeoutSuffix = timeoutFired
