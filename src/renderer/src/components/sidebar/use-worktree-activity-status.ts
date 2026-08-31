@@ -29,7 +29,8 @@ export function useWorktreeActivityStatus(worktreeId: string): WorktreeStatus {
     hasInterrupted,
     hasLiveDone,
     hasRetainedDone,
-    agentStatusPaneIdsByTabId
+    agentStatusPaneIdsByTabId,
+    paneForegroundAgentByPaneKey
   } = useAppStore(useShallow((s) => selectWorktreeAgentActivitySummary(s, worktreeId)))
 
   // Why: compact and detailed cards need the same status-dot semantics:
@@ -44,6 +45,7 @@ export function useWorktreeActivityStatus(worktreeId: string): WorktreeStatus {
         runtimePaneTitlesByTabId: runtimePaneTitlesForWorktree,
         agentStatusPaneIdsByTabId,
         terminalLayoutRootsByTabId,
+        paneForegroundAgentByPaneKey,
         hasPermission,
         hasLiveWorking,
         hasLiveMonitoring,
@@ -58,6 +60,7 @@ export function useWorktreeActivityStatus(worktreeId: string): WorktreeStatus {
       runtimePaneTitlesForWorktree,
       agentStatusPaneIdsByTabId,
       terminalLayoutRootsByTabId,
+      paneForegroundAgentByPaneKey,
       hasPermission,
       hasLiveWorking,
       hasLiveMonitoring,

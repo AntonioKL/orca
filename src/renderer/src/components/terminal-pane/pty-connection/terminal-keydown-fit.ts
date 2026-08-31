@@ -204,6 +204,17 @@ export function installTerminalKeydownFit(session: ConnectPanePtySession): void 
         currentAgentForExited !== exited.agent
       )
     },
+    onForegroundAgentInspected: (process) => {
+      const inspectedPtyId = session.transport.getPtyId()
+      // Process identity is local-only evidence; never publish an SSH/WSL
+      // inspection into the renderer's pane identity cache.
+      if (!inspectedPtyId || !session.isForegroundTrackingAllowed(inspectedPtyId)) {
+        return
+      }
+      useAppStore
+        .getState()
+        .refreshPaneForegroundAgentObservation(session.cacheKey, process.agent, inspectedPtyId)
+    },
     dispatchCompletion: (title, meta) => {
       if (meta?.source === 'process-exit') {
         session.clearSuppressedTitleSideEffects()

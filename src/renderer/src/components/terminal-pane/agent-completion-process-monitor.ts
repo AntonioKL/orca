@@ -77,6 +77,7 @@ export function createAgentCompletionProcessMonitor({
     state.consecutiveInspectionErrors = 0
     const recognized = recognizeAgentProcess(result.foregroundProcess)
     if (recognized) {
+      options.onForegroundAgentInspected?.(recognized)
       handleRecognizedProcess(recognized)
       return true
     }

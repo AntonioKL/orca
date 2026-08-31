@@ -37,7 +37,8 @@ export function selectWorktreeActivityStatuses(
       hasInterrupted,
       hasLiveDone,
       hasRetainedDone,
-      agentStatusPaneIdsByTabId
+      agentStatusPaneIdsByTabId,
+      paneForegroundAgentByPaneKey
     } = selectWorktreeAgentActivitySummary(statusInputs, worktreeId)
     statuses.set(
       worktreeId,
@@ -48,6 +49,7 @@ export function selectWorktreeActivityStatuses(
         runtimePaneTitlesByTabId: selectRuntimePaneTitlesForWorktree(statusInputs, worktreeId),
         agentStatusPaneIdsByTabId,
         terminalLayoutRootsByTabId: selectTerminalLayoutRootsForWorktree(statusInputs, worktreeId),
+        paneForegroundAgentByPaneKey,
         hasPermission,
         hasLiveWorking,
         hasLiveMonitoring,

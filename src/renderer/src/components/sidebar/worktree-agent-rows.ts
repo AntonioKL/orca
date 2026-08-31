@@ -26,6 +26,7 @@ import {
 } from './worktree-agent-row-fallback-tab'
 import { resolveRowAgentType } from './worktree-agent-row-type'
 import { entryWithRuntimeOrchestration } from './worktree-agent-row-orchestration'
+import type { PaneForegroundAgentEntry } from '@/store/slices/pane-foreground-agent'
 
 function countTerminalLayoutLeaves(node: TerminalPaneLayoutNode | null | undefined): number {
   if (!node) {
@@ -144,10 +145,12 @@ export function buildWorktreeAgentRows(args: {
   ptyIdsByTabId?: Record<string, string[]>
   terminalLayoutsByTabId?: Record<string, TerminalLayoutSnapshot | undefined>
   runtimeAgentOrchestrationByPaneKey?: Record<string, AgentStatusOrchestrationContext>
+  paneForegroundAgentByPaneKey?: Record<string, PaneForegroundAgentEntry>
   now: number
 }): DashboardAgentRow[] {
   const rows: DashboardAgentRow[] = []
   const seenPaneKeys = new Set<string>()
+  const staleTerminalPaneKeys = new Set<string>()
   const currentTabIds = new Set(args.tabs.map((tab) => tab.id))
 
   const entriesByTabId = new Map<string, AgentStatusEntry[]>()
@@ -186,6 +189,9 @@ export function buildWorktreeAgentRows(args: {
       })
       rows.push(...buildSubagentChildRows({ parentEntry: rowEntry, tab, parentIsFresh: isFresh }))
       seenPaneKeys.add(rowEntry.paneKey)
+      if (!isFresh && rowEntry.state === 'done') {
+        staleTerminalPaneKeys.add(rowEntry.paneKey)
+      }
     }
   }
 
@@ -198,7 +204,30 @@ export function buildWorktreeAgentRows(args: {
     seenPaneKeys
   })
 
-  rows.push(...buildTitleDerivedAgentRows({ ...args, seenPaneKeys }))
+  // Terminal outcomes are retained as history, but must yield to a fresh
+  // title/process observation for the same pane (e.g. a stale `done` row while
+  // the agent is visibly working again). Keep the history row when no newer
+  // evidence exists.
+  const titleSeenPaneKeys = new Set(seenPaneKeys)
+  for (const paneKey of staleTerminalPaneKeys) {
+    titleSeenPaneKeys.delete(paneKey)
+  }
+  const titleRows = buildTitleDerivedAgentRows({ ...args, seenPaneKeys: titleSeenPaneKeys })
+  if (staleTerminalPaneKeys.size > 0 && titleRows.length > 0) {
+    const replacedPaneKeys = new Set(titleRows.map((row) => row.paneKey))
+    for (let index = rows.length - 1; index >= 0; index -= 1) {
+      if (
+        staleTerminalPaneKeys.has(rows[index].paneKey) &&
+        replacedPaneKeys.has(rows[index].paneKey)
+      ) {
+        rows.splice(index, 1)
+      }
+    }
+  }
+  rows.push(...titleRows)
+  for (const paneKey of titleSeenPaneKeys) {
+    seenPaneKeys.add(paneKey)
+  }
 
   // Why: orchestration workers can be attributed to a worktree by main before
   // their tab is present in this renderer. Keep those live rows visible in the

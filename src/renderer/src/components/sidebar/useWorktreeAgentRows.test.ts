@@ -267,6 +267,24 @@ describe('buildWorktreeAgentRows', () => {
     expect(done?.state).toBe('done')
   })
 
+  it('lets fresh pane activity replace a stale done row for the same pane', () => {
+    const staleAt = 1_000
+    const now = staleAt + AGENT_STATUS_STALE_AFTER_MS + 1
+    const rows = buildWorktreeAgentRows({
+      tabs: [makeTab('tab-1', { title: 'zsh' })],
+      entries: [makeEntry(PANE_KEY_1, staleAt, { state: 'done', updatedAt: staleAt })],
+      retained: [],
+      runtimePaneTitlesByTabId: { 'tab-1': { 1: '⠋ Claude Code' } },
+      ptyIdsByTabId: { 'tab-1': ['pty-claude'] },
+      terminalLayoutsByTabId: { 'tab-1': makeSinglePaneLayout(LEAF_ID_1) },
+      now
+    })
+
+    expect(rows.map((row) => [row.paneKey, row.state, row.agentType])).toEqual([
+      [PANE_KEY_1, 'working', 'claude']
+    ])
+  })
+
   it('decays a restored-unconfirmed working entry to idle even while recent', () => {
     // Why: a hydrated nonterminal row may describe a turn that ended while no
     // receiver was up; it must never render as confirmed working, however new.

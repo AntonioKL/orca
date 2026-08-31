@@ -20,6 +20,10 @@ import {
   createWorktreeAgentFreshnessSelector,
   EMPTY_WORKTREE_AGENT_FRESHNESS_SIGNATURE
 } from './worktree-agent-freshness-selector'
+import {
+  EMPTY_PANE_FOREGROUND_AGENTS,
+  selectWorktreeAgentActivitySummary
+} from './worktree-agent-activity-summary'
 
 export { buildWorktreeAgentRows } from './worktree-agent-rows'
 export {
@@ -74,6 +78,13 @@ export function useWorktreeAgentRows(worktreeId: string, active = true): Dashboa
   const runtimeAgentOrchestrationByPaneKey = useAppStore(
     useShallow((s) => (active ? selectRuntimeAgentOrchestrationForWorktree(s, worktreeId) : {}))
   )
+  // Reuse the worktree-narrowed process identity projection so hookless live
+  // panes can still appear without subscribing every card to the global map.
+  const paneForegroundAgentByPaneKey = useAppStore((s) =>
+    active
+      ? selectWorktreeAgentActivitySummary(s, worktreeId).paneForegroundAgentByPaneKey
+      : EMPTY_PANE_FOREGROUND_AGENTS
+  )
   const agentFreshnessSignature = useAppStore((s) =>
     active ? selectAgentFreshness(s) : EMPTY_WORKTREE_AGENT_FRESHNESS_SIGNATURE
   )
@@ -104,6 +115,7 @@ export function useWorktreeAgentRows(worktreeId: string, active = true): Dashboa
         ptyIdsByTabId,
         terminalLayoutsByTabId,
         runtimeAgentOrchestrationByPaneKey,
+        paneForegroundAgentByPaneKey,
         now
       })
     )
@@ -118,6 +130,7 @@ export function useWorktreeAgentRows(worktreeId: string, active = true): Dashboa
     ptyIdsByTabId,
     terminalLayoutsByTabId,
     runtimeAgentOrchestrationByPaneKey,
+    paneForegroundAgentByPaneKey,
     agentFreshnessSignature
   ])
 }

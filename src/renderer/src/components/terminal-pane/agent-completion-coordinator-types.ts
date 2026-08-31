@@ -38,6 +38,8 @@ export type AgentCompletionCoordinatorOptions = {
     replacement: RecognizedAgentProcess
   ) => boolean
   shouldSuppressConfirmedProcessExitCompletion?: (exited: RecognizedAgentProcess) => boolean
+  /** Re-arm renderer process identity freshness when a cadence inspection sees an agent. */
+  onForegroundAgentInspected?: (process: RecognizedAgentProcess) => void
   isLive: () => boolean
   shouldPollProcessCadence?: () => boolean
   // Why: on hosts where one inspection forks a whole-process-table scan (local

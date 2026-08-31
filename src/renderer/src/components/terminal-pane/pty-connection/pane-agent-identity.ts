@@ -155,7 +155,14 @@ export function installPaneAgentIdentity(session: ConnectPanePtySession): void {
     isTrackablePtyId: session.isForegroundTrackingAllowed,
     readForegroundProcess: (id) => window.api.pty.getForegroundProcess(id),
     confirmForegroundProcess: (id) => window.api.pty.confirmForegroundProcess(id),
-    publish: (entry) => useAppStore.getState().setPaneForegroundAgent(session.cacheKey, entry),
+    // Bind observations to the PTY that was inspected; a pane key may survive
+    // a rebind while the old process identity is still in the store.
+    publish: (entry) =>
+      useAppStore.getState().setPaneForegroundAgent(session.cacheKey, {
+        ...entry,
+        observedAt: Date.now(),
+        ptyId: session.transport.getPtyId() ?? undefined
+      }),
     hasKnownAgentIdentity: session.paneHasKnownAgentIdentity,
     onConfirmedShellForeground: (reason) => {
       session.clearStaleAgentTabTitleOnConfirmedShell()
@@ -192,7 +199,8 @@ export function installPaneAgentIdentity(session: ConnectPanePtySession): void {
       useAppStore.getState().setPaneForegroundAgent(session.cacheKey, {
         agent: foreground.agent,
         routingRevoked: true,
-        shellForeground: foreground.shellForeground
+        shellForeground: foreground.shellForeground,
+        ptyId: session.transport.getPtyId() ?? undefined
       })
     }
   })
@@ -290,7 +298,8 @@ export function installPaneAgentIdentity(session: ConnectPanePtySession): void {
     useAppStore.getState().setPaneForegroundAgent(session.cacheKey, {
       agent: foreground.agent,
       routingRevoked: true,
-      shellForeground: false
+      shellForeground: false,
+      ptyId: session.transport.getPtyId() ?? undefined
     })
     session.visibleForegroundSamplePending = false
     session.visibleForegroundSampleSettled = false
@@ -302,7 +311,8 @@ export function installPaneAgentIdentity(session: ConnectPanePtySession): void {
         agent: foreground.agent,
         routingRevoked: true,
         shellForeground: false,
-        routingConfirmationPending: true
+        routingConfirmationPending: true,
+        ptyId: session.transport.getPtyId() ?? undefined
       })
     }
   }

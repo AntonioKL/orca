@@ -3,6 +3,7 @@ import { applyAgentRowLineage } from '@/components/dashboard/agent-row-lineage'
 import type { TerminalLayoutSnapshot, TerminalTab } from '../../../../shared/terminal-tab-types'
 import type { TuiAgent } from '../../../../shared/tui-agent'
 import { makePaneKey } from '../../../../shared/stable-pane-id'
+import type { PaneForegroundAgentEntry } from '@/store/slices/pane-foreground-agent'
 import { buildWorktreeAgentRows } from './worktree-agent-rows'
 
 const LEAF_ID_1 = '77777777-7777-4777-8777-777777777777'
@@ -44,6 +45,73 @@ function makeSingleLayout(leafId: string): TerminalLayoutSnapshot {
 }
 
 describe('buildTitleDerivedAgentRows', () => {
+  it('adds an idle identity row for a fresh live process with no hook or title', () => {
+    const paneKey = makePaneKey('tab-1', LEAF_ID_1)
+    const foreground: PaneForegroundAgentEntry = {
+      agent: 'claude',
+      shellForeground: false,
+      observedAt: 1_000,
+      ptyId: 'pty-claude'
+    }
+    const rows = buildWorktreeAgentRows({
+      tabs: [makeTab('tab-1', { title: 'zsh' })],
+      entries: [],
+      retained: [],
+      ptyIdsByTabId: { 'tab-1': ['pty-claude'] },
+      terminalLayoutsByTabId: { 'tab-1': makeSingleLayout(LEAF_ID_1) },
+      paneForegroundAgentByPaneKey: { [paneKey]: foreground },
+      now: 1_000 + 1_000
+    })
+
+    expect(rows.map((row) => [row.paneKey, row.agentType, row.state])).toEqual([
+      [paneKey, 'claude', 'idle']
+    ])
+  })
+
+  it('does not attribute process identity to a pane after its PTY is rebound', () => {
+    const paneKey = makePaneKey('tab-1', LEAF_ID_1)
+    const rows = buildWorktreeAgentRows({
+      tabs: [makeTab('tab-1', { title: 'zsh' })],
+      entries: [],
+      retained: [],
+      ptyIdsByTabId: { 'tab-1': ['pty-new'] },
+      terminalLayoutsByTabId: { 'tab-1': makeSingleLayout(LEAF_ID_1) },
+      paneForegroundAgentByPaneKey: {
+        [paneKey]: {
+          agent: 'claude',
+          shellForeground: false,
+          observedAt: 1_000,
+          ptyId: 'pty-old'
+        }
+      },
+      now: 2_000
+    })
+
+    expect(rows).toHaveLength(0)
+  })
+
+  it('expires process identity after the observation TTL', () => {
+    const paneKey = makePaneKey('tab-1', LEAF_ID_1)
+    const rows = buildWorktreeAgentRows({
+      tabs: [makeTab('tab-1', { title: 'zsh' })],
+      entries: [],
+      retained: [],
+      ptyIdsByTabId: { 'tab-1': ['pty-claude'] },
+      terminalLayoutsByTabId: { 'tab-1': makeSingleLayout(LEAF_ID_1) },
+      paneForegroundAgentByPaneKey: {
+        [paneKey]: {
+          agent: 'claude',
+          shellForeground: false,
+          observedAt: 1_000,
+          ptyId: 'pty-claude'
+        }
+      },
+      now: 31_001
+    })
+
+    expect(rows).toHaveLength(0)
+  })
+
   it('adds title-derived rows for live agent panes that have no hook status yet', () => {
     const rows = buildWorktreeAgentRows({
       tabs: [makeTab('tab-1')],

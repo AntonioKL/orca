@@ -11,6 +11,7 @@ import {
   type AgentStatusEntry,
   type AgentStatusOrchestrationContext
 } from '../../../../shared/agent-status-types'
+import type { PaneForegroundAgentEntry } from '@/store/slices/pane-foreground-agent'
 
 export type WorktreeAgentActivitySummary = {
   hasPermission: boolean
@@ -21,9 +22,12 @@ export type WorktreeAgentActivitySummary = {
   hasLiveDone: boolean
   hasRetainedDone: boolean
   agentStatusPaneIdsByTabId: Record<string, ReadonlySet<string>>
+  /** Process identity narrowed to this worktree's panes. */
+  paneForegroundAgentByPaneKey: Record<string, PaneForegroundAgentEntry>
 }
 
 const EMPTY_AGENT_STATUS_PANE_IDS_BY_TAB_ID: Record<string, ReadonlySet<string>> = {}
+export const EMPTY_PANE_FOREGROUND_AGENTS: Record<string, PaneForegroundAgentEntry> = {}
 
 const EMPTY_SUMMARY: WorktreeAgentActivitySummary = {
   hasPermission: false,
@@ -32,7 +36,8 @@ const EMPTY_SUMMARY: WorktreeAgentActivitySummary = {
   hasInterrupted: false,
   hasLiveDone: false,
   hasRetainedDone: false,
-  agentStatusPaneIdsByTabId: EMPTY_AGENT_STATUS_PANE_IDS_BY_TAB_ID
+  agentStatusPaneIdsByTabId: EMPTY_AGENT_STATUS_PANE_IDS_BY_TAB_ID,
+  paneForegroundAgentByPaneKey: EMPTY_PANE_FOREGROUND_AGENTS
 }
 
 type AgentActivityTabsByWorktree = Record<string, readonly { id: string }[]>
@@ -46,6 +51,7 @@ export type AgentActivityInput = Pick<
 > & {
   tabsByWorktree: AgentActivityTabsByWorktree
   runtimeAgentOrchestrationByPaneKey?: AppState['runtimeAgentOrchestrationByPaneKey']
+  paneForegroundAgentByPaneKey?: AppState['paneForegroundAgentByPaneKey']
 }
 
 type AgentActivityCache = {
@@ -54,6 +60,7 @@ type AgentActivityCache = {
   migrationUnsupportedByPtyId: AppState['migrationUnsupportedByPtyId']
   retainedAgentsByPaneKey: AppState['retainedAgentsByPaneKey']
   runtimeAgentOrchestrationByPaneKey: AppState['runtimeAgentOrchestrationByPaneKey'] | undefined
+  paneForegroundAgentByPaneKey: AppState['paneForegroundAgentByPaneKey'] | undefined
   summaries: Map<string, WorktreeAgentActivitySummary>
 }
 
@@ -70,13 +77,15 @@ function getWorktreeAgentActivitySummaries(
   state: AgentActivityInput
 ): Map<string, WorktreeAgentActivitySummary> {
   const runtimeAgentOrchestrationByPaneKey = state.runtimeAgentOrchestrationByPaneKey
+  const paneForegroundAgentByPaneKey = state.paneForegroundAgentByPaneKey
   if (
     agentActivityCache &&
     agentActivityCache.tabsByWorktree === state.tabsByWorktree &&
     agentActivityCache.agentStatusEpoch === state.agentStatusEpoch &&
     agentActivityCache.migrationUnsupportedByPtyId === state.migrationUnsupportedByPtyId &&
     agentActivityCache.retainedAgentsByPaneKey === state.retainedAgentsByPaneKey &&
-    agentActivityCache.runtimeAgentOrchestrationByPaneKey === runtimeAgentOrchestrationByPaneKey
+    agentActivityCache.runtimeAgentOrchestrationByPaneKey === runtimeAgentOrchestrationByPaneKey &&
+    agentActivityCache.paneForegroundAgentByPaneKey === paneForegroundAgentByPaneKey
   ) {
     return agentActivityCache.summaries
   }
@@ -138,6 +147,23 @@ function getWorktreeAgentActivitySummaries(
     }
   }
 
+  // Narrow process identity to each worktree so sidebar rows can attribute
+  // title-derived activity without subscribing to every pane globally.
+  for (const [paneKey, entry] of Object.entries(paneForegroundAgentByPaneKey ?? {})) {
+    if (!entry.agent) {
+      continue
+    }
+    const worktreeId = worktreeIdForPaneKey(paneKey, tabIdToWorktreeId)
+    if (!worktreeId) {
+      continue
+    }
+    const summary = summaryForWorktree(worktreeId)
+    if (summary.paneForegroundAgentByPaneKey === EMPTY_PANE_FOREGROUND_AGENTS) {
+      summary.paneForegroundAgentByPaneKey = {}
+    }
+    summary.paneForegroundAgentByPaneKey[paneKey] = entry
+  }
+
   for (const retained of Object.values(state.retainedAgentsByPaneKey ?? {})) {
     const summary = summaryForWorktree(retained.worktreeId)
     summary.hasRetainedDone = true
@@ -170,6 +196,7 @@ function getWorktreeAgentActivitySummaries(
     migrationUnsupportedByPtyId: state.migrationUnsupportedByPtyId,
     retainedAgentsByPaneKey: state.retainedAgentsByPaneKey,
     runtimeAgentOrchestrationByPaneKey,
+    paneForegroundAgentByPaneKey,
     summaries
   }
   return summaries
@@ -189,8 +216,26 @@ function summariesEqual(
     agentStatusPaneIdsByTabIdEqual(
       previous.agentStatusPaneIdsByTabId,
       next.agentStatusPaneIdsByTabId
+    ) &&
+    paneForegroundAgentsEqual(
+      previous.paneForegroundAgentByPaneKey,
+      next.paneForegroundAgentByPaneKey
     )
   )
+}
+
+function paneForegroundAgentsEqual(
+  previous: Record<string, PaneForegroundAgentEntry>,
+  next: Record<string, PaneForegroundAgentEntry>
+): boolean {
+  if (previous === next) {
+    return true
+  }
+  const previousKeys = Object.keys(previous)
+  if (previousKeys.length !== Object.keys(next).length) {
+    return false
+  }
+  return previousKeys.every((paneKey) => previous[paneKey] === next[paneKey])
 }
 
 function agentStatusPaneIdsByTabIdEqual(
