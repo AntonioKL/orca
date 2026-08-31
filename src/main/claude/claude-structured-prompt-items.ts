@@ -11,10 +11,10 @@ import {
 import { claudeRecord, claudeText } from './claude-structured-item-translation'
 import {
   CLAUDE_APPROVAL_DECISIONS,
-  encodeClaudeQuestionOptionId,
   type ClaudeApprovalDecision,
   type ClaudePendingPrompt
 } from './claude-structured-prompt-replies'
+import { encodeAgentSessionQuestionOptionId } from '../native-chat/agent-session-wire/agent-session-question-option-id'
 
 const APPROVAL_LABELS: Record<ClaudeApprovalDecision, string> = {
   allow: 'Allow',
@@ -74,7 +74,7 @@ function questionOptions(
     return label
       ? [
           {
-            id: encodeClaudeQuestionOptionId(questionAddress, `choice-${index + 1}`),
+            id: encodeAgentSessionQuestionOptionId(questionAddress, `choice-${index + 1}`),
             label
           }
         ]

@@ -3,6 +3,7 @@ import type { NativeChatBlock } from '../../shared/native-chat-types'
 import type { AgentSessionDispatchOutcome } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
 import type { ClaudeSession } from './claude-structured-session-state'
 import { readClaudeFrameString } from './claude-structured-init-proof'
+import { claudeImageBudget, claudeImageContent } from './claude-structured-image-content'
 
 export function resolveClaudeReplayWaiter(
   session: ClaudeSession,
@@ -32,16 +33,18 @@ async function messageContent(body: AgentJournalMessageItem): Promise<unknown[]>
   if (body.role !== 'user') {
     throw new Error('Claude dispatch accepts only user messages')
   }
+  const blocks = body.blocks as NativeChatBlock[]
+  const budget = claudeImageBudget(blocks.filter((block) => block.type === 'image-ref').length)
   const content: unknown[] = []
-  for (const block of body.blocks as NativeChatBlock[]) {
+  for (const block of blocks) {
     if (block.type === 'text' && block.text.length > 0) {
       content.push({ type: 'text', text: block.text })
     } else if (block.type === 'image-ref') {
-      throw new Error('Claude structured image dispatch is not available yet')
+      content.push(await claudeImageContent(block, budget))
     }
   }
   if (content.length === 0) {
-    throw new Error('Claude dispatch requires text')
+    throw new Error('Claude dispatch requires text or an image')
   }
   return content
 }

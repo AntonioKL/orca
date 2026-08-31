@@ -4,7 +4,7 @@ import type {
   AgentJournalResolution
 } from '../../../shared/agent-session-journal-types'
 import type { AgentSessionPromptResult } from '../../../shared/agent-session-wire'
-import { decodeCodexQuestionOptionId } from '../../codex/codex-structured-prompt-replies'
+import { decodeAgentSessionQuestionOptionId } from './agent-session-question-option-id'
 import type { AgentSessionTurnContext, TurnOutcome } from './structured-agent-session-turns'
 
 function invalid(message: string): TurnOutcome<never> {
@@ -58,7 +58,7 @@ export async function performPrompt(
       }
     }
   }
-  const freeText = decodeCodexQuestionOptionId(input.optionId)
+  const freeText = decodeAgentSessionQuestionOptionId(input.optionId)
   const acceptsFreeText =
     item.body.kind === 'question' &&
     prompt.freeTextQuestionId !== undefined &&

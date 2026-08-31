@@ -126,7 +126,7 @@ export function NativeChatExperimentalSetting({
                 <p className="text-xs text-muted-foreground">
                   {translate(
                     'auto.components.settings.ExperimentalPane.nativeChat.structuredCopy',
-                    'Opt in to the host-owned structured Codex runtime. Off keeps the existing terminal-backed chat path.'
+                    'Opt in to the host-owned structured Claude and Codex runtimes. Off keeps the existing terminal-backed chat path.'
                   )}
                 </p>
                 <p className="text-xs text-muted-foreground">

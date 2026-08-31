@@ -366,13 +366,14 @@ describe('parameter validation', () => {
     )
   })
 
-  it('rejects Claude structured create shapes', async () => {
-    await rejects('agentSession.createSupport', {
+  it('accepts Claude structured create shapes', async () => {
+    const support = await call('agentSession.createSupport', {
       worktree: 'id:workspace-1',
       agent: 'claude'
     })
+    expect(support).toMatchObject({ ok: true })
     const fields = { worktree: 'id:workspace-1', agent: 'claude' }
-    await rejects('agentSession.create', {
+    const created = await call('agentSession.create', {
       envelope: envelope({
         expectedRuntimeFence: null,
         payloadFingerprint: computeAgentSessionPayloadFingerprint({
@@ -383,6 +384,7 @@ describe('parameter validation', () => {
       }),
       ...fields
     })
+    expect(created).toMatchObject({ ok: true })
   })
 
   it('requires a sha256 fingerprint and a positive fence', async () => {

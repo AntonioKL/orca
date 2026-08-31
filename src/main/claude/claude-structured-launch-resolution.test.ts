@@ -87,12 +87,7 @@ describe('claude structured launch resolution', () => {
   })
 
   it('uses the runtime environment instead of the scrubbed legacy launchEnv', async () => {
-    const pinned = record({
-      launchEnv: {
-        ANTHROPIC_AUTH_TOKEN: 'first-token',
-        ANTHROPIC_BASE_URL: 'https://gateway.example.test'
-      }
-    })
+    const pinned = record()
     const resolver = resolverFor(pinned, () => ({
       ANTHROPIC_AUTH_TOKEN: 'rotated-token',
       ANTHROPIC_BASE_URL: 'https://gateway.example.test'

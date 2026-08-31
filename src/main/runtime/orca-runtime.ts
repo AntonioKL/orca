@@ -102,7 +102,8 @@ import {
 import type { AgentSessionRecord } from '../../shared/agent-session-record'
 import {
   agentSessionProviderHandleRoot,
-  agentSessionProviderHandlesEqual
+  agentSessionProviderHandlesEqual,
+  type AgentSessionHandleProvider
 } from '../../shared/agent-session-provider-handle'
 import { SESSION_TAB_NOT_FOUND_ERROR } from '../../shared/session-tab-close'
 import {
@@ -11686,9 +11687,12 @@ export class OrcaRuntimeService {
       // in a plain folder lands in the folder rather than failing to resolve.
       resolveWorkspacePath: async (workspaceId) =>
         (await this.resolveRuntimeFileTarget(`id:${workspaceId}`)).worktree.path,
-      resolveLaunchArgs: () => this.resolveConfiguredCodexStructuredArgs(),
-      resolveLaunchEnvOverlay: () =>
-        resolveTuiAgentLaunchEnv('codex', this.requireStore().getSettings().agentDefaultEnv),
+      resolveLaunchArgs: (provider) =>
+        provider === 'claude'
+          ? this.resolveConfiguredClaudeStructuredArgs()
+          : this.resolveConfiguredCodexStructuredArgs(),
+      resolveLaunchEnvOverlay: (provider) =>
+        resolveTuiAgentLaunchEnv(provider, this.requireStore().getSettings().agentDefaultEnv),
       handoffTransport: this.createStructuredAgentSessionHandoffTransport()
     })
   }
@@ -11704,6 +11708,10 @@ export class OrcaRuntimeService {
       resolveTuiAgentLaunchArgs('codex', settings.agentDefaultArgs),
       shell ?? 'posix'
     )
+  }
+
+  private resolveConfiguredClaudeStructuredArgs(): string[] {
+    return []
   }
 
   private createStructuredAgentSessionHandoffTransport(): StructuredAgentSessionHandoffTransport {
@@ -12533,7 +12541,7 @@ export class OrcaRuntimeService {
 
   async getStructuredAgentSessionCreateSupport(
     worktreeSelector: string,
-    agent: 'codex'
+    agent: AgentSessionHandleProvider
   ): Promise<{ supported: boolean; reason?: 'agent' | 'remote' | 'wsl' }> {
     const location = await this.resolveStructuredAgentSessionLocation(worktreeSelector)
     await this.ensureStructuredAgentSessionHost()
@@ -12598,10 +12606,13 @@ export class OrcaRuntimeService {
   async resolveStructuredAgentSessionCreateIntent(input: {
     envelope: { sessionId: string; clientOperationId: string }
     worktree: string
-    agent: 'codex'
+    agent: AgentSessionHandleProvider
   }): Promise<AgentSessionAttachParams> {
     return this.resolveStructuredAgentSessionIntent(input, async ({ workspacePath, launchEnv }) => {
       // A create has no process yet, so the current selection is what it must follow.
+      if (input.agent === 'claude') {
+        return launchEnv.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), '.claude')
+      }
       const preparedHome = await this.prepareCodexStructuredLaunchFn?.({ workspacePath, launchEnv })
       const configuredHome = launchEnv.CODEX_HOME
       return (
@@ -12616,7 +12627,7 @@ export class OrcaRuntimeService {
     input: {
       envelope: { sessionId: string; clientOperationId: string }
       worktree: string
-      agent: 'codex'
+      agent: AgentSessionHandleProvider
     },
     resolveAccountHomePath: (context: {
       workspacePath: string
@@ -12642,7 +12653,7 @@ export class OrcaRuntimeService {
       provider: input.agent,
       agent: input.agent,
       accountHome: {
-        variable: 'CODEX_HOME',
+        variable: input.agent === 'claude' ? 'CLAUDE_CONFIG_DIR' : 'CODEX_HOME',
         path: await resolveAccountHomePath({ workspacePath, launchEnv })
       },
       runtimeKind: 'native'
@@ -12702,7 +12713,7 @@ export class OrcaRuntimeService {
     }
     this.hydrateHeadlessMobileSessionTabsFromWorkspaceSession()
     for (const session of host?.listSessionTabs() ?? []) {
-      if (session.agent !== 'codex') {
+      if (session.agent !== 'codex' && session.agent !== 'claude') {
         continue
       }
       let sessionId = session.sessionId
@@ -12711,7 +12722,7 @@ export class OrcaRuntimeService {
       }
       await this.publishStructuredAgentSessionTab({
         ...session,
-        agent: 'codex',
+        agent: session.agent,
         sessionId,
         activate: false,
         notify: false
@@ -12722,7 +12733,7 @@ export class OrcaRuntimeService {
   async publishStructuredAgentSessionTab(input: {
     workspaceId: string
     sessionId: string
-    agent: 'codex'
+    agent: AgentSessionHandleProvider
     activate: boolean
     notify?: boolean
   }): Promise<void> {
@@ -12738,7 +12749,7 @@ export class OrcaRuntimeService {
     const tab: RuntimeMobileSessionAgentTab = {
       type: 'agent-session',
       id,
-      title: 'Codex Chat',
+      title: input.agent === 'claude' ? 'Claude Chat' : 'Codex Chat',
       sessionId: input.sessionId,
       agent: input.agent,
       isActive: input.activate

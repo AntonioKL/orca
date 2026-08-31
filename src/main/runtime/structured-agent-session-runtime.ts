@@ -71,7 +71,9 @@ export type StructuredAgentSessionRuntimeDeps = {
   readClaudeProcessStartTime?: ClaudeStructuredSessionAdapterDeps['readProcessStartTime']
   resolveLaunchArgs?: (provider: AgentSessionRecord['provider']) => Promise<string[]> | string[]
   resolveLaunchEnv?: () => Promise<NodeJS.ProcessEnv>
-  resolveLaunchEnvOverlay?: () => Promise<Record<string, string>> | Record<string, string>
+  resolveLaunchEnvOverlay?: (
+    provider: AgentSessionRecord['provider']
+  ) => Promise<Record<string, string>> | Record<string, string>
   resolveEnvironment?: () => Promise<NodeJS.ProcessEnv>
   resolveCodexOverrides?: () => NodeJS.ProcessEnv
   resolveClaudeOverrides?: () => NodeJS.ProcessEnv
@@ -134,7 +136,7 @@ async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<Install
   ): Promise<NodeJS.ProcessEnv> => ({
     ...(await bootEnvironment),
     ...(await deps.resolveLaunchEnv?.()),
-    ...(await deps.resolveLaunchEnvOverlay?.()),
+    ...(await deps.resolveLaunchEnvOverlay?.(provider)),
     ...(provider === 'claude' ? deps.resolveClaudeOverrides?.() : deps.resolveCodexOverrides?.())
   })
   const store = await AgentSessionRecordStore.open({
