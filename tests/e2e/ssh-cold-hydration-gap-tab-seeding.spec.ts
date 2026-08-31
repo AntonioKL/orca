@@ -205,6 +205,10 @@ test.describe('SSH cold hydration gap tab seeding', () => {
         `the captured host snapshot ${snapshotPath} is not parseable JSON, so replaying it proves nothing: ${JSON.stringify(saved.slice(0, 200))}`
       ).not.toBeNull()
       expect(
+        capturedTabIds,
+        `the captured host snapshot ${snapshotPath} contains ${capturedTabIds?.length ?? 0} tab(s), but the seeded baseline has ${BASELINE_TAB_COUNT}`
+      ).toHaveLength(BASELINE_TAB_COUNT)
+      expect(
         remote.tabIds.filter((id) => !(capturedTabIds ?? []).includes(id)),
         `the captured host snapshot ${snapshotPath} holds ${capturedTabIds?.length ?? 0} tab(s) and is missing part of the ${BASELINE_TAB_COUNT}-tab baseline this test seeded, so the bytes it replays are not the workspace the assertions below describe`
       ).toEqual([])
