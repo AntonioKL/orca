@@ -1,7 +1,7 @@
 # Structured native-chat readiness report
 
 Integration branch: `brennanb2025/structured-chat-integration-latest`
-Exact integration head: `2dd6d4d2e9cb36d7f82aec72e2688fea2a08b6a7`
+Exact integration head: `1b4530ef75b8352b769a525a68586f30efabab43`
 
 ## Architecture decision
 
