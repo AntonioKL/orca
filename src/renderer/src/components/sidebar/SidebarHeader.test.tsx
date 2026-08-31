@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
 type MockState = {
   repos: { id: string }[]
   groupBy: string
+  sidebarBody: 'workspaces' | 'agents'
+  setSidebarBody: (body: 'workspaces' | 'agents') => void
   openModal: (modal: string, data?: unknown) => void
 }
 
@@ -21,6 +23,10 @@ let mockState: MockState
 
 vi.mock('@/store', () => ({
   useAppStore: (selector: (state: MockState) => unknown) => selector(mockState)
+}))
+
+vi.mock('@/components/dashboard/useAgentBucketCounts', () => ({
+  useAgentBucketCounts: () => ({ attention: 0, working: 0, done: 0, idle: 0 })
 }))
 
 vi.mock('./SidebarWorkspaceOptionsMenu', () => ({ default: () => null }))
@@ -50,7 +56,13 @@ function newWorkspaceButton(): HTMLButtonElement {
 
 beforeEach(() => {
   mocks.openWorkspaceCreationComposerWithTourHandoff.mockClear()
-  mockState = { repos: [], groupBy: 'repo', openModal: vi.fn() }
+  mockState = {
+    repos: [],
+    groupBy: 'repo',
+    sidebarBody: 'workspaces',
+    setSidebarBody: vi.fn(),
+    openModal: vi.fn()
+  }
   container = document.createElement('div')
   document.body.append(container)
   root = createRoot(container)
@@ -89,5 +101,50 @@ describe('SidebarHeader', () => {
 
     expect(newWorkspaceButton().disabled).toBe(false)
     expect(mocks.openWorkspaceCreationComposerWithTourHandoff).toHaveBeenCalledTimes(1)
+  })
+
+  it('switches sidebar body to agents when clicking the agents tab in workspaces mode', () => {
+    act(() => {
+      root.render(<SidebarHeader onWorkspaceBoardMenuOpenChange={vi.fn()} />)
+    })
+
+    const agentTab = container.querySelector<HTMLButtonElement>(
+      'button[data-sidebar-section-title="agents"]'
+    )
+    expect(agentTab).toBeTruthy()
+
+    act(() => {
+      agentTab?.click()
+    })
+
+    expect(mockState.setSidebarBody).toHaveBeenCalledWith('agents')
+  })
+
+  it('switches sidebar body to workspaces when clicking the projects tab in agents mode', () => {
+    mockState.sidebarBody = 'agents'
+    act(() => {
+      root.render(<SidebarHeader onWorkspaceBoardMenuOpenChange={vi.fn()} />)
+    })
+
+    const projectsTab = container.querySelector<HTMLButtonElement>(
+      'button[data-sidebar-section-title="projects"]'
+    )
+    expect(projectsTab).toBeTruthy()
+
+    act(() => {
+      projectsTab?.click()
+    })
+
+    expect(mockState.setSidebarBody).toHaveBeenCalledWith('workspaces')
+  })
+
+  it('does not render workspace action buttons in agents mode', () => {
+    mockState.sidebarBody = 'agents'
+    act(() => {
+      root.render(<SidebarHeader onWorkspaceBoardMenuOpenChange={vi.fn()} />)
+    })
+
+    expect(container.querySelector('[aria-label="New workspace"]')).toBeNull()
+    expect(container.querySelector('[aria-label="Add Project"]')).toBeNull()
   })
 })

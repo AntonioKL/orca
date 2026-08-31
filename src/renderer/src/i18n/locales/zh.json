@@ -4420,6 +4420,7 @@
           "keepDefaultBranchAria": "隐藏休眠工作区时仍显示默认分支"
         },
         "SidebarHeader": {
+          "projects": "项目",
           "92154beb7e": "新工作区",
           "49f62c5665": "工作区板",
           "5c9c7c16aa": "添加项目以创建工作区",
@@ -14899,7 +14900,7 @@
   },
   "dashboard": {
     "sidebar": {
-      "label": "智能体仪表盘"
+      "label": "智能体"
     }
   },
   "browser": {

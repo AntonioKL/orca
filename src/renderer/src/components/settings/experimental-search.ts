@@ -95,50 +95,6 @@ export const getExperimentalPaneSearchEntries = createLocalizedCatalog(
         )
       ]
     },
-    {
-      title: translate(
-        'auto.components.settings.experimental.search.agentDashboard.title',
-        'Agent Dashboard'
-      ),
-      description: translate(
-        'auto.components.settings.experimental.search.agentDashboard.description',
-        'Kanban board for monitoring agents across worktrees, in-window or as a pop-out.'
-      ),
-      keywords: [
-        ...translateSearchKeyword(
-          'auto.components.settings.experimental.search.0d24759f14',
-          'experimental'
-        ),
-        ...translateSearchKeyword(
-          'auto.components.settings.experimental.search.agentDashboard.agent',
-          'agent'
-        ),
-        ...translateSearchKeyword(
-          'auto.components.settings.experimental.search.agentDashboard.dashboard',
-          'dashboard'
-        ),
-        ...translateSearchKeyword(
-          'auto.components.settings.experimental.search.agentDashboard.kanban',
-          'kanban'
-        ),
-        ...translateSearchKeyword(
-          'auto.components.settings.experimental.search.agentDashboard.popout',
-          'pop-out'
-        ),
-        ...translateSearchKeyword(
-          'auto.components.settings.experimental.search.agentDashboard.board',
-          'board'
-        ),
-        ...translateSearchKeyword(
-          'auto.components.settings.experimental.search.agentDashboard.inWindow',
-          'in-window'
-        ),
-        ...translateSearchKeyword(
-          'auto.components.settings.experimental.search.agentDashboard.worktrees',
-          'worktrees'
-        )
-      ]
-    },
     getNativeChatExperimentalSearchEntry(),
     {
       title: translate(
@@ -249,12 +205,6 @@ export function getExperimentalSearchEntry() {
     pet: findEntry(translate('auto.components.settings.experimental.search.87d99e634b', 'Pet')),
     agentsView: findEntry(
       translate('auto.components.settings.experimental.search.ccc5548ac5', 'Agents View')
-    ),
-    agentDashboard: findEntry(
-      translate(
-        'auto.components.settings.experimental.search.agentDashboard.title',
-        'Agent Dashboard'
-      )
     ),
     nativeChat: findEntry(
       translate('auto.components.settings.experimental.search.nativeChat.title', 'Chat UI')

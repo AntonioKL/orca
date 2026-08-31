@@ -1,8 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { useShallow } from 'zustand/react/shallow'
 import { useSidebarResize } from '@/hooks/useSidebarResize'
-import { useAppStore } from '@/store'
-import { getRepoMapFromState, getWorktreeMapFromState } from '@/store/selectors'
 import {
   setActivityTerminalPortals,
   type ActivityTerminalPortalTarget
@@ -11,13 +8,7 @@ import {
   reconcileActivityPortalThreads,
   resolveActivityPortalSwap
 } from './activity-portal-thread-reconciliation'
-import { buildActivityEvents } from './activity-event-builder'
-import { buildAgentPaneThreads } from './activity-thread-builder'
-import {
-  activityThreadMatchesSearchQuery,
-  buildActivityThreadGroups,
-  isActivitySearchQueryTooLarge
-} from './activity-thread-grouping'
+import { useAgentPaneThreads } from './use-agent-pane-threads'
 import { handleActivityFilterFocusShortcut } from './activity-filter-focus-shortcut'
 import { createActivityThreadActions } from './activity-thread-actions'
 import { ActivityThreadListPane } from './activity-thread-list-pane'
@@ -64,78 +55,18 @@ export default function ActivityPrototypePage(): React.JSX.Element {
     setWidth: setThreadListWidth
   })
 
-  const storeData = useAppStore(
-    useShallow((s) => ({
-      agentStatusByPaneKey: s.agentStatusByPaneKey,
-      migrationUnsupportedByPtyId: s.migrationUnsupportedByPtyId,
-      retainedAgentsByPaneKey: s.retainedAgentsByPaneKey,
-      tabsByWorktree: s.tabsByWorktree,
-      worktreeMap: getWorktreeMapFromState(s),
-      repoMap: getRepoMapFromState(s),
-      acknowledgedAgentsByPaneKey: s.acknowledgedAgentsByPaneKey,
-      acknowledgeAgents: s.acknowledgeAgents,
-      unacknowledgeAgents: s.unacknowledgeAgents,
-      generatedTitlesEnabled: s.settings?.tabAutoGenerateTitle === true
-    }))
-  )
-  // Why: agentStatusEpoch is a dep (not used in the body) so the memo recomputes when freshness boundaries expire even without new PTY data.
-  const agentStatusEpoch = useAppStore((s) => s.agentStatusEpoch)
-
-  const { events: allEvents, liveAgentByPaneKey } = useMemo(
-    () =>
-      buildActivityEvents({
-        agentStatusByPaneKey: storeData.agentStatusByPaneKey,
-        migrationUnsupportedByPtyId: storeData.migrationUnsupportedByPtyId,
-        retainedAgentsByPaneKey: storeData.retainedAgentsByPaneKey,
-        tabsByWorktree: storeData.tabsByWorktree,
-        worktreeMap: storeData.worktreeMap,
-        repoMap: storeData.repoMap,
-        acknowledgedAgentsByPaneKey: storeData.acknowledgedAgentsByPaneKey,
-        // Why: Date.now() is read in the memo body (not a dep) so stale-decay recomputes when agentStatusEpoch ticks, not on wall-clock time.
-        now: Date.now()
-      }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [storeData, agentStatusEpoch]
-  )
-
-  const allThreads = useMemo(
-    () =>
-      buildAgentPaneThreads({
-        events: allEvents,
-        liveAgentByPaneKey,
-        generatedTitlesEnabled: storeData.generatedTitlesEnabled
-      }),
-    [allEvents, liveAgentByPaneKey, storeData.generatedTitlesEnabled]
-  )
-  const selectedPaneKeyIsLive =
-    selectedPaneKey === null || allThreads.some((thread) => thread.paneKey === selectedPaneKey)
-  const effectiveSelectedPaneKey = selectedPaneKeyIsLive ? selectedPaneKey : null
+  const {
+    storeData,
+    allThreads,
+    selectedPaneKeyIsLive,
+    effectiveSelectedPaneKey,
+    visibleThreads,
+    visibleThreadGroups
+  } = useAgentPaneThreads({ query, readFilter, groupBy, selectedPaneKey })
   if (!selectedPaneKeyIsLive) {
     // Why: rows disappear when agent retention or tab state changes; clear stale selection before detail/portal rendering targets it.
     setSelectedPaneKey(null)
   }
-
-  const visibleThreads = useMemo(() => {
-    const normalizedQuery = isActivitySearchQueryTooLarge(query) ? null : query.trim().toLowerCase()
-    return allThreads.filter((thread) => {
-      // Why: keep the just-selected thread visible after auto-mark-read flips it to read, else unread-only mode makes the clicked row vanish from the list.
-      if (
-        readFilter === 'unread' &&
-        !thread.unread &&
-        thread.paneKey !== effectiveSelectedPaneKey
-      ) {
-        return false
-      }
-      if (normalizedQuery === null) {
-        return false
-      }
-      return activityThreadMatchesSearchQuery({ thread, searchQuery: normalizedQuery })
-    })
-  }, [allThreads, readFilter, query, effectiveSelectedPaneKey])
-  const visibleThreadGroups = useMemo(
-    () => buildActivityThreadGroups(visibleThreads, groupBy),
-    [visibleThreads, groupBy]
-  )
 
   const selectedThread = effectiveSelectedPaneKey
     ? (allThreads.find((thread) => thread.paneKey === effectiveSelectedPaneKey) ?? null)

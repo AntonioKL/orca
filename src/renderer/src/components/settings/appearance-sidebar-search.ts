@@ -123,6 +123,15 @@ export const getShowPinnedWorktreesInGroupsEntry = createLocalizedCatalog(
   })
 )
 
+export const getAgentsSidebarEntry = createLocalizedCatalog((): SettingsSearchEntry => ({
+  title: translate('settings.appearance.agentsSidebar.title', 'Show Agents Button'),
+  description: translate(
+    'settings.appearance.agentsSidebar.description',
+    'Show the Agents tab in the left sidebar.'
+  ),
+  keywords: ['agents', 'agent', 'sidebar', 'tab', 'dashboard', 'hide', 'show']
+}))
+
 export const getSidebarEntries = createLocalizedCatalog((): SettingsSearchEntry[] => [
   {
     title: translate('auto.components.settings.appearance.search.155a1e7438', 'Show Tasks Button'),

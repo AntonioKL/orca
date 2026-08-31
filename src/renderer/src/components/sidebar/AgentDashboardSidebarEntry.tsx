@@ -5,6 +5,9 @@ import { AgentQuestionIcon } from '@/components/AgentQuestionIcon'
 import { DASHBOARD_BUCKET_ORDER, type DashboardBucket } from '../../../../shared/dashboard-snapshot'
 import { useAgentBucketCounts } from '@/components/dashboard/useAgentBucketCounts'
 import { translate } from '@/i18n/i18n'
+function AgentsSidebarTour(): null {
+  return null
+}
 
 const DASHBOARD_BUCKET_DOT_CLASS: Record<'working' | 'done' | 'idle', string> = {
   working: 'bg-yellow-500',
@@ -64,28 +67,34 @@ export default function AgentDashboardSidebarEntry(): React.JSX.Element {
   const openAsPopout = useAppStore((s) => s.settings?.experimentalAgentDashboardMode === 'popout')
   const drawerOpen = useAppStore((s) => s.agentDashboardDrawerOpen)
   const setAgentDashboardDrawerOpen = useAppStore((s) => s.setAgentDashboardDrawerOpen)
+  const hasStoreApi =
+    typeof (useAppStore as typeof useAppStore & { getState?: unknown }).getState === 'function'
 
   return (
-    <button
-      type="button"
-      onClick={() => {
-        if (openAsPopout) {
-          void window.api.dashboard.openPopout()
-        } else {
-          setAgentDashboardDrawerOpen(!drawerOpen)
-        }
-      }}
-      className={cn(
-        'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] font-medium tracking-tight transition-colors',
-        'text-worktree-sidebar-foreground/60 hover:bg-worktree-sidebar-foreground/8'
-      )}
-    >
-      <LayoutDashboard
-        className="size-4 shrink-0 text-worktree-sidebar-foreground/30"
-        strokeWidth={1.75}
-      />
-      <span className="flex-1">{translate('dashboard.sidebar.label', 'Agent Dashboard')}</span>
-      <DashboardBucketCounts counts={dashboardBucketCounts} showIdle={showIdle} />
-    </button>
+    <>
+      {hasStoreApi ? <AgentsSidebarTour /> : null}
+      <button
+        type="button"
+        data-contextual-tour-target="agents-sidebar"
+        onClick={() => {
+          if (openAsPopout) {
+            void window.api.dashboard.openPopout()
+          } else {
+            setAgentDashboardDrawerOpen(!drawerOpen)
+          }
+        }}
+        className={cn(
+          'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] font-medium tracking-tight transition-colors',
+          'text-worktree-sidebar-foreground/60 hover:bg-worktree-sidebar-foreground/8'
+        )}
+      >
+        <LayoutDashboard
+          className="size-4 shrink-0 text-worktree-sidebar-foreground/30"
+          strokeWidth={1.75}
+        />
+        <span className="flex-1">{translate('dashboard.sidebar.label', 'Agents')}</span>
+        <DashboardBucketCounts counts={dashboardBucketCounts} showIdle={showIdle} />
+      </button>
+    </>
   )
 }

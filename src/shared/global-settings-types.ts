@@ -427,6 +427,8 @@ export type GlobalSettings = {
   experimentalActivity: boolean
   /** Experimental: pop-out Kanban dashboard for monitoring and opening agent terminals across worktrees. */
   experimentalAgentDashboardPopout?: boolean
+  /** Whether the Agents dashboard tab is shown in the left sidebar. Defaults on. */
+  showAgentsSidebar?: boolean
   /** How the Agent Dashboard opens: an in-window companion board or a separate pop-out window. Defaults to in-window. */
   experimentalAgentDashboardMode?: AgentDashboardMode
   /** Includes stale quiet agents as a fourth Agent Dashboard column. */

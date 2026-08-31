@@ -16,6 +16,7 @@ import { useWorkspaceBoardPanel } from './useWorkspaceBoardPanel'
 import { resolveLeftSidebarStyleVariables } from '@/lib/left-sidebar-appearance'
 import { useSystemPrefersDark } from '@/components/terminal-pane/use-system-prefers-dark'
 import { lazyWithRetry } from '@/lib/lazy-with-retry'
+import SidebarAgentsList from './SidebarAgentsList'
 
 const WorktreeMetaDialog = lazyWithRetry(() => import('./WorktreeMetaDialog'))
 const RemoveFolderDialog = lazyWithRetry(() => import('./RemoveFolderDialog'))
@@ -48,6 +49,7 @@ function Sidebar({
   const repos = useAppStore((s) => s.repos)
   const startupWorktreeRefreshCompleted = useAppStore((s) => s.startupWorktreeRefreshCompleted)
   const settings = useAppStore((s) => s.settings)
+  const sidebarBody = useAppStore((s) => s.sidebarBody ?? 'workspaces')
   const fetchAllWorktrees = useAppStore((s) => s.fetchAllWorktrees)
   const activeModal = useAppStore((s) => s.activeModal)
   const statusBarVisible = useAppStore((s) => s.statusBarVisible)
@@ -116,15 +118,18 @@ function Sidebar({
             {/* Fixed controls */}
             <SidebarNav />
             <SidebarHeader onWorkspaceBoardMenuOpenChange={setWorkspaceBoardMenuOpen} />
-
-            <WorktreeList
-              scrollOffsetRef={worktreeScrollOffsetRef}
-              scrollAnchorRef={worktreeScrollAnchorRef}
-              workspaceBoardOpen={workspaceBoardOpen}
-              onWorkspaceBoardDragPreviewStart={previewWorkspaceBoardFromDrag}
-              onWorkspaceBoardDragPreviewCommit={solidifyWorkspaceBoardFromDrag}
-              onWorkspaceBoardDragPreviewCancel={cancelWorkspaceBoardDragPreview}
-            />
+            {sidebarBody === 'agents' ? (
+              <SidebarAgentsList />
+            ) : (
+              <WorktreeList
+                scrollOffsetRef={worktreeScrollOffsetRef}
+                scrollAnchorRef={worktreeScrollAnchorRef}
+                workspaceBoardOpen={workspaceBoardOpen}
+                onWorkspaceBoardDragPreviewStart={previewWorkspaceBoardFromDrag}
+                onWorkspaceBoardDragPreviewCommit={solidifyWorkspaceBoardFromDrag}
+                onWorkspaceBoardDragPreviewCancel={cancelWorkspaceBoardDragPreview}
+              />
+            )}
 
             <div className="relative shrink-0">
               <SetupScriptPromptCard />
@@ -195,7 +200,7 @@ function Sidebar({
           onMenuOpenChange={setWorkspaceBoardMenuOpen}
         />
       ) : null}
-      {settings?.experimentalAgentDashboardPopout === true ? (
+      {(settings?.showAgentsSidebar ?? settings?.experimentalAgentDashboardPopout ?? true) ? (
         <React.Suspense fallback={null}>
           <AgentDashboardSidebarHost
             sidebarOpen={sidebarOpen}

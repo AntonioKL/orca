@@ -23,6 +23,7 @@ import { USAGE_PERCENTAGE_DISPLAY_SETTING_ID } from './appearance-usage-percenta
 import { LeftSidebarAppearanceSetting } from './LeftSidebarAppearanceSetting'
 import {
   getLeftSidebarAppearanceEntry,
+  getAgentsSidebarEntry,
   getShowPinnedWorktreesInGroupsEntry,
   getWorkspaceCardLayoutEntry
 } from './appearance-sidebar-search'
@@ -78,6 +79,7 @@ export function AppearanceWindowSidebarSection({
   const sidebarEntries = getSidebarEntries()
   const workspaceCardLayoutEntry = getWorkspaceCardLayoutEntry()
   const layoutEntries = getLayoutEntries()
+  const agentsSidebarEntry = getAgentsSidebarEntry()
   const statusBarTitle = translate(
     'auto.components.settings.AppearancePane.3e4175e5c6',
     'Status Bar'
@@ -103,6 +105,7 @@ export function AppearanceWindowSidebarSection({
     )
   const sidebarAdvancedMatches = matchesSettingsSearch(searchQuery, [
     workspaceCardLayoutEntry,
+    agentsSidebarEntry,
     ...sidebarEntries
   ])
   const fileExplorerAdvancedMatches = matchesSettingsSearch(searchQuery, layoutEntries)
@@ -203,6 +206,24 @@ export function AppearanceWindowSidebarSection({
                   title={translate('auto.components.settings.AppearancePane.dc29f3cc0d', 'Sidebar')}
                 />
                 <div className="ml-4 divide-y divide-border/40">
+                  <SearchableSetting
+                    title={agentsSidebarEntry.title}
+                    description={agentsSidebarEntry.description}
+                    keywords={agentsSidebarEntry.keywords}
+                  >
+                    <SettingsSwitchRow
+                      label={agentsSidebarEntry.title}
+                      description={agentsSidebarEntry.description}
+                      checked={settings.showAgentsSidebar !== false}
+                      onChange={() =>
+                        void updateSettings({
+                          showAgentsSidebar: settings.showAgentsSidebar === false
+                        })
+                      }
+                      ariaLabel={agentsSidebarEntry.title}
+                    />
+                  </SearchableSetting>
+
                   {/* Why: this setting lives with the sidebar layout controls; Settings only
                   names that ownership so we do not create a second stateful control. */}
                   <SearchableSetting

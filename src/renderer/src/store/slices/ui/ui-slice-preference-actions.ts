@@ -36,6 +36,9 @@ import {
 
 export function createUiPreferenceActions(set: UISliceSet, get: UISliceGet): Partial<UISlice> {
   return {
+    sidebarBody: 'workspaces',
+    setSidebarBody: (body) => set({ sidebarBody: body }),
+
     groupBy: 'repo',
     // Why: group keys are mode-specific, so clear collapsed state on mode switch — stale keys are meaningless and accumulate.
     setGroupBy: (g) => {

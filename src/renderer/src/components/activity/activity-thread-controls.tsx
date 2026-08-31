@@ -7,6 +7,9 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
@@ -20,7 +23,7 @@ import {
   threadAgentState,
   threadAgentStateLabel
 } from './activity-thread-presentation'
-import type { ActivityThreadGroup, AgentPaneThread } from './activity-thread-types'
+import type { ActivityGroupBy, ActivityThreadGroup, AgentPaneThread } from './activity-thread-types'
 
 export function EventTime({ timestamp }: { timestamp: number }): React.JSX.Element {
   const absolute = formatAbsoluteDate(timestamp)
@@ -44,11 +47,15 @@ export function EventTime({ timestamp }: { timestamp: number }): React.JSX.Eleme
 }
 
 export function ActivityThreadOptionsMenu({
+  groupBy,
+  onGroupByChange,
   compactMode,
   hasUnreadThreads,
   onCompactModeChange,
   onMarkAllThreadsRead
 }: {
+  groupBy?: ActivityGroupBy
+  onGroupByChange?: (groupBy: ActivityGroupBy) => void
   compactMode: boolean
   hasUnreadThreads: boolean
   onCompactModeChange: (compactMode: boolean) => void
@@ -63,15 +70,15 @@ export function ActivityThreadOptionsMenu({
             <DropdownMenuTrigger asChild>
               <Button
                 type="button"
-                variant="outline"
-                size="sm"
-                className="size-8 shrink-0 border-input bg-transparent p-0 text-muted-foreground shadow-xs hover:bg-accent hover:text-accent-foreground dark:bg-transparent dark:hover:bg-accent dark:hover:text-accent-foreground"
+                variant="ghost"
+                size="icon-xs"
+                className="size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground hover:bg-muted/50"
                 aria-label={translate(
                   'auto.components.activity.ActivityPrototypePage.db8a1878b5',
                   'Thread list options'
                 )}
               >
-                <MoreVertical className="size-3.5" />
+                <MoreVertical className="size-3" />
               </Button>
             </DropdownMenuTrigger>
           </span>
@@ -81,6 +88,34 @@ export function ActivityThreadOptionsMenu({
         </TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="end" sideOffset={6}>
+        {groupBy && onGroupByChange ? (
+          <>
+            <DropdownMenuLabel>
+              {translate(
+                'auto.components.activity.ActivityPrototypePage.770d458144',
+                'Group agent activity by'
+              )}
+            </DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              value={groupBy}
+              onValueChange={(value) => onGroupByChange(value as ActivityGroupBy)}
+            >
+              <DropdownMenuRadioItem value="status">
+                {translate('auto.components.activity.ActivityPrototypePage.4a3986b200', 'Status')}
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="project">
+                {translate('auto.components.activity.ActivityPrototypePage.8c3b621ddf', 'Project')}
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="worktree">
+                {translate('auto.components.activity.ActivityPrototypePage.b29191b3e0', 'Worktree')}
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="agent">
+                {translate('auto.components.activity.ActivityPrototypePage.f6396e1f85', 'Agent')}
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+            <DropdownMenuSeparator />
+          </>
+        ) : null}
         <DropdownMenuCheckboxItem
           checked={compactMode}
           onCheckedChange={(checked) => onCompactModeChange(checked === true)}

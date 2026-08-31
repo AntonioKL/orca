@@ -41,7 +41,8 @@ export function ActivityThreadRow({
   onJump,
   onMarkUnread,
   canJump,
-  compactMode
+  compactMode,
+  showJumpAction = true
 }: {
   thread: AgentPaneThread
   selected: boolean
@@ -50,6 +51,7 @@ export function ActivityThreadRow({
   onMarkUnread: () => void
   canJump: boolean
   compactMode: boolean
+  showJumpAction?: boolean
 }): React.JSX.Element {
   const renderedResponsePreview = activityThreadResponseRenderPreview({
     responsePreview: thread.responsePreview
@@ -57,11 +59,13 @@ export function ActivityThreadRow({
   const workspaceTitle = getActivityThreadWorkspaceTitle(thread.worktree)
   const taskTitle = thread.paneTitle
   const agentLabel = formatAgentTypeLabel(thread.agentType)
+  const hasDistinctTaskTitle = Boolean(taskTitle && taskTitle !== workspaceTitle)
   const showStatusPreview =
     !compactMode &&
     renderedResponsePreview.length > 0 &&
     renderedResponsePreview !== taskTitle &&
     renderedResponsePreview !== workspaceTitle
+
   return (
     <div
       data-current={selected ? 'true' : undefined}
@@ -80,8 +84,7 @@ export function ActivityThreadRow({
       }}
       className={cn(
         // Why (WorktreeCard cues): selected = tint+shadow, beats hover; unread = weight + left bar only; stacking all three confused selected vs unread on hover.
-        // Why (asymmetric padding): title leading-snug adds ~3px above cap-height; smaller top pad evens the row.
-        'group relative flex w-full cursor-pointer flex-col gap-1 border-b border-border px-3 pt-2.5 pb-3 text-left transition-colors',
+        'group relative flex w-full cursor-pointer flex-col gap-1 border-b border-border px-3 pt-2.5 pb-2.5 text-left transition-colors',
         selected
           ? 'bg-black/[0.08] shadow-[0_1px_2px_rgba(0,0,0,0.04)] dark:bg-white/[0.10] dark:shadow-[0_1px_2px_rgba(0,0,0,0.03)]'
           : 'hover:bg-accent/40'
@@ -90,134 +93,137 @@ export function ActivityThreadRow({
       {thread.unread ? (
         <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r-full bg-primary" />
       ) : null}
-      <div className="flex min-w-0 items-start gap-2">
-        <span className="inline-flex shrink-0 items-start gap-1">
+
+      {/* Top row: Status Dot + Agent Icon + Repo Label + Branch / Worktree + Time / Bell */}
+      <div className="flex min-w-0 items-center justify-between gap-1.5 text-[10px]">
+        <div className="flex min-w-0 flex-1 items-center gap-1.5">
           <ThreadAgentStateIndicator thread={thread} />
-          <span className="inline-flex shrink-0 pt-px">
-            <AgentIcon agent={agentTypeToIconAgent(thread.agentType)} size={14} />
+          <span className="inline-flex shrink-0">
+            <AgentIcon agent={agentTypeToIconAgent(thread.agentType)} size={13} />
           </span>
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-start gap-2">
-            <div className="min-w-0 flex-1 space-y-0.5">
-              <ActivityProjectLabel repo={thread.repo} />
-              <div
-                className={cn(
-                  'min-w-0 text-[13px] leading-snug',
-                  compactMode ? 'truncate' : 'line-clamp-2 break-words',
-                  thread.unread ? 'font-semibold text-foreground' : 'font-medium text-foreground'
+          <ActivityProjectLabel repo={thread.repo} />
+          {hasDistinctTaskTitle && workspaceTitle !== thread.repo?.displayName ? (
+            <span
+              className="min-w-0 truncate font-mono text-[10.5px] text-muted-foreground font-medium"
+              title={workspaceTitle}
+            >
+              {workspaceTitle}
+            </span>
+          ) : null}
+        </div>
+        <div className="inline-flex shrink-0 items-center gap-1">
+          <span className="inline-flex size-3.5 shrink-0 items-center justify-center">
+            {thread.unread ? (
+              <FilledBellIcon
+                className="size-3 shrink-0 text-amber-500 drop-shadow-sm"
+                aria-label={translate(
+                  'auto.components.activity.ActivityPrototypePage.beb2c19173',
+                  'Unread'
                 )}
-                title={workspaceTitle}
-              >
-                {workspaceTitle}
-              </div>
-              {taskTitle !== workspaceTitle ? (
-                <div
-                  className={cn(
-                    'min-w-0 text-[12px] leading-snug text-muted-foreground',
-                    compactMode ? 'truncate' : 'line-clamp-2 break-words'
-                  )}
-                  title={taskTitle}
-                >
-                  {taskTitle}
-                </div>
-              ) : null}
-              {showStatusPreview ? (
-                <CommentMarkdown
-                  content={renderedResponsePreview}
-                  className={cn(
-                    'h-[1lh] min-w-0 overflow-hidden truncate whitespace-nowrap text-[11px] font-normal leading-snug text-muted-foreground/80',
-                    '[&_*]:inline [&_*]:!m-0 [&_*]:!p-0 [&_*]:!whitespace-nowrap [&_br]:hidden [&_ol]:list-none [&_ul]:list-none'
-                  )}
-                  title={thread.responsePreview}
-                />
-              ) : null}
-              <div className="flex min-w-0 items-center gap-1.5 pt-0.5">
-                <span className="shrink-0 text-[10px] text-muted-foreground/80">{agentLabel}</span>
-                {canJump ? (
-                  <span
+              />
+            ) : (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onMarkUnread()
+                    }}
+                    onMouseDown={(event) => event.stopPropagation()}
                     className={cn(
-                      'ml-auto inline-flex shrink-0 items-center transition-opacity',
-                      'can-hover:pointer-events-none can-hover:invisible can-hover:opacity-0',
-                      'group-hover:pointer-events-auto group-hover:visible group-hover:opacity-100'
+                      'group/unread flex size-3.5 shrink-0 cursor-pointer items-center justify-center rounded transition-all',
+                      'hover:bg-accent/80 active:scale-95',
+                      'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
+                    )}
+                    aria-label={translate(
+                      'auto.components.activity.ActivityPrototypePage.59b131fbd9',
+                      'Mark thread unread'
                     )}
                   >
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon-xs"
-                          aria-label={translate(
-                            'auto.components.activity.ActivityPrototypePage.4616ea39fd',
-                            'Jump to workspace'
-                          )}
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            onJump()
-                          }}
-                          onMouseDown={(event) => event.stopPropagation()}
-                        >
-                          <ExternalLink className="size-3" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="left">
-                        {translate(
-                          'auto.components.activity.ActivityPrototypePage.4616ea39fd',
-                          'Jump to workspace'
-                        )}
-                      </TooltipContent>
-                    </Tooltip>
-                  </span>
-                ) : null}
-              </div>
-            </div>
-            <span className="inline-flex shrink-0 items-center gap-1.5 pt-px">
-              <span className="inline-flex size-4 shrink-0 items-center justify-center">
-                {thread.unread ? (
-                  <FilledBellIcon
-                    className="size-[13px] shrink-0 text-amber-500 drop-shadow-sm"
-                    aria-label={translate(
-                      'auto.components.activity.ActivityPrototypePage.beb2c19173',
-                      'Unread'
-                    )}
-                  />
-                ) : (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          onMarkUnread()
-                        }}
-                        onMouseDown={(event) => event.stopPropagation()}
-                        className={cn(
-                          'group/unread flex size-4 shrink-0 cursor-pointer items-center justify-center rounded transition-all',
-                          'hover:bg-accent/80 active:scale-95',
-                          'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
-                        )}
-                        aria-label={translate(
-                          'auto.components.activity.ActivityPrototypePage.59b131fbd9',
-                          'Mark thread unread'
-                        )}
-                      >
-                        <Bell className="size-3 text-muted-foreground/40 can-hover:opacity-0 transition-opacity group-hover:opacity-100 group-hover/unread:opacity-100" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="left">
-                      {translate(
-                        'auto.components.activity.ActivityPrototypePage.59b131fbd9',
-                        'Mark thread unread'
-                      )}
-                    </TooltipContent>
-                  </Tooltip>
-                )}
-              </span>
-              <EventTime timestamp={thread.latestTimestamp} />
-            </span>
-          </div>
+                    <Bell className="size-2.5 text-muted-foreground/40 can-hover:opacity-0 transition-opacity group-hover:opacity-100 group-hover/unread:opacity-100" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="left">
+                  {translate(
+                    'auto.components.activity.ActivityPrototypePage.59b131fbd9',
+                    'Mark thread unread'
+                  )}
+                </TooltipContent>
+              </Tooltip>
+            )}
+          </span>
+          <EventTime timestamp={thread.latestTimestamp} />
         </div>
+      </div>
+
+      {/* Main Body: Prompt / Task Title */}
+      <div
+        className={cn(
+          'min-w-0 text-[12px] leading-snug',
+          compactMode ? 'truncate' : 'line-clamp-2 break-words',
+          thread.unread ? 'font-semibold text-foreground' : 'font-medium text-foreground'
+        )}
+        title={taskTitle || workspaceTitle}
+      >
+        {taskTitle || workspaceTitle}
+      </div>
+
+      {/* Agent Response Snippet Box (Multi-line readable preview) */}
+      {showStatusPreview ? (
+        <div className="my-0.5 rounded border border-border/50 bg-accent/40 px-2 py-1.5 dark:bg-black/30">
+          <CommentMarkdown
+            content={renderedResponsePreview}
+            className={cn(
+              'min-w-0 break-words text-[10.5px] font-mono leading-relaxed text-muted-foreground',
+              compactMode ? 'truncate' : 'line-clamp-2',
+              '[&_*]:inline [&_*]:!m-0 [&_*]:!p-0 [&_br]:hidden [&_ol]:list-none [&_ul]:list-none'
+            )}
+            title={thread.responsePreview}
+          />
+        </div>
+      ) : null}
+
+      {/* Footer: Agent Type & Quick Jump Action */}
+      <div className="flex min-w-0 items-center justify-between pt-0.5 text-[10px] text-muted-foreground/70">
+        <span className="shrink-0">{agentLabel}</span>
+        {canJump && showJumpAction ? (
+          <span
+            className={cn(
+              'inline-flex shrink-0 items-center transition-opacity',
+              'can-hover:pointer-events-none can-hover:invisible can-hover:opacity-0',
+              'group-hover:pointer-events-auto group-hover:visible group-hover:opacity-100'
+            )}
+          >
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="size-4 p-0 text-muted-foreground hover:text-foreground"
+                  aria-label={translate(
+                    'auto.components.activity.ActivityPrototypePage.4616ea39fd',
+                    'Jump to workspace'
+                  )}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onJump()
+                  }}
+                  onMouseDown={(event) => event.stopPropagation()}
+                >
+                  <ExternalLink className="size-2.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left">
+                {translate(
+                  'auto.components.activity.ActivityPrototypePage.4616ea39fd',
+                  'Jump to workspace'
+                )}
+              </TooltipContent>
+            </Tooltip>
+          </span>
+        ) : null}
       </div>
     </div>
   )
