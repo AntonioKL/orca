@@ -14,7 +14,7 @@ import { EventEmitter } from 'node:events'
 import { createHash, randomUUID } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
-import { lstat, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { basename, join, win32 } from 'node:path'
 import { ipcMain } from 'electron'
@@ -9371,6 +9371,50 @@ describe('OrcaRuntimeService', () => {
     } finally {
       spawnSpy.mockRestore()
       await rm(destination, { recursive: true, force: true })
+    }
+  })
+
+  // Why real bytes: this lane serves paired web and remote-desktop clients, and the behaviour
+  // under test is "a .git that is not ours must still be on disk afterwards". A mocked fs cannot
+  // prove that.
+  it('refuses a runtime create into an existing repository and leaves its .git intact', async () => {
+    const runtime = new OrcaRuntimeService(store as never)
+    const parentDir = await mkdtemp('/tmp/orca-runtime-existing-repo-')
+    try {
+      const target = join(parentDir, 'existing')
+      await mkdir(join(target, '.git'), { recursive: true })
+      await writeFile(join(target, '.git', 'HEAD'), 'ref: refs/heads/main\n')
+
+      const result = await runtime.createRepo(parentDir, 'existing', 'git')
+
+      expect(result).toMatchObject({
+        error: expect.stringContaining('already a git repository')
+      })
+      await expect(readFile(join(target, '.git', 'HEAD'), 'utf8')).resolves.toBe(
+        'ref: refs/heads/main\n'
+      )
+    } finally {
+      await rm(parentDir, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses a runtime create when the target holds a .git pointer file', async () => {
+    // Linked worktrees and submodules point with a `.git` FILE, not a directory.
+    const runtime = new OrcaRuntimeService(store as never)
+    const parentDir = await mkdtemp('/tmp/orca-runtime-gitfile-')
+    try {
+      const target = join(parentDir, 'linked')
+      await mkdir(target, { recursive: true })
+      await writeFile(join(target, '.git'), 'gitdir: /somewhere/.git/worktrees/linked\n')
+
+      const result = await runtime.createRepo(parentDir, 'linked', 'git')
+
+      expect(result).toMatchObject({
+        error: expect.stringContaining('already a git repository')
+      })
+      await expect(readFile(join(target, '.git'), 'utf8')).resolves.toContain('gitdir:')
+    } finally {
+      await rm(parentDir, { recursive: true, force: true })
     }
   })
 

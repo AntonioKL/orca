@@ -6,8 +6,10 @@
 export const LEFTOVER_GIT_DIR_RETRY_HINT =
   'If a .git directory was left behind, remove it before retrying.'
 
+// Why: name both remedies. We cannot tell a user's own repository from a .git a failed attempt
+// left behind, and offering only "pick another location" contradicts the retry hint they just read.
 export function alreadyARepositoryError(name: string): string {
-  return `"${name}" is already a git repository. Choose a different name or location.`
+  return `"${name}" is already a git repository. Choose a different name or location — or, if an earlier attempt left a .git directory behind, remove it and try again.`
 }
 
 // Why: a probe that did not complete is not evidence of absence, so we refuse — but as a
