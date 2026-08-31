@@ -7,9 +7,9 @@ import { buildDashboardBucketCounts } from './build-dashboard-bucket-counts'
 export type AgentBucketCounts = Record<DashboardBucket, number>
 
 /**
- * Per-state agent counts for the sidebar dashboard entry, derived from the same
- * builder that feeds the pop-out board so the numbers always agree. Recomputes
- * only when an input slice changes (mirrors useDashboardData's cost profile).
+ * Per-state agent counts for the sidebar dashboard entry, using the same row
+ * and bucket projection as the pop-out board without allocating its cards.
+ * Recomputes only when an input slice changes.
  */
 export function useAgentBucketCounts(): AgentBucketCounts {
   const {
