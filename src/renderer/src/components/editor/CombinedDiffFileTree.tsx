@@ -28,7 +28,8 @@ export {
   createCombinedDiffSectionIndexMap,
   getCombinedDiffFileTreeNavigationIndex,
   getCombinedDiffFileTreeSectionKey,
-  handleCombinedDiffFileTreeNavigation
+  handleCombinedDiffFileTreeNavigation,
+  isCombinedDiffSectionViewed
 } from './combined-diff-file-tree-model'
 
 const UNCOMMITTED_AREA_ORDER: readonly GitStagingArea[] = ['unstaged', 'staged', 'untracked']

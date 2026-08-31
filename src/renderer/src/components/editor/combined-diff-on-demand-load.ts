@@ -7,8 +7,10 @@ export function shouldLoadCombinedDiffOnDemand({
   added?: number
   removed?: number
 }): boolean {
-  if (added === undefined || removed === undefined) {
+  // Untracked text files report additions only; both fields are absent when
+  // line counts are unavailable (for example, binary or oversized files).
+  if (added === undefined && removed === undefined) {
     return false
   }
-  return added + removed > MAX_AUTOMATIC_DIFF_CHANGED_LINES
+  return (added ?? 0) + (removed ?? 0) > MAX_AUTOMATIC_DIFF_CHANGED_LINES
 }

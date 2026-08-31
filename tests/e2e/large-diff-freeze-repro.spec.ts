@@ -87,14 +87,23 @@ test.describe('Large diff freeze repro', () => {
           if (!store) {
             throw new Error('window.__store is not available')
           }
-          const status = await window.api.git.status({ worktreePath: repoPath })
-          store.getState().setGitStatus(wId, status)
-          const entry = status.entries.find(
+          let status = await window.api.git.status({ worktreePath: repoPath })
+          let entry = status.entries.find(
             (candidate) => candidate.path === relativePath && candidate.area === 'unstaged'
           )
+          // Why: the app may still be settling the just-added worktree's first status read.
+          const statusDeadline = performance.now() + 5_000
+          while (!entry && performance.now() < statusDeadline) {
+            await new Promise((resolve) => window.setTimeout(resolve, 100))
+            status = await window.api.git.status({ worktreePath: repoPath })
+            entry = status.entries.find(
+              (candidate) => candidate.path === relativePath && candidate.area === 'unstaged'
+            )
+          }
           if (!entry) {
             throw new Error(`large diff status entry not found: ${relativePath}`)
           }
+          store.getState().setGitStatus(wId, status)
           store.getState().openAllDiffs(wId, repoPath, undefined, 'unstaged', [entry])
         },
         { wId: worktreeId, repoPath: fixture.repoPath, relativePath: fixture.relativePath }

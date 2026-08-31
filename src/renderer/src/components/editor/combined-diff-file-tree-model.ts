@@ -1,6 +1,7 @@
 import { basename } from '@/lib/path'
 import type { GitBranchChangeEntry } from '../../../../shared/git-diff-compare-types'
 import type { GitStatusEntry } from '../../../../shared/git-status-types'
+import type { DiffSection } from './diff-section-types'
 import { isClipboardTextByteLengthOverLimit } from '../../../../shared/clipboard-text'
 import {
   buildSourceControlTree,
@@ -36,6 +37,12 @@ export function createCombinedDiffSectionIndexMap(
   sections: readonly { key: string }[]
 ): Map<string, number> {
   return new Map(sections.map((section, index) => [section.key, index]))
+}
+
+export function isCombinedDiffSectionViewed(
+  section: Pick<DiffSection, 'loading' | 'loadOnDemand'>
+): boolean {
+  return !section.loading && section.loadOnDemand !== true
 }
 
 export function getCombinedDiffFileTreeNavigationIndex({

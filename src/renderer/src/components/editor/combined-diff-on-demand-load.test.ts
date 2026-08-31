@@ -26,4 +26,16 @@ describe('combined diff on-demand loading', () => {
   it('automatically loads diffs when line counts are unavailable', () => {
     expect(shouldLoadCombinedDiffOnDemand({ added: undefined, removed: undefined })).toBe(false)
   })
+
+  it('defers untracked diffs when only additions are reported', () => {
+    expect(shouldLoadCombinedDiffOnDemand({ added: MAX_AUTOMATIC_DIFF_CHANGED_LINES + 1 })).toBe(
+      true
+    )
+  })
+
+  it('defers diffs when only removals are reported', () => {
+    expect(shouldLoadCombinedDiffOnDemand({ removed: MAX_AUTOMATIC_DIFF_CHANGED_LINES + 1 })).toBe(
+      true
+    )
+  })
 })

@@ -52,7 +52,8 @@ import { DiffNotesSendMenu } from './DiffNotesSendMenu'
 import {
   CombinedDiffFileTree,
   createCombinedDiffSectionIndexMap,
-  handleCombinedDiffFileTreeNavigation
+  handleCombinedDiffFileTreeNavigation,
+  isCombinedDiffSectionViewed
 } from './CombinedDiffFileTree'
 import { getCombinedDiffFileTreeSectionKey } from './combined-diff-file-tree-model'
 import {
@@ -310,6 +311,13 @@ export default function CombinedDiffViewer({
   const deferredLoadRequestsRef = useRef<Set<number>>(new Set())
   const sectionsRef = useRef<DiffSection[]>([])
   const generationRef = useRef(0)
+  // Why: status polling can replace the entries array without changing its
+  // metadata; don't reinitialize and cancel an in-flight explicit diff load.
+  const initializedEntryStateRef = useRef<{
+    viewStateKey: string
+    entrySignature: string
+    hasUncommittedEntriesSnapshot: boolean
+  } | null>(null)
   // Why: per-section reload token, so a sibling's reload can't discard this section's in-flight load.
   const sectionLoadTokensRef = useRef<Map<number, number>>(new Map())
   const renderedIndicesRef = useRef<Set<number>>(new Set())
@@ -520,6 +528,19 @@ export default function CombinedDiffViewer({
 
   // Why: tab/worktree switches unmount this viewer; cache by pane key so remount restores sections+scroll before repaint.
   useLayoutEffect(() => {
+    const initializedEntryState = initializedEntryStateRef.current
+    if (
+      initializedEntryState?.viewStateKey === viewStateKey &&
+      initializedEntryState.entrySignature === entrySignature &&
+      initializedEntryState.hasUncommittedEntriesSnapshot === hasUncommittedEntriesSnapshot
+    ) {
+      return
+    }
+    initializedEntryStateRef.current = {
+      viewStateKey,
+      entrySignature,
+      hasUncommittedEntriesSnapshot
+    }
     deferredLoadRequestsRef.current.clear()
     const cached = combinedDiffViewStateCache.get(viewStateKey)
     const canRestoreSnapshotSectionsByKey =
@@ -1131,7 +1152,12 @@ export default function CombinedDiffViewer({
     setActiveTreeSectionState({ entrySignature, key: null })
   }
   const viewedSectionKeys = React.useMemo(
-    () => new Set(sections.filter((section) => !section.loading).map((section) => section.key)),
+    () =>
+      new Set(
+        sections
+          .filter((section) => isCombinedDiffSectionViewed(section))
+          .map((section) => section.key)
+      ),
     [sections]
   )
   const handleTreeNavigate = useCallback(
