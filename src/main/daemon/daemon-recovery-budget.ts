@@ -1,7 +1,14 @@
 /**
  * How long a transient wedge takes to drain — the Windows update-relaunch AV/disk-pressure shape
- * #8697 sized the grace against. The grace exists to adopt that daemon *with* its live sessions
- * instead of killing them, so the recovery budget has to outlast this.
+ * #8697 measured. The grace exists to adopt that daemon *with* its live sessions instead of
+ * killing them, so the recovery budget has to outlast this.
+ *
+ * Note this is the drain estimate, not the grace #8697 shipped: its merged second commit
+ * (840d3277d1d) widened WEDGED_DAEMON_GRACE_RETRIES 3 -> 11 (~20s -> ~60s) precisely to keep
+ * live-session loss near zero on that path. DAEMON_RECOVERY_BUDGET_MS below deliberately sits
+ * under that ~60s, because the unbounded version blew the startup PTY gate and lost the sessions
+ * anyway (STA-5732) — so a wedge draining between the budget and ~60s is now replaced where
+ * #8697 would have adopted it. That trade is pinned in daemon-init-wedged-daemon-grace.test.ts.
  */
 export const TRANSIENT_WEDGE_DRAIN_MS = 20_000
 

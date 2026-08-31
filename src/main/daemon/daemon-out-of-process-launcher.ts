@@ -200,9 +200,11 @@ export function createOutOfProcessLauncher(
       // giving up here costs the user every persistent session for the whole run. Something
       // answering the endpoint now is a daemon worth adopting, not a reason to fall back to
       // local PTYs.
-      if (
-        await probeSocket(socketPath, Math.max(1, Math.min(1000, recoveryDeadlineMs - Date.now())))
-      ) {
+      // Why unbudgeted: the recovery deadline bounds the adopt-or-replace decision, and this runs
+      // after it — past the kill, the fork and the lease. Clamping to the remainder yields a 1ms
+      // probe that loses to its own timer against a live socket, turning the rescue into the total
+      // daemon loss it exists to prevent.
+      if (await probeSocket(socketPath)) {
         console.warn(
           '[daemon] DEGRADED MODE: adopting the daemon that owns the endpoint after a replacement could not publish onto it. Existing sessions keep working; fresh terminals run on the local provider WITHOUT daemon persistence until you restart the daemon (Manage Sessions → Restart).'
         )

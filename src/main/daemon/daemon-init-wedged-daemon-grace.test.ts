@@ -333,57 +333,16 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     )
   })
 
-  it('preserves a daemon that stays wedged until the LAST allowed grace retry', async () => {
-    // Why: daemon drains only on the last allowed probe (1 + WEDGED_DAEMON_GRACE_RETRIES) — must be preserved, not replaced.
-    const mod = await importFresh()
-    await mod.initDaemonPtyProvider()
+  it('preserves a daemon that drains on the last probe the recovery budget allows', async () => {
+    // Why rewritten onto the clock: this used to drain on probe 1 + WEDGED_DAEMON_GRACE_RETRIES
+    // with real Date.now, so its 12 probes elapsed ~0ms and the budget never bound — a grace
+    // production can no longer deliver, since each failing probe costs up to
+    // DAEMON_RECOVERY_PROBE_MS. The count's exhaustion side stays pinned by the #8689 test above.
+    const recoveryMs = await runWedgedRecovery('handshake', DAEMON_RECOVERY_BUDGET_MS - 1_000)
 
-    let probe = 0
-    const answeringDefault = function MockDaemonClient() {
-      return {
-        ensureConnected: vi.fn(async () => {}),
-        ensureConnectedWithin: vi.fn(async () => {}),
-        request: vi.fn(async () => ({ sessions: [] })),
-        disconnect: vi.fn()
-      }
-    }
-    daemonClientMock.mockImplementation(function MockDaemonClient() {
-      probe += 1
-      const drainsNow = probe >= 1 + WEDGED_DAEMON_GRACE_RETRIES
-      return {
-        ensureConnected: vi.fn(async () => {
-          if (!drainsNow) {
-            throw new Error('Hello response timed out')
-          }
-        }),
-        ensureConnectedWithin: vi.fn(async () => {
-          if (!drainsNow) {
-            throw new Error('Hello response timed out')
-          }
-        }),
-        request: vi.fn(async () => ({
-          sessions: drainsNow ? [{ sessionId: 'wt-1@@live', isAlive: true }] : []
-        })),
-        disconnect: vi.fn()
-      }
-    })
-
-    const launcher = spawnerInstances[0].launcher as (
-      socketPath: string,
-      tokenPath: string
-    ) => Promise<{ shutdown(): Promise<void> }>
-    checkDaemonHealthMock.mockResolvedValueOnce('unreachable')
-    probeSocketExistsMock.mockReturnValue(true)
-    netConnectMock.mockImplementation(stubAliveSocketConnect)
-
-    try {
-      await launcher('/fake/socket', '/fake/token')
-
-      expect(killStaleDaemonMock).not.toHaveBeenCalled()
-      expect(forkMock).not.toHaveBeenCalled()
-    } finally {
-      daemonClientMock.mockImplementation(answeringDefault)
-    }
+    expect(killStaleDaemonMock).not.toHaveBeenCalled()
+    expect(forkMock).not.toHaveBeenCalled()
+    expect(recoveryMs).toBeLessThanOrEqual(DAEMON_RECOVERY_BUDGET_MS)
   })
 
   it('ends the grace on the recovery budget when every handshake stalls', async () => {
@@ -409,6 +368,16 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     expect(killStaleDaemonMock).not.toHaveBeenCalled()
     expect(forkMock).not.toHaveBeenCalled()
     expect(recoveryMs).toBeGreaterThanOrEqual(TRANSIENT_WEDGE_DRAIN_MS)
+  })
+
+  it('replaces a wedge that drains after the recovery budget (accepted trade vs #8697)', async () => {
+    // Why pinned rather than left implicit: #8697's merged grace was 11 retries ~= 60s, chosen to
+    // keep live-session loss near zero. Bounding it at DAEMON_RECOVERY_BUDGET_MS is a deliberate
+    // narrowing — a Windows update-relaunch wedge that drains after the budget is now replaced and
+    // its live terminal/agent sessions are destroyed. Only the window size is tunable.
+    await runWedgedRecovery('handshake', DAEMON_RECOVERY_BUDGET_MS + 5_000)
+
+    expect(killStaleDaemonMock).toHaveBeenCalled()
   })
 
   it('replaces a hello-rejected daemon even though its pipe accepts connections', async () => {
