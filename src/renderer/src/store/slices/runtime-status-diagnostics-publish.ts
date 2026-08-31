@@ -3,7 +3,6 @@ import type { AppState } from '../types'
 import type { RuntimeEnvironmentStatus } from './runtime-status'
 import * as diagnosticsGeneration from './runtime-status-diagnostics-generation'
 import * as runtimeStatusRecheck from './runtime-status-recheck'
-import type { AppState as RuntimeStatusAppState } from '../types'
 
 export function updateRuntimeStatusStore(
   state: AppState,
@@ -86,7 +85,7 @@ export function createRuntimeEnvironmentDiagnosticsSlicePublisher(args: {
   setState: (
     updater: (state: Map<string, RuntimeEnvironmentStatus>) => Map<string, RuntimeEnvironmentStatus>
   ) => void
-  getStore: () => RuntimeStatusAppState
+  getStore: () => AppState
   getConnectionGeneration: (environmentId: string) => number
 }): (event: {
   environmentId: string
