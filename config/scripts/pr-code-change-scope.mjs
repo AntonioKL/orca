@@ -177,8 +177,28 @@ const SHARED_PACKAGE_PREFIXES = [
   ...NATIVE_RUNTIME_PREFIXES
 ]
 
+// The hosted mobile UI is packaged and served by the desktop runtime; changes
+// here must keep desktop typecheck/package jobs enabled even though most RN
+// sources remain mobile-only.
+const DESKTOP_RELEVANT_MOBILE_PREFIXES = [
+  'mobile/package.json',
+  'mobile/pnpm-lock.yaml',
+  'mobile/pnpm-workspace.yaml',
+  'mobile/patches/',
+  'mobile/host-web-app/',
+  'mobile/packages/expo-mobile-web-shell/',
+  'src/mobile-web/',
+  'src/shared/mobile-web/',
+  'mobile/scripts/export-host-mobile-web.mjs',
+  'mobile/scripts/build-terminal-webview-engine.mjs',
+  'mobile/scripts/build-mermaid-webview-engine.mjs',
+  'config/scripts/package-mobile-web-rnw.mjs',
+  'config/scripts/verify-mobile-web-rnw-build.mjs'
+]
+
 const LINUX_PACKAGE_PREFIXES = [
   ...SHARED_PACKAGE_PREFIXES,
+  ...DESKTOP_RELEVANT_MOBILE_PREFIXES,
   'native/computer-use-linux/',
   'resources/linux/',
   'config/scripts/run-headless-serve'
@@ -186,6 +206,7 @@ const LINUX_PACKAGE_PREFIXES = [
 
 const WINDOWS_PACKAGE_PREFIXES = [
   ...SHARED_PACKAGE_PREFIXES,
+  ...DESKTOP_RELEVANT_MOBILE_PREFIXES,
   'native/windows-cli-launcher/',
   'native/computer-use-windows/',
   'resources/win32/',
@@ -232,18 +253,6 @@ const DESKTOP_IRRELEVANT_PREFIXES = [
   '.github/workflows/mobile.yml',
   '.github/workflows/mobile-ios-release.yml',
   '.github/workflows/mobile-android-release.yml'
-]
-
-// The hosted mobile UI is packaged and served by the desktop runtime; changes
-// here must keep desktop typecheck/package jobs enabled even though most RN
-// sources remain mobile-only.
-const DESKTOP_RELEVANT_MOBILE_PREFIXES = [
-  'mobile/host-web-app/',
-  'mobile/packages/expo-mobile-web-shell/',
-  'src/mobile-web/',
-  'src/shared/mobile-web/',
-  'config/scripts/package-mobile-web-rnw.mjs',
-  'config/scripts/verify-mobile-web-rnw-build.mjs'
 ]
 
 export function isDocsOnlyPath(file) {

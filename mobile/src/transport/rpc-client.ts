@@ -53,16 +53,14 @@ import {
 } from './mobile-inbound-frame-queue'
 import { createMobileDirectRpcOutbound } from './mobile-direct-rpc-outbound'
 import { createMobileDirectRpcSender } from './mobile-direct-rpc-sender'
+import { sendMobileTerminalBinaryFrame } from './mobile-terminal-binary-sender'
 import { handleMobileRpcSocketBinaryMessage } from './mobile-rpc-binary-frame-handler'
 import { processMobileOutboundMemoryBudget } from './mobile-outbound-memory-budget'
 import { redactedWebSocketEndpoint } from './redacted-websocket-endpoint'
 import { tryParseMobileJsonTextWithinLimits } from './mobile-json-text-admission'
 import type { TerminalStreamFrame } from './terminal-stream-protocol'
 import { buildServerSubscriptionUnsubscribe } from './rpc-client-server-subscription'
-import {
-  encryptedTerminalMultiplexFrame,
-  routeTerminalMultiplexFrame
-} from './rpc-client-terminal-multiplex'
+import { routeTerminalMultiplexFrame } from './rpc-client-terminal-multiplex'
 import type { RpcClient, RpcClientSendRequestOptions } from './rpc-client-contract'
 import type { RpcConnectWaiter, RpcPendingRequest } from './rpc-client-request-state'
 
@@ -1111,43 +1109,37 @@ export function connect(
         removeStreamListener(id)
       }
     },
-
     updateTerminalSubscriptionViewport(
       terminal: string,
       viewport: { cols: number; rows: number }
     ): void {
       updateCachedTerminalSubscriptionViewport(streamListeners.values(), terminal, viewport)
     },
-
     sendTerminalBinaryFrame(frame: TerminalStreamFrame): boolean {
-      if (!ws || ws.readyState !== WebSocket.OPEN || !sharedKey) {
-        return false
-      }
-      ws.send(encryptedTerminalMultiplexFrame(frame, sharedKey))
-      return true
+      return sendMobileTerminalBinaryFrame({
+        frame,
+        socket: ws,
+        sharedKey,
+        isConnected: state === 'connected',
+        onSocketClosed: handleSocketClosed
+      })
     },
-
     getState(): ConnectionState {
       return state
     },
-
     getReconnectAttempt(): number {
       return reconnectAttempt
     },
-
     getLastConnectedAt(): number | null {
       return lastConnectedAt
     },
-
     getLastInboundAt(): number | null {
       return livenessWatchdog.getLastInboundAt() || null
     },
-
     onStateChange(listener: (state: ConnectionState) => void): () => void {
       stateListeners.add(listener)
       return () => stateListeners.delete(listener)
     },
-
     notifyForeground(_reason?: ForegroundNudgeReason): void {
       if (intentionallyClosed) {
         return

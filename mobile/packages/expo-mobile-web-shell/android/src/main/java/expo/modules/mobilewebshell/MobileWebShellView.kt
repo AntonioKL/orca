@@ -13,6 +13,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.webkit.JavaScriptReplyProxy
+import androidx.webkit.ScriptHandler
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import expo.modules.kotlin.AppContext
@@ -63,7 +64,7 @@ private val MOBILE_WEB_MERMAID_FRAME_CSP = listOf(
 @SuppressLint("ViewConstructor", "SetJavaScriptEnabled")
 internal class MobileWebShellView(
   context: Context,
-  appContext: AppContext
+  private val appContext: AppContext
 ) : ExpoView(context, appContext) {
   private val onBridgeMessage by EventDispatcher<Map<String, Any>>()
   private val onNavigationBlocked by EventDispatcher<Map<String, Any>>()
@@ -71,9 +72,18 @@ internal class MobileWebShellView(
   private val onLoadState by EventDispatcher<Map<String, Any>>()
   private val packageStore = MobileWebShellEnvironment.packageStore(context)
   private var activeSessionId: String? = null
-  private val webView = WebView(context)
+  private var debugProbeScriptHandler: ScriptHandler? = null
+  private var bridgeMessageListenerAttached = false
+  private var webView: WebView
 
   init {
+    webView = createWebView()
+    attachWebView()
+  }
+
+  @SuppressLint("SetJavaScriptEnabled")
+  private fun createWebView(): WebView {
+    val webView = WebView(context)
     webView.setBackgroundColor(Color.TRANSPARENT)
     webView.settings.apply {
       javaScriptEnabled = true
@@ -91,7 +101,6 @@ internal class MobileWebShellView(
       saveFormData = false
     }
     webView.clearCache(true)
-    installMobileWebDebugIsolationProbe(webView, appContext)
     webView.webViewClient = LockedWebViewClient()
     webView.webChromeClient = object : WebChromeClient() {
       override fun onCreateWindow(
@@ -104,7 +113,7 @@ internal class MobileWebShellView(
     webView.setDownloadListener { url, _, _, _, _ ->
       onNavigationBlocked(mapOf("url" to url.orEmpty().take(2_048)))
     }
-    attachWebView()
+    return webView
   }
 
   private fun attachWebView() {
@@ -120,6 +129,12 @@ internal class MobileWebShellView(
     }
     if (sessionId == activeSessionId) return
     activeSessionId = sessionId
+    debugProbeScriptHandler?.remove()
+    debugProbeScriptHandler = installMobileWebDebugIsolationProbe(
+      webView,
+      appContext,
+      mobileWebOriginForSession(sessionId)
+    )
     removeBridgeMessageListener()
     addBridgeMessageListener(sessionId)
     webView.stopLoading()
@@ -136,6 +151,8 @@ internal class MobileWebShellView(
 
   fun deactivateSessionView() {
     removeBridgeMessageListener()
+    debugProbeScriptHandler?.remove()
+    debugProbeScriptHandler = null
     activeSessionId = null
     webView.stopLoading()
     visibility = View.INVISIBLE
@@ -174,13 +191,31 @@ internal class MobileWebShellView(
     super.onDetachedFromWindow()
   }
 
-  private fun removeBridgeMessageListener() {
-    if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
-      WebViewCompat.removeWebMessageListener(webView, MOBILE_WEB_BRIDGE_NAME)
+  override fun onAttachedToWindow() {
+    super.onAttachedToWindow()
+    attachWebView()
+    val sessionId = activeSessionId ?: return
+    addBridgeMessageListener(sessionId)
+    visibility = View.VISIBLE
+    webView.visibility = View.VISIBLE
+    val currentUrl = webView.url?.let(Uri::parse)
+    if (currentUrl == null || !isAllowedDocumentUrl(currentUrl)) {
+      webView.stopLoading()
+      onLoadState(mapOf("state" to "loading"))
+      webView.loadUrl("${mobileWebOriginForSession(sessionId)}/#$sessionId")
     }
   }
 
+  private fun removeBridgeMessageListener() {
+    if (!bridgeMessageListenerAttached) return
+    if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+      WebViewCompat.removeWebMessageListener(webView, MOBILE_WEB_BRIDGE_NAME)
+    }
+    bridgeMessageListenerAttached = false
+  }
+
   private fun addBridgeMessageListener(sessionId: String) {
+    if (bridgeMessageListenerAttached) return
     if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
       WebViewCompat.addWebMessageListener(
         webView,
@@ -188,6 +223,7 @@ internal class MobileWebShellView(
         setOf(mobileWebOriginForSession(sessionId)),
         OriginLockedMessageListener()
       )
+      bridgeMessageListenerAttached = true
     } else {
       throw IllegalStateException("mobile_web_bridge_origin_enforcement_unavailable")
     }
@@ -242,12 +278,27 @@ internal class MobileWebShellView(
       request: WebResourceRequest,
       error: android.webkit.WebResourceError
     ) {
-      if (request.isForMainFrame) onLoadState(mapOf("state" to "failed"))
+      if (request.isForMainFrame && isAllowedDocumentRequestUrl(request.url)) {
+        onLoadState(mapOf("state" to "failed"))
+      }
     }
 
     override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
       onProcessTerminated(mapOf("sessionId" to (activeSessionId ?: "")))
+      removeBridgeMessageListener()
+      debugProbeScriptHandler?.remove()
+      debugProbeScriptHandler = null
+      removeView(view)
       view.destroy()
+      webView = createWebView()
+      attachWebView()
+      val sessionId = activeSessionId
+      if (sessionId != null) {
+        addBridgeMessageListener(sessionId)
+        webView.visibility = View.VISIBLE
+        onLoadState(mapOf("state" to "loading"))
+        webView.loadUrl("${mobileWebOriginForSession(sessionId)}/#$sessionId")
+      }
       return true
     }
   }
@@ -288,14 +339,23 @@ internal class MobileWebShellView(
     )
   }
 
-  private fun isAllowedDocumentUrl(url: Uri): Boolean =
-      activeSessionId != null &&
-    isMobileWebOriginForSession(url, activeSessionId ?: return false) &&
+   private fun isAllowedDocumentUrl(url: Uri): Boolean =
+       activeSessionId != null &&
+     isMobileWebOriginForSession(url, activeSessionId ?: return false) &&
       url.path == "/" &&
       url.encodedPath == "/" &&
       url.query == null &&
-      url.fragment == activeSessionId &&
-      url.toString().length <= 8 * 1024
+       url.fragment == activeSessionId &&
+       url.toString().length <= 8 * 1024
+
+   private fun isAllowedDocumentRequestUrl(url: Uri): Boolean =
+     activeSessionId != null &&
+       isMobileWebOriginForSession(url, activeSessionId ?: return false) &&
+       url.path == "/" &&
+       url.encodedPath == "/" &&
+       url.query == null &&
+       (url.fragment == null || url.fragment == activeSessionId) &&
+       url.toString().length <= 8 * 1024
 
   private fun isAllowedEmbeddedDocumentUrl(url: Uri): Boolean =
     activeSessionId != null &&

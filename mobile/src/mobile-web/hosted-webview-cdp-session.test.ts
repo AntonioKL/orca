@@ -16,6 +16,11 @@ import {
 } from '../../scripts/hosted-webview-cdp-session.mjs'
 import { createHostedIosNativeBaselineStep } from '../../scripts/hosted-ios-native-baseline-step.mjs'
 import { verifyHostedWebViewExecutableIsolation } from '../../scripts/hosted-webview-executable-isolation.mjs'
+import {
+  FakeCdpSocket,
+  FakeProcessTerminationSocket,
+  fakeCdpConstructor
+} from './hosted-webview-cdp-test-fakes'
 
 const iosShellSource = readFileSync(
   new URL('../../packages/expo-mobile-web-shell/ios/MobileWebShellView.swift', import.meta.url),
@@ -100,9 +105,12 @@ function probe(overrides: Record<string, unknown> = {}) {
 describe('hosted WebView CDP target selection', () => {
   it('recognizes only the platform private asset origins', () => {
     expect(isHostedMobileWebUrl('orca-mobile-web://session-a/')).toBe(true)
+    expect(isHostedMobileWebUrl('https://session-a.orca-mobile-web.invalid/#session-a')).toBe(true)
     expect(isHostedMobileWebUrl('https://orca-mobile-web.invalid/#session-a')).toBe(true)
     expect(isHostedMobileWebUrl('https://orca-mobile-web.invalid.evil.test/')).toBe(false)
+    expect(isHostedMobileWebUrl('https://session-a.orca-mobile-web.invalid.evil.test/')).toBe(false)
     expect(isHostedMobileWebUrl('http://orca-mobile-web.invalid/')).toBe(false)
+    expect(isHostedMobileWebUrl('https://session-a.orca-mobile-web.invalid.evil/')).toBe(false)
   })
 
   it('proves native baselines have no hosted private-origin CDP target', async () => {
@@ -662,8 +670,15 @@ describe('hosted WebView CDP target selection', () => {
     expect(androidProbeSource).toContain("location.assign('orca-security-probe://blocked')")
     expect(androidProbeSource).toContain('WebViewFeature.DOCUMENT_START_SCRIPT')
     expect(androidProbeSource).toContain('WebViewCompat.addDocumentStartJavaScript')
-    expect(androidProbeSource).toContain('setOf(MOBILE_WEB_ORIGIN)')
-    expect(androidShellSource).toContain('installMobileWebDebugIsolationProbe(webView, appContext)')
+    expect(androidProbeSource).toContain('allowedOrigin: String')
+    expect(androidProbeSource).toContain('setOf(allowedOrigin)')
+    expect(androidProbeSource).not.toContain('setOf(MOBILE_WEB_ORIGIN)')
+    expect(androidShellSource).toContain(
+      'installMobileWebDebugIsolationProbe(\n      webView,\n      appContext,\n      mobileWebOriginForSession(sessionId)'
+    )
+    expect(androidShellSource).toContain('override fun onAttachedToWindow()')
+    expect(androidShellSource).toContain('addBridgeMessageListener(sessionId)')
+    expect(androidShellSource).toContain('!isAllowedDocumentUrl(currentUrl)')
     expect(expoLogBoxPatch).toContain(
       'context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0'
     )
@@ -768,79 +783,3 @@ describe('hosted WebView CDP target selection', () => {
     expect(androidCrashLoopHarnessSource).toContain('documents.at(-1)?.href === documents[0]?.href')
   })
 })
-
-class FakeCdpSocket {
-  evaluations: {
-    id: number
-    params: { expression: string; returnByValue: boolean }
-  }[] = []
-  private readonly values: string[]
-  private messageListener: ((data: Buffer) => void) | undefined
-
-  constructor(values: string[]) {
-    this.values = [...values]
-  }
-
-  once(event: string, listener: (value?: unknown) => void): void {
-    if (event === 'open') {
-      queueMicrotask(listener)
-    }
-  }
-
-  on(event: string, listener: (data: Buffer) => void): void {
-    if (event === 'message') {
-      this.messageListener = listener
-    }
-  }
-
-  send(payload: string): void {
-    this.evaluations.push(JSON.parse(payload))
-    const value = this.values.shift() ?? ''
-    queueMicrotask(() => {
-      this.messageListener?.(Buffer.from(JSON.stringify({ id: 1, result: { result: { value } } })))
-    })
-  }
-
-  close(): void {}
-}
-
-class FakeProcessTerminationSocket {
-  command: unknown
-  private messageListener: ((data: Buffer) => void) | undefined
-
-  once(event: string, listener: (value?: unknown) => void): void {
-    if (event === 'open') {
-      queueMicrotask(listener)
-    }
-  }
-
-  on(event: string, listener: (data: Buffer) => void): void {
-    if (event === 'message') {
-      this.messageListener = listener
-    }
-  }
-
-  send(payload: string): void {
-    this.command = JSON.parse(payload)
-    queueMicrotask(() => {
-      this.messageListener?.(
-        Buffer.from(
-          JSON.stringify({
-            method: 'Inspector.detached',
-            params: { reason: 'Render process gone.' }
-          })
-        )
-      )
-    })
-  }
-
-  close(): void {}
-}
-
-function fakeCdpConstructor(socket: FakeCdpSocket | FakeProcessTerminationSocket) {
-  return class {
-    constructor() {
-      return socket
-    }
-  }
-}

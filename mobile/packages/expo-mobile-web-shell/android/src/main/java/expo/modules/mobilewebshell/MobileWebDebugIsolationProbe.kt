@@ -2,6 +2,7 @@ package expo.modules.mobilewebshell
 
 import android.content.pm.ApplicationInfo
 import android.webkit.WebView
+import androidx.webkit.ScriptHandler
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import expo.modules.kotlin.AppContext
@@ -12,23 +13,24 @@ private const val NETWORK_PROBE_TOKEN_EXTRA = "ORCA_E2E_MOBILE_WEB_NETWORK_PROBE
 
 internal fun installMobileWebDebugIsolationProbe(
   webView: WebView,
-  appContext: AppContext
-) {
+  appContext: AppContext,
+  allowedOrigin: String
+): ScriptHandler? {
   val isDebuggable =
     webView.context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
   val debuggingEnabled = BuildConfig.DEBUG && isDebuggable
   WebView.setWebContentsDebuggingEnabled(debuggingEnabled)
-  if (!debuggingEnabled) return
-  val intent = appContext.currentActivity?.intent ?: return
+  if (!debuggingEnabled) return null
+  val intent = appContext.currentActivity?.intent ?: return null
   val script = createMobileWebDebugIsolationProbeScript(
     intent.getStringExtra(NETWORK_PROBE_PORT_EXTRA),
     intent.getStringExtra(NETWORK_PROBE_TOKEN_EXTRA)
-  ) ?: return
+  ) ?: return null
   if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
-    WebViewCompat.addDocumentStartJavaScript(
+    return WebViewCompat.addDocumentStartJavaScript(
       webView,
       script,
-      setOf(MOBILE_WEB_ORIGIN)
+      setOf(allowedOrigin)
     )
   } else {
     throw IllegalStateException("mobile_web_debug_isolation_probe_unavailable")

@@ -26,8 +26,10 @@ type ResolvedPackageCapability = {
   gzip: boolean
 }
 
-function currentConnectionId(client: RpcClient): number | null {
-  return typeof client.getLastConnectedAt === 'function' ? client.getLastConnectedAt() : null
+function currentConnectionId(client: RpcClient | null): number | null {
+  return client && typeof client.getLastConnectedAt === 'function'
+    ? client.getLastConnectedAt()
+    : null
 }
 
 export function useMobileWebPackageCapability(args: {
@@ -37,6 +39,7 @@ export function useMobileWebPackageCapability(args: {
 }): MobileWebPackageCapability {
   const { client, hostId, state } = args
   const [resolved, setResolved] = useState<ResolvedPackageCapability | null>(null)
+  const connectionId = currentConnectionId(client)
 
   useEffect(() => {
     if (state !== 'connected' || !client || !hostId) {
@@ -44,7 +47,7 @@ export function useMobileWebPackageCapability(args: {
     }
     const requestClient = client
     const requestHostId = hostId
-    const requestConnectionId = currentConnectionId(requestClient)
+    const requestConnectionId = connectionId
     return startRuntimeCapabilityProbe(requestClient, (capabilities) => {
       setResolved({
         client: requestClient,
@@ -54,7 +57,7 @@ export function useMobileWebPackageCapability(args: {
         gzip: capabilities.includes(MOBILE_WEB_PACKAGE_GZIP_RUNTIME_CAPABILITY)
       })
     })
-  }, [client, hostId, state])
+  }, [client, connectionId, hostId, state])
 
   const capability =
     state !== 'connected'
@@ -63,7 +66,7 @@ export function useMobileWebPackageCapability(args: {
           !hostId ||
           resolved?.client !== client ||
           resolved.hostId !== hostId ||
-          resolved.connectionId !== currentConnectionId(client)
+          resolved.connectionId !== connectionId
         ? { status: 'pending' as const, gzip: false }
         : {
             status: resolved.supported ? ('supported' as const) : ('update-required' as const),

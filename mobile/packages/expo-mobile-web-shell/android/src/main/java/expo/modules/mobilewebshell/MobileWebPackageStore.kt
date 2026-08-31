@@ -106,12 +106,25 @@ internal class MobileWebPackageStore internal constructor(
     val stageRoot = File(cacheRoot, "$hostKey/staging/$stageId")
     try {
       require(stageRoot.mkdirs()) { "mobile_web_stage_create_failed" }
-      File(stageRoot, "manifest.json").writeText(manifestJson, Charsets.UTF_8)
-      File(stageRoot, "canonical-manifest.json").writeText(canonicalManifestJson, Charsets.UTF_8)
+      require(isMobileWebUnlinkedPath(stageRoot, cacheRoot)) {
+        "mobile_web_stage_create_failed"
+      }
+      val manifestFile = File(stageRoot, "manifest.json")
+      val canonicalManifestFile = File(stageRoot, "canonical-manifest.json")
+      requireMobileWebWritePath(manifestFile, cacheRoot, "mobile_web_stage_create_failed")
+      requireMobileWebWritePath(
+        canonicalManifestFile,
+        cacheRoot,
+        "mobile_web_stage_create_failed"
+      )
+      manifestFile.writeText(manifestJson, Charsets.UTF_8)
+      canonicalManifestFile.writeText(canonicalManifestJson, Charsets.UTF_8)
       for (asset in manifest.assets.values) {
         val file = assetFile(stageRoot, asset.path)
         requireMobileWebAssetParent(file)
+        requireMobileWebWritePath(file, cacheRoot, "mobile_web_stage_create_failed")
         require(file.createNewFile()) { "mobile_web_stage_create_failed" }
+        require(isMobileWebUnlinkedPath(file, cacheRoot)) { "mobile_web_stage_create_failed" }
       }
     } catch (error: Exception) {
       removeMobileWebCacheTree(stageRoot, cacheRoot)
@@ -186,16 +199,28 @@ internal class MobileWebPackageStore internal constructor(
     val stage = requireStage(stageId)
     require(stage.finishedPaths.size == stage.manifest.assets.size) { "mobile_web_stage_incomplete" }
     val generations = File(cacheRoot, "${stage.hostKey}/generations")
+    require(isMobileWebUnlinkedPath(generations, cacheRoot)) {
+      "mobile_web_generation_create_failed"
+    }
     require(generations.mkdirs() || generations.isDirectory) { "mobile_web_generation_create_failed" }
+    require(isMobileWebUnlinkedPath(generations, cacheRoot)) {
+      "mobile_web_generation_create_failed"
+    }
     val destination = File(generations, stage.manifest.buildId)
     try {
       if (destination.exists()) {
+        require(isMobileWebUnlinkedPath(destination, cacheRoot)) {
+          "mobile_web_generation_commit_failed"
+        }
         verifyCommittedGeneration(destination, stage.manifest)
         require(removeMobileWebCacheTree(stage.root, cacheRoot)) {
           "mobile_web_stage_cleanup_failed"
         }
       } else {
         require(stage.root.renameTo(destination)) { "mobile_web_generation_commit_failed" }
+        require(isMobileWebUnlinkedPath(destination, cacheRoot)) {
+          "mobile_web_generation_commit_failed"
+        }
       }
     } catch (error: Exception) {
       throw storageException(error, "mobile_web_generation_commit_failed")
@@ -661,6 +686,12 @@ internal class MobileWebPackageStore internal constructor(
 internal fun requireMobileWebAssetParent(file: File) {
   val parent = requireNotNull(file.parentFile) { "mobile_web_stage_create_failed" }
   require(parent.mkdirs() || parent.isDirectory) { "mobile_web_stage_create_failed" }
+}
+
+internal fun requireMobileWebWritePath(file: File, root: File, errorCode: String) {
+  val parent = requireNotNull(file.parentFile) { errorCode }
+  require(isMobileWebUnlinkedPath(parent, root)) { errorCode }
+  require(!file.exists() || isMobileWebUnlinkedPath(file, root)) { errorCode }
 }
 
 internal object MobileWebShellEnvironment {

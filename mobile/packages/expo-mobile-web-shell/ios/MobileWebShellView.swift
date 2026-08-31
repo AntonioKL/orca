@@ -361,6 +361,7 @@ final class MobileWebShellView: ExpoView, WKNavigationDelegate, WKUIDelegate,
   private var webView: WKWebView!
   private var webViewConstraints: [NSLayoutConstraint] = []
   private var activeSessionId: String?
+  private var loadingSessionId: String?
   private var networkBlockReady = false
   private var networkBlockFailed = false
 
@@ -443,6 +444,7 @@ final class MobileWebShellView: ExpoView, WKNavigationDelegate, WKUIDelegate,
     }
     guard sessionId != activeSessionId else { return }
     activeSessionId = sessionId
+    loadingSessionId = sessionId
     schemeHandler.activeSessionId = sessionId
     webView.stopLoading()
     attachWebView()
@@ -462,6 +464,7 @@ final class MobileWebShellView: ExpoView, WKNavigationDelegate, WKUIDelegate,
 
   func deactivateSessionView() {
     activeSessionId = nil
+    loadingSessionId = nil
     schemeHandler.activeSessionId = nil
     webView.stopLoading()
     isHidden = true
@@ -566,7 +569,17 @@ final class MobileWebShellView: ExpoView, WKNavigationDelegate, WKUIDelegate,
   }
 
   func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+    guard isAllowedDocumentUrl(webView.url) else { return }
     onLoadState(["state": "loaded"])
+  }
+
+  func webView(
+    _ webView: WKWebView,
+    didFailProvisionalNavigation navigation: WKNavigation!,
+    withError error: Error
+  ) {
+    guard loadingSessionId == activeSessionId else { return }
+    onLoadState(["state": "failed"])
   }
 
   func webView(
@@ -574,6 +587,7 @@ final class MobileWebShellView: ExpoView, WKNavigationDelegate, WKUIDelegate,
     didFail navigation: WKNavigation!,
     withError error: Error
   ) {
+    guard loadingSessionId == activeSessionId else { return }
     onLoadState(["state": "failed"])
   }
 
@@ -633,6 +647,7 @@ final class MobileWebShellView: ExpoView, WKNavigationDelegate, WKUIDelegate,
       let sessionId = activeSessionId,
       let url = URL(string: "\(mobileWebScheme)://\(sessionId)/")
     else { return }
+    loadingSessionId = sessionId
     webView.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData))
   }
 }

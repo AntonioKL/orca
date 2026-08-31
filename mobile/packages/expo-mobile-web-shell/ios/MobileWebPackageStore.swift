@@ -115,7 +115,7 @@ final class MobileWebPackageStore {
         canonicalManifestJson: canonicalManifestJson
       )
       let hostKey = sha256Hex(Data(hostIdentity.utf8))
-      let stageId = randomIdentifier()
+      let stageId = try randomIdentifier()
       let root = try cacheRoot()
       try cleanupOrphanedWrites(cacheRoot: root)
       let reservedByteLength = Int64(
@@ -375,7 +375,7 @@ final class MobileWebPackageStore {
       [.modificationDate: Date()],
       ofItemAtPath: generationRoot.path
     )
-    let sessionId = randomIdentifier()
+    let sessionId = try randomIdentifier()
     sessions[sessionId] = MobileWebSessionRecord(
       hostKey: hostKey,
       buildId: selectedBuildId,
@@ -425,6 +425,7 @@ final class MobileWebPackageStore {
         throw MobileWebStoreError("mobile_web_recovery_unavailable")
       }
       try requireCompatibleBridge(manifest: manifest, bridgeVersion: failed.bridgeVersion)
+      let recoveredSessionId = try randomIdentifier()
       if activation.active == failed.buildId {
         try writeActivation(
           MobileWebActivationRecord(active: fallbackBuildId, previous: nil),
@@ -432,7 +433,6 @@ final class MobileWebPackageStore {
         )
       }
       sessions.removeValue(forKey: sessionId)
-      let recoveredSessionId = randomIdentifier()
       sessions[recoveredSessionId] = MobileWebSessionRecord(
         hostKey: failed.hostKey,
         buildId: fallbackBuildId,
@@ -1076,9 +1076,11 @@ private func sha256Hex(_ data: Data) -> String {
   SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
 }
 
-private func randomIdentifier() -> String {
+private func randomIdentifier() throws -> String {
   var bytes = [UInt8](repeating: 0, count: 32)
-  _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+  guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
+    throw MobileWebStoreError("mobile_web_random_identifier_failed")
+  }
   return Data(bytes).base64EncodedString()
     .replacingOccurrences(of: "+", with: "-")
     .replacingOccurrences(of: "/", with: "_")

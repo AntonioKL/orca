@@ -98,7 +98,7 @@ describe('docs-only path classification', () => {
   })
 
   it('does not start desktop PR Checks for mobile-only diffs', () => {
-    expect(shouldRunPrChecks(['mobile/src/App.tsx', 'mobile/package.json'])).toBe(false)
+    expect(shouldRunPrChecks(['mobile/src/App.tsx'])).toBe(false)
   })
 })
 
@@ -193,6 +193,26 @@ describe('per-job path classification', () => {
       package: true
     })
     expectClassification(['native/computer-use-macos/Package.swift'], {})
+  })
+
+  it('runs both desktop package jobs for hosted mobile web and shell changes', () => {
+    for (const file of [
+      'mobile/package.json',
+      'mobile/pnpm-lock.yaml',
+      'mobile/pnpm-workspace.yaml',
+      'mobile/patches/react-native.patch',
+      'mobile/host-web-app/index.html',
+      'mobile/packages/expo-mobile-web-shell/src/ExpoMobileWebShellView.ts',
+      'src/mobile-web/use-mobile-web-package-session.ts',
+      'src/shared/mobile-web/native-chat-operation-contract.ts',
+      'mobile/scripts/export-host-mobile-web.mjs',
+      'mobile/scripts/build-terminal-webview-engine.mjs',
+      'mobile/scripts/build-mermaid-webview-engine.mjs',
+      'config/scripts/package-mobile-web-rnw.mjs',
+      'config/scripts/verify-mobile-web-rnw-build.mjs'
+    ]) {
+      expectClassification([file], { package: true, package_windows: true })
+    }
   })
 
   it('runs shell contracts when live-shell inputs change', () => {

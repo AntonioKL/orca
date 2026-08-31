@@ -181,6 +181,7 @@ import { GIT_FETCH_SKIP_AUTO_MAINTENANCE_CONFIG_ARGS } from '../../shared/git-fe
 import { createHash, randomUUID } from 'node:crypto'
 import { homedir, hostname } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { readFileSync, statSync } from 'node:fs'
 import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises'
 import { resolveWorktreeCreateBase } from '../worktree-create-base'
 import { resolveWorktreeAddBaseRef } from '../../shared/worktree/base-ref'
@@ -728,6 +729,8 @@ import {
   configureAiVaultSessionSources,
   listAiVaultSessions
 } from '../ai-vault/cached-session-list'
+import { resolveMobileWebPackageRoot } from './rpc/mobile-web-package-root'
+import { MobileWebManifestSchema } from '../../shared/mobile-web/manifest-contract'
 import { configureHostReadableTranscriptPathSources } from '../native-chat/host-readable-transcript-path'
 import { resolveLocalAiVaultSessionTitles } from '../ai-vault/session-title-resolver'
 import type { AiVaultListArgs, AiVaultListResult } from '../../shared/ai-vault-types'
@@ -3229,6 +3232,26 @@ export type RuntimeRendererReloadFence = Readonly<{
   revision: number
   recovery: 'renderer' | 'headless' | 'reloading'
 }>
+
+function mobileWebPackageIsAvailable(): boolean {
+  try {
+    const root = resolveMobileWebPackageRoot()
+    const manifest = MobileWebManifestSchema.parse(
+      JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'))
+    )
+    return manifest.assets.every((asset) => {
+      const path = resolve(root, ...asset.path.split('/'))
+      const child = relative(root, path)
+      if (child.startsWith('..') || isAbsolute(child)) {
+        return false
+      }
+      const info = statSync(path)
+      return info.isFile() && info.size === asset.byteLength
+    })
+  } catch {
+    return false
+  }
+}
 
 /** How a caller wants the provider-held screen fetched when the runtime has no
  *  bytes of its own. `visibleScreenOnly` narrows the result to the current grid:
@@ -6573,6 +6596,7 @@ export class OrcaRuntimeService {
     const hasOffscreen = !hasRenderer && Boolean(this.offscreenBrowserBackend)
     const hasHeadlessCommands = runtimeBrowserCommandsFactoryIsHeadless()
     const canBrowse = hasRenderer || hasOffscreen
+    const hasMobileWebPackage = mobileWebPackageIsAvailable()
     const capabilities: RuntimeCapability[] = RUNTIME_CAPABILITIES.filter(
       (capability) =>
         (capability !== 'browser.screencast.v1' || canBrowse) &&
@@ -6582,7 +6606,9 @@ export class OrcaRuntimeService {
         (process.env.ORCA_E2E_DISABLE_PAIRED_TERMINAL_PARKING !== '1' ||
           capability !== TERMINAL_PAIRED_PARKING_RUNTIME_CAPABILITY) &&
         (process.env.ORCA_E2E_DISABLE_AUTHORITATIVE_SESSION_TABS_INVENTORY !== '1' ||
-          capability !== SESSION_TABS_AUTHORITATIVE_INVENTORY_RUNTIME_CAPABILITY)
+          capability !== SESSION_TABS_AUTHORITATIVE_INVENTORY_RUNTIME_CAPABILITY) &&
+        (hasMobileWebPackage ||
+          (capability !== 'mobileWeb.package.v1' && capability !== 'mobileWeb.package.gzip.v1'))
     )
     if (hasOffscreen || hasHeadlessCommands) {
       capabilities.push(BROWSER_HEADLESS_RUNTIME_CAPABILITY)

@@ -15,9 +15,22 @@ const hostedDocumentProbeExpression = `JSON.stringify({
 })`
 
 export function isHostedMobileWebUrl(value) {
-  return (
-    value.startsWith('orca-mobile-web://') || value.startsWith('https://orca-mobile-web.invalid/')
-  )
+  try {
+    const url = new URL(value)
+    if (url.protocol === 'orca-mobile-web:') {
+      return Boolean(url.hostname) && url.port === '' && url.username === '' && url.password === ''
+    }
+    return (
+      url.protocol === 'https:' &&
+      url.port === '' &&
+      url.username === '' &&
+      url.password === '' &&
+      (url.hostname === 'orca-mobile-web.invalid' ||
+        /^[a-z0-9_-]{1,32}\.orca-mobile-web\.invalid$/i.test(url.hostname))
+    )
+  } catch {
+    return false
+  }
 }
 
 export async function assertNoHostedMobileWebCdpTarget({

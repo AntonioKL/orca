@@ -48,6 +48,49 @@ class MobileWebCacheWriteBoundaryTest {
   }
 
   @Test
+  fun stageCreationRejectsLinkedStagingDirectory() {
+    val root = temporary.newFolder("cache-stage-link")
+    val outside = temporary.newFolder("outside-stage-link")
+    val hostRoot = File(root, sha256Hex("paired-host".toByteArray())).apply { mkdirs() }
+    Files.createSymbolicLink(File(hostRoot, "staging").toPath(), outside.toPath())
+
+    val error = assertThrows(IllegalArgumentException::class.java) {
+      testStore(root).beginStage("paired-host", packageFixture().manifest, packageFixture().canonical)
+    }
+
+    assertEquals("mobile_web_stage_create_failed", error.message)
+    assertTrue(outside.listFiles().isNullOrEmpty())
+  }
+
+  @Test
+  fun stageCommitRejectsLinkedGenerationsDirectory() {
+    val root = temporary.newFolder("cache-generation-link")
+    val outside = temporary.newFolder("outside-generation-link")
+    val fixture = packageFixture()
+    val store = testStore(root)
+    val stageId = store.beginStage("paired-host", fixture.manifest, fixture.canonical)
+    store.writeAssetChunk(
+      stageId,
+      "index.html",
+      0,
+      Base64.getEncoder().encodeToString(fixture.bytes),
+      sha256Hex(fixture.bytes)
+    )
+    store.finishAsset(stageId, "index.html")
+    val hostRoot = File(root, sha256Hex("paired-host".toByteArray()))
+    val generations = File(hostRoot, "generations")
+    Files.createSymbolicLink(generations.toPath(), outside.toPath())
+
+    val error = assertThrows(IllegalArgumentException::class.java) {
+      store.commitStage(stageId)
+    }
+
+    assertEquals("mobile_web_generation_create_failed", error.message)
+    assertTrue(outside.listFiles().isNullOrEmpty())
+    store.abortStage(stageId)
+  }
+
+  @Test
   fun activationWriteRejectsLinkedHostTree() {
     val root = temporary.newFolder("cache-activation")
     val externalRoot = temporary.newFolder("outside-activation")
