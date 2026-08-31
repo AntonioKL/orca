@@ -20823,6 +20823,10 @@ export class OrcaRuntimeService {
     this.stopRequestedPtyIds.add(ptyId)
   }
 
+  clearPtyStopRequested(ptyId: string): void {
+    this.stopRequestedPtyIds.delete(ptyId)
+  }
+
   isPtyStopRequested(ptyId: string): boolean {
     return this.stopRequestedPtyIds.has(ptyId)
   }

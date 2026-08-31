@@ -217,7 +217,7 @@ export async function shutdownLocalPty(
 ): Promise<PtyShutdownResult | void> {
   const expectedIncarnationId = ptyIncarnations.get(id)
   if (opts.incarnationId !== undefined && opts.incarnationId !== expectedIncarnationId) {
-    throw new Error(`PTY incarnation mismatch: ${id}`)
+    return { fenceUnavailable: true }
   }
   cancelPendingLocalPtySpawns(id)
   const pending = ptyShutdownOperations.get(id)

@@ -72,6 +72,7 @@ export async function shutdownSinglePty(
     // A pending daemon teardown can reject a stale incarnation without throwing.
     // Keep client ownership intact until bulk verification classifies that refusal.
     if (result?.fenceUnavailable) {
+      deps.runtime?.clearPtyStopRequested?.(id)
       return result
     }
   } catch (err) {
