@@ -113,6 +113,20 @@ describe('resolveProjectCreateTarget host selection', () => {
     ])
     const flags = new Map<string, string | boolean>([['project', 'github:stablyai/orca']])
 
-    await expect(resolveProjectCreateTarget(flags, client)).rejects.toThrow(/\/repo\?  forged/)
+    await expect(resolveProjectCreateTarget(flags, client)).rejects.toThrow(/\/repo\\u000a  forged/)
+  })
+
+  it('escapes C1, bidi and line-separator forgeries, keeping distinct ids distinct', async () => {
+    const client = clientReturning([
+      readySetup({ id: 'a\u009b31m', repoId: 'repo-a', path: '/one\u2028forged' }),
+      readySetup({ id: 'a\u202e31m', repoId: 'repo-b', path: '/two' })
+    ])
+    const flags = new Map<string, string | boolean>([['project', 'github:stablyai/orca']])
+    const failure = resolveProjectCreateTarget(flags, client)
+
+    await expect(failure).rejects.toThrow(/a\\u009b31m/)
+    await expect(failure).rejects.toThrow(/one\\u2028forged/)
+    // Distinct ids must not collapse onto the same rendering.
+    await expect(failure).rejects.toThrow(/a\\u202e31m/)
   })
 })

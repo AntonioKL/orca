@@ -141,10 +141,14 @@ export async function resolveProjectCreateTarget(
   }
 }
 
-// Why: setup paths and ids come from persisted metadata and may legally contain newlines or
-// control characters. This message is printed straight to a terminal, so an unescaped value could
-// forge a line or emit ANSI. Keep it readable rather than fully quoting.
+// Why: setup ids and paths are persisted metadata printed straight to a terminal, so anything that
+// can move the cursor, change colour, or reorder text could forge a setup line. Covers C0 and DEL,
+// C1 (U+009B is an 8-bit CSI, equivalent to `ESC [`), the Unicode line/paragraph separators, and
+// the bidi overrides. Escaped rather than dropped so two distinct values never render alike.
 function terminalSafe(value: string): string {
-  // eslint-disable-next-line no-control-regex
-  return value.replace(/[\u0000-\u001f\u007f]/g, '?')
+  return value.replace(
+    // eslint-disable-next-line no-control-regex
+    /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g,
+    (ch) => `\\u${ch.codePointAt(0)!.toString(16).padStart(4, '0')}`
+  )
 }
