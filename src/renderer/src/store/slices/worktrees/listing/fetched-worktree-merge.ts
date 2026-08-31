@@ -20,6 +20,7 @@ import {
 import { isCurrentDetectedWorktreeRefresh } from './detected-worktree-refresh-admission'
 import { buildWorktreePurgeState } from '../teardown/worktree-purge-state'
 import { isDisplayNamePersistencePending } from '../metadata/worktree-meta-persist'
+import { branchName } from '@/lib/git-utils'
 import {
   forgetAuthoritativelyRemovedWorktrees,
   forgetPersistedWorktreeMetaForRemovals,
@@ -92,8 +93,19 @@ export function preserveConcurrentDisplayName<T extends Worktree>(
     const latestDisplayNameIsPinned =
       latest.displayNameMode === 'fixed' ||
       (latest.displayNameMode === undefined && latest.cliProvenance?.kind === 'created-by-cli')
-    if (worktree.displayNameMode === undefined && latestDisplayNameIsPinned) {
-      // Older hosts omit provenance; never let their generated label replace a pinned one.
+    const incomingBranchShort = branchName(worktree.branch)
+    // Old hosts re-derive automatic labels from branch (or path basename when detached);
+    // any other label in their response is explicit meta a peer wrote there.
+    const incomingLooksAutomatic =
+      worktree.displayName === incomingBranchShort ||
+      (incomingBranchShort === '' &&
+        worktree.displayName === (worktree.path.split(/[\\/]/).pop() ?? ''))
+    if (
+      worktree.displayNameMode === undefined &&
+      latestDisplayNameIsPinned &&
+      incomingLooksAutomatic
+    ) {
+      // Older hosts omit provenance; never let their re-derived label replace a pinned one.
       return {
         ...worktree,
         displayName: latest.displayName,
