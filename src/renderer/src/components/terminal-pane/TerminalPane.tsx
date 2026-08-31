@@ -105,6 +105,7 @@ import { connectPanePty } from './pty-connection'
 import type { PaneProcessExit, PtyConnectionDeps } from './pty-connection-types'
 import { resolveTerminalProcessExitRestartStartup } from './terminal-process-exit-restart'
 import { resolveTerminalLayoutActiveLeafId } from './terminal-layout-leaf-ids'
+import { shouldIgnoreStalePanePtyLayoutBinding } from './pty-connection/pane-pty-layout-binding'
 import { shouldPreserveTerminalScrollbackBuffers } from '../../../../shared/workspace-session-terminal-buffers'
 import {
   getMobileFitOverridePtyIds,
@@ -1125,6 +1126,24 @@ function TerminalPane(
       const leafId = managerRef.current?.getLeafId(paneId)
       if (!leafId) {
         return
+      }
+
+      if (ptyId) {
+        const currentTransportPtyId = paneTransportsRef.current.get(paneId)?.getPtyId()
+        const tabPtyId = Object.values(useAppStore.getState().tabsByWorktree)
+          .flat()
+          .find((tab) => tab.id === tabId)?.ptyId
+        if (
+          currentTransportPtyId &&
+          currentTransportPtyId !== ptyId &&
+          shouldIgnoreStalePanePtyLayoutBinding({
+            existingPtyId: existingBindings[leafId],
+            nextPtyId: ptyId,
+            tabPtyId
+          })
+        ) {
+          return
+        }
       }
 
       if (ptyId) {

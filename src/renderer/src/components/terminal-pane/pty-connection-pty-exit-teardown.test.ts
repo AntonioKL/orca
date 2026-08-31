@@ -825,6 +825,7 @@ describe('connectPanePty', () => {
     onPtySpawn?.('terminal-new')
 
     expect(pane.container.dataset.ptyId).toBe('terminal-new')
+    expect(deps.updateTabPtyId).toHaveBeenCalledWith('tab-1', 'terminal-new', 'terminal-old')
     expect(deps.syncPanePtyLayoutBinding).toHaveBeenLastCalledWith(1, 'terminal-new')
   })
 

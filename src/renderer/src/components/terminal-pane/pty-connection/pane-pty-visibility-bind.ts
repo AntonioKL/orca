@@ -40,15 +40,23 @@ export function installPanePtyVisibilityBind(session: ConnectPanePtySession): vo
     if (session.disposed) {
       return
     }
-    if (!options.replacePtyId) {
-      const state = useAppStore.getState()
-      const leafId = session.pane.leafId
-      const existingPtyId = leafId
-        ? state.terminalLayoutsByTabId[session.deps.tabId]?.ptyIdsByLeafId?.[leafId]
+    const state = useAppStore.getState()
+    const leafId = session.pane.leafId
+    const existingPtyId = leafId
+      ? state.terminalLayoutsByTabId[session.deps.tabId]?.ptyIdsByLeafId?.[leafId]
+      : undefined
+    const tabPtyId = Object.values(state.tabsByWorktree)
+      .flat()
+      .find((tab) => tab.id === session.deps.tabId)?.ptyId
+    // A remounted mirrored pane can report a fresh spawn while its tab still
+    // carries the previous host handle. Treat that as an in-place replacement
+    // so the old identity cannot remain beside the new one in the tab PTY map.
+    const inferredReplacementPtyId =
+      existingPtyId && existingPtyId !== ptyId && tabPtyId === existingPtyId
+        ? existingPtyId
         : undefined
-      const tabPtyId = Object.values(state.tabsByWorktree)
-        .flat()
-        .find((tab) => tab.id === session.deps.tabId)?.ptyId
+    const replacementPtyId = options.replacePtyId ?? inferredReplacementPtyId
+    if (!options.replacePtyId) {
       const activePtyId = session.activePanePtyBinding
       const isCurrentPaneTransport =
         session.deps.paneTransportsRef.current.get(session.pane.id) === session.transport
@@ -67,7 +75,7 @@ export function installPanePtyVisibilityBind(session: ConnectPanePtySession): vo
         return
       }
     }
-    session.bindProcessExitState(ptyId, options.replacePtyId)
+    session.bindProcessExitState(ptyId, replacementPtyId)
     if (session.activePanePtyBinding && session.activePanePtyBinding !== ptyId) {
       session.reportPanePtyVisibility(session.activePanePtyBinding, false)
     }
@@ -92,11 +100,11 @@ export function installPanePtyVisibilityBind(session: ConnectPanePtySession): vo
         session.deps.updateTabPtyId(
           session.deps.tabId,
           ptyId,
-          options.replacePtyId,
+          replacementPtyId,
           directSshRetryAttemptId
         )
-      } else if (options.replacePtyId) {
-        session.deps.updateTabPtyId(session.deps.tabId, ptyId, options.replacePtyId)
+      } else if (replacementPtyId) {
+        session.deps.updateTabPtyId(session.deps.tabId, ptyId, replacementPtyId)
       } else {
         session.deps.updateTabPtyId(session.deps.tabId, ptyId)
       }
@@ -105,7 +113,7 @@ export function installPanePtyVisibilityBind(session: ConnectPanePtySession): vo
       directSshRetryAttemptId ||
       options.updateTabPtyId !== 'if-missing' ||
       !tabPtyIds.includes(ptyId)
-    if (options.replacePtyId) {
+    if (replacementPtyId) {
       // Replacement updates the tab and pane ownership in one store commit;
       // this follow-up is a no-op in production but keeps non-store test deps
       // and pane-local bookkeeping in sync.
