@@ -136,8 +136,7 @@ export function normalizeServeModeArgv(argv: readonly string[]): string[] {
       next.push(...argv.slice(i))
       break
     }
-    // Why: the CLI accepts `--port=6768` as well as `--port 6768`, but
-    // getServeOptions only reads the next token, so `=` must be split apart.
+    // Why: keep the internal argv shape canonical even though getServeOptions accepts both forms.
     const eq = token.indexOf('=')
     const name = eq === -1 ? token : token.slice(0, eq)
     // Why only the bare form: the CLI reads its serve booleans as `flags.get(name) === true`
