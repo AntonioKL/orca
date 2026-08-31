@@ -3,6 +3,7 @@ import type { AgentSessionJournalIdentity } from '../../shared/agent-session-jou
 import { agentSessionProviderHandleChainHead } from '../../shared/agent-session-provider-handle'
 import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import { resolveClaudeCommand } from '../codex-cli/command'
+import { withCliRuntimeOnPath } from '../../shared/node-cli-command-resolution'
 import type { AgentSessionRecordStore } from '../runtime/agent-session-record-store'
 
 export const CLAUDE_DEFAULT_SETTING_SOURCES = ['user', 'project', 'local'] as const
@@ -90,11 +91,12 @@ export function createClaudeStructuredLaunchResolver(
       pathEnv,
       ...(homePath ? { homePath } : {})
     })
+    const launchEnv = environment ? withCliRuntimeOnPath(command, { ...environment }) : undefined
     return {
       command,
-      args: [...CLAUDE_STRUCTURED_BASE_ARGS, ...providerArgs],
+      args: [...(record.launchArgs ?? []), ...CLAUDE_STRUCTURED_BASE_ARGS, ...providerArgs],
       cwd: await deps.resolveWorkspacePath(record.location.workspaceId),
-      ...(environment ? { env: { ...environment } as Record<string, string> } : {}),
+      ...(launchEnv ? { env: launchEnv as Record<string, string> } : {}),
       claudeConfigDir: record.accountHome.path,
       providerSessionId,
       resumeLeafUuid: head?.handle.provider === 'claude' ? head.handle.leafUuid : null,

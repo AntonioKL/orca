@@ -665,8 +665,11 @@ import {
   resolveTuiAgentLaunchArgs,
   resolveTuiAgentLaunchEnv
 } from '../../shared/tui-agent-launch-defaults'
+import { tokenizeStartupCommand } from '../../shared/tui-agent-startup-shell'
 import { resolveCodexStructuredAppServerArgs } from '../codex/codex-structured-app-server-args'
 import { resolveLocalWindowsAgentStartupShell } from '../../shared/windows-terminal-shell'
+import { hasClaudeAuthEnvConflict } from '../claude-accounts/environment'
+import { getSelectedClaudeAccountIdForTarget } from '../claude-accounts/runtime-selection'
 import {
   getTuiAgentLaunchCommand,
   isTuiAgent,
@@ -11719,7 +11722,26 @@ export class OrcaRuntimeService {
   }
 
   private resolveConfiguredClaudeStructuredArgs(): string[] {
-    return []
+    const settings = this.requireStore().getSettings()
+    const configured = resolveTuiAgentLaunchArgs('claude', settings.agentDefaultArgs)
+    const shell = resolveLocalWindowsAgentStartupShell({
+      platform: process.platform,
+      isRemote: false,
+      terminalWindowsShell: settings.terminalWindowsShell
+    })
+    const parsed = tokenizeStartupCommand(configured, shell ?? 'posix')
+    if (!parsed.ok) {
+      throw new Error(
+        `Structured Claude chat cannot apply the configured CLI arguments: ${parsed.error}`
+      )
+    }
+    const divergent = parsed.spans.find((span) => span.divergesFromShell)
+    if (divergent) {
+      throw new Error(
+        `Structured Claude chat cannot apply the configured CLI arguments: ${configured.slice(divergent.start, divergent.end)}`
+      )
+    }
+    return parsed.tokens
   }
 
   private createStructuredAgentSessionHandoffTransport(): StructuredAgentSessionHandoffTransport {
@@ -12634,7 +12656,11 @@ export class OrcaRuntimeService {
     return this.resolveStructuredAgentSessionIntent(input, async ({ workspacePath, launchEnv }) => {
       // A create has no process yet, so the current selection is what it must follow.
       if (input.agent === 'claude') {
-        return launchEnv.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), '.claude')
+        return (
+          this.accountServices?.claudeAccounts.getRuntimeConfigDir({ runtime: 'host' }) ||
+          launchEnv.CLAUDE_CONFIG_DIR?.trim() ||
+          join(homedir(), '.claude')
+        )
       }
       const preparedHome = await this.prepareCodexStructuredLaunchFn?.({ workspacePath, launchEnv })
       const configuredHome = launchEnv.CODEX_HOME
@@ -12663,6 +12689,17 @@ export class OrcaRuntimeService {
     }
     const settings = this.requireStore().getSettings()
     const launchEnv = resolveTuiAgentLaunchEnv(input.agent, settings.agentDefaultEnv)
+    // Managed account launches must not let explicit API credentials override the
+    // account's OAuth store. Keep this refusal aligned with PTY launches.
+    if (
+      input.agent === 'claude' &&
+      Boolean(getSelectedClaudeAccountIdForTarget(settings, { runtime: 'host' })) &&
+      hasClaudeAuthEnvConflict(launchEnv)
+    ) {
+      throw new Error(
+        'This Claude launch defines explicit Anthropic auth environment variables. Remove those overrides before using a managed Claude account.'
+      )
+    }
     const location = await this.resolveStructuredAgentSessionLocation(input.worktree)
     const workspacePath = (await this.resolveRuntimeFileTarget(input.worktree)).worktree.path
     return {

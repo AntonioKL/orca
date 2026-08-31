@@ -32,6 +32,7 @@ import {
 } from './running-terminal-close-guard'
 import { closeLocalTerminalTabState } from './close-local-terminal-tab-state'
 import { getTerminalIncarnationHandle } from './terminal-close-incarnation'
+import { agentSessionProviderLabel } from '../../../../shared/agent-session-provider-label'
 import {
   getWorktreeTerminalTabIds,
   resolveTerminalCloseTarget,
@@ -154,10 +155,18 @@ export function closeTerminalTab(
       : ({ kind: 'local' } as const)
     void closeStructuredTerminalSessionWithRetry(target, structuredSessionId).then((closed) => {
       if (!closed) {
+        const providerLabel = agentSessionProviderLabel(
+          state.unifiedTabsByWorktree?.[owningWorktreeId]?.find(
+            (tab) => tab.contentType === 'terminal' && tab.entityId === terminalTabId
+          )?.agentSessionAgent === 'claude'
+            ? 'claude'
+            : 'codex'
+        )
         toast.error(
           translate(
             'components.native-chat.structuredSessionCloseFailed',
-            'Could not close this Codex chat'
+            'Could not close {{providerLabel}} chat',
+            { providerLabel }
           ),
           {
             description: translate(

@@ -12,12 +12,17 @@ import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-cl
 import { closeStructuredAgentSession } from '@/runtime/structured-agent-session-close'
 import { toRuntimeWorktreeSelector } from '@/runtime/runtime-worktree-selector'
 import { translate } from '@/i18n/i18n'
+import { agentSessionProviderLabel } from '../../../../shared/agent-session-provider-label'
 
-function reportStructuredSessionCloseError(error: unknown): void {
+function reportStructuredSessionCloseError(
+  error: unknown,
+  provider: 'claude' | 'codex' = 'codex'
+): void {
   toast.error(
     translate(
       'components.native-chat.structuredSessionCloseFailed',
-      'Could not close this Codex chat'
+      'Could not close {{providerLabel}} chat',
+      { providerLabel: agentSessionProviderLabel(provider) }
     ),
     { description: error instanceof Error ? error.message : String(error) }
   )
@@ -139,7 +144,12 @@ export function useTabGroupTabCloseCommands({
               leaveWorktreeIfEmpty()
             }
           })
-          .catch(reportStructuredSessionCloseError)
+          .catch((error) =>
+            reportStructuredSessionCloseError(
+              error,
+              item.agentSessionAgent === 'claude' ? 'claude' : 'codex'
+            )
+          )
         return
       }
       if (item.contentType === 'terminal') {
@@ -205,7 +215,12 @@ export function useTabGroupTabCloseCommands({
               })
             )
             .then(() => closeUnifiedTab(item.id))
-            .catch(reportStructuredSessionCloseError)
+            .catch((error) =>
+              reportStructuredSessionCloseError(
+                error,
+                item.agentSessionAgent === 'claude' ? 'claude' : 'codex'
+              )
+            )
           continue
         }
         if (item.contentType === 'terminal' && isWebRuntimeSessionActive(runtimeEnvironmentId)) {

@@ -245,7 +245,8 @@ export function startStructuredCodexLaunch(worktreeId: string): void {
       toast.error(
         translate(
           'components.native-chat.structuredSessionLaunchFailed',
-          'Could not open Codex chat'
+          'Could not open {{providerLabel}} chat',
+          { providerLabel: 'Codex' }
         ),
         { description: error instanceof Error ? error.message : String(error) }
       )

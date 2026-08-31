@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { delimiter, dirname } from 'node:path'
 import type { AgentSessionRecord } from '../../shared/agent-session-record'
 import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import type { AgentSessionRecordStore } from '../runtime/agent-session-record-store'
@@ -86,6 +87,15 @@ describe('claude structured launch resolution', () => {
     expect(launch.args.slice(-2)).toEqual(['--resume', 'provider-current'])
   })
 
+  it('preserves launch arguments pinned when the session was created', async () => {
+    const launch = await resolverFor(record({ launchArgs: ['--dangerously-skip-permissions'] }))({
+      identity: IDENTITY
+    })
+
+    expect(launch.args[0]).toBe('--dangerously-skip-permissions')
+    expect(launch.args.slice(-2)).toEqual(['--session-id', launch.providerSessionId])
+  })
+
   it('uses the runtime environment instead of the scrubbed legacy launchEnv', async () => {
     const pinned = record()
     const resolver = resolverFor(pinned, () => ({
@@ -98,6 +108,18 @@ describe('claude structured launch resolution', () => {
       ANTHROPIC_BASE_URL: 'https://gateway.example.test'
     })
     expect((await resolver({ identity: IDENTITY })).env?.ANTHROPIC_AUTH_TOKEN).toBe('rotated-token')
+  })
+
+  it("pairs Claude's resolved binary with its sibling Node runtime", async () => {
+    const resolver = createClaudeStructuredLaunchResolver({
+      store: { getRecord: () => record() } as unknown as AgentSessionRecordStore,
+      resolveWorkspacePath: async () => '/repos/workspace-1',
+      resolveCommand: () => process.execPath,
+      resolveEnvironment: async () => ({ PATH: `/usr/bin${delimiter}/opt/bin` })
+    })
+
+    const launch = await resolver({ identity: IDENTITY })
+    expect(launch.env?.PATH?.split(delimiter)[0]).toBe(dirname(process.execPath))
   })
 
   it('refuses other hosts, WSL, providers, and account-home variables', async () => {
