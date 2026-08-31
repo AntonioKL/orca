@@ -24,21 +24,36 @@
 <body>
 <main>
   <h1>Orchestration vNext: whole-PR decision brief</h1>
-  <p class="sub">PR <a href="https://github.com/stablyai/orca/pull/16904">#16904</a> · reviewed head <code>4a32d073fa</code> · 30 Aug 2026</p>
+  <p class="sub">PR <a href="https://github.com/stablyai/orca/pull/16904">#16904</a> · report snapshot <code>4a32d073fa</code> · current workspace head <code>548ca8529f</code> · 30 Aug 2026</p>
 
   <div class="decision">
-    <strong>Recommendation: technically ready for final CI / human sign-off.</strong>
-    All evidence-backed blockers from the complexity audit and final review now have focused fixes and regressions.
-    The local orchestration matrix is green; the remaining merge gate is the repository's normal CI and a
-    human review of the intentionally accepted mailbox tradeoffs. No broad refactor is warranted.
+    <strong>Recommendation: do not treat this brief as merge approval yet.</strong>
+    The implementation has strong focused evidence, but this document's GitHub/CI snapshot is stale
+    (it was generated for <code>4a32d073fa</code>, while the workspace is now at <code>548ca8529f</code>).
+    Re-run repository CI and review the current diff before deciding. The local tests prove specific
+    behaviors; they do not prove the absence of bugs across every provider, OS, remote topology, or failure timing.
   </div>
 
   <div class="grid">
-    <div class="card"><div class="label">GitHub state</div><div class="value good">MERGEABLE / CLEAN</div></div>
-    <div class="card"><div class="label">CI</div><div class="value good">36 passed</div><div class="small">0 failed · 0 pending · 11 conditional skips</div></div>
+    <div class="card"><div class="label">GitHub state</div><div class="value warn">STALE SNAPSHOT</div><div class="small">Must refresh against current PR head</div></div>
+    <div class="card"><div class="label">CI</div><div class="value warn">NOT CURRENT</div><div class="small">36 checks were recorded for the older snapshot</div></div>
     <div class="card"><div class="label">PR size</div><div class="value">289 files</div><div class="small">23,272 additions / 4,162 deletions</div></div>
     <div class="card"><div class="label">Review coverage</div><div class="value">7 areas</div><div class="small">lifecycle, mailbox, terminal, transcript, federation, cleanup, ergonomics</div></div>
   </div>
+
+  <h2>What “technically ready” did—and did not—mean</h2>
+  <p>The earlier wording meant that the reviewed code paths had focused tests and no known blocker in that
+    snapshot. It was not a claim that the PR was bug-free, that current CI was green, or that every provider and
+    execution topology had been physically exercised. Because the snapshot predates the current workspace head,
+    that wording was too strong and has been withdrawn here.</p>
+  <table>
+    <thead><tr><th>Evidence level</th><th>What it establishes</th><th>What remains unproven</th></tr></thead>
+    <tbody>
+      <tr><td><span class="good"><b>Strong local evidence</b></span></td><td>Focused lifecycle, mailbox, federation, archive, and provider-transcript paths pass their targeted tests; the orchestration Electron matrix is green.</td><td>It cannot cover all OS/provider/remote combinations or arbitrary crash timing.</td></tr>
+      <tr><td><span class="warn"><b>Needs refresh</b></span></td><td>GitHub status and the CI counts shown in this document came from the older commit.</td><td>Current PR CI, current merge base, and any checks affected by later commits.</td></tr>
+      <tr><td><span class="warn"><b>Explicit product tradeoffs</b></span></td><td>Ambiguous mailbox writes fail closed; hook-only providers may not expose historical turn proof; composer auto-submit is not guaranteed.</td><td>Whether those boundaries are acceptable to the product owner.</td></tr>
+    </tbody>
+  </table>
 
   <h2>Why this PR exists</h2>
   <p>Orca’s original orchestration made it possible to coordinate agents, but delivery and lifecycle evidence
@@ -87,7 +102,7 @@
     </tbody>
   </table>
 
-  <h2>Evidence that the design works</h2>
+  <h2>Recorded evidence (separate snapshot vs. current verification)</h2>
   <div class="evidence">
     <ul>
       <li>Typecheck, lint, changed-code quality, packaging, Windows native smoke, cross-version wire checks, and skill round trips passed.</li>
@@ -98,6 +113,8 @@
       <li>Completed-worker retirement Electron E2E passed both close modes (2/2) after the activation fix.</li>
       <li>Real Electron flow proved dispatch, durable follow-up, correlated completion, replay-before-ack, release, archived transcript access, and exactly-once terminal submission.</li>
       <li>Remote/SSH/WSL deterministic fixtures and compatibility checks passed. Physical certification of every remote topology remains separate operational work.</li>
+      <li><b>Current workspace verification:</b> orchestration Electron matrix 20/20, provider-transcript E2E 1/1 (Claude/Grok/OMP-shaped hooks and files), focused runtime/archive tests 57/57, node typecheck, formatting, diff check, and changed-code quality all pass.</li>
+      <li><b>Current workspace caveat:</b> repository-wide <code>typecheck:e2e</code> still reports unrelated baseline errors in other specs; no error was reported for the provider-transcript spec.</li>
     </ul>
   </div>
 
