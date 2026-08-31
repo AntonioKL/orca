@@ -21,7 +21,10 @@ import {
   type BrowserWindowState,
   type TerminalSplitLatencyReportConfig
 } from './terminal-split-activation-latency-report'
-import { writeTerminalSplitLatencyArtifact } from './terminal-split-activation-latency-artifact'
+import {
+  sanitizeTerminalSplitLatencyReport,
+  writeTerminalSplitLatencyArtifact
+} from './terminal-split-activation-latency-artifact'
 import {
   disposeSplitLatencyMainProbe,
   installSplitLatencyMainProbe,
@@ -558,7 +561,7 @@ async function disposePtyExitProbe(page: Page): Promise<void> {
 }
 
 async function attachReport(testInfo: TestInfo, report: Record<string, unknown>): Promise<void> {
-  const body = `${JSON.stringify(report, null, 2)}\n`
+  const body = `${JSON.stringify(sanitizeTerminalSplitLatencyReport(report), null, 2)}\n`
   await testInfo.attach('terminal-split-activation-latency.json', {
     body,
     contentType: 'application/json'
@@ -566,7 +569,9 @@ async function attachReport(testInfo: TestInfo, report: Record<string, unknown>)
   if (BENCH_OUTPUT_PATH) {
     writeTerminalSplitLatencyArtifact(BENCH_OUTPUT_PATH, body)
   }
-  console.log(`[terminal-split-activation-latency] ${JSON.stringify(report)}`)
+  console.log(
+    `[terminal-split-activation-latency] ${JSON.stringify(sanitizeTerminalSplitLatencyReport(report))}`
+  )
 }
 
 test.describe('Terminal split activation latency benchmark @headful', () => {

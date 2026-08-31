@@ -2,7 +2,10 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { writeTerminalSplitLatencyArtifact } from './terminal-split-activation-latency-artifact'
+import {
+  sanitizeTerminalSplitLatencyReport,
+  writeTerminalSplitLatencyArtifact
+} from './terminal-split-activation-latency-artifact'
 
 const temporaryDirectories: string[] = []
 
@@ -36,5 +39,36 @@ describe('writeTerminalSplitLatencyArtifact', () => {
     expect(() => writeTerminalSplitLatencyArtifact(outputPath, '{}')).toThrow(
       `[terminal-split-activation-latency] unable to write ${outputPath}`
     )
+  })
+})
+
+describe('sanitizeTerminalSplitLatencyReport', () => {
+  it('replaces the machine-local test repo path', () => {
+    expect(
+      sanitizeTerminalSplitLatencyReport({ testRepoPath: '/var/folders/ab/T/orca-seeded-repo' })
+        .testRepoPath
+    ).toBe('<test-repo>')
+  })
+
+  it('redacts absolute paths and bounds free-form cleanup text', () => {
+    const sanitized = sanitizeTerminalSplitLatencyReport({
+      abortReason: 'ENOENT: /Users/someone/secret/dir missing',
+      measuredSamples: [{ shortcutToFocusMs: 12, cleanupError: `x /tmp/a ${'y'.repeat(500)}` }]
+    })
+
+    expect(sanitized.abortReason).toBe('ENOENT: <path> missing')
+    const [sample] = sanitized.measuredSamples as { cleanupError: string }[]
+    expect(sample?.cleanupError).not.toContain('/tmp/a')
+    expect(sample?.cleanupError.length).toBeLessThanOrEqual(200)
+  })
+
+  it('keeps timing fields and non-string cleanup values intact', () => {
+    const sanitized = sanitizeTerminalSplitLatencyReport({
+      headlineMs: { shortcutToFocusP50: 12 },
+      measuredSamples: [{ shortcutToFocusMs: 12, cleanupError: null }]
+    })
+
+    expect(sanitized.headlineMs).toEqual({ shortcutToFocusP50: 12 })
+    expect(sanitized.measuredSamples).toEqual([{ shortcutToFocusMs: 12, cleanupError: null }])
   })
 })

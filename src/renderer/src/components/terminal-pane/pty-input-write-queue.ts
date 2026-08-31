@@ -12,41 +12,18 @@ import {
   type PtyInputWriteQueue,
   type PtyInputWriteQueueDeps
 } from './pty-input-write-queue-contract'
+import {
+  createHeadQueue,
+  peekHeadQueue,
+  resetHeadQueue,
+  shiftHeadQueue
+} from './pty-input-write-head-queue'
 
 export {
   PTY_INPUT_WRITE_QUEUE_MAX_PENDING_REPLIES,
   PTY_INPUT_WRITE_QUEUE_MAX_PENDING_REPLY_CODE_UNITS,
   TERMINAL_INPUT_COALESCE_MAX_CODE_UNITS
 } from './pty-input-write-queue-contract'
-
-/** Amortized-O(1) FIFO: shift by head index, compact once the dead prefix dominates. */
-type HeadQueue = { items: (PendingPtyInputWrite | undefined)[]; head: number }
-
-function createHeadQueue(): HeadQueue {
-  return { items: [], head: 0 }
-}
-
-function resetHeadQueue(queue: HeadQueue): void {
-  queue.items = []
-  queue.head = 0
-}
-
-function peekHeadQueue(queue: HeadQueue): PendingPtyInputWrite | undefined {
-  return queue.items[queue.head]
-}
-
-function shiftHeadQueue(queue: HeadQueue): PendingPtyInputWrite | undefined {
-  const removed = queue.items[queue.head]
-  queue.items[queue.head] = undefined
-  queue.head += 1
-  if (queue.head === queue.items.length) {
-    resetHeadQueue(queue)
-  } else if (queue.head >= 1024 && queue.head * 2 >= queue.items.length) {
-    queue.items = queue.items.slice(queue.head)
-    queue.head = 0
-  }
-  return removed
-}
 
 export function createPtyInputWriteQueue(deps: PtyInputWriteQueueDeps): PtyInputWriteQueue {
   const yieldBetweenWrites = deps.yieldBetweenWrites ?? yieldToEventLoop
@@ -58,10 +35,7 @@ export function createPtyInputWriteQueue(deps: PtyInputWriteQueueDeps): PtyInput
   let generation = 0
   let failedGeneration: number | null = null
   let drainPromise: Promise<void> | null = null
-  let cancelAcceptedWrite = (): void => undefined
-  let acceptedWriteCancelled = new Promise<void>((resolve) => {
-    cancelAcceptedWrite = resolve
-  })
+  const pendingAcceptedCancels = new Set<() => void>()
 
   function resetSequenceIfEmpty(): void {
     if (pendingOrdinary.items.length === 0 && pendingReplies.items.length === 0) {
@@ -134,6 +108,27 @@ export function createPtyInputWriteQueue(deps: PtyInputWriteQueueDeps): PtyInput
     nextSequence = 0
   }
 
+  // Why: one cancel per in-flight write rather than `.then()` on a queue-lifetime
+  // promise — those reactions are retained until that promise settles, so a
+  // long-lived pane accumulated one record per acknowledged write (Esc, Ctrl+C).
+  async function writeAcceptedChunk(id: string, data: string): Promise<boolean> {
+    let cancel = (): void => undefined
+    const cancelled = new Promise<boolean>((resolve) => {
+      cancel = () => resolve(false)
+    })
+    // Registered before the write starts so a clear() inside a synchronous
+    // writeAccepted callback still unblocks this race.
+    pendingAcceptedCancels.add(cancel)
+    try {
+      return await Promise.race([
+        cancelled,
+        Promise.resolve(deps.writeAccepted?.(id, data) ?? false).catch(() => false)
+      ])
+    } finally {
+      pendingAcceptedCancels.delete(cancel)
+    }
+  }
+
   async function drain(): Promise<void> {
     let failureGeneration = generation
     // Why: the drain yields, so the owner may rebind before the failure surfaces; report the id that actually failed.
@@ -201,13 +196,7 @@ export function createPtyInputWriteQueue(deps: PtyInputWriteQueueDeps): PtyInput
         }
         const writeGeneration = generation
         const accepted = next.resolveAccepted
-          ? await Promise.race([
-              // Register before a synchronous accepted-write callback can clear and reuse the queue.
-              acceptedWriteCancelled.then(() => false),
-              Promise.resolve(deps.writeAccepted?.(next.id, chunk.value) ?? false).catch(
-                () => false
-              )
-            ])
+          ? await writeAcceptedChunk(next.id, chunk.value)
           : (deps.write(next.id, chunk.value), true)
         if (generation !== writeGeneration || firstPending() !== next) {
           continue
@@ -320,10 +309,10 @@ export function createPtyInputWriteQueue(deps: PtyInputWriteQueueDeps): PtyInput
       generation += 1
       failedGeneration = null
       clearPending()
-      cancelAcceptedWrite()
-      acceptedWriteCancelled = new Promise((resolve) => {
-        cancelAcceptedWrite = resolve
-      })
+      for (const cancel of pendingAcceptedCancels) {
+        cancel()
+      }
+      pendingAcceptedCancels.clear()
     }
   }
 }
