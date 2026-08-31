@@ -56,6 +56,7 @@ function renderDetailPane(options: {
           selectedRepoDisplayName="orca"
           selectedRepoDefaultBaseRef="main"
           selectedWorkspaceName="default"
+          selectedHostEntry={null}
           hostLabelById={new Map()}
           selectedRunNowAvailability={null}
           selectedAutomationRunPageWorkspaceDisplay={null}
@@ -186,6 +187,7 @@ describe('AutomationsDetailPane tab keyboard navigation', () => {
             selectedRepoDisplayName="orca"
             selectedRepoDefaultBaseRef="main"
             selectedWorkspaceName="default"
+            selectedHostEntry={null}
             hostLabelById={new Map()}
             selectedRunNowAvailability={null}
             selectedAutomationRunPageWorkspaceDisplay={null}
