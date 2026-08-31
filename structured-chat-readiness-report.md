@@ -1,7 +1,7 @@
 # Structured native-chat readiness report
 
-Integration branch: `brennanb2025/structured-chat-integration-latest`  
-Integration head: `3db8e822e45fa3623feb610a89e37eb2744fa596`  
+Integration branch: `brennanb2025/structured-chat-integration-latest`
+Integration head: `3db8e822e45fa3623feb610a89e37eb2744fa596`
 Base recorded: `origin/main` = `02a7742406a5a84fb372d6255d5a4367421990bd`
 
 ## Exact implementation heads
