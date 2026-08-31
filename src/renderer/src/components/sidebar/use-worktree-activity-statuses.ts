@@ -5,7 +5,7 @@ import { resolveWorktreeStatus, type WorktreeStatus } from '@/lib/worktree-statu
 import { EMPTY_BROWSER_TABS, EMPTY_TABS } from './WorktreeCardHelpers'
 import {
   selectLivePtyIdsForWorktree,
-  selectTerminalLayoutRootsForWorktree,
+  selectTerminalLayoutsForWorktree,
   selectRuntimePaneTitlesForWorktree
 } from './worktree-card-status-inputs'
 import { selectWorktreeAgentActivitySummary } from './worktree-agent-activity-summary'
@@ -48,7 +48,7 @@ export function selectWorktreeActivityStatuses(
         ptyIdsByTabId: selectLivePtyIdsForWorktree(statusInputs, worktreeId),
         runtimePaneTitlesByTabId: selectRuntimePaneTitlesForWorktree(statusInputs, worktreeId),
         agentStatusPaneIdsByTabId,
-        terminalLayoutRootsByTabId: selectTerminalLayoutRootsForWorktree(statusInputs, worktreeId),
+        terminalLayoutsByTabId: selectTerminalLayoutsForWorktree(statusInputs, worktreeId),
         paneForegroundAgentByPaneKey,
         hasPermission,
         hasLiveWorking,

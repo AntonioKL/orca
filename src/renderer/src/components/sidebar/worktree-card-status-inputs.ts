@@ -1,5 +1,8 @@
 import type { AppState } from '@/store/types'
-import type { TerminalPaneLayoutNode } from '../../../../shared/terminal-tab-types'
+import type {
+  TerminalLayoutSnapshot,
+  TerminalPaneLayoutNode
+} from '../../../../shared/terminal-tab-types'
 
 // Why: these selectors return fresh maps whose top-level values preserve
 // underlying per-tab references, so callers must compare them shallowly.
@@ -47,6 +50,17 @@ export function selectTerminalLayoutRootsForWorktree(
   const out: Record<string, TerminalPaneLayoutNode | null | undefined> = {}
   for (const tab of state.tabsByWorktree[worktreeId] ?? []) {
     out[tab.id] = state.terminalLayoutsByTabId[tab.id]?.root
+  }
+  return out
+}
+
+export function selectTerminalLayoutsForWorktree(
+  state: WorktreeCardLayoutRootInputState,
+  worktreeId: string
+): Record<string, TerminalLayoutSnapshot | undefined> {
+  const out: Record<string, TerminalLayoutSnapshot | undefined> = {}
+  for (const tab of state.tabsByWorktree[worktreeId] ?? []) {
+    out[tab.id] = state.terminalLayoutsByTabId[tab.id]
   }
   return out
 }

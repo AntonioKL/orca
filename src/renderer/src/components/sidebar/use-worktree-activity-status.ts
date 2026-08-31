@@ -5,7 +5,7 @@ import { resolveWorktreeStatus, type WorktreeStatus } from '@/lib/worktree-statu
 import { EMPTY_BROWSER_TABS, EMPTY_TABS } from './WorktreeCardHelpers'
 import {
   selectLivePtyIdsForWorktree,
-  selectTerminalLayoutRootsForWorktree,
+  selectTerminalLayoutsForWorktree,
   selectRuntimePaneTitlesForWorktree
 } from './worktree-card-status-inputs'
 import { selectWorktreeAgentActivitySummary } from './worktree-agent-activity-summary'
@@ -19,8 +19,8 @@ export function useWorktreeActivityStatus(worktreeId: string): WorktreeStatus {
   const ptyIdsForWorktree = useAppStore(
     useShallow((s) => selectLivePtyIdsForWorktree(s, worktreeId))
   )
-  const terminalLayoutRootsByTabId = useAppStore(
-    useShallow((s) => selectTerminalLayoutRootsForWorktree(s, worktreeId))
+  const terminalLayoutsByTabId = useAppStore(
+    useShallow((s) => selectTerminalLayoutsForWorktree(s, worktreeId))
   )
   const {
     hasPermission,
@@ -44,7 +44,7 @@ export function useWorktreeActivityStatus(worktreeId: string): WorktreeStatus {
         ptyIdsByTabId: ptyIdsForWorktree,
         runtimePaneTitlesByTabId: runtimePaneTitlesForWorktree,
         agentStatusPaneIdsByTabId,
-        terminalLayoutRootsByTabId,
+        terminalLayoutsByTabId,
         paneForegroundAgentByPaneKey,
         hasPermission,
         hasLiveWorking,
@@ -59,7 +59,7 @@ export function useWorktreeActivityStatus(worktreeId: string): WorktreeStatus {
       ptyIdsForWorktree,
       runtimePaneTitlesForWorktree,
       agentStatusPaneIdsByTabId,
-      terminalLayoutRootsByTabId,
+      terminalLayoutsByTabId,
       paneForegroundAgentByPaneKey,
       hasPermission,
       hasLiveWorking,
