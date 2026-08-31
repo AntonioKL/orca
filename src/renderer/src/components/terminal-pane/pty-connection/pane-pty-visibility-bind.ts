@@ -35,10 +35,10 @@ export function installPanePtyVisibilityBind(session: ConnectPanePtySession): vo
       replacePtyId?: string
       sampleVisibleForegroundAgent?: boolean
     } = {}
-  ): void => {
+  ): boolean => {
     // A disposed pane can still receive an already-queued transport callback; it no longer owns state.
     if (session.disposed) {
-      return
+      return false
     }
     const state = useAppStore.getState()
     const leafId = session.pane.leafId
@@ -72,7 +72,7 @@ export function installPanePtyVisibilityBind(session: ConnectPanePtySession): vo
         }) &&
           !isInitialCurrentTransportBinding)
       ) {
-        return
+        return false
       }
     }
     session.bindProcessExitState(ptyId, replacementPtyId)
@@ -160,6 +160,7 @@ export function installPanePtyVisibilityBind(session: ConnectPanePtySession): vo
         session.paneForegroundAgentTracker.onCommandStarted(freshSpawnLaunchAgent)
       }
     }
+    return true
   }
 
   session.onPtySpawn = (ptyId: string): void => {
@@ -179,7 +180,12 @@ export function installPanePtyVisibilityBind(session: ConnectPanePtySession): vo
     session.spawnedFreshPtyId = ptyId
     // Why: Command Code has no prompt-start hook. Seed the visible working row
     // once the PTY exists, then let real hook events refine or complete it.
-    session.bindActivePanePty(ptyId, { seedInitialAgentStatus: true })
+    const bound = session.bindActivePanePty(ptyId, { seedInitialAgentStatus: true })
+    if (!bound) {
+      // A stale transport may report a spawn after a successor claimed this
+      // pane slot. Its one-shot startup belongs to the successor, not here.
+      return
+    }
     // Spend queued startup only after this pane owns a concrete PTY.
     try {
       session.deps.onQueuedStartupSpawned?.()

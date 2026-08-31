@@ -270,6 +270,27 @@ describe('connectPanePty', () => {
     expect(onPtyErrorCleared).not.toHaveBeenCalled()
   })
 
+  it('does not spend queued startup from a stale spawn callback', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const staleTransport = createMockTransport()
+    transportFactoryQueue.push(staleTransport)
+    const paneTransportsRef = { current: new Map<number, MockTransport>() }
+    const onStartupBound = vi.fn()
+    const startup = { command: 'echo queued-startup' }
+    const deps = createDeps({ paneTransportsRef, startup, onStartupBound })
+    const binding = connectPanePty(createPane(1) as never, createManager(1) as never, deps as never)
+    await flushAsyncTicks(12)
+
+    const onPtySpawn = createdTransportOptions[0]?.onPtySpawn as
+      | ((ptyId: string) => void)
+      | undefined
+    paneTransportsRef.current.set(1, createMockTransport('terminal-successor'))
+    onPtySpawn?.('stale-pty')
+
+    expect(onStartupBound).not.toHaveBeenCalled()
+    binding.dispose()
+  })
+
   it('resizes a reattached PTY to the current grid when the pane narrows before reattach resolves', async () => {
     const { connectPanePty } = await import('./pty-connection')
     const reattach = createDeferred<void>()
