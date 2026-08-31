@@ -19,6 +19,7 @@ import {
 } from '../metadata/hosted-review-link-mutation'
 import { isCurrentDetectedWorktreeRefresh } from './detected-worktree-refresh-admission'
 import { buildWorktreePurgeState } from '../teardown/worktree-purge-state'
+import { isDisplayNamePersistencePending } from '../metadata/worktree-meta-persist'
 import {
   forgetAuthoritativelyRemovedWorktrees,
   forgetPersistedWorktreeMetaForRemovals,
@@ -73,12 +74,34 @@ export function preserveConcurrentDisplayName<T extends Worktree>(
     if (!started || !latest) {
       return worktree
     }
+    if (isDisplayNamePersistencePending(worktree.id, latest.hostId)) {
+      return {
+        ...worktree,
+        displayName: latest.displayName,
+        ...(latest.displayNameMode !== undefined
+          ? { displayNameMode: latest.displayNameMode }
+          : { displayNameMode: undefined })
+      }
+    }
     const latestChanged =
       latest.displayName !== started.displayName ||
       latest.displayNameMode !== started.displayNameMode
     // The label is the stable stale-response marker; mode may be absent on an
     // older host or newly projected by a newer one.
     const incomingIsStale = worktree.displayName === started.displayName
+    const latestDisplayNameIsPinned =
+      latest.displayNameMode === 'fixed' ||
+      (latest.displayNameMode === undefined && latest.cliProvenance?.kind === 'created-by-cli')
+    if (worktree.displayNameMode === undefined && latestDisplayNameIsPinned) {
+      // Older hosts omit provenance; never let their generated label replace a pinned one.
+      return {
+        ...worktree,
+        displayName: latest.displayName,
+        ...(latest.displayNameMode !== undefined
+          ? { displayNameMode: latest.displayNameMode }
+          : { displayNameMode: undefined })
+      }
+    }
     if (!latestChanged || !incomingIsStale) {
       return worktree
     }

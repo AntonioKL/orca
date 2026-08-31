@@ -400,6 +400,63 @@ describe('fetchWorktrees', () => {
     })
   })
 
+  it('retains an existing pinned mode when an older host omits it', async () => {
+    const store = createTestStore()
+    const existing = makeWorktree({
+      id: 'repo1::/path/wt1',
+      repoId: 'repo1',
+      path: '/path/wt1',
+      branch: 'refs/heads/feature',
+      displayName: 'feature',
+      displayNameMode: 'fixed'
+    })
+    const staleResponse = { ...existing, displayNameMode: undefined }
+
+    mockApi.worktrees.list.mockResolvedValueOnce([staleResponse])
+    store.setState({ worktreesByRepo: { repo1: [existing] } } as Partial<AppState>)
+
+    await store.getState().fetchWorktrees('repo1')
+    store.getState().updateWorktreeGitIdentity(existing.id, { branch: 'refs/heads/next' })
+
+    expect(store.getState().worktreesByRepo.repo1[0]).toMatchObject({
+      displayName: 'feature',
+      displayNameMode: 'fixed'
+    })
+  })
+
+  it('does not merge a host response captured before an optimistic rename settles', async () => {
+    const store = createTestStore()
+    const existing = makeWorktree({
+      id: 'repo1::/path/wt1',
+      repoId: 'repo1',
+      path: '/path/wt1',
+      displayName: 'old label',
+      displayNameMode: 'automatic'
+    })
+    const staleResponse = { ...existing }
+    let resolvePersist!: () => void
+    mockApi.worktrees.updateMeta.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        resolvePersist = resolve
+      })
+    )
+    mockApi.worktrees.list.mockResolvedValueOnce([staleResponse])
+    store.setState({ worktreesByRepo: { repo1: [existing] } } as Partial<AppState>)
+
+    const rename = store.getState().updateWorktreeMeta(existing.id, { displayName: 'new label' })
+    await vi.waitFor(() => expect(mockApi.worktrees.updateMeta).toHaveBeenCalledTimes(1))
+    const refresh = store.getState().fetchWorktrees('repo1')
+
+    await refresh
+    expect(store.getState().worktreesByRepo.repo1[0]).toMatchObject({
+      displayName: 'new label',
+      displayNameMode: 'fixed'
+    })
+
+    resolvePersist()
+    await rename
+  })
+
   it('updates the repo entry when only the persisted base ref changes', async () => {
     const store = createTestStore()
     const existing = makeWorktree({
