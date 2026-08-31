@@ -8,6 +8,7 @@ import SidebarWorkspaceOptionsMenu from './SidebarWorkspaceOptionsMenu'
 import { useShortcutLabel } from '@/hooks/useShortcutLabel'
 import { openWorkspaceCreationComposerWithTourHandoff } from '../contextual-tours/workspace-creation-tour-handoff'
 import { translate } from '@/i18n/i18n'
+import { cn } from '@/lib/utils'
 
 type SidebarHeaderProps = {
   onWorkspaceBoardMenuOpenChange: (open: boolean) => void
@@ -25,28 +26,38 @@ const SidebarHeader = React.memo(function SidebarHeader({
 
   return (
     <div className="mt-2 flex h-8 items-center justify-between px-2 gap-2">
-      <div className="flex min-w-0 items-center">
+      <div
+        role="radiogroup"
+        aria-label={translate('auto.components.sidebar.SidebarHeader.views', 'Sidebar view')}
+        className="inline-flex items-center rounded-lg border border-black/10 bg-black/[0.06] p-0.5 shadow-2xs dark:border-white/10 dark:bg-black/40"
+      >
         <button
           type="button"
+          role="radio"
+          aria-checked={sidebarBody === 'workspaces'}
           data-sidebar-section-title="projects"
           onClick={() => setSidebarBody?.('workspaces')}
-          className={
+          className={cn(
+            'rounded-md px-2.5 py-0.5 text-xs outline-none transition-all focus-visible:ring-2 focus-visible:ring-ring/50',
             sidebarBody === 'workspaces'
-              ? 'px-2 text-[13px] font-semibold text-worktree-sidebar-foreground'
-              : 'px-2 text-[13px] text-muted-foreground'
-          }
+              ? 'bg-background font-semibold text-foreground shadow-xs border border-black/[0.06] dark:border-white/10 dark:bg-worktree-sidebar-accent dark:text-worktree-sidebar-foreground'
+              : 'font-medium text-worktree-sidebar-foreground/65 hover:bg-black/[0.03] hover:text-worktree-sidebar-foreground dark:hover:bg-white/[0.04]'
+          )}
         >
           {translate('auto.components.sidebar.SidebarHeader.projects', 'Projects')}
         </button>
         <button
           type="button"
+          role="radio"
+          aria-checked={sidebarBody === 'agents'}
           data-sidebar-section-title="agents"
           onClick={() => setSidebarBody?.('agents')}
-          className={
+          className={cn(
+            'rounded-md px-2.5 py-0.5 text-xs outline-none transition-all focus-visible:ring-2 focus-visible:ring-ring/50',
             sidebarBody === 'agents'
-              ? 'px-2 text-[13px] font-semibold text-worktree-sidebar-foreground'
-              : 'px-2 text-[13px] text-muted-foreground'
-          }
+              ? 'bg-background font-semibold text-foreground shadow-xs border border-black/[0.06] dark:border-white/10 dark:bg-worktree-sidebar-accent dark:text-worktree-sidebar-foreground'
+              : 'font-medium text-worktree-sidebar-foreground/65 hover:bg-black/[0.03] hover:text-worktree-sidebar-foreground dark:hover:bg-white/[0.04]'
+          )}
         >
           {translate('dashboard.sidebar.label', 'Agents')}
         </button>

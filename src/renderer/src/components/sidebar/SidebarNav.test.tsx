@@ -251,7 +251,7 @@ describe('SidebarNav', () => {
   it('keeps the Agent Dashboard row unmounted by default', async () => {
     const container = await renderSidebarNav()
 
-    expect(queryButtonByText(container, 'Agent Dashboard')).toBeNull()
+    expect(queryButtonByText(container, 'Agents')).toBeNull()
     expect(mocks.getAgentBucketCounts).not.toHaveBeenCalled()
   })
 
@@ -264,7 +264,7 @@ describe('SidebarNav', () => {
     })
     const container = await renderSidebarNav()
 
-    await waitFor(() => expect(queryButtonByText(container, 'Agent Dashboard')).not.toBeNull())
+    await waitFor(() => expect(queryButtonByText(container, 'Agents')).not.toBeNull())
     expect(mocks.getAgentBucketCounts).toHaveBeenCalledTimes(1)
   })
 
