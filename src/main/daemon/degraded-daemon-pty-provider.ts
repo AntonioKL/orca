@@ -81,6 +81,8 @@ export class DegradedDaemonPtyProvider implements IPtyProvider {
   supportsGitCredentialGuardHost = (id?: string): boolean =>
     this.freshSpawns.supportsGitGuardHost(id)
 
+  supportsIncarnationFence = (): boolean => this.current.supportsIncarnationFence()
+
   canProvideAuthoritativeBufferSnapshot = (id: string): boolean =>
     this.freshSpawns.canProvideSnapshot(id)
 
@@ -307,24 +309,20 @@ export class DegradedDaemonPtyProvider implements IPtyProvider {
     }
   }
 
-  disposeProviderOnly(): void {
-    combineUnsubscribes(this.unsubscribers.splice(0))()
-  }
+  disposeProviderOnly = (): void => combineUnsubscribes(this.unsubscribers.splice(0))()
 
   async shutdownFallbackSessions(): Promise<number> {
     return shutdownDegradedFallbackSessions(this.sessionProviders, this.fallback)
   }
 
-  getCurrentDaemonSessionIds(): string[] {
-    return listProviderSessionIds(this.sessionProviders, this.current)
-  }
+  getCurrentDaemonSessionIds = (): string[] =>
+    listProviderSessionIds(this.sessionProviders, this.current)
 
   fanoutCurrentDaemonSyntheticExits(code: number): void {
     for (const id of this.getCurrentDaemonSessionIds()) {
       this.sessionProviders.delete(id)
       // Why: restart kills listed sessions even when the adapter did not track them active.
-      // oxlint-disable-next-line unicorn/no-useless-spread -- copy-safe: listeners may unsubscribe during iteration
-      for (const listener of [...this.exitListeners]) {
+      for (const listener of this.exitListeners) {
         listener({ id, code })
       }
     }
@@ -335,17 +333,11 @@ export class DegradedDaemonPtyProvider implements IPtyProvider {
     await Promise.all(this.allDaemonAdapters().map((adapter) => adapter.disconnectOnly()))
   }
 
-  getCurrentAdapter(): DaemonPtyAdapter {
-    return this.current
-  }
+  getCurrentAdapter = (): DaemonPtyAdapter => this.current
 
-  getLegacyAdapters(): readonly DaemonPtyAdapter[] {
-    return this.legacy
-  }
+  getLegacyAdapters = (): readonly DaemonPtyAdapter[] => this.legacy
 
-  getAllAdapters(): readonly DaemonPtyAdapter[] {
-    return this.allDaemonAdapters()
-  }
+  getAllAdapters = (): readonly DaemonPtyAdapter[] => this.allDaemonAdapters()
 
   private providerFor(sessionId: string): IPtyProvider {
     return (

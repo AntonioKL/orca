@@ -30,6 +30,7 @@ export abstract class DaemonPtySessionShutdown extends DaemonPtySessionSpawn {
     )
     if (!opts.keepHistory) {
       await shutdown
+      return
     }
     this.keepHistoryShutdowns.add(shutdown)
     try {
@@ -93,7 +94,9 @@ export abstract class DaemonPtySessionShutdown extends DaemonPtySessionSpawn {
       const coldRestore = restoreInfo ? this.buildColdRestorePayload(restoreInfo) : null
       if (coldRestore) {
         this.coldRestoreCache.set(id, coldRestore)
-        this.sleepRestoreSessionIds.add(id)
+        if (this.coldRestoreCache.has(id)) {
+          this.sleepRestoreSessionIds.add(id)
+        }
         this.historyManager?.suspendSession(id)
       } else if (
         detection?.status === 'unreadable' ||

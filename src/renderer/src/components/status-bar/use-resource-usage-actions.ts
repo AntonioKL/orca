@@ -12,6 +12,7 @@ import { navigateResourceSessionToTab } from './resource-session-navigation'
 import { requiresKillConfirmation } from './resource-session-kill-confirmation'
 import { resolveResourceManagerWorktreeTarget } from './resource-manager-worktree-target'
 import type { ResourceSessionBindingInputs } from './resource-session-bindings'
+import { selectUnboundDaemonSessions } from './resource-session-bindings'
 
 export function useResourceUsageActions({
   setCollapsedRepos,
@@ -62,7 +63,6 @@ export function useResourceUsageActions({
   popoverBodyRef: MutableRefObject<HTMLDivElement | null>
   popoverBodyFocusFrameRef: MutableRefObject<number | null>
 }) {
-  void resourceSessionBindings
   const toggleRepo = useCallback(
     (repoId: string): void => {
       setCollapsedRepos((prev) => {
@@ -179,12 +179,18 @@ export function useResourceUsageActions({
     if (sessions.length === 0) {
       return
     }
-    const refs = sessions.map((s) => ({
+    const refs = selectUnboundDaemonSessions(sessions, resourceSessionBindings).map((s) => ({
       id: s.id,
       ...(s.incarnationId ? { incarnationId: s.incarnationId } : {})
     }))
-    const results = await window.api.pty.killSessions(refs, 'orphan-cleanup')
-    const exited = new Set(results.filter((r) => r.verdict === 'exited').map((r) => r.id))
+    let results
+    try {
+      results = await window.api.pty.killSessions(refs, 'orphan-cleanup')
+    } catch {
+      await refreshSessions()
+      return
+    }
+    const exited = new Set<string>(results.filter((r) => r.verdict === 'exited').map((r) => r.id))
     if (exited.size) {
       removeSessions(exited)
     }
@@ -193,8 +199,15 @@ export function useResourceUsageActions({
         setSessionVerdict(result.id, result.verdict, result.reason)
       }
     }
-    void refreshSessions()
-  }, [sessions, workspaceSessionReady, refreshSessions, removeSessions, setSessionVerdict])
+    await refreshSessions()
+  }, [
+    sessions,
+    workspaceSessionReady,
+    refreshSessions,
+    removeSessions,
+    setSessionVerdict,
+    resourceSessionBindings
+  ])
 
   const runKillConfirmed = useCallback(async () => {
     if (!killConfirm) {
@@ -210,7 +223,7 @@ export function useResourceUsageActions({
             ...(target.incarnationId ? { incarnationId: target.incarnationId } : {})
           }
         ],
-        'orphan-cleanup'
+        'owner-close'
       )
       if (result?.verdict === 'exited') {
         removeSession(target.sessionId)

@@ -76,9 +76,7 @@ export class DaemonPtyRouter implements IPtyProvider {
   }
 
   supportsIncarnationFence(): boolean {
-    // A mixed-generation router must fail closed: an old adapter cannot prove
-    // the fence for sessions it still owns.
-    return this.allAdapters().every((adapter) => adapter.supportsIncarnationFence?.() === true)
+    return this.current.supportsIncarnationFence()
   }
 
   async attach(id: string): ReturnType<IPtyProvider['attach']> {

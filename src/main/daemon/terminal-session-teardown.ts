@@ -39,8 +39,11 @@ export class TerminalSessionTeardown {
     sessionId: string,
     session: Session,
     immediate: boolean,
-    _opts?: { intent?: PtyKillIntent; incarnationId?: string }
+    opts?: { intent?: PtyKillIntent; incarnationId?: string }
   ): void | Promise<PtyShutdownResult | void> {
+    if (opts?.incarnationId && opts.incarnationId !== session.incarnationId) {
+      return Promise.resolve({ fenceUnavailable: true })
+    }
     if (session.launchAgent) {
       return this.killAgentSession(sessionId, session, immediate)
     }

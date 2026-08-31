@@ -17,6 +17,7 @@ import {
 import { TerminalHostAgentSessionGenerations } from './terminal-host-agent-session-generations'
 import { resolveTerminalHostSessionCwd } from './terminal-host-session-cwd'
 import type { PtyKillIntent } from '../../shared/pty-kill-sessions'
+import type { PtyShutdownResult } from '../providers/pty-provider-contract'
 import { TerminalHostTombstones } from './terminal-host-tombstones'
 import { listLiveTerminalHostSessions } from './terminal-host-session-listing'
 import { createOrAttachTerminalSession } from './terminal-host-session-create'
@@ -68,7 +69,6 @@ export class TerminalHost {
     this.maxTombstones = opts.maxTombstones ?? DEFAULT_MAX_TOMBSTONES
     this.killedTombstones = new TerminalHostTombstones(this.maxTombstones)
   }
-
   async createOrAttach(opts: InternalCreateOrAttachOptions): Promise<CreateOrAttachResult> {
     this.assertCreateOrAttachAllowed(opts)
     for (
@@ -129,7 +129,6 @@ export class TerminalHost {
       settleCreation()
     }
   }
-
   private assertCreateOrAttachAllowed(opts: InternalCreateOrAttachOptions): void {
     if (this.creationFenced) {
       throw new Error('Terminal host is shutting down')
@@ -138,19 +137,15 @@ export class TerminalHost {
       throw new TerminalAttachCanceledError(opts.sessionId)
     }
   }
-
   write(sessionId: string, data: string): void {
     this.getAliveSession(sessionId).write(data)
   }
-
   closeStartupQueryAuthority(sessionId: string): number {
     return this.getAliveSession(sessionId).closeStartupQueryAuthority()
   }
-
   resize(sessionId: string, cols: number, rows: number): void {
     this.getAliveSession(sessionId).resize(cols, rows)
   }
-
   // Why null-not-throw (unlike write/resize): pause/resume are best-effort hints against a session that may have exited.
   pauseProducer(sessionId: string): void {
     const session = this.sessions.get(sessionId)
@@ -167,9 +162,17 @@ export class TerminalHost {
   kill(
     sessionId: string,
     opts: { immediate?: boolean; intent?: PtyKillIntent; incarnationId?: string } = {}
-  ): Promise<void> {
+  ): Promise<PtyShutdownResult | void> {
+    const currentSession = this.sessions.get(sessionId)
     const pending = this.sessionTeardown.get(sessionId)
     if (pending) {
+      if (
+        opts.incarnationId &&
+        currentSession &&
+        opts.incarnationId !== currentSession.incarnationId
+      ) {
+        return Promise.resolve({ fenceUnavailable: true })
+      }
       return Promise.resolve(
         opts.immediate ? this.sessionTeardown.requestImmediate(sessionId) : pending
       )
@@ -182,7 +185,7 @@ export class TerminalHost {
       opts
     )
     this.killedTombstones.record(sessionId)
-    return Promise.resolve(killed).then(() => undefined)
+    return Promise.resolve(killed)
   }
 
   // Why: dispose a dead session's emulator so exited terminals don't pin their scrollback window for the daemon's life.
@@ -248,8 +251,6 @@ export class TerminalHost {
       return false
     }
     const confirmed = await session.confirmShellForeground()
-    // Why the recheck: proof for a session that exited or was replaced during
-    // the await is stale; the caller would bind it to the successor's stream.
     return confirmed && this.sessions.get(sessionId) === session && session.isAlive
   }
 
@@ -257,7 +258,6 @@ export class TerminalHost {
     this.getAliveSession(sessionId).clearScrollback()
   }
 
-  // Why: null-not-throw (unlike getAliveSession) — checkpoint is best-effort against a session that may have just exited.
   getSnapshot(sessionId: string, opts: { scrollbackRows?: number } = {}): TerminalSnapshot | null {
     const session = this.sessions.get(sessionId)
     if (!session || !session.isAlive) {
@@ -275,50 +275,32 @@ export class TerminalHost {
       return null
     }
     await session.settleShellOwnershipConfirmation()
-    // Why no liveness recheck: the sync path returned the pre-exit snapshot when
-    // a session died a beat after the call; a disposal during the settle yields
-    // null naturally from the plane's own guard.
     return session.getSnapshot(opts)
   }
 
-  // Why: scan-authority handoff seed (null-not-throw like getSnapshot) — emulator's dangling incomplete escape at the stream position.
   getPartialEscapeTailAnsi(sessionId: string): string {
     const session = this.sessions.get(sessionId)
-    if (!session || !session.isAlive) {
-      return ''
-    }
-    return session.getPartialEscapeTailAnsi()
+    return session?.isAlive ? session.getPartialEscapeTailAnsi() : ''
   }
 
-  // Why: renderer diffs this against xterm to detect a dropped/coerced daemon-side resize; null-not-throw like getSnapshot.
   getAppliedSize(sessionId: string): { cols: number; rows: number } | null {
     const session = this.sessions.get(sessionId)
-    if (!session || !session.isAlive) {
-      return null
-    }
-    return session.getAppliedSize()
+    return session?.isAlive ? session.getAppliedSize() : null
   }
 
-  // Why: null-not-throw like getSnapshot — incremental checkpoints are best-effort against a just-exited session.
   takePendingOutput(
     sessionId: string,
     includeSnapshot: boolean,
     opts: { teardownSnapshot?: boolean } = {}
   ): TakePendingOutputResult | null {
     const session = this.sessions.get(sessionId)
-    if (!session || !session.isAlive) {
-      return null
-    }
-    return session.takePendingOutput(includeSnapshot, opts)
+    return session?.isAlive ? session.takePendingOutput(includeSnapshot, opts) : null
   }
 
-  isKilled(sessionId: string): boolean {
-    return this.killedTombstones.has(sessionId)
-  }
+  isKilled = (sessionId: string): boolean => this.killedTombstones.has(sessionId)
 
-  listSessions(): SessionInfo[] {
-    return listLiveTerminalHostSessions(this.sessions, this.agentSessionOwners)
-  }
+  listSessions = (): SessionInfo[] =>
+    listLiveTerminalHostSessions(this.sessions, this.agentSessionOwners)
 
   dispose(): Promise<void> {
     this.creationFenced = true

@@ -45,32 +45,40 @@ export async function killPtySessions(
   intent: PtyKillIntent,
   deps: KillSessionsDeps
 ): Promise<PtyKillSessionResult[]> {
-  const auth = intent === 'orphan-cleanup' ? refs.map((ref) => deps.isOwned?.(ref)) : []
   const shutdownResults = new Map<string, PtyShutdownResult | void>()
   const fenceCapabilities = new Map<string, boolean>()
   const results = await mapWithConcurrency<PtyKillSessionRef, PtyKillSessionResult>(
     refs,
     deps.concurrency ?? 4,
-    async (ref, index): Promise<PtyKillSessionResult> => {
-      const evidence = auth[index]
+    async (ref): Promise<PtyKillSessionResult> => {
+      const evidence = intent === 'orphan-cleanup' ? deps.isOwned?.(ref) : undefined
       if (evidence?.owned) {
         return { ...ref, verdict: 'refused', reason: evidence.reason ?? 'session is owned' }
       }
       const provider = deps.providerForSession(ref.id)
-      if (!provider) {
-        return { ...ref, verdict: 'unverifiable', reason: 'owning provider is unavailable' }
+      const fenceCapable =
+        provider && deps.supportsIncarnationFence
+          ? await deps.supportsIncarnationFence(provider)
+          : false
+      if (intent === 'orphan-cleanup') {
+        const latest = deps.isOwned?.(ref)
+        if (latest?.owned) {
+          return { ...ref, verdict: 'refused', reason: latest.reason ?? 'session is owned' }
+        }
       }
-      const fenceCapable = deps.supportsIncarnationFence
-        ? await deps.supportsIncarnationFence(provider)
-        : false
       fenceCapabilities.set(ref.id, fenceCapable)
       if (fenceCapable && !ref.incarnationId) {
         return { ...ref, verdict: 'refused', reason: 'missing incarnation fence' }
       }
       try {
         const shutdownResult = deps.singleKill
-          ? await shutdownSinglePty({ ...ref, intent, provider }, deps.singleKill)
-          : await deps.shutdown(provider, ref)
+          ? await shutdownSinglePty(
+              { ...ref, intent, ...(provider ? { provider } : {}) },
+              deps.singleKill
+            )
+          : provider
+            ? await deps.shutdown(provider, ref)
+            : undefined
         shutdownResults.set(ref.id, shutdownResult)
         return { ...ref, verdict: 'unverifiable' as const, reason: 'pending verification' }
       } catch (error) {
@@ -97,12 +105,24 @@ export async function killPtySessions(
     if (!listed) {
       return { ...result, verdict: 'unverifiable', reason: 'inventory unavailable' }
     }
-    const survivor = listed.find(
-      (row) =>
-        row.id === result.id &&
-        (!result.incarnationId || !row.incarnationId || row.incarnationId === result.incarnationId)
-    )
+    const survivor = listed.find((row) => {
+      if (row.id !== result.id) {
+        return false
+      }
+      if (!fenceCapabilities.get(result.id) || !result.incarnationId) {
+        return true
+      }
+      return row.incarnationId === result.incarnationId
+    })
     const sameId = listed.find((row) => row.id === result.id)
+    if (
+      fenceCapabilities.get(result.id) &&
+      result.incarnationId &&
+      sameId &&
+      !sameId.incarnationId
+    ) {
+      return { ...result, verdict: 'unverifiable', reason: 'incarnation evidence unavailable' }
+    }
     if (
       fenceCapabilities.get(result.id) &&
       result.incarnationId &&

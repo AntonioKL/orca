@@ -87,6 +87,11 @@ export function useResourceSessionInventory(ready: boolean): ResourceSessionInve
         }
       }
       knownSessionIdsRef.current = new Set(liveSessions.map(({ id }) => id))
+      for (const id of verdictsRef.current.keys()) {
+        if (!knownSessionIdsRef.current.has(id)) {
+          verdictsRef.current.delete(id)
+        }
+      }
       setStoredState({
         ready: true,
         sessionInventory: inventoryFromSessions(liveSessions),
@@ -109,6 +114,7 @@ export function useResourceSessionInventory(ready: boolean): ResourceSessionInve
     const lifecycleRevision = ++lifecycleRevisionRef.current
     removedAtRevisionRef.current.set(sessionId, lifecycleRevision)
     knownSessionIdsRef.current.delete(sessionId)
+    verdictsRef.current.delete(sessionId)
     setStoredState((current) => ({
       ...current,
       sessionInventory: removeSessionFromInventory(current.sessionInventory, sessionId)
@@ -120,6 +126,7 @@ export function useResourceSessionInventory(ready: boolean): ResourceSessionInve
     for (const sessionId of sessionIds) {
       removedAtRevisionRef.current.set(sessionId, lifecycleRevision)
       knownSessionIdsRef.current.delete(sessionId)
+      verdictsRef.current.delete(sessionId)
     }
     setStoredState((current) => ({
       ...current,
@@ -148,6 +155,7 @@ export function useResourceSessionInventory(ready: boolean): ResourceSessionInve
     if (!ready) {
       removedAtRevisionRef.current.clear()
       knownSessionIdsRef.current.clear()
+      verdictsRef.current.clear()
       return
     }
     void refreshSessions()

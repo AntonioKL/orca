@@ -204,8 +204,9 @@ export class DaemonRequestRouter {
     const canceledPendingSpawn = this.options.preparations.cancel(sessionId)
     this.options.attachments.clearInput(sessionId)
     const attribution = { sessionId, immediate: immediate === true, clientId }
+    let result: Record<string, unknown> | void = undefined
     try {
-      await this.options.host.kill(sessionId, { immediate, intent, incarnationId })
+      result = await this.options.host.kill(sessionId, { immediate, intent, incarnationId })
     } catch (error) {
       if (!(canceledPendingSpawn && error instanceof SessionNotFoundError)) {
         this.options.log.log('session-kill-failed', attribution)
@@ -213,7 +214,7 @@ export class DaemonRequestRouter {
       }
     }
     this.options.log.log('session-killed', attribution)
-    return {}
+    return result ?? {}
   }
 
   private shutdownIfIdle(clientId: string, requestId: string): { retiring: boolean } {

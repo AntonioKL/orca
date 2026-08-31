@@ -22,20 +22,17 @@ export function installPtyKillSessionsHandler(args: {
     'pty:killSessions',
     async (_event, input: { sessions?: unknown; intent?: unknown }) => {
       const refs = Array.isArray(input?.sessions)
-        ? input.sessions
-            .filter((value): value is { id: string; incarnationId?: string } => {
-              if (!value || typeof value !== 'object') {
-                return false
-              }
-              const candidate = value as { id?: unknown; incarnationId?: unknown }
-              return (
-                typeof candidate.id === 'string' &&
-                candidate.id.length > 0 &&
-                (candidate.incarnationId === undefined ||
-                  typeof candidate.incarnationId === 'string')
-              )
-            })
-            .slice(0, 512)
+        ? input.sessions.filter((value): value is { id: string; incarnationId?: string } => {
+            if (!value || typeof value !== 'object') {
+              return false
+            }
+            const candidate = value as { id?: unknown; incarnationId?: unknown }
+            return (
+              typeof candidate.id === 'string' &&
+              candidate.id.length > 0 &&
+              (candidate.incarnationId === undefined || typeof candidate.incarnationId === 'string')
+            )
+          })
         : []
       const intent = input?.intent === 'owner-close' ? 'owner-close' : 'orphan-cleanup'
       const claimed = new Set<string>()

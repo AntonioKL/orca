@@ -308,42 +308,23 @@ export class SshPtyProvider implements IPtyProvider {
     }
     return processes
   }
-
   hasPty = (id: string): boolean => this.livePtyIds.has(id)
+  getDefaultShell = async (): Promise<string> =>
+    (await this.mux.request('pty.getDefaultShell')) as string
 
-  async getDefaultShell(): Promise<string> {
-    const result = await this.mux.request('pty.getDefaultShell')
-    return result as string
-  }
-
-  async getProfiles(): Promise<{ name: string; path: string }[]> {
-    const result = await this.mux.request('pty.getProfiles')
-    return result as { name: string; path: string }[]
-  }
-
+  getProfiles = async (): Promise<{ name: string; path: string }[]> =>
+    (await this.mux.request('pty.getProfiles')) as { name: string; path: string }[]
   onData = (callback: SshPtyDataCallback): (() => void) => this.outputState.onData(callback)
   onRejectedData = (callback: SshPtyDataCallback): (() => void) =>
     this.outputState.onRejectedData(callback)
   onReplay = (callback: SshPtyReplayCallback): (() => void) => this.outputState.onReplay(callback)
   onExit = (callback: SshPtyExitCallback): (() => void) => this.outputState.onExit(callback)
-
-  setPtyDeliveryPauseAdapter(adapter: SshPtyDeliveryPauseAdapter | null): void {
+  setPtyDeliveryPauseAdapter = (adapter: SshPtyDeliveryPauseAdapter | null): void =>
     this.outputState.setDeliveryPauseAdapter(adapter)
-  }
-
-  hasPtyDeliveryPauseAdapter(): boolean {
-    return this.outputState.hasDeliveryPauseAdapter()
-  }
-
-  pauseProducer(id: string): void {
-    this.outputState.pause(this.toRelayPtyId(id))
-  }
-
-  resumeProducer(id: string): void {
-    this.outputState.resume(this.toRelayPtyId(id))
-  }
-
-  closeOutputIntake(reason: string): void {
+  hasPtyDeliveryPauseAdapter = (): boolean => this.outputState.hasDeliveryPauseAdapter()
+  pauseProducer = (id: string): void => this.outputState.pause(this.toRelayPtyId(id))
+  resumeProducer = (id: string): void => this.outputState.resume(this.toRelayPtyId(id))
+  closeOutputIntake = (reason: string): void => {
     this.mux.dispose('connection_lost')
     console.error('[ssh-pty-provider] closed after bounded output intake failure', { reason })
   }

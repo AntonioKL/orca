@@ -301,16 +301,17 @@ export async function killWithDescendantSweep(
   }
 
   const snapshot = await captureDescendantSnapshot(rootPid, deps)
+  const ownsRoot = deps.ownsRoot?.() ?? true
   try {
     // Signal the captured descendants while their parent links still exist;
     // killing the root first creates a reparent/PID-reuse window.
-    if (snapshot && (deps.ownsRoot?.() ?? true)) {
+    if (snapshot && ownsRoot) {
       terminateDescendantSnapshot(snapshot, deps)
     }
   } finally {
     killRoot()
   }
-  return snapshot ? 'tree_terminated' : 'tree_unavailable'
+  return snapshot && ownsRoot ? 'tree_terminated' : 'tree_unavailable'
 }
 
 export function sendDescendantSignal(pid: number, signal: NodeJS.Signals): void {

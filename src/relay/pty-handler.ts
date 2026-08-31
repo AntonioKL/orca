@@ -234,9 +234,11 @@ type ManagedStartupCommand = {
 function killPtyProcess(pty: IPty, signal: string): void {
   if (process.platform === 'win32') {
     pty.kill()
+    return
   }
   if (signal === 'SIGKILL') {
     forceKillPosixPtyProcessGroups(pty.pid, () => pty.kill(signal))
+    return
   }
   pty.kill(signal)
 }
@@ -268,6 +270,7 @@ function disposeManagedPty(managed: ManagedPty): void {
     ;(managed.pty as unknown as { kill: (sig?: string) => void }).kill = () => {}
   } else if (managed.gracefulKillSent || managed.forceKillSent) {
     // Why: WindowsTerminal.destroy() calls kill(); a prior bare kill already closed ConPTY, so skip to avoid double-close.
+    return
   }
   try {
     ;(managed.pty as unknown as { destroy?: () => void }).destroy?.()
