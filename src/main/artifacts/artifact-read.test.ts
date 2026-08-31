@@ -1,7 +1,7 @@
 import { createServer, type Server } from 'node:http'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ARTIFACT_CLI_MAX_READ_BYTES } from '../../shared/artifacts'
-import { readArtifactContent } from './artifact-read'
+import { parseTarget, readArtifactContent } from './artifact-read'
 
 const metadata = {
   artifact: {
@@ -60,6 +60,24 @@ describe('readArtifactContent', () => {
     const result = await readArtifactContent('abc123', { apiUrl: api })
     expect(result.content).toContain('<script>alert(1)</script>')
     expect(result.contentType).toBe('text/html')
+  })
+
+  it('uses the canonical share host for bare ids with a non-loopback API', () => {
+    expect(parseTarget('abc123', 'https://api.onorca.dev')).toEqual({
+      id: 'abc123',
+      shareUrl: 'https://share.onorca.dev/a/abc123'
+    })
+  })
+
+  it('reports the content response type', async () => {
+    const api = await serve({
+      '/v1/artifacts/abc123': { body: JSON.stringify(metadata), type: 'application/json' },
+      '/a/abc123': { body: '<iframe src="/usercontent/abc123/artifact.html">', type: 'text/html' },
+      '/usercontent/abc123/artifact.html': { body: '# Hello', type: 'text/markdown' }
+    })
+    const result = await readArtifactContent('abc123', { apiUrl: api })
+    expect(result.contentType).toBe('text/markdown')
+    expect(result.content).toBe('# Hello')
   })
 
   it('rejects malformed wrappers and oversized content', async () => {

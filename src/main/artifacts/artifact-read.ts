@@ -29,6 +29,11 @@ type ArtifactReadFetchOptions = {
   fetchImpl?: (url: string, options?: ArtifactFetchOptions) => Promise<Response>
 }
 
+type ArtifactTextResponse = {
+  contentType: string
+  text: string
+}
+
 function isLoopback(hostname: string): boolean {
   return ['127.0.0.1', 'localhost', '[::1]'].includes(hostname)
 }
@@ -46,7 +51,9 @@ function parseTarget(input: string, apiUrl: string): ArtifactReadTarget {
     if (!validArtifactId(trimmed)) {
       throw new Error('Artifact id is invalid.')
     }
-    return { id: trimmed, shareUrl: `${apiUrl}/a/${encodeURIComponent(trimmed)}` }
+    const apiOrigin = new URL(apiUrl)
+    const shareOrigin = isLoopback(apiOrigin.hostname) ? apiOrigin.origin : `https://${SHARE_HOST}`
+    return { id: trimmed, shareUrl: `${shareOrigin}/a/${encodeURIComponent(trimmed)}` }
   }
   let url: URL
   try {
@@ -118,7 +125,7 @@ async function fetchText(
   options: ArtifactReadFetchOptions,
   expectedTypes: readonly string[],
   includeToken = false
-): Promise<string> {
+): Promise<ArtifactTextResponse> {
   const response = await (options.fetchImpl ?? artifactFetch)(url, {
     token: includeToken ? options.token : undefined,
     signal: AbortSignal.timeout(TIMEOUT_MS)
@@ -145,7 +152,10 @@ async function fetchText(
     await response.body?.cancel()
     throw new Error('Artifact content exceeds the CLI size limit.')
   }
-  return readResponseText(response, options.maxBytes ?? ARTIFACT_CLI_MAX_READ_BYTES)
+  return {
+    contentType,
+    text: await readResponseText(response, options.maxBytes ?? ARTIFACT_CLI_MAX_READ_BYTES)
+  }
 }
 
 function parseIframe(wrapper: string, id: string, apiUrl: string): string {
@@ -185,12 +195,14 @@ export async function readArtifactContent(
   const target = parseTarget(input, options.apiUrl)
   let metadataText: string
   try {
-    metadataText = await fetchText(
-      `${options.apiUrl}/v1/artifacts/${encodeURIComponent(target.id)}`,
-      options,
-      ['application/json'],
-      true
-    )
+    metadataText = (
+      await fetchText(
+        `${options.apiUrl}/v1/artifacts/${encodeURIComponent(target.id)}`,
+        options,
+        ['application/json'],
+        true
+      )
+    ).text
   } catch (error) {
     if (error instanceof OrcaCloudRequestError) {
       throw new ArtifactReadMetadataError(error.statusCode, error.errorCode)
@@ -230,13 +242,17 @@ export async function readArtifactContent(
     throw new Error('Artifact metadata response was malformed.')
   }
   const wrapper = await fetchText(target.shareUrl, options, ['text/html'], false)
-  const contentUrl = parseIframe(wrapper, target.id, options.apiUrl)
-  const content = await fetchText(contentUrl, options, ['text/html', 'text/markdown', 'text/plain'])
+  const contentUrl = parseIframe(wrapper.text, target.id, options.apiUrl)
+  const contentResponse = await fetchText(contentUrl, options, [
+    'text/html',
+    'text/markdown',
+    'text/plain'
+  ])
   const result = {
     artifact: metadata,
     shareUrl,
-    contentType: metadata.renderedContentType,
-    content
+    contentType: contentResponse.contentType,
+    content: contentResponse.text
   }
   if (Buffer.byteLength(JSON.stringify(result), 'utf8') > ARTIFACT_CLI_MAX_RPC_BYTES) {
     throw new Error('Artifact content exceeds the CLI transport size limit.')

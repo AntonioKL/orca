@@ -56,8 +56,11 @@ export async function artifactRequest<T>(
     body: options.body ? JSON.stringify(options.body) : undefined
   })
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { code?: string } | null
-    throw new OrcaCloudRequestError(response.status, body?.code)
+    const body = (await response.json().catch(() => null)) as {
+      error?: string
+      code?: string
+    } | null
+    throw new OrcaCloudRequestError(response.status, body?.error ?? body?.code)
   }
   if (response.status === 204) {
     return undefined as T

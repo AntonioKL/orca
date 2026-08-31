@@ -1,6 +1,6 @@
 import { mkdtemp, open, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ArtifactListItem } from '../../shared/artifacts'
 import { ARTIFACT_HANDLERS } from './artifacts'
@@ -64,7 +64,40 @@ describe('artifact CLI handlers', () => {
     expect(
       await import('node:fs/promises').then(({ readFile }) => readFile(output, 'utf8'))
     ).toContain('<script>')
-    expect(log).toHaveBeenCalledWith(`Artifact written to ${output}`)
+    expect(log).toHaveBeenCalledWith(`Artifact written to ${JSON.stringify(output)}`)
+  })
+
+  it('sanitizes terminal controls in output-path confirmations', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'orca-artifact-cli-'))
+    const output = `out-${String.fromCharCode(27)}]52;c:secret${String.fromCharCode(7)}.html`
+    const call = vi.fn().mockResolvedValue({
+      id: 'request-1',
+      ok: true,
+      result: {
+        status: 'ok',
+        value: {
+          artifact: item.artifact,
+          shareUrl: item.shareUrl,
+          contentType: 'text/html',
+          content: '<h1>Safe</h1>'
+        }
+      },
+      _meta: { runtimeId: 'runtime-1' }
+    })
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+
+    await ARTIFACT_HANDLERS['artifacts read']!({
+      client: { call } as never,
+      cwd,
+      flags: new Map([
+        ['id', item.shareUrl],
+        ['output', output]
+      ]),
+      json: false
+    })
+
+    expect(log).toHaveBeenCalledWith(`Artifact written to ${JSON.stringify(resolve(cwd, output))}`)
+    expect(String(log.mock.calls[0]?.[0])).not.toContain('\u001b]52;')
   })
   it('reads a relative HTML file and sends sanitized content to the runtime', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'orca-artifact-cli-'))

@@ -38,7 +38,9 @@ export function sanitizeArtifactTerminalContent(content: string): string {
     .split('')
     .filter((char) => {
       const code = char.charCodeAt(0)
-      return code >= 32 || code === 9 || code === 10 || code === 13
+      return (
+        (code >= 32 && code !== 127 && !(code >= 0x80 && code <= 0x9f)) || code === 9 || code === 10
+      )
     })
     .join('')
 }

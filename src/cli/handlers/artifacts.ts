@@ -185,7 +185,7 @@ export const ARTIFACT_HANDLERS: Record<string, CommandHandler> = {
     if (ctx.json) {
       printResult({ ...response, result: value }, true, formatArtifactRead)
     } else if (output) {
-      console.log(`Artifact written to ${resolve(ctx.cwd, output)}`)
+      console.log(`Artifact written to ${JSON.stringify(resolve(ctx.cwd, output))}`)
     } else {
       const content = formatArtifactRead(value)
       process.stdout.write(
