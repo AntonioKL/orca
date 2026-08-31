@@ -21,7 +21,9 @@ import { PROTOCOL_VERSION } from './types'
 // would spin hot for the whole budget.
 export const WEDGED_DAEMON_GRACE_RETRIES = 11
 
-type PreserveDaemon = (mode?: 'degraded-new-pty-fallback') => Promise<DaemonProcessHandle>
+type PreserveDaemon = (
+  mode?: 'degraded-new-pty-fallback' | 'degraded-new-pty-fallback-sticky'
+) => Promise<DaemonProcessHandle>
 
 type ReplacementPreflightOptions = {
   runtimeDir: string
@@ -57,62 +59,67 @@ export async function prepareDaemonReplacement(
   let confirmedReplacement = false
   const health = await checkDaemonHealth(socketPath, tokenPath)
   if (health === 'healthy') {
-    const resolverHealth = await getMacDaemonSystemResolverHealth(socketPath, tokenPath)
-    if (resolverHealth === 'unhealthy') {
-      const liveSessionCount = await getAliveDaemonSessionCount(
+    // Why: a protocol-healthy daemon can outlive its launching app bundle (dev worktree rebuild,
+    // or packaged update replacing the app path). Classify that before resolver/TCC checks so a
+    // mismatched daemon never remains the fresh-PTY authority on macOS.
+    const identity = await getDaemonLaunchIdentity(runtimeDir, socketPath, tokenPath, entryPath)
+    const stalePackagedBundle =
+      getAppEnvironment().isPackaged() &&
+      (await isDaemonStaleForCurrentBundle(
+        runtimeDir,
         socketPath,
         tokenPath,
-        recoveryDeadlineMs
-      )
-      if (liveSessionCount !== 0) {
-        console.warn(
-          liveSessionCount === null
-            ? '[daemon] Preserving daemon with unavailable macOS system resolver because live session state could not be verified'
-            : `[daemon] Preserving daemon with unavailable macOS system resolver because it owns ${liveSessionCount} live session${liveSessionCount === 1 ? '' : 's'}`
+        getAppEnvironment().getVersion()
+      ))
+    if (identity === 'mismatch' || stalePackagedBundle) {
+      // Why: replacing a healthy daemon kills its child PTYs; defer code freshness until no live sessions would be lost.
+      const replacementLabel = stalePackagedBundle
+        ? 'launched before the current app bundle was installed'
+        : 'launched from a different app path'
+      if (
+        await shouldPreserveDaemonWithLiveSessions(
+          socketPath,
+          tokenPath,
+          recoveryDeadlineMs,
+          replacementLabel
         )
-        return preserveDaemon()
+      ) {
+        // Keep live sessions on the old daemon, but localize fresh PTYs on macOS so TCC uses this app's attribution.
+        return preserveDaemon(
+          process.platform === 'darwin' ? 'degraded-new-pty-fallback-sticky' : undefined
+        )
       }
-      console.warn('[daemon] Replacing daemon with unavailable macOS system resolver')
+      console.warn(
+        stalePackagedBundle
+          ? '[daemon] Replacing daemon launched before the current app bundle was installed'
+          : '[daemon] Replacing daemon launched from a different app path'
+      )
+      // liveSessionCount is 0: shouldPreserveDaemonWithLiveSessions() only falls through at exactly 0.
       pendingReplacement = {
-        reason: 'unhealthy_resolver',
-        liveSessionCount
+        reason: stalePackagedBundle ? 'stale_bundle' : 'different_app_path',
+        liveSessionCount: 0
       }
       confirmedReplacement = (await cleanupDaemonForProtocol(runtimeDir, PROTOCOL_VERSION)).cleaned
     } else {
-      // Why: a protocol-healthy daemon can outlive its launching app bundle (dev worktree rebuild, or packaged update replacing the app path).
-      const identity = await getDaemonLaunchIdentity(runtimeDir, socketPath, tokenPath, entryPath)
-      const stalePackagedBundle =
-        getAppEnvironment().isPackaged() &&
-        (await isDaemonStaleForCurrentBundle(
-          runtimeDir,
+      const resolverHealth = await getMacDaemonSystemResolverHealth(socketPath, tokenPath)
+      if (resolverHealth === 'unhealthy') {
+        const liveSessionCount = await getAliveDaemonSessionCount(
           socketPath,
           tokenPath,
-          getAppEnvironment().getVersion()
-        ))
-      if (identity === 'mismatch' || stalePackagedBundle) {
-        // Why: replacing a healthy daemon kills its child PTYs; defer code freshness until no live sessions would be lost.
-        const replacementLabel = stalePackagedBundle
-          ? 'launched before the current app bundle was installed'
-          : 'launched from a different app path'
-        if (
-          await shouldPreserveDaemonWithLiveSessions(
-            socketPath,
-            tokenPath,
-            recoveryDeadlineMs,
-            replacementLabel
+          recoveryDeadlineMs
+        )
+        if (liveSessionCount !== 0) {
+          console.warn(
+            liveSessionCount === null
+              ? '[daemon] Preserving daemon with unavailable macOS system resolver because live session state could not be verified'
+              : `[daemon] Preserving daemon with unavailable macOS system resolver because it owns ${liveSessionCount} live session${liveSessionCount === 1 ? '' : 's'}`
           )
-        ) {
           return preserveDaemon()
         }
-        console.warn(
-          stalePackagedBundle
-            ? '[daemon] Replacing daemon launched before the current app bundle was installed'
-            : '[daemon] Replacing daemon launched from a different app path'
-        )
-        // liveSessionCount is 0: shouldPreserveDaemonWithLiveSessions() only falls through at exactly 0.
+        console.warn('[daemon] Replacing daemon with unavailable macOS system resolver')
         pendingReplacement = {
-          reason: stalePackagedBundle ? 'stale_bundle' : 'different_app_path',
-          liveSessionCount: 0
+          reason: 'unhealthy_resolver',
+          liveSessionCount
         }
         confirmedReplacement = (await cleanupDaemonForProtocol(runtimeDir, PROTOCOL_VERSION))
           .cleaned

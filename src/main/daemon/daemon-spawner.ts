@@ -30,7 +30,7 @@ export type DaemonPidFile = {
 }
 
 export type DaemonProcessHandle = {
-  mode?: 'degraded-new-pty-fallback'
+  mode?: 'degraded-new-pty-fallback' | 'degraded-new-pty-fallback-sticky'
   /** Set when the launcher kept a daemon some earlier app launch forked, rather than forking one. */
   adopted?: true
   releaseAdoptionLease?(): void

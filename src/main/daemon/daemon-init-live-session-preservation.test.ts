@@ -48,9 +48,11 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
 
   afterEach(() => {
     vi.clearAllMocks()
+    vi.restoreAllMocks()
   })
 
   it('preserves a daemon launched from another app path when it owns live sessions', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     const mod = await importFresh()
     await mod.initDaemonPtyProvider()
 
@@ -79,10 +81,13 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     const launcher = spawnerInstances[0].launcher as (
       socketPath: string,
       tokenPath: string
-    ) => Promise<{ shutdown(): Promise<void> }>
+    ) => Promise<{
+      mode?: 'degraded-new-pty-fallback' | 'degraded-new-pty-fallback-sticky'
+      shutdown(): Promise<void>
+    }>
     getDaemonLaunchIdentityMock.mockReturnValueOnce('mismatch')
 
-    await launcher('/fake/socket', '/fake/token')
+    const handle = await launcher('/fake/socket', '/fake/token')
 
     expect(getDaemonLaunchIdentityMock).toHaveBeenCalledWith(
       FAKE_RUNTIME_DIR,
@@ -94,6 +99,40 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     expect(disconnectMock).toHaveBeenCalledOnce()
     expect(killStaleDaemonMock).not.toHaveBeenCalled()
     expect(forkMock).not.toHaveBeenCalled()
+    expect(handle.mode).toBe('degraded-new-pty-fallback-sticky')
+  })
+
+  it('degrades a mismatched daemon even when its macOS resolver is unhealthy', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const mod = await importFresh()
+    await mod.initDaemonPtyProvider()
+    const requestMock = vi.fn(async (method: string) =>
+      method === 'listSessions' ? { sessions: [{ sessionId: 'wt-1@@live', isAlive: true }] } : {}
+    )
+    const disconnectMock = vi.fn()
+    mockConnectedAdoptionClientOnce()
+    daemonClientMock.mockImplementationOnce(function MockDaemonClient() {
+      return {
+        ensureConnected: vi.fn(async () => {}),
+        ensureConnectedWithin: vi.fn(async () => {}),
+        request: requestMock,
+        disconnect: disconnectMock
+      }
+    })
+    getMacDaemonSystemResolverHealthMock.mockReturnValueOnce('unhealthy')
+    getDaemonLaunchIdentityMock.mockReturnValueOnce('mismatch')
+
+    const launcher = spawnerInstances[0].launcher as (
+      socketPath: string,
+      tokenPath: string
+    ) => Promise<{ mode?: string; shutdown(): Promise<void> }>
+    const handle = await launcher('/fake/socket', '/fake/token')
+
+    expect(handle.mode).toBe('degraded-new-pty-fallback-sticky')
+    expect(getMacDaemonSystemResolverHealthMock).not.toHaveBeenCalled()
+    expect(requestMock).toHaveBeenCalledWith('listSessions', undefined, expect.any(Number))
+    expect(disconnectMock).toHaveBeenCalledOnce()
+    expect(killStaleDaemonMock).not.toHaveBeenCalled()
   })
 
   it('preserves a daemon launched from another app path when live session state cannot be verified', async () => {
@@ -167,7 +206,12 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     await launcher('/fake/socket', '/fake/token')
 
     expect(getMacDaemonSystemResolverHealthMock).toHaveBeenCalledWith('/fake/socket', '/fake/token')
-    expect(getDaemonLaunchIdentityMock).not.toHaveBeenCalled()
+    expect(getDaemonLaunchIdentityMock).toHaveBeenCalledWith(
+      FAKE_RUNTIME_DIR,
+      '/fake/socket',
+      '/fake/token',
+      FAKE_DAEMON_ENTRY_PATH
+    )
     expect(killStaleDaemonMock).toHaveBeenCalledWith(
       FAKE_RUNTIME_DIR,
       '/fake/socket',
@@ -227,7 +271,12 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     expect(getMacDaemonSystemResolverHealthMock).toHaveBeenCalledWith('/fake/socket', '/fake/token')
     expect(requestMock).toHaveBeenCalledWith('listSessions', undefined, expect.any(Number))
     expect(disconnectMock).toHaveBeenCalledOnce()
-    expect(getDaemonLaunchIdentityMock).not.toHaveBeenCalled()
+    expect(getDaemonLaunchIdentityMock).toHaveBeenCalledWith(
+      FAKE_RUNTIME_DIR,
+      '/fake/socket',
+      '/fake/token',
+      FAKE_DAEMON_ENTRY_PATH
+    )
     expect(killStaleDaemonMock).not.toHaveBeenCalled()
     expect(forkMock).not.toHaveBeenCalled()
     // STA-2376: preserving a daemon is not a lifecycle transition — no event.

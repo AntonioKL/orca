@@ -49,6 +49,7 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
 
   afterEach(() => {
     vi.clearAllMocks()
+    vi.restoreAllMocks()
   })
 
   it('preserves a packaged healthy daemon when its app bundle is current', async () => {
@@ -58,7 +59,7 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     const launcher = spawnerInstances[0].launcher as (
       socketPath: string,
       tokenPath: string
-    ) => Promise<{ shutdown(): Promise<void> }>
+    ) => Promise<{ mode?: 'degraded-new-pty-fallback'; shutdown(): Promise<void> }>
     getDaemonLaunchIdentityMock.mockClear()
     killStaleDaemonMock.mockClear()
     forkMock.mockClear()
@@ -148,6 +149,7 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
   })
 
   it('preserves a packaged daemon that predates the current app bundle when it owns live sessions', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     const mod = await importFresh()
     await mod.initDaemonPtyProvider()
 
@@ -173,11 +175,14 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     const launcher = spawnerInstances[0].launcher as (
       socketPath: string,
       tokenPath: string
-    ) => Promise<{ shutdown(): Promise<void> }>
+    ) => Promise<{
+      mode?: 'degraded-new-pty-fallback' | 'degraded-new-pty-fallback-sticky'
+      shutdown(): Promise<void>
+    }>
     isPackagedMock.mockReturnValue(true)
     isDaemonStaleForCurrentBundleMock.mockReturnValueOnce(true)
 
-    await launcher('/fake/socket', '/fake/token')
+    const handle = await launcher('/fake/socket', '/fake/token')
 
     expect(isDaemonStaleForCurrentBundleMock).toHaveBeenCalledWith(
       FAKE_RUNTIME_DIR,
@@ -189,5 +194,6 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     expect(disconnectMock).toHaveBeenCalledOnce()
     expect(killStaleDaemonMock).not.toHaveBeenCalled()
     expect(forkMock).not.toHaveBeenCalled()
+    expect(handle.mode).toBe('degraded-new-pty-fallback-sticky')
   })
 })

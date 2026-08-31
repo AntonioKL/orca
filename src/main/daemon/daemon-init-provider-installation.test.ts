@@ -344,6 +344,25 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     expect(degradedProvider.routesFreshSpawnsToLocalProvider).toBeUndefined()
   })
 
+  it('keeps macOS version-skew fallback local until the daemon is restarted', async () => {
+    const mod = await importFresh()
+    ensureRunningOverrides.push(async () => ({
+      socketPath: '/fake/stale-socket',
+      tokenPath: '/fake/stale-token',
+      mode: 'degraded-new-pty-fallback-sticky'
+    }))
+    await mod.initDaemonPtyProvider()
+
+    const { DegradedDaemonPtyProvider } = await import('./degraded-daemon-pty-provider')
+    const provider = mod.getDaemonProvider() as InstanceType<typeof DegradedDaemonPtyProvider>
+    expect(provider).toBeInstanceOf(DegradedDaemonPtyProvider)
+    checkDaemonHealthMock.mockClear()
+
+    await expect(provider.recoverFreshSpawnRouting()).resolves.toBe(false)
+    expect(checkDaemonHealthMock).not.toHaveBeenCalled()
+    expect(provider.routesFreshSpawnsToLocalProvider).toBe(true)
+  })
+
   it('keeps legacy daemon pid/token files when the probe fails but the pid-file process is alive', async () => {
     // Why: deleting a live legacy daemon's token file makes its sessions permanently unadoptable.
     const mod = await importFresh()
