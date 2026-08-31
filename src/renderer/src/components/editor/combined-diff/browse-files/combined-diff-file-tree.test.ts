@@ -10,10 +10,15 @@ import {
 import {
   COMBINED_DIFF_FILE_TREE_QUERY_MAX_BYTES,
   getCombinedDiffBranchEntriesInTreeOrder,
+  getCombinedDiffFileTreeEntriesMatchingStaticFilters,
   getFilteredCombinedDiffFileTreeEntries,
   isCombinedDiffFileTreeQueryTooLarge,
   isCombinedDiffSectionViewed
 } from './combined-diff-file-tree-filter'
+import {
+  buildCombinedDiffBranchTreeRoots,
+  getViewedCombinedDiffTreeVisibility
+} from './combined-diff-file-tree-model'
 import type { GitBranchChangeEntry } from '../../../../../../shared/git-diff-compare-types'
 import type { GitStatusEntry } from '../../../../../../shared/git-status-types'
 
@@ -144,5 +149,47 @@ describe('CombinedDiffFileTree navigation mapping', () => {
         viewedSectionKeys: new Set()
       })
     ).toEqual([])
+  })
+
+  it('retains the structural entry list when only viewed state can change', () => {
+    const entries: GitBranchChangeEntry[] = [
+      { path: 'src/a.ts', status: 'modified' },
+      { path: 'src/b.ts', status: 'modified' }
+    ]
+
+    expect(
+      getCombinedDiffFileTreeEntriesMatchingStaticFilters({
+        entries,
+        query: '',
+        excludedExtensions: new Set()
+      })
+    ).toBe(entries)
+  })
+
+  it('overlays viewed files while preserving filtered-tree compaction', () => {
+    const entries: GitBranchChangeEntry[] = [
+      { path: 'src/a.ts', status: 'modified' },
+      { path: 'src/nested/b.ts', status: 'modified' },
+      { path: 'docs/readme.md', status: 'modified' }
+    ]
+    const roots = buildCombinedDiffBranchTreeRoots('branch', entries)
+    const visibility = getViewedCombinedDiffTreeVisibility({
+      roots,
+      collapsedDirectoryKeys: new Set(),
+      mode: 'branch',
+      viewedSectionKeys: new Set(['combined-branch:src/a.ts', 'combined-branch:docs/readme.md'])
+    })
+
+    expect(
+      visibility.rows.filter((node) => node.type === 'file').map((node) => node.entry.path)
+    ).toEqual(['src/nested/b.ts'])
+    expect(visibility.visibleFileCount).toBe(1)
+    const compactedDirectory = visibility.rows.find((node) => node.type === 'directory')
+    expect(compactedDirectory).toMatchObject({
+      path: 'src/nested',
+      name: 'src/nested',
+      fileCount: 1
+    })
+    expect(compactedDirectory && visibility.visibleFileCounts.get(compactedDirectory.key)).toBe(1)
   })
 })
