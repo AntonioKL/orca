@@ -120,8 +120,8 @@ import {
   TERMINAL_INTERRUPT_INPUT
 } from './xterm-bypass-policy'
 import {
-  clearPaneCwdDeferredSpawn,
   mergePaneCwdFromOsc7,
+  settlePaneCwdDeferredSpawn,
   type PaneCwdMap
 } from './resolve-split-cwd'
 import type { PtyPreconnectInputEntry } from './pty-preconnect-input-buffer'
@@ -168,7 +168,6 @@ import {
   beginDeferredSplitPaneHandoff,
   claimDeferredSplitPaneHandoff,
   clearDeferredSplitPaneHandoff,
-  discardDeferredSplitPaneHandoff,
   discardDeferredSplitPaneHandoffForKey,
   discardDeferredSplitPaneHandoffsForTab,
   releaseDeferredSplitPaneHandoff,
@@ -998,7 +997,6 @@ export function useTerminalPaneLifecycle({
       dispatchNotification,
       setCacheTimerStartedAt,
       syncPanePtyLayoutBinding: (paneId: number, ptyId: string | null) => {
-        const paneCwd = paneCwdRef.current.get(paneId)
         if (ptyId) {
           const deferredSplitHandoff = deferredSplitHandoffs.get(paneId)
           if (deferredSplitHandoff) {
@@ -1007,12 +1005,9 @@ export function useTerminalPaneLifecycle({
             clearDeferredSplitPaneHandoff(deferredSplitHandoff)
             deferredSplitHandoffs.delete(paneId)
           }
-          const settledPaneCwd = clearPaneCwdDeferredSpawn(paneCwd)
-          if (settledPaneCwd && settledPaneCwd !== paneCwd) {
-            // A concrete PTY settles the split admission fence; the lookup is
-            // no longer reusable once this pane owns a shell.
-            paneCwdRef.current.set(paneId, settledPaneCwd)
-          }
+          // A concrete PTY settles the split admission fence; the lookup is no
+          // longer reusable once this pane owns a shell.
+          settlePaneCwdDeferredSpawn(paneCwdRef.current, paneId)
         }
         syncPanePtyLayoutBinding(paneId, ptyId)
       },
@@ -1125,32 +1120,21 @@ export function useTerminalPaneLifecycle({
         }
         if (effectiveSpawnHints?.cwdPromise) {
           const cwdPromise = effectiveSpawnHints.cwdPromise
-          void cwdPromise.then(
-            (cwd) => {
-              const current = paneCwdRef.current.get(pane.id)
-              if (current && !current.confirmed && current.pendingCwd === cwdPromise) {
-                paneCwdRef.current.set(pane.id, {
-                  cwd,
-                  confirmed: false,
-                  ...(current.deferredSplitSpawn ? { deferredSplitSpawn: true } : {}),
-                  // Keep the settled identity until bind/failure so a stale
-                  // cleanup callback cannot clear a newer deferred lookup.
-                  pendingCwd: cwdPromise
-                })
-              }
-            },
-            () => {
-              const current = paneCwdRef.current.get(pane.id)
-              if (current && !current.confirmed && current.pendingCwd === cwdPromise) {
-                paneCwdRef.current.set(pane.id, {
-                  cwd: current.cwd,
-                  confirmed: false,
-                  ...(current.deferredSplitSpawn ? { deferredSplitSpawn: true } : {}),
-                  pendingCwd: cwdPromise
-                })
-              }
+          // A rejected lookup keeps the seed cwd; either way the settled identity
+          // stays until bind/failure so a stale cleanup cannot clear a newer lookup.
+          const applySettledCwd = (cwd: string | null): void => {
+            const current = paneCwdRef.current.get(pane.id)
+            if (!current || current.confirmed || current.pendingCwd !== cwdPromise) {
+              return
             }
-          )
+            paneCwdRef.current.set(pane.id, {
+              cwd: cwd ?? current.cwd,
+              confirmed: false,
+              ...(current.deferredSplitSpawn ? { deferredSplitSpawn: true } : {}),
+              pendingCwd: cwdPromise
+            })
+          }
+          void cwdPromise.then(applySettledCwd, () => applySettledCwd(null))
         }
         const osc7Disposable = pane.terminal.parser.registerOscHandler(
           7,
@@ -1504,11 +1488,11 @@ export function useTerminalPaneLifecycle({
           ...(effectiveSpawnHints?.cwdPromise
             ? {
                 onDeferredCwdSpawnFailed: () => {
-                  const current = paneCwdRef.current.get(pane.id)
-                  const settled = clearPaneCwdDeferredSpawn(current, effectiveSpawnHints.cwdPromise)
-                  if (settled && settled !== current) {
-                    paneCwdRef.current.set(pane.id, settled)
-                  }
+                  settlePaneCwdDeferredSpawn(
+                    paneCwdRef.current,
+                    pane.id,
+                    effectiveSpawnHints.cwdPromise
+                  )
                   if (handoffForInput) {
                     clearDeferredSplitPaneHandoff(handoffForInput)
                     deferredSplitHandoffs.delete(pane.id)
@@ -1647,7 +1631,7 @@ export function useTerminalPaneLifecycle({
         if (deferredSplitHandoff) {
           // Explicit pane removal is terminal for the split intent; only a
           // whole-tab remount is allowed to retain this record.
-          discardDeferredSplitPaneHandoff(deferredSplitHandoff)
+          clearDeferredSplitPaneHandoff(deferredSplitHandoff)
           deferredSplitHandoffs.delete(paneId)
         } else if (leafId) {
           // A close callback can outlive its mount-local numeric handle; the

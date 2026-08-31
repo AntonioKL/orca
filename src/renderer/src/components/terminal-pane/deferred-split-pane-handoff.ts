@@ -153,10 +153,6 @@ export function clearDeferredSplitPaneHandoff(handle: DeferredSplitPaneHandoffHa
   }
 }
 
-export function discardDeferredSplitPaneHandoff(handle: DeferredSplitPaneHandoffHandle): void {
-  clearDeferredSplitPaneHandoff(handle)
-}
-
 /** Drops a stale record when a restored pane already has an authoritative PTY. */
 export function discardDeferredSplitPaneHandoffForKey(key: PaneKey): void {
   deleteHandoff(key)

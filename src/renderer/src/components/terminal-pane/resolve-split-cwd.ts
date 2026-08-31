@@ -43,6 +43,19 @@ export function clearPaneCwdDeferredSpawn(
   return { cwd: existing.cwd, confirmed: existing.confirmed }
 }
 
+/** Settles a pane's deferred-split lookup in place once it binds or definitively fails. */
+export function settlePaneCwdDeferredSpawn(
+  paneCwdMap: PaneCwdMap,
+  paneId: number,
+  expectedPendingCwd?: Promise<string>
+): void {
+  const existing = paneCwdMap.get(paneId)
+  const settled = clearPaneCwdDeferredSpawn(existing, expectedPendingCwd)
+  if (settled && settled !== existing) {
+    paneCwdMap.set(paneId, settled)
+  }
+}
+
 // Why: sized to cover a cold `lsof -p <pid> -d cwd` on macOS (typically
 // 100–500ms, occasionally up to ~1s). Shorter budgets here would cause the
 // renderer to give up and fall back to the worktree root while the main

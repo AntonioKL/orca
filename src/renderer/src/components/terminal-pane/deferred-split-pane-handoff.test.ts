@@ -11,7 +11,6 @@ import {
   clearDeferredSplitPaneHandoff,
   DEFERRED_SPLIT_PANE_HANDOFF_MAX_RECORDS,
   DEFERRED_SPLIT_PANE_HANDOFF_TTL_MS,
-  discardDeferredSplitPaneHandoff,
   discardDeferredSplitPaneHandoffForKey,
   discardDeferredSplitPaneHandoffsForTab,
   getDeferredSplitPaneHandoffCountForTests,
@@ -54,7 +53,7 @@ describe('deferred split pane handoff', () => {
 
     appendDeferredSplitPaneInput(initial, { data: 'stale-input', kind: 'ordinary' })
     clearDeferredSplitPaneHandoff(initial)
-    discardDeferredSplitPaneHandoff(initial)
+    clearDeferredSplitPaneHandoff(initial)
     appendDeferredSplitPaneInput(firstRemount!.handle, {
       data: 'before-second-remount',
       kind: 'ordinary'
@@ -106,7 +105,7 @@ describe('deferred split pane handoff', () => {
 
     const discardedKey = makePaneKey('tab-discard', LEAF_1)
     const discarded = beginDeferredSplitPaneHandoff(discardedKey, Promise.resolve('/discard'))
-    discardDeferredSplitPaneHandoff(discarded)
+    clearDeferredSplitPaneHandoff(discarded)
     expect(claimDeferredSplitPaneHandoff(discardedKey)).toBeNull()
   })
 

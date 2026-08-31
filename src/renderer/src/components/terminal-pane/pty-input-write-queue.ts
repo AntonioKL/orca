@@ -19,12 +19,39 @@ export {
   TERMINAL_INPUT_COALESCE_MAX_CODE_UNITS
 } from './pty-input-write-queue-contract'
 
+/** Amortized-O(1) FIFO: shift by head index, compact once the dead prefix dominates. */
+type HeadQueue = { items: (PendingPtyInputWrite | undefined)[]; head: number }
+
+function createHeadQueue(): HeadQueue {
+  return { items: [], head: 0 }
+}
+
+function resetHeadQueue(queue: HeadQueue): void {
+  queue.items = []
+  queue.head = 0
+}
+
+function peekHeadQueue(queue: HeadQueue): PendingPtyInputWrite | undefined {
+  return queue.items[queue.head]
+}
+
+function shiftHeadQueue(queue: HeadQueue): PendingPtyInputWrite | undefined {
+  const removed = queue.items[queue.head]
+  queue.items[queue.head] = undefined
+  queue.head += 1
+  if (queue.head === queue.items.length) {
+    resetHeadQueue(queue)
+  } else if (queue.head >= 1024 && queue.head * 2 >= queue.items.length) {
+    queue.items = queue.items.slice(queue.head)
+    queue.head = 0
+  }
+  return removed
+}
+
 export function createPtyInputWriteQueue(deps: PtyInputWriteQueueDeps): PtyInputWriteQueue {
   const yieldBetweenWrites = deps.yieldBetweenWrites ?? yieldToEventLoop
-  let pendingOrdinary: (PendingPtyInputWrite | undefined)[] = []
-  let pendingOrdinaryHead = 0
-  let pendingReplies: (PendingPtyInputWrite | undefined)[] = []
-  let pendingReplyHead = 0
+  const pendingOrdinary = createHeadQueue()
+  const pendingReplies = createHeadQueue()
   let pendingReplyCount = 0
   let pendingReplyCodeUnits = 0
   let nextSequence = 0
@@ -36,35 +63,15 @@ export function createPtyInputWriteQueue(deps: PtyInputWriteQueueDeps): PtyInput
     cancelAcceptedWrite = resolve
   })
 
-  function compactOrdinary(): void {
-    if (pendingOrdinaryHead === pendingOrdinary.length) {
-      pendingOrdinary = []
-      pendingOrdinaryHead = 0
-    } else if (pendingOrdinaryHead >= 1024 && pendingOrdinaryHead * 2 >= pendingOrdinary.length) {
-      pendingOrdinary = pendingOrdinary.slice(pendingOrdinaryHead)
-      pendingOrdinaryHead = 0
-    }
-  }
-
-  function compactReplies(): void {
-    if (pendingReplyHead === pendingReplies.length) {
-      pendingReplies = []
-      pendingReplyHead = 0
-    } else if (pendingReplyHead >= 1024 && pendingReplyHead * 2 >= pendingReplies.length) {
-      pendingReplies = pendingReplies.slice(pendingReplyHead)
-      pendingReplyHead = 0
-    }
-  }
-
   function resetSequenceIfEmpty(): void {
-    if (pendingOrdinary.length === 0 && pendingReplies.length === 0) {
+    if (pendingOrdinary.items.length === 0 && pendingReplies.items.length === 0) {
       nextSequence = 0
     }
   }
 
   function firstPending(): PendingPtyInputWrite | undefined {
-    const ordinary = pendingOrdinary[pendingOrdinaryHead]
-    const reply = pendingReplies[pendingReplyHead]
+    const ordinary = peekHeadQueue(pendingOrdinary)
+    const reply = peekHeadQueue(pendingReplies)
     if (!ordinary) {
       return reply
     }
@@ -75,23 +82,17 @@ export function createPtyInputWriteQueue(deps: PtyInputWriteQueueDeps): PtyInput
   }
 
   function shiftOrdinary(): PendingPtyInputWrite | undefined {
-    const removed = pendingOrdinary[pendingOrdinaryHead]
-    pendingOrdinary[pendingOrdinaryHead] = undefined
-    pendingOrdinaryHead += 1
-    compactOrdinary()
+    const removed = shiftHeadQueue(pendingOrdinary)
     resetSequenceIfEmpty()
     return removed
   }
 
   function shiftReply(): PendingPtyInputWrite | undefined {
-    const removed = pendingReplies[pendingReplyHead]
-    pendingReplies[pendingReplyHead] = undefined
-    pendingReplyHead += 1
+    const removed = shiftHeadQueue(pendingReplies)
     if (removed) {
       pendingReplyCount -= 1
       pendingReplyCodeUnits -= removed.text.length
     }
-    compactReplies()
     resetSequenceIfEmpty()
     return removed
   }
@@ -123,13 +124,11 @@ export function createPtyInputWriteQueue(deps: PtyInputWriteQueueDeps): PtyInput
   }
 
   function clearPending(): void {
-    for (let index = pendingOrdinaryHead; index < pendingOrdinary.length; index += 1) {
-      pendingOrdinary[index]?.resolveAccepted?.(false)
+    for (let index = pendingOrdinary.head; index < pendingOrdinary.items.length; index += 1) {
+      pendingOrdinary.items[index]?.resolveAccepted?.(false)
     }
-    pendingOrdinary = []
-    pendingOrdinaryHead = 0
-    pendingReplies = []
-    pendingReplyHead = 0
+    resetHeadQueue(pendingOrdinary)
+    resetHeadQueue(pendingReplies)
     pendingReplyCount = 0
     pendingReplyCodeUnits = 0
     nextSequence = 0
@@ -283,11 +282,11 @@ export function createPtyInputWriteQueue(deps: PtyInputWriteQueueDeps): PtyInput
       const item = { sequence: nextSequence, id, text: data, replyOnly, tooLarge, resolveAccepted }
       nextSequence += 1
       if (replyOnly) {
-        pendingReplies.push(item)
+        pendingReplies.items.push(item)
         pendingReplyCount += 1
         pendingReplyCodeUnits += data.length
       } else {
-        pendingOrdinary.push(item)
+        pendingOrdinary.items.push(item)
       }
       scheduleDrain()
       return true
