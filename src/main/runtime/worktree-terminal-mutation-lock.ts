@@ -1,3 +1,5 @@
+import { settleBeforeDeadline } from './settle-before-deadline'
+
 /**
  * Per-worktree lock guarding terminal spawn against terminal sleep.
  *
@@ -15,7 +17,6 @@ export type WorktreeTerminalMutationKind = 'spawn' | 'sleep'
 type Waiter = {
   kind: WorktreeTerminalMutationKind
   grant: () => void
-  abandoned: boolean
 }
 
 type LockEntry = {
@@ -29,7 +30,8 @@ export const WORKTREE_TERMINAL_SLEEP_TIMEOUT_ERROR = 'terminal_worktree_sleep_ti
 export class WorktreeTerminalMutationLock {
   private readonly entries = new Map<string, LockEntry>()
 
-  /** Exposed for tests/diagnostics: no key may leak once fully released. */
+  /** Why exposed: entry deletion is the only thing keeping this map from
+   *  becoming a per-worktree leak, so the tests assert on it directly. */
   get trackedKeyCount(): number {
     return this.entries.size
   }
@@ -47,18 +49,28 @@ export class WorktreeTerminalMutationLock {
       return this.createRelease(key, entry, kind)
     }
 
-    const waiter: Waiter = { kind, grant: () => {}, abandoned: false }
+    let grant!: () => void
     const granted = new Promise<void>((resolve) => {
-      waiter.grant = resolve
+      grant = resolve
     })
+    const waiter: Waiter = { kind, grant }
     entry.queue.push(waiter)
 
     try {
-      await waitForMutationGrant(granted, deadline)
+      await (deadline === undefined
+        ? granted
+        : settleBeforeDeadline(
+            () => granted,
+            undefined,
+            deadline,
+            new Error(WORKTREE_TERMINAL_SLEEP_TIMEOUT_ERROR)
+          ))
     } catch (error) {
-      // Why: the caller timed out, so this node must never acquire later and
-      // stop terminals behind its back. Drop it and hand the turn onward.
-      waiter.abandoned = true
+      // Why splice-then-drain: the caller timed out, so this node must never
+      // acquire later and stop terminals behind its back. Removing it before
+      // any other code can run (no await between the throw and here) is what
+      // makes a grant-after-timeout unrepresentable, so no tombstone flag is
+      // needed — a queued waiter is by construction still live.
       const index = entry.queue.indexOf(waiter)
       if (index !== -1) {
         entry.queue.splice(index, 1)
@@ -78,7 +90,7 @@ export class WorktreeTerminalMutationLock {
       return entry.activeSpawns === 0 && entry.queue.length === 0
     }
     // Writer preference: a queued sleep blocks later spawns from jumping it.
-    return !entry.queue.some((waiter) => waiter.kind === 'sleep' && !waiter.abandoned)
+    return !entry.queue.some((waiter) => waiter.kind === 'sleep')
   }
 
   private markActive(entry: LockEntry, kind: WorktreeTerminalMutationKind): void {
@@ -110,59 +122,20 @@ export class WorktreeTerminalMutationLock {
   }
 
   private drain(key: string, entry: LockEntry): void {
-    while (entry.queue.length > 0) {
+    // Granting a sleep sets activeSleep, which ends the loop on the next test.
+    while (!entry.activeSleep && entry.queue.length > 0) {
       const next = entry.queue[0]!
-      if (next.abandoned) {
-        entry.queue.shift()
-        continue
-      }
-      if (entry.activeSleep) {
-        break
-      }
-      if (next.kind === 'sleep') {
-        if (entry.activeSpawns > 0) {
-          break
-        }
-        entry.queue.shift()
-        entry.activeSleep = true
-        next.grant()
+      if (next.kind === 'sleep' && entry.activeSpawns > 0) {
         break
       }
       entry.queue.shift()
-      entry.activeSpawns += 1
+      this.markActive(entry, next.kind)
       next.grant()
     }
     if (entry.activeSpawns === 0 && !entry.activeSleep && entry.queue.length === 0) {
       if (this.entries.get(key) === entry) {
         this.entries.delete(key)
       }
-    }
-  }
-}
-
-async function waitForMutationGrant(granted: Promise<void>, deadline?: number): Promise<void> {
-  if (deadline === undefined) {
-    await granted
-    return
-  }
-  const remainingMs = deadline - Date.now()
-  if (remainingMs <= 0) {
-    throw new Error(WORKTREE_TERMINAL_SLEEP_TIMEOUT_ERROR)
-  }
-  let timeout: ReturnType<typeof setTimeout> | undefined
-  try {
-    await Promise.race([
-      granted,
-      new Promise<never>((_, reject) => {
-        timeout = setTimeout(
-          () => reject(new Error(WORKTREE_TERMINAL_SLEEP_TIMEOUT_ERROR)),
-          remainingMs
-        )
-      })
-    ])
-  } finally {
-    if (timeout !== undefined) {
-      clearTimeout(timeout)
     }
   }
 }

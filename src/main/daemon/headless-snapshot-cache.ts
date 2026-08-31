@@ -33,7 +33,15 @@ type CachedParts = {
 // serializes to a few hundred KB, but a renderer may ask for 50k rows, so an
 // uncapped cache would retain tens of MB per session. Oversized payloads still
 // serve correctly, they just re-serialize instead of being retained.
-const MAX_CACHED_SNAPSHOT_CHARS = 2_000_000
+// Bytes, not chars, to match the daemon's other retention cap
+// (MAX_COLD_RESTORE_CACHE_BYTES) so the two budgets read in one unit.
+const MAX_CACHED_SNAPSHOT_BYTES = 4 * 1024 * 1024
+
+// Why code units: bounds V8 string storage without rescanning or flattening
+// multi-MB ropes — same sizing rule as getColdRestorePayloadBytes.
+function retainedSnapshotBytes(parts: CachedParts): number {
+  return (parts.snapshotAnsi.length + parts.scrollbackAnsi.length) * 2
+}
 
 export type HeadlessSnapshotSource = {
   serializer: SerializeAddon
@@ -62,10 +70,10 @@ export class HeadlessSnapshotCache {
       return retained
     }
     const computed = computeCachedParts(source, scrollbackRows)
-    // Why length-gated: see MAX_CACHED_SNAPSHOT_CHARS. Declining to retain
-    // costs the pre-existing serialize, never correctness.
+    // Why size-gated: see MAX_CACHED_SNAPSHOT_BYTES. Declining to retain costs
+    // the pre-existing serialize, never correctness.
     this.retained =
-      computed.snapshotAnsi.length + computed.scrollbackAnsi.length <= MAX_CACHED_SNAPSHOT_CHARS
+      retainedSnapshotBytes(computed) <= MAX_CACHED_SNAPSHOT_BYTES
         ? { ...computed, epoch: this.epoch, scrollbackRows }
         : null
     return computed

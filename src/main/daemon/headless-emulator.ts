@@ -156,6 +156,20 @@ export class HeadlessEmulator {
     this.snapshotCache.markMutated()
   }
 
+  /**
+   * Bumps only for real bytes. Why: flushParsedWrites() is a zero-byte write
+   * used purely as a parse fence (session-output-plane.ts), and every
+   * getSettledSnapshot runs one. Zero bytes cannot mutate the buffer — the OSC
+   * and mouse-mode scans are no-ops and the escape tail is idempotent — so
+   * bumping would evict the cache on every checkpoint read. Any write a fence
+   * orders behind has already bumped on its own completion.
+   */
+  private markWritten(data: string): void {
+    if (data.length > 0) {
+      this.markMutated()
+    }
+  }
+
   private emitQueryReply(reply: string): void {
     if (this.queryReplyForwardingDepth > 0 && this.onQueryReply) {
       this.onQueryReply(reply)
@@ -172,14 +186,7 @@ export class HeadlessEmulator {
       return Promise.resolve()
     }
 
-    // Why length-gated: flushParsedWrites() is a zero-byte write used purely as
-    // a parse fence (session-output-plane.ts), and every getSettledSnapshot runs
-    // one. Zero bytes cannot mutate the buffer — scans are no-ops and the escape
-    // tail is idempotent — so bumping here would evict the cache on every
-    // checkpoint read. Real writes still bracket themselves.
-    if (data.length > 0) {
-      this.markMutated()
-    }
+    this.markWritten(data)
     const forwardQueryReplies = opts.forwardQueryReplies === true
     if (this.tryWriteSync(data, { forwardQueryReplies })) {
       return Promise.resolve()
@@ -201,12 +208,8 @@ export class HeadlessEmulator {
         this.partialEscapeTail = advancePartialEscapeTail(this.partialEscapeTail, data)
         // Why again: xterm parses asynchronously, so the buffer only reaches
         // its post-write state here; the entry bump alone would let a
-        // snapshot taken mid-parse cache a half-applied buffer. Zero-byte
-        // fences are exempt for the reason given at the entry bump — any
-        // writes they fence have already bumped on their own completion.
-        if (data.length > 0) {
-          this.markMutated()
-        }
+        // snapshot taken mid-parse cache a half-applied buffer.
+        this.markWritten(data)
         resolve()
       })
     })
@@ -225,9 +228,7 @@ export class HeadlessEmulator {
     if (typeof writeSync !== 'function') {
       return false
     }
-    if (data.length > 0) {
-      this.markMutated()
-    }
+    this.markWritten(data)
     this.oscText.scan(data)
     const forwardQueryReplies = opts.forwardQueryReplies === true
     if (forwardQueryReplies) {

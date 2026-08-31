@@ -188,6 +188,7 @@ describe('HeadlessEmulator snapshot cache', () => {
         'isAlternateScreen',
         'isCursorOnEmptyPromptLine',
         'markMutated',
+        'markWritten',
         'partialEscapeTailAnsi',
         'emitQueryReply',
         'resize',
