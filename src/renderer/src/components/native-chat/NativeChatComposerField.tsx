@@ -56,6 +56,7 @@ export type NativeChatComposerFieldProps = {
 export type NativeChatComposerImageAttachment = {
   id: string
   path: string
+  connectionId?: string
 }
 
 /**

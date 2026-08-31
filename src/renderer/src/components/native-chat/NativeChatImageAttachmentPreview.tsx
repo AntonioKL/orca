@@ -18,7 +18,7 @@ export function NativeChatImageAttachmentPreview({
   onRemove
 }: Props): React.JSX.Element {
   const [isOpen, setIsOpen] = useState(false)
-  const previewSrc = useLocalImageSrc(attachment.path, attachment.path)
+  const previewSrc = useLocalImageSrc(attachment.path, attachment.path, attachment.connectionId)
   const filename = isNativeChatPastedImagePath(attachment.path)
     ? translate('components.native-chat.composer.pastedImageLabel', 'Pasted image')
     : basename(attachment.path)
