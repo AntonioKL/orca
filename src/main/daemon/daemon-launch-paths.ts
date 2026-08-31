@@ -46,8 +46,14 @@ export function daemonLogArgs(): string[] {
   return disabled === '1' || disabled === 'true' ? [] : ['--log-file', getDaemonLogFilePath()]
 }
 
+/** Named so a caller clamping this probe to a deadline cannot silently decouple from its default. */
+export const DAEMON_SOCKET_PROBE_TIMEOUT_MS = 1_000
+
 // Why: a socket that accepts a connection proves a daemon survived a previous app session and can be reused.
-export function probeDaemonSocket(socketPath: string, timeoutMs = 1000): Promise<boolean> {
+export function probeDaemonSocket(
+  socketPath: string,
+  timeoutMs = DAEMON_SOCKET_PROBE_TIMEOUT_MS
+): Promise<boolean> {
   const { promise, resolve } = Promise.withResolvers<boolean>()
   if (process.platform !== 'win32' && !existsSync(socketPath)) {
     resolve(false)

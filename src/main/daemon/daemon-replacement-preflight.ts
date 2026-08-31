@@ -3,7 +3,11 @@ import type { DaemonReplaceReason } from '../../shared/daemon-lifecycle-telemetr
 import { isDaemonStaleForCurrentBundle } from './daemon-bundle-staleness'
 import { DaemonEndpointOwnershipError } from './daemon-endpoint-adoption'
 import { checkDaemonHealth, getMacDaemonSystemResolverHealth } from './daemon-health'
-import { getAliveDaemonSessionCount, probeDaemonSocket as probeSocket } from './daemon-launch-paths'
+import {
+  DAEMON_SOCKET_PROBE_TIMEOUT_MS,
+  getAliveDaemonSessionCount,
+  probeDaemonSocket as probeSocket
+} from './daemon-launch-paths'
 import { trackDaemonReplaced } from './daemon-lifecycle-event'
 import { getDaemonLaunchIdentity } from './daemon-pid-identity'
 import { cleanupDaemonForProtocol } from './daemon-protocol-cleanup'
@@ -12,8 +16,9 @@ import { killStaleDaemon } from './daemon-stale-kill'
 import { getMacDaemonTccAttributionHealth } from './daemon-tcc-attribution'
 import { PROTOCOL_VERSION } from './types'
 
-// Why a count on top of the wall clock: DAEMON_RECOVERY_BUDGET_MS ends the grace, but a probe
-// that fails instantly (nothing listening) would spin hot for the whole budget without this.
+// Why a count on top of the wall clock: DAEMON_RECOVERY_BUDGET_MS ends the grace, but a socket
+// that accepts and then resets the hello answers both probes instantly, so without this the loop
+// would spin hot for the whole budget.
 export const WEDGED_DAEMON_GRACE_RETRIES = 11
 
 type PreserveDaemon = (mode?: 'degraded-new-pty-fallback') => Promise<DaemonProcessHandle>
@@ -157,7 +162,10 @@ export async function prepareDaemonReplacement(
       health !== 'rejected' &&
       graceRetry < WEDGED_DAEMON_GRACE_RETRIES &&
       Date.now() < recoveryDeadlineMs &&
-      (await probeSocket(socketPath, Math.max(1, Math.min(1000, recoveryDeadlineMs - Date.now()))))
+      (await probeSocket(
+        socketPath,
+        Math.max(1, Math.min(DAEMON_SOCKET_PROBE_TIMEOUT_MS, recoveryDeadlineMs - Date.now()))
+      ))
     ) {
       liveSessionCount = await getAliveDaemonSessionCount(socketPath, tokenPath, recoveryDeadlineMs)
       graceRetry++

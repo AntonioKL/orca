@@ -42,6 +42,11 @@ export const DAEMON_RECOVERY_PROBE_MS = 8_000
  * timeout, and 5s for the adoption lease and adapter connects — those two run against a daemon
  * that has just reported ready over IPC, so they get a realistic allowance, not the client's
  * unbudgeted 4x5s. 60 - 25.5 leaves 34.5s; take 32s and keep the rest as margin.
+ *
+ * Outside that accounting by design: the launcher's outer-catch endpoint rescue, which only
+ * runs once the replacement has already failed. Clamping it to the remainder is what turned a
+ * recoverable degraded adoption into total daemon loss, so it keeps its own probe default and
+ * the gate may fail open ahead of it — no worse than not rescuing, and better whenever it wins.
  */
 export const DAEMON_RECOVERY_BUDGET_MS = 32_000
 
