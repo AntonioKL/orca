@@ -50,9 +50,10 @@ export function _resetWorktreeScanCacheForTests(): void {
 }
 
 /**
- * Share one in-flight scan per (repo, distro, deadline, generation). `run` decides whether failures
- * soften or propagate; both variants must coalesce so a create overlapping a sidebar refresh does
- * not spawn a second `git worktree list` (expensive on Windows).
+ * Share one in-flight scan per (repo, distro, deadline, generation, runner). Coalescing keeps a
+ * sidebar refresh from spawning a second `git worktree list` (expensive on Windows), but only
+ * within one failure discipline: a strict joiner must never inherit a lenient scan's softened `[]`,
+ * so the strict and lenient runners scan separately by design.
  */
 function shareWorktreeScan(
   repoPath: string,
@@ -66,7 +67,7 @@ function shareWorktreeScan(
   const timeout = options.timeout ?? WORKTREE_LIST_TIMEOUT_MS
   // Why: callers with different deadlines cannot safely share which timeout wins the scan.
   // Why `run.name`: a strict joiner must never receive a softened `[]` from a lenient scan.
-  const key = `${repoPath}\0${options.wslDistro ?? ''}\0${timeout}\0${generation}\0${run.name}`
+  const key = `${repoPath}\0${options.wslDistro ?? ''}\0${timeout}\0${options.includeCreatePreparations === true}\0${generation}\0${run.name}`
   const inFlight = inFlightWorktreeScans.get(key)
   if (inFlight) {
     return inFlight

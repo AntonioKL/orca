@@ -34,6 +34,8 @@ import { parseExecutionHostId, type ExecutionHostId } from '../../../../shared/e
 import type { Repo } from '../../../../shared/repo-types'
 import type { TerminalTab } from '../../../../shared/terminal-tab-types'
 import type { Worktree } from '../../../../shared/worktree/types'
+import { isGitHubPRSuppressed } from '../../../../shared/worktree/github-pr-suppression'
+import type { HostedReviewProvider } from '../../../../shared/hosted-review'
 import type {
   WorktreeForceDeleteReason,
   WorktreeRemovalTarget
@@ -94,7 +96,6 @@ import {
   countWorkspaceSpaceActiveAgents,
   getLargestWorkspaceSpaceItemSize,
   getLargestWorkspaceSpaceRowSize,
-  getWorkspaceSpaceGitStatusRefreshCandidates,
   isWorkspaceSpaceRowReadyToDelete,
   pruneWorkspaceSpaceSelectedIds,
   resolveWorkspaceSpaceInspectedWorktreeId,
@@ -103,6 +104,7 @@ import {
   type WorkspaceSpaceSortDirection,
   type WorkspaceSpaceSortKey
 } from './workspace-space-presentation'
+import { getWorkspaceSpaceGitStatusRefreshCandidates } from './workspace-space-git-status-order'
 import { translate } from '@/i18n/i18n'
 
 const TREEMAP_FILLS = [
@@ -172,7 +174,15 @@ type WorkspaceDecisionInputs = {
   remoteStatusesByWorktree: Record<string, { hasUpstream: boolean; ahead: number; behind: number }>
   hostedReviewCache: Record<
     string,
-    { data?: { number: number; state: string; status: string; title: string } | null }
+    {
+      data?: {
+        number: number
+        state: string
+        status: string
+        title: string
+        provider?: HostedReviewProvider
+      } | null
+    }
   >
   issueCache: Record<string, { data?: { number: number; title: string; state: string } | null }>
   linearIssueCache: Record<
@@ -245,7 +255,13 @@ export function getWorkspaceDecisionDetails(
     repo?.executionHostId,
     repo !== undefined
   )
-  const hostedReview = inputs.hostedReviewCache[reviewCacheKey]?.data
+  const cachedHostedReview = inputs.hostedReviewCache[reviewCacheKey]?.data
+  const hostedReview =
+    cachedHostedReview?.provider === 'github' &&
+    workspaceRecord &&
+    isGitHubPRSuppressed(workspaceRecord, cachedHostedReview.number)
+      ? null
+      : cachedHostedReview
   const linkedPR = workspaceRecord?.linkedPR ?? null
   const reviewLabel =
     hostedReview !== undefined && hostedReview !== null
@@ -1474,12 +1490,15 @@ export function WorkspaceSpaceManagerPanel(): React.JSX.Element {
 
       return (
         owner
-          ? getRuntimeGitStatus({
-              settings: ownerSettings,
-              worktreeId: worktree.worktreeId,
-              worktreePath: worktree.path,
-              connectionId: owner.connectionId ?? undefined
-            })
+          ? getRuntimeGitStatus(
+              {
+                settings: ownerSettings,
+                worktreeId: worktree.worktreeId,
+                worktreePath: worktree.path,
+                connectionId: owner.connectionId ?? undefined
+              },
+              { admissionTier: 'background', includeLineStats: false }
+            )
           : Promise.reject(new Error('Workspace owner is no longer available'))
       )
         .then((status) => {
@@ -1574,7 +1593,12 @@ export function WorkspaceSpaceManagerPanel(): React.JSX.Element {
   }, [scanGeneration])
 
   useEffect(() => {
-    const candidates = getWorkspaceSpaceGitStatusRefreshCandidates(sourceRows)
+    const visibleWorktreeIdentities = new Set(rows.map(getWorkspaceSpaceWorktreeIdentity))
+    const candidates = getWorkspaceSpaceGitStatusRefreshCandidates(sourceRows, {
+      activeWorktreeId,
+      activeExecutionHostId: activeWorkspaceExecutionHostId,
+      visibleWorktreeIdentities
+    })
     if (candidates.length === 0) {
       return
     }
@@ -1597,7 +1621,13 @@ export function WorkspaceSpaceManagerPanel(): React.JSX.Element {
     return () => {
       cancelled = true
     }
-  }, [refreshWorkspaceGitStatus, sourceRows])
+  }, [
+    activeWorkspaceExecutionHostId,
+    activeWorktreeId,
+    refreshWorkspaceGitStatus,
+    rows,
+    sourceRows
+  ])
 
   const inspectedWorktree =
     rows.find((row) => getWorkspaceSpaceWorktreeIdentity(row) === nextInspectedWorktreeId) ??

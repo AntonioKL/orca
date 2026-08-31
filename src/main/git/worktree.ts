@@ -1,7 +1,12 @@
 export { addWorktree } from './worktree-add'
+export {
+  configurePushAutoSetupRemote,
+  persistWorktreeCreationBase,
+  resolveWorktreeAddBaseContext
+} from './worktree-add'
 export { forceDeleteLocalBranch } from './worktree-branch-removal'
 export { parseWorktreeList } from './worktree-list-parser'
-export { listWorktreeGraph, listWorktreesStrict } from './worktree-listing'
+export { describeCreatedWorktree, listWorktreeGraph, listWorktreesStrict } from './worktree-listing'
 export { moveWorktree } from './worktree-move'
 export {
   WORKTREE_ADD_TIMEOUT_MAX_MS,
@@ -25,5 +30,6 @@ export {
   listWorktrees,
   listWorktreesSharedStrict
 } from './worktree-scan-cache'
+export { bumpWorktreeScanGeneration as notifyPreparedWorktreeMutation } from './worktree-scan-cache'
 export { addSparseWorktree } from './worktree-sparse-add'
 export { parseCoreSparseCheckoutFlag } from './worktree-sparse-state'
