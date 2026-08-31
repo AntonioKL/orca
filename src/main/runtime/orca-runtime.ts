@@ -23916,16 +23916,20 @@ export class OrcaRuntimeService {
         // Why: refuse an existing repository on positive evidence, before `git init` can silently
         // reinitialize it. A `.git` FILE counts — that is how linked worktrees and submodules point.
         const gitPath = join(targetPath, '.git')
-        let gitProbeFailure: string | null = null
+        let gitProbeFailed = false
+        let gitProbeFailure = ''
         const gitStat = await stat(gitPath).catch((error: unknown) => {
           // Why: an indeterminate probe must surface as the shared "cannot check" message, not as
           // the generic prepare-directory error the outer catch would produce.
+          // Why a flag, not a truthy string: an error with an empty message would otherwise read
+          // as "no failure" and fail open into `git init`.
           if (!isProvenAbsent(error)) {
+            gitProbeFailed = true
             gitProbeFailure = error instanceof Error ? error.message : String(error)
           }
           return null
         })
-        if (gitProbeFailure) {
+        if (gitProbeFailed) {
           return { error: repositoryCheckUnavailableError(trimmedName, gitProbeFailure) }
         }
         if (gitStat) {

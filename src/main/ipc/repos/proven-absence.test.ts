@@ -43,4 +43,43 @@ describe('proven-absence', () => {
     expect(isNotADirectory(Object.assign(new Error('x'), { code: 'ENOTDIR' }))).toBe(true)
     expect(isNotADirectory(Object.assign(new Error('x'), { code: 'ENOENT' }))).toBe(false)
   })
+
+  it('does not throw when an Error instance has a throwing code getter', () => {
+    // R5: the old version delegated to isENOENT, which read `.code` a SECOND time unguarded.
+    const e = new Error('probe')
+    Object.defineProperty(e, 'code', {
+      get() {
+        throw new Error('boom')
+      }
+    })
+    expect(() => isProvenAbsent(e)).not.toThrow()
+    expect(isProvenAbsent(e)).toBe(false)
+    expect(() => isNotADirectory(e)).not.toThrow()
+  })
+
+  it('recognises the relay ENOTDIR shape, where the string errno did not survive', () => {
+    expect(
+      isNotADirectory(
+        Object.assign(new Error("ENOTDIR: not a directory, stat '/x/.git'"), { code: -32000 })
+      )
+    ).toBe(true)
+  })
+
+  it('still consults the message when a wrapper attached a non-errno string code', () => {
+    expect(
+      isProvenAbsent(
+        Object.assign(new Error("ENOENT: no such file or directory, stat '/x'"), {
+          code: 'REMOTE_FS_ERROR'
+        })
+      )
+    ).toBe(true)
+  })
+
+  it('does not match an errno quoted later in the message', () => {
+    expect(
+      isProvenAbsent(
+        new Error("EACCES: denied, access '/a/ENOENT: no such file or directory/.git'")
+      )
+    ).toBe(false)
+  })
 })
