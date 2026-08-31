@@ -11,7 +11,12 @@ export function isOpaqueRemintedPaneKey(value: string): boolean {
 }
 
 export function canRegisterPaneKeyAlias(fromPaneKey: string, toPaneKey: string): boolean {
-  if (fromPaneKey.length === 0 || fromPaneKey.length > MAX_PANE_KEY_LEN) {
+  if (
+    fromPaneKey.length === 0 ||
+    fromPaneKey.length > MAX_PANE_KEY_LEN ||
+    toPaneKey.length === 0 ||
+    toPaneKey.length > MAX_PANE_KEY_LEN
+  ) {
     return false
   }
   const stable = parsePaneKey(toPaneKey)
