@@ -8566,9 +8566,25 @@ export class OrcaRuntimeService {
     const activeGroupId =
       (activeParentId ? ownerGroupId.get(activeParentId) : undefined) ?? nextGroups[0]!.id
     const retainedOrder = new Map<string, string[]>(nextGroups.map((group) => [group.id, []]))
+    // Why: tabOrder is the canonical user-visible order, so it must survive a republish.
+    // A materialized idle surface can move to the end of terminalTabs; retaining the
+    // stored order prevents activation from rotating the tab bar.
+    const placed = new Set<string>()
+    for (const group of nextGroups) {
+      for (const tabId of group.tabOrder) {
+        if (liveTabIds.has(tabId) && !placed.has(tabId)) {
+          retainedOrder.get(group.id)?.push(tabId)
+          placed.add(tabId)
+        }
+      }
+    }
     for (const tabId of parentTabOrder) {
+      if (placed.has(tabId)) {
+        continue
+      }
       const groupId = ownerGroupId.get(tabId) ?? activeGroupId
       retainedOrder.get(groupId)?.push(tabId)
+      placed.add(tabId)
     }
     return nextGroups
       .map((group) => {
@@ -9367,7 +9383,27 @@ export class OrcaRuntimeService {
   ): RuntimeMobileSessionTabGroup[] {
     // Why: order across terminals and browsers in their actual array order so a
     // tab opened after a browser tab lands to its right, not regrouped before it.
-    const tabOrder = this.collectHeadlessTopLevelTabOrder(tabs)
+    const arrivalOrder = this.collectHeadlessTopLevelTabOrder(tabs)
+    // Why: tabOrder is the user-visible order and must survive a republish. A
+    // materialized idle surface can move to the end of the incoming array, so
+    // retain stored positions and append only genuinely new ids.
+    const liveTopLevelIds = new Set(arrivalOrder)
+    const tabOrder: string[] = []
+    const placed = new Set<string>()
+    for (const group of existingGroups ?? []) {
+      for (const tabId of group.tabOrder) {
+        if (liveTopLevelIds.has(tabId) && !placed.has(tabId)) {
+          tabOrder.push(tabId)
+          placed.add(tabId)
+        }
+      }
+    }
+    for (const tabId of arrivalOrder) {
+      if (!placed.has(tabId)) {
+        tabOrder.push(tabId)
+        placed.add(tabId)
+      }
+    }
     const topLevelOf = (tab: RuntimeMobileSessionSnapshotTab): string =>
       tab.type === 'terminal' ? tab.parentTabId : tab.id
     const activeTopLevelId =
