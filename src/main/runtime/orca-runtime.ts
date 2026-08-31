@@ -205,6 +205,8 @@ import type { RuntimeOrchestrationEnvelope } from '../../shared/runtime-rpc-enve
 import type {
   ArtifactCloudOperation,
   ArtifactCloudOptions,
+  ArtifactReadRequest,
+  ArtifactReadResult,
   ArtifactListOptions,
   ArtifactListPage,
   ArtifactListItem,
@@ -6172,6 +6174,10 @@ export class OrcaRuntimeService {
 
   listArtifacts(options: ArtifactListOptions): Promise<ArtifactCloudOperation<ArtifactListPage>> {
     return this.requireArtifactService().list(options)
+  }
+
+  readArtifact(request: ArtifactReadRequest): Promise<ArtifactCloudOperation<ArtifactReadResult>> {
+    return this.requireArtifactService().read(request)
   }
 
   getPublishedArtifactLink(
