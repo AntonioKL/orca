@@ -101,6 +101,10 @@ export function commitPtySourceSend(
   if (record.pendingSend !== reservation) {
     throw new Error('PTY source send reservation is stale')
   }
+  // advanceCredit breaks on the first uncredited boundary, so sentBoundaries inserts must ascend.
+  if (reservation.span.sourceEndSu <= record.sentEndSu) {
+    throw new Error('PTY source send reservation regresses the sent boundary')
+  }
   record.pendingSend = null
   record.sentEndSu = reservation.span.sourceEndSu
   record.sentBoundaries.add(record.sentEndSu)

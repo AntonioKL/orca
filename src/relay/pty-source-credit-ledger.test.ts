@@ -328,12 +328,31 @@ describe('RelayPtySourceCreditLedger', () => {
 
     expect(legacyVisits).toBe(524_799)
     expect(countedBoundaries.visits).toBe(2_046)
-    expect(legacyVisits - countedBoundaries.visits).toBe(522_753)
-    console.log(
-      `[bench] ${boundaryCount} sent boundaries: ACK iterator visits ${legacyVisits} -> ${countedBoundaries.visits} ` +
-        `(-${(((legacyVisits - countedBoundaries.visits) / legacyVisits) * 100).toFixed(2)}%)`
-    )
     expect(ledger.retentionSnapshot()).toEqual({ sourceSu: 0, dataBytes: 0, spans: 0 })
+    expect([...record.sentBoundaries]).toEqual([spanCount])
+  })
+
+  it('deletes every boundary skipped by a jump-ahead cumulative ACK', () => {
+    const ledger = new RelayPtySourceCreditLedger()
+    const owner = identity()
+    ledger.open(owner, 16)
+    append(ledger, owner, 'abcdefgh')
+    for (let index = 0; index < 8; index += 1) {
+      ledger.commitSend(ledger.reserveNextSend(owner, 1)!)
+    }
+    const record = getBoundaryRecord(ledger, owner)
+    expect([...record.sentBoundaries]).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8])
+
+    expect(
+      ledger.acknowledge(owner, {
+        id: owner.id,
+        clientGeneration: owner.clientGeneration,
+        ownerGeneration: owner.ownerGeneration,
+        deliveryToken: owner.deliveryToken,
+        creditedEndSu: 8
+      })
+    ).toBe('advanced')
+    expect([...record.sentBoundaries]).toEqual([8])
   })
 
   it('never exceeds a token source window across generated send/ACK sequences', () => {
@@ -487,6 +506,7 @@ describe('RelayPtySourceCreditLedger', () => {
 
     ledger.commitSend(pending)
     expect(ledger.snapshot(owner)).toMatchObject({ sentEndSu: 4, creditedEndSu: 4 })
+    expect([...getBoundaryRecord(ledger, owner).sentBoundaries]).toEqual([4])
     expect(ledger.retentionSnapshot()).toEqual({ sourceSu: 0, dataBytes: 0, spans: 0 })
   })
 
