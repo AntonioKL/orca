@@ -16,6 +16,21 @@ export async function readHostTabs(
   return response.result
 }
 
+type HostBrowserPageRow = { browserPageId: string; url: string }
+
+async function readHostBrowserPages(
+  hostClient: RuntimeClient,
+  worktreeSelector: string,
+  timeoutMs?: number
+): Promise<HostBrowserPageRow[]> {
+  const response = await hostClient.call<{ tabs: HostBrowserPageRow[] }>(
+    'browser.tabList',
+    { worktree: worktreeSelector },
+    { timeoutMs }
+  )
+  return response.result.tabs
+}
+
 /**
  * The browser pages the host itself still holds for a worktree.
  *
@@ -28,10 +43,8 @@ export async function readHostBrowserPageIds(
   hostClient: RuntimeClient,
   repoPath: string
 ): Promise<string[]> {
-  const response = await hostClient.call<{ tabs: { browserPageId: string }[] }>('browser.tabList', {
-    worktree: `path:${repoPath}`
-  })
-  return response.result.tabs.map((tab) => tab.browserPageId).sort()
+  const tabs = await readHostBrowserPages(hostClient, `path:${repoPath}`)
+  return tabs.map((tab) => tab.browserPageId).sort()
 }
 
 /**
@@ -46,9 +59,14 @@ export async function readHostBrowserPageUrl(
   repoPath: string,
   browserPageId: string
 ): Promise<string | null> {
-  const response = await hostClient.call<{ tabs: { browserPageId: string; url: string }[] }>(
-    'browser.tabList',
-    { worktree: `path:${repoPath}` }
-  )
-  return response.result.tabs.find((tab) => tab.browserPageId === browserPageId)?.url ?? null
+  const tabs = await readHostBrowserPages(hostClient, `path:${repoPath}`)
+  return tabs.find((tab) => tab.browserPageId === browserPageId)?.url ?? null
+}
+
+export async function readHostBrowserPageUrls(
+  hostClient: RuntimeClient,
+  worktreeSelector: string
+): Promise<string[]> {
+  const tabs = await readHostBrowserPages(hostClient, worktreeSelector, 15_000)
+  return tabs.map((tab) => tab.url)
 }
