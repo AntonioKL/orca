@@ -4718,6 +4718,11 @@ export class OrcaRuntimeService {
     this.scheduleRestoredMessageRepoints()
   }
 
+  // Why: the renderer fence is pushed live, so it can exist with no persisted record behind it
+  // (session sync lag, persistence unavailable). Remembering what this runtime fenced is the only
+  // way to guarantee an `unfenced` push later — otherwise that pane stays unspawnable until restart.
+  private readonly rendererFencedWorkerPaneWorktreeIds = new Map<string, string>()
+
   private getLegacyWorkerTerminalRecoveryPlan(): LegacyWorkerTerminalRecoveryPlan | null {
     try {
       return planLegacyWorkerTerminalRecovery(
@@ -4746,8 +4751,13 @@ export class OrcaRuntimeService {
         this.notifier?.resolveLegacyWorkerTerminalRecovery?.(blocked.paneKey, 'fenced', {
           worktreeId: blocked.worktreeId
         })
+        this.rendererFencedWorkerPaneWorktreeIds.set(blocked.paneKey, blocked.worktreeId)
       }
     }
+    const blockedPaneKeys = new Set(plan.blockedPanes.map((blocked) => blocked.paneKey))
+    // Why: run before the persistence bail-out below — a fence this runtime pushed must be liftable
+    // even when the workspace session is unreadable.
+    const rendererLifted = this.liftRendererLegacyWorkerResumeFences(blockedPaneKeys)
     const store = this.store
     if (
       !store?.getWorkspaceSession ||
@@ -4800,7 +4810,12 @@ export class OrcaRuntimeService {
         changedHostIds.add(hostId)
       }
     }
-    this.liftRetiredLegacyWorkerResumeFences(plan, sessions, changedHostIds)
+    this.liftRetiredLegacyWorkerResumeFences(
+      blockedPaneKeys,
+      sessions,
+      changedHostIds,
+      rendererLifted
+    )
     const changed = [...sessions].filter(([hostId]) => changedHostIds.has(hostId))
     if (changed.length === 0) {
       return plan
@@ -4820,16 +4835,31 @@ export class OrcaRuntimeService {
    * terminal that can never spawn again. Release, user retain, and dispatch pruning all drop the
    * row from the recovery plan — that is the signal to retire the fence.
    */
+  private liftRendererLegacyWorkerResumeFences(
+    blockedPaneKeys: ReadonlySet<string>
+  ): ReadonlySet<string> {
+    const lifted = new Set<string>()
+    for (const [paneKey, worktreeId] of this.rendererFencedWorkerPaneWorktreeIds) {
+      if (blockedPaneKeys.has(paneKey)) {
+        continue
+      }
+      this.rendererFencedWorkerPaneWorktreeIds.delete(paneKey)
+      this.notifier?.resolveLegacyWorkerTerminalRecovery?.(paneKey, 'unfenced', { worktreeId })
+      lifted.add(paneKey)
+    }
+    return lifted
+  }
+
   private liftRetiredLegacyWorkerResumeFences(
-    plan: LegacyWorkerTerminalRecoveryPlan,
+    blockedPaneKeys: ReadonlySet<string>,
     sessions: Map<ExecutionHostId, { current: WorkspaceSessionState; next: WorkspaceSessionState }>,
-    changedHostIds: Set<ExecutionHostId>
+    changedHostIds: Set<ExecutionHostId>,
+    alreadyLifted: ReadonlySet<string>
   ): void {
     const store = this.store
     if (!store?.getWorkspaceSession) {
       return
     }
-    const blockedPaneKeys = new Set(plan.blockedPanes.map((blocked) => blocked.paneKey))
     for (const hostId of store.getWorkspaceSessionHostIds?.() ?? [LOCAL_EXECUTION_HOST_ID]) {
       const staged = sessions.get(hostId)
       const session = staged?.next ?? store.getWorkspaceSession(hostId)
@@ -4854,6 +4884,10 @@ export class OrcaRuntimeService {
       for (const [paneKey, record] of retired) {
         const { automaticResumeBlockedBy: _retiredFence, ...unfenced } = record
         next[paneKey] = unfenced
+        this.rendererFencedWorkerPaneWorktreeIds.delete(paneKey)
+        if (alreadyLifted.has(paneKey)) {
+          continue
+        }
         this.notifier?.resolveLegacyWorkerTerminalRecovery?.(paneKey, 'unfenced', {
           worktreeId: record.worktreeId
         })

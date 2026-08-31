@@ -20,6 +20,7 @@ import {
   type LifecycleReconciliationResult
 } from '../../orchestration/lifecycle-reconciliation'
 import { waitForFederatedLifecycleSettlement } from '../../orchestration/federation-lifecycle-settlement'
+import { sweepSettledWorkerResumeFencesForLifecycle } from './settled-worker-resume-fence-sweep'
 import { abbreviateOrchestrationTasks } from '../../../../shared/orchestration-task-summary'
 import {
   ORCHESTRATION_LEGACY_RUN_ID,
@@ -323,18 +324,6 @@ function parseMessageTypes(rawTypes: string | undefined): MessageType[] | undefi
     throw new OrchestrationError('invalid_argument', `Invalid --types: ${invalidTypes.join(',')}`)
   }
   return types && types.length > 0 ? types : undefined
-}
-
-// Why: settlement is the moment a worker's pane stops being resumable work. Stamping the resume
-// fence here — not at release — is what lets it win the race with a workspace return. One sweep
-// covers every settled pane, so a batch of reconciled messages needs at most one.
-function fenceSettledWorkerPanes(
-  runtime: OrcaRuntimeService,
-  reconciled: readonly LifecycleReconciliationResult[]
-): void {
-  if (reconciled.some((result) => result.action === 'completed' || result.action === 'failed')) {
-    runtime.prepareLegacyWorkerTerminalRecovery()
-  }
 }
 
 function resolveMessageRun(
@@ -816,7 +805,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
             runtime.notifyMessageArrived(rejection.to_handle, rejection.type)
             return withSendWarnings({ message: rejection, lifecycle: reconciled })
           }
-          fenceSettledWorkerPanes(runtime, [reconciled])
+          sweepSettledWorkerResumeFencesForLifecycle(runtime, [reconciled])
           runtime.notifyMessageArrived(msg.to_handle, msg.type)
           return withSendWarnings(
             msg.type === 'worker_done' ? { message: msg, lifecycle: reconciled } : { message: msg }
@@ -1358,7 +1347,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
               ? (db.getMessageById(message.id) ?? message)
               : message
           })
-          fenceSettledWorkerPanes(runtime, reconciledMessages)
+          sweepSettledWorkerResumeFencesForLifecycle(runtime, reconciledMessages)
           db.markAsRead(messages.map((m) => m.id))
         }
 
