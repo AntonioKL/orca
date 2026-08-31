@@ -39,6 +39,15 @@ export function shouldHandleAutomationRunHistoryKey(event: {
     if (target.closest('[role="dialog"], [role="menu"], [role="listbox"]')) {
       return false
     }
+    // Enter belongs to the focused control; a focused run row is a button that opens itself on click.
+    if (
+      event.key === 'Enter' &&
+      target.closest(
+        'button, a[href], summary, [role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="checkbox"], [role="switch"]'
+      )
+    ) {
+      return false
+    }
   }
 
   return true

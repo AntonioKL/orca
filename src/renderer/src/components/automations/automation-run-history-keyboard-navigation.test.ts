@@ -76,6 +76,22 @@ describe('shouldHandleAutomationRunHistoryKey', () => {
 
     dialog.remove()
   })
+
+  it('leaves Enter to a focused button or link but still handles arrows there', () => {
+    const button = document.createElement('button')
+    const link = document.createElement('a')
+    link.setAttribute('href', '#')
+
+    expect(shouldHandleAutomationRunHistoryKey(makeEvent({ key: 'Enter', target: button }))).toBe(
+      false
+    )
+    expect(shouldHandleAutomationRunHistoryKey(makeEvent({ key: 'Enter', target: link }))).toBe(
+      false
+    )
+    expect(
+      shouldHandleAutomationRunHistoryKey(makeEvent({ key: 'ArrowDown', target: button }))
+    ).toBe(true)
+  })
 })
 
 describe('getAutomationRunHistoryArrowTarget', () => {
