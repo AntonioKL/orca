@@ -1,6 +1,7 @@
 'use client'
 
 import { useDocsSearch } from 'fumadocs-core/search/client'
+import type { SortedResult } from 'fumadocs-core/search'
 import { GitBranch, MessageCircle, Search, X } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -36,6 +37,8 @@ type Props = {
   dialogId?: string
   onClose: () => void
 }
+
+type SearchResult = SortedResult
 
 const DIALOG_FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]):not([tabindex="-1"]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
@@ -108,7 +111,7 @@ export default function SearchDialog({ dialogId = 'docs-search-dialog', onClose 
   const dialogRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
 
-  const results = useMemo(() => {
+  const results = useMemo<SearchResult[]>(() => {
     if (!query.data || query.data === 'empty') {
       return []
     }
@@ -317,8 +320,7 @@ export default function SearchDialog({ dialogId = 'docs-search-dialog', onClose 
           {results.length > 0 && (
             <div className="px-3 py-3">
               {(() => {
-                const groups: { page: (typeof results)[number] | null; items: typeof results }[] =
-                  []
+                const groups: { page: SearchResult | null; items: SearchResult[] }[] = []
                 for (const r of results) {
                   if (r.type === 'page') {
                     groups.push({ page: r, items: [] })
