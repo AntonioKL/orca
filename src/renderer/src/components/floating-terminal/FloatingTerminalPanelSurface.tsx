@@ -16,6 +16,7 @@ import { FloatingTerminalOrchestrationDialog } from './FloatingTerminalOrchestra
 import { FloatingTerminalResizeHandles } from './FloatingTerminalResizeHandles'
 import { renderFloatingTerminalSaveDialog } from './FloatingTerminalSaveDialog'
 import { FloatingTerminalWindowControls } from './FloatingTerminalWindowControls'
+import { FloatingWorkspaceTabDragContext } from './FloatingWorkspaceTabDragContext'
 import type { useFloatingTerminalPanelController } from './use-floating-terminal-panel-controller'
 
 const EditorPanel = lazy(() => import('@/components/editor/EditorPanel'))
@@ -129,7 +130,7 @@ export function renderFloatingTerminalPanelSurface({
           onPointerCancel={handleDragEnd}
           onDoubleClick={handleTitlebarDoubleClick}
         >
-          <div className="flex h-full min-w-0 flex-1">
+          <FloatingWorkspaceTabDragContext enabled={open}>
             <TabBar
               tabs={terminalItems}
               activeTabId={activeTerminalId}
@@ -178,7 +179,7 @@ export function renderFloatingTerminalPanelSurface({
               tabBarOrder={tabBarOrder}
               tabStripChrome="floating-panel"
             />
-          </div>
+          </FloatingWorkspaceTabDragContext>
           <FloatingTerminalWindowControls
             maximized={maximized}
             onToggleMaximized={toggleMaximized}
