@@ -138,6 +138,10 @@ export function bindHandleReattachResult(sessionBag: ConnectPanePtySession): voi
       const currentPtyId = session.transport.getPtyId()
       return (
         !session.disposed &&
+        // A remount can leave the old transport alive long enough to finish
+        // its reattach. Only the transport currently registered for this pane
+        // may publish pane/store ownership.
+        session.deps.paneTransportsRef.current.get(session.pane.id) === session.transport &&
         attemptGeneration === session.transportStreamGeneration &&
         currentPtyId === ptyId
       )

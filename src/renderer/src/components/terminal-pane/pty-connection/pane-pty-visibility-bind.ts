@@ -188,6 +188,9 @@ export function installPanePtyVisibilityBind(session: ConnectPanePtySession): vo
     }
   }
   session.onPtyRebind = (ptyId: string, replacedPtyId: string): void => {
+    if (session.deps.paneTransportsRef.current.get(session.pane.id) !== session.transport) {
+      return
+    }
     if (!session.canAdoptCapturedDirectSshRetryPty(ptyId)) {
       return
     }

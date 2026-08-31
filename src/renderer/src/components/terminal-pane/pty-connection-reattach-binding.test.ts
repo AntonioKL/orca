@@ -221,6 +221,43 @@ describe('connectPanePty', () => {
     expect(transport.resize).toHaveBeenLastCalledWith(65, 63, { claim: true })
   })
 
+  it('does not let a stale pane transport publish a completed reattach', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const reattach = createDeferred<{ id: string; isReattach: true }>()
+    const staleTransport = createMockTransport()
+    let stalePtyId: string | null = 'terminal-old'
+    staleTransport.getPtyId.mockImplementation(() => stalePtyId)
+    staleTransport.connect.mockImplementation(async () => {
+      stalePtyId = 'terminal-new'
+      return reattach.promise
+    })
+    transportFactoryQueue.push(staleTransport)
+    const pane = createPane(1)
+    const manager = createManager(1)
+    const paneTransportsRef = { current: new Map<number, MockTransport>() }
+    const deps = createDeps({
+      paneTransportsRef,
+      restoredLeafId: LEAF_1,
+      restoredPtyIdByLeafId: { [LEAF_1]: 'terminal-old' }
+    })
+
+    connectPanePty(pane as never, manager as never, deps as never)
+    await flushAsyncTicks(4)
+    expect(staleTransport.connect).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'terminal-old' })
+    )
+
+    const currentTransport = createMockTransport('terminal-current')
+    paneTransportsRef.current.set(pane.id, currentTransport)
+    pane.container.dataset.ptyId = 'terminal-current'
+    reattach.resolve({ id: 'terminal-new', isReattach: true })
+    await flushAsyncTicks(12)
+
+    expect(pane.container.dataset.ptyId).toBe('terminal-current')
+    expect(deps.updateTabPtyId).not.toHaveBeenCalled()
+    expect(deps.syncPanePtyLayoutBinding).not.toHaveBeenCalledWith(1, 'terminal-new')
+  })
+
   it('adopts a live eager PTY and withholds snapshots after its renderer dies', async () => {
     // Why: a live eager buffer means "attach + replay", not "reattach" — else first mount mis-routes to daemon-reattach and orphans the eager agent PTY.
     const eagerPtyId = 'auto-eager-pty'
