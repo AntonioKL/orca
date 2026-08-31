@@ -62,6 +62,30 @@ export function createTerminalPtyBindingActions(
           : existingPtyIds.includes(ptyId)
             ? existingPtyIds
             : [...existingPtyIds, ptyId]
+        // Keep provider handle rotation atomic across tab and pane ownership.
+        let nextTerminalLayoutsByTabId = s.terminalLayoutsByTabId
+        if (replacementPtyId) {
+          const existingLayout = s.terminalLayoutsByTabId[tabId]
+          const existingBindings = existingLayout?.ptyIdsByLeafId
+          if (existingLayout && existingBindings) {
+            let changed = false
+            const nextBindings = Object.fromEntries(
+              Object.entries(existingBindings).map(([leafId, currentPtyId]) => {
+                if (currentPtyId !== replacementPtyId) {
+                  return [leafId, currentPtyId]
+                }
+                changed = true
+                return [leafId, ptyId]
+              })
+            )
+            if (changed) {
+              nextTerminalLayoutsByTabId = {
+                ...s.terminalLayoutsByTabId,
+                [tabId]: { ...existingLayout, ptyIdsByLeafId: nextBindings }
+              }
+            }
+          }
+        }
         let nextTabsByWorktree = s.tabsByWorktree
         for (const [wId, tabs] of Object.entries(s.tabsByWorktree)) {
           const index = tabs.findIndex((t) => t.id === tabId)
@@ -235,6 +259,9 @@ export function createTerminalPtyBindingActions(
           migrationUnsupportedByPtyId: nextMigrationUnsupportedByPtyId,
           directSshPaneRetryByTabId: nextDirectSshPaneRetryByTabId,
           directSshLivePtyBindingByTabId: nextDirectSshLivePtyBindingByTabId,
+          ...(nextTerminalLayoutsByTabId !== s.terminalLayoutsByTabId
+            ? { terminalLayoutsByTabId: nextTerminalLayoutsByTabId }
+            : {}),
           ...(shouldBumpSortEpoch ? { sortEpoch: s.sortEpoch + 1 } : {})
         }
       })

@@ -47,7 +47,6 @@ export function installPanePtyVisibilityBind(session: ConnectPanePtySession): vo
     session.activePanePtyBindingBoundAt = performance.now()
     session.registerSideEffectFactConsumerForPty(ptyId)
     session.syncHiddenRendererPtyDelivery()
-    session.deps.syncPanePtyLayoutBinding(session.pane.id, ptyId)
     // A live bind proves this pane is current again after detach/reattach.
     useAppStore.getState().restoreAgentPaneAuthority?.(session.cacheKey)
     notifyCodexPaneBoundForStaleSweep(ptyId)
@@ -56,11 +55,7 @@ export function installPanePtyVisibilityBind(session: ConnectPanePtySession): vo
       session.capturedDirectSshRetryPtyAccepted && session.directSshRetryAttempt
         ? session.directSshRetryAttempt.attemptId
         : undefined
-    if (
-      directSshRetryAttemptId ||
-      options.updateTabPtyId !== 'if-missing' ||
-      !tabPtyIds.includes(ptyId)
-    ) {
+    const updateTabPtyBinding = (): void => {
       if (directSshRetryAttemptId) {
         session.deps.updateTabPtyId(
           session.deps.tabId,
@@ -72,6 +67,24 @@ export function installPanePtyVisibilityBind(session: ConnectPanePtySession): vo
         session.deps.updateTabPtyId(session.deps.tabId, ptyId, options.replacePtyId)
       } else {
         session.deps.updateTabPtyId(session.deps.tabId, ptyId)
+      }
+    }
+    const shouldUpdateTabPtyId =
+      directSshRetryAttemptId ||
+      options.updateTabPtyId !== 'if-missing' ||
+      !tabPtyIds.includes(ptyId)
+    if (options.replacePtyId) {
+      // Replacement updates the tab and pane ownership in one store commit;
+      // this follow-up is a no-op in production but keeps non-store test deps
+      // and pane-local bookkeeping in sync.
+      if (shouldUpdateTabPtyId) {
+        updateTabPtyBinding()
+      }
+      session.deps.syncPanePtyLayoutBinding(session.pane.id, ptyId)
+    } else {
+      session.deps.syncPanePtyLayoutBinding(session.pane.id, ptyId)
+      if (shouldUpdateTabPtyId) {
+        updateTabPtyBinding()
       }
     }
     if (session.paneStartup && !session.startupPtyBound) {
