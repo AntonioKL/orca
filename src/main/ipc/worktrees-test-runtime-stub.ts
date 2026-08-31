@@ -13,6 +13,8 @@ export type WorktreeRuntimeStub = {
   resolveManagedMrBase: ReturnType<typeof vi.fn>
   createTerminal: ReturnType<typeof vi.fn>
   splitTerminal: ReturnType<typeof vi.fn>
+  setMobileSessionTabProps: ReturnType<typeof vi.fn>
+  waitForSetupTerminalCompletion: ReturnType<typeof vi.fn>
   notifyWorktreesChangedForRemoteClients: ReturnType<typeof vi.fn>
   closeFileWatchersForRemoval: ReturnType<typeof vi.fn>
   acquireFileWatcherRemoval: ReturnType<typeof vi.fn>
@@ -43,6 +45,8 @@ export function createWorktreeRuntimeStub(): WorktreeRuntimeStub {
       tabId: 'tab-startup',
       paneRuntimeId: -1
     }),
+    setMobileSessionTabProps: vi.fn().mockResolvedValue({ updated: true }),
+    waitForSetupTerminalCompletion: vi.fn().mockResolvedValue({ exitCode: 0 }),
     notifyWorktreesChangedForRemoteClients: vi.fn(),
     closeFileWatchersForRemoval: vi.fn().mockResolvedValue(undefined),
     acquireFileWatcherRemoval: vi.fn(),

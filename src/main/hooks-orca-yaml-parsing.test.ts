@@ -374,6 +374,99 @@ describe('parseOrcaYaml', () => {
     expect(result?.scripts.setup).toBe('pnpm install')
     expect(result?.worktree?.sharedDirectories).toEqual(['.cache'])
   })
+
+  it('parses dependency seed paths and fingerprint inputs from worktree defaults', () => {
+    const result = parseOrcaYaml(
+      [
+        'worktree:',
+        '  dependencySeedPaths:',
+        '    - node_modules',
+        '    - .cache',
+        '  dependencySeedInputs:',
+        '    - package.json',
+        '    - pnpm-lock.yaml'
+      ].join('\n')
+    )
+
+    expect(result).toEqual({
+      scripts: {},
+      worktree: {
+        dependencySeedPaths: ['node_modules', '.cache'],
+        dependencySeedInputs: ['package.json', 'pnpm-lock.yaml']
+      }
+    })
+  })
+
+  it('normalizes and dedupes dependency seed paths and inputs', () => {
+    const result = parseOrcaYaml(
+      [
+        'worktree:',
+        '  dependencySeedPaths:',
+        '    - node_modules/',
+        '    - ./node_modules',
+        '    - apps\\web\\node_modules',
+        '    - apps/./web/node_modules',
+        '    - ../escape',
+        '    - /etc',
+        '    - .git',
+        '  dependencySeedInputs:',
+        '    - ./package.json',
+        '    - package.json',
+        '    - lockfiles\\pnpm-lock.yaml',
+        '    - lockfiles//yarn.lock',
+        '    - ..\\secret'
+      ].join('\n')
+    )
+
+    expect(result?.worktree).toEqual({
+      dependencySeedPaths: ['node_modules', 'apps/web/node_modules'],
+      dependencySeedInputs: ['package.json', 'lockfiles/pnpm-lock.yaml']
+    })
+  })
+
+  it('preserves explicitly empty dependency seed arrays', () => {
+    expect(
+      parseOrcaYaml(
+        ['worktree:', '  dependencySeedPaths: []', '  dependencySeedInputs: []'].join('\n')
+      )
+    ).toEqual({
+      scripts: {},
+      worktree: {
+        dependencySeedPaths: [],
+        dependencySeedInputs: []
+      }
+    })
+  })
+
+  it('preserves explicit dependency arrays after normalization removes every entry', () => {
+    expect(
+      parseOrcaYaml(
+        [
+          'scripts:',
+          '  setup: pnpm install',
+          'worktree:',
+          '  dependencySeedPaths:',
+          '    - ../escape',
+          '  dependencySeedInputs:',
+          '    - /etc/passwd'
+        ].join('\n')
+      )
+    ).toEqual({
+      scripts: { setup: 'pnpm install' },
+      worktree: {
+        dependencySeedPaths: [],
+        dependencySeedInputs: []
+      }
+    })
+  })
+
+  it('keeps malformed dependency values absent while preserving sharedDirectories behavior', () => {
+    expect(
+      parseOrcaYaml(
+        ['worktree:', '  dependencySeedPaths: node_modules', '  sharedDirectories: []'].join('\n')
+      )
+    ).toBeNull()
+  })
 })
 
 describe('hasUnrecognizedOrcaYamlKeys', () => {

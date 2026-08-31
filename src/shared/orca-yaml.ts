@@ -32,28 +32,30 @@ export const ORCA_VM_RECIPE_ID_RULE =
   'Use 1-64 lowercase letters, numbers, dots, underscores, or hyphens, starting with a letter or number.'
 
 // Why: bound the work one repo file can request; entries beyond this are ignored.
-const MAX_SHARED_DIRECTORIES = 100
+const MAX_WORKTREE_PATHS = 100
 
-/** Normalize `worktree.sharedDirectories` into deduped repo-root-relative paths.
+/** Normalize a worktree path list into deduped repo-root-relative paths.
  *  `\` becomes `/`, a `./` prefix and trailing `/` are stripped. Absolute paths,
  *  `..` traversal and `.git` are dropped here so callers get only safe entries.
  *
  *  Entries that would still need collapsing (`apps/./web`) are dropped rather
- *  than rewritten: `resolve()` collapses them when the symlink is created, but
- *  Git reports the collapsed path, so every later comparison against the stored
- *  entry would miss and the link would look like permanent untracked work. */
-function normalizeSharedDirectories(value: unknown): string[] {
+ *  than rewritten: callers compare these paths textually, so collapsing them
+ *  later would make the stored identity differ from the materialized path. */
+function normalizeWorktreePaths(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return []
   }
 
   const seen = new Set<string>()
-  for (const entry of value.slice(0, MAX_SHARED_DIRECTORIES)) {
+  for (const entry of value.slice(0, MAX_WORKTREE_PATHS)) {
     const raw = asTrimmedString(entry)
     if (!raw) {
       continue
     }
-    const normalized = raw.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '')
+    const normalized = raw
+      .replace(/\\/g, '/')
+      .replace(/^(?:\.\/)+/u, '')
+      .replace(/\/+$/, '')
     const segments = normalized.split('/')
     if (
       !normalized ||
@@ -70,6 +72,8 @@ function normalizeSharedDirectories(value: unknown): string[] {
   }
   return Array.from(seen)
 }
+
+const normalizeSharedDirectories = normalizeWorktreePaths
 
 function normalizeDefaultTabs(value: unknown): OrcaDefaultTabTemplate[] {
   if (!Array.isArray(value) || value.length > MAX_ORCA_YAML_COLLECTION_ENTRIES) {
@@ -236,9 +240,27 @@ export function parseOrcaYaml(content: string): OrcaHooks | null {
   const environmentRecipes = environmentRecipeParse.recipes
   const environmentRecipeDiagnostics = environmentRecipeParse.diagnostics
   const worktreeRecord = asRecord(record.worktree)
+  // Keep an explicitly-declared dependency array, including `[]`, so callers
+  // can distinguish "disable this input/path set" from an omitted setting.
+  const dependencySeedPathsConfigured = Array.isArray(worktreeRecord?.dependencySeedPaths)
+  const dependencySeedInputsConfigured = Array.isArray(worktreeRecord?.dependencySeedInputs)
   const sharedDirectories = worktreeRecord
     ? normalizeSharedDirectories(worktreeRecord.sharedDirectories)
     : []
+  const dependencySeedPaths = worktreeRecord
+    ? normalizeWorktreePaths(worktreeRecord.dependencySeedPaths)
+    : []
+  const dependencySeedInputs = worktreeRecord
+    ? normalizeWorktreePaths(worktreeRecord.dependencySeedInputs)
+    : []
+  const worktree =
+    sharedDirectories.length > 0 || dependencySeedPathsConfigured || dependencySeedInputsConfigured
+      ? {
+          ...(sharedDirectories.length > 0 ? { sharedDirectories } : {}),
+          ...(dependencySeedPathsConfigured ? { dependencySeedPaths } : {}),
+          ...(dependencySeedInputsConfigured ? { dependencySeedInputs } : {})
+        }
+      : undefined
 
   if (
     !setup &&
@@ -248,7 +270,7 @@ export function parseOrcaYaml(content: string): OrcaHooks | null {
     defaultTabs.length === 0 &&
     environmentRecipes.length === 0 &&
     environmentRecipeDiagnostics.length === 0 &&
-    sharedDirectories.length === 0
+    worktree === undefined
   ) {
     return null
   }
@@ -263,6 +285,6 @@ export function parseOrcaYaml(content: string): OrcaHooks | null {
     ...(defaultTabs.length > 0 ? { defaultTabs } : {}),
     ...(environmentRecipes.length > 0 ? { environmentRecipes } : {}),
     ...(environmentRecipeDiagnostics.length > 0 ? { environmentRecipeDiagnostics } : {}),
-    ...(sharedDirectories.length > 0 ? { worktree: { sharedDirectories } } : {})
+    ...(worktree ? { worktree } : {})
   }
 }

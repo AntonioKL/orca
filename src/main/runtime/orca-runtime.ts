@@ -1179,6 +1179,13 @@ import {
   getEffectiveSetupRunPolicy,
   shouldRunSetupForCreate
 } from '../effective-hook-config'
+import {
+  hydrateWorktreeDependencies,
+  promoteWorktreeDependencySeed,
+  readWorktreeDependencySeedInputs,
+  type WorktreeDependencySeedArgs
+} from '../worktree-dependency-seed'
+import { resolveWorktreeDependencySeedPlan } from '../worktree-dependency-seed-plan'
 import { readIssueCommand, writeIssueCommand } from '../issue-command-file'
 import {
   DEFAULT_REPO_BADGE_COLOR,
@@ -22112,12 +22119,15 @@ export class OrcaRuntimeService {
     return unsubscribe
   }
 
-  async waitForSetupTerminalCompletion(handle: string): Promise<{ exitCode: number | null }> {
+  async waitForSetupTerminalCompletion(
+    handle: string,
+    completionTokenOverride?: string
+  ): Promise<{ exitCode: number | null }> {
     const ptyId = this.getLivePtyForHandle(handle)?.pty.ptyId
     if (!ptyId) {
       throw new Error('terminal_handle_stale')
     }
-    const completionToken = this.setupCompletionTokenByPtyId.get(ptyId)
+    const completionToken = completionTokenOverride ?? this.setupCompletionTokenByPtyId.get(ptyId)
     const exitAbort = new AbortController()
     return await new Promise<{ exitCode: number | null }>((resolve, reject) => {
       let settled = false
@@ -22132,7 +22142,9 @@ export class OrcaRuntimeService {
         }
         settled = true
         cleanup()
-        this.setupCompletionTokenByPtyId.delete(ptyId)
+        if (this.setupCompletionTokenByPtyId.get(ptyId) === completionToken) {
+          this.setupCompletionTokenByPtyId.delete(ptyId)
+        }
         resolve({ exitCode })
       }
       const fail = (error: unknown): void => {
@@ -26357,6 +26369,10 @@ export class OrcaRuntimeService {
     hasStartupTerminal: boolean
     setupCommandPlatform: 'windows' | 'posix'
     observeSetupCompletion?: boolean
+    /** Promote a dependency seed after this setup terminal exits successfully. */
+    onSetupCompleted?: (exitCode: number | null) => void | Promise<void>
+    /** Seed-only setup can run in its own tab without inventing a shell pane. */
+    avoidPrimaryTerminal?: boolean
     // Why: when the agent startup is sequenced to wait for setup
     // (waitForAgentStartup), the startup PTY runs a wrapper that already embeds
     // the setup command. Pass that wrapped command through so the Setup tab runs
@@ -26386,24 +26402,29 @@ export class OrcaRuntimeService {
             Pick<GlobalSettings, 'setupScriptLaunchMode'>
           >
         ).setupScriptLaunchMode ?? 'new-tab'
-      if (!args.hasStartupTerminal && !primaryTerminalHandle) {
+      if (
+        !args.hasStartupTerminal &&
+        !primaryTerminalHandle &&
+        args.avoidPrimaryTerminal !== true
+      ) {
         const terminal = await this.createTerminal(args.worktreeSelector, surfacing)
         primaryTerminalHandle = terminal.handle
       }
       if (args.setup) {
         const completionToken =
-          args.observeSetupCompletion && !args.wrappedSetupCommand ? randomUUID() : null
+          args.observeSetupCompletion || args.onSetupCompleted ? randomUUID() : null
         const observedCommand = completionToken
           ? buildObservedSetupCommand(
               args.setup.runnerScriptPath,
               args.setupCommandPlatform,
               completionToken,
-              args.setup.shell
+              args.setup.shell,
+              args.wrappedSetupCommand
             )
           : null
         const setupCommand =
-          args.wrappedSetupCommand ??
           observedCommand?.command ??
+          args.wrappedSetupCommand ??
           buildSetupRunnerCommand(
             args.setup.runnerScriptPath,
             args.setupCommandPlatform,
@@ -26432,6 +26453,18 @@ export class OrcaRuntimeService {
         const ptyId = this.getLivePtyForHandle(setupTerminal.handle)?.pty.ptyId
         if (completionToken && ptyId) {
           this.setupCompletionTokenByPtyId.set(ptyId, completionToken)
+        }
+        if (args.onSetupCompleted) {
+          // Setup can take minutes; keep terminal provisioning responsive while
+          // promoting only after the runner reports a successful exit.
+          void this.waitForSetupTerminalCompletion(
+            setupTerminal.handle,
+            completionToken ?? undefined
+          )
+            .then(({ exitCode }) => args.onSetupCompleted?.(exitCode))
+            .catch((error) => {
+              console.warn('[worktree-create] setup completion observation failed:', error)
+            })
         }
       }
     } catch (err) {
@@ -27419,6 +27452,77 @@ export class OrcaRuntimeService {
         : undefined
     }
     const shouldRunSetup = hooks?.scripts.setup && shouldRunSetupForCreate(repo, effectiveDecision)
+    // Dependency seeds are opt-in through the setup hook's successful run. The
+    // default path keeps the common Node workspace fast, while an explicit
+    // empty list in orca.yaml disables seeding for a project.
+    // Copy-on-write seeds are implemented only by the local Darwin/Linux
+    // clone backends. Avoid even reading lockfiles or resolving seed config on
+    // unsupported hosts (notably Windows and remote-only runtime paths).
+    const dependencySeedPlan =
+      process.platform === 'darwin' || process.platform === 'linux'
+        ? resolveWorktreeDependencySeedPlan(yamlHooks)
+        : null
+    const dependencySeedPaths = dependencySeedPlan?.paths ?? []
+    const dependencySeedInputPaths = dependencySeedPlan?.fingerprintPaths
+    let dependencySeedArgs: WorktreeDependencySeedArgs | null = null
+    if (
+      dependencySeedPlan &&
+      shouldRunSetup &&
+      hooks?.scripts.setup &&
+      dependencySeedPaths.length > 0
+    ) {
+      try {
+        // Read from the target branch: its lockfiles may differ from the
+        // primary checkout used to resolve the worktree.
+        const lockfiles = await readWorktreeDependencySeedInputs(
+          worktreePath,
+          dependencySeedInputPaths
+        )
+        // A seed without a reproducible input is intentionally disabled. Keep
+        // ordinary setup/terminal ownership unchanged for repos without a lockfile.
+        if (lockfiles.length > 0) {
+          dependencySeedArgs = {
+            repo,
+            worktreePath,
+            setupScript: hooks.scripts.setup,
+            declaredSeedPaths: dependencySeedPaths,
+            lockfiles,
+            allowRuntimeExecutionHost: true
+          }
+          const hydration = await hydrateWorktreeDependencies(dependencySeedArgs)
+          if (hydration.status === 'failed' || hydration.status === 'skipped') {
+            console.warn(`[worktree-create] dependency seed hydration failed for ${worktreePath}`)
+            dependencySeedArgs = null
+          }
+        }
+      } catch (error) {
+        // Seeding is an optimization; never make a real worktree create fail.
+        console.warn(
+          `[worktree-create] dependency seed hydration skipped for ${worktreePath}:`,
+          error
+        )
+        dependencySeedArgs = null
+      }
+    }
+    const promoteDependencySeedAfterSetup = async (exitCode: number | null): Promise<void> => {
+      if (exitCode !== 0 || !dependencySeedArgs) {
+        return
+      }
+      // A setup hook may update its lockfile (for example, an explicitly
+      // unlocked package-manager install). Re-read the target snapshot so the
+      // published tree and marker describe the same final state.
+      const promotionInputs = await readWorktreeDependencySeedInputs(
+        worktreePath,
+        dependencySeedInputPaths
+      )
+      const promotion = await promoteWorktreeDependencySeed({
+        ...dependencySeedArgs,
+        lockfiles: promotionInputs
+      })
+      if (promotion.status === 'failed') {
+        console.warn(`[worktree-create] dependency seed promotion failed for ${worktreePath}`)
+      }
+    }
     // Why: the in-process hook uses a hardcoded cmd/bash shell, so it can only run
     // when nothing downstream is able to launch the shell-aware runner script.
     let didStartInProcessSetupHook = false
@@ -27446,6 +27550,11 @@ export class OrcaRuntimeService {
           // generation fails, keep creation successful and surface the problem in
           // logs rather than pretending the worktree was never created.
           console.error(`[hooks] Failed to prepare setup runner for ${worktreePath}:`, error)
+          // Hydration may have completed before runner generation. Without a
+          // runner there is no setup terminal to observe, so do not leave a
+          // seed context armed for a promotion that can never be tied to a
+          // successful setup run.
+          dependencySeedArgs = null
         }
       } else {
         didStartInProcessSetupHook = true
@@ -27455,11 +27564,22 @@ export class OrcaRuntimeService {
           repo,
           worktreePath,
           this.getLocalGitExecutionOptionArgs(repo)[0]
-        ).then((result) => {
-          if (!result.success) {
-            console.error(`[hooks] setup hook failed for ${worktreePath}:`, result.output)
-          }
-        })
+        )
+          .then((result) => {
+            if (!result.success) {
+              console.error(`[hooks] setup hook failed for ${worktreePath}:`, result.output)
+              return
+            }
+            void promoteDependencySeedAfterSetup(0).catch((error) => {
+              console.warn(
+                `[worktree-create] dependency seed promotion skipped for ${worktreePath}:`,
+                error
+              )
+            })
+          })
+          .catch((error) => {
+            console.error(`[hooks] setup hook failed for ${worktreePath}:`, error)
+          })
       }
     } else if (hooks?.scripts.setup && effectiveDecision !== 'skip') {
       // Runtime RPC calls have no renderer trust prompt, so hooks require explicit CLI opt-in.
@@ -27479,6 +27599,10 @@ export class OrcaRuntimeService {
 
     this.notifyWorktreesChanged(repo.id)
     const shouldActivate = args.activate === true || args.runHooks === true
+    // A seed is promoted only after a runtime-owned setup terminal exits. This
+    // remains true for an explicitly activated create that has no startup
+    // command (or whose startup pane failed to spawn).
+    const forceSeedSetup = Boolean(dependencySeedArgs && setup)
     let didSpawnStartup = false
     // Why: tracks whether runtime itself launched the setup script (via
     // provisionManagedWorktreeTerminals). When true, renderer activation and the
@@ -27559,7 +27683,15 @@ export class OrcaRuntimeService {
       // Why: plain CLI creates should not steal the user's current workspace.
       // Explicit activation and hook-running still use renderer activation so
       // the user can watch prompts/output in a visible pane.
-      const runtimeWillProvisionTerminals = didSpawnStartup && Boolean(setup || defaultTabs)
+      // A dependency seed needs a host-owned completion callback even when the
+      // caller explicitly activates a create without a startup command. In that
+      // case provision setup here so renderer activation cannot lose promotion.
+      const runtimeWillProvisionTerminals =
+        (didSpawnStartup && Boolean(setup || defaultTabs)) || forceSeedSetup
+      // Once runtime is provisioning any terminal for this create, let it own
+      // default tabs too; renderer activation can be short-circuited by host
+      // authority and would otherwise drop them on seeded creates.
+      const runtimeOwnsDefaultTabs = runtimeWillProvisionTerminals
       if (runtimeWillProvisionTerminals) {
         // Why: once runtime spawned the startup PTY, renderer activation may see
         // an existing terminal and skip setup/default tabs. Await provisioning so
@@ -27571,17 +27703,26 @@ export class OrcaRuntimeService {
           worktreeId: worktree.id,
           worktreePath,
           ...(setup ? { setup } : {}),
-          ...(defaultTabs ? { defaultTabs } : {}),
+          ...(defaultTabs && runtimeOwnsDefaultTabs ? { defaultTabs } : {}),
           primaryTerminalHandle: startupTerminalHandle,
           hasStartupTerminal: didSpawnStartup,
           setupCommandPlatform: getSetupRunnerCommandPlatformForLaunch(setup, 'posix'),
           observeSetupCompletion: args.observeSetupCompletion,
+          ...(setup && dependencySeedArgs
+            ? { onSetupCompleted: promoteDependencySeedAfterSetup }
+            : {}),
+          ...(forceSeedSetup ? { avoidPrimaryTerminal: true } : {}),
           // Why: carry the wait-for-agent wrapped setup command (#6298) so the
           // Setup tab runs the same script the sequenced agent waits on.
           ...(wrappedSetupCommandStr ? { wrappedSetupCommand: wrappedSetupCommandStr } : {})
         })
         didSpawnSetup = provisioned.setupSpawned
         setupTerminalHandle = provisioned.setupTerminalHandle
+        if (dependencySeedArgs && !didSpawnSetup) {
+          // Renderer activation can retry the setup descriptor, but cannot
+          // recover this host-owned promotion callback.
+          dependencySeedArgs = null
+        }
       }
       // Why: when runtime spawned setup, omit it from activation. When setup
       // spawn failed, fall through with the wrapped command so renderer
@@ -27596,7 +27737,8 @@ export class OrcaRuntimeService {
                 : {})
             }
           : undefined
-      const activationDefaultTabs = runtimeWillProvisionTerminals ? undefined : defaultTabs
+      const activationDefaultTabs =
+        runtimeWillProvisionTerminals && runtimeOwnsDefaultTabs ? undefined : defaultTabs
       if (effectiveStartup && !didSpawnStartup) {
         this.notifyActivateWorktree(repo.id, worktree.id, {
           setup: activationSetup,
@@ -27624,15 +27766,28 @@ export class OrcaRuntimeService {
         hasStartupTerminal: didSpawnStartup,
         setupCommandPlatform: getSetupRunnerCommandPlatformForLaunch(setup, 'posix'),
         observeSetupCompletion: args.observeSetupCompletion,
+        ...(setup && dependencySeedArgs
+          ? { onSetupCompleted: promoteDependencySeedAfterSetup }
+          : {}),
+        ...(forceSeedSetup ? { avoidPrimaryTerminal: true } : {}),
         ...(wrappedSetupCommandStr ? { wrappedSetupCommand: wrappedSetupCommandStr } : {}),
         surfaceOwner: false
       })
       // Why: runtime owns setup spawning here, so the RPC result must omit setup
       // to keep the headless/mobile caller from launching it a second time.
-      if (args.awaitTerminalProvisioning) {
+      // A dependency seed needs reliable spawn evidence and a completion
+      // observer. Await this path even for background creates so a failed
+      // setup spawn is returned to the renderer for retry instead of being
+      // reported as runtime-owned.
+      if (args.awaitTerminalProvisioning || Boolean(dependencySeedArgs)) {
         const provisioned = await provisioning
         didSpawnSetup = provisioned.setupSpawned
         setupTerminalHandle = provisioned.setupTerminalHandle
+        if (dependencySeedArgs && !didSpawnSetup) {
+          // A failed seed-owned spawn must fail open to ordinary setup retry;
+          // do not retain a promotion callback that no longer has an owner.
+          dependencySeedArgs = null
+        }
       } else {
         void provisioning
         if (setup) {

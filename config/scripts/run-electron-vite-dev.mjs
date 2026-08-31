@@ -1,7 +1,6 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
-  cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -23,6 +22,7 @@ import {
   getDevBundlePlistPatches,
   getDevHelperPlistPatches
 } from './dev-electron-bundle-identity.mjs'
+import { copyMacElectronBundle } from './macos-electron-bundle-copy.mjs'
 
 // Why: Electron-based hosts (e.g. Claude Code, VS Code) set
 // ELECTRON_RUN_AS_NODE=1 in their terminal environment. If this leaks into
@@ -300,7 +300,7 @@ function prepareMacDevElectronApp() {
   mkdirSync(distDir, { recursive: true })
   // Why: Electron.framework uses relative symlinks for its bundle resources;
   // resolving them to pnpm-store absolutes breaks Chromium's bundle lookup.
-  cpSync(sourceAppPath, appPath, { recursive: true, verbatimSymlinks: true })
+  copyMacElectronBundle(sourceAppPath, appPath)
   restoreElectronFrameworkSymlinks(appPath)
 
   const plistPath = path.join(appPath, 'Contents', 'Info.plist')

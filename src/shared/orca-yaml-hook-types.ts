@@ -20,6 +20,10 @@ export type OrcaWorktreeDefaults = {
   // Why: shared (symlinked) rather than copied — large rebuildable dirs like
   // node_modules should be one install serving every worktree.
   sharedDirectories?: string[]
+  /** Repo-relative paths to seed into newly-created worktrees after setup. */
+  dependencySeedPaths?: string[]
+  /** Repo-relative files that identify the dependency/setup input for a seed. */
+  dependencySeedInputs?: string[]
 }
 
 export type OrcaDefaultTabTemplate = {

@@ -77,6 +77,20 @@ describe('orchestration setup completion signal', () => {
     expect(observed.env).toEqual({ ORCA_SETUP_RUNNER_PATH: runnerPath })
   })
 
+  it('observes an already-wrapped POSIX setup command', () => {
+    const { command } = buildObservedSetupCommand(
+      '/repo/.git/orca/setup-runner.sh',
+      'posix',
+      'token-wrapped',
+      undefined,
+      `bash -lc 'touch "$PWD/.setup-ready"; exit 23'`
+    )
+
+    expect(command).toContain('touch "$PWD/.setup-ready"')
+    expect(command).toContain('__ORCA_SETUP_COMPLETE__:token-wrapped:%s\\n')
+    expect(command).toContain('exit "$status"')
+  })
+
   it('recognizes one completion signal across output chunk boundaries', () => {
     const onComplete = vi.fn()
     const scanner = createSetupCompletionScanner('token-chunks', onComplete)

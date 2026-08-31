@@ -127,7 +127,15 @@ import {
   buildSetupRunnerCommand,
   getSetupRunnerCommandPlatformForPath
 } from '../../shared/setup-runner-command'
+import { buildObservedSetupCommand } from '../runtime/orchestration/setup-completion-signal'
 import { createSequencedSetupAgentCommands } from '../../shared/setup-agent-sequencing'
+import {
+  hydrateWorktreeDependencies,
+  promoteWorktreeDependencySeed,
+  readWorktreeDependencySeedInputs,
+  resolveWorktreeDependencySeedPlan,
+  type WorktreeDependencySeedArgs
+} from '../worktree-dependency-seed'
 import { shouldWaitForSetupBeforeAgentStartup } from '../../shared/setup-agent-startup-policy'
 import { createWorktreeCreateTimingRecorder } from '../worktree-create-timing'
 import {
@@ -174,6 +182,8 @@ type RemoteWorktreeCreateBasePlan = {
 type StagedStartupResult = {
   startupTerminal?: CreateWorktreeResult['startupTerminal']
   activationSetup?: CreateWorktreeResult['setup']
+  setupTerminalHandle?: string
+  didSpawnDefaultTabs?: boolean
   didSpawnSetup: boolean
   warning?: string
 }
@@ -345,7 +355,8 @@ function countNonEmptyGitOutputLines(output: string): number {
   return output.split(/\r?\n/).filter((line) => line.trim().length > 0).length
 }
 
-async function spawnLocalStartupAndSetupTerminals(args: {
+/** Materialize local startup/setup panes; exported for lifecycle-focused tests. */
+export async function spawnLocalStartupAndSetupTerminals(args: {
   runtime: OrcaRuntimeService | undefined
   worktree: Pick<Worktree, 'id' | 'path'>
   startup: CreateWorktreeArgs['startup']
@@ -353,15 +364,40 @@ async function spawnLocalStartupAndSetupTerminals(args: {
   defaultTabs: CreateWorktreeResult['defaultTabs']
   settings: GlobalSettings
   createdWithAgent: CreateWorktreeArgs['createdWithAgent']
+  /** Runtime owns setup only when a completion observer needs to promote a seed. */
+  forceSetupProvision?: boolean
+  /** Seed-owned creates must materialize defaults before host authority short-circuits the renderer. */
+  materializeDefaultTabs?: boolean
+  onSetupCompleted?: (exitCode: number | null) => void | Promise<void>
 }): Promise<StagedStartupResult> {
-  const { runtime, worktree, startup, setup, defaultTabs, settings, createdWithAgent } = args
-  if (!runtime || !startup || defaultTabs?.tabs.length) {
+  const {
+    runtime,
+    worktree,
+    startup,
+    setup,
+    defaultTabs,
+    settings,
+    createdWithAgent,
+    forceSetupProvision = false,
+    materializeDefaultTabs = false
+  } = args
+  const shouldProvisionSetup = forceSetupProvision && Boolean(setup)
+  const shouldMaterializeDefaultTabs =
+    materializeDefaultTabs && Boolean(defaultTabs && defaultTabs.tabs.length > 0)
+  if (
+    !runtime ||
+    (!startup && !shouldProvisionSetup && !shouldMaterializeDefaultTabs) ||
+    (defaultTabs?.tabs.length && !shouldProvisionSetup && !shouldMaterializeDefaultTabs)
+  ) {
     return { didSpawnSetup: false }
   }
 
   let warning: string | undefined
   let startupTerminalHandle: string | null = null
   let startupTerminal: CreateWorktreeResult['startupTerminal']
+  let setupTerminalHandle: string | null = null
+  let defaultTabHandles: string[] = []
+  let didSpawnDefaultTabs = false
 
   let sequencedStartup = startup
   let wrappedSetupCommandStr: string | undefined
@@ -384,80 +420,147 @@ async function spawnLocalStartupAndSetupTerminals(args: {
     wrappedSetupCommandStr = sequenced.setupCommand
   }
 
-  try {
-    // Why: only after `git worktree add` + metadata registration is the path safe for a runtime PTY to boot the agent while setup runs alongside.
-    if (isTuiAgent(createdWithAgent)) {
-      const preset = TUI_AGENT_CONFIG[createdWithAgent].preflightTrust
-      try {
-        if (preset === 'cursor') {
-          markCursorWorkspaceTrusted(worktree.path)
-        } else if (preset === 'copilot') {
-          markCopilotFolderTrusted(worktree.path)
-        } else if (preset === 'codex') {
-          markCodexProjectTrusted(worktree.path)
+  if (startup && sequencedStartup) {
+    try {
+      // Why: only after `git worktree add` + metadata registration is the path safe for a runtime PTY to boot the agent while setup runs alongside.
+      if (isTuiAgent(createdWithAgent)) {
+        const preset = TUI_AGENT_CONFIG[createdWithAgent].preflightTrust
+        try {
+          if (preset === 'cursor') {
+            markCursorWorkspaceTrusted(worktree.path)
+          } else if (preset === 'copilot') {
+            markCopilotFolderTrusted(worktree.path)
+          } else if (preset === 'codex') {
+            markCodexProjectTrusted(worktree.path)
+          }
+        } catch {
+          // Best-effort: launch still proceeds and the agent can ask interactively.
         }
-      } catch {
-        // Best-effort: launch still proceeds and the agent can ask interactively.
+      }
+      const terminal = await runtime.createTerminal(`id:${worktree.id}`, {
+        command: sequencedStartup.command,
+        ...(setup ? { claudeAgentTeamsSourceCommand: startup.command } : {}),
+        env: sequencedStartup.env,
+        ...(sequencedStartup.launchConfig ? { launchConfig: sequencedStartup.launchConfig } : {}),
+        ...(isTuiAgent(createdWithAgent) ? { launchAgent: createdWithAgent } : {}),
+        ...(sequencedStartup.viewMode ? { viewMode: sequencedStartup.viewMode } : {}),
+        startupCommandDelivery: sequencedStartup.startupCommandDelivery,
+        telemetry: sequencedStartup.telemetry,
+        activate: true
+      })
+      startupTerminalHandle = terminal.handle
+      startupTerminal = {
+        spawned: true,
+        surface: terminal.surface
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      warning = `Failed to create the startup terminal for ${worktree.path}: ${message}`
+      console.warn(`[worktree-create] ${warning}`)
+      // A dependency-seed create still needs its setup runner observed even
+      // when the optional startup pane could not be spawned. Keep the normal
+      // path unchanged, but let force mode fall through to a standalone Setup
+      // tab so a successful install can promote the seed.
+      if (!forceSetupProvision) {
+        return { didSpawnSetup: false, warning }
       }
     }
-    const terminal = await runtime.createTerminal(`id:${worktree.id}`, {
-      command: sequencedStartup.command,
-      ...(setup ? { claudeAgentTeamsSourceCommand: startup.command } : {}),
-      env: sequencedStartup.env,
-      ...(sequencedStartup.launchConfig ? { launchConfig: sequencedStartup.launchConfig } : {}),
-      ...(isTuiAgent(createdWithAgent) ? { launchAgent: createdWithAgent } : {}),
-      ...(sequencedStartup.viewMode ? { viewMode: sequencedStartup.viewMode } : {}),
-      startupCommandDelivery: sequencedStartup.startupCommandDelivery,
-      telemetry: sequencedStartup.telemetry,
-      activate: true
-    })
-    startupTerminalHandle = terminal.handle
-    startupTerminal = {
-      spawned: true,
-      surface: terminal.surface
+  }
+
+  if (shouldMaterializeDefaultTabs && defaultTabs) {
+    // Claim ownership before the loop so a partial host spawn is not replayed
+    // by renderer activation as a second set of tabs.
+    didSpawnDefaultTabs = true
+    for (const template of defaultTabs.tabs) {
+      try {
+        const command = template.command?.trim()
+        const terminal = await runtime.createTerminal(`id:${worktree.id}`, {
+          ...(template.title ? { title: template.title } : {}),
+          ...(command && defaultTabs.runCommands ? { command } : {}),
+          activate: false
+        })
+        defaultTabHandles.push(terminal.handle)
+        if (template.color && terminal.tabId && runtime.setMobileSessionTabProps) {
+          await runtime.setMobileSessionTabProps(`id:${worktree.id}`, {
+            tabId: terminal.tabId,
+            color: template.color
+          })
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        warning = appendWorktreeCreateWarning(
+          warning,
+          `failed to create a default terminal for ${worktree.path}: ${message}`
+        )
+        console.warn(`[worktree-create] ${warning}`)
+      }
     }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    warning = `Failed to create the startup terminal for ${worktree.path}: ${message}`
-    console.warn(`[worktree-create] ${warning}`)
-    return { didSpawnSetup: false, warning }
   }
 
   let didSpawnSetup = false
   if (setup) {
     try {
+      const setupCommandPlatform = getSetupRunnerCommandPlatformForLaunch(
+        setup,
+        process.platform === 'win32' ? 'windows' : 'posix'
+      )
+      // A PTY's interactive shell survives a command's exit. Wrap setup with a
+      // completion marker whenever a caller needs the runner's actual status,
+      // including the wait-for-agent command that already embeds setup.
+      const completionToken = args.onSetupCompleted ? randomUUID() : undefined
+      const observedSetup = completionToken
+        ? buildObservedSetupCommand(
+            setup.runnerScriptPath,
+            setupCommandPlatform,
+            completionToken,
+            setup.shell,
+            wrappedSetupCommandStr
+          )
+        : undefined
       const setupCommand =
+        observedSetup?.command ??
         wrappedSetupCommandStr ??
-        buildSetupRunnerCommand(
-          setup.runnerScriptPath,
-          getSetupRunnerCommandPlatformForLaunch(
-            setup,
-            process.platform === 'win32' ? 'windows' : 'posix'
-          ),
-          setup.shell
-        )
+        buildSetupRunnerCommand(setup.runnerScriptPath, setupCommandPlatform, setup.shell)
+      const setupEnv = { ...setup.envVars, ...observedSetup?.env }
       const setupLaunchMode =
         (settings as Partial<Pick<GlobalSettings, 'setupScriptLaunchMode'>>)
           .setupScriptLaunchMode ?? 'new-tab'
-      if (setupLaunchMode === 'split-vertical' || setupLaunchMode === 'split-horizontal') {
-        if (!startupTerminalHandle) {
-          throw new Error('startup_terminal_missing')
-        }
-        await runtime.splitTerminal(startupTerminalHandle, {
-          direction: setupLaunchMode === 'split-horizontal' ? 'horizontal' : 'vertical',
-          command: setupCommand,
-          env: setup.envVars,
-          activate: false
-        })
+      if (
+        (setupLaunchMode === 'split-vertical' || setupLaunchMode === 'split-horizontal') &&
+        (startupTerminalHandle ?? defaultTabHandles[0])
+      ) {
+        const setupTerminal = await runtime.splitTerminal(
+          startupTerminalHandle ?? defaultTabHandles[0]!,
+          {
+            direction: setupLaunchMode === 'split-horizontal' ? 'horizontal' : 'vertical',
+            command: setupCommand,
+            env: setupEnv,
+            activate: false
+          }
+        )
+        setupTerminalHandle = setupTerminal.handle
       } else {
-        await runtime.createTerminal(`id:${worktree.id}`, {
+        // A seed-observing setup may be the only requested launch. Keep the
+        // setup visible without inventing a primary shell solely to split it.
+        const setupTerminal = await runtime.createTerminal(`id:${worktree.id}`, {
           title: 'Setup',
           command: setupCommand,
-          env: setup.envVars,
+          env: setupEnv,
           activate: false
         })
+        setupTerminalHandle = setupTerminal.handle
       }
       didSpawnSetup = true
+      if (args.onSetupCompleted && setupTerminalHandle) {
+        // Setup can outlive the create request; promotion must wait for the
+        // runner's actual exit status and must not delay workspace creation.
+        void runtime
+          .waitForSetupTerminalCompletion(setupTerminalHandle, completionToken)
+          .then(({ exitCode }) => args.onSetupCompleted?.(exitCode))
+          .catch((error) => {
+            console.warn('[worktree-create] setup completion observation failed:', error)
+          })
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       const nextWarning = `failed to create the setup terminal for ${worktree.path}: ${message}`
@@ -478,6 +581,8 @@ async function spawnLocalStartupAndSetupTerminals(args: {
         }
       : {}),
     ...(startupTerminal ? { startupTerminal } : {}),
+    ...(setupTerminalHandle ? { setupTerminalHandle } : {}),
+    ...(didSpawnDefaultTabs ? { didSpawnDefaultTabs } : {}),
     didSpawnSetup,
     ...(warning ? { warning } : {})
   }
@@ -2658,8 +2763,10 @@ export async function createLocalWorktree(
   // Why: the worktree's base-branch `orca.yaml` is authoritative; we don't re-gate on content parity with the primary checkout since benign divergence silently disabled setup (#1280).
   let setup: CreateWorktreeResult['setup']
   let defaultTabs: CreateWorktreeResult['defaultTabs']
+  let createdYamlHooks: ReturnType<typeof loadHooks> = null
+  let setupScriptForDependencySeed: string | undefined
   await timing.time('prepare_setup', async () => {
-    const createdYamlHooks = loadHooks(worktreePath)
+    createdYamlHooks = loadHooks(worktreePath)
     const createdEffectiveHooks = getEffectiveHooksFromConfig(repo, createdYamlHooks)
     try {
       defaultTabs = getDefaultTabsLaunch(createdYamlHooks, repo, args.setupDecision)
@@ -2671,6 +2778,7 @@ export async function createLocalWorktree(
         : undefined
     }
     const setupScript = createdEffectiveHooks?.scripts.setup
+    setupScriptForDependencySeed = setupScript
     let shouldLaunchSetup = false
     if (setupScript) {
       try {
@@ -2698,17 +2806,101 @@ export async function createLocalWorktree(
     }
   })
 
+  // Hydrate only when this create is about to run the setup hook. A seed is a
+  // post-setup snapshot, so using it for a skipped hook could hide required
+  // project initialization. The target checkout owns the lockfile bytes.
+  let dependencySeedArgs: WorktreeDependencySeedArgs | null = null
+  if (
+    runtime &&
+    setup &&
+    setupScriptForDependencySeed &&
+    (process.platform === 'darwin' || process.platform === 'linux')
+  ) {
+    const dependencySeedPlan = resolveWorktreeDependencySeedPlan(createdYamlHooks)
+    if (dependencySeedPlan.paths.length > 0) {
+      try {
+        const lockfiles = await readWorktreeDependencySeedInputs(
+          worktreePath,
+          dependencySeedPlan.fingerprintPaths
+        )
+        // A seed without a reproducible input is intentionally disabled. This
+        // also keeps normal setup provisioning unchanged when no lockfile exists.
+        if (lockfiles.length > 0) {
+          dependencySeedArgs = {
+            repo,
+            worktreePath,
+            setupScript: setupScriptForDependencySeed,
+            declaredSeedPaths: dependencySeedPlan.paths,
+            lockfiles,
+            allowRuntimeExecutionHost: Boolean(runtime)
+          }
+          const hydration = await timing.time('hydrate_dependency_seed', () =>
+            hydrateWorktreeDependencies(dependencySeedArgs!)
+          )
+          if (hydration.status === 'failed' || hydration.status === 'skipped') {
+            console.warn(`[worktree-create] dependency seed hydration failed for ${worktreePath}`)
+            dependencySeedArgs = null
+          }
+        }
+      } catch (error) {
+        // Seeding is an optimization; never make a real worktree create fail.
+        console.warn(
+          `[worktree-create] dependency seed hydration skipped for ${worktreePath}:`,
+          error
+        )
+        dependencySeedArgs = null
+      }
+    }
+  }
+
+  const promoteDependencySeedAfterSetup = async (exitCode: number | null): Promise<void> => {
+    if (exitCode !== 0 || !dependencySeedArgs) {
+      return
+    }
+    try {
+      const plan = resolveWorktreeDependencySeedPlan(createdYamlHooks)
+      const lockfiles = await readWorktreeDependencySeedInputs(worktreePath, plan.fingerprintPaths)
+      const promotion = await promoteWorktreeDependencySeed({
+        ...dependencySeedArgs,
+        lockfiles
+      })
+      if (promotion.status === 'failed') {
+        console.warn(`[worktree-create] dependency seed promotion failed for ${worktreePath}`)
+      }
+    } catch (error) {
+      console.warn(
+        `[worktree-create] dependency seed promotion skipped for ${worktreePath}:`,
+        error
+      )
+    }
+  }
+
   const stagedStartup = await timing.time('spawn_startup_terminal', () =>
     spawnLocalStartupAndSetupTerminals({
       runtime,
       worktree,
       startup: args.startup,
       setup,
+      // Seed-owned creates must materialize defaults alongside the host-owned
+      // setup pane; renderer host authority otherwise short-circuits them.
       defaultTabs,
       settings,
-      createdWithAgent: args.createdWithAgent
+      createdWithAgent: args.createdWithAgent,
+      ...(dependencySeedArgs
+        ? {
+            forceSetupProvision: true,
+            materializeDefaultTabs: true,
+            onSetupCompleted: promoteDependencySeedAfterSetup
+          }
+        : {})
     })
   )
+  // If setup provisioning failed, the renderer may retry the returned setup
+  // descriptor, but it cannot carry this host-owned promotion callback.
+  // Disable seed ownership rather than leaving a callback armed forever.
+  if (dependencySeedArgs && !stagedStartup.didSpawnSetup) {
+    dependencySeedArgs = null
+  }
 
   notifyWorktreesChanged(mainWindow, repo.id)
   return {
@@ -2726,7 +2918,7 @@ export async function createLocalWorktree(
       : setup && !stagedStartup.didSpawnSetup
         ? { setup }
         : {}),
-    ...(defaultTabs ? { defaultTabs } : {}),
+    ...(defaultTabs && !stagedStartup.didSpawnDefaultTabs ? { defaultTabs } : {}),
     ...(addResult.localBaseRefRefresh
       ? { localBaseRefRefresh: addResult.localBaseRefRefresh }
       : {}),

@@ -14,13 +14,18 @@ export function buildObservedSetupCommand(
   completionToken: string,
   // Why: the observed command must reuse the shell the runner was written for, or a
   // WSL-routed Windows-drive runner gets Git Bash `/c/...` instead of `/mnt/c/...`.
-  shell?: SetupRunnerShell
+  shell?: SetupRunnerShell,
+  /** Wrap an already-gated setup command (for wait-for-agent-startup). */
+  commandOverride?: string
 ): { command: string; env?: Record<string, string> } {
   const resolution = resolveSetupRunnerCommand(runnerScriptPath, platform, shell)
   if (resolution.shell === 'windows') {
+    const invocation = commandOverride
+      ? `Invoke-Expression ${quotePowerShellString(commandOverride)}`
+      : '& $runner'
     const script = [
-      `$runner = $env:${WINDOWS_SETUP_RUNNER_ENV}`,
-      '& $runner',
+      ...(commandOverride ? [] : [`$runner = $env:${WINDOWS_SETUP_RUNNER_ENV}`]),
+      invocation,
       '$succeeded = $?',
       '$status = $LASTEXITCODE',
       'if ($null -eq $status) { $status = if ($succeeded) { 0 } else { 1 } }',
@@ -32,12 +37,15 @@ export function buildObservedSetupCommand(
         script,
         'utf16le'
       ).toString('base64')}`,
-      env: { [WINDOWS_SETUP_RUNNER_ENV]: resolution.runnerScriptPathForShell }
+      ...(commandOverride
+        ? {}
+        : { env: { [WINDOWS_SETUP_RUNNER_ENV]: resolution.runnerScriptPathForShell } })
     }
   }
 
+  const command = commandOverride ?? resolution.command
   const script = [
-    `( ${resolution.command} )`,
+    `( ${command} )`,
     'status=$?',
     `printf '\\n${completionPrefix(completionToken)}%s\\n' "$status"`,
     'exit "$status"'
@@ -81,4 +89,8 @@ function completionPrefix(completionToken: string): string {
 
 function quotePosixArg(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+function quotePowerShellString(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`
 }

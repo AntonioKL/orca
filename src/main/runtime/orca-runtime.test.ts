@@ -16653,6 +16653,28 @@ describe('OrcaRuntimeService', () => {
     await expect(runtime.readTerminal(handle)).resolves.toMatchObject({ status: 'running' })
   })
 
+  it('honors an explicit completion token without deleting another observer token', async () => {
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: 'pty-setup-override' }),
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, { tabs: [], leaves: [] })
+    const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
+    const tokens = (runtime as unknown as { setupCompletionTokenByPtyId: Map<string, string> })
+      .setupCompletionTokenByPtyId
+    tokens.set('pty-setup-override', 'token-next-observer')
+
+    const waiting = runtime.waitForSetupTerminalCompletion(handle, 'token-explicit')
+    runtime.onPtyData('pty-setup-override', '__ORCA_SETUP_COMPLETE__:token-explicit:0\r\n$', 100)
+
+    await expect(waiting).resolves.toEqual({ exitCode: 0 })
+    expect(tokens.get('pty-setup-override')).toBe('token-next-observer')
+  })
+
   it('replays fast setup completion emitted before its observer is registered', async () => {
     const runtime = new OrcaRuntimeService(store)
     runtime.setPtyController({
@@ -16692,6 +16714,64 @@ describe('OrcaRuntimeService', () => {
     runtime.onPtyExit('pty-legacy-setup', 9)
 
     await expect(waiting).resolves.toEqual({ exitCode: 9 })
+  })
+
+  it('observes wrapped setup command exit callbacks', async () => {
+    const runtime = new OrcaRuntimeService(store)
+    const spawn = vi.fn().mockResolvedValue({ id: 'pty-wrapped-setup' })
+    runtime.setPtyController({
+      spawn,
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+
+    const onSetupCompleted = vi.fn()
+    const provision = (
+      runtime as unknown as {
+        provisionManagedWorktreeTerminals: (args: {
+          worktreeSelector: string
+          worktreeId: string
+          worktreePath: string
+          setup: {
+            runnerScriptPath: string
+            envVars: Record<string, string>
+          }
+          hasStartupTerminal: boolean
+          setupCommandPlatform: 'windows' | 'posix'
+          onSetupCompleted: (exitCode: number | null) => void | Promise<void>
+          wrappedSetupCommand: string
+        }) => Promise<{ setupSpawned: boolean; setupTerminalHandle: string | null }>
+      }
+    ).provisionManagedWorktreeTerminals({
+      worktreeSelector: `path:${TEST_WORKTREE_PATH}`,
+      worktreeId: TEST_WORKTREE_ID,
+      worktreePath: TEST_WORKTREE_PATH,
+      setup: {
+        runnerScriptPath: '/tmp/repo/.git/orca/setup-runner.sh',
+        envVars: {}
+      },
+      // The startup terminal already exists; only the wrapped setup runner is
+      // materialized here, matching the wait-for-agent-startup path.
+      hasStartupTerminal: true,
+      setupCommandPlatform: 'posix',
+      onSetupCompleted,
+      wrappedSetupCommand: 'bash /tmp/repo/.git/orca/setup-runner.sh'
+    })
+
+    const result = await provision
+    expect(result.setupSpawned).toBe(true)
+    expect(spawn).toHaveBeenCalledTimes(1)
+
+    const setupCommand = (spawn.mock.calls[0]![0] as { command: string }).command
+    const completionToken = setupCommand.match(/__ORCA_SETUP_COMPLETE__:([^:]+):%s\\n/)?.[1]
+    expect(completionToken).toEqual(expect.any(String))
+    runtime.onPtyData(
+      'pty-wrapped-setup',
+      `__ORCA_SETUP_COMPLETE__:${completionToken}:0\r\nPS>`,
+      100
+    )
+    await vi.waitFor(() => expect(onSetupCompleted).toHaveBeenCalledWith(0))
   })
 
   it('keeps observing after an uncertain setup terminal status', async () => {
