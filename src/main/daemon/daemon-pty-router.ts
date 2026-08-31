@@ -13,6 +13,7 @@ import { shouldHandoffDaemonHistory } from './daemon-history-handoff'
 import type { DaemonPtyRouterDataEvent, DaemonPtyRouterExitEvent } from './daemon-pty-router-events'
 import { DaemonSessionOwnerResolver } from './daemon-session-owner-resolution'
 import type { PtyKillIntent } from '../../shared/pty-kill-sessions'
+import type { PtyShutdownResult } from '../providers/pty-provider-contract'
 
 export class DaemonPtyRouter implements IPtyProvider {
   private current: DaemonPtyAdapter
@@ -72,6 +73,12 @@ export class DaemonPtyRouter implements IPtyProvider {
   supportsAgentSessionCreateOperations(): boolean {
     // Fresh sessions always route to the current daemon; legacy adapters only retain old IDs.
     return this.current.supportsAgentSessionCreateOperations()
+  }
+
+  supportsIncarnationFence(): boolean {
+    // A mixed-generation router must fail closed: an old adapter cannot prove
+    // the fence for sessions it still owns.
+    return this.allAdapters().every((adapter) => adapter.supportsIncarnationFence?.() === true)
   }
 
   async attach(id: string): ReturnType<IPtyProvider['attach']> {
@@ -135,6 +142,32 @@ export class DaemonPtyRouter implements IPtyProvider {
         this.ownerResolver.forgetRoute(id, adapter)
       }
     }
+  }
+
+  async shutdownWithOutcome(
+    id: string,
+    opts: {
+      immediate?: boolean
+      keepHistory?: boolean
+      deadlineMs?: number
+      intent?: PtyKillIntent
+      incarnationId?: string
+    }
+  ): Promise<PtyShutdownResult | void> {
+    const adapter = this.adapterFor(id)
+    const migrateHistory = shouldHandoffDaemonHistory(opts.keepHistory, adapter, this.current)
+    const result = adapter.shutdownWithOutcome
+      ? await adapter.shutdownWithOutcome(id, opts)
+      : await adapter.shutdown(id, opts)
+    if (!opts.keepHistory || migrateHistory) {
+      if (migrateHistory) {
+        adapter.ackColdRestore(id)
+      }
+      if (this.sessionAdapters.get(id) === adapter) {
+        this.ownerResolver.forgetRoute(id, adapter)
+      }
+    }
+    return result
   }
 
   async sendSignal(id: string, signal: string): Promise<void> {

@@ -225,7 +225,7 @@ export abstract class DaemonPtySessionControl extends DaemonPtySessionSpawn {
       intent?: PtyKillIntent
       incarnationId?: string
     }
-  ): Promise<void> {
+  ): Promise<PtyShutdownResult | void> {
     // Why: shutdown can be the first lazy-client operation after restart; connect
     // before killing so a healthy daemon session is not orphaned (#7742). Connect,
     // the final-checkpoint wait, and kill all share the caller's one absolute
@@ -311,8 +311,6 @@ export abstract class DaemonPtySessionControl extends DaemonPtySessionSpawn {
         .removeSession(id)
         .catch((err) => console.warn('[history] removeSession failed:', id, err))
     }
-    void result
-
     // Why: the tombstone rejects reattach to a user-killed session; sleep legitimately reattaches on wake, so skip it under keepHistory.
     if (!opts.keepHistory) {
       this.killedSessionTombstones.delete(id)
@@ -324,6 +322,7 @@ export abstract class DaemonPtySessionControl extends DaemonPtySessionSpawn {
         }
       }
     }
+    return result as PtyShutdownResult | void
   }
 
   ackColdRestore(sessionId: string): void {
