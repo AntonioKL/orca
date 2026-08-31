@@ -11,6 +11,67 @@ import type { UnifiedSessionRow, UnifiedWorktreeRow } from './resource-usage-mer
 import { MetricPair, ROW_TRAILING_GUTTER_CLS, Sparkline } from './resource-usage-metrics'
 import { isResourceSessionActivationKey } from './resource-session-navigation'
 
+const KILL_REASON_COPY: Record<string, { key: string; fallback: string }> = {
+  'missing incarnation fence': {
+    key: 'auto.components.status.bar.ResourceUsageStatusSegment.killMissingFence',
+    fallback: 'Kill refused: session identity is missing'
+  },
+  'inventory unavailable': {
+    key: 'auto.components.status.bar.ResourceUsageStatusSegment.killInventoryUnavailable',
+    fallback: "Couldn't verify terminal state"
+  },
+  'incarnation evidence unavailable': {
+    key: 'auto.components.status.bar.ResourceUsageStatusSegment.killIdentityUnavailable',
+    fallback: "Couldn't verify session identity"
+  },
+  'session was replaced': {
+    key: 'auto.components.status.bar.ResourceUsageStatusSegment.killSessionReplaced',
+    fallback: 'Session was replaced'
+  },
+  'descendant tree could not be verified': {
+    key: 'auto.components.status.bar.ResourceUsageStatusSegment.killDescendantsUnverified',
+    fallback: "Couldn't verify child processes"
+  },
+  'terminal surface ownership': {
+    key: 'auto.components.status.bar.ResourceUsageStatusSegment.killTerminalOwned',
+    fallback: 'Terminal is still in use'
+  },
+  'terminal ownership unknown': {
+    key: 'auto.components.status.bar.ResourceUsageStatusSegment.killOwnershipUnknown',
+    fallback: 'Terminal ownership could not be verified'
+  },
+  'agent ownership claim': {
+    key: 'auto.components.status.bar.ResourceUsageStatusSegment.killAgentOwned',
+    fallback: 'Agent still owns this terminal'
+  },
+  'session is owned': {
+    key: 'auto.components.status.bar.ResourceUsageStatusSegment.killSessionOwned',
+    fallback: 'Session is still in use'
+  },
+  'kill request exceeded the maximum batch size': {
+    key: 'auto.components.status.bar.ResourceUsageStatusSegment.killRequestTooLarge',
+    fallback: 'Kill request is too large'
+  }
+}
+
+function localizeKillReason(
+  reason: string,
+  verdict: NonNullable<UnifiedSessionRow['killVerdict']>
+): string {
+  const copy = KILL_REASON_COPY[reason]
+  if (copy) {
+    return translate(copy.key, copy.fallback)
+  }
+  return verdict === 'refused'
+    ? translate('auto.components.status.bar.ResourceUsageStatusSegment.killRefused', 'Kill refused')
+    : verdict === 'live'
+      ? translate('auto.components.status.bar.ResourceUsageStatusSegment.killLive', 'Still live')
+      : translate(
+          'auto.components.status.bar.ResourceUsageStatusSegment.killUnverifiable',
+          "Couldn't verify"
+        )
+}
+
 // ─── Session row ────────────────────────────────────────────────────
 
 // Exported (with WorktreeRow) for row-level regression tests pinning the kill affordance and remote-chip presentation.
@@ -64,8 +125,9 @@ export function SessionRow({
       </span>
       {session.killVerdict && (
         <span className="text-[10px] text-amber-600 truncate max-w-[10rem]" role="status">
-          {session.killReason ||
-            (session.killVerdict === 'refused'
+          {session.killReason
+            ? localizeKillReason(session.killReason, session.killVerdict)
+            : session.killVerdict === 'refused'
               ? translate(
                   'auto.components.status.bar.ResourceUsageStatusSegment.killRefused',
                   'Kill refused'
@@ -78,7 +140,7 @@ export function SessionRow({
                 : translate(
                     'auto.components.status.bar.ResourceUsageStatusSegment.killUnverifiable',
                     "Couldn't verify"
-                  ))}
+                  )}
         </span>
       )}
       <MetricPair cpu={session.cpu} memory={session.memory} size="small" />

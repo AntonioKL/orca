@@ -1,8 +1,9 @@
 import type { IPtyProvider, PtyProcessInfo } from '../../../providers/types'
-import type {
-  PtyKillIntent,
-  PtyKillSessionRef,
-  PtyKillSessionResult
+import {
+  MAX_PTY_KILL_SESSION_REFS,
+  type PtyKillIntent,
+  type PtyKillSessionRef,
+  type PtyKillSessionResult
 } from '../../../../shared/pty-kill-sessions'
 import type { PtyShutdownResult } from '../../../providers/pty-provider-contract'
 import { shutdownSinglePty, type SinglePtyKillDeps } from './shutdown-single'
@@ -45,10 +46,16 @@ export async function killPtySessions(
   intent: PtyKillIntent,
   deps: KillSessionsDeps
 ): Promise<PtyKillSessionResult[]> {
+  const acceptedRefs = refs.slice(0, MAX_PTY_KILL_SESSION_REFS)
+  const rejectedRefs = refs.slice(MAX_PTY_KILL_SESSION_REFS).map((ref) => ({
+    ...ref,
+    verdict: 'refused' as const,
+    reason: 'kill request exceeded the maximum batch size'
+  }))
   const shutdownResults = new Map<string, PtyShutdownResult | void>()
   const fenceCapabilities = new Map<string, boolean>()
   const results = await mapWithConcurrency<PtyKillSessionRef, PtyKillSessionResult>(
-    refs,
+    acceptedRefs,
     deps.concurrency ?? 4,
     async (ref): Promise<PtyKillSessionResult> => {
       const evidence = intent === 'orphan-cleanup' ? deps.isOwned?.(ref) : undefined
@@ -96,7 +103,7 @@ export async function killPtySessions(
       snapshots.set(provider, await provider.listProcesses().catch(() => null))
     })
   )
-  return results.map((result) => {
+  const finalized: PtyKillSessionResult[] = results.map((result): PtyKillSessionResult => {
     if (result.verdict !== 'unverifiable' || result.reason !== 'pending verification') {
       return result
     }
@@ -148,6 +155,7 @@ export async function killPtySessions(
             : {})
         }
   })
+  return [...finalized, ...rejectedRefs]
 }
 
 /** Utility used by the IPC adapter to take one pre-wave provider snapshot. */

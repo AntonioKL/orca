@@ -168,8 +168,7 @@ export class TerminalHost {
     if (pending) {
       if (
         opts.incarnationId &&
-        currentSession &&
-        opts.incarnationId !== currentSession.incarnationId
+        (!currentSession || opts.incarnationId !== currentSession.incarnationId)
       ) {
         return Promise.resolve({ fenceUnavailable: true })
       }
