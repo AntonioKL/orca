@@ -67,7 +67,6 @@ export function AutoplayClip({
   if (fill) {
     return (
       <>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           ref={posterRef}
           src={posterSrc}
@@ -83,7 +82,6 @@ export function AutoplayClip({
 
   return (
     <span className={cn('relative block overflow-hidden', wrapperClassName)}>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         ref={posterRef}
         src={posterSrc}

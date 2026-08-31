@@ -26,17 +26,16 @@ export default function SearchTrigger() {
       const modifierPressed = isMac ? e.metaKey : e.ctrlKey
       if (modifierPressed && e.key.toLowerCase() === 'k') {
         e.preventDefault()
-        setOpen((current) => {
-          if (current) {
-            window.requestAnimationFrame(() => triggerRef.current?.focus())
-          }
-          return !current
-        })
+        const nextOpen = !open
+        setOpen(nextOpen)
+        if (!nextOpen) {
+          window.requestAnimationFrame(() => triggerRef.current?.focus())
+        }
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [isMac])
+  }, [isMac, open])
 
   return (
     <>

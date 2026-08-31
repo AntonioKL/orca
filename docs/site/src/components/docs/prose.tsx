@@ -48,7 +48,6 @@ export function ImagePlaceholder({ caption, src }: { caption: string; src?: stri
         {src.endsWith('.gif') ? (
           <AutoplayClip src={src} alt={caption} fill={false} />
         ) : (
-          /* eslint-disable-next-line @next/next/no-img-element */
           <img src={src} alt={caption} loading="lazy" decoding="async" className="block w-full" />
         )}
         <figcaption className="px-4 py-2 text-xs text-muted-foreground">{caption}</figcaption>

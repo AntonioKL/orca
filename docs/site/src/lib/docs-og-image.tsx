@@ -99,7 +99,6 @@ export async function createDocsOgImage({ title, url }: { title: string; url: st
             background: ogColors.secondary
           }}
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={logoSrc} width={32} height={20} alt="" />
         </div>
 
