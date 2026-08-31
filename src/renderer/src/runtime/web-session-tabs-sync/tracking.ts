@@ -2,8 +2,8 @@ import type {
   RuntimeMobileSessionTabsRemovedResult,
   RuntimeMobileSessionTabsResult
 } from '../../../../shared/runtime-types'
-import { VISIBILITY_INVENTORY_REMOVAL_EPOCH, type SessionTabsListAllResult } from './state'
 import {
+  VISIBILITY_INVENTORY_REMOVAL_EPOCH,
   latestReceivedSessionTabsSnapshotByWorktree,
   latestSessionTabsRemovalFenceByWorktree,
   latestSessionTabsSnapshotByWorktree,
@@ -11,10 +11,11 @@ import {
   sessionTabsEnvironmentsByWorktree,
   sessionTabsRecoveryStateByWorktree,
   trackedSessionTabsWorktreeIdsByEnvironment,
+  nextReceivedSessionTabsFrame,
   type SnapshotFreshness,
+  type SessionTabsListAllResult,
   type TrackedWebSessionTabsWorktree
 } from './state'
-import { nextReceivedSessionTabsFrame } from './state'
 
 export function isSessionTabsListAllResult(value: unknown): value is SessionTabsListAllResult {
   return (
