@@ -259,6 +259,13 @@ export class HeadlessEmulator {
     if (this.disposed) {
       return
     }
+    // Why the equality gate: every attach re-asserts the pane's dimensions, so
+    // an unconditional bump made a reattach of an idle session miss its own
+    // cached snapshot — the exact case the cache exists for. A resize to the
+    // size already applied changes nothing the snapshot reads.
+    if (this.terminal.cols === cols && this.terminal.rows === rows) {
+      return
+    }
     this.markMutated()
     this.restoredOscLinks = []
     this.terminal.resize(cols, rows)

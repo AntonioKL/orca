@@ -72,6 +72,21 @@ describe('HeadlessEmulator snapshot cache', () => {
     expect(snapshot.snapshotAnsi).toContain('second line')
   })
 
+  it('keeps the cache across a resize to the size already applied', async () => {
+    // Why: every attach re-asserts the pane's dimensions, so bumping on a
+    // no-op resize made a reattach of an idle session miss its own snapshot —
+    // measured as 382ms of re-serialize per session before this gate.
+    emulator = new HeadlessEmulator({ cols: 80, rows: 24 })
+    await emulator.write('unchanged dimensions')
+    emulator.getSnapshot()
+    const serialize = spyOnSerialize(emulator)
+
+    emulator.resize(80, 24)
+
+    emulator.getSnapshot()
+    expect(serialize.calls()).toBe(0)
+  })
+
   it('invalidates on resize', async () => {
     emulator = new HeadlessEmulator({ cols: 80, rows: 24 })
     await emulator.write('sized')
