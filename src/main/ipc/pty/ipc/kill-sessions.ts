@@ -150,6 +150,22 @@ export async function killPtySessions(
     }
     const shutdownResult = shutdownResults.get(result.id)
     const treeUnverified = Boolean(shutdownResult?.treeUnverified)
+    if (!survivor && treeUnverified) {
+      return {
+        ...result,
+        verdict: 'unverifiable' as const,
+        reason: 'descendant tree could not be verified',
+        treeUnverified: true
+      }
+    }
+    if (!survivor && treeUnverified) {
+      return {
+        ...result,
+        verdict: 'unverifiable',
+        treeUnverified: true,
+        reason: 'descendant tree could not be verified'
+      }
+    }
     return survivor
       ? {
           ...result,
@@ -159,10 +175,7 @@ export async function killPtySessions(
         }
       : {
           ...result,
-          verdict: 'exited' as const,
-          ...(treeUnverified
-            ? { treeUnverified: true, reason: 'descendant tree could not be verified' }
-            : {})
+          verdict: 'exited' as const
         }
   })
   return [...finalized, ...rejectedRefs]

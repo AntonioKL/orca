@@ -50,6 +50,24 @@ describe('killPtySessions input bounds', () => {
     ])
   })
 
+  it('keeps an absent root unverifiable when descendant cleanup is pending', async () => {
+    const provider = { listProcesses: vi.fn(async () => []) }
+    const results = await killPtySessions([{ id: 'session-1' }], 'owner-close', {
+      listProviders: () => [{ provider: provider as never }],
+      providerForSession: () => provider as never,
+      shutdown: vi.fn(async () => ({ treeUnverified: true as const }))
+    })
+
+    expect(results).toEqual([
+      {
+        id: 'session-1',
+        verdict: 'unverifiable',
+        treeUnverified: true,
+        reason: 'descendant tree could not be verified'
+      }
+    ])
+  })
+
   it('resolves incarnation-fence capability per session route', async () => {
     const provider = {
       listProcesses: vi.fn(async () => []),
@@ -97,5 +115,27 @@ describe('killPtySessions input bounds', () => {
     expect(shutdown).toHaveBeenCalledTimes(1)
     expect(results[0]).toMatchObject({ id: 'failed', verdict: 'unverifiable' })
     expect(results[1]).toMatchObject({ id: 'healthy', verdict: 'exited' })
+  })
+
+  it('keeps an absent root unverifiable when descendant cleanup was not proven', async () => {
+    const provider = {
+      listProcesses: vi.fn(async () => []),
+      supportsIncarnationFence: vi.fn(() => false)
+    }
+    const results = await killPtySessions([{ id: 'session-1' }], 'orphan-cleanup', {
+      listProviders: () => [{ provider: provider as never }],
+      providerForSession: () => provider as never,
+      isOwned: () => ({ owned: false }),
+      shutdown: vi.fn(async () => ({ treeUnverified: true as const }))
+    })
+
+    expect(results).toEqual([
+      {
+        id: 'session-1',
+        verdict: 'unverifiable',
+        reason: 'descendant tree could not be verified',
+        treeUnverified: true
+      }
+    ])
   })
 })
