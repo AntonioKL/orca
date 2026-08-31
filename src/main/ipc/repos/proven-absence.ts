@@ -7,9 +7,14 @@ const ENOTDIR_MESSAGE = /^ENOTDIR: not a directory\b/
 
 // Why shape rather than a fixed list: EVERY real errno is authoritative, not just the two we care
 // about — an EACCES or ELOOP is a definitive non-absence answer even when the message quotes
-// ENOENT. But a wrapper attaching a domain string (`REMOTE_FS_ERROR`) is not an errno and must not
-// suppress the message fallback, which is the only classification path over the SSH relay.
-const ERRNO_NAME = /^E[A-Z0-9]+$/
+// ENOENT. Underscores are required: `EAI_AGAIN`/`EAI_NONAME` are real libuv codes, and missing them
+// let a transient DNS failure fall through to the message and read as proven absence.
+//
+// An E-prefixed code we do not recognise is therefore treated as an errno, i.e. NOT absence. That
+// biases toward refusing, which is the safe direction for this helper. Only a code that is not
+// errno-shaped at all (`REMOTE_FS_ERROR`, or the relay's numeric -32000) falls through to the
+// message — the only classification path that survives the SSH relay.
+const ERRNO_NAME = /^E[A-Z0-9_]+$/
 
 /** Whether a failed probe proves the path is absent. Never throws. */
 export function isProvenAbsent(error: unknown): boolean {

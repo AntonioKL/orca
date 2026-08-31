@@ -1278,7 +1278,7 @@ import {
   LEFTOVER_GIT_DIR_RETRY_HINT,
   repositoryCheckUnavailableError
 } from '../ipc/repos/repository-creation-messages'
-import { isProvenAbsent } from '../ipc/repos/proven-absence'
+import { describeError, isProvenAbsent } from '../ipc/repos/proven-absence'
 import { getWorktreeWatcherRemoval } from '../ipc/worktree-watcher-removal'
 import { acquireWatcherRemovalGate } from '../ipc/watcher-removal-gate'
 import {
@@ -23925,7 +23925,7 @@ export class OrcaRuntimeService {
           // as "no failure" and fail open into `git init`.
           if (!isProvenAbsent(error)) {
             gitProbeFailed = true
-            gitProbeFailure = error instanceof Error ? error.message : String(error)
+            gitProbeFailure = describeError(error)
           }
           return null
         })

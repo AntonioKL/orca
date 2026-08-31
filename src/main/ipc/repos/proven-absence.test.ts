@@ -111,4 +111,16 @@ describe('proven-absence', () => {
     })
     expect(() => describeError(e)).not.toThrow()
   })
+
+  it('treats underscore errno families like EAI_* as authoritative', () => {
+    // EAI_AGAIN is a real libuv code; missing it let a transient DNS failure whose message
+    // quotes ENOENT read as proven absence.
+    for (const code of ['EAI_AGAIN', 'EAI_NONAME']) {
+      expect(
+        isProvenAbsent(
+          Object.assign(new Error("ENOENT: no such file or directory, stat '/x'"), { code })
+        )
+      ).toBe(false)
+    }
+  })
 })
