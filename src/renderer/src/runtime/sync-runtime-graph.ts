@@ -938,6 +938,7 @@ async function syncRuntimeGraph(): Promise<void> {
           leafId,
           paneRuntimeId: parkedPaneId ?? index + 1,
           ptyId,
+          parked: true,
           // Why not null: the parked byte watcher keeps writing this pane's
           // runtime title, and main prefers leaf.paneTitle over its own older
           // lastOscTitle. Dropping it would pin a parked agent pane to a stale

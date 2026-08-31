@@ -24,8 +24,10 @@ import {
   SECOND_PTY_ID,
   SECOND_TERMINAL_HANDLE,
   sqliteFor,
+  TAB_ID,
   temporaryDirectories,
-  TERMINAL_HANDLE
+  TERMINAL_HANDLE,
+  WORKTREE_ID
 } from './orchestration-mailbox-notification-test-harness'
 import { RpcDispatcher } from './rpc/dispatcher'
 import { ORCHESTRATION_METHODS } from './rpc/methods/orchestration'
@@ -576,29 +578,115 @@ describe('orchestration notification mailbox consistency', () => {
     db.close()
   })
 
-  it.each([
-    ['working', '\x1b]0;Codex working\x07'],
-    ['permission', '\x1b]0;Codex waiting for permission\x07']
-  ])('handles a cold-parked pointer after the agent becomes %s', async (state, title) => {
+  it('keeps a staged Enter deferred when a parked watcher republishes the leaf beside a decoy', async () => {
     vi.useFakeTimers()
-    const db = createDatabase('orca-mailbox-cold-park-transition-')
+    const db = createDatabase('orca-mailbox-cold-park-published-leaf-')
     const harness = createRuntime(db)
-    const run = createBoundRun(db, 'Cold-park transition Run')
-    const message = insertDirectRunMessage(db, run.id, 'Do not submit while unavailable')
+    const run = createBoundRun(db, 'Cold-park published leaf Run')
+    insertDirectRunMessage(db, run.id, 'Keep Enter deferred')
 
     await driveToLiveIdle(harness.runtime)
     expect(pointerCount(harness.write)).toBe(1)
-    harness.runtime.syncWindowGraph(1, { tabs: [], leaves: [] })
-    harness.runtime.onPtyData(PTY_ID, title, 3)
+
+    // The first post-unmount graph can omit the target while a decoy remains.
+    harness.runtime.syncWindowGraph(1, {
+      tabs: [
+        {
+          tabId: 'decoy-tab',
+          worktreeId: WORKTREE_ID,
+          title: 'Decoy',
+          activeLeafId: 'decoy-leaf',
+          layout: null
+        }
+      ],
+      leaves: [
+        {
+          tabId: 'decoy-tab',
+          worktreeId: WORKTREE_ID,
+          leafId: 'decoy-leaf',
+          paneRuntimeId: 2,
+          ptyId: null
+        }
+      ]
+    })
+    // The parked watcher then republishes the target leaf. It is not a live
+    // renderer pane and must not clear the cold-park fence.
+    harness.runtime.syncWindowGraph(1, {
+      tabs: [
+        {
+          tabId: 'decoy-tab',
+          worktreeId: WORKTREE_ID,
+          title: 'Decoy',
+          activeLeafId: 'decoy-leaf',
+          layout: null
+        },
+        {
+          tabId: TAB_ID,
+          worktreeId: WORKTREE_ID,
+          title: 'Codex',
+          activeLeafId: LEAF_ID,
+          layout: null
+        }
+      ],
+      leaves: [
+        {
+          tabId: 'decoy-tab',
+          worktreeId: WORKTREE_ID,
+          leafId: 'decoy-leaf',
+          paneRuntimeId: 2,
+          ptyId: null
+        },
+        {
+          tabId: TAB_ID,
+          worktreeId: WORKTREE_ID,
+          leafId: LEAF_ID,
+          paneRuntimeId: 1,
+          ptyId: PTY_ID,
+          parked: true
+        }
+      ]
+    })
+    harness.runtime.onPtyData(PTY_ID, '\x1b]0;Codex working\x07', 3)
 
     await vi.advanceTimersByTimeAsync(500)
-
-    expect(harness.write.mock.calls.filter(([, payload]) => payload === '\r')).toHaveLength(
-      state === 'working' ? 1 : 0
-    )
-    expect(db.getMessageById(message.id)?.delivered_at).toEqual(expect.any(String))
+    expect(harness.write.mock.calls.filter(([, payload]) => payload === '\r')).toHaveLength(0)
     db.close()
   })
+
+  it.each([
+    ['working', '\x1b]0;Codex working\x07', '\x1b]0;Codex done\x07'],
+    ['permission', '\x1b]0;Codex waiting for permission\x07', '\x1b]0;Codex done\x07']
+  ])(
+    'handles a cold-parked pointer after the agent becomes %s',
+    async (state, title, idleTitle) => {
+      vi.useFakeTimers()
+      const db = createDatabase('orca-mailbox-cold-park-transition-')
+      const harness = createRuntime(db)
+      const run = createBoundRun(db, 'Cold-park transition Run')
+      const message = insertDirectRunMessage(db, run.id, 'Do not submit while unavailable')
+
+      await driveToLiveIdle(harness.runtime)
+      expect(pointerCount(harness.write)).toBe(1)
+      harness.runtime.syncWindowGraph(1, { tabs: [], leaves: [] })
+      harness.runtime.onPtyData(PTY_ID, title, 3)
+
+      await vi.advanceTimersByTimeAsync(500)
+
+      expect(harness.write.mock.calls.filter(([, payload]) => payload === '\r')).toHaveLength(0)
+      if (state === 'working') {
+        harness.runtime.onPtyData(PTY_ID, idleTitle, 4)
+        await Promise.resolve()
+        await Promise.resolve()
+        expect(harness.write.mock.calls.filter(([, payload]) => payload === '\r')).toHaveLength(1)
+        await vi.waitFor(() =>
+          expect(db.getMessageById(message.id)?.delivered_at).toEqual(expect.any(String))
+        )
+      } else {
+        expect(db.getMessageById(message.id)?.delivered_at).toBeNull()
+      }
+      db.close()
+    }
+  )
 
   it('releases staged pointer state when an explicit check owns the batch', async () => {
     vi.useFakeTimers()

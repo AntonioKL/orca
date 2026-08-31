@@ -67,7 +67,6 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
       return
     }
     if (leaf.ptyId) {
-      this.coldParkedPtys.delete(leaf.ptyId)
       const deferredEnter = this.state.takeDeferredEnter(leaf.ptyId)
       if (deferredEnter) {
         this.state.parkDelivery(leaf.ptyId, mailboxHandle, leaf, options.reservedTypes)
@@ -158,6 +157,7 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
   }
 
   retirePty(ptyId: string, preserveAttemptedDelivery = false): void {
+    this.coldParkedPtys.delete(ptyId)
     const { flight, releasedMailboxes } = this.state.retirePty(ptyId)
     if (flight?.enterTimer != null) {
       clearTimeout(flight.enterTimer)
@@ -174,6 +174,9 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
     try {
       // Staged pointer text is already queued in the composer; working is queue-safe.
       if (this.state.hasFlight(ptyId)) {
+        if (this.coldParkedPtys.has(ptyId)) {
+          this.state.deferFlightUntilIdle(ptyId)
+        }
         return
       }
       this.retirePty(ptyId)
@@ -192,6 +195,10 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
 
   markPtyColdParked(ptyId: string): void {
     this.coldParkedPtys.add(ptyId)
+  }
+
+  clearPtyColdParked(ptyId: string): void {
+    this.coldParkedPtys.delete(ptyId)
   }
 
   private redeliverAfterProbe(
