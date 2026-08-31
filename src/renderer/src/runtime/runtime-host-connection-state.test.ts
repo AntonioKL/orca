@@ -40,6 +40,18 @@ describe('runtime host connection state', () => {
     expect(isConnectedRuntimeHostState('disconnected')).toBe(false)
   })
 
+  it('distinguishes a connected transport from an unavailable runtime', () => {
+    expect(
+      runtimeHostConnectionState({
+        hasStatusEntry: true,
+        status: null,
+        transportStatus: 'connected'
+      })
+    ).toBe('runtime-unavailable')
+    expect(runtimeStatusForOverall('runtime-unavailable')).toBe('connected')
+    expect(isConnectedRuntimeHostState('runtime-unavailable')).toBe(true)
+  })
+
   it('still counts a workspace-window-closed remote server as a connected host', () => {
     // Why: the transport is healthy, so demoting it to disconnected would be a lie
     // in the other direction — only the wording changes (#12350).

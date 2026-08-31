@@ -10,6 +10,7 @@ import {
   getRuntimeServerConnectionLabel,
   getRuntimeServerConnectionState,
   getRuntimeServerDotClass,
+  isRuntimeServerTransportConnected,
   type RuntimeHostDetails
 } from './runtime-environment-host-details'
 import {
@@ -53,7 +54,7 @@ export function RuntimeServerRow({
   const detailsDescription = getHostDetailsDescription(details)
   const connectionState = getRuntimeServerConnectionState(details)
   // A connected host exposes Disconnect; otherwise Connect.
-  const isReachable = connectionState === 'connected'
+  const isReachable = isRuntimeServerTransportConnected(connectionState)
   const actionBusy = connecting || switching || disconnecting || removing
 
   return (

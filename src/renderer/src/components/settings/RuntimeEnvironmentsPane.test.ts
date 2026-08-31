@@ -14,6 +14,7 @@ import {
   getHostModelCapabilitySummary,
   getRuntimeCapabilitiesSummary,
   getRuntimeServerConnectionState,
+  isRuntimeServerTransportConnected,
   isRuntimeEnvironmentRemovalBlocked,
   type RuntimeHostDetails
 } from './RuntimeEnvironmentsPane'
@@ -176,12 +177,34 @@ describe('RuntimeEnvironmentsPane host details', () => {
     ).toBe('Host model support: update server for task source context, workspace run context')
   })
 
-  it('reports an attached, ready, compatible host as Connected regardless of active-ness', () => {
+  it('distinguishes transport-up/runtime-down from an attached ready runtime', () => {
     // Why: the row tracks attachment (reachable + ready), which exposes Disconnect.
     // Whether the host is the default *active* server is a separate concept, so it
     // must NOT change this label — otherwise the dot/label/button disagree (a host
     // showed "Available" with a grey dot yet offered Disconnect).
-    expect(getRuntimeServerConnectionState(details({ status: 'ready' }))).toBe('connected')
+    expect(getRuntimeServerConnectionState(details({ status: 'ready' }))).toBe(
+      'runtime-unavailable'
+    )
+    expect(isRuntimeServerTransportConnected('runtime-unavailable')).toBe(true)
+    expect(
+      getRuntimeServerConnectionState(
+        details({
+          status: 'ready',
+          runtimeStatus: {
+            runtimeId: 'runtime-ready',
+            rendererGraphEpoch: 1,
+            graphStatus: 'ready',
+            authoritativeWindowId: 1,
+            liveTabCount: 0,
+            liveLeafCount: 0
+          }
+        })
+      )
+    ).toBe('connected')
+    expect(getHostDetailsDescription(details({ status: 'ready' }))).toContain(
+      'SSH transport is connected'
+    )
+    expect(getHostDetailsSummary(details({ status: 'ready' }))).toBe('Orca unavailable')
     expect(getRuntimeServerConnectionState(undefined)).toBe('checking')
     expect(getRuntimeServerConnectionState(details({ status: 'loading' }))).toBe('checking')
     expect(getRuntimeServerConnectionState(details({ status: 'error', error: 'offline' }))).toBe(

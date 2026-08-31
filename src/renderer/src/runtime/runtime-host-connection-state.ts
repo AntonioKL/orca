@@ -2,11 +2,15 @@ import type { RuntimeStatus } from '../../../shared/runtime-types'
 import { isRuntimeWorkspaceWindowClosed } from '../../../shared/runtime-workspace-window-availability'
 
 export type HostStatus = 'connected' | 'disconnected' | 'connecting'
+export type RuntimeHostTransportState = 'connected' | 'checking' | 'disconnected'
 
 // Why: 'workspace-window-closed' is a reachable host that cannot serve graph-backed
 // work — connected for counting purposes, but not interchangeable with 'connected'.
 export type RuntimeHostConnectionState =
   | 'connected'
+  // The SSH/control transport is up, but the Orca runtime did not answer its
+  // status probe. This is distinct from a disconnected transport.
+  | 'runtime-unavailable'
   | 'workspace-window-closed'
   | 'checking'
   | 'reconnecting'
@@ -16,10 +20,13 @@ export type RuntimeHostConnectionState =
 // so a degraded host can never read "Connected" in one place and "Ready" in the other.
 export function runtimeHostConnectionState({
   hasStatusEntry,
-  status
+  status,
+  transportStatus = 'disconnected'
 }: {
   hasStatusEntry: boolean
   status: RuntimeStatus | null | undefined
+  /** Transport evidence is independent from the runtime status RPC result. */
+  transportStatus?: RuntimeHostTransportState
 }): RuntimeHostConnectionState {
   if (!hasStatusEntry) {
     return 'checking'
@@ -29,7 +36,7 @@ export function runtimeHostConnectionState({
     return 'reconnecting'
   }
   if (!status) {
-    return 'disconnected'
+    return transportStatus === 'connected' ? 'runtime-unavailable' : 'disconnected'
   }
   // Why no lastError requirement: a clean close (server restart, host sleep, network
   // blip) leaves lastError null, and demanding an error string painted those hosts green.
@@ -57,6 +64,7 @@ export function runtimeStatusForOverall(state: RuntimeHostConnectionState): Host
     // Why: a closed workspace window is a degraded host, not a lost connection —
     // it must keep counting toward the connected-host total.
     case 'connected':
+    case 'runtime-unavailable':
     case 'workspace-window-closed':
       return 'connected'
     case 'checking':
@@ -68,5 +76,7 @@ export function runtimeStatusForOverall(state: RuntimeHostConnectionState): Host
 }
 
 export function isConnectedRuntimeHostState(state: RuntimeHostConnectionState): boolean {
-  return state === 'connected' || state === 'workspace-window-closed'
+  return (
+    state === 'connected' || state === 'runtime-unavailable' || state === 'workspace-window-closed'
+  )
 }
