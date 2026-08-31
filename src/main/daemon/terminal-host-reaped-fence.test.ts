@@ -81,6 +81,7 @@ describe('TerminalHost pending kill fences', () => {
         sessionId: 'replacement-fence',
         cols: 80,
         rows: 24,
+        launchAgent: 'claude',
         streamClient: { onData: vi.fn(), onExit: vi.fn() }
       })
       await expect(
