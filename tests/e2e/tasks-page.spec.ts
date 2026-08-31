@@ -9,6 +9,11 @@ import { test, expect } from './helpers/orca-app'
 import { waitForSessionReady, waitForActiveWorktree, getStoreState } from './helpers/store'
 import { GITHUB_TASK_SEARCH_IDLE_MS } from '../../src/renderer/src/components/use-github-task-search-commit'
 
+// Why derived: a fixed 400ms cadence left only ~150ms of margin against the idle window
+// on a loaded runner, so one slow keystroke committed a prefix and failed the assertion.
+const TASK_SEARCH_TYPING_DELAY_MS = Math.round(GITHUB_TASK_SEARCH_IDLE_MS / 6)
+const TASK_SEARCH_SETTLE_MS = GITHUB_TASK_SEARCH_IDLE_MS + 50
+
 type RenderedTaskSource = {
   source: string
   active: boolean
@@ -18,11 +23,6 @@ type TaskSearchRequestProbe = {
   countQueries: string[]
   fetchQueries: string[]
 }
-
-// Keep every keystroke inside the idle window while leaving enough time for the
-// renderer to process each input event on a loaded E2E runner.
-const TASK_SEARCH_TYPING_DELAY_MS = Math.round(GITHUB_TASK_SEARCH_IDLE_MS / 6)
-const TASK_SEARCH_SETTLE_MS = GITHUB_TASK_SEARCH_IDLE_MS + 50
 
 const TASK_SOURCE_BY_LABEL: Record<string, string> = {
   GitHub: 'github',
@@ -385,6 +385,9 @@ test.describe('Tasks page', () => {
       'aria-current',
       'page'
     )
+    // Why the wait: outlives the 5s give-up that used to abandon the restore and
+    // overwrite the remembered offset with the committed 0. A list that never paints
+    // must defer the restore, never destroy the position.
     await orcaPage.waitForTimeout(5_500)
     await orcaPage.getByRole('button', { name: 'Close tasks' }).click()
     await expect
@@ -392,7 +395,7 @@ test.describe('Tasks page', () => {
         const position = await getStoreState<{ scrollTop: number }>(orcaPage, 'taskListPosition')
         return position.scrollTop
       })
-      .toBe(0)
+      .toBeGreaterThan(300)
     await permanentlyClampedRowsStyle.evaluate((element) => element.remove())
   })
 
@@ -416,6 +419,8 @@ test.describe('Tasks page', () => {
 
     await expect(existingIssue).toBeVisible()
 
+    // The contract is that no prefix of the typed query is ever queried, not that the
+    // probe is empty at one instant: exactly one request per surface, for the final value.
     await expect
       .poll(async () => readTaskSearchRequestProbe(orcaPage), { timeout: 2_000 })
       .toEqual({ countQueries: ['is:issue rate'], fetchQueries: ['is:issue rate'] })

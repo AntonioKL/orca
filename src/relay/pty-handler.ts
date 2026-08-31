@@ -49,6 +49,7 @@ import {
 import { isTuiAgent } from '../shared/tui-agent-config'
 import type { TuiAgent } from '../shared/tui-agent'
 import { forceKillPosixPtyProcessGroups } from '../main/pty/posix-pty-process-groups'
+import { terminatePtyJob } from '../main/windows/windows-pty-job'
 import { stripInheritedBuildModeEnv } from '../main/pty/build-mode-env'
 import { stripLegacyTerminalShimEnv } from '../main/pty/legacy-terminal-shim-dir'
 import { dropIncoherentCondaActivationEnv } from '../main/pty/conda-activation-env'
@@ -408,7 +409,7 @@ type PtyIdentity = { paneKey?: string; tabId?: string }
 
 /**
  * True when a reattach's expected pane identity contradicts the target PTY's own.
- * Rejects cross-relay-generation id collisions (a reset relay reuses `pty-N`).
+ * Rejects legacy cross-relay-generation id collisions (a reset relay reused `pty-N`).
  * Only compares fields present on both sides; absent identity stays permissive.
  */
 export function attachIdentityMismatches(expected: PtyIdentity, managed: PtyIdentity): boolean {
@@ -434,6 +435,7 @@ export type RelayPtyWorktreeRemovalCoordinator = {
 
 export class PtyHandler {
   private ptys = new Map<string, ManagedPty>()
+  private readonly ptyIdMintEpoch: string
   private nextId = 1
   private dispatcher: RelayDispatcher
   private graceTimeMs: number
@@ -470,9 +472,14 @@ export class PtyHandler {
     Promise<RelayAgentSessionCreateResult>
   >()
 
-  constructor(dispatcher: RelayDispatcher, graceTimeMs = DEFAULT_GRACE_TIME_MS) {
+  constructor(
+    dispatcher: RelayDispatcher,
+    graceTimeMs = DEFAULT_GRACE_TIME_MS,
+    ptyIdMintEpoch: string = randomUUID()
+  ) {
     this.dispatcher = dispatcher
     this.graceTimeMs = graceTimeMs
+    this.ptyIdMintEpoch = ptyIdMintEpoch
     this.registerHandlers()
     this.removeLegacyCapacityListener =
       this.dispatcher.onLegacyPtyCapacity?.(() => this.handleLegacyCapacity()) ?? null
@@ -1616,7 +1623,7 @@ export class PtyHandler {
     const shell = resolvedShellOverride || requestedEnvShell || resolveDefaultShell()
     let id: string
     do {
-      id = `pty-${this.nextId++}`
+      id = `pty2:${encodeURIComponent(this.ptyIdMintEpoch)}:${this.nextId++}`
     } while (this.ptys.has(id) || this.pendingReviveIds.has(id))
 
     // Why: augmenter values override renderer env so remote paths and hook coords win over local userData.
@@ -1818,7 +1825,7 @@ export class PtyHandler {
       throw new Error(`PTY "${id}" not found`)
     }
 
-    // Why: generation resets can reuse PTY IDs; reject conflicting identities.
+    // Why: legacy `pty-N` ids repeated across relay generations; reject conflicting identities.
     const mismatch = attachIdentityMismatches(
       {
         paneKey: typeof params.expectedPaneKey === 'string' ? params.expectedPaneKey : undefined,
@@ -2470,6 +2477,37 @@ export class PtyHandler {
     if (this.graceTimer) {
       clearTimeout(this.graceTimer)
       this.graceTimer = null
+    }
+  }
+
+  /**
+   * Reap every owned PTY synchronously, for the fatal-exit path only.
+   *
+   * Runs to completion across all PTYs: one shell that refuses to die must not
+   * strand the rest. The first failure is rethrown so the caller can record it --
+   * a reap that failed on a remote host is otherwise invisible.
+   */
+  forceKillAllPtyProcesses(): void {
+    let firstError: unknown
+    let hasError = false
+    for (const managed of this.ptys.values()) {
+      try {
+        // Why mark rather than skip: the job already took the whole tree, and the
+        // flag is what suppresses the redundant signal -- here in requestForceKill,
+        // and in any dispose that still runs after this.
+        if (process.platform === 'win32' && terminatePtyJob(managed.pty) === 'terminated') {
+          managed.forceKillSent = true
+        }
+        this.requestForceKill(managed)
+      } catch (error) {
+        if (!hasError) {
+          firstError = error
+          hasError = true
+        }
+      }
+    }
+    if (hasError) {
+      throw firstError
     }
   }
 
