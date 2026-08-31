@@ -87,7 +87,9 @@ export function createUpdateWorktreeGitIdentity(
         const currentBranchName = branchName(worktree.branch)
         const wasAutoDerived =
           worktree.displayNameMode === 'automatic' ||
-          (worktree.displayNameMode === undefined && worktree.displayName === currentBranchName)
+          (worktree.displayNameMode === undefined &&
+            worktree.cliProvenance?.kind !== 'created-by-cli' &&
+            worktree.displayName === currentBranchName)
         const wasDetachedAutoDerived =
           worktree.branch === '' &&
           nextBranch !== '' &&
