@@ -311,7 +311,12 @@ export async function killWithDescendantSweep(
   } finally {
     killRoot()
   }
-  return snapshot && ownsRoot ? 'tree_terminated' : 'tree_unavailable'
+  // POSIX escalation is deliberately asynchronous so teardown does not block on the
+  // grace window. A captured descendant therefore remains unverified until that sweep
+  // completes; report unavailable so callers retain the conservative verdict.
+  return snapshot && ownsRoot && snapshot.descendants.length === 0
+    ? 'tree_terminated'
+    : 'tree_unavailable'
 }
 
 export function sendDescendantSignal(pid: number, signal: NodeJS.Signals): void {
