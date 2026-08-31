@@ -1,32 +1,9 @@
 import { summarizeLatencies, type LatencyDistribution } from './codex-composer-echo-latency-probe'
+import type { SplitLatencySample } from './terminal-split-activation-latency-phases'
 
-export type RendererPhaseStamps = {
-  marker: string
-  sourcePaneId: number
-  sourcePtyId: string
-  newPaneId: number | null
-  newPtyId: string | null
-  keydownAtMs: number | null
-  focusAtMs: number | null
-  ptyBoundAtMs: number | null
-  inputAtMs: number | null
-  firstEchoAtMs: number | null
-}
-
-export type SplitLatencySample = RendererPhaseStamps & {
-  phase: 'warmup' | 'measured'
-  iteration: number
-  completedWithinTimeout: boolean
-  paneCountAfterProbe: number
-  ptyExitObserved: boolean
-  cleanupError: string | null
-  shortcutToFocusMs: number | null
-  shortcutToPtyBindMs: number | null
-  shortcutToFirstEchoMs: number | null
-  ptyBindToFirstEchoMs: number | null
-  inputToFirstEchoMs: number | null
-  missing: string[]
-  success: boolean
+export type BenchmarkRevisionIdentity = {
+  headSha: string
+  dirty: boolean
 }
 
 export type SampleSummary = {
@@ -39,7 +16,14 @@ export type SampleSummary = {
     missingEvents: {
       keydown: number
       focus: number
+      cwdRequest: number
+      cwdSettled: number
+      ptySpawnRequest: number
+      ptySpawnResult: number
       ptyBind: number
+      fixtureUnlockRequest: number
+      fixtureUnlockIpcWrite: number
+      fixtureReadyParse: number
       input: number
       firstEcho: number
       paneCount: number
@@ -50,7 +34,16 @@ export type SampleSummary = {
   }
   distributions: {
     shortcutToFocusMs: LatencyDistribution
+    shortcutToCwdRequestMs: LatencyDistribution
+    cwdLookupMs: LatencyDistribution
+    cwdSettleToPtySpawnRequestMs: LatencyDistribution
+    ptySpawnRequestToResultMs: LatencyDistribution
+    ptySpawnResultToBindMs: LatencyDistribution
     shortcutToPtyBindMs: LatencyDistribution
+    ptyBindToFixtureUnlockRequestMs: LatencyDistribution
+    fixtureUnlockRequestToIpcWriteMs: LatencyDistribution
+    fixtureUnlockIpcWriteToReadyParseMs: LatencyDistribution
+    fixtureReadyParseToInputMs: LatencyDistribution
     shortcutToFirstEchoMs: LatencyDistribution
     ptyBindToFirstEchoMs: LatencyDistribution
     inputToFirstEchoMs: LatencyDistribution
@@ -82,12 +75,7 @@ export type BenchmarkReportResult = {
 
 function valuesFor(
   samples: SplitLatencySample[],
-  key:
-    | 'shortcutToFocusMs'
-    | 'shortcutToPtyBindMs'
-    | 'shortcutToFirstEchoMs'
-    | 'ptyBindToFirstEchoMs'
-    | 'inputToFirstEchoMs'
+  key: keyof SampleSummary['distributions']
 ): number[] {
   return samples.flatMap((sample) => {
     const value = sample[key]
@@ -99,7 +87,16 @@ export function summarizeSamples(samples: SplitLatencySample[], requested: numbe
   const missingEvents = {
     keydown: samples.filter((sample) => sample.keydownAtMs === null).length,
     focus: samples.filter((sample) => sample.focusAtMs === null).length,
+    cwdRequest: samples.filter((sample) => sample.cwdRequestAtMs === null).length,
+    cwdSettled: samples.filter((sample) => sample.cwdSettledAtMs === null).length,
+    ptySpawnRequest: samples.filter((sample) => sample.ptySpawnRequestAtMs === null).length,
+    ptySpawnResult: samples.filter((sample) => sample.ptySpawnResultAtMs === null).length,
     ptyBind: samples.filter((sample) => sample.ptyBoundAtMs === null).length,
+    fixtureUnlockRequest: samples.filter((sample) => sample.fixtureUnlockRequestedAtMs === null)
+      .length,
+    fixtureUnlockIpcWrite: samples.filter((sample) => sample.fixtureUnlockIpcWriteAtMs === null)
+      .length,
+    fixtureReadyParse: samples.filter((sample) => sample.fixtureReadyParsedAtMs === null).length,
     input: samples.filter((sample) => sample.inputAtMs === null).length,
     firstEcho: samples.filter((sample) => sample.firstEchoAtMs === null).length,
     paneCount: samples.filter((sample) => sample.paneCountAfterProbe !== 2).length,
@@ -119,7 +116,28 @@ export function summarizeSamples(samples: SplitLatencySample[], requested: numbe
     },
     distributions: {
       shortcutToFocusMs: summarizeLatencies(valuesFor(samples, 'shortcutToFocusMs')),
+      shortcutToCwdRequestMs: summarizeLatencies(valuesFor(samples, 'shortcutToCwdRequestMs')),
+      cwdLookupMs: summarizeLatencies(valuesFor(samples, 'cwdLookupMs')),
+      cwdSettleToPtySpawnRequestMs: summarizeLatencies(
+        valuesFor(samples, 'cwdSettleToPtySpawnRequestMs')
+      ),
+      ptySpawnRequestToResultMs: summarizeLatencies(
+        valuesFor(samples, 'ptySpawnRequestToResultMs')
+      ),
+      ptySpawnResultToBindMs: summarizeLatencies(valuesFor(samples, 'ptySpawnResultToBindMs')),
       shortcutToPtyBindMs: summarizeLatencies(valuesFor(samples, 'shortcutToPtyBindMs')),
+      ptyBindToFixtureUnlockRequestMs: summarizeLatencies(
+        valuesFor(samples, 'ptyBindToFixtureUnlockRequestMs')
+      ),
+      fixtureUnlockRequestToIpcWriteMs: summarizeLatencies(
+        valuesFor(samples, 'fixtureUnlockRequestToIpcWriteMs')
+      ),
+      fixtureUnlockIpcWriteToReadyParseMs: summarizeLatencies(
+        valuesFor(samples, 'fixtureUnlockIpcWriteToReadyParseMs')
+      ),
+      fixtureReadyParseToInputMs: summarizeLatencies(
+        valuesFor(samples, 'fixtureReadyParseToInputMs')
+      ),
       shortcutToFirstEchoMs: summarizeLatencies(valuesFor(samples, 'shortcutToFirstEchoMs')),
       ptyBindToFirstEchoMs: summarizeLatencies(valuesFor(samples, 'ptyBindToFirstEchoMs')),
       inputToFirstEchoMs: summarizeLatencies(valuesFor(samples, 'inputToFirstEchoMs'))
@@ -129,6 +147,7 @@ export function summarizeSamples(samples: SplitLatencySample[], requested: numbe
 
 export function buildBenchmarkReport(args: {
   label: string
+  revision: BenchmarkRevisionIdentity
   headfulRun: boolean
   windowState: BrowserWindowState
   documentVisibility: string
@@ -159,9 +178,10 @@ export function buildBenchmarkReport(args: {
     : null
   return {
     report: {
-      schemaVersion: 1,
+      schemaVersion: 2,
       benchmark: 'terminal-split-activation-latency',
       label: args.label,
+      revision: args.revision,
       status: runComplete ? 'passed' : 'failed',
       valid: runComplete,
       abortReason: args.abortError?.message ?? null,

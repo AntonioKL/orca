@@ -1,8 +1,9 @@
+import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import type { Page, TestInfo } from '@stablyai/playwright-test'
+import type { ElectronApplication, Page, TestInfo } from '@stablyai/playwright-test'
 import { test, expect } from './helpers/orca-app'
 import {
   countVisibleTerminalPanes,
@@ -16,12 +17,23 @@ import {
 import { ensureTerminalVisible, waitForActiveWorktree, waitForSessionReady } from './helpers/store'
 import {
   buildBenchmarkReport,
+  type BenchmarkRevisionIdentity,
   type BrowserWindowState,
-  type RendererPhaseStamps,
-  type SplitLatencySample,
   type TerminalSplitLatencyReportConfig
 } from './terminal-split-activation-latency-report'
 import { writeTerminalSplitLatencyArtifact } from './terminal-split-activation-latency-artifact'
+import {
+  disposeSplitLatencyMainProbe,
+  installSplitLatencyMainProbe,
+  readSplitLatencyMainProbe,
+  resetSplitLatencyMainProbe
+} from './terminal-split-activation-latency-main-probe'
+import {
+  createSplitLatencySample,
+  mergeSplitLatencyMainProbeEvents,
+  type RendererPhaseStamps,
+  type SplitLatencySample
+} from './terminal-split-activation-latency-phases'
 
 const BENCH_ENABLED = process.env.ORCA_TERMINAL_SPLIT_LATENCY_BENCH === '1'
 const BENCH_LABEL = process.env.ORCA_TERMINAL_SPLIT_LATENCY_LABEL?.trim() || 'local'
@@ -81,6 +93,22 @@ type SplitLatencyProbeWindow = Window & {
   __terminalSplitLatencyProbe?: RendererProbe
   __terminalSplitLatencyPtyExitIds?: string[]
   __terminalSplitLatencyPtyExitDispose?: () => void
+}
+
+function readBenchmarkRevisionIdentity(): BenchmarkRevisionIdentity {
+  const headSha = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: process.cwd(),
+    encoding: 'utf8'
+  }).trim()
+  if (!/^[0-9a-f]{40}$/.test(headSha)) {
+    throw new Error(`Unable to resolve exact benchmark revision: ${headSha || 'empty output'}`)
+  }
+  const dirty =
+    execFileSync('git', ['status', '--porcelain'], {
+      cwd: process.cwd(),
+      encoding: 'utf8'
+    }).trim().length > 0
+  return { headSha, dirty }
 }
 
 function createEchoShellFixture(): { root: string; shellPath: string } {
@@ -162,9 +190,18 @@ async function installRendererProbe(
       sourcePtyId,
       newPaneId: null,
       newPtyId: null,
+      rendererTimeOriginEpochMs: performance.timeOrigin,
       keydownAtMs: null,
       focusAtMs: null,
+      cwdRequestAtMs: null,
+      cwdSettledAtMs: null,
+      ptySpawnRequestAtMs: null,
+      ptySpawnResultAtMs: null,
       ptyBoundAtMs: null,
+      fixtureUnlockRequestedAtMs: null,
+      fixtureUnlockIpcWriteAtMs: null,
+      fixtureUnlockIpcWriteChannel: null,
+      fixtureReadyParsedAtMs: null,
       inputAtMs: null,
       firstEchoAtMs: null
     }
@@ -225,6 +262,7 @@ async function installRendererProbe(
         }
         if (!fixtureReady && text.includes(readyMarker)) {
           fixtureReady = true
+          stamps.fixtureReadyParsedAtMs = performance.now()
           maybeFeedMarker()
         }
         if (stamps.firstEchoAtMs === null && text.includes(marker)) {
@@ -242,7 +280,10 @@ async function installRendererProbe(
         stamps.newPtyId = ptyId
         stamps.ptyBoundAtMs = performance.now()
         ptyBindingObserver?.disconnect()
-        queueMicrotask(() => pane.terminal.input('\r', true))
+        queueMicrotask(() => {
+          stamps.fixtureUnlockRequestedAtMs = performance.now()
+          pane.terminal.input('\r', true)
+        })
       }
 
       if (pane.container.dataset.ptyId) {
@@ -301,48 +342,6 @@ async function collectRendererProbe(page: Page): Promise<RendererPhaseStamps> {
     delete targetWindow.__terminalSplitLatencyProbe
     return report
   })
-}
-
-function elapsed(start: number | null, end: number | null): number | null {
-  return start === null || end === null ? null : end - start
-}
-
-function createSample(
-  phase: SplitLatencySample['phase'],
-  iteration: number,
-  stamps: RendererPhaseStamps,
-  completedWithinTimeout: boolean,
-  paneCountAfterProbe: number,
-  ptyExitObserved: boolean,
-  cleanupError: string | null
-): SplitLatencySample {
-  const missing = [
-    ...(stamps.keydownAtMs === null ? ['keydown'] : []),
-    ...(stamps.focusAtMs === null ? ['focus'] : []),
-    ...(stamps.ptyBoundAtMs === null ? ['pty-bind'] : []),
-    ...(stamps.inputAtMs === null ? ['input'] : []),
-    ...(stamps.firstEchoAtMs === null ? ['first-echo'] : []),
-    ...(stamps.newPtyId === stamps.sourcePtyId ? ['pty-identity'] : []),
-    ...(paneCountAfterProbe !== 2 ? [`pane-count:${paneCountAfterProbe}`] : []),
-    ...(!ptyExitObserved ? ['pty-exit'] : []),
-    ...(cleanupError ? ['cleanup'] : [])
-  ]
-  return {
-    ...stamps,
-    phase,
-    iteration,
-    completedWithinTimeout,
-    paneCountAfterProbe,
-    ptyExitObserved,
-    cleanupError,
-    shortcutToFocusMs: elapsed(stamps.keydownAtMs, stamps.focusAtMs),
-    shortcutToPtyBindMs: elapsed(stamps.keydownAtMs, stamps.ptyBoundAtMs),
-    shortcutToFirstEchoMs: elapsed(stamps.keydownAtMs, stamps.firstEchoAtMs),
-    ptyBindToFirstEchoMs: elapsed(stamps.ptyBoundAtMs, stamps.firstEchoAtMs),
-    inputToFirstEchoMs: elapsed(stamps.inputAtMs, stamps.firstEchoAtMs),
-    missing,
-    success: completedWithinTimeout && missing.length === 0
-  }
 }
 
 async function closeSplitsAndRefocusSource(
@@ -428,6 +427,7 @@ async function readChildPtyIds(page: Page, tabId: string, sourcePtyId: string): 
 }
 
 async function runSplitCycle(
+  electronApp: ElectronApplication,
   page: Page,
   args: {
     tabId: string
@@ -441,6 +441,7 @@ async function runSplitCycle(
   await focusActiveTerminalInput(page)
   // Prevent an ID reused by a later PTY lifetime from matching an earlier exit.
   await resetPtyExitProbe(page)
+  await resetSplitLatencyMainProbe(electronApp)
   await installRendererProbe(page, {
     tabId: args.tabId,
     sourcePaneId: args.sourcePaneId,
@@ -451,7 +452,11 @@ async function runSplitCycle(
   })
   await page.keyboard.press(SPLIT_CHORD)
   const completedWithinTimeout = await waitForRendererProbe(page)
-  const stamps = await collectRendererProbe(page)
+  const rendererStamps = await collectRendererProbe(page)
+  const stamps = mergeSplitLatencyMainProbeEvents(
+    rendererStamps,
+    await readSplitLatencyMainProbe(electronApp)
+  )
   let paneCountAfterProbe = -1
   let closeCompletedAt = Date.now()
   let ptyExitObserved = false
@@ -472,15 +477,15 @@ async function runSplitCycle(
     cleanupError = error instanceof Error ? error : new Error(String(error))
     closeCompletedAt = Date.now()
   }
-  const sample = createSample(
-    args.phase,
-    args.iteration,
+  const sample = createSplitLatencySample({
+    phase: args.phase,
+    iteration: args.iteration,
     stamps,
     completedWithinTimeout,
     paneCountAfterProbe,
     ptyExitObserved,
-    cleanupError?.message ?? null
-  )
+    cleanupError: cleanupError?.message ?? null
+  })
   return { sample, closeCompletedAt, fatalError: cleanupError }
 }
 
@@ -569,7 +574,7 @@ test.describe('Terminal split activation latency benchmark @headful', () => {
   test.skip(process.platform === 'win32', 'Deterministic echo-shell fixture is POSIX-only')
   test.setTimeout(BENCH_TIMEOUT_MS)
 
-  test('records shortcut, focus, PTY bind, and first echo phases', async ({
+  test('records attributed CWD, spawn, bind, fixture-ready, input, and echo phases', async ({
     electronApp,
     orcaPage,
     testRepoPath
@@ -584,9 +589,11 @@ test.describe('Terminal split activation latency benchmark @headful', () => {
     let fixture: { root: string; shellPath: string } | null = null
     const warmupSamples: SplitLatencySample[] = []
     const measuredSamples: SplitLatencySample[] = []
+    let revision: BenchmarkRevisionIdentity = { headSha: 'unavailable', dirty: true }
     let abortError: Error | null = null
     let reportAttached = false
     try {
+      revision = readBenchmarkRevisionIdentity()
       expect(headfulRun, 'The latency benchmark must run with a visible BrowserWindow').toBe(true)
       const observedWindowState = await electronApp.evaluate(({ BrowserWindow }) => ({
         browserWindowVisible: BrowserWindow.getAllWindows()[0]?.isVisible() ?? false,
@@ -617,10 +624,11 @@ test.describe('Terminal split activation latency benchmark @headful', () => {
       const { tabId, ptyId: sourcePtyId } = source
       const sourcePaneId = await readActivePaneId(orcaPage, tabId)
       await installPtyExitProbe(orcaPage)
+      await installSplitLatencyMainProbe(electronApp)
       let priorCloseCompletedAt = Date.now()
 
       for (let iteration = 0; iteration < WARMUP_CYCLES; iteration += 1) {
-        const result = await runSplitCycle(orcaPage, {
+        const result = await runSplitCycle(electronApp, orcaPage, {
           tabId,
           sourcePaneId,
           sourcePtyId,
@@ -638,7 +646,7 @@ test.describe('Terminal split activation latency benchmark @headful', () => {
 
       for (let iteration = 0; iteration < MEASURED_CYCLES && abortError === null; iteration += 1) {
         await waitForColdProcessCwdLookup(orcaPage, priorCloseCompletedAt)
-        const result = await runSplitCycle(orcaPage, {
+        const result = await runSplitCycle(electronApp, orcaPage, {
           tabId,
           sourcePaneId,
           sourcePtyId,
@@ -658,6 +666,7 @@ test.describe('Terminal split activation latency benchmark @headful', () => {
         .catch(() => 'unavailable' as const)
       const reportResult = buildBenchmarkReport({
         label: BENCH_LABEL,
+        revision,
         headfulRun,
         windowState,
         documentVisibility,
@@ -687,6 +696,7 @@ test.describe('Terminal split activation latency benchmark @headful', () => {
         abortError ??= failure
         const failureReport = buildBenchmarkReport({
           label: BENCH_LABEL,
+          revision,
           headfulRun,
           windowState,
           documentVisibility,
@@ -705,6 +715,7 @@ test.describe('Terminal split activation latency benchmark @headful', () => {
       }
       throw error
     } finally {
+      await disposeSplitLatencyMainProbe(electronApp).catch(() => undefined)
       await disposePtyExitProbe(orcaPage).catch(() => undefined)
       if (fixture) {
         rmSync(fixture.root, { recursive: true, force: true })
