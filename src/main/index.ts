@@ -757,7 +757,6 @@ if (app.isPackaged && process.platform !== 'win32') {
 }
 configureDevUserDataPath(is.dev)
 configureOrcaUserDataPathEnv()
-installServeSupervisorDisconnectQuit(isServeMode)
 
 // Why: just past createMainWindow's 10s ready-to-show fallback, so a window revealed that way still gets its tray icon.
 const TRAY_CREATE_FALLBACK_MS = 12_000
@@ -938,6 +937,7 @@ if (hasSingleInstanceLock) {
   // timing, in particular not the pre-ready Keychain service-name resolution and
   // the app.setName ordering the userData captures below depend on.
   setAppEnvironment(new ElectronAppEnvironment())
+  installServeSupervisorDisconnectQuit(isServeMode)
   setSecretStore(new ElectronSecretStore())
   // Why at process level, not per-window: pty.ts registers against injected surfaces so
   // it can load without electron, and an Electron main process always has ipcMain —

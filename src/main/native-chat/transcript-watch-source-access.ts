@@ -1,4 +1,4 @@
-import { createTranscriptNativeWatcher } from './transcript-native-watcher'
+import { createRunningGuardedTranscriptNativeWatcher } from './wsl-transcript-watcher-running-guard'
 import { readTranscriptBoundaryFingerprint } from './transcript-boundary-fingerprint'
 import type { TranscriptFileSource } from './transcript-file-source'
 import {
@@ -49,7 +49,7 @@ export function createSourceAwareTranscriptNativeWatcher(
   onRetry: () => void
 ) {
   return !fileSource || fileSource.supportsNativeWatch
-    ? createTranscriptNativeWatcher(filePath, onEvent, onRetry)
+    ? createRunningGuardedTranscriptNativeWatcher(filePath, onEvent, onRetry)
     : {
         bind: () => false,
         invalidate: () => {},

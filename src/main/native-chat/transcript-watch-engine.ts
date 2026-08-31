@@ -1,10 +1,5 @@
 import type { NativeChatMessage, NativeChatTurnLifecycle } from '../../shared/native-chat-types'
-import {
-  boundaryFingerprint,
-  readTranscriptFileVersion,
-  transcriptFileVersionChanged,
-  type TranscriptFileVersion
-} from './transcript-file-version'
+import { transcriptFileVersionChanged, type TranscriptFileVersion } from './transcript-file-version'
 import {
   createIncrementalTranscriptState,
   readIncrementalTranscriptMessages,
@@ -19,9 +14,14 @@ import type {
   SubscribeNativeChatTranscriptArgs
 } from './transcript-watch-contract'
 import { createTranscriptWatchScheduler } from './transcript-watch-scheduler'
+import {
+  createSourceAwareTranscriptNativeWatcher,
+  probeTranscriptWatchFile,
+  readTranscriptWatchBoundary,
+  readTranscriptWatchFileVersion
+} from './transcript-watch-source-access'
 import { WslTranscriptFsError } from './wsl-transcript-fs-gate'
 import {
-  createRunningGuardedTranscriptNativeWatcher,
   isWslTranscriptWatcherPath,
   transcriptWatcherPathIsRunning
 } from './wsl-transcript-watcher-running-guard'
@@ -35,8 +35,15 @@ export async function installTranscriptWatcher(
   args: SubscribeNativeChatTranscriptArgs,
   signal?: AbortSignal
 ): Promise<NativeChatTranscriptSubscription | null> {
+  const fileSource = args.fileSource
   const isWslPath = isWslTranscriptWatcherPath(filePath)
-  if (!(await transcriptWatcherPathIsInstallable(filePath, signal))) {
+  if (fileSource) {
+    try {
+      await probeTranscriptWatchFile(filePath, fileSource, signal)
+    } catch {
+      return null
+    }
+  } else if (!(await transcriptWatcherPathIsInstallable(filePath, signal))) {
     return null
   }
   const { onAppend, onInitialSnapshot, onReplace, initialLimit } = args
@@ -82,7 +89,7 @@ export async function installTranscriptWatcher(
       (nextLifecycle) => {
         lifecycle = nextLifecycle
       },
-      gateAbort.signal
+      { fileSource, signal: gateAbort.signal }
     )
     if (!closed && (remaining.length > 0 || lifecycle)) {
       onAppend(remaining, lifecycle)
@@ -90,8 +97,17 @@ export async function installTranscriptWatcher(
   }
 
   async function finishSuccessfulDrain(startVersion: TranscriptFileVersion): Promise<void> {
-    watchedBoundary = await boundaryFingerprint(filePath, state.offset, gateAbort.signal)
-    const completedVersion = await readTranscriptFileVersion(filePath, gateAbort.signal)
+    watchedBoundary = await readTranscriptWatchBoundary(
+      filePath,
+      state.offset,
+      fileSource,
+      gateAbort.signal
+    )
+    const completedVersion = await readTranscriptWatchFileVersion(
+      filePath,
+      fileSource,
+      gateAbort.signal
+    )
     if (transcriptFileVersionChanged(completedVersion, startVersion)) {
       // Why: a write racing this drain needs another pass even when the reader
       // happened to reach its new EOF; timestamp-only rewrites may need replace.
@@ -113,8 +129,13 @@ export async function installTranscriptWatcher(
   }
 
   async function drainOnce(): Promise<void> {
-    const current = await readTranscriptFileVersion(filePath, gateAbort.signal)
-    const currentBoundary = await boundaryFingerprint(filePath, state.offset, gateAbort.signal)
+    const current = await readTranscriptWatchFileVersion(filePath, fileSource, gateAbort.signal)
+    const currentBoundary = await readTranscriptWatchBoundary(
+      filePath,
+      state.offset,
+      fileSource,
+      gateAbort.signal
+    )
     if (closed) {
       return
     }
@@ -149,6 +170,7 @@ export async function installTranscriptWatcher(
             false,
             undefined,
             decodeLifecycle,
+            fileSource,
             gateAbort.signal
           )
         : null
@@ -178,6 +200,7 @@ export async function installTranscriptWatcher(
             false,
             undefined,
             decodeLifecycle,
+            fileSource,
             gateAbort.signal
           )
         : null
@@ -208,7 +231,7 @@ export async function installTranscriptWatcher(
           (nextLifecycle) => {
             lifecycle = nextLifecycle
           },
-          gateAbort.signal
+          { fileSource, signal: gateAbort.signal }
         )
         if (closed) {
           return
@@ -271,7 +294,7 @@ export async function installTranscriptWatcher(
       return
     }
     try {
-      const current = await readTranscriptFileVersion(filePath, gateAbort.signal)
+      const current = await readTranscriptWatchFileVersion(filePath, fileSource, gateAbort.signal)
       if (closed) {
         return
       }
@@ -292,8 +315,9 @@ export async function installTranscriptWatcher(
     drain: () => void drain(),
     reconcile: reconcileKnownRunning
   })
-  const nativeWatcher = createRunningGuardedTranscriptNativeWatcher(
+  const nativeWatcher = createSourceAwareTranscriptNativeWatcher(
     filePath,
+    fileSource,
     () => scheduler.scheduleEventDrain(),
     scheduleRotationRetry
   )

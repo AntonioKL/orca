@@ -84,6 +84,7 @@ import {
   SSH_FILESYSTEM_PROVIDER_UNAVAILABLE_MESSAGE
 } from '../providers/ssh-filesystem-dispatch'
 import type { FileReadLimits, FileStat, IFilesystemProvider } from '../providers/types'
+import { readSshFileExplorerChunk } from './ssh-file-explorer-chunk-read'
 import { FileReadCapExceededError } from '../ssh/ssh-filesystem-stream-reader'
 import {
   isWatcherProcessFailure,
@@ -1835,10 +1836,9 @@ export class RuntimeFileCommands {
       if (fileStat.type === 'directory') {
         throw new Error('Cannot download a directory')
       }
-      if (!provider.readFileChunk) {
-        throw new Error('SSH runtime chunked download requires an updated Orca host')
-      }
-      return provider.readFileChunk(target.path, offset, length)
+      return provider.readFileChunk
+        ? provider.readFileChunk(target.path, offset, length)
+        : readSshFileExplorerChunk(provider, target.path, fileStat.size, offset, length)
     }
 
     const filePath = await resolveAuthorizedPath(target.path, this.host.requireStore())
