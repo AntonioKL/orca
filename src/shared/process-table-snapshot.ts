@@ -166,6 +166,29 @@ export function scoreForegroundCandidateRow(row: ProcessTableRow & { depth: numb
   return (row.stat.includes('+') ? 10_000 : 0) + row.depth
 }
 
+const processTableIndexes = new WeakMap<readonly ProcessTableRow[], ProcessTableIndex>()
+
+/**
+ * Memoize one index per snapshot identity, so the panes that share a TTL-cached
+ * capture walk its rows once instead of once each. Keyed weakly by the rows
+ * array, so an index dies with the snapshot that produced it.
+ *
+ * Deliberately stats-free: `buildProcessTableIndex` mutates the caller's counter
+ * bag and stores it on the index, so a shared index would hand one caller's bag
+ * to an unrelated later caller and let a cache hit satisfy an `indexBuilds`
+ * measurement without building anything. Measured callers keep calling
+ * `buildProcessTableIndex(rows, stats)` directly.
+ */
+export function getProcessTableIndex(rows: readonly ProcessTableRow[]): ProcessTableIndex {
+  const cached = processTableIndexes.get(rows)
+  if (cached) {
+    return cached
+  }
+  const index = buildProcessTableIndex(rows)
+  processTableIndexes.set(rows, index)
+  return index
+}
+
 export function lookupProcessTableIndex<T>(
   index: ProcessTableIndex,
   lookup: (index: ProcessTableIndex) => T,
