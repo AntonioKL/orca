@@ -40,6 +40,9 @@ describe('mobile web session screen binding', () => {
     expect(hostedSessionRoute).toContain(
       'sessionNativeChatOperations={sessionNativeChatOperations}'
     )
+    expect(hostedSessionRoute).toContain('reconnect={() =>')
+    expect(hostedSessionRoute).toContain('reconnectAttempts={shell.reconnectAttempts}')
+    expect(hostedSessionRoute).toContain('lastConnectedAt={shell.lastConnectedAt}')
     expect(hostedSessionRoute).toContain('<SessionScreen')
     expect(nativeSessionRoute).toContain('export function SessionScreen(')
     expect(nativeSessionRoute).not.toContain('Clipboard.setStringAsync')

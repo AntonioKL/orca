@@ -43,6 +43,7 @@ describe('mobile web host screen bindings', () => {
     expect(hostedRouteSource).toContain('nativeHostBinding={false}')
     expect(hostedRouteSource).toContain('useWebHostStatusGates({')
     expect(hostedRouteSource).toContain('value={hostStatusGates}')
+    expect(hostedRouteSource).not.toContain("rememberRoute({ kind: 'workspaceList' })")
     expect(hostedRouteSource).not.toContain('hostCapabilities: []')
     expect(hostedRouteSource).not.toContain('floatingWorkspaceEnabled: false')
     expect(hostedRouteSource).not.toContain('hostDisplayName=')

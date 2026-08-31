@@ -316,6 +316,9 @@ type SessionScreenProps = {
   sessionChatPendingDeliveryOperations?: HostSessionChatPendingDeliveryOperations
   connectionState?: ConnectionState
   nativeHostBinding?: boolean
+  reconnect?: () => Promise<void>
+  reconnectAttempts?: number
+  lastConnectedAt?: number | null
 }
 
 export { SessionScreen as default }
@@ -334,7 +337,10 @@ export function SessionScreen({
   sessionChatDraftOperations: sessionChatDraftOperationsProp,
   sessionChatPendingDeliveryOperations: sessionChatPendingDeliveryOperationsProp,
   connectionState: connectionStateProp,
-  nativeHostBinding = true
+  nativeHostBinding = true,
+  reconnect: reconnectProp,
+  reconnectAttempts: reconnectAttemptsProp,
+  lastConnectedAt: lastConnectedAtProp
 }: SessionScreenProps = {}) {
   const {
     hostId,
@@ -441,8 +447,10 @@ export function SessionScreen({
     },
     [sessionDeviceOperations]
   )
-  const reconnectAttempts = useReconnectAttempt(hostId)
-  const lastConnectedAt = useLastConnectedAt(hostId)
+  const nativeReconnectAttempts = useReconnectAttempt(hostId)
+  const nativeLastConnectedAt = useLastConnectedAt(hostId)
+  const reconnectAttempts = reconnectAttemptsProp ?? nativeReconnectAttempts
+  const lastConnectedAt = lastConnectedAtProp ?? nativeLastConnectedAt
   const relayRecovery = useRelayRecoveryStatus(hostId)
   const forceReconnectHost = useForceReconnect()
   const { name: worktreeName, resolution: worktreeResolution } = useLiveWorktreeName({
@@ -3973,7 +3981,7 @@ export function SessionScreen({
                 disabled={!showConnectionRetry}
                 onPress={() => {
                   if (hostId) {
-                    void forceReconnectHost(hostId)
+                    void (reconnectProp ? reconnectProp() : forceReconnectHost(hostId))
                   }
                 }}
                 accessibilityRole={showConnectionRetry ? 'button' : undefined}

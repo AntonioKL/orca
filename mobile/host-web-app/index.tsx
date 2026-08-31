@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
 import { usePathname, useRouter } from 'expo-router'
 import { HostScreen } from '../app/h/[hostId]/index'
 import { HostProtocolGatesProvider } from '../src/components/host-protocol-gates-context'
@@ -16,11 +16,6 @@ export default function HostMobileWebRoute() {
   const shell = useMobileWebNativeShell()
   const router = useRouter()
   const pathname = usePathname()
-  useEffect(() => {
-    if (shell.context) {
-      shell.rememberRoute({ kind: 'workspaceList' })
-    }
-  }, [shell.context, shell.rememberRoute])
   const workspaceOperations = useMemo(
     () => (shell.client ? webHostWorkspaceOperations(shell.client) : undefined),
     [shell.client]

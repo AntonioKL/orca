@@ -101,6 +101,13 @@ export default function HostMobileWebSessionRoute() {
       sessionChatPendingDeliveryOperations={sessionChatPendingDeliveryOperations}
       connectionState={connectionState}
       nativeHostBinding={false}
+      reconnect={() =>
+        shell.client
+          ? shell.client.navigationReconnect().then(() => undefined)
+          : Promise.reject(new Error('Native shell channel unavailable'))
+      }
+      reconnectAttempts={shell.reconnectAttempts}
+      lastConnectedAt={shell.lastConnectedAt}
     />
   )
 }
