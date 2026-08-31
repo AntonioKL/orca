@@ -150,7 +150,7 @@ export async function commitPtyIpcSpawn(ctx: PtyIpcSpawnState): Promise<PtySpawn
       { authorityVerified: true }
     )
     clearMigrationUnsupportedPtysForPaneKey(ctx.migrationUnsupportedPaneKey)
-  } else if (ctx.opaqueRemintedSpawnPaneKey && ctx.validatedPaneKey) {
+  } else if (!agentResumeDeclined && ctx.opaqueRemintedSpawnPaneKey && ctx.validatedPaneKey) {
     // Reminted $$ tokens are spawn-physical; alias them to the metadata-proven tab:leaf key.
     agentHookServer.registerPaneKeyAlias(
       ctx.opaqueRemintedSpawnPaneKey,

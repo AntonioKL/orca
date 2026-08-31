@@ -545,6 +545,44 @@ describe('registerPtyHandlers', () => {
       expect.anything()
     )
   })
+  it('does not install reminted pane authority when the agent resume was declined', async () => {
+    const remintedPaneKey = '$$MFRGGZDFMY:L$$'
+    const leafId = '33333333-3333-4333-8333-333333333333'
+    const stablePaneKey = makePaneKey('tab-declined', leafId)
+    setLocalPtyProvider({
+      // Simulate the stable-pane relay epoch gate annotating its fresh shell result.
+      spawn: vi.fn(async () => ({
+        id: 'pty-declined-resume',
+        agentResumeUnavailable: true as const
+      })),
+      write: vi.fn(),
+      resize: vi.fn(),
+      kill: vi.fn(),
+      shutdown: vi.fn(),
+      onData: vi.fn(() => vi.fn()),
+      onExit: vi.fn(() => vi.fn()),
+      listProcesses: vi.fn(async () => []),
+      getForegroundProcess: vi.fn(async () => null)
+    } as never)
+    registerPtyHandlers(mainWindow as never)
+
+    const result = (await handlers.get('pty:spawn')!(null, {
+      cols: 80,
+      rows: 24,
+      worktreeId: 'wt-declined',
+      tabId: 'tab-declined',
+      leafId,
+      env: { ORCA_PANE_KEY: remintedPaneKey },
+      launchAgent: 'codex',
+      resumeProviderSession: { key: 'session_id', id: 'session-declined' }
+    })) as { agentResumeUnavailable?: true }
+
+    expect(result.agentResumeUnavailable).toBe(true)
+    expect(registerPtyMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ paneKey: stablePaneKey })
+    )
+    expect(registerPaneKeyAliasMock).not.toHaveBeenCalled()
+  })
   it('does not let an old PTY teardown clear a newer pane-key owner', async () => {
     registerPtyHandlers(mainWindow as never)
     const leafId = '11111111-1111-4111-8111-111111111111'
