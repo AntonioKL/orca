@@ -173,7 +173,8 @@ function buildProvisionedRootMeta(
     args.displayName,
     args.displayNameKind,
     args.name,
-    false
+    false,
+    args.nameWasGenerated === true
   )
   const displayNameMeta = resolveWorktreeCreateDisplayNameMeta(
     displayNameRequest.value,

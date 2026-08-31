@@ -27054,7 +27054,8 @@ export class OrcaRuntimeService {
         args.displayName,
         args.displayNameKind,
         args.name,
-        args.cliProvenance?.kind === 'created-by-cli'
+        args.cliProvenance?.kind === 'created-by-cli',
+        args.nameWasGenerated === true
       )
       const resolvedFolderDisplayName = displayNameRequest.value
       const meta = this.store.setWorktreeMeta(worktreeId, {
@@ -27259,7 +27260,8 @@ export class OrcaRuntimeService {
       args.displayName,
       args.displayNameKind,
       args.name,
-      args.cliProvenance?.kind === 'created-by-cli'
+      args.cliProvenance?.kind === 'created-by-cli',
+      args.nameWasGenerated === true
     )
     const requestedDisplayName = displayNameRequest.value
     const sanitizedName = sanitizeWorktreeName(args.name)

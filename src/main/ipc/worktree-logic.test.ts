@@ -145,6 +145,36 @@ describe('worktree create display-name provenance', () => {
     })
   })
 
+  it('recovers a legacy name-only user create without CLI provenance', () => {
+    expect(resolveWorktreeCreateDisplayNameRequest(undefined, undefined, 'feature', false)).toEqual(
+      {
+        value: 'feature',
+        kind: 'user'
+      }
+    )
+    expect(
+      resolveWorktreeCreateDisplayNameMeta('feature', 'feature', 'user', {
+        requestedName: 'feature',
+        sanitizedName: 'feature'
+      })
+    ).toEqual({ displayName: 'feature', displayNameIsPinned: true })
+  })
+
+  it('keeps a legacy generated name automatic when nameWasGenerated is set', () => {
+    expect(
+      resolveWorktreeCreateDisplayNameRequest(undefined, undefined, 'nautilus', false, true)
+    ).toEqual({
+      value: undefined,
+      kind: 'generated'
+    })
+  })
+
+  it('keeps a legacy artifact display name generated when its kind is absent', () => {
+    expect(
+      resolveWorktreeCreateDisplayNameRequest('Issue title', undefined, 'feature', false)
+    ).toEqual({ value: 'Issue title', kind: 'generated' })
+  })
+
   it('treats a CLI name as intentional even if a caller supplies generated provenance', () => {
     expect(
       resolveWorktreeCreateDisplayNameRequest('Agent label', 'generated', 'feature', true)

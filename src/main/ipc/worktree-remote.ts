@@ -1550,7 +1550,8 @@ export async function createRemoteWorktree(
     args.displayName,
     args.displayNameKind,
     args.name,
-    args.cliProvenance?.kind === 'created-by-cli'
+    args.cliProvenance?.kind === 'created-by-cli',
+    args.nameWasGenerated === true
   )
   const requestedDisplayName = displayNameRequest.value
 
@@ -2030,7 +2031,8 @@ export async function createLocalWorktree(
     args.displayName,
     args.displayNameKind,
     args.name,
-    args.cliProvenance?.kind === 'created-by-cli'
+    args.cliProvenance?.kind === 'created-by-cli',
+    args.nameWasGenerated === true
   )
   const requestedDisplayName = displayNameRequest.value
   // Why: explicit branches and non-username prefix modes never consume this; skipping the probe preserves the exact generated branch name.

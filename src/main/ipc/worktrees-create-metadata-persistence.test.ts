@@ -333,6 +333,29 @@ describe('registerWorktreeHandlers', () => {
     })
   })
 
+  it('pins a legacy name-only user create when the branch matches', async () => {
+    listWorktreesMock.mockResolvedValue([
+      {
+        path: '/workspace/feature',
+        head: 'abc123',
+        branch: 'feature',
+        isBare: false,
+        isMainWorktree: false
+      }
+    ])
+    store.setWorktreeMeta.mockImplementation((_worktreeId, meta) => meta)
+
+    await handlers['worktrees:create'](null, {
+      repoId: 'repo-1',
+      name: 'feature'
+    })
+
+    expect(store.setWorktreeMeta).toHaveBeenCalledWith(
+      'repo-1::/workspace/feature',
+      expect.objectContaining({ displayName: 'feature', displayNameIsPinned: true })
+    )
+  })
+
   it('persists linked issue and PR metadata during local create', async () => {
     listWorktreesMock.mockResolvedValue([
       {

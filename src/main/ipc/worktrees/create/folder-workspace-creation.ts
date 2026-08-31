@@ -19,7 +19,8 @@ export function createFolderWorkspace(
     args.displayName,
     args.displayNameKind,
     args.name,
-    args.cliProvenance?.kind === 'created-by-cli'
+    args.cliProvenance?.kind === 'created-by-cli',
+    args.nameWasGenerated === true
   )
   const meta = store.setWorktreeMeta(worktreeId, {
     instanceId,

@@ -44,12 +44,17 @@ export function resolveWorktreeCreateDisplayNameRequest(
   input: string | undefined,
   kind: DisplayNameKind,
   fallbackName: string,
-  cliCreated: boolean
+  cliCreated: boolean,
+  nameWasGenerated = false
 ): { value: string | undefined; kind: DisplayNameKind } {
   // The CLI name is always an explicit command argument; its marker wins over a
   // missing or malformed kind so a future client cannot make it auto-managed.
-  const effectiveKind = cliCreated ? 'user' : kind
-  const effectiveInput = input ?? (cliCreated ? fallbackName : undefined)
+  // Legacy clients omitted displayNameKind: an explicit displayName was the artifact-title
+  // contract, while a name-only request was user-entered unless marked as generated.
+  const effectiveKind = cliCreated
+    ? 'user'
+    : (kind ?? (input !== undefined || nameWasGenerated ? 'generated' : 'user'))
+  const effectiveInput = input ?? (effectiveKind === 'user' ? fallbackName : undefined)
   return {
     value: resolveWorktreeCreateDisplayName(effectiveInput, effectiveKind),
     kind: effectiveKind
