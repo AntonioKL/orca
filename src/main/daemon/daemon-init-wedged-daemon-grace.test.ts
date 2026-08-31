@@ -75,9 +75,17 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
   const CLIENT_CONNECT_TIMEOUT_MS = 5_000
   const CLIENT_REQUEST_TIMEOUT_MS = 30_000
   const HEALTH_CHECK_TIMEOUT_MS = 3_000
-  // What still has to fit inside the startup PTY gate once recovery decides: killStaleDaemon's
-  // SIGTERM wait + SIGKILL confirm (daemon-stale-kill.ts), then the fork, hello and lease.
-  const POST_RECOVERY_RELAUNCH_MS = 3_000 + 1_000 + 5_000
+  // What still has to fit inside the startup PTY gate once recovery decides, at each stage's own
+  // hard cap: killStaleDaemon's two identity inspections, SIGTERM wait, SIGKILL confirm and
+  // endpoint probe (daemon-stale-kill.ts, daemon-process-identity-query.ts,
+  // daemon-endpoint-probe.ts), then launchDaemonChild's readiness timeout
+  // (daemon-launched-child.ts), then the adoption lease and adapter connects — the last against a
+  // daemon that just reported ready, so an allowance rather than the client's unbudgeted 4x5s.
+  const POST_RECOVERY_KILL_MS = 3_000 + 3_000 + 3_000 + 1_000 + 500
+  const POST_RECOVERY_FORK_MS = 10_000
+  const POST_RECOVERY_LEASE_MS = 5_000
+  const POST_RECOVERY_RELAUNCH_MS =
+    POST_RECOVERY_KILL_MS + POST_RECOVERY_FORK_MS + POST_RECOVERY_LEASE_MS
 
   /**
    * Runs the launcher against a daemon that accepts connections and answers nothing until

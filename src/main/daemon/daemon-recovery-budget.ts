@@ -27,8 +27,16 @@ export const DAEMON_RECOVERY_PROBE_MS = 8_000
  * gate can still absorb, since the kill, fork and lease that follow run inside the same fail-open
  * cap: grace used to be a probe count with no clock at all, so it ran past that cap and the
  * sessions were lost anyway, after the user watched the app hang (STA-5732).
+ *
+ * Sized against that cap rather than guessed, because every second not spent here is a second a
+ * daemon that would have drained gets killed instead. What still has to fit after the deadline,
+ * at each stage's own hard cap: killStaleDaemon 10.5s (two identity inspections at 3s + the 3s
+ * SIGTERM wait + the 1s SIGKILL confirm + the 0.5s endpoint probe), the fork's 10s readiness
+ * timeout, and 5s for the adoption lease and adapter connects — those two run against a daemon
+ * that has just reported ready over IPC, so they get a realistic allowance, not the client's
+ * unbudgeted 4x5s. 60 - 25.5 leaves 34.5s; take 32s and keep the rest as margin.
  */
-export const DAEMON_RECOVERY_BUDGET_MS = 24_000
+export const DAEMON_RECOVERY_BUDGET_MS = 32_000
 
 /** One attempt's share of the recovery budget, never reaching past the deadline. */
 export function daemonRecoveryProbeTimeoutMs(recoveryDeadlineMs: number): number {
