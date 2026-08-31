@@ -56,7 +56,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-cut
+  # This recovery branch must not wait behind an already-stalled release run.
+  group: release-cut-recovery-2026-08-30
   cancel-in-progress: false
 
 jobs:
