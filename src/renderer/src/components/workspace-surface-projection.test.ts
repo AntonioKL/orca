@@ -1,12 +1,4 @@
-/**
- * STA-4846: the terminal workbench is bare-workspace-id keyed end to end
- * (`activeWorktreeId`, `tabsByWorktree`, `mountedWorktreeIdsRef`, React keys),
- * but its catalog inputs are host-qualified — `getIndexedAllWorktrees` emits one
- * row per (host, id) and `mergeFetchedFolderWorkspacesForHost` keeps one folder
- * row per (host, id). A repo checked out at the same path locally and on an
- * SSH/paired-runtime host therefore reached the mount loops twice, mounting the
- * same tabIds under duplicate React keys with both trees marked visible.
- */
+/** Catalog inputs are host-qualified while mounted surfaces use bare workspace IDs. */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'

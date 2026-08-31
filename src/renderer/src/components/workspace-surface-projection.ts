@@ -11,19 +11,7 @@ type FolderWorkspaceSurfaceRow = Pick<
   'id' | 'folderPath' | 'connectionId' | 'executionHostId'
 >
 
-/**
- * The terminal workbench's mount set: exactly one surface per workspace id.
- *
- * Why collapse here and nowhere else: the workbench is bare-id keyed end to end
- * (`activeWorktreeId`, `tabsByWorktree`, `mountedWorktreeIdsRef`, React keys),
- * so it can only represent one surface per id — but both catalogs it reads are
- * host-qualified on purpose (STA-4343), keeping a row per (host, id). Emitting
- * both mounts one workspace's tabs twice under a duplicate React key. Listing
- * surfaces such as the sidebar must keep showing every host.
- *
- * `worktreesById` is the store's first-wins per-id index, and that collapse is
- * lossless: `worktreeId` is `repoId::path`, so colliding rows agree on the path.
- */
+/** Returns one surface per workspace ID when catalog rows contain host-qualified duplicates. */
 export function projectWorkspaceSurfaces({
   worktreesById,
   folderWorkspaces,
