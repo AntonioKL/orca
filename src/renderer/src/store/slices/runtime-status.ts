@@ -29,7 +29,6 @@ import {
   ensureBrowserClientHostsForRestoredPages
 } from '@/runtime/restored-client-hosted-browser-host-attach'
 import * as runtimeStatusRecheck from './runtime-status-recheck'
-
 /** Live status for one saved runtime environment, as last observed by the
  * renderer. `status === null` records a probe that failed or timed out so the
  * sidebar can still distinguish "unknown/unreachable" from "never checked". */
@@ -310,7 +309,9 @@ export const createRuntimeStatusSlice: StateCreator<AppState, [], [], RuntimeSta
       diagnostics,
       current: get().runtimeStatusByEnvironmentId.get(environmentId),
       publish: (status) =>
-        get().setRuntimeEnvironmentStatus(environmentId, status, { suppressDisconnectToast: true })
+        set((s) =>
+          runtimeStatusDiagnostics.updateRuntimeEnvironmentStatusOverlay(s, environmentId, status)
+        )
     })
   },
 

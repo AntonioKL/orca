@@ -117,6 +117,7 @@ export class RemoteRuntimeSharedControlConnection {
   pauseStandingRetry(): void {
     if (this.subscriptions.size === 0) {
       this.reconnect.clear()
+      this.publishDiagnostics()
     }
   }
 

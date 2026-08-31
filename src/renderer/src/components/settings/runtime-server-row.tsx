@@ -55,18 +55,21 @@ export function RuntimeServerRow({
   const runtimeStatusEntry = useAppStore((state) =>
     state.runtimeStatusByEnvironmentId.get(environment.id)
   )
-  const connectionState = runtimeStatusEntry
-    ? getRuntimeServerConnectionState({
-        ...(details ?? {
-          status: runtimeStatusEntry.status ? 'ready' : 'error',
-          runtimeStatus: null,
-          compatibility: null,
-          error: null
-        }),
-        status: runtimeStatusEntry.status ? 'ready' : 'error',
-        runtimeStatus: runtimeStatusEntry.status
-      })
-    : getRuntimeServerConnectionState(details)
+  const connectionState =
+    details?.status === 'loading'
+      ? 'checking'
+      : runtimeStatusEntry
+        ? getRuntimeServerConnectionState({
+            ...(details ?? {
+              status: runtimeStatusEntry.status ? 'ready' : 'error',
+              runtimeStatus: null,
+              compatibility: null,
+              error: null
+            }),
+            status: runtimeStatusEntry.status ? 'ready' : 'error',
+            runtimeStatus: runtimeStatusEntry.status
+          })
+        : getRuntimeServerConnectionState(details)
   // A connected host exposes Disconnect; otherwise Connect.
   const isReachable =
     connectionState === 'connected' || connectionState === 'workspace-window-closed'

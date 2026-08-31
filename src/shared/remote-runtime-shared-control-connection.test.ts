@@ -683,6 +683,8 @@ describe('RemoteRuntimeSharedControlConnection', () => {
       pendingRequestCount: 0,
       lastClose: { code: 4001, reason: 'test close' }
     })
+    connection.pauseStandingRetry()
+    expect(connection.getDiagnostics()).toMatchObject({ state: 'closed' })
     connection.close()
   })
 })

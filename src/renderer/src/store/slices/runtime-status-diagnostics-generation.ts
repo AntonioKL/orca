@@ -1,6 +1,29 @@
 import { REMOTE_RUNTIME_SHARED_CONTROL_CAPABILITY } from '../../../../shared/protocol-version'
+import type { RemoteRuntimeSharedConnectionDiagnostics } from '../../../../shared/remote-runtime-shared-control-types'
+import type { RuntimeEnvironmentStatus } from './runtime-status'
 
 const diagnosticsGenerationByEnvironment = new Map<string, number>()
+
+export function updateRuntimeEnvironmentStatusOverlay<
+  T extends {
+    runtimeStatusByEnvironmentId: ReadonlyMap<string, RuntimeEnvironmentStatus>
+  }
+>(
+  state: T,
+  environmentId: string,
+  status: RuntimeEnvironmentStatus
+): T | { runtimeStatusByEnvironmentId: ReadonlyMap<string, RuntimeEnvironmentStatus> } {
+  const current = state.runtimeStatusByEnvironmentId.get(environmentId)
+  if (!current || current.status?.runtimeId !== status.status?.runtimeId) {
+    return state
+  }
+  return {
+    runtimeStatusByEnvironmentId: new Map(state.runtimeStatusByEnvironmentId).set(
+      environmentId,
+      status
+    )
+  }
+}
 
 export function acceptRuntimeEnvironmentDiagnosticsGeneration(
   environmentId: string,
@@ -26,8 +49,8 @@ export function mergePushedRuntimeEnvironmentDiagnostics(args: {
   publish: (status: RuntimeEnvironmentStatus) => void
 }): void {
   if (
-    !acceptRuntimeEnvironmentDiagnosticsGeneration(args.environmentId, args.transportGeneration) ||
-    !args.current?.status?.capabilities?.includes(REMOTE_RUNTIME_SHARED_CONTROL_CAPABILITY)
+    !args.current?.status?.capabilities?.includes(REMOTE_RUNTIME_SHARED_CONTROL_CAPABILITY) ||
+    !acceptRuntimeEnvironmentDiagnosticsGeneration(args.environmentId, args.transportGeneration)
   ) {
     return
   }
@@ -36,5 +59,3 @@ export function mergePushedRuntimeEnvironmentDiagnostics(args: {
     status: { ...args.current.status, remoteControl: args.diagnostics }
   })
 }
-import type { RemoteRuntimeSharedConnectionDiagnostics } from '../../../../shared/remote-runtime-shared-control-types'
-import type { RuntimeEnvironmentStatus } from './runtime-status'
