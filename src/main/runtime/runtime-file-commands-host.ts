@@ -16,7 +16,6 @@ import {
 import { watch as watchFs } from 'node:fs'
 import { WatcherProcessFailure } from '../ipc/parcel-watcher-process-failure'
 import { basenameFromRelativePath } from './runtime-file-path-names'
-import { basenameFromRelativePath } from './runtime-file-path-names'
 
 export type RuntimeFileCommandHost = {
   getRuntimeId(): string
@@ -169,27 +168,10 @@ export function isMobileBinaryPath(relativePath: string): boolean {
   return MOBILE_BINARY_EXTENSIONS.has(basename.slice(dotIndex).toLowerCase())
 }
 
-<<<<<<< HEAD
 export function isRuntimeDirectoryEntry(entry: {
   isDirectory(): boolean
   isSymbolicLink(): boolean
 }): boolean {
-||||||| parent of eb63e7e8479 (fix(main): isolate runtime file path naming)
-export function basenameFromRelativePath(relativePath: string): string {
-  const normalized = relativePath.replace(/\\/g, '/')
-  return normalized.slice(normalized.lastIndexOf('/') + 1)
-}
-
-export async function isRuntimeDirectoryEntry(
-  entry: { isDirectory(): boolean; isSymbolicLink(): boolean },
-  _entryPath: string
-): Promise<boolean> {
-=======
-export async function isRuntimeDirectoryEntry(
-  entry: { isDirectory(): boolean; isSymbolicLink(): boolean },
-  _entryPath: string
-): Promise<boolean> {
->>>>>>> eb63e7e8479 (fix(main): isolate runtime file path naming)
   // Why: listings are passive UI reads; don't stat symlink targets here (explicit open/expand resolves them).
   if (entry.isSymbolicLink()) {
     return false
