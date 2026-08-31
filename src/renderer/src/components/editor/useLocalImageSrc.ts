@@ -120,6 +120,7 @@ function disposeImageCacheModuleState(): void {
     URL.revokeObjectURL(url)
   }
   blobUrlCache.clear()
+  clearLocalImageCachePins()
   inFlightBlobUrlLoads.clear()
   cacheListeners.clear()
 }
