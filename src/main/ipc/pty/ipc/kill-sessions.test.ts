@@ -61,6 +61,7 @@ describe('killPtySessions input bounds', () => {
     expect(results).toEqual([
       {
         id: 'session-1',
+        fenceUnavailable: true,
         verdict: 'unverifiable',
         treeUnverified: true,
         reason: 'descendant tree could not be verified'
@@ -91,7 +92,18 @@ describe('killPtySessions input bounds', () => {
     )
 
     expect(shutdown).toHaveBeenCalledTimes(2)
-    expect(results.every((result) => result.verdict === 'exited')).toBe(true)
+    expect(results).toEqual([
+      {
+        id: 'legacy',
+        verdict: 'exited',
+        fenceUnavailable: true
+      },
+      {
+        id: 'current',
+        incarnationId: 'incarnation-current',
+        verdict: 'exited'
+      }
+    ])
     expect(provider.supportsIncarnationFence).toHaveBeenCalledWith({ sessionId: 'legacy' })
     expect(provider.supportsIncarnationFence).toHaveBeenCalledWith({ sessionId: 'current' })
   })
@@ -132,6 +144,7 @@ describe('killPtySessions input bounds', () => {
     expect(results).toEqual([
       {
         id: 'session-1',
+        fenceUnavailable: true,
         verdict: 'unverifiable',
         reason: 'descendant tree could not be verified',
         treeUnverified: true

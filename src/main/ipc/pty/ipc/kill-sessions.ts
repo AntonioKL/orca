@@ -97,7 +97,14 @@ export async function killPtySessions(
         if (shutdownResult?.fenceUnavailable) {
           return { ...ref, verdict: 'refused', reason: 'incarnation fence unavailable' }
         }
-        return { ...ref, verdict: 'unverifiable' as const, reason: 'pending verification' }
+        return {
+          ...ref,
+          verdict: 'unverifiable' as const,
+          reason: 'pending verification',
+          // Older daemon/relay peers ignore the additive fence field. Preserve
+          // today's kill behavior but expose that the identity door was absent.
+          ...(!fenceCapable ? { fenceUnavailable: true as const } : {})
+        }
       } catch (error) {
         return {
           ...ref,
@@ -150,9 +157,17 @@ export async function killPtySessions(
     }
     const shutdownResult = shutdownResults.get(result.id)
     const treeUnverified = Boolean(shutdownResult?.treeUnverified)
+    const cleanResult =
+      result.reason === 'pending verification'
+        ? (() => {
+            const copy = { ...result }
+            delete copy.reason
+            return copy
+          })()
+        : result
     if (!survivor && treeUnverified) {
       return {
-        ...result,
+        ...cleanResult,
         verdict: 'unverifiable' as const,
         reason: 'descendant tree could not be verified',
         treeUnverified: true
@@ -160,13 +175,13 @@ export async function killPtySessions(
     }
     return survivor
       ? {
-          ...result,
+          ...cleanResult,
           verdict: 'live' as const,
           reason: 'session still running',
           ...(treeUnverified ? { treeUnverified: true } : {})
         }
       : {
-          ...result,
+          ...cleanResult,
           verdict: 'exited' as const
         }
   })

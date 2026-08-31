@@ -89,9 +89,15 @@ export function useResourceSessionInventory(ready: boolean): ResourceSessionInve
         }
       }
       knownSessionIdsRef.current = new Set(liveSessions.map(({ id }) => id))
+      // Keep at most one verdict generation per listed PTY. Session ids can be
+      // recycled with a new incarnation while the inventory stays present; retaining
+      // every historical key would grow this map for the lifetime of the workspace.
+      const currentVerdictKeys = new Set(
+        liveSessions.map((session) => verdictKey(session.id, session.incarnationId))
+      )
       for (const key of verdictsRef.current.keys()) {
         const id = key.split('\0', 1)[0]
-        if (!knownSessionIdsRef.current.has(id)) {
+        if (!knownSessionIdsRef.current.has(id) || !currentVerdictKeys.has(key)) {
           verdictsRef.current.delete(key)
         }
       }
