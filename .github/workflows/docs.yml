@@ -57,8 +57,9 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: pnpm
-          cache-dependency-path: docs/site/pnpm-lock.yaml
+          # The repository root pins pnpm 12 while this isolated app pins 10;
+          # setup-node's cache probe runs at the root and would auto-switch.
+          package-manager-cache: false
 
       - name: Install site dependencies
         run: pnpm --ignore-workspace install --frozen-lockfile
@@ -214,8 +215,7 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: pnpm
-          cache-dependency-path: docs/site/pnpm-lock.yaml
+          package-manager-cache: false
 
       - name: Install site dependencies
         run: pnpm --ignore-workspace install --frozen-lockfile
