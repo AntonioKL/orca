@@ -2864,6 +2864,15 @@
         "pnpm exec vitest run --config config/vitest.config.ts src/main/ipc/browser-preview-tool-authorization.test.ts src/main/browser/browser-manager-annotation-bridge.test.ts src/main/browser/browser-manager-guest-lifecycle.test.ts src/main/browser/offscreen-browser-backend-lifecycle.test.ts src/main/browser/doc-preview-guest-policy.test.ts src/shared/doc-preview-scheme.test.ts src/renderer/src/components/browser-pane/workspace-doc/doc-preview-document-actions.test.ts src/renderer/src/components/browser-pane/workspace-doc/use-doc-preview-guest-tools.test.ts src/renderer/src/components/editor/EditorPanelShell.header.test.tsx src/renderer/src/components/browser-pane/workspace-doc/HtmlDocPreview.toolbar.test.tsx",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/ipc/doc-preview-grant-ipc.test.ts src/renderer/src/components/terminal-pane/TerminalLinkActionPopover.test.tsx src/renderer/src/runtime/sync-runtime-graph-editor-diff-tabs.test.ts src/renderer/src/store/slices/tabs-hydration.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/ipc/browser-preview-tool-authorization.test.ts src/main/ipc/browser-tab-registration-wait.test.ts src/main/ipc/doc-preview-grant-ipc.test.ts src/main/browser/browser-manager-guest-lifecycle.test.ts src/main/browser/browser-manager-guest-policy-profile.test.ts src/main/browser/browser-manager-annotation-bridge.test.ts src/main/browser/offscreen-browser-backend-lifecycle.test.ts src/main/browser/doc-preview-guest-policy.test.ts src/shared/doc-preview-scheme.test.ts src/renderer/src/components/browser-pane/workspace-doc/use-doc-preview-guest-tools.test.ts src/renderer/src/components/browser-pane/workspace-doc/HtmlDocPreview.toolbar.test.tsx",
+        // STA-5681 address-bar convergence: conversion is page replacement (fresh id, one store
+        // commit flips page + mirror + mobile observables), typed workspace paths convert via the
+        // lexical-containment classifier, and doc history carries document identities with no url
+        // field at all. The chip now answers to "Edit address".
+        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/store/slices/browser-page-conversion.test.ts src/renderer/src/runtime/sync-runtime-graph-conversion-publish.test.ts src/renderer/src/lib/workspace-doc-address-input.test.ts src/shared/workspace-doc-history.test.ts src/renderer/src/components/browser-pane/workspace-doc/HtmlDocPreview.toolbar.test.tsx src/renderer/src/components/browser-pane/assemble-chrome/browser-address-bar-suggestions.test.ts",
+        // The convergence journey with real clicks and typing: chip → address bar → URL converts in
+        // place, Back returns across the conversion, a typed path converts a runtime-owned tab, the
+        // dropdown's doc row dedupe-activates. Caught the remote-pane routing gap before it shipped.
+        "SKIP_BUILD=1 ORCA_E2E_WEB_CLIENT=1 ORCA_E2E_FORCE_HEADFUL=1 pnpm exec playwright test tests/e2e/paired-preview-address-bar-convergence.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1 --reporter=list",
         "SKIP_BUILD=1 ORCA_E2E_WEB_CLIENT=1 ORCA_E2E_FORCE_HEADFUL=1 pnpm exec playwright test tests/e2e/paired-remote-html-preview-local-render.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1 --reporter=line",
         "SKIP_BUILD=1 ORCA_E2E_WEB_CLIENT=1 ORCA_E2E_FORCE_HEADFUL=1 pnpm exec playwright test tests/e2e/paired-remote-html-preview-local-render.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1 --reporter=line --repeat-each=3",
         // The changed-spec e2e job's own command, which is the only Linux run this gate has.
@@ -2919,7 +2928,13 @@
         "src/renderer/src/store/slices/tabs-hydration.test.ts",
         "src/renderer/src/components/terminal-pane/TerminalLinkActionPopover.test.tsx",
         "src/renderer/src/runtime/sync-runtime-graph-editor-diff-tabs.test.ts",
+        "src/renderer/src/store/slices/browser-page-conversion.test.ts",
+        "src/renderer/src/runtime/sync-runtime-graph-conversion-publish.test.ts",
+        "src/renderer/src/lib/workspace-doc-address-input.test.ts",
+        "src/shared/workspace-doc-history.test.ts",
+        "src/renderer/src/components/browser-pane/assemble-chrome/browser-address-bar-suggestions.test.ts",
         "tests/e2e/paired-remote-html-preview-local-render.spec.ts",
+        "tests/e2e/paired-preview-address-bar-convergence.spec.ts",
         "tests/e2e/paired-browser-create-navigation-deadline.spec.ts",
         "tests/e2e/paired-browser-creation-reconciliation-failure.spec.ts"
       ],
@@ -6321,36 +6336,48 @@
     },
     {
       "id": "terminal-session.startup-cwd-missing-dir-recovery",
-      "title": "Fresh local terminal creation cannot be bricked by a deleted startup cwd",
+      "title": "Terminal working-directory recovery stays scoped and provider-safe",
       "maturity": "experimental",
       "protection": "partial",
       "owner": "terminal-runtime",
-      "layer": "shared-main-renderer-contract",
-      "surfaces": ["terminal lifecycle", "tab creation", "PTY spawn", "startup cwd persistence"],
+      "layer": "shared-main-renderer-and-posix-shell-contract",
+      "surfaces": [
+        "terminal lifecycle",
+        "tab creation",
+        "PTY spawn",
+        "startup cwd persistence",
+        "long-lived Bash and Zsh OMP launches"
+      ],
       "platforms": ["macos", "linux", "windows", "mobile"],
       "providers": ["local", "daemon", "ssh", "wsl", "remote-runtime"],
       "coveredPlatforms": ["macos"],
       "coveredProviders": ["local", "ssh", "remote-runtime"],
-      "coverageNotes": "Local macOS evidence covers the shared missing-dir fallback policy, main pty:spawn recovery and metadata, no-flag and reattach strictness, renderer IPC flag routing, SSH-tagged and remote-runtime omission, and the visibility-gated terminal notice. Daemon shares the same pre-provider main cwd decision but lacks a live daemon-provider run; WSL UNC paths are exempt from the probe by design and lack a live run; Linux/Windows and mobile/API strictness are gaps.",
+      "coverageNotes": "Local macOS evidence covers the shared missing-dir fallback policy, main pty:spawn recovery and metadata, no-flag and reattach strictness, renderer IPC flag routing, SSH-tagged and remote-runtime omission, and the visibility-gated terminal notice. Real Bash and Zsh node-pty tests replace the active cwd inode and exercise the shared POSIX OMP wrapper; generated-file snapshots pin identical local, daemon/SSH, and relay wrappers. Daemon shares the same pre-provider main cwd decision but lacks a live daemon-provider run; WSL UNC paths are exempt from the spawn probe and lack a live run; native PowerShell is unaffected; Linux/Windows and mobile/API strictness remain gaps.",
       "motivatingLinks": [
         "https://github.com/stablyai/orca/issues/7239",
         "https://github.com/stablyai/orca/pull/7750",
-        "https://github.com/stablyai/orca/pull/7678"
+        "https://github.com/stablyai/orca/pull/7678",
+        "https://github.com/stablyai/orca/issues/16457",
+        "https://github.com/stablyai/orca/pull/17128"
       ],
-      "invariant": "A fresh local renderer terminal spawn may recover from a saved startup cwd whose directory no longer exists only by spawning at the selected workspace root and printing a generic in-terminal notice; existing directories — including ones outside the worktree (#7685) — spawn as requested, and reattach, SSH, remote-runtime, runtime/API, and mobile callers keep exact cwd semantics.",
-      "oracle": "The shared resolver falls back to the workspace root only when the injected existence probe reports the resolved cwd missing and the workspace root present, and never probes floating terminals or a cwd equal to the root. The renderer sends cwdFallback only for fresh local IPC spawns, main honors it only when connectionId and sessionId are absent, WSL UNC paths never engage the probe-based fallback, main returns fallback metadata only after an actual fallback, the IPC transport preserves that metadata, and the connection layer writes a generic notice that omits the missing path.",
+      "invariant": "A fresh local renderer terminal spawn may recover from a saved startup cwd whose directory no longer exists only by spawning at the selected workspace root and printing a generic in-terminal notice; existing directories — including ones outside the worktree (#7685) — spawn as requested, and reattach, SSH, remote-runtime, runtime/API, and mobile callers keep exact cwd semantics. A long-lived POSIX shell whose cwd inode was deleted and replaced may run a wrapped OMP command from the live path named by its logical PWD only in a subshell; the parent shell cwd, OMP argv, status extension, and exit status remain unchanged, while a genuinely unavailable path fails visibly without invoking OMP. A usable physical cwd remains authoritative when PWD is unset or names a removed logical symlink instead of being remapped to a workspace fallback.",
+      "oracle": "The shared resolver falls back to the workspace root only when the injected existence probe reports the resolved cwd missing and the workspace root present, and never probes floating terminals or a cwd equal to the root. The renderer sends cwdFallback only for fresh local IPC spawns, main honors it only when connectionId and sessionId are absent, WSL UNC paths never engage the probe-based fallback, main returns fallback metadata only after an actual fallback, the IPC transport preserves that metadata, and the connection layer writes a generic notice that omits the missing path. In real interactive Bash and Zsh PTYs, unset PWD and remove a logical symlink while the physical cwd stays usable, requiring OMP to remain there; then delete and recreate the active project path, require extension-enabled and extension-skipping invocations to observe the replacement inode with byte-exact argv and nonzero status preserved, require the parent shell to remain on the stale inode, unset PWD and require recovery through ORCA_WORKTREE_PATH, clear every logical fallback and require an actionable failure without invoking OMP, and finally delete the replacement and require the same for the missing PWD path.",
       "commands": [
         "pnpm exec vitest run --config config/vitest.config.ts src/shared/terminal-startup-cwd.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/ipc/pty-spawn-cwd-fallback.test.ts src/main/ipc/pty-wsl-cwd-validation.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/pty-transport-connect-spawn.test.ts",
-        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/pty-connection-runtime-owner-spawn-routing.test.ts"
+        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/pty-connection-runtime-owner-spawn-routing.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/pty/omp-shell-wrapper.node-pty.test.ts src/main/pty/omp-shell-wrapper-alias-safety.test.ts src/main/shell-wrapper-generated-file-snapshot.test.ts"
       ],
       "testFiles": [
         "src/shared/terminal-startup-cwd.test.ts",
         "src/main/ipc/pty-spawn-cwd-fallback.test.ts",
         "src/main/ipc/pty-wsl-cwd-validation.test.ts",
         "src/renderer/src/components/terminal-pane/pty-transport-connect-spawn.test.ts",
-        "src/renderer/src/components/terminal-pane/pty-connection-runtime-owner-spawn-routing.test.ts"
+        "src/renderer/src/components/terminal-pane/pty-connection-runtime-owner-spawn-routing.test.ts",
+        "src/main/pty/omp-shell-wrapper.node-pty.test.ts",
+        "src/main/pty/omp-shell-wrapper-alias-safety.test.ts",
+        "src/main/shell-wrapper-generated-file-snapshot.test.ts"
       ],
       "assertionRefs": [
         {
@@ -6392,6 +6419,25 @@
             "startup cwd fallback metadata prints a generic in-terminal notice",
             "remote-runtime worktree spawns are not marked with cwdFallback"
           ]
+        },
+        {
+          "file": "src/main/pty/omp-shell-wrapper.node-pty.test.ts",
+          "assertions": [
+            "real Bash and Zsh PTYs rebind OMP to a recreated cwd inode without changing the parent shell",
+            "an unset PWD with a usable cwd stays unset and does not remap OMP to ORCA_WORKTREE_PATH",
+            "a removed logical symlink does not invalidate its still-usable physical cwd",
+            "extension-skipping commands such as omp --version still recover the cwd without gaining extension argv",
+            "an unset PWD on a stale inode recovers through ORCA_WORKTREE_PATH",
+            "an unset PWD on a stale inode without a logical fallback fails visibly before invoking OMP",
+            "extension argv and a nonzero OMP exit status survive the recovery subshell",
+            "a subsequently missing logical cwd prints an actionable error and does not invoke OMP again"
+          ]
+        },
+        {
+          "file": "src/main/shell-wrapper-generated-file-snapshot.test.ts",
+          "assertions": [
+            "local, daemon/SSH, and relay Bash/Zsh files contain the byte-identical shared OMP wrapper"
+          ]
         }
       ],
       "evidenceRuns": [
@@ -6430,11 +6476,20 @@
           "result": "passed",
           "durationSeconds": 6.5,
           "summary": "1 test file passed, 341 tests passed; covers local IPC marking, the generic terminal fallback notice, and remote-runtime omission."
+        },
+        {
+          "date": "2026-08-29",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/pty/omp-shell-wrapper.node-pty.test.ts src/main/pty/omp-shell-wrapper-alias-safety.test.ts src/main/shell-wrapper-generated-file-snapshot.test.ts",
+          "result": "passed",
+          "durationSeconds": 3,
+          "summary": "3 test files passed; real Bash and Zsh PTYs covered usable physical cwd authority, stale-inode recovery with set and unset PWD, extension-enabled and extension-skipping argv, parent-shell isolation, exit status, missing-path visibility, alias safety, and generated local/daemon/relay parity."
         }
       ],
       "runtimeBudget": {
-        "p95Seconds": 30,
-        "scope": "focused unit and IPC contract tests"
+        "p95Seconds": 40,
+        "scope": "focused unit, IPC, generated-wrapper, and real Bash/Zsh PTY contracts"
       },
       "flakeHistory": {
         "status": "unknown",
@@ -6442,23 +6497,25 @@
       },
       "redGreenEvidence": {
         "status": "partial",
-        "evidence": "The main IPC missing-cwd tests fail with the provider's 'Working directory ... does not exist.' error when the fallback is removed and pass with it. Full live Electron reproduction from a production persisted session is not captured."
+        "evidence": "The main IPC missing-cwd tests fail with the provider's 'Working directory ... does not exist.' error when the spawn fallback is removed and pass with it. Before the OMP recovery, the stale-inode reproduction makes the child process fail to resolve its cwd; the candidate rebinds to the recreated path in real Bash and Zsh PTYs. Full live Electron reproduction from a production persisted session is not captured."
       },
       "performanceBudget": {
         "required": true,
-        "evidence": "The runtime change adds at most two statSync probes on the fresh-local spawn path (the provider already stats the same paths during validation) and one bounded terminal write only when fallback actually occurs; no polling, provider listing, hidden-pane work, startup awaits, subprocesses, or render-loop work was added."
+        "evidence": "The spawn recovery adds at most two statSync probes on the fresh-local spawn path (the provider already stats the same paths during validation) and one bounded terminal write only when fallback actually occurs. Each wrapped OMP launch adds a constant number of shell filesystem predicates; only a detected stale/unusable cwd creates one short recovery subshell. No polling, retry, provider listing, hidden-pane work, startup awaits, extra OMP subprocesses, or render-loop work was added."
       },
       "promotionCriteria": [
         "Attach CI evidence for all declared test files.",
         "Add a live Electron regression that opens a local terminal whose persisted startupCwd was deleted and proves visible shell input/output at the workspace root.",
-        "Add WSL/mobile/API provider-contract coverage or explicitly narrow their risk scope."
+        "Add a live stale-inode OMP run on Linux or WSL and through an SSH/relay-generated wrapper.",
+        "Add WSL/mobile/API spawn provider-contract coverage or explicitly narrow their risk scope."
       ],
       "knownGaps": [
         "No live Electron fixture seeds a persisted tab whose startupCwd directory was deleted.",
         "Daemon coverage is via the shared pre-provider main cwd decision, not a live daemon provider spawn.",
-        "WSL UNC paths bypass the probe by design and have no live existence-recovery run; Linux, Windows, and mobile/API strictness are not directly exercised."
+        "The stale-inode OMP oracle is local macOS Bash/Zsh plus shared generated-file parity; it does not execute through live SSH, relay, Linux, or WSL providers.",
+        "WSL UNC paths bypass the spawn probe by design and have no live existence-recovery run; Linux, Windows, and mobile/API spawn strictness are not directly exercised."
       ],
-      "demotionRule": "Demote or quarantine if the gate flakes without a product bug, if an existing directory is ever remapped away from the requested cwd, or if a reattach/remote/API caller can engage the fallback."
+      "demotionRule": "Demote or quarantine if the gate flakes without a product bug, if an existing directory is ever remapped away from the requested cwd, if a reattach/remote/API caller can engage the spawn fallback, or if OMP recovery remaps a usable cwd with unset PWD, changes argv/status/parent cwd, or invokes OMP when the logical path remains unavailable."
     },
     {
       "id": "agent-status.pi-hook-liveness",
@@ -8109,15 +8166,15 @@
       "id": "startup-upgrade.persisted-session-corpus",
       "title": "Current Orca preserves or recovers old production persisted sessions",
       "maturity": "experimental",
-      "protection": "none",
+      "protection": "partial",
       "owner": "startup-persistence",
       "layer": "upgrade-fixture",
       "surfaces": ["startup", "upgrade", "session restore", "daemon restore"],
       "platforms": ["macos", "linux", "windows"],
       "providers": ["local", "daemon", "ssh", "wsl"],
-      "coveredPlatforms": [],
-      "coveredProviders": [],
-      "coverageNotes": "Registered gap only; no executable coverage is wired yet.",
+      "coveredPlatforms": ["macos"],
+      "coveredProviders": ["local", "daemon"],
+      "coverageNotes": "A macOS Electron journey materializes the immutable legacy workspace-session fixture over a live update-surviving daemon PTY, boots current Orca without a current-format session write, and proves the terminal title, marker output, exact PTY, tab identity, repo, and worktree survive both the upgrade launch and a second current-version relaunch. Linux, Windows, SSH, and WSL fixture journeys remain uncollected.",
       "motivatingLinks": [
         "https://github.com/stablyai/orca/issues/5356",
         "https://github.com/stablyai/orca/pull/5234",
@@ -8125,21 +8182,40 @@
       ],
       "invariant": "Startup and restore fixes must preserve or explicitly recover sessions from the last affected production persisted-state schema, not only from state written by current code.",
       "oracle": "Boot current Orca against immutable copied user-data fixtures from affected versions and reject blank replacement panes, duplicate resume tabs, silent session loss, or works-only-after-current-write behavior.",
-      "commands": [],
-      "testFiles": [],
-      "assertionRefs": [],
-      "evidenceRuns": [],
+      "commands": [
+        "SKIP_BUILD=1 pnpm run test:e2e -- tests/e2e/persisted-session-production-upgrade.spec.ts"
+      ],
+      "testFiles": ["tests/e2e/persisted-session-production-upgrade.spec.ts"],
+      "assertionRefs": [
+        {
+          "file": "tests/e2e/persisted-session-production-upgrade.spec.ts",
+          "assertions": [
+            "upgrades a legacy daemon session and keeps it stable after relaunch"
+          ]
+        }
+      ],
+      "evidenceRuns": [
+        {
+          "date": "2026-08-29",
+          "runner": "local",
+          "platform": "macos",
+          "command": "SKIP_BUILD=1 pnpm run test:e2e -- tests/e2e/persisted-session-production-upgrade.spec.ts",
+          "result": "passed",
+          "durationSeconds": 16.7,
+          "summary": "The legacy-shaped session retained its exact daemon PTY, terminal output marker, tab, repository, and worktree through the upgrade launch and a second current-version relaunch."
+        }
+      ],
       "runtimeBudget": {
         "p95Seconds": 120,
         "scope": "focused Electron upgrade fixture"
       },
       "flakeHistory": {
-        "status": "not-started",
-        "evidence": "Fixture corpus not implemented."
+        "status": "unknown",
+        "evidence": "One focused local macOS Electron run passed; CI soak history is not collected."
       },
       "redGreenEvidence": {
-        "status": "missing",
-        "evidence": "Needs immutable pre-fix persisted-state fixture."
+        "status": "partial",
+        "evidence": "The immutable legacy-shaped fixture and first-write/second-restart oracle are executable; saved intentional-break red/green evidence is still required."
       },
       "performanceBudget": {
         "required": true,
@@ -8150,7 +8226,11 @@
         "Run second restart after current code writes upgraded state.",
         "Record startup timing and failure artifact."
       ],
-      "knownGaps": ["No fixture corpus or command yet."],
+      "knownGaps": [
+        "The corpus currently contains one minimized legacy local-daemon workspace session.",
+        "Linux, Windows, SSH, and WSL upgrade fixtures remain uncollected.",
+        "The setup uses a current binary to create the live daemon PTY that stands in for the pre-upgrade process; it does not launch an installed legacy artifact."
+      ],
       "demotionRule": "Cannot promote without old production fixture provenance."
     },
     {
@@ -8519,6 +8599,7 @@
         "remote terminal reveal and input",
         "paired host relaunch with preserved daemon PTYs",
         "paired host session inventory publication authority",
+        "paired host session inventory subscription linearizability",
         "manual server disconnect"
       ],
       "platforms": ["macos", "linux", "windows"],
@@ -8537,13 +8618,14 @@
         "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/terminal-cold-park-pre-gate-loop.react185.test.tsx src/renderer/src/components/terminal-pane/use-parked-terminal-watcher-synchronization.react185.test.tsx src/renderer/src/components/terminal-pane/terminal-cold-park-verdict-loop.test.tsx src/renderer/src/components/terminal-pane/use-terminal-tab-cold-parking.test.ts --maxWorkers=1",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orca-runtime.test.ts src/main/runtime/rpc/terminal-multiplex-initial-snapshot-buffering.test.ts src/main/runtime/rpc/terminal-multiplex-snapshot-serialization.test.ts src/main/runtime/rpc/terminal-multiplex-pty-wait-capacity.test.ts src/main/runtime/rpc/terminal-subscribe-buffer.test.ts src/renderer/src/components/terminal-pane/parked-terminal-byte-watcher.test.ts src/renderer/src/components/terminal-pane/terminal-side-effect-facts-handler.test.ts src/renderer/src/components/terminal-pane/pty-connection-hidden-output-restore.test.ts src/renderer/src/components/terminal-pane/pty-connection-parked-ssh-snapshot.test.ts src/renderer/src/components/terminal-pane/remote-runtime-pty-transport-activation-inventory-fallback.test.ts src/renderer/src/components/terminal-pane/terminal-hidden-view-parking.test.ts src/renderer/src/components/terminal-pane/terminal-hidden-worktree-retention.test.ts src/renderer/src/components/terminal-pane/terminal-parked-tab-watchers.test.ts src/renderer/src/components/terminal-pane/terminal-parked-watcher-reconciliation.test.ts src/renderer/src/components/terminal-pane/terminal-parked-watcher-partial-reconciliation.test.ts src/renderer/src/components/terminal-pane/terminal-parking-e2e-overrides.test.ts src/renderer/src/runtime/remote-runtime-terminal-stall-recovery.test.ts src/renderer/src/runtime/runtime-client-events.test.ts src/renderer/src/web/web-preload-api-runtime-environment.test.ts src/main/ipc/runtime-environments-pairing.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/terminal-subscriber-driven-daemon-attach.test.ts",
-        "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/session-tabs-inventory-publication.test.ts src/main/runtime/rpc/methods/session-tabs.test.ts src/renderer/src/runtime/host-session-mirror-empty-inventory-settle.test.ts src/main/daemon/terminal-host-agent-session.test.ts tests/e2e/session-tabs-empty-inventory-daemon-oracle.unit.test.ts --maxWorkers=1",
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/session-tabs-inventory-publication.test.ts src/main/runtime/rpc/methods/session-tabs-inventory-census-race.test.ts src/main/runtime/rpc/methods/session-tabs.test.ts src/renderer/src/runtime/host-session-mirror-empty-inventory-settle.test.ts src/main/daemon/terminal-host-agent-session.test.ts tests/e2e/session-tabs-empty-inventory-daemon-oracle.unit.test.ts --maxWorkers=1",
         "pnpm exec vitest run --config config/vitest.config.ts src/shared/remote-runtime-shared-control-connection.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/runtime/remote-runtime-terminal-parse-backpressure.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/ipc/pty-ipc-hidden-delivery-gate.test.ts",
         "SKIP_BUILD=1 pnpm exec playwright test tests/e2e/paired-remote-terminal-host-restart-background-sync.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
         "ORCA_E2E_FORWARD_APP_LOGS=1 SKIP_BUILD=1 pnpm exec playwright test tests/e2e/paired-remote-terminal-host-restart-background-sync.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1 --repeat-each=10 --max-failures=1",
         "ORCA_E2E_WEB_CLIENT=1 SKIP_BUILD=1 pnpm exec playwright test tests/e2e/paired-remote-terminal-truncated-tail-first-paint.spec.ts --config tests/playwright.config.ts --project electron-headful --workers=1",
+        "SKIP_BUILD=1 pnpm exec playwright test tests/e2e/paired-remote-terminal-lossy-initial-snapshot.spec.ts --config tests/playwright.config.ts --project electron-headful --workers=1",
         "ORCA_E2E_WEB_CLIENT=1 ORCA_E2E_DISABLE_PAIRED_TERMINAL_PARKING=1 SKIP_BUILD=1 pnpm exec playwright test tests/e2e/paired-remote-terminal-truncated-tail-first-paint.spec.ts --config tests/playwright.config.ts --project electron-headful --workers=1",
         "ORCA_E2E_WEB_CLIENT=1 SKIP_BUILD=1 pnpm exec playwright test tests/e2e/paired-remote-terminal-stall-recovery.spec.ts --config tests/playwright.config.ts --project electron-headful --workers=1",
         "ORCA_E2E_WEB_CLIENT=1 SKIP_BUILD=1 pnpm exec playwright test tests/e2e/paired-remote-terminal-probe-gap-recovery.spec.ts --config tests/playwright.config.ts --project electron-headful --workers=1",
@@ -8571,6 +8653,7 @@
         "src/main/runtime/rpc/terminal-subscribe-buffer.test.ts",
         "src/main/runtime/terminal-subscriber-driven-daemon-attach.test.ts",
         "src/main/runtime/session-tabs-inventory-publication.test.ts",
+        "src/main/runtime/rpc/methods/session-tabs-inventory-census-race.test.ts",
         "src/main/runtime/rpc/methods/session-tabs.test.ts",
         "src/renderer/src/runtime/host-session-mirror-empty-inventory-settle.test.ts",
         "src/main/daemon/terminal-host-agent-session.test.ts",
@@ -8591,6 +8674,7 @@
         "src/renderer/src/runtime/runtime-client-events.test.ts",
         "src/renderer/src/components/terminal-pane/remote-runtime-pty-transport-activation-inventory-fallback.test.ts",
         "src/shared/remote-runtime-shared-control-connection.test.ts",
+        "tests/e2e/paired-remote-terminal-lossy-initial-snapshot.spec.ts",
         "tests/e2e/paired-remote-terminal-truncated-tail-first-paint.spec.ts",
         "tests/e2e/paired-remote-terminal-stall-recovery.spec.ts",
         "tests/e2e/paired-remote-terminal-probe-gap-recovery.spec.ts",
@@ -8659,6 +8743,18 @@
           "assertions": ["retries an existing subscriber when provider inventory becomes ready"]
         },
         {
+          "file": "src/main/runtime/rpc/methods/session-tabs-inventory-census-race.test.ts",
+          "assertions": [
+            "pre-boundary creation and removal are subsumed by the census exactly once",
+            "post-boundary creation and removal replay after the initial snapshot in sequence order",
+            "create/remove/recreate transitions are preserved without collapse",
+            "projected PTY state already visible in the census is deduplicated while later projected state is delivered",
+            "coalesced delivery uses its scheduling watermark across every subscriber",
+            "initialization churn is memory-bounded and repeated structural overflow fails after bounded recollection",
+            "initialization clears buffered transitions on cancellation"
+          ]
+        },
+        {
           "file": "tests/e2e/session-tabs-empty-inventory-daemon-oracle.unit.test.ts",
           "assertions": [
             "unpublished empty inventory keeps resume dispatch at zero with the original daemon session, process id, and writer as the sole live writer",
@@ -8703,6 +8799,13 @@
         {
           "file": "tests/e2e/headless-paired-remote-terminal-stall-recovery.spec.ts",
           "assertions": ["recovers an ACK-starved stream from an isolated headless Orca host"]
+        },
+        {
+          "file": "tests/e2e/paired-remote-terminal-lossy-initial-snapshot.spec.ts",
+          "assertions": [
+            "a nonempty lossy initial snapshot paints exactly once on a paired client",
+            "the authoritative host cursor advances and live output resumes exactly once"
+          ]
         },
         {
           "file": "tests/e2e/paired-remote-terminal-truncated-tail-first-paint.spec.ts",
@@ -11039,21 +11142,26 @@
       "providers": ["local", "daemon", "ssh", "remote-runtime"],
       "coveredPlatforms": ["macos", "linux"],
       "coveredProviders": [],
-      "coverageNotes": "Local macOS and containerized Linux evidence, deterministic renderer-unit coverage for the Linux/Sogou candidate-key policy including the legacy orphaned-keyup fallback, Electron/CDP live-PTY Sogou-style repros, and macOS renderer/main slices for Preview kitty commits and layout-native Option input. The Option slice covers complete CSI-u flag fields including lock state, repeat/release event types, authoritative committed associated text, native dead-key release suppression, functional-versus-printable numpad codes, press-pinned release identity, live keyup modifiers, pending-layout text fallback, atomic layout refresh, rapid in-focus input-source changes, stable native layout characters, and both native/web preload fallbacks. Snapshot flag provenance keeps a proven 0, a proven non-zero, and an absent field distinct from daemon through the sequenced remote SnapshotStart frame. Real Linux/Sogou OS IME automation, Windows ConPTY post-agent reset, and the CJK/Vietnamese/Arabic matrix remain registered gaps.",
+      "coverageNotes": "Local macOS and containerized Linux evidence, deterministic renderer-unit coverage for the Linux/Sogou candidate-key policy including the legacy orphaned-keyup fallback, xterm preedit visibility and row-occlusion behavior, Electron/CDP preedit geometry, Electron/CDP live-PTY Sogou-style repros, and macOS renderer/main slices for Preview kitty commits and layout-native Option input. The Option slice covers complete CSI-u flag fields including lock state, repeat/release event types, authoritative committed associated text, native dead-key release suppression, functional-versus-printable numpad codes, press-pinned release identity, live keyup modifiers, pending-layout text fallback, atomic layout refresh, rapid in-focus input-source changes, stable native layout characters, and both native/web preload fallbacks. Snapshot flag provenance keeps a proven 0, a proven non-zero, and an absent field distinct from daemon through the sequenced remote SnapshotStart frame. Real Linux/Sogou OS IME automation, native Windows candidate-window placement, Windows ConPTY post-agent reset, and the CJK/Vietnamese/Arabic matrix remain registered gaps.",
       "motivatingLinks": [
         "https://github.com/stablyai/orca/pull/6699",
         "https://github.com/stablyai/orca/pull/6682",
         "https://github.com/stablyai/orca/pull/6513",
-        "https://github.com/stablyai/orca/pull/6999"
+        "https://github.com/stablyai/orca/pull/6999",
+        "https://github.com/stablyai/orca/issues/12545",
+        "https://github.com/stablyai/orca/issues/12729",
+        "https://github.com/stablyai/orca/pull/17170"
       ],
-      "invariant": "Composition, native text forwarding, synthetic input, paste, and platform keyboard bypass paths must not send preedit/control bytes before commit and must commit text exactly once to the intended PTY. Layout-native Option text must preserve negotiated CSI-u alternate/associated fields and lock modifiers, distinguish repeat from press, and resolve releases with the press's primary identity plus the actual keyup modifiers without exposing a partial or stale layout refresh. An in-focus macOS input-source change must invalidate both renderer authorities before the next key can use the old source. When the snapshot source proves kitty state, macOS Preview commits must use the application's effective flags after the sequenced snapshot and every proven replay/live transition, and a claimed press delivered under report_event_types must produce exactly one matching release regardless of whether keyup arrives before or after insertText and regardless of xterm's defensive internal reset.",
-      "oracle": "Exact outbound bytes from the REAL native-text forwarder behind installPreviewImeBridge after initial snapshot restore, replacement resync, live transitions, and both keydown->insertText->keyup and keydown->keyup->insertText orderings; a wiring-only mock is supporting evidence, not the oracle. The current renderer-unit slice asserts native text commits route to the intended PTY once, composition/preedit bookkeeping does not leak premature text, input-source classification handles synthetic/native paths, paste/runtime forwarding avoids duplicate terminal payloads for covered fixtures, and Linux/Sogou candidate Space/digit selectors do not leak keydown/keypress/keyup while ordinary and long-held letter-to-digit typing remains available. A main/preload/renderer notification chain proves every live window invalidates immediately, the old native read settles before a coalesced refresh signal, and older refreshes are generation-fenced. The Electron/CDP live-PTY repro verifies Sogou-style Space and digit selectors submit only the committed Chinese text, while the legacy orphaned-letter-keyup sequence sends no selector byte to the PTY. Real legacy IME commit preservation and the full CJK/Vietnamese/Arabic/JIS-yen matrix run in follow-up platform soak where automation is possible.",
+      "invariant": "Composition, native text forwarding, synthetic input, paste, and platform keyboard bypass paths must not send preedit/control bytes before commit and must commit text exactly once to the intended PTY. A live preedit must stay visible across an IME-resumed transaction, preserve every committed row-tail cell hidden by its opaque overlay, mask only a structurally verified Codex or Claude placeholder and never a row carrying typed text, keep the themed insertion caret and native candidate anchor inside the terminal at the final column, and clean up without stale overlay children or ownership classes. Layout-native Option text must preserve negotiated CSI-u alternate/associated fields and lock modifiers, distinguish repeat from press, and resolve releases with the press's primary identity plus the actual keyup modifiers without exposing a partial or stale layout refresh. An in-focus macOS input-source change must invalidate both renderer authorities before the next key can use the old source. When the snapshot source proves kitty state, macOS Preview commits must use the application's effective flags after the sequenced snapshot and every proven replay/live transition, and a claimed press delivered under report_event_types must produce exactly one matching release regardless of whether keyup arrives before or after insertText and regardless of xterm's defensive internal reset.",
+      "oracle": "Exact outbound bytes from the REAL native-text forwarder behind installPreviewImeBridge after initial snapshot restore, replacement resync, live transitions, and both keydown->insertText->keyup and keydown->keyup->insertText orderings; a wiring-only mock is supporting evidence, not the oracle. The current renderer-unit slice asserts native text commits route to the intended PTY once, composition/preedit bookkeeping does not leak premature text, resumed Windows event traces reactivate the visible preedit, an opaque mid-line overlay reproduces the committed row tail it covers, arbitrary DIM output remains visible, and final-column layout keeps both caret and textarea candidate anchor within the available screen width. The candidate-anchor slice reads back the inline `textarea.style.left` xterm's own listener and Orca's anchor listener both write during one composition event, so the assertion is the position the OS would sample rather than either writer's intent. A Codex frame whose prompt row is bold and whose dimmed model footer sits below a blank gap acquires the mask class while composing; the same placeholder text without that footer, a framed-versus-unframed Claude prompt, a row of arbitrary dimmed output, and a row carrying typed text do not. The class is gone after composition end, after a blur that is not followed by a session end, and after disposal. Rendered Electron/CDP geometry independently proves the overlay reproduces every committed cell it hides, that a real Codex placeholder at column 2 is masked rather than repeated, and that the final-column caret, preedit, and textarea right edges all land inside the screen. Input-source classification handles synthetic/native paths, paste/runtime forwarding avoids duplicate terminal payloads for covered fixtures, and Linux/Sogou candidate Space/digit selectors do not leak keydown/keypress/keyup while ordinary and long-held letter-to-digit typing remains available. A main/preload/renderer notification chain proves every live window invalidates immediately, the old native read settles before a coalesced refresh signal, and older refreshes are generation-fenced. The Electron/CDP live-PTY repro verifies Sogou-style Space and digit selectors submit only the committed Chinese text, while the legacy orphaned-letter-keyup sequence sends no selector byte to the PTY. Real legacy IME commit preservation, native candidate-window placement, and the full CJK/Vietnamese/Arabic/JIS-yen matrix run in follow-up platform soak where automation is possible.",
       "commands": [
         "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/terminal-ime-native-text-forwarder.test.ts src/renderer/src/components/terminal-pane/terminal-ime-substituted-text-commit.test.ts src/renderer/src/components/terminal-pane/terminal-ime-macos-keybinding-dict-trace.test.ts src/renderer/src/components/terminal-pane/terminal-paste-runtime.test.ts src/renderer/src/components/terminal-pane/terminal-ime-composition-tracker.test.ts src/renderer/src/components/terminal-pane/terminal-ime-candidate-key-release-guard.test.ts src/renderer/src/components/terminal-pane/xterm-bypass-policy-non-mac.test.ts src/renderer/src/components/terminal-pane/xterm-bypass-policy.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/terminal-ime-linux-candidate-state.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/terminal-ime-xterm-midline-preedit-tail.test.ts src/renderer/src/components/terminal-pane/terminal-ime-xterm-resumed-preedit-visibility.test.ts src/renderer/src/components/terminal-pane/terminal-ime-xterm-trailing-preedit-occlusion.test.ts src/renderer/src/lib/pane-manager/terminal-ime-candidate-anchor.test.ts src/renderer/src/components/terminal-pane/terminal-ime-composer-placeholder-mask.test.ts src/shared/terminal-composer-draft.test.ts src/main/daemon/terminal-cursor-line-context.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/dashboard-popout/preview-terminal-ime-bridge-kitty-bytes.test.ts src/renderer/src/components/dashboard-popout/preview-terminal-snapshot-replay.test.ts src/renderer/src/components/dashboard-popout/AgentTerminalPreview.test.tsx src/renderer/src/components/dashboard-popout/AgentTerminalPreview.option-dead-key.test.tsx src/shared/terminal-kitty-keyboard-mode-tracker.test.ts src/main/ipc/terminal-preview.test.ts src/main/ipc/terminal-preview-output-stream.test.ts src/renderer/src/runtime/remote-runtime-terminal-snapshot-kitty-flags.test.ts src/main/daemon/daemon-pty-adapter.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/terminal-kitty-csi-u-encoding.test.ts src/renderer/src/components/terminal-pane/terminal-shortcut-option-compose.test.ts src/renderer/src/components/terminal-pane/terminal-option-kitty-release.test.ts src/renderer/src/lib/keyboard-layout/layout-base-character.test.ts src/renderer/src/lib/keyboard-layout/option-as-alt-probe.test.ts src/main/ipc/macos-keyboard-layout-snapshot.test.ts src/main/ipc/macos-keyboard-layout-change-notifications.test.ts src/preload/app-restart-checkpoint-routing.test.ts src/renderer/src/web/web-preload-api-ui.test.ts",
         "pnpm run test:e2e -- tests/e2e/chinese-ime-chat-input-repro.spec.ts",
+        "pnpm run test:e2e -- tests/e2e/terminal-korean-endofrow-preedit-cell-span.spec.ts tests/e2e/terminal-korean-midline-preedit-occlusion.spec.ts",
         "pnpm run test:e2e -- tests/e2e/terminal-option-composed-ascii.spec.ts"
       ],
       "testFiles": [
@@ -11065,6 +11173,13 @@
         "src/renderer/src/components/terminal-pane/terminal-ime-composition-tracker.test.ts",
         "src/renderer/src/components/terminal-pane/terminal-ime-candidate-key-release-guard.test.ts",
         "src/renderer/src/components/terminal-pane/terminal-ime-linux-candidate-state.test.ts",
+        "src/renderer/src/components/terminal-pane/terminal-ime-xterm-midline-preedit-tail.test.ts",
+        "src/renderer/src/components/terminal-pane/terminal-ime-xterm-resumed-preedit-visibility.test.ts",
+        "src/renderer/src/components/terminal-pane/terminal-ime-xterm-trailing-preedit-occlusion.test.ts",
+        "src/renderer/src/lib/pane-manager/terminal-ime-candidate-anchor.test.ts",
+        "src/renderer/src/components/terminal-pane/terminal-ime-composer-placeholder-mask.test.ts",
+        "src/shared/terminal-composer-draft.test.ts",
+        "src/main/daemon/terminal-cursor-line-context.test.ts",
         "src/renderer/src/components/terminal-pane/xterm-bypass-policy-non-mac.test.ts",
         "src/renderer/src/components/terminal-pane/xterm-bypass-policy.test.ts",
         "src/renderer/src/components/terminal-pane/terminal-kitty-csi-u-encoding.test.ts",
@@ -11085,7 +11200,9 @@
         "src/main/ipc/terminal-preview-output-stream.test.ts",
         "src/renderer/src/runtime/remote-runtime-terminal-snapshot-kitty-flags.test.ts",
         "src/main/daemon/daemon-pty-adapter.test.ts",
-        "tests/e2e/chinese-ime-chat-input-repro.spec.ts"
+        "tests/e2e/chinese-ime-chat-input-repro.spec.ts",
+        "tests/e2e/terminal-korean-endofrow-preedit-cell-span.spec.ts",
+        "tests/e2e/terminal-korean-midline-preedit-occlusion.spec.ts"
       ],
       "assertionRefs": [
         {
@@ -11136,6 +11253,46 @@
             "an orphaned plain-letter keyup arms exactly the next bare digit guard",
             "ordinary, overlapping, shifted, and long-held letter keydowns keep following digits available",
             "physical letter tracking survives cross-pane focus handoff and clears on renderer-window blur"
+          ]
+        },
+        {
+          "file": "src/renderer/src/components/terminal-pane/terminal-ime-xterm-midline-preedit-tail.test.ts",
+          "assertions": [
+            "a mid-line preedit reproduces committed cells hidden by its opaque overlay and refreshes that tail after terminal renders",
+            "arbitrary fully dimmed output remains visible even at column zero",
+            "the final-column caret stays visible and the textarea candidate anchor shifts left with an over-wide preedit",
+            "cancel, empty resumed updates, and disposal remove transient overlay state"
+          ]
+        },
+        {
+          "file": "src/renderer/src/lib/pane-manager/terminal-ime-candidate-anchor.test.ts",
+          "assertions": [
+            "the candidate anchor stays on the cursor cell while the preedit fits the remaining width",
+            "an over-wide final-column preedit pulls the anchor back inside the screen, and a preedit wider than the row never anchors left of it"
+          ]
+        },
+        {
+          "file": "src/renderer/src/components/terminal-pane/terminal-ime-composer-placeholder-mask.test.ts",
+          "assertions": [
+            "a bold Codex prompt row with a dimmed model footer below a blank gap, and a framed Claude prompt, acquire the mask class only while composing",
+            "the same placeholder text without its footer or frame, and arbitrary dimmed output, acquire nothing",
+            "a row carrying typed text acquires no mask even while the stock placeholder is still rendered to its right",
+            "the class is gone after composition end, after a blur with no session end behind it, and after disposal"
+          ]
+        },
+        {
+          "file": "src/renderer/src/components/terminal-pane/terminal-ime-xterm-resumed-preedit-visibility.test.ts",
+          "assertions": [
+            "recorded Windows Korean compositionupdate-without-compositionstart traces reactivate a visible preedit transaction",
+            "the resumed transaction commits exactly once and cleans up normally",
+            "the ordinary Linux compositionstart sequence remains unchanged"
+          ]
+        },
+        {
+          "file": "src/renderer/src/components/terminal-pane/terminal-ime-xterm-trailing-preedit-occlusion.test.ts",
+          "assertions": [
+            "rolling Korean input keeps only the uncommitted trailing syllable in the themed overlay",
+            "the overlay remains anchored to the live cursor cell and clears after commit"
           ]
         },
         {
@@ -11307,6 +11464,20 @@
             "Post-composition Sogou-style digit selection stays out of the PTY after compositionend",
             "Legacy orphaned-letter-keyup digit selection submits no selector byte to the PTY; real legacy candidate commit preservation remains a platform gap"
           ]
+        },
+        {
+          "file": "tests/e2e/terminal-korean-endofrow-preedit-cell-span.spec.ts",
+          "assertions": [
+            "the rendered final-column preedit caret remains inside the terminal screen",
+            "a rendered full-width Korean preedit spans materially more than the one terminal cell reported in #12729"
+          ]
+        },
+        {
+          "file": "tests/e2e/terminal-korean-midline-preedit-occlusion.spec.ts",
+          "assertions": [
+            "the rendered opaque overlay reproduces every committed row-tail cell its measured rectangle hides",
+            "a real Codex placeholder with bold prompt, blank footer gap, model footer, and cursor at column 2 stays masked while an end-of-row composition adds no tail"
+          ]
         }
       ],
       "evidenceRuns": [
@@ -11415,7 +11586,7 @@
       },
       "performanceBudget": {
         "required": true,
-        "evidence": "Terminal input hot-path audit clean on 2026-08-16: candidate guards retain O(1) checks and bounded per-pane state. Layout changes add one process-lifetime native listener, two singleton renderer subscriptions, one O(live windows) broadcast per OS event, and generation-fenced refreshes whose native helper read is deduplicated in flight. The path is event-driven with will-quit/dispose cleanup and adds no polling, timers, per-key IPC, SSH/remote transport work, unbounded queues, or retained terminal data."
+        "evidence": "Terminal input hot-path audit clean through 2026-08-29: candidate guards retain O(1) checks and bounded per-pane state. Xterm overlay reconciliation scans only the current row, bounded by terminal columns, retains at most three current DOM children, reuses one preedit-bounds layout read for the visual geometry and the textarea the OS samples, and cancels its single deferred timer on replacement and disposal. The candidate anchor adds no layout read of its own: it clamps from the inline width xterm just wrote. Orca's placeholder binding reads the bounded visible cursor context at composition start and on xterm render only while a session is active, retaining one active session id and one disposable render listener. Layout changes add one process-lifetime native listener, two singleton renderer subscriptions, one O(live windows) broadcast per OS event, and generation-fenced refreshes whose native helper read is deduplicated in flight. The paths are event-driven and add no polling, per-key IPC, SSH/remote transport work, unbounded queues, or retained terminal data."
       },
       "promotionCriteria": [
         "Cover deterministic byte/cell oracles first.",
@@ -11424,6 +11595,7 @@
       ],
       "knownGaps": [
         "Current commands include renderer-unit coverage and a CDP-driven Electron repro; real OS IME automation may need manual or soak evidence.",
+        "Textarea geometry is a deterministic lower-layer oracle for native candidate placement; no automated run observes the operating system's candidate window itself.",
         "Backspace/Enter during composition, JIS yen, Arabic/RTL, paste edge cases, and Windows ConPTY post-agent key reset still need representative gate coverage.",
         "An older remote host omits the optional SnapshotStart kitty field, so a new client falls back to raw commits until live negotiation is observed.",
         "Snapshot authorities expose only the active screen's effective flags, not kitty's complete two-screen push stacks; a pop that crosses the restored boundary degrades to unknown rather than a proven value."
@@ -15939,17 +16111,21 @@
       "providers": ["paired-runtime"],
       "coveredPlatforms": ["macos"],
       "coveredProviders": ["paired-runtime"],
-      "coverageNotes": "Loads the real host RPC methods, the real RpcDispatcher, and the real renderer terminal multiplexer from two builds (current working tree and the newest release tag) and drives them against each other over an in-process transport that reproduces production frame routing, including the host-side decode that silently drops unknown opcodes. Covers the terminal stream only; the session-tab sync channel, agent-session publications, file/Git RPCs, mobile E2EE framing, and the relay transport are uncovered.",
+      "coverageNotes": "Loads the real host RPC methods, real RpcDispatcher, real renderer terminal multiplexer, and codecs from the current working tree, exact pre-fix main, newest release tag, and the pinned reported 1.4.192-client/1.4.191-host commits. In-process transport reproduces production frame routing, including decoder-rejected opcodes. Covers the terminal stream only; session tabs, agent publications, file/Git RPCs, mobile E2EE framing, and relay transport are uncovered.",
       "motivatingLinks": [
         "https://github.com/stablyai/orca/pull/12641",
         "https://github.com/stablyai/orca/pull/12655"
       ],
       "invariant": "A client and a server built from different releases must complete subscribe, input delivery to the process, hide/reveal buffer snapshot, transport drop, and resubscribe with no frame refused by the receiving build's decoder, the same negotiated capabilities, and the same published snapshot content — so a new optional field stays safe, a new opcode is only sent after negotiation, and a change in what the host publishes is visible before release.",
-      "oracle": "Run one fixed journey per pairing (old client/new server, new client/old server, and current/current as control) and assert the recorded step list, the exact named frame sequence, both subscribed events with their negotiated capabilities, the exact input texts the host wrote to the PTY before and after reconnect, the rendered snapshot and live-output content, and an empty set of decoder-rejected frames in either direction. Missing host runtime methods are reported by name so a harness gap can never be read as a wire incompatibility.",
+      "oracle": "Run one fixed journey per general pairing (old client/new server, new client/old server, and current/current) plus the pinned reported pair, exact pre-fix main control, and candidate controls. Assert exact frames, subscriptions, input, rendered snapshot/live content, and zero decoder rejects or missing host methods. The reported and pre-fix-main clients must render blank after discarding the nonempty lossy initial image; candidate pairings must paint it once, recover the first post-snapshot sequence gap, and resume contiguous live output once.",
       "commands": [
-        "pnpm exec vitest run --config config/vitest.config.ts tests/e2e/cross-version-wire/cross-version-terminal-wire.unit.test.ts"
+        "pnpm exec vitest run --config config/vitest.config.ts tests/e2e/cross-version-wire/cross-version-terminal-wire.unit.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts tests/e2e/cross-version-wire/reported-lossy-initial-snapshot.unit.test.ts"
       ],
-      "testFiles": ["tests/e2e/cross-version-wire/cross-version-terminal-wire.unit.test.ts"],
+      "testFiles": [
+        "tests/e2e/cross-version-wire/cross-version-terminal-wire.unit.test.ts",
+        "tests/e2e/cross-version-wire/reported-lossy-initial-snapshot.unit.test.ts"
+      ],
       "assertionRefs": [
         {
           "file": "tests/e2e/cross-version-wire/cross-version-terminal-wire.unit.test.ts",
@@ -15959,6 +16135,16 @@
             "expect(record.rejected).toEqual([])",
             "expect(record.inputAtProcess).toEqual([JOURNEY_INPUTS.first, JOURNEY_INPUTS.second])",
             "expect(event.capabilities).toEqual({ outputPause: 1 })"
+          ]
+        },
+        {
+          "file": "tests/e2e/cross-version-wire/reported-lossy-initial-snapshot.unit.test.ts",
+          "assertions": [
+            "the reported 1.4.192 client discards the reported 1.4.191 host's nonempty lossy snapshot",
+            "the exact pre-fix main client reproduces the same blank rendered terminal",
+            "the candidate client paints that old-host image exactly once and resumes live output",
+            "the candidate client paints the candidate-host image exactly once and resumes live output",
+            "both candidate pairings report zero decoder rejects and missing runtime methods"
           ]
         }
       ],
@@ -15974,8 +16160,8 @@
         }
       ],
       "runtimeBudget": {
-        "p95Seconds": 60,
-        "scope": "one baseline checkout extraction plus three in-process journeys"
+        "p95Seconds": 180,
+        "scope": "four historical checkout extractions plus seven in-process pairings"
       },
       "flakeHistory": {
         "status": "not-started",
@@ -15986,18 +16172,18 @@
         "evidence": "Red proven separately for each rule by injecting the violation into the working tree and reverting it. Rule 2: adding opcode 17 and sending it ungated from the client turned new-client/old-server red with rejected rawOpcode 17 in the client-to-host direction, while old-client/new-server stayed green. Rule 3: making the host stop publishing the snapshot `source` field turned both new-server pairings red and left the old-server pairing green; trimming the published initial buffer removed the SnapshotChunk frame and failed the frame-sequence oracle. Rule 1: adding an optional `hiddenOutputReason` field to the snapshot frame kept all pairings green, and making the client require that field turned only new-client/old-server red."
       },
       "performanceBudget": {
-        "required": false,
-        "evidence": "Test-only infrastructure; it adds no product code path. The extracted baseline tree is cached by resolved commit, so repeat runs skip extraction and each journey completes in roughly 35ms."
+        "required": true,
+        "evidence": "Product reconciliation adds one existing-target comparison per completed snapshot and no timer, polling, subscription, provider call, scan, or subprocess. The test-only host hook adds one environment read per initial subscribe. Extracted trees are cached by commit."
       },
       "promotionCriteria": [
-        "Extend the matrix beyond two version points, for example the previous two minor releases.",
+        "Extend the matrix beyond the newest stable release and pinned reported pair.",
         "Cover a second wire surface, starting with the session-tab sync channel that PR #12641 changed.",
         "Collect 100 consecutive CI passes on the dedicated cross-version-wire job.",
         "Run the job on Linux and Windows runners, not only macOS locally."
       ],
       "knownGaps": [
         "Only the terminal stream is covered; session tabs, agent sessions, file/Git RPCs, mobile E2EE framing, and the relay transport are not.",
-        "Only two version points are compared, so a regression introduced and reverted between them is invisible.",
+        "The newest stable release and pinned reported pair do not expose every intermediate regression.",
         "The host runtime is a stub around a fake PTY, so real PTY, daemon, and SSH provider behavior is out of scope.",
         "The baseline is the newest release tag by default, so the compared pair changes when a new release is cut unless ORCA_CROSS_VERSION_BASELINE_REF pins it.",
         "tests/ is outside every tsconfig include, so the harness is linted and executed but not typechecked."

@@ -12810,8 +12810,9 @@
           "7e7ca60816": "更改的文件",
           "b6c3b84476": "显示文件树",
           "39f8007549": "评审冲突",
-          "39e73e7181": "被排除在此差异视图之外。",
-          "689b99f8ad": "未解决的冲突",
+          "skippedConflictsExcluded": "{{count}} 个未解决的冲突已被排除在此差异视图之外。",
+          "skippedConflictsExcluded_one": "{{count}} 个未解决的冲突已被排除在此差异视图之外。",
+          "skippedConflictsExcluded_other": "{{count}} 个未解决的冲突已被排除在此差异视图之外。",
           "820ec01f24": "冲突文件单独评审",
           "fd8892b120": "没有显示任何变化",
           "eb5f40e49c": "此差异视图排除了未解决的冲突，因为普通的双向差异管道不是冲突安全的。",
@@ -14703,28 +14704,15 @@
     "workspace": {
       "cleanup": {
         "browse": {
-          "selectionWithheldOne": "当前筛选条件隐藏了 1 个已选工作区，已取消选择。",
-          "selectionWithheld": "当前筛选条件隐藏了 {{value0}} 个已选工作区，已取消选择。",
-          "selectAllCountOne": "选择 1 个通过安全检查的工作区",
-          "selectAllCount": "选择全部 {{value0}} 个通过安全检查的工作区"
-        },
-        "scan": {
-          "readyOne": "找到 1 个工作区。",
-          "readyMany": "找到 {{value0}} 个工作区。"
-        },
-        "presentationFixtures": {
-          "reviewAlphaCleanup": "评审 Alpha 清理"
-        },
-        "presentation": {
-          "gitlabMergeRequestNumber": "MR #{{value0}}",
-          "githubPullRequestNumber": "PR #{{value0}}"
-        },
-        "browse": {
           "gitStatusCheckFailed": "Git 状态检查失败",
           "gitStatusUnverified": "无法验证 Git 状态",
           "deleteAnyway": "仍然删除",
           "forceDeleteProjectionOne": "当前有 {{count}} 个工作区显示风险，可能需要强制删除",
           "forceDeleteProjectionMany": "当前有 {{count}} 个工作区显示风险，可能需要强制删除",
+          "selectionWithheldOne": "当前筛选条件隐藏了 1 个已选工作区，已取消选择。",
+          "selectionWithheld": "当前筛选条件隐藏了 {{value0}} 个已选工作区，已取消选择。",
+          "selectAllCountOne": "选择 1 个通过安全检查的工作区",
+          "selectAllCount": "选择全部 {{value0}} 个通过安全检查的工作区",
           "appliedFilters": "已应用的筛选",
           "removeFilter": "移除筛选 {{value0}}",
           "chip": {
@@ -14771,6 +14759,17 @@
               "retainedAgents": "已完成的代理"
             }
           }
+        },
+        "scan": {
+          "readyOne": "找到 1 个工作区。",
+          "readyMany": "找到 {{value0}} 个工作区。"
+        },
+        "presentationFixtures": {
+          "reviewAlphaCleanup": "评审 Alpha 清理"
+        },
+        "presentation": {
+          "gitlabMergeRequestNumber": "MR #{{value0}}",
+          "githubPullRequestNumber": "PR #{{value0}}"
         }
       }
     },
