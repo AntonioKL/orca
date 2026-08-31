@@ -1,5 +1,5 @@
 import { randomUUID as nodeRandomUUID } from 'node:crypto'
-import { link, mkdir, rm, rmdir, stat, lstat, readdir, readlink, realpath } from 'node:fs/promises'
+import { link, mkdir, rm, stat, lstat, readdir, readlink, realpath } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { cloneWorktreePathWithApfs, type ApfsCloneDeps } from './ipc/worktree-apfs-clone'
 import {
@@ -32,6 +32,14 @@ export const defaultWorktreeDependencySeedDependencies: WorktreeDependencySeedDe
 
 function isAlreadyExists(error: unknown): boolean {
   return (error as { code?: unknown })?.code === 'EEXIST'
+}
+
+/** Identify a no-clobber race so rollback does not remove the other writer's target. */
+export function isDependencySeedTargetExistsError(error: unknown): boolean {
+  return (
+    isAlreadyExists(error) ||
+    (error as { name?: unknown })?.name === 'WorktreeLinkedPathTargetExistsError'
+  )
 }
 
 export async function dependencySeedPathExists(path: string): Promise<boolean> {
@@ -257,9 +265,9 @@ async function cloneDirectoryWithLinuxReflink(
     await runLinuxReflink(source, target, true, dependencies)
     return 'cloned'
   } catch (error) {
-    // Remove only an empty reservation. A partial clone remains inspectable and
-    // is never mistaken for a complete seed by the marker check.
-    await rmdir(target).catch(() => {})
+    // We own the reservation from mkdir; remove a partial tree so setup sees a
+    // clean cache miss instead of operating on an incomplete dependency tree.
+    await rm(target, { recursive: true, force: true }).catch(() => {})
     throw error
   }
 }
@@ -287,8 +295,22 @@ export async function cloneDependencySeedPath(
   // device identity, before handing paths to cp/clonefile.
   await assertContainedSource(sourceRoot, source)
   await ensureContainedTargetDirectory(targetRoot, dirname(target))
+  const targetExistedBeforeClone = await dependencySeedPathExists(target)
+  if (targetExistedBeforeClone) {
+    return 'exists'
+  }
   if (platform === 'darwin') {
-    await dependencies.cloneDarwinPath(source, target, sourceStats.isDirectory())
+    try {
+      await dependencies.cloneDarwinPath(source, target, sourceStats.isDirectory())
+    } catch (error) {
+      // APFS reserves directory targets internally and may leave a partial
+      // tree when cp fails. Remove only targets that were absent before this
+      // clone; a no-clobber race belongs to the other writer.
+      if (!isDependencySeedTargetExistsError(error)) {
+        await removeDependencySeedEntry(target).catch(() => {})
+      }
+      throw error
+    }
     return 'cloned'
   }
   if (platform === 'linux') {

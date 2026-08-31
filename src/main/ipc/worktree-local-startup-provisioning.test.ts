@@ -210,4 +210,30 @@ describe('spawnLocalStartupAndSetupTerminals', () => {
       color: '#123456'
     })
   })
+
+  it('leaves default tabs available when every host spawn fails', async () => {
+    const createTerminal = vi.fn().mockRejectedValue(new Error('pty unavailable'))
+    const runtime = {
+      createTerminal,
+      splitTerminal: vi.fn(),
+      waitForSetupTerminalCompletion: vi.fn()
+    } as never
+
+    const result = await spawnLocalStartupAndSetupTerminals({
+      runtime,
+      worktree: { id: 'repo-1::/workspace/default-fallback', path: '/workspace/default-fallback' },
+      startup: undefined,
+      setup: undefined,
+      defaultTabs: {
+        runCommands: true,
+        tabs: [{ title: 'Dev', command: 'pnpm dev' }]
+      },
+      settings: { setupScriptLaunchMode: 'new-tab' } as never,
+      createdWithAgent: undefined,
+      materializeDefaultTabs: true
+    })
+
+    expect(result.didSpawnDefaultTabs).toBeUndefined()
+    expect(result.warning).toContain('failed to create a default terminal')
+  })
 })

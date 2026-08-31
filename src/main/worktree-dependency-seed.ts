@@ -4,7 +4,12 @@ import {
   dependencySeedMarkerPaths,
   readDependencySeedMarker
 } from './worktree-dependency-seed-marker'
-import { cloneDependencySeedPath, dependencySeedPathExists } from './worktree-dependency-seed-clone'
+import {
+  cloneDependencySeedPath,
+  dependencySeedPathExists,
+  isDependencySeedTargetExistsError,
+  removeDependencySeedEntry
+} from './worktree-dependency-seed-clone'
 import {
   createDependencySeedContext,
   ensureDependencySeedRoot,
@@ -92,19 +97,29 @@ async function hydrateContext(context: SeedContext): Promise<WorktreeDependencyS
     return { status: 'miss', fingerprint: context.fingerprint.digest, paths: [] }
   }
   const hydrated: string[] = []
+  const hydratedTargets: string[] = []
+  const rollbackHydratedTargets = async (additionalTarget?: string): Promise<void> => {
+    const targets = [
+      ...new Set([...hydratedTargets, ...(additionalTarget ? [additionalTarget] : [])])
+    ]
+    await Promise.all(targets.map((target) => removeDependencySeedEntry(target)))
+  }
   for (const path of markerPaths) {
     const source = join(context.seedEntryPath, path)
     const target = join(context.worktreePath, path)
+    let targetExistedBeforeClone = true
     try {
       // A marker is published only after every listed path is cloned. Treat a
       // later missing source as a cache miss instead of reporting `existing`
       // and silently accepting a partial/tampered seed.
       if (!(await dependencySeedPathExists(source))) {
+        await rollbackHydratedTargets()
         return { status: 'miss', fingerprint: context.fingerprint.digest, paths: [] }
       }
       if (await dependencySeedPathExists(target)) {
         continue
       }
+      targetExistedBeforeClone = false
       const result = await cloneDependencySeedPath(
         source,
         target,
@@ -115,11 +130,20 @@ async function hydrateContext(context: SeedContext): Promise<WorktreeDependencyS
       )
       if (result === 'cloned') {
         hydrated.push(path)
+        hydratedTargets.push(target)
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        continue
+        await rollbackHydratedTargets(
+          !targetExistedBeforeClone && !isDependencySeedTargetExistsError(error)
+            ? target
+            : undefined
+        )
+        return { status: 'miss', fingerprint: context.fingerprint.digest, paths: [] }
       }
+      await rollbackHydratedTargets(
+        !targetExistedBeforeClone && !isDependencySeedTargetExistsError(error) ? target : undefined
+      )
       throw error
     }
   }

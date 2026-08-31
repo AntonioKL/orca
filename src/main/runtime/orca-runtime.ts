@@ -26395,15 +26395,15 @@ export class OrcaRuntimeService {
     let setupTerminalHandle: string | null = null
     let didSpawnDefaultTabs = false
     try {
-      // Claim ownership before the loop so a partial host spawn is not replayed
-      // by renderer activation as a second set of tabs.
-      didSpawnDefaultTabs = Boolean(args.defaultTabs && args.defaultTabs.tabs.length > 0)
       const defaultTabHandles = await this.createDefaultTabTerminals(
         args.worktreeSelector,
         args.worktreeId,
         args.defaultTabs,
         surfacing
       )
+      // Host owns replay suppression only after at least one tab exists. A
+      // completely failed loop must leave the descriptor available for retry.
+      didSpawnDefaultTabs = defaultTabHandles.length > 0
       let primaryTerminalHandle = args.primaryTerminalHandle ?? defaultTabHandles[0] ?? null
       const setupLaunchMode =
         (
@@ -27749,7 +27749,11 @@ export class OrcaRuntimeService {
             }
           : undefined
       const activationDefaultTabs =
-        runtimeWillProvisionTerminals && runtimeOwnsDefaultTabs ? undefined : defaultTabs
+        runtimeWillProvisionTerminals &&
+        runtimeOwnsDefaultTabs &&
+        (!defaultTabs || didSpawnDefaultTabs)
+          ? undefined
+          : defaultTabs
       if (effectiveStartup && !didSpawnStartup) {
         this.notifyActivateWorktree(repo.id, worktree.id, {
           setup: activationSetup,

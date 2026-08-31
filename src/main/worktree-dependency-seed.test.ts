@@ -178,6 +178,55 @@ describe('worktree dependency seed hydration and promotion', () => {
     )
   })
 
+  it('rolls back newly hydrated paths when a later clone fails', async () => {
+    const data = await fixture()
+    for (const path of ['other-deps', 'preexisting-deps']) {
+      await mkdir(join(data.worktree, path))
+      await writeFile(join(data.worktree, path, 'package.js'), `${path}\n`)
+    }
+    const seedArgs = {
+      ...args(data),
+      declaredSeedPaths: ['node_modules', 'other-deps', 'preexisting-deps']
+    }
+    await expect(promoteWorktreeDependencySeed(seedArgs)).resolves.toMatchObject({
+      status: 'promoted',
+      paths: ['node_modules', 'other-deps', 'preexisting-deps']
+    })
+
+    const target = join(data.root, 'rollback-target')
+    await mkdir(target)
+    await writeFile(join(target, 'pnpm-lock.yaml'), 'lock-v1')
+    await mkdir(join(target, 'preexisting-deps'))
+    await writeFile(join(target, 'preexisting-deps', 'keep.js'), 'keep\n')
+    let cloneCalls = 0
+    const cloneDarwinPath = async (
+      source: string,
+      destination: string,
+      sourceIsDirectory: boolean
+    ): Promise<void> => {
+      cloneCalls += 1
+      if (cloneCalls === 2) {
+        await mkdir(destination)
+        await writeFile(join(destination, 'partial.js'), 'partial\n')
+        throw new Error('injected clone failure')
+      }
+      await cp(source, destination, { recursive: sourceIsDirectory })
+    }
+
+    await expect(
+      hydrateWorktreeDependencies({
+        ...seedArgs,
+        worktreePath: target,
+        dependencies: { cloneDarwinPath }
+      })
+    ).resolves.toMatchObject({ status: 'failed', paths: [] })
+    await expect(access(join(target, 'node_modules'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(access(join(target, 'other-deps'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(join(target, 'preexisting-deps', 'keep.js'), 'utf8')).resolves.toBe(
+      'keep\n'
+    )
+  })
+
   it('misses changed fingerprints and never overwrites an existing target', async () => {
     const data = await fixture()
     await promoteWorktreeDependencySeed(args(data))

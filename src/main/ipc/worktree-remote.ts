@@ -468,9 +468,6 @@ export async function spawnLocalStartupAndSetupTerminals(args: {
   }
 
   if (shouldMaterializeDefaultTabs && defaultTabs) {
-    // Claim ownership before the loop so a partial host spawn is not replayed
-    // by renderer activation as a second set of tabs.
-    didSpawnDefaultTabs = true
     for (const template of defaultTabs.tabs) {
       try {
         const command = template.command?.trim()
@@ -495,6 +492,9 @@ export async function spawnLocalStartupAndSetupTerminals(args: {
         console.warn(`[worktree-create] ${warning}`)
       }
     }
+    // Suppress renderer replay only when at least one host tab exists. If all
+    // attempts failed, keep the descriptor available for a renderer retry.
+    didSpawnDefaultTabs = defaultTabHandles.length > 0
   }
 
   let didSpawnSetup = false
