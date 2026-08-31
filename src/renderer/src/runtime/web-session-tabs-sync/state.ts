@@ -1,0 +1,209 @@
+import type { AppState } from '../../store'
+import type {
+  RuntimeMobileSessionAgentTab,
+  RuntimeMobileSessionBrowserTab,
+  RuntimeMobileSessionFileTab,
+  RuntimeMobileSessionMarkdownTab,
+  RuntimeMobileSessionTabGroup,
+  RuntimeMobileSessionTabsRemovedResult,
+  RuntimeMobileSessionTabsResult,
+  RuntimeMobileSessionTerminalClientTab
+} from '../../../../shared/runtime-types'
+import type {
+  BrowserCertificateFailure,
+  BrowserPage,
+  BrowserWorkspace
+} from '../../../../shared/browser-workspace-types'
+import type { Tab } from '../../../../shared/tab-types'
+import type { TerminalLayoutSnapshot, TerminalTab } from '../../../../shared/terminal-tab-types'
+import type { OpenFile } from '../../store/slices/editor'
+import type { RuntimeBrowserPlacement } from '../../../../shared/runtime-browser-placement'
+
+export const WEB_SESSION_GROUP_PREFIX = 'web-session-tabs:'
+export const WEB_SESSION_TABS_VISIBILITY_RESUME_STAGGER_MS = 100
+export const VISIBILITY_INVENTORY_REMOVAL_EPOCH = 'visibility-inventory-removal'
+export const HOST_WORKING_CLIENT_BOUNDARY_LIMIT = 512
+
+export type SessionTabsStreamEvent =
+  | (RuntimeMobileSessionTabsResult & { type: 'snapshot' | 'updated' })
+  | { type: 'snapshots'; snapshots: RuntimeMobileSessionTabsResult[]; authoritative?: boolean }
+  | { type: 'end' }
+
+export type SessionTabsListAllResult = {
+  snapshots: RuntimeMobileSessionTabsResult[]
+  authoritative?: boolean
+}
+
+export type SnapshotFreshness = {
+  publicationEpoch: string
+  snapshotVersion: number
+}
+
+export type ReceivedSessionTabsSnapshot = SnapshotFreshness & { receivedFrame: number }
+export type SessionTabsRecoveryState = { pendingCount: number }
+export type SessionTabsRemovalFence = {
+  receivedFrame: number
+  recoveryState: SessionTabsRecoveryState
+  pendingCount: number
+}
+
+export type WebSessionTabsSnapshotApplyOptions = {
+  contentScope?: 'all' | 'agent-session'
+  preserveLocalLayout?: boolean
+  terminalPtyMode?: 'local' | 'remote'
+}
+
+export type TrackedWebSessionTabsWorktree = {
+  worktree: string
+  freshness: SnapshotFreshness
+}
+
+export type VisibilityResumeOmission = {
+  baseline: SnapshotFreshness
+  environmentId: string
+  inventoryReceivedFrame: number
+  superseded: boolean
+  visibilityGeneration: number
+}
+
+export const latestSessionTabsSnapshotByWorktree = new Map<string, SnapshotFreshness>()
+export const replayableSessionTabsSnapshotByWorktree = new Map<string, SnapshotFreshness>()
+export const latestReceivedSessionTabsSnapshotByWorktree = new Map<
+  string,
+  ReceivedSessionTabsSnapshot
+>()
+export const latestSessionTabsRemovalFenceByWorktree = new Map<string, SessionTabsRemovalFence>()
+export const sessionTabsRecoveryStateByWorktree = new Map<string, SessionTabsRecoveryState>()
+export const trackedSessionTabsWorktreeIdsByEnvironment = new Map<string, Set<string>>()
+export const sessionTabsEnvironmentsByWorktree = new Map<string, Set<string>>()
+export const sessionTabsTrackingGenerationByEnvironment = new Map<string, number>()
+export const lastHostTerminalTabCountByWorktree = new Map<string, number>()
+export const hostSessionTabIdByLocalKey = new Map<string, string>()
+export const hostSessionTabMappingKeysByEnvironmentAndWorktree = new Map<
+  string,
+  Map<string, Set<string>>
+>()
+export const hostWorkingClientBoundaryByPaneKey = new Map<
+  string,
+  {
+    hostStateStartedAt: number
+    hostPrompt: string
+    clientStateStartedAt: number
+    stamped: boolean
+  }
+>()
+
+export let receivedSessionTabsFrameSequence = 0
+export function nextReceivedSessionTabsFrame(): number {
+  receivedSessionTabsFrameSequence += 1
+  return receivedSessionTabsFrameSequence
+}
+export function resetReceivedSessionTabsFrameSequence(): void {
+  receivedSessionTabsFrameSequence = 0
+}
+
+export type TerminalSurface = RuntimeMobileSessionTerminalClientTab
+export type ReadyTerminalSurface = RuntimeMobileSessionTerminalClientTab & { status: 'ready' }
+export type ReadyBrowserSurface = RuntimeMobileSessionBrowserTab & { browserPageId: string }
+export type ReadyEditorSurface = RuntimeMobileSessionMarkdownTab | RuntimeMobileSessionFileTab
+
+export type MirroredAgentTab = { hostTabId: string; unifiedTab: Tab }
+export type MirroredTerminalTab = {
+  tab: TerminalTab
+  hostTabId: string
+  ptyIds: string[]
+  layout: TerminalLayoutSnapshot
+  retainedSurfaceByPrunedLeafId?: ReadonlyMap<string, TerminalSurface>
+}
+export type MirroredBrowserTab = {
+  workspace: BrowserWorkspace
+  page: BrowserPage
+  certificateFailure: BrowserCertificateFailure | null
+  remotePageId: string
+  placement?: RuntimeBrowserPlacement
+  unifiedTab: Tab
+  hostTabId: string
+  clientGroupId?: string
+}
+export type MirroredEditorTab = { file: OpenFile; unifiedTab: Tab; hostTabId: string }
+
+export type WebSessionTabsSyncState = Pick<
+  AppState,
+  | 'activeBrowserTabId'
+  | 'activeBrowserTabIdByWorktree'
+  | 'activeGroupIdByWorktree'
+  | 'activeFileId'
+  | 'activeFileIdByWorktree'
+  | 'activeTabId'
+  | 'activeTabIdByWorktree'
+  | 'activeTabType'
+  | 'activeTabTypeByWorktree'
+  | 'activeWorktreeId'
+  | 'agentStatusByPaneKey'
+  | 'agentStatusEpoch'
+  | 'browserPagesByWorkspace'
+  | 'browserCertificateFailuresByPageId'
+  | 'browserTabsByWorktree'
+  | 'groupsByWorktree'
+  | 'layoutByWorktree'
+  | 'openFiles'
+  | 'ptyIdsByTabId'
+  | 'remoteBrowserPageHandlesByPageId'
+  | 'tabBarOrderByWorktree'
+  | 'tabsByWorktree'
+  | 'terminalLayoutsByTabId'
+  | 'unifiedTabsByWorktree'
+  | 'unreadTerminalTabs'
+  | 'sortEpoch'
+> &
+  Partial<
+    Pick<
+      AppState,
+      | 'acknowledgedAgentsByPaneKey'
+      | 'agentLaunchConfigByPaneKey'
+      | 'automaticAgentResumeClaimsByTabId'
+      | 'migrationUnsupportedByPtyId'
+      | 'paneForegroundAgentByPaneKey'
+      | 'pendingStartupByTabId'
+      | 'recentlyClosedAgentStatusTabIds'
+      | 'recentlyRetiredAgentStatusPaneKeys'
+      | 'retainedAgentsByPaneKey'
+      | 'retentionSuppressedPaneKeys'
+    >
+  >
+
+export type WebSessionTabsBatchRecordKey =
+  | 'activeBrowserTabIdByWorktree'
+  | 'activeFileIdByWorktree'
+  | 'activeGroupIdByWorktree'
+  | 'activeTabIdByWorktree'
+  | 'activeTabTypeByWorktree'
+  | 'agentStatusByPaneKey'
+  | 'automaticAgentResumeClaimsByTabId'
+  | 'browserCertificateFailuresByPageId'
+  | 'browserPagesByWorkspace'
+  | 'browserTabsByWorktree'
+  | 'groupsByWorktree'
+  | 'layoutByWorktree'
+  | 'pendingStartupByTabId'
+  | 'ptyIdsByTabId'
+  | 'remoteBrowserPageHandlesByPageId'
+  | 'tabBarOrderByWorktree'
+  | 'tabsByWorktree'
+  | 'terminalLayoutsByTabId'
+  | 'unifiedTabsByWorktree'
+  | 'unreadTerminalTabs'
+
+export type WebSessionOpenFilesIndex = {
+  source: readonly OpenFile[]
+  byWorktree: Map<string, OpenFile[]>
+}
+export type WebSessionTabsBatchContext = {
+  agentPaneKeysByTabId: Map<string, Set<string>> | null
+  changedRecords: Set<WebSessionTabsBatchRecordKey>
+  openFilesIndex: WebSessionOpenFilesIndex | null
+}
+
+export type AgentTab = RuntimeMobileSessionAgentTab
+export type TabGroupSnapshot = RuntimeMobileSessionTabGroup
+export type RemovedTabsResult = RuntimeMobileSessionTabsRemovedResult
