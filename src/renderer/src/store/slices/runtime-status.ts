@@ -18,6 +18,7 @@ import { reconcileCatalogRows } from './repo-identity-reconcile'
 import { createRuntimeStatusHydration } from './runtime-status-hydration'
 import { refreshRuntimeEnvironmentStatus } from './runtime-status-refresh'
 import * as runtimeStatusDiagnostics from './runtime-status-diagnostics-generation'
+import * as runtimeStatusDiagnosticsPublish from './runtime-status-diagnostics-publish'
 import {
   advanceRuntimeEnvironmentConnectionGeneration,
   clearRuntimeEnvironmentConnectionGenerations,
@@ -300,20 +301,16 @@ export const createRuntimeStatusSlice: StateCreator<AppState, [], [], RuntimeSta
     }
   },
 
-  publishRuntimeEnvironmentDiagnostics: ({ environmentId, transportGeneration, diagnostics }) => {
-    // Diagnostics are an overlay, not a replacement status response. Without a complete
-    // status snapshot there is no runtime identity or graph evidence to which they belong.
-    runtimeStatusDiagnostics.mergePushedRuntimeEnvironmentDiagnostics({
-      environmentId,
-      transportGeneration,
-      diagnostics,
-      current: get().runtimeStatusByEnvironmentId.get(environmentId),
-      publish: (status) =>
-        set((s) =>
-          runtimeStatusDiagnostics.updateRuntimeEnvironmentStatusOverlay(s, environmentId, status)
+  publishRuntimeEnvironmentDiagnostics:
+    runtimeStatusDiagnosticsPublish.createRuntimeEnvironmentDiagnosticsPublisher({
+      getCurrent: (environmentId) => get().runtimeStatusByEnvironmentId.get(environmentId),
+      setState: (updater) =>
+        set((s) => ({ runtimeStatusByEnvironmentId: updater(s.runtimeStatusByEnvironmentId) })),
+      afterPublish: (environmentId, status) =>
+        runtimeStatusRecheck.reconcileRuntimeStatusForSlice(environmentId, status.status, get, () =>
+          getRuntimeEnvironmentConnectionGeneration(environmentId)
         )
-    })
-  },
+    }),
 
   clearRuntimeEnvironmentStatus: (environmentId) => {
     runtimeStatusRecheck.cancelRuntimeStatusRecheck(environmentId)

@@ -4,25 +4,16 @@ import type { RuntimeEnvironmentStatus } from './runtime-status'
 
 const diagnosticsGenerationByEnvironment = new Map<string, number>()
 
-export function updateRuntimeEnvironmentStatusOverlay<
-  T extends {
-    runtimeStatusByEnvironmentId: ReadonlyMap<string, RuntimeEnvironmentStatus>
-  }
->(
-  state: T,
+export function updateRuntimeEnvironmentStatusOverlay(
+  state: Map<string, RuntimeEnvironmentStatus>,
   environmentId: string,
   status: RuntimeEnvironmentStatus
-): T | { runtimeStatusByEnvironmentId: ReadonlyMap<string, RuntimeEnvironmentStatus> } {
-  const current = state.runtimeStatusByEnvironmentId.get(environmentId)
+): Map<string, RuntimeEnvironmentStatus> {
+  const current = state.get(environmentId)
   if (!current || current.status?.runtimeId !== status.status?.runtimeId) {
     return state
   }
-  return {
-    runtimeStatusByEnvironmentId: new Map(state.runtimeStatusByEnvironmentId).set(
-      environmentId,
-      status
-    )
-  }
+  return new Map(state).set(environmentId, status)
 }
 
 export function acceptRuntimeEnvironmentDiagnosticsGeneration(

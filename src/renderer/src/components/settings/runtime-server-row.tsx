@@ -56,7 +56,7 @@ export function RuntimeServerRow({
     state.runtimeStatusByEnvironmentId.get(environment.id)
   )
   const connectionState =
-    details?.status === 'loading'
+    details?.status === 'loading' && !runtimeStatusEntry?.status
       ? 'checking'
       : runtimeStatusEntry
         ? getRuntimeServerConnectionState({
