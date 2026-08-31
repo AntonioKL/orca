@@ -17,6 +17,13 @@ import {
 import { reconcileCatalogRows } from './repo-identity-reconcile'
 import { createRuntimeStatusHydration } from './runtime-status-hydration'
 import { refreshRuntimeEnvironmentStatus } from './runtime-status-refresh'
+import * as runtimeStatusDiagnostics from './runtime-status-diagnostics-generation'
+import {
+  advanceRuntimeEnvironmentConnectionGeneration,
+  clearRuntimeEnvironmentConnectionGenerations,
+  getRuntimeEnvironmentConnectionGeneration,
+  setRuntimeEnvironmentConnectionGenerationForTests
+} from './runtime-status-connection-generation'
 import { replayClientHostedBrowserCloseIntents } from '@/runtime/client-hosted-browser-close-intent-replay'
 import {
   ensureBrowserClientHostForRestartedRuntime,
@@ -101,28 +108,14 @@ export type RuntimeStatusSlice = {
   hydrateRuntimeEnvironmentStatuses: () => Promise<void>
 }
 
-const connectionGenerationByEnvironment = new Map<string, number>()
-
-export function getRuntimeEnvironmentConnectionGeneration(environmentId: string): number {
-  return connectionGenerationByEnvironment.get(environmentId) ?? 0
-}
-
 export const clearRuntimeEnvironmentConnectionGenerationsForTests = (): void => {
-  runtimeStatusRecheck.cancelRuntimeStatusRechecks(connectionGenerationByEnvironment.keys())
-  connectionGenerationByEnvironment.clear()
+  runtimeStatusRecheck.cancelRuntimeStatusRechecks(clearRuntimeEnvironmentConnectionGenerations())
+  runtimeStatusDiagnostics.clearRuntimeEnvironmentDiagnosticsGenerationsForTests()
 }
 
-export const setRuntimeEnvironmentConnectionGenerationForTests = (
-  environmentId: string,
-  generation: number
-): void => {
-  connectionGenerationByEnvironment.set(environmentId, generation)
-}
-
-function advanceRuntimeEnvironmentConnectionGeneration(environmentId: string): number {
-  const next = getRuntimeEnvironmentConnectionGeneration(environmentId) + 1
-  connectionGenerationByEnvironment.set(environmentId, next)
-  return next
+export {
+  getRuntimeEnvironmentConnectionGeneration,
+  setRuntimeEnvironmentConnectionGenerationForTests
 }
 
 export const createRuntimeStatusSlice: StateCreator<AppState, [], [], RuntimeStatusSlice> = (
@@ -317,16 +310,7 @@ export const createRuntimeStatusSlice: StateCreator<AppState, [], [], RuntimeSta
     }
   },
 
-  publishRuntimeEnvironmentDiagnostics:
-    runtimeStatusDiagnosticsPublish.createRuntimeEnvironmentDiagnosticsPublisher({
-      getCurrent: (environmentId) => get().runtimeStatusByEnvironmentId.get(environmentId),
-      setState: (updater) =>
-        set((s) => runtimeStatusDiagnosticsPublish.updateRuntimeStatusStore(s, updater)),
-      afterPublish: (environmentId, status) =>
-        runtimeStatusRecheck.reconcileRuntimeStatusForSlice(environmentId, status.status, get, () =>
-          getRuntimeEnvironmentConnectionGeneration(environmentId)
-        )
-    }),
+  publishRuntimeEnvironmentDiagnostics: runtimeStatusDiagnosticsPublish.createRuntimeEnvironmentDiagnosticsPublisher({ getCurrent: (environmentId) => get().runtimeStatusByEnvironmentId.get(environmentId), setState: (updater) => set((s) => runtimeStatusDiagnosticsPublish.updateRuntimeStatusStore(s, updater)), afterPublish: (environmentId, status) => runtimeStatusRecheck.reconcileRuntimeStatusForSlice(environmentId, status.status, get, () => getRuntimeEnvironmentConnectionGeneration(environmentId)) }),
 
   clearRuntimeEnvironmentStatus: (environmentId) => {
     runtimeStatusRecheck.cancelRuntimeStatusRecheck(environmentId)
