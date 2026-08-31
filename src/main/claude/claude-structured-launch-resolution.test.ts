@@ -120,7 +120,8 @@ describe('claude structured launch resolution', () => {
       store: { getRecord: () => record() } as unknown as AgentSessionRecordStore,
       resolveWorkspacePath: async () => '/repos/workspace-1',
       resolveCommand: () => process.execPath,
-      resolveEnvironment: async () => ({ PATH: `/usr/bin${delimiter}/opt/bin` })
+      resolveEnvironment: async () => ({ PATH: `/usr/bin${delimiter}/opt/bin` }),
+      platform: 'linux'
     })
 
     const launch = await resolver({ identity: IDENTITY })

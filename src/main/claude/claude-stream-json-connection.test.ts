@@ -8,7 +8,7 @@ import {
 } from './claude-stream-json-connection'
 
 type FakeChild = EventEmitter & {
-  pid: number
+  pid: number | undefined
   stdin: PassThrough
   stdout: PassThrough
   stderr: PassThrough
@@ -17,7 +17,7 @@ type FakeChild = EventEmitter & {
 
 function fakeSpawn() {
   const child = new EventEmitter() as FakeChild
-  child.pid = 4321
+  child.pid = process.platform === 'win32' ? undefined : 4321
   child.stdin = new PassThrough()
   child.stdout = new PassThrough()
   child.stderr = new PassThrough()
