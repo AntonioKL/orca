@@ -43,6 +43,28 @@ describe('refreshRuntimeProjectWorktrees', () => {
     })
   })
 
+  it('limits a large catalog to the bounded worktree refresh lane', async () => {
+    let active = 0
+    let peak = 0
+    const fetchWorktrees = vi.fn(
+      async (_repoId: string, _options: { executionHostId: string }): Promise<void> => {
+        active += 1
+        peak = Math.max(peak, active)
+        await new Promise<void>((resolve) => setTimeout(resolve, 5))
+        active -= 1
+      }
+    )
+
+    await refreshRuntimeProjectWorktrees(
+      'env-1',
+      Array.from({ length: 12 }, (_, index) => ({ id: `repo-${index}` })),
+      fetchWorktrees
+    )
+
+    expect(fetchWorktrees).toHaveBeenCalledTimes(12)
+    expect(peak).toBe(5)
+  })
+
   it('retains both repo and final lineage failures', async () => {
     const repoError = new Error('repo refresh failed')
     const lineageError = new Error('lineage refresh failed')
