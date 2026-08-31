@@ -5,10 +5,12 @@ import {
   AGENT_STATUS_STALE_AFTER_MS,
   type AgentStateHistoryEntry,
   type AgentStatusEntry,
+  type AgentStatusOrchestrationContext,
   type AgentStatusState,
   type AgentType,
   type MigrationUnsupportedPtyEntry
 } from '../../../../shared/agent-status-types'
+import { entryWithRuntimeOrchestration } from '../sidebar/worktree-agent-row-orchestration'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../../shared/constants'
 import type { Repo } from '../../../../shared/repo-types'
 import { parsePaneKey } from '../../../../shared/stable-pane-id'
@@ -164,6 +166,7 @@ function appendActivityEventsForEntry(args: {
 
 type BuildActivityEventsArgs = {
   agentStatusByPaneKey: Record<string, AgentStatusEntry>
+  runtimeAgentOrchestrationByPaneKey?: Record<string, AgentStatusOrchestrationContext>
   migrationUnsupportedByPtyId?: Record<string, MigrationUnsupportedPtyEntry>
   retainedAgentsByPaneKey: Record<string, RetainedAgentEntry>
   tabsByWorktree: Record<string, TerminalTab[]>
@@ -198,18 +201,19 @@ export function buildActivityEvents(args: BuildActivityEventsArgs): {
     if (!context) {
       continue
     }
+    const rowEntry = entryWithRuntimeOrchestration(entry, args.runtimeAgentOrchestrationByPaneKey)
     const ackAt = args.acknowledgedAgentsByPaneKey[paneKey] ?? 0
     // Why: live status is separate from history; a fresh working turn updates the thread without counting as an unread done/blocked/waiting event.
-    const liveState = freshActivityLiveAgentState(entry, args.now)
+    const liveState = freshActivityLiveAgentState(rowEntry, args.now)
     if (liveState) {
       liveAgentByPaneKey[paneKey] = {
         state: liveState,
-        timestamp: entry.stateStartedAt,
+        timestamp: rowEntry.stateStartedAt,
         worktree: context.worktree,
         repo: args.repoMap.get(context.worktree.repoId) ?? null,
-        entry,
+        entry: rowEntry,
         tab: context.tab,
-        agentType: entry.agentType ?? 'unknown'
+        agentType: rowEntry.agentType ?? 'unknown'
       }
     }
     appendActivityEventsForEntry({
@@ -217,9 +221,9 @@ export function buildActivityEvents(args: BuildActivityEventsArgs): {
       seenEventIds,
       worktree: context.worktree,
       repo: args.repoMap.get(context.worktree.repoId) ?? null,
-      entry,
+      entry: rowEntry,
       tab: context.tab,
-      agentType: entry.agentType ?? 'unknown',
+      agentType: rowEntry.agentType ?? 'unknown',
       agentAlive: true,
       acknowledgedAt: ackAt
     })
@@ -279,12 +283,16 @@ function appendUnsupportedAndRetainedEvents(
     if (!worktree) {
       continue
     }
+    const rowEntry = entryWithRuntimeOrchestration(
+      retained.entry,
+      args.runtimeAgentOrchestrationByPaneKey
+    )
     appendActivityEventsForEntry({
       events,
       seenEventIds,
       worktree,
       repo: args.repoMap.get(worktree.repoId) ?? null,
-      entry: retained.entry,
+      entry: rowEntry,
       tab: retained.tab,
       agentType: retained.agentType,
       agentAlive: false,

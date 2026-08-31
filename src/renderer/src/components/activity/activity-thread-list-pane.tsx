@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { BellDot, Search, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -33,8 +33,10 @@ export function ActivityThreadListPane({
   readFilter,
   onReadFilterChange,
   compactMode,
+  showChildAgents,
   hasUnreadThreads,
   onCompactModeChange,
+  onShowChildAgentsChange,
   onMarkAllThreadsRead,
   visibleThreadGroups,
   visibleThreadCount,
@@ -45,7 +47,11 @@ export function ActivityThreadListPane({
   canJumpToWorkspace,
   showJumpAction = true,
   isThreadListResizing,
-  onResizeStart
+  onResizeStart,
+  showFilterControls = true,
+  showOptionsMenu = true,
+  collapsedGroupKeys,
+  onToggleGroupCollapse
 }: {
   threadListRef?: React.RefObject<HTMLDivElement | null>
   threadListWidth?: number
@@ -57,8 +63,10 @@ export function ActivityThreadListPane({
   readFilter: ThreadReadFilter
   onReadFilterChange: (readFilter: ThreadReadFilter) => void
   compactMode: boolean
+  showChildAgents?: boolean
   hasUnreadThreads: boolean
   onCompactModeChange: (compactMode: boolean) => void
+  onShowChildAgentsChange?: (showChildAgents: boolean) => void
   onMarkAllThreadsRead: () => void
   visibleThreadGroups: ActivityThreadGroup[]
   visibleThreadCount: number
@@ -70,10 +78,34 @@ export function ActivityThreadListPane({
   showJumpAction?: boolean
   isThreadListResizing?: boolean
   onResizeStart?: React.MouseEventHandler<HTMLDivElement>
+  showFilterControls?: boolean
+  showOptionsMenu?: boolean
+  collapsedGroupKeys?: ReadonlySet<string>
+  onToggleGroupCollapse?: (groupKey: string) => void
 }): React.JSX.Element {
+  const [internalCollapsedGroupKeys, setInternalCollapsedGroupKeys] = useState<Set<string>>(
+    () => new Set()
+  )
+  const isControlled = collapsedGroupKeys !== undefined && onToggleGroupCollapse !== undefined
+  const effectiveCollapsedGroupKeys = isControlled ? collapsedGroupKeys : internalCollapsedGroupKeys
+  const handleToggleGroup = isControlled
+    ? onToggleGroupCollapse
+    : (groupKey: string) => {
+        setInternalCollapsedGroupKeys((prev) => {
+          const next = new Set(prev)
+          if (next.has(groupKey)) {
+            next.delete(groupKey)
+          } else {
+            next.add(groupKey)
+          }
+          return next
+        })
+      }
+
   // Why: the sidebar hosts this list as a fill-width column, so width and the
   // resize handle are page-only; omitting them lets the flex parent size it.
   const resizable = onResizeStart !== undefined
+  const showToolbar = showFilterControls || showOptionsMenu
   return (
     <aside
       ref={threadListRef}
@@ -83,142 +115,177 @@ export function ActivityThreadListPane({
       )}
       style={resizable ? { width: threadListWidth } : undefined}
     >
-      <div className="shrink-0 border-b border-border px-2 py-1.5">
-        <div className="flex items-center gap-1">
-          <div className="relative min-w-0 flex-1">
-            <Search className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              ref={activityFilterInputRef}
-              value={query}
-              onChange={(event) => onQueryChange(event.target.value)}
-              placeholder={translate(
-                'auto.components.activity.ActivityPrototypePage.795cbf26e2',
-                'Filter...'
-              )}
-              className={cn('h-7 w-full pl-6 text-[11px]', query ? 'pr-6' : '')}
-            />
-            {query ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                className="absolute right-0.5 top-1/2 -translate-y-1/2 size-5 p-0 text-muted-foreground hover:text-foreground"
-                aria-label={translate(
-                  'auto.components.sidebar.WorkspaceKanbanSearchField.3b7ea51793',
-                  'Clear search'
-                )}
-                onClick={() => {
-                  onQueryChange('')
-                  activityFilterInputRef.current?.focus()
-                }}
+      {showToolbar ? (
+        <div className="shrink-0 border-b border-border px-2 py-1.5">
+          <div className="flex items-center gap-1">
+            {showFilterControls ? (
+              <div className="relative min-w-0 flex-1">
+                <Search className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  ref={activityFilterInputRef}
+                  value={query}
+                  onChange={(event) => onQueryChange(event.target.value)}
+                  placeholder={translate(
+                    'auto.components.activity.ActivityPrototypePage.795cbf26e2',
+                    'Filter...'
+                  )}
+                  className={cn('h-7 w-full pl-6 text-[11px]', query ? 'pr-6' : '')}
+                />
+                {query ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    className="absolute right-0.5 top-1/2 -translate-y-1/2 size-5 p-0 text-muted-foreground hover:text-foreground"
+                    aria-label={translate(
+                      'auto.components.sidebar.WorkspaceKanbanSearchField.3b7ea51793',
+                      'Clear search'
+                    )}
+                    onClick={() => {
+                      onQueryChange('')
+                      activityFilterInputRef.current?.focus()
+                    }}
+                  >
+                    <X className="size-2.5" />
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+            {resizable ? (
+              <Select
+                value={groupBy}
+                onValueChange={(value) => onGroupByChange(value as ActivityGroupBy)}
               >
-                <X className="size-2.5" />
-              </Button>
+                <SelectTrigger
+                  size="sm"
+                  className="h-7 w-[116px] shrink-0 px-2 text-[11px]"
+                  aria-label={translate(
+                    'auto.components.activity.ActivityPrototypePage.770d458144',
+                    'Group agent activity by'
+                  )}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent align="end">
+                  <SelectItem value="none">
+                    {translate('auto.components.activity.ActivityPrototypePage.none', 'None')}
+                  </SelectItem>
+                  <SelectItem value="status">
+                    {translate(
+                      'auto.components.activity.ActivityPrototypePage.4a3986b200',
+                      'Status'
+                    )}
+                  </SelectItem>
+                  <SelectItem value="project">
+                    {translate(
+                      'auto.components.activity.ActivityPrototypePage.8c3b621ddf',
+                      'Project'
+                    )}
+                  </SelectItem>
+                  <SelectItem value="worktree">
+                    {translate(
+                      'auto.components.activity.ActivityPrototypePage.b29191b3e0',
+                      'Worktree'
+                    )}
+                  </SelectItem>
+                  <SelectItem value="agent">
+                    {translate(
+                      'auto.components.activity.ActivityPrototypePage.f6396e1f85',
+                      'Agent'
+                    )}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            ) : null}
+            {showFilterControls ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Toggle
+                    pressed={readFilter === 'unread'}
+                    onPressedChange={(pressed) => onReadFilterChange(pressed ? 'unread' : 'all')}
+                    size="sm"
+                    className={cn(
+                      'size-7 shrink-0 p-0 rounded-md transition-all',
+                      readFilter === 'unread'
+                        ? '!border border-primary/50 !bg-primary/20 !text-primary shadow-2xs hover:!bg-primary/30'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                    )}
+                    aria-label={translate(
+                      'auto.components.activity.ActivityPrototypePage.d1a88df9a8',
+                      'Show unread threads only'
+                    )}
+                  >
+                    <BellDot className="size-3" />
+                  </Toggle>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  {translate(
+                    'auto.components.activity.ActivityPrototypePage.d1a88df9a8',
+                    'Show unread threads only'
+                  )}
+                </TooltipContent>
+              </Tooltip>
+            ) : null}
+            {/* Why (overflow menu): "Mark all read" is low-frequency and destructive-feeling; behind `…` keeps the toolbar on the frequent Filter + unread toggle. */}
+            {showOptionsMenu ? (
+              <ActivityThreadOptionsMenu
+                groupBy={groupBy}
+                onGroupByChange={onGroupByChange}
+                compactMode={compactMode}
+                showChildAgents={showChildAgents}
+                hasUnreadThreads={hasUnreadThreads}
+                onCompactModeChange={onCompactModeChange}
+                onShowChildAgentsChange={onShowChildAgentsChange}
+                onMarkAllThreadsRead={onMarkAllThreadsRead}
+              />
             ) : null}
           </div>
-          {resizable ? (
-            <Select
-              value={groupBy}
-              onValueChange={(value) => onGroupByChange(value as ActivityGroupBy)}
-            >
-              <SelectTrigger
-                size="sm"
-                className="h-7 w-[116px] shrink-0 px-2 text-[11px]"
-                aria-label={translate(
-                  'auto.components.activity.ActivityPrototypePage.770d458144',
-                  'Group agent activity by'
-                )}
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent align="end">
-                <SelectItem value="status">
-                  {translate('auto.components.activity.ActivityPrototypePage.4a3986b200', 'Status')}
-                </SelectItem>
-                <SelectItem value="project">
-                  {translate(
-                    'auto.components.activity.ActivityPrototypePage.8c3b621ddf',
-                    'Project'
-                  )}
-                </SelectItem>
-                <SelectItem value="worktree">
-                  {translate(
-                    'auto.components.activity.ActivityPrototypePage.b29191b3e0',
-                    'Worktree'
-                  )}
-                </SelectItem>
-                <SelectItem value="agent">
-                  {translate('auto.components.activity.ActivityPrototypePage.f6396e1f85', 'Agent')}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          ) : null}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Toggle
-                pressed={readFilter === 'unread'}
-                onPressedChange={(pressed) => onReadFilterChange(pressed ? 'unread' : 'all')}
-                size="sm"
-                className={cn(
-                  'size-7 shrink-0 p-0 rounded-md transition-all',
-                  readFilter === 'unread'
-                    ? '!border border-primary/50 !bg-primary/20 !text-primary shadow-2xs hover:!bg-primary/30'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
-                )}
-                aria-label={translate(
-                  'auto.components.activity.ActivityPrototypePage.d1a88df9a8',
-                  'Show unread threads only'
-                )}
-              >
-                <BellDot className="size-3" />
-              </Toggle>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">
-              {translate(
-                'auto.components.activity.ActivityPrototypePage.d1a88df9a8',
-                'Show unread threads only'
-              )}
-            </TooltipContent>
-          </Tooltip>
-          {/* Why (overflow menu): "Mark all read" is low-frequency and destructive-feeling; behind `…` keeps the toolbar on the frequent Filter + unread toggle. */}
-          <ActivityThreadOptionsMenu
-            groupBy={groupBy}
-            onGroupByChange={onGroupByChange}
-            compactMode={compactMode}
-            hasUnreadThreads={hasUnreadThreads}
-            onCompactModeChange={onCompactModeChange}
-            onMarkAllThreadsRead={onMarkAllThreadsRead}
-          />
         </div>
-      </div>
-      <div className="min-h-0 flex-1 overflow-auto scrollbar-sleek">
-        {visibleThreadGroups.map((group) => (
-          <section
-            key={group.key}
-            aria-label={translate(
-              'auto.components.activity.ActivityPrototypePage.a2b4437bfb',
-              '{{value0}} activity',
-              { value0: group.label }
-            )}
-          >
-            <ActivityStatusGroupHeader group={group} />
-            {group.threads.map((thread) => (
-              <ActivityThreadRow
-                key={thread.paneKey}
-                thread={thread}
-                selected={thread.paneKey === selectedPaneKey}
-                onSelect={() => onSelectThread(thread)}
-                onJump={() => onJumpToWorkspace(thread)}
-                onMarkUnread={() => onMarkThreadUnread(thread)}
-                canJump={canJumpToWorkspace(thread)}
-                compactMode={compactMode}
-                showJumpAction={showJumpAction}
-              />
-            ))}
-          </section>
-        ))}
+      ) : null}
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-1.5 scrollbar-sleek">
+        {visibleThreadGroups.map((group) => {
+          const isCollapsed = groupBy !== 'none' && effectiveCollapsedGroupKeys.has(group.key)
+          return (
+            <section
+              key={group.key}
+              aria-label={
+                groupBy === 'none'
+                  ? undefined
+                  : translate(
+                      'auto.components.activity.ActivityPrototypePage.a2b4437bfb',
+                      '{{value0}} activity',
+                      { value0: group.label }
+                    )
+              }
+              className="flex flex-col gap-1 pb-1.5"
+            >
+              {groupBy !== 'none' ? (
+                <ActivityStatusGroupHeader
+                  group={group}
+                  collapsed={isCollapsed}
+                  onToggle={() => handleToggleGroup(group.key)}
+                />
+              ) : null}
+              {!isCollapsed
+                ? group.threads.map((thread) => (
+                    <ActivityThreadRow
+                      key={thread.paneKey}
+                      thread={thread}
+                      selected={thread.paneKey === selectedPaneKey}
+                      onSelect={() => onSelectThread(thread)}
+                      onJump={() => onJumpToWorkspace(thread)}
+                      onMarkUnread={() => onMarkThreadUnread(thread)}
+                      canJump={canJumpToWorkspace(thread)}
+                      compactMode={compactMode}
+                      showJumpAction={showJumpAction}
+                    />
+                  ))
+                : null}
+            </section>
+          )
+        })}
         {visibleThreadCount === 0 ? (
-          <div className="px-3 py-8 text-sm text-muted-foreground">
+          <div className="px-3 py-8 text-center text-xs text-muted-foreground">
             {translate(
               'auto.components.activity.ActivityPrototypePage.7cd632006b',
               'No agent activity matches these filters.'

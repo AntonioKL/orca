@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { createActivityThreadActions } from '@/components/activity/activity-thread-actions'
 import { ActivityThreadListPane } from '@/components/activity/activity-thread-list-pane'
+import { ActivityThreadOptionsMenu } from '@/components/activity/activity-thread-controls'
 import { useAgentPaneThreads } from '@/components/activity/use-agent-pane-threads'
 import type { ActivityGroupBy, ThreadReadFilter } from '@/components/activity/activity-thread-types'
 
@@ -10,13 +12,52 @@ import type { ActivityGroupBy, ThreadReadFilter } from '@/components/activity/ac
  * Threads whose pane is gone stay listed but inert — activateThreadTerminal
  * already no-ops without a live tab.
  */
-export default function SidebarAgentsList(): React.JSX.Element {
-  const [readFilter, setReadFilter] = useState<ThreadReadFilter>('all')
-  const [groupBy, setGroupBy] = useState<ActivityGroupBy>('status')
-  const [query, setQuery] = useState('')
+export type SidebarAgentsListProps = {
+  readFilter: ThreadReadFilter
+  setReadFilter: (filter: ThreadReadFilter) => void
+  groupBy: ActivityGroupBy
+  setGroupBy: (groupBy: ActivityGroupBy) => void
+  query: string
+  setQuery: (query: string) => void
+  optionsTarget?: HTMLElement | null
+  collapsedGroupKeys?: ReadonlySet<string>
+  onToggleGroupCollapse?: (groupKey: string) => void
+}
+
+export default function SidebarAgentsList({
+  readFilter,
+  setReadFilter,
+  groupBy,
+  setGroupBy,
+  query,
+  setQuery,
+  optionsTarget,
+  collapsedGroupKeys,
+  onToggleGroupCollapse
+}: SidebarAgentsListProps): React.JSX.Element {
   const [compactMode, setCompactMode] = useState(true)
+  const [showChildAgents, setShowChildAgents] = useState(false)
   const [selectedPaneKey, setSelectedPaneKey] = useState<string | null>(null)
+  const [internalCollapsedGroupKeys, setInternalCollapsedGroupKeys] = useState<Set<string>>(
+    () => new Set()
+  )
   const activityFilterInputRef = useRef<HTMLInputElement | null>(null)
+
+  const isControlled = collapsedGroupKeys !== undefined && onToggleGroupCollapse !== undefined
+  const effectiveCollapsedGroupKeys = isControlled ? collapsedGroupKeys : internalCollapsedGroupKeys
+  const handleToggleGroup = isControlled
+    ? onToggleGroupCollapse
+    : (groupKey: string) => {
+        setInternalCollapsedGroupKeys((prev) => {
+          const next = new Set(prev)
+          if (next.has(groupKey)) {
+            next.delete(groupKey)
+          } else {
+            next.add(groupKey)
+          }
+          return next
+        })
+      }
 
   const {
     storeData,
@@ -25,7 +66,7 @@ export default function SidebarAgentsList(): React.JSX.Element {
     effectiveSelectedPaneKey,
     visibleThreads,
     visibleThreadGroups
-  } = useAgentPaneThreads({ query, readFilter, groupBy, selectedPaneKey })
+  } = useAgentPaneThreads({ query, readFilter, groupBy, selectedPaneKey, showChildAgents })
 
   useEffect(() => {
     if (!selectedPaneKeyIsLive) {
@@ -42,26 +83,49 @@ export default function SidebarAgentsList(): React.JSX.Element {
     })
 
   return (
-    <ActivityThreadListPane
-      activityFilterInputRef={activityFilterInputRef}
-      query={query}
-      onQueryChange={setQuery}
-      groupBy={groupBy}
-      onGroupByChange={setGroupBy}
-      readFilter={readFilter}
-      onReadFilterChange={setReadFilter}
-      compactMode={compactMode}
-      hasUnreadThreads={hasUnreadThreads}
-      onCompactModeChange={setCompactMode}
-      onMarkAllThreadsRead={markAllThreadsRead}
-      visibleThreadGroups={visibleThreadGroups}
-      visibleThreadCount={visibleThreads.length}
-      selectedPaneKey={effectiveSelectedPaneKey}
-      onSelectThread={selectThread}
-      onJumpToWorkspace={jumpToWorkspace}
-      onMarkThreadUnread={markThreadUnread}
-      canJumpToWorkspace={(thread) => storeData.worktreeMap.has(thread.worktree.id)}
-      showJumpAction={false}
-    />
+    <>
+      <ActivityThreadListPane
+        activityFilterInputRef={activityFilterInputRef}
+        query={query}
+        onQueryChange={setQuery}
+        groupBy={groupBy}
+        onGroupByChange={setGroupBy}
+        readFilter={readFilter}
+        onReadFilterChange={setReadFilter}
+        compactMode={compactMode}
+        showChildAgents={showChildAgents}
+        hasUnreadThreads={hasUnreadThreads}
+        onCompactModeChange={setCompactMode}
+        onShowChildAgentsChange={setShowChildAgents}
+        onMarkAllThreadsRead={markAllThreadsRead}
+        visibleThreadGroups={visibleThreadGroups}
+        visibleThreadCount={visibleThreads.length}
+        selectedPaneKey={effectiveSelectedPaneKey}
+        onSelectThread={selectThread}
+        onJumpToWorkspace={jumpToWorkspace}
+        onMarkThreadUnread={markThreadUnread}
+        canJumpToWorkspace={(thread) => storeData.worktreeMap.has(thread.worktree.id)}
+        showJumpAction={false}
+        showFilterControls={false}
+        showOptionsMenu={false}
+        collapsedGroupKeys={effectiveCollapsedGroupKeys}
+        onToggleGroupCollapse={handleToggleGroup}
+      />
+      {optionsTarget
+        ? createPortal(
+            <ActivityThreadOptionsMenu
+              groupBy={groupBy}
+              onGroupByChange={setGroupBy}
+              compactMode={compactMode}
+              showChildAgents={showChildAgents}
+              hasUnreadThreads={hasUnreadThreads}
+              onCompactModeChange={setCompactMode}
+              onShowChildAgentsChange={setShowChildAgents}
+              onMarkAllThreadsRead={markAllThreadsRead}
+            />,
+            optionsTarget
+          )
+        : null}
+    </>
   )
 }

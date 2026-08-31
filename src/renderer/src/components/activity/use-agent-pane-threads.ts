@@ -5,6 +5,7 @@ import { getRepoMapFromState, getWorktreeMapFromState } from '@/store/selectors'
 import type { AppState } from '@/store/types'
 import { buildActivityEvents } from './activity-event-builder'
 import { buildAgentPaneThreads } from './activity-thread-builder'
+import { isChildAgentThread } from './activity-thread-child-agent'
 import {
   activityThreadMatchesSearchQuery,
   buildActivityThreadGroups,
@@ -20,6 +21,7 @@ import type {
 export type AgentPaneThreadsStoreData = Pick<
   AppState,
   | 'agentStatusByPaneKey'
+  | 'runtimeAgentOrchestrationByPaneKey'
   | 'migrationUnsupportedByPtyId'
   | 'retainedAgentsByPaneKey'
   | 'tabsByWorktree'
@@ -39,6 +41,7 @@ export function useAgentPaneThreads(args: {
   readFilter: ThreadReadFilter
   groupBy: ActivityGroupBy
   selectedPaneKey: string | null
+  showChildAgents?: boolean
 }): {
   storeData: AgentPaneThreadsStoreData
   allThreads: AgentPaneThread[]
@@ -47,10 +50,11 @@ export function useAgentPaneThreads(args: {
   visibleThreads: AgentPaneThread[]
   visibleThreadGroups: ActivityThreadGroup[]
 } {
-  const { query, readFilter, groupBy, selectedPaneKey } = args
+  const { query, readFilter, groupBy, selectedPaneKey, showChildAgents = false } = args
   const storeData = useAppStore(
     useShallow((s) => ({
       agentStatusByPaneKey: s.agentStatusByPaneKey,
+      runtimeAgentOrchestrationByPaneKey: s.runtimeAgentOrchestrationByPaneKey,
       migrationUnsupportedByPtyId: s.migrationUnsupportedByPtyId,
       retainedAgentsByPaneKey: s.retainedAgentsByPaneKey,
       tabsByWorktree: s.tabsByWorktree,
@@ -69,6 +73,7 @@ export function useAgentPaneThreads(args: {
     () =>
       buildActivityEvents({
         agentStatusByPaneKey: storeData.agentStatusByPaneKey,
+        runtimeAgentOrchestrationByPaneKey: storeData.runtimeAgentOrchestrationByPaneKey,
         migrationUnsupportedByPtyId: storeData.migrationUnsupportedByPtyId,
         retainedAgentsByPaneKey: storeData.retainedAgentsByPaneKey,
         tabsByWorktree: storeData.tabsByWorktree,
@@ -107,12 +112,20 @@ export function useAgentPaneThreads(args: {
       ) {
         return false
       }
+      // Why: child agents (e.g. dispatched orchestration workers) are hidden by default to keep top-level agent views focused on root tasks.
+      if (
+        !showChildAgents &&
+        isChildAgentThread(thread) &&
+        thread.paneKey !== effectiveSelectedPaneKey
+      ) {
+        return false
+      }
       if (normalizedQuery === null) {
         return false
       }
       return activityThreadMatchesSearchQuery({ thread, searchQuery: normalizedQuery })
     })
-  }, [allThreads, readFilter, query, effectiveSelectedPaneKey])
+  }, [allThreads, readFilter, query, effectiveSelectedPaneKey, showChildAgents])
 
   const visibleThreadGroups = useMemo(
     () => buildActivityThreadGroups(visibleThreads, groupBy),

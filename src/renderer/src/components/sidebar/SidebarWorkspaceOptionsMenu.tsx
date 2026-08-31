@@ -171,6 +171,18 @@ const SidebarWorkspaceOptionsMenu = React.memo(function SidebarWorkspaceOptionsM
         className="w-72 pb-2"
         data-workspace-board-preserve-open={preserveWorkspaceBoardOpen ? '' : undefined}
       >
+        <DropdownMenuLabel className="pb-0 text-sm text-foreground">
+          {translate(
+            'auto.components.sidebar.SidebarWorkspaceOptionsMenu.workspaceOptions',
+            'Workspace options'
+          )}
+        </DropdownMenuLabel>
+        <div className="px-2 pb-2 text-[11px] leading-4 text-muted-foreground">
+          {translate(
+            'auto.components.sidebar.SidebarWorkspaceOptionsMenu.workspaceOptionsDescription',
+            'Configure how workspaces appear in the sidebar.'
+          )}
+        </div>
         {/* Why: host + project filters share one section and the same single-row
             shell as Sort by (label left, value right) so the menu stays flat. */}
         {(showHostScopeControls || repos.length > 1) && (

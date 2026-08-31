@@ -1,8 +1,10 @@
 import { agentStateLabel, type AgentDotState } from '@/components/AgentStateDot'
 import { formatAgentTypeLabel } from '@/lib/agent-status'
 import { getAgentRowPrimaryText } from '@/lib/agent-row-primary-text'
+import { showsAgentToolPreview } from '@/lib/agent-row-tool-preview'
 import {
   getActivityThreadTaskTitle,
+  getActivityThreadWorkspaceTitle,
   resolveActivityThreadStatusPreview
 } from '@/lib/activity-thread-display'
 import { formatUiRelativeTime } from '@/i18n/relative-time-format'
@@ -110,4 +112,72 @@ export function threadAgentStateLabel(thread: AgentPaneThread): string {
     return 'Interrupted'
   }
   return agentStateLabel(state)
+}
+
+export type ActivityThreadStatusKind = 'tool' | 'message' | 'state' | 'none'
+
+export type ActivityThreadRowCopy = {
+  taskTitle: string
+  statusLine: string
+  statusKind: ActivityThreadStatusKind
+  needsAttention: boolean
+  workspaceLabel: string
+}
+
+export function formatCompactRelativeTime(timestamp: number, now = Date.now()): string {
+  const delta = Math.max(0, now - timestamp)
+  if (delta < 60_000) {
+    return 'now'
+  }
+  const minutes = Math.floor(delta / 60_000)
+  if (minutes < 60) {
+    return `${minutes}m`
+  }
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) {
+    return `${hours}h`
+  }
+  return `${Math.floor(hours / 24)}d`
+}
+
+function normalizeScanLabel(value: string): string {
+  return value.trim().toLowerCase().replace(/[-_]+/g, ' ').replace(/\s+/g, ' ')
+}
+
+function previewDuplicatesIdentity(preview: string, title: string, workspace: string): boolean {
+  const normalized = normalizeScanLabel(preview)
+  if (!normalized) {
+    return true
+  }
+  return normalized === normalizeScanLabel(title) || normalized === normalizeScanLabel(workspace)
+}
+
+export function activityThreadRowCopy(thread: AgentPaneThread): ActivityThreadRowCopy {
+  const workspaceLabel = getActivityThreadWorkspaceTitle(thread.worktree)
+  const taskTitle = thread.paneTitle.trim() || workspaceLabel
+  const renderedPreview = activityThreadResponseRenderPreview({
+    responsePreview: thread.responsePreview
+  })
+  const liveState = thread.currentAgentState ?? thread.latestEvent?.state ?? null
+  const state = threadAgentState(thread)
+  const needsAttention = state === 'waiting' || state === 'blocked' || state === 'permission'
+  if (renderedPreview && !previewDuplicatesIdentity(renderedPreview, taskTitle, workspaceLabel)) {
+    return {
+      taskTitle,
+      statusLine: renderedPreview,
+      statusKind: showsAgentToolPreview(liveState) ? 'tool' : 'message',
+      needsAttention,
+      workspaceLabel
+    }
+  }
+  if (state !== 'done' && state !== 'idle') {
+    return {
+      taskTitle,
+      statusLine: threadAgentStateLabel(thread),
+      statusKind: 'state',
+      needsAttention,
+      workspaceLabel
+    }
+  }
+  return { taskTitle, statusLine: '', statusKind: 'none', needsAttention, workspaceLabel }
 }

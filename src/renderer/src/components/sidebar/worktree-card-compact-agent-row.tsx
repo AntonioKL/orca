@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react'
+import React, { useCallback, useRef } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { AgentStateDot, agentStateLabel } from '@/components/AgentStateDot'
 import type { DashboardAgentRow as DashboardAgentRowData } from '@/components/dashboard/useDashboardData'
@@ -38,7 +38,11 @@ function getCompactAgentPrimary(
   return prompt || agentStateLabel(getAgentDotState(agent))
 }
 
-export function getCompactAgentSecondary(agent: DashboardAgentRowData, now: number): string {
+export function getCompactAgentSecondary(
+  agent: DashboardAgentRowData,
+  now: number,
+  lastAssistantMessageOverride?: string
+): string {
   if (agent.entry.interrupted === true) {
     return 'Interrupted by user'
   }
@@ -55,7 +59,8 @@ export function getCompactAgentSecondary(agent: DashboardAgentRowData, now: numb
   if (toolPreview) {
     return toolPreview
   }
-  const lastAssistantMessage = agent.entry.lastAssistantMessage?.trim()
+  const lastAssistantMessage =
+    lastAssistantMessageOverride ?? agent.entry.lastAssistantMessage?.trim()
   if (lastAssistantMessage) {
     return lastAssistantMessage
   }
@@ -128,7 +133,23 @@ export const CompactAgentRow = React.memo(function CompactAgentRow({
   const conversationName = useAgentRowConversationName(agent)
   const primary = getCompactAgentPrimary(agent, conversationName)
   const isLineageChild = agent.lineage?.depth === 1
-  const secondary = getCompactAgentSecondary(agent, now)
+  // Keep a live row's last assistant line stable while status/tool payloads
+  // briefly omit the hook-only field between updates.
+  const lastAssistantMessageRef = useRef<{ turn: number; message: string } | null>(null)
+  const turn = agent.entry.stateStartedAt ?? 0
+  const currentMessage = agent.entry.lastAssistantMessage?.trim() ?? ''
+  if (agent.state === 'working' && currentMessage) {
+    lastAssistantMessageRef.current = { turn, message: currentMessage }
+  } else if (agent.state !== 'working') {
+    lastAssistantMessageRef.current = null
+  } else if (lastAssistantMessageRef.current?.turn !== turn) {
+    lastAssistantMessageRef.current = null
+  }
+  const stableMessage =
+    agent.state === 'working' && !currentMessage
+      ? lastAssistantMessageRef.current?.message
+      : undefined
+  const secondary = getCompactAgentSecondary(agent, now, stableMessage)
   // Why: sidebar truncation must preserve the passive-vs-active distinction.
   const leadingText = dotState === 'monitoring' ? secondary : primary
   const trailingText =

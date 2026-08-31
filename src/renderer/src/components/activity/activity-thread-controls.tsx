@@ -1,5 +1,5 @@
 import React from 'react'
-import { MoreVertical } from 'lucide-react'
+import { ChevronDown, MoreVertical } from 'lucide-react'
 import { AgentStateDot } from '@/components/AgentStateDot'
 import { Button } from '@/components/ui/button'
 import {
@@ -15,28 +15,39 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { translate } from '@/i18n/i18n'
+import { cn } from '@/lib/utils'
 import { RepoBadgeMark } from '@/components/repo/RepoBadgeLabel'
 import type { Repo } from '../../../../shared/repo-types'
 import {
   formatAbsoluteDate,
+  formatCompactRelativeTime,
   formatRelativeTime,
   threadAgentState,
   threadAgentStateLabel
 } from './activity-thread-presentation'
 import type { ActivityGroupBy, ActivityThreadGroup, AgentPaneThread } from './activity-thread-types'
 
-export function EventTime({ timestamp }: { timestamp: number }): React.JSX.Element {
+export function EventTime({
+  timestamp,
+  compact = false
+}: {
+  timestamp: number
+  compact?: boolean
+}): React.JSX.Element {
   const absolute = formatAbsoluteDate(timestamp)
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <button
           type="button"
-          className="rounded px-1 py-0.5 text-xs text-muted-foreground hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+          className={cn(
+            'rounded text-muted-foreground hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none',
+            compact ? 'px-0 py-0 text-[11px] tabular-nums' : 'px-1 py-0.5 text-xs'
+          )}
           aria-label={absolute}
           onClick={(event) => event.stopPropagation()}
         >
-          {formatRelativeTime(timestamp)}
+          {compact ? formatCompactRelativeTime(timestamp) : formatRelativeTime(timestamp)}
         </button>
       </TooltipTrigger>
       <TooltipContent side="right" sideOffset={6}>
@@ -50,15 +61,19 @@ export function ActivityThreadOptionsMenu({
   groupBy,
   onGroupByChange,
   compactMode,
+  showChildAgents = false,
   hasUnreadThreads,
   onCompactModeChange,
+  onShowChildAgentsChange,
   onMarkAllThreadsRead
 }: {
   groupBy?: ActivityGroupBy
   onGroupByChange?: (groupBy: ActivityGroupBy) => void
   compactMode: boolean
+  showChildAgents?: boolean
   hasUnreadThreads: boolean
   onCompactModeChange: (compactMode: boolean) => void
+  onShowChildAgentsChange?: (showChildAgents: boolean) => void
   onMarkAllThreadsRead: () => void
 }): React.JSX.Element {
   return (
@@ -100,6 +115,9 @@ export function ActivityThreadOptionsMenu({
               value={groupBy}
               onValueChange={(value) => onGroupByChange(value as ActivityGroupBy)}
             >
+              <DropdownMenuRadioItem value="none">
+                {translate('auto.components.activity.ActivityPrototypePage.none', 'None')}
+              </DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="status">
                 {translate('auto.components.activity.ActivityPrototypePage.4a3986b200', 'Status')}
               </DropdownMenuRadioItem>
@@ -123,6 +141,18 @@ export function ActivityThreadOptionsMenu({
         >
           {translate('auto.components.activity.ActivityPrototypePage.f70e4bec47', 'Compact mode')}
         </DropdownMenuCheckboxItem>
+        {onShowChildAgentsChange ? (
+          <DropdownMenuCheckboxItem
+            checked={showChildAgents}
+            onCheckedChange={(checked) => onShowChildAgentsChange(checked === true)}
+            onSelect={(event) => event.preventDefault()}
+          >
+            {translate(
+              'auto.components.activity.ActivityPrototypePage.showChildAgents',
+              'Show child agents'
+            )}
+          </DropdownMenuCheckboxItem>
+        ) : null}
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={onMarkAllThreadsRead} disabled={!hasUnreadThreads}>
           {translate('auto.components.activity.ActivityPrototypePage.023ff75afe', 'Mark all read')}
@@ -185,12 +215,42 @@ export function ThreadAgentStateIndicator({
 }
 
 export function ActivityStatusGroupHeader({
-  group
+  group,
+  collapsed = false,
+  onToggle
 }: {
   group: ActivityThreadGroup
+  collapsed?: boolean
+  onToggle?: () => void
 }): React.JSX.Element {
+  const isInteractive = Boolean(onToggle)
   return (
-    <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-background/95 px-3 py-1.5 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+    <div
+      role={isInteractive ? 'button' : undefined}
+      tabIndex={isInteractive ? 0 : undefined}
+      aria-expanded={isInteractive ? !collapsed : undefined}
+      onClick={onToggle}
+      onKeyDown={
+        isInteractive
+          ? (event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault()
+                onToggle?.()
+              }
+            }
+          : undefined
+      }
+      className={cn(
+        'sticky top-0 z-10 flex h-7 items-center gap-1.5 bg-background/95 px-1.5 py-1 backdrop-blur supports-[backdrop-filter]:bg-background/80 select-none',
+        isInteractive && 'cursor-pointer hover:bg-muted/40 transition-colors'
+      )}
+    >
+      <ChevronDown
+        className={cn(
+          'size-3 shrink-0 text-muted-foreground/70 transition-transform duration-150',
+          collapsed && '-rotate-90'
+        )}
+      />
       {group.state ? (
         <span className="inline-flex size-4 shrink-0 items-center justify-center">
           <AgentStateDot state={group.state} size="sm" />
@@ -199,7 +259,7 @@ export function ActivityStatusGroupHeader({
       <span className="min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-[0.05em] text-muted-foreground">
         {group.label}
       </span>
-      <span className="rounded-full border border-border bg-accent px-1.5 py-0.5 text-[10px] font-semibold leading-none text-muted-foreground">
+      <span className="rounded-full border border-border/60 bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground">
         {group.threads.length}
       </span>
     </div>

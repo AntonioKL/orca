@@ -10,7 +10,11 @@ import SidebarToolbar from './SidebarToolbar'
 import WorkspaceKanbanDrawer from './WorkspaceKanbanDrawer'
 import type { VirtualizedScrollAnchor } from '@/hooks/useVirtualizedScrollAnchor'
 import { cn } from '@/lib/utils'
-import { FolderPlus, Loader2 } from 'lucide-react'
+import { BellDot, FolderPlus, Loader2, Search } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import type { ActivityGroupBy, ThreadReadFilter } from '@/components/activity/activity-thread-types'
 import { useSidebarProjectDrop } from './useSidebarProjectDrop'
 import { useWorkspaceBoardPanel } from './useWorkspaceBoardPanel'
 import { resolveLeftSidebarStyleVariables } from '@/lib/left-sidebar-appearance'
@@ -50,6 +54,11 @@ function Sidebar({
   const startupWorktreeRefreshCompleted = useAppStore((s) => s.startupWorktreeRefreshCompleted)
   const settings = useAppStore((s) => s.settings)
   const sidebarBody = useAppStore((s) => s.sidebarBody ?? 'workspaces')
+  const [agentReadFilter, setAgentReadFilter] = React.useState<ThreadReadFilter>('all')
+  const [agentGroupBy, setAgentGroupBy] = React.useState<ActivityGroupBy>('status')
+  const [agentQuery, setAgentQuery] = React.useState('')
+  const [agentSearchOpen, setAgentSearchOpen] = React.useState(false)
+  const [agentOptionsTarget, setAgentOptionsTarget] = React.useState<HTMLDivElement | null>(null)
   const fetchAllWorktrees = useAppStore((s) => s.fetchAllWorktrees)
   const activeModal = useAppStore((s) => s.activeModal)
   const statusBarVisible = useAppStore((s) => s.statusBarVisible)
@@ -117,9 +126,76 @@ function Sidebar({
           <>
             {/* Fixed controls */}
             <SidebarNav />
-            <SidebarHeader onWorkspaceBoardMenuOpenChange={setWorkspaceBoardMenuOpen} />
+            <SidebarHeader
+              onWorkspaceBoardMenuOpenChange={setWorkspaceBoardMenuOpen}
+              agentToolbar={
+                <div className="flex items-center gap-1 shrink-0">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        className="shrink-0 text-muted-foreground"
+                        aria-label="Search agent activity"
+                        aria-pressed={agentSearchOpen}
+                        onClick={() => setAgentSearchOpen((open) => !open)}
+                      >
+                        <Search className="size-3" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">Search agent activity</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-pressed={agentReadFilter === 'unread'}
+                        onClick={() =>
+                          setAgentReadFilter((filter) => (filter === 'unread' ? 'all' : 'unread'))
+                        }
+                        className={cn(
+                          'shrink-0 text-muted-foreground',
+                          agentReadFilter === 'unread' &&
+                            'border border-primary/50 bg-primary/20 text-primary hover:bg-primary/30'
+                        )}
+                        aria-label="Show unread threads only"
+                      >
+                        <BellDot className="size-3" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">Show unread threads only</TooltipContent>
+                  </Tooltip>
+                  <div ref={setAgentOptionsTarget} className="flex items-center" />
+                </div>
+              }
+              agentSearchRow={
+                agentSearchOpen ? (
+                  <div className="shrink-0 border-b border-border px-2 py-1.5">
+                    <Input
+                      autoFocus
+                      value={agentQuery}
+                      onChange={(event) => setAgentQuery(event.target.value)}
+                      placeholder="Filter..."
+                      className="h-7 w-full text-[11px]"
+                      aria-label="Filter agent activity"
+                    />
+                  </div>
+                ) : null
+              }
+            />
             {sidebarBody === 'agents' ? (
-              <SidebarAgentsList />
+              <SidebarAgentsList
+                readFilter={agentReadFilter}
+                setReadFilter={setAgentReadFilter}
+                groupBy={agentGroupBy}
+                setGroupBy={setAgentGroupBy}
+                query={agentQuery}
+                setQuery={setAgentQuery}
+                optionsTarget={agentOptionsTarget}
+              />
             ) : (
               <WorktreeList
                 scrollOffsetRef={worktreeScrollOffsetRef}

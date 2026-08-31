@@ -34,6 +34,7 @@ export default function ActivityPrototypePage(): React.JSX.Element {
   // Why: bounds auto mark-read to one acknowledgement per selected thread turn.
   const autoAcknowledgedTurnRef = useRef<string | null>(null)
   const [compactMode, setCompactMode] = useState(false)
+  const [showChildAgents, setShowChildAgents] = useState(false)
   const [selectedPaneKey, setSelectedPaneKey] = useState<string | null>(null)
   const [displayedPaneKey, setDisplayedPaneKey] = useState<string | null>(null)
   const [activePortalSlotId, setActivePortalSlotId] =
@@ -62,7 +63,7 @@ export default function ActivityPrototypePage(): React.JSX.Element {
     effectiveSelectedPaneKey,
     visibleThreads,
     visibleThreadGroups
-  } = useAgentPaneThreads({ query, readFilter, groupBy, selectedPaneKey })
+  } = useAgentPaneThreads({ query, readFilter, groupBy, selectedPaneKey, showChildAgents })
   if (!selectedPaneKeyIsLive) {
     // Why: rows disappear when agent retention or tab state changes; clear stale selection before detail/portal rendering targets it.
     setSelectedPaneKey(null)
@@ -287,8 +288,10 @@ export default function ActivityPrototypePage(): React.JSX.Element {
           readFilter={readFilter}
           onReadFilterChange={setReadFilter}
           compactMode={compactMode}
+          showChildAgents={showChildAgents}
           hasUnreadThreads={hasUnreadThreads}
           onCompactModeChange={setCompactMode}
+          onShowChildAgentsChange={setShowChildAgents}
           onMarkAllThreadsRead={markAllThreadsRead}
           visibleThreadGroups={visibleThreadGroups}
           visibleThreadCount={visibleThreads.length}

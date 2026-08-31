@@ -31,6 +31,9 @@ export function getActivityThreadGroup(
   thread: AgentPaneThread,
   groupBy: ActivityGroupBy
 ): { key: string; label: string } {
+  if (groupBy === 'none') {
+    return { key: 'all', label: '' }
+  }
   if (groupBy === 'status') {
     const state = threadAgentState(thread)
     if (!thread.currentAgentState && state === 'done' && thread.latestEvent?.entry.interrupted) {
@@ -59,6 +62,9 @@ export function buildActivityThreadGroups(
   threads: AgentPaneThread[],
   groupBy: ActivityGroupBy
 ): ActivityThreadGroup[] {
+  if (groupBy === 'none') {
+    return threads.length > 0 ? [{ key: 'all', label: '', threads }] : []
+  }
   const groups: ActivityThreadGroup[] = []
   const groupIndexByKey = new Map<string, number>()
   for (const thread of threads) {
