@@ -65,6 +65,15 @@ export function bindHandleReattachResult(sessionBag: ConnectPanePtySession): voi
     if (attemptGeneration !== session.transportStreamGeneration) {
       return false
     }
+    const isCurrentReattachTransport = (): boolean =>
+      !session.disposed &&
+      // A remount can register its successor before the old async result settles.
+      // Do not let the stale session mutate or retire the successor's ownership.
+      session.deps.paneTransportsRef.current.get(session.pane.id) === session.transport &&
+      attemptGeneration === session.transportStreamGeneration
+    if (!isCurrentReattachTransport()) {
+      return false
+    }
     // Why: bump only once this attempt owns the stream, or a superseded result
     // would cancel the current attempt's in-flight snapshot prepaint.
     session.authoritativeReattachGeneration += 1
@@ -136,15 +145,7 @@ export function bindHandleReattachResult(sessionBag: ConnectPanePtySession): voi
     }
     const isCurrentReattachPayload = (): boolean => {
       const currentPtyId = session.transport.getPtyId()
-      return (
-        !session.disposed &&
-        // A remount can leave the old transport alive long enough to finish
-        // its reattach. Only the transport currently registered for this pane
-        // may publish pane/store ownership.
-        session.deps.paneTransportsRef.current.get(session.pane.id) === session.transport &&
-        attemptGeneration === session.transportStreamGeneration &&
-        currentPtyId === ptyId
-      )
+      return isCurrentReattachTransport() && currentPtyId === ptyId
     }
     if (!isCurrentReattachPayload()) {
       return false

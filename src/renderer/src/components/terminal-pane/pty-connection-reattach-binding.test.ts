@@ -258,6 +258,51 @@ describe('connectPanePty', () => {
     expect(deps.syncPanePtyLayoutBinding).not.toHaveBeenCalledWith(1, 'terminal-new')
   })
 
+  it.each([
+    ['session-expired', { id: 'terminal-new', isReattach: true, sessionExpired: true }],
+    ['no-pty', undefined]
+  ] as const)(
+    'does not let a stale pane transport clear ownership on %s',
+    async (_label, result) => {
+      const { connectPanePty } = await import('./pty-connection')
+      const reattach = createDeferred<
+        { id: string; isReattach: true; sessionExpired?: boolean } | undefined
+      >()
+      const staleTransport = createMockTransport()
+      let stalePtyId: string | null = 'terminal-old'
+      staleTransport.getPtyId.mockImplementation(() => stalePtyId)
+      staleTransport.connect.mockImplementation(async () => {
+        stalePtyId = 'terminal-new'
+        return reattach.promise
+      })
+      transportFactoryQueue.push(staleTransport)
+      const pane = createPane(1)
+      const paneTransportsRef = { current: new Map<number, MockTransport>() }
+      const deps = createDeps({
+        paneTransportsRef,
+        restoredLeafId: LEAF_1,
+        restoredPtyIdByLeafId: { [LEAF_1]: 'terminal-old' }
+      })
+
+      connectPanePty(pane as never, createManager(1) as never, deps as never)
+      await flushAsyncTicks(4)
+      const currentTransport = createMockTransport('terminal-current')
+      paneTransportsRef.current.set(pane.id, currentTransport)
+      pane.container.dataset.ptyId = 'terminal-current'
+      if (result === undefined) {
+        stalePtyId = null
+      }
+      reattach.resolve(result)
+      await flushAsyncTicks(12)
+
+      expect(pane.container.dataset.ptyId).toBe('terminal-current')
+      expect(deps.clearExitedPanePtyLayoutBinding).not.toHaveBeenCalled()
+      expect(deps.clearTabPtyId).not.toHaveBeenCalled()
+      expect(deps.syncPanePtyLayoutBinding).not.toHaveBeenCalledWith(1, null)
+      expect(deps.syncPanePtyLayoutBinding).not.toHaveBeenCalledWith(1, 'terminal-new')
+    }
+  )
+
   it('adopts a live eager PTY and withholds snapshots after its renderer dies', async () => {
     // Why: a live eager buffer means "attach + replay", not "reattach" — else first mount mis-routes to daemon-reattach and orphans the eager agent PTY.
     const eagerPtyId = 'auto-eager-pty'
