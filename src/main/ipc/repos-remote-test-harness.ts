@@ -1,6 +1,10 @@
 import { EventEmitter } from 'node:events'
 import { vi } from 'vitest'
 
+import type { Mock } from 'vitest'
+import type * as GitRunner from '../git/runner'
+import type * as RepoModule from '../git/repo'
+
 // Why: model what actually crosses the relay. `dispatcher-rpc-routing.ts` forwards the handler's
 // message verbatim but replaces a string errno with -32000, so classification survives only via
 // the canonical message. Setting `code: 'ENOENT'` here would make these tests pass even if the
@@ -10,9 +14,6 @@ export function remoteEnoent(): Error {
     code: -32000
   })
 }
-import type { Mock } from 'vitest'
-import type * as GitRunner from '../git/runner'
-import type * as RepoModule from '../git/repo'
 
 /** Unconstrained spy; annotated explicitly so declaration emit never names @vitest/spy internals. */
 export type ReposIpcSpy = Mock<(...args: never[]) => unknown>

@@ -509,6 +509,24 @@ describe('repos:create', () => {
     expect(rmMock).not.toHaveBeenCalled()
   })
 
+  it('says a file target is not a folder rather than "could not check"', async () => {
+    // Probing `<file>/.git` yields ENOTDIR. That is a definite answer about the target — it is a
+    // file — so it must not be reported as an indeterminate probe.
+    accessMock.mockResolvedValueOnce(undefined) // target exists
+    accessMock.mockRejectedValueOnce(
+      Object.assign(new Error("ENOTDIR: not a directory, access '/tmp/afile/.git'"), {
+        code: 'ENOTDIR'
+      })
+    )
+    gitExecFileAsyncMock.mockReset()
+
+    const result = await callCreate({ parentPath: '/tmp', name: 'afile', kind: 'git' })
+
+    expect(result).toMatchObject({ error: expect.stringContaining('is not a folder') })
+    expect(result).not.toMatchObject({ error: expect.stringContaining('Could not check') })
+    expect(gitExecFileAsyncMock).not.toHaveBeenCalled()
+  })
+
   it('refuses a target that is already a git repository, before running git', async () => {
     // Positive evidence: we saw a .git. Refusing here is what stops `git init` from silently
     // reinitializing someone's repository.

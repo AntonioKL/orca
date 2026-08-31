@@ -1275,9 +1275,10 @@ import {
 import { prepareLocalWorktreeRootForRepo } from '../worktree-root-preparation'
 import {
   alreadyARepositoryError,
-  LEFTOVER_GIT_DIR_RETRY_HINT
+  LEFTOVER_GIT_DIR_RETRY_HINT,
+  repositoryCheckUnavailableError
 } from '../ipc/repos/repository-creation-messages'
-import { isProvenAbsent } from '../ipc/repos/existing-repository-probe'
+import { isProvenAbsent } from '../ipc/repos/proven-absence'
 import { getWorktreeWatcherRemoval } from '../ipc/worktree-watcher-removal'
 import { acquireWatcherRemovalGate } from '../ipc/watcher-removal-gate'
 import {
@@ -23915,12 +23916,18 @@ export class OrcaRuntimeService {
         // Why: refuse an existing repository on positive evidence, before `git init` can silently
         // reinitialize it. A `.git` FILE counts — that is how linked worktrees and submodules point.
         const gitPath = join(targetPath, '.git')
+        let gitProbeFailure: string | null = null
         const gitStat = await stat(gitPath).catch((error: unknown) => {
-          if (isProvenAbsent(error)) {
-            return null
+          // Why: an indeterminate probe must surface as the shared "cannot check" message, not as
+          // the generic prepare-directory error the outer catch would produce.
+          if (!isProvenAbsent(error)) {
+            gitProbeFailure = error instanceof Error ? error.message : String(error)
           }
-          throw error
+          return null
         })
+        if (gitProbeFailure) {
+          return { error: repositoryCheckUnavailableError(trimmedName, gitProbeFailure) }
+        }
         if (gitStat) {
           return { error: alreadyARepositoryError(trimmedName) }
         }

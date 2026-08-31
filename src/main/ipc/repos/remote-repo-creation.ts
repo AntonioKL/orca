@@ -16,7 +16,7 @@ import {
   repositoryCheckUnavailableError
 } from './repository-creation-messages'
 import { resolveRemoteHomePath } from './remote-home-path'
-import { isProvenAbsent } from './existing-repository-probe'
+import { isProvenAbsent } from './proven-absence'
 
 export async function createRemoteRepo(
   store: Store,
