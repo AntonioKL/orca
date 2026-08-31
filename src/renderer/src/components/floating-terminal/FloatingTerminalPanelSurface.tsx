@@ -264,6 +264,7 @@ export function renderFloatingTerminalPanelSurface({
                 <EditorPanel
                   activeFileId={activeEditorFile.id}
                   activeViewStateId={activeEditorUnifiedId}
+                  isVisible={open}
                   markdownAnnotationsEnabled={false}
                 />
               </Suspense>
