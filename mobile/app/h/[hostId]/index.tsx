@@ -6,7 +6,6 @@ import {
   type HybridHostScreenProps
 } from '../../../src/host-screen/use-hybrid-host-screen-controller'
 import { useResponsiveLayout } from '../../../src/layout/responsive-layout'
-import type { HostScreenController } from '../../../src/host-screen/use-host-screen-controller'
 import { hostScreenStyles as styles } from '../../../src/host-screen/host-screen-styles'
 
 export function HostScreen(props: HybridHostScreenProps = {}) {
@@ -18,7 +17,7 @@ export function HostScreen(props: HybridHostScreenProps = {}) {
       </View>
     )
   }
-  return <HostScreenView controller={controller as unknown as HostScreenController} />
+  return <HostScreenView controller={controller} />
 }
 
 export default function HostWorktreeRoute() {

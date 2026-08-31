@@ -234,6 +234,7 @@ export function useHybridHostScreenController(props: HybridHostScreenProps = {})
     routeNotice,
     noticeParam,
     router,
+    sectionsResult,
     setDismissedNotice,
     settings,
     showNewWorktree: resolved.showNewWorktree,

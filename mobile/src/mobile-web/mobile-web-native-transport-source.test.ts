@@ -162,7 +162,9 @@ describe('mobile web native bridge transport', () => {
     expect(androidSource).toContain('webView.visibility = View.VISIBLE')
     expect(androidSource).toContain('override fun onAttachedToWindow()')
     expect(androidSource).toContain('addBridgeMessageListener(sessionId)')
-    expect(androidSource).toContain('!isAllowedDocumentUrl(currentUrl)')
+    expect(androidSource).toContain(
+      '!documentLoaded || currentUrl == null || !isAllowedDocumentUrl(currentUrl)'
+    )
     expect(androidSource).toContain('bridgeMessageListenerAttached = false')
     expect(androidSource).toContain('if (bridgeMessageListenerAttached) return')
   })

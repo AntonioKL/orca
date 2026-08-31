@@ -72,6 +72,7 @@ internal class MobileWebShellView(
   private val onLoadState by EventDispatcher<Map<String, Any>>()
   private val packageStore = MobileWebShellEnvironment.packageStore(context)
   private var activeSessionId: String? = null
+  private var documentLoaded = false
   private var debugProbeScriptHandler: ScriptHandler? = null
   private var bridgeMessageListenerAttached = false
   private var webView: WebView
@@ -129,6 +130,7 @@ internal class MobileWebShellView(
     }
     if (sessionId == activeSessionId) return
     activeSessionId = sessionId
+    documentLoaded = false
     debugProbeScriptHandler?.remove()
     debugProbeScriptHandler = installMobileWebDebugIsolationProbe(
       webView,
@@ -154,6 +156,7 @@ internal class MobileWebShellView(
     debugProbeScriptHandler?.remove()
     debugProbeScriptHandler = null
     activeSessionId = null
+    documentLoaded = false
     webView.stopLoading()
     visibility = View.INVISIBLE
     webView.visibility = View.INVISIBLE
@@ -199,7 +202,7 @@ internal class MobileWebShellView(
     visibility = View.VISIBLE
     webView.visibility = View.VISIBLE
     val currentUrl = webView.url?.let(Uri::parse)
-    if (currentUrl == null || !isAllowedDocumentUrl(currentUrl)) {
+    if (!documentLoaded || currentUrl == null || !isAllowedDocumentUrl(currentUrl)) {
       webView.stopLoading()
       onLoadState(mapOf("state" to "loading"))
       webView.loadUrl("${mobileWebOriginForSession(sessionId)}/#$sessionId")
@@ -268,6 +271,7 @@ internal class MobileWebShellView(
 
     override fun onPageFinished(view: WebView, url: String) {
       if (isAllowedDocumentUrl(Uri.parse(url))) {
+        documentLoaded = true
         view.clearHistory()
         onLoadState(mapOf("state" to "loaded"))
       }
@@ -279,6 +283,7 @@ internal class MobileWebShellView(
       error: android.webkit.WebResourceError
     ) {
       if (request.isForMainFrame && isAllowedDocumentRequestUrl(request.url)) {
+        documentLoaded = false
         onLoadState(mapOf("state" to "failed"))
       }
     }
@@ -291,6 +296,7 @@ internal class MobileWebShellView(
       removeView(view)
       view.destroy()
       webView = createWebView()
+      documentLoaded = false
       attachWebView()
       val sessionId = activeSessionId
       if (sessionId != null) {

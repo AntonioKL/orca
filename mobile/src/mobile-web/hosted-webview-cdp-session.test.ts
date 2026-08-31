@@ -678,7 +678,9 @@ describe('hosted WebView CDP target selection', () => {
     )
     expect(androidShellSource).toContain('override fun onAttachedToWindow()')
     expect(androidShellSource).toContain('addBridgeMessageListener(sessionId)')
-    expect(androidShellSource).toContain('!isAllowedDocumentUrl(currentUrl)')
+    expect(androidShellSource).toContain(
+      '!documentLoaded || currentUrl == null || !isAllowedDocumentUrl(currentUrl)'
+    )
     expect(expoLogBoxPatch).toContain(
       'context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0'
     )

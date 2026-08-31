@@ -157,7 +157,24 @@ export function useHostScreenController({
   }
 }
 
-export type HostScreenController = ReturnType<typeof useHostScreenController> & {
+type HostScreenRouter = {
+  push: (target: string | { pathname: string; params?: Record<string, string> }) => void
+}
+type HostScreenState = ReturnType<typeof useHostScreenController>['state']
+type HostScreenViewState = Omit<
+  HostScreenState,
+  | 'clientRef'
+  | 'fetchRepoMetadataInFlightRef'
+  | 'fetchRepoMetadataPendingRef'
+  | 'worktreeCatalogRef'
+>
+
+export type HostScreenController = Omit<
+  ReturnType<typeof useHostScreenController>,
+  'router' | 'state'
+> & {
+  router: HostScreenRouter
+  state: HostScreenViewState
   creationOperations?: HostWorkspaceCreationOperations | null
   shellOperations?: HostScreenShellOperations
   actions: ReturnType<typeof useHostScreenController>['actions'] & {
