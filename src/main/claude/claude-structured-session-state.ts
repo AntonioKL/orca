@@ -1,4 +1,7 @@
 import type { AgentSessionJournalIdentity } from '../../shared/agent-session-journal-types'
+import { randomUUID } from 'node:crypto'
+import { cancelProcessAcquisition } from '../../shared/child-process/cancel-process-acquisition'
+import type { StructuredAgentSessionLifecycleEvent } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
 import type { StructuredAgentSessionEventSink } from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
 import type {
   ClaudeStreamJsonConnection,
@@ -30,7 +33,7 @@ export type ClaudeStructuredSessionEvent =
       fence: number
     }
   | { type: 'auth-diagnostic'; sessionId: string; diagnostic: ClaudeAuthDiagnostic }
-  | { type: 'ended'; sessionId: string; reason: string }
+  | StructuredAgentSessionLifecycleEvent
 
 export type ClaudeStructuredSessionAdapterDeps = {
   resolveLaunch: (input: {
@@ -41,6 +44,7 @@ export type ClaudeStructuredSessionAdapterDeps = {
   readProcessStartTime?: (pid: number) => Promise<number | null>
   mintLinkId?: () => string
   now?: () => number
+  mintAcquisitionGeneration?: () => string
   requestTimeoutMs?: number
   initTimeoutMs?: number
   dispatchAckTimeoutMs?: number
@@ -76,6 +80,8 @@ export type ClaudeDispatchWaiter = {
 
 export type ClaudeSession = {
   connection: ClaudeStreamJsonConnection
+  ended: boolean
+  requestedClose: boolean
   providerSessionId: string
   leafUuid: string | null
   fence: number
@@ -85,6 +91,7 @@ export type ClaudeSession = {
   reportedOptions: { model?: string; effort?: string }
   translator: ClaudeJournalTranslator | null
   events: StructuredAgentSessionEventSink | undefined
+  acquisitionGeneration: string
 }
 
 export type ClaudeAcquisitionAttempt = {
@@ -93,6 +100,7 @@ export type ClaudeAcquisitionAttempt = {
   buffered: (() => void)[]
   published: boolean
   cancelled: boolean
+  exitProven: boolean
   finished: Promise<void>
   finish: () => void
 }
@@ -110,9 +118,16 @@ export function createClaudeAcquisitionAttempt(
     buffered: [],
     published: false,
     cancelled: false,
+    exitProven: false,
     finished,
     finish
   }
+}
+
+export function mintClaudeAcquisitionGeneration(
+  deps: Pick<ClaudeStructuredSessionAdapterDeps, 'mintAcquisitionGeneration'>
+): string {
+  return deps.mintAcquisitionGeneration?.() ?? randomUUID()
 }
 
 export class ClaudeAcquisitionRegistry {
@@ -170,8 +185,12 @@ export async function cancelClaudeAcquisitionAttempt(
   if (!attempt) {
     return true
   }
-  attempt.cancelled = true
-  const exited = attempt.connection ? await attempt.connection.close() : true
-  await attempt.finished
-  return exited
+  return cancelProcessAcquisition({
+    cancel: () => {
+      attempt.cancelled = true
+    },
+    connection: () => attempt.connection,
+    exitProven: () => attempt.exitProven,
+    finished: attempt.finished
+  })
 }

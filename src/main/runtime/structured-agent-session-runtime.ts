@@ -39,6 +39,7 @@ import { readEchoedAgentSessionSpawnToken } from './agent-session-spawn-token-re
 import { agentSessionPtyWriteGate } from './agent-session-pty-write-gate'
 import { resolveLoginShellEnvironment } from '../startup/login-shell-environment'
 import { recordAgentSessionProviderHandle } from './agent-session-provider-handle-transition'
+import { createStructuredAgentSessionExitRecovery } from './structured-agent-session-exit-recovery'
 
 /** Sibling of the journal tree rather than inside it: one file adjudicates every
  *  session's lease, while a journal is per session. */
@@ -161,7 +162,14 @@ async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<Install
   })
   try {
     let host: StructuredAgentSessionHost | null = null
-    let recoveryChain = Promise.resolve()
+    const recovery = createStructuredAgentSessionExitRecovery(
+      (event) =>
+        host?.handleAdapterEvent(
+          event as Parameters<StructuredAgentSessionHost['handleAdapterEvent']>[0]
+        ),
+      (sessionId, error) =>
+        deps.onError?.({ scope: `structured-agent-session-exit:${sessionId}`, error })
+    )
     const codex = new CodexStructuredSessionAdapter({
       resolveLaunch: createCodexStructuredLaunchResolver({
         store,
@@ -171,21 +179,7 @@ async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<Install
       }),
       ...(deps.openCodexConnection ? { openConnection: deps.openCodexConnection } : {}),
       ...(deps.readProcessStartTime ? { readProcessStartTime: deps.readProcessStartTime } : {}),
-      onEvent: (event) => {
-        if (event.type !== 'ended' || !('cause' in event) || event.cause !== 'unexpected-exit') {
-          return
-        }
-        // Serialize recovery with teardown. Exit callbacks arrive from child
-        // process tasks, so a fire-and-forget callback can otherwise append
-        // after the host has flushed and its journal directory is removed.
-        recoveryChain = recoveryChain.then(async () => {
-          try {
-            await host?.handleAdapterEvent(event)
-          } catch (error) {
-            deps.onError?.({ scope: `structured-agent-session-exit:${event.sessionId}`, error })
-          }
-        })
-      }
+      onEvent: recovery.queue
     })
     const claude = new ClaudeStructuredSessionAdapter({
       resolveLaunch: createClaudeStructuredLaunchResolver({
@@ -196,6 +190,7 @@ async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<Install
       }),
       ...(deps.openClaudeConnection ? { openConnection: deps.openClaudeConnection } : {}),
       readProcessStartTime: deps.readClaudeProcessStartTime ?? deps.readProcessStartTime,
+      onEvent: recovery.queue,
       persistHandle: async (observed) => {
         const now = Date.now()
         await store.transitionHandoff(observed.sessionId, (record) =>
@@ -246,13 +241,7 @@ async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<Install
       waitForRecovery: async () => {
         // A recovery may synchronously trigger another exit while it is
         // reacquiring. Observe until the chain stops growing.
-        for (;;) {
-          const observed = recoveryChain
-          await observed
-          if (observed === recoveryChain) {
-            return
-          }
-        }
+        await recovery.wait()
       }
     }
   } catch (error) {

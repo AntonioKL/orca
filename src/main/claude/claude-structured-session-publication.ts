@@ -17,6 +17,7 @@ export function createClaudeSessionPublication(input: {
   process: AgentSessionAcquisition['process']
   linkId?: string
   observedAt: number
+  acquisitionGeneration: string
   options?: ReadonlyMap<string, string>
 }): { acquisition: AgentSessionAcquisition; session: ClaudeSession } {
   const model = readClaudeFrameString(input.init.message, 'model')
@@ -24,6 +25,7 @@ export function createClaudeSessionPublication(input: {
   return {
     acquisition: {
       process: input.process,
+      acquisitionGeneration: input.acquisitionGeneration,
       link: claudeProviderHandleLink({
         sessionId: input.init.providerSessionId,
         leafUuid: input.leafUuid,
@@ -35,6 +37,8 @@ export function createClaudeSessionPublication(input: {
     },
     session: {
       connection: input.connection,
+      ended: false,
+      requestedClose: false,
       providerSessionId: input.init.providerSessionId,
       leafUuid: input.leafUuid,
       fence: input.fence,
@@ -46,7 +50,8 @@ export function createClaudeSessionPublication(input: {
         ...(effort ? { effort } : {})
       },
       translator: input.translator,
-      events: input.events
+      events: input.events,
+      acquisitionGeneration: input.acquisitionGeneration
     }
   }
 }

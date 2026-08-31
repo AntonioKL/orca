@@ -23,12 +23,36 @@ export class ClaudeStructuredProviderEvents {
   }
 
   handleExit(sessionId: string, attempt: ClaudeAcquisitionAttempt, error: Error): void {
+    if (attempt.connection) {
+      attempt.exitProven = true
+    }
     const session = this.sessions.get(sessionId)
-    if (!session || session.connection !== attempt.connection) {
+    if (!session || session.connection !== attempt.connection || session.ended) {
       return
     }
-    this.sessions.delete(sessionId)
-    this.emit(session, session.events, { type: 'ended', sessionId, reason: error.message })
+    this.finishExit(sessionId, session, error)
+  }
+
+  handleClosed(sessionId: string, error: Error): boolean {
+    const session = this.sessions.get(sessionId)
+    if (!session || session.ended) {
+      return false
+    }
+    this.finishExit(sessionId, session, error)
+    return true
+  }
+
+  private finishExit(sessionId: string, session: ClaudeSession, error: Error): void {
+    const event = {
+      type: 'ended' as const,
+      sessionId,
+      reason: error.message,
+      cause: session.requestedClose ? ('requested-close' as const) : ('unexpected-exit' as const),
+      fence: session.fence,
+      acquisitionGeneration: session.acquisitionGeneration
+    }
+    session.ended = true
+    this.emit(session, session.events, event)
     settleClaudeExitedSession(session)
   }
 

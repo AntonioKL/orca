@@ -226,6 +226,72 @@ describe('ClaudeStructuredSessionAdapter.acquire', () => {
     expect(events[0]).toMatchObject({ type: 'message', message: { subtype: 'init' } })
   })
 
+  it('reports an unexpected child exit with the shared lifecycle identity', async () => {
+    const claude = fakeClaude()
+    const events: ClaudeStructuredSessionEvent[] = []
+    const adapter = await acquired(claude, {}, events)
+
+    claude.connections[0].handlers.onExit?.(new Error('provider exited'))
+
+    expect(events.at(-1)).toMatchObject({
+      type: 'ended',
+      sessionId: 'session-1',
+      reason: 'provider exited',
+      cause: 'unexpected-exit',
+      fence: 7,
+      acquisitionGeneration: expect.any(String)
+    })
+    await expect(
+      Promise.resolve().then(() =>
+        adapter.dispatch({
+          sessionId: 'session-1',
+          clientMessageId: 'client-1',
+          body: USER_MESSAGE,
+          fence: 7
+        })
+      )
+    ).rejects.toThrow('no live claude stream-json')
+  })
+
+  it('drops a late exit from a superseded child after reacquisition', async () => {
+    const claude = fakeClaude()
+    const events: ClaudeStructuredSessionEvent[] = []
+    const adapter = await acquired(claude, {}, events)
+    const first = claude.connections[0]
+
+    await adapter.acquire({ identity: identityFor(), fence: 8, spawnToken: 'spawn-10' })
+    const endedBeforeLateExit = events.filter((event) => event.type === 'ended').length
+    first.handlers.onExit?.(new Error('stale child exited'))
+
+    expect(events.filter((event) => event.type === 'ended')).toHaveLength(endedBeforeLateExit)
+  })
+
+  it('retries teardown when a child cannot yet prove exit', async () => {
+    const claude = fakeClaude()
+    const adapter = await acquired(claude)
+    const connection = claude.connections[0]
+    connection.close = async () => {
+      connection.closeCount += 1
+      return false
+    }
+
+    await expect(adapter.closeAll()).rejects.toThrow(
+      'claude structured session teardown could not prove provider-child exit'
+    )
+    expect(connection.closeCount).toBe(3)
+  })
+
+  it('marks a sink-triggered kill as an unexpected exit', async () => {
+    const claude = fakeClaude()
+    const events: ClaudeStructuredSessionEvent[] = []
+    const adapter = await acquired(claude, {}, events)
+
+    await expect(adapter.forceCloseSession('session-1')).resolves.toBe(true)
+    expect(events.filter((event) => event.type === 'ended')).toMatchObject([
+      { cause: 'unexpected-exit', fence: 7, acquisitionGeneration: expect.any(String) }
+    ])
+  })
+
   it('restores persisted model and effort before publishing a reacquired session', async () => {
     const claude = fakeClaude()
     const adapter = adapterFor(claude, { resumed: true })

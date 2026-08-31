@@ -32,10 +32,12 @@ import { ClaudeStructuredProviderEvents } from './claude-structured-provider-eve
 import {
   cancelClaudeAcquisitionAttempt,
   ClaudeAcquisitionRegistry,
+  mintClaudeAcquisitionGeneration,
   type ClaudeSession,
   type ClaudeStructuredSessionAdapterDeps
 } from './claude-structured-session-state'
 import { closeClaudePublishedSession } from './claude-structured-session-close'
+import { closeProcessRegistry } from '../../shared/child-process/close-process-registry'
 
 export type { ClaudeStructuredLaunch } from './claude-structured-launch-resolution'
 export type {
@@ -162,13 +164,17 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
         process,
         options: restoredClaudeStructuredSessionOptions(input.options),
         ...(this.deps.mintLinkId ? { linkId: this.deps.mintLinkId() } : {}),
-        observedAt: this.deps.now?.() ?? Date.now()
+        observedAt: this.deps.now?.() ?? Date.now(),
+        acquisitionGeneration: mintClaudeAcquisitionGeneration(this.deps)
       })
       const acquired: AgentSessionAcquisition = publication.acquisition
       const liveSession = publication.session
       acquisitionEvents.publish(liveSession)
       await restoreClaudeStructuredSessionOptions(liveSession, this.deps.requestTimeoutMs)
       this.acquisitions.assertCurrent(sessionId, attempt)
+      if (attempt.exitProven || connection.closed) {
+        throw new Error(`claude stream-json for session ${sessionId} exited while being acquired`)
+      }
       this.acquisitions.deleteIfCurrent(sessionId, attempt)
       this.sessions.set(sessionId, liveSession)
       attempt.published = true
@@ -248,23 +254,35 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
     return closeClaudePublishedSession({
       sessions: this.sessions,
       sessionId,
+      providerEvents: this.events,
       ...(this.deps.persistHandle ? { persistHandle: this.deps.persistHandle } : {}),
       ...(this.deps.onEvent ? { onEvent: this.deps.onEvent } : {})
     })
   }
 
+  forceCloseSession = (sessionId: string): Promise<boolean> =>
+    closeClaudePublishedSession({
+      sessions: this.sessions,
+      sessionId,
+      providerEvents: this.events,
+      requestedClose: false,
+      allowFailedSettlement: true
+    })
+
   async closeAll(): Promise<void> {
     this.acquisitions.close()
-    const ids = new Set([...this.sessions.keys(), ...this.acquisitions.sessionIds()])
-    const outcomes = await Promise.all([...ids].map((sessionId) => this.closeSession(sessionId)))
-    if (outcomes.some((exited) => !exited)) {
-      throw new Error('claude structured session teardown could not prove provider-child exit')
-    }
+    await closeProcessRegistry({
+      attempts: 3,
+      hasEntries: () => this.sessions.size > 0 || this.acquisitions.size > 0,
+      entryIds: () => new Set([...this.sessions.keys(), ...this.acquisitions.sessionIds()]),
+      closeEntry: (sessionId) => this.closeSession(sessionId),
+      failureMessage: 'claude structured session teardown could not prove provider-child exit'
+    })
   }
 
   private session(sessionId: string): ClaudeSession {
     const session = this.sessions.get(sessionId)
-    if (!session) {
+    if (!session || session.ended) {
       throw new Error(`no live claude stream-json session for ${sessionId}`)
     }
     return session
