@@ -1,4 +1,4 @@
-import { MAX_PANE_KEY_LEN } from './agent-hook-listener'
+import { MAX_PANE_KEY_LEN } from './agent-hook-listener/listener-limits'
 import { parseLegacyNumericPaneKey, parsePaneKey } from './stable-pane-id'
 
 // Why: remint mints an opaque `$$<base32>:L$$` token (same secret-class wrapping as
