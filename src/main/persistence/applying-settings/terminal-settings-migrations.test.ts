@@ -9,7 +9,7 @@ describe('migrateAgentYoloDefaults', () => {
       agentDefaultEnv: {}
     } as never)
 
-    expect(migrated.agentDefaultArgs.droid).toBe('')
-    expect(migrated.agentDefaultEnv.goose).toEqual({})
+    expect(migrated.agentDefaultArgs?.droid).toBe('')
+    expect(migrated.agentDefaultEnv?.goose).toEqual({})
   })
 })
