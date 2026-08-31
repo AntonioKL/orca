@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentHookServer, _internals } from './server'
-import { PANE } from './server.test-fixtures'
+import { buildBody, PANE } from './server.test-fixtures'
 
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),
@@ -389,7 +389,7 @@ describe('AgentHookServer listener replay', () => {
     }
   })
 
-  it('suppresses same-turn Claude tool progress after the stale suppression window', () => {
+  it('allows same-turn Claude tool progress after the stale suppression window', () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_000)
     try {
@@ -440,12 +440,12 @@ describe('AgentHookServer listener replay', () => {
 
       expect(server.getStatusSnapshot()).toEqual([
         expect.objectContaining({
-          state: 'done',
+          state: 'working',
           prompt: 'repeat task',
           agentType: 'claude',
-          interrupted: true,
-          receivedAt: 1_500,
-          stateStartedAt: 1_500
+          interrupted: undefined,
+          receivedAt: 16_501,
+          stateStartedAt: 16_501
         })
       ])
     } finally {
@@ -565,6 +565,89 @@ describe('AgentHookServer listener replay', () => {
         })
       ])
     } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('allows Codex tool progress after a request_user_input wait and interrupted turn', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    const server = new AgentHookServer()
+    try {
+      await server.start({ env: 'production' })
+      const postCodexHook = async (payload: Record<string, unknown>): Promise<void> => {
+        const env = server.buildPtyEnv()
+        const response = await fetch(`http://127.0.0.1:${env.ORCA_AGENT_HOOK_PORT}/hook/codex`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Orca-Agent-Hook-Token': env.ORCA_AGENT_HOOK_TOKEN
+          },
+          body: JSON.stringify(buildBody(payload))
+        })
+        expect(response.status).toBe(204)
+      }
+
+      await postCodexHook({
+        hook_event_name: 'UserPromptSubmit',
+        prompt: 'same turn'
+      })
+      vi.setSystemTime(1_100)
+      await postCodexHook({
+        hook_event_name: 'PreToolUse',
+        prompt: 'same turn',
+        tool_name: 'request_user_input',
+        tool_input: {
+          questions: [{ id: 'choice', question: 'Which color?', options: [{ label: 'Blue' }] }]
+        }
+      })
+      // Mirrors the captured Codex shape: this auto-allowed tool parks the row while awaiting an answer.
+      expect(server.getStatusSnapshot()[0]).toMatchObject({
+        state: 'waiting',
+        prompt: 'same turn',
+        toolName: 'request_user_input'
+      })
+      vi.setSystemTime(2_000)
+      await postCodexHook({
+        hook_event_name: 'PostToolUse',
+        prompt: 'same turn',
+        tool_name: 'request_user_input',
+        tool_input: {
+          questions: [{ id: 'choice', question: 'Which color?', options: [{ label: 'Blue' }] }]
+        },
+        tool_response: '{"answers":{"choice":{"answers":["Blue"]}}}'
+      })
+      const baseline = server.getStatusSnapshot()[0]
+      expect(baseline).toMatchObject({ state: 'working', prompt: 'same turn' })
+      vi.setSystemTime(2_500)
+      expect(
+        server.inferInterrupt({
+          paneKey: PANE,
+          baselineUpdatedAt: baseline.receivedAt,
+          baselineStateStartedAt: baseline.stateStartedAt,
+          baselinePrompt: 'same turn',
+          baselineAgentType: 'codex',
+          intent: 'plain-escape'
+        })
+      ).toBe(true)
+
+      vi.setSystemTime(18_501)
+      await postCodexHook({
+        hook_event_name: 'PreToolUse',
+        prompt: 'same turn',
+        tool_name: 'exec_command',
+        tool_input: { cmd: 'pnpm test' }
+      })
+      expect(server.getStatusSnapshot()[0]).toMatchObject({
+        state: 'working',
+        prompt: 'same turn',
+        toolName: 'exec_command',
+        interrupted: undefined,
+        receivedAt: 18_501,
+        stateStartedAt: 18_501
+      })
+    } finally {
+      server.stop()
       vi.useRealTimers()
     }
   })

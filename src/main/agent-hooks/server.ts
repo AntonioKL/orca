@@ -1599,7 +1599,8 @@ export class AgentHookServer {
       previous.payload.agentType === effectivePayload.payload.agentType &&
       previous.payload.prompt === effectivePayload.payload.prompt &&
       (effectivePayload.isReplay === true ||
-        isToolProgressWorkingAfterInterrupt(effectivePayload) ||
+        (isToolProgressWorkingAfterInterrupt(effectivePayload) &&
+          Date.now() - previous.receivedAt <= INTERRUPTED_DONE_LATE_WORKING_SUPPRESSION_MS) ||
         (effectivePayload.hasExplicitPrompt !== true &&
           Date.now() - previous.receivedAt <= INTERRUPTED_DONE_LATE_WORKING_SUPPRESSION_MS))
     ) {
