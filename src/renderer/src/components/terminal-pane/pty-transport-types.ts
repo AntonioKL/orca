@@ -15,6 +15,7 @@ import type { TuiAgent } from '../../../../shared/tui-agent'
 import type { ExecutionHostId } from '../../../../shared/execution-host'
 import type { PtyDataMeta } from './pty-dispatcher'
 import type { RemoteRuntimeSnapshotOutcome } from '../../runtime/remote-runtime-terminal-multiplexer'
+import type { PtyPreconnectInputEntry } from './pty-preconnect-input-buffer'
 
 export type PtyBufferSnapshot = {
   data: string
@@ -229,6 +230,10 @@ export type IpcPtyTransportOptions = {
   cwd?: string
   /** Retain bounded user input while a visible split waits to start its PTY. */
   bufferInputUntilConnect?: boolean
+  /** Seed a fresh transport with input handed off from a remounted deferred split. */
+  preconnectInput?: readonly PtyPreconnectInputEntry[]
+  /** Records newly retained input against a remount-safe deferred split handoff. */
+  onPreconnectInput?: (input: PtyPreconnectInputEntry) => void
   cwdFallback?: 'worktree'
   env?: Record<string, string>
   envToDelete?: string[]

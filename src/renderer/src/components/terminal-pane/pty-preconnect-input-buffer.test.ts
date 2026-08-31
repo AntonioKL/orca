@@ -136,4 +136,42 @@ describe('createPtyPreconnectInputBuffer', () => {
     await expect(entryAccepted).resolves.toBe(false)
     await entryFlush
   })
+
+  it('applies entry and code-unit caps to seeded input', async () => {
+    const entryBuffer = createPtyPreconnectInputBuffer(
+      Array.from({ length: PTY_PRECONNECT_INPUT_MAX_ENTRIES + 1 }, () => ({
+        data: '',
+        kind: 'ordinary' as const
+      }))
+    )
+    let entryWrites = 0
+
+    expect(entryBuffer.enqueue('', 'ordinary')).toBe(false)
+    await entryBuffer.flush({
+      isCurrent: () => true,
+      sendInput: () => {
+        entryWrites += 1
+        return true
+      },
+      sendInputImmediate: () => true
+    })
+    expect(entryWrites).toBe(PTY_PRECONNECT_INPUT_MAX_ENTRIES)
+
+    const codeUnitBuffer = createPtyPreconnectInputBuffer([
+      { data: 'x'.repeat(PTY_PRECONNECT_INPUT_MAX_CODE_UNITS), kind: 'ordinary' },
+      { data: 'overflow', kind: 'ordinary' }
+    ])
+    const codeUnitWrites: number[] = []
+
+    expect(codeUnitBuffer.enqueue('new', 'ordinary')).toBe(false)
+    await codeUnitBuffer.flush({
+      isCurrent: () => true,
+      sendInput: (data) => {
+        codeUnitWrites.push(data.length)
+        return true
+      },
+      sendInputImmediate: () => true
+    })
+    expect(codeUnitWrites).toEqual([PTY_PRECONNECT_INPUT_MAX_CODE_UNITS])
+  })
 })

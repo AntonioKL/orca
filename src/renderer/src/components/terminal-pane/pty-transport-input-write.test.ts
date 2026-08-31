@@ -8,7 +8,8 @@ import { PTY_INPUT_WRITE_QUEUE_MAX_PENDING_REPLIES } from './pty-input-write-que
 import { createDeferred, flushAsyncTicks } from './pty-connection-test-async'
 import {
   PTY_PRECONNECT_INPUT_MAX_CODE_UNITS,
-  PTY_PRECONNECT_INPUT_MAX_ENTRIES
+  PTY_PRECONNECT_INPUT_MAX_ENTRIES,
+  type PtyPreconnectInputEntry
 } from './pty-preconnect-input-buffer'
 import {
   installIpcPtyWindow,
@@ -114,6 +115,107 @@ describe('createIpcPtyTransport', () => {
     await flushAsyncTicks()
 
     expect(delivered).toEqual(['first-', 'second-', 'third'])
+  })
+
+  it('flushes remount-handoff input before newly typed input without recapturing the seed', async () => {
+    const spawn = createDeferred<{ id: string }>()
+    vi.mocked(window.api.pty.spawn).mockReturnValue(spawn.promise as never)
+    const delivered: string[] = []
+    vi.mocked(window.api.pty.write).mockImplementation((_id, data) => {
+      delivered.push(data)
+    })
+    vi.mocked(window.api.pty.writeAccepted).mockImplementation(async (_id, data) => {
+      delivered.push(data)
+      return true
+    })
+    const onPreconnectInput = vi.fn()
+    const { createIpcPtyTransport } = await import('./pty-transport')
+    const transport = createIpcPtyTransport({
+      bufferInputUntilConnect: true,
+      preconnectInput: [
+        { data: 'before-remount-', kind: 'ordinary' },
+        { data: '\x1b[0n', kind: 'immediate' },
+        { data: '\x03', kind: 'accepted' }
+      ],
+      onPreconnectInput
+    })
+
+    const connecting = transport.connect({ url: '', callbacks: {} })
+    expect(transport.sendInput('new-ordinary-')).toBe(true)
+    expect(transport.sendInputImmediate('new-immediate-')).toBe(true)
+    const accepted = transport.sendInputAccepted?.('new-accepted')
+    expect(onPreconnectInput.mock.calls).toEqual([
+      [{ data: 'new-ordinary-', kind: 'ordinary' }],
+      [{ data: 'new-immediate-', kind: 'immediate' }],
+      [{ data: 'new-accepted', kind: 'accepted' }]
+    ])
+
+    spawn.resolve({ id: 'pty-1' })
+    await connecting
+    await expect(accepted).resolves.toBe(true)
+    await flushAsyncTicks()
+
+    expect(delivered).toEqual([
+      'before-remount-',
+      '\x1b[0n',
+      '\x03',
+      'new-ordinary-',
+      'new-immediate-',
+      'new-accepted'
+    ])
+  })
+
+  it('settles a predecessor accepted write while its successor replays the captured bytes', async () => {
+    const spawn = createDeferred<{ id: string }>()
+    vi.mocked(window.api.pty.spawn).mockReturnValue(spawn.promise as never)
+    const delivered: string[] = []
+    vi.mocked(window.api.pty.writeAccepted).mockImplementation(async (_id, data) => {
+      delivered.push(data)
+      return true
+    })
+    const captured: PtyPreconnectInputEntry[] = []
+    const { createIpcPtyTransport } = await import('./pty-transport')
+    const predecessor = createIpcPtyTransport({
+      bufferInputUntilConnect: true,
+      onPreconnectInput: (input) => captured.push(input)
+    })
+
+    const predecessorAccepted = predecessor.sendInputAccepted?.('\x03')
+    expect(captured).toEqual([{ data: '\x03', kind: 'accepted' }])
+
+    const successor = createIpcPtyTransport({ preconnectInput: captured })
+    const connecting = successor.connect({ url: '', callbacks: {} })
+    await predecessor.destroy?.()
+
+    await expect(predecessorAccepted).resolves.toBe(false)
+    spawn.resolve({ id: 'pty-1' })
+    await connecting
+    await flushAsyncTicks()
+
+    expect(delivered).toEqual(['\x03'])
+  })
+
+  it('contains capture callback failures without rejecting retained input', async () => {
+    const onPreconnectInput = vi.fn(() => {
+      throw new Error('capture failed')
+    })
+    const { createIpcPtyTransport } = await import('./pty-transport')
+    const transport = createIpcPtyTransport({
+      bufferInputUntilConnect: true,
+      onPreconnectInput
+    })
+
+    expect(transport.sendInput('ordinary')).toBe(true)
+    expect(transport.sendInputImmediate('immediate')).toBe(true)
+    const accepted = transport.sendInputAccepted?.('accepted')
+    expect(onPreconnectInput).toHaveBeenCalledTimes(3)
+
+    await transport.connect({ url: '', callbacks: {} })
+
+    await expect(accepted).resolves.toBe(true)
+    expect(window.api.pty.write).toHaveBeenCalledWith('pty-1', 'ordinary')
+    expect(window.api.pty.write).toHaveBeenCalledWith('pty-1', 'immediate')
+    expect(window.api.pty.writeAccepted).toHaveBeenCalledWith('pty-1', 'accepted')
   })
 
   it('keeps live acknowledged input ahead of later ordinary and immediate writes', async () => {

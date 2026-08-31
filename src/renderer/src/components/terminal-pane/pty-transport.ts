@@ -49,9 +49,10 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
   let lastExitGeneration: number | null = null
   let suppressAttentionEvents = false
   let storedCallbacks: Parameters<PtyTransport['connect']>[0]['callbacks'] = {}
-  const preconnectInputBuffer = opts.bufferInputUntilConnect
-    ? createPtyPreconnectInputBuffer()
-    : null
+  const preconnectInputBuffer =
+    opts.bufferInputUntilConnect || opts.preconnectInput?.length
+      ? createPtyPreconnectInputBuffer(opts.preconnectInput)
+      : null
 
   const inputWriteQueue = createPtyInputWriteQueue({
     isWritable: (id) => !destroyed && connected && ptyId === id,
@@ -207,14 +208,14 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
 
     sendInput(data) {
       if (!destroyed && preconnectInputBuffer?.isBuffering()) {
-        return preconnectInputBuffer.enqueue(data, 'ordinary')
+        return preconnectInputBuffer.enqueue(data, 'ordinary', opts.onPreconnectInput)
       }
       return !destroyed && connected && ptyId ? inputWriteQueue.enqueue(ptyId, data) : false
     },
 
     sendInputImmediate(data) {
       if (!destroyed && preconnectInputBuffer?.isBuffering()) {
-        return preconnectInputBuffer.enqueue(data, 'immediate')
+        return preconnectInputBuffer.enqueue(data, 'immediate', opts.onPreconnectInput)
       }
       return !destroyed && connected && ptyId
         ? inputWriteQueue.enqueueQueryReply(ptyId, data)
@@ -226,7 +227,7 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
       : {
           async sendInputAccepted(data: string): Promise<boolean> {
             if (!destroyed && preconnectInputBuffer?.isBuffering()) {
-              return preconnectInputBuffer.enqueueAccepted(data)
+              return preconnectInputBuffer.enqueueAccepted(data, opts.onPreconnectInput)
             }
             if (destroyed || !connected || !ptyId) {
               return false
