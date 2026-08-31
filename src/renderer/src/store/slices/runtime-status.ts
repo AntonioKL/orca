@@ -28,6 +28,7 @@ import * as runtimeStatusRecheck from './runtime-status-recheck'
  * sidebar can still distinguish "unknown/unreachable" from "never checked". */
 export type RuntimeEnvironmentStatus = {
   status: RuntimeStatus | null
+  remoteControl?: RuntimeStatus['remoteControl'] | null
   appVersion?: string | null
   /** When the stored status was last *observed to change*; an unchanged re-probe
    * is dropped rather than rewritten, so this is not a probe-freshness clock. */
@@ -294,11 +295,7 @@ export const createRuntimeStatusSlice: StateCreator<AppState, [], [], RuntimeSta
       environmentExists: () =>
         get().runtimeEnvironments.some((environment) => environment.id === environmentId),
       getConnectionGeneration: () => getRuntimeEnvironmentConnectionGeneration(environmentId),
-      publish: (nextStatus) =>
-        get().setRuntimeEnvironmentStatus(environmentId, {
-          status: nextStatus,
-          checkedAt: Date.now()
-        })
+      publish: (entry) => get().setRuntimeEnvironmentStatus(environmentId, entry)
     })
     if (runtimeRestarted) {
       void ensureBrowserClientHostForRestartedRuntime(get(), environmentId)
@@ -348,15 +345,15 @@ export const createRuntimeStatusSlice: StateCreator<AppState, [], [], RuntimeSta
   },
 
   refreshRuntimeEnvironmentStatus: (environmentId, timeoutMs = 10_000, options) =>
-    refreshRuntimeEnvironmentStatus(environmentId, timeoutMs, (status) => {
-      if (status === null && options?.publishUnreachable === false) {
+    refreshRuntimeEnvironmentStatus(environmentId, timeoutMs, (entry) => {
+      if (entry.status === null && options?.publishUnreachable === false) {
         // Unverifiable, not exited: leave the cached verdict for the caller's retry to settle.
         return
       }
       // Why: setRuntimeEnvironmentStatus drops any stale compat failure on a non-null
       // (reachable) status, so a recovered host's reuse-flagged refetches re-probe.
-      get().setRuntimeEnvironmentStatus(environmentId, { status, checkedAt: Date.now() })
-      if (status) {
+      get().setRuntimeEnvironmentStatus(environmentId, entry)
+      if (entry.status) {
         // Why here: hydration can ask before the environment is reachable, and a restored
         // client-hosted page only comes back once this desktop attaches as its host.
         void ensureBrowserClientHostsForRestoredPages(get())

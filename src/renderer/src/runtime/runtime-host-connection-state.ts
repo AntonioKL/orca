@@ -21,30 +21,42 @@ export type RuntimeHostConnectionState =
 export function runtimeHostConnectionState({
   hasStatusEntry,
   status,
-  transportStatus = 'disconnected'
+  transportStatus = 'disconnected',
+  remoteControl = null
 }: {
   hasStatusEntry: boolean
   status: RuntimeStatus | null | undefined
   /** Transport evidence is independent from the runtime status RPC result. */
   transportStatus?: RuntimeHostTransportState
+  remoteControl?: RuntimeStatus['remoteControl'] | null
 }): RuntimeHostConnectionState {
   if (!hasStatusEntry) {
     return 'checking'
   }
-  const remoteControl = status?.remoteControl
-  if (remoteControl?.state === 'reconnecting') {
+  const transportState =
+    remoteControl?.state === 'ready'
+      ? 'connected'
+      : remoteControl?.state === 'awaiting_ready' ||
+          remoteControl?.state === 'awaiting_authenticated' ||
+          remoteControl?.state === 'reconnecting'
+        ? 'checking'
+        : remoteControl?.state === 'closed'
+          ? 'disconnected'
+          : transportStatus
+  const statusRemoteControl = status?.remoteControl ?? remoteControl
+  if (statusRemoteControl?.state === 'reconnecting') {
     return 'reconnecting'
   }
   if (!status) {
-    return transportStatus === 'connected' ? 'runtime-unavailable' : 'disconnected'
+    return transportState === 'connected' ? 'runtime-unavailable' : 'disconnected'
   }
   // Why no lastError requirement: a clean close (server restart, host sleep, network
   // blip) leaves lastError null, and demanding an error string painted those hosts green.
-  if (remoteControl?.state === 'closed') {
+  if (statusRemoteControl?.state === 'closed') {
     return 'disconnected'
   }
   // Why: the socket is up but ready/auth has not completed, so nothing can run there yet.
-  if (remoteControl && remoteControl.state !== 'ready') {
+  if (statusRemoteControl && statusRemoteControl.state !== 'ready') {
     return 'checking'
   }
   // Why: reachable but graph-less — the transport is fine, so this is not a network

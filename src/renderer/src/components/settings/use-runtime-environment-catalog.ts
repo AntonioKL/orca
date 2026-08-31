@@ -10,6 +10,7 @@ import { toast } from 'sonner'
 import { useMountedRef } from '@/hooks/useMountedRef'
 import { translate } from '@/i18n/i18n'
 import { unwrapRuntimeRpcResult } from '@/runtime/runtime-rpc-client'
+import { extractRuntimeTransportDiagnostics } from '@/runtime/runtime-status-probe-diagnostics'
 import { useAppStore } from '@/store'
 import {
   isUserManagedRuntimeEnvironment,
@@ -109,8 +110,10 @@ export function useRuntimeEnvironmentCatalog(): RuntimeEnvironmentCatalog {
               } catch (error) {
                 // Why: record the failed probe (null status) so the sidebar can
                 // distinguish unreachable from never-checked.
+                const remoteControl = extractRuntimeTransportDiagnostics(error)
                 useAppStore.getState().setRuntimeEnvironmentStatus(environment.id, {
                   status: null,
+                  ...(remoteControl ? { remoteControl } : {}),
                   checkedAt: Date.now()
                 })
                 if (!mountedRef.current) {

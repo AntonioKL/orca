@@ -105,6 +105,23 @@ describe('runtime host connection state', () => {
     }
   }
 
+  it('uses outer transport diagnostics when status is unavailable', () => {
+    expect(
+      runtimeHostConnectionState({
+        hasStatusEntry: true,
+        status: null,
+        remoteControl: remoteControl({ state: 'ready' })
+      })
+    ).toBe('runtime-unavailable')
+    expect(
+      runtimeHostConnectionState({
+        hasStatusEntry: true,
+        status: null,
+        remoteControl: remoteControl({ state: 'reconnecting' })
+      })
+    ).toBe('reconnecting')
+  })
+
   it('reports a cleanly closed control channel as disconnected even with no error', () => {
     // Why: a clean close (server restart, host sleep, network blip) leaves lastError null.
     // Requiring an error string to call it disconnected paints a dead host green.
