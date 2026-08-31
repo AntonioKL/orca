@@ -139,7 +139,6 @@ export function useCombinedDiffViewRestore({
         const loadOnDemand = shouldLoadCombinedDiffOnDemand({
           added: 'added' in entry ? entry.added : undefined,
           removed: 'removed' in entry ? entry.removed : undefined,
-          area: 'area' in entry ? entry.area : undefined,
           path: entry.path
         })
         return {
