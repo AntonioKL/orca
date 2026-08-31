@@ -14,6 +14,14 @@ describe('PtySourceSentBoundaries', () => {
     expect(boundaries.has(12)).toBe(false)
   })
 
+  it('rejects a boundary that does not ascend past the highest insert', () => {
+    const boundaries = new PtySourceSentBoundaries(4)
+    boundaries.add(9)
+    expect(() => boundaries.add(9)).toThrow('does not ascend')
+    expect(() => boundaries.add(5)).toThrow('does not ascend')
+    expect([...boundaries]).toEqual([4, 9])
+  })
+
   it('drops every boundary below the credit and keeps the credit itself', () => {
     const boundaries = new PtySourceSentBoundaries(0)
     for (const boundary of [1, 2, 3, 4, 5]) {

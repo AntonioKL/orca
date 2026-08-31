@@ -9,8 +9,12 @@ export class PtySourceSentBoundaries {
     this.entries = [checkpointBoundary]
   }
 
-  // Callers must add strictly ascending boundaries; has and dropBelow both rely on that order.
+  // has binary-searches and dropBelow scans forward, so a non-ascending insert corrupts both.
   add(boundary: number): void {
+    const highest = this.entries.at(-1)
+    if (highest !== undefined && boundary <= highest) {
+      throw new Error('PTY source sent boundary does not ascend')
+    }
     this.entries.push(boundary)
   }
 

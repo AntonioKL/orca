@@ -288,6 +288,8 @@ describe('RelayPtySourceCreditLedger', () => {
       // Every boundary below the credit must be gone, so the oldest live one is the credit itself.
       const [oldestLive] = record.sentBoundaries
       expect(oldestLive).toBe(creditedEndSu)
+      // Boundary cleanup and span reclamation must stay in step on every ACK, not just the last.
+      expect(ledger.retentionSnapshot().spans).toBe(spanCount - creditedEndSu)
     }
 
     expect([...record.sentBoundaries]).toEqual([spanCount])
