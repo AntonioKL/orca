@@ -136,7 +136,7 @@ import {
   normalizeCompatibleAgentTitleForOwner,
   resolveCompatibleAgentTypeForOwner
 } from '../../shared/agent-title-owner'
-import { resolvePaneAgentOwner } from '../../shared/pane-agent-owner'
+import { resolvePaneAgentOwnerRecord } from '../../shared/pane-agent-owner'
 import {
   createAgentStatusOscProcessor,
   type ProcessedAgentStatusChunk
@@ -1099,6 +1099,7 @@ import {
   listProjects as listJiraProjects,
   listTransitions as listJiraTransitions,
   searchIssues as searchJiraIssues,
+  searchUsers as searchJiraUsers,
   updateIssue as updateJiraIssue
 } from '../jira/issues'
 import {
@@ -8617,7 +8618,8 @@ export class OrcaRuntimeService {
     const ownerAgent = pty.launchAgent ?? pty.foregroundAgent
     const title = normalizeCompatibleAgentTitleForOwner(
       args.title ?? getLatestPtyTitle(pty) ?? 'Terminal',
-      ownerAgent
+      ownerAgent,
+      { ownerIsLaunch: Boolean(pty.launchAgent) }
     )
     const existingTab = existing?.tabs.find(
       (candidate): candidate is RuntimeMobileSessionTerminalTab =>
@@ -36448,31 +36450,32 @@ export class OrcaRuntimeService {
       const launchAgent = tab.launchAgent ?? null
       const launchOwnerAgent = launchAgent ?? liveLeafPty?.launchAgent ?? pty?.launchAgent ?? null
       // Why: a retained OMP hook stays stable while wrapper foreground reads can report Pi.
+      const ownerRecord = resolvePaneAgentOwnerRecord({
+        launchAgent: launchOwnerAgent,
+        hookAgent:
+          tab.agentStatus?.agentType ??
+          hookAgentStatus?.agentType ??
+          retainedAgentStatus?.payload.agentType ??
+          null
+      })
       const ownerAgent =
-        resolvePaneAgentOwner({
-          launchAgent: launchOwnerAgent,
-          hookAgent:
-            tab.agentStatus?.agentType ??
-            hookAgentStatus?.agentType ??
-            retainedAgentStatus?.payload.agentType ??
-            null
-        }) ??
-        liveLeafPty?.foregroundAgent ??
-        pty?.foregroundAgent ??
-        null
+        ownerRecord?.agent ?? liveLeafPty?.foregroundAgent ?? pty?.foregroundAgent ?? null
+      const ownerOptions = { ownerIsLaunch: ownerRecord?.ownerIsLaunch === true }
       const title = normalizeCompatibleAgentTitleForOwner(
         trackerOnlyTitle ?? leafTitle ?? ptyTitle ?? syncedTab?.title ?? tab.title,
-        ownerAgent
+        ownerAgent,
+        ownerOptions
       )
       const liveTitleEvidence = leafTitle ?? ptyTitle
       // Why: renderer status can precede hook session identity, leaving native chat with no transcript address.
       const rendererStatusAgent =
-        resolveCompatibleAgentTypeForOwner(tab.agentStatus?.agentType, ownerAgent) ??
+        resolveCompatibleAgentTypeForOwner(tab.agentStatus?.agentType, ownerAgent, ownerOptions) ??
         ownerAgent ??
         undefined
       const hookSessionAgent = resolveCompatibleAgentTypeForOwner(
         hookAgentStatus?.providerSessionAgentType,
-        ownerAgent
+        ownerAgent,
+        ownerOptions
       )
       const hookSessionMatchesRenderer =
         !rendererStatusAgent || !hookSessionAgent || rendererStatusAgent === hookSessionAgent
@@ -36491,7 +36494,8 @@ export class OrcaRuntimeService {
                 ...tab.agentStatus,
                 ...(hookProviderSession ? { providerSession: hookProviderSession } : {})
               },
-              ownerAgent
+              ownerAgent,
+              ownerOptions
             )
           : null,
         statusPty,
@@ -36796,16 +36800,16 @@ export class OrcaRuntimeService {
       }
     }
     // Why: a retained OMP hook stays stable while wrapper foreground reads can report Pi.
-    const ownerAgent =
-      resolvePaneAgentOwner({
-        launchAgent: tab.launchAgent ?? pty?.launchAgent ?? null,
-        hookAgent: retained?.payload.agentType ?? hookRow.agentType
-      }) ??
-      pty?.foregroundAgent ??
-      null
+    const ownerRecord = resolvePaneAgentOwnerRecord({
+      launchAgent: tab.launchAgent ?? pty?.launchAgent ?? null,
+      hookAgent: retained?.payload.agentType ?? hookRow.agentType
+    })
+    const ownerAgent = ownerRecord?.agent ?? pty?.foregroundAgent ?? null
+    const ownerOptions = { ownerIsLaunch: ownerRecord?.ownerIsLaunch === true }
     const terminalTitle = normalizeCompatibleAgentTitleForOwner(
       trackerOnlyTitle ?? (pty ? getLatestPtyTitle(pty) : null) ?? tab.title,
-      ownerAgent
+      ownerAgent,
+      ownerOptions
     )
     // Why: OSC 9999 hook payload carries real state/prompt/agent; without preferring it, hook-only transitions never surfaced (#7970).
     const liveRow = retained ?? this.resolveHookLiveAgentRow(hookRow.live, pty, nonAgentTitle)
@@ -36825,7 +36829,8 @@ export class OrcaRuntimeService {
           terminalTitle,
           ...providerSession
         },
-        ownerAgent
+        ownerAgent,
+        ownerOptions
       )
       // A live question outranks only the shell title that currently obscures it.
       const renewedStatus = this.renewMobileAgentStatusFromPtyTitle(liveStatus, pty, {
@@ -40923,6 +40928,11 @@ export class OrcaRuntimeService {
     siteId?: string
   ): ReturnType<typeof listJiraAssignableUsers> {
     return listJiraAssignableUsers(key, query, siteId)
+  }
+
+  /** Searches all users on the site, for reporter and user-picker create fields. */
+  jiraSearchUsers(query?: string, siteId?: string): ReturnType<typeof searchJiraUsers> {
+    return searchJiraUsers(query, siteId)
   }
 
   jiraListTransitions(key: string, siteId?: string): ReturnType<typeof listJiraTransitions> {
