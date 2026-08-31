@@ -2,6 +2,7 @@ import type { StateCreator } from 'zustand'
 import type { AppState } from '../types'
 import type { PublicKnownRuntimeEnvironment } from '../../../../shared/runtime-environments'
 import type { RuntimeStatus } from '../../../../shared/runtime-types'
+import type { RemoteRuntimeSharedConnectionDiagnostics } from '../../../../shared/remote-runtime-shared-control-types'
 import { runtimeEnvironmentStatusesEqual } from './runtime-environment-status-equality'
 import {
   clearRecentRuntimeCompatibilityFailure,
@@ -16,6 +17,8 @@ import {
 import { reconcileCatalogRows } from './repo-identity-reconcile'
 import { createRuntimeStatusHydration } from './runtime-status-hydration'
 import { refreshRuntimeEnvironmentStatus } from './runtime-status-refresh'
+import { clearRuntimeEnvironmentDiagnosticsGenerationsForTests } from './runtime-status-diagnostics-generation'
+import { mergePushedRuntimeEnvironmentDiagnostics } from './runtime-status-diagnostics-generation'
 import { replayClientHostedBrowserCloseIntents } from '@/runtime/client-hosted-browser-close-intent-replay'
 import {
   ensureBrowserClientHostForRestartedRuntime,
@@ -75,6 +78,12 @@ export type RuntimeStatusSlice = {
     status: RuntimeEnvironmentStatus,
     options?: { suppressDisconnectToast?: boolean }
   ) => void
+  /** Merges main-owned transport diagnostics into a complete runtime status snapshot. */
+  publishRuntimeEnvironmentDiagnostics: (args: {
+    environmentId: string
+    transportGeneration: number
+    diagnostics: RemoteRuntimeSharedConnectionDiagnostics
+  }) => void
   /** Drops a removed environment so stale hosts don't linger in the registry. */
   clearRuntimeEnvironmentStatus: (environmentId: string) => void
   /** Drops every entry whose id is not in the saved-environments set. */
@@ -101,6 +110,7 @@ export function getRuntimeEnvironmentConnectionGeneration(environmentId: string)
 export const clearRuntimeEnvironmentConnectionGenerationsForTests = (): void => {
   runtimeStatusRecheck.cancelRuntimeStatusRechecks(connectionGenerationByEnvironment.keys())
   connectionGenerationByEnvironment.clear()
+  clearRuntimeEnvironmentDiagnosticsGenerationsForTests()
 }
 
 export const setRuntimeEnvironmentConnectionGenerationForTests = (
@@ -310,6 +320,19 @@ export const createRuntimeStatusSlice: StateCreator<AppState, [], [], RuntimeSta
     } else if (previous && previous.status !== null && status.status === null) {
       showRuntimeDisconnectedToast(environmentId, get)
     }
+  },
+
+  publishRuntimeEnvironmentDiagnostics: ({ environmentId, transportGeneration, diagnostics }) => {
+    // Diagnostics are an overlay, not a replacement status response. Without a complete
+    // status snapshot there is no runtime identity or graph evidence to which they belong.
+    mergePushedRuntimeEnvironmentDiagnostics({
+      environmentId,
+      transportGeneration,
+      diagnostics,
+      current: get().runtimeStatusByEnvironmentId.get(environmentId),
+      publish: (status) =>
+        get().setRuntimeEnvironmentStatus(environmentId, status, { suppressDisconnectToast: true })
+    })
   },
 
   clearRuntimeEnvironmentStatus: (environmentId) => {
