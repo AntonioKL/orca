@@ -76,6 +76,7 @@ export abstract class DaemonPtyEventSubscriptions extends DaemonPtySessionInvent
     this.sessionsNeedingFullCheckpoint.clear()
     this.sessionsNeedingLiveCheckpoint.clear()
     this.sessionsNeedingContinuityCheckpoint.clear()
+    this.carriedUnloggedBatchesBySessionId.clear()
     this.overlayDeadlineWarnedSessionIds.clear()
     this.periodicDeadlineWarnedSessionIds.clear()
     this.nonFinalAdmissionDeniedSessionIds.clear()

@@ -31,6 +31,7 @@ import { HistoryReader } from './history-reader'
 import type { PtyBackgroundStreamEvent } from '../providers/types'
 import type { PtyIncarnationId } from '../../shared/pty-incarnation'
 import type { TerminalExitCause } from '../../shared/terminal-exit-cause'
+import type { TerminalHistoryLogBatch } from './terminal-history-log'
 
 export type PendingDaemonSpawnOperation = {
   exitsBySessionId: Map<string, { incarnationId?: string }[]>
@@ -131,6 +132,9 @@ export abstract class DaemonPtyRuntimeState {
   protected sessionsNeedingFullCheckpoint = new Set<string>()
   protected sessionsNeedingLiveCheckpoint = new Set<string>()
   protected sessionsNeedingContinuityCheckpoint = new Set<string>()
+  // Drained-from-daemon batches the capped log refused; they exist nowhere else, so the next
+  // full checkpoint folds them into its durable rebuild (or re-anchors live). See #17114.
+  protected carriedUnloggedBatchesBySessionId = new Map<string, TerminalHistoryLogBatch[]>()
   protected checkpointTimer: ReturnType<typeof setTimeout> | null = null
   protected checkpointInFlight: Promise<void> | null = null
   protected checkpointQueue = new CheckpointSessionQueue()

@@ -99,6 +99,7 @@ export class DaemonPtyAdapter extends DaemonPtyDaemonRecovery implements IPtyPro
         this.sessionsNeedingFullCheckpoint.delete(event.sessionId)
         this.sessionsNeedingLiveCheckpoint.delete(event.sessionId)
         this.sessionsNeedingContinuityCheckpoint.delete(event.sessionId)
+        this.carriedUnloggedBatchesBySessionId.delete(event.sessionId)
         this.overlayDeadlineWarnedSessionIds.delete(event.sessionId)
         this.periodicDeadlineWarnedSessionIds.delete(event.sessionId)
         this.nonFinalAdmissionDeniedSessionIds.delete(event.sessionId)
