@@ -3,19 +3,11 @@ import { Terminal } from '@xterm/headless'
 import { SerializeAddon } from '@xterm/addon-serialize'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { activateOrcaTerminalUnicodeProvider } from '../../shared/terminal-unicode-provider'
-import {
-  readSavedCursorRegister,
-  serializeWithAbsoluteCursor
-} from '../../shared/terminal-serialize-absolute-cursor'
 import { advancePartialEscapeTail } from '../../shared/terminal-partial-escape-tail'
 import type { TerminalViewAttributes } from '../../shared/terminal-view-attributes'
-import { collectHeadlessOscLinkRanges } from './headless-osc-link-ranges'
 import { readTerminalModes } from './headless-emulator-modes'
-import { buildRehydrateSequences } from './terminal-mode-rehydrate-sequences'
 import { TerminalMouseModeMirror } from './terminal-mouse-mode-mirror'
 import { TerminalOscCwdTitleScanner } from './terminal-osc-cwd-title-scanner'
-import { buildFrameRestoreSnapshotFields } from './terminal-frame-restore-sequences'
-import { splitTerminalSnapshotAnsi } from './terminal-snapshot-ansi-buffers'
 import {
   installTerminalViewAttributeResponder,
   type TerminalViewAttributeResponder
@@ -25,6 +17,7 @@ import type { TerminalSnapshot, TerminalModes } from './types'
 import type { TerminalOscLinkRange } from '../../shared/terminal-osc-link-ranges'
 import type { TerminalCursorContext } from '../../shared/terminal-composer-draft'
 import { readTerminalCursorLineContext } from '../../shared/terminal-cursor-line-context'
+import { HeadlessSnapshotCache } from './headless-snapshot-cache'
 
 export type HeadlessEmulatorOptions = {
   cols: number
@@ -72,6 +65,7 @@ export class HeadlessEmulator {
   private queryReplyForwardingDepth = 0
   // Why: a mid-escape chunk tail lives in xterm's parser, not the buffer, so serialize() drops it and it renders literal after restore (Bug E).
   private partialEscapeTail = ''
+  private readonly snapshotCache = new HeadlessSnapshotCache()
 
   constructor(opts: HeadlessEmulatorOptions) {
     this.pathFlavor = opts.pathFlavor
@@ -143,6 +137,7 @@ export class HeadlessEmulator {
     if (this.disposed) {
       return
     }
+    this.markMutated()
     this.terminal.options.cursorStyle = attributes.cursorStyle
     this.terminal.options.cursorBlink = attributes.cursorBlink
     this.viewAttributeResponder?.clearColorOverrides()
@@ -154,6 +149,11 @@ export class HeadlessEmulator {
       return Promise.resolve()
     }
     return this.write(`\x1b[=${flags};1u`)
+  }
+
+  /** Invalidates the snapshot cache; called by every state mutation. */
+  private markMutated(): void {
+    this.snapshotCache.markMutated()
   }
 
   private emitQueryReply(reply: string): void {
@@ -172,6 +172,7 @@ export class HeadlessEmulator {
       return Promise.resolve()
     }
 
+    this.markMutated()
     const forwardQueryReplies = opts.forwardQueryReplies === true
     if (this.tryWriteSync(data, { forwardQueryReplies })) {
       return Promise.resolve()
@@ -191,6 +192,10 @@ export class HeadlessEmulator {
         // Why: commit the mouse-mode mirror only after xterm has parsed the same bytes (snapshots combine both).
         this.mouseModes.scan(data)
         this.partialEscapeTail = advancePartialEscapeTail(this.partialEscapeTail, data)
+        // Why again: xterm parses asynchronously, so the buffer only reaches
+        // its post-write state here; the entry bump alone would let a
+        // snapshot taken mid-parse cache a half-applied buffer.
+        this.markMutated()
         resolve()
       })
     })
@@ -209,6 +214,7 @@ export class HeadlessEmulator {
     if (typeof writeSync !== 'function') {
       return false
     }
+    this.markMutated()
     this.oscText.scan(data)
     const forwardQueryReplies = opts.forwardQueryReplies === true
     if (forwardQueryReplies) {
@@ -231,6 +237,7 @@ export class HeadlessEmulator {
     if (this.disposed) {
       return
     }
+    this.markMutated()
     this.restoredOscLinks = []
     this.terminal.resize(cols, rows)
   }
@@ -241,37 +248,18 @@ export class HeadlessEmulator {
   }
 
   getSnapshot(opts: { scrollbackRows?: number } = {}): TerminalSnapshot {
-    const modes = this.getModes()
-    // Why absolute: relative cursor restore is off by a column after a wrap-pending final row; saved-cursor rides along for DECRC.
-    const serializedAnsi = serializeWithAbsoluteCursor(
-      this.serializer,
-      this.terminal,
-      { scrollback: opts.scrollbackRows },
-      readSavedCursorRegister(this.terminal)
+    return this.snapshotCache.build(
+      {
+        serializer: this.serializer,
+        terminal: this.terminal,
+        restoredOscLinks: this.restoredOscLinks,
+        readModes: () => this.getModes(),
+        cwd: this.oscText.cwd,
+        lastTitle: this.oscText.lastTitle,
+        partialEscapeTail: this.partialEscapeTail
+      },
+      opts.scrollbackRows
     )
-    const { snapshotAnsi, scrollbackAnsi } = splitTerminalSnapshotAnsi(serializedAnsi, modes)
-    const snapshot: TerminalSnapshot = {
-      snapshotAnsi,
-      scrollbackAnsi,
-      oscLinks: collectHeadlessOscLinkRanges(
-        this.terminal,
-        opts.scrollbackRows,
-        this.restoredOscLinks
-      ),
-      rehydrateSequences: buildRehydrateSequences(modes),
-      ...buildFrameRestoreSnapshotFields(this.serializer, this.terminal, modes),
-      cwd: this.oscText.cwd,
-      modes,
-      cols: this.terminal.cols,
-      rows: this.terminal.rows,
-      scrollbackLines: this.terminal.buffer.normal.length - this.terminal.rows,
-      lastTitle: this.oscText.lastTitle ?? undefined,
-      // Why written LAST by the restorer: the next live chunk must complete this dangling sequence, not render it literally (Bug E / #7329).
-      ...(this.partialEscapeTail.length > 0
-        ? { pendingEscapeTailAnsi: this.partialEscapeTail }
-        : {})
-    }
-    return snapshot
   }
 
   get isAlternateScreen(): boolean {
@@ -333,18 +321,22 @@ export class HeadlessEmulator {
   }
 
   setCwd(cwd: string | null): void {
+    this.markMutated()
     this.oscText.cwd = cwd
   }
 
   setLastTitle(title: string): void {
+    this.markMutated()
     this.oscText.lastTitle = title
   }
 
   setRestoredOscLinks(links: TerminalOscLinkRange[] | undefined): void {
+    this.markMutated()
     this.restoredOscLinks = links?.slice() ?? []
   }
 
   clearScrollback(): void {
+    this.markMutated()
     this.restoredOscLinks = []
     this.terminal.clear()
   }
