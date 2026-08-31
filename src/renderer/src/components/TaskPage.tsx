@@ -440,6 +440,8 @@ export default function TaskPage(): React.JSX.Element {
     page: number
     scrollTop: number
   } | null>(null)
+  // Invalidates queued restore callbacks when opening a detail page reuses the same scroll offset.
+  const githubScrollRestoreGenerationRef = useRef(0)
 
   useLayoutEffect(() => {
     if (
@@ -537,7 +539,13 @@ export default function TaskPage(): React.JSX.Element {
   useLayoutEffect(() => {
     const scrollTop = pendingGithubScrollRestoreRef.current
     const scrollElement = githubListScrollRef.current
-    if (scrollTop === null || !scrollElement || !pages[currentPage]) {
+    const restoreGeneration = githubScrollRestoreGenerationRef.current
+    if (
+      pageData.openGitHubWorkItem ||
+      scrollTop === null ||
+      !scrollElement ||
+      !pages[currentPage]
+    ) {
       return
     }
     let frame: number | null = null
@@ -556,7 +564,11 @@ export default function TaskPage(): React.JSX.Element {
     }
     const restore = (): void => {
       const committedScrollElement = githubListScrollRef.current
-      if (!committedScrollElement || pendingGithubScrollRestoreRef.current !== scrollTop) {
+      if (
+        !committedScrollElement ||
+        pendingGithubScrollRestoreRef.current !== scrollTop ||
+        githubScrollRestoreGenerationRef.current !== restoreGeneration
+      ) {
         return
       }
       committedScrollElement.scrollTop = scrollTop
@@ -598,6 +610,7 @@ export default function TaskPage(): React.JSX.Element {
     dialogWorkItem,
     githubResumeContextKey,
     pages,
+    pageData.openGitHubWorkItem,
     githubListScrollTopRef,
     pendingGithubScrollRestoreRef,
     githubListScrollRef.current?.scrollTop,
@@ -669,6 +682,7 @@ export default function TaskPage(): React.JSX.Element {
     (item: GitHubWorkItem, initialTab: ItemDialogTab = 'conversation') => {
       const scrollTop = githubListScrollRef.current?.scrollTop ?? githubListScrollTopRef.current
       githubListScrollTopRef.current = scrollTop
+      githubScrollRestoreGenerationRef.current += 1
       pendingGithubScrollRestoreRef.current = scrollTop
       taskListPositionRef.current = {
         contextKey: githubResumeContextKey,
