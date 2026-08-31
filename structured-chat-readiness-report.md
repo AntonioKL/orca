@@ -1,7 +1,7 @@
 # Structured native-chat readiness report
 
 Integration branch: `brennanb2025/structured-chat-integration-latest`
-Exact integration head: `1b4530ef75b8352b769a525a68586f30efabab43`
+Implementation/test head (code): `1b4530ef75b8352b769a525a68586f30efabab43`
 
 ## Architecture decision
 
@@ -11,7 +11,7 @@ paired-host lifecycle RPCs. SSH remains a distinct terminal-bridge boundary; rem
 start providers locally. When the structured toggle/default Chat UI is off, or support is missing,
 the recoverable legacy terminal path is retained.
 
-## Verification at this exact head
+## Verification at this implementation head
 
 - Structured suites: **171 files, 2,655 passed, 3 skipped**.
 - Additional launch/settings/runtime suites: **5 files, 1,265 passed, 1 skipped**.
