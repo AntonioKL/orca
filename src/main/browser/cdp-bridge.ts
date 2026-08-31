@@ -63,6 +63,8 @@ export class CdpBridge {
         this.activeWebContentsId = webContentsId
       },
       getRegisteredTabs: () => this.getRegisteredTabs(),
+      getTabIdForWebContentsId: (webContentsId) =>
+        this.browserManager.getTabIdForWebContentsId(webContentsId),
       tabState: this.tabState,
       commandQueues: this.commandQueues,
       processingQueues: this.processingQueues
