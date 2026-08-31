@@ -5,19 +5,25 @@
  * the process is shared. This keeps pane cancellation and ordering independent
  * while avoiding one live timer per pane.
  */
+// Timer APIs and performance.now() both use elapsed monotonic time; wall-clock
+// corrections must not stretch a pending poll's deadline.
+const monotonicNow = (): number => performance.now()
+
 export class CodexSubagentPollScheduler<T> {
   private readonly entries = new Map<string, { value: T; dueAt: number }>()
   private timer: ReturnType<typeof setTimeout> | undefined
   private timerDueAt: number | undefined
+  private timerGeneration = 0
 
   constructor(
     private readonly delayMs: number,
-    private readonly onDue: (key: string, value: T) => void
+    private readonly onDue: (key: string, value: T) => void,
+    private readonly now: () => number = monotonicNow
   ) {}
 
   schedule(key: string, value: T): void {
     this.entries.delete(key)
-    this.entries.set(key, { value, dueAt: Date.now() + this.delayMs })
+    this.entries.set(key, { value, dueAt: this.now() + this.delayMs })
     this.arm()
   }
 
@@ -30,11 +36,7 @@ export class CodexSubagentPollScheduler<T> {
 
   clearAll(): void {
     this.entries.clear()
-    if (this.timer !== undefined) {
-      clearTimeout(this.timer)
-      this.timer = undefined
-      this.timerDueAt = undefined
-    }
+    this.cancelTimer()
   }
 
   /** Number of pane wakeups currently waiting for a deadline. */
@@ -44,11 +46,7 @@ export class CodexSubagentPollScheduler<T> {
 
   private arm(): void {
     if (this.entries.size === 0) {
-      if (this.timer !== undefined) {
-        clearTimeout(this.timer)
-        this.timer = undefined
-        this.timerDueAt = undefined
-      }
+      this.cancelTimer()
       return
     }
 
@@ -60,16 +58,22 @@ export class CodexSubagentPollScheduler<T> {
       return
     }
     if (this.timer !== undefined) {
-      clearTimeout(this.timer)
+      this.cancelTimer()
     }
+    const generation = ++this.timerGeneration
     this.timerDueAt = nextDueAt
     const timer = setTimeout(
       () => {
+        // A cleared/replaced timer can still have its callback queued. It must
+        // not consume the active timer's metadata or flush its entries.
+        if (this.timerGeneration !== generation || this.timer !== timer) {
+          return
+        }
         this.timer = undefined
         this.timerDueAt = undefined
         this.flush()
       },
-      Math.max(0, nextDueAt - Date.now())
+      Math.max(0, nextDueAt - this.now())
     )
     this.timer = timer
     if (typeof timer.unref === 'function') {
@@ -77,8 +81,18 @@ export class CodexSubagentPollScheduler<T> {
     }
   }
 
+  private cancelTimer(): void {
+    const timer = this.timer
+    this.timer = undefined
+    this.timerDueAt = undefined
+    this.timerGeneration += 1
+    if (timer !== undefined) {
+      clearTimeout(timer)
+    }
+  }
+
   private flush(): void {
-    const now = Date.now()
+    const now = this.now()
     try {
       // Find one entry at a time so a callback can clear a sibling that has
       // not fired yet, matching independent timer cancellation semantics.
