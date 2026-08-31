@@ -97,7 +97,7 @@ describe('artifact publish flow', () => {
     await expect(publishArtifactFromSurface(createRequest)).resolves.toBeNull()
     expect(mocks.callRuntimeRpc).not.toHaveBeenCalled()
     expect(mocks.toastError).toHaveBeenCalledWith('Could not share artifact', {
-      description: 'Artifacts shared from Orca must be 5 MB or smaller.'
+      description: 'This artifact is too large to share.'
     })
   })
 
