@@ -21,6 +21,7 @@ import {
   type SplitLatencySample,
   type TerminalSplitLatencyReportConfig
 } from './terminal-split-activation-latency-report'
+import { writeTerminalSplitLatencyArtifact } from './terminal-split-activation-latency-artifact'
 
 const BENCH_ENABLED = process.env.ORCA_TERMINAL_SPLIT_LATENCY_BENCH === '1'
 const BENCH_LABEL = process.env.ORCA_TERMINAL_SPLIT_LATENCY_LABEL?.trim() || 'local'
@@ -558,14 +559,7 @@ async function attachReport(testInfo: TestInfo, report: Record<string, unknown>)
     contentType: 'application/json'
   })
   if (BENCH_OUTPUT_PATH) {
-    try {
-      writeFileSync(BENCH_OUTPUT_PATH, body, 'utf8')
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      console.error(
-        `[terminal-split-activation-latency] unable to write ${BENCH_OUTPUT_PATH}: ${message}`
-      )
-    }
+    writeTerminalSplitLatencyArtifact(BENCH_OUTPUT_PATH, body)
   }
   console.log(`[terminal-split-activation-latency] ${JSON.stringify(report)}`)
 }
