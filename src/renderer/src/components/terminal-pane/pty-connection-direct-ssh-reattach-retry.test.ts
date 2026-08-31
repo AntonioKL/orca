@@ -707,7 +707,7 @@ describe('connectPanePty', () => {
     expect(updateTabPtyId).toHaveBeenCalledWith(
       'tab-1',
       siblingPtyId,
-      undefined,
+      firstPtyId,
       pendingRetry.attemptId
     )
   })

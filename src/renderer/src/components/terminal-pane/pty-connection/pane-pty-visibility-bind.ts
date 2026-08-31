@@ -12,6 +12,7 @@ import {
   isAgentTaskCompleteTrackingEnabled
 } from './agent-task-complete-settings'
 import { isRemoteRuntimePtyId } from './paired-parked-terminal-restore'
+import { shouldIgnoreStalePanePtyLayoutBinding } from './pane-pty-layout-binding'
 
 import type { ConnectPanePtySession } from './connect-pane-pty-session'
 
@@ -35,6 +36,30 @@ export function installPanePtyVisibilityBind(session: ConnectPanePtySession): vo
       sampleVisibleForegroundAgent?: boolean
     } = {}
   ): void => {
+    // A disposed pane can still receive an already-queued transport callback; it no longer owns state.
+    if (session.disposed) {
+      return
+    }
+    if (!options.replacePtyId) {
+      const state = useAppStore.getState()
+      const leafId = session.pane.leafId
+      const existingPtyId = leafId
+        ? state.terminalLayoutsByTabId[session.deps.tabId]?.ptyIdsByLeafId?.[leafId]
+        : undefined
+      const tabPtyId = Object.values(state.tabsByWorktree)
+        .flat()
+        .find((tab) => tab.id === session.deps.tabId)?.ptyId
+      if (
+        shouldIgnoreStalePanePtyLayoutBinding({
+          existingPtyId,
+          nextPtyId: ptyId,
+          tabPtyId
+        }) &&
+        session.activePanePtyBinding === ptyId
+      ) {
+        return
+      }
+    }
     session.bindProcessExitState(ptyId, options.replacePtyId)
     if (session.activePanePtyBinding && session.activePanePtyBinding !== ptyId) {
       session.reportPanePtyVisibility(session.activePanePtyBinding, false)
@@ -82,10 +107,11 @@ export function installPanePtyVisibilityBind(session: ConnectPanePtySession): vo
       }
       session.deps.syncPanePtyLayoutBinding(session.pane.id, ptyId)
     } else {
-      session.deps.syncPanePtyLayoutBinding(session.pane.id, ptyId)
       if (shouldUpdateTabPtyId) {
         updateTabPtyBinding()
       }
+      // Publish the tab identity first so a late layout callback cannot leave a tab and pane split.
+      session.deps.syncPanePtyLayoutBinding(session.pane.id, ptyId)
     }
     if (session.paneStartup && !session.startupPtyBound) {
       // Settles the captured one-shot startup only after this pane owns a concrete PTY.
