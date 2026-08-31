@@ -176,6 +176,20 @@ function getTabRowIds(): string[] {
     ...testContainer.querySelectorAll<HTMLElement>('[data-command-item^="workspace-tab:"]')
   ].map((node) => (node.dataset.commandItem ?? '').replace('workspace-tab:', ''))
 }
+function getTabRowShortcutDigits(): string[] {
+  return [
+    ...testContainer.querySelectorAll<HTMLElement>('[data-command-item^="workspace-tab:"]')
+  ].flatMap((row) =>
+    [...row.querySelectorAll<HTMLElement>('span')]
+      .map((node) => node.textContent ?? '')
+      .filter((text) => /^\d+$/.test(text))
+  )
+}
+function clickSeeMore(): void {
+  ;[...testContainer.querySelectorAll('button')]
+    .find((button) => button.textContent?.includes('See more'))
+    ?.click()
+}
 describe('WorktreeJumpPalette recent chats & terminals', () => {
   beforeEach(() => {
     globalThis.IS_REACT_ACT_ENVIRONMENT = true
@@ -236,6 +250,25 @@ describe('WorktreeJumpPalette recent chats & terminals', () => {
     await flushEffects()
     expect(getTabRowIds()).toHaveLength(12)
     expect(testContainer.textContent).not.toContain('6 more')
+  })
+  it('reveals every recent row from a single expansion', async () => {
+    await renderPalette(makeManyTabState(30))
+    expect(getTabRowIds()).toHaveLength(6)
+    await act(async () => {
+      clickSeeMore()
+    })
+    await flushEffects()
+    expect(getTabRowIds()).toHaveLength(30)
+  })
+  it('stops badging expanded recent rows at the last addressable digit', async () => {
+    await renderPalette(makeManyTabState(12))
+    expect(getTabRowShortcutDigits()).toEqual(['1', '2', '3', '4', '5', '6'])
+    await act(async () => {
+      clickSeeMore()
+    })
+    await flushEffects()
+    expect(getTabRowIds()).toHaveLength(12)
+    expect(getTabRowShortcutDigits()).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9'])
   })
   it('backfills past the cap when rows drop out of the frozen order', async () => {
     await renderPalette(makeManyTabState(12))
@@ -803,10 +836,7 @@ describe('WorktreeJumpPalette recent chats & terminals', () => {
       makeRecentTabState({
         worktreesByRepo: {
           'repo-1': [
-            makeWorktree('wt-alpha', 'Alpha workspace', {
-              isMainWorktree: true,
-              branch: ''
-            }),
+            makeWorktree('wt-alpha', 'Alpha workspace', { isMainWorktree: true, branch: '' }),
             makeWorktree('wt-beta', 'Beta workspace')
           ]
         }
