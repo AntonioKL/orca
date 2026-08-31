@@ -1,7 +1,6 @@
 'use client'
 
 import { useDocsSearch } from 'fumadocs-core/search/client'
-import type { SortedResult } from 'fumadocs-core/search'
 import { GitBranch, MessageCircle, Search, X } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -38,7 +37,12 @@ type Props = {
   onClose: () => void
 }
 
-type SearchResult = SortedResult
+type SearchResult = {
+  id: string
+  url: string
+  type: 'page' | 'heading' | 'text'
+  content: string
+}
 
 const DIALOG_FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]):not([tabindex="-1"]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
