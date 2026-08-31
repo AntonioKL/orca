@@ -1132,6 +1132,22 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
       return null
     }
 
+    // Corrupt sessions can leave duplicate editor rows for one file in a group. Closing the visible
+    // row must retire all same-group duplicates while preserving a legitimate split-group reference.
+    const duplicateEditorTabIds =
+      tab.contentType === 'editor'
+        ? (state.unifiedTabsByWorktree[worktreeId] ?? [])
+            .filter(
+              (candidate) =>
+                candidate.id !== tabId &&
+                candidate.groupId === tab.groupId &&
+                candidate.entityId === tab.entityId &&
+                candidate.contentType === 'editor'
+            )
+            .map((candidate) => candidate.id)
+        : []
+    const closingTabIds = new Set([tabId, ...duplicateEditorTabIds])
+
     if (tab.contentType === 'terminal' && !opts?.terminalRetirementHandled) {
       const dedupedGroupOrder = dedupeTabOrder(group.tabOrder)
       const wasLastTab = dedupeTabOrder(dedupedGroupOrder.filter((id) => id !== tabId)).length === 0
@@ -1141,24 +1157,31 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
     }
 
     const dedupedGroupOrder = dedupeTabOrder(group.tabOrder)
-    const remainingOrder = dedupeTabOrder(dedupedGroupOrder.filter((id) => id !== tabId))
+    const remainingOrder = dedupeTabOrder(dedupedGroupOrder.filter((id) => !closingTabIds.has(id)))
     const wasLastTab = remainingOrder.length === 0
     // Why: on closing the active tab, walk the MRU stack to the previously-active tab; pickNextActiveTab falls back to the neighbor.
+    const nextFromMru = pickNextActiveTab(
+      dedupedGroupOrder,
+      group.recentTabIds?.filter((id) => !closingTabIds.has(id)),
+      tabId
+    )
     const nextActiveTabId =
-      group.activeTabId === tabId
+      group.activeTabId !== null && closingTabIds.has(group.activeTabId)
         ? wasLastTab
           ? null
-          : pickNextActiveTab(dedupedGroupOrder, group.recentTabIds, tabId)
+          : nextFromMru && !closingTabIds.has(nextFromMru)
+            ? nextFromMru
+            : (remainingOrder[0] ?? null)
         : group.activeTabId
     const nextRecentTabIds = sanitizeRecentTabIds(
-      (group.recentTabIds ?? []).filter((id) => id !== tabId),
+      (group.recentTabIds ?? []).filter((id) => !closingTabIds.has(id)),
       remainingOrder
     )
     const terminalEntityId = tab.contentType === 'terminal' ? tab.entityId : null
 
     set((current) => {
       const nextTabs = (current.unifiedTabsByWorktree[worktreeId] ?? []).filter(
-        (item) => item.id !== tabId
+        (item) => !closingTabIds.has(item.id)
       )
       // Why: close-to-right/others bypass terminals.closeTab, so clear the entityId-keyed unread flag here or a stale dot leaks.
       let nextUnreadTerminalTabs = current.unreadTerminalTabs

@@ -355,4 +355,138 @@ describe('corrupt editor session restore', () => {
       })
     ])
   })
+
+  it('does not persist duplicate editor rows for one entity in one group', () => {
+    const store = prepareStore()
+    const session = corruptSession()
+    store.getState().hydrateTabsSession(session)
+
+    const survivor = store.getState().unifiedTabsByWorktree[WORKTREE_ID][0]
+    store.setState({
+      unifiedTabsByWorktree: {
+        [WORKTREE_ID]: [survivor, { ...survivor, id: 'editor-duplicate', sortOrder: 1 }]
+      }
+    })
+
+    const persisted = buildWorkspaceSessionPayload(store.getState())
+    expect(persisted.unifiedTabs?.[WORKTREE_ID]).toHaveLength(1)
+    expect(persisted.unifiedTabs?.[WORKTREE_ID]?.[0].id).toBe(survivor.id)
+  })
+
+  it('does not resurrect a duplicate editor row closed before persistence', () => {
+    const store = prepareStore()
+    const session = corruptSession()
+    store.getState().hydrateTabsSession(session)
+    store.getState().hydrateEditorSession(session)
+
+    const survivor = store.getState().unifiedTabsByWorktree[WORKTREE_ID][0]
+    store.setState({
+      unifiedTabsByWorktree: {
+        [WORKTREE_ID]: [survivor, { ...survivor, id: 'editor-duplicate', sortOrder: 1 }]
+      },
+      groupsByWorktree: {
+        [WORKTREE_ID]: [
+          {
+            ...store.getState().groupsByWorktree[WORKTREE_ID][0],
+            activeTabId: survivor.id,
+            tabOrder: [survivor.id, 'editor-duplicate'],
+            recentTabIds: [survivor.id, 'editor-duplicate']
+          }
+        ]
+      }
+    })
+
+    store.getState().closeFile(store.getState().activeFileIdByWorktree[WORKTREE_ID]!)
+
+    const persistedAfterClose = buildWorkspaceSessionPayload(store.getState())
+    const restartedStore = prepareStore()
+    restartedStore.getState().hydrateTabsSession(persistedAfterClose)
+    restartedStore.getState().hydrateEditorSession(persistedAfterClose)
+    expect(restartedStore.getState().openFiles).toEqual([])
+    expect(restartedStore.getState().unifiedTabsByWorktree[WORKTREE_ID] ?? []).toEqual([])
+  })
+
+  it('closes same-group duplicates without removing a legitimate split-group editor', () => {
+    const store = prepareStore()
+    const session = corruptSession()
+    store.getState().hydrateTabsSession(session)
+    store.getState().hydrateEditorSession(session)
+
+    const editor = store.getState().unifiedTabsByWorktree[WORKTREE_ID][0]
+    const left = { ...editor, id: 'editor-left', groupId: 'group-left' }
+    const leftDuplicate = { ...editor, id: 'editor-left-duplicate', groupId: 'group-left' }
+    const right = { ...editor, id: 'editor-right', groupId: 'group-right' }
+    store.setState({
+      unifiedTabsByWorktree: { [WORKTREE_ID]: [left, leftDuplicate, right] },
+      groupsByWorktree: {
+        [WORKTREE_ID]: [
+          {
+            id: 'group-left',
+            worktreeId: WORKTREE_ID,
+            activeTabId: left.id,
+            tabOrder: [left.id, leftDuplicate.id]
+          },
+          {
+            id: 'group-right',
+            worktreeId: WORKTREE_ID,
+            activeTabId: right.id,
+            tabOrder: [right.id]
+          }
+        ]
+      },
+      activeGroupIdByWorktree: { [WORKTREE_ID]: 'group-left' },
+      layoutByWorktree: {
+        [WORKTREE_ID]: {
+          type: 'split',
+          direction: 'horizontal',
+          first: { type: 'leaf', groupId: 'group-left' },
+          second: { type: 'leaf', groupId: 'group-right' },
+          ratio: 0.5
+        }
+      }
+    })
+
+    store.getState().closeUnifiedTab(left.id)
+
+    expect(store.getState().unifiedTabsByWorktree[WORKTREE_ID].map((tab) => tab.id)).toEqual([
+      right.id
+    ])
+  })
+
+  it('persists shared editor entities in separate split groups', () => {
+    const store = prepareStore()
+    const session = corruptSession()
+    store.getState().hydrateTabsSession(session)
+
+    const editor = store.getState().unifiedTabsByWorktree[WORKTREE_ID][0]
+    const left = { ...editor, id: 'editor-left', groupId: 'group-left' }
+    const right = { ...editor, id: 'editor-right', groupId: 'group-right' }
+    store.setState({
+      unifiedTabsByWorktree: { [WORKTREE_ID]: [left, right] },
+      groupsByWorktree: {
+        [WORKTREE_ID]: [
+          { id: 'group-left', worktreeId: WORKTREE_ID, activeTabId: left.id, tabOrder: [left.id] },
+          {
+            id: 'group-right',
+            worktreeId: WORKTREE_ID,
+            activeTabId: right.id,
+            tabOrder: [right.id]
+          }
+        ]
+      },
+      activeGroupIdByWorktree: { [WORKTREE_ID]: 'group-left' },
+      layoutByWorktree: {
+        [WORKTREE_ID]: {
+          type: 'split',
+          direction: 'horizontal',
+          first: { type: 'leaf', groupId: 'group-left' },
+          second: { type: 'leaf', groupId: 'group-right' },
+          ratio: 0.5
+        }
+      }
+    })
+
+    const persisted = buildWorkspaceSessionPayload(store.getState())
+    expect(persisted.unifiedTabs?.[WORKTREE_ID]?.map((tab) => tab.id)).toEqual([left.id, right.id])
+  })
 })
