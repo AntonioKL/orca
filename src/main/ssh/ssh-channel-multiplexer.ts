@@ -20,6 +20,10 @@ import {
   type MultiplexerWriteSettlement,
   type MultiplexerWriterLane
 } from './ssh-multiplexer-transport-writer'
+import {
+  SSH_RELAY_REQUEST_TIMEOUT_MS,
+  sshRelayQueueWaitMs
+} from '../../shared/ssh-relay-request-budget'
 
 export type { MultiplexerTransport, MultiplexerWriteSettlement }
 
@@ -27,13 +31,16 @@ type PendingRequest = {
   resolve: (result: unknown) => void
   reject: (error: Error) => void
   beforeResolve?: (result: unknown) => void
-  timer: ReturnType<typeof setTimeout>
   cleanup: () => void
 }
 
 export type SshMultiplexerRequestOptions = {
   signal?: AbortSignal
   timeoutMs?: number
+  // Why: `timeoutMs` runs from enqueue, so callers that picked a short fail-fast
+  // budget keep it. Retry-safe calls that a saturated writer can park before the
+  // wire opt in here to start it at the wire, queue wait bounded separately.
+  budgetStartsAtWire?: boolean
   beforeResolve?: (result: unknown) => void
 }
 
@@ -56,7 +63,6 @@ export function createSshDisposalError(reason: MultiplexerDisposeReason): Error 
   return err
 }
 
-const REQUEST_TIMEOUT_MS = 30_000
 const MAX_ORDINARY_UNACKED_TIMESTAMPS = 4095
 const MAX_UNACKED_TIMESTAMPS = MAX_ORDINARY_UNACKED_TIMESTAMPS + 1
 // Why: a tick gap far beyond the interval means the process was paused
@@ -72,6 +78,15 @@ function sshMuxRequestTimeoutError(method: string, timeoutMs: number): Error {
   return Object.assign(new Error(`Request "${method}" timed out after ${timeoutMs}ms`), {
     code: SSH_MUX_REQUEST_TIMEOUT_CODE
   })
+}
+
+// Why: the two phases fail for different reasons (never sent vs. never answered)
+// and only the message survives into logs and scan-issue copy.
+function sshMuxWriteFlushTimeoutError(method: string, waitMs: number): Error {
+  return Object.assign(
+    new Error(`Request "${method}" timed out after ${waitMs}ms without reaching the wire`),
+    { code: SSH_MUX_REQUEST_TIMEOUT_CODE }
+  )
 }
 
 export function isSshMuxRequestTimeoutError(error: unknown): boolean {
@@ -238,53 +253,76 @@ export class SshChannelMultiplexer {
       method,
       ...(params !== undefined ? { params } : {})
     }
-    const timeoutMs = options?.timeoutMs ?? REQUEST_TIMEOUT_MS
+    const timeoutMs = options?.timeoutMs ?? SSH_RELAY_REQUEST_TIMEOUT_MS
 
     return new Promise((resolve, reject) => {
-      let timer: ReturnType<typeof setTimeout>
-      const cleanup = (): void => {
-        clearTimeout(timer)
-        if (options?.signal) {
-          options.signal.removeEventListener('abort', onAbort)
-        }
-      }
       const onAbort = (): void => {
-        const pending = this.pendingRequests.get(id)
-        if (!pending) {
+        const found = this.pendingRequests.get(id)
+        if (!found) {
           return
         }
-        pending.cleanup()
+        found.cleanup()
         this.pendingRequests.delete(id)
         // Why: Space scans can run long on SSH hosts. Let the relay stop its
         // local filesystem work instead of only dropping the client promise.
         this.notify('rpc.cancel', { id })
         const error = new Error(`Request "${method}" was cancelled`) as Error & { name: string }
         error.name = 'AbortError'
-        pending.reject(error)
+        found.reject(error)
       }
-      timer = setTimeout(() => {
-        const pending = this.pendingRequests.get(id)
-        if (pending) {
-          pending.cleanup()
+      let timer: ReturnType<typeof setTimeout>
+      const expire = (error: Error): void => {
+        const found = this.pendingRequests.get(id)
+        if (found) {
+          found.cleanup()
           // Why: request timeouts should stop relay-side long-running work,
           // not just detach the client from the eventual response.
           this.notify('rpc.cancel', { id })
         }
         this.pendingRequests.delete(id)
-        reject(sshMuxRequestTimeoutError(method, timeoutMs))
-      }, timeoutMs)
+        reject(error)
+      }
+      const pending: PendingRequest = {
+        resolve,
+        reject,
+        beforeResolve: options?.beforeResolve,
+        cleanup: () => {
+          clearTimeout(timer)
+          if (options?.signal) {
+            options.signal.removeEventListener('abort', onAbort)
+          }
+        }
+      }
 
       if (options?.signal) {
         options.signal.addEventListener('abort', onAbort, { once: true })
       }
-      this.pendingRequests.set(id, {
-        resolve,
-        reject,
-        beforeResolve: options?.beforeResolve,
-        timer,
-        cleanup
+      // Why: until the writer hands the frame to the transport it has had no
+      // wire time, and the dead-link check stands down while the writer is
+      // saturated, so an opted-in queue wait gets its own bound instead of
+      // silently spending the caller's response budget. Anything backstopping
+      // such a call must be sized with sshRelayRequestWorstCaseMs(timeoutMs).
+      const budgetStartsAtWire = options?.budgetStartsAtWire === true
+      const queueWaitMs = budgetStartsAtWire ? sshRelayQueueWaitMs(timeoutMs) : timeoutMs
+      timer = setTimeout(
+        () =>
+          expire(
+            budgetStartsAtWire
+              ? sshMuxWriteFlushTimeoutError(method, queueWaitMs)
+              : sshMuxRequestTimeoutError(method, timeoutMs)
+          ),
+        queueWaitMs
+      )
+      this.pendingRequests.set(id, pending)
+      this.sendMessage(msg, (settlement) => {
+        // Why: per-request, so a stall that parks one frame cannot suspend the
+        // deadline of a request whose frame is already out on the wire.
+        if (!budgetStartsAtWire || !settlement.ok || this.pendingRequests.get(id) !== pending) {
+          return
+        }
+        clearTimeout(timer)
+        timer = setTimeout(() => expire(sshMuxRequestTimeoutError(method, timeoutMs)), timeoutMs)
       })
-      this.sendMessage(msg)
     })
   }
 

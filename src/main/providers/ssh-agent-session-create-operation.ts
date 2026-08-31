@@ -10,8 +10,10 @@ import {
   type PtySourceReceivingActivation
 } from '../../shared/pty-source-receiving-activation'
 import { validateClaimedSshSpawn } from './ssh-agent-session-claim-validation'
-
-export const SSH_AGENT_SESSION_CAPABILITY_PROBE_TIMEOUT_MS = 5_000
+import {
+  SSH_AGENT_SESSION_CAPABILITY_PROBE_TIMEOUT_MS,
+  SSH_PTY_SPAWN_TIMEOUT_MS
+} from '../../shared/ssh-relay-request-budget'
 
 export function assertSshAgentSessionCreateResult(
   result: unknown
@@ -39,6 +41,10 @@ export async function sshSupportsAgentSessionCreateOperations(
   try {
     const result = (await mux.request('pty.getCapabilities', undefined, {
       signal: options.signal,
+      // Why: this probe gates pty.spawn, so it has to outlast the same saturated
+      // writer the spawn does — expiring in the queue turns a capable relay into
+      // a spawn failure before the spawn's own wire-started budget can engage.
+      budgetStartsAtWire: true,
       timeoutMs: SSH_AGENT_SESSION_CAPABILITY_PROBE_TIMEOUT_MS
     })) as {
       agentSessionCreateOperationVersion?: unknown
@@ -60,11 +66,17 @@ export async function requestSshAgentSessionCreate(args: {
   beforeResolve?: (result: unknown) => void
 }): Promise<unknown> {
   try {
-    const options =
-      args.signal || args.beforeResolve
-        ? { signal: args.signal, beforeResolve: args.beforeResolve }
-        : undefined
-    return await args.mux.request('pty.spawn', args.params, options)
+    return await args.mux.request('pty.spawn', args.params, {
+      signal: args.signal,
+      beforeResolve: args.beforeResolve,
+      // Why: spawning runs over a link that may still be congested from relay
+      // deploy, so the frame can sit in a saturated writer for the whole budget;
+      // a spawn that never reached the wire started nothing and retries safely.
+      budgetStartsAtWire: true,
+      // Why: named rather than inherited, so the pane-connect backstops sized
+      // from SSH_PTY_CONNECT_WORST_CASE_MS cannot drift from what spawn asks for.
+      timeoutMs: SSH_PTY_SPAWN_TIMEOUT_MS
+    })
   } catch (error) {
     if (!args.operationId) {
       throw error

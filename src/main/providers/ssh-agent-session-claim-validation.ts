@@ -6,7 +6,7 @@ import {
 } from '../../shared/agent-session-host-authority'
 import type { PtySpawnResult } from './pty-spawn-result'
 import type { SshChannelMultiplexer } from '../ssh/ssh-channel-multiplexer'
-import { SSH_AGENT_SESSION_CAPABILITY_PROBE_TIMEOUT_MS } from './ssh-agent-session-create-operation'
+import { SSH_AGENT_SESSION_CAPABILITY_PROBE_TIMEOUT_MS } from '../../shared/ssh-relay-request-budget'
 import { isPtyIncarnationId } from '../../shared/pty-incarnation'
 
 export type ClaimedSshSpawnValidation =
@@ -20,6 +20,9 @@ export async function proveSshAgentSessionClaimCapability(
   try {
     const result = (await mux.request('pty.getCapabilities', undefined, {
       signal: options.signal,
+      // Why: gates a claimed pty.spawn, so it must survive the same saturated
+      // writer rather than expiring in the queue ahead of it.
+      budgetStartsAtWire: true,
       timeoutMs: SSH_AGENT_SESSION_CAPABILITY_PROBE_TIMEOUT_MS
     })) as {
       agentSessionClaimVersion?: unknown

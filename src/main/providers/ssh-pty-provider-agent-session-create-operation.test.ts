@@ -6,6 +6,10 @@ import {
 import { SshChannelMultiplexer, type MultiplexerTransport } from '../ssh/ssh-channel-multiplexer'
 import { encodeFrame, HEADER_LENGTH, MessageType } from '../ssh/relay-protocol'
 import { SshPtyProvider } from './ssh-pty-provider'
+import {
+  SSH_AGENT_SESSION_CAPABILITY_PROBE_TIMEOUT_MS,
+  SSH_PTY_SPAWN_TIMEOUT_MS
+} from '../../shared/ssh-relay-request-budget'
 
 function createTransport(): MultiplexerTransport & {
   deliver: (data: Buffer) => void
@@ -102,7 +106,9 @@ describe('SSH fresh agent-session create operations', () => {
 
     expect(request).toHaveBeenNthCalledWith(1, 'pty.getCapabilities', undefined, {
       signal: undefined,
-      timeoutMs: 5_000
+      // The probe gates spawn, so it waits out the same saturated writer.
+      budgetStartsAtWire: true,
+      timeoutMs: SSH_AGENT_SESSION_CAPABILITY_PROBE_TIMEOUT_MS
     })
     expect(request).toHaveBeenNthCalledWith(
       2,
@@ -115,7 +121,11 @@ describe('SSH fresh agent-session create operations', () => {
         command: 'codex',
         agentSessionCreateOperationId: 'a'.repeat(43)
       },
-      expect.objectContaining({ beforeResolve: expect.any(Function) })
+      expect.objectContaining({
+        beforeResolve: expect.any(Function),
+        budgetStartsAtWire: true,
+        timeoutMs: SSH_PTY_SPAWN_TIMEOUT_MS
+      })
     )
   })
 
@@ -154,7 +164,11 @@ describe('SSH fresh agent-session create operations', () => {
         env: { POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD: 'true' },
         command: 'codex'
       },
-      expect.objectContaining({ beforeResolve: expect.any(Function) })
+      expect.objectContaining({
+        beforeResolve: expect.any(Function),
+        budgetStartsAtWire: true,
+        timeoutMs: SSH_PTY_SPAWN_TIMEOUT_MS
+      })
     )
   })
 

@@ -7,6 +7,7 @@ import { buildPaneConnectionDeps, buildDirectSshSplitRetryCommit } from './pty-c
 import { createInitialStoreState } from './pty-connection-test-store-fixtures'
 import type { StoreState } from './pty-connection-test-store-state'
 import {
+  DIRECT_SSH_PANE_RETRY_SETTLEMENT_TIMEOUT_MS,
   pendingSpawnByPaneKey,
   pendingSpawnGenerationByPaneKey
 } from './pty-connection/pty-connect-limits'
@@ -311,7 +312,7 @@ describe('connectPanePty', () => {
 
     expect(firstTransport.connect).toHaveBeenCalledOnce()
     expect(remountTransport.connect).not.toHaveBeenCalled()
-    await vi.advanceTimersByTimeAsync(30_999)
+    await vi.advanceTimersByTimeAsync(DIRECT_SSH_PANE_RETRY_SETTLEMENT_TIMEOUT_MS - 1)
     expect(settleDirectSshPaneRetry).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)
     expect(settleDirectSshPaneRetry).toHaveBeenCalledExactlyOnceWith({
@@ -373,7 +374,7 @@ describe('connectPanePty', () => {
     )
     await flushAsyncTicks()
     binding.dispose()
-    await vi.advanceTimersByTimeAsync(31_000)
+    await vi.advanceTimersByTimeAsync(DIRECT_SSH_PANE_RETRY_SETTLEMENT_TIMEOUT_MS)
 
     expect(settleDirectSshPaneRetry).not.toHaveBeenCalled()
 

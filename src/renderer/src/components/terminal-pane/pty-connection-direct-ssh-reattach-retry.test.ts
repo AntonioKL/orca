@@ -13,6 +13,7 @@ import {
   type MockTransport
 } from './pty-connection-test-pane-fixtures'
 import { buildPaneConnectionDeps, buildDirectSshSplitRetryCommit } from './pty-connection-test-deps'
+import { DIRECT_SSH_PANE_RETRY_SETTLEMENT_TIMEOUT_MS } from './pty-connection/pty-connect-limits'
 import { createInitialStoreState } from './pty-connection-test-store-fixtures'
 import type { StoreState } from './pty-connection-test-store-state'
 import {
@@ -206,7 +207,7 @@ describe('connectPanePty', () => {
     expect(transport.connect).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: restoredPtyId })
     )
-    await vi.advanceTimersByTimeAsync(31_000)
+    await vi.advanceTimersByTimeAsync(DIRECT_SSH_PANE_RETRY_SETTLEMENT_TIMEOUT_MS)
     expect(settleDirectSshPaneRetry).toHaveBeenCalledExactlyOnceWith({
       status: 'timed-out',
       tabId: 'tab-1',
