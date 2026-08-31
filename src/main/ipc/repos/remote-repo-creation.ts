@@ -12,9 +12,11 @@ import { emitRepoAdded } from './repo-added-telemetry'
 import { addRemoteRepoFromPath } from './remote-repo-registration'
 import {
   alreadyARepositoryError,
-  LEFTOVER_GIT_DIR_RETRY_HINT
+  LEFTOVER_GIT_DIR_RETRY_HINT,
+  repositoryCheckUnavailableError
 } from './repository-creation-messages'
 import { resolveRemoteHomePath } from './remote-home-path'
+import { isENOENT } from '../filesystem-path-containment'
 
 export async function createRemoteRepo(
   store: Store,
@@ -71,23 +73,29 @@ export async function createRemoteRepo(
   try {
     await fsProvider.stat(targetPath)
     targetExists = true
-  } catch {
+  } catch (err) {
+    // Why: only a proven ENOENT means absent. EACCES, ELOOP, a relay timeout or a disconnect say
+    // nothing about the target, and must not become permission to create into it.
+    if (!isENOENT(err)) {
+      const message = err instanceof Error ? err.message : String(err)
+      return { error: repositoryCheckUnavailableError(name, message) }
+    }
     targetExists = false
   }
 
   if (targetExists) {
     // Why: refuse an existing repository on positive evidence, before `git init` can silently
     // reinitialize it. A `.git` FILE counts — that is how linked worktrees and submodules point.
-    // This does not rely on readDir listing dotfiles, which the provider does not guarantee.
-    let remoteGitExists = false
+    // This does not rely on readDir listing dotfiles, which the provider contract does not promise.
     try {
       await fsProvider.stat(joinRemotePath(host, targetPath, '.git'))
-      remoteGitExists = true
-    } catch {
-      remoteGitExists = false
-    }
-    if (remoteGitExists) {
       return { error: alreadyARepositoryError(name) }
+    } catch (err) {
+      // Why: same rule as above — an indeterminate probe is not evidence that `.git` is absent.
+      if (!isENOENT(err)) {
+        const message = err instanceof Error ? err.message : String(err)
+        return { error: repositoryCheckUnavailableError(name, message) }
+      }
     }
     try {
       const entries = await fsProvider.readDir(targetPath)

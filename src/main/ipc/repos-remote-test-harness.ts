@@ -1,5 +1,11 @@
 import { EventEmitter } from 'node:events'
 import { vi } from 'vitest'
+
+// Why: the real provider surfaces Node's ENOENT; a bare Error('not found') would let a
+// fail-closed existence check misread an unrecognised failure as "absent".
+export function remoteEnoent(): NodeJS.ErrnoException {
+  return Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' })
+}
 import type { Mock } from 'vitest'
 import type * as GitRunner from '../git/runner'
 import type * as RepoModule from '../git/repo'
@@ -83,7 +89,7 @@ export function createReposIpcMocks(): ReposIpcMocks {
     mockFilesystemProvider: {
       readDir: vi.fn().mockResolvedValue([]),
       readFile: vi.fn().mockRejectedValue(new Error('not found')),
-      stat: vi.fn().mockRejectedValue(new Error('not found')),
+      stat: vi.fn().mockRejectedValue(remoteEnoent()),
       createDir: vi.fn().mockResolvedValue(undefined),
       createDirNoClobber: vi.fn().mockResolvedValue(undefined),
       deletePath: vi.fn().mockResolvedValue(undefined)
@@ -234,7 +240,7 @@ export function resetProjectGroupMocks(
   mocks.mockFilesystemProvider.readFile.mockReset()
   mocks.mockFilesystemProvider.readFile.mockRejectedValue(new Error('not found'))
   mocks.mockFilesystemProvider.stat.mockReset()
-  mocks.mockFilesystemProvider.stat.mockRejectedValue(new Error('not found'))
+  mocks.mockFilesystemProvider.stat.mockRejectedValue(remoteEnoent())
   mocks.mockGitProvider.isGitRepoAsync.mockReset()
   mocks.mockGitProvider.isGitRepoAsync.mockResolvedValue({ isRepo: true, rootPath: null })
   mocks.mockGitProvider.listWorktrees.mockReset()
