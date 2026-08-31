@@ -1,7 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
-import { win32 as pathWin32 } from 'node:path'
+import { join, win32 as pathWin32 } from 'node:path'
 import { quotePosixShell } from '../../shared/wsl-login-shell-command'
 import { WSL_CODEX_RUNTIME_HOME_SEGMENTS } from '../pty/codex-home-wsl-env'
 import { parseWslUncPath } from '../../shared/wsl-paths'
