@@ -565,7 +565,7 @@ function rendererEpisodeMachine(webContentsId: number) {
               : getDashboardPopoutWindow()?.webContents.id === webContentsId
                 ? getDashboardPopoutWindow()?.webContents
                 : null
-            )?.debugger?.isAttached
+            )?.debugger?.isAttached?.()
           )
         })
     })
