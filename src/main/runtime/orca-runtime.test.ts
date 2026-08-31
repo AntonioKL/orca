@@ -7067,11 +7067,11 @@ describe('OrcaRuntimeService', () => {
           worktreeId: result.worktree.id
         })
       )
-      const setupSpawn = spawn.mock.calls[1]![0] as {
+      const setupSpawn = spawn.mock.calls[0]![0] as {
         command: string
         env: Record<string, string>
       }
-      const startup = spawn.mock.calls[0]![0] as {
+      const startup = spawn.mock.calls[1]![0] as {
         command: string
         env: Record<string, string>
       }
@@ -7079,12 +7079,24 @@ describe('OrcaRuntimeService', () => {
       expect(setupSpawn.command).toContain(
         '/remote/repo/.git/worktrees/mobile-setup/orca/setup-runner.sh'
       )
-      expect(revealTerminalSession).toHaveBeenLastCalledWith(
+      expect(revealTerminalSession).toHaveBeenNthCalledWith(
+        1,
         result.worktree.id,
         expect.objectContaining({
           ptyId: 'pty-remote-setup',
           title: 'Setup',
           activate: false
+        })
+      )
+      expect(revealTerminalSession).toHaveBeenNthCalledWith(
+        2,
+        result.worktree.id,
+        expect.objectContaining({
+          ptyId: 'pty-remote-agent',
+          title: null,
+          activate: false,
+          surfaceOwner: false,
+          viewMode: 'chat'
         })
       )
     } finally {

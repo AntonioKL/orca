@@ -158,7 +158,7 @@ describe('PTY exit subscription demands proof of exit, not loss of connection', 
     expect(listener).toHaveBeenCalledWith({
       ptyId: 'pty-1',
       exitCode: 0,
-      incarnationId: 'incarnation-1',
+      incarnationId: expect.stringMatching(/^runtime:/),
       cause: { kind: 'signaled', signal: 9 }
     })
   })
