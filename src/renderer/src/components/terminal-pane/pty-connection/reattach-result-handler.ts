@@ -8,6 +8,7 @@ import { useAppStore } from '@/store'
 import { isPassiveCompletedHibernationEvidence } from '@/lib/sleeping-agent-pane-ownership'
 import { parseAppSshPtyId } from '../../../../../shared/ssh-pty-id'
 import { resolveHiddenRestoreScrollbackRows } from '../terminal-hidden-restore-scrollback'
+import { shouldIgnoreStalePanePtyLayoutBinding } from './pane-pty-layout-binding'
 
 import { isRemoteRuntimePtyId } from './paired-parked-terminal-restore'
 import type { ColdRestoreAgentResumeStartup } from './fresh-spawn-types'
@@ -47,6 +48,8 @@ type ReattachResultSession = ReattachPayloadSession &
     | 'setPanePtyFitBinding'
     | 'startFreshColdRestoreAgentResume'
     | 'structuralReplayCoordinator'
+    | 'syncPanePtyLayoutBinding'
+    | 'clearExitedPanePtyLayoutBinding'
     | 'syncHiddenRendererPtyDelivery'
     | 'transportStreamGeneration'
   >
@@ -109,9 +112,9 @@ export function bindHandleReattachResult(sessionBag: ConnectPanePtySession): voi
       }
       // Why: a stale restored session can fail reattach after mount; don't leave xterm alive without a backing PTY.
       if (staleSessionId) {
-        session.deps.clearExitedPanePtyLayoutBinding(session.pane.id, staleSessionId)
+        session.clearExitedPanePtyLayoutBinding(staleSessionId)
       } else {
-        session.deps.syncPanePtyLayoutBinding(session.pane.id, null)
+        session.syncPanePtyLayoutBinding(null)
       }
       if (staleSessionId) {
         session.deps.clearTabPtyId(session.deps.tabId, staleSessionId)
@@ -131,9 +134,9 @@ export function bindHandleReattachResult(sessionBag: ConnectPanePtySession): voi
     })
     if (connectResult?.sessionExpired) {
       if (staleSessionId) {
-        session.deps.clearExitedPanePtyLayoutBinding(session.pane.id, staleSessionId)
+        session.clearExitedPanePtyLayoutBinding(staleSessionId)
       } else {
-        session.deps.syncPanePtyLayoutBinding(session.pane.id, null)
+        session.syncPanePtyLayoutBinding(null)
       }
       if (staleSessionId) {
         session.deps.clearTabPtyId(session.deps.tabId, staleSessionId)
@@ -167,10 +170,10 @@ export function bindHandleReattachResult(sessionBag: ConnectPanePtySession): voi
     if (!hasStructuralReplay && connectResult?.isReattach && resumeComesFromPassiveHibernation) {
       session.transport.disconnect()
       if (staleSessionId) {
-        session.deps.clearExitedPanePtyLayoutBinding(session.pane.id, staleSessionId)
+        session.clearExitedPanePtyLayoutBinding(staleSessionId)
         session.deps.clearTabPtyId(session.deps.tabId, staleSessionId)
       } else {
-        session.deps.syncPanePtyLayoutBinding(session.pane.id, null)
+        session.syncPanePtyLayoutBinding(null)
       }
       session.startFreshColdRestoreAgentResume(coldRestoreStartup, {
         forceBlankRestoredViewport: true
@@ -188,12 +191,25 @@ export function bindHandleReattachResult(sessionBag: ConnectPanePtySession): voi
     const currentTabPtyId = Object.values(useAppStore.getState().tabsByWorktree)
       .flat()
       .find((tab) => tab.id === session.deps.tabId)?.ptyId
+    const existingLeafPtyId =
+      useAppStore.getState().terminalLayoutsByTabId[session.deps.tabId]?.ptyIdsByLeafId?.[
+        session.pane.leafId
+      ]
+    // A split pane has its own PTY while the legacy tab-level field still
+    // names the source pane. Only infer a tab-wide replacement when that
+    // field is actually bound to this leaf; an unrelated sibling must not be
+    // rewritten to the new pane's PTY.
+    const inferredReplacementPtyId =
+      currentTabPtyId &&
+      shouldIgnoreStalePanePtyLayoutBinding({
+        existingPtyId: existingLeafPtyId,
+        nextPtyId: ptyId,
+        tabPtyId: currentTabPtyId
+      })
+        ? existingLeafPtyId
+        : undefined
     const replacementPtyId =
-      staleSessionId && staleSessionId !== ptyId
-        ? staleSessionId
-        : currentTabPtyId && currentTabPtyId !== ptyId
-          ? currentTabPtyId
-          : undefined
+      staleSessionId && staleSessionId !== ptyId ? staleSessionId : inferredReplacementPtyId
     if (session.capturedDirectSshRetryPtyAccepted && session.directSshRetryAttempt) {
       session.deps.updateTabPtyId(
         session.deps.tabId,
@@ -207,7 +223,7 @@ export function bindHandleReattachResult(sessionBag: ConnectPanePtySession): voi
       session.deps.updateTabPtyId(session.deps.tabId, ptyId)
     }
     // Keep layout sync after the identity commit; replacement paths are atomic.
-    session.deps.syncPanePtyLayoutBinding(session.pane.id, ptyId)
+    session.syncPanePtyLayoutBinding(ptyId)
     useAppStore.getState().restoreAgentPaneAuthority?.(session.cacheKey)
     notifyCodexPaneBoundForStaleSweep(ptyId)
     session.agentCompletionCoordinator.startProcessTracking()

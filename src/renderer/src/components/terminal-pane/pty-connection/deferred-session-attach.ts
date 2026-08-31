@@ -228,7 +228,7 @@ export function runDeferredSessionAttach(session: ConnectPanePtySession): void {
                   return
                 }
                 useAppStore.getState().removeDeferredSshSessionId(session.deps.tabId)
-                session.deps.clearExitedPanePtyLayoutBinding(session.pane.id, pendingSessionId)
+                session.clearExitedPanePtyLayoutBinding(pendingSessionId)
                 session.deps.clearTabPtyId(session.deps.tabId, pendingSessionId)
                 session.startFreshColdRestoreAgentResume(coldRestoreStartup, {
                   forceBlankRestoredViewport: true
@@ -289,7 +289,7 @@ export function runDeferredSessionAttach(session: ConnectPanePtySession): void {
               }
               if (isSshSessionExpiredError(err)) {
                 useAppStore.getState().removeDeferredSshSessionId(session.deps.tabId)
-                session.deps.clearExitedPanePtyLayoutBinding(session.pane.id, pendingSessionId)
+                session.clearExitedPanePtyLayoutBinding(pendingSessionId)
                 session.deps.clearTabPtyId(session.deps.tabId, pendingSessionId)
                 session.startFreshColdRestoreAgentResume(coldRestoreStartup, {
                   forceBlankRestoredViewport: true

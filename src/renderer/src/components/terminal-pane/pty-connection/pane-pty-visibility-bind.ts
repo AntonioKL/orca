@@ -120,13 +120,13 @@ export function installPanePtyVisibilityBind(session: ConnectPanePtySession): vo
       if (shouldUpdateTabPtyId) {
         updateTabPtyBinding()
       }
-      session.deps.syncPanePtyLayoutBinding(session.pane.id, ptyId)
+      session.syncPanePtyLayoutBinding(ptyId)
     } else {
       if (shouldUpdateTabPtyId) {
         updateTabPtyBinding()
       }
       // Publish the tab identity first so a late layout callback cannot leave a tab and pane split.
-      session.deps.syncPanePtyLayoutBinding(session.pane.id, ptyId)
+      session.syncPanePtyLayoutBinding(ptyId)
     }
     if (session.paneStartup && !session.startupPtyBound) {
       // Settles the captured one-shot startup only after this pane owns a concrete PTY.

@@ -221,7 +221,7 @@ export function installPtyExitHibernate(session: ConnectPanePtySession): void {
     session.kittyKeyboardModes.reset()
     const isSuppressedExit = session.deps.consumeSuppressedPtyExit(ptyId) || preserveRendererBinding
     if (!isSuppressedExit && !isUnverifiedExit) {
-      session.deps.clearExitedPanePtyLayoutBinding(session.pane.id, ptyId)
+      session.clearExitedPanePtyLayoutBinding(ptyId)
     }
     session.deps.clearRuntimePaneTitle(session.deps.tabId, session.pane.id)
     if (!preserveRendererBinding && !isUnverifiedExit) {

@@ -1118,19 +1118,20 @@ function TerminalPane(
     persistLayoutSnapshot()
   }, [paneCount, paneTitles, persistLayoutSnapshot, terminalTab])
 
-  const writePanePtyLayoutBinding = useCallback(
-    (paneId: number, ptyId: string | null, repairActiveLeafOnClear: boolean): void => {
+  const writePanePtyLayoutBindingForLeaf = useCallback(
+    (
+      leafId: string,
+      ptyId: string | null,
+      repairActiveLeafOnClear: boolean,
+      sourcePaneId?: number
+    ): void => {
       const existingLayout = useAppStore.getState().terminalLayoutsByTabId[tabId] ?? EMPTY_LAYOUT
       const { ptyIdsByLeafId: _existingPtyIdsByLeafId, ...layoutWithoutPtyBindings } =
         existingLayout
       const existingBindings = existingLayout.ptyIdsByLeafId ?? {}
-      const leafId = managerRef.current?.getLeafId(paneId)
-      if (!leafId) {
-        return
-      }
 
-      if (ptyId) {
-        const currentTransportPtyId = paneTransportsRef.current.get(paneId)?.getPtyId()
+      if (ptyId && sourcePaneId !== undefined) {
+        const currentTransportPtyId = paneTransportsRef.current.get(sourcePaneId)?.getPtyId()
         const tabPtyId = Object.values(useAppStore.getState().tabsByWorktree)
           .flat()
           .find((tab) => tab.id === tabId)?.ptyId
@@ -1182,6 +1183,17 @@ function TerminalPane(
     [setTabLayout, tabId]
   )
 
+  const writePanePtyLayoutBinding = useCallback(
+    (paneId: number, ptyId: string | null, repairActiveLeafOnClear: boolean): void => {
+      const leafId = managerRef.current?.getLeafId(paneId)
+      if (!leafId) {
+        return
+      }
+      writePanePtyLayoutBindingForLeaf(leafId, ptyId, repairActiveLeafOnClear, paneId)
+    },
+    [managerRef, writePanePtyLayoutBindingForLeaf]
+  )
+
   const syncPanePtyLayoutBinding = useCallback(
     (paneId: number, ptyId: string | null): void => {
       writePanePtyLayoutBinding(paneId, ptyId, false)
@@ -1189,14 +1201,20 @@ function TerminalPane(
     [writePanePtyLayoutBinding]
   )
 
-  const clearExitedPanePtyLayoutBinding = useCallback(
-    (paneId: number, exitedPtyId: string): void => {
+  const syncPanePtyLayoutBindingForLeaf = useCallback(
+    (leafId: string, ptyId: string | null, sourcePaneId: number): void => {
+      writePanePtyLayoutBindingForLeaf(leafId, ptyId, false, sourcePaneId)
+    },
+    [writePanePtyLayoutBindingForLeaf]
+  )
+
+  const clearExitedPanePtyLayoutBindingForLeaf = useCallback(
+    (leafId: string, exitedPtyId: string): void => {
       const existingLayout = useAppStore.getState().terminalLayoutsByTabId[tabId] ?? EMPTY_LAYOUT
       const { ptyIdsByLeafId: _existingPtyIdsByLeafId, ...layoutWithoutPtyBindings } =
         existingLayout
       const existingBindings = existingLayout.ptyIdsByLeafId ?? {}
-      const leafId = managerRef.current?.getLeafId(paneId)
-      if (!leafId || existingBindings[leafId] !== exitedPtyId) {
+      if (existingBindings[leafId] !== exitedPtyId) {
         return
       }
 
@@ -1214,6 +1232,17 @@ function TerminalPane(
       })
     },
     [setTabLayout, tabId]
+  )
+
+  const clearExitedPanePtyLayoutBinding = useCallback(
+    (paneId: number, exitedPtyId: string): void => {
+      const leafId = managerRef.current?.getLeafId(paneId)
+      if (!leafId) {
+        return
+      }
+      clearExitedPanePtyLayoutBindingForLeaf(leafId, exitedPtyId)
+    },
+    [clearExitedPanePtyLayoutBindingForLeaf, managerRef]
   )
 
   const {
@@ -1253,11 +1282,21 @@ function TerminalPane(
           useAppStore.getState().dropAgentStatus(makePaneKey(tabId, leafId))
         }
         setTerminalErrorsByPaneId((current) => clearPaneTerminalError(current, paneId))
-        syncPanePtyLayoutBinding(paneId, null)
+        if (leafId) {
+          syncPanePtyLayoutBindingForLeaf?.(leafId, null, paneId)
+        } else {
+          syncPanePtyLayoutBinding(paneId, null)
+        }
         manager.closePane(paneId)
       }
     },
-    [clearSessionRestoredBannerForPane, onCloseTab, syncPanePtyLayoutBinding, tabId]
+    [
+      clearSessionRestoredBannerForPane,
+      onCloseTab,
+      syncPanePtyLayoutBinding,
+      syncPanePtyLayoutBindingForLeaf,
+      tabId
+    ]
   )
 
   // Cmd+W confirms before killing a shell with a running child (e.g. npm run dev); idle prompts close immediately, and Ctrl+D bypasses by design.
@@ -1460,7 +1499,9 @@ function TerminalPane(
     dispatchNotification,
     setCacheTimerStartedAt,
     syncPanePtyLayoutBinding,
+    syncPanePtyLayoutBindingForLeaf,
     clearExitedPanePtyLayoutBinding,
+    clearExitedPanePtyLayoutBindingForLeaf,
     onStartupBound: settleTabStartupCommand,
     setTabPaneExpanded,
     setTabCanExpandPane,
@@ -1754,12 +1795,15 @@ function TerminalPane(
     }
 
     // A replacement can commit tab/layout ownership while a remounted xterm
-    // is still carrying the previous DOM marker. Repair only when the current
-    // transport already owns the committed PTY; stale transports never win.
+    // is still carrying the previous DOM marker. Allow an unbound transport to
+    // catch up, but never let a live mismatched transport overwrite its owner.
     for (const pane of manager.getPanes()) {
       const expectedPtyId = panePtyLayoutBindings?.[pane.leafId]
+      if (!expectedPtyId) {
+        continue
+      }
       const transport = paneTransportsRef.current.get(pane.id)
-      if (!expectedPtyId || transport?.getPtyId() !== expectedPtyId) {
+      if (transport && transport.getPtyId() && transport.getPtyId() !== expectedPtyId) {
         continue
       }
       if (pane.container.dataset.ptyId === expectedPtyId) {

@@ -91,7 +91,7 @@ export function startDeferredSessionReattach(
         if (session.rejectObsoleteDirectSshReattach(deferredReattachSessionId)) {
           return
         }
-        session.deps.clearExitedPanePtyLayoutBinding(session.pane.id, deferredReattachSessionId)
+        session.clearExitedPanePtyLayoutBinding(deferredReattachSessionId)
         session.deps.clearTabPtyId(session.deps.tabId, deferredReattachSessionId)
         session.startFreshColdRestoreAgentResume(coldRestoreStartup, {
           forceBlankRestoredViewport: true
@@ -146,7 +146,7 @@ export function startDeferredSessionReattach(
         reason: message
       })
       if (session.connectionId && isSshSessionExpiredError(err)) {
-        session.deps.clearExitedPanePtyLayoutBinding(session.pane.id, deferredReattachSessionId)
+        session.clearExitedPanePtyLayoutBinding(deferredReattachSessionId)
         session.deps.clearTabPtyId(session.deps.tabId, deferredReattachSessionId)
         session.startFreshColdRestoreAgentResume(coldRestoreStartup, {
           forceBlankRestoredViewport: true
@@ -158,7 +158,7 @@ export function startDeferredSessionReattach(
         recoverUnverifiableDirectSshReattach(session, deferredReattachSessionId)
         return
       }
-      session.deps.clearExitedPanePtyLayoutBinding(session.pane.id, deferredReattachSessionId)
+      session.clearExitedPanePtyLayoutBinding(deferredReattachSessionId)
       session.deps.clearTabPtyId(session.deps.tabId, deferredReattachSessionId)
       session.startFreshColdRestoreAgentResume(coldRestoreStartup, {
         forceBlankRestoredViewport: true
