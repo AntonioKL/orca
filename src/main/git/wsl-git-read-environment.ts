@@ -3,6 +3,7 @@ import {
   buildWslCapturedLoginShellCommand,
   buildWslExecArgs
 } from '../../shared/wsl-login-shell-command'
+import { resolveWslExecutablePath } from '../wsl/wsl-executable-path'
 
 export type WslGitReadEnvironment = { gitPath: string; home: string; path: string }
 
@@ -59,7 +60,7 @@ function probeWslGitReadEnvironment(distro: string): Promise<ProbeOutcome> {
   const captured = buildWslCapturedLoginShellCommand(probeCommand)
   return new Promise((resolve) => {
     execFile(
-      'wsl.exe',
+      resolveWslExecutablePath(),
       buildWslExecArgs(distro, ['sh', '-lc', captured.command]),
       {
         encoding: 'utf8',

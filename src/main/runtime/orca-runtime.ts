@@ -12593,15 +12593,28 @@ export class OrcaRuntimeService {
   private async resolveStructuredAgentSessionLocation(worktreeSelector: string) {
     const target = await this.resolveRuntimeFileTarget(worktreeSelector)
     const repo = this.store?.getRepo(target.worktree.repoId)
-    const pathDistro = !target.connectionId ? parseWslUncPath(target.worktree.path)?.distro : null
-    const wslDistro = !target.connectionId
-      ? (repo && getLocalProjectWorktreeGitOptions(this.requireStore(), repo).wslDistro) ||
-        pathDistro ||
-        null
-      : null
-    const folderWorkspace = this.store
-      ?.getFolderWorkspaces?.()
-      .some((workspace) => workspace.id === target.worktree.id)
+    // Resolve the project runtime directly so a missing/repairing runtime is
+    // distinguishable from a native project. In particular, do not let the
+    // generic git-options helper throw here and turn a selected WSL distro into
+    // an unscoped native create attempt.
+    const projectRuntime =
+      repo && !target.connectionId
+        ? resolveLocalProjectRuntimeForRepo(this.requireStore(), repo)
+        : undefined
+    const wslDistro =
+      projectRuntime?.status === 'resolved' && projectRuntime.runtime.kind === 'wsl'
+        ? projectRuntime.runtime.distro
+        : projectRuntime?.status === 'repair-required'
+          ? projectRuntime.repair.preferredRuntime.distro
+          : (parseWslUncPath(target.worktree.path)?.distro ?? null)
+    if (projectRuntime?.status === 'repair-required' && !wslDistro) {
+      throw new Error('structured_agent_session_wsl_unavailable')
+    }
+    // Folder worktrees use the canonical `folder:<id>` workspace key, while
+    // the persisted record stores the bare folder id. Compare the parsed key
+    // (rather than the raw ids) so folder and git worktrees keep the same
+    // location policy.
+    const folderWorkspace = parseWorkspaceKey(target.worktree.id)?.type === 'folder'
     return {
       executionHostId: getRuntimeFileTargetExecutionHostId({
         worktree: target.worktree,

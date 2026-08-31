@@ -1,4 +1,3 @@
-import { existsSync } from 'node:fs'
 import { win32 as pathWin32 } from 'node:path'
 
 /** Absolute path, so PATH cannot be hijacked the way it was for PowerShell (#15749). */
@@ -8,9 +7,12 @@ export function resolveWslExecutablePath(): string {
   if (cached !== undefined) {
     return cached
   }
+  // WSL is a Windows-only executable. On Windows, resolving it by bare name
+  // lets a repository-controlled PATH entry shadow the system binary (and is
+  // particularly easy to trigger from an Electron-launched process).
+  if (process.platform !== 'win32') {
+    return (cached = 'wsl.exe')
+  }
   const systemRoot = process.env.SystemRoot || 'C:\\Windows'
-  const absolute = pathWin32.join(systemRoot, 'System32', 'wsl.exe')
-  // A host with WSL elsewhere still deserves a working call.
-  cached = existsSync(absolute) ? absolute : 'wsl.exe'
-  return cached
+  return (cached = pathWin32.join(systemRoot, 'System32', 'wsl.exe'))
 }
