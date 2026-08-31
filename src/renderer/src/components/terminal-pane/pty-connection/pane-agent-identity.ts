@@ -16,6 +16,7 @@ import type { TuiAgent } from '../../../../../shared/tui-agent'
 import { isTuiAgent, TUI_AGENT_CONFIG } from '../../../../../shared/tui-agent-config'
 import { parseAppSshPtyId } from '../../../../../shared/ssh-pty-id'
 import { bindPaneSshIdentityEvidence } from './pane-ssh-identity-evidence'
+import { isRemoteExecutionHostPtyId } from '../remote-execution-host-pty'
 
 import type { ConnectPanePtySession } from './connect-pane-pty-session'
 
@@ -138,6 +139,9 @@ export function installPaneAgentIdentity(session: ConnectPanePtySession): void {
       session.bindIdentityEvidence?.(id)
       return false
     }
+    if (isRemoteExecutionHostPtyId(id)) {
+      return false
+    }
     if (!navigator.userAgent.includes('Windows')) {
       return true
     }
@@ -162,9 +166,13 @@ export function installPaneAgentIdentity(session: ConnectPanePtySession): void {
     getPtyId: () => session.transport.getPtyId(),
     isTrackablePtyId: session.isForegroundTrackingAllowed,
     readForegroundProcess: (id) =>
-      isDirectSshPtyId(id) ? Promise.resolve(null) : window.api.pty.getForegroundProcess(id),
+      isRemoteExecutionHostPtyId(id)
+        ? Promise.resolve(null)
+        : window.api.pty.getForegroundProcess(id),
     confirmForegroundProcess: (id) =>
-      isDirectSshPtyId(id) ? Promise.resolve(null) : window.api.pty.confirmForegroundProcess(id),
+      isRemoteExecutionHostPtyId(id)
+        ? Promise.resolve(null)
+        : window.api.pty.confirmForegroundProcess(id),
     publish: (entry) => useAppStore.getState().setPaneForegroundAgent(session.cacheKey, entry),
     hasKnownAgentIdentity: session.paneHasKnownAgentIdentity,
     onConfirmedShellForeground: (reason) => {

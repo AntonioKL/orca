@@ -14,7 +14,9 @@ export function bindPaneSshIdentityEvidence(
   return (ptyId, incarnationId) => {
     dispose?.()
     const parsed = parseAppSshPtyId(ptyId)
-    if (!parsed) {
+    // Older preload bridges do not expose identity pushes; keep SSH panes
+    // usable without trying to initialize the PTY dispatcher on those clients.
+    if (!parsed || typeof window.api?.pty?.onIdentityEvidence !== 'function') {
       return null
     }
     dispose = registerPtyIdentityEvidenceHandler(ptyId, (notification) => {
