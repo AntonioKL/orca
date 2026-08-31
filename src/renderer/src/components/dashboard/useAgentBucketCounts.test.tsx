@@ -56,7 +56,10 @@ describe('useAgentBucketCounts', () => {
 
     expect(result.current).toEqual({ attention: 0, working: 1, done: 0, idle: 0 })
     expect(mocks.buildDashboardBucketCounts).toHaveBeenCalledWith(
-      expect.objectContaining({ folderWorkspaces: mocks.state.folderWorkspaces }),
+      expect.objectContaining({
+        folderWorkspaces: mocks.state.folderWorkspaces,
+        unifiedTabsByWorktree: mocks.state.unifiedTabsByWorktree
+      }),
       expect.any(Number)
     )
   })

@@ -1,25 +1,18 @@
-import {
-  dashboardCardDisplayState,
-  type DashboardBucket
-} from '../../../../shared/dashboard-snapshot'
+import type { DashboardBucket } from '../../../../shared/dashboard-snapshot'
 import { migrationUnsupportedToAgentStatusEntry } from '@/lib/migration-unsupported-agent-entry'
 import { applyAgentRowLineage } from './agent-row-lineage'
-import { dashboardBucketForDotState } from './dashboard-card-bucket'
 import type { DashboardSnapshotState } from './build-dashboard-snapshot'
 import { collectActiveDashboardWorkspaces } from './dashboard-snapshot-workspaces'
+import { selectDashboardOrchestration } from './dashboard-orchestration-selection'
+import { dashboardRowBucketProjection } from './dashboard-row-bucket'
 import { buildWorktreeAgentRows } from '../sidebar/worktree-agent-rows'
 import {
   selectLiveAgentStatusEntriesForWorktree,
   selectMigrationUnsupportedEntriesForWorktree,
   selectRetainedAgentEntriesForWorktree,
-  selectRuntimeAgentOrchestrationForWorktree,
   selectTerminalLayoutsForWorktree
 } from '../sidebar/worktree-agent-row-selectors'
-import {
-  EMPTY_WORKTREE_AGENT_ORCHESTRATION,
-  releaseRuntimeAgentOrchestrationBatchCache,
-  selectRuntimeAgentOrchestrationBatch
-} from '../sidebar/worktree-agent-orchestration-batch'
+import { EMPTY_WORKTREE_AGENT_ORCHESTRATION } from '../sidebar/worktree-agent-orchestration-batch'
 import {
   selectLivePtyIdsForWorktree,
   selectRuntimePaneTitlesForWorktree
@@ -44,23 +37,10 @@ export function buildDashboardBucketCounts(
     idle: 0
   } satisfies Record<DashboardBucket, number>
   const activeWorktrees = collectActiveDashboardWorkspaces(state, false)
-  let singletonOrchestration: ReturnType<typeof selectRuntimeAgentOrchestrationForWorktree> | null =
-    null
-  let orchestrationByWorktree: ReturnType<typeof selectRuntimeAgentOrchestrationBatch> | null = null
-  if (activeWorktrees.length >= 2) {
-    orchestrationByWorktree = selectRuntimeAgentOrchestrationBatch(
-      state,
-      activeWorktrees.map(({ worktree }) => worktree.id)
-    )
-  } else {
-    releaseRuntimeAgentOrchestrationBatchCache()
-    if (activeWorktrees.length === 1) {
-      singletonOrchestration = selectRuntimeAgentOrchestrationForWorktree(
-        state,
-        activeWorktrees[0].worktree.id
-      )
-    }
-  }
+  const { singletonOrchestration, orchestrationByWorktree } = selectDashboardOrchestration(
+    state,
+    activeWorktrees
+  )
 
   for (const { worktree } of activeWorktrees) {
     const worktreeId = worktree.id
@@ -98,18 +78,7 @@ export function buildDashboardBucketCounts(
       if (row.rowSource === 'subagent') {
         continue
       }
-      const isTitleDerived = row.startedAt === 0
-      const workingMode =
-        row.state === 'working' && row.entry.workingMode === 'monitoring'
-          ? row.entry.workingMode
-          : undefined
-      const unseen =
-        !isTitleDerived &&
-        (state.acknowledgedAgentsByPaneKey?.[row.paneKey] ?? 0) < row.entry.stateStartedAt
-      const bucket = dashboardBucketForDotState(
-        dashboardCardDisplayState({ dotState: row.state, workingMode, unseen })
-      )
-      counts[bucket] += 1
+      counts[dashboardRowBucketProjection(row, state.acknowledgedAgentsByPaneKey).bucket] += 1
     }
   }
 

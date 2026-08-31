@@ -8,7 +8,7 @@ export type AgentBucketCounts = Record<DashboardBucket, number>
 
 /**
  * Per-state agent counts for the sidebar dashboard entry, using the same row
- * and bucket projection as the pop-out board without allocating its cards.
+ * and bucket derivation as the pop-out board without allocating its cards.
  * Recomputes only when an input slice changes.
  */
 export function useAgentBucketCounts(): AgentBucketCounts {
