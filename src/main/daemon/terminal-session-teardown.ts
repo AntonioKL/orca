@@ -114,27 +114,29 @@ export class TerminalSessionTeardown {
       rootCompletion: Promise.resolve(),
       session
     }
-    const sweep = killWithDescendantSweep(
-      session.pid,
-      () => {
-        // Why: natural exit reaps the PID while ps is running. Never signal that
-        // stale numeric PID after the Session no longer represents a live root.
-        if (!session.isAlive) {
-          return
+    const sweep = Promise.resolve(
+      killWithDescendantSweep(
+        session.pid,
+        () => {
+          // Why: natural exit reaps the PID while ps is running. Never signal that
+          // stale numeric PID after the Session no longer represents a live root.
+          if (!session.isAlive) {
+            return
+          }
+          entry.rootSignalled = true
+          if (entry.immediate) {
+            entry.rootCompletion = session.forceKillAndWaitForExit()
+          } else {
+            session.signalTerminationRoot()
+          }
+        },
+        {
+          // Why: the descendant rows are only authoritative while this exact
+          // Session still owns the root PID captured by ps.
+          ownsRoot: () => this.sessions.get(sessionId) === session && session.isAlive,
+          terminateOwnedTree: () => session.terminateOwnedTree()
         }
-        entry.rootSignalled = true
-        if (entry.immediate) {
-          entry.rootCompletion = session.forceKillAndWaitForExit()
-        } else {
-          session.signalTerminationRoot()
-        }
-      },
-      {
-        // Why: the descendant rows are only authoritative while this exact
-        // Session still owns the root PID captured by ps.
-        ownsRoot: () => this.sessions.get(sessionId) === session && session.isAlive,
-        terminateOwnedTree: () => session.terminateOwnedTree()
-      }
+      )
     )
     // Why: descendant capture completion only proves signals were requested;
     // destructive callers must retain the native owner until OS-confirmed exit.
