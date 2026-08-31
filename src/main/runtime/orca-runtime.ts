@@ -7376,6 +7376,11 @@ export class OrcaRuntimeService {
     const graphWasReady = this.graphStatus === 'ready'
     const previousTabs = this.tabs
     const previousLeaves = this.leaves
+    if (graph.leaves.length === 0) {
+      // A parked renderer can publish an empty graph while its PTY remains
+      // alive; retain the preallocated leaf/handle for headless delivery.
+      this.rememberDetachedPreAllocatedLeaves()
+    }
     this.tabs = new Map(graph.tabs.map((tab) => [tab.tabId, tab]))
     const lifecycleLeaves = this.reconcileMobileSessionRetirementFences(graph.leaves)
     const mobileSessionResyncWorktrees = new Set<string>()
@@ -7499,6 +7504,11 @@ export class OrcaRuntimeService {
             this.invalidateLeafHandle(oldLeafKey)
           }
         } else {
+          if (oldLeaf?.ptyId && graph.leaves.length === 0 && !nextPtyIds.has(oldLeaf.ptyId)) {
+            // A cold-parked PTY remains alive without a graph leaf; hold its
+            // staged Enter until a live idle frame authorizes submission.
+            this.orchestrationMailboxPointerDelivery.markPtyColdParked(oldLeaf.ptyId)
+          }
           this.invalidateLeafHandle(oldLeafKey)
         }
       }
@@ -13091,8 +13101,8 @@ export class OrcaRuntimeService {
       this.handles.delete(preserveHandle)
       this.syntheticTerminalHandles.delete(preserveHandle)
     }
-    return invalidated
     this.archivePtyLivenessVerdictIfInactive(ptyId)
+    return invalidated
   }
 
   private replaceSyntheticTerminalHandlesForRestoredPty(

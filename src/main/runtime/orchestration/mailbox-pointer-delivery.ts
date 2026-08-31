@@ -25,6 +25,7 @@ function pointerEnterDelayMs(): number {
 
 export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMessageWaiter> {
   private readonly state = new OrchestrationMailboxPointerState()
+  private readonly coldParkedPtys = new Set<string>()
   constructor(private readonly deps: PointerDeliveryDependencies<TWaiter>) {}
 
   deliverForHandle(handle: string, reservedTypes?: ReadonlySet<string>): void {
@@ -66,6 +67,7 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
       return
     }
     if (leaf.ptyId) {
+      this.coldParkedPtys.delete(leaf.ptyId)
       const deferredEnter = this.state.takeDeferredEnter(leaf.ptyId)
       if (deferredEnter) {
         this.state.parkDelivery(leaf.ptyId, mailboxHandle, leaf, options.reservedTypes)
@@ -182,7 +184,14 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
   }
 
   observeAgentIdle(ptyId: string): void {
+    if (this.coldParkedPtys.has(ptyId)) {
+      this.state.deferFlightUntilIdle(ptyId)
+    }
     this.state.takeDeferredEnter(ptyId)?.()
+  }
+
+  markPtyColdParked(ptyId: string): void {
+    this.coldParkedPtys.add(ptyId)
   }
 
   private redeliverAfterProbe(
