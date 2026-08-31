@@ -708,6 +708,41 @@ describe('connectPanePty', () => {
     expect(manager.closePane).not.toHaveBeenCalled()
   })
 
+  it('ignores a late spawn callback after the pane adopted a provider replacement', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    let transportPtyId = 'terminal-old'
+    const transport = createMockTransport(transportPtyId)
+    transport.getPtyId = vi.fn(() => transportPtyId)
+    transportFactoryQueue.push(transport)
+    const manager = createManager(1)
+    const deps = createDeps()
+    const pane = createPane(1)
+
+    connectPanePty(pane as never, manager as never, deps as never)
+    const onPtySpawn = createdTransportOptions[0]?.onPtySpawn as
+      | ((ptyId: string) => void)
+      | undefined
+    const onPtyRebind = createdTransportOptions[0]?.onPtyRebind as
+      | ((ptyId: string, replacedPtyId: string) => void)
+      | undefined
+    expect(onPtySpawn).toBeTypeOf('function')
+    expect(onPtyRebind).toBeTypeOf('function')
+
+    onPtySpawn?.('terminal-old')
+    transportPtyId = 'terminal-reconnected'
+    onPtyRebind?.('terminal-reconnected', 'terminal-old')
+
+    // The fixture dependency is intentionally lightweight, so mirror the live
+    // tab/layout commit that the real store performs atomically on replacement.
+    mockStoreState.tabsByWorktree['wt-1'][0]!.ptyId = 'terminal-reconnected'
+    mockStoreState.terminalLayoutsByTabId['tab-1']!.ptyIdsByLeafId![LEAF_1] = 'terminal-reconnected'
+
+    onPtySpawn?.('terminal-old')
+
+    expect(pane.container.dataset.ptyId).toBe('terminal-reconnected')
+    expect(deps.syncPanePtyLayoutBinding).not.toHaveBeenLastCalledWith(1, 'terminal-old')
+  })
+
   it('closes a split pane when an established PTY exits after output', async () => {
     const { connectPanePty } = await import('./pty-connection')
     const capturedDataCallback: { current: ((data: string) => void) | null } = { current: null }

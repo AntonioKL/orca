@@ -54,8 +54,7 @@ export function installPanePtyVisibilityBind(session: ConnectPanePtySession): vo
           existingPtyId,
           nextPtyId: ptyId,
           tabPtyId
-        }) &&
-        session.activePanePtyBinding === ptyId
+        })
       ) {
         return
       }
