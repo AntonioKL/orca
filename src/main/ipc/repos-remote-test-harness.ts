@@ -1,10 +1,14 @@
 import { EventEmitter } from 'node:events'
 import { vi } from 'vitest'
 
-// Why: the real provider surfaces Node's ENOENT; a bare Error('not found') would let a
-// fail-closed existence check misread an unrecognised failure as "absent".
-export function remoteEnoent(): NodeJS.ErrnoException {
-  return Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' })
+// Why: model what actually crosses the relay. `dispatcher-rpc-routing.ts` forwards the handler's
+// message verbatim but replaces a string errno with -32000, so classification survives only via
+// the canonical message. Setting `code: 'ENOENT'` here would make these tests pass even if the
+// message arm broke.
+export function remoteEnoent(): Error {
+  return Object.assign(new Error("ENOENT: no such file or directory, stat '/home/user/created'"), {
+    code: -32000
+  })
 }
 import type { Mock } from 'vitest'
 import type * as GitRunner from '../git/runner'
