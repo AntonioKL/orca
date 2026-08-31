@@ -1,7 +1,7 @@
 # Structured native-chat readiness report
 
 Integration branch: `brennanb2025/structured-chat-integration-latest`
-Integration head: `3db8e822e45fa3623feb610a89e37eb2744fa596`
+Integration head: `b28c430fd5b1bc25d4a2149d267a4f11a14bb5ad`
 Base recorded: `origin/main` = `02a7742406a5a84fb372d6255d5a4367421990bd`
 
 ## Exact implementation heads
@@ -23,6 +23,8 @@ Base recorded: `origin/main` = `02a7742406a5a84fb372d6255d5a4367421990bd`
 - `pnpm tc:node`: passed.
 - `pnpm tc:web`: passed.
 - Changed-file `oxlint` (including React doctor config): passed.
+- Cross-version wire suites (agent-session, browser placement, terminal, field shape, lossy snapshot): **5 files, 36 passed**.
+- `git diff --check` on the combined head: passed.
 - `ref-oss` synchronization completed before implementation/review.
 - Architecture split recorded in `docs/architecture/structured-native-chat-platform-split.md`.
 
