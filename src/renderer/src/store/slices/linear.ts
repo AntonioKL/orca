@@ -236,6 +236,7 @@ function linearWorkspaceSignature(workspace: LinearWorkspace): string {
   ].join('\u001f')
 }
 
+/** Cache-invalidation key: broader than `linearWorkspaceScopeSignature`, hashes full viewer and workspace metadata. */
 function linearStatusScopeSignature(status: LinearConnectionStatus): string {
   return JSON.stringify({
     connected: status.connected,
