@@ -248,9 +248,10 @@ export class RelayPtySourceCreditLedger {
     )
     this.upstreamOwnerByPty.delete(ptyOwnerKey(old.identity))
     this.deliveries.set(replacementKey, replacement)
+    // Retention mirrors the delivery map, so count the replacement as it enters, not after cancel.
+    this.retention.addRecord(replacement)
     this.upstreamOwnerByPty.set(ptyOwnerKey(replacement.identity), replacementKey)
     const cancellation = this.cancel(oldIdentity, 'superseded', newIdentity.deliveryToken)
-    this.retention.addRecord(replacement)
     return Object.freeze({ cancellation, recovery: Object.freeze(replacement.spans.slice()) })
   }
 

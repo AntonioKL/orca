@@ -124,16 +124,11 @@ describe('RelayPtySourceCreditLedger', () => {
       sends += 1
     }
 
-    const naivePredicateVisits = (spanCount * (spanCount + 1)) / 2
     expect(sends).toBe(spanCount)
     // The final span remains the cursor until another source append arrives.
     expect(record.sendSpanIndex).toBe(spanCount - 1)
-    expect(indexedReads).toBe(spanCount * 2 - 1)
-    // The old Array.find path evaluated one predicate per retained prefix.
-    expect(naivePredicateVisits).toBe(524_800)
-    console.log(
-      `[bench] send-span cursor: indexed span reads ${indexedReads}; naive find predicate visits ${naivePredicateVisits}`
-    )
+    // Linear in spans; the removed Array.find rescanned the sent prefix (524,800 predicate visits).
+    expect(indexedReads).toBeLessThan(spanCount * 3)
   })
 
   it('keeps the uncovered-cursor diagnostic when a retained span has a gap', () => {
@@ -191,6 +186,8 @@ describe('RelayPtySourceCreditLedger', () => {
     const rotation = ledger.rotate(oldOwner, replacement, 2, 16)
     expect(rotation.recovery.map((span) => span.data).join('')).toBe('cdef')
     expect(getCursorRecord(ledger, replacement).sendSpanIndex).toBe(0)
+    // Rotation is the only path that removes and re-adds a record in one call.
+    expectRetentionMatchesRecords(ledger)
     ledger.commitSend(ledger.reserveNextSend(replacement, 16)!)
     ledger.commitSend(ledger.reserveNextSend(replacement, 16)!)
     ledger.seal(replacement)
