@@ -1,7 +1,7 @@
 # Structured native-chat readiness report
 
 Integration branch: `brennanb2025/structured-chat-integration-latest`
-Exact integration head: `f5a78dfe8cb907b26cbfcc3f1da6d8c1b1ae4bd3`
+Exact integration head: `2dd6d4d2e9cb36d7f82aec72e2688fea2a08b6a7`
 
 ## Architecture decision
 
@@ -44,6 +44,6 @@ the recoverable legacy terminal path is retained.
 
 ## Recommendation
 
-Internal checks are green at this exact head. Windows, WSL, SSH, paired remote, packaged Linux,
-and Electron evidence gates remain open; keep those units at **land after fixes/evidence** and do
-not describe them as live-supported until the required host runs complete.
+Internal checks and Electron UI proof are green at this exact head. Windows, WSL, SSH, paired
+remote, and packaged Linux evidence gates remain open; keep those units at **land after
+fixes/evidence** and do not describe them as live-supported until the required host runs complete.
