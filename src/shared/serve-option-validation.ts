@@ -34,6 +34,17 @@ const SERVE_SECURITY_FLAG_NAMES = [
   '--serve-pairing-address'
 ] as const
 
+const SERVE_VALUE_FLAG_NAMES = new Set([
+  '--port',
+  '--serve-port',
+  '--pairing-address',
+  '--serve-pairing-address',
+  '--project-root',
+  '--serve-project-root',
+  '--pairing-code',
+  '--environment'
+])
+
 function flagName(token: string): string {
   const equalsIndex = token.indexOf('=')
   return equalsIndex === -1 ? token : token.slice(0, equalsIndex)
@@ -41,7 +52,8 @@ function flagName(token: string): string {
 
 /** Reject only near-miss pairing flags; Electron/Chromium switches stay open-ended. */
 export function getServeFlagTypoError(argv: readonly string[]): string | null {
-  for (const token of argv) {
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index]!
     if (token === '--') {
       break
     }
@@ -60,6 +72,16 @@ export function getServeFlagTypoError(argv: readonly string[]): string | null {
     }
     if (suggestion) {
       return `Unknown flag ${name}. Did you mean ${suggestion}?`
+    }
+
+    // A value that is not flag-shaped belongs to the preceding known value flag.
+    // A `--`-prefixed space token remains a flag, matching parseArgs; use `=` when
+    // a value itself starts with `--`.
+    if (!token.includes('=') && SERVE_VALUE_FLAG_NAMES.has(name)) {
+      const value = argv[index + 1]
+      if (value !== undefined && !value.startsWith('--')) {
+        index += 1
+      }
     }
   }
   return null

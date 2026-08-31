@@ -154,7 +154,14 @@ export function normalizeServeModeArgv(argv: readonly string[]): string[] {
       continue
     }
     if (eq !== -1) {
-      next.push(valueFlag, token.slice(eq + 1))
+      const value = token.slice(eq + 1)
+      // Preserve the unambiguous `=` form when its value starts with `--`; splitting
+      // it would make the value look like a second option to the direct parser.
+      if (value.startsWith('--')) {
+        next.push(`${valueFlag}=${value}`)
+      } else {
+        next.push(valueFlag, value)
+      }
       continue
     }
     next.push(valueFlag)
