@@ -3,6 +3,7 @@ import {
   makePaneKey,
   parseLegacyNumericPaneKey
 } from '../../../../shared/stable-pane-id'
+import { isRemoteAgentHooksEnabled } from '../../../../shared/agent-hook-relay'
 import { isOpaqueRemintedPaneKey } from '../../../../shared/pane-key-alias'
 import { isValidTerminalTabId } from '../../../../shared/terminal-tab-id'
 import { isClaudeAuthSwitchInProgress } from '../../../claude-accounts/live-pty-gate'
@@ -114,7 +115,8 @@ export async function assemblePtyIpcSpawnEnv(ctx: PtyIpcSpawnState): Promise<voi
     ? ctx.baseEnv[resolvePathEnvKey(ctx.baseEnv, process.platform)]
     : undefined
   ctx.agentTeamsEnvToDelete = shouldRefreshAgentTeamsEnv ? ['TERM_PROGRAM'] : undefined
-  if (ctx.baseEnv && ctx.stablePaneKey) {
+  const canForwardPaneEnv = !args.connectionId || isRemoteAgentHooksEnabled()
+  if (ctx.baseEnv && ctx.stablePaneKey && canForwardPaneEnv) {
     ctx.baseEnv.ORCA_PANE_KEY = ctx.stablePaneKey
     if (typeof args.tabId === 'string') {
       ctx.baseEnv.ORCA_TAB_ID = args.tabId
