@@ -80,8 +80,12 @@ async function runPty(options: {
   proc.onData((data) => {
     output += data
   })
+  let exited = false
   const exitPromise = new Promise<number>((resolve) => {
-    proc.onExit(({ exitCode }) => resolve(exitCode))
+    proc.onExit(({ exitCode }) => {
+      exited = true
+      resolve(exitCode)
+    })
   })
   let timeout: ReturnType<typeof setTimeout> | undefined
   const timeoutPromise = new Promise<never>((_resolve, reject) => {
@@ -102,10 +106,12 @@ async function runPty(options: {
     if (timeout) {
       clearTimeout(timeout)
     }
-    try {
-      proc.kill()
-    } catch {
-      // The PTY may already have exited.
+    if (!exited) {
+      try {
+        proc.kill()
+      } catch {
+        // The PTY may have exited while cleanup was starting.
+      }
     }
   }
 }
