@@ -81,7 +81,10 @@ export async function killPtySessions(
         }
       }
       fenceCapabilities.set(ref.id, fenceCapable)
-      if (fenceCapable && !ref.incarnationId) {
+      // Orphan cleanup must prove the exact incarnation before acting. Explicit
+      // owner-close is already user-authorized and retains legacy id-only behavior
+      // when the listing omits an incarnation.
+      if (intent === 'orphan-cleanup' && fenceCapable && !ref.incarnationId) {
         return { ...ref, verdict: 'refused', reason: 'missing incarnation fence' }
       }
       try {

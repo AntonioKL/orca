@@ -69,6 +69,24 @@ describe('killPtySessions input bounds', () => {
     ])
   })
 
+  it('allows explicit owner-close when a capable host omits incarnation evidence', async () => {
+    const provider = {
+      listProcesses: vi.fn(async () => []),
+      supportsIncarnationFence: vi.fn(() => true)
+    }
+    const shutdown = vi.fn(async () => undefined)
+    const results = await killPtySessions([{ id: 'session-1' }], 'owner-close', {
+      listProviders: () => [{ provider: provider as never }],
+      providerForSession: () => provider as never,
+      shutdown,
+      supportsIncarnationFence: (target, id) =>
+        target.supportsIncarnationFence?.({ sessionId: id }) ?? false
+    })
+
+    expect(shutdown).toHaveBeenCalledTimes(1)
+    expect(results).toEqual([{ id: 'session-1', verdict: 'exited' }])
+  })
+
   it('resolves incarnation-fence capability per session route', async () => {
     const provider = {
       listProcesses: vi.fn(async () => []),
