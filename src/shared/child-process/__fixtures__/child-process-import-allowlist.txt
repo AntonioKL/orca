@@ -41,12 +41,14 @@ src/main/ai-vault/session-scanner-service-spawn.ts
 src/main/ai-vault/session-scanner-service-test-child.ts
 src/main/app-icon.ts
 src/main/automations/precheck-runner.ts
-src/main/browser/agent-browser-bridge.ts
-src/main/browser/browser-cookie-import.ts
+src/main/browser/agent-browser-bridge-execution.ts
+src/main/browser/agent-browser-bridge-raw-process.ts
+src/main/browser/agent-browser-bridge-state.ts
+src/main/browser/agent-browser-bridge-types.ts
 src/main/browser/browser-route-egress-electron-launch.ts
 src/main/browser/browser-route-persisted-worker-electron-process.ts
 src/main/claude-accounts/keychain.ts
-src/main/codex-accounts/runtime-home-service.ts
+src/main/codex-accounts/runtime-home-service-wsl.ts
 src/main/codex-accounts/service.ts
 src/main/codex/codex-app-server-client.ts
 src/main/codex/codex-app-server-posix-supervisor.ts
@@ -86,7 +88,8 @@ src/main/ipc/developer-permissions.ts
 src/main/ipc/filesystem-list-files-git-fallback.ts
 src/main/ipc/filesystem-list-files.ts
 src/main/ipc/filesystem-watcher-wsl.ts
-src/main/ipc/filesystem.ts
+src/main/ipc/filesystem/filesystem-handler-context.ts
+src/main/ipc/filesystem/filesystem-search-handlers.ts
 src/main/ipc/local-network-connection-test.ts
 src/main/ipc/macos-keyboard-layout-snapshot.ts
 src/main/ipc/notebook.ts
@@ -128,7 +131,8 @@ src/main/pty/posix-pty-process-groups.ts
 src/main/pty/windows-environment-path.ts
 src/main/rate-limits/codex-fetcher.ts
 src/main/rate-limits/gemini-cli-oauth-extractor.ts
-src/main/runtime/orca-runtime-files.ts
+src/main/runtime/runtime-file-commands-active-runtime-text-searches.ts
+src/main/runtime/runtime-file-commands-search-local-runtime-files.ts
 src/main/runtime/tls-certificate.ts
 src/main/runtime/windows-default-route-interfaces.ts
 src/main/runtime/windows-mobile-firewall.ts
