@@ -3125,10 +3125,6 @@ function TerminalPane(
     structuredSessionAgent,
     terminalAgent: chatPaneResolvedAgent ?? chatPaneLaunchAgent
   })
-  const structuredChatTarget = useMemo(() => {
-    const environmentId = getRuntimeEnvironmentIdForWorktree(useAppStore.getState(), worktreeId)
-    return environmentId ? { kind: 'environment' as const, environmentId } : { kind: 'local' as const }
-  }, [worktreeId])
   // The launch draft is keyed by tab, so gate it on the same pane ownership the
   // launch agent uses: a split sibling must not inherit the seeded text.
   const chatPaneOwnsTabWideLaunchDraft = nativeChatLeafOwnsTabWideEvidence({
