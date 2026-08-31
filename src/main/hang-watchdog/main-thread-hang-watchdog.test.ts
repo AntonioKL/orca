@@ -71,20 +71,27 @@ describe('installMainThreadHangWatchdog', () => {
     delete process.env.ORCA_HANG_WATCHDOG_CHECK_INTERVAL_MS
   })
 
-  it('is a no-op off macOS', () => {
-    expect(
-      withPlatform('win32', () => installMainThreadHangWatchdog({ userDataPath: '/ud' }))
-    ).toBeNull()
-    expect(
-      withPlatform('linux', () => installMainThreadHangWatchdog({ userDataPath: '/ud' }))
-    ).toBeNull()
-    expect(workerState.calls).toHaveLength(0)
-  })
+  it.each(['darwin', 'win32', 'linux'] as NodeJS.Platform[])(
+    'installs on %s when packaged',
+    (platform) => {
+      workerState.instance = fakeWorker()
+      expect(
+        withPlatform(platform, () => installMainThreadHangWatchdog({ userDataPath: '/ud' }))
+      ).not.toBeNull()
+      expect(workerState.calls).toHaveLength(1)
+    }
+  )
 
   it('is a no-op in unpackaged builds unless forced', () => {
     appMock.isPackaged = false
     expect(
       withPlatform('darwin', () => installMainThreadHangWatchdog({ userDataPath: '/ud' }))
+    ).toBeNull()
+    expect(
+      withPlatform('win32', () => installMainThreadHangWatchdog({ userDataPath: '/ud' }))
+    ).toBeNull()
+    expect(
+      withPlatform('linux', () => installMainThreadHangWatchdog({ userDataPath: '/ud' }))
     ).toBeNull()
     process.env.ORCA_HANG_WATCHDOG_FORCE = '1'
     const worker = fakeWorker()

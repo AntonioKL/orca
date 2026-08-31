@@ -100,6 +100,40 @@ describe('createHangWatchdogDetectionLoop', () => {
     expect(onHangResolved).toHaveBeenCalledWith(13 * CHECK_INTERVAL_MS)
   })
 
+  it('closes an open episode at suspend and resets on resume', () => {
+    const onHangSuspended = vi.fn()
+    let now = 0
+    const detected = vi.fn()
+    const resolved = vi.fn()
+    const machine = createHangWatchdogDetectionLoop({
+      timeoutMs: TIMEOUT_MS,
+      checkIntervalMs: CHECK_INTERVAL_MS,
+      now: () => now,
+      onHangDetected: detected,
+      onHangResolved: resolved,
+      onHangSuspended
+    })
+    for (let i = 0; i < 9; i++) {
+      now += CHECK_INTERVAL_MS
+      machine.tick()
+    }
+    now += CHECK_INTERVAL_MS
+    machine.tick()
+    expect(detected).toHaveBeenCalledWith(50_000)
+    now = 52_000
+    machine.setSuspended(true)
+    expect(onHangSuspended).toHaveBeenCalledWith(52_000)
+    expect(resolved).not.toHaveBeenCalled()
+    now = 120_000
+    machine.setSuspended(false)
+    now = 164_999
+    machine.tick()
+    expect(detected).toHaveBeenCalledTimes(1)
+    now = 165_000
+    machine.tick()
+    expect(detected).toHaveBeenCalledTimes(1)
+  })
+
   it('does not report resolution when no hang was ever detected', () => {
     const { loop, onHangResolved, advance } = loopWithClock()
     for (let i = 0; i < 5; i++) {

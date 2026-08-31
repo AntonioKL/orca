@@ -383,6 +383,12 @@ import {
 import { recordProcessGoneCrash as recordProcessGoneCrashEvent } from './crash-reporting/process-gone-recorder'
 import { startCrashpadCapture } from './crash-reporting/crashpad-capture'
 import { startPreGoneProcessMetricsSampling } from './crash-reporting/process-gone-diagnostics'
+import { captureFreezeCensus } from './crash-reporting/freeze-census'
+import {
+  createRendererUnresponsiveEpisodeMachine,
+  shouldSuppressRendererUnresponsive,
+  type RendererEpisodeSessionBudget
+} from './crash-reporting/renderer-unresponsive-episodes'
 import { resolveExpectedTeardownScope } from './crash-reporting/expected-teardown-state'
 import {
   advanceSyntheticTitleSpinnerEntries,
@@ -418,6 +424,29 @@ import { installLinuxBareOrcaDispatcher } from './cli/linux-bare-orca-dispatcher
 import { reconcileManagedWslCliRegistrations } from './cli/wsl-cli-registration-reconciliation'
 
 let mainWindow: BrowserWindow | null = null
+const rendererFreezeEpisodes = new Map<
+  number,
+  ReturnType<typeof createRendererUnresponsiveEpisodeMachine>
+>()
+const rendererFreezeEpisodeBudget: RendererEpisodeSessionBudget = { count: 0 }
+
+function rendererEpisodeMachine(webContentsId: number) {
+  let machine = rendererFreezeEpisodes.get(webContentsId)
+  if (!machine) {
+    machine = createRendererUnresponsiveEpisodeMachine({
+      maxEpisodes: 5,
+      sessionBudget: rendererFreezeEpisodeBudget,
+      isSuppressed: () =>
+        shouldSuppressRendererUnresponsive({
+          isDev: !app.isPackaged,
+          isDevToolsOpened: Boolean(mainWindow?.webContents.isDevToolsOpened?.()),
+          debuggerAttached: Boolean(mainWindow?.webContents.debugger?.isAttached)
+        })
+    })
+    rendererFreezeEpisodes.set(webContentsId, machine)
+  }
+  return machine
+}
 /** Whether a manual app.quit() (Cmd+Q) is in progress; lets the close handler skip the running-process confirmation and go straight to close. */
 let isQuitting = false
 let store: Store | null = null
@@ -1531,6 +1560,15 @@ function openMainWindow(options: { revealOnDidFinishLoad?: boolean } = {}): Brow
       clearExpectedRendererReload()
     },
     onRendererProcessGone: (details, webContentsId) => {
+      const episode = rendererEpisodeMachine(webContentsId).onProcessGone()
+      if (episode) {
+        track('renderer_unresponsive_closed', {
+          episode_id: episode.episodeId,
+          outcome: episode.outcome,
+          duration_ms: episode.durationMs,
+          ...captureFreezeCensus()
+        })
+      }
       recordProcessGoneCrash(
         'renderer',
         'renderer',
@@ -1541,6 +1579,56 @@ function openMainWindow(options: { revealOnDidFinishLoad?: boolean } = {}): Brow
         },
         webContentsId
       )
+    },
+    onRendererUnresponsive: (webContentsId) => {
+      const machine = rendererEpisodeMachine(webContentsId)
+      const episode = machine.onUnresponsive()
+      if (!episode) {
+        return
+      }
+      const census = captureFreezeCensus()
+      recordDurableCrashBreadcrumb('renderer_unresponsive_detected', {
+        episode_id: episode.episodeId,
+        ...census
+      })
+      track('renderer_unresponsive_detected', {
+        episode_id: episode.episodeId,
+        window_kind: 'main',
+        ...census
+      })
+    },
+    onRendererResponsive: (webContentsId) => {
+      const episode = rendererEpisodeMachine(webContentsId).onResponsive()
+      if (!episode) {
+        return
+      }
+      const census = captureFreezeCensus()
+      recordDurableCrashBreadcrumb('renderer_unresponsive_closed', {
+        episode_id: episode.episodeId,
+        outcome: episode.outcome,
+        duration_ms: episode.durationMs,
+        ...census
+      })
+      track('renderer_unresponsive_closed', {
+        episode_id: episode.episodeId,
+        outcome: episode.outcome,
+        duration_ms: episode.durationMs,
+        ...census
+      })
+    },
+    onRendererClosed: (webContentsId) => {
+      // process-gone callback above owns pairing precedence; this hook is for teardown abandonment.
+      if (mainWindow?.isDestroyed()) {
+        const episode = rendererEpisodeMachine(webContentsId).onAbandoned()
+        if (episode) {
+          track('renderer_unresponsive_closed', {
+            episode_id: episode.episodeId,
+            outcome: episode.outcome,
+            duration_ms: episode.durationMs,
+            ...captureFreezeCensus()
+          })
+        }
+      }
     },
     shouldRecoverRenderer: (details, webContentsId) =>
       shouldRecoverRendererAfterProcessGone({
@@ -2400,7 +2488,9 @@ void app.whenReady().then(async () => {
     recordDurableCrashBreadcrumb('main_thread_hang_detected', {
       unresponsiveMs: hangDetection.unresponsiveMs,
       previousPid: hangDetection.parentPid,
-      selfRecovered: hangDetection.selfRecovered
+      selfRecovered: hangDetection.selfRecovered,
+      ...(hangDetection.detectedAtMs !== undefined && { episodeId: hangDetection.detectedAtMs }),
+      ...hangDetection.census
     })
   }
   // Why: install certificate decisions before any webview or headless window issues its first TLS request.
@@ -2663,7 +2753,9 @@ void app.whenReady().then(async () => {
   if (hangDetection) {
     track('main_thread_hang_detected', {
       unresponsive_ms: Math.round(hangDetection.unresponsiveMs),
-      self_recovered: hangDetection.selfRecovered
+      self_recovered: hangDetection.selfRecovered,
+      ...(hangDetection.detectedAtMs !== undefined && { episode_id: hangDetection.detectedAtMs }),
+      ...hangDetection.census
     })
   }
   // Why: the trust-grant module is bundled into plain-node CLI entries where

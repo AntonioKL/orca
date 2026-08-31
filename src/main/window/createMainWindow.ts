@@ -126,6 +126,14 @@ export function createMainWindow(
     }
   })
   const rendererWebContentsId = mainWindow.webContents.id
+  // Main-side unresponsive hooks remain active even while the renderer is frozen.
+  mainWindow.webContents.on('unresponsive', () =>
+    opts?.onRendererUnresponsive?.(rendererWebContentsId)
+  )
+  mainWindow.webContents.on('responsive', () => opts?.onRendererResponsive?.(rendererWebContentsId))
+  mainWindow.webContents.on('render-process-gone', () =>
+    opts?.onRendererClosed?.(rendererWebContentsId)
+  )
   installWindowsPathRegistryChangeListener(mainWindow)
   // Why: native paste fallback is privileged IPC; only the top-level renderer may request it.
   setTrustedUIRendererWebContentsId(rendererWebContentsId)

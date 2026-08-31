@@ -9,10 +9,33 @@ import {
   type HangWatchdogWorkerData,
   type MainToHangWatchdogWorkerMessage
 } from './hang-watchdog-worker-protocol'
+import { captureFreezeCensus } from '../crash-reporting/freeze-census'
 
 export type MainThreadHangWatchdogHandle = {
   stop: () => void
   worker: Worker
+}
+
+export type WatchdogLaneEvent = {
+  unresponsiveMs: number
+  episodeId?: number
+  census?: Record<string, number>
+}
+const WATCHDOG_QUEUE_CAP = 8
+const watchdogQueue: WatchdogLaneEvent[] = []
+let watchdogDroppedCount = 0
+export function queueWatchdogLaneEvent(event: WatchdogLaneEvent): void {
+  if (watchdogQueue.length >= WATCHDOG_QUEUE_CAP) {
+    watchdogQueue.shift()
+    watchdogDroppedCount += 1
+  }
+  watchdogQueue.push(event)
+}
+export function drainWatchdogLaneEvents(): { events: WatchdogLaneEvent[]; dropped_count: number } {
+  const events = watchdogQueue.splice(0)
+  const dropped_count = watchdogDroppedCount
+  watchdogDroppedCount = 0
+  return { events, dropped_count }
 }
 
 function positiveTiming(value: string | undefined, fallback: number): number {
@@ -23,9 +46,6 @@ function positiveTiming(value: string | undefined, fallback: number): number {
 export function installMainThreadHangWatchdog(options: {
   userDataPath: string
 }): MainThreadHangWatchdogHandle | null {
-  if (process.platform !== 'darwin') {
-    return null
-  }
   // Why: dev main threads pause in debuggers routinely; watch packaged builds only unless forced.
   if (!app.isPackaged && process.env.ORCA_HANG_WATCHDOG_FORCE !== '1') {
     return null
@@ -66,7 +86,7 @@ export function installMainThreadHangWatchdog(options: {
     }
   }
   const heartbeatTimer = setInterval(() => {
-    postMessage({ type: 'heartbeat' })
+    postMessage({ type: 'heartbeat', census: captureFreezeCensus() })
   }, HANG_WATCHDOG_HEARTBEAT_INTERVAL_MS)
   const stop = (): void => {
     if (stopped) {
