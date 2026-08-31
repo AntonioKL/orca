@@ -9,7 +9,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { projectWorkspaceSurfaces } from './workspace-surface-projection'
 import { getIndexedAllWorktrees, getIndexedWorktreeMap } from '../store/worktree-repo-index'
 import type { ExecutionHostId } from '../../../shared/execution-host'
@@ -118,6 +118,36 @@ describe('projectWorkspaceSurfaces', () => {
     const surfaces = project({ folderWorkspaces: [runtimeFolder, localFolder] })
 
     expect(surfaces).toEqual([{ id: 'folder:folder-shared', path: '/remote/orca' }])
+  })
+
+  it('keeps first-wins for a colliding folder workspace that is not the active one', () => {
+    // A resolved host only breaks its own workspace's tie; another id's resolution must not move it.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const surfaces = project({
+      folderWorkspaces: [localFolder, runtimeFolder],
+      activeWorkspaceId: 'folder:other-workspace',
+      activeWorkspaceResolvedHostId: 'runtime:env-1'
+    })
+
+    expect(surfaces).toEqual([{ id: 'folder:folder-shared', path: '/work/orca-local' }])
+    expect(warn).toHaveBeenCalledWith(
+      '[workspace-surface] dropping colliding folder path',
+      expect.objectContaining({ kept: '/work/orca-local', dropped: '/remote/orca' })
+    )
+    warn.mockRestore()
+  })
+
+  it('keeps the resolved-host path when the colliding rows swap order', () => {
+    // `mergeFetchedFolderWorkspacesForHost` reaps and re-appends a host's rows across a
+    // disconnect, so which row is first flips mid-session; a resolved host must pin the path.
+    const surfaces = project({
+      folderWorkspaces: [runtimeFolder, localFolder],
+      activeWorkspaceId: 'folder:folder-shared',
+      activeWorkspaceResolvedHostId: 'local'
+    })
+
+    expect(surfaces).toEqual([{ id: 'folder:folder-shared', path: '/work/orca-local' }])
   })
 
   it('switches the active folder path from first-wins to the host that hydrates', () => {

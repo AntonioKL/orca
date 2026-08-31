@@ -78,6 +78,15 @@ export function projectWorkspaceSurfaces({
       getStampedFolderWorkspaceHostId(workspace) === activeWorkspaceResolvedHostId
     ) {
       surfaces[existingIndex] = surface
+    } else if (surfaces[existingIndex].path !== surface.path) {
+      // The dropped row's path is the PTY cwd for a tab with no startupCwd, so make the
+      // unresolvable drop observable rather than silently spawning in the other host's directory.
+      console.warn('[workspace-surface] dropping colliding folder path', {
+        id,
+        kept: surfaces[existingIndex].path,
+        dropped: surface.path,
+        droppedHost: getCatalogOwnerHostId(workspace)
+      })
     }
   }
   return surfaces
