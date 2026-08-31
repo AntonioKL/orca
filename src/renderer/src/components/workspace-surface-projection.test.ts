@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { projectWorkspaceSurfaces } from './workspace-surface-projection'
-import { getIndexedWorktreeMap } from '../store/worktree-repo-index'
+import { getIndexedAllWorktrees, getIndexedWorktreeMap } from '../store/worktree-repo-index'
 import type { ExecutionHostId } from '../../../shared/execution-host'
 import type { FolderWorkspace } from '../../../shared/folder-workspace-types'
 import type { Worktree } from '../../../shared/worktree/types'
@@ -160,6 +160,148 @@ describe('projectWorkspaceSurfaces', () => {
       { id: SHARED_WORKTREE_ID, path: '/work/orca-feature' },
       { id: 'repo-shared::/work/orca-other', path: '/work/orca-other' }
     ])
+  })
+})
+
+// The collapse only ever removes a duplicate id. Losing a surface the user owns
+// unmounts live terminals, which is strictly worse than the duplicate mount this
+// fixes, so every shape that reaches the workbench is pinned against dropping one.
+describe('projectWorkspaceSurfaces never under-selects', () => {
+  const unqualifiedWorktree: Worktree = { ...localWorktree, hostId: undefined }
+  const secondSshWorktree: Worktree = { ...localWorktree, hostId: 'ssh:ci-box' }
+  const localOnlyFolder: FolderWorkspace = {
+    ...localFolder,
+    id: 'folder-local-only',
+    executionHostId: undefined
+  }
+
+  it('emits every distinct id from a mixed local, SSH, runtime and folder catalog', () => {
+    const distinctWorktree: Worktree = {
+      ...sshWorktree,
+      id: 'repo-shared::/work/orca-ssh-only',
+      path: '/work/orca-ssh-only'
+    }
+    const distinctFolder: FolderWorkspace = { ...runtimeFolder, id: 'folder-runtime-only' }
+    const worktrees = [localWorktree, sshWorktree, secondSshWorktree, distinctWorktree]
+    const folderWorkspaces = [localFolder, runtimeFolder, localOnlyFolder, distinctFolder]
+
+    const surfaceIds = project({ worktrees, folderWorkspaces }).map((surface) => surface.id)
+
+    const expectedIds = new Set([
+      ...worktrees.map((worktree) => worktree.id),
+      ...folderWorkspaces.map((workspace) => `folder:${workspace.id}`)
+    ])
+    expect(new Set(surfaceIds)).toEqual(expectedIds)
+    expect(surfaceIds).toHaveLength(expectedIds.size)
+  })
+
+  it('mounts a local-only catalog whose rows never name a host', () => {
+    const otherUnqualified: Worktree = {
+      ...unqualifiedWorktree,
+      id: 'repo-shared::/work/orca-other',
+      path: '/work/orca-other'
+    }
+
+    expect(
+      project({
+        worktrees: [unqualifiedWorktree, otherUnqualified],
+        folderWorkspaces: [localOnlyFolder]
+      })
+    ).toEqual([
+      { id: SHARED_WORKTREE_ID, path: '/work/orca-feature' },
+      { id: 'repo-shared::/work/orca-other', path: '/work/orca-other' },
+      { id: 'folder:folder-local-only', path: '/work/orca-local' }
+    ])
+  })
+
+  it('keeps the id when an unqualified row collides with a host-qualified one', () => {
+    // `composeWorktreeHostIdentity` gives an unqualified row its own bucket, so
+    // the pair survives the host-qualified index and must still collapse to one id.
+    expect(project({ worktrees: [unqualifiedWorktree, localWorktree] })).toEqual([
+      { id: SHARED_WORKTREE_ID, path: '/work/orca-feature' }
+    ])
+    expect(project({ worktrees: [localWorktree, unqualifiedWorktree] })).toEqual([
+      { id: SHARED_WORKTREE_ID, path: '/work/orca-feature' }
+    ])
+  })
+
+  it('collapses two SSH hosts publishing one worktree id, with no local row present', () => {
+    expect(project({ worktrees: [sshWorktree, secondSshWorktree] })).toEqual([
+      { id: SHARED_WORKTREE_ID, path: '/work/orca-feature' }
+    ])
+  })
+
+  it('keeps a git worktree and a folder workspace apart even on the same id text', () => {
+    // `folderWorkspaceKey` prefixes `folder:`; a worktree id is `repoId::path`.
+    const surfaces = project({
+      worktrees: [{ ...localWorktree, id: 'folder-shared', path: '/work/collide' }],
+      folderWorkspaces: [localFolder]
+    })
+
+    expect(surfaces).toEqual([
+      { id: 'folder-shared', path: '/work/collide' },
+      { id: 'folder:folder-shared', path: '/work/orca-local' }
+    ])
+  })
+
+  it('collapses folder rows across three hosts to one surface without losing the id', () => {
+    const sshFolder: FolderWorkspace = {
+      ...localFolder,
+      folderPath: '/ssh/orca',
+      executionHostId: undefined,
+      connectionId: 'build-box'
+    }
+
+    const surfaces = project({
+      folderWorkspaces: [localFolder, runtimeFolder, sshFolder],
+      activeWorkspaceId: 'folder:folder-shared',
+      activeWorkspaceResolvedHostId: 'ssh:build-box'
+    })
+
+    expect(surfaces).toEqual([{ id: 'folder:folder-shared', path: '/ssh/orca' }])
+  })
+
+  it('does not let a folder row that names no host win the local tie-break', () => {
+    // `getCatalogOwnerHostId` defaults an unstamped row to `local`; honouring that
+    // would mount the unstamped row's path over the row that really is local.
+    const unstampedPeer: FolderWorkspace = {
+      ...localFolder,
+      folderPath: '/unknown/orca',
+      executionHostId: undefined,
+      connectionId: undefined
+    }
+
+    expect(
+      project({
+        folderWorkspaces: [localFolder, unstampedPeer],
+        activeWorkspaceId: 'folder:folder-shared',
+        activeWorkspaceResolvedHostId: 'local'
+      })
+    ).toEqual([{ id: 'folder:folder-shared', path: '/work/orca-local' }])
+  })
+
+  it('emits nothing extra and nothing missing for an empty catalog', () => {
+    expect(project({})).toEqual([])
+  })
+})
+
+// The feed swapped `useAllWorktrees` for `useWorktreeMap`. Both read the same
+// WeakMap-cached snapshot of `worktreesByRepo`, so the zustand `Object.is` compare
+// still re-renders on exactly the writes that replace the slice — no dropped update.
+describe('worktree surface feed subscription identity', () => {
+  const worktreesByRepo = { 'repo-shared': [localWorktree, sshWorktree] }
+
+  it('returns a stable map for an unchanged slice and a fresh one after a replace', () => {
+    expect(getIndexedWorktreeMap(worktreesByRepo)).toBe(getIndexedWorktreeMap(worktreesByRepo))
+    expect(getIndexedWorktreeMap({ ...worktreesByRepo })).not.toBe(
+      getIndexedWorktreeMap(worktreesByRepo)
+    )
+  })
+
+  it('exposes the same id set the host-qualified array does', () => {
+    expect(new Set(getIndexedWorktreeMap(worktreesByRepo).keys())).toEqual(
+      new Set(getIndexedAllWorktrees(worktreesByRepo).map((worktree) => worktree.id))
+    )
   })
 })
 

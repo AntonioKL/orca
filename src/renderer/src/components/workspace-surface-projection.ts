@@ -1,4 +1,4 @@
-import type { ExecutionHostId } from '../../../shared/execution-host'
+import { parseExecutionHostId, type ExecutionHostId } from '../../../shared/execution-host'
 import type { FolderWorkspace } from '../../../shared/folder-workspace-types'
 import type { Worktree } from '../../../shared/worktree/types'
 import { folderWorkspaceKey } from '../../../shared/workspace-scope'
@@ -10,6 +10,23 @@ type FolderWorkspaceSurfaceRow = Pick<
   FolderWorkspace,
   'id' | 'folderPath' | 'connectionId' | 'executionHostId'
 >
+
+/**
+ * The row's own host, or null when the row names none.
+ *
+ * `getCatalogOwnerHostId` defaults an unstamped row to `local`, which is the
+ * right answer for an owner lookup but the wrong one for a tie-break: it would
+ * let a row that never named a host win the `local` tie and mount another
+ * host's path. Only a row that names its own host may claim the collision.
+ */
+function getStampedFolderWorkspaceHostId(
+  workspace: FolderWorkspaceSurfaceRow
+): ExecutionHostId | null {
+  const namesOwnHost = Boolean(
+    parseExecutionHostId(workspace.executionHostId) ?? workspace.connectionId?.trim()
+  )
+  return namesOwnHost ? getCatalogOwnerHostId(workspace) : null
+}
 
 /**
  * The terminal workbench's mount set: exactly one surface per workspace id.
@@ -53,11 +70,12 @@ export function projectWorkspaceSurfaces({
     // Why: a folder-workspace id is opaque, not path-derived, so colliding hosts
     // disagree on the path; only the active workspace's resolved host breaks the tie.
     // Deriving that host from the row alone is sufficient because every stored row is
-    // stamped with an explicit `executionHostId` by `folderWorkspaceWithFetchedOwner`.
+    // stamped with an explicit `executionHostId` by `folderWorkspaceWithFetchedOwner`;
+    // an unstamped row keeps first-wins rather than guessing.
     if (
       activeWorkspaceResolvedHostId &&
       id === activeWorkspaceId &&
-      getCatalogOwnerHostId(workspace) === activeWorkspaceResolvedHostId
+      getStampedFolderWorkspaceHostId(workspace) === activeWorkspaceResolvedHostId
     ) {
       surfaces[existingIndex] = surface
     }
