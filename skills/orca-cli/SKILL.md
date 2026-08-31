@@ -12,8 +12,8 @@ description: >-
   PTYs, Playwright, or Computer Use when the task touches Orca-managed state.
   Use Computer Use for external browser windows, webviews, or desktop UI only
   when the task requires OS/window-level control such as focus, menus, dialogs,
-  coordinates, or screenshots. Use a browser/page skill for DOM, content, form,
-  console, network, or Playwright automation.
+  coordinates, or screenshots. Use `orca-cli` for Orca's embedded pages and a
+  page-automation tool such as Playwright or CDP for external pages.
 ---
 
 # Orca CLI

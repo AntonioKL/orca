@@ -5,8 +5,8 @@ description: >-
   local app windows. Use when a task must read or operate a native app or an
   external browser window (for example, Chrome, Edge, or Safari) or an app
   webview. Do not use for Orca's embedded browser or page-only browser
-  automation; use the Orca CLI or
-  a browser/page skill for those surfaces.
+  automation. Use `orca-cli` for Orca's embedded pages and a page-automation
+  tool such as Playwright or CDP for external pages.
 ---
 
 # Computer Use
@@ -16,8 +16,9 @@ reference is served by the `orca` binary itself — kept out of this file on pur
 never drift from the binary that will actually run your commands.
 
 Engage Orca's computer-use surface when a task requires desktop-level access to a visible local
-app or window, including a native app or an external browser window/webview. Orca's embedded
-browser and page-only browser automation belong to the Orca CLI or a browser/page skill.
+app or window, including a native app or an external browser window/webview. Do not use for
+Orca's embedded browser or page-only browser automation. Use `orca-cli` for Orca's embedded
+pages and a page-automation tool such as Playwright or CDP for external pages.
 
 ## Resolve the CLI for this session
 

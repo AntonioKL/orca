@@ -32,7 +32,7 @@ describe('orchestration skill guidance', () => {
       "Use Computer Use for external browser windows, webviews, Orca app UI, or desktop UI outside Orca's embedded browser only when the task requires OS/window-level control such as focus, menus, dialogs, coordinates, or screenshots."
     )
     expect(description).toContain(
-      'Use a browser/page skill for DOM, content, form, console, network, or Playwright automation.'
+      "`orca-cli` for Orca's embedded pages and a page-automation tool such as Playwright or CDP for external pages."
     )
   })
 

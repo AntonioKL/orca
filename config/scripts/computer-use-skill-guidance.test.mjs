@@ -20,6 +20,10 @@ describe('computer-use skill guidance', () => {
     expect(description).toContain('external browser window')
     expect(description).toContain("Do not use for Orca's embedded browser")
     expect(description).toContain('page-only browser automation')
+    expect(description).toContain("`orca-cli` for Orca's embedded pages")
+    expect(description).toContain(
+      'page-automation tool such as Playwright or CDP for external pages'
+    )
     expect(description).not.toContain('read Slack')
     expect(description).not.toContain('get app state')
 

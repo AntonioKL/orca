@@ -5,13 +5,13 @@ description: >-
   local app windows. Use when a task must read or operate a native app or an
   external browser window (for example, Chrome, Edge, or Safari) or an app
   webview. Do not use for Orca's embedded browser or page-only browser
-  automation; use the Orca CLI or
-  a browser/page skill for those surfaces.
+  automation. Use `orca-cli` for Orca's embedded pages and a page-automation
+  tool such as Playwright or CDP for external pages.
 ---
 
 # Computer Use
 
-Use this skill for desktop UI through `orca computer`. For a website or web app, use it only when the page is in an external desktop browser window that needs desktop-level control; use the Orca CLI for its embedded browser and a browser/page skill for page-only automation.
+Use this skill for desktop UI through `orca computer`. For a website or web app, use it only when the page is in an external desktop browser window that needs desktop-level control. Do not use it for page-only automation: use `orca-cli` for Orca's embedded pages and a page-automation tool such as Playwright or CDP for external pages.
 
 ## Preconditions
 

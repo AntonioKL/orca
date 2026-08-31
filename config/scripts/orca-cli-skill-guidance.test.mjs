@@ -26,13 +26,13 @@ describe('orca CLI skill guidance', () => {
       'Use Computer Use for external browser windows, webviews, or desktop UI only when the task requires OS/window-level control such as focus, menus, dialogs, coordinates, or screenshots.'
     )
     expect(description).toContain(
-      'Use a browser/page skill for DOM, content, form, console, network, or Playwright automation.'
+      "`orca-cli` for Orca's embedded pages and a page-automation tool such as Playwright or CDP for external pages."
     )
     expect(skill).toContain(
       'For external Chrome/Safari/webviews or Orca app chrome/settings, use the Computer Use skill/tool only when the task requires OS/window-level control'
     )
     expect(skill).toContain(
-      'use a browser/page skill for DOM, content, form, console, network, or Playwright automation'
+      "Use `orca-cli` for Orca's embedded pages and a page-automation tool such as Playwright or CDP for external pages"
     )
   })
 
