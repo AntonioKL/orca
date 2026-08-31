@@ -18,7 +18,16 @@ const HELPERS = [
   'resolveExplicitTerminalTitleAgentType',
   'resolveCommittedTitleAgentType',
   'resolvePaneAgentOwner',
-  'resolveCompatibleAgentTypeForOwner'
+  'resolveCompatibleAgentTypeForOwner',
+  'classifyTitleActivity',
+  'detectAgentStatusFromTitle',
+  'resolveAgentTypeFromTerminalTitle',
+  'resolvePaneAgentIdentity',
+  'resolveCanonicalPaneAgentIdentity',
+  'resolvePublishedPaneAgentIdentity',
+  'comparePublishedPaneAgentIdentity',
+  'recordTabAgentLadderComparison',
+  'useTabAgentLadderComparison'
 ] as const
 
 const TEST_SUPPORT_PATHS = new Set([
@@ -242,6 +251,157 @@ const INVENTORY: readonly InventoryGroup[] = [
       ['src/renderer/src/components/terminal-pane/pty-connection/direct-ssh-retry-status.ts', 2],
       ['src/renderer/src/components/terminal-pane/pty-connection/title-spawn-bell.ts', 2]
     ]
+  },
+  {
+    helper: 'classifyTitleActivity',
+    classification: 'identity-consumer',
+    paths: [
+      ['src/renderer/src/components/sidebar/smart-attention.ts', 3],
+      ['src/renderer/src/components/sidebar/worktree-title-derived-agent-rows.ts', 2],
+      ['src/renderer/src/components/status-bar/workspace-space-presentation.ts', 3],
+      ['src/renderer/src/lib/active-agent-note-target.ts', 2],
+      ['src/renderer/src/lib/worktree-status.ts', 3],
+      ['src/renderer/src/store/slices/terminal-helpers.ts', 2]
+    ]
+  },
+  {
+    helper: 'classifyTitleActivity',
+    classification: 'action-consumer',
+    paths: [
+      ['src/renderer/src/components/terminal-pane/cache-timer-seeding.ts', 2],
+      ['src/renderer/src/lib/agent-ready-wait.ts', 2],
+      ['src/renderer/src/store/terminals/terminal-ephemeral-state.ts', 2]
+    ]
+  },
+  {
+    helper: 'classifyTitleActivity',
+    classification: 'activity-only',
+    paths: [
+      ['src/renderer/src/store/slices/workspace-cleanup-local-evidence.ts', 3],
+      ['src/renderer/src/store/terminals/terminal-tab-presentation.ts', 4]
+    ]
+  },
+  {
+    helper: 'classifyTitleActivity',
+    classification: 'evidence-producer',
+    paths: [
+      ['src/renderer/src/lib/agent-send-title-status.ts', 2],
+      ['src/renderer/src/lib/agent-status-terminal-title.ts', 2]
+    ]
+  },
+  {
+    helper: 'classifyTitleActivity',
+    classification: 'parser-implementation',
+    paths: [
+      ['src/renderer/src/lib/agent-status.ts', 5],
+      'src/renderer/src/lib/pane-agent-evidence.ts'
+    ]
+  },
+  {
+    helper: 'detectAgentStatusFromTitle',
+    classification: 'evidence-producer',
+    paths: [
+      ['src/main/runtime/orca-runtime.ts', 12],
+      ['src/renderer/src/components/terminal-pane/agent-completion-title-observer.ts', 2],
+      ['src/renderer/src/components/terminal-pane/pty-connection/shell-command-inference.ts', 4],
+      ['src/renderer/src/components/terminal-pane/pty-output-title-observer.ts', 2],
+      ['src/shared/terminal-output-side-effects.ts', 3]
+    ]
+  },
+  {
+    helper: 'detectAgentStatusFromTitle',
+    classification: 'action-consumer',
+    paths: [
+      ['src/renderer/src/components/terminal-pane/pty-connection/agent-task-complete-notify.ts', 2],
+      [
+        'src/renderer/src/components/terminal-pane/pty-connection/command-inferred-pane-agent.ts',
+        3
+      ],
+      ['src/renderer/src/components/terminal-pane/pty-connection/interrupt-input-intent.ts', 3]
+    ]
+  },
+  {
+    helper: 'detectAgentStatusFromTitle',
+    classification: 'parser-implementation',
+    paths: [
+      ['src/renderer/src/components/terminal-pane/title-agent-identity.ts', 2],
+      'src/renderer/src/lib/agent-status.ts',
+      ['src/renderer/src/lib/pane-agent-evidence.ts', 3],
+      ['src/shared/agent-decorative-title-signature.ts', 2],
+      'src/shared/agent-detection.ts',
+      ['src/shared/agent-title-owner.ts', 2],
+      ['src/shared/agent-title-status.ts', 6]
+    ]
+  },
+  {
+    helper: 'resolveAgentTypeFromTerminalTitle',
+    classification: 'identity-consumer',
+    paths: [
+      ['src/renderer/src/components/sidebar/worktree-agent-row-type.ts', 2],
+      'src/renderer/src/components/sidebar/worktree-title-derived-agent-rows.ts',
+      ['src/renderer/src/lib/worktree-status.ts', 2]
+    ]
+  },
+  {
+    helper: 'resolvePaneAgentIdentity',
+    classification: 'parser-implementation',
+    paths: [
+      ['src/shared/pane-agent-identity-adapter.ts', 2],
+      'src/shared/pane-agent-identity-resolver.ts'
+    ]
+  },
+  {
+    helper: 'resolvePaneAgentIdentity',
+    classification: 'identity-consumer',
+    paths: [['src/shared/published-pane-agent-identity.ts', 2]]
+  },
+  {
+    helper: 'resolveCanonicalPaneAgentIdentity',
+    classification: 'parser-implementation',
+    paths: ['src/shared/pane-agent-identity-adapter.ts']
+  },
+  {
+    helper: 'resolveCanonicalPaneAgentIdentity',
+    classification: 'identity-consumer',
+    paths: [
+      ['src/renderer/src/lib/tab-agent-identity-comparison.ts', 2],
+      ['src/shared/published-pane-agent-identity-comparison.ts', 2]
+    ]
+  },
+  {
+    helper: 'resolvePublishedPaneAgentIdentity',
+    classification: 'parser-implementation',
+    paths: ['src/shared/published-pane-agent-identity.ts']
+  },
+  {
+    helper: 'resolvePublishedPaneAgentIdentity',
+    classification: 'identity-consumer',
+    paths: [['src/shared/published-pane-agent-identity-comparison.ts', 2]]
+  },
+  {
+    helper: 'comparePublishedPaneAgentIdentity',
+    classification: 'parser-implementation',
+    paths: ['src/shared/published-pane-agent-identity-comparison.ts']
+  },
+  {
+    helper: 'comparePublishedPaneAgentIdentity',
+    classification: 'identity-consumer',
+    paths: [['src/main/runtime/orca-runtime.ts', 2]]
+  },
+  {
+    helper: 'recordTabAgentLadderComparison',
+    classification: 'parser-implementation',
+    paths: [['src/renderer/src/lib/tab-agent-identity-comparison.ts', 2]]
+  },
+  {
+    helper: 'useTabAgentLadderComparison',
+    classification: 'parser-implementation',
+    paths: ['src/renderer/src/lib/tab-agent-identity-comparison.ts']
+  },
+  {
+    helper: 'useTabAgentLadderComparison',
+    classification: 'identity-consumer',
+    paths: [['src/renderer/src/lib/use-tab-agent.ts', 2]]
   }
 ]
 

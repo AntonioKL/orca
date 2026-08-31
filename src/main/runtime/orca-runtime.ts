@@ -404,7 +404,7 @@ import type {
   TerminalPaneLayoutNode,
   TerminalTab
 } from '../../shared/terminal-tab-types'
-import { resolvePublishedPaneAgentIdentity } from '../../shared/published-pane-agent-identity'
+import { comparePublishedPaneAgentIdentity } from '../../shared/published-pane-agent-identity-comparison'
 import type { TuiAgent } from '../../shared/tui-agent'
 import type { BranchPrefixStrategy } from '../../shared/ui-chrome-types'
 import type { WorkspaceSessionState } from '../../shared/workspace-session-state-types'
@@ -35987,12 +35987,20 @@ export class OrcaRuntimeService {
     return null
   }
 
-  /** Thin adapter so the summary builders stay declarative; the decision lives in `src/shared`. */
+  /** Thin adapter so the summary builders stay declarative; the decision lives in `src/shared`.
+   *  Published output is the FROZEN resolver's, verbatim; the wrapper only counts where the
+   *  canonical ladder would disagree (identity-ladder comparison window). */
   private resolvePaneAgentIdentityField(
     launchAgent: TuiAgent | null | undefined,
     foregroundAgent: TuiAgent | null | undefined,
     title: string | null,
-    paneKey: string | null
+    paneKey: string | null,
+    comparison: {
+      surface: 'terminal-summary' | 'pty-terminal-summary'
+      paneId: string
+      worktreeId: string
+      remote: boolean
+    }
   ): { agentIdentity?: TuiAgent } {
     // Why hooks here: an agent the USER started from a shell has no launch record, and on WSL the
     // Windows host reads its foreground process as `wsl.exe` rather than the agent inside the
@@ -36001,12 +36009,16 @@ export class OrcaRuntimeService {
       ? this.getHookAgentRowForPane(this.getAgentProviderSessionRowsForPaneFn?.(paneKey) ?? [])
       : null
     const hookAgent = isTuiAgent(hookRow?.agentType) ? hookRow.agentType : null
-    const agentIdentity = resolvePublishedPaneAgentIdentity({
+    const agentIdentity = comparePublishedPaneAgentIdentity({
       hookAgent,
       hookIsLive: hookRow?.agentIsLive,
       launchAgent,
       foregroundAgent,
-      title
+      title,
+      surface: comparison.surface,
+      paneId: comparison.paneId,
+      worktreeId: comparison.worktreeId,
+      hostScope: comparison.remote ? 'remote' : 'local'
     })
     return agentIdentity ? { agentIdentity } : {}
   }
@@ -36059,7 +36071,15 @@ export class OrcaRuntimeService {
         title,
         // Why guarded: makePaneKey THROWS on a non-UUID leaf id, and an unguarded call here took
         // down terminal.list for every pane in the list, not just the odd one.
-        isTerminalLeafId(leaf.leafId) ? makePaneKey(leaf.tabId, leaf.leafId) : null
+        isTerminalLeafId(leaf.leafId) ? makePaneKey(leaf.tabId, leaf.leafId) : null,
+        {
+          surface: 'terminal-summary',
+          paneId: `${leaf.tabId}:${leaf.leafId}`,
+          worktreeId: leaf.worktreeId,
+          remote:
+            leaf.ptyId !== null &&
+            (leaf.ptyId.startsWith('remote:') || parseAppSshPtyId(leaf.ptyId) !== null)
+        }
       )
     }
   }
@@ -38232,7 +38252,13 @@ export class OrcaRuntimeService {
         pty.launchAgent,
         pty.foregroundAgent,
         title,
-        pty.paneKey ?? null
+        pty.paneKey ?? null,
+        {
+          surface: 'pty-terminal-summary',
+          paneId: pty.paneKey ?? `pty:${pty.ptyId}`,
+          worktreeId: pty.worktreeId,
+          remote: pty.ptyId.startsWith('remote:') || parseAppSshPtyId(pty.ptyId) !== null
+        }
       )
     }
   }
