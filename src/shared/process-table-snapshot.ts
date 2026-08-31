@@ -322,7 +322,7 @@ const strictReader = createProcessTableSnapshotReader<ProcessTableRow[]>({
 })
 
 /**
- * Run (or reuse a recent) `ps -axo pid=,ppid=,stat=,command=` scan and return
+ * Run (or reuse a recent) `ps -axo` process-table scan and return
  * its parsed rows. Per-process singleton: the relay and local main processes
  * each dedupe their own scans and share a single parse per TTL window.
  */

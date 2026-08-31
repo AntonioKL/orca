@@ -1,4 +1,9 @@
-import { recognizeAgentProcessFromCommandLine } from '../../shared/agent-process-recognition'
+import {
+  isAgentForegroundWrapperProcess,
+  isExpectedAgentProcess,
+  recognizeAgentProcessFromCommandLine
+} from '../../shared/agent-process-recognition'
+import { getFirstCommandToken } from '../../shared/command-token-scanner'
 import { resolveOuterWrapperForegroundProcess } from '../../shared/foreground-wrapper-agent'
 import type { ForegroundProcessEvidence } from '../../shared/foreground-process-evidence'
 import {
@@ -103,7 +108,19 @@ export function resolveAgentForegroundProcessesFromIndex(
         reason: 'no_controlling_tty'
       }
     }
-    const candidates = (rowsByOwner.get(root.pid) ?? []).filter((row) => row.pgid === root.tpgid)
+    const allCandidates = rowsByOwner.get(root.pid) ?? []
+    const foregroundCandidates = allCandidates.filter((row) => row.pgid === root.tpgid)
+    const fallbackProcess = request.fallbackProcess
+    const wrapperFallback =
+      typeof fallbackProcess === 'string' && isAgentForegroundWrapperProcess(fallbackProcess)
+    const candidates = wrapperFallback
+      ? foregroundCandidates.filter((candidate) =>
+          isExpectedAgentProcess(getFirstCommandToken(candidate.command), fallbackProcess)
+        )
+      : foregroundCandidates
+    if (wrapperFallback && candidates.length !== 1) {
+      return { available: true, processName: null }
+    }
     let bestCandidate: (ProcessTableRow & { depth: number }) | null = null
     let bestName: ReturnType<typeof recognizeAgentProcessFromCommandLine> = null
     for (const candidate of candidates) {
@@ -119,7 +136,7 @@ export function resolveAgentForegroundProcessesFromIndex(
     if (bestCandidate && bestName) {
       return {
         available: true,
-        processName: resolveOuterWrapperForegroundProcess(bestName, bestCandidate, candidates)
+        processName: resolveOuterWrapperForegroundProcess(bestName, bestCandidate, allCandidates)
       }
     }
     return { available: true, processName: null }

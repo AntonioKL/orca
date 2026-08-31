@@ -229,12 +229,11 @@ export function installTerminalKeydownFit(session: ConnectPanePtySession): void 
       }),
     shouldPollProcessCadence: () =>
       isAgentTaskCompleteTrackingEnabled() && session.deps.isVisibleRef.current,
-    shouldPollNoEvidenceProcessCadence: () =>
-      !isRemoteExecutionHostPtyId(session.transport.getPtyId()),
     isProcessInspectionCostly: () => {
       // Why: local Windows inspection forks a powershell.exe whole-process-table
-      // CIM scan per poll (~10-40x heavier than POSIX `ps`). Remote authorities
-      // use the zero-idle cadence gate above instead.
+      // CIM scan per poll (~10-40x heavier than POSIX `ps`). Keep the no-evidence
+      // cadence enabled until inventory evidence is consumed by this renderer;
+      // mixed-version relays may omit the optional field.
       if (!navigator.userAgent.includes('Windows')) {
         return false
       }

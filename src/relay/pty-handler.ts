@@ -13,7 +13,6 @@ import {
   resolveProcessCwd,
   processHasChildren,
   getForegroundProcessName,
-  getForegroundProcessNameFromProcessTable,
   isProcessAlive,
   listShellProfiles
 } from './pty-shell-utils'
@@ -2286,13 +2285,10 @@ export class PtyHandler {
         this.reapExitedPty(managed)
         continue
       }
+      // Reuse batched correlation; per-PTY tree scans recreate O(PTY × rows) work.
       const title =
         (evidenceRows
-          ? getForegroundProcessNameFromProcessTable(
-              [...evidenceRows],
-              managed.pty.pid,
-              managed.pty.process || null
-            )
+          ? (evidenceResults[entryIndex]?.processName ?? managed.pty.process ?? null)
           : await getForegroundProcessName(managed.pty.pid, managed.pty.process || null)) || 'shell'
       const foregroundProcessEvidence =
         process.platform !== 'win32'

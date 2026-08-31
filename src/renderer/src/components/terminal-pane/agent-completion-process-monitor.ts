@@ -202,7 +202,8 @@ export function createAgentCompletionProcessMonitor({
       state.lastForegroundAgent !== null ||
       (options.shouldPollProcessCadence?.() !== false &&
         options.shouldPollNoEvidenceProcessCadence?.() !== false) ||
-      (state.lastPaneActivityAt !== null &&
+      (options.shouldPollProcessCadence?.() !== false &&
+        state.lastPaneActivityAt !== null &&
         Date.now() - state.lastPaneActivityAt < NO_EVIDENCE_ACTIVITY_HOT_WINDOW_MS)
     )
   }
