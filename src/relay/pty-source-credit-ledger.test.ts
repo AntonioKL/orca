@@ -198,18 +198,55 @@ describe('RelayPtySourceCreditLedger', () => {
     expect(ledger.snapshotIfKnown(canceled)?.state).toBe('closed')
   })
 
+  it('rebases the send cursor when ACK reclaim removes spans at or past it', () => {
+    const ledger = new RelayPtySourceCreditLedger()
+    const owner = identity('token-reclaim')
+    ledger.open(owner, 16)
+    append(ledger, owner, 'ab', 'span-a')
+    append(ledger, owner, 'cd', 'span-b')
+    append(ledger, owner, 'ef', 'span-c')
+    ledger.commitSend(ledger.reserveNextSend(owner, 2)!)
+    ledger.commitSend(ledger.reserveNextSend(owner, 2)!)
+    expect(getCursorRecord(ledger, owner).sendSpanIndex).toBe(1)
+
+    ledger.acknowledge(owner, {
+      id: owner.id,
+      clientGeneration: owner.clientGeneration,
+      ownerGeneration: owner.ownerGeneration,
+      deliveryToken: owner.deliveryToken,
+      creditedEndSu: 4
+    })
+
+    // Reclaim dropped both spans the cursor had passed, so it must rebase onto the new head.
+    const record = getCursorRecord(ledger, owner)
+    expect(record.spans.map((span) => span.data)).toEqual(['ef'])
+    expect(record.sendSpanIndex).toBe(0)
+    expect(ledger.reserveNextSend(owner, 2)!.span.data).toBe('ef')
+  })
+
   it('never exceeds a token source window across generated send/ACK sequences', () => {
     for (let seed = 1; seed <= 40; seed++) {
       const ledger = new RelayPtySourceCreditLedger()
       const owner = identity(`token-${seed}`)
       const windowSu = 7 + (seed % 17)
       ledger.open(owner, windowSu)
-      append(ledger, owner, 'x'.repeat(100), `span-${seed}`)
+      for (let part = 0; part < 20; part += 1) {
+        append(ledger, owner, 'x'.repeat(5), `span-${seed}-${part}`)
+      }
 
       for (let turn = 0; turn < 100; turn++) {
         const reservation = drainOne(ledger, owner, 1 + ((seed * 13 + turn * 7) % 19))
         const snapshot = ledger.snapshot(owner)
         expect(snapshot.sentEndSu - snapshot.creditedEndSu).toBeLessThanOrEqual(windowSu)
+        const record = getCursorRecord(ledger, owner)
+        const containingIndex = record.spans.findIndex(
+          (span) =>
+            span.sourceStartSu <= snapshot.sentEndSu && span.sourceEndSu > snapshot.sentEndSu
+        )
+        // Cursor may lag (advancement is lazy) but must never overshoot the containing span.
+        if (containingIndex !== -1) {
+          expect(record.sendSpanIndex).toBeLessThanOrEqual(containingIndex)
+        }
         if (snapshot.sentEndSu > snapshot.creditedEndSu && (turn + seed) % 3 === 0) {
           ledger.acknowledge(owner, {
             id: owner.id,
