@@ -12,10 +12,14 @@ import { refreshLocalStructuredSessionTabs } from '@/runtime/local-structured-se
 import { callStructuredAgentSession } from '@/runtime/structured-agent-session-client'
 import type { RuntimeMobileSessionTabsResult } from '../../../shared/runtime-types'
 import { translate } from '@/i18n/i18n'
+import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
+import type { RuntimeClientTarget } from '@/runtime/runtime-client-target'
+import { useAppStore } from '@/store'
 
 type StructuredLaunchState = {
   promise: Promise<string>
   sessionId?: string
+  target: RuntimeClientTarget
   visibilityUnknown: boolean
 }
 
@@ -48,8 +52,19 @@ function trackLaunchSettlement(
   )
 }
 
-async function verifyPublishedSession(worktreeId: string, sessionId: string): Promise<string> {
-  const snapshots = await refreshLocalStructuredSessionTabs()
+async function verifyPublishedSession(
+  worktreeId: string,
+  sessionId: string,
+  target: RuntimeClientTarget
+): Promise<string> {
+  const snapshots =
+    target.kind === 'local'
+      ? await refreshLocalStructuredSessionTabs()
+      : await callStructuredAgentSession<{ snapshots?: RuntimeMobileSessionTabsResult[] }>(
+          target,
+          'session.tabs.listAll',
+          {}
+        ).then((result) => result.snapshots ?? [])
   const published = snapshots.some(
     (snapshot) =>
       snapshot.worktree === worktreeId &&
@@ -70,7 +85,11 @@ function launchStructuredAgentSessionOnce(
   if (existing) {
     if (existing.visibilityUnknown && existing.sessionId) {
       existing.visibilityUnknown = false
-      existing.promise = verifyPublishedSession(worktreeId, existing.sessionId).catch((error) => {
+      existing.promise = verifyPublishedSession(
+        worktreeId,
+        existing.sessionId,
+        existing.target
+      ).catch((error) => {
         existing.visibilityUnknown = true
         throw error
       })
@@ -83,12 +102,16 @@ function launchStructuredAgentSessionOnce(
   // renderer; clearing here lets a rapid second click create a sibling chat.
   const state: StructuredLaunchState = {
     promise: Promise.resolve(''),
+    target: (() => {
+      const environmentId = getRuntimeEnvironmentIdForWorktree(useAppStore.getState(), worktreeId)
+      return environmentId ? { kind: 'environment', environmentId } : { kind: 'local' }
+    })(),
     visibilityUnknown: false
   }
   state.promise = launchStructuredAgentSession(worktreeId, agent)
     .then((sessionId) => {
       state.sessionId = sessionId
-      return verifyPublishedSession(worktreeId, sessionId)
+      return verifyPublishedSession(worktreeId, sessionId, state.target)
     })
     .catch((error) => {
       if (state.sessionId) {

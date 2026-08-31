@@ -16,9 +16,16 @@ import {
   resolveWebSessionVisibleTabId
 } from '@/runtime/web-session-focus-intent'
 import { LOCAL_STRUCTURED_SESSION_OWNER } from '@/runtime/local-structured-session-tabs-sync'
+import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
+import type { RuntimeClientTarget } from '@/runtime/runtime-client-target'
 
 function newSessionId(agent: AgentSessionHandleProvider): string {
   return `${agent}_${crypto.randomUUID().replaceAll('-', '_')}`
+}
+
+function targetForWorktree(worktreeId: string): RuntimeClientTarget {
+  const environmentId = getRuntimeEnvironmentIdForWorktree(useAppStore.getState(), worktreeId)
+  return environmentId ? { kind: 'environment', environmentId } : { kind: 'local' }
 }
 
 export async function launchStructuredAgentSession(
@@ -28,8 +35,12 @@ export async function launchStructuredAgentSession(
   const sessionId = newSessionId(agent)
   const fields = { worktree: toRuntimeWorktreeSelector(worktreeId), agent }
   const state = useAppStore.getState()
+  const target = targetForWorktree(worktreeId)
   recordWebSessionFocusIntent(
-    { environmentId: LOCAL_STRUCTURED_SESSION_OWNER },
+    {
+      environmentId:
+        target.kind === 'environment' ? target.environmentId : LOCAL_STRUCTURED_SESSION_OWNER
+    },
     worktreeId,
     `agent-session:${sessionId}`,
     undefined,
@@ -38,7 +49,7 @@ export async function launchStructuredAgentSession(
   try {
     const result = await callStructuredAgentSession<
       AgentSessionMutationResult<AgentSessionAttachResult>
-    >({ kind: 'local' }, 'agentSession.create', {
+    >(target, 'agentSession.create', {
       envelope: {
         sessionId,
         clientOperationId: createStructuredAgentSessionOperationId(() => crypto.randomUUID()),
@@ -59,7 +70,10 @@ export async function launchStructuredAgentSession(
     // A concurrent create may have replaced this intent. Only clear the failed
     // session's slot; never erase a later successful create's focus request.
     clearWebSessionFocusIntentIfMatches(
-      { environmentId: LOCAL_STRUCTURED_SESSION_OWNER },
+      {
+        environmentId:
+          target.kind === 'environment' ? target.environmentId : LOCAL_STRUCTURED_SESSION_OWNER
+      },
       worktreeId,
       `agent-session:${sessionId}`
     )
