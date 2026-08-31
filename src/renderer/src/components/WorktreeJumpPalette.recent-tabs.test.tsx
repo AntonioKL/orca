@@ -199,6 +199,20 @@ function getTabRowIds(): string[] {
     .map((node) => node.dataset.commandItem ?? '')
     .map((id) => id.replace('workspace-tab:', ''))
 }
+function getTabRowShortcutDigits(): string[] {
+  return [
+    ...testContainer.querySelectorAll<HTMLElement>('[data-command-item^="workspace-tab:"]')
+  ].flatMap((row) =>
+    [...row.querySelectorAll<HTMLElement>('span')]
+      .map((node) => node.textContent ?? '')
+      .filter((text) => /^\d+$/.test(text))
+  )
+}
+function clickSeeMore(): void {
+  ;[...testContainer.querySelectorAll('button')]
+    .find((button) => button.textContent?.includes('See more'))
+    ?.click()
+}
 
 describe('WorktreeJumpPalette recent chats & terminals', () => {
   beforeEach(() => {
@@ -257,6 +271,39 @@ describe('WorktreeJumpPalette recent chats & terminals', () => {
     // Why: the worktree section shrinks against the recent rows so the list holds at 10 total —
     // it must never uncap, not even for the frame before the order snapshot lands.
     expect(getWorktreeRows().length).toBeLessThanOrEqual(4)
+  })
+  it('shows more recent chats and terminals from the empty-query view', async () => {
+    await renderPalette(makeManyTabState(12))
+    const seeMoreButton = [...testContainer.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('See more')
+    )
+    expect(seeMoreButton).toBeDefined()
+    expect(testContainer.textContent).toContain('6 more')
+    await act(async () => {
+      seeMoreButton?.click()
+    })
+    await flushEffects()
+    expect(getTabRowIds()).toHaveLength(12)
+    expect(testContainer.textContent).not.toContain('6 more')
+  })
+  it('reveals every recent row from a single expansion', async () => {
+    await renderPalette(makeManyTabState(30))
+    expect(getTabRowIds()).toHaveLength(6)
+    await act(async () => {
+      clickSeeMore()
+    })
+    await flushEffects()
+    expect(getTabRowIds()).toHaveLength(30)
+  })
+  it('stops badging expanded recent rows at the last addressable digit', async () => {
+    await renderPalette(makeManyTabState(12))
+    expect(getTabRowShortcutDigits()).toEqual(['1', '2', '3', '4', '5', '6'])
+    await act(async () => {
+      clickSeeMore()
+    })
+    await flushEffects()
+    expect(getTabRowIds()).toHaveLength(12)
+    expect(getTabRowShortcutDigits()).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9'])
   })
 
   it('backfills past the cap when rows drop out of the frozen order', async () => {
