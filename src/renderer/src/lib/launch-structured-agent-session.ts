@@ -16,16 +16,15 @@ import {
   resolveWebSessionVisibleTabId
 } from '@/runtime/web-session-focus-intent'
 import { LOCAL_STRUCTURED_SESSION_OWNER } from '@/runtime/local-structured-session-tabs-sync'
-import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
 import type { RuntimeClientTarget } from '@/runtime/runtime-client-target'
+import { getStructuredAgentSessionTarget } from '@/runtime/structured-agent-session-target'
 
 function newSessionId(agent: AgentSessionHandleProvider): string {
   return `${agent}_${crypto.randomUUID().replaceAll('-', '_')}`
 }
 
 function targetForWorktree(worktreeId: string): RuntimeClientTarget {
-  const environmentId = getRuntimeEnvironmentIdForWorktree(useAppStore.getState(), worktreeId)
-  return environmentId ? { kind: 'environment', environmentId } : { kind: 'local' }
+  return getStructuredAgentSessionTarget(useAppStore.getState(), worktreeId)
 }
 
 export async function launchStructuredAgentSession(
