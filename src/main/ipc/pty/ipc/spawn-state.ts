@@ -57,6 +57,7 @@ export type PtyIpcSpawnState = {
   requestedAgentTeamsPath: string | undefined
   agentTeamsEnvToDelete: string[] | undefined
   stablePaneKey: string | null
+  sourcePaneKey: string | null
   verifiedLeafId: string | null
   metadataLeafId: string | null
   metadataPaneKey: string | null
@@ -130,6 +131,7 @@ export function createPtyIpcSpawnState(
     requestedAgentTeamsPath: undefined,
     agentTeamsEnvToDelete: undefined,
     stablePaneKey: null,
+    sourcePaneKey: null,
     verifiedLeafId: null,
     metadataLeafId: null,
     metadataPaneKey: null,

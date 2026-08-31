@@ -6,7 +6,11 @@ export {
   restorePtyIncarnation,
   getPtyIdsForConnection
 } from './pty/provider/ownership-state'
-export { getPtyIdForPaneKey, registerPaneKeyTeardownListener } from './pty/pane/key-state'
+export {
+  getPtyIdForPaneKey,
+  registerPaneKeyRekeyListener,
+  registerPaneKeyTeardownListener
+} from './pty/pane/key-state'
 export { hasPendingRendererSerializerForPaneKey } from './pty/pane/serializer-state'
 export type {
   BuildPtyHostEnvOptions,

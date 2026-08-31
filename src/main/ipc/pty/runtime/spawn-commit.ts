@@ -10,7 +10,7 @@ import {
 } from '../host-env/codex-home'
 import { markClaudePtySpawned } from '../../../claude-accounts/live-pty-gate'
 import { registerPty } from '../../../memory/pty-registry'
-import { rememberPaneKeyForPty } from '../pane/key-state'
+import * as spawnPaneKeyBinding from './spawn-pane-key-binding'
 import {
   pendingByPaneKey,
   pendingPtyIdBySerializerGeneration,
@@ -64,6 +64,8 @@ export async function commitRuntimePtySpawn(ctx: RuntimePtySpawnState) {
     if (ctx.result.incarnationId) {
       ptyIncarnationById.set(ctx.result.id, ctx.result.incarnationId)
     }
+    // Why: the adopted surface is the current bind identity even when the surviving process still carries an older hook paneKey.
+    spawnPaneKeyBinding.rememberRuntimeSurfacePaneKey(ctx, owner.surface)
     ctx.deps.runtime?.registerPty(
       ctx.result.id,
       owner.surface.worktreeId,
@@ -113,7 +115,6 @@ export async function commitRuntimePtySpawn(ctx: RuntimePtySpawnState) {
   ) {
     markNativeWindowsConptyPty(ctx.result.id)
   }
-  const relayResultId = getRelayPtyId(args.connectionId, ctx.result.id)
   const persistSshLease = (): void => {
     if (!ctx.deps.store || !args.connectionId) {
       return
@@ -121,7 +122,7 @@ export async function commitRuntimePtySpawn(ctx: RuntimePtySpawnState) {
     // Why: SSH leases keep relay ids for remote reconciliation, while session bindings keep app-facing ids for hydration.
     ctx.deps.store.upsertSshRemotePtyLease({
       targetId: args.connectionId,
-      ptyId: relayResultId,
+      ptyId: getRelayPtyId(args.connectionId, ctx.result.id),
       ...(typeof args.worktreeId === 'string' ? { worktreeId: args.worktreeId } : {}),
       ...(typeof args.tabId === 'string' ? { tabId: args.tabId } : {}),
       ...(typeof args.leafId === 'string' && isTerminalLeafId(args.leafId)
@@ -194,6 +195,8 @@ export async function commitRuntimePtySpawn(ctx: RuntimePtySpawnState) {
   if (args.preAllocatedHandle && !ctx.stablePaneOwner?.handle) {
     ctx.deps.runtime?.registerPreAllocatedHandleForPty(ctx.result.id, args.preAllocatedHandle)
   }
+  // Why: runtime controller metadata is the current bind identity even when a surviving process still carries an old ORCA_PANE_KEY; remember it before runtime registration so the rekey notification runs once.
+  const rememberedPaneKey = spawnPaneKeyBinding.rememberRuntimeSpawnPaneKey(ctx)
   if (args.worktreeId) {
     ctx.deps.runtime?.registerPty(
       ctx.result.id,
@@ -242,14 +245,13 @@ export async function commitRuntimePtySpawn(ctx: RuntimePtySpawnState) {
     }
   }
   // Why: runtime-owned CLI PTYs bypass the renderer pty:spawn handler; record paneKey here too since hook titles and cache cleanup need this reverse lookup.
-  const paneKey = rememberPaneKeyForPty(ctx.result.id, ctx.env?.ORCA_PANE_KEY)
-  const pendingSerializer = paneKey ? pendingByPaneKey.get(paneKey) : undefined
+  const pendingSerializer = rememberedPaneKey && pendingByPaneKey.get(rememberedPaneKey)
   const inheritRendererReadiness =
     ctx.result.isReattach === true &&
     !pendingSerializer &&
     rendererSerializerReadiness.has(ctx.result.id)
   rendererSerializerReadiness.beginIncarnation(ctx.result.id, inheritRendererReadiness)
-  if (paneKey && pendingSerializer) {
+  if (rememberedPaneKey && pendingSerializer) {
     pendingPtyIdBySerializerGeneration.set(pendingSerializer.gen, ctx.result.id)
   }
   if (!args.connectionId) {
@@ -257,7 +259,7 @@ export async function commitRuntimePtySpawn(ctx: RuntimePtySpawnState) {
       ptyId: ctx.result.id,
       worktreeId: args.worktreeId ?? null,
       sessionId: ctx.sessionId ?? null,
-      paneKey,
+      paneKey: rememberedPaneKey,
       pid:
         typeof ctx.result.pid === 'number' && Number.isFinite(ctx.result.pid) && ctx.result.pid > 0
           ? ctx.result.pid

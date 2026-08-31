@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { makePaneKey } from '../../shared/stable-pane-id'
+import { paneKeyPtyId, ptyPaneKey, registerPaneKeyRekeyListener } from '../ipc/pty/pane/key-state'
 import { OrcaRuntimeService } from './orca-runtime'
 
 vi.mock('electron', () => ({
@@ -14,6 +15,17 @@ const LEAF_ID = '22222222-2222-4222-8222-222222222222'
 const PANE_KEY = makePaneKey(TAB_ID, LEAF_ID)
 const INCARNATION_ID = 'provider-reattach-incarnation'
 const WORKTREE_ID = 'repo-1::/tmp/provider-reattach'
+const REKEY_PTY_ID = 'pty-runtime-pane-rekey'
+const REKEY_OLD_TAB_ID = '44444444-4444-4444-8444-444444444444'
+const REKEY_NEW_TAB_ID = '55555555-5555-4555-8555-555555555555'
+const REKEY_OLD_PANE_KEY = makePaneKey(REKEY_OLD_TAB_ID, LEAF_ID)
+const REKEY_NEW_PANE_KEY = makePaneKey(REKEY_NEW_TAB_ID, LEAF_ID)
+
+afterEach(() => {
+  ptyPaneKey.delete(REKEY_PTY_ID)
+  paneKeyPtyId.delete(REKEY_OLD_PANE_KEY)
+  paneKeyPtyId.delete(REKEY_NEW_PANE_KEY)
+})
 
 type RuntimePtyLaunchIdentity = {
   incarnationId: string | null
@@ -96,5 +108,27 @@ describe('provider reattach launch identity', () => {
       launchToken: null,
       launchIncarnationId: null
     })
+  })
+
+  it('rekeys hook authority when graph registration moves a surviving PTY', () => {
+    const onRekey = vi.fn()
+    const unregister = registerPaneKeyRekeyListener(onRekey)
+    const runtime = new OrcaRuntimeService(null)
+
+    runtime.registerPty(REKEY_PTY_ID, WORKTREE_ID, null, {
+      tabId: REKEY_OLD_TAB_ID,
+      leafId: LEAF_ID
+    })
+    runtime.registerPty(REKEY_PTY_ID, WORKTREE_ID, null, {
+      tabId: REKEY_NEW_TAB_ID,
+      leafId: LEAF_ID
+    })
+
+    expect(onRekey).toHaveBeenCalledWith({
+      ptyId: REKEY_PTY_ID,
+      previousPaneKey: REKEY_OLD_PANE_KEY,
+      paneKey: REKEY_NEW_PANE_KEY
+    })
+    unregister()
   })
 })

@@ -34,6 +34,9 @@ export async function assemblePtyIpcSpawnEnv(ctx: PtyIpcSpawnState): Promise<voi
     : sshSourceEnv
   const spawnPaneKey = baseEnvWithAuth?.ORCA_PANE_KEY
   const parsedSpawnPaneKey = parseValidPaneKey(spawnPaneKey)
+  ctx.sourcePaneKey = parsedSpawnPaneKey
+    ? makePaneKey(parsedSpawnPaneKey.tabId, parsedSpawnPaneKey.leafId)
+    : null
   const verifiedPaneKey =
     parsedSpawnPaneKey &&
     typeof args.tabId === 'string' &&

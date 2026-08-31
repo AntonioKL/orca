@@ -53,6 +53,7 @@ import {
   killAllPty,
   clearProviderPtyState,
   getPtyIdForPaneKey,
+  registerPaneKeyRekeyListener,
   registerPaneKeyTeardownListener,
   getLocalPtyProvider,
   getSshPtyProvider,
@@ -2206,6 +2207,13 @@ async function printServeReady(options: ServeOptions): Promise<void> {
 // Why: on PTY teardown drop the spinner entry explicitly, else the shared timer keeps ticking with sendSyntheticTitle no-oping forever.
 registerPaneKeyTeardownListener((paneKey) => {
   stopSyntheticTitleSpinner(paneKey)
+})
+
+// Why: a surviving PTY can be rebound under a newly-created tab while its hooks keep posting the old physical paneKey; move all hook authority to the new owner at the bind point.
+registerPaneKeyRekeyListener(({ ptyId, previousPaneKey, paneKey }) => {
+  agentHookServer.transferPaneAuthority(previousPaneKey, paneKey, ptyId, Date.now(), {
+    authorityVerified: true
+  })
 })
 
 function sendSyntheticTitle(ptyId: string, data: string, options: { force?: boolean } = {}): void {

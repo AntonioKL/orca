@@ -170,6 +170,7 @@ import {
 import type { GitAdmissionTier } from '../git/command-runner/git-exec-options'
 import { runWithGitReadCacheInvalidation } from '../git/status'
 import { wakeFolderRepoGitUpgradeWatch } from '../ipc/folder-repo-git-upgrade-wake'
+import { rememberPaneKeyBindingForPty } from '../ipc/pty/pane/key-state'
 import {
   cleanupClaimedCloneTarget,
   claimCloneTarget,
@@ -34872,6 +34873,7 @@ export class OrcaRuntimeService {
         // Why: restored SSH IDs can collide with stale local parser state; connection ownership must win before their first output is parsed.
         this.wslDistroByPtyId.delete(ptyId)
       }
+      rememberPaneKeyBindingForPty(ptyId, state.paneKey)
       // Why: restored/controller-discovered PTYs learn their worktree here without registerPty(), so URL enrichment must bind at this source.
       advertisedUrlWatcher.bindPty(ptyId, worktreeId)
       return pty
@@ -34919,6 +34921,8 @@ export class OrcaRuntimeService {
       pty.tabId = state.tabId
     }
     if (state.paneKey !== undefined) {
+      // Why: graph sync and PTY reattach both converge here; update the reverse map before replacing the record so rekey listeners can transfer hook authority.
+      rememberPaneKeyBindingForPty(ptyId, state.paneKey)
       pty.paneKey = state.paneKey
     }
     if (state.connected !== undefined) {

@@ -15,7 +15,7 @@ import {
   shouldSkipCodexHomeEnvForWindowsShell,
   codexReattachedHomeRouteField
 } from '../host-env/codex-home'
-import { rememberPaneKeyForPty } from '../pane/key-state'
+import { rememberPaneKeyBindingForPty } from '../pane/key-state'
 import { resolvePaneSpawnReservation } from '../pane/spawn-reservation'
 import { seedTerminalRestoreRecordsFromSpawnResult } from '../pane/agent-session-owners'
 import {
@@ -71,6 +71,16 @@ export async function commitPtyIpcSpawn(ctx: PtyIpcSpawnState): Promise<PtySpawn
       ctx.deps.runtime.seedHeadlessTerminal(ctx.result.id, ctx.result.replay)
     }
   }
+  // Why: the renderer's tab/leaf metadata is the current bind identity even when a surviving process still carries an old ORCA_PANE_KEY; remember it before runtime registration so the rekey notification runs once.
+  const currentPaneKey =
+    ctx.result.isReattach === true
+      ? (ctx.metadataPaneKey ?? ctx.validatedPaneKey)
+      : ctx.validatedPaneKey
+  const rememberedPaneKey = rememberPaneKeyBindingForPty(
+    ctx.result.id,
+    currentPaneKey,
+    ctx.result.isReattach === true ? ctx.sourcePaneKey : undefined
+  )
   if (
     typeof args.worktreeId === 'string' &&
     args.worktreeId.length > 0 &&
@@ -133,11 +143,6 @@ export async function commitPtyIpcSpawn(ctx: PtyIpcSpawnState): Promise<PtySpawn
   if (ctx.isClaudeLaunch && !ctx.stablePaneOwner) {
     markClaudePtySpawned(ctx.result.id)
   }
-  // Why: record the paneKey mapping so clearProviderPtyState can clear the agent-hooks server's per-paneKey caches on exit.
-  // Why: args.env is untrusted IPC JSON (type unenforced); bound the paneKey so malformed/oversized values can't pollute ptyPaneKey or clearPaneState.
-  const rememberedPaneKey = ctx.validatedPaneKey
-    ? rememberPaneKeyForPty(ctx.result.id, ctx.validatedPaneKey)
-    : null
   if (ctx.legacySpawnPaneKey && ctx.migrationUnsupportedPaneKey) {
     agentHookServer.registerPaneKeyAlias(
       ctx.legacySpawnPaneKey.paneKey,

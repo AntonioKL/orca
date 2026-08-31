@@ -2,7 +2,7 @@ import { getAppEnvironment } from '../../../../shared/app-environment'
 import type { PtySpawnResult } from '../../../providers/types'
 import { LocalPtyProvider } from '../../../providers/local-pty-provider'
 import { isValidTerminalTabId } from '../../../../shared/terminal-tab-id'
-import { isTerminalLeafId } from '../../../../shared/stable-pane-id'
+import { isTerminalLeafId, makePaneKey } from '../../../../shared/stable-pane-id'
 import { getAppPtyId, getProvider, getRelayPtyId } from '../provider/registry'
 import { buildPtyHostEnv } from '../host-env/assembly'
 import {
@@ -37,6 +37,7 @@ import { resolvePathEnvKey } from '../../../pty/windows-environment-path'
 import { stampWslOrchestrationCompatibilityHost } from '../../../pty/wsl-orca-env'
 import { ensureCodexStateDbBackfillRecoveryStarted } from '../../../codex/codex-state-db-backfill-recovery'
 import { clearProviderPtyState } from '../provider/state-cleanup'
+import { parseValidPaneKey } from '../pane/key-state'
 import type { RuntimePtySpawnState } from './spawn-state'
 
 export async function prepareRuntimePtySpawn(
@@ -163,6 +164,8 @@ export async function prepareRuntimePtySpawn(
     }
   }
   const sshScopedEnv = stripRemotePaneEnvWhenHooksDisabled(args.connectionId, args.env)
+  const sourcePaneKey = parseValidPaneKey(sshScopedEnv?.ORCA_PANE_KEY)
+  ctx.sourcePaneKey = sourcePaneKey ? makePaneKey(sourcePaneKey.tabId, sourcePaneKey.leafId) : null
   ctx.env = ctx.claudeAuth ? { ...sshScopedEnv, ...ctx.claudeAuth.envPatch } : sshScopedEnv
   ctx.requestedAgentTeamsPath = ctx.env?.ORCA_AGENT_TEAMS_TEAM_ID
     ? ctx.env[resolvePathEnvKey(ctx.env, process.platform)]

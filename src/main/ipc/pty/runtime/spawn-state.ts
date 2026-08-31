@@ -59,6 +59,7 @@ export type RuntimePtySpawnState = {
   hadSessionSizeBeforeAttach: boolean
   sessionSizeBeforeAttach: { cols: number; rows: number } | undefined
   materializedPaneKey: string | null
+  sourcePaneKey: string | null
   metadataLeafId: string | null
   metadataPaneKey: string | null
   spawnIdentityPaneKey: string | null
@@ -165,6 +166,7 @@ export function createRuntimePtySpawnState(
     hadSessionSizeBeforeAttach: false,
     sessionSizeBeforeAttach: undefined,
     materializedPaneKey: null,
+    sourcePaneKey: null,
     metadataLeafId: null,
     metadataPaneKey: null,
     spawnIdentityPaneKey: null,
