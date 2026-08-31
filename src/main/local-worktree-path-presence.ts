@@ -2,7 +2,7 @@ import { stat } from 'node:fs/promises'
 import { mapWithConcurrency } from '../shared/map-with-concurrency'
 import { PrioritySemaphore } from '../shared/priority-semaphore'
 
-// Why: share one bound across polling callers so slow mounts cannot multiply libuv work.
+// Why: share one bound across polling callers so normal probes cannot multiply libuv work.
 const LOCAL_WORKTREE_PATH_PROBE_CONCURRENCY = 2
 export const LOCAL_WORKTREE_PATH_PROBE_TIMEOUT_MS = 2_000
 const localWorktreePathProbeSemaphore = new PrioritySemaphore(LOCAL_WORKTREE_PATH_PROBE_CONCURRENCY)
@@ -23,25 +23,30 @@ async function probeLocalWorktreePath(pathValue: string, signal: AbortSignal): P
     release()
     return true
   }
-  const presence = stat(pathValue)
-    .then(
-      () => true,
-      (error) => {
-        const code = (error as NodeJS.ErrnoException | undefined)?.code
-        return code !== 'ENOENT' && code !== 'ENOTDIR'
-      }
-    )
-    .finally(release)
-  if (signal.aborted) {
-    return true
-  }
+  const presence = stat(pathValue).then(
+    () => true,
+    (error) => {
+      const code = (error as NodeJS.ErrnoException | undefined)?.code
+      return code !== 'ENOENT' && code !== 'ENOTDIR'
+    }
+  )
   return new Promise((resolve) => {
+    let settled = false
     const finish = (value: boolean): void => {
+      if (settled) {
+        return
+      }
+      settled = true
       signal.removeEventListener('abort', onAbort)
+      release()
       resolve(value)
     }
     const onAbort = (): void => finish(true)
     signal.addEventListener('abort', onAbort, { once: true })
+    if (signal.aborted) {
+      finish(true)
+      return
+    }
     void presence.then(finish)
   })
 }

@@ -135,15 +135,14 @@ describe('local worktree path presence', () => {
     await expect(localWorktreePathExistsOrIsUnverifiable('/unverifiable')).resolves.toBe(true)
   })
 
-  it('settles timed-out batches without exceeding or leaking the global stat bound', async () => {
+  it('releases permits when a batch times out so later probes are not starved', async () => {
     vi.useFakeTimers()
     const timeoutControllers = installFakeAbortSignalTimeout()
     const releaseStats: (() => void)[] = []
-    let returnMissing = false
-    statMock.mockImplementation(() =>
-      returnMissing
-        ? Promise.reject(fsError('ENOENT'))
-        : new Promise((resolve) => releaseStats.push(() => resolve({})))
+    statMock.mockImplementation((pathValue: string) =>
+      pathValue.startsWith('/first')
+        ? new Promise((resolve) => releaseStats.push(() => resolve({})))
+        : Promise.resolve({})
     )
 
     try {
@@ -166,20 +165,12 @@ describe('local worktree path presence', () => {
 
       const secondPaths = ['/second-1', '/second-2', '/second-3']
       const second = localWorktreePathsExistOrAreUnverifiable(secondPaths)
-      await vi.advanceTimersByTimeAsync(LOCAL_WORKTREE_PATH_PROBE_TIMEOUT_MS)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(statMock).toHaveBeenCalledTimes(5)
+
       await expect(second).resolves.toEqual(
         new Map(secondPaths.map((pathValue) => [pathValue, true]))
       )
-      expect(statMock).toHaveBeenCalledTimes(2)
-
-      returnMissing = true
-      releaseStats.splice(0).forEach((release) => release())
-      await vi.advanceTimersByTimeAsync(0)
-
-      await expect(localWorktreePathsExistOrAreUnverifiable(['/after-release'])).resolves.toEqual(
-        new Map([['/after-release', false]])
-      )
-      expect(statMock).toHaveBeenCalledTimes(3)
     } finally {
       timeoutControllers.forEach((controller) => controller.abort())
       releaseStats.splice(0).forEach((release) => release())
