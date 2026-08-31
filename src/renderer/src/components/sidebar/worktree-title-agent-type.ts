@@ -1,11 +1,11 @@
 import {
   resolveCompatibleAgentTypeForOwner,
+  normalizeCompatibleAgentTitleForOwner,
   type CompatibleAgentOwnerOptions
 } from '../../../../shared/agent-title-owner'
 import type { AgentType } from '../../../../shared/agent-status-types'
 import { isClaudeIdentityFrameTitle } from '../../../../shared/terminal-title-agent-type'
 import { resolveTitleActivityLabel } from '@/lib/pane-agent-evidence'
-import { normalizeCompatibleAgentTitleForOwner } from '../../../../shared/agent-title-owner'
 
 const TITLE_AGENT_LABEL_TO_TYPE: Record<string, AgentType> = {
   'Claude Code': 'claude',
