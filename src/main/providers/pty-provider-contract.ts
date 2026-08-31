@@ -27,6 +27,7 @@ export type PtyShutdownOptions = {
   deadlineMs?: number
   intent?: PtyKillIntent
   incarnationId?: string
+  expectedIncarnationId?: PtyIncarnationId
 }
 
 export function isPtyShutdownFenceUnavailable(

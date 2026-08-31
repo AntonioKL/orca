@@ -2099,7 +2099,6 @@ export class PtyHandler {
       // Preserve the live replacement; callers must classify this as a fence refusal.
       return { fenceUnavailable: true }
     }
-    }
     // Why: `pty.shutdown` is the only authoritative statement this host ever gets that a tab is
     // gone. Record it before the kill request, because the kill is the part that can fail: an agent
     // that survives teardown otherwise keeps posting hooks the relay forwards as a live agent pane

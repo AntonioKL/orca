@@ -324,7 +324,9 @@ export class DegradedDaemonPtyProvider implements IPtyProvider {
     for (const id of this.getCurrentDaemonSessionIds()) {
       this.sessionProviders.delete(id)
       // Why: restart kills listed sessions even when the adapter did not track them active.
-      for (const listener of this.exitListeners) {
+      // Snapshot listeners so unsubscribe during a callback cannot skip the next listener.
+      // oxlint-disable-next-line unicorn/no-useless-spread -- listener callbacks may unsubscribe
+      for (const listener of [...this.exitListeners]) {
         listener({ id, code })
       }
     }
