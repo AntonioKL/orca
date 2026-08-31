@@ -6,8 +6,9 @@ import {
 } from '../shared/pty-source-credit-contract'
 import { RelayPtySourceCreditLedger } from './pty-source-credit-ledger'
 import { CLOSED_DELIVERY_TOMBSTONE_LIMIT, type DeliveryRecord } from './pty-source-credit-record'
+import type { PtySourceSentBoundaries } from './pty-source-sent-boundaries'
 
-type BoundaryRecord = { sentBoundaries: Set<number> }
+type BoundaryRecord = { sentBoundaries: PtySourceSentBoundaries }
 
 function getBoundaryRecord(
   ledger: RelayPtySourceCreditLedger,
@@ -19,43 +20,6 @@ function getBoundaryRecord(
     throw new Error('test delivery record missing')
   }
   return record
-}
-
-type CountingBoundarySet = Set<number> & { readonly visits: number }
-
-function createCountingBoundarySet(boundaries: readonly number[]): CountingBoundarySet {
-  const pending = new Set(boundaries)
-  let visits = 0
-  return {
-    get visits() {
-      return visits
-    },
-    has: (boundary: number) => pending.has(boundary),
-    delete: (boundary: number) => pending.delete(boundary),
-    *[Symbol.iterator](): IterableIterator<number> {
-      for (const boundary of pending) {
-        visits += 1
-        yield boundary
-      }
-    }
-  } as unknown as CountingBoundarySet
-}
-
-function countLegacyBoundaryVisits(
-  boundaries: readonly number[],
-  credits: readonly number[]
-): number {
-  const pending = new Set(boundaries)
-  let visits = 0
-  for (const creditedEndSu of credits) {
-    for (const boundary of pending) {
-      visits += 1
-      if (boundary < creditedEndSu) {
-        pending.delete(boundary)
-      }
-    }
-  }
-  return visits
 }
 
 function identity(
@@ -290,7 +254,7 @@ describe('RelayPtySourceCreditLedger', () => {
     expect(ledger.reserveNextSend(owner, 2)!.span.data).toBe('ef')
   })
 
-  it('stops ACK boundary cleanup at the first uncredited boundary', () => {
+  it('reclaims every credited boundary across a long sequential ACK drain', () => {
     const boundaryCount = 1_024
     const spanCount = boundaryCount - 1
     const ledger = new RelayPtySourceCreditLedger({
@@ -307,14 +271,11 @@ describe('RelayPtySourceCreditLedger', () => {
     }
 
     const record = getBoundaryRecord(ledger, owner)
-    const insertionOrder = [...record.sentBoundaries]
-    expect(insertionOrder).toEqual(Array.from({ length: boundaryCount }, (_, index) => index))
-    const countedBoundaries = createCountingBoundarySet(insertionOrder)
-    record.sentBoundaries = countedBoundaries
-    const credits = Array.from({ length: spanCount }, (_, index) => index + 1)
-    const legacyVisits = countLegacyBoundaryVisits(insertionOrder, credits)
+    expect([...record.sentBoundaries]).toEqual(
+      Array.from({ length: boundaryCount }, (_, index) => index)
+    )
 
-    for (const creditedEndSu of credits) {
+    for (let creditedEndSu = 1; creditedEndSu <= spanCount; creditedEndSu += 1) {
       expect(
         ledger.acknowledge(owner, {
           id: owner.id,
@@ -324,12 +285,13 @@ describe('RelayPtySourceCreditLedger', () => {
           creditedEndSu
         })
       ).toBe('advanced')
+      // Every boundary below the credit must be gone, so the oldest live one is the credit itself.
+      const [oldestLive] = record.sentBoundaries
+      expect(oldestLive).toBe(creditedEndSu)
     }
 
-    expect(legacyVisits).toBe(524_799)
-    expect(countedBoundaries.visits).toBe(2_046)
-    expect(ledger.retentionSnapshot()).toEqual({ sourceSu: 0, dataBytes: 0, spans: 0 })
     expect([...record.sentBoundaries]).toEqual([spanCount])
+    expect(ledger.retentionSnapshot()).toEqual({ sourceSu: 0, dataBytes: 0, spans: 0 })
   })
 
   it('deletes every boundary skipped by a jump-ahead cumulative ACK', () => {

@@ -30,13 +30,7 @@ function reclaimCreditedSpans(record: DeliveryRecord): void {
 
 function advanceCredit(record: DeliveryRecord, creditedEndSu: number): void {
   record.creditedEndSu = creditedEndSu
-  for (const boundary of record.sentBoundaries) {
-    // Boundaries are inserted in increasing sentEndSu order, so later values cannot be eligible.
-    if (boundary >= creditedEndSu) {
-      break
-    }
-    record.sentBoundaries.delete(boundary)
-  }
+  record.sentBoundaries.dropBelow(creditedEndSu)
   reclaimCreditedSpans(record)
 }
 
@@ -101,7 +95,7 @@ export function commitPtySourceSend(
   if (record.pendingSend !== reservation) {
     throw new Error('PTY source send reservation is stale')
   }
-  // advanceCredit breaks on the first uncredited boundary, so sentBoundaries inserts must ascend.
+  // sentBoundaries lookups and cleanup both assume ascending order, so inserts must ascend.
   if (reservation.span.sourceEndSu <= record.sentEndSu) {
     throw new Error('PTY source send reservation regresses the sent boundary')
   }
