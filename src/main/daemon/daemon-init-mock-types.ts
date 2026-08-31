@@ -46,7 +46,7 @@ export type MockAdapterConstructor = new (opts: MockAdapter['options']) => MockA
 
 /** Handle the fake spawner hands back from ensureRunning/getHandle. */
 export type MockSpawnerHandle = {
-  mode?: 'degraded-new-pty-fallback'
+  mode?: 'degraded-new-pty-fallback' | 'degraded-new-pty-fallback-sticky'
   releaseAdoptionLease?: () => void
   shutdown: () => Promise<void>
 }
@@ -94,7 +94,7 @@ export type MockLocalPtyProvider = {
 export type EnsureRunningOverride = () => Promise<{
   socketPath: string
   tokenPath: string
-  mode?: 'degraded-new-pty-fallback'
+  mode?: 'degraded-new-pty-fallback' | 'degraded-new-pty-fallback-sticky'
 }>
 
 /** Every stub daemon-init's suites share, plus the control knobs they mutate per test. */

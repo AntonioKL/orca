@@ -30,7 +30,7 @@ export type DaemonPidFile = {
 }
 
 export type DaemonProcessHandle = {
-  mode?: 'degraded-new-pty-fallback'
+  mode?: 'degraded-new-pty-fallback' | 'degraded-new-pty-fallback-sticky'
   releaseAdoptionLease?(): void
   shutdown(): Promise<void>
 }

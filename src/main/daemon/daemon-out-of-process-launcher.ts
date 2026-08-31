@@ -38,7 +38,7 @@ export function attributeNextDaemonReplacement(reason: DaemonReplaceReason): voi
 function createPreservedDaemonHandle(
   runtimeDir: string,
   protocolVersion = PROTOCOL_VERSION,
-  mode?: 'degraded-new-pty-fallback'
+  mode?: 'degraded-new-pty-fallback' | 'degraded-new-pty-fallback-sticky'
 ): DaemonProcessHandle {
   const handle: DaemonProcessHandle = {
     shutdown: async () => {
@@ -86,7 +86,7 @@ export function createOutOfProcessLauncher(
       adoptionClient = null
     }
     const preserveDaemon = async (
-      mode?: 'degraded-new-pty-fallback'
+      mode?: 'degraded-new-pty-fallback' | 'degraded-new-pty-fallback-sticky'
     ): Promise<DaemonProcessHandle> => {
       const connectedClient = adoptionClient ?? undefined
       adoptionClient = null
