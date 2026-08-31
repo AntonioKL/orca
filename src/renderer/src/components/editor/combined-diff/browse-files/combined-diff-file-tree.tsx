@@ -112,16 +112,22 @@ export function CombinedDiffFileTree({
         : [],
     [mode, structurallyFilteredEntries]
   )
+  // Why: the viewed overlay below replaces these rows entirely when viewed files are hidden, so
+  // flattening the unfiltered tree there is pure dead work.
   const uncommittedRowsByArea = React.useMemo(() => {
     const rowsByArea = new Map<string, CombinedDiffTreeNode[]>()
+    if (!includeViewed) {
+      return rowsByArea
+    }
     for (const group of uncommittedTreeGroups) {
       rowsByArea.set(group.area, flattenCombinedDiffTreeRoots(group.roots, collapsedDirectoryKeys))
     }
     return rowsByArea
-  }, [collapsedDirectoryKeys, uncommittedTreeGroups])
+  }, [collapsedDirectoryKeys, includeViewed, uncommittedTreeGroups])
   const branchRows = React.useMemo(
-    () => flattenCombinedDiffTreeRoots(branchTreeRoots, collapsedDirectoryKeys),
-    [branchTreeRoots, collapsedDirectoryKeys]
+    () =>
+      includeViewed ? flattenCombinedDiffTreeRoots(branchTreeRoots, collapsedDirectoryKeys) : [],
+    [branchTreeRoots, collapsedDirectoryKeys, includeViewed]
   )
   const uncommittedVisibleRowsByArea = React.useMemo(() => {
     if (includeViewed) {
