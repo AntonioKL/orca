@@ -178,6 +178,8 @@ export class OrchestrationMutationExecutor {
         ...identity,
         receipt: JSON.stringify(attachMutationReceipt(result, requestId, resumedPendingMutation))
       })
+      // Keep completed receipts when post-commit notification fails; retries replay the durable effect.
+      effectPossible = true
     }
     let effectPossible = false
     const active = Promise.resolve().then(() =>

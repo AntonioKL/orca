@@ -27,16 +27,26 @@ type PulledRelayItem = {
 
 export async function syncFederatedDispatch(
   runtime: OrcaRuntimeService,
-  dispatchId: string
+  dispatchId: string,
+  isCurrent: () => boolean = () => true
 ): Promise<{ imported: number; acknowledgedThrough: number }> {
-  return syncFederatedDispatchPages(runtime, dispatchId, MAX_FEDERATION_PULL_PAGES_PER_SYNC)
+  return syncFederatedDispatchPages(
+    runtime,
+    dispatchId,
+    MAX_FEDERATION_PULL_PAGES_PER_SYNC,
+    isCurrent
+  )
 }
 
 async function syncFederatedDispatchPages(
   runtime: OrcaRuntimeService,
   dispatchId: string,
-  remainingPages: number
+  remainingPages: number,
+  isCurrent: () => boolean
 ): Promise<{ imported: number; acknowledgedThrough: number }> {
+  if (!isCurrent()) {
+    return { imported: 0, acknowledgedThrough: 0 }
+  }
   const db = runtime.getOrchestrationDb()
   const federated = db.getFederatedDispatch(dispatchId)
   const dispatch = db.getDispatchContextById(dispatchId)
@@ -80,6 +90,9 @@ async function syncFederatedDispatchPages(
     undefined,
     { expectedEnvironmentPairingRevision: currentServer.pairingRevision }
   )) as { runtimeEpoch: string; items: PulledRelayItem[] }
+  if (!isCurrent()) {
+    return { imported: 0, acknowledgedThrough: federated.to_home_imported_sequence }
+  }
   let cursor =
     shouldReplayUnacknowledged && pulled.items.length > 0
       ? pulled.items[0].sequence - 1
@@ -157,8 +170,9 @@ async function syncFederatedDispatchPages(
     ? lifecycleAcknowledgmentBarrier - 1
     : cursor
   if (
+    isCurrent() &&
     acknowledgmentCursor >
-    Math.max(getFederationAckedThrough(ackLease, ackIdentity), durableAcknowledgedThrough)
+      Math.max(getFederationAckedThrough(ackLease, ackIdentity), durableAcknowledgedThrough)
   ) {
     const delivered = (await runtime.callOrchestrationWorkerServer(
       federated.environment_id,
@@ -214,11 +228,17 @@ async function syncFederatedDispatchPages(
     })
   }
   if (
+    isCurrent() &&
     pulled.items.length === FEDERATION_PULL_PAGE_SIZE &&
     remainingPages > 1 &&
     lifecycleAcknowledgmentBarrier === undefined
   ) {
-    const next = await syncFederatedDispatchPages(runtime, dispatchId, remainingPages - 1)
+    const next = await syncFederatedDispatchPages(
+      runtime,
+      dispatchId,
+      remainingPages - 1,
+      isCurrent
+    )
     return {
       imported: imported + next.imported,
       acknowledgedThrough: next.acknowledgedThrough

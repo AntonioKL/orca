@@ -11,6 +11,11 @@ const DEBIAN_ROLLOUT_UNC = ROLLOUT_UNC.replace('Ubuntu', 'Debian')
 
 vi.mock('../wsl', () => ({
   listWslDistrosAsync: vi.fn(async () => ['Ubuntu', 'Debian']),
+  listRunningWslDistrosAsync: vi.fn(async () => ['Ubuntu', 'Debian']),
+  listRunningWslHomeDirsAsync: vi.fn(async () => [
+    UBUNTU_HOME,
+    UBUNTU_HOME.replace('Ubuntu', 'Debian')
+  ]),
   getWslHomeAsync: vi.fn(async (distro: string) => UBUNTU_HOME.replace('Ubuntu', distro))
 }))
 
