@@ -157,8 +157,9 @@ describeWindows('Windows Codex shell preflight runtime', () => {
     const root = makeTempDir()
     const preflight = writeFailingPreflight(root)
     // Keep the fixture ahead of any host-global Codex installation in Git Bash.
-    const codexExecutable = join(root, '.local', 'bin', 'codex.exe')
-    mkdirSync(join(root, '.local', 'bin'), { recursive: true })
+    // A `.local` segment is rewritten by MSYS when it converts temporary paths.
+    const codexExecutable = join(root, 'bin', 'codex.exe')
+    mkdirSync(join(root, 'bin'), { recursive: true })
     linkNodeExecutable(codexExecutable)
     const preflightMarker = join(root, 'git-bash-preflight-ran')
     const codexMarker = join(root, 'git-bash-codex-ran')
@@ -180,7 +181,7 @@ describeWindows('Windows Codex shell preflight runtime', () => {
         shellArgs: resolved.shellArgs,
         cwd: root,
         env: {
-          ...withPathEntry(process.env, join(root, '.local', 'bin')),
+          ...withPathEntry(process.env, join(root, 'bin')),
           CHERE_INVOKING: '1',
           HOME: root,
           ORCA_CODEX_LAUNCH_PREFLIGHT: preflight,
@@ -208,7 +209,7 @@ describeWindows('Windows Codex shell preflight runtime', () => {
       .trim()
       .replaceAll('\\', '/')
       .toLowerCase()
-    expect(resolvedCodexPath).toMatch(/\/\.local\/bin\/codex(?:\.exe)?$/)
+    expect(resolvedCodexPath).toMatch(/\/bin\/codex(?:\.exe)?$/)
     expect(readFileSync(codexMarker, 'utf8')).toBe('ran')
   })
 })
