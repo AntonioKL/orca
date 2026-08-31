@@ -1,3 +1,5 @@
+import { REMOTE_RUNTIME_SHARED_CONTROL_CAPABILITY } from '../../../../shared/protocol-version'
+
 const diagnosticsGenerationByEnvironment = new Map<string, number>()
 
 export function acceptRuntimeEnvironmentDiagnosticsGeneration(
@@ -25,7 +27,7 @@ export function mergePushedRuntimeEnvironmentDiagnostics(args: {
 }): void {
   if (
     !acceptRuntimeEnvironmentDiagnosticsGeneration(args.environmentId, args.transportGeneration) ||
-    !args.current?.status
+    !args.current?.status?.capabilities?.includes(REMOTE_RUNTIME_SHARED_CONTROL_CAPABILITY)
   ) {
     return
   }

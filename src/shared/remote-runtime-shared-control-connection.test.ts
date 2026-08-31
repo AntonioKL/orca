@@ -32,11 +32,16 @@ describe('RemoteRuntimeSharedControlConnection', () => {
 
     expect(first).toMatchObject({ ok: true, result: { method: 'worktree.ps' } })
     expect(second).toMatchObject({ ok: true, result: { method: 'session.tabs.listAll' } })
+    expect(server.connectionCount()).toBe(1)
     expect(server.auths).toContainEqual({
       type: 'e2ee_auth',
       deviceToken: 'device-token',
       clientCapabilities: remoteRuntimeClientCapabilities()
     })
+    expect(server.requests.map((request) => request.method)).toEqual([
+      'worktree.ps',
+      'session.tabs.listAll'
+    ])
     expect((connection.close(), states)).toEqual(
       expect.arrayContaining(['awaiting_ready', 'ready', 'closed'])
     )
