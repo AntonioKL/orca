@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { TerminalLayoutSnapshot } from '../../../shared/terminal-tab-types'
+import { makePaneKey } from '../../../shared/stable-pane-id'
 import { getWorktreeStatus, getWorktreeStatusLabel, resolveWorktreeStatus } from './worktree-status'
 
 const LEAF_ID_1 = '11111111-1111-4111-8111-111111111111'
@@ -137,6 +138,36 @@ describe('getWorktreeStatus', () => {
     )
 
     expect(status).toBe('working')
+  })
+
+  it('rejects a neutral spinner when process evidence belongs to a rebound PTY', () => {
+    const status = getWorktreeStatus(
+      [{ id: 'tab-1', title: '⠋ Review branch' }],
+      [],
+      { 'tab-1': ['pty-old', 'pty-new'] },
+      {},
+      {
+        terminalLayoutsByTabId: {
+          'tab-1': {
+            root: { type: 'leaf', leafId: LEAF_ID_1 },
+            activeLeafId: LEAF_ID_1,
+            expandedLeafId: null,
+            ptyIdsByLeafId: { [LEAF_ID_1]: 'pty-new' }
+          }
+        },
+        paneForegroundAgentByPaneKey: {
+          [makePaneKey('tab-1', LEAF_ID_1)]: {
+            agent: 'claude',
+            shellForeground: false,
+            observedAt: 1_000,
+            ptyId: 'pty-old'
+          }
+        },
+        now: 2_000
+      }
+    )
+
+    expect(status).toBe('active')
   })
 })
 
