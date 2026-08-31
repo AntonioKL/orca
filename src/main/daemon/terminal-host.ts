@@ -170,9 +170,11 @@ export class TerminalHost {
         opts.incarnationId &&
         (!currentSession || opts.incarnationId !== currentSession.incarnationId)
       ) {
-        return { fenceUnavailable: true }
+        return Promise.resolve({ fenceUnavailable: true })
       }
-      return opts.immediate ? this.sessionTeardown.requestImmediate(sessionId) : pending
+      return opts.immediate
+        ? (this.sessionTeardown.requestImmediate(sessionId) ?? pending)
+        : pending
     }
     const session = this.getAliveSession(sessionId)
     if (opts.incarnationId && opts.incarnationId !== session.incarnationId) {
