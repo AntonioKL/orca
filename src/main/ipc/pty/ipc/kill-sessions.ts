@@ -158,14 +158,6 @@ export async function killPtySessions(
         treeUnverified: true
       }
     }
-    if (!survivor && treeUnverified) {
-      return {
-        ...result,
-        verdict: 'unverifiable',
-        treeUnverified: true,
-        reason: 'descendant tree could not be verified'
-      }
-    }
     return survivor
       ? {
           ...result,
