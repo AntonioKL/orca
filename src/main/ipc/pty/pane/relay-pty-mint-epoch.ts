@@ -3,9 +3,19 @@ import { parseAppSshPtyId } from '../../../providers/ssh-pty-id'
 import { registerPaneKeyTeardownListener } from './key-state'
 
 const RELAY_STATUS_TIMEOUT_MS = 2_000
+const MAX_RETIRED_RELAY_OWNERS = 1_024
 const relayMintEpochByProvider = new WeakMap<IPtyProvider, Promise<string | undefined>>()
 const retiredRelayOwnerByPane = new Map<string, string>()
 const retiredRelayOwnerKeysByPane = new Map<string, Set<string>>()
+
+function forgetRetiredRelayOwnerKey(key: string, paneKey: string): void {
+  retiredRelayOwnerByPane.delete(key)
+  const keys = retiredRelayOwnerKeysByPane.get(paneKey)
+  keys?.delete(key)
+  if (keys?.size === 0) {
+    retiredRelayOwnerKeysByPane.delete(paneKey)
+  }
+}
 
 export function clearRetiredRelayEpochOwnersForPane(paneKey: string): void {
   const keys = retiredRelayOwnerKeysByPane.get(paneKey)
@@ -78,6 +88,19 @@ export function rememberRetiredRelayEpochOwner(args: {
     retiredRelayOwnerKeysByPane.set(args.paneKey, keys)
   }
   keys.add(key)
+  while (retiredRelayOwnerByPane.size > MAX_RETIRED_RELAY_OWNERS) {
+    const oldestKey = retiredRelayOwnerByPane.keys().next().value as string | undefined
+    if (!oldestKey) {
+      break
+    }
+    const separator = oldestKey.indexOf('\0')
+    const oldestPaneKey = separator === -1 ? undefined : oldestKey.slice(separator + 1)
+    if (oldestPaneKey) {
+      forgetRetiredRelayOwnerKey(oldestKey, oldestPaneKey)
+    } else {
+      retiredRelayOwnerByPane.delete(oldestKey)
+    }
+  }
 }
 
 export function takeRetiredRelayEpochOwner(
@@ -89,12 +112,7 @@ export function takeRetiredRelayEpochOwner(
   }
   const key = retiredRelayOwnerKey(connectionId, paneKey)
   const ownerPtyId = retiredRelayOwnerByPane.get(key)
-  retiredRelayOwnerByPane.delete(key)
-  const keys = retiredRelayOwnerKeysByPane.get(paneKey)
-  keys?.delete(key)
-  if (keys?.size === 0) {
-    retiredRelayOwnerKeysByPane.delete(paneKey)
-  }
+  forgetRetiredRelayOwnerKey(key, paneKey)
   return ownerPtyId
 }
 
