@@ -11,7 +11,7 @@ export type HangWatchdogWorkerData = {
 
 export type HangWatchdogCensus = Record<string, number>
 export type HangWatchdogWorkerEvent = {
-  type: 'hang_resolved'
+  type: 'hang_resolved' | 'hang_suspended'
   marker: {
     detectedAt: number
     detectedAtMs?: number
@@ -23,4 +23,6 @@ export type HangWatchdogWorkerEvent = {
 }
 export type MainToHangWatchdogWorkerMessage =
   | { type: 'heartbeat'; census?: HangWatchdogCensus }
+  | { type: 'suspend' }
+  | { type: 'resume' }
   | { type: 'shutdown' }

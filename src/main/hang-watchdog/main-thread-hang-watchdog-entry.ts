@@ -2,7 +2,6 @@ import { isMainThread, parentPort, workerData } from 'node:worker_threads'
 import { readFileSync, rmSync } from 'node:fs'
 import { createHangWatchdogDetectionLoop } from './hang-watchdog-detection-loop'
 import { claimHangDetectionMarker, writeHangDetectionMarker } from './hang-detection-marker'
-import { subscribeSystemPowerLifecycle } from '../system-power-lifecycle'
 import type {
   HangWatchdogWorkerData,
   MainToHangWatchdogWorkerMessage
@@ -93,9 +92,27 @@ export function runWatchdog(
         }
       })
     },
-    onHangSuspended: () => {
-      // A suspend edge closes the episode without emitting a hang marker; any
-      // marker already written belongs to the sleep false-positive.
+    onHangSuspended: (unresponsiveMs) => {
+      // Close the episode explicitly; sleep must never be reported as recovery.
+      try {
+        const marker = JSON.parse(readFileSync(config.markerPath, 'utf8')) as {
+          detectedAt: number
+          detectedAtMs?: number
+          parentPid: number
+          unresponsiveMs: number
+          census?: Record<string, number>
+        }
+        port.postMessage?.({
+          type: 'hang_suspended',
+          marker: {
+            ...marker,
+            unresponsiveMs,
+            selfRecovered: false
+          }
+        })
+      } catch {
+        // Best effort; marker may have been removed by a concurrent startup.
+      }
       try {
         rmSync(config.markerPath, { force: true })
       } catch {
@@ -103,11 +120,6 @@ export function runWatchdog(
       }
     }
   })
-  const unsubscribePower = subscribeSystemPowerLifecycle({
-    onSuspend: () => loop.setSuspended(true),
-    onResume: () => loop.setSuspended(false)
-  })
-
   let checkTimer: ReturnType<typeof setInterval> | null = setInterval(
     () => loop.tick(),
     config.checkIntervalMs
@@ -116,13 +128,16 @@ export function runWatchdog(
     if (message.type === 'heartbeat') {
       lastCensus = message.census
       loop.recordHeartbeat()
+    } else if (message.type === 'suspend') {
+      loop.setSuspended(true)
+    } else if (message.type === 'resume') {
+      loop.setSuspended(false)
     } else if (message.type === 'shutdown') {
       if (checkTimer) {
         clearInterval(checkTimer)
         checkTimer = null
       }
       port.close()
-      unsubscribePower()
     }
   })
 }

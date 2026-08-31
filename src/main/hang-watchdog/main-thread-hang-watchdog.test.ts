@@ -31,6 +31,7 @@ vi.mock('electron', () => ({
 }))
 
 import { installMainThreadHangWatchdog } from './main-thread-hang-watchdog'
+import { publishSystemResume, publishSystemSuspend } from '../system-power-lifecycle'
 
 function withPlatform<T>(platform: NodeJS.Platform, run: () => T): T {
   const original = process.platform
@@ -65,6 +66,7 @@ describe('installMainThreadHangWatchdog', () => {
   })
 
   afterEach(() => {
+    publishSystemResume()
     vi.useRealTimers()
     delete process.env.ORCA_HANG_WATCHDOG_FORCE
     delete process.env.ORCA_HANG_WATCHDOG_TIMEOUT_MS
@@ -179,9 +181,23 @@ describe('installMainThreadHangWatchdog', () => {
     withPlatform('darwin', () => installMainThreadHangWatchdog({ userDataPath: '/ud' }))
     const exitListener = worker.once.mock.calls.find(([event]) => event === 'exit')?.[1]
     expect(exitListener).toEqual(expect.any(Function))
+    worker.postMessage.mockClear()
     exitListener()
     vi.advanceTimersByTime(6_000)
     expect(worker.postMessage).not.toHaveBeenCalled()
+  })
+
+  it('forwards system power transitions to the watchdog worker', () => {
+    const worker = fakeWorker()
+    workerState.instance = worker
+    withPlatform('darwin', () => installMainThreadHangWatchdog({ userDataPath: '/ud' }))
+    worker.postMessage.mockClear()
+    publishSystemSuspend()
+    publishSystemResume()
+    expect(worker.postMessage.mock.calls.map(([message]) => message.type)).toEqual([
+      'suspend',
+      'resume'
+    ])
   })
 
   it('returns null and stays inert when worker construction fails', () => {

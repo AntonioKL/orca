@@ -47,6 +47,7 @@ export const mainThreadHangDetectedSchema = z
   .object({
     unresponsive_ms: z.number().int().nonnegative(),
     self_recovered: z.boolean(),
+    outcome: z.enum(['system_slept']).optional(),
     census_window_count: z.number().int().nonnegative().optional(),
     census_pane_count_local: z.number().int().nonnegative().optional(),
     census_agent_count: z.number().int().nonnegative().optional(),

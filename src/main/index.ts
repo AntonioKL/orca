@@ -519,7 +519,8 @@ function reportWatchdogLaneEvent(
   const census = sanitizeFreezeCensus(event.census ?? captureFreezeCensus())
   const payload = {
     unresponsive_ms: Math.round(event.unresponsiveMs),
-    self_recovered: true,
+    self_recovered: event.outcome !== 'system_slept',
+    ...(event.outcome ? { outcome: event.outcome } : {}),
     ...(event.episodeId !== undefined ? { episode_id: event.episodeId } : {}),
     ...(droppedCount > 0 ? { dropped_count: droppedCount } : {}),
     ...census
@@ -528,6 +529,7 @@ function reportWatchdogLaneEvent(
     recordDurableCrashBreadcrumb('main_thread_hang_detected', {
       unresponsiveMs: payload.unresponsive_ms,
       selfRecovered: payload.self_recovered,
+      ...(payload.outcome ? { outcome: payload.outcome } : {}),
       ...(payload.episode_id !== undefined ? { episodeId: payload.episode_id } : {}),
       ...(droppedCount > 0 ? { droppedCount } : {}),
       ...census
@@ -2614,6 +2616,8 @@ void app.whenReady().then(async () => {
   })
   installMainThreadHangWatchdog({
     userDataPath: getCanonicalUserDataPath(),
+    heartbeatCensus: () =>
+      captureFreezeCensus({ windowCount: BrowserWindow.getAllWindows().length }),
     onHangResolved: (event) => reportWatchdogLaneEvent(event)
   })
   const hangDetection = consumeHangDetectionMarker(
