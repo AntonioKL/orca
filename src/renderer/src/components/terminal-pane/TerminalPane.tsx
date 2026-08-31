@@ -369,7 +369,9 @@ function TerminalPane(
     sshReconnectTargetId && sshReconnectStatus && sshReconnectStatus !== 'connected'
   )
   const sshReconnectOwnsTerminalErrorsRef = useRef(sshReconnectOwnsTerminalErrors)
-  sshReconnectOwnsTerminalErrorsRef.current = sshReconnectOwnsTerminalErrors
+  useLayoutEffect(() => {
+    sshReconnectOwnsTerminalErrorsRef.current = sshReconnectOwnsTerminalErrors
+  }, [sshReconnectOwnsTerminalErrors])
   useEffect(() => {
     if (!sshReconnectEnvironmentId) {
       return
