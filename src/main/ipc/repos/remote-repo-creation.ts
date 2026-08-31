@@ -10,6 +10,10 @@ import { getSshFilesystemProvider } from '../../providers/ssh-filesystem-dispatc
 import { joinRemotePath } from '../../ssh/ssh-remote-platform'
 import { emitRepoAdded } from './repo-added-telemetry'
 import { addRemoteRepoFromPath } from './remote-repo-registration'
+import {
+  alreadyARepositoryError,
+  LEFTOVER_GIT_DIR_RETRY_HINT
+} from './repository-creation-messages'
 import { resolveRemoteHomePath } from './remote-home-path'
 
 export async function createRemoteRepo(
@@ -72,6 +76,19 @@ export async function createRemoteRepo(
   }
 
   if (targetExists) {
+    // Why: refuse an existing repository on positive evidence, before `git init` can silently
+    // reinitialize it. A `.git` FILE counts — that is how linked worktrees and submodules point.
+    // This does not rely on readDir listing dotfiles, which the provider does not guarantee.
+    let remoteGitExists = false
+    try {
+      await fsProvider.stat(joinRemotePath(host, targetPath, '.git'))
+      remoteGitExists = true
+    } catch {
+      remoteGitExists = false
+    }
+    if (remoteGitExists) {
+      return { error: alreadyARepositoryError(name) }
+    }
     try {
       const entries = await fsProvider.readDir(targetPath)
       if (entries.length > 0) {
@@ -107,23 +124,23 @@ export async function createRemoteRepo(
       step = 'commit'
       await gitProvider.exec(['commit', '--allow-empty', '-m', 'Initial commit'], targetPath)
     } catch (err) {
+      // Why: only the exclusive createDirNoClobber proves we made this; `git init` is idempotent and
+      // never reports whether it created or reinitialized, so a .git here may not be ours to delete.
       if (createdDir) {
         await fsProvider.deletePath(targetPath, true).catch(() => undefined)
-      } else if (step === 'commit') {
-        await fsProvider
-          .deletePath(joinRemotePath(host, targetPath, '.git'), true)
-          .catch(() => undefined)
       }
+      // Why: the .git we leave makes the folder non-empty, so a silent retry would hit the
+      // "not empty" guard with no clue why.
+      const leftover = !createdDir && step === 'commit' ? ` ${LEFTOVER_GIT_DIR_RETRY_HINT}` : ''
       const message = err instanceof Error ? err.message : String(err)
       if (step === 'commit' && /Please tell me who you are|user\.name|user\.email/i.test(message)) {
-        return {
-          error:
-            'Git author identity is not configured on the SSH host. Run `git config --global user.name "Your Name"` and `git config --global user.email "you@example.com"` on that host, then try again.'
-        }
+        const identityHint =
+          'Git author identity is not configured on the SSH host. Run `git config --global user.name "Your Name"` and `git config --global user.email "you@example.com"` on that host, then try again.'
+        return { error: `${identityHint}${leftover}` }
       }
       const stepLabel =
         step === 'init' ? 'Failed to initialize git repository' : 'Failed to create initial commit'
-      return { error: `${stepLabel}: ${message}` }
+      return { error: `${stepLabel}: ${message}${leftover}` }
     }
   }
 

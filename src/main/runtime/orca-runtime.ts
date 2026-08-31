@@ -1273,6 +1273,10 @@ import {
   prepareWorktreeCreateForRepo
 } from '../worktree-create-preparation'
 import { prepareLocalWorktreeRootForRepo } from '../worktree-root-preparation'
+import {
+  alreadyARepositoryError,
+  LEFTOVER_GIT_DIR_RETRY_HINT
+} from '../ipc/repos/repository-creation-messages'
 import { getWorktreeWatcherRemoval } from '../ipc/worktree-watcher-removal'
 import { acquireWatcherRemovalGate } from '../ipc/watcher-removal-gate'
 import {
@@ -23907,6 +23911,18 @@ export class OrcaRuntimeService {
         if (!existingStat.isDirectory()) {
           return { error: `"${trimmedName}" already exists at this location and is not a folder.` }
         }
+        // Why: refuse an existing repository on positive evidence, before `git init` can silently
+        // reinitialize it. A `.git` FILE counts — that is how linked worktrees and submodules point.
+        const gitPath = join(targetPath, '.git')
+        const gitStat = await stat(gitPath).catch((error: unknown) => {
+          if (isENOENT(error)) {
+            return null
+          }
+          throw error
+        })
+        if (gitStat) {
+          return { error: alreadyARepositoryError(trimmedName) }
+        }
         const entries = await readdir(targetPath)
         if (entries.length > 0) {
           return { error: `"${trimmedName}" already exists at this location and is not empty.` }
@@ -23929,26 +23945,28 @@ export class OrcaRuntimeService {
           cwd: targetPath
         })
       } catch (error) {
+        // Why: only the exclusive mkdir proves we made this; `git init` is idempotent and never
+        // reports whether it created or reinitialized, so a .git here may not be ours to delete.
         if (createdDir) {
           await rm(targetPath, { recursive: true, force: true }).catch(() => {})
-        } else if (step === 'commit') {
-          await rm(join(targetPath, '.git'), { recursive: true, force: true }).catch(() => {})
         }
+        // Why: the .git we leave makes the folder non-empty, so a silent retry would hit the
+        // "not empty" guard with no clue why.
+        const leftover = !createdDir && step === 'commit' ? ` ${LEFTOVER_GIT_DIR_RETRY_HINT}` : ''
         const message = error instanceof Error ? error.message : String(error)
         if (
           step === 'commit' &&
           /Please tell me who you are|user\.name|user\.email/i.test(message)
         ) {
-          return {
-            error:
-              'Git author identity is not configured. Run `git config --global user.name "Your Name"` and `git config --global user.email "you@example.com"`, then try again.'
-          }
+          const identityHint =
+            'Git author identity is not configured. Run `git config --global user.name "Your Name"` and `git config --global user.email "you@example.com"`, then try again.'
+          return { error: `${identityHint}${leftover}` }
         }
         const stepLabel =
           step === 'init'
             ? 'Failed to initialize git repository'
             : 'Failed to create initial commit'
-        return { error: `${stepLabel}: ${message}` }
+        return { error: `${stepLabel}: ${message}${leftover}` }
       }
     }
 

@@ -1,0 +1,14 @@
+// Why: shared so all three creation lanes (local, SSH, runtime) word these identically.
+
+export const LEFTOVER_GIT_DIR_RETRY_HINT =
+  'A .git directory was left behind and must be removed before retrying.'
+
+export function alreadyARepositoryError(name: string): string {
+  return `"${name}" is already a git repository. Choose a different name or location.`
+}
+
+// Why: a probe that did not complete is not evidence of absence, so we refuse — but as a
+// temporary condition the user can retry, not as a verdict about the target.
+export function repositoryCheckUnavailableError(name: string, message: string): string {
+  return `Could not check whether "${name}" is already a git repository: ${message}. Try again.`
+}

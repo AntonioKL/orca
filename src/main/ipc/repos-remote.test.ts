@@ -494,7 +494,11 @@ describe('repos:addRemote', () => {
     expect(mockStore.addRepo).not.toHaveBeenCalled()
   })
 
-  it('preserves an existing empty SSH directory and removes only .git when commit fails', async () => {
+  it('deletes nothing in an existing empty SSH directory when commit fails', async () => {
+    // STA-6079: this used to delete the remote .git. `git init` is idempotent and never reports
+    // whether it created or reinitialized, so the rollback could not prove that .git was ours —
+    // and on this lane the only thing standing between it and a real repository was a directory
+    // listing. A leftover .git is recoverable; a deleted one is not.
     mockFilesystemProvider.stat.mockResolvedValueOnce({ type: 'directory', size: 0, mtime: 0 })
     mockFilesystemProvider.readDir.mockResolvedValueOnce([])
     mockGitProvider.exec
@@ -510,10 +514,9 @@ describe('repos:addRemote', () => {
 
     expect(result).toEqual({
       error:
-        'Git author identity is not configured on the SSH host. Run `git config --global user.name "Your Name"` and `git config --global user.email "you@example.com"` on that host, then try again.'
+        'Git author identity is not configured on the SSH host. Run `git config --global user.name "Your Name"` and `git config --global user.email "you@example.com"` on that host, then try again. A .git directory was left behind and must be removed before retrying.'
     })
-    expect(mockFilesystemProvider.deletePath).toHaveBeenCalledWith('/home/user/created/.git', true)
-    expect(mockFilesystemProvider.deletePath).not.toHaveBeenCalledWith('/home/user/created', true)
+    expect(mockFilesystemProvider.deletePath).not.toHaveBeenCalled()
     expect(mockStore.addRepo).not.toHaveBeenCalled()
   })
 
