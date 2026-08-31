@@ -52,6 +52,9 @@ export function decodeGzipMobileWebPackageChunk(
   ) {
     return null
   }
+  if (expectedLength > MOBILE_WEB_PACKAGE_CHUNK_BYTES) {
+    return null
+  }
   const compressed = decodeCanonicalBase64(chunk.data.dataBase64)
   if (
     !compressed ||
@@ -61,10 +64,10 @@ export function decodeGzipMobileWebPackageChunk(
     return null
   }
   try {
-    const bytes = gunzipSync(compressed)
-    return bytes.byteLength === expectedLength && bytes.byteLength <= MOBILE_WEB_PACKAGE_CHUNK_BYTES
-      ? bytes
-      : null
+    // Reserve one sentinel byte so expansion beyond the advertised size is rejected without an
+    // attacker-controlled allocation.
+    const bytes = gunzipSync(compressed, { out: new Uint8Array(expectedLength + 1) })
+    return bytes.byteLength === expectedLength ? bytes : null
   } catch {
     return null
   }
