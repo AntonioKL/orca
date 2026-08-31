@@ -174,6 +174,7 @@ export function bindStartFreshSpawn(session: ConnectPanePtySession): void {
               ? spawnedPtyId
               : session.transport.getPtyId()
         if (resolvedPtyId && !session.claimCapturedDirectSshRetryPty(resolvedPtyId)) {
+          releaseDeferredCwdFence()
           session.finishReattachLiveDataDeferral(false, outputCallbacks.generation)
           // Why: an outstanding declare keeps main's cooperation gate suppressing
           // this paneKey's daemon-snapshot seed until something releases it.
