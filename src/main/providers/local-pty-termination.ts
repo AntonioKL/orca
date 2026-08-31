@@ -11,6 +11,7 @@ import {
   ptyAgentSessionIds,
   ptyForceKillTimers,
   ptyPhysicalExits,
+  ptyIncarnations,
   ptyProcesses,
   ptyShutdownOperations,
   ptyTerminationMode,
@@ -214,6 +215,10 @@ export async function shutdownLocalPty(
     incarnationId?: string
   }
 ): Promise<PtyShutdownResult | void> {
+  const expectedIncarnationId = ptyIncarnations.get(id)
+  if (opts.incarnationId !== undefined && opts.incarnationId !== expectedIncarnationId) {
+    throw new Error(`PTY incarnation mismatch: ${id}`)
+  }
   cancelPendingLocalPtySpawns(id)
   const pending = ptyShutdownOperations.get(id)
   if (pending) {

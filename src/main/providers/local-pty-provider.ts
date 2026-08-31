@@ -72,6 +72,10 @@ export class LocalPtyProvider implements IPtyProvider {
   hasPty(id: string): boolean {
     return ptyProcesses.has(id)
   }
+
+  supportsIncarnationFence(): boolean {
+    return true
+  }
   write(id: string, data: string): boolean {
     return writeLocalPty(id, data)
   }

@@ -5,6 +5,7 @@ import type {
   PtyKillSessionResult
 } from '../../../../shared/pty-kill-sessions'
 import type { PtyShutdownResult } from '../../../providers/pty-provider-contract'
+import { shutdownSinglePty, type SinglePtyKillDeps } from './shutdown-single'
 
 export type KillSessionsDeps = {
   listProviders: () => readonly { provider: IPtyProvider; connectionId?: string | null }[]
@@ -12,6 +13,7 @@ export type KillSessionsDeps = {
   /** Main-owned ownership evidence. `true` means the session is still claimed. */
   isOwned?: (ref: PtyKillSessionRef) => { owned: boolean; reason?: string }
   shutdown: (provider: IPtyProvider, ref: PtyKillSessionRef) => Promise<PtyShutdownResult | void>
+  singleKill?: SinglePtyKillDeps
   supportsIncarnationFence?: (provider: IPtyProvider) => boolean | Promise<boolean>
   concurrency?: number
 }
@@ -66,12 +68,8 @@ export async function killPtySessions(
         return { ...ref, verdict: 'refused', reason: 'missing incarnation fence' }
       }
       try {
-        const shutdownResult = provider.shutdownWithOutcome
-          ? await provider.shutdownWithOutcome(ref.id, {
-              immediate: true,
-              intent,
-              incarnationId: ref.incarnationId
-            })
+        const shutdownResult = deps.singleKill
+          ? await shutdownSinglePty({ ...ref, intent, provider }, deps.singleKill)
           : await deps.shutdown(provider, ref)
         shutdownResults.set(ref.id, shutdownResult)
         return { ...ref, verdict: 'unverifiable' as const, reason: 'pending verification' }

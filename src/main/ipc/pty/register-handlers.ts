@@ -8,12 +8,12 @@ import {
   getHiddenRendererPtyDeliveryDebug,
   resetRendererScopedHiddenPtyDeliveryState
 } from '../pty-hidden-delivery-gate'
-import { localProvider, registeredPtyProviders, tryGetProviderForPty } from './provider/registry'
+import { localProvider, registeredPtyProviders } from './provider/registry'
 import { finishPtyShutdown } from './provider/liveness'
 import type { GetSelectedCodexHomePath, PrepareClaudeAuth } from './host-env/types'
 import { installPtyInspectIpcHandlers } from './ipc/inspect'
 import { installPtyKillIpcHandler } from './ipc/renderer-kill'
-import { killPtySessions } from './ipc/kill-sessions'
+import { installPtyKillSessionsHandler } from './ipc/register-kill-sessions'
 import { installPtyWriteIpcHandlers } from './ipc/write'
 import { installPtySpawnIpcHandler } from './ipc/spawn'
 import { installPtyRuntimeController } from './runtime/controller'
@@ -264,70 +264,17 @@ export function registerPtyHandlers(
     store,
     runtime,
     getLocalPtyProviderStartupPromise,
-    shutdownProviderAndDetectExit: session.shutdownProviderAndDetectExit,
     rememberSyntheticKillExit: session.rememberSyntheticKillExit,
     sendPtyExitToRenderer: session.sendPtyExitToRenderer
   })
 
-  ipcMain.handle(
-    'pty:killSessions',
-    async (_event, args: { sessions?: unknown; intent?: unknown }) => {
-      const refs = Array.isArray(args?.sessions)
-        ? args.sessions
-            .filter((value): value is { id: string; incarnationId?: string } => {
-              if (!value || typeof value !== 'object') {
-                return false
-              }
-              const candidate = value as { id?: unknown; incarnationId?: unknown }
-              return (
-                typeof candidate.id === 'string' &&
-                candidate.id.length > 0 &&
-                (candidate.incarnationId === undefined ||
-                  typeof candidate.incarnationId === 'string')
-              )
-            })
-            .slice(0, 512)
-        : []
-      const intent = args?.intent === 'owner-close' ? 'owner-close' : 'orphan-cleanup'
-      const claimed = new Set<string>()
-      if (intent === 'orphan-cleanup') {
-        const snapshots = await Promise.all(
-          registeredPtyProviders().map(({ provider }) => provider.listProcesses().catch(() => []))
-        )
-        for (const row of snapshots.flat()) {
-          if (row.agentSessionOwners?.length) {
-            claimed.add(row.id)
-          }
-        }
-      }
-      return killPtySessions(refs, intent, {
-        listProviders: registeredPtyProviders,
-        providerForSession: tryGetProviderForPty,
-        isOwned: (ref) => {
-          if (intent === 'owner-close') {
-            return { owned: false }
-          }
-          const surface = runtime?.getPtySurfaceOwnershipEvidence(ref.id, ref.incarnationId)
-          if (surface !== 'absent') {
-            return {
-              owned: true,
-              reason:
-                surface === 'present' ? 'terminal surface ownership' : 'terminal ownership unknown'
-            }
-          }
-          return claimed.has(ref.id)
-            ? { owned: true, reason: 'agent ownership claim' }
-            : { owned: false }
-        },
-        shutdown: async (provider, ref) => {
-          await session.shutdownProviderAndDetectExit(provider, ref.id, {
-            immediate: true,
-            intent,
-            incarnationId: ref.incarnationId
-          })
-        },
-        supportsIncarnationFence: (provider) => provider.supportsIncarnationFence?.() ?? false
-      })
-    }
-  )
+  installPtyKillSessionsHandler({
+    store,
+    runtime,
+    registeredPtyProviders,
+    getLocalPtyProviderStartupPromise,
+    shutdownProviderAndDetectExit: session.shutdownProviderAndDetectExit,
+    rememberSyntheticKillExit: session.rememberSyntheticKillExit,
+    sendPtyExitToRenderer: session.sendPtyExitToRenderer
+  })
 }
