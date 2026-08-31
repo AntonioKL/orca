@@ -2089,7 +2089,14 @@ export function createRemoteRuntimePtyTransport(
 
       try {
         if (isWebTerminalSurfaceTabId(tabId ?? '')) {
-          return await attachHostSessionMirror(options, true, undefined, connectLifecycleEpoch)
+          // Reattach callbacks must not publish the replacement as a fresh
+          // spawn before the reattach result commits tab/layout ownership.
+          return await attachHostSessionMirror(
+            options,
+            !options.sessionId,
+            undefined,
+            connectLifecycleEpoch
+          )
         }
 
         if (options.sessionId && !getRemoteRuntimeTerminalHandle(options.sessionId)) {
