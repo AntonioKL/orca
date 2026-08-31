@@ -257,10 +257,10 @@ export function registerRepoCreationHandlers(mainWindow: BrowserWindow, store: S
               .then(() => true)
               .catch(() => false)
           }
-          // Why: the .git we leave makes the folder non-empty, so a silent retry would hit the
+          // Why: `git init` is not atomic either — a failed init can leave a partial .git — and
+          // whatever remains makes the folder non-empty, so a silent retry would hit the
           // "not empty" guard with no clue why.
-          const leftover =
-            !targetRemoved && step === 'commit' ? ` ${LEFTOVER_GIT_DIR_RETRY_HINT}` : ''
+          const leftover = !targetRemoved ? ` ${LEFTOVER_GIT_DIR_RETRY_HINT}` : ''
           const message = err instanceof Error ? err.message : String(err)
           if (
             step === 'commit' &&

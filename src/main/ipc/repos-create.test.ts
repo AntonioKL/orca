@@ -460,6 +460,20 @@ describe('repos:create', () => {
     expect(result).not.toMatchObject({ error: expect.stringContaining('before retrying') })
   })
 
+  it('warns about a partial .git left by a failed git init', async () => {
+    // `git init` is not atomic: it can create .git and then fail (ENOSPC, permissions). A
+    // pre-existing folder is deliberately not rolled back, so the partial .git blocks the retry.
+    accessMock.mockResolvedValueOnce(undefined) // target exists
+    readdirMock.mockResolvedValueOnce([])
+    gitExecFileAsyncMock.mockReset().mockRejectedValueOnce(new Error('init broke'))
+
+    const result = await callCreate({ parentPath: '/tmp', name: 'partial-init', kind: 'git' })
+
+    expect(result).toMatchObject({ error: expect.stringContaining('initialize') })
+    expect(result).toMatchObject({ error: expect.stringContaining('before retrying') })
+    expect(rmMock).not.toHaveBeenCalled()
+  })
+
   it('warns about the leftover when cleanup of a directory we created fails', async () => {
     // `createdDir` proves ownership, not that the removal succeeded. If cleanup fails the
     // directory and its .git remain, and the retry hits "not empty" with no explanation.
