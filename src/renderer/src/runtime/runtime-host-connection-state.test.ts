@@ -120,6 +120,16 @@ describe('runtime host connection state', () => {
         remoteControl: remoteControl({ state: 'reconnecting' })
       })
     ).toBe('reconnecting')
+    for (const state of ['awaiting_ready', 'awaiting_authenticated'] as const) {
+      expect(
+        runtimeHostConnectionState({
+          hasStatusEntry: true,
+          status: null,
+          remoteControl: remoteControl({ state })
+        }),
+        state
+      ).toBe('checking')
+    }
   })
 
   it('reports a cleanly closed control channel as disconnected even with no error', () => {

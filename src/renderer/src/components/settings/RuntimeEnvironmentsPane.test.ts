@@ -29,7 +29,9 @@ function details(overrides: Partial<RuntimeHostDetails>): RuntimeHostDetails {
   }
 }
 
-function readyTransport(): NonNullable<RuntimeHostDetails['remoteControl']> {
+function readyTransport(
+  overrides: Partial<NonNullable<RuntimeHostDetails['remoteControl']>> = {}
+): NonNullable<RuntimeHostDetails['remoteControl']> {
   return {
     state: 'ready',
     pendingRequestCount: 0,
@@ -37,7 +39,8 @@ function readyTransport(): NonNullable<RuntimeHostDetails['remoteControl']> {
     reconnectAttempt: 0,
     lastConnectedAt: 1,
     lastClose: null,
-    lastError: null
+    lastError: null,
+    ...overrides
   }
 }
 
@@ -253,6 +256,21 @@ describe('RuntimeEnvironmentsPane host details', () => {
     expect(isRuntimeServerTransportConnected(getRuntimeServerConnectionState(failedProbe))).toBe(
       true
     )
+  })
+
+  it('keeps reconnecting and handshaking failed probes out of disconnected state', () => {
+    for (const state of ['reconnecting', 'awaiting_ready', 'awaiting_authenticated'] as const) {
+      expect(
+        getRuntimeServerConnectionState(
+          details({
+            status: 'error',
+            remoteControl: readyTransport({ state }),
+            error: 'runtime.status.get failed'
+          })
+        ),
+        state
+      ).toBe(state === 'reconnecting' ? 'reconnecting' : 'checking')
+    }
   })
 
   it('explains that selecting a saved server is the explicit default Host mode', () => {

@@ -179,10 +179,7 @@ export function getRuntimeServerConnectionState(
   if (!details || details.status === 'loading') {
     return 'checking'
   }
-  if (
-    (details.status !== 'ready' && !isTransportConnected(details)) ||
-    details.compatibility?.kind === 'blocked'
-  ) {
+  if (details.compatibility?.kind === 'blocked') {
     return 'disconnected'
   }
   // A compatibility verdict is positive runtime evidence even when an older
@@ -195,8 +192,9 @@ export function getRuntimeServerConnectionState(
     status: details.runtimeStatus,
     remoteControl: details.remoteControl,
     // A ready details phase is transport evidence only; status.get may still
-    // have failed or been omitted by an older peer.
-    transportStatus: 'connected'
+    // have failed or been omitted by an older peer. Error details need
+    // diagnostics to prove transport reachability.
+    transportStatus: details.status === 'ready' ? 'connected' : 'disconnected'
   })
 }
 

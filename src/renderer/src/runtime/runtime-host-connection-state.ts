@@ -48,7 +48,12 @@ export function runtimeHostConnectionState({
     return 'reconnecting'
   }
   if (!status) {
-    return transportState === 'connected' ? 'runtime-unavailable' : 'disconnected'
+    if (transportState === 'connected') {
+      return 'runtime-unavailable'
+    }
+    // The control channel is still negotiating/reconnecting, so the host's
+    // runtime outcome is not yet knowable.
+    return transportState === 'checking' ? 'checking' : 'disconnected'
   }
   // Why no lastError requirement: a clean close (server restart, host sleep, network
   // blip) leaves lastError null, and demanding an error string painted those hosts green.
