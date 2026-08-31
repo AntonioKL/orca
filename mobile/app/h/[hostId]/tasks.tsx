@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
+import type { Dispatch, ReactNode, SetStateAction } from 'react'
 import {
   ActivityIndicator,
   FlatList,
@@ -2125,6 +2125,41 @@ type MobileTasksScreenProps = {
   nativeHostBinding?: boolean
 }
 
+type ActionItemDraftResetters = {
+  updateTitle: Dispatch<SetStateAction<string>>
+  updateBody: Dispatch<SetStateAction<string>>
+  updateComment: Dispatch<SetStateAction<string>>
+  updateAddLabels: Dispatch<SetStateAction<string>>
+  updateRemoveLabels: Dispatch<SetStateAction<string>>
+  updateAddAssignees: Dispatch<SetStateAction<string>>
+  updateRemoveAssignees: Dispatch<SetStateAction<string>>
+  updateReviewers: Dispatch<SetStateAction<string>>
+  updateReplies: Dispatch<SetStateAction<Record<string, string>>>
+  updateExpandedFile: Dispatch<SetStateAction<string | null>>
+  updateFileComments: Dispatch<SetStateAction<Record<string, string>>>
+  updateResolvedGroups: Dispatch<SetStateAction<Set<string>>>
+  clearFileContents: () => void
+}
+
+function resetActionItemDrafts(
+  item: ActionableTaskItem | null,
+  resetters: ActionItemDraftResetters
+) {
+  resetters.updateTitle(item?.title ?? '')
+  resetters.updateBody('')
+  resetters.updateComment('')
+  resetters.updateAddLabels('')
+  resetters.updateRemoveLabels('')
+  resetters.updateAddAssignees('')
+  resetters.updateRemoveAssignees('')
+  resetters.updateReviewers('')
+  resetters.updateReplies({})
+  resetters.updateExpandedFile(null)
+  resetters.clearFileContents()
+  resetters.updateFileComments({})
+  resetters.updateResolvedGroups(new Set())
+}
+
 export default function MobileTasksScreen({
   hostId: hostIdProp,
   detailOperations,
@@ -2830,24 +2865,24 @@ export default function MobileTasksScreen({
       if (!githubProjectFieldVisibilityScope) {
         return
       }
-      setGithubProjectHiddenFieldIdsByView((current) => {
-        const hidden = new Set(current[githubProjectFieldVisibilityScope] ?? [])
-        if (hidden.has(fieldId)) {
-          hidden.delete(fieldId)
-        } else {
-          hidden.add(fieldId)
-        }
-        const next = { ...current }
-        if (hidden.size === 0) {
-          delete next[githubProjectFieldVisibilityScope]
-        } else {
-          next[githubProjectFieldVisibilityScope] = [...hidden]
-        }
-        persistTaskResumeState({ githubProjectHiddenFieldIdsByView: next })
-        return next
-      })
+      const hidden = new Set(
+        githubProjectHiddenFieldIdsByView[githubProjectFieldVisibilityScope] ?? []
+      )
+      if (hidden.has(fieldId)) {
+        hidden.delete(fieldId)
+      } else {
+        hidden.add(fieldId)
+      }
+      const next = { ...githubProjectHiddenFieldIdsByView }
+      if (hidden.size === 0) {
+        delete next[githubProjectFieldVisibilityScope]
+      } else {
+        next[githubProjectFieldVisibilityScope] = [...hidden]
+      }
+      setGithubProjectHiddenFieldIdsByView(next)
+      persistTaskResumeState({ githubProjectHiddenFieldIdsByView: next })
     },
-    [githubProjectFieldVisibilityScope, persistTaskResumeState]
+    [githubProjectFieldVisibilityScope, githubProjectHiddenFieldIdsByView, persistTaskResumeState]
   )
 
   const persistTaskSource = useCallback(
@@ -4139,35 +4174,21 @@ export default function MobileTasksScreen({
   }, [linearMetadataItem, taskLinearOperations, tasksSupported])
 
   useEffect(() => {
-    if (!actionItem) {
-      setItemTitleDraft('')
-      setItemBodyDraft('')
-      setItemCommentDraft('')
-      setItemAddLabelsDraft('')
-      setItemRemoveLabelsDraft('')
-      setItemAddAssigneesDraft('')
-      setItemRemoveAssigneesDraft('')
-      setItemReviewersDraft('')
-      setItemReplyDrafts({})
-      setExpandedPrFilePath(null)
-      clearPrFileContents()
-      setPrFileCommentDrafts({})
-      setExpandedResolvedCommentGroups(new Set())
-      return
-    }
-    setItemTitleDraft(actionItem.title)
-    setItemBodyDraft('')
-    setItemCommentDraft('')
-    setItemAddLabelsDraft('')
-    setItemRemoveLabelsDraft('')
-    setItemAddAssigneesDraft('')
-    setItemRemoveAssigneesDraft('')
-    setItemReviewersDraft('')
-    setItemReplyDrafts({})
-    setExpandedPrFilePath(null)
-    clearPrFileContents()
-    setPrFileCommentDrafts({})
-    setExpandedResolvedCommentGroups(new Set())
+    resetActionItemDrafts(actionItem, {
+      updateTitle: setItemTitleDraft,
+      updateBody: setItemBodyDraft,
+      updateComment: setItemCommentDraft,
+      updateAddLabels: setItemAddLabelsDraft,
+      updateRemoveLabels: setItemRemoveLabelsDraft,
+      updateAddAssignees: setItemAddAssigneesDraft,
+      updateRemoveAssignees: setItemRemoveAssigneesDraft,
+      updateReviewers: setItemReviewersDraft,
+      updateReplies: setItemReplyDrafts,
+      updateExpandedFile: setExpandedPrFilePath,
+      updateFileComments: setPrFileCommentDrafts,
+      updateResolvedGroups: setExpandedResolvedCommentGroups,
+      clearFileContents: clearPrFileContents
+    })
   }, [actionItem, clearPrFileContents])
 
   useEffect(() => {
@@ -7884,20 +7905,18 @@ export default function MobileTasksScreen({
 
   const toggleRepoSelection = useCallback(
     (repoId: string) => {
-      setSelectedRepoIds((current) => {
-        const next = new Set(current)
-        if (next.has(repoId)) {
-          next.delete(repoId)
-        } else {
-          next.add(repoId)
-        }
-        const normalized =
-          next.size === 0 || next.size === hostedRepos.length ? new Set<string>() : next
-        persistRepoSelection(normalized, hostedRepos)
-        return normalized
-      })
+      const next = new Set(selectedRepoIds)
+      if (next.has(repoId)) {
+        next.delete(repoId)
+      } else {
+        next.add(repoId)
+      }
+      const normalized =
+        next.size === 0 || next.size === hostedRepos.length ? new Set<string>() : next
+      setSelectedRepoIds(normalized)
+      persistRepoSelection(normalized, hostedRepos)
     },
-    [hostedRepos, persistRepoSelection]
+    [hostedRepos, persistRepoSelection, selectedRepoIds]
   )
 
   const applyGitHubProjectSearch = useCallback(() => {
