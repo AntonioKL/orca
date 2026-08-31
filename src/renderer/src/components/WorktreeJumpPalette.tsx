@@ -1637,9 +1637,7 @@ function WorktreeJumpPaletteContent({
     const itemByOccurrenceId = new Map(
       openTabRecentRows.map(({ occurrenceId, item }) => [occurrenceId, item])
     )
-    return recentTabOrder
-      .flatMap((occurrenceId) => itemByOccurrenceId.get(occurrenceId) ?? [])
-      .slice(0, EMPTY_QUERY_RECENT_TAB_CAP)
+    return recentTabOrder.flatMap((occurrenceId) => itemByOccurrenceId.get(occurrenceId) ?? [])
   }, [openTabRecentRows, recentTabOrder])
 
   const settingsResults = useMemo(
@@ -1892,9 +1890,10 @@ function WorktreeJumpPaletteContent({
 
   const paletteSections = useMemo(() => {
     const openTabsCap = PALETTE_SECTION_RENDER_CAP + (expandedSectionCaps['open-tabs'] ?? 0)
+    const recentTabsCap = EMPTY_QUERY_RECENT_TAB_CAP + (expandedSectionCaps['open-tabs'] ?? 0)
     const openTabs = hasQuery
       ? capPaletteSection(openTabItems, openTabsCap)
-      : { visible: recentTabItems, overflowCount: 0 }
+      : capPaletteSection(recentTabItems, recentTabsCap)
     // Why: the worktree section shrinks against the recent rows to hold the empty-query list at its
     // pre-existing 10, so RECENT WORKTREES stays above the fold. An empty recent section hands the
     // whole budget to worktrees but never uncaps — a filter chip or a tab-less session used to drop
