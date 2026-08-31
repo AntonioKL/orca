@@ -83,12 +83,7 @@ export function useCombinedDiffTreeNavigation({
     keys: Set<string>
   } | null>(null)
   const viewedSectionKeys = React.useMemo(() => {
-    const previous = viewedSectionCacheRef.current
-    if (
-      previous === null ||
-      previous.entrySignature !== entrySignature ||
-      previous.sections.length !== sections.length
-    ) {
+    const recomputeAllViewedKeys = (): Set<string> => {
       const keys = new Set(
         sections
           .filter((section) => isCombinedDiffSectionViewed(section))
@@ -96,6 +91,14 @@ export function useCombinedDiffTreeNavigation({
       )
       viewedSectionCacheRef.current = { entrySignature, sections, keys }
       return keys
+    }
+    const previous = viewedSectionCacheRef.current
+    if (
+      previous === null ||
+      previous.entrySignature !== entrySignature ||
+      previous.sections.length !== sections.length
+    ) {
+      return recomputeAllViewedKeys()
     }
 
     let keys = previous.keys
@@ -106,20 +109,22 @@ export function useCombinedDiffTreeNavigation({
       if (!previousSection || !section) {
         continue
       }
-      const previousViewed = isCombinedDiffSectionViewed(previousSection)
+      // Why: reordered keys can't be patched index by index — a later delete would drop an earlier add.
+      if (previousSection.key !== section.key) {
+        return recomputeAllViewedKeys()
+      }
       const viewed = isCombinedDiffSectionViewed(section)
-      if (previousSection.key === section.key && previousViewed === viewed) {
+      if (isCombinedDiffSectionViewed(previousSection) === viewed) {
         continue
       }
       if (!copied) {
         keys = new Set(previous.keys)
         copied = true
       }
-      if (previousViewed) {
-        keys.delete(previousSection.key)
-      }
       if (viewed) {
         keys.add(section.key)
+      } else {
+        keys.delete(section.key)
       }
     }
     viewedSectionCacheRef.current = { entrySignature, sections, keys }
