@@ -1,6 +1,8 @@
 import { encodePowerShellCommand } from './powershell-command-encoding'
-import { SETUP_AGENT_SEQUENCE_STARTUP_COMMAND_ENV } from './setup-agent-sequencing-env'
-import { setupStartedPath } from './setup-agent-sequencing-posix-gate'
+import {
+  SETUP_AGENT_SEQUENCE_STARTUP_COMMAND_ENV,
+  setupStartedPath
+} from './setup-agent-sequencing-env'
 
 /** Shell fragments for the native-Windows half of the setup-to-agent gate. Both sides run under
  *  PowerShell so the marker write and the bounded poll stay parseable without a batch label loop. */
@@ -97,8 +99,8 @@ export function buildWindowsStartupCommand(
     '    [Console]::Error.WriteLine("Setup started; waiting for it to finish.")',
     '  }',
     '  if (-not $setupStarted -and (Get-Date) -ge $startDeadline) {',
-    `    [Console]::Error.WriteLine("Setup never reported starting within ${grace}s, so this terminal cannot tell whether it ran. Starting the agent without waiting for setup.")`,
-    '    & $launchAgent',
+    `    [Console]::Error.WriteLine("Setup never reported starting within ${grace}s; the agent was not started because setup could not be verified. Open the Setup tab and retry once setup is running.")`,
+    '    exit 125',
     '  }',
     '  if ((Get-Date) -ge $deadline) {',
     `    [Console]::Error.WriteLine("Timed out waiting for setup before starting agent. Waited ${timeout}s without a result; the agent was not started. Open the Setup tab for its output.")`,
@@ -123,4 +125,3 @@ function encodePowerShellInvocation(script: string): string {
 function quotePowerShellString(value: string): string {
   return `'${value.replace(/'/g, "''")}'`
 }
-

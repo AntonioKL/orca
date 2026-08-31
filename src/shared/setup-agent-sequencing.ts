@@ -29,9 +29,8 @@ import {
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 30 * 60
 // Why: the setup terminal is spawned in the same host operation as the agent terminal and writes
 // its start sentinel before running a single line of the script, so anything past a slow shell
-// profile plus an SSH round trip means nobody is going to run setup at all. Expiring does not
-// fail the launch — it starts the agent unsequenced and says so — so a false positive costs a
-// warning line, never a dead terminal.
+// profile plus an SSH round trip means nobody is going to run setup at all. Expiring fails closed
+// with a clear retry message; an unknown setup outcome must never authorize an agent launch.
 const SETUP_START_GRACE_SECONDS = 45
 // Why: a silent terminal reads as a hang, so the wait reports itself on a human interval.
 const WAIT_PROGRESS_INTERVAL_SECONDS = 15

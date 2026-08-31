@@ -776,7 +776,7 @@ describe('setup outcome recording', () => {
   )
 
   it.skipIf(process.platform === 'win32')(
-    'starts the agent unsequenced when setup is never started at all',
+    'fails closed when setup is never started at all',
     async () => {
       const tempDir = makeTempDir()
       const runnerScriptPath = join(tempDir, 'setup-runner.sh')
@@ -801,10 +801,13 @@ describe('setup outcome recording', () => {
         })
       )
 
-      expect(startupExit.code).toBe(0)
-      expect(startupExit.stderr).toContain('Setup never reported starting within 1s')
-      expect(readFileSync(logPath, 'utf8')).toBe('agent-start\n')
-    }
+      expect(startupExit.code).toBe(125)
+      expect(startupExit.stderr).toContain(
+        'Setup never reported starting within 1s; the agent was not started'
+      )
+      expect(readIfExists(logPath)).toBe('')
+    },
+    15_000
   )
 
   it.skipIf(process.platform === 'win32')(
@@ -836,7 +839,8 @@ describe('setup outcome recording', () => {
         })
       )
       // The wrapped launch record was dropped on the way to the setup terminal, so the gated
-      // script is absent from its env; the fallback must still run setup.
+      // script is absent from its env. Setup may still run, but the agent must fail closed because
+      // no authoritative setup result was recorded.
       const setupExit = await waitForExit(
         spawn('bash', ['-lc', commands.setupCommand], { stdio: 'pipe', env: { ...process.env } })
       )
@@ -844,10 +848,13 @@ describe('setup outcome recording', () => {
 
       expect(setupExit.code).toBe(0)
       expect(readFileSync(setupLogPath, 'utf8')).toBe('setup-ran\n')
-      expect(startupExit.code).toBe(0)
-      expect(startupExit.stderr).toContain('Setup never reported starting within 2s')
-      expect(readFileSync(logPath, 'utf8')).toBe('agent-start\n')
-    }
+      expect(startupExit.code).toBe(125)
+      expect(startupExit.stderr).toContain(
+        'Setup never reported starting within 2s; the agent was not started'
+      )
+      expect(readIfExists(logPath)).toBe('')
+    },
+    15_000
   )
 
   it.skipIf(process.platform === 'win32')(

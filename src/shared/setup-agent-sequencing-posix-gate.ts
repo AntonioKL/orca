@@ -1,11 +1,11 @@
-import { SETUP_AGENT_SEQUENCE_SETUP_SCRIPT_ENV, SETUP_AGENT_SEQUENCE_STARTUP_COMMAND_ENV } from './setup-agent-sequencing-env'
+import {
+  SETUP_AGENT_SEQUENCE_SETUP_SCRIPT_ENV,
+  SETUP_AGENT_SEQUENCE_STARTUP_COMMAND_ENV,
+  setupStartedPath
+} from './setup-agent-sequencing-env'
 
 /** Shell fragments for the POSIX half of the setup-to-agent gate: the setup launch that records
  *  an outcome, and the agent launch that waits for one. */
-export function setupStartedPath(markerPath: string): string {
-  return `${markerPath}.started`
-}
-
 export function buildPosixSetupCommand(bareRunnerCommand: string): string {
   const script = [
     `if [ -n "\${${SETUP_AGENT_SEQUENCE_SETUP_SCRIPT_ENV}:-}" ]; then`,
@@ -17,7 +17,11 @@ export function buildPosixSetupCommand(bareRunnerCommand: string): string {
   return `bash -lc ${quotePosixArg(script)}`
 }
 
-export function buildPosixSetupScript(setupCommand: string, markerPath: string, nonce: string): string {
+export function buildPosixSetupScript(
+  setupCommand: string,
+  markerPath: string,
+  nonce: string
+): string {
   const marker = quotePosixArg(markerPath)
   const tmp = quotePosixArg(`${markerPath}.tmp`)
   const started = quotePosixArg(setupStartedPath(markerPath))
@@ -79,11 +83,10 @@ export function buildPosixStartupScript(
     'echo "Setup started; waiting for it to finish." >&2;',
     'fi;',
     'if [ "$setup_started" = "0" ] && [ "$SECONDS" -ge "$start_deadline" ]; then',
-    // Why: nothing reported starting, so we cannot claim setup failed — only that this terminal
-    // has no way to observe it. Starting the agent unsequenced beats a terminal that waits out
-    // the whole bound for an outcome no one is going to record.
-    `echo "Setup never reported starting within ${grace}s, so this terminal cannot tell whether it ran. Starting the agent without waiting for setup." >&2;`,
-    `${launchAgent}`,
+    // Why: no start evidence is not success evidence. Stop here rather than allowing an
+    // unsequenced agent to run against an environment whose setup outcome is unknown.
+    `echo "Setup never reported starting within ${grace}s; the agent was not started because setup could not be verified. Open the Setup tab and retry once setup is running." >&2;`,
+    'exit 125;',
     'fi;',
     'if [ "$SECONDS" -ge "$deadline" ]; then',
     `echo "Timed out waiting for setup before starting agent. Waited ${timeout}s without a result; the agent was not started. Open the Setup tab for its output." >&2;`,
@@ -154,4 +157,3 @@ function quotePosixArg(value: string): string {
   }
   return `'${value.replace(/'/g, `'\\''`)}'`
 }
-
