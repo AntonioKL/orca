@@ -31,12 +31,17 @@ function record(overrides: Partial<AgentSessionRecord> = {}): AgentSessionRecord
   } as AgentSessionRecord
 }
 
-function resolverFor(value: AgentSessionRecord | null, resolveEnv?: () => Record<string, string>) {
+function resolverFor(
+  value: AgentSessionRecord | null,
+  resolveEnv?: () => Record<string, string>,
+  platform?: NodeJS.Platform
+) {
   return createClaudeStructuredLaunchResolver({
     store: { getRecord: () => value } as unknown as AgentSessionRecordStore,
     resolveWorkspacePath: async (id) => `/repos/${id}`,
     resolveCommand: () => '/usr/local/bin/claude',
-    ...(resolveEnv ? { resolveEnvironment: async () => resolveEnv() } : {})
+    ...(resolveEnv ? { resolveEnvironment: async () => resolveEnv() } : {}),
+    ...(platform ? { platform } : {})
   })
 }
 
@@ -139,7 +144,11 @@ describe('claude structured launch resolution', () => {
       })
     ).rejects.toThrow(/codex session/)
     await expect(
-      resolverFor(record({ accountHome: { variable: 'CODEX_HOME', path: '/tmp/codex' } }))({
+      resolverFor(
+        record({ accountHome: { variable: 'CODEX_HOME', path: '/tmp/codex' } }),
+        undefined,
+        'linux'
+      )({
         identity: IDENTITY
       })
     ).rejects.toThrow(/CLAUDE_CONFIG_DIR/)

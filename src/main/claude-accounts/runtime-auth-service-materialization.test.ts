@@ -181,7 +181,7 @@ describe('ClaudeRuntimeAuthService', () => {
     expect(readFileSync(markerPath, 'utf-8')).toBe('account-1\n')
   })
 
-  it('rejects symlinked managed credential children', async () => {
+  it.skipIf(hostPlatform === 'win32')('rejects symlinked managed credential children', async () => {
     setPlatform('linux')
     const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
     const systemCredentials = createClaudeCredentialsJson('system@example.com', 'system')
