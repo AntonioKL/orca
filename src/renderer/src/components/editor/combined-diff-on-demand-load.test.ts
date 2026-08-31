@@ -30,7 +30,46 @@ describe('combined diff on-demand loading', () => {
   })
 
   it('defers untracked files whose line counts were skipped as too large', () => {
-    expect(shouldLoadCombinedDiffOnDemand({ path: 'data/dump.json' })).toBe(true)
+    // The scan counted this row's siblings and still skipped it, so it is past
+    // MAX_UNTRACKED_LINE_COUNT_BYTES — the one case where size is truly unknown.
+    expect(
+      shouldLoadCombinedDiffOnDemand({
+        path: 'data/dump.json',
+        area: 'untracked',
+        hasCountedSiblings: true
+      })
+    ).toBe(true)
+    expect(shouldLoadCombinedDiffOnDemand({ path: 'data/dump.json', area: 'untracked' })).toBe(true)
+  })
+
+  it('automatically loads tracked binaries numstat left uncounted, whatever the extension', () => {
+    // `git diff --numstat` emits '-\t-' for any tracked binary; the extension
+    // list will never cover them all (.icns, .tiff, extensionless).
+    for (const path of ['resources/build/icon.icns', 'assets/logo.tiff', 'bin/orca-helper']) {
+      expect(
+        shouldLoadCombinedDiffOnDemand({ path, area: 'unstaged', hasCountedSiblings: true })
+      ).toBe(false)
+    }
+  })
+
+  it('automatically loads submodule rows whose only change is untracked content inside', () => {
+    // Porcelain v2 reports `1 .M S..U ... sub` while numstat emits no row at
+    // all, so the section is uncounted and 'sub' has no extension to read.
+    expect(
+      shouldLoadCombinedDiffOnDemand({
+        path: 'vendor/sub',
+        area: 'unstaged',
+        submodule: { commitChanged: false, trackedChanges: false, untrackedChanges: true }
+      })
+    ).toBe(false)
+  })
+
+  it('defers uncounted rows when the whole pass skipped counting', () => {
+    // Entry cap hit or numstat failed: no sibling has counts, so nothing
+    // distinguishes a 4 KB binary from an unbounded text file.
+    expect(
+      shouldLoadCombinedDiffOnDemand({ path: 'resources/build/icon.icns', area: 'unstaged' })
+    ).toBe(true)
   })
 
   it('defers uncounted svgs, which render as text rather than a preview', () => {

@@ -134,12 +134,20 @@ export function useCombinedDiffViewRestore({
     scrollOffsetRef.current = combinedDiffScrollTopCache.get(viewStateKey) ?? 0
     scrollAnchorRef.current = combinedDiffScrollAnchorCache.get(viewStateKey) ?? null
     latestDomScrollAnchorRef.current = scrollAnchorRef.current
+    // Why: separates "this row is uncounted" from "this whole pass skipped
+    // counting", which is what decides whether an uncounted row is cheap.
+    const hasCountedSiblings = entries.some(
+      (entry) => entry.added !== undefined || entry.removed !== undefined
+    )
     setSections(
       entries.map((entry) => {
         const loadOnDemand = shouldLoadCombinedDiffOnDemand({
           added: 'added' in entry ? entry.added : undefined,
           removed: 'removed' in entry ? entry.removed : undefined,
-          path: entry.path
+          path: entry.path,
+          area: 'area' in entry ? entry.area : undefined,
+          submodule: 'submodule' in entry ? entry.submodule : undefined,
+          hasCountedSiblings
         })
         return {
           key: getCombinedDiffFileTreeSectionKey(treeMode, entry),
