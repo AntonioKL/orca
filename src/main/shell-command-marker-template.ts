@@ -33,9 +33,13 @@ export const BASH_COMMAND_MARKER_EMIT_BLOCK = `if __orca_command_markers_allowed
   fi`
 
 export const ZSH_COMMAND_MARKER_EMIT_BLOCK = `if __orca_command_markers_allowed && (( $+commands[base64] )); then
-    local _orca_command_text="\${1[1,${SHELL_COMMAND_MAX_CHARS}]}"
-    local _orca_command_b64="$(builtin printf %s "$_orca_command_text" | command base64 | command tr -d '\\r\\n')"
-    builtin printf "\\033]777;orca-cmd;%s;%s\\007" "$_orca_shell_command_nonce" "$_orca_command_b64"
+    # zsh preexec passes typed, history-expanded, then alias-expanded forms.
+    local _orca_command_text="\${3:-\${2:-\${1:-}}}"
+    if [[ -n "$_orca_command_text" ]]; then
+      _orca_command_text="\${_orca_command_text[1,${SHELL_COMMAND_MAX_CHARS}]}"
+      local _orca_command_b64="$(builtin printf %s "$_orca_command_text" | command base64 | command tr -d '\\r\\n')"
+      builtin printf "\\033]777;orca-cmd;%s;%s\\007" "$_orca_shell_command_nonce" "$_orca_command_b64"
+    fi
   fi`
 
 export function getFishCommandMarkerInitCommand(): string {
