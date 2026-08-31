@@ -17,8 +17,12 @@ import {
 import { reconcileCatalogRows } from './repo-identity-reconcile'
 import { createRuntimeStatusHydration } from './runtime-status-hydration'
 import { refreshRuntimeEnvironmentStatus } from './runtime-status-refresh'
-import { clearRuntimeEnvironmentDiagnosticsGenerationsForTests } from './runtime-status-diagnostics-generation'
-import { mergePushedRuntimeEnvironmentDiagnostics } from './runtime-status-diagnostics-generation'
+import * as runtimeStatusDiagnostics from './runtime-status-diagnostics-generation'
+import {
+  advanceRuntimeEnvironmentConnectionGeneration,
+  clearRuntimeEnvironmentConnectionGenerations,
+  getRuntimeEnvironmentConnectionGeneration
+} from './runtime-status-connection-generation'
 import { replayClientHostedBrowserCloseIntents } from '@/runtime/client-hosted-browser-close-intent-replay'
 import {
   ensureBrowserClientHostForRestartedRuntime,
@@ -101,29 +105,14 @@ export type RuntimeStatusSlice = {
   hydrateRuntimeEnvironmentStatuses: () => Promise<void>
 }
 
-const connectionGenerationByEnvironment = new Map<string, number>()
-
-export function getRuntimeEnvironmentConnectionGeneration(environmentId: string): number {
-  return connectionGenerationByEnvironment.get(environmentId) ?? 0
-}
+export {
+  getRuntimeEnvironmentConnectionGeneration,
+  setRuntimeEnvironmentConnectionGenerationForTests
+} from './runtime-status-connection-generation'
 
 export const clearRuntimeEnvironmentConnectionGenerationsForTests = (): void => {
-  runtimeStatusRecheck.cancelRuntimeStatusRechecks(connectionGenerationByEnvironment.keys())
-  connectionGenerationByEnvironment.clear()
-  clearRuntimeEnvironmentDiagnosticsGenerationsForTests()
-}
-
-export const setRuntimeEnvironmentConnectionGenerationForTests = (
-  environmentId: string,
-  generation: number
-): void => {
-  connectionGenerationByEnvironment.set(environmentId, generation)
-}
-
-function advanceRuntimeEnvironmentConnectionGeneration(environmentId: string): number {
-  const next = getRuntimeEnvironmentConnectionGeneration(environmentId) + 1
-  connectionGenerationByEnvironment.set(environmentId, next)
-  return next
+  runtimeStatusRecheck.cancelRuntimeStatusRechecks(clearRuntimeEnvironmentConnectionGenerations())
+  runtimeStatusDiagnostics.clearRuntimeEnvironmentDiagnosticsGenerationsForTests()
 }
 
 export const createRuntimeStatusSlice: StateCreator<AppState, [], [], RuntimeStatusSlice> = (
@@ -297,19 +286,9 @@ export const createRuntimeStatusSlice: StateCreator<AppState, [], [], RuntimeSta
         ...(environmentsChanged ? { runtimeEnvironments } : {})
       }
     })
-    runtimeStatusRecheck.reconcileRuntimeStatusRecheck({
-      environmentId,
-      status: status.status,
-      connectionGeneration: getRuntimeEnvironmentConnectionGeneration(environmentId),
-      environmentExists: () =>
-        get().runtimeEnvironments.some((environment) => environment.id === environmentId),
-      getConnectionGeneration: () => getRuntimeEnvironmentConnectionGeneration(environmentId),
-      publish: (nextStatus) =>
-        get().setRuntimeEnvironmentStatus(environmentId, {
-          status: nextStatus,
-          checkedAt: Date.now()
-        })
-    })
+    runtimeStatusRecheck.reconcileRuntimeStatusForSlice(environmentId, status.status, get, () =>
+      getRuntimeEnvironmentConnectionGeneration(environmentId)
+    )
     if (runtimeRestarted) {
       void ensureBrowserClientHostForRestartedRuntime(get(), environmentId)
     }
@@ -325,7 +304,7 @@ export const createRuntimeStatusSlice: StateCreator<AppState, [], [], RuntimeSta
   publishRuntimeEnvironmentDiagnostics: ({ environmentId, transportGeneration, diagnostics }) => {
     // Diagnostics are an overlay, not a replacement status response. Without a complete
     // status snapshot there is no runtime identity or graph evidence to which they belong.
-    mergePushedRuntimeEnvironmentDiagnostics({
+    runtimeStatusDiagnostics.mergePushedRuntimeEnvironmentDiagnostics({
       environmentId,
       transportGeneration,
       diagnostics,
