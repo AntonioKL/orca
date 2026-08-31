@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isNotADirectory, isProvenAbsent } from './proven-absence'
+import { describeError, isNotADirectory, isProvenAbsent } from './proven-absence'
 
 describe('proven-absence', () => {
   it('trusts a string errno over the message', () => {
@@ -81,5 +81,34 @@ describe('proven-absence', () => {
         new Error("EACCES: denied, access '/a/ENOENT: no such file or directory/.git'")
       )
     ).toBe(false)
+  })
+
+  it('treats every real errno as authoritative, not just the two we branch on', () => {
+    // A permission failure whose message quotes ENOENT is still a permission failure.
+    for (const code of ['EACCES', 'ELOOP', 'ENAMETOOLONG', 'EPERM']) {
+      expect(
+        isProvenAbsent(
+          Object.assign(new Error("ENOENT: no such file or directory, stat '/x'"), { code })
+        )
+      ).toBe(false)
+    }
+    // A non-errno domain code still falls through to the message, which is the SSH relay path.
+    expect(
+      isProvenAbsent(
+        Object.assign(new Error("ENOENT: no such file or directory, stat '/x'"), {
+          code: 'REMOTE_FS_ERROR'
+        })
+      )
+    ).toBe(true)
+  })
+
+  it('describeError survives a throwing message getter', () => {
+    const e = new Error('x')
+    Object.defineProperty(e, 'message', {
+      get() {
+        throw new Error('boom')
+      }
+    })
+    expect(() => describeError(e)).not.toThrow()
   })
 })

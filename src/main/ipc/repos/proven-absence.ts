@@ -5,14 +5,16 @@
 const ENOENT_MESSAGE = /^ENOENT: no such file or directory\b/
 const ENOTDIR_MESSAGE = /^ENOTDIR: not a directory\b/
 
-// Why a vocabulary: only real errno names carry errno meaning. A wrapper attaching a domain string
-// (`REMOTE_FS_ERROR`) while keeping the canonical message must not suppress the message fallback.
-const AUTHORITATIVE_ERRNO = new Set(['ENOENT', 'ENOTDIR'])
+// Why shape rather than a fixed list: EVERY real errno is authoritative, not just the two we care
+// about — an EACCES or ELOOP is a definitive non-absence answer even when the message quotes
+// ENOENT. But a wrapper attaching a domain string (`REMOTE_FS_ERROR`) is not an errno and must not
+// suppress the message fallback, which is the only classification path over the SSH relay.
+const ERRNO_NAME = /^E[A-Z0-9]+$/
 
 /** Whether a failed probe proves the path is absent. Never throws. */
 export function isProvenAbsent(error: unknown): boolean {
   const code = readErrnoCode(error)
-  if (code !== undefined && AUTHORITATIVE_ERRNO.has(code)) {
+  if (code !== undefined && ERRNO_NAME.test(code)) {
     return code === 'ENOENT'
   }
   return ENOENT_MESSAGE.test(readMessage(error))
@@ -24,7 +26,7 @@ export function isProvenAbsent(error: unknown): boolean {
  */
 export function isNotADirectory(error: unknown): boolean {
   const code = readErrnoCode(error)
-  if (code !== undefined && AUTHORITATIVE_ERRNO.has(code)) {
+  if (code !== undefined && ERRNO_NAME.test(code)) {
     return code === 'ENOTDIR'
   }
   return ENOTDIR_MESSAGE.test(readMessage(error))
@@ -53,5 +55,20 @@ function readMessage(error: unknown): string {
     return typeof message === 'string' ? message : ''
   } catch {
     return ''
+  }
+}
+
+/** Safe message for user-facing errors — a hostile `message` getter must not escape a refusal. */
+export function describeError(error: unknown): string {
+  const message = readMessage(error)
+  if (message !== '') {
+    return message
+  }
+  // Why guarded too: `String(error)` calls toString(), which reads `message` again — the same trap
+  // one level down.
+  try {
+    return String(error)
+  } catch {
+    return 'unknown error'
   }
 }

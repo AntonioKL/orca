@@ -15,7 +15,7 @@ import {
   LEFTOVER_GIT_DIR_RETRY_HINT,
   repositoryCheckUnavailableError
 } from './repository-creation-messages'
-import { isNotADirectory, isProvenAbsent } from './proven-absence'
+import { describeError, isNotADirectory, isProvenAbsent } from './proven-absence'
 import { gitExecFileAsync } from '../../git/runner'
 import { detectRepoIconAndUpstream } from '../../repo-icon-autodetect'
 import { prepareLocalWorktreeRootForRepo } from '../../worktree-root-preparation'
@@ -206,8 +206,7 @@ export function registerRepoCreationHandlers(mainWindow: BrowserWindow, store: S
             return { error: `"${name}" already exists at this location and is not a folder.` }
           }
           if (!isProvenAbsent(err)) {
-            const message = err instanceof Error ? err.message : String(err)
-            return { error: repositoryCheckUnavailableError(name, message) }
+            return { error: repositoryCheckUnavailableError(name, describeError(err)) }
           }
         }
         try {

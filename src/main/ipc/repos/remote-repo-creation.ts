@@ -16,7 +16,7 @@ import {
   repositoryCheckUnavailableError
 } from './repository-creation-messages'
 import { resolveRemoteHomePath } from './remote-home-path'
-import { isNotADirectory, isProvenAbsent } from './proven-absence'
+import { describeError, isNotADirectory, isProvenAbsent } from './proven-absence'
 
 export async function createRemoteRepo(
   store: Store,
@@ -77,8 +77,7 @@ export async function createRemoteRepo(
     // Why: only a proven ENOENT means absent. EACCES, ELOOP, a relay timeout or a disconnect say
     // nothing about the target, and must not become permission to create into it.
     if (!isProvenAbsent(err)) {
-      const message = err instanceof Error ? err.message : String(err)
-      return { error: repositoryCheckUnavailableError(name, message) }
+      return { error: repositoryCheckUnavailableError(name, describeError(err)) }
     }
     targetExists = false
   }
@@ -98,8 +97,7 @@ export async function createRemoteRepo(
       }
       // Why: same rule as above — an indeterminate probe is not evidence that `.git` is absent.
       if (!isProvenAbsent(err)) {
-        const message = err instanceof Error ? err.message : String(err)
-        return { error: repositoryCheckUnavailableError(name, message) }
+        return { error: repositoryCheckUnavailableError(name, describeError(err)) }
       }
     }
     try {
