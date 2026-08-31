@@ -2,6 +2,7 @@ import type { WorktreeSlice } from '../../worktree-helpers'
 import type { WorktreeSliceGet, WorktreeSliceSet } from '../listing/worktree-slice-types'
 import { translate } from '@/i18n/i18n'
 import { isPositiveHostedReviewNumber } from '../../../../../../shared/hosted-review'
+import { displayNameUpdatePinsLabel } from '../../../../../../shared/worktree/display-name-provenance'
 import { parseWorkspaceKey } from '../../../../../../shared/workspace-scope'
 import { applyWorktreeUpdates, getRepoIdFromWorktreeId } from '../../worktree-helpers'
 import { getHostedReviewCacheKey } from '../../hosted-review-cache-identity'
@@ -124,7 +125,7 @@ export function createUpdateWorktreeMeta(
     // Why: bump lastActivityAt on comment edits so the time-decay sort doesn't drop a just-touched worktree.
     const displayNameProvenance =
       'displayName' in normalizedUpdates
-        ? { displayNameIsPinned: Boolean(normalizedUpdates.displayName?.trim()) }
+        ? { displayNameIsPinned: displayNameUpdatePinsLabel(normalizedUpdates.displayName) }
         : {}
     const targetEnriched = resolvedPushTarget
       ? { ...normalizedUpdates, ...displayNameProvenance, pushTarget: resolvedPushTarget }

@@ -4,6 +4,7 @@ import {
   resolveAutomationWorkspaceProvenance
 } from '../../../automations/workspace-provenance'
 import { buildCliWorkspaceProvenance } from '../../../../shared/cli-workspace-provenance'
+import { displayNameUpdatePinsLabel } from '../../../../shared/worktree/display-name-provenance'
 import { defineMethod, type RpcMethod } from '../core'
 import { buildManagedWorktreeCreateArgs } from './worktree-create-args'
 import { resolvePairedCallerHostId } from './paired-caller-host-id'
@@ -134,7 +135,7 @@ export const WORKTREE_METHODS: RpcMethod[] = [
       worktree: await runtime.updateManagedWorktreeMeta(params.worktree, {
         displayName: params.displayName,
         ...(params.displayName !== undefined
-          ? { displayNameIsPinned: Boolean(params.displayName.trim()) }
+          ? { displayNameIsPinned: displayNameUpdatePinsLabel(params.displayName) }
           : {}),
         linkedIssue: params.linkedIssue,
         linkedPR: params.linkedPR,
