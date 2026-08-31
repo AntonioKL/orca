@@ -976,10 +976,21 @@ jobs:
         run: node config/scripts/install-electron-package-binary.mjs
 
       - name: Run skill package, transaction, and compatibility suites
+        if: runner.os != 'Windows'
         env:
           ORCA_REAL_PROCESS_SKILL_TEST: '1'
           ORCA_REAL_WINDOWS_SKILL_TEST: ${{ runner.os == 'Windows' && '1' || '0' }}
         run: pnpm test:skill-sharing:release --reporter=json --outputFile=skill-sharing-release-results.json
+
+      # Windows hosts run the real-process recovery cases in one worker so a
+      # killed nested Vitest worker cannot race another release-gate worker.
+      - name: Run Windows skill gate serially
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          ORCA_REAL_PROCESS_SKILL_TEST: '1'
+          ORCA_REAL_WINDOWS_SKILL_TEST: '1'
+        run: pnpm test:skill-sharing:release --pool=forks --maxWorkers=1 --no-file-parallelism --reporter=json --outputFile=skill-sharing-release-results.json
 
       - name: Archive bounded skill-sharing results
         if: always()
