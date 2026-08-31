@@ -4228,6 +4228,8 @@ const api = {
         paneRuntimeId: number
         direction: 'horizontal' | 'vertical'
         command?: string
+        worktreeId?: string
+        sourceLeafId?: string
         telemetrySource?: TerminalPaneSplitSource
         newLeafId?: string
       }) => void
@@ -4239,6 +4241,8 @@ const api = {
           paneRuntimeId: number
           direction: 'horizontal' | 'vertical'
           command?: string
+          worktreeId?: string
+          sourceLeafId?: string
           telemetrySource?: TerminalPaneSplitSource
           newLeafId?: string
         }
@@ -5001,7 +5005,7 @@ const api = {
       callback: (data: {
         requestId: string
         targetId: string
-        kind: 'passphrase' | 'password'
+        kind: 'passphrase' | 'password' | 'keyboard-interactive'
         detail: string
       }) => void
     ): (() => void) => {
@@ -5010,7 +5014,7 @@ const api = {
         data: {
           requestId: string
           targetId: string
-          kind: 'passphrase' | 'password'
+          kind: 'passphrase' | 'password' | 'keyboard-interactive'
           detail: string
         }
       ) => callback(data)
