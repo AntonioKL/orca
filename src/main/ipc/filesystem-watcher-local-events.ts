@@ -159,7 +159,12 @@ async function flushBatch(root: WatchedRoot): Promise<void> {
     root.batch.flushInFlight = false
     if (root.batch.flushQueued) {
       root.batch.flushQueued = false
-      if (!root.batch.cancelled && (root.batch.events.length > 0 || root.batch.overflowed)) {
+      if (
+        !root.batch.cancelled &&
+        // Why: an armed timer still owns its debounce window; draining here would split related events across payloads.
+        !root.batch.timer &&
+        (root.batch.events.length > 0 || root.batch.overflowed)
+      ) {
         // Drain the queued batch only after the current payload has settled,
         // preserving watcher event ordering without dropping a storm tail.
         void flushBatch(root)
@@ -186,6 +191,7 @@ export function scheduleLocalBatchFlush(root: WatchedRoot): void {
   if (now - root.batch.firstEventAt >= WATCH_BATCH_MAX_WAIT_MS) {
     if (root.batch.timer) {
       clearTimeout(root.batch.timer)
+      root.batch.timer = null
     }
     void flushBatch(root)
     return
@@ -195,7 +201,11 @@ export function scheduleLocalBatchFlush(root: WatchedRoot): void {
   if (root.batch.timer) {
     clearTimeout(root.batch.timer)
   }
-  root.batch.timer = setTimeout(() => void flushBatch(root), WATCH_BATCH_TRAILING_MS)
+  // Why: clear the handle as it fires so `batch.timer` means "a debounce window is still open", which gates the queued drain.
+  root.batch.timer = setTimeout(() => {
+    root.batch.timer = null
+    void flushBatch(root)
+  }, WATCH_BATCH_TRAILING_MS)
 }
 
 // ── Watcher creation ─────────────────────────────────────────────────

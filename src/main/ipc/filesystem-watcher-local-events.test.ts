@@ -131,4 +131,41 @@ describe('local filesystem watcher flush serialization', () => {
     expect(statMock).toHaveBeenCalledTimes(1)
     expect(sender.send).not.toHaveBeenCalled()
   })
+
+  it('leaves an open debounce window to the armed timer instead of draining early', async () => {
+    const firstStat = deferred<{ isDirectory: () => boolean }>()
+    const secondStat = deferred<{ isDirectory: () => boolean }>()
+    statMock.mockReturnValueOnce(firstStat.promise).mockReturnValueOnce(secondStat.promise)
+    const root = await createLocalWatcher('/repo', '/repo')
+    root.listeners.set(1, sender as never)
+    const transientPath = '/repo/transient.ts'
+    const otherPath = '/repo/other.ts'
+
+    watcherCallback?.(null, [{ type: 'update', path: '/repo/first.ts' }])
+    vi.advanceTimersByTime(WATCH_BATCH_TRAILING_MS)
+    await flushMicrotasks()
+
+    // Queue an event mid-flush, then settle the flush before its debounce window closes.
+    watcherCallback?.(null, [{ type: 'create', path: transientPath }])
+    vi.advanceTimersByTime(WATCH_BATCH_TRAILING_MS - 50)
+    firstStat.resolve({ isDirectory: () => true })
+    await flushMicrotasks()
+    expect(sender.send).toHaveBeenCalledTimes(1)
+    expect(statMock).toHaveBeenCalledTimes(1)
+
+    // The still-open window coalesces the create away instead of emitting a transient one.
+    watcherCallback?.(null, [
+      { type: 'delete', path: transientPath },
+      { type: 'update', path: otherPath }
+    ])
+    vi.advanceTimersByTime(WATCH_BATCH_TRAILING_MS)
+    await flushMicrotasks()
+    secondStat.resolve({ isDirectory: () => false })
+    await flushMicrotasks()
+
+    expect(sender.send).toHaveBeenCalledTimes(2)
+    expect((sender.send.mock.calls[1][1] as FsChangedPayload).events).toEqual([
+      { kind: 'update', absolutePath: otherPath, isDirectory: false }
+    ])
+  })
 })
