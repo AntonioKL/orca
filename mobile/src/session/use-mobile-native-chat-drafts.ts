@@ -15,9 +15,11 @@ import {
   type MobileNativeChatPendingDeliveryOrigin,
   type MobileNativeChatPendingMessage
 } from './use-mobile-native-chat-pending-deliveries'
+import { MobileNativeChatDraftEditGenerations } from './mobile-native-chat-draft-edit-generations'
 
 export type MobileNativeChatSendOrigin = MobileNativeChatPendingDeliveryOrigin & {
   draftKey: string
+  draftEditGeneration: number
 }
 
 // Ack-lost sends wait for a transcript echo before surfacing as unconfirmed.
@@ -48,6 +50,7 @@ export function useMobileNativeChatDrafts(args: {
 }): {
   composerText: string
   setComposerText: Dispatch<SetStateAction<string>>
+  getComposerEditGeneration: () => number
   pending: MobileNativeChatPendingMessage[]
   /** Phone-local previews rebound to the transcript message that replaced the
    *  optimistic echo, keyed by authoritative message id. */
@@ -80,6 +83,7 @@ export function useMobileNativeChatDrafts(args: {
   } = args
   const draftKey = mobileNativeChatScopeKey(hostId, worktreeId, tabId)
   const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const draftEditGenerationsRef = useRef(new MobileNativeChatDraftEditGenerations())
   const messagesRef = useRef(messages)
   messagesRef.current = messages
   const activeDraftKeyRef = useRef(draftKey)
@@ -129,6 +133,7 @@ export function useMobileNativeChatDrafts(args: {
         return
       }
       markDraftEdited()
+      draftEditGenerationsRef.current.advance(draftKey)
       setDrafts((previous) => {
         const current = previous[draftKey] ?? ''
         const next = typeof value === 'function' ? value(current) : value
@@ -143,6 +148,7 @@ export function useMobileNativeChatDrafts(args: {
       draftKey
         ? {
             draftKey,
+            draftEditGeneration: draftEditGenerationsRef.current.readDraft(draftKey),
             ...capturePendingOrigin(text.trim())
           }
         : null,
@@ -151,7 +157,8 @@ export function useMobileNativeChatDrafts(args: {
 
   const clearDraftForSend = useCallback((origin: MobileNativeChatSendOrigin, text: string) => {
     setDrafts((previous) =>
-      (previous[origin.draftKey] ?? '').trim() === text.trim()
+      draftEditGenerationsRef.current.isCurrent(origin.draftKey, origin.draftEditGeneration) &&
+      (previous[origin.draftKey] ?? '') === text
         ? { ...previous, [origin.draftKey]: '' }
         : previous
     )
@@ -159,7 +166,10 @@ export function useMobileNativeChatDrafts(args: {
 
   const restoreRejectedDraft = useCallback((origin: MobileNativeChatSendOrigin, text: string) => {
     setDrafts((previous) =>
-      (previous[origin.draftKey] ?? '') === '' ? { ...previous, [origin.draftKey]: text } : previous
+      draftEditGenerationsRef.current.isCurrent(origin.draftKey, origin.draftEditGeneration) &&
+      (previous[origin.draftKey] ?? '') === ''
+        ? { ...previous, [origin.draftKey]: text }
+        : previous
     )
   }, [])
 
@@ -236,6 +246,7 @@ export function useMobileNativeChatDrafts(args: {
   return {
     composerText,
     setComposerText,
+    getComposerEditGeneration: draftEditGenerationsRef.current.readComposer,
     pending,
     imagePreviewsByMessageId,
     captureSendOrigin,

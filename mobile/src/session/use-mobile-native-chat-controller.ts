@@ -121,6 +121,7 @@ export function useMobileNativeChatController(args: {
   const {
     composerText: chatComposerText,
     setComposerText: setChatComposerText,
+    getComposerEditGeneration: getChatComposerEditGeneration,
     pending: chatPending,
     imagePreviewsByMessageId: chatImagePreviewsByMessageId,
     captureSendOrigin,
@@ -297,6 +298,7 @@ export function useMobileNativeChatController(args: {
     nativeChatAgent: activeChatResolution?.agent ?? null,
     chatComposerText,
     setChatComposerText,
+    getChatComposerEditGeneration,
     chatPending,
     chatImagePreviewsByMessageId,
     nativeChatSession,

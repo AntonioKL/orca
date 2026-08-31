@@ -58,6 +58,12 @@ type Props = {
   loadingEarlier?: boolean
   onLoadEarlier?: () => void
   onSend: (text: string) => Promise<boolean>
+  /** Route identity used to fence accepted sends that settle after a tab/view switch. */
+  sendSurfaceId: string
+  /** Reads the retained route's focus generation for accepted-send fencing. */
+  getSendCompletionGeneration: () => number
+  /** Reads user draft mutations from the route-owned controller. */
+  getComposerEditGeneration: () => number
   /** Accepted user echoes awaiting transcript replacement, including image previews. */
   pending: MobileNativeChatPendingItem[]
   /** Local photo URIs retained when the authoritative transcript replaces an
@@ -128,6 +134,9 @@ export function MobileNativeChatView({
   loadingEarlier,
   onLoadEarlier,
   onSend,
+  sendSurfaceId,
+  getSendCompletionGeneration,
+  getComposerEditGeneration,
   pending,
   imagePreviewsByMessageId,
   composerText,
@@ -179,9 +188,6 @@ export function MobileNativeChatView({
     []
   )
 
-  // `data` is the list source: folded transcript + synthetic streaming bubble +
-  // route-owned accepted echoes. Memoize on the same deps so the
-  // downstream autoscroll effects/`renderItem` keep referential stability.
   const { data } = useMemo(
     () =>
       buildMobileNativeChatTransientData({
@@ -194,10 +200,6 @@ export function MobileNativeChatView({
     [messages, folded, streaming, pending, imagePreviewsByMessageId]
   )
 
-  // Follow the tail as the conversation grows and keep the newest message above
-  // the keyboard when it opens — but only when already pinned to the bottom, so
-  // we don't yank the user away while they read history. (Also fires on keyboard
-  // close, which is harmless while atBottom.)
   useEffect(() => {
     if (data.length === 0 || !atBottom) {
       return
@@ -344,8 +346,6 @@ export function MobileNativeChatView({
               }
             />
           </GestureDetector>
-          {/* Jump-to-latest control. The scroll-to-top affordance now lives
-              per-message (the up-arrow in each agent message's controls). */}
           {!atBottom ? (
             <Pressable
               accessibilityLabel="Scroll to latest"
@@ -357,10 +357,6 @@ export function MobileNativeChatView({
           ) : null}
         </GestureHandlerRootView>
       )}
-      {/* Pending agent prompt: a structured AskUserQuestion wins, then a
-          heuristic permission, then a heuristic question. The controller owns
-          dismissal (it must survive this subtree unmounting on a view toggle);
-          `ask` arrives already nulled while dismissed. */}
       {ask ? (
         <MobileNativeChatAsk
           key={askKey ?? 'ask'}
@@ -393,8 +389,6 @@ export function MobileNativeChatView({
           onAnswer={async (text) => (await onAnswerQuestion?.(text)) ?? false}
         />
       ) : null}
-      {/* Chrome row above the composer: the working indicator and the global
-          tool-calls expand/collapse toggle on the left, Stop in the far corner. */}
       <View style={styles.chromeRow}>
         <View style={styles.chromeLeft}>
           {agentWorking ? <MobileAgentWorkingIndicator /> : null}
@@ -437,6 +431,8 @@ export function MobileNativeChatView({
         value={composerText}
         onChangeText={onComposerTextChange}
         onSend={handleSend}
+        sendSurfaceId={sendSurfaceId}
+        {...{ getSendCompletionGeneration, getComposerEditGeneration }}
         agent={agent}
         sessionOptions={sessionOptions}
         onAttachImage={onAttachImage}
