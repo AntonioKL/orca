@@ -10114,7 +10114,7 @@ export class OrcaRuntimeService {
       ? [...this.leaves.values()].filter(
           (leaf) =>
             leaf.tabId === lifecycleCloseParentTabId &&
-            runtimeWorktreeIdsEqual(leaf.worktreeId, worktreeId)
+            worktreeIdsEqual(leaf.worktreeId, worktreeId)
         )
       : []
     const lifecycleLeafHasConnectedPty = (leaf: RuntimeMobileSessionTerminalTab): boolean => {
@@ -32031,7 +32031,7 @@ export class OrcaRuntimeService {
           (tab) => tab.id === surface.tab.parentTabId
         )
       : undefined
-    if (persistedTab && !runtimeWorktreeIdsEqual(persistedTab.worktreeId, authority.worktreeId)) {
+    if (persistedTab && !worktreeIdsEqual(persistedTab.worktreeId, authority.worktreeId)) {
       return null
     }
     const paneKey = makePaneKey(surface.tab.parentTabId, surface.tab.leafId)
