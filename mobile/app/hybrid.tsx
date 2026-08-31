@@ -73,6 +73,7 @@ export default function HybridScreen() {
   const hostName = selectedHost?.name
   const {
     session,
+    sessionHostId,
     viewEpoch,
     packageLoading,
     packageProgress,
@@ -109,8 +110,8 @@ export default function HybridScreen() {
   }, [coldResumeRoute.clearRoute, e2eHostId, hostsLoading, router, selectedHost])
 
   useEffect(() => {
-    activeSessionIdRef.current = session?.sessionId
-  }, [session?.sessionId])
+    activeSessionIdRef.current = sessionHostId === selectedHostId ? session?.sessionId : undefined
+  }, [selectedHostId, session?.sessionId, sessionHostId])
 
   useFocusEffect(
     useCallback(() => {
@@ -167,7 +168,7 @@ export default function HybridScreen() {
     brokerRef.current = null
     setBrokerSessionId(undefined)
     const current = session
-    if (!current || !selectedHost) {
+    if (!current || !selectedHost || sessionHostId !== selectedHostId) {
       return
     }
     const broker = new MobileWebCapabilityBroker({
@@ -246,7 +247,9 @@ export default function HybridScreen() {
     selectedHost?.id,
     selectedHost?.publicKeyB64,
     session?.buildId,
-    session?.sessionId
+    session?.sessionId,
+    sessionHostId,
+    selectedHostId
   ])
 
   useEffect(() => {
@@ -371,9 +374,9 @@ export default function HybridScreen() {
     <MobileWebHybridShellPresentation
       viewRef={viewRef}
       selectedHost={selectedHost}
-      session={session}
+      session={sessionHostId === selectedHostId ? session : null}
       viewEpoch={viewEpoch}
-      packageLoading={packageLoading || !selectedHost}
+      packageLoading={packageLoading || !selectedHost || sessionHostId !== selectedHostId}
       packageProgress={packageProgress}
       packageWarning={packageWarning}
       hostedViewActive={hostedViewActive}

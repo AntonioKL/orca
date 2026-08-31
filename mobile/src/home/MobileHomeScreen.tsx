@@ -55,7 +55,7 @@ export function MobileHomeScreen() {
         navigateFromMobileHome({
           router: data.router,
           hostId: card.hostId,
-          target: { kind: 'workspaceList' }
+          target: { kind: 'workspaceList', notice: 'worktree-missing' }
         })
         return
       }

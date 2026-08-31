@@ -100,6 +100,13 @@ describe('docs-only path classification', () => {
   it('does not start desktop PR Checks for mobile-only diffs', () => {
     expect(shouldRunPrChecks(['mobile/src/App.tsx'])).toBe(false)
   })
+
+  it('runs desktop packaging when a shared host route changes', () => {
+    expectClassification(['mobile/app/h/[hostId]/tasks.tsx'], {
+      package: true,
+      package_windows: true
+    })
+  })
 })
 
 describe('per-job path classification', () => {

@@ -53,6 +53,29 @@ describe('notification routing', () => {
     expect(getNotificationNavigationPath({ hostId: 'host-1' })).toBe('/h/host-1')
   })
 
+  it('preserves credential recovery for notification taps', () => {
+    const options = {
+      knownHostIds: new Set(['missing', 'offline']),
+      credentialStatusByHostId: new Map([
+        ['missing', 'missing' as const],
+        ['offline', 'temporarily-unavailable' as const]
+      ])
+    }
+    expect(getNotificationNavigationTarget({ hostId: 'missing' }, options)).toEqual({
+      kind: 'host',
+      hostId: 'missing',
+      credentialRecovery: 're-pair'
+    })
+    expect(
+      getNotificationNavigationTarget({ hostId: 'offline', worktreeId: 'workspace' }, options)
+    ).toEqual({
+      kind: 'session',
+      hostId: 'offline',
+      hostWorkspaceId: 'workspace',
+      credentialRecovery: 'retry'
+    })
+  })
+
   it('ignores payloads that cannot identify the paired host', () => {
     expect(getNotificationNavigationTarget({ worktreeId: 'repo::/tmp/worktree' })).toBeNull()
   })

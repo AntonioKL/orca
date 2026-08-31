@@ -1,3 +1,5 @@
+import type { HostCredentialStatus } from '../transport/types'
+
 export type DesktopNotificationSource = 'agent-task-complete' | 'terminal-bell' | 'test'
 
 export type DesktopNotificationEvent = {
@@ -15,11 +17,17 @@ export type LocalNotificationData = {
 
 export type NotificationNavigationOptions = {
   knownHostIds?: ReadonlySet<string>
+  credentialStatusByHostId?: ReadonlyMap<string, HostCredentialStatus>
 }
 
 export type NotificationNavigationTarget =
-  | { kind: 'host'; hostId: string }
-  | { kind: 'session'; hostId: string; hostWorkspaceId: string }
+  | { kind: 'host'; hostId: string; credentialRecovery?: 'retry' | 're-pair' }
+  | {
+      kind: 'session'
+      hostId: string
+      hostWorkspaceId: string
+      credentialRecovery?: 'retry' | 're-pair'
+    }
 
 export type NotificationNavigation = {
   target: NotificationNavigationTarget
@@ -65,15 +73,22 @@ export function getNotificationNavigationPath(
 
 export async function resolveNotificationNavigation(
   data: unknown,
-  loadKnownHosts: () => Promise<readonly { id: string }[]>
+  loadKnownHosts: () => Promise<readonly { id: string; credentialStatus?: HostCredentialStatus }[]>
 ): Promise<NotificationNavigation | null> {
-  let hosts: readonly { id: string }[]
+  let hosts: readonly { id: string; credentialStatus?: HostCredentialStatus }[]
   try {
     hosts = await loadKnownHosts()
   } catch {
     return null
   }
-  const options = { knownHostIds: new Set(hosts.map((host) => host.id)) }
+  const options = {
+    knownHostIds: new Set(hosts.map((host) => host.id)),
+    credentialStatusByHostId: new Map(
+      hosts.flatMap((host) =>
+        host.credentialStatus ? [[host.id, host.credentialStatus] as const] : []
+      )
+    )
+  }
   const target = getNotificationNavigationTarget(data, options)
   return target ? { target, path: getNotificationNavigationTargetPath(target) } : null
 }
@@ -129,9 +144,30 @@ export function getNotificationNavigationTarget(
   if (typeof record.worktreeId === 'string' && record.worktreeId.length > 0 && !worktreeId) {
     return null
   }
+  const credentialStatus = options.credentialStatusByHostId?.get(hostId)
+  const credentialRecovery =
+    credentialStatus === 'missing'
+      ? 're-pair'
+      : credentialStatus === 'temporarily-unavailable'
+        ? 'retry'
+        : undefined
   if (!worktreeId) {
-    return { kind: 'host', hostId }
+    return { kind: 'host', hostId, ...(credentialRecovery ? { credentialRecovery } : {}) }
   }
 
-  return { kind: 'session', hostId, hostWorkspaceId: worktreeId }
+  return {
+    kind: 'session',
+    hostId,
+    hostWorkspaceId: worktreeId,
+    ...(credentialRecovery ? { credentialRecovery } : {})
+  }
+}
+
+export function notificationCredentialRecoveryRoute(
+  target: NotificationNavigationTarget
+): '/' | '/pair-scan' | null {
+  if (target.credentialRecovery === 're-pair') {
+    return '/pair-scan'
+  }
+  return target.credentialRecovery === 'retry' ? '/' : null
 }

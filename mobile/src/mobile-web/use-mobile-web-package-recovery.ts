@@ -14,6 +14,7 @@ type PackageRecoveryState = {
   processFailuresRef: RefObject<MobileWebProcessFailureTracker>
   rejectedBuildIdsRef: RefObject<Set<string>>
   setSession: Dispatch<SetStateAction<MobileWebShellSession | null>>
+  setSessionHostId: Dispatch<SetStateAction<string | undefined>>
   setViewEpoch: Dispatch<SetStateAction<number>>
   setPackageLoading: Dispatch<SetStateAction<boolean>>
   setPackageWarning: Dispatch<SetStateAction<string | undefined>>
@@ -38,6 +39,7 @@ export function useMobileWebPackageRecovery({
   processFailuresRef,
   rejectedBuildIdsRef,
   setSession,
+  setSessionHostId,
   setViewEpoch,
   setPackageLoading,
   setPackageWarning,
@@ -64,6 +66,7 @@ export function useMobileWebPackageRecovery({
         ownedSessionRef.current = recovered
         sessionGenerationRef.current += 1
         setSession(recovered)
+        setSessionHostId(hostId)
         setViewEpoch(0)
         setPackageWarning(warning)
         mobileWebDiagnosticsStore.recovered(hostId, recovered.buildId, failureCode)
@@ -88,6 +91,7 @@ export function useMobileWebPackageRecovery({
       rejectedBuildIdsRef,
       setPackageWarning,
       setSession,
+      setSessionHostId,
       setViewEpoch
     ]
   )
@@ -206,6 +210,7 @@ export function useMobileWebPackageRecovery({
     ownedSessionRef.current = null
     sessionGenerationRef.current += 1
     setSession(null)
+    setSessionHostId(undefined)
     setViewEpoch(0)
     setPackageLoading(true)
     setPackageWarning(undefined)
@@ -237,6 +242,7 @@ export function useMobileWebPackageRecovery({
     setPackageWarning,
     setRefreshEpoch,
     setSession,
+    setSessionHostId,
     setViewEpoch
   ])
 

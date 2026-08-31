@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { getNotificationNavigationTarget } from './notification-routing'
+import {
+  getNotificationNavigationTarget,
+  notificationCredentialRecoveryRoute
+} from './notification-routing'
 
 const rootLayoutSource = readFileSync(new URL('../../app/_layout.tsx', import.meta.url), 'utf8')
 
@@ -17,6 +20,27 @@ describe('notification route coordination', () => {
       hostId: 'host-1',
       hostWorkspaceId: 'repo::/tmp/worktree'
     })
+  })
+
+  it('routes unavailable notification hosts through native recovery', () => {
+    expect(
+      notificationCredentialRecoveryRoute(
+        getNotificationNavigationTarget(
+          { hostId: 'host-1' },
+          {
+            credentialStatusByHostId: new Map([['host-1', 'temporarily-unavailable']])
+          }
+        )!
+      )
+    ).toBe('/')
+    expect(
+      notificationCredentialRecoveryRoute(
+        getNotificationNavigationTarget(
+          { hostId: 'host-1' },
+          { credentialStatusByHostId: new Map([['host-1', 'missing']]) }
+        )!
+      )
+    ).toBe('/pair-scan')
   })
 
   it('publishes the validated intent before entering the hybrid route', () => {

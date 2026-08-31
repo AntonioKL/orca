@@ -181,6 +181,7 @@ const SHARED_PACKAGE_PREFIXES = [
 // here must keep desktop typecheck/package jobs enabled even though most RN
 // sources remain mobile-only.
 const DESKTOP_RELEVANT_MOBILE_PREFIXES = [
+  'mobile/app/h/',
   'mobile/package.json',
   'mobile/pnpm-lock.yaml',
   'mobile/pnpm-workspace.yaml',

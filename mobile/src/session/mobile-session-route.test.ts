@@ -112,7 +112,7 @@ describe('mobile session route', () => {
 
     const openResume = homeSource.slice(handlerStart, handlerEnd)
     expect(openResume).toContain('navigateFromMobileHome({')
-    expect(openResume).toContain("target: { kind: 'workspaceList' }")
+    expect(openResume).toContain("target: { kind: 'workspaceList', notice: 'worktree-missing' }")
     expect(openResume).toContain("target: { kind: 'session', hostWorkspaceId:")
     expect(openResume).not.toContain('router.push(')
   })

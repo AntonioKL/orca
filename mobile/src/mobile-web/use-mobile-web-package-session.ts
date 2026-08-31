@@ -38,6 +38,7 @@ export function useMobileWebPackageSession({
   const processFailuresRef = useRef(new MobileWebProcessFailureTracker())
   const rejectedBuildIdsRef = useRef(new Set<string>())
   const [session, setSession] = useState<MobileWebShellSession | null>(null)
+  const [sessionHostId, setSessionHostId] = useState<string>()
   const [viewEpoch, setViewEpoch] = useState(0)
   const [packageLoading, setPackageLoading] = useState(false)
   const [packageProgress, setPackageProgress] = useState<MobileWebPackageDownloadProgress>()
@@ -83,6 +84,7 @@ export function useMobileWebPackageSession({
       ownedSessionRef.current = next
       sessionGenerationRef.current += 1
       setSession(next)
+      setSessionHostId(hostId)
       setViewEpoch(0)
       setPackageLoading(false)
       setPackageProgress(undefined)
@@ -114,6 +116,7 @@ export function useMobileWebPackageSession({
     const previous = ownedSessionRef.current
     ownedSessionRef.current = null
     setSession(null)
+    setSessionHostId(undefined)
     setViewEpoch(0)
     setPackageWarning(undefined)
     setPackageLoading(Boolean(host))
@@ -213,6 +216,7 @@ export function useMobileWebPackageSession({
     processFailuresRef,
     rejectedBuildIdsRef,
     setSession,
+    setSessionHostId,
     setViewEpoch,
     setPackageLoading,
     setPackageWarning,
@@ -221,6 +225,7 @@ export function useMobileWebPackageSession({
 
   return {
     session,
+    sessionHostId,
     viewEpoch,
     packageLoading: effectivePackageLoading,
     packageProgress,

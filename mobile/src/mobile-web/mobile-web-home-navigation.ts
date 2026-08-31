@@ -48,5 +48,8 @@ export function mobileHomeDestination(
   if (target.kind === 'newWorkspace') {
     return `${hostRoute}?action=newWorktree`
   }
+  if (target.kind === 'workspaceList' && target.notice) {
+    return `${hostRoute}?notice=${encodeURIComponent(target.notice)}`
+  }
   return hostRoute
 }

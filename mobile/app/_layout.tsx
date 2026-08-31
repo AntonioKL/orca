@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { View, StyleSheet } from 'react-native'
-import { Stack, usePathname, useRouter } from 'expo-router'
+import { Stack, useGlobalSearchParams, usePathname, useRouter } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import * as SplashScreen from 'expo-splash-screen'
 import * as Notifications from 'expo-notifications'
@@ -8,7 +8,10 @@ import * as Linking from 'expo-linking'
 import { colors } from '../src/theme/mobile-theme'
 import { OrcaLogo } from '../src/components/OrcaLogo'
 import { RpcClientProvider } from '../src/transport/client-context'
-import { LatestNotificationNavigationResolver } from '../src/notifications/notification-routing'
+import {
+  LatestNotificationNavigationResolver,
+  notificationCredentialRecoveryRoute
+} from '../src/notifications/notification-routing'
 import { MOBILE_WEB_NAVIGATION_INTENTS } from '../src/mobile-web/mobile-web-navigation-intent-buffer'
 import {
   loadMobileWebColdResumeRoute,
@@ -46,6 +49,7 @@ Notifications.setNotificationHandler({
 export default function RootLayout() {
   const router = useRouter()
   const pathname = usePathname()
+  const { notice } = useGlobalSearchParams<{ notice?: string }>()
   const pathnameRef = useRef(pathname)
   const handledNotificationIdsRef = useRef<Set<string>>(new Set())
   const notificationNavigationResolverRef = useRef<LatestNotificationNavigationResolver | null>(
@@ -60,9 +64,16 @@ export default function RootLayout() {
   useEffect(() => {
     if (isRetiredNativeWorkspaceRoute(pathname, MOBILE_NATIVE_BASELINE_MODE)) {
       const hostId = retiredNativeWorkspaceHostId(pathname)
+      if (hostId && notice === 'worktree-missing') {
+        MOBILE_WEB_NAVIGATION_INTENTS.publishHostTarget(
+          hostId,
+          { kind: 'workspaceList', notice },
+          'home'
+        )
+      }
       router.replace(hostId ? mobileHostWorkspaceEntry(hostId, false) : '/hybrid')
     }
-  }, [pathname, router])
+  }, [notice, pathname, router])
 
   useEffect(() => {
     // Why: pairing publication is journaled across process death; startup must
@@ -177,6 +188,11 @@ export default function RootLayout() {
         return
       }
       if (navigation) {
+        const recoveryRoute = notificationCredentialRecoveryRoute(navigation.target)
+        if (recoveryRoute) {
+          router.push(recoveryRoute)
+          return
+        }
         MOBILE_WEB_NAVIGATION_INTENTS.publish(navigation.target)
         if (pathnameRef.current !== '/hybrid') {
           router.push(mobileHostWorkspaceEntry(navigation.target.hostId, false))

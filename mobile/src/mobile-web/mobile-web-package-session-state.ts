@@ -3,6 +3,7 @@ import type { MobileWebPackageDownloadProgress } from './mobile-web-package-down
 
 export type MobileWebPackageSession = {
   session: MobileWebShellSession | null
+  sessionHostId: string | undefined
   viewEpoch: number
   packageLoading: boolean
   packageProgress: MobileWebPackageDownloadProgress | undefined

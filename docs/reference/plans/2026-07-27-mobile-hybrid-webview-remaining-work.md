@@ -59,6 +59,28 @@ the hosted WebView route; adopting it would either break hosted behavior or
 require a separate operation-context migration. It remains the only new
 mobile-config max-lines baseline entry in this candidate.
 
+## 2026-08-31 Parallel Review Follow-up
+
+The second independent Codex review wave found and corrected four candidate
+regressions before merge:
+
+- Notification taps again honor missing-credential re-pair and temporary
+  credential retry recovery instead of always entering the hosted route.
+- Missing-worktree notices survive the retired native-route redirect and Home
+  Resume flow through the typed hosted navigation route.
+- Host changes fence the old package session before a new host broker or WebView
+  can become active.
+- Desktop package-scope classification now runs Linux/Windows package checks
+  when shared `mobile/app/h/**` routes change.
+
+The same review identified follow-ups that are not yet release blockers but
+need explicit disposition before production promotion: bounded native package
+session retention and retry-safe stage cleanup; an iOS delayed navigation
+failure generation token; broader two-host LAN/Relay/SSH/WSL/folder coverage;
+and restoring rendered Tasks/accessibility parity tests while removing the
+remaining Tasks duplication. These remain tracked by the corresponding gates
+below and are not silently considered complete.
+
 ## Packaged Desktop and Signed App Matrix
 
 - [ ] Build, install, and run package delivery from the final supported macOS

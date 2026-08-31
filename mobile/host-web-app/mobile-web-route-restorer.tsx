@@ -48,6 +48,9 @@ function navigationRouteQuery(
   if (route.kind === 'newWorkspace') {
     return { action: 'newWorktree' }
   }
+  if (route.kind === 'workspaceList') {
+    return { notice: route.notice }
+  }
   return {}
 }
 

@@ -60,6 +60,9 @@ describe('mobile web Home navigation', () => {
     expect(mobileHomeDestination('host/key', { kind: 'newWorkspace' }, true)).toBe(
       '/h/host%2Fkey?action=newWorktree'
     )
+    expect(
+      mobileHomeDestination('host/key', { kind: 'workspaceList', notice: 'worktree-missing' }, true)
+    ).toBe('/h/host%2Fkey?notice=worktree-missing')
   })
 })
 

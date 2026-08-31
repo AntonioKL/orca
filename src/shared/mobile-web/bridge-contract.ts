@@ -89,7 +89,12 @@ const PageHardwareBackResultSchema = PageEnvelopeSchema.extend({
   handled: z.boolean()
 }).strict()
 
-const MobileWebWorkspaceListRouteSchema = z.object({ kind: z.literal('workspaceList') }).strict()
+const MobileWebWorkspaceListRouteSchema = z
+  .object({
+    kind: z.literal('workspaceList'),
+    notice: z.literal('worktree-missing').optional()
+  })
+  .strict()
 const MobileWebSessionRouteSchema = z
   .object({
     kind: z.literal('session'),

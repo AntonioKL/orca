@@ -77,4 +77,14 @@ describe('mobile web navigation intent buffer', () => {
       target: { kind: 'tasks', taskSource: 'linear' }
     })
   })
+
+  it('carries a host notice through a workspace-list intent', () => {
+    const buffer = new MobileWebNavigationIntentBuffer()
+    const intent = buffer.publishHostTarget('paired-host', {
+      kind: 'workspaceList',
+      notice: 'worktree-missing'
+    })
+
+    expect(intent.target).toEqual({ kind: 'workspaceList', notice: 'worktree-missing' })
+  })
 })

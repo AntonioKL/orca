@@ -1,8 +1,9 @@
 import type { NotificationNavigationTarget } from '../notifications/notification-routing'
 import type { TaskProvider } from '../tasks/mobile-task-providers'
+import type { HostRouteNotice } from '../host-route-notice'
 
 export type MobileWebNavigationIntentTarget =
-  | { kind: 'workspaceList' }
+  | { kind: 'workspaceList'; notice?: HostRouteNotice }
   | { kind: 'session'; hostWorkspaceId: string }
   | { kind: 'tasks'; taskSource?: TaskProvider }
   | { kind: 'accounts' }
