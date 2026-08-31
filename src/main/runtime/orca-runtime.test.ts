@@ -18169,7 +18169,7 @@ describe('OrcaRuntimeService', () => {
     expect(writes).toEqual(['x'.repeat(TERMINAL_INPUT_CHUNK_MAX_BYTES), 'tail'])
   })
 
-  it('yields chunked terminal input through timers so the PTY can drain between writes', async () => {
+  it('yields chunked terminal input through immediates between writes', async () => {
     const immediate = vi.spyOn(globalThis, 'setImmediate')
     try {
       const writes: string[] = []
@@ -18190,7 +18190,7 @@ describe('OrcaRuntimeService', () => {
 
       expect(writes.at(-1)).toBe('\r')
       expect(writes.slice(0, -1).join('')).toBe(text)
-      expect(immediate).not.toHaveBeenCalled()
+      expect(immediate).toHaveBeenCalled()
     } finally {
       immediate.mockRestore()
     }

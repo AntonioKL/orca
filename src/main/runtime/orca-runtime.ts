@@ -2296,15 +2296,14 @@ async function waitForAgentPromptPromise<T>(promise: Promise<T>, signal?: AbortS
   })
 }
 
-// A timer yield gives the PTY/ConPTY provider one event-loop turn to drain each chunk. A
-// setImmediate callback can run before that drain and makes large pastes arrive as a burst;
-// some terminals then retain only the tail even though every write reports accepted.
-// The 16 MiB input ceiling bounds the total in-flight data, and this remains cross-platform.
+// Generic terminal.send uses setImmediate to let abort/permission/data callbacks run between
+// chunks without paying a full Windows timer tick for every 16 KiB write. Agent prompts use an
+// atomic bracketed-paste write below, so they do not rely on this scheduler.
 // Why the global and not node:timers/promises: only the global is intercepted by fake timers,
 // so a chunked paste stays observable on the test clock.
 function yieldBetweenTerminalInputChunks(): Promise<void> {
   return new Promise<void>((resolve) => {
-    setTimeout(resolve, 0)
+    setImmediate(resolve)
   })
 }
 
