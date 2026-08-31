@@ -229,11 +229,12 @@ export function installTerminalKeydownFit(session: ConnectPanePtySession): void 
       }),
     shouldPollProcessCadence: () =>
       isAgentTaskCompleteTrackingEnabled() && session.deps.isVisibleRef.current,
+    shouldPollNoEvidenceProcessCadence: () =>
+      !isRemoteExecutionHostPtyId(session.transport.getPtyId()),
     isProcessInspectionCostly: () => {
       // Why: local Windows inspection forks a powershell.exe whole-process-table
-      // CIM scan per poll (~10-40x heavier than POSIX `ps`); SSH/remote PTYs run
-      // their scans on the remote host, so only local Windows panes relax the
-      // no-evidence cadence.
+      // CIM scan per poll (~10-40x heavier than POSIX `ps`). Remote authorities
+      // use the zero-idle cadence gate above instead.
       if (!navigator.userAgent.includes('Windows')) {
         return false
       }

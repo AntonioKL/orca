@@ -70,6 +70,13 @@ export class ProcessTableCaptureError extends Error {
  * Parse a process-table capture for identity evidence. Unlike the historical
  * parser above, every non-framing line must be valid: silently dropping one row
  * could turn a truncated table into a false empty/no-agent result.
+ *
+ * Linux kernel roots legitimately report `ppid=0`, `pgid=0`, and
+ * `tpgid=-1`; user-space processes can also report `tpgid=0`/`-1` when no
+ * controlling TTY is attached. The parser therefore rejects only values
+ * outside the process-table domain (`pid <= 0`, `ppid < 0`, `pgid < 0`, or
+ * `tpgid < -1`), while retaining strict row framing and non-empty fields;
+ * an empty/header-only capture is unreadable as well.
  */
 export function parseStrictProcessTableRows(stdout: string): ProcessTableRow[] {
   const rows: ProcessTableRow[] = []
@@ -95,7 +102,7 @@ export function parseStrictProcessTableRows(stdout: string): ProcessTableRow[] {
       !Number.isSafeInteger(ppid) ||
       ppid < 0 ||
       !Number.isSafeInteger(pgid) ||
-      pgid <= 0 ||
+      pgid < 0 ||
       !Number.isSafeInteger(tpgid) ||
       (tpgid < 0 && tpgid !== -1) ||
       match[6].length === 0
@@ -103,6 +110,9 @@ export function parseStrictProcessTableRows(stdout: string): ProcessTableRow[] {
       throw new ProcessTableCaptureError('invalid_numeric_field')
     }
     rows.push({ pid, ppid, pgid, tpgid, stat: match[5], command: match[6] })
+  }
+  if (rows.length === 0) {
+    throw new ProcessTableCaptureError('empty_capture')
   }
   return rows
 }
