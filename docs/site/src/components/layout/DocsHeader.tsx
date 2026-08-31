@@ -24,7 +24,6 @@ export function DocsHeader() {
           <nav className="hidden items-center gap-5 sm:flex" aria-label="Primary navigation">
             <Link
               href="/docs"
-              aria-current="page"
               className="rounded-md px-2 py-1 text-[13px] font-semibold text-foreground underline decoration-border underline-offset-[6px] transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             >
               Docs

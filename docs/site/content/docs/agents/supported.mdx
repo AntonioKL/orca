@@ -3,11 +3,17 @@ title: Supported agents
 description: Every agent Orca ships with out of the box.
 ---
 
+import { Callout } from '@/components/docs/prose';
+
 Orca works with **any CLI agent** — the agent combobox just launches a process in a terminal. The following ship preconfigured in the built-in agent picker with one-click launch/setup; deeper hooks, status, usage tracking, and account switching are noted where supported.
+
+<Callout title="Permission safety">
+The defaults below pass each agent's permission-bypass flag for new launches. A worktree is an isolated checkout, not a security sandbox: the agent can still access files and network resources available to its process. Choose **Manual** in **Settings → Agents → Agent Permissions** unless you intentionally trust the agent and the task.
+</Callout>
 
 ## Permissions default
 
-Orca pre-fills each supported CLI's permission-bypass flag for new launches — `--dangerously-skip-permissions` for Claude, `--dangerously-bypass-approvals-and-sandbox` for Codex, `--yolo` for Gemini / Cursor / Crush / Kimi / Rovo Dev / Hermes / GitHub Copilot / Command Code, plus the equivalent flag for every other agent that exposes one. The reasoning is that worktrees are disposable: an agent running in its own checkout can experiment without you re-confirming every shell command, and you can still cherry-pick or discard the diff before merging.
+For new launches, Orca pre-fills each supported CLI's permission-bypass flag — `--dangerously-skip-permissions` for Claude, `--dangerously-bypass-approvals-and-sandbox` for Codex, `--yolo` for Gemini / Cursor / Crush / Kimi / Rovo Dev / Hermes / GitHub Copilot / Command Code, plus the equivalent flag for every other agent that exposes one. These flags allow an agent to act without confirming every shell command; review the trust boundary before using them.
 
 Use **Settings → Agents → Agent Permissions** when you want to switch all uncustomized agents between **Yolo** and **Manual** launches. If you already overrode a specific agent's launch arguments or environment, Orca leaves that agent alone so the global switch doesn't erase your custom command.
 

@@ -26,6 +26,10 @@ Jira sits next to GitHub and Linear in the task drawer. Browse Jira issues, upda
   - **Personal access token** — Bearer PAT (preferred on modern Server/DC).
   - **Username and password** — Basic auth for older instances without PATs.
 
+<Callout title="Use HTTPS">
+Use an `https://` URL for Cloud and self-hosted Jira whenever possible. Orca sends credentials in the `Authorization` header; plain HTTP can expose them on the network. If a server only offers HTTP, put it behind a trusted HTTPS tunnel or VPN before connecting.
+</Callout>
+
 4. Click **Connect**. Orca verifies the credentials and loads your sites.
 
 You can connect more than one Atlassian site. The Tasks header has a site picker once a site is connected; choose **All sites** to combine issues across them.

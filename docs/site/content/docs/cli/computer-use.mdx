@@ -89,6 +89,8 @@ printf '%s' "$TEXT" | orca computer set-value \
 
 `--text-stdin` works the same way for `type-text` and `paste-text`.
 
+On Linux and Windows, action payloads also pass briefly through a local operation file while the helper runs. Stdin keeps secrets out of shell history, but it does not hide them from every local observer; avoid sending secrets unless the task explicitly requires it.
+
 ## Screenshots
 
 `get-app-state` returns an accessibility tree and, by default, a screenshot. With `--json`, the image bytes are written to disk and the path is returned in `screenshot.path` rather than embedded in the response. Pass `--no-screenshot` when pixels aren't needed (faster, smaller payload). Pass `--restore-window` to bring a hidden or minimized window into view before capture.
